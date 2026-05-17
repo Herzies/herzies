@@ -72,6 +72,16 @@ export const adminEventSchema = z.object({
 	config: z.record(z.string(), z.unknown()).optional(),
 });
 
+export const adminItemSchema = z.object({
+	id: z.string().min(1),
+	name: z.string().min(1),
+	description: z.string().optional(),
+	rarity: z.enum(["common", "uncommon", "rare", "legendary"]),
+	sellPrice: z.number().int().nonnegative().nullable().optional(),
+	stackable: z.boolean().optional(),
+	equipable: z.boolean().optional(),
+});
+
 export const adminMultiplierSchema = z.object({
 	id: z.string().optional(),
 	name: z.string().min(1),

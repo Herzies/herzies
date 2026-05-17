@@ -1,16 +1,12 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase-admin";
+import { unauthorizedAdmin, verifyAdmin } from "@/lib/admin-auth";
 import { grantItemSchema, parseBody, isParseError } from "@/lib/schemas";
-
-function verifyAdmin(request: Request): boolean {
-	const secret = request.headers.get("x-admin-secret");
-	return !!secret && secret === process.env.GAME_ADMIN_SECRET;
-}
 
 /** Manually grant an item to a user by name or friend code */
 export async function POST(request: Request) {
 	if (!verifyAdmin(request)) {
-		return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+		return unauthorizedAdmin();
 	}
 
 	const body = await parseBody(request, grantItemSchema);

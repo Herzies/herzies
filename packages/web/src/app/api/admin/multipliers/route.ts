@@ -1,16 +1,12 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase-admin";
+import { unauthorizedAdmin, verifyAdmin } from "@/lib/admin-auth";
 import { adminMultiplierSchema, parseBody, isParseError } from "@/lib/schemas";
-
-function verifyAdmin(request: Request): boolean {
-	const secret = request.headers.get("x-admin-secret");
-	return !!secret && secret === process.env.GAME_ADMIN_SECRET;
-}
 
 /** List all multipliers */
 export async function GET(request: Request) {
 	if (!verifyAdmin(request)) {
-		return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+		return unauthorizedAdmin();
 	}
 
 	const admin = createAdminClient();
@@ -29,7 +25,7 @@ export async function GET(request: Request) {
 /** Create or update a multiplier */
 export async function POST(request: Request) {
 	if (!verifyAdmin(request)) {
-		return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+		return unauthorizedAdmin();
 	}
 
 	const body = await parseBody(request, adminMultiplierSchema);
@@ -78,7 +74,7 @@ export async function POST(request: Request) {
 /** Delete a multiplier */
 export async function DELETE(request: Request) {
 	if (!verifyAdmin(request)) {
-		return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+		return unauthorizedAdmin();
 	}
 
 	const { searchParams } = new URL(request.url);

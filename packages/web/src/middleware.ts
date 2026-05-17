@@ -50,6 +50,11 @@ function getIp(request: NextRequest): string {
 export async function middleware(request: NextRequest) {
 	const { pathname } = request.nextUrl;
 
+	// Dev-only routes (game admin UI)
+	if (pathname.startsWith("/dev") && process.env.NODE_ENV === "production") {
+		return new NextResponse(null, { status: 404 });
+	}
+
 	// Rate-limit API routes
 	if (pathname.startsWith("/api/")) {
 		const ip = getIp(request);

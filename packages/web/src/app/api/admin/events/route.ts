@@ -1,16 +1,12 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase-admin";
+import { unauthorizedAdmin, verifyAdmin } from "@/lib/admin-auth";
 import { adminEventSchema, parseBody, isParseError } from "@/lib/schemas";
-
-function verifyAdmin(request: Request): boolean {
-	const secret = request.headers.get("x-admin-secret");
-	return !!secret && secret === process.env.GAME_ADMIN_SECRET;
-}
 
 /** List all events */
 export async function GET(request: Request) {
 	if (!verifyAdmin(request)) {
-		return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+		return unauthorizedAdmin();
 	}
 
 	const admin = createAdminClient();
@@ -29,7 +25,7 @@ export async function GET(request: Request) {
 /** Create or update an event */
 export async function POST(request: Request) {
 	if (!verifyAdmin(request)) {
-		return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+		return unauthorizedAdmin();
 	}
 
 	const body = await parseBody(request, adminEventSchema);
@@ -101,4 +97,27 @@ export async function POST(request: Request) {
 	}
 
 	return NextResponse.json({ event: data }, { status: 201 });
+}
+
+/** Delete an event */
+export async function DELETE(request: Request) {
+	if (!verifyAdmin(request)) {
+		return unauthorizedAdmin();
+	}
+
+	const { searchParams } = new URL(request.url);
+	const id = searchParams.get("id");
+
+	if (!id) {
+		return NextResponse.json({ error: "id query param is required" }, { status: 400 });
+	}
+
+	const admin = createAdminClient();
+	const { error } = await admin.from("events").delete().eq("id", id);
+
+	if (error) {
+		return NextResponse.json({ error: "Failed to delete event" }, { status: 500 });
+	}
+
+	return NextResponse.json({ ok: true });
 }
