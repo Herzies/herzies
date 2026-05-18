@@ -1,36 +1,36 @@
 {
-	"$schema": "https://biomejs.dev/schemas/2.4.14/schema.json",
-	"files": {
-		"includes": ["packages/*/src/**", "packages/*/app/**"]
-	},
-	"assist": { "actions": { "source": { "organizeImports": "on" } } },
-	"linter": {
-		"enabled": true,
-		"rules": {
-			"recommended": true,
-			"a11y": {
-				"useButtonType": "warn",
-				"useKeyWithClickEvents": "warn",
-				"noStaticElementInteractions": "warn",
-				"useAriaPropsSupportedByRole": "warn"
-			},
-			"suspicious": {
-				"noArrayIndexKey": "warn"
-			},
-			"correctness": {
-				"useExhaustiveDependencies": "warn",
-				"noInvalidUseBeforeDeclaration": "warn"
-			},
-			"style": {
-				"noNonNullAssertion": "warn"
-			},
-			"security": {
-				"noDangerouslySetInnerHtml": "warn"
-			}
-		}
-	},
-	"formatter": {
-		"enabled": true,
-		"indentStyle": "tab"
-	}
+  "$schema": "https://biomejs.dev/schemas/2.4.14/schema.json",
+  "files": {
+    "includes": ["packages/*/src/**", "packages/*/app/**"]
+  },
+  "assist": { "actions": { "source": { "organizeImports": "on" } } },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "a11y": {
+        "useButtonType": "warn",
+        "useKeyWithClickEvents": "warn",
+        "noStaticElementInteractions": "warn",
+        "useAriaPropsSupportedByRole": "warn"
+      },
+      "suspicious": {
+        "noArrayIndexKey": "warn"
+      },
+      "correctness": {
+        "useExhaustiveDependencies": "warn",
+        "noInvalidUseBeforeDeclaration": "warn"
+      },
+      "style": {
+        "noNonNullAssertion": "warn"
+      },
+      "security": {
+        "noDangerouslySetInnerHtml": "warn"
+      }
+    }
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space"
+  }
 }
