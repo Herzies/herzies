@@ -9,30 +9,27 @@
 
 Your digital pet that grows by listening to music. **[herzies.app](https://www.herzies.app)**
 
+Day-to-day work in this repo centres on the **desktop app** (macOS, Tauri): it is the main product surface we ship and extend. The other packages support it, the site and API, or older workflows.
+
 ## Packages
 
 | Package | Description |
 |---------|-------------|
-| [`herzies`](packages/cli) | CLI application |
+| [`herzies-desktop`](packages/desktop) | macOS desktop app (Tauri); primary focus for development |
 | [`@herzies/shared`](packages/shared) | Shared types and utilities |
 | [`web`](packages/web) | Website, game server API, and auth |
+| [`herzies`](packages/cli) | CLI application — *not prioritised for ongoing development* |
 
 ## Getting Started
 
-```sh
-npm i -g herzies
-```
+Download the latest **Herzies Desktop** build for macOS from the [latest GitHub release](https://github.com/Herzies/herzies/releases/latest).
+
+> [!IMPORTANT]
+> **Beta** — Herzies Desktop is still in beta. If you run into errors or bugs, please report them as [GitHub issues](https://github.com/Herzies/herzies/issues).
 
 ## Requirements
 
 - macOS (music detection uses AppleScript and is not yet available on Linux or Windows)
-
-## Development
-
-```sh
-pnpm install
-pnpm build
-```
 
 ## Want to contribute?
 
