@@ -1,4 +1,8 @@
-import { Herzie3D as SharedHerzie3D, Sky } from "@herzies/shared";
+import {
+	type CreatureParams,
+	Herzie3D as SharedHerzie3D,
+	Sky,
+} from "@herzies/shared";
 import { useEffect, useState } from "react";
 import { useWindowFocused } from "../tauri-bridge";
 
@@ -9,6 +13,9 @@ interface Props {
 	animate?: boolean;
 	isPlaying?: boolean;
 	wearables?: string[];
+	creatureParams?: CreatureParams;
+	showSky?: boolean;
+	draggable?: boolean;
 }
 
 /**
@@ -24,6 +31,9 @@ export function Herzie3D({
 	animate,
 	isPlaying = false,
 	wearables,
+	creatureParams,
+	showSky = true,
+	draggable,
 }: Props) {
 	const [sceneryCols, setSceneryCols] = useState(() =>
 		Math.floor(window.innerWidth / (size * 0.6)),
@@ -42,20 +52,22 @@ export function Herzie3D({
 
 	return (
 		<>
-			<Sky
-				userId={userId}
-				isPlaying={isPlaying}
-				cols={sceneryCols}
-				size={size}
-				paused={paused || animate === false}
-				style={{
-					position: "fixed",
-					top: 0,
-					left: 0,
-					width: "100vw",
-					zIndex: 0,
-				}}
-			/>
+			{showSky && (
+				<Sky
+					userId={userId}
+					isPlaying={isPlaying}
+					cols={sceneryCols}
+					size={size}
+					paused={paused || animate === false}
+					style={{
+						position: "fixed",
+						top: 0,
+						left: 0,
+						width: "100vw",
+						zIndex: 0,
+					}}
+				/>
+			)}
 			<SharedHerzie3D
 				userId={userId}
 				stage={stage}
@@ -63,12 +75,18 @@ export function Herzie3D({
 				animate={animate}
 				isPlaying={isPlaying}
 				wearables={wearables}
+				creatureParams={creatureParams}
+				draggable={draggable}
 				paused={paused}
-				wrapperStyle={{
-					position: "relative",
-					width: "100vw",
-					marginLeft: "calc(-50vw + 50%)",
-				}}
+				wrapperStyle={
+					showSky
+						? {
+								position: "relative",
+								width: "100vw",
+								marginLeft: "calc(-50vw + 50%)",
+							}
+						: undefined
+				}
 			/>
 		</>
 	);

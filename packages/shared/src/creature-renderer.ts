@@ -36,7 +36,7 @@ export const DEFAULT_Y_ANGLE = 17 * (Math.PI / 180);
 // Creature scale
 const CS = 1.5;
 
-const CREATURE_PALETTE = [
+export const CREATURE_PALETTE = [
 	"#FFD700", // amber (original)
 	"#FF6B6B", // coral red
 	"#4ECDC4", // teal
@@ -270,6 +270,43 @@ export interface CreatureParams {
 	armLength: number;
 	legLength: number;
 	textureType: number;
+}
+
+export const CREATURE_BODY_TYPES = ["blob", "tall", "wide", "spiky"] as const;
+
+export const CREATURE_PARAM_BOUNDS = {
+	bodyType: { min: 0, max: 3, step: 1 },
+	colorIndex: { min: 0, max: CREATURE_PALETTE.length - 1, step: 1 },
+	bodyScale: { min: 0.85, max: 1.15, step: 0.01 },
+	headRatio: { min: 0.65, max: 0.95, step: 0.01 },
+	eyeSpacing: { min: 0.1, max: 0.18, step: 0.005 },
+	eyeSize: { min: 0.09, max: 0.15, step: 0.005 },
+	eyeHeight: { min: -0.25, max: -0.1, step: 0.005 },
+	earCount: { min: 0, max: 2, step: 1 },
+	earAngleDeg: { min: 25, max: 70, step: 1 },
+	earLength: { min: 0.12, max: 0.28, step: 0.01 },
+	armLength: { min: 0.25, max: 0.45, step: 0.01 },
+	legLength: { min: 0.3, max: 0.55, step: 0.01 },
+	textureType: { min: 0, max: 3, step: 1 },
+} as const;
+
+export function earAngleToDeg(rad: number): number {
+	return Math.round((rad * 180) / Math.PI);
+}
+
+export function earAngleFromDeg(deg: number): number {
+	return deg * (Math.PI / 180);
+}
+
+function resolveCreatureParams(
+	userId: string,
+	params?: CreatureParams,
+): CreatureParams {
+	return params ?? generateCreatureParams(userId);
+}
+
+function paramsCacheKey(userId: string, params?: CreatureParams): string {
+	return params ? `${userId}:${JSON.stringify(params)}` : userId;
 }
 
 export function generateCreatureParams(userId: string): CreatureParams {
@@ -564,44 +601,33 @@ function buildTall(p: CreatureParams, stage: number): Sphere[] {
 	return spheres;
 }
 
+/** Single wide head/body — no side-by-side blobs (breaks wearables). */
 function buildWide(p: CreatureParams, stage: number): Sphere[] {
 	const s = p.bodyScale * CS;
 	const spheres: Sphere[] = [];
 
-	const headR = 0.45 * p.headRatio * s;
+	const headR = 0.78 * p.headRatio * s;
 	const headY = stage === 1 ? 0 : stage === 2 ? -0.4 * s : -0.35 * s;
 	spheres.push({
-		center: [-0.14 * s, headY, 0],
-		radius: headR,
-		zone: "primary",
-		part: "head",
-	});
-	spheres.push({
-		center: [0.14 * s, headY, 0],
-		radius: headR,
-		zone: "primary",
-		part: "head",
-	});
-	spheres.push({
 		center: [0, headY, 0],
-		radius: headR * 0.95,
+		radius: headR,
 		zone: "primary",
 		part: "head",
 	});
 
-	const ex = p.eyeSpacing * s * 1.2;
-	const ey = headY + p.eyeHeight * headR * 1.4;
+	const ex = p.eyeSpacing * s * 1.15;
+	const ey = headY + p.eyeHeight * headR * 1.35;
 	const er = p.eyeSize * s;
-	const ez = eyeZ(headR, ex - 0.18 * s, ey - headY, er);
+	const ez = eyeZ(headR, ex, ey - headY, er);
 	spheres.push({ center: [-ex, ey, ez], radius: er, zone: "eye", part: "eye" });
 	spheres.push({ center: [ex, ey, ez], radius: er, zone: "eye", part: "eye" });
 	addPupils(spheres, er, [-ex, ey, ez], [ex, ey, ez]);
 
 	for (let i = 0; i < p.earCount; i++) {
 		const side = p.earCount === 1 ? 0 : i === 0 ? -1 : 1;
-		const earX = side * 0.4 * s;
+		const earX = side * (headR + p.earLength * 0.15 * s);
 		spheres.push({
-			center: [earX, headY - headR * 0.7, 0],
+			center: [earX, headY - headR * 0.75, 0],
 			radius: p.earLength * 0.4 * s,
 			zone: "accent",
 			part: "ear",
@@ -609,64 +635,61 @@ function buildWide(p: CreatureParams, stage: number): Sphere[] {
 	}
 
 	if (stage >= 2) {
-		const armY = stage === 3 ? 0.1 * s : headY + 0.1 * s;
+		const armY = stage === 3 ? 0.1 * s : headY + headR * 0.35;
+		const armX = headR + 0.12 * s;
 		spheres.push({
-			center: [-0.55 * s, armY, 0],
-			radius: 0.16 * s,
+			center: [-armX, armY, 0],
+			radius: 0.17 * s,
 			zone: "primary",
 			part: "arm-l",
 		});
 		spheres.push({
-			center: [0.55 * s, armY, 0],
-			radius: 0.16 * s,
+			center: [armX, armY, 0],
+			radius: 0.17 * s,
 			zone: "primary",
 			part: "arm-r",
 		});
 	}
 
 	if (stage >= 3) {
-		// Neck sphere bridging head and body
-		const neckY = (headY + 0.2 * s) * 0.5;
+		const bodyR = 0.5 * s;
+		const bodyY = 0.18 * s;
+		const neckY = (headY + bodyY) * 0.5;
 		spheres.push({
 			center: [0, neckY, 0],
-			radius: 0.28 * s,
+			radius: 0.3 * s,
 			zone: "primary",
 			part: "body",
 		});
 		spheres.push({
-			center: [-0.22 * s, 0.2 * s, 0],
-			radius: 0.4 * s,
-			zone: "primary",
-			part: "body",
-		});
-		spheres.push({
-			center: [0.22 * s, 0.2 * s, 0],
-			radius: 0.4 * s,
+			center: [0, bodyY, 0],
+			radius: bodyR,
 			zone: "primary",
 			part: "body",
 		});
 
-		const legY = 0.6 * s;
+		const legY = bodyY + bodyR * 0.75;
+		const legX = 0.32 * s;
 		spheres.push({
-			center: [-0.28 * s, legY, 0],
-			radius: 0.18 * s,
+			center: [-legX, legY, 0],
+			radius: 0.19 * s,
 			zone: "accent",
 			part: "leg-l",
 		});
 		spheres.push({
-			center: [0.28 * s, legY, 0],
-			radius: 0.18 * s,
+			center: [legX, legY, 0],
+			radius: 0.19 * s,
 			zone: "accent",
 			part: "leg-r",
 		});
 		spheres.push({
-			center: [-0.28 * s, legY + p.legLength * 0.35 * s, 0],
+			center: [-legX, legY + p.legLength * 0.4 * s, 0],
 			radius: 0.15 * s,
 			zone: "accent",
 			part: "leg-l",
 		});
 		spheres.push({
-			center: [0.28 * s, legY + p.legLength * 0.35 * s, 0],
+			center: [legX, legY + p.legLength * 0.4 * s, 0],
 			radius: 0.15 * s,
 			zone: "accent",
 			part: "leg-r",
@@ -810,8 +833,36 @@ const BODY_BUILDERS = [buildBlob, buildTall, buildWide, buildSpiky];
 
 // --- Wearable sphere builders ---
 
+/** Bounding sphere for all head parts (supports multi-sphere heads like tall). */
+function getHeadBounds(
+	spheres: Sphere[],
+): { center: V3; radius: number } | null {
+	const heads = spheres.filter((s) => s.part === "head");
+	if (heads.length === 0) return null;
+	if (heads.length === 1) {
+		return { center: heads[0].center, radius: heads[0].radius };
+	}
+
+	let minX = Infinity;
+	let maxX = -Infinity;
+	let minY = Infinity;
+	let maxY = -Infinity;
+	let hz = 0;
+	for (const h of heads) {
+		minX = Math.min(minX, h.center[0] - h.radius);
+		maxX = Math.max(maxX, h.center[0] + h.radius);
+		minY = Math.min(minY, h.center[1] - h.radius);
+		maxY = Math.max(maxY, h.center[1] + h.radius);
+		hz = h.center[2];
+	}
+	const cx = (minX + maxX) / 2;
+	const cy = (minY + maxY) / 2;
+	const radius = Math.max((maxX - minX) / 2, (maxY - minY) / 2);
+	return { center: [cx, cy, hz], radius };
+}
+
 function buildHeadphoneSpheres(spheres: Sphere[]): Sphere[] {
-	const head = spheres.find((s) => s.part === "head");
+	const head = getHeadBounds(spheres);
 	if (!head) return [];
 
 	const [hx, hy, hz] = head.center;
@@ -905,13 +956,13 @@ function getAnchors(
 	_params: CreatureParams,
 	stage: number,
 ): AnchorPoint[] {
-	const headSphere = spheres.find((s) => s.part === "head");
-	if (!headSphere) return [];
+	const headBounds = getHeadBounds(spheres);
+	if (!headBounds) return [];
 
 	const anchors: AnchorPoint[] = [
 		{
 			name: "hat",
-			localOffset: [0, -headSphere.radius * 1.1, 0],
+			localOffset: [0, -headBounds.radius * 1.1, 0],
 			parentPart: "head",
 			normalDir: [0, -1, 0],
 		},
@@ -1210,12 +1261,13 @@ export function generateIdleFrames(
 	userId: string,
 	stage: number,
 	wearables?: string[],
+	paramsOverride?: CreatureParams,
 ): FrameData[] {
-	const key = `idle:${userId}:${stage}:${wearables?.sort().join(",") ?? ""}`;
+	const key = `idle:${paramsCacheKey(userId, paramsOverride)}:${stage}:${wearables?.sort().join(",") ?? ""}`;
 	const cached = frameCache.get(key);
 	if (cached) return cached;
 
-	const params = generateCreatureParams(userId);
+	const params = resolveCreatureParams(userId, paramsOverride);
 	const baseSpheres = buildCreatureSpheres(params, stage);
 	if (wearables?.includes("headphones"))
 		baseSpheres.push(...buildHeadphoneSpheres(baseSpheres));
@@ -1246,12 +1298,13 @@ export function generateRotationFrames(
 	stage: number,
 	frameCount = 36,
 	wearables?: string[],
+	paramsOverride?: CreatureParams,
 ): FrameData[] {
-	const key = `rot:${userId}:${stage}:${wearables?.sort().join(",") ?? ""}`;
+	const key = `rot:${paramsCacheKey(userId, paramsOverride)}:${stage}:${wearables?.sort().join(",") ?? ""}`;
 	const cached = frameCache.get(key);
 	if (cached) return cached;
 
-	const params = generateCreatureParams(userId);
+	const params = resolveCreatureParams(userId, paramsOverride);
 	const spheres = buildCreatureSpheres(params, stage);
 	if (wearables?.includes("headphones"))
 		spheres.push(...buildHeadphoneSpheres(spheres));
@@ -1280,12 +1333,13 @@ export function generateDanceFrames(
 	userId: string,
 	stage: number,
 	wearables?: string[],
+	paramsOverride?: CreatureParams,
 ): FrameData[] {
-	const key = `dance:${userId}:${stage}:${wearables?.sort().join(",") ?? ""}`;
+	const key = `dance:${paramsCacheKey(userId, paramsOverride)}:${stage}:${wearables?.sort().join(",") ?? ""}`;
 	const cached = frameCache.get(key);
 	if (cached) return cached;
 
-	const params = generateCreatureParams(userId);
+	const params = resolveCreatureParams(userId, paramsOverride);
 	const baseSpheres = buildCreatureSpheres(params, stage);
 	if (wearables?.includes("headphones"))
 		baseSpheres.push(...buildHeadphoneSpheres(baseSpheres));
@@ -1319,8 +1373,9 @@ export function renderCreatureAtAngle(
 	frameIdx: number,
 	dancing = false,
 	wearables?: string[],
+	paramsOverride?: CreatureParams,
 ): FrameData {
-	const params = generateCreatureParams(userId);
+	const params = resolveCreatureParams(userId, paramsOverride);
 	const baseSpheres = buildCreatureSpheres(params, stage);
 	if (wearables?.includes("headphones"))
 		baseSpheres.push(...buildHeadphoneSpheres(baseSpheres));
@@ -1338,12 +1393,15 @@ export function renderCreatureAtAngle(
 	);
 }
 
-export function getCreatureColors(userId: string): {
+export function getCreatureColors(
+	userId: string,
+	paramsOverride?: CreatureParams,
+): {
 	dim: string;
 	base: string;
 	bright: string;
 } {
-	const params = generateCreatureParams(userId);
+	const params = resolveCreatureParams(userId, paramsOverride);
 	return buildColorTriplet(CREATURE_PALETTE[params.colorIndex]);
 }
 
