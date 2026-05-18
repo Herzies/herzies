@@ -184,7 +184,7 @@ async fn do_login(app: &AppHandle, web_url: &str, port: u16) -> bool {
 
     {
         let mut s = state.lock().unwrap();
-        s.is_connected = true;
+        s.last_sync_ok = true;
         let app_state = s.to_app_state(env!("CARGO_PKG_VERSION"));
         drop(s);
         let _ = app.emit("state-update", &app_state);

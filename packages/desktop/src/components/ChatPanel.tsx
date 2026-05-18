@@ -66,9 +66,10 @@ export function ChatPanel({
 
 		herzies.getAuthConfig().then((config) => {
 			if (cancelled || !config) return;
-			const supabase = createClient(config.supabaseUrl, config.anonKey, {
-				global: { headers: { Authorization: `Bearer ${config.accessToken}` } },
-			});
+			const supabase = createClient(config.supabaseUrl, config.anonKey);
+			// Realtime uses a separate WebSocket; it needs the user's JWT to
+			// pass the chat_messages RLS SELECT policy.
+			supabase.realtime.setAuth(config.accessToken);
 
 			localChannel = supabase
 				.channel("chat_messages_realtime")
@@ -86,7 +87,10 @@ export function ChatPanel({
 						});
 					},
 				)
-				.subscribe();
+				.subscribe((status, err) => {
+					if (status !== "SUBSCRIBED")
+						console.warn("chat realtime:", status, err);
+				});
 
 			// Race: if cleanup ran while getAuthConfig was pending, tear down now.
 			if (cancelled) {

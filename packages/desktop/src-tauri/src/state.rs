@@ -6,7 +6,11 @@ pub struct ManagedState {
     pub pending_minutes: f64,
     pub current_now_playing: Option<NowPlayingDisplay>,
     pub current_genres: Vec<String>,
-    pub is_connected: bool,
+    /// Last known result of a `/sync` round-trip. The frontend's connectivity
+    /// indicator is derived from this *plus* `ms_since_reachable` so that
+    /// successful traffic on other endpoints (chat, inventory, …) instantly
+    /// recovers the indicator without waiting for the next sync tick.
+    pub last_sync_ok: bool,
 }
 
 impl ManagedState {
@@ -16,20 +20,73 @@ impl ManagedState {
             pending_minutes: 0.0,
             current_now_playing: None,
             current_genres: Vec::new(),
-            is_connected: true,
+            last_sync_ok: true,
         }
     }
 
     pub fn to_app_state(&self, version: &str) -> AppState {
+        let is_logged_in = crate::api::is_logged_in();
         AppState {
             herzie: self.herzie.clone(),
             now_playing: self.current_now_playing.clone(),
             multipliers: crate::storage::load_multipliers(),
-            is_online: crate::api::is_logged_in(),
-            is_connected: self.is_connected,
+            is_online: is_logged_in,
+            is_connected: compute_is_connected(
+                is_logged_in,
+                self.last_sync_ok,
+                crate::api::ms_since_reachable(),
+            ),
             version: version.to_string(),
         }
     }
 }
 
 pub type SharedState = Mutex<ManagedState>;
+
+/// Pure helper so the connectivity rule is testable without touching the
+/// session-on-disk or the global reachable atomic.
+///
+/// Rule: we're "connected" when the user is logged in AND either the last
+/// `/sync` succeeded OR we've gotten *any* HTTP response from the server
+/// recently. The grace window lets non-sync traffic (chat fetch, inventory)
+/// keep the indicator green even if `/sync` itself just hiccuped.
+pub fn compute_is_connected(
+    is_logged_in: bool,
+    last_sync_ok: bool,
+    ms_since_reachable: u64,
+) -> bool {
+    is_logged_in && (last_sync_ok || ms_since_reachable < crate::api::REACHABLE_GRACE_MS)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn logged_out_is_never_connected() {
+        assert!(!compute_is_connected(false, true, 0));
+        assert!(!compute_is_connected(false, false, u64::MAX));
+    }
+
+    #[test]
+    fn logged_in_with_successful_sync_is_connected() {
+        assert!(compute_is_connected(true, true, u64::MAX));
+    }
+
+    #[test]
+    fn logged_in_with_failed_sync_but_recent_reachable_is_connected() {
+        // The bug fix: /sync failed (last_sync_ok=false) but chat/inventory
+        // just succeeded — we should still appear connected.
+        assert!(compute_is_connected(true, false, 1_000));
+    }
+
+    #[test]
+    fn logged_in_with_failed_sync_and_stale_reachable_is_offline() {
+        assert!(!compute_is_connected(
+            true,
+            false,
+            crate::api::REACHABLE_GRACE_MS
+        ));
+        assert!(!compute_is_connected(true, false, u64::MAX));
+    }
+}

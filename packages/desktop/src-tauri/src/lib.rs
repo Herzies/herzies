@@ -612,7 +612,7 @@ async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
         // server is reachable. The tray title already defaults to <3.
         tray::set_connected(app, is_logged_in);
         let mut s = state.lock().unwrap();
-        s.is_connected = is_logged_in;
+        s.last_sync_ok = is_logged_in;
         let app_state = s.to_app_state(env!("CARGO_PKG_VERSION"));
         drop(s);
         let _ = app.emit("state-update", &app_state);
@@ -621,17 +621,18 @@ async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
 
     let result = api::api_sync(client, np_payload, minutes_to_sync, genres).await;
     // /sync can fail for non-network reasons (5xx, schema mismatch, etc.) while
-    // the rest of the app keeps working. Treat ourselves as connected whenever
-    // we've gotten *any* HTTP response from the server in the last 90s, so a
-    // single failing sync doesn't flip the home screen to "reconnect to internet"
-    // while inventory/friends/etc. are clearly fine.
-    const REACHABLE_GRACE_MS: u64 = 90_000;
-    let connected = result.is_some() || api::ms_since_reachable() < REACHABLE_GRACE_MS;
+    // the rest of the app keeps working. The tray title (and the frontend
+    // indicator, via state.to_app_state) treats us as connected whenever
+    // we've gotten *any* HTTP response from the server in the grace window,
+    // so a single failing sync doesn't flip the UI to "offline" while
+    // inventory/chat/friends are clearly fine.
+    let sync_ok = result.is_some();
+    let connected = sync_ok || api::ms_since_reachable() < api::REACHABLE_GRACE_MS;
     tray::set_connected(app, connected);
 
     if let Some(sync_resp) = result {
         let mut s = state.lock().unwrap();
-        s.is_connected = connected;
+        s.last_sync_ok = sync_ok;
         s.pending_minutes = (s.pending_minutes - minutes_to_sync).max(0.0);
 
         if let Some(ref mut herzie) = s.herzie {
@@ -692,7 +693,7 @@ async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
         }
     } else {
         let mut s = state.lock().unwrap();
-        s.is_connected = connected;
+        s.last_sync_ok = sync_ok;
         let app_state = s.to_app_state(env!("CARGO_PKG_VERSION"));
         drop(s);
         let _ = app.emit("state-update", &app_state);

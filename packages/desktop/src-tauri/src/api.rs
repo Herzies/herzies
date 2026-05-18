@@ -22,6 +22,11 @@ fn now_ms() -> u64 {
 /// UI to "offline" while other endpoints are clearly still working.
 static LAST_REACHABLE_MS: AtomicU64 = AtomicU64::new(0);
 
+/// How recently we must have heard *any* HTTP response from the server before
+/// we consider ourselves disconnected. Wide enough to absorb a single failed
+/// `/sync` between successful chat/inventory calls.
+pub const REACHABLE_GRACE_MS: u64 = 90_000;
+
 fn mark_reachable() {
     LAST_REACHABLE_MS.store(now_ms(), Ordering::Relaxed);
 }

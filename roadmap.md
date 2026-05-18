@@ -2,6 +2,7 @@
 
 ## high priority
 
+- [ ] new chat messages aren't instantly showing up
 - [x] appeared offline eventhough I wasn't
 - [x] fix character seed (different local and on web)
 - [x] using crazy amounts of CPU after a while
@@ -14,6 +15,7 @@
 - [ ] currently playing doesn't reset when users quit desktop app
 - [ ] customisable herzie
 - [ ] streak didn't refresh when I logge in with a different user
+- [ ] app permissions should come from Herzies (not Mathias Novas)
 - [x] high usage costs in Vercel
 
 # Wishlist
@@ -26,6 +28,7 @@
 - [ ] egg first
 - [ ] Tidal support
 - [ ] Clear chat every 24hrs
+- [ ] skins
 - [x] better character rendring (more vibrant?)
 - [x] Chat
 - [x] Song hunt event

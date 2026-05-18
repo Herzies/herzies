@@ -1,3 +1,4 @@
+use crate::state::SharedState;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tauri::{
     tray::{MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -78,6 +79,19 @@ pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Snapshot the current AppState and broadcast it to the frontend. Used
+/// from window-visibility transitions where we want the UI to refresh
+/// without waiting for the next sync tick.
+fn emit_state_update(app: &AppHandle) {
+    if let Some(state) = app.try_state::<SharedState>() {
+        let app_state = {
+            let s = state.lock().unwrap();
+            s.to_app_state(env!("CARGO_PKG_VERSION"))
+        };
+        let _ = app.emit("state-update", &app_state);
+    }
+}
+
 /// Update the tray title based on connectivity state.
 /// `connected` = true shows `<3`, false shows `</3`.
 pub fn set_connected(app: &AppHandle, connected: bool) {
@@ -118,6 +132,10 @@ fn show_window(app: &AppHandle, window: &tauri::WebviewWindow) {
     HIDE_PENDING.store(false, Ordering::Relaxed);
     LAST_TRAY_SHOW.store(now_ms(), Ordering::Relaxed);
     WINDOW_VISIBLE.store(true, Ordering::Relaxed);
+    // Re-emit state so the UI picks up the freshly-derived is_connected
+    // (and any other state that changed while hidden) without having to
+    // wait up to 60s for the next sync_tick.
+    emit_state_update(app);
     // Switch to Regular so the app can take focus
     let _ = app.set_activation_policy(ActivationPolicy::Regular);
 
@@ -163,6 +181,9 @@ pub fn on_focus(app: &AppHandle) {
     HIDE_PENDING.store(false, Ordering::Relaxed);
     // Focus implies the window is on-screen; covers dev mode where show_window isn't used.
     WINDOW_VISIBLE.store(true, Ordering::Relaxed);
+    // Same rationale as in show_window: refresh derived state (connectivity,
+    // multipliers, etc.) immediately on re-focus.
+    emit_state_update(app);
     // Check for pending deep link
     if let Ok(mut dl) = app.state::<crate::PendingDeepLink>().0.lock() {
         if let Some(item_id) = dl.take() {
