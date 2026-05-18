@@ -6,7 +6,7 @@ import type {
 	Inventory,
 	Trade,
 } from "@herzies/shared";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { relaunch } from "@tauri-apps/plugin-process";
@@ -142,6 +142,9 @@ export const herzies = {
 export function useWindowFocused(): boolean {
 	const [focused, setFocused] = useState(true);
 	useEffect(() => {
+		// Sandbox / Vite dev runs in a plain browser — no Tauri window APIs.
+		if (!isTauri()) return;
+
 		const w = getCurrentWindow();
 		let unlisten: (() => void) | undefined;
 		w.onFocusChanged(({ payload }) => setFocused(payload)).then((fn) => {

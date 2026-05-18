@@ -2,7 +2,6 @@
 
 ## high priority
 
-- [ ] streak didn't refresh when I logge in with a different user
 - [x] appeared offline eventhough I wasn't
 - [x] fix character seed (different local and on web)
 - [x] using crazy amounts of CPU after a while
@@ -14,6 +13,7 @@
 ## low priority
 - [ ] currently playing doesn't reset when users quit desktop app
 - [ ] customisable herzie
+- [ ] streak didn't refresh when I logge in with a different user
 - [x] high usage costs in Vercel
 
 # Wishlist
