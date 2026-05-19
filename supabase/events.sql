@@ -31,11 +31,11 @@ create index if not exists idx_event_claims_user on public.event_claims(user_id)
 -- RLS for events
 alter table public.events enable row level security;
 
--- Anyone can see active events (but config is filtered at the API level)
+-- No public read policy: clients must go through /api/events/active,
+-- which strips sensitive fields (trackTitle, trackArtist) before responding.
+-- Service role bypasses RLS for server-side reads.
 drop policy if exists "Events are publicly readable" on public.events;
-create policy "Events are publicly readable"
-  on public.events for select
-  using (true);
+revoke select on public.events from anon, authenticated;
 
 -- Only service role (game server) can insert/update events
 -- No INSERT/UPDATE policies for anon/authenticated = only service role can write
