@@ -36,7 +36,7 @@ export default async function HerziePage({ params }: Props) {
   const { data } = await supabase
     .from("herzies")
     .select(
-      "user_id, name, stage, level, xp, appearance, total_minutes_listened, genre_minutes, friend_code, friend_codes, now_playing, created_at",
+      "user_id, name, stage, level, xp, appearance, total_minutes_listened, genre_minutes, friend_code, friend_codes, now_playing, created_at, equipped",
     )
     .ilike("name", decoded)
     .single();

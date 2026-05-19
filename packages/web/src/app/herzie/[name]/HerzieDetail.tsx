@@ -1,6 +1,6 @@
 "use client";
 
-import { Herzie3D } from "@herzies/shared";
+import { getItem, Herzie3D, RARITY_COLORS } from "@herzies/shared";
 import { useCallback, useEffect, useState } from "react";
 import Container from "@/components/container";
 import { createSupabaseClient } from "@/lib/supabase";
@@ -40,6 +40,7 @@ interface HerzieRow {
   friend_codes: string[];
   now_playing: { title: string; artist: string } | null;
   created_at: string;
+  equipped: string[] | null;
 }
 
 interface RecentTrack {
@@ -100,7 +101,7 @@ export function HerzieDetail({
     const { data } = await supabase
       .from("herzies")
       .select(
-        "name, stage, level, xp, appearance, total_minutes_listened, genre_minutes, friend_code, friend_codes, now_playing, created_at",
+        "name, stage, level, xp, appearance, total_minutes_listened, genre_minutes, friend_code, friend_codes, now_playing, created_at, equipped",
       )
       .eq("name", initial.name)
       .single();
@@ -137,6 +138,7 @@ export function HerzieDetail({
               stage={herzie.stage}
               size={5}
               isPlaying={!!herzie.now_playing}
+              wearables={herzie.equipped ?? []}
               ariaLabel={`${herzie.name}, a stage ${herzie.stage} herzie`}
             />
           </div>
@@ -169,14 +171,43 @@ export function HerzieDetail({
             />
           </div>
 
+          {/* Equipped */}
+          {(herzie.equipped?.length ?? 0) > 0 && (
+            <div className="mt-4">
+              <div className="text-[11px] text-text-dim mb-1">
+                // wearables
+              </div>
+              <div className="text-[13px] flex flex-wrap gap-x-3 gap-y-1">
+                {herzie.equipped?.map((id) => {
+                  const item = getItem(id);
+                  if (!item) return null;
+                  return (
+                    <span
+                      key={id}
+                      style={{ color: RARITY_COLORS[item.rarity] }}
+                      title={item.description}
+                    >
+                      {item.name}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Now playing */}
           {herzie.now_playing && (
-            <div className="mt-4 text-[13px] text-cyan">
-              &#9834; {herzie.now_playing.title}
-              <span className="text-text-dim">
-                {" "}
-                — {herzie.now_playing.artist}
-              </span>
+            <div className="mt-4">
+              <div className="text-[11px] text-text-dim mb-1">
+                // now playing
+              </div>
+              <div className="text-[13px] text-cyan">
+                &#9834; {herzie.now_playing.title}
+                <span className="text-text-dim">
+                  {" "}
+                  — {herzie.now_playing.artist}
+                </span>
+              </div>
             </div>
           )}
         </div>
