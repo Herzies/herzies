@@ -26,6 +26,7 @@ export function TradeView({
   const [offerItems, setOfferItems] = useState<Record<string, number>>({});
   const [offerCurrency, setOfferCurrency] = useState(0);
   const [currency, setCurrency] = useState(herzie.currency);
+  const lastSentOfferRef = useRef<string | null>(null);
   const focused = useWindowFocused();
 
   useEffect(() => {
@@ -102,7 +103,11 @@ export function TradeView({
     for (const [id, qty] of Object.entries(offerItems)) {
       if (qty > 0) items[id] = qty;
     }
-    await herzies.tradeOffer(tradeId, { items, currency: offerCurrency });
+    const payload = { items, currency: offerCurrency };
+    const serialized = JSON.stringify(payload);
+    if (lastSentOfferRef.current === serialized) return;
+    lastSentOfferRef.current = serialized;
+    await herzies.tradeOffer(tradeId, payload);
   };
 
   const handleLock = async () => {

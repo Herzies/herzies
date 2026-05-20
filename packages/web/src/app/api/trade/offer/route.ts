@@ -3,6 +3,21 @@ import { authenticateRequest, isAuthError } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase-admin";
 import { tradeOfferSchema, parseBody, isParseError } from "@/lib/schemas";
 
+function offersEqual(
+	a: { items: Record<string, number>; currency: number } | null,
+	b: { items: Record<string, number>; currency: number },
+): boolean {
+	if (!a) return false;
+	if (a.currency !== b.currency) return false;
+	const aKeys = Object.keys(a.items ?? {}).filter((k) => (a.items[k] ?? 0) > 0);
+	const bKeys = Object.keys(b.items ?? {}).filter((k) => (b.items[k] ?? 0) > 0);
+	if (aKeys.length !== bKeys.length) return false;
+	for (const k of bKeys) {
+		if ((a.items[k] ?? 0) !== (b.items[k] ?? 0)) return false;
+	}
+	return true;
+}
+
 export async function POST(request: Request) {
 	const auth = await authenticateRequest(request);
 	if (isAuthError(auth)) return auth;
@@ -60,11 +75,16 @@ export async function POST(request: Request) {
 		}
 	}
 
-	// Update offer and reset locks (changing offer resets any locks)
+	// Only reset locks if the offer actually changed. Resending the same offer
+	// (which happens on every Lock click — see TradeView.handleLock) must be a
+	// no-op for state, otherwise simultaneous locks ping-pong each other and
+	// the trade can never reach both_locked.
+	const currentOffer = (isInitiator ? trade.initiator_offer : trade.target_offer) as
+		| { items: Record<string, number>; currency: number }
+		| null;
+	const offerChanged = !offersEqual(currentOffer, offer);
+
 	const update: Record<string, unknown> = {
-		state: "active",
-		initiator_accepted: false,
-		target_accepted: false,
 		updated_at: new Date().toISOString(),
 	};
 
@@ -72,6 +92,12 @@ export async function POST(request: Request) {
 		update.initiator_offer = offer;
 	} else {
 		update.target_offer = offer;
+	}
+
+	if (offerChanged) {
+		update.state = "active";
+		update.initiator_accepted = false;
+		update.target_accepted = false;
 	}
 
 	const { error } = await admin
