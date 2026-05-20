@@ -117,11 +117,11 @@ export function EventsView() {
       style={{
         display: "flex",
         flexDirection: "column",
+        justifyContent: "space-between",
         height: "100%",
         overflow: "auto",
       }}
     >
-      {/* Title + countdown */}
       <div style={{ marginBottom: 8 }}>
         <div
           style={{
@@ -134,165 +134,185 @@ export function EventsView() {
         </div>
       </div>
 
-      <div
-        style={{
-          textAlign: "center",
-        }}
-      >
-        <div>{hunt.title}</div>
-        <div style={{ fontSize: 10, color: "#666", marginTop: 4 }}>
-          {formatCountdown(hunt.endsAt)}
+      <div style={{ flex: 1, display: "grid", placeItems: "center" }}>
+        <div>
+          {/* Title + countdown */}
+
+          <div
+            style={{
+              textAlign: "center",
+            }}
+          >
+            <div>{hunt.title}</div>
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 3,
+              fontSize: 10,
+              color: "#666",
+              marginTop: 12,
+              textAlign: "center",
+            }}
+          >
+            <div>Duration: {formatCountdown(hunt.endsAt)}</div>
+            {rewardItem ? (
+              <>
+                <div>
+                  Reward:{" "}
+                  <button
+                    style={{
+                      appearance: "none",
+                      border: "none",
+                      background: "none",
+                      cursor: "pointer",
+                      fontSize: 11,
+                      color: ITEM_RARITY_COLORS[rewardItem.rarity],
+                      textDecoration: "underline",
+                    }}
+                    type="button"
+                    onClick={() => setInspectOverlay("item")}
+                  >
+                    {rewardItem.name}
+                  </button>
+                </div>
+                <div>
+                  Rewards left: {config.maxClaims - config.firstFinders.length}
+                </div>
+              </>
+            ) : null}
+          </div>
         </div>
       </div>
 
-      {/* Reward preview */}
-      {rewardItem && (
+      <div>
         <div
           style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: 8,
             marginBottom: 10,
             marginTop: 10,
-            padding: "6px 0",
             borderBottom: "1px solid #222",
             borderTop: "1px solid #222",
+            paddingTop: 10,
+            paddingBottom: 10,
           }}
         >
-          <div style={{ fontSize: 10, color: "#666" }}>Reward</div>
-
-          <ItemDisplay item={rewardItem} size={5} />
-
-          <div
-            style={{
-              fontSize: 11,
-              color: ITEM_RARITY_COLORS[rewardItem.rarity],
-            }}
-          >
-            {rewardItem.name}
+          <div style={{ fontSize: 10, color: "#666", marginBottom: 6 }}>
+            How to play
+          </div>
+          <div style={{ fontSize: 11, color: "#e0e0e0" }}>
+            Decipher the clues and play the song.
           </div>
         </div>
-      )}
 
-      <div
-        style={{
-          marginBottom: 10,
-          borderBottom: "1px solid #222",
-          paddingBottom: 10,
-        }}
-      >
-        <div style={{ fontSize: 10, color: "#666", marginBottom: 4 }}>
-          How to play
-        </div>
-        <div style={{ fontSize: 11, color: "#555" }}>
-          Figure out which song the hints are referring to. The first{" "}
-          {config.maxClaims} people to play the song will receive the reward.
-        </div>
-      </div>
-
-      <div
-        style={{
-          display: "grid",
-          columnCount: 2,
-          gridTemplateColumns: "1fr 1fr",
-          gap: 10,
-        }}
-      >
-        {/* Hints */}
-        <div style={{ marginBottom: 10 }}>
-          <div
-            style={{
-              fontSize: 10,
-              color: "#666",
-              marginBottom: 4,
-            }}
-          >
-            Hints
-          </div>
-          {config.hints.map((hint, i) => (
+        <div
+          style={
+            {
+              // display: "grid",
+              // columnCount: 1,
+              // gridTemplateColumns: "1fr 1fr",
+              // gap: 10,
+            }
+          }
+        >
+          {/* Hints */}
+          <div style={{ marginBottom: 10 }}>
             <div
-              key={i}
               style={{
+                fontSize: 10,
+                color: "#666",
                 marginBottom: 4,
-                padding: "4px 0",
-                borderBottom: "1px solid #222",
               }}
             >
-              {hint.unlocked ? (
-                <div style={{ fontSize: 11, color: "#e0e0e0" }}>
-                  {i + 1}. {hint.text}
-                </div>
-              ) : (
-                <>
-                  <div
-                    style={{
-                      fontSize: 11,
-                      color: "#555",
-                      fontFamily: "monospace",
-                    }}
-                  >
-                    {i + 1}.{" "}
-                    <span
-                      style={{ filter: hint.unlocked ? "none" : "blur(1px)" }}
-                    >
-                      {hint.text}
-                    </span>
-                  </div>
-                  <div style={{ fontSize: 9, color: "#444" }}>
-                    unlocks{" "}
-                    {formatCountdown(hint.unlocksAt).replace(" left", "")}
-                  </div>
-                </>
-              )}
+              Clues
             </div>
-          ))}
-        </div>
-
-        {/* First Finders */}
-        <div>
-          <div
-            style={{
-              fontSize: 10,
-              color: "#666",
-              marginBottom: 4,
-            }}
-          >
-            First Finders
-          </div>
-          {config.firstFinders && config.firstFinders.length > 0 ? (
-            config.firstFinders.slice(0, 3).map((finder, i) => (
+            {config.hints.map((hint, i) => (
               <div
                 key={i}
                 style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  fontSize: 11,
-                  padding: "2px 0",
+                  marginBottom: 4,
+                  padding: "4px 0",
                   borderBottom: "1px solid #222",
                 }}
-                onClick={() => setInspectOverlay("herzie")}
               >
-                <span style={{ color: "#facc15" }}>{finder.name}</span>
-                <span style={{ color: "#555" }}>
-                  {timeAgo(finder.claimedAt)}
-                </span>
+                {hint.unlocked ? (
+                  <div style={{ fontSize: 11, color: "#e0e0e0" }}>
+                    {i + 1}. {hint.text}
+                  </div>
+                ) : (
+                  <>
+                    <div
+                      style={{
+                        fontSize: 11,
+                        color: "#555",
+                        fontFamily: "monospace",
+                      }}
+                    >
+                      {i + 1}.{" "}
+                      <span
+                        style={{ filter: hint.unlocked ? "none" : "blur(1px)" }}
+                      >
+                        {hint.text}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 9, color: "#444" }}>
+                      unlocks{" "}
+                      {formatCountdown(hint.unlocksAt).replace(" left", "")}
+                    </div>
+                  </>
+                )}
               </div>
-            ))
-          ) : (
-            <div style={{ fontSize: 11, color: "#555" }}>
-              No one has found it yet...
+            ))}
+          </div>
+
+          {/* First Finders */}
+          <div>
+            <div
+              style={{
+                fontSize: 10,
+                color: "#666",
+                marginBottom: 4,
+              }}
+            >
+              Finders ({config?.firstFinders?.length ?? 0})
             </div>
-          )}
+            {config?.firstFinders?.length &&
+            config?.firstFinders?.length > 0 ? (
+              config?.firstFinders?.slice(0, 5).map((finder, i) => (
+                <div
+                  key={i}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    fontSize: 11,
+                    padding: "2px 0",
+                    borderBottom: "1px solid #222",
+                  }}
+                >
+                  <span style={{ color: "#facc15" }}>{finder.name}</span>
+                  <span style={{ color: "#555" }}>
+                    {timeAgo(finder.claimedAt)}
+                  </span>
+                </div>
+              ))
+            ) : (
+              <div style={{ fontSize: 11, color: "#555" }}>
+                No one has found it yet...
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* {inspectOverlay === "item" && (
+      {inspectOverlay === "item" && (
         <ItemInspectOverlay
           itemId={config.rewardItemId}
           onClose={() => setInspectOverlay(null)}
         />
       )}
+
+      {/*
       {inspectOverlay === "herzie" && (
         <HerzieInspectOverlay
           herzie={config.firstFinders[0].}
