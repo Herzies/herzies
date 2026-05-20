@@ -1,9 +1,23 @@
 use crate::storage;
 use crate::types::*;
-use reqwest::Client;
+use reqwest::{Client, StatusCode};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::sync::Mutex;
+
+/// Serializes refresh attempts so concurrent callers can't all race the same
+/// refresh_token against Supabase's 10s reuse window (which, on a miss, would
+/// invalidate the entire refresh chain and silently log the user out).
+static REFRESH_LOCK: Mutex<()> = Mutex::const_new(());
+
+/// True if a refresh response status means the refresh token itself is dead
+/// (vs. a transient failure we should retry on the next tick). 429/5xx/etc.
+/// must NOT clear the session — they're commonly returned by rate limiters
+/// and Vercel cold starts.
+fn is_refresh_fatal(status: StatusCode) -> bool {
+    status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN
+}
 
 fn api_base() -> String {
     std::env::var("HERZIES_API_URL").unwrap_or_else(|_| "https://www.herzies.app/api".to_string())
@@ -51,7 +65,37 @@ pub fn mark_reachable_for_test() {
     mark_reachable();
 }
 
+/// Refresh if we're within 10 minutes of expiry. Outside the lock so callers
+/// in the common (fresh-token) path don't serialize.
+fn needs_refresh(session: &SessionData) -> bool {
+    !session.refresh_token.is_empty() && session.expires_at <= now_ms() + 10 * 60 * 1000
+}
+
 async fn ensure_fresh_token(client: &Client) {
+    let session = match storage::load_session() {
+        Some(s) => s,
+        None => return,
+    };
+    if !needs_refresh(&session) {
+        return;
+    }
+    refresh_locked(client, false).await;
+}
+
+/// Force a refresh regardless of the expiry check. Used after a 401 from a
+/// non-refresh endpoint, to recover from the case where our cached access
+/// token is stale but the refresh token still works.
+async fn force_refresh(client: &Client) {
+    refresh_locked(client, true).await;
+}
+
+/// Perform the refresh under a global mutex so concurrent callers don't all
+/// race the same refresh_token. Inside the lock we re-load the session and
+/// re-check `needs_refresh` (unless `force` is true) — that way, callers that
+/// were queued behind a successful refresh become no-ops.
+async fn refresh_locked(client: &Client, force: bool) {
+    let _guard = REFRESH_LOCK.lock().await;
+
     let session = match storage::load_session() {
         Some(s) => s,
         None => return,
@@ -59,8 +103,7 @@ async fn ensure_fresh_token(client: &Client) {
     if session.refresh_token.is_empty() {
         return;
     }
-    // Refresh if within 10 minutes of expiry
-    if session.expires_at > now_ms() + 10 * 60 * 1000 {
+    if !force && !needs_refresh(&session) {
         return;
     }
 
@@ -90,12 +133,15 @@ async fn ensure_fresh_token(client: &Client) {
         }
         Ok(resp) => {
             mark_reachable();
-            // Server rejected the refresh token (401, 403, etc.) — session is dead
-            log::warn!(
-                "Token refresh failed with status {}, logging out",
-                resp.status()
-            );
-            storage::clear_session();
+            let status = resp.status();
+            if is_refresh_fatal(status) {
+                log::warn!("Refresh token rejected ({}), clearing session", status);
+                storage::clear_session();
+            } else {
+                // 429 from the rate limiter, 5xx from a cold start, etc. The
+                // refresh token is still valid — try again on the next tick.
+                log::warn!("Token refresh transient failure (status {}), will retry", status);
+            }
         }
         Err(e) => {
             // Network error — don't clear session, might be temporary
@@ -123,23 +169,45 @@ async fn api_fetch(
     let token = get_token(client).await?;
     let url = format!("{}{}", api_base(), path);
 
-    let mut req = client.request(method, &url).bearer_auth(token);
+    let build = |tok: &str| {
+        let mut req = client.request(method.clone(), &url).bearer_auth(tok);
+        if let Some(ref b) = body {
+            req = req.json(b);
+        }
+        req
+    };
 
-    if let Some(b) = body {
-        req = req.json(&b);
-    }
-
-    let resp = req.send().await.ok()?;
+    let resp = build(&token).send().await.ok()?;
     // Any HTTP response (success or error) proves we reached the server.
     mark_reachable();
 
-    if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-        log::warn!("Got 401 on {}, clearing session", path);
-        storage::clear_session();
+    if resp.status() != StatusCode::UNAUTHORIZED {
+        return Some(resp);
+    }
+
+    // 401: our access token may just be stale relative to the refresh state
+    // on disk. Force a refresh and retry once before declaring the session
+    // dead. `force_refresh` itself will clear the session if the refresh
+    // token is truly rejected (401/403).
+    log::warn!("Got 401 on {}, forcing refresh and retrying", path);
+    force_refresh(client).await;
+    let new_token = storage::load_session().map(|s| s.access_token)?;
+    if new_token.is_empty() || new_token == token {
+        // Either force_refresh already cleared the session, or it failed
+        // transiently and we still have the same (rejected) token. Either
+        // way, give up on this request — don't double-clear.
         return None;
     }
 
-    Some(resp)
+    let resp2 = build(&new_token).send().await.ok()?;
+    mark_reachable();
+    if resp2.status() == StatusCode::UNAUTHORIZED {
+        // Fresh token still rejected — the user really is unauthorized.
+        log::warn!("Still 401 after refresh on {}, clearing session", path);
+        storage::clear_session();
+        return None;
+    }
+    Some(resp2)
 }
 
 pub fn is_logged_in() -> bool {
@@ -416,5 +484,42 @@ mod tests {
         assert_eq!(ms_since_reachable(), u64::MAX);
         mark_reachable_for_test();
         assert!(ms_since_reachable() < 1_000);
+    }
+
+    #[test]
+    fn refresh_fatal_only_for_401_403() {
+        // Hard auth failures — refresh token is dead, clear the session.
+        assert!(is_refresh_fatal(StatusCode::UNAUTHORIZED));
+        assert!(is_refresh_fatal(StatusCode::FORBIDDEN));
+
+        // Transient failures — must NOT clear the session. These were the
+        // cause of the <2h logout bug: the middleware rate limiter returns
+        // 429 when concurrent refresh attempts pile up, and Vercel cold
+        // starts return 5xx.
+        assert!(!is_refresh_fatal(StatusCode::TOO_MANY_REQUESTS));
+        assert!(!is_refresh_fatal(StatusCode::INTERNAL_SERVER_ERROR));
+        assert!(!is_refresh_fatal(StatusCode::BAD_GATEWAY));
+        assert!(!is_refresh_fatal(StatusCode::SERVICE_UNAVAILABLE));
+        assert!(!is_refresh_fatal(StatusCode::GATEWAY_TIMEOUT));
+    }
+
+    #[test]
+    fn needs_refresh_window() {
+        let now = now_ms();
+        let base = SessionData {
+            access_token: "a".into(),
+            refresh_token: "r".into(),
+            expires_at: 0,
+            user_id: "u".into(),
+        };
+
+        // Within 10 min of expiry → refresh.
+        assert!(needs_refresh(&SessionData { expires_at: now + 5 * 60 * 1000, ..base.clone() }));
+        // Already expired → refresh.
+        assert!(needs_refresh(&SessionData { expires_at: now.saturating_sub(60_000), ..base.clone() }));
+        // Plenty of headroom → no-op (this is the hot path).
+        assert!(!needs_refresh(&SessionData { expires_at: now + 30 * 60 * 1000, ..base.clone() }));
+        // No refresh token → can't refresh anyway.
+        assert!(!needs_refresh(&SessionData { refresh_token: String::new(), expires_at: 0, ..base }));
     }
 }
