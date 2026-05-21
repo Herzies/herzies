@@ -4,9 +4,7 @@ use std::time::Duration;
 use tokio::time::timeout;
 
 const MUSIC_SCRIPT: &str = r#"
-tell application "System Events"
-    if not (exists process "Music") then return "NOT_RUNNING"
-end tell
+if application "Music" is not running then return "NOT_RUNNING"
 tell application "Music"
     if player state is not playing then return "NOT_PLAYING"
     set t to name of current track
@@ -21,9 +19,7 @@ end tell
 "#;
 
 const SPOTIFY_SCRIPT: &str = r#"
-tell application "System Events"
-    if not (exists process "Spotify") then return "NOT_RUNNING"
-end tell
+if application "Spotify" is not running then return "NOT_RUNNING"
 tell application "Spotify"
     if player state is not playing then return "NOT_PLAYING"
     set u to spotify url of current track
