@@ -3,14 +3,13 @@ import {
   getItem,
   type Inventory,
   RARITY_COLORS as ITEM_RARITY_COLORS,
-  ItemDisplay,
   RARITY_LABELS,
 } from "@herzies/shared";
 import { createClient, type RealtimeChannel } from "@supabase/supabase-js";
 import { useEffect, useRef, useState } from "react";
+import { cn } from "../lib/utils";
 import { type ChatMessage, herzies } from "../tauri-bridge";
 import ItemInspectOverlay from "./ItemInspectOverlay";
-import { btnStyle, inputStyle } from "./styles";
 
 const CHAT_COLORS = [
   "#7dd3fc",
@@ -50,7 +49,6 @@ export function ChatPanel({
   const channelRef = useRef<RealtimeChannel | null>(null);
   const atPosRef = useRef<number>(-1);
 
-  // Fetch initial messages
   useEffect(() => {
     if (!isOnline) return;
     herzies.chatFetch().then((data) => {
@@ -58,7 +56,6 @@ export function ChatPanel({
     });
   }, [isOnline]);
 
-  // Supabase Realtime subscription
   useEffect(() => {
     if (!isOnline) return;
     let cancelled = false;
@@ -67,8 +64,6 @@ export function ChatPanel({
     herzies.getAuthConfig().then((config) => {
       if (cancelled || !config) return;
       const supabase = createClient(config.supabaseUrl, config.anonKey);
-      // Realtime uses a separate WebSocket; it needs the user's JWT to
-      // pass the chat_messages RLS SELECT policy.
       supabase.realtime.setAuth(config.accessToken);
 
       localChannel = supabase
@@ -80,8 +75,6 @@ export function ChatPanel({
           (payload: any) => {
             const newId = payload.new?.id;
             if (!newId) return;
-            // Re-fetch outside the setState updater so strict-mode's double
-            // invocation doesn't fire two chatFetch round-trips per message.
             herzies.chatFetch().then((data) => {
               if (data) setMessages(data.messages);
             });
@@ -92,7 +85,6 @@ export function ChatPanel({
             console.warn("chat realtime:", status, err);
         });
 
-      // Race: if cleanup ran while getAuthConfig was pending, tear down now.
       if (cancelled) {
         localChannel.unsubscribe();
         localChannel = null;
@@ -111,7 +103,6 @@ export function ChatPanel({
     };
   }, [isOnline]);
 
-  // Fetch inventory for autocomplete
   useEffect(() => {
     if (!isOnline) return;
     herzies.fetchInventory().then((data) => {
@@ -119,13 +110,11 @@ export function ChatPanel({
     });
   }, [isOnline]);
 
-  // Auto-scroll
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, activityLog]);
 
-  // Send handler
   const handleSend = async () => {
     if (!input.trim() || cooldown) return;
     const content = input.trim().slice(0, CHAT_MESSAGE_MAX_LENGTH);
@@ -145,7 +134,6 @@ export function ChatPanel({
     }
   };
 
-  // Build filtered autocomplete items
   const autocompleteItems = inventory
     ? Object.entries(inventory)
         .filter(([, qty]) => qty > 0)
@@ -172,12 +160,10 @@ export function ChatPanel({
     setInput(val);
 
     const cursorPos = e.target.selectionStart ?? val.length;
-    // Find the last @ before cursor that isn't preceded by a non-space
     const before = val.slice(0, cursorPos);
     const atIdx = before.lastIndexOf("@");
     if (atIdx >= 0 && (atIdx === 0 || before[atIdx - 1] === " ")) {
       const filterText = before.slice(atIdx + 1);
-      // Don't show autocomplete if there's a space after the filter (completed reference)
       if (!filterText.includes(" ")) {
         setShowAutocomplete(true);
         setAutocompleteFilter(filterText);
@@ -189,7 +175,7 @@ export function ChatPanel({
     setShowAutocomplete(false);
   };
 
-  const selectAutocomplete = (itemId: string, itemName: string) => {
+  const selectAutocomplete = (itemId: string) => {
     const atIdx = atPosRef.current;
     if (atIdx < 0) return;
     const before = input.slice(0, atIdx);
@@ -221,7 +207,7 @@ export function ChatPanel({
       if (e.key === "Tab" || e.key === "Enter") {
         e.preventDefault();
         const sel = autocompleteItems[autocompleteIndex];
-        if (sel) selectAutocomplete(sel.id, sel.item.name);
+        if (sel) selectAutocomplete(sel.id);
         return;
       }
       if (e.key === "Escape") {
@@ -236,7 +222,6 @@ export function ChatPanel({
     }
   };
 
-  // Render item ref inline: replace @item-id with colored item name
   const renderMessageContent = (content: string, msgItemRefs: string[]) => {
     if (msgItemRefs.length === 0) return <span>{content}</span>;
 
@@ -254,11 +239,9 @@ export function ChatPanel({
         parts.push(
           <span
             key={key++}
+            className="cursor-pointer underline decoration-dotted"
             style={{
               color: item ? ITEM_RARITY_COLORS[item.rarity] : "#c084fc",
-              cursor: "pointer",
-              textDecoration: "underline",
-              textDecorationStyle: "dotted",
             }}
             onClick={() => setInspectItem(ref)}
           >
@@ -272,7 +255,6 @@ export function ChatPanel({
     return <>{parts}</>;
   };
 
-  // Merge activity log entries and chat messages chronologically
   type FeedEntry =
     | { kind: "activity"; time: string; message: string; sortKey: string }
     | { kind: "chat"; msg: ChatMessage; sortKey: string };
@@ -294,32 +276,13 @@ export function ChatPanel({
 
   return (
     <>
-      <div
-        style={{
-          borderTop: "1px solid #333",
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        {/* Message feed */}
+      <div className="flex flex-col border-t border-border">
         <div
           ref={scrollRef}
-          style={{
-            maxHeight: 58,
-            minHeight: 20,
-            overflow: "auto",
-            padding: "2px 0",
-          }}
+          className="max-h-[58px] min-h-5 overflow-auto py-0.5"
         >
           {feed.length === 0 && (
-            <div
-              style={{
-                fontSize: 9,
-                color: "#444",
-                textAlign: "center",
-                padding: "2px 0",
-              }}
-            >
+            <div className="py-0.5 text-center text-ui-sm text-[#444]">
               No messages yet
             </div>
           )}
@@ -330,15 +293,9 @@ export function ChatPanel({
               return (
                 <div
                   key={`a-${i}`}
-                  style={{
-                    fontSize: 9,
-                    color: "#666",
-                    lineHeight: "14px",
-                    overflowWrap: "break-word",
-                    wordBreak: "break-word",
-                  }}
+                  className="break-words text-ui-sm leading-[14px] text-text-dim"
                 >
-                  <span style={{ color: "#555" }}>{display}</span>{" "}
+                  <span className="text-text-dim">{display}</span>{" "}
                   {entry.message}
                 </div>
               );
@@ -349,24 +306,17 @@ export function ChatPanel({
             return (
               <div
                 key={msg.id}
-                style={{
-                  fontSize: 9,
-                  lineHeight: "14px",
-                  overflowWrap: "break-word",
-                  wordBreak: "break-word",
-                }}
+                className="break-words text-ui-sm leading-[14px]"
               >
-                <span style={{ color: "#555" }}>{time}</span>{" "}
+                <span className="text-text-dim">{time}</span>{" "}
                 <span
-                  style={{
-                    color: usernameColor(msg.username),
-                    fontWeight: "bold",
-                  }}
+                  className="font-bold"
+                  style={{ color: usernameColor(msg.username) }}
                 >
                   {msg.username}
                 </span>
-                <span style={{ color: "#555" }}>:</span>{" "}
-                <span style={{ color: "#ccc" }}>
+                <span className="text-text-dim">:</span>{" "}
+                <span className="text-text">
                   {renderMessageContent(msg.content, msg.itemRefs)}
                 </span>
               </div>
@@ -374,50 +324,32 @@ export function ChatPanel({
           })}
         </div>
 
-        {/* Input area */}
         {isOnline && (
-          <div style={{ position: "relative" }}>
-            {/* Autocomplete dropdown */}
+          <div className="relative">
             {showAutocomplete && autocompleteItems.length > 0 && (
-              <div
-                style={{
-                  position: "absolute",
-                  bottom: "100%",
-                  left: 0,
-                  right: 0,
-                  background: "#1a1a1a",
-                  border: "1px solid #444",
-                  borderRadius: 4,
-                  maxHeight: 88,
-                  overflow: "auto",
-                  zIndex: 100,
-                }}
-              >
+              <div className="absolute bottom-full left-0 right-0 z-[100] max-h-[88px] overflow-auto rounded border border-[#444] bg-bg-panel">
                 {autocompleteItems.map((x, i) => (
                   <div
                     key={x.id}
-                    onClick={() => selectAutocomplete(x.id, x.item.name)}
-                    style={{
-                      padding: "3px 8px",
-                      fontSize: 10,
-                      cursor: "pointer",
-                      background:
-                        i === autocompleteIndex ? "#333" : "transparent",
-                      color: ITEM_RARITY_COLORS[x.item.rarity],
-                    }}
+                    onClick={() => selectAutocomplete(x.id)}
+                    className={cn(
+                      "cursor-pointer px-2 py-0.5 text-[10px]",
+                      i === autocompleteIndex ? "bg-[#333]" : "bg-transparent",
+                    )}
+                    style={{ color: ITEM_RARITY_COLORS[x.item.rarity] }}
                   >
                     {x.item.name}
-                    <span style={{ color: "#555", marginLeft: 4 }}>
+                    <span className="ml-1 text-text-dim">
                       {RARITY_LABELS[x.item.rarity]}
                     </span>
                   </div>
                 ))}
               </div>
             )}
-            <div style={{ display: "flex", gap: 3, padding: "2px 0" }}>
+            <div className="flex gap-0.5 py-0.5">
               <input
                 ref={inputRef}
-                style={{ ...inputStyle, flex: 1, fontSize: 10 }}
+                className="input flex-1 text-[10px]"
                 placeholder="Type a message... (@ for items)"
                 value={input}
                 onChange={handleInputChange}
@@ -425,11 +357,10 @@ export function ChatPanel({
                 maxLength={CHAT_MESSAGE_MAX_LENGTH}
               />
               <button
-                style={{
-                  ...btnStyle,
-                  fontSize: 9,
-                  opacity: cooldown || !input.trim() ? 0.5 : 1,
-                }}
+                className={cn(
+                  "btn text-ui-sm",
+                  cooldown || !input.trim() ? "opacity-50" : "opacity-100",
+                )}
                 disabled={cooldown || !input.trim()}
                 onClick={handleSend}
               >
@@ -440,7 +371,6 @@ export function ChatPanel({
         )}
       </div>
 
-      {/* Item inspect overlay */}
       {inspectItem && (
         <ItemInspectOverlay
           itemId={inspectItem}

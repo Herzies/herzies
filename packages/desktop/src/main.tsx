@@ -1,3 +1,4 @@
+import "./globals.css";
 import {
   isPermissionGranted,
   requestPermission,
@@ -143,22 +144,9 @@ function App() {
   return (
     <div
       data-tauri-drag-region
-      style={{
-        padding: "12px 12px 4px",
-        display: "flex",
-        flexDirection: "column",
-        height: "100vh",
-      }}
+      className="flex h-screen flex-col px-3 pt-3 pb-1"
     >
-      <div
-        style={{
-          flex: 1,
-          overflow: "hidden",
-          display: "flex",
-          flexDirection: "column",
-          marginBottom: 8,
-        }}
-      >
+      <div className="mb-2 flex flex-1 flex-col overflow-hidden">
         {view === "home" && (
           <HomeView state={state} stageOverride={stageOverride} />
         )}

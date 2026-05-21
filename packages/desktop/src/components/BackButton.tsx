@@ -1,12 +1,7 @@
 export function BackButton({ onClick }: { onClick: () => void }) {
   return (
     <div
-      style={{
-        fontSize: 13,
-        fontWeight: "bold",
-        color: "#facc15",
-        cursor: "pointer",
-      }}
+      className="text-ui-lg font-bold text-yellow cursor-pointer"
       onClick={onClick}
     >
       ← Back

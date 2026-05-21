@@ -1,12 +1,12 @@
 import type { Update } from "@tauri-apps/plugin-updater";
 import { useState } from "react";
+import { cn } from "../lib/utils";
 import {
   type AppState,
   herzies,
   installUpdate,
   type UpdateInstallEvent,
 } from "../tauri-bridge";
-import { btnStyle } from "./styles";
 
 export function SettingsView({
   state,
@@ -49,8 +49,6 @@ export function SettingsView({
           });
         }
       });
-      // installUpdate calls relaunch(); we won't actually reach here, but
-      // reset state defensively in case it returns instead of relaunching.
       onUpdateInstalled();
       setUpdateStatus({ kind: "idle" });
     } catch (err) {
@@ -62,33 +60,18 @@ export function SettingsView({
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <div
-        style={{
-          fontSize: 13,
-          fontWeight: "bold",
-          color: "#e0e0e0",
-          marginBottom: 12,
-        }}
-      >
-        Settings
-      </div>
+    <div className="flex h-full flex-col">
+      <div className="mb-3 text-ui-lg font-bold text-text">Settings</div>
 
-      {/* Account */}
-      <div style={{ marginBottom: 16 }}>
-        <div style={{ fontSize: 11, color: "#888", marginBottom: 6 }}>
-          Account
-        </div>
+      <div className="mb-4">
+        <div className="mb-1.5 text-ui text-text-dim">Account</div>
         {state.isOnline ? (
-          <button
-            style={{ ...btnStyle, color: "#f87171" }}
-            onClick={() => herzies.logout()}
-          >
+          <button className="btn text-red" onClick={() => herzies.logout()}>
             Logout
           </button>
         ) : (
           <button
-            style={{ ...btnStyle, color: "#4ade80" }}
+            className="btn text-green"
             disabled={loggingIn}
             onClick={async () => {
               setLoggingIn(true);
@@ -101,41 +84,36 @@ export function SettingsView({
         )}
       </div>
 
-      {/* Debug (dev-only) */}
       {import.meta.env.DEV && (
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 11, color: "#888", marginBottom: 6 }}>
-            Debug
-          </div>
-          <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-            <button style={btnStyle} onClick={() => herzies.testNotification()}>
+        <div className="mb-4">
+          <div className="mb-1.5 text-ui text-text-dim">Debug</div>
+          <div className="flex flex-wrap gap-1">
+            <button className="btn" onClick={() => herzies.testNotification()}>
               Test Notification
             </button>
-            <button style={btnStyle} onClick={() => herzies.testActivity()}>
+            <button className="btn" onClick={() => herzies.testActivity()}>
               Test Activity Log
             </button>
-            <button style={btnStyle} onClick={onPreviewOnboarding}>
+            <button className="btn" onClick={onPreviewOnboarding}>
               Preview Onboarding
             </button>
           </div>
         </div>
       )}
 
-      {/* Dev-only stage selector */}
       {import.meta.env.DEV && (
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 11, color: "#888", marginBottom: 6 }}>
-            Stage Preview
-          </div>
-          <div style={{ display: "flex", gap: 4 }}>
+        <div className="mb-4">
+          <div className="mb-1.5 text-ui text-text-dim">Stage Preview</div>
+          <div className="flex gap-1">
             {[null, 1, 2, 3].map((s) => (
               <button
                 key={s ?? "default"}
-                style={{
-                  ...btnStyle,
-                  color: stageOverride === s ? "#7dd3fc" : "#888",
-                  borderColor: stageOverride === s ? "#7dd3fc" : "#555",
-                }}
+                className={cn(
+                  "btn",
+                  stageOverride === s
+                    ? "border-cyan text-cyan"
+                    : "border-[#555] text-text-dim",
+                )}
                 onClick={() => onStageOverride(s)}
               >
                 {s === null ? "Default" : `Stage ${s}`}
@@ -145,25 +123,19 @@ export function SettingsView({
         </div>
       )}
 
-      {/* Update */}
       {availableUpdate && (
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 11, color: "#888", marginBottom: 6 }}>
-            Update
-          </div>
-          <div style={{ fontSize: 11, color: "#4ade80", marginBottom: 4 }}>
+        <div className="mb-4">
+          <div className="mb-1.5 text-ui text-text-dim">Update</div>
+          <div className="mb-1 text-ui text-green">
             Version {availableUpdate.version} available
           </div>
           {updateStatus.kind === "idle" && (
-            <button
-              style={{ ...btnStyle, color: "#4ade80" }}
-              onClick={handleInstallUpdate}
-            >
+            <button className="btn text-green" onClick={handleInstallUpdate}>
               Install &amp; restart
             </button>
           )}
           {updateStatus.kind === "installing" && (
-            <div style={{ fontSize: 10, color: "#888" }}>
+            <div className="text-[10px] text-text-dim">
               {updateStatus.total
                 ? `Downloading ${Math.round(
                     (updateStatus.downloaded / updateStatus.total) * 100,
@@ -172,25 +144,20 @@ export function SettingsView({
             </div>
           )}
           {updateStatus.kind === "error" && (
-            <div style={{ fontSize: 10, color: "#f87171" }}>
+            <div className="text-[10px] text-red">
               Update failed: {updateStatus.message}
             </div>
           )}
         </div>
       )}
 
-      {/* Quit */}
-      <div style={{ marginTop: "auto", marginBottom: 8 }}>
-        <button
-          style={{ ...btnStyle, color: "#f87171" }}
-          onClick={() => herzies.quit()}
-        >
+      <div className="mt-auto mb-2">
+        <button className="btn text-red" onClick={() => herzies.quit()}>
           Quit Herzies
         </button>
       </div>
 
-      {/* Version */}
-      <div style={{ fontSize: 11, color: "#555" }}>
+      <div className="text-ui text-text-dim">
         Herzies Desktop v{state.version}
       </div>
     </div>

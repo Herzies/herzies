@@ -1,0 +1,54 @@
+@import "tailwindcss";
+@import "@herzies/shared/theme.css";
+
+@theme {
+  --text-ui: 11px;
+  --text-ui-sm: 9px;
+  --text-ui-lg: 13px;
+}
+
+@utility btn {
+  background: transparent;
+  color: var(--color-text);
+  border: 1px solid #555;
+  padding: 4px 10px;
+  font-size: var(--text-ui);
+  cursor: pointer;
+}
+
+@utility input {
+  background: transparent;
+  color: var(--color-text);
+  border: 1px solid #555;
+  padding: 4px 10px;
+  font-size: var(--text-ui);
+  outline: none;
+}
+
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  html,
+  body {
+    @apply bg-bg-panel text-text font-mono overflow-hidden select-none;
+    -webkit-app-region: drag;
+  }
+
+  button,
+  a,
+  input {
+    -webkit-app-region: no-drag;
+  }
+
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+}

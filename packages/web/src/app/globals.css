@@ -1,39 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
 @import "tailwindcss";
-
-@theme {
-  --color-bg: #0c0c14;
-  --color-bg-panel: #12121e;
-  --color-border: #2a2a3a;
-  --color-text: #c8c8d0;
-  --color-text-dim: #6a6a7a;
-  --color-purple: #c77dff;
-  --color-cyan: #7ec8e3;
-  --color-green: #4ade80;
-  --color-yellow: #facc15;
-  --color-red: #ff6b6b;
-
-  --font-mono: 'JetBrains Mono', monospace;
-
-  --animate-blink: blink 1s step-end infinite;
-  --animate-float: float 3s ease-in-out infinite;
-  --animate-glow: glow 2s ease-in-out infinite;
-
-  @keyframes blink {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0; }
-  }
-
-  @keyframes float {
-    0%, 100% { transform: translateY(0); }
-    50% { transform: translateY(-6px); }
-  }
-
-  @keyframes glow {
-    0%, 100% { text-shadow: 0 0 8px currentColor; }
-    50% { text-shadow: 0 0 16px currentColor; }
-  }
-}
+@import "@herzies/shared/theme.css";
 
 @layer base {
   *, *::before, *::after {

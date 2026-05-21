@@ -1,12 +1,7 @@
 import type { GameEvent } from "@herzies/shared";
-import {
-  getItem,
-  RARITY_COLORS as ITEM_RARITY_COLORS,
-  ItemDisplay,
-} from "@herzies/shared";
+import { getItem, RARITY_COLORS as ITEM_RARITY_COLORS } from "@herzies/shared";
 import { useEffect, useState } from "react";
 import { herzies, useWindowFocused } from "../tauri-bridge";
-import HerzieInspectOverlay from "./HerzieInspectOverlay";
 import ItemInspectOverlay from "./ItemInspectOverlay";
 
 function formatCountdown(endsAt: string): string {
@@ -36,9 +31,7 @@ function timeAgo(dateStr: string): string {
 export function EventsView() {
   const [events, setEvents] = useState<GameEvent[]>([]);
   const [loading, setLoading] = useState(true);
-  const [inspectOverlay, setInspectOverlay] = useState<
-    "item" | "herzie" | null
-  >(null);
+  const [inspectOverlay, setInspectOverlay] = useState<"item" | null>(null);
   const focused = useWindowFocused();
 
   useEffect(() => {
@@ -61,16 +54,7 @@ export function EventsView() {
 
   if (loading) {
     return (
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          height: "100%",
-          fontSize: 12,
-          color: "#555",
-        }}
-      >
+      <div className="flex h-full items-center justify-center text-xs text-text-dim">
         Loading...
       </div>
     );
@@ -80,17 +64,7 @@ export function EventsView() {
 
   if (!hunt) {
     return (
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          height: "100%",
-          fontSize: 12,
-          color: "#555",
-          textAlign: "center",
-        }}
-      >
+      <div className="flex h-full items-center justify-center text-center text-xs text-text-dim">
         No active Song Hunt. Check back Monday!
       </div>
     );
@@ -113,65 +87,24 @@ export function EventsView() {
   const rewardItem = getItem(config.rewardItemId);
 
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        justifyContent: "space-between",
-        height: "100%",
-        overflow: "auto",
-      }}
-    >
-      <div style={{ marginBottom: 8 }}>
-        <div
-          style={{
-            fontSize: 13,
-            fontWeight: "bold",
-            color: "#7dd3fc",
-          }}
-        >
-          Events
-        </div>
+    <div className="flex h-full flex-col justify-between overflow-auto">
+      <div className="mb-2">
+        <div className="text-ui-lg font-bold text-cyan">Events</div>
       </div>
 
-      <div style={{ flex: 1, display: "grid", placeItems: "center" }}>
+      <div className="grid flex-1 place-items-center">
         <div>
-          {/* Title + countdown */}
+          <div className="text-center">{hunt.title}</div>
 
-          <div
-            style={{
-              textAlign: "center",
-            }}
-          >
-            <div>{hunt.title}</div>
-          </div>
-
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 3,
-              fontSize: 10,
-              color: "#666",
-              marginTop: 12,
-              textAlign: "center",
-            }}
-          >
+          <div className="mt-3 flex flex-col gap-0.5 text-center text-[10px] text-text-dim">
             <div>Duration: {formatCountdown(hunt.endsAt)}</div>
             {rewardItem ? (
               <>
                 <div>
                   Reward:{" "}
                   <button
-                    style={{
-                      appearance: "none",
-                      border: "none",
-                      background: "none",
-                      cursor: "pointer",
-                      fontSize: 11,
-                      color: ITEM_RARITY_COLORS[rewardItem.rarity],
-                      textDecoration: "underline",
-                    }}
+                    className="cursor-pointer border-none bg-transparent text-ui underline"
+                    style={{ color: ITEM_RARITY_COLORS[rewardItem.rarity] }}
                     type="button"
                     onClick={() => setInspectOverlay("item")}
                   >
@@ -188,75 +121,34 @@ export function EventsView() {
       </div>
 
       <div>
-        <div
-          style={{
-            marginBottom: 10,
-            marginTop: 10,
-            borderBottom: "1px solid #222",
-            borderTop: "1px solid #222",
-            paddingTop: 10,
-            paddingBottom: 10,
-          }}
-        >
-          <div style={{ fontSize: 10, color: "#666", marginBottom: 6 }}>
-            How to play
-          </div>
-          <div style={{ fontSize: 11, color: "#e0e0e0" }}>
+        <div className="my-2.5 border-t border-b border-border py-2.5">
+          <div className="mb-1.5 text-[10px] text-text-dim">How to play</div>
+          <div className="text-ui text-text">
             Decipher the clues and play the song.
           </div>
         </div>
 
-        <div
-          style={
-            {
-              // display: "grid",
-              // columnCount: 1,
-              // gridTemplateColumns: "1fr 1fr",
-              // gap: 10,
-            }
-          }
-        >
-          {/* Hints */}
-          <div style={{ marginBottom: 10 }}>
-            <div
-              style={{
-                fontSize: 10,
-                color: "#666",
-                marginBottom: 4,
-              }}
-            >
-              Clues
-            </div>
+        <div>
+          <div className="mb-2.5">
+            <div className="mb-1 text-[10px] text-text-dim">Clues</div>
             {config.hints.map((hint, i) => (
               <div
-                key={i}
-                style={{
-                  marginBottom: 4,
-                  padding: "4px 0",
-                  borderBottom: "1px solid #222",
-                }}
+                key={hint.unlocksAt}
+                className="mb-1 border-b border-border py-1"
               >
                 {hint.unlocked ? (
-                  <div style={{ fontSize: 11, color: "#e0e0e0" }}>
+                  <div className="text-ui text-text">
                     {i + 1}. {hint.text}
                   </div>
                 ) : (
                   <>
-                    <div
-                      style={{
-                        fontSize: 11,
-                        color: "#555",
-                        fontFamily: "monospace",
-                      }}
-                    >
+                    <div className="font-mono text-ui text-text-dim">
                       {i + 1}.{" "}
-                      <span
-                        style={{ filter: hint.unlocked ? "none" : "blur(1px)" }}
-                      >
+                      <span className={hint.unlocked ? "" : "blur-[1px]"}>
                         {hint.text}
                       </span>
                     </div>
-                    <div style={{ fontSize: 9, color: "#444" }}>
+                    <div className="text-ui-sm text-[#444]">
                       unlocks{" "}
                       {formatCountdown(hint.unlocksAt).replace(" left", "")}
                     </div>
@@ -266,38 +158,25 @@ export function EventsView() {
             ))}
           </div>
 
-          {/* First Finders */}
           <div>
-            <div
-              style={{
-                fontSize: 10,
-                color: "#666",
-                marginBottom: 4,
-              }}
-            >
+            <div className="mb-1 text-[10px] text-text-dim">
               Finders ({config?.firstFinders?.length ?? 0})
             </div>
             {config?.firstFinders?.length &&
             config?.firstFinders?.length > 0 ? (
-              config?.firstFinders?.slice(0, 5).map((finder, i) => (
+              config?.firstFinders?.slice(0, 5).map((finder) => (
                 <div
-                  key={i}
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    fontSize: 11,
-                    padding: "2px 0",
-                    borderBottom: "1px solid #222",
-                  }}
+                  key={finder.name}
+                  className="flex justify-between border-b border-border py-0.5 text-ui last:border-b-0"
                 >
-                  <span style={{ color: "#facc15" }}>{finder.name}</span>
-                  <span style={{ color: "#555" }}>
+                  <span className="text-yellow">{finder.name}</span>
+                  <span className="text-text-dim">
                     {timeAgo(finder.claimedAt)}
                   </span>
                 </div>
               ))
             ) : (
-              <div style={{ fontSize: 11, color: "#555" }}>
+              <div className="text-ui text-text-dim">
                 No one has found it yet...
               </div>
             )}
@@ -311,14 +190,6 @@ export function EventsView() {
           onClose={() => setInspectOverlay(null)}
         />
       )}
-
-      {/*
-      {inspectOverlay === "herzie" && (
-        <HerzieInspectOverlay
-          herzie={config.firstFinders[0].}
-          onClose={() => setInspectOverlay(null)}
-        />
-      )} */}
     </div>
   );
 }

@@ -3,7 +3,6 @@ import { getItem } from "@herzies/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { herzies, useWindowFocused } from "../tauri-bridge";
 import { NumberTicker } from "./NumberTicker";
-import { btnStyle, inputStyle } from "./styles";
 
 export function TradeView({
   herzie,
@@ -38,9 +37,6 @@ export function TradeView({
     });
   }, []);
 
-  // Poll active trade — pauses while window is hidden; the user can't act on
-  // a trade they can't see, and the sync_loop will surface trade requests via
-  // notifications when the window reopens.
   useEffect(() => {
     if (!tradeId) return;
     if (!focused) return;
@@ -75,14 +71,12 @@ export function TradeView({
     [targetCode],
   );
 
-  // Auto-start trade when opened from friends list
   useEffect(() => {
     if (initialTarget && !tradeId) {
       handleCreate(initialTarget);
     }
   }, [initialTarget]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-join an incoming trade when opened from a notification
   useEffect(() => {
     if (!initialTradeId || joiningRef.current) return;
     joiningRef.current = true;
@@ -120,70 +114,42 @@ export function TradeView({
     if (tradeId) await herzies.tradeAccept(tradeId);
   };
 
-  // No active trade — show create form or loading if auto-starting
   if (!tradeId) {
     if (initialTarget) {
       return (
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            height: "100%",
-            justifyContent: "center",
-            alignItems: "center",
-          }}
-        >
-          <div style={{ fontSize: 12, color: "#888" }}>
+        <div className="flex h-full flex-col items-center justify-center">
+          <div className="text-ui text-text-dim">
             {message || "Starting trade..."}
           </div>
         </div>
       );
     }
     return (
-      <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-        <div
-          style={{
-            fontSize: 13,
-            fontWeight: "bold",
-            color: "#c084fc",
-            marginBottom: 8,
-          }}
-        >
-          Trade
-        </div>
+      <div className="flex h-full flex-col">
+        <div className="mb-2 text-ui-lg font-bold text-purple">Trade</div>
 
-        <div style={{ display: "flex", gap: 4, marginBottom: 8 }}>
+        <div className="mb-2 flex gap-1">
           <input
-            style={{ ...inputStyle, flex: 1 }}
+            className="input flex-1"
             placeholder="Friend code to trade with"
             value={targetCode}
             onChange={(e) => setTargetCode(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleCreate()}
           />
-          <button style={btnStyle} onClick={() => handleCreate()}>
+          <button className="btn" onClick={() => handleCreate()}>
             Start
           </button>
         </div>
 
-        {message && (
-          <div style={{ fontSize: 11, color: "#f87171" }}>{message}</div>
-        )}
+        {message && <div className="text-ui text-red">{message}</div>}
 
-        <div
-          style={{
-            fontSize: 12,
-            color: "#555",
-            textAlign: "center",
-            paddingTop: 20,
-          }}
-        >
+        <div className="pt-5 text-center text-ui text-text-dim">
           Enter a friend's code to start a trade
         </div>
       </div>
     );
   }
 
-  // Active trade
   const myOffer = trade
     ? trade.initiatorName === herzie.name
       ? trade.initiatorOffer
@@ -202,16 +168,9 @@ export function TradeView({
   const bothLocked = trade?.state === "both_locked";
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 8,
-        }}
-      >
-        <div style={{ fontSize: 13, fontWeight: "bold", color: "#c084fc" }}>
+    <div className="flex h-full flex-col">
+      <div className="mb-2 flex items-center justify-between">
+        <div className="text-ui-lg font-bold text-purple">
           Trading with{" "}
           {trade
             ? trade.initiatorName === herzie.name
@@ -219,50 +178,32 @@ export function TradeView({
               : trade.initiatorName
             : "..."}
         </div>
-        <button
-          style={{ ...btnStyle, fontSize: 10, color: "#f87171" }}
-          onClick={handleCancel}
-        >
+        <button className="btn text-[10px] text-red" onClick={handleCancel}>
           Cancel
         </button>
       </div>
 
       {!trade || trade.state === "pending" ? (
-        <div
-          style={{
-            fontSize: 12,
-            color: "#555",
-            textAlign: "center",
-            paddingTop: 20,
-          }}
-        >
+        <div className="pt-5 text-center text-ui text-text-dim">
           Waiting for them to join...
         </div>
       ) : (
         <>
-          {/* Offers side by side */}
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: 8,
-              flex: 1,
-            }}
-          >
+          <div className="grid flex-1 grid-cols-2 gap-2">
             <div>
-              <div style={{ fontSize: 11, color: "#888", marginBottom: 4 }}>
+              <div className="mb-1 text-ui text-text-dim">
                 Your offer {myLocked ? "🔒" : ""}
               </div>
               {myLocked ? (
                 <>
                   {myOffer &&
                     Object.entries(myOffer.items).map(([id, qty]) => (
-                      <div key={id} style={{ fontSize: 11, color: "#ccc" }}>
+                      <div key={id} className="text-ui text-text">
                         {getItem(id)?.name ?? id} x{qty}
                       </div>
                     ))}
                   {myOffer && myOffer.currency > 0 && (
-                    <div style={{ fontSize: 11, color: "#facc15" }}>
+                    <div className="text-ui text-yellow">
                       ${myOffer.currency}
                     </div>
                   )}
@@ -279,16 +220,9 @@ export function TradeView({
                         return (
                           <div
                             key={id}
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: 4,
-                              marginBottom: 2,
-                            }}
+                            className="mb-0.5 flex items-center gap-1"
                           >
-                            <span
-                              style={{ fontSize: 10, color: "#ccc", flex: 1 }}
-                            >
+                            <span className="flex-1 text-[10px] text-text">
                               {item.name} ({qty})
                             </span>
                             <NumberTicker
@@ -302,15 +236,8 @@ export function TradeView({
                           </div>
                         );
                       })}
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 4,
-                      marginTop: 4,
-                    }}
-                  >
-                    <span style={{ fontSize: 10, color: "#facc15", flex: 1 }}>
+                  <div className="mt-1 flex items-center gap-1">
+                    <span className="flex-1 text-[10px] text-yellow">
                       $ ({currency})
                     </span>
                     <NumberTicker
@@ -324,40 +251,34 @@ export function TradeView({
               )}
             </div>
             <div>
-              <div style={{ fontSize: 11, color: "#888", marginBottom: 4 }}>
-                Their offer
-              </div>
+              <div className="mb-1 text-ui text-text-dim">Their offer</div>
               {theirOffer &&
                 Object.entries(theirOffer.items).map(([id, qty]) => (
-                  <div key={id} style={{ fontSize: 11, color: "#ccc" }}>
+                  <div key={id} className="text-ui text-text">
                     {id} x{qty}
                   </div>
                 ))}
               {theirOffer && theirOffer.currency > 0 && (
-                <div style={{ fontSize: 11, color: "#facc15" }}>
+                <div className="text-ui text-yellow">
                   ${theirOffer.currency}
                 </div>
               )}
               {theirOffer &&
                 Object.keys(theirOffer.items).length === 0 &&
                 theirOffer.currency === 0 && (
-                  <div style={{ fontSize: 10, color: "#ccc" }}>Empty</div>
+                  <div className="text-[10px] text-text">Empty</div>
                 )}
             </div>
           </div>
 
-          {/* Actions */}
-          <div style={{ display: "flex", gap: 4, marginTop: 8 }}>
+          <div className="mt-2 flex gap-1">
             {!myLocked && (
-              <button style={btnStyle} onClick={handleLock}>
+              <button className="btn" onClick={handleLock}>
                 Lock offer
               </button>
             )}
             {bothLocked && (
-              <button
-                style={{ ...btnStyle, color: "#4ade80" }}
-                onClick={handleAccept}
-              >
+              <button className="btn text-green" onClick={handleAccept}>
                 Accept
               </button>
             )}
@@ -365,11 +286,7 @@ export function TradeView({
         </>
       )}
 
-      {message && (
-        <div style={{ fontSize: 11, color: "#4ade80", marginTop: 8 }}>
-          {message}
-        </div>
-      )}
+      {message && <div className="mt-2 text-ui text-green">{message}</div>}
     </div>
   );
 }

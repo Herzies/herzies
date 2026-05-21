@@ -9,10 +9,12 @@
       "import": "./dist/index.js",
       "require": "./dist/index.js",
       "types": "./dist/index.d.ts"
-    }
+    },
+    "./theme.css": "./theme.css"
   },
   "files": [
-    "dist"
+    "dist",
+    "theme.css"
   ],
   "scripts": {
     "build": "tsc",

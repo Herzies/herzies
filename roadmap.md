@@ -2,7 +2,8 @@
 
 ## high priority
 
-- [ ] new chat messages aren't instantly showing up
+- [x] auth tokens expire too quickly
+- [x] new chat messages aren't instantly showing up
 - [x] appeared offline eventhough I wasn't
 - [x] fix character seed (different local and on web)
 - [x] using crazy amounts of CPU after a while
@@ -29,6 +30,8 @@
 - [ ] Tidal support
 - [ ] Clear chat every 24hrs
 - [ ] skins
+- [ ] progress lock: must play certain song to keep progress going
+- [ ] in-game purchase to support development and maintenance
 - [x] better character rendring (more vibrant?)
 - [x] Chat
 - [x] Song hunt event

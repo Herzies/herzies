@@ -1,3 +1,4 @@
+import "./globals.css";
 import {
   CREATURE_BODY_TYPES,
   CREATURE_PALETTE,
@@ -11,6 +12,7 @@ import {
 import { useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Herzie3D } from "./components/Herzie3D";
+import { cn } from "./lib/utils";
 
 const WEARABLE_OPTIONS = ["headphones"];
 
@@ -63,36 +65,19 @@ function Sandbox() {
   };
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh" }}>
-      <aside
-        style={{
-          width: 320,
-          flexShrink: 0,
-          overflowY: "auto",
-          maxHeight: "100vh",
-          position: "sticky",
-          top: 0,
-          padding: 12,
-          background: "#0a0a0f",
-          borderRight: "1px solid #333",
-          fontSize: 11,
-        }}
-      >
-        <h1 style={{ fontSize: 13, color: "#c77dff", marginBottom: 12 }}>
-          herzie sandbox
-        </h1>
+    <div className="flex min-h-screen">
+      <aside className="sticky top-0 max-h-screen w-80 shrink-0 overflow-y-auto border-r border-border bg-bg p-3 text-ui">
+        <h1 className="mb-3 text-ui-lg text-purple">herzie sandbox</h1>
 
         <Section title="identity">
           <Field label="userId (seed)">
             <input
               value={userId}
               onChange={(e) => setUserId(e.target.value)}
-              style={inputStyle}
+              className="input w-full"
             />
           </Field>
-          <div
-            style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}
-          >
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
             <Btn onClick={() => applySeed(userId)}>re-seed</Btn>
             <Btn onClick={randomUserId}>random id</Btn>
           </div>
@@ -235,7 +220,7 @@ function Sandbox() {
             onChange={setDraggable}
           />
           <Check label="show sky" checked={showSky} onChange={setShowSky} />
-          <div style={{ marginTop: 8 }}>
+          <div className="mt-2">
             wearables:
             {WEARABLE_OPTIONS.map((w) => (
               <Check
@@ -248,9 +233,7 @@ function Sandbox() {
           </div>
         </Section>
 
-        <div
-          style={{ marginTop: 12, display: "flex", gap: 6, flexWrap: "wrap" }}
-        >
+        <div className="mt-3 flex flex-wrap gap-1.5">
           <Btn onClick={() => setJsonOpen((v) => !v)}>
             {jsonOpen ? "hide json" : "show json"}
           </Btn>
@@ -258,34 +241,13 @@ function Sandbox() {
         </div>
 
         {jsonOpen && (
-          <pre
-            style={{
-              marginTop: 8,
-              padding: 8,
-              background: "#111",
-              border: "1px solid #333",
-              borderRadius: 4,
-              fontSize: 10,
-              overflow: "auto",
-              maxHeight: 200,
-              color: "#aaa",
-            }}
-          >
+          <pre className="mt-2 max-h-[200px] overflow-auto rounded border border-border bg-[#111] p-2 text-[10px] text-text-dim">
             {JSON.stringify({ userId, stage, creatureParams: params }, null, 2)}
           </pre>
         )}
       </aside>
 
-      <main
-        style={{
-          flex: 1,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: 24,
-          minHeight: "100vh",
-        }}
-      >
+      <main className="flex min-h-screen flex-1 items-center justify-center p-6">
         <Herzie3D
           userId={userId}
           stage={stage}
@@ -310,16 +272,8 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <div style={{ marginBottom: 16 }}>
-      <h2
-        style={{
-          fontSize: 10,
-          textTransform: "uppercase",
-          letterSpacing: "0.08em",
-          color: "#7ec8e3",
-          marginBottom: 8,
-        }}
-      >
+    <div className="mb-4">
+      <h2 className="mb-2 text-[10px] tracking-wider text-cyan uppercase">
         {title}
       </h2>
       {children}
@@ -335,10 +289,8 @@ function Field({
   children: React.ReactNode;
 }) {
   return (
-    <div style={{ marginBottom: 8 }}>
-      <span style={{ color: "#6a6a7a", display: "block", marginBottom: 2 }}>
-        {label}
-      </span>
+    <div className="mb-2">
+      <span className="mb-0.5 block text-text-dim">{label}</span>
       {children}
     </div>
   );
@@ -365,7 +317,7 @@ function SliderField({
         step={bounds.step}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        style={{ width: "100%" }}
+        className="w-full"
       />
     </Field>
   );
@@ -387,7 +339,7 @@ function SelectField({
       <select
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        style={inputStyle}
+        className="input w-full"
       >
         {options.map((o) => (
           <option key={o.value} value={o.value}>
@@ -397,15 +349,8 @@ function SelectField({
       </select>
       {options[value]?.swatch && (
         <span
-          style={{
-            display: "inline-block",
-            width: 14,
-            height: 14,
-            marginLeft: 8,
-            verticalAlign: "middle",
-            background: options[value].swatch,
-            border: "1px solid #444",
-          }}
+          className="ml-2 inline-block h-3.5 w-3.5 align-middle border border-[#444]"
+          style={{ background: options[value].swatch }}
         />
       )}
     </Field>
@@ -422,7 +367,7 @@ function Check({
   onChange: (v: boolean) => void;
 }) {
   return (
-    <label style={{ display: "block", marginTop: 4, cursor: "pointer" }}>
+    <label className="mt-1 block cursor-pointer">
       <input
         type="checkbox"
         checked={checked}
@@ -444,32 +389,12 @@ function Btn({
     <button
       type="button"
       onClick={onClick}
-      style={{
-        background: "#1a1a2e",
-        color: "#c77dff",
-        border: "1px solid #444",
-        padding: "4px 8px",
-        fontSize: 11,
-        cursor: "pointer",
-        borderRadius: 4,
-        fontFamily: "inherit",
-      }}
+      className="cursor-pointer rounded border border-[#444] bg-bg-panel px-2 py-1 text-ui text-purple font-mono"
     >
       {children}
     </button>
   );
 }
-
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  background: "#222",
-  color: "#e0e0e0",
-  border: "1px solid #444",
-  padding: "4px 6px",
-  fontFamily: "inherit",
-  fontSize: 11,
-  boxSizing: "border-box",
-};
 
 const root = createRoot(document.getElementById("root")!);
 root.render(<Sandbox />);

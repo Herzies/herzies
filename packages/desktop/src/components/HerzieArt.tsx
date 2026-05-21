@@ -216,12 +216,10 @@ export function HerzieArt({
 
   return (
     <pre
+      className="m-0 leading-[1.3] select-none"
       style={{
         fontSize: size,
-        lineHeight: 1.3,
-        margin: 0,
         filter: `drop-shadow(0 0 12px ${color}40)`,
-        userSelect: "none",
       }}
       aria-label={`A stage ${stage} herzie`}
     >

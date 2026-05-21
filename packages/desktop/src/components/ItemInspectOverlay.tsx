@@ -28,44 +28,25 @@ export default function ItemInspectOverlay({
   return (
     <div
       onClick={onClose}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.7)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 1000,
-      }}
+      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/70"
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        style={{
-          background: "#1a1a1a",
-          border: "1px solid #333",
-          padding: 16,
-          maxWidth: 260,
-          textAlign: "center",
-        }}
+        className="max-w-[260px] border border-border bg-bg-panel p-4 text-center"
       >
-        <div
-          style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}
-        >
+        <div className="mb-2 flex justify-center">
           <ItemDisplay item={item} size={9} />
         </div>
         <div
-          style={{
-            fontSize: 14,
-            fontWeight: "bold",
-            color: ITEM_RARITY_COLORS[item.rarity],
-          }}
+          className="text-sm font-bold"
+          style={{ color: ITEM_RARITY_COLORS[item.rarity] }}
         >
           {item.name}
         </div>
-        <div style={{ fontSize: 11, color: "#888", marginBottom: 4 }}>
+        <div className="mb-1 text-ui text-text-dim">
           {RARITY_LABELS[item.rarity]}
         </div>
-        <div style={{ fontSize: 11, color: "#aaa" }}>{item.description}</div>
+        <div className="text-ui text-text-dim">{item.description}</div>
       </div>
     </div>
   );
