@@ -1,7 +1,4 @@
-import type {
-  GameEvent,
-  SongHuntConfig,
-} from "@herzies/shared";
+import type { GameEvent, SongHuntConfig } from "@herzies/shared";
 import { NextResponse } from "next/server";
 import { buildSongHuntConfig } from "@/lib/events";
 import { createAdminClient } from "@/lib/supabase-admin";
@@ -13,9 +10,9 @@ export async function GET() {
   const { data, error } = await admin
     .from("events")
     .select("id, type, title, description, active, starts_at, ends_at, config")
-    .eq("active", true)
-    .lte("starts_at", now.toISOString())
-    .gte("ends_at", now.toISOString());
+    .eq("active", false)
+    .order("starts_at", { ascending: false })
+    .limit(1);
 
   if (error) {
     return NextResponse.json(
@@ -37,6 +34,7 @@ export async function GET() {
           e.id,
           e.config as SongHuntConfig,
           now,
+          true,
         );
       } else {
         config = e.config as Record<string, unknown>;
