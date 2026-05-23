@@ -1,8 +1,13 @@
 import type { GameEvent } from "@herzies/shared";
-import { getItem, RARITY_COLORS as ITEM_RARITY_COLORS } from "@herzies/shared";
+import {
+  getItem,
+  RARITY_COLORS as ITEM_RARITY_COLORS,
+  ItemDisplay,
+} from "@herzies/shared";
 import { useEffect, useState } from "react";
 import { herzies, useWindowFocused } from "../tauri-bridge";
 import ItemInspectOverlay from "./ItemInspectOverlay";
+import { View } from "./View";
 
 function formatCountdown(endsAt: string): string {
   const ms = new Date(endsAt).getTime() - Date.now();
@@ -28,11 +33,34 @@ function timeAgo(dateStr: string): string {
   return `${days}d ${hours % 24}h ago`;
 }
 
+type SongHuntConfig = {
+  trackTitle: string;
+  trackArtist: string;
+  rewardItemId: string;
+  maxClaims: number;
+  hints: Array<{
+    text: string;
+    unlocksAt: string;
+    unlocked: boolean;
+  }>;
+  firstFinders: Array<{
+    name: string;
+    claimedAt: string;
+  }>;
+};
+
 export function EventsView() {
   const [events, setEvents] = useState<GameEvent[]>([]);
+  const [previousHunt, setPreviousHunt] = useState<GameEvent | null>(null);
   const [loading, setLoading] = useState(true);
   const [inspectOverlay, setInspectOverlay] = useState<"item" | null>(null);
   const focused = useWindowFocused();
+
+  useEffect(() => {
+    herzies.fetchPreviousHunt().then((data) => {
+      setPreviousHunt(data.events[0]);
+    });
+  }, []);
 
   useEffect(() => {
     herzies
@@ -61,6 +89,84 @@ export function EventsView() {
   }
 
   const hunt = events.find((e) => e.type === "song_hunt");
+  const previousHuntConfig = previousHunt?.config as SongHuntConfig;
+
+  if (!hunt && previousHunt) {
+    return (
+      <View title="Events" colour="red">
+        <div>
+          <div>
+            <h2 className="text-ui-2xl mb-3 font-bold">
+              Song Hunt{" "}
+              <span className="text-ui text-text-dim">
+                (
+                {Intl.DateTimeFormat("en-US", {
+                  day: "numeric",
+                  month: "short",
+                }).format(getNextMonday())}
+                )
+              </span>
+            </h2>
+
+            <div className="text-ui-lg">
+              Starts in {countDownToMonday(getNextMonday())}.
+            </div>
+          </div>
+
+          <div className="mt-4 pt-4 border-t border-border">
+            <h2 className="text-ui-lg mb-3 font-bold">
+              Previous{" "}
+              <span className="text-ui text-text-dim">
+                (
+                {Intl.DateTimeFormat("en-US", {
+                  day: "numeric",
+                  month: "short",
+                }).format(new Date(previousHunt?.startsAt ?? ""))}
+                )
+              </span>
+            </h2>
+
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-1">
+                  <h2 className="text-ui font-bold text-text-dim">Type:</h2>
+                  <div className="text-ui">Song Hunt</div>
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <h2 className="text-ui font-bold text-text-dim">Answer:</h2>
+                  <div className="text-ui">
+                    {previousHuntConfig?.trackArtist} -{" "}
+                    {previousHuntConfig?.trackTitle}
+                  </div>
+                </div>
+
+                {previousHuntConfig.rewardItemId ? (
+                  <div className="flex flex-col gap-1">
+                    <h2 className="text-ui font-bold text-text-dim">Reward:</h2>
+                    <div className="text-ui">
+                      {getItem(previousHuntConfig.rewardItemId)?.name}
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="flex flex-col gap-1">
+                  <h2 className="text-ui font-bold text-text-dim">Finders:</h2>
+                  <div>
+                    {previousHuntConfig?.firstFinders?.map((finder, i) => (
+                      <div key={finder.name} className="text-ui text-yellow">
+                        {i + 1}. {finder.name}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </View>
+    );
+  }
 
   if (!hunt) {
     return (
@@ -192,4 +298,30 @@ export function EventsView() {
       )}
     </div>
   );
+}
+
+function countDownToMonday(date: Date): string {
+  const now = new Date();
+  const diff = date.getTime() - now.getTime();
+  if (diff <= 0) return "Today";
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+  const remainderMs = diff % (1000 * 60 * 60 * 24);
+  const hours = Math.floor(remainderMs / (1000 * 60 * 60));
+
+  if (days > 0) {
+    return `${days}d${hours > 0 ? ` ${hours}h` : ""}`;
+  }
+  // If less than 1 day left, show just hours
+  const onlyHours = Math.floor(diff / (1000 * 60 * 60));
+  return `${onlyHours}h`;
+}
+
+function getNextMonday(): Date {
+  const now = new Date();
+  const day = now.getDay();
+  const daysUntilMonday = (8 - day) % 7 || 7;
+  const nextMonday = new Date(now);
+  nextMonday.setHours(0, 0, 0, 0);
+  nextMonday.setDate(now.getDate() + daysUntilMonday);
+  return nextMonday;
 }

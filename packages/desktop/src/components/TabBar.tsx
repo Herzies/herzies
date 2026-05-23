@@ -15,12 +15,42 @@ export function TabBar({
   view: View;
   setView: (v: View) => void;
 }) {
-  const tabs: { id: View; label: string }[] = [
-    { id: "home", label: "Herzie" },
-    { id: "inventory", label: "Inventory" },
-    { id: "events", label: "Events" },
-    { id: "friends", label: "Friends" },
-    { id: "settings", label: "Settings" },
+  const tabs: {
+    id: View;
+    label: string;
+    colour: "cyan" | "yellow" | "red" | "green";
+    title: string;
+  }[] = [
+    {
+      id: "home",
+      label: "Herzie",
+      colour: "cyan",
+      title: "Your Herzie. Shortcut [h]",
+    },
+    {
+      id: "inventory",
+      label: "Inventory",
+      colour: "yellow",
+      title: "Your inventory. Shortcut [i]",
+    },
+    {
+      id: "events",
+      label: "Events",
+      colour: "red",
+      title: "Events. Shortcut [e]",
+    },
+    {
+      id: "friends",
+      label: "Friends",
+      colour: "green",
+      title: "Your friends. Shortcut [f]",
+    },
+    {
+      id: "settings",
+      label: "Settings",
+      colour: "cyan",
+      title: "Settings. Shortcut [s]",
+    },
   ];
   return (
     <div className="flex border-t border-border py-1.5">
@@ -29,11 +59,19 @@ export function TabBar({
           type="button"
           key={t.id}
           onClick={() => setView(t.id)}
+          title={t.title}
           className={cn(
             "flex-1 border-none bg-transparent py-1 text-[10px] cursor-pointer",
-            view === t.id
-              ? "font-bold text-cyan"
-              : "font-normal text-text-dim hover:text-text/70",
+            {
+              "font-bold text-cyan": view === t.id && t.colour === "cyan",
+              "hover:text-cyan/80": view !== t.id && t.colour === "cyan",
+              "font-bold text-yellow": view === t.id && t.colour === "yellow",
+              "hover:text-yellow/80": view !== t.id && t.colour === "yellow",
+              "font-bold text-red": view === t.id && t.colour === "red",
+              "hover:text-red/80": view !== t.id && t.colour === "red",
+              "font-bold text-green": view === t.id && t.colour === "green",
+              "hover:text-green/80": view !== t.id && t.colour === "green",
+            },
           )}
         >
           {t.label}

@@ -7,6 +7,7 @@ import {
   installUpdate,
   type UpdateInstallEvent,
 } from "../tauri-bridge";
+import { View } from "./View";
 
 export function SettingsView({
   state,
@@ -60,17 +61,20 @@ export function SettingsView({
   };
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="mb-3 text-ui-lg font-bold text-text">Settings</div>
-
+    <View title="Settings" colour="cyan" childrenClassName="flex flex-col">
       <div className="mb-4">
         <div className="mb-1.5 text-ui text-text-dim">Account</div>
         {state.isOnline ? (
-          <button className="btn text-red" onClick={() => herzies.logout()}>
+          <button
+            type="button"
+            className="btn text-red"
+            onClick={() => herzies.logout()}
+          >
             Logout
           </button>
         ) : (
           <button
+            type="button"
             className="btn text-green"
             disabled={loggingIn}
             onClick={async () => {
@@ -88,13 +92,21 @@ export function SettingsView({
         <div className="mb-4">
           <div className="mb-1.5 text-ui text-text-dim">Debug</div>
           <div className="flex flex-wrap gap-1">
-            <button className="btn" onClick={() => herzies.testNotification()}>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => herzies.testNotification()}
+            >
               Test Notification
             </button>
-            <button className="btn" onClick={() => herzies.testActivity()}>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => herzies.testActivity()}
+            >
               Test Activity Log
             </button>
-            <button className="btn" onClick={onPreviewOnboarding}>
+            <button type="button" className="btn" onClick={onPreviewOnboarding}>
               Preview Onboarding
             </button>
           </div>
@@ -108,6 +120,7 @@ export function SettingsView({
             {[null, 1, 2, 3].map((s) => (
               <button
                 key={s ?? "default"}
+                type="button"
                 className={cn(
                   "btn",
                   stageOverride === s
@@ -124,13 +137,17 @@ export function SettingsView({
       )}
 
       {availableUpdate && (
-        <div className="mb-4">
+        <div className="mt-auto mb-4">
           <div className="mb-1.5 text-ui text-text-dim">Update</div>
           <div className="mb-1 text-ui text-green">
             Version {availableUpdate.version} available
           </div>
           {updateStatus.kind === "idle" && (
-            <button className="btn text-green" onClick={handleInstallUpdate}>
+            <button
+              type="button"
+              className="btn text-green"
+              onClick={handleInstallUpdate}
+            >
               Install &amp; restart
             </button>
           )}
@@ -152,7 +169,11 @@ export function SettingsView({
       )}
 
       <div className="mt-auto mb-2">
-        <button className="btn text-red" onClick={() => herzies.quit()}>
+        <button
+          type="button"
+          className="btn text-red"
+          onClick={() => herzies.quit()}
+        >
           Quit Herzies
         </button>
       </div>
@@ -160,6 +181,6 @@ export function SettingsView({
       <div className="text-ui text-text-dim">
         Herzies Desktop v{state.version}
       </div>
-    </div>
+    </View>
   );
 }

@@ -1,10 +1,25 @@
-export function BackButton({ onClick }: { onClick: () => void }) {
+import { cn } from "../lib/utils";
+
+export function BackButton({
+  colour = "yellow",
+  onClick,
+}: {
+  colour?: "cyan" | "yellow" | "red" | "green";
+  onClick: () => void;
+}) {
   return (
-    <div
-      className="text-ui-lg font-bold text-yellow cursor-pointer"
+    <button
       onClick={onClick}
+      title="Back"
+      type="button"
+      className={cn("text-ui-lg font-bold cursor-pointer", {
+        "text-cyan": colour === "cyan",
+        "text-yellow": colour === "yellow",
+        "text-red": colour === "red",
+        "text-green": colour === "green",
+      })}
     >
       ← Back
-    </div>
+    </button>
   );
 }

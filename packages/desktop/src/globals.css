@@ -5,6 +5,8 @@
   --text-ui: 11px;
   --text-ui-sm: 9px;
   --text-ui-lg: 13px;
+  --text-ui-xl: 15px;
+  --text-ui-2xl: 17px;
 }
 
 @utility btn {
