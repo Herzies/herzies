@@ -17,6 +17,7 @@ import { SettingsView } from "./components/SettingsView";
 import { SplashScreen } from "./components/SplashScreen";
 import { TabBar, type View } from "./components/TabBar";
 import { TradeView } from "./components/TradeView";
+import { cn } from "./lib/utils";
 import { type AppState, checkForUpdate, herzies } from "./tauri-bridge";
 
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6h
@@ -29,6 +30,11 @@ function App() {
     isOnline: false,
     isConnected: true,
     version: "",
+    equipped: [],
+    chatMessages: [],
+    inventory: null,
+    inventoryCurrency: 0,
+    friends: {},
   });
   const [view, setView] = useState<View>("home");
   const [tradeTarget, setTradeTarget] = useState<string | null>(null);
@@ -146,40 +152,87 @@ function App() {
       data-tauri-drag-region
       className="flex h-screen flex-col px-3 pt-3 pb-1"
     >
-      <div className="mb-2 flex flex-1 flex-col overflow-hidden">
-        {view === "home" && (
+      <div className="mb-2 flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div
+          className={cn(
+            "min-h-0 flex-1 flex-col",
+            view === "home" ? "flex" : "hidden",
+          )}
+        >
           <HomeView state={state} stageOverride={stageOverride} />
+        </div>
+
+        {herzie && (
+          <div
+            className={cn(
+              "min-h-0 flex-1 flex-col",
+              view === "friends" ? "flex" : "hidden",
+            )}
+          >
+            <FriendsView
+              herzie={herzie}
+              friends={state.friends}
+              onStartTrade={handleStartTrade}
+              stageOverride={stageOverride}
+            />
+          </div>
         )}
-        {view === "friends" && herzie && (
-          <FriendsView
-            herzie={herzie}
-            onStartTrade={handleStartTrade}
-            stageOverride={stageOverride}
-          />
+
+        {herzie && (
+          <div
+            className={cn(
+              "min-h-0 flex-1 flex-col",
+              view === "inventory" ? "flex" : "hidden",
+            )}
+          >
+            <InventoryView
+              herzie={herzie}
+              initialItem={deepLinkItem}
+              inventory={state.inventory}
+              currency={state.inventoryCurrency}
+              equipped={state.equipped}
+              onLog={addLog}
+            />
+          </div>
         )}
-        {view === "inventory" && herzie && (
-          <InventoryView
-            herzie={herzie}
-            initialItem={deepLinkItem}
-            key={deepLinkItem ?? "inv"}
-            onLog={addLog}
-          />
+
+        <div
+          className={cn(
+            "min-h-0 flex-1 flex-col",
+            view === "events" ? "flex" : "hidden",
+          )}
+        >
+          <EventsView />
+        </div>
+
+        {herzie && (
+          <div
+            className={cn(
+              "min-h-0 flex-1 flex-col",
+              view === "trade" ? "flex" : "hidden",
+            )}
+          >
+            <TradeView
+              herzie={herzie}
+              initialTarget={tradeTarget}
+              initialTradeId={incomingTradeId}
+              inventory={state.inventory}
+              currency={state.inventoryCurrency}
+              onClose={() => {
+                setTradeTarget(null);
+                setIncomingTradeId(null);
+                setView("friends");
+              }}
+            />
+          </div>
         )}
-        {view === "events" && <EventsView />}
-        {view === "trade" && herzie && (
-          <TradeView
-            herzie={herzie}
-            initialTarget={tradeTarget}
-            initialTradeId={incomingTradeId}
-            key={incomingTradeId ?? tradeTarget ?? "trade"}
-            onClose={() => {
-              setTradeTarget(null);
-              setIncomingTradeId(null);
-              setView("friends");
-            }}
-          />
-        )}
-        {view === "settings" && (
+
+        <div
+          className={cn(
+            "min-h-0 flex-1 flex-col",
+            view === "settings" ? "flex" : "hidden",
+          )}
+        >
           <SettingsView
             state={state}
             stageOverride={stageOverride}
@@ -188,15 +241,22 @@ function App() {
             availableUpdate={availableUpdate}
             onUpdateInstalled={() => setAvailableUpdate(null)}
           />
-        )}
+        </div>
       </div>
+
       {herzie && view === "home" && (
-        <ChatPanel activityLog={activityLog} isOnline={state.isOnline} />
+        <ChatPanel
+          activityLog={activityLog}
+          isOnline={state.isOnline}
+          messages={state.chatMessages}
+          inventory={state.inventory}
+        />
       )}
+
       {herzie && <TabBar view={view} setView={switchView} />}
     </div>
   );
 }
 
-const root = createRoot(document.getElementById("root")!);
+const root = createRoot(document?.getElementById("root") ?? document.body);
 root.render(<App />);

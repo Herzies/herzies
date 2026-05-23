@@ -10,6 +10,7 @@ mod types;
 
 use reqwest::Client;
 use state::{ManagedState, SharedState};
+use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
@@ -41,6 +42,7 @@ fn logout(app: AppHandle, state: tauri::State<SharedState>) {
     storage::clear_herzie();
     let mut s = state.lock().unwrap();
     s.herzie = None;
+    s.clear_app_cache();
     let app_state = s.to_app_state(env!("CARGO_PKG_VERSION"));
     drop(s);
     let _ = app.emit("state-update", &app_state);
@@ -90,6 +92,11 @@ async fn register_herzie(
                 drop(s);
                 let _ = app.emit("state-update", &app_state);
                 let _ = app.emit("activity", format!("{} has hatched!", trimmed));
+                let app_clone = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let client = Client::new();
+                    refresh_app_cache(&app_clone, &client).await;
+                });
                 return Ok(());
             }
             Err(api::RegisterError::FriendCodeCollision) => {
@@ -174,6 +181,11 @@ async fn friend_add(
             let _ = app.emit("state-update", &app_state);
         }
         let _ = app.emit("activity", format!("Added friend {}", code));
+        let app_clone = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let client = Client::new();
+            refresh_friends_cache(&app_clone, &client).await;
+        });
         Ok(FriendResult {
             success: true,
             message: "Friend added!".into(),
@@ -212,10 +224,13 @@ async fn friend_remove(
         if let Some(ref mut herzie) = s.herzie {
             herzie.friend_codes.retain(|c| c != &code);
             storage::save_herzie(herzie);
-            let app_state = s.to_app_state(env!("CARGO_PKG_VERSION"));
-            drop(s);
-            let _ = app.emit("state-update", &app_state);
         }
+        s.friends.remove(&code);
+        if let Some(ref herzie) = s.herzie {
+            storage::save_friends_cache(&herzie.friend_codes, &s.friends);
+        }
+        drop(s);
+        emit_state_update(&app);
         let _ = app.emit("activity", format!("Removed friend {}", code));
         Ok(FriendResult {
             success: true,
@@ -232,25 +247,51 @@ async fn friend_remove(
 #[tauri::command]
 async fn friend_lookup(
     codes: Vec<String>,
-) -> Result<std::collections::HashMap<String, HerzieProfile>, String> {
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<HashMap<String, HerzieProfile>, String> {
     let client = Client::new();
-    Ok(api::api_lookup_herzies(&client, &codes).await)
+    if let Some(profiles) = api::api_lookup_herzies(&client, &codes).await {
+        let mut s = state.lock().unwrap();
+        for (code, profile) in &profiles {
+            s.friends.insert(code.clone(), profile.clone());
+        }
+        if let Some(ref herzie) = s.herzie {
+            storage::save_friends_cache(&herzie.friend_codes, &s.friends);
+        }
+        drop(s);
+        emit_state_update(&app);
+        Ok(profiles)
+    } else {
+        let s = state.lock().unwrap();
+        Ok(codes
+            .iter()
+            .filter_map(|c| s.friends.get(c).map(|p| (c.clone(), p.clone())))
+            .collect())
+    }
 }
 
 #[tauri::command]
 async fn fetch_inventory(
-    _state: tauri::State<'_, SharedState>,
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
 ) -> Result<Option<InventoryResult>, String> {
     if !api::is_logged_in() {
         return Ok(None);
     }
     let client = Client::new();
     match api::api_fetch_inventory(&client).await {
-        Some((inventory, currency, equipped)) => Ok(Some(InventoryResult {
-            inventory,
-            currency,
-            equipped,
-        })),
+        Some((inventory, currency, equipped)) => {
+            let mut s = state.lock().unwrap();
+            apply_inventory(&mut s, inventory.clone(), currency, equipped.clone());
+            drop(s);
+            emit_state_update(&app);
+            Ok(Some(InventoryResult {
+                inventory,
+                currency,
+                equipped,
+            }))
+        }
         None => Ok(None),
     }
 }
@@ -265,24 +306,52 @@ async fn sell_item(
     let client = Client::new();
     let result = api::api_sell_item(&client, &item_id, quantity).await;
     if let Some(ref data) = result {
-        if let Some(new_currency) = data["newCurrency"].as_u64() {
-            let mut s = state.lock().unwrap();
-            if let Some(ref mut herzie) = s.herzie {
+        let mut s = state.lock().unwrap();
+        let mut changed = false;
+        if let Ok(inventory) = serde_json::from_value::<Inventory>(data["inventory"].clone()) {
+            let currency = data["newCurrency"].as_u64().unwrap_or(0) as u32;
+            let equipped = s.equipped.clone();
+            apply_inventory(&mut s, inventory, currency, equipped);
+            changed = true;
+        } else if let Some(new_currency) = data["newCurrency"].as_u64() {
+            s.inventory_currency = new_currency as u32;
+            if let Some(ref inv) = s.inventory {
+                storage::save_inventory_cache(inv, s.inventory_currency);
+            }
+            changed = true;
+        }
+        if let Some(ref mut herzie) = s.herzie {
+            if let Some(new_currency) = data["newCurrency"].as_u64() {
                 herzie.currency = new_currency as u32;
                 storage::save_herzie(herzie);
-                let app_state = s.to_app_state(env!("CARGO_PKG_VERSION"));
-                drop(s);
-                let _ = app.emit("state-update", &app_state);
+                changed = true;
             }
+        }
+        drop(s);
+        if changed {
+            emit_state_update(&app);
         }
     }
     Ok(result)
 }
 
 #[tauri::command]
-async fn equip_item(item_id: String, action: String) -> Result<serde_json::Value, String> {
+async fn equip_item(
+    item_id: String,
+    action: String,
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
     let client = Client::new();
-    api::api_equip_item(&client, &item_id, &action).await
+    let result = api::api_equip_item(&client, &item_id, &action).await?;
+    if let Ok(equipped) = serde_json::from_value::<Vec<String>>(result["equipped"].clone()) {
+        let mut s = state.lock().unwrap();
+        s.equipped = equipped;
+        storage::save_equipped(&s.equipped);
+        drop(s);
+        emit_state_update(&app);
+    }
+    Ok(result)
 }
 
 #[tauri::command]
@@ -332,6 +401,15 @@ async fn fetch_active_events() -> Result<serde_json::Value, String> {
     let client = Client::new();
     match api::api_fetch_active_events(&client).await {
         Some(events) => Ok(serde_json::json!({ "events": events })),
+        None => Ok(serde_json::json!({ "events": [] }))
+    }
+}
+
+#[tauri::command]
+async fn fetch_previous_hunt() -> Result<serde_json::Value, String> {
+    let client = Client::new();
+    match api::api_fetch_previous_hunt(&client).await {
+        Some(events) => Ok(serde_json::json!({ "events": events })),
         None => Ok(serde_json::json!({ "events": [] })),
     }
 }
@@ -362,25 +440,48 @@ async fn get_auth_config() -> Result<Option<AuthConfig>, String> {
 }
 
 #[tauri::command]
-async fn chat_fetch() -> Result<Option<ChatFetchResponse>, String> {
+async fn chat_fetch(
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<Option<ChatFetchResponse>, String> {
     if !api::is_logged_in() {
         return Ok(None);
     }
     let client = Client::new();
-    Ok(api::api_chat_fetch(&client).await)
+    if let Some(chat) = api::api_chat_fetch(&client).await {
+        let mut s = state.lock().unwrap();
+        s.chat_messages = chat.messages.clone();
+        let app_state = s.to_app_state(env!("CARGO_PKG_VERSION"));
+        drop(s);
+        let _ = app.emit("state-update", &app_state);
+        Ok(Some(chat))
+    } else {
+        Ok(None)
+    }
 }
 
 #[tauri::command]
 async fn chat_send(
     content: String,
     item_refs: Vec<String>,
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
 ) -> Result<Option<ChatSendResponse>, String> {
     if !api::is_logged_in() {
         return Ok(None);
     }
     let client = Client::new();
     match api::api_chat_send(&client, &content, &item_refs).await {
-        Some(msg) => Ok(Some(ChatSendResponse { message: msg })),
+        Some(msg) => {
+            let mut s = state.lock().unwrap();
+            if !s.chat_messages.iter().any(|m| m.id == msg.id) {
+                s.chat_messages.push(msg.clone());
+            }
+            let app_state = s.to_app_state(env!("CARGO_PKG_VERSION"));
+            drop(s);
+            let _ = app.emit("state-update", &app_state);
+            Ok(Some(ChatSendResponse { message: msg }))
+        }
         None => Ok(None),
     }
 }
@@ -407,6 +508,124 @@ struct InventoryResult {
     inventory: Inventory,
     currency: u32,
     equipped: Vec<String>,
+}
+
+// --- App cache (inventory, friends, chat, equipped) ---
+
+fn emit_state_update(app: &AppHandle) {
+    let shared = app.state::<SharedState>();
+    let app_state = {
+        let s = shared.lock().unwrap();
+        s.to_app_state(env!("CARGO_PKG_VERSION"))
+    };
+    let _ = app.emit("state-update", &app_state);
+}
+
+fn apply_inventory(s: &mut ManagedState, inventory: Inventory, currency: u32, equipped: Vec<String>) {
+    s.inventory = Some(inventory.clone());
+    s.inventory_currency = currency;
+    s.equipped = equipped;
+    storage::save_inventory_cache(&inventory, currency);
+    storage::save_equipped(&s.equipped);
+}
+
+fn notifications_include_item_grants(notifications: &[EventNotification]) -> bool {
+    notifications
+        .iter()
+        .any(|n| n.notification_type == "item_granted")
+}
+
+async fn refresh_inventory_cache(app: &AppHandle, client: &Client) {
+    if let Some((inventory, currency, equipped)) = api::api_fetch_inventory(client).await {
+        let shared = app.state::<SharedState>();
+        let mut s = shared.lock().unwrap();
+        apply_inventory(&mut s, inventory, currency, equipped);
+        drop(s);
+        emit_state_update(app);
+    }
+}
+
+async fn refresh_friends_cache(app: &AppHandle, client: &Client) {
+    if !api::is_logged_in() {
+        return;
+    }
+    let shared = app.state::<SharedState>();
+    let friend_codes = {
+        let s = shared.lock().unwrap();
+        s.herzie
+            .as_ref()
+            .map(|h| h.friend_codes.clone())
+            .unwrap_or_default()
+    };
+    let profiles = if friend_codes.is_empty() {
+        Some(HashMap::new())
+    } else {
+        api::api_lookup_herzies(client, &friend_codes).await
+    };
+    if let Some(profiles) = profiles {
+        let mut s = shared.lock().unwrap();
+        s.friends = profiles;
+        if let Some(ref herzie) = s.herzie {
+            storage::save_friends_cache(&herzie.friend_codes, &s.friends);
+        }
+        drop(s);
+        emit_state_update(app);
+    }
+}
+
+/// Fetch inventory, chat, and friends in parallel into AppState.
+async fn refresh_app_cache(app: &AppHandle, client: &Client) {
+    if !api::is_logged_in() {
+        return;
+    }
+    let shared = app.state::<SharedState>();
+    let friend_codes = {
+        let s = shared.lock().unwrap();
+        if s.herzie.is_none() {
+            return;
+        }
+        s.herzie
+            .as_ref()
+            .map(|h| h.friend_codes.clone())
+            .unwrap_or_default()
+    };
+
+    let friends_fut = async {
+        if friend_codes.is_empty() {
+            Some(HashMap::new())
+        } else {
+            api::api_lookup_herzies(client, &friend_codes).await
+        }
+    };
+
+    let (inv_result, chat_result, friends_result) = tokio::join!(
+        api::api_fetch_inventory(client),
+        api::api_chat_fetch(client),
+        friends_fut,
+    );
+
+    let mut changed = false;
+    {
+        let mut s = shared.lock().unwrap();
+        if let Some((inventory, currency, equipped)) = inv_result {
+            apply_inventory(&mut s, inventory, currency, equipped);
+            changed = true;
+        }
+        if let Some(chat) = chat_result {
+            s.chat_messages = chat.messages;
+            changed = true;
+        }
+        if let Some(friends) = friends_result {
+            s.friends = friends;
+            if let Some(ref herzie) = s.herzie {
+                storage::save_friends_cache(&herzie.friend_codes, &s.friends);
+            }
+            changed = true;
+        }
+    }
+    if changed {
+        emit_state_update(app);
+    }
 }
 
 // --- Background loops ---
@@ -635,8 +854,9 @@ async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
         s.last_sync_ok = sync_ok;
         s.pending_minutes = (s.pending_minutes - minutes_to_sync).max(0.0);
 
-        if let Some(ref mut herzie) = s.herzie {
+        let friend_codes_changed = if let Some(ref mut herzie) = s.herzie {
             let server = &sync_resp.herzie;
+            let changed = herzie.friend_codes != server.friend_codes;
             herzie.xp = server.xp;
             herzie.level = server.level;
             herzie.stage = server.stage;
@@ -647,13 +867,24 @@ async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
             herzie.streak_last_date = server.streak_last_date.clone();
             herzie.currency = server.currency;
             storage::save_herzie(herzie);
-        }
+            changed
+        } else {
+            false
+        };
 
         storage::save_multipliers(&sync_resp.multipliers);
 
         let app_state = s.to_app_state(env!("CARGO_PKG_VERSION"));
         drop(s);
         let _ = app.emit("state-update", &app_state);
+
+        if friend_codes_changed {
+            let app_clone = app.clone();
+            let client = client.clone();
+            tauri::async_runtime::spawn(async move {
+                refresh_friends_cache(&app_clone, &client).await;
+            });
+        }
 
         // Show notification for incoming trade requests — dedupe by trade ID
         // so we don't re-notify on every sync tick while the trade is pending.
@@ -690,6 +921,14 @@ async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
                 send_notification(app, &notif.title, &notif.message, notif.item_id.as_deref());
                 let _ = app.emit("activity", format!("{}: {}", notif.title, notif.message));
             }
+        }
+
+        if notifications_include_item_grants(&sync_resp.notifications) {
+            let app_clone = app.clone();
+            let client = client.clone();
+            tauri::async_runtime::spawn(async move {
+                refresh_inventory_cache(&app_clone, &client).await;
+            });
         }
     } else {
         let mut s = state.lock().unwrap();
@@ -773,6 +1012,7 @@ pub fn run() {
             trade_cancel,
             trade_poll,
             fetch_active_events,
+            fetch_previous_hunt,
             get_auth_config,
             chat_fetch,
             chat_send,
@@ -833,13 +1073,14 @@ pub fn run() {
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(sync_loop(app_handle));
 
-            // Initial poll + sync
+            // Initial poll + sync + home cache (equipped + chat)
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 let client = Client::new();
                 // Initial tick credits no listening minutes (no prior interval).
                 let _ = poll_tick(&app_handle, &client, 0).await;
                 let _ = sync_tick(&app_handle, &client).await;
+                refresh_app_cache(&app_handle, &client).await;
             });
 
             Ok(())

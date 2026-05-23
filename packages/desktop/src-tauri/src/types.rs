@@ -50,6 +50,8 @@ pub struct HerzieProfile {
     pub appearance: Option<HerzieAppearance>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_artists: Option<Vec<TopArtist>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub equipped: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -162,6 +164,12 @@ pub struct AppState {
     pub is_online: bool,
     pub is_connected: bool,
     pub version: String,
+    pub equipped: Vec<String>,
+    pub chat_messages: Vec<ChatMessage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inventory: Option<Inventory>,
+    pub inventory_currency: u32,
+    pub friends: HashMap<String, HerzieProfile>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

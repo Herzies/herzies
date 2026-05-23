@@ -31,16 +31,21 @@ function usernameColor(name: string): string {
 export function ChatPanel({
   activityLog,
   isOnline,
+  messages,
+  inventory: cachedInventory,
 }: {
   activityLog: { time: string; message: string }[];
   isOnline: boolean;
+  messages: ChatMessage[];
+  inventory: Inventory | null;
 }) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [itemRefs, setItemRefs] = useState<string[]>([]);
   const [cooldown, setCooldown] = useState(false);
   const [inspectItem, setInspectItem] = useState<string | null>(null);
-  const [inventory, setInventory] = useState<Inventory | null>(null);
+  const [inventory, setInventory] = useState<Inventory | null>(
+    cachedInventory,
+  );
   const [showAutocomplete, setShowAutocomplete] = useState(false);
   const [autocompleteFilter, setAutocompleteFilter] = useState("");
   const [autocompleteIndex, setAutocompleteIndex] = useState(0);
@@ -48,13 +53,6 @@ export function ChatPanel({
   const inputRef = useRef<HTMLInputElement>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
   const atPosRef = useRef<number>(-1);
-
-  useEffect(() => {
-    if (!isOnline) return;
-    herzies.chatFetch().then((data) => {
-      if (data) setMessages(data.messages);
-    });
-  }, [isOnline]);
 
   useEffect(() => {
     if (!isOnline) return;
@@ -75,9 +73,7 @@ export function ChatPanel({
           (payload: any) => {
             const newId = payload.new?.id;
             if (!newId) return;
-            herzies.chatFetch().then((data) => {
-              if (data) setMessages(data.messages);
-            });
+            herzies.chatFetch();
           },
         )
         .subscribe((status, err) => {
@@ -104,11 +100,8 @@ export function ChatPanel({
   }, [isOnline]);
 
   useEffect(() => {
-    if (!isOnline) return;
-    herzies.fetchInventory().then((data) => {
-      if (data) setInventory(data.inventory);
-    });
-  }, [isOnline]);
+    setInventory(cachedInventory);
+  }, [cachedInventory]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -125,13 +118,7 @@ export function ChatPanel({
     setCooldown(true);
     setTimeout(() => setCooldown(false), 1500);
 
-    const result = await herzies.chatSend(content, refs);
-    if (result) {
-      setMessages((prev) => {
-        if (prev.some((m) => m.id === result.message.id)) return prev;
-        return [...prev, result.message];
-      });
-    }
+    await herzies.chatSend(content, refs);
   };
 
   const autocompleteItems = inventory

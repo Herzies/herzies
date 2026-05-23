@@ -8,11 +8,15 @@ export function TradeView({
   herzie,
   initialTarget,
   initialTradeId,
+  inventory: cachedInventory,
+  currency: cachedCurrency,
   onClose,
 }: {
   herzie: Herzie;
   initialTarget?: string | null;
   initialTradeId?: string | null;
+  inventory: Inventory | null;
+  currency: number;
   onClose: () => void;
 }) {
   const [targetCode, setTargetCode] = useState(initialTarget ?? "");
@@ -21,12 +25,17 @@ export function TradeView({
   const [message, setMessage] = useState("");
   const creatingRef = useRef(false);
   const joiningRef = useRef(false);
-  const [inventory, setInventory] = useState<Inventory | null>(null);
+  const [inventory, setInventory] = useState<Inventory | null>(cachedInventory);
   const [offerItems, setOfferItems] = useState<Record<string, number>>({});
   const [offerCurrency, setOfferCurrency] = useState(0);
-  const [currency, setCurrency] = useState(herzie.currency);
+  const [currency, setCurrency] = useState(cachedCurrency || herzie.currency);
   const lastSentOfferRef = useRef<string | null>(null);
   const focused = useWindowFocused();
+
+  useEffect(() => {
+    setInventory(cachedInventory);
+    setCurrency(cachedCurrency || herzie.currency);
+  }, [cachedInventory, cachedCurrency, herzie.currency]);
 
   useEffect(() => {
     herzies.fetchInventory().then((data) => {

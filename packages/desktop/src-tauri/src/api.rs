@@ -298,13 +298,52 @@ pub async fn api_remove_friend(client: &Client, my_code: &str, their_code: &str)
     }
 }
 
+#[cfg(test)]
+mod lookup_tests {
+    use crate::types::HerzieProfile;
+
+    #[test]
+    fn herzie_profile_parses_top_artists_from_lookup_json() {
+        let sample = serde_json::json!({
+            "name": "Mafacka",
+            "friendCode": "HERZ-ABCD",
+            "stage": 1,
+            "level": 5,
+            "currency": 100,
+            "appearance": {
+                "headIndex": 0,
+                "eyesIndex": 0,
+                "mouthIndex": 0,
+                "accessoryIndex": 0,
+                "limbsIndex": 0,
+                "bodyIndex": 0,
+                "legsIndex": 0,
+                "colorScheme": "cyan"
+            },
+            "topArtists": [
+                { "name": "James Prophet", "plays": 9 },
+                { "name": "The Soul of Philly", "plays": 7 }
+            ],
+            "equipped": ["headphones"]
+        });
+        let profile: HerzieProfile = serde_json::from_value(sample).expect("parse profile");
+        let artists = profile.top_artists.expect("top artists");
+        assert_eq!(artists.len(), 2);
+        assert_eq!(artists[0].name, "James Prophet");
+        assert_eq!(artists[0].plays, 9);
+        assert_eq!(
+            profile.equipped.as_deref(),
+            Some(["headphones".to_string()].as_slice())
+        );
+    }
+}
+
 pub async fn api_lookup_herzies(
     client: &Client,
     codes: &[String],
-) -> HashMap<String, HerzieProfile> {
-    let mut result = HashMap::new();
+) -> Option<HashMap<String, HerzieProfile>> {
     if codes.is_empty() {
-        return result;
+        return Some(HashMap::new());
     }
     let codes_str = codes.join(",");
     let url = format!(
@@ -312,19 +351,21 @@ pub async fn api_lookup_herzies(
         api_base(),
         urlencoding::encode(&codes_str)
     );
-    if let Ok(resp) = client.get(&url).send().await {
-        mark_reachable();
-        if let Ok(data) = resp.json::<serde_json::Value>().await {
-            if let Some(herzies) = data["herzies"].as_array() {
-                for h in herzies {
-                    if let Ok(profile) = serde_json::from_value::<HerzieProfile>(h.clone()) {
-                        result.insert(profile.friend_code.clone(), profile);
-                    }
-                }
+    let resp = client.get(&url).send().await.ok()?;
+    mark_reachable();
+    if !resp.status().is_success() {
+        return None;
+    }
+    let data = resp.json::<serde_json::Value>().await.ok()?;
+    let mut result = HashMap::new();
+    if let Some(herzies) = data["herzies"].as_array() {
+        for h in herzies {
+            if let Ok(profile) = serde_json::from_value::<HerzieProfile>(h.clone()) {
+                result.insert(profile.friend_code.clone(), profile);
             }
         }
     }
-    result
+    Some(result)
 }
 
 pub async fn api_fetch_inventory(client: &Client) -> Option<(Inventory, u32, Vec<String>)> {
@@ -438,6 +479,16 @@ pub async fn api_fetch_active_events(client: &Client) -> Option<Vec<GameEvent>> 
     }
     let data: ActiveEventsResponse = resp.json().await.ok()?;
     Some(data.events)
+}
+
+pub async fn api_fetch_previous_hunt(client: &Client) -> Option<Vec<GameEvent>> {
+    let resp = api_fetch(client, reqwest::Method::GET, "/events/previous-hunt", None).await?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let data: serde_json::Value = resp.json().await.ok()?;
+    let events: Vec<GameEvent> = serde_json::from_value(data["events"].clone()).unwrap_or_default();
+    Some(events)
 }
 
 pub async fn api_poll_trade(client: &Client, trade_id: &str) -> Option<Trade> {

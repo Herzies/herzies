@@ -190,5 +190,11 @@ async fn do_login(app: &AppHandle, web_url: &str, port: u16) -> bool {
         let _ = app.emit("state-update", &app_state);
     }
 
+    let app_clone = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let client = reqwest::Client::new();
+        crate::refresh_app_cache(&app_clone, &client).await;
+    });
+
     true
 }

@@ -1,7 +1,6 @@
 import { levelProgress, xpToNextLevel } from "@herzies/shared";
-import { useEffect, useState } from "react";
 import { cn } from "../lib/utils";
-import { type AppState, herzies } from "../tauri-bridge";
+import { type AppState } from "../tauri-bridge";
 import { Herzie3D } from "./Herzie3D";
 
 export function HomeView({
@@ -11,14 +10,7 @@ export function HomeView({
   state: AppState;
   stageOverride?: number | null;
 }) {
-  const { herzie, nowPlaying, multipliers, isConnected } = state;
-  const [equipped, setEquipped] = useState<string[]>([]);
-
-  useEffect(() => {
-    herzies.fetchInventory().then((data) => {
-      if (data) setEquipped(data.equipped ?? []);
-    });
-  }, []);
+  const { herzie, nowPlaying, multipliers, isConnected, equipped } = state;
 
   if (!herzie) return null;
 
@@ -86,7 +78,8 @@ export function HomeView({
           <span className="text-yellow">${herzie.currency}</span>
         </span>
         <span>
-          <span className="text-cyan">{herzie.friendCodes.length}</span> friends
+          <span className="text-green">{herzie.friendCodes.length}</span>{" "}
+          friends
         </span>
         {herzie.streakDays > 0 && (
           <span>

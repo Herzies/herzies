@@ -5,11 +5,12 @@ import {
   ItemDisplay,
   RARITY_LABELS,
 } from "@herzies/shared";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { cn } from "../lib/utils";
 import { herzies } from "../tauri-bridge";
 import { BackButton } from "./BackButton";
 import { NumberTicker } from "./NumberTicker";
+import { View } from "./View";
 
 function SellControls({
   itemId,
@@ -35,11 +36,19 @@ function SellControls({
           max={qty}
           onChange={setSellAmount}
         />
-        <button className="btn" onClick={() => onSell(itemId, clamped)}>
+        <button
+          type="button"
+          className="btn"
+          onClick={() => onSell(itemId, clamped)}
+        >
           Sell (${clamped * price})
         </button>
         {qty > 1 && (
-          <button className="btn" onClick={() => onSell(itemId, qty)}>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => onSell(itemId, qty)}
+          >
             Sell All ({qty})
           </button>
         )}
@@ -52,32 +61,46 @@ export function InventoryView({
   herzie,
   initialItem,
   onLog,
+  inventory: cachedInventory,
+  currency: cachedCurrency,
+  equipped: cachedEquipped,
 }: {
   herzie: Herzie;
   initialItem?: string | null;
   onLog?: (msg: string) => void;
+  inventory: Inventory | null;
+  currency: number;
+  equipped: string[];
 }) {
-  const [inventory, setInventory] = useState<Inventory | null>(null);
-  const [currency, setCurrency] = useState(herzie.currency);
-  const [equipped, setEquipped] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [inventory, setInventory] = useState<Inventory | null>(
+    cachedInventory,
+  );
+  const [currency, setCurrency] = useState(cachedCurrency || herzie.currency);
+  const [equipped, setEquipped] = useState(cachedEquipped);
   const [selectedItem, setSelectedItem] = useState<string | null>(
     initialItem ?? null,
   );
 
-  const load = useCallback(async () => {
-    const data = await herzies.fetchInventory();
-    if (data) {
-      setInventory(data.inventory);
-      setCurrency(data.currency);
-      setEquipped(data.equipped ?? []);
-    }
-    setLoading(false);
-  }, []);
+  useEffect(() => {
+    setInventory(cachedInventory);
+    setCurrency(cachedCurrency || herzie.currency);
+    setEquipped(cachedEquipped);
+  }, [cachedInventory, cachedCurrency, cachedEquipped, herzie.currency]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    if (initialItem) setSelectedItem(initialItem);
+  }, [initialItem]);
+
+  // Stale-while-revalidate once on mount (view stays mounted when hidden).
+  useEffect(() => {
+    herzies.fetchInventory().then((data) => {
+      if (data) {
+        setInventory(data.inventory);
+        setCurrency(data.currency);
+        setEquipped(data.equipped ?? []);
+      }
+    });
+  }, []);
 
   const handleSell = async (itemId: string, qty: number) => {
     const result = await herzies.sellItem(itemId, qty);
@@ -121,6 +144,7 @@ export function InventoryView({
         })
     : [];
   const selected = selectedItem ? getItem(selectedItem) : null;
+  const loading = inventory === null;
 
   if (selected && selectedItem) {
     const qty = inventory?.[selectedItem] ?? 0;
@@ -148,6 +172,7 @@ export function InventoryView({
 
         {selected.equipable && (
           <button
+            type="button"
             className={cn(
               "btn mb-2 self-start",
               equipped.includes(selectedItem) ? "text-red" : "text-green",
@@ -170,52 +195,62 @@ export function InventoryView({
     );
   }
 
-  return (
-    <div className="flex h-full flex-col">
-      <div className="mb-2 flex items-center justify-between">
-        <div className="text-ui-lg font-bold text-yellow">Inventory</div>
-        <div className="text-ui text-yellow">${currency}</div>
-      </div>
-
-      {loading ? (
+  if (loading) {
+    return (
+      <View title="Inventory" colour="yellow">
         <div className="pt-5 text-center text-ui text-text-dim">Loading...</div>
-      ) : items.length === 0 ? (
+      </View>
+    );
+  }
+
+  if (items.length === 0) {
+    return (
+      <View title="Inventory" colour="yellow">
         <div className="pt-5 text-center text-ui text-text-dim">
           No items yet. Keep listening to earn drops!
         </div>
-      ) : (
-        <div className="min-h-0 flex-1 overflow-auto">
-          {items.map(([itemId, qty]) => {
-            const def = getItem(itemId);
-            const name = def?.name ?? itemId;
-            const rarity = def?.rarity ?? "common";
-            return (
-              <div
-                key={itemId}
-                onClick={() => setSelectedItem(itemId)}
-                className="flex cursor-pointer items-center justify-between border-b border-[#222] py-1.5"
-              >
-                <div>
-                  <div
-                    className="text-ui"
-                    style={{ color: ITEM_RARITY_COLORS[rarity] }}
-                  >
-                    {name}
-                  </div>
-                  <div className="text-[10px] text-text-dim">
-                    x{qty}
-                    {def?.sellPrice ? ` · $${def.sellPrice} each` : ""}
-                    {equipped.includes(itemId) && (
-                      <span className="ml-1 text-green">[equipped]</span>
-                    )}
-                  </div>
+      </View>
+    );
+  }
+
+  return (
+    <View
+      title="Inventory"
+      colour="yellow"
+      action={<div className="text-ui text-yellow">${currency}</div>}
+    >
+      <div className="min-h-0 flex-1 overflow-auto">
+        {items.map(([itemId, qty]) => {
+          const def = getItem(itemId);
+          const name = def?.name ?? itemId;
+          const rarity = def?.rarity ?? "common";
+          return (
+            <button
+              type="button"
+              key={itemId}
+              onClick={() => setSelectedItem(itemId)}
+              className="w-full text-left flex cursor-pointer items-center justify-between border-b border-[#222] py-1.5"
+            >
+              <div>
+                <div
+                  className="text-ui"
+                  style={{ color: ITEM_RARITY_COLORS[rarity] }}
+                >
+                  {name}
                 </div>
-                <span className="text-ui text-text-dim">→</span>
+                <div className="text-[10px] text-text-dim">
+                  x{qty}
+                  {def?.sellPrice ? ` · $${def.sellPrice} each` : ""}
+                  {equipped.includes(itemId) && (
+                    <span className="ml-1 text-green">[equipped]</span>
+                  )}
+                </div>
               </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
+              <span className="text-ui text-text-dim">→</span>
+            </button>
+          );
+        })}
+      </div>
+    </View>
   );
 }

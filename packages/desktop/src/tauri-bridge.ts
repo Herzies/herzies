@@ -29,6 +29,11 @@ export interface AppState {
   isOnline: boolean;
   isConnected: boolean;
   version: string;
+  equipped: string[];
+  chatMessages: ChatMessage[];
+  inventory: Inventory | null;
+  inventoryCurrency: number;
+  friends: Record<string, HerzieProfile>;
 }
 
 export const herzies = {
@@ -88,6 +93,9 @@ export const herzies = {
 
   fetchActiveEvents: () =>
     invoke<{ events: GameEvent[] }>("fetch_active_events"),
+
+  fetchPreviousHunt: () =>
+    invoke<{ events: GameEvent[] }>("fetch_previous_hunt"),
 
   getAuthConfig: () =>
     invoke<{

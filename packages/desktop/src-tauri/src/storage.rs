@@ -1,7 +1,23 @@
-use crate::types::{ActiveMultiplier, Herzie, SessionData};
+use crate::types::{ActiveMultiplier, Herzie, HerzieProfile, SessionData};
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 use std::collections::HashMap;
+
+pub type Inventory = HashMap<String, u32>;
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct InventoryCacheFile {
+    inventory: Inventory,
+    currency: u32,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FriendsCacheFile {
+    friend_codes: Vec<String>,
+    profiles: HashMap<String, HerzieProfile>,
+}
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
@@ -192,4 +208,96 @@ pub fn save_multipliers(multipliers: &[ActiveMultiplier]) {
     let path = config_dir().join("multipliers.json");
     let data = serde_json::to_string(multipliers).unwrap();
     write_secure(&path, &data);
+}
+
+pub fn load_equipped() -> Vec<String> {
+    let path = config_dir().join("equipped.json");
+    if !path.exists() {
+        return Vec::new();
+    }
+    let raw = fs::read_to_string(&path).ok();
+    raw.and_then(|r| serde_json::from_str(&r).ok())
+        .unwrap_or_default()
+}
+
+pub fn save_equipped(equipped: &[String]) {
+    ensure_dir();
+    let path = config_dir().join("equipped.json");
+    let data = serde_json::to_string(equipped).unwrap();
+    write_secure(&path, &data);
+}
+
+pub fn clear_equipped() {
+    ensure_dir();
+    let path = config_dir().join("equipped.json");
+    if path.exists() {
+        fs::remove_file(&path).ok();
+    }
+}
+
+pub fn load_inventory_cache() -> Option<(Inventory, u32)> {
+    let path = config_dir().join("inventory_cache.json");
+    if !path.exists() {
+        return None;
+    }
+    let raw = fs::read_to_string(&path).ok()?;
+    let file: InventoryCacheFile = serde_json::from_str(&raw).ok()?;
+    Some((file.inventory, file.currency))
+}
+
+pub fn save_inventory_cache(inventory: &Inventory, currency: u32) {
+    ensure_dir();
+    let path = config_dir().join("inventory_cache.json");
+    let file = InventoryCacheFile {
+        inventory: inventory.clone(),
+        currency,
+    };
+    let data = serde_json::to_string(&file).unwrap();
+    write_secure(&path, &data);
+}
+
+pub fn clear_inventory_cache() {
+    ensure_dir();
+    let path = config_dir().join("inventory_cache.json");
+    if path.exists() {
+        fs::remove_file(&path).ok();
+    }
+}
+
+pub fn load_friends_cache(current_codes: &[String]) -> HashMap<String, HerzieProfile> {
+    let path = config_dir().join("friends_cache.json");
+    if !path.exists() {
+        return HashMap::new();
+    }
+    let raw = match fs::read_to_string(&path) {
+        Ok(r) => r,
+        Err(_) => return HashMap::new(),
+    };
+    let file: FriendsCacheFile = match serde_json::from_str(&raw) {
+        Ok(f) => f,
+        Err(_) => return HashMap::new(),
+    };
+    if file.friend_codes != current_codes {
+        return HashMap::new();
+    }
+    file.profiles
+}
+
+pub fn save_friends_cache(friend_codes: &[String], profiles: &HashMap<String, HerzieProfile>) {
+    ensure_dir();
+    let path = config_dir().join("friends_cache.json");
+    let file = FriendsCacheFile {
+        friend_codes: friend_codes.to_vec(),
+        profiles: profiles.clone(),
+    };
+    let data = serde_json::to_string(&file).unwrap();
+    write_secure(&path, &data);
+}
+
+pub fn clear_friends_cache() {
+    ensure_dir();
+    let path = config_dir().join("friends_cache.json");
+    if path.exists() {
+        fs::remove_file(&path).ok();
+    }
 }

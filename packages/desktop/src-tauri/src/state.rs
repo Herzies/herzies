@@ -1,4 +1,5 @@
 use crate::types::*;
+use std::collections::HashMap;
 use std::sync::Mutex;
 
 pub struct ManagedState {
@@ -11,17 +12,50 @@ pub struct ManagedState {
     /// successful traffic on other endpoints (chat, inventory, …) instantly
     /// recovers the indicator without waiting for the next sync tick.
     pub last_sync_ok: bool,
+    /// Cached wearables for the home 3D view (persisted locally, refreshed from API).
+    pub equipped: Vec<String>,
+    /// Latest chat messages for the home feed (refreshed from API).
+    pub chat_messages: Vec<ChatMessage>,
+    /// Cached inventory (`None` until first successful fetch).
+    pub inventory: Option<Inventory>,
+    pub inventory_currency: u32,
+    /// Friend profiles keyed by friend code (persisted when codes match).
+    pub friends: HashMap<String, HerzieProfile>,
 }
 
 impl ManagedState {
     pub fn new(herzie: Option<Herzie>) -> Self {
+        let friend_codes: Vec<String> = herzie
+            .as_ref()
+            .map(|h| h.friend_codes.clone())
+            .unwrap_or_default();
+        let (inventory, inventory_currency) = match crate::storage::load_inventory_cache() {
+            Some((inv, cur)) => (Some(inv), cur),
+            None => (None, 0),
+        };
         Self {
             herzie,
             pending_minutes: 0.0,
             current_now_playing: None,
             current_genres: Vec::new(),
             last_sync_ok: true,
+            equipped: crate::storage::load_equipped(),
+            chat_messages: Vec::new(),
+            inventory,
+            inventory_currency,
+            friends: crate::storage::load_friends_cache(&friend_codes),
         }
+    }
+
+    pub fn clear_app_cache(&mut self) {
+        self.equipped.clear();
+        self.chat_messages.clear();
+        self.inventory = None;
+        self.inventory_currency = 0;
+        self.friends.clear();
+        crate::storage::clear_equipped();
+        crate::storage::clear_inventory_cache();
+        crate::storage::clear_friends_cache();
     }
 
     pub fn to_app_state(&self, version: &str) -> AppState {
@@ -37,6 +71,11 @@ impl ManagedState {
                 crate::api::ms_since_reachable(),
             ),
             version: version.to_string(),
+            equipped: self.equipped.clone(),
+            chat_messages: self.chat_messages.clone(),
+            inventory: self.inventory.clone(),
+            inventory_currency: self.inventory_currency,
+            friends: self.friends.clone(),
         }
     }
 }
