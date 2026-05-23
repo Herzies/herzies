@@ -24,7 +24,7 @@ export async function GET(request: Request) {
 	if (singleCode) {
 		const { data, error } = await admin
 			.from("herzies")
-			.select("user_id, name, friend_code, stage, level, currency, appearance")
+			.select("user_id, name, friend_code, stage, level, currency, appearance, equipped")
 			.eq("friend_code", singleCode.toUpperCase().trim())
 			.single();
 
@@ -43,6 +43,7 @@ export async function GET(request: Request) {
 				currency: data.currency,
 				appearance: data.appearance,
 				topArtists,
+				equipped: data.equipped,
 			},
 		});
 	}
@@ -59,60 +60,55 @@ export async function GET(request: Request) {
 
 	const { data, error } = await admin
 		.from("herzies")
-		.select("user_id, name, friend_code, stage, level, currency, appearance")
+		.select("user_id, name, friend_code, stage, level, currency, appearance, equipped")
 		.in("friend_code", codes);
 
 	if (error || !data) {
 		return NextResponse.json({ herzies: [] });
 	}
 
-	const userIds = data.map((row) => row.user_id);
-	const { data: allPlays } = await admin
-		.from("listen_log")
-		.select("user_id, artist_name")
-		.in("user_id", userIds);
+	const herzies = await Promise.all(
+		data.map(async (row) => ({
+			name: row.name,
+			friendCode: row.friend_code,
+			stage: row.stage,
+			level: row.level,
+			currency: row.currency,
+			appearance: row.appearance,
+			equipped: row.equipped,
+			topArtists: await getTopArtists(admin, row.user_id),
+		})),
+	);
 
-	const artistsByUser: Record<string, Record<string, number>> = {};
-	for (const row of allPlays ?? []) {
-		if (!artistsByUser[row.user_id]) artistsByUser[row.user_id] = {};
-		artistsByUser[row.user_id][row.artist_name] =
-			(artistsByUser[row.user_id][row.artist_name] ?? 0) + 1;
-	}
-
-	return NextResponse.json({
-		herzies: data.map((row) => {
-			const counts = artistsByUser[row.user_id] ?? {};
-			const topArtists = Object.entries(counts)
-				.sort((a, b) => b[1] - a[1])
-				.slice(0, 3)
-				.map(([name, plays]) => ({ name, plays }));
-
-			return {
-				name: row.name,
-				friendCode: row.friend_code,
-				stage: row.stage,
-				level: row.level,
-				currency: row.currency,
-				appearance: row.appearance,
-				topArtists,
-			};
-		}),
-	});
+	return NextResponse.json({ herzies });
 }
+
+const LISTEN_LOG_PAGE_SIZE = 1000;
 
 async function getTopArtists(
 	admin: ReturnType<typeof createAdminClient>,
 	userId: string,
 ): Promise<{ name: string; plays: number }[]> {
-	const { data: allPlays } = await admin
-		.from("listen_log")
-		.select("artist_name")
-		.eq("user_id", userId);
-
 	const counts: Record<string, number> = {};
-	for (const row of allPlays ?? []) {
-		counts[row.artist_name] = (counts[row.artist_name] ?? 0) + 1;
+	let from = 0;
+
+	while (true) {
+		const { data: page } = await admin
+			.from("listen_log")
+			.select("artist_name")
+			.eq("user_id", userId)
+			.range(from, from + LISTEN_LOG_PAGE_SIZE - 1);
+
+		if (!page?.length) break;
+
+		for (const row of page) {
+			counts[row.artist_name] = (counts[row.artist_name] ?? 0) + 1;
+		}
+
+		if (page.length < LISTEN_LOG_PAGE_SIZE) break;
+		from += LISTEN_LOG_PAGE_SIZE;
 	}
+
 	return Object.entries(counts)
 		.sort((a, b) => b[1] - a[1])
 		.slice(0, 3)
