@@ -24,7 +24,13 @@ export interface ChatMessage {
 
 export interface AppState {
   herzie: Herzie | null;
-  nowPlaying: { title: string; artist: string } | null;
+  nowPlaying: {
+    title: string;
+    artist: string;
+    albumArtUrl?: string;
+    vibe?: string;
+    tags?: string[];
+  } | null;
   multipliers: ActiveMultiplier[] | null;
   isOnline: boolean;
   isConnected: boolean;

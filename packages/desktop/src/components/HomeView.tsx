@@ -1,6 +1,6 @@
 import { levelProgress, xpToNextLevel } from "@herzies/shared";
 import { cn } from "../lib/utils";
-import { type AppState } from "../tauri-bridge";
+import type { AppState } from "../tauri-bridge";
 import { Herzie3D } from "./Herzie3D";
 
 export function HomeView({
@@ -105,12 +105,39 @@ export function HomeView({
 
       {nowPlaying ? (
         <div className="border-t border-border pt-1.5">
-          <div className="mb-px text-ui-sm text-text-dim">♫ Now Playing</div>
-          <div className="truncate text-ui font-bold text-text">
-            {nowPlaying.title}
-          </div>
-          <div className="truncate text-[10px] text-text-dim">
-            {nowPlaying.artist}
+          <div className="flex gap-2">
+            <div className="h-12 w-12 shrink-0 overflow-hidden rounded bg-[#333]">
+              {nowPlaying.albumArtUrl ? (
+                <img
+                  src={nowPlaying.albumArtUrl}
+                  alt=""
+                  className="h-full w-full object-cover"
+                  onError={(e) => {
+                    e.currentTarget.style.display = "none";
+                  }}
+                />
+              ) : null}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="line-clamp-1 text-ui font-bold text-text">
+                {nowPlaying.title}
+              </div>
+              <div className="line-clamp-1 text-[10px] text-text-dim">
+                {nowPlaying.artist}
+              </div>
+              {nowPlaying.tags && nowPlaying.tags.length > 0 ? (
+                <div className="mt-0.5 flex flex-wrap gap-1">
+                  {nowPlaying.tags.map((tag) => (
+                    <span
+                      key={tag}
+                      className="rounded-full bg-purple/15 px-1.5 py-px text-[9px] lowercase text-purple"
+                    >
+                      {tag.toLowerCase()}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </div>
           </div>
         </div>
       ) : (

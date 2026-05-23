@@ -1,12 +1,20 @@
+use crate::lastfm::TrackEnrichment;
 use crate::types::*;
 use std::collections::HashMap;
 use std::sync::Mutex;
+use std::time::Instant;
 
 pub struct ManagedState {
     pub herzie: Option<Herzie>,
     pub pending_minutes: f64,
     pub current_now_playing: Option<NowPlayingDisplay>,
     pub current_genres: Vec<String>,
+    /// Genre from Apple Music (empty for Spotify).
+    pub current_local_genre: Option<String>,
+    pub last_track_key: Option<String>,
+    pub enrichment: Option<TrackEnrichment>,
+    pub enrichment_requested_at: Option<Instant>,
+    pub enrichment_in_flight: bool,
     /// Last known result of a `/sync` round-trip. The frontend's connectivity
     /// indicator is derived from this *plus* `ms_since_reachable` so that
     /// successful traffic on other endpoints (chat, inventory, …) instantly
@@ -38,6 +46,11 @@ impl ManagedState {
             pending_minutes: 0.0,
             current_now_playing: None,
             current_genres: Vec::new(),
+            current_local_genre: None,
+            last_track_key: None,
+            enrichment: None,
+            enrichment_requested_at: None,
+            enrichment_in_flight: false,
             last_sync_ok: true,
             equipped: crate::storage::load_equipped(),
             chat_messages: Vec::new(),

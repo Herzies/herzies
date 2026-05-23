@@ -2,17 +2,19 @@ mod api;
 mod auth;
 mod game;
 mod hatch;
+mod lastfm;
 mod nowplaying;
 mod state;
 mod storage;
 mod tray;
 mod types;
 
+use lastfm::{LastFmService, TrackEnrichment, ENRICHMENT_TIMEOUT};
 use reqwest::Client;
 use state::{ManagedState, SharedState};
 use std::collections::HashMap;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_autostart::MacosLauncher;
 use types::*;
@@ -646,8 +648,99 @@ async fn poll_loop(app: AppHandle) {
     }
 }
 
+fn display_tags(
+    enrichment: Option<&TrackEnrichment>,
+    local_genre: Option<&str>,
+    current_genres: &[String],
+) -> Option<Vec<String>> {
+    let source: &[String] = if let Some(e) = enrichment {
+        if !e.tags.is_empty() {
+            &e.tags
+        } else if !current_genres.is_empty() {
+            current_genres
+        } else {
+            return local_genre
+                .filter(|s| !s.is_empty())
+                .map(|g| vec![g.to_string()]);
+        }
+    } else if !current_genres.is_empty() {
+        current_genres
+    } else {
+        return local_genre
+            .filter(|s| !s.is_empty())
+            .map(|g| vec![g.to_string()]);
+    };
+    let tags: Vec<String> = source.iter().take(3).cloned().collect();
+    if tags.is_empty() {
+        None
+    } else {
+        Some(tags)
+    }
+}
+
+fn build_now_playing_display(
+    title: &str,
+    artist: &str,
+    enrichment: Option<&TrackEnrichment>,
+    local_genre: Option<&str>,
+    current_genres: &[String],
+) -> NowPlayingDisplay {
+    NowPlayingDisplay {
+        title: title.to_string(),
+        artist: artist.to_string(),
+        album_art_url: enrichment.and_then(|e| e.album_art_url.clone()),
+        vibe: enrichment.and_then(|e| e.vibe.clone()),
+        tags: display_tags(enrichment, local_genre, current_genres),
+    }
+}
+
+fn apply_enrichment(app: &AppHandle, track_key: &str, enrichment: Option<TrackEnrichment>) {
+    let state = app.state::<SharedState>();
+    let app_state = {
+        let mut s = state.lock().unwrap();
+        if s.last_track_key.as_deref() != Some(track_key) {
+            return;
+        }
+        s.enrichment_in_flight = false;
+        s.enrichment = enrichment;
+        if s.current_local_genre.is_none() {
+            if let Some(ref e) = s.enrichment {
+                if !e.tags.is_empty() {
+                    s.current_genres = e.tags.clone();
+                } else {
+                    s.current_genres = vec!["pop".to_string()];
+                }
+            }
+        }
+        let tags = display_tags(
+            s.enrichment.as_ref(),
+            s.current_local_genre.as_deref(),
+            &s.current_genres,
+        );
+        let art = s.enrichment.as_ref().and_then(|e| e.album_art_url.clone());
+        let vibe = s.enrichment.as_ref().and_then(|e| e.vibe.clone());
+        if let Some(ref mut np) = s.current_now_playing {
+            np.album_art_url = art;
+            np.vibe = vibe;
+            np.tags = tags;
+        }
+        s.to_app_state(env!("CARGO_PKG_VERSION"))
+    };
+    let _ = app.emit("state-update", &app_state);
+}
+
+fn spawn_track_enrichment(app: &AppHandle, artist: String, title: String, track_key: String) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let service = app.state::<LastFmService>();
+        let enrichment = service.fetch_track(&artist, &title).await;
+        apply_enrichment(&app, &track_key, enrichment);
+    });
+}
+
 async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: u64) -> Result<(), String> {
     let state = app.state::<SharedState>();
+    let lastfm = app.state::<LastFmService>();
 
     let has_herzie = {
         let s = state.lock().unwrap();
@@ -663,6 +756,7 @@ async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: u64) -> Resu
     // Collect notification info to send after releasing the lock
     let mut notify_level_up: Option<(String, u32)> = None;
     let mut notify_evolved: Option<(String, u32)> = None;
+    let mut spawn_enrichment: Option<(String, String, String)> = None;
 
     {
         let mut s = state.lock().unwrap();
@@ -672,66 +766,112 @@ async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: u64) -> Resu
 
         match np {
             Some(ref info) if info.is_playing && !info.title.is_empty() && info.volume > 0 => {
-                let np_display = NowPlayingDisplay {
-                    title: info.title.clone(),
-                    artist: info.artist.clone(),
-                };
-                let genres = if info.genre.is_empty() {
-                    vec![]
-                } else {
-                    vec![info.genre.clone()]
-                };
+                let key = lastfm::track_key(&info.artist, &info.title);
+                let track_changed = s.last_track_key.as_deref() != Some(key.as_str());
+
+                if track_changed {
+                    s.last_track_key = Some(key.clone());
+                    s.enrichment = None;
+                    s.enrichment_requested_at = Some(Instant::now());
+                    s.enrichment_in_flight = false;
+                    s.current_local_genre = if info.genre.is_empty() {
+                        None
+                    } else {
+                        Some(info.genre.clone())
+                    };
+                    s.current_genres = if info.genre.is_empty() {
+                        vec![]
+                    } else {
+                        vec![info.genre.clone()]
+                    };
+
+                    if lastfm.has_api_key() {
+                        s.enrichment_in_flight = true;
+                        spawn_enrichment = Some((
+                            info.artist.clone(),
+                            info.title.clone(),
+                            key.clone(),
+                        ));
+                    }
+                }
+
+                let timed_out = s
+                    .enrichment_requested_at
+                    .map(|t| t.elapsed() > ENRICHMENT_TIMEOUT)
+                    .unwrap_or(false);
+
+                let local_genre = s.current_local_genre.as_deref();
+                let genre_list = lastfm::resolve_listen_genres(
+                    local_genre,
+                    s.enrichment.as_ref(),
+                    timed_out,
+                    s.enrichment_in_flight,
+                );
 
                 let minutes = elapsed_secs as f64 / 60.0;
                 if minutes > 0.01 {
                     s.pending_minutes += minutes;
 
-                    let genre_list = if info.genre.is_empty() {
-                        vec![]
-                    } else {
-                        vec![info.genre.clone()]
-                    };
-                    let classified = if !genre_list.is_empty() {
-                        game::classify_genre(&genre_list)
-                    } else {
-                        game::classify_genre(&["pop".to_string()])
-                    };
+                    if let Some(ref genres) = genre_list {
+                        let classified = game::classify_genre(genres);
 
-                    // Work with herzie directly
-                    let herzie = s.herzie.as_mut().unwrap();
-                    let craving = game::get_daily_craving(&herzie.id, None);
-                    let is_craving =
-                        !genre_list.is_empty() && game::matches_craving(&genre_list, &craving);
+                        let herzie = s.herzie.as_mut().unwrap();
+                        let craving = game::get_daily_craving(&herzie.id, None);
+                        let is_craving =
+                            !genres.is_empty() && game::matches_craving(genres, &craving);
 
-                    let xp = game::calculate_xp_gain(
-                        minutes,
-                        herzie.friend_codes.len(),
-                        is_craving,
-                        &[],
-                    );
-                    let events = game::apply_xp(herzie, xp);
-                    herzie.total_minutes_listened += minutes;
-                    game::record_genre_minutes(&mut herzie.genre_minutes, &classified, minutes);
-                    storage::save_herzie(herzie);
+                        let xp = game::calculate_xp_gain(
+                            minutes,
+                            herzie.friend_codes.len(),
+                            is_craving,
+                            &[],
+                        );
+                        let events = game::apply_xp(herzie, xp);
+                        herzie.total_minutes_listened += minutes;
+                        game::record_genre_minutes(
+                            &mut herzie.genre_minutes,
+                            &classified,
+                            minutes,
+                        );
+                        storage::save_herzie(herzie);
 
-                    if events.leveled_up {
-                        notify_level_up = Some((herzie.name.clone(), herzie.level));
-                    }
-                    if events.evolved {
-                        if let Some(new_stage) = events.new_stage {
-                            notify_evolved = Some((herzie.name.clone(), new_stage));
+                        if events.leveled_up {
+                            notify_level_up = Some((herzie.name.clone(), herzie.level));
+                        }
+                        if events.evolved {
+                            if let Some(new_stage) = events.new_stage {
+                                notify_evolved = Some((herzie.name.clone(), new_stage));
+                            }
                         }
                     }
                 }
 
-                s.current_now_playing = Some(np_display);
-                s.current_genres = genres;
+                if let Some(ref genres) = genre_list {
+                    s.current_genres = genres.clone();
+                }
+
+                s.current_now_playing = Some(build_now_playing_display(
+                    &info.title,
+                    &info.artist,
+                    s.enrichment.as_ref(),
+                    s.current_local_genre.as_deref(),
+                    &s.current_genres,
+                ));
             }
             _ => {
                 s.current_now_playing = None;
                 s.current_genres.clear();
+                s.current_local_genre = None;
+                s.last_track_key = None;
+                s.enrichment = None;
+                s.enrichment_requested_at = None;
+                s.enrichment_in_flight = false;
             }
         }
+    }
+
+    if let Some((artist, title, key)) = spawn_enrichment {
+        spawn_track_enrichment(app, artist, title, key);
     }
 
     // Send notifications outside the lock
@@ -816,10 +956,17 @@ async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
         let has = s.herzie.is_some();
         let logged = api::is_logged_in();
         let mins = s.pending_minutes.min(10.0);
-        let np = s.current_now_playing.as_ref().map(|np| NowPlayingPayload {
-            title: np.title.clone(),
-            artist: np.artist.clone(),
-            genre: s.current_genres.first().cloned(),
+        let np = s.current_now_playing.as_ref().map(|np| {
+            let genre = if s.current_genres.is_empty() {
+                None
+            } else {
+                game::classify_genre(&s.current_genres).into_iter().next()
+            };
+            NowPlayingPayload {
+                title: np.title.clone(),
+                artist: np.artist.clone(),
+                genre,
+            }
         });
         let g = s.current_genres.clone();
         (has, logged, mins, np, g)
@@ -969,6 +1116,10 @@ pub(crate) fn adopt_local_herzie() -> Option<Herzie> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    lastfm::load_env();
+    let lastfm_service = LastFmService::from_env();
+    lastfm_service.log_missing_key_once();
+
     let herzie = adopt_local_herzie();
     log::info!(
         "Loaded herzie: {}",
@@ -991,6 +1142,7 @@ pub fn run() {
             }
         }))
         .manage(Mutex::new(ManagedState::new(herzie)) as SharedState)
+        .manage(lastfm_service)
         .manage(PendingDeepLink(Mutex::new(None)))
         .manage(LastTradeNotified(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![

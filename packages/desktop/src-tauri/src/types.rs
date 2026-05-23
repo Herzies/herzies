@@ -177,6 +177,12 @@ pub struct AppState {
 pub struct NowPlayingDisplay {
     pub title: String,
     pub artist: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub album_art_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vibe: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
