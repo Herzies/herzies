@@ -130,7 +130,7 @@ export function HomeView({
                   {nowPlaying.tags.map((tag) => (
                     <span
                       key={tag}
-                      className="rounded-full bg-purple/15 px-1.5 py-px text-[9px] lowercase text-purple"
+                      className="rounded-full bg-purple/15 px-1.5 py-px text-ui-sm lowercase text-purple"
                     >
                       {tag.toLowerCase()}
                     </span>
