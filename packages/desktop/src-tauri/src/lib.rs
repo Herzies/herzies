@@ -403,7 +403,7 @@ async fn fetch_active_events() -> Result<serde_json::Value, String> {
     let client = Client::new();
     match api::api_fetch_active_events(&client).await {
         Some(events) => Ok(serde_json::json!({ "events": events })),
-        None => Ok(serde_json::json!({ "events": [] }))
+        None => Ok(serde_json::json!({ "events": [] })),
     }
 }
 
@@ -523,7 +523,12 @@ fn emit_state_update(app: &AppHandle) {
     let _ = app.emit("state-update", &app_state);
 }
 
-fn apply_inventory(s: &mut ManagedState, inventory: Inventory, currency: u32, equipped: Vec<String>) {
+fn apply_inventory(
+    s: &mut ManagedState,
+    inventory: Inventory,
+    currency: u32,
+    equipped: Vec<String>,
+) {
     s.inventory = Some(inventory.clone());
     s.inventory_currency = currency;
     s.equipped = equipped;
@@ -787,11 +792,8 @@ async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: u64) -> Resu
 
                     if lastfm.has_api_key() {
                         s.enrichment_in_flight = true;
-                        spawn_enrichment = Some((
-                            info.artist.clone(),
-                            info.title.clone(),
-                            key.clone(),
-                        ));
+                        spawn_enrichment =
+                            Some((info.artist.clone(), info.title.clone(), key.clone()));
                     }
                 }
 
@@ -828,11 +830,7 @@ async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: u64) -> Resu
                         );
                         let events = game::apply_xp(herzie, xp);
                         herzie.total_minutes_listened += minutes;
-                        game::record_genre_minutes(
-                            &mut herzie.genre_minutes,
-                            &classified,
-                            minutes,
-                        );
+                        game::record_genre_minutes(&mut herzie.genre_minutes, &classified, minutes);
                         storage::save_herzie(herzie);
 
                         if events.leveled_up {

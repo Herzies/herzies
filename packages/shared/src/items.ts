@@ -439,8 +439,7 @@ function shadeItemColor(hex: string, brightness: number): string {
   const r = parseInt(hex.slice(1, 3), 16);
   const g = parseInt(hex.slice(3, 5), 16);
   const b = parseInt(hex.slice(5, 7), 16);
-  const scale =
-    brightness > 0.6 ? 1.25 : brightness > 0.3 ? 1 : 0.65;
+  const scale = brightness > 0.6 ? 1.25 : brightness > 0.3 ? 1 : 0.65;
   const clamp = (v: number) =>
     Math.min(255, Math.max(0, Math.round(v * scale)));
   return `#${clamp(r).toString(16).padStart(2, "0")}${clamp(g).toString(16).padStart(2, "0")}${clamp(b).toString(16).padStart(2, "0")}`;
@@ -653,7 +652,9 @@ function rotateBandPoint(
 }
 
 function rainbowAlongArc(t: number): string {
-  const idx = Math.floor(t * RAINBOW_HEADBAND_COLORS.length) % RAINBOW_HEADBAND_COLORS.length;
+  const idx =
+    Math.floor(t * RAINBOW_HEADBAND_COLORS.length) %
+    RAINBOW_HEADBAND_COLORS.length;
   return RAINBOW_HEADBAND_COLORS[idx];
 }
 
@@ -698,8 +699,28 @@ function traceThickBand(
   return pickCloserColoredHit(
     traceHeadbandHit(ox, oy, oz, dx, dy, dz, pts, colors, tubeR),
     pickCloserColoredHit(
-      traceHeadbandHit(ox, oy, oz, dx, dy, dz, top.pts, top.colors, tubeR * 0.72),
-      traceHeadbandHit(ox, oy, oz, dx, dy, dz, bottom.pts, bottom.colors, tubeR * 0.66),
+      traceHeadbandHit(
+        ox,
+        oy,
+        oz,
+        dx,
+        dy,
+        dz,
+        top.pts,
+        top.colors,
+        tubeR * 0.72,
+      ),
+      traceHeadbandHit(
+        ox,
+        oy,
+        oz,
+        dx,
+        dy,
+        dz,
+        bottom.pts,
+        bottom.colors,
+        tubeR * 0.66,
+      ),
     ),
   );
 }

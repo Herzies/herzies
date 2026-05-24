@@ -19,8 +19,21 @@ pub struct TrackEnrichment {
 }
 
 const GAME_GENRES: &[&str] = &[
-    "pop", "rock", "hip-hop", "electronic", "jazz", "classical", "r&b", "country",
-    "metal", "indie", "latin", "folk", "blues", "punk", "soul",
+    "pop",
+    "rock",
+    "hip-hop",
+    "electronic",
+    "jazz",
+    "classical",
+    "r&b",
+    "country",
+    "metal",
+    "indie",
+    "latin",
+    "folk",
+    "blues",
+    "punk",
+    "soul",
 ];
 
 const MOOD_TAGS: &[&str] = &[
@@ -312,10 +325,7 @@ mod tests {
             json!({ "#text": "http://large.jpg", "size": "large" }),
             json!({ "#text": "http://xl.jpg", "size": "extralarge" }),
         ];
-        assert_eq!(
-            pick_album_art(&images).as_deref(),
-            Some("http://large.jpg")
-        );
+        assert_eq!(pick_album_art(&images).as_deref(), Some("http://large.jpg"));
     }
 
     #[test]
@@ -337,8 +347,7 @@ mod tests {
             vibe: None,
             bpm: None,
         };
-        let genres =
-            resolve_listen_genres(None, Some(&enrichment), false, false).unwrap();
+        let genres = resolve_listen_genres(None, Some(&enrichment), false, false).unwrap();
         assert_eq!(genres, vec!["indie"]);
     }
 

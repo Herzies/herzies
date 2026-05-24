@@ -140,7 +140,10 @@ async fn refresh_locked(client: &Client, force: bool) {
             } else {
                 // 429 from the rate limiter, 5xx from a cold start, etc. The
                 // refresh token is still valid — try again on the next tick.
-                log::warn!("Token refresh transient failure (status {}), will retry", status);
+                log::warn!(
+                    "Token refresh transient failure (status {}), will retry",
+                    status
+                );
             }
         }
         Err(e) => {
@@ -565,12 +568,25 @@ mod tests {
         };
 
         // Within 10 min of expiry → refresh.
-        assert!(needs_refresh(&SessionData { expires_at: now + 5 * 60 * 1000, ..base.clone() }));
+        assert!(needs_refresh(&SessionData {
+            expires_at: now + 5 * 60 * 1000,
+            ..base.clone()
+        }));
         // Already expired → refresh.
-        assert!(needs_refresh(&SessionData { expires_at: now.saturating_sub(60_000), ..base.clone() }));
+        assert!(needs_refresh(&SessionData {
+            expires_at: now.saturating_sub(60_000),
+            ..base.clone()
+        }));
         // Plenty of headroom → no-op (this is the hot path).
-        assert!(!needs_refresh(&SessionData { expires_at: now + 30 * 60 * 1000, ..base.clone() }));
+        assert!(!needs_refresh(&SessionData {
+            expires_at: now + 30 * 60 * 1000,
+            ..base.clone()
+        }));
         // No refresh token → can't refresh anyway.
-        assert!(!needs_refresh(&SessionData { refresh_token: String::new(), expires_at: 0, ..base }));
+        assert!(!needs_refresh(&SessionData {
+            refresh_token: String::new(),
+            expires_at: 0,
+            ..base
+        }));
     }
 }

@@ -72,9 +72,7 @@ export function InventoryView({
   currency: number;
   equipped: string[];
 }) {
-  const [inventory, setInventory] = useState<Inventory | null>(
-    cachedInventory,
-  );
+  const [inventory, setInventory] = useState<Inventory | null>(cachedInventory);
   const [currency, setCurrency] = useState(cachedCurrency || herzie.currency);
   const [equipped, setEquipped] = useState(cachedEquipped);
   const [selectedItem, setSelectedItem] = useState<string | null>(

@@ -43,9 +43,7 @@ export function ChatPanel({
   const [itemRefs, setItemRefs] = useState<string[]>([]);
   const [cooldown, setCooldown] = useState(false);
   const [inspectItem, setInspectItem] = useState<string | null>(null);
-  const [inventory, setInventory] = useState<Inventory | null>(
-    cachedInventory,
-  );
+  const [inventory, setInventory] = useState<Inventory | null>(cachedInventory);
   const [showAutocomplete, setShowAutocomplete] = useState(false);
   const [autocompleteFilter, setAutocompleteFilter] = useState("");
   const [autocompleteIndex, setAutocompleteIndex] = useState(0);

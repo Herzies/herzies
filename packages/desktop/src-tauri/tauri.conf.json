@@ -1,7 +1,7 @@
 {
   "productName": "Herzies",
   "identifier": "app.herzies.desktop",
-  "version": "0.1.0-beta.8",
+  "version": "0.1.0-beta.9",
   "build": {
     "beforeDevCommand": "pnpm vite:dev",
     "beforeBuildCommand": "pnpm vite:build",

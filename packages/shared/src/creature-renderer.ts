@@ -109,7 +109,8 @@ const RAINBOW_HEADBAND = [
 
 function shadeWearableColor(hex: string, brightness: number): string {
   const [h, s, l] = hexToHsl(hex);
-  if (brightness > 0.6) return hslToHex(h, s, Math.min(0.88, l + (1 - l) * 0.4));
+  if (brightness > 0.6)
+    return hslToHex(h, s, Math.min(0.88, l + (1 - l) * 0.4));
   if (brightness > 0.3) return hex.toUpperCase();
   return hslToHex(h, s, l * 0.55);
 }
