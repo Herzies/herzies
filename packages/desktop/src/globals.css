@@ -39,12 +39,17 @@
   html,
   body {
     @apply bg-bg-panel text-text font-mono overflow-hidden select-none;
+  }
+
+  /* Window drag — scoped to Tauri markup, not global body (breaks sandbox herzie drag). */
+  [data-tauri-drag-region]:not([data-tauri-drag-region="false"]) {
     -webkit-app-region: drag;
   }
 
   button,
   a,
-  input {
+  input,
+  [data-tauri-drag-region="false"] {
     -webkit-app-region: no-drag;
   }
 

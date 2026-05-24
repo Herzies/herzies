@@ -19,6 +19,10 @@ import {
 
 export type Rarity = "common" | "uncommon" | "rare" | "legendary";
 
+/** Equip slot categories — only one item per slot may be equipped at a time. */
+export const EQUIP_SLOTS = ["head"] as const;
+export type EquipSlot = (typeof EQUIP_SLOTS)[number];
+
 export interface ItemDef {
   id: string;
   name: string;
@@ -27,6 +31,8 @@ export interface ItemDef {
   frames: string[][]; // Each frame is an array of lines (with HTML color spans)
   stackable?: boolean;
   equipable?: boolean;
+  /** When set, equipping replaces any other item in the same slot. */
+  equipSlot?: EquipSlot;
   sellPrice?: number;
 }
 
@@ -419,6 +425,49 @@ function rayChain(
   return best;
 }
 
+const RAINBOW_HEADBAND_COLORS = [
+  "#FF6B6B",
+  "#FFA94D",
+  "#FFD43B",
+  "#69DB7C",
+  "#4DABF7",
+  "#9775FA",
+  "#F783AC",
+];
+
+function shadeItemColor(hex: string, brightness: number): string {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  const scale =
+    brightness > 0.6 ? 1.25 : brightness > 0.3 ? 1 : 0.65;
+  const clamp = (v: number) =>
+    Math.min(255, Math.max(0, Math.round(v * scale)));
+  return `#${clamp(r).toString(16).padStart(2, "0")}${clamp(g).toString(16).padStart(2, "0")}${clamp(b).toString(16).padStart(2, "0")}`;
+}
+
+function rayChainColored(
+  ox: number,
+  oy: number,
+  oz: number,
+  dx: number,
+  dy: number,
+  dz: number,
+  centers: V3[],
+  radius: number,
+  colors: string[],
+): [number, V3, string] | null {
+  let best: [number, V3, string] | null = null;
+  for (let i = 0; i < centers.length; i++) {
+    const c = centers[i];
+    const hit = raySphere(ox, oy, oz, dx, dy, dz, c[0], c[1], c[2], radius);
+    if (hit && (best === null || hit[0] < best[0])) {
+      best = [hit[0], hit[1], colors[i % colors.length]];
+    }
+  }
+  return best;
+}
+
 function renderHeadphonesFrame(yAngle: number): string[] {
   const bright: number[][] = Array.from({ length: SH }, () =>
     Array(SW).fill(-1),
@@ -582,6 +631,163 @@ function renderHeadphonesFrame(yAngle: number): string[] {
   );
 }
 
+// --- Rainbow headband rendering (circular tilted hoop) ---
+
+function pickCloserColoredHit(
+  a: [number, V3, string] | null,
+  b: [number, V3, string] | null,
+): [number, V3, string] | null {
+  if (!a) return b;
+  if (!b) return a;
+  return a[0] < b[0] ? a : b;
+}
+
+function rotateBandPoint(
+  lx: number,
+  ly: number,
+  lz: number,
+  cosA: number,
+  sinA: number,
+): V3 {
+  return [lx * cosA + lz * sinA, ly, -lx * sinA + lz * cosA];
+}
+
+function rainbowAlongArc(t: number): string {
+  const idx = Math.floor(t * RAINBOW_HEADBAND_COLORS.length) % RAINBOW_HEADBAND_COLORS.length;
+  return RAINBOW_HEADBAND_COLORS[idx];
+}
+
+function offsetBandChain(
+  pts: V3[],
+  colors: string[],
+  dy: number,
+): { pts: V3[]; colors: string[] } {
+  return {
+    pts: pts.map(([x, y, z]) => [x, y + dy, z]),
+    colors,
+  };
+}
+
+function traceHeadbandHit(
+  ox: number,
+  oy: number,
+  oz: number,
+  dx: number,
+  dy: number,
+  dz: number,
+  pts: V3[],
+  colors: string[],
+  radius: number,
+): [number, V3, string] | null {
+  return rayChainColored(ox, oy, oz, dx, dy, dz, pts, radius, colors);
+}
+
+function traceThickBand(
+  ox: number,
+  oy: number,
+  oz: number,
+  dx: number,
+  dy: number,
+  dz: number,
+  pts: V3[],
+  colors: string[],
+  tubeR: number,
+): [number, V3, string] | null {
+  const top = offsetBandChain(pts, colors, tubeR * 0.42);
+  const bottom = offsetBandChain(pts, colors, -tubeR * 0.28);
+  return pickCloserColoredHit(
+    traceHeadbandHit(ox, oy, oz, dx, dy, dz, pts, colors, tubeR),
+    pickCloserColoredHit(
+      traceHeadbandHit(ox, oy, oz, dx, dy, dz, top.pts, top.colors, tubeR * 0.72),
+      traceHeadbandHit(ox, oy, oz, dx, dy, dz, bottom.pts, bottom.colors, tubeR * 0.66),
+    ),
+  );
+}
+
+function renderRainbowHeadbandFrame(yAngle: number): string[] {
+  const bright: number[][] = Array.from({ length: SH }, () =>
+    Array(SW).fill(-1),
+  );
+  const bandColor: string[][] = Array.from({ length: SH }, () =>
+    Array(SW).fill(""),
+  );
+
+  const cosA = Math.cos(yAngle);
+  const sinA = Math.sin(yAngle);
+
+  const scale = 1.32;
+  const ringR = 1.55 * scale;
+  const tubeR = 0.28 * scale;
+  const centerY = 0.02 * scale;
+  const pitchTilt = 0.28;
+
+  // Full circular hoop (tilted so the opening faces the viewer — round, not crescent)
+  const ringPts: V3[] = [];
+  const ringColors: string[] = [];
+  const segments = 72;
+  for (let i = 0; i <= segments; i++) {
+    const t = i / segments;
+    const angle = t * Math.PI * 2;
+    const lx = Math.cos(angle) * ringR;
+    const ly = centerY + Math.sin(angle) * ringR;
+    const pz = -ly * Math.sin(pitchTilt);
+    const py = ly * Math.cos(pitchTilt);
+    ringPts.push(rotateBandPoint(lx, py, pz, cosA, sinA));
+    ringColors.push(rainbowAlongArc(t));
+  }
+
+  const camZ = -CAM;
+  const fov = 2.2;
+
+  for (let sy2 = 0; sy2 < SH; sy2++) {
+    for (let sx = 0; sx < SW; sx++) {
+      const nx = (((sx + 0.5) / SW - 0.5) * fov * (SW / SH)) / CHAR_ASPECT;
+      const ny = ((sy2 + 0.5) / SH - 0.5) * fov;
+      const rd = normV([nx, ny, 1]);
+
+      const hit = traceThickBand(
+        0,
+        0,
+        camZ,
+        rd[0],
+        rd[1],
+        rd[2],
+        ringPts,
+        ringColors,
+        tubeR,
+      );
+      if (!hit) continue;
+
+      const diffuse = Math.max(0, -dot3(hit[1], LIGHT));
+      const ambient = 0.22;
+      const ref: V3 = [
+        hit[1][0] * 2 * dot3(hit[1], LIGHT) - LIGHT[0],
+        hit[1][1] * 2 * dot3(hit[1], LIGHT) - LIGHT[1],
+        hit[1][2] * 2 * dot3(hit[1], LIGHT) - LIGHT[2],
+      ];
+      const spec = Math.max(0, -ref[2]) ** 14 * 0.38;
+      bright[sy2][sx] = Math.min(1, ambient + diffuse * 0.68 + spec);
+      bandColor[sy2][sx] = hit[2];
+    }
+  }
+
+  return bright.map((row, y) =>
+    row
+      .map((val, x) => {
+        if (val < 0) return " ";
+        const idx = Math.min(
+          Math.floor(val * (RAMP_ITEM.length - 1)),
+          RAMP_ITEM.length - 1,
+        );
+        const ch = RAMP_ITEM[idx];
+        if (ch === " ") return " ";
+        const hex = bandColor[y][x];
+        return col(shadeItemColor(hex, val), ch);
+      })
+      .join(""),
+  );
+}
+
 // --- Generate all frames ---
 function generateFrames(
   renderFn: (angle: number) => string[],
@@ -595,6 +801,7 @@ function generateFrames(
 const firstEditionFrames = generateFrames(renderCardFrame);
 const cdFrames = generateFrames(renderCdFrame);
 const headphonesFrames = generateFrames(renderHeadphonesFrame);
+const rainbowHeadbandFrames = generateFrames(renderRainbowHeadbandFrame);
 
 export const ITEMS: ItemDef[] = [
   {
@@ -621,6 +828,16 @@ export const ITEMS: ItemDef[] = [
     rarity: "uncommon",
     frames: headphonesFrames,
     equipable: true,
+    equipSlot: "head",
+  },
+  {
+    id: "rainbow-headband",
+    name: "Rainbow Headband",
+    description: "A colourful headband for your herzie.",
+    rarity: "uncommon",
+    frames: rainbowHeadbandFrames,
+    equipable: true,
+    equipSlot: "head",
   },
 ];
 

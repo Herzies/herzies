@@ -15,6 +15,7 @@ type CatalogItem = {
 	sell_price?: number | null;
 	stackable?: boolean | null;
 	equipable?: boolean | null;
+	equip_slot?: string | null;
 };
 
 type AdminEvent = {
@@ -50,6 +51,7 @@ type ItemFormState = {
 	sellPrice: string;
 	stackable: boolean;
 	equipable: boolean;
+	equipSlot: "" | "head";
 };
 
 function getEventStatus(event: AdminEvent, now: Date): EventStatus {
@@ -146,6 +148,7 @@ function newItemForm(overrides?: Partial<ItemFormState>): ItemFormState {
 		sellPrice: "",
 		stackable: false,
 		equipable: false,
+		equipSlot: "",
 		...overrides,
 	};
 }
@@ -161,6 +164,7 @@ function itemToForm(item: CatalogItem): ItemFormState {
 		sellPrice: item.sell_price != null ? String(item.sell_price) : "",
 		stackable: !!item.stackable,
 		equipable: !!item.equipable,
+		equipSlot: item.equip_slot === "head" ? "head" : "",
 	};
 }
 
@@ -173,6 +177,7 @@ function itemFormToPayload(form: ItemFormState) {
 		sellPrice: form.sellPrice.trim() === "" ? null : Number(form.sellPrice),
 		stackable: form.stackable,
 		equipable: form.equipable,
+		equipSlot: form.equipable && form.equipSlot ? form.equipSlot : null,
 	};
 }
 
@@ -450,10 +455,34 @@ function ItemForm({
 					<input
 						type="checkbox"
 						checked={form.equipable}
-						onChange={(e) => setForm((f) => ({ ...f, equipable: e.target.checked }))}
+						onChange={(e) =>
+							setForm((f) => ({
+								...f,
+								equipable: e.target.checked,
+								equipSlot: e.target.checked ? f.equipSlot : "",
+							}))
+						}
 					/>
 					equipable
 				</label>
+				{form.equipable && (
+					<label className="flex items-center gap-2 cursor-pointer">
+						slot
+						<select
+							value={form.equipSlot}
+							onChange={(e) =>
+								setForm((f) => ({
+									...f,
+									equipSlot: e.target.value as "" | "head",
+								}))
+							}
+							className={INPUT}
+						>
+							<option value="">none</option>
+							<option value="head">head</option>
+						</select>
+					</label>
+				)}
 			</div>
 			<div className="flex gap-3">
 				<button
@@ -712,7 +741,7 @@ function ItemRow({
 				<td className="py-2 px-4 text-xs text-text-dim">{item.sell_price ?? "—"}</td>
 				<td className="py-2 px-4 text-xs text-text-dim">
 					{item.stackable ? "stack " : ""}
-					{item.equipable ? "equip" : ""}
+					{item.equipable ? `equip${item.equip_slot ? ` (${item.equip_slot})` : ""}` : ""}
 					{!item.stackable && !item.equipable ? "—" : ""}
 				</td>
 				<td className="py-2 px-4 text-right whitespace-nowrap">

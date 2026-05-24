@@ -68,6 +68,7 @@ export function Herzie3D({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [frame, setFrame] = useState(0);
   const [dragAngle, setDragAngle] = useState(defaultAngle);
+  const [hasDragged, setHasDragged] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [dancing, setDancing] = useState(false);
   const dragging = useRef(false);
@@ -78,7 +79,6 @@ export function Herzie3D({
   const velocity = useRef(0);
   const momentumRaf = useRef(0);
 
-  const hasDragged = dragAngle !== 0;
   const wantsDancing = animate !== false && isPlaying;
 
   useEffect(() => {
@@ -186,6 +186,7 @@ export function Herzie3D({
       lastMoveTime.current = now;
 
       const deltaX = e.clientX - dragStartX.current;
+      setHasDragged(true);
       setDragAngle(dragStartAngle.current - deltaX * DRAG_SENSITIVITY);
     },
     [draggable],
@@ -251,6 +252,7 @@ export function Herzie3D({
 
   return (
     <div
+      {...(draggable ? { "data-tauri-drag-region": "false" as const } : {})}
       onMouseDown={onMouseDown}
       onMouseMove={onMouseMove}
       onMouseUp={stopDrag}
@@ -261,6 +263,7 @@ export function Herzie3D({
         justifyContent: "center",
         cursor: draggable ? (isDragging ? "grabbing" : "grab") : "default",
         userSelect: "none",
+        ...(draggable ? { WebkitAppRegion: "no-drag" } : {}),
         ...wrapperStyle,
       }}
     >

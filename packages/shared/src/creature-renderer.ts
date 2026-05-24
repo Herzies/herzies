@@ -97,6 +97,23 @@ function hslToHex(h: number, s: number, l: number): string {
   return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`.toUpperCase();
 }
 
+const RAINBOW_HEADBAND = [
+  "#FF6B6B",
+  "#FFA94D",
+  "#FFD43B",
+  "#69DB7C",
+  "#4DABF7",
+  "#9775FA",
+  "#F783AC",
+] as const;
+
+function shadeWearableColor(hex: string, brightness: number): string {
+  const [h, s, l] = hexToHsl(hex);
+  if (brightness > 0.6) return hslToHex(h, s, Math.min(0.88, l + (1 - l) * 0.4));
+  if (brightness > 0.3) return hex.toUpperCase();
+  return hslToHex(h, s, l * 0.55);
+}
+
 function buildColorTriplet(hex: string): ColorTriplet {
   const [h, s, l] = hexToHsl(hex);
   // Dim: darken while keeping saturation punchy
@@ -180,6 +197,8 @@ interface Sphere {
   radius: number;
   zone: ColorZone;
   part: string;
+  /** Fixed color for wearables (shaded by lighting at render time). */
+  color?: string;
 }
 
 // --- Dance animation offsets ---
@@ -903,6 +922,56 @@ function buildHeadphoneSpheres(spheres: Sphere[]): Sphere[] {
   return result;
 }
 
+function buildRainbowHeadbandSpheres(spheres: Sphere[]): Sphere[] {
+  const head = getHeadBounds(spheres);
+  if (!head) return [];
+
+  const [hx, hy, hz] = head.center;
+  const hr = head.radius;
+  const result: Sphere[] = [];
+  const bandR = hr * 0.19;
+  const bandSteps = 20;
+  // Sweatband: full ring; front (-Z) lifted above eyes, sides/back stay lower.
+  const baseBandY = hy - hr * 0.38;
+  const bandRadius = hr * 0.92;
+
+  const eyes = spheres.filter((s) => s.part === "eye");
+  let frontLift = hr * 0.22;
+  if (eyes.length > 0) {
+    const eyeTopY = Math.min(...eyes.map((e) => e.center[1] - e.radius));
+    const targetFrontY = eyeTopY - bandR * 1.15;
+    frontLift = Math.max(hr * 0.1, baseBandY - targetFrontY);
+  }
+
+  for (let i = 0; i <= bandSteps; i++) {
+    const angle = (i / bandSteps) * Math.PI * 2;
+    // sin(angle) = -1 at front face (toward camera)
+    const frontWeight = Math.max(0, -Math.sin(angle)) ** 0.85;
+    const by = baseBandY - frontWeight * frontLift;
+    result.push({
+      center: [
+        hx + Math.cos(angle) * bandRadius,
+        by,
+        hz + Math.sin(angle) * bandRadius,
+      ],
+      radius: bandR,
+      zone: "wearable",
+      part: "head",
+      color: RAINBOW_HEADBAND[i % RAINBOW_HEADBAND.length],
+    });
+  }
+
+  return result;
+}
+
+function appendWearableSpheres(spheres: Sphere[], wearables?: string[]): void {
+  if (!wearables?.length) return;
+  if (wearables.includes("headphones"))
+    spheres.push(...buildHeadphoneSpheres(spheres));
+  if (wearables.includes("rainbow-headband"))
+    spheres.push(...buildRainbowHeadbandSpheres(spheres));
+}
+
 function buildCreatureSpheres(params: CreatureParams, stage: number): Sphere[] {
   const spheres = BODY_BUILDERS[params.bodyType](params, stage);
   centerVertically(spheres);
@@ -1116,6 +1185,7 @@ function renderCreatureFrame(
       radius: s.radius,
       zone: s.zone,
       part: s.part,
+      color: s.color,
     };
   });
 
@@ -1124,6 +1194,9 @@ function renderCreatureFrame(
   );
   const zones: ColorZone[][] = Array.from({ length: SH }, () =>
     Array<ColorZone>(SW).fill("primary"),
+  );
+  const pixelColors: (string | null)[][] = Array.from({ length: SH }, () =>
+    Array(SW).fill(null),
   );
 
   const oz = -CAM;
@@ -1189,6 +1262,7 @@ function renderCreatureFrame(
       }
       bright[sy][sx] = lit;
       zones[sy][sx] = sp.zone;
+      if (sp.color) pixelColors[sy][sx] = sp.color;
     }
   }
 
@@ -1202,7 +1276,11 @@ function renderCreatureFrame(
       );
       const ch = RAMP_HERZIE[idx];
       if (ch === " ") return EMPTY_CELL;
-      return { ch, color: zoneColor(zones[y][x], val, colors) };
+      const fixed = pixelColors[y][x];
+      const color = fixed
+        ? shadeWearableColor(fixed, val)
+        : zoneColor(zones[y][x], val, colors);
+      return { ch, color };
     }),
   );
 
@@ -1269,8 +1347,7 @@ export function generateIdleFrames(
 
   const params = resolveCreatureParams(userId, paramsOverride);
   const baseSpheres = buildCreatureSpheres(params, stage);
-  if (wearables?.includes("headphones"))
-    baseSpheres.push(...buildHeadphoneSpheres(baseSpheres));
+  appendWearableSpheres(baseSpheres, wearables);
   const anchors = getAnchors(baseSpheres, params, stage);
   const colors = buildColorTriplet(CREATURE_PALETTE[params.colorIndex]);
 
@@ -1306,8 +1383,7 @@ export function generateRotationFrames(
 
   const params = resolveCreatureParams(userId, paramsOverride);
   const spheres = buildCreatureSpheres(params, stage);
-  if (wearables?.includes("headphones"))
-    spheres.push(...buildHeadphoneSpheres(spheres));
+  appendWearableSpheres(spheres, wearables);
   const anchors = getAnchors(spheres, params, stage);
   const colors = buildColorTriplet(CREATURE_PALETTE[params.colorIndex]);
 
@@ -1341,8 +1417,7 @@ export function generateDanceFrames(
 
   const params = resolveCreatureParams(userId, paramsOverride);
   const baseSpheres = buildCreatureSpheres(params, stage);
-  if (wearables?.includes("headphones"))
-    baseSpheres.push(...buildHeadphoneSpheres(baseSpheres));
+  appendWearableSpheres(baseSpheres, wearables);
   const anchors = getAnchors(baseSpheres, params, stage);
   const colors = buildColorTriplet(CREATURE_PALETTE[params.colorIndex]);
 
@@ -1377,8 +1452,7 @@ export function renderCreatureAtAngle(
 ): FrameData {
   const params = resolveCreatureParams(userId, paramsOverride);
   const baseSpheres = buildCreatureSpheres(params, stage);
-  if (wearables?.includes("headphones"))
-    baseSpheres.push(...buildHeadphoneSpheres(baseSpheres));
+  appendWearableSpheres(baseSpheres, wearables);
   const anchors = getAnchors(baseSpheres, params, stage);
   const colors = buildColorTriplet(CREATURE_PALETTE[params.colorIndex]);
   const animated = dancing

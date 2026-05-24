@@ -17,7 +17,7 @@ export async function POST(request: Request) {
 	// Verify item is equipable
 	const { data: item } = await admin
 		.from("items")
-		.select("id, equipable")
+		.select("id, equipable, equip_slot")
 		.eq("id", itemId)
 		.single();
 
@@ -47,7 +47,17 @@ export async function POST(request: Request) {
 		if (current.includes(itemId)) {
 			return NextResponse.json({ error: "Already equipped" }, { status: 400 });
 		}
-		updated = [...current, itemId];
+
+		let cleared = current;
+		if (item.equip_slot) {
+			const { data: slotItems } = await admin
+				.from("items")
+				.select("id")
+				.eq("equip_slot", item.equip_slot);
+			const slotIds = new Set((slotItems ?? []).map((row) => row.id));
+			cleared = current.filter((id) => !slotIds.has(id));
+		}
+		updated = [...cleared, itemId];
 	} else {
 		if (!current.includes(itemId)) {
 			return NextResponse.json({ error: "Item not equipped" }, { status: 400 });

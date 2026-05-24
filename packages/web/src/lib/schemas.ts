@@ -80,6 +80,7 @@ export const adminItemSchema = z.object({
 	sellPrice: z.number().int().nonnegative().nullable().optional(),
 	stackable: z.boolean().optional(),
 	equipable: z.boolean().optional(),
+	equipSlot: z.enum(["head"]).nullable().optional(),
 });
 
 export const adminMultiplierSchema = z.object({

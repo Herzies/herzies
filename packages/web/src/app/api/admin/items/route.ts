@@ -31,7 +31,8 @@ export async function POST(request: Request) {
 	const body = await parseBody(request, adminItemSchema);
 	if (isParseError(body)) return body;
 
-	const { id, name, description, rarity, sellPrice, stackable, equipable } = body;
+	const { id, name, description, rarity, sellPrice, stackable, equipable, equipSlot } =
+		body;
 
 	const row = {
 		id,
@@ -41,6 +42,7 @@ export async function POST(request: Request) {
 		sell_price: sellPrice ?? null,
 		stackable: stackable ?? false,
 		equipable: equipable ?? false,
+		equip_slot: equipable ? (equipSlot ?? null) : null,
 	};
 
 	const admin = createAdminClient();
@@ -56,6 +58,7 @@ export async function POST(request: Request) {
 				sell_price: row.sell_price,
 				stackable: row.stackable,
 				equipable: row.equipable,
+				equip_slot: row.equip_slot,
 			})
 			.eq("id", id)
 			.select()
