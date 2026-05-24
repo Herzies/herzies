@@ -175,10 +175,17 @@ pub struct LastFmService {
 
 impl LastFmService {
     pub fn from_env() -> Self {
+        // Runtime env wins (so .env.local can override a baked-in key in dev);
+        // compile-time `option_env!` is the fallback so the shipped binary works
+        // without the user setting anything.
         let api_key = std::env::var("LASTFM_API_KEY")
             .ok()
+            .or_else(|| option_env!("LASTFM_API_KEY").map(str::to_string))
             .filter(|k| !k.is_empty());
-        let app_name = std::env::var("LASTFM_APP_NAME").unwrap_or_else(|_| "Herzies".to_string());
+        let app_name = std::env::var("LASTFM_APP_NAME")
+            .ok()
+            .or_else(|| option_env!("LASTFM_APP_NAME").map(str::to_string))
+            .unwrap_or_else(|| "Herzies".to_string());
         Self {
             api_key,
             app_name,
