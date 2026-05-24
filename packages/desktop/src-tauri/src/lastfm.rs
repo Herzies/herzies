@@ -81,21 +81,20 @@ pub fn resolve_listen_genres(
 }
 
 pub fn pick_album_art(images: &[Value]) -> Option<String> {
-    let mut large = None;
-    let mut extralarge = None;
-    for img in images {
-        let size = img.get("size").and_then(|s| s.as_str()).unwrap_or("");
-        let url = img.get("#text").and_then(|t| t.as_str()).unwrap_or("");
-        if url.is_empty() {
-            continue;
-        }
-        match size {
-            "extralarge" => extralarge = Some(url.to_string()),
-            "large" => large = Some(url.to_string()),
-            _ => {}
+    // Prefer medium (64×64) — closest to the 48×48 UI without upscaling.
+    const SIZE_ORDER: &[&str] = &["medium", "large", "extralarge", "small"];
+    for size in SIZE_ORDER {
+        for img in images {
+            if img.get("size").and_then(|s| s.as_str()) != Some(size) {
+                continue;
+            }
+            let url = img.get("#text").and_then(|t| t.as_str()).unwrap_or("");
+            if !url.is_empty() {
+                return Some(url.to_string());
+            }
         }
     }
-    extralarge.or(large)
+    None
 }
 
 pub fn parse_tag_names(toptags: &Value) -> Vec<String> {
@@ -294,15 +293,28 @@ mod tests {
     }
 
     #[test]
-    fn pick_extralarge_art() {
+    fn pick_medium_art_when_available() {
         let images = vec![
-            json!({ "#text": "", "size": "small" }),
+            json!({ "#text": "http://small.jpg", "size": "small" }),
+            json!({ "#text": "http://medium.jpg", "size": "medium" }),
+            json!({ "#text": "http://xl.jpg", "size": "extralarge" }),
+        ];
+        assert_eq!(
+            pick_album_art(&images).as_deref(),
+            Some("http://medium.jpg")
+        );
+    }
+
+    #[test]
+    fn pick_falls_back_when_medium_missing() {
+        let images = vec![
+            json!({ "#text": "http://small.jpg", "size": "small" }),
             json!({ "#text": "http://large.jpg", "size": "large" }),
             json!({ "#text": "http://xl.jpg", "size": "extralarge" }),
         ];
         assert_eq!(
             pick_album_art(&images).as_deref(),
-            Some("http://xl.jpg")
+            Some("http://large.jpg")
         );
     }
 
