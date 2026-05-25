@@ -147,7 +147,6 @@ export function DesktopHomePreview() {
         <div className="relative z-10 border-t border-border pt-1.5">
           <div className="text-[9px] text-text-dim mb-0.5">♫ Now Playing</div>
           <div className="flex gap-2">
-            <div className="h-10 w-10 shrink-0 rounded bg-[#333]" />
             <div className="min-w-0 flex-1">
               <div className="line-clamp-1 text-[11px] font-bold text-text">
                 {MOCK.nowPlaying.title}
@@ -155,23 +154,6 @@ export function DesktopHomePreview() {
               <div className="line-clamp-1 text-[10px] text-text-dim">
                 {MOCK.nowPlaying.artist}
               </div>
-              {MOCK.nowPlaying.tags.length > 0 ? (
-                <div className="mt-0.5 flex flex-wrap gap-1">
-                  {MOCK.nowPlaying.tags.map((tag) => (
-                    <span
-                      key={tag}
-                      className="rounded-full bg-purple/15 px-1.5 py-px text-[9px] lowercase text-purple"
-                    >
-                      {tag.toLowerCase()}
-                    </span>
-                  ))}
-                </div>
-              ) : null}
-              {MOCK.nowPlaying.vibe ? (
-                <div className="line-clamp-1 text-[10px] text-text-dim">
-                  {MOCK.nowPlaying.vibe}
-                </div>
-              ) : null}
             </div>
           </div>
         </div>

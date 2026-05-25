@@ -1,9 +1,5 @@
 import type { GameEvent } from "@herzies/shared";
-import {
-  getItem,
-  RARITY_COLORS as ITEM_RARITY_COLORS,
-  ItemDisplay,
-} from "@herzies/shared";
+import { getItem, RARITY_COLORS as ITEM_RARITY_COLORS } from "@herzies/shared";
 import { useEffect, useState } from "react";
 import { herzies, useWindowFocused } from "../tauri-bridge";
 import ItemInspectOverlay from "./ItemInspectOverlay";
@@ -193,11 +189,7 @@ export function EventsView() {
   const rewardItem = getItem(config.rewardItemId);
 
   return (
-    <div className="flex h-full flex-col justify-between overflow-auto">
-      <div className="mb-2">
-        <div className="text-ui-lg font-bold text-cyan">Events</div>
-      </div>
-
+    <View title="Events" colour="red" childrenClassName="flex flex-col h-full">
       <div className="grid flex-1 place-items-center">
         <div>
           <div className="text-center">{hunt.title}</div>
@@ -296,7 +288,7 @@ export function EventsView() {
           onClose={() => setInspectOverlay(null)}
         />
       )}
-    </div>
+    </View>
   );
 }
 

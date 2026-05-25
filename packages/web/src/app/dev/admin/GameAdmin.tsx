@@ -1,5 +1,6 @@
 "use client";
 
+import type { SongHuntConfig, SongHuntHint } from "@herzies/shared";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 const SECRET_KEY = "herzies-admin-secret";
@@ -32,6 +33,20 @@ type AdminEvent = {
 
 type EventStatus = "running" | "scheduled" | "ended" | "inactive";
 
+type SongHuntHintForm = {
+	text: string;
+	unlocksAt: string;
+};
+
+type SongHuntConfigForm = {
+	trackTitle: string;
+	trackArtist: string;
+	rewardItemId: string;
+	rewardItemName: string;
+	maxClaims: string;
+	hints: SongHuntHintForm[];
+};
+
 type EventFormState = {
 	id?: string;
 	type: string;
@@ -41,6 +56,7 @@ type EventFormState = {
 	startsAt: string;
 	endsAt: string;
 	configJson: string;
+	songHunt: SongHuntConfigForm;
 };
 
 type ItemFormState = {
@@ -112,6 +128,62 @@ function defaultWindow(): { startsAt: string; endsAt: string } {
 	return { startsAt: start.toISOString(), endsAt: end.toISOString() };
 }
 
+function defaultSongHuntConfig(): SongHuntConfigForm {
+	return {
+		trackTitle: "",
+		trackArtist: "",
+		rewardItemId: "",
+		rewardItemName: "",
+		maxClaims: "50",
+		hints: [{ text: "First hint", unlocksAt: new Date().toISOString() }],
+	};
+}
+
+function songHuntConfigFromRecord(config: Record<string, unknown>): SongHuntConfigForm {
+	const hints: SongHuntHintForm[] = Array.isArray(config.hints)
+		? config.hints.map((raw) => {
+				const hint = raw as Record<string, unknown>;
+				return {
+					text: typeof hint.text === "string" ? hint.text : "",
+					unlocksAt:
+						typeof hint.unlocksAt === "string" ? hint.unlocksAt : new Date().toISOString(),
+				};
+			})
+		: [];
+
+	return {
+		trackTitle: typeof config.trackTitle === "string" ? config.trackTitle : "",
+		trackArtist: typeof config.trackArtist === "string" ? config.trackArtist : "",
+		rewardItemId: typeof config.rewardItemId === "string" ? config.rewardItemId : "",
+		rewardItemName: typeof config.rewardItemName === "string" ? config.rewardItemName : "",
+		maxClaims:
+			typeof config.maxClaims === "number" && Number.isFinite(config.maxClaims)
+				? String(config.maxClaims)
+				: "50",
+		hints: hints.length > 0 ? hints : defaultSongHuntConfig().hints,
+	};
+}
+
+function songHuntConfigToPayload(form: SongHuntConfigForm): SongHuntConfig & { rewardItemName?: string } {
+	const maxClaims = Number.parseInt(form.maxClaims, 10);
+	const payload: SongHuntConfig & { rewardItemName?: string } = {
+		trackTitle: form.trackTitle.trim(),
+		trackArtist: form.trackArtist.trim(),
+		rewardItemId: form.rewardItemId.trim(),
+		maxClaims: Number.isFinite(maxClaims) && maxClaims > 0 ? maxClaims : 50,
+		hints: form.hints.map(
+			(h): SongHuntHint => ({
+				text: h.text.trim(),
+				unlocksAt: h.unlocksAt,
+			}),
+		),
+	};
+	if (form.rewardItemName.trim()) {
+		payload.rewardItemName = form.rewardItemName.trim();
+	}
+	return payload;
+}
+
 function newEventForm(overrides?: Partial<EventFormState>): EventFormState {
 	const { startsAt, endsAt } = defaultWindow();
 	return {
@@ -122,6 +194,7 @@ function newEventForm(overrides?: Partial<EventFormState>): EventFormState {
 		startsAt,
 		endsAt,
 		configJson: DEFAULT_CONFIGS.secret_track,
+		songHunt: defaultSongHuntConfig(),
 		...overrides,
 	};
 }
@@ -136,6 +209,10 @@ function eventToForm(event: AdminEvent): EventFormState {
 		startsAt: event.starts_at,
 		endsAt: event.ends_at,
 		configJson: JSON.stringify(event.config, null, 2),
+		songHunt:
+			event.type === "song_hunt"
+				? songHuntConfigFromRecord(event.config)
+				: defaultSongHuntConfig(),
 	};
 }
 
@@ -209,6 +286,257 @@ function parseEventConfig(json: string): Record<string, unknown> | string {
 	}
 }
 
+function buildEventConfig(form: EventFormState): Record<string, unknown> | string {
+	if (form.type === "song_hunt") {
+		const { songHunt } = form;
+		if (!songHunt.trackTitle.trim()) return "Track title is required";
+		if (!songHunt.trackArtist.trim()) return "Track artist is required";
+		if (!songHunt.rewardItemId.trim()) return "Reward item is required";
+		const maxClaims = Number.parseInt(songHunt.maxClaims, 10);
+		if (!Number.isFinite(maxClaims) || maxClaims < 1) {
+			return "Max claims must be a positive number";
+		}
+		if (songHunt.hints.length === 0) return "At least one hint is required";
+		for (let i = 0; i < songHunt.hints.length; i++) {
+			if (!songHunt.hints[i].text.trim()) return `Hint ${i + 1} text is required`;
+			if (Number.isNaN(new Date(songHunt.hints[i].unlocksAt).getTime())) {
+				return `Hint ${i + 1} unlock time is invalid`;
+			}
+		}
+		return { ...songHuntConfigToPayload(songHunt) };
+	}
+	return parseEventConfig(form.configJson);
+}
+
+function SongHuntConfigFields({
+	form,
+	setForm,
+	catalogItems,
+	fieldIdPrefix,
+}: {
+	form: EventFormState;
+	setForm: React.Dispatch<React.SetStateAction<EventFormState>>;
+	catalogItems: CatalogItem[];
+	fieldIdPrefix: string;
+}) {
+	const updateSongHunt = (patch: Partial<SongHuntConfigForm>) => {
+		setForm((f) => ({ ...f, songHunt: { ...f.songHunt, ...patch } }));
+	};
+
+	const updateHint = (index: number, patch: Partial<SongHuntHintForm>) => {
+		setForm((f) => ({
+			...f,
+			songHunt: {
+				...f.songHunt,
+				hints: f.songHunt.hints.map((h, i) => (i === index ? { ...h, ...patch } : h)),
+			},
+		}));
+	};
+
+	const addHint = () => {
+		setForm((f) => ({
+			...f,
+			songHunt: {
+				...f.songHunt,
+				hints: [
+					...f.songHunt.hints,
+					{ text: "", unlocksAt: new Date().toISOString() },
+				],
+			},
+		}));
+	};
+
+	const removeHint = (index: number) => {
+		setForm((f) => ({
+			...f,
+			songHunt: {
+				...f.songHunt,
+				hints: f.songHunt.hints.filter((_, i) => i !== index),
+			},
+		}));
+	};
+
+	const onRewardItemChange = (itemId: string) => {
+		const item = catalogItems.find((i) => i.id === itemId);
+		updateSongHunt({
+			rewardItemId: itemId,
+			rewardItemName: item?.name ?? form.songHunt.rewardItemName,
+		});
+	};
+
+	return (
+		<div className="space-y-4 border border-border rounded-sm p-4 bg-bg">
+			<p className="text-xs text-cyan">song hunt config</p>
+			<div className="grid sm:grid-cols-2 gap-4">
+				<div>
+					<label
+						className="block text-xs text-text-dim mb-1"
+						htmlFor={`${fieldIdPrefix}-track-title`}
+					>
+						track title
+					</label>
+					<input
+						id={`${fieldIdPrefix}-track-title`}
+						required
+						value={form.songHunt.trackTitle}
+						onChange={(e) => updateSongHunt({ trackTitle: e.target.value })}
+						className={INPUT}
+					/>
+				</div>
+				<div>
+					<label
+						className="block text-xs text-text-dim mb-1"
+						htmlFor={`${fieldIdPrefix}-track-artist`}
+					>
+						track artist
+					</label>
+					<input
+						id={`${fieldIdPrefix}-track-artist`}
+						required
+						value={form.songHunt.trackArtist}
+						onChange={(e) => updateSongHunt({ trackArtist: e.target.value })}
+						className={INPUT}
+					/>
+				</div>
+			</div>
+			<div className="grid sm:grid-cols-2 gap-4">
+				<div>
+					<label
+						className="block text-xs text-text-dim mb-1"
+						htmlFor={`${fieldIdPrefix}-reward-item`}
+					>
+						reward item
+					</label>
+					<select
+						id={`${fieldIdPrefix}-reward-item`}
+						required
+						value={form.songHunt.rewardItemId}
+						onChange={(e) => onRewardItemChange(e.target.value)}
+						className={INPUT}
+					>
+						<option value="">select item…</option>
+						{form.songHunt.rewardItemId &&
+							!catalogItems.some((i) => i.id === form.songHunt.rewardItemId) && (
+								<option value={form.songHunt.rewardItemId}>
+									{form.songHunt.rewardItemId} (not in catalog)
+								</option>
+							)}
+						{catalogItems.map((item) => (
+							<option key={item.id} value={item.id}>
+								{item.name} ({item.id})
+							</option>
+						))}
+					</select>
+					{form.songHunt.rewardItemId &&
+						!catalogItems.some((i) => i.id === form.songHunt.rewardItemId) && (
+							<p className="text-yellow text-xs mt-1">
+								Item not in catalog — will be auto-created on save if name is set.
+							</p>
+						)}
+				</div>
+				<div>
+					<label
+						className="block text-xs text-text-dim mb-1"
+						htmlFor={`${fieldIdPrefix}-reward-name`}
+					>
+						reward item name (auto-create)
+					</label>
+					<input
+						id={`${fieldIdPrefix}-reward-name`}
+						value={form.songHunt.rewardItemName}
+						onChange={(e) => updateSongHunt({ rewardItemName: e.target.value })}
+						className={INPUT}
+						placeholder="used when item id is new"
+					/>
+				</div>
+			</div>
+			<div className="max-w-xs">
+				<label
+					className="block text-xs text-text-dim mb-1"
+					htmlFor={`${fieldIdPrefix}-max-claims`}
+				>
+					max claims
+				</label>
+				<input
+					id={`${fieldIdPrefix}-max-claims`}
+					type="number"
+					min={1}
+					required
+					value={form.songHunt.maxClaims}
+					onChange={(e) => updateSongHunt({ maxClaims: e.target.value })}
+					className={INPUT}
+				/>
+			</div>
+			<div>
+				<div className="flex items-center justify-between gap-4 mb-2">
+					<span className="text-xs text-text-dim">hints (unlock in order by date)</span>
+					<button
+						type="button"
+						onClick={addHint}
+						className="text-xs text-purple bg-transparent border border-border px-2 py-1 rounded-sm cursor-pointer hover:border-purple"
+					>
+						+ add hint
+					</button>
+				</div>
+				<div className="space-y-3">
+					{form.songHunt.hints.map((hint, index) => (
+						<div
+							key={`${index}-${hint.unlocksAt}`}
+							className="border border-border/60 rounded-sm p-3 space-y-3 bg-bg-panel"
+						>
+							<div className="flex items-center justify-between gap-2">
+								<span className="text-xs text-text-dim">hint {index + 1}</span>
+								{form.songHunt.hints.length > 1 && (
+									<button
+										type="button"
+										onClick={() => removeHint(index)}
+										className="text-xs text-red bg-transparent border-0 cursor-pointer"
+									>
+										remove
+									</button>
+								)}
+							</div>
+							<div>
+								<label
+									className="block text-xs text-text-dim mb-1"
+									htmlFor={`${fieldIdPrefix}-hint-${index}-text`}
+								>
+									text
+								</label>
+								<input
+									id={`${fieldIdPrefix}-hint-${index}-text`}
+									required
+									value={hint.text}
+									onChange={(e) => updateHint(index, { text: e.target.value })}
+									className={INPUT}
+								/>
+							</div>
+							<div>
+								<label
+									className="block text-xs text-text-dim mb-1"
+									htmlFor={`${fieldIdPrefix}-hint-${index}-unlock`}
+								>
+									unlocks at (UTC stored as ISO)
+								</label>
+								<input
+									id={`${fieldIdPrefix}-hint-${index}-unlock`}
+									type="datetime-local"
+									required
+									value={toLocalDatetimeValue(hint.unlocksAt)}
+									onChange={(e) =>
+										updateHint(index, { unlocksAt: fromLocalDatetimeValue(e.target.value) })
+									}
+									className={INPUT}
+								/>
+							</div>
+						</div>
+					))}
+				</div>
+			</div>
+		</div>
+	);
+}
+
 function EventForm({
 	form,
 	setForm,
@@ -216,6 +544,7 @@ function EventForm({
 	onCancel,
 	submitLabel,
 	disabled,
+	catalogItems,
 }: {
 	form: EventFormState;
 	setForm: React.Dispatch<React.SetStateAction<EventFormState>>;
@@ -223,6 +552,7 @@ function EventForm({
 	onCancel?: () => void;
 	submitLabel: string;
 	disabled?: boolean;
+	catalogItems: CatalogItem[];
 }) {
 	return (
 		<form onSubmit={onSubmit} className="space-y-4">
@@ -236,11 +566,16 @@ function EventForm({
 						value={form.type}
 						onChange={(e) => {
 							const type = e.target.value;
-							setForm((f) => ({
-								...f,
-								type,
-								configJson: f.id ? f.configJson : (DEFAULT_CONFIGS[type] ?? f.configJson),
-							}));
+							setForm((f) => {
+								if (f.id) return { ...f, type };
+								return {
+									...f,
+									type,
+									configJson: DEFAULT_CONFIGS[type] ?? f.configJson,
+									songHunt:
+										type === "song_hunt" ? defaultSongHuntConfig() : f.songHunt,
+								};
+							});
 						}}
 						className={INPUT}
 					>
@@ -312,18 +647,30 @@ function EventForm({
 				/>
 				active
 			</label>
-			<div>
-				<label className="block text-xs text-text-dim mb-1" htmlFor={`${form.id ?? "new"}-ev-config`}>
-					config (json)
-				</label>
-				<textarea
-					id={`${form.id ?? "new"}-ev-config`}
-					rows={10}
-					value={form.configJson}
-					onChange={(e) => setForm((f) => ({ ...f, configJson: e.target.value }))}
-					className={`${INPUT} text-xs font-mono`}
+			{form.type === "song_hunt" ? (
+				<SongHuntConfigFields
+					form={form}
+					setForm={setForm}
+					catalogItems={catalogItems}
+					fieldIdPrefix={form.id ?? "new"}
 				/>
-			</div>
+			) : (
+				<div>
+					<label
+						className="block text-xs text-text-dim mb-1"
+						htmlFor={`${form.id ?? "new"}-ev-config`}
+					>
+						config (json)
+					</label>
+					<textarea
+						id={`${form.id ?? "new"}-ev-config`}
+						rows={10}
+						value={form.configJson}
+						onChange={(e) => setForm((f) => ({ ...f, configJson: e.target.value }))}
+						className={`${INPUT} text-xs font-mono`}
+					/>
+				</div>
+			)}
 			<div className="flex gap-3">
 				<button
 					type="submit"
@@ -510,10 +857,12 @@ function EventRow({
 	event,
 	secret,
 	onChange,
+	catalogItems,
 }: {
 	event: AdminEvent;
 	secret: string;
 	onChange: () => void;
+	catalogItems: CatalogItem[];
 }) {
 	const now = new Date();
 	const status = getEventStatus(event, now);
@@ -567,7 +916,7 @@ function EventRow({
 
 	const saveEdit = async (e: React.FormEvent) => {
 		e.preventDefault();
-		const config = parseEventConfig(form.configJson);
+		const config = buildEventConfig(form);
 		if (typeof config === "string") {
 			setError(config);
 			return;
@@ -665,6 +1014,7 @@ function EventRow({
 							}}
 							submitLabel="save changes"
 							disabled={busy}
+							catalogItems={catalogItems}
 						/>
 						{error && <p className="text-red text-xs mt-2">{error}</p>}
 					</td>
@@ -794,11 +1144,13 @@ function EventsTable({
 	secret,
 	onChange,
 	emptyLabel,
+	catalogItems,
 }: {
 	events: AdminEvent[];
 	secret: string;
 	onChange: () => void;
 	emptyLabel: string;
+	catalogItems: CatalogItem[];
 }) {
 	if (events.length === 0) {
 		return <p className="text-text-dim text-xs py-4">{emptyLabel}</p>;
@@ -818,7 +1170,13 @@ function EventsTable({
 				</thead>
 				<tbody>
 					{events.map((e) => (
-						<EventRow key={e.id} event={e} secret={secret} onChange={onChange} />
+						<EventRow
+							key={e.id}
+							event={e}
+							secret={secret}
+							onChange={onChange}
+							catalogItems={catalogItems}
+						/>
 					))}
 				</tbody>
 			</table>
@@ -899,7 +1257,7 @@ export function GameAdmin() {
 	const createEvent = async (e: React.FormEvent) => {
 		e.preventDefault();
 		if (!secret) return;
-		const config = parseEventConfig(eventForm.configJson);
+		const config = buildEventConfig(eventForm);
 		if (typeof config === "string") {
 			setError(config);
 			return;
@@ -1097,6 +1455,7 @@ export function GameAdmin() {
 							}}
 							submitLabel="create event"
 							disabled={loading}
+							catalogItems={items}
 						/>
 					</div>
 				)}
@@ -1107,6 +1466,7 @@ export function GameAdmin() {
 					secret={secret}
 					onChange={load}
 					emptyLabel="No active or scheduled events."
+					catalogItems={items}
 				/>
 
 				<h3 className="text-xs text-text-dim mb-2 mt-8 uppercase tracking-wide">previous</h3>
@@ -1115,6 +1475,7 @@ export function GameAdmin() {
 					secret={secret}
 					onChange={load}
 					emptyLabel="No ended or inactive events."
+					catalogItems={items}
 				/>
 			</section>
 		</div>
