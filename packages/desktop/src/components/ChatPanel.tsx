@@ -7,7 +7,7 @@ import {
   RARITY_LABELS,
 } from "@herzies/shared";
 import { createClient, type RealtimeChannel } from "@supabase/supabase-js";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "../lib/utils";
 import { type ChatMessage, herzies } from "../tauri-bridge";
 import ItemInspectOverlay from "./ItemInspectOverlay";
@@ -71,25 +71,60 @@ export function ChatPanel({
   const [autocompleteIndex, setAutocompleteIndex] = useState(0);
   const [userMenu, setUserMenu] = useState<UserMenuTarget | null>(null);
   const [userMenuIndex, setUserMenuIndex] = useState(0);
+  const [expanded, setExpanded] = useState(false);
+  const expandedRef = useRef(false);
+  /** In-flow height of the dock when collapsed; keeps flex layout stable while expanded (fixed) panel is out of flow. */
+  const [dockHeight, setDockHeight] = useState(88);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const bottomAnchorRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
+  const pinnedToBottomRef = useRef(true);
+  const feedAnchorFromBottomRef = useRef(0);
+  const ignoreScrollRef = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
   const atPosRef = useRef<number>(-1);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  const SCROLL_STICK_THRESHOLD_PX = 8;
+  /** Treat as "at bottom"; expanded flex layout often reports a larger gap than collapsed. */
+  const SCROLL_STICK_THRESHOLD_PX = 32;
+
+  const isNearBottom = (el: HTMLElement) => {
+    const maxTop = Math.max(0, el.scrollHeight - el.clientHeight);
+    return maxTop - el.scrollTop <= SCROLL_STICK_THRESHOLD_PX;
+  };
+
+  const pinToBottom = () => {
+    pinnedToBottomRef.current = true;
+    stickToBottomRef.current = true;
+    feedAnchorFromBottomRef.current = 0;
+  };
 
   const scrollToBottom = () => {
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    ignoreScrollRef.current = true;
+    pinToBottom();
+    bottomAnchorRef.current?.scrollIntoView({ block: "end" });
+    el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
+    requestAnimationFrame(() => {
+      bottomAnchorRef.current?.scrollIntoView({ block: "end" });
+      el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
+      requestAnimationFrame(() => {
+        ignoreScrollRef.current = false;
+      });
+    });
   };
 
   const handleFeedScroll = () => {
+    if (ignoreScrollRef.current) return;
     const el = scrollRef.current;
     if (!el) return;
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    stickToBottomRef.current = distanceFromBottom <= SCROLL_STICK_THRESHOLD_PX;
+    const near = isNearBottom(el);
+    stickToBottomRef.current = near;
+    pinnedToBottomRef.current = near;
+    if (near) feedAnchorFromBottomRef.current = 0;
   };
 
   useEffect(() => {
@@ -138,12 +173,64 @@ export function ChatPanel({
   }, [isOnline]);
 
   useEffect(() => {
+    expandedRef.current = expanded;
+  }, [expanded]);
+
+  useEffect(() => {
     setInventory(cachedInventory);
   }, [cachedInventory]);
 
   useEffect(() => {
     if (stickToBottomRef.current) scrollToBottom();
   }, [messages, activityLog]);
+
+  useEffect(() => {
+    if (expanded) return;
+    const panel = panelRef.current;
+    if (!panel) return;
+    const ro = new ResizeObserver(() => {
+      setDockHeight(panel.getBoundingClientRect().height);
+    });
+    ro.observe(panel);
+    setDockHeight(panel.getBoundingClientRect().height);
+    return () => ro.disconnect();
+  }, [expanded]);
+
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    const applyFeedScroll = () => {
+      if (pinnedToBottomRef.current) {
+        ignoreScrollRef.current = true;
+        bottomAnchorRef.current?.scrollIntoView({ block: "end" });
+        el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
+        pinToBottom();
+        return;
+      }
+      const maxTop = Math.max(0, el.scrollHeight - el.clientHeight);
+      const target = maxTop - feedAnchorFromBottomRef.current;
+      el.scrollTop = Math.min(maxTop, Math.max(0, target));
+    };
+
+    applyFeedScroll();
+    const ro = new ResizeObserver(applyFeedScroll);
+    ro.observe(el);
+    const raf1 = requestAnimationFrame(() => {
+      applyFeedScroll();
+      requestAnimationFrame(() => {
+        applyFeedScroll();
+        ro.disconnect();
+        ignoreScrollRef.current = false;
+      });
+    });
+
+    return () => {
+      cancelAnimationFrame(raf1);
+      ro.disconnect();
+      ignoreScrollRef.current = false;
+    };
+  }, [expanded]);
 
   useEffect(() => {
     if (!userMenu) return;
@@ -174,6 +261,48 @@ export function ChatPanel({
   const closeUserMenu = () => {
     setUserMenu(null);
     setUserMenuIndex(0);
+  };
+
+  const captureFeedScrollAnchor = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    if (isNearBottom(el)) {
+      pinToBottom();
+      return;
+    }
+    pinnedToBottomRef.current = false;
+    stickToBottomRef.current = false;
+    feedAnchorFromBottomRef.current = Math.max(
+      0,
+      el.scrollHeight - el.scrollTop - el.clientHeight,
+    );
+  };
+
+  const collapseChat = () => {
+    const el = scrollRef.current;
+    if (el && (pinnedToBottomRef.current || isNearBottom(el))) {
+      pinToBottom();
+    } else {
+      captureFeedScrollAnchor();
+    }
+    setExpanded(false);
+    setShowAutocomplete(false);
+    closeUserMenu();
+    inputRef.current?.blur();
+  };
+
+  const handleInputFocus = () => {
+    captureFeedScrollAnchor();
+    setExpanded(true);
+    pinToBottom();
+  };
+
+  const handleInputBlur = () => {
+    requestAnimationFrame(() => {
+      if (!expandedRef.current) return;
+      if (panelRef.current?.contains(document.activeElement)) return;
+      collapseChat();
+    });
   };
 
   const runUserMenuAction = async (
@@ -323,6 +452,11 @@ export function ChatPanel({
         return;
       }
     }
+    if (e.key === "Escape" && expanded) {
+      e.preventDefault();
+      collapseChat();
+      return;
+    }
     if (e.key === "Enter" && !showAutocomplete) {
       e.preventDefault();
       handleSend();
@@ -398,11 +532,37 @@ export function ChatPanel({
 
   return (
     <>
-      <div className="flex flex-col border-t border-border">
+      {expanded && (
+        <button
+          type="button"
+          aria-label="Close chat"
+          className="fixed inset-0 z-[200] cursor-default border-none bg-black/55 p-0"
+          onMouseDown={(e) => {
+            e.preventDefault();
+            collapseChat();
+          }}
+        />
+      )}
+
+      <div
+        className="shrink-0"
+        style={expanded ? { height: dockHeight } : undefined}
+      >
+        <div
+          ref={panelRef}
+          className={cn(
+            "flex flex-col border-t border-border",
+            expanded &&
+              "fixed inset-x-3 bottom-10 z-[201] h-[50vh] max-h-[50vh] bg-bg-panel shadow-[0_-8px_32px_rgba(0,0,0,0.45)] ring-1 ring-border",
+          )}
+        >
         <div
           ref={scrollRef}
           onScroll={handleFeedScroll}
-          className="max-h-[58px] min-h-5 overflow-auto py-0.5"
+          className={cn(
+            "min-h-5 overflow-auto py-0.5",
+            expanded ? "min-h-0 flex-1" : "max-h-[58px]",
+          )}
         >
           {feed.length === 0 && (
             <div className="py-0.5 text-center text-ui-sm text-[#444]">
@@ -460,6 +620,7 @@ export function ChatPanel({
               </div>
             );
           })}
+          <div ref={bottomAnchorRef} aria-hidden className="h-0 shrink-0" />
         </div>
 
         {isOnline && (
@@ -533,6 +694,8 @@ export function ChatPanel({
                 placeholder="Type a message... (@ for items)"
                 value={input}
                 onChange={handleInputChange}
+                onFocus={handleInputFocus}
+                onBlur={handleInputBlur}
                 onKeyDown={handleKeyDown}
                 maxLength={CHAT_MESSAGE_MAX_LENGTH}
               />
@@ -550,6 +713,7 @@ export function ChatPanel({
             </div>
           </div>
         )}
+        </div>
       </div>
 
       {inspectItem && (
