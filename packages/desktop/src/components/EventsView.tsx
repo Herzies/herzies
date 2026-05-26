@@ -148,7 +148,7 @@ export function EventsView() {
 
                 <div className="flex flex-col gap-1">
                   <h2 className="text-ui font-bold text-text-dim">Finders:</h2>
-                  <div>
+                  <div className="max-h-28 overflow-y-auto">
                     {previousHuntConfig?.firstFinders?.map((finder, i) => (
                       <div key={finder.name} className="text-ui text-yellow">
                         {i + 1}. {finder.name}
@@ -193,6 +193,7 @@ export function EventsView() {
       <div className="grid flex-1 place-items-center">
         <div>
           <div className="text-center">{hunt.title}</div>
+          <div className="text-ui-sm text-text-dim">{hunt.description}</div>
 
           <div className="mt-3 flex flex-col gap-0.5 text-center text-[10px] text-text-dim">
             <div>Duration: {formatCountdown(hunt.endsAt)}</div>
@@ -219,13 +220,6 @@ export function EventsView() {
       </div>
 
       <div>
-        <div className="my-2.5 border-t border-b border-border py-2.5">
-          <div className="mb-1.5 text-[10px] text-text-dim">How to play</div>
-          <div className="text-ui text-text">
-            Decipher the clues and play the song.
-          </div>
-        </div>
-
         <div>
           <div className="mb-2.5">
             <div className="mb-1 text-[10px] text-text-dim">Clues</div>
@@ -262,17 +256,21 @@ export function EventsView() {
             </div>
             {config?.firstFinders?.length &&
             config?.firstFinders?.length > 0 ? (
-              config?.firstFinders?.slice(0, 5).map((finder) => (
-                <div
-                  key={finder.name}
-                  className="flex justify-between border-b border-border py-0.5 text-ui last:border-b-0"
-                >
-                  <span className="text-yellow">{finder.name}</span>
-                  <span className="text-text-dim">
-                    {timeAgo(finder.claimedAt)}
-                  </span>
-                </div>
-              ))
+              <div className="max-h-28 overflow-y-auto">
+                {config.firstFinders.map((finder, i) => (
+                  <div
+                    key={`${finder.name}-${finder.claimedAt}`}
+                    className="flex justify-between border-b border-border py-0.5 text-ui last:border-b-0"
+                  >
+                    <span className="text-yellow">
+                      {i + 1}. {finder.name}
+                    </span>
+                    <span className="text-text-dim">
+                      {timeAgo(finder.claimedAt)}
+                    </span>
+                  </div>
+                ))}
+              </div>
             ) : (
               <div className="text-ui text-text-dim">
                 No one has found it yet...

@@ -8,20 +8,9 @@ import {
 } from "@herzies/shared";
 import { createClient, type RealtimeChannel } from "@supabase/supabase-js";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { cn } from "../lib/utils";
+import { chatUserColor, cn } from "../lib/utils";
 import { type ChatMessage, herzies } from "../tauri-bridge";
 import ItemInspectOverlay from "./ItemInspectOverlay";
-
-const CHAT_COLORS = [
-  "#7dd3fc",
-  "#fca5a5",
-  "#86efac",
-  "#fde047",
-  "#c4b5fd",
-  "#fdba74",
-  "#f9a8d4",
-  "#67e8f9",
-];
 
 type UserMenuTarget = {
   username: string;
@@ -36,13 +25,6 @@ const USER_MENU_ITEMS = [
 
 const DROPDOWN_ROW_CLASS =
   "cursor-pointer px-2 py-0.5 text-[10px] bg-transparent hover:bg-[#333]";
-
-function usernameColor(name: string): string {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++)
-    hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0;
-  return CHAT_COLORS[Math.abs(hash) % CHAT_COLORS.length];
-}
 
 export function ChatPanel({
   activityLog,
@@ -72,7 +54,6 @@ export function ChatPanel({
   const [userMenu, setUserMenu] = useState<UserMenuTarget | null>(null);
   const [userMenuIndex, setUserMenuIndex] = useState(0);
   const [expanded, setExpanded] = useState(false);
-  const expandedRef = useRef(false);
   /** In-flow height of the dock when collapsed; keeps flex layout stable while expanded (fixed) panel is out of flow. */
   const [dockHeight, setDockHeight] = useState(88);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -171,10 +152,6 @@ export function ChatPanel({
       }
     };
   }, [isOnline]);
-
-  useEffect(() => {
-    expandedRef.current = expanded;
-  }, [expanded]);
 
   useEffect(() => {
     setInventory(cachedInventory);
@@ -295,14 +272,6 @@ export function ChatPanel({
     captureFeedScrollAnchor();
     setExpanded(true);
     pinToBottom();
-  };
-
-  const handleInputBlur = () => {
-    requestAnimationFrame(() => {
-      if (!expandedRef.current) return;
-      if (panelRef.current?.contains(document.activeElement)) return;
-      collapseChat();
-    });
   };
 
   const runUserMenuAction = async (
@@ -556,163 +525,168 @@ export function ChatPanel({
               "fixed inset-x-3 bottom-10 z-[201] h-[50vh] max-h-[50vh] bg-bg-panel shadow-[0_-8px_32px_rgba(0,0,0,0.45)] ring-1 ring-border",
           )}
         >
-        <div
-          ref={scrollRef}
-          onScroll={handleFeedScroll}
-          className={cn(
-            "min-h-5 overflow-auto py-0.5",
-            expanded ? "min-h-0 flex-1" : "max-h-[58px]",
-          )}
-        >
-          {feed.length === 0 && (
-            <div className="py-0.5 text-center text-ui-sm text-[#444]">
-              No messages yet
-            </div>
-          )}
-          {feed.map((entry, i) => {
-            if (entry.kind === "activity") {
-              const d = new Date(entry.time);
-              const display = `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
+          <div
+            ref={scrollRef}
+            onScroll={handleFeedScroll}
+            className={cn(
+              "min-h-5 overflow-auto py-0.5",
+              expanded ? "min-h-0 flex-1" : "max-h-[58px]",
+            )}
+          >
+            {feed.length === 0 && (
+              <div className="py-0.5 text-center text-ui-sm text-[#444]">
+                No messages yet
+              </div>
+            )}
+            {feed.map((entry, i) => {
+              if (entry.kind === "activity") {
+                const d = new Date(entry.time);
+                const display = `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
+                return (
+                  <div
+                    key={`a-${i}`}
+                    className="break-words text-ui-sm leading-[14px] text-text-dim"
+                  >
+                    <span className="text-text-dim">{display}</span>{" "}
+                    {entry.message}
+                  </div>
+                );
+              }
+              const { msg } = entry;
+              const ts = new Date(msg.createdAt);
+              const time = `${ts.getHours().toString().padStart(2, "0")}:${ts.getMinutes().toString().padStart(2, "0")}`;
               return (
                 <div
-                  key={`a-${i}`}
-                  className="break-words text-ui-sm leading-[14px] text-text-dim"
+                  key={msg.id}
+                  className="break-words text-ui-sm leading-[14px]"
                 >
-                  <span className="text-text-dim">{display}</span>{" "}
-                  {entry.message}
+                  <span className="text-text-dim">{time}</span>{" "}
+                  <button
+                    type="button"
+                    className={cn(
+                      "cursor-pointer rounded-sm border-none bg-transparent px-0.5 py-px font-bold underline decoration-dotted underline-offset-2 transition-[background-color,filter] hover:brightness-125 hover:decoration-solid",
+                      userMenu?.username === msg.username
+                        ? "bg-[#333] decoration-solid"
+                        : "hover:bg-[#333]/60 active:bg-[#333]",
+                    )}
+                    style={{
+                      color: chatUserColor(
+                        msg.friendCode ?? msg.userId ?? msg.username,
+                      ),
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setUserMenu({
+                        username: msg.username,
+                        friendCode: msg.friendCode,
+                      });
+                      setUserMenuIndex(0);
+                      setShowAutocomplete(false);
+                    }}
+                  >
+                    {msg.username}
+                  </button>
+                  <span className="text-text-dim">:</span>{" "}
+                  <span className="text-text">
+                    {renderMessageContent(msg.content, msg.itemRefs)}
+                  </span>
                 </div>
               );
-            }
-            const { msg } = entry;
-            const ts = new Date(msg.createdAt);
-            const time = `${ts.getHours().toString().padStart(2, "0")}:${ts.getMinutes().toString().padStart(2, "0")}`;
-            return (
-              <div
-                key={msg.id}
-                className="break-words text-ui-sm leading-[14px]"
-              >
-                <span className="text-text-dim">{time}</span>{" "}
+            })}
+            <div ref={bottomAnchorRef} aria-hidden className="h-0 shrink-0" />
+          </div>
+
+          {isOnline && (
+            <div className="relative">
+              {userMenu && (
+                <div
+                  ref={menuRef}
+                  className="absolute bottom-full left-0 right-0 z-[100] overflow-hidden rounded border border-[#444] bg-bg-panel"
+                >
+                  {USER_MENU_ITEMS.map((item, i) => {
+                    const disabled = isMenuItemDisabled(item.id);
+                    const isReport = item.id === "report";
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        disabled={disabled && !isReport}
+                        onMouseEnter={() => setUserMenuIndex(i)}
+                        onClick={() => {
+                          if (isReport) {
+                            void runUserMenuAction("report");
+                            return;
+                          }
+                          if (!disabled) void runUserMenuAction(item.id);
+                        }}
+                        className={cn(
+                          "block w-full border-none text-left",
+                          DROPDOWN_ROW_CLASS,
+                          i === userMenuIndex && "bg-[#333]",
+                          disabled && !isReport
+                            ? "cursor-not-allowed opacity-40 hover:bg-transparent"
+                            : isReport
+                              ? "cursor-not-allowed opacity-50 hover:bg-transparent"
+                              : "text-text",
+                        )}
+                      >
+                        {item.label}
+                        {isReport && (
+                          <span className="ml-1 text-text-dim">(soon)</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {showAutocomplete &&
+                autocompleteItems.length > 0 &&
+                !userMenu && (
+                  <div className="absolute bottom-full left-0 right-0 z-[100] max-h-[88px] overflow-auto rounded border border-[#444] bg-bg-panel">
+                    {autocompleteItems.map((x, i) => (
+                      <div
+                        key={x.id}
+                        onMouseEnter={() => setAutocompleteIndex(i)}
+                        onClick={() => selectAutocomplete(x.id)}
+                        className={cn(
+                          DROPDOWN_ROW_CLASS,
+                          i === autocompleteIndex && "bg-[#333]",
+                        )}
+                        style={{ color: ITEM_RARITY_COLORS[x.item.rarity] }}
+                      >
+                        {x.item.name}
+                        <span className="ml-1 text-text-dim">
+                          {RARITY_LABELS[x.item.rarity]}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              <div className="flex gap-0.5 py-0.5">
+                <input
+                  ref={inputRef}
+                  className="input flex-1 text-[10px]"
+                  placeholder="Type a message... (@ for items)"
+                  value={input}
+                  onChange={handleInputChange}
+                  onFocus={handleInputFocus}
+                  onKeyDown={handleKeyDown}
+                  maxLength={CHAT_MESSAGE_MAX_LENGTH}
+                />
                 <button
                   type="button"
                   className={cn(
-                    "cursor-pointer rounded-sm border-none bg-transparent px-0.5 py-px font-bold underline decoration-dotted underline-offset-2 transition-[background-color,filter] hover:brightness-125 hover:decoration-solid",
-                    userMenu?.username === msg.username
-                      ? "bg-[#333] decoration-solid"
-                      : "hover:bg-[#333]/60 active:bg-[#333]",
+                    "btn text-ui-sm",
+                    cooldown || !input.trim() ? "opacity-50" : "opacity-100",
                   )}
-                  style={{ color: usernameColor(msg.username) }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setUserMenu({
-                      username: msg.username,
-                      friendCode: msg.friendCode,
-                    });
-                    setUserMenuIndex(0);
-                    setShowAutocomplete(false);
-                  }}
+                  disabled={cooldown || !input.trim()}
+                  onClick={handleSend}
                 >
-                  {msg.username}
+                  Send
                 </button>
-                <span className="text-text-dim">:</span>{" "}
-                <span className="text-text">
-                  {renderMessageContent(msg.content, msg.itemRefs)}
-                </span>
               </div>
-            );
-          })}
-          <div ref={bottomAnchorRef} aria-hidden className="h-0 shrink-0" />
-        </div>
-
-        {isOnline && (
-          <div className="relative">
-            {userMenu && (
-              <div
-                ref={menuRef}
-                className="absolute bottom-full left-0 right-0 z-[100] overflow-hidden rounded border border-[#444] bg-bg-panel"
-              >
-                {USER_MENU_ITEMS.map((item, i) => {
-                  const disabled = isMenuItemDisabled(item.id);
-                  const isReport = item.id === "report";
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      disabled={disabled && !isReport}
-                      onMouseEnter={() => setUserMenuIndex(i)}
-                      onClick={() => {
-                        if (isReport) {
-                          void runUserMenuAction("report");
-                          return;
-                        }
-                        if (!disabled) void runUserMenuAction(item.id);
-                      }}
-                      className={cn(
-                        "block w-full border-none text-left",
-                        DROPDOWN_ROW_CLASS,
-                        i === userMenuIndex && "bg-[#333]",
-                        disabled && !isReport
-                          ? "cursor-not-allowed opacity-40 hover:bg-transparent"
-                          : isReport
-                            ? "cursor-not-allowed opacity-50 hover:bg-transparent"
-                            : "text-text",
-                      )}
-                    >
-                      {item.label}
-                      {isReport && (
-                        <span className="ml-1 text-text-dim">(soon)</span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-            {showAutocomplete && autocompleteItems.length > 0 && !userMenu && (
-              <div className="absolute bottom-full left-0 right-0 z-[100] max-h-[88px] overflow-auto rounded border border-[#444] bg-bg-panel">
-                {autocompleteItems.map((x, i) => (
-                  <div
-                    key={x.id}
-                    onMouseEnter={() => setAutocompleteIndex(i)}
-                    onClick={() => selectAutocomplete(x.id)}
-                    className={cn(
-                      DROPDOWN_ROW_CLASS,
-                      i === autocompleteIndex && "bg-[#333]",
-                    )}
-                    style={{ color: ITEM_RARITY_COLORS[x.item.rarity] }}
-                  >
-                    {x.item.name}
-                    <span className="ml-1 text-text-dim">
-                      {RARITY_LABELS[x.item.rarity]}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-            <div className="flex gap-0.5 py-0.5">
-              <input
-                ref={inputRef}
-                className="input flex-1 text-[10px]"
-                placeholder="Type a message... (@ for items)"
-                value={input}
-                onChange={handleInputChange}
-                onFocus={handleInputFocus}
-                onBlur={handleInputBlur}
-                onKeyDown={handleKeyDown}
-                maxLength={CHAT_MESSAGE_MAX_LENGTH}
-              />
-              <button
-                type="button"
-                className={cn(
-                  "btn text-ui-sm",
-                  cooldown || !input.trim() ? "opacity-50" : "opacity-100",
-                )}
-                disabled={cooldown || !input.trim()}
-                onClick={handleSend}
-              >
-                Send
-              </button>
             </div>
-          </div>
-        )}
+          )}
         </div>
       </div>
 

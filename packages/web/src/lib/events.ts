@@ -38,7 +38,7 @@ export async function buildSongHuntConfig(
     .select("claimed_at, user_id")
     .eq("event_id", eventId)
     .order("claimed_at", { ascending: true })
-    .limit(3);
+    .limit(config.maxClaims);
 
   let firstFinders: SongHuntFinder[] = [];
   if (claims && claims.length > 0) {

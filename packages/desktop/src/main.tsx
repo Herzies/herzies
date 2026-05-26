@@ -84,10 +84,7 @@ function App() {
   }, []);
 
   const refreshEventIndicator = useCallback(() => {
-    Promise.all([
-      herzies.fetchActiveEvents(),
-      herzies.fetchPreviousHunt(),
-    ])
+    Promise.all([herzies.fetchActiveEvents(), herzies.fetchPreviousHunt()])
       .then(([active, previous]) => {
         const hunt = active.events.find((e) => e.type === "song_hunt");
         const previousHunt = previous.events[0] ?? null;
