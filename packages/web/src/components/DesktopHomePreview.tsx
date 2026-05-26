@@ -84,8 +84,8 @@ export function DesktopHomePreview() {
           </span>
         </div>
 
-        {/* Herzie — takes available space */}
-        <div className="relative z-10 flex-1 flex items-center justify-center min-h-0">
+        {/* Herzie — takes available space; full-width drag hit target */}
+        <div className="relative z-10 flex min-h-0 flex-1 w-full items-center justify-center">
           <Herzie3D
             userId={MOCK.name}
             stage={MOCK.stage}
@@ -93,6 +93,7 @@ export function DesktopHomePreview() {
             isPlaying
             ariaLabel={`A stage ${MOCK.stage} herzie named ${MOCK.name}`}
             defaultAngle={50}
+            wrapperStyle={{ width: "100%", height: "100%" }}
           />
         </div>
 

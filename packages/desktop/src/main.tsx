@@ -18,7 +18,12 @@ import { SplashScreen } from "./components/SplashScreen";
 import { TabBar, type View } from "./components/TabBar";
 import { TradeView } from "./components/TradeView";
 import { cn } from "./lib/utils";
-import { type AppState, checkForUpdate, herzies } from "./tauri-bridge";
+import {
+  type AppState,
+  checkForUpdate,
+  herzies,
+  useWindowFocused,
+} from "./tauri-bridge";
 
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6h
 
@@ -46,7 +51,10 @@ function App() {
   const [stageOverride, setStageOverride] = useState<number | null>(null);
   const [previewOnboarding, setPreviewOnboarding] = useState(false);
   const [availableUpdate, setAvailableUpdate] = useState<Update | null>(null);
+  const [hasActiveEvent, setHasActiveEvent] = useState(false);
+  const [chatProfileCode, setChatProfileCode] = useState<string | null>(null);
   const notifiedVersionRef = useRef<string | null>(null);
+  const focused = useWindowFocused();
 
   const addLog = useCallback((message: string) => {
     const time = new Date().toISOString();
@@ -74,6 +82,32 @@ function App() {
       unlistenDeepLink();
     };
   }, []);
+
+  const refreshEventIndicator = useCallback(() => {
+    Promise.all([
+      herzies.fetchActiveEvents(),
+      herzies.fetchPreviousHunt(),
+    ])
+      .then(([active, previous]) => {
+        const hunt = active.events.find((e) => e.type === "song_hunt");
+        const previousHunt = previous.events[0] ?? null;
+        // Match EventsView: active hunt, or between-hunts countdown content
+        setHasActiveEvent(!!hunt || (!hunt && !!previousHunt));
+      })
+      .catch(() => setHasActiveEvent(false));
+  }, []);
+
+  useEffect(() => {
+    if (!state.isOnline) return;
+    refreshEventIndicator();
+  }, [state.isOnline, refreshEventIndicator]);
+
+  useEffect(() => {
+    if (!focused || !state.isOnline) return;
+    refreshEventIndicator();
+    const interval = setInterval(refreshEventIndicator, 60_000);
+    return () => clearInterval(interval);
+  }, [focused, state.isOnline, refreshEventIndicator]);
 
   // Reset to home screen when logging back in
   const prevOnline = useRef(state.isOnline);
@@ -174,6 +208,8 @@ function App() {
               friends={state.friends}
               onStartTrade={handleStartTrade}
               stageOverride={stageOverride}
+              openProfileCode={chatProfileCode}
+              onProfileOpened={() => setChatProfileCode(null)}
             />
           </div>
         )}
@@ -250,10 +286,22 @@ function App() {
           isOnline={state.isOnline}
           messages={state.chatMessages}
           inventory={state.inventory}
+          herzie={herzie}
+          onOpenProfile={(code) => {
+            setChatProfileCode(code);
+            switchView("friends");
+          }}
+          onActivity={addLog}
         />
       )}
 
-      {herzie && <TabBar view={view} setView={switchView} />}
+      {herzie && (
+        <TabBar
+          view={view}
+          setView={switchView}
+          hasActiveEvent={hasActiveEvent}
+        />
+      )}
     </div>
   );
 }

@@ -1,26 +1,33 @@
 import type { Herzie, HerzieProfile } from "@herzies/shared";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "../lib/utils";
-import { herzies } from "../tauri-bridge";
+import { herzies, useWindowFocused } from "../tauri-bridge";
 import { ProfileView } from "./ProfileView";
 import { View } from "./View";
+
+const FRIEND_POLL_MS = 15_000;
 
 export function FriendsView({
   herzie,
   friends,
   onStartTrade,
   stageOverride,
+  openProfileCode,
+  onProfileOpened,
 }: {
   herzie: Herzie;
   friends: Record<string, HerzieProfile>;
   onStartTrade: (code: string) => void;
   stageOverride?: number | null;
+  openProfileCode?: string | null;
+  onProfileOpened?: () => void;
 }) {
   const [addCode, setAddCode] = useState("");
   const [message, setMessage] = useState("");
   const [selectedFriend, setSelectedFriend] = useState<HerzieProfile | null>(
     null,
   );
+  const focused = useWindowFocused();
 
   const friendCodesKey = herzie.friendCodes.join(",");
   const friendsRef = useRef(friends);
@@ -34,6 +41,32 @@ export function FriendsView({
     herzies.friendLookup(codes);
   }, [friendCodesKey]);
 
+  // Poll friend profiles while focused (now playing / online status).
+  useEffect(() => {
+    if (!focused || !friendCodesKey) return;
+    const codes = friendCodesKey.split(",");
+    const poll = () => herzies.friendLookup(codes);
+    poll();
+    const interval = setInterval(poll, FRIEND_POLL_MS);
+    return () => clearInterval(interval);
+  }, [focused, friendCodesKey]);
+
+  // Open profile from chat (or other external navigation).
+  useEffect(() => {
+    if (!openProfileCode) return;
+    const cached = friendsRef.current[openProfileCode];
+    if (cached) {
+      setSelectedFriend(cached);
+      onProfileOpened?.();
+      return;
+    }
+    herzies.friendLookup([openProfileCode]).then((result) => {
+      const profile = result[openProfileCode];
+      if (profile) setSelectedFriend(profile);
+      onProfileOpened?.();
+    });
+  }, [openProfileCode, onProfileOpened]);
+
   const handleAdd = async () => {
     const code = addCode.trim().toUpperCase();
     if (!code) return;
@@ -46,6 +79,12 @@ export function FriendsView({
   const handleRemove = async (code: string) => {
     const result = await herzies.friendRemove(code);
     setMessage(result.message);
+    setTimeout(() => setMessage(""), 3000);
+  };
+
+  const copyFriendCode = async () => {
+    await navigator.clipboard.writeText(herzie.friendCode);
+    setMessage(`Copied ${herzie.friendCode}!`);
     setTimeout(() => setMessage(""), 3000);
   };
 
@@ -70,6 +109,11 @@ export function FriendsView({
   const showLoading =
     herzie.friendCodes.length > 0 &&
     herzie.friendCodes.some((code) => !friends[code]);
+
+  const sortedCodes = [...herzie.friendCodes].sort(
+    (a, b) =>
+      Number(!!friends[b]?.nowPlaying) - Number(!!friends[a]?.nowPlaying),
+  );
 
   return (
     <View
@@ -103,7 +147,14 @@ export function FriendsView({
 
       <div className="mb-2 text-[10px] text-text-dim">
         Your code:{" "}
-        <span className="font-bold text-cyan">{herzie.friendCode}</span>
+        <button
+          type="button"
+          className="cursor-pointer border-none bg-transparent p-0 font-bold text-cyan hover:text-cyan/80"
+          title="Copy friend code"
+          onClick={copyFriendCode}
+        >
+          {herzie.friendCode}
+        </button>
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto">
@@ -112,8 +163,9 @@ export function FriendsView({
             No friends yet. Share your code above!
           </div>
         ) : (
-          herzie.friendCodes.map((code) => {
+          sortedCodes.map((code) => {
             const profile = friends[code];
+            const online = !!profile?.nowPlaying;
             return (
               <div
                 key={code}
@@ -122,20 +174,42 @@ export function FriendsView({
                 <button
                   type="button"
                   className={cn(
-                    "text-left py-2 w-full group",
+                    "text-left py-1.5 w-full group",
                     profile ? "cursor-pointer" : "",
                   )}
                   onClick={() => profile && setSelectedFriend(profile)}
                 >
-                  <div className="text-ui text-text group-hover:text-cyan">
+                  <div className="flex items-center gap-1 text-ui text-text group-hover:text-cyan">
+                    {online && (
+                      <span className="text-cyan" title="Listening now">
+                        ●
+                      </span>
+                    )}
                     {profile?.name ?? code}
                   </div>
-                  <div className="text-[10px] text-text-dim">
-                    {profile
-                      ? `Lv.${profile.level} · Stage ${profile.stage}`
-                      : showLoading
-                        ? "Loading..."
-                        : code}
+                  <div
+                    className={cn(
+                      "text-[10px] line-clamp-1",
+                      online ? "text-cyan" : "text-text-dim",
+                    )}
+                  >
+                    {profile ? (
+                      online && profile.nowPlaying ? (
+                        <>
+                          ♪ {profile.nowPlaying.title}
+                          <span className="text-text-dim">
+                            {" "}
+                            — {profile.nowPlaying.artist}
+                          </span>
+                        </>
+                      ) : (
+                        `Lv.${profile.level} · Stage ${profile.stage}`
+                      )
+                    ) : showLoading ? (
+                      "Loading..."
+                    ) : (
+                      code
+                    )}
                   </div>
                 </button>
               </div>

@@ -3,6 +3,17 @@ import { useState } from "react";
 import { BackButton } from "./BackButton";
 import { View } from "./View";
 
+function formatTimeAgo(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
 export function ProfileView({
   profile,
   onBack,
@@ -31,6 +42,7 @@ export function ProfileView({
           <Herzie3D
             userId={profile.friendCode}
             stage={stageOverride ?? profile.stage}
+            isPlaying={!!profile.nowPlaying}
             wearables={profile.equipped ?? []}
           />
         </div>
@@ -40,6 +52,35 @@ export function ProfileView({
         <span>Level {profile.level}</span>
         <span>Stage {profile.stage}</span>
       </div>
+
+      {profile.nowPlaying ? (
+        <div className="mb-2">
+          <div className="mb-1 text-[10px] text-text-dim">Now playing</div>
+          <div className="text-ui text-cyan line-clamp-2">
+            ♪ {profile.nowPlaying.title}
+            <span className="text-text-dim">
+              {" "}
+              — {profile.nowPlaying.artist}
+            </span>
+          </div>
+        </div>
+      ) : profile.lastPlayed ? (
+        <div className="mb-2">
+          <div className="mb-1 text-[10px] text-text-dim">Last played</div>
+          <div className="flex justify-between gap-2 text-ui">
+            <span className="min-w-0 line-clamp-2 text-cyan">
+              ♪ {profile.lastPlayed.title}
+              <span className="text-text-dim">
+                {" "}
+                — {profile.lastPlayed.artist}
+              </span>
+            </span>
+            <span className="shrink-0 text-[10px] text-text-dim">
+              {formatTimeAgo(profile.lastPlayed.listenedAt)}
+            </span>
+          </div>
+        </div>
+      ) : null}
 
       {profile.topArtists && profile.topArtists.length > 0 && (
         <div className="mb-2">

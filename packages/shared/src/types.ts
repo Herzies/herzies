@@ -65,6 +65,12 @@ export interface HerzieProfile {
   appearance?: HerzieAppearance;
   topArtists?: { name: string; plays: number }[];
   equipped?: string[];
+  nowPlaying?: { title: string; artist: string } | null;
+  lastPlayed?: {
+    title: string;
+    artist: string;
+    listenedAt: string;
+  } | null;
 }
 
 // --- Game Server API types ---

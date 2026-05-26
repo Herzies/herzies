@@ -46,7 +46,7 @@ interface Props {
   wrapperStyle?: CSSProperties;
   wrapperClassName?: string;
   ariaLabel?: string;
-  /** Angle in radians for the herzie. */
+  /** Y-axis rotation offset in radians (added to the default tilt). */
   defaultAngle?: number;
 }
 
@@ -68,7 +68,6 @@ export function Herzie3D({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [frame, setFrame] = useState(0);
   const [dragAngle, setDragAngle] = useState(defaultAngle);
-  const [hasDragged, setHasDragged] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [dancing, setDancing] = useState(false);
   const dragging = useRef(false);
@@ -79,6 +78,7 @@ export function Herzie3D({
   const velocity = useRef(0);
   const momentumRaf = useRef(0);
 
+  const hasDragged = dragAngle !== 0;
   const wantsDancing = animate !== false && isPlaying;
 
   useEffect(() => {
@@ -186,7 +186,6 @@ export function Herzie3D({
       lastMoveTime.current = now;
 
       const deltaX = e.clientX - dragStartX.current;
-      setHasDragged(true);
       setDragAngle(dragStartAngle.current - deltaX * DRAG_SENSITIVITY);
     },
     [draggable],

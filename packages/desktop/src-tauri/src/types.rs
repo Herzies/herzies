@@ -52,6 +52,10 @@ pub struct HerzieProfile {
     pub top_artists: Option<Vec<TopArtist>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub equipped: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub now_playing: Option<ProfileNowPlaying>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_played: Option<ProfileLastPlayed>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,6 +63,21 @@ pub struct HerzieProfile {
 pub struct TopArtist {
     pub name: String,
     pub plays: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileNowPlaying {
+    pub title: String,
+    pub artist: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileLastPlayed {
+    pub title: String,
+    pub artist: String,
+    pub listened_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -211,6 +230,8 @@ pub struct ChatMessage {
     pub id: String,
     pub user_id: String,
     pub username: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub friend_code: Option<String>,
     pub content: String,
     pub item_refs: Vec<String>,
     pub created_at: String,

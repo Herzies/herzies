@@ -17,6 +17,7 @@ export interface ChatMessage {
   id: string;
   userId: string;
   username: string;
+  friendCode?: string | null;
   content: string;
   itemRefs: string[];
   createdAt: string;

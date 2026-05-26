@@ -1,4 +1,5 @@
 import { cn } from "../lib/utils";
+import { TabStarAccent } from "./TabStarAccent";
 
 export type View =
   | "home"
@@ -11,9 +12,11 @@ export type View =
 export function TabBar({
   view,
   setView,
+  hasActiveEvent = false,
 }: {
   view: View;
   setView: (v: View) => void;
+  hasActiveEvent?: boolean;
 }) {
   const tabs: {
     id: View;
@@ -61,7 +64,7 @@ export function TabBar({
           onClick={() => setView(t.id)}
           title={t.title}
           className={cn(
-            "flex-1 border-none bg-transparent py-1 text-[10px] cursor-pointer",
+            "relative flex-1 overflow-visible border-none bg-transparent py-1 text-[10px] cursor-pointer",
             {
               "font-bold text-cyan": view === t.id && t.colour === "cyan",
               "hover:text-cyan/80": view !== t.id && t.colour === "cyan",
@@ -74,7 +77,8 @@ export function TabBar({
             },
           )}
         >
-          {t.label}
+          {t.id === "events" && hasActiveEvent && <TabStarAccent />}
+          <span className={cn("relative z-10")}>{t.label}</span>
         </button>
       ))}
     </div>

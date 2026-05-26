@@ -14,11 +14,13 @@ function sanitizeContent(raw: string): string {
 function formatMessage(
 	msg: { id: string; user_id: string; content: string; item_refs: string[] | null; created_at: string },
 	username: string,
+	friendCode: string | null,
 ) {
 	return {
 		id: msg.id,
 		userId: msg.user_id,
 		username,
+		friendCode,
 		content: msg.content,
 		itemRefs: msg.item_refs ?? [],
 		createdAt: msg.created_at,
@@ -50,14 +52,20 @@ export async function GET(request: Request) {
 	const userIds = [...new Set(messages.map((m) => m.user_id))];
 	const { data: herzies } = await admin
 		.from("herzies")
-		.select("user_id, name")
+		.select("user_id, name, friend_code")
 		.in("user_id", userIds);
 
-	const nameMap = new Map((herzies ?? []).map((h) => [h.user_id, h.name]));
-
-	const chronological = messages.reverse().map((msg) =>
-		formatMessage(msg, nameMap.get(msg.user_id) ?? "Unknown"),
+	const herzieMap = new Map(
+		(herzies ?? []).map((h) => [
+			h.user_id,
+			{ name: h.name, friendCode: h.friend_code as string },
+		]),
 	);
+
+	const chronological = messages.reverse().map((msg) => {
+		const h = herzieMap.get(msg.user_id);
+		return formatMessage(msg, h?.name ?? "Unknown", h?.friendCode ?? null);
+	});
 
 	return NextResponse.json({ messages: chronological });
 }
@@ -113,9 +121,15 @@ export async function POST(request: Request) {
 
 	const { data: herzie } = await admin
 		.from("herzies")
-		.select("name")
+		.select("name, friend_code")
 		.eq("user_id", auth.userId)
 		.single();
 
-	return NextResponse.json({ message: formatMessage(msg, herzie?.name ?? "Unknown") });
+	return NextResponse.json({
+		message: formatMessage(
+			msg,
+			herzie?.name ?? "Unknown",
+			herzie?.friend_code ?? null,
+		),
+	});
 }

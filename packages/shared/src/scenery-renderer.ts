@@ -13,7 +13,7 @@ const SKY_ROWS = 9;
 
 const CLOUD_CHARS = [".", "-", "~", ".", "~"];
 
-const STAR_TWINKLE_VARIANTS = ["·", "+", "*", "·", "+"];
+export const STAR_TWINKLE_VARIANTS = ["·", "+", "*", "·", "+"];
 
 interface Cloud {
   row: number;
