@@ -11,6 +11,7 @@ import { ChatPanel } from "./components/ChatPanel";
 import { EventsView } from "./components/EventsView";
 import { FriendsView } from "./components/FriendsView";
 import { HomeView } from "./components/HomeView";
+import { IncomingTradeOverlay } from "./components/IncomingTradeOverlay";
 import { InventoryView } from "./components/InventoryView";
 import { OnboardingScreen } from "./components/OnboardingScreen";
 import { SettingsView } from "./components/SettingsView";
@@ -40,6 +41,7 @@ function App() {
     inventory: null,
     inventoryCurrency: 0,
     friends: {},
+    pendingTradeRequest: null,
   });
   const [view, setView] = useState<View>("home");
   const [tradeTarget, setTradeTarget] = useState<string | null>(null);
@@ -53,6 +55,13 @@ function App() {
   const [availableUpdate, setAvailableUpdate] = useState<Update | null>(null);
   const [hasActiveEvent, setHasActiveEvent] = useState(false);
   const [chatProfileCode, setChatProfileCode] = useState<string | null>(null);
+  const [ignoredIncomingTradeId, setIgnoredIncomingTradeId] = useState<
+    string | null
+  >(null);
+  const [incomingTradeDeclineBusy, setIncomingTradeDeclineBusy] =
+    useState(false);
+  /** Bumps when a trade session ends or a new one starts so TradeView remounts (clears stale tradeId). */
+  const [tradeViewGeneration, setTradeViewGeneration] = useState(0);
   const notifiedVersionRef = useRef<string | null>(null);
   const focused = useWindowFocused();
 
@@ -68,6 +77,7 @@ function App() {
     const unlistenDeepLink = herzies.onDeepLink((payload) => {
       if (payload.startsWith("trade:")) {
         const tradeId = payload.slice("trade:".length);
+        setTradeViewGeneration((g) => g + 1);
         setIncomingTradeId(tradeId);
         setTradeTarget(null);
         setView("trade");
@@ -81,7 +91,14 @@ function App() {
       unlistenActivity();
       unlistenDeepLink();
     };
-  }, []);
+  }, [addLog]);
+
+  useEffect(() => {
+    if (!state.pendingTradeRequest) {
+      setIgnoredIncomingTradeId(null);
+      setIncomingTradeDeclineBusy(false);
+    }
+  }, [state.pendingTradeRequest]);
 
   const refreshEventIndicator = useCallback(() => {
     Promise.all([herzies.fetchActiveEvents(), herzies.fetchPreviousHunt()])
@@ -175,7 +192,42 @@ function App() {
 
   const handleStartTrade = (code: string) => {
     setTradeTarget(code);
+    setTradeViewGeneration((g) => g + 1);
     switchView("trade");
+  };
+
+  const pendingIncoming = state.pendingTradeRequest ?? null;
+  const showIncomingTradeOverlay =
+    pendingIncoming &&
+    pendingIncoming.tradeId !== ignoredIncomingTradeId &&
+    !(
+      view === "trade" &&
+      incomingTradeId != null &&
+      incomingTradeId === pendingIncoming.tradeId
+    );
+
+  const handleJoinIncomingTrade = () => {
+    if (!pendingIncoming) return;
+    setIncomingTradeId(pendingIncoming.tradeId);
+    setTradeTarget(null);
+    setTradeViewGeneration((g) => g + 1);
+    switchView("trade");
+  };
+
+  const handleIgnoreIncomingTrade = async () => {
+    if (!pendingIncoming || incomingTradeDeclineBusy) return;
+    setIncomingTradeDeclineBusy(true);
+    try {
+      const ok = await herzies.tradeCancel(pendingIncoming.tradeId);
+      if (ok) {
+        setIgnoredIncomingTradeId(pendingIncoming.tradeId);
+        addLog(`Declined trade from ${pendingIncoming.fromName}`);
+      } else {
+        addLog("Couldn't decline trade — try again");
+      }
+    } finally {
+      setIncomingTradeDeclineBusy(false);
+    }
   };
 
   return (
@@ -235,7 +287,7 @@ function App() {
             view === "events" ? "flex" : "hidden",
           )}
         >
-          <EventsView />
+          <EventsView eventsTabVisible={view === "events"} />
         </div>
 
         {herzie && (
@@ -246,6 +298,7 @@ function App() {
             )}
           >
             <TradeView
+              key={tradeViewGeneration}
               herzie={herzie}
               initialTarget={tradeTarget}
               initialTradeId={incomingTradeId}
@@ -254,6 +307,7 @@ function App() {
               onClose={() => {
                 setTradeTarget(null);
                 setIncomingTradeId(null);
+                setTradeViewGeneration((g) => g + 1);
                 setView("friends");
               }}
             />
@@ -283,7 +337,9 @@ function App() {
           isOnline={state.isOnline}
           messages={state.chatMessages}
           inventory={state.inventory}
+          friends={state.friends}
           herzie={herzie}
+          nowPlaying={state.nowPlaying}
           onOpenProfile={(code) => {
             setChatProfileCode(code);
             switchView("friends");
@@ -297,6 +353,15 @@ function App() {
           view={view}
           setView={switchView}
           hasActiveEvent={hasActiveEvent}
+        />
+      )}
+
+      {herzie && showIncomingTradeOverlay && pendingIncoming && (
+        <IncomingTradeOverlay
+          request={pendingIncoming}
+          busy={incomingTradeDeclineBusy ? "ignore" : null}
+          onJoin={handleJoinIncomingTrade}
+          onIgnore={handleIgnoreIncomingTrade}
         />
       )}
     </div>

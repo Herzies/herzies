@@ -466,6 +466,7 @@ async fn chat_fetch(
 async fn chat_send(
     content: String,
     item_refs: Vec<String>,
+    user_refs: Vec<String>,
     app: AppHandle,
     state: tauri::State<'_, SharedState>,
 ) -> Result<Option<ChatSendResponse>, String> {
@@ -473,7 +474,7 @@ async fn chat_send(
         return Ok(None);
     }
     let client = Client::new();
-    match api::api_chat_send(&client, &content, &item_refs).await {
+    match api::api_chat_send(&client, &content, &item_refs, &user_refs).await {
         Some(msg) => {
             let mut s = state.lock().unwrap();
             if !s.chat_messages.iter().any(|m| m.id == msg.id) {
@@ -903,6 +904,24 @@ fn test_activity(app: AppHandle) {
 }
 
 #[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    let parsed = url::Url::parse(&url).map_err(|e| e.to_string())?;
+    if parsed.scheme() != "https" {
+        return Err("only https URLs are allowed".into());
+    }
+    match parsed.host_str() {
+        Some("www.last.fm") | Some("last.fm") => {}
+        Some(h) => return Err(format!("unexpected host: {h}")),
+        None => return Err("missing host".into()),
+    }
+    let url_clone = url.clone();
+    std::thread::spawn(move || {
+        let _ = open::that(&url_clone);
+    });
+    Ok(())
+}
+
+#[tauri::command]
 fn quit(app: AppHandle) {
     app.exit(0);
 }
@@ -934,10 +953,10 @@ async fn sync_loop(app: AppHandle) {
     let client = Client::new();
 
     loop {
-        // 10s when the user can see results; 60s when the window is hidden
-        // (still flushes pending listening minutes, but avoids 17k/day Vercel
-        // calls per idle user).
-        let delay = if tray::is_window_visible() { 10 } else { 60 };
+        // 5s when the window is visible — keeps pending trade invites and
+        // server state reasonably fresh without the old 10s+ perceived lag.
+        // 60s when hidden (still flushes listening minutes; avoids idle cost).
+        let delay = if tray::is_window_visible() { 5 } else { 60 };
         tokio::time::sleep(Duration::from_secs(delay)).await;
 
         if let Err(e) = sync_tick(&app, &client).await {
@@ -1018,6 +1037,8 @@ async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
         };
 
         storage::save_multipliers(&sync_resp.multipliers);
+
+        s.pending_trade_request = sync_resp.pending_trade_request.clone();
 
         let app_state = s.to_app_state(env!("CARGO_PKG_VERSION"));
         drop(s);
@@ -1169,6 +1190,7 @@ pub fn run() {
             test_notification,
             test_activity,
             quit,
+            open_external_url,
         ])
         .setup(|app| {
             // Set notification bundle ID so clicks activate this app

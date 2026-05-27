@@ -3,16 +3,37 @@ import { NextResponse } from "next/server";
 import { authenticateRequest, isAuthError } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase-admin";
 
+/** Last.fm track URLs are allowed in chat (e.g. /current_song). Other URLs are stripped. */
+const LASTFM_CHAT_URL =
+	/https:\/\/(?:www\.)?last\.fm\/music\/[^\s<>]+/gi;
+
 function sanitizeContent(raw: string): string {
 	let content = raw.trim();
 	content = content.replace(/<[^>]*>/g, "");
+	const preserved: string[] = [];
+	content = content.replace(LASTFM_CHAT_URL, (match) => {
+		const i = preserved.length;
+		preserved.push(match);
+		return `%%__HERZIES_LF_URL_${i}__%%`;
+	});
 	content = content.replace(/https?:\/\/\S+/gi, "");
 	content = content.replace(/www\.\S+/gi, "");
+	for (let i = 0; i < preserved.length; i++) {
+		const p = preserved[i];
+		if (p) content = content.replace(`%%__HERZIES_LF_URL_${i}__%%`, p);
+	}
 	return content.trim();
 }
 
 function formatMessage(
-	msg: { id: string; user_id: string; content: string; item_refs: string[] | null; created_at: string },
+	msg: {
+		id: string;
+		user_id: string;
+		content: string;
+		item_refs: string[] | null;
+		user_refs: string[] | null;
+		created_at: string;
+	},
 	username: string,
 	friendCode: string | null,
 ) {
@@ -23,6 +44,7 @@ function formatMessage(
 		friendCode,
 		content: msg.content,
 		itemRefs: msg.item_refs ?? [],
+		userRefs: msg.user_refs ?? [],
 		createdAt: msg.created_at,
 	};
 }
@@ -37,7 +59,7 @@ export async function GET(request: Request) {
 	const admin = createAdminClient();
 	const { data: messages, error } = await admin
 		.from("chat_messages")
-		.select("id, user_id, content, item_refs, created_at")
+		.select("id, user_id, content, item_refs, user_refs, created_at")
 		.order("created_at", { ascending: false })
 		.limit(limit);
 
@@ -102,11 +124,55 @@ export async function POST(request: Request) {
 		itemRefs = body.itemRefs;
 	}
 
+	let userRefs: string[] = [];
+	if (body.userRefs !== undefined) {
+		if (!Array.isArray(body.userRefs) || body.userRefs.some((r: unknown) => typeof r !== "string")) {
+			return NextResponse.json({ error: "userRefs must be an array of strings" }, { status: 400 });
+		}
+		if (body.userRefs.length > 10) {
+			return NextResponse.json({ error: "userRefs cannot exceed 10 mentions" }, { status: 400 });
+		}
+		userRefs = body.userRefs;
+	}
+
 	const admin = createAdminClient();
+
+	if (userRefs.length > 0) {
+		const { data: me } = await admin
+			.from("herzies")
+			.select("friend_codes, friend_code")
+			.eq("user_id", auth.userId)
+			.single();
+
+		const allowed = new Set<string>(me?.friend_codes ?? []);
+		const { data: recent } = await admin
+			.from("chat_messages")
+			.select("user_id")
+			.order("created_at", { ascending: false })
+			.limit(100);
+		const participantIds = [...new Set((recent ?? []).map((m) => m.user_id))];
+		if (participantIds.length > 0) {
+			const { data: participants } = await admin
+				.from("herzies")
+				.select("friend_code")
+				.in("user_id", participantIds);
+			for (const p of participants ?? []) {
+				if (p.friend_code) allowed.add(p.friend_code as string);
+			}
+		}
+		if (me?.friend_code) allowed.delete(me.friend_code as string);
+
+		for (const ref of userRefs) {
+			if (!allowed.has(ref)) {
+				return NextResponse.json({ error: "Invalid user mention" }, { status: 400 });
+			}
+		}
+	}
+
 	const { data: msg, error } = await admin
 		.from("chat_messages")
-		.insert({ user_id: auth.userId, content, item_refs: itemRefs })
-		.select("id, user_id, content, item_refs, created_at")
+		.insert({ user_id: auth.userId, content, item_refs: itemRefs, user_refs: userRefs })
+		.select("id, user_id, content, item_refs, user_refs, created_at")
 		.single();
 
 	if (error || !msg) {

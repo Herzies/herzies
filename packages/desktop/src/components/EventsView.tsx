@@ -45,7 +45,14 @@ type SongHuntConfig = {
   }>;
 };
 
-export function EventsView() {
+const EVENTS_POLL_MS = 10_000;
+
+export function EventsView({
+  eventsTabVisible,
+}: {
+  /** Tab stays mounted but hidden; only poll while user is on Events. */
+  eventsTabVisible: boolean;
+}) {
   const [events, setEvents] = useState<GameEvent[]>([]);
   const [previousHunt, setPreviousHunt] = useState<GameEvent | null>(null);
   const [loading, setLoading] = useState(true);
@@ -69,12 +76,16 @@ export function EventsView() {
   }, []);
 
   useEffect(() => {
-    if (!focused) return;
-    const interval = setInterval(() => {
+    if (!focused || !eventsTabVisible) return;
+
+    const refresh = () => {
       herzies.fetchActiveEvents().then((data) => setEvents(data.events));
-    }, 60_000);
+    };
+
+    refresh();
+    const interval = setInterval(refresh, EVENTS_POLL_MS);
     return () => clearInterval(interval);
-  }, [focused]);
+  }, [focused, eventsTabVisible]);
 
   if (loading) {
     return (

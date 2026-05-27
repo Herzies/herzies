@@ -20,7 +20,15 @@ export interface ChatMessage {
   friendCode?: string | null;
   content: string;
   itemRefs: string[];
+  /** Friend codes @-mentioned in the message body. */
+  userRefs?: string[];
   createdAt: string;
+}
+
+export interface PendingTradeRequest {
+  tradeId: string;
+  fromName: string;
+  fromFriendCode: string;
 }
 
 export interface AppState {
@@ -41,6 +49,7 @@ export interface AppState {
   inventory: Inventory | null;
   inventoryCurrency: number;
   friends: Record<string, HerzieProfile>;
+  pendingTradeRequest?: PendingTradeRequest | null;
 }
 
 export const herzies = {
@@ -113,8 +122,15 @@ export const herzies = {
     } | null>("get_auth_config"),
 
   chatFetch: () => invoke<{ messages: ChatMessage[] } | null>("chat_fetch"),
-  chatSend: (content: string, itemRefs: string[]) =>
-    invoke<{ message: ChatMessage } | null>("chat_send", { content, itemRefs }),
+  chatSend: (content: string, itemRefs: string[], userRefs: string[]) =>
+    invoke<{ message: ChatMessage } | null>("chat_send", {
+      content,
+      itemRefs,
+      userRefs,
+    }),
+
+  /** Open a URL in the system browser (WKWebView does not navigate external https). */
+  openExternalUrl: (url: string) => invoke<void>("open_external_url", { url }),
 
   testNotification: () => invoke<void>("test_notification"),
   testActivity: () => invoke<void>("test_activity"),

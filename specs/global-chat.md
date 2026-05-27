@@ -12,8 +12,8 @@ There's no way for players to interact with each other. The game has social hook
 - **Supabase Realtime** listening to Postgres changes on a `chat_messages` table
 - Messages are **persisted** — players see the last N messages on load, new messages stream in
 - **`BEFORE INSERT` database trigger** with keyword blocklist for basic moderation
-- **Heavy input sanitization** — plain text only, no links, no HTML, no script injection. Sanitize both client-side and server-side
-- Typing `@` opens an **autocomplete for items from the user's own inventory**. Selected items render as clickable references in the message
+- **Heavy input sanitization** — plain text only, no HTML, no script injection. Sanitize both client-side and server-side. **Exception:** Last.fm track URLs (from the `/current_song` slash command) are preserved so shared links work.
+- Typing `#` opens an **autocomplete for items from the user's own inventory**. Typing `@` mentions **people in the current chat session or friends** (stored as friend codes; rendered as `@Name`). For the mentioned player, their name appears in **cyan**; for everyone else it uses default message text colour. Typing `/` opens **slash commands** (e.g. `/current_song` — share now playing with a Last.fm link). Selected items render as clickable references in the message
 - Clicking an item reference opens the **existing item inspect view as an overlay/modal**
 - Song Hunt spoilers: **no technical filtering** — lean into collaboration. First-finders leaderboard already rewards speed
 - **Local Supabase** for development
@@ -27,8 +27,9 @@ There's no way for players to interact with each other. The game has social hook
 ## No-gos
 - No private/direct messages
 - No user blocking or reporting system
-- No rich media — no images, no link previews, no rendered HTML
-- No links allowed in messages at all
+- No rich media — no images, no link previews, no rendered HTML (Last.fm track URLs from `/current_song` are plain links only)
+- No arbitrary links in messages — only Last.fm music URLs are allowed, so slash-command shares work without opening generic URL spam
 - No chat channels or rooms — one global channel only
 - No technical spoiler filtering for Song Hunt
-- No @ autocomplete for all game items — inventory only
+- No # autocomplete for all game items — inventory only
+- No @ autocomplete for arbitrary users — friends and recent chat participants only

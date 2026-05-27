@@ -371,6 +371,66 @@ describe("Sync flow", () => {
 		expect(rewardNotif.message).toContain("CD");
 	});
 
+	it("sends a later-finder win notification when the user finds a song_hunt after someone else", async () => {
+		const admin = getAdminClient();
+
+		const finder = await createTestUser();
+		await createTestHerzie(finder.userId, { name: "FirstFinder" });
+
+		const later = await createTestUser();
+		await createTestHerzie(later.userId, { name: "LaterFinder" });
+
+		const { data: event } = await admin
+			.from("events")
+			.insert({
+				type: "song_hunt",
+				title: "Late Hunt",
+				description: "Find it!",
+				active: true,
+				starts_at: new Date(Date.now() - 86400_000).toISOString(),
+				ends_at: new Date(Date.now() + 86400_000).toISOString(),
+				config: {
+					trackTitle: "Blue Monday",
+					trackArtist: "New Order",
+					rewardItemId: "cd",
+					maxClaims: 100,
+					hints: [],
+				},
+			})
+			.select("id")
+			.single();
+		expect(event).toBeDefined();
+
+		await admin.from("event_claims").insert({
+			event_id: event!.id,
+			user_id: finder.userId,
+		});
+
+		const res = await syncRoute(
+			authenticatedRequest("/sync", later.accessToken, {
+				nowPlaying: { title: "Blue Monday", artist: "New Order" },
+				minutesListened: 1,
+				genres: ["pop"],
+			}),
+		);
+		expect(res.status).toBe(200);
+		const body = await res.json();
+
+		const winNotif = body.notifications.find(
+			(n: { type: string; message: string; logOnly?: boolean }) =>
+				n.type === "item_granted" && !n.logOnly,
+		);
+		expect(winNotif).toBeDefined();
+		expect(winNotif.message).toContain("You found the song");
+		expect(winNotif.message.toLowerCase()).not.toContain("first");
+
+		const firstFinderNotif = body.notifications.find(
+			(n: { type: string; message: string }) =>
+				n.type === "info" && n.message.includes("found the song"),
+		);
+		expect(firstFinderNotif).toBeUndefined();
+	});
+
 	it("sync does not wipe inventory changes from other operations", async () => {
 		const admin = getAdminClient();
 

@@ -189,6 +189,9 @@ pub struct AppState {
     pub inventory: Option<Inventory>,
     pub inventory_currency: u32,
     pub friends: HashMap<String, HerzieProfile>,
+    /// Present while the server reports an incoming trade you have not joined yet.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending_trade_request: Option<PendingTradeRequest>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -233,7 +236,10 @@ pub struct ChatMessage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub friend_code: Option<String>,
     pub content: String,
+    #[serde(default)]
     pub item_refs: Vec<String>,
+    #[serde(default)]
+    pub user_refs: Vec<String>,
     pub created_at: String,
 }
 

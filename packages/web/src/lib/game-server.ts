@@ -279,19 +279,23 @@ export async function processSync(
 		});
 	}
 
-	// 6. Check for secret track events (CLI only — requires real-time now_playing)
-	if (source === "cli" && nowPlaying) {
+	// Track which song-hunt announcements this user has already seen.
+	const notifiedHunts = (row.notified_hunts ?? []) as string[];
+
+	// 6. Match live now_playing against secret tracks / song hunts.
+	// Skip Spotify catch-up sync — it has no real-time now_playing.
+	if (source !== "spotify" && nowPlaying) {
 		const eventNotifications = await checkSecretTrackEvents(
 			admin,
 			userId,
 			nowPlaying.title,
 			nowPlaying.artist,
+			notifiedHunts,
 		);
 		notifications.push(...eventNotifications);
 	}
 
 	// 6b. First-finder notifications for song hunts
-	const notifiedHunts = (row.notified_hunts ?? []) as string[];
 	{
 		const { data: activeHunts } = await admin
 			.from("events")
@@ -346,7 +350,7 @@ export async function processSync(
 
 	// 7. Update the herzie in DB
 	// Spotify catch-up: don't overwrite now_playing (it may be stale)
-	const npPayload = source === "cli" && nowPlaying
+	const npPayload = source !== "spotify" && nowPlaying
 		? { title: nowPlaying.title, artist: nowPlaying.artist }
 		: null;
 	const updateData: Record<string, unknown> = {
@@ -403,6 +407,7 @@ async function checkSecretTrackEvents(
 	userId: string,
 	title: string,
 	artist: string,
+	notifiedHunts: string[],
 ): Promise<EventNotification[]> {
 	const notifications: EventNotification[] = [];
 	const now = new Date().toISOString();
@@ -428,7 +433,8 @@ async function checkSecretTrackEvents(
 			.select("*", { count: "exact", head: true })
 			.eq("event_id", event.id);
 
-		if ((totalClaims ?? 0) >= config.maxClaims) continue;
+		const maxClaims = (config.maxClaims as number | undefined) ?? Infinity;
+		if ((totalClaims ?? 0) >= maxClaims) continue;
 
 		// Check if this user already claimed
 		const { data: existingClaim } = await admin
@@ -463,12 +469,20 @@ async function checkSecretTrackEvents(
 		const itemName = (itemRow?.name as string | undefined) ?? config.rewardItemId;
 
 		const eventTitle = (event.title as string | null) ?? "Song Hunt";
+		const isSongHunt = event.type === "song_hunt";
+		const isFirstFinder = (totalClaims ?? 0) === 0;
 
-		// Native + log: the "you won" line.
+		const winMessage = isSongHunt
+			? isFirstFinder
+				? `You won! You found "${config.trackTitle}" first.`
+				: `You found the song! You solved "${config.trackTitle}".`
+			: `You discovered the secret track "${config.trackTitle}"! You earned a collectible!`;
+
+		// Native + log: the win / discovery line.
 		notifications.push({
 			type: "item_granted",
 			title: eventTitle,
-			message: `You won! You found "${config.trackTitle}" first.`,
+			message: winMessage,
 			itemId: config.rewardItemId,
 			quantity: 1,
 		});
@@ -482,6 +496,10 @@ async function checkSecretTrackEvents(
 			quantity: 1,
 			logOnly: true,
 		});
+
+		if (isSongHunt && !notifiedHunts.includes(event.id as string)) {
+			notifiedHunts.push(event.id as string);
+		}
 	}
 
 	return notifications;

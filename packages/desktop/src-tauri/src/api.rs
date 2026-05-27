@@ -516,8 +516,13 @@ pub async fn api_chat_send(
     client: &Client,
     content: &str,
     item_refs: &[String],
+    user_refs: &[String],
 ) -> Option<ChatMessage> {
-    let body = serde_json::json!({ "content": content, "itemRefs": item_refs });
+    let body = serde_json::json!({
+        "content": content,
+        "itemRefs": item_refs,
+        "userRefs": user_refs,
+    });
     let resp = api_fetch(client, reqwest::Method::POST, "/chat", Some(body)).await?;
     if !resp.status().is_success() {
         return None;

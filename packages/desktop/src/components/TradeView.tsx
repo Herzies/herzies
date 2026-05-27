@@ -1,8 +1,11 @@
 import type { Herzie, Inventory, Trade } from "@herzies/shared";
 import { getItem } from "@herzies/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { herzies, useWindowFocused } from "../tauri-bridge";
+import { herzies } from "../tauri-bridge";
 import { NumberTicker } from "./NumberTicker";
+
+/** How often we poll `/trade/status` while a trade is open (ms). */
+const TRADE_POLL_MS = 650;
 
 export function TradeView({
   herzie,
@@ -24,13 +27,19 @@ export function TradeView({
   const [trade, setTrade] = useState<Trade | null>(null);
   const [message, setMessage] = useState("");
   const creatingRef = useRef(false);
-  const joiningRef = useRef(false);
   const [inventory, setInventory] = useState<Inventory | null>(cachedInventory);
   const [offerItems, setOfferItems] = useState<Record<string, number>>({});
   const [offerCurrency, setOfferCurrency] = useState(0);
   const [currency, setCurrency] = useState(cachedCurrency || herzie.currency);
   const lastSentOfferRef = useRef<string | null>(null);
-  const focused = useWindowFocused();
+  const closeScheduledRef = useRef(false);
+
+  const refreshTrade = useCallback(async () => {
+    if (!tradeId) return null;
+    const t = await herzies.tradePoll(tradeId);
+    if (t) setTrade(t);
+    return t;
+  }, [tradeId]);
 
   useEffect(() => {
     setInventory(cachedInventory);
@@ -46,23 +55,37 @@ export function TradeView({
     });
   }, []);
 
+  // Hydrate + keep trade fresh. Poll even when the window is blurred so partner
+  // lock/accept updates arrive quickly (trade sessions are short-lived).
   useEffect(() => {
     if (!tradeId) return;
-    if (!focused) return;
-    const interval = setInterval(async () => {
+    let cancelled = false;
+
+    const tick = async () => {
       const t = await herzies.tradePoll(tradeId);
+      if (cancelled) return;
       if (t) setTrade(t);
       if (t?.state === "completed" || t?.state === "cancelled") {
         setMessage(
           t.state === "completed" ? "Trade completed!" : "Trade cancelled",
         );
-        setTimeout(() => {
-          onClose();
-        }, 2000);
+        if (!closeScheduledRef.current) {
+          closeScheduledRef.current = true;
+          setTimeout(() => {
+            closeScheduledRef.current = false;
+            onClose();
+          }, 2000);
+        }
       }
-    }, 1500);
-    return () => clearInterval(interval);
-  }, [tradeId, onClose, focused]);
+    };
+
+    void tick();
+    const interval = setInterval(tick, TRADE_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [tradeId, onClose]);
 
   const handleCreate = useCallback(
     async (overrideCode?: string) => {
@@ -87,12 +110,33 @@ export function TradeView({
   }, [initialTarget]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (!initialTradeId || joiningRef.current) return;
-    joiningRef.current = true;
+    if (!initialTradeId) return;
+    let cancelled = false;
     (async () => {
       const ok = await herzies.tradeJoin(initialTradeId);
-      if (!ok) setMessage("Couldn't join trade — it may have expired");
+      if (cancelled) return;
+      if (ok) {
+        setTradeId(initialTradeId);
+        return;
+      }
+      // Recover from duplicate / strict-mode double-join where the first call
+      // already activated the trade and a second POST returns 400.
+      const t = await herzies.tradePoll(initialTradeId);
+      if (cancelled) return;
+      if (
+        t &&
+        t.state !== "pending" &&
+        t.state !== "cancelled" &&
+        t.state !== "completed"
+      ) {
+        setTradeId(initialTradeId);
+      } else {
+        setMessage("Couldn't join trade — it may have expired");
+      }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, [initialTradeId]);
 
   const handleCancel = async () => {
@@ -114,13 +158,35 @@ export function TradeView({
   };
 
   const handleLock = async () => {
-    if (tradeId) {
-      await handleSendOffer();
-      await herzies.tradeLock(tradeId);
+    if (!tradeId) return;
+    await handleSendOffer();
+    const ok = await herzies.tradeLock(tradeId);
+    const t = await refreshTrade();
+    if (!ok) {
+      setMessage("Couldn't lock offer — try again");
+    } else if (t) {
+      setMessage("");
     }
   };
+
   const handleAccept = async () => {
-    if (tradeId) await herzies.tradeAccept(tradeId);
+    if (!tradeId) return;
+    const result = await herzies.tradeAccept(tradeId);
+    await refreshTrade();
+    if (result?.completed) {
+      setMessage("Trade completed!");
+      if (!closeScheduledRef.current) {
+        closeScheduledRef.current = true;
+        setTimeout(() => {
+          closeScheduledRef.current = false;
+          onClose();
+        }, 2000);
+      }
+    } else if (result && !result.completed) {
+      setMessage("You confirmed — waiting for them to confirm.");
+    } else {
+      setMessage("Couldn't confirm — try again");
+    }
   };
 
   if (!tradeId) {
@@ -129,6 +195,15 @@ export function TradeView({
         <div className="flex h-full flex-col items-center justify-center">
           <div className="text-ui text-text-dim">
             {message || "Starting trade..."}
+          </div>
+        </div>
+      );
+    }
+    if (initialTradeId) {
+      return (
+        <div className="flex h-full flex-col items-center justify-center">
+          <div className="text-ui text-text-dim">
+            {message || "Joining trade..."}
           </div>
         </div>
       );
@@ -175,6 +250,17 @@ export function TradeView({
       : trade.state === "target_locked" || trade.state === "both_locked"
     : false;
   const bothLocked = trade?.state === "both_locked";
+  const imInitiator = trade ? trade.initiatorName === herzie.name : false;
+  const myAccepted = trade
+    ? imInitiator
+      ? trade.initiatorAccepted
+      : trade.targetAccepted
+    : false;
+  const theirAccepted = trade
+    ? imInitiator
+      ? trade.targetAccepted
+      : trade.initiatorAccepted
+    : false;
 
   return (
     <div className="flex h-full flex-col">
@@ -280,16 +366,28 @@ export function TradeView({
             </div>
           </div>
 
-          <div className="mt-2 flex gap-1">
-            {!myLocked && (
-              <button className="btn" onClick={handleLock}>
-                Lock offer
-              </button>
+          <div className="mt-2 flex flex-col gap-1">
+            <div className="flex flex-wrap gap-1">
+              {!myLocked && (
+                <button type="button" className="btn" onClick={handleLock}>
+                  Lock offer
+                </button>
+              )}
+              {bothLocked && !myAccepted && (
+                <button type="button" className="btn text-green" onClick={handleAccept}>
+                  Accept
+                </button>
+              )}
+            </div>
+            {bothLocked && myAccepted && !theirAccepted && (
+              <div className="text-ui text-text-dim">
+                You confirmed — waiting for them to confirm.
+              </div>
             )}
-            {bothLocked && (
-              <button className="btn text-green" onClick={handleAccept}>
-                Accept
-              </button>
+            {bothLocked && !myAccepted && theirAccepted && (
+              <div className="text-ui text-text-dim">
+                They confirmed — press Accept to finish.
+              </div>
             )}
           </div>
         </>

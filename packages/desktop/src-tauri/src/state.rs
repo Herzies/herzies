@@ -29,6 +29,8 @@ pub struct ManagedState {
     pub inventory_currency: u32,
     /// Friend profiles keyed by friend code (persisted when codes match).
     pub friends: HashMap<String, HerzieProfile>,
+    /// Latest incoming trade from `/sync` (cleared when absent on a successful sync).
+    pub pending_trade_request: Option<PendingTradeRequest>,
 }
 
 impl ManagedState {
@@ -57,6 +59,7 @@ impl ManagedState {
             inventory,
             inventory_currency,
             friends: crate::storage::load_friends_cache(&friend_codes),
+            pending_trade_request: None,
         }
     }
 
@@ -66,6 +69,7 @@ impl ManagedState {
         self.inventory = None;
         self.inventory_currency = 0;
         self.friends.clear();
+        self.pending_trade_request = None;
         crate::storage::clear_equipped();
         crate::storage::clear_inventory_cache();
         crate::storage::clear_friends_cache();
@@ -89,6 +93,7 @@ impl ManagedState {
             inventory: self.inventory.clone(),
             inventory_currency: self.inventory_currency,
             friends: self.friends.clone(),
+            pending_trade_request: self.pending_trade_request.clone(),
         }
     }
 }
