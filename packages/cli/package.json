@@ -1,6 +1,7 @@
 {
   "name": "herzies",
   "version": "0.6.1",
+  "private": true,
   "description": "Your digital pet that grows by listening to music",
   "type": "module",
   "bin": {

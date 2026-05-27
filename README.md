@@ -18,7 +18,7 @@ Day-to-day work in this repo centres on the **desktop app** (macOS, Tauri): it i
 | [`herzies-desktop`](packages/desktop) | macOS desktop app (Tauri); primary focus for development |
 | [`@herzies/shared`](packages/shared) | Shared types and utilities |
 | [`web`](packages/web) | Website, game server API, and auth |
-| [`herzies`](packages/cli) | CLI application — *not prioritised for ongoing development* |
+| [`herzies`](packages/cli) | CLI application — *disabled; excluded from workspace, not maintained* |
 
 ## Getting Started
 
