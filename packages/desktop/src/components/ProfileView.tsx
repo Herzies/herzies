@@ -18,13 +18,17 @@ export function ProfileView({
   profile,
   onBack,
   onTrade,
+  onAdd,
   onRemove,
+  canRemove,
   stageOverride,
 }: {
   profile: HerzieProfile;
   onBack: () => void;
   onTrade: () => void;
+  onAdd: () => void;
   onRemove: () => void;
+  canRemove?: boolean;
   stageOverride?: number | null;
 }) {
   const [confirmRemove, setConfirmRemove] = useState(false);
@@ -103,7 +107,12 @@ export function ProfileView({
         <button type="button" className="btn text-purple" onClick={onTrade}>
           Trade
         </button>
-        {confirmRemove ? (
+        {!canRemove && (
+          <button type="button" className="btn text-green" onClick={onAdd}>
+            Add friend
+          </button>
+        )}
+        {canRemove && confirmRemove ? (
           <>
             <button type="button" className="btn text-red" onClick={onRemove}>
               Yes, remove
@@ -116,7 +125,7 @@ export function ProfileView({
               Cancel
             </button>
           </>
-        ) : (
+        ) : canRemove ? (
           <button
             type="button"
             className="btn text-red"
@@ -124,7 +133,7 @@ export function ProfileView({
           >
             Remove friend
           </button>
-        )}
+        ) : null}
       </div>
     </View>
   );

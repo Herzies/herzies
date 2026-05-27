@@ -67,13 +67,25 @@ export function FriendsView({
     });
   }, [openProfileCode, onProfileOpened]);
 
+  const handleAddByCode = async (code: string) => {
+    const normalized = code.trim().toUpperCase();
+    if (!normalized) return;
+    const result = await herzies.friendAdd(normalized);
+    setMessage(result.message);
+    setTimeout(() => setMessage(""), 3000);
+    if (result.success) {
+      const refreshed = await herzies.friendLookup([normalized]);
+      if (refreshed[normalized]) {
+        setSelectedFriend(refreshed[normalized]);
+      }
+    }
+  };
+
   const handleAdd = async () => {
     const code = addCode.trim().toUpperCase();
     if (!code) return;
-    const result = await herzies.friendAdd(code);
-    setMessage(result.message);
-    if (result.success) setAddCode("");
-    setTimeout(() => setMessage(""), 3000);
+    await handleAddByCode(code);
+    setAddCode("");
   };
 
   const handleRemove = async (code: string) => {
@@ -97,10 +109,14 @@ export function FriendsView({
           setSelectedFriend(null);
           onStartTrade(selectedFriend.friendCode);
         }}
+        onAdd={async () => {
+          await handleAddByCode(selectedFriend.friendCode);
+        }}
         onRemove={async () => {
           await handleRemove(selectedFriend.friendCode);
           setSelectedFriend(null);
         }}
+        canRemove={herzie.friendCodes.includes(selectedFriend.friendCode)}
         stageOverride={stageOverride}
       />
     );
