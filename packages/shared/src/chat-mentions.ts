@@ -31,7 +31,10 @@ export function getChatInputMenuState(
 
   const filter = before.slice(active.idx + 1);
   if (filter.includes(" ")) return { kind: "none" };
-  if (active.kind === "slash" && (filter.includes("@") || filter.includes("#"))) {
+  if (
+    active.kind === "slash" &&
+    (filter.includes("@") || filter.includes("#"))
+  ) {
     return { kind: "none" };
   }
   if (active.kind === "item" && filter.includes("@")) return { kind: "none" };

@@ -6,8 +6,8 @@ import {
   type Herzie,
   type HerzieProfile,
   type Inventory,
-  type MentionableChatUser,
   RARITY_COLORS as ITEM_RARITY_COLORS,
+  type MentionableChatUser,
   RARITY_LABELS,
 } from "@herzies/shared";
 import { createClient, type RealtimeChannel } from "@supabase/supabase-js";
@@ -55,8 +55,7 @@ function filterAutocompleteItems(inventory: Inventory | null, filter: string) {
     )
     .filter(
       (x) =>
-        !filter ||
-        x.item.name.toLowerCase().includes(filter.toLowerCase()),
+        !filter || x.item.name.toLowerCase().includes(filter.toLowerCase()),
     );
 }
 
@@ -69,10 +68,7 @@ function filterSlashCommandItems(filter: string) {
   );
 }
 
-function filterMentionableUsers(
-  users: MentionableChatUser[],
-  filter: string,
-) {
+function filterMentionableUsers(users: MentionableChatUser[], filter: string) {
   const q = filter.toLowerCase();
   return users.filter(
     (u) =>
@@ -127,7 +123,9 @@ function parseSegmentsWithLastFm(text: string): LastFmChunk[] {
   let i = 0;
   while (i < text.length) {
     const rest = text.slice(i);
-    const two = rest.match(/^(♪[^\n]+)\n(https:\/\/(?:www\.)?last\.fm\/[^\s\n]+)/);
+    const two = rest.match(
+      /^(♪[^\n]+)\n(https:\/\/(?:www\.)?last\.fm\/[^\s\n]+)/,
+    );
     if (two) {
       chunks.push({ type: "songShare", label: two[1], url: two[2] });
       i += two[0].length;
@@ -952,13 +950,17 @@ export function ChatPanel({
           (!best || legacyIdx < best.idx) &&
           !msgUserRefs.includes(ref)
         ) {
-          best = { idx: legacyIdx, len: legacyPattern.length, kind: "item", ref };
+          best = {
+            idx: legacyIdx,
+            len: legacyPattern.length,
+            kind: "item",
+            ref,
+          };
         }
       }
       for (const ref of msgUserRefs) {
         const name = nameByFriendCode.get(ref) ?? ref;
-        const patterns =
-          name === ref ? [`@${name}`] : [`@${name}`, `@${ref}`];
+        const patterns = name === ref ? [`@${name}`] : [`@${name}`, `@${ref}`];
         for (const pattern of patterns) {
           const idx = remaining.indexOf(pattern);
           if (idx >= 0 && (!best || idx < best.idx)) {

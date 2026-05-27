@@ -1,8 +1,2 @@
 // Stage 3 mouths
-export const mouths: string[] = [
-	"╰◡╯",
-	"◡◡◡",
-	" ω ",
-	"╰▽╯",
-	"╰─╯",
-];
+export const mouths: string[] = ["╰◡╯", "◡◡◡", " ω ", "╰▽╯", "╰─╯"];

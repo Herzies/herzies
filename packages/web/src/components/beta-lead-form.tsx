@@ -33,9 +33,9 @@ export default function BetaLeadForm() {
         body: JSON.stringify({ email: trimmed }),
       });
       if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as
-          | { error?: string }
-          | null;
+        const body = (await res.json().catch(() => null)) as {
+          error?: string;
+        } | null;
         setStatus({
           kind: "error",
           message: body?.error ?? "Something went wrong. Try again.",

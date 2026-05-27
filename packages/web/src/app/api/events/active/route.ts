@@ -1,7 +1,4 @@
-import type {
-  GameEvent,
-  SongHuntConfig,
-} from "@herzies/shared";
+import type { GameEvent, SongHuntConfig } from "@herzies/shared";
 import { NextResponse } from "next/server";
 import { buildSongHuntConfig } from "@/lib/events";
 import { createAdminClient } from "@/lib/supabase-admin";

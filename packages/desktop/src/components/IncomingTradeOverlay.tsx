@@ -1,5 +1,5 @@
-import type { PendingTradeRequest } from "../tauri-bridge";
 import { useEffect, useRef } from "react";
+import type { PendingTradeRequest } from "../tauri-bridge";
 
 /**
  * In-app prompt when a trade request arrives. macOS often suppresses notification

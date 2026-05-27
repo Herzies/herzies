@@ -44,8 +44,12 @@ export default function AboutPage() {
       </div>
 
       <div className="text-[13px] flex gap-4">
-        <a href="/docs" className="text-cyan">docs</a>
-        <a href="/terms" className="text-cyan">terms of service</a>
+        <a href="/docs" className="text-cyan">
+          docs
+        </a>
+        <a href="/terms" className="text-cyan">
+          terms of service
+        </a>
       </div>
     </main>
   );

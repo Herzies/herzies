@@ -1,6 +1,6 @@
-import { createServerClient, type CookieOptions } from "@supabase/ssr";
-import { NextResponse } from "next/server";
+import { type CookieOptions, createServerClient } from "@supabase/ssr";
 import type { NextRequest } from "next/server";
+import { NextResponse } from "next/server";
 
 /**
  * Server-side OAuth callback handler.
@@ -13,45 +13,53 @@ import type { NextRequest } from "next/server";
  * available and the resulting session cookies are forwarded.
  */
 export async function GET(request: NextRequest) {
-	const { searchParams } = request.nextUrl;
-	const code = searchParams.get("code");
-	const cliPort = searchParams.get("cli_port");
+  const { searchParams } = request.nextUrl;
+  const code = searchParams.get("code");
+  const cliPort = searchParams.get("cli_port");
 
-	if (!code) {
-		return NextResponse.redirect(new URL("/login?error=missing_code", request.url));
-	}
+  if (!code) {
+    return NextResponse.redirect(
+      new URL("/login?error=missing_code", request.url),
+    );
+  }
 
-	// Build a response we can attach cookies to
-	const redirectUrl = cliPort
-		? new URL(`/auth/callback/cli?cli_port=${cliPort}`, request.url)
-		: new URL("/dashboard", request.url);
-	const response = NextResponse.redirect(redirectUrl);
+  // Build a response we can attach cookies to
+  const redirectUrl = cliPort
+    ? new URL(`/auth/callback/cli?cli_port=${cliPort}`, request.url)
+    : new URL("/dashboard", request.url);
+  const response = NextResponse.redirect(redirectUrl);
 
-	const supabase = createServerClient(
-		process.env.NEXT_PUBLIC_SUPABASE_URL!,
-		process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-		{
-			cookies: {
-				getAll() {
-					return request.cookies.getAll();
-				},
-				setAll(cookiesToSet: Array<{ name: string; value: string; options: CookieOptions }>) {
-					for (const { name, value, options } of cookiesToSet) {
-						response.cookies.set(name, value, options);
-					}
-				},
-			},
-		},
-	);
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll();
+        },
+        setAll(
+          cookiesToSet: Array<{
+            name: string;
+            value: string;
+            options: CookieOptions;
+          }>,
+        ) {
+          for (const { name, value, options } of cookiesToSet) {
+            response.cookies.set(name, value, options);
+          }
+        },
+      },
+    },
+  );
 
-	const { error } = await supabase.auth.exchangeCodeForSession(code);
+  const { error } = await supabase.auth.exchangeCodeForSession(code);
 
-	if (error) {
-		const errorUrl = cliPort
-			? new URL(`/auth/cli?error=auth_failed`, request.url)
-			: new URL("/login?error=auth_failed", request.url);
-		return NextResponse.redirect(errorUrl);
-	}
+  if (error) {
+    const errorUrl = cliPort
+      ? new URL(`/auth/cli?error=auth_failed`, request.url)
+      : new URL("/login?error=auth_failed", request.url);
+    return NextResponse.redirect(errorUrl);
+  }
 
-	return response;
+  return response;
 }

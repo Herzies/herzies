@@ -1,15 +1,18 @@
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap");
 @import "tailwindcss";
 @import "@herzies/shared/theme.css";
 
 @layer base {
-  *, *::before, *::after {
+  *,
+  *::before,
+  *::after {
     box-sizing: border-box;
     margin: 0;
     padding: 0;
   }
 
-  html, body {
+  html,
+  body {
     background: var(--color-bg);
     color: var(--color-text);
     font-family: var(--font-mono);
@@ -24,7 +27,7 @@
   }
 
   body::after {
-    content: '';
+    content: "";
     position: fixed;
     inset: 0;
     pointer-events: none;

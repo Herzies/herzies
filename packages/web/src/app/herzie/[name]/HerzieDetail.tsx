@@ -174,9 +174,7 @@ export function HerzieDetail({
           {/* Equipped */}
           {(herzie.equipped?.length ?? 0) > 0 && (
             <div className="mt-4">
-              <div className="text-[11px] text-text-dim mb-1">
-                // wearables
-              </div>
+              <div className="text-[11px] text-text-dim mb-1">// wearables</div>
               <div className="text-[13px] flex flex-wrap gap-x-3 gap-y-1">
                 {herzie.equipped?.map((id) => {
                   const item = getItem(id);

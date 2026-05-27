@@ -374,7 +374,11 @@ export function TradeView({
                 </button>
               )}
               {bothLocked && !myAccepted && (
-                <button type="button" className="btn text-green" onClick={handleAccept}>
+                <button
+                  type="button"
+                  className="btn text-green"
+                  onClick={handleAccept}
+                >
                   Accept
                 </button>
               )}
