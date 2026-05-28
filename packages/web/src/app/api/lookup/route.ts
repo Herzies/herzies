@@ -25,7 +25,7 @@ export async function GET(request: Request) {
     const { data, error } = await admin
       .from("herzies")
       .select(
-        "user_id, name, friend_code, stage, level, currency, appearance, equipped, now_playing",
+        "user_id, name, friend_code, xp, stage, level, currency, appearance, equipped, now_playing",
       )
       .eq("friend_code", singleCode.toUpperCase().trim())
       .single();
@@ -34,17 +34,25 @@ export async function GET(request: Request) {
       return NextResponse.json({ herzie: null });
     }
 
-    const [topArtists, lastPlayed] = await Promise.all([
+    const [topArtists, lastPlayed, globalRank, globalTotal] = await Promise.all([
       getTopArtists(admin, data.user_id),
       getLastPlayed(admin, data.user_id),
+      getGlobalRank(admin, data.xp),
+      getGlobalTotal(admin),
     ]);
 
     return NextResponse.json({
-      herzie: formatProfile(data, topArtists, lastPlayed),
+      herzie: formatProfile(
+        data,
+        topArtists,
+        lastPlayed,
+        globalRank,
+        globalTotal,
+      ),
     });
   }
 
-  const codes = batchCodes!
+  const codes = (batchCodes ?? "")
     .split(",")
     .map((c) => c.trim().toUpperCase())
     .filter(Boolean)
@@ -57,7 +65,7 @@ export async function GET(request: Request) {
   const { data, error } = await admin
     .from("herzies")
     .select(
-      "user_id, name, friend_code, stage, level, currency, appearance, equipped, now_playing",
+      "user_id, name, friend_code, xp, stage, level, currency, appearance, equipped, now_playing",
     )
     .in("friend_code", codes);
 
@@ -65,13 +73,15 @@ export async function GET(request: Request) {
     return NextResponse.json({ herzies: [] });
   }
 
+  const globalTotal = await getGlobalTotal(admin);
   const herzies = await Promise.all(
     data.map(async (row) => {
-      const [topArtists, lastPlayed] = await Promise.all([
+      const [topArtists, lastPlayed, globalRank] = await Promise.all([
         getTopArtists(admin, row.user_id),
         getLastPlayed(admin, row.user_id),
+        getGlobalRank(admin, row.xp),
       ]);
-      return formatProfile(row, topArtists, lastPlayed);
+      return formatProfile(row, topArtists, lastPlayed, globalRank, globalTotal);
     }),
   );
 
@@ -82,6 +92,7 @@ type HerzieRow = {
   user_id: string;
   name: string;
   friend_code: string;
+  xp: number;
   stage: number;
   level: number;
   currency: number | null;
@@ -101,10 +112,14 @@ function formatProfile(
   row: HerzieRow,
   topArtists: { name: string; plays: number }[],
   lastPlayed: { title: string; artist: string; listenedAt: string } | null,
+  globalRank?: number,
+  globalTotal?: number,
 ) {
   return {
     name: row.name,
     friendCode: row.friend_code,
+    globalRank,
+    globalTotal,
     stage: row.stage,
     level: row.level,
     currency: row.currency,
@@ -114,6 +129,28 @@ function formatProfile(
     nowPlaying: formatNowPlaying(row.now_playing),
     lastPlayed,
   };
+}
+
+async function getGlobalRank(
+  admin: ReturnType<typeof createAdminClient>,
+  xp: number,
+): Promise<number | undefined> {
+  const { count } = await admin
+    .from("herzies")
+    .select("friend_code", { count: "exact", head: true })
+    .gt("xp", xp);
+
+  if (typeof count !== "number") return undefined;
+  return count + 1;
+}
+
+async function getGlobalTotal(
+  admin: ReturnType<typeof createAdminClient>,
+): Promise<number | undefined> {
+  const { count } = await admin
+    .from("herzies")
+    .select("friend_code", { count: "exact", head: true });
+  return typeof count === "number" ? count : undefined;
 }
 
 const LISTEN_LOG_PAGE_SIZE = 1000;

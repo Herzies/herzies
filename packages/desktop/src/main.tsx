@@ -104,7 +104,9 @@ function App() {
     Promise.all([herzies.fetchActiveEvents(), herzies.fetchPreviousHunt()])
       .then(([active, previous]) => {
         const hunt = active.events.find((e) => e.type === "song_hunt");
-        const previousHunt = previous.events.find((e) => e.type === "song_hunt");
+        const previousHunt = previous.events.find(
+          (e) => e.type === "song_hunt",
+        );
         // Sparkle only when there is an active song hunt.
         // Keep previous hunt lookup for parity with EventsView data flow.
         void previousHunt;

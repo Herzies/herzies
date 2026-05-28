@@ -54,6 +54,19 @@ export function ProfileView({
 
       <div className="mb-2 flex justify-between text-ui text-text-dim">
         <span>Level {profile.level}</span>
+        {profile.globalRank ? (
+          <span
+            title={
+              profile.globalTotal
+                ? `Ranked #${profile.globalRank} of ${profile.globalTotal}`
+                : undefined
+            }
+          >
+            #{profile.globalRank}
+          </span>
+        ) : (
+          <span />
+        )}
         <span>Stage {profile.stage}</span>
       </div>
 

@@ -42,6 +42,10 @@ pub struct Herzie {
 pub struct HerzieProfile {
     pub name: String,
     pub friend_code: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub global_rank: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub global_total: Option<u32>,
     pub stage: u32,
     pub level: u32,
     #[serde(skip_serializing_if = "Option::is_none")]

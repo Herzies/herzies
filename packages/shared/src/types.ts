@@ -59,6 +59,8 @@ export interface Herzie {
 export interface HerzieProfile {
   name: string;
   friendCode: string;
+  globalRank?: number;
+  globalTotal?: number;
   stage: number;
   level: number;
   currency?: number;

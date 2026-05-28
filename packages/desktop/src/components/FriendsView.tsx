@@ -202,6 +202,18 @@ export function FriendsView({
                       </span>
                     )}
                     {profile?.name ?? code}
+                    {profile?.globalRank && (
+                      <span
+                        className="text-[10px] text-text-dim"
+                        title={
+                          profile.globalTotal
+                            ? `Ranked #${profile.globalRank} of ${profile.globalTotal}`
+                            : undefined
+                        }
+                      >
+                        #{profile.globalRank}
+                      </span>
+                    )}
                   </div>
                   <div
                     className={cn(

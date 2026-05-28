@@ -1,6 +1,7 @@
 import { levelProgress, xpToNextLevel } from "@herzies/shared";
+import { useEffect, useState } from "react";
 import { cn } from "../lib/utils";
-import type { AppState } from "../tauri-bridge";
+import { type AppState, herzies } from "../tauri-bridge";
 import { Herzie3D } from "./Herzie3D";
 
 export function HomeView({
@@ -11,6 +12,22 @@ export function HomeView({
   stageOverride?: number | null;
 }) {
   const { herzie, nowPlaying, multipliers, isConnected, equipped } = state;
+  const [globalRank, setGlobalRank] = useState<number | undefined>(undefined);
+  const [globalTotal, setGlobalTotal] = useState<number | undefined>(undefined);
+  const friendCode = herzie?.friendCode;
+
+  useEffect(() => {
+    if (!friendCode) return;
+    let cancelled = false;
+    herzies.friendLookup([friendCode]).then((result) => {
+      if (cancelled) return;
+      setGlobalRank(result[friendCode]?.globalRank);
+      setGlobalTotal(result[friendCode]?.globalTotal);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [friendCode]);
 
   if (!herzie) return null;
 
@@ -21,8 +38,20 @@ export function HomeView({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="mb-1 flex items-center justify-between">
-        <span className="text-ui-lg font-bold text-cyan">{herzie.name}</span>
+      <div className="mb-1 flex items-center justify-between z-50">
+        <span className="text-ui-lg font-bold text-cyan">
+          {herzie.name}
+          {globalRank ? (
+            <span
+              className="ml-1 text-[10px] font-normal text-text-dim"
+              title={
+                globalTotal ? `Ranked #${globalRank} of ${globalTotal}` : undefined
+              }
+            >
+              #{globalRank}
+            </span>
+          ) : null}
+        </span>
         <div className="flex items-center gap-1.5">
           {!isConnected && (
             <span className="text-[10px] text-red">
