@@ -74,7 +74,9 @@ export function EventsView({
       .then(([active, previous]) => {
         if (cancelled) return;
         setEvents(active.events);
-        setPreviousHunt(previous.events.find((e) => e.type === "song_hunt") ?? null);
+        setPreviousHunt(
+          previous.events.find((e) => e.type === "song_hunt") ?? null,
+        );
         setLoading(false);
       })
       .catch(() => {
@@ -90,12 +92,15 @@ export function EventsView({
     if (!focused || !eventsTabVisible) return;
 
     const refresh = () => {
-      Promise.all([herzies.fetchActiveEvents(), herzies.fetchPreviousHunt()]).then(
-        ([active, previous]) => {
-          setEvents(active.events);
-          setPreviousHunt(previous.events.find((e) => e.type === "song_hunt") ?? null);
-        },
-      );
+      Promise.all([
+        herzies.fetchActiveEvents(),
+        herzies.fetchPreviousHunt(),
+      ]).then(([active, previous]) => {
+        setEvents(active.events);
+        setPreviousHunt(
+          previous.events.find((e) => e.type === "song_hunt") ?? null,
+        );
+      });
     };
 
     refresh();

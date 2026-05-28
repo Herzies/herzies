@@ -36,16 +36,14 @@ pub fn raw_json() -> Option<String> {
 pub fn fetch_system_artwork_url() -> Option<String> {
     let json = fetch_get_json(true)?;
     let parsed: AdapterArtworkPayload = serde_json::from_str(&json).ok()?;
-    parsed.to_data_url()
+    parsed.artwork_data_url()
 }
 
 fn fetch_get_json(include_artwork: bool) -> Option<String> {
     let (script, framework) = mediaremote_paths()?;
     let framework_str = framework.to_string_lossy();
     let mut cmd = Command::new("/usr/bin/perl");
-    cmd.arg(&script)
-        .arg(Path::new(&*framework_str))
-        .arg("get");
+    cmd.arg(&script).arg(Path::new(&*framework_str)).arg("get");
     if !include_artwork {
         cmd.arg("--no-artwork");
     }
@@ -80,12 +78,14 @@ struct AdapterArtworkPayload {
 }
 
 impl AdapterArtworkPayload {
-    fn to_data_url(self) -> Option<String> {
-        let data = self.artwork_data.filter(|d| !d.is_empty())?;
+    fn artwork_data_url(&self) -> Option<String> {
+        let data = self.artwork_data.as_ref().filter(|d| !d.is_empty())?;
         let mime = self
             .artwork_mime_type
+            .as_ref()
             .filter(|m| !m.is_empty())
-            .unwrap_or_else(|| "image/jpeg".to_string());
+            .map(|m| m.as_str())
+            .unwrap_or("image/jpeg");
         Some(format!("data:{mime};base64,{data}"))
     }
 }
@@ -274,7 +274,7 @@ mod tests {
             artwork_data: Some("abc123".into()),
         };
         assert_eq!(
-            payload.to_data_url().as_deref(),
+            payload.artwork_data_url().as_deref(),
             Some("data:image/png;base64,abc123")
         );
     }

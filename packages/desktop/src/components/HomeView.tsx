@@ -45,7 +45,9 @@ export function HomeView({
             <span
               className="ml-1 text-[10px] font-normal text-text-dim"
               title={
-                globalTotal ? `Ranked #${globalRank} of ${globalTotal}` : undefined
+                globalTotal
+                  ? `Ranked #${globalRank} of ${globalTotal}`
+                  : undefined
               }
             >
               #{globalRank}

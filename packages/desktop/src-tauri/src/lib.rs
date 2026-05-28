@@ -736,10 +736,8 @@ fn apply_enrichment(app: &AppHandle, track_key: &str, enrichment: Option<TrackEn
             s.current_local_genre.as_deref(),
             &s.current_genres,
         );
-        let album_art_url = resolve_album_art_url(
-            s.system_album_art_url.as_deref(),
-            s.enrichment.as_ref(),
-        );
+        let album_art_url =
+            resolve_album_art_url(s.system_album_art_url.as_deref(), s.enrichment.as_ref());
         let vibe = s.enrichment.as_ref().and_then(|e| e.vibe.clone());
         if let Some(ref mut np) = s.current_now_playing {
             np.album_art_url = album_art_url;
@@ -779,10 +777,8 @@ fn spawn_system_artwork_fetch(app: &AppHandle, track_key: String) {
                 return;
             }
             s.system_album_art_url = Some(artwork);
-            let album_art_url = resolve_album_art_url(
-                s.system_album_art_url.as_deref(),
-                s.enrichment.as_ref(),
-            );
+            let album_art_url =
+                resolve_album_art_url(s.system_album_art_url.as_deref(), s.enrichment.as_ref());
             if let Some(ref mut np) = s.current_now_playing {
                 np.album_art_url = album_art_url;
             }
@@ -1276,7 +1272,10 @@ pub fn run() {
                 let dir = bundled.unwrap_or(dev);
                 if dir.join("mediaremote-adapter.pl").is_file() {
                     media_remote_adapter::init(dir);
-                    log::info!("MediaRemote adapter: {:?}", media_remote_adapter::is_configured());
+                    log::info!(
+                        "MediaRemote adapter: {:?}",
+                        media_remote_adapter::is_configured()
+                    );
                 } else {
                     log::warn!(
                         "MediaRemote adapter files missing; now playing falls back to AppleScript"
