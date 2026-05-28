@@ -10,7 +10,8 @@ export async function GET() {
   const { data, error } = await admin
     .from("events")
     .select("id, type, title, description, active, starts_at, ends_at, config")
-    .eq("active", false)
+    .eq("type", "song_hunt")
+    .lt("ends_at", now.toISOString())
     .order("starts_at", { ascending: false })
     .limit(1);
 

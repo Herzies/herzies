@@ -16,6 +16,15 @@ function formatCountdown(endsAt: string): string {
   return "< 1h left";
 }
 
+function formatDuration(ms: number): string {
+  if (ms <= 0) return "0m";
+  const totalMinutes = Math.floor(ms / 60_000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours <= 0) return `${minutes}m`;
+  return `${hours}h ${minutes}m`;
+}
+
 function timeAgo(dateStr: string): string {
   const ms = Date.now() - new Date(dateStr).getTime();
   if (ms < 1000) return `${ms}ms ago`;
@@ -60,26 +69,33 @@ export function EventsView({
   const focused = useWindowFocused();
 
   useEffect(() => {
-    herzies.fetchPreviousHunt().then((data) => {
-      setPreviousHunt(data.events[0]);
-    });
-  }, []);
-
-  useEffect(() => {
-    herzies
-      .fetchActiveEvents()
-      .then((data) => {
-        setEvents(data.events);
+    let cancelled = false;
+    Promise.all([herzies.fetchActiveEvents(), herzies.fetchPreviousHunt()])
+      .then(([active, previous]) => {
+        if (cancelled) return;
+        setEvents(active.events);
+        setPreviousHunt(previous.events.find((e) => e.type === "song_hunt") ?? null);
         setLoading(false);
       })
-      .catch(() => setLoading(false));
+      .catch(() => {
+        if (cancelled) return;
+        setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
     if (!focused || !eventsTabVisible) return;
 
     const refresh = () => {
-      herzies.fetchActiveEvents().then((data) => setEvents(data.events));
+      Promise.all([herzies.fetchActiveEvents(), herzies.fetchPreviousHunt()]).then(
+        ([active, previous]) => {
+          setEvents(active.events);
+          setPreviousHunt(previous.events.find((e) => e.type === "song_hunt") ?? null);
+        },
+      );
     };
 
     refresh();
@@ -97,6 +113,13 @@ export function EventsView({
 
   const hunt = events.find((e) => e.type === "song_hunt");
   const previousHuntConfig = previousHunt?.config as SongHuntConfig;
+  const previousFastestFinders = (previousHuntConfig?.firstFinders ?? [])
+    .slice()
+    .sort(
+      (a, b) =>
+        new Date(a.claimedAt).getTime() - new Date(b.claimedAt).getTime(),
+    )
+    .slice(0, 3);
 
   if (!hunt && previousHunt) {
     return (
@@ -160,11 +183,29 @@ export function EventsView({
                 <div className="flex flex-col gap-1">
                   <h2 className="text-ui font-bold text-text-dim">Finders:</h2>
                   <div className="max-h-28 overflow-y-auto">
-                    {previousHuntConfig?.firstFinders?.map((finder, i) => (
-                      <div key={finder.name} className="text-ui text-yellow">
-                        {i + 1}. {finder.name}
+                    {previousFastestFinders.length > 0 ? (
+                      previousFastestFinders.map((finder, i) => {
+                        const elapsed = formatDuration(
+                          new Date(finder.claimedAt).getTime() -
+                            new Date(previousHunt.startsAt).getTime(),
+                        );
+                        return (
+                          <div
+                            key={`${finder.name}-${finder.claimedAt}`}
+                            className="flex justify-between border-b border-border py-0.5 text-ui last:border-b-0"
+                          >
+                            <span className="text-yellow">
+                              {i + 1}. {finder.name}
+                            </span>
+                            <span className="text-text-dim">{elapsed}</span>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div className="text-ui text-text-dim">
+                        No finders from the previous hunt.
                       </div>
-                    ))}
+                    )}
                   </div>
                 </div>
               </div>
