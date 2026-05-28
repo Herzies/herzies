@@ -1263,15 +1263,23 @@ pub fn run() {
                 use std::path::PathBuf;
                 use tauri::path::BaseDirectory;
 
-                let bundled = app
-                    .path()
-                    .resolve("mediaremote", BaseDirectory::Resource)
-                    .ok()
-                    .filter(|p| p.join("mediaremote-adapter.pl").is_file());
                 let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("mediaremote");
-                let dir = bundled.unwrap_or(dev);
-                if dir.join("mediaremote-adapter.pl").is_file() {
-                    media_remote_adapter::init(dir);
+                let script = app
+                    .path()
+                    .resolve("mediaremote/mediaremote-adapter.pl", BaseDirectory::Resource)
+                    .ok()
+                    .filter(|p| p.is_file())
+                    .unwrap_or_else(|| dev.join("mediaremote-adapter.pl"));
+                let framework = std::env::current_exe()
+                    .ok()
+                    .and_then(|exe| {
+                        let contents = exe.parent()?.parent()?;
+                        let fw = contents.join("Frameworks/MediaRemoteAdapter.framework");
+                        fw.is_dir().then_some(fw)
+                    })
+                    .unwrap_or_else(|| dev.join("MediaRemoteAdapter.framework"));
+                if script.is_file() && framework.is_dir() {
+                    media_remote_adapter::init(script, framework);
                     log::info!(
                         "MediaRemote adapter: {:?}",
                         media_remote_adapter::is_configured()

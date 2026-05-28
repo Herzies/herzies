@@ -13,3 +13,7 @@ cd mediaremote-adapter && mkdir build && cd build && cmake .. && cmake --build .
 cp -R MediaRemoteAdapter.framework /path/to/herzies/packages/desktop/src-tauri/mediaremote/
 cp ../bin/mediaremote-adapter.pl /path/to/herzies/packages/desktop/src-tauri/mediaremote/
 ```
+
+Release builds copy the Perl script into `Resources/mediaremote/` and the framework into
+`Contents/Frameworks/` (via `bundle.macOS.frameworks`) so Tauri code-signs the Mach-O
+binary before notarization.

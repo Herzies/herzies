@@ -6,10 +6,12 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
-static MEDIAREMOTE_DIR: OnceLock<PathBuf> = OnceLock::new();
+static MEDIAREMOTE_SCRIPT: OnceLock<PathBuf> = OnceLock::new();
+static MEDIAREMOTE_FRAMEWORK: OnceLock<PathBuf> = OnceLock::new();
 
-pub fn init(dir: PathBuf) {
-    let _ = MEDIAREMOTE_DIR.set(dir);
+pub fn init(script: PathBuf, framework: PathBuf) {
+    let _ = MEDIAREMOTE_SCRIPT.set(script);
+    let _ = MEDIAREMOTE_FRAMEWORK.set(framework);
 }
 
 pub fn is_configured() -> bool {
@@ -17,11 +19,10 @@ pub fn is_configured() -> bool {
 }
 
 fn mediaremote_paths() -> Option<(PathBuf, PathBuf)> {
-    let dir = MEDIAREMOTE_DIR.get()?;
-    let script = dir.join("mediaremote-adapter.pl");
-    let framework = dir.join("MediaRemoteAdapter.framework");
+    let script = MEDIAREMOTE_SCRIPT.get()?;
+    let framework = MEDIAREMOTE_FRAMEWORK.get()?;
     if script.is_file() && framework.is_dir() {
-        Some((script, framework))
+        Some((script.clone(), framework.clone()))
     } else {
         None
     }

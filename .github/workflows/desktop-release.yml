@@ -90,11 +90,24 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           DMG=$(find packages/desktop/src-tauri/target/universal-apple-darwin/release/bundle/dmg -name '*.dmg' | head -1)
+          SUBMIT_JSON=$(mktemp)
           xcrun notarytool submit "$DMG" \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_PASSWORD" \
             --team-id "$APPLE_TEAM_ID" \
-            --wait
+            --wait \
+            --output-format json > "$SUBMIT_JSON"
+          cat "$SUBMIT_JSON"
+          STATUS=$(jq -r '.status' "$SUBMIT_JSON")
+          SUBMISSION_ID=$(jq -r '.id' "$SUBMIT_JSON")
+          if [ "$STATUS" != "Accepted" ]; then
+            echo "::error::Notarization failed with status: $STATUS"
+            xcrun notarytool log "$SUBMISSION_ID" \
+              --apple-id "$APPLE_ID" \
+              --password "$APPLE_PASSWORD" \
+              --team-id "$APPLE_TEAM_ID" || true
+            exit 1
+          fi
           xcrun stapler staple "$DMG"
 
       - name: Read version
