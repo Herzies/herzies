@@ -134,6 +134,9 @@ export const herzies = {
 
   testNotification: () => invoke<void>("test_notification"),
   testActivity: () => invoke<void>("test_activity"),
+  /** macOS only — raw MediaRemote JSON for debugging Now Playing detection. */
+  debugMediaRemoteNowPlaying: () =>
+    invoke<string | null>("debug_media_remote_now_playing"),
   quit: () => invoke<void>("quit"),
 
   /**

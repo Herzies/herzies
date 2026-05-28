@@ -3,6 +3,8 @@ mod auth;
 mod game;
 mod hatch;
 mod lastfm;
+#[cfg(target_os = "macos")]
+mod media_remote_adapter;
 mod nowplaying;
 mod state;
 mod storage;
@@ -684,9 +686,20 @@ fn display_tags(
     }
 }
 
+fn resolve_album_art_url(
+    system_art: Option<&str>,
+    enrichment: Option<&TrackEnrichment>,
+) -> Option<String> {
+    system_art
+        .filter(|url| !url.is_empty())
+        .map(str::to_string)
+        .or_else(|| enrichment.and_then(|e| e.album_art_url.clone()))
+}
+
 fn build_now_playing_display(
     title: &str,
     artist: &str,
+    system_art: Option<&str>,
     enrichment: Option<&TrackEnrichment>,
     local_genre: Option<&str>,
     current_genres: &[String],
@@ -694,7 +707,7 @@ fn build_now_playing_display(
     NowPlayingDisplay {
         title: title.to_string(),
         artist: artist.to_string(),
-        album_art_url: enrichment.and_then(|e| e.album_art_url.clone()),
+        album_art_url: resolve_album_art_url(system_art, enrichment),
         vibe: enrichment.and_then(|e| e.vibe.clone()),
         tags: display_tags(enrichment, local_genre, current_genres),
     }
@@ -723,10 +736,13 @@ fn apply_enrichment(app: &AppHandle, track_key: &str, enrichment: Option<TrackEn
             s.current_local_genre.as_deref(),
             &s.current_genres,
         );
-        let art = s.enrichment.as_ref().and_then(|e| e.album_art_url.clone());
+        let album_art_url = resolve_album_art_url(
+            s.system_album_art_url.as_deref(),
+            s.enrichment.as_ref(),
+        );
         let vibe = s.enrichment.as_ref().and_then(|e| e.vibe.clone());
         if let Some(ref mut np) = s.current_now_playing {
-            np.album_art_url = art;
+            np.album_art_url = album_art_url;
             np.vibe = vibe;
             np.tags = tags;
         }
@@ -743,6 +759,41 @@ fn spawn_track_enrichment(app: &AppHandle, artist: String, title: String, track_
         apply_enrichment(&app, &track_key, enrichment);
     });
 }
+
+#[cfg(target_os = "macos")]
+fn spawn_system_artwork_fetch(app: &AppHandle, track_key: String) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let artwork = tokio::task::spawn_blocking(media_remote_adapter::fetch_system_artwork_url)
+            .await
+            .ok()
+            .flatten();
+        let Some(artwork) = artwork else {
+            return;
+        };
+
+        let state = app.state::<SharedState>();
+        let app_state = {
+            let mut s = state.lock().unwrap();
+            if s.last_track_key.as_deref() != Some(track_key.as_str()) {
+                return;
+            }
+            s.system_album_art_url = Some(artwork);
+            let album_art_url = resolve_album_art_url(
+                s.system_album_art_url.as_deref(),
+                s.enrichment.as_ref(),
+            );
+            if let Some(ref mut np) = s.current_now_playing {
+                np.album_art_url = album_art_url;
+            }
+            s.to_app_state(env!("CARGO_PKG_VERSION"))
+        };
+        let _ = app.emit("state-update", &app_state);
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
+fn spawn_system_artwork_fetch(_app: &AppHandle, _track_key: String) {}
 
 async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: u64) -> Result<(), String> {
     let state = app.state::<SharedState>();
@@ -763,6 +814,7 @@ async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: u64) -> Resu
     let mut notify_level_up: Option<(String, u32)> = None;
     let mut notify_evolved: Option<(String, u32)> = None;
     let mut spawn_enrichment: Option<(String, String, String)> = None;
+    let mut spawn_artwork: Option<String> = None;
 
     {
         let mut s = state.lock().unwrap();
@@ -778,8 +830,13 @@ async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: u64) -> Resu
                 if track_changed {
                     s.last_track_key = Some(key.clone());
                     s.enrichment = None;
+                    s.system_album_art_url = None;
                     s.enrichment_requested_at = Some(Instant::now());
                     s.enrichment_in_flight = false;
+                    #[cfg(target_os = "macos")]
+                    if media_remote_adapter::is_configured() {
+                        spawn_artwork = Some(key.clone());
+                    }
                     s.current_local_genre = if info.genre.is_empty() {
                         None
                     } else {
@@ -852,6 +909,7 @@ async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: u64) -> Resu
                 s.current_now_playing = Some(build_now_playing_display(
                     &info.title,
                     &info.artist,
+                    s.system_album_art_url.as_deref(),
                     s.enrichment.as_ref(),
                     s.current_local_genre.as_deref(),
                     &s.current_genres,
@@ -862,6 +920,7 @@ async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: u64) -> Resu
                 s.current_genres.clear();
                 s.current_local_genre = None;
                 s.last_track_key = None;
+                s.system_album_art_url = None;
                 s.enrichment = None;
                 s.enrichment_requested_at = None;
                 s.enrichment_in_flight = false;
@@ -871,6 +930,9 @@ async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: u64) -> Resu
 
     if let Some((artist, title, key)) = spawn_enrichment {
         spawn_track_enrichment(app, artist, title, key);
+    }
+    if let Some(track_key) = spawn_artwork {
+        spawn_system_artwork_fetch(app, track_key);
     }
 
     // Send notifications outside the lock
@@ -901,6 +963,12 @@ fn test_notification(app: AppHandle) {
 #[tauri::command]
 fn test_activity(app: AppHandle) {
     let _ = app.emit("activity", "Test activity log entry");
+}
+
+/// Raw JSON from macOS MediaRemote (debug). Returns `null` when unavailable or empty.
+#[tauri::command]
+fn debug_media_remote_now_playing() -> Option<String> {
+    nowplaying::raw_media_remote_json()
 }
 
 #[tauri::command]
@@ -1189,10 +1257,33 @@ pub fn run() {
             chat_send,
             test_notification,
             test_activity,
+            debug_media_remote_now_playing,
             quit,
             open_external_url,
         ])
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            {
+                use std::path::PathBuf;
+                use tauri::path::BaseDirectory;
+
+                let bundled = app
+                    .path()
+                    .resolve("mediaremote", BaseDirectory::Resource)
+                    .ok()
+                    .filter(|p| p.join("mediaremote-adapter.pl").is_file());
+                let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("mediaremote");
+                let dir = bundled.unwrap_or(dev);
+                if dir.join("mediaremote-adapter.pl").is_file() {
+                    media_remote_adapter::init(dir);
+                    log::info!("MediaRemote adapter: {:?}", media_remote_adapter::is_configured());
+                } else {
+                    log::warn!(
+                        "MediaRemote adapter files missing; now playing falls back to AppleScript"
+                    );
+                }
+            }
+
             // Set notification bundle ID so clicks activate this app
             let bundle_id = if tauri::is_dev() {
                 "com.apple.Terminal"

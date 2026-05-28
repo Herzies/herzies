@@ -15,6 +15,8 @@ pub struct ManagedState {
     pub enrichment: Option<TrackEnrichment>,
     pub enrichment_requested_at: Option<Instant>,
     pub enrichment_in_flight: bool,
+    /// Album art from the system Now Playing session (`data:` URL), when available.
+    pub system_album_art_url: Option<String>,
     /// Last known result of a `/sync` round-trip. The frontend's connectivity
     /// indicator is derived from this *plus* `ms_since_reachable` so that
     /// successful traffic on other endpoints (chat, inventory, …) instantly
@@ -53,6 +55,7 @@ impl ManagedState {
             enrichment: None,
             enrichment_requested_at: None,
             enrichment_in_flight: false,
+            system_album_art_url: None,
             last_sync_ok: true,
             equipped: crate::storage::load_equipped(),
             chat_messages: Vec::new(),

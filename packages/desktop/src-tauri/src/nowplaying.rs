@@ -35,10 +35,29 @@ end tell
 "#;
 
 pub async fn get_now_playing() -> Option<NowPlayingInfo> {
+    #[cfg(target_os = "macos")]
+    if crate::media_remote_adapter::is_configured() {
+        if let Ok(Some(info)) =
+            tokio::task::spawn_blocking(crate::media_remote_adapter::get_now_playing).await
+        {
+            return Some(info);
+        }
+    }
+
     if let Some(info) = query_app(MUSIC_SCRIPT, "Music").await {
         return Some(info);
     }
     query_app(SPOTIFY_SCRIPT, "Spotify").await
+}
+
+#[cfg(target_os = "macos")]
+pub fn raw_media_remote_json() -> Option<String> {
+    crate::media_remote_adapter::raw_json()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn raw_media_remote_json() -> Option<String> {
+    None
 }
 
 async fn query_app(script: &str, source: &str) -> Option<NowPlayingInfo> {

@@ -25,6 +25,7 @@ export function SettingsView({
   onUpdateInstalled: () => void;
 }) {
   const [loggingIn, setLoggingIn] = useState(false);
+  const [mediaRemoteDebug, setMediaRemoteDebug] = useState<string | null>(null);
   const [updateStatus, setUpdateStatus] = useState<
     | { kind: "idle" }
     | { kind: "installing"; downloaded: number; total: number | undefined }
@@ -106,10 +107,37 @@ export function SettingsView({
             >
               Test Activity Log
             </button>
+            <button
+              type="button"
+              className="btn"
+              onClick={async () => {
+                const raw = await herzies.debugMediaRemoteNowPlaying();
+                let text: string;
+                if (raw === null) {
+                  text =
+                    "(null — no now playing data from adapter; is music playing?)";
+                } else {
+                  try {
+                    text = JSON.stringify(JSON.parse(raw), null, 2);
+                  } catch {
+                    text = raw;
+                  }
+                }
+                console.log("[MediaRemote]", raw ?? null);
+                setMediaRemoteDebug(text);
+              }}
+            >
+              MediaRemote JSON
+            </button>
             <button type="button" className="btn" onClick={onPreviewOnboarding}>
               Preview Onboarding
             </button>
           </div>
+          {mediaRemoteDebug !== null && (
+            <pre className="mt-2 max-h-40 overflow-auto rounded border border-border bg-[#111] p-2 text-[10px] text-text-dim whitespace-pre-wrap break-all">
+              {mediaRemoteDebug}
+            </pre>
+          )}
         </div>
       )}
 
