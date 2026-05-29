@@ -1,6 +1,6 @@
 /**
  * Integration tests for the events table — verifies the public RLS lockdown
- * (00015_events_rls_lockdown.sql) prevents anon clients from reading sensitive
+ * (00016_events_rls_lockdown.sql) prevents anon clients from reading sensitive
  * config fields like trackTitle / trackArtist while the API still works.
  *
  * Requires: `npx supabase start`

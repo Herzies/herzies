@@ -1,3 +1,4 @@
+import { NextResponse } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createMockAdmin,
@@ -43,7 +44,7 @@ const validBody = {
 describe("POST /api/herzie", () => {
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(
-      new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 }),
+      NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
     );
 
     const res = await POST(fakeRequest(validBody));

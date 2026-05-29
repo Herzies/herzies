@@ -244,9 +244,7 @@ async fn friend_request_accept(
                 let mut s = state.lock().unwrap();
                 s.incoming_friend_requests
                     .retain(|r| r.request_id != request_id);
-                if s.pending_friend_request.as_ref().map(|p| &p.request_id)
-                    == Some(&request_id)
-                {
+                if s.pending_friend_request.as_ref().map(|p| &p.request_id) == Some(&request_id) {
                     s.pending_friend_request = None;
                 }
             }
@@ -280,9 +278,7 @@ async fn friend_request_decline(
                 let mut s = state.lock().unwrap();
                 s.incoming_friend_requests
                     .retain(|r| r.request_id != request_id);
-                if s.pending_friend_request.as_ref().map(|p| &p.request_id)
-                    == Some(&request_id)
-                {
+                if s.pending_friend_request.as_ref().map(|p| &p.request_id) == Some(&request_id) {
                     s.pending_friend_request = None;
                 }
             }
@@ -1436,7 +1432,10 @@ pub fn run() {
                 let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("mediaremote");
                 let script = app
                     .path()
-                    .resolve("mediaremote/mediaremote-adapter.pl", BaseDirectory::Resource)
+                    .resolve(
+                        "mediaremote/mediaremote-adapter.pl",
+                        BaseDirectory::Resource,
+                    )
                     .ok()
                     .filter(|p| p.is_file())
                     .unwrap_or_else(|| dev.join("mediaremote-adapter.pl"));

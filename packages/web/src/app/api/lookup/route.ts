@@ -56,14 +56,18 @@ export async function GET(request: Request) {
     }
 
     const canSeeListening = visibleCodes.has(data.friend_code);
-    const [topArtists, lastPlayed, globalRank, globalTotal] = await Promise.all([
-      canSeeListening ? getTopArtists(admin, data.user_id) : Promise.resolve([]),
-      canSeeListening
-        ? getLastPlayed(admin, data.user_id)
-        : Promise.resolve(null),
-      getGlobalRank(admin, data.xp),
-      getGlobalTotal(admin),
-    ]);
+    const [topArtists, lastPlayed, globalRank, globalTotal] = await Promise.all(
+      [
+        canSeeListening
+          ? getTopArtists(admin, data.user_id)
+          : Promise.resolve([]),
+        canSeeListening
+          ? getLastPlayed(admin, data.user_id)
+          : Promise.resolve(null),
+        getGlobalRank(admin, data.xp),
+        getGlobalTotal(admin),
+      ],
+    );
 
     return NextResponse.json({
       herzie: formatProfile(

@@ -137,43 +137,43 @@ export function ProfileView({
       )}
 
       {!isSelf && (
-      <div className="flex shrink-0 gap-1.5">
-        <button type="button" className="btn text-purple" onClick={onTrade}>
-          Trade
-        </button>
-        {!canRemove && requestPending && (
-          <button type="button" className="btn text-text-dim" disabled>
-            Request sent
+        <div className="flex shrink-0 gap-1.5">
+          <button type="button" className="btn text-purple" onClick={onTrade}>
+            Trade
           </button>
-        )}
-        {!canRemove && !requestPending && (
-          <button type="button" className="btn text-green" onClick={onAdd}>
-            Add friend
-          </button>
-        )}
-        {canRemove && confirmRemove ? (
-          <>
-            <button type="button" className="btn text-red" onClick={onRemove}>
-              Yes, remove
+          {!canRemove && requestPending && (
+            <button type="button" className="btn text-text-dim" disabled>
+              Request sent
             </button>
+          )}
+          {!canRemove && !requestPending && (
+            <button type="button" className="btn text-green" onClick={onAdd}>
+              Add friend
+            </button>
+          )}
+          {canRemove && confirmRemove ? (
+            <>
+              <button type="button" className="btn text-red" onClick={onRemove}>
+                Yes, remove
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setConfirmRemove(false)}
+              >
+                Cancel
+              </button>
+            </>
+          ) : canRemove ? (
             <button
               type="button"
-              className="btn"
-              onClick={() => setConfirmRemove(false)}
+              className="btn text-red"
+              onClick={() => setConfirmRemove(true)}
             >
-              Cancel
+              Remove friend
             </button>
-          </>
-        ) : canRemove ? (
-          <button
-            type="button"
-            className="btn text-red"
-            onClick={() => setConfirmRemove(true)}
-          >
-            Remove friend
-          </button>
-        ) : null}
-      </div>
+          ) : null}
+        </div>
       )}
     </View>
   );

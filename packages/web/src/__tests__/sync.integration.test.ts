@@ -315,7 +315,7 @@ describe("Sync flow", () => {
     const body = await res.json();
 
     const huntNotif = body.notifications.find(
-      (n: { type: string }) =>
+      (n: { type: string; message: string }) =>
         n.type === "info" && n.message.includes("FinderHerzie"),
     );
     expect(huntNotif).toBeDefined();
@@ -333,7 +333,7 @@ describe("Sync flow", () => {
     const body2 = await res2.json();
 
     const huntNotif2 = body2.notifications.find(
-      (n: { type: string }) =>
+      (n: { type: string; message: string }) =>
         n.type === "info" && n.message.includes("FinderHerzie"),
     );
     expect(huntNotif2).toBeUndefined();

@@ -516,9 +516,7 @@ function TabButton({
       onClick={onClick}
       className={cn(
         "cursor-pointer border-none bg-transparent px-1.5 pb-1.5 pt-0.5",
-        active
-          ? "font-bold text-green"
-          : "text-text-dim hover:text-text",
+        active ? "font-bold text-green" : "text-text-dim hover:text-text",
       )}
     >
       {children}
@@ -536,7 +534,9 @@ function SearchResults({
   onSend: (code: string) => void;
 }) {
   if (searching && results.length === 0) {
-    return <div className="pt-5 text-center text-ui text-text-dim">Searching…</div>;
+    return (
+      <div className="pt-5 text-center text-ui text-text-dim">Searching…</div>
+    );
   }
   if (results.length === 0) {
     return (
@@ -559,7 +559,9 @@ function SearchResults({
           {r.relationship === "friends" ? (
             <span className="shrink-0 text-[10px] text-text-dim">Friends</span>
           ) : r.relationship === "pending_sent" ? (
-            <span className="shrink-0 text-[10px] text-text-dim">Requested</span>
+            <span className="shrink-0 text-[10px] text-text-dim">
+              Requested
+            </span>
           ) : r.relationship === "pending_received" ? (
             <button
               type="button"

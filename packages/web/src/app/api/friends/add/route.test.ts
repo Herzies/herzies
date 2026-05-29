@@ -1,3 +1,4 @@
+import { NextResponse } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createMockAdmin,
@@ -28,7 +29,7 @@ beforeEach(() => {
 describe("POST /api/friends/add (send friend request)", () => {
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(
-      new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 }),
+      NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
     );
 
     const res = await POST(
@@ -104,9 +105,6 @@ describe("POST /api/friends/add (send friend request)", () => {
       }),
     );
     // Friendship is not created on send.
-    expect(admin.rpc).not.toHaveBeenCalledWith(
-      "add_friend",
-      expect.anything(),
-    );
+    expect(admin.rpc).not.toHaveBeenCalledWith("add_friend", expect.anything());
   });
 });

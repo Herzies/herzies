@@ -29,9 +29,7 @@ export async function GET(request: Request) {
 
   const myFriendCodes = new Set<string>(me?.friend_codes ?? []);
 
-  let query = admin
-    .from("herzies")
-    .select("user_id, name, friend_code, level");
+  let query = admin.from("herzies").select("user_id, name, friend_code, level");
 
   const asCode = q.toUpperCase();
   if (FRIEND_CODE_RE.test(asCode)) {
@@ -62,7 +60,8 @@ export async function GET(request: Request) {
   const receivedFrom = new Set<string>();
   for (const p of pending ?? []) {
     if (p.from_user_id === auth.userId) sentTo.add(p.to_user_id as string);
-    if (p.to_user_id === auth.userId) receivedFrom.add(p.from_user_id as string);
+    if (p.to_user_id === auth.userId)
+      receivedFrom.add(p.from_user_id as string);
   }
 
   const results: FriendSearchResult[] = matches.map((r) => {

@@ -41,8 +41,8 @@ export function IncomingFriendOverlay({
         },
       ]}
     >
-      <span className="font-bold text-text">{request.fromName}</span> wants to be
-      your friend.
+      <span className="font-bold text-text">{request.fromName}</span> wants to
+      be your friend.
     </PromptOverlay>
   );
 }

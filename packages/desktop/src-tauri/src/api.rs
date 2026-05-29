@@ -297,8 +297,7 @@ async fn post_friend_action(
         .ok_or_else(|| "Network error".to_string())?;
     let status = resp.status();
     let text = resp.text().await.map_err(|e| format!("Read error: {e}"))?;
-    let data: serde_json::Value =
-        serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
+    let data: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
     if !status.is_success() {
         let msg = data["error"].as_str().unwrap_or("Something went wrong");
         return Err(msg.to_string());
@@ -318,30 +317,21 @@ pub async fn api_send_friend_request(
     Ok(data["accepted"].as_bool().unwrap_or(false))
 }
 
-pub async fn api_accept_friend_request(
-    client: &Client,
-    request_id: &str,
-) -> Result<(), String> {
+pub async fn api_accept_friend_request(client: &Client, request_id: &str) -> Result<(), String> {
     let body = serde_json::json!({ "requestId": request_id });
     post_friend_action(client, "/friends/accept", body)
         .await
         .map(|_| ())
 }
 
-pub async fn api_decline_friend_request(
-    client: &Client,
-    request_id: &str,
-) -> Result<(), String> {
+pub async fn api_decline_friend_request(client: &Client, request_id: &str) -> Result<(), String> {
     let body = serde_json::json!({ "requestId": request_id });
     post_friend_action(client, "/friends/decline", body)
         .await
         .map(|_| ())
 }
 
-pub async fn api_cancel_friend_request(
-    client: &Client,
-    request_id: &str,
-) -> Result<(), String> {
+pub async fn api_cancel_friend_request(client: &Client, request_id: &str) -> Result<(), String> {
     let body = serde_json::json!({ "requestId": request_id });
     post_friend_action(client, "/friends/cancel", body)
         .await

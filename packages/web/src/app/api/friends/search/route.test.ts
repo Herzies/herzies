@@ -1,3 +1,4 @@
+import { NextResponse } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockAdmin, responseJson } from "@/__tests__/helpers";
 
@@ -32,7 +33,7 @@ beforeEach(() => {
 describe("GET /api/friends/search", () => {
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(
-      new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 }),
+      NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
     );
     const res = await GET(getRequest("bob"));
     expect(res.status).toBe(401);
