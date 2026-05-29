@@ -1,4 +1,5 @@
 import "./globals.css";
+import type { HerzieProfile } from "@herzies/shared";
 import {
   isPermissionGranted,
   requestPermission,
@@ -11,9 +12,11 @@ import { ChatPanel } from "./components/ChatPanel";
 import { EventsView } from "./components/EventsView";
 import { FriendsView } from "./components/FriendsView";
 import { HomeView } from "./components/HomeView";
+import { IncomingFriendOverlay } from "./components/IncomingFriendOverlay";
 import { IncomingTradeOverlay } from "./components/IncomingTradeOverlay";
 import { InventoryView } from "./components/InventoryView";
 import { OnboardingScreen } from "./components/OnboardingScreen";
+import { ProfileView } from "./components/ProfileView";
 import { SettingsView } from "./components/SettingsView";
 import { SplashScreen } from "./components/SplashScreen";
 import { TabBar, type View } from "./components/TabBar";
@@ -42,6 +45,9 @@ function App() {
     inventoryCurrency: 0,
     friends: {},
     pendingTradeRequest: null,
+    pendingFriendRequest: null,
+    incomingFriendRequests: [],
+    outgoingFriendRequests: [],
   });
   const [view, setView] = useState<View>("home");
   const [tradeTarget, setTradeTarget] = useState<string | null>(null);
@@ -55,11 +61,21 @@ function App() {
   const [availableUpdate, setAvailableUpdate] = useState<Update | null>(null);
   const [hasActiveEvent, setHasActiveEvent] = useState(false);
   const [chatProfileCode, setChatProfileCode] = useState<string | null>(null);
+  const [selfProfile, setSelfProfile] = useState<HerzieProfile | null>(null);
   const [ignoredIncomingTradeId, setIgnoredIncomingTradeId] = useState<
     string | null
   >(null);
   const [incomingTradeDeclineBusy, setIncomingTradeDeclineBusy] =
     useState(false);
+  const [ignoredFriendRequestId, setIgnoredFriendRequestId] = useState<
+    string | null
+  >(null);
+  const [friendOverlayBusy, setFriendOverlayBusy] = useState<
+    "accept" | "decline" | null
+  >(null);
+  const [friendsTab, setFriendsTab] = useState<
+    "friends" | "requests" | "add" | "leaderboard"
+  >("friends");
   /** Bumps when a trade session ends or a new one starts so TradeView remounts (clears stale tradeId). */
   const [tradeViewGeneration, setTradeViewGeneration] = useState(0);
   const notifiedVersionRef = useRef<string | null>(null);
@@ -81,6 +97,9 @@ function App() {
         setIncomingTradeId(tradeId);
         setTradeTarget(null);
         setView("trade");
+      } else if (payload === "friends:requests") {
+        setFriendsTab("requests");
+        setView("friends");
       } else {
         setDeepLinkItem(payload);
         setView("inventory");
@@ -99,6 +118,13 @@ function App() {
       setIncomingTradeDeclineBusy(false);
     }
   }, [state.pendingTradeRequest]);
+
+  useEffect(() => {
+    if (!state.pendingFriendRequest) {
+      setIgnoredFriendRequestId(null);
+      setFriendOverlayBusy(null);
+    }
+  }, [state.pendingFriendRequest]);
 
   const refreshEventIndicator = useCallback(() => {
     Promise.all([herzies.fetchActiveEvents(), herzies.fetchPreviousHunt()])
@@ -191,7 +217,17 @@ function App() {
       setIncomingTradeId(null);
       setTradeTarget(null);
     }
+    setSelfProfile(null);
     setView(v);
+  };
+
+  const handleOpenSelfProfile = async () => {
+    const code = herzie?.friendCode;
+    if (!code) return;
+    const cached = state.friends[code];
+    if (cached) setSelfProfile(cached);
+    const result = await herzies.friendLookup([code]);
+    if (result[code]) setSelfProfile(result[code]);
   };
 
   const handleStartTrade = (code: string) => {
@@ -234,6 +270,47 @@ function App() {
     }
   };
 
+  const pendingFriend = state.pendingFriendRequest ?? null;
+  const showIncomingFriendOverlay =
+    pendingFriend &&
+    pendingFriend.requestId !== ignoredFriendRequestId &&
+    !(view === "friends" && friendsTab === "requests");
+
+  const handleAcceptFriendRequest = async () => {
+    if (!pendingFriend || friendOverlayBusy) return;
+    setFriendOverlayBusy("accept");
+    try {
+      const result = await herzies.friendRequestAccept(pendingFriend.requestId);
+      addLog(result.message);
+      if (result.success) setIgnoredFriendRequestId(pendingFriend.requestId);
+    } finally {
+      setFriendOverlayBusy(null);
+    }
+  };
+
+  const handleDeclineFriendRequest = async () => {
+    if (!pendingFriend || friendOverlayBusy) return;
+    setFriendOverlayBusy("decline");
+    try {
+      const result = await herzies.friendRequestDecline(
+        pendingFriend.requestId,
+      );
+      if (result.success) {
+        setIgnoredFriendRequestId(pendingFriend.requestId);
+        addLog(`Declined friend request from ${pendingFriend.fromName}`);
+      } else {
+        addLog(result.message);
+      }
+    } finally {
+      setFriendOverlayBusy(null);
+    }
+  };
+
+  const handleDismissFriendRequest = () => {
+    if (!pendingFriend || friendOverlayBusy) return;
+    setIgnoredFriendRequestId(pendingFriend.requestId);
+  };
+
   return (
     <div
       data-tauri-drag-region
@@ -246,7 +323,24 @@ function App() {
             view === "home" ? "flex" : "hidden",
           )}
         >
-          <HomeView state={state} stageOverride={stageOverride} />
+          {selfProfile ? (
+            <ProfileView
+              profile={selfProfile}
+              isSelf
+              isFriend
+              stageOverride={stageOverride}
+              onBack={() => setSelfProfile(null)}
+              onTrade={() => {}}
+              onAdd={() => {}}
+              onRemove={() => {}}
+            />
+          ) : (
+            <HomeView
+              state={state}
+              stageOverride={stageOverride}
+              onOpenProfile={handleOpenSelfProfile}
+            />
+          )}
         </div>
 
         {herzie && (
@@ -259,10 +353,15 @@ function App() {
             <FriendsView
               herzie={herzie}
               friends={state.friends}
+              incomingRequests={state.incomingFriendRequests}
+              outgoingRequests={state.outgoingFriendRequests}
               onStartTrade={handleStartTrade}
               stageOverride={stageOverride}
               openProfileCode={chatProfileCode}
               onProfileOpened={() => setChatProfileCode(null)}
+              tab={friendsTab}
+              onTabChange={setFriendsTab}
+              onActivity={addLog}
             />
           </div>
         )}
@@ -335,7 +434,7 @@ function App() {
         </div>
       </div>
 
-      {herzie && view === "home" && (
+      {herzie && view === "home" && !selfProfile && (
         <ChatPanel
           activityLog={activityLog}
           isOnline={state.isOnline}
@@ -344,6 +443,10 @@ function App() {
           friends={state.friends}
           herzie={herzie}
           nowPlaying={state.nowPlaying}
+          pendingFriendCodes={[
+            ...state.incomingFriendRequests.map((r) => r.friendCode),
+            ...state.outgoingFriendRequests.map((r) => r.friendCode),
+          ]}
           onOpenProfile={(code) => {
             setChatProfileCode(code);
             switchView("friends");
@@ -366,6 +469,16 @@ function App() {
           busy={incomingTradeDeclineBusy ? "ignore" : null}
           onJoin={handleJoinIncomingTrade}
           onIgnore={handleIgnoreIncomingTrade}
+        />
+      )}
+
+      {herzie && showIncomingFriendOverlay && pendingFriend && (
+        <IncomingFriendOverlay
+          request={pendingFriend}
+          busy={friendOverlayBusy}
+          onAccept={handleAcceptFriendRequest}
+          onDecline={handleDeclineFriendRequest}
+          onDismiss={handleDismissFriendRequest}
         />
       )}
     </div>

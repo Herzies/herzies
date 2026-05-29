@@ -176,7 +176,7 @@ describe("Listen log", () => {
     expect(error).not.toBeNull();
   });
 
-  it("anon client can read listen_log (public SELECT policy)", async () => {
+  it("anon client cannot read another user's listen_log (private)", async () => {
     const anon = getAnonClient();
 
     const { data, error } = await anon
@@ -186,6 +186,31 @@ describe("Listen log", () => {
       .order("listened_at", { ascending: false })
       .limit(3);
 
+    // Listening history is private — RLS hides every row from anon. Either the
+    // request errors (permission denied) or it returns no rows.
+    if (error) {
+      expect(error).not.toBeNull();
+    } else {
+      expect(data).toEqual([]);
+    }
+  });
+
+  it("the owner can read their own listen_log", async () => {
+    const anon = getAnonClient();
+    await anon.auth.setSession({
+      access_token: user.accessToken,
+      refresh_token: "",
+    });
+
+    const { data, error } = await anon
+      .from("listen_log")
+      .select("track_name, artist_name, listened_at")
+      .eq("user_id", user.userId)
+      .order("listened_at", { ascending: false })
+      .limit(3);
+
+    await anon.auth.signOut();
+
     expect(error).toBeNull();
     expect(data).not.toBeNull();
     expect(data!.length).toBe(3);
@@ -194,47 +219,28 @@ describe("Listen log", () => {
     expect(data![1].track_name).toBe("Stairway to Heaven");
     expect(data![2].track_name).toBe("Bohemian Rhapsody");
   });
+});
 
-  it("anon client can query top artists by play count", async () => {
+describe("Herzies column privacy", () => {
+  it("anon can read public leaderboard columns", async () => {
     const anon = getAnonClient();
-
-    // Insert extra plays via admin to create a clear ranking
-    const admin = getAdminClient();
-    for (let i = 0; i < 5; i++) {
-      await admin.from("listen_log").insert({
-        user_id: user.userId,
-        track_name: `Song ${i}`,
-        artist_name: "The Beatles",
-        source: "cli",
-      });
-    }
-
-    // Query: count plays grouped by artist, ordered by count desc
-    // Supabase doesn't support group-by directly, so we fetch all and aggregate client-side
-    // (or use an RPC — but for now, fetch recent and aggregate)
     const { data, error } = await anon
-      .from("listen_log")
-      .select("artist_name")
+      .from("herzies")
+      .select("name, level, stage, total_minutes_listened")
       .eq("user_id", user.userId);
 
     expect(error).toBeNull();
-    expect(data).not.toBeNull();
+    expect((data ?? []).length).toBe(1);
+  });
 
-    // Aggregate by artist
-    const counts: Record<string, number> = {};
-    for (const row of data!) {
-      counts[row.artist_name] = (counts[row.artist_name] ?? 0) + 1;
-    }
+  it("anon cannot read now_playing", async () => {
+    const anon = getAnonClient();
+    const { error } = await anon
+      .from("herzies")
+      .select("now_playing")
+      .eq("user_id", user.userId);
 
-    const sorted = Object.entries(counts)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 3);
-
-    // The Beatles should be #1 with 5 plays
-    expect(sorted[0][0]).toBe("The Beatles");
-    expect(sorted[0][1]).toBe(5);
-    // Queen should be #2 with 2 plays (from earlier tests)
-    expect(sorted[1][0]).toBe("Queen");
-    expect(sorted[1][1]).toBe(2);
+    // now_playing is not granted to anon — selecting it is denied.
+    expect(error).not.toBeNull();
   });
 });

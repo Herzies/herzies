@@ -37,8 +37,10 @@ export default function TermsPage() {
           </ul>
           <p className="text-[13px]">
             We store your listening history so you can see stats like your
-            recently played tracks and top artists on your profile. This data is
-            publicly visible on your herzie's profile page.
+            recently played tracks and top artists. Your listening history and
+            currently playing track are private — only you and the friends you
+            add can see them. The public leaderboard only shows aggregate stats
+            like level and total minutes listened, never what you're playing.
           </p>
           <p className="text-[13px]">
             We do <span className="font-bold">not</span> sell or share your data

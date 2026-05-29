@@ -26,6 +26,7 @@ use types::*;
 // and would collide on the second `.manage()` call.
 pub struct PendingDeepLink(pub Mutex<Option<String>>);
 pub struct LastTradeNotified(pub Mutex<Option<String>>);
+pub struct LastFriendNotified(pub Mutex<Option<String>>);
 
 // --- Tauri commands ---
 
@@ -174,32 +175,161 @@ async fn friend_add(
     }
 
     let client = Client::new();
-    let ok = api::api_add_friend(&client, &friend_code, &code).await;
-    if ok {
+    match api::api_send_friend_request(&client, &friend_code, &code).await {
+        Ok(accepted) => {
+            if accepted {
+                // They had already requested us, so the friendship is live now.
+                add_friend_locally(&app, &state, &code);
+                Ok(FriendResult {
+                    success: true,
+                    message: "Friend added!".into(),
+                })
+            } else {
+                let _ = app.emit("activity", format!("Friend request sent to {}", code));
+                Ok(FriendResult {
+                    success: true,
+                    message: "Friend request sent!".into(),
+                })
+            }
+        }
+        Err(message) => Ok(FriendResult {
+            success: false,
+            message,
+        }),
+    }
+}
+
+/// Push a newly-confirmed friend code into local state, persist, emit, and
+/// refresh the cached profiles. Shared by send (auto-accept) and accept paths.
+fn add_friend_locally(app: &AppHandle, state: &tauri::State<'_, SharedState>, code: &str) {
+    {
         let mut s = state.lock().unwrap();
         if let Some(ref mut herzie) = s.herzie {
-            herzie.friend_codes.push(code.clone());
-            storage::save_herzie(herzie);
-            let app_state = s.to_app_state(env!("CARGO_PKG_VERSION"));
-            drop(s);
-            let _ = app.emit("state-update", &app_state);
+            if !herzie.friend_codes.contains(&code.to_string()) {
+                herzie.friend_codes.push(code.to_string());
+                storage::save_herzie(herzie);
+            }
         }
-        let _ = app.emit("activity", format!("Added friend {}", code));
-        let app_clone = app.clone();
-        tauri::async_runtime::spawn(async move {
-            let client = Client::new();
-            refresh_friends_cache(&app_clone, &client).await;
-        });
-        Ok(FriendResult {
-            success: true,
-            message: "Friend added!".into(),
-        })
-    } else {
-        Ok(FriendResult {
-            success: false,
-            message: "Friend code not found".into(),
-        })
+        let app_state = s.to_app_state(env!("CARGO_PKG_VERSION"));
+        drop(s);
+        let _ = app.emit("state-update", &app_state);
     }
+    let _ = app.emit("activity", format!("Added friend {}", code));
+    let app_clone = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let client = Client::new();
+        refresh_friends_cache(&app_clone, &client).await;
+    });
+}
+
+#[tauri::command]
+async fn friend_request_accept(
+    request_id: String,
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<FriendResult, String> {
+    // Resolve the friend code for this request so we can update local state.
+    let code = {
+        let s = state.lock().unwrap();
+        s.incoming_friend_requests
+            .iter()
+            .find(|r| r.request_id == request_id)
+            .map(|r| r.friend_code.clone())
+    };
+
+    let client = Client::new();
+    match api::api_accept_friend_request(&client, &request_id).await {
+        Ok(()) => {
+            {
+                let mut s = state.lock().unwrap();
+                s.incoming_friend_requests
+                    .retain(|r| r.request_id != request_id);
+                if s.pending_friend_request.as_ref().map(|p| &p.request_id)
+                    == Some(&request_id)
+                {
+                    s.pending_friend_request = None;
+                }
+            }
+            if let Some(code) = code {
+                add_friend_locally(&app, &state, &code);
+            } else {
+                emit_state_update(&app);
+            }
+            Ok(FriendResult {
+                success: true,
+                message: "Friend added!".into(),
+            })
+        }
+        Err(message) => Ok(FriendResult {
+            success: false,
+            message,
+        }),
+    }
+}
+
+#[tauri::command]
+async fn friend_request_decline(
+    request_id: String,
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<FriendResult, String> {
+    let client = Client::new();
+    match api::api_decline_friend_request(&client, &request_id).await {
+        Ok(()) => {
+            {
+                let mut s = state.lock().unwrap();
+                s.incoming_friend_requests
+                    .retain(|r| r.request_id != request_id);
+                if s.pending_friend_request.as_ref().map(|p| &p.request_id)
+                    == Some(&request_id)
+                {
+                    s.pending_friend_request = None;
+                }
+            }
+            emit_state_update(&app);
+            Ok(FriendResult {
+                success: true,
+                message: "Request declined".into(),
+            })
+        }
+        Err(message) => Ok(FriendResult {
+            success: false,
+            message,
+        }),
+    }
+}
+
+#[tauri::command]
+async fn friend_request_cancel(
+    request_id: String,
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<FriendResult, String> {
+    let client = Client::new();
+    match api::api_cancel_friend_request(&client, &request_id).await {
+        Ok(()) => {
+            {
+                let mut s = state.lock().unwrap();
+                s.outgoing_friend_requests
+                    .retain(|r| r.request_id != request_id);
+            }
+            emit_state_update(&app);
+            Ok(FriendResult {
+                success: true,
+                message: "Request cancelled".into(),
+            })
+        }
+        Err(message) => Ok(FriendResult {
+            success: false,
+            message,
+        }),
+    }
+}
+
+#[tauri::command]
+async fn friend_search(query: String) -> Result<Vec<FriendSearchResult>, String> {
+    let client = Client::new();
+    api::api_search_friends(&client, &query).await
 }
 
 #[tauri::command]
@@ -398,6 +528,15 @@ async fn trade_cancel(trade_id: String) -> Result<bool, String> {
 async fn trade_poll(trade_id: String) -> Result<Option<Trade>, String> {
     let client = Client::new();
     Ok(api::api_poll_trade(&client, &trade_id).await)
+}
+
+#[tauri::command]
+async fn fetch_leaderboard() -> Result<serde_json::Value, String> {
+    let client = Client::new();
+    match api::api_fetch_leaderboard(&client).await {
+        Some(entries) => Ok(serde_json::json!({ "entries": entries })),
+        None => Ok(serde_json::json!({ "entries": [] })),
+    }
 }
 
 #[tauri::command]
@@ -1103,6 +1242,9 @@ async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
         storage::save_multipliers(&sync_resp.multipliers);
 
         s.pending_trade_request = sync_resp.pending_trade_request.clone();
+        s.pending_friend_request = sync_resp.pending_friend_request.clone();
+        s.incoming_friend_requests = sync_resp.incoming_friend_requests.clone();
+        s.outgoing_friend_requests = sync_resp.outgoing_friend_requests.clone();
 
         let app_state = s.to_app_state(env!("CARGO_PKG_VERSION"));
         drop(s);
@@ -1141,6 +1283,28 @@ async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
             if let Ok(mut last) = app.state::<LastTradeNotified>().0.lock() {
                 *last = None;
             }
+        }
+
+        // Show notification for incoming friend requests — dedupe by request ID
+        // so we don't re-notify on every sync tick while it's pending.
+        if let Some(friend_req) = &sync_resp.pending_friend_request {
+            let should_notify = {
+                let state = app.state::<LastFriendNotified>();
+                let mut last = state.0.lock().unwrap();
+                if last.as_deref() == Some(friend_req.request_id.as_str()) {
+                    false
+                } else {
+                    *last = Some(friend_req.request_id.clone());
+                    true
+                }
+            };
+            if should_notify {
+                let msg = format!("{} wants to be your friend!", friend_req.from_name);
+                send_notification(app, "Friend Request", &msg, Some("friends:requests"));
+                let _ = app.emit("activity", format!("Friend Request: {}", msg));
+            }
+        } else if let Ok(mut last) = app.state::<LastFriendNotified>().0.lock() {
+            *last = None;
         }
 
         // Show server-sent notifications (item drops, etc.)
@@ -1228,6 +1392,7 @@ pub fn run() {
         .manage(lastfm_service)
         .manage(PendingDeepLink(Mutex::new(None)))
         .manage(LastTradeNotified(Mutex::new(None)))
+        .manage(LastFriendNotified(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             get_state,
             login,
@@ -1236,6 +1401,10 @@ pub fn run() {
             friend_add,
             friend_remove,
             friend_lookup,
+            friend_request_accept,
+            friend_request_decline,
+            friend_request_cancel,
+            friend_search,
             fetch_inventory,
             sell_item,
             equip_item,
@@ -1248,6 +1417,7 @@ pub fn run() {
             trade_poll,
             fetch_active_events,
             fetch_previous_hunt,
+            fetch_leaderboard,
             get_auth_config,
             chat_fetch,
             chat_send,

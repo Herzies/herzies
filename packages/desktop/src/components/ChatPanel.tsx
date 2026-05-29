@@ -201,6 +201,7 @@ export function ChatPanel({
   friends: cachedFriends,
   herzie,
   nowPlaying,
+  pendingFriendCodes,
   onOpenProfile,
   onActivity,
 }: {
@@ -217,6 +218,8 @@ export function ChatPanel({
     vibe?: string;
     tags?: string[];
   } | null;
+  /** Friend codes with a pending request (sent or received) — add is disabled for these. */
+  pendingFriendCodes?: string[];
   onOpenProfile: (friendCode: string) => void;
   onActivity?: (message: string) => void;
 }) {
@@ -491,8 +494,14 @@ export function ChatPanel({
   const isAlreadyFriend = (code: string | null | undefined) =>
     !!code && herzie.friendCodes.includes(code);
 
+  const hasPendingRequest = (code: string | null | undefined) =>
+    !!code && (pendingFriendCodes?.includes(code) ?? false);
+
   const canAddFriend = (code: string | null | undefined) =>
-    !!code && !isSelf(code) && !isAlreadyFriend(code);
+    !!code &&
+    !isSelf(code) &&
+    !isAlreadyFriend(code) &&
+    !hasPendingRequest(code);
 
   const closeUserMenu = () => {
     setUserMenu(null);

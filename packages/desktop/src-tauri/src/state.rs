@@ -33,6 +33,12 @@ pub struct ManagedState {
     pub friends: HashMap<String, HerzieProfile>,
     /// Latest incoming trade from `/sync` (cleared when absent on a successful sync).
     pub pending_trade_request: Option<PendingTradeRequest>,
+    /// Newest incoming friend request from `/sync` (drives the prompt overlay).
+    pub pending_friend_request: Option<PendingFriendRequest>,
+    /// All pending friend requests sent to you (Requests tab).
+    pub incoming_friend_requests: Vec<FriendRequestSummary>,
+    /// All pending friend requests you sent (Add friend tab).
+    pub outgoing_friend_requests: Vec<FriendRequestSummary>,
 }
 
 impl ManagedState {
@@ -63,6 +69,9 @@ impl ManagedState {
             inventory_currency,
             friends: crate::storage::load_friends_cache(&friend_codes),
             pending_trade_request: None,
+            pending_friend_request: None,
+            incoming_friend_requests: Vec::new(),
+            outgoing_friend_requests: Vec::new(),
         }
     }
 
@@ -73,6 +82,9 @@ impl ManagedState {
         self.inventory_currency = 0;
         self.friends.clear();
         self.pending_trade_request = None;
+        self.pending_friend_request = None;
+        self.incoming_friend_requests.clear();
+        self.outgoing_friend_requests.clear();
         crate::storage::clear_equipped();
         crate::storage::clear_inventory_cache();
         crate::storage::clear_friends_cache();
@@ -97,6 +109,9 @@ impl ManagedState {
             inventory_currency: self.inventory_currency,
             friends: self.friends.clone(),
             pending_trade_request: self.pending_trade_request.clone(),
+            pending_friend_request: self.pending_friend_request.clone(),
+            incoming_friend_requests: self.incoming_friend_requests.clone(),
+            outgoing_friend_requests: self.outgoing_friend_requests.clone(),
         }
     }
 }

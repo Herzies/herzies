@@ -29,6 +29,9 @@ export async function POST(request: Request) {
       notifications: result.notifications,
       multipliers: result.multipliers,
       pendingTradeRequest: result.pendingTradeRequest,
+      pendingFriendRequest: result.pendingFriendRequest,
+      incomingFriendRequests: result.incomingFriendRequests,
+      outgoingFriendRequests: result.outgoingFriendRequests,
     };
 
     return NextResponse.json(response);

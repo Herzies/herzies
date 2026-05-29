@@ -7,9 +7,12 @@ import { Herzie3D } from "./Herzie3D";
 export function HomeView({
   state,
   stageOverride,
+  onOpenProfile,
 }: {
   state: AppState;
   stageOverride?: number | null;
+  /** Open the viewer's own profile (same layout as other herzies'). */
+  onOpenProfile?: () => void;
 }) {
   const { herzie, nowPlaying, multipliers, isConnected, equipped } = state;
   const [globalRank, setGlobalRank] = useState<number | undefined>(undefined);
@@ -40,7 +43,14 @@ export function HomeView({
     <div className="flex h-full flex-col">
       <div className="mb-1 flex items-center justify-between z-50">
         <span className="text-ui-lg font-bold text-cyan">
-          {herzie.name}
+          <button
+            type="button"
+            onClick={onOpenProfile}
+            className="font-bold text-cyan hover:underline"
+            title="View your profile"
+          >
+            {herzie.name}
+          </button>
           {globalRank ? (
             <span
               className="ml-1 text-[10px] font-normal text-text-dim"
@@ -81,9 +91,10 @@ export function HomeView({
       </div>
 
       <div className="mb-1.5">
-        <div className="mb-0.5 flex justify-between text-ui text-text-dim">
-          <span>Level {herzie.level}</span>
-          <span>Stage {herzie.stage}</span>
+        <div className="mb-0.5 text-ui text-text-dim">
+          <span>
+            Level {herzie.level} (Stage {herzie.stage})
+          </span>
         </div>
         <div className="flex h-2 gap-0.5">
           {Array.from({ length: 40 }, (_, i) => (

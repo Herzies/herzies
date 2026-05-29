@@ -1,9 +1,12 @@
 import type {
   ActiveMultiplier,
+  FriendRequestSummary,
+  FriendSearchResult,
   GameEvent,
   Herzie,
   HerzieProfile,
   Inventory,
+  PendingFriendRequest,
   Trade,
 } from "@herzies/shared";
 import { invoke, isTauri } from "@tauri-apps/api/core";
@@ -31,6 +34,16 @@ export interface PendingTradeRequest {
   fromFriendCode: string;
 }
 
+export interface LeaderboardEntry {
+  rank: number;
+  name: string;
+  level: number;
+  stage: number;
+  totalMinutes: number;
+}
+
+export type { FriendRequestSummary, FriendSearchResult, PendingFriendRequest };
+
 export interface AppState {
   herzie: Herzie | null;
   nowPlaying: {
@@ -50,6 +63,9 @@ export interface AppState {
   inventoryCurrency: number;
   friends: Record<string, HerzieProfile>;
   pendingTradeRequest?: PendingTradeRequest | null;
+  pendingFriendRequest?: PendingFriendRequest | null;
+  incomingFriendRequests: FriendRequestSummary[];
+  outgoingFriendRequests: FriendRequestSummary[];
 }
 
 export const herzies = {
@@ -76,6 +92,20 @@ export const herzies = {
     invoke<{ success: boolean; message: string }>("friend_remove", { code }),
   friendLookup: (codes: string[]) =>
     invoke<Record<string, HerzieProfile>>("friend_lookup", { codes }),
+  friendRequestAccept: (requestId: string) =>
+    invoke<{ success: boolean; message: string }>("friend_request_accept", {
+      requestId,
+    }),
+  friendRequestDecline: (requestId: string) =>
+    invoke<{ success: boolean; message: string }>("friend_request_decline", {
+      requestId,
+    }),
+  friendRequestCancel: (requestId: string) =>
+    invoke<{ success: boolean; message: string }>("friend_request_cancel", {
+      requestId,
+    }),
+  friendSearch: (query: string) =>
+    invoke<FriendSearchResult[]>("friend_search", { query }),
 
   fetchInventory: () =>
     invoke<{
@@ -113,6 +143,9 @@ export const herzies = {
   fetchPreviousHunt: () =>
     invoke<{ events: GameEvent[] }>("fetch_previous_hunt"),
 
+  fetchLeaderboard: () =>
+    invoke<{ entries: LeaderboardEntry[] }>("fetch_leaderboard"),
+
   getAuthConfig: () =>
     invoke<{
       supabaseUrl: string;
@@ -142,6 +175,7 @@ export const herzies = {
   /**
    * Deep-link payloads from notification clicks.
    *   - `"trade:<tradeId>"` — open TradeView and auto-join the trade
+   *   - `"friends:requests"` — open FriendsView on the Requests tab
    *   - any other string — treated as an item ID, opens InventoryView focused on that item
    */
   onDeepLink: (cb: (payload: string) => void) => {

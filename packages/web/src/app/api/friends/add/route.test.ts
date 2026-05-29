@@ -25,7 +25,7 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe("POST /api/friends/add", () => {
+describe("POST /api/friends/add (send friend request)", () => {
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(
       new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 }),
@@ -53,7 +53,7 @@ describe("POST /api/friends/add", () => {
     mockAuth.mockResolvedValue({ userId: "user-1" });
     mockAdmin.mockReturnValue(
       createMockAdmin({
-        herzies: { data: { friend_code: "HERZ-REAL" } },
+        herzies: { data: { friend_code: "HERZ-REAL", friend_codes: [] } },
       }) as never,
     );
 
@@ -63,35 +63,30 @@ describe("POST /api/friends/add", () => {
     expect(res.status).toBe(403);
   });
 
-  it("calls add_friend RPC and returns success", async () => {
+  it("returns 409 when already friends", async () => {
     mockAuth.mockResolvedValue({ userId: "user-1" });
-
-    let herzieCallCount = 0;
-    const admin = createMockAdmin(
-      {},
-      { add_friend: { data: null, error: null } },
+    mockAdmin.mockReturnValue(
+      createMockAdmin({
+        herzies: {
+          data: { friend_code: "HERZ-ME", friend_codes: ["HERZ-THEM"] },
+        },
+      }) as never,
     );
-    const originalFrom = admin.from;
-    admin.from = vi.fn((table: string) => {
-      if (table === "herzies") {
-        herzieCallCount++;
-        const chain = originalFrom("__empty__");
-        if (herzieCallCount === 1) {
-          // Ownership check
-          (chain as Record<string, unknown>).then = (
-            resolve: (v: unknown) => void,
-          ) => resolve({ data: { friend_code: "HERZ-ME" }, error: null });
-        } else {
-          // Fetch own friend_codes for update
-          (chain as Record<string, unknown>).then = (
-            resolve: (v: unknown) => void,
-          ) => resolve({ data: { friend_codes: [] }, error: null });
-        }
-        return chain;
-      }
-      return originalFrom(table);
-    }) as typeof admin.from;
 
+    const res = await POST(
+      fakeRequest({ myCode: "HERZ-ME", theirCode: "HERZ-THEM" }),
+    );
+    expect(res.status).toBe(409);
+  });
+
+  it("creates a pending request without making them friends yet", async () => {
+    mockAuth.mockResolvedValue({ userId: "user-1" });
+    const admin = createMockAdmin({
+      herzies: {
+        data: { friend_code: "HERZ-ME", friend_codes: [], user_id: "user-2" },
+      },
+      friend_requests: { data: null, error: null },
+    });
     mockAdmin.mockReturnValue(admin as never);
 
     const res = await POST(
@@ -101,10 +96,17 @@ describe("POST /api/friends/add", () => {
     const body = (await responseJson(res)) as { ok: boolean };
     expect(body.ok).toBe(true);
 
-    // Verify RPC was called
-    expect(admin.rpc).toHaveBeenCalledWith("add_friend", {
-      my_friend_code: "HERZ-ME",
-      their_friend_code: "HERZ-THEM",
-    });
+    expect(admin._insertFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        from_user_id: "user-1",
+        to_user_id: "user-2",
+        status: "pending",
+      }),
+    );
+    // Friendship is not created on send.
+    expect(admin.rpc).not.toHaveBeenCalledWith(
+      "add_friend",
+      expect.anything(),
+    );
   });
 });

@@ -53,6 +53,7 @@ export function createMockAdmin(
       "in",
       "not",
       "is",
+      "or",
       "ilike",
       "like",
       "order",

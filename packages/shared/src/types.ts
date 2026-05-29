@@ -95,6 +95,12 @@ export interface SyncResponse {
   multipliers: ActiveMultiplier[];
   /** Pending trade request from another player */
   pendingTradeRequest?: PendingTradeRequest;
+  /** Newest incoming friend request you haven't responded to (drives the overlay + notification) */
+  pendingFriendRequest?: PendingFriendRequest;
+  /** Friend requests sent to you that are still pending */
+  incomingFriendRequests: FriendRequestSummary[];
+  /** Friend requests you sent that are still pending */
+  outgoingFriendRequests: FriendRequestSummary[];
 }
 
 /** Notification that another player wants to trade */
@@ -102,6 +108,29 @@ export interface PendingTradeRequest {
   tradeId: string;
   fromName: string;
   fromFriendCode: string;
+}
+
+/** Notification that another player wants to be your friend */
+export interface PendingFriendRequest {
+  requestId: string;
+  fromName: string;
+  fromFriendCode: string;
+}
+
+/** A pending friend request (incoming or outgoing) */
+export interface FriendRequestSummary {
+  requestId: string;
+  friendCode: string;
+  name: string;
+  createdAt: string;
+}
+
+/** A result from searching for a herzie to befriend */
+export interface FriendSearchResult {
+  friendCode: string;
+  name: string;
+  level: number;
+  relationship: "none" | "friends" | "pending_sent" | "pending_received";
 }
 
 /** A multiplier that boosts XP gain */

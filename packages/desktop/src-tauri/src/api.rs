@@ -285,12 +285,84 @@ pub async fn api_register_herzie(
     }))
 }
 
-pub async fn api_add_friend(client: &Client, my_code: &str, their_code: &str) -> bool {
-    let body = serde_json::json!({ "myCode": my_code, "theirCode": their_code });
-    match api_fetch(client, reqwest::Method::POST, "/friends/add", Some(body)).await {
-        Some(r) => r.status().is_success(),
-        None => false,
+/// POST a friend-request action and parse the JSON body, surfacing the
+/// server's `error` message on failure.
+async fn post_friend_action(
+    client: &Client,
+    path: &str,
+    body: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let resp = api_fetch(client, reqwest::Method::POST, path, Some(body))
+        .await
+        .ok_or_else(|| "Network error".to_string())?;
+    let status = resp.status();
+    let text = resp.text().await.map_err(|e| format!("Read error: {e}"))?;
+    let data: serde_json::Value =
+        serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
+    if !status.is_success() {
+        let msg = data["error"].as_str().unwrap_or("Something went wrong");
+        return Err(msg.to_string());
     }
+    Ok(data)
+}
+
+/// Send a friend request. Returns `Ok(true)` if it was auto-accepted because
+/// the other player had already requested you.
+pub async fn api_send_friend_request(
+    client: &Client,
+    my_code: &str,
+    their_code: &str,
+) -> Result<bool, String> {
+    let body = serde_json::json!({ "myCode": my_code, "theirCode": their_code });
+    let data = post_friend_action(client, "/friends/add", body).await?;
+    Ok(data["accepted"].as_bool().unwrap_or(false))
+}
+
+pub async fn api_accept_friend_request(
+    client: &Client,
+    request_id: &str,
+) -> Result<(), String> {
+    let body = serde_json::json!({ "requestId": request_id });
+    post_friend_action(client, "/friends/accept", body)
+        .await
+        .map(|_| ())
+}
+
+pub async fn api_decline_friend_request(
+    client: &Client,
+    request_id: &str,
+) -> Result<(), String> {
+    let body = serde_json::json!({ "requestId": request_id });
+    post_friend_action(client, "/friends/decline", body)
+        .await
+        .map(|_| ())
+}
+
+pub async fn api_cancel_friend_request(
+    client: &Client,
+    request_id: &str,
+) -> Result<(), String> {
+    let body = serde_json::json!({ "requestId": request_id });
+    post_friend_action(client, "/friends/cancel", body)
+        .await
+        .map(|_| ())
+}
+
+pub async fn api_search_friends(
+    client: &Client,
+    query: &str,
+) -> Result<Vec<FriendSearchResult>, String> {
+    let path = format!("/friends/search?q={}", urlencoding::encode(query));
+    let resp = api_fetch(client, reqwest::Method::GET, &path, None)
+        .await
+        .ok_or_else(|| "Network error".to_string())?;
+    if !resp.status().is_success() {
+        return Err("Search failed".to_string());
+    }
+    let data: serde_json::Value = resp.json().await.map_err(|e| format!("Read error: {e}"))?;
+    let results: Vec<FriendSearchResult> =
+        serde_json::from_value(data["results"].clone()).unwrap_or_default();
+    Ok(results)
 }
 
 pub async fn api_remove_friend(client: &Client, my_code: &str, their_code: &str) -> bool {
@@ -349,13 +421,10 @@ pub async fn api_lookup_herzies(
         return Some(HashMap::new());
     }
     let codes_str = codes.join(",");
-    let url = format!(
-        "{}/lookup?codes={}",
-        api_base(),
-        urlencoding::encode(&codes_str)
-    );
-    let resp = client.get(&url).send().await.ok()?;
-    mark_reachable();
+    // Authenticated: the server only returns listening data (now playing,
+    // last played, top artists) for herzies the caller is friends with.
+    let path = format!("/lookup?codes={}", urlencoding::encode(&codes_str));
+    let resp = api_fetch(client, reqwest::Method::GET, &path, None).await?;
     if !resp.status().is_success() {
         return None;
     }
@@ -473,6 +542,15 @@ pub async fn api_cancel_trade(client: &Client, trade_id: &str) -> bool {
         Some(r) => r.status().is_success(),
         None => false,
     }
+}
+
+pub async fn api_fetch_leaderboard(client: &Client) -> Option<serde_json::Value> {
+    let resp = api_fetch(client, reqwest::Method::GET, "/leaderboard", None).await?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let data: serde_json::Value = resp.json().await.ok()?;
+    Some(data["entries"].clone())
 }
 
 pub async fn api_fetch_active_events(client: &Client) -> Option<Vec<GameEvent>> {

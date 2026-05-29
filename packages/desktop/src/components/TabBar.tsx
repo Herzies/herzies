@@ -44,9 +44,9 @@ export function TabBar({
     },
     {
       id: "friends",
-      label: "Friends",
+      label: "Social",
       colour: "green",
-      title: "Your friends. Shortcut [f]",
+      title: "Friends & leaderboard. Shortcut [f]",
     },
     {
       id: "settings",

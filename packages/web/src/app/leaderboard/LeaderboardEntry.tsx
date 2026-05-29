@@ -31,7 +31,6 @@ interface LeaderboardEntryProps {
   };
   totalMinutes: number;
   topGenres: string[];
-  nowPlaying?: { title: string; artist: string } | null;
 }
 
 function formatMinutes(mins: number): string {
@@ -55,14 +54,12 @@ export function LeaderboardEntry({
   appearance,
   totalMinutes,
   topGenres,
-  nowPlaying,
 }: LeaderboardEntryProps) {
   const borderClass = rank === 1 ? "border-yellow" : "border-border";
 
   return (
-    <a
-      href={`/herzie/${encodeURIComponent(name)}`}
-      className={`bg-bg-panel border ${borderClass} rounded-md px-4 py-3 flex items-center gap-4 no-underline text-inherit`}
+    <div
+      className={`bg-bg-panel border ${borderClass} rounded-md px-4 py-3 flex items-center gap-4 text-inherit`}
     >
       {/* Rank */}
       <span
@@ -86,14 +83,7 @@ export function LeaderboardEntry({
         <div className="text-xs text-text-dim mt-0.5">
           <span className="text-green">{formatMinutes(totalMinutes)}</span>
         </div>
-
-        {nowPlaying && (
-          <div className="text-[11px] mt-[3px] text-cyan">
-            <span>&#9834; {nowPlaying.title}</span>
-            <span className="text-text-dim"> — {nowPlaying.artist}</span>
-          </div>
-        )}
       </div>
-    </a>
+    </div>
   );
 }

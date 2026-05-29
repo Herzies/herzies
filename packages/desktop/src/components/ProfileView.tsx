@@ -21,6 +21,9 @@ export function ProfileView({
   onAdd,
   onRemove,
   canRemove,
+  isFriend,
+  isSelf,
+  requestPending,
   stageOverride,
 }: {
   profile: HerzieProfile;
@@ -29,6 +32,15 @@ export function ProfileView({
   onAdd: () => void;
   onRemove: () => void;
   canRemove?: boolean;
+  /**
+   * Whether the viewer is friends with this herzie. Listening data (now
+   * playing, last played, top artists) is only shown to friends.
+   */
+  isFriend?: boolean;
+  /** This is the viewer's own profile — hide trade/friend actions. */
+  isSelf?: boolean;
+  /** A friend request to this herzie is already pending (sent or received). */
+  requestPending?: boolean;
   stageOverride?: number | null;
 }) {
   const [confirmRemove, setConfirmRemove] = useState(false);
@@ -37,40 +49,48 @@ export function ProfileView({
     <View
       title={profile.name}
       backButton={<BackButton colour="green" onClick={onBack} />}
-      action={profile.name}
       colour="green"
       childrenClassName="flex min-h-0 flex-col"
     >
       {profile.friendCode && (
-        <div className="flex min-h-0 flex-1 items-center justify-center">
+        <div className="flex min-h-0 flex-1 items-center justify-center *:shrink-0">
           <Herzie3D
             userId={profile.friendCode}
             stage={stageOverride ?? profile.stage}
-            isPlaying={!!profile.nowPlaying}
+            isPlaying={isFriend ? !!profile.nowPlaying : false}
             wearables={profile.equipped ?? []}
           />
         </div>
       )}
 
-      <div className="mb-2 flex justify-between text-ui text-text-dim">
-        <span>Level {profile.level}</span>
-        {profile.globalRank ? (
-          <span
-            title={
-              profile.globalTotal
-                ? `Ranked #${profile.globalRank} of ${profile.globalTotal}`
-                : undefined
-            }
-          >
-            #{profile.globalRank}
-          </span>
-        ) : (
-          <span />
-        )}
-        <span>Stage {profile.stage}</span>
+      <div className="mb-2">
+        <div className="flex items-baseline gap-1.5">
+          <span className="text-ui font-bold text-text">{profile.name}</span>
+          {profile.globalRank ? (
+            <span
+              className="text-[10px] text-text-dim"
+              title={
+                profile.globalTotal
+                  ? `Ranked #${profile.globalRank} of ${profile.globalTotal}`
+                  : undefined
+              }
+            >
+              #{profile.globalRank}
+            </span>
+          ) : null}
+        </div>
+        <div className="text-ui text-text-dim">
+          Level {profile.level} (Stage {profile.stage})
+        </div>
       </div>
 
-      {profile.nowPlaying ? (
+      {!isFriend ? (
+        <div className="mb-2">
+          <div className="text-ui-sm text-[#444]">
+            Become friends to share music
+          </div>
+        </div>
+      ) : profile.nowPlaying ? (
         <div className="mb-2">
           <div className="mb-1 text-[10px] text-text-dim">Now playing</div>
           <div className="text-ui text-cyan line-clamp-2">
@@ -99,7 +119,7 @@ export function ProfileView({
         </div>
       ) : null}
 
-      {profile.topArtists && profile.topArtists.length > 0 && (
+      {isFriend && profile.topArtists && profile.topArtists.length > 0 && (
         <div className="mb-2">
           <div className="mb-1 text-[10px] text-text-dim">Top Artists</div>
           {profile.topArtists.map((a, i) => (
@@ -116,11 +136,17 @@ export function ProfileView({
         </div>
       )}
 
+      {!isSelf && (
       <div className="flex shrink-0 gap-1.5">
         <button type="button" className="btn text-purple" onClick={onTrade}>
           Trade
         </button>
-        {!canRemove && (
+        {!canRemove && requestPending && (
+          <button type="button" className="btn text-text-dim" disabled>
+            Request sent
+          </button>
+        )}
+        {!canRemove && !requestPending && (
           <button type="button" className="btn text-green" onClick={onAdd}>
             Add friend
           </button>
@@ -148,6 +174,7 @@ export function ProfileView({
           </button>
         ) : null}
       </div>
+      )}
     </View>
   );
 }

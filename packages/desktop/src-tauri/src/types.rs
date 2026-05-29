@@ -110,6 +110,12 @@ pub struct SyncResponse {
     pub multipliers: Vec<ActiveMultiplier>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pending_trade_request: Option<PendingTradeRequest>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending_friend_request: Option<PendingFriendRequest>,
+    #[serde(default)]
+    pub incoming_friend_requests: Vec<FriendRequestSummary>,
+    #[serde(default)]
+    pub outgoing_friend_requests: Vec<FriendRequestSummary>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -118,6 +124,32 @@ pub struct PendingTradeRequest {
     pub trade_id: String,
     pub from_name: String,
     pub from_friend_code: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingFriendRequest {
+    pub request_id: String,
+    pub from_name: String,
+    pub from_friend_code: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FriendRequestSummary {
+    pub request_id: String,
+    pub friend_code: String,
+    pub name: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FriendSearchResult {
+    pub friend_code: String,
+    pub name: String,
+    pub level: u32,
+    pub relationship: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -196,6 +228,13 @@ pub struct AppState {
     /// Present while the server reports an incoming trade you have not joined yet.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pending_trade_request: Option<PendingTradeRequest>,
+    /// Newest incoming friend request you haven't responded to (drives the overlay).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending_friend_request: Option<PendingFriendRequest>,
+    /// Friend requests sent to you that are still pending.
+    pub incoming_friend_requests: Vec<FriendRequestSummary>,
+    /// Friend requests you sent that are still pending.
+    pub outgoing_friend_requests: Vec<FriendRequestSummary>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

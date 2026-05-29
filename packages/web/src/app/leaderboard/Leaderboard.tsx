@@ -22,7 +22,6 @@ interface HerzieRow {
   };
   total_minutes_listened: number;
   genre_minutes: Record<string, number>;
-  now_playing: { title: string; artist: string } | null;
 }
 
 function getTopGenres(
@@ -45,7 +44,7 @@ export function Leaderboard() {
     const { data } = await supabase
       .from("herzies")
       .select(
-        "name, stage, level, xp, appearance, total_minutes_listened, genre_minutes, now_playing",
+        "name, stage, level, xp, appearance, total_minutes_listened, genre_minutes",
       )
       .order("xp", { ascending: false })
       .limit(100);
@@ -87,7 +86,6 @@ export function Leaderboard() {
           appearance={herzie.appearance}
           totalMinutes={Math.floor(herzie.total_minutes_listened)}
           topGenres={getTopGenres(herzie.genre_minutes)}
-          nowPlaying={herzie.now_playing}
         />
       ))}
     </div>

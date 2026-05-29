@@ -1,13 +1,23 @@
 import { NextResponse } from "next/server";
+import { authenticateRequest, isAuthError } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase-admin";
 
 /**
- * Look up herzies by friend code(s). Public endpoint (no auth required).
+ * Look up herzies by friend code(s). Requires authentication.
+ *
+ * A herzie's listening data (now playing, last played, top artists) is
+ * private: it is only included in the response when the authenticated caller
+ * is friends with that herzie (or is looking up their own profile). For
+ * everyone else only the public game stats (name, level, stage, appearance,
+ * rank, …) are returned.
  *
  * GET /api/lookup?code=HERZ-XXXX          — single lookup
  * GET /api/lookup?codes=HERZ-XXXX,HERZ-YYYY — batch lookup
  */
 export async function GET(request: Request) {
+  const auth = await authenticateRequest(request);
+  if (isAuthError(auth)) return auth;
+
   const { searchParams } = new URL(request.url);
   const singleCode = searchParams.get("code");
   const batchCodes = searchParams.get("codes");
@@ -20,6 +30,17 @@ export async function GET(request: Request) {
   }
 
   const admin = createAdminClient();
+
+  // Codes whose listening data the caller is allowed to see: their own and
+  // their confirmed friends.
+  const { data: me } = await admin
+    .from("herzies")
+    .select("friend_code, friend_codes")
+    .eq("user_id", auth.userId)
+    .single();
+
+  const visibleCodes = new Set<string>(me?.friend_codes ?? []);
+  if (me?.friend_code) visibleCodes.add(me.friend_code);
 
   if (singleCode) {
     const { data, error } = await admin
@@ -34,9 +55,12 @@ export async function GET(request: Request) {
       return NextResponse.json({ herzie: null });
     }
 
+    const canSeeListening = visibleCodes.has(data.friend_code);
     const [topArtists, lastPlayed, globalRank, globalTotal] = await Promise.all([
-      getTopArtists(admin, data.user_id),
-      getLastPlayed(admin, data.user_id),
+      canSeeListening ? getTopArtists(admin, data.user_id) : Promise.resolve([]),
+      canSeeListening
+        ? getLastPlayed(admin, data.user_id)
+        : Promise.resolve(null),
       getGlobalRank(admin, data.xp),
       getGlobalTotal(admin),
     ]);
@@ -44,6 +68,7 @@ export async function GET(request: Request) {
     return NextResponse.json({
       herzie: formatProfile(
         data,
+        canSeeListening,
         topArtists,
         lastPlayed,
         globalRank,
@@ -76,12 +101,24 @@ export async function GET(request: Request) {
   const globalTotal = await getGlobalTotal(admin);
   const herzies = await Promise.all(
     data.map(async (row) => {
+      const canSeeListening = visibleCodes.has(row.friend_code);
       const [topArtists, lastPlayed, globalRank] = await Promise.all([
-        getTopArtists(admin, row.user_id),
-        getLastPlayed(admin, row.user_id),
+        canSeeListening
+          ? getTopArtists(admin, row.user_id)
+          : Promise.resolve([]),
+        canSeeListening
+          ? getLastPlayed(admin, row.user_id)
+          : Promise.resolve(null),
         getGlobalRank(admin, row.xp),
       ]);
-      return formatProfile(row, topArtists, lastPlayed, globalRank, globalTotal);
+      return formatProfile(
+        row,
+        canSeeListening,
+        topArtists,
+        lastPlayed,
+        globalRank,
+        globalTotal,
+      );
     }),
   );
 
@@ -110,6 +147,7 @@ function formatNowPlaying(
 
 function formatProfile(
   row: HerzieRow,
+  canSeeListening: boolean,
   topArtists: { name: string; plays: number }[],
   lastPlayed: { title: string; artist: string; listenedAt: string } | null,
   globalRank?: number,
@@ -124,10 +162,10 @@ function formatProfile(
     level: row.level,
     currency: row.currency,
     appearance: row.appearance,
-    topArtists,
+    topArtists: canSeeListening ? topArtists : [],
     equipped: row.equipped,
-    nowPlaying: formatNowPlaying(row.now_playing),
-    lastPlayed,
+    nowPlaying: canSeeListening ? formatNowPlaying(row.now_playing) : null,
+    lastPlayed: canSeeListening ? lastPlayed : null,
   };
 }
 

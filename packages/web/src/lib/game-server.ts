@@ -4,9 +4,11 @@ import {
   calculateXpGain,
   classifyGenre,
   type EventNotification,
+  type FriendRequestSummary,
   getDailyCraving,
   type Herzie,
   matchesCraving,
+  type PendingFriendRequest,
   type PendingTradeRequest,
   recordGenreMinutes,
   type SecretTrackConfig,
@@ -144,6 +146,9 @@ export async function processSync(
   notifications: EventNotification[];
   multipliers: ActiveMultiplier[];
   pendingTradeRequest?: PendingTradeRequest;
+  pendingFriendRequest?: PendingFriendRequest;
+  incomingFriendRequests: FriendRequestSummary[];
+  outgoingFriendRequests: FriendRequestSummary[];
 }> {
   const source = options.source ?? "cli";
   // 1. Fetch the herzie
@@ -417,12 +422,92 @@ export async function processSync(
     }
   }
 
+  // 9. Load pending friend requests (incoming + outgoing)
+  const { incomingFriendRequests, outgoingFriendRequests } =
+    await loadFriendRequests(admin, userId);
+
+  const pendingFriendRequest: PendingFriendRequest | undefined =
+    incomingFriendRequests[0]
+      ? {
+          requestId: incomingFriendRequests[0].requestId,
+          fromName: incomingFriendRequests[0].name,
+          fromFriendCode: incomingFriendRequests[0].friendCode,
+        }
+      : undefined;
+
   return {
     herzie,
     notifications,
     multipliers: allMultipliers,
     pendingTradeRequest,
+    pendingFriendRequest,
+    incomingFriendRequests,
+    outgoingFriendRequests,
   };
+}
+
+/**
+ * Load all pending friend requests for a user, resolving the other party's
+ * name and friend code for display. Incoming requests are ordered newest-first
+ * so the first entry can drive the prompt overlay / notification.
+ */
+export async function loadFriendRequests(
+  admin: SupabaseClient,
+  userId: string,
+): Promise<{
+  incomingFriendRequests: FriendRequestSummary[];
+  outgoingFriendRequests: FriendRequestSummary[];
+}> {
+  const { data: rows } = await admin
+    .from("friend_requests")
+    .select("id, from_user_id, to_user_id, created_at")
+    .or(`from_user_id.eq.${userId},to_user_id.eq.${userId}`)
+    .eq("status", "pending")
+    .order("created_at", { ascending: false });
+
+  if (!rows || rows.length === 0) {
+    return { incomingFriendRequests: [], outgoingFriendRequests: [] };
+  }
+
+  const otherIds = Array.from(
+    new Set(
+      rows.map((r) =>
+        r.from_user_id === userId ? r.to_user_id : r.from_user_id,
+      ),
+    ),
+  );
+
+  const { data: profiles } = await admin
+    .from("herzies")
+    .select("user_id, name, friend_code")
+    .in("user_id", otherIds);
+
+  const byUser = new Map(
+    (profiles ?? []).map((p) => [
+      p.user_id as string,
+      { name: p.name as string, friendCode: p.friend_code as string },
+    ]),
+  );
+
+  const incomingFriendRequests: FriendRequestSummary[] = [];
+  const outgoingFriendRequests: FriendRequestSummary[] = [];
+
+  for (const row of rows) {
+    const incoming = row.to_user_id === userId;
+    const otherId = incoming ? row.from_user_id : row.to_user_id;
+    const profile = byUser.get(otherId as string);
+    if (!profile) continue;
+    const summary: FriendRequestSummary = {
+      requestId: row.id as string,
+      friendCode: profile.friendCode,
+      name: profile.name,
+      createdAt: row.created_at as string,
+    };
+    if (incoming) incomingFriendRequests.push(summary);
+    else outgoingFriendRequests.push(summary);
+  }
+
+  return { incomingFriendRequests, outgoingFriendRequests };
 }
 
 /**

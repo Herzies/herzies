@@ -39,7 +39,6 @@
         {
           "name": "GET /api/lookup (single)",
           "request": {
-            "auth": { "type": "noauth" },
             "method": "GET",
             "header": [],
             "url": {
@@ -53,7 +52,6 @@
         {
           "name": "GET /api/lookup (batch)",
           "request": {
-            "auth": { "type": "noauth" },
             "method": "GET",
             "header": [],
             "url": {

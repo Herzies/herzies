@@ -57,6 +57,10 @@ export const friendCodePairSchema = z.object({
   theirCode: z.string().min(1),
 });
 
+export const friendRequestIdSchema = z.object({
+  requestId: z.string().min(1),
+});
+
 export const claimEventSchema = z.object({
   eventId: z.string().min(1),
 });
