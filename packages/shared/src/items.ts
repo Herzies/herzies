@@ -20,7 +20,7 @@ import {
 export type Rarity = "common" | "uncommon" | "rare" | "legendary";
 
 /** Equip slot categories — only one item per slot may be equipped at a time. */
-export const EQUIP_SLOTS = ["head"] as const;
+export const EQUIP_SLOTS = ["head", "scenery"] as const;
 export type EquipSlot = (typeof EQUIP_SLOTS)[number];
 
 export interface ItemDef {
@@ -824,6 +824,68 @@ const cdFrames = generateFrames(renderCdFrame);
 const headphonesFrames = generateFrames(renderHeadphonesFrame);
 const rainbowHeadbandFrames = generateFrames(renderRainbowHeadbandFrame);
 
+// --- Scenery icons (not 3D — simple animated ASCII for inventory display) ---
+const SCENERY_SKY = "#8899aa";
+const SCENERY_STAR_BRIGHT = "#ccddee";
+const SCENERY_TWINKLE = ["·", "+", "*", "·", "+"];
+
+const CLOUD_ART = [
+  "    .--.    ",
+  "  .(    ).  ",
+  " (        ) ",
+  "  `------'  ",
+];
+
+function renderCloudsFrame(offset: number): string[] {
+  return CLOUD_ART.map((line) =>
+    (" ".repeat(offset) + line)
+      .split("")
+      .map((ch) => (ch === " " ? " " : col(SCENERY_SKY, ch)))
+      .join(""),
+  );
+}
+
+// Gentle back-and-forth drift: 0,1,2,3,3,2,1,0
+const cloudsFrames = Array.from({ length: 8 }, (_, i) =>
+  renderCloudsFrame(i < 4 ? i : 7 - i),
+);
+
+const STAR_POSITIONS: {
+  row: number;
+  col: number;
+  phase: number;
+  bright: boolean;
+}[] = [
+  { row: 0, col: 2, phase: 0, bright: false },
+  { row: 0, col: 11, phase: 3, bright: true },
+  { row: 1, col: 6, phase: 1, bright: false },
+  { row: 2, col: 13, phase: 4, bright: false },
+  { row: 2, col: 3, phase: 2, bright: true },
+  { row: 3, col: 9, phase: 0, bright: false },
+  { row: 4, col: 5, phase: 3, bright: false },
+  { row: 4, col: 12, phase: 1, bright: true },
+  { row: 5, col: 8, phase: 2, bright: false },
+];
+
+function renderStarsFrame(frameIdx: number): string[] {
+  const rows = 6;
+  const cols = 16;
+  const grid: string[][] = Array.from({ length: rows }, () =>
+    new Array(cols).fill(" "),
+  );
+  for (const s of STAR_POSITIONS) {
+    const variant =
+      SCENERY_TWINKLE[(frameIdx + s.phase) % SCENERY_TWINKLE.length];
+    grid[s.row][s.col] = col(
+      s.bright ? SCENERY_STAR_BRIGHT : SCENERY_SKY,
+      variant,
+    );
+  }
+  return grid.map((r) => r.join(""));
+}
+
+const starsFrames = Array.from({ length: 5 }, (_, i) => renderStarsFrame(i));
+
 export const ITEMS: ItemDef[] = [
   {
     id: "first-edition",
@@ -859,6 +921,24 @@ export const ITEMS: ItemDef[] = [
     frames: rainbowHeadbandFrames,
     equipable: true,
     equipSlot: "head",
+  },
+  {
+    id: "clouds",
+    name: "Clouds",
+    description: "Drifting clouds for your herzie's sky.",
+    rarity: "uncommon",
+    frames: cloudsFrames,
+    equipable: true,
+    equipSlot: "scenery",
+  },
+  {
+    id: "stars",
+    name: "Stars",
+    description: "A twinkling starfield for your herzie's sky.",
+    rarity: "uncommon",
+    frames: starsFrames,
+    equipable: true,
+    equipSlot: "scenery",
   },
 ];
 

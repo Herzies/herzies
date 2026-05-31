@@ -13,8 +13,22 @@ export async function POST(request: Request) {
   if (isParseError(body)) return body;
 
   const { itemId, herzieName, friendCode } = body;
+  const quantity = body.quantity ?? 1;
 
   const admin = createAdminClient();
+
+  // Ensure the item exists in the catalog before granting it.
+  const { data: item } = await admin
+    .from("items")
+    .select("id")
+    .eq("id", itemId)
+    .maybeSingle();
+  if (!item) {
+    return NextResponse.json(
+      { error: `Item "${itemId}" is not in the catalog` },
+      { status: 404 },
+    );
+  }
 
   // Find the herzie
   let query = admin.from("herzies").select("user_id, inventory_v2");
@@ -30,7 +44,7 @@ export async function POST(request: Request) {
   }
 
   const inv = (herzie.inventory_v2 ?? {}) as Record<string, number>;
-  inv[itemId] = (inv[itemId] ?? 0) + 1;
+  inv[itemId] = (inv[itemId] ?? 0) + quantity;
 
   const { error } = await admin
     .from("herzies")
@@ -44,5 +58,10 @@ export async function POST(request: Request) {
     );
   }
 
-  return NextResponse.json({ ok: true, itemId });
+  return NextResponse.json({
+    ok: true,
+    itemId,
+    quantity,
+    total: inv[itemId],
+  });
 }

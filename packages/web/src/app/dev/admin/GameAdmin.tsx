@@ -67,8 +67,10 @@ type ItemFormState = {
   sellPrice: string;
   stackable: boolean;
   equipable: boolean;
-  equipSlot: "" | "head";
+  equipSlot: "" | "head" | "scenery";
 };
+
+const EQUIP_SLOT_OPTIONS = ["head", "scenery"] as const;
 
 function getEventStatus(event: AdminEvent, now: Date): EventStatus {
   if (!event.active) return "inactive";
@@ -250,7 +252,11 @@ function itemToForm(item: CatalogItem): ItemFormState {
     sellPrice: item.sell_price != null ? String(item.sell_price) : "",
     stackable: !!item.stackable,
     equipable: !!item.equipable,
-    equipSlot: item.equip_slot === "head" ? "head" : "",
+    equipSlot: EQUIP_SLOT_OPTIONS.includes(
+      item.equip_slot as (typeof EQUIP_SLOT_OPTIONS)[number],
+    )
+      ? (item.equip_slot as (typeof EQUIP_SLOT_OPTIONS)[number])
+      : "",
   };
 }
 
@@ -889,13 +895,17 @@ function ItemForm({
               onChange={(e) =>
                 setForm((f) => ({
                   ...f,
-                  equipSlot: e.target.value as "" | "head",
+                  equipSlot: e.target.value as "" | "head" | "scenery",
                 }))
               }
               className={INPUT}
             >
               <option value="">none</option>
-              <option value="head">head</option>
+              {EQUIP_SLOT_OPTIONS.map((slot) => (
+                <option key={slot} value={slot}>
+                  {slot}
+                </option>
+              ))}
             </select>
           </label>
         )}
@@ -1270,6 +1280,160 @@ function EventsTable({
   );
 }
 
+function GrantItemPanel({
+  secret,
+  catalogItems,
+}: {
+  secret: string;
+  catalogItems: CatalogItem[];
+}) {
+  const [itemId, setItemId] = useState("");
+  const [targetMode, setTargetMode] = useState<"name" | "friendCode">("name");
+  const [target, setTarget] = useState("");
+  const [quantity, setQuantity] = useState("1");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<string | null>(null);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setResult(null);
+    const qty = Number.parseInt(quantity, 10);
+    if (!itemId) {
+      setError("Select an item");
+      return;
+    }
+    if (!target.trim()) {
+      setError("Enter a herzie name or friend code");
+      return;
+    }
+    if (!Number.isFinite(qty) || qty < 1) {
+      setError("Quantity must be a positive number");
+      return;
+    }
+    setBusy(true);
+    try {
+      const payload: Record<string, unknown> = { itemId, quantity: qty };
+      if (targetMode === "name") payload.herzieName = target.trim();
+      else payload.friendCode = target.trim();
+      const res = await adminFetch<{
+        ok: boolean;
+        itemId: string;
+        quantity: number;
+        total: number;
+      }>("/api/admin/grant-item", secret, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      const name = catalogItems.find((i) => i.id === itemId)?.name ?? itemId;
+      setResult(
+        `Granted ${res.quantity}× ${name} to ${target.trim()} (new total: ${res.total})`,
+      );
+      setTarget("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to grant item");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form
+      onSubmit={submit}
+      className="border border-border rounded-sm p-6 bg-bg-panel space-y-4"
+    >
+      <div className="grid sm:grid-cols-2 gap-4">
+        <div>
+          <label
+            className="block text-xs text-text-dim mb-1"
+            htmlFor="grant-item-id"
+          >
+            item
+          </label>
+          <select
+            id="grant-item-id"
+            value={itemId}
+            onChange={(e) => setItemId(e.target.value)}
+            className={INPUT}
+          >
+            <option value="">select item…</option>
+            {catalogItems.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name} ({item.id})
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label
+            className="block text-xs text-text-dim mb-1"
+            htmlFor="grant-quantity"
+          >
+            quantity
+          </label>
+          <input
+            id="grant-quantity"
+            type="number"
+            min={1}
+            value={quantity}
+            onChange={(e) => setQuantity(e.target.value)}
+            className={INPUT}
+          />
+        </div>
+      </div>
+      <div className="grid sm:grid-cols-2 gap-4">
+        <div>
+          <label
+            className="block text-xs text-text-dim mb-1"
+            htmlFor="grant-target-mode"
+          >
+            target by
+          </label>
+          <select
+            id="grant-target-mode"
+            value={targetMode}
+            onChange={(e) => {
+              setTargetMode(e.target.value as "name" | "friendCode");
+              setTarget("");
+            }}
+            className={INPUT}
+          >
+            <option value="name">herzie name</option>
+            <option value="friendCode">friend code</option>
+          </select>
+        </div>
+        <div>
+          <label
+            className="block text-xs text-text-dim mb-1"
+            htmlFor="grant-target"
+          >
+            {targetMode === "name" ? "herzie name" : "friend code"}
+          </label>
+          <input
+            id="grant-target"
+            value={target}
+            onChange={(e) => setTarget(e.target.value)}
+            className={INPUT}
+            placeholder={targetMode === "name" ? "e.g. Pixel" : "e.g. ABC123"}
+          />
+        </div>
+      </div>
+      <div className="flex items-center gap-4">
+        <button
+          type="submit"
+          disabled={busy || !itemId || !target.trim()}
+          className="text-sm text-purple bg-transparent border border-border px-4 py-2 rounded-sm cursor-pointer hover:border-purple disabled:opacity-50"
+        >
+          {busy ? "granting…" : "grant item"}
+        </button>
+        {result && <span className="text-green text-xs">{result}</span>}
+        {error && <span className="text-red text-xs">{error}</span>}
+      </div>
+    </form>
+  );
+}
+
 export function GameAdmin() {
   const [secret, setSecret] = useState("");
   const [secretInput, setSecretInput] = useState("");
@@ -1524,6 +1688,11 @@ export function GameAdmin() {
             </tbody>
           </table>
         </div>
+      </section>
+
+      <section>
+        <h2 className="text-sm text-cyan mb-4">grant item to player</h2>
+        <GrantItemPanel secret={secret} catalogItems={items} />
       </section>
 
       <section>

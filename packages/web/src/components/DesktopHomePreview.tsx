@@ -65,6 +65,7 @@ export function DesktopHomePreview() {
         <Sky
           userId={MOCK.name}
           cols={SKY_COLS}
+          variant="stars"
           size={SIZE}
           style={{
             position: "absolute",

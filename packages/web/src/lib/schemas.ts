@@ -88,7 +88,7 @@ export const adminItemSchema = z.object({
   sellPrice: z.number().int().nonnegative().nullable().optional(),
   stackable: z.boolean().optional(),
   equipable: z.boolean().optional(),
-  equipSlot: z.enum(["head"]).nullable().optional(),
+  equipSlot: z.enum(["head", "scenery"]).nullable().optional(),
 });
 
 export const adminMultiplierSchema = z.object({
@@ -106,6 +106,7 @@ export const grantItemSchema = z
     itemId: z.string().min(1),
     herzieName: z.string().optional(),
     friendCode: z.string().optional(),
+    quantity: z.number().int().positive().optional(),
   })
   .refine((d) => d.herzieName || d.friendCode, {
     message: "herzieName or friendCode is required",

@@ -1,26 +1,7 @@
 "use client";
 
-import { type CSSProperties, useEffect, useRef, useState } from "react";
-import { renderSky } from "./scenery-renderer.js";
-
-function useIsNight(): boolean {
-  const [isNight, setIsNight] = useState(() => {
-    if (typeof window === "undefined") return false;
-    const h = new Date().getHours();
-    return h >= 21 || h < 6;
-  });
-
-  useEffect(() => {
-    const check = () => {
-      const h = new Date().getHours();
-      setIsNight(h >= 21 || h < 6);
-    };
-    const id = setInterval(check, 10 * 60 * 1000);
-    return () => clearInterval(id);
-  }, []);
-
-  return isNight;
-}
+import { type CSSProperties, useEffect, useRef } from "react";
+import { renderSky, type SceneryVariant } from "./scenery-renderer.js";
 
 const FONT_FAMILY = "'SF Mono', 'Menlo', monospace";
 
@@ -28,6 +9,8 @@ interface Props {
   userId: string;
   isPlaying?: boolean;
   cols: number;
+  /** Which scenery to display, driven by the equipped scenery item. */
+  variant?: SceneryVariant;
   /** Font size in px for each character cell. */
   size?: number;
   /** Pause animation (e.g. when host indicates animate=false). */
@@ -40,25 +23,24 @@ export function Sky({
   userId,
   isPlaying = false,
   cols,
+  variant = null,
   size = 5,
   paused = false,
   style,
   className,
 }: Props) {
   const ref = useRef<HTMLPreElement>(null);
-  const isNight = useIsNight();
   const cloudOffset = useRef(0);
   const twinkleFrame = useRef(0);
 
   useEffect(() => {
-    if (paused) return;
     const el = ref.current;
     if (!el) return;
 
     const render = () => {
       el.innerHTML = renderSky({
         userId,
-        isNight,
+        variant,
         isPlaying,
         cloudOffset: Math.floor(cloudOffset.current),
         twinkleFrame: twinkleFrame.current,
@@ -67,6 +49,9 @@ export function Sky({
     };
 
     render();
+
+    // Nothing equipped: render a blank sky once, no animation needed.
+    if (paused || variant === null) return;
 
     const cloudId = setInterval(() => {
       cloudOffset.current += isPlaying ? 1.4 : 1;
@@ -82,7 +67,7 @@ export function Sky({
       clearInterval(cloudId);
       clearInterval(twinkleId);
     };
-  }, [userId, isNight, isPlaying, paused, cols]);
+  }, [userId, variant, isPlaying, paused, cols]);
 
   const lineH = size * 1.35;
 

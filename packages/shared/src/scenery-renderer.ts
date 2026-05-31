@@ -84,20 +84,27 @@ function ensureCache(userId: string) {
   cachedStars = generateStars(rng);
 }
 
+export type SceneryVariant = "clouds" | "stars" | null;
+
 export function renderSky(opts: {
   userId: string;
-  isNight: boolean;
+  variant: SceneryVariant;
   isPlaying: boolean;
   cloudOffset: number;
   twinkleFrame: number;
   cols: number;
 }): string {
-  const { userId, isNight, isPlaying, cloudOffset, twinkleFrame, cols } = opts;
+  const { userId, variant, isPlaying, cloudOffset, twinkleFrame, cols } = opts;
   ensureCache(userId);
 
   const lines: string[] = [];
 
-  if (isNight) {
+  if (variant === null) {
+    for (let r = 0; r < SKY_ROWS; r++) lines.push("");
+    return lines.join("\n");
+  }
+
+  if (variant === "stars") {
     const skyGrid: (string | null)[][] = [];
     const colorGrid: (string | null)[][] = [];
     for (let r = 0; r < SKY_ROWS; r++) {

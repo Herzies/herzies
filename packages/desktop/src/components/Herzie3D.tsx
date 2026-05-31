@@ -50,6 +50,12 @@ export function Herzie3D({
   const focused = useWindowFocused();
   const paused = !focused;
 
+  const scenery = wearables?.includes("stars")
+    ? "stars"
+    : wearables?.includes("clouds")
+      ? "clouds"
+      : null;
+
   return (
     <>
       {showSky && (
@@ -57,6 +63,7 @@ export function Herzie3D({
           userId={userId}
           isPlaying={isPlaying}
           cols={sceneryCols}
+          variant={scenery}
           size={size}
           paused={paused || animate === false}
           style={{
