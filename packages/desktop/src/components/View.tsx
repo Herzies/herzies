@@ -19,7 +19,7 @@ export function View({
 }) {
   return (
     <div className={cn("h-full flex flex-col", className)}>
-      <div className="flex justify-between items-center mb-4">
+      <div className="relative z-50 flex justify-between items-center mb-4">
         {backButton ? (
           backButton
         ) : (

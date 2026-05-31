@@ -1,6 +1,7 @@
-import { Herzie3D, type HerzieProfile } from "@herzies/shared";
+import type { HerzieProfile } from "@herzies/shared";
 import { useState } from "react";
 import { BackButton } from "./BackButton";
+import { Herzie3D } from "./Herzie3D";
 import { View } from "./View";
 
 function formatTimeAgo(dateStr: string): string {

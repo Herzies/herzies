@@ -46,7 +46,7 @@ export function HomeView({
           <button
             type="button"
             onClick={onOpenProfile}
-            className="font-bold text-cyan hover:underline"
+            className="cursor-pointer font-bold text-cyan hover:underline"
             title="View your profile"
           >
             {herzie.name}
