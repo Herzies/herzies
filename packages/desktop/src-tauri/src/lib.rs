@@ -210,6 +210,7 @@ fn add_friend_locally(app: &AppHandle, state: &tauri::State<'_, SharedState>, co
                 storage::save_herzie(herzie);
             }
         }
+        s.bump_friend_epoch();
         let app_state = s.to_app_state(env!("CARGO_PKG_VERSION"));
         drop(s);
         let _ = app.emit("state-update", &app_state);
@@ -247,6 +248,7 @@ async fn friend_request_accept(
                 if s.pending_friend_request.as_ref().map(|p| &p.request_id) == Some(&request_id) {
                     s.pending_friend_request = None;
                 }
+                s.bump_friend_epoch();
             }
             if let Some(code) = code {
                 add_friend_locally(&app, &state, &code);
@@ -281,6 +283,7 @@ async fn friend_request_decline(
                 if s.pending_friend_request.as_ref().map(|p| &p.request_id) == Some(&request_id) {
                     s.pending_friend_request = None;
                 }
+                s.bump_friend_epoch();
             }
             emit_state_update(&app);
             Ok(FriendResult {
@@ -308,6 +311,7 @@ async fn friend_request_cancel(
                 let mut s = state.lock().unwrap();
                 s.outgoing_friend_requests
                     .retain(|r| r.request_id != request_id);
+                s.bump_friend_epoch();
             }
             emit_state_update(&app);
             Ok(FriendResult {
@@ -355,6 +359,7 @@ async fn friend_remove(
             herzie.friend_codes.retain(|c| c != &code);
             storage::save_herzie(herzie);
         }
+        s.bump_friend_epoch();
         s.friends.remove(&code);
         if let Some(ref herzie) = s.herzie {
             storage::save_friends_cache(&herzie.friend_codes, &s.friends);
@@ -1167,7 +1172,7 @@ async fn sync_loop(app: AppHandle) {
 async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
     let state = app.state::<SharedState>();
 
-    let (has_herzie, is_logged_in, minutes_to_sync, np_payload, genres) = {
+    let (has_herzie, is_logged_in, minutes_to_sync, np_payload, genres, friend_epoch_before) = {
         let s = state.lock().unwrap();
         let has = s.herzie.is_some();
         let logged = api::is_logged_in();
@@ -1185,7 +1190,7 @@ async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
             }
         });
         let g = s.current_genres.clone();
-        (has, logged, mins, np, g)
+        (has, logged, mins, np, g, s.friend_epoch)
     };
 
     if !has_herzie || !is_logged_in {
@@ -1217,18 +1222,29 @@ async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
         s.last_sync_ok = sync_ok;
         s.pending_minutes = (s.pending_minutes - minutes_to_sync).max(0.0);
 
+        // A friend relationship changed locally (accept/decline/cancel/add/
+        // remove) while this /sync was in flight, so its server snapshot of
+        // friends + requests is stale. Skip applying those fields so it can't
+        // clobber the local set (e.g. briefly emptying the just-accepted friend
+        // or re-showing an accepted request). The next sync reconciles.
+        let friend_state_stale = s.friend_epoch != friend_epoch_before;
         let friend_codes_changed = if let Some(ref mut herzie) = s.herzie {
             let server = &sync_resp.herzie;
-            let changed = herzie.friend_codes != server.friend_codes;
             herzie.xp = server.xp;
             herzie.level = server.level;
             herzie.stage = server.stage;
             herzie.total_minutes_listened = server.total_minutes_listened;
             herzie.genre_minutes = server.genre_minutes.clone();
-            herzie.friend_codes = server.friend_codes.clone();
             herzie.streak_days = server.streak_days;
             herzie.streak_last_date = server.streak_last_date.clone();
             herzie.currency = server.currency;
+            let changed = if friend_state_stale {
+                false
+            } else {
+                let changed = herzie.friend_codes != server.friend_codes;
+                herzie.friend_codes = server.friend_codes.clone();
+                changed
+            };
             storage::save_herzie(herzie);
             changed
         } else {
@@ -1238,9 +1254,11 @@ async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
         storage::save_multipliers(&sync_resp.multipliers);
 
         s.pending_trade_request = sync_resp.pending_trade_request.clone();
-        s.pending_friend_request = sync_resp.pending_friend_request.clone();
-        s.incoming_friend_requests = sync_resp.incoming_friend_requests.clone();
-        s.outgoing_friend_requests = sync_resp.outgoing_friend_requests.clone();
+        if !friend_state_stale {
+            s.pending_friend_request = sync_resp.pending_friend_request.clone();
+            s.incoming_friend_requests = sync_resp.incoming_friend_requests.clone();
+            s.outgoing_friend_requests = sync_resp.outgoing_friend_requests.clone();
+        }
 
         let app_state = s.to_app_state(env!("CARGO_PKG_VERSION"));
         drop(s);

@@ -39,6 +39,11 @@ pub struct ManagedState {
     pub incoming_friend_requests: Vec<FriendRequestSummary>,
     /// All pending friend requests you sent (Add friend tab).
     pub outgoing_friend_requests: Vec<FriendRequestSummary>,
+    /// Bumped on every local `friend_codes` mutation (add/accept/remove). A
+    /// `sync_tick` captures this before its network call; if it changes while
+    /// the request is in flight, the (now-stale) server `friend_codes` is not
+    /// applied so it can't clobber a just-accepted friend.
+    pub friend_epoch: u64,
 }
 
 impl ManagedState {
@@ -72,7 +77,14 @@ impl ManagedState {
             pending_friend_request: None,
             incoming_friend_requests: Vec::new(),
             outgoing_friend_requests: Vec::new(),
+            friend_epoch: 0,
         }
+    }
+
+    /// Mark that the local `friend_codes` set just changed so any `/sync`
+    /// already in flight won't overwrite it with stale server data.
+    pub fn bump_friend_epoch(&mut self) {
+        self.friend_epoch = self.friend_epoch.wrapping_add(1);
     }
 
     pub fn clear_app_cache(&mut self) {
