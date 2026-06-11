@@ -9,15 +9,17 @@ import { cn } from "../lib/utils";
 import {
   herzies,
   type LeaderboardEntry,
+  type OngoingTrade,
   useWindowFocused,
 } from "../tauri-bridge";
 import { ProfileView } from "./ProfileView";
 import { View } from "./View";
 
 const FRIEND_POLL_MS = 15_000;
+const TRADES_POLL_MS = 5_000;
 const SEARCH_DEBOUNCE_MS = 350;
 
-type Tab = "friends" | "requests" | "add" | "leaderboard";
+type Tab = "friends" | "requests" | "add" | "trades" | "leaderboard";
 
 export function FriendsView({
   herzie,
@@ -25,6 +27,7 @@ export function FriendsView({
   incomingRequests,
   outgoingRequests,
   onStartTrade,
+  onResumeTrade,
   stageOverride,
   openProfileCode,
   onProfileOpened,
@@ -37,6 +40,7 @@ export function FriendsView({
   incomingRequests: FriendRequestSummary[];
   outgoingRequests: FriendRequestSummary[];
   onStartTrade: (code: string) => void;
+  onResumeTrade: (tradeId: string) => void;
   stageOverride?: number | null;
   openProfileCode?: string | null;
   onProfileOpened?: () => void;
@@ -52,6 +56,9 @@ export function FriendsView({
   const [searchResults, setSearchResults] = useState<FriendSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[] | null>(
+    null,
+  );
+  const [ongoingTrades, setOngoingTrades] = useState<OngoingTrade[] | null>(
     null,
   );
   const focused = useWindowFocused();
@@ -130,6 +137,26 @@ export function FriendsView({
     load();
     if (!focused) return;
     const interval = setInterval(load, FRIEND_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [tab, focused]);
+
+  // Fetch ongoing trades when the tab is opened and refresh while focused.
+  useEffect(() => {
+    if (tab !== "trades") return;
+    let cancelled = false;
+    const load = () =>
+      herzies
+        .fetchOngoingTrades()
+        .then((res) => {
+          if (!cancelled) setOngoingTrades(res.trades);
+        })
+        .catch(() => {});
+    load();
+    if (!focused) return;
+    const interval = setInterval(load, TRADES_POLL_MS);
     return () => {
       cancelled = true;
       clearInterval(interval);
@@ -225,7 +252,7 @@ export function FriendsView({
           active={tab === "friends"}
           onClick={() => onTabChange("friends")}
         >
-          Friends ({herzie.friendCodes.length}/20)
+          Friends
         </TabButton>
         <TabButton
           active={tab === "requests"}
@@ -238,6 +265,15 @@ export function FriendsView({
         </TabButton>
         <TabButton active={tab === "add"} onClick={() => onTabChange("add")}>
           Add friend
+        </TabButton>
+        <TabButton
+          active={tab === "trades"}
+          onClick={() => onTabChange("trades")}
+        >
+          Trades
+          {ongoingTrades && ongoingTrades.length > 0 && (
+            <span className="ml-1 text-purple">({ongoingTrades.length})</span>
+          )}
         </TabButton>
         <TabButton
           active={tab === "leaderboard"}
@@ -442,6 +478,48 @@ export function FriendsView({
         </div>
       )}
 
+      {tab === "trades" && (
+        <div className="min-h-0 flex-1 overflow-auto">
+          {ongoingTrades === null ? (
+            <div className="pt-5 text-center text-ui text-text-dim">
+              Loading…
+            </div>
+          ) : ongoingTrades.length === 0 ? (
+            <div className="pt-5 text-center text-ui text-text-dim">
+              No ongoing trades. <br />
+              Start one from a friend's profile!
+            </div>
+          ) : (
+            ongoingTrades.map((trade) => (
+              <div
+                key={trade.tradeId}
+                className="flex items-center justify-between gap-2 border-b border-border py-1.5 last:border-b-0"
+              >
+                <div className="min-w-0">
+                  <div className="truncate text-ui text-text">
+                    {trade.partnerName}
+                  </div>
+                  <div className="text-[10px] text-text-dim">
+                    {tradeStateLabel(trade)}
+                    {" · "}
+                    {formatExpiry(trade.expiresAt)}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="btn shrink-0 text-purple"
+                  onClick={() => onResumeTrade(trade.tradeId)}
+                >
+                  {trade.state === "pending" && trade.role === "target"
+                    ? "Join"
+                    : "Rejoin"}
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
       {tab === "leaderboard" && (
         <div className="min-h-0 flex-1 overflow-auto">
           {leaderboard === null ? (
@@ -492,6 +570,23 @@ export function FriendsView({
       )}
     </View>
   );
+}
+
+function tradeStateLabel(trade: OngoingTrade): string {
+  if (trade.state === "pending") {
+    return trade.role === "initiator"
+      ? "Waiting for them to join"
+      : "They're waiting for you";
+  }
+  if (trade.state === "both_locked") return "Ready to confirm";
+  return "In progress";
+}
+
+function formatExpiry(expiresAt: string): string {
+  const ms = new Date(expiresAt).getTime() - Date.now();
+  if (ms <= 0) return "expiring…";
+  const mins = Math.ceil(ms / 60_000);
+  return `expires in ${mins}m`;
 }
 
 function formatMinutes(mins: number): string {

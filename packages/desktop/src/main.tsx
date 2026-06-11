@@ -17,6 +17,7 @@ import { IncomingTradeOverlay } from "./components/IncomingTradeOverlay";
 import { InventoryView } from "./components/InventoryView";
 import { OnboardingScreen } from "./components/OnboardingScreen";
 import { ProfileView } from "./components/ProfileView";
+import { PromptOverlay } from "./components/PromptOverlay";
 import { SettingsView } from "./components/SettingsView";
 import { SplashScreen } from "./components/SplashScreen";
 import { TabBar, type View } from "./components/TabBar";
@@ -74,10 +75,26 @@ function App() {
     "accept" | "decline" | null
   >(null);
   const [friendsTab, setFriendsTab] = useState<
-    "friends" | "requests" | "add" | "leaderboard"
+    "friends" | "requests" | "add" | "trades" | "leaderboard"
   >("friends");
   /** Bumps when a trade session ends or a new one starts so TradeView remounts (clears stale tradeId). */
   const [tradeViewGeneration, setTradeViewGeneration] = useState(0);
+  /** True while TradeView has a live (non-terminal) trade open. */
+  const [tradeActive, setTradeActive] = useState(false);
+  /** Set when the user tries to navigate away mid-trade; holds the destination until confirmed. */
+  const [pendingLeaveView, setPendingLeaveView] = useState<View | null>(null);
+  /** Where to return when the trade session ends — the view the user was on before entering it. */
+  const tradeReturnViewRef = useRef<View>("home");
+  /** Current view, readable from effect closures (deep-link handler). */
+  const viewRef = useRef(view);
+  viewRef.current = view;
+
+  /** Snapshot the current view so closing the trade can return to it. */
+  const rememberTradeReturnView = useCallback(() => {
+    if (viewRef.current !== "trade") {
+      tradeReturnViewRef.current = viewRef.current;
+    }
+  }, []);
   const notifiedVersionRef = useRef<string | null>(null);
   const focused = useWindowFocused();
 
@@ -93,6 +110,7 @@ function App() {
     const unlistenDeepLink = herzies.onDeepLink((payload) => {
       if (payload.startsWith("trade:")) {
         const tradeId = payload.slice("trade:".length);
+        rememberTradeReturnView();
         setTradeViewGeneration((g) => g + 1);
         setIncomingTradeId(tradeId);
         setTradeTarget(null);
@@ -110,7 +128,7 @@ function App() {
       unlistenActivity();
       unlistenDeepLink();
     };
-  }, [addLog]);
+  }, [addLog, rememberTradeReturnView]);
 
   useEffect(() => {
     if (!state.pendingTradeRequest) {
@@ -212,11 +230,32 @@ function App() {
   }
 
   const switchView = (v: View) => {
+    // Leaving an in-progress trade needs confirmation. The trade itself stays
+    // open server-side and can be rejoined from Social → Trades.
+    if (view === "trade" && v !== "trade" && tradeActive) {
+      setPendingLeaveView(v);
+      return;
+    }
     if (v !== "inventory") setDeepLinkItem(null);
     if (v !== "trade") {
       setIncomingTradeId(null);
       setTradeTarget(null);
     }
+    setSelfProfile(null);
+    setView(v);
+  };
+
+  const handleConfirmLeaveTrade = () => {
+    const v = pendingLeaveView;
+    setPendingLeaveView(null);
+    if (!v) return;
+    // Remount TradeView so it stops polling; the trade stays alive server-side
+    // and is rejoinable from the Trades tab.
+    setTradeTarget(null);
+    setIncomingTradeId(null);
+    setTradeViewGeneration((g) => g + 1);
+    setTradeActive(false);
+    if (v !== "inventory") setDeepLinkItem(null);
     setSelfProfile(null);
     setView(v);
   };
@@ -231,7 +270,17 @@ function App() {
   };
 
   const handleStartTrade = (code: string) => {
+    rememberTradeReturnView();
     setTradeTarget(code);
+    setTradeViewGeneration((g) => g + 1);
+    switchView("trade");
+  };
+
+  /** Re-enter an ongoing trade from the Social → Trades tab. */
+  const handleResumeTrade = (tradeId: string) => {
+    rememberTradeReturnView();
+    setIncomingTradeId(tradeId);
+    setTradeTarget(null);
     setTradeViewGeneration((g) => g + 1);
     switchView("trade");
   };
@@ -248,6 +297,7 @@ function App() {
 
   const handleJoinIncomingTrade = () => {
     if (!pendingIncoming) return;
+    rememberTradeReturnView();
     setIncomingTradeId(pendingIncoming.tradeId);
     setTradeTarget(null);
     setTradeViewGeneration((g) => g + 1);
@@ -356,6 +406,7 @@ function App() {
               incomingRequests={state.incomingFriendRequests}
               outgoingRequests={state.outgoingFriendRequests}
               onStartTrade={handleStartTrade}
+              onResumeTrade={handleResumeTrade}
               stageOverride={stageOverride}
               openProfileCode={chatProfileCode}
               onProfileOpened={() => setChatProfileCode(null)}
@@ -407,11 +458,14 @@ function App() {
               initialTradeId={incomingTradeId}
               inventory={state.inventory}
               currency={state.inventoryCurrency}
+              onActiveChange={setTradeActive}
               onClose={() => {
                 setTradeTarget(null);
                 setIncomingTradeId(null);
                 setTradeViewGeneration((g) => g + 1);
-                setView("friends");
+                setTradeActive(false);
+                // Return to wherever the user was before the trade started.
+                setView(tradeReturnViewRef.current);
               }}
             />
           </div>
@@ -461,6 +515,29 @@ function App() {
           setView={switchView}
           hasActiveEvent={hasActiveEvent}
         />
+      )}
+
+      {pendingLeaveView && (
+        <PromptOverlay
+          title="Leave trade?"
+          titleId="leave-trade-title"
+          onEscape={() => setPendingLeaveView(null)}
+          actions={[
+            {
+              label: "Stay",
+              colour: "text-text-dim",
+              onClick: () => setPendingLeaveView(null),
+            },
+            {
+              label: "Leave",
+              colour: "text-purple",
+              onClick: handleConfirmLeaveTrade,
+            },
+          ]}
+        >
+          Are you sure you want to leave? The trade stays open — you can rejoin
+          it from Social → Trades.
+        </PromptOverlay>
       )}
 
       {herzie && showIncomingTradeOverlay && pendingIncoming && (

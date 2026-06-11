@@ -1,8 +1,10 @@
 import type { Herzie, Inventory, Trade } from "@herzies/shared";
 import { getItem } from "@herzies/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { cn } from "../lib/utils";
 import { herzies } from "../tauri-bridge";
 import { NumberTicker } from "./NumberTicker";
+import { PromptOverlay } from "./PromptOverlay";
 
 /** How often we poll `/trade/status` while a trade is open (ms). */
 const TRADE_POLL_MS = 650;
@@ -14,6 +16,7 @@ export function TradeView({
   inventory: cachedInventory,
   currency: cachedCurrency,
   onClose,
+  onActiveChange,
 }: {
   herzie: Herzie;
   initialTarget?: string | null;
@@ -21,11 +24,14 @@ export function TradeView({
   inventory: Inventory | null;
   currency: number;
   onClose: () => void;
+  /** Reports whether a live (non-terminal) trade session is open, so the app shell can confirm before navigating away. */
+  onActiveChange?: (active: boolean) => void;
 }) {
   const [targetCode, setTargetCode] = useState(initialTarget ?? "");
   const [tradeId, setTradeId] = useState<string | null>(initialTradeId ?? null);
   const [trade, setTrade] = useState<Trade | null>(null);
   const [message, setMessage] = useState("");
+  const [confirmCancel, setConfirmCancel] = useState(false);
   const creatingRef = useRef(false);
   const [inventory, setInventory] = useState<Inventory | null>(cachedInventory);
   const [offerItems, setOfferItems] = useState<Record<string, number>>({});
@@ -33,6 +39,15 @@ export function TradeView({
   const [currency, setCurrency] = useState(cachedCurrency || herzie.currency);
   const lastSentOfferRef = useRef<string | null>(null);
   const closeScheduledRef = useRef(false);
+
+  const onActiveChangeRef = useRef(onActiveChange);
+  onActiveChangeRef.current = onActiveChange;
+  const tradeActive =
+    !!tradeId && trade?.state !== "completed" && trade?.state !== "cancelled";
+  useEffect(() => {
+    onActiveChangeRef.current?.(tradeActive);
+  }, [tradeActive]);
+  useEffect(() => () => onActiveChangeRef.current?.(false), []);
 
   const refreshTrade = useCallback(async () => {
     if (!tradeId) return null;
@@ -119,16 +134,14 @@ export function TradeView({
         setTradeId(initialTradeId);
         return;
       }
-      // Recover from duplicate / strict-mode double-join where the first call
-      // already activated the trade and a second POST returns 400.
+      // Join fails for already-active trades (rejoining from the Trades tab,
+      // strict-mode double-join) and for initiators (only targets can join).
+      // Fall back to the trade status: any live trade is fine to re-enter, and
+      // a pending one is too when we're the initiator still waiting.
       const t = await herzies.tradePoll(initialTradeId);
       if (cancelled) return;
-      if (
-        t &&
-        t.state !== "pending" &&
-        t.state !== "cancelled" &&
-        t.state !== "completed"
-      ) {
+      const live = t && t.state !== "cancelled" && t.state !== "completed";
+      if (live && (t.state !== "pending" || t.initiatorName === herzie.name)) {
         setTradeId(initialTradeId);
       } else {
         setMessage("Couldn't join trade — it may have expired");
@@ -137,11 +150,19 @@ export function TradeView({
     return () => {
       cancelled = true;
     };
-  }, [initialTradeId]);
+  }, [initialTradeId, herzie.name]);
 
   const handleCancel = async () => {
     if (tradeId) await herzies.tradeCancel(tradeId);
     onClose();
+  };
+
+  const handleCancelClick = () => {
+    if (tradeActive) {
+      setConfirmCancel(true);
+    } else {
+      void handleCancel();
+    }
   };
 
   const handleSendOffer = async () => {
@@ -261,6 +282,8 @@ export function TradeView({
       ? trade.targetAccepted
       : trade.initiatorAccepted
     : false;
+  const tradeOver =
+    trade?.state === "completed" || trade?.state === "cancelled";
 
   return (
     <div className="flex h-full flex-col">
@@ -273,12 +296,32 @@ export function TradeView({
               : trade.initiatorName
             : "..."}
         </div>
-        <button className="btn text-[10px] text-red" onClick={handleCancel}>
-          Cancel
-        </button>
+        {!tradeOver && (
+          <button
+            type="button"
+            className="btn text-[10px] text-red"
+            onClick={handleCancelClick}
+          >
+            Cancel
+          </button>
+        )}
       </div>
 
-      {!trade || trade.state === "pending" ? (
+      {tradeOver ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-1">
+          <div
+            className={cn(
+              "text-ui-lg font-bold",
+              trade.state === "completed" ? "text-green" : "text-text-dim",
+            )}
+          >
+            {trade.state === "completed"
+              ? "Trade completed!"
+              : "Trade cancelled"}
+          </div>
+          <div className="text-[10px] text-text-dim">Closing…</div>
+        </div>
+      ) : !trade || trade.state === "pending" ? (
         <div className="pt-5 text-center text-ui text-text-dim">
           Waiting for them to join...
         </div>
@@ -397,7 +440,35 @@ export function TradeView({
         </>
       )}
 
-      {message && <div className="mt-2 text-ui text-green">{message}</div>}
+      {message && !tradeOver && (
+        <div className="mt-2 text-ui text-green">{message}</div>
+      )}
+
+      {confirmCancel && (
+        <PromptOverlay
+          title="Cancel trade?"
+          titleId="cancel-trade-title"
+          onEscape={() => setConfirmCancel(false)}
+          actions={[
+            {
+              label: "Keep trading",
+              colour: "text-text-dim",
+              onClick: () => setConfirmCancel(false),
+            },
+            {
+              label: "Cancel trade",
+              colour: "text-red",
+              onClick: () => {
+                setConfirmCancel(false);
+                void handleCancel();
+              },
+            },
+          ]}
+        >
+          Are you sure you want to leave? This cancels the trade for both of
+          you.
+        </PromptOverlay>
+      )}
     </div>
   );
 }

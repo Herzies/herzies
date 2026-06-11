@@ -19,6 +19,18 @@ pub fn is_window_visible() -> bool {
     WINDOW_VISIBLE.load(Ordering::Relaxed)
 }
 
+/// When pinned, the window stays open on blur (it is NOT always-on-top —
+/// other windows can cover it; it just doesn't auto-hide).
+static WINDOW_PINNED: AtomicBool = AtomicBool::new(false);
+
+pub fn set_pinned(pinned: bool) {
+    WINDOW_PINNED.store(pinned, Ordering::Relaxed);
+}
+
+pub fn is_pinned() -> bool {
+    WINDOW_PINNED.load(Ordering::Relaxed)
+}
+
 /// Stored tray icon position for anchoring the window below it.
 static TRAY_X: AtomicU64 = AtomicU64::new(0);
 static TRAY_Y: AtomicU64 = AtomicU64::new(0);
@@ -195,6 +207,11 @@ pub fn on_focus(app: &AppHandle) {
 /// Called when the window loses focus.
 /// Schedules a delayed hide so that tray-click re-focus can cancel it.
 pub fn on_blur(app: &AppHandle) {
+    // Pinned windows stay open when they lose focus.
+    if is_pinned() {
+        return;
+    }
+
     // Suppress blur if the window was just shown via tray click (within 500ms).
     // This prevents the mouse-release on the tray icon from immediately hiding the window.
     let elapsed = now_ms().saturating_sub(LAST_TRAY_SHOW.load(Ordering::Relaxed));

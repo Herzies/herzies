@@ -532,6 +532,26 @@ async fn trade_poll(trade_id: String) -> Result<Option<Trade>, String> {
 }
 
 #[tauri::command]
+async fn fetch_ongoing_trades() -> Result<serde_json::Value, String> {
+    let client = Client::new();
+    match api::api_fetch_ongoing_trades(&client).await {
+        Some(trades) => Ok(serde_json::json!({ "trades": trades })),
+        None => Ok(serde_json::json!({ "trades": [] })),
+    }
+}
+
+#[tauri::command]
+fn set_window_pinned(pinned: bool) {
+    tray::set_pinned(pinned);
+    storage::save_pin_window(pinned);
+}
+
+#[tauri::command]
+fn get_window_pinned() -> bool {
+    tray::is_pinned()
+}
+
+#[tauri::command]
 async fn fetch_leaderboard() -> Result<serde_json::Value, String> {
     let client = Client::new();
     match api::api_fetch_leaderboard(&client).await {
@@ -1169,6 +1189,73 @@ async fn sync_loop(app: AppHandle) {
     }
 }
 
+/// Show a system notification for an incoming trade invite — deduped by trade
+/// ID so we don't re-notify on every poll while the trade is pending. Shared
+/// by sync_tick and trade_watch_loop.
+fn notify_pending_trade(app: &AppHandle, pending: Option<&PendingTradeRequest>) {
+    if let Some(trade_req) = pending {
+        let should_notify = {
+            let state = app.state::<LastTradeNotified>();
+            let mut last = state.0.lock().unwrap();
+            if last.as_deref() == Some(trade_req.trade_id.as_str()) {
+                false
+            } else {
+                *last = Some(trade_req.trade_id.clone());
+                true
+            }
+        };
+        if should_notify {
+            let msg = format!("{} wants to trade with you!", trade_req.from_name);
+            let deep_link = format!("trade:{}", trade_req.trade_id);
+            send_notification(app, "Trade Request", &msg, Some(&deep_link));
+            let _ = app.emit("activity", format!("Trade Request: {}", msg));
+        }
+    } else {
+        // Pending trade is gone (joined, cancelled, or expired) — reset
+        // so a future request from the same partner re-notifies.
+        if let Ok(mut last) = app.state::<LastTradeNotified>().0.lock() {
+            *last = None;
+        }
+    }
+}
+
+/// Lightweight poll for incoming trade invites. When the window is hidden the
+/// full /sync only runs every 60s, which made trade requests feel slow — this
+/// hits the cheap /trade/pending endpoint every 5s instead so the invite
+/// notification arrives quickly. While visible, sync_loop already covers the
+/// same data at a 5s cadence, so this loop skips its request.
+async fn trade_watch_loop(app: AppHandle) {
+    let client = Client::new();
+
+    loop {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+
+        if tray::is_window_visible() {
+            continue;
+        }
+        if !api::is_logged_in() {
+            continue;
+        }
+
+        let Some(pending) = api::api_check_pending_trade(&client).await else {
+            continue;
+        };
+
+        let state = app.state::<SharedState>();
+        let app_state = {
+            let mut s = state.lock().unwrap();
+            if s.herzie.is_none() {
+                continue;
+            }
+            s.pending_trade_request = pending.clone();
+            s.to_app_state(env!("CARGO_PKG_VERSION"))
+        };
+        let _ = app.emit("state-update", &app_state);
+
+        notify_pending_trade(&app, pending.as_ref());
+    }
+}
+
 async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
     let state = app.state::<SharedState>();
 
@@ -1272,32 +1359,8 @@ async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
             });
         }
 
-        // Show notification for incoming trade requests — dedupe by trade ID
-        // so we don't re-notify on every sync tick while the trade is pending.
-        if let Some(trade_req) = &sync_resp.pending_trade_request {
-            let should_notify = {
-                let state = app.state::<LastTradeNotified>();
-                let mut last = state.0.lock().unwrap();
-                if last.as_deref() == Some(trade_req.trade_id.as_str()) {
-                    false
-                } else {
-                    *last = Some(trade_req.trade_id.clone());
-                    true
-                }
-            };
-            if should_notify {
-                let msg = format!("{} wants to trade with you!", trade_req.from_name);
-                let deep_link = format!("trade:{}", trade_req.trade_id);
-                send_notification(app, "Trade Request", &msg, Some(&deep_link));
-                let _ = app.emit("activity", format!("Trade Request: {}", msg));
-            }
-        } else {
-            // Pending trade is gone (joined, cancelled, or expired) — reset
-            // so a future request from the same partner re-notifies.
-            if let Ok(mut last) = app.state::<LastTradeNotified>().0.lock() {
-                *last = None;
-            }
-        }
+        // Show notification for incoming trade requests.
+        notify_pending_trade(app, sync_resp.pending_trade_request.as_ref());
 
         // Show notification for incoming friend requests — dedupe by request ID
         // so we don't re-notify on every sync tick while it's pending.
@@ -1429,6 +1492,9 @@ pub fn run() {
             trade_accept,
             trade_cancel,
             trade_poll,
+            fetch_ongoing_trades,
+            set_window_pinned,
+            get_window_pinned,
             fetch_active_events,
             fetch_previous_hunt,
             fetch_leaderboard,
@@ -1493,6 +1559,9 @@ pub fn run() {
             // Set up tray icon
             tray::setup_tray(app.handle())?;
 
+            // Restore the "pin window" preference (keep window open on blur)
+            tray::set_pinned(storage::load_pin_window());
+
             // Set up window hide-on-blur (production only)
             if !tauri::is_dev() {
                 if let Some(window) = app.get_webview_window("main") {
@@ -1529,6 +1598,9 @@ pub fn run() {
 
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(sync_loop(app_handle));
+
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(trade_watch_loop(app_handle));
 
             // Initial poll + sync + home cache (equipped + chat)
             let app_handle = app.handle().clone();

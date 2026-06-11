@@ -106,9 +106,24 @@ export async function POST(request: Request) {
   }
 
   if (offerChanged) {
-    update.state = "active";
+    // The deal changed, so any accepts are stale.
     update.initiator_accepted = false;
     update.target_accepted = false;
+    // Only release the lock of the side whose offer changed. Locking means
+    // "my own offer is final" — the partner's lock must survive my edits,
+    // otherwise the second player's first offer-send (part of their Lock
+    // click) silently unlocks the first player and locks ping-pong forever.
+    const state = trade.state as string;
+    if (isInitiator) {
+      if (state === "initiator_locked") update.state = "active";
+      else if (state === "both_locked") update.state = "target_locked";
+    } else {
+      if (state === "target_locked") update.state = "active";
+      else if (state === "both_locked") update.state = "initiator_locked";
+    }
+    // Give both sides time to react to the new offer instead of dying at the
+    // original created_at + 5min mark.
+    update.expires_at = new Date(Date.now() + 5 * 60_000).toISOString();
   }
 
   const { error } = await admin.from("trades").update(update).eq("id", tradeId);

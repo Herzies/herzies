@@ -264,6 +264,38 @@ pub fn clear_inventory_cache() {
     }
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct SettingsFile {
+    #[serde(default)]
+    pin_window: bool,
+}
+
+fn load_settings() -> SettingsFile {
+    let path = config_dir().join("settings.json");
+    fs::read_to_string(&path)
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default()
+}
+
+fn save_settings(settings: &SettingsFile) {
+    ensure_dir();
+    let path = config_dir().join("settings.json");
+    let data = serde_json::to_string_pretty(settings).unwrap();
+    write_secure(&path, &data);
+}
+
+pub fn load_pin_window() -> bool {
+    load_settings().pin_window
+}
+
+pub fn save_pin_window(pinned: bool) {
+    let mut settings = load_settings();
+    settings.pin_window = pinned;
+    save_settings(&settings);
+}
+
 pub fn load_friends_cache(current_codes: &[String]) -> HashMap<String, HerzieProfile> {
     let path = config_dir().join("friends_cache.json");
     if !path.exists() {

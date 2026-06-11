@@ -57,7 +57,12 @@ export async function POST(request: Request) {
 
   const { error } = await admin
     .from("trades")
-    .update({ state: newState, updated_at: new Date().toISOString() })
+    .update({
+      state: newState,
+      updated_at: new Date().toISOString(),
+      // Keep the trade alive while both sides are actively progressing it.
+      expires_at: new Date(Date.now() + 5 * 60_000).toISOString(),
+    })
     .eq("id", tradeId);
 
   if (error) {

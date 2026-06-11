@@ -118,13 +118,13 @@ export function EventsView({
 
   const hunt = events.find((e) => e.type === "song_hunt");
   const previousHuntConfig = previousHunt?.config as SongHuntConfig;
-  const previousFastestFinders = (previousHuntConfig?.firstFinders ?? [])
+  const previousFinders = (previousHuntConfig?.firstFinders ?? [])
     .slice()
     .sort(
       (a, b) =>
         new Date(a.claimedAt).getTime() - new Date(b.claimedAt).getTime(),
     )
-    .slice(0, 3);
+    .slice(0, 20);
 
   if (!hunt && previousHunt) {
     return (
@@ -186,10 +186,13 @@ export function EventsView({
                 ) : null}
 
                 <div className="flex flex-col gap-1">
-                  <h2 className="text-ui font-bold text-text-dim">Finders:</h2>
-                  <div className="max-h-28 overflow-y-auto">
-                    {previousFastestFinders.length > 0 ? (
-                      previousFastestFinders.map((finder, i) => {
+                  <h2 className="text-ui font-bold text-text-dim">
+                    Finders ({previousFinders.length}):
+                  </h2>
+
+                  <div className="overflow-y-auto h-full">
+                    {previousFinders.length > 0 ? (
+                      previousFinders.map((finder, i) => {
                         const elapsed = formatDuration(
                           new Date(finder.claimedAt).getTime() -
                             new Date(previousHunt.startsAt).getTime(),

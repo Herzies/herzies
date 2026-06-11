@@ -17,7 +17,21 @@ export function HomeView({
   const { herzie, nowPlaying, multipliers, isConnected, equipped } = state;
   const [globalRank, setGlobalRank] = useState<number | undefined>(undefined);
   const [globalTotal, setGlobalTotal] = useState<number | undefined>(undefined);
+  const [pinned, setPinned] = useState(false);
   const friendCode = herzie?.friendCode;
+
+  useEffect(() => {
+    herzies
+      .getWindowPinned()
+      .then(setPinned)
+      .catch(() => {});
+  }, []);
+
+  const togglePin = () => {
+    const next = !pinned;
+    setPinned(next);
+    herzies.setWindowPinned(next).catch(() => {});
+  };
 
   useEffect(() => {
     if (!friendCode) return;
@@ -70,6 +84,37 @@ export function HomeView({
               connect to internet to grow
             </span>
           )}
+          <button
+            type="button"
+            onClick={togglePin}
+            title={
+              pinned
+                ? "Unpin window — hide it when it loses focus"
+                : "Pin window — keep it open when it loses focus"
+            }
+            className={cn(
+              "flex cursor-pointer items-center rounded-lg border-none px-1.5 py-0.5",
+              pinned
+                ? "bg-cyan/20 text-cyan"
+                : "bg-transparent text-text-dim hover:text-text",
+            )}
+          >
+            <svg
+              width="11"
+              height="11"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-label={pinned ? "Window pinned" : "Pin window"}
+              role="img"
+            >
+              <path d="M12 17v5" />
+              <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
+            </svg>
+          </button>
           <span
             className={cn(
               "rounded-lg px-2 py-0.5 text-[10px]",

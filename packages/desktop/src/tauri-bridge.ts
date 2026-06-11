@@ -8,6 +8,7 @@ import type {
   Inventory,
   PendingFriendRequest,
   Trade,
+  TradeState,
 } from "@herzies/shared";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -32,6 +33,16 @@ export interface PendingTradeRequest {
   tradeId: string;
   fromName: string;
   fromFriendCode: string;
+}
+
+export interface OngoingTrade {
+  tradeId: string;
+  state: TradeState;
+  role: "initiator" | "target";
+  partnerName: string;
+  partnerFriendCode: string;
+  createdAt: string;
+  expiresAt: string;
 }
 
 export interface LeaderboardEntry {
@@ -136,6 +147,13 @@ export const herzies = {
     invoke<boolean>("trade_cancel", { tradeId }),
   tradePoll: (tradeId: string) =>
     invoke<Trade | null>("trade_poll", { tradeId }),
+  fetchOngoingTrades: () =>
+    invoke<{ trades: OngoingTrade[] }>("fetch_ongoing_trades"),
+
+  /** Keep the window open when it loses focus (not always-on-top). */
+  setWindowPinned: (pinned: boolean) =>
+    invoke<void>("set_window_pinned", { pinned }),
+  getWindowPinned: () => invoke<boolean>("get_window_pinned"),
 
   fetchActiveEvents: () =>
     invoke<{ events: GameEvent[] }>("fetch_active_events"),

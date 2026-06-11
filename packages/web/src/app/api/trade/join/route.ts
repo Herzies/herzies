@@ -43,7 +43,13 @@ export async function POST(request: Request) {
 
   const { error } = await admin
     .from("trades")
-    .update({ state: "active", updated_at: new Date().toISOString() })
+    .update({
+      state: "active",
+      updated_at: new Date().toISOString(),
+      // Restart the expiry clock — the 5min default counts from create, which
+      // would otherwise cancel trades mid-negotiation.
+      expires_at: new Date(Date.now() + 5 * 60_000).toISOString(),
+    })
     .eq("id", tradeId)
     .eq("state", "pending");
 

@@ -203,7 +203,7 @@ describe("POST /api/trade/offer", () => {
     expect(updateArg).not.toHaveProperty("target_accepted");
   });
 
-  it("resets locks when offer actually changes", async () => {
+  it("releases only the changer's lock when offer changes (both_locked)", async () => {
     mockAuth.mockResolvedValue({ userId: "user-2" });
 
     const admin = createMockAdmin();
@@ -252,7 +252,67 @@ describe("POST /api/trade/offer", () => {
       string,
       unknown
     >;
-    expect(updateArg.state).toBe("active");
+    // The target changed their offer, so only the target's lock is released;
+    // the initiator stays locked on their own (unchanged) offer.
+    expect(updateArg.state).toBe("initiator_locked");
+    expect(updateArg.initiator_accepted).toBe(false);
+    expect(updateArg.target_accepted).toBe(false);
+    expect(updateArg.expires_at).toBeDefined();
+  });
+
+  it("preserves the partner's lock when the other side first sends an offer", async () => {
+    mockAuth.mockResolvedValue({ userId: "user-2" });
+
+    const admin = createMockAdmin();
+    const originalFrom = admin.from;
+    admin.from = vi.fn((table: string) => {
+      if (table === "trades") {
+        const chain = originalFrom("__empty__");
+        (chain as Record<string, unknown>).then = (
+          resolve: (v: unknown) => void,
+        ) =>
+          resolve({
+            data: {
+              id: "t1",
+              initiator_id: "user-1",
+              target_id: "user-2",
+              state: "initiator_locked",
+              initiator_offer: { items: {}, currency: 0 },
+              // Target has never sent an offer yet (null) — their first send
+              // counts as a change but must NOT unlock the initiator.
+              target_offer: null,
+            },
+            error: null,
+          });
+        return chain;
+      }
+      if (table === "herzies") {
+        const chain = originalFrom("__empty__");
+        (chain as Record<string, unknown>).then = (
+          resolve: (v: unknown) => void,
+        ) =>
+          resolve({
+            data: { inventory_v2: { cd: 5 }, currency: 100 },
+            error: null,
+          });
+        return chain;
+      }
+      return originalFrom(table);
+    }) as typeof admin.from;
+
+    mockAdmin.mockReturnValue(admin as never);
+
+    const res = await POST(
+      fakeRequest({ tradeId: "t1", offer: { items: { cd: 1 }, currency: 0 } }),
+    );
+    expect(res.status).toBe(200);
+
+    const updateArg = admin._updateFn.mock.calls[0]?.[0] as Record<
+      string,
+      unknown
+    >;
+    // Target isn't locked, so no lock state changes — initiator_locked stands.
+    expect(updateArg).not.toHaveProperty("state");
     expect(updateArg.initiator_accepted).toBe(false);
     expect(updateArg.target_accepted).toBe(false);
   });

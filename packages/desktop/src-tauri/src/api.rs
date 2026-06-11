@@ -562,6 +562,31 @@ pub async fn api_fetch_previous_hunt(client: &Client) -> Option<Vec<GameEvent>> 
     Some(events)
 }
 
+/// GET /trade/pending — lightweight check for an incoming trade invite.
+/// Outer `None` = request failed; inner `None` = no pending invite.
+pub async fn api_check_pending_trade(client: &Client) -> Option<Option<PendingTradeRequest>> {
+    let resp = api_fetch(client, reqwest::Method::GET, "/trade/pending", None).await?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let data: serde_json::Value = resp.json().await.ok()?;
+    Some(
+        serde_json::from_value::<Option<PendingTradeRequest>>(data["pending"].clone())
+            .unwrap_or(None),
+    )
+}
+
+/// GET /trade/ongoing — all non-terminal trades for the current user, so the
+/// UI can offer a way back into a trade after closing the window.
+pub async fn api_fetch_ongoing_trades(client: &Client) -> Option<serde_json::Value> {
+    let resp = api_fetch(client, reqwest::Method::GET, "/trade/ongoing", None).await?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let data: serde_json::Value = resp.json().await.ok()?;
+    Some(data["trades"].clone())
+}
+
 pub async fn api_poll_trade(client: &Client, trade_id: &str) -> Option<Trade> {
     let path = format!("/trade/status?tradeId={}", urlencoding::encode(trade_id));
     let resp = api_fetch(client, reqwest::Method::GET, &path, None).await?;

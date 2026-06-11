@@ -41,6 +41,8 @@ export async function POST(request: Request) {
   // Set this player's accepted flag
   const update: Record<string, unknown> = {
     updated_at: new Date().toISOString(),
+    // Keep the trade alive while waiting for the partner's accept.
+    expires_at: new Date(Date.now() + 5 * 60_000).toISOString(),
   };
 
   if (isInitiator) {
