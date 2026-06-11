@@ -30,6 +30,11 @@ interface Props {
   stage?: number;
   /** Font size in px for each character cell. */
   size?: number;
+  /**
+   * Width of the render grid in character columns. Default: SW (80).
+   * Widening adds horizontal field of view — the creature is not stretched.
+   */
+  cols?: number;
   /** Enable continuous Y-axis rotation. Default: false (idle breathing only). */
   animate?: boolean;
   /** Music is playing — switches to dance animation. No effect when animate is false. */
@@ -54,6 +59,7 @@ export function Herzie3D({
   userId,
   stage = 1,
   size = 5,
+  cols = SW,
   animate,
   isPlaying = false,
   wearables,
@@ -89,7 +95,13 @@ export function Herzie3D({
 
   const frames = useMemo(() => {
     if (dancing)
-      return generateDanceFrames(userId, stage, wearables, creatureParams);
+      return generateDanceFrames(
+        userId,
+        stage,
+        wearables,
+        creatureParams,
+        cols,
+      );
     if (animate)
       return generateRotationFrames(
         userId,
@@ -97,9 +109,10 @@ export function Herzie3D({
         undefined,
         wearables,
         creatureParams,
+        cols,
       );
-    return generateIdleFrames(userId, stage, wearables, creatureParams);
-  }, [userId, stage, animate, dancing, wearables, creatureParams]);
+    return generateIdleFrames(userId, stage, wearables, creatureParams, cols);
+  }, [userId, stage, animate, dancing, wearables, creatureParams, cols]);
 
   const interval = dancing ? 65 : animate ? 80 : 50;
 
@@ -109,10 +122,10 @@ export function Herzie3D({
     return {
       charW,
       lineH,
-      canvasW: Math.ceil(SW * charW),
+      canvasW: Math.ceil(cols * charW),
       canvasH: Math.ceil(SH * lineH),
     };
-  }, [size]);
+  }, [size, cols]);
 
   const drawFrame = useCallback(
     (cells: Cell[][]) => {
@@ -229,6 +242,7 @@ export function Herzie3D({
         dancing,
         wearables,
         creatureParams,
+        cols,
       );
       drawFrame(data.cells);
     } else {
@@ -247,6 +261,7 @@ export function Herzie3D({
     dancing,
     wearables,
     creatureParams,
+    cols,
   ]);
 
   return (

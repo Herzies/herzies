@@ -4,7 +4,7 @@ import {
   Sky,
 } from "@herzies/shared";
 import { useEffect, useState } from "react";
-import { useWindowFocused } from "../tauri-bridge";
+import { useWindowVisible } from "../tauri-bridge";
 
 interface Props {
   userId: string;
@@ -35,20 +35,22 @@ export function Herzie3D({
   showSky = true,
   draggable,
 }: Props) {
-  const [sceneryCols, setSceneryCols] = useState(() =>
+  // Full-window-width column count, shared by the sky and the creature
+  // viewport so both span the window without stretching their contents.
+  const [windowCols, setWindowCols] = useState(() =>
     Math.floor(window.innerWidth / (size * 0.6)),
   );
 
   useEffect(() => {
     const onResize = () => {
-      setSceneryCols(Math.floor(window.innerWidth / (size * 0.6)));
+      setWindowCols(Math.floor(window.innerWidth / (size * 0.6)));
     };
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, [size]);
 
-  const focused = useWindowFocused();
-  const paused = !focused;
+  const visible = useWindowVisible();
+  const paused = !visible;
 
   const scenery = wearables?.includes("stars")
     ? "stars"
@@ -62,7 +64,7 @@ export function Herzie3D({
         <Sky
           userId={userId}
           isPlaying={isPlaying}
-          cols={sceneryCols}
+          cols={windowCols}
           variant={scenery}
           size={size}
           paused={paused || animate === false}
@@ -79,6 +81,7 @@ export function Herzie3D({
         userId={userId}
         stage={stage}
         size={size}
+        cols={showSky ? windowCols : undefined}
         animate={animate}
         isPlaying={isPlaying}
         wearables={wearables}

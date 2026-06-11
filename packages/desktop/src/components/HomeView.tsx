@@ -1,7 +1,7 @@
-import { levelProgress, xpToNextLevel } from "@herzies/shared";
+import { lastFmTrackUrl, levelProgress, xpToNextLevel } from "@herzies/shared";
 import { useEffect, useState } from "react";
 import { cn } from "../lib/utils";
-import { type AppState, herzies } from "../tauri-bridge";
+import { type AppState, herzies, useWindowPinned } from "../tauri-bridge";
 import { Herzie3D } from "./Herzie3D";
 
 export function HomeView({
@@ -17,20 +17,13 @@ export function HomeView({
   const { herzie, nowPlaying, multipliers, isConnected, equipped } = state;
   const [globalRank, setGlobalRank] = useState<number | undefined>(undefined);
   const [globalTotal, setGlobalTotal] = useState<number | undefined>(undefined);
-  const [pinned, setPinned] = useState(false);
+  const pinned = useWindowPinned();
   const friendCode = herzie?.friendCode;
 
-  useEffect(() => {
-    herzies
-      .getWindowPinned()
-      .then(setPinned)
-      .catch(() => {});
-  }, []);
-
   const togglePin = () => {
-    const next = !pinned;
-    setPinned(next);
-    herzies.setWindowPinned(next).catch(() => {});
+    // setWindowPinned updates the shared pinned cache synchronously, so the
+    // UI (and animation pausing) reflects the toggle immediately.
+    herzies.setWindowPinned(!pinned).catch(() => {});
   };
 
   useEffect(() => {
@@ -193,18 +186,27 @@ export function HomeView({
       {nowPlaying ? (
         <div className="border-t border-border pt-1.5">
           <div className="flex gap-2">
-            <div className="h-12 w-12 shrink-0 overflow-hidden rounded bg-[#333]">
+            <button
+              type="button"
+              onClick={() => {
+                void herzies.openExternalUrl(
+                  lastFmTrackUrl(nowPlaying.artist, nowPlaying.title),
+                );
+              }}
+              title="Open on Last.fm"
+              className="h-12 w-12 shrink-0 cursor-pointer overflow-hidden rounded border-none bg-[#333] p-0"
+            >
               {nowPlaying.albumArtUrl ? (
                 <img
                   src={nowPlaying.albumArtUrl}
-                  alt=""
+                  alt={`${nowPlaying.title} album art`}
                   className="h-full w-full object-cover"
                   onError={(e) => {
                     e.currentTarget.style.display = "none";
                   }}
                 />
               ) : null}
-            </div>
+            </button>
             <div className="min-w-0 flex-1">
               <div className="line-clamp-1 text-ui font-bold text-text">
                 {nowPlaying.title}

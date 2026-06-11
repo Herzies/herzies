@@ -151,9 +151,15 @@ export const herzies = {
     invoke<{ trades: OngoingTrade[] }>("fetch_ongoing_trades"),
 
   /** Keep the window open when it loses focus (not always-on-top). */
-  setWindowPinned: (pinned: boolean) =>
-    invoke<void>("set_window_pinned", { pinned }),
-  getWindowPinned: () => invoke<boolean>("get_window_pinned"),
+  setWindowPinned: (pinned: boolean) => {
+    updatePinnedCache(pinned);
+    return invoke<void>("set_window_pinned", { pinned });
+  },
+  getWindowPinned: () =>
+    invoke<boolean>("get_window_pinned").then((pinned) => {
+      updatePinnedCache(pinned);
+      return pinned;
+    }),
 
   fetchActiveEvents: () =>
     invoke<{ events: GameEvent[] }>("fetch_active_events"),
@@ -219,6 +225,34 @@ export const herzies = {
   },
 };
 
+// Pin state only changes through herzies.setWindowPinned above, so a
+// module-level cache + listener set is enough to keep hooks in sync without
+// a dedicated Tauri event.
+let pinnedCache = false;
+const pinnedListeners = new Set<(pinned: boolean) => void>();
+
+function updatePinnedCache(pinned: boolean) {
+  if (pinnedCache === pinned) return;
+  pinnedCache = pinned;
+  for (const listener of pinnedListeners) listener(pinned);
+}
+
+/** Tracks the "pin window" preference (window stays open on blur). */
+export function useWindowPinned(): boolean {
+  const [pinned, setPinned] = useState(pinnedCache);
+  useEffect(() => {
+    pinnedListeners.add(setPinned);
+    setPinned(pinnedCache);
+    if (isTauri()) {
+      herzies.getWindowPinned().catch(() => {});
+    }
+    return () => {
+      pinnedListeners.delete(setPinned);
+    };
+  }, []);
+  return pinned;
+}
+
 /**
  * Tracks whether the Tauri window currently has focus. The tray window is
  * hidden when blurred (200ms after on_blur in tray.rs), so this doubles as
@@ -244,6 +278,17 @@ export function useWindowFocused(): boolean {
     };
   }, []);
   return focused;
+}
+
+/**
+ * True while the window is visible to the user: focused, or pinned (pinned
+ * windows stay open on blur instead of auto-hiding). Use this instead of
+ * useWindowFocused for pausing animations, so a pinned window keeps animating.
+ */
+export function useWindowVisible(): boolean {
+  const focused = useWindowFocused();
+  const pinned = useWindowPinned();
+  return focused || pinned;
 }
 
 export type UpdateInstallEvent =

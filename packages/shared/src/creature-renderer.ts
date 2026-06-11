@@ -23,9 +23,14 @@ const SW = 80;
 const SH = 48;
 const CAM = 2.0;
 const FOV_Y = 1.8;
-const ASPECT_RATIO = (SW / SH) * (1 / CHAR_ASPECT);
 const HALF_H = Math.tan(FOV_Y / 2);
-const HALF_W = HALF_H * ASPECT_RATIO;
+
+/** Horizontal half-extent of the view plane for a given column count. */
+function halfWidthFor(cols: number): number {
+  return HALF_H * ((cols / SH) * (1 / CHAR_ASPECT));
+}
+
+const HALF_W = halfWidthFor(SW);
 const TILT = 8 * (Math.PI / 180);
 const TILT_COS = Math.cos(TILT);
 const TILT_SIN = Math.sin(TILT);
@@ -297,8 +302,8 @@ export const CREATURE_BODY_TYPES = ["blob", "tall", "wide", "spiky"] as const;
 export const CREATURE_PARAM_BOUNDS = {
   bodyType: { min: 0, max: 3, step: 1 },
   colorIndex: { min: 0, max: CREATURE_PALETTE.length - 1, step: 1 },
-  bodyScale: { min: 0.85, max: 1.15, step: 0.01 },
-  headRatio: { min: 0.65, max: 0.95, step: 0.01 },
+  bodyScale: { min: 0.85, max: 1.05, step: 0.01 },
+  headRatio: { min: 0.65, max: 0.85, step: 0.01 },
   eyeSpacing: { min: 0.1, max: 0.18, step: 0.005 },
   eyeSize: { min: 0.09, max: 0.15, step: 0.005 },
   eyeHeight: { min: -0.25, max: -0.1, step: 0.005 },
@@ -336,8 +341,16 @@ export function generateCreatureParams(userId: string): CreatureParams {
   return {
     bodyType: intSeeded(0, 3, rng),
     colorIndex: intSeeded(0, CREATURE_PALETTE.length - 1, rng),
-    bodyScale: rangeSeeded(0.85, 1.15, rng),
-    headRatio: rangeSeeded(0.65, 0.95, rng),
+    bodyScale: rangeSeeded(
+      CREATURE_PARAM_BOUNDS.bodyScale.min,
+      CREATURE_PARAM_BOUNDS.bodyScale.max,
+      rng,
+    ),
+    headRatio: rangeSeeded(
+      CREATURE_PARAM_BOUNDS.headRatio.min,
+      CREATURE_PARAM_BOUNDS.headRatio.max,
+      rng,
+    ),
     eyeSpacing: rangeSeeded(0.1, 0.18, rng),
     eyeSize: rangeSeeded(0.09, 0.15, rng),
     eyeHeight: rangeSeeded(-0.25, -0.1, rng),
@@ -543,26 +556,28 @@ function buildTall(p: CreatureParams, stage: number): Sphere[] {
 
   if (stage >= 2) {
     const armY = stage === 3 ? -0.05 * s : -0.15 * s;
+    // Stage 3 body is wider, so push arms further out to stay visible
+    const armX = stage === 3 ? 0.47 * s : 0.4 * s;
     spheres.push({
-      center: [-0.4 * s, armY, 0],
+      center: [-armX, armY, 0],
       radius: 0.12 * s,
       zone: "primary",
       part: "arm-l",
     });
     spheres.push({
-      center: [0.4 * s, armY, 0],
+      center: [armX, armY, 0],
       radius: 0.12 * s,
       zone: "primary",
       part: "arm-r",
     });
     spheres.push({
-      center: [-0.5 * s, armY + p.armLength * 0.4 * s, 0],
+      center: [-(armX + 0.1 * s), armY + p.armLength * 0.4 * s, 0],
       radius: 0.09 * s,
       zone: "primary",
       part: "arm-l",
     });
     spheres.push({
-      center: [0.5 * s, armY + p.armLength * 0.4 * s, 0],
+      center: [armX + 0.1 * s, armY + p.armLength * 0.4 * s, 0],
       radius: 0.09 * s,
       zone: "primary",
       part: "arm-r",
@@ -570,28 +585,24 @@ function buildTall(p: CreatureParams, stage: number): Sphere[] {
   }
 
   if (stage >= 3) {
-    // Neck sphere bridging head and body
-    const neckY = (headY + 0.05 * s) * 0.5;
-    spheres.push({
-      center: [0, neckY, 0],
-      radius: 0.25 * s,
-      zone: "primary",
-      part: "body",
-    });
+    // Single elongated body blob — two near-equal spheres packed tightly
+    // so the silhouette reads as one capsule, not separate lumps.
+    // The top sphere overlaps the head directly, forming a natural neck
+    // pinch without a dedicated (bulging) neck sphere.
     spheres.push({
       center: [0, 0.05 * s, 0],
-      radius: 0.35 * s,
+      radius: 0.4 * s,
       zone: "primary",
       part: "body",
     });
     spheres.push({
-      center: [0, 0.4 * s, 0],
-      radius: 0.3 * s,
+      center: [0, 0.3 * s, 0],
+      radius: 0.36 * s,
       zone: "primary",
       part: "body",
     });
 
-    const legBase = 0.6 * s;
+    const legBase = 0.62 * s;
     spheres.push({
       center: [-0.15 * s, legBase, 0],
       radius: 0.14 * s,
@@ -1131,12 +1142,16 @@ function applyTexture(
 
 // --- Anchor projection (FOV-based) ---
 
-function projectPoint(p: V3): [number, number, number] {
+function projectPoint(
+  p: V3,
+  cols: number,
+  halfW: number,
+): [number, number, number] {
   const relZ = p[2] + CAM;
-  if (relZ <= 0.01) return [SW / 2, SH / 2, 0];
-  const ndcX = p[0] / (relZ * HALF_W);
+  if (relZ <= 0.01) return [cols / 2, SH / 2, 0];
+  const ndcX = p[0] / (relZ * halfW);
   const ndcY = p[1] / (relZ * HALF_H);
-  return [(ndcX + 1) * 0.5 * SW, (ndcY + 1) * 0.5 * SH, relZ];
+  return [(ndcX + 1) * 0.5 * cols, (ndcY + 1) * 0.5 * SH, relZ];
 }
 
 // --- Color for zone ---
@@ -1174,7 +1189,9 @@ function renderCreatureFrame(
   textureType: number,
   anchorDefs: AnchorPoint[],
   colors: ColorTriplet,
+  cols: number = SW,
 ): FrameData {
+  const halfW = cols === SW ? HALF_W : halfWidthFor(cols);
   const transformed = spheres.map((s) => {
     const tilted: V3 = [
       s.center[0],
@@ -1191,22 +1208,22 @@ function renderCreatureFrame(
   });
 
   const bright: number[][] = Array.from({ length: SH }, () =>
-    Array(SW).fill(-1),
+    Array(cols).fill(-1),
   );
   const zones: ColorZone[][] = Array.from({ length: SH }, () =>
-    Array<ColorZone>(SW).fill("primary"),
+    Array<ColorZone>(cols).fill("primary"),
   );
   const pixelColors: (string | null)[][] = Array.from({ length: SH }, () =>
-    Array(SW).fill(null),
+    Array(cols).fill(null),
   );
 
   const oz = -CAM;
 
   for (let sy = 0; sy < SH; sy++) {
-    for (let sx = 0; sx < SW; sx++) {
-      const ndcX = ((sx + 0.5) / SW) * 2 - 1;
+    for (let sx = 0; sx < cols; sx++) {
+      const ndcX = ((sx + 0.5) / cols) * 2 - 1;
       const ndcY = ((sy + 0.5) / SH) * 2 - 1;
-      const px = ndcX * HALF_W;
+      const px = ndcX * halfW;
       const py = ndcY * HALF_H;
       const dLen = Math.sqrt(px * px + py * py + 1);
       const dx = px / dLen;
@@ -1302,7 +1319,7 @@ function renderCreatureFrame(
       worldPos[1] * TILT_SIN + worldPos[2] * TILT_COS,
     ];
     const rotated = rotY(tilted, yAngle);
-    const [screenX, screenY, depth] = projectPoint(rotated);
+    const [screenX, screenY, depth] = projectPoint(rotated, cols, halfW);
 
     const nTilted: V3 = [
       anchor.normalDir[0],
@@ -1314,7 +1331,7 @@ function renderCreatureFrame(
 
     const parentRadius = transformed[parentIdx].radius;
     const screenRadius =
-      depth > 0.01 ? (parentRadius / depth) * ((SW * 0.5) / HALF_W) : 0;
+      depth > 0.01 ? (parentRadius / depth) * ((cols * 0.5) / halfW) : 0;
 
     anchors[anchor.name] = {
       screenX: Math.round(screenX),
@@ -1341,8 +1358,9 @@ export function generateIdleFrames(
   stage: number,
   wearables?: string[],
   paramsOverride?: CreatureParams,
+  cols: number = SW,
 ): FrameData[] {
-  const key = `idle:${paramsCacheKey(userId, paramsOverride)}:${stage}:${wearables?.sort().join(",") ?? ""}`;
+  const key = `idle:${paramsCacheKey(userId, paramsOverride)}:${stage}:${wearables?.sort().join(",") ?? ""}:${cols}`;
   const cached = frameCache.get(key);
   if (cached) return cached;
 
@@ -1360,6 +1378,7 @@ export function generateIdleFrames(
       params.textureType,
       anchors,
       colors,
+      cols,
     );
   });
 
@@ -1377,8 +1396,9 @@ export function generateRotationFrames(
   frameCount = 36,
   wearables?: string[],
   paramsOverride?: CreatureParams,
+  cols: number = SW,
 ): FrameData[] {
-  const key = `rot:${paramsCacheKey(userId, paramsOverride)}:${stage}:${wearables?.sort().join(",") ?? ""}`;
+  const key = `rot:${paramsCacheKey(userId, paramsOverride)}:${stage}:${wearables?.sort().join(",") ?? ""}:${cols}`;
   const cached = frameCache.get(key);
   if (cached) return cached;
 
@@ -1395,6 +1415,7 @@ export function generateRotationFrames(
       params.textureType,
       anchors,
       colors,
+      cols,
     ),
   );
 
@@ -1411,8 +1432,9 @@ export function generateDanceFrames(
   stage: number,
   wearables?: string[],
   paramsOverride?: CreatureParams,
+  cols: number = SW,
 ): FrameData[] {
-  const key = `dance:${paramsCacheKey(userId, paramsOverride)}:${stage}:${wearables?.sort().join(",") ?? ""}`;
+  const key = `dance:${paramsCacheKey(userId, paramsOverride)}:${stage}:${wearables?.sort().join(",") ?? ""}:${cols}`;
   const cached = frameCache.get(key);
   if (cached) return cached;
 
@@ -1430,6 +1452,7 @@ export function generateDanceFrames(
       params.textureType,
       anchors,
       colors,
+      cols,
     );
   });
 
@@ -1450,6 +1473,7 @@ export function renderCreatureAtAngle(
   dancing = false,
   wearables?: string[],
   paramsOverride?: CreatureParams,
+  cols: number = SW,
 ): FrameData {
   const params = resolveCreatureParams(userId, paramsOverride);
   const baseSpheres = buildCreatureSpheres(params, stage);
@@ -1465,6 +1489,7 @@ export function renderCreatureAtAngle(
     params.textureType,
     anchors,
     colors,
+    cols,
   );
 }
 

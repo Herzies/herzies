@@ -128,8 +128,12 @@ export function EventsView({
 
   if (!hunt && previousHunt) {
     return (
-      <View title="Events" colour="red">
-        <div>
+      <View
+        title="Events"
+        colour="red"
+        childrenClassName="flex min-h-0 flex-col"
+      >
+        <div className="flex min-h-0 flex-1 flex-col">
           <div>
             <h2 className="text-ui-2xl mb-3 font-bold">
               Song Hunt{" "}
@@ -148,7 +152,7 @@ export function EventsView({
             </div>
           </div>
 
-          <div className="mt-4 pt-4 border-t border-border">
+          <div className="mt-4 flex min-h-0 flex-1 flex-col border-t border-border pt-4">
             <h2 className="text-ui-lg mb-3 font-bold">
               Previous{" "}
               <span className="text-ui text-text-dim">
@@ -161,8 +165,8 @@ export function EventsView({
               </span>
             </h2>
 
-            <div className="flex flex-col gap-2">
-              <div className="flex flex-col gap-2">
+            <div className="flex min-h-0 flex-1 flex-col gap-2">
+              <div className="flex min-h-0 flex-1 flex-col gap-2">
                 <div className="flex flex-col gap-1">
                   <h2 className="text-ui font-bold text-text-dim">Type:</h2>
                   <div className="text-ui">Song Hunt</div>
@@ -185,12 +189,12 @@ export function EventsView({
                   </div>
                 ) : null}
 
-                <div className="flex flex-col gap-1">
+                <div className="flex min-h-0 flex-1 flex-col gap-1">
                   <h2 className="text-ui font-bold text-text-dim">
                     Finders ({previousFinders.length}):
                   </h2>
 
-                  <div className="overflow-y-auto h-full">
+                  <div className="min-h-0 flex-1 overflow-y-auto">
                     {previousFinders.length > 0 ? (
                       previousFinders.map((finder, i) => {
                         const elapsed = formatDuration(

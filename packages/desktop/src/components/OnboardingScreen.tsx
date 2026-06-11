@@ -1,7 +1,7 @@
 import { Herzie3D, validateName } from "@herzies/shared";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../lib/utils";
-import { herzies, useWindowFocused } from "../tauri-bridge";
+import { herzies, useWindowVisible } from "../tauri-bridge";
 
 export function OnboardingScreen({ onClose }: { onClose?: () => void }) {
   const [name, setName] = useState("");
@@ -21,7 +21,7 @@ export function OnboardingScreen({ onClose }: { onClose?: () => void }) {
   const trimmed = name.trim();
   const clientError = trimmed === "" ? null : validateName(trimmed);
   const canSubmit = trimmed !== "" && !clientError && !hatching;
-  const focused = useWindowFocused();
+  const visible = useWindowVisible();
 
   async function submit() {
     if (!canSubmit) return;
@@ -56,7 +56,7 @@ export function OnboardingScreen({ onClose }: { onClose?: () => void }) {
           stage={1}
           size={5}
           draggable={false}
-          paused={!focused}
+          paused={!visible}
           ariaLabel="A mysterious herzie waiting to hatch"
         />
       </div>
