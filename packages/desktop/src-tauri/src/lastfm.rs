@@ -60,6 +60,78 @@ const MOOD_TAGS: &[&str] = &[
     "euphoric",
 ];
 
+/// Tags that carry no genre/mood signal but rank high on artist.getTopTags.
+const JUNK_TAGS: &[&str] = &[
+    "seen live",
+    "favorites",
+    "favourites",
+    "albums i own",
+    "under 2000 listeners",
+    "spotify",
+];
+
+fn is_junk_tag(tag: &str) -> bool {
+    JUNK_TAGS.contains(&tag.to_lowercase().as_str())
+}
+
+fn is_version_marker(content: &str) -> bool {
+    const MARKERS: &[&str] = &[
+        "remaster",
+        "remastered",
+        "deluxe",
+        "edition",
+        "anniversary",
+        "expanded",
+        "mono",
+        "stereo",
+        "version",
+        "edit",
+        "bonus",
+    ];
+    content
+        .to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .any(|w| MARKERS.contains(&w))
+}
+
+/// Strip trailing version markers — "(Remastered)", "[Deluxe Edition]",
+/// "- 2014 Remaster", etc. — so the Last.fm lookup hits the canonical track
+/// entry instead of a sparsely-tagged variant. Conservative: only removes a
+/// trailing parenthetical/bracket group or dash suffix whose words match a
+/// known marker, so titles like "Time (Clock of the Heart)" survive intact.
+pub fn normalize_title(title: &str) -> String {
+    let mut t = title.trim();
+    loop {
+        let trimmed = t.trim_end();
+        let stripped = if trimmed.ends_with(')') {
+            trimmed
+                .rfind('(')
+                .filter(|&i| i > 0 && is_version_marker(&trimmed[i + 1..trimmed.len() - 1]))
+                .map(|i| &trimmed[..i])
+        } else if trimmed.ends_with(']') {
+            trimmed
+                .rfind('[')
+                .filter(|&i| i > 0 && is_version_marker(&trimmed[i + 1..trimmed.len() - 1]))
+                .map(|i| &trimmed[..i])
+        } else {
+            trimmed
+                .rfind(" - ")
+                .filter(|&i| i > 0 && is_version_marker(&trimmed[i + 3..]))
+                .map(|i| &trimmed[..i])
+        };
+        match stripped {
+            Some(s) => t = s,
+            None => break,
+        }
+    }
+    let t = t.trim();
+    if t.is_empty() {
+        title.trim().to_string()
+    } else {
+        t.to_string()
+    }
+}
+
 pub fn track_key(artist: &str, title: &str) -> String {
     format!(
         "{}\0{}",
@@ -169,6 +241,7 @@ pub struct LastFmService {
     app_name: String,
     http: reqwest::Client,
     cache: Mutex<HashMap<String, TrackEnrichment>>,
+    artist_tags_cache: Mutex<HashMap<String, Vec<String>>>,
     rate_limit_until: Mutex<Option<Instant>>,
     warned_missing_key: Mutex<bool>,
 }
@@ -191,6 +264,7 @@ impl LastFmService {
             app_name,
             http: reqwest::Client::new(),
             cache: Mutex::new(HashMap::new()),
+            artist_tags_cache: Mutex::new(HashMap::new()),
             rate_limit_until: Mutex::new(None),
             warned_missing_key: Mutex::new(false),
         }
@@ -201,12 +275,79 @@ impl LastFmService {
     }
 
     pub async fn fetch_track(&self, artist: &str, title: &str) -> Option<TrackEnrichment> {
-        let api_key = self.api_key.as_ref()?;
-        let cache_key = track_key(artist, title);
+        self.api_key.as_ref()?;
+        let lookup_title = normalize_title(title);
+        let cache_key = track_key(artist, &lookup_title);
 
         if let Some(cached) = self.cache.lock().unwrap().get(&cache_key).cloned() {
             return Some(cached);
         }
+
+        let body = self
+            .request(&[
+                ("method", "track.getInfo"),
+                ("artist", artist),
+                ("track", &lookup_title),
+            ])
+            .await?;
+
+        // An unknown track still deserves the artist-tags fallback below.
+        let mut enrichment = parse_track_response(&body).unwrap_or(TrackEnrichment {
+            tags: Vec::new(),
+            album_art_url: None,
+            vibe: None,
+            bpm: None,
+        });
+
+        // Sparsely-scrobbled tracks often have no tags; the artist's top tags
+        // are a decent genre proxy in that case.
+        if enrichment.tags.is_empty() {
+            if let Some(artist_tags) = self.fetch_artist_tags(artist).await {
+                enrichment.vibe = pick_vibe(&artist_tags);
+                enrichment.tags = artist_tags;
+            }
+        }
+
+        self.cache
+            .lock()
+            .unwrap()
+            .insert(cache_key, enrichment.clone());
+        Some(enrichment)
+    }
+
+    async fn fetch_artist_tags(&self, artist: &str) -> Option<Vec<String>> {
+        let cache_key = artist.trim().to_lowercase();
+
+        if let Some(cached) = self.artist_tags_cache.lock().unwrap().get(&cache_key) {
+            return Some(cached.clone());
+        }
+
+        let body = self
+            .request(&[("method", "artist.getTopTags"), ("artist", artist)])
+            .await?;
+
+        if body.get("error").is_some() {
+            return None;
+        }
+        let tags: Vec<String> = body
+            .get("toptags")
+            .map(parse_tag_names)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|t| !is_junk_tag(t))
+            .take(5)
+            .collect();
+
+        self.artist_tags_cache
+            .lock()
+            .unwrap()
+            .insert(cache_key, tags.clone());
+        Some(tags)
+    }
+
+    /// Single Last.fm GET with shared rate-limit bookkeeping.
+    async fn request(&self, params: &[(&str, &str)]) -> Option<Value> {
+        let api_key = self.api_key.as_ref()?;
 
         {
             let until = self.rate_limit_until.lock().unwrap();
@@ -223,11 +364,9 @@ impl LastFmService {
             .http
             .get(API_BASE)
             .header("User-Agent", user_agent)
+            .query(params)
             .query(&[
-                ("method", "track.getInfo"),
                 ("api_key", api_key.as_str()),
-                ("artist", artist),
-                ("track", title),
                 ("autocorrect", "1"),
                 ("format", "json"),
             ])
@@ -249,12 +388,7 @@ impl LastFmService {
             return None;
         }
 
-        let enrichment = parse_track_response(&body)?;
-        self.cache
-            .lock()
-            .unwrap()
-            .insert(cache_key, enrichment.clone());
-        Some(enrichment)
+        Some(body)
     }
 
     pub fn log_missing_key_once(&self) {
@@ -368,5 +502,46 @@ mod tests {
     fn parse_error_returns_none() {
         let body = json!({ "error": 6, "message": "Track not found" });
         assert!(parse_track_response(&body).is_none());
+    }
+
+    #[test]
+    fn normalize_strips_parenthetical_remaster() {
+        assert_eq!(normalize_title("Live Forever (Remastered)"), "Live Forever");
+        assert_eq!(normalize_title("Wonderwall (2014 Remaster)"), "Wonderwall");
+    }
+
+    #[test]
+    fn normalize_strips_dash_suffix() {
+        assert_eq!(
+            normalize_title("Live Forever - Remastered 2014"),
+            "Live Forever"
+        );
+        assert_eq!(normalize_title("Heroes - 2017 Remaster"), "Heroes");
+    }
+
+    #[test]
+    fn normalize_strips_brackets_and_stacked_suffixes() {
+        assert_eq!(normalize_title("Song [Deluxe Edition]"), "Song");
+        assert_eq!(normalize_title("Song (Remastered) [Bonus Track]"), "Song");
+    }
+
+    #[test]
+    fn normalize_keeps_legit_parentheses_and_dashes() {
+        assert_eq!(
+            normalize_title("Time (Clock of the Heart)"),
+            "Time (Clock of the Heart)"
+        );
+        assert_eq!(
+            normalize_title("Brain Damage - Eclipse"),
+            "Brain Damage - Eclipse"
+        );
+        assert_eq!(normalize_title("(Remastered)"), "(Remastered)");
+    }
+
+    #[test]
+    fn junk_tags_filtered() {
+        assert!(is_junk_tag("Seen Live"));
+        assert!(is_junk_tag("albums i own"));
+        assert!(!is_junk_tag("britpop"));
     }
 }
