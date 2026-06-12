@@ -16,6 +16,8 @@ interface Props {
   creatureParams?: CreatureParams;
   showSky?: boolean;
   draggable?: boolean;
+  /** Pause animation regardless of window visibility (e.g. tab hidden). */
+  paused?: boolean;
 }
 
 /**
@@ -34,6 +36,7 @@ export function Herzie3D({
   creatureParams,
   showSky = true,
   draggable,
+  paused: pausedProp = false,
 }: Props) {
   // Full-window-width column count, shared by the sky and the creature
   // viewport so both span the window without stretching their contents.
@@ -50,7 +53,7 @@ export function Herzie3D({
   }, [size]);
 
   const visible = useWindowVisible();
-  const paused = !visible;
+  const paused = !visible || pausedProp;
 
   const scenery = wearables?.includes("stars")
     ? "stars"

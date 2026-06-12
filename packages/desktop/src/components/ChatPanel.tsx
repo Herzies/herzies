@@ -202,6 +202,8 @@ export function ChatPanel({
   herzie,
   nowPlaying,
   pendingFriendCodes,
+  openRequested,
+  onOpenHandled,
   onOpenProfile,
   onActivity,
 }: {
@@ -220,6 +222,9 @@ export function ChatPanel({
   } | null;
   /** Friend codes with a pending request (sent or received) — add is disabled for these. */
   pendingFriendCodes?: string[];
+  /** When true, focus the input (which expands the panel), then call onOpenHandled. */
+  openRequested?: boolean;
+  onOpenHandled?: () => void;
   onOpenProfile: (friendCode: string) => void;
   onActivity?: (message: string) => void;
 }) {
@@ -388,6 +393,14 @@ export function ChatPanel({
   useEffect(() => {
     setInventory(cachedInventory);
   }, [cachedInventory]);
+
+  // "c" shortcut (or any caller) asked for the chat to open: focusing the
+  // input expands the panel via its onFocus handler.
+  useEffect(() => {
+    if (!openRequested) return;
+    inputRef.current?.focus();
+    onOpenHandled?.();
+  }, [openRequested, onOpenHandled]);
 
   useEffect(() => {
     if (stickToBottomRef.current) scrollToBottom();

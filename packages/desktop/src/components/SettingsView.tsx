@@ -14,6 +14,7 @@ export function SettingsView({
   stageOverride,
   onStageOverride,
   onPreviewOnboarding,
+  onTestUpdateAlert,
   availableUpdate,
   onUpdateInstalled,
 }: {
@@ -21,6 +22,7 @@ export function SettingsView({
   stageOverride: number | null;
   onStageOverride: (v: number | null) => void;
   onPreviewOnboarding: () => void;
+  onTestUpdateAlert: () => void;
   availableUpdate: Update | null;
   onUpdateInstalled: () => void;
 }) {
@@ -31,6 +33,16 @@ export function SettingsView({
     | { kind: "installing"; downloaded: number; total: number | undefined }
     | { kind: "error"; message: string }
   >({ kind: "idle" });
+
+  const shortcuts: { key: string; label: string }[] = [
+    { key: "H", label: "Herzie" },
+    { key: "I", label: "Inventory" },
+    { key: "E", label: "Events" },
+    { key: "F", label: "Social" },
+    { key: "S", label: "Settings" },
+    { key: "C", label: "Open chat" },
+    { key: "Esc", label: "Close chat or dialog" },
+  ];
 
   const handleInstallUpdate = async () => {
     if (!availableUpdate) return;
@@ -132,6 +144,9 @@ export function SettingsView({
             <button type="button" className="btn" onClick={onPreviewOnboarding}>
               Preview Onboarding
             </button>
+            <button type="button" className="btn" onClick={onTestUpdateAlert}>
+              Test Update Alert
+            </button>
           </div>
           {mediaRemoteDebug !== null && (
             <pre className="mt-2 max-h-40 overflow-auto rounded border border-border bg-[#111] p-2 text-[10px] text-text-dim whitespace-pre-wrap break-all">
@@ -163,6 +178,20 @@ export function SettingsView({
           </div>
         </div>
       )}
+
+      <div className="mb-4">
+        <div className="mb-1.5 text-ui text-text-dim">Keyboard shortcuts</div>
+        <div className="flex flex-col gap-0.5">
+          {shortcuts.map((s) => (
+            <div key={s.key} className="flex items-center gap-2 text-ui-sm">
+              <kbd className="inline-flex min-w-[18px] justify-center rounded border border-border bg-bg-panel px-1 py-px text-ui-sm text-text">
+                {s.key}
+              </kbd>
+              <span className="text-text-dim">{s.label}</span>
+            </div>
+          ))}
+        </div>
+      </div>
 
       {availableUpdate && (
         <div className="mt-auto mb-4">

@@ -22,6 +22,7 @@ import { SettingsView } from "./components/SettingsView";
 import { SplashScreen } from "./components/SplashScreen";
 import { TabBar, type View } from "./components/TabBar";
 import { TradeView } from "./components/TradeView";
+import { UpdateAvailableOverlay } from "./components/UpdateAvailableOverlay";
 import { cn } from "./lib/utils";
 import {
   type AppState,
@@ -30,7 +31,7 @@ import {
   useWindowFocused,
 } from "./tauri-bridge";
 
-const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6h
+const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1h
 
 function App() {
   const [state, setState] = useState<AppState>({
@@ -60,6 +61,16 @@ function App() {
   const [stageOverride, setStageOverride] = useState<number | null>(null);
   const [previewOnboarding, setPreviewOnboarding] = useState(false);
   const [availableUpdate, setAvailableUpdate] = useState<Update | null>(null);
+  /** Version the user dismissed the update overlay for; suppresses re-showing it. */
+  const [dismissedUpdateVersion, setDismissedUpdateVersion] = useState<
+    string | null
+  >(null);
+  /** Dev-only: shows the update overlay with a fake version (Settings → Debug). */
+  const [testUpdateOverlay, setTestUpdateOverlay] = useState(false);
+  /** Set by the "c" shortcut: focus/expand the chat once the home view shows it. */
+  const [openChatRequested, setOpenChatRequested] = useState(false);
+  /** "c" pressed mid-trade: open chat after the user confirms leaving the trade. */
+  const openChatAfterLeaveRef = useRef(false);
   const [hasActiveEvent, setHasActiveEvent] = useState(false);
   const [chatProfileCode, setChatProfileCode] = useState<string | null>(null);
   const [selfProfile, setSelfProfile] = useState<HerzieProfile | null>(null);
@@ -180,8 +191,9 @@ function App() {
     prevOnline.current = state.isOnline;
   }, [state.isOnline]);
 
-  // Check for updates on launch and every 6h. Fires a system notification
-  // once per detected version so the user knows even if the window is hidden.
+  // Check for updates on launch and every hour. Fires a system notification
+  // once per detected version so the user knows even if the window is hidden;
+  // an in-app overlay (same style as trade prompts) shows when it's visible.
   useEffect(() => {
     let cancelled = false;
 
@@ -217,6 +229,75 @@ function App() {
 
   const { herzie } = state;
 
+  const switchView = useCallback(
+    (v: View): boolean => {
+      // Leaving an in-progress trade needs confirmation. The trade itself stays
+      // open server-side and can be rejoined from Social → Trades.
+      if (view === "trade" && v !== "trade" && tradeActive) {
+        setPendingLeaveView(v);
+        return false;
+      }
+      if (v !== "inventory") setDeepLinkItem(null);
+      if (v !== "trade") {
+        setIncomingTradeId(null);
+        setTradeTarget(null);
+      }
+      setSelfProfile(null);
+      setView(v);
+      return true;
+    },
+    [view, tradeActive],
+  );
+
+  /** "c" shortcut: go home and focus the chat. Mid-trade this routes through
+   * the leave-trade confirmation like every other view switch. */
+  const requestOpenChat = useCallback(() => {
+    if (switchView("home")) {
+      setOpenChatRequested(true);
+    } else {
+      openChatAfterLeaveRef.current = true;
+    }
+  }, [switchView]);
+
+  // Tab keyboard shortcuts (advertised in the tab bar tooltips). Skipped
+  // while typing in an input so chat/search fields don't switch views.
+  useEffect(() => {
+    if (!state.isOnline || !herzie || previewOnboarding) return;
+
+    const shortcuts: Record<string, View> = {
+      h: "home",
+      i: "inventory",
+      e: "events",
+      f: "friends",
+      s: "settings",
+    };
+
+    const handler = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      )
+        return;
+      const key = event.key.toLowerCase();
+      if (key === "c") {
+        // Without this the same keydown types a "c" into the freshly focused
+        // chat input.
+        event.preventDefault();
+        requestOpenChat();
+        return;
+      }
+      const v = shortcuts[key];
+      if (v) switchView(v);
+    };
+
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [state.isOnline, herzie, previewOnboarding, switchView, requestOpenChat]);
+
   if (!state.isOnline) {
     return <SplashScreen />;
   }
@@ -229,24 +310,10 @@ function App() {
     return <OnboardingScreen onClose={() => setPreviewOnboarding(false)} />;
   }
 
-  const switchView = (v: View) => {
-    // Leaving an in-progress trade needs confirmation. The trade itself stays
-    // open server-side and can be rejoined from Social → Trades.
-    if (view === "trade" && v !== "trade" && tradeActive) {
-      setPendingLeaveView(v);
-      return;
-    }
-    if (v !== "inventory") setDeepLinkItem(null);
-    if (v !== "trade") {
-      setIncomingTradeId(null);
-      setTradeTarget(null);
-    }
-    setSelfProfile(null);
-    setView(v);
-  };
-
   const handleConfirmLeaveTrade = () => {
     const v = pendingLeaveView;
+    const openChat = openChatAfterLeaveRef.current;
+    openChatAfterLeaveRef.current = false;
     setPendingLeaveView(null);
     if (!v) return;
     // Remount TradeView so it stops polling; the trade stays alive server-side
@@ -258,6 +325,12 @@ function App() {
     if (v !== "inventory") setDeepLinkItem(null);
     setSelfProfile(null);
     setView(v);
+    if (openChat && v === "home") setOpenChatRequested(true);
+  };
+
+  const handleStayInTrade = () => {
+    openChatAfterLeaveRef.current = false;
+    setPendingLeaveView(null);
   };
 
   const handleOpenSelfProfile = async () => {
@@ -431,6 +504,7 @@ function App() {
               currency={state.inventoryCurrency}
               equipped={state.equipped}
               onLog={addLog}
+              active={view === "inventory"}
             />
           </div>
         )}
@@ -482,6 +556,7 @@ function App() {
             stageOverride={stageOverride}
             onStageOverride={setStageOverride}
             onPreviewOnboarding={() => setPreviewOnboarding(true)}
+            onTestUpdateAlert={() => setTestUpdateOverlay(true)}
             availableUpdate={availableUpdate}
             onUpdateInstalled={() => setAvailableUpdate(null)}
           />
@@ -501,6 +576,8 @@ function App() {
             ...state.incomingFriendRequests.map((r) => r.friendCode),
             ...state.outgoingFriendRequests.map((r) => r.friendCode),
           ]}
+          openRequested={openChatRequested}
+          onOpenHandled={() => setOpenChatRequested(false)}
           onOpenProfile={(code) => {
             setChatProfileCode(code);
             switchView("friends");
@@ -521,12 +598,12 @@ function App() {
         <PromptOverlay
           title="Leave trade?"
           titleId="leave-trade-title"
-          onEscape={() => setPendingLeaveView(null)}
+          onEscape={handleStayInTrade}
           actions={[
             {
               label: "Stay",
               colour: "text-text-dim",
-              onClick: () => setPendingLeaveView(null),
+              onClick: handleStayInTrade,
             },
             {
               label: "Leave",
@@ -556,6 +633,28 @@ function App() {
           onAccept={handleAcceptFriendRequest}
           onDecline={handleDeclineFriendRequest}
           onDismiss={handleDismissFriendRequest}
+        />
+      )}
+
+      {herzie &&
+        availableUpdate &&
+        availableUpdate.version !== dismissedUpdateVersion &&
+        view !== "settings" && (
+          <UpdateAvailableOverlay
+            version={availableUpdate.version}
+            onUpdate={() => {
+              setDismissedUpdateVersion(availableUpdate.version);
+              switchView("settings");
+            }}
+            onLater={() => setDismissedUpdateVersion(availableUpdate.version)}
+          />
+        )}
+
+      {testUpdateOverlay && (
+        <UpdateAvailableOverlay
+          version="9.9.9-test"
+          onUpdate={() => setTestUpdateOverlay(false)}
+          onLater={() => setTestUpdateOverlay(false)}
         />
       )}
     </div>

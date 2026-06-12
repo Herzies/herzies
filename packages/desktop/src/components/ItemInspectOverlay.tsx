@@ -9,9 +9,15 @@ import { useEffect } from "react";
 export default function ItemInspectOverlay({
   itemId,
   onClose,
+  meta,
+  footer,
 }: {
   itemId: string;
   onClose: () => void;
+  /** Extra line shown next to the rarity label (e.g. owned quantity). */
+  meta?: string;
+  /** Actions rendered below the description (e.g. equip / sell controls). */
+  footer?: React.ReactNode;
 }) {
   const item = getItem(itemId);
 
@@ -45,8 +51,12 @@ export default function ItemInspectOverlay({
         </div>
         <div className="mb-1 text-ui text-text-dim">
           {RARITY_LABELS[item.rarity]}
+          {meta ? ` · ${meta}` : ""}
         </div>
         <div className="text-ui text-text-dim">{item.description}</div>
+        {footer && (
+          <div className="mt-3 flex flex-col items-center gap-2">{footer}</div>
+        )}
       </div>
     </div>
   );
