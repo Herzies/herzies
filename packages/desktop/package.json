@@ -1,6 +1,6 @@
 {
   "name": "herzies-desktop",
-  "version": "0.1.0-beta.21",
+  "version": "0.1.0-beta.22",
   "private": true,
   "description": "Herzies desktop app for macOS",
   "scripts": {

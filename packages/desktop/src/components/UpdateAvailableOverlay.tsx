@@ -30,8 +30,8 @@ export function UpdateAvailableOverlay({
         },
       ]}
     >
-      Version <span className="font-bold text-text">{version}</span> is ready
-      to install. Update to get the latest features and fixes.
+      Version <span className="font-bold text-text">{version}</span> is ready to
+      install. Update to get the latest features and fixes.
     </PromptOverlay>
   );
 }

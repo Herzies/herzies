@@ -13,7 +13,11 @@ import { NumberTicker } from "./NumberTicker";
 import { Tooltip } from "./Tooltip";
 
 /** Wearable areas shown as overlays on the 3D render. More slots stack per side. */
-const WEARABLE_AREAS: { slot: EquipSlot; label: string; side: "left" | "right" }[] = [
+const WEARABLE_AREAS: {
+  slot: EquipSlot;
+  label: string;
+  side: "left" | "right";
+}[] = [
   { slot: "scenery", label: "scene", side: "left" },
   { slot: "head", label: "head", side: "right" },
 ];
@@ -342,9 +346,7 @@ export function InventoryView({
                   type="button"
                   className={cn(
                     "btn",
-                    equipped.includes(inspectItem)
-                      ? "text-red"
-                      : "text-green",
+                    equipped.includes(inspectItem) ? "text-red" : "text-green",
                   )}
                   onClick={() => handleEquip(inspectItem)}
                 >
