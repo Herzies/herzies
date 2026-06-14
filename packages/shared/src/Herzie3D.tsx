@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import {
+  type BoomboxConfig,
   type Cell,
   type CreatureParams,
   DEFAULT_Y_ANGLE,
@@ -43,6 +44,8 @@ interface Props {
   wearables?: string[];
   /** Override procedural params derived from userId (sandbox / tooling). */
   creatureParams?: CreatureParams;
+  /** Override boombox placement/rotation (sandbox / tooling). */
+  boomboxConfig?: BoomboxConfig;
   /** Enable click-drag rotation with momentum. Default: true. */
   draggable?: boolean;
   /** Stop the frame timer to save CPU while the host is hidden / unfocused. */
@@ -64,6 +67,7 @@ export function Herzie3D({
   isPlaying = false,
   wearables,
   creatureParams,
+  boomboxConfig,
   draggable = true,
   paused = false,
   wrapperStyle,
@@ -101,6 +105,7 @@ export function Herzie3D({
         wearables,
         creatureParams,
         cols,
+        boomboxConfig,
       );
     if (animate)
       return generateRotationFrames(
@@ -110,9 +115,26 @@ export function Herzie3D({
         wearables,
         creatureParams,
         cols,
+        boomboxConfig,
       );
-    return generateIdleFrames(userId, stage, wearables, creatureParams, cols);
-  }, [userId, stage, animate, dancing, wearables, creatureParams, cols]);
+    return generateIdleFrames(
+      userId,
+      stage,
+      wearables,
+      creatureParams,
+      cols,
+      boomboxConfig,
+    );
+  }, [
+    userId,
+    stage,
+    animate,
+    dancing,
+    wearables,
+    creatureParams,
+    cols,
+    boomboxConfig,
+  ]);
 
   const interval = dancing ? 65 : animate ? 80 : 50;
 
@@ -243,6 +265,7 @@ export function Herzie3D({
         wearables,
         creatureParams,
         cols,
+        boomboxConfig,
       );
       drawFrame(data.cells);
     } else {
@@ -262,6 +285,7 @@ export function Herzie3D({
     wearables,
     creatureParams,
     cols,
+    boomboxConfig,
   ]);
 
   return (

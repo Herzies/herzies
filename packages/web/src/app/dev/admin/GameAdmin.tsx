@@ -67,10 +67,10 @@ type ItemFormState = {
   sellPrice: string;
   stackable: boolean;
   equipable: boolean;
-  equipSlot: "" | "head" | "scenery";
+  equipSlot: "" | "head" | "face" | "body" | "scenery" | "ground";
 };
 
-const EQUIP_SLOT_OPTIONS = ["head", "scenery"] as const;
+const EQUIP_SLOT_OPTIONS = ["head", "face", "body", "scenery", "ground"] as const;
 
 function getEventStatus(event: AdminEvent, now: Date): EventStatus {
   if (!event.active) return "inactive";
@@ -895,7 +895,13 @@ function ItemForm({
               onChange={(e) =>
                 setForm((f) => ({
                   ...f,
-                  equipSlot: e.target.value as "" | "head" | "scenery",
+                  equipSlot: e.target.value as
+                    | ""
+                    | "head"
+                    | "face"
+                    | "body"
+                    | "scenery"
+                    | "ground",
                 }))
               }
               className={INPUT}

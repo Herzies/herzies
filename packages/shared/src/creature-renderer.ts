@@ -163,6 +163,7 @@ const DANCE = {
   limb: { amp: 0.09, cycles: 2 }, // L at 0, R at π — alternating sway
   ear: { amp: 0.055, cycles: 4 }, // double body freq — floppy
   spike: { amp: 0.04, cycles: 4, xAmp: 0.03, xCycles: 2 }, // Y bounce + lateral X sway
+  ground: { amp: 0.06, cycles: 2 }, // boombox hop — upward bounce on the beat
 } as const;
 
 // --- Seeded PRNG ---
@@ -228,6 +229,10 @@ function applyDanceOffsets(spheres: Sphere[], frameIdx: number): Sphere[] {
     DANCE.spike.xAmp;
   const limbLOff = yOff(DANCE.limb.amp, DANCE.limb.cycles, 0);
   const limbROff = yOff(DANCE.limb.amp, DANCE.limb.cycles, Math.PI);
+  // Boombox hops upward on the beat (negative Y is up).
+  const groundOff =
+    -Math.abs(Math.sin(2 * Math.PI * t * DANCE.ground.cycles)) *
+    DANCE.ground.amp;
 
   return spheres.map((s) => {
     let dy = 0;
@@ -241,6 +246,7 @@ function applyDanceOffsets(spheres: Sphere[], frameIdx: number): Sphere[] {
       dx = spikeXOff;
     } else if (s.part === "arm-l" || s.part === "leg-l") dy = limbLOff;
     else if (s.part === "arm-r" || s.part === "leg-r") dy = limbROff;
+    else if (s.part === "ground") dy = groundOff;
 
     return {
       ...s,
@@ -332,6 +338,10 @@ function resolveCreatureParams(
 
 function paramsCacheKey(userId: string, params?: CreatureParams): string {
   return params ? `${userId}:${JSON.stringify(params)}` : userId;
+}
+
+function boomboxKey(config?: BoomboxConfig): string {
+  return config ? JSON.stringify(config) : "";
 }
 
 export function generateCreatureParams(userId: string): CreatureParams {
@@ -976,12 +986,147 @@ function buildRainbowHeadbandSpheres(spheres: Sphere[]): Sphere[] {
   return result;
 }
 
-function appendWearableSpheres(spheres: Sphere[], wearables?: string[]): void {
+/** Placement/orientation overrides for the boombox ground prop. */
+export interface BoomboxConfig {
+  /** Yaw rotation around the vertical axis, in degrees. */
+  yawDeg: number;
+  /** Horizontal nudge from the auto corner placement, in world units. */
+  offsetX: number;
+  /** Vertical nudge (positive = down), in world units. */
+  offsetY: number;
+  /** Size multiplier. */
+  scale: number;
+}
+
+export const DEFAULT_BOOMBOX_CONFIG: BoomboxConfig = {
+  yawDeg: -33,
+  offsetX: 0.18,
+  offsetY: 0,
+  scale: 1.15,
+};
+
+// Fixed world-space size basis so the boombox stays the same size regardless of
+// the herzie's body/stage. `scale` multiplies this. (Roughly a stage-2 herzie's
+// height, which is what the placement was tuned against.)
+const BOOMBOX_REF_HEIGHT = 1.26;
+
+function buildBoomboxSpheres(
+  spheres: Sphere[],
+  cols: number,
+  config: BoomboxConfig = DEFAULT_BOOMBOX_CONFIG,
+): Sphere[] {
+  if (spheres.length === 0) return [];
+
+  // Only the creature's lowest point is needed — to rest the box at its feet.
+  // Its *size* is independent of the herzie (uses BOOMBOX_REF_HEIGHT).
+  let maxY = -Infinity;
+  for (const s of spheres) {
+    maxY = Math.max(maxY, s.center[1] + s.radius);
+  }
+
+  const bodyColor = "#aeb4ba";
+  const speakerColor = "#141414";
+  const coneColor = "#5a5a5a";
+  const handleColor = "#2b2b2b";
+  const redColor = "#e0564f";
+  const playColor = "#ffd43b";
+
+  const boomW = BOOMBOX_REF_HEIGHT * 0.32 * config.scale;
+  const boomH = BOOMBOX_REF_HEIGHT * 0.16 * config.scale;
+  const boomD = BOOMBOX_REF_HEIGHT * 0.11 * config.scale;
+  const bodyR = boomH * 0.55;
+
+  // --- Geometry around the box centre, facing the camera (-Z front) ---
+  const zFront = -boomD * 0.5;
+  const zBack = boomD * 0.5;
+  const zFace = zFront - bodyR * 0.95;
+
+  interface LocalSphere {
+    c: V3;
+    r: number;
+    color: string;
+  }
+  const local: LocalSphere[] = [];
+  const add = (c: V3, r: number, color: string) => local.push({ c, r, color });
+
+  // Body: overlapping grid of spheres forming a rounded box (front + back).
+  const nx = 6;
+  const ny = 3;
+  for (const z of [zFront, zBack]) {
+    for (let ix = 0; ix < nx; ix++) {
+      const fx = (ix / (nx - 1) - 0.5) * boomW;
+      for (let iy = 0; iy < ny; iy++) {
+        const fy = (iy / (ny - 1) - 0.5) * boomH;
+        add([fx, fy, z], bodyR, bodyColor);
+      }
+    }
+  }
+
+  // Twin speakers protruding clearly in front of the body, each with a cone.
+  for (const side of [-1, 1]) {
+    const scx = side * boomW * 0.3;
+    add([scx, 0, zFace], boomH * 0.44, speakerColor);
+    add([scx, 0, zFace - boomH * 0.16], boomH * 0.2, coneColor);
+  }
+
+  // Control panel between the speakers.
+  add([0, -boomH * 0.18, zFace], boomH * 0.15, playColor);
+  add([0, boomH * 0.2, zFace], boomH * 0.13, redColor);
+
+  // Carry handle arcing over the top.
+  const handleSteps = 7;
+  const topY = -boomH * 0.5;
+  for (let i = 0; i <= handleSteps; i++) {
+    const t = i / handleSteps;
+    const ang = Math.PI * t;
+    add(
+      [Math.cos(ang) * boomW * 0.36, topY - Math.sin(ang) * boomH * 0.55, 0],
+      boomH * 0.11,
+      handleColor,
+    );
+  }
+
+  // --- Box centre: auto corner placement + user offsets ---
+  // Sits on the ground in the bottom-left corner. Its part is "ground", so the
+  // renderer keeps it fixed while the creature spins. The visible frustum
+  // widens with `cols`, so the body's left edge is placed a small margin inside
+  // the frustum (measured at the closest depth) to avoid clipping.
+  const bz = -boomD * 0.8;
+  const by = maxY - boomH * 0.5 + config.offsetY;
+  const halfW = cols === SW ? HALF_W : halfWidthFor(cols);
+  const relZClose = zFace + bz + CAM;
+  const marginCols = 2;
+  const leftNdc = -1 + (2 * marginCols) / cols;
+  const leftWorldX = leftNdc * relZClose * halfW;
+  const bx = leftWorldX + boomW * 0.5 + bodyR + config.offsetX;
+
+  const yaw = (config.yawDeg * Math.PI) / 180;
+
+  return local.map((ls) => {
+    const r = rotY(ls.c, yaw);
+    return {
+      center: [bx + r[0], by + r[1], bz + r[2]] as V3,
+      radius: ls.r,
+      zone: "wearable" as const,
+      part: "ground",
+      color: ls.color,
+    };
+  });
+}
+
+function appendWearableSpheres(
+  spheres: Sphere[],
+  wearables: string[] | undefined,
+  cols: number,
+  boomboxConfig?: BoomboxConfig,
+): void {
   if (!wearables?.length) return;
   if (wearables.includes("headphones"))
     spheres.push(...buildHeadphoneSpheres(spheres));
   if (wearables.includes("rainbow-headband"))
     spheres.push(...buildRainbowHeadbandSpheres(spheres));
+  if (wearables.includes("boombox"))
+    spheres.push(...buildBoomboxSpheres(spheres, cols, boomboxConfig));
 }
 
 function buildCreatureSpheres(params: CreatureParams, stage: number): Sphere[] {
@@ -1198,8 +1343,11 @@ function renderCreatureFrame(
       s.center[1] * TILT_COS - s.center[2] * TILT_SIN,
       s.center[1] * TILT_SIN + s.center[2] * TILT_COS,
     ];
+    // Ground props (e.g. the boombox) are anchored to the scene, not the
+    // creature — they keep their facing as the herzie spins around its Y axis.
+    const isFixed = s.part === "ground";
     return {
-      center: rotY(tilted, yAngle),
+      center: isFixed ? tilted : rotY(tilted, yAngle),
       radius: s.radius,
       zone: s.zone,
       part: s.part,
@@ -1318,7 +1466,10 @@ function renderCreatureFrame(
       worldPos[1] * TILT_COS - worldPos[2] * TILT_SIN,
       worldPos[1] * TILT_SIN + worldPos[2] * TILT_COS,
     ];
-    const rotated = rotY(tilted, yAngle);
+    // Ground props stay fixed while the creature spins, so their anchors must
+    // skip the Y-rotation too (otherwise they'd drift off the prop).
+    const isFixed = anchor.parentPart === "ground";
+    const rotated = isFixed ? tilted : rotY(tilted, yAngle);
     const [screenX, screenY, depth] = projectPoint(rotated, cols, halfW);
 
     const nTilted: V3 = [
@@ -1326,7 +1477,7 @@ function renderCreatureFrame(
       anchor.normalDir[1] * TILT_COS - anchor.normalDir[2] * TILT_SIN,
       anchor.normalDir[1] * TILT_SIN + anchor.normalDir[2] * TILT_COS,
     ];
-    const nRotated = rotY(nTilted, yAngle);
+    const nRotated = isFixed ? nTilted : rotY(nTilted, yAngle);
     const visible = nRotated[2] < 0;
 
     const parentRadius = transformed[parentIdx].radius;
@@ -1359,14 +1510,15 @@ export function generateIdleFrames(
   wearables?: string[],
   paramsOverride?: CreatureParams,
   cols: number = SW,
+  boomboxConfig?: BoomboxConfig,
 ): FrameData[] {
-  const key = `idle:${paramsCacheKey(userId, paramsOverride)}:${stage}:${wearables?.sort().join(",") ?? ""}:${cols}`;
+  const key = `idle:${paramsCacheKey(userId, paramsOverride)}:${stage}:${wearables?.sort().join(",") ?? ""}:${cols}:${boomboxKey(boomboxConfig)}`;
   const cached = frameCache.get(key);
   if (cached) return cached;
 
   const params = resolveCreatureParams(userId, paramsOverride);
   const baseSpheres = buildCreatureSpheres(params, stage);
-  appendWearableSpheres(baseSpheres, wearables);
+  appendWearableSpheres(baseSpheres, wearables, cols, boomboxConfig);
   const anchors = getAnchors(baseSpheres, params, stage);
   const colors = buildColorTriplet(CREATURE_PALETTE[params.colorIndex]);
 
@@ -1397,14 +1549,15 @@ export function generateRotationFrames(
   wearables?: string[],
   paramsOverride?: CreatureParams,
   cols: number = SW,
+  boomboxConfig?: BoomboxConfig,
 ): FrameData[] {
-  const key = `rot:${paramsCacheKey(userId, paramsOverride)}:${stage}:${wearables?.sort().join(",") ?? ""}:${cols}`;
+  const key = `rot:${paramsCacheKey(userId, paramsOverride)}:${stage}:${wearables?.sort().join(",") ?? ""}:${cols}:${boomboxKey(boomboxConfig)}`;
   const cached = frameCache.get(key);
   if (cached) return cached;
 
   const params = resolveCreatureParams(userId, paramsOverride);
   const spheres = buildCreatureSpheres(params, stage);
-  appendWearableSpheres(spheres, wearables);
+  appendWearableSpheres(spheres, wearables, cols, boomboxConfig);
   const anchors = getAnchors(spheres, params, stage);
   const colors = buildColorTriplet(CREATURE_PALETTE[params.colorIndex]);
 
@@ -1433,14 +1586,15 @@ export function generateDanceFrames(
   wearables?: string[],
   paramsOverride?: CreatureParams,
   cols: number = SW,
+  boomboxConfig?: BoomboxConfig,
 ): FrameData[] {
-  const key = `dance:${paramsCacheKey(userId, paramsOverride)}:${stage}:${wearables?.sort().join(",") ?? ""}:${cols}`;
+  const key = `dance:${paramsCacheKey(userId, paramsOverride)}:${stage}:${wearables?.sort().join(",") ?? ""}:${cols}:${boomboxKey(boomboxConfig)}`;
   const cached = frameCache.get(key);
   if (cached) return cached;
 
   const params = resolveCreatureParams(userId, paramsOverride);
   const baseSpheres = buildCreatureSpheres(params, stage);
-  appendWearableSpheres(baseSpheres, wearables);
+  appendWearableSpheres(baseSpheres, wearables, cols, boomboxConfig);
   const anchors = getAnchors(baseSpheres, params, stage);
   const colors = buildColorTriplet(CREATURE_PALETTE[params.colorIndex]);
 
@@ -1474,10 +1628,11 @@ export function renderCreatureAtAngle(
   wearables?: string[],
   paramsOverride?: CreatureParams,
   cols: number = SW,
+  boomboxConfig?: BoomboxConfig,
 ): FrameData {
   const params = resolveCreatureParams(userId, paramsOverride);
   const baseSpheres = buildCreatureSpheres(params, stage);
-  appendWearableSpheres(baseSpheres, wearables);
+  appendWearableSpheres(baseSpheres, wearables, cols, boomboxConfig);
   const anchors = getAnchors(baseSpheres, params, stage);
   const colors = buildColorTriplet(CREATURE_PALETTE[params.colorIndex]);
   const animated = dancing

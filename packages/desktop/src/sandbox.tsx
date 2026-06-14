@@ -1,10 +1,12 @@
 import "./globals.css";
 import {
+  type BoomboxConfig,
   CREATURE_BODY_TYPES,
   CREATURE_PALETTE,
   CREATURE_PARAM_BOUNDS,
   type CreatureParams,
   clearCreatureCache,
+  DEFAULT_BOOMBOX_CONFIG,
   earAngleFromDeg,
   earAngleToDeg,
   generateCreatureParams,
@@ -14,7 +16,7 @@ import { createRoot } from "react-dom/client";
 import { Herzie3D } from "./components/Herzie3D";
 import { cn } from "./lib/utils";
 
-const WEARABLE_OPTIONS = ["headphones", "rainbow-headband"];
+const WEARABLE_OPTIONS = ["headphones", "rainbow-headband", "boombox"];
 
 const DEFAULT_USER = "sandbox-user";
 
@@ -30,7 +32,13 @@ function Sandbox() {
   const [draggable, setDraggable] = useState(true);
   const [showSky, setShowSky] = useState(false);
   const [wearables, setWearables] = useState<string[]>([]);
+  const [boombox, setBoombox] = useState<BoomboxConfig>(DEFAULT_BOOMBOX_CONFIG);
   const [jsonOpen, setJsonOpen] = useState(false);
+
+  const patchBoombox = (partial: Partial<BoomboxConfig>) => {
+    setBoombox((b) => ({ ...b, ...partial }));
+    clearCreatureCache();
+  };
 
   const applySeed = useCallback((id: string) => {
     setParams(generateCreatureParams(id));
@@ -58,10 +66,15 @@ function Sandbox() {
     setUserId(id);
   };
 
+  const exportState = () => ({
+    userId,
+    stage,
+    creatureParams: params,
+    ...(wearables.includes("boombox") ? { boomboxConfig: boombox } : {}),
+  });
+
   const copyJson = async () => {
-    await navigator.clipboard.writeText(
-      JSON.stringify({ userId, stage, creatureParams: params }, null, 2),
-    );
+    await navigator.clipboard.writeText(JSON.stringify(exportState(), null, 2));
   };
 
   return (
@@ -233,6 +246,45 @@ function Sandbox() {
           </div>
         </Section>
 
+        {wearables.includes("boombox") && (
+          <Section title="boombox">
+            <SliderField
+              label="yaw (°)"
+              value={boombox.yawDeg}
+              bounds={{ min: -180, max: 180, step: 1 }}
+              onChange={(v) => patchBoombox({ yawDeg: v })}
+            />
+            <SliderField
+              label="offset x"
+              value={boombox.offsetX}
+              bounds={{ min: -4, max: 4, step: 0.05 }}
+              onChange={(v) => patchBoombox({ offsetX: v })}
+            />
+            <SliderField
+              label="offset y (down +)"
+              value={boombox.offsetY}
+              bounds={{ min: -3, max: 3, step: 0.05 }}
+              onChange={(v) => patchBoombox({ offsetY: v })}
+            />
+            <SliderField
+              label="scale"
+              value={boombox.scale}
+              bounds={{ min: 0.3, max: 3, step: 0.05 }}
+              onChange={(v) => patchBoombox({ scale: v })}
+            />
+            <div className="mt-1.5">
+              <Btn
+                onClick={() => {
+                  setBoombox(DEFAULT_BOOMBOX_CONFIG);
+                  clearCreatureCache();
+                }}
+              >
+                reset boombox
+              </Btn>
+            </div>
+          </Section>
+        )}
+
         <div className="mt-3 flex flex-wrap gap-1.5">
           <Btn onClick={() => setJsonOpen((v) => !v)}>
             {jsonOpen ? "hide json" : "show json"}
@@ -242,7 +294,7 @@ function Sandbox() {
 
         {jsonOpen && (
           <pre className="mt-2 max-h-[200px] overflow-auto rounded border border-border bg-[#111] p-2 text-[10px] text-text-dim">
-            {JSON.stringify({ userId, stage, creatureParams: params }, null, 2)}
+            {JSON.stringify(exportState(), null, 2)}
           </pre>
         )}
       </aside>
@@ -256,6 +308,7 @@ function Sandbox() {
           isPlaying={isPlaying}
           wearables={wearables}
           creatureParams={params}
+          boomboxConfig={boombox}
           showSky={showSky}
           draggable={draggable}
         />

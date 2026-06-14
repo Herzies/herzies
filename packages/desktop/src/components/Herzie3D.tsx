@@ -1,4 +1,5 @@
 import {
+  type BoomboxConfig,
   type CreatureParams,
   Herzie3D as SharedHerzie3D,
   Sky,
@@ -14,6 +15,7 @@ interface Props {
   isPlaying?: boolean;
   wearables?: string[];
   creatureParams?: CreatureParams;
+  boomboxConfig?: BoomboxConfig;
   showSky?: boolean;
   draggable?: boolean;
   /** Pause animation regardless of window visibility (e.g. tab hidden). */
@@ -34,6 +36,7 @@ export function Herzie3D({
   isPlaying = false,
   wearables,
   creatureParams,
+  boomboxConfig,
   showSky = true,
   draggable,
   paused: pausedProp = false,
@@ -89,6 +92,7 @@ export function Herzie3D({
         isPlaying={isPlaying}
         wearables={wearables}
         creatureParams={creatureParams}
+        boomboxConfig={boomboxConfig}
         draggable={draggable}
         paused={paused}
         wrapperStyle={

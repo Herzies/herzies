@@ -20,7 +20,13 @@ import {
 export type Rarity = "common" | "uncommon" | "rare" | "legendary";
 
 /** Equip slot categories — only one item per slot may be equipped at a time. */
-export const EQUIP_SLOTS = ["head", "scenery"] as const;
+export const EQUIP_SLOTS = [
+  "head",
+  "face",
+  "body",
+  "scenery",
+  "ground",
+] as const;
 export type EquipSlot = (typeof EQUIP_SLOTS)[number];
 
 export interface ItemDef {
@@ -809,6 +815,138 @@ function renderRainbowHeadbandFrame(yAngle: number): string[] {
   );
 }
 
+// --- Boombox rendering (retro stereo: body, twin speakers, handle, buttons) ---
+
+function renderBoomboxFrame(yAngle: number): string[] {
+  const cosA = Math.cos(yAngle);
+  const sinA = Math.sin(yAngle);
+  const rot = (lx: number, ly: number, lz: number): V3 => [
+    lx * cosA + lz * sinA,
+    ly,
+    -lx * sinA + lz * cosA,
+  ];
+
+  const silver = "#aeb4ba";
+  const black = "#141414";
+  const cone = "#5a5a5a";
+  const handle = "#2b2b2b";
+  const red = "#e0564f";
+  const play = "#ffd43b";
+
+  const W = 3.0;
+  const Hh = 1.55;
+  const D = 0.9;
+
+  const spheres: { c: V3; r: number; color: string }[] = [];
+
+  const nx = 6;
+  const ny = 3;
+  const bodyR = 0.5;
+  for (const z of [-D / 2, D / 2]) {
+    for (let ix = 0; ix < nx; ix++) {
+      const fx = (ix / (nx - 1) - 0.5) * W;
+      for (let iy = 0; iy < ny; iy++) {
+        const fy = (iy / (ny - 1) - 0.5) * Hh;
+        spheres.push({ c: rot(fx, fy, z), r: bodyR, color: silver });
+      }
+    }
+  }
+
+  for (const side of [-1, 1]) {
+    spheres.push({
+      c: rot(side * 0.9, 0, -D / 2 - 0.1),
+      r: 0.58,
+      color: black,
+    });
+    spheres.push({
+      c: rot(side * 0.9, 0, -D / 2 - 0.24),
+      r: 0.28,
+      color: cone,
+    });
+  }
+
+  spheres.push({ c: rot(0, 0.34, -D / 2 - 0.08), r: 0.2, color: play });
+  spheres.push({ c: rot(0, -0.3, -D / 2 - 0.08), r: 0.17, color: red });
+
+  const handleSteps = 9;
+  for (let i = 0; i <= handleSteps; i++) {
+    const t = i / handleSteps;
+    const a = Math.PI * t;
+    spheres.push({
+      c: rot(Math.cos(a) * W * 0.34, -Hh / 2 - Math.sin(a) * 0.7, 0),
+      r: 0.14,
+      color: handle,
+    });
+  }
+
+  const camZ = -CAM;
+  const fov = 2.2;
+  const bright: number[][] = Array.from({ length: SH }, () =>
+    Array(SW).fill(-1),
+  );
+  const colorGrid: string[][] = Array.from({ length: SH }, () =>
+    Array(SW).fill(""),
+  );
+
+  for (let sy = 0; sy < SH; sy++) {
+    for (let sx = 0; sx < SW; sx++) {
+      const nrx = (((sx + 0.5) / SW - 0.5) * fov * (SW / SH)) / CHAR_ASPECT;
+      const nry = ((sy + 0.5) / SH - 0.5) * fov;
+      const rd = normV([nrx, nry, 1]);
+
+      let bestT = Infinity;
+      let bestN: V3 = [0, 0, 0];
+      let bestColor = "";
+      for (const s of spheres) {
+        const hit = raySphere(
+          0,
+          0,
+          camZ,
+          rd[0],
+          rd[1],
+          rd[2],
+          s.c[0],
+          s.c[1],
+          s.c[2],
+          s.r,
+        );
+        if (hit && hit[0] < bestT) {
+          bestT = hit[0];
+          bestN = hit[1];
+          bestColor = s.color;
+        }
+      }
+
+      if (bestT < Infinity) {
+        const diffuse = Math.max(0, -dot3(bestN, LIGHT));
+        const ref: V3 = [
+          bestN[0] * 2 * dot3(bestN, LIGHT) - LIGHT[0],
+          bestN[1] * 2 * dot3(bestN, LIGHT) - LIGHT[1],
+          bestN[2] * 2 * dot3(bestN, LIGHT) - LIGHT[2],
+        ];
+        const spec = Math.max(0, -ref[2]) ** 16 * 0.35;
+        bright[sy][sx] = Math.min(1, 0.22 + diffuse * 0.7 + spec);
+        colorGrid[sy][sx] = bestColor;
+      }
+    }
+  }
+
+  return bright.map((row, y) =>
+    row
+      .map((val, x) => {
+        if (val < 0) return " ";
+        const idx = Math.min(
+          Math.floor(val * (RAMP_ITEM.length - 1)),
+          RAMP_ITEM.length - 1,
+        );
+        const ch = RAMP_ITEM[idx];
+        if (ch === " ") return " ";
+        return col(shadeItemColor(colorGrid[y][x], val), ch);
+      })
+      .join(""),
+  );
+}
+
 // --- Generate all frames ---
 function generateFrames(
   renderFn: (angle: number) => string[],
@@ -823,6 +961,7 @@ const firstEditionFrames = generateFrames(renderCardFrame);
 const cdFrames = generateFrames(renderCdFrame);
 const headphonesFrames = generateFrames(renderHeadphonesFrame);
 const rainbowHeadbandFrames = generateFrames(renderRainbowHeadbandFrame);
+const boomboxFrames = generateFrames(renderBoomboxFrame);
 
 // --- Scenery icons (not 3D — simple animated ASCII for inventory display) ---
 const SCENERY_SKY = "#8899aa";
@@ -921,6 +1060,15 @@ export const ITEMS: ItemDef[] = [
     frames: rainbowHeadbandFrames,
     equipable: true,
     equipSlot: "head",
+  },
+  {
+    id: "boombox",
+    name: "Boombox",
+    description: "A retro boombox that sits by your herzie's feet.",
+    rarity: "rare",
+    frames: boomboxFrames,
+    equipable: true,
+    equipSlot: "ground",
   },
   {
     id: "clouds",

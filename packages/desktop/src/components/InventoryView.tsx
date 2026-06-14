@@ -19,7 +19,10 @@ const WEARABLE_AREAS: {
   side: "left" | "right";
 }[] = [
   { slot: "scenery", label: "scene", side: "left" },
+  { slot: "ground", label: "ground", side: "left" },
   { slot: "head", label: "head", side: "right" },
+  { slot: "face", label: "face", side: "right" },
+  { slot: "body", label: "body", side: "right" },
 ];
 
 function SellControls({
