@@ -23,6 +23,7 @@ function normalizeTrack(s: string): string {
     .toLowerCase()
     .replace(/\s*\(.*?\)\s*/g, "") // strip parenthetical: (Remastered), (feat. X)
     .replace(/\s*\[.*?\]\s*/g, "") // strip bracketed: [Deluxe Edition]
+    .replace(/\s+-\s+.*$/, "") // strip Spotify dash suffix: " - Kantoi Version", " - Remastered 2011"
     .trim();
 }
 
