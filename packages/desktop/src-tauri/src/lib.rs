@@ -14,7 +14,7 @@ mod types;
 use lastfm::{LastFmService, TrackEnrichment, ENRICHMENT_TIMEOUT};
 use reqwest::Client;
 use state::{ManagedState, SharedState};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
@@ -1256,6 +1256,71 @@ async fn trade_watch_loop(app: AppHandle) {
     }
 }
 
+/// How often to check for newly-started events. `/events/active` only returns
+/// events whose `starts_at <= now <= ends_at`, so polling it and watching for
+/// IDs we haven't seen before tells us exactly when an event has started.
+const EVENTS_WATCH_SECS: u64 = 30;
+
+/// Watches for events that have just started and fires a native notification
+/// for each one — even while the menu-bar window is hidden, which is the whole
+/// point (the frontend event polling pauses when unfocused/hidden).
+///
+/// The set of known event IDs lives in this loop's own scope; no shared state
+/// is needed since this is the only place that notifies for event starts. On
+/// the first successful fetch we seed the set without notifying so we don't
+/// fire a burst of notifications for events that were already running when the
+/// app launched.
+async fn events_watch_loop(app: AppHandle) {
+    let client = Client::new();
+    let mut known: HashSet<String> = HashSet::new();
+    let mut seeded = false;
+
+    loop {
+        tokio::time::sleep(Duration::from_secs(EVENTS_WATCH_SECS)).await;
+
+        if !api::is_logged_in() {
+            continue;
+        }
+
+        let Some(events) = api::api_fetch_active_events(&client).await else {
+            continue;
+        };
+
+        let active_now: HashSet<String> = events.iter().map(|e| e.id.clone()).collect();
+
+        if !seeded {
+            // First fetch: everything currently running counts as already-known
+            // so launching the app mid-event doesn't spam notifications.
+            known = active_now;
+            seeded = true;
+            continue;
+        }
+
+        for event in &events {
+            if !known.insert(event.id.clone()) {
+                continue;
+            }
+            let title = if event.title.trim().is_empty() {
+                "A new event is starting!".to_string()
+            } else {
+                format!("{} is starting!", event.title)
+            };
+            let body = event
+                .description
+                .as_deref()
+                .map(|d| d.trim())
+                .filter(|d| !d.is_empty())
+                .unwrap_or("A new event is live in Herzies.");
+            send_notification(&app, &title, body, Some("events"));
+            let _ = app.emit("activity", format!("{}: {}", title, body));
+        }
+
+        // Forget events that have ended so the set stays bounded (and a future
+        // event reusing an ID could re-notify).
+        known.retain(|id| active_now.contains(id));
+    }
+}
+
 async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
     let state = app.state::<SharedState>();
 
@@ -1601,6 +1666,9 @@ pub fn run() {
 
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(trade_watch_loop(app_handle));
+
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(events_watch_loop(app_handle));
 
             // Initial poll + sync + home cache (equipped + chat)
             let app_handle = app.handle().clone();

@@ -129,6 +129,8 @@ function App() {
       } else if (payload === "friends:requests") {
         setFriendsTab("requests");
         setView("friends");
+      } else if (payload === "events") {
+        setView("events");
       } else {
         setDeepLinkItem(payload);
         setView("inventory");
