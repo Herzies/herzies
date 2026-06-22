@@ -302,9 +302,13 @@ export async function processSync(
     notifications.push({
       type: "item_granted",
       title: "CD",
-      message: `You earned ${newCds} CD${newCds > 1 ? "s" : ""}!`,
+      message: `You received: ${newCds}x CD`,
       itemId: "cd",
       quantity: newCds,
+      // CDs drop passively while listening — keep this in the activity log
+      // only so it doesn't fire an OS popup (and surface the item preview)
+      // every time the user is just playing music in the background.
+      logOnly: true,
     });
   }
 
