@@ -57,18 +57,19 @@ export default function BetaLeadForm() {
       <div className="rounded-lg overflow-hidden border border-border w-full p-4 md:p-6 lg:p-12 lg:py-24">
         <div className="flex flex-col items-center text-center">
           <p className="text-sm text-text-dim mb-2 uppercase tracking-widest">
-            Your herzie is waiting
+            Stay in the loop
           </p>
           <h2 className="text-4xl md:text-5xl lg:text-6xl text-purple mb-1 font-semibold">
-            Early access
+            Want to stay updated?
           </h2>
           <p className="text-[12px] text-text-dim mb-4 leading-snug mt-6">
-            Drop your email and we'll let you know when we're ready.
+            Drop your email for the occasional update on new features, events,
+            and releases.
           </p>
 
           {isSuccess ? (
             <p className="text-cyan text-sm mt-2" role="status">
-              You're on the list. We'll be in touch.
+              You're subscribed. We'll keep you posted.
             </p>
           ) : (
             <form
@@ -86,7 +87,7 @@ export default function BetaLeadForm() {
                 className="shrink-0 w-full md:w-auto"
                 disabled={isSubmitting}
               >
-                {isSubmitting ? "Sending…" : "Let me in!"}
+                {isSubmitting ? "Sending…" : "Keep me posted"}
               </Button>
             </form>
           )}
@@ -104,15 +105,6 @@ export default function BetaLeadForm() {
         <Link href="/terms" className="text-cyan">
           terms
         </Link>
-        . A CLI preview is available on{" "}
-        <a
-          target="_blank"
-          rel="noopener noreferrer"
-          href="https://www.npmjs.com/package/herzies"
-          className="text-cyan"
-        >
-          npm
-        </a>
         .
       </p>
     </>
