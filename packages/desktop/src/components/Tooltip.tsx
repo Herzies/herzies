@@ -25,7 +25,7 @@ export function Tooltip({
       <span
         role="tooltip"
         className={cn(
-          "pointer-events-none absolute z-100 whitespace-nowrap rounded border border-border bg-bg-panel px-1.5 py-0.5 text-ui-sm text-text opacity-0 transition-opacity delay-150 group-hover/tooltip:opacity-100",
+          "pointer-events-none absolute z-100 w-max max-w-[160px] text-balance rounded border border-border bg-bg-panel px-1.5 py-0.5 text-center text-ui-sm text-text opacity-0 transition-opacity delay-150 group-hover/tooltip:opacity-100",
           side === "bottom" ? "top-full mt-1" : "bottom-full mb-1",
           align === "center" && "left-1/2 -translate-x-1/2",
           align === "left" && "left-0",

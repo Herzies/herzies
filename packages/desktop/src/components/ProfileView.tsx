@@ -46,6 +46,12 @@ export function ProfileView({
 }) {
   const [confirmRemove, setConfirmRemove] = useState(false);
 
+  // Drop recently played artists that came through without a name — they'd
+  // otherwise render as a blank, rankless row.
+  const topArtists = (profile.topArtists ?? []).filter(
+    (a) => a.name?.trim(),
+  );
+
   return (
     <View
       title={profile.name}
@@ -120,10 +126,10 @@ export function ProfileView({
         </div>
       ) : null}
 
-      {isFriend && profile.topArtists && profile.topArtists.length > 0 && (
+      {isFriend && topArtists.length > 0 && (
         <div className="mb-2">
           <div className="mb-1 text-[10px] text-text-dim">Top Artists</div>
-          {profile.topArtists.map((a, i) => (
+          {topArtists.map((a, i) => (
             <div
               key={a.name}
               className="flex justify-between border-b border-[#222] py-0.5 text-ui"

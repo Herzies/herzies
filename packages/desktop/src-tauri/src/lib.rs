@@ -552,6 +552,16 @@ fn get_window_pinned() -> bool {
 }
 
 #[tauri::command]
+fn set_ghost_mode(enabled: bool) {
+    tray::set_ghost_mode(enabled);
+}
+
+#[tauri::command]
+fn get_ghost_mode() -> bool {
+    tray::is_ghost_mode()
+}
+
+#[tauri::command]
 async fn fetch_leaderboard() -> Result<serde_json::Value, String> {
     let client = Client::new();
     match api::api_fetch_leaderboard(&client).await {
@@ -979,7 +989,15 @@ async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: u64) -> Resu
         }
 
         match np {
-            Some(ref info) if info.is_playing && !info.title.is_empty() && info.volume > 0 => {
+            // Skip tracking entirely in ghost mode, and never track a song that
+            // is missing an artist name or a track title.
+            Some(ref info)
+                if info.is_playing
+                    && !tray::is_ghost_mode()
+                    && !info.title.trim().is_empty()
+                    && !info.artist.trim().is_empty()
+                    && info.volume > 0 =>
+            {
                 let key = lastfm::track_key(&info.artist, &info.title);
                 let track_changed = s.last_track_key.as_deref() != Some(key.as_str());
 
@@ -1560,6 +1578,8 @@ pub fn run() {
             fetch_ongoing_trades,
             set_window_pinned,
             get_window_pinned,
+            set_ghost_mode,
+            get_ghost_mode,
             fetch_active_events,
             fetch_previous_hunt,
             fetch_leaderboard,

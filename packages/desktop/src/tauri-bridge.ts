@@ -161,6 +161,17 @@ export const herzies = {
       return pinned;
     }),
 
+  /** "Ghost mode" — pause all listening tracking (no XP, minutes, or now playing). */
+  setGhostMode: (enabled: boolean) => {
+    updateGhostModeCache(enabled);
+    return invoke<void>("set_ghost_mode", { enabled });
+  },
+  getGhostMode: () =>
+    invoke<boolean>("get_ghost_mode").then((enabled) => {
+      updateGhostModeCache(enabled);
+      return enabled;
+    }),
+
   fetchActiveEvents: () =>
     invoke<{ events: GameEvent[] }>("fetch_active_events"),
 
@@ -251,6 +262,34 @@ export function useWindowPinned(): boolean {
     };
   }, []);
   return pinned;
+}
+
+// Ghost mode mirrors the pin pattern: it only changes through
+// herzies.setGhostMode, so a module-level cache + listener set keeps every
+// hook in sync without a dedicated Tauri event.
+let ghostModeCache = false;
+const ghostModeListeners = new Set<(enabled: boolean) => void>();
+
+function updateGhostModeCache(enabled: boolean) {
+  if (ghostModeCache === enabled) return;
+  ghostModeCache = enabled;
+  for (const listener of ghostModeListeners) listener(enabled);
+}
+
+/** Tracks "ghost mode" (listening tracking paused for privacy). */
+export function useGhostMode(): boolean {
+  const [enabled, setEnabled] = useState(ghostModeCache);
+  useEffect(() => {
+    ghostModeListeners.add(setEnabled);
+    setEnabled(ghostModeCache);
+    if (isTauri()) {
+      herzies.getGhostMode().catch(() => {});
+    }
+    return () => {
+      ghostModeListeners.delete(setEnabled);
+    };
+  }, []);
+  return enabled;
 }
 
 /**

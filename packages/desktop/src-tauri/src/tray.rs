@@ -31,6 +31,18 @@ pub fn is_pinned() -> bool {
     WINDOW_PINNED.load(Ordering::Relaxed)
 }
 
+/// "Ghost mode" — while enabled, no listening is tracked (no XP, minutes, or
+/// now-playing reported to the server). Session-only; resets to off on launch.
+static GHOST_MODE: AtomicBool = AtomicBool::new(false);
+
+pub fn set_ghost_mode(enabled: bool) {
+    GHOST_MODE.store(enabled, Ordering::Relaxed);
+}
+
+pub fn is_ghost_mode() -> bool {
+    GHOST_MODE.load(Ordering::Relaxed)
+}
+
 /// Stored tray icon position for anchoring the window below it.
 static TRAY_X: AtomicU64 = AtomicU64::new(0);
 static TRAY_Y: AtomicU64 = AtomicU64::new(0);

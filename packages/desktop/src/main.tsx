@@ -28,6 +28,7 @@ import {
   type AppState,
   checkForUpdate,
   herzies,
+  useGhostMode,
   useWindowFocused,
 } from "./tauri-bridge";
 
@@ -108,6 +109,7 @@ function App() {
   }, []);
   const notifiedVersionRef = useRef<string | null>(null);
   const focused = useWindowFocused();
+  const ghostMode = useGhostMode();
 
   const addLog = useCallback((message: string) => {
     const time = new Date().toISOString();
@@ -439,7 +441,10 @@ function App() {
   return (
     <div
       data-tauri-drag-region
-      className="flex h-screen flex-col px-3 pt-3 pb-1"
+      className={cn(
+        "relative flex h-screen flex-col px-3 pt-3 pb-1",
+        ghostMode && "grayscale",
+      )}
     >
       <div className="mb-2 flex min-h-0 flex-1 flex-col overflow-hidden">
         <div
@@ -658,6 +663,13 @@ function App() {
           onUpdate={() => setTestUpdateOverlay(false)}
           onLater={() => setTestUpdateOverlay(false)}
         />
+      )}
+
+      {/* Transparent tint over the whole app; pointer-events-none so the ghost
+          toggle and everything else stay interactive. The "music is not
+          tracked" copy lives in the now-playing card in HomeView. */}
+      {ghostMode && (
+        <div className="pointer-events-none fixed inset-0 z-200 bg-black/30" />
       )}
     </div>
   );

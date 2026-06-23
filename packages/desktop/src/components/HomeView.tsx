@@ -1,8 +1,14 @@
 import { lastFmTrackUrl, levelProgress, xpToNextLevel } from "@herzies/shared";
 import { useEffect, useState } from "react";
 import { cn } from "../lib/utils";
-import { type AppState, herzies, useWindowPinned } from "../tauri-bridge";
+import {
+  type AppState,
+  herzies,
+  useGhostMode,
+  useWindowPinned,
+} from "../tauri-bridge";
 import { Herzie3D } from "./Herzie3D";
+import { Tooltip } from "./Tooltip";
 
 export function HomeView({
   state,
@@ -18,12 +24,17 @@ export function HomeView({
   const [globalRank, setGlobalRank] = useState<number | undefined>(undefined);
   const [globalTotal, setGlobalTotal] = useState<number | undefined>(undefined);
   const pinned = useWindowPinned();
+  const ghostMode = useGhostMode();
   const friendCode = herzie?.friendCode;
 
   const togglePin = () => {
     // setWindowPinned updates the shared pinned cache synchronously, so the
     // UI (and animation pausing) reflects the toggle immediately.
     herzies.setWindowPinned(!pinned).catch(() => {});
+  };
+
+  const toggleGhostMode = () => {
+    herzies.setGhostMode(!ghostMode).catch(() => {});
   };
 
   useEffect(() => {
@@ -50,14 +61,15 @@ export function HomeView({
     <div className="flex h-full flex-col">
       <div className="mb-1 flex items-center justify-between z-50">
         <span className="text-ui-lg font-bold text-cyan">
-          <button
-            type="button"
-            onClick={onOpenProfile}
-            className="cursor-pointer font-bold text-cyan hover:underline"
-            title="View your profile"
-          >
-            {herzie.name}
-          </button>
+          <Tooltip label="View your profile" side="bottom" align="left">
+            <button
+              type="button"
+              onClick={onOpenProfile}
+              className="cursor-pointer font-bold text-cyan hover:underline"
+            >
+              {herzie.name}
+            </button>
+          </Tooltip>
           {globalRank ? (
             <span
               className="ml-1 text-[10px] font-normal text-text-dim"
@@ -77,37 +89,71 @@ export function HomeView({
               connect to internet to grow
             </span>
           )}
-          <button
-            type="button"
-            onClick={togglePin}
-            title={
-              pinned
-                ? "Unpin window — hide it when it loses focus"
-                : "Pin window — keep it open when it loses focus"
-            }
-            className={cn(
-              "flex cursor-pointer items-center rounded-lg border-none px-1.5 py-0.5",
-              pinned
-                ? "bg-cyan/20 text-cyan"
-                : "bg-transparent text-text-dim hover:text-text",
-            )}
+          <Tooltip
+            label={pinned ? "Unpin window" : "Pin window"}
+            side="bottom"
+            align="right"
           >
-            <svg
-              width="11"
-              height="11"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-label={pinned ? "Window pinned" : "Pin window"}
-              role="img"
+            <button
+              type="button"
+              onClick={togglePin}
+              className={cn(
+                "flex h-5 w-5 cursor-pointer items-center justify-center rounded-lg border-none p-0",
+                pinned
+                  ? "bg-cyan/20 text-cyan"
+                  : "bg-transparent text-text-dim hover:text-text",
+              )}
             >
-              <path d="M12 17v5" />
-              <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
-            </svg>
-          </button>
+              <svg
+                width="11"
+                height="11"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-label={pinned ? "Window pinned" : "Pin window"}
+                role="img"
+              >
+                <path d="M12 17v5" />
+                <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
+              </svg>
+            </button>
+          </Tooltip>
+          <Tooltip
+            label={ghostMode ? "Resume tracking" : "Pause tracking"}
+            side="bottom"
+            align="right"
+          >
+            <button
+              type="button"
+              onClick={toggleGhostMode}
+              className={cn(
+                "flex h-5 w-5 cursor-pointer items-center justify-center rounded-lg border-none p-0",
+                ghostMode
+                  ? "bg-purple/20 text-purple"
+                  : "bg-transparent text-text-dim hover:text-text",
+              )}
+            >
+              <svg
+                width="11"
+                height="11"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-label={ghostMode ? "Ghost mode on" : "Ghost mode"}
+                role="img"
+              >
+                <path d="M9 10h.01" />
+                <path d="M15 10h.01" />
+                <path d="M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8z" />
+              </svg>
+            </button>
+          </Tooltip>
           <span
             className={cn(
               "rounded-lg px-2 py-0.5 text-[10px]",
@@ -183,7 +229,36 @@ export function HomeView({
         </div>
       ) : null}
 
-      {nowPlaying ? (
+      {ghostMode ? (
+        <div className="border-t border-border pt-1.5">
+          <div className="flex items-center gap-2">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded bg-purple/15 text-purple">
+              <svg
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+                role="img"
+              >
+                <path d="M9 10h.01" />
+                <path d="M15 10h.01" />
+                <path d="M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8z" />
+              </svg>
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="text-ui font-bold text-purple">Ghost mode</div>
+              <div className="text-[10px] text-text-dim">
+                Music is not tracked
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : nowPlaying ? (
         <div className="border-t border-border pt-1.5">
           <div className="flex gap-2">
             <button
