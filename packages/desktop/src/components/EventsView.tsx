@@ -130,7 +130,7 @@ export function EventsView({
     return (
       <View
         title="Events"
-        colour="red"
+        colour="cyan"
         childrenClassName="flex min-h-0 flex-col"
       >
         <div className="flex min-h-0 flex-1 flex-col">
@@ -253,11 +253,11 @@ export function EventsView({
   const rewardItem = getItem(config.rewardItemId);
 
   return (
-    <View title="Events" colour="red" childrenClassName="flex flex-col h-full">
+    <View title="Events" colour="cyan" childrenClassName="flex flex-col h-full">
       <div className="grid flex-1 place-items-center">
         <div>
-          <div className="text-center">{hunt.title}</div>
-          <div className="text-ui-sm text-text-dim">{hunt.description}</div>
+          <div className="text-center text-cyan">{hunt.title}</div>
+          <div className="text-ui text-text-dim mt-2">{hunt.description}</div>
 
           <div className="mt-3 flex flex-col gap-0.5 text-center text-[10px] text-text-dim">
             <div>Duration: {formatCountdown(hunt.endsAt)}</div>

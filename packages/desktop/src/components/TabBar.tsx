@@ -33,19 +33,19 @@ export function TabBar({
     {
       id: "inventory",
       label: "Inventory",
-      colour: "yellow",
+      colour: "cyan",
       title: "Your inventory. Shortcut [i]",
     },
     {
       id: "events",
       label: "Events",
-      colour: "red",
+      colour: "cyan",
       title: "Events. Shortcut [e]",
     },
     {
       id: "friends",
       label: "Social",
-      colour: "green",
+      colour: "cyan",
       title: "Friends & leaderboard. Shortcut [f]",
     },
     {

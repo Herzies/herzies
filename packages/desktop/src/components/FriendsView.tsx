@@ -244,7 +244,7 @@ export function FriendsView({
   return (
     <View
       title="Social"
-      colour="green"
+      colour="cyan"
       childrenClassName="flex min-h-0 flex-col"
     >
       <div className="mb-2 flex gap-1 border-b border-border text-ui">
@@ -611,7 +611,7 @@ function TabButton({
       onClick={onClick}
       className={cn(
         "cursor-pointer border-none bg-transparent px-1.5 pb-1.5 pt-0.5",
-        active ? "font-bold text-green" : "text-text-dim hover:text-text",
+        active ? "font-bold text-cyan" : "text-text-dim hover:text-text",
       )}
     >
       {children}
