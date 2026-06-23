@@ -21,17 +21,16 @@
 
 # Wishlist
 
-- [ ] LOGO!
 - [ ] allow sending DMs
 - [ ] 3 tier CDs with different drop rates. regular (like now), bronze, and gold.
-- [ ] genres fra last.fm
-- [ ] track list only available for friends
 - [ ] egg first
-- [ ] Tidal support
 - [ ] Clear chat every 24hrs
 - [ ] skins
 - [ ] progress lock: must play certain song to keep progress going
 - [ ] in-game purchase to support development and maintenance
+- [x] track list only available for friends
+- [x] genres fra last.fm
+- [x] Tidal support
 - [x] better character rendring (more vibrant?)
 - [x] Chat
 - [x] Song hunt event
