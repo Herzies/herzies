@@ -8,7 +8,7 @@ export default async function Header() {
           <a href="/" className="text-xl font-bold text-purple no-underline">
             herzies
             <span className="text-[10px] font-medium opacity-60 ml-1">
-              [closed beta]
+              [open beta]
             </span>
           </a>
         </div>
