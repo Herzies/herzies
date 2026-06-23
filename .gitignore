@@ -26,9 +26,6 @@ Thumbs.db
 # Claude Code
 .claude/settings.local.json
 
-# Compiled native binary
-packages/cli/bin/nowplaying
-
 # Debug
 npm-debug.log*
 pnpm-debug.log*

@@ -18,7 +18,6 @@ This project is a monorepo with these distinct areas:
 | **Rust** | `packages/desktop/src-tauri/` | Rust, Tauri |
 | **Database** | `supabase/` | PostgreSQL, Supabase migrations, Edge Functions |
 | **Shared** | `packages/shared/` | TypeScript |
-| **CLI** | `packages/cli/` | TypeScript |
 
 ## Instructions
 
