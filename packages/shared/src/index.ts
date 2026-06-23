@@ -6,6 +6,8 @@ export * from "./creature-renderer.js";
 export * from "./genres.js";
 export * from "./Herzie3D.js";
 export * from "./ItemDisplay.js";
+export * from "./ItemPreview.js";
+export * from "./item-canvas.js";
 export * from "./items.js";
 export * from "./lastfm-link.js";
 export * from "./leveling.js";

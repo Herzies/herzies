@@ -1,7 +1,7 @@
 import {
   getItem,
   RARITY_COLORS as ITEM_RARITY_COLORS,
-  ItemDisplay,
+  ItemPreview,
   RARITY_LABELS,
 } from "@herzies/shared";
 import { useEffect } from "react";
@@ -41,7 +41,7 @@ export default function ItemInspectOverlay({
         className="max-w-[260px] border border-border bg-bg-panel p-4 text-center"
       >
         <div className="mb-2 flex justify-center">
-          <ItemDisplay item={item} size={9} />
+          <ItemPreview item={item} box={150} />
         </div>
         <div
           className="text-sm font-bold"

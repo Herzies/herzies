@@ -16,6 +16,25 @@ import {
   type V2,
   type V3,
 } from "@herzies/shared";
+import type { Cell } from "./creature-renderer.js";
+
+const EMPTY_CELL: Cell = { ch: " ", color: "" };
+
+/** Map a 0..1 brightness value to a ramp character. */
+function rampChar(val: number): string {
+  const idx = Math.min(
+    Math.floor(val * (RAMP_ITEM.length - 1)),
+    RAMP_ITEM.length - 1,
+  );
+  return RAMP_ITEM[idx];
+}
+
+/** Convert a live cell grid into the baked HTML-span string rows. */
+function cellsToStrings(cells: Cell[][]): string[] {
+  return cells.map((row) =>
+    row.map((c) => (c.ch === " " ? " " : col(c.color, c.ch))).join(""),
+  );
+}
 
 export type Rarity = "common" | "uncommon" | "rare" | "legendary";
 
@@ -473,7 +492,7 @@ function rayChainColored(
   return best;
 }
 
-function renderHeadphonesFrame(yAngle: number): string[] {
+function renderHeadphonesCells(yAngle: number): Cell[][] {
   const bright: number[][] = Array.from({ length: SH }, () =>
     Array(SW).fill(-1),
   );
@@ -618,22 +637,21 @@ function renderHeadphonesFrame(yAngle: number): string[] {
   }
 
   return bright.map((row, y) =>
-    row
-      .map((val, x) => {
-        if (val < 0) return " ";
-        const idx = Math.min(
-          Math.floor(val * (RAMP_ITEM.length - 1)),
-          RAMP_ITEM.length - 1,
-        );
-        const ch = RAMP_ITEM[idx];
-        if (ch === " ") return " ";
-        if (zone[y][x] === "pad") return col("#3a3a3a", ch);
-        if (zone[y][x] === "cup")
-          return val > 0.6 ? col("#e0b0ff", ch) : col("#c084fc", ch);
-        return val > 0.55 ? col("#BBBBBB", ch) : col("#888888", ch);
-      })
-      .join(""),
+    row.map((val, x) => {
+      if (val < 0) return EMPTY_CELL;
+      const ch = rampChar(val);
+      if (ch === " ") return EMPTY_CELL;
+      let color: string;
+      if (zone[y][x] === "pad") color = "#3a3a3a";
+      else if (zone[y][x] === "cup") color = val > 0.6 ? "#e0b0ff" : "#c084fc";
+      else color = val > 0.55 ? "#BBBBBB" : "#888888";
+      return { ch, color };
+    }),
   );
+}
+
+function renderHeadphonesFrame(yAngle: number): string[] {
+  return cellsToStrings(renderHeadphonesCells(yAngle));
 }
 
 // --- Rainbow headband rendering (circular tilted hoop) ---
@@ -731,7 +749,7 @@ function traceThickBand(
   );
 }
 
-function renderRainbowHeadbandFrame(yAngle: number): string[] {
+function renderRainbowHeadbandCells(yAngle: number): Cell[][] {
   const bright: number[][] = Array.from({ length: SH }, () =>
     Array(SW).fill(-1),
   );
@@ -799,25 +817,22 @@ function renderRainbowHeadbandFrame(yAngle: number): string[] {
   }
 
   return bright.map((row, y) =>
-    row
-      .map((val, x) => {
-        if (val < 0) return " ";
-        const idx = Math.min(
-          Math.floor(val * (RAMP_ITEM.length - 1)),
-          RAMP_ITEM.length - 1,
-        );
-        const ch = RAMP_ITEM[idx];
-        if (ch === " ") return " ";
-        const hex = bandColor[y][x];
-        return col(shadeItemColor(hex, val), ch);
-      })
-      .join(""),
+    row.map((val, x) => {
+      if (val < 0) return EMPTY_CELL;
+      const ch = rampChar(val);
+      if (ch === " ") return EMPTY_CELL;
+      return { ch, color: shadeItemColor(bandColor[y][x], val) };
+    }),
   );
+}
+
+function renderRainbowHeadbandFrame(yAngle: number): string[] {
+  return cellsToStrings(renderRainbowHeadbandCells(yAngle));
 }
 
 // --- Boombox rendering (retro stereo: body, twin speakers, handle, buttons) ---
 
-function renderBoomboxFrame(yAngle: number): string[] {
+function renderBoomboxCells(yAngle: number): Cell[][] {
   const cosA = Math.cos(yAngle);
   const sinA = Math.sin(yAngle);
   const rot = (lx: number, ly: number, lz: number): V3 => [
@@ -932,19 +947,17 @@ function renderBoomboxFrame(yAngle: number): string[] {
   }
 
   return bright.map((row, y) =>
-    row
-      .map((val, x) => {
-        if (val < 0) return " ";
-        const idx = Math.min(
-          Math.floor(val * (RAMP_ITEM.length - 1)),
-          RAMP_ITEM.length - 1,
-        );
-        const ch = RAMP_ITEM[idx];
-        if (ch === " ") return " ";
-        return col(shadeItemColor(colorGrid[y][x], val), ch);
-      })
-      .join(""),
+    row.map((val, x) => {
+      if (val < 0) return EMPTY_CELL;
+      const ch = rampChar(val);
+      if (ch === " ") return EMPTY_CELL;
+      return { ch, color: shadeItemColor(colorGrid[y][x], val) };
+    }),
   );
+}
+
+function renderBoomboxFrame(yAngle: number): string[] {
+  return cellsToStrings(renderBoomboxCells(yAngle));
 }
 
 // --- Generate all frames ---
@@ -1064,7 +1077,7 @@ export const ITEMS: ItemDef[] = [
   {
     id: "boombox",
     name: "Boombox",
-    description: "A retro boombox that sits by your herzie's feet.",
+    description: "A retro boombox.",
     rarity: "rare",
     frames: boomboxFrames,
     equipable: true,

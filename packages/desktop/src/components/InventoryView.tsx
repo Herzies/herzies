@@ -2,7 +2,7 @@ import type { EquipSlot, Herzie, Inventory, ItemDef } from "@herzies/shared";
 import {
   getItem,
   RARITY_COLORS as ITEM_RARITY_COLORS,
-  ItemDisplay,
+  ItemPreview,
 } from "@herzies/shared";
 import { useEffect, useState } from "react";
 import { cn } from "../lib/utils";
@@ -73,19 +73,6 @@ function SellControls({
 /** Fixed square dimension for every wearable zone, regardless of item art. */
 const SLOT_SIZE = 56;
 
-/** Font size that fits the item's ASCII art inside the square zone. */
-function slotPreviewSize(item: ItemDef): number {
-  const lines = item.frames[0] ?? [];
-  const rows = lines.length || 1;
-  const cols = Math.max(
-    1,
-    ...lines.map((l) => l.replace(/<[^>]*>/g, "").length),
-  );
-  // ItemDisplay metrics: char width = size * 0.6, line height = size * 1.35.
-  const fit = Math.min(SLOT_SIZE / (rows * 1.35), SLOT_SIZE / (cols * 0.6));
-  return Math.min(7, Math.max(2, fit));
-}
-
 function WearableArea({
   label,
   item,
@@ -117,11 +104,7 @@ function WearableArea({
             {/* pointer-events-none: the animated art swaps DOM nodes every
                 frame, which otherwise breaks click events mid-press. */}
             <span className="pointer-events-none">
-              <ItemDisplay
-                item={item}
-                size={slotPreviewSize(item)}
-                animate={animate}
-              />
+              <ItemPreview item={item} box={SLOT_SIZE} animate={animate} />
             </span>
           </button>
         </Tooltip>
@@ -238,8 +221,8 @@ export function InventoryView({
   return (
     <div className="flex h-full flex-col">
       <div className="z-50 mb-1 flex items-center justify-between">
-        <h1 className="text-ui-lg font-bold text-yellow">Inventory</h1>
-        <div className="text-ui text-yellow">${currency}</div>
+        <h1 className="text-ui-lg font-bold text-cyan">Inventory</h1>
+        <div className="text-ui text-cyan">${currency}</div>
       </div>
 
       {/* 3D render with wearable-area overlays */}
@@ -307,25 +290,19 @@ export function InventoryView({
                 >
                   <div
                     className="truncate text-ui hover:underline"
-                    style={{ color: ITEM_RARITY_COLORS[rarity] }}
+                    // style={{ color: ITEM_RARITY_COLORS[rarity] }}
                   >
                     {name}
                   </div>
                   <div className="text-[10px] text-text-dim">
                     x{qty}
                     {def?.sellPrice ? ` · $${def.sellPrice} each` : ""}
-                    {isEquipped && (
-                      <span className="ml-1 text-green">[equipped]</span>
-                    )}
                   </div>
                 </button>
                 {def?.equipable && (
                   <button
                     type="button"
-                    className={cn(
-                      "btn shrink-0",
-                      isEquipped ? "text-red" : "text-green",
-                    )}
+                    className={cn("btn shrink-0")}
                     onClick={() => handleEquip(itemId)}
                   >
                     {isEquipped ? "Unequip" : "Equip"}
