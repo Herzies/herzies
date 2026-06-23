@@ -23,6 +23,30 @@ fn api_base() -> String {
     std::env::var("HERZIES_API_URL").unwrap_or_else(|_| "https://www.herzies.app/api".to_string())
 }
 
+/// Supabase project URL. Mirrors the resolution used by `get_auth_config` in
+/// lib.rs so the Edge Function and the rest of the app agree on the project.
+fn supabase_url() -> String {
+    std::env::var("NEXT_PUBLIC_SUPABASE_URL")
+        .or_else(|_| std::env::var("SUPABASE_URL"))
+        .unwrap_or_else(|_| "https://ojqfqxolbjegorgoyond.supabase.co".to_string())
+}
+
+/// Public anon key — required as the `apikey` header on every Edge Function
+/// call so the Supabase API gateway routes the request (the user's JWT in the
+/// Authorization header is what actually authenticates the caller).
+fn supabase_anon_key() -> String {
+    std::env::var("NEXT_PUBLIC_SUPABASE_ANON_KEY")
+        .or_else(|_| std::env::var("SUPABASE_ANON_KEY"))
+        .unwrap_or_else(|_| "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9qcWZxeG9sYmplZ29yZ295b25kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc2NTcwMjgsImV4cCI6MjA5MzIzMzAyOH0.BBT77VK1ROJr57BJvMfCyra3lbycMA9u2-jxG-LhBJE".to_string())
+}
+
+/// Base URL for Supabase Edge Functions. Override with `HERZIES_FUNCTIONS_URL`
+/// for local dev (`supabase functions serve` → http://127.0.0.1:54321/functions/v1).
+fn functions_base() -> String {
+    std::env::var("HERZIES_FUNCTIONS_URL")
+        .unwrap_or_else(|_| format!("{}/functions/v1", supabase_url()))
+}
+
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -169,11 +193,28 @@ async fn api_fetch(
     path: &str,
     body: Option<serde_json::Value>,
 ) -> Option<reqwest::Response> {
-    let token = get_token(client).await?;
     let url = format!("{}{}", api_base(), path);
+    api_fetch_full(client, method, &url, body, None).await
+}
+
+/// Like `api_fetch` but takes a fully-qualified URL and an optional `apikey`
+/// header. Used to call Supabase Edge Functions (which live on a different base
+/// URL and require the anon key as `apikey`) while reusing the same token
+/// freshness + 401-retry handling as the Next.js endpoints.
+async fn api_fetch_full(
+    client: &Client,
+    method: reqwest::Method,
+    url: &str,
+    body: Option<serde_json::Value>,
+    apikey: Option<&str>,
+) -> Option<reqwest::Response> {
+    let token = get_token(client).await?;
 
     let build = |tok: &str| {
-        let mut req = client.request(method.clone(), &url).bearer_auth(tok);
+        let mut req = client.request(method.clone(), url).bearer_auth(tok);
+        if let Some(key) = apikey {
+            req = req.header("apikey", key);
+        }
         if let Some(ref b) = body {
             req = req.json(b);
         }
@@ -192,7 +233,7 @@ async fn api_fetch(
     // on disk. Force a refresh and retry once before declaring the session
     // dead. `force_refresh` itself will clear the session if the refresh
     // token is truly rejected (401/403).
-    log::warn!("Got 401 on {}, forcing refresh and retrying", path);
+    log::warn!("Got 401 on {}, forcing refresh and retrying", url);
     force_refresh(client).await;
     let new_token = storage::load_session().map(|s| s.access_token)?;
     if new_token.is_empty() || new_token == token {
@@ -206,7 +247,7 @@ async fn api_fetch(
     mark_reachable();
     if resp2.status() == StatusCode::UNAUTHORIZED {
         // Fresh token still rejected — the user really is unauthorized.
-        log::warn!("Still 401 after refresh on {}, clearing session", path);
+        log::warn!("Still 401 after refresh on {}, clearing session", url);
         storage::clear_session();
         return None;
     }
@@ -228,7 +269,13 @@ pub async fn api_sync(
         "minutesListened": minutes_listened,
         "genres": genres,
     });
-    let resp = api_fetch(client, reqwest::Method::POST, "/sync", Some(body)).await?;
+    // /sync has been ported to a Supabase Edge Function (co-located with
+    // Postgres, off Vercel). It lives on the functions base URL and needs the
+    // anon key as `apikey`; everything else still routes through `api_base()`.
+    let url = format!("{}/sync", functions_base());
+    let anon = supabase_anon_key();
+    let resp =
+        api_fetch_full(client, reqwest::Method::POST, &url, Some(body), Some(&anon)).await?;
     if !resp.status().is_success() {
         return None;
     }

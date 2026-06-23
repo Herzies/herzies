@@ -380,6 +380,14 @@ deno_version = 2
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 
+# Proof-of-concept port of POST /api/sync to an Edge Function.
+# Requires a valid Supabase user JWT (the CLI already sends one as Bearer).
+[functions.sync]
+enabled = true
+verify_jwt = true
+import_map = "./functions/deno.json"
+entrypoint = "./functions/sync/index.ts"
+
 [analytics]
 enabled = true
 port = 54327
