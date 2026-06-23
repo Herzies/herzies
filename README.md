@@ -1,11 +1,6 @@
-```
- _                   _
-| |                 (_)
-| |__   ___ _ __ _____  ___  ___
-| '_ \ / _ \ '__|_  / |/ _ \/ __|
-| | | |  __/ |   / /| |  __/\__ \
-|_| |_|\___|_|  /___|_|\___||___/
-```
+<p align="center">
+  <img src="packages/desktop/src-tauri/icons/icon.png" alt="Herzies" width="128" height="128" />
+</p>
 
 Your digital pet that grows by listening to music. **[herzies.app](https://www.herzies.app)**
 
@@ -28,9 +23,9 @@ Download the latest **Herzies Desktop** build for macOS from the [latest GitHub 
 
 ## Requirements
 
-- macOS (music detection uses AppleScript and is not yet available on Linux or Windows)
+- macOS (music detection uses the system MediaRemote now-playing feed, with AppleScript for Apple Music and Spotify as a fallback; not yet available on Linux or Windows)
 
 ## Want to contribute?
 
-- **Add support for other operating systems** — music detection currently relies on macOS AppleScript. Linux (e.g. MPRIS) and Windows support would be welcome.
+- **Add support for other operating systems** — music detection currently relies on macOS (MediaRemote, with AppleScript as a fallback). Linux (e.g. MPRIS) and Windows support would be welcome.
 - **Add support for more music players** — we currently detect Apple Music and Spotify, but there are plenty more out there.
