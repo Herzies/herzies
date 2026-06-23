@@ -33,7 +33,7 @@ const jsonLd = {
   description:
     "Your digital pet that grows by listening to music. Works with Apple Music and Spotify.",
   url: "https://www.herzies.app",
-  installUrl: "https://www.npmjs.com/package/herzies",
+  installUrl: "https://github.com/Herzies/herzies/releases/latest",
   offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
 };
 
@@ -62,8 +62,8 @@ export default function Home() {
             Your digital pet <br /> that grows by listening to music.
           </p>
 
-          <Link href="#beta" className="inline mt-6">
-            <Button className="inline">Early access</Button>
+          <Link href="/download" className="inline mt-6">
+            <Button className="inline">Download Herzies</Button>
           </Link>
 
           <div className="absolute bottom-0 right-0 translate-y-[110px] md:translate-y-[50px] translate-x-[80px]">
