@@ -72,7 +72,7 @@ function resolveEquipped(
   for (const id of wearables) {
     if (id === "headphones" || id === "rainbow-headband") out.head = id;
     else if (id === "clouds" || id === "stars") out.scenery = id;
-    else if (id === "boombox" || id === "coffee-mug") {
+    else if (id === "boombox") {
       if (!out.ground_left) out.ground_left = id;
       else out.ground_right = id;
     }

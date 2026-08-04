@@ -135,8 +135,7 @@ export const herzies = {
     itemId: string,
     action: "equip" | "unequip",
     side?: "left" | "right",
-  ) =>
-    invoke<{ equipped: Equipped }>("equip_item", { itemId, action, side }),
+  ) => invoke<{ equipped: Equipped }>("equip_item", { itemId, action, side }),
 
   tradeCreate: (targetCode: string) =>
     invoke<{ tradeId: string } | null>("trade_create", { targetCode }),

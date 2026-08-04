@@ -274,8 +274,7 @@ pub async fn api_sync(
     // anon key as `apikey`; everything else still routes through `api_base()`.
     let url = format!("{}/sync", functions_base());
     let anon = supabase_anon_key();
-    let resp =
-        api_fetch_full(client, reqwest::Method::POST, &url, Some(body), Some(&anon)).await?;
+    let resp = api_fetch_full(client, reqwest::Method::POST, &url, Some(body), Some(&anon)).await?;
     if !resp.status().is_success() {
         return None;
     }
@@ -619,15 +618,13 @@ pub async fn api_fetch_previous_hunt(
     }
     let data: serde_json::Value = resp.json().await.ok()?;
     let events: Vec<GameEvent> = serde_json::from_value(data["events"].clone()).unwrap_or_default();
-    let next: Option<GameEvent> = data
-        .get("next")
-        .and_then(|v| {
-            if v.is_null() {
-                None
-            } else {
-                serde_json::from_value(v.clone()).ok()
-            }
-        });
+    let next: Option<GameEvent> = data.get("next").and_then(|v| {
+        if v.is_null() {
+            None
+        } else {
+            serde_json::from_value(v.clone()).ok()
+        }
+    });
     Some((events, next))
 }
 
@@ -692,8 +689,7 @@ pub async fn api_chat_send(
     });
     let url = format!("{}/chat", functions_base());
     let anon = supabase_anon_key();
-    let resp =
-        api_fetch_full(client, reqwest::Method::POST, &url, Some(body), Some(&anon)).await?;
+    let resp = api_fetch_full(client, reqwest::Method::POST, &url, Some(body), Some(&anon)).await?;
     if !resp.status().is_success() {
         return None;
     }

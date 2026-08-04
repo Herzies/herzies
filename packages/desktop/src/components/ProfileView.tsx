@@ -48,9 +48,7 @@ export function ProfileView({
 
   // Drop recently played artists that came through without a name — they'd
   // otherwise render as a blank, rankless row.
-  const topArtists = (profile.topArtists ?? []).filter(
-    (a) => a.name?.trim(),
-  );
+  const topArtists = (profile.topArtists ?? []).filter((a) => a.name?.trim());
 
   return (
     <View

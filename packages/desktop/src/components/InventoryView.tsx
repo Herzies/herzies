@@ -30,7 +30,7 @@ const WEARABLE_AREAS: {
 }[] = [
   { slot: "scenery", label: "scene", side: "left" },
   { slot: "ground_left", label: "ground L", side: "left" },
-  { slot: "ground_right", label: "ground R", side: "right" },
+  { slot: "ground_right", label: "ground R", side: "left" },
   { slot: "head", label: "head", side: "right" },
   { slot: "face", label: "face", side: "right" },
   { slot: "body", label: "body", side: "right" },
@@ -105,7 +105,7 @@ function WearableArea({
           <button
             type="button"
             onClick={() => onUnequip(item.id)}
-            className="flex cursor-pointer items-center justify-center overflow-hidden rounded border border-border bg-black/40"
+            className="flex cursor-pointer items-center justify-center overflow-hidden rounded border border-border bg-bg-panel"
             style={{
               width: SLOT_SIZE,
               height: SLOT_SIZE,
@@ -121,7 +121,7 @@ function WearableArea({
         </Tooltip>
       ) : (
         <div
-          className="rounded border border-dashed border-border bg-black/20"
+          className="rounded border border-dashed border-border bg-bg-panel"
           style={{ width: SLOT_SIZE, height: SLOT_SIZE }}
         />
       )}

@@ -17,11 +17,7 @@ import {
   rotY,
   type V3,
 } from "./ascii3d.js";
-import {
-  type Equipped,
-  type GroundSide,
-  groundSlot,
-} from "./items.js";
+import { type Equipped, type GroundSide, groundSlot } from "./items.js";
 
 // --- Creature viewport ---
 const SW = 80;
@@ -119,10 +115,12 @@ const RAINBOW_HEADBAND = [
 
 function shadeWearableColor(hex: string, brightness: number): string {
   const [h, s, l] = hexToHsl(hex);
-  if (brightness > 0.6)
-    return hslToHex(h, s, Math.min(0.88, l + (1 - l) * 0.4));
+  // Never darken highlights — a 0.88 cap turned pure white into gray.
+  if (brightness > 0.6) return hslToHex(h, s, Math.min(1, l + (1 - l) * 0.4));
   if (brightness > 0.3) return hex.toUpperCase();
-  return hslToHex(h, s, l * 0.55);
+  // Keep near-white ceramics readable (avoid muddy mid-gray shadows).
+  const shadowL = l > 0.85 ? l * 0.78 : l * 0.55;
+  return hslToHex(h, s, shadowL);
 }
 
 function buildColorTriplet(hex: string): ColorTriplet {
@@ -159,7 +157,7 @@ const IDLE = {
 // --- Dance animation constants ---
 // Energetic rhythmic motion — ~2.5-3× idle amplitudes, faster cycle.
 const DANCE_FRAMES = 24;
-const DANCE_INTERVAL = 65; // ms per frame → 1560ms loop (~77 BPM)
+// 65ms per frame → 1560ms loop (~77 BPM); interval applied by the animator.
 
 const DANCE = {
   body: { amp: 0.11, cycles: 2 },
@@ -1144,95 +1142,11 @@ function buildBoomboxSpheres(
   });
 }
 
-function buildCoffeeMugSpheres(
-  spheres: Sphere[],
-  cols: number,
-  side: GroundSide,
-): Sphere[] {
-  if (spheres.length === 0) return [];
-
-  let maxY = -Infinity;
-  for (const s of spheres) {
-    maxY = Math.max(maxY, s.center[1] + s.radius);
-  }
-
-  const scale = 1.0;
-  const mugH = BOOMBOX_REF_HEIGHT * 0.22 * scale;
-  const mugR = BOOMBOX_REF_HEIGHT * 0.09 * scale;
-  const bodyR = mugR * 0.55;
-
-  const ceramic = "#e8d5c4";
-  const ceramicDark = "#c4a882";
-  const coffee = "#3b2414";
-  const handle = "#d4c0a8";
-
-  interface LocalSphere {
-    c: V3;
-    r: number;
-    color: string;
-  }
-  const local: LocalSphere[] = [];
-  const add = (c: V3, r: number, color: string) => local.push({ c, r, color });
-
-  // Cylindrical body: stacked rings of spheres.
-  const rings = 5;
-  const around = 8;
-  for (let iy = 0; iy < rings; iy++) {
-    const fy = (iy / (rings - 1) - 0.5) * mugH;
-    const ringR = mugR * (iy === rings - 1 ? 1.05 : 1); // slight rim flare at top
-    for (let ia = 0; ia < around; ia++) {
-      const ang = (ia / around) * Math.PI * 2;
-      add(
-        [Math.cos(ang) * ringR, fy, Math.sin(ang) * ringR],
-        bodyR,
-        iy === rings - 1 ? ceramicDark : ceramic,
-      );
-    }
-  }
-
-  // Coffee surface inside the rim.
-  add([0, -mugH * 0.42, 0], mugR * 0.7, coffee);
-
-  // C-handle on the outward side (away from herzie centre).
-  const handleSign = side === "left" ? -1 : 1;
-  const handleSteps = 7;
-  for (let i = 0; i <= handleSteps; i++) {
-    const t = i / handleSteps;
-    const ang = -Math.PI / 2 + Math.PI * t;
-    add(
-      [
-        handleSign * (mugR + mugR * 0.55 * (1 + Math.cos(ang))),
-        Math.sin(ang) * mugH * 0.35,
-        0,
-      ],
-      bodyR * 0.7,
-      handle,
-    );
-  }
-
-  const bz = -mugR * 0.3;
-  const by = maxY - mugH * 0.5;
-  const zFace = -mugR;
-  const bx = groundCornerX(cols, side, mugR, bodyR, zFace, bz, 0.06);
-
-  const yawDeg = side === "left" ? 25 : -25;
-  const yaw = (yawDeg * Math.PI) / 180;
-
-  return local.map((ls) => {
-    const r = rotY(ls.c, yaw);
-    return {
-      center: [bx + r[0], by + r[1], bz + r[2]] as V3,
-      radius: ls.r,
-      zone: "wearable" as const,
-      part: "ground",
-      color: ls.color,
-    };
-  });
-}
-
 function equippedCacheKey(equipped?: Equipped): string {
   if (!equipped) return "";
-  return (["head", "face", "body", "scenery", "ground_left", "ground_right"] as const)
+  return (
+    ["head", "face", "body", "scenery", "ground_left", "ground_right"] as const
+  )
     .map((s) => `${s}:${equipped[s] ?? ""}`)
     .join(",");
 }
@@ -1256,8 +1170,6 @@ function appendWearableSpheres(
     const itemId = equipped[groundSlot(side)];
     if (itemId === "boombox") {
       spheres.push(...buildBoomboxSpheres(spheres, cols, side, boomboxConfig));
-    } else if (itemId === "coffee-mug") {
-      spheres.push(...buildCoffeeMugSpheres(spheres, cols, side));
     }
   }
 }
@@ -1555,6 +1467,9 @@ function renderCreatureFrame(
         lit = 1 / (RAMP_HERZIE.length - 1);
       } else if (sp.zone === "eye") {
         lit = 0.75 * (0.15 + 0.85 * diffuse);
+      } else if (sp.color) {
+        // Wearables keep clean shading — skip creature texture patterns.
+        lit = 0.7 * (0.3 + 0.7 * diffuse);
       } else {
         const baseBright = 0.5 + applyTexture(textureType, nx, ny, nz);
         lit = baseBright * (0.15 + 0.85 * diffuse);

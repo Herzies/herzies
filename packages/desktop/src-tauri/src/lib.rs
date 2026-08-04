@@ -479,13 +479,10 @@ async fn equip_item(
     state: tauri::State<'_, SharedState>,
 ) -> Result<serde_json::Value, String> {
     let client = Client::new();
-    let result =
-        api::api_equip_item(&client, &item_id, &action, side.as_deref()).await?;
-    if let Ok(equipped) =
-        serde_json::from_value::<std::collections::HashMap<String, String>>(
-            result["equipped"].clone(),
-        )
-    {
+    let result = api::api_equip_item(&client, &item_id, &action, side.as_deref()).await?;
+    if let Ok(equipped) = serde_json::from_value::<std::collections::HashMap<String, String>>(
+        result["equipped"].clone(),
+    ) {
         let mut s = state.lock().unwrap();
         s.equipped = equipped;
         storage::save_equipped(&s.equipped);

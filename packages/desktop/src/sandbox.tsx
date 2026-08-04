@@ -16,12 +16,7 @@ import { createRoot } from "react-dom/client";
 import { Herzie3D } from "./components/Herzie3D";
 import { cn } from "./lib/utils";
 
-const WEARABLE_OPTIONS = [
-  "headphones",
-  "rainbow-headband",
-  "boombox",
-  "coffee-mug",
-];
+const WEARABLE_OPTIONS = ["headphones", "rainbow-headband", "boombox"];
 
 const DEFAULT_USER = "sandbox-user";
 
