@@ -170,7 +170,7 @@ export function HomeView({
           userId={herzie.friendCode}
           stage={stageOverride ?? herzie.stage}
           isPlaying={!!nowPlaying}
-          wearables={equipped}
+          equipped={equipped}
         />
       </div>
 

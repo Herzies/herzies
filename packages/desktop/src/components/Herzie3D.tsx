@@ -1,6 +1,8 @@
 import {
   type BoomboxConfig,
   type CreatureParams,
+  type Equipped,
+  equippedItemIds,
   Herzie3D as SharedHerzie3D,
   Sky,
 } from "@herzies/shared";
@@ -13,6 +15,8 @@ interface Props {
   size?: number;
   animate?: boolean;
   isPlaying?: boolean;
+  equipped?: Equipped;
+  /** @deprecated Prefer `equipped`. */
   wearables?: string[];
   creatureParams?: CreatureParams;
   boomboxConfig?: BoomboxConfig;
@@ -34,6 +38,7 @@ export function Herzie3D({
   size = 5,
   animate,
   isPlaying = false,
+  equipped,
   wearables,
   creatureParams,
   boomboxConfig,
@@ -58,9 +63,10 @@ export function Herzie3D({
   const visible = useWindowVisible();
   const paused = !visible || pausedProp;
 
-  const scenery = wearables?.includes("stars")
+  const ids = equipped ? equippedItemIds(equipped) : (wearables ?? []);
+  const scenery = ids.includes("stars")
     ? "stars"
-    : wearables?.includes("clouds")
+    : ids.includes("clouds")
       ? "clouds"
       : null;
 
@@ -90,6 +96,7 @@ export function Herzie3D({
         cols={showSky ? windowCols : undefined}
         animate={animate}
         isPlaying={isPlaying}
+        equipped={equipped}
         wearables={wearables}
         creatureParams={creatureParams}
         boomboxConfig={boomboxConfig}

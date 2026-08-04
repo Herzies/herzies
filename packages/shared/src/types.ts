@@ -1,3 +1,5 @@
+import type { Equipped } from "./items.js";
+
 export interface HerzieAppearance {
   headIndex: number;
   eyesIndex: number;
@@ -66,7 +68,7 @@ export interface HerzieProfile {
   currency?: number;
   appearance?: HerzieAppearance;
   topArtists?: { name: string; plays: number }[];
-  equipped?: string[];
+  equipped?: Equipped;
   nowPlaying?: { title: string; artist: string } | null;
   lastPlayed?: {
     title: string;

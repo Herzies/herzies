@@ -114,20 +114,31 @@ const DEFAULT_CONFIGS: Record<string, string> = {
   ),
 };
 
-function toLocalDatetimeValue(iso: string): string {
-  const d = new Date(iso);
+/** Format for native `<input type="datetime-local">` values (local wall clock). */
+function toDatetimeLocalValue(date: Date): string {
+  if (Number.isNaN(date.getTime())) return "";
   const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-function fromLocalDatetimeValue(value: string): string {
-  return new Date(value).toISOString();
+function isoToDatetimeLocal(iso: string): string {
+  return toDatetimeLocalValue(new Date(iso));
+}
+
+/** Convert a datetime-local string to ISO for the API. */
+function datetimeLocalToIso(value: string): string {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toISOString();
 }
 
 function defaultWindow(): { startsAt: string; endsAt: string } {
   const start = new Date();
   const end = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
-  return { startsAt: start.toISOString(), endsAt: end.toISOString() };
+  return {
+    startsAt: toDatetimeLocalValue(start),
+    endsAt: toDatetimeLocalValue(end),
+  };
 }
 
 function defaultSongHuntConfig(): SongHuntConfigForm {
@@ -137,7 +148,7 @@ function defaultSongHuntConfig(): SongHuntConfigForm {
     rewardItemId: "",
     rewardItemName: "",
     maxClaims: "50",
-    hints: [{ text: "First hint", unlocksAt: new Date().toISOString() }],
+    hints: [{ text: "First hint", unlocksAt: toDatetimeLocalValue(new Date()) }],
   };
 }
 
@@ -151,8 +162,8 @@ function songHuntConfigFromRecord(
           text: typeof hint.text === "string" ? hint.text : "",
           unlocksAt:
             typeof hint.unlocksAt === "string"
-              ? hint.unlocksAt
-              : new Date().toISOString(),
+              ? isoToDatetimeLocal(hint.unlocksAt)
+              : toDatetimeLocalValue(new Date()),
         };
       })
     : [];
@@ -185,7 +196,7 @@ function songHuntConfigToPayload(
     hints: form.hints.map(
       (h): SongHuntHint => ({
         text: h.text.trim(),
-        unlocksAt: h.unlocksAt,
+        unlocksAt: datetimeLocalToIso(h.unlocksAt),
       }),
     ),
   };
@@ -217,8 +228,8 @@ function eventToForm(event: AdminEvent): EventFormState {
     title: event.title,
     description: event.description ?? "",
     active: event.active,
-    startsAt: event.starts_at,
-    endsAt: event.ends_at,
+    startsAt: isoToDatetimeLocal(event.starts_at),
+    endsAt: isoToDatetimeLocal(event.ends_at),
     configJson: JSON.stringify(event.config, null, 2),
     songHunt:
       event.type === "song_hunt"
@@ -362,7 +373,7 @@ function SongHuntConfigFields({
         ...f.songHunt,
         hints: [
           ...f.songHunt.hints,
-          { text: "", unlocksAt: new Date().toISOString() },
+          { text: "", unlocksAt: toDatetimeLocalValue(new Date()) },
         ],
       },
     }));
@@ -508,7 +519,7 @@ function SongHuntConfigFields({
         <div className="space-y-3">
           {form.songHunt.hints.map((hint, index) => (
             <div
-              key={`${index}-${hint.unlocksAt}`}
+              key={index}
               className="border border-border/60 rounded-sm p-3 space-y-3 bg-bg-panel"
             >
               <div className="flex items-center justify-between gap-2">
@@ -543,17 +554,15 @@ function SongHuntConfigFields({
                   className="block text-xs text-text-dim mb-1"
                   htmlFor={`${fieldIdPrefix}-hint-${index}-unlock`}
                 >
-                  unlocks at (UTC stored as ISO)
+                  unlocks at
                 </label>
                 <input
                   id={`${fieldIdPrefix}-hint-${index}-unlock`}
                   type="datetime-local"
                   required
-                  value={toLocalDatetimeValue(hint.unlocksAt)}
+                  value={hint.unlocksAt}
                   onChange={(e) =>
-                    updateHint(index, {
-                      unlocksAt: fromLocalDatetimeValue(e.target.value),
-                    })
+                    updateHint(index, { unlocksAt: e.target.value })
                   }
                   className={INPUT}
                 />
@@ -659,11 +668,11 @@ function EventForm({
             id={`${form.id ?? "new"}-ev-start`}
             type="datetime-local"
             required
-            value={toLocalDatetimeValue(form.startsAt)}
+            value={form.startsAt}
             onChange={(e) =>
               setForm((f) => ({
                 ...f,
-                startsAt: fromLocalDatetimeValue(e.target.value),
+                startsAt: e.target.value,
               }))
             }
             className={INPUT}
@@ -680,11 +689,11 @@ function EventForm({
             id={`${form.id ?? "new"}-ev-end`}
             type="datetime-local"
             required
-            value={toLocalDatetimeValue(form.endsAt)}
+            value={form.endsAt}
             onChange={(e) =>
               setForm((f) => ({
                 ...f,
-                endsAt: fromLocalDatetimeValue(e.target.value),
+                endsAt: e.target.value,
               }))
             }
             className={INPUT}
@@ -1019,8 +1028,8 @@ function EventRow({
           title: form.title,
           description: form.description || undefined,
           active: form.active,
-          startsAt: form.startsAt,
-          endsAt: form.endsAt,
+          startsAt: datetimeLocalToIso(form.startsAt),
+          endsAt: datetimeLocalToIso(form.endsAt),
           config,
         }),
       });
@@ -1530,8 +1539,8 @@ export function GameAdmin() {
           title: eventForm.title,
           description: eventForm.description || undefined,
           active: eventForm.active,
-          startsAt: eventForm.startsAt,
-          endsAt: eventForm.endsAt,
+          startsAt: datetimeLocalToIso(eventForm.startsAt),
+          endsAt: datetimeLocalToIso(eventForm.endsAt),
           config,
         }),
       });

@@ -36,6 +36,8 @@ export const sellItemSchema = z.object({
 export const equipItemSchema = z.object({
   itemId: z.string().min(1),
   action: z.enum(["equip", "unequip"]),
+  /** Required when equipping a ground-category item. */
+  side: z.enum(["left", "right"]).optional(),
 });
 
 export const createTradeSchema = z.object({

@@ -1,8 +1,18 @@
-import type { EquipSlot, Herzie, Inventory, ItemDef } from "@herzies/shared";
+import type {
+  Equipped,
+  EquippedSlot,
+  GroundSide,
+  Herzie,
+  Inventory,
+  ItemDef,
+} from "@herzies/shared";
 import {
+  findEquippedSlot,
   getItem,
+  groundSlot,
   RARITY_COLORS as ITEM_RARITY_COLORS,
   ItemPreview,
+  normalizeEquipped,
 } from "@herzies/shared";
 import { useEffect, useState } from "react";
 import { cn } from "../lib/utils";
@@ -12,14 +22,15 @@ import ItemInspectOverlay from "./ItemInspectOverlay";
 import { NumberTicker } from "./NumberTicker";
 import { Tooltip } from "./Tooltip";
 
-/** Wearable areas shown as overlays on the 3D render. More slots stack per side. */
+/** Wearable areas shown as overlays on the 3D render. */
 const WEARABLE_AREAS: {
-  slot: EquipSlot;
+  slot: EquippedSlot;
   label: string;
   side: "left" | "right";
 }[] = [
   { slot: "scenery", label: "scene", side: "left" },
-  { slot: "ground", label: "ground", side: "left" },
+  { slot: "ground_left", label: "ground L", side: "left" },
+  { slot: "ground_right", label: "ground R", side: "right" },
   { slot: "head", label: "head", side: "right" },
   { slot: "face", label: "face", side: "right" },
   { slot: "body", label: "body", side: "right" },
@@ -118,6 +129,12 @@ function WearableArea({
   );
 }
 
+function pickGroundSide(equipped: Equipped): GroundSide {
+  if (!equipped.ground_left) return "left";
+  if (!equipped.ground_right) return "right";
+  return "left"; // both occupied → replace left
+}
+
 export function InventoryView({
   herzie,
   initialItem,
@@ -132,13 +149,15 @@ export function InventoryView({
   onLog?: (msg: string) => void;
   inventory: Inventory | null;
   currency: number;
-  equipped: string[];
+  equipped: Equipped;
   /** False while another tab is shown — pauses the 3D render. */
   active?: boolean;
 }) {
   const [inventory, setInventory] = useState<Inventory | null>(cachedInventory);
   const [currency, setCurrency] = useState(cachedCurrency || herzie.currency);
-  const [equipped, setEquipped] = useState(cachedEquipped);
+  const [equipped, setEquipped] = useState(() =>
+    normalizeEquipped(cachedEquipped),
+  );
   const [inspectItem, setInspectItem] = useState<string | null>(
     initialItem ?? null,
   );
@@ -146,7 +165,7 @@ export function InventoryView({
   useEffect(() => {
     setInventory(cachedInventory);
     setCurrency(cachedCurrency || herzie.currency);
-    setEquipped(cachedEquipped);
+    setEquipped(normalizeEquipped(cachedEquipped));
   }, [cachedInventory, cachedCurrency, cachedEquipped, herzie.currency]);
 
   useEffect(() => {
@@ -159,7 +178,7 @@ export function InventoryView({
       if (data) {
         setInventory(data.inventory);
         setCurrency(data.currency);
-        setEquipped(data.equipped ?? []);
+        setEquipped(normalizeEquipped(data.equipped));
       }
     });
   }, []);
@@ -173,13 +192,17 @@ export function InventoryView({
   };
 
   const handleEquip = async (itemId: string) => {
-    const isEquipped = equipped.includes(itemId);
-    const action = isEquipped ? "unequip" : "equip";
+    const existing = findEquippedSlot(equipped, itemId);
+    const action = existing ? "unequip" : "equip";
     const item = getItem(itemId);
     const name = item?.name ?? itemId;
+    let side: GroundSide | undefined;
+    if (action === "equip" && item?.equipSlot === "ground") {
+      side = pickGroundSide(equipped);
+    }
     try {
-      const result = await herzies.equipItem(itemId, action);
-      setEquipped(result.equipped);
+      const result = await herzies.equipItem(itemId, action, side);
+      setEquipped(normalizeEquipped(result.equipped));
       onLog?.(action === "equip" ? `Equipped ${name}` : `Unequipped ${name}`);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -207,13 +230,13 @@ export function InventoryView({
     : [];
   const loading = inventory === null;
 
-  const equippedInSlot = (slot: EquipSlot): ItemDef | null => {
-    for (const id of equipped) {
-      const def = getItem(id);
-      if (def?.equipSlot === slot) return def;
-    }
-    return null;
+  const equippedInSlot = (slot: EquippedSlot): ItemDef | null => {
+    const id = equipped[slot];
+    return id ? (getItem(id) ?? null) : null;
   };
+
+  const isItemEquipped = (itemId: string) =>
+    findEquippedSlot(equipped, itemId) !== null;
 
   const inspected = inspectItem ? getItem(inspectItem) : null;
   const inspectedQty = inspectItem ? (inventory?.[inspectItem] ?? 0) : 0;
@@ -231,7 +254,7 @@ export function InventoryView({
           <Herzie3D
             userId={herzie.friendCode}
             stage={herzie.stage}
-            wearables={equipped}
+            equipped={equipped}
             paused={!active}
           />
         </div>
@@ -275,8 +298,7 @@ export function InventoryView({
           items.map(([itemId, qty]) => {
             const def = getItem(itemId);
             const name = def?.name ?? itemId;
-            const rarity = def?.rarity ?? "common";
-            const isEquipped = equipped.includes(itemId);
+            const isEquipped = isItemEquipped(itemId);
             return (
               <div
                 key={itemId}
@@ -288,15 +310,13 @@ export function InventoryView({
                   className="min-w-0 flex-1 cursor-pointer text-left"
                   title="Inspect item"
                 >
-                  <div
-                    className="truncate text-ui hover:underline"
-                    // style={{ color: ITEM_RARITY_COLORS[rarity] }}
-                  >
-                    {name}
-                  </div>
+                  <div className="truncate text-ui hover:underline">{name}</div>
                   <div className="text-[10px] text-text-dim">
                     x{qty}
                     {def?.sellPrice ? ` · $${def.sellPrice} each` : ""}
+                    {isEquipped && def?.equipSlot === "ground"
+                      ? ` · ${findEquippedSlot(equipped, itemId) === groundSlot("left") ? "L" : "R"}`
+                      : ""}
                   </div>
                 </button>
                 {def?.equipable && (
@@ -326,11 +346,11 @@ export function InventoryView({
                   type="button"
                   className={cn(
                     "btn",
-                    equipped.includes(inspectItem) ? "text-red" : "text-green",
+                    isItemEquipped(inspectItem) ? "text-red" : "text-green",
                   )}
                   onClick={() => handleEquip(inspectItem)}
                 >
-                  {equipped.includes(inspectItem) ? "Unequip" : "Equip"}
+                  {isItemEquipped(inspectItem) ? "Unequip" : "Equip"}
                 </button>
               )}
               {inspected.sellPrice && inspectedQty > 0 ? (

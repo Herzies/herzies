@@ -64,6 +64,7 @@ export function EventsView({
 }) {
   const [events, setEvents] = useState<GameEvent[]>([]);
   const [previousHunt, setPreviousHunt] = useState<GameEvent | null>(null);
+  const [nextHunt, setNextHunt] = useState<GameEvent | null>(null);
   const [loading, setLoading] = useState(true);
   const [inspectOverlay, setInspectOverlay] = useState<"item" | null>(null);
   const focused = useWindowFocused();
@@ -77,6 +78,7 @@ export function EventsView({
         setPreviousHunt(
           previous.events.find((e) => e.type === "song_hunt") ?? null,
         );
+        setNextHunt(previous.next);
         setLoading(false);
       })
       .catch(() => {
@@ -100,6 +102,7 @@ export function EventsView({
         setPreviousHunt(
           previous.events.find((e) => e.type === "song_hunt") ?? null,
         );
+        setNextHunt(previous.next);
       });
     };
 
@@ -126,7 +129,8 @@ export function EventsView({
     )
     .slice(0, 20);
 
-  if (!hunt && previousHunt) {
+  if (!hunt && (previousHunt || nextHunt)) {
+    const nextStartsAt = nextHunt ? new Date(nextHunt.startsAt) : null;
     return (
       <View
         title="Events"
@@ -137,92 +141,100 @@ export function EventsView({
           <div>
             <h2 className="text-ui-2xl mb-3 font-bold">
               Song Hunt{" "}
-              <span className="text-ui text-text-dim">
-                (
-                {Intl.DateTimeFormat("en-US", {
-                  day: "numeric",
-                  month: "short",
-                }).format(getNextMonday())}
-                )
-              </span>
+              {nextStartsAt ? (
+                <span className="text-ui text-text-dim">
+                  (
+                  {Intl.DateTimeFormat("en-US", {
+                    day: "numeric",
+                    month: "short",
+                  }).format(nextStartsAt)}
+                  )
+                </span>
+              ) : null}
             </h2>
 
             <div className="text-ui-lg">
-              Starts in {countDownToMonday(getNextMonday())}.
+              {nextStartsAt
+                ? `Starts in ${formatStartsIn(nextStartsAt)}.`
+                : "No hunt scheduled yet."}
             </div>
           </div>
 
-          <div className="mt-4 flex min-h-0 flex-1 flex-col border-t border-border pt-4">
-            <h2 className="text-ui-lg mb-3 font-bold">
-              Previous{" "}
-              <span className="text-ui text-text-dim">
-                (
-                {Intl.DateTimeFormat("en-US", {
-                  day: "numeric",
-                  month: "short",
-                }).format(new Date(previousHunt?.startsAt ?? ""))}
-                )
-              </span>
-            </h2>
+          {previousHunt ? (
+            <div className="mt-4 flex min-h-0 flex-1 flex-col border-t border-border pt-4">
+              <h2 className="text-ui-lg mb-3 font-bold">
+                Previous{" "}
+                <span className="text-ui text-text-dim">
+                  (
+                  {Intl.DateTimeFormat("en-US", {
+                    day: "numeric",
+                    month: "short",
+                  }).format(new Date(previousHunt.startsAt))}
+                  )
+                </span>
+              </h2>
 
-            <div className="flex min-h-0 flex-1 flex-col gap-2">
               <div className="flex min-h-0 flex-1 flex-col gap-2">
-                <div className="flex flex-col gap-1">
-                  <h2 className="text-ui font-bold text-text-dim">Type:</h2>
-                  <div className="text-ui">Song Hunt</div>
-                </div>
-
-                <div className="flex flex-col gap-1">
-                  <h2 className="text-ui font-bold text-text-dim">Answer:</h2>
-                  <div className="text-ui">
-                    {previousHuntConfig?.trackArtist} -{" "}
-                    {previousHuntConfig?.trackTitle}
-                  </div>
-                </div>
-
-                {previousHuntConfig.rewardItemId ? (
+                <div className="flex min-h-0 flex-1 flex-col gap-2">
                   <div className="flex flex-col gap-1">
-                    <h2 className="text-ui font-bold text-text-dim">Reward:</h2>
+                    <h2 className="text-ui font-bold text-text-dim">Type:</h2>
+                    <div className="text-ui">Song Hunt</div>
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <h2 className="text-ui font-bold text-text-dim">Answer:</h2>
                     <div className="text-ui">
-                      {getItem(previousHuntConfig.rewardItemId)?.name}
+                      {previousHuntConfig?.trackArtist} -{" "}
+                      {previousHuntConfig?.trackTitle}
                     </div>
                   </div>
-                ) : null}
 
-                <div className="flex min-h-0 flex-1 flex-col gap-1">
-                  <h2 className="text-ui font-bold text-text-dim">
-                    Finders ({previousFinders.length}):
-                  </h2>
-
-                  <div className="min-h-0 flex-1 overflow-y-auto">
-                    {previousFinders.length > 0 ? (
-                      previousFinders.map((finder, i) => {
-                        const elapsed = formatDuration(
-                          new Date(finder.claimedAt).getTime() -
-                            new Date(previousHunt.startsAt).getTime(),
-                        );
-                        return (
-                          <div
-                            key={`${finder.name}-${finder.claimedAt}`}
-                            className="flex justify-between border-b border-border py-0.5 text-ui last:border-b-0"
-                          >
-                            <span className="text-yellow">
-                              {i + 1}. {finder.name}
-                            </span>
-                            <span className="text-text-dim">{elapsed}</span>
-                          </div>
-                        );
-                      })
-                    ) : (
-                      <div className="text-ui text-text-dim">
-                        No finders from the previous hunt.
+                  {previousHuntConfig.rewardItemId ? (
+                    <div className="flex flex-col gap-1">
+                      <h2 className="text-ui font-bold text-text-dim">
+                        Reward:
+                      </h2>
+                      <div className="text-ui">
+                        {getItem(previousHuntConfig.rewardItemId)?.name}
                       </div>
-                    )}
+                    </div>
+                  ) : null}
+
+                  <div className="flex min-h-0 flex-1 flex-col gap-1">
+                    <h2 className="text-ui font-bold text-text-dim">
+                      Finders ({previousFinders.length}):
+                    </h2>
+
+                    <div className="min-h-0 flex-1 overflow-y-auto">
+                      {previousFinders.length > 0 ? (
+                        previousFinders.map((finder, i) => {
+                          const elapsed = formatDuration(
+                            new Date(finder.claimedAt).getTime() -
+                              new Date(previousHunt.startsAt).getTime(),
+                          );
+                          return (
+                            <div
+                              key={`${finder.name}-${finder.claimedAt}`}
+                              className="flex justify-between border-b border-border py-0.5 text-ui last:border-b-0"
+                            >
+                              <span className="text-yellow">
+                                {i + 1}. {finder.name}
+                              </span>
+                              <span className="text-text-dim">{elapsed}</span>
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <div className="text-ui text-text-dim">
+                          No finders from the previous hunt.
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
-          </div>
+          ) : null}
         </div>
       </View>
     );
@@ -231,7 +243,7 @@ export function EventsView({
   if (!hunt) {
     return (
       <div className="flex h-full items-center justify-center text-center text-xs text-text-dim">
-        No active Song Hunt. Check back Monday!
+        No active Song Hunt. Check back later!
       </div>
     );
   }
@@ -354,7 +366,7 @@ export function EventsView({
   );
 }
 
-function countDownToMonday(date: Date): string {
+function formatStartsIn(date: Date): string {
   const now = new Date();
   const diff = date.getTime() - now.getTime();
   if (diff <= 0) return "Today";
@@ -365,17 +377,6 @@ function countDownToMonday(date: Date): string {
   if (days > 0) {
     return `${days}d${hours > 0 ? ` ${hours}h` : ""}`;
   }
-  // If less than 1 day left, show just hours
   const onlyHours = Math.floor(diff / (1000 * 60 * 60));
   return `${onlyHours}h`;
-}
-
-function getNextMonday(): Date {
-  const now = new Date();
-  const day = now.getDay();
-  const daysUntilMonday = (8 - day) % 7 || 7;
-  const nextMonday = new Date(now);
-  nextMonday.setHours(0, 0, 0, 0);
-  nextMonday.setDate(now.getDate() + daysUntilMonday);
-  return nextMonday;
 }

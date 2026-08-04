@@ -38,7 +38,7 @@ function cellsToStrings(cells: Cell[][]): string[] {
 
 export type Rarity = "common" | "uncommon" | "rare" | "legendary";
 
-/** Equip slot categories — only one item per slot may be equipped at a time. */
+/** Catalog equip categories (item.equip_slot). Ground items choose a side at equip time. */
 export const EQUIP_SLOTS = [
   "head",
   "face",
@@ -48,6 +48,59 @@ export const EQUIP_SLOTS = [
 ] as const;
 export type EquipSlot = (typeof EQUIP_SLOTS)[number];
 
+/** Keys stored on herzies.equipped — ground splits into left/right instance slots. */
+export const EQUIPPED_SLOTS = [
+  "head",
+  "face",
+  "body",
+  "scenery",
+  "ground_left",
+  "ground_right",
+] as const;
+export type EquippedSlot = (typeof EQUIPPED_SLOTS)[number];
+
+export type GroundSide = "left" | "right";
+
+/** Slot-keyed map of currently equipped item IDs. */
+export type Equipped = Partial<Record<EquippedSlot, string>>;
+
+export function groundSlot(side: GroundSide): EquippedSlot {
+  return side === "left" ? "ground_left" : "ground_right";
+}
+
+export function equippedItemIds(equipped: Equipped | null | undefined): string[] {
+  if (!equipped) return [];
+  return Object.values(equipped).filter(
+    (id): id is string => typeof id === "string" && id.length > 0,
+  );
+}
+
+export function findEquippedSlot(
+  equipped: Equipped | null | undefined,
+  itemId: string,
+): EquippedSlot | null {
+  if (!equipped) return null;
+  for (const slot of EQUIPPED_SLOTS) {
+    if (equipped[slot] === itemId) return slot;
+  }
+  return null;
+}
+
+/** Normalize API/cache payloads that may still be a legacy string[]. */
+export function normalizeEquipped(raw: unknown): Equipped {
+  if (!raw || typeof raw !== "object") return {};
+  if (Array.isArray(raw)) {
+    // Legacy array — drop side info; callers should re-equip after migration.
+    return {};
+  }
+  const out: Equipped = {};
+  for (const slot of EQUIPPED_SLOTS) {
+    const v = (raw as Record<string, unknown>)[slot];
+    if (typeof v === "string" && v.length > 0) out[slot] = v;
+  }
+  return out;
+}
+
 export interface ItemDef {
   id: string;
   name: string;
@@ -56,7 +109,7 @@ export interface ItemDef {
   frames: string[][]; // Each frame is an array of lines (with HTML color spans)
   stackable?: boolean;
   equipable?: boolean;
-  /** When set, equipping replaces any other item in the same slot. */
+  /** Catalog category; ground items occupy ground_left or ground_right when equipped. */
   equipSlot?: EquipSlot;
   sellPrice?: number;
 }
@@ -960,6 +1013,120 @@ function renderBoomboxFrame(yAngle: number): string[] {
   return cellsToStrings(renderBoomboxCells(yAngle));
 }
 
+// --- Coffee mug rendering ---
+
+function renderCoffeeMugCells(yAngle: number): Cell[][] {
+  const cosA = Math.cos(yAngle);
+  const sinA = Math.sin(yAngle);
+  const rot = (lx: number, ly: number, lz: number): V3 => [
+    lx * cosA + lz * sinA,
+    ly,
+    -lx * sinA + lz * cosA,
+  ];
+
+  const ceramic = "#e8d5c4";
+  const ceramicDark = "#c4a882";
+  const coffee = "#3b2414";
+  const handleCol = "#d4c0a8";
+
+  const mugH = 2.0;
+  const mugR = 0.85;
+  const bodyR = 0.38;
+
+  const spheres: { c: V3; r: number; color: string }[] = [];
+  const add = (c: V3, r: number, color: string) => spheres.push({ c, r, color });
+
+  const rings = 5;
+  const around = 10;
+  for (let iy = 0; iy < rings; iy++) {
+    const fy = (iy / (rings - 1) - 0.5) * mugH;
+    const ringR = mugR * (iy === rings - 1 ? 1.08 : 1);
+    for (let ia = 0; ia < around; ia++) {
+      const ang = (ia / around) * Math.PI * 2;
+      add(
+        rot(Math.cos(ang) * ringR, fy, Math.sin(ang) * ringR),
+        bodyR,
+        iy === rings - 1 ? ceramicDark : ceramic,
+      );
+    }
+  }
+
+  add(rot(0, -mugH * 0.42, 0), mugR * 0.65, coffee);
+
+  const handleSteps = 8;
+  for (let i = 0; i <= handleSteps; i++) {
+    const t = i / handleSteps;
+    const ang = -Math.PI / 2 + Math.PI * t;
+    add(
+      rot(
+        mugR + mugR * 0.55 * (1 + Math.cos(ang)),
+        Math.sin(ang) * mugH * 0.35,
+        0,
+      ),
+      bodyR * 0.65,
+      handleCol,
+    );
+  }
+
+  const camZ = -CAM;
+  const fov = 2.2;
+  const bright: number[][] = Array.from({ length: SH }, () =>
+    Array(SW).fill(-1),
+  );
+  const colorGrid: string[][] = Array.from({ length: SH }, () =>
+    Array(SW).fill(""),
+  );
+
+  for (let sy = 0; sy < SH; sy++) {
+    for (let sx = 0; sx < SW; sx++) {
+      const nrx = (((sx + 0.5) / SW - 0.5) * fov * (SW / SH)) / CHAR_ASPECT;
+      const nry = ((sy + 0.5) / SH - 0.5) * fov;
+      const rd = normV([nrx, nry, 1]);
+
+      let bestT = Infinity;
+      let bestN: V3 = [0, 0, 0];
+      let bestColor = "";
+      for (const s of spheres) {
+        const hit = raySphere(
+          0,
+          0,
+          camZ,
+          rd[0],
+          rd[1],
+          rd[2],
+          s.c[0],
+          s.c[1],
+          s.c[2],
+          s.r,
+        );
+        if (hit && hit[0] < bestT) {
+          bestT = hit[0];
+          bestN = hit[1];
+          bestColor = s.color;
+        }
+      }
+      if (bestT < Infinity) {
+        const val = Math.max(0, dot3(bestN, LIGHT)) * 0.85 + 0.15;
+        bright[sy][sx] = val;
+        colorGrid[sy][sx] = bestColor;
+      }
+    }
+  }
+
+  return bright.map((row, y) =>
+    row.map((val, x) => {
+      if (val < 0) return EMPTY_CELL;
+      const ch = rampChar(val);
+      if (ch === " ") return EMPTY_CELL;
+      return { ch, color: shadeItemColor(colorGrid[y][x], val) };
+    }),
+  );
+}
+
+function renderCoffeeMugFrame(yAngle: number): string[] {
+  return cellsToStrings(renderCoffeeMugCells(yAngle));
+}
+
 // --- Generate all frames ---
 function generateFrames(
   renderFn: (angle: number) => string[],
@@ -975,6 +1142,7 @@ const cdFrames = generateFrames(renderCdFrame);
 const headphonesFrames = generateFrames(renderHeadphonesFrame);
 const rainbowHeadbandFrames = generateFrames(renderRainbowHeadbandFrame);
 const boomboxFrames = generateFrames(renderBoomboxFrame);
+const coffeeMugFrames = generateFrames(renderCoffeeMugFrame);
 
 // --- Scenery icons (not 3D — simple animated ASCII for inventory display) ---
 const SCENERY_SKY = "#8899aa";
@@ -1080,6 +1248,15 @@ export const ITEMS: ItemDef[] = [
     description: "A retro boombox.",
     rarity: "rare",
     frames: boomboxFrames,
+    equipable: true,
+    equipSlot: "ground",
+  },
+  {
+    id: "coffee-mug",
+    name: "Coffee Mug",
+    description: "A warm mug for getting back to work. Sits by your herzie's feet.",
+    rarity: "uncommon",
+    frames: coffeeMugFrames,
     equipable: true,
     equipSlot: "ground",
   },

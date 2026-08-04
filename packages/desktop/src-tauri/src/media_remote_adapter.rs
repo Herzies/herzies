@@ -124,21 +124,6 @@ const MUSIC_BUNDLE_ALLOWLIST: &[&str] = &[
     "com.apple.MusicKit.MusicUI",
 ];
 
-/// Browsers and other apps that often expose web/video Now Playing without album metadata.
-const NON_MUSIC_BUNDLE_PREFIXES: &[&str] = &[
-    "com.apple.Safari",
-    "com.google.Chrome",
-    "org.mozilla.firefox",
-    "com.microsoft.edgemac",
-    "com.brave.Browser",
-    "company.thebrowser.Browser",
-    "com.operasoftware.Opera",
-    "com.vivaldi.Vivaldi",
-    "com.apple.QuickTimePlayerX",
-    "com.colliderli.iina",
-    "com.apple.TV",
-];
-
 fn counts_as_music_listening(parsed: &AdapterNowPlaying) -> bool {
     let bundle = parsed.bundle_identifier.as_deref().unwrap_or("");
 
@@ -146,13 +131,7 @@ fn counts_as_music_listening(parsed: &AdapterNowPlaying) -> bool {
         return true;
     }
 
-    if NON_MUSIC_BUNDLE_PREFIXES
-        .iter()
-        .any(|prefix| bundle == *prefix || bundle.starts_with(&format!("{prefix}.")))
-    {
-        return false;
-    }
-
+    // Apps that explicitly flag themselves as non-music (some video players do) never count.
     if parsed.is_music_app == Some(false) {
         return false;
     }
@@ -161,6 +140,9 @@ fn counts_as_music_listening(parsed: &AdapterNowPlaying) -> bool {
         return true;
     }
 
+    // Reject clear video content whenever the source bothers to tell us. Browser web
+    // players (SoundCloud, Bandcamp, YouTube, ...) usually leave this empty, so it can't
+    // be relied on to separate audio from video — it's only a best-effort reject.
     if let Some(ref media_type) = parsed.media_type {
         let mt = media_type.to_ascii_lowercase();
         if mt.contains("video") {
@@ -171,11 +153,16 @@ fn counts_as_music_listening(parsed: &AdapterNowPlaying) -> bool {
         }
     }
 
-    // Web players and misc sources: require album metadata (YouTube etc. usually omit it).
-    parsed
-        .album
+    // Everything else (notably browser audio like SoundCloud) lacks album/mediaType
+    // metadata, so we count it only when we can extract both a track title and an artist.
+    // Caveat: on video platforms the "artist" is often the channel name, so those plays
+    // will count too — an accepted trade-off for tracking web music players.
+    let has_title = !parsed.title.trim().is_empty();
+    let has_artist = parsed
+        .artist
         .as_ref()
-        .is_some_and(|album| !album.trim().is_empty())
+        .is_some_and(|artist| !artist.trim().is_empty());
+    has_title && has_artist
 }
 
 pub fn get_now_playing() -> Option<NowPlayingInfo> {
@@ -242,12 +229,27 @@ mod tests {
     }
 
     #[test]
-    fn rejects_browsers_without_album() {
-        assert!(!counts_as_music_listening(&sample(
+    fn accepts_browser_audio_with_title_and_artist() {
+        // SoundCloud in Chrome: no album, no mediaType, no isMusicApp — just title + artist.
+        assert!(counts_as_music_listening(&sample(
             "com.google.Chrome",
-            Some(false),
+            None,
             None
         )));
+    }
+
+    #[test]
+    fn rejects_browser_audio_without_artist() {
+        let mut np = sample("com.google.Chrome", None, None);
+        np.artist = None;
+        assert!(!counts_as_music_listening(&np));
+    }
+
+    #[test]
+    fn rejects_browser_audio_without_title() {
+        let mut np = sample("com.google.Chrome", None, None);
+        np.title = "   ".into();
+        assert!(!counts_as_music_listening(&np));
     }
 
     #[test]
@@ -257,6 +259,13 @@ mod tests {
             Some(false),
             Some("Some Album")
         )));
+    }
+
+    #[test]
+    fn rejects_video_media_type() {
+        let mut np = sample("com.google.Chrome", None, None);
+        np.media_type = Some("MRMediaRemoteMediaTypeVideo".into());
+        assert!(!counts_as_music_listening(&np));
     }
 
     #[test]

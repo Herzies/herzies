@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { authenticateRequest, isAuthError } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase-admin";
+import { normalizeEquipped } from "@herzies/shared";
 
 /**
  * Look up herzies by friend code(s). Requires authentication.
@@ -138,7 +139,7 @@ type HerzieRow = {
   level: number;
   currency: number | null;
   appearance: unknown;
-  equipped: string[] | null;
+  equipped: unknown;
   now_playing: { title?: string; artist?: string } | null;
 };
 
@@ -167,7 +168,7 @@ function formatProfile(
     currency: row.currency,
     appearance: row.appearance,
     topArtists: canSeeListening ? topArtists : [],
-    equipped: row.equipped,
+    equipped: normalizeEquipped(row.equipped),
     nowPlaying: canSeeListening ? formatNowPlaying(row.now_playing) : null,
     lastPlayed: canSeeListening ? lastPlayed : null,
   };

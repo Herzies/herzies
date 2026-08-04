@@ -388,6 +388,14 @@ verify_jwt = true
 import_map = "./functions/deno.json"
 entrypoint = "./functions/sync/index.ts"
 
+# Port of GET/POST /api/chat to an Edge Function (co-located with Postgres).
+# Requires a valid Supabase user JWT (the desktop client sends one as Bearer).
+[functions.chat]
+enabled = true
+verify_jwt = true
+import_map = "./functions/deno.json"
+entrypoint = "./functions/chat/index.ts"
+
 [analytics]
 enabled = true
 port = 54327

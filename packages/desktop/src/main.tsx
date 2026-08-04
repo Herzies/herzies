@@ -42,7 +42,7 @@ function App() {
     isOnline: false,
     isConnected: true,
     version: "",
-    equipped: [],
+    equipped: {},
     chatMessages: [],
     inventory: null,
     inventoryCurrency: 0,

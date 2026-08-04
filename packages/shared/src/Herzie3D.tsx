@@ -20,6 +20,7 @@ import {
   SH,
   SW,
 } from "./creature-renderer.js";
+import type { Equipped } from "./items.js";
 
 const FONT_FAMILY = "'SF Mono', 'Menlo', monospace";
 const DRAG_SENSITIVITY = Math.PI / 200; // ~180° per 200px
@@ -40,7 +41,9 @@ interface Props {
   animate?: boolean;
   /** Music is playing — switches to dance animation. No effect when animate is false. */
   isPlaying?: boolean;
-  /** Active wearable IDs to render on the creature (e.g. ["headphones"]). */
+  /** Slot-keyed equipped items (preferred). */
+  equipped?: Equipped;
+  /** @deprecated Prefer `equipped`. Converted to a best-effort map if equipped is absent. */
   wearables?: string[];
   /** Override procedural params derived from userId (sandbox / tooling). */
   creatureParams?: CreatureParams;
@@ -58,6 +61,25 @@ interface Props {
   defaultAngle?: number;
 }
 
+function resolveEquipped(
+  equipped?: Equipped,
+  wearables?: string[],
+): Equipped | undefined {
+  if (equipped) return equipped;
+  if (!wearables?.length) return undefined;
+  // Legacy array: put first ground item on left; head items on head.
+  const out: Equipped = {};
+  for (const id of wearables) {
+    if (id === "headphones" || id === "rainbow-headband") out.head = id;
+    else if (id === "clouds" || id === "stars") out.scenery = id;
+    else if (id === "boombox" || id === "coffee-mug") {
+      if (!out.ground_left) out.ground_left = id;
+      else out.ground_right = id;
+    }
+  }
+  return out;
+}
+
 export function Herzie3D({
   userId,
   stage = 1,
@@ -65,6 +87,7 @@ export function Herzie3D({
   cols = SW,
   animate,
   isPlaying = false,
+  equipped: equippedProp,
   wearables,
   creatureParams,
   boomboxConfig,
@@ -75,6 +98,7 @@ export function Herzie3D({
   ariaLabel,
   defaultAngle = 0,
 }: Props) {
+  const equipped = resolveEquipped(equippedProp, wearables);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [frame, setFrame] = useState(0);
   const [dragAngle, setDragAngle] = useState(defaultAngle);
@@ -102,7 +126,7 @@ export function Herzie3D({
       return generateDanceFrames(
         userId,
         stage,
-        wearables,
+        equipped,
         creatureParams,
         cols,
         boomboxConfig,
@@ -112,7 +136,7 @@ export function Herzie3D({
         userId,
         stage,
         undefined,
-        wearables,
+        equipped,
         creatureParams,
         cols,
         boomboxConfig,
@@ -120,7 +144,7 @@ export function Herzie3D({
     return generateIdleFrames(
       userId,
       stage,
-      wearables,
+      equipped,
       creatureParams,
       cols,
       boomboxConfig,
@@ -130,7 +154,7 @@ export function Herzie3D({
     stage,
     animate,
     dancing,
-    wearables,
+    equipped,
     creatureParams,
     cols,
     boomboxConfig,
@@ -262,7 +286,7 @@ export function Herzie3D({
         yAngle,
         frame,
         dancing,
-        wearables,
+        equipped,
         creatureParams,
         cols,
         boomboxConfig,
@@ -282,7 +306,7 @@ export function Herzie3D({
     stage,
     animate,
     dancing,
-    wearables,
+    equipped,
     creatureParams,
     cols,
     boomboxConfig,

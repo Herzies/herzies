@@ -474,12 +474,18 @@ async fn sell_item(
 async fn equip_item(
     item_id: String,
     action: String,
+    side: Option<String>,
     app: AppHandle,
     state: tauri::State<'_, SharedState>,
 ) -> Result<serde_json::Value, String> {
     let client = Client::new();
-    let result = api::api_equip_item(&client, &item_id, &action).await?;
-    if let Ok(equipped) = serde_json::from_value::<Vec<String>>(result["equipped"].clone()) {
+    let result =
+        api::api_equip_item(&client, &item_id, &action, side.as_deref()).await?;
+    if let Ok(equipped) =
+        serde_json::from_value::<std::collections::HashMap<String, String>>(
+            result["equipped"].clone(),
+        )
+    {
         let mut s = state.lock().unwrap();
         s.equipped = equipped;
         storage::save_equipped(&s.equipped);
@@ -583,8 +589,8 @@ async fn fetch_active_events() -> Result<serde_json::Value, String> {
 async fn fetch_previous_hunt() -> Result<serde_json::Value, String> {
     let client = Client::new();
     match api::api_fetch_previous_hunt(&client).await {
-        Some(events) => Ok(serde_json::json!({ "events": events })),
-        None => Ok(serde_json::json!({ "events": [] })),
+        Some((events, next)) => Ok(serde_json::json!({ "events": events, "next": next })),
+        None => Ok(serde_json::json!({ "events": [], "next": null })),
     }
 }
 
@@ -661,6 +667,34 @@ async fn chat_send(
     }
 }
 
+/// Ingest a single chat message pushed over Supabase Realtime Broadcast. The
+/// broadcast payload already carries the fully-formed message (enriched with the
+/// sender's name/friend code by the DB trigger), so we append it directly to the
+/// shared state instead of doing a GET round-trip per message. Deduped by id and
+/// capped to the same window the GET returns; the periodic reconcile keeps the
+/// canonical list authoritative.
+#[tauri::command]
+fn chat_ingest(
+    message: ChatMessage,
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<(), String> {
+    const MAX_MESSAGES: usize = 50;
+    let mut s = state.lock().unwrap();
+    if s.chat_messages.iter().any(|m| m.id == message.id) {
+        return Ok(());
+    }
+    s.chat_messages.push(message);
+    let len = s.chat_messages.len();
+    if len > MAX_MESSAGES {
+        s.chat_messages.drain(0..len - MAX_MESSAGES);
+    }
+    let app_state = s.to_app_state(env!("CARGO_PKG_VERSION"));
+    drop(s);
+    let _ = app.emit("state-update", &app_state);
+    Ok(())
+}
+
 // --- Helper types for command results ---
 
 #[derive(serde::Serialize)]
@@ -682,7 +716,7 @@ struct FriendResult {
 struct InventoryResult {
     inventory: Inventory,
     currency: u32,
-    equipped: Vec<String>,
+    equipped: std::collections::HashMap<String, String>,
 }
 
 // --- App cache (inventory, friends, chat, equipped) ---
@@ -700,7 +734,7 @@ fn apply_inventory(
     s: &mut ManagedState,
     inventory: Inventory,
     currency: u32,
-    equipped: Vec<String>,
+    equipped: std::collections::HashMap<String, String>,
 ) {
     s.inventory = Some(inventory.clone());
     s.inventory_currency = currency;
@@ -1536,7 +1570,10 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
-            None,
+            // Passed only when macOS launches us at login, so a cold start can
+            // tell "user opened the app" (show the window) apart from "launched
+            // at login" (stay hidden in the menu bar).
+            Some(vec!["--autostart"]),
         ))
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -1586,6 +1623,7 @@ pub fn run() {
             get_auth_config,
             chat_fetch,
             chat_send,
+            chat_ingest,
             test_notification,
             test_activity,
             debug_media_remote_now_playing,
@@ -1660,6 +1698,15 @@ pub fn run() {
                         }
                         _ => {}
                     });
+                }
+
+                // Cold start: if the user opened the app themselves (rather than
+                // it being launched at login), surface the window. Without this,
+                // quitting and reopening the app only re-shows the tray icon and
+                // nothing visibly happens.
+                let launched_at_login = std::env::args().any(|arg| arg == "--autostart");
+                if !launched_at_login {
+                    tray::ensure_visible(app.handle());
                 }
             } else {
                 // In dev, show window immediately

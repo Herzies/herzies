@@ -65,7 +65,7 @@ export function ProfileView({
             userId={profile.friendCode}
             stage={stageOverride ?? profile.stage}
             isPlaying={isFriend ? !!profile.nowPlaying : false}
-            wearables={profile.equipped ?? []}
+            equipped={profile.equipped ?? {}}
           />
         </div>
       )}

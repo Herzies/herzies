@@ -1,5 +1,6 @@
 import type {
   ActiveMultiplier,
+  Equipped,
   FriendRequestSummary,
   FriendSearchResult,
   GameEvent,
@@ -68,7 +69,7 @@ export interface AppState {
   isOnline: boolean;
   isConnected: boolean;
   version: string;
-  equipped: string[];
+  equipped: Equipped;
   chatMessages: ChatMessage[];
   inventory: Inventory | null;
   inventoryCurrency: number;
@@ -122,7 +123,7 @@ export const herzies = {
     invoke<{
       inventory: Inventory;
       currency: number;
-      equipped: string[];
+      equipped: Equipped;
     } | null>("fetch_inventory"),
   sellItem: (itemId: string, quantity: number) =>
     invoke<{
@@ -130,8 +131,12 @@ export const herzies = {
       newCurrency: number;
       inventory: Inventory;
     } | null>("sell_item", { itemId, quantity }),
-  equipItem: (itemId: string, action: "equip" | "unequip") =>
-    invoke<{ equipped: string[] }>("equip_item", { itemId, action }),
+  equipItem: (
+    itemId: string,
+    action: "equip" | "unequip",
+    side?: "left" | "right",
+  ) =>
+    invoke<{ equipped: Equipped }>("equip_item", { itemId, action, side }),
 
   tradeCreate: (targetCode: string) =>
     invoke<{ tradeId: string } | null>("trade_create", { targetCode }),
@@ -176,7 +181,9 @@ export const herzies = {
     invoke<{ events: GameEvent[] }>("fetch_active_events"),
 
   fetchPreviousHunt: () =>
-    invoke<{ events: GameEvent[] }>("fetch_previous_hunt"),
+    invoke<{ events: GameEvent[]; next: GameEvent | null }>(
+      "fetch_previous_hunt",
+    ),
 
   fetchLeaderboard: () =>
     invoke<{ entries: LeaderboardEntry[] }>("fetch_leaderboard"),
@@ -196,6 +203,9 @@ export const herzies = {
       itemRefs,
       userRefs,
     }),
+  /** Append a message received over Realtime Broadcast to the shared state. */
+  chatIngest: (message: ChatMessage) =>
+    invoke<void>("chat_ingest", { message }),
 
   /** Open a URL in the system browser (WKWebView does not navigate external https). */
   openExternalUrl: (url: string) => invoke<void>("open_external_url", { url }),

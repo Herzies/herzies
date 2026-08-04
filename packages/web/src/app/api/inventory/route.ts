@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { authenticateRequest, isAuthError } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase-admin";
+import { normalizeEquipped } from "@herzies/shared";
 
 export async function GET(request: Request) {
   const auth = await authenticateRequest(request);
@@ -30,6 +31,6 @@ export async function GET(request: Request) {
     inventory,
     currency: data.currency ?? 0,
     items: items ?? [],
-    equipped: (data.equipped as string[]) ?? [],
+    equipped: normalizeEquipped(data.equipped),
   });
 }

@@ -2,6 +2,13 @@ import { NextResponse } from "next/server";
 import { authenticateRequest, isAuthError } from "@/lib/auth";
 import { equipItemSchema, isParseError, parseBody } from "@/lib/schemas";
 import { createAdminClient } from "@/lib/supabase-admin";
+import {
+  type Equipped,
+  type EquippedSlot,
+  findEquippedSlot,
+  groundSlot,
+  normalizeEquipped,
+} from "@herzies/shared";
 
 export async function POST(request: Request) {
   const auth = await authenticateRequest(request);
@@ -10,7 +17,7 @@ export async function POST(request: Request) {
   const body = await parseBody(request, equipItemSchema);
   if (isParseError(body)) return body;
 
-  const { itemId, action } = body;
+  const { itemId, action, side } = body;
 
   const admin = createAdminClient();
 
@@ -40,8 +47,8 @@ export async function POST(request: Request) {
   }
 
   const inv = (herzie.inventory_v2 ?? {}) as Record<string, number>;
-  const current: string[] = (herzie.equipped as string[]) ?? [];
-  let updated: string[];
+  const current = normalizeEquipped(herzie.equipped);
+  let updated: Equipped;
 
   if (action === "equip") {
     if ((inv[itemId] ?? 0) < 1) {
@@ -50,25 +57,40 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
-    if (current.includes(itemId)) {
+
+    const existingSlot = findEquippedSlot(current, itemId);
+    if (existingSlot) {
       return NextResponse.json({ error: "Already equipped" }, { status: 400 });
     }
 
-    let cleared = current;
-    if (item.equip_slot) {
-      const { data: slotItems } = await admin
-        .from("items")
-        .select("id")
-        .eq("equip_slot", item.equip_slot);
-      const slotIds = new Set((slotItems ?? []).map((row) => row.id));
-      cleared = current.filter((id) => !slotIds.has(id));
+    updated = { ...current };
+
+    if (item.equip_slot === "ground") {
+      if (side !== "left" && side !== "right") {
+        return NextResponse.json(
+          { error: "side (left|right) is required for ground items" },
+          { status: 400 },
+        );
+      }
+      const target = groundSlot(side);
+      updated[target] = itemId;
+    } else if (item.equip_slot) {
+      const slot = item.equip_slot as EquippedSlot;
+      updated[slot] = itemId;
+    } else {
+      // Equipable with no slot — treat as unique by id only (no dedicated key).
+      return NextResponse.json(
+        { error: "Item has no equip slot" },
+        { status: 400 },
+      );
     }
-    updated = [...cleared, itemId];
   } else {
-    if (!current.includes(itemId)) {
+    const slot = findEquippedSlot(current, itemId);
+    if (!slot) {
       return NextResponse.json({ error: "Item not equipped" }, { status: 400 });
     }
-    updated = current.filter((id) => id !== itemId);
+    updated = { ...current };
+    delete updated[slot];
   }
 
   const { error } = await admin

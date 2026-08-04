@@ -413,6 +413,7 @@ pub async fn api_remove_friend(client: &Client, my_code: &str, their_code: &str)
 #[cfg(test)]
 mod lookup_tests {
     use crate::types::HerzieProfile;
+    use std::collections::HashMap;
 
     #[test]
     fn herzie_profile_parses_top_artists_from_lookup_json() {
@@ -436,17 +437,16 @@ mod lookup_tests {
                 { "name": "James Prophet", "plays": 9 },
                 { "name": "The Soul of Philly", "plays": 7 }
             ],
-            "equipped": ["headphones"]
+            "equipped": { "head": "headphones" }
         });
         let profile: HerzieProfile = serde_json::from_value(sample).expect("parse profile");
         let artists = profile.top_artists.expect("top artists");
         assert_eq!(artists.len(), 2);
         assert_eq!(artists[0].name, "James Prophet");
         assert_eq!(artists[0].plays, 9);
-        assert_eq!(
-            profile.equipped.as_deref(),
-            Some(["headphones".to_string()].as_slice())
-        );
+        let mut expected = HashMap::new();
+        expected.insert("head".to_string(), "headphones".to_string());
+        assert_eq!(profile.equipped.as_ref(), Some(&expected));
     }
 }
 
@@ -477,7 +477,9 @@ pub async fn api_lookup_herzies(
     Some(result)
 }
 
-pub async fn api_fetch_inventory(client: &Client) -> Option<(Inventory, u32, Vec<String>)> {
+pub async fn api_fetch_inventory(
+    client: &Client,
+) -> Option<(Inventory, u32, HashMap<String, String>)> {
     let resp = api_fetch(client, reqwest::Method::GET, "/inventory", None).await?;
     if !resp.status().is_success() {
         return None;
@@ -485,8 +487,13 @@ pub async fn api_fetch_inventory(client: &Client) -> Option<(Inventory, u32, Vec
     let data: serde_json::Value = resp.json().await.ok()?;
     let inventory: Inventory = serde_json::from_value(data["inventory"].clone()).ok()?;
     let currency = data["currency"].as_u64().unwrap_or(0) as u32;
-    let equipped: Vec<String> =
-        serde_json::from_value(data["equipped"].clone()).unwrap_or_default();
+    let equipped: HashMap<String, String> = match &data["equipped"] {
+        serde_json::Value::Object(map) => map
+            .iter()
+            .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+            .collect(),
+        _ => HashMap::new(),
+    };
     Some((inventory, currency, equipped))
 }
 
@@ -494,8 +501,12 @@ pub async fn api_equip_item(
     client: &Client,
     item_id: &str,
     action: &str,
+    side: Option<&str>,
 ) -> Result<serde_json::Value, String> {
-    let body = serde_json::json!({ "itemId": item_id, "action": action });
+    let mut body = serde_json::json!({ "itemId": item_id, "action": action });
+    if let Some(s) = side {
+        body["side"] = serde_json::Value::String(s.to_string());
+    }
     let resp = api_fetch(
         client,
         reqwest::Method::POST,
@@ -599,14 +610,25 @@ pub async fn api_fetch_active_events(client: &Client) -> Option<Vec<GameEvent>> 
     Some(data.events)
 }
 
-pub async fn api_fetch_previous_hunt(client: &Client) -> Option<Vec<GameEvent>> {
+pub async fn api_fetch_previous_hunt(
+    client: &Client,
+) -> Option<(Vec<GameEvent>, Option<GameEvent>)> {
     let resp = api_fetch(client, reqwest::Method::GET, "/events/previous-hunt", None).await?;
     if !resp.status().is_success() {
         return None;
     }
     let data: serde_json::Value = resp.json().await.ok()?;
     let events: Vec<GameEvent> = serde_json::from_value(data["events"].clone()).unwrap_or_default();
-    Some(events)
+    let next: Option<GameEvent> = data
+        .get("next")
+        .and_then(|v| {
+            if v.is_null() {
+                None
+            } else {
+                serde_json::from_value(v.clone()).ok()
+            }
+        });
+    Some((events, next))
 }
 
 /// GET /trade/pending — lightweight check for an incoming trade invite.
@@ -645,7 +667,12 @@ pub async fn api_poll_trade(client: &Client, trade_id: &str) -> Option<Trade> {
 }
 
 pub async fn api_chat_fetch(client: &Client) -> Option<ChatFetchResponse> {
-    let resp = api_fetch(client, reqwest::Method::GET, "/chat?limit=50", None).await?;
+    // Ported to a Supabase Edge Function (co-located with Postgres, off Vercel),
+    // like /sync: it lives on the functions base URL and needs the anon key as
+    // `apikey`.
+    let url = format!("{}/chat?limit=50", functions_base());
+    let anon = supabase_anon_key();
+    let resp = api_fetch_full(client, reqwest::Method::GET, &url, None, Some(&anon)).await?;
     if !resp.status().is_success() {
         return None;
     }
@@ -663,7 +690,10 @@ pub async fn api_chat_send(
         "itemRefs": item_refs,
         "userRefs": user_refs,
     });
-    let resp = api_fetch(client, reqwest::Method::POST, "/chat", Some(body)).await?;
+    let url = format!("{}/chat", functions_base());
+    let anon = supabase_anon_key();
+    let resp =
+        api_fetch_full(client, reqwest::Method::POST, &url, Some(body), Some(&anon)).await?;
     if !resp.status().is_success() {
         return None;
     }

@@ -55,7 +55,7 @@ pub struct HerzieProfile {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_artists: Option<Vec<TopArtist>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub equipped: Option<Vec<String>>,
+    pub equipped: Option<HashMap<String, String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub now_playing: Option<ProfileNowPlaying>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -219,7 +219,7 @@ pub struct AppState {
     pub is_online: bool,
     pub is_connected: bool,
     pub version: String,
-    pub equipped: Vec<String>,
+    pub equipped: HashMap<String, String>,
     pub chat_messages: Vec<ChatMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub inventory: Option<Inventory>,
@@ -276,7 +276,7 @@ pub struct ChatMessage {
     pub id: String,
     pub user_id: String,
     pub username: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub friend_code: Option<String>,
     pub content: String,
     #[serde(default)]

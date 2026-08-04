@@ -1,4 +1,4 @@
-import { CHAT_MESSAGE_MAX_LENGTH } from "@herzies/shared";
+import { CHAT_MESSAGE_MAX_LENGTH, CHAT_RETENTION_MS } from "@herzies/shared";
 import { NextResponse } from "next/server";
 import { authenticateRequest, isAuthError } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase-admin";
@@ -58,10 +58,15 @@ export async function GET(request: Request) {
     100,
   );
 
+  // The global chat is ephemeral: never serve messages older than the
+  // retention window, even if the scheduled purge hasn't run yet.
+  const retentionCutoff = new Date(Date.now() - CHAT_RETENTION_MS).toISOString();
+
   const admin = createAdminClient();
   const { data: messages, error } = await admin
     .from("chat_messages")
     .select("id, user_id, content, item_refs, user_refs, created_at")
+    .gte("created_at", retentionCutoff)
     .order("created_at", { ascending: false })
     .limit(limit);
 
