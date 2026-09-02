@@ -49,12 +49,7 @@ export default function ItemInspectOverlay({
           style={{ color: ITEM_RARITY_COLORS[item.rarity] }}
         >
           {RARITY_LABELS[item.rarity]}
-          {meta ? (
-            <>
-              {" "}
-              · {meta}
-            </>
-          ) : null}
+          {meta ? <> · {meta}</> : null}
         </div>
         <div className="text-ui text-text-dim">{item.description}</div>
         {footer && (

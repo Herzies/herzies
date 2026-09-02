@@ -43,7 +43,7 @@ describe("prism", () => {
   it("matches the database row", () => {
     expect(prism).toMatchObject({
       id: "prism",
-      name: "Prism",
+      name: "Prismatic Surrenderer",
       rarity: "uncommon",
       equipable: true,
       equipSlot: "color",

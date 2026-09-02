@@ -399,9 +399,8 @@ function renderIconCard(
   const bright: number[][] = Array.from({ length: SH }, () =>
     Array(SW).fill(-1),
   );
-  const pixelColor: (string | undefined)[][] = Array.from(
-    { length: SH },
-    () => Array(SW).fill(undefined),
+  const pixelColor: (string | undefined)[][] = Array.from({ length: SH }, () =>
+    Array(SW).fill(undefined),
   );
 
   for (let sy = 0; sy < SH; sy++) {
@@ -707,11 +706,13 @@ function generateFrames(
   count = 36,
 ): string[][] {
   // The card faces us for the yAngle arc (PI/2, 3*PI/2) — a symmetric 180°
-  // window regardless of the cosmetic Z tilt. Start at PI/2, the moment it
-  // turns to face us, so the full front-facing arc plays before it turns away.
-  return Array.from({ length: count }, (_, i) =>
-    renderFn((i / count) * Math.PI * 2 + Math.PI / 2),
-  );
+  // window regardless of the cosmetic Z tilt. PI/2 itself is edge-on (zero
+  // width, nothing to render), so start one frame step past it: the earliest
+  // angle that's actually visible, keeping nearly the whole front-facing arc
+  // ahead of frame 0.
+  const step = (Math.PI * 2) / count;
+  const start = Math.PI / 2 + step;
+  return Array.from({ length: count }, (_, i) => renderFn(start + i * step));
 }
 
 const firstEditionFrames = generateFrames(renderCardFrame);
@@ -788,7 +789,8 @@ export const ITEMS: ItemDef[] = [
   {
     id: "cd",
     name: "Nostalgic Token",
-    description: "An image of a CD on a dull card. Weird. Probably not worth much.",
+    description:
+      "An image of a CD on a dull card. Weird. Probably not worth much.",
     rarity: "common",
     frames: cdFrames,
     stackable: true,
