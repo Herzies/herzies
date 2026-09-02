@@ -1,9 +1,11 @@
 import type { Inventory, StoreProduct } from "@herzies/shared";
 import { getItem, ITEMS } from "@herzies/shared";
 import { useEffect, useRef, useState } from "react";
-import { cn } from "../lib/utils";
+import { cn, formatAmount } from "../lib/utils";
 import { herzies, useWindowFocused } from "../tauri-bridge";
+import { Coin } from "./Coin";
 import ItemInspectOverlay from "./ItemInspectOverlay";
+import { Tooltip } from "./Tooltip";
 
 type StoreTab = "items" | "currency";
 
@@ -126,7 +128,11 @@ export function StoreView({
     <div className="flex h-full flex-col">
       <div className="z-50 mb-4 flex items-center justify-between">
         <h1 className="text-ui-lg font-bold text-yellow">Store</h1>
-        <div className="text-ui text-yellow">${currency}</div>
+        <Tooltip label={`${formatAmount(currency)} herzie coins`}>
+          <div className="text-ui text-yellow">
+            <Coin amount={currency} />
+          </div>
+        </Tooltip>
       </div>
 
       <div className="mb-2 flex gap-1 border-b border-border">
@@ -137,7 +143,7 @@ export function StoreView({
           active={tab === "currency"}
           onClick={() => setTab("currency")}
         >
-          Currency
+          <span className="italic">H</span> coins
         </TabButton>
       </div>
 
@@ -173,7 +179,7 @@ export function StoreView({
                         {item.name}
                       </div>
                       <div className="text-[10px] text-text-dim">
-                        {alreadyOwned ? "Owned" : `$${price}`}
+                        {alreadyOwned ? "Owned" : <Coin amount={price} />}
                       </div>
                     </button>
                     <button
@@ -228,7 +234,7 @@ export function StoreView({
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-ui">{p.name}</div>
                     <div className="text-[10px] text-text-dim">
-                      {p.currencyAmount} coins · $
+                      {formatAmount(p.currencyAmount)} coins · $
                       {(p.priceUsdCents / 100).toFixed(2)}
                     </div>
                   </div>
@@ -271,7 +277,9 @@ export function StoreView({
         <ItemInspectOverlay
           itemId={inspectItem}
           onClose={() => setInspectItem(null)}
-          meta={inspectedAlreadyOwned ? "Owned" : `$${inspectedPrice}`}
+          meta={
+            inspectedAlreadyOwned ? "Owned" : <Coin amount={inspectedPrice} />
+          }
           footer={
             inspected.buyPrice != null && (
               <button
@@ -284,11 +292,15 @@ export function StoreView({
                 }
                 onClick={() => handleBuyItem(inspectItem)}
               >
-                {pendingItemId === inspectItem
-                  ? "Buying..."
-                  : inspectedAlreadyOwned
-                    ? "Owned"
-                    : `Buy ($${inspectedPrice})`}
+                {pendingItemId === inspectItem ? (
+                  "Buying..."
+                ) : inspectedAlreadyOwned ? (
+                  "Owned"
+                ) : (
+                  <>
+                    Buy (<Coin amount={inspectedPrice} />)
+                  </>
+                )}
               </button>
             )
           }

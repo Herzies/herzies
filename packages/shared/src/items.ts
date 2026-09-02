@@ -810,6 +810,7 @@ export const ITEMS: ItemDef[] = [
     frames: rainbowHeadbandFrames,
     equipable: true,
     equipSlot: "head",
+    buyPrice: 1000,
     sellPrice: 100,
   },
   {
@@ -825,7 +826,7 @@ export const ITEMS: ItemDef[] = [
   {
     id: "clouds",
     name: "Clouds",
-    description: "Drifting clouds for your herzie's sky.",
+    description: "Paints calming clouds on your herzie's sky.",
     rarity: "rare",
     frames: cloudsFrames,
     equipable: true,
@@ -835,7 +836,7 @@ export const ITEMS: ItemDef[] = [
   {
     id: "stars",
     name: "Stars",
-    description: "A twinkling starfield for your herzie's sky.",
+    description: "Sprinkles a twinkling starfield on your herzie's sky.",
     rarity: "rare",
     frames: starsFrames,
     equipable: true,
@@ -845,7 +846,7 @@ export const ITEMS: ItemDef[] = [
   {
     id: "prism",
     name: "Prism",
-    description: "A rainbow gradient colour scheme for your herzie.",
+    description: "Turns your herzie into a walking rainbow.",
     rarity: "uncommon",
     frames: prismFrames,
     equipable: true,

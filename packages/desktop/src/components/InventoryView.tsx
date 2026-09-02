@@ -6,11 +6,13 @@ import {
   normalizeEquipped,
 } from "@herzies/shared";
 import { useEffect, useState } from "react";
-import { cn } from "../lib/utils";
+import { cn, formatAmount } from "../lib/utils";
 import { herzies } from "../tauri-bridge";
+import { Coin } from "./Coin";
 import { Herzie3D } from "./Herzie3D";
 import ItemInspectOverlay from "./ItemInspectOverlay";
 import { NumberTicker } from "./NumberTicker";
+import { Tooltip } from "./Tooltip";
 
 function SellControls({
   itemId,
@@ -28,7 +30,9 @@ function SellControls({
 
   return (
     <div>
-      <div className="mb-1 text-ui text-text-dim">Sell for ${price} each</div>
+      <div className="mb-1 text-ui text-text-dim">
+        Sell for <Coin amount={price} /> each
+      </div>
       {qty > 1 && (
         <div className="mb-1 flex items-center gap-1">
           <NumberTicker
@@ -46,7 +50,7 @@ function SellControls({
           className="btn"
           onClick={() => onSell(itemId, clamped)}
         >
-          Sell (${clamped * price})
+          Sell (<Coin amount={clamped * price} />)
         </button>
         {qty > 1 && (
           <button
@@ -173,7 +177,11 @@ export function InventoryView({
     <div className="flex h-full flex-col">
       <div className="z-50 mb-1 flex items-center justify-between">
         <h1 className="text-ui-lg font-bold text-cyan">Inventory</h1>
-        <div className="text-ui text-cyan">${currency}</div>
+        <Tooltip label={`${formatAmount(currency)} herzie coins`}>
+          <div className="text-ui text-cyan">
+            <Coin amount={currency} />
+          </div>
+        </Tooltip>
       </div>
 
       {/* 3D render */}

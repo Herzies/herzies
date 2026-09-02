@@ -7,6 +7,7 @@ import {
   useGhostMode,
   useWindowPinned,
 } from "../tauri-bridge";
+import { Coin } from "./Coin";
 import { Herzie3D } from "./Herzie3D";
 import { Tooltip } from "./Tooltip";
 
@@ -201,7 +202,9 @@ export function HomeView({
           <span className="text-purple">{totalHours}h</span> music
         </span>
         <span>
-          <span className="text-yellow">${herzie.currency}</span>
+          <span className="text-yellow">
+            <Coin amount={herzie.currency} />
+          </span>
         </span>
         <span>
           <span className="text-green">{herzie.friendCodes.length}</span>{" "}

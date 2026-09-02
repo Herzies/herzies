@@ -1,8 +1,9 @@
 import type { Herzie, Inventory, Trade } from "@herzies/shared";
 import { getItem } from "@herzies/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { cn } from "../lib/utils";
+import { cn, formatAmount } from "../lib/utils";
 import { herzies } from "../tauri-bridge";
+import { Coin } from "./Coin";
 import { NumberTicker } from "./NumberTicker";
 import { PromptOverlay } from "./PromptOverlay";
 
@@ -342,7 +343,7 @@ export function TradeView({
                     ))}
                   {myOffer && myOffer.currency > 0 && (
                     <div className="text-ui text-yellow">
-                      ${myOffer.currency}
+                      <Coin amount={myOffer.currency} />
                     </div>
                   )}
                 </>
@@ -376,7 +377,8 @@ export function TradeView({
                       })}
                   <div className="mt-1 flex items-center gap-1">
                     <span className="flex-1 text-[10px] text-yellow">
-                      $ ({currency})
+                      <span className="italic">H</span> (
+                      {formatAmount(currency)})
                     </span>
                     <NumberTicker
                       value={offerCurrency}
@@ -398,7 +400,7 @@ export function TradeView({
                 ))}
               {theirOffer && theirOffer.currency > 0 && (
                 <div className="text-ui text-yellow">
-                  ${theirOffer.currency}
+                  <Coin amount={theirOffer.currency} />
                 </div>
               )}
               {theirOffer &&

@@ -15,7 +15,7 @@ export default function ItemInspectOverlay({
   itemId: string;
   onClose: () => void;
   /** Extra line shown next to the rarity label (e.g. owned quantity). */
-  meta?: string;
+  meta?: React.ReactNode;
   /** Actions rendered below the description (e.g. equip / sell controls). */
   footer?: React.ReactNode;
 }) {
@@ -51,7 +51,12 @@ export default function ItemInspectOverlay({
         </div>
         <div className="mb-1 text-ui text-text-dim">
           {RARITY_LABELS[item.rarity]}
-          {meta ? ` · ${meta}` : ""}
+          {meta ? (
+            <>
+              {" "}
+              · {meta}
+            </>
+          ) : null}
         </div>
         <div className="text-ui text-text-dim">{item.description}</div>
         {footer && (
