@@ -855,8 +855,9 @@ export const ITEMS: ItemDef[] = [
   },
   {
     id: "good-eye-sniper",
-    name: "Good Eye Sniper",
-    description: "Proof your ears never miss. Tracks every song hunt you've won.",
+    name: "Good Eye, Sniper",
+    description:
+      "Good eye... and good ears! Let everyone know just how good they are.",
     rarity: "rare",
     frames: goodEyeSniperFrames,
     equipable: true,
