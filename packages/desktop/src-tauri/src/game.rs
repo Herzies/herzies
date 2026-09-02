@@ -61,6 +61,16 @@ pub fn calculate_xp_gain(
     xp
 }
 
+/// How many minutes a `/sync` round-trip actually credited, derived from the
+/// real `total_minutes_listened` delta the server returned — never assume
+/// the full amount sent was billed. The server's own caps (elapsed-wall-clock
+/// limit, per-sync cooldown) can credit less than that, including zero, and
+/// treating "sent" as "credited" silently discards the shortfall forever
+/// instead of leaving it in `pending_minutes` to retry on the next sync.
+pub fn minutes_credited(previous_total_minutes: f64, server_total_minutes: f64) -> f64 {
+    (server_total_minutes - previous_total_minutes).max(0.0)
+}
+
 fn roll_over_levels(xp: f64, level: &mut u32, stage: &mut u32) {
     while xp >= total_xp_for_level(*level + 1) {
         *level += 1;
@@ -233,6 +243,26 @@ mod tests {
     fn test_calculate_xp_with_craving() {
         let xp = calculate_xp_gain(1.0, 0, true, &[]);
         assert!((xp - 15.0).abs() < 0.001); // 10 * 1.5
+    }
+
+    #[test]
+    fn test_minutes_credited_full_amount() {
+        assert_eq!(minutes_credited(100.0, 105.0), 5.0);
+    }
+
+    #[test]
+    fn test_minutes_credited_throttled_to_zero() {
+        // The server's cooldown/elapsed-wall-clock cap can credit nothing for
+        // a sync even though minutes were sent — must be reported as 0, not
+        // negative, so pending_minutes isn't incorrectly bumped up.
+        assert_eq!(minutes_credited(100.0, 100.0), 0.0);
+    }
+
+    #[test]
+    fn test_minutes_credited_never_negative() {
+        // Defensive: a stale/out-of-order response should never look like a
+        // negative credit.
+        assert_eq!(minutes_credited(100.0, 99.0), 0.0);
     }
 
     #[test]

@@ -1494,7 +1494,26 @@ async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
     if let Some(sync_resp) = result {
         let mut s = state.lock().unwrap();
         s.last_sync_ok = sync_ok;
-        s.pending_minutes = (s.pending_minutes - minutes_to_sync).max(0.0);
+
+        // The server can credit less than minutes_to_sync (its own elapsed-
+        // wall-clock cap, or the per-sync cooldown, can reduce this to zero —
+        // easy to hit here since this loop's 5s cadence is shorter than the
+        // server's 8s cooldown between billable syncs). Only consume what was
+        // actually billed, derived from the real total_minutes_listened delta
+        // it returns; blindly subtracting minutes_to_sync discarded the
+        // shortfall forever instead of retrying it on the next tick, which is
+        // what produced the "XP rises then drops back" flicker.
+        let credited_minutes = s
+            .herzie
+            .as_ref()
+            .map(|h| {
+                game::minutes_credited(
+                    h.total_minutes_listened,
+                    sync_resp.herzie.total_minutes_listened,
+                )
+            })
+            .unwrap_or(minutes_to_sync);
+        s.pending_minutes = (s.pending_minutes - credited_minutes).max(0.0);
         // Persist the decrement too — otherwise a relaunch right after a
         // successful sync would reload the pre-decrement value from disk and
         // re-bill minutes that were already confirmed.
