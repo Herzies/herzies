@@ -706,8 +706,11 @@ function generateFrames(
   renderFn: (angle: number) => string[],
   count = 36,
 ): string[][] {
+  // The card faces us for the yAngle arc (PI/2, 3*PI/2) — a symmetric 180°
+  // window regardless of the cosmetic Z tilt. Start at PI/2, the moment it
+  // turns to face us, so the full front-facing arc plays before it turns away.
   return Array.from({ length: count }, (_, i) =>
-    renderFn((i / count) * Math.PI * 2),
+    renderFn((i / count) * Math.PI * 2 + Math.PI / 2),
   );
 }
 
@@ -784,8 +787,8 @@ export const ITEMS: ItemDef[] = [
   },
   {
     id: "cd",
-    name: "CD",
-    description: "A compact disc earned by listening.",
+    name: "Nostalgic Token",
+    description: "An image of a CD on a dull card. Weird. Probably not worth much.",
     rarity: "common",
     frames: cdFrames,
     stackable: true,
@@ -793,8 +796,8 @@ export const ITEMS: ItemDef[] = [
   },
   {
     id: "headphones",
-    name: "Headphones",
-    description: "Summons a pair of headphones on your herzie.",
+    name: "Intimite Music Device",
+    description: "Summons a pair of headphones on your herzie's head.",
     rarity: "uncommon",
     frames: headphonesFrames,
     equipable: true,
@@ -804,8 +807,8 @@ export const ITEMS: ItemDef[] = [
   },
   {
     id: "rainbow-headband",
-    name: "Rainbow Headband",
-    description: "Puts a colorful spell on your herzie's head.",
+    name: "Permanent Rainbow Dreams",
+    description: "Rainbows forever on your mind. And head.",
     rarity: "uncommon",
     frames: rainbowHeadbandFrames,
     equipable: true,
@@ -815,7 +818,7 @@ export const ITEMS: ItemDef[] = [
   },
   {
     id: "boombox",
-    name: "Boombox",
+    name: "Box of Boom",
     description: "Grants your herzie real street cred.",
     rarity: "rare",
     frames: boomboxFrames,
@@ -825,7 +828,7 @@ export const ITEMS: ItemDef[] = [
   },
   {
     id: "clouds",
-    name: "Clouds",
+    name: "Overcast",
     description: "Paints calming clouds on your herzie's sky.",
     rarity: "rare",
     frames: cloudsFrames,
@@ -835,7 +838,7 @@ export const ITEMS: ItemDef[] = [
   },
   {
     id: "stars",
-    name: "Stars",
+    name: "Starfield",
     description: "Sprinkles a twinkling starfield on your herzie's sky.",
     rarity: "rare",
     frames: starsFrames,
@@ -845,7 +848,7 @@ export const ITEMS: ItemDef[] = [
   },
   {
     id: "prism",
-    name: "Prism",
+    name: "Prismatic Surrenderer",
     description: "Turns your herzie into a walking rainbow.",
     rarity: "uncommon",
     frames: prismFrames,

@@ -43,13 +43,11 @@ export default function ItemInspectOverlay({
         <div className="mb-4 flex justify-center">
           <ItemPreview item={item} box={150} />
         </div>
+        <div className="text-sm font-bold">"{item.name}"</div>
         <div
-          className="text-sm font-bold"
+          className="mb-1 text-ui-sm"
           style={{ color: ITEM_RARITY_COLORS[item.rarity] }}
         >
-          {item.name}
-        </div>
-        <div className="mb-1 text-ui text-text-dim">
           {RARITY_LABELS[item.rarity]}
           {meta ? (
             <>

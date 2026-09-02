@@ -4,6 +4,8 @@ import {
   getItem,
   groundSlot,
   normalizeEquipped,
+  RARITY_COLORS,
+  RARITY_LABELS,
 } from "@herzies/shared";
 import { useEffect, useState } from "react";
 import { cn, formatAmount } from "../lib/utils";
@@ -30,9 +32,6 @@ function SellControls({
 
   return (
     <div>
-      <div className="mb-1 text-ui text-text-dim">
-        Sell for <Coin amount={price} /> each
-      </div>
       {qty > 1 && (
         <div className="mb-1 flex items-center gap-1">
           <NumberTicker
@@ -125,6 +124,10 @@ export function InventoryView({
     if (result) {
       setInventory(result.inventory);
       setCurrency(result.newCurrency);
+      // Selling the last one leaves nothing to preview — close it.
+      if (itemId === inspectItem && (result.inventory[itemId] ?? 0) === 0) {
+        setInspectItem(null);
+      }
     }
   };
 
@@ -224,7 +227,14 @@ export function InventoryView({
                 >
                   <div className="truncate text-ui hover:underline">{name}</div>
                   <div className="text-[10px] text-text-dim">
-                    x{qty}
+                    <span
+                      style={{
+                        color: RARITY_COLORS[def?.rarity ?? "common"],
+                      }}
+                    >
+                      {RARITY_LABELS[def?.rarity ?? "common"]}
+                    </span>{" "}
+                    · x{qty}
                     {isEquipped && def?.equipSlot === "ground"
                       ? ` · ${findEquippedSlot(equipped, itemId) === groundSlot("left") ? "L" : "R"}`
                       : ""}
@@ -252,18 +262,6 @@ export function InventoryView({
           meta={inspectedQty > 0 ? `x${inspectedQty}` : undefined}
           footer={
             <>
-              {inspected.equipable && (
-                <button
-                  type="button"
-                  className={cn(
-                    "btn",
-                    isItemEquipped(inspectItem) ? "text-red" : "text-green",
-                  )}
-                  onClick={() => handleEquip(inspectItem)}
-                >
-                  {isItemEquipped(inspectItem) ? "Unequip" : "Equip"}
-                </button>
-              )}
               {inspected.sellPrice && inspectedQty > 0 ? (
                 <SellControls
                   itemId={inspectItem}
