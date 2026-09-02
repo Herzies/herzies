@@ -405,5 +405,14 @@ export async function installUpdate(
         break;
     }
   });
+  // Best-effort: bill any unsynced listening time before restarting so less
+  // (ideally nothing) is left for the next launch to catch up on. Safe to
+  // ignore failures — pending minutes are persisted on the Rust side and
+  // survive the relaunch either way.
+  try {
+    await invoke("flush_before_relaunch");
+  } catch (err) {
+    console.warn("flush_before_relaunch failed:", err);
+  }
   await relaunch();
 }

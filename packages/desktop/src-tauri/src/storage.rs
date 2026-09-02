@@ -116,6 +116,10 @@ pub fn load_herzie() -> Option<LoadedHerzie> {
 
     if !verified {
         // Tampered or unsigned — reset progress.
+        log::warn!(
+            "herzie.json signature mismatch — resetting xp/level/stage to defaults (owner={:?})",
+            owner
+        );
         herzie.xp = 0.0;
         herzie.level = 1;
         herzie.stage = 1;
@@ -340,5 +344,78 @@ pub fn clear_friends_cache() {
     let path = config_dir().join("friends_cache.json");
     if path.exists() {
         fs::remove_file(&path).ok();
+    }
+}
+
+/// Minutes of listening time accrued locally but not yet confirmed by `/sync`.
+/// This is an estimate cache, not a source of truth — the server always
+/// recomputes XP authoritatively from minutes it receives — so it's
+/// deliberately not HMAC-signed like `herzie.json`. Persisting it means a
+/// relaunch (app update or otherwise) doesn't silently drop unsynced
+/// listening time; a missing or corrupt file is treated as `0.0` rather than
+/// an error, since losing a few minutes of estimate is far better than
+/// failing startup.
+pub fn load_pending_minutes() -> f64 {
+    let path = config_dir().join("pending_minutes.json");
+    fs::read_to_string(&path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<f64>(&raw).ok())
+        .unwrap_or(0.0)
+}
+
+pub fn save_pending_minutes(minutes: f64) {
+    ensure_dir();
+    let path = config_dir().join("pending_minutes.json");
+    let data = serde_json::to_string(&minutes).unwrap();
+    write_secure(&path, &data);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    // These tests touch the real `~/.config/herzies/pending_minutes.json` (the
+    // module has no config-dir injection point), so they run serially via a
+    // shared lock to avoid clobbering each other, and always restore whatever
+    // was on disk beforehand.
+    static PENDING_MINUTES_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn pending_minutes_round_trips() {
+        let _guard = PENDING_MINUTES_TEST_LOCK.lock().unwrap();
+        let path = config_dir().join("pending_minutes.json");
+        let previous = fs::read_to_string(&path).ok();
+
+        save_pending_minutes(4.5);
+        assert_eq!(load_pending_minutes(), 4.5);
+
+        match previous {
+            Some(raw) => write_secure(&path, &raw),
+            None => {
+                fs::remove_file(&path).ok();
+            }
+        }
+    }
+
+    #[test]
+    fn pending_minutes_missing_or_corrupt_file_yields_zero() {
+        let _guard = PENDING_MINUTES_TEST_LOCK.lock().unwrap();
+        let path = config_dir().join("pending_minutes.json");
+        let previous = fs::read_to_string(&path).ok();
+
+        fs::remove_file(&path).ok();
+        assert_eq!(load_pending_minutes(), 0.0);
+
+        ensure_dir();
+        write_secure(&path, "not valid json");
+        assert_eq!(load_pending_minutes(), 0.0);
+
+        match previous {
+            Some(raw) => write_secure(&path, &raw),
+            None => {
+                fs::remove_file(&path).ok();
+            }
+        }
     }
 }

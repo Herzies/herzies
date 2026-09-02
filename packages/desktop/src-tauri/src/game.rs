@@ -1,5 +1,4 @@
-use crate::types::{ActiveMultiplier, Herzie};
-use std::collections::HashMap;
+use crate::types::ActiveMultiplier;
 
 const GENRES: &[&str] = &[
     "pop",
@@ -62,34 +61,25 @@ pub fn calculate_xp_gain(
     xp
 }
 
-pub struct ApplyXpResult {
-    pub leveled_up: bool,
-    pub evolved: bool,
-    pub new_stage: Option<u32>,
+fn roll_over_levels(xp: f64, level: &mut u32, stage: &mut u32) {
+    while xp >= total_xp_for_level(*level + 1) {
+        *level += 1;
+        *stage = stage_for_level(*level);
+    }
 }
 
-pub fn apply_xp(herzie: &mut Herzie, xp_gain: f64) -> ApplyXpResult {
-    herzie.xp += xp_gain;
-    let mut leveled_up = false;
-    let mut evolved = false;
-    let mut new_stage: Option<u32> = None;
-
-    while herzie.xp >= total_xp_for_level(herzie.level + 1) {
-        herzie.level += 1;
-        leveled_up = true;
-        let stage = stage_for_level(herzie.level);
-        if stage != herzie.stage {
-            herzie.stage = stage;
-            evolved = true;
-            new_stage = Some(stage);
-        }
-    }
-
-    ApplyXpResult {
-        leveled_up,
-        evolved,
-        new_stage,
-    }
+/// Pure projection for optimistic display only: given the last server-confirmed
+/// xp/level/stage and an estimated additional gain from not-yet-synced listening
+/// time, returns the projected xp/level/stage. Fires no notifications — the
+/// server remains the sole source of truth and the sole writer of confirmed
+/// xp/level/stage, applied when a `/sync` confirms it (see `sync_tick` in
+/// `lib.rs` and `ManagedState::display_herzie` in `state.rs`).
+pub fn project_xp(xp: f64, level: u32, stage: u32, xp_gain: f64) -> (f64, u32, u32) {
+    let mut level = level;
+    let mut stage = stage;
+    let projected_xp = xp + xp_gain;
+    roll_over_levels(projected_xp, &mut level, &mut stage);
+    (projected_xp, level, stage)
 }
 
 pub fn classify_genre(spotify_genres: &[String]) -> Vec<String> {
@@ -132,18 +122,6 @@ pub fn classify_genre(spotify_genres: &[String]) -> Vec<String> {
         vec!["pop".to_string()]
     } else {
         matched.into_iter().collect()
-    }
-}
-
-pub fn record_genre_minutes(
-    genre_minutes: &mut HashMap<String, f64>,
-    genres: &[String],
-    minutes: f64,
-) {
-    let count = if genres.is_empty() { 1 } else { genres.len() };
-    let per_genre = minutes / count as f64;
-    for genre in genres {
-        *genre_minutes.entry(genre.clone()).or_insert(0.0) += per_genre;
     }
 }
 
@@ -255,5 +233,47 @@ mod tests {
     fn test_calculate_xp_with_craving() {
         let xp = calculate_xp_gain(1.0, 0, true, &[]);
         assert!((xp - 15.0).abs() < 0.001); // 10 * 1.5
+    }
+
+    #[test]
+    fn test_project_xp_no_gain_is_unchanged() {
+        let (xp, level, stage) = project_xp(500.0, 3, 1, 0.0);
+        assert_eq!(xp, 500.0);
+        assert_eq!(level, 3);
+        assert_eq!(stage, 1);
+    }
+
+    #[test]
+    fn test_project_xp_rolls_over_a_single_level() {
+        // Exactly enough xp to cross into the next level should bump level by
+        // one and re-derive stage from the leveling curve, same as the old
+        // apply_xp mutator did.
+        let start_level = 3;
+        let gain_to_next = total_xp_for_level(start_level + 1) + 1.0;
+        let (xp, level, stage) =
+            project_xp(0.0, start_level, stage_for_level(start_level), gain_to_next);
+        assert_eq!(level, start_level + 1);
+        assert_eq!(stage, stage_for_level(start_level + 1));
+        assert!(xp >= total_xp_for_level(level));
+    }
+
+    #[test]
+    fn test_project_xp_multi_level_rollover() {
+        // Simulate an app closed for days: a single large one-shot gain should
+        // roll over several levels without panicking or looping pathologically.
+        let (xp, level, stage) = project_xp(0.0, 1, 1, 50_000.0);
+        assert!(level > 10);
+        assert_eq!(stage, stage_for_level(level));
+        assert!(xp >= total_xp_for_level(level));
+        assert!(xp < total_xp_for_level(level + 1));
+    }
+
+    #[test]
+    fn test_project_xp_does_not_mutate_inputs() {
+        // project_xp is a pure projection — verify it doesn't require a Herzie
+        // at all and leaves no persisted state to roll back.
+        let (xp, level, _stage) = project_xp(100.0, 2, 1, 0.0);
+        assert_eq!(xp, 100.0);
+        assert_eq!(level, 2);
     }
 }

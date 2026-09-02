@@ -1091,9 +1091,7 @@ async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: u64) -> Resu
 
     let np = nowplaying::get_now_playing().await;
 
-    // Collect notification info to send after releasing the lock
-    let mut notify_level_up: Option<(String, u32)> = None;
-    let mut notify_evolved: Option<(String, u32)> = None;
+    // Collect side-effect info to act on after releasing the lock
     let mut spawn_enrichment: Option<(String, String, String)> = None;
     let mut spawn_artwork: Option<String> = None;
 
@@ -1159,36 +1157,15 @@ async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: u64) -> Resu
 
                 let minutes = elapsed_secs as f64 / 60.0;
                 if minutes > 0.01 {
+                    // Only accumulated here — never applied to herzie.xp/level
+                    // locally. The server is the sole authority on XP; this
+                    // just tracks unsynced listening time so sync_tick can bill
+                    // it, and to_app_state can show an optimistic display-only
+                    // estimate in the meantime (see ManagedState::display_herzie).
+                    // Persisted so a relaunch (e.g. an app update) doesn't drop
+                    // it before it reaches the server.
                     s.pending_minutes += minutes;
-
-                    if let Some(ref genres) = genre_list {
-                        let classified = game::classify_genre(genres);
-
-                        let herzie = s.herzie.as_mut().unwrap();
-                        let craving = game::get_daily_craving(&herzie.id, None);
-                        let is_craving =
-                            !genres.is_empty() && game::matches_craving(genres, &craving);
-
-                        let xp = game::calculate_xp_gain(
-                            minutes,
-                            herzie.friend_codes.len(),
-                            is_craving,
-                            &[],
-                        );
-                        let events = game::apply_xp(herzie, xp);
-                        herzie.total_minutes_listened += minutes;
-                        game::record_genre_minutes(&mut herzie.genre_minutes, &classified, minutes);
-                        storage::save_herzie(herzie);
-
-                        if events.leveled_up {
-                            notify_level_up = Some((herzie.name.clone(), herzie.level));
-                        }
-                        if events.evolved {
-                            if let Some(new_stage) = events.new_stage {
-                                notify_evolved = Some((herzie.name.clone(), new_stage));
-                            }
-                        }
-                    }
+                    storage::save_pending_minutes(s.pending_minutes);
                 }
 
                 if let Some(ref genres) = genre_list {
@@ -1224,16 +1201,8 @@ async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: u64) -> Resu
         spawn_system_artwork_fetch(app, track_key);
     }
 
-    // Send notifications outside the lock
-    if let Some((name, level)) = notify_level_up {
-        let msg = format!("{} is now level {}!", name, level);
-        send_notification(app, "Level Up!", &msg, None);
-    }
-    if let Some((name, stage)) = notify_evolved {
-        let msg = format!("{} evolved to Stage {}!", name, stage);
-        send_notification(app, "Evolution!", &msg, None);
-    }
-
+    // Level-up/evolution notifications are sent from sync_tick, once the
+    // server confirms the crossing — poll_tick no longer applies XP locally.
     let app_state = {
         let s = state.lock().unwrap();
         s.to_app_state(env!("CARGO_PKG_VERSION"))
@@ -1278,9 +1247,29 @@ fn open_external_url(url: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Best-effort flush of unsynced listening time, used before a relaunch (app
+/// update) or quit so pending_minutes reaches the server sooner. Safe to
+/// ignore failures — pending_minutes is persisted to disk (see
+/// storage::save_pending_minutes), so a failed or timed-out flush just means
+/// it's picked up on the next launch instead of being lost.
+async fn flush_pending_sync(app: &AppHandle) {
+    let client = Client::new();
+    let _ = tokio::time::timeout(Duration::from_secs(3), sync_tick(app, &client)).await;
+}
+
 #[tauri::command]
-fn quit(app: AppHandle) {
+async fn quit(app: AppHandle) {
+    flush_pending_sync(&app).await;
     app.exit(0);
+}
+
+/// Called by the frontend right before `relaunch()` during an app update, so
+/// listening time accrued since the last sync is billed before the process
+/// restarts instead of only being picked up on the next sync tick after
+/// relaunch.
+#[tauri::command]
+async fn flush_before_relaunch(app: AppHandle) {
+    flush_pending_sync(&app).await;
 }
 
 fn send_notification(app: &AppHandle, title: &str, body: &str, deep_link: Option<&str>) {
@@ -1506,6 +1495,10 @@ async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
         let mut s = state.lock().unwrap();
         s.last_sync_ok = sync_ok;
         s.pending_minutes = (s.pending_minutes - minutes_to_sync).max(0.0);
+        // Persist the decrement too — otherwise a relaunch right after a
+        // successful sync would reload the pre-decrement value from disk and
+        // re-bill minutes that were already confirmed.
+        storage::save_pending_minutes(s.pending_minutes);
 
         // A friend relationship changed locally (accept/decline/cancel/add/
         // remove) while this /sync was in flight, so its server snapshot of
@@ -1628,6 +1621,9 @@ pub(crate) fn adopt_local_herzie() -> Option<Herzie> {
             Some(loaded.herzie)
         }
         _ => {
+            log::warn!(
+                "adopt_local_herzie: owner mismatch or missing session — clearing local herzie file"
+            );
             storage::clear_herzie();
             None
         }
@@ -1712,6 +1708,7 @@ pub fn run() {
             test_activity,
             debug_media_remote_now_playing,
             quit,
+            flush_before_relaunch,
             open_external_url,
         ])
         .setup(|app| {
