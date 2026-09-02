@@ -63,7 +63,7 @@ export function TabBar({
     },
   ];
   return (
-    <div className="flex border-t border-border py-1.5">
+    <div className="flex items-center border-t border-border py-1.5">
       {tabs.map((t) => (
         <button
           type="button"
