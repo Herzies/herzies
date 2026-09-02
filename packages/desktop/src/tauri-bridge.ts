@@ -8,6 +8,7 @@ import type {
   HerzieProfile,
   Inventory,
   PendingFriendRequest,
+  StoreProduct,
   Trade,
   TradeState,
 } from "@herzies/shared";
@@ -136,6 +137,25 @@ export const herzies = {
     action: "equip" | "unequip",
     side?: "left" | "right",
   ) => invoke<{ equipped: Equipped }>("equip_item", { itemId, action, side }),
+  /** Buys an item with in-game currency (store's Items tab). Throws with the
+   * server's error message (not enough currency, already owned, etc.). */
+  buyItem: (itemId: string, quantity: number) =>
+    invoke<{
+      spent: number;
+      newCurrency: number;
+      inventory: Inventory;
+    }>("buy_item", { itemId, quantity }),
+
+  fetchStoreProducts: () => invoke<StoreProduct[]>("fetch_store_products"),
+  /**
+   * Starts a purchase. Resolves `true` if Stripe Checkout was opened in the
+   * system browser (balance updates once the webhook confirms payment —
+   * refetch state after the user returns), or `false` if the server's
+   * Stripe-less test-mode bypass fulfilled the order immediately (AppState
+   * is already refreshed by the time this resolves).
+   */
+  startPurchase: (productId: string) =>
+    invoke<boolean>("start_purchase", { productId }),
 
   tradeCreate: (targetCode: string) =>
     invoke<{ tradeId: string } | null>("trade_create", { targetCode }),

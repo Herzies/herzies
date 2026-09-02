@@ -231,6 +231,15 @@ export type TradeState =
   | "completed"
   | "cancelled";
 
+/** A purchasable currency pack in the store. */
+export interface StoreProduct {
+  id: string;
+  name: string;
+  description: string | null;
+  currencyAmount: number;
+  priceUsdCents: number;
+}
+
 export interface Trade {
   id: string;
   initiatorId: string;

@@ -120,6 +120,8 @@ export interface ItemDef {
   /** Catalog category; ground items occupy ground_left or ground_right when equipped. */
   equipSlot?: EquipSlot;
   sellPrice?: number;
+  /** Set when the item can be bought with in-game currency from the store's Items tab. */
+  buyPrice?: number;
 }
 
 export const RARITY_COLORS: Record<Rarity, string> = {
@@ -1219,6 +1221,7 @@ export const ITEMS: ItemDef[] = [
     rarity: "rare",
     frames: firstEditionFrames,
     stackable: false,
+    sellPrice: 250,
   },
   {
     id: "cd",
@@ -1237,6 +1240,8 @@ export const ITEMS: ItemDef[] = [
     frames: headphonesFrames,
     equipable: true,
     equipSlot: "head",
+    buyPrice: 250,
+    sellPrice: 100,
   },
   {
     id: "rainbow-headband",
@@ -1246,6 +1251,7 @@ export const ITEMS: ItemDef[] = [
     frames: rainbowHeadbandFrames,
     equipable: true,
     equipSlot: "head",
+    sellPrice: 100,
   },
   {
     id: "boombox",
@@ -1255,6 +1261,7 @@ export const ITEMS: ItemDef[] = [
     frames: boomboxFrames,
     equipable: true,
     equipSlot: "ground",
+    sellPrice: 250,
   },
   {
     id: "clouds",
@@ -1264,6 +1271,7 @@ export const ITEMS: ItemDef[] = [
     frames: cloudsFrames,
     equipable: true,
     equipSlot: "scenery",
+    sellPrice: 250,
   },
   {
     id: "stars",
@@ -1273,6 +1281,7 @@ export const ITEMS: ItemDef[] = [
     frames: starsFrames,
     equipable: true,
     equipSlot: "scenery",
+    sellPrice: 250,
   },
   {
     id: "prism",
@@ -1282,6 +1291,7 @@ export const ITEMS: ItemDef[] = [
     frames: prismFrames,
     equipable: true,
     equipSlot: "color",
+    sellPrice: 100,
   },
 ];
 

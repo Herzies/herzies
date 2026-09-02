@@ -445,7 +445,13 @@ async fn sell_item(
         let mut changed = false;
         if let Ok(inventory) = serde_json::from_value::<Inventory>(data["inventory"].clone()) {
             let currency = data["newCurrency"].as_u64().unwrap_or(0) as u32;
-            let equipped = s.equipped.clone();
+            // Selling the last copy of an equipped item unequips it
+            // server-side too — apply whatever the response says rather than
+            // the stale local equip state, so the two never drift apart.
+            let equipped = serde_json::from_value::<std::collections::HashMap<String, String>>(
+                data["equipped"].clone(),
+            )
+            .unwrap_or_else(|_| s.equipped.clone());
             apply_inventory(&mut s, inventory, currency, equipped);
             changed = true;
         } else if let Some(new_currency) = data["newCurrency"].as_u64() {
@@ -490,6 +496,84 @@ async fn equip_item(
         emit_state_update(&app);
     }
     Ok(result)
+}
+
+#[tauri::command]
+async fn buy_item(
+    item_id: String,
+    quantity: u32,
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    let client = Client::new();
+    let data = api::api_buy_item(&client, &item_id, quantity).await?;
+
+    let mut s = state.lock().unwrap();
+    let mut changed = false;
+    if let Ok(inventory) = serde_json::from_value::<Inventory>(data["inventory"].clone()) {
+        let currency = data["newCurrency"].as_u64().unwrap_or(0) as u32;
+        let equipped = s.equipped.clone();
+        apply_inventory(&mut s, inventory, currency, equipped);
+        changed = true;
+    }
+    if let Some(ref mut herzie) = s.herzie {
+        if let Some(new_currency) = data["newCurrency"].as_u64() {
+            herzie.currency = new_currency as u32;
+            storage::save_herzie(herzie);
+            changed = true;
+        }
+    }
+    drop(s);
+    if changed {
+        emit_state_update(&app);
+    }
+    Ok(data)
+}
+
+#[tauri::command]
+async fn fetch_store_products() -> Result<Vec<StoreProduct>, String> {
+    let client = Client::new();
+    Ok(api::api_fetch_store_products(&client)
+        .await
+        .unwrap_or_default())
+}
+
+/// Creates a Stripe Checkout Session for `product_id` and opens it in the
+/// system browser. Currency is credited only once Stripe's webhook confirms
+/// payment server-side — this command never touches local/AppState currency
+/// itself in that path.
+///
+/// Returns `true` if a browser checkout was opened, `false` if the server's
+/// Stripe-less test-mode bypass fulfilled the order immediately (in which
+/// case AppState is refreshed here so the new balance shows up right away).
+#[tauri::command]
+async fn start_purchase(
+    product_id: String,
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<bool, String> {
+    let client = Client::new();
+    match api::api_create_checkout(&client, &product_id).await? {
+        Some(url) => {
+            let parsed = url::Url::parse(&url).map_err(|e| e.to_string())?;
+            if parsed.scheme() != "https" || parsed.host_str() != Some("checkout.stripe.com") {
+                return Err("Unexpected checkout URL".to_string());
+            }
+            std::thread::spawn(move || {
+                let _ = open::that(&url);
+            });
+            Ok(true)
+        }
+        None => {
+            if let Some((inventory, currency, equipped)) = api::api_fetch_inventory(&client).await {
+                let mut s = state.lock().unwrap();
+                apply_inventory(&mut s, inventory, currency, equipped);
+                drop(s);
+                emit_state_update(&app);
+            }
+            Ok(false)
+        }
+    }
 }
 
 #[tauri::command]
@@ -1601,7 +1685,10 @@ pub fn run() {
             friend_search,
             fetch_inventory,
             sell_item,
+            buy_item,
             equip_item,
+            fetch_store_products,
+            start_purchase,
             trade_create,
             trade_join,
             trade_offer,

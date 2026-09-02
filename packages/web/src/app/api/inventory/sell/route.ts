@@ -1,3 +1,4 @@
+import { findEquippedSlot, normalizeEquipped } from "@herzies/shared";
 import { NextResponse } from "next/server";
 import { authenticateRequest, isAuthError } from "@/lib/auth";
 import { isParseError, parseBody, sellItemSchema } from "@/lib/schemas";
@@ -21,14 +22,14 @@ export async function POST(request: Request) {
     .eq("id", itemId)
     .single();
 
-  if (!item || !item.sell_price) {
+  if (!item?.sell_price) {
     return NextResponse.json({ error: "Item cannot be sold" }, { status: 400 });
   }
 
-  // Fetch player's inventory and currency
+  // Fetch player's inventory, currency, and equip state
   const { data: herzie } = await admin
     .from("herzies")
-    .select("inventory_v2, currency")
+    .select("inventory_v2, currency, equipped")
     .eq("user_id", auth.userId)
     .single();
 
@@ -45,10 +46,19 @@ export async function POST(request: Request) {
 
   // Update inventory and currency
   const newQty = owned - quantity;
+  let equipped = normalizeEquipped(herzie.equipped);
   if (newQty > 0) {
     inv[itemId] = newQty;
   } else {
     delete inv[itemId];
+    // Selling the last copy of an equipped item can't leave it equipped —
+    // unequip it in the same request so ownership and equip state never
+    // drift apart.
+    const slot = findEquippedSlot(equipped, itemId);
+    if (slot) {
+      equipped = { ...equipped };
+      delete equipped[slot];
+    }
   }
 
   const earned = quantity * (item.sell_price as number);
@@ -56,12 +66,18 @@ export async function POST(request: Request) {
 
   const { error } = await admin
     .from("herzies")
-    .update({ inventory_v2: inv, currency: newCurrency })
+    .update({ inventory_v2: inv, currency: newCurrency, equipped })
     .eq("user_id", auth.userId);
 
   if (error) {
     return NextResponse.json({ error: "Failed to sell" }, { status: 500 });
   }
 
-  return NextResponse.json({ ok: true, earned, newCurrency, inventory: inv });
+  return NextResponse.json({
+    ok: true,
+    earned,
+    newCurrency,
+    inventory: inv,
+    equipped,
+  });
 }

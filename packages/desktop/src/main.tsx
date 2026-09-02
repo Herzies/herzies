@@ -20,6 +20,7 @@ import { ProfileView } from "./components/ProfileView";
 import { PromptOverlay } from "./components/PromptOverlay";
 import { SettingsView } from "./components/SettingsView";
 import { SplashScreen } from "./components/SplashScreen";
+import { StoreView } from "./components/StoreView";
 import { TabBar, type View } from "./components/TabBar";
 import { TradeView } from "./components/TradeView";
 import { UpdateAvailableOverlay } from "./components/UpdateAvailableOverlay";
@@ -273,6 +274,7 @@ function App() {
       i: "inventory",
       e: "events",
       f: "friends",
+      b: "store",
       s: "settings",
     };
 
@@ -551,6 +553,20 @@ function App() {
             />
           </div>
         )}
+
+        <div
+          className={cn(
+            "min-h-0 flex-1 flex-col",
+            view === "store" ? "flex" : "hidden",
+          )}
+        >
+          <StoreView
+            inventory={state.inventory}
+            currency={state.inventoryCurrency}
+            active={view === "store"}
+            onLog={addLog}
+          />
+        </div>
 
         <div
           className={cn(

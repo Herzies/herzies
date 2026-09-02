@@ -7,6 +7,7 @@ export type View =
   | "inventory"
   | "trade"
   | "events"
+  | "store"
   | "settings";
 
 export function TabBar({
@@ -47,6 +48,12 @@ export function TabBar({
       label: "Social",
       colour: "cyan",
       title: "Friends & leaderboard. Shortcut [f]",
+    },
+    {
+      id: "store",
+      label: "Store",
+      colour: "yellow",
+      title: "Buy coins. Shortcut [b]",
     },
     {
       id: "settings",

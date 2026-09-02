@@ -33,6 +33,11 @@ export const sellItemSchema = z.object({
   quantity: z.number().int().min(1),
 });
 
+export const buyItemSchema = z.object({
+  itemId: z.string().min(1),
+  quantity: z.number().int().min(1),
+});
+
 export const equipItemSchema = z.object({
   itemId: z.string().min(1),
   action: z.enum(["equip", "unequip"]),
@@ -104,6 +109,10 @@ export const adminMultiplierSchema = z.object({
   startsAt: z.string().min(1),
   endsAt: z.string().min(1),
   schedule: z.string().nullable().optional(),
+});
+
+export const checkoutSchema = z.object({
+  productId: z.string().min(1),
 });
 
 export const grantItemSchema = z

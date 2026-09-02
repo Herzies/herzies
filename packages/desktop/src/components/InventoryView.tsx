@@ -29,13 +29,18 @@ function SellControls({
   return (
     <div>
       <div className="mb-1 text-ui text-text-dim">Sell for ${price} each</div>
-      <div className="flex items-center gap-1">
-        <NumberTicker
-          value={clamped}
-          min={1}
-          max={qty}
-          onChange={setSellAmount}
-        />
+      {qty > 1 && (
+        <div className="mb-1 flex items-center gap-1">
+          <NumberTicker
+            value={clamped}
+            min={1}
+            max={qty}
+            onChange={setSellAmount}
+            fullWidth
+          />
+        </div>
+      )}
+      <div className="flex items-center justify-center gap-1">
         <button
           type="button"
           className="btn"
@@ -212,7 +217,6 @@ export function InventoryView({
                   <div className="truncate text-ui hover:underline">{name}</div>
                   <div className="text-[10px] text-text-dim">
                     x{qty}
-                    {def?.sellPrice ? ` · $${def.sellPrice} each` : ""}
                     {isEquipped && def?.equipSlot === "ground"
                       ? ` · ${findEquippedSlot(equipped, itemId) === groundSlot("left") ? "L" : "R"}`
                       : ""}

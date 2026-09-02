@@ -202,6 +202,16 @@ pub type Inventory = HashMap<String, u32>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct StoreProduct {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub currency_amount: u32,
+    pub price_usd_cents: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SessionData {
     pub access_token: String,
     pub refresh_token: String,

@@ -538,6 +538,71 @@ pub async fn api_sell_item(
     resp.json().await.ok()
 }
 
+/// Buys an item with in-game currency. Unlike `api_sell_item`, this surfaces
+/// the server's error message (e.g. "not enough currency", "already own
+/// this item") so the Items tab can show the user why a purchase failed.
+pub async fn api_buy_item(
+    client: &Client,
+    item_id: &str,
+    quantity: u32,
+) -> Result<serde_json::Value, String> {
+    let body = serde_json::json!({ "itemId": item_id, "quantity": quantity });
+    let resp = api_fetch(client, reqwest::Method::POST, "/inventory/buy", Some(body))
+        .await
+        .ok_or_else(|| "Network error".to_string())?;
+    let status = resp.status();
+    let text = resp.text().await.map_err(|e| format!("Read error: {e}"))?;
+    let data: serde_json::Value =
+        serde_json::from_str(&text).map_err(|_| format!("Server returned {status}"))?;
+    if !status.is_success() {
+        let msg = data["error"].as_str().unwrap_or("Unknown error");
+        return Err(msg.to_string());
+    }
+    Ok(data)
+}
+
+pub async fn api_fetch_store_products(client: &Client) -> Option<Vec<StoreProduct>> {
+    let resp = api_fetch(client, reqwest::Method::GET, "/store/products", None).await?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let data: serde_json::Value = resp.json().await.ok()?;
+    serde_json::from_value(data["products"].clone()).ok()
+}
+
+/// Creates a Stripe Checkout Session for `product_id` and returns the URL to
+/// open in the system browser. Currency is credited only by the webhook once
+/// Stripe confirms payment — this call never mutates local/server balances.
+///
+/// Returns `Ok(None)` when the server is running its Stripe-less test-mode
+/// bypass (no `STRIPE_SECRET_KEY` configured, non-production only) — in that
+/// case the order was already fulfilled server-side and there is no URL to
+/// open.
+pub async fn api_create_checkout(
+    client: &Client,
+    product_id: &str,
+) -> Result<Option<String>, String> {
+    let body = serde_json::json!({ "productId": product_id });
+    let resp = api_fetch(client, reqwest::Method::POST, "/store/checkout", Some(body))
+        .await
+        .ok_or_else(|| "Network error".to_string())?;
+    let status = resp.status();
+    let text = resp.text().await.map_err(|e| format!("Read error: {e}"))?;
+    let data: serde_json::Value =
+        serde_json::from_str(&text).map_err(|_| format!("Server returned {status}"))?;
+    if !status.is_success() {
+        let msg = data["error"].as_str().unwrap_or("Unknown error");
+        return Err(msg.to_string());
+    }
+    if let Some(url) = data["url"].as_str() {
+        return Ok(Some(url.to_string()));
+    }
+    if data["testMode"].as_bool() == Some(true) {
+        return Ok(None);
+    }
+    Err("Unexpected checkout response".to_string())
+}
+
 pub async fn api_create_trade(
     client: &Client,
     target_friend_code: &str,

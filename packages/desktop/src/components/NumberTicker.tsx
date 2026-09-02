@@ -6,12 +6,15 @@ export function NumberTicker({
   max,
   onChange,
   size = "normal",
+  fullWidth = false,
 }: {
   value: number;
   min?: number;
   max: number;
   onChange: (v: number) => void;
   size?: "normal" | "small";
+  /** Stretches the input to fill the row instead of a fixed width. */
+  fullWidth?: boolean;
 }) {
   const small = size === "small";
   const clamped = Math.max(min, Math.min(value, max));
@@ -35,6 +38,7 @@ export function NumberTicker({
         className={cn(
           "input text-center",
           small ? "w-9 text-ui-sm px-0.5 py-px" : "w-[60px]",
+          fullWidth && "w-auto flex-1",
         )}
       />
       <button
