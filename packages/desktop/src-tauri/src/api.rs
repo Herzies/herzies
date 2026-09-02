@@ -684,9 +684,14 @@ pub async fn api_play_hint_audio(
     hint_index: u32,
 ) -> Result<serde_json::Value, String> {
     let body = serde_json::json!({ "eventId": event_id, "hintIndex": hint_index });
-    let resp = api_fetch(client, reqwest::Method::POST, "/events/hint-audio/play", Some(body))
-        .await
-        .ok_or_else(|| "Network error".to_string())?;
+    let resp = api_fetch(
+        client,
+        reqwest::Method::POST,
+        "/events/hint-audio/play",
+        Some(body),
+    )
+    .await
+    .ok_or_else(|| "Network error".to_string())?;
     let status = resp.status();
     let text = resp.text().await.map_err(|e| format!("Read error: {e}"))?;
     let data: serde_json::Value =
