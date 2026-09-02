@@ -1,17 +1,8 @@
-import type {
-  Equipped,
-  EquippedSlot,
-  GroundSide,
-  Herzie,
-  Inventory,
-  ItemDef,
-} from "@herzies/shared";
+import type { Equipped, GroundSide, Herzie, Inventory } from "@herzies/shared";
 import {
   findEquippedSlot,
   getItem,
   groundSlot,
-  RARITY_COLORS as ITEM_RARITY_COLORS,
-  ItemPreview,
   normalizeEquipped,
 } from "@herzies/shared";
 import { useEffect, useState } from "react";
@@ -20,21 +11,6 @@ import { herzies } from "../tauri-bridge";
 import { Herzie3D } from "./Herzie3D";
 import ItemInspectOverlay from "./ItemInspectOverlay";
 import { NumberTicker } from "./NumberTicker";
-import { Tooltip } from "./Tooltip";
-
-/** Wearable areas shown as overlays on the 3D render. */
-const WEARABLE_AREAS: {
-  slot: EquippedSlot;
-  label: string;
-  side: "left" | "right";
-}[] = [
-  { slot: "scenery", label: "scene", side: "left" },
-  { slot: "ground_left", label: "ground L", side: "left" },
-  { slot: "ground_right", label: "ground R", side: "left" },
-  { slot: "head", label: "head", side: "right" },
-  { slot: "face", label: "face", side: "right" },
-  { slot: "body", label: "body", side: "right" },
-];
 
 function SellControls({
   itemId,
@@ -77,54 +53,6 @@ function SellControls({
           </button>
         )}
       </div>
-    </div>
-  );
-}
-
-/** Fixed square dimension for every wearable zone, regardless of item art. */
-const SLOT_SIZE = 56;
-
-function WearableArea({
-  label,
-  item,
-  animate,
-  align,
-  onUnequip,
-}: {
-  label: string;
-  item: ItemDef | null;
-  animate: boolean;
-  align: "left" | "right";
-  onUnequip: (itemId: string) => void;
-}) {
-  return (
-    <div className="flex flex-col items-center gap-0.5">
-      <span className="text-ui-sm text-text-dim">{label}</span>
-      {item ? (
-        <Tooltip label={item.name} side="bottom" align={align}>
-          <button
-            type="button"
-            onClick={() => onUnequip(item.id)}
-            className="flex cursor-pointer items-center justify-center overflow-hidden rounded border border-border bg-bg-panel"
-            style={{
-              width: SLOT_SIZE,
-              height: SLOT_SIZE,
-              borderColor: ITEM_RARITY_COLORS[item.rarity],
-            }}
-          >
-            {/* pointer-events-none: the animated art swaps DOM nodes every
-                frame, which otherwise breaks click events mid-press. */}
-            <span className="pointer-events-none">
-              <ItemPreview item={item} box={SLOT_SIZE} animate={animate} />
-            </span>
-          </button>
-        </Tooltip>
-      ) : (
-        <div
-          className="rounded border border-dashed border-border bg-bg-panel"
-          style={{ width: SLOT_SIZE, height: SLOT_SIZE }}
-        />
-      )}
     </div>
   );
 }
@@ -230,11 +158,6 @@ export function InventoryView({
     : [];
   const loading = inventory === null;
 
-  const equippedInSlot = (slot: EquippedSlot): ItemDef | null => {
-    const id = equipped[slot];
-    return id ? (getItem(id) ?? null) : null;
-  };
-
   const isItemEquipped = (itemId: string) =>
     findEquippedSlot(equipped, itemId) !== null;
 
@@ -248,8 +171,8 @@ export function InventoryView({
         <div className="text-ui text-cyan">${currency}</div>
       </div>
 
-      {/* 3D render with wearable-area overlays */}
-      <div className="relative min-h-0 flex-1">
+      {/* 3D render */}
+      <div className="min-h-0 flex-1">
         <div className="flex h-full items-center justify-center">
           <Herzie3D
             userId={herzie.friendCode}
@@ -257,30 +180,6 @@ export function InventoryView({
             equipped={equipped}
             paused={!active}
           />
-        </div>
-        <div className="absolute left-0 top-0 z-10 flex flex-col gap-2">
-          {WEARABLE_AREAS.filter((a) => a.side === "left").map((area) => (
-            <WearableArea
-              key={area.slot}
-              label={area.label}
-              item={equippedInSlot(area.slot)}
-              animate={active}
-              align="left"
-              onUnequip={handleEquip}
-            />
-          ))}
-        </div>
-        <div className="absolute right-0 top-0 z-10 flex flex-col items-end gap-2">
-          {WEARABLE_AREAS.filter((a) => a.side === "right").map((area) => (
-            <WearableArea
-              key={area.slot}
-              label={area.label}
-              item={equippedInSlot(area.slot)}
-              animate={active}
-              align="right"
-              onUnequip={handleEquip}
-            />
-          ))}
         </div>
       </div>
 
