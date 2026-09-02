@@ -60,6 +60,8 @@ pub struct HerzieProfile {
     pub now_playing: Option<ProfileNowPlaying>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_played: Option<ProfileLastPlayed>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub song_hunt_wins: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

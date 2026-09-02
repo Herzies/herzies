@@ -615,6 +615,28 @@ async function checkSecretTrackEvents(
       logOnly: true,
     });
 
+    if (isSongHunt) {
+      // One-time bonus: the first time a user wins any song hunt, grant the
+      // Good Eye Sniper (cosmetic, tracks their song-hunt win count via a
+      // live query — never re-granted, so duplicate copies never pile up).
+      const { data: sniperRow } = await admin
+        .from("herzies")
+        .select("inventory_v2")
+        .eq("user_id", userId)
+        .single();
+      const alreadyOwnedSniper =
+        ((sniperRow?.inventory_v2 as Record<string, number> | null)?.[
+          "good-eye-sniper"
+        ] ?? 0) > 0;
+      if (!alreadyOwnedSniper) {
+        await admin.rpc("grant_inventory_item", {
+          p_user_id: userId,
+          p_item_id: "good-eye-sniper",
+          p_quantity: 1,
+        });
+      }
+    }
+
     if (isSongHunt && !notifiedHunts.includes(event.id as string)) {
       notifiedHunts.push(event.id as string);
     }

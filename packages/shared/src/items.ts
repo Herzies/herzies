@@ -589,6 +589,30 @@ function renderBoomboxFrame(yAngle: number): string[] {
   );
 }
 
+// --- Good Eye Sniper card ---
+function goodEyeSniperIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  const r = Math.sqrt(ix * ix + iy * iy);
+  const R = 0.27;
+  if (r > R) return null;
+  const ring = Math.floor((r / R) * 5); // 5 concentric bands, innermost = 0
+  const isRed = ring % 2 === 0; // center + alternating bands red
+  return {
+    bright: isRed ? 0.8 : 0.95,
+    color: isRed ? "#cc2222" : "#f2f2f2",
+  };
+}
+
+function renderGoodEyeSniperFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#e05050",
+    "#8a3a3a",
+    "#4a2020",
+    goodEyeSniperIcon,
+  );
+}
+
 // --- Generate all frames ---
 // --- Prism (colour scheme) rendering ---
 
@@ -720,6 +744,7 @@ const cdFrames = generateFrames(renderCdFrame);
 const headphonesFrames = generateFrames(renderHeadphonesFrame);
 const rainbowHeadbandFrames = generateFrames(renderRainbowHeadbandFrame);
 const boomboxFrames = generateFrames(renderBoomboxFrame);
+const goodEyeSniperFrames = generateFrames(renderGoodEyeSniperFrame);
 const prismFrames = generateFrames(renderPrismFrame);
 
 // --- Clouds card ---
@@ -827,6 +852,17 @@ export const ITEMS: ItemDef[] = [
     equipable: true,
     equipSlot: "ground",
     sellPrice: 250,
+  },
+  {
+    id: "good-eye-sniper",
+    name: "Good Eye Sniper",
+    description: "Proof your ears never miss. Tracks every song hunt you've won.",
+    rarity: "rare",
+    frames: goodEyeSniperFrames,
+    equipable: true,
+    equipSlot: "ground",
+    sellPrice: 250,
+    // no buyPrice — reward-only, matches boombox
   },
   {
     id: "clouds",

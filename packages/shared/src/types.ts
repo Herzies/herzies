@@ -75,6 +75,7 @@ export interface HerzieProfile {
     artist: string;
     listenedAt: string;
   } | null;
+  songHuntWins?: number;
 }
 
 // --- Game Server API types ---

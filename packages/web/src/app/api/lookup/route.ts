@@ -57,8 +57,10 @@ export async function GET(request: Request) {
     }
 
     const canSeeListening = visibleCodes.has(data.friend_code);
-    const [topArtists, lastPlayed, globalRank, globalTotal] = await Promise.all(
-      [
+    const equipped = normalizeEquipped(data.equipped);
+    const wantsSongHuntWins = hasGoodEyeSniperEquipped(equipped);
+    const [topArtists, lastPlayed, globalRank, globalTotal, songHuntWins] =
+      await Promise.all([
         canSeeListening
           ? getTopArtists(admin, data.user_id)
           : Promise.resolve([]),
@@ -67,8 +69,10 @@ export async function GET(request: Request) {
           : Promise.resolve(null),
         getGlobalRank(admin, data.xp),
         getGlobalTotal(admin),
-      ],
-    );
+        wantsSongHuntWins
+          ? getSongHuntWins(admin, data.user_id)
+          : Promise.resolve(undefined),
+      ]);
 
     return NextResponse.json({
       herzie: formatProfile(
@@ -78,6 +82,7 @@ export async function GET(request: Request) {
         lastPlayed,
         globalRank,
         globalTotal,
+        songHuntWins,
       ),
     });
   }
@@ -107,15 +112,21 @@ export async function GET(request: Request) {
   const herzies = await Promise.all(
     data.map(async (row) => {
       const canSeeListening = visibleCodes.has(row.friend_code);
-      const [topArtists, lastPlayed, globalRank] = await Promise.all([
-        canSeeListening
-          ? getTopArtists(admin, row.user_id)
-          : Promise.resolve([]),
-        canSeeListening
-          ? getLastPlayed(admin, row.user_id)
-          : Promise.resolve(null),
-        getGlobalRank(admin, row.xp),
-      ]);
+      const equipped = normalizeEquipped(row.equipped);
+      const wantsSongHuntWins = hasGoodEyeSniperEquipped(equipped);
+      const [topArtists, lastPlayed, globalRank, songHuntWins] =
+        await Promise.all([
+          canSeeListening
+            ? getTopArtists(admin, row.user_id)
+            : Promise.resolve([]),
+          canSeeListening
+            ? getLastPlayed(admin, row.user_id)
+            : Promise.resolve(null),
+          getGlobalRank(admin, row.xp),
+          wantsSongHuntWins
+            ? getSongHuntWins(admin, row.user_id)
+            : Promise.resolve(undefined),
+        ]);
       return formatProfile(
         row,
         canSeeListening,
@@ -123,6 +134,7 @@ export async function GET(request: Request) {
         lastPlayed,
         globalRank,
         globalTotal,
+        songHuntWins,
       );
     }),
   );
@@ -157,6 +169,7 @@ function formatProfile(
   lastPlayed: { title: string; artist: string; listenedAt: string } | null,
   globalRank?: number,
   globalTotal?: number,
+  songHuntWins?: number,
 ) {
   return {
     name: row.name,
@@ -171,7 +184,28 @@ function formatProfile(
     equipped: normalizeEquipped(row.equipped),
     nowPlaying: canSeeListening ? formatNowPlaying(row.now_playing) : null,
     lastPlayed: canSeeListening ? lastPlayed : null,
+    songHuntWins,
   };
+}
+
+/** Whether the Good Eye Sniper is equipped in either ground slot. */
+function hasGoodEyeSniperEquipped(
+  equipped: ReturnType<typeof normalizeEquipped>,
+): boolean {
+  return (
+    equipped.ground_left === "good-eye-sniper" ||
+    equipped.ground_right === "good-eye-sniper"
+  );
+}
+
+async function getSongHuntWins(
+  admin: ReturnType<typeof createAdminClient>,
+  userId: string,
+): Promise<number | undefined> {
+  const { data, error } = await admin.rpc("count_song_hunt_wins", {
+    p_user_id: userId,
+  });
+  return error ? undefined : (data as number);
 }
 
 async function getGlobalRank(

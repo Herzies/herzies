@@ -87,6 +87,12 @@ export function ProfileView({
         <div className="text-ui text-text-dim">
           Level {profile.level} (Stage {profile.stage})
         </div>
+        {profile.songHuntWins !== undefined && (
+          <div className="text-ui text-text-dim">
+            🎯 {profile.songHuntWins} song hunt
+            {profile.songHuntWins === 1 ? "" : "s"} won
+          </div>
+        )}
       </div>
 
       {!isFriend ? (
