@@ -100,7 +100,9 @@ describe("events table RLS", () => {
   });
 
   it("/api/events/active still returns the event with redacted config", async () => {
-    const res = await getActiveEvents();
+    const res = await getActiveEvents(
+      new Request("http://localhost/api/events/active"),
+    );
     expect(res.status).toBe(200);
 
     const body = (await res.json()) as {

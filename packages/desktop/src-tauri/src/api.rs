@@ -674,6 +674,30 @@ pub async fn api_fetch_active_events(client: &Client) -> Option<Vec<GameEvent>> 
     Some(data.events)
 }
 
+/// Grants one play of a hint's audio snippet and returns a short-lived
+/// signed URL. Surfaces the server's error message (e.g. "No plays
+/// remaining", "Hint is locked") so the Events tab can show why playback
+/// was refused.
+pub async fn api_play_hint_audio(
+    client: &Client,
+    event_id: &str,
+    hint_index: u32,
+) -> Result<serde_json::Value, String> {
+    let body = serde_json::json!({ "eventId": event_id, "hintIndex": hint_index });
+    let resp = api_fetch(client, reqwest::Method::POST, "/events/hint-audio/play", Some(body))
+        .await
+        .ok_or_else(|| "Network error".to_string())?;
+    let status = resp.status();
+    let text = resp.text().await.map_err(|e| format!("Read error: {e}"))?;
+    let data: serde_json::Value =
+        serde_json::from_str(&text).map_err(|_| format!("Server returned {status}"))?;
+    if !status.is_success() {
+        let msg = data["error"].as_str().unwrap_or("Unknown error");
+        return Err(msg.to_string());
+    }
+    Ok(data)
+}
+
 pub async fn api_fetch_previous_hunt(
     client: &Client,
 ) -> Option<(Vec<GameEvent>, Option<GameEvent>)> {

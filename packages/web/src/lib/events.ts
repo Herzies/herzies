@@ -17,20 +17,49 @@ function garbleText(text: string, seed: string): string {
     .join("");
 }
 
+const MAX_HINT_AUDIO_PLAYS = 3;
+
 export async function buildSongHuntConfig(
   admin: ReturnType<typeof createAdminClient>,
   eventId: string,
   config: SongHuntConfig,
   now: Date,
   includeTrackInfo: boolean = false,
+  userId: string | null = null,
 ): Promise<Record<string, unknown>> {
+  const unlockedAudioKeys = config.hints
+    .filter((h) => h.audioKey && now >= new Date(h.unlocksAt))
+    .map((h) => h.audioKey as string);
+
+  let playCounts = new Map<string, number>();
+  if (userId && unlockedAudioKeys.length > 0) {
+    const { data: plays } = await admin
+      .from("hint_plays")
+      .select("audio_key, play_count")
+      .eq("user_id", userId)
+      .in("audio_key", unlockedAudioKeys);
+    playCounts = new Map(
+      (plays ?? []).map((p) => [p.audio_key as string, p.play_count as number]),
+    );
+  }
+
   const hints = config.hints.map((hint, i) => {
     const unlocked = now >= new Date(hint.unlocksAt);
-    return {
+    const result: Record<string, unknown> = {
       text: unlocked ? hint.text : garbleText(hint.text, `${eventId}${i}`),
       unlocksAt: hint.unlocksAt,
       unlocked,
     };
+    // Locked hints never carry audio metadata — same principle as garbling
+    // the text: nothing about a locked hint should be inspectable.
+    if (unlocked && hint.audioKey) {
+      result.hasAudio = true;
+      if (userId) {
+        const playCount = playCounts.get(hint.audioKey) ?? 0;
+        result.playsRemaining = Math.max(0, MAX_HINT_AUDIO_PLAYS - playCount);
+      }
+    }
+    return result;
   });
 
   const { data: claims } = await admin

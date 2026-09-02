@@ -72,6 +72,11 @@ export const claimEventSchema = z.object({
   eventId: z.string().min(1),
 });
 
+export const hintAudioPlaySchema = z.object({
+  eventId: z.string().min(1),
+  hintIndex: z.number().int().nonnegative(),
+});
+
 export const refreshTokenSchema = z.object({
   refreshToken: z.string().min(1),
 });

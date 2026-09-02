@@ -204,6 +204,12 @@ export const herzies = {
       "fetch_previous_hunt",
     ),
 
+  playHintAudio: (eventId: string, hintIndex: number) =>
+    invoke<{ url: string; playsRemaining: number }>("play_hint_audio", {
+      eventId,
+      hintIndex,
+    }),
+
   fetchLeaderboard: () =>
     invoke<{ entries: LeaderboardEntry[] }>("fetch_leaderboard"),
 

@@ -1,6 +1,6 @@
 import type { GameEvent } from "@herzies/shared";
 import { getItem, RARITY_COLORS as ITEM_RARITY_COLORS } from "@herzies/shared";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { herzies, useWindowFocused } from "../tauri-bridge";
 import ItemInspectOverlay from "./ItemInspectOverlay";
 import { View } from "./View";
@@ -47,6 +47,8 @@ type SongHuntConfig = {
     text: string;
     unlocksAt: string;
     unlocked: boolean;
+    hasAudio?: boolean;
+    playsRemaining?: number;
   }>;
   firstFinders: Array<{
     name: string;
@@ -68,6 +70,45 @@ export function EventsView({
   const [loading, setLoading] = useState(true);
   const [inspectOverlay, setInspectOverlay] = useState<"item" | null>(null);
   const focused = useWindowFocused();
+
+  // Optimistic override of playsRemaining, keyed by hint index — updated
+  // immediately from a play response so the button reflects the new count
+  // without waiting for the next poll cycle.
+  const [audioOverrides, setAudioOverrides] = useState<Record<number, number>>(
+    {},
+  );
+  const [playingHint, setPlayingHint] = useState<number | null>(null);
+  // Spans the actual playback, not just the fetch — set once audio starts,
+  // cleared on end/pause/error, so the button stays disabled for as long as
+  // the clip is audibly playing (not just while the request is in flight).
+  const [activeAudioHint, setActiveAudioHint] = useState<number | null>(null);
+  const [audioError, setAudioError] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
+
+  const playHintAudio = async (eventId: string, hintIndex: number) => {
+    if (playingHint !== null || activeAudioHint !== null) return;
+    setPlayingHint(hintIndex);
+    setAudioError(null);
+    try {
+      const { url, playsRemaining } = await herzies.playHintAudio(
+        eventId,
+        hintIndex,
+      );
+      setAudioOverrides((prev) => ({ ...prev, [hintIndex]: playsRemaining }));
+      if (audioRef.current) {
+        audioRef.current.src = url;
+        setActiveAudioHint(hintIndex);
+        await audioRef.current.play();
+      }
+    } catch (e) {
+      setAudioError(
+        e instanceof Error ? e.message : "Couldn't play hint audio",
+      );
+      setActiveAudioHint(null);
+    } finally {
+      setPlayingHint(null);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -255,6 +296,8 @@ export function EventsView({
       text: string;
       unlocksAt: string;
       unlocked: boolean;
+      hasAudio?: boolean;
+      playsRemaining?: number;
     }>;
     firstFinders: Array<{
       name: string;
@@ -307,6 +350,33 @@ export function EventsView({
                 {hint.unlocked ? (
                   <div className="text-ui text-text">
                     {i + 1}. {hint.text}
+                    {hint.hasAudio ? (
+                      <>
+                        <button
+                          type="button"
+                          disabled={
+                            playingHint !== null ||
+                            activeAudioHint !== null ||
+                            (audioOverrides[i] ?? hint.playsRemaining) === 0
+                          }
+                          onClick={() => playHintAudio(hunt.id, i)}
+                          className="ml-4 inline-block cursor-pointer border-none bg-transparent p-0 align-middle leading-none text-cyan disabled:cursor-not-allowed disabled:text-text-dim"
+                        >
+                          {activeAudioHint === i
+                            ? "▶ playing…"
+                            : (audioOverrides[i] ?? hint.playsRemaining ?? 0) >
+                                0
+                              ? "▶ play"
+                              : "no plays left"}
+                        </button>
+                        {(audioOverrides[i] ?? hint.playsRemaining ?? 0) > 0 ? (
+                          <span className="text-ui-sm text-text-dim">
+                            {" "}
+                            ({audioOverrides[i] ?? hint.playsRemaining}/3 left)
+                          </span>
+                        ) : null}
+                      </>
+                    ) : null}
                   </div>
                 ) : (
                   <>
@@ -324,6 +394,9 @@ export function EventsView({
                 )}
               </div>
             ))}
+            {audioError ? (
+              <div className="text-ui-sm text-red">{audioError}</div>
+            ) : null}
           </div>
 
           <div>
@@ -362,6 +435,14 @@ export function EventsView({
           onClose={() => setInspectOverlay(null)}
         />
       )}
+      {/* biome-ignore lint/a11y/useMediaCaption: short game hint clips, no source track */}
+      <audio
+        ref={audioRef}
+        hidden
+        onEnded={() => setActiveAudioHint(null)}
+        onPause={() => setActiveAudioHint(null)}
+        onError={() => setActiveAudioHint(null)}
+      />
     </View>
   );
 }

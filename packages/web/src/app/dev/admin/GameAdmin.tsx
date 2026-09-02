@@ -36,6 +36,7 @@ type EventStatus = "running" | "scheduled" | "ended" | "inactive";
 type SongHuntHintForm = {
   text: string;
   unlocksAt: string;
+  audioKey?: string;
 };
 
 type SongHuntConfigForm = {
@@ -164,6 +165,8 @@ function songHuntConfigFromRecord(
             typeof hint.unlocksAt === "string"
               ? isoToDatetimeLocal(hint.unlocksAt)
               : toDatetimeLocalValue(new Date()),
+          audioKey:
+            typeof hint.audioKey === "string" ? hint.audioKey : undefined,
         };
       })
     : [];
@@ -197,6 +200,7 @@ function songHuntConfigToPayload(
       (h): SongHuntHint => ({
         text: h.text.trim(),
         unlocksAt: datetimeLocalToIso(h.unlocksAt),
+        ...(h.audioKey ? { audioKey: h.audioKey } : {}),
       }),
     ),
   };
@@ -344,12 +348,17 @@ function SongHuntConfigFields({
   setForm,
   catalogItems,
   fieldIdPrefix,
+  secret,
 }: {
   form: EventFormState;
   setForm: React.Dispatch<React.SetStateAction<EventFormState>>;
   catalogItems: CatalogItem[];
   fieldIdPrefix: string;
+  secret: string;
 }) {
+  const [uploadingHint, setUploadingHint] = useState<number | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
   const updateSongHunt = (patch: Partial<SongHuntConfigForm>) => {
     setForm((f) => ({ ...f, songHunt: { ...f.songHunt, ...patch } }));
   };
@@ -364,6 +373,31 @@ function SongHuntConfigFields({
         ),
       },
     }));
+  };
+
+  const uploadHintAudio = async (index: number, file: File) => {
+    setUploadingHint(index);
+    setUploadError(null);
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      const res = await fetch("/api/admin/events/hint-audio", {
+        method: "POST",
+        headers: { "x-admin-secret": secret },
+        body,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          (data as { error?: string }).error ?? "Failed to upload audio",
+        );
+      }
+      updateHint(index, { audioKey: (data as { audioKey: string }).audioKey });
+    } catch (e) {
+      setUploadError(e instanceof Error ? e.message : "Failed to upload audio");
+    } finally {
+      setUploadingHint(null);
+    }
   };
 
   const addHint = () => {
@@ -567,6 +601,46 @@ function SongHuntConfigFields({
                   className={INPUT}
                 />
               </div>
+              <div>
+                <label
+                  className="block text-xs text-text-dim mb-1"
+                  htmlFor={`${fieldIdPrefix}-hint-${index}-audio`}
+                >
+                  audio snippet (optional, max 3 plays/user)
+                </label>
+                <input
+                  id={`${fieldIdPrefix}-hint-${index}-audio`}
+                  type="file"
+                  accept="audio/*"
+                  disabled={uploadingHint === index}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) uploadHintAudio(index, file);
+                    e.target.value = "";
+                  }}
+                  className="text-xs text-text-dim"
+                />
+                {uploadingHint === index && (
+                  <p className="text-xs text-cyan mt-1">uploading…</p>
+                )}
+                {hint.audioKey && uploadingHint !== index && (
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-xs text-green">
+                      uploaded ({hint.audioKey})
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => updateHint(index, { audioKey: undefined })}
+                      className="text-xs text-red bg-transparent border-0 cursor-pointer"
+                    >
+                      clear
+                    </button>
+                  </div>
+                )}
+                {uploadError && uploadingHint === null && (
+                  <p className="text-xs text-red mt-1">{uploadError}</p>
+                )}
+              </div>
             </div>
           ))}
         </div>
@@ -583,6 +657,7 @@ function EventForm({
   submitLabel,
   disabled,
   catalogItems,
+  secret,
 }: {
   form: EventFormState;
   setForm: React.Dispatch<React.SetStateAction<EventFormState>>;
@@ -591,6 +666,7 @@ function EventForm({
   submitLabel: string;
   disabled?: boolean;
   catalogItems: CatalogItem[];
+  secret: string;
 }) {
   return (
     <form onSubmit={onSubmit} className="space-y-4">
@@ -714,6 +790,7 @@ function EventForm({
           setForm={setForm}
           catalogItems={catalogItems}
           fieldIdPrefix={form.id ?? "new"}
+          secret={secret}
         />
       ) : (
         <div>
@@ -1115,6 +1192,7 @@ function EventRow({
               submitLabel="save changes"
               disabled={busy}
               catalogItems={catalogItems}
+              secret={secret}
             />
             {error && <p className="text-red text-xs mt-2">{error}</p>}
           </td>
@@ -1739,6 +1817,7 @@ export function GameAdmin() {
               submitLabel="create event"
               disabled={loading}
               catalogItems={items}
+              secret={secret}
             />
           </div>
         )}

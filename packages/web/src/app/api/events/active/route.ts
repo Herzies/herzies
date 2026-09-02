@@ -1,9 +1,11 @@
 import type { GameEvent, SongHuntConfig } from "@herzies/shared";
 import { NextResponse } from "next/server";
+import { authenticateRequestOptional } from "@/lib/auth";
 import { buildSongHuntConfig } from "@/lib/events";
 import { createAdminClient } from "@/lib/supabase-admin";
 
-export async function GET() {
+export async function GET(request: Request) {
+  const { userId } = await authenticateRequestOptional(request);
   const admin = createAdminClient();
   const now = new Date();
 
@@ -34,6 +36,8 @@ export async function GET() {
           e.id,
           e.config as SongHuntConfig,
           now,
+          false,
+          userId,
         );
       } else {
         config = e.config as Record<string, unknown>;

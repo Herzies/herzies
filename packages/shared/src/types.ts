@@ -177,6 +177,18 @@ export interface SongHuntHint {
   text: string;
   /** ISO date string — hint becomes readable after this time (UTC) */
   unlocksAt: string;
+  /**
+   * Storage object key of an optional audio snippet attached to this hint
+   * (in the private `hint-audio` bucket). Never sent to clients directly —
+   * only used server-side to resolve playback via /api/events/hint-audio/play.
+   */
+  audioKey?: string;
+}
+
+/** Audio playback state for a hint, as seen by a specific user (server-computed). */
+export interface SongHuntHintAudioState {
+  hasAudio: true;
+  playsRemaining: number;
 }
 
 export interface SongHuntConfig {

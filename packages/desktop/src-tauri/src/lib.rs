@@ -676,6 +676,12 @@ async fn fetch_previous_hunt() -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
+async fn play_hint_audio(event_id: String, hint_index: u32) -> Result<serde_json::Value, String> {
+    let client = Client::new();
+    api::api_play_hint_audio(&client, &event_id, hint_index).await
+}
+
+#[tauri::command]
 async fn get_auth_config() -> Result<Option<AuthConfig>, String> {
     let client = Client::new();
     let token = api::get_token_public(&client).await;
@@ -1718,6 +1724,7 @@ pub fn run() {
             get_ghost_mode,
             fetch_active_events,
             fetch_previous_hunt,
+            play_hint_audio,
             fetch_leaderboard,
             get_auth_config,
             chat_fetch,

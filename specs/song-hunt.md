@@ -36,6 +36,6 @@ There's no recurring event that gives users a reason to come back each week or e
 - No CLI support — desktop app only
 - No hint request/unlock mechanics (hints are purely time-based, not user-action-based)
 - No leaderboard beyond first 3 finders
-- No song preview or audio playback in the app — users figure out the song and go play it in their music app
+- No general song preview or full-track playback — users still figure out the song and go play it in their music app. (Update: short admin-uploaded audio *hint* snippets, capped at 3 plays/user, are now supported per-hint — see the audio hints addition. This is a bounded hint mechanic, not a way to preview or hear the actual target track.)
 - No history of past hunts (just the current active one)
 - No push notifications or webhooks — notifications only arrive during sync when the app is open
