@@ -89,7 +89,7 @@ export function ProfileView({
         </div>
         {profile.songHuntWins !== undefined && (
           <div className="text-ui text-text-dim">
-            🎯 {profile.songHuntWins} song hunt
+            {profile.songHuntWins} song hunt
             {profile.songHuntWins === 1 ? "" : "s"} won
           </div>
         )}
