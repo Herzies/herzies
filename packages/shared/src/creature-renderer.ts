@@ -13,11 +13,17 @@ import {
   CHAR_ASPECT,
   dot3,
   LIGHT,
+  RAINBOW_RAMP,
   RAMP_HERZIE,
   rotY,
   type V3,
 } from "./ascii3d.js";
-import { type Equipped, type GroundSide, groundSlot } from "./items.js";
+import {
+  EQUIPPED_SLOTS,
+  type Equipped,
+  type GroundSide,
+  groundSlot,
+} from "./items.js";
 
 // --- Creature viewport ---
 const SW = 80;
@@ -103,15 +109,7 @@ function hslToHex(h: number, s: number, l: number): string {
   return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`.toUpperCase();
 }
 
-const RAINBOW_HEADBAND = [
-  "#FF6B6B",
-  "#FFA94D",
-  "#FFD43B",
-  "#69DB7C",
-  "#4DABF7",
-  "#9775FA",
-  "#F783AC",
-] as const;
+const RAINBOW_HEADBAND = RAINBOW_RAMP;
 
 function shadeWearableColor(hex: string, brightness: number): string {
   const [h, s, l] = hexToHsl(hex);
@@ -1144,11 +1142,9 @@ function buildBoomboxSpheres(
 
 function equippedCacheKey(equipped?: Equipped): string {
   if (!equipped) return "";
-  return (
-    ["head", "face", "body", "scenery", "ground_left", "ground_right"] as const
-  )
-    .map((s) => `${s}:${equipped[s] ?? ""}`)
-    .join(",");
+  // Derived from EQUIPPED_SLOTS so a new slot can never silently miss the key
+  // and serve stale frames after equipping.
+  return EQUIPPED_SLOTS.map((s) => `${s}:${equipped[s] ?? ""}`).join(",");
 }
 
 function appendWearableSpheres(
@@ -1172,6 +1168,30 @@ function appendWearableSpheres(
       spheres.push(...buildBoomboxSpheres(spheres, cols, side, boomboxConfig));
     }
   }
+}
+
+/**
+ * Equipable colour schemes, keyed by item id. A scheme replaces the herzie's
+ * seeded body colour with a vertical gradient; the seed itself is untouched,
+ * so unequipping restores the original creature.
+ */
+const COLOR_SCHEMES: Record<string, readonly string[]> = {
+  prism: RAINBOW_RAMP,
+};
+
+/** True for spheres that a colour scheme is allowed to repaint. */
+function isSchemePaintable(zone: ColorZone, hasOwnColor: boolean): boolean {
+  return (
+    !hasOwnColor && zone !== "eye" && zone !== "pupil" && zone !== "wearable"
+  );
+}
+
+/** Resolve the ramp for whatever colour scheme is equipped, if any. */
+function colorSchemeFor(equipped?: Equipped): readonly string[] | undefined {
+  const id = equipped?.color;
+  if (!id) return undefined;
+  const ramp = COLOR_SCHEMES[id];
+  return ramp && ramp.length > 0 ? ramp : undefined;
 }
 
 function buildCreatureSpheres(params: CreatureParams, stage: number): Sphere[] {
@@ -1380,6 +1400,7 @@ function renderCreatureFrame(
   anchorDefs: AnchorPoint[],
   colors: ColorTriplet,
   cols: number = SW,
+  colorScheme?: readonly string[],
 ): FrameData {
   const halfW = cols === SW ? HALF_W : halfWidthFor(cols);
   const transformed = spheres.map((s) => {
@@ -1409,6 +1430,24 @@ function renderCreatureFrame(
   const pixelColors: (string | null)[][] = Array.from({ length: SH }, () =>
     Array(cols).fill(null),
   );
+
+  // Surface extent of the scheme-painted body, measured in tilted space. rotY
+  // preserves Y, so these bounds — and every hue derived from them — hold
+  // steady as the herzie spins.
+  let schemeYMin = Number.POSITIVE_INFINITY;
+  let schemeYMax = Number.NEGATIVE_INFINITY;
+  if (colorScheme) {
+    for (const sp of transformed) {
+      if (!isSchemePaintable(sp.zone, Boolean(sp.color))) continue;
+      if (sp.center[1] - sp.radius < schemeYMin) {
+        schemeYMin = sp.center[1] - sp.radius;
+      }
+      if (sp.center[1] + sp.radius > schemeYMax) {
+        schemeYMax = sp.center[1] + sp.radius;
+      }
+    }
+  }
+  const schemeSpan = Math.max(1e-6, schemeYMax - schemeYMin);
 
   const oz = -CAM;
 
@@ -1463,8 +1502,10 @@ function renderCreatureFrame(
 
       let lit: number;
       if (sp.zone === "pupil") {
-        // Force pupils to bottom 2 RAMP characters regardless of lighting
-        lit = 1 / (RAMP_HERZIE.length - 1);
+        // Pupils are colour-driven, not ramp-driven: RAMP_HERZIE is a single
+        // glyph, so 1/(length-1) divided by zero and produced an undefined
+        // glyph that canvas drew as the literal string "undefined".
+        lit = 0;
       } else if (sp.zone === "eye") {
         lit = 0.75 * (0.15 + 0.85 * diffuse);
       } else if (sp.color) {
@@ -1476,7 +1517,23 @@ function renderCreatureFrame(
       }
       bright[sy][sx] = lit;
       zones[sy][sx] = sp.zone;
-      if (sp.color) pixelColors[sy][sx] = sp.color;
+      if (sp.color) {
+        pixelColors[sy][sx] = sp.color;
+      } else if (
+        colorScheme &&
+        isSchemePaintable(sp.zone, false) &&
+        schemeYMax > schemeYMin
+      ) {
+        // Hue comes from where the ray actually struck the surface, so the
+        // head and body — each a single large sphere — carry a gradient
+        // instead of one flat colour apiece.
+        const t = (hy - schemeYMin) / schemeSpan;
+        const band = Math.min(
+          colorScheme.length - 1,
+          Math.max(0, Math.floor(t * colorScheme.length)),
+        );
+        pixelColors[sy][sx] = colorScheme[band];
+      }
     }
   }
 
@@ -1569,6 +1626,7 @@ export function generateIdleFrames(
   appendWearableSpheres(baseSpheres, equipped, cols, boomboxConfig);
   const anchors = getAnchors(baseSpheres, params, stage);
   const colors = buildColorTriplet(CREATURE_PALETTE[params.colorIndex]);
+  const scheme = colorSchemeFor(equipped);
 
   const frames = Array.from({ length: IDLE_FRAMES }, (_, i) => {
     const animated = applyIdleOffsets(baseSpheres, i);
@@ -1579,6 +1637,7 @@ export function generateIdleFrames(
       anchors,
       colors,
       cols,
+      scheme,
     );
   });
 
@@ -1608,6 +1667,7 @@ export function generateRotationFrames(
   appendWearableSpheres(spheres, equipped, cols, boomboxConfig);
   const anchors = getAnchors(spheres, params, stage);
   const colors = buildColorTriplet(CREATURE_PALETTE[params.colorIndex]);
+  const scheme = colorSchemeFor(equipped);
 
   const frames = Array.from({ length: frameCount }, (_, i) =>
     renderCreatureFrame(
@@ -1617,6 +1677,7 @@ export function generateRotationFrames(
       anchors,
       colors,
       cols,
+      scheme,
     ),
   );
 
@@ -1645,6 +1706,7 @@ export function generateDanceFrames(
   appendWearableSpheres(baseSpheres, equipped, cols, boomboxConfig);
   const anchors = getAnchors(baseSpheres, params, stage);
   const colors = buildColorTriplet(CREATURE_PALETTE[params.colorIndex]);
+  const scheme = colorSchemeFor(equipped);
 
   const frames = Array.from({ length: DANCE_FRAMES }, (_, i) => {
     const animated = applyDanceOffsets(baseSpheres, i);
@@ -1655,6 +1717,7 @@ export function generateDanceFrames(
       anchors,
       colors,
       cols,
+      scheme,
     );
   });
 
@@ -1683,6 +1746,7 @@ export function renderCreatureAtAngle(
   appendWearableSpheres(baseSpheres, equipped, cols, boomboxConfig);
   const anchors = getAnchors(baseSpheres, params, stage);
   const colors = buildColorTriplet(CREATURE_PALETTE[params.colorIndex]);
+  const scheme = colorSchemeFor(equipped);
   const animated = dancing
     ? applyDanceOffsets(baseSpheres, frameIdx)
     : applyIdleOffsets(baseSpheres, frameIdx);
@@ -1693,6 +1757,7 @@ export function renderCreatureAtAngle(
     anchors,
     colors,
     cols,
+    scheme,
   );
 }
 

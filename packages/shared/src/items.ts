@@ -3,6 +3,9 @@
  * Ported from CLI — uses HTML color spans instead of chalk.
  */
 
+// Imported from the leaf module rather than the package barrel: the barrel
+// re-exports this file, and that cycle left RAINBOW_RAMP undefined while the
+// item frames were being generated at module load.
 import {
   CHAR_ASPECT,
   col,
@@ -10,12 +13,13 @@ import {
   dot3,
   LIGHT,
   normV,
+  RAINBOW_RAMP,
   RAMP_ITEM,
   rotY,
   rotZ,
   type V2,
   type V3,
-} from "@herzies/shared";
+} from "./ascii3d.js";
 import type { Cell } from "./creature-renderer.js";
 
 const EMPTY_CELL: Cell = { ch: " ", color: "" };
@@ -45,6 +49,7 @@ export const EQUIP_SLOTS = [
   "body",
   "scenery",
   "ground",
+  "color",
 ] as const;
 export type EquipSlot = (typeof EQUIP_SLOTS)[number];
 
@@ -56,6 +61,7 @@ export const EQUIPPED_SLOTS = [
   "scenery",
   "ground_left",
   "ground_right",
+  "color",
 ] as const;
 export type EquippedSlot = (typeof EQUIPPED_SLOTS)[number];
 
@@ -1016,6 +1022,117 @@ function renderBoomboxFrame(yAngle: number): string[] {
 }
 
 // --- Generate all frames ---
+// --- Prism (colour scheme) rendering ---
+
+/** Scale a hex colour toward black — used for the card's reverse face. */
+function shadeHex(hex: string, factor: number): string {
+  const channel = (start: number) =>
+    Math.min(
+      255,
+      Math.round(parseInt(hex.slice(start, start + 2), 16) * factor),
+    )
+      .toString(16)
+      .padStart(2, "0");
+  return `#${channel(1)}${channel(3)}${channel(5)}`.toUpperCase();
+}
+
+function prismTexture(u: number, v: number): number {
+  const bw = 0.055;
+  if (u < bw || u > 1 - bw || v < bw || v > 1 - bw) return 0.9;
+  // Gentle sheen across the face so the gradient still reads as a lit card.
+  return 0.55 + 0.35 * Math.sin((u + v) * Math.PI);
+}
+
+/** Band index for the diagonal rainbow sweep across the card face. */
+function prismBand(u: number, v: number): number {
+  const t = (u * 0.65 + v * 0.35) % 1;
+  return Math.min(RAINBOW_RAMP.length - 1, Math.floor(t * RAINBOW_RAMP.length));
+}
+
+function renderPrismFrame(yAngle: number): string[] {
+  const xf = CORNERS.map((v) => rotY(rotZ(v, TILT), yAngle));
+  const e1: V3 = [
+    xf[1][0] - xf[0][0],
+    xf[1][1] - xf[0][1],
+    xf[1][2] - xf[0][2],
+  ];
+  const e2: V3 = [
+    xf[3][0] - xf[0][0],
+    xf[3][1] - xf[0][1],
+    xf[3][2] - xf[0][2],
+  ];
+  const faceN = normV(cross(e1, e2));
+  const front = faceN[2] < 0;
+  const diffuse = Math.abs(dot3(faceN, LIGHT));
+  const pr = xf.map((v) => project(v));
+
+  const bright: number[][] = Array.from({ length: SH }, () =>
+    Array(SW).fill(-1),
+  );
+  const bands: number[][] = Array.from({ length: SH }, () => Array(SW).fill(0));
+
+  for (let sy = 0; sy < SH; sy++) {
+    for (let sx = 0; sx < SW; sx++) {
+      const px = sx + 0.5,
+        py = sy + 0.5;
+      const uv =
+        triUV(
+          px,
+          py,
+          pr[0][0],
+          pr[0][1],
+          UVS[0][0],
+          UVS[0][1],
+          pr[1][0],
+          pr[1][1],
+          UVS[1][0],
+          UVS[1][1],
+          pr[2][0],
+          pr[2][1],
+          UVS[2][0],
+          UVS[2][1],
+        ) ??
+        triUV(
+          px,
+          py,
+          pr[0][0],
+          pr[0][1],
+          UVS[0][0],
+          UVS[0][1],
+          pr[2][0],
+          pr[2][1],
+          UVS[2][0],
+          UVS[2][1],
+          pr[3][0],
+          pr[3][1],
+          UVS[3][0],
+          UVS[3][1],
+        );
+      if (!uv) continue;
+      let [u, v] = uv;
+      if (!front) u = 1 - u;
+      bright[sy][sx] = prismTexture(u, v) * (0.2 + 0.8 * diffuse);
+      bands[sy][sx] = prismBand(u, v);
+    }
+  }
+
+  return bright.map((row, y) =>
+    row
+      .map((val, x) => {
+        if (val < 0) return " ";
+        const idx = Math.min(
+          Math.floor(val * (RAMP_ITEM.length - 1)),
+          RAMP_ITEM.length - 1,
+        );
+        const ch = RAMP_ITEM[idx];
+        if (ch === " ") return " ";
+        const hue = RAINBOW_RAMP[bands[y][x]];
+        return col(front ? hue : shadeHex(hue, 0.45), ch);
+      })
+      .join(""),
+  );
+}
+
 function generateFrames(
   renderFn: (angle: number) => string[],
   count = 36,
@@ -1030,6 +1147,7 @@ const cdFrames = generateFrames(renderCdFrame);
 const headphonesFrames = generateFrames(renderHeadphonesFrame);
 const rainbowHeadbandFrames = generateFrames(renderRainbowHeadbandFrame);
 const boomboxFrames = generateFrames(renderBoomboxFrame);
+const prismFrames = generateFrames(renderPrismFrame);
 
 // --- Scenery icons (not 3D — simple animated ASCII for inventory display) ---
 const SCENERY_SKY = "#8899aa";
@@ -1155,6 +1273,15 @@ export const ITEMS: ItemDef[] = [
     frames: starsFrames,
     equipable: true,
     equipSlot: "scenery",
+  },
+  {
+    id: "prism",
+    name: "Prism",
+    description: "A rainbow gradient colour scheme for your herzie.",
+    rarity: "uncommon",
+    frames: prismFrames,
+    equipable: true,
+    equipSlot: "color",
   },
 ];
 

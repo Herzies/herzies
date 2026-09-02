@@ -42,3 +42,17 @@ export const RAMP_HERZIE = "▓";
 export const RAMP_ITEM = " .·:;=+*#%@█";
 export const LIGHT = normV([0.4, -0.6, -0.8]);
 export const CHAR_ASPECT = 2.1;
+
+/**
+ * Canonical rainbow ramp. Shared by the Prism colour scheme, its inventory
+ * card, and the Rainbow Headband so all three show the same seven hues.
+ */
+export const RAINBOW_RAMP = [
+  "#FF6B6B",
+  "#FFA94D",
+  "#FFD43B",
+  "#69DB7C",
+  "#4DABF7",
+  "#9775FA",
+  "#F783AC",
+] as const;
