@@ -21,7 +21,7 @@ export default function AboutPage() {
           cravings keep things interesting.
         </p>
         <p className="text-[13px]">
-          Collect items from limited-time events, build daily listening streaks
+          Collect cards from limited-time events, build daily listening streaks
           for bonus multipliers, and climb the leaderboard.
         </p>
       </div>

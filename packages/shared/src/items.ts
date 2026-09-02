@@ -20,25 +20,6 @@ import {
   type V2,
   type V3,
 } from "./ascii3d.js";
-import type { Cell } from "./creature-renderer.js";
-
-const EMPTY_CELL: Cell = { ch: " ", color: "" };
-
-/** Map a 0..1 brightness value to a ramp character. */
-function rampChar(val: number): string {
-  const idx = Math.min(
-    Math.floor(val * (RAMP_ITEM.length - 1)),
-    RAMP_ITEM.length - 1,
-  );
-  return RAMP_ITEM[idx];
-}
-
-/** Convert a live cell grid into the baked HTML-span string rows. */
-function cellsToStrings(cells: Cell[][]): string[] {
-  return cells.map((row) =>
-    row.map((c) => (c.ch === " " ? " " : col(c.color, c.ch))).join(""),
-  );
-}
 
 export type Rarity = "common" | "uncommon" | "rare" | "legendary";
 
@@ -343,41 +324,63 @@ function renderCardFrame(yAngle: number): string[] {
   );
 }
 
-// --- CD rendering ---
-const CD_RADIUS = 1.1;
-const CD_CORNERS: V3[] = [
-  [-CD_RADIUS, -CD_RADIUS, 0],
-  [CD_RADIUS, -CD_RADIUS, 0],
-  [CD_RADIUS, CD_RADIUS, 0],
-  [-CD_RADIUS, CD_RADIUS, 0],
-];
+// --- Shared card-frame renderer for icon-based item cards ---
+// Every non-signature item is presented as a card using the same
+// CORNERS/UVS/TILT/CAM rig as First Edition and Prism above (untouched) —
+// each item just supplies an icon glyph and a couple of accent colours
+// instead of reimplementing the projection/lighting loop.
 
-function cdFrontTexture(u: number, v: number): number {
-  const dx = u - 0.5,
-    dy = v - 0.5;
-  const r = Math.sqrt(dx * dx + dy * dy);
-  if (r > 0.5) return -1;
-  if (r < 0.08) return -1;
-  if (r < 0.1) return 0.9;
-  const ring = (r * 40) % 1;
-  const base = 0.3 + 0.4 * (1 - r / 0.5);
-  if (ring < 0.15) return base + 0.2;
-  if (r > 0.14 && r < 0.25) return 0.55;
-  return base;
+/** Icon-space radius so a circle centred on the card face reads as round
+ * despite the card being taller than it is wide. */
+const ICON_ASPECT = CARD_HH / CARD_HW;
+
+function iconUV(u: number, v: number): V2 {
+  return [u - 0.5, (v - 0.5) * ICON_ASPECT];
 }
 
-function cdBackTexture(u: number, v: number): number {
-  const dx = u - 0.5,
-    dy = v - 0.5;
-  const r = Math.sqrt(dx * dx + dy * dy);
-  if (r > 0.5) return -1;
-  if (r < 0.08) return -1;
-  if (r < 0.1) return 0.7;
-  return 0.35 + 0.15 * Math.sin(r * 30);
+interface TexSample {
+  bright: number;
+  /** Present for "content" pixels — tints them instead of the card's dim colour. */
+  color?: string;
 }
 
-function renderCdFrame(yAngle: number): string[] {
-  const xf = CD_CORNERS.map((v) => rotY(rotZ(v, TILT), yAngle));
+/** Border, inner rule, and four corner diamonds shared by every icon card —
+ * mirrors First Edition's frame proportions. Returns null over the open
+ * interior so the caller's icon can fill it in. */
+function cardChrome(u: number, v: number, accent: string): TexSample | null {
+  const bw = 0.055;
+  if (u < bw || u > 1 - bw || v < bw || v > 1 - bw) return { bright: 0.9 };
+  const ib = 0.11,
+    ibw = 0.012;
+  if (
+    (u > ib - ibw && u < ib + ibw && v > ib && v < 1 - ib) ||
+    (u > 1 - ib - ibw && u < 1 - ib + ibw && v > ib && v < 1 - ib) ||
+    (v > ib - ibw && v < ib + ibw && u > ib && u < 1 - ib) ||
+    (v > 1 - ib - ibw && v < 1 - ib + ibw && u > ib && u < 1 - ib)
+  )
+    return { bright: 0.65 };
+  const diamonds: V2[] = [
+    [0.16, 0.1],
+    [0.84, 0.1],
+    [0.16, 0.9],
+    [0.84, 0.9],
+  ];
+  for (const [dx, dy] of diamonds) {
+    const du = Math.abs(u - dx) / 0.035;
+    const dv = Math.abs(v - dy) / 0.045;
+    if (du + dv < 1) return { bright: 1.0, color: accent };
+  }
+  return null;
+}
+
+function renderIconCard(
+  yAngle: number,
+  accent: string,
+  dimColor: string,
+  backColor: string,
+  icon: (u: number, v: number) => TexSample | null,
+): string[] {
+  const xf = CORNERS.map((v) => rotY(rotZ(v, TILT), yAngle));
   const e1: V3 = [
     xf[1][0] - xf[0][0],
     xf[1][1] - xf[0][1],
@@ -395,6 +398,10 @@ function renderCdFrame(yAngle: number): string[] {
 
   const bright: number[][] = Array.from({ length: SH }, () =>
     Array(SW).fill(-1),
+  );
+  const pixelColor: (string | undefined)[][] = Array.from(
+    { length: SH },
+    () => Array(SW).fill(undefined),
   );
 
   for (let sy = 0; sy < SH; sy++) {
@@ -437,16 +444,27 @@ function renderCdFrame(yAngle: number): string[] {
       if (!uv) continue;
       let [u, v] = uv;
       if (!front) u = 1 - u;
-      const tex = front ? cdFrontTexture(u, v) : cdBackTexture(u, v);
-      if (tex < 0) continue;
-      const lit = tex * (0.2 + 0.8 * diffuse);
-      bright[sy][sx] = lit;
+      let sample: TexSample;
+      if (front) {
+        sample = cardChrome(u, v, accent) ?? icon(u, v) ?? { bright: 0.3 };
+      } else {
+        const bw = 0.055;
+        if (u < bw || u > 1 - bw || v < bw || v > 1 - bw) {
+          sample = { bright: 0.7 };
+        } else {
+          const g = 0.065,
+            w = 0.018;
+          sample = { bright: u % g < w || v % g < w ? 0.5 : 0.28 };
+        }
+      }
+      bright[sy][sx] = sample.bright * (0.2 + 0.8 * diffuse);
+      pixelColor[sy][sx] = sample.color;
     }
   }
 
-  return bright.map((row) =>
+  return bright.map((row, y) =>
     row
-      .map((val) => {
+      .map((val, x) => {
         if (val < 0) return " ";
         const idx = Math.min(
           Math.floor(val * (RAMP_ITEM.length - 1)),
@@ -454,573 +472,122 @@ function renderCdFrame(yAngle: number): string[] {
         );
         const ch = RAMP_ITEM[idx];
         if (ch === " ") return " ";
-        return val > 0.6
-          ? col("#E8E8E8", ch)
-          : val > 0.35
-            ? col("#C0C0C0", ch)
-            : col("#808080", ch);
+        const c = pixelColor[y][x];
+        return col(c ?? (front ? dimColor : backColor), ch);
       })
       .join(""),
   );
 }
 
-// --- Headphones rendering (ray-traced) ---
-
-function raySphere(
-  ox: number,
-  oy: number,
-  oz: number,
-  dx: number,
-  dy: number,
-  dz: number,
-  sx: number,
-  sy: number,
-  sz: number,
-  sr: number,
-): [number, V3] | null {
-  const ex = ox - sx,
-    ey = oy - sy,
-    ez = oz - sz;
-  const a = dx * dx + dy * dy + dz * dz;
-  const b = 2 * (ex * dx + ey * dy + ez * dz);
-  const c = ex * ex + ey * ey + ez * ez - sr * sr;
-  const disc = b * b - 4 * a * c;
-  if (disc < 0) return null;
-  const t = (-b - Math.sqrt(disc)) / (2 * a);
-  if (t < 0) return null;
-  const hx = ox + dx * t - sx,
-    hy = oy + dy * t - sy,
-    hz = oz + dz * t - sz;
-  const il = 1 / sr;
-  return [t, [hx * il, hy * il, hz * il]];
+// --- CD card ---
+function cdCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  const r = Math.sqrt(ix * ix + iy * iy);
+  const R = 0.27;
+  if (r > R || r < R * 0.16) return null;
+  const band = ((r / R) * 7) % 1;
+  const bright = band < 0.5 ? 0.85 : 0.5;
+  const color = r < R * 0.4 ? "#E8E8E8" : r < R * 0.7 ? "#C0C0C0" : "#808080";
+  return { bright, color };
 }
 
-function rayChain(
-  ox: number,
-  oy: number,
-  oz: number,
-  dx: number,
-  dy: number,
-  dz: number,
-  centers: V3[],
-  radius: number,
-): [number, V3] | null {
-  let best: [number, V3] | null = null;
-  for (const c of centers) {
-    const hit = raySphere(ox, oy, oz, dx, dy, dz, c[0], c[1], c[2], radius);
-    if (hit && (best === null || hit[0] < best[0])) best = hit;
+function renderCdFrame(yAngle: number): string[] {
+  return renderIconCard(yAngle, "#C0C0C0", "#7a7a7a", "#4a4a4a", cdCardIcon);
+}
+
+// --- Headphones card ---
+function headbandArcIcon(
+  u: number,
+  v: number,
+  cupColor: string | null,
+): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  const dist = Math.sqrt(ix * ix + iy * iy);
+  const R = 0.26,
+    bandT = 0.045;
+  const angle = Math.atan2(iy, ix);
+  const start = -2.7,
+    end = -0.44; // upper arc, opening downward like a headband over ears
+  if (Math.abs(dist - R) < bandT && angle > start && angle < end) {
+    return { bright: 0.75, color: "#BBBBBB" };
   }
-  return best;
-}
-
-const RAINBOW_HEADBAND_COLORS = [
-  "#FF6B6B",
-  "#FFA94D",
-  "#FFD43B",
-  "#69DB7C",
-  "#4DABF7",
-  "#9775FA",
-  "#F783AC",
-];
-
-function shadeItemColor(hex: string, brightness: number): string {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  const scale = brightness > 0.6 ? 1.25 : brightness > 0.3 ? 1 : 0.65;
-  const clamp = (v: number) =>
-    Math.min(255, Math.max(0, Math.round(v * scale)));
-  return `#${clamp(r).toString(16).padStart(2, "0")}${clamp(g).toString(16).padStart(2, "0")}${clamp(b).toString(16).padStart(2, "0")}`;
-}
-
-function rayChainColored(
-  ox: number,
-  oy: number,
-  oz: number,
-  dx: number,
-  dy: number,
-  dz: number,
-  centers: V3[],
-  radius: number,
-  colors: string[],
-): [number, V3, string] | null {
-  let best: [number, V3, string] | null = null;
-  for (let i = 0; i < centers.length; i++) {
-    const c = centers[i];
-    const hit = raySphere(ox, oy, oz, dx, dy, dz, c[0], c[1], c[2], radius);
-    if (hit && (best === null || hit[0] < best[0])) {
-      best = [hit[0], hit[1], colors[i % colors.length]];
+  if (cupColor) {
+    for (const a of [start, end]) {
+      const cx = R * Math.cos(a),
+        cy = R * Math.sin(a);
+      const d = Math.sqrt((ix - cx) ** 2 + (iy - cy) ** 2);
+      if (d < 0.1) return { bright: d < 0.05 ? 0.9 : 0.6, color: cupColor };
     }
   }
-  return best;
-}
-
-function renderHeadphonesCells(yAngle: number): Cell[][] {
-  const bright: number[][] = Array.from({ length: SH }, () =>
-    Array(SW).fill(-1),
-  );
-  const zone: string[][] = Array.from({ length: SH }, () => Array(SW).fill(""));
-
-  const cosA = Math.cos(yAngle),
-    sinA = Math.sin(yAngle);
-
-  const arcR = 1.7;
-  const tubeR = 0.14;
-  const cupR = 0.72;
-  const cupY = 0.45;
-  const padR = 0.35;
-
-  // Headband arc points
-  const bandPts: V3[] = [];
-  for (let i = 0; i <= 64; i++) {
-    const t = (i / 64) * Math.PI;
-    const lx = Math.cos(t) * arcR;
-    const ly = -Math.sin(t) * arcR * 0.85 - 0.15;
-    bandPts.push([lx * cosA, ly, -lx * sinA]);
-  }
-
-  // Connector bars
-  const connPts: V3[] = [];
-  for (const side of [-1, 1]) {
-    const bx = side * arcR;
-    const topY = -0.15;
-    for (let j = 0; j <= 8; j++) {
-      const frac = j / 8;
-      connPts.push([bx * cosA, topY + frac * (cupY - topY), -bx * sinA]);
-    }
-  }
-
-  const leftCup: V3 = [-arcR * cosA, cupY, arcR * sinA];
-  const rightCup: V3 = [arcR * cosA, cupY, -arcR * sinA];
-  const leftPad: V3 = [
-    -arcR * cosA - sinA * 0.15,
-    cupY,
-    arcR * sinA - cosA * 0.15,
-  ];
-  const rightPad: V3 = [
-    arcR * cosA + sinA * 0.15,
-    cupY,
-    -arcR * sinA + cosA * 0.15,
-  ];
-
-  const camZ = -CAM;
-  const fov = 2.2;
-
-  for (let sy2 = 0; sy2 < SH; sy2++) {
-    for (let sx = 0; sx < SW; sx++) {
-      const nx = (((sx + 0.5) / SW - 0.5) * fov * (SW / SH)) / CHAR_ASPECT;
-      const ny = ((sy2 + 0.5) / SH - 0.5) * fov;
-      const rd = normV([nx, ny, 1]);
-
-      let bestT = Infinity;
-      let bestN: V3 = [0, 0, 0];
-      let bestZone = "";
-
-      // Ear cups
-      for (const cup of [leftCup, rightCup]) {
-        const hit = raySphere(
-          0,
-          0,
-          camZ,
-          rd[0],
-          rd[1],
-          rd[2],
-          cup[0],
-          cup[1],
-          cup[2],
-          cupR,
-        );
-        if (hit && hit[0] < bestT) {
-          bestT = hit[0];
-          bestN = hit[1];
-          bestZone = "cup";
-        }
-      }
-
-      // Ear pads
-      for (const pad of [leftPad, rightPad]) {
-        const hit = raySphere(
-          0,
-          0,
-          camZ,
-          rd[0],
-          rd[1],
-          rd[2],
-          pad[0],
-          pad[1],
-          pad[2],
-          padR,
-        );
-        if (hit && hit[0] < bestT) {
-          bestT = hit[0];
-          bestN = hit[1];
-          bestZone = "pad";
-        }
-      }
-
-      // Headband
-      const bandHit = rayChain(0, 0, camZ, rd[0], rd[1], rd[2], bandPts, tubeR);
-      if (bandHit && bandHit[0] < bestT) {
-        bestT = bandHit[0];
-        bestN = bandHit[1];
-        bestZone = "band";
-      }
-
-      // Connectors
-      const connHit = rayChain(
-        0,
-        0,
-        camZ,
-        rd[0],
-        rd[1],
-        rd[2],
-        connPts,
-        tubeR * 0.8,
-      );
-      if (connHit && connHit[0] < bestT) {
-        bestT = connHit[0];
-        bestN = connHit[1];
-        bestZone = "band";
-      }
-
-      if (bestT < Infinity) {
-        const diffuse = Math.max(0, -dot3(bestN, LIGHT));
-        const ambient = 0.2;
-        const ref: V3 = [
-          bestN[0] * 2 * dot3(bestN, LIGHT) - LIGHT[0],
-          bestN[1] * 2 * dot3(bestN, LIGHT) - LIGHT[1],
-          bestN[2] * 2 * dot3(bestN, LIGHT) - LIGHT[2],
-        ];
-        const spec = Math.max(0, -ref[2]) ** 16 * 0.3;
-        const lit = Math.min(1, ambient + diffuse * 0.65 + spec);
-        bright[sy2][sx] = lit;
-        zone[sy2][sx] = bestZone;
-      }
-    }
-  }
-
-  return bright.map((row, y) =>
-    row.map((val, x) => {
-      if (val < 0) return EMPTY_CELL;
-      const ch = rampChar(val);
-      if (ch === " ") return EMPTY_CELL;
-      let color: string;
-      if (zone[y][x] === "pad") color = "#3a3a3a";
-      else if (zone[y][x] === "cup") color = val > 0.6 ? "#e0b0ff" : "#c084fc";
-      else color = val > 0.55 ? "#BBBBBB" : "#888888";
-      return { ch, color };
-    }),
-  );
+  return null;
 }
 
 function renderHeadphonesFrame(yAngle: number): string[] {
-  return cellsToStrings(renderHeadphonesCells(yAngle));
-}
-
-// --- Rainbow headband rendering (circular tilted hoop) ---
-
-function pickCloserColoredHit(
-  a: [number, V3, string] | null,
-  b: [number, V3, string] | null,
-): [number, V3, string] | null {
-  if (!a) return b;
-  if (!b) return a;
-  return a[0] < b[0] ? a : b;
-}
-
-function rotateBandPoint(
-  lx: number,
-  ly: number,
-  lz: number,
-  cosA: number,
-  sinA: number,
-): V3 {
-  return [lx * cosA + lz * sinA, ly, -lx * sinA + lz * cosA];
-}
-
-function rainbowAlongArc(t: number): string {
-  const idx =
-    Math.floor(t * RAINBOW_HEADBAND_COLORS.length) %
-    RAINBOW_HEADBAND_COLORS.length;
-  return RAINBOW_HEADBAND_COLORS[idx];
-}
-
-function offsetBandChain(
-  pts: V3[],
-  colors: string[],
-  dy: number,
-): { pts: V3[]; colors: string[] } {
-  return {
-    pts: pts.map(([x, y, z]) => [x, y + dy, z]),
-    colors,
-  };
-}
-
-function traceHeadbandHit(
-  ox: number,
-  oy: number,
-  oz: number,
-  dx: number,
-  dy: number,
-  dz: number,
-  pts: V3[],
-  colors: string[],
-  radius: number,
-): [number, V3, string] | null {
-  return rayChainColored(ox, oy, oz, dx, dy, dz, pts, radius, colors);
-}
-
-function traceThickBand(
-  ox: number,
-  oy: number,
-  oz: number,
-  dx: number,
-  dy: number,
-  dz: number,
-  pts: V3[],
-  colors: string[],
-  tubeR: number,
-): [number, V3, string] | null {
-  const top = offsetBandChain(pts, colors, tubeR * 0.42);
-  const bottom = offsetBandChain(pts, colors, -tubeR * 0.28);
-  return pickCloserColoredHit(
-    traceHeadbandHit(ox, oy, oz, dx, dy, dz, pts, colors, tubeR),
-    pickCloserColoredHit(
-      traceHeadbandHit(
-        ox,
-        oy,
-        oz,
-        dx,
-        dy,
-        dz,
-        top.pts,
-        top.colors,
-        tubeR * 0.72,
-      ),
-      traceHeadbandHit(
-        ox,
-        oy,
-        oz,
-        dx,
-        dy,
-        dz,
-        bottom.pts,
-        bottom.colors,
-        tubeR * 0.66,
-      ),
-    ),
+  return renderIconCard(yAngle, "#c084fc", "#7a5aa0", "#4a3163", (u, v) =>
+    headbandArcIcon(u, v, "#c084fc"),
   );
 }
 
-function renderRainbowHeadbandCells(yAngle: number): Cell[][] {
-  const bright: number[][] = Array.from({ length: SH }, () =>
-    Array(SW).fill(-1),
-  );
-  const bandColor: string[][] = Array.from({ length: SH }, () =>
-    Array(SW).fill(""),
-  );
-
-  const cosA = Math.cos(yAngle);
-  const sinA = Math.sin(yAngle);
-
-  const scale = 1.32;
-  const ringR = 1.55 * scale;
-  const tubeR = 0.28 * scale;
-  const centerY = 0.02 * scale;
-  const pitchTilt = 0.28;
-
-  // Full circular hoop (tilted so the opening faces the viewer — round, not crescent)
-  const ringPts: V3[] = [];
-  const ringColors: string[] = [];
-  const segments = 72;
-  for (let i = 0; i <= segments; i++) {
-    const t = i / segments;
-    const angle = t * Math.PI * 2;
-    const lx = Math.cos(angle) * ringR;
-    const ly = centerY + Math.sin(angle) * ringR;
-    const pz = -ly * Math.sin(pitchTilt);
-    const py = ly * Math.cos(pitchTilt);
-    ringPts.push(rotateBandPoint(lx, py, pz, cosA, sinA));
-    ringColors.push(rainbowAlongArc(t));
+// --- Rainbow headband card ---
+function rainbowHeadbandCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  const dist = Math.sqrt(ix * ix + iy * iy);
+  const R = 0.26,
+    bandT = 0.05;
+  const angle = Math.atan2(iy, ix);
+  const start = -2.7,
+    end = -0.44;
+  if (Math.abs(dist - R) < bandT && angle > start && angle < end) {
+    const t = (angle - start) / (end - start);
+    const idx = Math.min(
+      RAINBOW_RAMP.length - 1,
+      Math.floor(t * RAINBOW_RAMP.length),
+    );
+    return { bright: 0.85, color: RAINBOW_RAMP[idx] };
   }
-
-  const camZ = -CAM;
-  const fov = 2.2;
-
-  for (let sy2 = 0; sy2 < SH; sy2++) {
-    for (let sx = 0; sx < SW; sx++) {
-      const nx = (((sx + 0.5) / SW - 0.5) * fov * (SW / SH)) / CHAR_ASPECT;
-      const ny = ((sy2 + 0.5) / SH - 0.5) * fov;
-      const rd = normV([nx, ny, 1]);
-
-      const hit = traceThickBand(
-        0,
-        0,
-        camZ,
-        rd[0],
-        rd[1],
-        rd[2],
-        ringPts,
-        ringColors,
-        tubeR,
-      );
-      if (!hit) continue;
-
-      const diffuse = Math.max(0, -dot3(hit[1], LIGHT));
-      const ambient = 0.22;
-      const ref: V3 = [
-        hit[1][0] * 2 * dot3(hit[1], LIGHT) - LIGHT[0],
-        hit[1][1] * 2 * dot3(hit[1], LIGHT) - LIGHT[1],
-        hit[1][2] * 2 * dot3(hit[1], LIGHT) - LIGHT[2],
-      ];
-      const spec = Math.max(0, -ref[2]) ** 14 * 0.38;
-      bright[sy2][sx] = Math.min(1, ambient + diffuse * 0.68 + spec);
-      bandColor[sy2][sx] = hit[2];
-    }
-  }
-
-  return bright.map((row, y) =>
-    row.map((val, x) => {
-      if (val < 0) return EMPTY_CELL;
-      const ch = rampChar(val);
-      if (ch === " ") return EMPTY_CELL;
-      return { ch, color: shadeItemColor(bandColor[y][x], val) };
-    }),
-  );
+  return null;
 }
 
 function renderRainbowHeadbandFrame(yAngle: number): string[] {
-  return cellsToStrings(renderRainbowHeadbandCells(yAngle));
+  return renderIconCard(
+    yAngle,
+    "#e8e2d0",
+    "#8f8672",
+    "#5c5648",
+    rainbowHeadbandCardIcon,
+  );
 }
 
-// --- Boombox rendering (retro stereo: body, twin speakers, handle, buttons) ---
-
-function renderBoomboxCells(yAngle: number): Cell[][] {
-  const cosA = Math.cos(yAngle);
-  const sinA = Math.sin(yAngle);
-  const rot = (lx: number, ly: number, lz: number): V3 => [
-    lx * cosA + lz * sinA,
-    ly,
-    -lx * sinA + lz * cosA,
-  ];
-
-  const silver = "#aeb4ba";
-  const black = "#141414";
-  const cone = "#5a5a5a";
-  const handle = "#2b2b2b";
-  const red = "#e0564f";
-  const play = "#ffd43b";
-
-  const W = 3.0;
-  const Hh = 1.55;
-  const D = 0.9;
-
-  const spheres: { c: V3; r: number; color: string }[] = [];
-
-  const nx = 6;
-  const ny = 3;
-  const bodyR = 0.5;
-  for (const z of [-D / 2, D / 2]) {
-    for (let ix = 0; ix < nx; ix++) {
-      const fx = (ix / (nx - 1) - 0.5) * W;
-      for (let iy = 0; iy < ny; iy++) {
-        const fy = (iy / (ny - 1) - 0.5) * Hh;
-        spheres.push({ c: rot(fx, fy, z), r: bodyR, color: silver });
-      }
-    }
-  }
-
-  for (const side of [-1, 1]) {
-    spheres.push({
-      c: rot(side * 0.9, 0, -D / 2 - 0.1),
-      r: 0.58,
-      color: black,
-    });
-    spheres.push({
-      c: rot(side * 0.9, 0, -D / 2 - 0.24),
-      r: 0.28,
-      color: cone,
-    });
-  }
-
-  spheres.push({ c: rot(0, 0.34, -D / 2 - 0.08), r: 0.2, color: play });
-  spheres.push({ c: rot(0, -0.3, -D / 2 - 0.08), r: 0.17, color: red });
-
-  const handleSteps = 9;
-  for (let i = 0; i <= handleSteps; i++) {
-    const t = i / handleSteps;
-    const a = Math.PI * t;
-    spheres.push({
-      c: rot(Math.cos(a) * W * 0.34, -Hh / 2 - Math.sin(a) * 0.7, 0),
-      r: 0.14,
-      color: handle,
-    });
-  }
-
-  const camZ = -CAM;
-  const fov = 2.2;
-  const bright: number[][] = Array.from({ length: SH }, () =>
-    Array(SW).fill(-1),
-  );
-  const colorGrid: string[][] = Array.from({ length: SH }, () =>
-    Array(SW).fill(""),
-  );
-
-  for (let sy = 0; sy < SH; sy++) {
-    for (let sx = 0; sx < SW; sx++) {
-      const nrx = (((sx + 0.5) / SW - 0.5) * fov * (SW / SH)) / CHAR_ASPECT;
-      const nry = ((sy + 0.5) / SH - 0.5) * fov;
-      const rd = normV([nrx, nry, 1]);
-
-      let bestT = Infinity;
-      let bestN: V3 = [0, 0, 0];
-      let bestColor = "";
-      for (const s of spheres) {
-        const hit = raySphere(
-          0,
-          0,
-          camZ,
-          rd[0],
-          rd[1],
-          rd[2],
-          s.c[0],
-          s.c[1],
-          s.c[2],
-          s.r,
-        );
-        if (hit && hit[0] < bestT) {
-          bestT = hit[0];
-          bestN = hit[1];
-          bestColor = s.color;
-        }
-      }
-
-      if (bestT < Infinity) {
-        const diffuse = Math.max(0, -dot3(bestN, LIGHT));
-        const ref: V3 = [
-          bestN[0] * 2 * dot3(bestN, LIGHT) - LIGHT[0],
-          bestN[1] * 2 * dot3(bestN, LIGHT) - LIGHT[1],
-          bestN[2] * 2 * dot3(bestN, LIGHT) - LIGHT[2],
-        ];
-        const spec = Math.max(0, -ref[2]) ** 16 * 0.35;
-        bright[sy][sx] = Math.min(1, 0.22 + diffuse * 0.7 + spec);
-        colorGrid[sy][sx] = bestColor;
-      }
-    }
-  }
-
-  return bright.map((row, y) =>
-    row.map((val, x) => {
-      if (val < 0) return EMPTY_CELL;
-      const ch = rampChar(val);
-      if (ch === " ") return EMPTY_CELL;
-      return { ch, color: shadeItemColor(colorGrid[y][x], val) };
-    }),
-  );
+// --- Boombox card ---
+function boomboxNoteIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  const headCx = -0.02,
+    headCy = 0.22;
+  const dHead = Math.sqrt((ix - headCx) ** 2 + (iy - headCy) ** 2);
+  if (dHead < 0.16) return { bright: 0.85, color: "#f2f2f2" };
+  const stemL = headCx + 0.12,
+    stemR = headCx + 0.2;
+  if (ix > stemL && ix < stemR && iy > -0.34 && iy < headCy)
+    return { bright: 0.8, color: "#f2f2f2" };
+  if (
+    ix > stemR &&
+    ix < stemR + 0.16 &&
+    iy > -0.34 &&
+    iy < -0.16 &&
+    ix - stemR > (iy + 0.34) * 0.9
+  )
+    return { bright: 0.8, color: "#f2f2f2" };
+  return null;
 }
 
 function renderBoomboxFrame(yAngle: number): string[] {
-  return cellsToStrings(renderBoomboxCells(yAngle));
+  return renderIconCard(
+    yAngle,
+    "#aeb4ba",
+    "#75757a",
+    "#45454a",
+    boomboxNoteIcon,
+  );
 }
 
 // --- Generate all frames ---
@@ -1151,67 +718,59 @@ const rainbowHeadbandFrames = generateFrames(renderRainbowHeadbandFrame);
 const boomboxFrames = generateFrames(renderBoomboxFrame);
 const prismFrames = generateFrames(renderPrismFrame);
 
-// --- Scenery icons (not 3D — simple animated ASCII for inventory display) ---
-const SCENERY_SKY = "#8899aa";
-const SCENERY_STAR_BRIGHT = "#ccddee";
-const SCENERY_TWINKLE = ["·", "+", "*", "·", "+"];
-
-const CLOUD_ART = [
-  "    .--.    ",
-  "  .(    ).  ",
-  " (        ) ",
-  "  `------'  ",
-];
-
-function renderCloudsFrame(offset: number): string[] {
-  return CLOUD_ART.map((line) =>
-    (" ".repeat(offset) + line)
-      .split("")
-      .map((ch) => (ch === " " ? " " : col(SCENERY_SKY, ch)))
-      .join(""),
-  );
-}
-
-// Gentle back-and-forth drift: 0,1,2,3,3,2,1,0
-const cloudsFrames = Array.from({ length: 8 }, (_, i) =>
-  renderCloudsFrame(i < 4 ? i : 7 - i),
-);
-
-const STAR_POSITIONS: {
-  row: number;
-  col: number;
-  phase: number;
-  bright: boolean;
-}[] = [
-  { row: 0, col: 2, phase: 0, bright: false },
-  { row: 0, col: 11, phase: 3, bright: true },
-  { row: 1, col: 6, phase: 1, bright: false },
-  { row: 2, col: 13, phase: 4, bright: false },
-  { row: 2, col: 3, phase: 2, bright: true },
-  { row: 3, col: 9, phase: 0, bright: false },
-  { row: 4, col: 5, phase: 3, bright: false },
-  { row: 4, col: 12, phase: 1, bright: true },
-  { row: 5, col: 8, phase: 2, bright: false },
-];
-
-function renderStarsFrame(frameIdx: number): string[] {
-  const rows = 6;
-  const cols = 16;
-  const grid: string[][] = Array.from({ length: rows }, () =>
-    new Array(cols).fill(" "),
-  );
-  for (const s of STAR_POSITIONS) {
-    const variant =
-      SCENERY_TWINKLE[(frameIdx + s.phase) % SCENERY_TWINKLE.length];
-    grid[s.row][s.col] = col(
-      s.bright ? SCENERY_STAR_BRIGHT : SCENERY_SKY,
-      variant,
-    );
+// --- Clouds card ---
+function cloudCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  const puffs: [number, number, number][] = [
+    [-0.14, 0.02, 0.13],
+    [0.05, -0.06, 0.17],
+    [0.22, 0.04, 0.12],
+  ];
+  for (const [cx, cy, r] of puffs) {
+    const d = Math.sqrt((ix - cx) ** 2 + (iy - cy) ** 2);
+    if (d < r) return { bright: d < r * 0.6 ? 0.85 : 0.6, color: "#c7d3de" };
   }
-  return grid.map((r) => r.join(""));
+  if (ix > -0.22 && ix < 0.3 && iy > 0.08 && iy < 0.16)
+    return { bright: 0.6, color: "#c7d3de" };
+  return null;
 }
 
-const starsFrames = Array.from({ length: 5 }, (_, i) => renderStarsFrame(i));
+function renderCloudsFrame(yAngle: number): string[] {
+  return renderIconCard(yAngle, "#8899aa", "#5f707d", "#3d4a56", cloudCardIcon);
+}
+
+const cloudsFrames = generateFrames(renderCloudsFrame);
+
+// --- Stars card ---
+function starCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  const dist = Math.sqrt(ix * ix + iy * iy);
+  const outerR = 0.26,
+    innerR = 0.1;
+  const angle = Math.atan2(iy, ix) + Math.PI / 2;
+  const seg = ((angle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+  const spike = seg / ((Math.PI * 2) / 5);
+  const frac = spike - Math.floor(spike);
+  const edgeR = innerR + (outerR - innerR) * (1 - Math.abs(frac - 0.5) * 2);
+  if (dist < edgeR * 0.55) return { bright: 0.95, color: "#eaf2fb" };
+  if (dist < edgeR) return { bright: 0.7, color: "#ccddee" };
+  const sparkles: V2[] = [
+    [-0.32, -0.3],
+    [0.3, -0.28],
+    [-0.28, 0.32],
+  ];
+  for (const [sx, sy] of sparkles) {
+    const d = Math.sqrt((ix - sx) ** 2 + (iy - sy) ** 2);
+    if (d < 0.03) return { bright: 0.8, color: "#8899aa" };
+  }
+  return null;
+}
+
+function renderStarsFrame(yAngle: number): string[] {
+  return renderIconCard(yAngle, "#ccddee", "#5a6ea0", "#3a4868", starCardIcon);
+}
+
+const starsFrames = generateFrames(renderStarsFrame);
 
 export const ITEMS: ItemDef[] = [
   {
@@ -1235,18 +794,18 @@ export const ITEMS: ItemDef[] = [
   {
     id: "headphones",
     name: "Headphones",
-    description: "Wearable headphones for your herzie.",
+    description: "Summons a pair of headphones on your herzie.",
     rarity: "uncommon",
     frames: headphonesFrames,
     equipable: true,
     equipSlot: "head",
-    buyPrice: 250,
+    buyPrice: 10000,
     sellPrice: 100,
   },
   {
     id: "rainbow-headband",
     name: "Rainbow Headband",
-    description: "A colourful headband for your herzie.",
+    description: "Puts a colorful spell on your herzie's head.",
     rarity: "uncommon",
     frames: rainbowHeadbandFrames,
     equipable: true,
@@ -1256,7 +815,7 @@ export const ITEMS: ItemDef[] = [
   {
     id: "boombox",
     name: "Boombox",
-    description: "A retro boombox.",
+    description: "Grants your herzie real street cred.",
     rarity: "rare",
     frames: boomboxFrames,
     equipable: true,

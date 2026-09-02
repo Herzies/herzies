@@ -3,10 +3,14 @@ import { getItem, ITEMS } from "@herzies/shared";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "../lib/utils";
 import { herzies, useWindowFocused } from "../tauri-bridge";
+import ItemInspectOverlay from "./ItemInspectOverlay";
 
 type StoreTab = "items" | "currency";
 
 const BUYABLE_ITEMS = ITEMS.filter((item) => item.buyPrice != null);
+
+/** Flip this back on once currency purchases are ready to ship. */
+const CURRENCY_PURCHASES_ENABLED = false;
 
 function TabButton({
   active,
@@ -49,6 +53,7 @@ export function StoreView({
   const [products, setProducts] = useState<StoreProduct[] | null>(null);
   const [pendingProductId, setPendingProductId] = useState<string | null>(null);
   const [pendingItemId, setPendingItemId] = useState<string | null>(null);
+  const [inspectItem, setInspectItem] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const focused = useWindowFocused();
   const prevFocusedRef = useRef(focused);
@@ -111,6 +116,12 @@ export function StoreView({
   const loading = products === null;
   const currencyProducts = products ?? [];
 
+  const inspected = inspectItem ? getItem(inspectItem) : null;
+  const inspectedOwned = inspectItem ? (inventory?.[inspectItem] ?? 0) : 0;
+  const inspectedAlreadyOwned =
+    !!inspected && !inspected.stackable && inspectedOwned > 0;
+  const inspectedPrice = inspected?.buyPrice ?? 0;
+
   return (
     <div className="flex h-full flex-col">
       <div className="z-50 mb-4 flex items-center justify-between">
@@ -120,7 +131,7 @@ export function StoreView({
 
       <div className="mb-2 flex gap-1 border-b border-border">
         <TabButton active={tab === "items"} onClick={() => setTab("items")}>
-          Items
+          Cards
         </TabButton>
         <TabButton
           active={tab === "currency"}
@@ -133,13 +144,13 @@ export function StoreView({
       {tab === "items" ? (
         <>
           <p className="mb-2 text-[11px] text-text-dim leading-snug">
-            Spend coins on items for your herzie. Purchases land straight in
+            Spend coins on cards for your herzie. Purchases land straight in
             your inventory.
           </p>
           <div className="min-h-0 flex-1 overflow-auto">
             {BUYABLE_ITEMS.length === 0 ? (
               <div className="pt-5 text-center text-ui text-text-dim">
-                No items available right now.
+                No cards available right now.
               </div>
             ) : (
               BUYABLE_ITEMS.map((item) => {
@@ -152,12 +163,19 @@ export function StoreView({
                     key={item.id}
                     className="flex items-center justify-between gap-2 border-b border-[#222] py-2"
                   >
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-ui">{item.name}</div>
+                    <button
+                      type="button"
+                      onClick={() => setInspectItem(item.id)}
+                      className="min-w-0 flex-1 cursor-pointer text-left"
+                      title="Inspect card"
+                    >
+                      <div className="truncate text-ui hover:underline">
+                        {item.name}
+                      </div>
                       <div className="text-[10px] text-text-dim">
                         {alreadyOwned ? "Owned" : `$${price}`}
                       </div>
-                    </div>
+                    </button>
                     <button
                       type="button"
                       className={cn(
@@ -185,8 +203,13 @@ export function StoreView({
         <>
           <p className="mb-2 text-[11px] text-text-dim leading-snug">
             Herzies is a one-person passion project. If you'd like to support
-            its development, you can grab coins here to purchase limited items.
+            its development, you can grab coins here to purchase limited cards.
           </p>
+          {!CURRENCY_PURCHASES_ENABLED && (
+            <p className="mb-2 text-[11px] text-yellow leading-snug">
+              Coming soon...
+            </p>
+          )}
           <div className="min-h-0 flex-1 overflow-auto">
             {loading ? (
               <div className="pt-5 text-center text-ui text-text-dim">
@@ -211,11 +234,20 @@ export function StoreView({
                   </div>
                   <button
                     type="button"
-                    className="btn shrink-0"
-                    disabled={pendingProductId === p.id}
+                    className={cn(
+                      "btn shrink-0",
+                      !CURRENCY_PURCHASES_ENABLED && "cursor-not-allowed",
+                    )}
+                    disabled={
+                      !CURRENCY_PURCHASES_ENABLED || pendingProductId === p.id
+                    }
                     onClick={() => handleBuyCurrency(p.id)}
                   >
-                    {pendingProductId === p.id ? "Waiting..." : "Buy"}
+                    {!CURRENCY_PURCHASES_ENABLED
+                      ? "Coming soon"
+                      : pendingProductId === p.id
+                        ? "Waiting..."
+                        : "Buy"}
                   </button>
                 </div>
               ))
@@ -233,6 +265,34 @@ export function StoreView({
 
       {error && (
         <div className="pt-1 text-center text-[10px] text-red">{error}</div>
+      )}
+
+      {inspectItem && inspected && (
+        <ItemInspectOverlay
+          itemId={inspectItem}
+          onClose={() => setInspectItem(null)}
+          meta={inspectedAlreadyOwned ? "Owned" : `$${inspectedPrice}`}
+          footer={
+            inspected.buyPrice != null && (
+              <button
+                type="button"
+                className={cn("btn", inspectedAlreadyOwned && "cursor-default")}
+                disabled={
+                  inspectedAlreadyOwned ||
+                  currency < inspectedPrice ||
+                  pendingItemId === inspectItem
+                }
+                onClick={() => handleBuyItem(inspectItem)}
+              >
+                {pendingItemId === inspectItem
+                  ? "Buying..."
+                  : inspectedAlreadyOwned
+                    ? "Owned"
+                    : `Buy ($${inspectedPrice})`}
+              </button>
+            )
+          }
+        />
       )}
     </div>
   );

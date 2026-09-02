@@ -101,7 +101,7 @@ export default function Home() {
 
         <TextAndMedia
           preTitle="Collect"
-          title="Collect rare items"
+          title="Collect rare cards"
           description="Every track you play has a chance to drop something. Cards, gear, oddities — equip your favorites or trade them with the Herzies community."
           media={<DesktopInventoryPreview />}
           position="right"

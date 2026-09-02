@@ -38,9 +38,9 @@ export default function ItemInspectOverlay({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="max-w-[260px] border border-border bg-bg-panel p-4 text-center"
+        className="w-[260px] max-w-full border border-border bg-bg-panel p-4 text-center"
       >
-        <div className="mb-2 flex justify-center">
+        <div className="mb-4 flex justify-center">
           <ItemPreview item={item} box={150} />
         </div>
         <div
