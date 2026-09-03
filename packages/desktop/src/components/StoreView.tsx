@@ -110,7 +110,7 @@ export function StoreView({
         <h1 className="text-ui-lg font-bold text-yellow">Store</h1>
         <Tooltip label={`${formatAmount(currency)} herzie coins`} align="right">
           <div className="text-ui text-yellow">
-            <Coin amount={currency} />
+            <Coin amount={currency} animate />
           </div>
         </Tooltip>
       </div>

@@ -204,7 +204,7 @@ export function HomeView({
         </span>
         <span>
           <span className="text-yellow">
-            <Coin amount={herzie.currency} />
+            <Coin amount={herzie.currency} animate />
           </span>
         </span>
         <span>

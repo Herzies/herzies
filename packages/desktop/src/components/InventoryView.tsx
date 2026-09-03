@@ -197,7 +197,7 @@ export function InventoryView({
         <h1 className="text-ui-lg font-bold text-cyan">Inventory</h1>
         <Tooltip label={`${formatAmount(currency)} herzie coins`} align="right">
           <div className="text-ui text-cyan">
-            <Coin amount={currency} />
+            <Coin amount={currency} animate />
           </div>
         </Tooltip>
       </div>
