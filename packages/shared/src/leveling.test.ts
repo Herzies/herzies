@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyXp,
   calculateXpGain,
+  goodEyeSniperBonus,
   levelProgress,
   stageForLevel,
   totalXpForLevel,
@@ -151,6 +152,21 @@ describe("calculateXpGain", () => {
     const multipliers = [{ name: "test", bonus: 1.0 }];
     const xp = calculateXpGain(1, 0, true, multipliers);
     expect(xp).toBe(30); // 10 * 1.5 craving * 2.0 multiplier
+  });
+});
+
+describe("goodEyeSniperBonus", () => {
+  it("is zero with no wins", () => {
+    expect(goodEyeSniperBonus(0)).toBe(0);
+  });
+
+  it("scales 2% per win", () => {
+    expect(goodEyeSniperBonus(3)).toBeCloseTo(0.06);
+  });
+
+  it("caps at 30% (15 wins)", () => {
+    expect(goodEyeSniperBonus(15)).toBeCloseTo(0.3);
+    expect(goodEyeSniperBonus(50)).toBeCloseTo(0.3);
   });
 });
 

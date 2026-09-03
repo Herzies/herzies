@@ -5,6 +5,7 @@ import {
   equippedItemIds,
   findEquippedSlot,
   getItem,
+  getItemType,
   normalizeEquipped,
 } from "./items.js";
 
@@ -67,5 +68,35 @@ describe("prism", () => {
       (prism?.frames[0].join("") ?? "").match(/#[0-9A-Fa-f]{6}/g) ?? [],
     );
     expect(hues.size).toBeGreaterThan(2);
+  });
+});
+
+describe("getItemType", () => {
+  it("classifies color-slot items as skins", () => {
+    expect(getItemType({ equipable: true, equipSlot: "color" })).toBe("skin");
+  });
+
+  it("classifies modifier items as modifiers even though equipable", () => {
+    expect(
+      getItemType({
+        equipable: true,
+        equipSlot: "ground",
+        modifier: { label: "Exp boost", tooltip: "2% per song hunt won" },
+      }),
+    ).toBe("modifier");
+  });
+
+  it("classifies other equipable items as wearables", () => {
+    expect(getItemType({ equipable: true, equipSlot: "head" })).toBe(
+      "wearable",
+    );
+  });
+
+  it("classifies non-equipable items as artefacts", () => {
+    expect(getItemType({})).toBe("artefact");
+  });
+
+  it("good-eye-sniper is a modifier", () => {
+    expect(getItemType(getItem("good-eye-sniper")!)).toBe("modifier");
   });
 });

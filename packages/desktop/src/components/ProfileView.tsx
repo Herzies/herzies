@@ -1,8 +1,50 @@
 import type { HerzieProfile } from "@herzies/shared";
+import { lastFmTrackUrl } from "@herzies/shared";
 import { useState } from "react";
+import { herzies } from "../tauri-bridge";
 import { BackButton } from "./BackButton";
 import { Herzie3D } from "./Herzie3D";
+import { MarqueeText } from "./MarqueeText";
 import { View } from "./View";
+
+/** Album art + title + artist, shared between "Now playing" and "Last played". */
+function TrackRow({
+  title,
+  artist,
+  albumArtUrl,
+}: {
+  title: string;
+  artist: string;
+  albumArtUrl?: string;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        type="button"
+        onClick={() => {
+          void herzies.openExternalUrl(lastFmTrackUrl(artist, title));
+        }}
+        title="Open on Last.fm"
+        className="h-10 w-10 shrink-0 cursor-pointer overflow-hidden rounded border-none bg-[#333] p-0"
+      >
+        {albumArtUrl ? (
+          <img
+            src={albumArtUrl}
+            alt={`${title} album art`}
+            className="h-full w-full object-cover"
+            onError={(e) => {
+              e.currentTarget.style.display = "none";
+            }}
+          />
+        ) : null}
+      </button>
+      <div className="min-w-0 flex-1">
+        <MarqueeText text={title} className="text-ui text-cyan" />
+        <div className="line-clamp-1 text-[10px] text-text-dim">{artist}</div>
+      </div>
+    </div>
+  );
+}
 
 function formatTimeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -104,29 +146,22 @@ export function ProfileView({
       ) : profile.nowPlaying ? (
         <div className="mb-2">
           <div className="mb-1 text-[10px] text-text-dim">Now playing</div>
-          <div className="text-ui text-cyan line-clamp-2">
-            ♪ {profile.nowPlaying.title}
-            <span className="text-text-dim">
-              {" "}
-              — {profile.nowPlaying.artist}
-            </span>
-          </div>
+          <TrackRow
+            title={profile.nowPlaying.title}
+            artist={profile.nowPlaying.artist}
+            albumArtUrl={profile.nowPlaying.albumArtUrl}
+          />
         </div>
       ) : profile.lastPlayed ? (
         <div className="mb-2">
-          <div className="mb-1 text-[10px] text-text-dim">Last played</div>
-          <div className="flex justify-between gap-2 text-ui">
-            <span className="min-w-0 line-clamp-2 text-cyan">
-              ♪ {profile.lastPlayed.title}
-              <span className="text-text-dim">
-                {" "}
-                — {profile.lastPlayed.artist}
-              </span>
-            </span>
-            <span className="shrink-0 text-[10px] text-text-dim">
-              {formatTimeAgo(profile.lastPlayed.listenedAt)}
-            </span>
+          <div className="mb-1 text-[10px] text-text-dim">
+            Last played ({formatTimeAgo(profile.lastPlayed.listenedAt)})
           </div>
+          <TrackRow
+            title={profile.lastPlayed.title}
+            artist={profile.lastPlayed.artist}
+            albumArtUrl={profile.lastPlayed.albumArtUrl}
+          />
         </div>
       ) : null}
 

@@ -102,6 +102,11 @@ pub struct NowPlayingPayload {
     pub artist: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub genre: Option<String>,
+    /// Last.fm's remote artwork URL only — never the local system/data: URL
+    /// (see `sync_tick`), which can be a multi-MB base64 blob unfit for the
+    /// server or other viewers' clients.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub album_art_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -321,4 +326,9 @@ pub struct NowPlayingInfo {
     pub is_playing: bool,
     pub source: String,
     pub volume: i32,
+    /// Whether the source is a known music player (so this listen counts
+    /// without further checks) as opposed to an unverified one (mainly
+    /// browser web players, including YouTube) that needs Last.fm to confirm
+    /// the track is real before it counts toward XP.
+    pub verified: bool,
 }

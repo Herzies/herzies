@@ -152,21 +152,30 @@ type HerzieRow = {
   currency: number | null;
   appearance: unknown;
   equipped: unknown;
-  now_playing: { title?: string; artist?: string } | null;
+  now_playing: {
+    title?: string;
+    artist?: string;
+    albumArtUrl?: string;
+  } | null;
 };
 
 function formatNowPlaying(
-  np: { title?: string; artist?: string } | null,
-): { title: string; artist: string } | null {
+  np: { title?: string; artist?: string; albumArtUrl?: string } | null,
+): { title: string; artist: string; albumArtUrl?: string } | null {
   if (!np?.title || !np?.artist) return null;
-  return { title: np.title, artist: np.artist };
+  return { title: np.title, artist: np.artist, albumArtUrl: np.albumArtUrl };
 }
 
 function formatProfile(
   row: HerzieRow,
   canSeeListening: boolean,
   topArtists: { name: string; plays: number }[],
-  lastPlayed: { title: string; artist: string; listenedAt: string } | null,
+  lastPlayed: {
+    title: string;
+    artist: string;
+    listenedAt: string;
+    albumArtUrl?: string;
+  } | null,
   globalRank?: number,
   globalTotal?: number,
   songHuntWins?: number,
@@ -235,10 +244,15 @@ const LISTEN_LOG_PAGE_SIZE = 1000;
 async function getLastPlayed(
   admin: ReturnType<typeof createAdminClient>,
   userId: string,
-): Promise<{ title: string; artist: string; listenedAt: string } | null> {
+): Promise<{
+  title: string;
+  artist: string;
+  listenedAt: string;
+  albumArtUrl?: string;
+} | null> {
   const { data } = await admin
     .from("listen_log")
-    .select("track_name, artist_name, listened_at")
+    .select("track_name, artist_name, listened_at, album_art_url")
     .eq("user_id", userId)
     .order("listened_at", { ascending: false })
     .limit(1)
@@ -249,6 +263,7 @@ async function getLastPlayed(
     title: data.track_name,
     artist: data.artist_name,
     listenedAt: data.listened_at,
+    albumArtUrl: data.album_art_url ?? undefined,
   };
 }
 

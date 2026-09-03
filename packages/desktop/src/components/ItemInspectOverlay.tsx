@@ -5,6 +5,7 @@ import {
   RARITY_LABELS,
 } from "@herzies/shared";
 import { useEffect } from "react";
+import { ItemTypeTag, ModifierEffectTag } from "./ItemTypeTag";
 
 export default function ItemInspectOverlay({
   itemId,
@@ -40,7 +41,11 @@ export default function ItemInspectOverlay({
         onClick={(e) => e.stopPropagation()}
         className="w-[260px] max-w-full border border-border bg-bg-panel p-4 text-center"
       >
-        <div className="mb-4 flex justify-center">
+        <div className="relative mb-4 flex justify-center">
+          <div className="absolute top-0 left-0 flex gap-1">
+            <ItemTypeTag item={item} />
+            <ModifierEffectTag item={item} />
+          </div>
           <ItemPreview item={item} box={150} />
         </div>
         <div className="text-sm font-bold">"{item.name}"</div>

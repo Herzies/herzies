@@ -69,11 +69,12 @@ export interface HerzieProfile {
   appearance?: HerzieAppearance;
   topArtists?: { name: string; plays: number }[];
   equipped?: Equipped;
-  nowPlaying?: { title: string; artist: string } | null;
+  nowPlaying?: { title: string; artist: string; albumArtUrl?: string } | null;
   lastPlayed?: {
     title: string;
     artist: string;
     listenedAt: string;
+    albumArtUrl?: string;
   } | null;
   songHuntWins?: number;
 }
@@ -82,7 +83,12 @@ export interface HerzieProfile {
 
 /** CLI → Server: heartbeat sync payload */
 export interface SyncRequest {
-  nowPlaying: { title: string; artist: string; genre?: string } | null;
+  nowPlaying: {
+    title: string;
+    artist: string;
+    genre?: string;
+    albumArtUrl?: string;
+  } | null;
   /** Minutes listened since last sync */
   minutesListened: number;
   /** Raw genre strings from the music player */

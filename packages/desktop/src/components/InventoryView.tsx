@@ -21,6 +21,7 @@ import { Coin } from "./Coin";
 import { Herzie3D } from "./Herzie3D";
 import ItemInspectOverlay from "./ItemInspectOverlay";
 import { ItemRow } from "./ItemRow";
+import { ItemTypeTag } from "./ItemTypeTag";
 import { List } from "./List";
 import { NumberTicker } from "./NumberTicker";
 import { TabButton } from "./TabButton";
@@ -262,6 +263,12 @@ export function InventoryView({
                       >
                         {RARITY_LABELS[def?.rarity ?? "common"]}
                       </span>{" "}
+                      {def ? (
+                        <>
+                          {" "}
+                          · <ItemTypeTag item={def} variant="text" />
+                        </>
+                      ) : null}{" "}
                       · x{qty}
                       {isEquipped && def?.equipSlot === "ground"
                         ? ` · ${findEquippedSlot(equipped, itemId) === groundSlot("left") ? "L" : "R"}`

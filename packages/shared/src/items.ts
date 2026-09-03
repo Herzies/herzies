@@ -109,11 +109,37 @@ export interface ItemDef {
   buyPrice?: number;
   /** Inventory sub-tab grouping. Defaults to "deck" when unset. */
   category?: ItemCategory;
+  /** Set when the item has a gameplay effect while equipped (e.g. an XP bonus), not just cosmetic. */
+  modifier?: {
+    /** Short label for the effect badge, e.g. "Exp boost". */
+    label: string;
+    /** Hover detail, e.g. "2% per song hunt won". */
+    tooltip: string;
+  };
 }
 
 export function getItemCategory(item: Pick<ItemDef, "category">): ItemCategory {
   return item.category ?? "deck";
 }
+
+/** Display classification, derived from the equip fields rather than stored directly. */
+export type ItemType = "skin" | "wearable" | "modifier" | "artefact";
+
+export function getItemType(
+  item: Pick<ItemDef, "equipable" | "equipSlot" | "modifier">,
+): ItemType {
+  if (item.equipSlot === "color") return "skin";
+  if (item.modifier) return "modifier";
+  if (item.equipable) return "wearable";
+  return "artefact";
+}
+
+export const ITEM_TYPE_LABELS: Record<ItemType, string> = {
+  skin: "Skin",
+  wearable: "Wearable",
+  modifier: "Modifier",
+  artefact: "Artefact",
+};
 
 export const RARITY_COLORS: Record<Rarity, string> = {
   common: "#9d9d9d",
@@ -880,12 +906,14 @@ export const ITEMS: ItemDef[] = [
   {
     id: "good-eye-sniper",
     name: "Good Eye, Sniper",
-    description: "... and good ears! Let everyone know just how good they are.",
+    description:
+      "... and good ears! Displays your song hunt wins and boosts XP the more you rack up.",
     rarity: "rare",
     frames: goodEyeSniperFrames,
     equipable: true,
     equipSlot: "ground",
     sellPrice: 250,
+    modifier: { label: "Exp boost", tooltip: "2% per song hunt won" },
     // no buyPrice — reward-only, matches boombox
   },
   {

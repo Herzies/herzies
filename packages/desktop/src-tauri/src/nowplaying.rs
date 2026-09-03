@@ -96,5 +96,8 @@ async fn query_app(script: &str, source: &str) -> Option<NowPlayingInfo> {
         is_playing: true,
         source,
         volume: parts[6].parse().unwrap_or(0),
+        // Queried directly from Music.app/Spotify.app via AppleScript — always
+        // a known music player.
+        verified: true,
     })
 }

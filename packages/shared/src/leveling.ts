@@ -55,6 +55,17 @@ export function calculateXpGain(
   return xp;
 }
 
+/** +2% XP per song hunt won while Good Eye Sniper is equipped, capped at +30% (15 wins). */
+const GOOD_EYE_SNIPER_XP_PER_WIN = 0.02;
+const GOOD_EYE_SNIPER_XP_CAP = 0.3;
+
+export function goodEyeSniperBonus(songHuntWins: number): number {
+  return Math.min(
+    songHuntWins * GOOD_EYE_SNIPER_XP_PER_WIN,
+    GOOD_EYE_SNIPER_XP_CAP,
+  );
+}
+
 export function applyXp(
   herzie: Herzie,
   xpGain: number,

@@ -16,6 +16,11 @@ pub struct TrackEnrichment {
     /// Reserved for a future BPM provider; Last.fm does not expose BPM.
     #[allow(dead_code)]
     pub bpm: Option<u32>,
+    /// Whether `track.getInfo` confirmed this artist+title is a real,
+    /// catalogued track — as opposed to falling back to the artist's top
+    /// tags after a "not found". Used to gate XP for unverified sources
+    /// (browsers/YouTube) that can't be confirmed any other way.
+    pub found: bool,
 }
 
 const GAME_GENRES: &[&str] = &[
@@ -140,6 +145,32 @@ pub fn track_key(artist: &str, title: &str) -> String {
     )
 }
 
+/// Whether the current listen is confirmed as real music — gates both XP
+/// crediting and what `sync_tick` reports to the server (now-playing status,
+/// listen_log — the latter writes a permanent row the moment the track
+/// changes, so it must actually wait rather than fail open while a check is
+/// still pending). Trusted sources (Music/Spotify/Tidal, or anything the OS
+/// flags as a music app) always count. Everything else — mainly browser web
+/// players, including YouTube — only counts once Last.fm's `track.getInfo`
+/// confirms the artist+title is a real, catalogued track (`enrichment.found`).
+/// Once a lookup was actually attempted and settled one way or the other
+/// (`timed_out`) — or never happens at all (`!in_flight`, e.g. no API key) —
+/// this fails *open*: we'd rather credit/show a few extra seconds than
+/// punish a legitimate listen for our own infra hiccup. Only a genuinely
+/// pending check (`in_flight && !timed_out`) withholds, and only an explicit
+/// "not found" withholds permanently.
+pub fn is_confirmed_listen(
+    verified: bool,
+    enrichment: Option<&TrackEnrichment>,
+    in_flight: bool,
+    timed_out: bool,
+) -> bool {
+    verified
+        || enrichment
+            .map(|e| e.found)
+            .unwrap_or(timed_out || !in_flight)
+}
+
 /// Genres to use for XP / sync. Returns `None` while Last.fm enrichment is pending.
 pub fn resolve_listen_genres(
     local_genre: Option<&str>,
@@ -233,6 +264,7 @@ pub fn parse_track_response(body: &Value) -> Option<TrackEnrichment> {
         album_art_url,
         vibe,
         bpm: None,
+        found: true,
     })
 }
 
@@ -291,12 +323,15 @@ impl LastFmService {
             ])
             .await?;
 
-        // An unknown track still deserves the artist-tags fallback below.
+        // An unknown track still deserves the artist-tags fallback below, but
+        // `found` stays false — the exact track was never confirmed, only
+        // (maybe) its artist.
         let mut enrichment = parse_track_response(&body).unwrap_or(TrackEnrichment {
             tags: Vec::new(),
             album_art_url: None,
             vibe: None,
             bpm: None,
+            found: false,
         });
 
         // Sparsely-scrobbled tracks often have no tags; the artist's top tags
@@ -487,9 +522,58 @@ mod tests {
             album_art_url: None,
             vibe: None,
             bpm: None,
+            found: true,
         };
         let genres = resolve_listen_genres(None, Some(&enrichment), false, false).unwrap();
         assert_eq!(genres, vec!["indie"]);
+    }
+
+    #[test]
+    fn confirmed_trusted_source_always_counts() {
+        assert!(is_confirmed_listen(true, None, false, false));
+    }
+
+    #[test]
+    fn confirmed_unverified_counts_once_lastfm_confirms() {
+        let enrichment = TrackEnrichment {
+            tags: vec![],
+            album_art_url: None,
+            vibe: None,
+            bpm: None,
+            found: true,
+        };
+        assert!(is_confirmed_listen(false, Some(&enrichment), false, false));
+    }
+
+    #[test]
+    fn confirmed_unverified_rejected_when_lastfm_says_not_found() {
+        let enrichment = TrackEnrichment {
+            tags: vec![],
+            album_art_url: None,
+            vibe: None,
+            bpm: None,
+            found: false,
+        };
+        assert!(!is_confirmed_listen(false, Some(&enrichment), false, false));
+    }
+
+    #[test]
+    fn confirmed_unverified_fails_open_when_never_checked() {
+        // No API key (or lookup hasn't started) — don't punish the listen
+        // for our own infra state.
+        assert!(is_confirmed_listen(false, None, false, false));
+    }
+
+    #[test]
+    fn confirmed_unverified_fails_open_after_timeout() {
+        assert!(is_confirmed_listen(false, None, true, true));
+    }
+
+    #[test]
+    fn confirmed_unverified_withheld_while_pending() {
+        // Lookup genuinely in flight and hasn't timed out — must wait,
+        // since a listen_log row written now can't be un-written later.
+        assert!(!is_confirmed_listen(false, None, true, false));
     }
 
     #[test]

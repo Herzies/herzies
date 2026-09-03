@@ -1119,6 +1119,7 @@ async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: u64) -> Resu
             {
                 let key = lastfm::track_key(&info.artist, &info.title);
                 let track_changed = s.last_track_key.as_deref() != Some(key.as_str());
+                s.source_verified = info.verified;
 
                 if track_changed {
                     s.last_track_key = Some(key.clone());
@@ -1162,7 +1163,18 @@ async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: u64) -> Resu
                 );
 
                 let minutes = elapsed_secs as f64 / 60.0;
-                if minutes > 0.01 {
+                // Unverified sources (mainly browser web players, including
+                // YouTube) can carry title+channel-name metadata for
+                // non-music video too — only credit them once Last.fm
+                // confirms the track is real. See `is_confirmed_listen`.
+                if minutes > 0.01
+                    && lastfm::is_confirmed_listen(
+                        info.verified,
+                        s.enrichment.as_ref(),
+                        s.enrichment_in_flight,
+                        timed_out,
+                    )
+                {
                     // Only accumulated here — never applied to herzie.xp/level
                     // locally. The server is the sole authority on XP; this
                     // just tracks unsynced listening time so sync_tick can bill
@@ -1191,6 +1203,7 @@ async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: u64) -> Resu
                 s.current_now_playing = None;
                 s.current_genres.clear();
                 s.current_local_genre = None;
+                s.source_verified = false;
                 s.last_track_key = None;
                 s.system_album_art_url = None;
                 s.enrichment = None;
@@ -1457,18 +1470,47 @@ async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
         let has = s.herzie.is_some();
         let logged = api::is_logged_in();
         let mins = s.pending_minutes.min(10.0);
-        let np = s.current_now_playing.as_ref().map(|np| {
-            let genre = if s.current_genres.is_empty() {
-                None
-            } else {
-                game::classify_genre(&s.current_genres).into_iter().next()
-            };
-            NowPlayingPayload {
-                title: np.title.clone(),
-                artist: np.artist.clone(),
-                genre,
-            }
-        });
+        // An unconfirmed play (unverified source, Last.fm hasn't found the
+        // track) never reaches the server: no now-playing status, no
+        // listen_log row — so it can't pollute "listening now", "last
+        // played", or "top artists" on the profile. It stays visible in this
+        // device's own widget (`current_now_playing` itself is untouched);
+        // only what we report to `/sync` is gated. `listen_log` writes a
+        // permanent row the instant the track changes, so — unlike the XP
+        // gate in `poll_tick` — this must actually wait out an in-flight
+        // Last.fm lookup rather than fail open. See `is_confirmed_listen`.
+        let timed_out = s
+            .enrichment_requested_at
+            .map(|t| t.elapsed() > ENRICHMENT_TIMEOUT)
+            .unwrap_or(false);
+        let np = s
+            .current_now_playing
+            .as_ref()
+            .filter(|_| {
+                lastfm::is_confirmed_listen(
+                    s.source_verified,
+                    s.enrichment.as_ref(),
+                    s.enrichment_in_flight,
+                    timed_out,
+                )
+            })
+            .map(|np| {
+                let genre = if s.current_genres.is_empty() {
+                    None
+                } else {
+                    game::classify_genre(&s.current_genres).into_iter().next()
+                };
+                NowPlayingPayload {
+                    title: np.title.clone(),
+                    artist: np.artist.clone(),
+                    genre,
+                    // Sync only Last.fm's remote artwork, not `np.album_art_url`
+                    // (which prefers the local system artwork data: URL) — that
+                    // blob is fine for this device's own widget but too large,
+                    // macOS-only, and not durable enough to store/serve to friends.
+                    album_art_url: s.enrichment.as_ref().and_then(|e| e.album_art_url.clone()),
+                }
+            });
         let g = s.current_genres.clone();
         (has, logged, mins, np, g, s.friend_epoch)
     };

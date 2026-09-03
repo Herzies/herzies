@@ -15,7 +15,7 @@ type StoreTab = "items" | "currency";
 const BUYABLE_ITEMS = ITEMS.filter((item) => item.buyPrice != null);
 
 /** Flip this back on once currency purchases are ready to ship. */
-const CURRENCY_PURCHASES_ENABLED = true;
+const CURRENCY_PURCHASES_ENABLED = false;
 
 export function StoreView({
   inventory: cachedInventory,

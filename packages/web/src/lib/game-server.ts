@@ -6,6 +6,7 @@ import {
   type EventNotification,
   type FriendRequestSummary,
   getDailyCraving,
+  goodEyeSniperBonus,
   type Herzie,
   matchesCraving,
   type PendingFriendRequest,
@@ -16,6 +17,13 @@ import {
   stageForLevel,
 } from "@herzies/shared";
 import type { SupabaseClient } from "@supabase/supabase-js";
+
+/** Good Eye Sniper occupies a ground slot, worn on either side. */
+function hasGoodEyeSniperEquipped(equipped: unknown): boolean {
+  if (!equipped || typeof equipped !== "object") return false;
+  const e = equipped as Record<string, unknown>;
+  return e.ground_left === "good-eye-sniper" || e.ground_right === "good-eye-sniper";
+}
 
 /** Normalize a track string for fuzzy matching */
 function normalizeTrack(s: string): string {
@@ -67,7 +75,7 @@ export function rowToHerzie(row: Record<string, unknown>): Herzie {
 /** Convert Herzie to DB update payload */
 function herzieToRow(
   herzie: Herzie,
-  nowPlaying: { title: string; artist: string } | null,
+  nowPlaying: { title: string; artist: string; albumArtUrl?: string } | null,
 ) {
   return {
     xp: Math.floor(herzie.xp),
@@ -138,7 +146,12 @@ interface SyncOptions {
 export async function processSync(
   admin: SupabaseClient,
   userId: string,
-  nowPlaying: { title: string; artist: string; genre?: string } | null,
+  nowPlaying: {
+    title: string;
+    artist: string;
+    genre?: string;
+    albumArtUrl?: string;
+  } | null,
   minutesListened: number,
   genres: string[],
   options: SyncOptions = {},
@@ -183,6 +196,7 @@ export async function processSync(
         track_name: nowPlaying.title,
         artist_name: nowPlaying.artist,
         genre: classifiedGenre ?? nowPlaying.genre ?? null,
+        album_art_url: nowPlaying.albumArtUrl ?? null,
         source: "cli",
       });
     }
@@ -259,6 +273,25 @@ export async function processSync(
       }
     }
     // Spotify source: no caps — deduplication handled by spotify_play_log
+
+    // Good Eye Sniper bonus (2% XP per song hunt won, capped at 30%) — only
+    // queries the win count when both equipped and actually about to credit
+    // XP this tick, since minutes is commonly 0 here (cooldown-throttled or
+    // nothing billable) and this runs on every sync.
+    if (minutes > 0 && hasGoodEyeSniperEquipped(row.equipped)) {
+      const { data: songHuntWins, error: sniperError } = await admin.rpc(
+        "count_song_hunt_wins",
+        { p_user_id: userId },
+      );
+      // Skip the bonus (rather than treating a query error as 0 wins) so a
+      // transient RPC failure can't silently zero out an earned bonus.
+      if (!sniperError) {
+        const bonus = goodEyeSniperBonus(songHuntWins as number);
+        if (bonus > 0) {
+          allMultipliers.push({ name: "Good Eye Sniper", bonus });
+        }
+      }
+    }
 
     const xp = calculateXpGain(
       minutes,
@@ -385,7 +418,11 @@ export async function processSync(
   // Spotify catch-up: don't overwrite now_playing (it may be stale)
   const npPayload =
     source !== "spotify" && nowPlaying
-      ? { title: nowPlaying.title, artist: nowPlaying.artist }
+      ? {
+          title: nowPlaying.title,
+          artist: nowPlaying.artist,
+          albumArtUrl: nowPlaying.albumArtUrl,
+        }
       : null;
   const updateData: Record<string, unknown> = {
     ...herzieToRow(herzie, npPayload),

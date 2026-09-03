@@ -124,10 +124,35 @@ const MUSIC_BUNDLE_ALLOWLIST: &[&str] = &[
     "com.apple.MusicKit.MusicUI",
 ];
 
-fn counts_as_music_listening(parsed: &AdapterNowPlaying) -> bool {
+/// Whether the source is trusted to be genuinely music on its own — a known
+/// player, or one that explicitly flags itself as music. Everything else
+/// (mainly browser web players, including YouTube) can still count as a
+/// listen via the title+artist fallback below, but only provisionally: the
+/// caller uses this flag to require a Last.fm confirmation before crediting
+/// XP for it (see `poll_tick`), since a non-music YouTube video can carry
+/// the same title+channel-name metadata as a real track.
+fn is_trusted_music_source(parsed: &AdapterNowPlaying) -> bool {
     let bundle = parsed.bundle_identifier.as_deref().unwrap_or("");
 
     if MUSIC_BUNDLE_ALLOWLIST.contains(&bundle) {
+        return true;
+    }
+
+    if parsed.is_music_app == Some(true) {
+        return true;
+    }
+
+    if let Some(ref media_type) = parsed.media_type {
+        if media_type.to_ascii_lowercase().contains("music") {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn counts_as_music_listening(parsed: &AdapterNowPlaying) -> bool {
+    if is_trusted_music_source(parsed) {
         return true;
     }
 
@@ -136,27 +161,20 @@ fn counts_as_music_listening(parsed: &AdapterNowPlaying) -> bool {
         return false;
     }
 
-    if parsed.is_music_app == Some(true) {
-        return true;
-    }
-
     // Reject clear video content whenever the source bothers to tell us. Browser web
     // players (SoundCloud, Bandcamp, YouTube, ...) usually leave this empty, so it can't
     // be relied on to separate audio from video — it's only a best-effort reject.
     if let Some(ref media_type) = parsed.media_type {
-        let mt = media_type.to_ascii_lowercase();
-        if mt.contains("video") {
+        if media_type.to_ascii_lowercase().contains("video") {
             return false;
-        }
-        if mt.contains("music") {
-            return true;
         }
     }
 
-    // Everything else (notably browser audio like SoundCloud) lacks album/mediaType
+    // Everything else (notably browser audio like SoundCloud/YouTube) lacks album/mediaType
     // metadata, so we count it only when we can extract both a track title and an artist.
     // Caveat: on video platforms the "artist" is often the channel name, so those plays
-    // will count too — an accepted trade-off for tracking web music players.
+    // pass this check too — that's why `is_trusted_music_source` is false here, and
+    // `poll_tick` withholds XP until Last.fm confirms the track is real.
     let has_title = !parsed.title.trim().is_empty();
     let has_artist = parsed
         .artist
@@ -177,6 +195,7 @@ pub fn get_now_playing() -> Option<NowPlayingInfo> {
         .as_deref()
         .map(source_from_bundle_id)
         .unwrap_or_else(|| "MediaRemote".to_string());
+    let verified = is_trusted_music_source(&parsed);
 
     Some(NowPlayingInfo {
         title: parsed.title,
@@ -188,6 +207,7 @@ pub fn get_now_playing() -> Option<NowPlayingInfo> {
         is_playing: true,
         source,
         volume: 100,
+        verified,
     })
 }
 

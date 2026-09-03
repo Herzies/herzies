@@ -48,7 +48,7 @@
 }
 
 @utility animate-marquee {
-  animation: marquee-x 6s ease-in-out infinite;
+  animation: marquee-x 12s ease-in-out infinite;
 }
 
 @keyframes coin-bump {

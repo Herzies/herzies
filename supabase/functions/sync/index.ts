@@ -23,6 +23,12 @@ const syncRequestSchema = z.object({
       title: z.string(),
       artist: z.string(),
       genre: z.string().optional(),
+      // Last.fm's remote artwork URL only — never the local system/data: URL,
+      // which can be a multi-MB base64 blob unfit for DB storage or for other
+      // viewers' clients to fetch. No `.url()` check: a malformed value here
+      // should just mean no thumbnail, not a 400 that drops the whole sync
+      // (and with it this tick's XP).
+      albumArtUrl: z.string().max(500).optional(),
     })
     .nullable(),
   minutesListened: z.number().nonnegative().max(10),

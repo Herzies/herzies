@@ -11,6 +11,12 @@ pub struct ManagedState {
     pub current_genres: Vec<String>,
     /// Genre from Apple Music (empty for Spotify).
     pub current_local_genre: Option<String>,
+    /// Whether the current track's source is trusted on its own (see
+    /// `media_remote_adapter::is_trusted_music_source`). Gates whether
+    /// `sync_tick` reports `current_now_playing` to the server at all — an
+    /// unconfirmed browser/YouTube play stays fully local (no now-playing
+    /// status, no listen_log entry) until Last.fm confirms it.
+    pub source_verified: bool,
     pub last_track_key: Option<String>,
     pub enrichment: Option<TrackEnrichment>,
     pub enrichment_requested_at: Option<Instant>,
@@ -62,6 +68,7 @@ impl ManagedState {
             current_now_playing: None,
             current_genres: Vec::new(),
             current_local_genre: None,
+            source_verified: false,
             last_track_key: None,
             enrichment: None,
             enrichment_requested_at: None,
@@ -249,6 +256,7 @@ mod tests {
             current_now_playing: None,
             current_genres: Vec::new(),
             current_local_genre: None,
+            source_verified: false,
             last_track_key: None,
             enrichment: None,
             enrichment_requested_at: None,
