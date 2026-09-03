@@ -56,3 +56,16 @@ export const RAINBOW_RAMP = [
   "#9775FA",
   "#F783AC",
 ] as const;
+
+/**
+ * Ocean-blue ramp for the Poseidon's Gift colour scheme, shared by the
+ * creature renderer's colour scheme and this item's inventory card.
+ */
+export const OCEAN_RAMP = [
+  "#BFEFFF",
+  "#7EC8E3",
+  "#4AA8D8",
+  "#2E86C1",
+  "#1B5FA8",
+  "#123F7A",
+] as const;

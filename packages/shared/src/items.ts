@@ -13,6 +13,7 @@ import {
   dot3,
   LIGHT,
   normV,
+  OCEAN_RAMP,
   RAINBOW_RAMP,
   RAMP_ITEM,
   rotY,
@@ -635,13 +636,18 @@ function prismTexture(u: number, v: number): number {
   return 0.55 + 0.35 * Math.sin((u + v) * Math.PI);
 }
 
-/** Band index for the diagonal rainbow sweep across the card face. */
-function prismBand(u: number, v: number): number {
+/** Band index for the diagonal colour sweep across the card face. */
+function gradientBand(u: number, v: number, ramp: readonly string[]): number {
   const t = (u * 0.65 + v * 0.35) % 1;
-  return Math.min(RAINBOW_RAMP.length - 1, Math.floor(t * RAINBOW_RAMP.length));
+  return Math.min(ramp.length - 1, Math.floor(t * ramp.length));
 }
 
-function renderPrismFrame(yAngle: number): string[] {
+/** Diagonal gradient card shared by every equipable colour-scheme item —
+ * Prism sweeps the rainbow, Poseidon's Gift sweeps the ocean ramp. */
+function renderGradientCardFrame(
+  yAngle: number,
+  ramp: readonly string[],
+): string[] {
   const xf = CORNERS.map((v) => rotY(rotZ(v, TILT), yAngle));
   const e1: V3 = [
     xf[1][0] - xf[0][0],
@@ -704,7 +710,7 @@ function renderPrismFrame(yAngle: number): string[] {
       let [u, v] = uv;
       if (!front) u = 1 - u;
       bright[sy][sx] = prismTexture(u, v) * (0.2 + 0.8 * diffuse);
-      bands[sy][sx] = prismBand(u, v);
+      bands[sy][sx] = gradientBand(u, v, ramp);
     }
   }
 
@@ -718,11 +724,19 @@ function renderPrismFrame(yAngle: number): string[] {
         );
         const ch = RAMP_ITEM[idx];
         if (ch === " ") return " ";
-        const hue = RAINBOW_RAMP[bands[y][x]];
+        const hue = ramp[bands[y][x]];
         return col(front ? hue : shadeHex(hue, 0.45), ch);
       })
       .join(""),
   );
+}
+
+function renderPrismFrame(yAngle: number): string[] {
+  return renderGradientCardFrame(yAngle, RAINBOW_RAMP);
+}
+
+function renderPoseidonsGiftFrame(yAngle: number): string[] {
+  return renderGradientCardFrame(yAngle, OCEAN_RAMP);
 }
 
 function generateFrames(
@@ -746,6 +760,7 @@ const rainbowHeadbandFrames = generateFrames(renderRainbowHeadbandFrame);
 const boomboxFrames = generateFrames(renderBoomboxFrame);
 const goodEyeSniperFrames = generateFrames(renderGoodEyeSniperFrame);
 const prismFrames = generateFrames(renderPrismFrame);
+const poseidonsGiftFrames = generateFrames(renderPoseidonsGiftFrame);
 
 // --- Clouds card ---
 function cloudCardIcon(u: number, v: number): TexSample | null {
@@ -829,7 +844,7 @@ export const ITEMS: ItemDef[] = [
     frames: headphonesFrames,
     equipable: true,
     equipSlot: "head",
-    buyPrice: 10000,
+    buyPrice: 8000,
     sellPrice: 100,
   },
   {
@@ -840,7 +855,7 @@ export const ITEMS: ItemDef[] = [
     frames: rainbowHeadbandFrames,
     equipable: true,
     equipSlot: "head",
-    buyPrice: 1000,
+    buyPrice: 8000,
     sellPrice: 100,
   },
   {
@@ -893,6 +908,17 @@ export const ITEMS: ItemDef[] = [
     equipable: true,
     equipSlot: "color",
     sellPrice: 100,
+  },
+  {
+    id: "poseidons-gift",
+    name: "Poseidon's Gift",
+description: "Somehow ended up here. Use it only if you don't care about upsetting the gods.",
+    rarity: "legendary",
+    frames: poseidonsGiftFrames,
+    equipable: true,
+    equipSlot: "color",
+    buyPrice: 100000,
+    sellPrice: 500,
   },
 ];
 

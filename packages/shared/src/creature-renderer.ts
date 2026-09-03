@@ -13,6 +13,7 @@ import {
   CHAR_ASPECT,
   dot3,
   LIGHT,
+  OCEAN_RAMP,
   RAINBOW_RAMP,
   RAMP_HERZIE,
   rotY,
@@ -1177,6 +1178,7 @@ function appendWearableSpheres(
  */
 const COLOR_SCHEMES: Record<string, readonly string[]> = {
   prism: RAINBOW_RAMP,
+  "poseidons-gift": OCEAN_RAMP,
 };
 
 /** True for spheres that a colour scheme is allowed to repaint. */

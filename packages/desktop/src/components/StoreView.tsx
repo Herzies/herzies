@@ -167,7 +167,7 @@ export function StoreView({
                 return (
                   <div
                     key={item.id}
-                    className="flex items-center justify-between gap-2 border-b border-[#222] py-2"
+                    className="group flex items-center justify-between gap-2 border-b border-[#222] py-2"
                   >
                     <button
                       type="button"
@@ -175,7 +175,7 @@ export function StoreView({
                       className="min-w-0 flex-1 cursor-pointer text-left"
                       title="Inspect card"
                     >
-                      <div className="truncate text-ui hover:underline">
+                      <div className="truncate text-ui group-hover:underline">
                         {item.name}
                       </div>
                       <div className="text-[10px] text-text-dim">
