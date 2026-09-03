@@ -22,10 +22,10 @@ export function ItemRow({
       <button
         type="button"
         onClick={() => onInspect(itemId)}
-        className="min-w-0 flex-1 cursor-pointer text-left"
+        className="group min-w-0 flex-1 cursor-pointer text-left"
         title={inspectTitle}
       >
-        <div className="truncate text-ui hover:underline">{name}</div>
+        <div className="truncate text-ui group-hover:underline">{name}</div>
         <div className="text-[10px] text-text-dim">{subtitle}</div>
       </button>
       {action && <div className="shrink-0">{action}</div>}
