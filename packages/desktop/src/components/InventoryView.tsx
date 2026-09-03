@@ -21,30 +21,8 @@ import { Coin } from "./Coin";
 import { Herzie3D } from "./Herzie3D";
 import ItemInspectOverlay from "./ItemInspectOverlay";
 import { NumberTicker } from "./NumberTicker";
+import { TabButton } from "./TabButton";
 import { Tooltip } from "./Tooltip";
-
-function TabButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "cursor-pointer border-none bg-transparent px-1.5 pb-1.5 pt-0.5 text-ui",
-        active ? "font-bold text-cyan" : "text-text-dim hover:text-text",
-      )}
-    >
-      {children}
-    </button>
-  );
-}
 
 function SellControls({
   itemId,
@@ -215,7 +193,7 @@ export function InventoryView({
     <div className="flex h-full flex-col">
       <div className="z-50 mb-1 flex items-center justify-between">
         <h1 className="text-ui-lg font-bold text-cyan">Inventory</h1>
-        <Tooltip label={`${formatAmount(currency)} herzie coins`}>
+        <Tooltip label={`${formatAmount(currency)} herzie coins`} align="right">
           <div className="text-ui text-cyan">
             <Coin amount={currency} />
           </div>
@@ -237,12 +215,20 @@ export function InventoryView({
       {/* Item list — bottom ~40% */}
       <div className="z-10 flex h-[40%] min-h-0 shrink-0 flex-col border-t border-border">
         <div className="flex gap-1 border-b border-border">
-          <Tooltip label="Cards give bonuses or change appearance">
-            <TabButton active={tab === "deck"} onClick={() => setTab("deck")}>
+          <Tooltip label="Cards give bonuses or change appearance" align="left">
+            <TabButton
+              active={tab === "deck"}
+              onClick={() => setTab("deck")}
+              colour="cyan"
+            >
               Deck
             </TabButton>
           </Tooltip>
-          <TabButton active={tab === "misc"} onClick={() => setTab("misc")}>
+          <TabButton
+            active={tab === "misc"}
+            onClick={() => setTab("misc")}
+            colour="cyan"
+          >
             Misc
           </TabButton>
         </div>

@@ -5,6 +5,7 @@ import { cn, formatAmount } from "../lib/utils";
 import { herzies, useWindowFocused } from "../tauri-bridge";
 import { Coin } from "./Coin";
 import ItemInspectOverlay from "./ItemInspectOverlay";
+import { TabButton } from "./TabButton";
 import { Tooltip } from "./Tooltip";
 
 type StoreTab = "items" | "currency";
@@ -13,29 +14,6 @@ const BUYABLE_ITEMS = ITEMS.filter((item) => item.buyPrice != null);
 
 /** Flip this back on once currency purchases are ready to ship. */
 const CURRENCY_PURCHASES_ENABLED = false;
-
-function TabButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "cursor-pointer border-none bg-transparent px-1.5 pb-1.5 pt-0.5 text-ui",
-        active ? "font-bold text-yellow" : "text-text-dim hover:text-text",
-      )}
-    >
-      {children}
-    </button>
-  );
-}
 
 export function StoreView({
   inventory: cachedInventory,
@@ -136,12 +114,17 @@ export function StoreView({
       </div>
 
       <div className="mb-2 flex gap-1 border-b border-border">
-        <TabButton active={tab === "items"} onClick={() => setTab("items")}>
+        <TabButton
+          active={tab === "items"}
+          onClick={() => setTab("items")}
+          colour="yellow"
+        >
           Cards
         </TabButton>
         <TabButton
           active={tab === "currency"}
           onClick={() => setTab("currency")}
+          colour="yellow"
         >
           <span className="italic">H</span> coins
         </TabButton>

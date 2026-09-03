@@ -13,6 +13,7 @@ import {
   useWindowFocused,
 } from "../tauri-bridge";
 import { ProfileView } from "./ProfileView";
+import { TabButton } from "./TabButton";
 import { View } from "./View";
 
 const FRIEND_POLL_MS = 15_000;
@@ -594,29 +595,6 @@ function formatMinutes(mins: number): string {
   const h = Math.floor(mins / 60);
   const m = mins % 60;
   return m > 0 ? `${h}h ${m}m` : `${h}h`;
-}
-
-function TabButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "cursor-pointer border-none bg-transparent px-1.5 pb-1.5 pt-0.5",
-        active ? "font-bold text-cyan" : "text-text-dim hover:text-text",
-      )}
-    >
-      {children}
-    </button>
-  );
 }
 
 function SearchResults({
