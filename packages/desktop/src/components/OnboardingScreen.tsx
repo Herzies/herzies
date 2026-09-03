@@ -7,6 +7,7 @@ export function OnboardingScreen({ onClose }: { onClose?: () => void }) {
   const [name, setName] = useState("");
   const [hatching, setHatching] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loggingOut, setLoggingOut] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const mysterySeed = useMemo(
@@ -50,6 +51,18 @@ export function OnboardingScreen({ onClose }: { onClose?: () => void }) {
           ×
         </button>
       )}
+
+      <button
+        type="button"
+        disabled={loggingOut}
+        onClick={async () => {
+          setLoggingOut(true);
+          await herzies.logout();
+        }}
+        className="btn absolute top-2 left-2 px-2 py-1 text-ui text-text-dim"
+      >
+        {loggingOut ? "Logging out..." : "Logout"}
+      </button>
       <div className="pointer-events-none opacity-35 grayscale">
         <Herzie3D
           userId={mysterySeed}
