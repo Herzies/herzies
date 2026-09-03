@@ -15,7 +15,7 @@ type StoreTab = "items" | "currency";
 const BUYABLE_ITEMS = ITEMS.filter((item) => item.buyPrice != null);
 
 /** Flip this back on once currency purchases are ready to ship. */
-const CURRENCY_PURCHASES_ENABLED = false;
+const CURRENCY_PURCHASES_ENABLED = true;
 
 export function StoreView({
   inventory: cachedInventory,
@@ -149,6 +149,23 @@ export function StoreView({
                 const alreadyOwned = !item.stackable && owned > 0;
                 const price = item.buyPrice ?? 0;
                 const canAfford = currency >= price;
+                const insufficientFunds = !alreadyOwned && !canAfford;
+                const buyButton = (
+                  <button
+                    type="button"
+                    className={cn("btn", alreadyOwned && "cursor-default")}
+                    disabled={
+                      alreadyOwned || !canAfford || pendingItemId === item.id
+                    }
+                    onClick={() => handleBuyItem(item.id)}
+                  >
+                    {pendingItemId === item.id
+                      ? "Buying..."
+                      : alreadyOwned
+                        ? "Owned"
+                        : "Buy"}
+                  </button>
+                );
                 return (
                   <ItemRow
                     key={item.id}
@@ -158,22 +175,13 @@ export function StoreView({
                     colour="yellow"
                     subtitle={alreadyOwned ? "Owned" : <Coin amount={price} />}
                     action={
-                      <button
-                        type="button"
-                        className={cn("btn", alreadyOwned && "cursor-default")}
-                        disabled={
-                          alreadyOwned ||
-                          !canAfford ||
-                          pendingItemId === item.id
-                        }
-                        onClick={() => handleBuyItem(item.id)}
-                      >
-                        {pendingItemId === item.id
-                          ? "Buying..."
-                          : alreadyOwned
-                            ? "Owned"
-                            : "Buy"}
-                      </button>
+                      insufficientFunds ? (
+                        <Tooltip label="Insufficient funds" align="right">
+                          {buyButton}
+                        </Tooltip>
+                      ) : (
+                        buyButton
+                      )
                     }
                   />
                 );
@@ -257,28 +265,41 @@ export function StoreView({
             inspectedAlreadyOwned ? "Owned" : <Coin amount={inspectedPrice} />
           }
           footer={
-            inspected.buyPrice != null && (
-              <button
-                type="button"
-                className={cn("btn", inspectedAlreadyOwned && "cursor-default")}
-                disabled={
-                  inspectedAlreadyOwned ||
-                  currency < inspectedPrice ||
-                  pendingItemId === inspectItem
-                }
-                onClick={() => handleBuyItem(inspectItem)}
-              >
-                {pendingItemId === inspectItem ? (
-                  "Buying..."
-                ) : inspectedAlreadyOwned ? (
-                  "Owned"
-                ) : (
-                  <>
-                    Buy (<Coin amount={inspectedPrice} />)
-                  </>
-                )}
-              </button>
-            )
+            inspected.buyPrice != null &&
+            (() => {
+              const insufficientFunds =
+                !inspectedAlreadyOwned && currency < inspectedPrice;
+              const buyButton = (
+                <button
+                  type="button"
+                  className={cn(
+                    "btn",
+                    inspectedAlreadyOwned && "cursor-default",
+                  )}
+                  disabled={
+                    inspectedAlreadyOwned ||
+                    insufficientFunds ||
+                    pendingItemId === inspectItem
+                  }
+                  onClick={() => handleBuyItem(inspectItem)}
+                >
+                  {pendingItemId === inspectItem ? (
+                    "Buying..."
+                  ) : inspectedAlreadyOwned ? (
+                    "Owned"
+                  ) : (
+                    <>
+                      Buy (<Coin amount={inspectedPrice} />)
+                    </>
+                  )}
+                </button>
+              );
+              return insufficientFunds ? (
+                <Tooltip label="Insufficient funds">{buyButton}</Tooltip>
+              ) : (
+                buyButton
+              );
+            })()
           }
         />
       )}

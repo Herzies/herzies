@@ -16,6 +16,11 @@
   padding: 4px 10px;
   font-size: var(--text-ui);
   cursor: pointer;
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
 }
 
 @utility input {
