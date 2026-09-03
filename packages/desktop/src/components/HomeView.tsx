@@ -9,6 +9,7 @@ import {
 } from "../tauri-bridge";
 import { Coin } from "./Coin";
 import { Herzie3D } from "./Herzie3D";
+import { MarqueeText } from "./MarqueeText";
 import { Tooltip } from "./Tooltip";
 
 export function HomeView({
@@ -286,9 +287,10 @@ export function HomeView({
               ) : null}
             </button>
             <div className="min-w-0 flex-1">
-              <div className="line-clamp-1 text-ui font-bold text-text">
-                {nowPlaying.title}
-              </div>
+              <MarqueeText
+                text={nowPlaying.title}
+                className="text-ui font-bold text-text"
+              />
               <div className="line-clamp-1 text-[10px] text-text-dim">
                 {nowPlaying.artist}
               </div>

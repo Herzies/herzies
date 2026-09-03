@@ -27,6 +27,25 @@
   outline: none;
 }
 
+@keyframes marquee-x {
+  0%,
+  15% {
+    transform: translateX(0);
+  }
+  45%,
+  55% {
+    transform: translateX(var(--marquee-distance));
+  }
+  85%,
+  100% {
+    transform: translateX(0);
+  }
+}
+
+@utility animate-marquee {
+  animation: marquee-x 6s ease-in-out infinite;
+}
+
 @layer base {
   *,
   *::before,
