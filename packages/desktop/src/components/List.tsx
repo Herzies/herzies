@@ -45,20 +45,23 @@ export function List({
     };
   }, []);
 
+  // className carries the caller's sizing (`min-h-0 flex-1` or `max-h-*`),
+  // so it has to land on the actual scrolling element rather than a wrapper
+  // — a wrapper with no in-flow content (the scroller pulled out via
+  // `absolute`) collapses to zero height whenever that sizing doesn't come
+  // from a flex parent stretching it (e.g. a bare `max-h-*` caller).
   return (
-    <div className={cn("relative overflow-hidden", className)}>
-      <div ref={scrollRef} className="absolute inset-0 overflow-y-auto">
-        <div ref={contentRef}>{children}</div>
-      </div>
+    <div ref={scrollRef} className={cn("overflow-y-auto", className)}>
       <div
         className={cn(
-          "pointer-events-none absolute inset-x-0 top-0 h-4 bg-gradient-to-b from-bg-panel to-transparent transition-opacity",
+          "pointer-events-none sticky top-0 -mb-4 h-4 bg-gradient-to-b from-bg-panel to-transparent transition-opacity",
           atTop ? "opacity-0" : "opacity-100",
         )}
       />
+      <div ref={contentRef}>{children}</div>
       <div
         className={cn(
-          "pointer-events-none absolute inset-x-0 bottom-0 h-4 bg-gradient-to-t from-bg-panel to-transparent transition-opacity",
+          "pointer-events-none sticky bottom-0 -mt-4 h-4 bg-gradient-to-t from-bg-panel to-transparent transition-opacity",
           atBottom ? "opacity-0" : "opacity-100",
         )}
       />
