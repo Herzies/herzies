@@ -106,7 +106,7 @@ export function StoreView({
     <div className="flex h-full flex-col">
       <div className="z-50 mb-4 flex items-center justify-between">
         <h1 className="text-ui-lg font-bold text-yellow">Store</h1>
-        <Tooltip label={`${formatAmount(currency)} herzie coins`}>
+        <Tooltip label={`${formatAmount(currency)} herzie coins`} align="right">
           <div className="text-ui text-yellow">
             <Coin amount={currency} />
           </div>
