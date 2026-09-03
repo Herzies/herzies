@@ -162,6 +162,9 @@ export function EventsView({
 
   const hunt = events.find((e) => e.type === "song_hunt");
   const previousHuntConfig = previousHunt?.config as SongHuntConfig;
+  const previousRewardItem = previousHuntConfig?.rewardItemId
+    ? getItem(previousHuntConfig.rewardItemId)
+    : undefined;
   const previousFinders = (previousHuntConfig?.firstFinders ?? [])
     .slice()
     .sort(
@@ -230,13 +233,23 @@ export function EventsView({
                     </div>
                   </div>
 
-                  {previousHuntConfig.rewardItemId ? (
+                  {previousHuntConfig.rewardItemId && previousRewardItem ? (
                     <div className="flex flex-col gap-1">
                       <h2 className="text-ui font-bold text-text-dim">
                         Reward:
                       </h2>
                       <div className="text-ui">
-                        {getItem(previousHuntConfig.rewardItemId)?.name}
+                        <button
+                          className="cursor-pointer border-none bg-transparent text-ui underline"
+                          style={{
+                            color:
+                              ITEM_RARITY_COLORS[previousRewardItem.rarity],
+                          }}
+                          type="button"
+                          onClick={() => setInspectOverlay("item")}
+                        >
+                          {previousRewardItem.name}
+                        </button>
                       </div>
                     </div>
                   ) : null}
@@ -277,6 +290,13 @@ export function EventsView({
             </div>
           ) : null}
         </div>
+
+        {inspectOverlay === "item" && previousHuntConfig?.rewardItemId && (
+          <ItemInspectOverlay
+            itemId={previousHuntConfig.rewardItemId}
+            onClose={() => setInspectOverlay(null)}
+          />
+        )}
       </View>
     );
   }
