@@ -19,12 +19,14 @@ export function TabBar({
   setView: (v: View) => void;
   hasActiveEvent?: boolean;
 }) {
-  const tabs: {
+  type Tab = {
     id: View;
     label: string;
     colour: "cyan" | "yellow" | "red" | "green";
     title: string;
-  }[] = [
+  };
+
+  const leftTabs: Tab[] = [
     {
       id: "home",
       label: "Herzie",
@@ -49,6 +51,9 @@ export function TabBar({
       colour: "cyan",
       title: "Friends & leaderboard. Shortcut [f]",
     },
+  ];
+
+  const rightTabs: Tab[] = [
     {
       id: "store",
       label: "Store",
@@ -62,32 +67,36 @@ export function TabBar({
       title: "Settings. Shortcut [s]",
     },
   ];
+
+  const renderTab = (t: Tab) => (
+    <button
+      type="button"
+      key={t.id}
+      onClick={() => setView(t.id)}
+      title={t.title}
+      className={cn(
+        "relative overflow-visible border-none bg-transparent py-1 text-[10px] cursor-pointer",
+        {
+          "font-bold text-cyan": view === t.id && t.colour === "cyan",
+          "hover:text-cyan/80": view !== t.id && t.colour === "cyan",
+          "font-bold text-yellow": view === t.id && t.colour === "yellow",
+          "hover:text-yellow/80": view !== t.id && t.colour === "yellow",
+          "font-bold text-red": view === t.id && t.colour === "red",
+          "hover:text-red/80": view !== t.id && t.colour === "red",
+          "font-bold text-green": view === t.id && t.colour === "green",
+          "hover:text-green/80": view !== t.id && t.colour === "green",
+        },
+      )}
+    >
+      {t.id === "events" && hasActiveEvent && <TabStarAccent />}
+      <span className={cn("relative z-10")}>{t.label}</span>
+    </button>
+  );
+
   return (
-    <div className="flex items-center border-t border-border py-1.5">
-      {tabs.map((t) => (
-        <button
-          type="button"
-          key={t.id}
-          onClick={() => setView(t.id)}
-          title={t.title}
-          className={cn(
-            "relative flex-1 overflow-visible border-none bg-transparent py-1 text-[10px] cursor-pointer",
-            {
-              "font-bold text-cyan": view === t.id && t.colour === "cyan",
-              "hover:text-cyan/80": view !== t.id && t.colour === "cyan",
-              "font-bold text-yellow": view === t.id && t.colour === "yellow",
-              "hover:text-yellow/80": view !== t.id && t.colour === "yellow",
-              "font-bold text-red": view === t.id && t.colour === "red",
-              "hover:text-red/80": view !== t.id && t.colour === "red",
-              "font-bold text-green": view === t.id && t.colour === "green",
-              "hover:text-green/80": view !== t.id && t.colour === "green",
-            },
-          )}
-        >
-          {t.id === "events" && hasActiveEvent && <TabStarAccent />}
-          <span className={cn("relative z-10")}>{t.label}</span>
-        </button>
-      ))}
+    <div className="flex items-center justify-between border-t border-border px-3 py-1.5">
+      <div className="flex items-center gap-3">{leftTabs.map(renderTab)}</div>
+      <div className="flex items-center gap-3">{rightTabs.map(renderTab)}</div>
     </div>
   );
 }
