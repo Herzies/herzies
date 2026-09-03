@@ -5,6 +5,7 @@ import { cn, formatAmount } from "../lib/utils";
 import { herzies, useWindowFocused } from "../tauri-bridge";
 import { Coin } from "./Coin";
 import ItemInspectOverlay from "./ItemInspectOverlay";
+import { ItemRow } from "./ItemRow";
 import { TabButton } from "./TabButton";
 import { Tooltip } from "./Tooltip";
 
@@ -148,41 +149,31 @@ export function StoreView({
                 const price = item.buyPrice ?? 0;
                 const canAfford = currency >= price;
                 return (
-                  <div
+                  <ItemRow
                     key={item.id}
-                    className="group flex items-center justify-between gap-2 border-b border-[#222] py-2"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => setInspectItem(item.id)}
-                      className="min-w-0 flex-1 cursor-pointer text-left"
-                      title="Inspect card"
-                    >
-                      <div className="truncate text-ui group-hover:underline">
-                        {item.name}
-                      </div>
-                      <div className="text-[10px] text-text-dim">
-                        {alreadyOwned ? "Owned" : <Coin amount={price} />}
-                      </div>
-                    </button>
-                    <button
-                      type="button"
-                      className={cn(
-                        "btn shrink-0",
-                        alreadyOwned && "cursor-default",
-                      )}
-                      disabled={
-                        alreadyOwned || !canAfford || pendingItemId === item.id
-                      }
-                      onClick={() => handleBuyItem(item.id)}
-                    >
-                      {pendingItemId === item.id
-                        ? "Buying..."
-                        : alreadyOwned
-                          ? "Owned"
-                          : "Buy"}
-                    </button>
-                  </div>
+                    itemId={item.id}
+                    onInspect={setInspectItem}
+                    inspectTitle="Inspect card"
+                    subtitle={alreadyOwned ? "Owned" : <Coin amount={price} />}
+                    action={
+                      <button
+                        type="button"
+                        className={cn("btn", alreadyOwned && "cursor-default")}
+                        disabled={
+                          alreadyOwned ||
+                          !canAfford ||
+                          pendingItemId === item.id
+                        }
+                        onClick={() => handleBuyItem(item.id)}
+                      >
+                        {pendingItemId === item.id
+                          ? "Buying..."
+                          : alreadyOwned
+                            ? "Owned"
+                            : "Buy"}
+                      </button>
+                    }
+                  />
                 );
               })
             )}

@@ -15,11 +15,12 @@ import {
   RARITY_LABELS,
 } from "@herzies/shared";
 import { useEffect, useState } from "react";
-import { cn, formatAmount } from "../lib/utils";
+import { formatAmount } from "../lib/utils";
 import { herzies } from "../tauri-bridge";
 import { Coin } from "./Coin";
 import { Herzie3D } from "./Herzie3D";
 import ItemInspectOverlay from "./ItemInspectOverlay";
+import { ItemRow } from "./ItemRow";
 import { NumberTicker } from "./NumberTicker";
 import { TabButton } from "./TabButton";
 import { Tooltip } from "./Tooltip";
@@ -247,23 +248,14 @@ export function InventoryView({
           ) : (
             items.map(([itemId, qty]) => {
               const def = getItem(itemId);
-              const name = def?.name ?? itemId;
               const isEquipped = isItemEquipped(itemId);
               return (
-                <div
+                <ItemRow
                   key={itemId}
-                  className="flex items-center justify-between gap-2 border-b border-[#222] py-1.5"
-                >
-                  <button
-                    type="button"
-                    onClick={() => setInspectItem(itemId)}
-                    className="min-w-0 flex-1 cursor-pointer text-left"
-                    title="Inspect item"
-                  >
-                    <div className="truncate text-ui hover:underline">
-                      {name}
-                    </div>
-                    <div className="text-[10px] text-text-dim">
+                  itemId={itemId}
+                  onInspect={setInspectItem}
+                  subtitle={
+                    <>
                       <span
                         style={{
                           color: RARITY_COLORS[def?.rarity ?? "common"],
@@ -275,18 +267,20 @@ export function InventoryView({
                       {isEquipped && def?.equipSlot === "ground"
                         ? ` · ${findEquippedSlot(equipped, itemId) === groundSlot("left") ? "L" : "R"}`
                         : ""}
-                    </div>
-                  </button>
-                  {def?.equipable && (
-                    <button
-                      type="button"
-                      className={cn("btn shrink-0")}
-                      onClick={() => handleEquip(itemId)}
-                    >
-                      {isEquipped ? "Unequip" : "Equip"}
-                    </button>
-                  )}
-                </div>
+                    </>
+                  }
+                  action={
+                    def?.equipable && (
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={() => handleEquip(itemId)}
+                      >
+                        {isEquipped ? "Unequip" : "Equip"}
+                      </button>
+                    )
+                  }
+                />
               );
             })
           )}
