@@ -1,7 +1,14 @@
-import type { Equipped, GroundSide, Herzie, Inventory } from "@herzies/shared";
+import type {
+  Equipped,
+  GroundSide,
+  Herzie,
+  Inventory,
+  ItemCategory,
+} from "@herzies/shared";
 import {
   findEquippedSlot,
   getItem,
+  getItemCategory,
   groundSlot,
   normalizeEquipped,
   RARITY_COLORS,
@@ -15,6 +22,29 @@ import { Herzie3D } from "./Herzie3D";
 import ItemInspectOverlay from "./ItemInspectOverlay";
 import { NumberTicker } from "./NumberTicker";
 import { Tooltip } from "./Tooltip";
+
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "cursor-pointer border-none bg-transparent px-1.5 pb-1.5 pt-0.5 text-ui",
+        active ? "font-bold text-cyan" : "text-text-dim hover:text-text",
+      )}
+    >
+      {children}
+    </button>
+  );
+}
 
 function SellControls({
   itemId,
@@ -97,6 +127,7 @@ export function InventoryView({
   const [inspectItem, setInspectItem] = useState<string | null>(
     initialItem ?? null,
   );
+  const [tab, setTab] = useState<ItemCategory>("deck");
 
   useEffect(() => {
     setInventory(cachedInventory);
@@ -158,7 +189,11 @@ export function InventoryView({
   };
   const items = inventory
     ? Object.entries(inventory)
-        .filter(([, qty]) => qty > 0)
+        .filter(([itemId, qty]) => {
+          if (qty <= 0) return false;
+          const def = getItem(itemId);
+          return (def ? getItemCategory(def) : "deck") === tab;
+        })
         .sort((a, b) => {
           const ra = rarityOrder[getItem(a[0])?.rarity ?? "common"] ?? 3;
           const rb = rarityOrder[getItem(b[0])?.rarity ?? "common"] ?? 3;
@@ -200,59 +235,74 @@ export function InventoryView({
       </div>
 
       {/* Item list — bottom ~40% */}
-      <div className="z-10 h-[40%] min-h-0 shrink-0 overflow-auto border-t border-border">
-        {loading ? (
-          <div className="pt-5 text-center text-ui text-text-dim">
-            Loading...
-          </div>
-        ) : items.length === 0 ? (
-          <div className="pt-5 text-center text-ui text-text-dim">
-            No items yet. Keep listening to earn drops!
-          </div>
-        ) : (
-          items.map(([itemId, qty]) => {
-            const def = getItem(itemId);
-            const name = def?.name ?? itemId;
-            const isEquipped = isItemEquipped(itemId);
-            return (
-              <div
-                key={itemId}
-                className="flex items-center justify-between gap-2 border-b border-[#222] py-1.5"
-              >
-                <button
-                  type="button"
-                  onClick={() => setInspectItem(itemId)}
-                  className="min-w-0 flex-1 cursor-pointer text-left"
-                  title="Inspect item"
+      <div className="z-10 flex h-[40%] min-h-0 shrink-0 flex-col border-t border-border">
+        <div className="flex gap-1 border-b border-border">
+          <TabButton active={tab === "deck"} onClick={() => setTab("deck")}>
+            Deck
+          </TabButton>
+          <TabButton active={tab === "misc"} onClick={() => setTab("misc")}>
+            Misc
+          </TabButton>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-auto">
+          {loading ? (
+            <div className="pt-5 text-center text-ui text-text-dim">
+              Loading...
+            </div>
+          ) : items.length === 0 ? (
+            <div className="pt-5 text-center text-ui text-text-dim">
+              {tab === "deck"
+                ? "No cards yet. Keep listening to earn drops!"
+                : "No misc items yet."}
+            </div>
+          ) : (
+            items.map(([itemId, qty]) => {
+              const def = getItem(itemId);
+              const name = def?.name ?? itemId;
+              const isEquipped = isItemEquipped(itemId);
+              return (
+                <div
+                  key={itemId}
+                  className="flex items-center justify-between gap-2 border-b border-[#222] py-1.5"
                 >
-                  <div className="truncate text-ui hover:underline">{name}</div>
-                  <div className="text-[10px] text-text-dim">
-                    <span
-                      style={{
-                        color: RARITY_COLORS[def?.rarity ?? "common"],
-                      }}
-                    >
-                      {RARITY_LABELS[def?.rarity ?? "common"]}
-                    </span>{" "}
-                    · x{qty}
-                    {isEquipped && def?.equipSlot === "ground"
-                      ? ` · ${findEquippedSlot(equipped, itemId) === groundSlot("left") ? "L" : "R"}`
-                      : ""}
-                  </div>
-                </button>
-                {def?.equipable && (
                   <button
                     type="button"
-                    className={cn("btn shrink-0")}
-                    onClick={() => handleEquip(itemId)}
+                    onClick={() => setInspectItem(itemId)}
+                    className="min-w-0 flex-1 cursor-pointer text-left"
+                    title="Inspect item"
                   >
-                    {isEquipped ? "Unequip" : "Equip"}
+                    <div className="truncate text-ui hover:underline">
+                      {name}
+                    </div>
+                    <div className="text-[10px] text-text-dim">
+                      <span
+                        style={{
+                          color: RARITY_COLORS[def?.rarity ?? "common"],
+                        }}
+                      >
+                        {RARITY_LABELS[def?.rarity ?? "common"]}
+                      </span>{" "}
+                      · x{qty}
+                      {isEquipped && def?.equipSlot === "ground"
+                        ? ` · ${findEquippedSlot(equipped, itemId) === groundSlot("left") ? "L" : "R"}`
+                        : ""}
+                    </div>
                   </button>
-                )}
-              </div>
-            );
-          })
-        )}
+                  {def?.equipable && (
+                    <button
+                      type="button"
+                      className={cn("btn shrink-0")}
+                      onClick={() => handleEquip(itemId)}
+                    >
+                      {isEquipped ? "Unequip" : "Equip"}
+                    </button>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
       </div>
 
       {inspectItem && inspected && (

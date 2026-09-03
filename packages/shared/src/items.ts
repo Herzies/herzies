@@ -24,6 +24,9 @@ import {
 
 export type Rarity = "common" | "uncommon" | "rare" | "legendary";
 
+/** Inventory grouping. Most items are cards (some grant a visual, some a bonus); "misc" is for non-card items. */
+export type ItemCategory = "deck" | "misc";
+
 /** Catalog equip categories (item.equip_slot). Ground items choose a side at equip time. */
 export const EQUIP_SLOTS = [
   "head",
@@ -104,6 +107,12 @@ export interface ItemDef {
   sellPrice?: number;
   /** Set when the item can be bought with in-game currency from the store's Items tab. */
   buyPrice?: number;
+  /** Inventory sub-tab grouping. Defaults to "deck" when unset. */
+  category?: ItemCategory;
+}
+
+export function getItemCategory(item: Pick<ItemDef, "category">): ItemCategory {
+  return item.category ?? "deck";
 }
 
 export const RARITY_COLORS: Record<Rarity, string> = {
@@ -912,7 +921,8 @@ export const ITEMS: ItemDef[] = [
   {
     id: "poseidons-gift",
     name: "Poseidon's Gift",
-description: "Somehow ended up here. Use it only if you don't care about upsetting the gods.",
+    description:
+      "Somehow ended up here. Use it only if you don't care about upsetting the gods.",
     rarity: "legendary",
     frames: poseidonsGiftFrames,
     equipable: true,
