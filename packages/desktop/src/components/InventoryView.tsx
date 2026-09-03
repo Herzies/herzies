@@ -237,9 +237,11 @@ export function InventoryView({
       {/* Item list — bottom ~40% */}
       <div className="z-10 flex h-[40%] min-h-0 shrink-0 flex-col border-t border-border">
         <div className="flex gap-1 border-b border-border">
-          <TabButton active={tab === "deck"} onClick={() => setTab("deck")}>
-            Deck
-          </TabButton>
+          <Tooltip label="Cards give bonuses or change appearance">
+            <TabButton active={tab === "deck"} onClick={() => setTab("deck")}>
+              Deck
+            </TabButton>
+          </Tooltip>
           <TabButton active={tab === "misc"} onClick={() => setTab("misc")}>
             Misc
           </TabButton>
