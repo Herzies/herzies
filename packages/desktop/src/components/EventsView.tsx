@@ -3,6 +3,7 @@ import { getItem, RARITY_COLORS as ITEM_RARITY_COLORS } from "@herzies/shared";
 import { useEffect, useRef, useState } from "react";
 import { herzies, useWindowFocused } from "../tauri-bridge";
 import ItemInspectOverlay from "./ItemInspectOverlay";
+import { List } from "./List";
 import { View } from "./View";
 
 function formatCountdown(endsAt: string): string {
@@ -259,7 +260,7 @@ export function EventsView({
                       Finders ({previousFinders.length}):
                     </h2>
 
-                    <div className="min-h-0 flex-1 overflow-y-auto">
+                    <List className="min-h-0 flex-1">
                       {previousFinders.length > 0 ? (
                         previousFinders.map((finder, i) => {
                           const elapsed = formatDuration(
@@ -283,7 +284,7 @@ export function EventsView({
                           No finders from the previous hunt.
                         </div>
                       )}
-                    </div>
+                    </List>
                   </div>
                 </div>
               </div>
@@ -425,7 +426,7 @@ export function EventsView({
             </div>
             {config?.firstFinders?.length &&
             config?.firstFinders?.length > 0 ? (
-              <div className="max-h-28 overflow-y-auto">
+              <List className="max-h-28">
                 {config.firstFinders.map((finder, i) => (
                   <div
                     key={`${finder.name}-${finder.claimedAt}`}
@@ -439,7 +440,7 @@ export function EventsView({
                     </span>
                   </div>
                 ))}
-              </div>
+              </List>
             ) : (
               <div className="text-ui text-text-dim">
                 No one has found it yet...

@@ -6,6 +6,7 @@ import { herzies, useWindowFocused } from "../tauri-bridge";
 import { Coin } from "./Coin";
 import ItemInspectOverlay from "./ItemInspectOverlay";
 import { ItemRow } from "./ItemRow";
+import { List } from "./List";
 import { TabButton } from "./TabButton";
 import { Tooltip } from "./Tooltip";
 
@@ -137,7 +138,7 @@ export function StoreView({
             Spend coins on cards for your herzie. Purchases land straight in
             your inventory.
           </p>
-          <div className="min-h-0 flex-1 overflow-auto">
+          <List className="min-h-0 flex-1">
             {BUYABLE_ITEMS.length === 0 ? (
               <div className="pt-5 text-center text-ui text-text-dim">
                 No cards available right now.
@@ -154,6 +155,7 @@ export function StoreView({
                     itemId={item.id}
                     onInspect={setInspectItem}
                     inspectTitle="Inspect card"
+                    colour="yellow"
                     subtitle={alreadyOwned ? "Owned" : <Coin amount={price} />}
                     action={
                       <button
@@ -177,7 +179,7 @@ export function StoreView({
                 );
               })
             )}
-          </div>
+          </List>
         </>
       ) : (
         <>
@@ -190,7 +192,7 @@ export function StoreView({
               Coming soon...
             </p>
           )}
-          <div className="min-h-0 flex-1 overflow-auto">
+          <List className="min-h-0 flex-1">
             {loading ? (
               <div className="pt-5 text-center text-ui text-text-dim">
                 Loading...
@@ -232,7 +234,7 @@ export function StoreView({
                 </div>
               ))
             )}
-          </div>
+          </List>
 
           {pendingProductId && (
             <div className="border-t border-border pt-2 text-center text-[10px] text-text-dim">

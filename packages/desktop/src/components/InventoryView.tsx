@@ -21,6 +21,7 @@ import { Coin } from "./Coin";
 import { Herzie3D } from "./Herzie3D";
 import ItemInspectOverlay from "./ItemInspectOverlay";
 import { ItemRow } from "./ItemRow";
+import { List } from "./List";
 import { NumberTicker } from "./NumberTicker";
 import { TabButton } from "./TabButton";
 import { Tooltip } from "./Tooltip";
@@ -232,7 +233,7 @@ export function InventoryView({
           </TabButton>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-auto">
+        <List className="min-h-0 flex-1">
           {loading ? (
             <div className="pt-5 text-center text-ui text-text-dim">
               Loading...
@@ -282,7 +283,7 @@ export function InventoryView({
               );
             })
           )}
-        </div>
+        </List>
       </div>
 
       {inspectItem && inspected && (

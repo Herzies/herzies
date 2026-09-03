@@ -12,6 +12,7 @@ import {
   type OngoingTrade,
   useWindowFocused,
 } from "../tauri-bridge";
+import { List } from "./List";
 import { ProfileView } from "./ProfileView";
 import { TabButton } from "./TabButton";
 import { View } from "./View";
@@ -309,7 +310,7 @@ export function FriendsView({
             </button>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-auto">
+          <List className="min-h-0 flex-1">
             {herzie.friendCodes.length === 0 ? (
               <div className="pt-5 text-center text-ui text-text-dim">
                 No friends yet. Add some from the Add friend tab!
@@ -380,12 +381,12 @@ export function FriendsView({
                 );
               })
             )}
-          </div>
+          </List>
         </>
       )}
 
       {tab === "requests" && (
-        <div className="min-h-0 flex-1 overflow-auto">
+        <List className="min-h-0 flex-1">
           {incomingRequests.length === 0 ? (
             <div className="pt-5 text-center text-ui text-text-dim">
               No friend requests right now.
@@ -421,7 +422,7 @@ export function FriendsView({
               </div>
             ))
           )}
-        </div>
+        </List>
       )}
 
       {tab === "add" && (
@@ -433,7 +434,7 @@ export function FriendsView({
             onChange={(e) => setSearch(e.target.value)}
           />
 
-          <div className="min-h-0 flex-1 overflow-auto">
+          <List className="min-h-0 flex-1">
             {search.trim() ? (
               <SearchResults
                 results={searchResults}
@@ -475,12 +476,12 @@ export function FriendsView({
                 Search for a herzie by name or friend code.
               </div>
             )}
-          </div>
+          </List>
         </div>
       )}
 
       {tab === "trades" && (
-        <div className="min-h-0 flex-1 overflow-auto">
+        <List className="min-h-0 flex-1">
           {ongoingTrades === null ? (
             <div className="pt-5 text-center text-ui text-text-dim">
               Loading…
@@ -518,11 +519,11 @@ export function FriendsView({
               </div>
             ))
           )}
-        </div>
+        </List>
       )}
 
       {tab === "leaderboard" && (
-        <div className="min-h-0 flex-1 overflow-auto">
+        <List className="min-h-0 flex-1">
           {leaderboard === null ? (
             <div className="pt-5 text-center text-ui text-text-dim">
               Loading…
@@ -567,7 +568,7 @@ export function FriendsView({
               );
             })
           )}
-        </div>
+        </List>
       )}
     </View>
   );
