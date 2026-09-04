@@ -76,6 +76,8 @@ pub struct TopArtist {
 pub struct ProfileNowPlaying {
     pub title: String,
     pub artist: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub album_art_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -84,6 +86,8 @@ pub struct ProfileLastPlayed {
     pub title: String,
     pub artist: String,
     pub listened_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub album_art_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
