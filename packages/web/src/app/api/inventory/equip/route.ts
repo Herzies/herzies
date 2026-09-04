@@ -7,6 +7,7 @@ import {
   type EquippedSlot,
   findEquippedSlot,
   groundSlot,
+  isModifierEquipped,
   normalizeEquipped,
 } from "@herzies/shared";
 
@@ -59,7 +60,7 @@ export async function POST(request: Request) {
     }
 
     const existingSlot = findEquippedSlot(current, itemId);
-    if (existingSlot) {
+    if (existingSlot || isModifierEquipped(current, itemId)) {
       return NextResponse.json({ error: "Already equipped" }, { status: 400 });
     }
 
@@ -74,6 +75,9 @@ export async function POST(request: Request) {
       }
       const target = groundSlot(side);
       updated[target] = itemId;
+    } else if (item.equip_slot === "modifier") {
+      // Unlimited — accumulate rather than occupy a single-value slot.
+      updated.modifier = [...(current.modifier ?? []), itemId];
     } else if (item.equip_slot) {
       const slot = item.equip_slot as EquippedSlot;
       updated[slot] = itemId;
@@ -86,11 +90,15 @@ export async function POST(request: Request) {
     }
   } else {
     const slot = findEquippedSlot(current, itemId);
-    if (!slot) {
+    if (!slot && !isModifierEquipped(current, itemId)) {
       return NextResponse.json({ error: "Item not equipped" }, { status: 400 });
     }
     updated = { ...current };
-    delete updated[slot];
+    if (slot) {
+      delete updated[slot];
+    } else {
+      updated.modifier = (current.modifier ?? []).filter((id) => id !== itemId);
+    }
   }
 
   const { error } = await admin

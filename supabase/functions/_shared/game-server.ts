@@ -33,11 +33,12 @@ import {
 } from "./herzies-shared.ts";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-/** Good Eye Sniper occupies a ground slot, worn on either side. */
+/** Good Eye Sniper occupies the modifier slot — an unbounded array, unlike
+ * every other equip slot. */
 function hasGoodEyeSniperEquipped(equipped: unknown): boolean {
   if (!equipped || typeof equipped !== "object") return false;
   const e = equipped as Record<string, unknown>;
-  return e.ground_left === "good-eye-sniper" || e.ground_right === "good-eye-sniper";
+  return Array.isArray(e.modifier) && e.modifier.includes("good-eye-sniper");
 }
 
 /** Normalize a track string for fuzzy matching */

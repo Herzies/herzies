@@ -444,7 +444,10 @@ mod lookup_tests {
         assert_eq!(artists[0].name, "James Prophet");
         assert_eq!(artists[0].plays, 9);
         let mut expected = HashMap::new();
-        expected.insert("head".to_string(), "headphones".to_string());
+        expected.insert(
+            "head".to_string(),
+            serde_json::Value::String("headphones".to_string()),
+        );
         assert_eq!(profile.equipped.as_ref(), Some(&expected));
     }
 }
@@ -478,7 +481,7 @@ pub async fn api_lookup_herzies(
 
 pub async fn api_fetch_inventory(
     client: &Client,
-) -> Option<(Inventory, u32, HashMap<String, String>)> {
+) -> Option<(Inventory, u32, HashMap<String, serde_json::Value>)> {
     let resp = api_fetch(client, reqwest::Method::GET, "/inventory", None).await?;
     if !resp.status().is_success() {
         return None;
@@ -486,11 +489,8 @@ pub async fn api_fetch_inventory(
     let data: serde_json::Value = resp.json().await.ok()?;
     let inventory: Inventory = serde_json::from_value(data["inventory"].clone()).ok()?;
     let currency = data["currency"].as_u64().unwrap_or(0) as u32;
-    let equipped: HashMap<String, String> = match &data["equipped"] {
-        serde_json::Value::Object(map) => map
-            .iter()
-            .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
-            .collect(),
+    let equipped: HashMap<String, serde_json::Value> = match &data["equipped"] {
+        serde_json::Value::Object(map) => map.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
         _ => HashMap::new(),
     };
     Some((inventory, currency, equipped))

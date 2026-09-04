@@ -8,7 +8,9 @@ import {
   getDailyCraving,
   goodEyeSniperBonus,
   type Herzie,
+  isModifierEquipped,
   matchesCraving,
+  normalizeEquipped,
   type PendingFriendRequest,
   type PendingTradeRequest,
   recordGenreMinutes,
@@ -18,11 +20,9 @@ import {
 } from "@herzies/shared";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-/** Good Eye Sniper occupies a ground slot, worn on either side. */
+/** Good Eye Sniper occupies the modifier slot. */
 function hasGoodEyeSniperEquipped(equipped: unknown): boolean {
-  if (!equipped || typeof equipped !== "object") return false;
-  const e = equipped as Record<string, unknown>;
-  return e.ground_left === "good-eye-sniper" || e.ground_right === "good-eye-sniper";
+  return isModifierEquipped(normalizeEquipped(equipped), "good-eye-sniper");
 }
 
 /** Normalize a track string for fuzzy matching */

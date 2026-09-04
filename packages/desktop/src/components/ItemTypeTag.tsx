@@ -1,22 +1,31 @@
-import { getItemType, ITEM_TYPE_LABELS, type ItemDef, type ItemType } from "@herzies/shared";
+import {
+  getItemType,
+  ITEM_TYPE_LABELS,
+  type ItemDef,
+  type ItemType,
+} from "@herzies/shared";
 import { cn } from "../lib/utils";
 import { Tooltip } from "./Tooltip";
 
 const ITEM_TYPE_TEXT_CLASSES: Record<ItemType, string> = {
   skin: "text-purple",
-  wearable: "text-cyan",
+  sceneryCard: "text-green",
+  equipable: "text-cyan",
+  accessory: "text-red",
   modifier: "text-yellow",
   artefact: "text-text-dim",
 };
 
 const ITEM_TYPE_PILL_CLASSES: Record<ItemType, string> = {
   skin: "bg-purple/15 text-purple",
-  wearable: "bg-cyan/15 text-cyan",
+  sceneryCard: "bg-green/15 text-green",
+  equipable: "bg-cyan/15 text-cyan",
+  accessory: "bg-red/15 text-red",
   modifier: "bg-yellow/15 text-yellow",
   artefact: "bg-text-dim/15 text-text-dim",
 };
 
-/** Labels an item's type (skin / wearable / modifier / artefact). */
+/** Labels an item's type (skin / scenery card / equipable / accessory / modifier / artefact). */
 export function ItemTypeTag({
   item,
   className,
@@ -33,7 +42,10 @@ export function ItemTypeTag({
     <span
       className={cn(
         variant === "pill"
-          ? cn("rounded-full px-1.5 py-px text-ui-sm", ITEM_TYPE_PILL_CLASSES[type])
+          ? cn(
+              "rounded-full px-1.5 py-px text-ui-sm",
+              ITEM_TYPE_PILL_CLASSES[type],
+            )
           : ITEM_TYPE_TEXT_CLASSES[type],
         className,
       )}

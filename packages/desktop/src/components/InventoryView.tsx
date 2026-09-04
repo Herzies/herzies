@@ -9,7 +9,10 @@ import {
   findEquippedSlot,
   getItem,
   getItemCategory,
+  getItemType,
   groundSlot,
+  ITEM_TYPE_LABELS,
+  isModifierEquipped,
   normalizeEquipped,
   RARITY_COLORS,
   RARITY_LABELS,
@@ -21,7 +24,6 @@ import { Coin } from "./Coin";
 import { Herzie3D } from "./Herzie3D";
 import ItemInspectOverlay from "./ItemInspectOverlay";
 import { ItemRow } from "./ItemRow";
-import { ItemTypeTag } from "./ItemTypeTag";
 import { List } from "./List";
 import { NumberTicker } from "./NumberTicker";
 import { TabButton } from "./TabButton";
@@ -42,36 +44,23 @@ function SellControls({
   const clamped = Math.max(1, Math.min(sellAmount, qty));
 
   return (
-    <div>
+    <div className="flex w-full items-stretch gap-1">
       {qty > 1 && (
-        <div className="mb-1 flex items-center gap-1">
-          <NumberTicker
-            value={clamped}
-            min={1}
-            max={qty}
-            onChange={setSellAmount}
-            fullWidth
-          />
-        </div>
+        <NumberTicker
+          value={clamped}
+          min={1}
+          max={qty}
+          onChange={setSellAmount}
+          fullWidth
+        />
       )}
-      <div className="flex items-center justify-center gap-1">
-        <button
-          type="button"
-          className="btn"
-          onClick={() => onSell(itemId, clamped)}
-        >
-          Sell (<Coin amount={clamped * price} />)
-        </button>
-        {qty > 1 && (
-          <button
-            type="button"
-            className="btn"
-            onClick={() => onSell(itemId, qty)}
-          >
-            Sell All ({qty})
-          </button>
-        )}
-      </div>
+      <button
+        type="button"
+        className="btn flex-1"
+        onClick={() => onSell(itemId, clamped)}
+      >
+        Sell (<Coin amount={clamped * price} />)
+      </button>
     </div>
   );
 }
@@ -144,8 +133,10 @@ export function InventoryView({
   };
 
   const handleEquip = async (itemId: string) => {
-    const existing = findEquippedSlot(equipped, itemId);
-    const action = existing ? "unequip" : "equip";
+    const alreadyEquipped =
+      findEquippedSlot(equipped, itemId) !== null ||
+      isModifierEquipped(equipped, itemId);
+    const action = alreadyEquipped ? "unequip" : "equip";
     const item = getItem(itemId);
     const name = item?.name ?? itemId;
     let side: GroundSide | undefined;
@@ -187,7 +178,8 @@ export function InventoryView({
   const loading = inventory === null;
 
   const isItemEquipped = (itemId: string) =>
-    findEquippedSlot(equipped, itemId) !== null;
+    findEquippedSlot(equipped, itemId) !== null ||
+    isModifierEquipped(equipped, itemId);
 
   const inspected = inspectItem ? getItem(inspectItem) : null;
   const inspectedQty = inspectItem ? (inventory?.[inspectItem] ?? 0) : 0;
@@ -215,8 +207,8 @@ export function InventoryView({
         </div>
       </div>
 
-      {/* Item list — bottom ~40% */}
-      <div className="z-10 flex h-[40%] min-h-0 shrink-0 flex-col">
+      {/* Item list — bottom ~55% */}
+      <div className="z-10 flex h-[55%] min-h-0 shrink-0 flex-col">
         <div className="flex gap-1 border-b border-border">
           <TabButton
             active={tab === "deck"}
@@ -264,10 +256,7 @@ export function InventoryView({
                         {RARITY_LABELS[def?.rarity ?? "common"]}
                       </span>{" "}
                       {def ? (
-                        <>
-                          {" "}
-                          · <ItemTypeTag item={def} variant="text" />
-                        </>
+                        <> · {ITEM_TYPE_LABELS[getItemType(def)]}</>
                       ) : null}{" "}
                       · x{qty}
                       {isEquipped && def?.equipSlot === "ground"
@@ -297,7 +286,6 @@ export function InventoryView({
         <ItemInspectOverlay
           itemId={inspectItem}
           onClose={() => setInspectItem(null)}
-          meta={inspectedQty > 0 ? `x${inspectedQty}` : undefined}
           footer={
             <>
               {inspected.sellPrice && inspectedQty > 0 ? (

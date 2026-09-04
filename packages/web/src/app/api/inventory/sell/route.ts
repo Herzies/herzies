@@ -1,4 +1,8 @@
-import { findEquippedSlot, normalizeEquipped } from "@herzies/shared";
+import {
+  findEquippedSlot,
+  isModifierEquipped,
+  normalizeEquipped,
+} from "@herzies/shared";
 import { NextResponse } from "next/server";
 import { authenticateRequest, isAuthError } from "@/lib/auth";
 import { isParseError, parseBody, sellItemSchema } from "@/lib/schemas";
@@ -58,6 +62,11 @@ export async function POST(request: Request) {
     if (slot) {
       equipped = { ...equipped };
       delete equipped[slot];
+    } else if (isModifierEquipped(equipped, itemId)) {
+      equipped = {
+        ...equipped,
+        modifier: (equipped.modifier ?? []).filter((id) => id !== itemId),
+      };
     }
   }
 

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { authenticateRequest, isAuthError } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase-admin";
-import { normalizeEquipped } from "@herzies/shared";
+import { isModifierEquipped, normalizeEquipped } from "@herzies/shared";
 
 /**
  * Look up herzies by friend code(s). Requires authentication.
@@ -197,14 +197,11 @@ function formatProfile(
   };
 }
 
-/** Whether the Good Eye Sniper is equipped in either ground slot. */
+/** Whether the Good Eye Sniper is equipped in the modifier slot. */
 function hasGoodEyeSniperEquipped(
   equipped: ReturnType<typeof normalizeEquipped>,
 ): boolean {
-  return (
-    equipped.ground_left === "good-eye-sniper" ||
-    equipped.ground_right === "good-eye-sniper"
-  );
+  return isModifierEquipped(equipped, "good-eye-sniper");
 }
 
 async function getSongHuntWins(

@@ -214,7 +214,7 @@ pub fn save_multipliers(multipliers: &[ActiveMultiplier]) {
     write_secure(&path, &data);
 }
 
-pub fn load_equipped() -> HashMap<String, String> {
+pub fn load_equipped() -> HashMap<String, serde_json::Value> {
     let path = config_dir().join("equipped.json");
     if !path.exists() {
         return HashMap::new();
@@ -223,17 +223,16 @@ pub fn load_equipped() -> HashMap<String, String> {
     let Some(r) = raw else {
         return HashMap::new();
     };
-    // Accept object maps; discard legacy string arrays.
+    // Accept object maps; discard legacy string arrays. Values are passed
+    // through as-is (a plain string per single-value slot, or an array for
+    // the unbounded "modifier" slot) rather than coerced to strings.
     match serde_json::from_str::<serde_json::Value>(&r) {
-        Ok(serde_json::Value::Object(map)) => map
-            .into_iter()
-            .filter_map(|(k, v)| v.as_str().map(|s| (k, s.to_string())))
-            .collect(),
+        Ok(serde_json::Value::Object(map)) => map.into_iter().collect(),
         _ => HashMap::new(),
     }
 }
 
-pub fn save_equipped(equipped: &HashMap<String, String>) {
+pub fn save_equipped(equipped: &HashMap<String, serde_json::Value>) {
     ensure_dir();
     let path = config_dir().join("equipped.json");
     let data = serde_json::to_string(equipped).unwrap();

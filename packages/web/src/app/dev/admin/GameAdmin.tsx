@@ -60,6 +60,15 @@ type EventFormState = {
   songHunt: SongHuntConfigForm;
 };
 
+const EQUIP_SLOT_OPTIONS = [
+  "head",
+  "face",
+  "body",
+  "scenery",
+  "ground",
+  "modifier",
+] as const;
+
 type ItemFormState = {
   id: string;
   name: string;
@@ -68,10 +77,8 @@ type ItemFormState = {
   sellPrice: string;
   stackable: boolean;
   equipable: boolean;
-  equipSlot: "" | "head" | "face" | "body" | "scenery" | "ground";
+  equipSlot: "" | (typeof EQUIP_SLOT_OPTIONS)[number];
 };
-
-const EQUIP_SLOT_OPTIONS = ["head", "face", "body", "scenery", "ground"] as const;
 
 function getEventStatus(event: AdminEvent, now: Date): EventStatus {
   if (!event.active) return "inactive";

@@ -36,8 +36,8 @@ export function NumberTicker({
           onChange(Math.max(min, Math.min(max, Number(e.target.value))))
         }
         className={cn(
-          "input text-center",
-          small ? "w-9 text-ui-sm px-0.5 py-px" : "w-[60px]",
+          "input text-center text-ui-sm",
+          small ? "w-9 px-0.5 py-px" : "w-[60px]",
           fullWidth && "w-auto flex-1",
         )}
       />

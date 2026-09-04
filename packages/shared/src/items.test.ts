@@ -6,6 +6,7 @@ import {
   findEquippedSlot,
   getItem,
   getItemType,
+  isModifierEquipped,
   normalizeEquipped,
 } from "./items.js";
 
@@ -76,19 +77,31 @@ describe("getItemType", () => {
     expect(getItemType({ equipable: true, equipSlot: "color" })).toBe("skin");
   });
 
-  it("classifies modifier items as modifiers even though equipable", () => {
+  it("classifies modifier-slot items as modifiers", () => {
     expect(
       getItemType({
         equipable: true,
-        equipSlot: "ground",
+        equipSlot: "modifier",
         modifier: { label: "Exp boost", tooltip: "2% per song hunt won" },
       }),
     ).toBe("modifier");
   });
 
-  it("classifies other equipable items as wearables", () => {
+  it("classifies head/face/body items as equipables", () => {
     expect(getItemType({ equipable: true, equipSlot: "head" })).toBe(
-      "wearable",
+      "equipable",
+    );
+  });
+
+  it("classifies scenery-slot items as scenery cards", () => {
+    expect(getItemType({ equipable: true, equipSlot: "scenery" })).toBe(
+      "sceneryCard",
+    );
+  });
+
+  it("classifies non-modifier ground-slot items as accessories", () => {
+    expect(getItemType({ equipable: true, equipSlot: "ground" })).toBe(
+      "accessory",
     );
   });
 
@@ -98,5 +111,53 @@ describe("getItemType", () => {
 
   it("good-eye-sniper is a modifier", () => {
     expect(getItemType(getItem("good-eye-sniper")!)).toBe("modifier");
+  });
+});
+
+describe("modifier slot", () => {
+  it("is a catalog category", () => {
+    expect(EQUIP_SLOTS).toContain("modifier");
+  });
+
+  it("is not one of the single-value equipped slots", () => {
+    expect(EQUIPPED_SLOTS).not.toContain("modifier");
+  });
+
+  it("good-eye-sniper equips into the modifier slot, not ground", () => {
+    expect(getItem("good-eye-sniper")).toMatchObject({ equipSlot: "modifier" });
+  });
+
+  it("accumulates multiple ids rather than overwriting", () => {
+    const equipped = normalizeEquipped({ modifier: ["a"] });
+    equipped.modifier = [...(equipped.modifier ?? []), "b"];
+    expect(equipped.modifier).toEqual(["a", "b"]);
+  });
+
+  it("survives normalizeEquipped as an array", () => {
+    expect(normalizeEquipped({ modifier: ["good-eye-sniper"] })).toEqual({
+      modifier: ["good-eye-sniper"],
+    });
+  });
+
+  it("coerces a legacy scalar modifier value into a one-element array", () => {
+    expect(normalizeEquipped({ modifier: "good-eye-sniper" })).toEqual({
+      modifier: ["good-eye-sniper"],
+    });
+  });
+
+  it("counts every modifier id toward equipped item ids", () => {
+    expect(
+      equippedItemIds({ head: "headphones", modifier: ["a", "b"] }),
+    ).toEqual(["headphones", "a", "b"]);
+  });
+
+  it("is discoverable via isModifierEquipped", () => {
+    expect(
+      isModifierEquipped({ modifier: ["good-eye-sniper"] }, "good-eye-sniper"),
+    ).toBe(true);
+    expect(isModifierEquipped({ modifier: ["good-eye-sniper"] }, "other")).toBe(
+      false,
+    );
+    expect(isModifierEquipped({}, "good-eye-sniper")).toBe(false);
   });
 });

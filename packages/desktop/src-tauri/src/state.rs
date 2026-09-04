@@ -29,7 +29,7 @@ pub struct ManagedState {
     /// recovers the indicator without waiting for the next sync tick.
     pub last_sync_ok: bool,
     /// Cached wearables for the home 3D view (persisted locally, refreshed from API).
-    pub equipped: HashMap<String, String>,
+    pub equipped: HashMap<String, serde_json::Value>,
     /// Latest chat messages for the home feed (refreshed from API).
     pub chat_messages: Vec<ChatMessage>,
     /// Cached inventory (`None` until first successful fetch).

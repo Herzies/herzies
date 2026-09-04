@@ -107,7 +107,7 @@ export const adminItemSchema = z.object({
   stackable: z.boolean().optional(),
   equipable: z.boolean().optional(),
   equipSlot: z
-    .enum(["head", "face", "body", "scenery", "ground"])
+    .enum(["head", "face", "body", "scenery", "ground", "modifier"])
     .nullable()
     .optional(),
 });

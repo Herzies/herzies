@@ -13,6 +13,7 @@ import {
   type Cell,
   type CreatureParams,
   DEFAULT_Y_ANGLE,
+  equippedCacheKey,
   generateDanceFrames,
   generateIdleFrames,
   generateRotationFrames,
@@ -98,7 +99,22 @@ export function Herzie3D({
   ariaLabel,
   defaultAngle = 0,
 }: Props) {
-  const equipped = resolveEquipped(equippedProp, wearables);
+  const equippedRaw = resolveEquipped(equippedProp, wearables);
+  // The parent may hand us a brand-new (but content-identical) `equipped`
+  // object on every render — a fresh AppState push, an unrelated background
+  // sync tick — since it's typically produced by re-normalizing raw data.
+  // Keeping the same reference across those renders (as long as the actual
+  // slots/modifiers are unchanged) keeps `frames` below stable, which in
+  // turn keeps the frame-reset effect from firing and popping the idle
+  // animation back to frame 0 for no visible reason.
+  const equippedKeyRef = useRef<string>("");
+  const equippedRef = useRef<Equipped | undefined>(equippedRaw);
+  const equippedKey = equippedCacheKey(equippedRaw);
+  if (equippedKeyRef.current !== equippedKey) {
+    equippedKeyRef.current = equippedKey;
+    equippedRef.current = equippedRaw;
+  }
+  const equipped = equippedRef.current;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [frame, setFrame] = useState(0);
   const [dragAngle, setDragAngle] = useState(defaultAngle);

@@ -448,9 +448,9 @@ async fn sell_item(
             // Selling the last copy of an equipped item unequips it
             // server-side too — apply whatever the response says rather than
             // the stale local equip state, so the two never drift apart.
-            let equipped = serde_json::from_value::<std::collections::HashMap<String, String>>(
-                data["equipped"].clone(),
-            )
+            let equipped = serde_json::from_value::<
+                std::collections::HashMap<String, serde_json::Value>,
+            >(data["equipped"].clone())
             .unwrap_or_else(|_| s.equipped.clone());
             apply_inventory(&mut s, inventory, currency, equipped);
             changed = true;
@@ -486,9 +486,10 @@ async fn equip_item(
 ) -> Result<serde_json::Value, String> {
     let client = Client::new();
     let result = api::api_equip_item(&client, &item_id, &action, side.as_deref()).await?;
-    if let Ok(equipped) = serde_json::from_value::<std::collections::HashMap<String, String>>(
-        result["equipped"].clone(),
-    ) {
+    if let Ok(equipped) = serde_json::from_value::<
+        std::collections::HashMap<String, serde_json::Value>,
+    >(result["equipped"].clone())
+    {
         let mut s = state.lock().unwrap();
         s.equipped = equipped;
         storage::save_equipped(&s.equipped);
@@ -803,7 +804,7 @@ struct FriendResult {
 struct InventoryResult {
     inventory: Inventory,
     currency: u32,
-    equipped: std::collections::HashMap<String, String>,
+    equipped: std::collections::HashMap<String, serde_json::Value>,
 }
 
 // --- App cache (inventory, friends, chat, equipped) ---
@@ -821,7 +822,7 @@ fn apply_inventory(
     s: &mut ManagedState,
     inventory: Inventory,
     currency: u32,
-    equipped: std::collections::HashMap<String, String>,
+    equipped: std::collections::HashMap<String, serde_json::Value>,
 ) {
     s.inventory = Some(inventory.clone());
     s.inventory_currency = currency;

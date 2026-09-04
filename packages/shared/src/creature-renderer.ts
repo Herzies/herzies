@@ -1141,11 +1141,17 @@ function buildBoomboxSpheres(
   });
 }
 
-function equippedCacheKey(equipped?: Equipped): string {
+export function equippedCacheKey(equipped?: Equipped): string {
   if (!equipped) return "";
   // Derived from EQUIPPED_SLOTS so a new slot can never silently miss the key
-  // and serve stale frames after equipping.
-  return EQUIPPED_SLOTS.map((s) => `${s}:${equipped[s] ?? ""}`).join(",");
+  // and serve stale frames after equipping. `modifier` lives outside
+  // EQUIPPED_SLOTS (it's an unbounded array, not a single-value slot) so it's
+  // folded in separately, sorted for a stable key regardless of equip order.
+  const slots = EQUIPPED_SLOTS.map((s) => `${s}:${equipped[s] ?? ""}`).join(
+    ",",
+  );
+  const modifiers = [...(equipped.modifier ?? [])].sort().join("+");
+  return `${slots},modifier:${modifiers}`;
 }
 
 function appendWearableSpheres(

@@ -27,7 +27,8 @@ export type Rarity = "common" | "uncommon" | "rare" | "legendary";
 /** Inventory grouping. Most items are cards (some grant a visual, some a bonus); "misc" is for non-card items. */
 export type ItemCategory = "deck" | "misc";
 
-/** Catalog equip categories (item.equip_slot). Ground items choose a side at equip time. */
+/** Catalog equip categories (item.equip_slot). Ground items choose a side at equip time.
+ * "modifier" is unlimited — see EQUIPPED_SLOTS below, it isn't one of the single-value slots. */
 export const EQUIP_SLOTS = [
   "head",
   "face",
@@ -35,10 +36,13 @@ export const EQUIP_SLOTS = [
   "scenery",
   "ground",
   "color",
+  "modifier",
 ] as const;
 export type EquipSlot = (typeof EQUIP_SLOTS)[number];
 
-/** Keys stored on herzies.equipped — ground splits into left/right instance slots. */
+/** Single-value keys stored on herzies.equipped — ground splits into left/right instance
+ * slots. Modifier items are tracked separately via the `modifier` array on Equipped, since
+ * any number of them can be equipped at once (see Equipped below). */
 export const EQUIPPED_SLOTS = [
   "head",
   "face",
@@ -52,8 +56,11 @@ export type EquippedSlot = (typeof EQUIPPED_SLOTS)[number];
 
 export type GroundSide = "left" | "right";
 
-/** Slot-keyed map of currently equipped item IDs. */
-export type Equipped = Partial<Record<EquippedSlot, string>>;
+/** Slot-keyed map of currently equipped item IDs. `modifier` is an unbounded list rather
+ * than a single-value slot, since any number of modifier items can be equipped at once. */
+export type Equipped = Partial<Record<EquippedSlot, string>> & {
+  modifier?: string[];
+};
 
 export function groundSlot(side: GroundSide): EquippedSlot {
   return side === "left" ? "ground_left" : "ground_right";
@@ -63,9 +70,10 @@ export function equippedItemIds(
   equipped: Equipped | null | undefined,
 ): string[] {
   if (!equipped) return [];
-  return Object.values(equipped).filter(
+  const single = Object.values(equipped).filter(
     (id): id is string => typeof id === "string" && id.length > 0,
   );
+  return [...single, ...(equipped.modifier ?? [])];
 }
 
 export function findEquippedSlot(
@@ -77,6 +85,13 @@ export function findEquippedSlot(
     if (equipped[slot] === itemId) return slot;
   }
   return null;
+}
+
+export function isModifierEquipped(
+  equipped: Equipped | null | undefined,
+  itemId: string,
+): boolean {
+  return !!equipped?.modifier?.includes(itemId);
 }
 
 /** Normalize API/cache payloads that may still be a legacy string[]. */
@@ -91,6 +106,15 @@ export function normalizeEquipped(raw: unknown): Equipped {
     const v = (raw as Record<string, unknown>)[slot];
     if (typeof v === "string" && v.length > 0) out[slot] = v;
   }
+  const modifierRaw = (raw as Record<string, unknown>).modifier;
+  if (Array.isArray(modifierRaw)) {
+    const ids = modifierRaw.filter(
+      (id): id is string => typeof id === "string" && id.length > 0,
+    );
+    if (ids.length > 0) out.modifier = ids;
+  } else if (typeof modifierRaw === "string" && modifierRaw.length > 0) {
+    out.modifier = [modifierRaw];
+  }
   return out;
 }
 
@@ -102,7 +126,8 @@ export interface ItemDef {
   frames: string[][]; // Each frame is an array of lines (with HTML color spans)
   stackable?: boolean;
   equipable?: boolean;
-  /** Catalog category; ground items occupy ground_left or ground_right when equipped. */
+  /** Catalog category; ground items occupy ground_left or ground_right when equipped,
+   * modifier items stack unbounded in Equipped.modifier. */
   equipSlot?: EquipSlot;
   sellPrice?: number;
   /** Set when the item can be bought with in-game currency from the store's Items tab. */
@@ -123,20 +148,30 @@ export function getItemCategory(item: Pick<ItemDef, "category">): ItemCategory {
 }
 
 /** Display classification, derived from the equip fields rather than stored directly. */
-export type ItemType = "skin" | "wearable" | "modifier" | "artefact";
+export type ItemType =
+  | "skin"
+  | "sceneryCard"
+  | "equipable"
+  | "accessory"
+  | "modifier"
+  | "artefact";
 
 export function getItemType(
   item: Pick<ItemDef, "equipable" | "equipSlot" | "modifier">,
 ): ItemType {
   if (item.equipSlot === "color") return "skin";
-  if (item.modifier) return "modifier";
-  if (item.equipable) return "wearable";
+  if (item.equipSlot === "modifier") return "modifier";
+  if (item.equipSlot === "scenery") return "sceneryCard";
+  if (item.equipSlot === "ground") return "accessory";
+  if (item.equipable) return "equipable";
   return "artefact";
 }
 
 export const ITEM_TYPE_LABELS: Record<ItemType, string> = {
   skin: "Skin",
-  wearable: "Wearable",
+  sceneryCard: "Scenery",
+  equipable: "Equipable",
+  accessory: "Accessory",
   modifier: "Modifier",
   artefact: "Artefact",
 };
@@ -911,7 +946,7 @@ export const ITEMS: ItemDef[] = [
     rarity: "rare",
     frames: goodEyeSniperFrames,
     equipable: true,
-    equipSlot: "ground",
+    equipSlot: "modifier",
     sellPrice: 250,
     modifier: { label: "Exp boost", tooltip: "2% per song hunt won" },
     // no buyPrice — reward-only, matches boombox
