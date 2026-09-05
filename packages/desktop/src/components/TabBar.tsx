@@ -26,7 +26,7 @@ export function TabBar({
     title: string;
   };
 
-  const leftTabs: Tab[] = [
+  const tabs: Tab[] = [
     {
       id: "home",
       label: "Herzie",
@@ -51,20 +51,11 @@ export function TabBar({
       colour: "cyan",
       title: "Friends & leaderboard. Shortcut [f]",
     },
-  ];
-
-  const rightTabs: Tab[] = [
     {
       id: "store",
       label: "Store",
       colour: "yellow",
       title: "Buy coins. Shortcut [b]",
-    },
-    {
-      id: "settings",
-      label: "Settings",
-      colour: "cyan",
-      title: "Settings. Shortcut [s]",
     },
   ];
 
@@ -100,8 +91,7 @@ export function TabBar({
 
   return (
     <div className="flex items-center justify-between border-t border-border px-3 py-1.5">
-      <div className="flex items-center gap-3">{leftTabs.map(renderTab)}</div>
-      <div className="flex items-center gap-3">{rightTabs.map(renderTab)}</div>
+      {tabs.map(renderTab)}
     </div>
   );
 }

@@ -60,6 +60,9 @@ export function FriendsView({
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[] | null>(
     null,
   );
+  const [leaderboardBoard, setLeaderboardBoard] = useState<"xp" | "song_hunt">(
+    "xp",
+  );
   const [ongoingTrades, setOngoingTrades] = useState<OngoingTrade[] | null>(
     null,
   );
@@ -125,13 +128,15 @@ export function FriendsView({
     return () => clearTimeout(handle);
   }, [search]);
 
-  // Fetch the leaderboard when its tab is opened and refresh while focused.
+  // Fetch the leaderboard when its tab (or sub-board) is opened and refresh
+  // while focused.
   useEffect(() => {
     if (tab !== "leaderboard") return;
     let cancelled = false;
+    setLeaderboard(null);
     const load = () =>
       herzies
-        .fetchLeaderboard()
+        .fetchLeaderboard(leaderboardBoard)
         .then((res) => {
           if (!cancelled) setLeaderboard(res.entries);
         })
@@ -143,7 +148,7 @@ export function FriendsView({
       cancelled = true;
       clearInterval(interval);
     };
-  }, [tab, focused]);
+  }, [tab, focused, leaderboardBoard]);
 
   // Fetch ongoing trades when the tab is opened and refresh while focused.
   useEffect(() => {
@@ -523,52 +528,72 @@ export function FriendsView({
       )}
 
       {tab === "leaderboard" && (
-        <List className="min-h-0 flex-1">
-          {leaderboard === null ? (
-            <div className="pt-5 text-center text-ui text-text-dim">
-              Loading…
-            </div>
-          ) : leaderboard.length === 0 ? (
-            <div className="pt-5 text-center text-ui text-text-dim">
-              No herzies on the leaderboard yet.
-            </div>
-          ) : (
-            leaderboard.map((entry) => {
-              const isMe = entry.name === herzie.name;
-              return (
-                <div
-                  key={`${entry.rank}-${entry.name}`}
-                  className="flex items-center gap-2 border-b border-border py-1.5 last:border-b-0"
-                >
-                  <span
-                    className={cn(
-                      "w-6 shrink-0 text-right text-ui font-bold",
-                      entry.rank === 1 ? "text-yellow" : "text-text-dim",
-                    )}
+        <>
+          <div className="mb-1.5 flex gap-1">
+            <TabButton
+              active={leaderboardBoard === "xp"}
+              onClick={() => setLeaderboardBoard("xp")}
+            >
+              EXP/Level
+            </TabButton>
+            <TabButton
+              active={leaderboardBoard === "song_hunt"}
+              onClick={() => setLeaderboardBoard("song_hunt")}
+            >
+              Song Hunt
+            </TabButton>
+          </div>
+          <List className="min-h-0 flex-1">
+            {leaderboard === null ? (
+              <div className="pt-5 text-center text-ui text-text-dim">
+                Loading…
+              </div>
+            ) : leaderboard.length === 0 ? (
+              <div className="pt-5 text-center text-ui text-text-dim">
+                {leaderboardBoard === "song_hunt"
+                  ? "No song hunts won yet."
+                  : "No herzies on the leaderboard yet."}
+              </div>
+            ) : (
+              leaderboard.map((entry) => {
+                const isMe = entry.name === herzie.name;
+                return (
+                  <div
+                    key={`${entry.rank}-${entry.name}`}
+                    className="flex items-center gap-2 border-b border-border py-1.5 last:border-b-0"
                   >
-                    {entry.rank}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div
+                    <span
                       className={cn(
-                        "truncate text-ui",
-                        isMe ? "font-bold text-cyan" : "text-text",
+                        "w-6 shrink-0 text-right text-ui font-bold",
+                        entry.rank === 1 ? "text-yellow" : "text-text-dim",
                       )}
                     >
-                      {entry.name}
-                      <span className="ml-1 text-[10px] text-text-dim">
-                        Lv.{entry.level} · Stage {entry.stage}
-                      </span>
+                      {entry.rank}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div
+                        className={cn(
+                          "truncate text-ui",
+                          isMe ? "font-bold text-cyan" : "text-text",
+                        )}
+                      >
+                        {entry.name}
+                        <span className="ml-1 text-[10px] text-text-dim">
+                          Lv.{entry.level} · Stage {entry.stage}
+                        </span>
+                      </div>
                     </div>
+                    <span className="shrink-0 text-[10px] text-green">
+                      {leaderboardBoard === "song_hunt"
+                        ? `${entry.songHuntWins ?? 0} won`
+                        : formatMinutes(entry.totalMinutes)}
+                    </span>
                   </div>
-                  <span className="shrink-0 text-[10px] text-green">
-                    {formatMinutes(entry.totalMinutes)}
-                  </span>
-                </div>
-              );
-            })
-          )}
-        </List>
+                );
+              })
+            )}
+          </List>
+        </>
       )}
     </View>
   );

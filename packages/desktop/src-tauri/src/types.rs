@@ -265,6 +265,11 @@ pub struct NowPlayingDisplay {
     pub artist: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub album_art_url: Option<String>,
+    /// Artist portrait photo (Spotify), for the now-playing bar's background.
+    /// Unlike `album_art_url`, this is keyed by artist only, so it lags one
+    /// async round-trip behind a track change rather than resetting to `None`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artist_image_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vibe: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

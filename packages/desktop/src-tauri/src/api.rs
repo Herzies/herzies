@@ -656,13 +656,32 @@ pub async fn api_cancel_trade(client: &Client, trade_id: &str) -> bool {
     }
 }
 
-pub async fn api_fetch_leaderboard(client: &Client) -> Option<serde_json::Value> {
-    let resp = api_fetch(client, reqwest::Method::GET, "/leaderboard", None).await?;
+pub async fn api_fetch_leaderboard(
+    client: &Client,
+    board: Option<&str>,
+) -> Option<serde_json::Value> {
+    let path = match board {
+        Some(b) => format!("/leaderboard?board={b}"),
+        None => "/leaderboard".to_string(),
+    };
+    let resp = api_fetch(client, reqwest::Method::GET, &path, None).await?;
     if !resp.status().is_success() {
         return None;
     }
     let data: serde_json::Value = resp.json().await.ok()?;
     Some(data["entries"].clone())
+}
+
+/// Artist portrait photo for the now-playing bar's background, resolved
+/// server-side (Spotify search — the client credentials never ship in the app).
+pub async fn api_fetch_artist_image(client: &Client, artist: &str) -> Option<String> {
+    let path = format!("/artist-image?artist={}", urlencoding::encode(artist));
+    let resp = api_fetch(client, reqwest::Method::GET, &path, None).await?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let data: serde_json::Value = resp.json().await.ok()?;
+    data["url"].as_str().map(str::to_string)
 }
 
 pub async fn api_fetch_active_events(client: &Client) -> Option<Vec<GameEvent>> {

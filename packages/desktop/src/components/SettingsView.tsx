@@ -1,13 +1,14 @@
 import type { Update } from "@tauri-apps/plugin-updater";
 import { useState } from "react";
 import { cn } from "../lib/utils";
-import {
-  type AppState,
-  herzies,
-  installUpdate,
-  type UpdateInstallEvent,
-} from "../tauri-bridge";
+import type { AppState } from "../tauri-bridge";
+import { herzies } from "../tauri-bridge";
 import { View } from "./View";
+
+type UpdateInstallStatus =
+  | { kind: "idle" }
+  | { kind: "installing"; downloaded: number; total: number | undefined }
+  | { kind: "error"; message: string };
 
 export function SettingsView({
   state,
@@ -16,7 +17,8 @@ export function SettingsView({
   onPreviewOnboarding,
   onTestUpdateAlert,
   availableUpdate,
-  onUpdateInstalled,
+  installStatus,
+  onInstallUpdate,
 }: {
   state: AppState;
   stageOverride: number | null;
@@ -24,15 +26,11 @@ export function SettingsView({
   onPreviewOnboarding: () => void;
   onTestUpdateAlert: () => void;
   availableUpdate: Update | null;
-  onUpdateInstalled: () => void;
+  installStatus: UpdateInstallStatus;
+  onInstallUpdate: () => void;
 }) {
   const [loggingIn, setLoggingIn] = useState(false);
   const [mediaRemoteDebug, setMediaRemoteDebug] = useState<string | null>(null);
-  const [updateStatus, setUpdateStatus] = useState<
-    | { kind: "idle" }
-    | { kind: "installing"; downloaded: number; total: number | undefined }
-    | { kind: "error"; message: string }
-  >({ kind: "idle" });
 
   const shortcuts: { key: string; label: string }[] = [
     { key: "H", label: "Herzie" },
@@ -43,35 +41,6 @@ export function SettingsView({
     { key: "C", label: "Open chat" },
     { key: "Esc", label: "Close chat or dialog" },
   ];
-
-  const handleInstallUpdate = async () => {
-    if (!availableUpdate) return;
-    setUpdateStatus({ kind: "installing", downloaded: 0, total: undefined });
-    try {
-      await installUpdate(availableUpdate, (e: UpdateInstallEvent) => {
-        if (e.kind === "started") {
-          setUpdateStatus({
-            kind: "installing",
-            downloaded: 0,
-            total: e.contentLength,
-          });
-        } else if (e.kind === "progress") {
-          setUpdateStatus({
-            kind: "installing",
-            downloaded: e.downloaded,
-            total: e.total,
-          });
-        }
-      });
-      onUpdateInstalled();
-      setUpdateStatus({ kind: "idle" });
-    } catch (err) {
-      setUpdateStatus({
-        kind: "error",
-        message: err instanceof Error ? err.message : String(err),
-      });
-    }
-  };
 
   return (
     <View title="Settings" colour="cyan" childrenClassName="flex flex-col">
@@ -199,27 +168,29 @@ export function SettingsView({
           <div className="mb-1 text-ui text-green">
             Version {availableUpdate.version} available
           </div>
-          {updateStatus.kind === "idle" && (
+          {installStatus.kind !== "installing" && (
             <button
               type="button"
               className="btn text-green"
-              onClick={handleInstallUpdate}
+              onClick={onInstallUpdate}
             >
-              Install &amp; restart
+              {installStatus.kind === "error"
+                ? "Try again"
+                : "Install & restart"}
             </button>
           )}
-          {updateStatus.kind === "installing" && (
+          {installStatus.kind === "installing" && (
             <div className="text-[10px] text-text-dim">
-              {updateStatus.total
+              {installStatus.total
                 ? `Downloading ${Math.round(
-                    (updateStatus.downloaded / updateStatus.total) * 100,
+                    (installStatus.downloaded / installStatus.total) * 100,
                   )}%`
-                : "Downloading..."}
+                : "Installing..."}
             </div>
           )}
-          {updateStatus.kind === "error" && (
+          {installStatus.kind === "error" && (
             <div className="text-[10px] text-red">
-              Update failed: {updateStatus.message}
+              Update failed: {installStatus.message}
             </div>
           )}
         </div>

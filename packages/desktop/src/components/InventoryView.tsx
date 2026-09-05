@@ -207,8 +207,8 @@ export function InventoryView({
         </div>
       </div>
 
-      {/* Item list — bottom ~55% */}
-      <div className="z-10 flex h-[55%] min-h-0 shrink-0 flex-col">
+      {/* Item list — bottom ~48% */}
+      <div className="z-10 flex h-[48%] min-h-0 shrink-0 flex-col">
         <div className="flex gap-1 border-b border-border">
           <TabButton
             active={tab === "deck"}

@@ -16,7 +16,11 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { relaunch } from "@tauri-apps/plugin-process";
-import { check, type Update } from "@tauri-apps/plugin-updater";
+import {
+  check,
+  type DownloadEvent,
+  type Update,
+} from "@tauri-apps/plugin-updater";
 import { useEffect, useState } from "react";
 
 export interface ChatMessage {
@@ -53,6 +57,8 @@ export interface LeaderboardEntry {
   level: number;
   stage: number;
   totalMinutes: number;
+  /** Present only on the song-hunt leaderboard (fetchLeaderboard("song_hunt")). */
+  songHuntWins?: number;
 }
 
 export type { FriendRequestSummary, FriendSearchResult, PendingFriendRequest };
@@ -63,6 +69,7 @@ export interface AppState {
     title: string;
     artist: string;
     albumArtUrl?: string;
+    artistImageUrl?: string;
     vibe?: string;
     tags?: string[];
   } | null;
@@ -210,8 +217,8 @@ export const herzies = {
       hintIndex,
     }),
 
-  fetchLeaderboard: () =>
-    invoke<{ entries: LeaderboardEntry[] }>("fetch_leaderboard"),
+  fetchLeaderboard: (board?: "xp" | "song_hunt") =>
+    invoke<{ entries: LeaderboardEntry[] }>("fetch_leaderboard", { board }),
 
   getAuthConfig: () =>
     invoke<{
@@ -385,18 +392,13 @@ export async function checkForUpdate(): Promise<Update | null> {
   }
 }
 
-/**
- * Download + install + relaunch. Streams progress through onProgress so the
- * caller can render a percentage. Throws if download/install fails — the
- * caller should surface the error.
- */
-export async function installUpdate(
-  update: Update,
+/** Adapts the plugin's raw download events into cumulative-bytes progress. */
+function trackDownloadProgress(
   onProgress?: (e: UpdateInstallEvent) => void,
-): Promise<void> {
+): (event: DownloadEvent) => void {
   let downloaded = 0;
   let total: number | undefined;
-  await update.downloadAndInstall((event) => {
+  return (event) => {
     switch (event.event) {
       case "Started":
         total = event.data.contentLength;
@@ -410,7 +412,40 @@ export async function installUpdate(
         onProgress?.({ kind: "finished" });
         break;
     }
-  });
+  };
+}
+
+/**
+ * Silently downloads an update's bytes ahead of time so a later `installUpdate`
+ * call can skip straight to install. Speculative/best-effort: this is meant to
+ * run in the background before the user has asked to update, so callers
+ * should log and swallow failures rather than surfacing them — the normal
+ * checkForUpdate → installUpdate flow still works as a fallback.
+ */
+export async function downloadUpdate(
+  update: Update,
+  onProgress?: (e: UpdateInstallEvent) => void,
+): Promise<void> {
+  await update.download(trackDownloadProgress(onProgress));
+}
+
+/**
+ * Install + relaunch. If `predownloaded` is true (a prior downloadUpdate call
+ * on this same Update instance completed), installs directly for a
+ * near-instant restart; otherwise downloads first. Streams progress through
+ * onProgress so the caller can render a percentage. Throws if download/install
+ * fails — the caller should surface the error.
+ */
+export async function installUpdate(
+  update: Update,
+  onProgress?: (e: UpdateInstallEvent) => void,
+  predownloaded = false,
+): Promise<void> {
+  if (predownloaded) {
+    await update.install();
+  } else {
+    await update.downloadAndInstall(trackDownloadProgress(onProgress));
+  }
   // Best-effort: bill any unsynced listening time before restarting so less
   // (ideally nothing) is left for the next launch to catch up on. Safe to
   // ignore failures — pending minutes are persisted on the Rust side and

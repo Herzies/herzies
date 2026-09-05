@@ -16,11 +16,13 @@ export function HomeView({
   state,
   stageOverride,
   onOpenProfile,
+  onOpenSettings,
 }: {
   state: AppState;
   stageOverride?: number | null;
   /** Open the viewer's own profile (same layout as other herzies'). */
   onOpenProfile?: () => void;
+  onOpenSettings?: () => void;
 }) {
   const { herzie, nowPlaying, multipliers, isConnected, equipped } = state;
   const [globalRank, setGlobalRank] = useState<number | undefined>(undefined);
@@ -156,6 +158,29 @@ export function HomeView({
               </svg>
             </button>
           </Tooltip>
+          <Tooltip label="Settings" side="bottom" align="right">
+            <button
+              type="button"
+              onClick={onOpenSettings}
+              className="flex h-5 w-5 cursor-pointer items-center justify-center rounded-lg border-none bg-transparent p-0 text-text-dim hover:text-text"
+            >
+              <svg
+                width="11"
+                height="11"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-label="Settings"
+                role="img"
+              >
+                <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+            </button>
+          </Tooltip>
           <span
             className={cn(
               "rounded-lg px-2 py-0.5 text-[10px]",
@@ -263,8 +288,25 @@ export function HomeView({
           </div>
         </div>
       ) : nowPlaying ? (
-        <div className="border-t border-border pt-1.5">
-          <div className="flex gap-2">
+        <div className="relative overflow-hidden border-t border-border pt-1.5">
+          {nowPlaying.artistImageUrl ? (
+            <>
+              <img
+                src={nowPlaying.artistImageUrl}
+                alt=""
+                aria-hidden="true"
+                className="absolute inset-0 h-full w-full object-cover object-right"
+                onError={(e) => {
+                  e.currentTarget.style.display = "none";
+                }}
+              />
+              {/* Darken so title/artist stay readable over the photo. */}
+              <div className="absolute inset-0 bg-black/35" />
+              {/* Fades the photo into the app background toward the left. */}
+              <div className="absolute inset-0 bg-gradient-to-r from-bg-panel via-bg-panel/70 to-transparent" />
+            </>
+          ) : null}
+          <div className="relative flex gap-2">
             <button
               type="button"
               onClick={() => {

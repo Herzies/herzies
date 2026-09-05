@@ -23,6 +23,10 @@ pub struct ManagedState {
     pub enrichment_in_flight: bool,
     /// Album art from the system Now Playing session (`data:` URL), when available.
     pub system_album_art_url: Option<String>,
+    /// Current artist's portrait photo (Spotify), fetched via our backend.
+    /// Cleared and re-fetched only when the artist actually changes, so
+    /// consecutive tracks by the same artist (e.g. an album) don't flicker.
+    pub artist_image_url: Option<String>,
     /// Last known result of a `/sync` round-trip. The frontend's connectivity
     /// indicator is derived from this *plus* `ms_since_reachable` so that
     /// successful traffic on other endpoints (chat, inventory, …) instantly
@@ -74,6 +78,7 @@ impl ManagedState {
             enrichment_requested_at: None,
             enrichment_in_flight: false,
             system_album_art_url: None,
+            artist_image_url: None,
             last_sync_ok: true,
             equipped: crate::storage::load_equipped(),
             chat_messages: Vec::new(),
@@ -262,6 +267,7 @@ mod tests {
             enrichment_requested_at: None,
             enrichment_in_flight: false,
             system_album_art_url: None,
+            artist_image_url: None,
             last_sync_ok: true,
             equipped: HashMap::new(),
             chat_messages: Vec::new(),

@@ -650,9 +650,9 @@ fn get_ghost_mode() -> bool {
 }
 
 #[tauri::command]
-async fn fetch_leaderboard() -> Result<serde_json::Value, String> {
+async fn fetch_leaderboard(board: Option<String>) -> Result<serde_json::Value, String> {
     let client = Client::new();
-    match api::api_fetch_leaderboard(&client).await {
+    match api::api_fetch_leaderboard(&client, board.as_deref()).await {
         Some(entries) => Ok(serde_json::json!({ "entries": entries })),
         None => Ok(serde_json::json!({ "entries": [] })),
     }
@@ -992,6 +992,7 @@ fn build_now_playing_display(
     title: &str,
     artist: &str,
     system_art: Option<&str>,
+    artist_image_url: Option<&str>,
     enrichment: Option<&TrackEnrichment>,
     local_genre: Option<&str>,
     current_genres: &[String],
@@ -1000,6 +1001,7 @@ fn build_now_playing_display(
         title: title.to_string(),
         artist: artist.to_string(),
         album_art_url: resolve_album_art_url(system_art, enrichment),
+        artist_image_url: artist_image_url.map(str::to_string),
         vibe: enrichment.and_then(|e| e.vibe.clone()),
         tags: display_tags(enrichment, local_genre, current_genres),
     }
@@ -1083,6 +1085,34 @@ fn spawn_system_artwork_fetch(app: &AppHandle, track_key: String) {
 #[cfg(not(target_os = "macos"))]
 fn spawn_system_artwork_fetch(_app: &AppHandle, _track_key: String) {}
 
+/// Fetches the artist's portrait photo via our backend (Spotify search,
+/// server-side so the Spotify client secret never ships in the app). Applied
+/// only if the artist is still current when it resolves — a rapid artist
+/// change shouldn't let a stale response clobber the new one.
+fn spawn_artist_image_fetch(app: &AppHandle, artist: String, track_key: String) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let client = Client::new();
+        let Some(image_url) = api::api_fetch_artist_image(&client, &artist).await else {
+            return;
+        };
+
+        let state = app.state::<SharedState>();
+        let app_state = {
+            let mut s = state.lock().unwrap();
+            if s.last_track_key.as_deref() != Some(track_key.as_str()) {
+                return;
+            }
+            s.artist_image_url = Some(image_url.clone());
+            if let Some(ref mut np) = s.current_now_playing {
+                np.artist_image_url = Some(image_url);
+            }
+            s.to_app_state(env!("CARGO_PKG_VERSION"))
+        };
+        let _ = app.emit("state-update", &app_state);
+    });
+}
+
 async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: u64) -> Result<(), String> {
     let state = app.state::<SharedState>();
     let lastfm = app.state::<LastFmService>();
@@ -1101,6 +1131,7 @@ async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: u64) -> Resu
     // Collect side-effect info to act on after releasing the lock
     let mut spawn_enrichment: Option<(String, String, String)> = None;
     let mut spawn_artwork: Option<String> = None;
+    let mut spawn_artist_image: Option<(String, String)> = None;
 
     {
         let mut s = state.lock().unwrap();
@@ -1123,6 +1154,15 @@ async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: u64) -> Resu
                 s.source_verified = info.verified;
 
                 if track_changed {
+                    // Distinct from track_changed: an artist photo only needs
+                    // re-fetching when the artist itself changes, so back-to-back
+                    // tracks off the same album keep their background image
+                    // instead of flickering it out and back in.
+                    let artist_changed = s
+                        .current_now_playing
+                        .as_ref()
+                        .is_none_or(|np| np.artist != info.artist);
+
                     s.last_track_key = Some(key.clone());
                     s.enrichment = None;
                     s.system_album_art_url = None;
@@ -1131,6 +1171,10 @@ async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: u64) -> Resu
                     #[cfg(target_os = "macos")]
                     if media_remote_adapter::is_configured() {
                         spawn_artwork = Some(key.clone());
+                    }
+                    if artist_changed {
+                        s.artist_image_url = None;
+                        spawn_artist_image = Some((info.artist.clone(), key.clone()));
                     }
                     s.current_local_genre = if info.genre.is_empty() {
                         None
@@ -1195,6 +1239,7 @@ async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: u64) -> Resu
                     &info.title,
                     &info.artist,
                     s.system_album_art_url.as_deref(),
+                    s.artist_image_url.as_deref(),
                     s.enrichment.as_ref(),
                     s.current_local_genre.as_deref(),
                     &s.current_genres,
@@ -1207,6 +1252,7 @@ async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: u64) -> Resu
                 s.source_verified = false;
                 s.last_track_key = None;
                 s.system_album_art_url = None;
+                s.artist_image_url = None;
                 s.enrichment = None;
                 s.enrichment_requested_at = None;
                 s.enrichment_in_flight = false;
@@ -1219,6 +1265,9 @@ async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: u64) -> Resu
     }
     if let Some(track_key) = spawn_artwork {
         spawn_system_artwork_fetch(app, track_key);
+    }
+    if let Some((artist, key)) = spawn_artist_image {
+        spawn_artist_image_fetch(app, artist, key);
     }
 
     // Level-up/evolution notifications are sent from sync_tick, once the

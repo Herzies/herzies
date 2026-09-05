@@ -54,6 +54,99 @@ export async function refreshSpotifyToken(refreshToken: string): Promise<{
   };
 }
 
+let cachedAppToken: { token: string; expiresAt: number } | null = null;
+
+/**
+ * App-level access token (Client Credentials grant — no user auth), for
+ * endpoints like artist search that only need public catalog data.
+ */
+async function getAppAccessToken(): Promise<string> {
+  if (cachedAppToken && Date.now() < cachedAppToken.expiresAt - 30_000) {
+    return cachedAppToken.token;
+  }
+
+  const res = await fetch(SPOTIFY_TOKEN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "client_credentials",
+      client_id: process.env.SPOTIFY_CLIENT_ID!,
+      client_secret: process.env.SPOTIFY_CLIENT_SECRET!,
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Spotify app token request failed: ${res.status}`);
+  }
+
+  const data = await res.json();
+  cachedAppToken = {
+    token: data.access_token,
+    expiresAt: Date.now() + data.expires_in * 1000,
+  };
+  return cachedAppToken.token;
+}
+
+const artistImageCache = new Map<
+  string,
+  { url: string | null; cachedAt: number }
+>();
+const ARTIST_IMAGE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Best-effort artist portrait photo (largest available), via Spotify search.
+ * Cached per artist name (including misses) since this is polled on every
+ * track change. Never throws — a lookup failure just means no photo.
+ */
+export async function findArtistImage(
+  artistName: string,
+): Promise<string | null> {
+  const key = artistName.toLowerCase().trim();
+  const cached = artistImageCache.get(key);
+  if (cached && Date.now() - cached.cachedAt < ARTIST_IMAGE_CACHE_TTL_MS) {
+    console.log("[findArtistImage] cache hit", { artistName, url: cached.url });
+    return cached.url;
+  }
+
+  let url: string | null = null;
+  try {
+    const token = await getAppAccessToken();
+    const params = new URLSearchParams({
+      q: `artist:"${artistName}"`,
+      type: "artist",
+      limit: "1",
+    });
+    const res = await fetch(`${SPOTIFY_API_BASE}/search?${params}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const images = data.artists?.items?.[0]?.images as
+        | { url: string }[]
+        | undefined;
+      url = images?.[0]?.url ?? null;
+      console.log("[findArtistImage] search result", {
+        artistName,
+        matchedArtist: data.artists?.items?.[0]?.name,
+        imageCount: images?.length ?? 0,
+        url,
+      });
+    } else {
+      console.error(
+        "[findArtistImage] Spotify search failed",
+        res.status,
+        await res.text(),
+      );
+    }
+  } catch (err) {
+    console.error("[findArtistImage] threw", err);
+    url = null;
+  }
+
+  artistImageCache.set(key, { url, cachedAt: Date.now() });
+  return url;
+}
+
 /**
  * Get a valid access token for a Spotify connection.
  * Refreshes and updates DB if expired.

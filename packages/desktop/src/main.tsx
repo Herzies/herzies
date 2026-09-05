@@ -28,12 +28,20 @@ import { cn } from "./lib/utils";
 import {
   type AppState,
   checkForUpdate,
+  downloadUpdate,
   herzies,
+  installUpdate,
+  type UpdateInstallEvent,
   useGhostMode,
   useWindowFocused,
 } from "./tauri-bridge";
 
 const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1h
+
+type UpdateInstallStatus =
+  | { kind: "idle" }
+  | { kind: "installing"; downloaded: number; total: number | undefined }
+  | { kind: "error"; message: string };
 
 function App() {
   const [state, setState] = useState<AppState>({
@@ -69,6 +77,8 @@ function App() {
   >(null);
   /** Dev-only: shows the update overlay with a fake version (Settings → Debug). */
   const [testUpdateOverlay, setTestUpdateOverlay] = useState(false);
+  const [updateInstallStatus, setUpdateInstallStatus] =
+    useState<UpdateInstallStatus>({ kind: "idle" });
   /** Set by the "c" shortcut: focus/expand the chat once the home view shows it. */
   const [openChatRequested, setOpenChatRequested] = useState(false);
   /** "c" pressed mid-trade: open chat after the user confirms leaving the trade. */
@@ -109,6 +119,14 @@ function App() {
     }
   }, []);
   const notifiedVersionRef = useRef<string | null>(null);
+  /** Version whose bytes a background downloadUpdate() call has finished for. */
+  const downloadedVersionRef = useRef<string | null>(null);
+  /** In-flight background download, so installUpdate can await it instead of
+   * racing a second download of the same Update instance. */
+  const pendingDownloadRef = useRef<{
+    version: string;
+    promise: Promise<void>;
+  } | null>(null);
   const focused = useWindowFocused();
   const ghostMode = useGhostMode();
 
@@ -199,6 +217,8 @@ function App() {
   // Check for updates on launch and every hour. Fires a system notification
   // once per detected version so the user knows even if the window is hidden;
   // an in-app overlay (same style as trade prompts) shows when it's visible.
+  // Also silently downloads the update's bytes in the background so that
+  // clicking "Update now" later can skip straight to install.
   useEffect(() => {
     let cancelled = false;
 
@@ -207,9 +227,38 @@ function App() {
       if (cancelled) return;
       if (!update) {
         setAvailableUpdate(null);
+        downloadedVersionRef.current = null;
+        pendingDownloadRef.current = null;
         return;
       }
+
+      // Once a version is being tracked (downloaded or downloading), ignore
+      // this tick's fresh Update instance — swapping it in would orphan the
+      // original instance's downloaded bytes, since install() only works on
+      // the exact instance download() was called on.
+      if (
+        downloadedVersionRef.current === update.version ||
+        pendingDownloadRef.current?.version === update.version
+      ) {
+        return;
+      }
+
       setAvailableUpdate(update);
+      const version = update.version;
+      const promise = downloadUpdate(update)
+        .then(() => {
+          downloadedVersionRef.current = version;
+        })
+        .catch((err) => {
+          console.warn("Background update download failed:", err);
+        })
+        .finally(() => {
+          if (pendingDownloadRef.current?.version === version) {
+            pendingDownloadRef.current = null;
+          }
+        });
+      pendingDownloadRef.current = { version, promise };
+
       if (notifiedVersionRef.current === update.version) return;
       notifiedVersionRef.current = update.version;
 
@@ -231,6 +280,53 @@ function App() {
       clearInterval(id);
     };
   }, []);
+
+  /** Shared by the update overlay and Settings so either entry point downloads,
+   * installs, and relaunches without extra clicks. */
+  const handleInstallUpdate = useCallback(async () => {
+    if (!availableUpdate) return;
+    setUpdateInstallStatus({
+      kind: "installing",
+      downloaded: 0,
+      total: undefined,
+    });
+    try {
+      // If a background download for this version is still in flight, ride
+      // it instead of kicking off a second, racing download.
+      if (pendingDownloadRef.current?.version === availableUpdate.version) {
+        await pendingDownloadRef.current.promise;
+      }
+      const predownloaded =
+        downloadedVersionRef.current === availableUpdate.version;
+      await installUpdate(
+        availableUpdate,
+        (e: UpdateInstallEvent) => {
+          if (e.kind === "started") {
+            setUpdateInstallStatus({
+              kind: "installing",
+              downloaded: 0,
+              total: e.contentLength,
+            });
+          } else if (e.kind === "progress") {
+            setUpdateInstallStatus({
+              kind: "installing",
+              downloaded: e.downloaded,
+              total: e.total,
+            });
+          }
+        },
+        predownloaded,
+      );
+      // Normally unreachable: installUpdate relaunches the app on success.
+      setUpdateInstallStatus({ kind: "idle" });
+      setAvailableUpdate(null);
+    } catch (err) {
+      setUpdateInstallStatus({
+        kind: "error",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }, [availableUpdate]);
 
   const { herzie } = state;
 
@@ -275,10 +371,20 @@ function App() {
       e: "events",
       f: "friends",
       b: "store",
-      s: "settings",
     };
 
     const handler = (event: KeyboardEvent) => {
+      // Settings: macOS's conventional Cmd+, — works from any view/focus.
+      if (
+        event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        event.key === ","
+      ) {
+        event.preventDefault();
+        switchView("settings");
+        return;
+      }
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       const target = event.target as HTMLElement | null;
       if (
@@ -471,6 +577,7 @@ function App() {
               state={state}
               stageOverride={stageOverride}
               onOpenProfile={handleOpenSelfProfile}
+              onOpenSettings={() => switchView("settings")}
             />
           )}
         </div>
@@ -581,7 +688,8 @@ function App() {
             onPreviewOnboarding={() => setPreviewOnboarding(true)}
             onTestUpdateAlert={() => setTestUpdateOverlay(true)}
             availableUpdate={availableUpdate}
-            onUpdateInstalled={() => setAvailableUpdate(null)}
+            installStatus={updateInstallStatus}
+            onInstallUpdate={handleInstallUpdate}
           />
         </div>
       </div>
@@ -665,11 +773,22 @@ function App() {
         view !== "settings" && (
           <UpdateAvailableOverlay
             version={availableUpdate.version}
-            onUpdate={() => {
-              setDismissedUpdateVersion(availableUpdate.version);
-              switchView("settings");
-            }}
+            onUpdate={handleInstallUpdate}
             onLater={() => setDismissedUpdateVersion(availableUpdate.version)}
+            installing={updateInstallStatus.kind === "installing"}
+            progress={
+              updateInstallStatus.kind === "installing"
+                ? {
+                    downloaded: updateInstallStatus.downloaded,
+                    total: updateInstallStatus.total,
+                  }
+                : undefined
+            }
+            error={
+              updateInstallStatus.kind === "error"
+                ? updateInstallStatus.message
+                : undefined
+            }
           />
         )}
 
@@ -678,6 +797,7 @@ function App() {
           version="9.9.9-test"
           onUpdate={() => setTestUpdateOverlay(false)}
           onLater={() => setTestUpdateOverlay(false)}
+          installing={false}
         />
       )}
 
