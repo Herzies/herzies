@@ -259,7 +259,7 @@ export function HomeView({
       ) : null}
 
       {ghostMode ? (
-        <div className="border-t border-border pt-1.5">
+        <div className="border-t border-border pt-1.5 pb-2">
           <div className="flex items-center gap-2">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded bg-purple/15 text-purple">
               <svg
@@ -288,9 +288,9 @@ export function HomeView({
           </div>
         </div>
       ) : nowPlaying ? (
-        <div className="relative overflow-hidden border-t border-border pt-1.5">
+        <div className="relative overflow-hidden border-t border-border pt-1.5 pb-2">
           {nowPlaying.artistImageUrl ? (
-            <>
+            <div className="absolute inset-y-0 right-0 w-1/2 overflow-hidden">
               <img
                 src={nowPlaying.artistImageUrl}
                 alt=""
@@ -302,9 +302,10 @@ export function HomeView({
               />
               {/* Darken so title/artist stay readable over the photo. */}
               <div className="absolute inset-0 bg-black/35" />
-              {/* Fades the photo into the app background toward the left. */}
-              <div className="absolute inset-0 bg-gradient-to-r from-bg-panel via-bg-panel/70 to-transparent" />
-            </>
+              {/* Fades the photo into the app background toward the left,
+                  right at this box's own edge (the bar's 50% mark). */}
+              <div className="absolute inset-0 bg-gradient-to-r from-bg-panel to-transparent" />
+            </div>
           ) : null}
           <div className="relative flex gap-2">
             <button
@@ -352,7 +353,7 @@ export function HomeView({
           </div>
         </div>
       ) : (
-        <div className="border-t border-border pt-1.5">
+        <div className="border-t border-border pt-1.5 pb-2">
           <div className="text-center text-[10px] text-text-dim">
             Play some music to start earning XP
           </div>

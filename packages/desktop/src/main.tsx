@@ -554,7 +554,15 @@ function App() {
         ghostMode && "grayscale",
       )}
     >
-      <div className="mb-2 flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div
+        className={cn(
+          "flex min-h-0 flex-1 flex-col overflow-hidden",
+          // Home supplies its own bottom breathing room (HomeView's now-playing
+          // bar) so its artist-image background can reach the chat's top
+          // border instead of stopping short of an outer margin.
+          view !== "home" && "mb-2",
+        )}
+      >
         <div
           className={cn(
             "min-h-0 flex-1 flex-col",
