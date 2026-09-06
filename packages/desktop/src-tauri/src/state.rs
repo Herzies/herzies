@@ -12,10 +12,11 @@ pub struct ManagedState {
     /// Genre from Apple Music (empty for Spotify).
     pub current_local_genre: Option<String>,
     /// Whether the current track's source is trusted on its own (see
-    /// `media_remote_adapter::is_trusted_music_source`). Gates whether
-    /// `sync_tick` reports `current_now_playing` to the server at all — an
-    /// unconfirmed browser/YouTube play stays fully local (no now-playing
-    /// status, no listen_log entry) until Last.fm confirms it.
+    /// `media_remote_adapter::is_trusted_music_source`). Fed into
+    /// `is_confirmed_listen` in `poll_tick`, which gates `current_now_playing`
+    /// itself — an unconfirmed browser/YouTube play shows up nowhere (not
+    /// this device's own widget, not the server, no listen_log entry) until
+    /// Last.fm confirms it.
     pub source_verified: bool,
     pub last_track_key: Option<String>,
     pub enrichment: Option<TrackEnrichment>,
