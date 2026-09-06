@@ -7,7 +7,7 @@ import {
 import { cn } from "../lib/utils";
 import { Tooltip } from "./Tooltip";
 
-const ITEM_TYPE_TEXT_CLASSES: Record<ItemType, string> = {
+export const ITEM_TYPE_TEXT_CLASSES: Record<ItemType, string> = {
   skin: "text-purple",
   sceneryCard: "text-green",
   equipable: "text-cyan",

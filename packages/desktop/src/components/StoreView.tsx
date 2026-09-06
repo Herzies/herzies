@@ -6,6 +6,7 @@ import { herzies, useWindowFocused } from "../tauri-bridge";
 import { Coin } from "./Coin";
 import ItemInspectOverlay from "./ItemInspectOverlay";
 import { ItemRow } from "./ItemRow";
+import { CoinPackIcon } from "./icons/CurrencyIcon";
 import { List } from "./List";
 import { TabButton } from "./TabButton";
 import { Tooltip } from "./Tooltip";
@@ -214,11 +215,14 @@ export function StoreView({
                   key={p.id}
                   className="flex items-center justify-between gap-2 border-b border-[#222] py-2"
                 >
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-ui">{p.name}</div>
-                    <div className="text-[10px] text-text-dim">
-                      {formatAmount(p.currencyAmount)} coins ·{" "}
-                      {formatNok(p.priceNokOre)}
+                  <div className="flex min-w-0 flex-1 items-center gap-2">
+                    <CoinPackIcon className="h-4 w-4 shrink-0 text-yellow" />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-ui">{p.name}</div>
+                      <div className="text-[10px] text-text-dim">
+                        {formatAmount(p.currencyAmount)} coins ·{" "}
+                        {formatNok(p.priceNokOre)}
+                      </div>
                     </div>
                   </div>
                   <button
