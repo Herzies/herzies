@@ -218,7 +218,7 @@ pub struct StoreProduct {
     pub name: String,
     pub description: Option<String>,
     pub currency_amount: u32,
-    pub price_usd_cents: u32,
+    pub price_nok_ore: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

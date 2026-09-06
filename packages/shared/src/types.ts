@@ -256,7 +256,7 @@ export interface StoreProduct {
   name: string;
   description: string | null;
   currencyAmount: number;
-  priceUsdCents: number;
+  priceNokOre: number;
 }
 
 export interface Trade {

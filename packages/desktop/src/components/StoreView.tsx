@@ -1,7 +1,7 @@
 import type { Inventory, StoreProduct } from "@herzies/shared";
 import { getItem, ITEMS } from "@herzies/shared";
 import { useEffect, useRef, useState } from "react";
-import { cn, formatAmount } from "../lib/utils";
+import { cn, formatAmount, formatNok } from "../lib/utils";
 import { herzies, useWindowFocused } from "../tauri-bridge";
 import { Coin } from "./Coin";
 import ItemInspectOverlay from "./ItemInspectOverlay";
@@ -14,8 +14,7 @@ type StoreTab = "items" | "currency";
 
 const BUYABLE_ITEMS = ITEMS.filter((item) => item.buyPrice != null);
 
-/** Flip this back on once currency purchases are ready to ship. */
-const CURRENCY_PURCHASES_ENABLED = false;
+const CURRENCY_PURCHASES_ENABLED = true;
 
 export function StoreView({
   inventory: cachedInventory,
@@ -218,8 +217,8 @@ export function StoreView({
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-ui">{p.name}</div>
                     <div className="text-[10px] text-text-dim">
-                      {formatAmount(p.currencyAmount)} coins · $
-                      {(p.priceUsdCents / 100).toFixed(2)}
+                      {formatAmount(p.currencyAmount)} coins ·{" "}
+                      {formatNok(p.priceNokOre)}
                     </div>
                   </div>
                   <button

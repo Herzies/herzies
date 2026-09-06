@@ -6,7 +6,7 @@ export async function GET() {
 
   const { data, error } = await admin
     .from("store_products")
-    .select("id, name, description, currency_amount, price_usd_cents")
+    .select("id, name, description, currency_amount, price_nok_ore")
     .eq("active", true);
 
   if (error) {
@@ -21,7 +21,7 @@ export async function GET() {
     name: p.name,
     description: p.description,
     currencyAmount: p.currency_amount,
-    priceUsdCents: p.price_usd_cents,
+    priceNokOre: p.price_nok_ore,
   }));
 
   return NextResponse.json({ products });
