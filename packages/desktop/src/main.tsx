@@ -573,7 +573,27 @@ function App() {
         >
           {selfProfile ? (
             <ProfileView
-              profile={selfProfile}
+              profile={
+                // The synced profile's nowPlaying.albumArtUrl only ever holds
+                // Last.fm's art (see sync_tick in lib.rs — the local system
+                // artwork data: URL is never synced). Prefer the live local
+                // value here, which does include it, whenever it's still the
+                // same track — avoids a stale mismatch right after a track
+                // change, before the next sync tick catches up.
+                selfProfile.nowPlaying &&
+                state.nowPlaying &&
+                state.nowPlaying.title === selfProfile.nowPlaying.title &&
+                state.nowPlaying.artist === selfProfile.nowPlaying.artist &&
+                state.nowPlaying.albumArtUrl
+                  ? {
+                      ...selfProfile,
+                      nowPlaying: {
+                        ...selfProfile.nowPlaying,
+                        albumArtUrl: state.nowPlaying.albumArtUrl,
+                      },
+                    }
+                  : selfProfile
+              }
               isSelf
               isFriend
               stageOverride={stageOverride}

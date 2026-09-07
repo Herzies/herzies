@@ -1055,10 +1055,20 @@ fn spawn_track_enrichment(app: &AppHandle, artist: String, title: String, track_
 }
 
 #[cfg(target_os = "macos")]
+fn fetch_system_artwork_url() -> Option<String> {
+    media_remote_adapter::fetch_system_artwork_url()
+}
+
+#[cfg(windows)]
+fn fetch_system_artwork_url() -> Option<String> {
+    smtc_adapter::fetch_system_artwork_url()
+}
+
+#[cfg(any(target_os = "macos", windows))]
 fn spawn_system_artwork_fetch(app: &AppHandle, track_key: String) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        let artwork = tokio::task::spawn_blocking(media_remote_adapter::fetch_system_artwork_url)
+        let artwork = tokio::task::spawn_blocking(fetch_system_artwork_url)
             .await
             .ok()
             .flatten();
@@ -1084,7 +1094,7 @@ fn spawn_system_artwork_fetch(app: &AppHandle, track_key: String) {
     });
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 fn spawn_system_artwork_fetch(_app: &AppHandle, _track_key: String) {}
 
 /// Fetches the artist's portrait photo via our backend (Spotify search,
@@ -1171,7 +1181,12 @@ async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: u64) -> Resu
                     s.enrichment_requested_at = Some(Instant::now());
                     s.enrichment_in_flight = false;
                     #[cfg(target_os = "macos")]
-                    if media_remote_adapter::is_configured() {
+                    let artwork_available = media_remote_adapter::is_configured();
+                    #[cfg(windows)]
+                    let artwork_available = true;
+                    #[cfg(not(any(target_os = "macos", windows)))]
+                    let artwork_available = false;
+                    if artwork_available {
                         spawn_artwork = Some(key.clone());
                     }
                     if artist_changed {
@@ -1958,12 +1973,13 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app_handle, event| {
+        .run(|_app_handle, _event| {
             // macOS sends Reopen when the app is re-activated — including via
             // a notification click. Surfacing the window here triggers the
             // existing on_focus chain which emits any pending deep link.
-            if matches!(event, tauri::RunEvent::Reopen { .. }) {
-                tray::ensure_visible(app_handle);
+            #[cfg(target_os = "macos")]
+            if matches!(_event, tauri::RunEvent::Reopen { .. }) {
+                tray::ensure_visible(_app_handle);
             }
         });
 }

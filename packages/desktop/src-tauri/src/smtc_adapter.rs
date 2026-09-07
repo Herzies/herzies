@@ -5,19 +5,23 @@
 //! reports through this same session manager.
 
 use crate::types::NowPlayingInfo;
+use base64::Engine;
 use windows::core::Interface;
 use windows::Media::Control::{
+    GlobalSystemMediaTransportControlsSession as Session,
     GlobalSystemMediaTransportControlsSessionManager as SessionManager,
-    GlobalSystemMediaTransportControlsSessionPlaybackStatus as PlaybackStatus, MediaPlaybackType,
+    GlobalSystemMediaTransportControlsSessionPlaybackStatus as PlaybackStatus,
 };
+use windows::Media::MediaPlaybackType;
+use windows::Storage::Streams::DataReader;
 
-pub fn get_now_playing() -> Option<NowPlayingInfo> {
-    let manager = SessionManager::RequestAsync().ok()?.get().ok()?;
+/// The current session, but only when something is actually playing —
+/// `GetCurrentSession()` returns a *valid but null* object (not an Err) when
+/// nothing is playing, so that must be checked before calling any method on
+/// it, or the null COM pointer gets dereferenced.
+fn current_playing_session() -> Option<Session> {
+    let manager = SessionManager::RequestAsync().ok()?.join().ok()?;
     let session = manager.GetCurrentSession().ok()?;
-    // GetCurrentSession() returns a *valid but null* object (not an Err)
-    // when nothing is playing — this is the common case, so it must be
-    // checked explicitly before calling any method on `session`, or the
-    // null COM pointer gets dereferenced.
     if session.as_raw().is_null() {
         return None;
     }
@@ -27,7 +31,12 @@ pub fn get_now_playing() -> Option<NowPlayingInfo> {
         return None;
     }
 
-    let props = session.TryGetMediaPropertiesAsync().ok()?.get().ok()?;
+    Some(session)
+}
+
+pub fn get_now_playing() -> Option<NowPlayingInfo> {
+    let session = current_playing_session()?;
+    let props = session.TryGetMediaPropertiesAsync().ok()?.join().ok()?;
     let title = props.Title().map(|h| h.to_string()).unwrap_or_default();
     let artist = props.Artist().map(|h| h.to_string()).unwrap_or_default();
     let album = props
@@ -90,6 +99,37 @@ pub fn get_now_playing() -> Option<NowPlayingInfo> {
         volume: 100,
         verified,
     })
+}
+
+/// Album art from the active session's thumbnail as a `data:` URL (fetched
+/// once per track; can be large). Mirrors `media_remote_adapter.rs`'s
+/// same-named macOS function.
+pub fn fetch_system_artwork_url() -> Option<String> {
+    let session = current_playing_session()?;
+    let props = session.TryGetMediaPropertiesAsync().ok()?.join().ok()?;
+    let thumbnail = props.Thumbnail().ok()?;
+    let stream = thumbnail.OpenReadAsync().ok()?.join().ok()?;
+
+    let size = stream.Size().ok()?;
+    if size == 0 || size > u32::MAX as u64 {
+        return None;
+    }
+    let size = size as u32;
+
+    let content_type = stream.ContentType().ok()?.to_string();
+    let input_stream = stream.GetInputStreamAt(0).ok()?;
+    let reader = DataReader::CreateDataReader(&input_stream).ok()?;
+    reader.LoadAsync(size).ok()?.join().ok()?;
+    let mut buffer = vec![0u8; size as usize];
+    reader.ReadBytes(&mut buffer).ok()?;
+
+    let mime = if content_type.is_empty() {
+        "image/jpeg"
+    } else {
+        content_type.as_str()
+    };
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&buffer);
+    Some(format!("data:{mime};base64,{encoded}"))
 }
 
 fn timespan_secs(ts: windows::Foundation::TimeSpan) -> f64 {

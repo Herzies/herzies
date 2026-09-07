@@ -45,4 +45,5 @@ windows = { version = "0.62", features = [
     "Media_Control",
     "Foundation",
     "Foundation_Collections",
+    "Storage_Streams",
 ] }

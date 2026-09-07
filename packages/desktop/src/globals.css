@@ -142,4 +142,15 @@
     -webkit-appearance: none;
     margin: 0;
   }
+
+  /* WebView2 (Windows) renders classic Chromium scrollbars; WKWebView
+     (macOS) already draws thin overlay ones, so this is a no-op there. */
+  * {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  *::-webkit-scrollbar {
+    display: none;
+  }
 }
