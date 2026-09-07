@@ -29,8 +29,12 @@ jobs:
         run: pnpm turbo check --filter=herzies-desktop --filter=@herzies/shared
 
   rust:
-    name: Rust checks
-    runs-on: macos-latest
+    name: Rust checks (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
     defaults:
       run:
         working-directory: packages/desktop/src-tauri
@@ -42,6 +46,7 @@ jobs:
           components: clippy, rustfmt
 
       - name: Ensure rustup shims take precedence on PATH
+        shell: bash
         run: echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - uses: Swatinem/rust-cache@v2

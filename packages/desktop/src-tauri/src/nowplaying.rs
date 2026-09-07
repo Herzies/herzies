@@ -1,8 +1,12 @@
 use crate::types::NowPlayingInfo;
+#[cfg(target_os = "macos")]
 use std::process::Command;
+#[cfg(target_os = "macos")]
 use std::time::Duration;
+#[cfg(target_os = "macos")]
 use tokio::time::timeout;
 
+#[cfg(target_os = "macos")]
 const MUSIC_SCRIPT: &str = r#"
 if application "Music" is not running then return "NOT_RUNNING"
 tell application "Music"
@@ -18,6 +22,7 @@ tell application "Music"
 end tell
 "#;
 
+#[cfg(target_os = "macos")]
 const SPOTIFY_SCRIPT: &str = r#"
 if application "Spotify" is not running then return "NOT_RUNNING"
 tell application "Spotify"
@@ -36,18 +41,31 @@ end tell
 
 pub async fn get_now_playing() -> Option<NowPlayingInfo> {
     #[cfg(target_os = "macos")]
-    if crate::media_remote_adapter::is_configured() {
-        if let Ok(Some(info)) =
-            tokio::task::spawn_blocking(crate::media_remote_adapter::get_now_playing).await
-        {
+    {
+        if crate::media_remote_adapter::is_configured() {
+            if let Ok(Some(info)) =
+                tokio::task::spawn_blocking(crate::media_remote_adapter::get_now_playing).await
+            {
+                return Some(info);
+            }
+        }
+
+        if let Some(info) = query_app(MUSIC_SCRIPT, "Music").await {
             return Some(info);
         }
+        return query_app(SPOTIFY_SCRIPT, "Spotify").await;
     }
 
-    if let Some(info) = query_app(MUSIC_SCRIPT, "Music").await {
-        return Some(info);
+    #[cfg(windows)]
+    {
+        return tokio::task::spawn_blocking(crate::smtc_adapter::get_now_playing)
+            .await
+            .ok()
+            .flatten();
     }
-    query_app(SPOTIFY_SCRIPT, "Spotify").await
+
+    #[allow(unreachable_code)]
+    None
 }
 
 #[cfg(target_os = "macos")]
@@ -60,6 +78,7 @@ pub fn raw_media_remote_json() -> Option<String> {
     None
 }
 
+#[cfg(target_os = "macos")]
 async fn query_app(script: &str, source: &str) -> Option<NowPlayingInfo> {
     let script = script.to_string();
     let source = source.to_string();

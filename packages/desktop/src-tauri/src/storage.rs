@@ -19,6 +19,7 @@ struct FriendsCacheFile {
     profiles: HashMap<String, HerzieProfile>,
 }
 use std::fs;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
@@ -26,6 +27,11 @@ type HmacSha256 = Hmac<Sha256>;
 
 const HMAC_SALT: &str = "hrzs_v1_8f3a2c";
 
+// Unix (including macOS) keeps its existing `~/.config/herzies` path
+// byte-for-byte — changing it would orphan every existing user's local
+// herzie/session data. Windows has no such history, so it gets the
+// platform-idiomatic `%APPDATA%\herzies` instead.
+#[cfg(unix)]
 fn config_dir() -> PathBuf {
     dirs::home_dir()
         .expect("No home directory")
@@ -33,16 +39,25 @@ fn config_dir() -> PathBuf {
         .join("herzies")
 }
 
+#[cfg(windows)]
+fn config_dir() -> PathBuf {
+    dirs::config_dir()
+        .expect("No config directory")
+        .join("herzies")
+}
+
 fn ensure_dir() {
     let dir = config_dir();
     if !dir.exists() {
         fs::create_dir_all(&dir).ok();
+        #[cfg(unix)]
         fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).ok();
     }
 }
 
 fn write_secure(path: &PathBuf, data: &str) {
     fs::write(path, data).ok();
+    #[cfg(unix)]
     fs::set_permissions(path, fs::Permissions::from_mode(0o600)).ok();
 }
 

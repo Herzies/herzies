@@ -375,10 +375,11 @@ function App() {
     };
 
     const handler = (event: KeyboardEvent) => {
-      // Settings: macOS's conventional Cmd+, — works from any view/focus.
+      // Settings: macOS's conventional Cmd+, (Ctrl+, on Windows/Linux) —
+      // works from any view/focus.
       if (
-        event.metaKey &&
-        !event.ctrlKey &&
+        (event.metaKey || event.ctrlKey) &&
+        !(event.metaKey && event.ctrlKey) &&
         !event.altKey &&
         event.key === ","
       ) {

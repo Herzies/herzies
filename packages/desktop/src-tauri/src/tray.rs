@@ -1,8 +1,10 @@
 use crate::state::SharedState;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+#[cfg(target_os = "macos")]
+use tauri::ActivationPolicy;
 use tauri::{
     tray::{MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    ActivationPolicy, AppHandle, Emitter, Manager, PhysicalPosition,
+    AppHandle, Emitter, Manager, PhysicalPosition,
 };
 
 /// Tracks current connectivity state to avoid redundant updates.
@@ -66,9 +68,24 @@ fn now_ms() -> u64 {
 pub const TRAY_ID: &str = "herzies-tray";
 
 pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
-    let _tray = TrayIconBuilder::with_id(TRAY_ID)
-        .title("<3")
-        .tooltip("Herzies")
+    let mut builder = TrayIconBuilder::with_id(TRAY_ID).tooltip("Herzies");
+
+    // macOS renders the tray title as text directly in the menu bar, so the
+    // connected/disconnected signal (`<3` / `</3`) lives there and no icon
+    // image is needed. Windows' notification area has no such text-title
+    // convention — it needs a real icon image, and the connectivity signal
+    // moves to the tooltip instead (see `set_connected`).
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder.title("<3");
+    }
+    #[cfg(windows)]
+    {
+        let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png"))?;
+        builder = builder.icon(icon);
+    }
+
+    let _tray = builder
         .on_tray_icon_event(|tray, event| {
             if let TrayIconEvent::Click {
                 button_state: MouseButtonState::Up,
@@ -116,17 +133,32 @@ fn emit_state_update(app: &AppHandle) {
     }
 }
 
-/// Update the tray title based on connectivity state.
-/// `connected` = true shows `<3`, false shows `</3`.
+/// Reflect connectivity state in the tray — macOS shows it as the menu-bar
+/// title (`<3` / `</3`), Windows (no tray text convention) shows it in the
+/// tooltip instead.
 pub fn set_connected(app: &AppHandle, connected: bool) {
     let was_connected = IS_CONNECTED.swap(connected, Ordering::Relaxed);
     if was_connected == connected {
         return;
     }
 
-    let title = if connected { "<3" } else { "</3" };
-    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+    let Some(tray) = app.tray_by_id(TRAY_ID) else {
+        return;
+    };
+
+    #[cfg(target_os = "macos")]
+    {
+        let title = if connected { "<3" } else { "</3" };
         let _ = tray.set_title(Some(title));
+    }
+    #[cfg(windows)]
+    {
+        let tooltip = if connected {
+            "Herzies"
+        } else {
+            "Herzies (offline)"
+        };
+        let _ = tray.set_tooltip(Some(tooltip));
     }
 }
 
@@ -160,7 +192,9 @@ fn show_window(app: &AppHandle, window: &tauri::WebviewWindow) {
     // (and any other state that changed while hidden) without having to
     // wait up to 60s for the next sync_tick.
     emit_state_update(app);
-    // Switch to Regular so the app can take focus
+    // Switch to Regular so the app can take focus (macOS only — no dock/menu-
+    // bar activation-policy concept elsewhere).
+    #[cfg(target_os = "macos")]
     let _ = app.set_activation_policy(ActivationPolicy::Regular);
 
     // Use saved user position if available, otherwise anchor below tray icon
@@ -196,8 +230,11 @@ fn hide_window(app: &AppHandle, window: &tauri::WebviewWindow) {
     }
     WINDOW_VISIBLE.store(false, Ordering::Relaxed);
     let _ = window.hide();
-    // Switch back to Accessory (no dock icon)
+    // Switch back to Accessory (no dock icon) — macOS only.
+    #[cfg(target_os = "macos")]
     let _ = app.set_activation_policy(ActivationPolicy::Accessory);
+    #[cfg(not(target_os = "macos"))]
+    let _ = app;
 }
 
 /// Called when the window gains focus — cancels any pending hide and checks for deep links.

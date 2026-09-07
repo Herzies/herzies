@@ -6,11 +6,9 @@ on:
       - 'desktop-v*'
 
 jobs:
-  build:
+  build-macos:
     name: Build macOS
     runs-on: macos-latest
-    permissions:
-      contents: write
     env:
       HAS_APPLE_CERT: ${{ secrets.APPLE_CERTIFICATE != '' }}
       HAS_APPLE_ID: ${{ secrets.APPLE_ID != '' }}
@@ -110,65 +108,150 @@ jobs:
           fi
           xcrun stapler staple "$DMG"
 
+      - name: Stage release artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          DMG=$(find packages/desktop/src-tauri/target/universal-apple-darwin/release/bundle/dmg -name '*.dmg' | head -1)
+          TARGZ=$(find packages/desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos -name '*.app.tar.gz' | head -1)
+          cp "$DMG" dist/
+          cp "$TARGZ" dist/
+          cp "${TARGZ}.sig" dist/
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-release
+          path: dist/*
+
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/desktop/src-tauri
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build shared package
+        run: pnpm --filter @herzies/shared build
+
+      # No Windows code-signing certificate yet — the NSIS installer ships
+      # unsigned for now (SmartScreen will warn on install/update until one
+      # is added). Tauri's updater signature (TAURI_SIGNING_PRIVATE_KEY)
+      # still applies so auto-update integrity checks keep working.
+      - name: Build installer
+        working-directory: packages/desktop
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
+          LASTFM_APP_NAME: ${{ secrets.LASTFM_APP_NAME }}
+        run: pnpm tauri build --target x86_64-pc-windows-msvc
+
+      - name: Stage release artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          EXE=$(find packages/desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis -name '*.exe' | head -1)
+          cp "$EXE" dist/
+          cp "${EXE}.sig" dist/
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: dist/*
+
+  publish:
+    name: Publish release
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
       - name: Read version
         id: version
         run: |
           VERSION=$(jq -r .version packages/desktop/src-tauri/tauri.conf.json)
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Upload DMG artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
-          name: Herzies-${{ steps.version.outputs.version }}-universal.dmg
-          path: packages/desktop/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          name: macos-release
+          path: artifacts/macos
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-release
+          path: artifacts/windows
+
+      # Assembled here — not in the per-OS build jobs — because latest.json
+      # is a single shared file at the live updater endpoint
+      # (releases/latest/download/latest.json); two independent jobs each
+      # writing their own copy would race and clobber each other's platform
+      # entries. This is the only job that produces it.
       - name: Build updater manifest
         id: manifest
         run: |
+          set -euo pipefail
           VERSION=${{ steps.version.outputs.version }}
-          BUNDLE_DIR=packages/desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos
-          TARGZ=$(find "$BUNDLE_DIR" -name '*.app.tar.gz' | head -1)
-          SIG_FILE="${TARGZ}.sig"
 
-          if [ -z "$TARGZ" ] || [ ! -f "$SIG_FILE" ]; then
-            echo "error: updater artifacts not found — is TAURI_SIGNING_PRIVATE_KEY set and createUpdaterArtifacts enabled?" >&2
-            ls -la "$BUNDLE_DIR" >&2 || true
-            exit 1
-          fi
+          MAC_TARGZ=$(find artifacts/macos -name '*.app.tar.gz' | head -1)
+          MAC_SIG=$(cat "${MAC_TARGZ}.sig")
+          MAC_URL="https://github.com/Herzies/herzies/releases/download/desktop-v${VERSION}/$(basename "$MAC_TARGZ")"
 
-          SIG_CONTENT=$(cat "$SIG_FILE")
-          TARGZ_NAME=$(basename "$TARGZ")
-          DOWNLOAD_URL="https://github.com/Herzies/herzies/releases/download/desktop-v${VERSION}/${TARGZ_NAME}"
+          WIN_EXE=$(find artifacts/windows -name '*.exe' | head -1)
+          WIN_SIG=$(cat "${WIN_EXE}.sig")
+          WIN_URL="https://github.com/Herzies/herzies/releases/download/desktop-v${VERSION}/$(basename "$WIN_EXE")"
 
-          # Universal binary: both architectures point at the same .app.tar.gz.
+          # Universal macOS binary: both architectures point at the same .app.tar.gz.
           jq -n \
             --arg version "$VERSION" \
             --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --arg sig "$SIG_CONTENT" \
-            --arg url "$DOWNLOAD_URL" \
+            --arg mac_sig "$MAC_SIG" \
+            --arg mac_url "$MAC_URL" \
+            --arg win_sig "$WIN_SIG" \
+            --arg win_url "$WIN_URL" \
             '{
               version: $version,
               notes: ("Herzies Desktop v" + $version),
               pub_date: $pub_date,
               platforms: {
-                "darwin-x86_64":  { signature: $sig, url: $url },
-                "darwin-aarch64": { signature: $sig, url: $url }
+                "darwin-x86_64":  { signature: $mac_sig, url: $mac_url },
+                "darwin-aarch64": { signature: $mac_sig, url: $mac_url },
+                "windows-x86_64": { signature: $win_sig, url: $win_url }
               }
             }' > latest.json
-
-          echo "targz=$TARGZ" >> "$GITHUB_OUTPUT"
-          echo "sig=$SIG_FILE" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           VERSION=${{ steps.version.outputs.version }}
-          DMG=$(find packages/desktop/src-tauri/target/universal-apple-darwin/release/bundle/dmg -name '*.dmg' | head -1)
           gh release create "desktop-v${VERSION}" \
-            "$DMG" \
-            "${{ steps.manifest.outputs.targz }}" \
-            "${{ steps.manifest.outputs.sig }}" \
+            artifacts/macos/*.dmg \
+            artifacts/macos/*.app.tar.gz \
+            artifacts/macos/*.app.tar.gz.sig \
+            artifacts/windows/*.exe \
+            artifacts/windows/*.exe.sig \
             latest.json \
             --title "Herzies Desktop v${VERSION}" \
             --generate-notes \

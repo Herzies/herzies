@@ -6,6 +6,8 @@ mod lastfm;
 #[cfg(target_os = "macos")]
 mod media_remote_adapter;
 mod nowplaying;
+#[cfg(windows)]
+mod smtc_adapter;
 mod state;
 mod storage;
 mod tray;
@@ -1358,15 +1360,29 @@ fn send_notification(app: &AppHandle, title: &str, body: &str, deep_link: Option
     let title = title.to_string();
     let body = body.to_string();
 
-    // Fire-and-forget. The previous implementation used wait_for_click(true),
-    // which inside mac-notification-sys spins an NSRunLoop until the user
-    // clicks — pegging a core at ~100% per pending notification. Click routing
-    // is now handled via RunEvent::Reopen in run().
-    std::thread::spawn(move || {
-        let mut n = mac_notification_sys::Notification::default();
-        n.title(&title).message(&body);
-        let _ = n.send();
-    });
+    #[cfg(target_os = "macos")]
+    {
+        // Fire-and-forget. The previous implementation used wait_for_click(true),
+        // which inside mac-notification-sys spins an NSRunLoop until the user
+        // clicks — pegging a core at ~100% per pending notification. Click routing
+        // is now handled via RunEvent::Reopen in run().
+        std::thread::spawn(move || {
+            let mut n = mac_notification_sys::Notification::default();
+            n.title(&title).message(&body);
+            let _ = n.send();
+        });
+    }
+
+    #[cfg(windows)]
+    {
+        use tauri_plugin_notification::NotificationExt;
+        let _ = app
+            .notification()
+            .builder()
+            .title(&title)
+            .body(&body)
+            .show();
+    }
 }
 
 async fn sync_loop(app: AppHandle) {
@@ -1853,13 +1869,18 @@ pub fn run() {
                 }
             }
 
-            // Set notification bundle ID so clicks activate this app
-            let bundle_id = if tauri::is_dev() {
-                "com.apple.Terminal"
-            } else {
-                &app.config().identifier
-            };
-            let _ = mac_notification_sys::set_application(bundle_id);
+            // Set notification bundle ID so clicks activate this app (macOS only —
+            // mac-notification-sys is the send mechanism there; Windows sends via
+            // tauri-plugin-notification instead, see `send_notification`).
+            #[cfg(target_os = "macos")]
+            {
+                let bundle_id = if tauri::is_dev() {
+                    "com.apple.Terminal"
+                } else {
+                    &app.config().identifier
+                };
+                let _ = mac_notification_sys::set_application(bundle_id);
+            }
 
             // Hide dock icon (menu bar only)
             #[cfg(target_os = "macos")]

@@ -1,0 +1,10 @@
+{
+  "bundle": {
+    "targets": ["dmg", "app"],
+    "resources": ["mediaremote/mediaremote-adapter.pl"],
+    "macOS": {
+      "minimumSystemVersion": "10.15",
+      "frameworks": ["mediaremote/MediaRemoteAdapter.framework"]
+    }
+  }
+}
