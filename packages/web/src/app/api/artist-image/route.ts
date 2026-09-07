@@ -18,6 +18,5 @@ export async function GET(request: Request) {
   }
 
   const url = await findArtistImage(artist);
-  console.log("[artist-image]", { artist, url });
   return NextResponse.json({ url });
 }

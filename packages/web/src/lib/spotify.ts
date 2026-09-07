@@ -104,7 +104,6 @@ export async function findArtistImage(
   const key = artistName.toLowerCase().trim();
   const cached = artistImageCache.get(key);
   if (cached && Date.now() - cached.cachedAt < ARTIST_IMAGE_CACHE_TTL_MS) {
-    console.log("[findArtistImage] cache hit", { artistName, url: cached.url });
     return cached.url;
   }
 
@@ -125,12 +124,6 @@ export async function findArtistImage(
         | { url: string }[]
         | undefined;
       url = images?.[0]?.url ?? null;
-      console.log("[findArtistImage] search result", {
-        artistName,
-        matchedArtist: data.artists?.items?.[0]?.name,
-        imageCount: images?.length ?? 0,
-        url,
-      });
     } else {
       console.error(
         "[findArtistImage] Spotify search failed",
