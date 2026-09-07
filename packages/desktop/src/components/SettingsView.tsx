@@ -19,6 +19,8 @@ export function SettingsView({
   availableUpdate,
   installStatus,
   onInstallUpdate,
+  hasActiveEventOverride,
+  onToggleActiveEventOverride,
 }: {
   state: AppState;
   stageOverride: number | null;
@@ -28,6 +30,8 @@ export function SettingsView({
   availableUpdate: Update | null;
   installStatus: UpdateInstallStatus;
   onInstallUpdate: () => void;
+  hasActiveEventOverride: boolean;
+  onToggleActiveEventOverride: () => void;
 }) {
   const [loggingIn, setLoggingIn] = useState(false);
   const [mediaRemoteDebug, setMediaRemoteDebug] = useState<string | null>(null);
@@ -115,6 +119,18 @@ export function SettingsView({
             </button>
             <button type="button" className="btn" onClick={onTestUpdateAlert}>
               Test Update Alert
+            </button>
+            <button
+              type="button"
+              className={cn(
+                "btn",
+                hasActiveEventOverride
+                  ? "border-cyan text-cyan"
+                  : "border-[#555] text-text-dim",
+              )}
+              onClick={onToggleActiveEventOverride}
+            >
+              {hasActiveEventOverride ? "Live Event: On" : "Test Live Event"}
             </button>
           </div>
           {mediaRemoteDebug !== null && (

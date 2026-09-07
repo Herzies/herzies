@@ -84,6 +84,7 @@ function App() {
   /** "c" pressed mid-trade: open chat after the user confirms leaving the trade. */
   const openChatAfterLeaveRef = useRef(false);
   const [hasActiveEvent, setHasActiveEvent] = useState(false);
+  const [hasActiveEventOverride, setHasActiveEventOverride] = useState(false);
   const [chatProfileCode, setChatProfileCode] = useState<string | null>(null);
   const [selfProfile, setSelfProfile] = useState<HerzieProfile | null>(null);
   const [ignoredIncomingTradeId, setIgnoredIncomingTradeId] = useState<
@@ -639,7 +640,11 @@ function App() {
             view === "events" ? "flex" : "hidden",
           )}
         >
-          <EventsView eventsTabVisible={view === "events"} />
+          <EventsView
+            eventsTabVisible={view === "events"}
+            debugForceActive={hasActiveEventOverride}
+            inventory={state.inventory}
+          />
         </div>
 
         {herzie && (
@@ -695,6 +700,10 @@ function App() {
             onStageOverride={setStageOverride}
             onPreviewOnboarding={() => setPreviewOnboarding(true)}
             onTestUpdateAlert={() => setTestUpdateOverlay(true)}
+            hasActiveEventOverride={hasActiveEventOverride}
+            onToggleActiveEventOverride={() =>
+              setHasActiveEventOverride((v) => !v)
+            }
             availableUpdate={availableUpdate}
             installStatus={updateInstallStatus}
             onInstallUpdate={handleInstallUpdate}
@@ -729,7 +738,7 @@ function App() {
         <TabBar
           view={view}
           setView={switchView}
-          hasActiveEvent={hasActiveEvent}
+          hasActiveEvent={hasActiveEvent || hasActiveEventOverride}
         />
       )}
 

@@ -67,11 +67,6 @@ export function TabBar({
       title={t.title}
       className={cn(
         "relative overflow-visible border-none bg-transparent py-1 text-[10px] cursor-pointer",
-        // Extra breathing room for the sparkle accent — its star slots are
-        // positioned by percentage, so a wider box keeps them from bunching.
-        // Matches the old flex-1 tab's width (~1/6 of the row) now that tabs
-        // are natural-width.
-        t.id === "events" && hasActiveEvent && "min-w-16 text-center",
         {
           "font-bold text-cyan": view === t.id && t.colour === "cyan",
           "hover:text-cyan/80": view !== t.id && t.colour === "cyan",

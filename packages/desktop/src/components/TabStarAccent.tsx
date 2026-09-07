@@ -20,21 +20,25 @@ export function TabStarAccent() {
   }, []);
 
   return (
-    <>
+    // Fixed-size positioning box, centered on the tab and independent of its
+    // rendered width, so the sparkle never changes the tab's own layout size.
+    <span
+      className="pointer-events-none absolute left-1/2 top-0 h-full w-16 -translate-x-1/2"
+      aria-hidden
+    >
       {STAR_SLOTS.map((pos, i) => {
         const idx =
           Math.floor((frame + i * 2) / 3) % STAR_TWINKLE_VARIANTS.length;
         return (
           <span
             key={i}
-            className="pointer-events-none absolute font-mono text-[10px] leading-none text-[#ccddee] opacity-80"
+            className="absolute font-mono text-[10px] leading-none text-[#ccddee] opacity-80"
             style={pos}
-            aria-hidden
           >
             {STAR_TWINKLE_VARIANTS[idx]}
           </span>
         );
       })}
-    </>
+    </span>
   );
 }
