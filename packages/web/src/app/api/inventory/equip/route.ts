@@ -1,15 +1,16 @@
-import { NextResponse } from "next/server";
-import { authenticateRequest, isAuthError } from "@/lib/auth";
-import { equipItemSchema, isParseError, parseBody } from "@/lib/schemas";
-import { createAdminClient } from "@/lib/supabase-admin";
 import {
   type Equipped,
   type EquippedSlot,
   findEquippedSlot,
   groundSlot,
   isModifierEquipped,
+  MAX_MODIFIERS,
   normalizeEquipped,
 } from "@herzies/shared";
+import { NextResponse } from "next/server";
+import { authenticateRequest, isAuthError } from "@/lib/auth";
+import { equipItemSchema, isParseError, parseBody } from "@/lib/schemas";
+import { createAdminClient } from "@/lib/supabase-admin";
 
 export async function POST(request: Request) {
   const auth = await authenticateRequest(request);
@@ -76,7 +77,13 @@ export async function POST(request: Request) {
       const target = groundSlot(side);
       updated[target] = itemId;
     } else if (item.equip_slot === "modifier") {
-      // Unlimited — accumulate rather than occupy a single-value slot.
+      if ((current.modifier?.length ?? 0) >= MAX_MODIFIERS) {
+        return NextResponse.json(
+          { error: "Maximum modifiers equipped" },
+          { status: 400 },
+        );
+      }
+      // Accumulates (up to MAX_MODIFIERS) rather than occupying a single-value slot.
       updated.modifier = [...(current.modifier ?? []), itemId];
     } else if (item.equip_slot) {
       const slot = item.equip_slot as EquippedSlot;

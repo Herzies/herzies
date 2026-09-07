@@ -1,8 +1,26 @@
+import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import { cn } from "../lib/utils";
 
+const ALIGN_MAP = {
+  left: "start",
+  center: "center",
+  right: "end",
+} as const satisfies Record<
+  string,
+  TooltipPrimitive.TooltipContentProps["align"]
+>;
+
 /**
- * Hover tooltip. Wraps its trigger; the label appears on hover with a short
- * delay. Pure CSS — no portal — so keep `align` away from clipping edges.
+ * Hover tooltip, built on Radix's Tooltip primitive. Content portals to
+ * `document.body`, so it's immune to ancestor stacking contexts (no z-index
+ * fights) and ancestor containing-block sizing quirks (no width collapse) —
+ * and `avoidCollisions` (on by default) keeps it inside the viewport instead
+ * of clipping at screen edges.
+ *
+ * The trigger is always our own wrapping `<span>`, not the caller's child
+ * directly: a `disabled` native `<button>` doesn't fire the pointer events
+ * Radix needs, so hovering a disabled trigger would otherwise never open the
+ * tooltip. Wrapping it in a plain (non-disabled) span sidesteps that.
  */
 export function Tooltip({
   label,
@@ -20,20 +38,23 @@ export function Tooltip({
   className?: string;
 }) {
   return (
-    <span className={cn("group/tooltip relative inline-flex", className)}>
-      {children}
-      <span
-        role="tooltip"
-        className={cn(
-          "pointer-events-none absolute z-100 w-max max-w-[160px] text-balance rounded border border-border bg-bg-panel px-1.5 py-0.5 text-center text-ui-sm text-text opacity-0 transition-opacity delay-150 group-hover/tooltip:opacity-100",
-          side === "bottom" ? "top-full mt-1" : "bottom-full mb-1",
-          align === "center" && "left-1/2 -translate-x-1/2",
-          align === "left" && "left-0",
-          align === "right" && "right-0",
-        )}
-      >
-        {label}
-      </span>
-    </span>
+    <TooltipPrimitive.Provider delayDuration={0}>
+      <TooltipPrimitive.Root>
+        <TooltipPrimitive.Trigger asChild>
+          <span className={cn("inline-flex", className)}>{children}</span>
+        </TooltipPrimitive.Trigger>
+        <TooltipPrimitive.Portal>
+          <TooltipPrimitive.Content
+            side={side}
+            align={ALIGN_MAP[align]}
+            sideOffset={4}
+            collisionPadding={8}
+            className="z-100 max-w-[160px] rounded border border-border bg-bg-panel px-1.5 py-0.5 text-left text-ui-sm text-text"
+          >
+            {label}
+          </TooltipPrimitive.Content>
+        </TooltipPrimitive.Portal>
+      </TooltipPrimitive.Root>
+    </TooltipPrimitive.Provider>
   );
 }

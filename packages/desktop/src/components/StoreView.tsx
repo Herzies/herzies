@@ -264,6 +264,7 @@ export function StoreView({
         <ItemInspectOverlay
           itemId={inspectItem}
           onClose={() => setInspectItem(null)}
+          inventory={inventory}
           meta={
             inspectedAlreadyOwned ? "Owned" : <Coin amount={inspectedPrice} />
           }

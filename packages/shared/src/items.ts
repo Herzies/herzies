@@ -28,7 +28,8 @@ export type Rarity = "common" | "uncommon" | "rare" | "legendary";
 export type ItemCategory = "deck" | "misc";
 
 /** Catalog equip categories (item.equip_slot). Ground items choose a side at equip time.
- * "modifier" is unlimited — see EQUIPPED_SLOTS below, it isn't one of the single-value slots. */
+ * "modifier" stacks up to MAX_MODIFIERS — see EQUIPPED_SLOTS below, it isn't one of the
+ * single-value slots. */
 export const EQUIP_SLOTS = [
   "head",
   "face",
@@ -54,10 +55,16 @@ export const EQUIPPED_SLOTS = [
 ] as const;
 export type EquippedSlot = (typeof EQUIPPED_SLOTS)[number];
 
+/** Modifier items stack in Equipped.modifier, but only up to this many at once
+ * (enforced server-side in the equip route; the desktop UI also disables the
+ * Equip action once this cap is hit, for instant feedback). */
+export const MAX_MODIFIERS = 6;
+
 export type GroundSide = "left" | "right";
 
-/** Slot-keyed map of currently equipped item IDs. `modifier` is an unbounded list rather
- * than a single-value slot, since any number of modifier items can be equipped at once. */
+/** Slot-keyed map of currently equipped item IDs. `modifier` is a list (up to
+ * MAX_MODIFIERS) rather than a single-value slot, since more than one modifier
+ * item can be equipped at once. */
 export type Equipped = Partial<Record<EquippedSlot, string>> & {
   modifier?: string[];
 };
@@ -175,6 +182,82 @@ export const ITEM_TYPE_LABELS: Record<ItemType, string> = {
   modifier: "Modifier",
   artefact: "Artefact",
 };
+
+/** A set is a named group of items whose `effect` describes what equipping
+ * all of them together does — membership is purely by `itemIds`, not a
+ * field on ItemDef, so adding an item to a set never touches its own entry. */
+export interface ItemSet {
+  id: string;
+  /** Display name, e.g. "Prismatic". */
+  name: string;
+  /** What equipping the full set does — shown on each member's item preview. */
+  effect: string;
+  /** Item ids that make up this set. */
+  itemIds: string[];
+}
+
+export const ITEM_SETS: ItemSet[] = [
+  {
+    id: "prismatic",
+    name: "Prismatic",
+    effect: "Even more rainbow",
+    itemIds: ["rainbow-headband", "prism"],
+  },
+];
+
+export function getItemSet(itemId: string): ItemSet | undefined {
+  return ITEM_SETS.find((set) => set.itemIds.includes(itemId));
+}
+
+/** Whether every item in `set` is currently equipped. */
+export function isSetFullyEquipped(
+  equipped: Equipped | null | undefined,
+  set: ItemSet,
+): boolean {
+  const ids = new Set(equippedItemIds(equipped));
+  return set.itemIds.every((id) => ids.has(id));
+}
+
+/** Drives the inventory "Deck" slot row: one entry per visual group, in
+ * left-to-right display order. `slots` is either the ordered list of
+ * single-value EquippedSlot keys in the group (box i ↔ slots[i]), or the
+ * literal "modifier" for the capped modifier array (box i ↔ equipped.modifier[i]).
+ * `itemType` selects the icon + ITEM_TYPE_TEXT_CLASSES color for filled boxes. */
+export interface DeckSlotGroup {
+  label: string;
+  itemType: ItemType;
+  slots: EquippedSlot[] | "modifier";
+  count: number;
+}
+
+export const DECK_SLOT_GROUPS: DeckSlotGroup[] = [
+  {
+    label: "Equip",
+    itemType: "equipable",
+    slots: ["head", "face", "body"],
+    count: 3,
+  },
+  {
+    label: "Accessories",
+    itemType: "accessory",
+    slots: ["ground_left", "ground_right"],
+    count: 2,
+  },
+  { label: "Scenery", itemType: "sceneryCard", slots: ["scenery"], count: 1 },
+  {
+    label: "Modifiers",
+    itemType: "modifier",
+    slots: "modifier",
+    count: MAX_MODIFIERS,
+  },
+  { label: "Skin", itemType: "skin", slots: ["color"], count: 1 },
+];
+
+/** Total fixed slot capacity across all groups (3+2+1+6+1 = 13). */
+export const DECK_TOTAL_SLOTS = DECK_SLOT_GROUPS.reduce(
+  (sum, g) => sum + g.count,
+  0,
+);
 
 export const RARITY_COLORS: Record<Rarity, string> = {
   common: "#9d9d9d",

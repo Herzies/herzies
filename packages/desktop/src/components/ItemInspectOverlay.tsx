@@ -1,17 +1,21 @@
 import {
   getItem,
+  getItemSet,
+  type Inventory,
   RARITY_COLORS as ITEM_RARITY_COLORS,
   ItemPreview,
   RARITY_LABELS,
 } from "@herzies/shared";
 import { useEffect } from "react";
-import { ItemTypeTag, ModifierEffectTag } from "./ItemTypeTag";
+import { cn } from "../lib/utils";
+import { ItemTypeTag, ModifierEffectTag, SetTag } from "./ItemTypeTag";
 
 export default function ItemInspectOverlay({
   itemId,
   onClose,
   meta,
   footer,
+  inventory,
 }: {
   itemId: string;
   onClose: () => void;
@@ -19,8 +23,13 @@ export default function ItemInspectOverlay({
   meta?: React.ReactNode;
   /** Actions rendered below the description (e.g. equip / sell controls). */
   footer?: React.ReactNode;
+  /** Owned quantities, used to show set-completion progress (e.g. "Prismatic set 1/2"). */
+  inventory?: Inventory | null;
 }) {
   const item = getItem(itemId);
+  const set = getItemSet(itemId);
+  const ownedCount =
+    set?.itemIds.filter((id) => (inventory?.[id] ?? 0) > 0).length ?? 0;
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -46,6 +55,9 @@ export default function ItemInspectOverlay({
             <ItemTypeTag item={item} />
             <ModifierEffectTag item={item} />
           </div>
+          <div className="absolute top-0 right-0 flex">
+            <SetTag itemId={itemId} />
+          </div>
           <ItemPreview item={item} box={150} />
         </div>
         <div className="text-sm font-bold">"{item.name}"</div>
@@ -57,6 +69,24 @@ export default function ItemInspectOverlay({
           {meta ? <> · {meta}</> : null}
         </div>
         <div className="text-ui text-text-dim">{item.description}</div>
+        {set && (
+          <div className="mt-2 border-t border-border pt-2 text-left text-ui-sm">
+            <div className="font-bold text-text">
+              {set.name} set {ownedCount}/{set.itemIds.length}
+            </div>
+            <div className="my-1 text-text-dim">Set effect: {set.effect}</div>
+            {set.itemIds.map((id) => (
+              <div
+                key={id}
+                className={cn(
+                  (inventory?.[id] ?? 0) > 0 ? "text-white" : "text-text-dim",
+                )}
+              >
+                • {getItem(id)?.name ?? id}
+              </div>
+            ))}
+          </div>
+        )}
         {footer && (
           <div className="mt-3 flex flex-col items-center gap-2">{footer}</div>
         )}

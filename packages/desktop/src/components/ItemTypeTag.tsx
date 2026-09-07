@@ -1,4 +1,5 @@
 import {
+  getItemSet,
   getItemType,
   ITEM_TYPE_LABELS,
   type ItemDef,
@@ -16,13 +17,24 @@ export const ITEM_TYPE_TEXT_CLASSES: Record<ItemType, string> = {
   artefact: "text-text-dim",
 };
 
-const ITEM_TYPE_PILL_CLASSES: Record<ItemType, string> = {
+export const ITEM_TYPE_PILL_CLASSES: Record<ItemType, string> = {
   skin: "bg-purple/15 text-purple",
   sceneryCard: "bg-green/15 text-green",
   equipable: "bg-cyan/15 text-cyan",
   accessory: "bg-red/15 text-red",
   modifier: "bg-yellow/15 text-yellow",
   artefact: "bg-text-dim/15 text-text-dim",
+};
+
+/** Fainter background-only tint per type, for placeholders that hint at a
+ * category without looking occupied (e.g. empty deck slots). */
+export const ITEM_TYPE_DIM_BG_CLASSES: Record<ItemType, string> = {
+  skin: "bg-purple/8",
+  sceneryCard: "bg-green/8",
+  equipable: "bg-cyan/8",
+  accessory: "bg-red/8",
+  modifier: "bg-yellow/8",
+  artefact: "bg-text-dim/8",
 };
 
 /** Labels an item's type (skin / scenery card / equipable / accessory / modifier / artefact). */
@@ -52,6 +64,31 @@ export function ItemTypeTag({
     >
       {ITEM_TYPE_LABELS[type]}
     </span>
+  );
+}
+
+/** Names the set an item belongs to (e.g. "Prismatic"); hover for what
+ * equipping the full set does. Renders nothing for items not in a set. */
+export function SetTag({
+  itemId,
+  className,
+}: {
+  itemId: string;
+  className?: string;
+}) {
+  const set = getItemSet(itemId);
+  if (!set) return null;
+  return (
+    <Tooltip label={set.effect} align="left">
+      <span
+        className={cn(
+          "rounded-full border border-border bg-bg px-1.5 py-px text-ui-sm text-text-dim",
+          className,
+        )}
+      >
+        {set.name}
+      </span>
+    </Tooltip>
   );
 }
 

@@ -3,11 +3,16 @@ import {
   type CreatureParams,
   type Equipped,
   equippedItemIds,
+  ITEM_SETS,
   Herzie3D as SharedHerzie3D,
   Sky,
 } from "@herzies/shared";
 import { useEffect, useState } from "react";
 import { useWindowVisible } from "../tauri-bridge";
+
+// Only one set has a visual effect today; look it up by id rather than
+// generalizing to "any fully-equipped set" until a second one exists.
+const PRISMATIC_SET = ITEM_SETS.find((set) => set.id === "prismatic");
 
 interface Props {
   userId: string;
@@ -69,9 +74,37 @@ export function Herzie3D({
     : ids.includes("clouds")
       ? "clouds"
       : null;
+  const prismaticActive =
+    !!PRISMATIC_SET && PRISMATIC_SET.itemIds.every((id) => ids.includes(id));
+
+  // Fades the bottom of the prismatic layer into transparency (revealing
+  // the app's own background underneath, whatever that is, rather than
+  // painting a specific colour over it) instead of cutting off hard.
+  const prismaticMask =
+    "linear-gradient(to bottom, black 0%, black 40%, transparent 85%)";
 
   return (
     <>
+      {showSky && prismaticActive && (
+        <div
+          aria-hidden="true"
+          className="animate-prismatic pointer-events-none fixed"
+          style={{
+            top: 0,
+            left: 0,
+            width: "100vw",
+            height: "45vh",
+            background:
+              "linear-gradient(120deg, #ff5f6d, #ffc371, #f9f871, #6dffb0, #6dc9ff, #a06dff, #ff6df3)",
+            backgroundSize: "220% 220%",
+            opacity: 0.1,
+            mixBlendMode: "screen",
+            WebkitMaskImage: prismaticMask,
+            maskImage: prismaticMask,
+            zIndex: 0,
+          }}
+        />
+      )}
       {showSky && (
         <Sky
           userId={userId}

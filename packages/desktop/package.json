@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@herzies/shared": "workspace:*",
+    "@radix-ui/react-tooltip": "^1.2.16",
     "@supabase/supabase-js": "^2.105.1",
     "@tauri-apps/api": "^2.5.0",
     "@tauri-apps/plugin-notification": "^2.3.3",

@@ -6,6 +6,8 @@ import type {
   ItemCategory,
 } from "@herzies/shared";
 import {
+  DECK_TOTAL_SLOTS,
+  equippedItemIds,
   findEquippedSlot,
   getItem,
   getItemCategory,
@@ -13,6 +15,7 @@ import {
   groundSlot,
   ITEM_TYPE_LABELS,
   isModifierEquipped,
+  MAX_MODIFIERS,
   normalizeEquipped,
   RARITY_COLORS,
   RARITY_LABELS,
@@ -21,6 +24,7 @@ import { useEffect, useState } from "react";
 import { formatAmount } from "../lib/utils";
 import { herzies } from "../tauri-bridge";
 import { Coin } from "./Coin";
+import { DeckRow } from "./DeckRow";
 import { Herzie3D } from "./Herzie3D";
 import ItemInspectOverlay from "./ItemInspectOverlay";
 import { ItemRow } from "./ItemRow";
@@ -143,13 +147,14 @@ export function InventoryView({
     if (action === "equip" && item?.equipSlot === "ground") {
       side = pickGroundSide(equipped);
     }
+    const actionLabel = action === "equip" ? "place" : "return";
     try {
       const result = await herzies.equipItem(itemId, action, side);
       setEquipped(normalizeEquipped(result.equipped));
-      onLog?.(action === "equip" ? `Equipped ${name}` : `Unequipped ${name}`);
+      onLog?.(action === "equip" ? `Placed ${name}` : `Returned ${name}`);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
-      onLog?.(`Failed to ${action} ${name}: ${msg}`);
+      onLog?.(`Failed to ${actionLabel} ${name}: ${msg}`);
     }
   };
 
@@ -207,6 +212,14 @@ export function InventoryView({
         </div>
       </div>
 
+      {/* Deck slot row */}
+      <div className="z-10 shrink-0 pb-3">
+        <div className="mb-1 text-[10px] text-text-dim">
+          Deck ({equippedItemIds(equipped).length}/{DECK_TOTAL_SLOTS})
+        </div>
+        <DeckRow equipped={equipped} onUnequip={handleEquip} />
+      </div>
+
       {/* Item list — bottom ~48% */}
       <div className="z-10 flex h-[48%] min-h-0 shrink-0 flex-col">
         <div className="flex gap-1 border-b border-border">
@@ -215,7 +228,7 @@ export function InventoryView({
             onClick={() => setTab("deck")}
             colour="cyan"
           >
-            Deck
+            Cards
           </TabButton>
           <TabButton
             active={tab === "misc"}
@@ -265,15 +278,32 @@ export function InventoryView({
                     </>
                   }
                   action={
-                    def?.equipable && (
-                      <button
-                        type="button"
-                        className="btn"
-                        onClick={() => handleEquip(itemId)}
-                      >
-                        {isEquipped ? "Unequip" : "Equip"}
-                      </button>
-                    )
+                    def?.equipable &&
+                    (() => {
+                      const modifierCapped =
+                        !isEquipped &&
+                        def.equipSlot === "modifier" &&
+                        (equipped.modifier?.length ?? 0) >= MAX_MODIFIERS;
+                      const button = (
+                        <button
+                          type="button"
+                          className="btn"
+                          disabled={modifierCapped}
+                          onClick={() => handleEquip(itemId)}
+                        >
+                          {isEquipped ? "Return" : "Place"}
+                        </button>
+                      );
+                      return modifierCapped ? (
+                        <Tooltip
+                          label={`Max modifiers placed (${MAX_MODIFIERS}/${MAX_MODIFIERS})`}
+                        >
+                          {button}
+                        </Tooltip>
+                      ) : (
+                        button
+                      );
+                    })()
                   }
                 />
               );
@@ -286,6 +316,7 @@ export function InventoryView({
         <ItemInspectOverlay
           itemId={inspectItem}
           onClose={() => setInspectItem(null)}
+          inventory={inventory}
           footer={
             <>
               {inspected.sellPrice && inspectedQty > 0 ? (
