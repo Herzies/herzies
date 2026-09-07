@@ -71,7 +71,7 @@ export function TabBar({
         // positioned by percentage, so a wider box keeps them from bunching.
         // Matches the old flex-1 tab's width (~1/6 of the row) now that tabs
         // are natural-width.
-        t.id === "events" && "min-w-16 text-center",
+        t.id === "events" && hasActiveEvent && "min-w-16 text-center",
         {
           "font-bold text-cyan": view === t.id && t.colour === "cyan",
           "hover:text-cyan/80": view !== t.id && t.colour === "cyan",
