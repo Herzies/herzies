@@ -95,7 +95,7 @@ export default function DocsPage() {
         <h2 className="text-sm text-cyan mb-2">requirements</h2>
         <div className="bg-bg-panel border border-border rounded-md p-4">
           <p className="text-[13px]">
-            macOS with Apple Music or Spotify. Linux and Windows support is
+            macOS or Windows with Apple Music or Spotify. Linux support is
             coming.
           </p>
         </div>

@@ -11,13 +11,14 @@ export const metadata: Metadata = {
     template: "%s | Herzies",
   },
   description:
-    "Hatch your herzie, play music, and watch it evolve. A terminal-based digital pet powered by your listening habits. Works with Apple Music and Spotify on macOS.",
+    "Hatch your herzie, play music, and watch it evolve. A terminal-based digital pet powered by your listening habits. Works with Apple Music and Spotify on macOS and Windows.",
   keywords: [
     "cli",
     "digital pet",
     "music",
     "terminal",
     "macos",
+    "windows",
     "apple music",
     "spotify",
   ],

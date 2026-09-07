@@ -12,7 +12,7 @@ import TextAndMedia from "@/components/text-and-media";
 export const metadata: Metadata = {
   title: "Herzies — Your digital pet that grows by listening to music",
   description:
-    "Hatch your herzie, play music, and watch it evolve. A digital pet powered by your listening habits. Works with Apple Music and Spotify on macOS.",
+    "Hatch your herzie, play music, and watch it evolve. A digital pet powered by your listening habits. Works with Apple Music and Spotify on macOS and Windows.",
   alternates: { canonical: "https://www.herzies.app" },
 };
 
@@ -29,7 +29,7 @@ const jsonLd = {
   "@type": "SoftwareApplication",
   name: "Herzies",
   applicationCategory: "EntertainmentApplication",
-  operatingSystem: "macOS",
+  operatingSystem: "macOS, Windows",
   description:
     "Your digital pet that grows by listening to music. Works with Apple Music and Spotify.",
   url: "https://www.herzies.app",
