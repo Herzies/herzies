@@ -301,3 +301,45 @@ export function recordGenreMinutes(
     genreMinutes[genre] = (genreMinutes[genre] ?? 0) + perGenre;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Event types (mirror of packages/shared/src/types.ts — the subset the
+// `events-active` function's vendored `events.ts` uses)
+// ---------------------------------------------------------------------------
+
+/** A game event (secret track challenge, etc.) */
+export interface GameEvent {
+  id: string;
+  type: string;
+  title: string;
+  description: string | null;
+  active: boolean;
+  startsAt: string;
+  endsAt: string;
+  config: Record<string, unknown>;
+}
+
+export interface SongHuntHint {
+  text: string;
+  /** ISO date string — hint becomes readable after this time (UTC) */
+  unlocksAt: string;
+  /**
+   * Storage object key of an optional audio snippet attached to this hint
+   * (in the private `hint-audio` bucket). Never sent to clients directly —
+   * only used server-side to resolve playback via /api/events/hint-audio/play.
+   */
+  audioKey?: string;
+}
+
+export interface SongHuntConfig {
+  trackTitle: string;
+  trackArtist: string;
+  rewardItemId: string;
+  maxClaims: number;
+  hints: SongHuntHint[];
+}
+
+export interface SongHuntFinder {
+  name: string;
+  claimedAt: string;
+}

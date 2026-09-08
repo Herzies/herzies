@@ -685,7 +685,12 @@ pub async fn api_fetch_artist_image(client: &Client, artist: &str) -> Option<Str
 }
 
 pub async fn api_fetch_active_events(client: &Client) -> Option<Vec<GameEvent>> {
-    let resp = api_fetch(client, reqwest::Method::GET, "/events/active", None).await?;
+    // Ported to a Supabase Edge Function (co-located with Postgres, off
+    // Vercel), like /sync and /chat: it's polled every 30s regardless of
+    // window visibility, so it was a steady source of Vercel invocations.
+    let url = format!("{}/events-active", functions_base());
+    let anon = supabase_anon_key();
+    let resp = api_fetch_full(client, reqwest::Method::GET, &url, None, Some(&anon)).await?;
     if !resp.status().is_success() {
         return None;
     }
@@ -743,8 +748,15 @@ pub async fn api_fetch_previous_hunt(
 
 /// GET /trade/pending — lightweight check for an incoming trade invite.
 /// Outer `None` = request failed; inner `None` = no pending invite.
+///
+/// Ported to a Supabase Edge Function (co-located with Postgres, off
+/// Vercel), like /sync and /chat: trade_watch_loop hits this every 5s
+/// whenever the window is hidden, so it was the single largest source of
+/// Vercel invocations.
 pub async fn api_check_pending_trade(client: &Client) -> Option<Option<PendingTradeRequest>> {
-    let resp = api_fetch(client, reqwest::Method::GET, "/trade/pending", None).await?;
+    let url = format!("{}/trade-pending", functions_base());
+    let anon = supabase_anon_key();
+    let resp = api_fetch_full(client, reqwest::Method::GET, &url, None, Some(&anon)).await?;
     if !resp.status().is_success() {
         return None;
     }

@@ -401,6 +401,23 @@ verify_jwt = true
 import_map = "./functions/deno.json"
 entrypoint = "./functions/chat/index.ts"
 
+# Port of GET /api/trade/pending. Polled every 5s by the desktop client's
+# trade_watch_loop whenever the window is hidden — moving it here (alongside
+# sync/chat) removes the bulk of the background Vercel invocation traffic.
+[functions.trade-pending]
+enabled = true
+verify_jwt = true
+import_map = "./functions/deno.json"
+entrypoint = "./functions/trade-pending/index.ts"
+
+# Port of GET /api/events/active. Polled every 30s by the desktop client's
+# events_watch_loop regardless of window visibility.
+[functions.events-active]
+enabled = true
+verify_jwt = true
+import_map = "./functions/deno.json"
+entrypoint = "./functions/events-active/index.ts"
+
 [analytics]
 enabled = true
 port = 54327
