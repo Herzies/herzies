@@ -274,6 +274,37 @@ export const RARITY_LABELS: Record<Rarity, string> = {
   legendary: "Legendary",
 };
 
+/** Relative weight for random world drops — common is heaviest, legendary lightest. */
+export const RARITY_DROP_WEIGHTS: Record<Rarity, number> = {
+  common: 100,
+  uncommon: 30,
+  rare: 8,
+  legendary: 1,
+};
+
+/** Items that can never appear as a random world drop, regardless of rarity. */
+export const NON_DROPPABLE_ITEM_IDS = ["first-edition", "spirit-orb"] as const;
+
+/** Chance a drop is rolled on each eligible listening tick (see DROP_TICK_MINUTES). */
+export const DROP_CHANCE_PER_TICK = 0.12;
+
+/** Weighted-random pick from a rarity-tagged candidate pool. `rng` returns a
+ * float in [0, 1) — inject Math.random in production, a seeded fn in tests. */
+export function pickWeightedDrop<T extends { rarity: Rarity }>(
+  candidates: T[],
+  rng: () => number = Math.random,
+): T | undefined {
+  if (candidates.length === 0) return undefined;
+  const weights = candidates.map((c) => RARITY_DROP_WEIGHTS[c.rarity]);
+  const total = weights.reduce((a, b) => a + b, 0);
+  let r = rng() * total;
+  for (let i = 0; i < candidates.length; i++) {
+    r -= weights[i];
+    if (r <= 0) return candidates[i];
+  }
+  return candidates[candidates.length - 1];
+}
+
 // --- Constants ---
 const SW = 30;
 const SH = 18;
@@ -649,6 +680,35 @@ function renderCdFrame(yAngle: number): string[] {
   return renderIconCard(yAngle, "#C0C0C0", "#7a7a7a", "#4a4a4a", cdCardIcon);
 }
 
+// --- Spirit Orb card ---
+function spiritOrbCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  const r = Math.sqrt(ix * ix + iy * iy);
+  const R = 0.26;
+  if (r > R) return null;
+  const eyeR = R * 0.16;
+  const ex = R * 0.32,
+    ey = -R * 0.08;
+  if (
+    Math.hypot(ix - ex, iy - ey) < eyeR ||
+    Math.hypot(ix + ex, iy - ey) < eyeR
+  ) {
+    return { bright: 0.15, color: "#1a1a2e" };
+  }
+  const shade = 0.9 - (r / R) * 0.35;
+  return { bright: shade, color: "#d8c8ff" };
+}
+
+function renderSpiritOrbFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#c9b8ff",
+    "#7d6bb0",
+    "#4a3d70",
+    spiritOrbCardIcon,
+  );
+}
+
 // --- Headphones card ---
 function headbandArcIcon(
   u: number,
@@ -915,6 +975,7 @@ const boomboxFrames = generateFrames(renderBoomboxFrame);
 const goodEyeSniperFrames = generateFrames(renderGoodEyeSniperFrame);
 const prismFrames = generateFrames(renderPrismFrame);
 const poseidonsGiftFrames = generateFrames(renderPoseidonsGiftFrame);
+const spiritOrbFrames = generateFrames(renderSpiritOrbFrame);
 
 // --- Clouds card ---
 function cloudCardIcon(u: number, v: number): TexSample | null {
@@ -1077,6 +1138,18 @@ export const ITEMS: ItemDef[] = [
     buyPrice: 100000,
     sellPrice: 500,
   },
+  {
+    id: "spirit-orb",
+    name: "Spirit Orb",
+    description:
+      "A small round spirit that watches over your herzie. Automatically collects drops for you.",
+    rarity: "legendary",
+    frames: spiritOrbFrames,
+    equipable: true,
+    equipSlot: "ground",
+    buyPrice: 50000,
+    sellPrice: 500,
+  },
 ];
 
 export function getItem(id: string): ItemDef | undefined {
@@ -1098,3 +1171,21 @@ export function getItemColor(item: ItemDef): string {
   const color = (front && dominantColor(front)) || "#ffffff";
   itemColorCache.set(item.id, color);
   return color;
+}
+
+/** Filters raw {id, rarity} rows (e.g. fetched from the `items` DB table) down
+ * to ones that are both a known catalog item and have a rarity recognized by
+ * RARITY_DROP_WEIGHTS. Defends pickWeightedDrop against an id absent from
+ * this catalog (mid-migration, a rename that left the old row behind, an
+ * admin-created row) or a bad rarity value — either would otherwise let a
+ * drop roll onto something the client can never render or collect, which
+ * (since a pending drop is never overwritten) would silently and permanently
+ * block that user from ever getting another drop. */
+export function filterDroppablePool<T extends { id: string; rarity: string }>(
+  rows: T[],
+): (T & { rarity: Rarity })[] {
+  return rows.filter(
+    (r): r is T & { rarity: Rarity } =>
+      getItem(r.id) !== undefined && r.rarity in RARITY_DROP_WEIGHTS,
+  );
+}

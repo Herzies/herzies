@@ -101,6 +101,34 @@ describe("prism colour scheme", () => {
   });
 });
 
+describe("spirit orb pet", () => {
+  it("renders without throwing on either ground slot", () => {
+    expect(() =>
+      generateRotationFrames(USER, 3, 8, { ground_left: "spirit-orb" }),
+    ).not.toThrow();
+    expect(() =>
+      generateRotationFrames(USER, 3, 8, { ground_right: "spirit-orb" }),
+    ).not.toThrow();
+  });
+
+  it("adds pixels beyond the plain body", () => {
+    const plain = generateRotationFrames(USER, 3, 12);
+    const withOrb = generateRotationFrames(USER, 3, 12, {
+      ground_left: "spirit-orb",
+    });
+    expect(hueSet(withOrb).size).toBeGreaterThan(hueSet(plain).size);
+  });
+
+  it("coexists with a boombox on the other ground slot", () => {
+    expect(() =>
+      generateRotationFrames(USER, 3, 8, {
+        ground_left: "spirit-orb",
+        ground_right: "boombox",
+      }),
+    ).not.toThrow();
+  });
+});
+
 describe("prism band spread", () => {
   // The first cut coloured whole spheres, so the head and body — each one big
   // sphere — came out flat: an orange herzie with a red hat and blue socks.

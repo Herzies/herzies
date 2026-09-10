@@ -7,7 +7,12 @@ import {
   getItem,
   getItemType,
   isModifierEquipped,
+  ITEMS,
+  NON_DROPPABLE_ITEM_IDS,
   normalizeEquipped,
+  pickWeightedDrop,
+  type Rarity,
+  RARITY_DROP_WEIGHTS,
 } from "./items.js";
 
 describe("color equip slot", () => {
@@ -159,5 +164,94 @@ describe("modifier slot", () => {
       false,
     );
     expect(isModifierEquipped({}, "good-eye-sniper")).toBe(false);
+  });
+});
+
+describe("spirit-orb", () => {
+  const spiritOrb = getItem("spirit-orb");
+
+  it("exists in the catalog as a purchasable ground-slot accessory", () => {
+    expect(spiritOrb).toMatchObject({
+      id: "spirit-orb",
+      equipable: true,
+      equipSlot: "ground",
+    });
+    expect(spiritOrb?.buyPrice).toBeGreaterThan(0);
+  });
+
+  it("has renderable card art", () => {
+    expect(spiritOrb?.frames.length).toBeGreaterThan(0);
+    for (const frame of spiritOrb?.frames ?? []) {
+      expect(frame.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("is excluded from the world-drop pool (store-only)", () => {
+    expect(NON_DROPPABLE_ITEM_IDS).toContain("spirit-orb");
+  });
+});
+
+describe("NON_DROPPABLE_ITEM_IDS", () => {
+  it("excludes first-edition, per 'any card but first edition can drop'", () => {
+    expect(NON_DROPPABLE_ITEM_IDS).toContain("first-edition");
+  });
+
+  it("only references real catalog ids", () => {
+    for (const id of NON_DROPPABLE_ITEM_IDS) {
+      expect(getItem(id)).toBeDefined();
+    }
+  });
+});
+
+describe("pickWeightedDrop", () => {
+  const candidates: { id: string; rarity: Rarity }[] = [
+    { id: "a", rarity: "common" },
+    { id: "b", rarity: "uncommon" },
+    { id: "c", rarity: "rare" },
+    { id: "d", rarity: "legendary" },
+  ];
+
+  it("returns undefined for an empty pool", () => {
+    expect(pickWeightedDrop([])).toBeUndefined();
+  });
+
+  it("picks the first (heaviest) candidate when rng returns 0", () => {
+    expect(pickWeightedDrop(candidates, () => 0)?.id).toBe("a");
+  });
+
+  it("picks the last candidate when rng returns just under 1", () => {
+    expect(pickWeightedDrop(candidates, () => 0.999999)?.id).toBe("d");
+  });
+
+  it("skews toward common over legendary across many rolls", () => {
+    let commonCount = 0;
+    let legendaryCount = 0;
+    for (let i = 0; i < 10_000; i++) {
+      const picked = pickWeightedDrop(candidates);
+      if (picked?.rarity === "common") commonCount++;
+      if (picked?.rarity === "legendary") legendaryCount++;
+    }
+    expect(commonCount).toBeGreaterThan(legendaryCount);
+  });
+
+  it("weight table orders common > uncommon > rare > legendary", () => {
+    expect(RARITY_DROP_WEIGHTS.common).toBeGreaterThan(
+      RARITY_DROP_WEIGHTS.uncommon,
+    );
+    expect(RARITY_DROP_WEIGHTS.uncommon).toBeGreaterThan(
+      RARITY_DROP_WEIGHTS.rare,
+    );
+    expect(RARITY_DROP_WEIGHTS.rare).toBeGreaterThan(
+      RARITY_DROP_WEIGHTS.legendary,
+    );
+  });
+
+  it("never picks a non-droppable item when the caller filters the pool first", () => {
+    const nonDroppable: readonly string[] = NON_DROPPABLE_ITEM_IDS;
+    const pool = ITEMS.filter((item) => !nonDroppable.includes(item.id));
+    for (let i = 0; i < 500; i++) {
+      const picked = pickWeightedDrop(pool);
+      expect(nonDroppable).not.toContain(picked?.id);
+    }
   });
 });

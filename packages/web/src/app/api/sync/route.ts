@@ -32,6 +32,7 @@ export async function POST(request: Request) {
       pendingFriendRequest: result.pendingFriendRequest,
       incomingFriendRequests: result.incomingFriendRequests,
       outgoingFriendRequests: result.outgoingFriendRequests,
+      pendingDrop: result.pendingDrop,
     };
 
     return NextResponse.json(response);

@@ -7,6 +7,7 @@ import type {
   Herzie,
   HerzieProfile,
   Inventory,
+  PendingDrop,
   PendingFriendRequest,
   StoreProduct,
   Trade,
@@ -61,7 +62,12 @@ export interface LeaderboardEntry {
   songHuntWins?: number;
 }
 
-export type { FriendRequestSummary, FriendSearchResult, PendingFriendRequest };
+export type {
+  FriendRequestSummary,
+  FriendSearchResult,
+  PendingDrop,
+  PendingFriendRequest,
+};
 
 export interface AppState {
   herzie: Herzie | null;
@@ -86,6 +92,7 @@ export interface AppState {
   pendingFriendRequest?: PendingFriendRequest | null;
   incomingFriendRequests: FriendRequestSummary[];
   outgoingFriendRequests: FriendRequestSummary[];
+  pendingDrop?: PendingDrop | null;
 }
 
 export const herzies = {
@@ -152,6 +159,9 @@ export const herzies = {
       newCurrency: number;
       inventory: Inventory;
     }>("buy_item", { itemId, quantity }),
+  /** Manually collects the current pending world drop. Resolves `true` if a
+   * drop was collected, `false` if nothing was pending. */
+  collectDrop: () => invoke<boolean>("collect_drop"),
 
   fetchStoreProducts: () => invoke<StoreProduct[]>("fetch_store_products"),
   /**

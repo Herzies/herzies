@@ -127,6 +127,8 @@ pub struct SyncResponse {
     pub incoming_friend_requests: Vec<FriendRequestSummary>,
     #[serde(default)]
     pub outgoing_friend_requests: Vec<FriendRequestSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending_drop: Option<PendingDrop>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,6 +137,15 @@ pub struct PendingTradeRequest {
     pub trade_id: String,
     pub from_name: String,
     pub from_friend_code: String,
+}
+
+/// A world drop waiting to be collected — absent once picked up (manually or
+/// automatically by an equipped Spirit Orb).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingDrop {
+    pub item_id: String,
+    pub dropped_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -256,6 +267,9 @@ pub struct AppState {
     pub incoming_friend_requests: Vec<FriendRequestSummary>,
     /// Friend requests you sent that are still pending.
     pub outgoing_friend_requests: Vec<FriendRequestSummary>,
+    /// A world drop waiting to be collected (auto-cleared once collected).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending_drop: Option<PendingDrop>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

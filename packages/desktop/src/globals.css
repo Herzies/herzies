@@ -111,6 +111,20 @@
   animation: prismatic-shift 14s linear infinite;
 }
 
+@keyframes drop-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+@utility animate-drop-float {
+  animation: drop-float 2.2s ease-in-out infinite;
+}
+
 @layer base {
   *,
   *::before,

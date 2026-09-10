@@ -534,6 +534,25 @@ async fn buy_item(
 }
 
 #[tauri::command]
+async fn collect_drop(
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<bool, String> {
+    let client = Client::new();
+    match api::api_collect_drop(&client).await? {
+        Some(_item_id) => {
+            {
+                let mut s = state.lock().unwrap();
+                s.pending_drop = None;
+            }
+            refresh_inventory_cache(&app, &client).await;
+            Ok(true)
+        }
+        None => Ok(false),
+    }
+}
+
+#[tauri::command]
 async fn fetch_store_products() -> Result<Vec<StoreProduct>, String> {
     let client = Client::new();
     Ok(api::api_fetch_store_products(&client)
@@ -1667,6 +1686,7 @@ async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
         storage::save_multipliers(&sync_resp.multipliers);
 
         s.pending_trade_request = sync_resp.pending_trade_request.clone();
+        s.pending_drop = sync_resp.pending_drop.clone();
         if !friend_state_stale {
             s.pending_friend_request = sync_resp.pending_friend_request.clone();
             s.incoming_friend_requests = sync_resp.incoming_friend_requests.clone();
@@ -1817,6 +1837,7 @@ pub fn run() {
             fetch_inventory,
             sell_item,
             buy_item,
+            collect_drop,
             equip_item,
             fetch_store_products,
             start_purchase,

@@ -1,5 +1,12 @@
-import { lastFmTrackUrl, levelProgress, xpToNextLevel } from "@herzies/shared";
-import { useEffect, useState } from "react";
+import {
+  getItem,
+  getItemColor,
+  getItemType,
+  lastFmTrackUrl,
+  levelProgress,
+  xpToNextLevel,
+} from "@herzies/shared";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "../lib/utils";
 import {
   type AppState,
@@ -9,27 +16,126 @@ import {
 } from "../tauri-bridge";
 import { Coin } from "./Coin";
 import { Herzie3D } from "./Herzie3D";
+import { CARD_SHAPE_CLIP, ItemTypeIcon } from "./icons/ItemTypeIcon";
 import { MarqueeText } from "./MarqueeText";
 import { Tooltip } from "./Tooltip";
+
+/** Dev-only: a locally spawned drop for testing the drop UI (Settings →
+ * Debug). Never touches the server or inventory. */
+export interface DebugDrop {
+  /** Unique per spawn — repeat drops of the same item never merge. */
+  id: string;
+  itemId: string;
+  /** Ground position, percent from the left, assigned once at spawn. */
+  x: number;
+}
+
+/** Keep drops off the very edges of the scene. */
+export const DROP_X_MIN = 8;
+export const DROP_X_MAX = 92;
+
+/** How long the pick-up fade-and-rise plays before the drop actually leaves. */
+const DROP_EXIT_MS = 260;
 
 export function HomeView({
   state,
   stageOverride,
   onOpenProfile,
   onOpenSettings,
+  debugDrops,
+  onCollectDebugDrop,
 }: {
   state: AppState;
   stageOverride?: number | null;
   /** Open the viewer's own profile (same layout as other herzies'). */
   onOpenProfile?: () => void;
   onOpenSettings?: () => void;
+  debugDrops?: DebugDrop[];
+  onCollectDebugDrop?: (id: string) => void;
 }) {
-  const { herzie, nowPlaying, multipliers, isConnected, equipped } = state;
+  const { herzie, nowPlaying, multipliers, isConnected, equipped, pendingDrop } =
+    state;
   const [globalRank, setGlobalRank] = useState<number | undefined>(undefined);
   const [globalTotal, setGlobalTotal] = useState<number | undefined>(undefined);
+  const [collectingDrop, setCollectingDrop] = useState(false);
   const pinned = useWindowPinned();
   const ghostMode = useGhostMode();
   const friendCode = herzie?.friendCode;
+
+  // The real drop has no ground position of its own (the server only tracks
+  // itemId/droppedAt) — pick one client-side the first time a given drop is
+  // seen and keep it stable across re-renders for as long as that drop lasts.
+  const realDropXRef = useRef<Map<string, number>>(new Map());
+  const realDropX = (droppedAt: string) => {
+    let x = realDropXRef.current.get(droppedAt);
+    if (x === undefined) {
+      x = DROP_X_MIN + Math.random() * (DROP_X_MAX - DROP_X_MIN);
+      realDropXRef.current.set(droppedAt, x);
+    }
+    return x;
+  };
+
+  // A Spirit Orb auto-collects drops server-side within one sync tick, so the
+  // manual "Collect" affordance would almost always be stale — skip it when
+  // either ground slot has one equipped.
+  const hasSpiritOrb =
+    equipped.ground_left === "spirit-orb" || equipped.ground_right === "spirit-orb";
+  // The real drop (server-driven, always a single item) renders alongside any
+  // debug drops (dev-only, each spawn its own item on the ground) — every
+  // item is independently collectible.
+  const dropItems: (DebugDrop & { isDebug: boolean })[] = [
+    ...(pendingDrop
+      ? [
+          {
+            id: "real",
+            itemId: pendingDrop.itemId,
+            x: realDropX(pendingDrop.droppedAt),
+            isDebug: false,
+          },
+        ]
+      : []),
+    ...(debugDrops ?? []).map((d) => ({ ...d, isDebug: true })),
+  ];
+
+  const dropKey = (drop: DebugDrop & { isDebug: boolean }) =>
+    `${drop.isDebug ? "debug" : "real"}-${drop.id}`;
+
+  const performCollect = async (drop: DebugDrop & { isDebug: boolean }) => {
+    if (drop.isDebug) {
+      onCollectDebugDrop?.(drop.id);
+      return;
+    }
+    if (collectingDrop) return;
+    setCollectingDrop(true);
+    try {
+      await herzies.collectDrop();
+    } finally {
+      setCollectingDrop(false);
+    }
+  };
+
+  // Picking one up plays a quick fade-and-rise before it actually leaves —
+  // `leavingKeys` drives that transition locally, and the real removal
+  // (unmounting the debug drop / calling the server) is deferred until it
+  // finishes so the item doesn't just vanish mid-animation. The key also
+  // doubles as a guard against a drag sweep re-triggering the same item
+  // while its exit is still playing.
+  const [leavingKeys, setLeavingKeys] = useState<Set<string>>(new Set());
+
+  const handleCollectDrop = (drop: DebugDrop & { isDebug: boolean }) => {
+    const key = dropKey(drop);
+    if (leavingKeys.has(key)) return;
+    setLeavingKeys((prev) => new Set(prev).add(key));
+    setTimeout(() => {
+      performCollect(drop);
+      setLeavingKeys((prev) => {
+        if (!prev.has(key)) return prev;
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+    }, DROP_EXIT_MS);
+  };
 
   const togglePin = () => {
     // setWindowPinned updates the shared pinned cache synchronously, so the
@@ -184,13 +290,113 @@ export function HomeView({
         </div>
       </div>
 
-      <div className="flex min-h-0 flex-1 items-center justify-center">
+      <div className="relative flex min-h-0 flex-1 items-center justify-center">
         <Herzie3D
           userId={herzie.friendCode}
           stage={stageOverride ?? herzie.stage}
           isPlaying={!!nowPlaying}
           equipped={equipped}
         />
+        {dropItems.length > 0 && !hasSpiritOrb && (
+          // pointer-events-none on the wrapper keeps the gaps between items
+          // from blocking herzie drag; each item re-enables pointer events
+          // on itself. z-10: the herzie canvas sets its own z-index: 1 (see
+          // Herzie3D.tsx), which otherwise sits above this overlay in the
+          // stacking order and swallows clicks even though it's visually
+          // behind. Items sit directly on the ground (no box/panel) at a
+          // random x picked once at spawn.
+          <div className="pointer-events-none absolute inset-x-0 bottom-2 z-10 h-0">
+            {dropItems.map((drop) => {
+              const item = getItem(drop.itemId);
+              const itemType = item ? getItemType(item) : undefined;
+              const key = dropKey(drop);
+              const isLeaving = leavingKeys.has(key);
+              return (
+                // The absolute positioning (ground x-position) lives on this
+                // outer span, not on the button below — Tooltip's own
+                // trigger span only sizes/anchors correctly around content
+                // that's actually in normal flow. Nesting a position:absolute
+                // element straight inside it collapses that trigger span to
+                // zero size at the wrong spot, which threw the tooltip's
+                // placement off.
+                <span
+                  key={key}
+                  className="pointer-events-auto absolute bottom-0 -translate-x-1/2"
+                  style={{ left: `${drop.x}%` }}
+                >
+                  <Tooltip label={item?.name ?? drop.itemId}>
+                    <button
+                      type="button"
+                      // mousedown (not click) so a held-down button can be
+                      // dragged across several drops in one gesture — see
+                      // the onMouseEnter below, which picks up whatever's
+                      // under the cursor while the button stays held.
+                      onMouseDown={() => handleCollectDrop(drop)}
+                      onMouseEnter={(e) => {
+                        if (e.buttons === 1) handleCollectDrop(drop);
+                      }}
+                      disabled={isLeaving || (!drop.isDebug && collectingDrop)}
+                      className="flex cursor-pointer flex-col items-center border-none bg-transparent p-0 disabled:cursor-default"
+                    >
+                      {/* The float animation and the pick-up exit both
+                          apply here — only here, not to the shadow below —
+                          so the item bobs while its shadow stays put on the
+                          ground. */}
+                      <div
+                        className={cn(
+                          "transition-all ease-out",
+                          isLeaving
+                            ? "-translate-y-2 opacity-0 duration-[260ms]"
+                            : "animate-drop-float",
+                        )}
+                        style={
+                          isLeaving
+                            ? undefined
+                            : { animationDelay: `${(drop.x * 37) % 2200}ms` }
+                        }
+                      >
+                        {item && itemType ? (
+                          <span className="relative inline-block h-4 w-4">
+                            {/* Card-shaped backing in the app's own
+                                background colour so the icon reads as an
+                                opaque card instead of a bare wireframe
+                                outline. */}
+                            <span
+                              aria-hidden="true"
+                              className="absolute inset-0 bg-bg"
+                              style={{ clipPath: CARD_SHAPE_CLIP }}
+                            />
+                            {/* Coloured by this specific item's own
+                                dominant art colour, not its category —
+                                different items of the same type (e.g. two
+                                "equipable" cards) should look distinct. */}
+                            <ItemTypeIcon
+                              type={itemType}
+                              className="relative block h-4 w-4"
+                              style={{ color: getItemColor(item) }}
+                            />
+                          </span>
+                        ) : (
+                          // Always render the Collect action even if the
+                          // item id isn't in this build's catalog — a real
+                          // pending drop is never overwritten server-side,
+                          // so if this affordance silently didn't render for
+                          // an unrecognized id, that user could never get
+                          // another drop. Falling back to the raw id keeps
+                          // it clickable regardless.
+                          <span className="text-[9px] text-text-dim">
+                            {drop.itemId}
+                          </span>
+                        )}
+                      </div>
+                      <div className="h-1 w-3.5 rounded-full bg-black/40 blur-[1px]" />
+                    </button>
+                  </Tooltip>
+                </span>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <div className="mb-1.5">

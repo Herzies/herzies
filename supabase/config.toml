@@ -418,6 +418,14 @@ verify_jwt = true
 import_map = "./functions/deno.json"
 entrypoint = "./functions/events-active/index.ts"
 
+# New (not a port): manually collects a pending world drop into the caller's
+# inventory. Called when the user clicks "Collect" on the pending-drop UI.
+[functions.collect-drop]
+enabled = true
+verify_jwt = true
+import_map = "./functions/deno.json"
+entrypoint = "./functions/collect-drop/index.ts"
+
 [analytics]
 enabled = true
 port = 54327

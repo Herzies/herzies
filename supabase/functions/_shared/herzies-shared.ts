@@ -86,6 +86,88 @@ export interface PendingFriendRequest {
   fromFriendCode: string;
 }
 
+/** A world drop waiting to be collected — absent once picked up (manually or
+ * automatically by an equipped Spirit Orb). Mirror of packages/shared/src/types.ts. */
+export interface PendingDrop {
+  itemId: string;
+  droppedAt: string;
+}
+
+/** Mirror of packages/shared/src/items.ts's Rarity. */
+export type Rarity = "common" | "uncommon" | "rare" | "legendary";
+
+/** Relative weight for random world drops — common is heaviest, legendary
+ * lightest. Mirror of packages/shared/src/items.ts's RARITY_DROP_WEIGHTS. */
+export const RARITY_DROP_WEIGHTS: Record<Rarity, number> = {
+  common: 100,
+  uncommon: 30,
+  rare: 8,
+  legendary: 1,
+};
+
+/** Items that can never appear as a random world drop, regardless of rarity.
+ * Mirror of packages/shared/src/items.ts's NON_DROPPABLE_ITEM_IDS. */
+export const NON_DROPPABLE_ITEM_IDS = ["first-edition", "spirit-orb"] as const;
+
+/** Chance a drop is rolled on each eligible listening tick. Mirror of
+ * packages/shared/src/items.ts's DROP_CHANCE_PER_TICK. */
+export const DROP_CHANCE_PER_TICK = 0.12;
+
+/** Weighted-random pick from a rarity-tagged candidate pool. Mirror of
+ * packages/shared/src/items.ts's pickWeightedDrop. */
+export function pickWeightedDrop<T extends { rarity: Rarity }>(
+  candidates: T[],
+  rng: () => number = Math.random,
+): T | undefined {
+  if (candidates.length === 0) return undefined;
+  const weights = candidates.map((c) => RARITY_DROP_WEIGHTS[c.rarity]);
+  const total = weights.reduce((a, b) => a + b, 0);
+  let r = rng() * total;
+  for (let i = 0; i < candidates.length; i++) {
+    r -= weights[i];
+    if (r <= 0) return candidates[i];
+  }
+  return candidates[candidates.length - 1];
+}
+
+/** Every item id in packages/shared/src/items.ts's ITEMS catalog. Kept as a
+ * plain id list (not the full ItemDef catalog, which generates ASCII card art
+ * at module load — wasted cold-start cost in a function that never renders
+ * cards) so filterDroppablePool below can validate DB rows against it.
+ *
+ * MUST be updated whenever an item is added to or removed from ITEMS — same
+ * "keep this in sync" obligation as the rest of this file. An id present in
+ * the `items` table but missing here (or vice versa) is exactly the drift
+ * this list exists to catch: see filterDroppablePool. */
+const KNOWN_ITEM_IDS = new Set([
+  "first-edition",
+  "cd",
+  "headphones",
+  "rainbow-headband",
+  "boombox",
+  "good-eye-sniper",
+  "clouds",
+  "stars",
+  "prism",
+  "poseidons-gift",
+  "spirit-orb",
+]);
+
+/** Filters raw {id, rarity} rows fetched from the `items` DB table down to
+ * ones that are both a known catalog item and have a rarity recognized by
+ * RARITY_DROP_WEIGHTS. Mirror of packages/shared/src/items.ts's
+ * filterDroppablePool — see its doc comment for why this matters (an
+ * unrecognized id/rarity would otherwise silently and permanently block a
+ * user's world-drop slot, since a pending drop is never overwritten). */
+export function filterDroppablePool<T extends { id: string; rarity: string }>(
+  rows: T[],
+): (T & { rarity: Rarity })[] {
+  return rows.filter(
+    (r): r is T & { rarity: Rarity } =>
+      KNOWN_ITEM_IDS.has(r.id) && r.rarity in RARITY_DROP_WEIGHTS,
+  );
+}
+
 export interface FriendRequestSummary {
   requestId: string;
   friendCode: string;

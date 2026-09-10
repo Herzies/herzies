@@ -483,3 +483,139 @@ describe("Sync flow", () => {
     expect((data!.inventory_v2 as Record<string, number>)["rare-item"]).toBe(1);
   });
 });
+
+describe("World drops", () => {
+  it("advances drop_rolls_done by exactly 1 when crossing a 10-minute boundary", async () => {
+    const admin = getAdminClient();
+    const dropUser = await createTestUser();
+    await createTestHerzie(dropUser.userId, {
+      total_minutes_listened: 0,
+      inventory_v2: {},
+    });
+
+    const tenMinAgo = new Date(Date.now() - 10 * 60_000).toISOString();
+    await admin
+      .from("herzies")
+      .update({ last_synced_at: tenMinAgo })
+      .eq("user_id", dropUser.userId);
+
+    const res = await syncRoute(
+      authenticatedRequest("/sync", dropUser.accessToken, {
+        nowPlaying: { title: "Drop Song", artist: "Drop Artist" },
+        minutesListened: 10,
+        genres: ["rock"],
+      }),
+    );
+    expect(res.status).toBe(200);
+
+    const { data } = await admin
+      .from("herzies")
+      .select("drop_rolls_done, total_minutes_listened")
+      .eq("user_id", dropUser.userId)
+      .single();
+
+    expect(data!.total_minutes_listened).toBeGreaterThanOrEqual(10);
+    expect(data!.drop_rolls_done).toBe(1);
+  });
+
+  it("does not advance drop_rolls_done again while still within the same 10-minute tick", async () => {
+    const admin = getAdminClient();
+    const dropUser = await createTestUser();
+    await createTestHerzie(dropUser.userId, {
+      total_minutes_listened: 10,
+      drop_rolls_done: 1,
+      inventory_v2: {},
+    });
+
+    const tenMinAgo = new Date(Date.now() - 10 * 60_000).toISOString();
+    await admin
+      .from("herzies")
+      .update({ last_synced_at: tenMinAgo })
+      .eq("user_id", dropUser.userId);
+
+    // 1 more minute (10 -> 11) is still floor(11/10) === 1, the same tick
+    // drop_rolls_done already accounts for — should not roll or advance again.
+    const res = await syncRoute(
+      authenticatedRequest("/sync", dropUser.accessToken, {
+        nowPlaying: { title: "Same Tick", artist: "Same Artist" },
+        minutesListened: 1,
+        genres: ["rock"],
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.herzie.totalMinutesListened).toBeGreaterThanOrEqual(11);
+
+    const { data } = await admin
+      .from("herzies")
+      .select("drop_rolls_done")
+      .eq("user_id", dropUser.userId)
+      .single();
+    expect(data!.drop_rolls_done).toBe(1);
+  });
+
+  it("auto-collects a pending drop in the same tick when Spirit Orb is equipped", async () => {
+    const admin = getAdminClient();
+    const petUser = await createTestUser();
+    await createTestHerzie(petUser.userId, {
+      inventory_v2: {},
+      equipped: { ground_left: "spirit-orb" },
+    });
+
+    await admin.rpc("roll_pending_drop", {
+      p_user_id: petUser.userId,
+      p_item_id: "headphones",
+    });
+
+    const res = await syncRoute(
+      authenticatedRequest("/sync", petUser.accessToken, {
+        nowPlaying: null,
+        minutesListened: 0,
+        genres: [],
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+
+    expect(body.pendingDrop).toBeUndefined();
+
+    const collectedNotif = body.notifications.find(
+      (n: { type: string; itemId?: string }) =>
+        n.type === "item_granted" && n.itemId === "headphones",
+    );
+    expect(collectedNotif).toBeDefined();
+
+    const { data } = await admin
+      .from("herzies")
+      .select("inventory_v2, pending_drop_item_id")
+      .eq("user_id", petUser.userId)
+      .single();
+    expect((data!.inventory_v2 as Record<string, number>).headphones).toBe(1);
+    expect(data!.pending_drop_item_id).toBeNull();
+  });
+
+  it("leaves the drop pending and reports it in the sync response without the pet equipped", async () => {
+    const admin = getAdminClient();
+    const noPetUser = await createTestUser();
+    await createTestHerzie(noPetUser.userId, { inventory_v2: {} });
+
+    await admin.rpc("roll_pending_drop", {
+      p_user_id: noPetUser.userId,
+      p_item_id: "boombox",
+    });
+
+    const res = await syncRoute(
+      authenticatedRequest("/sync", noPetUser.accessToken, {
+        nowPlaying: null,
+        minutesListened: 0,
+        genres: [],
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+
+    expect(body.pendingDrop).toEqual(
+      expect.objectContaining({ itemId: "boombox" }),
+    );
+  });
+});

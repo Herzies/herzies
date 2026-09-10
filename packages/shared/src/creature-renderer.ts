@@ -151,6 +151,7 @@ const IDLE = {
   limb: { amp: 0.03, period: 1800 },
   ear: { amp: 0.02, period: 2200 },
   spike: { amp: 0.015, period: 2200 }, // follows ears
+  spirit: { amp: 0.035, period: 3400 }, // Spirit Orb — slowest bob of the set
 } as const;
 
 // --- Dance animation constants ---
@@ -166,6 +167,7 @@ const DANCE = {
   ear: { amp: 0.055, cycles: 4 }, // double body freq — floppy
   spike: { amp: 0.04, cycles: 4, xAmp: 0.03, xCycles: 2 }, // Y bounce + lateral X sway
   ground: { amp: 0.06, cycles: 2 }, // boombox hop — upward bounce on the beat
+  spirit: { amp: 0.08, cycles: 1 }, // Spirit Orb — slow smooth float, not a hop
 } as const;
 
 // --- Seeded PRNG ---
@@ -235,6 +237,9 @@ function applyDanceOffsets(spheres: Sphere[], frameIdx: number): Sphere[] {
   const groundOff =
     -Math.abs(Math.sin(2 * Math.PI * t * DANCE.ground.cycles)) *
     DANCE.ground.amp;
+  // Spirit Orb floats with a slow smooth bob rather than a hop — half the
+  // body's cycle count, so it visibly lags the beat.
+  const spiritOff = yOff(DANCE.spirit.amp, DANCE.spirit.cycles, Math.PI / 5);
 
   return spheres.map((s) => {
     let dy = 0;
@@ -249,6 +254,7 @@ function applyDanceOffsets(spheres: Sphere[], frameIdx: number): Sphere[] {
     } else if (s.part === "arm-l" || s.part === "leg-l") dy = limbLOff;
     else if (s.part === "arm-r" || s.part === "leg-r") dy = limbROff;
     else if (s.part === "ground") dy = groundOff;
+    else if (s.part === "spirit") dy = spiritOff;
 
     return {
       ...s,
@@ -1141,6 +1147,76 @@ function buildBoomboxSpheres(
   });
 }
 
+/** A small round spirit with two eyes, resting near the herzie's feet — the
+ * Spirit Orb pet. Reuses the same eyeZ() surface-protrusion math and pupil
+ * offset as the body builders (e.g. buildBlob), inlined here rather than via
+ * addPupils/eye-sphere pushes since this builder returns a flat sphere array
+ * (matching buildBoomboxSpheres' contract) instead of mutating in place. */
+function buildSpiritOrbSpheres(
+  spheres: Sphere[],
+  cols: number,
+  side: GroundSide,
+): Sphere[] {
+  if (spheres.length === 0) return [];
+
+  // Floats roughly level with the herzie's vertical midpoint rather than
+  // resting on the ground like the boombox — reads as a hovering companion,
+  // not a prop sitting at its feet.
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const s of spheres) {
+    minY = Math.min(minY, s.center[1] - s.radius);
+    maxY = Math.max(maxY, s.center[1] + s.radius);
+  }
+  const midY = (minY + maxY) / 2;
+
+  const bodyColor = "#c9b8ff";
+  const eyeColor = "#1a1a2e";
+  const pupilColor = "#000000";
+
+  // Fixed world-space size, same basis as the boombox, but clearly smaller —
+  // reads as a small round "spirit", not a companion-sized creature.
+  const orbR = BOOMBOX_REF_HEIGHT * 0.12;
+  const eyeR = orbR * 0.22;
+  const eyeX = orbR * 0.38;
+  const eyeY = -orbR * 0.1;
+  const ez = eyeZ(orbR, eyeX, eyeY, eyeR);
+  const pupilR = eyeR * 0.32;
+  const pupilZOff = -eyeR * 0.85;
+
+  interface LocalSphere {
+    c: V3;
+    r: number;
+    color: string;
+  }
+  const local: LocalSphere[] = [
+    { c: [0, 0, 0], r: orbR, color: bodyColor },
+    { c: [-eyeX, eyeY, ez], r: eyeR, color: eyeColor },
+    { c: [eyeX, eyeY, ez], r: eyeR, color: eyeColor },
+    { c: [-eyeX, eyeY, ez + pupilZOff], r: pupilR, color: pupilColor },
+    { c: [eyeX, eyeY, ez + pupilZOff], r: pupilR, color: pupilColor },
+  ];
+
+  // Horizontal placement reuses the same bottom-corner scheme as the
+  // boombox (still respects left/right slot + camera-FOV margin math), but
+  // the vertical placement floats at midY instead of the ground. Its part is
+  // "spirit", not "ground" — like the boombox, renderCreatureFrame keeps it
+  // fixed while the herzie is manually rotated, but unlike the boombox it
+  // gets its own autonomous motion (a slow bob plus an occasional orbit lap
+  // around the herzie) baked into the idle loop — see applyIdleOffsets.
+  const bz = -orbR * 1.6;
+  const by = midY;
+  const bx = groundCornerX(cols, side, orbR, orbR, -orbR, bz, 0.1);
+
+  return local.map((ls) => ({
+    center: [bx + ls.c[0], by + ls.c[1], bz + ls.c[2]] as V3,
+    radius: ls.r,
+    zone: "wearable" as const,
+    part: "spirit",
+    color: ls.color,
+  }));
+}
+
 export function equippedCacheKey(equipped?: Equipped): string {
   if (!equipped) return "";
   // Derived from EQUIPPED_SLOTS so a new slot can never silently miss the key
@@ -1173,6 +1249,8 @@ function appendWearableSpheres(
     const itemId = equipped[groundSlot(side)];
     if (itemId === "boombox") {
       spheres.push(...buildBoomboxSpheres(spheres, cols, side, boomboxConfig));
+    } else if (itemId === "spirit-orb") {
+      spheres.push(...buildSpiritOrbSpheres(spheres, cols, side));
     }
   }
 }
@@ -1208,6 +1286,24 @@ function buildCreatureSpheres(params: CreatureParams, stage: number): Sphere[] {
   return spheres;
 }
 
+// --- Spirit Orb orbit ---
+// Angular offset (radians), around the herzie's vertical axis, for the
+// Spirit Orb's autonomous "spin around the herzie" flourish: it rests at its
+// normal position for most of the idle loop, then sweeps one eased lap near
+// the end. Returns exactly 0 at t=0 and (2π, i.e. equivalent to 0) at t=1, so
+// it tiles seamlessly into the next loop replay without a visible snap.
+
+const SPIRIT_ORBIT_START = 0.72; // rests for the first ~72% of the idle loop
+
+function spiritOrbitAngle(t: number): number {
+  if (t < SPIRIT_ORBIT_START) return 0;
+  const spinT = (t - SPIRIT_ORBIT_START) / (1 - SPIRIT_ORBIT_START);
+  // Ease in/out so the lap doesn't snap to/from a standstill.
+  const eased =
+    spinT < 0.5 ? 2 * spinT * spinT : 1 - (-2 * spinT + 2) ** 2 / 2;
+  return eased * Math.PI * 2;
+}
+
 // --- Idle animation offsets ---
 // Returns a copy of the sphere list with per-part Y offsets applied.
 
@@ -1230,8 +1326,21 @@ function applyIdleOffsets(spheres: Sphere[], frameIdx: number): Sphere[] {
   const spikeOff = offset(IDLE.spike, Math.PI / 3);
   const limbLOff = offset(IDLE.limb, 0);
   const limbROff = offset(IDLE.limb, Math.PI); // mirrored phase
+  const spiritOff = offset(IDLE.spirit, Math.PI / 5);
+  const spiritSpin = spiritOrbitAngle(frameIdx / IDLE_FRAMES);
 
   return spheres.map((s) => {
+    if (s.part === "spirit") {
+      // Rotating every orb sphere by the same angle around the herzie's
+      // vertical axis is a rigid transform — it preserves the orb's own
+      // shape (eyes stay put relative to its body) while sweeping the whole
+      // cluster along a circular path, naturally turning to face its
+      // direction of travel as it goes.
+      const [x, , z] = s.center;
+      const [sx, , sz] = rotY([x, 0, z], spiritSpin);
+      return { ...s, center: [sx, s.center[1] + spiritOff, sz] as V3 };
+    }
+
     let dy = 0;
     if (s.part === "body") dy = bodyOff;
     else if (s.part === "head") dy = headOff;
@@ -1417,9 +1526,12 @@ function renderCreatureFrame(
       s.center[1] * TILT_COS - s.center[2] * TILT_SIN,
       s.center[1] * TILT_SIN + s.center[2] * TILT_COS,
     ];
-    // Ground props (e.g. the boombox) are anchored to the scene, not the
-    // creature — they keep their facing as the herzie spins around its Y axis.
-    const isFixed = s.part === "ground";
+    // Ground props (e.g. the boombox) and the Spirit Orb ("spirit") are both
+    // anchored to the scene, not the creature — they keep their facing as the
+    // herzie spins around its Y axis (manual drag-rotation shouldn't drag the
+    // orb along with it). The orb gets its own independent motion instead,
+    // via the idle-loop orbit in applyIdleOffsets below.
+    const isFixed = s.part === "ground" || s.part === "spirit";
     return {
       center: isFixed ? tilted : rotY(tilted, yAngle),
       radius: s.radius,

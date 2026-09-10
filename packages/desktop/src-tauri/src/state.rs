@@ -50,6 +50,9 @@ pub struct ManagedState {
     pub incoming_friend_requests: Vec<FriendRequestSummary>,
     /// All pending friend requests you sent (Add friend tab).
     pub outgoing_friend_requests: Vec<FriendRequestSummary>,
+    /// Latest pending world drop from `/sync` (cleared when absent on a
+    /// successful sync, e.g. after a Spirit Orb auto-collects it).
+    pub pending_drop: Option<PendingDrop>,
     /// Bumped on every local `friend_codes` mutation (add/accept/remove). A
     /// `sync_tick` captures this before its network call; if it changes while
     /// the request is in flight, the (now-stale) server `friend_codes` is not
@@ -90,6 +93,7 @@ impl ManagedState {
             pending_friend_request: None,
             incoming_friend_requests: Vec::new(),
             outgoing_friend_requests: Vec::new(),
+            pending_drop: None,
             friend_epoch: 0,
         }
     }
@@ -110,6 +114,7 @@ impl ManagedState {
         self.pending_friend_request = None;
         self.incoming_friend_requests.clear();
         self.outgoing_friend_requests.clear();
+        self.pending_drop = None;
         crate::storage::clear_equipped();
         crate::storage::clear_inventory_cache();
         crate::storage::clear_friends_cache();
@@ -171,6 +176,7 @@ impl ManagedState {
             pending_friend_request: self.pending_friend_request.clone(),
             incoming_friend_requests: self.incoming_friend_requests.clone(),
             outgoing_friend_requests: self.outgoing_friend_requests.clone(),
+            pending_drop: self.pending_drop.clone(),
         }
     }
 }
@@ -279,6 +285,7 @@ mod tests {
             pending_friend_request: None,
             incoming_friend_requests: Vec::new(),
             outgoing_friend_requests: Vec::new(),
+            pending_drop: None,
             friend_epoch: 0,
         }
     }

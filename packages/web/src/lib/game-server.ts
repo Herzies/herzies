@@ -3,16 +3,21 @@ import {
   applyXp,
   calculateXpGain,
   classifyGenre,
+  DROP_CHANCE_PER_TICK,
   type EventNotification,
+  filterDroppablePool,
   type FriendRequestSummary,
   getDailyCraving,
   goodEyeSniperBonus,
   type Herzie,
   isModifierEquipped,
   matchesCraving,
+  NON_DROPPABLE_ITEM_IDS,
   normalizeEquipped,
+  type PendingDrop,
   type PendingFriendRequest,
   type PendingTradeRequest,
+  pickWeightedDrop,
   recordGenreMinutes,
   type SecretTrackConfig,
   type Stage,
@@ -23,6 +28,13 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 /** Good Eye Sniper occupies the modifier slot. */
 function hasGoodEyeSniperEquipped(equipped: unknown): boolean {
   return isModifierEquipped(normalizeEquipped(equipped), "good-eye-sniper");
+}
+
+/** Spirit Orb occupies a ground slot (either side) and auto-collects pending
+ * world drops so the user doesn't have to manually click to collect. */
+function hasSpiritOrbEquipped(equipped: unknown): boolean {
+  const e = normalizeEquipped(equipped);
+  return e.ground_left === "spirit-orb" || e.ground_right === "spirit-orb";
 }
 
 /** Normalize a track string for fuzzy matching */
@@ -163,6 +175,7 @@ export async function processSync(
   pendingFriendRequest?: PendingFriendRequest;
   incomingFriendRequests: FriendRequestSummary[];
   outgoingFriendRequests: FriendRequestSummary[];
+  pendingDrop?: PendingDrop;
 }> {
   const source = options.source ?? "cli";
   // 1. Fetch the herzie
@@ -345,6 +358,88 @@ export async function processSync(
     });
   }
 
+  // 5b. Roll for a world drop at the same cadence as CD accrual above, then
+  // auto-collect it immediately if a Spirit Orb pet is equipped — so a
+  // pet-equipped user doesn't wait an extra sync cycle for a drop that
+  // spawned this tick. roll_pending_drop no-ops if one is already pending,
+  // so only one drop is ever outstanding at a time.
+  //
+  // Dev-only test mode: HERZIES_DROP_TEST_MODE=1 rolls on every sync call
+  // instead of every 10 listened minutes, and always hits instead of rolling
+  // DROP_CHANCE_PER_TICK — since the sync daemon calls roughly every 10s,
+  // this gives a fast ~10s drop cadence for local iteration. Must never be
+  // set in production (it would spam every real user with a drop on every
+  // sync); leave unset there. Deliberately skips drop_rolls_done bookkeeping
+  // in test mode so toggling it off resumes normal cadence unaffected.
+  const dropTestMode = process.env.HERZIES_DROP_TEST_MODE === "1";
+  const totalDropRollsEligible = Math.floor(herzie.totalMinutesListened / 10);
+  const dropRollsDone = (row.drop_rolls_done ?? 0) as number;
+
+  let pendingDropItemId = row.pending_drop_item_id as string | null;
+  let pendingDropAt = row.pending_drop_at as string | null;
+
+  if (dropTestMode || totalDropRollsEligible > dropRollsDone) {
+    if (!pendingDropItemId && (dropTestMode || Math.random() < DROP_CHANCE_PER_TICK)) {
+      const { data: pool } = await admin
+        .from("items")
+        .select("id, rarity")
+        .not(
+          "id",
+          "in",
+          `(${NON_DROPPABLE_ITEM_IDS.map((id) => `"${id}"`).join(",")})`,
+        );
+      // Rows come from the DB, not the TS catalog — filter out any id/rarity
+      // this catalog doesn't recognize before feeding the picker (see
+      // filterDroppablePool's doc comment for why this matters).
+      const picked = pool
+        ? pickWeightedDrop(filterDroppablePool(pool))
+        : undefined;
+      if (picked) {
+        await admin.rpc("roll_pending_drop", {
+          p_user_id: userId,
+          p_item_id: picked.id,
+        });
+        pendingDropItemId = picked.id;
+        pendingDropAt = now.toISOString();
+        notifications.push({
+          type: "info",
+          title: "A drop appeared!",
+          message: "Something dropped nearby — come collect it.",
+        });
+      }
+    }
+    if (!dropTestMode) {
+      await admin
+        .from("herzies")
+        .update({ drop_rolls_done: totalDropRollsEligible })
+        .eq("user_id", userId);
+    }
+  }
+
+  if (pendingDropItemId && hasSpiritOrbEquipped(row.equipped)) {
+    const { data: collectedId } = await admin.rpc("collect_pending_drop", {
+      p_user_id: userId,
+    });
+    if (collectedId) {
+      notifications.push({
+        type: "item_granted",
+        title: "Spirit Orb",
+        message: `Your Spirit Orb collected: ${collectedId}`,
+        itemId: collectedId as string,
+        quantity: 1,
+      });
+      pendingDropItemId = null;
+      pendingDropAt = null;
+    }
+  }
+
+  const pendingDrop: PendingDrop | undefined = pendingDropItemId
+    ? {
+        itemId: pendingDropItemId,
+        droppedAt: pendingDropAt ?? now.toISOString(),
+      }
+    : undefined;
+
   // Track which song-hunt announcements this user has already seen.
   const notifiedHunts = (row.notified_hunts ?? []) as string[];
 
@@ -485,6 +580,7 @@ export async function processSync(
     pendingFriendRequest,
     incomingFriendRequests,
     outgoingFriendRequests,
+    pendingDrop,
   };
 }
 
