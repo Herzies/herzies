@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Herzies icon editor</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    background: #0b0d14;
+    color: #e6e6e6;
+    display: flex;
+    height: 100vh;
+  }
+
+  #sidebar {
+    width: 220px;
+    flex-shrink: 0;
+    border-right: 1px solid #2a2d3a;
+    overflow-y: auto;
+    padding: 8px;
+  }
+  #sidebar h1 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #8b8fa3;
+    margin: 4px 4px 10px;
+  }
+  .item-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 6px 8px;
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .item-row:hover { background: #171a24; }
+  .item-row.selected { background: #1c2030; border-color: #3d4258; }
+  .item-row canvas {
+    width: 28px;
+    height: 28px;
+    image-rendering: pixelated;
+    background: #05060a;
+    flex-shrink: 0;
+  }
+
+  #main {
+    flex: 1;
+    padding: 24px;
+    overflow-y: auto;
+  }
+  #main h2 { margin: 0 0 4px; font-size: 18px; }
+  #main .hint { color: #8b8fa3; font-size: 12px; margin-bottom: 20px; }
+
+  #editor {
+    display: flex;
+    align-items: flex-start;
+    gap: 32px;
+  }
+
+  #big-grid {
+    display: grid;
+    grid-template-columns: repeat(16, 28px);
+    grid-template-rows: repeat(16, 28px);
+    border: 1px solid #2a2d3a;
+    width: max-content;
+  }
+  .cell {
+    width: 28px;
+    height: 28px;
+    background: #05060a;
+    border: 1px solid #171a24;
+  }
+  .cell.filled { background: #e6e6e6; }
+
+  #preview-column {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+  }
+  #preview-column .label {
+    color: #8b8fa3;
+    font-size: 11px;
+    text-align: center;
+  }
+  #preview-canvas {
+    width: 16px;
+    height: 16px;
+    image-rendering: pixelated;
+    background: #05060a;
+    border: 1px solid #2a2d3a;
+  }
+  /* A second, larger copy of the same 16x16 buffer — same pixels, easier to
+     glance at without losing the true-size one above it. */
+  #preview-canvas-4x {
+    width: 64px;
+    height: 64px;
+    image-rendering: pixelated;
+    background: #05060a;
+    border: 1px solid #2a2d3a;
+  }
+
+  #controls {
+    margin-top: 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  button.action {
+    font: inherit;
+    padding: 8px 16px;
+    border-radius: 4px;
+    border: 1px solid #3d4258;
+    background: #1c2030;
+    color: #e6e6e6;
+    cursor: pointer;
+  }
+  button.action:hover { background: #262b3d; }
+  button.action.primary { background: #2f5fd6; border-color: #2f5fd6; }
+  button.action.primary:hover { background: #3a6ce0; }
+  #status { color: #8b8fa3; font-size: 12px; }
+  #status.dirty { color: #e0b84d; }
+  #status.saved { color: #57c785; }
+  #status.error { color: #e05d5d; }
+</style>
+</head>
+<body>
+  <div id="sidebar">
+    <h1>Card icons</h1>
+    <div id="sidebar-list"></div>
+  </div>
+
+  <div id="main">
+    <h2 id="editor-title">Select an icon</h2>
+    <div class="hint">Click, or click-drag, to toggle pixels. Colour is applied automatically — this only edits the shape.</div>
+
+    <div id="editor">
+      <div id="big-grid"></div>
+
+      <div id="preview-column">
+        <div class="label">Actual size<br>(16×16, as shown in the app)</div>
+        <canvas id="preview-canvas" width="16" height="16"></canvas>
+        <canvas id="preview-canvas-4x" width="16" height="16"></canvas>
+      </div>
+    </div>
+
+    <div id="controls">
+      <button class="action primary" id="save-btn">Save to file</button>
+      <button class="action" id="revert-btn">Revert</button>
+      <span id="status"></span>
+    </div>
+  </div>
+
+<script>
+const state = {
+  items: [],
+  grids: {},
+  selectedId: null,
+  currentGrid: null,
+  dirty: false,
+};
+
+const bigGridEl = document.getElementById("big-grid");
+const sidebarListEl = document.getElementById("sidebar-list");
+const statusEl = document.getElementById("status");
+const titleEl = document.getElementById("editor-title");
+
+async function load() {
+  const res = await fetch("/api/icons");
+  const data = await res.json();
+  state.items = data.items;
+  state.grids = data.grids;
+  renderSidebar();
+  if (state.items.length > 0) selectItem(state.items[0].id);
+}
+
+function itemById(id) {
+  return state.items.find((item) => item.id === id);
+}
+
+function fillStyleFor(ctx, item) {
+  if (item.gradient && item.gradient.length > 0) {
+    const gradient = ctx.createLinearGradient(0, 0, 16, 16);
+    const denom = item.gradient.length > 1 ? item.gradient.length - 1 : 1;
+    item.gradient.forEach((color, i) => gradient.addColorStop(i / denom, color));
+    return gradient;
+  }
+  return item.color || "#e6e6e6";
+}
+
+function drawGrid(canvas, grid, item) {
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, 16, 16);
+  ctx.fillStyle = fillStyleFor(ctx, item);
+  for (let y = 0; y < 16; y++) {
+    for (let x = 0; x < 16; x++) {
+      if (grid[y][x] === "#") ctx.fillRect(x, y, 1, 1);
+    }
+  }
+}
+
+function renderSidebar() {
+  sidebarListEl.innerHTML = "";
+  for (const item of state.items) {
+    const row = document.createElement("button");
+    row.className = "item-row";
+    row.type = "button";
+    row.dataset.id = item.id;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = 16;
+    canvas.height = 16;
+    drawGrid(canvas, state.grids[item.id], item);
+
+    const label = document.createElement("span");
+    label.textContent = item.name;
+
+    row.append(canvas, label);
+    row.addEventListener("click", () => selectItem(item.id));
+    sidebarListEl.appendChild(row);
+  }
+  updateSelectedRowStyles();
+}
+
+function updateSelectedRowStyles() {
+  for (const el of sidebarListEl.querySelectorAll(".item-row")) {
+    el.classList.toggle("selected", el.dataset.id === state.selectedId);
+  }
+}
+
+function selectItem(id) {
+  if (state.dirty && !confirm("Discard unsaved changes to this icon?")) return;
+  state.selectedId = id;
+  state.currentGrid = [...state.grids[id]];
+  state.dirty = false;
+  updateSelectedRowStyles();
+  titleEl.textContent = itemById(id).name;
+  renderBigGrid();
+  renderPreview();
+  setStatus("");
+}
+
+function renderBigGrid() {
+  bigGridEl.innerHTML = "";
+  for (let y = 0; y < 16; y++) {
+    for (let x = 0; x < 16; x++) {
+      const cell = document.createElement("div");
+      cell.className = "cell" + (state.currentGrid[y][x] === "#" ? " filled" : "");
+      cell.dataset.x = String(x);
+      cell.dataset.y = String(y);
+      bigGridEl.appendChild(cell);
+    }
+  }
+}
+
+function renderPreview() {
+  const item = itemById(state.selectedId);
+  drawGrid(document.getElementById("preview-canvas"), state.currentGrid, item);
+  drawGrid(document.getElementById("preview-canvas-4x"), state.currentGrid, item);
+  const thumb = sidebarListEl.querySelector(`.item-row[data-id="${state.selectedId}"] canvas`);
+  if (thumb) drawGrid(thumb, state.currentGrid, item);
+}
+
+function setCell(x, y, value) {
+  const row = state.currentGrid[y];
+  if (row[x] === value) return;
+  state.currentGrid[y] = row.slice(0, x) + value + row.slice(x + 1);
+  const idx = y * 16 + x;
+  bigGridEl.children[idx].classList.toggle("filled", value === "#");
+  state.dirty = true;
+  renderPreview();
+  setStatus("Unsaved changes", "dirty");
+}
+
+let painting = false;
+let paintValue = "#";
+
+bigGridEl.addEventListener("mousedown", (e) => {
+  const cell = e.target.closest(".cell");
+  if (!cell || !state.currentGrid) return;
+  const x = Number(cell.dataset.x);
+  const y = Number(cell.dataset.y);
+  paintValue = state.currentGrid[y][x] === "#" ? "." : "#";
+  painting = true;
+  setCell(x, y, paintValue);
+  e.preventDefault();
+});
+bigGridEl.addEventListener("mouseover", (e) => {
+  if (!painting) return;
+  const cell = e.target.closest(".cell");
+  if (!cell) return;
+  setCell(Number(cell.dataset.x), Number(cell.dataset.y), paintValue);
+});
+window.addEventListener("mouseup", () => { painting = false; });
+
+function setStatus(text, kind) {
+  statusEl.textContent = text;
+  statusEl.className = kind || "";
+}
+
+document.getElementById("save-btn").addEventListener("click", async () => {
+  if (!state.selectedId) return;
+  setStatus("Saving...");
+  try {
+    const res = await fetch(`/api/icons/${encodeURIComponent(state.selectedId)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ grid: state.currentGrid }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || res.statusText);
+    state.grids[state.selectedId] = [...state.currentGrid];
+    state.dirty = false;
+    setStatus("Saved — the app will pick this up automatically", "saved");
+  } catch (err) {
+    setStatus(`Error: ${err.message}`, "error");
+  }
+});
+
+document.getElementById("revert-btn").addEventListener("click", () => {
+  if (!state.selectedId) return;
+  state.currentGrid = [...state.grids[state.selectedId]];
+  state.dirty = false;
+  renderBigGrid();
+  renderPreview();
+  setStatus("");
+});
+
+load();
+</script>
+</body>
+</html>
