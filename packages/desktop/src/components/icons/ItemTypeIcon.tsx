@@ -1,4 +1,5 @@
 import type { ItemType } from "@herzies/shared";
+import type { CSSProperties } from "react";
 import { PixelIcon } from "./PixelIcon";
 
 // Every item is a card (the store's buy tab is literally called "Cards"), so
@@ -31,6 +32,13 @@ function cardIcon(pipRows: string[], startRow: number): string[] {
   });
   return rows;
 }
+
+/** Chamfered card silhouette, in the same proportions as CARD_FRAME's
+ * outline above (16x16 grid, border pixels at x=3/4/12/13, y=1/2/14/15) —
+ * for clipping something else (a background tint, a solid fill) into the
+ * same card shape instead of a plain square. */
+export const CARD_SHAPE_CLIP =
+  "polygon(25% 6.25%, 75% 6.25%, 75% 12.5%, 81.25% 12.5%, 81.25% 87.5%, 75% 87.5%, 75% 93.75%, 25% 93.75%, 25% 87.5%, 18.75% 87.5%, 18.75% 12.5%, 25% 12.5%)";
 
 const GRIDS: Record<ItemType, string[]> = {
   // Paint drop — appearance/palette, no hue needed to read as "color".
@@ -65,9 +73,12 @@ const GRIDS: Record<ItemType, string[]> = {
 export function ItemTypeIcon({
   type,
   className,
+  style,
 }: {
   type: ItemType;
   className?: string;
+  /** e.g. `{ color: "#..." }` to override the default category colour. */
+  style?: CSSProperties;
 }) {
-  return <PixelIcon grid={GRIDS[type]} className={className} />;
+  return <PixelIcon grid={GRIDS[type]} className={className} style={style} />;
 }

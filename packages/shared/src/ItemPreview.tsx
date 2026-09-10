@@ -12,6 +12,7 @@ import {
   drawFrameCells,
   fitMetrics,
   parseAsciiFrames,
+  widestFrameIndex,
 } from "./item-canvas.js";
 import type { ItemDef } from "./items.js";
 
@@ -23,6 +24,13 @@ interface Props {
   animate?: boolean;
   /** Stop animation to save CPU while the host is hidden / unfocused. */
   paused?: boolean;
+  /**
+   * Hold on one static frame instead of animating (overrides `animate`).
+   * `"front"` picks the widest frame — the card facing the camera square-on,
+   * as opposed to frame 0, which is nearest edge-on (see `generateFrames` in
+   * items.ts) and reads as the item having vanished.
+   */
+  frame?: number | "front";
   ariaLabel?: string;
   wrapperStyle?: CSSProperties;
 }
@@ -37,27 +45,35 @@ export function ItemPreview({
   box = 120,
   animate = true,
   paused = false,
+  frame,
   ariaLabel,
   wrapperStyle,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [frameIdx, setFrameIdx] = useState(0);
 
   const cellFrames = useMemo(
     () => parseAsciiFrames(item.frames),
     [item.frames],
   );
+  const staticFrame =
+    frame === "front" ? widestFrameIndex(cellFrames) : frame;
+  const [frameIdx, setFrameIdx] = useState(staticFrame ?? 0);
   const bounds = useMemo(() => contentBounds(cellFrames), [cellFrames]);
   const metrics = useMemo(() => fitMetrics(bounds, box), [bounds, box]);
 
   useEffect(() => {
-    if (paused || !animate || cellFrames.length <= 1) return;
+    if (staticFrame !== undefined) setFrameIdx(staticFrame);
+  }, [staticFrame]);
+
+  useEffect(() => {
+    if (staticFrame !== undefined || paused || !animate || cellFrames.length <= 1)
+      return;
     const id = setInterval(
       () => setFrameIdx((f) => (f + 1) % cellFrames.length),
       80,
     );
     return () => clearInterval(id);
-  }, [animate, cellFrames.length, paused]);
+  }, [animate, cellFrames.length, paused, staticFrame]);
 
   useEffect(() => {
     const ctx = canvasRef.current?.getContext("2d");

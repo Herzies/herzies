@@ -1,7 +1,13 @@
 import type { GameEvent, Inventory } from "@herzies/shared";
-import { getItem, RARITY_COLORS as ITEM_RARITY_COLORS } from "@herzies/shared";
+import {
+  getItem,
+  getItemColor,
+  getItemType,
+  RARITY_COLORS as ITEM_RARITY_COLORS,
+} from "@herzies/shared";
 import { useEffect, useRef, useState } from "react";
 import { herzies, useWindowFocused } from "../tauri-bridge";
+import { ItemTypeIcon } from "./icons/ItemTypeIcon";
 import ItemInspectOverlay from "./ItemInspectOverlay";
 import { List } from "./List";
 import { View } from "./View";
@@ -247,7 +253,12 @@ export function EventsView({
                       <h2 className="text-ui font-bold text-text-dim">
                         Reward:
                       </h2>
-                      <div className="text-ui">
+                      <div className="flex items-center gap-1 text-ui">
+                        <ItemTypeIcon
+                          type={getItemType(previousRewardItem)}
+                          className="h-4 w-4 shrink-0"
+                          style={{ color: getItemColor(previousRewardItem) }}
+                        />
                         <button
                           className="cursor-pointer border-none bg-transparent text-ui underline"
                           style={{
@@ -348,8 +359,13 @@ export function EventsView({
             <div>Duration: {formatCountdown(hunt.endsAt)}</div>
             {rewardItem ? (
               <>
-                <div>
+                <div className="flex items-center justify-center gap-1">
                   Reward:{" "}
+                  <ItemTypeIcon
+                    type={getItemType(rewardItem)}
+                    className="h-4 w-4 shrink-0"
+                    style={{ color: getItemColor(rewardItem) }}
+                  />
                   <button
                     className="cursor-pointer border-none bg-transparent text-ui underline"
                     style={{ color: ITEM_RARITY_COLORS[rewardItem.rarity] }}

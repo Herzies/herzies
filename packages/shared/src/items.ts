@@ -21,6 +21,7 @@ import {
   type V2,
   type V3,
 } from "./ascii3d.js";
+import { dominantColor, parseAsciiFrames, widestFrameIndex } from "./item-canvas.js";
 
 export type Rarity = "common" | "uncommon" | "rare" | "legendary";
 
@@ -232,7 +233,7 @@ export interface DeckSlotGroup {
 
 export const DECK_SLOT_GROUPS: DeckSlotGroup[] = [
   {
-    label: "Equip",
+    label: "Equipment",
     itemType: "equipable",
     slots: ["head", "face", "body"],
     count: 3,
@@ -1081,3 +1082,19 @@ export const ITEMS: ItemDef[] = [
 export function getItem(id: string): ItemDef | undefined {
   return ITEMS.find((item) => item.id === id);
 }
+
+const itemColorCache = new Map<string, string>();
+
+/** This item's own dominant colour, sampled from its baked art's
+ * front-facing frame (see `dominantColor`/`widestFrameIndex` in
+ * item-canvas.ts) — distinct from a category or rarity colour, this is
+ * what that specific card actually looks like. Memoized per item id since
+ * the underlying art never changes at runtime. */
+export function getItemColor(item: ItemDef): string {
+  const cached = itemColorCache.get(item.id);
+  if (cached) return cached;
+  const frames = parseAsciiFrames(item.frames);
+  const front = frames[widestFrameIndex(frames)] ?? frames[0];
+  const color = (front && dominantColor(front)) || "#ffffff";
+  itemColorCache.set(item.id, color);
+  return color;

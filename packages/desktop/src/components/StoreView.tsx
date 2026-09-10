@@ -108,7 +108,7 @@ export function StoreView({
     <div className="flex h-full flex-col">
       <div className="z-50 mb-4 flex items-center justify-between">
         <h1 className="text-ui-lg font-bold text-yellow">Store</h1>
-        <Tooltip label={`${formatAmount(currency)} herzie coins`} align="right">
+        <Tooltip label={`${formatAmount(currency)} herzie coins`}>
           <div className="text-ui text-yellow">
             <Coin amount={currency} animate />
           </div>
@@ -176,7 +176,7 @@ export function StoreView({
                     subtitle={alreadyOwned ? "Owned" : <Coin amount={price} />}
                     action={
                       insufficientFunds ? (
-                        <Tooltip label="Insufficient funds" align="right">
+                        <Tooltip label="Insufficient funds">
                           {buyButton}
                         </Tooltip>
                       ) : (

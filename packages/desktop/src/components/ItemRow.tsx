@@ -1,6 +1,5 @@
-import { getItem, getItemType } from "@herzies/shared";
+import { getItem, getItemColor, getItemType } from "@herzies/shared";
 import { cn } from "../lib/utils";
-import { ITEM_TYPE_TEXT_CLASSES } from "./ItemTypeTag";
 import { ItemTypeIcon } from "./icons/ItemTypeIcon";
 import type { TabColour } from "./TabButton";
 
@@ -32,10 +31,11 @@ export function ItemRow({
         className="group flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
         title={inspectTitle}
       >
-        {type && (
+        {type && def && (
           <ItemTypeIcon
             type={type}
-            className={cn("h-4 w-4 shrink-0", ITEM_TYPE_TEXT_CLASSES[type])}
+            className="h-4 w-4 shrink-0"
+            style={{ color: getItemColor(def) }}
           />
         )}
         <div className="min-w-0 flex-1">

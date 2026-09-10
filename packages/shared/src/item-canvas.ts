@@ -39,6 +39,66 @@ export function contentBounds(frames: Cell[][][]): Bounds {
   return { r0, r1, c0, c1 };
 }
 
+/** Column span (0 for an empty frame) of a single frame's non-space cells. */
+function frameWidth(frame: Cell[][]): number {
+  let c0 = Infinity;
+  let c1 = -Infinity;
+  for (const row of frame) {
+    for (let x = 0; x < row.length; x++) {
+      if (row[x].ch === " ") continue;
+      if (x < c0) c0 = x;
+      if (x > c1) c1 = x;
+    }
+  }
+  return c1 < c0 ? 0 : c1 - c0 + 1;
+}
+
+/**
+ * Index of the widest frame in an animated set. Items are baked as a card
+ * spinning through a visible arc (see `generateFrames` in items.ts): the
+ * frames nearest edge-on are thin slivers, and the widest frame is the one
+ * facing the camera square-on — so this doubles as "pick the front-facing
+ * frame" for a static (non-animated) preview, without assuming any fixed
+ * index or frame count.
+ */
+export function widestFrameIndex(frames: Cell[][][]): number {
+  let best = 0;
+  let bestWidth = -1;
+  for (let i = 0; i < frames.length; i++) {
+    const w = frameWidth(frames[i]);
+    if (w > bestWidth) {
+      bestWidth = w;
+      best = i;
+    }
+  }
+  return best;
+}
+
+/** Most common non-space glyph colour in a single frame — a quick stand-in
+ * for "this specific card's colour" (as opposed to a category or rarity
+ * colour) without needing separate per-item colour metadata. Cards are baked
+ * with a handful of discrete shade bands rather than a smooth gradient (see
+ * `renderGradientCardFrame` and friends in items.ts), so the most-frequent
+ * colour reliably lands on the card's actual dominant hue. */
+export function dominantColor(frame: Cell[][]): string | undefined {
+  const counts = new Map<string, number>();
+  for (const row of frame) {
+    for (const cell of row) {
+      if (cell.ch === " " || !cell.color) continue;
+      counts.set(cell.color, (counts.get(cell.color) ?? 0) + 1);
+    }
+  }
+  let best: string | undefined;
+  let bestCount = 0;
+  for (const [color, count] of counts) {
+    if (count > bestCount) {
+      bestCount = count;
+      best = color;
+    }
+  }
+  return best;
+}
+
 /**
  * Scale the content bounds to fit (contain) within a square `box` of pixels.
  * Character cell metrics match `ItemDisplay`: width = size * 0.6, height = size

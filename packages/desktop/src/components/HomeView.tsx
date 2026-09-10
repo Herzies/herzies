@@ -65,7 +65,7 @@ export function HomeView({
     <div className="flex h-full flex-col">
       <div className="mb-1 flex items-center justify-between z-50">
         <span className="text-ui-lg font-bold text-cyan">
-          <Tooltip label="View your profile" side="bottom" align="left">
+          <Tooltip label="View your profile">
             <button
               type="button"
               onClick={onOpenProfile}
@@ -93,11 +93,7 @@ export function HomeView({
               connect to internet to grow
             </span>
           )}
-          <Tooltip
-            label={pinned ? "Unpin window" : "Pin window"}
-            side="bottom"
-            align="right"
-          >
+          <Tooltip label={pinned ? "Unpin window" : "Pin window"}>
             <button
               type="button"
               onClick={togglePin}
@@ -125,11 +121,7 @@ export function HomeView({
               </svg>
             </button>
           </Tooltip>
-          <Tooltip
-            label={ghostMode ? "Resume tracking" : "Pause tracking"}
-            side="bottom"
-            align="right"
-          >
+          <Tooltip label={ghostMode ? "Resume tracking" : "Pause tracking"}>
             <button
               type="button"
               onClick={toggleGhostMode}
@@ -158,7 +150,7 @@ export function HomeView({
               </svg>
             </button>
           </Tooltip>
-          <Tooltip label="Settings" side="bottom" align="right">
+          <Tooltip label="Settings">
             <button
               type="button"
               onClick={onOpenSettings}
