@@ -92,7 +92,7 @@ export interface AppState {
   pendingFriendRequest?: PendingFriendRequest | null;
   incomingFriendRequests: FriendRequestSummary[];
   outgoingFriendRequests: FriendRequestSummary[];
-  pendingDrop?: PendingDrop | null;
+  pendingDrops: PendingDrop[];
 }
 
 export const herzies = {
@@ -159,9 +159,11 @@ export const herzies = {
       newCurrency: number;
       inventory: Inventory;
     }>("buy_item", { itemId, quantity }),
-  /** Manually collects the current pending world drop. Resolves `true` if a
-   * drop was collected, `false` if nothing was pending. */
-  collectDrop: () => invoke<boolean>("collect_drop"),
+  /** Manually collects one specific pending world drop by id. Resolves
+   * `true` if it was collected, `false` if it no longer existed (e.g.
+   * already collected by a racing Spirit Orb auto-collect). */
+  collectDrop: (dropId: string) =>
+    invoke<boolean>("collect_drop", { dropId }),
 
   fetchStoreProducts: () => invoke<StoreProduct[]>("fetch_store_products"),
   /**

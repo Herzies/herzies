@@ -575,7 +575,7 @@ describe("World drops", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
 
-    expect(body.pendingDrop).toBeUndefined();
+    expect(body.pendingDrops).toEqual([]);
 
     const collectedNotif = body.notifications.find(
       (n: { type: string; itemId?: string }) =>
@@ -583,13 +583,20 @@ describe("World drops", () => {
     );
     expect(collectedNotif).toBeDefined();
 
-    const { data } = await admin
+    const { data: herzieRow } = await admin
       .from("herzies")
-      .select("inventory_v2, pending_drop_item_id")
+      .select("inventory_v2")
       .eq("user_id", petUser.userId)
       .single();
-    expect((data!.inventory_v2 as Record<string, number>).headphones).toBe(1);
-    expect(data!.pending_drop_item_id).toBeNull();
+    expect(
+      (herzieRow!.inventory_v2 as Record<string, number>).headphones,
+    ).toBe(1);
+
+    const { data: drops } = await admin
+      .from("pending_drops")
+      .select("id")
+      .eq("user_id", petUser.userId);
+    expect(drops).toEqual([]);
   });
 
   it("leaves the drop pending and reports it in the sync response without the pet equipped", async () => {
@@ -612,8 +619,55 @@ describe("World drops", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
 
-    expect(body.pendingDrop).toEqual(
+    expect(body.pendingDrops).toEqual([
       expect.objectContaining({ itemId: "boombox" }),
+    ]);
+  });
+
+  it("keeps multiple drops pending at once instead of blocking on the first", async () => {
+    const admin = getAdminClient();
+    const multiUser = await createTestUser();
+    await createTestHerzie(multiUser.userId, { inventory_v2: {} });
+
+    await admin.rpc("roll_pending_drop", {
+      p_user_id: multiUser.userId,
+      p_item_id: "boombox",
+    });
+    await admin.rpc("roll_pending_drop", {
+      p_user_id: multiUser.userId,
+      p_item_id: "cd",
+    });
+
+    const res = await syncRoute(
+      authenticatedRequest("/sync", multiUser.accessToken, {
+        nowPlaying: null,
+        minutesListened: 0,
+        genres: [],
+      }),
     );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+
+    expect(body.pendingDrops).toHaveLength(2);
+    const itemIds = body.pendingDrops.map(
+      (d: { itemId: string }) => d.itemId,
+    );
+    expect(itemIds).toEqual(expect.arrayContaining(["boombox", "cd"]));
+
+    // Collecting one by id leaves the other untouched.
+    const boombox = body.pendingDrops.find(
+      (d: { itemId: string }) => d.itemId === "boombox",
+    );
+    const { data: collectedId } = await admin.rpc("collect_pending_drop", {
+      p_user_id: multiUser.userId,
+      p_drop_id: boombox.id,
+    });
+    expect(collectedId).toBe("boombox");
+
+    const { data: remaining } = await admin
+      .from("pending_drops")
+      .select("item_id")
+      .eq("user_id", multiUser.userId);
+    expect(remaining).toEqual([{ item_id: "cd" }]);
   });
 });

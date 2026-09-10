@@ -46,6 +46,17 @@ Deno.serve(async (request) => {
     return jsonResponse({ error: "Invalid or expired token" }, 401);
   }
 
+  let dropId: string;
+  try {
+    const body = await request.json();
+    if (typeof body?.dropId !== "string" || !body.dropId) {
+      return jsonResponse({ error: "Missing dropId" }, 400);
+    }
+    dropId = body.dropId;
+  } catch {
+    return jsonResponse({ error: "Invalid JSON body" }, 400);
+  }
+
   try {
     const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
       auth: { autoRefreshToken: false, persistSession: false },
@@ -53,6 +64,7 @@ Deno.serve(async (request) => {
 
     const { data: itemId, error } = await admin.rpc("collect_pending_drop", {
       p_user_id: user.id,
+      p_drop_id: dropId,
     });
 
     if (error) {

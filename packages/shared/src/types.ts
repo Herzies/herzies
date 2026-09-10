@@ -110,8 +110,9 @@ export interface SyncResponse {
   incomingFriendRequests: FriendRequestSummary[];
   /** Friend requests you sent that are still pending */
   outgoingFriendRequests: FriendRequestSummary[];
-  /** A world drop waiting to be collected. Persists until collected (no expiry). */
-  pendingDrop?: PendingDrop;
+  /** World drops waiting to be collected. Each persists until collected (no
+   * expiry) — any number can be pending at once. */
+  pendingDrops: PendingDrop[];
 }
 
 /** Notification that another player wants to trade */
@@ -121,9 +122,10 @@ export interface PendingTradeRequest {
   fromFriendCode: string;
 }
 
-/** A world drop waiting to be collected — absent once picked up (manually or
- * automatically by an equipped Spirit Orb). */
+/** A world drop waiting to be collected — removed from the list once picked
+ * up (manually, by id, or automatically by an equipped Spirit Orb). */
 export interface PendingDrop {
+  id: string;
   itemId: string;
   droppedAt: string;
 }

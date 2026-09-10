@@ -281,17 +281,22 @@ pub async fn api_sync(
     resp.json().await.ok()
 }
 
-/// Manually collects a pending world drop into the caller's inventory.
-/// Returns `Ok(Some((item_id, name)))` if a drop was collected, `Ok(None)` if
-/// nothing was pending (not an error — just a no-op), `Err` on network/server
-/// failure.
-pub async fn api_collect_drop(client: &Client) -> Result<Option<(String, String)>, String> {
+/// Manually collects one specific pending world drop (by id) into the
+/// caller's inventory. Returns `Ok(Some((item_id, name)))` if it was
+/// collected, `Ok(None)` if that drop no longer exists (already collected,
+/// e.g. by a racing Spirit Orb auto-collect — not an error), `Err` on
+/// network/server failure.
+pub async fn api_collect_drop(
+    client: &Client,
+    drop_id: &str,
+) -> Result<Option<(String, String)>, String> {
     // New functionality, not a port — lives only as an Edge Function (see
     // supabase/functions/collect-drop), same functions_base()/anon-key
     // pattern as api_sync.
     let url = format!("{}/collect-drop", functions_base());
     let anon = supabase_anon_key();
-    let resp = api_fetch_full(client, reqwest::Method::POST, &url, None, Some(&anon))
+    let body = serde_json::json!({ "dropId": drop_id });
+    let resp = api_fetch_full(client, reqwest::Method::POST, &url, Some(body), Some(&anon))
         .await
         .ok_or_else(|| "Network error".to_string())?;
     let status = resp.status();

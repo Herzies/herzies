@@ -537,13 +537,16 @@ async fn buy_item(
 async fn collect_drop(
     app: AppHandle,
     state: tauri::State<'_, SharedState>,
+    drop_id: String,
 ) -> Result<bool, String> {
     let client = Client::new();
-    match api::api_collect_drop(&client).await? {
+    match api::api_collect_drop(&client, &drop_id).await? {
         Some((_item_id, name)) => {
             {
                 let mut s = state.lock().unwrap();
-                s.pending_drop = None;
+                // Only the one collected drop leaves the list — any others
+                // still pending stay on the ground.
+                s.pending_drops.retain(|d| d.id != drop_id);
             }
             refresh_inventory_cache(&app, &client).await;
             // Same "You received: Nx <name>" convention as server-driven
@@ -1690,7 +1693,7 @@ async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
         storage::save_multipliers(&sync_resp.multipliers);
 
         s.pending_trade_request = sync_resp.pending_trade_request.clone();
-        s.pending_drop = sync_resp.pending_drop.clone();
+        s.pending_drops = sync_resp.pending_drops.clone();
         if !friend_state_stale {
             s.pending_friend_request = sync_resp.pending_friend_request.clone();
             s.incoming_friend_requests = sync_resp.incoming_friend_requests.clone();

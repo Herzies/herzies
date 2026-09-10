@@ -86,9 +86,11 @@ export interface PendingFriendRequest {
   fromFriendCode: string;
 }
 
-/** A world drop waiting to be collected — absent once picked up (manually or
- * automatically by an equipped Spirit Orb). Mirror of packages/shared/src/types.ts. */
+/** A world drop waiting to be collected — removed from the list once picked
+ * up (manually, by id, or automatically by an equipped Spirit Orb). Mirror
+ * of packages/shared/src/types.ts. */
 export interface PendingDrop {
+  id: string;
   itemId: string;
   droppedAt: string;
 }

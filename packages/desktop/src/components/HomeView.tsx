@@ -51,24 +51,31 @@ export function HomeView({
   debugDrops?: DebugDrop[];
   onCollectDebugDrop?: (id: string) => void;
 }) {
-  const { herzie, nowPlaying, multipliers, isConnected, equipped, pendingDrop } =
-    state;
+  const {
+    herzie,
+    nowPlaying,
+    multipliers,
+    isConnected,
+    equipped,
+    pendingDrops,
+  } = state;
   const [globalRank, setGlobalRank] = useState<number | undefined>(undefined);
   const [globalTotal, setGlobalTotal] = useState<number | undefined>(undefined);
-  const [collectingDrop, setCollectingDrop] = useState(false);
+  const [collectingIds, setCollectingIds] = useState<Set<string>>(new Set());
   const pinned = useWindowPinned();
   const ghostMode = useGhostMode();
   const friendCode = herzie?.friendCode;
 
-  // The real drop has no ground position of its own (the server only tracks
-  // itemId/droppedAt) — pick one client-side the first time a given drop is
-  // seen and keep it stable across re-renders for as long as that drop lasts.
+  // Real drops have no ground position of their own (the server only tracks
+  // id/itemId/droppedAt) — pick one client-side the first time a given drop
+  // id is seen and keep it stable across re-renders for as long as that drop
+  // lasts.
   const realDropXRef = useRef<Map<string, number>>(new Map());
-  const realDropX = (droppedAt: string) => {
-    let x = realDropXRef.current.get(droppedAt);
+  const realDropX = (id: string) => {
+    let x = realDropXRef.current.get(id);
     if (x === undefined) {
       x = DROP_X_MIN + Math.random() * (DROP_X_MAX - DROP_X_MIN);
-      realDropXRef.current.set(droppedAt, x);
+      realDropXRef.current.set(id, x);
     }
     return x;
   };
@@ -77,21 +84,18 @@ export function HomeView({
   // manual "Collect" affordance would almost always be stale — skip it when
   // either ground slot has one equipped.
   const hasSpiritOrb =
-    equipped.ground_left === "spirit-orb" || equipped.ground_right === "spirit-orb";
-  // The real drop (server-driven, always a single item) renders alongside any
-  // debug drops (dev-only, each spawn its own item on the ground) — every
-  // item is independently collectible.
+    equipped.ground_left === "spirit-orb" ||
+    equipped.ground_right === "spirit-orb";
+  // Real drops (server-driven, any number at once) render alongside any debug
+  // drops (dev-only, each spawn its own item on the ground) — every item is
+  // independently collectible.
   const dropItems: (DebugDrop & { isDebug: boolean })[] = [
-    ...(pendingDrop
-      ? [
-          {
-            id: "real",
-            itemId: pendingDrop.itemId,
-            x: realDropX(pendingDrop.droppedAt),
-            isDebug: false,
-          },
-        ]
-      : []),
+    ...pendingDrops.map((d) => ({
+      id: d.id,
+      itemId: d.itemId,
+      x: realDropX(d.id),
+      isDebug: false,
+    })),
     ...(debugDrops ?? []).map((d) => ({ ...d, isDebug: true })),
   ];
 
@@ -103,12 +107,17 @@ export function HomeView({
       onCollectDebugDrop?.(drop.id);
       return;
     }
-    if (collectingDrop) return;
-    setCollectingDrop(true);
+    if (collectingIds.has(drop.id)) return;
+    setCollectingIds((prev) => new Set(prev).add(drop.id));
     try {
-      await herzies.collectDrop();
+      await herzies.collectDrop(drop.id);
     } finally {
-      setCollectingDrop(false);
+      setCollectingIds((prev) => {
+        if (!prev.has(drop.id)) return prev;
+        const next = new Set(prev);
+        next.delete(drop.id);
+        return next;
+      });
     }
   };
 
@@ -332,7 +341,10 @@ export function HomeView({
                       onMouseEnter={(e) => {
                         if (e.buttons === 1) handleCollectDrop(drop);
                       }}
-                      disabled={isLeaving || (!drop.isDebug && collectingDrop)}
+                      disabled={
+                        isLeaving ||
+                        (!drop.isDebug && collectingIds.has(drop.id))
+                      }
                       className="flex cursor-pointer flex-col items-center border-none bg-transparent p-0 disabled:cursor-default"
                     >
                       {/* The float animation and the pick-up exit both
@@ -343,7 +355,7 @@ export function HomeView({
                         className={cn(
                           "transition-all ease-out",
                           isLeaving
-                            ? "-translate-y-2 opacity-0 duration-[260ms]"
+                            ? "-translate-y-2 opacity-0 duration-260"
                             : "animate-drop-float",
                         )}
                         style={

@@ -104,7 +104,7 @@ Deno.serve(async (request) => {
       pendingFriendRequest: result.pendingFriendRequest,
       incomingFriendRequests: result.incomingFriendRequests,
       outgoingFriendRequests: result.outgoingFriendRequests,
-      pendingDrop: result.pendingDrop,
+      pendingDrops: result.pendingDrops,
     });
   } catch (err) {
     const message =

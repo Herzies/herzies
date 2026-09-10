@@ -175,7 +175,7 @@ export async function processSync(
   pendingFriendRequest?: PendingFriendRequest;
   incomingFriendRequests: FriendRequestSummary[];
   outgoingFriendRequests: FriendRequestSummary[];
-  pendingDrop?: PendingDrop;
+  pendingDrops: PendingDrop[];
 }> {
   const source = options.source ?? "cli";
   // 1. Fetch the herzie
@@ -333,14 +333,13 @@ export async function processSync(
     }
   }
 
-  // 5. Roll for a world drop every 10 listened minutes, then auto-collect it
-  // immediately if a Spirit Orb pet is equipped — so a pet-equipped user
-  // doesn't wait an extra sync cycle for a drop that spawned this tick.
-  // roll_pending_drop no-ops if one is already pending, so only one drop is
-  // ever outstanding at a time. CDs come from this pool too (with the
-  // highest drop weight, see ITEM_DROP_WEIGHT_OVERRIDES) rather than being
-  // granted straight to inventory — every item, CDs included, has to be
-  // picked up off the ground.
+  // 5. Roll for a world drop every 10 listened minutes — any number can be
+  // pending on the ground at once (see the pending_drops table), so this no
+  // longer waits for an earlier drop to be collected first. CDs come from
+  // this pool too (with the highest drop weight, see
+  // ITEM_DROP_WEIGHT_OVERRIDES) rather than being granted straight to
+  // inventory — every item, CDs included, has to be picked up off the
+  // ground.
   //
   // Dev-only test mode: HERZIES_DROP_TEST_MODE=1 rolls on every sync call
   // instead of every 10 listened minutes (DROP_CHANCE_PER_TICK is already 1
@@ -354,11 +353,8 @@ export async function processSync(
   const totalDropRollsEligible = Math.floor(herzie.totalMinutesListened / 10);
   const dropRollsDone = (row.drop_rolls_done ?? 0) as number;
 
-  let pendingDropItemId = row.pending_drop_item_id as string | null;
-  let pendingDropAt = row.pending_drop_at as string | null;
-
   if (dropTestMode || totalDropRollsEligible > dropRollsDone) {
-    if (!pendingDropItemId && (dropTestMode || Math.random() < DROP_CHANCE_PER_TICK)) {
+    if (dropTestMode || Math.random() < DROP_CHANCE_PER_TICK) {
       const { data: pool } = await admin
         .from("items")
         .select("id, rarity")
@@ -378,13 +374,6 @@ export async function processSync(
           p_user_id: userId,
           p_item_id: picked.id,
         });
-        pendingDropItemId = picked.id;
-        pendingDropAt = now.toISOString();
-        notifications.push({
-          type: "info",
-          title: "A drop appeared!",
-          message: "Something dropped nearby — come collect it.",
-        });
       }
     }
     if (!dropTestMode) {
@@ -395,29 +384,36 @@ export async function processSync(
     }
   }
 
-  if (pendingDropItemId && hasSpiritOrbEquipped(row.equipped)) {
-    const { data: collectedId } = await admin.rpc("collect_pending_drop", {
-      p_user_id: userId,
-    });
-    if (collectedId) {
-      notifications.push({
-        type: "item_granted",
-        title: "Spirit Orb",
-        message: `Your Spirit Orb collected: ${collectedId}`,
-        itemId: collectedId as string,
-        quantity: 1,
-      });
-      pendingDropItemId = null;
-      pendingDropAt = null;
-    }
-  }
+  const { data: pendingDropRows } = await admin
+    .from("pending_drops")
+    .select("id, item_id, dropped_at")
+    .eq("user_id", userId)
+    .order("dropped_at", { ascending: true });
 
-  const pendingDrop: PendingDrop | undefined = pendingDropItemId
-    ? {
-        itemId: pendingDropItemId,
-        droppedAt: pendingDropAt ?? now.toISOString(),
+  let pendingDrops: PendingDrop[] = (pendingDropRows ?? []).map((r) => ({
+    id: r.id as string,
+    itemId: r.item_id as string,
+    droppedAt: r.dropped_at as string,
+  }));
+
+  if (pendingDrops.length > 0 && hasSpiritOrbEquipped(row.equipped)) {
+    for (const drop of pendingDrops) {
+      const { data: collectedId } = await admin.rpc("collect_pending_drop", {
+        p_user_id: userId,
+        p_drop_id: drop.id,
+      });
+      if (collectedId) {
+        notifications.push({
+          type: "item_granted",
+          title: "Spirit Orb",
+          message: `Your Spirit Orb collected: ${collectedId}`,
+          itemId: collectedId as string,
+          quantity: 1,
+        });
       }
-    : undefined;
+    }
+    pendingDrops = [];
+  }
 
   // Track which song-hunt announcements this user has already seen.
   const notifiedHunts = (row.notified_hunts ?? []) as string[];
@@ -559,7 +555,7 @@ export async function processSync(
     pendingFriendRequest,
     incomingFriendRequests,
     outgoingFriendRequests,
-    pendingDrop,
+    pendingDrops,
   };
 }
 

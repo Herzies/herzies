@@ -70,7 +70,7 @@ function App() {
     pendingFriendRequest: null,
     incomingFriendRequests: [],
     outgoingFriendRequests: [],
-    pendingDrop: null,
+    pendingDrops: [],
   });
   const [view, setView] = useState<View>("home");
   const [tradeTarget, setTradeTarget] = useState<string | null>(null);
