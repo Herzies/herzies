@@ -63,7 +63,17 @@ Deno.serve(async (request) => {
       return jsonResponse({ collected: null });
     }
 
-    return jsonResponse({ collected: { itemId } });
+    // Resolve a human-readable name for the desktop app's activity log
+    // (falls back to the id if missing — mirrors processSync's song-hunt
+    // reward lookup in packages/web/src/lib/game-server.ts).
+    const { data: itemRow } = await admin
+      .from("items")
+      .select("name")
+      .eq("id", itemId)
+      .maybeSingle();
+    const name = (itemRow?.name as string | undefined) ?? itemId;
+
+    return jsonResponse({ collected: { itemId, name } });
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "Internal server error";

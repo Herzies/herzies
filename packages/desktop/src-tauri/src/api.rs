@@ -282,9 +282,10 @@ pub async fn api_sync(
 }
 
 /// Manually collects a pending world drop into the caller's inventory.
-/// Returns `Ok(Some(item_id))` if a drop was collected, `Ok(None)` if nothing
-/// was pending (not an error — just a no-op), `Err` on network/server failure.
-pub async fn api_collect_drop(client: &Client) -> Result<Option<String>, String> {
+/// Returns `Ok(Some((item_id, name)))` if a drop was collected, `Ok(None)` if
+/// nothing was pending (not an error — just a no-op), `Err` on network/server
+/// failure.
+pub async fn api_collect_drop(client: &Client) -> Result<Option<(String, String)>, String> {
     // New functionality, not a port — lives only as an Edge Function (see
     // supabase/functions/collect-drop), same functions_base()/anon-key
     // pattern as api_sync.
@@ -301,7 +302,12 @@ pub async fn api_collect_drop(client: &Client) -> Result<Option<String>, String>
         let msg = data["error"].as_str().unwrap_or("Unknown error");
         return Err(msg.to_string());
     }
-    Ok(data["collected"]["itemId"].as_str().map(|s| s.to_string()))
+    let item_id = data["collected"]["itemId"].as_str().map(|s| s.to_string());
+    let name = data["collected"]["name"].as_str().map(|s| s.to_string());
+    Ok(item_id.map(|id| {
+        let name = name.unwrap_or_else(|| id.clone());
+        (id, name)
+    }))
 }
 
 pub async fn api_get_me(client: &Client) -> Option<Herzie> {

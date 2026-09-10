@@ -540,12 +540,16 @@ async fn collect_drop(
 ) -> Result<bool, String> {
     let client = Client::new();
     match api::api_collect_drop(&client).await? {
-        Some(_item_id) => {
+        Some((_item_id, name)) => {
             {
                 let mut s = state.lock().unwrap();
                 s.pending_drop = None;
             }
             refresh_inventory_cache(&app, &client).await;
+            // Same "You received: Nx <name>" convention as server-driven
+            // item_granted notifications (see game-server.ts) — this path
+            // has no SyncResponse to ride along on, so log it directly.
+            let _ = app.emit("activity", format!("You received: 1x {name}"));
             Ok(true)
         }
         None => Ok(false),
