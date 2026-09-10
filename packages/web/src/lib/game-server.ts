@@ -333,44 +333,23 @@ export async function processSync(
     }
   }
 
-  // 5. Grant CDs based on total listening time
-  const totalCdsEarned = Math.floor(herzie.totalMinutesListened / 10);
-  const cdsGranted = (row.cds_granted ?? 0) as number;
-  const newCds = totalCdsEarned - cdsGranted;
-
-  if (newCds > 0) {
-    await admin.rpc("grant_cds", {
-      p_user_id: userId,
-      p_quantity: newCds,
-      p_cds_granted: totalCdsEarned,
-    });
-
-    notifications.push({
-      type: "item_granted",
-      title: "CD",
-      message: `You received: ${newCds}x CD`,
-      itemId: "cd",
-      quantity: newCds,
-      // CDs drop passively while listening — keep this in the activity log
-      // only so it doesn't fire an OS popup (and surface the item preview)
-      // every time the user is just playing music in the background.
-      logOnly: true,
-    });
-  }
-
-  // 5b. Roll for a world drop at the same cadence as CD accrual above, then
-  // auto-collect it immediately if a Spirit Orb pet is equipped — so a
-  // pet-equipped user doesn't wait an extra sync cycle for a drop that
-  // spawned this tick. roll_pending_drop no-ops if one is already pending,
-  // so only one drop is ever outstanding at a time.
+  // 5. Roll for a world drop every 10 listened minutes, then auto-collect it
+  // immediately if a Spirit Orb pet is equipped — so a pet-equipped user
+  // doesn't wait an extra sync cycle for a drop that spawned this tick.
+  // roll_pending_drop no-ops if one is already pending, so only one drop is
+  // ever outstanding at a time. CDs come from this pool too (with the
+  // highest drop weight, see ITEM_DROP_WEIGHT_OVERRIDES) rather than being
+  // granted straight to inventory — every item, CDs included, has to be
+  // picked up off the ground.
   //
   // Dev-only test mode: HERZIES_DROP_TEST_MODE=1 rolls on every sync call
-  // instead of every 10 listened minutes, and always hits instead of rolling
-  // DROP_CHANCE_PER_TICK — since the sync daemon calls roughly every 10s,
-  // this gives a fast ~10s drop cadence for local iteration. Must never be
-  // set in production (it would spam every real user with a drop on every
-  // sync); leave unset there. Deliberately skips drop_rolls_done bookkeeping
-  // in test mode so toggling it off resumes normal cadence unaffected.
+  // instead of every 10 listened minutes (DROP_CHANCE_PER_TICK is already 1
+  // in production, so the only thing test mode changes is the cadence gate)
+  // — since the sync daemon calls roughly every 10s, this gives a fast ~10s
+  // drop cadence for local iteration. Must never be set in production (it
+  // would drop an item on every single sync); leave unset there.
+  // Deliberately skips drop_rolls_done bookkeeping in test mode so toggling
+  // it off resumes normal cadence unaffected.
   const dropTestMode = process.env.HERZIES_DROP_TEST_MODE === "1";
   const totalDropRollsEligible = Math.floor(herzie.totalMinutesListened / 10);
   const dropRollsDone = (row.drop_rolls_done ?? 0) as number;

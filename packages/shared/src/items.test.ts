@@ -7,6 +7,7 @@ import {
   getItem,
   getItemType,
   isModifierEquipped,
+  ITEM_DROP_WEIGHT_OVERRIDES,
   ITEMS,
   NON_DROPPABLE_ITEM_IDS,
   normalizeEquipped,
@@ -252,6 +253,27 @@ describe("pickWeightedDrop", () => {
     for (let i = 0; i < 500; i++) {
       const picked = pickWeightedDrop(pool);
       expect(nonDroppable).not.toContain(picked?.id);
+    }
+  });
+
+  it("favors CD well above the heaviest rarity weight", () => {
+    expect(ITEM_DROP_WEIGHT_OVERRIDES.cd).toBeGreaterThan(
+      RARITY_DROP_WEIGHTS.common,
+    );
+  });
+
+  it("picks CD far more often than any other single item in the full pool", () => {
+    const nonDroppable: readonly string[] = NON_DROPPABLE_ITEM_IDS;
+    const pool = ITEMS.filter((item) => !nonDroppable.includes(item.id));
+    const counts: Record<string, number> = {};
+    for (let i = 0; i < 10_000; i++) {
+      const picked = pickWeightedDrop(pool);
+      if (picked) counts[picked.id] = (counts[picked.id] ?? 0) + 1;
+    }
+    const cdCount = counts.cd ?? 0;
+    for (const [id, count] of Object.entries(counts)) {
+      if (id === "cd") continue;
+      expect(cdCount).toBeGreaterThan(count);
     }
   });
 });

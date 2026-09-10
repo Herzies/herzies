@@ -114,8 +114,10 @@ describe("Sync flow", () => {
     expect(body.herzie.totalMinutesListened).toBe(5);
   });
 
-  it("grants CDs based on listening time", async () => {
-    // Backdate last_synced_at so the elapsed-time cap allows 5 minutes
+  it("does not grant a CD straight to inventory from listening time alone", async () => {
+    // CDs are no longer a guaranteed per-10-minutes grant — they're just
+    // another item in the world-drop pool (see ITEM_DROP_WEIGHT_OVERRIDES),
+    // which lands as a pending ground drop, not straight in inventory.
     const admin = getAdminClient();
     const tenMinAgo = new Date(Date.now() - 10 * 60_000).toISOString();
     await admin
@@ -123,8 +125,8 @@ describe("Sync flow", () => {
       .update({ last_synced_at: tenMinAgo })
       .eq("user_id", user.userId);
 
-    // Sync with enough minutes to earn CDs (10 min = 1 CD)
-    // We already have 5 minutes, add 5 more
+    // We already have 5 minutes from the previous test, add 5 more to cross
+    // the 10-minute drop-roll boundary.
     const res = await syncRoute(
       authenticatedRequest("/sync", user.accessToken, {
         nowPlaying: { title: "Test Song 2", artist: "Test Artist" },
@@ -136,17 +138,13 @@ describe("Sync flow", () => {
     const body = await res.json();
     expect(body.herzie.totalMinutesListened).toBe(10);
 
-    // Check inventory for CD
     const { data } = await admin
       .from("herzies")
-      .select("inventory_v2, cds_granted")
+      .select("inventory_v2")
       .eq("user_id", user.userId)
       .single();
 
-    expect(data!.cds_granted).toBe(1);
-    expect(
-      (data!.inventory_v2 as Record<string, number>).cd,
-    ).toBeGreaterThanOrEqual(1);
+    expect((data!.inventory_v2 as Record<string, number>).cd ?? 0).toBe(0);
   });
 
   it("caps minutesListened to elapsed time since last sync", async () => {

@@ -110,17 +110,25 @@ export const RARITY_DROP_WEIGHTS: Record<Rarity, number> = {
 export const NON_DROPPABLE_ITEM_IDS = ["first-edition", "spirit-orb"] as const;
 
 /** Chance a drop is rolled on each eligible listening tick. Mirror of
- * packages/shared/src/items.ts's DROP_CHANCE_PER_TICK. */
-export const DROP_CHANCE_PER_TICK = 0.12;
+ * packages/shared/src/items.ts's DROP_CHANCE_PER_TICK. 1 = guaranteed. */
+export const DROP_CHANCE_PER_TICK = 1;
+
+/** Per-item drop-weight overrides. Mirror of packages/shared/src/items.ts's
+ * ITEM_DROP_WEIGHT_OVERRIDES. */
+export const ITEM_DROP_WEIGHT_OVERRIDES: Partial<Record<string, number>> = {
+  cd: 400,
+};
 
 /** Weighted-random pick from a rarity-tagged candidate pool. Mirror of
  * packages/shared/src/items.ts's pickWeightedDrop. */
-export function pickWeightedDrop<T extends { rarity: Rarity }>(
+export function pickWeightedDrop<T extends { id: string; rarity: Rarity }>(
   candidates: T[],
   rng: () => number = Math.random,
 ): T | undefined {
   if (candidates.length === 0) return undefined;
-  const weights = candidates.map((c) => RARITY_DROP_WEIGHTS[c.rarity]);
+  const weights = candidates.map(
+    (c) => ITEM_DROP_WEIGHT_OVERRIDES[c.id] ?? RARITY_DROP_WEIGHTS[c.rarity],
+  );
   const total = weights.reduce((a, b) => a + b, 0);
   let r = rng() * total;
   for (let i = 0; i < candidates.length; i++) {

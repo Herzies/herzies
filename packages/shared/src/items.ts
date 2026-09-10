@@ -291,17 +291,29 @@ export const RARITY_DROP_WEIGHTS: Record<Rarity, number> = {
 /** Items that can never appear as a random world drop, regardless of rarity. */
 export const NON_DROPPABLE_ITEM_IDS = ["first-edition", "spirit-orb"] as const;
 
-/** Chance a drop is rolled on each eligible listening tick (see DROP_TICK_MINUTES). */
-export const DROP_CHANCE_PER_TICK = 0.12;
+/** Chance a drop is rolled on each eligible listening tick (see DROP_TICK_MINUTES).
+ * 1 = guaranteed — every 10-minute tick drops something, with which item
+ * decided by ITEM_DROP_WEIGHT_OVERRIDES / RARITY_DROP_WEIGHTS below. */
+export const DROP_CHANCE_PER_TICK = 1;
+
+/** Per-item drop-weight overrides, applied instead of RARITY_DROP_WEIGHTS when
+ * present. CDs are earned purely by listening (not by any special rarity),
+ * so they're weighted well above even the heaviest common item to make them
+ * the most likely drop by a wide margin. */
+export const ITEM_DROP_WEIGHT_OVERRIDES: Partial<Record<string, number>> = {
+  cd: 400,
+};
 
 /** Weighted-random pick from a rarity-tagged candidate pool. `rng` returns a
  * float in [0, 1) — inject Math.random in production, a seeded fn in tests. */
-export function pickWeightedDrop<T extends { rarity: Rarity }>(
+export function pickWeightedDrop<T extends { id: string; rarity: Rarity }>(
   candidates: T[],
   rng: () => number = Math.random,
 ): T | undefined {
   if (candidates.length === 0) return undefined;
-  const weights = candidates.map((c) => RARITY_DROP_WEIGHTS[c.rarity]);
+  const weights = candidates.map(
+    (c) => ITEM_DROP_WEIGHT_OVERRIDES[c.id] ?? RARITY_DROP_WEIGHTS[c.rarity],
+  );
   const total = weights.reduce((a, b) => a + b, 0);
   let r = rng() * total;
   for (let i = 0; i < candidates.length; i++) {

@@ -2,7 +2,7 @@
 
 ## high priority
 
-- [ ] drops must be picked up
+- [x] drops must be picked up
 - [ ] introduce pick-up pet or orb (simple shape with eyes)
 - [ ] introduce drop rate. any card but first edition can drop. drop
   change lowers with rarity.
