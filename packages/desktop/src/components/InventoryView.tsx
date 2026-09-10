@@ -3,8 +3,6 @@ import {
   findEquippedSlot,
   getItem,
   getItemCategory,
-  getItemColor,
-  getItemType,
   groundSlot,
   isModifierEquipped,
   MAX_MODIFIERS,
@@ -171,7 +169,6 @@ function ItemGridCell({
   onDragPointerDown: (index: number, e: React.PointerEvent) => void;
 }) {
   const def = getItem(itemId);
-  const type = def ? getItemType(def) : null;
 
   return (
     <HoverPreview
@@ -206,13 +203,7 @@ function ItemGridCell({
             x{qty}
           </span>
         )}
-        {type && def && (
-          <ItemTypeIcon
-            type={type}
-            className="h-4 w-4"
-            style={{ color: getItemColor(def) }}
-          />
-        )}
+        {def && <ItemTypeIcon item={def} className="h-4 w-4" />}
       </button>
     </HoverPreview>
   );
@@ -703,17 +694,15 @@ export function InventoryView({
       {dragVisual &&
         (() => {
           const draggedDef = getItem(dragVisual.itemId);
-          const draggedType = draggedDef ? getItemType(draggedDef) : null;
-          if (!draggedType || !draggedDef) return null;
+          if (!draggedDef) return null;
           return createPortal(
             <div
               className="pointer-events-none fixed z-200 flex h-8 w-8 -translate-x-1/2 -translate-y-1/2 items-center justify-center"
               style={{ left: dragVisual.x, top: dragVisual.y }}
             >
               <ItemTypeIcon
-                type={draggedType}
+                item={draggedDef}
                 className="h-6 w-6 drop-shadow-[0_0_4px_rgba(0,0,0,0.8)]"
-                style={{ color: getItemColor(draggedDef) }}
               />
             </div>,
             document.body,

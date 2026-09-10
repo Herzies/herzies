@@ -1,4 +1,4 @@
-import { getItem, getItemColor, getItemType } from "@herzies/shared";
+import { getItem } from "@herzies/shared";
 import { cn } from "../lib/utils";
 import { ItemTypeIcon } from "./icons/ItemTypeIcon";
 import type { TabColour } from "./TabButton";
@@ -21,7 +21,6 @@ export function ItemRow({
 }) {
   const def = getItem(itemId);
   const name = def?.name ?? itemId;
-  const type = def ? getItemType(def) : null;
 
   return (
     <div className="flex items-center justify-between gap-2 border-b border-[#222] py-1.5">
@@ -31,13 +30,7 @@ export function ItemRow({
         className="group flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
         title={inspectTitle}
       >
-        {type && def && (
-          <ItemTypeIcon
-            type={type}
-            className="h-4 w-4 shrink-0"
-            style={{ color: getItemColor(def) }}
-          />
-        )}
+        {def && <ItemTypeIcon item={def} className="h-4 w-4 shrink-0" />}
         <div className="min-w-0 flex-1">
           <div
             className={cn("truncate text-ui text-text", {

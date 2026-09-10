@@ -1,10 +1,5 @@
 import type { GameEvent, Inventory } from "@herzies/shared";
-import {
-  getItem,
-  getItemColor,
-  getItemType,
-  RARITY_COLORS as ITEM_RARITY_COLORS,
-} from "@herzies/shared";
+import { getItem, RARITY_COLORS as ITEM_RARITY_COLORS } from "@herzies/shared";
 import { useEffect, useRef, useState } from "react";
 import { herzies, useWindowFocused } from "../tauri-bridge";
 import { ItemTypeIcon } from "./icons/ItemTypeIcon";
@@ -255,9 +250,8 @@ export function EventsView({
                       </h2>
                       <div className="flex items-center gap-1 text-ui">
                         <ItemTypeIcon
-                          type={getItemType(previousRewardItem)}
+                          item={previousRewardItem}
                           className="h-4 w-4 shrink-0"
-                          style={{ color: getItemColor(previousRewardItem) }}
                         />
                         <button
                           className="cursor-pointer border-none bg-transparent text-ui underline"
@@ -361,11 +355,7 @@ export function EventsView({
               <>
                 <div className="flex items-center justify-center gap-1">
                   Reward:{" "}
-                  <ItemTypeIcon
-                    type={getItemType(rewardItem)}
-                    className="h-4 w-4 shrink-0"
-                    style={{ color: getItemColor(rewardItem) }}
-                  />
+                  <ItemTypeIcon item={rewardItem} className="h-4 w-4 shrink-0" />
                   <button
                     className="cursor-pointer border-none bg-transparent text-ui underline"
                     style={{ color: ITEM_RARITY_COLORS[rewardItem.rarity] }}

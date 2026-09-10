@@ -3,13 +3,15 @@ import {
   type DeckSlotGroup,
   type Equipped,
   getItem,
-  getItemColor,
-  getItemType,
   type Inventory,
   ITEM_TYPE_LABELS,
   type ItemType,
 } from "@herzies/shared";
-import { CARD_SHAPE_CLIP, ItemTypeIcon } from "./icons/ItemTypeIcon";
+import {
+  CARD_SHAPE_CLIP,
+  GenericTypeIcon,
+  ItemTypeIcon,
+} from "./icons/ItemTypeIcon";
 import { ItemPreviewCard } from "./ItemInspectOverlay";
 import { HoverPreview, Tooltip } from "./Tooltip";
 
@@ -150,10 +152,6 @@ function DeckSlot({
   }
 
   const def = getItem(itemId);
-  // Equipped-but-missing-from-catalog (stale/desynced data): render filled but
-  // generic rather than silently falling back to empty — an empty box would
-  // hide a real data problem and make the item un-unequippable here.
-  const type = def ? getItemType(def) : fallbackType;
 
   const button = (
     <button
@@ -162,14 +160,15 @@ function DeckSlot({
       className="flex h-4 w-4 shrink-0 cursor-pointer items-center justify-center bg-bg-panel/50 transition-opacity hover:opacity-75"
       style={{ clipPath: CARD_SHAPE_CLIP }}
     >
-      {/* Coloured by this specific item's own dominant art colour, not its
-          category — matches how it's coloured in the inventory grid and
-          store. */}
-      <ItemTypeIcon
-        type={type}
-        className="h-full w-full"
-        style={def ? { color: getItemColor(def) } : undefined}
-      />
+      {def ? (
+        <ItemTypeIcon item={def} className="h-full w-full" />
+      ) : (
+        // Equipped-but-missing-from-catalog (stale/desynced data): render
+        // filled but generic rather than silently falling back to empty — an
+        // empty box would hide a real data problem and make the item
+        // un-unequippable here.
+        <GenericTypeIcon type={fallbackType} className="h-full w-full" />
+      )}
     </button>
   );
 

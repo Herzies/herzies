@@ -1,7 +1,5 @@
 import {
   getItem,
-  getItemColor,
-  getItemType,
   lastFmTrackUrl,
   levelProgress,
   xpToNextLevel,
@@ -308,7 +306,6 @@ export function HomeView({
           <div className="pointer-events-none absolute inset-x-0 bottom-2 z-10 h-0">
             {dropItems.map((drop) => {
               const item = getItem(drop.itemId);
-              const itemType = item ? getItemType(item) : undefined;
               const key = dropKey(drop);
               const isLeaving = leavingKeys.has(key);
               return (
@@ -355,7 +352,7 @@ export function HomeView({
                             : { animationDelay: `${(drop.x * 37) % 2200}ms` }
                         }
                       >
-                        {item && itemType ? (
+                        {item ? (
                           <span className="relative inline-block h-4 w-4">
                             {/* Card-shaped backing in the app's own
                                 background colour so the icon reads as an
@@ -366,14 +363,9 @@ export function HomeView({
                               className="absolute inset-0 bg-bg"
                               style={{ clipPath: CARD_SHAPE_CLIP }}
                             />
-                            {/* Coloured by this specific item's own
-                                dominant art colour, not its category —
-                                different items of the same type (e.g. two
-                                "equipable" cards) should look distinct. */}
                             <ItemTypeIcon
-                              type={itemType}
+                              item={item}
                               className="relative block h-4 w-4"
-                              style={{ color: getItemColor(item) }}
                             />
                           </span>
                         ) : (

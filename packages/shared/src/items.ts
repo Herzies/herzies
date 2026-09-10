@@ -195,6 +195,11 @@ export interface ItemSet {
   effect: string;
   /** Item ids that make up this set. */
   itemIds: string[];
+  /** Shared visual clue applied to every member's small card icon, on top of
+   * whatever shape that item's own icon has — e.g. a rainbow gradient fill
+   * instead of the item's usual solid dominant-colour tint, so set members
+   * read as related regardless of their individual icon depiction. */
+  visual?: { gradient: readonly string[] };
 }
 
 export const ITEM_SETS: ItemSet[] = [
@@ -203,6 +208,7 @@ export const ITEM_SETS: ItemSet[] = [
     name: "Prismatic",
     effect: "Even more rainbow",
     itemIds: ["rainbow-headband", "prism"],
+    visual: { gradient: RAINBOW_RAMP },
   },
 ];
 
