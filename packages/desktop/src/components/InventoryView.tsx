@@ -23,27 +23,35 @@ import { NumberTicker } from "./NumberTicker";
 import { TabButton } from "./TabButton";
 import { HoverPreview, Tooltip } from "./Tooltip";
 
+/** Non-stackable items cap out at 1 per sell action regardless of how many
+ * are owned — each grid slot already represents exactly one physical unit
+ * (see InventoryView's slotKeyFor), so "sell 2 equipables at once" isn't a
+ * meaningful action even when you own 2. Only stackable items (artefacts)
+ * get the quantity ticker. */
 function SellControls({
   itemId,
   qty,
   price,
+  stackable,
   onSell,
 }: {
   itemId: string;
   qty: number;
   price: number;
+  stackable: boolean;
   onSell: (itemId: string, qty: number) => void;
 }) {
+  const maxQty = stackable ? qty : 1;
   const [sellAmount, setSellAmount] = useState(1);
-  const clamped = Math.max(1, Math.min(sellAmount, qty));
+  const clamped = Math.max(1, Math.min(sellAmount, maxQty));
 
   return (
     <div className="flex w-full items-stretch gap-1">
-      {qty > 1 && (
+      {stackable && maxQty > 1 && (
         <NumberTicker
           value={clamped}
           min={1}
-          max={qty}
+          max={maxQty}
           onChange={setSellAmount}
           fullWidth
         />
@@ -56,6 +64,79 @@ function SellControls({
         Sell (<Coin amount={clamped * price} />)
       </button>
     </div>
+  );
+}
+
+/** Compact floating sell action anchored at a point (e.g. a right-click
+ * position) — item name + SellControls, no art/description/set-info. Shares
+ * ContextMenu's anchor-and-dismiss behaviour (outside click, Escape,
+ * scroll) but isn't built on it directly since it needs its own content
+ * layout rather than a list of menu items. */
+function SellBox({
+  itemId,
+  x,
+  y,
+  qty,
+  price,
+  stackable,
+  onSell,
+  onClose,
+}: {
+  itemId: string;
+  x: number;
+  y: number;
+  qty: number;
+  price: number;
+  stackable: boolean;
+  onSell: (itemId: string, qty: number) => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const item = getItem(itemId);
+
+  useEffect(() => {
+    const handlePointerDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("keydown", handleKey);
+    window.addEventListener("scroll", onClose, true);
+    return () => {
+      window.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("keydown", handleKey);
+      window.removeEventListener("scroll", onClose, true);
+    };
+  }, [onClose]);
+
+  if (!item) return null;
+
+  const BOX_WIDTH = 170;
+  const EDGE_PADDING = 8;
+  const left = Math.min(x, window.innerWidth - BOX_WIDTH - EDGE_PADDING);
+  const top = Math.min(y, window.innerHeight - 80 - EDGE_PADDING);
+
+  return createPortal(
+    <div
+      ref={ref}
+      className="fixed z-150 flex w-[170px] flex-col gap-2 border border-border bg-bg-panel p-2 shadow-lg"
+      style={{ left, top }}
+    >
+      <div className="flex items-center gap-1.5 text-ui-sm text-text">
+        <ItemTypeIcon item={item} className="h-4 w-4 shrink-0" />
+        <span className="truncate">{item.name}</span>
+      </div>
+      <SellControls
+        itemId={itemId}
+        qty={qty}
+        price={price}
+        stackable={stackable}
+        onSell={onSell}
+      />
+    </div>,
+    document.body,
   );
 }
 
@@ -294,7 +375,11 @@ export function InventoryView({
   const [inspectItem, setInspectItem] = useState<string | null>(
     initialItem ?? null,
   );
-  const [sellItem, setSellItem] = useState<string | null>(null);
+  const [sellBox, setSellBox] = useState<{
+    itemId: string;
+    x: number;
+    y: number;
+  } | null>(null);
   const [sellMenu, setSellMenu] = useState<{
     itemId: string;
     x: number;
@@ -430,9 +515,8 @@ export function InventoryView({
       setInventory(result.inventory);
       setCurrency(result.newCurrency);
       // Selling the last one leaves nothing to preview — close it.
-      if ((result.inventory[itemId] ?? 0) === 0) {
-        if (itemId === inspectItem) setInspectItem(null);
-        if (itemId === sellItem) setSellItem(null);
+      if ((result.inventory[itemId] ?? 0) === 0 && itemId === inspectItem) {
+        setInspectItem(null);
       }
     }
   };
@@ -692,6 +776,7 @@ export function InventoryView({
                   itemId={inspectItem}
                   qty={inspectedQty}
                   price={inspected.sellPrice}
+                  stackable={inspected.stackable ?? false}
                   onSell={handleSell}
                 />
               ) : null}
@@ -709,7 +794,7 @@ export function InventoryView({
             {
               label: "Sell",
               onClick: () => {
-                setSellItem(sellMenu.itemId);
+                setSellBox(sellMenu);
                 setSellMenu(null);
               },
             },
@@ -717,25 +802,24 @@ export function InventoryView({
         />
       )}
 
-      {sellItem &&
+      {sellBox &&
         (() => {
-          const item = getItem(sellItem);
-          const qty = inventory?.[sellItem] ?? 0;
+          const item = getItem(sellBox.itemId);
+          const qty = inventory?.[sellBox.itemId] ?? 0;
           if (!item?.sellPrice || qty <= 0) return null;
           return (
-            <ItemInspectOverlay
-              itemId={sellItem}
-              onClose={() => setSellItem(null)}
-              inventory={inventory}
-              meta={<>x{qty}</>}
-              footer={
-                <SellControls
-                  itemId={sellItem}
-                  qty={qty}
-                  price={item.sellPrice}
-                  onSell={handleSell}
-                />
-              }
+            <SellBox
+              itemId={sellBox.itemId}
+              x={sellBox.x}
+              y={sellBox.y}
+              qty={qty}
+              price={item.sellPrice}
+              stackable={item.stackable ?? false}
+              onSell={(id, n) => {
+                handleSell(id, n);
+                setSellBox(null);
+              }}
+              onClose={() => setSellBox(null)}
             />
           );
         })()}
