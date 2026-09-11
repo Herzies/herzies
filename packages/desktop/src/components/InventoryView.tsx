@@ -237,11 +237,16 @@ function dragVisualClasses(isDragging: boolean, isDragOver: boolean) {
 const SLOT_INDEX_ATTR = "data-slot-index";
 
 /** One grid cell: just the item's icon (coloured by its own art, not its
- * category — see getItemColor), a stack-count badge, and an equipped ring.
- * Hovering shows the full item preview (art, rarity, description, set
- * progress — no equip/sell actions); clicking places (or returns) the item
- * directly; right-clicking a sellable item opens a Sell menu. Press-and-drag
- * onto any other slot (empty or filled — filled swaps the two items).
+ * category — see getItemColor) and a stack-count badge. No equipped ring —
+ * equip state is per item id, not per physical copy, and the bank only ever
+ * shows unequipped units to begin with (equipping reserves one unit as
+ * "worn" and removes it from the bank — see ownedSlotKeys), so there's
+ * never a specific card here to correctly mark as equipped; that's the
+ * Deck tab's job. Hovering shows the full item preview (art, rarity,
+ * description, set progress — no equip/sell actions); clicking places (or
+ * returns) the item directly; right-clicking a sellable item opens a Sell
+ * menu. Press-and-drag onto any other slot (empty or filled — filled swaps
+ * the two items).
  *
  * `border-r`/`border-b` only draw on non-edge cells (see `isLastCol`/
  * `isLastRow`) — the grid should show inner divider lines only, not an
@@ -250,7 +255,6 @@ function ItemGridCell({
   index,
   itemId,
   qty,
-  isEquipped,
   isLastCol,
   isLastRow,
   isDragging,
@@ -263,7 +267,6 @@ function ItemGridCell({
   index: number;
   itemId: string;
   qty: number;
-  isEquipped: boolean;
   isLastCol: boolean;
   isLastRow: boolean;
   isDragging: boolean;
@@ -304,7 +307,6 @@ function ItemGridCell({
           "relative flex h-full w-full cursor-grab items-center justify-center bg-bg-panel/50 transition-colors hover:bg-white/5 active:cursor-grabbing",
           !isLastCol && "border-r border-border",
           !isLastRow && "border-b border-border",
-          isEquipped && "ring-1 ring-inset ring-cyan/60",
           dragVisualClasses(isDragging, isDragOver),
         )}
       >
@@ -728,7 +730,6 @@ export function InventoryView({
                   index={i}
                   itemId={itemId}
                   qty={qty}
-                  isEquipped={isItemEquipped(itemId)}
                   isLastCol={isLastCol}
                   isLastRow={isLastRow}
                   isDragging={dragVisual?.index === i}
