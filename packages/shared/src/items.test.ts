@@ -1,19 +1,22 @@
 import { describe, expect, it } from "vitest";
 import {
+  BANK_SLOT_COUNT,
+  bankSlotsUsed,
   EQUIP_SLOTS,
   EQUIPPED_SLOTS,
   equippedItemIds,
   findEquippedSlot,
   getItem,
   getItemType,
-  isModifierEquipped,
   ITEM_DROP_WEIGHT_OVERRIDES,
   ITEMS,
+  isBankFull,
+  isModifierEquipped,
   NON_DROPPABLE_ITEM_IDS,
   normalizeEquipped,
   pickWeightedDrop,
-  type Rarity,
   RARITY_DROP_WEIGHTS,
+  type Rarity,
 } from "./items.js";
 
 describe("color equip slot", () => {
@@ -275,5 +278,42 @@ describe("pickWeightedDrop", () => {
       if (id === "cd") continue;
       expect(cdCount).toBeGreaterThan(count);
     }
+  });
+});
+
+describe("bank capacity", () => {
+  it("counts a stackable item as one slot regardless of quantity", () => {
+    expect(bankSlotsUsed({ cd: 12 }, {})).toBe(1);
+  });
+
+  it("counts a non-stackable item as one slot per unit owned", () => {
+    expect(bankSlotsUsed({ headphones: 3 }, {})).toBe(3);
+  });
+
+  it("frees the slot for whichever unit is currently equipped", () => {
+    expect(bankSlotsUsed({ headphones: 3 }, { head: "headphones" })).toBe(2);
+    expect(bankSlotsUsed({ prism: 1 }, { color: "prism" })).toBe(0);
+  });
+
+  it("ignores items owned with a non-positive quantity", () => {
+    expect(bankSlotsUsed({ cd: 0, headphones: -1 }, {})).toBe(0);
+  });
+
+  it("is full only once every slot is spoken for", () => {
+    const inventory = {
+      cd: 1,
+      "first-edition": 1,
+      headphones: BANK_SLOT_COUNT - 2,
+    };
+    expect(bankSlotsUsed(inventory, {})).toBe(BANK_SLOT_COUNT);
+    expect(isBankFull(inventory, {})).toBe(true);
+    expect(
+      isBankFull({ ...inventory, headphones: BANK_SLOT_COUNT - 3 }, {}),
+    ).toBe(false);
+  });
+
+  it("treats a null/empty inventory as empty", () => {
+    expect(bankSlotsUsed(null, {})).toBe(0);
+    expect(isBankFull(null, {})).toBe(false);
   });
 });

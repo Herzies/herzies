@@ -102,6 +102,48 @@ export function isModifierEquipped(
   return !!equipped?.modifier?.includes(itemId);
 }
 
+/** Fixed bank capacity in the desktop Cards grid (6×3 — see InventoryView's
+ * GRID_COLS/GRID_ROWS, which must stay in sync with this). Exported here so
+ * non-UI code (e.g. deciding whether to warn before a purchase or pickup)
+ * doesn't have to duplicate the slot-counting rules below. */
+export const BANK_SLOT_COUNT = 18;
+
+/** How many of the fixed bank slots (see BANK_SLOT_COUNT) `inventory`
+ * currently needs: one slot per stackable item id owned (any quantity),
+ * plus one per unit of a non-stackable item — except whatever's currently
+ * equipped, which reserves a unit as "worn" and frees its bank slot. Mirrors
+ * the slot-key expansion InventoryView uses to lay out its grid. */
+export function bankSlotsUsed(
+  inventory: Record<string, number> | null | undefined,
+  equipped: Equipped | null | undefined,
+): number {
+  if (!inventory) return 0;
+  let count = 0;
+  for (const [itemId, qty] of Object.entries(inventory)) {
+    if (qty <= 0) continue;
+    const item = getItem(itemId);
+    if (item && getItemCategory(item) !== "deck") continue;
+    const isEquipped =
+      findEquippedSlot(equipped, itemId) !== null ||
+      isModifierEquipped(equipped, itemId);
+    if (item?.stackable) {
+      if (!isEquipped) count += 1;
+      continue;
+    }
+    count += Math.max(0, isEquipped ? qty - 1 : qty);
+  }
+  return count;
+}
+
+/** Whether the bank has no free slot left for a fresh item — see
+ * bankSlotsUsed. */
+export function isBankFull(
+  inventory: Record<string, number> | null | undefined,
+  equipped: Equipped | null | undefined,
+): boolean {
+  return bankSlotsUsed(inventory, equipped) >= BANK_SLOT_COUNT;
+}
+
 /** Normalize API/cache payloads that may still be a legacy string[]. */
 export function normalizeEquipped(raw: unknown): Equipped {
   if (!raw || typeof raw !== "object") return {};

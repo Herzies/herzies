@@ -1,5 +1,6 @@
 import type { Equipped, GroundSide, Herzie, Inventory } from "@herzies/shared";
 import {
+  BANK_SLOT_COUNT,
   findEquippedSlot,
   getItem,
   getItemCategory,
@@ -25,8 +26,8 @@ import { HoverPreview, Tooltip } from "./Tooltip";
 
 /** Non-stackable items cap out at 1 per sell action regardless of how many
  * are owned — each grid slot already represents exactly one physical unit
- * (see InventoryView's slotKeyFor), so "sell 2 equipables at once" isn't a
- * meaningful action even when you own 2. Only stackable items (artefacts)
+ * (see InventoryView's ownedBankUnits), so "sell 2 equipables at once" isn't
+ * a meaningful action even when you own 2. Only stackable items (artefacts)
  * get the quantity ticker. */
 function SellControls({
   itemId,
@@ -172,30 +173,13 @@ const GRID_ROWS = 3;
 /** Fixed inventory capacity — 18 slots (6×3) for now, always shown whether
  * filled or empty. A freshly-seen item fills the first empty slot (in
  * current sort order); from there the player can drag items to any slot,
- * including swapping two filled ones. */
-const TOTAL_SLOTS = GRID_COLS * GRID_ROWS;
+ * including swapping two filled ones. Sourced from @herzies/shared so
+ * non-UI code (deciding whether to warn before a purchase or pickup) agrees
+ * with this grid's actual capacity. */
+const TOTAL_SLOTS = BANK_SLOT_COUNT;
 
 const slotStorageKey = (friendCode: string) =>
   `herzies:inventory-slots:${friendCode}`;
-
-/** Non-stackable items (everything but artefacts — see ItemDef.stackable)
- * occupy one grid slot per unit owned instead of one shared slot with a
- * count badge, so N copies show as N separate cards. Each per-unit slot key
- * carries a synthetic instance suffix so multiple copies of the same item
- * can coexist in `slotOrder`; stackable items skip this and use the bare
- * item id as their single slot key. */
-const SLOT_KEY_SEP = "::";
-
-function slotKeyFor(itemId: string, instanceIndex: number): string {
-  return `${itemId}${SLOT_KEY_SEP}${instanceIndex}`;
-}
-
-/** Recovers the real item id from a slot key — a no-op for stackable items,
- * which use the bare item id as their key (see slotKeyFor). */
-function slotKeyItemId(key: string): string {
-  const i = key.indexOf(SLOT_KEY_SEP);
-  return i === -1 ? key : key.slice(0, i);
-}
 
 /** Loads the saved slot arrangement, padded/truncated to `TOTAL_SLOTS` and
  * with anything that isn't a string coerced to an empty slot. */
@@ -212,27 +196,44 @@ function loadSlotOrder(friendCode: string): (string | null)[] {
   }
 }
 
-/** Reconciles the saved slot arrangement against what's actually owned:
- * drops a slot's key if it's no longer owned (sold, or never really
- * there — e.g. corrupted storage), then fills the first empty slot for each
- * owned key not already placed somewhere. `ownedKeys` is expected in the
- * order fresh items should be placed (rarity, then name) — see slotKeyFor
- * for how non-stackable items expand into multiple keys. */
+/** Reconciles the saved slot arrangement against what's actually owned.
+ * `ownedIds` is a multiset (plain item ids, one entry per bank unit — see
+ * `ownedBankUnits`) in the order fresh items should be placed (rarity, then
+ * name); a non-stackable item with N copies simply appears N times.
+ *
+ * Slots are matched by count, not by a synthetic per-unit identity: a first
+ * pass walks `prev` in slot order and keeps a slot's occupant as long as
+ * there's still an un-spoken-for owned unit of that id left, decrementing a
+ * running per-id budget as it goes — so if a copy was sold from one specific
+ * slot (see `handleSell`'s targeted clear), that slot stays empty and every
+ * *other* slot holding the same id is left untouched, instead of an
+ * arbitrary same-id slot losing its card. Only once every existing slot has
+ * had first claim does a second pass place any genuinely new units (more
+ * owned than currently placed) into the remaining empty slots. */
 function reconcileSlotOrder(
   prev: (string | null)[],
-  ownedKeys: string[],
+  ownedIds: string[],
 ): (string | null)[] {
-  const owned = new Set(ownedKeys);
-  const next = prev.map((id) => (id && owned.has(id) ? id : null));
-  const placed = new Set(next.filter((id): id is string => id !== null));
-  for (const id of ownedKeys) {
-    if (placed.has(id)) continue;
+  const remaining = new Map<string, number>();
+  for (const id of ownedIds) remaining.set(id, (remaining.get(id) ?? 0) + 1);
+
+  const next = prev.map((id) => {
+    if (id === null) return null;
+    const left = remaining.get(id) ?? 0;
+    if (left <= 0) return null;
+    remaining.set(id, left - 1);
+    return id;
+  });
+
+  for (const id of ownedIds) {
+    const left = remaining.get(id) ?? 0;
+    if (left <= 0) continue;
+    remaining.set(id, left - 1);
     const emptyIndex = next.indexOf(null);
-    // No room left — over-capacity items simply don't show (not handled
-    // yet; see TOTAL_SLOTS).
+    // No room left — over-capacity items simply don't show (the player is
+    // warned separately — see isBankFull — before this can normally happen).
     if (emptyIndex === -1) break;
     next[emptyIndex] = id;
-    placed.add(id);
   }
   return next;
 }
@@ -256,7 +257,7 @@ const SLOT_INDEX_ATTR = "data-slot-index";
  * category — see getItemColor) and a stack-count badge. No equipped ring —
  * equip state is per item id, not per physical copy, and the bank only ever
  * shows unequipped units to begin with (equipping reserves one unit as
- * "worn" and removes it from the bank — see ownedSlotKeys), so there's
+ * "worn" and removes it from the bank — see ownedBankUnits), so there's
  * never a specific card here to correctly mark as equipped; that's the
  * Deck tab's job. Hovering shows the full item preview (art, rarity,
  * description, set progress — no equip/sell actions); clicking places (or
@@ -289,7 +290,12 @@ function ItemGridCell({
   isDragOver: boolean;
   inventory: Inventory | null;
   onPlace: (itemId: string) => void;
-  onSellRequest: (itemId: string, x: number, y: number) => void;
+  onSellRequest: (
+    itemId: string,
+    slotIndex: number,
+    x: number,
+    y: number,
+  ) => void;
   onDragPointerDown: (index: number, e: React.PointerEvent) => void;
 }) {
   const def = getItem(itemId);
@@ -312,7 +318,8 @@ function ItemGridCell({
         onClick={() => onPlace(itemId)}
         onContextMenu={(e) => {
           e.preventDefault();
-          if (def?.sellPrice) onSellRequest(itemId, e.clientX, e.clientY);
+          if (def?.sellPrice)
+            onSellRequest(itemId, index, e.clientX, e.clientY);
         }}
         className={cn(
           // w-full/h-full: Tooltip's trigger span is a flex item's only
@@ -395,11 +402,14 @@ export function InventoryView({
   );
   const [sellBox, setSellBox] = useState<{
     itemId: string;
+    /** The specific slot this sell was requested from — see handleSell. */
+    slotIndex: number;
     x: number;
     y: number;
   } | null>(null);
   const [sellMenu, setSellMenu] = useState<{
     itemId: string;
+    slotIndex: number;
     x: number;
     y: number;
   } | null>(null);
@@ -504,11 +514,11 @@ export function InventoryView({
 
   const handleDragPointerDown = (index: number, e: React.PointerEvent) => {
     if (e.button !== 0) return;
-    const slotKey = slotOrder[index];
-    if (!slotKey) return;
+    const itemId = slotOrder[index];
+    if (!itemId) return;
     dragRef.current = {
       index,
-      itemId: slotKeyItemId(slotKey),
+      itemId,
       startX: e.clientX,
       startY: e.clientY,
       dragging: false,
@@ -527,7 +537,21 @@ export function InventoryView({
     });
   }, []);
 
-  const handleSell = async (itemId: string, qty: number) => {
+  /** `slotIndex`, when given, is the exact grid slot the sell was requested
+   * from (see the grid's onSellRequest). For a non-stackable item — sold one
+   * unit at a time (see SellControls) — clearing that specific slot on
+   * success is what makes the card that visually disappears match the one
+   * the player actually right-clicked: reconcileSlotOrder's count-based
+   * matching only knows "one fewer of this item id is owned now", and with
+   * several identical cards on the grid it has no way on its own to tell
+   * *which* of them the player meant. Skipped for stackable items, which
+   * share a single badge-counted slot regardless of quantity — clearing it
+   * on a partial sell would wipe a stack that's still owned. */
+  const handleSell = async (
+    itemId: string,
+    qty: number,
+    slotIndex?: number,
+  ) => {
     const result = await herzies.sellItem(itemId, qty);
     if (result) {
       setInventory(result.inventory);
@@ -535,6 +559,14 @@ export function InventoryView({
       // Selling the last one leaves nothing to preview — close it.
       if ((result.inventory[itemId] ?? 0) === 0 && itemId === inspectItem) {
         setInspectItem(null);
+      }
+      if (slotIndex !== undefined && !getItem(itemId)?.stackable) {
+        setSlotOrder((prev) => {
+          if (prev[slotIndex] !== itemId) return prev;
+          const next = [...prev];
+          next[slotIndex] = null;
+          return next;
+        });
       }
     }
   };
@@ -605,33 +637,32 @@ export function InventoryView({
   // one unit as equipped and still shows any remaining copies (owning 2,
   // equipping 1, leaves 1 in the bank); a stackable item, if it were ever
   // equipable too, hides its whole stack instead (nothing today is both,
-  // so this is just a safety fallback). Non-stackable items expand into one
-  // slot key per bank unit (see slotKeyFor) instead of one key for the
-  // whole stack, so N copies occupy N separate grid slots.
-  const ownedSlotKeys = items.flatMap(([itemId, qty]) => {
+  // so this is just a safety fallback). Non-stackable items repeat their id
+  // once per bank unit (a multiset, not a set of unique keys — see
+  // reconcileSlotOrder) instead of contributing one entry for the whole
+  // stack, so N copies occupy N separate grid slots.
+  const ownedBankUnits = items.flatMap(([itemId, qty]) => {
     const def = getItem(itemId);
     if (def?.stackable) return isItemEquipped(itemId) ? [] : [itemId];
     const bankQty = isItemEquipped(itemId) ? qty - 1 : qty;
-    return Array.from({ length: Math.max(0, bankQty) }, (_, i) =>
-      slotKeyFor(itemId, i),
-    );
+    return Array.from({ length: Math.max(0, bankQty) }, () => itemId);
   });
   const loading = inventory === null;
 
   // Keep the saved slot arrangement in sync with what's actually owned —
-  // see reconcileSlotOrder. Keyed on the joined key list (not
-  // `ownedSlotKeys`, a new array every render) so this only runs when
-  // ownership actually changes.
-  const ownedSlotKeysJoined = ownedSlotKeys.join(",");
+  // see reconcileSlotOrder. Keyed on the joined list (not `ownedBankUnits`,
+  // a new array every render) so this only runs when ownership actually
+  // changes.
+  const ownedBankUnitsJoined = ownedBankUnits.join(",");
   useEffect(() => {
     setSlotOrder((prev) =>
       reconcileSlotOrder(
         prev,
-        ownedSlotKeysJoined ? ownedSlotKeysJoined.split(",") : [],
+        ownedBankUnitsJoined ? ownedBankUnitsJoined.split(",") : [],
       ),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ownedSlotKeysJoined]);
+  }, [ownedBankUnitsJoined]);
 
   useEffect(() => {
     try {
@@ -724,10 +755,9 @@ export function InventoryView({
           </div>
         ) : (
           <div className="grid min-h-0 flex-1 grid-cols-6 grid-rows-3">
-            {slotOrder.map((slotKey, i) => {
+            {slotOrder.map((itemId, i) => {
               const isLastCol = i % GRID_COLS === GRID_COLS - 1;
               const isLastRow = i >= TOTAL_SLOTS - GRID_COLS;
-              const itemId = slotKey ? slotKeyItemId(slotKey) : null;
               const qty = itemId ? (inventory?.[itemId] ?? 0) : 0;
               if (!itemId || qty <= 0) {
                 return (
@@ -752,8 +782,8 @@ export function InventoryView({
                   isDragOver={dragVisual?.overIndex === i}
                   inventory={inventory}
                   onPlace={handleGridClick}
-                  onSellRequest={(id, x, y) =>
-                    setSellMenu({ itemId: id, x, y })
+                  onSellRequest={(id, slotIndex, x, y) =>
+                    setSellMenu({ itemId: id, slotIndex, x, y })
                   }
                   onDragPointerDown={handleDragPointerDown}
                 />
@@ -838,7 +868,7 @@ export function InventoryView({
               price={item.sellPrice}
               stackable={item.stackable ?? false}
               onSell={(id, n) => {
-                handleSell(id, n);
+                handleSell(id, n, sellBox.slotIndex);
                 setSellBox(null);
               }}
               onClose={() => setSellBox(null)}

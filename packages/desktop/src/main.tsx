@@ -1,5 +1,5 @@
 import "./globals.css";
-import type { HerzieProfile } from "@herzies/shared";
+import { type HerzieProfile, isBankFull } from "@herzies/shared";
 import {
   isPermissionGranted,
   requestPermission,
@@ -108,6 +108,10 @@ function App() {
   const [tradeActive, setTradeActive] = useState(false);
   /** Set when the user tries to navigate away mid-trade; holds the destination until confirmed. */
   const [pendingLeaveView, setPendingLeaveView] = useState<View | null>(null);
+  /** True once the "inventory full" alert has been dismissed for the current
+   * overflow — reset the moment a slot frees up, so filling back up again
+   * (a further buy/pickup) shows it again instead of staying silenced. */
+  const [dismissedInventoryFull, setDismissedInventoryFull] = useState(false);
   /** Where to return when the trade session ends — the view the user was on before entering it. */
   const tradeReturnViewRef = useRef<View>("home");
   /** Current view, readable from effect closures (deep-link handler). */
@@ -179,6 +183,11 @@ function App() {
       setFriendOverlayBusy(null);
     }
   }, [state.pendingFriendRequest]);
+
+  const inventoryFull = isBankFull(state.inventory, state.equipped);
+  useEffect(() => {
+    if (!inventoryFull) setDismissedInventoryFull(false);
+  }, [inventoryFull]);
 
   const refreshEventIndicator = useCallback(() => {
     Promise.all([herzies.fetchActiveEvents(), herzies.fetchPreviousHunt()])
@@ -567,7 +576,7 @@ function App() {
           // Home supplies its own bottom breathing room (HomeView's now-playing
           // bar) so its artist-image background can reach the chat's top
           // border instead of stopping short of an outer margin.
-          view !== "home" && "mb-2",
+          view !== "home" && view !== "inventory" && "mb-2",
         )}
       >
         <div
@@ -789,6 +798,32 @@ function App() {
         >
           Are you sure you want to leave? The trade stays open — you can rejoin
           it from Social → Trades.
+        </PromptOverlay>
+      )}
+
+      {herzie && inventoryFull && !dismissedInventoryFull && (
+        <PromptOverlay
+          title="Inventory full"
+          titleId="inventory-full-title"
+          onEscape={() => setDismissedInventoryFull(true)}
+          actions={[
+            {
+              label: "Later",
+              colour: "text-text-dim",
+              onClick: () => setDismissedInventoryFull(true),
+            },
+            {
+              label: "Open Cards",
+              colour: "text-purple",
+              onClick: () => {
+                setDismissedInventoryFull(true);
+                switchView("inventory");
+              },
+            },
+          ]}
+        >
+          Your inventory is full. Sell something from Cards to free up a slot
+          before you pick up or buy anything else.
         </PromptOverlay>
       )}
 
