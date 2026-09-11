@@ -132,6 +132,9 @@ export interface ItemDef {
   description: string;
   rarity: Rarity;
   frames: string[][]; // Each frame is an array of lines (with HTML color spans)
+  /** Whether owning more than one is allowed (gates re-buying from the
+   * store). For now, artefacts — items with no equipSlot/equipable, see
+   * getItemType — are the only stackable item type. */
   stackable?: boolean;
   equipable?: boolean;
   /** Catalog category; ground items occupy ground_left or ground_right when equipped,
@@ -1056,7 +1059,9 @@ export const ITEMS: ItemDef[] = [
     description: "A token of appreciation for early adopters.",
     rarity: "rare",
     frames: firstEditionFrames,
-    stackable: false,
+    // Artefacts (no equipSlot/equipable — see getItemType) are the only
+    // stackable item type for now.
+    stackable: true,
     sellPrice: 250,
   },
   {
