@@ -540,15 +540,39 @@ async fn collect_drop(
     drop_id: String,
 ) -> Result<bool, String> {
     let client = Client::new();
-    match api::api_collect_drop(&client, &drop_id).await? {
-        Some((_item_id, name)) => {
-            {
-                let mut s = state.lock().unwrap();
-                // Only the one collected drop leaves the list — any others
-                // still pending stay on the ground.
-                s.pending_drops.retain(|d| d.id != drop_id);
-                s.bump_drop_epoch();
+
+    // Optimistic: remove the drop and credit the item to inventory locally
+    // right away, before the round trip even starts, so the card
+    // disappears and the count bumps instantly instead of after a couple
+    // hundred ms of network latency. Reverted below if the server says
+    // otherwise — already gone (e.g. a racing Spirit Orb auto-collect) or
+    // a request failure.
+    let removed_drop = {
+        let mut s = state.lock().unwrap();
+        let removed = s
+            .pending_drops
+            .iter()
+            .position(|d| d.id == drop_id)
+            .map(|i| s.pending_drops.remove(i));
+        if let Some(ref drop) = removed {
+            if let Some(inv) = s.inventory.as_mut() {
+                *inv.entry(drop.item_id.clone()).or_insert(0) += 1;
             }
+            s.bump_drop_epoch();
+        }
+        removed
+    };
+    if removed_drop.is_some() {
+        emit_state_update(&app);
+    }
+
+    let result = api::api_collect_drop(&client, &drop_id).await;
+
+    match result {
+        Ok(Some((_item_id, name))) => {
+            // Confirmed — reconcile with the authoritative inventory
+            // (equipped/currency can drift too, so a full refresh is
+            // simplest) rather than trusting the optimistic +1 forever.
             refresh_inventory_cache(&app, &client).await;
             // Same "You received: Nx <name>" convention as server-driven
             // item_granted notifications (see game-server.ts) — this path
@@ -556,8 +580,34 @@ async fn collect_drop(
             let _ = app.emit("activity", format!("You received: 1x {name}"));
             Ok(true)
         }
-        None => Ok(false),
+        Ok(None) => {
+            if let Some(drop) = removed_drop {
+                revert_optimistic_collect(&state, drop);
+                emit_state_update(&app);
+            }
+            Ok(false)
+        }
+        Err(e) => {
+            if let Some(drop) = removed_drop {
+                revert_optimistic_collect(&state, drop);
+                emit_state_update(&app);
+            }
+            Err(e)
+        }
     }
+}
+
+/// Undoes the optimistic local removal/inventory-credit in `collect_drop`
+/// once the server reports the collect didn't actually happen.
+fn revert_optimistic_collect(state: &tauri::State<'_, SharedState>, drop: PendingDrop) {
+    let mut s = state.lock().unwrap();
+    if let Some(inv) = s.inventory.as_mut() {
+        if let Some(qty) = inv.get_mut(&drop.item_id) {
+            *qty = qty.saturating_sub(1);
+        }
+    }
+    s.pending_drops.push(drop);
+    s.bump_drop_epoch();
 }
 
 /// Dev-only: powers the "Spawn Item Drop" debug button in Settings. Adds the

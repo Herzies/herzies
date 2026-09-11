@@ -89,11 +89,17 @@ export function HomeView({
     x: realDropX(d.id),
   }));
 
-  const performCollect = async (drop: GroundDrop) => {
-    if (collectingIds.has(drop.id)) return;
+  // Returns whether the drop was actually collected — the Rust side already
+  // updates pendingDrops/inventory optimistically before its own network
+  // call resolves, so `false` here means the server rejected it (already
+  // gone, e.g. a racing Spirit Orb auto-collect) or the request failed.
+  const performCollect = async (drop: GroundDrop): Promise<boolean> => {
+    if (collectingIds.has(drop.id)) return false;
     setCollectingIds((prev) => new Set(prev).add(drop.id));
     try {
-      await herzies.collectDrop(drop.id);
+      return await herzies.collectDrop(drop.id);
+    } catch {
+      return false;
     } finally {
       setCollectingIds((prev) => {
         if (!prev.has(drop.id)) return prev;
@@ -104,24 +110,29 @@ export function HomeView({
     }
   };
 
-  // Picking one up plays a quick fade-and-rise before it actually leaves —
-  // `leavingKeys` drives that transition locally, and the real removal
-  // (the server call) is deferred until it finishes so the item doesn't just
-  // vanish mid-animation. The key also doubles as a guard against a drag
-  // sweep re-triggering the same item while its exit is still playing.
+  // Picking one up plays a quick fade-and-rise, then stays hidden through
+  // the collect call — `leavingKeys` only clears again if the collect
+  // actually failed, letting the item reappear instead of leaving it stuck
+  // invisible. On success there's nothing to clear: pendingDrops drops the
+  // id (the Rust side updates it optimistically, before its network call
+  // even resolves) so the item just stops being rendered. The key also
+  // doubles as a guard against a drag sweep re-triggering the same item
+  // while its exit is still playing.
   const [leavingKeys, setLeavingKeys] = useState<Set<string>>(new Set());
 
   const handleCollectDrop = (drop: GroundDrop) => {
     if (leavingKeys.has(drop.id)) return;
     setLeavingKeys((prev) => new Set(prev).add(drop.id));
-    setTimeout(() => {
-      performCollect(drop);
-      setLeavingKeys((prev) => {
-        if (!prev.has(drop.id)) return prev;
-        const next = new Set(prev);
-        next.delete(drop.id);
-        return next;
-      });
+    setTimeout(async () => {
+      const collected = await performCollect(drop);
+      if (!collected) {
+        setLeavingKeys((prev) => {
+          if (!prev.has(drop.id)) return prev;
+          const next = new Set(prev);
+          next.delete(drop.id);
+          return next;
+        });
+      }
     }, DROP_EXIT_MS);
   };
 
