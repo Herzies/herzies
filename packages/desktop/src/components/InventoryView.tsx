@@ -565,14 +565,10 @@ export function InventoryView({
     uncommon: 2,
     common: 3,
   };
-  // Equipped items live only in the Deck tab, not the Cards bank — an item
-  // disappears from here the moment it's placed, and reappears once
-  // returned.
   const items = inventory
     ? Object.entries(inventory)
         .filter(([itemId, qty]) => {
           if (qty <= 0) return false;
-          if (isItemEquipped(itemId)) return false;
           const def = getItem(itemId);
           return (def ? getItemCategory(def) : "deck") === "deck";
         })
@@ -585,14 +581,23 @@ export function InventoryView({
           );
         })
     : [];
-  // Non-stackable items expand into one slot key per unit owned (see
-  // slotKeyFor) instead of one key for the whole stack, so N copies occupy
-  // N separate grid slots.
-  const ownedSlotKeys = items.flatMap(([itemId, qty]) =>
-    getItem(itemId)?.stackable
-      ? [itemId]
-      : Array.from({ length: qty }, (_, i) => slotKeyFor(itemId, i)),
-  );
+  // Equipped items live only in the Deck tab, not the Cards bank. Equip
+  // state is per item id, not per physical copy — there's no way to say
+  // "this specific one is worn" — so a non-stackable item reserves exactly
+  // one unit as equipped and still shows any remaining copies (owning 2,
+  // equipping 1, leaves 1 in the bank); a stackable item, if it were ever
+  // equipable too, hides its whole stack instead (nothing today is both,
+  // so this is just a safety fallback). Non-stackable items expand into one
+  // slot key per bank unit (see slotKeyFor) instead of one key for the
+  // whole stack, so N copies occupy N separate grid slots.
+  const ownedSlotKeys = items.flatMap(([itemId, qty]) => {
+    const def = getItem(itemId);
+    if (def?.stackable) return isItemEquipped(itemId) ? [] : [itemId];
+    const bankQty = isItemEquipped(itemId) ? qty - 1 : qty;
+    return Array.from({ length: Math.max(0, bankQty) }, (_, i) =>
+      slotKeyFor(itemId, i),
+    );
+  });
   const loading = inventory === null;
 
   // Keep the saved slot arrangement in sync with what's actually owned —
