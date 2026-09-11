@@ -34,27 +34,34 @@ function SellControls({
   price,
   stackable,
   onSell,
+  stacked = false,
 }: {
   itemId: string;
   qty: number;
   price: number;
   stackable: boolean;
   onSell: (itemId: string, qty: number) => void;
+  /** Ticker row above a full-width Sell button instead of side by side —
+   * for the compact SellBox popover, which isn't wide enough to fit the
+   * ticker's three segments and the Sell button in one row. */
+  stacked?: boolean;
 }) {
   const maxQty = stackable ? qty : 1;
   const [sellAmount, setSellAmount] = useState(1);
   const clamped = Math.max(1, Math.min(sellAmount, maxQty));
 
   return (
-    <div className="flex w-full items-stretch gap-1">
+    <div className={cn("flex gap-1", stacked ? "flex-col" : "w-full items-stretch")}>
       {stackable && maxQty > 1 && (
-        <NumberTicker
-          value={clamped}
-          min={1}
-          max={maxQty}
-          onChange={setSellAmount}
-          fullWidth
-        />
+        <div className="flex items-stretch gap-1">
+          <NumberTicker
+            value={clamped}
+            min={1}
+            max={maxQty}
+            onChange={setSellAmount}
+            fullWidth
+          />
+        </div>
       )}
       <button
         type="button"
@@ -113,15 +120,18 @@ function SellBox({
 
   if (!item) return null;
 
-  const BOX_WIDTH = 170;
+  const BOX_WIDTH = 180;
+  // Stacked SellControls adds a row (ticker above the Sell button instead of
+  // beside it) versus the row-layout estimate this would otherwise need.
+  const BOX_HEIGHT = 110;
   const EDGE_PADDING = 8;
   const left = Math.min(x, window.innerWidth - BOX_WIDTH - EDGE_PADDING);
-  const top = Math.min(y, window.innerHeight - 80 - EDGE_PADDING);
+  const top = Math.min(y, window.innerHeight - BOX_HEIGHT - EDGE_PADDING);
 
   return createPortal(
     <div
       ref={ref}
-      className="fixed z-150 flex w-[170px] flex-col gap-2 border border-border bg-bg-panel p-2 shadow-lg"
+      className="fixed z-150 flex w-[180px] flex-col gap-2 border border-border bg-bg-panel p-2 shadow-lg"
       style={{ left, top }}
     >
       <div className="flex items-center gap-1.5 text-ui-sm text-text">
@@ -134,6 +144,7 @@ function SellBox({
         price={price}
         stackable={stackable}
         onSell={onSell}
+        stacked
       />
     </div>,
     document.body,
