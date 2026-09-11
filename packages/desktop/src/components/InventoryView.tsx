@@ -65,7 +65,12 @@ function SellControls({
       )}
       <button
         type="button"
-        className="btn flex-1"
+        // flex-1 only in the row layout, to stretch width. In the stacked
+        // (column) layout, flex-1's flex-basis: 0 hijacks the main axis —
+        // now vertical — and overrides .btn's fixed height, squashing the
+        // button; full width there instead comes for free from the column
+        // container's default align-items: stretch.
+        className={cn("btn", !stacked && "flex-1")}
         onClick={() => onSell(itemId, clamped)}
       >
         Sell (<Coin amount={clamped * price} />)
