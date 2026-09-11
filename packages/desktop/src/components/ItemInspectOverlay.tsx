@@ -43,7 +43,7 @@ export function ItemPreviewCard({
   return (
     <div
       className={cn(
-        "w-[260px] max-w-full border border-border bg-bg-panel p-4 text-center",
+        "w-65 max-w-full border border-border bg-bg-panel p-4 text-center",
         className,
       )}
     >
@@ -59,7 +59,7 @@ export function ItemPreviewCard({
       </div>
       <div className="text-sm font-bold">"{item.name}"</div>
       <div
-        className="mb-1 text-ui-sm"
+        className="my-1 text-ui-sm"
         style={{ color: ITEM_RARITY_COLORS[item.rarity] }}
       >
         {RARITY_LABELS[item.rarity]}
