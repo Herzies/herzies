@@ -16,8 +16,8 @@ import { Coin } from "./Coin";
 import { ContextMenu } from "./ContextMenu";
 import { DeckRow } from "./DeckRow";
 import { Herzie3D } from "./Herzie3D";
-import { ItemTypeIcon } from "./icons/ItemTypeIcon";
 import ItemInspectOverlay, { ItemPreviewCard } from "./ItemInspectOverlay";
+import { ItemTypeIcon } from "./icons/ItemTypeIcon";
 import { List } from "./List";
 import { NumberTicker } from "./NumberTicker";
 import { TabButton } from "./TabButton";
@@ -78,7 +78,27 @@ const GRID_ROWS = 3;
  * including swapping two filled ones. */
 const TOTAL_SLOTS = GRID_COLS * GRID_ROWS;
 
-const slotStorageKey = (friendCode: string) => `herzies:inventory-slots:${friendCode}`;
+const slotStorageKey = (friendCode: string) =>
+  `herzies:inventory-slots:${friendCode}`;
+
+/** Non-stackable items (everything but artefacts — see ItemDef.stackable)
+ * occupy one grid slot per unit owned instead of one shared slot with a
+ * count badge, so N copies show as N separate cards. Each per-unit slot key
+ * carries a synthetic instance suffix so multiple copies of the same item
+ * can coexist in `slotOrder`; stackable items skip this and use the bare
+ * item id as their single slot key. */
+const SLOT_KEY_SEP = "::";
+
+function slotKeyFor(itemId: string, instanceIndex: number): string {
+  return `${itemId}${SLOT_KEY_SEP}${instanceIndex}`;
+}
+
+/** Recovers the real item id from a slot key — a no-op for stackable items,
+ * which use the bare item id as their key (see slotKeyFor). */
+function slotKeyItemId(key: string): string {
+  const i = key.indexOf(SLOT_KEY_SEP);
+  return i === -1 ? key : key.slice(0, i);
+}
 
 /** Loads the saved slot arrangement, padded/truncated to `TOTAL_SLOTS` and
  * with anything that isn't a string coerced to an empty slot. */
@@ -96,18 +116,19 @@ function loadSlotOrder(friendCode: string): (string | null)[] {
 }
 
 /** Reconciles the saved slot arrangement against what's actually owned:
- * drops a slot's item if it's no longer owned (sold, or never really
+ * drops a slot's key if it's no longer owned (sold, or never really
  * there — e.g. corrupted storage), then fills the first empty slot for each
- * owned item not already placed somewhere. `ownedIds` is expected in the
- * order fresh items should be placed (rarity, then name). */
+ * owned key not already placed somewhere. `ownedKeys` is expected in the
+ * order fresh items should be placed (rarity, then name) — see slotKeyFor
+ * for how non-stackable items expand into multiple keys. */
 function reconcileSlotOrder(
   prev: (string | null)[],
-  ownedIds: string[],
+  ownedKeys: string[],
 ): (string | null)[] {
-  const owned = new Set(ownedIds);
+  const owned = new Set(ownedKeys);
   const next = prev.map((id) => (id && owned.has(id) ? id : null));
   const placed = new Set(next.filter((id): id is string => id !== null));
-  for (const id of ownedIds) {
+  for (const id of ownedKeys) {
     if (placed.has(id)) continue;
     const emptyIndex = next.indexOf(null);
     // No room left — over-capacity items simply don't show (not handled
@@ -122,7 +143,10 @@ function reconcileSlotOrder(
 /** Shared by both cell kinds: only the dragged cell dims, only the one
  * currently dragged over gets the drop-target ring. */
 function dragVisualClasses(isDragging: boolean, isDragOver: boolean) {
-  return cn(isDragging && "opacity-30", isDragOver && "ring-1 ring-inset ring-cyan");
+  return cn(
+    isDragging && "opacity-30",
+    isDragOver && "ring-1 ring-inset ring-cyan",
+  );
 }
 
 /** `data-slot-index` on every cell lets the global pointermove handler find
@@ -173,7 +197,12 @@ function ItemGridCell({
   return (
     <HoverPreview
       content={
-        <ItemPreviewCard itemId={itemId} meta={`x${qty}`} box={100} inventory={inventory} />
+        <ItemPreviewCard
+          itemId={itemId}
+          meta={def?.stackable ? `x${qty}` : undefined}
+          box={100}
+          inventory={inventory}
+        />
       }
     >
       <button
@@ -198,7 +227,7 @@ function ItemGridCell({
           dragVisualClasses(isDragging, isDragOver),
         )}
       >
-        {qty > 1 && (
+        {def?.stackable && qty > 1 && (
           <span className="absolute top-0.5 right-0.5 rounded bg-black/60 px-1 text-[9px] text-text-dim">
             x{qty}
           </span>
@@ -372,11 +401,11 @@ export function InventoryView({
 
   const handleDragPointerDown = (index: number, e: React.PointerEvent) => {
     if (e.button !== 0) return;
-    const itemId = slotOrder[index];
-    if (!itemId) return;
+    const slotKey = slotOrder[index];
+    if (!slotKey) return;
     dragRef.current = {
       index,
-      itemId,
+      itemId: slotKeyItemId(slotKey),
       startX: e.clientX,
       startY: e.clientY,
       dragging: false,
@@ -472,17 +501,30 @@ export function InventoryView({
           );
         })
     : [];
-  const ownedIds = items.map(([itemId]) => itemId);
+  // Non-stackable items expand into one slot key per unit owned (see
+  // slotKeyFor) instead of one key for the whole stack, so N copies occupy
+  // N separate grid slots.
+  const ownedSlotKeys = items.flatMap(([itemId, qty]) =>
+    getItem(itemId)?.stackable
+      ? [itemId]
+      : Array.from({ length: qty }, (_, i) => slotKeyFor(itemId, i)),
+  );
   const loading = inventory === null;
 
   // Keep the saved slot arrangement in sync with what's actually owned —
-  // see reconcileSlotOrder. Keyed on the joined id list (not `items`, a new
-  // array every render) so this only runs when ownership actually changes.
-  const ownedIdsKey = ownedIds.join(",");
+  // see reconcileSlotOrder. Keyed on the joined key list (not
+  // `ownedSlotKeys`, a new array every render) so this only runs when
+  // ownership actually changes.
+  const ownedSlotKeysJoined = ownedSlotKeys.join(",");
   useEffect(() => {
-    setSlotOrder((prev) => reconcileSlotOrder(prev, ownedIdsKey ? ownedIdsKey.split(",") : []));
+    setSlotOrder((prev) =>
+      reconcileSlotOrder(
+        prev,
+        ownedSlotKeysJoined ? ownedSlotKeysJoined.split(",") : [],
+      ),
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ownedIdsKey]);
+  }, [ownedSlotKeysJoined]);
 
   useEffect(() => {
     try {
@@ -509,6 +551,15 @@ export function InventoryView({
         ? "L"
         : "R"
       : null;
+  // Quantity is only meaningful for stackable items — each non-stackable
+  // card in the grid already represents exactly one unit, so showing "x2"
+  // while inspecting one of them would be misleading.
+  const inspectedMeta = [
+    inspected?.stackable ? `x${inspectedQty}` : null,
+    inspectedGroundSide,
+  ]
+    .filter((part): part is string => Boolean(part))
+    .join(" · ");
 
   return (
     <div className="flex h-full flex-col">
@@ -566,9 +617,10 @@ export function InventoryView({
           </div>
         ) : (
           <div className="grid min-h-0 flex-1 grid-cols-6 grid-rows-3">
-            {slotOrder.map((itemId, i) => {
+            {slotOrder.map((slotKey, i) => {
               const isLastCol = i % GRID_COLS === GRID_COLS - 1;
               const isLastRow = i >= TOTAL_SLOTS - GRID_COLS;
+              const itemId = slotKey ? slotKeyItemId(slotKey) : null;
               const qty = itemId ? (inventory?.[itemId] ?? 0) : 0;
               if (!itemId || qty <= 0) {
                 return (
@@ -594,7 +646,9 @@ export function InventoryView({
                   isDragOver={dragVisual?.overIndex === i}
                   inventory={inventory}
                   onPlace={handleGridClick}
-                  onSellRequest={(id, x, y) => setSellMenu({ itemId: id, x, y })}
+                  onSellRequest={(id, x, y) =>
+                    setSellMenu({ itemId: id, x, y })
+                  }
                   onDragPointerDown={handleDragPointerDown}
                 />
               );
@@ -608,12 +662,7 @@ export function InventoryView({
           itemId={inspectItem}
           onClose={() => setInspectItem(null)}
           inventory={inventory}
-          meta={
-            <>
-              x{inspectedQty}
-              {inspectedGroundSide ? ` · ${inspectedGroundSide}` : ""}
-            </>
-          }
+          meta={inspectedMeta || undefined}
           footer={
             <>
               {inspected.equipable &&
