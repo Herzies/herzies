@@ -559,6 +559,24 @@ async fn collect_drop(
     }
 }
 
+/// Dev-only: powers the "Spawn Item Drop" debug button in Settings. Adds the
+/// server-spawned drop straight into local state so it appears on the ground
+/// immediately, instead of waiting for the next sync tick to pick it up.
+#[tauri::command]
+async fn spawn_debug_drop(
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<(), String> {
+    let client = Client::new();
+    let drop = api::api_spawn_debug_drop(&client).await?;
+    {
+        let mut s = state.lock().unwrap();
+        s.pending_drops.push(drop);
+    }
+    emit_state_update(&app);
+    Ok(())
+}
+
 #[tauri::command]
 async fn fetch_store_products() -> Result<Vec<StoreProduct>, String> {
     let client = Client::new();
@@ -1845,6 +1863,7 @@ pub fn run() {
             sell_item,
             buy_item,
             collect_drop,
+            spawn_debug_drop,
             equip_item,
             fetch_store_products,
             start_purchase,

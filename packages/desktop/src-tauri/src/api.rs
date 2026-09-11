@@ -315,6 +315,29 @@ pub async fn api_collect_drop(
     }))
 }
 
+/// Dev-only: spawns a real, pickup-able world drop for the "Spawn Item Drop"
+/// debug button in Settings (see supabase/functions/debug-spawn-drop — that
+/// endpoint is further restricted server-side to the developer's own
+/// account, since a client-side dev gate alone wouldn't stop any other
+/// player from calling it directly).
+pub async fn api_spawn_debug_drop(client: &Client) -> Result<PendingDrop, String> {
+    let url = format!("{}/debug-spawn-drop", functions_base());
+    let anon = supabase_anon_key();
+    let resp = api_fetch_full(client, reqwest::Method::POST, &url, None, Some(&anon))
+        .await
+        .ok_or_else(|| "Network error".to_string())?;
+    let status = resp.status();
+    let text = resp.text().await.map_err(|e| format!("Read error: {e}"))?;
+    let data: serde_json::Value =
+        serde_json::from_str(&text).map_err(|_| format!("Server returned {status}"))?;
+    if !status.is_success() {
+        let msg = data["error"].as_str().unwrap_or("Unknown error");
+        return Err(msg.to_string());
+    }
+    serde_json::from_value(data["spawned"].clone())
+        .map_err(|e| format!("Malformed response: {e}"))
+}
+
 pub async fn api_get_me(client: &Client) -> Option<Herzie> {
     let resp = api_fetch(client, reqwest::Method::GET, "/me", None).await?;
     if !resp.status().is_success() {

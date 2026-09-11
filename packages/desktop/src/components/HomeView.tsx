@@ -18,10 +18,9 @@ import { CARD_SHAPE_CLIP, ItemTypeIcon } from "./icons/ItemTypeIcon";
 import { MarqueeText } from "./MarqueeText";
 import { Tooltip } from "./Tooltip";
 
-/** Dev-only: a locally spawned drop for testing the drop UI (Settings →
- * Debug). Never touches the server or inventory. */
-export interface DebugDrop {
-  /** Unique per spawn — repeat drops of the same item never merge. */
+/** A pending world drop plus the ground x-position it was assigned on first
+ * render. */
+interface GroundDrop {
   id: string;
   itemId: string;
   /** Ground position, percent from the left, assigned once at spawn. */
@@ -29,8 +28,8 @@ export interface DebugDrop {
 }
 
 /** Keep drops off the very edges of the scene. */
-export const DROP_X_MIN = 8;
-export const DROP_X_MAX = 92;
+const DROP_X_MIN = 8;
+const DROP_X_MAX = 92;
 
 /** How long the pick-up fade-and-rise plays before the drop actually leaves. */
 const DROP_EXIT_MS = 260;
@@ -40,16 +39,12 @@ export function HomeView({
   stageOverride,
   onOpenProfile,
   onOpenSettings,
-  debugDrops,
-  onCollectDebugDrop,
 }: {
   state: AppState;
   stageOverride?: number | null;
   /** Open the viewer's own profile (same layout as other herzies'). */
   onOpenProfile?: () => void;
   onOpenSettings?: () => void;
-  debugDrops?: DebugDrop[];
-  onCollectDebugDrop?: (id: string) => void;
 }) {
   const {
     herzie,
@@ -86,27 +81,15 @@ export function HomeView({
   const hasSpiritOrb =
     equipped.ground_left === "spirit-orb" ||
     equipped.ground_right === "spirit-orb";
-  // Real drops (server-driven, any number at once) render alongside any debug
-  // drops (dev-only, each spawn its own item on the ground) — every item is
-  // independently collectible.
-  const dropItems: (DebugDrop & { isDebug: boolean })[] = [
-    ...pendingDrops.map((d) => ({
-      id: d.id,
-      itemId: d.itemId,
-      x: realDropX(d.id),
-      isDebug: false,
-    })),
-    ...(debugDrops ?? []).map((d) => ({ ...d, isDebug: true })),
-  ];
+  // Any number of drops can be pending at once — every item is independently
+  // collectible.
+  const dropItems: GroundDrop[] = pendingDrops.map((d) => ({
+    id: d.id,
+    itemId: d.itemId,
+    x: realDropX(d.id),
+  }));
 
-  const dropKey = (drop: DebugDrop & { isDebug: boolean }) =>
-    `${drop.isDebug ? "debug" : "real"}-${drop.id}`;
-
-  const performCollect = async (drop: DebugDrop & { isDebug: boolean }) => {
-    if (drop.isDebug) {
-      onCollectDebugDrop?.(drop.id);
-      return;
-    }
+  const performCollect = async (drop: GroundDrop) => {
     if (collectingIds.has(drop.id)) return;
     setCollectingIds((prev) => new Set(prev).add(drop.id));
     try {
@@ -123,22 +106,20 @@ export function HomeView({
 
   // Picking one up plays a quick fade-and-rise before it actually leaves —
   // `leavingKeys` drives that transition locally, and the real removal
-  // (unmounting the debug drop / calling the server) is deferred until it
-  // finishes so the item doesn't just vanish mid-animation. The key also
-  // doubles as a guard against a drag sweep re-triggering the same item
-  // while its exit is still playing.
+  // (the server call) is deferred until it finishes so the item doesn't just
+  // vanish mid-animation. The key also doubles as a guard against a drag
+  // sweep re-triggering the same item while its exit is still playing.
   const [leavingKeys, setLeavingKeys] = useState<Set<string>>(new Set());
 
-  const handleCollectDrop = (drop: DebugDrop & { isDebug: boolean }) => {
-    const key = dropKey(drop);
-    if (leavingKeys.has(key)) return;
-    setLeavingKeys((prev) => new Set(prev).add(key));
+  const handleCollectDrop = (drop: GroundDrop) => {
+    if (leavingKeys.has(drop.id)) return;
+    setLeavingKeys((prev) => new Set(prev).add(drop.id));
     setTimeout(() => {
       performCollect(drop);
       setLeavingKeys((prev) => {
-        if (!prev.has(key)) return prev;
+        if (!prev.has(drop.id)) return prev;
         const next = new Set(prev);
-        next.delete(key);
+        next.delete(drop.id);
         return next;
       });
     }, DROP_EXIT_MS);
@@ -315,8 +296,7 @@ export function HomeView({
           <div className="pointer-events-none absolute inset-x-0 bottom-2 z-10 h-0">
             {dropItems.map((drop) => {
               const item = getItem(drop.itemId);
-              const key = dropKey(drop);
-              const isLeaving = leavingKeys.has(key);
+              const isLeaving = leavingKeys.has(drop.id);
               return (
                 // The absolute positioning (ground x-position) lives on this
                 // outer span, not on the button below — Tooltip's own
@@ -326,7 +306,7 @@ export function HomeView({
                 // zero size at the wrong spot, which threw the tooltip's
                 // placement off.
                 <span
-                  key={key}
+                  key={drop.id}
                   className="pointer-events-auto absolute bottom-0 -translate-x-1/2"
                   style={{ left: `${drop.x}%` }}
                 >
@@ -341,10 +321,7 @@ export function HomeView({
                       onMouseEnter={(e) => {
                         if (e.buttons === 1) handleCollectDrop(drop);
                       }}
-                      disabled={
-                        isLeaving ||
-                        (!drop.isDebug && collectingIds.has(drop.id))
-                      }
+                      disabled={isLeaving || collectingIds.has(drop.id)}
                       className="flex cursor-pointer flex-col items-center border-none bg-transparent p-0 disabled:cursor-default"
                     >
                       {/* The float animation and the pick-up exit both

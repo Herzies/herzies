@@ -1,10 +1,5 @@
 import "./globals.css";
-import {
-  filterDroppablePool,
-  type HerzieProfile,
-  ITEMS,
-  pickWeightedDrop,
-} from "@herzies/shared";
+import type { HerzieProfile } from "@herzies/shared";
 import {
   isPermissionGranted,
   requestPermission,
@@ -16,12 +11,7 @@ import { createRoot } from "react-dom/client";
 import { ChatPanel } from "./components/ChatPanel";
 import { EventsView } from "./components/EventsView";
 import { FriendsView } from "./components/FriendsView";
-import {
-  type DebugDrop,
-  DROP_X_MAX,
-  DROP_X_MIN,
-  HomeView,
-} from "./components/HomeView";
+import { HomeView } from "./components/HomeView";
 import { IncomingFriendOverlay } from "./components/IncomingFriendOverlay";
 import { IncomingTradeOverlay } from "./components/IncomingTradeOverlay";
 import { InventoryView } from "./components/InventoryView";
@@ -88,8 +78,6 @@ function App() {
   >(null);
   /** Dev-only: shows the update overlay with a fake version (Settings → Debug). */
   const [testUpdateOverlay, setTestUpdateOverlay] = useState(false);
-  /** Dev-only: locally spawned drops for testing the drop UI (Settings → Debug). Never touches the server or inventory. */
-  const [debugDrops, setDebugDrops] = useState<DebugDrop[]>([]);
   const [updateInstallStatus, setUpdateInstallStatus] =
     useState<UpdateInstallStatus>({ kind: "idle" });
   /** Set by the "c" shortcut: focus/expand the chat once the home view shows it. */
@@ -461,17 +449,7 @@ function App() {
   };
 
   const handleSpawnDebugDrop = () => {
-    const picked = pickWeightedDrop(filterDroppablePool(ITEMS));
-    if (!picked) return;
-    const x = DROP_X_MIN + Math.random() * (DROP_X_MAX - DROP_X_MIN);
-    setDebugDrops((prev) => [
-      ...prev,
-      { id: crypto.randomUUID(), itemId: picked.id, x },
-    ]);
-  };
-
-  const handleCollectDebugDrop = (id: string) => {
-    setDebugDrops((prev) => prev.filter((d) => d.id !== id));
+    herzies.spawnDebugDrop().catch(() => {});
   };
 
   const handleOpenSelfProfile = async () => {
@@ -635,8 +613,6 @@ function App() {
               stageOverride={stageOverride}
               onOpenProfile={handleOpenSelfProfile}
               onOpenSettings={() => switchView("settings")}
-              debugDrops={debugDrops}
-              onCollectDebugDrop={handleCollectDebugDrop}
             />
           )}
         </div>

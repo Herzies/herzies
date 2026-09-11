@@ -164,6 +164,8 @@ export const herzies = {
    * already collected by a racing Spirit Orb auto-collect). */
   collectDrop: (dropId: string) =>
     invoke<boolean>("collect_drop", { dropId }),
+  /** Dev-only: spawns a real, pickup-able world drop (Settings → Debug). */
+  spawnDebugDrop: () => invoke<void>("spawn_debug_drop"),
 
   fetchStoreProducts: () => invoke<StoreProduct[]>("fetch_store_products"),
   /**
