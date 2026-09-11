@@ -547,6 +547,7 @@ async fn collect_drop(
                 // Only the one collected drop leaves the list — any others
                 // still pending stay on the ground.
                 s.pending_drops.retain(|d| d.id != drop_id);
+                s.bump_drop_epoch();
             }
             refresh_inventory_cache(&app, &client).await;
             // Same "You received: Nx <name>" convention as server-driven
@@ -572,6 +573,7 @@ async fn spawn_debug_drop(
     {
         let mut s = state.lock().unwrap();
         s.pending_drops.push(drop);
+        s.bump_drop_epoch();
     }
     emit_state_update(&app);
     Ok(())
@@ -1595,7 +1597,15 @@ async fn events_watch_loop(app: AppHandle) {
 async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
     let state = app.state::<SharedState>();
 
-    let (has_herzie, is_logged_in, minutes_to_sync, np_payload, genres, friend_epoch_before) = {
+    let (
+        has_herzie,
+        is_logged_in,
+        minutes_to_sync,
+        np_payload,
+        genres,
+        friend_epoch_before,
+        drop_epoch_before,
+    ) = {
         let s = state.lock().unwrap();
         let has = s.herzie.is_some();
         let logged = api::is_logged_in();
@@ -1624,7 +1634,7 @@ async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
             }
         });
         let g = s.current_genres.clone();
-        (has, logged, mins, np, g, s.friend_epoch)
+        (has, logged, mins, np, g, s.friend_epoch, s.drop_epoch)
     };
 
     if !has_herzie || !is_logged_in {
@@ -1711,7 +1721,13 @@ async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
         storage::save_multipliers(&sync_resp.multipliers);
 
         s.pending_trade_request = sync_resp.pending_trade_request.clone();
-        s.pending_drops = sync_resp.pending_drops.clone();
+        // A drop was collected (or a debug drop spawned) locally while this
+        // /sync was in flight, so its server snapshot of pending_drops is
+        // stale — applying it would reinstate a drop the user just picked
+        // up (or drop one they just got). Skip it; the next sync reconciles.
+        if s.drop_epoch == drop_epoch_before {
+            s.pending_drops = sync_resp.pending_drops.clone();
+        }
         if !friend_state_stale {
             s.pending_friend_request = sync_resp.pending_friend_request.clone();
             s.incoming_friend_requests = sync_resp.incoming_friend_requests.clone();

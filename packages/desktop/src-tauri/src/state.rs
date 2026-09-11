@@ -59,6 +59,13 @@ pub struct ManagedState {
     /// the request is in flight, the (now-stale) server `friend_codes` is not
     /// applied so it can't clobber a just-accepted friend.
     pub friend_epoch: u64,
+    /// Bumped on every local `pending_drops` mutation (manual collect,
+    /// debug spawn). Same purpose as `friend_epoch`: a `sync_tick` captures
+    /// this before its network call, and skips applying the (now-stale)
+    /// server `pendingDrops` if it changed while the request was in flight —
+    /// otherwise a collect that completes mid-sync gets its drop reinstated
+    /// by a response that was fetched before the collect happened.
+    pub drop_epoch: u64,
 }
 
 impl ManagedState {
@@ -96,7 +103,14 @@ impl ManagedState {
             outgoing_friend_requests: Vec::new(),
             pending_drops: Vec::new(),
             friend_epoch: 0,
+            drop_epoch: 0,
         }
+    }
+
+    /// Mark that the local `pending_drops` list just changed so any `/sync`
+    /// already in flight won't overwrite it with stale server data.
+    pub fn bump_drop_epoch(&mut self) {
+        self.drop_epoch = self.drop_epoch.wrapping_add(1);
     }
 
     /// Mark that the local `friend_codes` set just changed so any `/sync`
@@ -288,6 +302,7 @@ mod tests {
             outgoing_friend_requests: Vec::new(),
             pending_drops: Vec::new(),
             friend_epoch: 0,
+            drop_epoch: 0,
         }
     }
 
