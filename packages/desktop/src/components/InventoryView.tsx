@@ -439,7 +439,9 @@ export function InventoryView({
     overIndex: number | null;
   } | null>(null);
   // Set right before a real drag's pointerup so the click that (in a
-  // browser) follows it gets ignored instead of also placing the item.
+  // browser) follows it gets ignored instead of also placing the item. Set
+  // only for a drag that changed slots, and cleared when the next gesture
+  // starts — see handlePointerUp/handlePointerDown for why both matter.
   const suppressClickRef = useRef(false);
 
   useEffect(() => {
@@ -489,24 +491,38 @@ export function InventoryView({
     const handlePointerUp = () => {
       const state = dragRef.current;
       dragRef.current = null;
-      if (!state?.dragging) return;
-      suppressClickRef.current = true;
-      if (state.overIndex !== null && state.overIndex !== state.index) {
-        setSlotOrder((prev) => {
-          const next = [...prev];
-          [next[state.index], next[state.overIndex!]] = [
-            next[state.overIndex!],
-            next[state.index],
-          ];
-          return next;
-        });
-      }
       setDragVisual(null);
+      if (!state?.dragging) return;
+      // Only a drag that actually moved the item to a *different* slot is a
+      // drop whose trailing click needs suppressing. Releasing on the slot you
+      // pressed is a click by every platform convention — and since
+      // DRAG_THRESHOLD is only 4px, a normal click with the faintest mouse or
+      // trackpad drift lands here, so suppressing it swallowed the equip and
+      // made items need clicking twice.
+      const { index, overIndex } = state;
+      if (overIndex === null || overIndex === index) return;
+      suppressClickRef.current = true;
+      setSlotOrder((prev) => {
+        const next = [...prev];
+        [next[index], next[overIndex]] = [next[overIndex], next[index]];
+        return next;
+      });
     };
 
+    // A drop's trailing click isn't guaranteed to arrive: when pointerup lands
+    // on a different cell than pointerdown, the click fires on their common
+    // ancestor, which is no slot at all. Clearing the flag when the next
+    // gesture begins keeps an unconsumed suppression from eating a later,
+    // unrelated click instead of lingering until something happens to claim it.
+    const handlePointerDown = () => {
+      suppressClickRef.current = false;
+    };
+
+    window.addEventListener("pointerdown", handlePointerDown);
     window.addEventListener("pointermove", handlePointerMove);
     window.addEventListener("pointerup", handlePointerUp);
     return () => {
+      window.removeEventListener("pointerdown", handlePointerDown);
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
     };
@@ -595,8 +611,8 @@ export function InventoryView({
 
   // Grid click places (or returns) an item directly — a no-op for
   // non-equipable items (e.g. plain collectible cards) rather than a doomed
-  // equip attempt. Also a no-op right after a drag-and-drop move, so
-  // dropping an item doesn't also place it (see suppressClickRef).
+  // equip attempt. Also a no-op right after a drag that moved the item to
+  // another slot, so dropping it doesn't also place it (see suppressClickRef).
   const handleGridClick = (itemId: string) => {
     if (suppressClickRef.current) {
       suppressClickRef.current = false;
