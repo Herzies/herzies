@@ -1,8 +1,4 @@
-import {
-  findEquippedSlot,
-  isModifierEquipped,
-  normalizeEquipped,
-} from "@herzies/shared";
+import { applySell, normalizeEquipped } from "@herzies/shared";
 import { NextResponse } from "next/server";
 import { authenticateRequest, isAuthError } from "@/lib/auth";
 import { isParseError, parseBody, sellItemSchema } from "@/lib/schemas";
@@ -41,41 +37,33 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Herzie not found" }, { status: 404 });
   }
 
-  const inv = (herzie.inventory_v2 ?? {}) as Record<string, number>;
-  const owned = inv[itemId] ?? 0;
+  // The sale rules live in @herzies/shared so the desktop client can predict
+  // this exact result optimistically (see handleSell in InventoryView).
+  const outcome = applySell(
+    (herzie.inventory_v2 ?? {}) as Record<string, number>,
+    (herzie.currency as number) ?? 0,
+    normalizeEquipped(herzie.equipped),
+    itemId,
+    quantity,
+    item.sell_price as number,
+  );
 
-  if (owned < quantity) {
-    return NextResponse.json({ error: "Not enough items" }, { status: 400 });
+  if (!outcome.ok) {
+    const messages: Record<typeof outcome.reason, string> = {
+      "not-sellable": "Item cannot be sold",
+      "not-enough": "Not enough items",
+    };
+    return NextResponse.json(
+      { error: messages[outcome.reason] },
+      { status: 400 },
+    );
   }
 
-  // Update inventory and currency
-  const newQty = owned - quantity;
-  let equipped = normalizeEquipped(herzie.equipped);
-  if (newQty > 0) {
-    inv[itemId] = newQty;
-  } else {
-    delete inv[itemId];
-    // Selling the last copy of an equipped item can't leave it equipped —
-    // unequip it in the same request so ownership and equip state never
-    // drift apart.
-    const slot = findEquippedSlot(equipped, itemId);
-    if (slot) {
-      equipped = { ...equipped };
-      delete equipped[slot];
-    } else if (isModifierEquipped(equipped, itemId)) {
-      equipped = {
-        ...equipped,
-        modifier: (equipped.modifier ?? []).filter((id) => id !== itemId),
-      };
-    }
-  }
-
-  const earned = quantity * (item.sell_price as number);
-  const newCurrency = ((herzie.currency as number) ?? 0) + earned;
+  const { earned, newCurrency, inventory, equipped } = outcome;
 
   const { error } = await admin
     .from("herzies")
-    .update({ inventory_v2: inv, currency: newCurrency, equipped })
+    .update({ inventory_v2: inventory, currency: newCurrency, equipped })
     .eq("user_id", auth.userId);
 
   if (error) {
@@ -86,7 +74,7 @@ export async function POST(request: Request) {
     ok: true,
     earned,
     newCurrency,
-    inventory: inv,
+    inventory,
     equipped,
   });
 }

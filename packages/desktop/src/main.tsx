@@ -6,7 +6,7 @@ import {
   sendNotification,
 } from "@tauri-apps/plugin-notification";
 import type { Update } from "@tauri-apps/plugin-updater";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ChatPanel } from "./components/ChatPanel";
 import { EventsView } from "./components/EventsView";
@@ -24,6 +24,7 @@ import { StoreView } from "./components/StoreView";
 import { TabBar, type View } from "./components/TabBar";
 import { TradeView } from "./components/TradeView";
 import { UpdateAvailableOverlay } from "./components/UpdateAvailableOverlay";
+import { useOptimisticEquipped } from "./hooks/useOptimisticEquipped";
 import { cn } from "./lib/utils";
 import {
   type AppState,
@@ -44,7 +45,7 @@ type UpdateInstallStatus =
   | { kind: "error"; message: string };
 
 function App() {
-  const [state, setState] = useState<AppState>({
+  const [rawState, setState] = useState<AppState>({
     herzie: null,
     nowPlaying: null,
     multipliers: null,
@@ -62,6 +63,23 @@ function App() {
     outgoingFriendRequests: [],
     pendingDrops: [],
   });
+  // Equipping is predicted locally so it lands instantly (see
+  // useOptimisticEquipped). Overlaying it onto `state` here, rather than
+  // threading it to each consumer, is what keeps the 3D herzie, the deck row,
+  // the bank grid and the "inventory full" check from disagreeing for a frame.
+  const {
+    equipped: effectiveEquipped,
+    toggleEquip,
+    predictUnequip,
+  } = useOptimisticEquipped(rawState.equipped);
+  // Memoized on both inputs, each of which is itself identity-stable while its
+  // content is unchanged — so this object only changes when something really
+  // did, and an unrelated App re-render (a view switch, a local toggle) doesn't
+  // hand every view a new `state` and re-render the lot.
+  const state = useMemo(
+    () => ({ ...rawState, equipped: effectiveEquipped }),
+    [rawState, effectiveEquipped],
+  );
   const [view, setView] = useState<View>("home");
   const [tradeTarget, setTradeTarget] = useState<string | null>(null);
   const [incomingTradeId, setIncomingTradeId] = useState<string | null>(null);
@@ -189,26 +207,23 @@ function App() {
     if (!inventoryFull) setDismissedInventoryFull(false);
   }, [inventoryFull]);
 
+  // The tab only needs to know whether a song hunt is running right now, which
+  // /events-active alone answers — and it's an Edge Function, so it's cheap and
+  // fast. This used to also fetch /events/previous-hunt (a slow Vercel route)
+  // purely "for parity with EventsView" and discard the result.
   const refreshEventIndicator = useCallback(() => {
-    Promise.all([herzies.fetchActiveEvents(), herzies.fetchPreviousHunt()])
-      .then(([active, previous]) => {
-        const hunt = active.events.find((e) => e.type === "song_hunt");
-        const previousHunt = previous.events.find(
-          (e) => e.type === "song_hunt",
-        );
-        // Sparkle only when there is an active song hunt.
-        // Keep previous hunt lookup for parity with EventsView data flow.
-        void previousHunt;
-        setHasActiveEvent(!!hunt);
+    herzies
+      .fetchActiveEvents()
+      .then(({ events }) => {
+        setHasActiveEvent(events.some((e) => e.type === "song_hunt"));
       })
       .catch(() => setHasActiveEvent(false));
   }, []);
 
-  useEffect(() => {
-    if (!state.isOnline) return;
-    refreshEventIndicator();
-  }, [state.isOnline, refreshEventIndicator]);
-
+  // One effect, not two: a second copy gated on `state.isOnline` alone fired a
+  // duplicate of this every time connectivity flipped while the window was
+  // open, which is part of why opening the tray produced a burst of identical
+  // requests.
   useEffect(() => {
     if (!focused || !state.isOnline) return;
     refreshEventIndicator();
@@ -622,6 +637,7 @@ function App() {
               stageOverride={stageOverride}
               onOpenProfile={handleOpenSelfProfile}
               onOpenSettings={() => switchView("settings")}
+              onActivity={addLog}
             />
           )}
         </div>
@@ -646,6 +662,7 @@ function App() {
               tab={friendsTab}
               onTabChange={setFriendsTab}
               onActivity={addLog}
+              active={view === "friends"}
             />
           </div>
         )}
@@ -663,6 +680,8 @@ function App() {
               inventory={state.inventory}
               currency={state.inventoryCurrency}
               equipped={state.equipped}
+              onToggleEquip={toggleEquip}
+              onPredictUnequip={predictUnequip}
               onLog={addLog}
               active={view === "inventory"}
             />

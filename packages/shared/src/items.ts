@@ -108,6 +108,26 @@ export function isModifierEquipped(
  * doesn't have to duplicate the slot-counting rules below. */
 export const BANK_SLOT_COUNT = 18;
 
+/** The only two item facts bank-slot counting needs. */
+export interface BankItemInfo {
+  stackable?: boolean;
+  category: ItemCategory;
+}
+
+/**
+ * Resolves those facts for an item id. Defaults to the bundled catalog; server
+ * code that has no catalog (the Edge Functions) passes one built from the
+ * `items` table instead, so there is one slot-counting implementation rather
+ * than a second one to keep in sync.
+ */
+export type BankItemLookup = (itemId: string) => BankItemInfo | undefined;
+
+const catalogBankLookup: BankItemLookup = (itemId) => {
+  const item = getItem(itemId);
+  if (!item) return undefined;
+  return { stackable: item.stackable, category: getItemCategory(item) };
+};
+
 /** How many of the fixed bank slots (see BANK_SLOT_COUNT) `inventory`
  * currently needs: one slot per stackable item id owned (any quantity),
  * plus one per unit of a non-stackable item — except whatever's currently
@@ -116,13 +136,14 @@ export const BANK_SLOT_COUNT = 18;
 export function bankSlotsUsed(
   inventory: Record<string, number> | null | undefined,
   equipped: Equipped | null | undefined,
+  lookup: BankItemLookup = catalogBankLookup,
 ): number {
   if (!inventory) return 0;
   let count = 0;
   for (const [itemId, qty] of Object.entries(inventory)) {
     if (qty <= 0) continue;
-    const item = getItem(itemId);
-    if (item && getItemCategory(item) !== "deck") continue;
+    const item = lookup(itemId);
+    if (item && item.category !== "deck") continue;
     const isEquipped =
       findEquippedSlot(equipped, itemId) !== null ||
       isModifierEquipped(equipped, itemId);
@@ -140,8 +161,31 @@ export function bankSlotsUsed(
 export function isBankFull(
   inventory: Record<string, number> | null | undefined,
   equipped: Equipped | null | undefined,
+  lookup: BankItemLookup = catalogBankLookup,
 ): boolean {
-  return bankSlotsUsed(inventory, equipped) >= BANK_SLOT_COUNT;
+  return bankSlotsUsed(inventory, equipped, lookup) >= BANK_SLOT_COUNT;
+}
+
+/**
+ * Whether one more of `itemId` would fit in the bank.
+ *
+ * Not the same question as `isBankFull`: a stackable item the player already
+ * owns shares its existing slot, so it still fits at capacity. Gate item
+ * *acquisition* on this rather than on `isBankFull`, or a full bank wrongly
+ * blocks picking up another copy of something already stacked there.
+ *
+ * Pass a `lookup` to source item facts from somewhere other than the bundled
+ * catalog — server code can build one from the `items` table.
+ */
+export function hasRoomFor(
+  inventory: Record<string, number> | null | undefined,
+  equipped: Equipped | null | undefined,
+  itemId: string,
+  lookup: BankItemLookup = catalogBankLookup,
+): boolean {
+  const current = inventory ?? {};
+  const next = { ...current, [itemId]: (current[itemId] ?? 0) + 1 };
+  return bankSlotsUsed(next, equipped, lookup) <= BANK_SLOT_COUNT;
 }
 
 /** Normalize API/cache payloads that may still be a legacy string[]. */
@@ -166,6 +210,160 @@ export function normalizeEquipped(raw: unknown): Equipped {
     out.modifier = [modifierRaw];
   }
   return out;
+}
+
+/** Why an equip/unequip can't be applied to a given Equipped. Ownership and
+ * "is this item even equipable" aren't here — they need the inventory/catalog
+ * the caller holds, and stay the caller's job (see the equip route). */
+export type EquipRejection =
+  | "already-equipped"
+  | "not-equipped"
+  | "max-modifiers"
+  | "missing-side"
+  | "no-slot";
+
+export type EquipOutcome =
+  | { ok: true; equipped: Equipped }
+  | { ok: false; reason: EquipRejection };
+
+/**
+ * The single source of truth for what equipping or unequipping does to
+ * `Equipped`. The server applies it to persist the change and the desktop
+ * client applies it to predict the result optimistically — sharing one
+ * function is what lets the optimistic state match the server's byte for byte,
+ * so the real response lands as a no-op instead of a visible correction.
+ *
+ * Pure: never mutates `current`. `equipSlot` is passed in rather than looked up
+ * because the server reads it from the DB row (`equip_slot`) and the client
+ * from the bundled catalog (`getItem(...).equipSlot`).
+ *
+ * Note that equipping into an occupied single-value slot **displaces** the
+ * incumbent rather than refusing — that's deliberate (swapping a hat shouldn't
+ * need an explicit unequip first), and the displaced item returns to the bank.
+ */
+export function applyEquip(
+  current: Equipped,
+  itemId: string,
+  action: "equip" | "unequip",
+  equipSlot: EquipSlot | undefined,
+  side?: GroundSide,
+): EquipOutcome {
+  const isEquipped =
+    findEquippedSlot(current, itemId) !== null ||
+    isModifierEquipped(current, itemId);
+
+  if (action === "unequip") {
+    if (!isEquipped) return { ok: false, reason: "not-equipped" };
+    const equipped: Equipped = { ...current };
+    const slot = findEquippedSlot(current, itemId);
+    if (slot) {
+      delete equipped[slot];
+    } else {
+      const rest = (current.modifier ?? []).filter((id) => id !== itemId);
+      if (rest.length > 0) equipped.modifier = rest;
+      else delete equipped.modifier;
+    }
+    return { ok: true, equipped };
+  }
+
+  if (isEquipped) return { ok: false, reason: "already-equipped" };
+
+  const equipped: Equipped = { ...current };
+
+  if (equipSlot === "ground") {
+    if (side !== "left" && side !== "right") {
+      return { ok: false, reason: "missing-side" };
+    }
+    equipped[groundSlot(side)] = itemId;
+    return { ok: true, equipped };
+  }
+
+  if (equipSlot === "modifier") {
+    const worn = current.modifier ?? [];
+    if (worn.length >= MAX_MODIFIERS) {
+      return { ok: false, reason: "max-modifiers" };
+    }
+    equipped.modifier = [...worn, itemId];
+    return { ok: true, equipped };
+  }
+
+  if (!equipSlot) return { ok: false, reason: "no-slot" };
+
+  // Single-value slot — displaces whatever was worn there. No cast needed:
+  // ruling out "ground" and "modifier" above narrows EquipSlot to exactly the
+  // members EquippedSlot also has.
+  equipped[equipSlot] = itemId;
+  return { ok: true, equipped };
+}
+
+export type SellRejection = "not-sellable" | "not-enough";
+
+export type SellOutcome =
+  | {
+      ok: true;
+      /** Inventory with the sold units removed (the id is dropped at zero). */
+      inventory: Record<string, number>;
+      earned: number;
+      newCurrency: number;
+      /** Equip state after the sale — see the unequip note below. */
+      equipped: Equipped;
+      /** True when selling the last copy forced an unequip. */
+      unequipped: boolean;
+    }
+  | { ok: false; reason: SellRejection };
+
+/**
+ * The single source of truth for what selling does. Server-side this computes
+ * the row to persist; client-side it predicts the result so the grid and coin
+ * move on click instead of after the round trip. Sharing one function is what
+ * keeps the prediction identical to what the server will store.
+ *
+ * Pure: never mutates `inventory` or `equipped`.
+ *
+ * Selling the last copy of an equipped item unequips it in the same operation —
+ * ownership and equip state must never drift apart, and an item you no longer
+ * own can't stay worn.
+ */
+export function applySell(
+  inventory: Record<string, number>,
+  currency: number,
+  equipped: Equipped,
+  itemId: string,
+  quantity: number,
+  sellPrice: number | undefined,
+): SellOutcome {
+  if (!sellPrice) return { ok: false, reason: "not-sellable" };
+
+  const owned = inventory[itemId] ?? 0;
+  if (owned < quantity) return { ok: false, reason: "not-enough" };
+
+  const nextInventory = { ...inventory };
+  const newQty = owned - quantity;
+  let nextEquipped = equipped;
+  let unequipped = false;
+
+  if (newQty > 0) {
+    nextInventory[itemId] = newQty;
+  } else {
+    delete nextInventory[itemId];
+    // No copies left — it can't remain equipped. Reuses applyEquip's unequip
+    // branch so this agrees with an explicit unequip exactly.
+    const removal = applyEquip(equipped, itemId, "unequip", undefined);
+    if (removal.ok) {
+      nextEquipped = removal.equipped;
+      unequipped = true;
+    }
+  }
+
+  const earned = quantity * sellPrice;
+  return {
+    ok: true,
+    inventory: nextInventory,
+    earned,
+    newCurrency: currency + earned,
+    equipped: nextEquipped,
+    unequipped,
+  };
 }
 
 export interface ItemDef {

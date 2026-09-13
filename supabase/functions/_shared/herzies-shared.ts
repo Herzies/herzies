@@ -435,3 +435,63 @@ export interface SongHuntFinder {
   name: string;
   claimedAt: string;
 }
+
+// --- Bank capacity ---------------------------------------------------------
+// Vendored from `packages/shared/src/items.ts` (see this file's header for why
+// a copy is needed). Keep in sync with that copy — in particular
+// BANK_SLOT_COUNT, which the desktop grid also derives its 6x3 layout from.
+
+/** Fixed bank capacity in the desktop Cards grid. */
+export const BANK_SLOT_COUNT = 18;
+
+/** The only two item facts bank-slot counting needs. */
+export interface BankItemInfo {
+  stackable?: boolean;
+  category: "deck" | "misc";
+}
+
+export type BankItemLookup = (itemId: string) => BankItemInfo | undefined;
+
+/** One slot per stackable id owned (any quantity), plus one per unit of a
+ * non-stackable — except whatever is equipped, which reserves a unit as "worn"
+ * and frees its bank slot. */
+export function bankSlotsUsed(
+  inventory: Record<string, number> | null | undefined,
+  equipped: Record<string, unknown> | null | undefined,
+  lookup: BankItemLookup,
+): number {
+  if (!inventory) return 0;
+  const e = (equipped ?? {}) as Record<string, unknown>;
+  const modifiers = Array.isArray(e.modifier) ? (e.modifier as string[]) : [];
+  const isEquipped = (itemId: string) =>
+    Object.entries(e).some(
+      ([slot, value]) => slot !== "modifier" && value === itemId,
+    ) || modifiers.includes(itemId);
+
+  let count = 0;
+  for (const [itemId, qty] of Object.entries(inventory)) {
+    if (qty <= 0) continue;
+    const item = lookup(itemId);
+    if (item && item.category !== "deck") continue;
+    const worn = isEquipped(itemId);
+    if (item?.stackable) {
+      if (!worn) count += 1;
+      continue;
+    }
+    count += Math.max(0, worn ? qty - 1 : qty);
+  }
+  return count;
+}
+
+/** Whether one more of `itemId` would fit. Not the same as "is the bank full":
+ * another copy of an already-stacked item shares its slot and still fits. */
+export function hasRoomFor(
+  inventory: Record<string, number> | null | undefined,
+  equipped: Record<string, unknown> | null | undefined,
+  itemId: string,
+  lookup: BankItemLookup,
+): boolean {
+  const current = inventory ?? {};
+  const next = { ...current, [itemId]: (current[itemId] ?? 0) + 1 };
+  return bankSlotsUsed(next, equipped, lookup) <= BANK_SLOT_COUNT;
+}

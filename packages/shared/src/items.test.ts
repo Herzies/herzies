@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyEquip,
+  applySell,
   BANK_SLOT_COUNT,
+  type BankItemLookup,
   bankSlotsUsed,
   EQUIP_SLOTS,
   EQUIPPED_SLOTS,
@@ -8,10 +11,12 @@ import {
   findEquippedSlot,
   getItem,
   getItemType,
+  hasRoomFor,
   ITEM_DROP_WEIGHT_OVERRIDES,
   ITEMS,
   isBankFull,
   isModifierEquipped,
+  MAX_MODIFIERS,
   NON_DROPPABLE_ITEM_IDS,
   normalizeEquipped,
   pickWeightedDrop,
@@ -315,5 +320,253 @@ describe("bank capacity", () => {
   it("treats a null/empty inventory as empty", () => {
     expect(bankSlotsUsed(null, {})).toBe(0);
     expect(isBankFull(null, {})).toBe(false);
+  });
+});
+
+describe("applyEquip", () => {
+  const equip = (
+    current: Parameters<typeof applyEquip>[0],
+    itemId: string,
+    slot: Parameters<typeof applyEquip>[3],
+    side?: Parameters<typeof applyEquip>[4],
+  ) => applyEquip(current, itemId, "equip", slot, side);
+
+  /** Unwraps a success, failing loudly rather than silently typing around it. */
+  const equipped = (outcome: ReturnType<typeof applyEquip>) => {
+    if (!outcome.ok) throw new Error(`expected ok, got ${outcome.reason}`);
+    return outcome.equipped;
+  };
+
+  it("puts a single-value item in its own slot", () => {
+    expect(equipped(equip({}, "headphones", "head"))).toEqual({
+      head: "headphones",
+    });
+  });
+
+  it("displaces the incumbent when its slot is taken", () => {
+    // Swapping a hat shouldn't require unequipping the old one first — and the
+    // displaced id must vanish from Equipped so it returns to the bank.
+    const next = equipped(equip({ head: "old-hat" }, "headphones", "head"));
+    expect(next).toEqual({ head: "headphones" });
+    expect(findEquippedSlot(next, "old-hat")).toBeNull();
+  });
+
+  it("leaves other slots untouched and never mutates the input", () => {
+    const current = { head: "old-hat", color: "prism" };
+    const next = equipped(equip(current, "cd", "face"));
+    expect(next).toEqual({ head: "old-hat", color: "prism", face: "cd" });
+    expect(current).toEqual({ head: "old-hat", color: "prism" });
+  });
+
+  it("routes ground items to the requested side", () => {
+    expect(equipped(equip({}, "spirit-orb", "ground", "left"))).toEqual({
+      ground_left: "spirit-orb",
+    });
+    expect(equipped(equip({}, "spirit-orb", "ground", "right"))).toEqual({
+      ground_right: "spirit-orb",
+    });
+  });
+
+  it("requires a side for ground items", () => {
+    expect(equip({}, "spirit-orb", "ground")).toEqual({
+      ok: false,
+      reason: "missing-side",
+    });
+  });
+
+  it("accumulates modifiers up to the cap", () => {
+    let current = {};
+    for (let i = 0; i < MAX_MODIFIERS; i++) {
+      current = equipped(equip(current, `mod-${i}`, "modifier"));
+    }
+    expect(current).toEqual({
+      modifier: Array.from({ length: MAX_MODIFIERS }, (_, i) => `mod-${i}`),
+    });
+    expect(equip(current, "one-too-many", "modifier")).toEqual({
+      ok: false,
+      reason: "max-modifiers",
+    });
+  });
+
+  it("refuses to equip something already worn", () => {
+    expect(equip({ head: "headphones" }, "headphones", "head")).toEqual({
+      ok: false,
+      reason: "already-equipped",
+    });
+    expect(equip({ modifier: ["boost"] }, "boost", "modifier")).toEqual({
+      ok: false,
+      reason: "already-equipped",
+    });
+  });
+
+  it("refuses an equipable item with no slot", () => {
+    expect(equip({}, "mystery", undefined)).toEqual({
+      ok: false,
+      reason: "no-slot",
+    });
+  });
+
+  it("unequips from a single-value slot", () => {
+    expect(
+      equipped(
+        applyEquip(
+          { head: "headphones", color: "prism" },
+          "headphones",
+          "unequip",
+          "head",
+        ),
+      ),
+    ).toEqual({ color: "prism" });
+  });
+
+  it("unequips one modifier and drops the key once empty", () => {
+    const two = { modifier: ["a", "b"] };
+    expect(equipped(applyEquip(two, "a", "unequip", "modifier"))).toEqual({
+      modifier: ["b"],
+    });
+    // An empty modifier list is normalized away, so don't persist one.
+    expect(
+      equipped(applyEquip({ modifier: ["a"] }, "a", "unequip", "modifier")),
+    ).toEqual({});
+  });
+
+  it("refuses to unequip something that isn't worn", () => {
+    expect(applyEquip({}, "headphones", "unequip", "head")).toEqual({
+      ok: false,
+      reason: "not-equipped",
+    });
+  });
+
+  // The whole point of sharing this function: an optimistic client prediction
+  // and the server's persisted result must be identical, so the response lands
+  // as a no-op instead of a visible correction.
+  it("is deterministic for the same input", () => {
+    const current = { head: "old-hat", modifier: ["a"] };
+    expect(equip(current, "cd", "face")).toEqual(equip(current, "cd", "face"));
+  });
+});
+
+describe("applySell", () => {
+  const PRICE = 10;
+  const sold = (outcome: ReturnType<typeof applySell>) => {
+    if (!outcome.ok) throw new Error(`expected ok, got ${outcome.reason}`);
+    return outcome;
+  };
+
+  it("removes the sold units and credits the currency", () => {
+    const out = sold(applySell({ cd: 3 }, 100, {}, "cd", 2, PRICE));
+    expect(out.inventory).toEqual({ cd: 1 });
+    expect(out.earned).toBe(20);
+    expect(out.newCurrency).toBe(120);
+    expect(out.unequipped).toBe(false);
+  });
+
+  it("drops the id entirely when the last copy goes", () => {
+    const out = sold(applySell({ cd: 1 }, 0, {}, "cd", 1, PRICE));
+    expect(out.inventory).toEqual({});
+    expect("cd" in out.inventory).toBe(false);
+  });
+
+  it("never mutates its inputs", () => {
+    const inventory = { cd: 2 };
+    const equipped = { head: "cd" };
+    applySell(inventory, 0, equipped, "cd", 2, PRICE);
+    expect(inventory).toEqual({ cd: 2 });
+    expect(equipped).toEqual({ head: "cd" });
+  });
+
+  // Ownership and equip state must never drift: an item you no longer own
+  // cannot stay worn, and this has to agree with applyEquip's unequip branch.
+  it("unequips when the last copy is sold", () => {
+    const out = sold(
+      applySell({ cd: 1 }, 0, { head: "cd", color: "prism" }, "cd", 1, PRICE),
+    );
+    expect(out.equipped).toEqual({ color: "prism" });
+    expect(out.unequipped).toBe(true);
+  });
+
+  it("unequips a modifier when its last copy is sold", () => {
+    const out = sold(
+      applySell({ boost: 1 }, 0, { modifier: ["boost"] }, "boost", 1, PRICE),
+    );
+    expect(out.equipped).toEqual({});
+    expect(out.unequipped).toBe(true);
+  });
+
+  it("keeps it equipped while a copy remains", () => {
+    const out = sold(applySell({ cd: 2 }, 0, { head: "cd" }, "cd", 1, PRICE));
+    expect(out.equipped).toEqual({ head: "cd" });
+    expect(out.unequipped).toBe(false);
+  });
+
+  it("refuses to sell more than is owned", () => {
+    expect(applySell({ cd: 1 }, 0, {}, "cd", 2, PRICE)).toEqual({
+      ok: false,
+      reason: "not-enough",
+    });
+    expect(applySell({}, 0, {}, "cd", 1, PRICE)).toEqual({
+      ok: false,
+      reason: "not-enough",
+    });
+  });
+
+  it("refuses an item with no sell price", () => {
+    expect(applySell({ cd: 1 }, 0, {}, "cd", 1, undefined)).toEqual({
+      ok: false,
+      reason: "not-sellable",
+    });
+  });
+});
+
+describe("hasRoomFor", () => {
+  /** Fills the bank to exactly capacity with distinct non-stackable ids. */
+  const fullBank = () =>
+    Object.fromEntries(
+      Array.from({ length: BANK_SLOT_COUNT }, (_, i) => [`filler-${i}`, 1]),
+    );
+
+  it("allows a new item while there is a free slot", () => {
+    const almost = fullBank();
+    delete almost[`filler-0`];
+    expect(hasRoomFor(almost, {}, "cd")).toBe(true);
+  });
+
+  it("blocks a new non-stackable item at capacity", () => {
+    expect(isBankFull(fullBank(), {})).toBe(true);
+    expect(hasRoomFor(fullBank(), {}, "cd")).toBe(false);
+  });
+
+  /** Treats only the named ids as stackable; everything else is not. */
+  const stackableOnly =
+    (...ids: string[]): BankItemLookup =>
+    (id) => ({ stackable: ids.includes(id), category: "deck" });
+
+  // The reason this exists rather than callers using isBankFull: another copy
+  // of an already-stacked item needs no new slot, so a full bank must not
+  // block it.
+  it("allows another copy of a stackable already owned, even when full", () => {
+    const lookup = stackableOnly("stack");
+    // 17 one-per-slot fillers plus a stack that occupies exactly one slot.
+    const full: Record<string, number> = { ...fullBank(), stack: 3 };
+    delete full["filler-0"];
+    expect(isBankFull(full, {}, lookup)).toBe(true);
+    expect(hasRoomFor(full, {}, "stack", lookup)).toBe(true);
+  });
+
+  it("blocks a stackable not yet owned when full", () => {
+    const lookup = stackableOnly("brand-new");
+    expect(isBankFull(fullBank(), {}, lookup)).toBe(true);
+    expect(hasRoomFor(fullBank(), {}, "brand-new", lookup)).toBe(false);
+  });
+
+  it("counts an equipped copy as freeing its bank slot", () => {
+    // Equipping reserves a unit as worn, so the bank has room again.
+    const full = fullBank();
+    expect(hasRoomFor(full, { head: "filler-0" }, "cd")).toBe(true);
+  });
+
+  it("treats an empty inventory as having room", () => {
+    expect(hasRoomFor(null, {}, "cd")).toBe(true);
+    expect(hasRoomFor({}, {}, "cd")).toBe(true);
   });
 });

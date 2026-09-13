@@ -1,5 +1,6 @@
-import type { Equipped, GroundSide, Herzie, Inventory } from "@herzies/shared";
+import type { Equipped, Herzie, Inventory } from "@herzies/shared";
 import {
+  applySell,
   BANK_SLOT_COUNT,
   findEquippedSlot,
   getItem,
@@ -7,10 +8,10 @@ import {
   groundSlot,
   isModifierEquipped,
   MAX_MODIFIERS,
-  normalizeEquipped,
 } from "@herzies/shared";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import type { ToggleEquipResult } from "../hooks/useOptimisticEquipped";
 import { cn, formatAmount } from "../lib/utils";
 import { herzies } from "../tauri-bridge";
 import { Coin } from "./Coin";
@@ -155,12 +156,6 @@ function SellBox({
     </div>,
     document.body,
   );
-}
-
-function pickGroundSide(equipped: Equipped): GroundSide {
-  if (!equipped.ground_left) return "left";
-  if (!equipped.ground_right) return "right";
-  return "left"; // both occupied → replace left
 }
 
 /** The Misc category (see `ItemCategory` in @herzies/shared) has no catalog
@@ -380,7 +375,9 @@ export function InventoryView({
   onLog,
   inventory: cachedInventory,
   currency: cachedCurrency,
-  equipped: cachedEquipped,
+  equipped,
+  onToggleEquip,
+  onPredictUnequip,
   active = true,
 }: {
   herzie: Herzie;
@@ -388,15 +385,29 @@ export function InventoryView({
   onLog?: (msg: string) => void;
   inventory: Inventory | null;
   currency: number;
+  /** Already optimistic — see useOptimisticEquipped in main.tsx. Held there
+   * rather than here so the 3D herzie and deck row move in the same frame as
+   * the grid; keeping a local copy in sync with it only ever reintroduced the
+   * flicker the optimistic layer exists to remove. */
   equipped: Equipped;
+  onToggleEquip: (itemId: string) => Promise<ToggleEquipResult>;
+  /** Register the unequip a sell performs server-side when the last copy goes. */
+  onPredictUnequip?: (itemId: string, settled: Promise<unknown>) => void;
   /** False while another tab is shown — pauses the 3D render. */
   active?: boolean;
 }) {
   const [inventory, setInventory] = useState<Inventory | null>(cachedInventory);
   const [currency, setCurrency] = useState(cachedCurrency || herzie.currency);
-  const [equipped, setEquipped] = useState(() =>
-    normalizeEquipped(cachedEquipped),
-  );
+  /** Unsettled sells. While non-zero, incoming snapshots are behind us. */
+  const [sellsInFlight, setSellsInFlight] = useState(0);
+  // handleSell is recreated every render and handed to SellBox/SellControls,
+  // which can be holding a render-old copy. Reading the latest values through
+  // refs (the friendsRef pattern used in FriendsView) is what lets a second
+  // sell compose on the first one's prediction instead of discarding it.
+  const inventoryRef = useRef(inventory);
+  inventoryRef.current = inventory;
+  const currencyRef = useRef(currency);
+  currencyRef.current = currency;
   const [inspectItem, setInspectItem] = useState<string | null>(
     initialItem ?? null,
   );
@@ -444,11 +455,15 @@ export function InventoryView({
   // starts — see handlePointerUp/handlePointerDown for why both matter.
   const suppressClickRef = useRef(false);
 
+  // Adopt the shared AppState snapshot — except while a sell is in flight, when
+  // it is known to be behind our prediction and would revert the grid and coin
+  // mid-request. `sell_item` emits the updated state before its command
+  // returns, so by the time the counter falls the snapshot already matches.
   useEffect(() => {
+    if (sellsInFlight > 0) return;
     setInventory(cachedInventory);
     setCurrency(cachedCurrency || herzie.currency);
-    setEquipped(normalizeEquipped(cachedEquipped));
-  }, [cachedInventory, cachedCurrency, cachedEquipped, herzie.currency]);
+  }, [cachedInventory, cachedCurrency, herzie.currency, sellsInFlight]);
 
   useEffect(() => {
     if (initialItem) setInspectItem(initialItem);
@@ -542,16 +557,11 @@ export function InventoryView({
     };
   };
 
-  // Stale-while-revalidate once on mount (view stays mounted when hidden).
-  useEffect(() => {
-    herzies.fetchInventory().then((data) => {
-      if (data) {
-        setInventory(data.inventory);
-        setCurrency(data.currency);
-        setEquipped(normalizeEquipped(data.equipped));
-      }
-    });
-  }, []);
+  // No fetch on mount: this view stays mounted when hidden, so it fired at
+  // launch whether or not the player opened it — duplicating refresh_app_cache,
+  // which already fills the cache at startup. /sync now carries the
+  // authoritative inventory and currency every few seconds, so both the initial
+  // fill and any later drift are covered without a dedicated request.
 
   /** `slotIndex`, when given, is the exact grid slot the sell was requested
    * from (see the grid's onSellRequest). For a non-stackable item — sold one
@@ -568,44 +578,85 @@ export function InventoryView({
     qty: number,
     slotIndex?: number,
   ) => {
-    const result = await herzies.sellItem(itemId, qty);
-    if (result) {
-      setInventory(result.inventory);
-      setCurrency(result.newCurrency);
-      // Selling the last one leaves nothing to preview — close it.
-      if ((result.inventory[itemId] ?? 0) === 0 && itemId === inspectItem) {
-        setInspectItem(null);
+    const item = getItem(itemId);
+    const name = item?.name ?? itemId;
+
+    // Predict with the same function the server applies, so the card leaves the
+    // grid and the coin ticks up on click rather than a round trip later, and
+    // the response lands as a no-op instead of a visible correction.
+    const predicted = applySell(
+      inventoryRef.current ?? {},
+      currencyRef.current,
+      equipped,
+      itemId,
+      qty,
+      item?.sellPrice,
+    );
+    if (!predicted.ok) {
+      onLog?.(
+        predicted.reason === "not-sellable"
+          ? `${name} can't be sold`
+          : `Not enough ${name} to sell`,
+      );
+      return;
+    }
+
+    setInventory(predicted.inventory);
+    setCurrency(predicted.newCurrency);
+    // Also update the refs now, not just on the next render, so two sells
+    // fired within a single tick still compose.
+    inventoryRef.current = predicted.inventory;
+    currencyRef.current = predicted.newCurrency;
+    // Selling the last one leaves nothing to preview — close it.
+    if (predicted.inventory[itemId] === undefined && itemId === inspectItem) {
+      setInspectItem(null);
+    }
+    if (slotIndex !== undefined && !item?.stackable) {
+      setSlotOrder((prev) => {
+        if (prev[slotIndex] !== itemId) return prev;
+        const next = [...prev];
+        next[slotIndex] = null;
+        return next;
+      });
+    }
+
+    const request = herzies.sellItem(itemId, qty);
+    // Selling the last copy unequips server-side. Route that through the shared
+    // equip overlay so it can't fight an explicit unequip prediction.
+    if (predicted.unequipped) onPredictUnequip?.(itemId, request);
+
+    setSellsInFlight((n) => n + 1);
+    try {
+      const result = await request;
+      if (result) {
+        // Authoritative, and by construction equal to the prediction.
+        setInventory(result.inventory);
+        setCurrency(result.newCurrency);
+        inventoryRef.current = result.inventory;
+        currencyRef.current = result.newCurrency;
+      } else {
+        onLog?.(`Failed to sell ${name}`);
       }
-      if (slotIndex !== undefined && !getItem(itemId)?.stackable) {
-        setSlotOrder((prev) => {
-          if (prev[slotIndex] !== itemId) return prev;
-          const next = [...prev];
-          next[slotIndex] = null;
-          return next;
-        });
-      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      onLog?.(`Failed to sell ${name}: ${msg}`);
+    } finally {
+      // No manual rollback on failure: once the last sell settles the gate
+      // below lifts and the effect adopts the server snapshot, which for a
+      // failed sell is still the pre-sell state. Restoring a value captured
+      // before *this* sell would instead clobber any other sell still pending.
+      setSellsInFlight((n) => Math.max(0, n - 1));
     }
   };
 
   const handleEquip = async (itemId: string) => {
-    const alreadyEquipped =
-      findEquippedSlot(equipped, itemId) !== null ||
-      isModifierEquipped(equipped, itemId);
-    const action = alreadyEquipped ? "unequip" : "equip";
-    const item = getItem(itemId);
-    const name = item?.name ?? itemId;
-    let side: GroundSide | undefined;
-    if (action === "equip" && item?.equipSlot === "ground") {
-      side = pickGroundSide(equipped);
-    }
-    const actionLabel = action === "equip" ? "place" : "return";
-    try {
-      const result = await herzies.equipItem(itemId, action, side);
-      setEquipped(normalizeEquipped(result.equipped));
-      onLog?.(action === "equip" ? `Placed ${name}` : `Returned ${name}`);
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      onLog?.(`Failed to ${actionLabel} ${name}: ${msg}`);
+    const name = getItem(itemId)?.name ?? itemId;
+    const result = await onToggleEquip(itemId);
+    if (result.ok) {
+      onLog?.(result.action === "equip" ? `Placed ${name}` : `Returned ${name}`);
+    } else {
+      const verb = result.action === "equip" ? "place" : "return";
+      onLog?.(`Failed to ${verb} ${name}: ${result.error}`);
     }
   };
 

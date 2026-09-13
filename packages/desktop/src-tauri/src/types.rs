@@ -129,6 +129,14 @@ pub struct SyncResponse {
     pub outgoing_friend_requests: Vec<FriendRequestSummary>,
     #[serde(default)]
     pub pending_drops: Vec<PendingDrop>,
+    /// Authoritative inventory, carried on every sync so mutations don't each
+    /// have to re-fetch `/inventory`. `None` only when talking to a server
+    /// older than this field.
+    #[serde(default)]
+    pub inventory: Option<Inventory>,
+    /// Authoritative equip state, carried for the same reason as `inventory`.
+    #[serde(default)]
+    pub equipped: Option<HashMap<String, serde_json::Value>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

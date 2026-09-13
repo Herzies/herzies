@@ -5,12 +5,18 @@
  * defaults to Edge Functions per the ongoing migration off Vercel (see
  * `sync`/`trade-pending`/`events-active`/`chat`).
  *
- * Only the platform glue (HTTP, auth) lives here; the actual claim/grant is
- * atomic inside `collect_pending_drop` (see the migration that defines it) so
- * this function has no game logic worth vendoring, matching `trade-pending`.
+ * The claim/grant itself is atomic inside `collect_pending_drop` (see the
+ * migration that defines it). The one piece of game logic here is the bank
+ * capacity check — `collect_pending_drop` credits inventory unconditionally,
+ * and an over-capacity item stays owned but has no grid slot to render in, so
+ * it would vanish from view. See `hasRoomFor` in ../_shared/herzies-shared.ts.
  */
 import { createClient } from "@supabase/supabase-js";
 import { corsHeaders, jsonResponse } from "../_shared/cors.ts";
+import {
+  type BankItemLookup,
+  hasRoomFor,
+} from "../_shared/herzies-shared.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -61,6 +67,52 @@ Deno.serve(async (request) => {
     const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
+
+    // Refuse if the bank can't hold it. Without this, an over-capacity item is
+    // still credited to inventory_v2 but the desktop grid has no slot to draw
+    // it in, so it silently disappears from view (see reconcileSlotOrder) while
+    // remaining owned and unsellable. The drop stays pending — they never
+    // expire — so refusing loses nothing.
+    const [{ data: dropRow }, { data: herzieRow }] = await Promise.all([
+      admin
+        .from("pending_drops")
+        .select("item_id")
+        .eq("id", dropId)
+        .eq("user_id", user.id)
+        .maybeSingle(),
+      admin
+        .from("herzies")
+        .select("inventory_v2, equipped")
+        .eq("user_id", user.id)
+        .maybeSingle(),
+    ]);
+
+    if (dropRow && herzieRow) {
+      const inventory = (herzieRow.inventory_v2 ?? {}) as Record<string, number>;
+      const incoming = dropRow.item_id as string;
+      // `stackable` comes from the items table; `category` isn't a column, and
+      // every catalog item is "deck" today (see ItemCategory in
+      // @herzies/shared). If a non-deck item is ever added, this needs a
+      // category column or it will over-count slots relative to the client.
+      const { data: itemRows } = await admin
+        .from("items")
+        .select("id, stackable")
+        .in("id", [...Object.keys(inventory), incoming]);
+      const stackableById = new Map(
+        (itemRows ?? []).map((r) => [r.id as string, !!r.stackable]),
+      );
+      const lookup: BankItemLookup = (id) => ({
+        stackable: stackableById.get(id) ?? false,
+        category: "deck",
+      });
+
+      if (!hasRoomFor(inventory, herzieRow.equipped, incoming, lookup)) {
+        return jsonResponse(
+          { error: "Inventory full", reason: "inventory-full" },
+          409,
+        );
+      }
+    }
 
     const { data: itemId, error } = await admin.rpc("collect_pending_drop", {
       p_user_id: user.id,

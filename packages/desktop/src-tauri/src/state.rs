@@ -66,6 +66,21 @@ pub struct ManagedState {
     /// otherwise a collect that completes mid-sync gets its drop reinstated
     /// by a response that was fetched before the collect happened.
     pub drop_epoch: u64,
+    /// Bumped on every local `equipped` mutation (equip/unequip). Same purpose
+    /// as `friend_epoch`: an `/inventory` fetch captures this before its
+    /// network call, and `apply_inventory` skips the (now-stale) server
+    /// `equipped` if it changed while the request was in flight — otherwise an
+    /// equip that completes mid-fetch gets undone by a response that was
+    /// issued before it happened, which the desktop UI sees as the item
+    /// popping back off.
+    pub equip_epoch: u64,
+    /// Bumped on every local `inventory` mutation (sell, buy, drop collect and
+    /// its revert). Same purpose as `friend_epoch`: `sync_tick` captures this
+    /// before its network call and skips the response's `inventory` if it
+    /// moved, so a sync issued before the mutation can't reinstate the old
+    /// contents. Distinct from `equip_epoch`/`drop_epoch` because buying
+    /// changes inventory without touching either.
+    pub inventory_epoch: u64,
 }
 
 impl ManagedState {
@@ -104,6 +119,8 @@ impl ManagedState {
             pending_drops: Vec::new(),
             friend_epoch: 0,
             drop_epoch: 0,
+            equip_epoch: 0,
+            inventory_epoch: 0,
         }
     }
 
@@ -117,6 +134,18 @@ impl ManagedState {
     /// already in flight won't overwrite it with stale server data.
     pub fn bump_friend_epoch(&mut self) {
         self.friend_epoch = self.friend_epoch.wrapping_add(1);
+    }
+
+    /// Mark that the local `equipped` map just changed so any `/inventory`
+    /// fetch already in flight won't overwrite it with stale server data.
+    pub fn bump_equip_epoch(&mut self) {
+        self.equip_epoch = self.equip_epoch.wrapping_add(1);
+    }
+
+    /// Mark that the local `inventory` just changed so any `/sync` already in
+    /// flight won't overwrite it with stale server data.
+    pub fn bump_inventory_epoch(&mut self) {
+        self.inventory_epoch = self.inventory_epoch.wrapping_add(1);
     }
 
     pub fn clear_app_cache(&mut self) {
@@ -303,6 +332,8 @@ mod tests {
             pending_drops: Vec::new(),
             friend_epoch: 0,
             drop_epoch: 0,
+            equip_epoch: 0,
+            inventory_epoch: 0,
         }
     }
 

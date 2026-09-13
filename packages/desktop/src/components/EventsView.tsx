@@ -118,46 +118,36 @@ export function EventsView({
     }
   };
 
+  // Load when the tab is actually opened, and keep it fresh only while the
+  // window is up. This view stays mounted when hidden, so it previously also
+  // fetched once on mount — meaning every launch paid for /events/previous-hunt
+  // (a slow Vercel route) whether or not the player ever opened Events, and
+  // opening the tab then immediately re-fetched the same two endpoints.
   useEffect(() => {
+    if (!eventsTabVisible) return;
     let cancelled = false;
-    Promise.all([herzies.fetchActiveEvents(), herzies.fetchPreviousHunt()])
-      .then(([active, previous]) => {
-        if (cancelled) return;
-        setEvents(active.events);
-        setPreviousHunt(
-          previous.events.find((e) => e.type === "song_hunt") ?? null,
-        );
-        setNextHunt(previous.next);
-        setLoading(false);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
-  useEffect(() => {
-    if (!focused || !eventsTabVisible) return;
-
-    const refresh = () => {
-      Promise.all([
-        herzies.fetchActiveEvents(),
-        herzies.fetchPreviousHunt(),
-      ]).then(([active, previous]) => {
-        setEvents(active.events);
-        setPreviousHunt(
-          previous.events.find((e) => e.type === "song_hunt") ?? null,
-        );
-        setNextHunt(previous.next);
-      });
-    };
+    const refresh = () =>
+      Promise.all([herzies.fetchActiveEvents(), herzies.fetchPreviousHunt()])
+        .then(([active, previous]) => {
+          if (cancelled) return;
+          setEvents(active.events);
+          setPreviousHunt(
+            previous.events.find((e) => e.type === "song_hunt") ?? null,
+          );
+          setNextHunt(previous.next);
+          setLoading(false);
+        })
+        .catch(() => {
+          if (!cancelled) setLoading(false);
+        });
 
     refresh();
-    const interval = setInterval(refresh, EVENTS_POLL_MS);
-    return () => clearInterval(interval);
+    const interval = focused ? setInterval(refresh, EVENTS_POLL_MS) : undefined;
+    return () => {
+      cancelled = true;
+      if (interval) clearInterval(interval);
+    };
   }, [focused, eventsTabVisible]);
 
   if (loading) {

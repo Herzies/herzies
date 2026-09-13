@@ -1,5 +1,6 @@
 import {
   getItem,
+  hasRoomFor,
   lastFmTrackUrl,
   levelProgress,
   xpToNextLevel,
@@ -39,12 +40,15 @@ export function HomeView({
   stageOverride,
   onOpenProfile,
   onOpenSettings,
+  onActivity,
 }: {
   state: AppState;
   stageOverride?: number | null;
   /** Open the viewer's own profile (same layout as other herzies'). */
   onOpenProfile?: () => void;
   onOpenSettings?: () => void;
+  /** Surfaces a line in the activity log (e.g. a refused pickup). */
+  onActivity?: (message: string) => void;
 }) {
   const {
     herzie,
@@ -52,6 +56,7 @@ export function HomeView({
     multipliers,
     isConnected,
     equipped,
+    inventory,
     pendingDrops,
   } = state;
   const [globalRank, setGlobalRank] = useState<number | undefined>(undefined);
@@ -95,10 +100,27 @@ export function HomeView({
   // gone, e.g. a racing Spirit Orb auto-collect) or the request failed.
   const performCollect = async (drop: GroundDrop): Promise<boolean> => {
     if (collectingIds.has(drop.id)) return false;
+    // Refuse rather than pocketing something the bank can't hold: over-capacity
+    // items stay owned but the grid has no slot to draw them in, so they'd
+    // vanish from view (see reconcileSlotOrder). The drop keeps sitting on the
+    // ground — pending drops never expire — so nothing is lost by waiting.
+    //
+    // hasRoomFor, not isBankFull: another copy of a stackable already in the
+    // bank shares its slot and still fits at capacity.
+    if (!hasRoomFor(inventory, equipped, drop.itemId)) {
+      const name = getItem(drop.itemId)?.name ?? drop.itemId;
+      onActivity?.(`Inventory full — couldn't pick up ${name}`);
+      return false;
+    }
     setCollectingIds((prev) => new Set(prev).add(drop.id));
     try {
       return await herzies.collectDrop(drop.id);
-    } catch {
+    } catch (e: unknown) {
+      // The server refuses an over-capacity collect too (the gate above is the
+      // fast path, not the authority). Surface why instead of just letting the
+      // item animate away and reappear, which reads as an unexplained glitch.
+      const msg = e instanceof Error ? e.message : String(e);
+      onActivity?.(`Couldn't pick that up: ${msg}`);
       return false;
     } finally {
       setCollectingIds((prev) => {

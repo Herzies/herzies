@@ -24,6 +24,7 @@ import {
   type FriendRequestSummary,
   getDailyCraving,
   goodEyeSniperBonus,
+  hasRoomFor,
   type Herzie,
   matchesCraving,
   NON_DROPPABLE_ITEM_IDS,
@@ -193,6 +194,8 @@ export async function processSync(
   incomingFriendRequests: FriendRequestSummary[];
   outgoingFriendRequests: FriendRequestSummary[];
   pendingDrops: PendingDrop[];
+  inventory: Record<string, number>;
+  equipped: Record<string, unknown>;
 }> {
   const source = options.source ?? "cli";
   // 1. Fetch the herzie
@@ -416,12 +419,42 @@ export async function processSync(
   }));
 
   if (pendingDrops.length > 0 && hasSpiritOrbEquipped(row.equipped)) {
+    // Auto-collect only what the bank can hold. `collect_pending_drop` credits
+    // inventory unconditionally, and an over-capacity item stays owned with no
+    // grid slot to render in — so it would silently vanish from view. Anything
+    // that doesn't fit stays on the ground (pending drops never expire) and is
+    // retried next sync. `stackable` comes from the items table; `category`
+    // isn't a column and every catalog item is "deck" today.
+    const running = { ...((row.inventory_v2 ?? {}) as Record<string, number>) };
+    const { data: dropItemRows } = await admin
+      .from("items")
+      .select("id, stackable")
+      .in("id", [
+        ...Object.keys(running),
+        ...pendingDrops.map((d) => d.itemId),
+      ]);
+    const stackableById = new Map(
+      (dropItemRows ?? []).map((r) => [r.id as string, !!r.stackable]),
+    );
+    const bankLookup = (id: string) => ({
+      stackable: stackableById.get(id) ?? false,
+      category: "deck" as const,
+    });
+
+    const uncollected: PendingDrop[] = [];
     for (const drop of pendingDrops) {
+      if (!hasRoomFor(running, row.equipped, drop.itemId, bankLookup)) {
+        uncollected.push(drop);
+        continue;
+      }
       const { data: collectedId } = await admin.rpc("collect_pending_drop", {
         p_user_id: userId,
         p_drop_id: drop.id,
       });
       if (collectedId) {
+        // Keep the running tally in step so the next iteration sees this one —
+        // otherwise a full bank would still let the whole queue through.
+        running[drop.itemId] = (running[drop.itemId] ?? 0) + 1;
         notifications.push({
           type: "item_granted",
           title: "Spirit Orb",
@@ -429,9 +462,11 @@ export async function processSync(
           itemId: collectedId as string,
           quantity: 1,
         });
+      } else {
+        uncollected.push(drop);
       }
     }
-    pendingDrops = [];
+    pendingDrops = uncollected;
   }
 
   // Track which song-hunt announcements this user has already seen.
@@ -521,7 +556,17 @@ export async function processSync(
     // Don't overwrite now_playing for spotify catch-up
     delete updateData.now_playing;
   }
-  await admin.from("herzies").update(updateData).eq("user_id", userId);
+  // Return the post-update row so the response can carry authoritative
+  // inventory/equipped. Every inventory mutation in this sync (Spirit Orb
+  // auto-collect, event reward grants) has already committed by this point, and
+  // `updateData` never touches inventory_v2/equipped — so this reflects them,
+  // and piggybacking on the update costs no extra round trip.
+  const { data: syncedRow } = await admin
+    .from("herzies")
+    .update(updateData)
+    .eq("user_id", userId)
+    .select("inventory_v2, equipped")
+    .single();
 
   // 8. Check for pending trade requests
   let pendingTradeRequest:
@@ -575,6 +620,16 @@ export async function processSync(
     incomingFriendRequests,
     outgoingFriendRequests,
     pendingDrops,
+    // Carried on the regular sync cadence so clients don't have to re-fetch
+    // /inventory after every mutation. Falls back to the pre-update row if the
+    // returning select came back empty.
+    inventory: ((syncedRow?.inventory_v2 ?? row.inventory_v2) ?? {}) as Record<
+      string,
+      number
+    >,
+    // Raw, not normalized — same convention as /api/inventory. The desktop
+    // client normalizes at its own boundary (see useOptimisticEquipped).
+    equipped: ((syncedRow?.equipped ?? row.equipped) ?? {}) as Record<string, unknown>,
   };
 }
 

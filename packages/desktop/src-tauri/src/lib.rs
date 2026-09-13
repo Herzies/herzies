@@ -417,10 +417,20 @@ async fn fetch_inventory(
         return Ok(None);
     }
     let client = Client::new();
+    let epoch_before = { state.lock().unwrap().equip_epoch };
     match api::api_fetch_inventory(&client).await {
         Some((inventory, currency, equipped)) => {
             let mut s = state.lock().unwrap();
-            apply_inventory(&mut s, inventory.clone(), currency, equipped.clone());
+            apply_inventory(
+                &mut s,
+                inventory.clone(),
+                currency,
+                equipped.clone(),
+                Some(epoch_before),
+            );
+            // Hand back whatever `equipped` actually won, so a caller that
+            // raced an equip doesn't render the stale snapshot we just skipped.
+            let equipped = s.equipped.clone();
             drop(s);
             emit_state_update(&app);
             Ok(Some(InventoryResult {
@@ -454,7 +464,10 @@ async fn sell_item(
                 std::collections::HashMap<String, serde_json::Value>,
             >(data["equipped"].clone())
             .unwrap_or_else(|_| s.equipped.clone());
-            apply_inventory(&mut s, inventory, currency, equipped);
+            apply_inventory(&mut s, inventory, currency, equipped, None);
+            // Selling can unequip server-side, so this is a local `equipped`
+            // mutation — any `/inventory` fetch in flight must not undo it.
+            s.bump_equip_epoch();
             changed = true;
         } else if let Some(new_currency) = data["newCurrency"].as_u64() {
             s.inventory_currency = new_currency as u32;
@@ -494,6 +507,9 @@ async fn equip_item(
     {
         let mut s = state.lock().unwrap();
         s.equipped = equipped;
+        // Any `/inventory` fetch already in flight was issued before this
+        // change and would otherwise clobber it back — see apply_inventory.
+        s.bump_equip_epoch();
         storage::save_equipped(&s.equipped);
         drop(s);
         emit_state_update(&app);
@@ -516,7 +532,7 @@ async fn buy_item(
     if let Ok(inventory) = serde_json::from_value::<Inventory>(data["inventory"].clone()) {
         let currency = data["newCurrency"].as_u64().unwrap_or(0) as u32;
         let equipped = s.equipped.clone();
-        apply_inventory(&mut s, inventory, currency, equipped);
+        apply_inventory(&mut s, inventory, currency, equipped, None);
         changed = true;
     }
     if let Some(ref mut herzie) = s.herzie {
@@ -559,6 +575,7 @@ async fn collect_drop(
                 *inv.entry(drop.item_id.clone()).or_insert(0) += 1;
             }
             s.bump_drop_epoch();
+            s.bump_inventory_epoch();
         }
         removed
     };
@@ -570,14 +587,23 @@ async fn collect_drop(
 
     match result {
         Ok(Some((_item_id, name))) => {
-            // Confirmed — reconcile with the authoritative inventory
-            // (equipped/currency can drift too, so a full refresh is
-            // simplest) rather than trusting the optimistic +1 forever.
-            refresh_inventory_cache(&app, &client).await;
+            // Log as soon as the collect is confirmed. This used to sit behind
+            // the reconcile below, so the "You received" line waited on two
+            // sequential round trips — the second to Vercel `/api/inventory` —
+            // and lagged visibly behind the item vanishing from the ground.
+            //
             // Same "You received: Nx <name>" convention as server-driven
-            // item_granted notifications (see game-server.ts) — this path
-            // has no SyncResponse to ride along on, so log it directly.
+            // item_granted notifications (see game-server.ts) — this path has
+            // no SyncResponse to ride along on, so log it directly.
             let _ = app.emit("activity", format!("You received: 1x {name}"));
+
+            // No /inventory re-fetch here. `collect_pending_drop` does exactly
+            // one thing — delete the drop row and credit inventory_v2 by one —
+            // which the optimistic update above already mirrors exactly, so a
+            // refresh could only confirm what we know. Picking up several drops
+            // in quick succession used to fire one slow Vercel request each.
+            // /sync carries the authoritative inventory within a few seconds
+            // regardless, which covers any genuine drift.
             Ok(true)
         }
         Ok(None) => {
@@ -608,6 +634,7 @@ fn revert_optimistic_collect(state: &tauri::State<'_, SharedState>, drop: Pendin
     }
     s.pending_drops.push(drop);
     s.bump_drop_epoch();
+    s.bump_inventory_epoch();
 }
 
 /// Dev-only: powers the "Spawn Item Drop" debug button in Settings. Adds the
@@ -664,9 +691,10 @@ async fn start_purchase(
             Ok(true)
         }
         None => {
+            let epoch_before = { state.lock().unwrap().equip_epoch };
             if let Some((inventory, currency, equipped)) = api::api_fetch_inventory(&client).await {
                 let mut s = state.lock().unwrap();
-                apply_inventory(&mut s, inventory, currency, equipped);
+                apply_inventory(&mut s, inventory, currency, equipped, Some(epoch_before));
                 drop(s);
                 emit_state_update(&app);
             }
@@ -916,32 +944,38 @@ fn emit_state_update(app: &AppHandle) {
     let _ = app.emit("state-update", &app_state);
 }
 
+/// Apply an inventory payload to shared state.
+///
+/// `equip_epoch_before` distinguishes the two kinds of caller:
+///
+/// - `Some(epoch)` — the `equipped` came from a *snapshot* read (`/inventory`),
+///   and `epoch` is the value captured before the network call. If it has moved
+///   since, an equip/unequip landed while the fetch was in flight, so the
+///   snapshot predates it and its `equipped` is skipped; applying it would undo
+///   the change and make the item visibly pop back off in the UI.
+/// - `None` — the `equipped` came from a *mutation* response (or is the current
+///   in-memory value), so it is at least as new as anything local and always
+///   applies.
+///
+/// `inventory`/`currency` are applied either way — they have their own writers
+/// and aren't what this guards.
 fn apply_inventory(
     s: &mut ManagedState,
     inventory: Inventory,
     currency: u32,
     equipped: std::collections::HashMap<String, serde_json::Value>,
+    equip_epoch_before: Option<u64>,
 ) {
     s.inventory = Some(inventory.clone());
     s.inventory_currency = currency;
-    s.equipped = equipped;
+    // Any `/sync` already in flight predates this and must not reinstate the
+    // old contents — see `inventory_epoch` and sync_tick.
+    s.bump_inventory_epoch();
     storage::save_inventory_cache(&inventory, currency);
-    storage::save_equipped(&s.equipped);
-}
-
-fn notifications_include_item_grants(notifications: &[EventNotification]) -> bool {
-    notifications
-        .iter()
-        .any(|n| n.notification_type == "item_granted")
-}
-
-async fn refresh_inventory_cache(app: &AppHandle, client: &Client) {
-    if let Some((inventory, currency, equipped)) = api::api_fetch_inventory(client).await {
-        let shared = app.state::<SharedState>();
-        let mut s = shared.lock().unwrap();
-        apply_inventory(&mut s, inventory, currency, equipped);
-        drop(s);
-        emit_state_update(app);
+    let equipped_is_current = equip_epoch_before.is_none_or(|before| s.equip_epoch == before);
+    if equipped_is_current {
+        s.equipped = equipped;
+        storage::save_equipped(&s.equipped);
     }
 }
 
@@ -998,6 +1032,8 @@ async fn refresh_app_cache(app: &AppHandle, client: &Client) {
         }
     };
 
+    let equip_epoch_before = { shared.lock().unwrap().equip_epoch };
+
     let (inv_result, chat_result, friends_result) = tokio::join!(
         api::api_fetch_inventory(client),
         api::api_chat_fetch(client),
@@ -1008,7 +1044,13 @@ async fn refresh_app_cache(app: &AppHandle, client: &Client) {
     {
         let mut s = shared.lock().unwrap();
         if let Some((inventory, currency, equipped)) = inv_result {
-            apply_inventory(&mut s, inventory, currency, equipped);
+            apply_inventory(
+                &mut s,
+                inventory,
+                currency,
+                equipped,
+                Some(equip_epoch_before),
+            );
             changed = true;
         }
         if let Some(chat) = chat_result {
@@ -1655,6 +1697,8 @@ async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
         genres,
         friend_epoch_before,
         drop_epoch_before,
+        equip_epoch_before,
+        inventory_epoch_before,
     ) = {
         let s = state.lock().unwrap();
         let has = s.herzie.is_some();
@@ -1684,7 +1728,17 @@ async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
             }
         });
         let g = s.current_genres.clone();
-        (has, logged, mins, np, g, s.friend_epoch, s.drop_epoch)
+        (
+            has,
+            logged,
+            mins,
+            np,
+            g,
+            s.friend_epoch,
+            s.drop_epoch,
+            s.equip_epoch,
+            s.inventory_epoch,
+        )
     };
 
     if !has_herzie || !is_logged_in {
@@ -1778,6 +1832,34 @@ async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
         if s.drop_epoch == drop_epoch_before {
             s.pending_drops = sync_resp.pending_drops.clone();
         }
+
+        // /sync now carries the authoritative inventory and equip state, which
+        // is what lets mutations skip their own /inventory re-fetch. Guarded
+        // like the fields above: a local equip/sell/collect that landed while
+        // this request was in flight makes the response's copy stale, and
+        // applying it would visibly undo the change. The next sync reconciles.
+        if s.equip_epoch == equip_epoch_before {
+            if let Some(ref equipped) = sync_resp.equipped {
+                s.equipped = equipped.clone();
+                storage::save_equipped(&s.equipped);
+            }
+        }
+        // `inventory_currency` mirrors the same balance as `herzie.currency`
+        // (applied above) but is what the inventory/store/trade views read. It
+        // used to be refreshed only by /inventory, so it has to be kept in step
+        // here or removing those fetches would leave the coin stale.
+        s.inventory_currency = sync_resp.herzie.currency;
+
+        // Guarded on its own epoch rather than drop_epoch/equip_epoch: buying
+        // changes inventory without touching either of those, so overloading
+        // them would let a sync issued before a purchase reinstate the old
+        // contents.
+        if s.inventory_epoch == inventory_epoch_before {
+            if let Some(ref inventory) = sync_resp.inventory {
+                s.inventory = Some(inventory.clone());
+                storage::save_inventory_cache(inventory, s.inventory_currency);
+            }
+        }
         if !friend_state_stale {
             s.pending_friend_request = sync_resp.pending_friend_request.clone();
             s.incoming_friend_requests = sync_resp.incoming_friend_requests.clone();
@@ -1831,13 +1913,8 @@ async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
             }
         }
 
-        if notifications_include_item_grants(&sync_resp.notifications) {
-            let app_clone = app.clone();
-            let client = client.clone();
-            tauri::async_runtime::spawn(async move {
-                refresh_inventory_cache(&app_clone, &client).await;
-            });
-        }
+        // A grant used to need its own /inventory fetch to become visible; the
+        // response that announced it now carries the resulting inventory too.
     } else {
         let mut s = state.lock().unwrap();
         s.last_sync_ok = sync_ok;
