@@ -42,25 +42,38 @@ export function Tooltip({
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   const frame = useRef<number | null>(null);
 
-  useEffect(
-    () => () => {
-      if (frame.current !== null) cancelAnimationFrame(frame.current);
-    },
-    [],
-  );
+  const cancelFrame = () => {
+    if (frame.current !== null) cancelAnimationFrame(frame.current);
+    frame.current = null;
+  };
+
+  /** Every path that hides the bubble has to cancel the pending frame too:
+   * a move schedules the `setPos` for the *next* frame, so a mouseleave (or
+   * drag start) in the same frame would set null first and then be undone by
+   * that queued callback — leaving a bubble on screen for a trigger the
+   * cursor has already left, with no further event coming to clear it. */
+  const close = () => {
+    cancelFrame();
+    setPos(null);
+  };
+
+  useEffect(() => cancelFrame, []);
 
   const handleMove = (e: React.MouseEvent) => {
-    if (frame.current !== null) cancelAnimationFrame(frame.current);
+    cancelFrame();
     // A held button means a drag (native or click-drag) is in progress —
     // dragging over several triggers in a row can leave a stale element
     // without its mouseleave (e.g. a native drag hijacking the event
     // stream), so don't track the cursor while any button is down.
     if (e.buttons !== 0) {
-      setPos(null);
+      close();
       return;
     }
     const { clientX: x, clientY: y } = e;
-    frame.current = requestAnimationFrame(() => setPos({ x, y }));
+    frame.current = requestAnimationFrame(() => {
+      frame.current = null;
+      setPos({ x, y });
+    });
   };
 
   const bubbleStyle = (x: number, y: number): React.CSSProperties => {
@@ -78,7 +91,7 @@ export function Tooltip({
       className={cn("inline-flex", className)}
       onMouseEnter={handleMove}
       onMouseMove={handleMove}
-      onMouseLeave={() => setPos(null)}
+      onMouseLeave={close}
     >
       {children}
       {pos &&
