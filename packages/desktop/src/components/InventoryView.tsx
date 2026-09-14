@@ -284,7 +284,10 @@ function ItemGridCell({
   isDragging: boolean;
   isDragOver: boolean;
   inventory: Inventory | null;
-  onPlace: (itemId: string) => void;
+  /** Takes this cell's own slot index, not just the item id: with several
+   * identical cards on the grid it's the only thing that says *which* copy
+   * was clicked — see handleEquip. */
+  onPlace: (itemId: string, slotIndex: number) => void;
   onSellRequest: (
     itemId: string,
     slotIndex: number,
@@ -310,7 +313,7 @@ function ItemGridCell({
         type="button"
         data-slot-index={index}
         onPointerDown={(e) => onDragPointerDown(index, e)}
-        onClick={() => onPlace(itemId)}
+        onClick={() => onPlace(itemId, index)}
         onContextMenu={(e) => {
           e.preventDefault();
           if (def?.sellPrice)
@@ -649,32 +652,84 @@ export function InventoryView({
     }
   };
 
-  const handleEquip = async (itemId: string) => {
+  const isItemEquipped = (itemId: string) =>
+    findEquippedSlot(equipped, itemId) !== null ||
+    isModifierEquipped(equipped, itemId);
+
+  /** `fromSlot`, when given, is the exact grid slot the placed unit left from
+   * (see handleGridClick) — the equip counterpart of handleSell's slotIndex,
+   * and needed for the same reason. reconcileSlotOrder only learns that one
+   * fewer unit of this id is in the bank, so with several identical cards on
+   * the grid its count-based first pass keeps the earliest of them and empties
+   * the *last*, whichever one the player actually clicked; whatever the equip
+   * displaced then drops into that hole. Clearing the clicked slot here is
+   * what makes the card that leaves the grid the one that was clicked, and
+   * leaves that slot as the first empty one for the displaced item to land in.
+   *
+   * Done before awaiting, so it batches with the optimistic equip inside
+   * onToggleEquip and the reconcile sees both at once — a clear afterwards
+   * would arrive a render too late, with reconcile having already emptied
+   * some other slot. */
+  const handleEquip = async (itemId: string, fromSlot?: number) => {
     const name = getItem(itemId)?.name ?? itemId;
+    if (fromSlot !== undefined) {
+      setSlotOrder((prev) => {
+        if (prev[fromSlot] !== itemId) return prev;
+        const next = [...prev];
+        next[fromSlot] = null;
+        return next;
+      });
+    }
     const result = await onToggleEquip(itemId);
     if (result.ok) {
       onLog?.(result.action === "equip" ? `Placed ${name}` : `Returned ${name}`);
     } else {
+      // Put the card back only for a toggle that never left the client (see
+      // ToggleEquipResult.sent): nothing changed anywhere, and no ownership
+      // change is coming to trigger a reconcile that would restore it. After
+      // a failed *request* the overlay drop puts ownership back by itself, so
+      // reconcile re-places the unit — writing the slot here too would race
+      // that and could leave the displaced item with nowhere to land.
+      if (fromSlot !== undefined && !result.sent) {
+        setSlotOrder((prev) => {
+          if (prev[fromSlot] !== null) return prev;
+          const next = [...prev];
+          next[fromSlot] = itemId;
+          return next;
+        });
+      }
       const verb = result.action === "equip" ? "place" : "return";
       onLog?.(`Failed to ${verb} ${name}: ${result.error}`);
     }
   };
 
-  // Grid click places (or returns) an item directly — a no-op for
-  // non-equipable items (e.g. plain collectible cards) rather than a doomed
-  // equip attempt. Also a no-op right after a drag that moved the item to
-  // another slot, so dropping it doesn't also place it (see suppressClickRef).
-  const handleGridClick = (itemId: string) => {
+  // Grid click places an item directly — a no-op for non-equipable items
+  // (e.g. plain collectible cards) rather than a doomed equip attempt. Also a
+  // no-op right after a drag that moved the item to another slot, so dropping
+  // it doesn't also place it (see suppressClickRef).
+  //
+  // Never a *return*, unlike the Deck tab and the inspect overlay: every unit
+  // on this grid is by construction one that isn't being worn (equipping
+  // reserves a unit out of the bank — see ownedBankUnits), so a click here can
+  // only mean "place this copy". For a duplicate of something already placed
+  // that's nothing at all, since equip state is per item id rather than per
+  // physical copy — swapping the worn copy for this identical one is
+  // unrepresentable, and indistinguishable from leaving it alone. Toggling
+  // instead, as this used to, read the shared "is this id worn" bit and took
+  // the *worn* copy off in response to a click on a different one.
+  const handleGridClick = (itemId: string, slotIndex: number) => {
     if (suppressClickRef.current) {
       suppressClickRef.current = false;
       return;
     }
-    if (getItem(itemId)?.equipable) handleEquip(itemId);
+    const def = getItem(itemId);
+    if (!def?.equipable) return;
+    if (isItemEquipped(itemId)) {
+      onLog?.(`${def.name} is already placed`);
+      return;
+    }
+    handleEquip(itemId, slotIndex);
   };
-
-  const isItemEquipped = (itemId: string) =>
-    findEquippedSlot(equipped, itemId) !== null ||
-    isModifierEquipped(equipped, itemId);
 
   const rarityOrder: Record<string, number> = {
     legendary: 0,

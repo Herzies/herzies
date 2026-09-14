@@ -40,7 +40,18 @@ const REJECTION_MESSAGES: Record<EquipRejection, string> = {
 
 export type ToggleEquipResult =
   | { ok: true; action: "equip" | "unequip" }
-  | { ok: false; action: "equip" | "unequip"; error: string };
+  | {
+      ok: false;
+      action: "equip" | "unequip";
+      error: string;
+      /** False when the toggle was refused against local state and so never
+       * reached the server: nothing moved, here or there, and no ownership
+       * change is coming. That's the only case in which a caller can safely
+       * undo optimistic bookkeeping of its own (InventoryView's targeted slot
+       * clear) — after a failed *request*, dropping the overlay restores the
+       * previous ownership, and whatever that re-triggers would race it. */
+      sent: boolean;
+    };
 
 /**
  * Deep equality for Equipped. `normalizeEquipped` walks EQUIPPED_SLOTS in a
@@ -176,6 +187,7 @@ export function useOptimisticEquipped(serverEquipped: Equipped) {
           ok: false,
           action,
           error: REJECTION_MESSAGES[predicted.reason],
+          sent: false,
         };
       }
 
@@ -193,7 +205,7 @@ export function useOptimisticEquipped(serverEquipped: Equipped) {
         // nothing re-applies a prediction for them.
         setOverlay(null);
         const error = e instanceof Error ? e.message : String(e);
-        return { ok: false, action, error };
+        return { ok: false, action, error, sent: true };
       } finally {
         setInFlight((n) => Math.max(0, n - 1));
       }
