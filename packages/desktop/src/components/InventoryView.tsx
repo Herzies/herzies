@@ -1,10 +1,12 @@
-import type { Equipped, Herzie, Inventory } from "@herzies/shared";
+import type { Equipped, Herzie, Inventory, ItemType } from "@herzies/shared";
 import {
   applySell,
   BANK_SLOT_COUNT,
+  DECK_SLOT_GROUPS,
   findEquippedSlot,
   getItem,
   getItemCategory,
+  getItemType,
   groundSlot,
   isModifierEquipped,
   MAX_MODIFIERS,
@@ -20,6 +22,7 @@ import { DeckRow } from "./DeckRow";
 import { Herzie3D } from "./Herzie3D";
 import ItemInspectOverlay, { ItemPreviewCard } from "./ItemInspectOverlay";
 import { ItemTypeIcon } from "./icons/ItemTypeIcon";
+import { SortIcon } from "./icons/SortIcon";
 import { List } from "./List";
 import { NumberTicker } from "./NumberTicker";
 import { TabButton } from "./TabButton";
@@ -231,6 +234,39 @@ function reconcileSlotOrder(
     next[emptyIndex] = id;
   }
   return next;
+}
+
+/** Rank per item type for the quick sort, taken from the Deck tab's own
+ * left-to-right grouping so a sorted grid reads in the same order as the
+ * deck it fills, instead of a second ordering invented here that could drift
+ * from it. A type with no deck slot of its own — artefacts, which aren't
+ * equipable — has no rank there and sorts last.
+ *
+ * Note this groups by `ItemType` (Equipable, Accessory, Scenery, Modifier,
+ * Skin, Artefact), not by `ItemCategory`: every unit in this grid is already
+ * filtered to the "deck" category, so ranking by that would be a no-op. */
+const TYPE_RANK = new Map<ItemType, number>(
+  DECK_SLOT_GROUPS.map((group, i) => [group.itemType, i]),
+);
+
+function typeRank(itemId: string): number {
+  const def = getItem(itemId);
+  const rank = def ? TYPE_RANK.get(getItemType(def)) : undefined;
+  return rank ?? TYPE_RANK.size;
+}
+
+/** Re-lays every owned bank unit out from the first slot, grouped by item
+ * type — the quick sort. Built from `ownedBankUnits` rather than by
+ * permuting the current arrangement, so it also heals any drift (gaps left
+ * by sells, say) in one go.
+ *
+ * `ownedIds` already arrives rarity-then-name sorted (see InventoryView's
+ * `items`) and `sort` is stable, so ranking by type alone yields type →
+ * rarity → name without a second comparator. Anything past `TOTAL_SLOTS`
+ * drops off the grid, the same way `reconcileSlotOrder` drops it. */
+function sortSlotsByType(ownedIds: string[]): (string | null)[] {
+  const sorted = [...ownedIds].sort((a, b) => typeRank(a) - typeRank(b));
+  return Array.from({ length: TOTAL_SLOTS }, (_, i) => sorted[i] ?? null);
 }
 
 /** Shared by both cell kinds: only the dragged cell dims, only the one
@@ -861,6 +897,28 @@ export function InventoryView({
           >
             Deck
           </TabButton>
+          {/* Cards only — the Deck tab has fixed slots, so there's no
+              arrangement of its own to sort. `ml-auto` goes on the Tooltip:
+              its wrapping span is the flex item here, not the button. */}
+          {tab === "cards" && (
+            <Tooltip className="ml-auto" label="Quick sort">
+              <button
+                type="button"
+                aria-label="Quick sort"
+                onClick={() => setSlotOrder(sortSlotsByType(ownedBankUnits))}
+                // Tighter vertical padding than TabButton's, so the taller
+                // icon doesn't grow the tab row: the flex row's default
+                // stretch sizes this button to the tabs anyway, and
+                // items-center then centres the icon against their text.
+                className="flex cursor-pointer items-center border-none bg-transparent px-1.5 py-0.5 text-text-dim hover:text-cyan"
+              >
+                {/* 16px, the same size the item pips render at — a 16x16
+                    PixelIcon scaled to anything else lands its 1px arrow
+                    shaft on fractional device pixels and goes soft. */}
+                <SortIcon className="h-4 w-4" />
+              </button>
+            </Tooltip>
+          )}
         </div>
 
         {tab === "deck" ? (
