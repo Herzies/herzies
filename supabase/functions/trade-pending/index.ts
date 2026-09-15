@@ -53,8 +53,11 @@ Deno.serve(async (request) => {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    // Expire stale trades
-    await admin.rpc("expire_stale_trades");
+    // No expire_stale_trades() call here: the query below already filters on
+    // expires_at, so the sweep never changed this result. It runs on pg_cron
+    // now (00057_expire_stale_trades_cron.sql). This endpoint is polled every
+    // 5s per hidden client, so it was the single largest source of those
+    // writes.
 
     // Check for pending trades where this user is the target
     const { data: pending } = await admin

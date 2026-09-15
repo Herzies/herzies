@@ -8,8 +8,9 @@ export async function GET(request: Request) {
 
   const admin = createAdminClient();
 
-  // Expire stale trades
-  await admin.rpc("expire_stale_trades");
+  // No expire_stale_trades() call here: the query below already filters on
+  // expires_at, so the sweep never changed this result. It runs on pg_cron now
+  // (00057_expire_stale_trades_cron.sql).
 
   // Check for pending trades where this user is the target
   const { data: pending } = await admin
