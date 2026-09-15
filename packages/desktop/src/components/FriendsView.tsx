@@ -241,6 +241,7 @@ export function FriendsView({
         isFriend={herzie.friendCodes.includes(code)}
         requestPending={outgoingCodes.has(code)}
         stageOverride={stageOverride}
+        active={active}
       />
     );
   }

@@ -41,9 +41,16 @@ export function HomeView({
   onOpenProfile,
   onOpenSettings,
   onActivity,
+  active = true,
 }: {
   state: AppState;
   stageOverride?: number | null;
+  /**
+   * Home is the visible view. Views are only hidden with a CSS class, so
+   * without this the creature and its sky keep animating inside a
+   * `display: none` subtree for as long as the user is on another tab.
+   */
+  active?: boolean;
   /** Open the viewer's own profile (same layout as other herzies'). */
   onOpenProfile?: () => void;
   onOpenSettings?: () => void;
@@ -317,6 +324,7 @@ export function HomeView({
           stage={stageOverride ?? herzie.stage}
           isPlaying={!!nowPlaying}
           equipped={equipped}
+          paused={!active}
         />
         {dropItems.length > 0 && !hasSpiritOrb && (
           // pointer-events-none on the wrapper keeps the gaps between items

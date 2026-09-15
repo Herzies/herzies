@@ -626,6 +626,7 @@ function App() {
               isSelf
               isFriend
               stageOverride={stageOverride}
+              active={view === "home"}
               onBack={() => setSelfProfile(null)}
               onTrade={() => {}}
               onAdd={() => {}}
@@ -635,6 +636,7 @@ function App() {
             <HomeView
               state={state}
               stageOverride={stageOverride}
+              active={view === "home"}
               onOpenProfile={handleOpenSelfProfile}
               onOpenSettings={() => switchView("settings")}
               onActivity={addLog}

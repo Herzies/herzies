@@ -68,6 +68,7 @@ export function ProfileView({
   isSelf,
   requestPending,
   stageOverride,
+  active = true,
 }: {
   profile: HerzieProfile;
   onBack: () => void;
@@ -85,6 +86,12 @@ export function ProfileView({
   /** A friend request to this herzie is already pending (sent or received). */
   requestPending?: boolean;
   stageOverride?: number | null;
+  /**
+   * This profile is on the visible view. Views are only hidden with a CSS
+   * class, so without this the creature keeps animating behind whichever tab
+   * the user actually switched to.
+   */
+  active?: boolean;
 }) {
   const [confirmRemove, setConfirmRemove] = useState(false);
 
@@ -106,6 +113,7 @@ export function ProfileView({
             stage={stageOverride ?? profile.stage}
             isPlaying={isFriend ? !!profile.nowPlaying : false}
             equipped={profile.equipped ?? {}}
+            paused={!active}
           />
         </div>
       )}
