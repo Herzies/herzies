@@ -11,7 +11,7 @@
  * exploit given items have sellPrice/buyPrice and a live store/trade system.
  *
  * Picks from the same weighted pool `processSync` rolls from (see
- * `_shared/herzies-shared.ts`), then inserts straight into `pending_drops`
+ * `_shared/shared/game-rules.ts`), then inserts straight into `pending_drops`
  * (rather than going through the `roll_pending_drop` RPC) so the inserted
  * row — including its id — can be returned to the caller for immediate
  * display, instead of waiting for the next sync tick to pick it up.
@@ -22,7 +22,7 @@ import {
   filterDroppablePool,
   NON_DROPPABLE_ITEM_IDS,
   pickWeightedDrop,
-} from "../_shared/herzies-shared.ts";
+} from "../_shared/shared/game-rules.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;

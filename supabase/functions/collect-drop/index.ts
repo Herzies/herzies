@@ -9,14 +9,14 @@
  * migration that defines it). The one piece of game logic here is the bank
  * capacity check — `collect_pending_drop` credits inventory unconditionally,
  * and an over-capacity item stays owned but has no grid slot to render in, so
- * it would vanish from view. See `hasRoomFor` in ../_shared/herzies-shared.ts.
+ * it would vanish from view. See `hasRoomFor` in ../_shared/shared/game-rules.ts.
  */
 import { createClient } from "@supabase/supabase-js";
 import { corsHeaders, jsonResponse } from "../_shared/cors.ts";
 import {
   type BankItemLookup,
   hasRoomFor,
-} from "../_shared/herzies-shared.ts";
+} from "../_shared/shared/game-rules.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;

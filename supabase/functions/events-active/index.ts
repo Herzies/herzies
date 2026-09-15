@@ -13,8 +13,8 @@
  * the Next.js route which also serves anonymous marketing-site callers.
  */
 import { createClient } from "@supabase/supabase-js";
-import type { GameEvent, SongHuntConfig } from "../_shared/herzies-shared.ts";
-import { buildSongHuntConfig } from "../_shared/events.ts";
+import type { GameEvent, SongHuntConfig } from "../_shared/shared/game-rules.ts";
+import { buildSongHuntConfig } from "../_shared/shared/game-events.ts";
 import { corsHeaders, jsonResponse } from "../_shared/cors.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;

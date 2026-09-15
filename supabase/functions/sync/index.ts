@@ -14,7 +14,7 @@
  */
 import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
-import { processSync } from "../_shared/game-server.ts";
+import { processSync } from "../_shared/shared/game-server.ts";
 import { corsHeaders, jsonResponse } from "../_shared/cors.ts";
 
 const syncRequestSchema = z.object({
@@ -94,6 +94,14 @@ Deno.serve(async (request) => {
       nowPlaying,
       minutesListened,
       genres,
+      {
+        // The shared game loop is runtime-agnostic, so the env read happens
+        // here rather than inside it (the Next.js entry point does the same
+        // with process.env). Dev-only: rolls a drop on every sync instead of
+        // every 10 listened minutes. Must never be set on the deployed
+        // function — only via `supabase functions serve --env-file`.
+        dropTestMode: Deno.env.get("HERZIES_DROP_TEST_MODE") === "1",
+      },
     );
 
     return jsonResponse({
