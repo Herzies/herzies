@@ -10,7 +10,17 @@
       "require": "./dist/index.js",
       "types": "./dist/index.d.ts"
     },
-    "./theme.css": "./theme.css"
+    "./theme.css": "./theme.css",
+    "./server": {
+      "import": "./dist/game-server.js",
+      "require": "./dist/game-server.js",
+      "types": "./dist/game-server.d.ts"
+    },
+    "./game-events": {
+      "import": "./dist/game-events.js",
+      "require": "./dist/game-events.js",
+      "types": "./dist/game-events.d.ts"
+    }
   },
   "files": [
     "dist",
@@ -23,12 +33,19 @@
     "test": "vitest run"
   },
   "peerDependencies": {
-    "react": ">=19"
+    "react": ">=19",
+    "@supabase/supabase-js": "^2"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
     "@types/react": "^19.2.14",
     "react": "^19.2.5",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "@supabase/supabase-js": "^2.105.1"
+  },
+  "peerDependenciesMeta": {
+    "@supabase/supabase-js": {
+      "optional": true
+    }
   }
 }

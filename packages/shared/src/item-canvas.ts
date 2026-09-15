@@ -1,4 +1,5 @@
 import type { Cell } from "./creature-renderer.js";
+import type { ItemDef } from "./items.js";
 
 export const ITEM_FONT_FAMILY = "'SF Mono', 'Menlo', monospace";
 
@@ -163,4 +164,25 @@ export function parseAsciiFrames(frames: string[][]): Cell[][][] {
       return cells;
     }),
   );
+}
+
+const itemColorCache = new Map<string, string>();
+
+/** This item's own dominant colour, sampled from its baked art's
+ * front-facing frame (see `dominantColor`/`widestFrameIndex` above) —
+ * distinct from a category or rarity colour, this is what that specific card
+ * actually looks like. Memoized per item id since the underlying art never
+ * changes at runtime.
+ *
+ * Lives here rather than in items.ts so that items.ts carries no dependency on
+ * the rendering chain: it is shared verbatim with the Deno edge functions
+ * (see game-rules.ts), which have no canvas. */
+export function getItemColor(item: ItemDef): string {
+  const cached = itemColorCache.get(item.id);
+  if (cached) return cached;
+  const frames = parseAsciiFrames(item.frames);
+  const front = frames[widestFrameIndex(frames)] ?? frames[0];
+  const color = (front && dominantColor(front)) || "#ffffff";
+  itemColorCache.set(item.id, color);
+  return color;
 }
