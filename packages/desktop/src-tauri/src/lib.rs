@@ -909,6 +909,44 @@ fn chat_ingest(
     Ok(())
 }
 
+/// Ingest a trade request that arrived over the Realtime broadcast channel.
+///
+/// Counterpart to `chat_ingest`, and the push half of what `trade_watch_loop`
+/// used to poll for every 5s. The DB trigger
+/// (00058_trade_request_broadcast.sql) sends the initiator's name and friend
+/// code with the payload, so this needs no round-trip to render.
+///
+/// Safe to race with the fallback poll and with `sync_tick`: whichever arrives
+/// first sets the same state, and `notify_pending_trade` dedupes on trade id so
+/// only one notification fires.
+#[tauri::command]
+fn trade_request_ingest(
+    request: PendingTradeRequest,
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<(), String> {
+    {
+        let mut s = state.lock().unwrap();
+        if s.herzie.is_none() {
+            return Ok(());
+        }
+        // Don't clobber a trade the user is already dealing with.
+        if s.pending_trade_request
+            .as_ref()
+            .is_some_and(|p| p.trade_id == request.trade_id)
+        {
+            return Ok(());
+        }
+        s.pending_trade_request = Some(request.clone());
+        let app_state = s.to_app_state(env!("CARGO_PKG_VERSION"));
+        drop(s);
+        let _ = app.emit("state-update", &app_state);
+    }
+
+    notify_pending_trade(&app, Some(&request));
+    Ok(())
+}
+
 // --- Helper types for command results ---
 
 #[derive(serde::Serialize)]
@@ -1584,16 +1622,38 @@ fn notify_pending_trade(app: &AppHandle, pending: Option<&PendingTradeRequest>) 
     }
 }
 
-/// Lightweight poll for incoming trade invites. When the window is hidden the
-/// full /sync only runs every 60s, which made trade requests feel slow — this
-/// hits the cheap /trade/pending endpoint every 5s instead so the invite
-/// notification arrives quickly. While visible, sync_loop already covers the
-/// same data at a 5s cadence, so this loop skips its request.
+/// How often the backup trade poll runs while the window is hidden.
+///
+/// DELIBERATELY STILL 5s, and this is the single biggest remaining cost lever
+/// in the app — see the note below before changing it.
+///
+/// Trade invites now also arrive over a Realtime broadcast
+/// (00058_trade_request_broadcast.sql -> useTradeRequests -> trade_request_ingest),
+/// which is what makes them instant instead of up to 5s late. Raising this to
+/// 60s (or deleting this loop outright — sync_loop already refreshes the same
+/// field every 60s while hidden, notification included) would remove almost
+/// all of those calls.
+///
+/// What blocks that: the websocket lives in the webview, and this loop only
+/// runs while the window is hidden — which is exactly the state where macOS is
+/// most likely to throttle or drop it. Nobody has yet confirmed that a
+/// broadcast actually lands with the window in the tray. Until someone
+/// watches that happen, widening this trades a verified 5s worst case for an
+/// unverified one, in the only scenario the feature exists for.
+///
+/// To confirm: run the app, hide the window, insert a pending trade targeting
+/// your user, and check the native notification fires within a second or two.
+const TRADE_WATCH_SECS: u64 = 5;
+
+/// Backup poll for incoming trade invites while the window is hidden.
+///
+/// The broadcast channel is the fast path; this catches anything it misses.
+/// While visible, sync_loop already covers the same data every 5s.
 async fn trade_watch_loop(app: AppHandle) {
     let client = Client::new();
 
     loop {
-        tokio::time::sleep(Duration::from_secs(5)).await;
+        tokio::time::sleep(Duration::from_secs(TRADE_WATCH_SECS)).await;
 
         if tray::is_window_visible() {
             continue;
@@ -2030,6 +2090,7 @@ pub fn run() {
             chat_fetch,
             chat_send,
             chat_ingest,
+            trade_request_ingest,
             test_notification,
             test_activity,
             debug_media_remote_now_playing,

@@ -25,6 +25,7 @@ import { TabBar, type View } from "./components/TabBar";
 import { TradeView } from "./components/TradeView";
 import { UpdateAvailableOverlay } from "./components/UpdateAvailableOverlay";
 import { useOptimisticEquipped } from "./hooks/useOptimisticEquipped";
+import { useTradeRequests } from "./hooks/useTradeRequests";
 import { cn } from "./lib/utils";
 import {
   type AppState,
@@ -80,6 +81,11 @@ function App() {
     () => ({ ...rawState, equipped: effectiveEquipped }),
     [rawState, effectiveEquipped],
   );
+  // Mounted here, at the root, rather than inside a view: trade invites have to
+  // keep arriving while the window is hidden, and every view below is unmounted
+  // or hidden at some point. See the hook for why the Rust-side fallback poll
+  // stays.
+  useTradeRequests(rawState.isOnline);
   const [view, setView] = useState<View>("home");
   const [tradeTarget, setTradeTarget] = useState<string | null>(null);
   const [incomingTradeId, setIncomingTradeId] = useState<string | null>(null);

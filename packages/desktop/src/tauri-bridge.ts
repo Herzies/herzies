@@ -162,8 +162,7 @@ export const herzies = {
   /** Manually collects one specific pending world drop by id. Resolves
    * `true` if it was collected, `false` if it no longer existed (e.g.
    * already collected by a racing Spirit Orb auto-collect). */
-  collectDrop: (dropId: string) =>
-    invoke<boolean>("collect_drop", { dropId }),
+  collectDrop: (dropId: string) => invoke<boolean>("collect_drop", { dropId }),
   /** Dev-only: spawns a real, pickup-able world drop (Settings → Debug). */
   spawnDebugDrop: () => invoke<void>("spawn_debug_drop"),
 
@@ -252,6 +251,14 @@ export const herzies = {
   /** Append a message received over Realtime Broadcast to the shared state. */
   chatIngest: (message: ChatMessage) =>
     invoke<void>("chat_ingest", { message }),
+
+  /**
+   * Hand a trade request received over Realtime Broadcast to the backend, which
+   * updates the shared state and fires the native notification. Idempotent —
+   * deduped by trade id against the fallback poll and /sync.
+   */
+  tradeRequestIngest: (request: PendingTradeRequest) =>
+    invoke<void>("trade_request_ingest", { request }),
 
   /** Open a URL in the system browser (WKWebView does not navigate external https). */
   openExternalUrl: (url: string) => invoke<void>("open_external_url", { url }),
