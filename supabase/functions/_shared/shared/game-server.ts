@@ -20,20 +20,24 @@
  * caller instead. Reached through the `@herzies/shared/server` export so the
  * desktop bundle never pulls this in.
  */
+
+import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   type ActiveMultiplier,
   applyXp,
   calculateXpGain,
   classifyGenre,
   DROP_CHANCE_PER_TICK,
+  DROP_TICK_MINUTES,
   type EventNotification,
-  filterDroppablePool,
   type FriendRequestSummary,
+  filterDroppablePool,
   getDailyCraving,
   goodEyeSniperBonus,
+  type Herzie,
   hasRoomFor,
   isModifierEquipped,
-  type Herzie,
+  MAX_DROP_ROLLS_PER_SYNC,
   matchesCraving,
   NON_DROPPABLE_ITEM_IDS,
   normalizeEquipped,
@@ -46,7 +50,39 @@ import {
   type Stage,
   stageForLevel,
 } from "./game-rules.ts";
-import type { SupabaseClient } from "@supabase/supabase-js";
+
+/** Minimum gap between two *billable* syncs, measured from `last_billed_at`.
+ *
+ * It used to be measured from `last_synced_at`, which every sync rewrites as a
+ * daemon-liveness heartbeat (the Spotify cron reads it to decide whether the
+ * desktop app is covering a user). The desktop sync loop ticks every 5s while
+ * the window is visible, so the gap was permanently below this threshold and
+ * *no listening time was ever credited with the window open* — which, since
+ * drop eligibility is a counter diff on total_minutes_listened, meant no drops
+ * either. Keeping the two clocks separate is what fixes that. */
+const BILL_COOLDOWN_MS = 8_000;
+
+/** Hard ceiling on listened minutes credited by a single CLI sync. */
+const MAX_MINUTES_PER_SYNC = 10;
+
+/** Grace added to the wall-clock cap to absorb clock skew between the client's
+ * accrual and the server's `last_billed_at`. */
+const WALL_CLOCK_GRACE_MINUTES = 5 / 60;
+
+/** How much faster than real time a client may drain a backlog of listened
+ * minutes it accrued but could not get billed for.
+ *
+ * At 1 the wall-clock cap admits only as many minutes as have elapsed since
+ * the last bill, so a backlog can never be repaid faster than it accrues. The
+ * BILL_COOLDOWN_MS bug above left every user holding a large unbilled balance
+ * in `pending_minutes.json`; at 1 those balances would take days of listening
+ * to clear, and while hidden (60s sync cadence) essentially never.
+ *
+ * `minutesListened` is client-asserted, so this is a deliberate, bounded
+ * loosening: the ceiling on forged minutes rises from 1x to 3x real elapsed
+ * time. MAX_MINUTES_PER_SYNC still caps any single call. Drop this back to 1
+ * once the backlogs are paid off if the ceiling is a concern. */
+const CATCHUP_RATE = 3;
 
 /** Good Eye Sniper occupies the modifier slot — an unbounded array, unlike
  * every other equip slot. */
@@ -318,6 +354,11 @@ export async function processSync(
   }
 
   // 4. Calculate and apply XP (server-authoritative)
+  // Minutes actually added to total_minutes_listened by this sync. Hoisted out
+  // of the block because step 7 advances `last_billed_at` only when it is > 0 —
+  // moving the billing clock on a throttled, zero-minute sync is precisely the
+  // bug BILL_COOLDOWN_MS documents.
+  let billedMinutes = 0;
   if (minutesListened > 0) {
     const classifiedGenres =
       genres.length > 0 ? classifyGenre(genres) : classifyGenre(["pop"]);
@@ -329,17 +370,26 @@ export async function processSync(
     // CLI sync: cap to prevent abuse via rapid requests
     if (source === "cli") {
       // Cap at 10 minutes per sync hard limit
-      minutes = Math.min(minutes, 10);
+      minutes = Math.min(minutes, MAX_MINUTES_PER_SYNC);
 
-      // Cap to actual elapsed wall-clock time since last sync (+5s grace)
-      const lastSyncedAt = row.last_synced_at as string | null;
-      if (lastSyncedAt) {
-        const elapsedMs = now.getTime() - new Date(lastSyncedAt).getTime();
+      // Both caps below are measured from the last sync that actually credited
+      // minutes, NOT from last_synced_at — see BILL_COOLDOWN_MS. Rows predating
+      // the last_billed_at column fall back to it once, then track the new clock.
+      const lastBilledAt = (row.last_billed_at ?? row.last_synced_at) as
+        | string
+        | null;
+      if (lastBilledAt) {
+        const elapsedMs = now.getTime() - new Date(lastBilledAt).getTime();
         const elapsedMinutes = Math.max(0, elapsedMs / 60_000);
-        minutes = Math.min(minutes, elapsedMinutes + 5 / 60);
+        // Cap to elapsed wall-clock time since the last bill (+grace), times
+        // the catch-up allowance that lets an unbilled backlog drain.
+        minutes = Math.min(
+          minutes,
+          elapsedMinutes * CATCHUP_RATE + WALL_CLOCK_GRACE_MINUTES,
+        );
 
-        // Enforce minimum 8-second cooldown between syncs
-        if (elapsedMs < 8_000) {
+        // Enforce minimum cooldown between billable syncs
+        if (elapsedMs < BILL_COOLDOWN_MS) {
           minutes = 0;
         }
       }
@@ -374,6 +424,7 @@ export async function processSync(
 
     const events = applyXp(herzie, xp);
     herzie.totalMinutesListened += minutes;
+    billedMinutes = minutes;
     recordGenreMinutes(herzie.genreMinutes, classifiedGenres, minutes);
 
     if (events.leveledUp) {
@@ -392,14 +443,20 @@ export async function processSync(
     }
   }
 
-  // 5. Roll for a world drop every 10 listened minutes, then auto-collect it
-  // immediately if a Spirit Orb pet is equipped — any number of drops can be
-  // pending on the ground at once (see the pending_drops table), so this no
-  // longer waits for an earlier drop to be collected first. CDs come from
-  // this pool too (with the highest drop weight, see
+  // 5. Roll for a world drop every DROP_TICK_MINUTES listened minutes, then
+  // auto-collect it immediately if a Spirit Orb pet is equipped — any number of
+  // drops can be pending on the ground at once (see the pending_drops table),
+  // so this no longer waits for an earlier drop to be collected first. CDs come
+  // from this pool too (with the highest drop weight, see
   // ITEM_DROP_WEIGHT_OVERRIDES) rather than being granted straight to
   // inventory — every item, CDs included, has to be picked up off the
   // ground.
+  //
+  // One roll is awarded per tick the counter crossed, not one per sync. The
+  // desktop path crosses at most one (MAX_MINUTES_PER_SYNC caps it), but the
+  // Spotify cron passes uncapped catch-up minutes, and this used to award a
+  // single drop and then fast-forward drop_rolls_done past the rest — a
+  // 50-minute catch-up paid out 1 of the 5 rolls it owed and burned the other 4.
   //
   // Dev-only test mode: HERZIES_DROP_TEST_MODE=1 rolls on every sync call
   // instead of every 10 listened minutes (DROP_CHANCE_PER_TICK is already 1
@@ -411,41 +468,57 @@ export async function processSync(
   // skips drop_rolls_done bookkeeping in test mode so toggling it off
   // resumes normal cadence unaffected.
   const dropTestMode = options.dropTestMode ?? false;
-  const totalDropRollsEligible = Math.floor(herzie.totalMinutesListened / 10);
+  const totalDropRollsEligible = Math.floor(
+    herzie.totalMinutesListened / DROP_TICK_MINUTES,
+  );
   const dropRollsDone = (row.drop_rolls_done ?? 0) as number;
-  // Whether this sync actually inserted a drop, which is the only case where
-  // sync_context's pending_drops snapshot is stale.
-  let rolledThisSync = false;
+  // Rolls this sync owes. Anything above the per-sync ceiling stays owed and is
+  // paid on the next call — drop_rolls_done advances by what was actually
+  // inserted, so the remainder is carried rather than written off.
+  const rollsOwed = dropTestMode
+    ? 1
+    : Math.min(
+        Math.max(0, totalDropRollsEligible - dropRollsDone),
+        MAX_DROP_ROLLS_PER_SYNC,
+      );
+  // How many drops this sync inserted. Non-zero is the only case where
+  // sync_context's pending_drops snapshot is stale, and it is also what
+  // drop_rolls_done advances by — a failed pool query no longer burns the tick.
+  let rollsInserted = 0;
 
-  if (dropTestMode || totalDropRollsEligible > dropRollsDone) {
-    if (dropTestMode || Math.random() < DROP_CHANCE_PER_TICK) {
-      const { data: pool } = await admin
-        .from("items")
-        .select("id, rarity")
-        .not(
-          "id",
-          "in",
-          `(${NON_DROPPABLE_ITEM_IDS.map((id) => `"${id}"`).join(",")})`,
-        );
-      // Rows come from the DB, not this shim's catalog mirror — filter out
-      // any id/rarity that mirror doesn't recognize before feeding the
-      // picker (see filterDroppablePool's doc comment for why this matters).
-      const picked = pool
-        ? pickWeightedDrop(filterDroppablePool(pool))
-        : undefined;
-      if (picked) {
-        await admin.rpc("roll_pending_drop", {
-          p_user_id: userId,
-          p_item_id: picked.id,
-        });
-        rolledThisSync = true;
-      }
+  if (rollsOwed > 0) {
+    const { data: pool } = await admin
+      .from("items")
+      .select("id, rarity")
+      .not(
+        "id",
+        "in",
+        `(${NON_DROPPABLE_ITEM_IDS.map((id) => `"${id}"`).join(",")})`,
+      );
+    // Rows come from the DB, not this shim's catalog mirror — filter out
+    // any id/rarity that mirror doesn't recognize before feeding the
+    // picker (see filterDroppablePool's doc comment for why this matters).
+    // Fetched once and re-picked per roll, so a multi-roll catch-up costs one
+    // query, not one per drop.
+    const droppable = pool ? filterDroppablePool(pool) : [];
+    const pickedIds: string[] = [];
+    for (let i = 0; i < rollsOwed; i++) {
+      if (!dropTestMode && Math.random() >= DROP_CHANCE_PER_TICK) continue;
+      const picked = pickWeightedDrop(droppable);
+      if (picked) pickedIds.push(picked.id);
+    }
+    if (pickedIds.length > 0) {
+      await admin.rpc("roll_pending_drops", {
+        p_user_id: userId,
+        p_item_ids: pickedIds,
+      });
+      rollsInserted = pickedIds.length;
     }
     // drop_rolls_done used to be its own UPDATE here. It is now folded into the
-    // single herzie update in step 7 (see dropRollsToPersist) — same write,
-    // one fewer round trip, and it can no longer land without the rest of the
-    // sync's changes.
+    // single herzie update in step 7 — same write, one fewer round trip, and it
+    // can no longer land without the rest of the sync's changes.
   }
+  const rolledThisSync = rollsInserted > 0;
 
   // sync_context already returned the drops standing on the ground. Only a roll
   // that actually inserted one invalidates that snapshot, and that happens at
@@ -548,46 +621,44 @@ export async function processSync(
   {
     // Came from sync_context; same filter, no query here.
     const activeHunts = ctx.active_hunts ?? [];
-    {
-      for (const hunt of activeHunts) {
-        if (notifiedHunts.includes(hunt.id)) continue;
+    for (const hunt of activeHunts) {
+      if (notifiedHunts.includes(hunt.id)) continue;
 
-        // Check if user already claimed this hunt (they'd get the item_granted notif instead)
-        const { data: ownClaim } = await admin
-          .from("event_claims")
-          .select("id")
-          .eq("event_id", hunt.id)
-          .eq("user_id", userId)
-          .maybeSingle();
+      // Check if user already claimed this hunt (they'd get the item_granted notif instead)
+      const { data: ownClaim } = await admin
+        .from("event_claims")
+        .select("id")
+        .eq("event_id", hunt.id)
+        .eq("user_id", userId)
+        .maybeSingle();
 
-        if (ownClaim) continue;
+      if (ownClaim) continue;
 
-        // Check if anyone has found it
-        const { data: firstClaim } = await admin
-          .from("event_claims")
-          .select("user_id")
-          .eq("event_id", hunt.id)
-          .order("claimed_at", { ascending: true })
-          .limit(1)
-          .maybeSingle();
+      // Check if anyone has found it
+      const { data: firstClaim } = await admin
+        .from("event_claims")
+        .select("user_id")
+        .eq("event_id", hunt.id)
+        .order("claimed_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
 
-        if (!firstClaim) continue;
+      if (!firstClaim) continue;
 
-        // Get the finder's name
-        const { data: finderHerzie } = await admin
-          .from("herzies")
-          .select("name")
-          .eq("user_id", firstClaim.user_id as string)
-          .single();
+      // Get the finder's name
+      const { data: finderHerzie } = await admin
+        .from("herzies")
+        .select("name")
+        .eq("user_id", firstClaim.user_id as string)
+        .single();
 
-        const finderName = (finderHerzie?.name as string) ?? "Someone";
-        notifications.push({
-          type: "info",
-          title: hunt.title as string,
-          message: `${finderName} found the song! Find it yourself to claim your reward.`,
-        });
-        notifiedHunts.push(hunt.id);
-      }
+      const finderName = (finderHerzie?.name as string) ?? "Someone";
+      notifications.push({
+        type: "info",
+        title: hunt.title as string,
+        message: `${finderName} found the song! Find it yourself to claim your reward.`,
+      });
+      notifiedHunts.push(hunt.id);
     }
   }
 
@@ -607,8 +678,22 @@ export async function processSync(
   };
   // Folded in from step 5's former standalone UPDATE. Test mode deliberately
   // skips the bookkeeping so toggling it off resumes the normal cadence.
-  if (!dropTestMode && totalDropRollsEligible > dropRollsDone) {
-    updateData.drop_rolls_done = totalDropRollsEligible;
+  //
+  // Advances by the number of drops actually inserted, not all the way to
+  // totalDropRollsEligible. That fast-forward silently burned every roll this
+  // sync couldn't pay — the ones above MAX_DROP_ROLLS_PER_SYNC, and the whole
+  // tick whenever the items query failed or the droppable pool came back empty.
+  if (!dropTestMode && rollsInserted > 0) {
+    updateData.drop_rolls_done = dropRollsDone + rollsInserted;
+  }
+  // The billing clock BILL_COOLDOWN_MS and the wall-clock cap measure from.
+  // Deliberately *not* part of herzieToRow: last_synced_at in there is a
+  // liveness heartbeat every sync must move (the Spotify cron reads it to skip
+  // users the desktop app is already covering), whereas this may only move when
+  // minutes were really credited — otherwise the cooldown never elapses at the
+  // desktop's 5s cadence and nothing is ever billed.
+  if (billedMinutes > 0) {
+    updateData.last_billed_at = now.toISOString();
   }
   if (source === "spotify") {
     // Don't overwrite now_playing for spotify catch-up

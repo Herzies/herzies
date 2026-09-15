@@ -533,10 +533,21 @@ export const RARITY_DROP_WEIGHTS: Record<Rarity, number> = {
 /** Items that can never appear as a random world drop, regardless of rarity. */
 export const NON_DROPPABLE_ITEM_IDS = ["first-edition", "spirit-orb"] as const;
 
+/** Listened minutes that earn one drop roll. Eligibility is a counter diff on
+ * total_minutes_listened, not a wall-clock timer — see processSync step 5. */
+export const DROP_TICK_MINUTES = 10;
+
 /** Chance a drop is rolled on each eligible listening tick (see DROP_TICK_MINUTES).
  * 1 = guaranteed — every 10-minute tick drops something, with which item
  * decided by ITEM_DROP_WEIGHT_OVERRIDES / RARITY_DROP_WEIGHTS below. */
 export const DROP_CHANCE_PER_TICK = 1;
+
+/** Ceiling on how many owed rolls a single sync may award. The desktop path
+ * never owes more than one (its minutes are capped per sync), but the Spotify
+ * cron passes uncapped catch-up minutes and could otherwise owe dozens at
+ * once. Anything above this carries over to the next sync rather than being
+ * written off — see the drop_rolls_done bookkeeping in processSync. */
+export const MAX_DROP_ROLLS_PER_SYNC = 20;
 
 /** Per-item drop-weight overrides, applied instead of RARITY_DROP_WEIGHTS when
  * present. CDs are earned purely by listening (not by any special rarity),
