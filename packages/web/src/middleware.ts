@@ -107,7 +107,17 @@ export const config = {
      * - _next/static (static files)
      * - _next/image (image optimization)
      * - favicon.ico, sitemap.xml, robots.txt
+     * - anything with a file extension, i.e. everything served out of public/
+     *
+     * That last one is load-bearing, not tidiness. Page routes fall through to
+     * the session refresh below, which builds a Supabase client and makes a
+     * network round trip to Auth. Without the extension exclusion, public/og.png
+     * (224 KB, referenced from every page's OG and Twitter card metadata) paid
+     * for that on every request — so every Slack/Discord unfurl, crawler and
+     * link preview billed a middleware invocation plus an Auth hop for a static
+     * image. No page route in this app contains a dot, so nothing that needs the
+     * refresh is excluded by it.
      */
-    "/((?!_next/static|_next/image|favicon\\.ico|sitemap\\.xml|robots\\.txt).*)",
+    "/((?!_next/static|_next/image|favicon\\.ico|sitemap\\.xml|robots\\.txt|.*\\.[^/]+$).*)",
   ],
 };
