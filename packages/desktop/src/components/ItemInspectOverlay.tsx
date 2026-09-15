@@ -43,7 +43,7 @@ export function ItemPreviewCard({
   return (
     <div
       className={cn(
-        "w-65 max-w-full border border-border bg-bg-panel p-4 text-center",
+        "w-65 max-w-full border border-border bg-bg-panel p-2 text-center shadow-xl shadow-black/50",
         className,
       )}
     >
@@ -65,7 +65,7 @@ export function ItemPreviewCard({
         {RARITY_LABELS[item.rarity]}
         {meta ? <> · {meta}</> : null}
       </div>
-      <div className="text-ui text-text-dim">{item.description}</div>
+      <div className="text-ui-sm text-text-dim">{item.description}</div>
       {set && (
         <div className="mt-2 border-t border-border pt-2 text-left text-ui-sm">
           <div className="font-bold text-text">

@@ -56,7 +56,12 @@ function SellControls({
   const clamped = Math.max(1, Math.min(sellAmount, maxQty));
 
   return (
-    <div className={cn("flex gap-1", stacked ? "flex-col" : "w-full items-stretch")}>
+    <div
+      className={cn(
+        "flex gap-1",
+        stacked ? "flex-col" : "w-full items-stretch",
+      )}
+    >
       {stackable && maxQty > 1 && (
         <div className="flex items-stretch gap-1">
           <NumberTicker
@@ -718,7 +723,9 @@ export function InventoryView({
     }
     const result = await onToggleEquip(itemId);
     if (result.ok) {
-      onLog?.(result.action === "equip" ? `Placed ${name}` : `Returned ${name}`);
+      onLog?.(
+        result.action === "equip" ? `Placed ${name}` : `Returned ${name}`,
+      );
     } else {
       // Put the card back only for a toggle that never left the client (see
       // ToggleEquipResult.sent): nothing changed anywhere, and no ownership
