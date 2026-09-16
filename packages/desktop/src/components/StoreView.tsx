@@ -1,4 +1,4 @@
-import type { Inventory, StoreProduct } from "@herzies/shared";
+import type { Equipped, Inventory, StoreProduct } from "@herzies/shared";
 import { getItem, ITEMS } from "@herzies/shared";
 import { useEffect, useRef, useState } from "react";
 import { cn, formatAmount, formatNok } from "../lib/utils";
@@ -20,11 +20,14 @@ const CURRENCY_PURCHASES_ENABLED = true;
 export function StoreView({
   inventory: cachedInventory,
   currency: cachedCurrency,
+  equipped,
   active = true,
   onLog,
 }: {
   inventory: Inventory | null;
   currency: number;
+  /** Current deck, used to show set progress in the item preview. */
+  equipped: Equipped;
   /** False while another tab is shown. */
   active?: boolean;
   onLog?: (msg: string) => void;
@@ -264,7 +267,7 @@ export function StoreView({
         <ItemInspectOverlay
           itemId={inspectItem}
           onClose={() => setInspectItem(null)}
-          inventory={inventory}
+          equipped={equipped}
           meta={
             inspectedAlreadyOwned ? "Owned" : <Coin amount={inspectedPrice} />
           }

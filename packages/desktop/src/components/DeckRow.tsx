@@ -63,6 +63,7 @@ function DeckGroup({
               slotNumber={i + 1}
               slotCount={group.count}
               inventory={inventory}
+              equipped={equipped}
               onUnequip={onUnequip}
             />
           );
@@ -127,6 +128,7 @@ function DeckSlot({
   slotNumber,
   slotCount,
   inventory,
+  equipped,
   onUnequip,
 }: {
   itemId: string | undefined;
@@ -134,6 +136,7 @@ function DeckSlot({
   slotNumber: number;
   slotCount: number;
   inventory: Inventory | null;
+  equipped: Equipped;
   onUnequip: (itemId: string) => void;
 }) {
   if (!itemId) {
@@ -184,7 +187,7 @@ function DeckSlot({
           itemId={itemId}
           meta={`x${inventory?.[itemId] ?? 0}`}
           box={100}
-          inventory={inventory}
+          equipped={equipped}
         />
       }
     >

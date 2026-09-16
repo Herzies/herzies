@@ -312,7 +312,7 @@ function ItemGridCell({
   isLastRow,
   isDragging,
   isDragOver,
-  inventory,
+  equipped,
   onPlace,
   onSellRequest,
   onDragPointerDown,
@@ -324,7 +324,7 @@ function ItemGridCell({
   isLastRow: boolean;
   isDragging: boolean;
   isDragOver: boolean;
-  inventory: Inventory | null;
+  equipped: Equipped;
   /** Takes this cell's own slot index, not just the item id: with several
    * identical cards on the grid it's the only thing that says *which* copy
    * was clicked — see handleEquip. */
@@ -346,7 +346,7 @@ function ItemGridCell({
           itemId={itemId}
           meta={def?.stackable ? `x${qty}` : undefined}
           box={100}
-          inventory={inventory}
+          equipped={equipped}
         />
       }
     >
@@ -967,7 +967,7 @@ export function InventoryView({
                   isLastRow={isLastRow}
                   isDragging={dragVisual?.index === i}
                   isDragOver={dragVisual?.overIndex === i}
-                  inventory={inventory}
+                  equipped={equipped}
                   onPlace={handleGridClick}
                   onSellRequest={(id, slotIndex, x, y) =>
                     setSellMenu({ itemId: id, slotIndex, x, y })
@@ -984,7 +984,7 @@ export function InventoryView({
         <ItemInspectOverlay
           itemId={inspectItem}
           onClose={() => setInspectItem(null)}
-          inventory={inventory}
+          equipped={equipped}
           meta={inspectedMeta || undefined}
           footer={
             <>

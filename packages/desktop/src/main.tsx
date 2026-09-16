@@ -705,7 +705,7 @@ function App() {
           <EventsView
             eventsTabVisible={view === "events"}
             debugForceActive={hasActiveEventOverride}
-            inventory={state.inventory}
+            equipped={state.equipped}
           />
         </div>
 
@@ -745,6 +745,7 @@ function App() {
           <StoreView
             inventory={state.inventory}
             currency={state.inventoryCurrency}
+            equipped={state.equipped}
             active={view === "store"}
             onLog={addLog}
           />

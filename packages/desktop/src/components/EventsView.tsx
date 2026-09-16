@@ -1,4 +1,4 @@
-import type { GameEvent, Inventory } from "@herzies/shared";
+import type { Equipped, GameEvent } from "@herzies/shared";
 import { getItem, RARITY_COLORS as ITEM_RARITY_COLORS } from "@herzies/shared";
 import { useEffect, useRef, useState } from "react";
 import { herzies, useWindowFocused } from "../tauri-bridge";
@@ -63,14 +63,14 @@ const EVENTS_POLL_MS = 10_000;
 export function EventsView({
   eventsTabVisible,
   debugForceActive = false,
-  inventory,
+  equipped,
 }: {
   /** Tab stays mounted but hidden; only poll while user is on Events. */
   eventsTabVisible: boolean;
   /** Debug: render the previous hunt as if it were live, to preview the active-event UI. */
   debugForceActive?: boolean;
-  /** Owned quantities, used to show set-completion progress in the reward preview. */
-  inventory?: Inventory | null;
+  /** Current deck, used to show set progress in the reward preview. */
+  equipped?: Equipped | null;
 }) {
   const [events, setEvents] = useState<GameEvent[]>([]);
   const [previousHunt, setPreviousHunt] = useState<GameEvent | null>(null);
@@ -299,7 +299,7 @@ export function EventsView({
           <ItemInspectOverlay
             itemId={previousHuntConfig.rewardItemId}
             onClose={() => setInspectOverlay(null)}
-            inventory={inventory}
+            equipped={equipped}
           />
         )}
       </View>
@@ -462,7 +462,7 @@ export function EventsView({
         <ItemInspectOverlay
           itemId={config.rewardItemId}
           onClose={() => setInspectOverlay(null)}
-          inventory={inventory}
+          equipped={equipped}
         />
       )}
       {/* biome-ignore lint/a11y/useMediaCaption: short game hint clips, no source track */}
