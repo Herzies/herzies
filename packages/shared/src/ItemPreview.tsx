@@ -55,8 +55,7 @@ export function ItemPreview({
     () => parseAsciiFrames(item.frames),
     [item.frames],
   );
-  const staticFrame =
-    frame === "front" ? widestFrameIndex(cellFrames) : frame;
+  const staticFrame = frame === "front" ? widestFrameIndex(cellFrames) : frame;
   const [frameIdx, setFrameIdx] = useState(staticFrame ?? 0);
   const bounds = useMemo(() => contentBounds(cellFrames), [cellFrames]);
   const metrics = useMemo(() => fitMetrics(bounds, box), [bounds, box]);
@@ -66,7 +65,12 @@ export function ItemPreview({
   }, [staticFrame]);
 
   useEffect(() => {
-    if (staticFrame !== undefined || paused || !animate || cellFrames.length <= 1)
+    if (
+      staticFrame !== undefined ||
+      paused ||
+      !animate ||
+      cellFrames.length <= 1
+    )
       return;
     const id = setInterval(
       () => setFrameIdx((f) => (f + 1) % cellFrames.length),

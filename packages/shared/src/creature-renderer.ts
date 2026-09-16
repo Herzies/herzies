@@ -1299,8 +1299,7 @@ function spiritOrbitAngle(t: number): number {
   if (t < SPIRIT_ORBIT_START) return 0;
   const spinT = (t - SPIRIT_ORBIT_START) / (1 - SPIRIT_ORBIT_START);
   // Ease in/out so the lap doesn't snap to/from a standstill.
-  const eased =
-    spinT < 0.5 ? 2 * spinT * spinT : 1 - (-2 * spinT + 2) ** 2 / 2;
+  const eased = spinT < 0.5 ? 2 * spinT * spinT : 1 - (-2 * spinT + 2) ** 2 / 2;
   return eased * Math.PI * 2;
 }
 

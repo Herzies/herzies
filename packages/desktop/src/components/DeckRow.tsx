@@ -7,12 +7,12 @@ import {
   ITEM_TYPE_LABELS,
   type ItemType,
 } from "@herzies/shared";
+import { ItemPreviewCard } from "./ItemInspectOverlay";
 import {
   CARD_SHAPE_CLIP,
   GenericTypeIcon,
   ItemTypeIcon,
 } from "./icons/ItemTypeIcon";
-import { ItemPreviewCard } from "./ItemInspectOverlay";
 import { HoverPreview, Tooltip } from "./Tooltip";
 
 const groupByLabel = (label: string): DeckSlotGroup => {

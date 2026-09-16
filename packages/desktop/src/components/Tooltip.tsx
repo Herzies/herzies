@@ -77,7 +77,8 @@ export function Tooltip({
   };
 
   const bubbleStyle = (x: number, y: number): React.CSSProperties => {
-    const fitsRight = x + CURSOR_GAP_X + EST_WIDTH <= window.innerWidth - EDGE_PADDING;
+    const fitsRight =
+      x + CURSOR_GAP_X + EST_WIDTH <= window.innerWidth - EDGE_PADDING;
     const fitsAbove = y - CURSOR_GAP_Y - EST_HEIGHT >= EDGE_PADDING;
     return {
       left: fitsRight ? x + CURSOR_GAP_X : x - CURSOR_GAP_X,
@@ -174,7 +175,10 @@ export function HoverPreview({
       {children}
       {visible &&
         createPortal(
-          <div className="pointer-events-none fixed z-100" style={bubbleStyle()}>
+          <div
+            className="pointer-events-none fixed z-100"
+            style={bubbleStyle()}
+          >
             {content}
           </div>,
           document.body,

@@ -29,19 +29,15 @@
  * is the intended alarm.
  */
 
-// Core domain types (Herzie, Stage, drops, events, friend/trade requests).
-export * from "./types.ts";
-
-// XP curve, levelling, stage thresholds, multiplier application.
-export * from "./leveling.ts";
-
-// Genre vocabulary and classification of raw provider tags.
-export * from "./genres.ts";
-
 // Daily craving selection and matching.
 export * from "./craving.ts";
-
+// Genre vocabulary and classification of raw provider tags.
+export * from "./genres.ts";
 // Item catalog, rarity and drop weighting, equip slots, bank capacity.
 // Note this is the whole catalog, which is what lets filterDroppablePool use
 // the real getItem() instead of the hand-maintained id list it used before.
 export * from "./items.ts";
+// XP curve, levelling, stage thresholds, multiplier application.
+export * from "./leveling.ts";
+// Core domain types (Herzie, Stage, drops, events, friend/trade requests).
+export * from "./types.ts";

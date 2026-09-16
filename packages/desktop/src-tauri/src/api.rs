@@ -426,8 +426,7 @@ pub async fn api_spawn_debug_drop(client: &Client) -> Result<PendingDrop, String
         let msg = data["error"].as_str().unwrap_or("Unknown error");
         return Err(msg.to_string());
     }
-    serde_json::from_value(data["spawned"].clone())
-        .map_err(|e| format!("Malformed response: {e}"))
+    serde_json::from_value(data["spawned"].clone()).map_err(|e| format!("Malformed response: {e}"))
 }
 
 pub async fn api_get_me(client: &Client) -> Option<Herzie> {
