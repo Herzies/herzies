@@ -11,12 +11,72 @@ use tokio::sync::Mutex;
 /// invalidate the entire refresh chain and silently log the user out).
 static REFRESH_LOCK: Mutex<()> = Mutex::const_new(());
 
-/// True if a refresh response status means the refresh token itself is dead
-/// (vs. a transient failure we should retry on the next tick). 429/5xx/etc.
-/// must NOT clear the session — they're commonly returned by rate limiters
-/// and Vercel cold starts.
-fn is_refresh_fatal(status: StatusCode) -> bool {
-    status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN
+/// True if a refresh response means the refresh token itself is dead (vs. a
+/// transient failure we should retry on the next tick). 429/5xx/etc. must NOT
+/// clear the session — they're commonly returned by rate limiters and by cold
+/// starts.
+///
+/// We talk to Supabase's GoTrue token endpoint directly (see `refresh_locked`),
+/// and it reports a dead refresh token as **400**, not 401 — so status alone
+/// can't classify the failure. Treating every 400 as transient would leave a
+/// genuinely expired session retrying forever instead of falling through to the
+/// login screen; treating every 400 as fatal would log users out over a
+/// malformed request of our own. So we match the body.
+///
+/// Probed against this project's GoTrue (2026-09-12): an unknown token, an empty
+/// token, and a missing `refresh_token` field all return exactly
+/// `{"code":400,"error_code":"validation_failed","msg":"Refresh token is not
+/// valid"}`. The `error_code` therefore carries no signal — the `msg` is the
+/// discriminator. `refresh_locked` never sends an empty token (it returns early
+/// on one), so that message reaching us means the token we hold is dead.
+///
+/// The `invalid_grant` / `refresh_token_*` arms cover the shapes other GoTrue
+/// versions use, so a Supabase upgrade can't silently turn a dead session into
+/// an infinite retry. 401/403 stay fatal because the old Vercel passthrough
+/// reported a dead token that way — with one carve-out, below.
+fn is_refresh_fatal(status: StatusCode, body: &serde_json::Value) -> bool {
+    if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
+        // Calling GoTrue directly means the request now carries our baked-in
+        // anon key (see `supabase_anon_key`), and Supabase's API gateway
+        // rejects a bad/rotated one with 401 before GoTrue ever sees the grant:
+        // `{"message":"Invalid API key",...}` / `{"message":"No API key found
+        // in request",...}` (probed 2026-09-12). That says nothing about the
+        // user's refresh token, so clearing the session over it would brick
+        // every shipped client on a key rotation — permanently, since
+        // `clear_session` destroys the token that could have retried once the
+        // key was fixed. Treat it as transient and let the user retry or
+        // auto-update instead.
+        let gateway_key_error = body["message"]
+            .as_str()
+            .map(|m| m.to_ascii_lowercase().contains("api key"))
+            .unwrap_or(false);
+        if gateway_key_error {
+            return false;
+        }
+        return true;
+    }
+    if status != StatusCode::BAD_REQUEST {
+        // 429 from a rate limiter, 5xx from a cold start — the token is fine.
+        return false;
+    }
+    // Older GoTrue: {"error":"invalid_grant","error_description":...}
+    if body["error"].as_str() == Some("invalid_grant") {
+        return true;
+    }
+    // Some versions name the token in the code itself.
+    if let Some(code) = body["error_code"].as_str() {
+        if code.starts_with("refresh_token") {
+            return true;
+        }
+    }
+    // This project's version: generic `validation_failed`, with the only real
+    // signal in the human-readable message.
+    let mentions_refresh_token = |v: &serde_json::Value| {
+        v.as_str()
+            .map(|s| s.to_ascii_lowercase().contains("refresh token"))
+            .unwrap_or(false)
+    };
+    mentions_refresh_token(&body["msg"]) || mentions_refresh_token(&body["error_description"])
 }
 
 fn api_base() -> String {
@@ -45,6 +105,18 @@ fn supabase_anon_key() -> String {
 fn functions_base() -> String {
     std::env::var("HERZIES_FUNCTIONS_URL")
         .unwrap_or_else(|_| format!("{}/functions/v1", supabase_url()))
+}
+
+/// Supabase's GoTrue token endpoint — refreshes a session without a Vercel hop.
+///
+/// The Next.js `/api/auth/refresh` route this replaces was a pure passthrough to
+/// `supabase.auth.refreshSession()`; its stated reason for existing ("so the CLI
+/// doesn't need the anon key") never applied to this client, which has always
+/// shipped the anon key (see `supabase_anon_key`). Going direct removes a
+/// serverless cold start and a shared-per-IP rate-limit bucket from in front of
+/// the one call whose failure logs the user out.
+fn refresh_url() -> String {
+    format!("{}/auth/v1/token?grant_type=refresh_token", supabase_url())
 }
 
 fn now_ms() -> u64 {
@@ -131,34 +203,54 @@ async fn refresh_locked(client: &Client, force: bool) {
         return;
     }
 
+    let anon = supabase_anon_key();
     let res = client
-        .post(format!("{}/auth/refresh", api_base()))
-        .json(&serde_json::json!({ "refreshToken": session.refresh_token }))
+        .post(refresh_url())
+        // GoTrue is behind the Supabase API gateway, which routes on `apikey`.
+        // The anon key is also sent as the bearer because that's what an
+        // unauthenticated token-endpoint call is expected to carry — the
+        // refresh token in the body is what actually authorizes the exchange.
+        .header("apikey", &anon)
+        .bearer_auth(&anon)
+        .json(&serde_json::json!({ "refresh_token": session.refresh_token }))
         .send()
         .await;
 
     match res {
-        Ok(resp) if resp.status().is_success() => {
+        Ok(resp) => {
+            // Any HTTP response proves we reached Supabase.
             mark_reachable();
-            if let Ok(data) = resp.json::<serde_json::Value>().await {
-                let access_token = data["accessToken"].as_str().unwrap_or_default().to_string();
-                let refresh_token = data["refreshToken"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .to_string();
-                let expires_in = data["expiresIn"].as_u64().unwrap_or(3600);
+            let status = resp.status();
+            let body: serde_json::Value = resp
+                .text()
+                .await
+                .ok()
+                .and_then(|t| serde_json::from_str(&t).ok())
+                .unwrap_or(serde_json::Value::Null);
+
+            if status.is_success() {
+                // GoTrue responds in snake_case (the Vercel passthrough this
+                // replaced re-cased these to camelCase).
+                let access_token = body["access_token"].as_str().unwrap_or_default();
+                let refresh_token = body["refresh_token"].as_str().unwrap_or_default();
+                if access_token.is_empty() || refresh_token.is_empty() {
+                    // A 2xx we can't parse is not a dead token — keep the
+                    // session and retry rather than persisting an empty one,
+                    // which would wedge every subsequent request.
+                    log::warn!(
+                        "Token refresh returned {} with no tokens, will retry",
+                        status
+                    );
+                    return;
+                }
+                let expires_in = body["expires_in"].as_u64().unwrap_or(3600);
                 storage::save_session(&SessionData {
-                    access_token,
-                    refresh_token,
+                    access_token: access_token.to_string(),
+                    refresh_token: refresh_token.to_string(),
                     expires_at: now_ms() + expires_in * 1000,
                     user_id: session.user_id,
                 });
-            }
-        }
-        Ok(resp) => {
-            mark_reachable();
-            let status = resp.status();
-            if is_refresh_fatal(status) {
+            } else if is_refresh_fatal(status, &body) {
                 log::warn!("Refresh token rejected ({}), clearing session", status);
                 storage::clear_session();
             } else {
@@ -279,6 +371,62 @@ pub async fn api_sync(
         return None;
     }
     resp.json().await.ok()
+}
+
+/// Manually collects one specific pending world drop (by id) into the
+/// caller's inventory. Returns `Ok(Some((item_id, name)))` if it was
+/// collected, `Ok(None)` if that drop no longer exists (already collected,
+/// e.g. by a racing Spirit Orb auto-collect — not an error), `Err` on
+/// network/server failure.
+pub async fn api_collect_drop(
+    client: &Client,
+    drop_id: &str,
+) -> Result<Option<(String, String)>, String> {
+    // New functionality, not a port — lives only as an Edge Function (see
+    // supabase/functions/collect-drop), same functions_base()/anon-key
+    // pattern as api_sync.
+    let url = format!("{}/collect-drop", functions_base());
+    let anon = supabase_anon_key();
+    let body = serde_json::json!({ "dropId": drop_id });
+    let resp = api_fetch_full(client, reqwest::Method::POST, &url, Some(body), Some(&anon))
+        .await
+        .ok_or_else(|| "Network error".to_string())?;
+    let status = resp.status();
+    let text = resp.text().await.map_err(|e| format!("Read error: {e}"))?;
+    let data: serde_json::Value =
+        serde_json::from_str(&text).map_err(|_| format!("Server returned {status}"))?;
+    if !status.is_success() {
+        let msg = data["error"].as_str().unwrap_or("Unknown error");
+        return Err(msg.to_string());
+    }
+    let item_id = data["collected"]["itemId"].as_str().map(|s| s.to_string());
+    let name = data["collected"]["name"].as_str().map(|s| s.to_string());
+    Ok(item_id.map(|id| {
+        let name = name.unwrap_or_else(|| id.clone());
+        (id, name)
+    }))
+}
+
+/// Dev-only: spawns a real, pickup-able world drop for the "Spawn Item Drop"
+/// debug button in Settings (see supabase/functions/debug-spawn-drop — that
+/// endpoint is further restricted server-side to the developer's own
+/// account, since a client-side dev gate alone wouldn't stop any other
+/// player from calling it directly).
+pub async fn api_spawn_debug_drop(client: &Client) -> Result<PendingDrop, String> {
+    let url = format!("{}/debug-spawn-drop", functions_base());
+    let anon = supabase_anon_key();
+    let resp = api_fetch_full(client, reqwest::Method::POST, &url, None, Some(&anon))
+        .await
+        .ok_or_else(|| "Network error".to_string())?;
+    let status = resp.status();
+    let text = resp.text().await.map_err(|e| format!("Read error: {e}"))?;
+    let data: serde_json::Value =
+        serde_json::from_str(&text).map_err(|_| format!("Server returned {status}"))?;
+    if !status.is_success() {
+        let msg = data["error"].as_str().unwrap_or("Unknown error");
+        return Err(msg.to_string());
+    }
+    serde_json::from_value(data["spawned"].clone()).map_err(|e| format!("Malformed response: {e}"))
 }
 
 pub async fn api_get_me(client: &Client) -> Option<Herzie> {
@@ -685,7 +833,12 @@ pub async fn api_fetch_artist_image(client: &Client, artist: &str) -> Option<Str
 }
 
 pub async fn api_fetch_active_events(client: &Client) -> Option<Vec<GameEvent>> {
-    let resp = api_fetch(client, reqwest::Method::GET, "/events/active", None).await?;
+    // Ported to a Supabase Edge Function (co-located with Postgres, off
+    // Vercel), like /sync and /chat: it's polled every 30s regardless of
+    // window visibility, so it was a steady source of Vercel invocations.
+    let url = format!("{}/events-active", functions_base());
+    let anon = supabase_anon_key();
+    let resp = api_fetch_full(client, reqwest::Method::GET, &url, None, Some(&anon)).await?;
     if !resp.status().is_success() {
         return None;
     }
@@ -743,8 +896,15 @@ pub async fn api_fetch_previous_hunt(
 
 /// GET /trade/pending — lightweight check for an incoming trade invite.
 /// Outer `None` = request failed; inner `None` = no pending invite.
+///
+/// Ported to a Supabase Edge Function (co-located with Postgres, off
+/// Vercel), like /sync and /chat: trade_watch_loop hits this every 5s
+/// whenever the window is hidden, so it was the single largest source of
+/// Vercel invocations.
 pub async fn api_check_pending_trade(client: &Client) -> Option<Option<PendingTradeRequest>> {
-    let resp = api_fetch(client, reqwest::Method::GET, "/trade/pending", None).await?;
+    let url = format!("{}/trade-pending", functions_base());
+    let anon = supabase_anon_key();
+    let resp = api_fetch_full(client, reqwest::Method::GET, &url, None, Some(&anon)).await?;
     if !resp.status().is_success() {
         return None;
     }
@@ -824,21 +984,103 @@ mod tests {
         assert!(ms_since_reachable() < 1_000);
     }
 
+    /// Stand-in for a response body we didn't get or couldn't parse.
+    const NO_BODY: serde_json::Value = serde_json::Value::Null;
+
     #[test]
-    fn refresh_fatal_only_for_401_403() {
+    fn refresh_fatal_for_hard_auth_failures() {
         // Hard auth failures — refresh token is dead, clear the session.
-        assert!(is_refresh_fatal(StatusCode::UNAUTHORIZED));
-        assert!(is_refresh_fatal(StatusCode::FORBIDDEN));
+        assert!(is_refresh_fatal(StatusCode::UNAUTHORIZED, &NO_BODY));
+        assert!(is_refresh_fatal(StatusCode::FORBIDDEN, &NO_BODY));
 
         // Transient failures — must NOT clear the session. These were the
         // cause of the <2h logout bug: the middleware rate limiter returns
-        // 429 when concurrent refresh attempts pile up, and Vercel cold
+        // 429 when concurrent refresh attempts pile up, and serverless cold
         // starts return 5xx.
-        assert!(!is_refresh_fatal(StatusCode::TOO_MANY_REQUESTS));
-        assert!(!is_refresh_fatal(StatusCode::INTERNAL_SERVER_ERROR));
-        assert!(!is_refresh_fatal(StatusCode::BAD_GATEWAY));
-        assert!(!is_refresh_fatal(StatusCode::SERVICE_UNAVAILABLE));
-        assert!(!is_refresh_fatal(StatusCode::GATEWAY_TIMEOUT));
+        assert!(!is_refresh_fatal(StatusCode::TOO_MANY_REQUESTS, &NO_BODY));
+        assert!(!is_refresh_fatal(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &NO_BODY
+        ));
+        assert!(!is_refresh_fatal(StatusCode::BAD_GATEWAY, &NO_BODY));
+        assert!(!is_refresh_fatal(StatusCode::SERVICE_UNAVAILABLE, &NO_BODY));
+        assert!(!is_refresh_fatal(StatusCode::GATEWAY_TIMEOUT, &NO_BODY));
+    }
+
+    // GoTrue (which we now call directly instead of going through Vercel)
+    // reports a dead refresh token as 400, not 401. If this regressed, an
+    // expired session would retry forever instead of falling through to the
+    // login screen.
+    #[test]
+    fn refresh_fatal_for_this_projects_gotrue_400() {
+        // Verbatim body observed from this project's GoTrue for an unknown
+        // refresh token (probed 2026-09-12). Note `error_code` is the generic
+        // `validation_failed` — the message is the only discriminator.
+        let observed = serde_json::json!({
+            "code": 400,
+            "error_code": "validation_failed",
+            "msg": "Refresh token is not valid",
+        });
+        assert!(is_refresh_fatal(StatusCode::BAD_REQUEST, &observed));
+    }
+
+    #[test]
+    fn refresh_fatal_for_other_gotrue_versions_400() {
+        let invalid_grant = serde_json::json!({
+            "error": "invalid_grant",
+            "error_description": "Invalid Refresh Token: Refresh Token Not Found",
+        });
+        assert!(is_refresh_fatal(StatusCode::BAD_REQUEST, &invalid_grant));
+
+        for code in ["refresh_token_not_found", "refresh_token_already_used"] {
+            let named = serde_json::json!({ "code": 400, "error_code": code });
+            assert!(
+                is_refresh_fatal(StatusCode::BAD_REQUEST, &named),
+                "{code} should be fatal"
+            );
+        }
+    }
+
+    // A rotated/bad anon key is rejected by Supabase's API gateway with 401
+    // before GoTrue sees the grant. Clearing the session there would brick every
+    // shipped client permanently, since the refresh token it destroys is the
+    // only thing that could retry once the key is fixed.
+    #[test]
+    fn refresh_not_fatal_for_gateway_api_key_rejection() {
+        // Verbatim bodies observed from the gateway (probed 2026-09-12).
+        for message in ["Invalid API key", "No API key found in request"] {
+            let body = serde_json::json!({
+                "message": message,
+                "hint": "Double check your Supabase `anon` or `service_role` API key.",
+            });
+            assert!(
+                !is_refresh_fatal(StatusCode::UNAUTHORIZED, &body),
+                "{message} must not clear the session"
+            );
+        }
+    }
+
+    #[test]
+    fn refresh_still_fatal_for_401_from_the_legacy_vercel_route() {
+        // Older builds point at /api/auth/refresh, which reports a dead refresh
+        // token as a bare 401 — that must keep clearing the session.
+        let legacy = serde_json::json!({ "error": "Failed to refresh token" });
+        assert!(is_refresh_fatal(StatusCode::UNAUTHORIZED, &legacy));
+        assert!(is_refresh_fatal(StatusCode::UNAUTHORIZED, &NO_BODY));
+    }
+
+    #[test]
+    fn refresh_not_fatal_for_400_unrelated_to_the_token() {
+        // A 400 about something other than the refresh token is our bug, not a
+        // dead session — retrying is right, logging the user out is not.
+        let other = serde_json::json!({
+            "code": 400,
+            "error_code": "validation_failed",
+            "msg": "Unsupported grant_type",
+        });
+        assert!(!is_refresh_fatal(StatusCode::BAD_REQUEST, &other));
+        // A 400 we can't parse at all also stays non-fatal.
+        assert!(!is_refresh_fatal(StatusCode::BAD_REQUEST, &NO_BODY));
     }
 
     #[test]

@@ -417,10 +417,20 @@ async fn fetch_inventory(
         return Ok(None);
     }
     let client = Client::new();
+    let epoch_before = { state.lock().unwrap().equip_epoch };
     match api::api_fetch_inventory(&client).await {
         Some((inventory, currency, equipped)) => {
             let mut s = state.lock().unwrap();
-            apply_inventory(&mut s, inventory.clone(), currency, equipped.clone());
+            apply_inventory(
+                &mut s,
+                inventory.clone(),
+                currency,
+                equipped.clone(),
+                Some(epoch_before),
+            );
+            // Hand back whatever `equipped` actually won, so a caller that
+            // raced an equip doesn't render the stale snapshot we just skipped.
+            let equipped = s.equipped.clone();
             drop(s);
             emit_state_update(&app);
             Ok(Some(InventoryResult {
@@ -454,7 +464,10 @@ async fn sell_item(
                 std::collections::HashMap<String, serde_json::Value>,
             >(data["equipped"].clone())
             .unwrap_or_else(|_| s.equipped.clone());
-            apply_inventory(&mut s, inventory, currency, equipped);
+            apply_inventory(&mut s, inventory, currency, equipped, None);
+            // Selling can unequip server-side, so this is a local `equipped`
+            // mutation — any `/inventory` fetch in flight must not undo it.
+            s.bump_equip_epoch();
             changed = true;
         } else if let Some(new_currency) = data["newCurrency"].as_u64() {
             s.inventory_currency = new_currency as u32;
@@ -494,6 +507,9 @@ async fn equip_item(
     {
         let mut s = state.lock().unwrap();
         s.equipped = equipped;
+        // Any `/inventory` fetch already in flight was issued before this
+        // change and would otherwise clobber it back — see apply_inventory.
+        s.bump_equip_epoch();
         storage::save_equipped(&s.equipped);
         drop(s);
         emit_state_update(&app);
@@ -516,7 +532,7 @@ async fn buy_item(
     if let Ok(inventory) = serde_json::from_value::<Inventory>(data["inventory"].clone()) {
         let currency = data["newCurrency"].as_u64().unwrap_or(0) as u32;
         let equipped = s.equipped.clone();
-        apply_inventory(&mut s, inventory, currency, equipped);
+        apply_inventory(&mut s, inventory, currency, equipped, None);
         changed = true;
     }
     if let Some(ref mut herzie) = s.herzie {
@@ -531,6 +547,113 @@ async fn buy_item(
         emit_state_update(&app);
     }
     Ok(data)
+}
+
+#[tauri::command]
+async fn collect_drop(
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+    drop_id: String,
+) -> Result<bool, String> {
+    let client = Client::new();
+
+    // Optimistic: remove the drop and credit the item to inventory locally
+    // right away, before the round trip even starts, so the card
+    // disappears and the count bumps instantly instead of after a couple
+    // hundred ms of network latency. Reverted below if the server says
+    // otherwise — already gone (e.g. a racing Spirit Orb auto-collect) or
+    // a request failure.
+    let removed_drop = {
+        let mut s = state.lock().unwrap();
+        let removed = s
+            .pending_drops
+            .iter()
+            .position(|d| d.id == drop_id)
+            .map(|i| s.pending_drops.remove(i));
+        if let Some(ref drop) = removed {
+            if let Some(inv) = s.inventory.as_mut() {
+                *inv.entry(drop.item_id.clone()).or_insert(0) += 1;
+            }
+            s.bump_drop_epoch();
+            s.bump_inventory_epoch();
+        }
+        removed
+    };
+    if removed_drop.is_some() {
+        emit_state_update(&app);
+    }
+
+    let result = api::api_collect_drop(&client, &drop_id).await;
+
+    match result {
+        Ok(Some((_item_id, name))) => {
+            // Log as soon as the collect is confirmed. This used to sit behind
+            // the reconcile below, so the "You received" line waited on two
+            // sequential round trips — the second to Vercel `/api/inventory` —
+            // and lagged visibly behind the item vanishing from the ground.
+            //
+            // Same "You received: Nx <name>" convention as server-driven
+            // item_granted notifications (see game-server.ts) — this path has
+            // no SyncResponse to ride along on, so log it directly.
+            let _ = app.emit("activity", format!("You received: 1x {name}"));
+
+            // No /inventory re-fetch here. `collect_pending_drop` does exactly
+            // one thing — delete the drop row and credit inventory_v2 by one —
+            // which the optimistic update above already mirrors exactly, so a
+            // refresh could only confirm what we know. Picking up several drops
+            // in quick succession used to fire one slow Vercel request each.
+            // /sync carries the authoritative inventory within a few seconds
+            // regardless, which covers any genuine drift.
+            Ok(true)
+        }
+        Ok(None) => {
+            if let Some(drop) = removed_drop {
+                revert_optimistic_collect(&state, drop);
+                emit_state_update(&app);
+            }
+            Ok(false)
+        }
+        Err(e) => {
+            if let Some(drop) = removed_drop {
+                revert_optimistic_collect(&state, drop);
+                emit_state_update(&app);
+            }
+            Err(e)
+        }
+    }
+}
+
+/// Undoes the optimistic local removal/inventory-credit in `collect_drop`
+/// once the server reports the collect didn't actually happen.
+fn revert_optimistic_collect(state: &tauri::State<'_, SharedState>, drop: PendingDrop) {
+    let mut s = state.lock().unwrap();
+    if let Some(inv) = s.inventory.as_mut() {
+        if let Some(qty) = inv.get_mut(&drop.item_id) {
+            *qty = qty.saturating_sub(1);
+        }
+    }
+    s.pending_drops.push(drop);
+    s.bump_drop_epoch();
+    s.bump_inventory_epoch();
+}
+
+/// Dev-only: powers the "Spawn Item Drop" debug button in Settings. Adds the
+/// server-spawned drop straight into local state so it appears on the ground
+/// immediately, instead of waiting for the next sync tick to pick it up.
+#[tauri::command]
+async fn spawn_debug_drop(
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<(), String> {
+    let client = Client::new();
+    let drop = api::api_spawn_debug_drop(&client).await?;
+    {
+        let mut s = state.lock().unwrap();
+        s.pending_drops.push(drop);
+        s.bump_drop_epoch();
+    }
+    emit_state_update(&app);
+    Ok(())
 }
 
 #[tauri::command]
@@ -568,9 +691,10 @@ async fn start_purchase(
             Ok(true)
         }
         None => {
+            let epoch_before = { state.lock().unwrap().equip_epoch };
             if let Some((inventory, currency, equipped)) = api::api_fetch_inventory(&client).await {
                 let mut s = state.lock().unwrap();
-                apply_inventory(&mut s, inventory, currency, equipped);
+                apply_inventory(&mut s, inventory, currency, equipped, Some(epoch_before));
                 drop(s);
                 emit_state_update(&app);
             }
@@ -785,6 +909,44 @@ fn chat_ingest(
     Ok(())
 }
 
+/// Ingest a trade request that arrived over the Realtime broadcast channel.
+///
+/// Counterpart to `chat_ingest`, and the push half of what `trade_watch_loop`
+/// used to poll for every 5s. The DB trigger
+/// (00058_trade_request_broadcast.sql) sends the initiator's name and friend
+/// code with the payload, so this needs no round-trip to render.
+///
+/// Safe to race with the fallback poll and with `sync_tick`: whichever arrives
+/// first sets the same state, and `notify_pending_trade` dedupes on trade id so
+/// only one notification fires.
+#[tauri::command]
+fn trade_request_ingest(
+    request: PendingTradeRequest,
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<(), String> {
+    {
+        let mut s = state.lock().unwrap();
+        if s.herzie.is_none() {
+            return Ok(());
+        }
+        // Don't clobber a trade the user is already dealing with.
+        if s.pending_trade_request
+            .as_ref()
+            .is_some_and(|p| p.trade_id == request.trade_id)
+        {
+            return Ok(());
+        }
+        s.pending_trade_request = Some(request.clone());
+        let app_state = s.to_app_state(env!("CARGO_PKG_VERSION"));
+        drop(s);
+        let _ = app.emit("state-update", &app_state);
+    }
+
+    notify_pending_trade(&app, Some(&request));
+    Ok(())
+}
+
 // --- Helper types for command results ---
 
 #[derive(serde::Serialize)]
@@ -820,32 +982,38 @@ fn emit_state_update(app: &AppHandle) {
     let _ = app.emit("state-update", &app_state);
 }
 
+/// Apply an inventory payload to shared state.
+///
+/// `equip_epoch_before` distinguishes the two kinds of caller:
+///
+/// - `Some(epoch)` — the `equipped` came from a *snapshot* read (`/inventory`),
+///   and `epoch` is the value captured before the network call. If it has moved
+///   since, an equip/unequip landed while the fetch was in flight, so the
+///   snapshot predates it and its `equipped` is skipped; applying it would undo
+///   the change and make the item visibly pop back off in the UI.
+/// - `None` — the `equipped` came from a *mutation* response (or is the current
+///   in-memory value), so it is at least as new as anything local and always
+///   applies.
+///
+/// `inventory`/`currency` are applied either way — they have their own writers
+/// and aren't what this guards.
 fn apply_inventory(
     s: &mut ManagedState,
     inventory: Inventory,
     currency: u32,
     equipped: std::collections::HashMap<String, serde_json::Value>,
+    equip_epoch_before: Option<u64>,
 ) {
     s.inventory = Some(inventory.clone());
     s.inventory_currency = currency;
-    s.equipped = equipped;
+    // Any `/sync` already in flight predates this and must not reinstate the
+    // old contents — see `inventory_epoch` and sync_tick.
+    s.bump_inventory_epoch();
     storage::save_inventory_cache(&inventory, currency);
-    storage::save_equipped(&s.equipped);
-}
-
-fn notifications_include_item_grants(notifications: &[EventNotification]) -> bool {
-    notifications
-        .iter()
-        .any(|n| n.notification_type == "item_granted")
-}
-
-async fn refresh_inventory_cache(app: &AppHandle, client: &Client) {
-    if let Some((inventory, currency, equipped)) = api::api_fetch_inventory(client).await {
-        let shared = app.state::<SharedState>();
-        let mut s = shared.lock().unwrap();
-        apply_inventory(&mut s, inventory, currency, equipped);
-        drop(s);
-        emit_state_update(app);
+    let equipped_is_current = equip_epoch_before.is_none_or(|before| s.equip_epoch == before);
+    if equipped_is_current {
+        s.equipped = equipped;
+        storage::save_equipped(&s.equipped);
     }
 }
 
@@ -902,6 +1070,8 @@ async fn refresh_app_cache(app: &AppHandle, client: &Client) {
         }
     };
 
+    let equip_epoch_before = { shared.lock().unwrap().equip_epoch };
+
     let (inv_result, chat_result, friends_result) = tokio::join!(
         api::api_fetch_inventory(client),
         api::api_chat_fetch(client),
@@ -912,7 +1082,13 @@ async fn refresh_app_cache(app: &AppHandle, client: &Client) {
     {
         let mut s = shared.lock().unwrap();
         if let Some((inventory, currency, equipped)) = inv_result {
-            apply_inventory(&mut s, inventory, currency, equipped);
+            apply_inventory(
+                &mut s,
+                inventory,
+                currency,
+                equipped,
+                Some(equip_epoch_before),
+            );
             changed = true;
         }
         if let Some(chat) = chat_result {
@@ -1446,16 +1622,38 @@ fn notify_pending_trade(app: &AppHandle, pending: Option<&PendingTradeRequest>) 
     }
 }
 
-/// Lightweight poll for incoming trade invites. When the window is hidden the
-/// full /sync only runs every 60s, which made trade requests feel slow — this
-/// hits the cheap /trade/pending endpoint every 5s instead so the invite
-/// notification arrives quickly. While visible, sync_loop already covers the
-/// same data at a 5s cadence, so this loop skips its request.
+/// How often the backup trade poll runs while the window is hidden.
+///
+/// DELIBERATELY STILL 5s, and this is the single biggest remaining cost lever
+/// in the app — see the note below before changing it.
+///
+/// Trade invites now also arrive over a Realtime broadcast
+/// (00058_trade_request_broadcast.sql -> useTradeRequests -> trade_request_ingest),
+/// which is what makes them instant instead of up to 5s late. Raising this to
+/// 60s (or deleting this loop outright — sync_loop already refreshes the same
+/// field every 60s while hidden, notification included) would remove almost
+/// all of those calls.
+///
+/// What blocks that: the websocket lives in the webview, and this loop only
+/// runs while the window is hidden — which is exactly the state where macOS is
+/// most likely to throttle or drop it. Nobody has yet confirmed that a
+/// broadcast actually lands with the window in the tray. Until someone
+/// watches that happen, widening this trades a verified 5s worst case for an
+/// unverified one, in the only scenario the feature exists for.
+///
+/// To confirm: run the app, hide the window, insert a pending trade targeting
+/// your user, and check the native notification fires within a second or two.
+const TRADE_WATCH_SECS: u64 = 5;
+
+/// Backup poll for incoming trade invites while the window is hidden.
+///
+/// The broadcast channel is the fast path; this catches anything it misses.
+/// While visible, sync_loop already covers the same data every 5s.
 async fn trade_watch_loop(app: AppHandle) {
     let client = Client::new();
 
     loop {
-        tokio::time::sleep(Duration::from_secs(5)).await;
+        tokio::time::sleep(Duration::from_secs(TRADE_WATCH_SECS)).await;
 
         if tray::is_window_visible() {
             continue;
@@ -1551,7 +1749,17 @@ async fn events_watch_loop(app: AppHandle) {
 async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
     let state = app.state::<SharedState>();
 
-    let (has_herzie, is_logged_in, minutes_to_sync, np_payload, genres, friend_epoch_before) = {
+    let (
+        has_herzie,
+        is_logged_in,
+        minutes_to_sync,
+        np_payload,
+        genres,
+        friend_epoch_before,
+        drop_epoch_before,
+        equip_epoch_before,
+        inventory_epoch_before,
+    ) = {
         let s = state.lock().unwrap();
         let has = s.herzie.is_some();
         let logged = api::is_logged_in();
@@ -1580,7 +1788,17 @@ async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
             }
         });
         let g = s.current_genres.clone();
-        (has, logged, mins, np, g, s.friend_epoch)
+        (
+            has,
+            logged,
+            mins,
+            np,
+            g,
+            s.friend_epoch,
+            s.drop_epoch,
+            s.equip_epoch,
+            s.inventory_epoch,
+        )
     };
 
     if !has_herzie || !is_logged_in {
@@ -1667,6 +1885,41 @@ async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
         storage::save_multipliers(&sync_resp.multipliers);
 
         s.pending_trade_request = sync_resp.pending_trade_request.clone();
+        // A drop was collected (or a debug drop spawned) locally while this
+        // /sync was in flight, so its server snapshot of pending_drops is
+        // stale — applying it would reinstate a drop the user just picked
+        // up (or drop one they just got). Skip it; the next sync reconciles.
+        if s.drop_epoch == drop_epoch_before {
+            s.pending_drops = sync_resp.pending_drops.clone();
+        }
+
+        // /sync now carries the authoritative inventory and equip state, which
+        // is what lets mutations skip their own /inventory re-fetch. Guarded
+        // like the fields above: a local equip/sell/collect that landed while
+        // this request was in flight makes the response's copy stale, and
+        // applying it would visibly undo the change. The next sync reconciles.
+        if s.equip_epoch == equip_epoch_before {
+            if let Some(ref equipped) = sync_resp.equipped {
+                s.equipped = equipped.clone();
+                storage::save_equipped(&s.equipped);
+            }
+        }
+        // `inventory_currency` mirrors the same balance as `herzie.currency`
+        // (applied above) but is what the inventory/store/trade views read. It
+        // used to be refreshed only by /inventory, so it has to be kept in step
+        // here or removing those fetches would leave the coin stale.
+        s.inventory_currency = sync_resp.herzie.currency;
+
+        // Guarded on its own epoch rather than drop_epoch/equip_epoch: buying
+        // changes inventory without touching either of those, so overloading
+        // them would let a sync issued before a purchase reinstate the old
+        // contents.
+        if s.inventory_epoch == inventory_epoch_before {
+            if let Some(ref inventory) = sync_resp.inventory {
+                s.inventory = Some(inventory.clone());
+                storage::save_inventory_cache(inventory, s.inventory_currency);
+            }
+        }
         if !friend_state_stale {
             s.pending_friend_request = sync_resp.pending_friend_request.clone();
             s.incoming_friend_requests = sync_resp.incoming_friend_requests.clone();
@@ -1720,13 +1973,8 @@ async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
             }
         }
 
-        if notifications_include_item_grants(&sync_resp.notifications) {
-            let app_clone = app.clone();
-            let client = client.clone();
-            tauri::async_runtime::spawn(async move {
-                refresh_inventory_cache(&app_clone, &client).await;
-            });
-        }
+        // A grant used to need its own /inventory fetch to become visible; the
+        // response that announced it now carries the resulting inventory too.
     } else {
         let mut s = state.lock().unwrap();
         s.last_sync_ok = sync_ok;
@@ -1817,6 +2065,8 @@ pub fn run() {
             fetch_inventory,
             sell_item,
             buy_item,
+            collect_drop,
+            spawn_debug_drop,
             equip_item,
             fetch_store_products,
             start_purchase,
@@ -1840,6 +2090,7 @@ pub fn run() {
             chat_fetch,
             chat_send,
             chat_ingest,
+            trade_request_ingest,
             test_notification,
             test_activity,
             debug_media_remote_now_playing,

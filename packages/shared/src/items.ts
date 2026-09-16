@@ -101,6 +101,92 @@ export function isModifierEquipped(
   return !!equipped?.modifier?.includes(itemId);
 }
 
+/** Fixed bank capacity in the desktop Cards grid (6×3 — see InventoryView's
+ * GRID_COLS/GRID_ROWS, which must stay in sync with this). Exported here so
+ * non-UI code (e.g. deciding whether to warn before a purchase or pickup)
+ * doesn't have to duplicate the slot-counting rules below. */
+export const BANK_SLOT_COUNT = 18;
+
+/** The only two item facts bank-slot counting needs. */
+export interface BankItemInfo {
+  stackable?: boolean;
+  category: ItemCategory;
+}
+
+/**
+ * Resolves those facts for an item id. Defaults to the bundled catalog; server
+ * code that has no catalog (the Edge Functions) passes one built from the
+ * `items` table instead, so there is one slot-counting implementation rather
+ * than a second one to keep in sync.
+ */
+export type BankItemLookup = (itemId: string) => BankItemInfo | undefined;
+
+const catalogBankLookup: BankItemLookup = (itemId) => {
+  const item = getItem(itemId);
+  if (!item) return undefined;
+  return { stackable: item.stackable, category: getItemCategory(item) };
+};
+
+/** How many of the fixed bank slots (see BANK_SLOT_COUNT) `inventory`
+ * currently needs: one slot per stackable item id owned (any quantity),
+ * plus one per unit of a non-stackable item — except whatever's currently
+ * equipped, which reserves a unit as "worn" and frees its bank slot. Mirrors
+ * the slot-key expansion InventoryView uses to lay out its grid. */
+export function bankSlotsUsed(
+  inventory: Record<string, number> | null | undefined,
+  equipped: Equipped | null | undefined,
+  lookup: BankItemLookup = catalogBankLookup,
+): number {
+  if (!inventory) return 0;
+  let count = 0;
+  for (const [itemId, qty] of Object.entries(inventory)) {
+    if (qty <= 0) continue;
+    const item = lookup(itemId);
+    if (item && item.category !== "deck") continue;
+    const isEquipped =
+      findEquippedSlot(equipped, itemId) !== null ||
+      isModifierEquipped(equipped, itemId);
+    if (item?.stackable) {
+      if (!isEquipped) count += 1;
+      continue;
+    }
+    count += Math.max(0, isEquipped ? qty - 1 : qty);
+  }
+  return count;
+}
+
+/** Whether the bank has no free slot left for a fresh item — see
+ * bankSlotsUsed. */
+export function isBankFull(
+  inventory: Record<string, number> | null | undefined,
+  equipped: Equipped | null | undefined,
+  lookup: BankItemLookup = catalogBankLookup,
+): boolean {
+  return bankSlotsUsed(inventory, equipped, lookup) >= BANK_SLOT_COUNT;
+}
+
+/**
+ * Whether one more of `itemId` would fit in the bank.
+ *
+ * Not the same question as `isBankFull`: a stackable item the player already
+ * owns shares its existing slot, so it still fits at capacity. Gate item
+ * *acquisition* on this rather than on `isBankFull`, or a full bank wrongly
+ * blocks picking up another copy of something already stacked there.
+ *
+ * Pass a `lookup` to source item facts from somewhere other than the bundled
+ * catalog — server code can build one from the `items` table.
+ */
+export function hasRoomFor(
+  inventory: Record<string, number> | null | undefined,
+  equipped: Equipped | null | undefined,
+  itemId: string,
+  lookup: BankItemLookup = catalogBankLookup,
+): boolean {
+  const current = inventory ?? {};
+  const next = { ...current, [itemId]: (current[itemId] ?? 0) + 1 };
+  return bankSlotsUsed(next, equipped, lookup) <= BANK_SLOT_COUNT;
+}
+
 /** Normalize API/cache payloads that may still be a legacy string[]. */
 export function normalizeEquipped(raw: unknown): Equipped {
   if (!raw || typeof raw !== "object") return {};
@@ -125,12 +211,169 @@ export function normalizeEquipped(raw: unknown): Equipped {
   return out;
 }
 
+/** Why an equip/unequip can't be applied to a given Equipped. Ownership and
+ * "is this item even equipable" aren't here — they need the inventory/catalog
+ * the caller holds, and stay the caller's job (see the equip route). */
+export type EquipRejection =
+  | "already-equipped"
+  | "not-equipped"
+  | "max-modifiers"
+  | "missing-side"
+  | "no-slot";
+
+export type EquipOutcome =
+  | { ok: true; equipped: Equipped }
+  | { ok: false; reason: EquipRejection };
+
+/**
+ * The single source of truth for what equipping or unequipping does to
+ * `Equipped`. The server applies it to persist the change and the desktop
+ * client applies it to predict the result optimistically — sharing one
+ * function is what lets the optimistic state match the server's byte for byte,
+ * so the real response lands as a no-op instead of a visible correction.
+ *
+ * Pure: never mutates `current`. `equipSlot` is passed in rather than looked up
+ * because the server reads it from the DB row (`equip_slot`) and the client
+ * from the bundled catalog (`getItem(...).equipSlot`).
+ *
+ * Note that equipping into an occupied single-value slot **displaces** the
+ * incumbent rather than refusing — that's deliberate (swapping a hat shouldn't
+ * need an explicit unequip first), and the displaced item returns to the bank.
+ */
+export function applyEquip(
+  current: Equipped,
+  itemId: string,
+  action: "equip" | "unequip",
+  equipSlot: EquipSlot | undefined,
+  side?: GroundSide,
+): EquipOutcome {
+  const isEquipped =
+    findEquippedSlot(current, itemId) !== null ||
+    isModifierEquipped(current, itemId);
+
+  if (action === "unequip") {
+    if (!isEquipped) return { ok: false, reason: "not-equipped" };
+    const equipped: Equipped = { ...current };
+    const slot = findEquippedSlot(current, itemId);
+    if (slot) {
+      delete equipped[slot];
+    } else {
+      const rest = (current.modifier ?? []).filter((id) => id !== itemId);
+      if (rest.length > 0) equipped.modifier = rest;
+      else delete equipped.modifier;
+    }
+    return { ok: true, equipped };
+  }
+
+  if (isEquipped) return { ok: false, reason: "already-equipped" };
+
+  const equipped: Equipped = { ...current };
+
+  if (equipSlot === "ground") {
+    if (side !== "left" && side !== "right") {
+      return { ok: false, reason: "missing-side" };
+    }
+    equipped[groundSlot(side)] = itemId;
+    return { ok: true, equipped };
+  }
+
+  if (equipSlot === "modifier") {
+    const worn = current.modifier ?? [];
+    if (worn.length >= MAX_MODIFIERS) {
+      return { ok: false, reason: "max-modifiers" };
+    }
+    equipped.modifier = [...worn, itemId];
+    return { ok: true, equipped };
+  }
+
+  if (!equipSlot) return { ok: false, reason: "no-slot" };
+
+  // Single-value slot — displaces whatever was worn there. No cast needed:
+  // ruling out "ground" and "modifier" above narrows EquipSlot to exactly the
+  // members EquippedSlot also has.
+  equipped[equipSlot] = itemId;
+  return { ok: true, equipped };
+}
+
+export type SellRejection = "not-sellable" | "not-enough";
+
+export type SellOutcome =
+  | {
+      ok: true;
+      /** Inventory with the sold units removed (the id is dropped at zero). */
+      inventory: Record<string, number>;
+      earned: number;
+      newCurrency: number;
+      /** Equip state after the sale — see the unequip note below. */
+      equipped: Equipped;
+      /** True when selling the last copy forced an unequip. */
+      unequipped: boolean;
+    }
+  | { ok: false; reason: SellRejection };
+
+/**
+ * The single source of truth for what selling does. Server-side this computes
+ * the row to persist; client-side it predicts the result so the grid and coin
+ * move on click instead of after the round trip. Sharing one function is what
+ * keeps the prediction identical to what the server will store.
+ *
+ * Pure: never mutates `inventory` or `equipped`.
+ *
+ * Selling the last copy of an equipped item unequips it in the same operation —
+ * ownership and equip state must never drift apart, and an item you no longer
+ * own can't stay worn.
+ */
+export function applySell(
+  inventory: Record<string, number>,
+  currency: number,
+  equipped: Equipped,
+  itemId: string,
+  quantity: number,
+  sellPrice: number | undefined,
+): SellOutcome {
+  if (!sellPrice) return { ok: false, reason: "not-sellable" };
+
+  const owned = inventory[itemId] ?? 0;
+  if (owned < quantity) return { ok: false, reason: "not-enough" };
+
+  const nextInventory = { ...inventory };
+  const newQty = owned - quantity;
+  let nextEquipped = equipped;
+  let unequipped = false;
+
+  if (newQty > 0) {
+    nextInventory[itemId] = newQty;
+  } else {
+    delete nextInventory[itemId];
+    // No copies left — it can't remain equipped. Reuses applyEquip's unequip
+    // branch so this agrees with an explicit unequip exactly.
+    const removal = applyEquip(equipped, itemId, "unequip", undefined);
+    if (removal.ok) {
+      nextEquipped = removal.equipped;
+      unequipped = true;
+    }
+  }
+
+  const earned = quantity * sellPrice;
+  return {
+    ok: true,
+    inventory: nextInventory,
+    earned,
+    newCurrency: currency + earned,
+    equipped: nextEquipped,
+    unequipped,
+  };
+}
+
 export interface ItemDef {
   id: string;
   name: string;
   description: string;
   rarity: Rarity;
   frames: string[][]; // Each frame is an array of lines (with HTML color spans)
+  /** Whether owning more than one is allowed (gates re-buying from the
+   * store). For now, artefacts — items with no equipSlot/equipable, see
+   * getItemType — are the only stackable item type. */
   stackable?: boolean;
   equipable?: boolean;
   /** Catalog category; ground items occupy ground_left or ground_right when equipped,
@@ -194,6 +437,11 @@ export interface ItemSet {
   effect: string;
   /** Item ids that make up this set. */
   itemIds: string[];
+  /** Shared visual clue applied to every member's small card icon, on top of
+   * whatever shape that item's own icon has — e.g. a rainbow gradient fill
+   * instead of the item's usual solid dominant-colour tint, so set members
+   * read as related regardless of their individual icon depiction. */
+  visual?: { gradient: readonly string[] };
 }
 
 export const ITEM_SETS: ItemSet[] = [
@@ -202,6 +450,7 @@ export const ITEM_SETS: ItemSet[] = [
     name: "Prismatic",
     effect: "Even more rainbow",
     itemIds: ["rainbow-headband", "prism"],
+    visual: { gradient: RAINBOW_RAMP },
   },
 ];
 
@@ -232,7 +481,7 @@ export interface DeckSlotGroup {
 
 export const DECK_SLOT_GROUPS: DeckSlotGroup[] = [
   {
-    label: "Equip",
+    label: "Equipment",
     itemType: "equipable",
     slots: ["head", "face", "body"],
     count: 3,
@@ -272,6 +521,60 @@ export const RARITY_LABELS: Record<Rarity, string> = {
   rare: "Rare",
   legendary: "Legendary",
 };
+
+/** Relative weight for random world drops — common is heaviest, legendary lightest. */
+export const RARITY_DROP_WEIGHTS: Record<Rarity, number> = {
+  common: 100,
+  uncommon: 30,
+  rare: 8,
+  legendary: 1,
+};
+
+/** Items that can never appear as a random world drop, regardless of rarity. */
+export const NON_DROPPABLE_ITEM_IDS = ["first-edition", "spirit-orb"] as const;
+
+/** Listened minutes that earn one drop roll. Eligibility is a counter diff on
+ * total_minutes_listened, not a wall-clock timer — see processSync step 5. */
+export const DROP_TICK_MINUTES = 10;
+
+/** Chance a drop is rolled on each eligible listening tick (see DROP_TICK_MINUTES).
+ * 1 = guaranteed — every 10-minute tick drops something, with which item
+ * decided by ITEM_DROP_WEIGHT_OVERRIDES / RARITY_DROP_WEIGHTS below. */
+export const DROP_CHANCE_PER_TICK = 1;
+
+/** Ceiling on how many owed rolls a single sync may award. The desktop path
+ * never owes more than one (its minutes are capped per sync), but the Spotify
+ * cron passes uncapped catch-up minutes and could otherwise owe dozens at
+ * once. Anything above this carries over to the next sync rather than being
+ * written off — see the drop_rolls_done bookkeeping in processSync. */
+export const MAX_DROP_ROLLS_PER_SYNC = 20;
+
+/** Per-item drop-weight overrides, applied instead of RARITY_DROP_WEIGHTS when
+ * present. CDs are earned purely by listening (not by any special rarity),
+ * so they're weighted well above even the heaviest common item to make them
+ * the most likely drop by a wide margin. */
+export const ITEM_DROP_WEIGHT_OVERRIDES: Partial<Record<string, number>> = {
+  cd: 400,
+};
+
+/** Weighted-random pick from a rarity-tagged candidate pool. `rng` returns a
+ * float in [0, 1) — inject Math.random in production, a seeded fn in tests. */
+export function pickWeightedDrop<T extends { id: string; rarity: Rarity }>(
+  candidates: T[],
+  rng: () => number = Math.random,
+): T | undefined {
+  if (candidates.length === 0) return undefined;
+  const weights = candidates.map(
+    (c) => ITEM_DROP_WEIGHT_OVERRIDES[c.id] ?? RARITY_DROP_WEIGHTS[c.rarity],
+  );
+  const total = weights.reduce((a, b) => a + b, 0);
+  let r = rng() * total;
+  for (let i = 0; i < candidates.length; i++) {
+    r -= weights[i];
+    if (r <= 0) return candidates[i];
+  }
+  return candidates[candidates.length - 1];
+}
 
 // --- Constants ---
 const SW = 30;
@@ -648,6 +951,35 @@ function renderCdFrame(yAngle: number): string[] {
   return renderIconCard(yAngle, "#C0C0C0", "#7a7a7a", "#4a4a4a", cdCardIcon);
 }
 
+// --- Spirit Orb card ---
+function spiritOrbCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  const r = Math.sqrt(ix * ix + iy * iy);
+  const R = 0.26;
+  if (r > R) return null;
+  const eyeR = R * 0.16;
+  const ex = R * 0.32,
+    ey = -R * 0.08;
+  if (
+    Math.hypot(ix - ex, iy - ey) < eyeR ||
+    Math.hypot(ix + ex, iy - ey) < eyeR
+  ) {
+    return { bright: 0.15, color: "#1a1a2e" };
+  }
+  const shade = 0.9 - (r / R) * 0.35;
+  return { bright: shade, color: "#d8c8ff" };
+}
+
+function renderSpiritOrbFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#c9b8ff",
+    "#7d6bb0",
+    "#4a3d70",
+    spiritOrbCardIcon,
+  );
+}
+
 // --- Headphones card ---
 function headbandArcIcon(
   u: number,
@@ -914,6 +1246,7 @@ const boomboxFrames = generateFrames(renderBoomboxFrame);
 const goodEyeSniperFrames = generateFrames(renderGoodEyeSniperFrame);
 const prismFrames = generateFrames(renderPrismFrame);
 const poseidonsGiftFrames = generateFrames(renderPoseidonsGiftFrame);
+const spiritOrbFrames = generateFrames(renderSpiritOrbFrame);
 
 // --- Clouds card ---
 function cloudCardIcon(u: number, v: number): TexSample | null {
@@ -976,7 +1309,9 @@ export const ITEMS: ItemDef[] = [
     description: "A token of appreciation for early adopters.",
     rarity: "rare",
     frames: firstEditionFrames,
-    stackable: false,
+    // Artefacts (no equipSlot/equipable — see getItemType) are the only
+    // stackable item type for now.
+    stackable: true,
     sellPrice: 250,
   },
   {
@@ -1076,8 +1411,44 @@ export const ITEMS: ItemDef[] = [
     buyPrice: 100000,
     sellPrice: 500,
   },
+  {
+    id: "spirit-orb",
+    name: "Spirit Orb",
+    description:
+      "A small round spirit that watches over your herzie. Automatically collects drops for you.",
+    rarity: "legendary",
+    frames: spiritOrbFrames,
+    equipable: true,
+    equipSlot: "ground",
+    buyPrice: 50000,
+    sellPrice: 500,
+  },
 ];
 
 export function getItem(id: string): ItemDef | undefined {
   return ITEMS.find((item) => item.id === id);
+}
+
+// getItemColor lived here. It moved to item-canvas.ts — the module its three
+// dependencies already come from — so that this file stays free of the
+// rendering chain (item-canvas -> creature-renderer, which pulls in canvas
+// types). That keeps items.ts isomorphic and lets it be shared verbatim with
+// the Deno edge functions via game-rules.ts. It is still re-exported from the
+// package root, so importers are unaffected.
+
+/** Filters raw {id, rarity} rows (e.g. fetched from the `items` DB table) down
+ * to ones that are both a known catalog item and have a rarity recognized by
+ * RARITY_DROP_WEIGHTS. Defends pickWeightedDrop against an id absent from
+ * this catalog (mid-migration, a rename that left the old row behind, an
+ * admin-created row) or a bad rarity value — either would otherwise let a
+ * drop roll onto something the client can never render or collect, which
+ * (since a pending drop is never overwritten) would silently and permanently
+ * block that user from ever getting another drop. */
+export function filterDroppablePool<T extends { id: string; rarity: string }>(
+  rows: T[],
+): (T & { rarity: Rarity })[] {
+  return rows.filter(
+    (r): r is T & { rarity: Rarity } =>
+      getItem(r.id) !== undefined && r.rarity in RARITY_DROP_WEIGHTS,
+  );
 }

@@ -90,6 +90,9 @@ importers:
 
   packages/shared:
     devDependencies:
+      '@supabase/supabase-js':
+        specifier: ^2.105.1
+        version: 2.105.1
       '@types/node':
         specifier: ^25.6.0
         version: 25.6.0

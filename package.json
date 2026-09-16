@@ -9,8 +9,10 @@
   "scripts": {
     "build": "turbo build",
     "dev": "turbo dev",
-    "check": "turbo check",
-    "test": "turbo test"
+    "check": "node scripts/vendor-shared.mjs --check && turbo check",
+    "test": "turbo test",
+    "vendor:shared": "node scripts/vendor-shared.mjs",
+    "vendor:check": "node scripts/vendor-shared.mjs --check"
   },
   "packageManager": "pnpm@10.21.0",
   "devDependencies": {

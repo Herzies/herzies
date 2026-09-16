@@ -4,6 +4,7 @@ import {
   generateCreatureParams,
   generateIdleFrames,
   generateRotationFrames,
+  renderCreatureAtAngle,
 } from "./creature-renderer.js";
 
 const USER = "test-herzie";
@@ -101,6 +102,34 @@ describe("prism colour scheme", () => {
   });
 });
 
+describe("spirit orb pet", () => {
+  it("renders without throwing on either ground slot", () => {
+    expect(() =>
+      generateRotationFrames(USER, 3, 8, { ground_left: "spirit-orb" }),
+    ).not.toThrow();
+    expect(() =>
+      generateRotationFrames(USER, 3, 8, { ground_right: "spirit-orb" }),
+    ).not.toThrow();
+  });
+
+  it("adds pixels beyond the plain body", () => {
+    const plain = generateRotationFrames(USER, 3, 12);
+    const withOrb = generateRotationFrames(USER, 3, 12, {
+      ground_left: "spirit-orb",
+    });
+    expect(hueSet(withOrb).size).toBeGreaterThan(hueSet(plain).size);
+  });
+
+  it("coexists with a boombox on the other ground slot", () => {
+    expect(() =>
+      generateRotationFrames(USER, 3, 8, {
+        ground_left: "spirit-orb",
+        ground_right: "boombox",
+      }),
+    ).not.toThrow();
+  });
+});
+
 describe("prism band spread", () => {
   // The first cut coloured whole spheres, so the head and body — each one big
   // sphere — came out flat: an orange herzie with a red hat and blue socks.
@@ -153,4 +182,30 @@ describe("prism band spread", () => {
       expect(largest).toBeLessThan(0.5);
     });
   }
+});
+
+describe("renderCreatureAtAngle", () => {
+  // Herzie3D caches this per settled drag angle, keyed on frame index alone.
+  // That is only sound while the function is pure — if it ever picks up a
+  // time or random source, the cache would silently freeze the animation
+  // after the user's first drag rather than fail loudly.
+  it("is deterministic for identical inputs", () => {
+    const args = [USER, 3, 1.2345, 7] as const;
+    const first = renderCreatureAtAngle(...args);
+    const second = renderCreatureAtAngle(...args);
+
+    expect(second.cells).toEqual(first.cells);
+  });
+
+  it("still varies across the idle cycle", () => {
+    // Not every pair of frames differs — the idle breathing runs a whole
+    // number of sine cycles over the 60-frame loop, so frame 30 lands back on
+    // frame 0. Assert the loop as a whole animates rather than any one pair.
+    const base = renderCreatureAtAngle(USER, 3, 1.2345, 0);
+    const differs = Array.from({ length: 59 }, (_, i) =>
+      renderCreatureAtAngle(USER, 3, 1.2345, i + 1),
+    ).some((f) => JSON.stringify(f.cells) !== JSON.stringify(base.cells));
+
+    expect(differs).toBe(true);
+  });
 });

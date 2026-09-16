@@ -3,6 +3,7 @@ import { getItem, RARITY_COLORS as ITEM_RARITY_COLORS } from "@herzies/shared";
 import { useEffect, useRef, useState } from "react";
 import { herzies, useWindowFocused } from "../tauri-bridge";
 import ItemInspectOverlay from "./ItemInspectOverlay";
+import { ItemTypeIcon } from "./icons/ItemTypeIcon";
 import { List } from "./List";
 import { View } from "./View";
 
@@ -117,46 +118,36 @@ export function EventsView({
     }
   };
 
+  // Load when the tab is actually opened, and keep it fresh only while the
+  // window is up. This view stays mounted when hidden, so it previously also
+  // fetched once on mount — meaning every launch paid for /events/previous-hunt
+  // (a slow Vercel route) whether or not the player ever opened Events, and
+  // opening the tab then immediately re-fetched the same two endpoints.
   useEffect(() => {
+    if (!eventsTabVisible) return;
     let cancelled = false;
-    Promise.all([herzies.fetchActiveEvents(), herzies.fetchPreviousHunt()])
-      .then(([active, previous]) => {
-        if (cancelled) return;
-        setEvents(active.events);
-        setPreviousHunt(
-          previous.events.find((e) => e.type === "song_hunt") ?? null,
-        );
-        setNextHunt(previous.next);
-        setLoading(false);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
-  useEffect(() => {
-    if (!focused || !eventsTabVisible) return;
-
-    const refresh = () => {
-      Promise.all([
-        herzies.fetchActiveEvents(),
-        herzies.fetchPreviousHunt(),
-      ]).then(([active, previous]) => {
-        setEvents(active.events);
-        setPreviousHunt(
-          previous.events.find((e) => e.type === "song_hunt") ?? null,
-        );
-        setNextHunt(previous.next);
-      });
-    };
+    const refresh = () =>
+      Promise.all([herzies.fetchActiveEvents(), herzies.fetchPreviousHunt()])
+        .then(([active, previous]) => {
+          if (cancelled) return;
+          setEvents(active.events);
+          setPreviousHunt(
+            previous.events.find((e) => e.type === "song_hunt") ?? null,
+          );
+          setNextHunt(previous.next);
+          setLoading(false);
+        })
+        .catch(() => {
+          if (!cancelled) setLoading(false);
+        });
 
     refresh();
-    const interval = setInterval(refresh, EVENTS_POLL_MS);
-    return () => clearInterval(interval);
+    const interval = focused ? setInterval(refresh, EVENTS_POLL_MS) : undefined;
+    return () => {
+      cancelled = true;
+      if (interval) clearInterval(interval);
+    };
   }, [focused, eventsTabVisible]);
 
   if (loading) {
@@ -247,7 +238,11 @@ export function EventsView({
                       <h2 className="text-ui font-bold text-text-dim">
                         Reward:
                       </h2>
-                      <div className="text-ui">
+                      <div className="flex items-center gap-1 text-ui">
+                        <ItemTypeIcon
+                          item={previousRewardItem}
+                          className="h-4 w-4 shrink-0"
+                        />
                         <button
                           className="cursor-pointer border-none bg-transparent text-ui underline"
                           style={{
@@ -348,8 +343,12 @@ export function EventsView({
             <div>Duration: {formatCountdown(hunt.endsAt)}</div>
             {rewardItem ? (
               <>
-                <div>
+                <div className="flex items-center justify-center gap-1">
                   Reward:{" "}
+                  <ItemTypeIcon
+                    item={rewardItem}
+                    className="h-4 w-4 shrink-0"
+                  />
                   <button
                     className="cursor-pointer border-none bg-transparent text-ui underline"
                     style={{ color: ITEM_RARITY_COLORS[rewardItem.rarity] }}

@@ -12,14 +12,17 @@ export async function GET(request: Request) {
 
   const admin = createAdminClient();
 
-  // Expire stale trades
-  await admin.rpc("expire_stale_trades");
-
+  // This used to call expire_stale_trades() — a write — on every poll, purely
+  // so the sweep would flip stale rows to 'cancelled' and the filter below
+  // would then exclude them. Filtering on expires_at directly gets the same
+  // result without the write; the sweep itself runs on pg_cron now
+  // (00057_expire_stale_trades_cron.sql).
   const { data: trades } = await admin
     .from("trades")
     .select("id, initiator_id, target_id, state, created_at, expires_at")
     .or(`initiator_id.eq.${auth.userId},target_id.eq.${auth.userId}`)
     .not("state", "in", "(completed,cancelled)")
+    .gt("expires_at", new Date().toISOString())
     .order("created_at", { ascending: false });
 
   if (!trades || trades.length === 0) {

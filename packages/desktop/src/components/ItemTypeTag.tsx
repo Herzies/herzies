@@ -26,17 +26,6 @@ export const ITEM_TYPE_PILL_CLASSES: Record<ItemType, string> = {
   artefact: "bg-text-dim/15 text-text-dim",
 };
 
-/** Fainter background-only tint per type, for placeholders that hint at a
- * category without looking occupied (e.g. empty deck slots). */
-export const ITEM_TYPE_DIM_BG_CLASSES: Record<ItemType, string> = {
-  skin: "bg-purple/8",
-  sceneryCard: "bg-green/8",
-  equipable: "bg-cyan/8",
-  accessory: "bg-red/8",
-  modifier: "bg-yellow/8",
-  artefact: "bg-text-dim/8",
-};
-
 /** Labels an item's type (skin / scenery card / equipable / accessory / modifier / artefact). */
 export function ItemTypeTag({
   item,
@@ -79,7 +68,7 @@ export function SetTag({
   const set = getItemSet(itemId);
   if (!set) return null;
   return (
-    <Tooltip label={set.effect} align="left">
+    <Tooltip label={set.effect}>
       <span
         className={cn(
           "rounded-full border border-border bg-bg px-1.5 py-px text-ui-sm text-text-dim",
@@ -102,7 +91,7 @@ export function ModifierEffectTag({
 }) {
   if (!item.modifier) return null;
   return (
-    <Tooltip label={item.modifier.tooltip} align="left">
+    <Tooltip label={item.modifier.tooltip}>
       <span
         className={cn(
           "rounded-full bg-yellow/15 px-1.5 py-px text-ui-sm text-yellow",

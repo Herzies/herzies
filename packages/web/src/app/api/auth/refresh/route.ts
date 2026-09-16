@@ -4,7 +4,18 @@ import { isParseError, parseBody, refreshTokenSchema } from "@/lib/schemas";
 
 /**
  * Refresh an access token using a refresh token.
- * This allows the CLI to refresh tokens without needing the Supabase anon key.
+ *
+ * LEGACY — kept only for desktop builds shipped before the client started
+ * calling Supabase's GoTrue token endpoint directly (see `refresh_url` in
+ * `packages/desktop/src-tauri/src/api.rs`). Current clients never reach this,
+ * so its traffic should decay to zero as users take the auto-update; do not
+ * delete it until old-version telemetry says nobody is refreshing here.
+ *
+ * The original rationale ("so the CLI doesn't need the Supabase anon key") did
+ * not hold: the desktop binary has always shipped the anon key, so this hop only
+ * added a serverless cold start and the shared-per-IP `auth` rate-limit bucket
+ * in `middleware.ts` in front of session refresh — which is the one call whose
+ * failure logs a user out.
  */
 export async function POST(request: Request) {
   const body = await parseBody(request, refreshTokenSchema);

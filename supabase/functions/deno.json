@@ -1,4 +1,7 @@
 {
+  "tasks": {
+    "test": "deno test --allow-env --allow-net _shared/"
+  },
   "imports": {
     "@supabase/supabase-js": "npm:@supabase/supabase-js@^2.105.1",
     "zod": "npm:zod@^4.4.3"

@@ -1,4 +1,5 @@
 import type { Cell } from "./creature-renderer.js";
+import type { ItemDef } from "./items.js";
 
 export const ITEM_FONT_FAMILY = "'SF Mono', 'Menlo', monospace";
 
@@ -37,6 +38,66 @@ export function contentBounds(frames: Cell[][][]): Bounds {
   }
   if (r1 < r0 || c1 < c0) return { r0: 0, r1: 0, c0: 0, c1: 0 };
   return { r0, r1, c0, c1 };
+}
+
+/** Column span (0 for an empty frame) of a single frame's non-space cells. */
+function frameWidth(frame: Cell[][]): number {
+  let c0 = Infinity;
+  let c1 = -Infinity;
+  for (const row of frame) {
+    for (let x = 0; x < row.length; x++) {
+      if (row[x].ch === " ") continue;
+      if (x < c0) c0 = x;
+      if (x > c1) c1 = x;
+    }
+  }
+  return c1 < c0 ? 0 : c1 - c0 + 1;
+}
+
+/**
+ * Index of the widest frame in an animated set. Items are baked as a card
+ * spinning through a visible arc (see `generateFrames` in items.ts): the
+ * frames nearest edge-on are thin slivers, and the widest frame is the one
+ * facing the camera square-on — so this doubles as "pick the front-facing
+ * frame" for a static (non-animated) preview, without assuming any fixed
+ * index or frame count.
+ */
+export function widestFrameIndex(frames: Cell[][][]): number {
+  let best = 0;
+  let bestWidth = -1;
+  for (let i = 0; i < frames.length; i++) {
+    const w = frameWidth(frames[i]);
+    if (w > bestWidth) {
+      bestWidth = w;
+      best = i;
+    }
+  }
+  return best;
+}
+
+/** Most common non-space glyph colour in a single frame — a quick stand-in
+ * for "this specific card's colour" (as opposed to a category or rarity
+ * colour) without needing separate per-item colour metadata. Cards are baked
+ * with a handful of discrete shade bands rather than a smooth gradient (see
+ * `renderGradientCardFrame` and friends in items.ts), so the most-frequent
+ * colour reliably lands on the card's actual dominant hue. */
+export function dominantColor(frame: Cell[][]): string | undefined {
+  const counts = new Map<string, number>();
+  for (const row of frame) {
+    for (const cell of row) {
+      if (cell.ch === " " || !cell.color) continue;
+      counts.set(cell.color, (counts.get(cell.color) ?? 0) + 1);
+    }
+  }
+  let best: string | undefined;
+  let bestCount = 0;
+  for (const [color, count] of counts) {
+    if (count > bestCount) {
+      bestCount = count;
+      best = color;
+    }
+  }
+  return best;
 }
 
 /**
@@ -103,4 +164,25 @@ export function parseAsciiFrames(frames: string[][]): Cell[][][] {
       return cells;
     }),
   );
+}
+
+const itemColorCache = new Map<string, string>();
+
+/** This item's own dominant colour, sampled from its baked art's
+ * front-facing frame (see `dominantColor`/`widestFrameIndex` above) —
+ * distinct from a category or rarity colour, this is what that specific card
+ * actually looks like. Memoized per item id since the underlying art never
+ * changes at runtime.
+ *
+ * Lives here rather than in items.ts so that items.ts carries no dependency on
+ * the rendering chain: it is shared verbatim with the Deno edge functions
+ * (see game-rules.ts), which have no canvas. */
+export function getItemColor(item: ItemDef): string {
+  const cached = itemColorCache.get(item.id);
+  if (cached) return cached;
+  const frames = parseAsciiFrames(item.frames);
+  const front = frames[widestFrameIndex(frames)] ?? frames[0];
+  const color = (front && dominantColor(front)) || "#ffffff";
+  itemColorCache.set(item.id, color);
+  return color;
 }

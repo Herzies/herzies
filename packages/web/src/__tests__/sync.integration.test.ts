@@ -17,6 +17,24 @@ import {
 
 let user: { userId: string; accessToken: string };
 
+/**
+ * Backdate a herzie's sync clocks so the elapsed-time cap and the billing
+ * cooldown see the gap a test wants.
+ *
+ * Both columns, always. `last_billed_at` is what processSync actually measures
+ * from (00061); `last_synced_at` only falls back for rows predating that
+ * column, so a test that moved just the latter would silently assert nothing
+ * the moment the herzie had been billed once.
+ */
+async function backdateSyncClocks(userId: string, msAgo: number) {
+  const at = new Date(Date.now() - msAgo).toISOString();
+  await getAdminClient()
+    .from("herzies")
+    .update({ last_synced_at: at, last_billed_at: at })
+    .eq("user_id", userId);
+  return at;
+}
+
 beforeAll(async () => {
   setLocalEnv();
   user = await createTestUser();
@@ -93,13 +111,8 @@ describe("Sync flow", () => {
   });
 
   it("grants XP for listening time", async () => {
-    // Backdate last_synced_at so the elapsed-time cap allows 5 minutes
-    const admin = getAdminClient();
-    const tenMinAgo = new Date(Date.now() - 10 * 60_000).toISOString();
-    await admin
-      .from("herzies")
-      .update({ last_synced_at: tenMinAgo })
-      .eq("user_id", user.userId);
+    // Backdate the sync clocks so the elapsed-time cap allows 5 minutes
+    await backdateSyncClocks(user.userId, 10 * 60_000);
 
     const res = await syncRoute(
       authenticatedRequest("/sync", user.accessToken, {
@@ -114,17 +127,15 @@ describe("Sync flow", () => {
     expect(body.herzie.totalMinutesListened).toBe(5);
   });
 
-  it("grants CDs based on listening time", async () => {
-    // Backdate last_synced_at so the elapsed-time cap allows 5 minutes
+  it("does not grant a CD straight to inventory from listening time alone", async () => {
+    // CDs are no longer a guaranteed per-10-minutes grant — they're just
+    // another item in the world-drop pool (see ITEM_DROP_WEIGHT_OVERRIDES),
+    // which lands as a pending ground drop, not straight in inventory.
     const admin = getAdminClient();
-    const tenMinAgo = new Date(Date.now() - 10 * 60_000).toISOString();
-    await admin
-      .from("herzies")
-      .update({ last_synced_at: tenMinAgo })
-      .eq("user_id", user.userId);
+    await backdateSyncClocks(user.userId, 10 * 60_000);
 
-    // Sync with enough minutes to earn CDs (10 min = 1 CD)
-    // We already have 5 minutes, add 5 more
+    // We already have 5 minutes from the previous test, add 5 more to cross
+    // the 10-minute drop-roll boundary.
     const res = await syncRoute(
       authenticatedRequest("/sync", user.accessToken, {
         nowPlaying: { title: "Test Song 2", artist: "Test Artist" },
@@ -136,28 +147,20 @@ describe("Sync flow", () => {
     const body = await res.json();
     expect(body.herzie.totalMinutesListened).toBe(10);
 
-    // Check inventory for CD
     const { data } = await admin
       .from("herzies")
-      .select("inventory_v2, cds_granted")
+      .select("inventory_v2")
       .eq("user_id", user.userId)
       .single();
 
-    expect(data!.cds_granted).toBe(1);
-    expect(
-      (data!.inventory_v2 as Record<string, number>).cd,
-    ).toBeGreaterThanOrEqual(1);
+    expect((data!.inventory_v2 as Record<string, number>).cd ?? 0).toBe(0);
   });
 
-  it("caps minutesListened to elapsed time since last sync", async () => {
+  it("caps minutesListened to elapsed time since the last bill", async () => {
     const admin = getAdminClient();
 
-    // Set last_synced_at to 15 seconds ago — above 8s cooldown, so sync is allowed
-    const fifteenSecondsAgo = new Date(Date.now() - 15_000).toISOString();
-    await admin
-      .from("herzies")
-      .update({ last_synced_at: fifteenSecondsAgo })
-      .eq("user_id", user.userId);
+    // 15 seconds ago — above the 8s cooldown, so the sync is billable
+    await backdateSyncClocks(user.userId, 15_000);
 
     // Fetch current minutes before sync
     const { data: before } = await admin
@@ -168,7 +171,9 @@ describe("Sync flow", () => {
 
     const minutesBefore = before!.total_minutes_listened as number;
 
-    // Try to claim 10 minutes — should be capped to ~0.33 min (0.25 elapsed + 5s grace)
+    // Try to claim 10 minutes. The ceiling is elapsed * CATCHUP_RATE + grace =
+    // 0.25 * 3 + 5/60 ≈ 0.83 min — enough headroom to drain a backlog faster
+    // than it accrued, nowhere near the 10 claimed.
     const res = await syncRoute(
       authenticatedRequest("/sync", user.accessToken, {
         nowPlaying: { title: "Cheat Song", artist: "Cheat Artist" },
@@ -179,21 +184,16 @@ describe("Sync flow", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
 
-    // Should have gained at most ~0.33 min (15s elapsed + 5s grace), not 10
     const gained = body.herzie.totalMinutesListened - minutesBefore;
-    expect(gained).toBeLessThanOrEqual(0.4);
+    expect(gained).toBeLessThanOrEqual(0.9);
     expect(gained).toBeGreaterThan(0);
   });
 
-  it("enforces 8-second cooldown between syncs", async () => {
+  it("enforces 8-second cooldown between billable syncs", async () => {
     const admin = getAdminClient();
 
-    // Set last_synced_at to 2 seconds ago — within cooldown window
-    const twoSecondsAgo = new Date(Date.now() - 2000).toISOString();
-    await admin
-      .from("herzies")
-      .update({ last_synced_at: twoSecondsAgo })
-      .eq("user_id", user.userId);
+    // 2 seconds ago — within the cooldown window
+    await backdateSyncClocks(user.userId, 2000);
 
     const { data: before } = await admin
       .from("herzies")
@@ -216,6 +216,51 @@ describe("Sync flow", () => {
     // Should gain 0 minutes due to cooldown
     const gained = body.herzie.totalMinutesListened - minutesBefore;
     expect(gained).toBe(0);
+  });
+
+  // Regression: the cooldown and the wall-clock cap used to measure from
+  // last_synced_at, which every sync rewrites as a liveness heartbeat. At the
+  // desktop's 5s visible cadence that gap never reached 8s, so with the window
+  // open no listening time was ever credited — and since drop eligibility is a
+  // counter diff on total_minutes_listened, no drops ever rolled either.
+  it("a throttled sync moves last_synced_at but not the billing clock", async () => {
+    const admin = getAdminClient();
+    const backdatedTo = await backdateSyncClocks(user.userId, 5000);
+
+    const { data: before } = await admin
+      .from("herzies")
+      .select("total_minutes_listened")
+      .eq("user_id", user.userId)
+      .single();
+
+    const res = await syncRoute(
+      authenticatedRequest("/sync", user.accessToken, {
+        nowPlaying: { title: "Throttled", artist: "Throttled Artist" },
+        minutesListened: 5,
+        genres: ["rock"],
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.herzie.totalMinutesListened).toBe(
+      before!.total_minutes_listened,
+    );
+
+    const { data: after } = await admin
+      .from("herzies")
+      .select("last_synced_at, last_billed_at")
+      .eq("user_id", user.userId)
+      .single();
+
+    // The billing clock stays put, so the next tick 5s later clears the 8s gap.
+    expect(new Date(after!.last_billed_at as string).getTime()).toBe(
+      new Date(backdatedTo).getTime(),
+    );
+    // The heartbeat still advances — the Spotify cron reads it to decide
+    // whether the desktop app is already covering this user.
+    expect(new Date(after!.last_synced_at as string).getTime()).toBeGreaterThan(
+      new Date(backdatedTo).getTime(),
+    );
   });
 
   it("rejects minutesListened > 10 at schema level", async () => {
@@ -481,5 +526,257 @@ describe("Sync flow", () => {
 
     expect(data!.currency).toBe(500);
     expect((data!.inventory_v2 as Record<string, number>)["rare-item"]).toBe(1);
+  });
+});
+
+describe("World drops", () => {
+  it("advances drop_rolls_done by exactly 1 when crossing a 10-minute boundary", async () => {
+    const admin = getAdminClient();
+    const dropUser = await createTestUser();
+    await createTestHerzie(dropUser.userId, {
+      total_minutes_listened: 0,
+      inventory_v2: {},
+    });
+
+    await backdateSyncClocks(dropUser.userId, 10 * 60_000);
+
+    const res = await syncRoute(
+      authenticatedRequest("/sync", dropUser.accessToken, {
+        nowPlaying: { title: "Drop Song", artist: "Drop Artist" },
+        minutesListened: 10,
+        genres: ["rock"],
+      }),
+    );
+    expect(res.status).toBe(200);
+
+    const { data } = await admin
+      .from("herzies")
+      .select("drop_rolls_done, total_minutes_listened")
+      .eq("user_id", dropUser.userId)
+      .single();
+
+    expect(data!.total_minutes_listened).toBeGreaterThanOrEqual(10);
+    expect(data!.drop_rolls_done).toBe(1);
+  });
+
+  // Both conditional writes in step 7 — last_billed_at and drop_rolls_done —
+  // land in the same UPDATE. This is the one shape that exercises them
+  // together: minutes are credited *and* more than one boundary is crossed.
+  it("bills minutes and awards both owed rolls in the same sync", async () => {
+    const admin = getAdminClient();
+    const comboUser = await createTestUser();
+    // 15 banked, none paid: 5 more minutes takes it to 20, i.e. two whole ticks.
+    await createTestHerzie(comboUser.userId, {
+      total_minutes_listened: 15,
+      drop_rolls_done: 0,
+      inventory_v2: {},
+    });
+
+    const backdatedTo = await backdateSyncClocks(comboUser.userId, 10 * 60_000);
+
+    const res = await syncRoute(
+      authenticatedRequest("/sync", comboUser.accessToken, {
+        nowPlaying: { title: "Combo Song", artist: "Combo Artist" },
+        minutesListened: 5,
+        genres: ["rock"],
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.herzie.totalMinutesListened).toBe(20);
+    expect(body.pendingDrops).toHaveLength(2);
+
+    const { data } = await admin
+      .from("herzies")
+      .select("drop_rolls_done, last_billed_at")
+      .eq("user_id", comboUser.userId)
+      .single();
+
+    expect(data!.drop_rolls_done).toBe(2);
+    expect(new Date(data!.last_billed_at as string).getTime()).toBeGreaterThan(
+      new Date(backdatedTo).getTime(),
+    );
+  });
+
+  it("does not advance drop_rolls_done again while still within the same 10-minute tick", async () => {
+    const admin = getAdminClient();
+    const dropUser = await createTestUser();
+    await createTestHerzie(dropUser.userId, {
+      total_minutes_listened: 10,
+      drop_rolls_done: 1,
+      inventory_v2: {},
+    });
+
+    await backdateSyncClocks(dropUser.userId, 10 * 60_000);
+
+    // 1 more minute (10 -> 11) is still floor(11/10) === 1, the same tick
+    // drop_rolls_done already accounts for — should not roll or advance again.
+    const res = await syncRoute(
+      authenticatedRequest("/sync", dropUser.accessToken, {
+        nowPlaying: { title: "Same Tick", artist: "Same Artist" },
+        minutesListened: 1,
+        genres: ["rock"],
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.herzie.totalMinutesListened).toBeGreaterThanOrEqual(11);
+
+    const { data } = await admin
+      .from("herzies")
+      .select("drop_rolls_done")
+      .eq("user_id", dropUser.userId)
+      .single();
+    expect(data!.drop_rolls_done).toBe(1);
+  });
+
+  // Regression: the roll block used to insert exactly one drop and then
+  // fast-forward drop_rolls_done to the eligible count, writing off the rest.
+  // Unreachable from the desktop (10 min/sync cap = at most one boundary), but
+  // the Spotify cron hands over uncapped catch-up minutes.
+  it("awards one drop per boundary when a sync owes several rolls", async () => {
+    const admin = getAdminClient();
+    const catchupUser = await createTestUser();
+    // 25 minutes banked, nothing paid out: two whole ticks are owed.
+    await createTestHerzie(catchupUser.userId, {
+      total_minutes_listened: 25,
+      drop_rolls_done: 0,
+      inventory_v2: {},
+    });
+
+    const res = await syncRoute(
+      authenticatedRequest("/sync", catchupUser.accessToken, {
+        nowPlaying: null,
+        minutesListened: 0,
+        genres: [],
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.pendingDrops).toHaveLength(2);
+
+    const { data } = await admin
+      .from("herzies")
+      .select("drop_rolls_done")
+      .eq("user_id", catchupUser.userId)
+      .single();
+    expect(data!.drop_rolls_done).toBe(2);
+  });
+
+  it("auto-collects a pending drop in the same tick when Spirit Orb is equipped", async () => {
+    const admin = getAdminClient();
+    const petUser = await createTestUser();
+    await createTestHerzie(petUser.userId, {
+      inventory_v2: {},
+      equipped: { ground_left: "spirit-orb" },
+    });
+
+    await admin.rpc("roll_pending_drop", {
+      p_user_id: petUser.userId,
+      p_item_id: "headphones",
+    });
+
+    const res = await syncRoute(
+      authenticatedRequest("/sync", petUser.accessToken, {
+        nowPlaying: null,
+        minutesListened: 0,
+        genres: [],
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+
+    expect(body.pendingDrops).toEqual([]);
+
+    const collectedNotif = body.notifications.find(
+      (n: { type: string; itemId?: string }) =>
+        n.type === "item_granted" && n.itemId === "headphones",
+    );
+    expect(collectedNotif).toBeDefined();
+
+    const { data: herzieRow } = await admin
+      .from("herzies")
+      .select("inventory_v2")
+      .eq("user_id", petUser.userId)
+      .single();
+    expect((herzieRow!.inventory_v2 as Record<string, number>).headphones).toBe(
+      1,
+    );
+
+    const { data: drops } = await admin
+      .from("pending_drops")
+      .select("id")
+      .eq("user_id", petUser.userId);
+    expect(drops).toEqual([]);
+  });
+
+  it("leaves the drop pending and reports it in the sync response without the pet equipped", async () => {
+    const admin = getAdminClient();
+    const noPetUser = await createTestUser();
+    await createTestHerzie(noPetUser.userId, { inventory_v2: {} });
+
+    await admin.rpc("roll_pending_drop", {
+      p_user_id: noPetUser.userId,
+      p_item_id: "boombox",
+    });
+
+    const res = await syncRoute(
+      authenticatedRequest("/sync", noPetUser.accessToken, {
+        nowPlaying: null,
+        minutesListened: 0,
+        genres: [],
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+
+    expect(body.pendingDrops).toEqual([
+      expect.objectContaining({ itemId: "boombox" }),
+    ]);
+  });
+
+  it("keeps multiple drops pending at once instead of blocking on the first", async () => {
+    const admin = getAdminClient();
+    const multiUser = await createTestUser();
+    await createTestHerzie(multiUser.userId, { inventory_v2: {} });
+
+    await admin.rpc("roll_pending_drop", {
+      p_user_id: multiUser.userId,
+      p_item_id: "boombox",
+    });
+    await admin.rpc("roll_pending_drop", {
+      p_user_id: multiUser.userId,
+      p_item_id: "cd",
+    });
+
+    const res = await syncRoute(
+      authenticatedRequest("/sync", multiUser.accessToken, {
+        nowPlaying: null,
+        minutesListened: 0,
+        genres: [],
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+
+    expect(body.pendingDrops).toHaveLength(2);
+    const itemIds = body.pendingDrops.map((d: { itemId: string }) => d.itemId);
+    expect(itemIds).toEqual(expect.arrayContaining(["boombox", "cd"]));
+
+    // Collecting one by id leaves the other untouched.
+    const boombox = body.pendingDrops.find(
+      (d: { itemId: string }) => d.itemId === "boombox",
+    );
+    const { data: collectedId } = await admin.rpc("collect_pending_drop", {
+      p_user_id: multiUser.userId,
+      p_drop_id: boombox.id,
+    });
+    expect(collectedId).toBe("boombox");
+
+    const { data: remaining } = await admin
+      .from("pending_drops")
+      .select("item_id")
+      .eq("user_id", multiUser.userId);
+    expect(remaining).toEqual([{ item_id: "cd" }]);
   });
 });

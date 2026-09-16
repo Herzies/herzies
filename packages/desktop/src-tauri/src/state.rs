@@ -50,11 +50,37 @@ pub struct ManagedState {
     pub incoming_friend_requests: Vec<FriendRequestSummary>,
     /// All pending friend requests you sent (Add friend tab).
     pub outgoing_friend_requests: Vec<FriendRequestSummary>,
+    /// Pending world drops from `/sync` — any number can be outstanding at
+    /// once (replaced wholesale with the server's list on every sync, e.g.
+    /// emptied after a Spirit Orb auto-collects them all).
+    pub pending_drops: Vec<PendingDrop>,
     /// Bumped on every local `friend_codes` mutation (add/accept/remove). A
     /// `sync_tick` captures this before its network call; if it changes while
     /// the request is in flight, the (now-stale) server `friend_codes` is not
     /// applied so it can't clobber a just-accepted friend.
     pub friend_epoch: u64,
+    /// Bumped on every local `pending_drops` mutation (manual collect,
+    /// debug spawn). Same purpose as `friend_epoch`: a `sync_tick` captures
+    /// this before its network call, and skips applying the (now-stale)
+    /// server `pendingDrops` if it changed while the request was in flight —
+    /// otherwise a collect that completes mid-sync gets its drop reinstated
+    /// by a response that was fetched before the collect happened.
+    pub drop_epoch: u64,
+    /// Bumped on every local `equipped` mutation (equip/unequip). Same purpose
+    /// as `friend_epoch`: an `/inventory` fetch captures this before its
+    /// network call, and `apply_inventory` skips the (now-stale) server
+    /// `equipped` if it changed while the request was in flight — otherwise an
+    /// equip that completes mid-fetch gets undone by a response that was
+    /// issued before it happened, which the desktop UI sees as the item
+    /// popping back off.
+    pub equip_epoch: u64,
+    /// Bumped on every local `inventory` mutation (sell, buy, drop collect and
+    /// its revert). Same purpose as `friend_epoch`: `sync_tick` captures this
+    /// before its network call and skips the response's `inventory` if it
+    /// moved, so a sync issued before the mutation can't reinstate the old
+    /// contents. Distinct from `equip_epoch`/`drop_epoch` because buying
+    /// changes inventory without touching either.
+    pub inventory_epoch: u64,
 }
 
 impl ManagedState {
@@ -90,14 +116,36 @@ impl ManagedState {
             pending_friend_request: None,
             incoming_friend_requests: Vec::new(),
             outgoing_friend_requests: Vec::new(),
+            pending_drops: Vec::new(),
             friend_epoch: 0,
+            drop_epoch: 0,
+            equip_epoch: 0,
+            inventory_epoch: 0,
         }
+    }
+
+    /// Mark that the local `pending_drops` list just changed so any `/sync`
+    /// already in flight won't overwrite it with stale server data.
+    pub fn bump_drop_epoch(&mut self) {
+        self.drop_epoch = self.drop_epoch.wrapping_add(1);
     }
 
     /// Mark that the local `friend_codes` set just changed so any `/sync`
     /// already in flight won't overwrite it with stale server data.
     pub fn bump_friend_epoch(&mut self) {
         self.friend_epoch = self.friend_epoch.wrapping_add(1);
+    }
+
+    /// Mark that the local `equipped` map just changed so any `/inventory`
+    /// fetch already in flight won't overwrite it with stale server data.
+    pub fn bump_equip_epoch(&mut self) {
+        self.equip_epoch = self.equip_epoch.wrapping_add(1);
+    }
+
+    /// Mark that the local `inventory` just changed so any `/sync` already in
+    /// flight won't overwrite it with stale server data.
+    pub fn bump_inventory_epoch(&mut self) {
+        self.inventory_epoch = self.inventory_epoch.wrapping_add(1);
     }
 
     pub fn clear_app_cache(&mut self) {
@@ -110,6 +158,7 @@ impl ManagedState {
         self.pending_friend_request = None;
         self.incoming_friend_requests.clear();
         self.outgoing_friend_requests.clear();
+        self.pending_drops.clear();
         crate::storage::clear_equipped();
         crate::storage::clear_inventory_cache();
         crate::storage::clear_friends_cache();
@@ -171,6 +220,7 @@ impl ManagedState {
             pending_friend_request: self.pending_friend_request.clone(),
             incoming_friend_requests: self.incoming_friend_requests.clone(),
             outgoing_friend_requests: self.outgoing_friend_requests.clone(),
+            pending_drops: self.pending_drops.clone(),
         }
     }
 }
@@ -279,7 +329,11 @@ mod tests {
             pending_friend_request: None,
             incoming_friend_requests: Vec::new(),
             outgoing_friend_requests: Vec::new(),
+            pending_drops: Vec::new(),
             friend_epoch: 0,
+            drop_epoch: 0,
+            equip_epoch: 0,
+            inventory_epoch: 0,
         }
     }
 

@@ -47,7 +47,7 @@ export async function GET(request: Request) {
     const { data, error } = await admin
       .from("herzies")
       .select(
-        "user_id, name, friend_code, xp, stage, level, currency, appearance, equipped, now_playing",
+        "user_id, name, friend_code, stage, level, currency, appearance, equipped, now_playing",
       )
       .eq("friend_code", singleCode.toUpperCase().trim())
       .single();
@@ -59,29 +59,27 @@ export async function GET(request: Request) {
     const canSeeListening = visibleCodes.has(data.friend_code);
     const equipped = normalizeEquipped(data.equipped);
     const wantsSongHuntWins = hasGoodEyeSniperEquipped(equipped);
-    const [topArtists, lastPlayed, globalRank, globalTotal, songHuntWins] =
-      await Promise.all([
-        canSeeListening
-          ? getTopArtists(admin, data.user_id)
-          : Promise.resolve([]),
-        canSeeListening
-          ? getLastPlayed(admin, data.user_id)
-          : Promise.resolve(null),
-        getGlobalRank(admin, data.xp),
-        getGlobalTotal(admin),
-        wantsSongHuntWins
-          ? getSongHuntWins(admin, data.user_id)
-          : Promise.resolve(undefined),
-      ]);
+
+    const [details, songHuntWins] = await Promise.all([
+      fetchBatchDetails(
+        admin,
+        [data.user_id],
+        canSeeListening ? [data.user_id] : [],
+      ),
+      wantsSongHuntWins
+        ? getSongHuntWins(admin, data.user_id)
+        : Promise.resolve(undefined),
+    ]);
+    const rank = details.ranks.get(data.user_id);
 
     return NextResponse.json({
       herzie: formatProfile(
         data,
         canSeeListening,
-        topArtists,
-        lastPlayed,
-        globalRank,
-        globalTotal,
+        details.topArtists.get(data.user_id) ?? [],
+        details.lastPlayed.get(data.user_id) ?? null,
+        rank?.globalRank,
+        rank?.globalTotal,
         songHuntWins,
       ),
     });
@@ -100,7 +98,7 @@ export async function GET(request: Request) {
   const { data, error } = await admin
     .from("herzies")
     .select(
-      "user_id, name, friend_code, xp, stage, level, currency, appearance, equipped, now_playing",
+      "user_id, name, friend_code, stage, level, currency, appearance, equipped, now_playing",
     )
     .in("friend_code", codes);
 
@@ -108,36 +106,42 @@ export async function GET(request: Request) {
     return NextResponse.json({ herzies: [] });
   }
 
-  const globalTotal = await getGlobalTotal(admin);
-  const herzies = await Promise.all(
-    data.map(async (row) => {
-      const canSeeListening = visibleCodes.has(row.friend_code);
-      const equipped = normalizeEquipped(row.equipped);
-      const wantsSongHuntWins = hasGoodEyeSniperEquipped(equipped);
-      const [topArtists, lastPlayed, globalRank, songHuntWins] =
-        await Promise.all([
-          canSeeListening
-            ? getTopArtists(admin, row.user_id)
-            : Promise.resolve([]),
-          canSeeListening
-            ? getLastPlayed(admin, row.user_id)
-            : Promise.resolve(null),
-          getGlobalRank(admin, row.xp),
-          wantsSongHuntWins
-            ? getSongHuntWins(admin, row.user_id)
-            : Promise.resolve(undefined),
-        ]);
-      return formatProfile(
-        row,
-        canSeeListening,
-        topArtists,
-        lastPlayed,
-        globalRank,
-        globalTotal,
-        songHuntWins,
-      );
-    }),
+  const details = await fetchBatchDetails(
+    admin,
+    data.map((row) => row.user_id),
+    data
+      .filter((row) => visibleCodes.has(row.friend_code))
+      .map((row) => row.user_id),
   );
+
+  // Still per row, but only for herzies wearing the Good Eye Sniper, which is
+  // rare enough not to be worth its own batch RPC.
+  const songHuntWinsByUser = new Map<string, number | undefined>();
+  await Promise.all(
+    data
+      .filter((row) =>
+        hasGoodEyeSniperEquipped(normalizeEquipped(row.equipped)),
+      )
+      .map(async (row) => {
+        songHuntWinsByUser.set(
+          row.user_id,
+          await getSongHuntWins(admin, row.user_id),
+        );
+      }),
+  );
+
+  const herzies = data.map((row) => {
+    const rank = details.ranks.get(row.user_id);
+    return formatProfile(
+      row,
+      visibleCodes.has(row.friend_code),
+      details.topArtists.get(row.user_id) ?? [],
+      details.lastPlayed.get(row.user_id) ?? null,
+      rank?.globalRank,
+      rank?.globalTotal,
+      songHuntWinsByUser.get(row.user_id),
+    );
+  });
 
   return NextResponse.json({ herzies });
 }
@@ -146,7 +150,6 @@ type HerzieRow = {
   user_id: string;
   name: string;
   friend_code: string;
-  xp: number;
   stage: number;
   level: number;
   currency: number | null;
@@ -214,82 +217,87 @@ async function getSongHuntWins(
   return error ? undefined : (data as number);
 }
 
-async function getGlobalRank(
-  admin: ReturnType<typeof createAdminClient>,
-  xp: number,
-): Promise<number | undefined> {
-  const { count } = await admin
-    .from("herzies")
-    .select("friend_code", { count: "exact", head: true })
-    .gt("xp", xp);
-
-  if (typeof count !== "number") return undefined;
-  return count + 1;
-}
-
-async function getGlobalTotal(
-  admin: ReturnType<typeof createAdminClient>,
-): Promise<number | undefined> {
-  const { count } = await admin
-    .from("herzies")
-    .select("friend_code", { count: "exact", head: true });
-  return typeof count === "number" ? count : undefined;
-}
-
-const LISTEN_LOG_PAGE_SIZE = 1000;
-
-async function getLastPlayed(
-  admin: ReturnType<typeof createAdminClient>,
-  userId: string,
-): Promise<{
+type TopArtist = { name: string; plays: number };
+type LastPlayed = {
   title: string;
   artist: string;
   listenedAt: string;
   albumArtUrl?: string;
-} | null> {
-  const { data } = await admin
-    .from("listen_log")
-    .select("track_name, artist_name, listened_at, album_art_url")
-    .eq("user_id", userId)
-    .order("listened_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+};
+type Rank = { globalRank?: number; globalTotal?: number };
 
-  if (!data) return null;
-  return {
-    title: data.track_name,
-    artist: data.artist_name,
-    listenedAt: data.listened_at,
-    albumArtUrl: data.album_art_url ?? undefined,
-  };
-}
-
-async function getTopArtists(
+/**
+ * Per-request listening and ranking data for a batch of herzies.
+ *
+ * Everything here used to be fetched per row, which made a full friend list
+ * 4xN queries — and the top-artists half paged each user's entire listen_log
+ * 1000 rows at a time to tally artists in JS. These three RPCs aggregate in
+ * Postgres and take the whole batch at once (see 00056_lookup_batch_rpcs.sql),
+ * so the cost is three round trips regardless of how many friends are looked
+ * up, and no listening history crosses the wire.
+ *
+ * `listeningUserIds` must contain only users whose listening data the caller
+ * is allowed to see — the RPCs are service-role and do not re-check.
+ */
+async function fetchBatchDetails(
   admin: ReturnType<typeof createAdminClient>,
-  userId: string,
-): Promise<{ name: string; plays: number }[]> {
-  const counts: Record<string, number> = {};
-  let from = 0;
+  allUserIds: string[],
+  listeningUserIds: string[],
+) {
+  const wantsListening = listeningUserIds.length > 0;
 
-  while (true) {
-    const { data: page } = await admin
-      .from("listen_log")
-      .select("artist_name")
-      .eq("user_id", userId)
-      .range(from, from + LISTEN_LOG_PAGE_SIZE - 1);
+  const [topArtistRows, lastPlayedRows, rankRows] = await Promise.all([
+    wantsListening
+      ? admin.rpc("top_artists_for_users", {
+          p_user_ids: listeningUserIds,
+          p_limit: 3,
+        })
+      : Promise.resolve({ data: [] }),
+    wantsListening
+      ? admin.rpc("last_played_for_users", { p_user_ids: listeningUserIds })
+      : Promise.resolve({ data: [] }),
+    admin.rpc("herzie_ranks", { p_user_ids: allUserIds }),
+  ]);
 
-    if (!page?.length) break;
-
-    for (const row of page) {
-      counts[row.artist_name] = (counts[row.artist_name] ?? 0) + 1;
-    }
-
-    if (page.length < LISTEN_LOG_PAGE_SIZE) break;
-    from += LISTEN_LOG_PAGE_SIZE;
+  const topArtists = new Map<string, TopArtist[]>();
+  // Already ordered by rank within each user by the RPC's row_number().
+  for (const row of (topArtistRows.data ?? []) as {
+    user_id: string;
+    artist_name: string;
+    plays: number;
+  }[]) {
+    const list = topArtists.get(row.user_id) ?? [];
+    list.push({ name: row.artist_name, plays: row.plays });
+    topArtists.set(row.user_id, list);
   }
 
-  return Object.entries(counts)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 3)
-    .map(([name, plays]) => ({ name, plays }));
+  const lastPlayed = new Map<string, LastPlayed>();
+  for (const row of (lastPlayedRows.data ?? []) as {
+    user_id: string;
+    track_name: string;
+    artist_name: string;
+    listened_at: string;
+    album_art_url: string | null;
+  }[]) {
+    lastPlayed.set(row.user_id, {
+      title: row.track_name,
+      artist: row.artist_name,
+      listenedAt: row.listened_at,
+      albumArtUrl: row.album_art_url ?? undefined,
+    });
+  }
+
+  const ranks = new Map<string, Rank>();
+  for (const row of (rankRows.data ?? []) as {
+    user_id: string;
+    global_rank: number;
+    global_total: number;
+  }[]) {
+    ranks.set(row.user_id, {
+      globalRank: row.global_rank,
+      globalTotal: row.global_total,
+    });
+  }
+
+  return { topArtists, lastPlayed, ranks };
 }

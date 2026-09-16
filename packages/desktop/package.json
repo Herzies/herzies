@@ -1,6 +1,6 @@
 {
   "name": "herzies-desktop",
-  "version": "0.1.0-beta.35",
+  "version": "0.1.0-beta.36",
   "private": true,
   "description": "Herzies desktop app for macOS",
   "scripts": {
@@ -10,7 +10,8 @@
     "build:signed": "bash scripts/build-signed.sh",
     "vite:dev": "vite dev --port 1420",
     "vite:build": "vite build",
-    "sandbox": "vite dev --port 1420 --open /sandbox.html"
+    "sandbox": "vite dev --port 1420 --open /sandbox.html",
+    "icon-editor": "node tools/icon-editor/server.mjs"
   },
   "dependencies": {
     "@herzies/shared": "workspace:*",

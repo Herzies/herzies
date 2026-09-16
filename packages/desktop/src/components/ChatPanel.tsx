@@ -21,6 +21,11 @@ type UserMenuTarget = {
   friendCode: string | null | undefined;
 };
 
+/** The activity log and chat messages, interleaved into one time-ordered list. */
+type FeedEntry =
+  | { kind: "activity"; time: string; message: string; sortKey: string }
+  | { kind: "chat"; msg: ChatMessage; sortKey: string };
+
 const USER_MENU_ITEMS = [
   { id: "add", label: "Add as friend" },
   { id: "profile", label: "Profile" },
@@ -1124,24 +1129,25 @@ export function ChatPanel({
     }
   };
 
-  type FeedEntry =
-    | { kind: "activity"; time: string; message: string; sortKey: string }
-    | { kind: "chat"; msg: ChatMessage; sortKey: string };
-
-  const feed: FeedEntry[] = [];
-
-  for (const entry of activityLog) {
-    feed.push({
-      kind: "activity",
-      time: entry.time,
-      message: entry.message,
-      sortKey: entry.time,
-    });
-  }
-  for (const msg of messages) {
-    feed.push({ kind: "chat", msg, sortKey: msg.createdAt });
-  }
-  feed.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+  // Merging and sorting ~100 entries is not expensive on its own, but this
+  // component re-renders on every keystroke (the `input` state below), so
+  // unmemoized it re-sorted the whole feed once per typed character.
+  const feed = useMemo(() => {
+    const entries: FeedEntry[] = [];
+    for (const entry of activityLog) {
+      entries.push({
+        kind: "activity",
+        time: entry.time,
+        message: entry.message,
+        sortKey: entry.time,
+      });
+    }
+    for (const msg of messages) {
+      entries.push({ kind: "chat", msg, sortKey: msg.createdAt });
+    }
+    entries.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+    return entries;
+  }, [activityLog, messages]);
 
   return (
     <>

@@ -127,6 +127,16 @@ pub struct SyncResponse {
     pub incoming_friend_requests: Vec<FriendRequestSummary>,
     #[serde(default)]
     pub outgoing_friend_requests: Vec<FriendRequestSummary>,
+    #[serde(default)]
+    pub pending_drops: Vec<PendingDrop>,
+    /// Authoritative inventory, carried on every sync so mutations don't each
+    /// have to re-fetch `/inventory`. `None` only when talking to a server
+    /// older than this field.
+    #[serde(default)]
+    pub inventory: Option<Inventory>,
+    /// Authoritative equip state, carried for the same reason as `inventory`.
+    #[serde(default)]
+    pub equipped: Option<HashMap<String, serde_json::Value>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,6 +145,16 @@ pub struct PendingTradeRequest {
     pub trade_id: String,
     pub from_name: String,
     pub from_friend_code: String,
+}
+
+/// A world drop waiting to be collected — removed from the list once picked
+/// up (manually, by id, or automatically by an equipped Spirit Orb).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingDrop {
+    pub id: String,
+    pub item_id: String,
+    pub dropped_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -256,6 +276,8 @@ pub struct AppState {
     pub incoming_friend_requests: Vec<FriendRequestSummary>,
     /// Friend requests you sent that are still pending.
     pub outgoing_friend_requests: Vec<FriendRequestSummary>,
+    /// World drops waiting to be collected (each removed once collected).
+    pub pending_drops: Vec<PendingDrop>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

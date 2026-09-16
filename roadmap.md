@@ -2,6 +2,10 @@
 
 ## high priority
 
+- [x] drops must be picked up
+- [ ] introduce pick-up pet or orb (simple shape with eyes)
+- [ ] introduce drop rate. any card but first edition can drop. drop
+  change lowers with rarity.
 - [x] auth tokens expire too quickly
 - [x] new chat messages aren't instantly showing up
 - [x] appeared offline eventhough I wasn't
@@ -13,10 +17,10 @@
 - [x] clicking a trade request notification doesn't open trade view with person requesting
 
 ## low priority
-- [ ] currently playing doesn't reset when users quit desktop app
-- [ ] customisable herzie
-- [ ] streak didn't refresh when I logge in with a different user
-- [ ] app permissions should come from Herzies (not Mathias Novas)
+- [x] currently playing doesn't reset when users quit desktop app
+- [x] customisable herzie
+- [x] streak didn't refresh when I logge in with a different user
+- [x] app permissions should come from Herzies (not Mathias Novas)
 - [x] high usage costs in Vercel
 
 # Wishlist

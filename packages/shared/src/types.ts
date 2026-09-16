@@ -110,6 +110,17 @@ export interface SyncResponse {
   incomingFriendRequests: FriendRequestSummary[];
   /** Friend requests you sent that are still pending */
   outgoingFriendRequests: FriendRequestSummary[];
+  /** World drops waiting to be collected. Each persists until collected (no
+   * expiry) — any number can be pending at once. */
+  pendingDrops: PendingDrop[];
+  /** Authoritative inventory. Carried here so clients get it on the regular
+   * sync cadence instead of re-fetching /inventory after every mutation: the
+   * herzies row is already loaded to build this response, so including it
+   * costs no extra query. Reflects any grants or Spirit Orb auto-collects
+   * this same sync performed. */
+  inventory: Inventory;
+  /** Authoritative equip state, carried for the same reason as `inventory`. */
+  equipped: Equipped;
 }
 
 /** Notification that another player wants to trade */
@@ -117,6 +128,14 @@ export interface PendingTradeRequest {
   tradeId: string;
   fromName: string;
   fromFriendCode: string;
+}
+
+/** A world drop waiting to be collected — removed from the list once picked
+ * up (manually, by id, or automatically by an equipped Spirit Orb). */
+export interface PendingDrop {
+  id: string;
+  itemId: string;
+  droppedAt: string;
 }
 
 /** Notification that another player wants to be your friend */

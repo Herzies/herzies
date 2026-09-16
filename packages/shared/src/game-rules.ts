@@ -1,0 +1,39 @@
+/**
+ * The game's rules, as a single isomorphic entry point.
+ *
+ * This is the canonical source for everything that has to agree between the
+ * Next.js API, the Supabase edge functions and the desktop client: XP and
+ * levelling, genre classification, daily cravings, drop weights, the item
+ * catalog, equip slots and bank capacity.
+ *
+ * WHY IT EXISTS: the edge functions could not import `@herzies/shared`,
+ * because the package root re-exports React components and the creature
+ * renderer. So `supabase/functions/_shared/herzies-shared.ts` was a
+ * hand-maintained 497-line transcription of the parts they needed — including
+ * a `KNOWN_ITEM_IDS` set that a comment warned "MUST be updated whenever an
+ * item is added to or removed from ITEMS". Three places to keep in step, one
+ * of them load-bearing for whether a new item can ever drop.
+ *
+ * Everything reachable from here must stay free of React, the DOM and Node
+ * built-ins, so it can be copied verbatim into Deno. `scripts/vendor-shared.mjs`
+ * walks this file's import graph and regenerates the copy under
+ * `supabase/functions/_shared/shared/`; `pnpm vendor:check` fails if that copy
+ * is stale, which is what makes drift impossible rather than merely discouraged.
+ *
+ * Adding an export here is free. Adding an import of something that touches a
+ * browser or Node API is not — it will break the edge function typecheck, which
+ * is the intended alarm.
+ */
+
+// Daily craving selection and matching.
+export * from "./craving.js";
+// Genre vocabulary and classification of raw provider tags.
+export * from "./genres.js";
+// Item catalog, rarity and drop weighting, equip slots, bank capacity.
+// Note this is the whole catalog, which is what lets filterDroppablePool use
+// the real getItem() instead of the hand-maintained id list it used before.
+export * from "./items.js";
+// XP curve, levelling, stage thresholds, multiplier application.
+export * from "./leveling.js";
+// Core domain types (Herzie, Stage, drops, events, friend/trade requests).
+export * from "./types.js";

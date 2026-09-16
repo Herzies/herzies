@@ -1,10 +1,7 @@
 import {
-  type Equipped,
-  type EquippedSlot,
-  findEquippedSlot,
-  groundSlot,
-  isModifierEquipped,
-  MAX_MODIFIERS,
+  applyEquip,
+  type EquipRejection,
+  type EquipSlot,
   normalizeEquipped,
 } from "@herzies/shared";
 import { NextResponse } from "next/server";
@@ -50,63 +47,41 @@ export async function POST(request: Request) {
 
   const inv = (herzie.inventory_v2 ?? {}) as Record<string, number>;
   const current = normalizeEquipped(herzie.equipped);
-  let updated: Equipped;
 
-  if (action === "equip") {
-    if ((inv[itemId] ?? 0) < 1) {
-      return NextResponse.json(
-        { error: "Item not in inventory" },
-        { status: 400 },
-      );
-    }
-
-    const existingSlot = findEquippedSlot(current, itemId);
-    if (existingSlot || isModifierEquipped(current, itemId)) {
-      return NextResponse.json({ error: "Already equipped" }, { status: 400 });
-    }
-
-    updated = { ...current };
-
-    if (item.equip_slot === "ground") {
-      if (side !== "left" && side !== "right") {
-        return NextResponse.json(
-          { error: "side (left|right) is required for ground items" },
-          { status: 400 },
-        );
-      }
-      const target = groundSlot(side);
-      updated[target] = itemId;
-    } else if (item.equip_slot === "modifier") {
-      if ((current.modifier?.length ?? 0) >= MAX_MODIFIERS) {
-        return NextResponse.json(
-          { error: "Maximum modifiers equipped" },
-          { status: 400 },
-        );
-      }
-      // Accumulates (up to MAX_MODIFIERS) rather than occupying a single-value slot.
-      updated.modifier = [...(current.modifier ?? []), itemId];
-    } else if (item.equip_slot) {
-      const slot = item.equip_slot as EquippedSlot;
-      updated[slot] = itemId;
-    } else {
-      // Equipable with no slot — treat as unique by id only (no dedicated key).
-      return NextResponse.json(
-        { error: "Item has no equip slot" },
-        { status: 400 },
-      );
-    }
-  } else {
-    const slot = findEquippedSlot(current, itemId);
-    if (!slot && !isModifierEquipped(current, itemId)) {
-      return NextResponse.json({ error: "Item not equipped" }, { status: 400 });
-    }
-    updated = { ...current };
-    if (slot) {
-      delete updated[slot];
-    } else {
-      updated.modifier = (current.modifier ?? []).filter((id) => id !== itemId);
-    }
+  // Ownership is the one rule applyEquip can't check — it only sees Equipped.
+  if (action === "equip" && (inv[itemId] ?? 0) < 1) {
+    return NextResponse.json(
+      { error: "Item not in inventory" },
+      { status: 400 },
+    );
   }
+
+  // The slot rules themselves live in @herzies/shared so the desktop client can
+  // predict this exact result optimistically (see useOptimisticEquipped).
+  const outcome = applyEquip(
+    current,
+    itemId,
+    action,
+    (item.equip_slot ?? undefined) as EquipSlot | undefined,
+    side,
+  );
+
+  if (!outcome.ok) {
+    const messages: Record<EquipRejection, string> = {
+      "already-equipped": "Already equipped",
+      "not-equipped": "Item not equipped",
+      "max-modifiers": "Maximum modifiers equipped",
+      "missing-side": "side (left|right) is required for ground items",
+      // Equipable with no slot — treat as unique by id only (no dedicated key).
+      "no-slot": "Item has no equip slot",
+    };
+    return NextResponse.json(
+      { error: messages[outcome.reason] },
+      { status: 400 },
+    );
+  }
+
+  const updated = outcome.equipped;
 
   const { error } = await admin
     .from("herzies")

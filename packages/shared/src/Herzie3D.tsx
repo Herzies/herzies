@@ -178,6 +178,38 @@ export function Herzie3D({
 
   const interval = dancing ? 65 : animate ? 80 : 50;
 
+  // Frames rendered at an arbitrary drag angle can't come from the module-level
+  // frameCache — its keys carry no angle, and a live drag would add an entry per
+  // mousemove to a cache that is never evicted. Cache per settled angle instead.
+  //
+  // This matters more than it looks: `hasDragged` latches on for the lifetime of
+  // the component (dragAngle is only ever reset by a remount, and momentum
+  // decays velocity, not angle), so without this every frame tick rebuilds the
+  // whole creature — spheres, anchors, palette, projection — 20x a second,
+  // forever, after a single drag.
+  //
+  // The Map identity is the invalidation: useMemo hands back a fresh one
+  // whenever any render input changes, so a drag in progress misses on every
+  // mousemove (correct — the angle really is new each time), while a settled
+  // angle pays for one animation cycle and is free from then on. That is why
+  // the deps below are wider than the factory body reads, and why `frame` is
+  // deliberately absent from them.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: see above
+  const angleFrames = useMemo(
+    () => new Map<number, Cell[][]>(),
+    [
+      dragAngle,
+      userId,
+      stage,
+      animate,
+      dancing,
+      equipped,
+      creatureParams,
+      cols,
+      boomboxConfig,
+    ],
+  );
+
   const metrics = useMemo(() => {
     const charW = size * 0.6;
     const lineH = size * 1.35;
@@ -293,21 +325,25 @@ export function Herzie3D({
 
   useEffect(() => {
     if (hasDragged) {
-      const yAngle = animate
-        ? (frame / frames.length) * Math.PI * 2 + dragAngle
-        : DEFAULT_Y_ANGLE + dragAngle;
-      const data = renderCreatureAtAngle(
-        userId,
-        stage,
-        yAngle,
-        frame,
-        dancing,
-        equipped,
-        creatureParams,
-        cols,
-        boomboxConfig,
-      );
-      drawFrame(data.cells);
+      let cells = angleFrames.get(frame);
+      if (!cells) {
+        const yAngle = animate
+          ? (frame / frames.length) * Math.PI * 2 + dragAngle
+          : DEFAULT_Y_ANGLE + dragAngle;
+        cells = renderCreatureAtAngle(
+          userId,
+          stage,
+          yAngle,
+          frame,
+          dancing,
+          equipped,
+          creatureParams,
+          cols,
+          boomboxConfig,
+        ).cells;
+        angleFrames.set(frame, cells);
+      }
+      drawFrame(cells);
     } else {
       const current = frames[frame] ?? frames[0];
       if (current) drawFrame(current.cells);
@@ -318,6 +354,7 @@ export function Herzie3D({
     drawFrame,
     dragAngle,
     hasDragged,
+    angleFrames,
     userId,
     stage,
     animate,

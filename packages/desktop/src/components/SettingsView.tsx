@@ -21,6 +21,7 @@ export function SettingsView({
   onInstallUpdate,
   hasActiveEventOverride,
   onToggleActiveEventOverride,
+  onSpawnDebugDrop,
 }: {
   state: AppState;
   stageOverride: number | null;
@@ -32,6 +33,7 @@ export function SettingsView({
   onInstallUpdate: () => void;
   hasActiveEventOverride: boolean;
   onToggleActiveEventOverride: () => void;
+  onSpawnDebugDrop: () => void;
 }) {
   const [loggingIn, setLoggingIn] = useState(false);
   const [mediaRemoteDebug, setMediaRemoteDebug] = useState<string | null>(null);
@@ -131,6 +133,9 @@ export function SettingsView({
               onClick={onToggleActiveEventOverride}
             >
               {hasActiveEventOverride ? "Live Event: On" : "Test Live Event"}
+            </button>
+            <button type="button" className="btn" onClick={onSpawnDebugDrop}>
+              Spawn Item Drop
             </button>
           </div>
           {mediaRemoteDebug !== null && (

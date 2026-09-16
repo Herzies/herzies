@@ -1,12 +1,12 @@
 import "./globals.css";
-import type { HerzieProfile } from "@herzies/shared";
+import { type HerzieProfile, isBankFull } from "@herzies/shared";
 import {
   isPermissionGranted,
   requestPermission,
   sendNotification,
 } from "@tauri-apps/plugin-notification";
 import type { Update } from "@tauri-apps/plugin-updater";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ChatPanel } from "./components/ChatPanel";
 import { EventsView } from "./components/EventsView";
@@ -24,6 +24,8 @@ import { StoreView } from "./components/StoreView";
 import { TabBar, type View } from "./components/TabBar";
 import { TradeView } from "./components/TradeView";
 import { UpdateAvailableOverlay } from "./components/UpdateAvailableOverlay";
+import { useOptimisticEquipped } from "./hooks/useOptimisticEquipped";
+import { useTradeRequests } from "./hooks/useTradeRequests";
 import { cn } from "./lib/utils";
 import {
   type AppState,
@@ -44,7 +46,7 @@ type UpdateInstallStatus =
   | { kind: "error"; message: string };
 
 function App() {
-  const [state, setState] = useState<AppState>({
+  const [rawState, setState] = useState<AppState>({
     herzie: null,
     nowPlaying: null,
     multipliers: null,
@@ -60,7 +62,30 @@ function App() {
     pendingFriendRequest: null,
     incomingFriendRequests: [],
     outgoingFriendRequests: [],
+    pendingDrops: [],
   });
+  // Equipping is predicted locally so it lands instantly (see
+  // useOptimisticEquipped). Overlaying it onto `state` here, rather than
+  // threading it to each consumer, is what keeps the 3D herzie, the deck row,
+  // the bank grid and the "inventory full" check from disagreeing for a frame.
+  const {
+    equipped: effectiveEquipped,
+    toggleEquip,
+    predictUnequip,
+  } = useOptimisticEquipped(rawState.equipped);
+  // Memoized on both inputs, each of which is itself identity-stable while its
+  // content is unchanged — so this object only changes when something really
+  // did, and an unrelated App re-render (a view switch, a local toggle) doesn't
+  // hand every view a new `state` and re-render the lot.
+  const state = useMemo(
+    () => ({ ...rawState, equipped: effectiveEquipped }),
+    [rawState, effectiveEquipped],
+  );
+  // Mounted here, at the root, rather than inside a view: trade invites have to
+  // keep arriving while the window is hidden, and every view below is unmounted
+  // or hidden at some point. See the hook for why the Rust-side fallback poll
+  // stays.
+  useTradeRequests(rawState.isOnline);
   const [view, setView] = useState<View>("home");
   const [tradeTarget, setTradeTarget] = useState<string | null>(null);
   const [incomingTradeId, setIncomingTradeId] = useState<string | null>(null);
@@ -107,6 +132,10 @@ function App() {
   const [tradeActive, setTradeActive] = useState(false);
   /** Set when the user tries to navigate away mid-trade; holds the destination until confirmed. */
   const [pendingLeaveView, setPendingLeaveView] = useState<View | null>(null);
+  /** True once the "inventory full" alert has been dismissed for the current
+   * overflow — reset the moment a slot frees up, so filling back up again
+   * (a further buy/pickup) shows it again instead of staying silenced. */
+  const [dismissedInventoryFull, setDismissedInventoryFull] = useState(false);
   /** Where to return when the trade session ends — the view the user was on before entering it. */
   const tradeReturnViewRef = useRef<View>("home");
   /** Current view, readable from effect closures (deep-link handler). */
@@ -179,26 +208,28 @@ function App() {
     }
   }, [state.pendingFriendRequest]);
 
+  const inventoryFull = isBankFull(state.inventory, state.equipped);
+  useEffect(() => {
+    if (!inventoryFull) setDismissedInventoryFull(false);
+  }, [inventoryFull]);
+
+  // The tab only needs to know whether a song hunt is running right now, which
+  // /events-active alone answers — and it's an Edge Function, so it's cheap and
+  // fast. This used to also fetch /events/previous-hunt (a slow Vercel route)
+  // purely "for parity with EventsView" and discard the result.
   const refreshEventIndicator = useCallback(() => {
-    Promise.all([herzies.fetchActiveEvents(), herzies.fetchPreviousHunt()])
-      .then(([active, previous]) => {
-        const hunt = active.events.find((e) => e.type === "song_hunt");
-        const previousHunt = previous.events.find(
-          (e) => e.type === "song_hunt",
-        );
-        // Sparkle only when there is an active song hunt.
-        // Keep previous hunt lookup for parity with EventsView data flow.
-        void previousHunt;
-        setHasActiveEvent(!!hunt);
+    herzies
+      .fetchActiveEvents()
+      .then(({ events }) => {
+        setHasActiveEvent(events.some((e) => e.type === "song_hunt"));
       })
       .catch(() => setHasActiveEvent(false));
   }, []);
 
-  useEffect(() => {
-    if (!state.isOnline) return;
-    refreshEventIndicator();
-  }, [state.isOnline, refreshEventIndicator]);
-
+  // One effect, not two: a second copy gated on `state.isOnline` alone fired a
+  // duplicate of this every time connectivity flipped while the window was
+  // open, which is part of why opening the tray produced a burst of identical
+  // requests.
   useEffect(() => {
     if (!focused || !state.isOnline) return;
     refreshEventIndicator();
@@ -447,6 +478,10 @@ function App() {
     setPendingLeaveView(null);
   };
 
+  const handleSpawnDebugDrop = () => {
+    herzies.spawnDebugDrop().catch(() => {});
+  };
+
   const handleOpenSelfProfile = async () => {
     const code = herzie?.friendCode;
     if (!code) return;
@@ -562,7 +597,7 @@ function App() {
           // Home supplies its own bottom breathing room (HomeView's now-playing
           // bar) so its artist-image background can reach the chat's top
           // border instead of stopping short of an outer margin.
-          view !== "home" && "mb-2",
+          view !== "home" && view !== "inventory" && "mb-2",
         )}
       >
         <div
@@ -597,6 +632,7 @@ function App() {
               isSelf
               isFriend
               stageOverride={stageOverride}
+              active={view === "home"}
               onBack={() => setSelfProfile(null)}
               onTrade={() => {}}
               onAdd={() => {}}
@@ -606,8 +642,10 @@ function App() {
             <HomeView
               state={state}
               stageOverride={stageOverride}
+              active={view === "home"}
               onOpenProfile={handleOpenSelfProfile}
               onOpenSettings={() => switchView("settings")}
+              onActivity={addLog}
             />
           )}
         </div>
@@ -632,6 +670,7 @@ function App() {
               tab={friendsTab}
               onTabChange={setFriendsTab}
               onActivity={addLog}
+              active={view === "friends"}
             />
           </div>
         )}
@@ -649,6 +688,8 @@ function App() {
               inventory={state.inventory}
               currency={state.inventoryCurrency}
               equipped={state.equipped}
+              onToggleEquip={toggleEquip}
+              onPredictUnequip={predictUnequip}
               onLog={addLog}
               active={view === "inventory"}
             />
@@ -725,6 +766,7 @@ function App() {
             onToggleActiveEventOverride={() =>
               setHasActiveEventOverride((v) => !v)
             }
+            onSpawnDebugDrop={handleSpawnDebugDrop}
             availableUpdate={availableUpdate}
             installStatus={updateInstallStatus}
             onInstallUpdate={handleInstallUpdate}
@@ -783,6 +825,32 @@ function App() {
         >
           Are you sure you want to leave? The trade stays open — you can rejoin
           it from Social → Trades.
+        </PromptOverlay>
+      )}
+
+      {herzie && inventoryFull && !dismissedInventoryFull && (
+        <PromptOverlay
+          title="Inventory full"
+          titleId="inventory-full-title"
+          onEscape={() => setDismissedInventoryFull(true)}
+          actions={[
+            {
+              label: "Later",
+              colour: "text-text-dim",
+              onClick: () => setDismissedInventoryFull(true),
+            },
+            {
+              label: "Open Cards",
+              colour: "text-purple",
+              onClick: () => {
+                setDismissedInventoryFull(true);
+                switchView("inventory");
+              },
+            },
+          ]}
+        >
+          Your inventory is full. Sell something from Cards to free up a slot
+          before you pick up or buy anything else.
         </PromptOverlay>
       )}
 

@@ -36,6 +36,7 @@ export function FriendsView({
   tab,
   onTabChange,
   onActivity,
+  active = true,
 }: {
   herzie: Herzie;
   friends: Record<string, HerzieProfile>;
@@ -49,6 +50,11 @@ export function FriendsView({
   tab: Tab;
   onTabChange: (tab: Tab) => void;
   onActivity?: (message: string) => void;
+  /** False while another view is shown. This view stays mounted when hidden
+   * (main.tsx toggles visibility with CSS), and `tab` is lifted into main.tsx
+   * so it survives navigating away — without this gate the polls below kept
+   * running from behind the Home screen, fetching data nobody could see. */
+  active?: boolean;
 }) {
   const [message, setMessage] = useState("");
   const [selectedFriend, setSelectedFriend] = useState<HerzieProfile | null>(
@@ -85,15 +91,17 @@ export function FriendsView({
     herzies.friendLookup(codes);
   }, [friendCodesKey]);
 
-  // Poll friend profiles while focused (now playing / online status).
+  // Poll friend profiles while this view is actually on screen (now playing /
+  // online status). /lookup is the app's most expensive endpoint — 2-3s for a
+  // full friend list — so running it from behind another view was pure waste.
   useEffect(() => {
-    if (!focused || !friendCodesKey) return;
+    if (!active || !focused || !friendCodesKey) return;
     const codes = friendCodesKey.split(",");
     const poll = () => herzies.friendLookup(codes);
     poll();
     const interval = setInterval(poll, FRIEND_POLL_MS);
     return () => clearInterval(interval);
-  }, [focused, friendCodesKey]);
+  }, [active, focused, friendCodesKey]);
 
   // Open profile from chat (or other external navigation).
   useEffect(() => {
@@ -131,7 +139,7 @@ export function FriendsView({
   // Fetch the leaderboard when its tab (or sub-board) is opened and refresh
   // while focused.
   useEffect(() => {
-    if (tab !== "leaderboard") return;
+    if (!active || tab !== "leaderboard") return;
     let cancelled = false;
     setLeaderboard(null);
     const load = () =>
@@ -142,17 +150,16 @@ export function FriendsView({
         })
         .catch(() => {});
     load();
-    if (!focused) return;
-    const interval = setInterval(load, FRIEND_POLL_MS);
+    const interval = focused ? setInterval(load, FRIEND_POLL_MS) : undefined;
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      if (interval) clearInterval(interval);
     };
-  }, [tab, focused, leaderboardBoard]);
+  }, [active, tab, focused, leaderboardBoard]);
 
   // Fetch ongoing trades when the tab is opened and refresh while focused.
   useEffect(() => {
-    if (tab !== "trades") return;
+    if (!active || tab !== "trades") return;
     let cancelled = false;
     const load = () =>
       herzies
@@ -162,13 +169,12 @@ export function FriendsView({
         })
         .catch(() => {});
     load();
-    if (!focused) return;
-    const interval = setInterval(load, TRADES_POLL_MS);
+    const interval = focused ? setInterval(load, TRADES_POLL_MS) : undefined;
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      if (interval) clearInterval(interval);
     };
-  }, [tab, focused]);
+  }, [active, tab, focused]);
 
   const outgoingCodes = new Set(outgoingRequests.map((r) => r.friendCode));
 
@@ -235,6 +241,7 @@ export function FriendsView({
         isFriend={herzie.friendCodes.includes(code)}
         requestPending={outgoingCodes.has(code)}
         stageOverride={stageOverride}
+        active={active}
       />
     );
   }
