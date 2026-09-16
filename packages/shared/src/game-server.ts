@@ -585,8 +585,8 @@ export async function processSync(
         running[drop.itemId] = (running[drop.itemId] ?? 0) + 1;
         notifications.push({
           type: "item_granted",
-          title: "Spirit Orb",
-          message: `Your Spirit Orb collected: ${collectedId}`,
+          title: "Greedy Spirit",
+          message: `Your Greedy Spirit collected: ${collectedId}`,
           itemId: collectedId as string,
           quantity: 1,
         });

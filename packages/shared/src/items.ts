@@ -1413,9 +1413,8 @@ export const ITEMS: ItemDef[] = [
   },
   {
     id: "spirit-orb",
-    name: "Spirit Orb",
-    description:
-      "A small round spirit that watches over your herzie. Automatically collects drops for you.",
+    name: "Greedy Spirit",
+    description: "Tired of picking up items? This little guy can help.",
     rarity: "legendary",
     frames: spiritOrbFrames,
     equipable: true,
