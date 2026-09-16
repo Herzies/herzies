@@ -349,6 +349,27 @@ export async function processSync(
     });
   }
 
+  // Good Eye Sniper bonus (2% XP per song hunt won, capped at 30%). Added on
+  // every sync while equipped, like the boost and streak above — `multipliers`
+  // is also what the client displays, and gating this on credited minutes made
+  // it vanish on every cooldown-throttled sync (the desktop syncs every 5s
+  // against an 8s billing cooldown), so it blinked in and out of the home
+  // view. The win-count RPC only runs for herzies wearing the card.
+  if (hasGoodEyeSniperEquipped(row.equipped)) {
+    const { data: songHuntWins, error: sniperError } = await admin.rpc(
+      "count_song_hunt_wins",
+      { p_user_id: userId },
+    );
+    // Skip the bonus (rather than treating a query error as 0 wins) so a
+    // transient RPC failure can't silently zero out an earned bonus.
+    if (!sniperError) {
+      const bonus = goodEyeSniperBonus(songHuntWins as number);
+      if (bonus > 0) {
+        allMultipliers.push({ name: "Good Eye Sniper", bonus });
+      }
+    }
+  }
+
   // 4. Calculate and apply XP (server-authoritative)
   // Minutes actually added to total_minutes_listened by this sync. Hoisted out
   // of the block because step 7 advances `last_billed_at` only when it is > 0 —
@@ -391,25 +412,6 @@ export async function processSync(
       }
     }
     // Spotify source: no caps — deduplication handled by spotify_play_log
-
-    // Good Eye Sniper bonus (2% XP per song hunt won, capped at 30%) — only
-    // queries the win count when both equipped and actually about to credit
-    // XP this tick, since minutes is commonly 0 here (cooldown-throttled or
-    // nothing billable) and this runs on every sync.
-    if (minutes > 0 && hasGoodEyeSniperEquipped(row.equipped)) {
-      const { data: songHuntWins, error: sniperError } = await admin.rpc(
-        "count_song_hunt_wins",
-        { p_user_id: userId },
-      );
-      // Skip the bonus (rather than treating a query error as 0 wins) so a
-      // transient RPC failure can't silently zero out an earned bonus.
-      if (!sniperError) {
-        const bonus = goodEyeSniperBonus(songHuntWins as number);
-        if (bonus > 0) {
-          allMultipliers.push({ name: "Good Eye Sniper", bonus });
-        }
-      }
-    }
 
     const xp = calculateXpGain(
       minutes,
