@@ -593,6 +593,9 @@ export async function processSync(
           message: `Your Greedy Spirit collected: ${collectedId}`,
           itemId: collectedId as string,
           quantity: 1,
+          // Activity log only — the whole point of the pet is picking things
+          // up quietly, so no native notification per item.
+          logOnly: true,
         });
       } else {
         uncollected.push(drop);

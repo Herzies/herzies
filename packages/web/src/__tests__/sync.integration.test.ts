@@ -693,6 +693,10 @@ describe("World drops", () => {
         n.type === "item_granted" && n.itemId === "headphones",
     );
     expect(collectedNotif).toBeDefined();
+    // Logged to activity only — no native notification per auto-collect.
+    expect(collectedNotif.logOnly).toBe(true);
+    // The response carries the post-collect inventory the client renders from.
+    expect(body.inventory.headphones).toBe(1);
 
     const { data: herzieRow } = await admin
       .from("herzies")
