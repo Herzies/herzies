@@ -588,14 +588,14 @@ async fn collect_drop(
     match result {
         Ok(Some((_item_id, name))) => {
             // Log as soon as the collect is confirmed. This used to sit behind
-            // the reconcile below, so the "You received" line waited on two
+            // the reconcile below, so the pickup line waited on two
             // sequential round trips — the second to Vercel `/api/inventory` —
             // and lagged visibly behind the item vanishing from the ground.
             //
-            // Same "You received: Nx <name>" convention as server-driven
-            // item_granted notifications (see game-server.ts) — this path has
+            // Same `Picked up "<name>"` wording as the Greedy Spirit's
+            // server-side auto-collect (see game-server.ts) — this path has
             // no SyncResponse to ride along on, so log it directly.
-            let _ = app.emit("activity", format!("You received: 1x {name}"));
+            let _ = app.emit("activity", format!("Picked up \"{name}\""));
 
             // No /inventory re-fetch here. `collect_pending_drop` does exactly
             // one thing — delete the drop row and credit inventory_v2 by one —
@@ -1481,8 +1481,13 @@ async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: u64) -> Resu
 
 #[tauri::command]
 fn test_notification(app: AppHandle) {
-    send_notification(&app, "CD", "You received: 1x CD", Some("cd"));
-    let _ = app.emit("activity", "You received: 1x CD".to_string());
+    send_notification(
+        &app,
+        "Nostalgic Token",
+        "Picked up \"Nostalgic Token\"",
+        Some("cd"),
+    );
+    let _ = app.emit("activity", "Picked up \"Nostalgic Token\"".to_string());
 }
 
 #[tauri::command]

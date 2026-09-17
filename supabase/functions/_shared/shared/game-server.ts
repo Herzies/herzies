@@ -33,6 +33,7 @@ import {
   type FriendRequestSummary,
   filterDroppablePool,
   getDailyCraving,
+  getItem,
   goodEyeSniperBonus,
   type Herzie,
   hasRoomFor,
@@ -592,7 +593,9 @@ export async function processSync(
         notifications.push({
           type: "item_granted",
           title: "Greedy Spirit",
-          message: `Your Greedy Spirit collected: ${collectedId}`,
+          // Display name from the shared catalog — collectedId is the raw
+          // item id (e.g. "cd"), not something to show a player.
+          message: `Picked up "${getItem(collectedId as string)?.name ?? collectedId}"`,
           itemId: collectedId as string,
           quantity: 1,
           // Activity log only — the whole point of the pet is picking things
@@ -902,8 +905,12 @@ async function checkSecretTrackEvents(
       .select("name")
       .eq("id", config.rewardItemId)
       .maybeSingle();
+    // The shared catalog is what every client displays, so prefer it; the
+    // items row only covers an id the catalog doesn't know yet.
     const itemName =
-      (itemRow?.name as string | undefined) ?? config.rewardItemId;
+      getItem(config.rewardItemId)?.name ??
+      (itemRow?.name as string | undefined) ??
+      config.rewardItemId;
 
     const eventTitle = (event.title as string | null) ?? "Song Hunt";
     const isSongHunt = event.type === "song_hunt";

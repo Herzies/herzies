@@ -15,6 +15,7 @@ import { createClient } from "@supabase/supabase-js";
 import { corsHeaders, jsonResponse } from "../_shared/cors.ts";
 import {
   type BankItemLookup,
+  getItem,
   hasRoomFor,
 } from "../_shared/shared/game-rules.ts";
 
@@ -127,15 +128,18 @@ Deno.serve(async (request) => {
       return jsonResponse({ collected: null });
     }
 
-    // Resolve a human-readable name for the desktop app's activity log
-    // (falls back to the id if missing — mirrors processSync's song-hunt
-    // reward lookup in packages/web/src/lib/game-server.ts).
-    const { data: itemRow } = await admin
-      .from("items")
-      .select("name")
-      .eq("id", itemId)
-      .maybeSingle();
-    const name = (itemRow?.name as string | undefined) ?? itemId;
+    // Resolve a human-readable name for the desktop app's activity log from
+    // the shared catalog every client displays, falling back to the items row
+    // and then the id — mirrors processSync's song-hunt reward lookup.
+    let name = getItem(itemId as string)?.name;
+    if (!name) {
+      const { data: itemRow } = await admin
+        .from("items")
+        .select("name")
+        .eq("id", itemId)
+        .maybeSingle();
+      name = (itemRow?.name as string | undefined) ?? (itemId as string);
+    }
 
     return jsonResponse({ collected: { itemId, name } });
   } catch (err) {
