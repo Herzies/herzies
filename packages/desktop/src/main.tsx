@@ -596,8 +596,11 @@ function App() {
           "flex min-h-0 flex-1 flex-col overflow-hidden",
           // Home supplies its own bottom breathing room (HomeView's now-playing
           // bar) so its artist-image background can reach the chat's top
-          // border instead of stopping short of an outer margin.
-          view !== "home" && view !== "inventory" && "mb-2",
+          // border instead of stopping short of an outer margin. The viewer's
+          // own profile shares the home slot but has no such bar, so it takes
+          // the margin like every other view — otherwise it sits tighter to
+          // the chat than the same profile opened from Social.
+          (view !== "home" || !!selfProfile) && view !== "inventory" && "mb-2",
         )}
       >
         <div

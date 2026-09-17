@@ -16,6 +16,7 @@ export function TrackCard({
   albumArtUrl,
   artistImageUrl,
   tags,
+  meta,
   className,
 }: {
   title: string;
@@ -24,6 +25,8 @@ export function TrackCard({
   /** Photo bled in behind the text, right-aligned. */
   artistImageUrl?: string;
   tags?: string[];
+  /** Extra dim line under the artist, e.g. how long ago it was played. */
+  meta?: string;
   className?: string;
 }) {
   return (
@@ -69,6 +72,9 @@ export function TrackCard({
         <div className="min-w-0 flex-1">
           <MarqueeText text={title} className="text-ui font-bold text-text" />
           <div className="line-clamp-1 text-[10px] text-text-dim">{artist}</div>
+          {meta ? (
+            <div className="text-[10px] text-text-dim/70">{meta}</div>
+          ) : null}
           {tags && tags.length > 0 ? (
             <div className="mt-0.5 flex flex-wrap gap-1">
               {tags.map((tag) => (

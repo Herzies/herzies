@@ -76,9 +76,9 @@ export function ProfileView({
   return (
     <View
       title={profile.name}
-      backButton={<BackButton colour="green" onClick={onBack} />}
+      backButton={<BackButton colour="cyan" onClick={onBack} />}
       action={<ProfileBadges profile={profile} />}
-      colour="green"
+      colour="cyan"
       childrenClassName="flex min-h-0 flex-col"
     >
       {profile.friendCode && (
@@ -121,84 +121,8 @@ export function ProfileView({
           </div>
         </div>
 
-        <div className="mb-2 flex gap-1 border-b border-border text-ui">
-          <TabButton
-            colour="green"
-            active={tab === "music"}
-            onClick={() => setTab("music")}
-          >
-            {isFriend && profile.nowPlaying ? "Now playing" : "Last played"}
-          </TabButton>
-          <TabButton
-            colour="green"
-            active={tab === "artists"}
-            onClick={() => setTab("artists")}
-          >
-            Top Artists
-          </TabButton>
-        </div>
-
-        {/* Fixed panel height: the herzie above takes the leftover space, so
-            a shorter tab's content would otherwise let this whole block sink
-            and the tab row would jump as the viewer switches tabs. Tall
-            enough for the tallest panel — last played, whose time-ago line
-            sits above a 48px track card. */}
-        <div className="min-h-[72px]">
-          {!isFriend ? (
-            <div className="mb-2">
-              <div className="text-ui-sm text-[#444]">
-                Become friends to share music
-              </div>
-            </div>
-          ) : tab === "music" ? (
-            profile.nowPlaying ? (
-              <TrackCard
-                className="mb-2"
-                title={profile.nowPlaying.title}
-                artist={profile.nowPlaying.artist}
-                albumArtUrl={profile.nowPlaying.albumArtUrl}
-              />
-            ) : profile.lastPlayed ? (
-              <div className="mb-2">
-                {/* The tab already says "Last played" — this line only carries
-                    the when. */}
-                <div className="mb-1 text-[10px] text-text-dim">
-                  {formatTimeAgo(profile.lastPlayed.listenedAt)}
-                </div>
-                <TrackCard
-                  title={profile.lastPlayed.title}
-                  artist={profile.lastPlayed.artist}
-                  albumArtUrl={profile.lastPlayed.albumArtUrl}
-                />
-              </div>
-            ) : (
-              <div className="mb-2 text-ui-sm text-[#444]">
-                Nothing played yet
-              </div>
-            )
-          ) : topArtists.length > 0 ? (
-            <div className="mb-2">
-              {topArtists.map((a, i) => (
-                <div
-                  key={a.name}
-                  className="flex justify-between border-b border-[#222] py-0.5 text-ui"
-                >
-                  <span className="text-text">
-                    {i + 1}. {a.name}
-                  </span>
-                  <span className="text-text-dim">{a.plays} plays</span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="mb-2 text-ui-sm text-[#444]">
-              No top artists yet
-            </div>
-          )}
-        </div>
-
         {!isSelf && (
-          <div className="flex shrink-0 gap-1.5">
+          <div className="mb-2 flex shrink-0 gap-1.5">
             <button type="button" className="btn text-purple" onClick={onTrade}>
               Trade
             </button>
@@ -240,6 +164,69 @@ export function ProfileView({
             ) : null}
           </div>
         )}
+        <div className="mb-2 flex gap-1 border-b border-border text-ui">
+          <TabButton
+            colour="cyan"
+            active={tab === "music"}
+            onClick={() => setTab("music")}
+          >
+            {isFriend && profile.nowPlaying ? "Now playing" : "Last played"}
+          </TabButton>
+          <TabButton
+            colour="cyan"
+            active={tab === "artists"}
+            onClick={() => setTab("artists")}
+          >
+            Top Artists
+          </TabButton>
+        </div>
+
+        {/* Fixed panel height: the herzie above takes the leftover space, so
+            a shorter tab's content would otherwise let this whole block sink
+            and the tab row would jump as the viewer switches tabs. Tall
+            enough for the tallest panel — three top artist rows. */}
+        <div className="min-h-16">
+          {!isFriend ? (
+            <div>
+              <div className="text-ui-sm text-[#444]">
+                Become friends to share music
+              </div>
+            </div>
+          ) : tab === "music" ? (
+            profile.nowPlaying ? (
+              <TrackCard
+                title={profile.nowPlaying.title}
+                artist={profile.nowPlaying.artist}
+                albumArtUrl={profile.nowPlaying.albumArtUrl}
+              />
+            ) : profile.lastPlayed ? (
+              <TrackCard
+                title={profile.lastPlayed.title}
+                artist={profile.lastPlayed.artist}
+                albumArtUrl={profile.lastPlayed.albumArtUrl}
+                meta={formatTimeAgo(profile.lastPlayed.listenedAt)}
+              />
+            ) : (
+              <div className="text-ui-sm text-[#444]">Nothing played yet</div>
+            )
+          ) : topArtists.length > 0 ? (
+            <div>
+              {topArtists.map((a, i) => (
+                <div
+                  key={a.name}
+                  className="flex justify-between border-b border-[#222] py-0.5 text-ui last:border-b-0"
+                >
+                  <span className="text-text">
+                    {i + 1}. {a.name}
+                  </span>
+                  <span className="text-text-dim">{a.plays} plays</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-ui-sm text-[#444]">No top artists yet</div>
+          )}
+        </div>
       </div>
     </View>
   );
