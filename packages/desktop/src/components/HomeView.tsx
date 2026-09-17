@@ -1,7 +1,6 @@
 import {
   getItem,
   hasRoomFor,
-  lastFmTrackUrl,
   levelProgress,
   xpToNextLevel,
 } from "@herzies/shared";
@@ -15,9 +14,9 @@ import {
 } from "../tauri-bridge";
 import { Herzie3D } from "./Herzie3D";
 import { CARD_SHAPE_CLIP, ItemTypeIcon } from "./icons/ItemTypeIcon";
-import { MarqueeText } from "./MarqueeText";
 import { ModifiersButton } from "./ModifiersButton";
 import { Tooltip } from "./Tooltip";
+import { TrackCard } from "./TrackCard";
 
 /** A pending world drop plus the ground x-position it was assigned on first
  * render. */
@@ -470,70 +469,14 @@ export function HomeView({
           </div>
         </div>
       ) : nowPlaying ? (
-        <div className="relative overflow-hidden border-t border-border pt-1.5 pb-2">
-          {nowPlaying.artistImageUrl ? (
-            <div className="absolute inset-y-0 right-0 w-1/2 overflow-hidden">
-              <img
-                src={nowPlaying.artistImageUrl}
-                alt=""
-                aria-hidden="true"
-                className="absolute inset-0 h-full w-full object-cover object-right"
-                onError={(e) => {
-                  e.currentTarget.style.display = "none";
-                }}
-              />
-              {/* Darken so title/artist stay readable over the photo. */}
-              <div className="absolute inset-0 bg-black/35" />
-              {/* Fades the photo into the app background toward the left,
-                  right at this box's own edge (the bar's 50% mark). */}
-              <div className="absolute inset-0 bg-gradient-to-r from-bg-panel to-transparent" />
-            </div>
-          ) : null}
-          <div className="relative flex gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                void herzies.openExternalUrl(
-                  lastFmTrackUrl(nowPlaying.artist, nowPlaying.title),
-                );
-              }}
-              title="Open on Last.fm"
-              className="h-12 w-12 shrink-0 cursor-pointer overflow-hidden rounded border-none bg-[#333] p-0"
-            >
-              {nowPlaying.albumArtUrl ? (
-                <img
-                  src={nowPlaying.albumArtUrl}
-                  alt={`${nowPlaying.title} album art`}
-                  className="h-full w-full object-cover"
-                  onError={(e) => {
-                    e.currentTarget.style.display = "none";
-                  }}
-                />
-              ) : null}
-            </button>
-            <div className="min-w-0 flex-1">
-              <MarqueeText
-                text={nowPlaying.title}
-                className="text-ui font-bold text-text"
-              />
-              <div className="line-clamp-1 text-[10px] text-text-dim">
-                {nowPlaying.artist}
-              </div>
-              {nowPlaying.tags && nowPlaying.tags.length > 0 ? (
-                <div className="mt-0.5 flex flex-wrap gap-1">
-                  {nowPlaying.tags.map((tag) => (
-                    <span
-                      key={tag}
-                      className="rounded-full bg-purple/15 px-1.5 py-px text-ui-sm lowercase text-purple"
-                    >
-                      {tag.toLowerCase()}
-                    </span>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          </div>
-        </div>
+        <TrackCard
+          title={nowPlaying.title}
+          artist={nowPlaying.artist}
+          albumArtUrl={nowPlaying.albumArtUrl}
+          artistImageUrl={nowPlaying.artistImageUrl}
+          tags={nowPlaying.tags}
+          className="border-t border-border pt-1.5 pb-2"
+        />
       ) : (
         <div className="border-t border-border pt-1.5 pb-2">
           <div className="text-center text-[10px] text-text-dim">
