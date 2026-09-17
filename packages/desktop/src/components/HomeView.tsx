@@ -116,7 +116,7 @@ export function HomeView({
     // bank shares its slot and still fits at capacity.
     if (!hasRoomFor(inventory, equipped, drop.itemId)) {
       const name = getItem(drop.itemId)?.name ?? drop.itemId;
-      onActivity?.(`Inventory full — couldn't pick up ${name}`);
+      onActivity?.(`Inventory full — couldn't pick up "${name}"`);
       return false;
     }
     setCollectingIds((prev) => new Set(prev).add(drop.id));

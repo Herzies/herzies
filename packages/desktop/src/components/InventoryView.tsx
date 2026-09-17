@@ -672,8 +672,8 @@ export function InventoryView({
     if (!predicted.ok) {
       onLog?.(
         predicted.reason === "not-sellable"
-          ? `${name} can't be sold`
-          : `Not enough ${name} to sell`,
+          ? `"${name}" can't be sold`
+          : `Not enough "${name}" to sell`,
       );
       return;
     }
@@ -712,11 +712,11 @@ export function InventoryView({
         inventoryRef.current = result.inventory;
         currencyRef.current = result.newCurrency;
       } else {
-        onLog?.(`Failed to sell ${name}`);
+        onLog?.(`Failed to sell "${name}"`);
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
-      onLog?.(`Failed to sell ${name}: ${msg}`);
+      onLog?.(`Failed to sell "${name}": ${msg}`);
     } finally {
       // No manual rollback on failure: once the last sell settles the gate
       // below lifts and the effect adopts the server snapshot, which for a
@@ -757,7 +757,7 @@ export function InventoryView({
     const result = await onToggleEquip(itemId);
     if (result.ok) {
       onLog?.(
-        result.action === "equip" ? `Placed ${name}` : `Returned ${name}`,
+        result.action === "equip" ? `Placed "${name}"` : `Returned "${name}"`,
       );
     } else {
       // Put the card back only for a toggle that never left the client (see
@@ -775,7 +775,7 @@ export function InventoryView({
         });
       }
       const verb = result.action === "equip" ? "place" : "return";
-      onLog?.(`Failed to ${verb} ${name}: ${result.error}`);
+      onLog?.(`Failed to ${verb} "${name}": ${result.error}`);
     }
   };
 
@@ -801,7 +801,7 @@ export function InventoryView({
     const def = getItem(itemId);
     if (!def?.equipable) return;
     if (isItemEquipped(itemId)) {
-      onLog?.(`${def.name} is already placed`);
+      onLog?.(`"${def.name}" is already placed`);
       return;
     }
     handleEquip(itemId, slotIndex);

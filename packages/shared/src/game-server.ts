@@ -931,7 +931,7 @@ async function checkSecretTrackEvents(
     notifications.push({
       type: "item_granted",
       title: eventTitle,
-      message: `You received: ${itemName}`,
+      message: `You received "${itemName}"`,
       itemId: config.rewardItemId,
       quantity: 1,
       logOnly: true,

@@ -90,7 +90,7 @@ export function StoreView({
       const result = await herzies.buyItem(itemId, 1);
       setInventory(result.inventory);
       setCurrency(result.newCurrency);
-      onLog?.(`Bought ${getItem(itemId)?.name ?? itemId}`);
+      onLog?.(`Bought "${getItem(itemId)?.name ?? itemId}"`);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
