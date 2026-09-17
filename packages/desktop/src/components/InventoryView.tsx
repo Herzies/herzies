@@ -1,4 +1,10 @@
-import type { Equipped, Herzie, Inventory, ItemType } from "@herzies/shared";
+import type {
+  Equipped,
+  Herzie,
+  Inventory,
+  ItemType,
+  Rarity,
+} from "@herzies/shared";
 import {
   applySell,
   BANK_SLOT_COUNT,
@@ -10,6 +16,8 @@ import {
   groundSlot,
   isModifierEquipped,
   MAX_MODIFIERS,
+  RARITY_COLORS,
+  RARITY_LABELS,
 } from "@herzies/shared";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -25,8 +33,15 @@ import { ItemTypeIcon } from "./icons/ItemTypeIcon";
 import { SortIcon } from "./icons/SortIcon";
 import { List } from "./List";
 import { NumberTicker } from "./NumberTicker";
+import { PromptOverlay } from "./PromptOverlay";
 import { TabButton } from "./TabButton";
 import { HoverPreview, Tooltip } from "./Tooltip";
+
+/** Rarities worth a second look before they're sold for coin. */
+const CONFIRM_SELL_RARITIES: ReadonlySet<Rarity> = new Set([
+  "rare",
+  "legendary",
+]);
 
 /** Non-stackable items cap out at 1 per sell action regardless of how many
  * are owned — each grid slot already represents exactly one physical unit
@@ -617,6 +632,24 @@ export function InventoryView({
    * *which* of them the player meant. Skipped for stackable items, which
    * share a single badge-counted slot regardless of quantity — clearing it
    * on a partial sell would wipe a stack that's still owned. */
+  /** A rare-or-better sell waiting on the "are you sure?" prompt. */
+  const [sellConfirm, setSellConfirm] = useState<{
+    itemId: string;
+    qty: number;
+    slotIndex?: number;
+  } | null>(null);
+
+  /** Every sell entry point goes through here: rare and legendary items ask
+   * first, anything else sells straight away. */
+  const requestSell = (itemId: string, qty: number, slotIndex?: number) => {
+    const rarity = getItem(itemId)?.rarity;
+    if (rarity && CONFIRM_SELL_RARITIES.has(rarity)) {
+      setSellConfirm({ itemId, qty, slotIndex });
+      return;
+    }
+    handleSell(itemId, qty, slotIndex);
+  };
+
   const handleSell = async (
     itemId: string,
     qty: number,
@@ -983,7 +1016,11 @@ export function InventoryView({
       {inspectItem && inspected && (
         <ItemInspectOverlay
           itemId={inspectItem}
-          onClose={() => setInspectItem(null)}
+          // Escape reaches both this and the sell confirmation; let it only
+          // dismiss the prompt, leaving the preview open underneath.
+          onClose={() => {
+            if (!sellConfirm) setInspectItem(null);
+          }}
           equipped={equipped}
           meta={inspectedMeta || undefined}
           footer={
@@ -1016,7 +1053,7 @@ export function InventoryView({
                   qty={inspectedQty}
                   price={inspected.sellPrice}
                   stackable={inspected.stackable ?? false}
-                  onSell={handleSell}
+                  onSell={requestSell}
                 />
               ) : null}
             </>
@@ -1024,22 +1061,40 @@ export function InventoryView({
         />
       )}
 
-      {sellMenu && (
-        <ContextMenu
-          x={sellMenu.x}
-          y={sellMenu.y}
-          onClose={() => setSellMenu(null)}
-          items={[
-            {
-              label: "Sell",
-              onClick: () => {
-                setSellBox(sellMenu);
-                setSellMenu(null);
-              },
-            },
-          ]}
-        />
-      )}
+      {sellMenu &&
+        (() => {
+          const qty = inventory?.[sellMenu.itemId] ?? 0;
+          const canSellAll =
+            (getItem(sellMenu.itemId)?.stackable ?? false) && qty > 1;
+          return (
+            <ContextMenu
+              x={sellMenu.x}
+              y={sellMenu.y}
+              onClose={() => setSellMenu(null)}
+              items={[
+                {
+                  label: "Sell",
+                  onClick: () => {
+                    setSellBox(sellMenu);
+                    setSellMenu(null);
+                  },
+                },
+                // Skips the quantity popover and sells the whole stack.
+                ...(canSellAll
+                  ? [
+                      {
+                        label: "Sell all",
+                        onClick: () => {
+                          requestSell(sellMenu.itemId, qty, sellMenu.slotIndex);
+                          setSellMenu(null);
+                        },
+                      },
+                    ]
+                  : []),
+              ]}
+            />
+          );
+        })()}
 
       {sellBox &&
         (() => {
@@ -1055,11 +1110,51 @@ export function InventoryView({
               price={item.sellPrice}
               stackable={item.stackable ?? false}
               onSell={(id, n) => {
-                handleSell(id, n, sellBox.slotIndex);
+                requestSell(id, n, sellBox.slotIndex);
                 setSellBox(null);
               }}
               onClose={() => setSellBox(null)}
             />
+          );
+        })()}
+
+      {sellConfirm &&
+        (() => {
+          const item = getItem(sellConfirm.itemId);
+          if (!item) return null;
+          const total = sellConfirm.qty * (item.sellPrice ?? 0);
+          return (
+            <PromptOverlay
+              title={`Sell ${RARITY_LABELS[item.rarity].toLowerCase()} item?`}
+              titleId="confirm-sell-title"
+              onEscape={() => setSellConfirm(null)}
+              actions={[
+                {
+                  label: "Keep it",
+                  colour: "text-text-dim",
+                  onClick: () => setSellConfirm(null),
+                },
+                {
+                  label: "Sell",
+                  colour: "text-red",
+                  onClick: () => {
+                    handleSell(
+                      sellConfirm.itemId,
+                      sellConfirm.qty,
+                      sellConfirm.slotIndex,
+                    );
+                    setSellConfirm(null);
+                  },
+                },
+              ]}
+            >
+              Are you sure you want to sell{" "}
+              {sellConfirm.qty > 1 ? `${sellConfirm.qty}x ` : ""}
+              <span style={{ color: RARITY_COLORS[item.rarity] }}>
+                "{item.name}"
+              </span>{" "}
+              for <Coin amount={total} />?
+            </PromptOverlay>
           );
         })()}
 
