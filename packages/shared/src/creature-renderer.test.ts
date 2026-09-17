@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { RAINBOW_RAMP } from "./ascii3d.js";
 import {
+  DEFAULT_Y_ANGLE,
   generateCreatureParams,
+  generateDanceFrames,
   generateIdleFrames,
   generateRotationFrames,
+  isSpiritHopFrame,
   renderCreatureAtAngle,
+  SPIRIT_DANCE_HOP_VARIANT_COUNT,
 } from "./creature-renderer.js";
 
 const USER = "test-herzie";
@@ -118,6 +122,69 @@ describe("spirit orb pet", () => {
       ground_left: "spirit-orb",
     });
     expect(hueSet(withOrb).size).toBeGreaterThan(hueSet(plain).size);
+  });
+
+  it("dance hop variants reuse plain frames outside the hop", () => {
+    const eq = { ground_left: "spirit-orb" } as const;
+    const plain = generateDanceFrames(USER, 3, eq);
+    for (let v = 0; v < SPIRIT_DANCE_HOP_VARIANT_COUNT; v++) {
+      const hop = generateDanceFrames(
+        USER,
+        3,
+        eq,
+        undefined,
+        undefined,
+        undefined,
+        v,
+      );
+      expect(hop).toHaveLength(plain.length);
+      hop.forEach((frame, i) => {
+        if (isSpiritHopFrame(v, i)) expect(frame).not.toBe(plain[i]);
+        else expect(frame).toBe(plain[i]);
+      });
+      // Seamless at the loop boundary, where Herzie3D swaps variants.
+      expect(isSpiritHopFrame(v, 0)).toBe(false);
+      expect(isSpiritHopFrame(v, plain.length - 1)).toBe(false);
+    }
+  });
+
+  it("dance hop variants put the spirit back where it started", () => {
+    // Travel holds after landing, so a variant whose travels don't cancel out
+    // would snap the spirit sideways once its hops end (those frames are
+    // reused from the plain loop). Re-render the last frame with the variant's
+    // pose actually applied and compare pixels.
+    const eq = { ground_left: "spirit-orb" } as const;
+    const plain = generateDanceFrames(USER, 3, eq);
+    const last = plain.length - 1;
+    for (let v = 0; v < SPIRIT_DANCE_HOP_VARIANT_COUNT; v++) {
+      const posed = renderCreatureAtAngle(
+        USER,
+        3,
+        DEFAULT_Y_ANGLE,
+        last,
+        true,
+        eq,
+        undefined,
+        undefined,
+        undefined,
+        v,
+      );
+      expect(posed.cells).toEqual(plain[last].cells);
+    }
+  });
+
+  it("ignores a dance hop variant when no spirit is equipped", () => {
+    expect(
+      generateDanceFrames(
+        USER,
+        3,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        1,
+      ),
+    ).toBe(generateDanceFrames(USER, 3));
   });
 
   it("coexists with a boombox on the other ground slot", () => {

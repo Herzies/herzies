@@ -217,7 +217,11 @@ interface Sphere {
 // Returns a copy of the sphere list with per-part dance offsets applied.
 // Adds X-axis sway for spikes in addition to Y-axis bounce.
 
-function applyDanceOffsets(spheres: Sphere[], frameIdx: number): Sphere[] {
+function applyDanceOffsets(
+  spheres: Sphere[],
+  frameIdx: number,
+  hops: readonly SpiritHop[] = [],
+): Sphere[] {
   const t = frameIdx / DANCE_FRAMES; // normalized 0..1
 
   function yOff(amp: number, cycles: number, phase: number): number {
@@ -238,11 +242,17 @@ function applyDanceOffsets(spheres: Sphere[], frameIdx: number): Sphere[] {
   const groundOff =
     -Math.abs(Math.sin(2 * Math.PI * t * DANCE.ground.cycles)) *
     DANCE.ground.amp;
-  // Spirit Orb floats with a slow smooth bob rather than a hop — half the
-  // body's cycle count, so it visibly lags the beat.
-  const spiritOff = yOff(DANCE.spirit.amp, DANCE.spirit.cycles, Math.PI / 5);
+  // Greedy Spirit floats with a slow smooth bob — half the body's cycle count,
+  // so it visibly lags the beat — plus any on-beat hops of this loop variant.
+  const moveSpirit = spiritMover(
+    spheres,
+    frameIdx,
+    hops,
+    yOff(DANCE.spirit.amp, DANCE.spirit.cycles, Math.PI / 5),
+  );
 
   return spheres.map((s) => {
+    if (s.part === "spirit") return moveSpirit(s);
     let dy = 0;
     let dx = 0;
     if (s.part === "body") dy = bodyOff;
@@ -255,7 +265,6 @@ function applyDanceOffsets(spheres: Sphere[], frameIdx: number): Sphere[] {
     } else if (s.part === "arm-l" || s.part === "leg-l") dy = limbLOff;
     else if (s.part === "arm-r" || s.part === "leg-r") dy = limbROff;
     else if (s.part === "ground") dy = groundOff;
-    else if (s.part === "spirit") dy = spiritOff;
 
     return {
       ...s,
@@ -1229,6 +1238,14 @@ function buildSpiritOrbSpheres(
   });
 }
 
+/** Whether a Greedy Spirit sits in either ground slot. */
+export function hasSpiritEquipped(equipped?: Equipped): boolean {
+  return (
+    equipped?.ground_left === "spirit-orb" ||
+    equipped?.ground_right === "spirit-orb"
+  );
+}
+
 export function equippedCacheKey(equipped?: Equipped): string {
   if (!equipped) return "";
   // Derived from EQUIPPED_SLOTS so a new slot can never silently miss the key
@@ -1296,6 +1313,249 @@ function buildCreatureSpheres(params: CreatureParams, stage: number): Sphere[] {
   const spheres = BODY_BUILDERS[params.bodyType](params, stage);
   centerVertically(spheres);
   return spheres;
+}
+
+// --- Greedy Spirit dance hops ---
+// While dancing, the spirit every so often hops along to the music, so it
+// reads as alive rather than as a prop on a sine wave. A hop baked into the
+// loop would recur on the exact same beat forever, which is the opposite of
+// alive, so hops live in separate loop *variants* instead: identical to the
+// plain dance loop except for the spirit during its hop(s). Herzie3D picks
+// plain or a random variant at each loop boundary, so hops land at irregular
+// times, heights and spacings. A variant only re-renders the frames its hops
+// touch and shares the rest with the plain loop (see generateLoopFrames).
+//
+// Hops are snappy and locked to the beat: they launch as the boombox touches
+// down and land on a later touchdown, sometimes chaining beat to beat.
+
+interface SpiritHop {
+  /** Frame the crouch starts on. */
+  start: number;
+  /** Apex height above rest, in world units (~11 terminal rows per unit). */
+  height: number;
+  crouch: number; // frames
+  air: number; // frames
+  settle: number; // frames
+  /** Sideways distance covered, toward the herzie (negative = away). It is
+   * kept after landing, so a variant's travels must sum to zero. Columns are
+   * about twice as dense as rows (~24 per unit), so a little goes a long way. */
+  travel: number;
+  /** Degrees the spirit turns toward the herzie (negative = toward the
+   * camera) to look where it is going, then eases back after landing. */
+  turn: number;
+}
+
+interface HopOptions {
+  travel?: number;
+  turn?: number;
+}
+
+const HOP_CROUCH_DEPTH = 0.25; // of height
+const HOP_SETTLE_DEPTH = 0.5; // of height, before the sin·(1-p) shaping
+
+/** Boombox touchdowns — the beat — fall every DANCE_BEAT frames (390ms). */
+const DANCE_BEAT = DANCE_FRAMES / (2 * DANCE.ground.cycles);
+
+/** A dance hop that leaves the ground on beat `launchBeat` and lands `beats`
+ * later, with a one-frame crouch just before the beat. `rebound` drops the
+ * landing so the next hop can push straight off it. */
+function danceHop(
+  launchBeat: number,
+  beats: number,
+  height: number,
+  {
+    travel = 0,
+    turn = 0,
+    rebound = false,
+  }: HopOptions & { rebound?: boolean } = {},
+): SpiritHop {
+  return {
+    start: launchBeat * DANCE_BEAT - 1,
+    height,
+    crouch: 1,
+    air: beats * DANCE_BEAT,
+    settle: rebound ? 0 : 2,
+    travel,
+    turn,
+  };
+}
+
+// Launches never sit on beat 0: every variant must match the plain loop on its
+// first and last frame so swapping at the wrap is seamless.
+const DANCE_SPIRIT_HOPS: readonly (readonly SpiritHop[])[] = [
+  // Heights run higher than idle hops: the dance float already swings the
+  // spirit about a row either way, and a smaller hop just disappears into it.
+  [danceHop(1, 1, 0.2)],
+  [danceHop(1, 2, 0.34)],
+  [danceHop(2, 1, 0.24)],
+  // Bouncing along: two quick hops, the second a touch higher.
+  [danceHop(1, 1, 0.18, { rebound: true }), danceHop(2, 1, 0.24)],
+  // Little hop, then a big one off the rebound.
+  [danceHop(1, 1, 0.14, { rebound: true }), danceHop(2, 1, 0.32)],
+  // Side-step: over toward the herzie on one beat, back out on the next.
+  [
+    danceHop(1, 1, 0.2, { travel: 0.08, turn: 10, rebound: true }),
+    danceHop(2, 1, 0.2, { travel: -0.08, turn: -25 }),
+  ],
+];
+
+/** Dance hop variants Herzie3D can choose between (indices 0..n-1). */
+export const SPIRIT_DANCE_HOP_VARIANT_COUNT = DANCE_SPIRIT_HOPS.length;
+
+function spiritHopsFor(
+  variant: number | undefined,
+): readonly SpiritHop[] | undefined {
+  return variant === undefined ? undefined : DANCE_SPIRIT_HOPS[variant];
+}
+
+/** The glance leads the jump: it starts turning at least this many frames
+ * before launch, and takes at least this long to ease back after landing. */
+const HOP_TURN_LEAD = 3;
+
+function hopLaunch(hop: SpiritHop): number {
+  return hop.start + hop.crouch;
+}
+
+function hopLanding(hop: SpiritHop): number {
+  return hopLaunch(hop) + hop.air;
+}
+
+/** First frame this hop moves anything. */
+function hopFirstFrame(hop: SpiritHop): number {
+  return hop.turn
+    ? Math.min(hop.start, hopLaunch(hop) - HOP_TURN_LEAD)
+    : hop.start;
+}
+
+/** One past the last frame this hop moves anything. Travel persists beyond
+ * it, which isSpiritHopFrame accounts for by spanning the whole variant. */
+function hopEndFrame(hop: SpiritHop): number {
+  const release = hop.turn ? Math.max(hop.settle, HOP_TURN_LEAD) : hop.settle;
+  return hopLanding(hop) + release;
+}
+
+/** Hermite ease-in-out, clamped to 0..1. */
+function smoothstep(x: number): number {
+  const t = Math.min(1, Math.max(0, x));
+  return t * t * (3 - 2 * t);
+}
+
+/**
+ * Height of one hop above rest at `frameIdx` (positive = up), 0 outside it.
+ * Three phases, in the classic squash-and-stretch shape minus the squash
+ * (spheres can't):
+ *
+ *   crouch  ease-in-out dip — the anticipation that sells the jump
+ *   air     ballistic parabola from the crouch to rest: fast launch, slow
+ *           hang at the apex, accelerating fall (gravity, not an easing)
+ *   settle  the landing carries it below rest, then it springs back:
+ *           sin(πp)·(1-p) starts moving downward like the fall and eases
+ *           into rest with no velocity, so there is no pop on either end
+ *
+ * Air and settle sample mid-frame so no frame sits exactly on a boundary value.
+ */
+function hopHeight(frameIdx: number, hop: SpiritHop): number {
+  const t = frameIdx - hop.start;
+  const crouch = hop.height * HOP_CROUCH_DEPTH;
+  if (t < 0 || t >= hop.crouch + hop.air + hop.settle) return 0;
+  if (t < hop.crouch) {
+    const p = (t + 1) / hop.crouch;
+    return (-crouch * (1 - Math.cos(Math.PI * p))) / 2;
+  }
+  if (t < hop.crouch + hop.air) {
+    const p = (t - hop.crouch + 0.5) / hop.air;
+    return -crouch * (1 - p) + 4 * hop.height * p * (1 - p);
+  }
+  const p = (t - hop.crouch - hop.air + 0.5) / hop.settle;
+  return -hop.height * HOP_SETTLE_DEPTH * Math.sin(Math.PI * p) * (1 - p);
+}
+
+/** Fraction of `hop.travel` covered by `frameIdx`. Linear through the air —
+ * horizontal speed is constant in a ballistic jump, and paired with the
+ * vertical parabola that traces a true arc. */
+function hopTravel(frameIdx: number, hop: SpiritHop): number {
+  const t = frameIdx - hopLaunch(hop);
+  if (t < 0) return 0;
+  if (t >= hop.air) return 1;
+  return (t + 0.5) / hop.air;
+}
+
+/** 0..1 weight of `hop.turn` at `frameIdx`: eases in before launch (it looks
+ * first, then jumps), holds through the air, eases out after landing. */
+function hopTurn(frameIdx: number, hop: SpiritHop): number {
+  const first = hopFirstFrame(hop);
+  const launch = hopLaunch(hop);
+  const landing = hopLanding(hop);
+  const end = hopEndFrame(hop);
+  if (frameIdx < first || frameIdx >= end) return 0;
+  if (frameIdx < launch)
+    return smoothstep((frameIdx - first + 1) / (launch - first));
+  if (frameIdx < landing) return 1;
+  return 1 - smoothstep((frameIdx - landing + 1) / (end - landing));
+}
+
+interface SpiritPose {
+  /** World units above rest. */
+  up: number;
+  /** World units toward the herzie. */
+  travel: number;
+  /** Degrees toward the herzie. */
+  turn: number;
+}
+
+function spiritPose(frameIdx: number, hops: readonly SpiritHop[]): SpiritPose {
+  const pose = { up: 0, travel: 0, turn: 0 };
+  for (const hop of hops) {
+    pose.up += hopHeight(frameIdx, hop);
+    pose.travel += hop.travel * hopTravel(frameIdx, hop);
+    pose.turn += hop.turn * hopTurn(frameIdx, hop);
+  }
+  return pose;
+}
+
+/** Whether `frameIdx` differs from the plain dance loop in hop variant `variant`:
+ * anywhere from its first hop's glance to its last hop's settle, gaps
+ * included, since travel holds the spirit off its rest spot in between. */
+export function isSpiritHopFrame(variant: number, frameIdx: number): boolean {
+  const hops = spiritHopsFor(variant);
+  if (!hops || hops.length === 0) return false;
+  const first = Math.min(...hops.map(hopFirstFrame));
+  const end = Math.max(...hops.map(hopEndFrame));
+  return frameIdx >= first && frameIdx < end;
+}
+
+/**
+ * Moves every Greedy Spirit sphere by the loop's bob plus its hop pose. The
+ * turn rotates the spheres about the orb's own centre, so the eyes swing
+ * round the body rather than the whole spirit orbiting. With no hops this is
+ * exactly the plain bob (a zero-angle rotY is the identity).
+ */
+function spiritMover(
+  spheres: Sphere[],
+  frameIdx: number,
+  hops: readonly SpiritHop[],
+  bob: number,
+): (s: Sphere) => Sphere {
+  const pose = spiritPose(frameIdx, hops);
+  let core: Sphere | undefined;
+  for (const s of spheres) {
+    if (s.part === "spirit" && (!core || s.radius > core.radius)) core = s;
+  }
+  const [cx, , cz] = core?.center ?? [0, 0, 0];
+  // The herzie is centred on x = 0; the spirit sits to one side of it.
+  const toward = cx < 0 ? 1 : -1;
+  // Same sign convention as the placement yaw in buildSpiritOrbSpheres.
+  const yaw = (-toward * pose.turn * Math.PI) / 180;
+  const dx = toward * pose.travel;
+  // World +y points down the screen (the creature's feet are at maxY).
+  const dy = bob - pose.up;
+  return (s) => {
+    const [rx, , rz] = rotY([s.center[0] - cx, 0, s.center[2] - cz], yaw);
+    return {
+      ...s,
+      center: [cx + rx + dx, s.center[1] + dy, cz + rz] as V3,
+    };
+  };
 }
 
 // --- Idle animation offsets ---
@@ -1708,20 +1968,42 @@ function renderCreatureFrame(
 const frameCache = new Map<string, FrameData[]>();
 
 /**
- * Generate idle animation frames — fixed Y angle with per-part breathing offsets.
- * 120 frames at 50ms = 6s loop.
+ * Idle or dance loop, the dance loop optionally as a Greedy Spirit hop
+ * variant. With a variant, frames outside its hops are the plain loop's own
+ * objects, so a variant costs only the handful of frames it re-renders. The
+ * variant is ignored for the idle loop and when no spirit is equipped.
  */
-export function generateIdleFrames(
+function generateLoopFrames(
+  mode: "idle" | "dance",
   userId: string,
   stage: number,
-  equipped?: Equipped,
-  paramsOverride?: CreatureParams,
-  cols: number = SW,
-  boomboxConfig?: BoomboxConfig,
+  equipped: Equipped | undefined,
+  paramsOverride: CreatureParams | undefined,
+  cols: number,
+  boomboxConfig: BoomboxConfig | undefined,
+  spiritHopVariant: number | undefined,
 ): FrameData[] {
-  const key = `idle:${paramsCacheKey(userId, paramsOverride)}:${stage}:${equippedCacheKey(equipped)}:${cols}:${boomboxKey(boomboxConfig)}`;
+  const dancing = mode === "dance";
+  const hops =
+    dancing && hasSpiritEquipped(equipped)
+      ? spiritHopsFor(spiritHopVariant)
+      : undefined;
+  const key = `${mode}:${paramsCacheKey(userId, paramsOverride)}:${stage}:${equippedCacheKey(equipped)}:${cols}:${boomboxKey(boomboxConfig)}${hops ? `:hop${spiritHopVariant}` : ""}`;
   const cached = frameCache.get(key);
   if (cached) return cached;
+
+  const plain = hops
+    ? generateLoopFrames(
+        mode,
+        userId,
+        stage,
+        equipped,
+        paramsOverride,
+        cols,
+        boomboxConfig,
+        undefined,
+      )
+    : undefined;
 
   const params = resolveCreatureParams(userId, paramsOverride);
   const baseSpheres = buildCreatureSpheres(params, stage);
@@ -1730,8 +2012,14 @@ export function generateIdleFrames(
   const colors = buildColorTriplet(CREATURE_PALETTE[params.colorIndex]);
   const scheme = colorSchemeFor(equipped);
 
-  const frames = Array.from({ length: IDLE_FRAMES }, (_, i) => {
-    const animated = applyIdleOffsets(baseSpheres, i);
+  const length = dancing ? DANCE_FRAMES : IDLE_FRAMES;
+  const frames = Array.from({ length }, (_, i) => {
+    if (plain && !isSpiritHopFrame(spiritHopVariant as number, i)) {
+      return plain[i];
+    }
+    const animated = dancing
+      ? applyDanceOffsets(baseSpheres, i, hops)
+      : applyIdleOffsets(baseSpheres, i);
     return renderCreatureFrame(
       animated,
       DEFAULT_Y_ANGLE,
@@ -1745,6 +2033,30 @@ export function generateIdleFrames(
 
   frameCache.set(key, frames);
   return frames;
+}
+
+/**
+ * Generate idle animation frames — fixed Y angle with per-part breathing offsets.
+ * 120 frames at 50ms = 6s loop.
+ */
+export function generateIdleFrames(
+  userId: string,
+  stage: number,
+  equipped?: Equipped,
+  paramsOverride?: CreatureParams,
+  cols: number = SW,
+  boomboxConfig?: BoomboxConfig,
+): FrameData[] {
+  return generateLoopFrames(
+    "idle",
+    userId,
+    stage,
+    equipped,
+    paramsOverride,
+    cols,
+    boomboxConfig,
+    undefined,
+  );
 }
 
 /**
@@ -1789,7 +2101,10 @@ export function generateRotationFrames(
 
 /**
  * Generate dance animation frames — rhythmic bounce at DEFAULT_Y_ANGLE.
- * 24 frames at 35ms = 840ms loop.
+ * 24 frames at 65ms = 1560ms loop.
+ *
+ * `spiritHopVariant` (0..SPIRIT_DANCE_HOP_VARIANT_COUNT-1) returns that
+ * Greedy Spirit on-beat hop variant of the loop instead of the plain one.
  */
 export function generateDanceFrames(
   userId: string,
@@ -1798,33 +2113,18 @@ export function generateDanceFrames(
   paramsOverride?: CreatureParams,
   cols: number = SW,
   boomboxConfig?: BoomboxConfig,
+  spiritHopVariant?: number,
 ): FrameData[] {
-  const key = `dance:${paramsCacheKey(userId, paramsOverride)}:${stage}:${equippedCacheKey(equipped)}:${cols}:${boomboxKey(boomboxConfig)}`;
-  const cached = frameCache.get(key);
-  if (cached) return cached;
-
-  const params = resolveCreatureParams(userId, paramsOverride);
-  const baseSpheres = buildCreatureSpheres(params, stage);
-  appendWearableSpheres(baseSpheres, equipped, cols, boomboxConfig);
-  const anchors = getAnchors(baseSpheres, params, stage);
-  const colors = buildColorTriplet(CREATURE_PALETTE[params.colorIndex]);
-  const scheme = colorSchemeFor(equipped);
-
-  const frames = Array.from({ length: DANCE_FRAMES }, (_, i) => {
-    const animated = applyDanceOffsets(baseSpheres, i);
-    return renderCreatureFrame(
-      animated,
-      DEFAULT_Y_ANGLE,
-      params.textureType,
-      anchors,
-      colors,
-      cols,
-      scheme,
-    );
-  });
-
-  frameCache.set(key, frames);
-  return frames;
+  return generateLoopFrames(
+    "dance",
+    userId,
+    stage,
+    equipped,
+    paramsOverride,
+    cols,
+    boomboxConfig,
+    spiritHopVariant,
+  );
 }
 
 /**
@@ -1842,6 +2142,7 @@ export function renderCreatureAtAngle(
   paramsOverride?: CreatureParams,
   cols: number = SW,
   boomboxConfig?: BoomboxConfig,
+  spiritHopVariant?: number,
 ): FrameData {
   const params = resolveCreatureParams(userId, paramsOverride);
   const baseSpheres = buildCreatureSpheres(params, stage);
@@ -1850,7 +2151,7 @@ export function renderCreatureAtAngle(
   const colors = buildColorTriplet(CREATURE_PALETTE[params.colorIndex]);
   const scheme = colorSchemeFor(equipped);
   const animated = dancing
-    ? applyDanceOffsets(baseSpheres, frameIdx)
+    ? applyDanceOffsets(baseSpheres, frameIdx, spiritHopsFor(spiritHopVariant))
     : applyIdleOffsets(baseSpheres, frameIdx);
   return renderCreatureFrame(
     animated,
