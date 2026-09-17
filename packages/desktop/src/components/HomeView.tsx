@@ -13,10 +13,10 @@ import {
   useGhostMode,
   useWindowPinned,
 } from "../tauri-bridge";
-import { Coin } from "./Coin";
 import { Herzie3D } from "./Herzie3D";
 import { CARD_SHAPE_CLIP, ItemTypeIcon } from "./icons/ItemTypeIcon";
 import { MarqueeText } from "./MarqueeText";
+import { ModifiersButton } from "./ModifiersButton";
 import { Tooltip } from "./Tooltip";
 
 /** A pending world drop plus the ground x-position it was assigned on first
@@ -192,8 +192,6 @@ export function HomeView({
 
   const progress = levelProgress(herzie);
   const toNext = xpToNextLevel(herzie);
-  const totalHours = (herzie.totalMinutesListened / 60).toFixed(1);
-  const activeMultipliers = multipliers ?? [];
 
   return (
     <div className="flex h-full flex-col">
@@ -227,6 +225,7 @@ export function HomeView({
               connect to internet to grow
             </span>
           )}
+          <ModifiersButton multipliers={multipliers} />
           <Tooltip label={pinned ? "Unpin window" : "Pin window"}>
             <button
               type="button"
@@ -422,10 +421,11 @@ export function HomeView({
       </div>
 
       <div className="mb-1.5">
-        <div className="mb-0.5 text-ui text-text-dim">
+        <div className="mb-0.5 flex items-baseline justify-between text-ui text-text-dim">
           <span>
             Level {herzie.level} (Stage {herzie.stage})
           </span>
+          <span className="text-ui-sm">{Math.ceil(toNext)} XP to next</span>
         </div>
         <div className="flex h-2 gap-0.5">
           {Array.from({ length: 40 }, (_, i) => (
@@ -438,45 +438,7 @@ export function HomeView({
             />
           ))}
         </div>
-        <div className="mt-0.5 text-right text-ui-sm text-text-dim">
-          {Math.ceil(toNext)} XP to next
-        </div>
       </div>
-
-      <div className="mb-1.5 flex justify-between text-[10px] text-text-dim">
-        <span>
-          <span className="text-purple">{totalHours}h</span> music
-        </span>
-        <span>
-          <span className="text-yellow">
-            <Coin amount={herzie.currency} animate />
-          </span>
-        </span>
-        <span>
-          <span className="text-green">{herzie.friendCodes.length}</span>{" "}
-          friends
-        </span>
-        {herzie.streakDays > 0 && (
-          <span>
-            <span className="text-yellow">{herzie.streakDays}d</span> streak
-          </span>
-        )}
-      </div>
-
-      {!multipliers ? (
-        <div className="mb-1.5 text-[10px] text-text-dim">
-          <span className="text-yellow">Bonuses:</span> Log in to get bonuses
-        </div>
-      ) : activeMultipliers.length > 0 ? (
-        <div className="mb-1.5">
-          {activeMultipliers.map((m) => (
-            <div key={m.name} className="flex justify-between text-[10px]">
-              <span className="text-yellow">★ {m.name}</span>
-              <span className="text-green">+{Math.round(m.bonus * 100)}%</span>
-            </div>
-          ))}
-        </div>
-      ) : null}
 
       {ghostMode ? (
         <div className="border-t border-border pt-1.5 pb-2">
