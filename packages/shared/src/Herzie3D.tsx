@@ -17,8 +17,11 @@ import {
   generateDanceFrames,
   generateIdleFrames,
   generateRotationFrames,
+  hasSpiritEquipped,
+  isSpiritHopFrame,
   renderCreatureAtAngle,
   SH,
+  SPIRIT_DANCE_HOP_VARIANT_COUNT,
   SW,
 } from "./creature-renderer.js";
 import type { Equipped } from "./items.js";
@@ -27,6 +30,9 @@ const FONT_FAMILY = "'SF Mono', 'Menlo', monospace";
 const DRAG_SENSITIVITY = Math.PI / 200; // ~180° per 200px
 const FRICTION = 0.92;
 const MIN_VELOCITY = 0.0005;
+/** Chance that a dance loop (1.56s) with a Greedy Spirit plays without a
+ * hop — roughly one hop every 4s. */
+const SPIRIT_CALM_LOOP_CHANCE = 0.6;
 
 interface Props {
   userId: string;
@@ -120,6 +126,9 @@ export function Herzie3D({
   const [dragAngle, setDragAngle] = useState(defaultAngle);
   const [isDragging, setIsDragging] = useState(false);
   const [dancing, setDancing] = useState(false);
+  /** Greedy Spirit dance hop variant for the current loop; undefined = none. */
+  const [hopVariant, setHopVariant] = useState<number | undefined>(undefined);
+  const prevFrame = useRef(0);
   const dragging = useRef(false);
   const dragStartX = useRef(0);
   const dragStartAngle = useRef(0);
@@ -146,6 +155,7 @@ export function Herzie3D({
         creatureParams,
         cols,
         boomboxConfig,
+        hopVariant,
       );
     if (animate)
       return generateRotationFrames(
@@ -174,7 +184,31 @@ export function Herzie3D({
     creatureParams,
     cols,
     boomboxConfig,
+    hopVariant,
   ]);
+
+  // Re-roll the Greedy Spirit's dance hop at each loop wrap: none or one of the
+  // variants, never the same variant twice running. Every variant is the plain
+  // loop outside its hops, so swapping at the wrap is seamless, and the random
+  // choice is what spaces hops irregularly instead of on the loop's fixed
+  // beat. Keyed on `wantsDancing`, the mode the next loop will play in (the
+  // dance/idle switch also happens at the wrap).
+  const canHop = !animate && wantsDancing && hasSpiritEquipped(equipped);
+  useEffect(() => {
+    const wrapped = frame === 0 && prevFrame.current !== 0;
+    prevFrame.current = frame;
+    if (!canHop) {
+      setHopVariant(undefined);
+      return;
+    }
+    if (!wrapped) return;
+    setHopVariant((prev) => {
+      if (Math.random() < SPIRIT_CALM_LOOP_CHANCE) return undefined;
+      let next = Math.floor(Math.random() * SPIRIT_DANCE_HOP_VARIANT_COUNT);
+      if (next === prev) next = (next + 1) % SPIRIT_DANCE_HOP_VARIANT_COUNT;
+      return next;
+    });
+  }, [frame, canHop]);
 
   const interval = dancing ? 65 : animate ? 80 : 50;
 
@@ -196,7 +230,7 @@ export function Herzie3D({
   // deliberately absent from them.
   // biome-ignore lint/correctness/useExhaustiveDependencies: see above
   const angleFrames = useMemo(
-    () => new Map<number, Cell[][]>(),
+    () => new Map<string, Cell[][]>(),
     [
       dragAngle,
       userId,
@@ -325,7 +359,14 @@ export function Herzie3D({
 
   useEffect(() => {
     if (hasDragged) {
-      let cells = angleFrames.get(frame);
+      // Keyed so hop variants share every frame outside their hops with the
+      // calm loop — otherwise each re-roll would re-render a whole loop live.
+      const hopFrame =
+        dancing &&
+        hopVariant !== undefined &&
+        isSpiritHopFrame(hopVariant, frame);
+      const cacheKey = hopFrame ? `${hopVariant}:${frame}` : `${frame}`;
+      let cells = angleFrames.get(cacheKey);
       if (!cells) {
         const yAngle = animate
           ? (frame / frames.length) * Math.PI * 2 + dragAngle
@@ -340,8 +381,9 @@ export function Herzie3D({
           creatureParams,
           cols,
           boomboxConfig,
+          hopFrame ? hopVariant : undefined,
         ).cells;
-        angleFrames.set(frame, cells);
+        angleFrames.set(cacheKey, cells);
       }
       drawFrame(cells);
     } else {
@@ -363,6 +405,7 @@ export function Herzie3D({
     creatureParams,
     cols,
     boomboxConfig,
+    hopVariant,
   ]);
 
   return (
