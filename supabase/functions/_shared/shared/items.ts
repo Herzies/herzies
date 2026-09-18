@@ -1409,7 +1409,6 @@ export const ITEMS: ItemDef[] = [
     frames: headphonesFrames,
     equipable: true,
     equipSlot: "head",
-    buyPrice: 2500,
     sellPrice: 100,
   },
   {
@@ -1420,7 +1419,6 @@ export const ITEMS: ItemDef[] = [
     frames: rainbowHeadbandFrames,
     equipable: true,
     equipSlot: "head",
-    buyPrice: 2500,
     sellPrice: 100,
   },
   {
@@ -1474,6 +1472,7 @@ export const ITEMS: ItemDef[] = [
     frames: prismFrames,
     equipable: true,
     equipSlot: "color",
+    buyPrice: 3000,
     sellPrice: 100,
   },
   {
@@ -1481,11 +1480,11 @@ export const ITEMS: ItemDef[] = [
     name: "Poseidon's Gift",
     description:
       "Somehow ended up here. Use it only if you don't care about upsetting the gods.",
-    rarity: "legendary",
+    rarity: "uncommon",
     frames: poseidonsGiftFrames,
     equipable: true,
     equipSlot: "color",
-    buyPrice: 100000,
+    buyPrice: 3000,
     sellPrice: 500,
   },
   {
