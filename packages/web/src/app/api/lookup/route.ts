@@ -1,7 +1,7 @@
+import { isModifierEquipped, normalizeEquipped } from "@herzies/shared";
 import { NextResponse } from "next/server";
 import { authenticateRequest, isAuthError } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase-admin";
-import { isModifierEquipped, normalizeEquipped } from "@herzies/shared";
 
 /**
  * Look up herzies by friend code(s). Requires authentication.

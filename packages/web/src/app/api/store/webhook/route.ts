@@ -1,3 +1,4 @@
+import { hasRoomFor, normalizeEquipped } from "@herzies/shared";
 import { NextResponse } from "next/server";
 import { getStripe } from "@/lib/stripe";
 import { createAdminClient } from "@/lib/supabase-admin";
@@ -34,9 +35,41 @@ export async function POST(request: Request) {
       .object as import("stripe").Stripe.Checkout.Session;
     const admin = createAdminClient();
 
+    // Where an item purchase should land. Checkout already refused if the
+    // bank was full, but Stripe Checkout can sit open for a long time and the
+    // bank may have filled since — and by now the money is taken, so refusing
+    // is not an option. An item with nowhere to go drops on the ground
+    // instead, where it waits to be collected.
+    //
+    // Decided here rather than in SQL so the capacity rules stay in the one
+    // shared implementation the client and sync loop also use; the RPC just
+    // applies the answer atomically. A failed lookup falls through to `false`,
+    // which is the pre-existing behaviour for every coin order.
+    let toGround = false;
+    const { data: order } = await admin
+      .from("store_orders")
+      .select("user_id, grant_item_id, status")
+      .eq("stripe_checkout_session_id", session.id)
+      .maybeSingle();
+
+    if (order?.grant_item_id && order.status !== "completed") {
+      const { data: herzie } = await admin
+        .from("herzies")
+        .select("inventory_v2, equipped")
+        .eq("user_id", order.user_id as string)
+        .single();
+
+      toGround = !hasRoomFor(
+        (herzie?.inventory_v2 ?? {}) as Record<string, number>,
+        normalizeEquipped(herzie?.equipped),
+        order.grant_item_id as string,
+      );
+    }
+
     const { error } = await admin.rpc("fulfill_store_order", {
       p_session_id: session.id,
       p_event_id: event.id,
+      p_to_ground: toGround,
     });
 
     if (error) {

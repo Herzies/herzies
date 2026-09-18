@@ -1,7 +1,7 @@
+import { normalizeEquipped } from "@herzies/shared";
 import { NextResponse } from "next/server";
 import { authenticateRequest, isAuthError } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase-admin";
-import { normalizeEquipped } from "@herzies/shared";
 
 export async function GET(request: Request) {
   const auth = await authenticateRequest(request);

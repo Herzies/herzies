@@ -27,7 +27,10 @@ export default function DownloadPage() {
           </p>
 
           <div className="flex flex-col sm:flex-row items-center gap-3">
-            <a href="/api/download" className="inline-block no-underline hover:no-underline">
+            <a
+              href="/api/download"
+              className="inline-block no-underline hover:no-underline"
+            >
               <Button className="text-base px-6 py-3">
                 <svg
                   width="15"

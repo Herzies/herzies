@@ -156,7 +156,9 @@ function defaultSongHuntConfig(): SongHuntConfigForm {
     rewardItemId: "",
     rewardItemName: "",
     maxClaims: "50",
-    hints: [{ text: "First hint", unlocksAt: toDatetimeLocalValue(new Date()) }],
+    hints: [
+      { text: "First hint", unlocksAt: toDatetimeLocalValue(new Date()) },
+    ],
   };
 }
 

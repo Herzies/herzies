@@ -60,7 +60,9 @@ export async function GET(request: Request) {
 
   // The global chat is ephemeral: never serve messages older than the
   // retention window, even if the scheduled purge hasn't run yet.
-  const retentionCutoff = new Date(Date.now() - CHAT_RETENTION_MS).toISOString();
+  const retentionCutoff = new Date(
+    Date.now() - CHAT_RETENTION_MS,
+  ).toISOString();
 
   const admin = createAdminClient();
   const { data: messages, error } = await admin

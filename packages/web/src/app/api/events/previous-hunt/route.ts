@@ -37,14 +37,18 @@ export async function GET() {
   const [previousResult, nextResult] = await Promise.all([
     admin
       .from("events")
-      .select("id, type, title, description, active, starts_at, ends_at, config")
+      .select(
+        "id, type, title, description, active, starts_at, ends_at, config",
+      )
       .eq("type", "song_hunt")
       .lt("ends_at", nowIso)
       .order("starts_at", { ascending: false })
       .limit(1),
     admin
       .from("events")
-      .select("id, type, title, description, active, starts_at, ends_at, config")
+      .select(
+        "id, type, title, description, active, starts_at, ends_at, config",
+      )
       .eq("type", "song_hunt")
       .eq("active", true)
       .gt("starts_at", nowIso)
