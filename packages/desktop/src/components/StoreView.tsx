@@ -4,7 +4,7 @@ import type {
   PremiumItem,
   StoreProduct,
 } from "@herzies/shared";
-import { getItem, ITEMS } from "@herzies/shared";
+import { getItem, hasRoomFor, ITEMS } from "@herzies/shared";
 import { useEffect, useRef, useState } from "react";
 import { cn, formatAmount, formatNok, formatPrice } from "../lib/utils";
 import { herzies, useWindowFocused } from "../tauri-bridge";
@@ -146,9 +146,11 @@ export function StoreView({
 
   const inspected = inspectItem ? getItem(inspectItem) : null;
   const inspectedOwned = inspectItem ? (inventory?.[inspectItem] ?? 0) : 0;
-  const inspectedAlreadyOwned =
-    !!inspected && !inspected.stackable && inspectedOwned > 0;
   const inspectedPrice = inspected?.buyPrice ?? 0;
+  // Same rule as the list: owning one is no reason not to buy another, but
+  // having nowhere to put it is.
+  const inspectedNoRoom =
+    !!inspectItem && !hasRoomFor(inventory, equipped, inspectItem);
 
   return (
     <div className="flex h-full flex-col">
@@ -193,14 +195,15 @@ export function StoreView({
               shopItems.map((item) => {
                 const paid = premiumByItem.get(item.id);
                 const owned = inventory?.[item.id] ?? 0;
-                // A paid item can be bought again however many you own —
-                // they are tradable, so a spare is a legitimate thing to want.
-                // Coin items still stop at one, since a duplicate there is
-                // just a wasted bank slot.
-                const alreadyOwned = !paid && !item.stackable && owned > 0;
                 const price = item.buyPrice ?? 0;
                 const canAfford = paid ? true : currency >= price;
-                const insufficientFunds = !alreadyOwned && !canAfford;
+                const insufficientFunds = !canAfford;
+                // Duplicates are fine — items are tradable, so a spare is a
+                // legitimate thing to buy. Having nowhere to put it is not:
+                // the bank is a fixed 18 slots and anything past that doesn't
+                // render, so it would be bought and invisible. The server
+                // refuses this too; disabling here just explains why.
+                const noRoom = !hasRoomFor(inventory, equipped, item.id);
                 // Paid purchases leave for the browser and are credited by the
                 // webhook, so they share the coin-pack pending state and its
                 // refresh-on-return — not handleBuyItem, which spends coins.
@@ -210,13 +213,13 @@ export function StoreView({
                 const buyButton = (
                   <button
                     type="button"
-                    className={cn("btn", alreadyOwned && "cursor-default")}
-                    disabled={alreadyOwned || !canAfford || pending}
+                    className="btn"
+                    disabled={!canAfford || noRoom || pending}
                     onClick={() =>
                       paid ? handleBuyCurrency(item.id) : handleBuyItem(item.id)
                     }
                   >
-                    {pending ? "Buying..." : alreadyOwned ? "Owned" : "Buy"}
+                    {pending ? "Buying..." : "Buy"}
                   </button>
                 );
                 return (
@@ -226,17 +229,25 @@ export function StoreView({
                     onInspect={setInspectItem}
                     inspectTitle="Inspect card"
                     colour="yellow"
+                    // The price always shows, since it can always be bought
+                    // again; how many you already hold rides alongside it
+                    // rather than replacing it.
                     subtitle={
-                      paid ? (
-                        formatPrice(paid.amount, paid.currency)
-                      ) : alreadyOwned ? (
-                        "Owned"
-                      ) : (
-                        <Coin amount={price} />
-                      )
+                      <>
+                        {paid ? (
+                          formatPrice(paid.amount, paid.currency)
+                        ) : (
+                          <Coin amount={price} />
+                        )}
+                        {owned > 0 && ` · ${owned} owned`}
+                      </>
                     }
                     action={
-                      insufficientFunds ? (
+                      noRoom ? (
+                        <Tooltip label="Bank full — sell something first">
+                          {buyButton}
+                        </Tooltip>
+                      ) : insufficientFunds ? (
                         <Tooltip label="Insufficient funds">
                           {buyButton}
                         </Tooltip>
@@ -327,31 +338,28 @@ export function StoreView({
           onClose={() => setInspectItem(null)}
           equipped={equipped}
           meta={
-            inspectedAlreadyOwned ? "Owned" : <Coin amount={inspectedPrice} />
+            <>
+              <Coin amount={inspectedPrice} />
+              {inspectedOwned > 0 && ` · ${inspectedOwned} owned`}
+            </>
           }
           footer={
             inspected.buyPrice != null &&
             (() => {
-              const insufficientFunds =
-                !inspectedAlreadyOwned && currency < inspectedPrice;
+              const insufficientFunds = currency < inspectedPrice;
               const buyButton = (
                 <button
                   type="button"
-                  className={cn(
-                    "btn",
-                    inspectedAlreadyOwned && "cursor-default",
-                  )}
+                  className="btn"
                   disabled={
-                    inspectedAlreadyOwned ||
                     insufficientFunds ||
+                    inspectedNoRoom ||
                     pendingItemId === inspectItem
                   }
                   onClick={() => handleBuyItem(inspectItem)}
                 >
                   {pendingItemId === inspectItem ? (
                     "Buying..."
-                  ) : inspectedAlreadyOwned ? (
-                    "Owned"
                   ) : (
                     <>
                       Buy (<Coin amount={inspectedPrice} />)
@@ -359,7 +367,11 @@ export function StoreView({
                   )}
                 </button>
               );
-              return insufficientFunds ? (
+              return inspectedNoRoom ? (
+                <Tooltip label="Bank full — sell something first">
+                  {buyButton}
+                </Tooltip>
+              ) : insufficientFunds ? (
                 <Tooltip label="Insufficient funds">{buyButton}</Tooltip>
               ) : (
                 buyButton

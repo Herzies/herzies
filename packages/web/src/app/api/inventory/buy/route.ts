@@ -1,3 +1,8 @@
+import {
+  BANK_SLOT_COUNT,
+  bankSlotsUsed,
+  normalizeEquipped,
+} from "@herzies/shared";
 import { NextResponse } from "next/server";
 import { authenticateRequest, isAuthError } from "@/lib/auth";
 import { buyItemSchema, isParseError, parseBody } from "@/lib/schemas";
@@ -29,7 +34,7 @@ export async function POST(request: Request) {
 
   const { data: herzie } = await admin
     .from("herzies")
-    .select("inventory_v2, currency")
+    .select("inventory_v2, currency, equipped")
     .eq("user_id", auth.userId)
     .single();
 
@@ -40,10 +45,18 @@ export async function POST(request: Request) {
   const inv = (herzie.inventory_v2 ?? {}) as Record<string, number>;
   const owned = inv[itemId] ?? 0;
 
-  if (!item.stackable && (quantity > 1 || owned > 0)) {
+  // Duplicates are allowed: items are tradable, so a spare is a legitimate
+  // thing to buy. What is not allowed is buying one with nowhere to put it —
+  // the bank is a fixed BANK_SLOT_COUNT slots and anything past that simply
+  // does not render, so it would be paid for and invisible. This check is the
+  // reason the one-per-item rule could be lifted at all.
+  const next = { ...inv, [itemId]: owned + quantity };
+  if (
+    bankSlotsUsed(next, normalizeEquipped(herzie.equipped)) > BANK_SLOT_COUNT
+  ) {
     return NextResponse.json(
-      { error: "You already own this item" },
-      { status: 400 },
+      { error: "Your bank is full — sell something first" },
+      { status: 409 },
     );
   }
 
