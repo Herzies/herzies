@@ -579,6 +579,21 @@ export const RARITY_DROP_WEIGHTS: Record<Rarity, number> = {
 /** Items that can never appear as a random world drop, regardless of rarity. */
 export const NON_DROPPABLE_ITEM_IDS = ["first-edition", "spirit-orb"] as const;
 
+/** How many uncollected drops may stand on the ground at once.
+ *
+ * At the cap a rolled drop is *forfeited*, not queued: the roll is spent and
+ * nothing lands. That is deliberate — a queue would make the cap invisible
+ * (everything owed would still arrive eventually) and would leave a player
+ * who ignores the ground for a month with a month of drops waiting. Losing
+ * drops to a full ground is also what makes an auto-collecting pet (the
+ * Greedy Spirit) worth equipping rather than a convenience.
+ *
+ * Enforced in the `roll_pending_drops` SQL function, under a row lock, so
+ * concurrent syncs can't both claim the last slot. This constant is the
+ * documented copy for client-side use; the number itself is duplicated there
+ * and the two must stay in sync (same arrangement as BANK_SLOT_COUNT). */
+export const GROUND_DROP_CAP = 10;
+
 /** Listened minutes that earn one drop roll. Eligibility is a counter diff on
  * total_minutes_listened, not a wall-clock timer — see processSync step 5. */
 export const DROP_TICK_MINUTES = 10;
