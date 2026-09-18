@@ -871,13 +871,19 @@ export function InventoryView({
    *
    * Built from `items` (one entry per id, already rarity-then-name sorted)
    * rather than `ownedBankUnits`, since the sale is per id with a quantity.
-   * Anything with no sellPrice is skipped — `applySell` would refuse it. */
+   * Anything with no sellPrice is skipped — `applySell` would refuse it.
+   *
+   * Legendaries are never included, however many you own. A spare legendary
+   * is the most valuable thing in the bank and the likeliest to be wanted for
+   * a trade, so it is not something a one-click bulk action should be able to
+   * turn into coin — selling one stays a deliberate, per-item act with its
+   * own CONFIRM_SELL_RARITIES prompt. */
   const duplicates = items
-    .map(([itemId, qty]) => ({
-      itemId,
-      qty: qty - 1,
-      price: getItem(itemId)?.sellPrice ?? 0,
-    }))
+    .flatMap(([itemId, qty]) => {
+      const def = getItem(itemId);
+      if (!def || def.rarity === "legendary") return [];
+      return [{ itemId, qty: qty - 1, price: def.sellPrice ?? 0 }];
+    })
     .filter((d) => d.qty > 0 && d.price > 0);
   const duplicatesTotal = duplicates.reduce(
     (sum, d) => sum + d.qty * d.price,
@@ -1247,16 +1253,18 @@ export function InventoryView({
             <div>
               Sell {duplicatesCount} duplicate
               {duplicatesCount === 1 ? "" : "s"} for{" "}
-              <Coin amount={duplicatesTotal} />? One of each is kept.
+              <Coin amount={duplicatesTotal} />? One of each is kept, and
+              legendaries are never sold.
             </div>
             {/* The breakdown, since this is the one sell action where what
                 goes is not the thing that was clicked. Capped so a bank full
                 of odds and ends can't outgrow the dialog — and the cap is
                 only safe because `items` sorts rarity-first (see rarityOrder),
-                so anything valuable is at the top and a legendary can never
-                be the thing hidden behind "+N more". This batch confirm is
-                also what stands in for the per-item CONFIRM_SELL_RARITIES
-                prompt, which a batch would otherwise fire once per rare. */}
+                so a rare is always at the top and can never be the thing
+                hidden behind "+N more". Legendaries aren't in this list at
+                all (see `duplicates`). This batch confirm is what stands in
+                for the per-item CONFIRM_SELL_RARITIES prompt, which a batch
+                would otherwise fire once per rare. */}
             <div className="flex flex-col gap-0.5 text-ui-sm text-text-dim">
               {duplicates.slice(0, 6).map((d) => {
                 const def = getItem(d.itemId);
