@@ -14,11 +14,17 @@ import { createClient, type RealtimeChannel } from "@supabase/supabase-js";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { chatUserColor, cn } from "../lib/utils";
 import { type ChatMessage, herzies } from "../tauri-bridge";
+import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import ItemInspectOverlay from "./ItemInspectOverlay";
 
 type UserMenuTarget = {
   username: string;
   friendCode: string | null | undefined;
+  /** Click position the menu is anchored at. */
+  x: number;
+  y: number;
+  /** Right-click opens the menu with Trade; a plain click leaves it out. */
+  withTrade: boolean;
 };
 
 /** The activity log and chat messages, interleaved into one time-ordered list. */
@@ -26,11 +32,7 @@ type FeedEntry =
   | { kind: "activity"; time: string; message: string; sortKey: string }
   | { kind: "chat"; msg: ChatMessage; sortKey: string };
 
-const USER_MENU_ITEMS = [
-  { id: "add", label: "Add as friend" },
-  { id: "profile", label: "Profile" },
-  { id: "report", label: "Report" },
-] as const;
+type UserMenuActionId = "add" | "profile" | "trade" | "report";
 
 const DROPDOWN_ROW_CLASS =
   "cursor-pointer px-2 py-0.5 text-[10px] bg-transparent hover:bg-white/5";
@@ -210,6 +212,7 @@ export function ChatPanel({
   openRequested,
   onOpenHandled,
   onOpenProfile,
+  onStartTrade,
   onActivity,
 }: {
   activityLog: { time: string; message: string }[];
@@ -231,6 +234,7 @@ export function ChatPanel({
   openRequested?: boolean;
   onOpenHandled?: () => void;
   onOpenProfile: (friendCode: string) => void;
+  onStartTrade: (friendCode: string) => void;
   onActivity?: (message: string) => void;
 }) {
   const [input, setInput] = useState("");
@@ -249,7 +253,6 @@ export function ChatPanel({
   const [slashFilter, setSlashFilter] = useState("");
   const [slashIndex, setSlashIndex] = useState(0);
   const [userMenu, setUserMenu] = useState<UserMenuTarget | null>(null);
-  const [userMenuIndex, setUserMenuIndex] = useState(0);
   const [expanded, setExpanded] = useState(false);
   /** In-flow height of the dock when collapsed; keeps flex layout stable while expanded (fixed) panel is out of flow. */
   const [dockHeight, setDockHeight] = useState(88);
@@ -267,12 +270,10 @@ export function ChatPanel({
   const slashPosRef = useRef<number>(-1);
   const userAutocompleteIndexRef = useRef(0);
   const userOptionRefs = useRef<(HTMLButtonElement | null)[]>([]);
-  const menuRef = useRef<HTMLDivElement>(null);
   const autocompleteListRef = useRef<HTMLDivElement>(null);
   const autocompleteOptionRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const autocompleteIndexRef = useRef(0);
   const slashIndexRef = useRef(0);
-  const userMenuIndexRef = useRef(0);
   const chatKeyStateRef = useRef({
     inventory: null as Inventory | null,
     mentionableUsers: [] as MentionableChatUser[],
@@ -287,9 +288,7 @@ export function ChatPanel({
     selectSlashCommand: (_label: string) => {},
     handleSend: () => {},
     closeUserMenu: () => {},
-    runUserMenuAction: (
-      _actionId: (typeof USER_MENU_ITEMS)[number]["id"],
-    ) => {},
+    runUserMenuAction: (_actionId: UserMenuActionId) => {},
     collapseChat: () => {},
   });
 
@@ -543,10 +542,6 @@ export function ChatPanel({
     slashIndexRef.current = slashIndex;
   }, [slashIndex]);
 
-  useEffect(() => {
-    userMenuIndexRef.current = userMenuIndex;
-  }, [userMenuIndex]);
-
   useLayoutEffect(() => {
     if (!showItemAutocomplete) return;
     autocompleteOptionRefs.current[autocompleteIndex]?.scrollIntoView({
@@ -565,23 +560,6 @@ export function ChatPanel({
     });
   }, [userAutocompleteIndex, showUserAutocomplete, userAutocompleteFilter]);
 
-  useEffect(() => {
-    if (!userMenu) return;
-    const onPointerDown = (e: MouseEvent) => {
-      if (menuRef.current?.contains(e.target as Node)) return;
-      setUserMenu(null);
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setUserMenu(null);
-    };
-    document.addEventListener("mousedown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [userMenu]);
-
   const isSelf = (code: string | null | undefined) =>
     !!code && code === herzie.friendCode;
 
@@ -597,9 +575,26 @@ export function ChatPanel({
     !isAlreadyFriend(code) &&
     !hasPendingRequest(code);
 
+  const openUserMenu = (
+    msg: ChatMessage,
+    x: number,
+    y: number,
+    withTrade: boolean,
+  ) => {
+    setUserMenu({
+      username: msg.username,
+      friendCode: msg.friendCode,
+      x,
+      y,
+      withTrade,
+    });
+    setShowItemAutocomplete(false);
+    setShowUserAutocomplete(false);
+    setShowSlashCommands(false);
+  };
+
   const closeUserMenu = () => {
     setUserMenu(null);
-    setUserMenuIndex(0);
   };
 
   const captureFeedScrollAnchor = () => {
@@ -638,9 +633,7 @@ export function ChatPanel({
     pinToBottom();
   };
 
-  const runUserMenuAction = async (
-    actionId: (typeof USER_MENU_ITEMS)[number]["id"],
-  ) => {
+  const runUserMenuAction = async (actionId: UserMenuActionId) => {
     if (!userMenu) return;
     const code = userMenu.friendCode;
 
@@ -653,8 +646,18 @@ export function ChatPanel({
       }
       case "profile": {
         if (!code) return;
+        // Same as "trade" below — opening a profile switches view.
+        closeUserMenu();
         onOpenProfile(code);
-        break;
+        return;
+      }
+      case "trade": {
+        if (!code || isSelf(code)) return;
+        // Close first: starting a trade switches view, which unmounts this
+        // panel, so the closeUserMenu() below would never run.
+        closeUserMenu();
+        onStartTrade(code);
+        return;
       }
       case "report":
         onActivity?.("Report — coming soon");
@@ -836,34 +839,13 @@ export function ChatPanel({
       const state = chatKeyStateRef.current;
       const actions = chatKeyActionsRef.current;
 
-      if (state.userMenu) {
+      // The user menu is a floating ContextMenu now (no arrow-key nav), but
+      // Escape must still close it rather than collapse the whole chat.
+      if (state.userMenu && e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
-        if (e.key === "ArrowUp") {
-          setUserMenuIndex((i) => {
-            const next = Math.max(0, i - 1);
-            userMenuIndexRef.current = next;
-            return next;
-          });
-          return;
-        }
-        if (e.key === "ArrowDown") {
-          setUserMenuIndex((i) => {
-            const next = Math.min(USER_MENU_ITEMS.length - 1, i + 1);
-            userMenuIndexRef.current = next;
-            return next;
-          });
-          return;
-        }
-        if (e.key === "Enter") {
-          const item = USER_MENU_ITEMS[userMenuIndexRef.current];
-          if (item) void actions.runUserMenuAction(item.id);
-          return;
-        }
-        if (e.key === "Escape") {
-          actions.closeUserMenu();
-          return;
-        }
+        actions.closeUserMenu();
+        return;
       }
 
       const val = inputEl.value;
@@ -1114,19 +1096,26 @@ export function ChatPanel({
     return <>{parts}</>;
   };
 
-  const isMenuItemDisabled = (id: (typeof USER_MENU_ITEMS)[number]["id"]) => {
-    if (!userMenu) return true;
-    const code = userMenu.friendCode;
-    switch (id) {
-      case "add":
-        return !canAddFriend(code);
-      case "profile":
-        return !code || isSelf(code);
-      case "report":
-        return false;
-      default:
-        return true;
-    }
+  /** Actions for the clicked username. Ones that can't apply to this herzie
+   * (adding an existing friend, opening your own profile) are left out rather
+   * than shown greyed, matching the item menu. */
+  const userMenuItems = (target: UserMenuTarget): ContextMenuItem[] => {
+    const code = target.friendCode;
+    const run = (id: UserMenuActionId) => () => {
+      void runUserMenuAction(id);
+    };
+    return [
+      ...(canAddFriend(code)
+        ? [{ label: "Add as friend", onClick: run("add") }]
+        : []),
+      ...(code && !isSelf(code)
+        ? [{ label: "Profile", onClick: run("profile") }]
+        : []),
+      ...(target.withTrade && code && !isSelf(code)
+        ? [{ label: "Trade", onClick: run("trade") }]
+        : []),
+      { label: "Report (soon)", onClick: run("report") },
+    ];
   };
 
   // Merging and sorting ~100 entries is not expensive on its own, but this
@@ -1236,14 +1225,12 @@ export function ChatPanel({
                     }}
                     onClick={(e) => {
                       e.stopPropagation();
-                      setUserMenu({
-                        username: msg.username,
-                        friendCode: msg.friendCode,
-                      });
-                      setUserMenuIndex(0);
-                      setShowItemAutocomplete(false);
-                      setShowUserAutocomplete(false);
-                      setShowSlashCommands(false);
+                      openUserMenu(msg, e.clientX, e.clientY, false);
+                    }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      openUserMenu(msg, e.clientX, e.clientY, true);
                     }}
                   >
                     {msg.username}
@@ -1264,47 +1251,6 @@ export function ChatPanel({
 
           {isOnline && (
             <div className="relative">
-              {userMenu && (
-                <div
-                  ref={menuRef}
-                  className="absolute bottom-full left-0 right-0 z-[100] overflow-hidden rounded border border-[#444] bg-bg-panel"
-                >
-                  {USER_MENU_ITEMS.map((item, i) => {
-                    const disabled = isMenuItemDisabled(item.id);
-                    const isReport = item.id === "report";
-                    return (
-                      <button
-                        key={item.id}
-                        type="button"
-                        disabled={disabled && !isReport}
-                        onMouseEnter={() => setUserMenuIndex(i)}
-                        onClick={() => {
-                          if (isReport) {
-                            void runUserMenuAction("report");
-                            return;
-                          }
-                          if (!disabled) void runUserMenuAction(item.id);
-                        }}
-                        className={cn(
-                          "block w-full border-none text-left",
-                          DROPDOWN_ROW_CLASS,
-                          i === userMenuIndex && DROPDOWN_ROW_ACTIVE_CLASS,
-                          disabled && !isReport
-                            ? "cursor-not-allowed opacity-40 hover:bg-transparent"
-                            : isReport
-                              ? "cursor-not-allowed opacity-50 hover:bg-transparent"
-                              : "text-text",
-                        )}
-                      >
-                        {item.label}
-                        {isReport && (
-                          <span className="ml-1 text-text-dim">(soon)</span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
               {showItemAutocomplete &&
                 autocompleteItems.length > 0 &&
                 !userMenu && (
@@ -1457,6 +1403,16 @@ export function ChatPanel({
           )}
         </div>
       </div>
+
+      {userMenu && (
+        <ContextMenu
+          x={userMenu.x}
+          y={userMenu.y}
+          items={userMenuItems(userMenu)}
+          onClose={closeUserMenu}
+          closeOnScroll={false}
+        />
+      )}
 
       {inspectItem && (
         <ItemInspectOverlay

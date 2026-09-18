@@ -12,6 +12,7 @@ import {
   type OngoingTrade,
   useWindowFocused,
 } from "../tauri-bridge";
+import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { List } from "./List";
 import { ProfileView } from "./ProfileView";
 import { TabButton } from "./TabButton";
@@ -22,6 +23,16 @@ const TRADES_POLL_MS = 5_000;
 const SEARCH_DEBOUNCE_MS = 350;
 
 type Tab = "friends" | "requests" | "add" | "trades" | "leaderboard";
+
+/** Right-click target in the friends list. Keyed by code, not profile — rows
+ * render from the code alone while a profile is still loading. */
+type FriendMenuTarget = {
+  code: string;
+  x: number;
+  y: number;
+  /** Second step of the remove flow, mirroring ProfileView's confirm. */
+  confirmRemove: boolean;
+};
 
 export function FriendsView({
   herzie,
@@ -72,6 +83,7 @@ export function FriendsView({
   const [ongoingTrades, setOngoingTrades] = useState<OngoingTrade[] | null>(
     null,
   );
+  const [friendMenu, setFriendMenu] = useState<FriendMenuTarget | null>(null);
   const focused = useWindowFocused();
 
   const friendCodesKey = herzie.friendCodes.join(",");
@@ -215,6 +227,36 @@ export function FriendsView({
     flash(result.message);
   };
 
+  /** Trade / remove for a right-clicked friend row. Remove is two-step, like
+   * the button on their profile — the menu swaps to a confirm pair in place. */
+  const friendMenuItems = (target: FriendMenuTarget): ContextMenuItem[] => {
+    if (target.confirmRemove) {
+      return [
+        {
+          label: "Yes, remove",
+          onClick: () => {
+            setFriendMenu(null);
+            void handleRemove(target.code);
+          },
+        },
+        { label: "Cancel", onClick: () => setFriendMenu(null) },
+      ];
+    }
+    return [
+      {
+        label: "Trade",
+        onClick: () => {
+          setFriendMenu(null);
+          onStartTrade(target.code);
+        },
+      },
+      {
+        label: "Remove friend",
+        onClick: () => setFriendMenu({ ...target, confirmRemove: true }),
+      },
+    ];
+  };
+
   const copyFriendCode = async () => {
     await navigator.clipboard.writeText(herzie.friendCode);
     flash(`Copied ${herzie.friendCode}!`);
@@ -343,6 +385,15 @@ export function FriendsView({
                         profile ? "cursor-pointer" : "",
                       )}
                       onClick={() => profile && setSelectedFriend(profile)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        setFriendMenu({
+                          code,
+                          x: e.clientX,
+                          y: e.clientY,
+                          confirmRemove: false,
+                        });
+                      }}
                     >
                       <div className="flex items-center gap-1 text-ui text-text group-hover:text-cyan">
                         {online && (
@@ -601,6 +652,14 @@ export function FriendsView({
             )}
           </List>
         </>
+      )}
+      {friendMenu && (
+        <ContextMenu
+          x={friendMenu.x}
+          y={friendMenu.y}
+          items={friendMenuItems(friendMenu)}
+          onClose={() => setFriendMenu(null)}
+        />
       )}
     </View>
   );

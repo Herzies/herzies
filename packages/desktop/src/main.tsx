@@ -797,6 +797,7 @@ function App() {
             setChatProfileCode(code);
             switchView("friends");
           }}
+          onStartTrade={handleStartTrade}
           onActivity={addLog}
         />
       )}
