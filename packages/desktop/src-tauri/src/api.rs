@@ -723,11 +723,21 @@ pub async fn api_fetch_store_products(client: &Client) -> Option<Vec<StoreProduc
 /// "none for sale" — either way the store shows its coin-priced cards.
 pub async fn api_fetch_premium_items(client: &Client) -> Option<Vec<PremiumItem>> {
     let resp = api_fetch(client, reqwest::Method::GET, "/store/premium", None).await?;
-    if !resp.status().is_success() {
+    let status = resp.status();
+    if !status.is_success() {
+        log::warn!("Premium items request failed: {}", status);
         return None;
     }
     let data: serde_json::Value = resp.json().await.ok()?;
-    serde_json::from_value(data["items"].clone()).ok()
+    let items: Option<Vec<PremiumItem>> = serde_json::from_value(data["items"].clone()).ok();
+    // Logged at info because zero is both the normal answer (nothing is
+    // configured for sale) and the confusing one (a product exists in Stripe
+    // but is filtered out) — and those are indistinguishable without this.
+    match &items {
+        Some(v) => log::info!("Premium items: {} for sale", v.len()),
+        None => log::warn!("Premium items response could not be parsed"),
+    }
+    items
 }
 
 /// Creates a Stripe Checkout Session for `product_id` and returns the URL to

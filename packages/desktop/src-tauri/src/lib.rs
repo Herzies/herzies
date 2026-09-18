@@ -2048,6 +2048,22 @@ pub fn run() {
             // at login" (stay hidden in the menu bar).
             Some(vec!["--autostart"]),
         ))
+        .plugin(
+            // Routes the `log` facade somewhere visible: stdout for the
+            // terminal running `tauri dev`, and the webview console so the
+            // same lines show up in devtools next to the frontend's own.
+            tauri_plugin_log::Builder::new()
+                .level(log::LevelFilter::Info)
+                .targets([
+                    tauri_plugin_log::Target::new(
+                        tauri_plugin_log::TargetKind::Stdout,
+                    ),
+                    tauri_plugin_log::Target::new(
+                        tauri_plugin_log::TargetKind::Webview,
+                    ),
+                ])
+                .build(),
+        )
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())

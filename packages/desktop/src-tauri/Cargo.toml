@@ -19,6 +19,10 @@ dirs = "6"
 url = "2"
 open = "5"
 log = "0.4"
+# Backend for the `log` facade above. Without one every log::warn! in this
+# crate is silently discarded — including the token-refresh and 401 warnings,
+# which is exactly when you most want to see them.
+tauri-plugin-log = "2"
 urlencoding = "2"
 regex-lite = "0.1"
 base64 = "0.22"
