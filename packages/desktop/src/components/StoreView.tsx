@@ -55,14 +55,24 @@ export function StoreView({
   }, [cachedInventory, cachedCurrency]);
 
   useEffect(() => {
+    // Both fall back to an empty list so one broken feed can't blank the
+    // whole store — but they say so first. Silently swallowing made "the call
+    // failed" and "nothing is for sale" look identical, which is precisely
+    // the case you need to tell apart when a product isn't showing up.
     herzies
       .fetchStoreProducts()
       .then(setProducts)
-      .catch(() => setProducts([]));
+      .catch((e: unknown) => {
+        console.error("[store] fetchStoreProducts failed:", e);
+        setProducts([]);
+      });
     herzies
       .fetchPremiumItems()
       .then(setPremium)
-      .catch(() => setPremium([]));
+      .catch((e: unknown) => {
+        console.error("[store] fetchPremiumItems failed:", e);
+        setPremium([]);
+      });
   }, []);
 
   // Currency purchases complete in the browser and are credited by a
