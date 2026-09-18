@@ -557,12 +557,27 @@ export const RARITY_LABELS: Record<Rarity, string> = {
   legendary: "Legendary",
 };
 
-/** Relative weight for random world drops — common is heaviest, legendary lightest. */
+/** Relative weight for random world drops — common is heaviest, legendary
+ * lightest.
+ *
+ * Deliberately on a 1000-scale rather than the 100-scale this used to use.
+ * Only the ratios matter, but legendary sat at the minimum useful integer
+ * (1), and that made the tier impossible to tune *down*: shrinking uncommon
+ * and rare to sharpen the curve shrinks the total, so a fixed legendary
+ * weight of 1 gained share instead of losing it (100/15/3/1 moved the one
+ * legendary from ~97h of listening to ~81h — the opposite of the intent).
+ * The extra digit is the headroom to move every tier in the direction
+ * intended.
+ *
+ * Roughly, at the current pool and one guaranteed drop per DROP_TICK_MINUTES:
+ * a non-CD item lands about every 57 minutes of listening, a given uncommon
+ * every ~5.4h, a given rare every ~32h, and the lone legendary every ~270h
+ * (it is also buyable, which is the intended path for most players). */
 export const RARITY_DROP_WEIGHTS: Record<Rarity, number> = {
-  common: 100,
-  uncommon: 30,
-  rare: 8,
-  legendary: 1,
+  common: 1000,
+  uncommon: 150,
+  rare: 25,
+  legendary: 3,
 };
 
 /** Items that can never appear as a random world drop, regardless of rarity. */
@@ -589,7 +604,7 @@ export const MAX_DROP_ROLLS_PER_SYNC = 20;
  * so they're weighted well above even the heaviest common item to make them
  * the most likely drop by a wide margin. */
 export const ITEM_DROP_WEIGHT_OVERRIDES: Partial<Record<string, number>> = {
-  cd: 400,
+  cd: 4000,
 };
 
 /** Weighted-random pick from a rarity-tagged candidate pool. `rng` returns a
