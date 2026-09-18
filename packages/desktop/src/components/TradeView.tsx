@@ -43,6 +43,11 @@ export function TradeView({
 
   const onActiveChangeRef = useRef(onActiveChange);
   onActiveChangeRef.current = onActiveChange;
+  // Same treatment for onClose: the parent passes an inline arrow, so naming it
+  // as a dependency of the poll effect below would restart the 650ms interval —
+  // and fire an immediate tick — on every single parent render.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   const tradeActive =
     !!tradeId && trade?.state !== "completed" && trade?.state !== "cancelled";
   useEffect(() => {
@@ -89,7 +94,7 @@ export function TradeView({
           closeScheduledRef.current = true;
           setTimeout(() => {
             closeScheduledRef.current = false;
-            onClose();
+            onCloseRef.current();
           }, 2000);
         }
       }
@@ -101,7 +106,9 @@ export function TradeView({
       cancelled = true;
       clearInterval(interval);
     };
-  }, [tradeId, onClose]);
+    // The poll's lifetime is tied to the trade, not to the parent's render
+    // identity — see onCloseRef above.
+  }, [tradeId]);
 
   const handleCreate = useCallback(
     async (overrideCode?: string) => {
