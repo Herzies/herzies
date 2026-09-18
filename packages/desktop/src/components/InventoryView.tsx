@@ -1,5 +1,6 @@
 import type {
   Equipped,
+  GroundSide,
   Herzie,
   Inventory,
   ItemType,
@@ -26,7 +27,8 @@ import { cn, formatAmount } from "../lib/utils";
 import { herzies } from "../tauri-bridge";
 import { Coin } from "./Coin";
 import { ContextMenu } from "./ContextMenu";
-import { DeckRow } from "./DeckRow";
+import { DeckRow, type EmptySlotTarget } from "./DeckRow";
+import { DeckSlotPicker } from "./DeckSlotPicker";
 import { Herzie3D } from "./Herzie3D";
 import ItemInspectOverlay, { ItemPreviewCard } from "./ItemInspectOverlay";
 import { ItemTypeIcon } from "./icons/ItemTypeIcon";
@@ -449,7 +451,10 @@ export function InventoryView({
    * the grid; keeping a local copy in sync with it only ever reintroduced the
    * flicker the optimistic layer exists to remove. */
   equipped: Equipped;
-  onToggleEquip: (itemId: string) => Promise<ToggleEquipResult>;
+  onToggleEquip: (
+    itemId: string,
+    side?: GroundSide,
+  ) => Promise<ToggleEquipResult>;
   /** Register the unequip a sell performs server-side when the last copy goes. */
   onPredictUnequip?: (itemId: string, settled: Promise<unknown>) => void;
   /** False while another tab is shown — pauses the 3D render. */
@@ -483,6 +488,8 @@ export function InventoryView({
     x: number;
     y: number;
   } | null>(null);
+  /** The empty deck slot whose picker is open (see DeckSlotPicker). */
+  const [slotPicker, setSlotPicker] = useState<EmptySlotTarget | null>(null);
   const [tab, setTab] = useState<InventoryTab>("cards");
   const [slotOrder, setSlotOrder] = useState<(string | null)[]>(() =>
     loadSlotOrder(herzie.friendCode),
@@ -744,7 +751,11 @@ export function InventoryView({
    * onToggleEquip and the reconcile sees both at once — a clear afterwards
    * would arrive a render too late, with reconcile having already emptied
    * some other slot. */
-  const handleEquip = async (itemId: string, fromSlot?: number) => {
+  const handleEquip = async (
+    itemId: string,
+    fromSlot?: number,
+    side?: GroundSide,
+  ) => {
     const name = getItem(itemId)?.name ?? itemId;
     if (fromSlot !== undefined) {
       setSlotOrder((prev) => {
@@ -754,7 +765,7 @@ export function InventoryView({
         return next;
       });
     }
-    const result = await onToggleEquip(itemId);
+    const result = await onToggleEquip(itemId, side);
     if (result.ok) {
       onLog?.(
         result.action === "equip" ? `Placed "${name}"` : `Returned "${name}"`,
@@ -846,6 +857,32 @@ export function InventoryView({
     return Array.from({ length: Math.max(0, bankQty) }, () => itemId);
   });
   const loading = inventory === null;
+
+  /** What can go in the empty deck slot whose picker is open.
+   *
+   * Filtered on the item's own `equipSlot`, not on the group's broader
+   * `itemType`: `applyEquip` routes by `equipSlot` and *displaces* whatever
+   * the slot already holds, so offering a hat in the empty Face box would
+   * silently take off the hat that's already on. That does mean the list
+   * can come up empty while the player owns plenty of other Equipment —
+   * which is what DeckSlotPicker's slot-name header is there to explain.
+   *
+   * Drawn from `items` (one entry per id, already rarity-then-name sorted)
+   * rather than `ownedBankUnits` (a multiset), since equip state is per item
+   * id: two copies of the same hat are one and the same move, and listing it
+   * twice would just be a row that does nothing new. Anything already
+   * equipped is dropped for the same reason — `applyEquip` would refuse it
+   * with "already-equipped" no matter which copy was meant. */
+  const slotPickerItems = slotPicker
+    ? items
+        .map(([itemId]) => itemId)
+        .filter((itemId) => {
+          const def = getItem(itemId);
+          return (
+            def?.equipSlot === slotPicker.equipSlot && !isItemEquipped(itemId)
+          );
+        })
+    : [];
 
   // Keep the saved slot arrangement in sync with what's actually owned —
   // see reconcileSlotOrder. Keyed on the joined list (not `ownedBankUnits`,
@@ -967,6 +1004,7 @@ export function InventoryView({
               equipped={equipped}
               inventory={inventory}
               onUnequip={handleEquip}
+              onPlaceRequest={setSlotPicker}
             />
           </List>
         ) : loading ? (
@@ -1095,6 +1133,23 @@ export function InventoryView({
             />
           );
         })()}
+
+      {slotPicker && (
+        <DeckSlotPicker
+          x={slotPicker.x}
+          y={slotPicker.y}
+          slotLabel={slotPicker.label}
+          itemIds={slotPickerItems}
+          onPick={(itemId) => {
+            // Closed before the await, as the sell menu does: the optimistic
+            // equip fills the slot on the next render anyway, so leaving the
+            // list up would only show a stale row for the item just placed.
+            setSlotPicker(null);
+            handleEquip(itemId, undefined, slotPicker.side);
+          }}
+          onClose={() => setSlotPicker(null)}
+        />
+      )}
 
       {sellBox &&
         (() => {

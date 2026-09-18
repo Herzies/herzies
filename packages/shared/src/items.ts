@@ -73,6 +73,21 @@ export function groundSlot(side: GroundSide): EquippedSlot {
   return side === "left" ? "ground_left" : "ground_right";
 }
 
+/** The catalog equip slot an item must have to fill a given stored slot —
+ * the inverse of the ground split, since both ground_left and ground_right
+ * are filled by items whose catalog `equipSlot` is plain "ground". Every
+ * other key is spelled identically in both sets. */
+export function equipSlotFor(slot: EquippedSlot): EquipSlot {
+  return slot === "ground_left" || slot === "ground_right" ? "ground" : slot;
+}
+
+/** Which side a ground slot key refers to, for the reverse trip. */
+export function groundSideOf(slot: EquippedSlot): GroundSide | undefined {
+  if (slot === "ground_left") return "left";
+  if (slot === "ground_right") return "right";
+  return undefined;
+}
+
 export function equippedItemIds(
   equipped: Equipped | null | undefined,
 ): string[] {
@@ -424,6 +439,20 @@ export const ITEM_TYPE_LABELS: Record<ItemType, string> = {
   accessory: "Accessory",
   modifier: "Modifier",
   artefact: "Artefact",
+};
+
+/** Names a catalog equip slot. Finer-grained than ITEM_TYPE_LABELS, which
+ * groups head/face/body together as one "Equipable" type: a deck box holds
+ * exactly one of those slots, so naming the slot is what tells the player
+ * why an empty Equipment box offers hats but not shirts. */
+export const EQUIP_SLOT_LABELS: Record<EquipSlot, string> = {
+  head: "Head",
+  face: "Face",
+  body: "Body",
+  scenery: "Scenery",
+  ground: "Accessory",
+  color: "Skin",
+  modifier: "Modifier",
 };
 
 /** A set is a named group of items whose `effect` describes what equipping
