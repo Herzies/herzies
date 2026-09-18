@@ -22,8 +22,10 @@ import {
   RAMP_ITEM,
   rotY,
   rotZ,
+  TEAL_RAMP,
   type V2,
   type V3,
+  VIOLET_RAMP,
 } from "./ascii3d.ts";
 
 export type Rarity = "common" | "uncommon" | "rare" | "legendary";
@@ -75,6 +77,21 @@ export type Equipped = Partial<Record<EquippedSlot, string>> & {
 
 export function groundSlot(side: GroundSide): EquippedSlot {
   return side === "left" ? "ground_left" : "ground_right";
+}
+
+/** The catalog equip slot an item must have to fill a given stored slot —
+ * the inverse of the ground split, since both ground_left and ground_right
+ * are filled by items whose catalog `equipSlot` is plain "ground". Every
+ * other key is spelled identically in both sets. */
+export function equipSlotFor(slot: EquippedSlot): EquipSlot {
+  return slot === "ground_left" || slot === "ground_right" ? "ground" : slot;
+}
+
+/** Which side a ground slot key refers to, for the reverse trip. */
+export function groundSideOf(slot: EquippedSlot): GroundSide | undefined {
+  if (slot === "ground_left") return "left";
+  if (slot === "ground_right") return "right";
+  return undefined;
 }
 
 export function equippedItemIds(
@@ -430,6 +447,20 @@ export const ITEM_TYPE_LABELS: Record<ItemType, string> = {
   artefact: "Artefact",
 };
 
+/** Names a catalog equip slot. Finer-grained than ITEM_TYPE_LABELS, which
+ * groups head/face/body together as one "Equipable" type: a deck box holds
+ * exactly one of those slots, so naming the slot is what tells the player
+ * why an empty Equipment box offers hats but not shirts. */
+export const EQUIP_SLOT_LABELS: Record<EquipSlot, string> = {
+  head: "Head",
+  face: "Face",
+  body: "Body",
+  scenery: "Scenery",
+  ground: "Accessory",
+  color: "Skin",
+  modifier: "Modifier",
+};
+
 /** A set is a named group of items whose `effect` describes what equipping
  * all of them together does — membership is purely by `itemIds`, not a
  * field on ItemDef, so adding an item to a set never touches its own entry. */
@@ -526,16 +557,46 @@ export const RARITY_LABELS: Record<Rarity, string> = {
   legendary: "Legendary",
 };
 
-/** Relative weight for random world drops — common is heaviest, legendary lightest. */
+/** Relative weight for random world drops — common is heaviest, legendary
+ * lightest.
+ *
+ * Deliberately on a 1000-scale rather than the 100-scale this used to use.
+ * Only the ratios matter, but legendary sat at the minimum useful integer
+ * (1), and that made the tier impossible to tune *down*: shrinking uncommon
+ * and rare to sharpen the curve shrinks the total, so a fixed legendary
+ * weight of 1 gained share instead of losing it (100/15/3/1 moved the one
+ * legendary from ~97h of listening to ~81h — the opposite of the intent).
+ * The extra digit is the headroom to move every tier in the direction
+ * intended.
+ *
+ * Roughly, at the current pool and one guaranteed drop per DROP_TICK_MINUTES:
+ * a non-CD item lands about every 57 minutes of listening, a given uncommon
+ * every ~5.4h, a given rare every ~32h, and the lone legendary every ~270h
+ * (it is also buyable, which is the intended path for most players). */
 export const RARITY_DROP_WEIGHTS: Record<Rarity, number> = {
-  common: 100,
-  uncommon: 30,
-  rare: 8,
-  legendary: 1,
+  common: 1000,
+  uncommon: 150,
+  rare: 25,
+  legendary: 3,
 };
 
 /** Items that can never appear as a random world drop, regardless of rarity. */
 export const NON_DROPPABLE_ITEM_IDS = ["first-edition", "spirit-orb"] as const;
+
+/** How many uncollected drops may stand on the ground at once.
+ *
+ * At the cap a rolled drop is *forfeited*, not queued: the roll is spent and
+ * nothing lands. That is deliberate — a queue would make the cap invisible
+ * (everything owed would still arrive eventually) and would leave a player
+ * who ignores the ground for a month with a month of drops waiting. Losing
+ * drops to a full ground is also what makes an auto-collecting pet (the
+ * Greedy Spirit) worth equipping rather than a convenience.
+ *
+ * Enforced in the `roll_pending_drops` SQL function, under a row lock, so
+ * concurrent syncs can't both claim the last slot. This constant is the
+ * documented copy for client-side use; the number itself is duplicated there
+ * and the two must stay in sync (same arrangement as BANK_SLOT_COUNT). */
+export const GROUND_DROP_CAP = 10;
 
 /** Listened minutes that earn one drop roll. Eligibility is a counter diff on
  * total_minutes_listened, not a wall-clock timer — see processSync step 5. */
@@ -558,7 +619,7 @@ export const MAX_DROP_ROLLS_PER_SYNC = 20;
  * so they're weighted well above even the heaviest common item to make them
  * the most likely drop by a wide margin. */
 export const ITEM_DROP_WEIGHT_OVERRIDES: Partial<Record<string, number>> = {
-  cd: 400,
+  cd: 4000,
 };
 
 /** Weighted-random pick from a rarity-tagged candidate pool. `rng` returns a
@@ -1228,6 +1289,14 @@ function renderPoseidonsGiftFrame(yAngle: number): string[] {
   return renderGradientCardFrame(yAngle, OCEAN_RAMP);
 }
 
+function renderPurpleDaneFrame(yAngle: number): string[] {
+  return renderGradientCardFrame(yAngle, VIOLET_RAMP);
+}
+
+function renderThanksForAllTheFishFrame(yAngle: number): string[] {
+  return renderGradientCardFrame(yAngle, TEAL_RAMP);
+}
+
 function generateFrames(
   renderFn: (angle: number) => string[],
   count = 36,
@@ -1250,6 +1319,10 @@ const boomboxFrames = generateFrames(renderBoomboxFrame);
 const goodEyeSniperFrames = generateFrames(renderGoodEyeSniperFrame);
 const prismFrames = generateFrames(renderPrismFrame);
 const poseidonsGiftFrames = generateFrames(renderPoseidonsGiftFrame);
+const purpleDaneFrames = generateFrames(renderPurpleDaneFrame);
+const thanksForAllTheFishFrames = generateFrames(
+  renderThanksForAllTheFishFrame,
+);
 const spiritOrbFrames = generateFrames(renderSpiritOrbFrame);
 
 // --- Clouds card ---
@@ -1414,6 +1487,28 @@ export const ITEMS: ItemDef[] = [
     equipSlot: "color",
     buyPrice: 100000,
     sellPrice: 500,
+  },
+  {
+    id: "purple-dane",
+    name: "Purple Dane",
+    description: "Denne her gør dig lilla.",
+    rarity: "uncommon",
+    frames: purpleDaneFrames,
+    equipable: true,
+    equipSlot: "color",
+    buyPrice: 10000,
+    sellPrice: 100,
+  },
+  {
+    id: "thanks-for-all-the-fish",
+    name: "Thanks for all the fish!",
+    description: "Get ready to leave planet earth in style.",
+    rarity: "uncommon",
+    frames: thanksForAllTheFishFrames,
+    equipable: true,
+    equipSlot: "color",
+    buyPrice: 10000,
+    sellPrice: 100,
   },
   {
     id: "spirit-orb",

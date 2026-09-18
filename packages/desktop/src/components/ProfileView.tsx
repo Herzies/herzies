@@ -1,50 +1,14 @@
 import type { HerzieProfile } from "@herzies/shared";
-import { lastFmTrackUrl } from "@herzies/shared";
-import { useState } from "react";
-import { herzies } from "../tauri-bridge";
+import { useEffect, useState } from "react";
 import { BackButton } from "./BackButton";
 import { Herzie3D } from "./Herzie3D";
-import { MarqueeText } from "./MarqueeText";
+import { ProfileBadges } from "./ProfileBadges";
+import { TabButton } from "./TabButton";
+import { TrackCard } from "./TrackCard";
 import { View } from "./View";
 
-/** Album art + title + artist, shared between "Now playing" and "Last played". */
-function TrackRow({
-  title,
-  artist,
-  albumArtUrl,
-}: {
-  title: string;
-  artist: string;
-  albumArtUrl?: string;
-}) {
-  return (
-    <div className="flex items-center gap-2">
-      <button
-        type="button"
-        onClick={() => {
-          void herzies.openExternalUrl(lastFmTrackUrl(artist, title));
-        }}
-        title="Open on Last.fm"
-        className="h-10 w-10 shrink-0 cursor-pointer overflow-hidden rounded border-none bg-[#333] p-0"
-      >
-        {albumArtUrl ? (
-          <img
-            src={albumArtUrl}
-            alt={`${title} album art`}
-            className="h-full w-full object-cover"
-            onError={(e) => {
-              e.currentTarget.style.display = "none";
-            }}
-          />
-        ) : null}
-      </button>
-      <div className="min-w-0 flex-1">
-        <MarqueeText text={title} className="text-ui text-cyan" />
-        <div className="line-clamp-1 text-[10px] text-text-dim">{artist}</div>
-      </div>
-    </div>
-  );
-}
+/** Profile content tabs. "music" (now playing / last played) is the default. */
+type ProfileTab = "music" | "artists";
 
 function formatTimeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -94,6 +58,16 @@ export function ProfileView({
   active?: boolean;
 }) {
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const [tab, setTab] = useState<ProfileTab>("music");
+
+  // The same ProfileView instance is reused as the viewer walks from one
+  // herzie to the next, so the tab has to fall back to the default with the
+  // profile — otherwise the second herzie opens on whichever tab was left
+  // selected on the first.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: resets on profile change, not on tab state
+  useEffect(() => {
+    setTab("music");
+  }, [profile.friendCode]);
 
   // Drop recently played artists that came through without a name — they'd
   // otherwise render as a blank, rankless row.
@@ -102,8 +76,9 @@ export function ProfileView({
   return (
     <View
       title={profile.name}
-      backButton={<BackButton colour="green" onClick={onBack} />}
-      colour="green"
+      backButton={<BackButton colour="cyan" onClick={onBack} />}
+      action={<ProfileBadges profile={profile} />}
+      colour="cyan"
       childrenClassName="flex min-h-0 flex-col"
     >
       {profile.friendCode && (
@@ -118,117 +93,141 @@ export function ProfileView({
         </div>
       )}
 
-      <div className="mb-2">
-        <div className="flex items-baseline gap-1.5">
-          <span className="text-ui font-bold text-text">{profile.name}</span>
-          {profile.globalRank ? (
-            <span
-              className="text-[10px] text-text-dim"
-              title={
-                profile.globalTotal
-                  ? `Ranked #${profile.globalRank} of ${profile.globalTotal}`
-                  : undefined
-              }
-            >
-              #{profile.globalRank}
+      {/* The herzie canvas paints at its own z-index: 1 (see shared's
+          Herzie3D) and the sky sits fixed behind everything, so the text UI
+          needs its own stacking context above them — otherwise a tall
+          creature overlaps and hides these rows. */}
+      <div className="relative z-10 shrink-0">
+        <div className="mb-2">
+          <div className="flex items-baseline gap-1.5">
+            <span className="text-ui-lg font-bold text-text">
+              {profile.name}
             </span>
-          ) : null}
-        </div>
-        <div className="text-ui text-text-dim">
-          Level {profile.level} (Stage {profile.stage})
-        </div>
-        {profile.songHuntWins !== undefined && (
-          <div className="text-ui text-text-dim">
-            {profile.songHuntWins} song hunt
-            {profile.songHuntWins === 1 ? "" : "s"} won
-          </div>
-        )}
-      </div>
-
-      {!isFriend ? (
-        <div className="mb-2">
-          <div className="text-ui-sm text-[#444]">
-            Become friends to share music
-          </div>
-        </div>
-      ) : profile.nowPlaying ? (
-        <div className="mb-2">
-          <div className="mb-1 text-[10px] text-text-dim">Now playing</div>
-          <TrackRow
-            title={profile.nowPlaying.title}
-            artist={profile.nowPlaying.artist}
-            albumArtUrl={profile.nowPlaying.albumArtUrl}
-          />
-        </div>
-      ) : profile.lastPlayed ? (
-        <div className="mb-2">
-          <div className="mb-1 text-[10px] text-text-dim">
-            Last played ({formatTimeAgo(profile.lastPlayed.listenedAt)})
-          </div>
-          <TrackRow
-            title={profile.lastPlayed.title}
-            artist={profile.lastPlayed.artist}
-            albumArtUrl={profile.lastPlayed.albumArtUrl}
-          />
-        </div>
-      ) : null}
-
-      {isFriend && topArtists.length > 0 && (
-        <div className="mb-2">
-          <div className="mb-1 text-[10px] text-text-dim">Top Artists</div>
-          {topArtists.map((a, i) => (
-            <div
-              key={a.name}
-              className="flex justify-between border-b border-[#222] py-0.5 text-ui"
-            >
-              <span className="text-text">
-                {i + 1}. {a.name}
+            {profile.globalRank ? (
+              <span
+                className="text-[10px] text-text-dim"
+                title={
+                  profile.globalTotal
+                    ? `Ranked #${profile.globalRank} of ${profile.globalTotal}`
+                    : undefined
+                }
+              >
+                #{profile.globalRank}
               </span>
-              <span className="text-text-dim">{a.plays} plays</span>
-            </div>
-          ))}
+            ) : null}
+          </div>
+          <div className="text-ui text-text-dim">
+            Level {profile.level} (Stage {profile.stage})
+          </div>
         </div>
-      )}
 
-      {!isSelf && (
-        <div className="flex shrink-0 gap-1.5">
-          <button type="button" className="btn text-purple" onClick={onTrade}>
-            Trade
-          </button>
-          {!canRemove && requestPending && (
-            <button type="button" className="btn text-text-dim" disabled>
-              Request sent
+        {!isSelf && (
+          <div className="mb-2 flex shrink-0 gap-1.5">
+            <button type="button" className="btn text-purple" onClick={onTrade}>
+              Trade
             </button>
-          )}
-          {!canRemove && !requestPending && (
-            <button type="button" className="btn text-green" onClick={onAdd}>
-              Add friend
-            </button>
-          )}
-          {canRemove && confirmRemove ? (
-            <>
-              <button type="button" className="btn text-red" onClick={onRemove}>
-                Yes, remove
+            {!canRemove && requestPending && (
+              <button type="button" className="btn text-text-dim" disabled>
+                Request sent
               </button>
+            )}
+            {!canRemove && !requestPending && (
+              <button type="button" className="btn text-green" onClick={onAdd}>
+                Add friend
+              </button>
+            )}
+            {canRemove && confirmRemove ? (
+              <>
+                <button
+                  type="button"
+                  className="btn text-red"
+                  onClick={onRemove}
+                >
+                  Yes, remove
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => setConfirmRemove(false)}
+                >
+                  Cancel
+                </button>
+              </>
+            ) : canRemove ? (
               <button
                 type="button"
-                className="btn"
-                onClick={() => setConfirmRemove(false)}
+                className="btn text-red"
+                onClick={() => setConfirmRemove(true)}
               >
-                Cancel
+                Remove friend
               </button>
-            </>
-          ) : canRemove ? (
-            <button
-              type="button"
-              className="btn text-red"
-              onClick={() => setConfirmRemove(true)}
-            >
-              Remove friend
-            </button>
-          ) : null}
+            ) : null}
+          </div>
+        )}
+        <div className="mb-2 flex gap-1 border-b border-border text-ui">
+          <TabButton
+            colour="cyan"
+            active={tab === "music"}
+            onClick={() => setTab("music")}
+          >
+            {isFriend && profile.nowPlaying ? "Now playing" : "Last played"}
+          </TabButton>
+          <TabButton
+            colour="cyan"
+            active={tab === "artists"}
+            onClick={() => setTab("artists")}
+          >
+            Top Artists
+          </TabButton>
         </div>
-      )}
+
+        {/* Fixed panel height: the herzie above takes the leftover space, so
+            a shorter tab's content would otherwise let this whole block sink
+            and the tab row would jump as the viewer switches tabs. Tall
+            enough for the tallest panel — three top artist rows. */}
+        <div className="min-h-16">
+          {!isFriend ? (
+            <div>
+              <div className="text-ui-sm text-[#444]">
+                Become friends to share music
+              </div>
+            </div>
+          ) : tab === "music" ? (
+            profile.nowPlaying ? (
+              <TrackCard
+                title={profile.nowPlaying.title}
+                artist={profile.nowPlaying.artist}
+                albumArtUrl={profile.nowPlaying.albumArtUrl}
+              />
+            ) : profile.lastPlayed ? (
+              <TrackCard
+                title={profile.lastPlayed.title}
+                artist={profile.lastPlayed.artist}
+                albumArtUrl={profile.lastPlayed.albumArtUrl}
+                meta={formatTimeAgo(profile.lastPlayed.listenedAt)}
+              />
+            ) : (
+              <div className="text-ui-sm text-[#444]">Nothing played yet</div>
+            )
+          ) : topArtists.length > 0 ? (
+            <div>
+              {topArtists.map((a, i) => (
+                <div
+                  key={a.name}
+                  className="flex justify-between border-b border-[#222] py-0.5 text-ui last:border-b-0"
+                >
+                  <span className="text-text">
+                    {i + 1}. {a.name}
+                  </span>
+                  <span className="text-text-dim">{a.plays} plays</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-ui-sm text-[#444]">No top artists yet</div>
+          )}
+        </div>
+      </div>
     </View>
   );
 }

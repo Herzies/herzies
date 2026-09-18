@@ -476,18 +476,26 @@ export async function processSync(
   );
   const dropRollsDone = (row.drop_rolls_done ?? 0) as number;
   // Rolls this sync owes. Anything above the per-sync ceiling stays owed and is
-  // paid on the next call — drop_rolls_done advances by what was actually
-  // inserted, so the remainder is carried rather than written off.
+  // paid on the next call — drop_rolls_done advances by the rolls actually
+  // *taken* below, so only the ones this sync never got to are carried.
   const rollsOwed = dropTestMode
     ? 1
     : Math.min(
         Math.max(0, totalDropRollsEligible - dropRollsDone),
         MAX_DROP_ROLLS_PER_SYNC,
       );
-  // How many drops this sync inserted. Non-zero is the only case where
-  // sync_context's pending_drops snapshot is stale, and it is also what
-  // drop_rolls_done advances by — a failed pool query no longer burns the tick.
+  // How many drops this sync actually put on the ground. Non-zero is the only
+  // case where sync_context's pending_drops snapshot is stale. Note this is no
+  // longer the same as the number of rolls taken: the ground is capped at
+  // GROUND_DROP_CAP, so a roll can be taken and produce nothing.
   let rollsInserted = 0;
+  // Rolls this sync consumed, which is what drop_rolls_done advances by. A
+  // roll is spent once it has been taken, whether or not it ended up on the
+  // ground — a drop blocked by a full ground is forfeited, not queued for
+  // later, which is the whole point of the cap (and what makes a pickup pet
+  // worth equipping). A failed pool query still burns nothing, since it means
+  // no roll was ever taken.
+  let rollsConsumed = 0;
 
   if (rollsOwed > 0) {
     const { data: pool } = await admin
@@ -504,18 +512,28 @@ export async function processSync(
     // Fetched once and re-picked per roll, so a multi-roll catch-up costs one
     // query, not one per drop.
     const droppable = pool ? filterDroppablePool(pool) : [];
+    if (droppable.length > 0) rollsConsumed = rollsOwed;
     const pickedIds: string[] = [];
     for (let i = 0; i < rollsOwed; i++) {
+      // A roll that loses this coin toss is spent, not retried — see
+      // rollsConsumed above. (DROP_CHANCE_PER_TICK is 1 today, so this never
+      // fires in production.)
       if (!dropTestMode && Math.random() >= DROP_CHANCE_PER_TICK) continue;
       const picked = pickWeightedDrop(droppable);
       if (picked) pickedIds.push(picked.id);
     }
     if (pickedIds.length > 0) {
-      await admin.rpc("roll_pending_drops", {
+      // Returns how many it actually inserted, which is fewer than it was
+      // handed once the ground is at GROUND_DROP_CAP (the cap is enforced
+      // there, under a row lock, so two concurrent syncs can't both see room
+      // for the same slot). Read the count rather than assuming
+      // pickedIds.length, or a fully-blocked roll would look like an insert
+      // and skip the re-fetch below.
+      const { data: inserted } = await admin.rpc("roll_pending_drops", {
         p_user_id: userId,
         p_item_ids: pickedIds,
       });
-      rollsInserted = pickedIds.length;
+      rollsInserted = typeof inserted === "number" ? inserted : 0;
     }
     // drop_rolls_done used to be its own UPDATE here. It is now folded into the
     // single herzie update in step 7 — same write, one fewer round trip, and it
@@ -687,12 +705,14 @@ export async function processSync(
   // Folded in from step 5's former standalone UPDATE. Test mode deliberately
   // skips the bookkeeping so toggling it off resumes the normal cadence.
   //
-  // Advances by the number of drops actually inserted, not all the way to
+  // Advances by the rolls this sync actually took, not all the way to
   // totalDropRollsEligible. That fast-forward silently burned every roll this
   // sync couldn't pay — the ones above MAX_DROP_ROLLS_PER_SYNC, and the whole
   // tick whenever the items query failed or the droppable pool came back empty.
-  if (!dropTestMode && rollsInserted > 0) {
-    updateData.drop_rolls_done = dropRollsDone + rollsInserted;
+  // A roll that was taken but landed nowhere (full ground) still counts as
+  // paid: blocked drops are forfeited rather than owed.
+  if (!dropTestMode && rollsConsumed > 0) {
+    updateData.drop_rolls_done = dropRollsDone + rollsConsumed;
   }
   // The billing clock BILL_COOLDOWN_MS and the wall-clock cap measure from.
   // Deliberately *not* part of herzieToRow: last_synced_at in there is a

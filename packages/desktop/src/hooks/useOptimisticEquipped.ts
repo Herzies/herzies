@@ -161,16 +161,23 @@ export function useOptimisticEquipped(serverEquipped: Equipped) {
   }, [overlay, inFlight]);
 
   const toggleEquip = useCallback(
-    async (itemId: string): Promise<ToggleEquipResult> => {
+    async (
+      itemId: string,
+      preferredSide?: GroundSide,
+    ): Promise<ToggleEquipResult> => {
       const current = overlayRef.current ?? serverRef.current;
       const item = getItem(itemId);
       const worn =
         findEquippedSlot(current, itemId) !== null ||
         isModifierEquipped(current, itemId);
       const action: "equip" | "unequip" = worn ? "unequip" : "equip";
+      // `preferredSide` is the caller naming the exact ground slot it means
+      // (the deck's two Accessory boxes are ground_left and ground_right, and
+      // clicking the right one must not fill the left). Without one, fall
+      // back to picking a free side — which is all a bank click can say.
       const side =
         action === "equip" && item?.equipSlot === "ground"
-          ? pickGroundSide(current)
+          ? (preferredSide ?? pickGroundSide(current))
           : undefined;
 
       const predicted = applyEquip(

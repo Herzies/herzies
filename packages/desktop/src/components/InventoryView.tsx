@@ -1,5 +1,6 @@
 import type {
   Equipped,
+  GroundSide,
   Herzie,
   Inventory,
   ItemType,
@@ -26,9 +27,11 @@ import { cn, formatAmount } from "../lib/utils";
 import { herzies } from "../tauri-bridge";
 import { Coin } from "./Coin";
 import { ContextMenu } from "./ContextMenu";
-import { DeckRow } from "./DeckRow";
+import { DeckRow, type EmptySlotTarget } from "./DeckRow";
+import { DeckSlotPicker } from "./DeckSlotPicker";
 import { Herzie3D } from "./Herzie3D";
 import ItemInspectOverlay, { ItemPreviewCard } from "./ItemInspectOverlay";
+import { DuplicatesIcon } from "./icons/DuplicatesIcon";
 import { ItemTypeIcon } from "./icons/ItemTypeIcon";
 import { SortIcon } from "./icons/SortIcon";
 import { List } from "./List";
@@ -449,7 +452,10 @@ export function InventoryView({
    * the grid; keeping a local copy in sync with it only ever reintroduced the
    * flicker the optimistic layer exists to remove. */
   equipped: Equipped;
-  onToggleEquip: (itemId: string) => Promise<ToggleEquipResult>;
+  onToggleEquip: (
+    itemId: string,
+    side?: GroundSide,
+  ) => Promise<ToggleEquipResult>;
   /** Register the unequip a sell performs server-side when the last copy goes. */
   onPredictUnequip?: (itemId: string, settled: Promise<unknown>) => void;
   /** False while another tab is shown — pauses the 3D render. */
@@ -483,6 +489,11 @@ export function InventoryView({
     x: number;
     y: number;
   } | null>(null);
+  /** Open when the Sell duplicates button is awaiting confirmation. The
+   * batch it will sell is recomputed at confirm time from `duplicates`. */
+  const [sellDupesConfirm, setSellDupesConfirm] = useState(false);
+  /** The empty deck slot whose picker is open (see DeckSlotPicker). */
+  const [slotPicker, setSlotPicker] = useState<EmptySlotTarget | null>(null);
   const [tab, setTab] = useState<InventoryTab>("cards");
   const [slotOrder, setSlotOrder] = useState<(string | null)[]>(() =>
     loadSlotOrder(herzie.friendCode),
@@ -744,7 +755,11 @@ export function InventoryView({
    * onToggleEquip and the reconcile sees both at once — a clear afterwards
    * would arrive a render too late, with reconcile having already emptied
    * some other slot. */
-  const handleEquip = async (itemId: string, fromSlot?: number) => {
+  const handleEquip = async (
+    itemId: string,
+    fromSlot?: number,
+    side?: GroundSide,
+  ) => {
     const name = getItem(itemId)?.name ?? itemId;
     if (fromSlot !== undefined) {
       setSlotOrder((prev) => {
@@ -754,7 +769,7 @@ export function InventoryView({
         return next;
       });
     }
-    const result = await onToggleEquip(itemId);
+    const result = await onToggleEquip(itemId, side);
     if (result.ok) {
       onLog?.(
         result.action === "equip" ? `Placed "${name}"` : `Returned "${name}"`,
@@ -845,7 +860,109 @@ export function InventoryView({
     const bankQty = isItemEquipped(itemId) ? qty - 1 : qty;
     return Array.from({ length: Math.max(0, bankQty) }, () => itemId);
   });
+  /** Every copy beyond the first, of everything sellable in the bank — what
+   * the Sell duplicates button offers.
+   *
+   * Keeps exactly one of each id *in total*, not one per bank slot, so an
+   * item you are currently wearing counts as the copy you keep. That is also
+   * what makes this safe: the remaining quantity never reaches zero, so
+   * `applySell` never takes its unequip branch and nothing can be sold out
+   * from under the deck.
+   *
+   * Built from `items` (one entry per id, already rarity-then-name sorted)
+   * rather than `ownedBankUnits`, since the sale is per id with a quantity.
+   * Anything with no sellPrice is skipped — `applySell` would refuse it.
+   *
+   * Anything in CONFIRM_SELL_RARITIES — rare and legendary — is left out
+   * however many you own, so this only ever clears common and uncommon
+   * clutter. Spares of the good stuff are the likeliest to be wanted for a
+   * trade, and are exactly the items that already demand a per-item "are you
+   * sure" before they can be sold; a one-click bulk action has no business
+   * turning them into coin. Reusing that same set rather than listing the
+   * rarities again is what keeps the two from drifting apart: whatever is
+   * worth a second look is, by definition, not bulk-sellable.
+   *
+   * Stackable items are left out too, which is what keeps this a decluttering
+   * action rather than a payout. A stack occupies one grid cell however many
+   * you own (see ownedBankUnits), so selling its spares frees nothing — it
+   * just converts them to coin, and a stack already has its own "Sell all" in
+   * the right-click menu. Only non-stackable spares cost a slot each, and
+   * they are the whole reason this button exists. */
+  const duplicates = items
+    .flatMap(([itemId, qty]) => {
+      const def = getItem(itemId);
+      if (!def || def.stackable || CONFIRM_SELL_RARITIES.has(def.rarity)) {
+        return [];
+      }
+      return [{ itemId, qty: qty - 1, price: def.sellPrice ?? 0 }];
+    })
+    .filter((d) => d.qty > 0 && d.price > 0);
+  const duplicatesTotal = duplicates.reduce(
+    (sum, d) => sum + d.qty * d.price,
+    0,
+  );
+  const duplicatesCount = duplicates.reduce((sum, d) => sum + d.qty, 0);
+
+  /**
+   * Sells the whole duplicate batch, one item id at a time.
+   *
+   * Sequential on purpose, and this is load-bearing rather than caution: the
+   * sell route is a read-modify-write (fetch inventory_v2, applySell, update)
+   * with no row lock, so two sells in flight at once both read the same
+   * pre-sale inventory and the second write clobbers the first. Firing the
+   * batch in parallel would silently pay out for a fraction of it. Awaiting
+   * each one keeps every request reading the previous one's result.
+   *
+   * The extra in-flight count wraps the whole batch: each handleSell releases
+   * its own, and without this the counter would touch zero between two items
+   * and let the snapshot effect adopt a pre-batch `cachedInventory`, undoing
+   * the optimistic state mid-run.
+   */
+  const sellDuplicates = async () => {
+    const batch = duplicates;
+    if (batch.length === 0) return;
+    const count = duplicatesCount;
+    const total = duplicatesTotal;
+    setSellsInFlight((n) => n + 1);
+    try {
+      for (const d of batch) {
+        await handleSell(d.itemId, d.qty);
+      }
+    } finally {
+      setSellsInFlight((n) => Math.max(0, n - 1));
+    }
+    onLog?.(
+      `Sold ${count} duplicate${count === 1 ? "" : "s"} for ${formatAmount(total)} coins`,
+    );
+  };
+
   const loading = inventory === null;
+
+  /** What can go in the empty deck slot whose picker is open.
+   *
+   * Filtered on the item's own `equipSlot`, not on the group's broader
+   * `itemType`: `applyEquip` routes by `equipSlot` and *displaces* whatever
+   * the slot already holds, so offering a hat in the empty Face box would
+   * silently take off the hat that's already on. That does mean the list
+   * can come up empty while the player owns plenty of other Equipment —
+   * which is what DeckSlotPicker's slot-name header is there to explain.
+   *
+   * Drawn from `items` (one entry per id, already rarity-then-name sorted)
+   * rather than `ownedBankUnits` (a multiset), since equip state is per item
+   * id: two copies of the same hat are one and the same move, and listing it
+   * twice would just be a row that does nothing new. Anything already
+   * equipped is dropped for the same reason — `applyEquip` would refuse it
+   * with "already-equipped" no matter which copy was meant. */
+  const slotPickerItems = slotPicker
+    ? items
+        .map(([itemId]) => itemId)
+        .filter((itemId) => {
+          const def = getItem(itemId);
+          return (
+            def?.equipSlot === slotPicker.equipSlot && !isItemEquipped(itemId)
+          );
+        })
+    : [];
 
   // Keep the saved slot arrangement in sync with what's actually owned —
   // see reconcileSlotOrder. Keyed on the joined list (not `ownedBankUnits`,
@@ -937,27 +1054,53 @@ export function InventoryView({
           >
             Deck
           </TabButton>
-          {/* Cards only — the Deck tab has fixed slots, so there's no
-              arrangement of its own to sort. `ml-auto` goes on the Tooltip:
-              its wrapping span is the flex item here, not the button. */}
+          {/* Cards only — the Deck tab has fixed slots, so there's neither an
+              arrangement of its own to sort nor a bank to clear. Both live in
+              one wrapper so they read as a pair: it carries the `ml-auto` that
+              pushes them right, and it keeps the row's `gap-1` from opening a
+              third gap between two buttons that already pad themselves. */}
           {tab === "cards" && (
-            <Tooltip className="ml-auto" label="Quick sort">
-              <button
-                type="button"
-                aria-label="Quick sort"
-                onClick={() => setSlotOrder(sortSlotsByType(ownedBankUnits))}
-                // Tighter vertical padding than TabButton's, so the taller
-                // icon doesn't grow the tab row: the flex row's default
-                // stretch sizes this button to the tabs anyway, and
-                // items-center then centres the icon against their text.
-                className="flex cursor-pointer items-center border-none bg-transparent px-1.5 py-0.5 text-text-dim hover:text-cyan"
+            <div className="ml-auto flex items-center">
+              <Tooltip
+                label={
+                  duplicatesCount > 0
+                    ? `Sell ${duplicatesCount} duplicate${duplicatesCount === 1 ? "" : "s"}, keeping one of each`
+                    : "No duplicates to sell"
+                }
               >
-                {/* 16px, the same size the item pips render at — a 16x16
-                    PixelIcon scaled to anything else lands its 1px arrow
-                    shaft on fractional device pixels and goes soft. */}
-                <SortIcon className="h-4 w-4" />
-              </button>
-            </Tooltip>
+                <button
+                  type="button"
+                  aria-label="Sell duplicates"
+                  disabled={duplicatesCount === 0}
+                  onClick={() => setSellDupesConfirm(true)}
+                  // Same tight padding as the sort button beside it, so neither
+                  // icon grows the tab row.
+                  className="flex cursor-pointer items-center border-none bg-transparent px-1.5 py-0.5 text-text-dim hover:text-cyan disabled:cursor-default disabled:opacity-40 disabled:hover:text-text-dim"
+                >
+                  <DuplicatesIcon className="h-3.5 w-3.5" />
+                </button>
+              </Tooltip>
+              <Tooltip label="Quick sort">
+                <button
+                  type="button"
+                  aria-label="Quick sort"
+                  onClick={() => setSlotOrder(sortSlotsByType(ownedBankUnits))}
+                  // Tighter vertical padding than TabButton's, so the taller
+                  // icon doesn't grow the tab row: the flex row's default
+                  // stretch sizes this button to the tabs anyway, and
+                  // items-center then centres the icon against their text.
+                  className="flex cursor-pointer items-center border-none bg-transparent px-1.5 py-0.5 text-text-dim hover:text-cyan"
+                >
+                  {/* 14px rather than the item pips' 16px: these are chrome
+                    beside the tab labels, not content, and read better a
+                    little smaller. A 16x16 PixelIcon only lands on whole
+                    device pixels at 16px (or a multiple), so both glyphs are
+                    drawn at 2px stroke weight to survive the fractional
+                    scale — a 1px feature here would go visibly soft. */}
+                  <SortIcon className="h-3.5 w-3.5" />
+                </button>
+              </Tooltip>
+            </div>
           )}
         </div>
 
@@ -967,6 +1110,7 @@ export function InventoryView({
               equipped={equipped}
               inventory={inventory}
               onUnequip={handleEquip}
+              onPlaceRequest={setSlotPicker}
             />
           </List>
         ) : loading ? (
@@ -1095,6 +1239,86 @@ export function InventoryView({
             />
           );
         })()}
+
+      {sellDupesConfirm && (
+        <PromptOverlay
+          title="Sell duplicates?"
+          titleId="confirm-sell-dupes-title"
+          onEscape={() => setSellDupesConfirm(false)}
+          actions={[
+            {
+              label: "Keep them",
+              colour: "text-text-dim",
+              onClick: () => setSellDupesConfirm(false),
+            },
+            {
+              label: "Sell",
+              colour: "text-red",
+              onClick: () => {
+                setSellDupesConfirm(false);
+                sellDuplicates();
+              },
+            },
+          ]}
+        >
+          <div className="flex flex-col gap-2">
+            <div>
+              Sell {duplicatesCount} duplicate
+              {duplicatesCount === 1 ? "" : "s"} for{" "}
+              <Coin amount={duplicatesTotal} />? One of each is kept, and rare
+              and legendary items are never sold.
+            </div>
+            {/* The breakdown, since this is the one sell action where what
+                goes is not the thing that was clicked. Capped so a bank full
+                of odds and ends can't outgrow the dialog. Nothing valuable
+                can hide behind "+N more": the batch is common and uncommon
+                only (see `duplicates`), and `items` sorts rarity-first (see
+                rarityOrder) so the uncommons are the rows that do show. */}
+            <div className="flex flex-col gap-0.5 text-ui-sm text-text-dim">
+              {duplicates.slice(0, 6).map((d) => {
+                const def = getItem(d.itemId);
+                return (
+                  <div key={d.itemId} className="flex justify-between gap-3">
+                    <span className="truncate">
+                      {d.qty}x{" "}
+                      <span
+                        style={{
+                          color: def ? RARITY_COLORS[def.rarity] : undefined,
+                        }}
+                      >
+                        {def?.name ?? d.itemId}
+                      </span>
+                    </span>
+                    <span className="shrink-0">
+                      <Coin amount={d.qty * d.price} />
+                    </span>
+                  </div>
+                );
+              })}
+              {duplicates.length > 6 && (
+                <div>+{duplicates.length - 6} more</div>
+              )}
+            </div>
+          </div>
+        </PromptOverlay>
+      )}
+
+      {slotPicker && (
+        <DeckSlotPicker
+          x={slotPicker.x}
+          y={slotPicker.y}
+          slotLabel={slotPicker.label}
+          itemIds={slotPickerItems}
+          onPick={(itemId) => {
+            // Closed before the await, as the sell menu does: the optimistic
+            // equip fills the slot on the next render anyway, so leaving the
+            // list up would only show a stale row for the item just placed.
+            setSlotPicker(null);
+            handleEquip(itemId, undefined, slotPicker.side);
+          }}
+          onClose={() => setSlotPicker(null)}
+        />
+      )}
 
       {sellBox &&
         (() => {

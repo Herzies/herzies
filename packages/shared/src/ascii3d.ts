@@ -69,3 +69,32 @@ export const OCEAN_RAMP = [
   "#1B5FA8",
   "#123F7A",
 ] as const;
+
+/**
+ * Violet ramp for the Purple Dane colour scheme. Built around
+ * CREATURE_PALETTE's "soft violet" (#C3A6FF) — the skin exists to paint a
+ * herzie a colour it could already have hatched with, so the ramp keeps that
+ * exact hue (259.6°) and only walks lightness across OCEAN_RAMP's span,
+ * easing saturation down at the dark end so shadows don't read as neon.
+ */
+export const VIOLET_RAMP = [
+  "#DDCCFF",
+  "#B28EFC",
+  "#8953F7",
+  "#601BEF",
+  "#4812B8",
+  "#320F7B",
+] as const;
+
+/**
+ * Teal ramp for the Thanks for all the fish! colour scheme. Same construction
+ * as VIOLET_RAMP, around CREATURE_PALETTE's "teal" (#4ECDC4, hue 175.7°).
+ */
+export const TEAL_RAMP = [
+  "#6ED6CF",
+  "#54CBC3",
+  "#3DBCB3",
+  "#379E96",
+  "#2F807A",
+  "#27635F",
+] as const;
