@@ -6,12 +6,18 @@ import { Tooltip } from "./Tooltip";
  * badge wears its colour. */
 const GOOD_EYE_SNIPER_RED = "#e05050";
 
-/** One earned badge: a small icon with the count it stands for. */
+/** The theme's --color-yellow, inlined because these badges colour an inline
+ * `style` rather than a Tailwind class (see the render below). */
+const RANK_ONE_YELLOW = "#facc15";
+
+/** One earned badge: a small icon, optionally with the count it stands for. */
 interface Badge {
   key: string;
   /** Tooltip text, already pluralized. */
   label: string;
-  count: number;
+  /** Rendered beside the icon. Omitted by a badge that stands for a rank
+   * rather than a tally, or whose icon already carries its number. */
+  count?: number;
   icon: React.ReactNode;
   /** Icon/count colour, as a CSS colour. */
   colour: string;
@@ -39,11 +45,41 @@ function BullseyeIcon() {
   );
 }
 
+/** Filled circle with a "1" knocked out of it — top of the global XP
+ * leaderboard. Drawn as a filled disc with the digit in the page background
+ * colour rather than a stroked ring with a glyph, so it still reads as a "1"
+ * at the 12px these render at. */
+function RankOneIcon() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      role="img"
+    >
+      <circle cx="12" cy="12" r="10" fill="currentColor" />
+      <text
+        x="12"
+        y="12"
+        textAnchor="middle"
+        dominantBaseline="central"
+        fontSize="14"
+        fontWeight="bold"
+        fill="var(--color-bg)"
+      >
+        1
+      </text>
+    </svg>
+  );
+}
+
 /**
  * Badges earned by a herzie, shown in the top-right of the profile header.
- * Each one is icon + count, with the full sentence in a hover tooltip. Built
- * as a list so future badges are one entry rather than another layout change;
- * a badge with a zero (or missing) count isn't rendered at all.
+ * Each one is an icon, optionally followed by the count it stands for, with
+ * the full sentence in a hover tooltip. Built as a list so future badges are
+ * one entry rather than another layout change. A tally badge with a zero (or
+ * missing) count isn't rendered at all; a rank badge carries no count.
  */
 export function ProfileBadges({ profile }: { profile: HerzieProfile }) {
   const badges: Badge[] = [];
@@ -56,6 +92,17 @@ export function ProfileBadges({ profile }: { profile: HerzieProfile }) {
       count: wins,
       icon: <BullseyeIcon />,
       colour: GOOD_EYE_SNIPER_RED,
+    });
+  }
+
+  // rank() in herzie_ranks ties rather than breaking ties arbitrarily (see
+  // migration 00056), so equal-XP herzies can all be #1 and all wear this.
+  if (profile.globalRank === 1) {
+    badges.push({
+      key: "rank-one",
+      label: "Ranked #1 globally",
+      icon: <RankOneIcon />,
+      colour: RANK_ONE_YELLOW,
     });
   }
 
