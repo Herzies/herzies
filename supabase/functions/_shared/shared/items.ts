@@ -1409,7 +1409,7 @@ export const ITEMS: ItemDef[] = [
     frames: headphonesFrames,
     equipable: true,
     equipSlot: "head",
-    buyPrice: 8000,
+    buyPrice: 2500,
     sellPrice: 100,
   },
   {
@@ -1420,7 +1420,7 @@ export const ITEMS: ItemDef[] = [
     frames: rainbowHeadbandFrames,
     equipable: true,
     equipSlot: "head",
-    buyPrice: 8000,
+    buyPrice: 2500,
     sellPrice: 100,
   },
   {
@@ -1496,7 +1496,7 @@ export const ITEMS: ItemDef[] = [
     frames: purpleDaneFrames,
     equipable: true,
     equipSlot: "color",
-    buyPrice: 10000,
+    buyPrice: 3000,
     sellPrice: 100,
   },
   {
@@ -1507,7 +1507,7 @@ export const ITEMS: ItemDef[] = [
     frames: thanksForAllTheFishFrames,
     equipable: true,
     equipSlot: "color",
-    buyPrice: 10000,
+    buyPrice: 3000,
     sellPrice: 100,
   },
   {
