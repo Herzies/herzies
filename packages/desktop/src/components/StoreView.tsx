@@ -1,7 +1,12 @@
-import type { Equipped, Inventory, StoreProduct } from "@herzies/shared";
+import type {
+  Equipped,
+  Inventory,
+  PremiumItem,
+  StoreProduct,
+} from "@herzies/shared";
 import { getItem, ITEMS } from "@herzies/shared";
 import { useEffect, useRef, useState } from "react";
-import { cn, formatAmount, formatNok } from "../lib/utils";
+import { cn, formatAmount, formatNok, formatPrice } from "../lib/utils";
 import { herzies, useWindowFocused } from "../tauri-bridge";
 import { Coin } from "./Coin";
 import ItemInspectOverlay from "./ItemInspectOverlay";
@@ -36,6 +41,7 @@ export function StoreView({
   const [inventory, setInventory] = useState(cachedInventory);
   const [currency, setCurrency] = useState(cachedCurrency);
   const [products, setProducts] = useState<StoreProduct[] | null>(null);
+  const [premium, setPremium] = useState<PremiumItem[] | null>(null);
   const [pendingProductId, setPendingProductId] = useState<string | null>(null);
   const [pendingItemId, setPendingItemId] = useState<string | null>(null);
   const [inspectItem, setInspectItem] = useState<string | null>(null);
@@ -53,6 +59,10 @@ export function StoreView({
       .fetchStoreProducts()
       .then(setProducts)
       .catch(() => setProducts([]));
+    herzies
+      .fetchPremiumItems()
+      .then(setPremium)
+      .catch(() => setPremium([]));
   }, []);
 
   // Currency purchases complete in the browser and are credited by a
@@ -101,6 +111,29 @@ export function StoreView({
   const loading = products === null;
   const currencyProducts = products ?? [];
 
+  /** Premium listings by item id — the join back to the bundled catalog. */
+  const premiumByItem = new Map((premium ?? []).map((p) => [p.itemId, p]));
+
+  /**
+   * One list, both kinds of price. A premium listing wins over a coin price
+   * for the same item, so putting an item up in Stripe takes it off the coin
+   * shop by itself, with no second place to remember to change.
+   *
+   * Premium rows sort first: there are few of them, they are the ones that
+   * cost real money, and burying them under the coin cards would make the
+   * store's whole point easy to miss.
+   */
+  const shopItems = [
+    ...BUYABLE_ITEMS.filter((item) => premiumByItem.has(item.id)),
+    ...(premium ?? [])
+      .filter((p) => !BUYABLE_ITEMS.some((i) => i.id === p.itemId))
+      .flatMap((p) => {
+        const def = getItem(p.itemId);
+        return def ? [def] : [];
+      }),
+    ...BUYABLE_ITEMS.filter((item) => !premiumByItem.has(item.id)),
+  ];
+
   const inspected = inspectItem ? getItem(inspectItem) : null;
   const inspectedOwned = inspectItem ? (inventory?.[inspectItem] ?? 0) : 0;
   const inspectedAlreadyOwned =
@@ -142,31 +175,38 @@ export function StoreView({
             your inventory.
           </p>
           <List className="min-h-0 flex-1">
-            {BUYABLE_ITEMS.length === 0 ? (
+            {shopItems.length === 0 ? (
               <div className="pt-5 text-center text-ui text-text-dim">
                 No cards available right now.
               </div>
             ) : (
-              BUYABLE_ITEMS.map((item) => {
+              shopItems.map((item) => {
+                const paid = premiumByItem.get(item.id);
                 const owned = inventory?.[item.id] ?? 0;
-                const alreadyOwned = !item.stackable && owned > 0;
+                // A paid item can be bought again however many you own —
+                // they are tradable, so a spare is a legitimate thing to want.
+                // Coin items still stop at one, since a duplicate there is
+                // just a wasted bank slot.
+                const alreadyOwned = !paid && !item.stackable && owned > 0;
                 const price = item.buyPrice ?? 0;
-                const canAfford = currency >= price;
+                const canAfford = paid ? true : currency >= price;
                 const insufficientFunds = !alreadyOwned && !canAfford;
+                // Paid purchases leave for the browser and are credited by the
+                // webhook, so they share the coin-pack pending state and its
+                // refresh-on-return — not handleBuyItem, which spends coins.
+                const pending = paid
+                  ? pendingProductId === item.id
+                  : pendingItemId === item.id;
                 const buyButton = (
                   <button
                     type="button"
                     className={cn("btn", alreadyOwned && "cursor-default")}
-                    disabled={
-                      alreadyOwned || !canAfford || pendingItemId === item.id
+                    disabled={alreadyOwned || !canAfford || pending}
+                    onClick={() =>
+                      paid ? handleBuyCurrency(item.id) : handleBuyItem(item.id)
                     }
-                    onClick={() => handleBuyItem(item.id)}
                   >
-                    {pendingItemId === item.id
-                      ? "Buying..."
-                      : alreadyOwned
-                        ? "Owned"
-                        : "Buy"}
+                    {pending ? "Buying..." : alreadyOwned ? "Owned" : "Buy"}
                   </button>
                 );
                 return (
@@ -176,7 +216,15 @@ export function StoreView({
                     onInspect={setInspectItem}
                     inspectTitle="Inspect card"
                     colour="yellow"
-                    subtitle={alreadyOwned ? "Owned" : <Coin amount={price} />}
+                    subtitle={
+                      paid ? (
+                        formatPrice(paid.amount, paid.currency)
+                      ) : alreadyOwned ? (
+                        "Owned"
+                      ) : (
+                        <Coin amount={price} />
+                      )
+                    }
                     action={
                       insufficientFunds ? (
                         <Tooltip label="Insufficient funds">

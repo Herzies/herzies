@@ -241,6 +241,20 @@ pub struct StoreProduct {
     pub price_nok_ore: u32,
 }
 
+/// A catalog item sold for real money rather than coins. Carries no name or
+/// art: the app already has those in its own catalog under `item_id`, which
+/// is the whole point of joining on the id (see /api/store/premium).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PremiumItem {
+    pub item_id: String,
+    pub price_id: String,
+    /// Minor units in `currency` (e.g. 3900 = 39.00). Not assumed to be NOK.
+    pub amount: u32,
+    /// ISO 4217 code, lowercase, as Stripe returns it.
+    pub currency: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionData {

@@ -282,6 +282,23 @@ export interface StoreProduct {
   priceNokOre: number;
 }
 
+/**
+ * A catalog item sold for real money rather than coins.
+ *
+ * Carries no name, art or description: the client already has all of that in
+ * its own item catalog under `itemId`, and duplicating it here would create a
+ * second copy to drift out of sync. Stripe owns the price, the catalog owns
+ * the presentation, and `itemId` is the join.
+ */
+export interface PremiumItem {
+  itemId: string;
+  priceId: string;
+  /** Minor units of `currency` (e.g. 3900 = 39.00). Never assumed to be NOK. */
+  amount: number;
+  /** ISO 4217 code, lowercase, as Stripe returns it. */
+  currency: string;
+}
+
 export interface Trade {
   id: string;
   initiatorId: string;

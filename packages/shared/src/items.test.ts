@@ -179,13 +179,21 @@ describe("modifier slot", () => {
 describe("spirit-orb", () => {
   const spiritOrb = getItem("spirit-orb");
 
-  it("exists in the catalog as a purchasable ground-slot accessory", () => {
+  it("exists in the catalog as a ground-slot accessory", () => {
     expect(spiritOrb).toMatchObject({
       id: "spirit-orb",
       equipable: true,
       equipSlot: "ground",
     });
-    expect(spiritOrb?.buyPrice).toBeGreaterThan(0);
+  });
+
+  it("has no coin price, being the one money-only item", () => {
+    // Deliberately unbuyable with coins: it is also the only equipable that
+    // can never drop (see the exclusion test below), so a coin price would
+    // make the one thing you cannot earn by playing earnable after all. It is
+    // sold as a Stripe product joined by metadata.item_id — see the
+    // /api/store/premium route — which is why no price lives here.
+    expect(spiritOrb?.buyPrice).toBeUndefined();
   });
 
   it("has renderable card art", () => {

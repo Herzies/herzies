@@ -664,6 +664,14 @@ async fn fetch_store_products() -> Result<Vec<StoreProduct>, String> {
         .unwrap_or_default())
 }
 
+#[tauri::command]
+async fn fetch_premium_items() -> Result<Vec<PremiumItem>, String> {
+    let client = Client::new();
+    Ok(api::api_fetch_premium_items(&client)
+        .await
+        .unwrap_or_default())
+}
+
 /// Creates a Stripe Checkout Session for `product_id` and opens it in the
 /// system browser. Currency is credited only once Stripe's webhook confirms
 /// payment server-side — this command never touches local/AppState currency
@@ -2074,6 +2082,7 @@ pub fn run() {
             spawn_debug_drop,
             equip_item,
             fetch_store_products,
+            fetch_premium_items,
             start_purchase,
             trade_create,
             trade_join,

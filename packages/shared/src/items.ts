@@ -1513,7 +1513,10 @@ export const ITEMS: ItemDef[] = [
     frames: spiritOrbFrames,
     equipable: true,
     equipSlot: "ground",
-    buyPrice: 50000,
+    // No coin price: sold for money only, as a Stripe product whose
+    // metadata.item_id is "spirit-orb" (see /api/store/premium). It is the
+    // one item that cannot be earned by playing — see NON_DROPPABLE_ITEM_IDS
+    // — so a coin price would have made it grindable after all.
     sellPrice: 500,
   },
 ];

@@ -9,6 +9,7 @@ import type {
   Inventory,
   PendingDrop,
   PendingFriendRequest,
+  PremiumItem,
   StoreProduct,
   Trade,
   TradeState,
@@ -167,6 +168,8 @@ export const herzies = {
   spawnDebugDrop: () => invoke<void>("spawn_debug_drop"),
 
   fetchStoreProducts: () => invoke<StoreProduct[]>("fetch_store_products"),
+  /** Catalog items sold for money. Empty when Stripe has none configured. */
+  fetchPremiumItems: () => invoke<PremiumItem[]>("fetch_premium_items"),
   /**
    * Starts a purchase. Resolves `true` if Stripe Checkout was opened in the
    * system browser (balance updates once the webhook confirms payment —

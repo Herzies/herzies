@@ -21,6 +21,27 @@ export function formatNok(ore: number): string {
   return nokFormatter.format(ore / 100);
 }
 
+/**
+ * Formats a minor-unit amount in whatever currency Stripe reports, so nothing
+ * client-side has to assume NOK — switching the store to USD or EUR is then a
+ * Stripe-side change with no app release.
+ *
+ * Rendered in the user's own locale rather than nb-NO: the currency is fixed
+ * by what they'll be charged, but the grouping and symbol placement should
+ * read naturally wherever they are. Falls back to a bare amount if the code
+ * isn't one Intl recognises, since it arrives from an external service.
+ */
+export function formatPrice(minorUnits: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: currency.toUpperCase(),
+    }).format(minorUnits / 100);
+  } catch {
+    return `${(minorUnits / 100).toFixed(2)} ${currency.toUpperCase()}`;
+  }
+}
+
 /** Stable per-user chat name colour (360 hues; avoids 8-bucket collisions on display names). */
 export function chatUserColor(userKey: string): string {
   let hash = 0;

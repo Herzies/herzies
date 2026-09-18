@@ -718,6 +718,18 @@ pub async fn api_fetch_store_products(client: &Client) -> Option<Vec<StoreProduc
     serde_json::from_value(data["products"].clone()).ok()
 }
 
+/// Items sold for money. An empty list is the normal answer when Stripe has
+/// no such products configured, so a failure here is not distinguished from
+/// "none for sale" — either way the store shows its coin-priced cards.
+pub async fn api_fetch_premium_items(client: &Client) -> Option<Vec<PremiumItem>> {
+    let resp = api_fetch(client, reqwest::Method::GET, "/store/premium", None).await?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let data: serde_json::Value = resp.json().await.ok()?;
+    serde_json::from_value(data["items"].clone()).ok()
+}
+
 /// Creates a Stripe Checkout Session for `product_id` and returns the URL to
 /// open in the system browser. Currency is credited only by the webhook once
 /// Stripe confirms payment — this call never mutates local/server balances.
