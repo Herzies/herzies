@@ -32,14 +32,27 @@ export function formatNok(ore: number): string {
  * isn't one Intl recognises, since it arrives from an external service.
  */
 export function formatPrice(minorUnits: number, currency: string): string {
-  try {
-    return new Intl.NumberFormat(undefined, {
-      style: "currency",
-      currency: currency.toUpperCase(),
-    }).format(minorUnits / 100);
-  } catch {
-    return `${(minorUnits / 100).toFixed(2)} ${currency.toUpperCase()}`;
+  const amount = minorUnits / 100;
+  const code = currency.toUpperCase();
+
+  // "narrowSymbol" first, for "$5.00" rather than "US$5.00": the default
+  // display disambiguates USD from the other dollar currencies whenever the
+  // viewer's locale isn't American, which is noise when only one currency is
+  // ever on screen. Falls back to the default display if the runtime doesn't
+  // know the option, and to a bare amount if it doesn't know the currency —
+  // which can happen, since the code comes from Stripe rather than from us.
+  for (const currencyDisplay of ["narrowSymbol", "symbol"] as const) {
+    try {
+      return new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency: code,
+        currencyDisplay,
+      }).format(amount);
+    } catch {
+      // Try the next display, then the plain fallback below.
+    }
   }
+  return `${amount.toFixed(2)} ${code}`;
 }
 
 /** Stable per-user chat name colour (360 hues; avoids 8-bucket collisions on display names). */
