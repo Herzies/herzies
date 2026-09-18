@@ -873,15 +873,27 @@ export function InventoryView({
    * rather than `ownedBankUnits`, since the sale is per id with a quantity.
    * Anything with no sellPrice is skipped — `applySell` would refuse it.
    *
-   * Legendaries are never included, however many you own. A spare legendary
-   * is the most valuable thing in the bank and the likeliest to be wanted for
-   * a trade, so it is not something a one-click bulk action should be able to
-   * turn into coin — selling one stays a deliberate, per-item act with its
-   * own CONFIRM_SELL_RARITIES prompt. */
+   * Anything in CONFIRM_SELL_RARITIES — rare and legendary — is left out
+   * however many you own, so this only ever clears common and uncommon
+   * clutter. Spares of the good stuff are the likeliest to be wanted for a
+   * trade, and are exactly the items that already demand a per-item "are you
+   * sure" before they can be sold; a one-click bulk action has no business
+   * turning them into coin. Reusing that same set rather than listing the
+   * rarities again is what keeps the two from drifting apart: whatever is
+   * worth a second look is, by definition, not bulk-sellable.
+   *
+   * Stackable items are left out too, which is what keeps this a decluttering
+   * action rather than a payout. A stack occupies one grid cell however many
+   * you own (see ownedBankUnits), so selling its spares frees nothing — it
+   * just converts them to coin, and a stack already has its own "Sell all" in
+   * the right-click menu. Only non-stackable spares cost a slot each, and
+   * they are the whole reason this button exists. */
   const duplicates = items
     .flatMap(([itemId, qty]) => {
       const def = getItem(itemId);
-      if (!def || def.rarity === "legendary") return [];
+      if (!def || def.stackable || CONFIRM_SELL_RARITIES.has(def.rarity)) {
+        return [];
+      }
       return [{ itemId, qty: qty - 1, price: def.sellPrice ?? 0 }];
     })
     .filter((d) => d.qty > 0 && d.price > 0);
@@ -1253,18 +1265,15 @@ export function InventoryView({
             <div>
               Sell {duplicatesCount} duplicate
               {duplicatesCount === 1 ? "" : "s"} for{" "}
-              <Coin amount={duplicatesTotal} />? One of each is kept, and
-              legendaries are never sold.
+              <Coin amount={duplicatesTotal} />? One of each is kept, and rare
+              and legendary items are never sold.
             </div>
             {/* The breakdown, since this is the one sell action where what
                 goes is not the thing that was clicked. Capped so a bank full
-                of odds and ends can't outgrow the dialog — and the cap is
-                only safe because `items` sorts rarity-first (see rarityOrder),
-                so a rare is always at the top and can never be the thing
-                hidden behind "+N more". Legendaries aren't in this list at
-                all (see `duplicates`). This batch confirm is what stands in
-                for the per-item CONFIRM_SELL_RARITIES prompt, which a batch
-                would otherwise fire once per rare. */}
+                of odds and ends can't outgrow the dialog. Nothing valuable
+                can hide behind "+N more": the batch is common and uncommon
+                only (see `duplicates`), and `items` sorts rarity-first (see
+                rarityOrder) so the uncommons are the rows that do show. */}
             <div className="flex flex-col gap-0.5 text-ui-sm text-text-dim">
               {duplicates.slice(0, 6).map((d) => {
                 const def = getItem(d.itemId);
