@@ -126,6 +126,28 @@ export function StoreView({
   // having nowhere to put it is.
   const inspectedNoRoom =
     !!inspectItem && !hasRoomFor(inventory, equipped, inspectItem);
+  const inspectedPaid = inspectItem
+    ? premiumByItem.get(inspectItem)
+    : undefined;
+
+  // Built as parts rather than one fragment so a card with no price shows no
+  // price. A premium card has no buyPrice at all, and rendering that as a coin
+  // amount printed a bare "H 0" next to its rarity.
+  const inspectedPriceNode = inspectedPaid ? (
+    formatPrice(inspectedPaid.amount, inspectedPaid.currency)
+  ) : inspected?.buyPrice != null ? (
+    <Coin amount={inspectedPrice} />
+  ) : null;
+  const inspectedOwnedText =
+    inspectedOwned > 0 ? `${inspectedOwned} owned` : null;
+  const inspectedMeta =
+    inspectedPriceNode && inspectedOwnedText ? (
+      <>
+        {inspectedPriceNode} · {inspectedOwnedText}
+      </>
+    ) : (
+      (inspectedPriceNode ?? inspectedOwnedText ?? undefined)
+    );
 
   return (
     <div className="flex h-full flex-col">
@@ -259,46 +281,68 @@ export function StoreView({
           itemId={inspectItem}
           onClose={() => setInspectItem(null)}
           equipped={equipped}
-          meta={
-            <>
-              <Coin amount={inspectedPrice} />
-              {inspectedOwned > 0 && ` · ${inspectedOwned} owned`}
-            </>
-          }
+          meta={inspectedMeta}
           footer={
-            inspected.buyPrice != null &&
-            (() => {
-              const insufficientFunds = currency < inspectedPrice;
-              const buyButton = (
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={
-                    insufficientFunds ||
-                    inspectedNoRoom ||
-                    pendingItemId === inspectItem
-                  }
-                  onClick={() => handleBuyItem(inspectItem)}
-                >
-                  {pendingItemId === inspectItem ? (
-                    "Buying..."
+            // Premium cards are bought the same way here as in the list:
+            // through the browser, credited by the webhook. Without this the
+            // overlay was a dead end for exactly the cards the store most
+            // wants to sell.
+            inspectedPaid
+              ? (() => {
+                  const pending = pendingProductId === inspectItem;
+                  const paidButton = (
+                    <button
+                      type="button"
+                      className="btn"
+                      disabled={inspectedNoRoom || pending}
+                      onClick={() => handleBuyCurrency(inspectItem)}
+                    >
+                      {pending
+                        ? "Buying..."
+                        : `Buy (${formatPrice(inspectedPaid.amount, inspectedPaid.currency)})`}
+                    </button>
+                  );
+                  return inspectedNoRoom ? (
+                    <Tooltip label="Bank full — sell something first">
+                      {paidButton}
+                    </Tooltip>
                   ) : (
-                    <>
-                      Buy (<Coin amount={inspectedPrice} />)
-                    </>
-                  )}
-                </button>
-              );
-              return inspectedNoRoom ? (
-                <Tooltip label="Bank full — sell something first">
-                  {buyButton}
-                </Tooltip>
-              ) : insufficientFunds ? (
-                <Tooltip label="Insufficient funds">{buyButton}</Tooltip>
-              ) : (
-                buyButton
-              );
-            })()
+                    paidButton
+                  );
+                })()
+              : inspected.buyPrice != null &&
+                (() => {
+                  const insufficientFunds = currency < inspectedPrice;
+                  const buyButton = (
+                    <button
+                      type="button"
+                      className="btn"
+                      disabled={
+                        insufficientFunds ||
+                        inspectedNoRoom ||
+                        pendingItemId === inspectItem
+                      }
+                      onClick={() => handleBuyItem(inspectItem)}
+                    >
+                      {pendingItemId === inspectItem ? (
+                        "Buying..."
+                      ) : (
+                        <>
+                          Buy (<Coin amount={inspectedPrice} />)
+                        </>
+                      )}
+                    </button>
+                  );
+                  return inspectedNoRoom ? (
+                    <Tooltip label="Bank full — sell something first">
+                      {buyButton}
+                    </Tooltip>
+                  ) : insufficientFunds ? (
+                    <Tooltip label="Insufficient funds">{buyButton}</Tooltip>
+                  ) : (
+                    buyButton
+                  );
+                })()
           }
         />
       )}
