@@ -1037,49 +1037,52 @@ export function InventoryView({
             Deck
           </TabButton>
           {/* Cards only — the Deck tab has fixed slots, so there's neither an
-              arrangement of its own to sort nor a bank to clear. `ml-auto`
-              goes on the Tooltip of the *first* of the two: its wrapping span
-              is the flex item here, not the button. */}
+              arrangement of its own to sort nor a bank to clear. Both live in
+              one wrapper so they read as a pair: it carries the `ml-auto` that
+              pushes them right, and it keeps the row's `gap-1` from opening a
+              third gap between two buttons that already pad themselves. */}
           {tab === "cards" && (
-            <Tooltip
-              className="ml-auto"
-              label={
-                duplicatesCount > 0
-                  ? `Sell ${duplicatesCount} duplicate${duplicatesCount === 1 ? "" : "s"}, keeping one of each`
-                  : "No duplicates to sell"
-              }
-            >
-              <button
-                type="button"
-                aria-label="Sell duplicates"
-                disabled={duplicatesCount === 0}
-                onClick={() => setSellDupesConfirm(true)}
-                // Same tight padding as the sort button beside it, so neither
-                // icon grows the tab row.
-                className="flex cursor-pointer items-center border-none bg-transparent px-1.5 py-0.5 text-text-dim hover:text-cyan disabled:cursor-default disabled:opacity-40 disabled:hover:text-text-dim"
+            <div className="ml-auto flex items-center">
+              <Tooltip
+                label={
+                  duplicatesCount > 0
+                    ? `Sell ${duplicatesCount} duplicate${duplicatesCount === 1 ? "" : "s"}, keeping one of each`
+                    : "No duplicates to sell"
+                }
               >
-                <DuplicatesIcon className="h-4 w-4" />
-              </button>
-            </Tooltip>
-          )}
-          {tab === "cards" && (
-            <Tooltip label="Quick sort">
-              <button
-                type="button"
-                aria-label="Quick sort"
-                onClick={() => setSlotOrder(sortSlotsByType(ownedBankUnits))}
-                // Tighter vertical padding than TabButton's, so the taller
-                // icon doesn't grow the tab row: the flex row's default
-                // stretch sizes this button to the tabs anyway, and
-                // items-center then centres the icon against their text.
-                className="flex cursor-pointer items-center border-none bg-transparent px-1.5 py-0.5 text-text-dim hover:text-cyan"
-              >
-                {/* 16px, the same size the item pips render at — a 16x16
-                    PixelIcon scaled to anything else lands its 1px arrow
-                    shaft on fractional device pixels and goes soft. */}
-                <SortIcon className="h-4 w-4" />
-              </button>
-            </Tooltip>
+                <button
+                  type="button"
+                  aria-label="Sell duplicates"
+                  disabled={duplicatesCount === 0}
+                  onClick={() => setSellDupesConfirm(true)}
+                  // Same tight padding as the sort button beside it, so neither
+                  // icon grows the tab row.
+                  className="flex cursor-pointer items-center border-none bg-transparent px-1.5 py-0.5 text-text-dim hover:text-cyan disabled:cursor-default disabled:opacity-40 disabled:hover:text-text-dim"
+                >
+                  <DuplicatesIcon className="h-3.5 w-3.5" />
+                </button>
+              </Tooltip>
+              <Tooltip label="Quick sort">
+                <button
+                  type="button"
+                  aria-label="Quick sort"
+                  onClick={() => setSlotOrder(sortSlotsByType(ownedBankUnits))}
+                  // Tighter vertical padding than TabButton's, so the taller
+                  // icon doesn't grow the tab row: the flex row's default
+                  // stretch sizes this button to the tabs anyway, and
+                  // items-center then centres the icon against their text.
+                  className="flex cursor-pointer items-center border-none bg-transparent px-1.5 py-0.5 text-text-dim hover:text-cyan"
+                >
+                  {/* 14px rather than the item pips' 16px: these are chrome
+                    beside the tab labels, not content, and read better a
+                    little smaller. A 16x16 PixelIcon only lands on whole
+                    device pixels at 16px (or a multiple), so both glyphs are
+                    drawn at 2px stroke weight to survive the fractional
+                    scale — a 1px feature here would go visibly soft. */}
+                  <SortIcon className="h-3.5 w-3.5" />
+                </button>
+              </Tooltip>
+            </div>
           )}
         </div>
 
