@@ -31,6 +31,7 @@ import { DeckRow, type EmptySlotTarget } from "./DeckRow";
 import { DeckSlotPicker } from "./DeckSlotPicker";
 import { Herzie3D } from "./Herzie3D";
 import ItemInspectOverlay, { ItemPreviewCard } from "./ItemInspectOverlay";
+import { DuplicatesIcon } from "./icons/DuplicatesIcon";
 import { ItemTypeIcon } from "./icons/ItemTypeIcon";
 import { SortIcon } from "./icons/SortIcon";
 import { List } from "./List";
@@ -488,6 +489,9 @@ export function InventoryView({
     x: number;
     y: number;
   } | null>(null);
+  /** Open when the Sell duplicates button is awaiting confirmation. The
+   * batch it will sell is recomputed at confirm time from `duplicates`. */
+  const [sellDupesConfirm, setSellDupesConfirm] = useState(false);
   /** The empty deck slot whose picker is open (see DeckSlotPicker). */
   const [slotPicker, setSlotPicker] = useState<EmptySlotTarget | null>(null);
   const [tab, setTab] = useState<InventoryTab>("cards");
@@ -856,6 +860,64 @@ export function InventoryView({
     const bankQty = isItemEquipped(itemId) ? qty - 1 : qty;
     return Array.from({ length: Math.max(0, bankQty) }, () => itemId);
   });
+  /** Every copy beyond the first, of everything sellable in the bank — what
+   * the Sell duplicates button offers.
+   *
+   * Keeps exactly one of each id *in total*, not one per bank slot, so an
+   * item you are currently wearing counts as the copy you keep. That is also
+   * what makes this safe: the remaining quantity never reaches zero, so
+   * `applySell` never takes its unequip branch and nothing can be sold out
+   * from under the deck.
+   *
+   * Built from `items` (one entry per id, already rarity-then-name sorted)
+   * rather than `ownedBankUnits`, since the sale is per id with a quantity.
+   * Anything with no sellPrice is skipped — `applySell` would refuse it. */
+  const duplicates = items
+    .map(([itemId, qty]) => ({
+      itemId,
+      qty: qty - 1,
+      price: getItem(itemId)?.sellPrice ?? 0,
+    }))
+    .filter((d) => d.qty > 0 && d.price > 0);
+  const duplicatesTotal = duplicates.reduce(
+    (sum, d) => sum + d.qty * d.price,
+    0,
+  );
+  const duplicatesCount = duplicates.reduce((sum, d) => sum + d.qty, 0);
+
+  /**
+   * Sells the whole duplicate batch, one item id at a time.
+   *
+   * Sequential on purpose, and this is load-bearing rather than caution: the
+   * sell route is a read-modify-write (fetch inventory_v2, applySell, update)
+   * with no row lock, so two sells in flight at once both read the same
+   * pre-sale inventory and the second write clobbers the first. Firing the
+   * batch in parallel would silently pay out for a fraction of it. Awaiting
+   * each one keeps every request reading the previous one's result.
+   *
+   * The extra in-flight count wraps the whole batch: each handleSell releases
+   * its own, and without this the counter would touch zero between two items
+   * and let the snapshot effect adopt a pre-batch `cachedInventory`, undoing
+   * the optimistic state mid-run.
+   */
+  const sellDuplicates = async () => {
+    const batch = duplicates;
+    if (batch.length === 0) return;
+    const count = duplicatesCount;
+    const total = duplicatesTotal;
+    setSellsInFlight((n) => n + 1);
+    try {
+      for (const d of batch) {
+        await handleSell(d.itemId, d.qty);
+      }
+    } finally {
+      setSellsInFlight((n) => Math.max(0, n - 1));
+    }
+    onLog?.(
+      `Sold ${count} duplicate${count === 1 ? "" : "s"} for ${formatAmount(total)} coins`,
+    );
+  };
+
   const loading = inventory === null;
 
   /** What can go in the empty deck slot whose picker is open.
@@ -974,11 +1036,34 @@ export function InventoryView({
           >
             Deck
           </TabButton>
-          {/* Cards only — the Deck tab has fixed slots, so there's no
-              arrangement of its own to sort. `ml-auto` goes on the Tooltip:
-              its wrapping span is the flex item here, not the button. */}
+          {/* Cards only — the Deck tab has fixed slots, so there's neither an
+              arrangement of its own to sort nor a bank to clear. `ml-auto`
+              goes on the Tooltip of the *first* of the two: its wrapping span
+              is the flex item here, not the button. */}
           {tab === "cards" && (
-            <Tooltip className="ml-auto" label="Quick sort">
+            <Tooltip
+              className="ml-auto"
+              label={
+                duplicatesCount > 0
+                  ? `Sell ${duplicatesCount} duplicate${duplicatesCount === 1 ? "" : "s"}, keeping one of each`
+                  : "No duplicates to sell"
+              }
+            >
+              <button
+                type="button"
+                aria-label="Sell duplicates"
+                disabled={duplicatesCount === 0}
+                onClick={() => setSellDupesConfirm(true)}
+                // Same tight padding as the sort button beside it, so neither
+                // icon grows the tab row.
+                className="flex cursor-pointer items-center border-none bg-transparent px-1.5 py-0.5 text-text-dim hover:text-cyan disabled:cursor-default disabled:opacity-40 disabled:hover:text-text-dim"
+              >
+                <DuplicatesIcon className="h-4 w-4" />
+              </button>
+            </Tooltip>
+          )}
+          {tab === "cards" && (
+            <Tooltip label="Quick sort">
               <button
                 type="button"
                 aria-label="Quick sort"
@@ -1133,6 +1218,70 @@ export function InventoryView({
             />
           );
         })()}
+
+      {sellDupesConfirm && (
+        <PromptOverlay
+          title="Sell duplicates?"
+          titleId="confirm-sell-dupes-title"
+          onEscape={() => setSellDupesConfirm(false)}
+          actions={[
+            {
+              label: "Keep them",
+              colour: "text-text-dim",
+              onClick: () => setSellDupesConfirm(false),
+            },
+            {
+              label: "Sell",
+              colour: "text-red",
+              onClick: () => {
+                setSellDupesConfirm(false);
+                sellDuplicates();
+              },
+            },
+          ]}
+        >
+          <div className="flex flex-col gap-2">
+            <div>
+              Sell {duplicatesCount} duplicate
+              {duplicatesCount === 1 ? "" : "s"} for{" "}
+              <Coin amount={duplicatesTotal} />? One of each is kept.
+            </div>
+            {/* The breakdown, since this is the one sell action where what
+                goes is not the thing that was clicked. Capped so a bank full
+                of odds and ends can't outgrow the dialog — and the cap is
+                only safe because `items` sorts rarity-first (see rarityOrder),
+                so anything valuable is at the top and a legendary can never
+                be the thing hidden behind "+N more". This batch confirm is
+                also what stands in for the per-item CONFIRM_SELL_RARITIES
+                prompt, which a batch would otherwise fire once per rare. */}
+            <div className="flex flex-col gap-0.5 text-ui-sm text-text-dim">
+              {duplicates.slice(0, 6).map((d) => {
+                const def = getItem(d.itemId);
+                return (
+                  <div key={d.itemId} className="flex justify-between gap-3">
+                    <span className="truncate">
+                      {d.qty}x{" "}
+                      <span
+                        style={{
+                          color: def ? RARITY_COLORS[def.rarity] : undefined,
+                        }}
+                      >
+                        {def?.name ?? d.itemId}
+                      </span>
+                    </span>
+                    <span className="shrink-0">
+                      <Coin amount={d.qty * d.price} />
+                    </span>
+                  </div>
+                );
+              })}
+              {duplicates.length > 6 && (
+                <div>+{duplicates.length - 6} more</div>
+              )}
+            </div>
+          </div>
+        </PromptOverlay>
+      )}
 
       {slotPicker && (
         <DeckSlotPicker
