@@ -17,7 +17,9 @@ import {
   RAINBOW_RAMP,
   RAMP_HERZIE,
   rotY,
+  TEAL_RAMP,
   type V3,
+  VIOLET_RAMP,
 } from "./ascii3d.js";
 import {
   EQUIPPED_SLOTS,
@@ -1292,6 +1294,11 @@ function appendWearableSpheres(
 const COLOR_SCHEMES: Record<string, readonly string[]> = {
   prism: RAINBOW_RAMP,
   "poseidons-gift": OCEAN_RAMP,
+  // Both ramps are built around a CREATURE_PALETTE entry (soft violet and
+  // teal), so these two paint a herzie a colour it could already have
+  // hatched with rather than introducing a new one.
+  "purple-dane": VIOLET_RAMP,
+  "thanks-for-all-the-fish": TEAL_RAMP,
 };
 
 /** True for spheres that a colour scheme is allowed to repaint. */

@@ -22,8 +22,10 @@ import {
   RAMP_ITEM,
   rotY,
   rotZ,
+  TEAL_RAMP,
   type V2,
   type V3,
+  VIOLET_RAMP,
 } from "./ascii3d.ts";
 
 export type Rarity = "common" | "uncommon" | "rare" | "legendary";
@@ -1257,6 +1259,14 @@ function renderPoseidonsGiftFrame(yAngle: number): string[] {
   return renderGradientCardFrame(yAngle, OCEAN_RAMP);
 }
 
+function renderPurpleDaneFrame(yAngle: number): string[] {
+  return renderGradientCardFrame(yAngle, VIOLET_RAMP);
+}
+
+function renderThanksForAllTheFishFrame(yAngle: number): string[] {
+  return renderGradientCardFrame(yAngle, TEAL_RAMP);
+}
+
 function generateFrames(
   renderFn: (angle: number) => string[],
   count = 36,
@@ -1279,6 +1289,10 @@ const boomboxFrames = generateFrames(renderBoomboxFrame);
 const goodEyeSniperFrames = generateFrames(renderGoodEyeSniperFrame);
 const prismFrames = generateFrames(renderPrismFrame);
 const poseidonsGiftFrames = generateFrames(renderPoseidonsGiftFrame);
+const purpleDaneFrames = generateFrames(renderPurpleDaneFrame);
+const thanksForAllTheFishFrames = generateFrames(
+  renderThanksForAllTheFishFrame,
+);
 const spiritOrbFrames = generateFrames(renderSpiritOrbFrame);
 
 // --- Clouds card ---
@@ -1443,6 +1457,26 @@ export const ITEMS: ItemDef[] = [
     equipSlot: "color",
     buyPrice: 100000,
     sellPrice: 500,
+  },
+  {
+    id: "purple-dane",
+    name: "Purple Dane",
+    description: "Denne her gør dig lilla.",
+    rarity: "uncommon",
+    frames: purpleDaneFrames,
+    equipable: true,
+    equipSlot: "color",
+    sellPrice: 100,
+  },
+  {
+    id: "thanks-for-all-the-fish",
+    name: "Thanks for all the fish!",
+    description: "Get ready to leave planet earth in style.",
+    rarity: "uncommon",
+    frames: thanksForAllTheFishFrames,
+    equipable: true,
+    equipSlot: "color",
+    sellPrice: 100,
   },
   {
     id: "spirit-orb",
