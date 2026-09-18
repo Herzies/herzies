@@ -505,14 +505,10 @@ function buildBlob(p: CreatureParams, stage: number): Sphere[] {
       zone: "primary",
       part: "body",
     });
-    // Neck sphere bridging head and body
-    const neckY = (headY + 0.25 * s) * 0.5;
-    spheres.push({
-      center: [0, neckY, 0],
-      radius: 0.3 * s,
-      zone: "primary",
-      part: "body",
-    });
+    // No neck sphere at stage 3: the head and body already overlap at every
+    // headRatio in CREATURE_PARAM_BOUNDS, so one only added bulk between them
+    // and made the largest adults read as overstuffed. Same reasoning the
+    // second body type has always used — see its "natural neck pinch" note.
 
     const legY = 0.25 * s + bodyR * 0.75;
     const legX = 0.25 * s;
@@ -715,13 +711,6 @@ function buildWide(p: CreatureParams, stage: number): Sphere[] {
   if (stage >= 3) {
     const bodyR = 0.5 * s;
     const bodyY = 0.18 * s;
-    const neckY = (headY + bodyY) * 0.5;
-    spheres.push({
-      center: [0, neckY, 0],
-      radius: 0.3 * s,
-      zone: "primary",
-      part: "body",
-    });
     spheres.push({
       center: [0, bodyY, 0],
       radius: bodyR,
@@ -833,14 +822,6 @@ function buildSpiky(p: CreatureParams, stage: number): Sphere[] {
   }
 
   if (stage >= 3) {
-    // Neck sphere bridging head and body
-    const neckY = (headY + 0.2 * s) * 0.5;
-    spheres.push({
-      center: [0, neckY, 0],
-      radius: 0.3 * s,
-      zone: "primary",
-      part: "body",
-    });
     spheres.push({
       center: [0, 0.2 * s, 0],
       radius: 0.48 * s,
