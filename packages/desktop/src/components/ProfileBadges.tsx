@@ -10,6 +10,12 @@ const GOOD_EYE_SNIPER_RED = "#e05050";
  * `style` rather than a Tailwind class (see the render below). */
 const RANK_ONE_YELLOW = "#facc15";
 
+/** The theme's background colour, for the digit knocked out of the rank
+ * badge's disc. Inlined as a hex rather than referenced as a CSS variable: a
+ * variable in an SVG *presentation attribute* (as opposed to a `style` rule)
+ * is not substituted, and would leave the digit painted black. */
+const BADGE_KNOCKOUT = "#0c0c14";
+
 /** One earned badge: a small icon, optionally with the count it stands for. */
 interface Badge {
   key: string;
@@ -66,7 +72,7 @@ function RankOneIcon() {
         dominantBaseline="central"
         fontSize="14"
         fontWeight="bold"
-        fill="var(--color-bg)"
+        fill={BADGE_KNOCKOUT}
       >
         1
       </text>
