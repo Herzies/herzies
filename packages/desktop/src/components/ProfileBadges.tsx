@@ -64,13 +64,16 @@ function RankOneIcon() {
       aria-hidden="true"
       role="img"
     >
-      <circle cx="12" cy="12" r="10" fill="currentColor" />
+      {/* r=11, not 10: the bullseye's r=10 circle is stroked at width 2, so
+          its outer edge lands at r=11. Matching the *drawn* edge is what makes
+          the two badges read as the same size. */}
+      <circle cx="12" cy="12" r="11" fill="currentColor" />
       <text
         x="12"
         y="12"
         textAnchor="middle"
         dominantBaseline="central"
-        fontSize="14"
+        fontSize="15"
         fontWeight="bold"
         fill={BADGE_KNOCKOUT}
       >

@@ -1462,6 +1462,7 @@ export const ITEMS: ItemDef[] = [
     frames: purpleDaneFrames,
     equipable: true,
     equipSlot: "color",
+    buyPrice: 10000,
     sellPrice: 100,
   },
   {
@@ -1472,6 +1473,7 @@ export const ITEMS: ItemDef[] = [
     frames: thanksForAllTheFishFrames,
     equipable: true,
     equipSlot: "color",
+    buyPrice: 10000,
     sellPrice: 100,
   },
   {
