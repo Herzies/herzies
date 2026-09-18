@@ -718,17 +718,93 @@ pub async fn api_fetch_store_products(client: &Client) -> Option<Vec<StoreProduc
     serde_json::from_value(data["products"].clone()).ok()
 }
 
+/// What the last premium fetch attempt produced, and when it happened.
+///
+/// A *failed* attempt is recorded too, with `items` left at the last good
+/// listing (or `None` if we never had one). Caching the failure is the whole
+/// point: the case this exists for is a cold cache being hammered into 429s,
+/// and a cache that only remembers successes would let every one of those
+/// callers through to the rate limiter.
+struct PremiumCache {
+    /// Last listing we successfully fetched, kept across failures so a
+    /// transient 429 doesn't empty the shelf.
+    items: Option<Vec<PremiumItem>>,
+    /// When we last *attempted*, whether or not it worked.
+    attempted_at: u64,
+    /// Whether that attempt succeeded — picks which TTL applies.
+    ok: bool,
+}
+
+/// Guarded by a `tokio::sync::Mutex` held *across* the network call, which is
+/// what makes this a request deduper and not just a TTL cache: callers that
+/// arrive while a fetch is in flight queue on the lock, then re-check the TTL
+/// and return the value the winner just stored instead of issuing their own
+/// request.
+static PREMIUM_CACHE: Mutex<Option<PremiumCache>> = Mutex::const_new(None);
+
+/// Premium listings change only when a product is edited in the Stripe
+/// Dashboard, so a minute of staleness costs nothing and keeps a remounting
+/// store off the rate limiter.
+const PREMIUM_TTL_MS: u64 = 60_000;
+
+/// Backoff after a failed attempt. Much shorter than `PREMIUM_TTL_MS` so a
+/// transient 429 doesn't leave the shelf empty for a full minute, but long
+/// enough that a burst of callers costs one request rather than one each.
+const PREMIUM_RETRY_MS: u64 = 10_000;
+
 /// Items sold for money. An empty list is the normal answer when Stripe has
 /// no such products configured, so a failure here is not distinguished from
 /// "none for sale" — either way the store shows its coin-priced cards.
+///
+/// Cached for `PREMIUM_TTL_MS`. Every call costs a Stripe API request
+/// server-side and shares the general 120/min per-IP bucket with every other
+/// endpoint, so an unthrottled caller could — and did — flood it into 429s.
+///
+/// On failure the last good listing is served rather than `None`: both callers
+/// above this (`fetch_premium_items`'s `unwrap_or_default` and the store view's
+/// `setPremium([])`) collapse "the call failed" into "nothing is for sale", so
+/// without this a single 429 empties the premium shelf.
 pub async fn api_fetch_premium_items(client: &Client) -> Option<Vec<PremiumItem>> {
-    let resp = api_fetch(client, reqwest::Method::GET, "/store/premium", None).await?;
+    let mut cache = PREMIUM_CACHE.lock().await;
+    if let Some(entry) = cache.as_ref() {
+        let ttl = if entry.ok {
+            PREMIUM_TTL_MS
+        } else {
+            PREMIUM_RETRY_MS
+        };
+        if now_ms().saturating_sub(entry.attempted_at) < ttl {
+            return entry.items.clone();
+        }
+    }
+
+    // Taken before the request so the failure paths below can serve it without
+    // holding a borrow of `cache` across the write at the end.
+    let stale = cache.as_ref().and_then(|e| e.items.clone());
+
+    // Records the attempt so a burst of callers costs one request, then hands
+    // back the last good listing (if any) rather than "nothing for sale".
+    let fail = |cache: &mut Option<PremiumCache>| {
+        *cache = Some(PremiumCache {
+            items: stale.clone(),
+            attempted_at: now_ms(),
+            ok: false,
+        });
+        stale.clone()
+    };
+
+    let resp = match api_fetch(client, reqwest::Method::GET, "/store/premium", None).await {
+        Some(r) => r,
+        None => return fail(&mut cache),
+    };
     let status = resp.status();
     if !status.is_success() {
         log::warn!("Premium items request failed: {}", status);
-        return None;
+        return fail(&mut cache);
     }
-    let data: serde_json::Value = resp.json().await.ok()?;
+    let data: serde_json::Value = match resp.json().await {
+        Ok(d) => d,
+        Err(_) => return fail(&mut cache),
+    };
     let items: Option<Vec<PremiumItem>> = serde_json::from_value(data["items"].clone()).ok();
     // Logged at info because zero is both the normal answer (nothing is
     // configured for sale) and the confusing one (a product exists in Stripe
@@ -737,7 +813,17 @@ pub async fn api_fetch_premium_items(client: &Client) -> Option<Vec<PremiumItem>
         Some(v) => log::info!("Premium items: {} for sale", v.len()),
         None => log::warn!("Premium items response could not be parsed"),
     }
-    items
+    match items {
+        Some(v) => {
+            *cache = Some(PremiumCache {
+                items: Some(v.clone()),
+                attempted_at: now_ms(),
+                ok: true,
+            });
+            Some(v)
+        }
+        None => fail(&mut cache),
+    }
 }
 
 /// Creates a Stripe Checkout Session for `product_id` and returns the URL to
