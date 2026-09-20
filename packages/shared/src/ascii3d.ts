@@ -98,3 +98,21 @@ export const TEAL_RAMP = [
   "#2F807A",
   "#27635F",
 ] as const;
+
+/**
+ * Boss ramp — the only ramp that is not built around a CREATURE_PALETTE hue,
+ * because a boss is deliberately not a colour a herzie could hatch with.
+ *
+ * Runs ember-red at the top to near-black at the bottom, which is the inverse
+ * of every other ramp here: those brighten downward, this one swallows the
+ * legs. RAMP_HERZIE is a single glyph, so the sink into black is the only way
+ * the silhouette can lose its own feet.
+ */
+export const VOID_RAMP = [
+  "#C8341B",
+  "#93220F",
+  "#63150A",
+  "#3D0C06",
+  "#220604",
+  "#0E0202",
+] as const;
