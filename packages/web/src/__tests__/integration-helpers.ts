@@ -119,6 +119,14 @@ export async function cleanupTestData() {
     .from("event_claims")
     .delete()
     .neq("id", "00000000-0000-0000-0000-000000000000");
+  // Events themselves, which nothing used to clean up. Harmless while event
+  // tests only asserted RLS, but spawn_boss_fight() no-ops when a boss is
+  // already live — so a leftover boss makes the NEXT run's spawn test fail
+  // looking like a logic bug. boss_state/boss_damage cascade from here.
+  await admin
+    .from("events")
+    .delete()
+    .neq("id", "00000000-0000-0000-0000-000000000000");
   await admin
     .from("trades")
     .delete()
