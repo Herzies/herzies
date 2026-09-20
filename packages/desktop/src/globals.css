@@ -137,6 +137,18 @@
   html,
   body {
     @apply bg-bg-panel text-text font-mono overflow-hidden select-none;
+    /* Both directions of the boss-fight blackout ride on this one
+       transition, so entering and leaving the fight feel symmetric. */
+    transition: background-color 450ms ease;
+  }
+
+  /* Looking at a live boss blacks the window out — the default #12121e reads
+     as a lit room, and the fight should not. Toggled from main.tsx; the class
+     sits on <html> because the app's root div is transparent, so body's
+     background is what actually shows (corners included). */
+  html.boss-mode,
+  html.boss-mode body {
+    background-color: #000;
   }
 
   /* Window drag — scoped to Tauri markup, not global body (breaks sandbox herzie drag). */

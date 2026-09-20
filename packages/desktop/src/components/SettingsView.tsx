@@ -20,6 +20,8 @@ export function SettingsView({
   installStatus,
   onInstallUpdate,
   hasActiveEventOverride,
+  debugBossOverride,
+  onToggleDebugBoss,
   onToggleActiveEventOverride,
   onSpawnDebugDrop,
 }: {
@@ -32,6 +34,8 @@ export function SettingsView({
   installStatus: UpdateInstallStatus;
   onInstallUpdate: () => void;
   hasActiveEventOverride: boolean;
+  debugBossOverride: boolean;
+  onToggleDebugBoss: () => void;
   onToggleActiveEventOverride: () => void;
   onSpawnDebugDrop: () => void;
 }) {
@@ -133,6 +137,18 @@ export function SettingsView({
               onClick={onToggleActiveEventOverride}
             >
               {hasActiveEventOverride ? "Live Event: On" : "Test Live Event"}
+            </button>
+            <button
+              type="button"
+              className={cn(
+                "btn",
+                debugBossOverride
+                  ? "border-red text-red"
+                  : "border-[#555] text-text-dim",
+              )}
+              onClick={onToggleDebugBoss}
+            >
+              {debugBossOverride ? "Boss Fight: On" : "Test Boss Fight"}
             </button>
             <button type="button" className="btn" onClick={onSpawnDebugDrop}>
               Spawn Item Drop

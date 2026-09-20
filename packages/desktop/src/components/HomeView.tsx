@@ -41,6 +41,7 @@ export function HomeView({
   onOpenSettings,
   onActivity,
   active = true,
+  bossHatedGenres,
 }: {
   state: AppState;
   stageOverride?: number | null;
@@ -55,6 +56,8 @@ export function HomeView({
   onOpenSettings?: () => void;
   /** Surfaces a line in the activity log (e.g. a refused pickup). */
   onActivity?: (message: string) => void;
+  /** Hated genres of the live boss, if any — reddens the matching tag pills. */
+  bossHatedGenres?: string[];
 }) {
   const {
     herzie,
@@ -475,6 +478,7 @@ export function HomeView({
           albumArtUrl={nowPlaying.albumArtUrl}
           artistImageUrl={nowPlaying.artistImageUrl}
           tags={nowPlaying.tags}
+          hatedGenres={bossHatedGenres}
           className="border-t border-border pt-1.5 pb-2"
         />
       ) : (
