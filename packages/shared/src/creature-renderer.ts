@@ -20,6 +20,7 @@ import {
   TEAL_RAMP,
   type V3,
   VIOLET_RAMP,
+  VOID_RAMP,
 } from "./ascii3d.js";
 import {
   EQUIPPED_SLOTS,
@@ -65,6 +66,15 @@ export const CREATURE_PALETTE = [
 ];
 
 const EYE_COLOR = "#FFF8DC";
+
+/**
+ * Boss eyes. A separate zone rather than a different EYE_COLOR: that constant
+ * is shared by every creature in the game and is asserted directly in
+ * creature-renderer.test.ts, so recolouring it would repaint every herzie.
+ */
+const EVIL_EYE_BRIGHT = "#FF6A45";
+const EVIL_EYE_BASE = "#E5200B";
+const EVIL_EYE_DIM = "#7A0C04";
 
 // --- HSL color utilities ---
 
@@ -204,7 +214,14 @@ function intSeeded(min: number, max: number, rng: () => number): number {
 
 // --- Sphere primitives ---
 
-type ColorZone = "primary" | "accent" | "eye" | "pupil" | "dark" | "wearable";
+type ColorZone =
+  | "primary"
+  | "accent"
+  | "eye"
+  | "pupil"
+  | "dark"
+  | "wearable"
+  | "eye-evil";
 
 interface Sphere {
   center: V3;
@@ -323,10 +340,18 @@ export interface CreatureParams {
   textureType: number;
 }
 
-export const CREATURE_BODY_TYPES = ["blob", "tall", "wide", "spiky"] as const;
+export const CREATURE_BODY_TYPES = [
+  "blob",
+  "tall",
+  "wide",
+  "spiky",
+  "boss",
+] as const;
 
 export const CREATURE_PARAM_BOUNDS = {
-  bodyType: { min: 0, max: 3, step: 1 },
+  // max is 4 ("boss") so the sandbox slider can reach it, but the seeded
+  // generator deliberately stops at 3 — see generateCreatureParams.
+  bodyType: { min: 0, max: 4, step: 1 },
   colorIndex: { min: 0, max: CREATURE_PALETTE.length - 1, step: 1 },
   bodyScale: { min: 0.85, max: 1.05, step: 0.01 },
   headRatio: { min: 0.65, max: 0.85, step: 0.01 },
@@ -369,6 +394,11 @@ export function generateCreatureParams(userId: string): CreatureParams {
   const rng = mulberry32(seed);
 
   return {
+    // Hardcoded 3, NOT CREATURE_PARAM_BOUNDS.bodyType.max — "boss" is index 4
+    // and must stay unreachable here. Widening this would consume the same
+    // rng() call but remap bodyType for every existing seed, silently
+    // changing what every herzie in the wild looks like. Bosses arrive only
+    // via the creatureParams override prop.
     bodyType: intSeeded(0, 3, rng),
     colorIndex: intSeeded(0, CREATURE_PALETTE.length - 1, rng),
     bodyScale: rangeSeeded(
@@ -890,7 +920,202 @@ function buildSpiky(p: CreatureParams, stage: number): Sphere[] {
   return spheres;
 }
 
-const BODY_BUILDERS = [buildBlob, buildTall, buildWide, buildSpiky];
+/**
+ * Boss — a corrupted herzie, for the Boss Fight event.
+ *
+ * Deliberately breaks the rules the other four builders follow, because those
+ * rules are what make a herzie read as friendly:
+ *
+ *  - The head is SMALLER than the body and sunk into it, so the thing hunches
+ *    instead of standing up. Every other builder gives the head top billing.
+ *  - The spike crown is a full ring, not buildSpiky's front-facing half-arc,
+ *    so the silhouette stays hostile from behind while it rotates.
+ *  - It is asymmetric. Herzies are mirror-symmetric; a lopsided shoulder and
+ *    an off-centre crown are most of what makes this look wrong.
+ *  - No legs. The body bottoms out and VOID_RAMP takes it to near-black, so
+ *    it looks like it continues past where you can see.
+ *
+ * `stage` is ignored — a boss is never half-grown.
+ */
+function buildBoss(p: CreatureParams, _stage: number): Sphere[] {
+  const s = p.bodyScale * CS * 0.86;
+  const spheres: Sphere[] = [];
+
+  // --- Bulk ---
+  // Two stacked spheres rather than one big one: a single sphere wide enough
+  // to look heavy also looks like a mound, and the creature stops reading as
+  // something that stands up.
+  const bodyY = 0.3 * s;
+  const bodyR = 0.42 * s;
+  spheres.push({
+    center: [0, bodyY, 0],
+    radius: bodyR,
+    zone: "primary",
+    part: "body",
+  });
+  spheres.push({
+    center: [0.02 * s, bodyY + 0.34 * s, 0],
+    radius: 0.36 * s,
+    zone: "primary",
+    part: "body",
+  });
+
+  // Lopsided shoulders: the right one rides higher and larger. This single
+  // asymmetry does more for "wrong" than any amount of extra geometry.
+  spheres.push({
+    center: [-0.38 * s, bodyY - 0.16 * s, 0.04 * s],
+    radius: 0.21 * s,
+    zone: "primary",
+    part: "body",
+  });
+  spheres.push({
+    center: [0.43 * s, bodyY - 0.26 * s, -0.02 * s],
+    radius: 0.26 * s,
+    zone: "primary",
+    part: "body",
+  });
+
+  // --- Head, sunk low and forward ---
+  // Unlike every other builder, this head is NOT at the origin — it is nudged
+  // right and toward the camera. Anything seated against its surface has to
+  // add headX/headZ back in; eyeZ() assumes an origin-centred head.
+  const headR = 0.44 * p.headRatio * s * 1.25;
+  const headY = bodyY - bodyR * 1.35;
+  const headX = 0.03 * s;
+  const headZ = -0.08 * s;
+  spheres.push({
+    center: [headX, headY, headZ],
+    radius: headR,
+    zone: "primary",
+    part: "head",
+  });
+
+  // Brow ridge — a dark bar across the top of the eyes. The scowl comes from
+  // this, not from the eyes themselves.
+  spheres.push({
+    center: [headX - 0.1 * s, headY - headR * 0.44, headZ - headR * 0.72],
+    radius: headR * 0.34,
+    zone: "dark",
+    part: "head",
+  });
+  spheres.push({
+    center: [headX + 0.1 * s, headY - headR * 0.5, headZ - headR * 0.68],
+    radius: headR * 0.3,
+    zone: "dark",
+    part: "head",
+  });
+
+  // --- Eyes: small, close-set, under the brow ---
+  const ex = Math.max(0.055, p.eyeSpacing * 0.62) * s;
+  const er = Math.max(0.04, p.eyeSize * 0.52) * s;
+  const ey = headY - headR * 0.06;
+  const ez = headZ + eyeZ(headR, ex, ey - headY, er);
+  for (const dir of [-1, 1]) {
+    spheres.push({
+      center: [headX + dir * ex, ey, ez],
+      radius: er,
+      zone: "eye-evil",
+      part: "eye",
+    });
+  }
+
+  // --- Crown: a full ring of spikes, longest at the back ---
+  const crownCount = 7 + p.earCount * 2;
+  for (let i = 0; i < crownCount; i++) {
+    const a = (i / crownCount) * Math.PI * 2 + 0.4;
+    // Longest toward the back of the ring, so the profile reads as a mane
+    // rather than a uniform sea urchin.
+    const lean = 0.55 + 0.45 * Math.cos(a);
+    const len = headR * (0.42 + p.earLength * 1.6) * lean;
+    const ringR = headR * 0.86;
+    spheres.push({
+      center: [
+        headX + Math.cos(a) * ringR,
+        headY - headR * 0.5 - len * 0.5,
+        // Z kept deliberately shallow. CAM is only 2.0 units out, so anything
+        // with real depth swells hugely as it rotates toward the camera and
+        // pushes the creature past SH=48. The ring reads as a ring from the
+        // silhouette alone; it does not need the depth to sell it.
+        headZ + Math.sin(a) * ringR * 0.42,
+      ],
+      radius: Math.max(0.03 * s, len * 0.34),
+      zone: "accent",
+      part: "spike",
+    });
+  }
+
+  // Two horns sweeping up and out off the skull. Same shallow-Z rule as the
+  // crown — these were the worst offender for clipping at side-on angles.
+  for (const side of [-1, 1]) {
+    for (let seg = 0; seg < 3; seg++) {
+      const t = seg / 2;
+      spheres.push({
+        center: [
+          headX + side * (0.2 + t * 0.3) * s,
+          headY - headR * (0.85 + t * 0.6),
+          headZ + (0.04 + t * 0.1) * s,
+        ],
+        radius: (0.085 - t * 0.024) * s,
+        zone: "accent",
+        part: "spike",
+      });
+    }
+  }
+
+  // --- Arms: long, hanging well past the body ---
+  for (const [side, part] of [
+    [-1, "arm-l"],
+    [1, "arm-r"],
+  ] as const) {
+    // Set well outboard of the shoulders so the arms stay a separate shape in
+    // silhouette instead of dissolving into the torso mass.
+    const ax = side * 0.5 * s;
+    const reach = p.armLength * 1.3;
+    const shoulderY = bodyY - 0.14 * s;
+    const wristY = bodyY + reach * s;
+
+    // The arms curve INWARD as they fall, so the claws gather near the
+    // centreline. Two reasons, and the first is the load-bearing one:
+    // splayed-out long arms swing close to the camera on rotation and the
+    // perspective blow-up pushed the creature off the bottom of the grid at
+    // side-on angles. It also reads better — gathered claws look poised.
+    const SEGMENTS = 5;
+    for (let seg = 0; seg <= SEGMENTS; seg++) {
+      const t = seg / SEGMENTS;
+      const taper = 1 - 0.42 * t * t;
+      spheres.push({
+        center: [ax * taper, shoulderY + (wristY - shoulderY) * t, 0],
+        radius: (0.155 - 0.05 * t) * s,
+        zone: "primary",
+        part,
+      });
+    }
+
+    // Claw: three talons splaying off the wrist.
+    const cx = ax * 0.58;
+    for (let c = -1; c <= 1; c++) {
+      spheres.push({
+        center: [cx + c * 0.07 * s, wristY + 0.13 * s, 0.02 * s],
+        radius: 0.048 * s,
+        zone: "accent",
+        part,
+      });
+      spheres.push({
+        center: [cx + c * 0.095 * s, wristY + 0.23 * s, 0.03 * s],
+        radius: 0.031 * s,
+        zone: "accent",
+        part,
+      });
+    }
+  }
+
+  return spheres;
+}
+
+const BODY_BUILDERS = [buildBlob, buildTall, buildWide, buildSpiky, buildBoss];
+
+/** Index of buildBoss in BODY_BUILDERS. Not reachable from the seeded roll. */
+export const BOSS_BODY_TYPE = 4;
 
 // --- Wearable sphere builders ---
 
@@ -1304,12 +1529,27 @@ const COLOR_SCHEMES: Record<string, readonly string[]> = {
 /** True for spheres that a colour scheme is allowed to repaint. */
 function isSchemePaintable(zone: ColorZone, hasOwnColor: boolean): boolean {
   return (
-    !hasOwnColor && zone !== "eye" && zone !== "pupil" && zone !== "wearable"
+    !hasOwnColor &&
+    zone !== "eye" &&
+    zone !== "eye-evil" &&
+    zone !== "pupil" &&
+    zone !== "wearable"
   );
 }
 
-/** Resolve the ramp for whatever colour scheme is equipped, if any. */
-function colorSchemeFor(equipped?: Equipped): readonly string[] | undefined {
+/**
+ * Resolve the ramp for whatever colour scheme is equipped, if any.
+ *
+ * A boss always paints with VOID_RAMP and ignores equipped colour items: its
+ * palette is part of what it *is*, not a skin over a seeded body colour. This
+ * is also why the boss needs no entry in CREATURE_PALETTE — adding one there
+ * would shift `colorIndex` for every existing seed, the same trap as bodyType.
+ */
+function colorSchemeFor(
+  equipped?: Equipped,
+  params?: CreatureParams,
+): readonly string[] | undefined {
+  if (params?.bodyType === BOSS_BODY_TYPE) return VOID_RAMP;
   const id = equipped?.color;
   if (!id) return undefined;
   const ramp = COLOR_SCHEMES[id];
@@ -1740,6 +1980,14 @@ function zoneColor(
   switch (zone) {
     case "eye":
       return EYE_COLOR;
+    case "eye-evil":
+      // Unlike "eye", this one shades: a flat red disc read as a sticker, and
+      // the falloff is what makes it look lit from inside.
+      return brightness > 0.62
+        ? EVIL_EYE_BRIGHT
+        : brightness > 0.34
+          ? EVIL_EYE_BASE
+          : EVIL_EYE_DIM;
     case "pupil":
       return "#111111";
     case "accent":
@@ -1877,6 +2125,10 @@ function renderCreatureFrame(
         lit = 0;
       } else if (sp.zone === "eye") {
         lit = 0.75 * (0.15 + 0.85 * diffuse);
+      } else if (sp.zone === "eye-evil") {
+        // Biased high and compressed, so the eye stays hot even on the face's
+        // shadow side — it should read as emitting, not as reflecting LIGHT.
+        lit = 0.55 + 0.45 * diffuse;
       } else if (sp.color) {
         // Wearables keep clean shading — skip creature texture patterns.
         lit = 0.7 * (0.3 + 0.7 * diffuse);
@@ -2017,7 +2269,7 @@ function generateLoopFrames(
   appendWearableSpheres(baseSpheres, equipped, cols, boomboxConfig);
   const anchors = getAnchors(baseSpheres, params, stage);
   const colors = buildColorTriplet(CREATURE_PALETTE[params.colorIndex]);
-  const scheme = colorSchemeFor(equipped);
+  const scheme = colorSchemeFor(equipped, params);
 
   const length = dancing ? DANCE_FRAMES : IDLE_FRAMES;
   const frames = Array.from({ length }, (_, i) => {
@@ -2088,7 +2340,7 @@ export function generateRotationFrames(
   appendWearableSpheres(spheres, equipped, cols, boomboxConfig);
   const anchors = getAnchors(spheres, params, stage);
   const colors = buildColorTriplet(CREATURE_PALETTE[params.colorIndex]);
-  const scheme = colorSchemeFor(equipped);
+  const scheme = colorSchemeFor(equipped, params);
 
   const frames = Array.from({ length: frameCount }, (_, i) =>
     renderCreatureFrame(
@@ -2156,7 +2408,7 @@ export function renderCreatureAtAngle(
   appendWearableSpheres(baseSpheres, equipped, cols, boomboxConfig);
   const anchors = getAnchors(baseSpheres, params, stage);
   const colors = buildColorTriplet(CREATURE_PALETTE[params.colorIndex]);
-  const scheme = colorSchemeFor(equipped);
+  const scheme = colorSchemeFor(equipped, params);
   const animated = dancing
     ? applyDanceOffsets(baseSpheres, frameIdx, spiritHopsFor(spiritHopVariant))
     : applyIdleOffsets(baseSpheres, frameIdx);

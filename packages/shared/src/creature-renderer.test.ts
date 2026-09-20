@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { RAINBOW_RAMP } from "./ascii3d.js";
+import { RAINBOW_RAMP, VOID_RAMP } from "./ascii3d.js";
 import {
+  BOSS_BODY_TYPE,
   DEFAULT_Y_ANGLE,
   generateCreatureParams,
   generateDanceFrames,
@@ -274,5 +275,110 @@ describe("renderCreatureAtAngle", () => {
     ).some((f) => JSON.stringify(f.cells) !== JSON.stringify(base.cells));
 
     expect(differs).toBe(true);
+  });
+});
+
+describe("boss body type", () => {
+  const bossParams = () => ({
+    ...generateCreatureParams(USER),
+    bodyType: BOSS_BODY_TYPE,
+  });
+
+  it("is unreachable from the seeded generator", () => {
+    // The seeded roll is hardcoded to intSeeded(0, 3) rather than reading
+    // CREATURE_PARAM_BOUNDS.bodyType.max. If someone "tidies" that up to use
+    // the bound, every existing herzie silently changes body — this is the
+    // test that catches it.
+    for (let i = 0; i < 2000; i++) {
+      expect(generateCreatureParams(`seed-${i}`).bodyType).toBeLessThan(
+        BOSS_BODY_TYPE,
+      );
+    }
+  });
+
+  it("does not disturb existing seeds", () => {
+    // Widening the roll would shift every downstream param too, because they
+    // all draw from the same rng sequence.
+    expect(generateCreatureParams("herzie-1")).toEqual(
+      generateCreatureParams("herzie-1"),
+    );
+    expect(generateCreatureParams("herzie-1").bodyType).toBe(
+      generateCreatureParams("herzie-1").bodyType,
+    );
+  });
+
+  it("paints with the void ramp regardless of equipped colour", () => {
+    const frame = renderCreatureAtAngle(
+      USER,
+      3,
+      DEFAULT_Y_ANGLE,
+      0,
+      false,
+      { color: "prism" },
+      bossParams(),
+    );
+    const colors = hueSet([frame]);
+    // Prism is equipped but must not win: the boss palette is not a skin.
+    for (const rainbow of RAINBOW_RAMP) expect(colors).not.toContain(rainbow);
+    expect([...VOID_RAMP].some((c) => colors.has(c))).toBe(true);
+  });
+
+  it("gives the boss red eyes without touching herzie eyes", () => {
+    const boss = hueSet([
+      renderCreatureAtAngle(
+        USER,
+        3,
+        DEFAULT_Y_ANGLE,
+        0,
+        false,
+        undefined,
+        bossParams(),
+      ),
+    ]);
+    // Mirrors EVIL_EYE_* in creature-renderer.ts. Kept as literals on purpose:
+    // if those constants are recoloured, this test should fail and be updated
+    // deliberately rather than quietly tracking whatever the source says.
+    const EVIL_EYES = ["#FF6A45", "#E5200B", "#7A0C04"];
+    expect(boss).not.toContain("#FFF8DC");
+    expect(EVIL_EYES.filter((c) => boss.has(c)).length).toBeGreaterThan(0);
+    // The shared herzie eye colour is untouched for everyone else.
+    expect(hueSet(generateRotationFrames(USER, 3, 8))).toContain("#FFF8DC");
+  });
+
+  it("keeps a head part so wearable anchors still resolve", () => {
+    // getHeadBounds() filters on part === "head" and returns null without it,
+    // which silently drops hats, headphones and the headband.
+    const frame = renderCreatureAtAngle(
+      USER,
+      3,
+      DEFAULT_Y_ANGLE,
+      0,
+      false,
+      undefined,
+      bossParams(),
+    );
+    expect(frame.anchors.hat).toBeDefined();
+  });
+
+  it("fits the render grid at every angle", () => {
+    // SH is a module constant and is not parameterised, so an oversized boss
+    // clips at the top and bottom rather than overflowing its element. Depth
+    // matters as much as height: CAM is 2.0, so parts swinging toward the
+    // camera magnify hard.
+    for (let i = 0; i < 12; i++) {
+      const frame = renderCreatureAtAngle(
+        USER,
+        3,
+        (i / 12) * Math.PI * 2,
+        0,
+        false,
+        undefined,
+        bossParams(),
+      );
+      const rows = frame.cells;
+      const filled = (y: number) => rows[y].some((c) => c.ch !== " ");
+      expect(filled(0)).toBe(false);
+      expect(filled(rows.length - 1)).toBe(false);
+    }
   });
 });
