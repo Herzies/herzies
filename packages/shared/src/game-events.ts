@@ -7,7 +7,12 @@
  * Node and Deno APIs — see game-rules.ts for why.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { SongHuntConfig, SongHuntFinder } from "./game-rules.js";
+import type {
+  BossDamageDealer,
+  BossFightConfig,
+  SongHuntConfig,
+  SongHuntFinder,
+} from "./game-rules.js";
 
 function garbleText(text: string, seed: string): string {
   let h = 0;
@@ -107,4 +112,84 @@ export async function buildSongHuntConfig(
   }
 
   return result;
+}
+
+/**
+ * Project a boss_fight event for a client.
+ *
+ * Live HP and the leaderboard live in `boss_state` / `boss_damage`, both of
+ * which have SELECT revoked from anon and authenticated (00073, same posture
+ * as the events lockdown in 00016). Everything a client sees about a boss
+ * comes through here, on the service-role client.
+ */
+export async function buildBossFightConfig(
+  admin: SupabaseClient,
+  eventId: string,
+  config: BossFightConfig,
+  userId: string | null = null,
+  topCount: number = 3,
+): Promise<Record<string, unknown>> {
+  const { data: state } = await admin
+    .from("boss_state")
+    .select("hp, max_hp, killed, escaped")
+    .eq("event_id", eventId)
+    .maybeSingle();
+
+  const { data: board } = await admin.rpc("boss_leaderboard", {
+    p_event_id: eventId,
+    p_limit: topCount,
+  });
+
+  const topDealers: BossDamageDealer[] = (
+    (board ?? []) as { name: string; damage: number; rank: number }[]
+  ).map((r) => ({
+    name: r.name ?? "Unknown",
+    damage: Math.round(r.damage),
+    rank: Number(r.rank),
+  }));
+
+  // The caller's own damage is a separate read: they are very often not in
+  // the top N, and "you: 64" is the line that makes the board feel personal.
+  let yourDamage = 0;
+  let yourRank: number | null = null;
+  if (userId) {
+    const { data: mine } = await admin
+      .from("boss_damage")
+      .select("damage")
+      .eq("event_id", eventId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    yourDamage = Math.round((mine?.damage as number) ?? 0);
+
+    if (yourDamage > 0) {
+      const { count } = await admin
+        .from("boss_damage")
+        .select("user_id", { count: "exact", head: true })
+        .eq("event_id", eventId)
+        .gt("damage", (mine?.damage as number) ?? 0);
+      yourRank = (count ?? 0) + 1;
+    }
+  }
+
+  const killed = state?.killed ?? false;
+
+  return {
+    hatedGenres: config.hatedGenres ?? [],
+    // The reward is a mystery until the boss is down, and it is withheld
+    // SERVER-SIDE rather than merely hidden by the UI — clients cannot read
+    // `events` directly (00016), but anything projected into config is
+    // inspectable in the response. This is the same reasoning that makes
+    // buildSongHuntConfig garble locked hints instead of trusting the client
+    // not to look.
+    rewardItemId: killed ? config.rewardItemId : undefined,
+    topRewardItemId: killed ? config.topRewardItemId : undefined,
+    topCount: config.topCount ?? 3,
+    hp: state?.hp ?? 0,
+    maxHp: state?.max_hp ?? config.maxHp ?? 0,
+    killed,
+    escaped: state?.escaped ?? false,
+    topDealers,
+    yourDamage,
+    yourRank,
+  };
 }
