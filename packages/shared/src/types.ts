@@ -229,6 +229,54 @@ export interface SongHuntFinder {
   claimedAt: string;
 }
 
+/**
+ * Boss fight config as stored in `events.config`.
+ *
+ * `hatedGenres` holds values from GENRES, not raw listener tags. "techno" is
+ * not a Genre — classifyGenre maps techno/house/edm/dubstep onto "electronic",
+ * so a techno boss is stored as `["electronic"]` and is also hurt by the rest
+ * of that family. The spawner never rolls "pop", which is the fallback for
+ * every unmatched tag and would make the boss take damage from everything.
+ */
+export interface BossFightConfig {
+  hatedGenres: Genre[];
+  rewardItemId: string;
+  topRewardItemId?: string;
+  /** How many top dealers also get the rarer reward. */
+  topCount: number;
+  maxHp: number;
+}
+
+export interface BossDamageDealer {
+  name: string;
+  damage: number;
+  rank: number;
+}
+
+/**
+ * What a client actually receives for a boss_fight event. Live HP and the
+ * leaderboard are read server-side and projected in — clients cannot read
+ * `events`, `boss_state` or `boss_damage` directly (00016, 00073).
+ */
+export interface BossFightView {
+  hatedGenres: Genre[];
+  /**
+   * Withheld until the boss is dead — the reward is part of the mystery, and
+   * hiding it only in the UI would leave it readable in the response.
+   */
+  rewardItemId?: string;
+  topRewardItemId?: string;
+  topCount: number;
+  hp: number;
+  maxHp: number;
+  killed: boolean;
+  escaped: boolean;
+  topDealers: BossDamageDealer[];
+  /** The requesting user's own contribution, so the UI can show "you". */
+  yourDamage: number;
+  yourRank: number | null;
+}
+
 export const GENRES = [
   "pop",
   "rock",

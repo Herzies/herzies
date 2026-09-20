@@ -13,8 +13,15 @@
  * the Next.js route which also serves anonymous marketing-site callers.
  */
 import { createClient } from "@supabase/supabase-js";
-import type { GameEvent, SongHuntConfig } from "../_shared/shared/game-rules.ts";
-import { buildSongHuntConfig } from "../_shared/shared/game-events.ts";
+import type {
+  BossFightConfig,
+  GameEvent,
+  SongHuntConfig,
+} from "../_shared/shared/game-rules.ts";
+import {
+  buildBossFightConfig,
+  buildSongHuntConfig,
+} from "../_shared/shared/game-events.ts";
 import { corsHeaders, jsonResponse } from "../_shared/cors.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -82,6 +89,13 @@ Deno.serve(async (request) => {
             e.config as SongHuntConfig,
             now,
             false,
+            user.id,
+          );
+        } else if (e.type === "boss_fight") {
+          config = await buildBossFightConfig(
+            admin,
+            e.id,
+            e.config as BossFightConfig,
             user.id,
           );
         } else {
