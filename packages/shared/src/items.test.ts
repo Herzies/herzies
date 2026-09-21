@@ -582,8 +582,9 @@ describe("hasRoomFor", () => {
 });
 
 describe("herzie stats", () => {
-  it("gives Box of Boom +10 sonic power", () => {
+  it("gives Box of Boom +10 and the Intimite Music Device +5 sonic power", () => {
     expect(getItem("boombox")?.stats).toEqual({ sonicPower: 10 });
+    expect(getItem("headphones")?.stats).toEqual({ sonicPower: 5 });
   });
 
   it("is zero for a herzie with nothing equipped", () => {
@@ -593,9 +594,15 @@ describe("herzie stats", () => {
 
   it("adds up the stats of equipped items", () => {
     expect(getHerzieStats({ ground_left: "boombox" }).sonicPower).toBe(10);
-    // Either ground side counts, and an item with no stats adds nothing.
+    expect(getHerzieStats({ head: "headphones" }).sonicPower).toBe(5);
+    // Stats add up across slots, and either ground side counts.
     expect(
       getHerzieStats({ ground_right: "boombox", head: "headphones" })
+        .sonicPower,
+    ).toBe(15);
+    // An item with no stats adds nothing.
+    expect(
+      getHerzieStats({ ground_left: "boombox", head: "rainbow-headband" })
         .sonicPower,
     ).toBe(10);
   });

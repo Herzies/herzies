@@ -1427,6 +1427,7 @@ export const ITEMS: ItemDef[] = [
     equipable: true,
     equipSlot: "head",
     sellPrice: 100,
+    stats: { sonicPower: 5 },
   },
   {
     id: "rainbow-headband",
