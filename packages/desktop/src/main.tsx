@@ -1,5 +1,6 @@
 import "./globals.css";
 import { type HerzieProfile, isBankFull } from "@herzies/shared";
+import { attachConsole } from "@tauri-apps/plugin-log";
 import {
   isPermissionGranted,
   requestPermission,
@@ -956,6 +957,15 @@ function App() {
     </div>
   );
 }
+
+// Pipes the Rust side's `log` output into this webview's console, so backend
+// and frontend lines interleave in devtools instead of only reaching the
+// terminal running `tauri dev`. The plugin's Webview target emits events; this
+// is the subscriber that turns them into console output, and without it that
+// target goes nowhere.
+attachConsole().catch(() => {
+  // Logging is a debugging aid, never a reason to fail startup.
+});
 
 const root = createRoot(document?.getElementById("root") ?? document.body);
 root.render(<App />);
