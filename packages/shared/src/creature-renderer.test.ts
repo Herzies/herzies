@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { RAINBOW_RAMP, VOID_RAMP } from "./ascii3d.js";
 import {
   BOSS_BODY_TYPE,
+  buildCreatureSpheres,
+  CREATURE_PARAM_BOUNDS,
   DEFAULT_Y_ANGLE,
   generateCreatureParams,
   generateDanceFrames,
@@ -379,6 +381,134 @@ describe("boss body type", () => {
       const filled = (y: number) => rows[y].some((c) => c.ch !== " ");
       expect(filled(0)).toBe(false);
       expect(filled(rows.length - 1)).toBe(false);
+    }
+  });
+});
+
+describe("stage 3 head and body", () => {
+  /** Radius of the circle where two spheres intersect, over the smaller
+   * sphere's radius. 1 means the head sits flush on the body; the lower it
+   * gets, the deeper the pinch between them, and a deep enough pinch reads as
+   * a neck — a third blob between head and body. */
+  function waist(
+    a: { center: number[]; radius: number },
+    b: { center: number[]; radius: number },
+  ): number {
+    const d = Math.abs(a.center[1] - b.center[1]);
+    const along = (d * d + a.radius ** 2 - b.radius ** 2) / (2 * d);
+    return (
+      Math.sqrt(Math.max(0, a.radius ** 2 - along ** 2)) /
+      Math.min(a.radius, b.radius)
+    );
+  }
+
+  // Blob and spiky sit at about 0.77 and were never called necky; the tall
+  // one was 0.62 at its smallest head and got the complaint.
+  const MIN_WAIST = 0.75;
+
+  const bodyTypes = [
+    [0, "blob"],
+    [1, "tall"],
+    [2, "wide"],
+    [3, "spiky"],
+  ] as const;
+  const { min, max } = CREATURE_PARAM_BOUNDS.headRatio;
+
+  for (const [bodyType, name] of bodyTypes) {
+    it(`has no neck between the head and body of a ${name} at any head size`, () => {
+      for (const headRatio of [min, (min + max) / 2, max]) {
+        const spheres = buildCreatureSpheres(
+          { ...generateCreatureParams(USER), bodyType, headRatio },
+          3,
+        );
+        const head = spheres.find((s) => s.part === "head");
+        const body = spheres.find((s) => s.part === "body");
+        if (!head || !body)
+          throw new Error(`no head or body sphere for ${name}`);
+        expect(waist(head, body)).toBeGreaterThanOrEqual(MIN_WAIST);
+      }
+    });
+  }
+});
+
+describe("herzie anatomy", () => {
+  /** Where the body parts are, relative to the head. Everything is measured
+   * from the head because the whole creature is re-centred on its bounding
+   * box, and ears or spikes change that box. */
+  function bodyLayout(seed: string, stage: number) {
+    const spheres = buildCreatureSpheres(generateCreatureParams(seed), stage);
+    const head = spheres.find((s) => s.part === "head");
+    if (!head) throw new Error(`no head for ${seed}`);
+    const parts = ["head", "body", "arm-l", "arm-r", "leg-l", "leg-r"];
+    return spheres
+      .filter((s) => parts.includes(s.part ?? ""))
+      .map((s) => [
+        s.part,
+        ...s.center.map((c, i) => Number((c - head.center[i]).toFixed(9))),
+        Number(s.radius.toFixed(9)),
+      ]);
+  }
+
+  // Enough seeds that every seeded body type, blob through spiky, turns up.
+  const seeds = Array.from({ length: 120 }, (_, i) => `herzie-${i}`);
+
+  it("covers every seeded body type", () => {
+    const types = new Set(seeds.map((s) => generateCreatureParams(s).bodyType));
+    expect([...types].sort()).toEqual([0, 1, 2, 3]);
+  });
+
+  for (const stage of [1, 2, 3]) {
+    it(`gives every herzie the same head, body, arms and legs at stage ${stage}`, () => {
+      const template = bodyLayout(seeds[0], stage);
+      for (const seed of seeds) {
+        expect(bodyLayout(seed, stage)).toEqual(template);
+      }
+    });
+  }
+
+  it("sizes the head from Mathias's own numbers, the template's source", () => {
+    // HERZ-MSL5's headRatio and bodyScale, unrounded: a rounded constant
+    // moved twenty cells of his render, which is not what "this one is good"
+    // asked for.
+    const params = generateCreatureParams("HERZ-MSL5");
+    const head = buildCreatureSpheres(params, 3).find((s) => s.part === "head");
+    expect(head?.radius).toBeCloseTo(
+      0.78 * params.headRatio * params.bodyScale * 1.5,
+      12,
+    );
+  });
+
+  it("grows the head with each stage, and stage 3 is the template size", () => {
+    const radius = (stage: number) =>
+      buildCreatureSpheres(generateCreatureParams("HERZ-MSL5"), stage).find(
+        (s) => s.part === "head",
+      )?.radius ?? 0;
+    expect(radius(1)).toBeLessThan(radius(2));
+    expect(radius(2)).toBeLessThan(radius(3));
+    // Stage 2 is only a little bigger than stage 1, not most of the way.
+    expect(radius(2) / radius(3)).toBeGreaterThan(0.8);
+    expect(radius(1) / radius(3)).toBeLessThan(0.8);
+  });
+
+  it("still varies the eyes", () => {
+    const eyeSizes = new Set(
+      seeds.map((seed) =>
+        buildCreatureSpheres(generateCreatureParams(seed), 3)
+          .find((s) => s.part === "eye")
+          ?.radius.toFixed(6),
+      ),
+    );
+    expect(eyeSizes.size).toBeGreaterThan(20);
+  });
+
+  it("gives spikes to spiky herzies only", () => {
+    for (const seed of seeds) {
+      const { bodyType } = generateCreatureParams(seed);
+      const spikes = buildCreatureSpheres(
+        generateCreatureParams(seed),
+        3,
+      ).filter((s) => s.part === "spike");
+      expect(spikes.length > 0).toBe(bodyType === 3);
     }
   });
 });

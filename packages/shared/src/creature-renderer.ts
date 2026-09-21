@@ -223,7 +223,7 @@ type ColorZone =
   | "wearable"
   | "eye-evil";
 
-interface Sphere {
+export interface Sphere {
   center: V3;
   radius: number;
   zone: ColorZone;
@@ -340,6 +340,9 @@ export interface CreatureParams {
   textureType: number;
 }
 
+/** Only "spiky" and "boss" look different from the others: blob, tall and wide
+ * all build the same herzie body now (see HERZIE_BODY), and the names are kept
+ * because the seeded roll that picks between them is not allowed to move. */
 export const CREATURE_BODY_TYPES = [
   "blob",
   "tall",
@@ -474,226 +477,49 @@ function centerVertically(spheres: Sphere[]): void {
   }
 }
 
-// --- Body archetype builders ---
+// --- The herzie body ---
 
-function buildBlob(p: CreatureParams, stage: number): Sphere[] {
-  const s = p.bodyScale * CS;
+/**
+ * Every herzie has these proportions. They are Mathias's stage-3 herzie
+ * (seed HERZ-MSL5, the wide body type), which is the shape everyone settled
+ * on; before this, four builders each sized head, body and limbs differently
+ * from the seeded params, and one of them (tall) read as three blobs — head,
+ * neck, body.
+ *
+ * What still varies from herzie to herzie is the eyes (spacing, size,
+ * height), the ears, and the spikes on a spiky one. Colour and texture vary
+ * too, but they are not dimensions.
+ *
+ * These are constants here, NOT changes to generateCreatureParams. That
+ * function rolls all thirteen params in a fixed order, so dropping or
+ * reordering any of the size ones would hand every later param — the eyes and
+ * ears we are keeping — a different value for every existing seed. The seeded
+ * size params are still rolled and simply not read by the herzie builder. The
+ * boss still reads them, which is the other reason to leave the generator
+ * alone.
+ */
+const HERZIE_BODY = {
+  // Verbatim from generateCreatureParams("HERZ-MSL5"), not rounded: rounding
+  // to three places moved 20 cells across a 12-angle turn.
+  scale: 0.9873104626312852,
+  headRatio: 0.7309588266070932,
+  legLength: 0.3828585948329419,
+} as const;
+
+/** The body type whose herzies carry spikes instead of ears. 0-2 all build
+ * the same body now; the roll is unchanged (see generateCreatureParams). */
+const SPIKY_BODY_TYPE = 3;
+
+function buildHerzie(p: CreatureParams, stage: number): Sphere[] {
+  const s = HERZIE_BODY.scale * CS;
   const spheres: Sphere[] = [];
 
-  const headR = 0.65 * p.headRatio * s;
-  // Head pushed up further from body for clear silhouette separation
-  const headY = stage === 1 ? 0 : stage === 2 ? -0.55 * s : -0.45 * s;
-  spheres.push({
-    center: [0, headY, 0],
-    radius: headR,
-    zone: "primary",
-    part: "head",
-  });
-
-  const ex = p.eyeSpacing * s;
-  const ey = headY + p.eyeHeight * headR * 1.6;
-  const er = p.eyeSize * s;
-  const ez = eyeZ(headR, ex, ey - headY, er);
-  spheres.push({ center: [-ex, ey, ez], radius: er, zone: "eye", part: "eye" });
-  spheres.push({ center: [ex, ey, ez], radius: er, zone: "eye", part: "eye" });
-  addPupils(spheres, er, [-ex, ey, ez], [ex, ey, ez]);
-
-  for (let i = 0; i < p.earCount; i++) {
-    const side = p.earCount === 1 ? 0 : i === 0 ? -1 : 1;
-    const earX = side * 0.2 * s;
-    const earY = headY - headR * 0.95;
-    spheres.push({
-      center: [earX, earY - Math.cos(p.earAngle) * p.earLength * s, 0],
-      radius: p.earLength * 0.4 * s,
-      zone: "accent",
-      part: "ear",
-    });
-  }
-
-  if (stage >= 2) {
-    const armY = stage === 3 ? 0.1 * s : headY + headR * 0.4;
-    const armX = stage === 3 ? 0.55 * s : headR + 0.12 * s;
-    spheres.push({
-      center: [-armX, armY, 0],
-      radius: 0.18 * s,
-      zone: "primary",
-      part: "arm-l",
-    });
-    spheres.push({
-      center: [armX, armY, 0],
-      radius: 0.18 * s,
-      zone: "primary",
-      part: "arm-r",
-    });
-  }
-
-  if (stage >= 3) {
-    const bodyR = 0.55 * s;
-    spheres.push({
-      center: [0, 0.25 * s, 0],
-      radius: bodyR,
-      zone: "primary",
-      part: "body",
-    });
-    // No neck sphere at stage 3: the head and body already overlap at every
-    // headRatio in CREATURE_PARAM_BOUNDS, so one only added bulk between them
-    // and made the largest adults read as overstuffed. Same reasoning the
-    // second body type has always used — see its "natural neck pinch" note.
-
-    const legY = 0.25 * s + bodyR * 0.75;
-    const legX = 0.25 * s;
-    spheres.push({
-      center: [-legX, legY, 0],
-      radius: 0.2 * s,
-      zone: "accent",
-      part: "leg-l",
-    });
-    spheres.push({
-      center: [legX, legY, 0],
-      radius: 0.2 * s,
-      zone: "accent",
-      part: "leg-r",
-    });
-    spheres.push({
-      center: [-legX, legY + p.legLength * 0.5 * s, 0],
-      radius: 0.16 * s,
-      zone: "accent",
-      part: "leg-l",
-    });
-    spheres.push({
-      center: [legX, legY + p.legLength * 0.5 * s, 0],
-      radius: 0.16 * s,
-      zone: "accent",
-      part: "leg-r",
-    });
-  }
-
-  return spheres;
-}
-
-function buildTall(p: CreatureParams, stage: number): Sphere[] {
-  const s = p.bodyScale * CS;
-  const spheres: Sphere[] = [];
-
-  const headR = 0.5 * p.headRatio * s;
-  const headY = stage === 1 ? 0 : stage === 2 ? -0.65 * s : -0.55 * s;
-  spheres.push({
-    center: [0, headY, 0],
-    radius: headR,
-    zone: "primary",
-    part: "head",
-  });
-  spheres.push({
-    center: [0, headY - headR * 0.25, 0],
-    radius: headR * 0.92,
-    zone: "primary",
-    part: "head",
-  });
-
-  const ex = p.eyeSpacing * s * 0.9;
-  const ey = headY + p.eyeHeight * headR * 1.5;
-  const er = p.eyeSize * s * 0.9;
-  const ez = eyeZ(headR, ex, ey - headY, er);
-  spheres.push({ center: [-ex, ey, ez], radius: er, zone: "eye", part: "eye" });
-  spheres.push({ center: [ex, ey, ez], radius: er, zone: "eye", part: "eye" });
-  addPupils(spheres, er, [-ex, ey, ez], [ex, ey, ez]);
-
-  for (let i = 0; i < p.earCount; i++) {
-    const side = p.earCount === 1 ? 0 : i === 0 ? -1 : 1;
-    const earX = side * 0.2 * s;
-    const earY = headY - headR;
-    spheres.push({
-      center: [earX, earY - p.earLength * s * 0.8, 0],
-      radius: p.earLength * 0.35 * s,
-      zone: "accent",
-      part: "ear",
-    });
-  }
-
-  if (stage >= 2) {
-    const armY = stage === 3 ? -0.05 * s : -0.15 * s;
-    // Stage 3 body is wider, so push arms further out to stay visible
-    const armX = stage === 3 ? 0.47 * s : 0.4 * s;
-    spheres.push({
-      center: [-armX, armY, 0],
-      radius: 0.12 * s,
-      zone: "primary",
-      part: "arm-l",
-    });
-    spheres.push({
-      center: [armX, armY, 0],
-      radius: 0.12 * s,
-      zone: "primary",
-      part: "arm-r",
-    });
-    spheres.push({
-      center: [-(armX + 0.1 * s), armY + p.armLength * 0.4 * s, 0],
-      radius: 0.09 * s,
-      zone: "primary",
-      part: "arm-l",
-    });
-    spheres.push({
-      center: [armX + 0.1 * s, armY + p.armLength * 0.4 * s, 0],
-      radius: 0.09 * s,
-      zone: "primary",
-      part: "arm-r",
-    });
-  }
-
-  if (stage >= 3) {
-    // Single elongated body blob — two near-equal spheres packed tightly
-    // so the silhouette reads as one capsule, not separate lumps.
-    // The top sphere overlaps the head directly, forming a natural neck
-    // pinch without a dedicated (bulging) neck sphere.
-    spheres.push({
-      center: [0, 0.05 * s, 0],
-      radius: 0.4 * s,
-      zone: "primary",
-      part: "body",
-    });
-    spheres.push({
-      center: [0, 0.3 * s, 0],
-      radius: 0.36 * s,
-      zone: "primary",
-      part: "body",
-    });
-
-    const legBase = 0.62 * s;
-    spheres.push({
-      center: [-0.15 * s, legBase, 0],
-      radius: 0.14 * s,
-      zone: "accent",
-      part: "leg-l",
-    });
-    spheres.push({
-      center: [0.15 * s, legBase, 0],
-      radius: 0.14 * s,
-      zone: "accent",
-      part: "leg-r",
-    });
-    spheres.push({
-      center: [-0.15 * s, legBase + p.legLength * 0.6 * s, 0],
-      radius: 0.11 * s,
-      zone: "accent",
-      part: "leg-l",
-    });
-    spheres.push({
-      center: [0.15 * s, legBase + p.legLength * 0.6 * s, 0],
-      radius: 0.11 * s,
-      zone: "accent",
-      part: "leg-r",
-    });
-  }
-
-  return spheres;
-}
-
-/** Single wide head/body — no side-by-side blobs (breaks wearables). */
-function buildWide(p: CreatureParams, stage: number): Sphere[] {
-  const s = p.bodyScale * CS;
-  const spheres: Sphere[] = [];
-
-  const headR = 0.78 * p.headRatio * s;
+  // The head grows: smallest at stage 1, a little bigger at stage 2, and the
+  // template's own size from stage 3 on. Ears, spikes and arms are placed from
+  // headR, so they follow it; the eyes keep their absolute size, which makes
+  // the young ones look big-eyed.
+  const headGrowth = stage === 1 ? 0.7 : stage === 2 ? 0.85 : 1;
+  const headR = 0.78 * HERZIE_BODY.headRatio * s * headGrowth;
   const headY = stage === 1 ? 0 : stage === 2 ? -0.4 * s : -0.35 * s;
   spheres.push({
     center: [0, headY, 0],
@@ -710,15 +536,35 @@ function buildWide(p: CreatureParams, stage: number): Sphere[] {
   spheres.push({ center: [ex, ey, ez], radius: er, zone: "eye", part: "eye" });
   addPupils(spheres, er, [-ex, ey, ez], [ex, ey, ez]);
 
-  for (let i = 0; i < p.earCount; i++) {
-    const side = p.earCount === 1 ? 0 : i === 0 ? -1 : 1;
-    const earX = side * (headR + p.earLength * 0.15 * s);
-    spheres.push({
-      center: [earX, headY - headR * 0.75, 0],
-      radius: p.earLength * 0.4 * s,
-      zone: "accent",
-      part: "ear",
-    });
+  const spiky = p.bodyType === SPIKY_BODY_TYPE;
+
+  if (spiky) {
+    // A crest over the top of the head, standing in for ears. The count and
+    // size come from the ear params, as they always have for spiky.
+    const spikeCount = 2 + p.earCount;
+    const spikeR = p.earLength * 0.4 * s;
+    for (let i = 0; i < spikeCount; i++) {
+      const angle = (i / spikeCount) * Math.PI - Math.PI / 2 + p.earAngle * 0.3;
+      const sx = Math.sin(angle) * (headR + spikeR * 1.2);
+      const sy = headY - Math.cos(angle) * (headR + spikeR * 1.2);
+      spheres.push({
+        center: [sx, sy, 0],
+        radius: spikeR,
+        zone: "accent",
+        part: "spike",
+      });
+    }
+  } else {
+    for (let i = 0; i < p.earCount; i++) {
+      const side = p.earCount === 1 ? 0 : i === 0 ? -1 : 1;
+      const earX = side * (headR + p.earLength * 0.15 * s);
+      spheres.push({
+        center: [earX, headY - headR * 0.75, 0],
+        radius: p.earLength * 0.4 * s,
+        zone: "accent",
+        part: "ear",
+      });
+    }
   }
 
   if (stage >= 2) {
@@ -736,6 +582,16 @@ function buildWide(p: CreatureParams, stage: number): Sphere[] {
       zone: "primary",
       part: "arm-r",
     });
+    if (spiky) {
+      for (const side of [-1, 1]) {
+        spheres.push({
+          center: [side * (armX + 0.14 * s), armY, 0],
+          radius: 0.07 * s,
+          zone: "accent",
+          part: "spike",
+        });
+      }
+    }
   }
 
   if (stage >= 3) {
@@ -747,6 +603,16 @@ function buildWide(p: CreatureParams, stage: number): Sphere[] {
       zone: "primary",
       part: "body",
     });
+    if (spiky) {
+      for (const side of [-1, 1]) {
+        spheres.push({
+          center: [side * (bodyR + 0.05 * s), bodyY, 0],
+          radius: 0.09 * s,
+          zone: "accent",
+          part: "spike",
+        });
+      }
+    }
 
     const legY = bodyY + bodyR * 0.75;
     const legX = 0.32 * s;
@@ -763,136 +629,14 @@ function buildWide(p: CreatureParams, stage: number): Sphere[] {
       part: "leg-r",
     });
     spheres.push({
-      center: [-legX, legY + p.legLength * 0.4 * s, 0],
+      center: [-legX, legY + HERZIE_BODY.legLength * 0.4 * s, 0],
       radius: 0.15 * s,
       zone: "accent",
       part: "leg-l",
     });
     spheres.push({
-      center: [legX, legY + p.legLength * 0.4 * s, 0],
+      center: [legX, legY + HERZIE_BODY.legLength * 0.4 * s, 0],
       radius: 0.15 * s,
-      zone: "accent",
-      part: "leg-r",
-    });
-  }
-
-  return spheres;
-}
-
-function buildSpiky(p: CreatureParams, stage: number): Sphere[] {
-  const s = p.bodyScale * CS;
-  const spheres: Sphere[] = [];
-
-  const headR = 0.55 * p.headRatio * s;
-  const headY = stage === 1 ? 0 : stage === 2 ? -0.5 * s : -0.4 * s;
-  spheres.push({
-    center: [0, headY, 0],
-    radius: headR,
-    zone: "primary",
-    part: "head",
-  });
-
-  const ex = p.eyeSpacing * s;
-  const ey = headY + p.eyeHeight * headR * 1.6;
-  const er = p.eyeSize * s;
-  const ez = eyeZ(headR, ex, ey - headY, er);
-  spheres.push({ center: [-ex, ey, ez], radius: er, zone: "eye", part: "eye" });
-  spheres.push({ center: [ex, ey, ez], radius: er, zone: "eye", part: "eye" });
-  addPupils(spheres, er, [-ex, ey, ez], [ex, ey, ez]);
-
-  const spikeCount = 2 + p.earCount;
-  const spikeR = p.earLength * 0.3 * s;
-  for (let i = 0; i < spikeCount; i++) {
-    const angle = (i / spikeCount) * Math.PI - Math.PI / 2 + p.earAngle * 0.3;
-    const sx = Math.sin(angle) * (headR + spikeR * 1.2);
-    const sy = headY - Math.cos(angle) * (headR + spikeR * 1.2);
-    spheres.push({
-      center: [sx, sy, 0],
-      radius: spikeR,
-      zone: "accent",
-      part: "spike",
-    });
-  }
-
-  if (p.earCount > 0) {
-    spheres.push({
-      center: [0, headY - headR - p.earLength * s * 0.6, 0],
-      radius: p.earLength * 0.35 * s,
-      zone: "accent",
-      part: "ear",
-    });
-  }
-
-  if (stage >= 2) {
-    const armY = stage === 3 ? 0.05 * s : headY + headR * 0.5;
-    spheres.push({
-      center: [-0.5 * s, armY, 0],
-      radius: 0.14 * s,
-      zone: "primary",
-      part: "arm-l",
-    });
-    spheres.push({
-      center: [0.5 * s, armY, 0],
-      radius: 0.14 * s,
-      zone: "primary",
-      part: "arm-r",
-    });
-    spheres.push({
-      center: [-0.62 * s, armY, 0],
-      radius: 0.07 * s,
-      zone: "accent",
-      part: "spike",
-    });
-    spheres.push({
-      center: [0.62 * s, armY, 0],
-      radius: 0.07 * s,
-      zone: "accent",
-      part: "spike",
-    });
-  }
-
-  if (stage >= 3) {
-    spheres.push({
-      center: [0, 0.2 * s, 0],
-      radius: 0.48 * s,
-      zone: "primary",
-      part: "body",
-    });
-    spheres.push({
-      center: [-0.55 * s, 0.15 * s, 0],
-      radius: 0.09 * s,
-      zone: "accent",
-      part: "spike",
-    });
-    spheres.push({
-      center: [0.55 * s, 0.15 * s, 0],
-      radius: 0.09 * s,
-      zone: "accent",
-      part: "spike",
-    });
-
-    const legY = 0.6 * s;
-    spheres.push({
-      center: [-0.22 * s, legY, 0],
-      radius: 0.17 * s,
-      zone: "accent",
-      part: "leg-l",
-    });
-    spheres.push({
-      center: [0.22 * s, legY, 0],
-      radius: 0.17 * s,
-      zone: "accent",
-      part: "leg-r",
-    });
-    spheres.push({
-      center: [-0.22 * s, legY + p.legLength * 0.5 * s, 0],
-      radius: 0.13 * s,
-      zone: "accent",
-      part: "leg-l",
-    });
-    spheres.push({
-      center: [0.22 * s, legY + p.legLength * 0.5 * s, 0],
-      radius: 0.13 * s,
       zone: "accent",
       part: "leg-r",
     });
@@ -904,12 +648,12 @@ function buildSpiky(p: CreatureParams, stage: number): Sphere[] {
 /**
  * Boss — a corrupted herzie, for the Boss Fight event.
  *
- * Deliberately breaks the rules the other four builders follow, because those
+ * Deliberately breaks the rules the herzie builder follows, because those
  * rules are what make a herzie read as friendly:
  *
  *  - The head is SMALLER than the body and sunk into it, so the thing hunches
- *    instead of standing up. Every other builder gives the head top billing.
- *  - The spike crown is a full ring, not buildSpiky's front-facing half-arc,
+ *    instead of standing up. The herzie builder gives the head top billing.
+ *  - The spike crown is a full ring, not a spiky herzie's front-facing half-arc,
  *    so the silhouette stays hostile from behind while it rotates.
  *  - It is asymmetric. Herzies are mirror-symmetric; a lopsided shoulder and
  *    an off-centre crown are most of what makes this look wrong.
@@ -1093,14 +837,20 @@ function buildBoss(p: CreatureParams, _stage: number): Sphere[] {
   return spheres;
 }
 
-const BODY_BUILDERS = [buildBlob, buildTall, buildWide, buildSpiky, buildBoss];
+const BODY_BUILDERS = [
+  buildHerzie,
+  buildHerzie,
+  buildHerzie,
+  buildHerzie,
+  buildBoss,
+];
 
 /** Index of buildBoss in BODY_BUILDERS. Not reachable from the seeded roll. */
 export const BOSS_BODY_TYPE = 4;
 
 // --- Wearable sphere builders ---
 
-/** Bounding sphere for all head parts (supports multi-sphere heads like tall). */
+/** Bounding sphere for all head parts (supports multi-sphere heads). */
 function getHeadBounds(
   spheres: Sphere[],
 ): { center: V3; radius: number } | null {
@@ -1369,7 +1119,7 @@ const SPIRIT_ORB_YAW_DEG = 45;
 
 /** A small round spirit with two eyes, resting near the herzie's feet — the
  * Spirit Orb pet. Reuses the same eyeZ() surface-protrusion math and pupil
- * offset as the body builders (e.g. buildBlob), inlined here rather than via
+ * offset as the herzie builder (buildHerzie), inlined here rather than via
  * addPupils/eye-sphere pushes since this builder returns a flat sphere array
  * (matching buildBoomboxSpheres' contract) instead of mutating in place. */
 function buildSpiritOrbSpheres(
@@ -1537,7 +1287,12 @@ function colorSchemeFor(
   return ramp && ramp.length > 0 ? ramp : undefined;
 }
 
-function buildCreatureSpheres(params: CreatureParams, stage: number): Sphere[] {
+/** The creature's spheres in world space, before rendering. Exported so tests
+ * can assert on the geometry itself rather than on rendered cells. */
+export function buildCreatureSpheres(
+  params: CreatureParams,
+  stage: number,
+): Sphere[] {
   const spheres = BODY_BUILDERS[params.bodyType](params, stage);
   centerVertically(spheres);
   return spheres;
