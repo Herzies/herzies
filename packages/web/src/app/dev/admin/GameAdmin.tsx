@@ -1,6 +1,11 @@
 "use client";
 
-import type { SongHuntConfig, SongHuntHint } from "@herzies/shared";
+import {
+  GENRES,
+  type Genre,
+  type SongHuntConfig,
+  type SongHuntHint,
+} from "@herzies/shared";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 const SECRET_KEY = "herzies-admin-secret";
@@ -29,6 +34,8 @@ type AdminEvent = {
   ends_at: string;
   config: Record<string, unknown>;
   created_at: string;
+  /** Live HP, present on boss_fight events only. */
+  boss?: { hp: number; maxHp: number; killed: boolean; escaped: boolean };
 };
 
 type EventStatus = "running" | "scheduled" | "ended" | "inactive";
@@ -48,6 +55,28 @@ type SongHuntConfigForm = {
   hints: SongHuntHintForm[];
 };
 
+type BossFightConfigForm = {
+  hatedGenres: Genre[];
+  maxHp: string;
+  rewardItemId: string;
+  topRewardItemId: string;
+  topCount: string;
+};
+
+type BossSettings = {
+  autoSpawn: boolean;
+  defaultHp: number | null;
+  rewardItemId: string;
+  topRewardItemId: string | null;
+  topCount: number;
+};
+
+type BossSettingsResponse = {
+  settings: BossSettings;
+  skippedWeeks: string[];
+  autoHp: number;
+};
+
 type EventFormState = {
   id?: string;
   type: string;
@@ -58,6 +87,7 @@ type EventFormState = {
   endsAt: string;
   configJson: string;
   songHunt: SongHuntConfigForm;
+  bossFight: BossFightConfigForm;
 };
 
 const EQUIP_SLOT_OPTIONS = [
@@ -219,6 +249,60 @@ function songHuntConfigToPayload(
   return payload;
 }
 
+/** The weekly spawn's window: Thursday 00:00 UTC for four days (00073). */
+const BOSS_WINDOW_MS = 4 * 24 * 60 * 60 * 1000;
+
+/** The next `count` Thursdays (UTC midnight) the weekly spawn fires on. */
+function upcomingBossWeeks(now: Date, count: number): Date[] {
+  const first = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
+  first.setUTCDate(first.getUTCDate() + ((4 - first.getUTCDay() + 7) % 7));
+  // Today is Thursday but the cron has already fired — start from next week.
+  if (first.getTime() < now.getTime() - 60_000) {
+    first.setUTCDate(first.getUTCDate() + 7);
+  }
+  return Array.from({ length: count }, (_, i) => {
+    const d = new Date(first);
+    d.setUTCDate(d.getUTCDate() + i * 7);
+    return d;
+  });
+}
+
+function defaultBossFightConfig(
+  defaults?: BossSettingsResponse | null,
+): BossFightConfigForm {
+  const s = defaults?.settings;
+  return {
+    hatedGenres: [],
+    maxHp: String(s?.defaultHp ?? defaults?.autoHp ?? 900),
+    rewardItemId: s?.rewardItemId ?? "cd",
+    topRewardItemId: s ? (s.topRewardItemId ?? "") : "cd",
+    topCount: String(s?.topCount ?? 3),
+  };
+}
+
+function bossFightConfigFromEvent(event: AdminEvent): BossFightConfigForm {
+  const config = event.config;
+  const maxHp =
+    event.boss?.maxHp ??
+    (typeof config.maxHp === "number" ? config.maxHp : undefined);
+  return {
+    hatedGenres: Array.isArray(config.hatedGenres)
+      ? (config.hatedGenres.filter((g) =>
+          (GENRES as readonly unknown[]).includes(g),
+        ) as Genre[])
+      : [],
+    maxHp: maxHp != null ? String(maxHp) : "",
+    rewardItemId:
+      typeof config.rewardItemId === "string" ? config.rewardItemId : "",
+    topRewardItemId:
+      typeof config.topRewardItemId === "string" ? config.topRewardItemId : "",
+    topCount:
+      typeof config.topCount === "number" ? String(config.topCount) : "3",
+  };
+}
+
 function newEventForm(overrides?: Partial<EventFormState>): EventFormState {
   const { startsAt, endsAt } = defaultWindow();
   return {
@@ -230,6 +314,7 @@ function newEventForm(overrides?: Partial<EventFormState>): EventFormState {
     endsAt,
     configJson: DEFAULT_CONFIGS.secret_track,
     songHunt: defaultSongHuntConfig(),
+    bossFight: defaultBossFightConfig(),
     ...overrides,
   };
 }
@@ -248,6 +333,10 @@ function eventToForm(event: AdminEvent): EventFormState {
       event.type === "song_hunt"
         ? songHuntConfigFromRecord(event.config)
         : defaultSongHuntConfig(),
+    bossFight:
+      event.type === "boss_fight"
+        ? bossFightConfigFromEvent(event)
+        : defaultBossFightConfig(),
   };
 }
 
@@ -348,6 +437,33 @@ function buildEventConfig(
       }
     }
     return { ...songHuntConfigToPayload(songHunt) };
+  }
+  if (form.type === "boss_fight") {
+    const { bossFight } = form;
+    if (bossFight.hatedGenres.length === 0) {
+      return "Pick at least one hated genre";
+    }
+    const maxHp = Number(bossFight.maxHp);
+    if (!Number.isFinite(maxHp) || maxHp <= 0) {
+      return "Boss HP must be a positive number";
+    }
+    if (!bossFight.rewardItemId) return "Reward item is required";
+    const topCount = Number.parseInt(bossFight.topCount, 10);
+    if (!Number.isFinite(topCount) || topCount < 0) {
+      return "Top count must be zero or more";
+    }
+    if (new Date(form.endsAt) <= new Date(form.startsAt)) {
+      return "Boss must end after it starts";
+    }
+    return {
+      hatedGenres: bossFight.hatedGenres,
+      maxHp,
+      rewardItemId: bossFight.rewardItemId,
+      ...(bossFight.topRewardItemId
+        ? { topRewardItemId: bossFight.topRewardItemId }
+        : {}),
+      topCount,
+    };
   }
   return parseEventConfig(form.configJson);
 }
@@ -658,6 +774,195 @@ function SongHuntConfigFields({
   );
 }
 
+function BossFightConfigFields({
+  form,
+  setForm,
+  catalogItems,
+  fieldIdPrefix,
+  bossDefaults,
+  live,
+}: {
+  form: EventFormState;
+  setForm: React.Dispatch<React.SetStateAction<EventFormState>>;
+  catalogItems: CatalogItem[];
+  fieldIdPrefix: string;
+  bossDefaults: BossSettingsResponse | null;
+  live?: AdminEvent["boss"];
+}) {
+  const boss = form.bossFight;
+  const update = (patch: Partial<BossFightConfigForm>) => {
+    setForm((f) => ({ ...f, bossFight: { ...f.bossFight, ...patch } }));
+  };
+  const toggleGenre = (genre: Genre) => {
+    update({
+      hatedGenres: boss.hatedGenres.includes(genre)
+        ? boss.hatedGenres.filter((g) => g !== genre)
+        : [...boss.hatedGenres, genre],
+    });
+  };
+  const defaultHp =
+    bossDefaults?.settings.defaultHp ?? bossDefaults?.autoHp ?? null;
+
+  return (
+    <div className="space-y-4 border border-border rounded-sm p-4 bg-bg">
+      <p className="text-xs text-cyan">boss fight config</p>
+      <fieldset>
+        <legend className="block text-xs text-text-dim mb-2">
+          hated genres (listening to these deals damage)
+        </legend>
+        <div className="flex flex-wrap gap-x-4 gap-y-2">
+          {GENRES.map((genre) => (
+            <label
+              key={genre}
+              className="flex items-center gap-1.5 text-xs cursor-pointer"
+            >
+              <input
+                type="checkbox"
+                checked={boss.hatedGenres.includes(genre)}
+                onChange={() => toggleGenre(genre)}
+              />
+              {genre}
+            </label>
+          ))}
+        </div>
+        {boss.hatedGenres.includes("pop") && (
+          <p className="text-yellow text-xs mt-2">
+            Pop is the fallback genre for unmatched tags — nearly every listen
+            will hit this boss.
+          </p>
+        )}
+      </fieldset>
+      <div className="grid sm:grid-cols-2 gap-4">
+        <div>
+          <label
+            className="block text-xs text-text-dim mb-1"
+            htmlFor={`${fieldIdPrefix}-boss-hp`}
+          >
+            max hp
+          </label>
+          <input
+            id={`${fieldIdPrefix}-boss-hp`}
+            type="number"
+            min={1}
+            required
+            value={boss.maxHp}
+            onChange={(e) => update({ maxHp: e.target.value })}
+            className={INPUT}
+          />
+          <p className="text-xs text-text-dim mt-1">
+            {live
+              ? `current: ${Math.round(live.hp)} / ${Math.round(live.maxHp)}${live.killed ? " (killed)" : live.escaped ? " (escaped)" : ""} — damage already dealt is kept`
+              : defaultHp != null
+                ? `default: ${Math.round(defaultHp)}`
+                : null}
+            {!live && defaultHp != null && String(defaultHp) !== boss.maxHp && (
+              <button
+                type="button"
+                onClick={() => update({ maxHp: String(defaultHp) })}
+                className="text-purple bg-transparent border-0 cursor-pointer ml-2"
+              >
+                reset
+              </button>
+            )}
+          </p>
+        </div>
+        <div>
+          <label
+            className="block text-xs text-text-dim mb-1"
+            htmlFor={`${fieldIdPrefix}-boss-top-count`}
+          >
+            top dealers who get the top reward
+          </label>
+          <input
+            id={`${fieldIdPrefix}-boss-top-count`}
+            type="number"
+            min={0}
+            required
+            value={boss.topCount}
+            onChange={(e) => update({ topCount: e.target.value })}
+            className={INPUT}
+          />
+        </div>
+      </div>
+      <div className="grid sm:grid-cols-2 gap-4">
+        <div>
+          <label
+            className="block text-xs text-text-dim mb-1"
+            htmlFor={`${fieldIdPrefix}-boss-reward`}
+          >
+            reward item (everyone who dealt damage)
+          </label>
+          <CatalogItemSelect
+            id={`${fieldIdPrefix}-boss-reward`}
+            value={boss.rewardItemId}
+            onChange={(rewardItemId) => update({ rewardItemId })}
+            catalogItems={catalogItems}
+            required
+          />
+        </div>
+        <div>
+          <label
+            className="block text-xs text-text-dim mb-1"
+            htmlFor={`${fieldIdPrefix}-boss-top-reward`}
+          >
+            top reward item (optional, on top of the reward)
+          </label>
+          <CatalogItemSelect
+            id={`${fieldIdPrefix}-boss-top-reward`}
+            value={boss.topRewardItemId}
+            onChange={(topRewardItemId) => update({ topRewardItemId })}
+            catalogItems={catalogItems}
+            emptyLabel="none"
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Item picker limited to the catalog — boss rewards are never auto-created. */
+function CatalogItemSelect({
+  id,
+  value,
+  onChange,
+  catalogItems,
+  required,
+  emptyLabel = "select item…",
+}: {
+  id: string;
+  value: string;
+  onChange: (itemId: string) => void;
+  catalogItems: CatalogItem[];
+  required?: boolean;
+  emptyLabel?: string;
+}) {
+  const missing = !!value && !catalogItems.some((i) => i.id === value);
+  return (
+    <>
+      <select
+        id={id}
+        required={required}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={INPUT}
+      >
+        <option value="">{emptyLabel}</option>
+        {missing && <option value={value}>{value} (not in catalog)</option>}
+        {catalogItems.map((item) => (
+          <option key={item.id} value={item.id}>
+            {item.name} ({item.id})
+          </option>
+        ))}
+      </select>
+      {missing && (
+        <p className="text-red text-xs mt-1">
+          Item not in catalog — saving will be refused.
+        </p>
+      )}
+    </>
+  );
+}
+
 function EventForm({
   form,
   setForm,
@@ -667,6 +972,8 @@ function EventForm({
   disabled,
   catalogItems,
   secret,
+  bossDefaults,
+  live,
 }: {
   form: EventFormState;
   setForm: React.Dispatch<React.SetStateAction<EventFormState>>;
@@ -676,6 +983,8 @@ function EventForm({
   disabled?: boolean;
   catalogItems: CatalogItem[];
   secret: string;
+  bossDefaults: BossSettingsResponse | null;
+  live?: AdminEvent["boss"];
 }) {
   return (
     <form onSubmit={onSubmit} className="space-y-4">
@@ -700,6 +1009,10 @@ function EventForm({
                   configJson: DEFAULT_CONFIGS[type] ?? f.configJson,
                   songHunt:
                     type === "song_hunt" ? defaultSongHuntConfig() : f.songHunt,
+                  bossFight:
+                    type === "boss_fight"
+                      ? defaultBossFightConfig(bossDefaults)
+                      : f.bossFight,
                 };
               });
             }}
@@ -707,6 +1020,7 @@ function EventForm({
           >
             <option value="secret_track">secret_track</option>
             <option value="song_hunt">song_hunt</option>
+            <option value="boss_fight">boss_fight</option>
           </select>
         </div>
         <div>
@@ -800,6 +1114,15 @@ function EventForm({
           catalogItems={catalogItems}
           fieldIdPrefix={form.id ?? "new"}
           secret={secret}
+        />
+      ) : form.type === "boss_fight" ? (
+        <BossFightConfigFields
+          form={form}
+          setForm={setForm}
+          catalogItems={catalogItems}
+          fieldIdPrefix={form.id ?? "new"}
+          bossDefaults={bossDefaults}
+          live={live}
         />
       ) : (
         <div>
@@ -1038,11 +1361,13 @@ function EventRow({
   secret,
   onChange,
   catalogItems,
+  bossDefaults,
 }: {
   event: AdminEvent;
   secret: string;
   onChange: () => void;
   catalogItems: CatalogItem[];
+  bossDefaults: BossSettingsResponse | null;
 }) {
   const now = new Date();
   const status = getEventStatus(event, now);
@@ -1154,6 +1479,13 @@ function EventRow({
           {typeof event.config.rewardItemId === "string"
             ? event.config.rewardItemId
             : "—"}
+          {event.boss && (
+            <div className="mt-0.5">
+              hp {Math.round(event.boss.hp)} / {Math.round(event.boss.maxHp)}
+              {event.boss.killed && <span className="text-green"> killed</span>}
+              {event.boss.escaped && <span className="text-red"> escaped</span>}
+            </div>
+          )}
         </td>
         <td className="py-3 text-right whitespace-nowrap">
           <button
@@ -1202,6 +1534,8 @@ function EventRow({
               disabled={busy}
               catalogItems={catalogItems}
               secret={secret}
+              bossDefaults={bossDefaults}
+              live={event.boss}
             />
             {error && <p className="text-red text-xs mt-2">{error}</p>}
           </td>
@@ -1343,12 +1677,14 @@ function EventsTable({
   onChange,
   emptyLabel,
   catalogItems,
+  bossDefaults,
 }: {
   events: AdminEvent[];
   secret: string;
   onChange: () => void;
   emptyLabel: string;
   catalogItems: CatalogItem[];
+  bossDefaults: BossSettingsResponse | null;
 }) {
   if (events.length === 0) {
     return <p className="text-text-dim text-xs py-4">{emptyLabel}</p>;
@@ -1374,6 +1710,7 @@ function EventsTable({
               secret={secret}
               onChange={onChange}
               catalogItems={catalogItems}
+              bossDefaults={bossDefaults}
             />
           ))}
         </tbody>
@@ -1536,11 +1873,282 @@ function GrantItemPanel({
   );
 }
 
+function bossSettingsToForm(settings: BossSettings) {
+  return {
+    autoSpawn: settings.autoSpawn,
+    defaultHp: settings.defaultHp != null ? String(settings.defaultHp) : "",
+    rewardItemId: settings.rewardItemId,
+    topRewardItemId: settings.topRewardItemId ?? "",
+    topCount: String(settings.topCount),
+  };
+}
+
+function BossSchedulePanel({
+  secret,
+  catalogItems,
+  data,
+  events,
+  onChange,
+  onCustomize,
+}: {
+  secret: string;
+  catalogItems: CatalogItem[];
+  data: BossSettingsResponse;
+  events: AdminEvent[];
+  onChange: () => void;
+  onCustomize: (weekStart: Date) => void;
+}) {
+  const [form, setForm] = useState(() => bossSettingsToForm(data.settings));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setForm(bossSettingsToForm(data.settings));
+  }, [data.settings]);
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setSaved(false);
+    const defaultHp =
+      form.defaultHp.trim() === "" ? null : Number(form.defaultHp);
+    if (defaultHp !== null && (!Number.isFinite(defaultHp) || defaultHp <= 0)) {
+      setError("Default HP must be a positive number, or empty for auto");
+      return;
+    }
+    const topCount = Number.parseInt(form.topCount, 10);
+    if (!Number.isFinite(topCount) || topCount < 0) {
+      setError("Top count must be zero or more");
+      return;
+    }
+    setBusy(true);
+    try {
+      await adminFetch("/api/admin/boss-fight", secret, {
+        method: "POST",
+        body: JSON.stringify({
+          autoSpawn: form.autoSpawn,
+          defaultHp,
+          rewardItemId: form.rewardItemId,
+          topRewardItemId: form.topRewardItemId || null,
+          topCount,
+        }),
+      });
+      setSaved(true);
+      onChange();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const setSkip = async (weekOf: string, skip: boolean) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await adminFetch("/api/admin/boss-fight", secret, {
+        method: "PUT",
+        body: JSON.stringify({ weekOf, skip }),
+      });
+      onChange();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update week");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const weeks = upcomingBossWeeks(new Date(), 6).map((start) => {
+    const end = new Date(start.getTime() + BOSS_WINDOW_MS);
+    const weekOf = start.toISOString().slice(0, 10);
+    // Any active boss overlapping this window makes the cron no-op (00076).
+    const custom = events.find(
+      (e) =>
+        e.type === "boss_fight" &&
+        e.active &&
+        new Date(e.starts_at) < end &&
+        new Date(e.ends_at) > start,
+    );
+    return {
+      start,
+      weekOf,
+      custom,
+      skipped: data.skippedWeeks.includes(weekOf),
+    };
+  });
+
+  return (
+    <div className="border border-border rounded-sm p-6 bg-bg-panel space-y-6">
+      <form onSubmit={save} className="space-y-4">
+        <label className="flex items-center gap-2 text-xs cursor-pointer">
+          <input
+            type="checkbox"
+            checked={form.autoSpawn}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, autoSpawn: e.target.checked }))
+            }
+          />
+          spawn a boss automatically every Thursday 00:00 UTC (runs 4 days)
+        </label>
+        <div className="grid sm:grid-cols-2 gap-4">
+          <div>
+            <label
+              className="block text-xs text-text-dim mb-1"
+              htmlFor="boss-default-hp"
+            >
+              default hp
+            </label>
+            <input
+              id="boss-default-hp"
+              type="number"
+              min={1}
+              value={form.defaultHp}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, defaultHp: e.target.value }))
+              }
+              className={INPUT}
+              placeholder={`auto (currently ${data.autoHp})`}
+            />
+            <p className="text-xs text-text-dim mt-1">
+              empty = 35 per active player, 900–50,000
+            </p>
+          </div>
+          <div>
+            <label
+              className="block text-xs text-text-dim mb-1"
+              htmlFor="boss-default-top-count"
+            >
+              top dealers who get the top reward
+            </label>
+            <input
+              id="boss-default-top-count"
+              type="number"
+              min={0}
+              value={form.topCount}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, topCount: e.target.value }))
+              }
+              className={INPUT}
+            />
+          </div>
+        </div>
+        <div className="grid sm:grid-cols-2 gap-4">
+          <div>
+            <label
+              className="block text-xs text-text-dim mb-1"
+              htmlFor="boss-default-reward"
+            >
+              default reward item
+            </label>
+            <CatalogItemSelect
+              id="boss-default-reward"
+              value={form.rewardItemId}
+              onChange={(rewardItemId) =>
+                setForm((f) => ({ ...f, rewardItemId }))
+              }
+              catalogItems={catalogItems}
+              required
+            />
+          </div>
+          <div>
+            <label
+              className="block text-xs text-text-dim mb-1"
+              htmlFor="boss-default-top-reward"
+            >
+              default top reward item
+            </label>
+            <CatalogItemSelect
+              id="boss-default-top-reward"
+              value={form.topRewardItemId}
+              onChange={(topRewardItemId) =>
+                setForm((f) => ({ ...f, topRewardItemId }))
+              }
+              catalogItems={catalogItems}
+              emptyLabel="none"
+            />
+          </div>
+        </div>
+        <div className="flex items-center gap-4">
+          <button
+            type="submit"
+            disabled={busy || !form.rewardItemId}
+            className="text-sm text-purple bg-transparent border border-border px-4 py-2 rounded-sm cursor-pointer hover:border-purple disabled:opacity-50"
+          >
+            save settings
+          </button>
+          {saved && <span className="text-green text-xs">saved</span>}
+          {error && <span className="text-red text-xs">{error}</span>}
+        </div>
+      </form>
+
+      <div>
+        <p className="text-xs text-text-dim mb-2">upcoming weeks</p>
+        <table className="w-full text-sm text-left">
+          <tbody>
+            {weeks.map((w) => (
+              <tr key={w.weekOf} className="border-t border-border">
+                <td className="py-2 pr-4 text-xs whitespace-nowrap">
+                  Thu {w.weekOf}
+                </td>
+                <td className="py-2 pr-4 text-xs">
+                  {w.custom ? (
+                    <span className="text-cyan">
+                      custom: {w.custom.title} (
+                      {new Date(w.custom.starts_at).toLocaleString()} →{" "}
+                      {new Date(w.custom.ends_at).toLocaleString()})
+                    </span>
+                  ) : w.skipped ? (
+                    <span className="text-red">skipped</span>
+                  ) : form.autoSpawn ? (
+                    <span className="text-green">automatic</span>
+                  ) : (
+                    <span className="text-text-dim">
+                      none (weekly spawn off)
+                    </span>
+                  )}
+                </td>
+                <td className="py-2 text-right whitespace-nowrap">
+                  {!w.custom && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => onCustomize(w.start)}
+                      className="text-purple text-xs bg-transparent border-0 cursor-pointer disabled:opacity-50 mr-3"
+                    >
+                      custom boss
+                    </button>
+                  )}
+                  {!w.custom && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => setSkip(w.weekOf, !w.skipped)}
+                      className="text-cyan text-xs bg-transparent border-0 cursor-pointer disabled:opacity-50"
+                    >
+                      {w.skipped ? "unskip" : "skip"}
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="text-xs text-text-dim mt-2">
+          A custom boss overlapping a week replaces that week&apos;s automatic
+          one. Edit or delete it in the events list below.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export function GameAdmin() {
   const [secret, setSecret] = useState("");
   const [secretInput, setSecretInput] = useState("");
   const [items, setItems] = useState<CatalogItem[]>([]);
   const [events, setEvents] = useState<AdminEvent[]>([]);
+  const [boss, setBoss] = useState<BossSettingsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showEventForm, setShowEventForm] = useState(false);
@@ -1563,12 +2171,17 @@ export function GameAdmin() {
     setLoading(true);
     setError(null);
     try {
-      const [itemsRes, eventsRes] = await Promise.all([
+      const [itemsRes, eventsRes, bossRes] = await Promise.all([
         adminFetch<{ items: CatalogItem[] }>("/api/admin/items", secret),
         adminFetch<{ events: AdminEvent[] }>("/api/admin/events", secret),
+        // Optional: without 00076 applied the rest of the page still works.
+        adminFetch<BossSettingsResponse>("/api/admin/boss-fight", secret).catch(
+          () => null,
+        ),
       ]);
       setItems(itemsRes.items);
       setEvents(eventsRes.events);
+      setBoss(bossRes);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load");
     } finally {
@@ -1591,6 +2204,27 @@ export function GameAdmin() {
     setSecretInput("");
     setItems([]);
     setEvents([]);
+    setBoss(null);
+  };
+
+  /** Open the new-event form as a boss filling that week's usual window. */
+  const customizeBossWeek = (weekStart: Date) => {
+    setEventForm(
+      newEventForm({
+        type: "boss_fight",
+        title: "Nohoot Henry",
+        description: "Listen to what it hates.",
+        startsAt: toDatetimeLocalValue(weekStart),
+        endsAt: toDatetimeLocalValue(
+          new Date(weekStart.getTime() + BOSS_WINDOW_MS),
+        ),
+        bossFight: defaultBossFightConfig(boss),
+      }),
+    );
+    setShowEventForm(true);
+    document
+      .getElementById("events-section")
+      ?.scrollIntoView({ behavior: "smooth" });
   };
 
   const now = new Date();
@@ -1797,7 +2431,21 @@ export function GameAdmin() {
         <GrantItemPanel secret={secret} catalogItems={items} />
       </section>
 
-      <section>
+      {boss && (
+        <section>
+          <h2 className="text-sm text-cyan mb-4">weekly boss fight</h2>
+          <BossSchedulePanel
+            secret={secret}
+            catalogItems={items}
+            data={boss}
+            events={events}
+            onChange={load}
+            onCustomize={customizeBossWeek}
+          />
+        </section>
+      )}
+
+      <section id="events-section">
         <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
           <h2 className="text-sm text-cyan">events</h2>
           <button
@@ -1827,6 +2475,7 @@ export function GameAdmin() {
               disabled={loading}
               catalogItems={items}
               secret={secret}
+              bossDefaults={boss}
             />
           </div>
         )}
@@ -1840,6 +2489,7 @@ export function GameAdmin() {
           onChange={load}
           emptyLabel="No active or scheduled events."
           catalogItems={items}
+          bossDefaults={boss}
         />
 
         <h3 className="text-xs text-text-dim mb-2 mt-8 uppercase tracking-wide">
@@ -1851,6 +2501,7 @@ export function GameAdmin() {
           onChange={load}
           emptyLabel="No ended or inactive events."
           catalogItems={items}
+          bossDefaults={boss}
         />
       </section>
     </div>
