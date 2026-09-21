@@ -1,7 +1,7 @@
-import type { GameEvent, SongHuntConfig } from "@herzies/shared";
+import type { BossFightConfig, GameEvent, SongHuntConfig } from "@herzies/shared";
 import { NextResponse } from "next/server";
 import { authenticateRequestOptional } from "@/lib/auth";
-import { buildSongHuntConfig } from "@/lib/events";
+import { buildBossFightConfig, buildSongHuntConfig } from "@/lib/events";
 import { createAdminClient } from "@/lib/supabase-admin";
 
 export async function GET(request: Request) {
@@ -37,6 +37,13 @@ export async function GET(request: Request) {
           e.config as SongHuntConfig,
           now,
           false,
+          userId,
+        );
+      } else if (e.type === "boss_fight") {
+        config = await buildBossFightConfig(
+          admin,
+          e.id,
+          e.config as BossFightConfig,
           userId,
         );
       } else {

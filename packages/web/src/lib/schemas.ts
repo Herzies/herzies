@@ -98,6 +98,21 @@ export const adminEventSchema = z.object({
   config: z.record(z.string(), z.unknown()).optional(),
 });
 
+export const adminBossSettingsSchema = z.object({
+  autoSpawn: z.boolean(),
+  /** null = scale with active players. */
+  defaultHp: z.number().positive().nullable(),
+  rewardItemId: z.string().min(1),
+  topRewardItemId: z.string().min(1).nullable(),
+  topCount: z.number().int().nonnegative(),
+});
+
+export const adminBossSkipSchema = z.object({
+  /** UTC date (YYYY-MM-DD) of the Thursday the weekly spawn should skip. */
+  weekOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  skip: z.boolean(),
+});
+
 export const adminItemSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),

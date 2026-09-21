@@ -119,6 +119,25 @@ export async function cleanupTestData() {
     .from("event_claims")
     .delete()
     .neq("id", "00000000-0000-0000-0000-000000000000");
+  // Events themselves, which nothing used to clean up. Harmless while event
+  // tests only asserted RLS, but spawn_boss_fight() no-ops when a boss is
+  // already live — so a leftover boss makes the NEXT run's spawn test fail
+  // looking like a logic bug. boss_state/boss_damage cascade from here.
+  await admin
+    .from("events")
+    .delete()
+    .neq("id", "00000000-0000-0000-0000-000000000000");
+  // Back to 00076's defaults: a test that turns the weekly spawn off or sets a
+  // default HP must not change what the next test's spawn does.
+  await admin.from("boss_fight_settings").upsert({
+    id: true,
+    auto_spawn: true,
+    default_hp: null,
+    reward_item_id: "cd",
+    top_reward_item_id: "cd",
+    top_count: 3,
+  });
+  await admin.from("boss_fight_skips").delete().gte("week_of", "1970-01-01");
   await admin
     .from("trades")
     .delete()

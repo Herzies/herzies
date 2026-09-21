@@ -219,6 +219,15 @@ interface SyncContext {
   }[];
   pending_drops: { id: string; item_id: string; dropped_at: string }[];
   active_hunts: { id: string; title: string }[];
+  /**
+   * The live, still-fightable boss, if any (00075). Absent on a database that
+   * predates that migration, which reads the same as "no boss".
+   */
+  active_boss?: {
+    id: string;
+    title: string;
+    hatedGenres: string[];
+  } | null;
   pending_trade: {
     tradeId: string;
     fromName: string;
@@ -439,6 +448,61 @@ export async function processSync(
         title: "Evolution!",
         message: `${herzie.name} evolved to stage ${events.newStage}!`,
       });
+    }
+  }
+
+  // 4b. Boss damage. Damage is billedMinutes, deliberately — the value that
+  // has already been through MAX_MINUTES_PER_SYNC, BILL_COOLDOWN_MS and the
+  // wall-clock cap above, never the raw client-asserted minutesListened. That
+  // is the whole reason this lives in processSync rather than behind its own
+  // endpoint: the anti-cheat comes for free and stays in one place.
+  //
+  // The guard is not an optimisation to skip. processSync runs every 5s per
+  // visible client, and 00057 exists because an RPC sitting on this polled
+  // path reached 1.93M calls from ~26 users. deal_boss_damage is its own
+  // round trip, so it only fires when all three hold — and all three are
+  // already in hand, so the check itself is free.
+  const activeBoss = ctx.active_boss ?? null;
+  if (billedMinutes > 0 && activeBoss && genres.length > 0) {
+    // The classified array, not [0]: a metal/thrash track should hit a boss
+    // that hates either. And no ["pop"] fallback on an empty tag list — "we
+    // don't know what this is" must not count as a hit, even though the
+    // spawner never rolls pop anyway.
+    const hated = activeBoss.hatedGenres ?? [];
+    const hurtsBoss = classifyGenre(genres).some((g) => hated.includes(g));
+
+    if (hurtsBoss) {
+      const { data: hit, error: hitError } = await admin.rpc(
+        "deal_boss_damage",
+        {
+          p_event_id: activeBoss.id,
+          p_user_id: userId,
+          p_damage: billedMinutes,
+        },
+      );
+
+      if (hitError) {
+        // Never fail a sync over the boss. The listen is already billed and
+        // the XP already applied; losing one hit is far cheaper than losing
+        // the player's whole tick.
+        console.error("deal_boss_damage failed:", hitError.message);
+      } else {
+        const result = (hit ?? [])[0] as
+          | { hp: number; is_killing_blow: boolean }
+          | undefined;
+        // Only the killing blow gets a popup. Every other hit is visible on
+        // the HP bar and the red tag pills, and a notification per sync would
+        // fire every few seconds for anyone listening to the right genre.
+        // Rewards are NOT granted here — settle_boss_fight does that on its
+        // own cron, so a timeout in this request can't half-pay the server.
+        if (result?.is_killing_blow) {
+          notifications.push({
+            type: "event_complete",
+            title: "Boss defeated!",
+            message: `You landed the killing blow on "${activeBoss.title}".`,
+          });
+        }
+      }
     }
   }
 

@@ -2,6 +2,7 @@ import type { Equipped, GameEvent } from "@herzies/shared";
 import { getItem, RARITY_COLORS as ITEM_RARITY_COLORS } from "@herzies/shared";
 import { useEffect, useRef, useState } from "react";
 import { herzies, useWindowFocused } from "../tauri-bridge";
+import { BossFightHelp, BossFightPanel, makeDebugBoss } from "./BossFightPanel";
 import ItemInspectOverlay from "./ItemInspectOverlay";
 import { ItemTypeIcon } from "./icons/ItemTypeIcon";
 import { List } from "./List";
@@ -63,12 +64,15 @@ const EVENTS_POLL_MS = 10_000;
 export function EventsView({
   eventsTabVisible,
   debugForceActive = false,
+  debugForceBoss = false,
   equipped,
 }: {
   /** Tab stays mounted but hidden; only poll while user is on Events. */
   eventsTabVisible: boolean;
   /** Debug: render the previous hunt as if it were live, to preview the active-event UI. */
   debugForceActive?: boolean;
+  /** Debug: render a fixture boss, so the panel can be reviewed without a live one. */
+  debugForceBoss?: boolean;
   /** Current deck, used to show set progress in the reward preview. */
   equipped?: Equipped | null;
 }) {
@@ -77,6 +81,7 @@ export function EventsView({
   const [nextHunt, setNextHunt] = useState<GameEvent | null>(null);
   const [loading, setLoading] = useState(true);
   const [inspectOverlay, setInspectOverlay] = useState<"item" | null>(null);
+  const [inspectItemId, setInspectItemId] = useState<string | null>(null);
   const focused = useWindowFocused();
 
   // Optimistic override of playsRemaining, keyed by hint index — updated
@@ -155,6 +160,37 @@ export function EventsView({
       <div className="flex h-full items-center justify-center text-xs text-text-dim">
         Loading...
       </div>
+    );
+  }
+
+  // Per-type dispatch. Boss windows (Thu-Sun) and hunts are scheduled not to
+  // overlap, so this ordering is only a tie-break for the case where an admin
+  // has forced both to be live at once.
+  const boss =
+    events.find((e) => e.type === "boss_fight") ??
+    (debugForceBoss ? makeDebugBoss() : undefined);
+  if (boss) {
+    return (
+      <View
+        title="Boss Fight"
+        colour="cyan"
+        childrenClassName="flex min-h-0 flex-col"
+        action={<BossFightHelp />}
+      >
+        <BossFightPanel
+          event={boss}
+          paused={!eventsTabVisible || !focused}
+          onInspectReward={(itemId) => setInspectItemId(itemId)}
+          equipped={equipped}
+        />
+        {inspectItemId ? (
+          <ItemInspectOverlay
+            itemId={inspectItemId}
+            onClose={() => setInspectItemId(null)}
+            equipped={equipped}
+          />
+        ) : null}
+      </View>
     );
   }
 
@@ -333,7 +369,11 @@ export function EventsView({
   const rewardItem = getItem(config.rewardItemId);
 
   return (
-    <View title="Events" colour="cyan" childrenClassName="flex flex-col h-full">
+    <View
+      title="Song Hunt"
+      colour="cyan"
+      childrenClassName="flex flex-col h-full"
+    >
       <div className="grid flex-1 place-items-center">
         <div>
           <div className="text-center text-cyan">{hunt.title}</div>

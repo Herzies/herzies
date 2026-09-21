@@ -111,6 +111,9 @@ function App() {
   const openChatAfterLeaveRef = useRef(false);
   const [hasActiveEvent, setHasActiveEvent] = useState(false);
   const [hasActiveEventOverride, setHasActiveEventOverride] = useState(false);
+  const [debugBossOverride, setDebugBossOverride] = useState(false);
+  const [hasActiveBoss, setHasActiveBoss] = useState(false);
+  const [bossHatedGenres, setBossHatedGenres] = useState<string[]>([]);
   const [chatProfileCode, setChatProfileCode] = useState<string | null>(null);
   const [selfProfile, setSelfProfile] = useState<HerzieProfile | null>(null);
   const [ignoredIncomingTradeId, setIgnoredIncomingTradeId] = useState<
@@ -214,6 +217,18 @@ function App() {
     if (!inventoryFull) setDismissedInventoryFull(false);
   }, [inventoryFull]);
 
+  // Black out the window while you are looking at a live boss. The class goes
+  // on <html> rather than a React element because the app's root div is
+  // transparent — body's bg-bg-panel is what you actually see, and it also
+  // covers the window's corners and any area the root doesn't paint. CSS owns
+  // the fade so both directions are symmetric.
+  useEffect(() => {
+    const bossOnScreen =
+      view === "events" && (hasActiveBoss || debugBossOverride);
+    document.documentElement.classList.toggle("boss-mode", bossOnScreen);
+    return () => document.documentElement.classList.remove("boss-mode");
+  }, [view, hasActiveBoss, debugBossOverride]);
+
   // The tab only needs to know whether a song hunt is running right now, which
   // /events-active alone answers — and it's an Edge Function, so it's cheap and
   // fast. This used to also fetch /events/previous-hunt (a slow Vercel route)
@@ -222,9 +237,23 @@ function App() {
     herzies
       .fetchActiveEvents()
       .then(({ events }) => {
-        setHasActiveEvent(events.some((e) => e.type === "song_hunt"));
+        setHasActiveEvent(
+          events.some((e) => e.type === "song_hunt" || e.type === "boss_fight"),
+        );
+        const boss = events.find((e) => e.type === "boss_fight");
+        setHasActiveBoss(Boolean(boss));
+        // Drives the red genre pills on the now-playing card, so the player
+        // can see a track is hurting the boss without opening the Events tab.
+        setBossHatedGenres(
+          ((boss?.config as { hatedGenres?: string[] } | undefined)
+            ?.hatedGenres ?? []) as string[],
+        );
       })
-      .catch(() => setHasActiveEvent(false));
+      .catch(() => {
+        setHasActiveEvent(false);
+        setHasActiveBoss(false);
+        setBossHatedGenres([]);
+      });
   }, []);
 
   // One effect, not two: a second copy gated on `state.isOnline` alone fired a
@@ -650,6 +679,7 @@ function App() {
               onOpenProfile={handleOpenSelfProfile}
               onOpenSettings={() => switchView("settings")}
               onActivity={addLog}
+              bossHatedGenres={bossHatedGenres}
             />
           )}
         </div>
@@ -709,6 +739,7 @@ function App() {
           <EventsView
             eventsTabVisible={view === "events"}
             debugForceActive={hasActiveEventOverride}
+            debugForceBoss={debugBossOverride}
             equipped={state.equipped}
           />
         </div>
@@ -771,6 +802,8 @@ function App() {
             onToggleActiveEventOverride={() =>
               setHasActiveEventOverride((v) => !v)
             }
+            debugBossOverride={debugBossOverride}
+            onToggleDebugBoss={() => setDebugBossOverride((v) => !v)}
             onSpawnDebugDrop={handleSpawnDebugDrop}
             availableUpdate={availableUpdate}
             installStatus={updateInstallStatus}
@@ -807,7 +840,9 @@ function App() {
         <TabBar
           view={view}
           setView={switchView}
-          hasActiveEvent={hasActiveEvent || hasActiveEventOverride}
+          hasActiveEvent={
+            hasActiveEvent || hasActiveEventOverride || debugBossOverride
+          }
         />
       )}
 
