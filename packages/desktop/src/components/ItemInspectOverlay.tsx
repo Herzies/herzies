@@ -9,10 +9,15 @@ import {
 } from "@herzies/shared";
 import { useEffect } from "react";
 import { cn } from "../lib/utils";
-import { ItemTypeTag, ModifierEffectTag, SetTag } from "./ItemTypeTag";
+import {
+  ItemStatLines,
+  ItemTypeTag,
+  ModifierEffectTag,
+  SetTag,
+} from "./ItemTypeTag";
 
 /** The full item preview card — art, type/set tags, name, rarity (+ optional
- * `meta`, e.g. owned quantity), description, and set-completion progress.
+ * `meta`, e.g. owned quantity), stats, description, and set-completion progress.
  * Used both as the content of the click-to-inspect modal (with `footer`
  * actions) and, footer-less, as a hover preview in the inventory grid. */
 export function ItemPreviewCard({
@@ -69,6 +74,7 @@ export function ItemPreviewCard({
         {RARITY_LABELS[item.rarity]}
         {meta ? <> · {meta}</> : null}
       </div>
+      <ItemStatLines item={item} className="mb-1" />
       <div className="text-ui-sm text-text-dim">{item.description}</div>
       {set && (
         <div className="mt-2 border-t border-border pt-2 text-left text-ui-sm">

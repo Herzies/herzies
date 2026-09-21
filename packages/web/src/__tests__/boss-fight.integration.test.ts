@@ -440,6 +440,26 @@ describe("damage from listening", () => {
     expect((await bossState(boss)).hp).toBeCloseTo(495, 5);
   });
 
+  it("deals more damage with sonic power equipped", async () => {
+    const boss = (await spawnBoss(500))!;
+    const plain = await makePlayer();
+    const boomer = await createTestUser();
+    // Box of Boom: +10 sonic power, which is +10% damage.
+    await createTestHerzie(boomer.userId, {
+      inventory_v2: {},
+      equipped: { ground_left: "boombox" },
+    });
+
+    await listen(plain, ["techno"], 5);
+    await listen(boomer, ["techno"], 5);
+
+    // The plain player in the same test is the baseline, so the delta is the
+    // claim rather than a magic number.
+    const base = await damageOf(boss, plain.userId);
+    expect(base).toBeCloseTo(5, 4);
+    expect(await damageOf(boss, boomer.userId)).toBeCloseTo(base * 1.1, 4);
+  });
+
   it("deals nothing for a genre the boss doesn't hate", async () => {
     const boss = (await spawnBoss(500))!;
     const player = await makePlayer();

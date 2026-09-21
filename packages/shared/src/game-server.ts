@@ -21,7 +21,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   type ActiveMultiplier,
   applyXp,
-  BOSS_DAMAGE_PER_MINUTE,
+  bossDamagePerMinute,
   calculateXpGain,
   classifyGenre,
   DROP_CHANCE_PER_TICK,
@@ -30,6 +30,7 @@ import {
   type FriendRequestSummary,
   filterDroppablePool,
   getDailyCraving,
+  getHerzieStats,
   getItem,
   goodEyeSniperBonus,
   type Herzie,
@@ -478,7 +479,13 @@ export async function processSync(
         {
           p_event_id: activeBoss.id,
           p_user_id: userId,
-          p_damage: billedMinutes * BOSS_DAMAGE_PER_MINUTE,
+          // Sonic power from the STORED row's equipped items, like
+          // hasGoodEyeSniperEquipped above — never from the request body.
+          p_damage:
+            billedMinutes *
+            bossDamagePerMinute(
+              getHerzieStats(normalizeEquipped(row.equipped)),
+            ),
         },
       );
 

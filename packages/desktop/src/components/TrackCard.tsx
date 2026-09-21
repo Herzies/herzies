@@ -9,7 +9,15 @@ import { MarqueeText } from "./MarqueeText";
 import { Tooltip } from "./Tooltip";
 
 /** A now-playing tag. Red, with a tooltip, when it is dealing damage to a boss. */
-function GenrePill({ tag, hurts }: { tag: string; hurts: boolean }) {
+function GenrePill({
+  tag,
+  hurts,
+  damagePerMinute,
+}: {
+  tag: string;
+  hurts: boolean;
+  damagePerMinute: number;
+}) {
   const pill = (
     <span
       className={cn(
@@ -22,7 +30,9 @@ function GenrePill({ tag, hurts }: { tag: string; hurts: boolean }) {
   );
   if (!hurts) return pill;
   return (
-    <Tooltip label={`Dealing ${BOSS_DAMAGE_PER_MINUTE} damage per minute`}>
+    <Tooltip
+      label={`Dealing ${Number(damagePerMinute.toFixed(2))} damage per minute`}
+    >
       {pill}
     </Tooltip>
   );
@@ -42,6 +52,7 @@ export function TrackCard({
   artistImageUrl,
   tags,
   hatedGenres,
+  damagePerMinute = BOSS_DAMAGE_PER_MINUTE,
   meta,
   className,
 }: {
@@ -56,6 +67,9 @@ export function TrackCard({
    * currently dealing damage, and gets a red pill to say so.
    */
   hatedGenres?: string[];
+  /** Damage per minute the player's listening deals to a boss, sonic power
+   * included — what the red pills' tooltip says. */
+  damagePerMinute?: number;
   /** Extra dim line under the artist, e.g. how long ago it was played. */
   meta?: string;
   className?: string;
@@ -119,7 +133,14 @@ export function TrackCard({
                 const hurts =
                   hated.length > 0 &&
                   classifyGenre([tag]).some((g) => hated.includes(g));
-                return <GenrePill key={tag} tag={tag} hurts={hurts} />;
+                return (
+                  <GenrePill
+                    key={tag}
+                    tag={tag}
+                    hurts={hurts}
+                    damagePerMinute={damagePerMinute}
+                  />
+                );
               })}
             </div>
           ) : null}

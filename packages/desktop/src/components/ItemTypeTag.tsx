@@ -4,6 +4,8 @@ import {
   ITEM_TYPE_LABELS,
   type ItemDef,
   type ItemType,
+  STAT_KEYS,
+  STAT_LABELS,
 } from "@herzies/shared";
 import { cn } from "../lib/utils";
 import { Tooltip } from "./Tooltip";
@@ -78,6 +80,28 @@ export function SetTag({
         {set.name}
       </span>
     </Tooltip>
+  );
+}
+
+/** The stats an item adds to its wearer, one per line (e.g. "Sonic power:
+ * +10"). Renders nothing on items without any — most have none. */
+export function ItemStatLines({
+  item,
+  className,
+}: {
+  item: Pick<ItemDef, "stats">;
+  className?: string;
+}) {
+  const keys = STAT_KEYS.filter((key) => item.stats?.[key]);
+  if (keys.length === 0) return null;
+  return (
+    <div className={cn("text-ui-sm text-cyan", className)}>
+      {keys.map((key) => (
+        <div key={key}>
+          {STAT_LABELS[key]}: +{item.stats?.[key]}
+        </div>
+      ))}
+    </div>
   );
 }
 

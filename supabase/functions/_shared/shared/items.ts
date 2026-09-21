@@ -27,6 +27,7 @@ import {
   type V3,
   VIOLET_RAMP,
 } from "./ascii3d.ts";
+import { BOSS_DAMAGE_PER_MINUTE } from "./types.ts";
 
 export type Rarity = "common" | "uncommon" | "rare" | "legendary";
 
@@ -386,6 +387,24 @@ export function applySell(
   };
 }
 
+/** The stats a herzie has. Only one so far; add a key here (and a label in
+ * STAT_LABELS) and every item, tooltip and total below picks it up. */
+export const STAT_KEYS = ["sonicPower"] as const;
+export type StatKey = (typeof STAT_KEYS)[number];
+
+/** What an item adds to its wearer. Most items add nothing, so every key is
+ * optional and an item with no `stats` is the norm. */
+export type ItemStats = Partial<Record<StatKey, number>>;
+
+/** A herzie's totals: what its equipped items add up to. Derived from
+ * `equipped` every time it is needed, never stored, so unequipping an item
+ * takes its stats with it and there is nothing to keep in sync. */
+export type HerzieStats = Record<StatKey, number>;
+
+export const STAT_LABELS: Record<StatKey, string> = {
+  sonicPower: "Sonic power",
+};
+
 export interface ItemDef {
   id: string;
   name: string;
@@ -405,6 +424,8 @@ export interface ItemDef {
   buyPrice?: number;
   /** Inventory sub-tab grouping. Defaults to "deck" when unset. */
   category?: ItemCategory;
+  /** Stats added to the herzie while this is equipped. Most items have none. */
+  stats?: ItemStats;
   /** Set when the item has a gameplay effect while equipped (e.g. an XP bonus), not just cosmetic. */
   modifier?: {
     /** Short label for the effect badge, e.g. "Exp boost". */
@@ -1430,6 +1451,7 @@ export const ITEMS: ItemDef[] = [
     equipable: true,
     equipSlot: "ground",
     sellPrice: 250,
+    stats: { sonicPower: 10 },
   },
   {
     id: "good-eye-sniper",
@@ -1527,6 +1549,32 @@ export const ITEMS: ItemDef[] = [
 
 export function getItem(id: string): ItemDef | undefined {
   return ITEMS.find((item) => item.id === id);
+}
+
+/** The herzie's stats: every equipped item's `stats`, summed. Takes a
+ * normalized `Equipped` — and on the server that must come from the stored
+ * row, never from anything the client sent. */
+export function getHerzieStats(
+  equipped: Equipped | null | undefined,
+): HerzieStats {
+  const totals = Object.fromEntries(
+    STAT_KEYS.map((key) => [key, 0]),
+  ) as HerzieStats;
+  for (const id of equippedItemIds(equipped)) {
+    const stats = getItem(id)?.stats;
+    if (!stats) continue;
+    for (const key of STAT_KEYS) totals[key] += stats[key] ?? 0;
+  }
+  return totals;
+}
+
+/** Damage a listen deals to a boss per billed minute. Sonic power is a
+ * percentage on top of the base rate — 10 sonic power is +10% — the same way
+ * every other bonus in the game is a fraction of what it modifies. Both
+ * `processSync` and the desktop tooltip call this, so what a player is told
+ * is what the server bills. */
+export function bossDamagePerMinute(stats: HerzieStats): number {
+  return BOSS_DAMAGE_PER_MINUTE * (1 + stats.sonicPower / 100);
 }
 
 // getItemColor lived here. It moved to item-canvas.ts — the module its three

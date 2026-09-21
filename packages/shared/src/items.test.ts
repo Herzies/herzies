@@ -5,10 +5,12 @@ import {
   BANK_SLOT_COUNT,
   type BankItemLookup,
   bankSlotsUsed,
+  bossDamagePerMinute,
   EQUIP_SLOTS,
   EQUIPPED_SLOTS,
   equippedItemIds,
   findEquippedSlot,
+  getHerzieStats,
   getItem,
   getItemType,
   hasRoomFor,
@@ -576,5 +578,40 @@ describe("hasRoomFor", () => {
   it("treats an empty inventory as having room", () => {
     expect(hasRoomFor(null, {}, "cd")).toBe(true);
     expect(hasRoomFor({}, {}, "cd")).toBe(true);
+  });
+});
+
+describe("herzie stats", () => {
+  it("gives Box of Boom +10 sonic power", () => {
+    expect(getItem("boombox")?.stats).toEqual({ sonicPower: 10 });
+  });
+
+  it("is zero for a herzie with nothing equipped", () => {
+    expect(getHerzieStats({})).toEqual({ sonicPower: 0 });
+    expect(getHerzieStats(null)).toEqual({ sonicPower: 0 });
+  });
+
+  it("adds up the stats of equipped items", () => {
+    expect(getHerzieStats({ ground_left: "boombox" }).sonicPower).toBe(10);
+    // Either ground side counts, and an item with no stats adds nothing.
+    expect(
+      getHerzieStats({ ground_right: "boombox", head: "headphones" })
+        .sonicPower,
+    ).toBe(10);
+  });
+
+  it("ignores items that are owned but not equipped, and unknown ids", () => {
+    expect(getHerzieStats({ head: "no-such-item" }).sonicPower).toBe(0);
+  });
+});
+
+describe("bossDamagePerMinute", () => {
+  it("is the base rate with no sonic power", () => {
+    expect(bossDamagePerMinute({ sonicPower: 0 })).toBe(1);
+  });
+
+  it("treats sonic power as a percentage on top of the base rate", () => {
+    expect(bossDamagePerMinute({ sonicPower: 10 })).toBeCloseTo(1.1, 10);
+    expect(bossDamagePerMinute({ sonicPower: 50 })).toBeCloseTo(1.5, 10);
   });
 });

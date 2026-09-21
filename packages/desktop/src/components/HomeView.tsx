@@ -1,4 +1,6 @@
 import {
+  bossDamagePerMinute,
+  getHerzieStats,
   getItem,
   hasRoomFor,
   levelProgress,
@@ -15,6 +17,7 @@ import {
 import { Herzie3D } from "./Herzie3D";
 import { CARD_SHAPE_CLIP, ItemTypeIcon } from "./icons/ItemTypeIcon";
 import { ModifiersButton } from "./ModifiersButton";
+import { StatsButton } from "./StatsButton";
 import { Tooltip } from "./Tooltip";
 import { TrackCard } from "./TrackCard";
 
@@ -71,6 +74,7 @@ export function HomeView({
   const [globalRank, setGlobalRank] = useState<number | undefined>(undefined);
   const [globalTotal, setGlobalTotal] = useState<number | undefined>(undefined);
   const [collectingIds, setCollectingIds] = useState<Set<string>>(new Set());
+  const stats = getHerzieStats(equipped);
   const pinned = useWindowPinned();
   const ghostMode = useGhostMode();
   const friendCode = herzie?.friendCode;
@@ -227,6 +231,7 @@ export function HomeView({
               connect to internet to grow
             </span>
           )}
+          <StatsButton stats={stats} />
           <ModifiersButton multipliers={multipliers} />
           <Tooltip label={pinned ? "Unpin window" : "Pin window"}>
             <button
@@ -479,6 +484,7 @@ export function HomeView({
           artistImageUrl={nowPlaying.artistImageUrl}
           tags={nowPlaying.tags}
           hatedGenres={bossHatedGenres}
+          damagePerMinute={bossDamagePerMinute(stats)}
           className="border-t border-border pt-1.5 pb-2"
         />
       ) : (
