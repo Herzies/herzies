@@ -1,7 +1,32 @@
-import { classifyGenre, lastFmTrackUrl } from "@herzies/shared";
+import {
+  BOSS_DAMAGE_PER_MINUTE,
+  classifyGenre,
+  lastFmTrackUrl,
+} from "@herzies/shared";
 import { cn } from "../lib/utils";
 import { herzies } from "../tauri-bridge";
 import { MarqueeText } from "./MarqueeText";
+import { Tooltip } from "./Tooltip";
+
+/** A now-playing tag. Red, with a tooltip, when it is dealing damage to a boss. */
+function GenrePill({ tag, hurts }: { tag: string; hurts: boolean }) {
+  const pill = (
+    <span
+      className={cn(
+        "cursor-default rounded-full px-1.5 py-px text-ui-sm lowercase",
+        hurts ? "bg-red/20 text-red" : "bg-purple/15 text-purple",
+      )}
+    >
+      {tag.toLowerCase()}
+    </span>
+  );
+  if (!hurts) return pill;
+  return (
+    <Tooltip label={`Dealing ${BOSS_DAMAGE_PER_MINUTE} damage per minute`}>
+      {pill}
+    </Tooltip>
+  );
+}
 
 /**
  * A track with its album art, title and artist — the home screen's now-playing
@@ -94,17 +119,7 @@ export function TrackCard({
                 const hurts =
                   hated.length > 0 &&
                   classifyGenre([tag]).some((g) => hated.includes(g));
-                return (
-                  <span
-                    key={tag}
-                    className={cn(
-                      "rounded-full px-1.5 py-px text-ui-sm lowercase",
-                      hurts ? "bg-red/20 text-red" : "bg-purple/15 text-purple",
-                    )}
-                  >
-                    {tag.toLowerCase()}
-                  </span>
-                );
+                return <GenrePill key={tag} tag={tag} hurts={hurts} />;
               })}
             </div>
           ) : null}

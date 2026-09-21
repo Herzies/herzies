@@ -247,6 +247,14 @@ export interface BossFightConfig {
   maxHp: number;
 }
 
+/**
+ * Damage a listen deals to a boss, per billed minute, whichever hated genre it
+ * matches. `processSync` multiplies billed minutes by this and the desktop
+ * shows it on the red genre pills, so the tooltip cannot disagree with the
+ * fight.
+ */
+export const BOSS_DAMAGE_PER_MINUTE = 1;
+
 export interface BossDamageDealer {
   name: string;
   damage: number;
