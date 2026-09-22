@@ -37,7 +37,9 @@ export function SettingsView({
   debugBossOverride: boolean;
   onToggleDebugBoss: () => void;
   onToggleActiveEventOverride: () => void;
-  onSpawnDebugDrop: () => void;
+  /** `diceOnly` narrows the spawned drop to a dice-type item — see the
+   * "Spawn Dice Drop" button below. */
+  onSpawnDebugDrop: (diceOnly?: boolean) => void;
 }) {
   const [loggingIn, setLoggingIn] = useState(false);
   const [mediaRemoteDebug, setMediaRemoteDebug] = useState<string | null>(null);
@@ -150,8 +152,19 @@ export function SettingsView({
             >
               {debugBossOverride ? "Boss Fight: On" : "Test Boss Fight"}
             </button>
-            <button type="button" className="btn" onClick={onSpawnDebugDrop}>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => onSpawnDebugDrop()}
+            >
               Spawn Item Drop
+            </button>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => onSpawnDebugDrop(true)}
+            >
+              Spawn Dice Drop
             </button>
           </div>
           {mediaRemoteDebug !== null && (

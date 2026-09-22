@@ -509,8 +509,8 @@ function App() {
     setPendingLeaveView(null);
   };
 
-  const handleSpawnDebugDrop = () => {
-    herzies.spawnDebugDrop().catch(() => {});
+  const handleSpawnDebugDrop = (diceOnly = false) => {
+    herzies.spawnDebugDrop(diceOnly).catch(() => {});
   };
 
   const handleOpenSelfProfile = async () => {

@@ -1,7 +1,8 @@
 /**
  * `debug-spawn-drop` Edge Function — spawns a real, pickup-able world drop
- * for the caller on demand, powering the dev-only "Spawn Item Drop" button
- * in Settings (`SettingsView.tsx`, `import.meta.env.DEV`-gated).
+ * for the caller on demand, powering the dev-only "Spawn Item Drop"/"Spawn
+ * Dice Drop" buttons in Settings (`SettingsView.tsx`,
+ * `import.meta.env.DEV`-gated).
  *
  * That client-side gate is cosmetic only — this endpoint is reachable by any
  * authenticated request, same as every other edge function — so it is
@@ -15,11 +16,17 @@
  * (rather than going through the `roll_pending_drop` RPC) so the inserted
  * row — including its id — can be returned to the caller for immediate
  * display, instead of waiting for the next sync tick to pick it up.
+ *
+ * An optional `{ diceOnly: true }` body narrows the pool to dice-type items
+ * first — without it, a dice item (rare, ~0.5% of the live pool) is
+ * realistic-odds but impractical to hit on demand for testing the
+ * upgrade flow.
  */
 import { createClient } from "@supabase/supabase-js";
 import { corsHeaders, jsonResponse } from "../_shared/cors.ts";
 import {
   filterDroppablePool,
+  getItem,
   NON_DROPPABLE_ITEM_IDS,
   pickWeightedDrop,
 } from "../_shared/shared/game-rules.ts";
@@ -66,6 +73,17 @@ Deno.serve(async (request) => {
     return jsonResponse({ error: "Not available for this account" }, 403);
   }
 
+  // Optional body — `{}` (or no body at all) is the common case, from the
+  // plain "Spawn Item Drop" button, so a missing/empty/invalid body is not
+  // an error, just "no filter requested".
+  let diceOnly = false;
+  try {
+    const body = await request.json();
+    diceOnly = body?.diceOnly === true;
+  } catch {
+    // No body, or not JSON — fine, diceOnly stays false.
+  }
+
   try {
     const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
       auth: { autoRefreshToken: false, persistSession: false },
@@ -79,9 +97,20 @@ Deno.serve(async (request) => {
         "in",
         `(${NON_DROPPABLE_ITEM_IDS.map((id) => `"${id}"`).join(",")})`,
       );
-    const picked = pool ? pickWeightedDrop(filterDroppablePool(pool)) : undefined;
+    let droppable = pool ? filterDroppablePool(pool) : [];
+    if (diceOnly) {
+      droppable = droppable.filter((item) => getItem(item.id)?.dice);
+    }
+    const picked = pickWeightedDrop(droppable);
     if (!picked) {
-      return jsonResponse({ error: "No droppable items in the pool" }, 500);
+      return jsonResponse(
+        {
+          error: diceOnly
+            ? "No droppable dice items in the pool"
+            : "No droppable items in the pool",
+        },
+        500,
+      );
     }
 
     const { data: row, error } = await admin

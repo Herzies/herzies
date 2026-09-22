@@ -407,15 +407,19 @@ pub async fn api_collect_drop(
     }))
 }
 
-/// Dev-only: spawns a real, pickup-able world drop for the "Spawn Item Drop"
-/// debug button in Settings (see supabase/functions/debug-spawn-drop — that
-/// endpoint is further restricted server-side to the developer's own
-/// account, since a client-side dev gate alone wouldn't stop any other
-/// player from calling it directly).
-pub async fn api_spawn_debug_drop(client: &Client) -> Result<PendingDrop, String> {
+/// Dev-only: spawns a real, pickup-able world drop for the "Spawn Item
+/// Drop"/"Spawn Dice Drop" debug buttons in Settings (see
+/// supabase/functions/debug-spawn-drop — that endpoint is further restricted
+/// server-side to the developer's own account, since a client-side dev gate
+/// alone wouldn't stop any other player from calling it directly).
+/// `dice_only` narrows the pool to dice-type items — without it, a dice item
+/// is realistic-odds (rare, ~0.5% of the live pool) but impractical to hit
+/// on demand for testing the upgrade flow.
+pub async fn api_spawn_debug_drop(client: &Client, dice_only: bool) -> Result<PendingDrop, String> {
     let url = format!("{}/debug-spawn-drop", functions_base());
     let anon = supabase_anon_key();
-    let resp = api_fetch_full(client, reqwest::Method::POST, &url, None, Some(&anon))
+    let body = serde_json::json!({ "diceOnly": dice_only });
+    let resp = api_fetch_full(client, reqwest::Method::POST, &url, Some(body), Some(&anon))
         .await
         .ok_or_else(|| "Network error".to_string())?;
     let status = resp.status();

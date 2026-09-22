@@ -676,16 +676,18 @@ fn revert_optimistic_collect(state: &tauri::State<'_, SharedState>, drop: Pendin
     s.bump_inventory_epoch();
 }
 
-/// Dev-only: powers the "Spawn Item Drop" debug button in Settings. Adds the
-/// server-spawned drop straight into local state so it appears on the ground
-/// immediately, instead of waiting for the next sync tick to pick it up.
+/// Dev-only: powers the "Spawn Item Drop"/"Spawn Dice Drop" debug buttons in
+/// Settings. Adds the server-spawned drop straight into local state so it
+/// appears on the ground immediately, instead of waiting for the next sync
+/// tick to pick it up.
 #[tauri::command]
 async fn spawn_debug_drop(
+    dice_only: bool,
     app: AppHandle,
     state: tauri::State<'_, SharedState>,
 ) -> Result<(), String> {
     let client = Client::new();
-    let drop = api::api_spawn_debug_drop(&client).await?;
+    let drop = api::api_spawn_debug_drop(&client, dice_only).await?;
     {
         let mut s = state.lock().unwrap();
         s.pending_drops.push(drop);

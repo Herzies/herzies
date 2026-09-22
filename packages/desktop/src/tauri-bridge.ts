@@ -178,8 +178,11 @@ export const herzies = {
    * `true` if it was collected, `false` if it no longer existed (e.g.
    * already collected by a racing Spirit Orb auto-collect). */
   collectDrop: (dropId: string) => invoke<boolean>("collect_drop", { dropId }),
-  /** Dev-only: spawns a real, pickup-able world drop (Settings → Debug). */
-  spawnDebugDrop: () => invoke<void>("spawn_debug_drop"),
+  /** Dev-only: spawns a real, pickup-able world drop (Settings → Debug).
+   * `diceOnly` narrows the pool to dice-type items — without it, a dice
+   * item is realistic-odds (rare) but impractical to hit on demand. */
+  spawnDebugDrop: (diceOnly = false) =>
+    invoke<void>("spawn_debug_drop", { diceOnly }),
 
   fetchStoreProducts: () => invoke<StoreProduct[]>("fetch_store_products"),
   /** Catalog items sold for money. Empty when Stripe has none configured. */
