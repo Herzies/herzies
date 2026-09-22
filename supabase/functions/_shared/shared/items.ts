@@ -3,8 +3,15 @@
 // Run `pnpm vendor:shared` after changing the original.
 
 /**
- * Item definitions with 3D ASCII art renderer.
+ * Item definitions with 3D ASCII art renderers.
  * Ported from CLI — uses HTML color spans instead of chalk.
+ *
+ * Two independent rendering rigs live here: the flat rotating card/icon rig
+ * (CORNERS/UVS/renderIconCard, used by every card-type item) and Power
+ * Dice's own rendered-cube rig (DICE_CORNERS/DICE_FACES/renderPowerDiceFrame,
+ * see the block comment above it) — a die needed to read as an actual solid,
+ * not a card with a die-face icon painted on it. Both share `project`/
+ * `triUV`, nothing else.
  */
 
 // Imported from the leaf module rather than the package barrel: the barrel
@@ -1182,10 +1189,18 @@ function renderCdFrame(yAngle: number): string[] {
 // faces need real back-face culling that a single flat quad never does —
 // see DICE_FACES below.
 
-/** Cube half-extent — calibrated against CARD_HW/CARD_HH so Power Dice
- * reads at roughly the same on-screen size as a card, despite being a much
- * more compact (square, not tall) silhouette. */
-const DICE_H = 0.85;
+/** Cube half-extent. Unlike the card's CARD_HW/CARD_HH — flat corners at
+ * z=0, so `project`'s perspective term never inflates their screen extent
+ * beyond a fixed bound — a cube's corners move in depth as it rotates, and
+ * the nearest corner at a 3-face angle projects noticeably larger than the
+ * same corner would flat. Copying the card's half-width here clipped off
+ * the canvas edge on more than a third of the 36 frames. This value is
+ * calibrated, not guessed: project all 8 corners at every rotation frame,
+ * take the worst-case (nearest-corner) screen extent, and pick H so that
+ * stays inside the SW×SH canvas with a margin — width is the binding
+ * constraint here, not height. Re-run that check before changing this
+ * number, DICE_PITCH, or SW/SH/CAM. */
+const DICE_H = 0.58;
 
 /** Tilts the cube back before it spins around Y, the same way TILT gives
  * the flat card a cosmetic diagonal — here it's load-bearing: without it,
