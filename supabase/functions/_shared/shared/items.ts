@@ -20,6 +20,7 @@ import {
   OCEAN_RAMP,
   RAINBOW_RAMP,
   RAMP_ITEM,
+  rotX,
   rotY,
   rotZ,
   TEAL_RAMP,
@@ -1168,33 +1169,200 @@ function renderCdFrame(yAngle: number): string[] {
   return renderIconCard(yAngle, "#C0C0C0", "#7a7a7a", "#4a4a4a", cdCardIcon);
 }
 
-// --- Power Dice card ---
-// A single die face (the "five" pip pattern), painted with the same
-// icon-card rig every other item uses — see the block comment above
-// iconUV. There's no 3D-cube renderer anywhere in this file; every item is
-// a flat rotating card with a painted icon, so a die is "a card whose icon
-// is a die face" rather than an actual rendered cube.
-function powerDiceIcon(u: number, v: number): TexSample | null {
-  const [ix, iy] = iconUV(u, v);
-  const pipR = 0.095;
-  const pips: V2[] = [
-    [-0.23, -0.23],
-    [0.23, -0.23],
+// --- Power Dice: an actual rendered cube, not a card ---
+//
+// Every other item — including every "3D-looking" one — is a flat quad
+// (CORNERS/UVS above) with a painted icon: a rotating rectangle, never an
+// actual solid. Dice needed to read as dice rather than "a card with dots
+// on it," so this is a second, independent rig: a real cube with 6 faces,
+// each carrying its own die value (opposite faces sum to 7, same as a
+// physical die), lit per-face so the faces read as distinct planes as it
+// spins. It reuses `project`/`triUV` (the same projection and barycentric
+// UV lookup the card rig uses) but has its own geometry, since a cube's
+// faces need real back-face culling that a single flat quad never does —
+// see DICE_FACES below.
+
+/** Cube half-extent — calibrated against CARD_HW/CARD_HH so Power Dice
+ * reads at roughly the same on-screen size as a card, despite being a much
+ * more compact (square, not tall) silhouette. */
+const DICE_H = 0.85;
+
+/** Tilts the cube back before it spins around Y, the same way TILT gives
+ * the flat card a cosmetic diagonal — here it's load-bearing: without it,
+ * yAngle=0 looks straight at one face with the other five in silhouette,
+ * and it never reads as a cube. This brings the top face into view. */
+const DICE_PITCH = -22 * (Math.PI / 180);
+
+const DICE_CORNERS = {
+  lbb: [-DICE_H, -DICE_H, -DICE_H] as V3,
+  rbb: [DICE_H, -DICE_H, -DICE_H] as V3,
+  rtb: [DICE_H, DICE_H, -DICE_H] as V3,
+  ltb: [-DICE_H, DICE_H, -DICE_H] as V3,
+  lbf: [-DICE_H, -DICE_H, DICE_H] as V3,
+  rbf: [DICE_H, -DICE_H, DICE_H] as V3,
+  rtf: [DICE_H, DICE_H, DICE_H] as V3,
+  ltf: [-DICE_H, DICE_H, DICE_H] as V3,
+};
+
+/** The cube's 6 faces, each 4 corners wound CCW as seen from outside (so
+ * the cross product of its first two edges gives an outward-facing normal —
+ * see the culling check in renderDiceFrame) plus the pip count on that
+ * face. Opposite faces (front/back, left/right, top/bottom) sum to 7, same
+ * as a physical die — which face ends up toward the camera at any given
+ * frame is just whichever the rotation puts there. */
+const DICE_FACES: { corners: [V3, V3, V3, V3]; value: number }[] = [
+  { corners: [DICE_CORNERS.lbf, DICE_CORNERS.rbf, DICE_CORNERS.rtf, DICE_CORNERS.ltf], value: 2 },
+  { corners: [DICE_CORNERS.rbb, DICE_CORNERS.lbb, DICE_CORNERS.ltb, DICE_CORNERS.rtb], value: 5 },
+  { corners: [DICE_CORNERS.rbb, DICE_CORNERS.rbf, DICE_CORNERS.rtf, DICE_CORNERS.rtb], value: 3 },
+  { corners: [DICE_CORNERS.lbf, DICE_CORNERS.lbb, DICE_CORNERS.ltb, DICE_CORNERS.ltf], value: 4 },
+  { corners: [DICE_CORNERS.ltf, DICE_CORNERS.rtf, DICE_CORNERS.rtb, DICE_CORNERS.ltb], value: 1 },
+  { corners: [DICE_CORNERS.lbb, DICE_CORNERS.rbb, DICE_CORNERS.rbf, DICE_CORNERS.lbf], value: 6 },
+];
+
+/** Standard die-face pip layouts, in [-0.5, 0.5] face-local coordinates. */
+const DICE_PIP_LAYOUTS: Record<number, V2[]> = {
+  1: [[0, 0]],
+  2: [
+    [-0.5, -0.5],
+    [0.5, 0.5],
+  ],
+  3: [
+    [-0.5, -0.5],
     [0, 0],
-    [-0.23, 0.23],
-    [0.23, 0.23],
-  ];
-  for (const [px, py] of pips) {
+    [0.5, 0.5],
+  ],
+  4: [
+    [-0.5, -0.5],
+    [0.5, -0.5],
+    [-0.5, 0.5],
+    [0.5, 0.5],
+  ],
+  5: [
+    [-0.5, -0.5],
+    [0.5, -0.5],
+    [0, 0],
+    [-0.5, 0.5],
+    [0.5, 0.5],
+  ],
+  6: [
+    [-0.5, -0.55],
+    [-0.5, 0],
+    [-0.5, 0.55],
+    [0.5, -0.55],
+    [0.5, 0],
+    [0.5, 0.55],
+  ],
+};
+
+const DICE_PIP_RADIUS = 0.16;
+
+/** A face's pips: dark divots sunk into the die's face colour. `null` (the
+ * face colour) elsewhere, same "return null to fall through" convention as
+ * cardChrome/icon. */
+function dicePipIcon(u: number, v: number, value: number): TexSample | null {
+  const ix = u - 0.5,
+    iy = v - 0.5;
+  for (const [px, py] of DICE_PIP_LAYOUTS[value]) {
     const d = Math.hypot(ix - px, iy - py);
-    if (d < pipR) {
-      return { bright: d < pipR * 0.5 ? 0.95 : 0.8, color: "#f5f0e6" };
+    if (d < DICE_PIP_RADIUS) {
+      return {
+        bright: d < DICE_PIP_RADIUS * 0.5 ? 0.95 : 0.8,
+        color: "#2a1a10",
+      };
     }
   }
   return null;
 }
 
 function renderPowerDiceFrame(yAngle: number): string[] {
-  return renderIconCard(yAngle, "#e8c34a", "#b23a3a", "#5c1f1f", powerDiceIcon);
+  const bright: number[][] = Array.from({ length: SH }, () => Array(SW).fill(-1));
+  const pixelColor: (string | undefined)[][] = Array.from({ length: SH }, () =>
+    Array(SW).fill(undefined),
+  );
+
+  for (const face of DICE_FACES) {
+    const xf = face.corners.map((p) => rotY(rotX(p, DICE_PITCH), yAngle));
+    const e1: V3 = [
+      xf[1][0] - xf[0][0],
+      xf[1][1] - xf[0][1],
+      xf[1][2] - xf[0][2],
+    ];
+    const e2: V3 = [
+      xf[3][0] - xf[0][0],
+      xf[3][1] - xf[0][1],
+      xf[3][2] - xf[0][2],
+    ];
+    const faceN = normV(cross(e1, e2));
+    // A convex solid's front-facing faces never overlap on screen once
+    // back-facing ones are culled, so — unlike a scene with several
+    // separate objects — no depth buffer is needed: every pixel a visible
+    // face claims is one no other visible face will also claim.
+    if (faceN[2] >= 0) continue;
+    const diffuse = Math.abs(dot3(faceN, LIGHT));
+    const pr = xf.map((v) => project(v));
+
+    for (let sy = 0; sy < SH; sy++) {
+      for (let sx = 0; sx < SW; sx++) {
+        const px = sx + 0.5,
+          py = sy + 0.5;
+        const uv =
+          triUV(
+            px,
+            py,
+            pr[0][0],
+            pr[0][1],
+            UVS[0][0],
+            UVS[0][1],
+            pr[1][0],
+            pr[1][1],
+            UVS[1][0],
+            UVS[1][1],
+            pr[2][0],
+            pr[2][1],
+            UVS[2][0],
+            UVS[2][1],
+          ) ??
+          triUV(
+            px,
+            py,
+            pr[0][0],
+            pr[0][1],
+            UVS[0][0],
+            UVS[0][1],
+            pr[2][0],
+            pr[2][1],
+            UVS[2][0],
+            UVS[2][1],
+            pr[3][0],
+            pr[3][1],
+            UVS[3][0],
+            UVS[3][1],
+          );
+        if (!uv) continue;
+        const [u, v] = uv;
+        const sample = dicePipIcon(u, v, face.value) ?? {
+          bright: 0.6,
+          color: "#e8c34a",
+        };
+        bright[sy][sx] = sample.bright * (0.25 + 0.75 * diffuse);
+        pixelColor[sy][sx] = sample.color;
+      }
+    }
+  }
+
+  return bright.map((row, y) =>
+    row
+      .map((val, x) => {
+        if (val < 0) return " ";
+        const idx = Math.min(
+          Math.floor(val * (RAMP_ITEM.length - 1)),
+          RAMP_ITEM.length - 1,
+        );
+        const ch = RAMP_ITEM[idx];
+        return ch === " " ? " " : col(pixelColor[y][x] ?? "#e8c34a", ch);
+      })
+      .join(""),
+  );
 }
 
 // --- Spirit Orb card ---
