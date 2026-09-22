@@ -23,6 +23,7 @@ import {
   normalizeEquipped,
   pickWeightedDrop,
   RARITY_DROP_WEIGHTS,
+  RARITY_LUCK_WEIGHT_BONUS,
   type Rarity,
 } from "./items.js";
 
@@ -235,11 +236,11 @@ describe("pickWeightedDrop", () => {
   });
 
   it("picks the first (heaviest) candidate when rng returns 0", () => {
-    expect(pickWeightedDrop(candidates, () => 0)?.id).toBe("a");
+    expect(pickWeightedDrop(candidates, 0, () => 0)?.id).toBe("a");
   });
 
   it("picks the last candidate when rng returns just under 1", () => {
-    expect(pickWeightedDrop(candidates, () => 0.999999)?.id).toBe("d");
+    expect(pickWeightedDrop(candidates, 0, () => 0.999999)?.id).toBe("d");
   });
 
   it("skews toward common over legendary across many rolls", () => {
@@ -294,6 +295,22 @@ describe("pickWeightedDrop", () => {
       expect(cdCount).toBeGreaterThan(count);
     }
   });
+
+  it("luck shifts the pick toward the rarer candidate at a fixed rng boundary", () => {
+    const pool: { id: string; rarity: Rarity }[] = [
+      { id: "common-thing", rarity: "common" },
+      { id: "rare-thing", rarity: "rare" },
+    ];
+    // weight totals: luck 0 -> 1000 + 25 = 1025, boundary at 1000/1025 ≈ 0.97561
+    // luck 10 -> 1000 + 25*1.15 = 1028.75, boundary at 1000/1028.75 ≈ 0.97205
+    // 0.974 sits between the two boundaries: common at luck 0, rare at luck 10.
+    expect(pickWeightedDrop(pool, 0, () => 0.974)?.id).toBe("common-thing");
+    expect(pickWeightedDrop(pool, 10, () => 0.974)?.id).toBe("rare-thing");
+  });
+
+  it("never lets luck touch cd's odds (common rarity has a zero luck bonus)", () => {
+    expect(RARITY_LUCK_WEIGHT_BONUS.common).toBe(0);
+  });
 });
 
 describe("bank capacity", () => {
@@ -330,6 +347,20 @@ describe("bank capacity", () => {
   it("treats a null/empty inventory as empty", () => {
     expect(bankSlotsUsed(null, {})).toBe(0);
     expect(isBankFull(null, {})).toBe(false);
+  });
+
+  it("still charges a bank slot for a stackable item with copies left after one is equipped", () => {
+    // Owning 3, equipping 1 (modifier slot) — 2 remain in the bank, so the
+    // slot is still needed.
+    expect(
+      bankSlotsUsed({ "first-edition": 3 }, { modifier: ["first-edition"] }),
+    ).toBe(1);
+  });
+
+  it("frees the slot once the only remaining copy of a stackable item is equipped", () => {
+    expect(
+      bankSlotsUsed({ "first-edition": 1 }, { modifier: ["first-edition"] }),
+    ).toBe(0);
   });
 });
 
@@ -588,8 +619,8 @@ describe("herzie stats", () => {
   });
 
   it("is zero for a herzie with nothing equipped", () => {
-    expect(getHerzieStats({})).toEqual({ sonicPower: 0 });
-    expect(getHerzieStats(null)).toEqual({ sonicPower: 0 });
+    expect(getHerzieStats({})).toEqual({ sonicPower: 0, luck: 0 });
+    expect(getHerzieStats(null)).toEqual({ sonicPower: 0, luck: 0 });
   });
 
   it("adds up the stats of equipped items", () => {
@@ -610,15 +641,35 @@ describe("herzie stats", () => {
   it("ignores items that are owned but not equipped, and unknown ids", () => {
     expect(getHerzieStats({ head: "no-such-item" }).sonicPower).toBe(0);
   });
+
+  it("gives First Edition Card +10 luck and makes it a stackable modifier", () => {
+    const item = getItem("first-edition");
+    expect(item?.stats).toEqual({ luck: 10 });
+    expect(item?.stackable).toBe(true);
+    expect(item?.equipable).toBe(true);
+    expect(item?.equipSlot).toBe("modifier");
+    expect(getItemType(item!)).toBe("modifier");
+  });
+
+  it("adds First Edition Card's luck through getHerzieStats", () => {
+    expect(getHerzieStats({ modifier: ["first-edition"] }).luck).toBe(10);
+    expect(getHerzieStats({}).luck).toBe(0);
+  });
 });
 
 describe("bossDamagePerMinute", () => {
   it("is the base rate with no sonic power", () => {
-    expect(bossDamagePerMinute({ sonicPower: 0 })).toBe(1);
+    expect(bossDamagePerMinute({ sonicPower: 0, luck: 0 })).toBe(1);
   });
 
   it("treats sonic power as a percentage on top of the base rate", () => {
-    expect(bossDamagePerMinute({ sonicPower: 10 })).toBeCloseTo(1.1, 10);
-    expect(bossDamagePerMinute({ sonicPower: 50 })).toBeCloseTo(1.5, 10);
+    expect(bossDamagePerMinute({ sonicPower: 10, luck: 0 })).toBeCloseTo(
+      1.1,
+      10,
+    );
+    expect(bossDamagePerMinute({ sonicPower: 50, luck: 0 })).toBeCloseTo(
+      1.5,
+      10,
+    );
   });
 });

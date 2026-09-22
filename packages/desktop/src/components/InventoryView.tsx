@@ -846,18 +846,18 @@ export function InventoryView({
     : [];
   // Equipped items live only in the Deck tab, not the Cards bank. Equip
   // state is per item id, not per physical copy — there's no way to say
-  // "this specific one is worn" — so a non-stackable item reserves exactly
-  // one unit as equipped and still shows any remaining copies (owning 2,
-  // equipping 1, leaves 1 in the bank); a stackable item, if it were ever
-  // equipable too, hides its whole stack instead (nothing today is both,
-  // so this is just a safety fallback). Non-stackable items repeat their id
-  // once per bank unit (a multiset, not a set of unique keys — see
-  // reconcileSlotOrder) instead of contributing one entry for the whole
-  // stack, so N copies occupy N separate grid slots.
+  // "this specific one is worn" — so both stackable and non-stackable items
+  // reserve exactly one unit as equipped and still show any remaining
+  // copies (owning 3, equipping 1, leaves 2 in the bank — as one stack
+  // entry for a stackable item, or two separate cells for a non-stackable
+  // one). Non-stackable items repeat their id once per bank unit (a
+  // multiset, not a set of unique keys — see reconcileSlotOrder) instead of
+  // contributing one entry for the whole stack, so N copies occupy N
+  // separate grid slots.
   const ownedBankUnits = items.flatMap(([itemId, qty]) => {
     const def = getItem(itemId);
-    if (def?.stackable) return isItemEquipped(itemId) ? [] : [itemId];
     const bankQty = isItemEquipped(itemId) ? qty - 1 : qty;
+    if (def?.stackable) return bankQty > 0 ? [itemId] : [];
     return Array.from({ length: Math.max(0, bankQty) }, () => itemId);
   });
   /** Every copy beyond the first, of everything sellable in the bank — what
@@ -1122,7 +1122,13 @@ export function InventoryView({
             {slotOrder.map((itemId, i) => {
               const isLastCol = i % GRID_COLS === GRID_COLS - 1;
               const isLastRow = i >= TOTAL_SLOTS - GRID_COLS;
-              const qty = itemId ? (inventory?.[itemId] ?? 0) : 0;
+              const rawQty = itemId ? (inventory?.[itemId] ?? 0) : 0;
+              // A stackable item's bank quantity excludes the one unit
+              // reserved as "worn" — see ownedBankUnits above.
+              const qty =
+                itemId && getItem(itemId)?.stackable && isItemEquipped(itemId)
+                  ? Math.max(0, rawQty - 1)
+                  : rawQty;
               if (!itemId || qty <= 0) {
                 return (
                   <EmptyGridCell

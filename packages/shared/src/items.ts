@@ -165,7 +165,10 @@ export function bankSlotsUsed(
       findEquippedSlot(equipped, itemId) !== null ||
       isModifierEquipped(equipped, itemId);
     if (item?.stackable) {
-      if (!isEquipped) count += 1;
+      // A stackable item frees its slot only once every owned copy is
+      // equipped — applyEquip never lets the same id occupy two modifier
+      // slots, so "equipped" here means at most one unit is worn.
+      if (!isEquipped || qty > 1) count += 1;
       continue;
     }
     count += Math.max(0, isEquipped ? qty - 1 : qty);
@@ -383,9 +386,9 @@ export function applySell(
   };
 }
 
-/** The stats a herzie has. Only one so far; add a key here (and a label in
- * STAT_LABELS) and every item, tooltip and total below picks it up. */
-export const STAT_KEYS = ["sonicPower"] as const;
+/** The stats a herzie has. Add a key here (and a label in STAT_LABELS) and
+ * every item, tooltip and total below picks it up. */
+export const STAT_KEYS = ["sonicPower", "luck"] as const;
 export type StatKey = (typeof STAT_KEYS)[number];
 
 /** What an item adds to its wearer. Most items add nothing, so every key is
@@ -399,6 +402,7 @@ export type HerzieStats = Record<StatKey, number>;
 
 export const STAT_LABELS: Record<StatKey, string> = {
   sonicPower: "Sonic power",
+  luck: "Luck",
 };
 
 export interface ItemDef {
@@ -408,8 +412,8 @@ export interface ItemDef {
   rarity: Rarity;
   frames: string[][]; // Each frame is an array of lines (with HTML color spans)
   /** Whether owning more than one is allowed (gates re-buying from the
-   * store). For now, artefacts — items with no equipSlot/equipable, see
-   * getItemType — are the only stackable item type. */
+   * store). Independent of equipable/equipSlot — see getItemType — so an
+   * item (e.g. First Edition Card) can be both stackable and equipable. */
   stackable?: boolean;
   equipable?: boolean;
   /** Catalog category; ground items occupy ground_left or ground_right when equipped,
@@ -639,16 +643,41 @@ export const ITEM_DROP_WEIGHT_OVERRIDES: Partial<Record<string, number>> = {
   cd: 4000,
 };
 
-/** Weighted-random pick from a rarity-tagged candidate pool. `rng` returns a
- * float in [0, 1) — inject Math.random in production, a seeded fn in tests. */
+/** How much luck nudges a rarity's drop weight, as a fraction of that
+ * rarity's own weight per point of luck — e.g. rare: 0.015 means +10 luck
+ * multiplies every rare candidate's weight by 1 + 10*0.015 = 1.15 (+15%).
+ * Scales up with rarity so the bias reads as "toward better stuff," not a
+ * flat tax on the whole pool, while staying the "very minor" nudge luck was
+ * scoped as: at the live droppable pool, +10 luck (First Edition Card's
+ * whole contribution) moves a single rare item's odds from 0.500% to 0.568%
+ * of any roll (+13.6% relative), a single uncommon's from 3.000% to 3.113%
+ * (+3.8% relative), and cd's from 80.00% to 79.05% (-1.2% relative). Common
+ * is 0 so cd — the guaranteed-cadence item, see ITEM_DROP_WEIGHT_OVERRIDES —
+ * stays luck-independent. Legendary is filled in for completeness even
+ * though no droppable legendary exists today (spirit-orb is the only one,
+ * and it's in NON_DROPPABLE_ITEM_IDS). */
+export const RARITY_LUCK_WEIGHT_BONUS: Record<Rarity, number> = {
+  common: 0,
+  uncommon: 0.005,
+  rare: 0.015,
+  legendary: 0.03,
+};
+
+/** Weighted-random pick from a rarity-tagged candidate pool. `luck` (default
+ * 0, a herzie's summed luck stat — see getHerzieStats) biases which
+ * candidate wins via RARITY_LUCK_WEIGHT_BONUS. `rng` returns a float in
+ * [0, 1) — inject Math.random in production, a seeded fn in tests. */
 export function pickWeightedDrop<T extends { id: string; rarity: Rarity }>(
   candidates: T[],
+  luck = 0,
   rng: () => number = Math.random,
 ): T | undefined {
   if (candidates.length === 0) return undefined;
-  const weights = candidates.map(
-    (c) => ITEM_DROP_WEIGHT_OVERRIDES[c.id] ?? RARITY_DROP_WEIGHTS[c.rarity],
-  );
+  const weights = candidates.map((c) => {
+    const base =
+      ITEM_DROP_WEIGHT_OVERRIDES[c.id] ?? RARITY_DROP_WEIGHTS[c.rarity];
+    return base * (1 + luck * RARITY_LUCK_WEIGHT_BONUS[c.rarity]);
+  });
   const total = weights.reduce((a, b) => a + b, 0);
   let r = rng() * total;
   for (let i = 0; i < candidates.length; i++) {
@@ -1403,10 +1432,11 @@ export const ITEMS: ItemDef[] = [
     description: "A token of appreciation for early adopters.",
     rarity: "rare",
     frames: firstEditionFrames,
-    // Artefacts (no equipSlot/equipable — see getItemType) are the only
-    // stackable item type for now.
     stackable: true,
+    equipable: true,
+    equipSlot: "modifier",
     sellPrice: 250,
+    stats: { luck: 10 },
   },
   {
     id: "cd",

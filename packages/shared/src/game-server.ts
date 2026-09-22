@@ -293,6 +293,12 @@ export async function processSync(
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
 
+  // Equipped-item stat totals, from the STORED row's equipped items (never
+  // the request body) — computed once and reused below for both boss
+  // damage and the drop-luck weighting, so both read the same equip state
+  // within one sync.
+  const herzieStats = getHerzieStats(normalizeEquipped(row.equipped));
+
   // Log track change to listen_log (CLI source only — Spotify logged in cron)
   if (source === "cli" && nowPlaying) {
     const prev = row.now_playing as { title?: string; artist?: string } | null;
@@ -481,11 +487,7 @@ export async function processSync(
           p_user_id: userId,
           // Sonic power from the STORED row's equipped items, like
           // hasGoodEyeSniperEquipped above — never from the request body.
-          p_damage:
-            billedMinutes *
-            bossDamagePerMinute(
-              getHerzieStats(normalizeEquipped(row.equipped)),
-            ),
+          p_damage: billedMinutes * bossDamagePerMinute(herzieStats),
         },
       );
 
@@ -587,7 +589,7 @@ export async function processSync(
       // rollsConsumed above. (DROP_CHANCE_PER_TICK is 1 today, so this never
       // fires in production.)
       if (!dropTestMode && Math.random() >= DROP_CHANCE_PER_TICK) continue;
-      const picked = pickWeightedDrop(droppable);
+      const picked = pickWeightedDrop(droppable, herzieStats.luck);
       if (picked) pickedIds.push(picked.id);
     }
     if (pickedIds.length > 0) {
