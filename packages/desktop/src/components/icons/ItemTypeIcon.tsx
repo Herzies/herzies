@@ -58,6 +58,12 @@ export const CARD_SHAPE_CLIP =
   "polygon(25% 6.25%, 75% 6.25%, 75% 12.5%, 81.25% 12.5%, 81.25% 87.5%, 75% 87.5%, 75% 93.75%, 25% 93.75%, 25% 87.5%, 18.75% 87.5%, 18.75% 12.5%, 25% 12.5%)";
 
 const GRIDS: Record<ItemType, string[]> = {
+  // Three diagonal pips — a die face, distinct from modifier's single
+  // up-arrow and equipable's shield.
+  dice: cardIcon(
+    ["##......", "........", "..##....", "........", "....##.."],
+    6,
+  ),
   // Paint drop — appearance/palette, no hue needed to read as "color".
   skin: cardIcon(
     ["...##...", "..####..", "..####..", "..####..", "...##..."],

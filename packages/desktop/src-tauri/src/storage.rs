@@ -4,12 +4,19 @@ use sha2::Sha256;
 use std::collections::HashMap;
 
 pub type Inventory = HashMap<String, u32>;
+pub type ItemUpgrades = HashMap<String, u32>;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct InventoryCacheFile {
     inventory: Inventory,
     currency: u32,
+    /// Dice-upgrade levels — folded in here rather than a separate cache
+    /// file since the two are always written together server-side too.
+    /// Defaulted so a cache file written before this field existed still
+    /// loads.
+    #[serde(default)]
+    item_upgrades: ItemUpgrades,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -262,22 +269,23 @@ pub fn clear_equipped() {
     }
 }
 
-pub fn load_inventory_cache() -> Option<(Inventory, u32)> {
+pub fn load_inventory_cache() -> Option<(Inventory, u32, ItemUpgrades)> {
     let path = config_dir().join("inventory_cache.json");
     if !path.exists() {
         return None;
     }
     let raw = fs::read_to_string(&path).ok()?;
     let file: InventoryCacheFile = serde_json::from_str(&raw).ok()?;
-    Some((file.inventory, file.currency))
+    Some((file.inventory, file.currency, file.item_upgrades))
 }
 
-pub fn save_inventory_cache(inventory: &Inventory, currency: u32) {
+pub fn save_inventory_cache(inventory: &Inventory, currency: u32, item_upgrades: &ItemUpgrades) {
     ensure_dir();
     let path = config_dir().join("inventory_cache.json");
     let file = InventoryCacheFile {
         inventory: inventory.clone(),
         currency,
+        item_upgrades: item_upgrades.clone(),
     };
     let data = serde_json::to_string(&file).unwrap();
     write_secure(&path, &data);

@@ -419,13 +419,14 @@ async fn fetch_inventory(
     let client = Client::new();
     let epoch_before = { state.lock().unwrap().equip_epoch };
     match api::api_fetch_inventory(&client).await {
-        Some((inventory, currency, equipped)) => {
+        Some((inventory, currency, equipped, item_upgrades)) => {
             let mut s = state.lock().unwrap();
             apply_inventory(
                 &mut s,
                 inventory.clone(),
                 currency,
                 equipped.clone(),
+                item_upgrades.clone(),
                 Some(epoch_before),
             );
             // Hand back whatever `equipped` actually won, so a caller that
@@ -437,6 +438,7 @@ async fn fetch_inventory(
                 inventory,
                 currency,
                 equipped,
+                item_upgrades,
             }))
         }
         None => Ok(None),
@@ -464,7 +466,14 @@ async fn sell_item(
                 std::collections::HashMap<String, serde_json::Value>,
             >(data["equipped"].clone())
             .unwrap_or_else(|_| s.equipped.clone());
-            apply_inventory(&mut s, inventory, currency, equipped, None);
+            // Selling the last copy of an upgraded item clears its
+            // item_upgrades entry server-side too (see applySell) — apply
+            // whatever the response says, same reasoning as `equipped` above.
+            let item_upgrades = serde_json::from_value::<ItemUpgrades>(
+                data["itemUpgrades"].clone(),
+            )
+            .unwrap_or_else(|_| s.item_upgrades.clone());
+            apply_inventory(&mut s, inventory, currency, equipped, item_upgrades, None);
             // Selling can unequip server-side, so this is a local `equipped`
             // mutation — any `/inventory` fetch in flight must not undo it.
             s.bump_equip_epoch();
@@ -472,7 +481,7 @@ async fn sell_item(
         } else if let Some(new_currency) = data["newCurrency"].as_u64() {
             s.inventory_currency = new_currency as u32;
             if let Some(ref inv) = s.inventory {
-                storage::save_inventory_cache(inv, s.inventory_currency);
+                storage::save_inventory_cache(inv, s.inventory_currency, &s.item_upgrades);
             }
             changed = true;
         }
@@ -489,6 +498,34 @@ async fn sell_item(
         }
     }
     Ok(result)
+}
+
+/// Consumes one dice item to bump a statted card's upgrade level by one
+/// (see MAX_ITEM_UPGRADE_LEVEL in @herzies/shared). Mirrors sell_item's
+/// shape: the response carries the authoritative inventory/item_upgrades,
+/// applied the same way a sell's does.
+#[tauri::command]
+async fn apply_dice_upgrade(
+    dice_item_id: String,
+    target_item_id: String,
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    let client = Client::new();
+    let data = api::api_apply_dice_upgrade(&client, &dice_item_id, &target_item_id).await?;
+
+    if let (Ok(inventory), Ok(item_upgrades)) = (
+        serde_json::from_value::<Inventory>(data["inventory"].clone()),
+        serde_json::from_value::<ItemUpgrades>(data["itemUpgrades"].clone()),
+    ) {
+        let mut s = state.lock().unwrap();
+        let equipped = s.equipped.clone();
+        let currency = s.inventory_currency;
+        apply_inventory(&mut s, inventory, currency, equipped, item_upgrades, None);
+        drop(s);
+        emit_state_update(&app);
+    }
+    Ok(data)
 }
 
 #[tauri::command]
@@ -532,7 +569,9 @@ async fn buy_item(
     if let Ok(inventory) = serde_json::from_value::<Inventory>(data["inventory"].clone()) {
         let currency = data["newCurrency"].as_u64().unwrap_or(0) as u32;
         let equipped = s.equipped.clone();
-        apply_inventory(&mut s, inventory, currency, equipped, None);
+        // Buying doesn't touch dice-upgrade levels — carry the current value.
+        let item_upgrades = s.item_upgrades.clone();
+        apply_inventory(&mut s, inventory, currency, equipped, item_upgrades, None);
         changed = true;
     }
     if let Some(ref mut herzie) = s.herzie {
@@ -700,9 +739,18 @@ async fn start_purchase(
         }
         None => {
             let epoch_before = { state.lock().unwrap().equip_epoch };
-            if let Some((inventory, currency, equipped)) = api::api_fetch_inventory(&client).await {
+            if let Some((inventory, currency, equipped, item_upgrades)) =
+                api::api_fetch_inventory(&client).await
+            {
                 let mut s = state.lock().unwrap();
-                apply_inventory(&mut s, inventory, currency, equipped, Some(epoch_before));
+                apply_inventory(
+                    &mut s,
+                    inventory,
+                    currency,
+                    equipped,
+                    item_upgrades,
+                    Some(epoch_before),
+                );
                 drop(s);
                 emit_state_update(&app);
             }
@@ -973,10 +1021,12 @@ struct FriendResult {
 }
 
 #[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 struct InventoryResult {
     inventory: Inventory,
     currency: u32,
     equipped: std::collections::HashMap<String, serde_json::Value>,
+    item_upgrades: ItemUpgrades,
 }
 
 // --- App cache (inventory, friends, chat, equipped) ---
@@ -1010,14 +1060,16 @@ fn apply_inventory(
     inventory: Inventory,
     currency: u32,
     equipped: std::collections::HashMap<String, serde_json::Value>,
+    item_upgrades: ItemUpgrades,
     equip_epoch_before: Option<u64>,
 ) {
     s.inventory = Some(inventory.clone());
     s.inventory_currency = currency;
+    s.item_upgrades = item_upgrades.clone();
     // Any `/sync` already in flight predates this and must not reinstate the
     // old contents — see `inventory_epoch` and sync_tick.
     s.bump_inventory_epoch();
-    storage::save_inventory_cache(&inventory, currency);
+    storage::save_inventory_cache(&inventory, currency, &item_upgrades);
     let equipped_is_current = equip_epoch_before.is_none_or(|before| s.equip_epoch == before);
     if equipped_is_current {
         s.equipped = equipped;
@@ -1089,12 +1141,13 @@ async fn refresh_app_cache(app: &AppHandle, client: &Client) {
     let mut changed = false;
     {
         let mut s = shared.lock().unwrap();
-        if let Some((inventory, currency, equipped)) = inv_result {
+        if let Some((inventory, currency, equipped, item_upgrades)) = inv_result {
             apply_inventory(
                 &mut s,
                 inventory,
                 currency,
                 equipped,
+                item_upgrades,
                 Some(equip_epoch_before),
             );
             changed = true;
@@ -1930,7 +1983,10 @@ async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
         if s.inventory_epoch == inventory_epoch_before {
             if let Some(ref inventory) = sync_resp.inventory {
                 s.inventory = Some(inventory.clone());
-                storage::save_inventory_cache(inventory, s.inventory_currency);
+                if let Some(ref item_upgrades) = sync_resp.item_upgrades {
+                    s.item_upgrades = item_upgrades.clone();
+                }
+                storage::save_inventory_cache(inventory, s.inventory_currency, &s.item_upgrades);
             }
         }
         if !friend_state_stale {
@@ -2089,6 +2145,7 @@ pub fn run() {
             friend_search,
             fetch_inventory,
             sell_item,
+            apply_dice_upgrade,
             buy_item,
             collect_drop,
             spawn_debug_drop,

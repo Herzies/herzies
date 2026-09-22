@@ -25,6 +25,7 @@ export function ItemPreviewCard({
   meta,
   footer,
   equipped,
+  level = 0,
   box = 150,
   className,
 }: {
@@ -37,6 +38,9 @@ export function ItemPreviewCard({
    * a set effect is only active while its members are equipped, so owning
    * them isn't enough. */
   equipped?: Equipped | null;
+  /** Current dice-upgrade level (0-MAX_ITEM_UPGRADE_LEVEL) — renders as a
+   * "+N" next to the name and feeds ItemStatLines' effective totals. */
+  level?: number;
   /** Art canvas footprint (px) — see `ItemPreview`'s `box`. */
   box?: number;
   className?: string;
@@ -66,7 +70,9 @@ export function ItemPreviewCard({
         </div>
         <ItemPreview item={item} box={box} />
       </div>
-      <div className="text-sm font-bold">"{item.name}"</div>
+      <div className="text-sm font-bold">
+        "{item.name}"{level > 0 ? ` +${level}` : ""}
+      </div>
       <div
         className="my-1 text-ui-sm"
         style={{ color: ITEM_RARITY_COLORS[item.rarity] }}
@@ -74,7 +80,7 @@ export function ItemPreviewCard({
         {RARITY_LABELS[item.rarity]}
         {meta ? <> · {meta}</> : null}
       </div>
-      <ItemStatLines item={item} className="mb-1" />
+      <ItemStatLines item={item} level={level} className="mb-1" />
       <div className="text-ui-sm text-text-dim">{item.description}</div>
       {set && (
         <div className="mt-2 border-t border-border pt-2 text-left text-ui-sm">
@@ -107,6 +113,7 @@ export default function ItemInspectOverlay({
   meta,
   footer,
   equipped,
+  level,
 }: {
   itemId: string;
   onClose: () => void;
@@ -118,6 +125,8 @@ export default function ItemInspectOverlay({
    * a set effect is only active while its members are equipped, so owning
    * them isn't enough. */
   equipped?: Equipped | null;
+  /** Current dice-upgrade level — see ItemPreviewCard. */
+  level?: number;
 }) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -140,6 +149,7 @@ export default function ItemInspectOverlay({
           meta={meta}
           footer={footer}
           equipped={equipped}
+          level={level}
         />
       </div>
     </div>

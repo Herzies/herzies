@@ -47,6 +47,7 @@ function DeckGroup({
   group,
   equipped,
   inventory,
+  itemUpgrades,
   onUnequip,
   onPlaceRequest,
   className,
@@ -54,6 +55,7 @@ function DeckGroup({
   group: DeckSlotGroup;
   equipped: Equipped;
   inventory: Inventory | null;
+  itemUpgrades: Record<string, number>;
   onUnequip: (itemId: string) => void;
   onPlaceRequest: (target: EmptySlotTarget) => void;
   className?: string;
@@ -98,6 +100,7 @@ function DeckGroup({
               slotCount={alike}
               inventory={inventory}
               equipped={equipped}
+              itemUpgrades={itemUpgrades}
               onUnequip={onUnequip}
               onPlaceRequest={(x, y) =>
                 onPlaceRequest({
@@ -122,11 +125,14 @@ function DeckGroup({
 export function DeckRow({
   equipped,
   inventory,
+  itemUpgrades,
   onUnequip,
   onPlaceRequest,
 }: {
   equipped: Equipped;
   inventory: Inventory | null;
+  /** Dice-upgrade levels — see ItemPreviewCard's `level` prop. */
+  itemUpgrades: Record<string, number>;
   onUnequip: (itemId: string) => void;
   onPlaceRequest: (target: EmptySlotTarget) => void;
 }) {
@@ -136,6 +142,7 @@ export function DeckRow({
         group={groupByLabel("Equipment")}
         equipped={equipped}
         inventory={inventory}
+        itemUpgrades={itemUpgrades}
         onUnequip={onUnequip}
         onPlaceRequest={onPlaceRequest}
       />
@@ -143,6 +150,7 @@ export function DeckRow({
         group={groupByLabel("Accessories")}
         equipped={equipped}
         inventory={inventory}
+        itemUpgrades={itemUpgrades}
         onUnequip={onUnequip}
         onPlaceRequest={onPlaceRequest}
       />
@@ -150,6 +158,7 @@ export function DeckRow({
         group={groupByLabel("Skin")}
         equipped={equipped}
         inventory={inventory}
+        itemUpgrades={itemUpgrades}
         onUnequip={onUnequip}
         onPlaceRequest={onPlaceRequest}
       />
@@ -157,6 +166,7 @@ export function DeckRow({
         group={groupByLabel("Scenery")}
         equipped={equipped}
         inventory={inventory}
+        itemUpgrades={itemUpgrades}
         onUnequip={onUnequip}
         onPlaceRequest={onPlaceRequest}
       />
@@ -164,6 +174,7 @@ export function DeckRow({
         group={groupByLabel("Modifiers")}
         equipped={equipped}
         inventory={inventory}
+        itemUpgrades={itemUpgrades}
         onUnequip={onUnequip}
         onPlaceRequest={onPlaceRequest}
         className="col-span-2"
@@ -180,6 +191,7 @@ function DeckSlot({
   slotCount,
   inventory,
   equipped,
+  itemUpgrades,
   onUnequip,
   onPlaceRequest,
 }: {
@@ -195,6 +207,8 @@ function DeckSlot({
   slotCount: number;
   inventory: Inventory | null;
   equipped: Equipped;
+  /** Dice-upgrade levels — see ItemPreviewCard's `level` prop. */
+  itemUpgrades: Record<string, number>;
   onUnequip: (itemId: string) => void;
   onPlaceRequest: (x: number, y: number) => void;
 }) {
@@ -268,6 +282,7 @@ function DeckSlot({
           meta={`x${inventory?.[itemId] ?? 0}`}
           box={100}
           equipped={equipped}
+          level={itemUpgrades[itemId] ?? 0}
         />
       }
     >

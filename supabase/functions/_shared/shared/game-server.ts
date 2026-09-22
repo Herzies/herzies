@@ -271,6 +271,7 @@ export async function processSync(
   pendingDrops: PendingDrop[];
   inventory: Record<string, number>;
   equipped: Record<string, unknown>;
+  itemUpgrades: Record<string, number>;
 }> {
   const source = options.source ?? "cli";
   // 1. Fetch everything this sync reads, in one round trip.
@@ -300,8 +301,12 @@ export async function processSync(
   // Equipped-item stat totals, from the STORED row's equipped items (never
   // the request body) — computed once and reused below for both boss
   // damage and the drop-luck weighting, so both read the same equip state
-  // within one sync.
-  const herzieStats = getHerzieStats(normalizeEquipped(row.equipped));
+  // within one sync. item_upgrades comes along the same way, straight off
+  // sync_context's whole-row jsonb — see getHerzieStats' doc comment.
+  const herzieStats = getHerzieStats(
+    normalizeEquipped(row.equipped),
+    (row.item_upgrades ?? {}) as Record<string, number>,
+  );
 
   // Log track change to listen_log (CLI source only — Spotify logged in cron)
   if (source === "cli" && nowPlaying) {
@@ -810,7 +815,7 @@ export async function processSync(
     .from("herzies")
     .update(updateData)
     .eq("user_id", userId)
-    .select("inventory_v2, equipped")
+    .select("inventory_v2, equipped, item_upgrades")
     .single();
 
   // 8. Pending trade request — resolved with the initiator's name in
@@ -863,6 +868,10 @@ export async function processSync(
     equipped: (syncedRow?.equipped ?? row.equipped ?? {}) as Record<
       string,
       unknown
+    >,
+    itemUpgrades: (syncedRow?.item_upgrades ?? row.item_upgrades ?? {}) as Record<
+      string,
+      number
     >,
   };
 }

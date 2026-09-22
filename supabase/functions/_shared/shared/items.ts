@@ -333,6 +333,9 @@ export type SellOutcome =
       equipped: Equipped;
       /** True when selling the last copy forced an unequip. */
       unequipped: boolean;
+      /** item_upgrades with the sold id's entry cleared if this sale hit
+       * zero owned (same reference back otherwise) — see the note below. */
+      itemUpgrades: Record<string, number>;
     }
   | { ok: false; reason: SellRejection };
 
@@ -342,11 +345,13 @@ export type SellOutcome =
  * move on click instead of after the round trip. Sharing one function is what
  * keeps the prediction identical to what the server will store.
  *
- * Pure: never mutates `inventory` or `equipped`.
+ * Pure: never mutates `inventory`, `equipped`, or `itemUpgrades`.
  *
  * Selling the last copy of an equipped item unequips it in the same operation —
  * ownership and equip state must never drift apart, and an item you no longer
- * own can't stay worn.
+ * own can't stay worn. Selling the last copy of an upgraded item clears its
+ * item_upgrades entry the same way, for the same reason — otherwise
+ * reacquiring the id later would grant a free upgrade.
  */
 export function applySell(
   inventory: Record<string, number>,
@@ -355,6 +360,7 @@ export function applySell(
   itemId: string,
   quantity: number,
   sellPrice: number | undefined,
+  itemUpgrades: Record<string, number> = {},
 ): SellOutcome {
   if (!sellPrice) return { ok: false, reason: "not-sellable" };
 
@@ -365,6 +371,7 @@ export function applySell(
   const newQty = owned - quantity;
   let nextEquipped = equipped;
   let unequipped = false;
+  let nextItemUpgrades = itemUpgrades;
 
   if (newQty > 0) {
     nextInventory[itemId] = newQty;
@@ -377,6 +384,10 @@ export function applySell(
       nextEquipped = removal.equipped;
       unequipped = true;
     }
+    if (itemId in itemUpgrades) {
+      nextItemUpgrades = { ...itemUpgrades };
+      delete nextItemUpgrades[itemId];
+    }
   }
 
   const earned = quantity * sellPrice;
@@ -387,6 +398,85 @@ export function applySell(
     newCurrency: currency + earned,
     equipped: nextEquipped,
     unequipped,
+    itemUpgrades: nextItemUpgrades,
+  };
+}
+
+/** How many times a card can be upgraded — Power Dice 1 and any future dice
+ * item share this cap. The level-cap check inside apply_item_upgrade
+ * (00078_dice_and_item_upgrades.sql) can't import this constant — it's
+ * duplicated there as a bare 3, and the two must stay in sync (same
+ * arrangement as GROUND_DROP_CAP/BANK_SLOT_COUNT). */
+export const MAX_ITEM_UPGRADE_LEVEL = 3;
+
+export type ItemUpgradeRejection =
+  | "not-dice"
+  | "dice-not-owned"
+  | "target-not-owned"
+  | "not-statted"
+  | "max-level";
+
+export type ItemUpgradeOutcome =
+  | {
+      ok: true;
+      /** Inventory with one dice consumed (the id is dropped at zero). */
+      inventory: Record<string, number>;
+      /** item_upgrades with the target's level bumped by one. */
+      itemUpgrades: Record<string, number>;
+      newLevel: number;
+    }
+  | { ok: false; reason: ItemUpgradeRejection };
+
+/**
+ * The single source of truth for what applying a dice item to a target card
+ * does. Server-side this computes the row to persist (the apply_item_upgrade
+ * RPC re-validates ownership/level-cap against the DB row under lock);
+ * client-side it predicts the result so the target's "+N" appears on click
+ * instead of after the round trip.
+ *
+ * Pure: never mutates `inventory` or `itemUpgrades`. Ownership/quantity/level
+ * checks mirror what the RPC re-checks server-side; "is this a statted card"
+ * can only be checked here (and in the upgrade API route) since `stats`
+ * lives only in this TS catalog, never in the DB `items` table.
+ */
+export function applyItemUpgrade(
+  inventory: Record<string, number>,
+  itemUpgrades: Record<string, number>,
+  diceItemId: string,
+  targetItemId: string,
+): ItemUpgradeOutcome {
+  const diceDef = getItem(diceItemId);
+  if (!diceDef?.dice) return { ok: false, reason: "not-dice" };
+  if ((inventory[diceItemId] ?? 0) < 1) {
+    return { ok: false, reason: "dice-not-owned" };
+  }
+  if ((inventory[targetItemId] ?? 0) < 1) {
+    return { ok: false, reason: "target-not-owned" };
+  }
+
+  const targetStats = getItem(targetItemId)?.stats;
+  if (!targetStats || Object.keys(targetStats).length === 0) {
+    return { ok: false, reason: "not-statted" };
+  }
+
+  const currentLevel = itemUpgrades[targetItemId] ?? 0;
+  if (currentLevel >= MAX_ITEM_UPGRADE_LEVEL) {
+    return { ok: false, reason: "max-level" };
+  }
+
+  const nextInventory = { ...inventory };
+  const remaining = (nextInventory[diceItemId] ?? 0) - 1;
+  if (remaining > 0) nextInventory[diceItemId] = remaining;
+  else delete nextInventory[diceItemId];
+
+  const newLevel = currentLevel + 1;
+  const nextItemUpgrades = { ...itemUpgrades, [targetItemId]: newLevel };
+
+  return {
+    ok: true,
+    inventory: nextInventory,
+    itemUpgrades: nextItemUpgrades,
+    newLevel,
   };
 }
 
@@ -437,6 +527,11 @@ export interface ItemDef {
     /** Hover detail, e.g. "2% per song hunt won". */
     tooltip: string;
   };
+  /** Set when the item modifies another item rather than being worn itself
+   * (e.g. Power Dice 1, applied to a statted card — see applyItemUpgrade).
+   * Mutually exclusive with equipable/equipSlot in practice — see
+   * getItemType, which checks this first. */
+  dice?: boolean;
 }
 
 export function getItemCategory(item: Pick<ItemDef, "category">): ItemCategory {
@@ -445,6 +540,7 @@ export function getItemCategory(item: Pick<ItemDef, "category">): ItemCategory {
 
 /** Display classification, derived from the equip fields rather than stored directly. */
 export type ItemType =
+  | "dice"
   | "skin"
   | "sceneryCard"
   | "equipable"
@@ -453,8 +549,9 @@ export type ItemType =
   | "artefact";
 
 export function getItemType(
-  item: Pick<ItemDef, "equipable" | "equipSlot" | "modifier">,
+  item: Pick<ItemDef, "equipable" | "equipSlot" | "modifier" | "dice">,
 ): ItemType {
+  if (item.dice) return "dice";
   if (item.equipSlot === "color") return "skin";
   if (item.equipSlot === "modifier") return "modifier";
   if (item.equipSlot === "scenery") return "sceneryCard";
@@ -464,6 +561,7 @@ export function getItemType(
 }
 
 export const ITEM_TYPE_LABELS: Record<ItemType, string> = {
+  dice: "Dice",
   skin: "Skin",
   sceneryCard: "Scenery",
   equipable: "Equipable",
@@ -652,14 +750,18 @@ export const ITEM_DROP_WEIGHT_OVERRIDES: Partial<Record<string, number>> = {
  * multiplies every rare candidate's weight by 1 + 10*0.015 = 1.15 (+15%).
  * Scales up with rarity so the bias reads as "toward better stuff," not a
  * flat tax on the whole pool, while staying the "very minor" nudge luck was
- * scoped as: at the live droppable pool, +10 luck (First Edition Card's
- * whole contribution) moves a single rare item's odds from 0.500% to 0.568%
- * of any roll (+13.6% relative), a single uncommon's from 3.000% to 3.113%
- * (+3.8% relative), and cd's from 80.00% to 79.05% (-1.2% relative). Common
+ * scoped as: at the live droppable pool (12 items: 1 common-override cd, 6
+ * uncommon, 5 rare — power-dice-1 included, spirit-orb excluded per
+ * NON_DROPPABLE_ITEM_IDS), +10 luck (First Edition Card's whole
+ * contribution) moves a single rare item's odds from 0.498% to 0.565% of
+ * any roll (+13.6% relative), a single uncommon's from 2.985% to 3.095%
+ * (+3.7% relative), and cd's from 79.60% to 78.60% (-1.3% relative). Common
  * is 0 so cd — the guaranteed-cadence item, see ITEM_DROP_WEIGHT_OVERRIDES —
  * stays luck-independent. Legendary is filled in for completeness even
  * though no droppable legendary exists today (spirit-orb is the only one,
- * and it's in NON_DROPPABLE_ITEM_IDS). */
+ * and it's in NON_DROPPABLE_ITEM_IDS). These numbers shift again whenever
+ * the droppable pool's item/rarity mix changes — recompute rather than trust
+ * them blindly. */
 export const RARITY_LUCK_WEIGHT_BONUS: Record<Rarity, number> = {
   common: 0,
   uncommon: 0.005,
@@ -1066,6 +1168,35 @@ function renderCdFrame(yAngle: number): string[] {
   return renderIconCard(yAngle, "#C0C0C0", "#7a7a7a", "#4a4a4a", cdCardIcon);
 }
 
+// --- Power Dice card ---
+// A single die face (the "five" pip pattern), painted with the same
+// icon-card rig every other item uses — see the block comment above
+// iconUV. There's no 3D-cube renderer anywhere in this file; every item is
+// a flat rotating card with a painted icon, so a die is "a card whose icon
+// is a die face" rather than an actual rendered cube.
+function powerDiceIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  const pipR = 0.095;
+  const pips: V2[] = [
+    [-0.23, -0.23],
+    [0.23, -0.23],
+    [0, 0],
+    [-0.23, 0.23],
+    [0.23, 0.23],
+  ];
+  for (const [px, py] of pips) {
+    const d = Math.hypot(ix - px, iy - py);
+    if (d < pipR) {
+      return { bright: d < pipR * 0.5 ? 0.95 : 0.8, color: "#f5f0e6" };
+    }
+  }
+  return null;
+}
+
+function renderPowerDiceFrame(yAngle: number): string[] {
+  return renderIconCard(yAngle, "#e8c34a", "#b23a3a", "#5c1f1f", powerDiceIcon);
+}
+
 // --- Spirit Orb card ---
 function spiritOrbCardIcon(u: number, v: number): TexSample | null {
   const [ix, iy] = iconUV(u, v);
@@ -1363,6 +1494,7 @@ function generateFrames(
 
 const firstEditionFrames = generateFrames(renderCardFrame);
 const cdFrames = generateFrames(renderCdFrame);
+const powerDiceFrames = generateFrames(renderPowerDiceFrame);
 const headphonesFrames = generateFrames(renderHeadphonesFrame);
 const rainbowHeadbandFrames = generateFrames(renderRainbowHeadbandFrame);
 const boomboxFrames = generateFrames(renderBoomboxFrame);
@@ -1451,6 +1583,20 @@ export const ITEMS: ItemDef[] = [
     frames: cdFrames,
     stackable: true,
     sellPrice: 10,
+  },
+  {
+    id: "power-dice-1",
+    name: "Power Dice 1",
+    description:
+      "Roll it onto a statted card to bump every one of that card's stats by 1. Up to 3 rolls per card.",
+    rarity: "rare",
+    frames: powerDiceFrames,
+    dice: true,
+    stackable: true,
+    sellPrice: 200,
+    // Not equipable — clicking it opens the upgrade-target picker instead
+    // of placing it (see InventoryView's handleGridClick). No buyPrice: a
+    // normal world drop, same pool as any other card.
   },
   {
     id: "headphones",
@@ -1582,11 +1728,15 @@ export function getItem(id: string): ItemDef | undefined {
   return ITEMS.find((item) => item.id === id);
 }
 
-/** The herzie's stats: every equipped item's `stats`, summed. Takes a
- * normalized `Equipped` — and on the server that must come from the stored
- * row, never from anything the client sent. */
+/** The herzie's stats: every equipped item's `stats`, summed, plus +1 per
+ * dice-upgrade level (see item_upgrades / applyItemUpgrade) on every stat
+ * key that item's catalog `stats` already defines — Power Dice 1's "bump
+ * each stat by 1" generalizes correctly if a future item ever carries two
+ * stats. Takes a normalized `Equipped` — and on the server that must come
+ * from the stored row, never from anything the client sent. */
 export function getHerzieStats(
   equipped: Equipped | null | undefined,
+  itemUpgrades?: Record<string, number> | null,
 ): HerzieStats {
   const totals = Object.fromEntries(
     STAT_KEYS.map((key) => [key, 0]),
@@ -1594,7 +1744,11 @@ export function getHerzieStats(
   for (const id of equippedItemIds(equipped)) {
     const stats = getItem(id)?.stats;
     if (!stats) continue;
-    for (const key of STAT_KEYS) totals[key] += stats[key] ?? 0;
+    const level = itemUpgrades?.[id] ?? 0;
+    for (const key of STAT_KEYS) {
+      if (stats[key] === undefined) continue;
+      totals[key] += stats[key] + level;
+    }
   }
   return totals;
 }

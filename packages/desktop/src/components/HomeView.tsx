@@ -69,12 +69,13 @@ export function HomeView({
     isConnected,
     equipped,
     inventory,
+    itemUpgrades,
     pendingDrops,
   } = state;
   const [globalRank, setGlobalRank] = useState<number | undefined>(undefined);
   const [globalTotal, setGlobalTotal] = useState<number | undefined>(undefined);
   const [collectingIds, setCollectingIds] = useState<Set<string>>(new Set());
-  const stats = getHerzieStats(equipped);
+  const stats = getHerzieStats(equipped, itemUpgrades);
   const pinned = useWindowPinned();
   const ghostMode = useGhostMode();
   const friendCode = herzie?.friendCode;

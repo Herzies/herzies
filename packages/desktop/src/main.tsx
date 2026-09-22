@@ -58,6 +58,7 @@ function App() {
     chatMessages: [],
     inventory: null,
     inventoryCurrency: 0,
+    itemUpgrades: {},
     friends: {},
     pendingTradeRequest: null,
     pendingFriendRequest: null,
@@ -721,6 +722,7 @@ function App() {
               initialItem={deepLinkItem}
               inventory={state.inventory}
               currency={state.inventoryCurrency}
+              itemUpgrades={state.itemUpgrades}
               equipped={state.equipped}
               onToggleEquip={toggleEquip}
               onPredictUnequip={predictUnequip}

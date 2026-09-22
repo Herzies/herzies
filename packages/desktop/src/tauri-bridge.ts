@@ -88,6 +88,8 @@ export interface AppState {
   chatMessages: ChatMessage[];
   inventory: Inventory | null;
   inventoryCurrency: number;
+  /** Dice-upgrade levels (itemId -> 0-3) — see applyDiceUpgrade. */
+  itemUpgrades: Record<string, number>;
   friends: Record<string, HerzieProfile>;
   pendingTradeRequest?: PendingTradeRequest | null;
   pendingFriendRequest?: PendingFriendRequest | null;
@@ -140,18 +142,30 @@ export const herzies = {
       inventory: Inventory;
       currency: number;
       equipped: Equipped;
+      itemUpgrades: Record<string, number>;
     } | null>("fetch_inventory"),
   sellItem: (itemId: string, quantity: number) =>
     invoke<{
       earned: number;
       newCurrency: number;
       inventory: Inventory;
+      itemUpgrades: Record<string, number>;
     } | null>("sell_item", { itemId, quantity }),
   equipItem: (
     itemId: string,
     action: "equip" | "unequip",
     side?: "left" | "right",
   ) => invoke<{ equipped: Equipped }>("equip_item", { itemId, action, side }),
+  /** Consumes one dice item to bump a statted card's upgrade level by one
+   * (see MAX_ITEM_UPGRADE_LEVEL). Throws with the server's error message
+   * (not owned, already maxed, target has no stats, etc.). */
+  applyDiceUpgrade: (diceItemId: string, targetItemId: string) =>
+    invoke<{
+      ok: boolean;
+      newLevel: number;
+      inventory: Inventory;
+      itemUpgrades: Record<string, number>;
+    } | null>("apply_dice_upgrade", { diceItemId, targetItemId }),
   /** Buys an item with in-game currency (store's Items tab). Throws with the
    * server's error message (not enough currency, already owned, etc.). */
   buyItem: (itemId: string, quantity: number) =>

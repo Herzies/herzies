@@ -125,6 +125,9 @@ export interface SyncResponse {
   inventory: Inventory;
   /** Authoritative equip state, carried for the same reason as `inventory`. */
   equipped: Equipped;
+  /** Dice-upgrade levels (itemId -> 0-3), carried for the same reason as
+   * `inventory` — see applyItemUpgrade / MAX_ITEM_UPGRADE_LEVEL. */
+  itemUpgrades: Record<string, number>;
 }
 
 /** Notification that another player wants to trade */

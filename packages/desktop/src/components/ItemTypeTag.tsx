@@ -11,6 +11,7 @@ import { cn } from "../lib/utils";
 import { Tooltip } from "./Tooltip";
 
 export const ITEM_TYPE_TEXT_CLASSES: Record<ItemType, string> = {
+  dice: "text-orange",
   skin: "text-purple",
   sceneryCard: "text-green",
   equipable: "text-cyan",
@@ -20,6 +21,7 @@ export const ITEM_TYPE_TEXT_CLASSES: Record<ItemType, string> = {
 };
 
 export const ITEM_TYPE_PILL_CLASSES: Record<ItemType, string> = {
+  dice: "bg-orange/15 text-orange",
   skin: "bg-purple/15 text-purple",
   sceneryCard: "bg-green/15 text-green",
   equipable: "bg-cyan/15 text-cyan",
@@ -36,7 +38,7 @@ export function ItemTypeTag({
    * inline in an existing metadata line (e.g. next to the rarity label). */
   variant = "pill",
 }: {
-  item: Pick<ItemDef, "equipable" | "equipSlot" | "modifier">;
+  item: Pick<ItemDef, "equipable" | "equipSlot" | "modifier" | "dice">;
   className?: string;
   variant?: "pill" | "text";
 }) {
@@ -84,21 +86,26 @@ export function SetTag({
 }
 
 /** The stats an item adds to its wearer, one per line (e.g. "Sonic power:
- * +10"). Renders nothing on items without any — most have none. */
+ * +10"). Renders nothing on items without any — most have none. `level` is
+ * the item's dice-upgrade level (see item_upgrades / applyItemUpgrade) —
+ * when set, each line shows the *effective* value (base + level), since
+ * Power Dice 1 bumps every stat a card has by 1 per level. */
 export function ItemStatLines({
   item,
+  level = 0,
   className,
 }: {
   item: Pick<ItemDef, "stats">;
+  level?: number;
   className?: string;
 }) {
-  const keys = STAT_KEYS.filter((key) => item.stats?.[key]);
+  const keys = STAT_KEYS.filter((key) => item.stats?.[key] !== undefined);
   if (keys.length === 0) return null;
   return (
     <div className={cn("text-ui-sm text-cyan", className)}>
       {keys.map((key) => (
         <div key={key}>
-          {STAT_LABELS[key]}: +{item.stats?.[key]}
+          {STAT_LABELS[key]}: +{(item.stats?.[key] ?? 0) + level}
         </div>
       ))}
     </div>

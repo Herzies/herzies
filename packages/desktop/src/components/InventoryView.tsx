@@ -4,9 +4,11 @@ import type {
   Herzie,
   Inventory,
   ItemType,
+  ItemUpgradeRejection,
   Rarity,
 } from "@herzies/shared";
 import {
+  applyItemUpgrade,
   applySell,
   BANK_SLOT_COUNT,
   DECK_SLOT_GROUPS,
@@ -29,6 +31,7 @@ import { Coin } from "./Coin";
 import { ContextMenu } from "./ContextMenu";
 import { DeckRow, type EmptySlotTarget } from "./DeckRow";
 import { DeckSlotPicker } from "./DeckSlotPicker";
+import { DiceUpgradeOverlay } from "./DiceUpgradeOverlay";
 import { Herzie3D } from "./Herzie3D";
 import ItemInspectOverlay, { ItemPreviewCard } from "./ItemInspectOverlay";
 import { DuplicatesIcon } from "./icons/DuplicatesIcon";
@@ -331,6 +334,7 @@ function ItemGridCell({
   isDragging,
   isDragOver,
   equipped,
+  level,
   onPlace,
   onSellRequest,
   onDragPointerDown,
@@ -343,6 +347,8 @@ function ItemGridCell({
   isDragging: boolean;
   isDragOver: boolean;
   equipped: Equipped;
+  /** Current dice-upgrade level — see ItemPreviewCard. */
+  level: number;
   /** Takes this cell's own slot index, not just the item id: with several
    * identical cards on the grid it's the only thing that says *which* copy
    * was clicked — see handleEquip. */
@@ -365,6 +371,7 @@ function ItemGridCell({
           meta={def?.stackable ? `x${qty}` : undefined}
           box={100}
           equipped={equipped}
+          level={level}
         />
       }
     >
@@ -437,6 +444,7 @@ export function InventoryView({
   onLog,
   inventory: cachedInventory,
   currency: cachedCurrency,
+  itemUpgrades: cachedItemUpgrades,
   equipped,
   onToggleEquip,
   onPredictUnequip,
@@ -447,6 +455,8 @@ export function InventoryView({
   onLog?: (msg: string) => void;
   inventory: Inventory | null;
   currency: number;
+  /** Dice-upgrade levels (itemId -> 0-3) — see MAX_ITEM_UPGRADE_LEVEL. */
+  itemUpgrades: Record<string, number>;
   /** Already optimistic — see useOptimisticEquipped in main.tsx. Held there
    * rather than here so the 3D herzie and deck row move in the same frame as
    * the grid; keeping a local copy in sync with it only ever reintroduced the
@@ -463,8 +473,13 @@ export function InventoryView({
 }) {
   const [inventory, setInventory] = useState<Inventory | null>(cachedInventory);
   const [currency, setCurrency] = useState(cachedCurrency || herzie.currency);
+  const [itemUpgrades, setItemUpgrades] = useState<Record<string, number>>(
+    cachedItemUpgrades ?? {},
+  );
   /** Unsettled sells. While non-zero, incoming snapshots are behind us. */
   const [sellsInFlight, setSellsInFlight] = useState(0);
+  /** Unsettled dice upgrades — same reasoning as sellsInFlight. */
+  const [upgradesInFlight, setUpgradesInFlight] = useState(0);
   // handleSell is recreated every render and handed to SellBox/SellControls,
   // which can be holding a render-old copy. Reading the latest values through
   // refs (the friendsRef pattern used in FriendsView) is what lets a second
@@ -473,6 +488,10 @@ export function InventoryView({
   inventoryRef.current = inventory;
   const currencyRef = useRef(currency);
   currencyRef.current = currency;
+  const itemUpgradesRef = useRef(itemUpgrades);
+  itemUpgradesRef.current = itemUpgrades;
+  /** The dice whose upgrade-target picker is open, if any. */
+  const [diceUpgradeItem, setDiceUpgradeItem] = useState<string | null>(null);
   const [inspectItem, setInspectItem] = useState<string | null>(
     initialItem ?? null,
   );
@@ -530,10 +549,18 @@ export function InventoryView({
   // mid-request. `sell_item` emits the updated state before its command
   // returns, so by the time the counter falls the snapshot already matches.
   useEffect(() => {
-    if (sellsInFlight > 0) return;
+    if (sellsInFlight > 0 || upgradesInFlight > 0) return;
     setInventory(cachedInventory);
     setCurrency(cachedCurrency || herzie.currency);
-  }, [cachedInventory, cachedCurrency, herzie.currency, sellsInFlight]);
+    setItemUpgrades(cachedItemUpgrades ?? {});
+  }, [
+    cachedInventory,
+    cachedCurrency,
+    cachedItemUpgrades,
+    herzie.currency,
+    sellsInFlight,
+    upgradesInFlight,
+  ]);
 
   useEffect(() => {
     if (initialItem) setInspectItem(initialItem);
@@ -679,6 +706,7 @@ export function InventoryView({
       itemId,
       qty,
       item?.sellPrice,
+      itemUpgradesRef.current,
     );
     if (!predicted.ok) {
       onLog?.(
@@ -691,10 +719,12 @@ export function InventoryView({
 
     setInventory(predicted.inventory);
     setCurrency(predicted.newCurrency);
+    setItemUpgrades(predicted.itemUpgrades);
     // Also update the refs now, not just on the next render, so two sells
     // fired within a single tick still compose.
     inventoryRef.current = predicted.inventory;
     currencyRef.current = predicted.newCurrency;
+    itemUpgradesRef.current = predicted.itemUpgrades;
     // Selling the last one leaves nothing to preview — close it.
     if (predicted.inventory[itemId] === undefined && itemId === inspectItem) {
       setInspectItem(null);
@@ -720,8 +750,10 @@ export function InventoryView({
         // Authoritative, and by construction equal to the prediction.
         setInventory(result.inventory);
         setCurrency(result.newCurrency);
+        setItemUpgrades(result.itemUpgrades);
         inventoryRef.current = result.inventory;
         currencyRef.current = result.newCurrency;
+        itemUpgradesRef.current = result.itemUpgrades;
       } else {
         onLog?.(`Failed to sell "${name}"`);
       }
@@ -734,6 +766,59 @@ export function InventoryView({
       // failed sell is still the pre-sell state. Restoring a value captured
       // before *this* sell would instead clobber any other sell still pending.
       setSellsInFlight((n) => Math.max(0, n - 1));
+    }
+  };
+
+  /** Applies a dice item to a target card, mirroring handleSell's predict-
+   * then-confirm shape: applyItemUpgrade is the same pure function the RPC
+   * enforces server-side, so the "+N" badge and the consumed dice both
+   * appear on click instead of after the round trip. */
+  const handleApplyDiceUpgrade = async (
+    diceItemId: string,
+    targetItemId: string,
+  ) => {
+    const targetName = getItem(targetItemId)?.name ?? targetItemId;
+    const predicted = applyItemUpgrade(
+      inventoryRef.current ?? {},
+      itemUpgradesRef.current,
+      diceItemId,
+      targetItemId,
+    );
+    if (!predicted.ok) {
+      const messages: Record<ItemUpgradeRejection, string> = {
+        "not-dice": "Not a dice item",
+        "dice-not-owned": "You don't have that dice",
+        "target-not-owned": "You don't own that card",
+        "not-statted": `"${targetName}" has no stats to upgrade`,
+        "max-level": `"${targetName}" is already fully upgraded`,
+      };
+      onLog?.(messages[predicted.reason]);
+      return;
+    }
+
+    setInventory(predicted.inventory);
+    setItemUpgrades(predicted.itemUpgrades);
+    inventoryRef.current = predicted.inventory;
+    itemUpgradesRef.current = predicted.itemUpgrades;
+    setDiceUpgradeItem(null);
+
+    setUpgradesInFlight((n) => n + 1);
+    try {
+      const result = await herzies.applyDiceUpgrade(diceItemId, targetItemId);
+      if (result) {
+        setInventory(result.inventory);
+        setItemUpgrades(result.itemUpgrades);
+        inventoryRef.current = result.inventory;
+        itemUpgradesRef.current = result.itemUpgrades;
+        onLog?.(`Upgraded "${targetName}" to +${result.newLevel}`);
+      } else {
+        onLog?.(`Failed to apply "${getItem(diceItemId)?.name ?? diceItemId}"`);
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      onLog?.(`Failed to apply dice: ${msg}`);
+    } finally {
+      setUpgradesInFlight((n) => Math.max(0, n - 1));
     }
   };
 
@@ -814,6 +899,12 @@ export function InventoryView({
       return;
     }
     const def = getItem(itemId);
+    // Dice don't equip — clicking one opens the upgrade-target picker
+    // instead (see DiceUpgradeOverlay).
+    if (def?.dice) {
+      setDiceUpgradeItem(itemId);
+      return;
+    }
     if (!def?.equipable) return;
     if (isItemEquipped(itemId)) {
       onLog?.(`"${def.name}" is already placed`);
@@ -1045,7 +1136,7 @@ export function InventoryView({
             onClick={() => setTab("cards")}
             colour="cyan"
           >
-            Cards
+            Inventory
           </TabButton>
           <TabButton
             active={tab === "deck"}
@@ -1109,6 +1200,7 @@ export function InventoryView({
             <DeckRow
               equipped={equipped}
               inventory={inventory}
+              itemUpgrades={itemUpgrades}
               onUnequip={handleEquip}
               onPlaceRequest={setSlotPicker}
             />
@@ -1151,6 +1243,7 @@ export function InventoryView({
                   isDragging={dragVisual?.index === i}
                   isDragOver={dragVisual?.overIndex === i}
                   equipped={equipped}
+                  level={itemUpgrades[itemId] ?? 0}
                   onPlace={handleGridClick}
                   onSellRequest={(id, slotIndex, x, y) =>
                     setSellMenu({ itemId: id, slotIndex, x, y })
@@ -1172,6 +1265,7 @@ export function InventoryView({
             if (!sellConfirm) setInspectItem(null);
           }}
           equipped={equipped}
+          level={itemUpgrades[inspectItem] ?? 0}
           meta={inspectedMeta || undefined}
           footer={
             <>
@@ -1208,6 +1302,18 @@ export function InventoryView({
               ) : null}
             </>
           }
+        />
+      )}
+
+      {diceUpgradeItem && (
+        <DiceUpgradeOverlay
+          diceItemId={diceUpgradeItem}
+          inventory={inventory}
+          itemUpgrades={itemUpgrades}
+          onPick={(targetItemId) =>
+            handleApplyDiceUpgrade(diceUpgradeItem, targetItemId)
+          }
+          onClose={() => setDiceUpgradeItem(null)}
         />
       )}
 

@@ -10,7 +10,7 @@ export async function GET(request: Request) {
   const admin = createAdminClient();
   const { data, error } = await admin
     .from("herzies")
-    .select("inventory_v2, currency, equipped")
+    .select("inventory_v2, currency, equipped, item_upgrades")
     .eq("user_id", auth.userId)
     .single();
 
@@ -32,5 +32,6 @@ export async function GET(request: Request) {
     currency: data.currency ?? 0,
     items: items ?? [],
     equipped: normalizeEquipped(data.equipped),
+    itemUpgrades: (data.item_upgrades ?? {}) as Record<string, number>,
   });
 }

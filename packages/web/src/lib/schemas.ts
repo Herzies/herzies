@@ -51,6 +51,11 @@ export const equipItemSchema = z.object({
   side: z.enum(["left", "right"]).optional(),
 });
 
+export const upgradeItemSchema = z.object({
+  diceItemId: z.string().min(1),
+  targetItemId: z.string().min(1),
+});
+
 export const createTradeSchema = z.object({
   targetFriendCode: z.string().min(1),
 });

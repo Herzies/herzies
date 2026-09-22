@@ -629,7 +629,7 @@ pub async fn api_lookup_herzies(
 
 pub async fn api_fetch_inventory(
     client: &Client,
-) -> Option<(Inventory, u32, HashMap<String, serde_json::Value>)> {
+) -> Option<(Inventory, u32, HashMap<String, serde_json::Value>, ItemUpgrades)> {
     let resp = api_fetch(client, reqwest::Method::GET, "/inventory", None).await?;
     if !resp.status().is_success() {
         return None;
@@ -641,7 +641,9 @@ pub async fn api_fetch_inventory(
         serde_json::Value::Object(map) => map.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
         _ => HashMap::new(),
     };
-    Some((inventory, currency, equipped))
+    let item_upgrades: ItemUpgrades =
+        serde_json::from_value(data["itemUpgrades"].clone()).unwrap_or_default();
+    Some((inventory, currency, equipped, item_upgrades))
 }
 
 pub async fn api_equip_item(
@@ -658,6 +660,34 @@ pub async fn api_equip_item(
         client,
         reqwest::Method::POST,
         "/inventory/equip",
+        Some(body),
+    )
+    .await
+    .ok_or_else(|| "Network error".to_string())?;
+    let status = resp.status();
+    let text = resp.text().await.map_err(|e| format!("Read error: {e}"))?;
+    let data: serde_json::Value =
+        serde_json::from_str(&text).map_err(|_| format!("Server returned {status}"))?;
+    if !status.is_success() {
+        let msg = data["error"].as_str().unwrap_or("Unknown error");
+        return Err(msg.to_string());
+    }
+    Ok(data)
+}
+
+/// Consumes one dice item to bump a statted card's upgrade level by one.
+/// Surfaces the server's error message, same as `api_equip_item`/`api_buy_item`
+/// (not owned, already maxed, target has no stats, etc.).
+pub async fn api_apply_dice_upgrade(
+    client: &Client,
+    dice_item_id: &str,
+    target_item_id: &str,
+) -> Result<serde_json::Value, String> {
+    let body = serde_json::json!({ "diceItemId": dice_item_id, "targetItemId": target_item_id });
+    let resp = api_fetch(
+        client,
+        reqwest::Method::POST,
+        "/inventory/upgrade",
         Some(body),
     )
     .await

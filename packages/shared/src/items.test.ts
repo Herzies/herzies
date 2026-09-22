@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyEquip,
+  applyItemUpgrade,
   applySell,
   BANK_SLOT_COUNT,
   type BankItemLookup,
@@ -18,6 +19,7 @@ import {
   ITEMS,
   isBankFull,
   isModifierEquipped,
+  MAX_ITEM_UPGRADE_LEVEL,
   MAX_MODIFIERS,
   NON_DROPPABLE_ITEM_IDS,
   normalizeEquipped,
@@ -128,6 +130,18 @@ describe("getItemType", () => {
 
   it("good-eye-sniper is a modifier", () => {
     expect(getItemType(getItem("good-eye-sniper")!)).toBe("modifier");
+  });
+
+  it("classifies dice items as dice, ahead of the equipable fields", () => {
+    expect(getItemType({ dice: true })).toBe("dice");
+  });
+
+  it("power-dice-1 is a dice, stackable, statted, and not equipable", () => {
+    const item = getItem("power-dice-1");
+    expect(getItemType(item!)).toBe("dice");
+    expect(item?.stackable).toBe(true);
+    expect(item?.equipable).toBeFalsy();
+    expect(item?.stats).toBeUndefined();
   });
 });
 
@@ -557,6 +571,22 @@ describe("applySell", () => {
       reason: "not-sellable",
     });
   });
+
+  it("clears the item's upgrade entry when the last copy is sold", () => {
+    const out = sold(
+      applySell({ boombox: 1 }, 0, {}, "boombox", 1, PRICE, { boombox: 2 }),
+    );
+    expect(out.itemUpgrades).toEqual({});
+  });
+
+  it("keeps the upgrade entry while a copy remains", () => {
+    const out = sold(
+      applySell({ "first-edition": 3 }, 0, {}, "first-edition", 1, PRICE, {
+        "first-edition": 1,
+      }),
+    );
+    expect(out.itemUpgrades).toEqual({ "first-edition": 1 });
+  });
 });
 
 describe("hasRoomFor", () => {
@@ -654,6 +684,99 @@ describe("herzie stats", () => {
   it("adds First Edition Card's luck through getHerzieStats", () => {
     expect(getHerzieStats({ modifier: ["first-edition"] }).luck).toBe(10);
     expect(getHerzieStats({}).luck).toBe(0);
+  });
+
+  it("adds the dice-upgrade level to every stat key an equipped item defines", () => {
+    expect(
+      getHerzieStats({ ground_left: "boombox" }, { boombox: 2 }).sonicPower,
+    ).toBe(12); // base 10 + level 2
+  });
+
+  it("ignores upgrade levels on items that aren't equipped", () => {
+    expect(getHerzieStats({}, { boombox: 3 }).sonicPower).toBe(0);
+  });
+
+  it("ignores upgrade levels on items with no stats at all", () => {
+    expect(
+      getHerzieStats({ head: "rainbow-headband" }, {
+        "rainbow-headband": 3,
+      }),
+    ).toEqual({ sonicPower: 0, luck: 0 });
+  });
+});
+
+describe("applyItemUpgrade", () => {
+  it("rejects a non-dice id", () => {
+    expect(applyItemUpgrade({ cd: 1, boombox: 1 }, {}, "cd", "boombox")).toEqual(
+      { ok: false, reason: "not-dice" },
+    );
+  });
+
+  it("rejects when the dice isn't owned", () => {
+    expect(
+      applyItemUpgrade({ boombox: 1 }, {}, "power-dice-1", "boombox"),
+    ).toEqual({ ok: false, reason: "dice-not-owned" });
+  });
+
+  it("rejects when the target isn't owned", () => {
+    expect(
+      applyItemUpgrade({ "power-dice-1": 1 }, {}, "power-dice-1", "boombox"),
+    ).toEqual({ ok: false, reason: "target-not-owned" });
+  });
+
+  it("rejects an unstatted target", () => {
+    expect(
+      applyItemUpgrade(
+        { "power-dice-1": 1, cd: 1 },
+        {},
+        "power-dice-1",
+        "cd",
+      ),
+    ).toEqual({ ok: false, reason: "not-statted" });
+  });
+
+  it("rejects past the level cap", () => {
+    expect(
+      applyItemUpgrade(
+        { "power-dice-1": 1, boombox: 1 },
+        { boombox: MAX_ITEM_UPGRADE_LEVEL },
+        "power-dice-1",
+        "boombox",
+      ),
+    ).toEqual({ ok: false, reason: "max-level" });
+  });
+
+  it("consumes one dice and bumps the level", () => {
+    const outcome = applyItemUpgrade(
+      { "power-dice-1": 2, boombox: 1 },
+      {},
+      "power-dice-1",
+      "boombox",
+    );
+    expect(outcome).toEqual({
+      ok: true,
+      inventory: { "power-dice-1": 1, boombox: 1 },
+      itemUpgrades: { boombox: 1 },
+      newLevel: 1,
+    });
+  });
+
+  it("deletes the dice id once the last copy is consumed", () => {
+    const outcome = applyItemUpgrade(
+      { "power-dice-1": 1, boombox: 1 },
+      {},
+      "power-dice-1",
+      "boombox",
+    );
+    expect(outcome.ok && outcome.inventory).toEqual({ boombox: 1 });
+  });
+
+  it("never mutates its inputs", () => {
+    const inventory = { "power-dice-1": 1, boombox: 1 };
+    const itemUpgrades = { boombox: 1 };
+    applyItemUpgrade(inventory, itemUpgrades, "power-dice-1", "boombox");
+    expect(inventory).toEqual({ "power-dice-1": 1, boombox: 1 });
+    expect(itemUpgrades).toEqual({ boombox: 1 });
   });
 });
 

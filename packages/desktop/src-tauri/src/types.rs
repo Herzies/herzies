@@ -137,6 +137,10 @@ pub struct SyncResponse {
     /// Authoritative equip state, carried for the same reason as `inventory`.
     #[serde(default)]
     pub equipped: Option<HashMap<String, serde_json::Value>>,
+    /// Dice-upgrade levels (itemId -> 0-3), carried for the same reason as
+    /// `inventory` — see MAX_ITEM_UPGRADE_LEVEL in @herzies/shared.
+    #[serde(default)]
+    pub item_upgrades: Option<ItemUpgrades>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -231,6 +235,10 @@ pub struct Trade {
 
 pub type Inventory = HashMap<String, u32>;
 
+/// Dice-upgrade levels (itemId -> 0-3) — see MAX_ITEM_UPGRADE_LEVEL in
+/// @herzies/shared.
+pub type ItemUpgrades = HashMap<String, u32>;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StoreProduct {
@@ -279,6 +287,10 @@ pub struct AppState {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub inventory: Option<Inventory>,
     pub inventory_currency: u32,
+    /// Dice-upgrade levels (itemId -> 0-3) — see MAX_ITEM_UPGRADE_LEVEL in
+    /// @herzies/shared.
+    #[serde(default)]
+    pub item_upgrades: ItemUpgrades,
     pub friends: HashMap<String, HerzieProfile>,
     /// Present while the server reports an incoming trade you have not joined yet.
     #[serde(skip_serializing_if = "Option::is_none")]

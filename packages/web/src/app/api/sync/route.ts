@@ -35,6 +35,7 @@ export async function POST(request: Request) {
       pendingDrops: result.pendingDrops,
       inventory: result.inventory,
       equipped: result.equipped,
+      itemUpgrades: result.itemUpgrades,
     };
 
     return NextResponse.json(response);

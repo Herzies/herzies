@@ -26,10 +26,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Item cannot be sold" }, { status: 400 });
   }
 
-  // Fetch player's inventory, currency, and equip state
+  // Fetch player's inventory, currency, equip state, and dice-upgrade levels
   const { data: herzie } = await admin
     .from("herzies")
-    .select("inventory_v2, currency, equipped")
+    .select("inventory_v2, currency, equipped, item_upgrades")
     .eq("user_id", auth.userId)
     .single();
 
@@ -46,6 +46,7 @@ export async function POST(request: Request) {
     itemId,
     quantity,
     item.sell_price as number,
+    (herzie.item_upgrades ?? {}) as Record<string, number>,
   );
 
   if (!outcome.ok) {
@@ -59,11 +60,16 @@ export async function POST(request: Request) {
     );
   }
 
-  const { earned, newCurrency, inventory, equipped } = outcome;
+  const { earned, newCurrency, inventory, equipped, itemUpgrades } = outcome;
 
   const { error } = await admin
     .from("herzies")
-    .update({ inventory_v2: inventory, currency: newCurrency, equipped })
+    .update({
+      inventory_v2: inventory,
+      currency: newCurrency,
+      equipped,
+      item_upgrades: itemUpgrades,
+    })
     .eq("user_id", auth.userId);
 
   if (error) {
@@ -76,5 +82,6 @@ export async function POST(request: Request) {
     newCurrency,
     inventory,
     equipped,
+    itemUpgrades,
   });
 }
