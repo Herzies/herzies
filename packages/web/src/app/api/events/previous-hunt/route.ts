@@ -1,6 +1,11 @@
-import type { GameEvent, SongHuntConfig } from "@herzies/shared";
+import type {
+  BossFightConfig,
+  GameEvent,
+  SongHuntConfig,
+} from "@herzies/shared";
 import { NextResponse } from "next/server";
-import { buildSongHuntConfig } from "@/lib/events";
+import { authenticateRequestOptional } from "@/lib/auth";
+import { buildBossFightConfig, buildSongHuntConfig } from "@/lib/events";
 import { createAdminClient } from "@/lib/supabase-admin";
 
 function toPublicNextHunt(e: {
@@ -29,7 +34,8 @@ function toPublicNextHunt(e: {
   };
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const { userId } = await authenticateRequestOptional(request);
   const admin = createAdminClient();
   const now = new Date();
   const nowIso = now.toISOString();
@@ -40,8 +46,15 @@ export async function GET() {
       .select(
         "id, type, title, description, active, starts_at, ends_at, config",
       )
-      .eq("type", "song_hunt")
-      .lt("ends_at", nowIso)
+      .in("type", ["song_hunt", "boss_fight"])
+      // "Previous" mirrors the admin panel's own definition
+      // (`getEventStatus` in GameAdmin.tsx): an event is done once its
+      // window has lapsed OR it's been explicitly deactivated. A killed
+      // boss needs that second clause — `settle_boss_fight` flips `active`
+      // to false the moment it's paid out, which is almost always well
+      // before its `ends_at` (the original multi-day window boundary).
+      // Song Hunt never flips `active` early, so this is a no-op for it.
+      .or(`active.eq.false,ends_at.lt.${nowIso}`)
       .order("starts_at", { ascending: false })
       .limit(1),
     admin
@@ -77,6 +90,13 @@ export async function GET() {
           e.config as SongHuntConfig,
           now,
           true,
+        );
+      } else if (e.type === "boss_fight") {
+        config = await buildBossFightConfig(
+          admin,
+          e.id,
+          e.config as BossFightConfig,
+          userId,
         );
       } else {
         config = e.config as Record<string, unknown>;
