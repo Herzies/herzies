@@ -25,9 +25,11 @@ import { StoreView } from "./components/StoreView";
 import { TabBar, type View } from "./components/TabBar";
 import { TradeView } from "./components/TradeView";
 import { UpdateAvailableOverlay } from "./components/UpdateAvailableOverlay";
+import { WhatsNewOverlay } from "./components/WhatsNewOverlay";
 import { useOptimisticEquipped } from "./hooks/useOptimisticEquipped";
 import { useTradeRequests } from "./hooks/useTradeRequests";
 import { cn } from "./lib/utils";
+import { RELEASE_NOTES } from "./release-notes";
 import {
   type AppState,
   checkForUpdate,
@@ -40,6 +42,8 @@ import {
 } from "./tauri-bridge";
 
 const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1h
+
+const WHATS_NEW_SEEN_KEY = "herzies:whats-new-seen-version";
 
 type UpdateInstallStatus =
   | { kind: "idle" }
@@ -104,6 +108,15 @@ function App() {
   >(null);
   /** Dev-only: shows the update overlay with a fake version (Settings → Debug). */
   const [testUpdateOverlay, setTestUpdateOverlay] = useState(false);
+  /** Version to show the "What's new" overlay for; null means hidden. */
+  const [whatsNewVersion, setWhatsNewVersion] = useState<string | null>(null);
+  /** Dev-only: shows the "What's new" overlay with sample notes (Settings → Debug). */
+  const [testWhatsNewOverlay, setTestWhatsNewOverlay] = useState(false);
+  /** Captured the first time `state.isOnline` is true this session: was this
+   * device mid-onboarding (no herzie yet)? A fresh install or reinstall
+   * shouldn't be told what's new in the version it just installed — only an
+   * existing user upgrading into a version with curated notes should. */
+  const isFreshInstallRef = useRef<boolean | null>(null);
   const [updateInstallStatus, setUpdateInstallStatus] =
     useState<UpdateInstallStatus>({ kind: "idle" });
   /** Set by the "c" shortcut: focus/expand the chat once the home view shows it. */
@@ -392,6 +405,30 @@ function App() {
   }, [availableUpdate]);
 
   const { herzie } = state;
+
+  // Surface curated release notes once per version, but only to a device that
+  // was already onboarded the first time we saw it this session — a fresh
+  // install shouldn't be told what's new in the version it just installed.
+  // The seen-version is only persisted from the overlay's own close handler
+  // (below), not here: this app can launch hidden, and detecting a version
+  // isn't the same as the overlay having actually been shown.
+  useEffect(() => {
+    if (!state.isOnline) return;
+    if (isFreshInstallRef.current === null) {
+      isFreshInstallRef.current = !herzie;
+    }
+    if (isFreshInstallRef.current) {
+      if (herzie && localStorage.getItem(WHATS_NEW_SEEN_KEY) === null) {
+        localStorage.setItem(WHATS_NEW_SEEN_KEY, state.version);
+      }
+      return;
+    }
+    if (!herzie || !state.version) return;
+    if (localStorage.getItem(WHATS_NEW_SEEN_KEY) === state.version) return;
+    if (RELEASE_NOTES.some((entry) => entry.version === state.version)) {
+      setWhatsNewVersion(state.version);
+    }
+  }, [state.isOnline, state.version, herzie]);
 
   const switchView = useCallback(
     (v: View): boolean => {
@@ -800,6 +837,7 @@ function App() {
             onStageOverride={setStageOverride}
             onPreviewOnboarding={() => setPreviewOnboarding(true)}
             onTestUpdateAlert={() => setTestUpdateOverlay(true)}
+            onTestWhatsNew={() => setTestWhatsNewOverlay(true)}
             hasActiveEventOverride={hasActiveEventOverride}
             onToggleActiveEventOverride={() =>
               setHasActiveEventOverride((v) => !v)
@@ -947,6 +985,31 @@ function App() {
           onUpdate={() => setTestUpdateOverlay(false)}
           onLater={() => setTestUpdateOverlay(false)}
           installing={false}
+        />
+      )}
+
+      {herzie && whatsNewVersion && (
+        <WhatsNewOverlay
+          version={whatsNewVersion}
+          highlights={
+            RELEASE_NOTES.find((entry) => entry.version === whatsNewVersion)
+              ?.highlights ?? []
+          }
+          onClose={() => {
+            localStorage.setItem(WHATS_NEW_SEEN_KEY, whatsNewVersion);
+            setWhatsNewVersion(null);
+          }}
+        />
+      )}
+
+      {testWhatsNewOverlay && (
+        <WhatsNewOverlay
+          version="9.9.9-test"
+          highlights={[
+            "Added a curated 'What's new' modal",
+            "Fixed a sample bug for the debug preview",
+          ]}
+          onClose={() => setTestWhatsNewOverlay(false)}
         />
       )}
 

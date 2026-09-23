@@ -16,6 +16,7 @@ export function SettingsView({
   onStageOverride,
   onPreviewOnboarding,
   onTestUpdateAlert,
+  onTestWhatsNew,
   availableUpdate,
   installStatus,
   onInstallUpdate,
@@ -30,6 +31,7 @@ export function SettingsView({
   onStageOverride: (v: number | null) => void;
   onPreviewOnboarding: () => void;
   onTestUpdateAlert: () => void;
+  onTestWhatsNew: () => void;
   availableUpdate: Update | null;
   installStatus: UpdateInstallStatus;
   onInstallUpdate: () => void;
@@ -127,6 +129,9 @@ export function SettingsView({
             </button>
             <button type="button" className="btn" onClick={onTestUpdateAlert}>
               Test Update Alert
+            </button>
+            <button type="button" className="btn" onClick={onTestWhatsNew}>
+              Test What's New
             </button>
             <button
               type="button"
