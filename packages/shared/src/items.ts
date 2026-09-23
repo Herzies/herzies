@@ -1178,25 +1178,37 @@ function renderCdFrame(yAngle: number): string[] {
 // (CORNERS/UVS above) with a painted icon: a rotating rectangle, never an
 // actual solid. Dice needed to read as dice rather than "a card with dots
 // on it," so this is a second, independent rig: a real cube with 6 faces,
-// each carrying its own die value (opposite faces sum to 7, same as a
-// physical die), lit per-face so the faces read as distinct planes as it
-// spins. It reuses `project`/`triUV` (the same projection and barycentric
-// UV lookup the card rig uses) but has its own geometry, since a cube's
-// faces need real back-face culling that a single flat quad never does —
-// see DICE_FACES below.
+// each carrying the same single red-on-white pip (see dicePipIcon — this
+// isn't a physical 1-6 die), lit per-face so the faces read as distinct
+// planes as it spins. It reuses `project`/`triUV` (the same projection and
+// barycentric UV lookup the card rig uses) but has its own geometry, since
+// a cube's faces need real back-face culling that a single flat quad never
+// does — see DICE_FACES below.
 
 /** Cube half-extent. Unlike the card's CARD_HW/CARD_HH — flat corners at
  * z=0, so `project`'s perspective term never inflates their screen extent
  * beyond a fixed bound — a cube's corners move in depth as it rotates, and
  * the nearest corner at a 3-face angle projects noticeably larger than the
- * same corner would flat. Copying the card's half-width here clipped off
- * the canvas edge on more than a third of the 36 frames. This value is
- * calibrated, not guessed: project all 8 corners at every rotation frame,
- * take the worst-case (nearest-corner) screen extent, and pick H so that
- * stays inside the SW×SH canvas with a margin — width is the binding
- * constraint here, not height. Re-run that check before changing this
- * number, DICE_PITCH, or SW/SH/CAM. */
-const DICE_H = 0.58;
+ * same corner would flat. This value is calibrated, not guessed: project
+ * all 8 corners at every rotation frame, take the worst-case (nearest-
+ * corner) screen extent, and pick H so that stays inside the SW×SH canvas
+ * with a margin — width is the binding constraint here, not height (at
+ * this pitch, the worst-case corner hits ~14.0/15 half-widths vs ~4.6/9
+ * half-heights). Re-run that check before changing this number,
+ * DICE_PITCH, or SW/SH/CAM — there isn't much room left above this value:
+ * 0.64 is where the margin hits zero.
+ *
+ * This is sized to use roughly as much of the character canvas as the card
+ * rig does — NOT shrunk to make the die look smaller than a card. Every
+ * item's preview gets content-cropped and rescaled to fill a fixed
+ * on-screen box (see `fitMetrics` in item-canvas.ts), so a smaller DICE_H
+ * doesn't render a visually smaller die — it renders the same box filled by
+ * fewer source characters stretched to cover it, i.e. strictly lower
+ * resolution for no size change (this was tried; that's why this comment
+ * exists). "Dice are smaller than cards" is instead handled entirely at
+ * that display layer, via `previewFillFraction` — this constant should
+ * only ever change to fix clipping or genuinely add/remove source detail. */
+const DICE_H = 0.6;
 
 /** Tilts the cube back before it spins around Y, the same way TILT gives
  * the flat card a cosmetic diagonal — here it's load-bearing: without it,
@@ -1217,72 +1229,66 @@ const DICE_CORNERS = {
 
 /** The cube's 6 faces, each 4 corners wound CCW as seen from outside (so
  * the cross product of its first two edges gives an outward-facing normal —
- * see the culling check in renderDiceFrame) plus the pip count on that
- * face. Opposite faces (front/back, left/right, top/bottom) sum to 7, same
- * as a physical die — which face ends up toward the camera at any given
- * frame is just whichever the rotation puts there. */
-const DICE_FACES: { corners: [V3, V3, V3, V3]; value: number }[] = [
-  { corners: [DICE_CORNERS.lbf, DICE_CORNERS.rbf, DICE_CORNERS.rtf, DICE_CORNERS.ltf], value: 2 },
-  { corners: [DICE_CORNERS.rbb, DICE_CORNERS.lbb, DICE_CORNERS.ltb, DICE_CORNERS.rtb], value: 5 },
-  { corners: [DICE_CORNERS.rbb, DICE_CORNERS.rbf, DICE_CORNERS.rtf, DICE_CORNERS.rtb], value: 3 },
-  { corners: [DICE_CORNERS.lbf, DICE_CORNERS.lbb, DICE_CORNERS.ltb, DICE_CORNERS.ltf], value: 4 },
-  { corners: [DICE_CORNERS.ltf, DICE_CORNERS.rtf, DICE_CORNERS.rtb, DICE_CORNERS.ltb], value: 1 },
-  { corners: [DICE_CORNERS.lbb, DICE_CORNERS.rbb, DICE_CORNERS.rbf, DICE_CORNERS.lbf], value: 6 },
+ * see the culling check in renderDiceFrame). Every face gets the same
+ * single centred pip (see dicePipIcon) — this is Power Dice's own item, not
+ * a physical 1-6 die, so there's no "opposite faces sum to 7" convention to
+ * preserve; it's the same red dot on white the bespoke 16x16 icon uses,
+ * repeated on all six faces so it reads as one consistent object from any
+ * angle.
+ *
+ * The right and left faces below are wound the *other* way round from the
+ * other four — swap indices 1 and 3 in either and `cross(e1, e2)` flips
+ * from pointing inward back to outward, same as the rest. That inward
+ * normal was a real bug, not cosmetic: the culling check in
+ * renderPowerDiceFrame keeps a face exactly when its rotated normal faces
+ * the camera, so a face whose normal starts out backwards gets culled
+ * during the half of the spin where it should be visible (a gap you can
+ * see clean through — the "invisible wall") and drawn during the half
+ * where it should be hidden (painting the inside of the shell over
+ * whichever real face is actually facing the camera there, since faces
+ * share one pixel buffer with no depth test — see the comment on that). */
+const DICE_FACES: { corners: [V3, V3, V3, V3] }[] = [
+  { corners: [DICE_CORNERS.lbf, DICE_CORNERS.rbf, DICE_CORNERS.rtf, DICE_CORNERS.ltf] },
+  { corners: [DICE_CORNERS.rbb, DICE_CORNERS.lbb, DICE_CORNERS.ltb, DICE_CORNERS.rtb] },
+  { corners: [DICE_CORNERS.rbb, DICE_CORNERS.rtb, DICE_CORNERS.rtf, DICE_CORNERS.rbf] },
+  { corners: [DICE_CORNERS.lbf, DICE_CORNERS.ltf, DICE_CORNERS.ltb, DICE_CORNERS.lbb] },
+  { corners: [DICE_CORNERS.ltf, DICE_CORNERS.rtf, DICE_CORNERS.rtb, DICE_CORNERS.ltb] },
+  { corners: [DICE_CORNERS.lbb, DICE_CORNERS.rbb, DICE_CORNERS.rbf, DICE_CORNERS.lbf] },
 ];
-
-/** Standard die-face pip layouts, in [-0.5, 0.5] face-local coordinates. */
-const DICE_PIP_LAYOUTS: Record<number, V2[]> = {
-  1: [[0, 0]],
-  2: [
-    [-0.5, -0.5],
-    [0.5, 0.5],
-  ],
-  3: [
-    [-0.5, -0.5],
-    [0, 0],
-    [0.5, 0.5],
-  ],
-  4: [
-    [-0.5, -0.5],
-    [0.5, -0.5],
-    [-0.5, 0.5],
-    [0.5, 0.5],
-  ],
-  5: [
-    [-0.5, -0.5],
-    [0.5, -0.5],
-    [0, 0],
-    [-0.5, 0.5],
-    [0.5, 0.5],
-  ],
-  6: [
-    [-0.5, -0.55],
-    [-0.5, 0],
-    [-0.5, 0.55],
-    [0.5, -0.55],
-    [0.5, 0],
-    [0.5, 0.55],
-  ],
-};
 
 const DICE_PIP_RADIUS = 0.16;
 
-/** A face's pips: dark divots sunk into the die's face colour. `null` (the
- * face colour) elsewhere, same "return null to fall through" convention as
- * cardChrome/icon. */
-function dicePipIcon(u: number, v: number, value: number): TexSample | null {
-  const ix = u - 0.5,
-    iy = v - 0.5;
-  for (const [px, py] of DICE_PIP_LAYOUTS[value]) {
-    const d = Math.hypot(ix - px, iy - py);
-    if (d < DICE_PIP_RADIUS) {
-      return {
-        bright: d < DICE_PIP_RADIUS * 0.5 ? 0.95 : 0.8,
-        color: "#2a1a10",
-      };
-    }
-  }
-  return null;
+// White body, red pip — matches the bespoke 16x16 pixel icon (see
+// item-icon-grids.json's power-dice-1 palette) so the flat inventory icon
+// and the spinning 3D card read as the same object, not two different dice.
+const DICE_FACE_COLOR = "#ffffff";
+const DICE_PIP_COLOR = "#ff1f1f";
+
+/** Every face's pip: a single coloured divot sunk into the die's face
+ * colour, dead centre. `null` (the face colour) elsewhere, same "return
+ * null to fall through" convention as cardChrome/icon. */
+function dicePipIcon(u: number, v: number): TexSample | null {
+  const d = Math.hypot(u - 0.5, v - 0.5);
+  if (d >= DICE_PIP_RADIUS) return null;
+  return {
+    bright: d < DICE_PIP_RADIUS * 0.5 ? 1.0 : 0.88,
+    color: DICE_PIP_COLOR,
+  };
+}
+
+/** How far a point in face-local UV space sits from that face's nearest
+ * edge, expressed as a 1.0 (face interior) to 0.55 (right on the edge)
+ * darkening factor. Without this, adjoining faces at a similar angle have
+ * nothing but their (per-face-constant) diffuse shading telling them apart —
+ * often barely any contrast — so the cube read as one flat blob with no
+ * visible seam between its faces, a big part of why it looked papery rather
+ * than solid. This paints a routed-looking bevel along every face boundary
+ * so the eye always has an edge to lock onto, the same job a real die's
+ * chamfered corners do. */
+function diceEdgeBevel(u: number, v: number): number {
+  const width = 0.14;
+  const edgeDist = Math.min(u, 1 - u, v, 1 - v);
+  return edgeDist >= width ? 1 : 0.55 + 0.45 * (edgeDist / width);
 }
 
 function renderPowerDiceFrame(yAngle: number): string[] {
@@ -1351,11 +1357,22 @@ function renderPowerDiceFrame(yAngle: number): string[] {
           );
         if (!uv) continue;
         const [u, v] = uv;
-        const sample = dicePipIcon(u, v, face.value) ?? {
-          bright: 0.6,
-          color: "#e8c34a",
+        const sample = dicePipIcon(u, v) ?? {
+          // Was 0.6 — capped every face at '+' (RAMP_ITEM index 6) even at
+          // the single brightest-lit frame across the whole 36-frame spin
+          // (diffuse maxes out around 0.98). A believable plastic face
+          // needs to actually reach the ramp's dense end when it's lit
+          // near head-on, not just approach the midpoint.
+          bright: 0.95,
+          color: DICE_FACE_COLOR,
         };
-        bright[sy][sx] = sample.bright * (0.25 + 0.75 * diffuse);
+        // Was `0.25 + 0.75 * diffuse`: raising the floor a bit (so a
+        // grazing face doesn't fade to near-nothing) while still leaving
+        // most of the range to diffuse keeps the per-face contrast that
+        // makes the rotation read as light sweeping across real planes,
+        // rather than everything sitting at one flat mid-tone.
+        bright[sy][sx] =
+          sample.bright * (0.32 + 0.68 * diffuse) * diceEdgeBevel(u, v);
         pixelColor[sy][sx] = sample.color;
       }
     }
@@ -1370,7 +1387,7 @@ function renderPowerDiceFrame(yAngle: number): string[] {
           RAMP_ITEM.length - 1,
         );
         const ch = RAMP_ITEM[idx];
-        return ch === " " ? " " : col(pixelColor[y][x] ?? "#e8c34a", ch);
+        return ch === " " ? " " : col(pixelColor[y][x] ?? DICE_FACE_COLOR, ch);
       })
       .join(""),
   );

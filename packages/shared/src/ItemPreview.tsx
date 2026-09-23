@@ -12,6 +12,7 @@ import {
   drawFrameCells,
   fitMetrics,
   parseAsciiFrames,
+  previewFillFraction,
   widestFrameIndex,
 } from "./item-canvas.js";
 import type { ItemDef } from "./items.js";
@@ -58,7 +59,11 @@ export function ItemPreview({
   const staticFrame = frame === "front" ? widestFrameIndex(cellFrames) : frame;
   const [frameIdx, setFrameIdx] = useState(staticFrame ?? 0);
   const bounds = useMemo(() => contentBounds(cellFrames), [cellFrames]);
-  const metrics = useMemo(() => fitMetrics(bounds, box), [bounds, box]);
+  const fillFraction = useMemo(() => previewFillFraction(item), [item]);
+  const metrics = useMemo(
+    () => fitMetrics(bounds, box, fillFraction),
+    [bounds, box, fillFraction],
+  );
 
   useEffect(() => {
     if (staticFrame !== undefined) setFrameIdx(staticFrame);
