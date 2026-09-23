@@ -921,7 +921,7 @@ function App() {
               onClick: () => setDismissedInventoryFull(true),
             },
             {
-              label: "Open Cards",
+              label: "Open inventory",
               colour: "text-purple",
               onClick: () => {
                 setDismissedInventoryFull(true);

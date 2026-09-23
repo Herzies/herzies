@@ -3,6 +3,7 @@ import {
   getHerzieStats,
   getItem,
   hasRoomFor,
+  isBankFull,
   levelProgress,
   xpToNextLevel,
 } from "@herzies/shared";
@@ -96,10 +97,15 @@ export function HomeView({
 
   // A Spirit Orb auto-collects drops server-side within one sync tick, so the
   // manual "Collect" affordance would almost always be stale — skip it when
-  // either ground slot has one equipped.
+  // either ground slot has one equipped. Except when the bank is full: then
+  // auto-collect can't land anything either, so drops pile up right where a
+  // non-Orb player's would (same GROUND_DROP_CAP of 10) — showing them here
+  // is what keeps that backlog visible instead of it building up unseen and
+  // then landing in the bank all at once the moment a slot frees up.
   const hasSpiritOrb =
     equipped.ground_left === "spirit-orb" ||
     equipped.ground_right === "spirit-orb";
+  const bankFull = isBankFull(inventory, equipped);
   // Any number of drops can be pending at once — every item is independently
   // collectible.
   const dropItems: GroundDrop[] = pendingDrops.map((d) => ({
@@ -333,7 +339,7 @@ export function HomeView({
           equipped={equipped}
           paused={!active}
         />
-        {dropItems.length > 0 && !hasSpiritOrb && (
+        {dropItems.length > 0 && (!hasSpiritOrb || bankFull) && (
           // pointer-events-none on the wrapper keeps the gaps between items
           // from blocking herzie drag; each item re-enables pointer events
           // on itself. z-10: the herzie canvas sets its own z-index: 1 (see

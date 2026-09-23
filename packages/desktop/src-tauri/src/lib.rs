@@ -29,6 +29,11 @@ use types::*;
 pub struct PendingDeepLink(pub Mutex<Option<String>>);
 pub struct LastTradeNotified(pub Mutex<Option<String>>);
 pub struct LastFriendNotified(pub Mutex<Option<String>>);
+/// Whether the last sync tick found a pick-up accessory (spirit-orb) unable to
+/// collect a drop because the bank was full. A bool, not an id: unlike a trade
+/// or friend request there's no single thing to dedupe by, just a condition
+/// that can flip back and forth as slots free up and fill again.
+pub struct LastInventoryFullNotified(pub Mutex<bool>);
 
 // --- Tauri commands ---
 
@@ -2034,6 +2039,47 @@ async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
             *last = None;
         }
 
+        // A pick-up accessory (spirit-orb, "Greedy Spirit") auto-collects world
+        // drops quietly — the whole point is not having to watch the ground.
+        // That means a full bank blocks it silently too, unless we say
+        // something: the server already leaves any drop it couldn't fit room
+        // for in `pending_drops` (see hasSpiritOrbEquipped in game-server.ts),
+        // so a non-empty list here with the accessory equipped means it's
+        // stuck.
+        let has_spirit_orb = app_state
+            .equipped
+            .get("ground_left")
+            .and_then(|v| v.as_str())
+            == Some("spirit-orb")
+            || app_state
+                .equipped
+                .get("ground_right")
+                .and_then(|v| v.as_str())
+                == Some("spirit-orb");
+        let pickup_blocked = has_spirit_orb && !app_state.pending_drops.is_empty();
+        if let Ok(mut last) = app.state::<LastInventoryFullNotified>().0.lock() {
+            if pickup_blocked {
+                // While the window is open, the in-app "Inventory full" prompt
+                // (HomeView) already covers this — a system notification would
+                // just be noise on top of it. Deliberately leave `last` unset
+                // in that case rather than marking it notified, so the alert
+                // still fires the moment the user hides the window with the
+                // block still unresolved, instead of being silently skipped
+                // for the rest of this blocking episode.
+                if !*last && !tray::is_window_visible() {
+                    send_notification(
+                        app,
+                        "Inventory full",
+                        "Your Greedy Spirit found something but there's no room for it. Free up a slot to keep collecting.",
+                        None,
+                    );
+                    *last = true;
+                }
+            } else {
+                *last = false;
+            }
+        }
+
         // Show server-sent notifications (item drops, etc.)
         for notif in &sync_resp.notifications {
             if notif.log_only.unwrap_or(false) {
@@ -2133,6 +2179,7 @@ pub fn run() {
         .manage(PendingDeepLink(Mutex::new(None)))
         .manage(LastTradeNotified(Mutex::new(None)))
         .manage(LastFriendNotified(Mutex::new(None)))
+        .manage(LastInventoryFullNotified(Mutex::new(false)))
         .invoke_handler(tauri::generate_handler![
             get_state,
             login,
