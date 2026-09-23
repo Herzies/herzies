@@ -10,14 +10,18 @@ import { PixelIcon } from "./PixelIcon";
 
 /** Bespoke 16x16 pip per item id, depicting what that specific item actually
  * is or does (e.g. the headphones item gets an actual pair of headphones)
- * rather than its generic type shape. Falls back to `GRIDS` below for any
- * item without one yet — e.g. a newly added item.
+ * rather than its generic type shape, painted per-pixel rather than in one
+ * solid tint — `grid` indexes into `palette` per cell ('.' empty, '0'-'9'/
+ * 'a'-'f' a palette slot). Falls back to `GRIDS` below for any item without
+ * one yet — e.g. a newly added item.
  *
  * Lives in its own JSON file (rather than inline here) so the icon-editor
  * tool (`pnpm icon-editor`, see `tools/icon-editor/`) can read and overwrite
- * it directly — editing a shape there and saving takes effect immediately,
- * the same live-reload any other source edit gets. */
-const ITEM_ICON_GRIDS: Partial<Record<string, string[]>> = rawItemIconGrids;
+ * it directly — painting it there and saving takes effect immediately, the
+ * same live-reload any other source edit gets. */
+const ITEM_ICON_GRIDS: Partial<
+  Record<string, { grid: string[]; palette: string[] }>
+> = rawItemIconGrids;
 
 // Every item is a card (the store's buy tab is literally called "Cards"), so
 // each type icon is the same chamfered-corner card outline with a small pip
@@ -132,17 +136,43 @@ export function ItemTypeIcon({
   className?: string;
 }) {
   const type = getItemType(item);
-  const grid = ITEM_ICON_GRIDS[item.id] ?? GRIDS[type];
+  const bespoke = ITEM_ICON_GRIDS[item.id];
   const set = getItemSet(item.id);
+
+  if (set?.visual) {
+    // A set's shared visual clue (e.g. Prismatic's rainbow) overrides
+    // whatever this item's own icon was painted — only its shape carries
+    // over (any painted cell counts as filled) — so members read as related
+    // regardless of their individual icon's colours.
+    const shape = (bespoke?.grid ?? GRIDS[type]).map((row) =>
+      row.replace(/[^.]/g, "#"),
+    );
+    return (
+      <PixelIcon
+        grid={shape}
+        className={className}
+        gradient={set.visual.gradient}
+      />
+    );
+  }
+
+  if (bespoke) {
+    return (
+      <PixelIcon
+        grid={bespoke.grid}
+        palette={bespoke.palette}
+        className={className}
+      />
+    );
+  }
+
+  // No bespoke icon yet: the generic per-type pip, tinted with this item's
+  // own dominant-colour tint (sampled from its card art).
   return (
     <PixelIcon
-      grid={grid}
+      grid={GRIDS[type]}
       className={className}
-      // A set's shared visual clue (e.g. Prismatic's rainbow) overrides this
-      // item's own dominant-colour tint, so members read as related
-      // regardless of their individual icon shape.
-      style={set?.visual ? undefined : { color: getItemColor(item) }}
-      gradient={set?.visual?.gradient}
+      style={{ color: getItemColor(item) }}
     />
   );
 }

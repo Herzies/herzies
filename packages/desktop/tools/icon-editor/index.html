@@ -80,7 +80,6 @@
     background: #05060a;
     border: 1px solid #171a24;
   }
-  .cell.filled { background: #e6e6e6; }
 
   #preview-column {
     display: flex;
@@ -110,8 +109,44 @@
     border: 1px solid #2a2d3a;
   }
 
-  #controls {
+  #paint-row {
     margin-top: 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  #paint-row label { color: #8b8fa3; font-size: 12px; }
+  #paint-color-input {
+    width: 36px;
+    height: 28px;
+    padding: 0;
+    border: 1px solid #3d4258;
+    border-radius: 4px;
+    background: none;
+    cursor: pointer;
+  }
+  #paint-hint { color: #8b8fa3; font-size: 12px; }
+
+  #palette-row {
+    margin-top: 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  #palette-row .label { color: #8b8fa3; font-size: 12px; }
+  #palette-swatches { display: flex; gap: 6px; flex-wrap: wrap; }
+  .swatch {
+    width: 22px;
+    height: 22px;
+    border-radius: 4px;
+    border: 1px solid #3d4258;
+    cursor: pointer;
+    padding: 0;
+  }
+  .swatch.active { border-color: #e6e6e6; box-shadow: 0 0 0 1px #e6e6e6; }
+
+  #controls {
+    margin-top: 16px;
     display: flex;
     align-items: center;
     gap: 10px;
@@ -128,6 +163,7 @@
   button.action:hover { background: #262b3d; }
   button.action.primary { background: #2f5fd6; border-color: #2f5fd6; }
   button.action.primary:hover { background: #3a6ce0; }
+  button.action.active { background: #4a2f2f; border-color: #c76b6b; }
   #status { color: #8b8fa3; font-size: 12px; }
   #status.dirty { color: #e0b84d; }
   #status.saved { color: #57c785; }
@@ -142,7 +178,7 @@
 
   <div id="main">
     <h2 id="editor-title">Select an icon</h2>
-    <div class="hint">Click, or click-drag, to toggle pixels. Colour is applied automatically — this only edits the shape.</div>
+    <div class="hint">Click, or click-drag, to paint pixels with the selected colour below.</div>
 
     <div id="editor">
       <div id="big-grid"></div>
@@ -154,6 +190,19 @@
       </div>
     </div>
 
+    <div id="paint-row">
+      <label for="paint-color-input">Paint colour</label>
+      <input type="color" id="paint-color-input" />
+      <button class="action" id="use-auto-btn" type="button">Use auto colour</button>
+      <button class="action" id="eraser-btn" type="button">Eraser</button>
+      <span id="paint-hint"></span>
+    </div>
+
+    <div id="palette-row">
+      <span class="label">Palette</span>
+      <div id="palette-swatches"></div>
+    </div>
+
     <div id="controls">
       <button class="action primary" id="save-btn">Save to file</button>
       <button class="action" id="revert-btn">Revert</button>
@@ -162,11 +211,16 @@
   </div>
 
 <script>
+const MAX_PALETTE = 16;
+
 const state = {
   items: [],
-  grids: {},
+  grids: {}, // id -> { grid, palette }, last-saved (or loaded) state
   selectedId: null,
-  currentGrid: null,
+  currentGrid: null, // 16 rows, '.' or a hex digit indexing currentPalette
+  currentPalette: null, // hex colours, index-addressable by that digit
+  paintColor: "#ffffff",
+  eraseMode: false,
   dirty: false,
 };
 
@@ -174,6 +228,11 @@ const bigGridEl = document.getElementById("big-grid");
 const sidebarListEl = document.getElementById("sidebar-list");
 const statusEl = document.getElementById("status");
 const titleEl = document.getElementById("editor-title");
+const paintColorInputEl = document.getElementById("paint-color-input");
+const useAutoBtn = document.getElementById("use-auto-btn");
+const eraserBtn = document.getElementById("eraser-btn");
+const paintHintEl = document.getElementById("paint-hint");
+const paletteSwatchesEl = document.getElementById("palette-swatches");
 
 async function load() {
   const res = await fetch("/api/icons");
@@ -188,23 +247,40 @@ function itemById(id) {
   return state.items.find((item) => item.id === id);
 }
 
-function fillStyleFor(ctx, item) {
-  if (item.gradient && item.gradient.length > 0) {
-    const gradient = ctx.createLinearGradient(0, 0, 16, 16);
-    const denom = item.gradient.length > 1 ? item.gradient.length - 1 : 1;
-    item.gradient.forEach((color, i) => gradient.addColorStop(i / denom, color));
-    return gradient;
-  }
-  return item.color || "#e6e6e6";
+function colorForChar(ch, palette) {
+  if (ch === ".") return null;
+  return palette[parseInt(ch, 16)] ?? "#ff00ff";
 }
 
-function drawGrid(canvas, grid, item) {
+function buildGradient(ctx, stops) {
+  const gradient = ctx.createLinearGradient(0, 0, 16, 16);
+  const denom = stops.length > 1 ? stops.length - 1 : 1;
+  stops.forEach((color, i) => gradient.addColorStop(i / denom, color));
+  return gradient;
+}
+
+// `item` only contributes `.gradient` here — a set's shared visual clue
+// (e.g. Prismatic's rainbow) overrides this icon's own painted colours in
+// the real app, so the preview shows that too, even though the big grid
+// below still lets you paint (and save) the real per-pixel colours.
+function drawGrid(canvas, grid, palette, item) {
   const ctx = canvas.getContext("2d");
   ctx.clearRect(0, 0, 16, 16);
-  ctx.fillStyle = fillStyleFor(ctx, item);
+  if (item.gradient && item.gradient.length > 0) {
+    ctx.fillStyle = buildGradient(ctx, item.gradient);
+    for (let y = 0; y < 16; y++) {
+      for (let x = 0; x < 16; x++) {
+        if (grid[y][x] !== ".") ctx.fillRect(x, y, 1, 1);
+      }
+    }
+    return;
+  }
   for (let y = 0; y < 16; y++) {
     for (let x = 0; x < 16; x++) {
-      if (grid[y][x] === "#") ctx.fillRect(x, y, 1, 1);
+      const color = colorForChar(grid[y][x], palette);
+      if (!color) continue;
+      ctx.fillStyle = color;
+      ctx.fillRect(x, y, 1, 1);
     }
   }
 }
@@ -220,7 +296,8 @@ function renderSidebar() {
     const canvas = document.createElement("canvas");
     canvas.width = 16;
     canvas.height = 16;
-    drawGrid(canvas, state.grids[item.id], item);
+    const stored = state.grids[item.id];
+    drawGrid(canvas, stored.grid, stored.palette, item);
 
     const label = document.createElement("span");
     label.textContent = item.name;
@@ -240,14 +317,53 @@ function updateSelectedRowStyles() {
 
 function selectItem(id) {
   if (state.dirty && !confirm("Discard unsaved changes to this icon?")) return;
+  const stored = state.grids[id];
   state.selectedId = id;
-  state.currentGrid = [...state.grids[id]];
+  state.currentGrid = [...stored.grid];
+  state.currentPalette = [...stored.palette];
+  state.paintColor = stored.palette[0] ?? itemById(id).autoColor;
+  state.eraseMode = false;
   state.dirty = false;
   updateSelectedRowStyles();
   titleEl.textContent = itemById(id).name;
   renderBigGrid();
   renderPreview();
+  renderPaletteSwatches();
+  updatePaintControls();
   setStatus("");
+}
+
+function updatePaintControls() {
+  const item = itemById(state.selectedId);
+  if (!item) return;
+  paintColorInputEl.value = state.paintColor;
+  eraserBtn.classList.toggle("active", state.eraseMode);
+  paintHintEl.textContent =
+    item.gradient && item.gradient.length > 0
+      ? "This item is in a set with a shared gradient — the app shows that instead of whatever you paint here, but painting still saves."
+      : "";
+}
+
+function renderPaletteSwatches() {
+  paletteSwatchesEl.innerHTML = "";
+  state.currentPalette.forEach((color) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "swatch";
+    btn.style.background = color;
+    btn.title = color;
+    btn.classList.toggle(
+      "active",
+      !state.eraseMode && color.toLowerCase() === state.paintColor.toLowerCase(),
+    );
+    btn.addEventListener("click", () => {
+      state.eraseMode = false;
+      state.paintColor = color;
+      updatePaintControls();
+      renderPaletteSwatches();
+    });
+    paletteSwatchesEl.appendChild(btn);
+  });
 }
 
 function renderBigGrid() {
@@ -255,9 +371,11 @@ function renderBigGrid() {
   for (let y = 0; y < 16; y++) {
     for (let x = 0; x < 16; x++) {
       const cell = document.createElement("div");
-      cell.className = "cell" + (state.currentGrid[y][x] === "#" ? " filled" : "");
+      cell.className = "cell";
       cell.dataset.x = String(x);
       cell.dataset.y = String(y);
+      const color = colorForChar(state.currentGrid[y][x], state.currentPalette);
+      cell.style.background = color ?? "#05060a";
       bigGridEl.appendChild(cell);
     }
   }
@@ -265,10 +383,33 @@ function renderBigGrid() {
 
 function renderPreview() {
   const item = itemById(state.selectedId);
-  drawGrid(document.getElementById("preview-canvas"), state.currentGrid, item);
-  drawGrid(document.getElementById("preview-canvas-4x"), state.currentGrid, item);
+  drawGrid(document.getElementById("preview-canvas"), state.currentGrid, state.currentPalette, item);
+  drawGrid(document.getElementById("preview-canvas-4x"), state.currentGrid, state.currentPalette, item);
   const thumb = sidebarListEl.querySelector(`.item-row[data-id="${state.selectedId}"] canvas`);
-  if (thumb) drawGrid(thumb, state.currentGrid, item);
+  if (thumb) drawGrid(thumb, state.currentGrid, state.currentPalette, item);
+}
+
+// Returns the grid character to paint with right now (a palette digit, or
+// "." for the eraser), adding `state.paintColor` to the palette first if
+// it's a new colour. Returns null if the palette is already full and the
+// colour isn't in it.
+function charToPaintWith() {
+  if (state.eraseMode) return ".";
+  const wanted = state.paintColor.toLowerCase();
+  let idx = state.currentPalette.findIndex((c) => c.toLowerCase() === wanted);
+  if (idx === -1) {
+    if (state.currentPalette.length >= MAX_PALETTE) {
+      setStatus(
+        `Palette full (${MAX_PALETTE} colours) — pick an existing swatch instead.`,
+        "error",
+      );
+      return null;
+    }
+    state.currentPalette = [...state.currentPalette, state.paintColor];
+    idx = state.currentPalette.length - 1;
+    renderPaletteSwatches();
+  }
+  return idx.toString(16);
 }
 
 function setCell(x, y, value) {
@@ -276,23 +417,24 @@ function setCell(x, y, value) {
   if (row[x] === value) return;
   state.currentGrid[y] = row.slice(0, x) + value + row.slice(x + 1);
   const idx = y * 16 + x;
-  bigGridEl.children[idx].classList.toggle("filled", value === "#");
+  const color = colorForChar(value, state.currentPalette);
+  bigGridEl.children[idx].style.background = color ?? "#05060a";
   state.dirty = true;
   renderPreview();
   setStatus("Unsaved changes", "dirty");
 }
 
 let painting = false;
-let paintValue = "#";
+let paintValue = ".";
 
 bigGridEl.addEventListener("mousedown", (e) => {
   const cell = e.target.closest(".cell");
   if (!cell || !state.currentGrid) return;
-  const x = Number(cell.dataset.x);
-  const y = Number(cell.dataset.y);
-  paintValue = state.currentGrid[y][x] === "#" ? "." : "#";
+  const value = charToPaintWith();
+  if (value === null) return;
+  paintValue = value;
   painting = true;
-  setCell(x, y, paintValue);
+  setCell(Number(cell.dataset.x), Number(cell.dataset.y), paintValue);
   e.preventDefault();
 });
 bigGridEl.addEventListener("mouseover", (e) => {
@@ -302,6 +444,28 @@ bigGridEl.addEventListener("mouseover", (e) => {
   setCell(Number(cell.dataset.x), Number(cell.dataset.y), paintValue);
 });
 window.addEventListener("mouseup", () => { painting = false; });
+
+paintColorInputEl.addEventListener("input", () => {
+  state.eraseMode = false;
+  state.paintColor = paintColorInputEl.value;
+  updatePaintControls();
+  renderPaletteSwatches();
+});
+
+useAutoBtn.addEventListener("click", () => {
+  const item = itemById(state.selectedId);
+  if (!item) return;
+  state.eraseMode = false;
+  state.paintColor = item.autoColor;
+  updatePaintControls();
+  renderPaletteSwatches();
+});
+
+eraserBtn.addEventListener("click", () => {
+  state.eraseMode = !state.eraseMode;
+  updatePaintControls();
+  renderPaletteSwatches();
+});
 
 function setStatus(text, kind) {
   statusEl.textContent = text;
@@ -315,11 +479,14 @@ document.getElementById("save-btn").addEventListener("click", async () => {
     const res = await fetch(`/api/icons/${encodeURIComponent(state.selectedId)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ grid: state.currentGrid }),
+      body: JSON.stringify({ grid: state.currentGrid, palette: state.currentPalette }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || res.statusText);
-    state.grids[state.selectedId] = [...state.currentGrid];
+    state.grids[state.selectedId] = {
+      grid: [...state.currentGrid],
+      palette: [...state.currentPalette],
+    };
     state.dirty = false;
     setStatus("Saved — the app will pick this up automatically", "saved");
   } catch (err) {
@@ -329,10 +496,16 @@ document.getElementById("save-btn").addEventListener("click", async () => {
 
 document.getElementById("revert-btn").addEventListener("click", () => {
   if (!state.selectedId) return;
-  state.currentGrid = [...state.grids[state.selectedId]];
+  const stored = state.grids[state.selectedId];
+  state.currentGrid = [...stored.grid];
+  state.currentPalette = [...stored.palette];
+  state.paintColor = stored.palette[0] ?? itemById(state.selectedId).autoColor;
+  state.eraseMode = false;
   state.dirty = false;
   renderBigGrid();
   renderPreview();
+  renderPaletteSwatches();
+  updatePaintControls();
   setStatus("");
 });
 
