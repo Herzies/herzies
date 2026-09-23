@@ -947,11 +947,18 @@ pub async fn api_fetch_active_events(client: &Client) -> Option<Vec<GameEvent>> 
     let url = format!("{}/events-active", functions_base());
     let anon = supabase_anon_key();
     let resp = api_fetch_full(client, reqwest::Method::GET, &url, None, Some(&anon)).await?;
-    if !resp.status().is_success() {
+    let status = resp.status();
+    if !status.is_success() {
+        log::warn!("events-active fetch failed: HTTP {status}");
         return None;
     }
-    let data: ActiveEventsResponse = resp.json().await.ok()?;
-    Some(data.events)
+    match resp.json::<ActiveEventsResponse>().await {
+        Ok(data) => Some(data.events),
+        Err(e) => {
+            log::warn!("events-active response parse failed: {e}");
+            None
+        }
+    }
 }
 
 /// Grants one play of a hint's audio snippet and returns a short-lived
