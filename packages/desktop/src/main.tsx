@@ -26,7 +26,7 @@ import { TabBar, type View } from "./components/TabBar";
 import { TradeView } from "./components/TradeView";
 import { UpdateAvailableOverlay } from "./components/UpdateAvailableOverlay";
 import { WhatsNewOverlay } from "./components/WhatsNewOverlay";
-import { useOptimisticEquipped } from "./hooks/useOptimisticEquipped";
+import { useOptimisticUnits } from "./hooks/useOptimisticUnits";
 import { useTradeRequests } from "./hooks/useTradeRequests";
 import { cn } from "./lib/utils";
 import { RELEASE_NOTES } from "./release-notes";
@@ -63,6 +63,7 @@ function App() {
     inventory: null,
     inventoryCurrency: 0,
     itemUpgrades: {},
+    units: [],
     friends: {},
     pendingTradeRequest: null,
     pendingFriendRequest: null,
@@ -70,22 +71,34 @@ function App() {
     outgoingFriendRequests: [],
     pendingDrops: [],
   });
-  // Equipping is predicted locally so it lands instantly (see
-  // useOptimisticEquipped). Overlaying it onto `state` here, rather than
-  // threading it to each consumer, is what keeps the 3D herzie, the deck row,
-  // the bank grid and the "inventory full" check from disagreeing for a frame.
+  // Equipping, selling and dice upgrades are predicted locally so they land
+  // instantly (see useOptimisticUnits). Overlaying the result onto `state` here,
+  // rather than threading it to each consumer, is what keeps the 3D herzie, the
+  // deck row, the bank grid and the "inventory full" check from disagreeing for
+  // a frame.
   const {
     equipped: effectiveEquipped,
+    units: effectiveUnits,
+    predictedInventory,
     toggleEquip,
-    predictUnequip,
-  } = useOptimisticEquipped(rawState.equipped);
-  // Memoized on both inputs, each of which is itself identity-stable while its
+    predict,
+  } = useOptimisticUnits(rawState.equipped, rawState.units);
+  // Memoized on its inputs, each of which is itself identity-stable while its
   // content is unchanged — so this object only changes when something really
   // did, and an unrelated App re-render (a view switch, a local toggle) doesn't
   // hand every view a new `state` and re-render the lot.
+  //
+  // `inventory` (the counts) follows the predicted copies only while something
+  // is predicted: otherwise it stays the server's own, which is all there is to
+  // show before copies have arrived (e.g. a cache from before they existed).
   const state = useMemo(
-    () => ({ ...rawState, equipped: effectiveEquipped }),
-    [rawState, effectiveEquipped],
+    () => ({
+      ...rawState,
+      equipped: effectiveEquipped,
+      units: effectiveUnits,
+      inventory: predictedInventory ?? rawState.inventory,
+    }),
+    [rawState, effectiveEquipped, effectiveUnits, predictedInventory],
   );
   // Mounted here, at the root, rather than inside a view: trade invites have to
   // keep arriving while the window is hidden, and every view below is unmounted
@@ -757,12 +770,20 @@ function App() {
             <InventoryView
               herzie={herzie}
               initialItem={deepLinkItem}
-              inventory={state.inventory}
+              // An inventory with items but no copies is a cache from before
+              // copies existed: laying out an empty bank from it would show the
+              // player nothing until the first sync (and indefinitely offline),
+              // so it counts as not loaded yet.
+              loaded={
+                state.inventory !== null &&
+                (state.units.length > 0 ||
+                  Object.keys(state.inventory).length === 0)
+              }
+              units={state.units}
               currency={state.inventoryCurrency}
-              itemUpgrades={state.itemUpgrades}
               equipped={state.equipped}
               onToggleEquip={toggleEquip}
-              onPredictUnequip={predictUnequip}
+              onPredictUnits={predict}
               onLog={addLog}
               active={view === "inventory"}
             />
@@ -795,7 +816,7 @@ function App() {
               herzie={herzie}
               initialTarget={tradeTarget}
               initialTradeId={incomingTradeId}
-              inventory={state.inventory}
+              units={state.units}
               currency={state.inventoryCurrency}
               onActiveChange={setTradeActive}
               onClose={() => {

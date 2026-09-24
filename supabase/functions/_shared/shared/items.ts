@@ -244,10 +244,201 @@ export function normalizeEquipped(raw: unknown): Equipped {
   return out;
 }
 
-/** Why an equip/unequip can't be applied to a given Equipped. Ownership and
- * "is this item even equipable" aren't here — they need the inventory/catalog
- * the caller holds, and stay the caller's job (see the equip route). */
+/** Where a unit is worn: one of the stored slot keys, or "modifier" for the
+ * capped list. Mirrors item_units.equipped_slot. */
+export type UnitSlot = EquippedSlot | "modifier";
+
+/**
+ * One owned copy of an item — the unit of ownership. It is what a bank tile is,
+ * what gets sold, traded and worn, and what a dice upgrade lands on.
+ *
+ * Until these existed an item was only a count against its catalog id, so
+ * anything that could differ between two copies (an upgrade level) could only
+ * be a property of the whole item type: upgrade one Box of Boom and every Box
+ * of Boom was upgraded.
+ *
+ * `inventory`/`equipped`/`itemUpgrades` still exist as derived views (the
+ * server recomputes them from the units) for readers that only need "how many"
+ * or "which ids are worn"; anything that has to tell copies apart reads these.
+ */
+export interface ItemUnit {
+  id: string;
+  itemId: string;
+  upgradeLevel: number;
+  equippedSlot: UnitSlot | null;
+}
+
+const UNIT_SLOTS: readonly string[] = [...EQUIPPED_SLOTS, "modifier"];
+
+/** Parse an untrusted units payload (an API response, a local cache), dropping
+ * anything malformed rather than trusting its shape. */
+export function normalizeUnits(raw: unknown): ItemUnit[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ItemUnit[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const r = entry as Record<string, unknown>;
+    if (typeof r.id !== "string" || typeof r.itemId !== "string") continue;
+    out.push({
+      id: r.id,
+      itemId: r.itemId,
+      upgradeLevel: typeof r.upgradeLevel === "number" ? r.upgradeLevel : 0,
+      equippedSlot:
+        typeof r.equippedSlot === "string" &&
+        UNIT_SLOTS.includes(r.equippedSlot)
+          ? (r.equippedSlot as UnitSlot)
+          : null,
+    });
+  }
+  return out;
+}
+
+/** `{itemId: count}` — the legacy inventory shape, derived. */
+export function unitsToInventory(
+  units: readonly ItemUnit[],
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const u of units) out[u.itemId] = (out[u.itemId] ?? 0) + 1;
+  return out;
+}
+
+/** The id-keyed `Equipped` shape (what the renderer draws from), derived. The
+ * modifier list keeps the order the units arrive in. */
+export function unitsToEquipped(units: readonly ItemUnit[]): Equipped {
+  const equipped: Equipped = {};
+  const modifier: string[] = [];
+  for (const u of units) {
+    if (u.equippedSlot === null) continue;
+    if (u.equippedSlot === "modifier") modifier.push(u.itemId);
+    else equipped[u.equippedSlot] = u.itemId;
+  }
+  if (modifier.length > 0) equipped.modifier = modifier;
+  return equipped;
+}
+
+/**
+ * One tile in the bank grid. A stack of interchangeable copies (a stackable
+ * item, which never carries per-unit state) is one tile with a count; every
+ * other copy is a tile of its own, since each has its own upgrade level.
+ */
+export interface BankTile {
+  /** A stable identity for arranging tiles in the grid: the copy's own id for
+   * a single copy, `stack:<itemId>` for a stack. */
+  key: string;
+  itemId: string;
+  /** The copies behind this tile — one for a single copy, every unworn copy of
+   * a stack (oldest first). */
+  unitIds: string[];
+  /** Upgrade level of a single copy; always 0 for a stack. */
+  upgradeLevel: number;
+}
+
+/**
+ * The bank grid's tiles: every unworn copy in the "deck" category, with a
+ * stackable item's copies folded into one tile. Always exactly as many tiles as
+ * `bankSlotsUsed` counts slots — they are the same rule, one returning the
+ * tiles and the other their number.
+ */
+export function bankTiles(
+  units: readonly ItemUnit[],
+  lookup: BankItemLookup = catalogBankLookup,
+): BankTile[] {
+  const tiles: BankTile[] = [];
+  const stacks = new Map<string, BankTile>();
+  for (const u of units) {
+    if (u.equippedSlot !== null) continue;
+    const info = lookup(u.itemId);
+    if (info && info.category !== "deck") continue;
+    if (info?.stackable) {
+      const stack = stacks.get(u.itemId);
+      if (stack) {
+        stack.unitIds.push(u.id);
+      } else {
+        const tile: BankTile = {
+          key: `stack:${u.itemId}`,
+          itemId: u.itemId,
+          unitIds: [u.id],
+          upgradeLevel: 0,
+        };
+        stacks.set(u.itemId, tile);
+        tiles.push(tile);
+      }
+    } else {
+      tiles.push({
+        key: u.id,
+        itemId: u.itemId,
+        unitIds: [u.id],
+        upgradeLevel: u.upgradeLevel,
+      });
+    }
+  }
+  return tiles;
+}
+
+/** Copies of one item, plainest first — unworn before worn, then lowest level,
+ * then in the order given (oldest first). What "sell/offer N of this item"
+ * means when it can't say which copies: a spare goes before one you've
+ * invested in or are wearing. */
+export function unitsPlainestFirst(
+  units: readonly ItemUnit[],
+  itemId: string,
+): ItemUnit[] {
+  return units
+    .filter((u) => u.itemId === itemId)
+    .map((u, order) => ({ u, order }))
+    .sort(
+      (a, b) =>
+        Number(a.u.equippedSlot !== null) - Number(b.u.equippedSlot !== null) ||
+        a.u.upgradeLevel - b.u.upgradeLevel ||
+        a.order - b.order,
+    )
+    .map(({ u }) => u);
+}
+
+/** The ids of the `quantity` plainest copies of an item, or null if the player
+ * doesn't own that many. */
+export function pickPlainestUnitIds(
+  units: readonly ItemUnit[],
+  itemId: string,
+  quantity: number,
+): string[] | null {
+  const ordered = unitsPlainestFirst(units, itemId);
+  return ordered.length >= quantity
+    ? ordered.slice(0, quantity).map((u) => u.id)
+    : null;
+}
+
+/** Copies of one item, best first — worn before unworn, then highest level,
+ * then in the order given. The copy worth keeping when the rest are spares. */
+export function unitsBestFirst(
+  units: readonly ItemUnit[],
+  itemId: string,
+): ItemUnit[] {
+  return units
+    .filter((u) => u.itemId === itemId)
+    .map((u, order) => ({ u, order }))
+    .sort(
+      (a, b) =>
+        Number(b.u.equippedSlot !== null) - Number(a.u.equippedSlot !== null) ||
+        b.u.upgradeLevel - a.u.upgradeLevel ||
+        a.order - b.order,
+    )
+    .map(({ u }) => u);
+}
+
+/** The copy of an item that "the item" most plausibly means: the one worn if
+ * any, else the best one owned. For surfaces that only know an item id. */
+export function bestUnitOf(
+  units: readonly ItemUnit[],
+  itemId: string,
+): ItemUnit | undefined {
+  return unitsBestFirst(units, itemId)[0];
+}
+
+/** Why an equip/unequip can't be applied. Whether an item is equipable at all
+ * is the caller's lookup (the `equipSlot` it passes in). */
 export type EquipRejection =
+  | "not-owned"
   | "already-equipped"
   | "not-equipped"
   | "max-modifiers"
@@ -255,77 +446,88 @@ export type EquipRejection =
   | "no-slot";
 
 export type EquipOutcome =
-  | { ok: true; equipped: Equipped }
+  | { ok: true; units: ItemUnit[] }
   | { ok: false; reason: EquipRejection };
 
 /**
- * The single source of truth for what equipping or unequipping does to
- * `Equipped`. The server applies it to persist the change and the desktop
- * client applies it to predict the result optimistically — sharing one
- * function is what lets the optimistic state match the server's byte for byte,
- * so the real response lands as a no-op instead of a visible correction.
+ * What equipping or unequipping one specific unit does. The equip_unit RPC does
+ * the same thing under a row lock to persist it; the desktop applies this to
+ * predict the result, and sharing the rules is what lets the prediction match
+ * the server's answer so the real response lands as a no-op rather than a
+ * visible correction.
  *
- * Pure: never mutates `current`. `equipSlot` is passed in rather than looked up
- * because the server reads it from the DB row (`equip_slot`) and the client
- * from the bundled catalog (`getItem(...).equipSlot`).
+ * Pure: never mutates `units`. `equipSlot` is passed in because the server
+ * reads it from the items row and the client from the bundled catalog.
  *
- * Note that equipping into an occupied single-value slot **displaces** the
- * incumbent rather than refusing — that's deliberate (swapping a hat shouldn't
- * need an explicit unequip first), and the displaced item returns to the bank.
+ * Two behaviours worth knowing:
+ *  - Equipping a copy of an item whose OTHER copy is worn is a swap, never a
+ *    second equip — one copy of an item worn at a time has always been the
+ *    rule, and it's what stops a stat being counted twice.
+ *  - Equipping into an occupied single-value slot displaces the incumbent
+ *    (swapping a hat shouldn't need an explicit unequip first); the displaced
+ *    copy returns to the bank.
  */
 export function applyEquip(
-  current: Equipped,
-  itemId: string,
+  units: readonly ItemUnit[],
+  unitId: string,
   action: "equip" | "unequip",
   equipSlot: EquipSlot | undefined,
   side?: GroundSide,
 ): EquipOutcome {
-  const isEquipped =
-    findEquippedSlot(current, itemId) !== null ||
-    isModifierEquipped(current, itemId);
+  const unit = units.find((u) => u.id === unitId);
+  if (!unit) return { ok: false, reason: "not-owned" };
 
   if (action === "unequip") {
-    if (!isEquipped) return { ok: false, reason: "not-equipped" };
-    const equipped: Equipped = { ...current };
-    const slot = findEquippedSlot(current, itemId);
-    if (slot) {
-      delete equipped[slot];
-    } else {
-      const rest = (current.modifier ?? []).filter((id) => id !== itemId);
-      if (rest.length > 0) equipped.modifier = rest;
-      else delete equipped.modifier;
-    }
-    return { ok: true, equipped };
-  }
-
-  if (isEquipped) return { ok: false, reason: "already-equipped" };
-
-  const equipped: Equipped = { ...current };
-
-  if (equipSlot === "ground") {
-    if (side !== "left" && side !== "right") {
-      return { ok: false, reason: "missing-side" };
-    }
-    equipped[groundSlot(side)] = itemId;
-    return { ok: true, equipped };
-  }
-
-  if (equipSlot === "modifier") {
-    const worn = current.modifier ?? [];
-    if (worn.length >= MAX_MODIFIERS) {
-      return { ok: false, reason: "max-modifiers" };
-    }
-    equipped.modifier = [...worn, itemId];
-    return { ok: true, equipped };
+    if (unit.equippedSlot === null)
+      return { ok: false, reason: "not-equipped" };
+    return {
+      ok: true,
+      units: units.map((u) =>
+        u.id === unitId ? { ...u, equippedSlot: null } : u,
+      ),
+    };
   }
 
   if (!equipSlot) return { ok: false, reason: "no-slot" };
 
-  // Single-value slot — displaces whatever was worn there. No cast needed:
-  // ruling out "ground" and "modifier" above narrows EquipSlot to exactly the
-  // members EquippedSlot also has.
-  equipped[equipSlot] = itemId;
-  return { ok: true, equipped };
+  let slot: UnitSlot;
+  if (equipSlot === "ground") {
+    if (side !== "left" && side !== "right") {
+      return { ok: false, reason: "missing-side" };
+    }
+    slot = groundSlot(side);
+  } else {
+    // Ruling out "ground" narrows EquipSlot to exactly the members UnitSlot
+    // also has, so no cast is needed.
+    slot = equipSlot;
+  }
+
+  if (unit.equippedSlot === slot) {
+    return { ok: false, reason: "already-equipped" };
+  }
+
+  if (slot === "modifier") {
+    const others = units.filter(
+      (u) => u.equippedSlot === "modifier" && u.itemId !== unit.itemId,
+    ).length;
+    if (others >= MAX_MODIFIERS) return { ok: false, reason: "max-modifiers" };
+  }
+
+  return {
+    ok: true,
+    units: units.map((u) => {
+      if (u.id === unitId) return { ...u, equippedSlot: slot };
+      // The other worn copy of this item, if any — the swap.
+      if (u.itemId === unit.itemId && u.equippedSlot !== null) {
+        return { ...u, equippedSlot: null };
+      }
+      // Whoever held a single-value slot before.
+      if (slot !== "modifier" && u.equippedSlot === slot) {
+        return { ...u, equippedSlot: null };
+      }
+      return u;
+    }),
+  };
 }
 
 export type SellRejection = "not-sellable" | "not-enough";
@@ -333,88 +535,54 @@ export type SellRejection = "not-sellable" | "not-enough";
 export type SellOutcome =
   | {
       ok: true;
-      /** Inventory with the sold units removed (the id is dropped at zero). */
-      inventory: Record<string, number>;
+      units: ItemUnit[];
       earned: number;
       newCurrency: number;
-      /** Equip state after the sale — see the unequip note below. */
-      equipped: Equipped;
-      /** True when selling the last copy forced an unequip. */
-      unequipped: boolean;
-      /** item_upgrades with the sold id's entry cleared if this sale hit
-       * zero owned (same reference back otherwise) — see the note below. */
-      itemUpgrades: Record<string, number>;
     }
   | { ok: false; reason: SellRejection };
 
 /**
- * The single source of truth for what selling does. Server-side this computes
- * the row to persist; client-side it predicts the result so the grid and coin
- * move on click instead of after the round trip. Sharing one function is what
- * keeps the prediction identical to what the server will store.
+ * What selling specific units does. The sell_units RPC persists it under a row
+ * lock; the desktop predicts it so the grid and coin move on click instead of
+ * after the round trip.
  *
- * Pure: never mutates `inventory`, `equipped`, or `itemUpgrades`.
- *
- * Selling the last copy of an equipped item unequips it in the same operation —
- * ownership and equip state must never drift apart, and an item you no longer
- * own can't stay worn. Selling the last copy of an upgraded item clears its
- * item_upgrades entry the same way, for the same reason — otherwise
- * reacquiring the id later would grant a free upgrade.
+ * Pure: never mutates `units`. A worn copy that is sold simply stops being
+ * worn — it no longer exists — so ownership and equip state can't drift apart.
+ * `sellPriceOf` is the caller's price lookup (the items row on the server, the
+ * bundled catalog on the client); no price means not sellable.
  */
 export function applySell(
-  inventory: Record<string, number>,
+  units: readonly ItemUnit[],
   currency: number,
-  equipped: Equipped,
-  itemId: string,
-  quantity: number,
-  sellPrice: number | undefined,
-  itemUpgrades: Record<string, number> = {},
+  unitIds: readonly string[],
+  sellPriceOf: (itemId: string) => number | undefined,
 ): SellOutcome {
-  if (!sellPrice) return { ok: false, reason: "not-sellable" };
+  const wanted = new Set(unitIds);
+  if (wanted.size === 0) return { ok: false, reason: "not-enough" };
 
-  const owned = inventory[itemId] ?? 0;
-  if (owned < quantity) return { ok: false, reason: "not-enough" };
+  const chosen = units.filter((u) => wanted.has(u.id));
+  if (chosen.length !== wanted.size) return { ok: false, reason: "not-enough" };
 
-  const nextInventory = { ...inventory };
-  const newQty = owned - quantity;
-  let nextEquipped = equipped;
-  let unequipped = false;
-  let nextItemUpgrades = itemUpgrades;
-
-  if (newQty > 0) {
-    nextInventory[itemId] = newQty;
-  } else {
-    delete nextInventory[itemId];
-    // No copies left — it can't remain equipped. Reuses applyEquip's unequip
-    // branch so this agrees with an explicit unequip exactly.
-    const removal = applyEquip(equipped, itemId, "unequip", undefined);
-    if (removal.ok) {
-      nextEquipped = removal.equipped;
-      unequipped = true;
-    }
-    if (itemId in itemUpgrades) {
-      nextItemUpgrades = { ...itemUpgrades };
-      delete nextItemUpgrades[itemId];
-    }
+  let earned = 0;
+  for (const u of chosen) {
+    const price = sellPriceOf(u.itemId);
+    if (!price) return { ok: false, reason: "not-sellable" };
+    earned += price;
   }
 
-  const earned = quantity * sellPrice;
   return {
     ok: true,
-    inventory: nextInventory,
+    units: units.filter((u) => !wanted.has(u.id)),
     earned,
     newCurrency: currency + earned,
-    equipped: nextEquipped,
-    unequipped,
-    itemUpgrades: nextItemUpgrades,
   };
 }
 
 /** How many times a card can be upgraded — Power Dice 1 and any future dice
  * item share this cap. The level-cap check inside apply_item_upgrade
- * (00078_dice_and_item_upgrades.sql) can't import this constant — it's
- * duplicated there as a bare 3, and the two must stay in sync (same
- * arrangement as GROUND_DROP_CAP/BANK_SLOT_COUNT). */
+ * (00079_item_units.sql) and item_units.upgrade_level's CHECK can't import this
+ * constant — it's duplicated there as a bare 3, and they must stay in sync
+ * (same arrangement as GROUND_DROP_CAP/BANK_SLOT_COUNT). */
 export const MAX_ITEM_UPGRADE_LEVEL = 3;
 
 export type ItemUpgradeRejection =
@@ -427,63 +595,53 @@ export type ItemUpgradeRejection =
 export type ItemUpgradeOutcome =
   | {
       ok: true;
-      /** Inventory with one dice consumed (the id is dropped at zero). */
-      inventory: Record<string, number>;
-      /** item_upgrades with the target's level bumped by one. */
-      itemUpgrades: Record<string, number>;
+      /** Units with one die consumed and the target's level raised by one. */
+      units: ItemUnit[];
       newLevel: number;
     }
   | { ok: false; reason: ItemUpgradeRejection };
 
 /**
- * The single source of truth for what applying a dice item to a target card
- * does. Server-side this computes the row to persist (the apply_item_upgrade
- * RPC re-validates ownership/level-cap against the DB row under lock);
- * client-side it predicts the result so the target's "+N" appears on click
- * instead of after the round trip.
+ * What applying a die to one specific card does — raises THAT unit's level and
+ * no other's, which is the whole point. The apply_item_upgrade RPC re-validates
+ * ownership and the level cap under a row lock; the desktop predicts it so the
+ * "+N" appears on click instead of after the round trip.
  *
- * Pure: never mutates `inventory` or `itemUpgrades`. Ownership/quantity/level
- * checks mirror what the RPC re-checks server-side; "is this a statted card"
- * can only be checked here (and in the upgrade API route) since `stats`
+ * Pure: never mutates `units`. Dice are fungible, so which die is consumed
+ * doesn't matter (the first unworn one, matching the RPC). "Is this a statted
+ * card" can only be checked here (and in the upgrade API route) since `stats`
  * lives only in this TS catalog, never in the DB `items` table.
  */
 export function applyItemUpgrade(
-  inventory: Record<string, number>,
-  itemUpgrades: Record<string, number>,
+  units: readonly ItemUnit[],
   diceItemId: string,
-  targetItemId: string,
+  targetUnitId: string,
 ): ItemUpgradeOutcome {
-  const diceDef = getItem(diceItemId);
-  if (!diceDef?.dice) return { ok: false, reason: "not-dice" };
-  if ((inventory[diceItemId] ?? 0) < 1) {
-    return { ok: false, reason: "dice-not-owned" };
-  }
-  if ((inventory[targetItemId] ?? 0) < 1) {
-    return { ok: false, reason: "target-not-owned" };
-  }
+  if (!getItem(diceItemId)?.dice) return { ok: false, reason: "not-dice" };
 
-  const targetStats = getItem(targetItemId)?.stats;
+  const dice = units.find(
+    (u) => u.itemId === diceItemId && u.equippedSlot === null,
+  );
+  if (!dice) return { ok: false, reason: "dice-not-owned" };
+
+  const target = units.find((u) => u.id === targetUnitId);
+  if (!target) return { ok: false, reason: "target-not-owned" };
+
+  const targetStats = getItem(target.itemId)?.stats;
   if (!targetStats || Object.keys(targetStats).length === 0) {
     return { ok: false, reason: "not-statted" };
   }
 
-  const currentLevel = itemUpgrades[targetItemId] ?? 0;
-  if (currentLevel >= MAX_ITEM_UPGRADE_LEVEL) {
+  if (target.upgradeLevel >= MAX_ITEM_UPGRADE_LEVEL) {
     return { ok: false, reason: "max-level" };
   }
 
-  const nextInventory = { ...inventory };
-  const remaining = (nextInventory[diceItemId] ?? 0) - 1;
-  if (remaining > 0) nextInventory[diceItemId] = remaining;
-  else delete nextInventory[diceItemId];
-
-  const newLevel = currentLevel + 1;
-  const nextItemUpgrades = { ...itemUpgrades, [targetItemId]: newLevel };
-
+  const newLevel = target.upgradeLevel + 1;
   return {
     ok: true,
-    inventory: nextInventory,
-    itemUpgrades: nextItemUpgrades,
+    units: units
+      .filter((u) => u.id !== dice.id)
+      .map((u) => (u.id === target.id ? { ...u, upgradeLevel: newLevel } : u)),
     newLevel,
   };
 }
@@ -515,7 +673,9 @@ export interface ItemDef {
   frames: string[][]; // Each frame is an array of lines (with HTML color spans)
   /** Whether owning more than one is allowed (gates re-buying from the
    * store). Independent of equipable/equipSlot — see getItemType — so an
-   * item (e.g. First Edition Card) can be both stackable and equipable. */
+   * item can be both stackable and equipable. A stackable item must never
+   * carry per-unit state (an upgrade level), or its copies stop being
+   * interchangeable and can't share a tile. */
   stackable?: boolean;
   equipable?: boolean;
   /** Catalog category; ground items occupy ground_left or ground_right when equipped,
@@ -1182,25 +1342,37 @@ function renderCdFrame(yAngle: number): string[] {
 // (CORNERS/UVS above) with a painted icon: a rotating rectangle, never an
 // actual solid. Dice needed to read as dice rather than "a card with dots
 // on it," so this is a second, independent rig: a real cube with 6 faces,
-// each carrying its own die value (opposite faces sum to 7, same as a
-// physical die), lit per-face so the faces read as distinct planes as it
-// spins. It reuses `project`/`triUV` (the same projection and barycentric
-// UV lookup the card rig uses) but has its own geometry, since a cube's
-// faces need real back-face culling that a single flat quad never does —
-// see DICE_FACES below.
+// each carrying the same single red-on-white pip (see dicePipIcon — this
+// isn't a physical 1-6 die), lit per-face so the faces read as distinct
+// planes as it spins. It reuses `project`/`triUV` (the same projection and
+// barycentric UV lookup the card rig uses) but has its own geometry, since
+// a cube's faces need real back-face culling that a single flat quad never
+// does — see DICE_FACES below.
 
 /** Cube half-extent. Unlike the card's CARD_HW/CARD_HH — flat corners at
  * z=0, so `project`'s perspective term never inflates their screen extent
  * beyond a fixed bound — a cube's corners move in depth as it rotates, and
  * the nearest corner at a 3-face angle projects noticeably larger than the
- * same corner would flat. Copying the card's half-width here clipped off
- * the canvas edge on more than a third of the 36 frames. This value is
- * calibrated, not guessed: project all 8 corners at every rotation frame,
- * take the worst-case (nearest-corner) screen extent, and pick H so that
- * stays inside the SW×SH canvas with a margin — width is the binding
- * constraint here, not height. Re-run that check before changing this
- * number, DICE_PITCH, or SW/SH/CAM. */
-const DICE_H = 0.58;
+ * same corner would flat. This value is calibrated, not guessed: project
+ * all 8 corners at every rotation frame, take the worst-case (nearest-
+ * corner) screen extent, and pick H so that stays inside the SW×SH canvas
+ * with a margin — width is the binding constraint here, not height (at
+ * this pitch, the worst-case corner hits ~14.0/15 half-widths vs ~4.6/9
+ * half-heights). Re-run that check before changing this number,
+ * DICE_PITCH, or SW/SH/CAM — there isn't much room left above this value:
+ * 0.64 is where the margin hits zero.
+ *
+ * This is sized to use roughly as much of the character canvas as the card
+ * rig does — NOT shrunk to make the die look smaller than a card. Every
+ * item's preview gets content-cropped and rescaled to fill a fixed
+ * on-screen box (see `fitMetrics` in item-canvas.ts), so a smaller DICE_H
+ * doesn't render a visually smaller die — it renders the same box filled by
+ * fewer source characters stretched to cover it, i.e. strictly lower
+ * resolution for no size change (this was tried; that's why this comment
+ * exists). "Dice are smaller than cards" is instead handled entirely at
+ * that display layer, via `previewFillFraction` — this constant should
+ * only ever change to fix clipping or genuinely add/remove source detail. */
+const DICE_H = 0.6;
 
 /** Tilts the cube back before it spins around Y, the same way TILT gives
  * the flat card a cosmetic diagonal — here it's load-bearing: without it,
@@ -1221,76 +1393,114 @@ const DICE_CORNERS = {
 
 /** The cube's 6 faces, each 4 corners wound CCW as seen from outside (so
  * the cross product of its first two edges gives an outward-facing normal —
- * see the culling check in renderDiceFrame) plus the pip count on that
- * face. Opposite faces (front/back, left/right, top/bottom) sum to 7, same
- * as a physical die — which face ends up toward the camera at any given
- * frame is just whichever the rotation puts there. */
-const DICE_FACES: { corners: [V3, V3, V3, V3]; value: number }[] = [
-  { corners: [DICE_CORNERS.lbf, DICE_CORNERS.rbf, DICE_CORNERS.rtf, DICE_CORNERS.ltf], value: 2 },
-  { corners: [DICE_CORNERS.rbb, DICE_CORNERS.lbb, DICE_CORNERS.ltb, DICE_CORNERS.rtb], value: 5 },
-  { corners: [DICE_CORNERS.rbb, DICE_CORNERS.rbf, DICE_CORNERS.rtf, DICE_CORNERS.rtb], value: 3 },
-  { corners: [DICE_CORNERS.lbf, DICE_CORNERS.lbb, DICE_CORNERS.ltb, DICE_CORNERS.ltf], value: 4 },
-  { corners: [DICE_CORNERS.ltf, DICE_CORNERS.rtf, DICE_CORNERS.rtb, DICE_CORNERS.ltb], value: 1 },
-  { corners: [DICE_CORNERS.lbb, DICE_CORNERS.rbb, DICE_CORNERS.rbf, DICE_CORNERS.lbf], value: 6 },
+ * see the culling check in renderDiceFrame). Every face gets the same
+ * single centred pip (see dicePipIcon) — this is Power Dice's own item, not
+ * a physical 1-6 die, so there's no "opposite faces sum to 7" convention to
+ * preserve; it's the same red dot on white the bespoke 16x16 icon uses,
+ * repeated on all six faces so it reads as one consistent object from any
+ * angle.
+ *
+ * The right and left faces below are wound the *other* way round from the
+ * other four — swap indices 1 and 3 in either and `cross(e1, e2)` flips
+ * from pointing inward back to outward, same as the rest. That inward
+ * normal was a real bug, not cosmetic: the culling check in
+ * renderPowerDiceFrame keeps a face exactly when its rotated normal faces
+ * the camera, so a face whose normal starts out backwards gets culled
+ * during the half of the spin where it should be visible (a gap you can
+ * see clean through — the "invisible wall") and drawn during the half
+ * where it should be hidden (painting the inside of the shell over
+ * whichever real face is actually facing the camera there, since faces
+ * share one pixel buffer with no depth test — see the comment on that). */
+const DICE_FACES: { corners: [V3, V3, V3, V3] }[] = [
+  {
+    corners: [
+      DICE_CORNERS.lbf,
+      DICE_CORNERS.rbf,
+      DICE_CORNERS.rtf,
+      DICE_CORNERS.ltf,
+    ],
+  },
+  {
+    corners: [
+      DICE_CORNERS.rbb,
+      DICE_CORNERS.lbb,
+      DICE_CORNERS.ltb,
+      DICE_CORNERS.rtb,
+    ],
+  },
+  {
+    corners: [
+      DICE_CORNERS.rbb,
+      DICE_CORNERS.rtb,
+      DICE_CORNERS.rtf,
+      DICE_CORNERS.rbf,
+    ],
+  },
+  {
+    corners: [
+      DICE_CORNERS.lbf,
+      DICE_CORNERS.ltf,
+      DICE_CORNERS.ltb,
+      DICE_CORNERS.lbb,
+    ],
+  },
+  {
+    corners: [
+      DICE_CORNERS.ltf,
+      DICE_CORNERS.rtf,
+      DICE_CORNERS.rtb,
+      DICE_CORNERS.ltb,
+    ],
+  },
+  {
+    corners: [
+      DICE_CORNERS.lbb,
+      DICE_CORNERS.rbb,
+      DICE_CORNERS.rbf,
+      DICE_CORNERS.lbf,
+    ],
+  },
 ];
-
-/** Standard die-face pip layouts, in [-0.5, 0.5] face-local coordinates. */
-const DICE_PIP_LAYOUTS: Record<number, V2[]> = {
-  1: [[0, 0]],
-  2: [
-    [-0.5, -0.5],
-    [0.5, 0.5],
-  ],
-  3: [
-    [-0.5, -0.5],
-    [0, 0],
-    [0.5, 0.5],
-  ],
-  4: [
-    [-0.5, -0.5],
-    [0.5, -0.5],
-    [-0.5, 0.5],
-    [0.5, 0.5],
-  ],
-  5: [
-    [-0.5, -0.5],
-    [0.5, -0.5],
-    [0, 0],
-    [-0.5, 0.5],
-    [0.5, 0.5],
-  ],
-  6: [
-    [-0.5, -0.55],
-    [-0.5, 0],
-    [-0.5, 0.55],
-    [0.5, -0.55],
-    [0.5, 0],
-    [0.5, 0.55],
-  ],
-};
 
 const DICE_PIP_RADIUS = 0.16;
 
-/** A face's pips: dark divots sunk into the die's face colour. `null` (the
- * face colour) elsewhere, same "return null to fall through" convention as
- * cardChrome/icon. */
-function dicePipIcon(u: number, v: number, value: number): TexSample | null {
-  const ix = u - 0.5,
-    iy = v - 0.5;
-  for (const [px, py] of DICE_PIP_LAYOUTS[value]) {
-    const d = Math.hypot(ix - px, iy - py);
-    if (d < DICE_PIP_RADIUS) {
-      return {
-        bright: d < DICE_PIP_RADIUS * 0.5 ? 0.95 : 0.8,
-        color: "#2a1a10",
-      };
-    }
-  }
-  return null;
+// White body, red pip — matches the bespoke 16x16 pixel icon (see
+// item-icon-grids.json's power-dice-1 palette) so the flat inventory icon
+// and the spinning 3D card read as the same object, not two different dice.
+const DICE_FACE_COLOR = "#ffffff";
+const DICE_PIP_COLOR = "#ff1f1f";
+
+/** Every face's pip: a single coloured divot sunk into the die's face
+ * colour, dead centre. `null` (the face colour) elsewhere, same "return
+ * null to fall through" convention as cardChrome/icon. */
+function dicePipIcon(u: number, v: number): TexSample | null {
+  const d = Math.hypot(u - 0.5, v - 0.5);
+  if (d >= DICE_PIP_RADIUS) return null;
+  return {
+    bright: d < DICE_PIP_RADIUS * 0.5 ? 1.0 : 0.88,
+    color: DICE_PIP_COLOR,
+  };
+}
+
+/** How far a point in face-local UV space sits from that face's nearest
+ * edge, expressed as a 1.0 (face interior) to 0.55 (right on the edge)
+ * darkening factor. Without this, adjoining faces at a similar angle have
+ * nothing but their (per-face-constant) diffuse shading telling them apart —
+ * often barely any contrast — so the cube read as one flat blob with no
+ * visible seam between its faces, a big part of why it looked papery rather
+ * than solid. This paints a routed-looking bevel along every face boundary
+ * so the eye always has an edge to lock onto, the same job a real die's
+ * chamfered corners do. */
+function diceEdgeBevel(u: number, v: number): number {
+  const width = 0.14;
+  const edgeDist = Math.min(u, 1 - u, v, 1 - v);
+  return edgeDist >= width ? 1 : 0.55 + 0.45 * (edgeDist / width);
 }
 
 function renderPowerDiceFrame(yAngle: number): string[] {
-  const bright: number[][] = Array.from({ length: SH }, () => Array(SW).fill(-1));
+  const bright: number[][] = Array.from({ length: SH }, () =>
+    Array(SW).fill(-1),
+  );
   const pixelColor: (string | undefined)[][] = Array.from({ length: SH }, () =>
     Array(SW).fill(undefined),
   );
@@ -1355,11 +1565,22 @@ function renderPowerDiceFrame(yAngle: number): string[] {
           );
         if (!uv) continue;
         const [u, v] = uv;
-        const sample = dicePipIcon(u, v, face.value) ?? {
-          bright: 0.6,
-          color: "#e8c34a",
+        const sample = dicePipIcon(u, v) ?? {
+          // Was 0.6 — capped every face at '+' (RAMP_ITEM index 6) even at
+          // the single brightest-lit frame across the whole 36-frame spin
+          // (diffuse maxes out around 0.98). A believable plastic face
+          // needs to actually reach the ramp's dense end when it's lit
+          // near head-on, not just approach the midpoint.
+          bright: 0.95,
+          color: DICE_FACE_COLOR,
         };
-        bright[sy][sx] = sample.bright * (0.25 + 0.75 * diffuse);
+        // Was `0.25 + 0.75 * diffuse`: raising the floor a bit (so a
+        // grazing face doesn't fade to near-nothing) while still leaving
+        // most of the range to diffuse keeps the per-face contrast that
+        // makes the rotation read as light sweeping across real planes,
+        // rather than everything sitting at one flat mid-tone.
+        bright[sy][sx] =
+          sample.bright * (0.32 + 0.68 * diffuse) * diceEdgeBevel(u, v);
         pixelColor[sy][sx] = sample.color;
       }
     }
@@ -1374,7 +1595,7 @@ function renderPowerDiceFrame(yAngle: number): string[] {
           RAMP_ITEM.length - 1,
         );
         const ch = RAMP_ITEM[idx];
-        return ch === " " ? " " : col(pixelColor[y][x] ?? "#e8c34a", ch);
+        return ch === " " ? " " : col(pixelColor[y][x] ?? DICE_FACE_COLOR, ch);
       })
       .join(""),
   );
@@ -1751,7 +1972,9 @@ export const ITEMS: ItemDef[] = [
     description: "A token of appreciation for early adopters.",
     rarity: "rare",
     frames: firstEditionFrames,
-    stackable: true,
+    // Not stackable: it is statted (+10 luck), so its copies can differ in
+    // upgrade level, and a stackable item must never carry per-unit state —
+    // that is what lets the bank treat a stack as one interchangeable tile.
     equipable: true,
     equipSlot: "modifier",
     sellPrice: 250,
@@ -1931,6 +2154,28 @@ export function getHerzieStats(
     for (const key of STAT_KEYS) {
       if (stats[key] === undefined) continue;
       totals[key] += stats[key] + level;
+    }
+  }
+  return totals;
+}
+
+/** The same totals, read straight off the units: each worn unit adds its
+ * catalog `stats` plus its OWN upgrade level to every stat key it defines —
+ * so two copies of one item at different levels contribute what each really
+ * is, instead of the id-wide level `getHerzieStats` has to assume. */
+export function getHerzieStatsFromUnits(
+  units: readonly ItemUnit[] | null | undefined,
+): HerzieStats {
+  const totals = Object.fromEntries(
+    STAT_KEYS.map((key) => [key, 0]),
+  ) as HerzieStats;
+  for (const unit of units ?? []) {
+    if (unit.equippedSlot === null) continue;
+    const stats = getItem(unit.itemId)?.stats;
+    if (!stats) continue;
+    for (const key of STAT_KEYS) {
+      if (stats[key] === undefined) continue;
+      totals[key] += stats[key] + unit.upgradeLevel;
     }
   }
   return totals;

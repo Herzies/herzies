@@ -6,28 +6,46 @@ import {
   BANK_SLOT_COUNT,
   type BankItemLookup,
   bankSlotsUsed,
+  bankTiles,
+  bestUnitOf,
   bossDamagePerMinute,
   EQUIP_SLOTS,
   EQUIPPED_SLOTS,
   equippedItemIds,
   findEquippedSlot,
   getHerzieStats,
+  getHerzieStatsFromUnits,
   getItem,
   getItemType,
   hasRoomFor,
   ITEM_DROP_WEIGHT_OVERRIDES,
   ITEMS,
+  type ItemUnit,
   isBankFull,
   isModifierEquipped,
   MAX_ITEM_UPGRADE_LEVEL,
   MAX_MODIFIERS,
   NON_DROPPABLE_ITEM_IDS,
   normalizeEquipped,
+  normalizeUnits,
+  pickPlainestUnitIds,
   pickWeightedDrop,
   RARITY_DROP_WEIGHTS,
   RARITY_LUCK_WEIGHT_BONUS,
   type Rarity,
+  unitsBestFirst,
+  unitsPlainestFirst,
+  unitsToEquipped,
+  unitsToInventory,
 } from "./items.js";
+
+/** A unit with sensible defaults, so a test only states what it cares about. */
+const unit = (
+  id: string,
+  itemId: string,
+  upgradeLevel = 0,
+  equippedSlot: ItemUnit["equippedSlot"] = null,
+): ItemUnit => ({ id, itemId, upgradeLevel, equippedSlot });
 
 describe("color equip slot", () => {
   it("is a catalog category", () => {
@@ -363,229 +381,290 @@ describe("bank capacity", () => {
     expect(isBankFull(null, {})).toBe(false);
   });
 
+  // No catalog item is both stackable and equipable any more (First Edition
+  // was the only one), but the rule still has to hold for whichever item is
+  // next, so it's exercised through a lookup rather than a real id.
+  const stackableHat: BankItemLookup = () => ({
+    stackable: true,
+    category: "deck",
+  });
+
   it("still charges a bank slot for a stackable item with copies left after one is equipped", () => {
-    // Owning 3, equipping 1 (modifier slot) — 2 remain in the bank, so the
-    // slot is still needed.
-    expect(
-      bankSlotsUsed({ "first-edition": 3 }, { modifier: ["first-edition"] }),
-    ).toBe(1);
+    // Owning 3, equipping 1 — 2 remain in the bank, so the slot is still needed.
+    expect(bankSlotsUsed({ hat: 3 }, { modifier: ["hat"] }, stackableHat)).toBe(
+      1,
+    );
   });
 
   it("frees the slot once the only remaining copy of a stackable item is equipped", () => {
+    expect(bankSlotsUsed({ hat: 1 }, { modifier: ["hat"] }, stackableHat)).toBe(
+      0,
+    );
+  });
+
+  it("charges First Edition Card per copy now that it isn't stackable", () => {
+    expect(getItem("first-edition")?.stackable).toBeFalsy();
+    expect(bankSlotsUsed({ "first-edition": 3 }, {})).toBe(3);
     expect(
-      bankSlotsUsed({ "first-edition": 1 }, { modifier: ["first-edition"] }),
-    ).toBe(0);
+      bankSlotsUsed({ "first-edition": 3 }, { modifier: ["first-edition"] }),
+    ).toBe(2);
   });
 });
 
 describe("applyEquip", () => {
   const equip = (
-    current: Parameters<typeof applyEquip>[0],
-    itemId: string,
+    units: ItemUnit[],
+    unitId: string,
     slot: Parameters<typeof applyEquip>[3],
     side?: Parameters<typeof applyEquip>[4],
-  ) => applyEquip(current, itemId, "equip", slot, side);
+  ) => applyEquip(units, unitId, "equip", slot, side);
 
   /** Unwraps a success, failing loudly rather than silently typing around it. */
-  const equipped = (outcome: ReturnType<typeof applyEquip>) => {
+  const after = (outcome: ReturnType<typeof applyEquip>) => {
     if (!outcome.ok) throw new Error(`expected ok, got ${outcome.reason}`);
-    return outcome.equipped;
+    return outcome.units;
   };
 
   it("puts a single-value item in its own slot", () => {
-    expect(equipped(equip({}, "headphones", "head"))).toEqual({
-      head: "headphones",
-    });
+    const next = after(equip([unit("u1", "headphones")], "u1", "head"));
+    expect(unitsToEquipped(next)).toEqual({ head: "headphones" });
   });
 
   it("displaces the incumbent when its slot is taken", () => {
     // Swapping a hat shouldn't require unequipping the old one first — and the
-    // displaced id must vanish from Equipped so it returns to the bank.
-    const next = equipped(equip({ head: "old-hat" }, "headphones", "head"));
-    expect(next).toEqual({ head: "headphones" });
-    expect(findEquippedSlot(next, "old-hat")).toBeNull();
+    // displaced copy must go back to the bank.
+    const next = after(
+      equip(
+        [unit("old", "rainbow-headband", 0, "head"), unit("u1", "headphones")],
+        "u1",
+        "head",
+      ),
+    );
+    expect(unitsToEquipped(next)).toEqual({ head: "headphones" });
+    expect(next.find((u) => u.id === "old")?.equippedSlot).toBeNull();
   });
 
   it("leaves other slots untouched and never mutates the input", () => {
-    const current = { head: "old-hat", color: "prism" };
-    const next = equipped(equip(current, "cd", "face"));
-    expect(next).toEqual({ head: "old-hat", color: "prism", face: "cd" });
-    expect(current).toEqual({ head: "old-hat", color: "prism" });
+    const units = [
+      unit("a", "rainbow-headband", 0, "head"),
+      unit("b", "prism", 0, "color"),
+      unit("c", "cd"),
+    ];
+    const snapshot = structuredClone(units);
+    const next = after(equip(units, "c", "face"));
+    expect(unitsToEquipped(next)).toEqual({
+      head: "rainbow-headband",
+      color: "prism",
+      face: "cd",
+    });
+    expect(units).toEqual(snapshot);
   });
 
   it("routes ground items to the requested side", () => {
-    expect(equipped(equip({}, "spirit-orb", "ground", "left"))).toEqual({
+    const units = [unit("u1", "spirit-orb")];
+    expect(
+      unitsToEquipped(after(equip(units, "u1", "ground", "left"))),
+    ).toEqual({
       ground_left: "spirit-orb",
     });
-    expect(equipped(equip({}, "spirit-orb", "ground", "right"))).toEqual({
-      ground_right: "spirit-orb",
-    });
+    expect(
+      unitsToEquipped(after(equip(units, "u1", "ground", "right"))),
+    ).toEqual({ ground_right: "spirit-orb" });
   });
 
   it("requires a side for ground items", () => {
-    expect(equip({}, "spirit-orb", "ground")).toEqual({
+    expect(equip([unit("u1", "spirit-orb")], "u1", "ground")).toEqual({
       ok: false,
       reason: "missing-side",
     });
   });
 
   it("accumulates modifiers up to the cap", () => {
-    let current = {};
+    let units: ItemUnit[] = Array.from({ length: MAX_MODIFIERS + 1 }, (_, i) =>
+      unit(`m${i}`, `mod-${i}`),
+    );
     for (let i = 0; i < MAX_MODIFIERS; i++) {
-      current = equipped(equip(current, `mod-${i}`, "modifier"));
+      units = after(equip(units, `m${i}`, "modifier"));
     }
-    expect(current).toEqual({
-      modifier: Array.from({ length: MAX_MODIFIERS }, (_, i) => `mod-${i}`),
-    });
-    expect(equip(current, "one-too-many", "modifier")).toEqual({
+    expect(unitsToEquipped(units).modifier).toHaveLength(MAX_MODIFIERS);
+    expect(equip(units, `m${MAX_MODIFIERS}`, "modifier")).toEqual({
       ok: false,
       reason: "max-modifiers",
     });
   });
 
-  it("refuses to equip something already worn", () => {
-    expect(equip({ head: "headphones" }, "headphones", "head")).toEqual({
+  it("refuses to equip something already worn in that slot", () => {
+    expect(equip([unit("u1", "headphones", 0, "head")], "u1", "head")).toEqual({
       ok: false,
       reason: "already-equipped",
     });
-    expect(equip({ modifier: ["boost"] }, "boost", "modifier")).toEqual({
-      ok: false,
-      reason: "already-equipped",
-    });
+    expect(
+      equip([unit("u1", "boost", 0, "modifier")], "u1", "modifier"),
+    ).toEqual({ ok: false, reason: "already-equipped" });
   });
 
   it("refuses an equipable item with no slot", () => {
-    expect(equip({}, "mystery", undefined)).toEqual({
+    expect(equip([unit("u1", "mystery")], "u1", undefined)).toEqual({
       ok: false,
       reason: "no-slot",
     });
   });
 
-  it("unequips from a single-value slot", () => {
-    expect(
-      equipped(
-        applyEquip(
-          { head: "headphones", color: "prism" },
-          "headphones",
-          "unequip",
-          "head",
-        ),
+  it("refuses a unit the player doesn't own", () => {
+    expect(equip([unit("u1", "headphones")], "nope", "head")).toEqual({
+      ok: false,
+      reason: "not-owned",
+    });
+  });
+
+  // One copy of an item worn at a time has always been the rule. With copies
+  // that can differ it becomes a swap, not a second equip that would count the
+  // item's stats twice.
+  it("swaps to another copy of an item whose other copy is worn", () => {
+    const units = [
+      unit("plain", "boombox", 0, "ground_left"),
+      unit("plus3", "boombox", 3),
+    ];
+    const next = after(equip(units, "plus3", "ground", "right"));
+    expect(next.find((u) => u.id === "plain")?.equippedSlot).toBeNull();
+    expect(next.find((u) => u.id === "plus3")?.equippedSlot).toBe(
+      "ground_right",
+    );
+    expect(unitsToEquipped(next)).toEqual({ ground_right: "boombox" });
+  });
+
+  it("moves a worn copy between ground sides", () => {
+    const next = after(
+      equip([unit("u1", "boombox", 0, "ground_left")], "u1", "ground", "right"),
+    );
+    expect(unitsToEquipped(next)).toEqual({ ground_right: "boombox" });
+  });
+
+  it("lets a swapped-in copy take a full modifier list when it replaces its own twin", () => {
+    // The cap counts OTHER items: swapping copies of an item already among the
+    // six must not be refused as a seventh.
+    const units = [
+      ...Array.from({ length: MAX_MODIFIERS - 1 }, (_, i) =>
+        unit(`m${i}`, `mod-${i}`, 0, "modifier"),
       ),
+      unit("fe-worn", "first-edition", 0, "modifier"),
+      unit("fe-spare", "first-edition", 2),
+    ];
+    const next = after(equip(units, "fe-spare", "modifier"));
+    expect(next.find((u) => u.id === "fe-worn")?.equippedSlot).toBeNull();
+    expect(next.find((u) => u.id === "fe-spare")?.equippedSlot).toBe(
+      "modifier",
+    );
+  });
+
+  it("unequips a single-value slot", () => {
+    const units = [
+      unit("a", "headphones", 0, "head"),
+      unit("b", "prism", 0, "color"),
+    ];
+    expect(
+      unitsToEquipped(after(applyEquip(units, "a", "unequip", "head"))),
     ).toEqual({ color: "prism" });
   });
 
-  it("unequips one modifier and drops the key once empty", () => {
-    const two = { modifier: ["a", "b"] };
-    expect(equipped(applyEquip(two, "a", "unequip", "modifier"))).toEqual({
-      modifier: ["b"],
-    });
-    // An empty modifier list is normalized away, so don't persist one.
-    expect(
-      equipped(applyEquip({ modifier: ["a"] }, "a", "unequip", "modifier")),
-    ).toEqual({});
+  it("unequips one modifier and leaves the rest", () => {
+    const units = [
+      unit("a", "boost", 0, "modifier"),
+      unit("b", "other", 0, "modifier"),
+    ];
+    const next = after(applyEquip(units, "a", "unequip", "modifier"));
+    expect(unitsToEquipped(next)).toEqual({ modifier: ["other"] });
   });
 
   it("refuses to unequip something that isn't worn", () => {
-    expect(applyEquip({}, "headphones", "unequip", "head")).toEqual({
-      ok: false,
-      reason: "not-equipped",
-    });
+    expect(
+      applyEquip([unit("u1", "headphones")], "u1", "unequip", "head"),
+    ).toEqual({ ok: false, reason: "not-equipped" });
   });
 
   // The whole point of sharing this function: an optimistic client prediction
   // and the server's persisted result must be identical, so the response lands
   // as a no-op instead of a visible correction.
   it("is deterministic for the same input", () => {
-    const current = { head: "old-hat", modifier: ["a"] };
-    expect(equip(current, "cd", "face")).toEqual(equip(current, "cd", "face"));
+    const units = [unit("a", "rainbow-headband", 0, "head"), unit("b", "cd")];
+    expect(equip(units, "b", "face")).toEqual(equip(units, "b", "face"));
   });
 });
 
 describe("applySell", () => {
-  const PRICE = 10;
+  const price = (id: string) => (id === "junk" ? undefined : 10);
   const sold = (outcome: ReturnType<typeof applySell>) => {
     if (!outcome.ok) throw new Error(`expected ok, got ${outcome.reason}`);
     return outcome;
   };
 
   it("removes the sold units and credits the currency", () => {
-    const out = sold(applySell({ cd: 3 }, 100, {}, "cd", 2, PRICE));
-    expect(out.inventory).toEqual({ cd: 1 });
+    const units = [unit("a", "cd"), unit("b", "cd"), unit("c", "cd")];
+    const out = sold(applySell(units, 100, ["a", "b"], price));
+    expect(out.units.map((u) => u.id)).toEqual(["c"]);
     expect(out.earned).toBe(20);
     expect(out.newCurrency).toBe(120);
-    expect(out.unequipped).toBe(false);
   });
 
-  it("drops the id entirely when the last copy goes", () => {
-    const out = sold(applySell({ cd: 1 }, 0, {}, "cd", 1, PRICE));
-    expect(out.inventory).toEqual({});
-    expect("cd" in out.inventory).toBe(false);
+  it("sells exactly the copy named, not a different one of the same item", () => {
+    // The reason this takes unit ids: sell the plain copy, keep the +3.
+    const units = [unit("plain", "boombox"), unit("plus3", "boombox", 3)];
+    const out = sold(applySell(units, 0, ["plain"], price));
+    expect(out.units).toEqual([unit("plus3", "boombox", 3)]);
   });
 
   it("never mutates its inputs", () => {
-    const inventory = { cd: 2 };
-    const equipped = { head: "cd" };
-    applySell(inventory, 0, equipped, "cd", 2, PRICE);
-    expect(inventory).toEqual({ cd: 2 });
-    expect(equipped).toEqual({ head: "cd" });
+    const units = [unit("a", "cd", 0, "head")];
+    const snapshot = structuredClone(units);
+    applySell(units, 0, ["a"], price);
+    expect(units).toEqual(snapshot);
   });
 
-  // Ownership and equip state must never drift: an item you no longer own
-  // cannot stay worn, and this has to agree with applyEquip's unequip branch.
-  it("unequips when the last copy is sold", () => {
-    const out = sold(
-      applySell({ cd: 1 }, 0, { head: "cd", color: "prism" }, "cd", 1, PRICE),
-    );
-    expect(out.equipped).toEqual({ color: "prism" });
-    expect(out.unequipped).toBe(true);
+  // Ownership and equip state must never drift: a copy you no longer own can't
+  // stay worn. It falls out of the copy simply no longer existing.
+  it("a sold worn copy stops being worn", () => {
+    const units = [
+      unit("a", "headphones", 0, "head"),
+      unit("b", "prism", 0, "color"),
+    ];
+    const out = sold(applySell(units, 0, ["a"], price));
+    expect(unitsToEquipped(out.units)).toEqual({ color: "prism" });
   });
 
-  it("unequips a modifier when its last copy is sold", () => {
-    const out = sold(
-      applySell({ boost: 1 }, 0, { modifier: ["boost"] }, "boost", 1, PRICE),
-    );
-    expect(out.equipped).toEqual({});
-    expect(out.unequipped).toBe(true);
+  it("keeps the worn copy while another copy is sold", () => {
+    const units = [unit("worn", "cd", 0, "head"), unit("spare", "cd")];
+    const out = sold(applySell(units, 0, ["spare"], price));
+    expect(unitsToEquipped(out.units)).toEqual({ head: "cd" });
   });
 
-  it("keeps it equipped while a copy remains", () => {
-    const out = sold(applySell({ cd: 2 }, 0, { head: "cd" }, "cd", 1, PRICE));
-    expect(out.equipped).toEqual({ head: "cd" });
-    expect(out.unequipped).toBe(false);
-  });
-
-  it("refuses to sell more than is owned", () => {
-    expect(applySell({ cd: 1 }, 0, {}, "cd", 2, PRICE)).toEqual({
+  it("refuses to sell a copy the player doesn't own", () => {
+    expect(applySell([unit("a", "cd")], 0, ["a", "ghost"], price)).toEqual({
       ok: false,
       reason: "not-enough",
     });
-    expect(applySell({}, 0, {}, "cd", 1, PRICE)).toEqual({
+    expect(applySell([], 0, ["a"], price)).toEqual({
+      ok: false,
+      reason: "not-enough",
+    });
+  });
+
+  it("refuses an empty sale", () => {
+    expect(applySell([unit("a", "cd")], 0, [], price)).toEqual({
       ok: false,
       reason: "not-enough",
     });
   });
 
   it("refuses an item with no sell price", () => {
-    expect(applySell({ cd: 1 }, 0, {}, "cd", 1, undefined)).toEqual({
+    expect(applySell([unit("a", "junk")], 0, ["a"], price)).toEqual({
       ok: false,
       reason: "not-sellable",
     });
   });
 
-  it("clears the item's upgrade entry when the last copy is sold", () => {
-    const out = sold(
-      applySell({ boombox: 1 }, 0, {}, "boombox", 1, PRICE, { boombox: 2 }),
-    );
-    expect(out.itemUpgrades).toEqual({});
-  });
-
-  it("keeps the upgrade entry while a copy remains", () => {
-    const out = sold(
-      applySell({ "first-edition": 3 }, 0, {}, "first-edition", 1, PRICE, {
-        "first-edition": 1,
-      }),
-    );
-    expect(out.itemUpgrades).toEqual({ "first-edition": 1 });
+  it("counts a unit named twice once", () => {
+    const out = sold(applySell([unit("a", "cd")], 0, ["a", "a"], price));
+    expect(out.earned).toBe(10);
   });
 });
 
@@ -672,10 +751,11 @@ describe("herzie stats", () => {
     expect(getHerzieStats({ head: "no-such-item" }).sonicPower).toBe(0);
   });
 
-  it("gives First Edition Card +10 luck and makes it a stackable modifier", () => {
+  it("gives First Edition Card +10 luck and makes it a modifier", () => {
     const item = getItem("first-edition");
     expect(item?.stats).toEqual({ luck: 10 });
-    expect(item?.stackable).toBe(true);
+    // Statted, so its copies can differ in level, so it can't share a tile.
+    expect(item?.stackable).toBeFalsy();
     expect(item?.equipable).toBe(true);
     expect(item?.equipSlot).toBe("modifier");
     expect(getItemType(item!)).toBe("modifier");
@@ -698,85 +778,180 @@ describe("herzie stats", () => {
 
   it("ignores upgrade levels on items with no stats at all", () => {
     expect(
-      getHerzieStats({ head: "rainbow-headband" }, {
-        "rainbow-headband": 3,
-      }),
+      getHerzieStats(
+        { head: "rainbow-headband" },
+        {
+          "rainbow-headband": 3,
+        },
+      ),
     ).toEqual({ sonicPower: 0, luck: 0 });
   });
 });
 
 describe("applyItemUpgrade", () => {
+  const dice = "power-dice-1";
+
   it("rejects a non-dice id", () => {
-    expect(applyItemUpgrade({ cd: 1, boombox: 1 }, {}, "cd", "boombox")).toEqual(
-      { ok: false, reason: "not-dice" },
-    );
+    expect(
+      applyItemUpgrade([unit("c", "cd"), unit("b", "boombox")], "cd", "b"),
+    ).toEqual({ ok: false, reason: "not-dice" });
   });
 
-  it("rejects when the dice isn't owned", () => {
-    expect(
-      applyItemUpgrade({ boombox: 1 }, {}, "power-dice-1", "boombox"),
-    ).toEqual({ ok: false, reason: "dice-not-owned" });
+  it("rejects when no die is owned", () => {
+    expect(applyItemUpgrade([unit("b", "boombox")], dice, "b")).toEqual({
+      ok: false,
+      reason: "dice-not-owned",
+    });
   });
 
-  it("rejects when the target isn't owned", () => {
-    expect(
-      applyItemUpgrade({ "power-dice-1": 1 }, {}, "power-dice-1", "boombox"),
-    ).toEqual({ ok: false, reason: "target-not-owned" });
+  it("rejects when the target copy isn't owned", () => {
+    expect(applyItemUpgrade([unit("d", dice)], dice, "b")).toEqual({
+      ok: false,
+      reason: "target-not-owned",
+    });
   });
 
   it("rejects an unstatted target", () => {
     expect(
-      applyItemUpgrade(
-        { "power-dice-1": 1, cd: 1 },
-        {},
-        "power-dice-1",
-        "cd",
-      ),
+      applyItemUpgrade([unit("d", dice), unit("c", "cd")], dice, "c"),
     ).toEqual({ ok: false, reason: "not-statted" });
   });
 
   it("rejects past the level cap", () => {
     expect(
       applyItemUpgrade(
-        { "power-dice-1": 1, boombox: 1 },
-        { boombox: MAX_ITEM_UPGRADE_LEVEL },
-        "power-dice-1",
-        "boombox",
+        [unit("d", dice), unit("b", "boombox", MAX_ITEM_UPGRADE_LEVEL)],
+        dice,
+        "b",
       ),
     ).toEqual({ ok: false, reason: "max-level" });
   });
 
-  it("consumes one dice and bumps the level", () => {
-    const outcome = applyItemUpgrade(
-      { "power-dice-1": 2, boombox: 1 },
-      {},
-      "power-dice-1",
-      "boombox",
+  it("consumes one die and raises the level", () => {
+    const out = applyItemUpgrade(
+      [unit("d1", dice), unit("d2", dice), unit("b", "boombox")],
+      dice,
+      "b",
     );
-    expect(outcome).toEqual({
+    expect(out).toEqual({
       ok: true,
-      inventory: { "power-dice-1": 1, boombox: 1 },
-      itemUpgrades: { boombox: 1 },
+      units: [unit("d2", dice), unit("b", "boombox", 1)],
       newLevel: 1,
     });
   });
 
-  it("deletes the dice id once the last copy is consumed", () => {
-    const outcome = applyItemUpgrade(
-      { "power-dice-1": 1, boombox: 1 },
-      {},
-      "power-dice-1",
-      "boombox",
-    );
-    expect(outcome.ok && outcome.inventory).toEqual({ boombox: 1 });
+  // The bug this whole change exists for: two Box of Booms, one upgraded to +3
+  // — the other must NOT change.
+  it("raises only the targeted copy, never its twin", () => {
+    let units: ItemUnit[] = [
+      unit("d1", dice),
+      unit("d2", dice),
+      unit("d3", dice),
+      unit("a", "boombox"),
+      unit("b", "boombox"),
+    ];
+    for (let i = 0; i < 3; i++) {
+      const out = applyItemUpgrade(units, dice, "a");
+      if (!out.ok) throw new Error(out.reason);
+      units = out.units;
+    }
+    expect(units.find((u) => u.id === "a")?.upgradeLevel).toBe(3);
+    expect(units.find((u) => u.id === "b")?.upgradeLevel).toBe(0);
+    expect(unitsToInventory(units)).toEqual({ boombox: 2 });
+  });
+
+  it("won't spend a die that is somehow worn", () => {
+    expect(
+      applyItemUpgrade(
+        [unit("d", dice, 0, "modifier"), unit("b", "boombox")],
+        dice,
+        "b",
+      ),
+    ).toEqual({ ok: false, reason: "dice-not-owned" });
   });
 
   it("never mutates its inputs", () => {
-    const inventory = { "power-dice-1": 1, boombox: 1 };
-    const itemUpgrades = { boombox: 1 };
-    applyItemUpgrade(inventory, itemUpgrades, "power-dice-1", "boombox");
-    expect(inventory).toEqual({ "power-dice-1": 1, boombox: 1 });
-    expect(itemUpgrades).toEqual({ boombox: 1 });
+    const units = [unit("d", dice), unit("b", "boombox", 1)];
+    const snapshot = structuredClone(units);
+    applyItemUpgrade(units, dice, "b");
+    expect(units).toEqual(snapshot);
+  });
+});
+
+describe("item units", () => {
+  it("derives the legacy count and equipped views", () => {
+    const units = [
+      unit("a", "boombox", 3, "ground_left"),
+      unit("b", "boombox"),
+      unit("c", "first-edition", 0, "modifier"),
+      unit("d", "cd"),
+    ];
+    expect(unitsToInventory(units)).toEqual({
+      boombox: 2,
+      "first-edition": 1,
+      cd: 1,
+    });
+    expect(unitsToEquipped(units)).toEqual({
+      ground_left: "boombox",
+      modifier: ["first-edition"],
+    });
+  });
+
+  it("derives nothing from no units", () => {
+    expect(unitsToInventory([])).toEqual({});
+    expect(unitsToEquipped([])).toEqual({});
+  });
+
+  it("normalizes an untrusted payload, dropping the malformed", () => {
+    expect(
+      normalizeUnits([
+        { id: "a", itemId: "boombox", upgradeLevel: 2, equippedSlot: "head" },
+        { id: "b", itemId: "cd" },
+        { id: "c", itemId: "cd", equippedSlot: "not-a-slot" },
+        { itemId: "cd" },
+        null,
+        "junk",
+      ]),
+    ).toEqual([
+      unit("a", "boombox", 2, "head"),
+      unit("b", "cd"),
+      unit("c", "cd"),
+    ]);
+    expect(normalizeUnits(undefined)).toEqual([]);
+    expect(normalizeUnits({})).toEqual([]);
+  });
+
+  it("adds each worn copy's OWN level to its stats", () => {
+    // Two boomboxes, one +3: only the worn one counts, at its own level.
+    const wornPlus3 = [
+      unit("a", "boombox", 3, "ground_left"),
+      unit("b", "boombox"),
+    ];
+    expect(getHerzieStatsFromUnits(wornPlus3).sonicPower).toBe(13);
+    const wornPlain = [
+      unit("a", "boombox", 3),
+      unit("b", "boombox", 0, "ground_left"),
+    ];
+    expect(getHerzieStatsFromUnits(wornPlain).sonicPower).toBe(10);
+  });
+
+  it("agrees with the id-keyed getHerzieStats for the same wardrobe", () => {
+    const units = [
+      unit("a", "boombox", 2, "ground_right"),
+      unit("b", "headphones", 1, "head"),
+      unit("c", "first-edition", 0, "modifier"),
+    ];
+    expect(getHerzieStatsFromUnits(units)).toEqual(
+      getHerzieStats(unitsToEquipped(units), { boombox: 2, headphones: 1 }),
+    );
+  });
+
+  it("is zero with nothing worn", () => {
+    expect(getHerzieStatsFromUnits(null)).toEqual({ sonicPower: 0, luck: 0 });
+    expect(getHerzieStatsFromUnits([unit("a", "boombox", 3)])).toEqual({
+      sonicPower: 0,
+      luck: 0,
+    });
   });
 });
 
@@ -794,5 +969,123 @@ describe("bossDamagePerMinute", () => {
       1.5,
       10,
     );
+  });
+});
+
+describe("bank tiles", () => {
+  it("folds a stack into one tile and gives every other copy its own", () => {
+    const tiles = bankTiles([
+      unit("c1", "cd"),
+      unit("c2", "cd"),
+      unit("b1", "boombox", 3),
+      unit("b2", "boombox"),
+    ]);
+    expect(tiles).toEqual([
+      { key: "stack:cd", itemId: "cd", unitIds: ["c1", "c2"], upgradeLevel: 0 },
+      { key: "b1", itemId: "boombox", unitIds: ["b1"], upgradeLevel: 3 },
+      { key: "b2", itemId: "boombox", unitIds: ["b2"], upgradeLevel: 0 },
+    ]);
+  });
+
+  it("leaves worn copies out of the bank", () => {
+    const tiles = bankTiles([
+      unit("worn", "boombox", 3, "ground_left"),
+      unit("spare", "boombox"),
+    ]);
+    expect(tiles.map((t) => t.key)).toEqual(["spare"]);
+  });
+
+  it("keeps a stack's tile while any copy of it is unworn", () => {
+    const stackable: BankItemLookup = () => ({
+      stackable: true,
+      category: "deck",
+    });
+    expect(
+      bankTiles(
+        [unit("a", "hat", 0, "modifier"), unit("b", "hat")],
+        stackable,
+      ).map((t) => t.key),
+    ).toEqual(["stack:hat"]);
+    expect(bankTiles([unit("a", "hat", 0, "modifier")], stackable)).toEqual([]);
+  });
+
+  it("skips items outside the deck category", () => {
+    const misc: BankItemLookup = () => ({ category: "misc" });
+    expect(bankTiles([unit("a", "thing")], misc)).toEqual([]);
+  });
+
+  // The tile list and the capacity rule are one rule: however the copies are
+  // arranged, the grid must show exactly as many tiles as bankSlotsUsed counts.
+  it("always has as many tiles as bankSlotsUsed counts slots", () => {
+    const wardrobes: ItemUnit[][] = [
+      [],
+      [unit("a", "cd"), unit("b", "cd"), unit("c", "cd")],
+      [unit("a", "boombox", 1), unit("b", "boombox", 3)],
+      [
+        unit("a", "boombox", 1, "ground_left"),
+        unit("b", "boombox", 3),
+        unit("c", "headphones", 0, "head"),
+        unit("d", "first-edition", 0, "modifier"),
+        unit("e", "first-edition", 2),
+        unit("f", "cd"),
+        unit("g", "cd"),
+        unit("h", "power-dice-1"),
+      ],
+    ];
+    for (const units of wardrobes) {
+      expect(bankTiles(units)).toHaveLength(
+        bankSlotsUsed(unitsToInventory(units), unitsToEquipped(units)),
+      );
+    }
+  });
+});
+
+describe("choosing copies from an item id", () => {
+  const units = [
+    unit("worn", "boombox", 0, "ground_left"),
+    unit("plus3", "boombox", 3),
+    unit("plus1", "boombox", 1),
+    unit("plain", "boombox"),
+    unit("cd", "cd"),
+  ];
+
+  it("orders copies plainest first: unworn, then lowest level, then oldest", () => {
+    expect(unitsPlainestFirst(units, "boombox").map((u) => u.id)).toEqual([
+      "plain",
+      "plus1",
+      "plus3",
+      "worn",
+    ]);
+  });
+
+  it("picks the plainest N, or null if there aren't N", () => {
+    expect(pickPlainestUnitIds(units, "boombox", 2)).toEqual([
+      "plain",
+      "plus1",
+    ]);
+    expect(pickPlainestUnitIds(units, "boombox", 5)).toBeNull();
+    expect(pickPlainestUnitIds(units, "nothing", 1)).toBeNull();
+  });
+
+  it("orders copies best first: worn, then highest level", () => {
+    expect(unitsBestFirst(units, "boombox").map((u) => u.id)).toEqual([
+      "worn",
+      "plus3",
+      "plus1",
+      "plain",
+    ]);
+  });
+
+  it("finds the copy an item id most plausibly means", () => {
+    expect(bestUnitOf(units, "boombox")?.id).toBe("worn");
+    expect(bestUnitOf(units.slice(1), "boombox")?.id).toBe("plus3");
+    expect(bestUnitOf(units, "nothing")).toBeUndefined();
+  });
+
+  it("never mutates its input", () => {
+    const snapshot = structuredClone(units);
+    unitsPlainestFirst(units, "boombox");
+    unitsBestFirst(units, "boombox");
+    expect(units).toEqual(snapshot);
   });
 });

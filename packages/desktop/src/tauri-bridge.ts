@@ -7,6 +7,7 @@ import type {
   Herzie,
   HerzieProfile,
   Inventory,
+  ItemUnit,
   PendingDrop,
   PendingFriendRequest,
   PremiumItem,
@@ -88,8 +89,13 @@ export interface AppState {
   chatMessages: ChatMessage[];
   inventory: Inventory | null;
   inventoryCurrency: number;
-  /** Dice-upgrade levels (itemId -> 0-3) — see applyDiceUpgrade. */
+  /** Dice-upgrade levels (itemId -> 0-3), derived from `units` — the level
+   * of the worn copy of each item. Prefer `units` wherever copies differ. */
   itemUpgrades: Record<string, number>;
+  /** Every owned copy of every item, each with its own upgrade level and worn
+   * slot. The source of truth: `inventory` and `equipped` are the derived
+   * id-keyed views (what the creature is drawn from, and cheap counts). */
+  units: ItemUnit[];
   friends: Record<string, HerzieProfile>;
   pendingTradeRequest?: PendingTradeRequest | null;
   pendingFriendRequest?: PendingFriendRequest | null;
@@ -143,29 +149,42 @@ export const herzies = {
       currency: number;
       equipped: Equipped;
       itemUpgrades: Record<string, number>;
+      units: ItemUnit[];
     } | null>("fetch_inventory"),
-  sellItem: (itemId: string, quantity: number) =>
+  /** Sells specific copies. Resolves null if the server refused (not owned,
+   * not sellable). */
+  sellItem: (unitIds: string[]) =>
     invoke<{
       earned: number;
       newCurrency: number;
       inventory: Inventory;
       itemUpgrades: Record<string, number>;
-    } | null>("sell_item", { itemId, quantity }),
+      units: ItemUnit[];
+    } | null>("sell_item", { unitIds }),
+  /** Wears or removes one specific copy. Throws with the server's message
+   * (max modifiers, side required, not equipable, ...). */
   equipItem: (
-    itemId: string,
+    unitId: string,
     action: "equip" | "unequip",
     side?: "left" | "right",
-  ) => invoke<{ equipped: Equipped }>("equip_item", { itemId, action, side }),
-  /** Consumes one dice item to bump a statted card's upgrade level by one
-   * (see MAX_ITEM_UPGRADE_LEVEL). Throws with the server's error message
-   * (not owned, already maxed, target has no stats, etc.). */
-  applyDiceUpgrade: (diceItemId: string, targetItemId: string) =>
+  ) =>
+    invoke<{ equipped: Equipped; units: ItemUnit[] }>("equip_item", {
+      unitId,
+      action,
+      side,
+    }),
+  /** Consumes one dice item to raise ONE specific card's upgrade level by one
+   * (see MAX_ITEM_UPGRADE_LEVEL) — a second copy of the same card is left
+   * alone. Throws with the server's error message (not owned, already maxed,
+   * target has no stats, etc.). */
+  applyDiceUpgrade: (diceItemId: string, targetUnitId: string) =>
     invoke<{
       ok: boolean;
       newLevel: number;
       inventory: Inventory;
       itemUpgrades: Record<string, number>;
-    } | null>("apply_dice_upgrade", { diceItemId, targetItemId }),
+      units: ItemUnit[];
+    } | null>("apply_dice_upgrade", { diceItemId, targetUnitId }),
   /** Buys an item with in-game currency (store's Items tab). Throws with the
    * server's error message (not enough currency, already owned, etc.). */
   buyItem: (itemId: string, quantity: number) =>
@@ -200,10 +219,10 @@ export const herzies = {
   tradeCreate: (targetCode: string) =>
     invoke<{ tradeId: string } | null>("trade_create", { targetCode }),
   tradeJoin: (tradeId: string) => invoke<boolean>("trade_join", { tradeId }),
-  tradeOffer: (
-    tradeId: string,
-    offer: { items: Record<string, number>; currency: number },
-  ) => invoke<boolean>("trade_offer", { tradeId, offer }),
+  /** Sets your side of the trade: the specific copies to give (by id) and any
+   * coins. The server snapshots each copy's level for the other player. */
+  tradeOffer: (tradeId: string, offer: { units: string[]; currency: number }) =>
+    invoke<boolean>("trade_offer", { tradeId, offer }),
   tradeLock: (tradeId: string) => invoke<boolean>("trade_lock", { tradeId }),
   tradeAccept: (tradeId: string) =>
     invoke<{ completed: boolean } | null>("trade_accept", { tradeId }),

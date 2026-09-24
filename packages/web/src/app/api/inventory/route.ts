@@ -1,6 +1,7 @@
 import { normalizeEquipped } from "@herzies/shared";
 import { NextResponse } from "next/server";
 import { authenticateRequest, isAuthError } from "@/lib/auth";
+import { loadUnits } from "@/lib/item-units";
 import { createAdminClient } from "@/lib/supabase-admin";
 
 export async function GET(request: Request) {
@@ -28,6 +29,9 @@ export async function GET(request: Request) {
     .in("id", itemIds.length > 0 ? itemIds : ["__none__"]);
 
   return NextResponse.json({
+    // Every owned copy, with its own upgrade level and worn slot. The three
+    // id-keyed fields below are derived from these, kept for older clients.
+    units: await loadUnits(admin, auth.userId),
     inventory,
     currency: data.currency ?? 0,
     items: items ?? [],

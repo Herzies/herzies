@@ -87,7 +87,7 @@ export function SetTag({
 
 /** The stats an item adds to its wearer, one per line (e.g. "Sonic power:
  * +10"). Renders nothing on items without any — most have none. `level` is
- * the item's dice-upgrade level (see item_upgrades / applyItemUpgrade) —
+ * the dice-upgrade level of the specific copy shown (ItemUnit.upgradeLevel) —
  * when set, each line shows the *effective* value (base + level), since
  * Power Dice 1 bumps every stat a card has by 1 per level. */
 export function ItemStatLines({

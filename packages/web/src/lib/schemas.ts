@@ -4,6 +4,10 @@ import { z } from "zod";
 
 const tradeIdBody = z.object({ tradeId: z.string().min(1) });
 
+/** A unit id. guid, not uuid: zod's strict uuid rejects ids whose version bits
+ * aren't RFC 4122, and all that matters here is that it parses as one. */
+const unitId = z.guid();
+
 // --- Schemas ---
 
 export const registerHerzieSchema = z.object({
@@ -34,27 +38,43 @@ export const syncRequestSchema = z.object({
   genres: z.array(z.string()).default([]),
 });
 
-export const sellItemSchema = z.object({
-  itemId: z.string().min(1),
-  quantity: z.number().int().min(1),
-});
+/** Sell named copies. Older clients (which only knew item ids) send
+ * `{itemId, quantity}` instead; the route resolves that to specific copies. */
+export const sellItemSchema = z.union([
+  z.object({ unitIds: z.array(unitId).min(1).max(500) }),
+  z.object({
+    itemId: z.string().min(1),
+    quantity: z.number().int().min(1),
+  }),
+]);
 
 export const buyItemSchema = z.object({
   itemId: z.string().min(1),
   quantity: z.number().int().min(1),
 });
 
-export const equipItemSchema = z.object({
-  itemId: z.string().min(1),
-  action: z.enum(["equip", "unequip"]),
-  /** Required when equipping a ground-category item. */
-  side: z.enum(["left", "right"]).optional(),
-});
+const equipAction = z.enum(["equip", "unequip"]);
+/** Required when equipping a ground-category item. */
+const equipSide = z.enum(["left", "right"]).optional();
 
-export const upgradeItemSchema = z.object({
-  diceItemId: z.string().min(1),
-  targetItemId: z.string().min(1),
-});
+/** Equip one named copy. `{itemId}` is the older client's spelling. */
+export const equipItemSchema = z.union([
+  z.object({ unitId, action: equipAction, side: equipSide }),
+  z.object({
+    itemId: z.string().min(1),
+    action: equipAction,
+    side: equipSide,
+  }),
+]);
+
+/** Upgrade one named copy. `{targetItemId}` is the older client's spelling. */
+export const upgradeItemSchema = z.union([
+  z.object({ diceItemId: z.string().min(1), targetUnitId: unitId }),
+  z.object({
+    diceItemId: z.string().min(1),
+    targetItemId: z.string().min(1),
+  }),
+]);
 
 export const createTradeSchema = z.object({
   targetFriendCode: z.string().min(1),
@@ -64,10 +84,18 @@ export const tradeIdSchema = tradeIdBody;
 
 export const tradeOfferSchema = z.object({
   tradeId: z.string().min(1),
-  offer: z.object({
-    items: z.record(z.string(), z.number().int().min(1)),
-    currency: z.number().int().nonnegative(),
-  }),
+  // What you're giving: named copies (`units`), or — from a client that
+  // predates them — a count per item id (`items`) that the route resolves to
+  // copies. At least one of the two must be present, even if empty.
+  offer: z
+    .object({
+      units: z.array(unitId).max(500).optional(),
+      items: z.record(z.string(), z.number().int().min(1)).optional(),
+      currency: z.number().int().nonnegative(),
+    })
+    .refine((o) => o.units !== undefined || o.items !== undefined, {
+      message: "offer needs units or items",
+    }),
 });
 
 export const friendCodePairSchema = z.object({

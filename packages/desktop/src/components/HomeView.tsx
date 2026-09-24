@@ -1,6 +1,7 @@
 import {
   bossDamagePerMinute,
   getHerzieStats,
+  getHerzieStatsFromUnits,
   getItem,
   hasRoomFor,
   isBankFull,
@@ -71,12 +72,19 @@ export function HomeView({
     equipped,
     inventory,
     itemUpgrades,
+    units,
     pendingDrops,
   } = state;
   const [globalRank, setGlobalRank] = useState<number | undefined>(undefined);
   const [globalTotal, setGlobalTotal] = useState<number | undefined>(undefined);
   const [collectingIds, setCollectingIds] = useState<Set<string>>(new Set());
-  const stats = getHerzieStats(equipped, itemUpgrades);
+  // Read off the copies, so each worn one counts at its OWN upgrade level. A
+  // cache from before copies existed has none yet, and falls back to the
+  // id-keyed levels until the first sync brings them.
+  const stats =
+    units.length > 0
+      ? getHerzieStatsFromUnits(units)
+      : getHerzieStats(equipped, itemUpgrades);
   const pinned = useWindowPinned();
   const ghostMode = useGhostMode();
   const friendCode = herzie?.friendCode;

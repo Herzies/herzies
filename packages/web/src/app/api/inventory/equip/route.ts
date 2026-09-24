@@ -1,13 +1,25 @@
-import {
-  applyEquip,
-  type EquipRejection,
-  type EquipSlot,
-  normalizeEquipped,
-} from "@herzies/shared";
 import { NextResponse } from "next/server";
 import { authenticateRequest, isAuthError } from "@/lib/auth";
+import {
+  type ItemState,
+  itemResponse,
+  loadUnits,
+  unitForLegacyEquip,
+  unitForLegacyUnequip,
+} from "@/lib/item-units";
 import { equipItemSchema, isParseError, parseBody } from "@/lib/schemas";
 import { createAdminClient } from "@/lib/supabase-admin";
+
+const REASONS: Record<string, string> = {
+  "not-found": "Herzie not found",
+  "not-owned": "Item not in inventory",
+  "already-equipped": "Already equipped",
+  "not-equipped": "Item not equipped",
+  "max-modifiers": "Maximum modifiers equipped",
+  "missing-side": "side (left|right) is required for ground items",
+  "no-slot": "Item is not equipable",
+  "bad-action": "Invalid action",
+};
 
 export async function POST(request: Request) {
   const auth = await authenticateRequest(request);
@@ -16,81 +28,58 @@ export async function POST(request: Request) {
   const body = await parseBody(request, equipItemSchema);
   if (isParseError(body)) return body;
 
-  const { itemId, action, side } = body;
+  const { action, side } = body;
 
   const admin = createAdminClient();
 
-  // Verify item is equipable
-  const { data: item } = await admin
-    .from("items")
-    .select("id, equipable, equip_slot")
-    .eq("id", itemId)
-    .single();
-
-  if (!item || !item.equipable) {
-    return NextResponse.json(
-      { error: "Item is not equipable" },
-      { status: 400 },
-    );
+  // One named copy, or — from a client that only knew item ids — an item id,
+  // which we resolve to the copy it most plausibly means.
+  let unitId: string;
+  if ("unitId" in body) {
+    unitId = body.unitId;
+  } else {
+    const units = await loadUnits(admin, auth.userId);
+    const unit =
+      action === "equip"
+        ? unitForLegacyEquip(units, body.itemId)
+        : unitForLegacyUnequip(units, body.itemId);
+    if (!unit) {
+      return NextResponse.json(
+        {
+          error:
+            action === "equip" ? REASONS["not-owned"] : REASONS["not-equipped"],
+        },
+        { status: 400 },
+      );
+    }
+    unitId = unit.id;
   }
 
-  // Fetch player data
-  const { data: herzie } = await admin
-    .from("herzies")
-    .select("inventory_v2, equipped")
-    .eq("user_id", auth.userId)
-    .single();
+  // One locked transaction. Wearing a copy of an item whose other copy is worn
+  // swaps them, and equipping into an occupied slot displaces the incumbent —
+  // the same rules applyEquip in @herzies/shared uses to predict the result.
+  const { data, error } = await admin.rpc("equip_unit", {
+    p_user_id: auth.userId,
+    p_unit_id: unitId,
+    p_action: action,
+    p_side: side ?? null,
+  });
 
-  if (!herzie) {
-    return NextResponse.json({ error: "Herzie not found" }, { status: 404 });
-  }
-
-  const inv = (herzie.inventory_v2 ?? {}) as Record<string, number>;
-  const current = normalizeEquipped(herzie.equipped);
-
-  // Ownership is the one rule applyEquip can't check — it only sees Equipped.
-  if (action === "equip" && (inv[itemId] ?? 0) < 1) {
-    return NextResponse.json(
-      { error: "Item not in inventory" },
-      { status: 400 },
-    );
-  }
-
-  // The slot rules themselves live in @herzies/shared so the desktop client can
-  // predict this exact result optimistically (see useOptimisticEquipped).
-  const outcome = applyEquip(
-    current,
-    itemId,
-    action,
-    (item.equip_slot ?? undefined) as EquipSlot | undefined,
-    side,
-  );
-
-  if (!outcome.ok) {
-    const messages: Record<EquipRejection, string> = {
-      "already-equipped": "Already equipped",
-      "not-equipped": "Item not equipped",
-      "max-modifiers": "Maximum modifiers equipped",
-      "missing-side": "side (left|right) is required for ground items",
-      // Equipable with no slot — treat as unique by id only (no dedicated key).
-      "no-slot": "Item has no equip slot",
-    };
-    return NextResponse.json(
-      { error: messages[outcome.reason] },
-      { status: 400 },
-    );
-  }
-
-  const updated = outcome.equipped;
-
-  const { error } = await admin
-    .from("herzies")
-    .update({ equipped: updated })
-    .eq("user_id", auth.userId);
+  const result = data as {
+    ok: boolean;
+    reason?: string;
+    state?: ItemState;
+  } | null;
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
+  if (!result?.ok || !result.state) {
+    return NextResponse.json(
+      { error: REASONS[result?.reason ?? ""] ?? "Failed to equip" },
+      { status: result?.reason === "not-found" ? 404 : 400 },
+    );
+  }
 
-  return NextResponse.json({ ok: true, equipped: updated });
+  return NextResponse.json({ ok: true, ...itemResponse(result.state) });
 }

@@ -17,6 +17,10 @@ struct InventoryCacheFile {
     /// loads.
     #[serde(default)]
     item_upgrades: ItemUpgrades,
+    /// Every owned copy. Defaulted so a cache file written before copies
+    /// existed still loads — with none, and the next sync fills them in.
+    #[serde(default)]
+    units: Vec<crate::types::ItemUnit>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -269,23 +273,35 @@ pub fn clear_equipped() {
     }
 }
 
-pub fn load_inventory_cache() -> Option<(Inventory, u32, ItemUpgrades)> {
+pub fn load_inventory_cache() -> Option<(Inventory, u32, ItemUpgrades, Vec<crate::types::ItemUnit>)>
+{
     let path = config_dir().join("inventory_cache.json");
     if !path.exists() {
         return None;
     }
     let raw = fs::read_to_string(&path).ok()?;
     let file: InventoryCacheFile = serde_json::from_str(&raw).ok()?;
-    Some((file.inventory, file.currency, file.item_upgrades))
+    Some((
+        file.inventory,
+        file.currency,
+        file.item_upgrades,
+        file.units,
+    ))
 }
 
-pub fn save_inventory_cache(inventory: &Inventory, currency: u32, item_upgrades: &ItemUpgrades) {
+pub fn save_inventory_cache(
+    inventory: &Inventory,
+    currency: u32,
+    item_upgrades: &ItemUpgrades,
+    units: &[crate::types::ItemUnit],
+) {
     ensure_dir();
     let path = config_dir().join("inventory_cache.json");
     let file = InventoryCacheFile {
         inventory: inventory.clone(),
         currency,
         item_upgrades: item_upgrades.clone(),
+        units: units.to_vec(),
     };
     let data = serde_json::to_string(&file).unwrap();
     write_secure(&path, &data);
@@ -402,6 +418,36 @@ mod tests {
     // shared lock to avoid clobbering each other, and always restore whatever
     // was on disk beforehand.
     static PENDING_MINUTES_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    // Pure serde — no disk — so unlike the tests below these can't touch a
+    // player's real cache.
+    #[test]
+    fn an_inventory_cache_written_before_copies_existed_still_loads() {
+        let old = r#"{"inventory":{"cd":3},"currency":10,"itemUpgrades":{"boombox":1}}"#;
+        let file: InventoryCacheFile = serde_json::from_str(old).unwrap();
+        assert_eq!(file.inventory["cd"], 3);
+        assert_eq!(file.currency, 10);
+        // No copies yet; the next sync fills them in.
+        assert!(file.units.is_empty());
+    }
+
+    #[test]
+    fn the_inventory_cache_round_trips_its_units() {
+        let file = InventoryCacheFile {
+            inventory: Inventory::from([("boombox".to_string(), 1)]),
+            currency: 5,
+            item_upgrades: ItemUpgrades::new(),
+            units: vec![crate::types::ItemUnit {
+                id: "u1".to_string(),
+                item_id: "boombox".to_string(),
+                upgrade_level: 3,
+                equipped_slot: Some("ground_left".to_string()),
+            }],
+        };
+        let back: InventoryCacheFile =
+            serde_json::from_str(&serde_json::to_string(&file).unwrap()).unwrap();
+        assert_eq!(back.units, file.units);
+    }
 
     #[test]
     fn pending_minutes_round_trips() {

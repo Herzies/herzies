@@ -1,9 +1,10 @@
 import type {
+  BankTile,
   Equipped,
   GroundSide,
   Herzie,
-  Inventory,
   ItemType,
+  ItemUnit,
   ItemUpgradeRejection,
   Rarity,
 } from "@herzies/shared";
@@ -11,26 +12,26 @@ import {
   applyItemUpgrade,
   applySell,
   BANK_SLOT_COUNT,
+  bankTiles,
+  bestUnitOf,
   DECK_SLOT_GROUPS,
-  findEquippedSlot,
   getItem,
-  getItemCategory,
   getItemType,
-  groundSlot,
-  isModifierEquipped,
   MAX_MODIFIERS,
+  pickPlainestUnitIds,
   RARITY_COLORS,
   RARITY_LABELS,
+  unitsBestFirst,
 } from "@herzies/shared";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { ToggleEquipResult } from "../hooks/useOptimisticEquipped";
+import type { ToggleEquipResult } from "../hooks/useOptimisticUnits";
 import { cn, formatAmount } from "../lib/utils";
 import { herzies } from "../tauri-bridge";
 import { Coin } from "./Coin";
 import { ContextMenu } from "./ContextMenu";
 import { DeckRow, type EmptySlotTarget } from "./DeckRow";
-import { DeckSlotPicker } from "./DeckSlotPicker";
+import { DeckSlotPicker, type PickerOption } from "./DeckSlotPicker";
 import { DiceUpgradeOverlay } from "./DiceUpgradeOverlay";
 import { Herzie3D } from "./Herzie3D";
 import ItemInspectOverlay, { ItemPreviewCard } from "./ItemInspectOverlay";
@@ -50,23 +51,21 @@ const CONFIRM_SELL_RARITIES: ReadonlySet<Rarity> = new Set([
 ]);
 
 /** Non-stackable items cap out at 1 per sell action regardless of how many
- * are owned — each grid slot already represents exactly one physical unit
- * (see InventoryView's ownedBankUnits), so "sell 2 equipables at once" isn't
- * a meaningful action even when you own 2. Only stackable items (artefacts)
- * get the quantity ticker. */
+ * are owned — each grid tile already represents exactly one copy (see
+ * `bankTiles`), so "sell 2 equipables at once" isn't a meaningful action even
+ * when you own 2. Only stackable items (artefacts) get the quantity ticker. */
 function SellControls({
-  itemId,
   qty,
   price,
   stackable,
   onSell,
   stacked = false,
 }: {
-  itemId: string;
   qty: number;
   price: number;
   stackable: boolean;
-  onSell: (itemId: string, qty: number) => void;
+  /** How many to sell; the caller decides WHICH copies that means. */
+  onSell: (qty: number) => void;
   /** Ticker row above a full-width Sell button instead of side by side —
    * for the compact SellBox popover, which isn't wide enough to fit the
    * ticker's three segments and the Sell button in one row. */
@@ -102,7 +101,7 @@ function SellControls({
         // button; full width there instead comes for free from the column
         // container's default align-items: stretch.
         className={cn("btn", !stacked && "flex-1")}
-        onClick={() => onSell(itemId, clamped)}
+        onClick={() => onSell(clamped)}
       >
         Sell (<Coin amount={clamped * price} />)
       </button>
@@ -131,7 +130,7 @@ function SellBox({
   qty: number;
   price: number;
   stackable: boolean;
-  onSell: (itemId: string, qty: number) => void;
+  onSell: (qty: number) => void;
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -175,7 +174,6 @@ function SellBox({
         <span className="truncate">{item.name}</span>
       </div>
       <SellControls
-        itemId={itemId}
         qty={qty}
         price={price}
         stackable={stackable}
@@ -202,8 +200,13 @@ const GRID_ROWS = 3;
  * with this grid's actual capacity. */
 const TOTAL_SLOTS = BANK_SLOT_COUNT;
 
+/** v2: the arrangement is now keyed by tile (a copy's own id, or `stack:<item>`)
+ * rather than by item id, so an arrangement saved under the old key — plain
+ * item ids, repeated once per copy — is simply never read. It only ever
+ * recorded where cards sat in a per-device layout, and re-laying it out once
+ * is cheaper than trying to map ids that were never unique onto ones that are. */
 const slotStorageKey = (friendCode: string) =>
-  `herzies:inventory-slots:${friendCode}`;
+  `herzies:inventory-slots:v2:${friendCode}`;
 
 /** Loads the saved slot arrangement, padded/truncated to `TOTAL_SLOTS` and
  * with anything that isn't a string coerced to an empty slot. */
@@ -220,44 +223,41 @@ function loadSlotOrder(friendCode: string): (string | null)[] {
   }
 }
 
-/** Reconciles the saved slot arrangement against what's actually owned.
- * `ownedIds` is a multiset (plain item ids, one entry per bank unit — see
- * `ownedBankUnits`) in the order fresh items should be placed (rarity, then
- * name); a non-stackable item with N copies simply appears N times.
+/** Reconciles the saved slot arrangement against the tiles that exist.
+ * `tileKeys` is every current tile's key in the order fresh tiles should be
+ * placed (rarity, then name).
  *
- * Slots are matched by count, not by a synthetic per-unit identity: a first
- * pass walks `prev` in slot order and keeps a slot's occupant as long as
- * there's still an un-spoken-for owned unit of that id left, decrementing a
- * running per-id budget as it goes — so if a copy was sold from one specific
- * slot (see `handleSell`'s targeted clear), that slot stays empty and every
- * *other* slot holding the same id is left untouched, instead of an
- * arbitrary same-id slot losing its card. Only once every existing slot has
- * had first claim does a second pass place any genuinely new units (more
- * owned than currently placed) into the remaining empty slots. */
+ * Every key is unique — a copy's own id, or one key per stack — so this is a
+ * plain set match, with none of the counting the old per-item-id arrangement
+ * needed to guess which of several identical cards was meant: a tile that's
+ * gone (sold, worn) empties exactly its own slot and nothing else moves.
+ *
+ * A tile that newly appears takes a slot freed in this same pass before any
+ * other empty one. That is what makes equipping into an occupied slot feel
+ * right: the copy you clicked leaves the grid and whatever it displaced lands
+ * where it was, rather than in the first hole the grid happens to have. */
 function reconcileSlotOrder(
   prev: (string | null)[],
-  ownedIds: string[],
+  tileKeys: string[],
 ): (string | null)[] {
-  const remaining = new Map<string, number>();
-  for (const id of ownedIds) remaining.set(id, (remaining.get(id) ?? 0) + 1);
-
-  const next = prev.map((id) => {
-    if (id === null) return null;
-    const left = remaining.get(id) ?? 0;
-    if (left <= 0) return null;
-    remaining.set(id, left - 1);
-    return id;
+  const present = new Set(tileKeys);
+  const next = prev.map((key) =>
+    key !== null && present.has(key) ? key : null,
+  );
+  const freed: number[] = [];
+  prev.forEach((key, i) => {
+    if (key !== null && next[i] === null) freed.push(i);
   });
+  const placed = new Set(next.filter((k): k is string => k !== null));
 
-  for (const id of ownedIds) {
-    const left = remaining.get(id) ?? 0;
-    if (left <= 0) continue;
-    remaining.set(id, left - 1);
-    const emptyIndex = next.indexOf(null);
-    // No room left — over-capacity items simply don't show (the player is
+  for (const key of tileKeys) {
+    if (placed.has(key)) continue;
+    const slot = freed.shift() ?? next.indexOf(null);
+    // No room left — over-capacity tiles simply don't show (the player is
     // warned separately — see isBankFull — before this can normally happen).
-    if (emptyIndex === -1) break;
-    next[emptyIndex] = id;
+    if (slot === -1) break;
+    next[slot] = key;
+    placed.add(key);
   }
   return next;
 }
@@ -281,18 +281,19 @@ function typeRank(itemId: string): number {
   return rank ?? TYPE_RANK.size;
 }
 
-/** Re-lays every owned bank unit out from the first slot, grouped by item
- * type — the quick sort. Built from `ownedBankUnits` rather than by
- * permuting the current arrangement, so it also heals any drift (gaps left
- * by sells, say) in one go.
+/** Re-lays every tile out from the first slot, grouped by item type — the
+ * quick sort. Built from the current tiles rather than by permuting the
+ * arrangement, so it also heals any drift (gaps left by sells, say) in one go.
  *
- * `ownedIds` already arrives rarity-then-name sorted (see InventoryView's
- * `items`) and `sort` is stable, so ranking by type alone yields type →
- * rarity → name without a second comparator. Anything past `TOTAL_SLOTS`
- * drops off the grid, the same way `reconcileSlotOrder` drops it. */
-function sortSlotsByType(ownedIds: string[]): (string | null)[] {
-  const sorted = [...ownedIds].sort((a, b) => typeRank(a) - typeRank(b));
-  return Array.from({ length: TOTAL_SLOTS }, (_, i) => sorted[i] ?? null);
+ * `tiles` already arrives rarity-then-name sorted (see InventoryView's
+ * `compareTiles`) and `sort` is stable, so ranking by type alone yields type →
+ * rarity → name without a second comparator. Anything past `TOTAL_SLOTS` drops
+ * off the grid, the same way `reconcileSlotOrder` drops it. */
+function sortSlotsByType(tiles: BankTile[]): (string | null)[] {
+  const sorted = [...tiles].sort(
+    (a, b) => typeRank(a.itemId) - typeRank(b.itemId),
+  );
+  return Array.from({ length: TOTAL_SLOTS }, (_, i) => sorted[i]?.key ?? null);
 }
 
 /** Shared by both cell kinds: only the dragged cell dims, only the one
@@ -311,16 +312,14 @@ function dragVisualClasses(isDragging: boolean, isDragOver: boolean) {
 const SLOT_INDEX_ATTR = "data-slot-index";
 
 /** One grid cell: just the item's icon (coloured by its own art, not its
- * category — see getItemColor) and a stack-count badge. No equipped ring —
- * equip state is per item id, not per physical copy, and the bank only ever
- * shows unequipped units to begin with (equipping reserves one unit as
- * "worn" and removes it from the bank — see ownedBankUnits), so there's
- * never a specific card here to correctly mark as equipped; that's the
- * Deck tab's job. Hovering shows the full item preview (art, rarity,
- * description, set progress — no equip/sell actions); clicking places (or
- * returns) the item directly; right-clicking a sellable item opens a Sell
- * menu. Press-and-drag onto any other slot (empty or filled — filled swaps
- * the two items).
+ * category — see getItemColor), a "+N" badge when the copy is upgraded and a
+ * stack-count badge on a stack. No equipped ring — the bank only ever shows
+ * unworn copies (wearing one takes it off the grid — see `bankTiles`), so
+ * there's never a specific card here to mark as equipped; that's the Deck tab's
+ * job. Hovering shows the full item preview (art, rarity, description, set
+ * progress — no equip/sell actions); clicking places the copy directly;
+ * right-clicking a sellable item opens a Sell menu. Press-and-drag onto any
+ * other slot (empty or filled — filled swaps the two items).
  *
  * `border-r`/`border-b` only draw on non-edge cells (see `isLastCol`/
  * `isLastRow`) — the grid should show inner divider lines only, not an
@@ -329,36 +328,31 @@ function ItemGridCell({
   index,
   itemId,
   qty,
+  level,
   isLastCol,
   isLastRow,
   isDragging,
   isDragOver,
   equipped,
-  level,
   onPlace,
   onSellRequest,
   onDragPointerDown,
 }: {
   index: number;
   itemId: string;
+  /** Copies behind the tile: more than one only for a stack. */
   qty: number;
+  /** This copy's dice-upgrade level (0 for a stack) — see ItemPreviewCard. */
+  level: number;
   isLastCol: boolean;
   isLastRow: boolean;
   isDragging: boolean;
   isDragOver: boolean;
   equipped: Equipped;
-  /** Current dice-upgrade level — see ItemPreviewCard. */
-  level: number;
-  /** Takes this cell's own slot index, not just the item id: with several
-   * identical cards on the grid it's the only thing that says *which* copy
-   * was clicked — see handleEquip. */
-  onPlace: (itemId: string, slotIndex: number) => void;
-  onSellRequest: (
-    itemId: string,
-    slotIndex: number,
-    x: number,
-    y: number,
-  ) => void;
+  /** The tile is the exact copy that was clicked — there is no "which of the
+   * identical cards" to work out — so no slot index has to be threaded through. */
+  onPlace: () => void;
+  onSellRequest: (x: number, y: number) => void;
   onDragPointerDown: (index: number, e: React.PointerEvent) => void;
 }) {
   const def = getItem(itemId);
@@ -379,11 +373,10 @@ function ItemGridCell({
         type="button"
         data-slot-index={index}
         onPointerDown={(e) => onDragPointerDown(index, e)}
-        onClick={() => onPlace(itemId, index)}
+        onClick={onPlace}
         onContextMenu={(e) => {
           e.preventDefault();
-          if (def?.sellPrice)
-            onSellRequest(itemId, index, e.clientX, e.clientY);
+          if (def?.sellPrice) onSellRequest(e.clientX, e.clientY);
         }}
         className={cn(
           // w-full/h-full: Tooltip's trigger span is a flex item's only
@@ -397,6 +390,11 @@ function ItemGridCell({
           dragVisualClasses(isDragging, isDragOver),
         )}
       >
+        {level > 0 && (
+          <span className="absolute top-0.5 left-0.5 rounded bg-black/60 px-1 text-[9px] text-cyan">
+            +{level}
+          </span>
+        )}
         {def?.stackable && qty > 1 && (
           <span className="absolute top-0.5 right-0.5 rounded bg-black/60 px-1 text-[9px] text-text-dim">
             x{qty}
@@ -438,73 +436,87 @@ function EmptyGridCell({
   );
 }
 
+const RARITY_ORDER: Record<string, number> = {
+  legendary: 0,
+  rare: 1,
+  uncommon: 2,
+  common: 3,
+};
+
+/** Rarity, then name, then — so an upgraded copy leads its plainer twins —
+ * highest level first. The order fresh tiles are placed in and the order the
+ * quick sort starts from. */
+function compareTiles(a: BankTile, b: BankTile): number {
+  const ra = RARITY_ORDER[getItem(a.itemId)?.rarity ?? "common"] ?? 3;
+  const rb = RARITY_ORDER[getItem(b.itemId)?.rarity ?? "common"] ?? 3;
+  if (ra !== rb) return ra - rb;
+  const byName = (getItem(a.itemId)?.name ?? a.itemId).localeCompare(
+    getItem(b.itemId)?.name ?? b.itemId,
+  );
+  return byName || b.upgradeLevel - a.upgradeLevel;
+}
+
 export function InventoryView({
   herzie,
   initialItem,
   onLog,
-  inventory: cachedInventory,
+  loaded,
+  units,
   currency: cachedCurrency,
-  itemUpgrades: cachedItemUpgrades,
   equipped,
   onToggleEquip,
-  onPredictUnequip,
+  onPredictUnits,
   active = true,
 }: {
   herzie: Herzie;
   initialItem?: string | null;
   onLog?: (msg: string) => void;
-  inventory: Inventory | null;
+  /** False until the first inventory has arrived — nothing to lay out before. */
+  loaded: boolean;
+  /** Every owned copy, already optimistic — see useOptimisticUnits in main.tsx.
+   * Held there rather than here so the 3D herzie and deck row move in the same
+   * frame as the grid; keeping a local copy in sync with it only ever
+   * reintroduced the flicker the optimistic layer exists to remove. */
+  units: ItemUnit[];
   currency: number;
-  /** Dice-upgrade levels (itemId -> 0-3) — see MAX_ITEM_UPGRADE_LEVEL. */
-  itemUpgrades: Record<string, number>;
-  /** Already optimistic — see useOptimisticEquipped in main.tsx. Held there
-   * rather than here so the 3D herzie and deck row move in the same frame as
-   * the grid; keeping a local copy in sync with it only ever reintroduced the
-   * flicker the optimistic layer exists to remove. */
+  /** Also optimistic, from the same place. */
   equipped: Equipped;
   onToggleEquip: (
-    itemId: string,
+    unitId: string,
     side?: GroundSide,
   ) => Promise<ToggleEquipResult>;
-  /** Register the unequip a sell performs server-side when the last copy goes. */
-  onPredictUnequip?: (itemId: string, settled: Promise<unknown>) => void;
+  /** Show a change to the copies that a request issued here is performing (a
+   * sell, a dice upgrade), held until that request settles. */
+  onPredictUnits: (
+    update: (units: readonly ItemUnit[]) => ItemUnit[],
+    settled: Promise<unknown>,
+  ) => void;
   /** False while another tab is shown — pauses the 3D render. */
   active?: boolean;
 }) {
-  const [inventory, setInventory] = useState<Inventory | null>(cachedInventory);
   const [currency, setCurrency] = useState(cachedCurrency || herzie.currency);
-  const [itemUpgrades, setItemUpgrades] = useState<Record<string, number>>(
-    cachedItemUpgrades ?? {},
-  );
-  /** Unsettled sells. While non-zero, incoming snapshots are behind us. */
+  /** Unsettled sells. While non-zero, an incoming snapshot is behind us. */
   const [sellsInFlight, setSellsInFlight] = useState(0);
-  /** Unsettled dice upgrades — same reasoning as sellsInFlight. */
-  const [upgradesInFlight, setUpgradesInFlight] = useState(0);
   // handleSell is recreated every render and handed to SellBox/SellControls,
-  // which can be holding a render-old copy. Reading the latest values through
-  // refs (the friendsRef pattern used in FriendsView) is what lets a second
-  // sell compose on the first one's prediction instead of discarding it.
-  const inventoryRef = useRef(inventory);
-  inventoryRef.current = inventory;
+  // which can be holding a render-old copy. Reading the latest coin through a
+  // ref (the friendsRef pattern used in FriendsView) is what lets a second sell
+  // compose on the first one's prediction instead of discarding it.
   const currencyRef = useRef(currency);
   currencyRef.current = currency;
-  const itemUpgradesRef = useRef(itemUpgrades);
-  itemUpgradesRef.current = itemUpgrades;
   /** The dice whose upgrade-target picker is open, if any. */
   const [diceUpgradeItem, setDiceUpgradeItem] = useState<string | null>(null);
   const [inspectItem, setInspectItem] = useState<string | null>(
     initialItem ?? null,
   );
+  /** Sell popover/menu, anchored where the right-click was. They name the TILE
+   * (which is what says exactly which copies), not an item id. */
   const [sellBox, setSellBox] = useState<{
-    itemId: string;
-    /** The specific slot this sell was requested from — see handleSell. */
-    slotIndex: number;
+    tileKey: string;
     x: number;
     y: number;
   } | null>(null);
   const [sellMenu, setSellMenu] = useState<{
-    itemId: string;
-    slotIndex: number;
+    tileKey: string;
     x: number;
     y: number;
   } | null>(null);
@@ -544,23 +556,23 @@ export function InventoryView({
   // starts — see handlePointerUp/handlePointerDown for why both matter.
   const suppressClickRef = useRef(false);
 
-  // Adopt the shared AppState snapshot — except while a sell is in flight, when
-  // it is known to be behind our prediction and would revert the grid and coin
-  // mid-request. `sell_item` emits the updated state before its command
-  // returns, so by the time the counter falls the snapshot already matches.
+  // What the grid shows: one tile per unworn copy, a stack folded into one.
+  // Held behind `units`, which is identity-stable while its content is, so this
+  // isn't rebuilt by an unrelated render.
+  const tiles = useMemo(() => bankTiles(units).sort(compareTiles), [units]);
+  const tileByKey = useMemo(
+    () => new Map(tiles.map((t) => [t.key, t])),
+    [tiles],
+  );
+
+  // Adopt the shared AppState's coin — except while a sell is in flight, when it
+  // is known to be behind our prediction and would revert the coin mid-request.
+  // (The copies need no such gate: they come through the optimistic layer, which
+  // holds its own prediction until the server catches up.)
   useEffect(() => {
-    if (sellsInFlight > 0 || upgradesInFlight > 0) return;
-    setInventory(cachedInventory);
+    if (sellsInFlight > 0) return;
     setCurrency(cachedCurrency || herzie.currency);
-    setItemUpgrades(cachedItemUpgrades ?? {});
-  }, [
-    cachedInventory,
-    cachedCurrency,
-    cachedItemUpgrades,
-    herzie.currency,
-    sellsInFlight,
-    upgradesInFlight,
-  ]);
+  }, [cachedCurrency, herzie.currency, sellsInFlight]);
 
   useEffect(() => {
     if (initialItem) setInspectItem(initialItem);
@@ -642,11 +654,12 @@ export function InventoryView({
 
   const handleDragPointerDown = (index: number, e: React.PointerEvent) => {
     if (e.button !== 0) return;
-    const itemId = slotOrder[index];
-    if (!itemId) return;
+    const key = slotOrder[index];
+    const tile = key ? tileByKey.get(key) : undefined;
+    if (!tile) return;
     dragRef.current = {
       index,
-      itemId,
+      itemId: tile.itemId,
       startX: e.clientX,
       startY: e.clientY,
       dragging: false,
@@ -660,130 +673,103 @@ export function InventoryView({
   // authoritative inventory and currency every few seconds, so both the initial
   // fill and any later drift are covered without a dedicated request.
 
-  /** `slotIndex`, when given, is the exact grid slot the sell was requested
-   * from (see the grid's onSellRequest). For a non-stackable item — sold one
-   * unit at a time (see SellControls) — clearing that specific slot on
-   * success is what makes the card that visually disappears match the one
-   * the player actually right-clicked: reconcileSlotOrder's count-based
-   * matching only knows "one fewer of this item id is owned now", and with
-   * several identical cards on the grid it has no way on its own to tell
-   * *which* of them the player meant. Skipped for stackable items, which
-   * share a single badge-counted slot regardless of quantity — clearing it
-   * on a partial sell would wipe a stack that's still owned. */
   /** A rare-or-better sell waiting on the "are you sure?" prompt. */
   const [sellConfirm, setSellConfirm] = useState<{
     itemId: string;
-    qty: number;
-    slotIndex?: number;
+    unitIds: string[];
   } | null>(null);
 
   /** Every sell entry point goes through here: rare and legendary items ask
-   * first, anything else sells straight away. */
-  const requestSell = (itemId: string, qty: number, slotIndex?: number) => {
+   * first, anything else sells straight away. `unitIds` are the exact copies —
+   * what the sell removes and what it pays for. */
+  const requestSell = (itemId: string, unitIds: string[]) => {
+    if (unitIds.length === 0) return;
     const rarity = getItem(itemId)?.rarity;
     if (rarity && CONFIRM_SELL_RARITIES.has(rarity)) {
-      setSellConfirm({ itemId, qty, slotIndex });
+      setSellConfirm({ itemId, unitIds });
       return;
     }
-    handleSell(itemId, qty, slotIndex);
+    handleSell(unitIds, itemId);
   };
 
+  /** Sells exactly these copies. Resolves whether it worked. `itemId`, when the
+   * sale is of one kind of thing, is only for the wording of a message. */
   const handleSell = async (
-    itemId: string,
-    qty: number,
-    slotIndex?: number,
-  ) => {
-    const item = getItem(itemId);
-    const name = item?.name ?? itemId;
+    unitIds: string[],
+    itemId?: string,
+  ): Promise<boolean> => {
+    const name = itemId
+      ? (getItem(itemId)?.name ?? itemId)
+      : `${unitIds.length} items`;
 
     // Predict with the same function the server applies, so the card leaves the
     // grid and the coin ticks up on click rather than a round trip later, and
     // the response lands as a no-op instead of a visible correction.
-    const predicted = applySell(
-      inventoryRef.current ?? {},
-      currencyRef.current,
-      equipped,
-      itemId,
-      qty,
-      item?.sellPrice,
-      itemUpgradesRef.current,
-    );
+    const sell = (base: readonly ItemUnit[], coin: number) =>
+      applySell(base, coin, unitIds, (id) => getItem(id)?.sellPrice);
+    const predicted = sell(units, currencyRef.current);
     if (!predicted.ok) {
       onLog?.(
         predicted.reason === "not-sellable"
           ? `"${name}" can't be sold`
           : `Not enough "${name}" to sell`,
       );
-      return;
+      return false;
     }
 
-    setInventory(predicted.inventory);
     setCurrency(predicted.newCurrency);
-    setItemUpgrades(predicted.itemUpgrades);
-    // Also update the refs now, not just on the next render, so two sells
-    // fired within a single tick still compose.
-    inventoryRef.current = predicted.inventory;
+    // Also update the ref now, not just on the next render, so two sells fired
+    // within a single tick still compose.
     currencyRef.current = predicted.newCurrency;
-    itemUpgradesRef.current = predicted.itemUpgrades;
     // Selling the last one leaves nothing to preview — close it.
-    if (predicted.inventory[itemId] === undefined && itemId === inspectItem) {
+    if (inspectItem && !predicted.units.some((u) => u.itemId === inspectItem)) {
       setInspectItem(null);
     }
-    if (slotIndex !== undefined && !item?.stackable) {
-      setSlotOrder((prev) => {
-        if (prev[slotIndex] !== itemId) return prev;
-        const next = [...prev];
-        next[slotIndex] = null;
-        return next;
-      });
-    }
 
-    const request = herzies.sellItem(itemId, qty);
-    // Selling the last copy unequips server-side. Route that through the shared
-    // equip overlay so it can't fight an explicit unequip prediction.
-    if (predicted.unequipped) onPredictUnequip?.(itemId, request);
+    const request = herzies.sellItem(unitIds);
+    // A worn copy that is sold stops being worn; the optimistic layer derives
+    // that from the copies leaving, so the creature drops it in the same frame.
+    onPredictUnits((base) => {
+      const outcome = sell(base, currencyRef.current);
+      return outcome.ok ? outcome.units : [...base];
+    }, request);
 
     setSellsInFlight((n) => n + 1);
     try {
       const result = await request;
       if (result) {
         // Authoritative, and by construction equal to the prediction.
-        setInventory(result.inventory);
         setCurrency(result.newCurrency);
-        setItemUpgrades(result.itemUpgrades);
-        inventoryRef.current = result.inventory;
         currencyRef.current = result.newCurrency;
-        itemUpgradesRef.current = result.itemUpgrades;
-      } else {
-        onLog?.(`Failed to sell "${name}"`);
+        return true;
       }
+      onLog?.(`Failed to sell "${name}"`);
+      return false;
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       onLog?.(`Failed to sell "${name}": ${msg}`);
+      return false;
     } finally {
       // No manual rollback on failure: once the last sell settles the gate
-      // below lifts and the effect adopts the server snapshot, which for a
-      // failed sell is still the pre-sell state. Restoring a value captured
+      // above lifts and the effect adopts the server's coin, which for a
+      // failed sell is still the pre-sell balance. Restoring a value captured
       // before *this* sell would instead clobber any other sell still pending.
       setSellsInFlight((n) => Math.max(0, n - 1));
     }
   };
 
-  /** Applies a dice item to a target card, mirroring handleSell's predict-
+  /** Applies a dice item to ONE named card, mirroring handleSell's predict-
    * then-confirm shape: applyItemUpgrade is the same pure function the RPC
    * enforces server-side, so the "+N" badge and the consumed dice both
-   * appear on click instead of after the round trip. */
+   * appear on click instead of after the round trip. Its twin — another copy
+   * of the same card — is untouched. */
   const handleApplyDiceUpgrade = async (
     diceItemId: string,
-    targetItemId: string,
+    targetUnitId: string,
   ) => {
-    const targetName = getItem(targetItemId)?.name ?? targetItemId;
-    const predicted = applyItemUpgrade(
-      inventoryRef.current ?? {},
-      itemUpgradesRef.current,
-      diceItemId,
-      targetItemId,
-    );
+    const target = units.find((u) => u.id === targetUnitId);
+    const targetName = getItem(target?.itemId ?? "")?.name ?? "that card";
+    const predicted = applyItemUpgrade(units, diceItemId, targetUnitId);
     if (!predicted.ok) {
       const messages: Record<ItemUpgradeRejection, string> = {
         "not-dice": "Not a dice item",
@@ -796,20 +782,16 @@ export function InventoryView({
       return;
     }
 
-    setInventory(predicted.inventory);
-    setItemUpgrades(predicted.itemUpgrades);
-    inventoryRef.current = predicted.inventory;
-    itemUpgradesRef.current = predicted.itemUpgrades;
     setDiceUpgradeItem(null);
+    const request = herzies.applyDiceUpgrade(diceItemId, targetUnitId);
+    onPredictUnits((base) => {
+      const outcome = applyItemUpgrade(base, diceItemId, targetUnitId);
+      return outcome.ok ? outcome.units : [...base];
+    }, request);
 
-    setUpgradesInFlight((n) => n + 1);
     try {
-      const result = await herzies.applyDiceUpgrade(diceItemId, targetItemId);
+      const result = await request;
       if (result) {
-        setInventory(result.inventory);
-        setItemUpgrades(result.itemUpgrades);
-        inventoryRef.current = result.inventory;
-        itemUpgradesRef.current = result.itemUpgrades;
         onLog?.(`Upgraded "${targetName}" to +${result.newLevel}`);
       } else {
         onLog?.(`Failed to apply "${getItem(diceItemId)?.name ?? diceItemId}"`);
@@ -817,152 +799,59 @@ export function InventoryView({
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       onLog?.(`Failed to apply dice: ${msg}`);
-    } finally {
-      setUpgradesInFlight((n) => Math.max(0, n - 1));
     }
   };
 
-  const isItemEquipped = (itemId: string) =>
-    findEquippedSlot(equipped, itemId) !== null ||
-    isModifierEquipped(equipped, itemId);
-
-  /** `fromSlot`, when given, is the exact grid slot the placed unit left from
-   * (see handleGridClick) — the equip counterpart of handleSell's slotIndex,
-   * and needed for the same reason. reconcileSlotOrder only learns that one
-   * fewer unit of this id is in the bank, so with several identical cards on
-   * the grid its count-based first pass keeps the earliest of them and empties
-   * the *last*, whichever one the player actually clicked; whatever the equip
-   * displaced then drops into that hole. Clearing the clicked slot here is
-   * what makes the card that leaves the grid the one that was clicked, and
-   * leaves that slot as the first empty one for the displaced item to land in.
-   *
-   * Done before awaiting, so it batches with the optimistic equip inside
-   * onToggleEquip and the reconcile sees both at once — a clear afterwards
-   * would arrive a render too late, with reconcile having already emptied
-   * some other slot. */
-  const handleEquip = async (
-    itemId: string,
-    fromSlot?: number,
-    side?: GroundSide,
-  ) => {
-    const name = getItem(itemId)?.name ?? itemId;
-    if (fromSlot !== undefined) {
-      setSlotOrder((prev) => {
-        if (prev[fromSlot] !== itemId) return prev;
-        const next = [...prev];
-        next[fromSlot] = null;
-        return next;
-      });
-    }
-    const result = await onToggleEquip(itemId, side);
+  /** Wears or removes one specific copy. There is no slot bookkeeping here any
+   * more: a copy is its own tile, so when it leaves the grid the tile's slot
+   * empties on its own, and anything it displaces lands in that freed slot (see
+   * reconcileSlotOrder) — which is what used to need the clicked slot cleared
+   * by hand before the equip was sent, and restored by hand if it failed. */
+  const handleEquip = async (unitId: string, side?: GroundSide) => {
+    const unit = units.find((u) => u.id === unitId);
+    const name = getItem(unit?.itemId ?? "")?.name ?? "item";
+    const result = await onToggleEquip(unitId, side);
     if (result.ok) {
       onLog?.(
         result.action === "equip" ? `Placed "${name}"` : `Returned "${name}"`,
       );
     } else {
-      // Put the card back only for a toggle that never left the client (see
-      // ToggleEquipResult.sent): nothing changed anywhere, and no ownership
-      // change is coming to trigger a reconcile that would restore it. After
-      // a failed *request* the overlay drop puts ownership back by itself, so
-      // reconcile re-places the unit — writing the slot here too would race
-      // that and could leave the displaced item with nowhere to land.
-      if (fromSlot !== undefined && !result.sent) {
-        setSlotOrder((prev) => {
-          if (prev[fromSlot] !== null) return prev;
-          const next = [...prev];
-          next[fromSlot] = itemId;
-          return next;
-        });
-      }
       const verb = result.action === "equip" ? "place" : "return";
       onLog?.(`Failed to ${verb} "${name}": ${result.error}`);
     }
   };
 
-  // Grid click places an item directly — a no-op for non-equipable items
+  // Grid click places a copy directly — a no-op for non-equipable items
   // (e.g. plain collectible cards) rather than a doomed equip attempt. Also a
   // no-op right after a drag that moved the item to another slot, so dropping
   // it doesn't also place it (see suppressClickRef).
   //
-  // Never a *return*, unlike the Deck tab and the inspect overlay: every unit
-  // on this grid is by construction one that isn't being worn (equipping
-  // reserves a unit out of the bank — see ownedBankUnits), so a click here can
-  // only mean "place this copy". For a duplicate of something already placed
-  // that's nothing at all, since equip state is per item id rather than per
-  // physical copy — swapping the worn copy for this identical one is
-  // unrepresentable, and indistinguishable from leaving it alone. Toggling
-  // instead, as this used to, read the shared "is this id worn" bit and took
-  // the *worn* copy off in response to a click on a different one.
-  const handleGridClick = (itemId: string, slotIndex: number) => {
+  // Never a *return*, unlike the Deck tab and the inspect overlay: every tile on
+  // this grid is by construction a copy that isn't being worn, so a click here
+  // can only mean "place this copy". If another copy of the same item is
+  // already worn that's a swap — the worn one comes off, this one goes on — so
+  // a +3 can replace a plain one just by clicking it.
+  const handleGridClick = (tile: BankTile) => {
     if (suppressClickRef.current) {
       suppressClickRef.current = false;
       return;
     }
-    const def = getItem(itemId);
+    const def = getItem(tile.itemId);
     // Dice don't equip — clicking one opens the upgrade-target picker
     // instead (see DiceUpgradeOverlay).
     if (def?.dice) {
-      setDiceUpgradeItem(itemId);
+      setDiceUpgradeItem(tile.itemId);
       return;
     }
     if (!def?.equipable) return;
-    if (isItemEquipped(itemId)) {
-      onLog?.(`"${def.name}" is already placed`);
-      return;
-    }
-    handleEquip(itemId, slotIndex);
+    handleEquip(tile.unitIds[0]);
   };
 
-  const rarityOrder: Record<string, number> = {
-    legendary: 0,
-    rare: 1,
-    uncommon: 2,
-    common: 3,
-  };
-  const items = inventory
-    ? Object.entries(inventory)
-        .filter(([itemId, qty]) => {
-          if (qty <= 0) return false;
-          const def = getItem(itemId);
-          return (def ? getItemCategory(def) : "deck") === "deck";
-        })
-        .sort((a, b) => {
-          const ra = rarityOrder[getItem(a[0])?.rarity ?? "common"] ?? 3;
-          const rb = rarityOrder[getItem(b[0])?.rarity ?? "common"] ?? 3;
-          if (ra !== rb) return ra - rb;
-          return (getItem(a[0])?.name ?? a[0]).localeCompare(
-            getItem(b[0])?.name ?? b[0],
-          );
-        })
-    : [];
-  // Equipped items live only in the Deck tab, not the Cards bank. Equip
-  // state is per item id, not per physical copy — there's no way to say
-  // "this specific one is worn" — so both stackable and non-stackable items
-  // reserve exactly one unit as equipped and still show any remaining
-  // copies (owning 3, equipping 1, leaves 2 in the bank — as one stack
-  // entry for a stackable item, or two separate cells for a non-stackable
-  // one). Non-stackable items repeat their id once per bank unit (a
-  // multiset, not a set of unique keys — see reconcileSlotOrder) instead of
-  // contributing one entry for the whole stack, so N copies occupy N
-  // separate grid slots.
-  const ownedBankUnits = items.flatMap(([itemId, qty]) => {
-    const def = getItem(itemId);
-    const bankQty = isItemEquipped(itemId) ? qty - 1 : qty;
-    if (def?.stackable) return bankQty > 0 ? [itemId] : [];
-    return Array.from({ length: Math.max(0, bankQty) }, () => itemId);
-  });
-  /** Every copy beyond the first, of everything sellable in the bank — what
-   * the Sell duplicates button offers.
-   *
-   * Keeps exactly one of each id *in total*, not one per bank slot, so an
-   * item you are currently wearing counts as the copy you keep. That is also
-   * what makes this safe: the remaining quantity never reaches zero, so
-   * `applySell` never takes its unequip branch and nothing can be sold out
-   * from under the deck.
-   *
-   * Built from `items` (one entry per id, already rarity-then-name sorted)
-   * rather than `ownedBankUnits`, since the sale is per id with a quantity.
-   * Anything with no sellPrice is skipped — `applySell` would refuse it.
+  /** Every spare copy, of everything sellable in the bank — what the Sell
+   * duplicates button offers. For each item the best copy is kept — the worn
+   * one, else the most upgraded — and the rest are the spares. So the one you'd
+   * miss is never the one that goes, and since a worn copy is always the one
+   * kept, nothing can be sold out from under the deck.
    *
    * Anything in CONFIRM_SELL_RARITIES — rare and legendary — is left out
    * however many you own, so this only ever clears common and uncommon
@@ -975,100 +864,105 @@ export function InventoryView({
    *
    * Stackable items are left out too, which is what keeps this a decluttering
    * action rather than a payout. A stack occupies one grid cell however many
-   * you own (see ownedBankUnits), so selling its spares frees nothing — it
-   * just converts them to coin, and a stack already has its own "Sell all" in
-   * the right-click menu. Only non-stackable spares cost a slot each, and
-   * they are the whole reason this button exists. */
-  const duplicates = items
-    .flatMap(([itemId, qty]) => {
+   * you own, so selling its spares frees nothing — it just converts them to
+   * coin, and a stack already has its own "Sell all" in the right-click menu.
+   * Only non-stackable spares cost a slot each, and they are the whole reason
+   * this button exists. Anything with no sellPrice is skipped too — applySell
+   * would refuse it. */
+  const duplicates = [...new Set(tiles.map((t) => t.itemId))].flatMap(
+    (itemId) => {
       const def = getItem(itemId);
-      if (!def || def.stackable || CONFIRM_SELL_RARITIES.has(def.rarity)) {
+      if (
+        !def ||
+        def.stackable ||
+        !def.sellPrice ||
+        CONFIRM_SELL_RARITIES.has(def.rarity)
+      ) {
         return [];
       }
-      return [{ itemId, qty: qty - 1, price: def.sellPrice ?? 0 }];
-    })
-    .filter((d) => d.qty > 0 && d.price > 0);
+      const spares = unitsBestFirst(units, itemId).slice(1);
+      return spares.length > 0
+        ? [
+            {
+              itemId,
+              unitIds: spares.map((u) => u.id),
+              qty: spares.length,
+              price: def.sellPrice,
+            },
+          ]
+        : [];
+    },
+  );
   const duplicatesTotal = duplicates.reduce(
     (sum, d) => sum + d.qty * d.price,
     0,
   );
   const duplicatesCount = duplicates.reduce((sum, d) => sum + d.qty, 0);
 
-  /**
-   * Sells the whole duplicate batch, one item id at a time.
-   *
-   * Sequential on purpose, and this is load-bearing rather than caution: the
-   * sell route is a read-modify-write (fetch inventory_v2, applySell, update)
-   * with no row lock, so two sells in flight at once both read the same
-   * pre-sale inventory and the second write clobbers the first. Firing the
-   * batch in parallel would silently pay out for a fraction of it. Awaiting
-   * each one keeps every request reading the previous one's result.
-   *
-   * The extra in-flight count wraps the whole batch: each handleSell releases
-   * its own, and without this the counter would touch zero between two items
-   * and let the snapshot effect adopt a pre-batch `cachedInventory`, undoing
-   * the optimistic state mid-run.
-   */
+  /** Sells the whole duplicate batch in one request. It used to go one item id
+   * at a time, sequentially, because the sell route was a read-modify-write
+   * with no lock and two in flight at once clobbered each other; selling is now
+   * a single locked transaction that takes any number of copies, so one call
+   * does it. */
   const sellDuplicates = async () => {
     const batch = duplicates;
     if (batch.length === 0) return;
     const count = duplicatesCount;
     const total = duplicatesTotal;
-    setSellsInFlight((n) => n + 1);
-    try {
-      for (const d of batch) {
-        await handleSell(d.itemId, d.qty);
-      }
-    } finally {
-      setSellsInFlight((n) => Math.max(0, n - 1));
+    const ok = await handleSell(batch.flatMap((d) => d.unitIds));
+    if (ok) {
+      onLog?.(
+        `Sold ${count} duplicate${count === 1 ? "" : "s"} for ${formatAmount(total)} coins`,
+      );
     }
-    onLog?.(
-      `Sold ${count} duplicate${count === 1 ? "" : "s"} for ${formatAmount(total)} coins`,
-    );
   };
 
-  const loading = inventory === null;
+  const loading = !loaded;
 
   /** What can go in the empty deck slot whose picker is open.
    *
    * Filtered on the item's own `equipSlot`, not on the group's broader
-   * `itemType`: `applyEquip` routes by `equipSlot` and *displaces* whatever
-   * the slot already holds, so offering a hat in the empty Face box would
-   * silently take off the hat that's already on. That does mean the list
-   * can come up empty while the player owns plenty of other Equipment —
-   * which is what DeckSlotPicker's slot-name header is there to explain.
+   * `itemType`: equipping routes by `equipSlot` and *displaces* whatever the
+   * slot already holds, so offering a hat in the empty Face box would silently
+   * take off the hat that's already on. That does mean the list can come up
+   * empty while the player owns plenty of other Equipment — which is what
+   * DeckSlotPicker's slot-name header is there to explain.
    *
-   * Drawn from `items` (one entry per id, already rarity-then-name sorted)
-   * rather than `ownedBankUnits` (a multiset), since equip state is per item
-   * id: two copies of the same hat are one and the same move, and listing it
-   * twice would just be a row that does nothing new. Anything already
-   * equipped is dropped for the same reason — `applyEquip` would refuse it
-   * with "already-equipped" no matter which copy was meant. */
-  const slotPickerItems = slotPicker
-    ? items
-        .map(([itemId]) => itemId)
-        .filter((itemId) => {
-          const def = getItem(itemId);
-          return (
-            def?.equipSlot === slotPicker.equipSlot && !isItemEquipped(itemId)
-          );
-        })
-    : [];
+   * Drawn from the tiles (rarity-then-name sorted), one row per item at each
+   * level: identical copies are one and the same move, a copy at another level
+   * is a different one. An item that's already worn is left out — wearing a
+   * second copy of it is a swap, which belongs to clicking that copy in the
+   * bank, not to filling an empty box. */
+  const wornItemIds = new Set(
+    units.filter((u) => u.equippedSlot !== null).map((u) => u.itemId),
+  );
+  const slotPickerOptions: PickerOption[] = [];
+  if (slotPicker) {
+    const seen = new Set<string>();
+    for (const tile of tiles) {
+      const def = getItem(tile.itemId);
+      if (def?.equipSlot !== slotPicker.equipSlot) continue;
+      if (wornItemIds.has(tile.itemId)) continue;
+      const key = `${tile.itemId}:${tile.upgradeLevel}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      slotPickerOptions.push({
+        itemId: tile.itemId,
+        unitId: tile.unitIds[0],
+        upgradeLevel: tile.upgradeLevel,
+      });
+    }
+  }
 
   // Keep the saved slot arrangement in sync with what's actually owned —
-  // see reconcileSlotOrder. Keyed on the joined list (not `ownedBankUnits`,
-  // a new array every render) so this only runs when ownership actually
-  // changes.
-  const ownedBankUnitsJoined = ownedBankUnits.join(",");
+  // see reconcileSlotOrder. Keyed on the joined list (not `tiles`, a new array
+  // whenever anything changes) so this only runs when the set of tiles does.
+  const tileKeysJoined = tiles.map((t) => t.key).join(",");
   useEffect(() => {
     setSlotOrder((prev) =>
-      reconcileSlotOrder(
-        prev,
-        ownedBankUnitsJoined ? ownedBankUnitsJoined.split(",") : [],
-      ),
+      reconcileSlotOrder(prev, tileKeysJoined ? tileKeysJoined.split(",") : []),
     );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ownedBankUnitsJoined]);
+  }, [tileKeysJoined]);
 
   useEffect(() => {
     try {
@@ -1082,21 +976,28 @@ export function InventoryView({
     }
   }, [slotOrder, herzie.friendCode]);
 
+  // The overlay opens on an item id (a deep link from a notification), so it
+  // shows the copy that id most plausibly means: the one worn, else the best.
   const inspected = inspectItem ? getItem(inspectItem) : null;
-  const inspectedQty = inspectItem ? (inventory?.[inspectItem] ?? 0) : 0;
-  const inspectedEquipped = inspectItem ? isItemEquipped(inspectItem) : false;
+  const inspectUnit = inspectItem ? bestUnitOf(units, inspectItem) : undefined;
+  const inspectedQty = inspectItem
+    ? units.filter((u) => u.itemId === inspectItem).length
+    : 0;
+  const inspectedEquipped = inspectUnit?.equippedSlot != null;
   const inspectedModifierCapped =
     !inspectedEquipped &&
     inspected?.equipSlot === "modifier" &&
     (equipped.modifier?.length ?? 0) >= MAX_MODIFIERS;
   const inspectedGroundSide =
-    inspectItem && inspectedEquipped && inspected?.equipSlot === "ground"
-      ? findEquippedSlot(equipped, inspectItem) === groundSlot("left")
+    inspected?.equipSlot === "ground"
+      ? inspectUnit?.equippedSlot === "ground_left"
         ? "L"
-        : "R"
+        : inspectUnit?.equippedSlot === "ground_right"
+          ? "R"
+          : null
       : null;
   // Quantity is only meaningful for stackable items — each non-stackable
-  // card in the grid already represents exactly one unit, so showing "x2"
+  // card in the grid already represents exactly one copy, so showing "x2"
   // while inspecting one of them would be misleading.
   const inspectedMeta = [
     inspected?.stackable ? `x${inspectedQty}` : null,
@@ -1155,7 +1056,7 @@ export function InventoryView({
               <Tooltip
                 label={
                   duplicatesCount > 0
-                    ? `Sell ${duplicatesCount} duplicate${duplicatesCount === 1 ? "" : "s"}, keeping one of each`
+                    ? `Sell ${duplicatesCount} duplicate${duplicatesCount === 1 ? "" : "s"}, keeping the best of each`
                     : "No duplicates to sell"
                 }
               >
@@ -1175,7 +1076,7 @@ export function InventoryView({
                 <button
                   type="button"
                   aria-label="Quick sort"
-                  onClick={() => setSlotOrder(sortSlotsByType(ownedBankUnits))}
+                  onClick={() => setSlotOrder(sortSlotsByType(tiles))}
                   // Tighter vertical padding than TabButton's, so the taller
                   // icon doesn't grow the tab row: the flex row's default
                   // stretch sizes this button to the tabs anyway, and
@@ -1199,9 +1100,8 @@ export function InventoryView({
           <List className="min-h-0 flex-1">
             <DeckRow
               equipped={equipped}
-              inventory={inventory}
-              itemUpgrades={itemUpgrades}
-              onUnequip={handleEquip}
+              units={units}
+              onUnequip={(unitId) => handleEquip(unitId)}
               onPlaceRequest={setSlotPicker}
             />
           </List>
@@ -1211,17 +1111,11 @@ export function InventoryView({
           </div>
         ) : (
           <div className="grid min-h-0 flex-1 grid-cols-6 grid-rows-3">
-            {slotOrder.map((itemId, i) => {
+            {slotOrder.map((key, i) => {
               const isLastCol = i % GRID_COLS === GRID_COLS - 1;
               const isLastRow = i >= TOTAL_SLOTS - GRID_COLS;
-              const rawQty = itemId ? (inventory?.[itemId] ?? 0) : 0;
-              // A stackable item's bank quantity excludes the one unit
-              // reserved as "worn" — see ownedBankUnits above.
-              const qty =
-                itemId && getItem(itemId)?.stackable && isItemEquipped(itemId)
-                  ? Math.max(0, rawQty - 1)
-                  : rawQty;
-              if (!itemId || qty <= 0) {
+              const tile = key ? tileByKey.get(key) : undefined;
+              if (!tile) {
                 return (
                   <EmptyGridCell
                     key={`slot-${i}`}
@@ -1236,17 +1130,17 @@ export function InventoryView({
                 <ItemGridCell
                   key={`slot-${i}`}
                   index={i}
-                  itemId={itemId}
-                  qty={qty}
+                  itemId={tile.itemId}
+                  qty={tile.unitIds.length}
+                  level={tile.upgradeLevel}
                   isLastCol={isLastCol}
                   isLastRow={isLastRow}
                   isDragging={dragVisual?.index === i}
                   isDragOver={dragVisual?.overIndex === i}
                   equipped={equipped}
-                  level={itemUpgrades[itemId] ?? 0}
-                  onPlace={handleGridClick}
-                  onSellRequest={(id, slotIndex, x, y) =>
-                    setSellMenu({ itemId: id, slotIndex, x, y })
+                  onPlace={() => handleGridClick(tile)}
+                  onSellRequest={(x, y) =>
+                    setSellMenu({ tileKey: tile.key, x, y })
                   }
                   onDragPointerDown={handleDragPointerDown}
                 />
@@ -1265,7 +1159,7 @@ export function InventoryView({
             if (!sellConfirm) setInspectItem(null);
           }}
           equipped={equipped}
-          level={itemUpgrades[inspectItem] ?? 0}
+          level={inspectUnit?.upgradeLevel ?? 0}
           meta={inspectedMeta || undefined}
           footer={
             <>
@@ -1275,8 +1169,8 @@ export function InventoryView({
                     <button
                       type="button"
                       className="btn"
-                      disabled={inspectedModifierCapped}
-                      onClick={() => handleEquip(inspectItem)}
+                      disabled={inspectedModifierCapped || !inspectUnit}
+                      onClick={() => inspectUnit && handleEquip(inspectUnit.id)}
                     >
                       {inspectedEquipped ? "Return" : "Place"}
                     </button>
@@ -1293,11 +1187,15 @@ export function InventoryView({
                 })()}
               {inspected.sellPrice && inspectedQty > 0 ? (
                 <SellControls
-                  itemId={inspectItem}
                   qty={inspectedQty}
                   price={inspected.sellPrice}
                   stackable={inspected.stackable ?? false}
-                  onSell={requestSell}
+                  onSell={(qty) => {
+                    // The overlay only knows an item id, so which copies goes
+                    // by the plainest-first rule: a spare, never the one worn.
+                    const ids = pickPlainestUnitIds(units, inspectItem, qty);
+                    if (ids) requestSell(inspectItem, ids);
+                  }}
                 />
               ) : null}
             </>
@@ -1308,10 +1206,9 @@ export function InventoryView({
       {diceUpgradeItem && (
         <DiceUpgradeOverlay
           diceItemId={diceUpgradeItem}
-          inventory={inventory}
-          itemUpgrades={itemUpgrades}
-          onPick={(targetItemId) =>
-            handleApplyDiceUpgrade(diceUpgradeItem, targetItemId)
+          units={units}
+          onPick={(targetUnitId) =>
+            handleApplyDiceUpgrade(diceUpgradeItem, targetUnitId)
           }
           onClose={() => setDiceUpgradeItem(null)}
         />
@@ -1319,9 +1216,11 @@ export function InventoryView({
 
       {sellMenu &&
         (() => {
-          const qty = inventory?.[sellMenu.itemId] ?? 0;
+          const tile = tileByKey.get(sellMenu.tileKey);
+          if (!tile) return null;
+          const qty = tile.unitIds.length;
           const canSellAll =
-            (getItem(sellMenu.itemId)?.stackable ?? false) && qty > 1;
+            (getItem(tile.itemId)?.stackable ?? false) && qty > 1;
           return (
             <ContextMenu
               x={sellMenu.x}
@@ -1341,7 +1240,7 @@ export function InventoryView({
                       {
                         label: "Sell all",
                         onClick: () => {
-                          requestSell(sellMenu.itemId, qty, sellMenu.slotIndex);
+                          requestSell(tile.itemId, tile.unitIds);
                           setSellMenu(null);
                         },
                       },
@@ -1377,15 +1276,15 @@ export function InventoryView({
             <div>
               Sell {duplicatesCount} duplicate
               {duplicatesCount === 1 ? "" : "s"} for{" "}
-              <Coin amount={duplicatesTotal} />? One of each is kept, and rare
-              and legendary items are never sold.
+              <Coin amount={duplicatesTotal} />? The best copy of each is kept,
+              and rare and legendary items are never sold.
             </div>
             {/* The breakdown, since this is the one sell action where what
                 goes is not the thing that was clicked. Capped so a bank full
                 of odds and ends can't outgrow the dialog. Nothing valuable
                 can hide behind "+N more": the batch is common and uncommon
-                only (see `duplicates`), and `items` sorts rarity-first (see
-                rarityOrder) so the uncommons are the rows that do show. */}
+                only (see `duplicates`), and the tiles sort rarity-first (see
+                RARITY_ORDER) so the uncommons are the rows that do show. */}
             <div className="flex flex-col gap-0.5 text-ui-sm text-text-dim">
               {duplicates.slice(0, 6).map((d) => {
                 const def = getItem(d.itemId);
@@ -1420,13 +1319,13 @@ export function InventoryView({
           x={slotPicker.x}
           y={slotPicker.y}
           slotLabel={slotPicker.label}
-          itemIds={slotPickerItems}
-          onPick={(itemId) => {
+          options={slotPickerOptions}
+          onPick={(unitId) => {
             // Closed before the await, as the sell menu does: the optimistic
             // equip fills the slot on the next render anyway, so leaving the
             // list up would only show a stale row for the item just placed.
             setSlotPicker(null);
-            handleEquip(itemId, undefined, slotPicker.side);
+            handleEquip(unitId, slotPicker.side);
           }}
           onClose={() => setSlotPicker(null)}
         />
@@ -1434,19 +1333,19 @@ export function InventoryView({
 
       {sellBox &&
         (() => {
-          const item = getItem(sellBox.itemId);
-          const qty = inventory?.[sellBox.itemId] ?? 0;
-          if (!item?.sellPrice || qty <= 0) return null;
+          const tile = tileByKey.get(sellBox.tileKey);
+          const item = tile ? getItem(tile.itemId) : undefined;
+          if (!tile || !item?.sellPrice) return null;
           return (
             <SellBox
-              itemId={sellBox.itemId}
+              itemId={tile.itemId}
               x={sellBox.x}
               y={sellBox.y}
-              qty={qty}
+              qty={tile.unitIds.length}
               price={item.sellPrice}
               stackable={item.stackable ?? false}
-              onSell={(id, n) => {
-                requestSell(id, n, sellBox.slotIndex);
+              onSell={(qty) => {
+                requestSell(tile.itemId, tile.unitIds.slice(0, qty));
                 setSellBox(null);
               }}
               onClose={() => setSellBox(null)}
@@ -1458,7 +1357,8 @@ export function InventoryView({
         (() => {
           const item = getItem(sellConfirm.itemId);
           if (!item) return null;
-          const total = sellConfirm.qty * (item.sellPrice ?? 0);
+          const qty = sellConfirm.unitIds.length;
+          const total = qty * (item.sellPrice ?? 0);
           return (
             <PromptOverlay
               title={`Sell ${RARITY_LABELS[item.rarity].toLowerCase()} item?`}
@@ -1474,18 +1374,13 @@ export function InventoryView({
                   label: "Sell",
                   colour: "text-red",
                   onClick: () => {
-                    handleSell(
-                      sellConfirm.itemId,
-                      sellConfirm.qty,
-                      sellConfirm.slotIndex,
-                    );
+                    handleSell(sellConfirm.unitIds, sellConfirm.itemId);
                     setSellConfirm(null);
                   },
                 },
               ]}
             >
-              Are you sure you want to sell{" "}
-              {sellConfirm.qty > 1 ? `${sellConfirm.qty}x ` : ""}
+              Are you sure you want to sell {qty > 1 ? `${qty}x ` : ""}
               <span style={{ color: RARITY_COLORS[item.rarity] }}>
                 "{item.name}"
               </span>{" "}

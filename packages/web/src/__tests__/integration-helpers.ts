@@ -65,6 +65,83 @@ export async function createTestUser(): Promise<{
   };
 }
 
+/** How many of each item a test wants a player to own. */
+export type InventorySpec = Record<string, number>;
+
+/**
+ * Give a player exactly this inventory, replacing whatever they own: one owned
+ * copy (an item_units row) per unit, so a test can think in counts.
+ *
+ * `equipped` wears one copy of each named item, in the same shape the legacy
+ * `equipped` column had (`{ground_left: "boombox", modifier: ["a", "b"]}`).
+ * `levels` sets the upgrade level of the WORN copy of an item, or of one copy
+ * if it isn't worn.
+ *
+ * Owned items are rows, not a column you can write: inventory_v2/equipped/
+ * item_upgrades are derived from item_units by a trigger and a direct write to
+ * them is rejected.
+ */
+export async function seedInventory(
+  userId: string,
+  inventory: InventorySpec,
+  opts: {
+    equipped?: Record<string, string | string[]>;
+    levels?: Record<string, number>;
+  } = {},
+): Promise<void> {
+  const admin = getAdminClient();
+  const { error: delError } = await admin
+    .from("item_units")
+    .delete()
+    .eq("user_id", userId);
+  if (delError) throw new Error(`seedInventory delete: ${delError.message}`);
+
+  const worn = new Map<string, string>(); // itemId -> slot
+  for (const [slot, value] of Object.entries(opts.equipped ?? {})) {
+    for (const itemId of Array.isArray(value) ? value : [value]) {
+      worn.set(itemId, slot);
+    }
+  }
+
+  const rows: Record<string, unknown>[] = [];
+  for (const [itemId, qty] of Object.entries(inventory)) {
+    for (let i = 0; i < qty; i++) {
+      // The first copy of an item is the worn / levelled one.
+      rows.push({
+        user_id: userId,
+        item_id: itemId,
+        equipped_slot: i === 0 ? (worn.get(itemId) ?? null) : null,
+        equipped_at:
+          i === 0 && worn.has(itemId) ? new Date().toISOString() : null,
+        upgrade_level: i === 0 ? (opts.levels?.[itemId] ?? 0) : 0,
+      });
+    }
+  }
+  if (rows.length === 0) return;
+  const { error } = await admin.from("item_units").insert(rows);
+  if (error) throw new Error(`seedInventory insert: ${error.message}`);
+}
+
+/** A player's owned copies, oldest first. */
+export async function getUnits(userId: string): Promise<
+  {
+    id: string;
+    item_id: string;
+    upgrade_level: number;
+    equipped_slot: string | null;
+  }[]
+> {
+  const admin = getAdminClient();
+  const { data, error } = await admin
+    .from("item_units")
+    .select("id, item_id, upgrade_level, equipped_slot")
+    .eq("user_id", userId)
+    .order("acquired_at")
+    .order("id");
+  if (error) throw new Error(`getUnits: ${error.message}`);
+  return data ?? [];
+}
+
 /** Create a herzie row for a test user */
 export async function createTestHerzie(
   userId: string,
@@ -91,11 +168,24 @@ export async function createTestHerzie(
     total_minutes_listened: 0,
     genre_minutes: {},
     friend_codes: [],
-    inventory_v2: { cd: 5 },
     currency: 100,
   };
 
-  const row = { ...defaults, ...overrides };
+  // Tests still think in counts: `inventory_v2`, `equipped` and `item_upgrades`
+  // overrides are turned into owned copies rather than written to the columns
+  // (which are derived from item_units and reject direct writes).
+  const {
+    inventory_v2: inventory = { cd: 5 },
+    equipped = {},
+    item_upgrades: levels = {},
+    ...rest
+  } = overrides as {
+    inventory_v2?: InventorySpec;
+    equipped?: Record<string, string | string[]>;
+    item_upgrades?: Record<string, number>;
+  } & Record<string, unknown>;
+
+  const row = { ...defaults, ...rest };
 
   const { data, error } = await admin
     .from("herzies")
@@ -107,7 +197,15 @@ export async function createTestHerzie(
     throw new Error(`Failed to create test herzie: ${error?.message}`);
   }
 
-  return data;
+  await seedInventory(userId, inventory, { equipped, levels });
+
+  // Re-read so the returned row reflects the projection the seed just wrote.
+  const { data: fresh } = await admin
+    .from("herzies")
+    .select("*")
+    .eq("user_id", userId)
+    .single();
+  return fresh ?? data;
 }
 
 /** Clean up all test data (call in afterEach/afterAll) */

@@ -240,10 +240,201 @@ export function normalizeEquipped(raw: unknown): Equipped {
   return out;
 }
 
-/** Why an equip/unequip can't be applied to a given Equipped. Ownership and
- * "is this item even equipable" aren't here — they need the inventory/catalog
- * the caller holds, and stay the caller's job (see the equip route). */
+/** Where a unit is worn: one of the stored slot keys, or "modifier" for the
+ * capped list. Mirrors item_units.equipped_slot. */
+export type UnitSlot = EquippedSlot | "modifier";
+
+/**
+ * One owned copy of an item — the unit of ownership. It is what a bank tile is,
+ * what gets sold, traded and worn, and what a dice upgrade lands on.
+ *
+ * Until these existed an item was only a count against its catalog id, so
+ * anything that could differ between two copies (an upgrade level) could only
+ * be a property of the whole item type: upgrade one Box of Boom and every Box
+ * of Boom was upgraded.
+ *
+ * `inventory`/`equipped`/`itemUpgrades` still exist as derived views (the
+ * server recomputes them from the units) for readers that only need "how many"
+ * or "which ids are worn"; anything that has to tell copies apart reads these.
+ */
+export interface ItemUnit {
+  id: string;
+  itemId: string;
+  upgradeLevel: number;
+  equippedSlot: UnitSlot | null;
+}
+
+const UNIT_SLOTS: readonly string[] = [...EQUIPPED_SLOTS, "modifier"];
+
+/** Parse an untrusted units payload (an API response, a local cache), dropping
+ * anything malformed rather than trusting its shape. */
+export function normalizeUnits(raw: unknown): ItemUnit[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ItemUnit[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const r = entry as Record<string, unknown>;
+    if (typeof r.id !== "string" || typeof r.itemId !== "string") continue;
+    out.push({
+      id: r.id,
+      itemId: r.itemId,
+      upgradeLevel: typeof r.upgradeLevel === "number" ? r.upgradeLevel : 0,
+      equippedSlot:
+        typeof r.equippedSlot === "string" &&
+        UNIT_SLOTS.includes(r.equippedSlot)
+          ? (r.equippedSlot as UnitSlot)
+          : null,
+    });
+  }
+  return out;
+}
+
+/** `{itemId: count}` — the legacy inventory shape, derived. */
+export function unitsToInventory(
+  units: readonly ItemUnit[],
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const u of units) out[u.itemId] = (out[u.itemId] ?? 0) + 1;
+  return out;
+}
+
+/** The id-keyed `Equipped` shape (what the renderer draws from), derived. The
+ * modifier list keeps the order the units arrive in. */
+export function unitsToEquipped(units: readonly ItemUnit[]): Equipped {
+  const equipped: Equipped = {};
+  const modifier: string[] = [];
+  for (const u of units) {
+    if (u.equippedSlot === null) continue;
+    if (u.equippedSlot === "modifier") modifier.push(u.itemId);
+    else equipped[u.equippedSlot] = u.itemId;
+  }
+  if (modifier.length > 0) equipped.modifier = modifier;
+  return equipped;
+}
+
+/**
+ * One tile in the bank grid. A stack of interchangeable copies (a stackable
+ * item, which never carries per-unit state) is one tile with a count; every
+ * other copy is a tile of its own, since each has its own upgrade level.
+ */
+export interface BankTile {
+  /** A stable identity for arranging tiles in the grid: the copy's own id for
+   * a single copy, `stack:<itemId>` for a stack. */
+  key: string;
+  itemId: string;
+  /** The copies behind this tile — one for a single copy, every unworn copy of
+   * a stack (oldest first). */
+  unitIds: string[];
+  /** Upgrade level of a single copy; always 0 for a stack. */
+  upgradeLevel: number;
+}
+
+/**
+ * The bank grid's tiles: every unworn copy in the "deck" category, with a
+ * stackable item's copies folded into one tile. Always exactly as many tiles as
+ * `bankSlotsUsed` counts slots — they are the same rule, one returning the
+ * tiles and the other their number.
+ */
+export function bankTiles(
+  units: readonly ItemUnit[],
+  lookup: BankItemLookup = catalogBankLookup,
+): BankTile[] {
+  const tiles: BankTile[] = [];
+  const stacks = new Map<string, BankTile>();
+  for (const u of units) {
+    if (u.equippedSlot !== null) continue;
+    const info = lookup(u.itemId);
+    if (info && info.category !== "deck") continue;
+    if (info?.stackable) {
+      const stack = stacks.get(u.itemId);
+      if (stack) {
+        stack.unitIds.push(u.id);
+      } else {
+        const tile: BankTile = {
+          key: `stack:${u.itemId}`,
+          itemId: u.itemId,
+          unitIds: [u.id],
+          upgradeLevel: 0,
+        };
+        stacks.set(u.itemId, tile);
+        tiles.push(tile);
+      }
+    } else {
+      tiles.push({
+        key: u.id,
+        itemId: u.itemId,
+        unitIds: [u.id],
+        upgradeLevel: u.upgradeLevel,
+      });
+    }
+  }
+  return tiles;
+}
+
+/** Copies of one item, plainest first — unworn before worn, then lowest level,
+ * then in the order given (oldest first). What "sell/offer N of this item"
+ * means when it can't say which copies: a spare goes before one you've
+ * invested in or are wearing. */
+export function unitsPlainestFirst(
+  units: readonly ItemUnit[],
+  itemId: string,
+): ItemUnit[] {
+  return units
+    .filter((u) => u.itemId === itemId)
+    .map((u, order) => ({ u, order }))
+    .sort(
+      (a, b) =>
+        Number(a.u.equippedSlot !== null) - Number(b.u.equippedSlot !== null) ||
+        a.u.upgradeLevel - b.u.upgradeLevel ||
+        a.order - b.order,
+    )
+    .map(({ u }) => u);
+}
+
+/** The ids of the `quantity` plainest copies of an item, or null if the player
+ * doesn't own that many. */
+export function pickPlainestUnitIds(
+  units: readonly ItemUnit[],
+  itemId: string,
+  quantity: number,
+): string[] | null {
+  const ordered = unitsPlainestFirst(units, itemId);
+  return ordered.length >= quantity
+    ? ordered.slice(0, quantity).map((u) => u.id)
+    : null;
+}
+
+/** Copies of one item, best first — worn before unworn, then highest level,
+ * then in the order given. The copy worth keeping when the rest are spares. */
+export function unitsBestFirst(
+  units: readonly ItemUnit[],
+  itemId: string,
+): ItemUnit[] {
+  return units
+    .filter((u) => u.itemId === itemId)
+    .map((u, order) => ({ u, order }))
+    .sort(
+      (a, b) =>
+        Number(b.u.equippedSlot !== null) - Number(a.u.equippedSlot !== null) ||
+        b.u.upgradeLevel - a.u.upgradeLevel ||
+        a.order - b.order,
+    )
+    .map(({ u }) => u);
+}
+
+/** The copy of an item that "the item" most plausibly means: the one worn if
+ * any, else the best one owned. For surfaces that only know an item id. */
+export function bestUnitOf(
+  units: readonly ItemUnit[],
+  itemId: string,
+): ItemUnit | undefined {
+  return unitsBestFirst(units, itemId)[0];
+}
+
+/** Why an equip/unequip can't be applied. Whether an item is equipable at all
+ * is the caller's lookup (the `equipSlot` it passes in). */
 export type EquipRejection =
+  | "not-owned"
   | "already-equipped"
   | "not-equipped"
   | "max-modifiers"
@@ -251,77 +442,88 @@ export type EquipRejection =
   | "no-slot";
 
 export type EquipOutcome =
-  | { ok: true; equipped: Equipped }
+  | { ok: true; units: ItemUnit[] }
   | { ok: false; reason: EquipRejection };
 
 /**
- * The single source of truth for what equipping or unequipping does to
- * `Equipped`. The server applies it to persist the change and the desktop
- * client applies it to predict the result optimistically — sharing one
- * function is what lets the optimistic state match the server's byte for byte,
- * so the real response lands as a no-op instead of a visible correction.
+ * What equipping or unequipping one specific unit does. The equip_unit RPC does
+ * the same thing under a row lock to persist it; the desktop applies this to
+ * predict the result, and sharing the rules is what lets the prediction match
+ * the server's answer so the real response lands as a no-op rather than a
+ * visible correction.
  *
- * Pure: never mutates `current`. `equipSlot` is passed in rather than looked up
- * because the server reads it from the DB row (`equip_slot`) and the client
- * from the bundled catalog (`getItem(...).equipSlot`).
+ * Pure: never mutates `units`. `equipSlot` is passed in because the server
+ * reads it from the items row and the client from the bundled catalog.
  *
- * Note that equipping into an occupied single-value slot **displaces** the
- * incumbent rather than refusing — that's deliberate (swapping a hat shouldn't
- * need an explicit unequip first), and the displaced item returns to the bank.
+ * Two behaviours worth knowing:
+ *  - Equipping a copy of an item whose OTHER copy is worn is a swap, never a
+ *    second equip — one copy of an item worn at a time has always been the
+ *    rule, and it's what stops a stat being counted twice.
+ *  - Equipping into an occupied single-value slot displaces the incumbent
+ *    (swapping a hat shouldn't need an explicit unequip first); the displaced
+ *    copy returns to the bank.
  */
 export function applyEquip(
-  current: Equipped,
-  itemId: string,
+  units: readonly ItemUnit[],
+  unitId: string,
   action: "equip" | "unequip",
   equipSlot: EquipSlot | undefined,
   side?: GroundSide,
 ): EquipOutcome {
-  const isEquipped =
-    findEquippedSlot(current, itemId) !== null ||
-    isModifierEquipped(current, itemId);
+  const unit = units.find((u) => u.id === unitId);
+  if (!unit) return { ok: false, reason: "not-owned" };
 
   if (action === "unequip") {
-    if (!isEquipped) return { ok: false, reason: "not-equipped" };
-    const equipped: Equipped = { ...current };
-    const slot = findEquippedSlot(current, itemId);
-    if (slot) {
-      delete equipped[slot];
-    } else {
-      const rest = (current.modifier ?? []).filter((id) => id !== itemId);
-      if (rest.length > 0) equipped.modifier = rest;
-      else delete equipped.modifier;
-    }
-    return { ok: true, equipped };
-  }
-
-  if (isEquipped) return { ok: false, reason: "already-equipped" };
-
-  const equipped: Equipped = { ...current };
-
-  if (equipSlot === "ground") {
-    if (side !== "left" && side !== "right") {
-      return { ok: false, reason: "missing-side" };
-    }
-    equipped[groundSlot(side)] = itemId;
-    return { ok: true, equipped };
-  }
-
-  if (equipSlot === "modifier") {
-    const worn = current.modifier ?? [];
-    if (worn.length >= MAX_MODIFIERS) {
-      return { ok: false, reason: "max-modifiers" };
-    }
-    equipped.modifier = [...worn, itemId];
-    return { ok: true, equipped };
+    if (unit.equippedSlot === null)
+      return { ok: false, reason: "not-equipped" };
+    return {
+      ok: true,
+      units: units.map((u) =>
+        u.id === unitId ? { ...u, equippedSlot: null } : u,
+      ),
+    };
   }
 
   if (!equipSlot) return { ok: false, reason: "no-slot" };
 
-  // Single-value slot — displaces whatever was worn there. No cast needed:
-  // ruling out "ground" and "modifier" above narrows EquipSlot to exactly the
-  // members EquippedSlot also has.
-  equipped[equipSlot] = itemId;
-  return { ok: true, equipped };
+  let slot: UnitSlot;
+  if (equipSlot === "ground") {
+    if (side !== "left" && side !== "right") {
+      return { ok: false, reason: "missing-side" };
+    }
+    slot = groundSlot(side);
+  } else {
+    // Ruling out "ground" narrows EquipSlot to exactly the members UnitSlot
+    // also has, so no cast is needed.
+    slot = equipSlot;
+  }
+
+  if (unit.equippedSlot === slot) {
+    return { ok: false, reason: "already-equipped" };
+  }
+
+  if (slot === "modifier") {
+    const others = units.filter(
+      (u) => u.equippedSlot === "modifier" && u.itemId !== unit.itemId,
+    ).length;
+    if (others >= MAX_MODIFIERS) return { ok: false, reason: "max-modifiers" };
+  }
+
+  return {
+    ok: true,
+    units: units.map((u) => {
+      if (u.id === unitId) return { ...u, equippedSlot: slot };
+      // The other worn copy of this item, if any — the swap.
+      if (u.itemId === unit.itemId && u.equippedSlot !== null) {
+        return { ...u, equippedSlot: null };
+      }
+      // Whoever held a single-value slot before.
+      if (slot !== "modifier" && u.equippedSlot === slot) {
+        return { ...u, equippedSlot: null };
+      }
+      return u;
+    }),
+  };
 }
 
 export type SellRejection = "not-sellable" | "not-enough";
@@ -329,88 +531,54 @@ export type SellRejection = "not-sellable" | "not-enough";
 export type SellOutcome =
   | {
       ok: true;
-      /** Inventory with the sold units removed (the id is dropped at zero). */
-      inventory: Record<string, number>;
+      units: ItemUnit[];
       earned: number;
       newCurrency: number;
-      /** Equip state after the sale — see the unequip note below. */
-      equipped: Equipped;
-      /** True when selling the last copy forced an unequip. */
-      unequipped: boolean;
-      /** item_upgrades with the sold id's entry cleared if this sale hit
-       * zero owned (same reference back otherwise) — see the note below. */
-      itemUpgrades: Record<string, number>;
     }
   | { ok: false; reason: SellRejection };
 
 /**
- * The single source of truth for what selling does. Server-side this computes
- * the row to persist; client-side it predicts the result so the grid and coin
- * move on click instead of after the round trip. Sharing one function is what
- * keeps the prediction identical to what the server will store.
+ * What selling specific units does. The sell_units RPC persists it under a row
+ * lock; the desktop predicts it so the grid and coin move on click instead of
+ * after the round trip.
  *
- * Pure: never mutates `inventory`, `equipped`, or `itemUpgrades`.
- *
- * Selling the last copy of an equipped item unequips it in the same operation —
- * ownership and equip state must never drift apart, and an item you no longer
- * own can't stay worn. Selling the last copy of an upgraded item clears its
- * item_upgrades entry the same way, for the same reason — otherwise
- * reacquiring the id later would grant a free upgrade.
+ * Pure: never mutates `units`. A worn copy that is sold simply stops being
+ * worn — it no longer exists — so ownership and equip state can't drift apart.
+ * `sellPriceOf` is the caller's price lookup (the items row on the server, the
+ * bundled catalog on the client); no price means not sellable.
  */
 export function applySell(
-  inventory: Record<string, number>,
+  units: readonly ItemUnit[],
   currency: number,
-  equipped: Equipped,
-  itemId: string,
-  quantity: number,
-  sellPrice: number | undefined,
-  itemUpgrades: Record<string, number> = {},
+  unitIds: readonly string[],
+  sellPriceOf: (itemId: string) => number | undefined,
 ): SellOutcome {
-  if (!sellPrice) return { ok: false, reason: "not-sellable" };
+  const wanted = new Set(unitIds);
+  if (wanted.size === 0) return { ok: false, reason: "not-enough" };
 
-  const owned = inventory[itemId] ?? 0;
-  if (owned < quantity) return { ok: false, reason: "not-enough" };
+  const chosen = units.filter((u) => wanted.has(u.id));
+  if (chosen.length !== wanted.size) return { ok: false, reason: "not-enough" };
 
-  const nextInventory = { ...inventory };
-  const newQty = owned - quantity;
-  let nextEquipped = equipped;
-  let unequipped = false;
-  let nextItemUpgrades = itemUpgrades;
-
-  if (newQty > 0) {
-    nextInventory[itemId] = newQty;
-  } else {
-    delete nextInventory[itemId];
-    // No copies left — it can't remain equipped. Reuses applyEquip's unequip
-    // branch so this agrees with an explicit unequip exactly.
-    const removal = applyEquip(equipped, itemId, "unequip", undefined);
-    if (removal.ok) {
-      nextEquipped = removal.equipped;
-      unequipped = true;
-    }
-    if (itemId in itemUpgrades) {
-      nextItemUpgrades = { ...itemUpgrades };
-      delete nextItemUpgrades[itemId];
-    }
+  let earned = 0;
+  for (const u of chosen) {
+    const price = sellPriceOf(u.itemId);
+    if (!price) return { ok: false, reason: "not-sellable" };
+    earned += price;
   }
 
-  const earned = quantity * sellPrice;
   return {
     ok: true,
-    inventory: nextInventory,
+    units: units.filter((u) => !wanted.has(u.id)),
     earned,
     newCurrency: currency + earned,
-    equipped: nextEquipped,
-    unequipped,
-    itemUpgrades: nextItemUpgrades,
   };
 }
 
 /** How many times a card can be upgraded — Power Dice 1 and any future dice
  * item share this cap. The level-cap check inside apply_item_upgrade
- * (00078_dice_and_item_upgrades.sql) can't import this constant — it's
- * duplicated there as a bare 3, and the two must stay in sync (same
- * arrangement as GROUND_DROP_CAP/BANK_SLOT_COUNT). */
+ * (00079_item_units.sql) and item_units.upgrade_level's CHECK can't import this
+ * constant — it's duplicated there as a bare 3, and they must stay in sync
+ * (same arrangement as GROUND_DROP_CAP/BANK_SLOT_COUNT). */
 export const MAX_ITEM_UPGRADE_LEVEL = 3;
 
 export type ItemUpgradeRejection =
@@ -423,63 +591,53 @@ export type ItemUpgradeRejection =
 export type ItemUpgradeOutcome =
   | {
       ok: true;
-      /** Inventory with one dice consumed (the id is dropped at zero). */
-      inventory: Record<string, number>;
-      /** item_upgrades with the target's level bumped by one. */
-      itemUpgrades: Record<string, number>;
+      /** Units with one die consumed and the target's level raised by one. */
+      units: ItemUnit[];
       newLevel: number;
     }
   | { ok: false; reason: ItemUpgradeRejection };
 
 /**
- * The single source of truth for what applying a dice item to a target card
- * does. Server-side this computes the row to persist (the apply_item_upgrade
- * RPC re-validates ownership/level-cap against the DB row under lock);
- * client-side it predicts the result so the target's "+N" appears on click
- * instead of after the round trip.
+ * What applying a die to one specific card does — raises THAT unit's level and
+ * no other's, which is the whole point. The apply_item_upgrade RPC re-validates
+ * ownership and the level cap under a row lock; the desktop predicts it so the
+ * "+N" appears on click instead of after the round trip.
  *
- * Pure: never mutates `inventory` or `itemUpgrades`. Ownership/quantity/level
- * checks mirror what the RPC re-checks server-side; "is this a statted card"
- * can only be checked here (and in the upgrade API route) since `stats`
+ * Pure: never mutates `units`. Dice are fungible, so which die is consumed
+ * doesn't matter (the first unworn one, matching the RPC). "Is this a statted
+ * card" can only be checked here (and in the upgrade API route) since `stats`
  * lives only in this TS catalog, never in the DB `items` table.
  */
 export function applyItemUpgrade(
-  inventory: Record<string, number>,
-  itemUpgrades: Record<string, number>,
+  units: readonly ItemUnit[],
   diceItemId: string,
-  targetItemId: string,
+  targetUnitId: string,
 ): ItemUpgradeOutcome {
-  const diceDef = getItem(diceItemId);
-  if (!diceDef?.dice) return { ok: false, reason: "not-dice" };
-  if ((inventory[diceItemId] ?? 0) < 1) {
-    return { ok: false, reason: "dice-not-owned" };
-  }
-  if ((inventory[targetItemId] ?? 0) < 1) {
-    return { ok: false, reason: "target-not-owned" };
-  }
+  if (!getItem(diceItemId)?.dice) return { ok: false, reason: "not-dice" };
 
-  const targetStats = getItem(targetItemId)?.stats;
+  const dice = units.find(
+    (u) => u.itemId === diceItemId && u.equippedSlot === null,
+  );
+  if (!dice) return { ok: false, reason: "dice-not-owned" };
+
+  const target = units.find((u) => u.id === targetUnitId);
+  if (!target) return { ok: false, reason: "target-not-owned" };
+
+  const targetStats = getItem(target.itemId)?.stats;
   if (!targetStats || Object.keys(targetStats).length === 0) {
     return { ok: false, reason: "not-statted" };
   }
 
-  const currentLevel = itemUpgrades[targetItemId] ?? 0;
-  if (currentLevel >= MAX_ITEM_UPGRADE_LEVEL) {
+  if (target.upgradeLevel >= MAX_ITEM_UPGRADE_LEVEL) {
     return { ok: false, reason: "max-level" };
   }
 
-  const nextInventory = { ...inventory };
-  const remaining = (nextInventory[diceItemId] ?? 0) - 1;
-  if (remaining > 0) nextInventory[diceItemId] = remaining;
-  else delete nextInventory[diceItemId];
-
-  const newLevel = currentLevel + 1;
-  const nextItemUpgrades = { ...itemUpgrades, [targetItemId]: newLevel };
-
+  const newLevel = target.upgradeLevel + 1;
   return {
     ok: true,
-    inventory: nextInventory,
-    itemUpgrades: nextItemUpgrades,
+    units: units
+      .filter((u) => u.id !== dice.id)
+      .map((u) => (u.id === target.id ? { ...u, upgradeLevel: newLevel } : u)),
     newLevel,
   };
 }
@@ -511,7 +669,9 @@ export interface ItemDef {
   frames: string[][]; // Each frame is an array of lines (with HTML color spans)
   /** Whether owning more than one is allowed (gates re-buying from the
    * store). Independent of equipable/equipSlot — see getItemType — so an
-   * item (e.g. First Edition Card) can be both stackable and equipable. */
+   * item can be both stackable and equipable. A stackable item must never
+   * carry per-unit state (an upgrade level), or its copies stop being
+   * interchangeable and can't share a tile. */
   stackable?: boolean;
   equipable?: boolean;
   /** Catalog category; ground items occupy ground_left or ground_right when equipped,
@@ -1248,12 +1408,54 @@ const DICE_CORNERS = {
  * whichever real face is actually facing the camera there, since faces
  * share one pixel buffer with no depth test — see the comment on that). */
 const DICE_FACES: { corners: [V3, V3, V3, V3] }[] = [
-  { corners: [DICE_CORNERS.lbf, DICE_CORNERS.rbf, DICE_CORNERS.rtf, DICE_CORNERS.ltf] },
-  { corners: [DICE_CORNERS.rbb, DICE_CORNERS.lbb, DICE_CORNERS.ltb, DICE_CORNERS.rtb] },
-  { corners: [DICE_CORNERS.rbb, DICE_CORNERS.rtb, DICE_CORNERS.rtf, DICE_CORNERS.rbf] },
-  { corners: [DICE_CORNERS.lbf, DICE_CORNERS.ltf, DICE_CORNERS.ltb, DICE_CORNERS.lbb] },
-  { corners: [DICE_CORNERS.ltf, DICE_CORNERS.rtf, DICE_CORNERS.rtb, DICE_CORNERS.ltb] },
-  { corners: [DICE_CORNERS.lbb, DICE_CORNERS.rbb, DICE_CORNERS.rbf, DICE_CORNERS.lbf] },
+  {
+    corners: [
+      DICE_CORNERS.lbf,
+      DICE_CORNERS.rbf,
+      DICE_CORNERS.rtf,
+      DICE_CORNERS.ltf,
+    ],
+  },
+  {
+    corners: [
+      DICE_CORNERS.rbb,
+      DICE_CORNERS.lbb,
+      DICE_CORNERS.ltb,
+      DICE_CORNERS.rtb,
+    ],
+  },
+  {
+    corners: [
+      DICE_CORNERS.rbb,
+      DICE_CORNERS.rtb,
+      DICE_CORNERS.rtf,
+      DICE_CORNERS.rbf,
+    ],
+  },
+  {
+    corners: [
+      DICE_CORNERS.lbf,
+      DICE_CORNERS.ltf,
+      DICE_CORNERS.ltb,
+      DICE_CORNERS.lbb,
+    ],
+  },
+  {
+    corners: [
+      DICE_CORNERS.ltf,
+      DICE_CORNERS.rtf,
+      DICE_CORNERS.rtb,
+      DICE_CORNERS.ltb,
+    ],
+  },
+  {
+    corners: [
+      DICE_CORNERS.lbb,
+      DICE_CORNERS.rbb,
+      DICE_CORNERS.rbf,
+      DICE_CORNERS.lbf,
+    ],
+  },
 ];
 
 const DICE_PIP_RADIUS = 0.16;
@@ -1292,7 +1494,9 @@ function diceEdgeBevel(u: number, v: number): number {
 }
 
 function renderPowerDiceFrame(yAngle: number): string[] {
-  const bright: number[][] = Array.from({ length: SH }, () => Array(SW).fill(-1));
+  const bright: number[][] = Array.from({ length: SH }, () =>
+    Array(SW).fill(-1),
+  );
   const pixelColor: (string | undefined)[][] = Array.from({ length: SH }, () =>
     Array(SW).fill(undefined),
   );
@@ -1764,7 +1968,9 @@ export const ITEMS: ItemDef[] = [
     description: "A token of appreciation for early adopters.",
     rarity: "rare",
     frames: firstEditionFrames,
-    stackable: true,
+    // Not stackable: it is statted (+10 luck), so its copies can differ in
+    // upgrade level, and a stackable item must never carry per-unit state —
+    // that is what lets the bank treat a stack as one interchangeable tile.
     equipable: true,
     equipSlot: "modifier",
     sellPrice: 250,
@@ -1944,6 +2150,28 @@ export function getHerzieStats(
     for (const key of STAT_KEYS) {
       if (stats[key] === undefined) continue;
       totals[key] += stats[key] + level;
+    }
+  }
+  return totals;
+}
+
+/** The same totals, read straight off the units: each worn unit adds its
+ * catalog `stats` plus its OWN upgrade level to every stat key it defines —
+ * so two copies of one item at different levels contribute what each really
+ * is, instead of the id-wide level `getHerzieStats` has to assume. */
+export function getHerzieStatsFromUnits(
+  units: readonly ItemUnit[] | null | undefined,
+): HerzieStats {
+  const totals = Object.fromEntries(
+    STAT_KEYS.map((key) => [key, 0]),
+  ) as HerzieStats;
+  for (const unit of units ?? []) {
+    if (unit.equippedSlot === null) continue;
+    const stats = getItem(unit.itemId)?.stats;
+    if (!stats) continue;
+    for (const key of STAT_KEYS) {
+      if (stats[key] === undefined) continue;
+      totals[key] += stats[key] + unit.upgradeLevel;
     }
   }
   return totals;

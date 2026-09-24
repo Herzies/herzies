@@ -31,7 +31,7 @@ export async function POST(request: Request) {
   }
 
   // Find the herzie
-  let query = admin.from("herzies").select("user_id, inventory_v2");
+  let query = admin.from("herzies").select("user_id");
   if (herzieName) {
     query = query.ilike("name", herzieName);
   } else {
@@ -43,13 +43,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Herzie not found" }, { status: 404 });
   }
 
-  const inv = (herzie.inventory_v2 ?? {}) as Record<string, number>;
-  inv[itemId] = (inv[itemId] ?? 0) + quantity;
-
-  const { error } = await admin
-    .from("herzies")
-    .update({ inventory_v2: inv })
-    .eq("user_id", herzie.user_id);
+  // The same grant every other reward goes through, so a granted item is a
+  // real owned copy (a row in item_units) like any other — a direct write to
+  // the inventory column would be rejected, since that column is derived.
+  const { error } = await admin.rpc("grant_inventory_item", {
+    p_user_id: herzie.user_id,
+    p_item_id: itemId,
+    p_quantity: quantity,
+  });
 
   if (error) {
     return NextResponse.json(
@@ -58,10 +59,17 @@ export async function POST(request: Request) {
     );
   }
 
+  const { data: after } = await admin
+    .from("herzies")
+    .select("inventory_v2")
+    .eq("user_id", herzie.user_id)
+    .single();
+  const inv = (after?.inventory_v2 ?? {}) as Record<string, number>;
+
   return NextResponse.json({
     ok: true,
     itemId,
     quantity,
-    total: inv[itemId],
+    total: inv[itemId] ?? 0,
   });
 }

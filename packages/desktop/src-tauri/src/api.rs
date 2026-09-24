@@ -631,9 +631,7 @@ pub async fn api_lookup_herzies(
     Some(result)
 }
 
-pub async fn api_fetch_inventory(
-    client: &Client,
-) -> Option<(Inventory, u32, HashMap<String, serde_json::Value>, ItemUpgrades)> {
+pub async fn api_fetch_inventory(client: &Client) -> Option<ItemSnapshot> {
     let resp = api_fetch(client, reqwest::Method::GET, "/inventory", None).await?;
     if !resp.status().is_success() {
         return None;
@@ -647,16 +645,25 @@ pub async fn api_fetch_inventory(
     };
     let item_upgrades: ItemUpgrades =
         serde_json::from_value(data["itemUpgrades"].clone()).unwrap_or_default();
-    Some((inventory, currency, equipped, item_upgrades))
+    let units = serde_json::from_value::<Vec<ItemUnit>>(data["units"].clone()).ok();
+    Some(ItemSnapshot {
+        inventory,
+        currency,
+        equipped,
+        item_upgrades,
+        units,
+    })
 }
 
-pub async fn api_equip_item(
+/// Wears or removes one specific copy. Surfaces the server's message (max
+/// modifiers, side required, not equipable, ...) like the other item calls.
+pub async fn api_equip_unit(
     client: &Client,
-    item_id: &str,
+    unit_id: &str,
     action: &str,
     side: Option<&str>,
 ) -> Result<serde_json::Value, String> {
-    let mut body = serde_json::json!({ "itemId": item_id, "action": action });
+    let mut body = serde_json::json!({ "unitId": unit_id, "action": action });
     if let Some(s) = side {
         body["side"] = serde_json::Value::String(s.to_string());
     }
@@ -679,15 +686,15 @@ pub async fn api_equip_item(
     Ok(data)
 }
 
-/// Consumes one dice item to bump a statted card's upgrade level by one.
-/// Surfaces the server's error message, same as `api_equip_item`/`api_buy_item`
+/// Consumes one dice item to raise ONE specific card's upgrade level by one.
+/// Surfaces the server's error message, same as `api_equip_unit`/`api_buy_item`
 /// (not owned, already maxed, target has no stats, etc.).
 pub async fn api_apply_dice_upgrade(
     client: &Client,
     dice_item_id: &str,
-    target_item_id: &str,
+    target_unit_id: &str,
 ) -> Result<serde_json::Value, String> {
-    let body = serde_json::json!({ "diceItemId": dice_item_id, "targetItemId": target_item_id });
+    let body = serde_json::json!({ "diceItemId": dice_item_id, "targetUnitId": target_unit_id });
     let resp = api_fetch(
         client,
         reqwest::Method::POST,
@@ -707,12 +714,9 @@ pub async fn api_apply_dice_upgrade(
     Ok(data)
 }
 
-pub async fn api_sell_item(
-    client: &Client,
-    item_id: &str,
-    quantity: u32,
-) -> Option<serde_json::Value> {
-    let body = serde_json::json!({ "itemId": item_id, "quantity": quantity });
+/// Sells the named copies.
+pub async fn api_sell_units(client: &Client, unit_ids: &[String]) -> Option<serde_json::Value> {
+    let body = serde_json::json!({ "unitIds": unit_ids });
     let resp = api_fetch(client, reqwest::Method::POST, "/inventory/sell", Some(body)).await?;
     if !resp.status().is_success() {
         return None;
@@ -913,7 +917,11 @@ pub async fn api_join_trade(client: &Client, trade_id: &str) -> bool {
     }
 }
 
-pub async fn api_update_trade_offer(client: &Client, trade_id: &str, offer: &TradeOffer) -> bool {
+pub async fn api_update_trade_offer(
+    client: &Client,
+    trade_id: &str,
+    offer: &TradeOfferRequest,
+) -> bool {
     let body = serde_json::json!({ "tradeId": trade_id, "offer": offer });
     match api_fetch(client, reqwest::Method::POST, "/trade/offer", Some(body)).await {
         Some(r) => r.status().is_success(),
