@@ -77,7 +77,7 @@ export function EventsView({
   equipped?: Equipped | null;
 }) {
   const [events, setEvents] = useState<GameEvent[]>([]);
-  const [previousHunt, setPreviousHunt] = useState<GameEvent | null>(null);
+  const [previousEvent, setPreviousEvent] = useState<GameEvent | null>(null);
   const [nextHunt, setNextHunt] = useState<GameEvent | null>(null);
   const [loading, setLoading] = useState(true);
   const [inspectOverlay, setInspectOverlay] = useState<"item" | null>(null);
@@ -137,9 +137,7 @@ export function EventsView({
         .then(([active, previous]) => {
           if (cancelled) return;
           setEvents(active.events);
-          setPreviousHunt(
-            previous.events.find((e) => e.type === "song_hunt") ?? null,
-          );
+          setPreviousEvent(previous.events[0] ?? null);
           setNextHunt(previous.next);
           setLoading(false);
         })
@@ -168,6 +166,7 @@ export function EventsView({
   // has forced both to be live at once.
   const boss =
     events.find((e) => e.type === "boss_fight") ??
+    (previousEvent?.type === "boss_fight" ? previousEvent : undefined) ??
     (debugForceBoss ? makeDebugBoss() : undefined);
   if (boss) {
     return (
@@ -194,6 +193,8 @@ export function EventsView({
     );
   }
 
+  const previousHunt =
+    previousEvent?.type === "song_hunt" ? previousEvent : null;
   const hunt =
     events.find((e) => e.type === "song_hunt") ??
     (debugForceActive ? (previousHunt ?? undefined) : undefined);

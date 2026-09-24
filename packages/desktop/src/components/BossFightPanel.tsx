@@ -177,16 +177,29 @@ export function BossFightPanel({
   equipped?: Equipped | null;
 }) {
   const config = event.config as unknown as BossFightView;
-  const now = useNow(!paused);
+  // A server-settled outcome ends the clock outright rather than just
+  // freezing it. `settle_boss_fight` flips `killed` well before `ends_at`
+  // (the original multi-day window boundary, which can be days later — see
+  // the previous-hunt fix), so without this a killed-early boss would show
+  // a stale "Xd left" next to its DEFEATED overlay — first ticking live,
+  // then, if merely paused, frozen at a leftover value that's still wrong.
+  // The not-yet-decided case still needs a live clock so an in-progress
+  // fight can self-declare an escape the instant its window runs out.
+  const dead = config.killed || config.hp <= 0;
+  const decided = dead || config.escaped;
+  const now = useNow(!paused && !decided);
 
   const startsAt = new Date(event.startsAt).getTime();
   const endsAt = new Date(event.endsAt).getTime();
-  const remaining = endsAt - now;
+  const remaining = decided ? 0 : endsAt - now;
   const timeFrac = Math.max(0, remaining) / Math.max(1, endsAt - startsAt);
   const hpFrac = config.maxHp > 0 ? config.hp / config.maxHp : 0;
 
   const rewardItem = config.rewardItemId
     ? getItem(config.rewardItemId)
+    : undefined;
+  const topRewardItem = config.topRewardItemId
+    ? getItem(config.topRewardItemId)
     : undefined;
 
   // The boss is not a herzie row and nothing about it is persisted — its
@@ -198,7 +211,6 @@ export function BossFightPanel({
   }, [event.id]);
 
   const hated = hatedPhrase(config.hatedGenres ?? []);
-  const dead = config.killed || config.hp <= 0;
   const escaped = config.escaped || (remaining <= 0 && !dead);
   const { line, typed } = useBossChatter(
     hpFrac,
@@ -236,6 +248,23 @@ export function BossFightPanel({
         </div>
       ) : null}
 
+      {/* Same reveal gating as the base reward — withheld server-side until
+          killed, so there is never a "???" placeholder to show here either. */}
+      {topRewardItem ? (
+        <div className="flex items-center justify-center gap-1 text-[10px] text-text-dim">
+          Top {config.topCount} bonus:
+          <ItemTypeIcon item={topRewardItem} className="h-4 w-4 shrink-0" />
+          <button
+            className="cursor-pointer border-none bg-transparent text-ui underline"
+            style={{ color: ITEM_RARITY_COLORS[topRewardItem.rarity] }}
+            type="button"
+            onClick={() => onInspectReward(topRewardItem.id)}
+          >
+            {topRewardItem.name}
+          </button>
+        </div>
+      ) : null}
+
       {/* Takes all the vertical slack the rest of the panel doesn't need,
           rather than a fixed box. The renderer's grid is a fixed 48 rows and
           the boss only occupies rows 7..38 of it, so the canvas is always
@@ -243,8 +272,16 @@ export function BossFightPanel({
           instead of letting it push the bars off screen. */}
       <div className="relative flex min-h-[200px] flex-1 flex-col">
         {/* The canvas gets its own overflow-hidden so the speech bubble, which
-            is a sibling rather than a child, can't be clipped by it. */}
-        <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden">
+            is a sibling rather than a child, can't be clipped by it. A CSS
+            filter, not a renderer change (specs/boss-fight.md's no-go) —
+            greyscale + dimmed reads as "over" without touching the ASCII
+            colour scheme itself. */}
+        <div
+          className={cn(
+            "flex min-h-0 flex-1 items-center justify-center overflow-hidden",
+            (dead || escaped) && "grayscale opacity-50",
+          )}
+        >
           <SharedHerzie3D
             userId={`boss:${event.id}`}
             stage={3}
@@ -313,24 +350,31 @@ export function BossFightPanel({
         ) : null}
       </div>
 
-      <div>
-        <div className="mb-0.5 flex items-baseline justify-between text-ui text-text-dim">
-          <span>Health</span>
-          <span className="text-ui-sm">
-            {Math.round(config.hp).toLocaleString()} /{" "}
-            {Math.round(config.maxHp).toLocaleString()}
-          </span>
-        </div>
-        <SegmentBar progress={hpFrac} colour="bg-red" />
-      </div>
+      {/* Both bars are meaningless once the fight is decided — a frozen HP
+          bar and a "Time left" that no longer counts down just clutter the
+          end screen next to the DEFEATED/ESCAPED overlay. */}
+      {!dead && !escaped ? (
+        <>
+          <div>
+            <div className="mb-0.5 flex items-baseline justify-between text-ui text-text-dim">
+              <span>Health</span>
+              <span className="text-ui-sm">
+                {Math.round(config.hp).toLocaleString()} /{" "}
+                {Math.round(config.maxHp).toLocaleString()}
+              </span>
+            </div>
+            <SegmentBar progress={hpFrac} colour="bg-red" />
+          </div>
 
-      <div>
-        <div className="mb-0.5 flex items-baseline justify-between text-ui text-text-dim">
-          <span>Time left</span>
-          <span className="text-ui-sm">{formatRemaining(remaining)}</span>
-        </div>
-        <SegmentBar progress={timeFrac} colour="bg-cyan" />
-      </div>
+          <div>
+            <div className="mb-0.5 flex items-baseline justify-between text-ui text-text-dim">
+              <span>Time left</span>
+              <span className="text-ui-sm">{formatRemaining(remaining)}</span>
+            </div>
+            <SegmentBar progress={timeFrac} colour="bg-cyan" />
+          </div>
+        </>
+      ) : null}
 
       {/* shrink-0, not flex-1: the leaderboard is a fixed four rows at most,
           so any spare height belongs to the boss render above. */}
@@ -347,7 +391,7 @@ export function BossFightPanel({
                 key={`${d.rank}-${d.name}`}
                 className="flex items-baseline justify-between text-ui"
               >
-                <span className={cn(d.rank === 1 && "text-gold")}>
+                <span className={cn(d.rank <= config.topCount && "text-gold")}>
                   {d.rank}. {d.name}
                 </span>
                 <span className="text-text-dim">

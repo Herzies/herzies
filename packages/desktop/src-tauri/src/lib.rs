@@ -1640,19 +1640,24 @@ fn send_notification(app: &AppHandle, title: &str, body: &str, deep_link: Option
         std::thread::spawn(move || {
             let mut n = mac_notification_sys::Notification::default();
             n.title(&title).message(&body);
-            let _ = n.send();
+            if let Err(e) = n.send() {
+                log::warn!("macOS notification delivery failed: {e}");
+            }
         });
     }
 
     #[cfg(windows)]
     {
         use tauri_plugin_notification::NotificationExt;
-        let _ = app
+        if let Err(e) = app
             .notification()
             .builder()
             .title(&title)
             .body(&body)
-            .show();
+            .show()
+        {
+            log::warn!("Windows notification delivery failed: {e}");
+        }
     }
 }
 
@@ -2297,7 +2302,9 @@ pub fn run() {
                 } else {
                     &app.config().identifier
                 };
-                let _ = mac_notification_sys::set_application(bundle_id);
+                if let Err(e) = mac_notification_sys::set_application(bundle_id) {
+                    log::warn!("Failed to set notification bundle id {bundle_id:?}: {e}");
+                }
             }
 
             // Hide dock icon (menu bar only)

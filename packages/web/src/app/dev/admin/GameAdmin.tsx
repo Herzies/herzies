@@ -7,6 +7,7 @@ import {
   type SongHuntHint,
 } from "@herzies/shared";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { NotificationsPanel } from "./NotificationsPanel";
 
 const SECRET_KEY = "herzies-admin-secret";
 const INPUT =
@@ -24,7 +25,7 @@ type CatalogItem = {
   equip_slot?: string | null;
 };
 
-type AdminEvent = {
+export type AdminEvent = {
   id: string;
   type: string;
   title: string;
@@ -38,7 +39,9 @@ type AdminEvent = {
   boss?: { hp: number; maxHp: number; killed: boolean; escaped: boolean };
 };
 
-type EventStatus = "running" | "scheduled" | "ended" | "inactive";
+export type EventStatus = "running" | "scheduled" | "ended" | "inactive";
+
+type AdminTab = "items" | "grant" | "boss" | "events" | "notifications";
 
 type SongHuntHintForm = {
   text: string;
@@ -71,7 +74,7 @@ type BossSettings = {
   topCount: number;
 };
 
-type BossSettingsResponse = {
+export type BossSettingsResponse = {
   settings: BossSettings;
   skippedWeeks: string[];
   autoHp: number;
@@ -110,7 +113,7 @@ type ItemFormState = {
   equipSlot: "" | (typeof EQUIP_SLOT_OPTIONS)[number];
 };
 
-function getEventStatus(event: AdminEvent, now: Date): EventStatus {
+export function getEventStatus(event: AdminEvent, now: Date): EventStatus {
   if (!event.active) return "inactive";
   const start = new Date(event.starts_at);
   const end = new Date(event.ends_at);
@@ -119,7 +122,7 @@ function getEventStatus(event: AdminEvent, now: Date): EventStatus {
   return "running";
 }
 
-const STATUS_STYLES: Record<EventStatus, string> = {
+export const STATUS_STYLES: Record<EventStatus, string> = {
   running: "text-green",
   scheduled: "text-yellow",
   ended: "text-text-dim",
@@ -2144,6 +2147,7 @@ function BossSchedulePanel({
 }
 
 export function GameAdmin() {
+  const [tab, setTab] = useState<AdminTab>("items");
   const [secret, setSecret] = useState("");
   const [secretInput, setSecretInput] = useState("");
   const [items, setItems] = useState<CatalogItem[]>([]);
@@ -2222,9 +2226,7 @@ export function GameAdmin() {
       }),
     );
     setShowEventForm(true);
-    document
-      .getElementById("events-section")
-      ?.scrollIntoView({ behavior: "smooth" });
+    setTab("events");
   };
 
   const now = new Date();
@@ -2360,7 +2362,9 @@ export function GameAdmin() {
         </p>
       )}
 
-      <section>
+      <AdminTabBar tab={tab} setTab={setTab} hasBoss={!!boss} />
+
+      <section className={tab === "items" ? undefined : "hidden"}>
         <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
           <h2 className="text-sm text-cyan">items catalog</h2>
           <button
@@ -2426,13 +2430,13 @@ export function GameAdmin() {
         </div>
       </section>
 
-      <section>
+      <section className={tab === "grant" ? undefined : "hidden"}>
         <h2 className="text-sm text-cyan mb-4">grant item to player</h2>
         <GrantItemPanel secret={secret} catalogItems={items} />
       </section>
 
       {boss && (
-        <section>
+        <section className={tab === "boss" ? undefined : "hidden"}>
           <h2 className="text-sm text-cyan mb-4">weekly boss fight</h2>
           <BossSchedulePanel
             secret={secret}
@@ -2445,7 +2449,10 @@ export function GameAdmin() {
         </section>
       )}
 
-      <section id="events-section">
+      <section
+        id="events-section"
+        className={tab === "events" ? undefined : "hidden"}
+      >
         <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
           <h2 className="text-sm text-cyan">events</h2>
           <button
@@ -2504,6 +2511,50 @@ export function GameAdmin() {
           bossDefaults={boss}
         />
       </section>
+
+      <section className={tab === "notifications" ? undefined : "hidden"}>
+        <h2 className="text-sm text-cyan mb-4">notifications</h2>
+        <NotificationsPanel events={events} boss={boss} now={now} />
+      </section>
+    </div>
+  );
+}
+
+function AdminTabBar({
+  tab,
+  setTab,
+  hasBoss,
+}: {
+  tab: AdminTab;
+  setTab: (t: AdminTab) => void;
+  hasBoss: boolean;
+}) {
+  const tabs: { id: AdminTab; label: string }[] = [
+    { id: "items", label: "items" },
+    { id: "grant", label: "grant item" },
+    ...(hasBoss
+      ? [{ id: "boss" as AdminTab, label: "weekly boss fight" }]
+      : []),
+    { id: "events", label: "events" },
+    { id: "notifications", label: "notifications" },
+  ];
+
+  return (
+    <div className="flex flex-wrap items-center gap-4 text-xs border-b border-border pb-2">
+      {tabs.map((t) => (
+        <button
+          key={t.id}
+          type="button"
+          onClick={() => setTab(t.id)}
+          className={
+            tab === t.id
+              ? "text-purple font-bold bg-transparent border-0 cursor-pointer"
+              : "text-text-dim hover:text-cyan bg-transparent border-0 cursor-pointer"
+          }
+        >
+          {t.label}
+        </button>
+      ))}
     </div>
   );
 }
