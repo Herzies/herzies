@@ -25,9 +25,11 @@ import { StoreView } from "./components/StoreView";
 import { TabBar, type View } from "./components/TabBar";
 import { TradeView } from "./components/TradeView";
 import { UpdateAvailableOverlay } from "./components/UpdateAvailableOverlay";
-import { useOptimisticEquipped } from "./hooks/useOptimisticEquipped";
+import { WhatsNewOverlay } from "./components/WhatsNewOverlay";
+import { useOptimisticUnits } from "./hooks/useOptimisticUnits";
 import { useTradeRequests } from "./hooks/useTradeRequests";
 import { cn } from "./lib/utils";
+import { RELEASE_NOTES } from "./release-notes";
 import {
   type AppState,
   checkForUpdate,
@@ -40,6 +42,8 @@ import {
 } from "./tauri-bridge";
 
 const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1h
+
+const WHATS_NEW_SEEN_KEY = "herzies:whats-new-seen-version";
 
 type UpdateInstallStatus =
   | { kind: "idle" }
@@ -58,6 +62,8 @@ function App() {
     chatMessages: [],
     inventory: null,
     inventoryCurrency: 0,
+    itemUpgrades: {},
+    units: [],
     friends: {},
     pendingTradeRequest: null,
     pendingFriendRequest: null,
@@ -65,22 +71,34 @@ function App() {
     outgoingFriendRequests: [],
     pendingDrops: [],
   });
-  // Equipping is predicted locally so it lands instantly (see
-  // useOptimisticEquipped). Overlaying it onto `state` here, rather than
-  // threading it to each consumer, is what keeps the 3D herzie, the deck row,
-  // the bank grid and the "inventory full" check from disagreeing for a frame.
+  // Equipping, selling and dice upgrades are predicted locally so they land
+  // instantly (see useOptimisticUnits). Overlaying the result onto `state` here,
+  // rather than threading it to each consumer, is what keeps the 3D herzie, the
+  // deck row, the bank grid and the "inventory full" check from disagreeing for
+  // a frame.
   const {
     equipped: effectiveEquipped,
+    units: effectiveUnits,
+    predictedInventory,
     toggleEquip,
-    predictUnequip,
-  } = useOptimisticEquipped(rawState.equipped);
-  // Memoized on both inputs, each of which is itself identity-stable while its
+    predict,
+  } = useOptimisticUnits(rawState.equipped, rawState.units);
+  // Memoized on its inputs, each of which is itself identity-stable while its
   // content is unchanged — so this object only changes when something really
   // did, and an unrelated App re-render (a view switch, a local toggle) doesn't
   // hand every view a new `state` and re-render the lot.
+  //
+  // `inventory` (the counts) follows the predicted copies only while something
+  // is predicted: otherwise it stays the server's own, which is all there is to
+  // show before copies have arrived (e.g. a cache from before they existed).
   const state = useMemo(
-    () => ({ ...rawState, equipped: effectiveEquipped }),
-    [rawState, effectiveEquipped],
+    () => ({
+      ...rawState,
+      equipped: effectiveEquipped,
+      units: effectiveUnits,
+      inventory: predictedInventory ?? rawState.inventory,
+    }),
+    [rawState, effectiveEquipped, effectiveUnits, predictedInventory],
   );
   // Mounted here, at the root, rather than inside a view: trade invites have to
   // keep arriving while the window is hidden, and every view below is unmounted
@@ -103,6 +121,15 @@ function App() {
   >(null);
   /** Dev-only: shows the update overlay with a fake version (Settings → Debug). */
   const [testUpdateOverlay, setTestUpdateOverlay] = useState(false);
+  /** Version to show the "What's new" overlay for; null means hidden. */
+  const [whatsNewVersion, setWhatsNewVersion] = useState<string | null>(null);
+  /** Dev-only: shows the "What's new" overlay with sample notes (Settings → Debug). */
+  const [testWhatsNewOverlay, setTestWhatsNewOverlay] = useState(false);
+  /** Captured the first time `state.isOnline` is true this session: was this
+   * device mid-onboarding (no herzie yet)? A fresh install or reinstall
+   * shouldn't be told what's new in the version it just installed — only an
+   * existing user upgrading into a version with curated notes should. */
+  const isFreshInstallRef = useRef<boolean | null>(null);
   const [updateInstallStatus, setUpdateInstallStatus] =
     useState<UpdateInstallStatus>({ kind: "idle" });
   /** Set by the "c" shortcut: focus/expand the chat once the home view shows it. */
@@ -392,6 +419,30 @@ function App() {
 
   const { herzie } = state;
 
+  // Surface curated release notes once per version, but only to a device that
+  // was already onboarded the first time we saw it this session — a fresh
+  // install shouldn't be told what's new in the version it just installed.
+  // The seen-version is only persisted from the overlay's own close handler
+  // (below), not here: this app can launch hidden, and detecting a version
+  // isn't the same as the overlay having actually been shown.
+  useEffect(() => {
+    if (!state.isOnline) return;
+    if (isFreshInstallRef.current === null) {
+      isFreshInstallRef.current = !herzie;
+    }
+    if (isFreshInstallRef.current) {
+      if (herzie && localStorage.getItem(WHATS_NEW_SEEN_KEY) === null) {
+        localStorage.setItem(WHATS_NEW_SEEN_KEY, state.version);
+      }
+      return;
+    }
+    if (!herzie || !state.version) return;
+    if (localStorage.getItem(WHATS_NEW_SEEN_KEY) === state.version) return;
+    if (RELEASE_NOTES.some((entry) => entry.version === state.version)) {
+      setWhatsNewVersion(state.version);
+    }
+  }, [state.isOnline, state.version, herzie]);
+
   const switchView = useCallback(
     (v: View): boolean => {
       // Leaving an in-progress trade needs confirmation. The trade itself stays
@@ -508,8 +559,8 @@ function App() {
     setPendingLeaveView(null);
   };
 
-  const handleSpawnDebugDrop = () => {
-    herzies.spawnDebugDrop().catch(() => {});
+  const handleSpawnDebugDrop = (diceOnly = false) => {
+    herzies.spawnDebugDrop(diceOnly).catch(() => {});
   };
 
   const handleOpenSelfProfile = async () => {
@@ -719,11 +770,20 @@ function App() {
             <InventoryView
               herzie={herzie}
               initialItem={deepLinkItem}
-              inventory={state.inventory}
+              // An inventory with items but no copies is a cache from before
+              // copies existed: laying out an empty bank from it would show the
+              // player nothing until the first sync (and indefinitely offline),
+              // so it counts as not loaded yet.
+              loaded={
+                state.inventory !== null &&
+                (state.units.length > 0 ||
+                  Object.keys(state.inventory).length === 0)
+              }
+              units={state.units}
               currency={state.inventoryCurrency}
               equipped={state.equipped}
               onToggleEquip={toggleEquip}
-              onPredictUnequip={predictUnequip}
+              onPredictUnits={predict}
               onLog={addLog}
               active={view === "inventory"}
             />
@@ -756,7 +816,7 @@ function App() {
               herzie={herzie}
               initialTarget={tradeTarget}
               initialTradeId={incomingTradeId}
-              inventory={state.inventory}
+              units={state.units}
               currency={state.inventoryCurrency}
               onActiveChange={setTradeActive}
               onClose={() => {
@@ -798,6 +858,7 @@ function App() {
             onStageOverride={setStageOverride}
             onPreviewOnboarding={() => setPreviewOnboarding(true)}
             onTestUpdateAlert={() => setTestUpdateOverlay(true)}
+            onTestWhatsNew={() => setTestWhatsNewOverlay(true)}
             hasActiveEventOverride={hasActiveEventOverride}
             onToggleActiveEventOverride={() =>
               setHasActiveEventOverride((v) => !v)
@@ -881,7 +942,7 @@ function App() {
               onClick: () => setDismissedInventoryFull(true),
             },
             {
-              label: "Open Cards",
+              label: "Open inventory",
               colour: "text-purple",
               onClick: () => {
                 setDismissedInventoryFull(true);
@@ -945,6 +1006,31 @@ function App() {
           onUpdate={() => setTestUpdateOverlay(false)}
           onLater={() => setTestUpdateOverlay(false)}
           installing={false}
+        />
+      )}
+
+      {herzie && whatsNewVersion && (
+        <WhatsNewOverlay
+          version={whatsNewVersion}
+          highlights={
+            RELEASE_NOTES.find((entry) => entry.version === whatsNewVersion)
+              ?.highlights ?? []
+          }
+          onClose={() => {
+            localStorage.setItem(WHATS_NEW_SEEN_KEY, whatsNewVersion);
+            setWhatsNewVersion(null);
+          }}
+        />
+      )}
+
+      {testWhatsNewOverlay && (
+        <WhatsNewOverlay
+          version="9.9.9-test"
+          highlights={[
+            "Added a curated 'What's new' modal",
+            "Fixed a sample bug for the debug preview",
+          ]}
+          onClose={() => setTestWhatsNewOverlay(false)}
         />
       )}
 

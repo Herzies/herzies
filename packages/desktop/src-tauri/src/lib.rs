@@ -29,6 +29,11 @@ use types::*;
 pub struct PendingDeepLink(pub Mutex<Option<String>>);
 pub struct LastTradeNotified(pub Mutex<Option<String>>);
 pub struct LastFriendNotified(pub Mutex<Option<String>>);
+/// Whether the last sync tick found a pick-up accessory (spirit-orb) unable to
+/// collect a drop because the bank was full. A bool, not an id: unlike a trade
+/// or friend request there's no single thing to dedupe by, just a condition
+/// that can flip back and forth as slots free up and fill again.
+pub struct LastInventoryFullNotified(pub Mutex<bool>);
 
 // --- Tauri commands ---
 
@@ -419,24 +424,25 @@ async fn fetch_inventory(
     let client = Client::new();
     let epoch_before = { state.lock().unwrap().equip_epoch };
     match api::api_fetch_inventory(&client).await {
-        Some((inventory, currency, equipped)) => {
+        Some(snapshot) => {
             let mut s = state.lock().unwrap();
-            apply_inventory(
-                &mut s,
-                inventory.clone(),
-                currency,
-                equipped.clone(),
-                Some(epoch_before),
-            );
-            // Hand back whatever `equipped` actually won, so a caller that
-            // raced an equip doesn't render the stale snapshot we just skipped.
+            let inventory = snapshot.inventory.clone();
+            let currency = snapshot.currency;
+            let item_upgrades = snapshot.item_upgrades.clone();
+            apply_inventory(&mut s, snapshot, Some(epoch_before));
+            // Hand back whatever `equipped`/`units` actually won, so a caller
+            // that raced an equip doesn't render the stale snapshot we just
+            // skipped.
             let equipped = s.equipped.clone();
+            let units = s.units.clone();
             drop(s);
             emit_state_update(&app);
             Ok(Some(InventoryResult {
                 inventory,
                 currency,
                 equipped,
+                item_upgrades,
+                units,
             }))
         }
         None => Ok(None),
@@ -445,26 +451,20 @@ async fn fetch_inventory(
 
 #[tauri::command]
 async fn sell_item(
-    item_id: String,
-    quantity: u32,
+    unit_ids: Vec<String>,
     app: AppHandle,
     state: tauri::State<'_, SharedState>,
 ) -> Result<Option<serde_json::Value>, String> {
     let client = Client::new();
-    let result = api::api_sell_item(&client, &item_id, quantity).await;
+    let result = api::api_sell_units(&client, &unit_ids).await;
     if let Some(ref data) = result {
         let mut s = state.lock().unwrap();
         let mut changed = false;
-        if let Ok(inventory) = serde_json::from_value::<Inventory>(data["inventory"].clone()) {
-            let currency = data["newCurrency"].as_u64().unwrap_or(0) as u32;
-            // Selling the last copy of an equipped item unequips it
-            // server-side too — apply whatever the response says rather than
-            // the stale local equip state, so the two never drift apart.
-            let equipped = serde_json::from_value::<
-                std::collections::HashMap<String, serde_json::Value>,
-            >(data["equipped"].clone())
-            .unwrap_or_else(|_| s.equipped.clone());
-            apply_inventory(&mut s, inventory, currency, equipped, None);
+        // Selling a worn copy unequips it server-side too (it simply stops
+        // existing) — apply whatever the response says rather than the stale
+        // local equip state, so the two never drift apart.
+        if let Some(snapshot) = snapshot_from_response(data, &s) {
+            apply_inventory(&mut s, snapshot, None);
             // Selling can unequip server-side, so this is a local `equipped`
             // mutation — any `/inventory` fetch in flight must not undo it.
             s.bump_equip_epoch();
@@ -472,7 +472,12 @@ async fn sell_item(
         } else if let Some(new_currency) = data["newCurrency"].as_u64() {
             s.inventory_currency = new_currency as u32;
             if let Some(ref inv) = s.inventory {
-                storage::save_inventory_cache(inv, s.inventory_currency);
+                storage::save_inventory_cache(
+                    inv,
+                    s.inventory_currency,
+                    &s.item_upgrades,
+                    &s.units,
+                );
             }
             changed = true;
         }
@@ -491,26 +496,45 @@ async fn sell_item(
     Ok(result)
 }
 
+/// Consumes one dice item to raise ONE specific card's upgrade level by one
+/// (see MAX_ITEM_UPGRADE_LEVEL in @herzies/shared) — its twin, a second copy of
+/// the same card, is untouched. Mirrors sell_item's shape: the response carries
+/// the authoritative item state, applied the same way a sell's does.
+#[tauri::command]
+async fn apply_dice_upgrade(
+    dice_item_id: String,
+    target_unit_id: String,
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    let client = Client::new();
+    let data = api::api_apply_dice_upgrade(&client, &dice_item_id, &target_unit_id).await?;
+
+    let mut s = state.lock().unwrap();
+    if let Some(snapshot) = snapshot_from_response(&data, &s) {
+        apply_inventory(&mut s, snapshot, None);
+        drop(s);
+        emit_state_update(&app);
+    }
+    Ok(data)
+}
+
 #[tauri::command]
 async fn equip_item(
-    item_id: String,
+    unit_id: String,
     action: String,
     side: Option<String>,
     app: AppHandle,
     state: tauri::State<'_, SharedState>,
 ) -> Result<serde_json::Value, String> {
     let client = Client::new();
-    let result = api::api_equip_item(&client, &item_id, &action, side.as_deref()).await?;
-    if let Ok(equipped) = serde_json::from_value::<
-        std::collections::HashMap<String, serde_json::Value>,
-    >(result["equipped"].clone())
-    {
-        let mut s = state.lock().unwrap();
-        s.equipped = equipped;
+    let result = api::api_equip_unit(&client, &unit_id, &action, side.as_deref()).await?;
+    let mut s = state.lock().unwrap();
+    if let Some(snapshot) = snapshot_from_response(&result, &s) {
+        apply_inventory(&mut s, snapshot, None);
         // Any `/inventory` fetch already in flight was issued before this
         // change and would otherwise clobber it back — see apply_inventory.
         s.bump_equip_epoch();
-        storage::save_equipped(&s.equipped);
         drop(s);
         emit_state_update(&app);
     }
@@ -529,10 +553,8 @@ async fn buy_item(
 
     let mut s = state.lock().unwrap();
     let mut changed = false;
-    if let Ok(inventory) = serde_json::from_value::<Inventory>(data["inventory"].clone()) {
-        let currency = data["newCurrency"].as_u64().unwrap_or(0) as u32;
-        let equipped = s.equipped.clone();
-        apply_inventory(&mut s, inventory, currency, equipped, None);
+    if let Some(snapshot) = snapshot_from_response(&data, &s) {
+        apply_inventory(&mut s, snapshot, None);
         changed = true;
     }
     if let Some(ref mut herzie) = s.herzie {
@@ -574,6 +596,15 @@ async fn collect_drop(
             if let Some(inv) = s.inventory.as_mut() {
                 *inv.entry(drop.item_id.clone()).or_insert(0) += 1;
             }
+            // The server mints the copy under the drop's own id
+            // (collect_pending_drop), so this placeholder IS the real copy —
+            // there's no temporary id to reconcile once the call confirms.
+            s.units.push(ItemUnit {
+                id: drop.id.clone(),
+                item_id: drop.item_id.clone(),
+                upgrade_level: 0,
+                equipped_slot: None,
+            });
             s.bump_drop_epoch();
             s.bump_inventory_epoch();
         }
@@ -598,7 +629,7 @@ async fn collect_drop(
             let _ = app.emit("activity", format!("Picked up \"{name}\""));
 
             // No /inventory re-fetch here. `collect_pending_drop` does exactly
-            // one thing — delete the drop row and credit inventory_v2 by one —
+            // one thing — delete the drop row and mint a copy under its id —
             // which the optimistic update above already mirrors exactly, so a
             // refresh could only confirm what we know. Picking up several drops
             // in quick succession used to fire one slow Vercel request each.
@@ -632,21 +663,24 @@ fn revert_optimistic_collect(state: &tauri::State<'_, SharedState>, drop: Pendin
             *qty = qty.saturating_sub(1);
         }
     }
+    s.units.retain(|u| u.id != drop.id);
     s.pending_drops.push(drop);
     s.bump_drop_epoch();
     s.bump_inventory_epoch();
 }
 
-/// Dev-only: powers the "Spawn Item Drop" debug button in Settings. Adds the
-/// server-spawned drop straight into local state so it appears on the ground
-/// immediately, instead of waiting for the next sync tick to pick it up.
+/// Dev-only: powers the "Spawn Item Drop"/"Spawn Dice Drop" debug buttons in
+/// Settings. Adds the server-spawned drop straight into local state so it
+/// appears on the ground immediately, instead of waiting for the next sync
+/// tick to pick it up.
 #[tauri::command]
 async fn spawn_debug_drop(
+    dice_only: bool,
     app: AppHandle,
     state: tauri::State<'_, SharedState>,
 ) -> Result<(), String> {
     let client = Client::new();
-    let drop = api::api_spawn_debug_drop(&client).await?;
+    let drop = api::api_spawn_debug_drop(&client, dice_only).await?;
     {
         let mut s = state.lock().unwrap();
         s.pending_drops.push(drop);
@@ -700,9 +734,9 @@ async fn start_purchase(
         }
         None => {
             let epoch_before = { state.lock().unwrap().equip_epoch };
-            if let Some((inventory, currency, equipped)) = api::api_fetch_inventory(&client).await {
+            if let Some(snapshot) = api::api_fetch_inventory(&client).await {
                 let mut s = state.lock().unwrap();
-                apply_inventory(&mut s, inventory, currency, equipped, Some(epoch_before));
+                apply_inventory(&mut s, snapshot, Some(epoch_before));
                 drop(s);
                 emit_state_update(&app);
             }
@@ -724,7 +758,7 @@ async fn trade_join(trade_id: String) -> Result<bool, String> {
 }
 
 #[tauri::command]
-async fn trade_offer(trade_id: String, offer: TradeOffer) -> Result<bool, String> {
+async fn trade_offer(trade_id: String, offer: TradeOfferRequest) -> Result<bool, String> {
     let client = Client::new();
     Ok(api::api_update_trade_offer(&client, &trade_id, &offer).await)
 }
@@ -973,10 +1007,13 @@ struct FriendResult {
 }
 
 #[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 struct InventoryResult {
     inventory: Inventory,
     currency: u32,
     equipped: std::collections::HashMap<String, serde_json::Value>,
+    item_upgrades: ItemUpgrades,
+    units: Vec<ItemUnit>,
 }
 
 // --- App cache (inventory, friends, chat, equipped) ---
@@ -1005,24 +1042,60 @@ fn emit_state_update(app: &AppHandle) {
 ///
 /// `inventory`/`currency` are applied either way — they have their own writers
 /// and aren't what this guards.
-fn apply_inventory(
-    s: &mut ManagedState,
-    inventory: Inventory,
-    currency: u32,
-    equipped: std::collections::HashMap<String, serde_json::Value>,
-    equip_epoch_before: Option<u64>,
-) {
+fn apply_inventory(s: &mut ManagedState, snapshot: ItemSnapshot, equip_epoch_before: Option<u64>) {
+    let ItemSnapshot {
+        inventory,
+        currency,
+        equipped,
+        item_upgrades,
+        units,
+    } = snapshot;
     s.inventory = Some(inventory.clone());
     s.inventory_currency = currency;
+    s.item_upgrades = item_upgrades.clone();
     // Any `/sync` already in flight predates this and must not reinstate the
     // old contents — see `inventory_epoch` and sync_tick.
     s.bump_inventory_epoch();
-    storage::save_inventory_cache(&inventory, currency);
     let equipped_is_current = equip_epoch_before.is_none_or(|before| s.equip_epoch == before);
     if equipped_is_current {
         s.equipped = equipped;
         storage::save_equipped(&s.equipped);
+        // The copies carry worn state too, so they are exactly as stale as
+        // `equipped` when an equip raced this snapshot. Left alone in that case
+        // (a `None` from a server that predates copies leaves them alone too);
+        // the next sync reconciles.
+        if let Some(units) = units {
+            s.units = units;
+        }
     }
+    storage::save_inventory_cache(&inventory, currency, &item_upgrades, &s.units);
+}
+
+/// Reads the item state out of an inventory-changing response (sell, buy,
+/// equip, upgrade). Anything the response doesn't carry falls back to what we
+/// already hold, so a call that changes only some of it (a buy never touches
+/// levels) doesn't blank the rest. `None` when there's no `inventory` at all,
+/// i.e. the response wasn't a success carrying state.
+fn snapshot_from_response(data: &serde_json::Value, s: &ManagedState) -> Option<ItemSnapshot> {
+    let inventory = serde_json::from_value::<Inventory>(data["inventory"].clone()).ok()?;
+    let currency = data["newCurrency"]
+        .as_u64()
+        .map(|c| c as u32)
+        .unwrap_or(s.inventory_currency);
+    let equipped = serde_json::from_value::<std::collections::HashMap<String, serde_json::Value>>(
+        data["equipped"].clone(),
+    )
+    .unwrap_or_else(|_| s.equipped.clone());
+    let item_upgrades = serde_json::from_value::<ItemUpgrades>(data["itemUpgrades"].clone())
+        .unwrap_or_else(|_| s.item_upgrades.clone());
+    let units = serde_json::from_value::<Vec<ItemUnit>>(data["units"].clone()).ok();
+    Some(ItemSnapshot {
+        inventory,
+        currency,
+        equipped,
+        item_upgrades,
+        units,
+    })
 }
 
 async fn refresh_friends_cache(app: &AppHandle, client: &Client) {
@@ -1089,14 +1162,8 @@ async fn refresh_app_cache(app: &AppHandle, client: &Client) {
     let mut changed = false;
     {
         let mut s = shared.lock().unwrap();
-        if let Some((inventory, currency, equipped)) = inv_result {
-            apply_inventory(
-                &mut s,
-                inventory,
-                currency,
-                equipped,
-                Some(equip_epoch_before),
-            );
+        if let Some(snapshot) = inv_result {
+            apply_inventory(&mut s, snapshot, Some(equip_epoch_before));
             changed = true;
         }
         if let Some(chat) = chat_result {
@@ -1935,7 +2002,23 @@ async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
         if s.inventory_epoch == inventory_epoch_before {
             if let Some(ref inventory) = sync_resp.inventory {
                 s.inventory = Some(inventory.clone());
-                storage::save_inventory_cache(inventory, s.inventory_currency);
+                if let Some(ref item_upgrades) = sync_resp.item_upgrades {
+                    s.item_upgrades = item_upgrades.clone();
+                }
+                // The copies carry worn state too, so a local equip that landed
+                // while this request was in flight makes them as stale as it
+                // makes `equipped`. Skip them then; the next sync reconciles.
+                if s.equip_epoch == equip_epoch_before {
+                    if let Some(ref units) = sync_resp.units {
+                        s.units = units.clone();
+                    }
+                }
+                storage::save_inventory_cache(
+                    inventory,
+                    s.inventory_currency,
+                    &s.item_upgrades,
+                    &s.units,
+                );
             }
         }
         if !friend_state_stale {
@@ -1979,6 +2062,47 @@ async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
             }
         } else if let Ok(mut last) = app.state::<LastFriendNotified>().0.lock() {
             *last = None;
+        }
+
+        // A pick-up accessory (spirit-orb, "Greedy Spirit") auto-collects world
+        // drops quietly — the whole point is not having to watch the ground.
+        // That means a full bank blocks it silently too, unless we say
+        // something: the server already leaves any drop it couldn't fit room
+        // for in `pending_drops` (see hasSpiritOrbEquipped in game-server.ts),
+        // so a non-empty list here with the accessory equipped means it's
+        // stuck.
+        let has_spirit_orb = app_state
+            .equipped
+            .get("ground_left")
+            .and_then(|v| v.as_str())
+            == Some("spirit-orb")
+            || app_state
+                .equipped
+                .get("ground_right")
+                .and_then(|v| v.as_str())
+                == Some("spirit-orb");
+        let pickup_blocked = has_spirit_orb && !app_state.pending_drops.is_empty();
+        if let Ok(mut last) = app.state::<LastInventoryFullNotified>().0.lock() {
+            if pickup_blocked {
+                // While the window is open, the in-app "Inventory full" prompt
+                // (HomeView) already covers this — a system notification would
+                // just be noise on top of it. Deliberately leave `last` unset
+                // in that case rather than marking it notified, so the alert
+                // still fires the moment the user hides the window with the
+                // block still unresolved, instead of being silently skipped
+                // for the rest of this blocking episode.
+                if !*last && !tray::is_window_visible() {
+                    send_notification(
+                        app,
+                        "Inventory full",
+                        "Your Greedy Spirit found something but there's no room for it. Free up a slot to keep collecting.",
+                        None,
+                    );
+                    *last = true;
+                }
+            } else {
+                *last = false;
+            }
         }
 
         // Show server-sent notifications (item drops, etc.)
@@ -2080,6 +2204,7 @@ pub fn run() {
         .manage(PendingDeepLink(Mutex::new(None)))
         .manage(LastTradeNotified(Mutex::new(None)))
         .manage(LastFriendNotified(Mutex::new(None)))
+        .manage(LastInventoryFullNotified(Mutex::new(false)))
         .invoke_handler(tauri::generate_handler![
             get_state,
             login,
@@ -2094,6 +2219,7 @@ pub fn run() {
             friend_search,
             fetch_inventory,
             sell_item,
+            apply_dice_upgrade,
             buy_item,
             collect_drop,
             spawn_debug_drop,
@@ -2266,4 +2392,83 @@ pub fn run() {
                 tray::ensure_visible(_app_handle);
             }
         });
+}
+
+#[cfg(test)]
+mod item_state_tests {
+    use super::*;
+
+    // `ManagedState::new` only reads local caches, never writes them, so it is
+    // safe to build here. `snapshot_from_response` is pure — it must not touch
+    // disk — which is why it is what's tested rather than `apply_inventory`
+    // (which writes the real ~/.config/herzies cache).
+    fn state_with_currency(currency: u32) -> ManagedState {
+        let mut s = ManagedState::new(None);
+        s.inventory_currency = currency;
+        s.equipped = std::collections::HashMap::from([(
+            "head".to_string(),
+            serde_json::json!("headphones"),
+        )]);
+        s.item_upgrades = ItemUpgrades::from([("boombox".to_string(), 2)]);
+        s
+    }
+
+    #[test]
+    fn reads_the_units_alongside_the_derived_views() {
+        let s = state_with_currency(10);
+        let snap = snapshot_from_response(
+            &serde_json::json!({
+                "ok": true,
+                "newCurrency": 260,
+                "inventory": { "boombox": 2 },
+                "equipped": { "ground_left": "boombox" },
+                "itemUpgrades": { "boombox": 3 },
+                "units": [
+                    { "id": "a", "itemId": "boombox", "upgradeLevel": 3, "equippedSlot": "ground_left" },
+                    { "id": "b", "itemId": "boombox", "upgradeLevel": 0, "equippedSlot": null }
+                ]
+            }),
+            &s,
+        )
+        .expect("a response with an inventory is a snapshot");
+
+        assert_eq!(snap.currency, 260);
+        assert_eq!(snap.inventory["boombox"], 2);
+        assert_eq!(snap.item_upgrades["boombox"], 3);
+        let units = snap.units.expect("units present");
+        assert_eq!(units.len(), 2);
+        assert_eq!(units[0].upgrade_level, 3);
+        assert_eq!(units[0].equipped_slot.as_deref(), Some("ground_left"));
+        assert_eq!(units[1].equipped_slot, None);
+    }
+
+    // An upgrade or an equip doesn't move money and a buy doesn't touch levels:
+    // whatever the response doesn't carry must keep its local value rather than
+    // being blanked.
+    #[test]
+    fn falls_back_to_what_we_hold_for_anything_missing() {
+        let s = state_with_currency(77);
+        let snap = snapshot_from_response(&serde_json::json!({ "inventory": { "cd": 1 } }), &s)
+            .expect("inventory alone is enough");
+
+        assert_eq!(snap.currency, 77);
+        assert_eq!(snap.equipped["head"], "headphones");
+        assert_eq!(snap.item_upgrades["boombox"], 2);
+    }
+
+    // A server that predates copies sends none; that must read as "unknown" and
+    // leave the local copies alone, not as "the player owns nothing".
+    #[test]
+    fn a_server_without_units_yields_none_not_empty() {
+        let s = state_with_currency(0);
+        let snap = snapshot_from_response(&serde_json::json!({ "inventory": {} }), &s).unwrap();
+        assert!(snap.units.is_none());
+    }
+
+    #[test]
+    fn a_response_without_an_inventory_is_not_a_snapshot() {
+        let s = state_with_currency(0);
+        assert!(snapshot_from_response(&serde_json::json!({ "error": "nope" }), &s).is_none());
+        assert!(snapshot_from_response(&serde_json::json!({ "newCurrency": 5 }), &s).is_none());
+    }
 }

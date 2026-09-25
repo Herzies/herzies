@@ -1,4 +1,4 @@
-import type { Herzie, Inventory, Trade } from "@herzies/shared";
+import type { Herzie, ItemUnit, Trade, TradeOffer } from "@herzies/shared";
 import { getItem } from "@herzies/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cn, formatAmount } from "../lib/utils";
@@ -10,11 +10,80 @@ import { PromptOverlay } from "./PromptOverlay";
 /** How often we poll `/trade/status` while a trade is open (ms). */
 const TRADE_POLL_MS = 650;
 
+/** Copies of one item at one level: interchangeable, so offered by count. A
+ * copy at another level is a different row, which is what lets a player offer
+ * their spare +0 and keep the +3. */
+interface OfferGroup {
+  key: string;
+  itemId: string;
+  level: number;
+  /** The copies in the group, oldest first. */
+  unitIds: string[];
+}
+
+/** What could be offered: every copy that isn't being worn. A worn copy can't
+ * be traded (the server refuses it), so it isn't listed. */
+function offerGroups(units: readonly ItemUnit[]): OfferGroup[] {
+  const groups = new Map<string, OfferGroup>();
+  for (const u of units) {
+    if (u.equippedSlot !== null) continue;
+    const key = `${u.itemId}:${u.upgradeLevel}`;
+    const group = groups.get(key);
+    if (group) group.unitIds.push(u.id);
+    else
+      groups.set(key, {
+        key,
+        itemId: u.itemId,
+        level: u.upgradeLevel,
+        unitIds: [u.id],
+      });
+  }
+  return [...groups.values()].sort(
+    (a, b) =>
+      (getItem(a.itemId)?.name ?? a.itemId).localeCompare(
+        getItem(b.itemId)?.name ?? b.itemId,
+      ) || b.level - a.level,
+  );
+}
+
+/** An offer as words: "Box of Boom +3 x1". Reads the per-copy snapshot the
+ * server stores (which carries each copy's level), falling back to the plain
+ * count-by-item an offer made before copies existed has. */
+function describeOffer(
+  offer: TradeOffer | null,
+): { key: string; name: string; level: number; qty: number }[] {
+  if (!offer) return [];
+  const rows = new Map<
+    string,
+    { key: string; name: string; level: number; qty: number }
+  >();
+  if (offer.units && offer.units.length > 0) {
+    for (const u of offer.units) {
+      const key = `${u.itemId}:${u.upgradeLevel}`;
+      const row = rows.get(key);
+      if (row) row.qty += 1;
+      else
+        rows.set(key, {
+          key,
+          name: getItem(u.itemId)?.name ?? u.itemId,
+          level: u.upgradeLevel,
+          qty: 1,
+        });
+    }
+  } else {
+    for (const [id, qty] of Object.entries(offer.items ?? {})) {
+      if (qty > 0)
+        rows.set(id, { key: id, name: getItem(id)?.name ?? id, level: 0, qty });
+    }
+  }
+  return [...rows.values()];
+}
+
 export function TradeView({
   herzie,
   initialTarget,
   initialTradeId,
-  inventory: cachedInventory,
+  units: cachedUnits,
   currency: cachedCurrency,
   onClose,
   onActiveChange,
@@ -22,7 +91,8 @@ export function TradeView({
   herzie: Herzie;
   initialTarget?: string | null;
   initialTradeId?: string | null;
-  inventory: Inventory | null;
+  /** Every owned copy — what the offer is built from. */
+  units: ItemUnit[];
   currency: number;
   onClose: () => void;
   /** Reports whether a live (non-terminal) trade session is open, so the app shell can confirm before navigating away. */
@@ -34,8 +104,9 @@ export function TradeView({
   const [message, setMessage] = useState("");
   const [confirmCancel, setConfirmCancel] = useState(false);
   const creatingRef = useRef(false);
-  const [inventory, setInventory] = useState<Inventory | null>(cachedInventory);
-  const [offerItems, setOfferItems] = useState<Record<string, number>>({});
+  const [units, setUnits] = useState<ItemUnit[]>(cachedUnits);
+  /** How many copies of each group are on offer. */
+  const [offerCounts, setOfferCounts] = useState<Record<string, number>>({});
   const [offerCurrency, setOfferCurrency] = useState(0);
   const [currency, setCurrency] = useState(cachedCurrency || herzie.currency);
   const lastSentOfferRef = useRef<string | null>(null);
@@ -63,14 +134,14 @@ export function TradeView({
   }, [tradeId]);
 
   useEffect(() => {
-    setInventory(cachedInventory);
+    setUnits(cachedUnits);
     setCurrency(cachedCurrency || herzie.currency);
-  }, [cachedInventory, cachedCurrency, herzie.currency]);
+  }, [cachedUnits, cachedCurrency, herzie.currency]);
 
   useEffect(() => {
     herzies.fetchInventory().then((data) => {
       if (data) {
-        setInventory(data.inventory);
+        setUnits(data.units);
         setCurrency(data.currency);
       }
     });
@@ -175,11 +246,12 @@ export function TradeView({
 
   const handleSendOffer = async () => {
     if (!tradeId) return;
-    const items: Record<string, number> = {};
-    for (const [id, qty] of Object.entries(offerItems)) {
-      if (qty > 0) items[id] = qty;
-    }
-    const payload = { items, currency: offerCurrency };
+    // The specific copies on offer. Sorted so the same offer always serializes
+    // the same way — that's what stops a Lock click resending an unchanged one.
+    const offered = offerGroups(units)
+      .flatMap((g) => g.unitIds.slice(0, offerCounts[g.key] ?? 0))
+      .sort();
+    const payload = { units: offered, currency: offerCurrency };
     const serialized = JSON.stringify(payload);
     if (lastSentOfferRef.current === serialized) return;
     lastSentOfferRef.current = serialized;
@@ -342,12 +414,12 @@ export function TradeView({
               </div>
               {myLocked ? (
                 <>
-                  {myOffer &&
-                    Object.entries(myOffer.items).map(([id, qty]) => (
-                      <div key={id} className="text-ui text-text">
-                        {getItem(id)?.name ?? id} x{qty}
-                      </div>
-                    ))}
+                  {describeOffer(myOffer).map((row) => (
+                    <div key={row.key} className="text-ui text-text">
+                      {row.name}
+                      {row.level > 0 ? ` +${row.level}` : ""} x{row.qty}
+                    </div>
+                  ))}
                   {myOffer && myOffer.currency > 0 && (
                     <div className="text-ui text-yellow">
                       <Coin amount={myOffer.currency} />
@@ -356,32 +428,33 @@ export function TradeView({
                 </>
               ) : (
                 <>
-                  {inventory &&
-                    Object.entries(inventory)
-                      .filter(([, qty]) => qty > 0)
-                      .map(([id, qty]) => {
-                        const item = getItem(id);
-                        if (!item) return null;
-                        const offered = offerItems[id] ?? 0;
-                        return (
-                          <div
-                            key={id}
-                            className="mb-0.5 flex items-center gap-1"
-                          >
-                            <span className="flex-1 text-[10px] text-text">
-                              {item.name} ({qty})
-                            </span>
-                            <NumberTicker
-                              value={offered}
-                              max={qty}
-                              size="small"
-                              onChange={(v) =>
-                                setOfferItems((prev) => ({ ...prev, [id]: v }))
-                              }
-                            />
-                          </div>
-                        );
-                      })}
+                  {offerGroups(units).map((group) => {
+                    const item = getItem(group.itemId);
+                    if (!item) return null;
+                    const qty = group.unitIds.length;
+                    return (
+                      <div
+                        key={group.key}
+                        className="mb-0.5 flex items-center gap-1"
+                      >
+                        <span className="flex-1 text-[10px] text-text">
+                          {item.name}
+                          {group.level > 0 ? ` +${group.level}` : ""} ({qty})
+                        </span>
+                        <NumberTicker
+                          value={Math.min(offerCounts[group.key] ?? 0, qty)}
+                          max={qty}
+                          size="small"
+                          onChange={(v) =>
+                            setOfferCounts((prev) => ({
+                              ...prev,
+                              [group.key]: v,
+                            }))
+                          }
+                        />
+                      </div>
+                    );
+                  })}
                   <div className="mt-1 flex items-center gap-1">
                     <span className="flex-1 text-[10px] text-yellow">
                       <span className="italic">H</span> (
@@ -399,19 +472,19 @@ export function TradeView({
             </div>
             <div>
               <div className="mb-1 text-ui text-text-dim">Their offer</div>
-              {theirOffer &&
-                Object.entries(theirOffer.items).map(([id, qty]) => (
-                  <div key={id} className="text-ui text-text">
-                    {id} x{qty}
-                  </div>
-                ))}
+              {describeOffer(theirOffer).map((row) => (
+                <div key={row.key} className="text-ui text-text">
+                  {row.name}
+                  {row.level > 0 ? ` +${row.level}` : ""} x{row.qty}
+                </div>
+              ))}
               {theirOffer && theirOffer.currency > 0 && (
                 <div className="text-ui text-yellow">
                   <Coin amount={theirOffer.currency} />
                 </div>
               )}
               {theirOffer &&
-                Object.keys(theirOffer.items).length === 0 &&
+                describeOffer(theirOffer).length === 0 &&
                 theirOffer.currency === 0 && (
                   <div className="text-[10px] text-text">Empty</div>
                 )}

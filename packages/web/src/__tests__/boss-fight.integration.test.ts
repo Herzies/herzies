@@ -16,6 +16,7 @@ import {
   createTestHerzie,
   createTestUser,
   getAdminClient,
+  seedInventory,
   setLocalEnv,
 } from "./integration-helpers";
 
@@ -299,10 +300,9 @@ describe("settling", () => {
       .delete()
       .eq("event_id", boss)
       .in("user_id", unpaid);
-    await admin()
-      .from("herzies")
-      .update({ inventory_v2: {} })
-      .in("user_id", unpaid);
+    // Their copies come from item_units now; inventory_v2 is derived from it
+    // and can't be written directly.
+    await Promise.all(unpaid.map((id) => seedInventory(id, {})));
     await admin()
       .from("boss_state")
       .update({ settled: false })
@@ -445,8 +445,9 @@ describe("damage from listening", () => {
     const plain = await makePlayer();
     const boomer = await createTestUser();
     // Box of Boom: +10 sonic power, which is +10% damage.
+    // A worn item is an owned copy, so the boomer has to own the box.
     await createTestHerzie(boomer.userId, {
-      inventory_v2: {},
+      inventory_v2: { boombox: 1 },
       equipped: { ground_left: "boombox" },
     });
 

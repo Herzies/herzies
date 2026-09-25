@@ -1,22 +1,15 @@
+import { normalizeUnits } from "@herzies/shared";
 import { NextResponse } from "next/server";
 import { authenticateRequest, isAuthError } from "@/lib/auth";
+import {
+  countByItem,
+  type OfferedUnit,
+  type StoredOffer,
+  sameOffer,
+  unitsForLegacyCount,
+} from "@/lib/item-units";
 import { isParseError, parseBody, tradeOfferSchema } from "@/lib/schemas";
 import { createAdminClient } from "@/lib/supabase-admin";
-
-function offersEqual(
-  a: { items: Record<string, number>; currency: number } | null,
-  b: { items: Record<string, number>; currency: number },
-): boolean {
-  if (!a) return false;
-  if (a.currency !== b.currency) return false;
-  const aKeys = Object.keys(a.items ?? {}).filter((k) => (a.items[k] ?? 0) > 0);
-  const bKeys = Object.keys(b.items ?? {}).filter((k) => (b.items[k] ?? 0) > 0);
-  if (aKeys.length !== bKeys.length) return false;
-  for (const k of bKeys) {
-    if ((a.items[k] ?? 0) !== (b.items[k] ?? 0)) return false;
-  }
-  return true;
-}
 
 export async function POST(request: Request) {
   const auth = await authenticateRequest(request);
@@ -63,7 +56,7 @@ export async function POST(request: Request) {
   // Validate player has what they're offering
   const { data: herzie } = await admin
     .from("herzies")
-    .select("inventory_v2, currency")
+    .select("currency")
     .eq("user_id", auth.userId)
     .single();
 
@@ -71,20 +64,79 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Herzie not found" }, { status: 404 });
   }
 
-  const inv = (herzie.inventory_v2 ?? {}) as Record<string, number>;
-
   if ((herzie.currency as number) < offer.currency) {
     return NextResponse.json({ error: "Not enough currency" }, { status: 400 });
   }
 
-  for (const [itemId, qty] of Object.entries(offer.items)) {
-    if ((inv[itemId] ?? 0) < qty) {
+  const { data: rows } = await admin
+    .from("item_units")
+    .select("id, item_id, upgrade_level, equipped_slot, acquired_at")
+    .eq("user_id", auth.userId)
+    .order("acquired_at", { ascending: true })
+    .order("id", { ascending: true });
+
+  const owned = normalizeUnits(
+    (rows ?? []).map((r) => ({
+      id: r.id,
+      itemId: r.item_id,
+      upgradeLevel: r.upgrade_level,
+      equippedSlot: r.equipped_slot,
+    })),
+  );
+
+  // What are they giving? Named copies (current clients), or — from a client
+  // that predates copies — a count per item id, which we resolve to copies: the
+  // plainest unworn ones first, so a spare goes before one you've upgraded.
+  let unitIds: string[];
+  if (offer.units) {
+    unitIds = [...new Set(offer.units)];
+  } else {
+    unitIds = [];
+    // Only unworn copies can be traded, so a count that could only be met by
+    // wearing-down your equipment is "not enough", not a silent partial offer.
+    const unworn = owned.filter((u) => u.equippedSlot === null);
+    for (const [itemId, qty] of Object.entries(offer.items ?? {})) {
+      const picked = unitsForLegacyCount(unworn, itemId, qty);
+      if (!picked) {
+        return NextResponse.json(
+          { error: `Not enough ${itemId}` },
+          { status: 400 },
+        );
+      }
+      unitIds.push(...picked);
+    }
+  }
+
+  const byId = new Map(owned.map((u) => [u.id, u]));
+  const offered: OfferedUnit[] = [];
+  for (const id of unitIds) {
+    const u = byId.get(id);
+    if (!u) {
       return NextResponse.json(
-        { error: `Not enough ${itemId}` },
+        { error: "You don't own one of those items" },
         { status: 400 },
       );
     }
+    // A worn copy can't be traded: nothing else would stop you giving away the
+    // hat you have on, leaving it worn by nobody. Unequip it first.
+    if (u.equippedSlot !== null) {
+      return NextResponse.json(
+        { error: "Unequip an item before trading it" },
+        { status: 400 },
+      );
+    }
+    offered.push({
+      unitId: u.id,
+      itemId: u.itemId,
+      upgradeLevel: u.upgradeLevel,
+    });
   }
+
+  const stored: StoredOffer = {
+    units: offered,
+    items: countByItem(offered),
+    currency: offer.currency,
+  };
 
   // Only reset locks if the offer actually changed. Resending the same offer
   // (which happens on every Lock click — see TradeView.handleLock) must be a
@@ -92,17 +144,17 @@ export async function POST(request: Request) {
   // the trade can never reach both_locked.
   const currentOffer = (
     isInitiator ? trade.initiator_offer : trade.target_offer
-  ) as { items: Record<string, number>; currency: number } | null;
-  const offerChanged = !offersEqual(currentOffer, offer);
+  ) as Partial<StoredOffer> | null;
+  const offerChanged = !sameOffer(currentOffer, stored);
 
   const update: Record<string, unknown> = {
     updated_at: new Date().toISOString(),
   };
 
   if (isInitiator) {
-    update.initiator_offer = offer;
+    update.initiator_offer = stored;
   } else {
-    update.target_offer = offer;
+    update.target_offer = stored;
   }
 
   if (offerChanged) {

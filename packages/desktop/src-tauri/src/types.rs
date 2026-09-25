@@ -137,6 +137,16 @@ pub struct SyncResponse {
     /// Authoritative equip state, carried for the same reason as `inventory`.
     #[serde(default)]
     pub equipped: Option<HashMap<String, serde_json::Value>>,
+    /// Dice-upgrade levels (itemId -> 0-3), carried for the same reason as
+    /// `inventory` — see MAX_ITEM_UPGRADE_LEVEL in @herzies/shared.
+    #[serde(default)]
+    pub item_upgrades: Option<ItemUpgrades>,
+    /// Every owned copy of every item, each with its own upgrade level and
+    /// worn slot. The source of truth — `inventory`, `equipped` and
+    /// `item_upgrades` above are derived from these server-side. `None` only
+    /// when talking to a server older than this field.
+    #[serde(default)]
+    pub units: Option<Vec<ItemUnit>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -205,10 +215,35 @@ pub struct EventNotification {
     pub log_only: Option<bool>,
 }
 
+/// A trade offer as stored and shown: the copies being given (each snapshotted
+/// with its level, so the other side sees "+3 Box of Boom" before accepting),
+/// plus the same offer counted by item id. `items` is the only field an offer
+/// made before copies existed has, so `units` is empty for those.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TradeOffer {
+    #[serde(default)]
     pub items: HashMap<String, u32>,
+    #[serde(default)]
+    pub units: Vec<OfferedUnit>,
+    pub currency: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OfferedUnit {
+    pub unit_id: String,
+    pub item_id: String,
+    #[serde(default)]
+    pub upgrade_level: u32,
+}
+
+/// What this player sends to change their side of a trade: the copies to give,
+/// by id. The server snapshots them into a `TradeOffer`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TradeOfferRequest {
+    pub units: Vec<String>,
     pub currency: u32,
 }
 
@@ -230,6 +265,40 @@ pub struct Trade {
 }
 
 pub type Inventory = HashMap<String, u32>;
+
+/// All the item state the server reports at once — what `/inventory` returns
+/// and what every inventory-changing call (sell, buy, equip, upgrade) answers
+/// with. Applied to local state as a unit so the copies and the id-keyed views
+/// derived from them never disagree.
+#[derive(Debug, Clone)]
+pub struct ItemSnapshot {
+    pub inventory: Inventory,
+    pub currency: u32,
+    pub equipped: HashMap<String, serde_json::Value>,
+    pub item_upgrades: ItemUpgrades,
+    /// `None` when the server predates copies, in which case the local ones are
+    /// left as they are rather than cleared.
+    pub units: Option<Vec<ItemUnit>>,
+}
+
+/// One owned copy of an item — the unit of ownership. It is what a bank tile
+/// is, what gets sold, traded and worn, and what a dice upgrade lands on.
+/// Mirrors `ItemUnit` in @herzies/shared.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemUnit {
+    pub id: String,
+    pub item_id: String,
+    #[serde(default)]
+    pub upgrade_level: u32,
+    /// A stored slot key, `"modifier"`, or `None` while it sits in the bank.
+    #[serde(default)]
+    pub equipped_slot: Option<String>,
+}
+
+/// Dice-upgrade levels (itemId -> 0-3) — see MAX_ITEM_UPGRADE_LEVEL in
+/// @herzies/shared.
+pub type ItemUpgrades = HashMap<String, u32>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -279,6 +348,15 @@ pub struct AppState {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub inventory: Option<Inventory>,
     pub inventory_currency: u32,
+    /// Dice-upgrade levels (itemId -> 0-3) — see MAX_ITEM_UPGRADE_LEVEL in
+    /// @herzies/shared.
+    #[serde(default)]
+    pub item_upgrades: ItemUpgrades,
+    /// Every owned copy — see `ItemUnit`. The desktop UI reads this wherever
+    /// copies have to be told apart; `inventory`/`equipped` remain as the
+    /// derived id-keyed views.
+    #[serde(default)]
+    pub units: Vec<ItemUnit>,
     pub friends: HashMap<String, HerzieProfile>,
     /// Present while the server reports an incoming trade you have not joined yet.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -376,4 +454,63 @@ pub struct NowPlayingInfo {
     /// browser web players, including YouTube) that needs Last.fm to confirm
     /// the track is real before it counts toward XP.
     pub verified: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_item_unit_reads_with_only_its_identity() {
+        let u: ItemUnit = serde_json::from_str(r#"{"id":"a","itemId":"cd"}"#).unwrap();
+        assert_eq!(u.upgrade_level, 0);
+        assert_eq!(u.equipped_slot, None);
+    }
+
+    #[test]
+    fn an_item_unit_serializes_camel_case_for_the_frontend() {
+        let u = ItemUnit {
+            id: "a".into(),
+            item_id: "boombox".into(),
+            upgrade_level: 2,
+            equipped_slot: Some("modifier".into()),
+        };
+        let v = serde_json::to_value(&u).unwrap();
+        assert_eq!(v["itemId"], "boombox");
+        assert_eq!(v["upgradeLevel"], 2);
+        assert_eq!(v["equippedSlot"], "modifier");
+    }
+
+    // An offer made before copies existed has only `items`; it must still parse
+    // (an in-flight trade, or the other player on an older client).
+    #[test]
+    fn a_trade_offer_from_before_copies_existed_still_parses() {
+        let o: TradeOffer = serde_json::from_str(r#"{"items":{"cd":2},"currency":10}"#).unwrap();
+        assert_eq!(o.items["cd"], 2);
+        assert!(o.units.is_empty());
+        assert_eq!(o.currency, 10);
+    }
+
+    #[test]
+    fn a_trade_offer_carries_each_copy_with_its_level() {
+        let o: TradeOffer = serde_json::from_str(
+            r#"{"units":[{"unitId":"u1","itemId":"boombox","upgradeLevel":3}],"items":{"boombox":1},"currency":0}"#,
+        )
+        .unwrap();
+        assert_eq!(o.units.len(), 1);
+        assert_eq!(o.units[0].unit_id, "u1");
+        assert_eq!(o.units[0].upgrade_level, 3);
+    }
+
+    #[test]
+    fn a_trade_offer_request_sends_only_the_copies_and_the_coins() {
+        let req = TradeOfferRequest {
+            units: vec!["u1".into(), "u2".into()],
+            currency: 7,
+        };
+        assert_eq!(
+            serde_json::to_value(&req).unwrap(),
+            serde_json::json!({ "units": ["u1", "u2"], "currency": 7 })
+        );
+    }
 }

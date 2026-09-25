@@ -6,8 +6,24 @@ on:
       - 'desktop-v*'
 
 jobs:
+  check-release-notes:
+    name: Check release notes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify curated notes exist for this version
+        run: |
+          set -euo pipefail
+          VERSION=$(jq -r .version packages/desktop/src-tauri/tauri.conf.json)
+          jq -e --arg v "$VERSION" \
+            '[.[] | select(.version == $v) | .highlights[]?] | length > 0' \
+            packages/desktop/release-notes.json > /dev/null \
+            || { echo "::error::No curated release notes for version $VERSION in packages/desktop/release-notes.json. Add an entry with a non-empty \"highlights\" array before tagging (see packages/desktop/README.md#releasing)."; exit 1; }
+
   build-macos:
     name: Build macOS
+    needs: check-release-notes
     runs-on: macos-latest
     env:
       HAS_APPLE_CERT: ${{ secrets.APPLE_CERTIFICATE != '' }}
@@ -126,6 +142,7 @@ jobs:
 
   build-windows:
     name: Build Windows
+    needs: check-release-notes
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -193,6 +210,19 @@ jobs:
           VERSION=$(jq -r .version packages/desktop/src-tauri/tauri.conf.json)
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
+      # Written to a file rather than a step output: curated prose can contain
+      # quotes, backticks or `$` that would corrupt later `run:` scripts if
+      # interpolated as a string. Every step below that needs the notes reads
+      # this file instead.
+      - name: Extract curated release notes
+        run: |
+          set -euo pipefail
+          VERSION=${{ steps.version.outputs.version }}
+          jq -r --arg v "$VERSION" \
+            '.[] | select(.version == $v) | .highlights | map("- " + .) | join("\n")' \
+            packages/desktop/release-notes.json > release-notes-body.txt
+          cat release-notes-body.txt
+
       - uses: actions/download-artifact@v4
         with:
           name: macos-release
@@ -223,16 +253,19 @@ jobs:
           WIN_URL="https://github.com/Herzies/herzies/releases/download/desktop-v${VERSION}/$(basename "$WIN_EXE")"
 
           # Universal macOS binary: both architectures point at the same .app.tar.gz.
+          # --rawfile (not --arg) so the curated notes reach jq as file content,
+          # never interpolated into the shell script.
           jq -n \
             --arg version "$VERSION" \
             --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --rawfile notes release-notes-body.txt \
             --arg mac_sig "$MAC_SIG" \
             --arg mac_url "$MAC_URL" \
             --arg win_sig "$WIN_SIG" \
             --arg win_url "$WIN_URL" \
             '{
               version: $version,
-              notes: ("Herzies Desktop v" + $version),
+              notes: $notes,
               pub_date: $pub_date,
               platforms: {
                 "darwin-x86_64":  { signature: $mac_sig, url: $mac_url },
@@ -254,5 +287,5 @@ jobs:
             artifacts/windows/*.exe.sig \
             latest.json \
             --title "Herzies Desktop v${VERSION}" \
-            --generate-notes \
+            --notes-file release-notes-body.txt \
             --target main

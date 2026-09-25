@@ -33,8 +33,10 @@ export async function POST(request: Request) {
       incomingFriendRequests: result.incomingFriendRequests,
       outgoingFriendRequests: result.outgoingFriendRequests,
       pendingDrops: result.pendingDrops,
+      units: result.units,
       inventory: result.inventory,
       equipped: result.equipped,
+      itemUpgrades: result.itemUpgrades,
     };
 
     return NextResponse.json(response);

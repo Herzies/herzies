@@ -35,15 +35,18 @@ import {
   filterDroppablePool,
   getDailyCraving,
   getHerzieStats,
+  getHerzieStatsFromUnits,
   getItem,
   goodEyeSniperBonus,
   type Herzie,
   hasRoomFor,
+  type ItemUnit,
   isModifierEquipped,
   MAX_DROP_ROLLS_PER_SYNC,
   matchesCraving,
   NON_DROPPABLE_ITEM_IDS,
   normalizeEquipped,
+  normalizeUnits,
   type PendingDrop,
   type PendingFriendRequest,
   type PendingTradeRequest,
@@ -224,6 +227,12 @@ interface SyncContext {
     schedule: MultiplierSchedule | null;
   }[];
   pending_drops: { id: string; item_id: string; dropped_at: string }[];
+  /**
+   * The player's owned copies (item_units, 00079). Absent on a database that
+   * predates that migration, which reads as "unknown" rather than "owns
+   * nothing": stats then fall back to the legacy id-keyed columns.
+   */
+  item_units?: unknown[];
   active_hunts: { id: string; title: string }[];
   /**
    * The live, still-fightable boss, if any (00075). Absent on a database that
@@ -269,8 +278,14 @@ export async function processSync(
   incomingFriendRequests: FriendRequestSummary[];
   outgoingFriendRequests: FriendRequestSummary[];
   pendingDrops: PendingDrop[];
+  /** Every owned copy, with its own level and worn slot. Absent — not empty —
+   * when they couldn't be read: a client must take that as "unknown, keep what
+   * you have", since an empty list would read as "owns nothing". */
+  units?: ItemUnit[];
+  /** Derived from `units` (by trigger); kept for clients that predate them. */
   inventory: Record<string, number>;
   equipped: Record<string, unknown>;
+  itemUpgrades: Record<string, number>;
 }> {
   const source = options.source ?? "cli";
   // 1. Fetch everything this sync reads, in one round trip.
@@ -296,6 +311,26 @@ export async function processSync(
   const notifications: EventNotification[] = [];
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
+
+  // Equipped-item stat totals, from the STORED row's equipped items (never
+  // the request body) — computed once and reused below for both boss
+  // damage and the drop-luck weighting, so both read the same equip state
+  // within one sync. Read off the units, so each worn copy contributes its
+  // OWN upgrade level; a database without units yet falls back to the
+  // id-keyed columns, where the level is a property of the whole item id.
+  const ctxUnits = Array.isArray(ctx.item_units)
+    ? normalizeUnits(ctx.item_units)
+    : null;
+  const herzieStats = ctxUnits
+    ? getHerzieStatsFromUnits(ctxUnits)
+    : getHerzieStats(
+        normalizeEquipped(row.equipped),
+        (row.item_upgrades ?? {}) as Record<string, number>,
+      );
+  // Copies minted during this sync, so the response can carry them without
+  // another query on a path that runs every few seconds per client.
+  const collectedUnits: ItemUnit[] = [];
+  let unitsStale = false;
 
   // Log track change to listen_log (CLI source only — Spotify logged in cron)
   if (source === "cli" && nowPlaying) {
@@ -485,11 +520,7 @@ export async function processSync(
           p_user_id: userId,
           // Sonic power from the STORED row's equipped items, like
           // hasGoodEyeSniperEquipped above — never from the request body.
-          p_damage:
-            billedMinutes *
-            bossDamagePerMinute(
-              getHerzieStats(normalizeEquipped(row.equipped)),
-            ),
+          p_damage: billedMinutes * bossDamagePerMinute(herzieStats),
         },
       );
 
@@ -591,7 +622,7 @@ export async function processSync(
       // rollsConsumed above. (DROP_CHANCE_PER_TICK is 1 today, so this never
       // fires in production.)
       if (!dropTestMode && Math.random() >= DROP_CHANCE_PER_TICK) continue;
-      const picked = pickWeightedDrop(droppable);
+      const picked = pickWeightedDrop(droppable, herzieStats.luck);
       if (picked) pickedIds.push(picked.id);
     }
     if (pickedIds.length > 0) {
@@ -677,6 +708,13 @@ export async function processSync(
         p_drop_id: drop.id,
       });
       if (collectedId) {
+        // collect_pending_drop mints the unit under the drop's own id.
+        collectedUnits.push({
+          id: drop.id,
+          itemId: collectedId as string,
+          upgradeLevel: 0,
+          equippedSlot: null,
+        });
         // Keep the running tally in step so the next iteration sees this one —
         // otherwise a full bank would still let the whole queue through.
         running[drop.itemId] = (running[drop.itemId] ?? 0) + 1;
@@ -713,6 +751,8 @@ export async function processSync(
       notifiedHunts,
     );
     notifications.push(...eventNotifications);
+    // A reward grant minted units under fresh ids we never saw.
+    if (eventNotifications.some((n) => n.itemId)) unitsStale = true;
   }
 
   // 6b. First-finder notifications for song hunts
@@ -808,7 +848,7 @@ export async function processSync(
     .from("herzies")
     .update(updateData)
     .eq("user_id", userId)
-    .select("inventory_v2, equipped")
+    .select("inventory_v2, equipped, item_upgrades")
     .single();
 
   // 8. Pending trade request — resolved with the initiator's name in
@@ -840,6 +880,20 @@ export async function processSync(
         }
       : undefined;
 
+  let units: ItemUnit[] | undefined;
+  if (unitsStale || !ctxUnits) {
+    const { data: fresh, error: unitsError } = await admin.rpc(
+      "item_units_json",
+      { p_user_id: userId },
+    );
+    // A failed read (or a database that predates copies) leaves them out
+    // rather than sending an empty list a client would take as "owns nothing".
+    units =
+      !unitsError && Array.isArray(fresh) ? normalizeUnits(fresh) : undefined;
+  } else {
+    units = [...ctxUnits, ...collectedUnits];
+  }
+
   return {
     herzie,
     notifications,
@@ -849,6 +903,7 @@ export async function processSync(
     incomingFriendRequests,
     outgoingFriendRequests,
     pendingDrops,
+    units,
     // Carried on the regular sync cadence so clients don't have to re-fetch
     // /inventory after every mutation. Falls back to the pre-update row if the
     // returning select came back empty.
@@ -862,6 +917,9 @@ export async function processSync(
       string,
       unknown
     >,
+    itemUpgrades: (syncedRow?.item_upgrades ??
+      row.item_upgrades ??
+      {}) as Record<string, number>,
   };
 }
 

@@ -407,15 +407,19 @@ pub async fn api_collect_drop(
     }))
 }
 
-/// Dev-only: spawns a real, pickup-able world drop for the "Spawn Item Drop"
-/// debug button in Settings (see supabase/functions/debug-spawn-drop — that
-/// endpoint is further restricted server-side to the developer's own
-/// account, since a client-side dev gate alone wouldn't stop any other
-/// player from calling it directly).
-pub async fn api_spawn_debug_drop(client: &Client) -> Result<PendingDrop, String> {
+/// Dev-only: spawns a real, pickup-able world drop for the "Spawn Item
+/// Drop"/"Spawn Dice Drop" debug buttons in Settings (see
+/// supabase/functions/debug-spawn-drop — that endpoint is further restricted
+/// server-side to the developer's own account, since a client-side dev gate
+/// alone wouldn't stop any other player from calling it directly).
+/// `dice_only` narrows the pool to dice-type items — without it, a dice item
+/// is realistic-odds (rare, ~0.5% of the live pool) but impractical to hit
+/// on demand for testing the upgrade flow.
+pub async fn api_spawn_debug_drop(client: &Client, dice_only: bool) -> Result<PendingDrop, String> {
     let url = format!("{}/debug-spawn-drop", functions_base());
     let anon = supabase_anon_key();
-    let resp = api_fetch_full(client, reqwest::Method::POST, &url, None, Some(&anon))
+    let body = serde_json::json!({ "diceOnly": dice_only });
+    let resp = api_fetch_full(client, reqwest::Method::POST, &url, Some(body), Some(&anon))
         .await
         .ok_or_else(|| "Network error".to_string())?;
     let status = resp.status();
@@ -627,9 +631,7 @@ pub async fn api_lookup_herzies(
     Some(result)
 }
 
-pub async fn api_fetch_inventory(
-    client: &Client,
-) -> Option<(Inventory, u32, HashMap<String, serde_json::Value>)> {
+pub async fn api_fetch_inventory(client: &Client) -> Option<ItemSnapshot> {
     let resp = api_fetch(client, reqwest::Method::GET, "/inventory", None).await?;
     if !resp.status().is_success() {
         return None;
@@ -641,16 +643,27 @@ pub async fn api_fetch_inventory(
         serde_json::Value::Object(map) => map.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
         _ => HashMap::new(),
     };
-    Some((inventory, currency, equipped))
+    let item_upgrades: ItemUpgrades =
+        serde_json::from_value(data["itemUpgrades"].clone()).unwrap_or_default();
+    let units = serde_json::from_value::<Vec<ItemUnit>>(data["units"].clone()).ok();
+    Some(ItemSnapshot {
+        inventory,
+        currency,
+        equipped,
+        item_upgrades,
+        units,
+    })
 }
 
-pub async fn api_equip_item(
+/// Wears or removes one specific copy. Surfaces the server's message (max
+/// modifiers, side required, not equipable, ...) like the other item calls.
+pub async fn api_equip_unit(
     client: &Client,
-    item_id: &str,
+    unit_id: &str,
     action: &str,
     side: Option<&str>,
 ) -> Result<serde_json::Value, String> {
-    let mut body = serde_json::json!({ "itemId": item_id, "action": action });
+    let mut body = serde_json::json!({ "unitId": unit_id, "action": action });
     if let Some(s) = side {
         body["side"] = serde_json::Value::String(s.to_string());
     }
@@ -673,12 +686,37 @@ pub async fn api_equip_item(
     Ok(data)
 }
 
-pub async fn api_sell_item(
+/// Consumes one dice item to raise ONE specific card's upgrade level by one.
+/// Surfaces the server's error message, same as `api_equip_unit`/`api_buy_item`
+/// (not owned, already maxed, target has no stats, etc.).
+pub async fn api_apply_dice_upgrade(
     client: &Client,
-    item_id: &str,
-    quantity: u32,
-) -> Option<serde_json::Value> {
-    let body = serde_json::json!({ "itemId": item_id, "quantity": quantity });
+    dice_item_id: &str,
+    target_unit_id: &str,
+) -> Result<serde_json::Value, String> {
+    let body = serde_json::json!({ "diceItemId": dice_item_id, "targetUnitId": target_unit_id });
+    let resp = api_fetch(
+        client,
+        reqwest::Method::POST,
+        "/inventory/upgrade",
+        Some(body),
+    )
+    .await
+    .ok_or_else(|| "Network error".to_string())?;
+    let status = resp.status();
+    let text = resp.text().await.map_err(|e| format!("Read error: {e}"))?;
+    let data: serde_json::Value =
+        serde_json::from_str(&text).map_err(|_| format!("Server returned {status}"))?;
+    if !status.is_success() {
+        let msg = data["error"].as_str().unwrap_or("Unknown error");
+        return Err(msg.to_string());
+    }
+    Ok(data)
+}
+
+/// Sells the named copies.
+pub async fn api_sell_units(client: &Client, unit_ids: &[String]) -> Option<serde_json::Value> {
+    let body = serde_json::json!({ "unitIds": unit_ids });
     let resp = api_fetch(client, reqwest::Method::POST, "/inventory/sell", Some(body)).await?;
     if !resp.status().is_success() {
         return None;
@@ -879,7 +917,11 @@ pub async fn api_join_trade(client: &Client, trade_id: &str) -> bool {
     }
 }
 
-pub async fn api_update_trade_offer(client: &Client, trade_id: &str, offer: &TradeOffer) -> bool {
+pub async fn api_update_trade_offer(
+    client: &Client,
+    trade_id: &str,
+    offer: &TradeOfferRequest,
+) -> bool {
     let body = serde_json::json!({ "tradeId": trade_id, "offer": offer });
     match api_fetch(client, reqwest::Method::POST, "/trade/offer", Some(body)).await {
         Some(r) => r.status().is_success(),

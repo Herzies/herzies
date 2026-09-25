@@ -40,6 +40,13 @@ pub struct ManagedState {
     /// Cached inventory (`None` until first successful fetch).
     pub inventory: Option<Inventory>,
     pub inventory_currency: u32,
+    /// Dice-upgrade levels (itemId -> 0-3), cached the same way as
+    /// `inventory` — see MAX_ITEM_UPGRADE_LEVEL in @herzies/shared.
+    pub item_upgrades: ItemUpgrades,
+    /// Every owned copy of every item, each with its own level and worn slot
+    /// — the source of truth that `inventory`, `equipped` and `item_upgrades`
+    /// are derived from server-side. Cached alongside them.
+    pub units: Vec<ItemUnit>,
     /// Friend profiles keyed by friend code (persisted when codes match).
     pub friends: HashMap<String, HerzieProfile>,
     /// Latest incoming trade from `/sync` (cleared when absent on a successful sync).
@@ -89,10 +96,11 @@ impl ManagedState {
             .as_ref()
             .map(|h| h.friend_codes.clone())
             .unwrap_or_default();
-        let (inventory, inventory_currency) = match crate::storage::load_inventory_cache() {
-            Some((inv, cur)) => (Some(inv), cur),
-            None => (None, 0),
-        };
+        let (inventory, inventory_currency, item_upgrades, units) =
+            match crate::storage::load_inventory_cache() {
+                Some((inv, cur, upgrades, units)) => (Some(inv), cur, upgrades, units),
+                None => (None, 0, ItemUpgrades::new(), Vec::new()),
+            };
         Self {
             herzie,
             pending_minutes: crate::storage::load_pending_minutes(),
@@ -111,6 +119,8 @@ impl ManagedState {
             chat_messages: Vec::new(),
             inventory,
             inventory_currency,
+            item_upgrades,
+            units,
             friends: crate::storage::load_friends_cache(&friend_codes),
             pending_trade_request: None,
             pending_friend_request: None,
@@ -153,6 +163,8 @@ impl ManagedState {
         self.chat_messages.clear();
         self.inventory = None;
         self.inventory_currency = 0;
+        self.item_upgrades.clear();
+        self.units.clear();
         self.friends.clear();
         self.pending_trade_request = None;
         self.pending_friend_request = None;
@@ -215,6 +227,8 @@ impl ManagedState {
             chat_messages: self.chat_messages.clone(),
             inventory: self.inventory.clone(),
             inventory_currency: self.inventory_currency,
+            item_upgrades: self.item_upgrades.clone(),
+            units: self.units.clone(),
             friends: self.friends.clone(),
             pending_trade_request: self.pending_trade_request.clone(),
             pending_friend_request: self.pending_friend_request.clone(),
@@ -324,6 +338,8 @@ mod tests {
             chat_messages: Vec::new(),
             inventory: None,
             inventory_currency: 0,
+            item_upgrades: ItemUpgrades::new(),
+            units: Vec::new(),
             friends: HashMap::new(),
             pending_trade_request: None,
             pending_friend_request: None,

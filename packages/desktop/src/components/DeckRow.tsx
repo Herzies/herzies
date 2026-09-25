@@ -8,8 +8,8 @@ import {
   type GroundSide,
   getItem,
   groundSideOf,
-  type Inventory,
   type ItemType,
+  type ItemUnit,
 } from "@herzies/shared";
 import { ItemPreviewCard } from "./ItemInspectOverlay";
 import {
@@ -46,15 +46,15 @@ export interface EmptySlotTarget {
 function DeckGroup({
   group,
   equipped,
-  inventory,
+  units,
   onUnequip,
   onPlaceRequest,
   className,
 }: {
   group: DeckSlotGroup;
   equipped: Equipped;
-  inventory: Inventory | null;
-  onUnequip: (itemId: string) => void;
+  units: readonly ItemUnit[];
+  onUnequip: (unitId: string) => void;
   onPlaceRequest: (target: EmptySlotTarget) => void;
   className?: string;
 }) {
@@ -96,7 +96,7 @@ function DeckGroup({
               equipSlot={equipSlot}
               slotNumber={i + 1}
               slotCount={alike}
-              inventory={inventory}
+              units={units}
               equipped={equipped}
               onUnequip={onUnequip}
               onPlaceRequest={(x, y) =>
@@ -121,13 +121,17 @@ function DeckGroup({
  * others. */
 export function DeckRow({
   equipped,
-  inventory,
+  units,
   onUnequip,
   onPlaceRequest,
 }: {
   equipped: Equipped;
-  inventory: Inventory | null;
-  onUnequip: (itemId: string) => void;
+  /** Every owned copy: what tells a box which copy it is showing (and so its
+   * upgrade level), and which copy a click takes off. */
+  units: readonly ItemUnit[];
+  /** Takes the worn copy's id, not the item's — an item can have several copies
+   * and only one is ever worn. */
+  onUnequip: (unitId: string) => void;
   onPlaceRequest: (target: EmptySlotTarget) => void;
 }) {
   return (
@@ -135,35 +139,35 @@ export function DeckRow({
       <DeckGroup
         group={groupByLabel("Equipment")}
         equipped={equipped}
-        inventory={inventory}
+        units={units}
         onUnequip={onUnequip}
         onPlaceRequest={onPlaceRequest}
       />
       <DeckGroup
         group={groupByLabel("Accessories")}
         equipped={equipped}
-        inventory={inventory}
+        units={units}
         onUnequip={onUnequip}
         onPlaceRequest={onPlaceRequest}
       />
       <DeckGroup
         group={groupByLabel("Skin")}
         equipped={equipped}
-        inventory={inventory}
+        units={units}
         onUnequip={onUnequip}
         onPlaceRequest={onPlaceRequest}
       />
       <DeckGroup
         group={groupByLabel("Scenery")}
         equipped={equipped}
-        inventory={inventory}
+        units={units}
         onUnequip={onUnequip}
         onPlaceRequest={onPlaceRequest}
       />
       <DeckGroup
         group={groupByLabel("Modifiers")}
         equipped={equipped}
-        inventory={inventory}
+        units={units}
         onUnequip={onUnequip}
         onPlaceRequest={onPlaceRequest}
         className="col-span-2"
@@ -178,7 +182,7 @@ function DeckSlot({
   equipSlot,
   slotNumber,
   slotCount,
-  inventory,
+  units,
   equipped,
   onUnequip,
   onPlaceRequest,
@@ -193,9 +197,9 @@ function DeckSlot({
   /** How many boxes in the group share this box's equip slot — a "#N" is
    * only worth showing when more than one of them is interchangeable. */
   slotCount: number;
-  inventory: Inventory | null;
+  units: readonly ItemUnit[];
   equipped: Equipped;
-  onUnequip: (itemId: string) => void;
+  onUnequip: (unitId: string) => void;
   onPlaceRequest: (x: number, y: number) => void;
 }) {
   if (!itemId) {
@@ -235,11 +239,20 @@ function DeckSlot({
   }
 
   const def = getItem(itemId);
+  // An item is worn at most once, so this is THE copy in the box: its level is
+  // what the preview shows, and it is the one a click takes off.
+  const worn = units.find(
+    (u) => u.itemId === itemId && u.equippedSlot !== null,
+  );
 
   const button = (
     <button
       type="button"
-      onClick={() => onUnequip(itemId)}
+      // Nothing to take off if the copy isn't among the units (a snapshot from
+      // before copies existed): the box still shows what's worn, it just can't
+      // act on it until the next sync brings the copies.
+      disabled={!worn}
+      onClick={() => worn && onUnequip(worn.id)}
       className="flex h-4 w-4 shrink-0 cursor-pointer items-center justify-center bg-bg-panel/50 transition-opacity hover:opacity-75"
       style={{ clipPath: CARD_SHAPE_CLIP }}
     >
@@ -265,9 +278,10 @@ function DeckSlot({
       content={
         <ItemPreviewCard
           itemId={itemId}
-          meta={`x${inventory?.[itemId] ?? 0}`}
+          meta={`x${units.filter((u) => u.itemId === itemId).length}`}
           box={100}
           equipped={equipped}
+          level={worn?.upgradeLevel ?? 0}
         />
       }
     >

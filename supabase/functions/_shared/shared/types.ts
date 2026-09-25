@@ -2,7 +2,7 @@
 // Source: packages/shared/src/types.ts
 // Run `pnpm vendor:shared` after changing the original.
 
-import type { Equipped } from "./items.ts";
+import type { Equipped, ItemUnit } from "./items.ts";
 
 export interface HerzieAppearance {
   headIndex: number;
@@ -117,6 +117,12 @@ export interface SyncResponse {
   /** World drops waiting to be collected. Each persists until collected (no
    * expiry) — any number can be pending at once. */
   pendingDrops: PendingDrop[];
+  /** Every owned copy of every item, each with its own upgrade level and worn
+   * slot. The source of truth: `inventory`, `equipped` and `itemUpgrades`
+   * below are derived from these and only remain for clients that predate
+   * them. Omitted when they couldn't be read — a client keeps what it has
+   * rather than treating that as an empty inventory. */
+  units?: ItemUnit[];
   /** Authoritative inventory. Carried here so clients get it on the regular
    * sync cadence instead of re-fetching /inventory after every mutation: the
    * herzies row is already loaded to build this response, so including it
@@ -125,6 +131,9 @@ export interface SyncResponse {
   inventory: Inventory;
   /** Authoritative equip state, carried for the same reason as `inventory`. */
   equipped: Equipped;
+  /** Dice-upgrade levels (itemId -> 0-3), carried for the same reason as
+   * `inventory` — see applyItemUpgrade / MAX_ITEM_UPGRADE_LEVEL. */
+  itemUpgrades: Record<string, number>;
 }
 
 /** Notification that another player wants to trade */
@@ -314,8 +323,21 @@ export type Genre = (typeof GENRES)[number];
 /** Inventory as a map of item ID to quantity */
 export type Inventory = Record<string, number>;
 
-/** One side of a trade offer */
+/** One copy in a trade offer, snapshotted with what the other side needs to
+ * judge it — its level — so they can see "+3 Box of Boom" before accepting
+ * without a live look into the offerer's inventory. */
+export interface OfferedUnit {
+  unitId: string;
+  itemId: string;
+  upgradeLevel: number;
+}
+
+/** One side of a trade offer. */
 export interface TradeOffer {
+  /** The copies being given. Absent on an offer made before copies existed. */
+  units?: OfferedUnit[];
+  /** The same offer counted by item id — the only thing an offer from before
+   * copies existed has, and still filled in for clients that read only this. */
   items: Record<string, number>;
   currency: number;
 }

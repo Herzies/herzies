@@ -12,6 +12,7 @@ import {
   createTestHerzie,
   createTestUser,
   getAdminClient,
+  seedInventory,
   setLocalEnv,
 } from "./integration-helpers";
 
@@ -502,9 +503,10 @@ describe("Sync flow", () => {
     const admin = getAdminClient();
 
     // Manually set inventory to simulate a trade completing
+    await seedInventory(user.userId, { cd: 3, "rare-item": 1 });
     await admin
       .from("herzies")
-      .update({ inventory_v2: { cd: 3, "rare-item": 1 }, currency: 500 })
+      .update({ currency: 500 })
       .eq("user_id", user.userId);
 
     // Sync should NOT overwrite currency or inventory
@@ -666,8 +668,10 @@ describe("World drops", () => {
   it("auto-collects a pending drop in the same tick when Spirit Orb is equipped", async () => {
     const admin = getAdminClient();
     const petUser = await createTestUser();
+    // The orb has to be an owned copy to be worn: a worn item is a unit, so
+    // "equipped but not owned" (which the old columns could express) can't exist.
     await createTestHerzie(petUser.userId, {
-      inventory_v2: {},
+      inventory_v2: { "spirit-orb": 1 },
       equipped: { ground_left: "spirit-orb" },
     });
 

@@ -1,5 +1,5 @@
 import type { Cell } from "./creature-renderer.js";
-import type { ItemDef } from "./items.js";
+import { getItemType, type ItemDef } from "./items.js";
 
 export const ITEM_FONT_FAMILY = "'SF Mono', 'Menlo', monospace";
 
@@ -104,11 +104,27 @@ export function dominantColor(frame: Cell[][]): string | undefined {
  * Scale the content bounds to fit (contain) within a square `box` of pixels.
  * Character cell metrics match `ItemDisplay`: width = size * 0.6, height = size
  * * 1.35.
+ *
+ * `fillFraction` (default 1, i.e. fill the box like every card-shaped item
+ * does) shrinks the *target* the content is fit into, not the content's own
+ * character-count budget — see `previewFillFraction`. Shrinking `bounds`
+ * itself instead (by baking a smaller object in items.ts) would look
+ * identical at this box size but be strictly lower-resolution: fewer source
+ * characters get stretched to cover the same on-screen area rather than
+ * more of them filling less of it.
  */
-export function fitMetrics(bounds: Bounds, box: number): FitMetrics {
+export function fitMetrics(
+  bounds: Bounds,
+  box: number,
+  fillFraction = 1,
+): FitMetrics {
   const cols = bounds.c1 - bounds.c0 + 1;
   const rows = bounds.r1 - bounds.r0 + 1;
-  const size = Math.max(1, Math.min(box / (cols * 0.6), box / (rows * 1.35)));
+  const target = box * fillFraction;
+  const size = Math.max(
+    1,
+    Math.min(target / (cols * 0.6), target / (rows * 1.35)),
+  );
   const charW = size * 0.6;
   const lineH = size * 1.35;
   return {
@@ -118,6 +134,20 @@ export function fitMetrics(bounds: Bounds, box: number): FitMetrics {
     canvasW: Math.ceil(cols * charW),
     canvasH: Math.ceil(rows * lineH),
   };
+}
+
+/** How much of its preview box an item's content should fill — passed
+ * straight through to `fitMetrics`'s `fillFraction`. 1 (fill it) for every
+ * card-shaped item, same as always. Power Dice is the one exception: its
+ * cube is baked at (close to) the same character-count budget as a card —
+ * deliberately, so it's just as detailed — but a die sitting next to a card
+ * should still read as the smaller physical object. Doing that here, by
+ * asking for less of the box, keeps the full source resolution and only
+ * changes the final on-screen size — the opposite of shrinking the baked
+ * geometry, which (see the note on `fitMetrics`) changes the size not at
+ * all and only costs resolution. */
+export function previewFillFraction(item: ItemDef): number {
+  return getItemType(item) === "dice" ? 0.62 : 1;
 }
 
 /** Draw the cropped cell grid of a single frame onto a 2D canvas context. */

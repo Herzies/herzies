@@ -113,10 +113,14 @@ Deno.serve(async (request) => {
       incomingFriendRequests: result.incomingFriendRequests,
       outgoingFriendRequests: result.outgoingFriendRequests,
       pendingDrops: result.pendingDrops,
+      // Every owned copy with its own level and worn slot — the source of
+      // truth; the three fields below are derived from it.
+      units: result.units,
       // The desktop client no longer re-fetches /inventory after drops,
       // grants or Greedy Spirit auto-collects — these are its only source.
       inventory: result.inventory,
       equipped: result.equipped,
+      itemUpgrades: result.itemUpgrades,
     });
   } catch (err) {
     const message =

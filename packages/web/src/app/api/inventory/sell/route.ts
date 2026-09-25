@@ -1,8 +1,19 @@
-import { applySell, normalizeEquipped } from "@herzies/shared";
 import { NextResponse } from "next/server";
 import { authenticateRequest, isAuthError } from "@/lib/auth";
+import {
+  type ItemState,
+  itemResponse,
+  loadUnits,
+  unitsForLegacyCount,
+} from "@/lib/item-units";
 import { isParseError, parseBody, sellItemSchema } from "@/lib/schemas";
 import { createAdminClient } from "@/lib/supabase-admin";
+
+const REASONS: Record<string, { status: number; error: string }> = {
+  "not-found": { status: 404, error: "Herzie not found" },
+  "not-sellable": { status: 400, error: "Item cannot be sold" },
+  "not-enough": { status: 400, error: "Not enough items" },
+};
 
 export async function POST(request: Request) {
   const auth = await authenticateRequest(request);
@@ -11,70 +22,62 @@ export async function POST(request: Request) {
   const body = await parseBody(request, sellItemSchema);
   if (isParseError(body)) return body;
 
-  const { itemId, quantity } = body;
-
   const admin = createAdminClient();
 
-  // Fetch item catalog entry
-  const { data: item } = await admin
-    .from("items")
-    .select("id, sell_price, stackable")
-    .eq("id", itemId)
-    .single();
-
-  if (!item?.sell_price) {
-    return NextResponse.json({ error: "Item cannot be sold" }, { status: 400 });
-  }
-
-  // Fetch player's inventory, currency, and equip state
-  const { data: herzie } = await admin
-    .from("herzies")
-    .select("inventory_v2, currency, equipped")
-    .eq("user_id", auth.userId)
-    .single();
-
-  if (!herzie) {
-    return NextResponse.json({ error: "Herzie not found" }, { status: 404 });
-  }
-
-  // The sale rules live in @herzies/shared so the desktop client can predict
-  // this exact result optimistically (see handleSell in InventoryView).
-  const outcome = applySell(
-    (herzie.inventory_v2 ?? {}) as Record<string, number>,
-    (herzie.currency as number) ?? 0,
-    normalizeEquipped(herzie.equipped),
-    itemId,
-    quantity,
-    item.sell_price as number,
-  );
-
-  if (!outcome.ok) {
-    const messages: Record<typeof outcome.reason, string> = {
-      "not-sellable": "Item cannot be sold",
-      "not-enough": "Not enough items",
-    };
-    return NextResponse.json(
-      { error: messages[outcome.reason] },
-      { status: 400 },
+  // Named copies, or — from a client that only knew item ids — "N of this
+  // item", which we resolve to the plainest copies so a spare goes before one
+  // you've upgraded or are wearing.
+  let unitIds: string[];
+  if ("unitIds" in body) {
+    unitIds = body.unitIds;
+  } else {
+    const picked = unitsForLegacyCount(
+      await loadUnits(admin, auth.userId),
+      body.itemId,
+      body.quantity,
     );
+    if (!picked) {
+      return NextResponse.json(
+        { error: REASONS["not-enough"].error },
+        { status: 400 },
+      );
+    }
+    unitIds = picked;
   }
 
-  const { earned, newCurrency, inventory, equipped } = outcome;
+  // One locked transaction: ownership, price, coins and removal together. This
+  // used to be a read, a computation here, and a separate write — two racing
+  // sells could both read the same inventory and the second write clobber the
+  // first. The rules live in sell_units (00079_item_units.sql); the desktop
+  // predicts the same result with applySell in @herzies/shared.
+  const { data, error } = await admin.rpc("sell_units", {
+    p_user_id: auth.userId,
+    p_unit_ids: unitIds,
+  });
 
-  const { error } = await admin
-    .from("herzies")
-    .update({ inventory_v2: inventory, currency: newCurrency, equipped })
-    .eq("user_id", auth.userId);
+  const result = data as {
+    ok: boolean;
+    reason?: string;
+    earned?: number;
+    newCurrency?: number;
+    state?: ItemState;
+  } | null;
 
   if (error) {
     return NextResponse.json({ error: "Failed to sell" }, { status: 500 });
   }
+  if (!result?.ok || !result.state) {
+    const known = REASONS[result?.reason ?? ""];
+    return NextResponse.json(
+      { error: known?.error ?? "Failed to sell" },
+      { status: known?.status ?? 400 },
+    );
+  }
 
   return NextResponse.json({
     ok: true,
-    earned,
-    newCurrency,
-    inventory,
-    equipped,
+    earned: result.earned,
+    newCurrency: result.newCurrency,
+    ...itemResponse(result.state),
   });
 }

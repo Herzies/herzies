@@ -16,6 +16,7 @@ export function SettingsView({
   onStageOverride,
   onPreviewOnboarding,
   onTestUpdateAlert,
+  onTestWhatsNew,
   availableUpdate,
   installStatus,
   onInstallUpdate,
@@ -30,6 +31,7 @@ export function SettingsView({
   onStageOverride: (v: number | null) => void;
   onPreviewOnboarding: () => void;
   onTestUpdateAlert: () => void;
+  onTestWhatsNew: () => void;
   availableUpdate: Update | null;
   installStatus: UpdateInstallStatus;
   onInstallUpdate: () => void;
@@ -37,7 +39,9 @@ export function SettingsView({
   debugBossOverride: boolean;
   onToggleDebugBoss: () => void;
   onToggleActiveEventOverride: () => void;
-  onSpawnDebugDrop: () => void;
+  /** `diceOnly` narrows the spawned drop to a dice-type item — see the
+   * "Spawn Dice Drop" button below. */
+  onSpawnDebugDrop: (diceOnly?: boolean) => void;
 }) {
   const [loggingIn, setLoggingIn] = useState(false);
   const [mediaRemoteDebug, setMediaRemoteDebug] = useState<string | null>(null);
@@ -126,6 +130,9 @@ export function SettingsView({
             <button type="button" className="btn" onClick={onTestUpdateAlert}>
               Test Update Alert
             </button>
+            <button type="button" className="btn" onClick={onTestWhatsNew}>
+              Test What's New
+            </button>
             <button
               type="button"
               className={cn(
@@ -150,8 +157,19 @@ export function SettingsView({
             >
               {debugBossOverride ? "Boss Fight: On" : "Test Boss Fight"}
             </button>
-            <button type="button" className="btn" onClick={onSpawnDebugDrop}>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => onSpawnDebugDrop()}
+            >
               Spawn Item Drop
+            </button>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => onSpawnDebugDrop(true)}
+            >
+              Spawn Dice Drop
             </button>
           </div>
           {mediaRemoteDebug !== null && (

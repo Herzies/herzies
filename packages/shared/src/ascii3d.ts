@@ -5,6 +5,12 @@
 export type V3 = [number, number, number];
 export type V2 = [number, number];
 
+export function rotX(p: V3, a: number): V3 {
+  const c = Math.cos(a),
+    s = Math.sin(a);
+  return [p[0], p[1] * c - p[2] * s, p[1] * s + p[2] * c];
+}
+
 export function rotY(p: V3, a: number): V3 {
   const c = Math.cos(a),
     s = Math.sin(a);

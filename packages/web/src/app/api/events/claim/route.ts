@@ -75,21 +75,15 @@ export async function POST(request: Request) {
   // Grant reward item if configured
   const rewardItemId = config.rewardItemId as string | undefined;
   if (rewardItemId) {
-    const { data: herzie } = await admin
-      .from("herzies")
-      .select("inventory")
-      .eq("user_id", auth.userId)
-      .single();
-
-    if (herzie) {
-      const inventory: string[] = herzie.inventory ?? [];
-      if (!inventory.includes(rewardItemId)) {
-        await admin
-          .from("herzies")
-          .update({ inventory: [...inventory, rewardItemId] })
-          .eq("user_id", auth.userId);
-      }
-    }
+    // This used to append to the legacy `herzies.inventory` text[] column,
+    // which nothing reads back — a reward granted here never reached the
+    // player's bank. Granting through the same RPC every other reward uses
+    // makes it a real owned copy. (The claim row above is what stops a repeat.)
+    await admin.rpc("grant_inventory_item", {
+      p_user_id: auth.userId,
+      p_item_id: rewardItemId,
+      p_quantity: 1,
+    });
   }
 
   return NextResponse.json({ ok: true, rewardItemId });
