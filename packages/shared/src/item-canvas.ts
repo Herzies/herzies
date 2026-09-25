@@ -121,7 +121,10 @@ export function fitMetrics(
   const cols = bounds.c1 - bounds.c0 + 1;
   const rows = bounds.r1 - bounds.r0 + 1;
   const target = box * fillFraction;
-  const size = Math.max(1, Math.min(target / (cols * 0.6), target / (rows * 1.35)));
+  const size = Math.max(
+    1,
+    Math.min(target / (cols * 0.6), target / (rows * 1.35)),
+  );
   const charW = size * 0.6;
   const lineH = size * 1.35;
   return {

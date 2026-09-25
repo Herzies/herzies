@@ -1,4 +1,8 @@
-import type { BossFightConfig, GameEvent, SongHuntConfig } from "@herzies/shared";
+import type {
+  BossFightConfig,
+  GameEvent,
+  SongHuntConfig,
+} from "@herzies/shared";
 import { NextResponse } from "next/server";
 import { authenticateRequestOptional } from "@/lib/auth";
 import { buildBossFightConfig, buildSongHuntConfig } from "@/lib/events";

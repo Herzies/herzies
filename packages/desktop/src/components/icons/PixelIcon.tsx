@@ -38,7 +38,8 @@ export function PixelIcon({
       if (ch !== ".") {
         const start = x;
         while (x < row.length && row[x] === ch) x++;
-        const fill = palette && ch !== "#" ? palette[parseInt(ch, 16)] : undefined;
+        const fill =
+          palette && ch !== "#" ? palette[parseInt(ch, 16)] : undefined;
         rects.push({ x: start, y, w: x - start, fill });
       } else {
         x++;
