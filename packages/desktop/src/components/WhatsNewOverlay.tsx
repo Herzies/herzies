@@ -22,6 +22,12 @@ export function WhatsNewOverlay({
           <li key={highlight}>{highlight}</li>
         ))}
       </ul>
+      {/* Outside the scrolling list so the sign-off is always in view. */}
+      <p className="mt-3 text-text-dim">
+        Happy listening,
+        <br />
+        music_lover69
+      </p>
     </PromptOverlay>
   );
 }

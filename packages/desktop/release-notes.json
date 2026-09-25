@@ -1,1 +1,9 @@
-[]
+[
+  {
+    "version": "0.1.0-beta.42",
+    "highlights": [
+      "New: Power Dice 1. Roll it onto a statted card to raise that card's stats, up to +3 per card",
+      "New: Luck stat. It nudges your drops toward rarer items, and the First Edition Card now gives +10 Luck"
+    ]
+  }
+]
