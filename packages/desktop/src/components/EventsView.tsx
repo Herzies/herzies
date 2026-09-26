@@ -256,11 +256,22 @@ export function EventsView({
         ? "boss_fight"
         : selected === DEBUG_MERCHANT.id && debugForceMerchant
           ? "merchant"
-          : events.find((e) => e.id === selected)?.type;
+          : // The previous event too: an ended boss's results stay blacked out.
+            (
+              events.find((e) => e.id === selected) ??
+              (previousEvent?.id === selected ? previousEvent : undefined)
+            )?.type;
     onScreenChange(
       open === "boss_fight" ? "boss" : open === "merchant" ? "merchant" : null,
     );
-  }, [selected, events, debugForceBoss, debugForceMerchant, onScreenChange]);
+  }, [
+    selected,
+    events,
+    previousEvent,
+    debugForceBoss,
+    debugForceMerchant,
+    onScreenChange,
+  ]);
 
   if (loading) {
     return (
