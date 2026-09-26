@@ -888,16 +888,17 @@ function EventCardRow({
         {card.status === "live" ? (
           <div className="flex items-center justify-end gap-1 text-[10px] font-bold text-green">
             <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-green" />
-            LIVE
+            {card.type === "merchant" ? "IN TOWN" : "LIVE"}
           </div>
-        ) : card.status === "scheduled" ? (
-          <div className="text-[10px] text-yellow">SCHEDULED</div>
         ) : null}
         {card.at ? (
           <div className="text-[10px] text-text-dim">
-            {card.status === "live"
-              ? `ends in ${formatIn(card.at)}`
-              : `in ${formatIn(card.at)}`}
+            {card.status !== "live"
+              ? `in ${formatIn(card.at)}`
+              : // George and the boss are visitors: they leave, or get away.
+                card.type === "merchant" || card.type === "boss_fight"
+                ? `leaving in ${formatIn(card.at)}`
+                : `ends in ${formatIn(card.at)}`}
           </div>
         ) : null}
       </div>
