@@ -80,7 +80,6 @@ export function HomeView({
   } = state;
   const capacity = bankCapacity(bankExpansions);
   const [globalRank, setGlobalRank] = useState<number | undefined>(undefined);
-  const [globalTotal, setGlobalTotal] = useState<number | undefined>(undefined);
   const [collectingIds, setCollectingIds] = useState<Set<string>>(new Set());
   // Read off the copies, so each worn one counts at its OWN upgrade level. A
   // cache from before copies existed has none yet, and falls back to the
@@ -206,7 +205,6 @@ export function HomeView({
     herzies.friendLookup([friendCode]).then((result) => {
       if (cancelled) return;
       setGlobalRank(result[friendCode]?.globalRank);
-      setGlobalTotal(result[friendCode]?.globalTotal);
     });
     return () => {
       cancelled = true;
@@ -232,16 +230,11 @@ export function HomeView({
             </button>
           </Tooltip>
           {globalRank ? (
-            <span
-              className="ml-1 text-[10px] font-normal text-text-dim"
-              title={
-                globalTotal
-                  ? `Ranked #${globalRank} of ${globalTotal}`
-                  : undefined
-              }
-            >
-              #{globalRank}
-            </span>
+            <Tooltip label={`Ranked #${globalRank} globally`} className="ml-1">
+              <span className="cursor-default text-[10px] font-normal text-text-dim">
+                #{globalRank}
+              </span>
+            </Tooltip>
           ) : null}
         </span>
         <div className="flex items-center gap-1.5">
@@ -337,14 +330,23 @@ export function HomeView({
               </svg>
             </button>
           </Tooltip>
-          <span
-            className={cn(
-              "rounded-lg px-2 py-0.5 text-[10px]",
-              isConnected ? "bg-green/20 text-green" : "bg-red/20 text-red",
-            )}
-          >
-            {isConnected ? "online" : "offline"}
-          </span>
+          {/* A heart rather than the word: whole when connected, broken when
+              not. The tooltip says it in words for anyone who wants it. */}
+          <Tooltip label={isConnected ? "Connected" : "Offline"}>
+            <span
+              role="img"
+              aria-label={isConnected ? "Connected" : "Offline"}
+              className={cn(
+                // `top-px`: a glyph's ink sits about a pixel above its line box's
+                // centre, unlike the icons beside it, which are centred by their
+                // drawn shape.
+                "relative top-px flex h-5 cursor-default items-center px-1 text-[10px] leading-none",
+                isConnected ? "text-green" : "text-text-dim",
+              )}
+            >
+              {isConnected ? "<3" : "</3"}
+            </span>
+          </Tooltip>
         </div>
       </div>
 

@@ -9,6 +9,7 @@ import { BackButton } from "./BackButton";
 import { Herzie3D } from "./Herzie3D";
 import { ProfileBadges } from "./ProfileBadges";
 import { TabButton } from "./TabButton";
+import { Tooltip } from "./Tooltip";
 import { TrackCard } from "./TrackCard";
 import { View } from "./View";
 
@@ -114,16 +115,11 @@ export function ProfileView({
               {profile.name}
             </span>
             {profile.globalRank ? (
-              <span
-                className="text-[10px] text-text-dim"
-                title={
-                  profile.globalTotal
-                    ? `Ranked #${profile.globalRank} of ${profile.globalTotal}`
-                    : undefined
-                }
-              >
-                #{profile.globalRank}
-              </span>
+              <Tooltip label={`Ranked #${profile.globalRank} globally`}>
+                <span className="cursor-default text-[10px] text-text-dim">
+                  #{profile.globalRank}
+                </span>
+              </Tooltip>
             ) : null}
           </div>
           <div className="text-ui text-text-dim">
