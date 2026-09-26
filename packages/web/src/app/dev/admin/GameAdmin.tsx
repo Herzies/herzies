@@ -1,47 +1,40 @@
 "use client";
 
-import {
-  GENRES,
-  type Genre,
-  type SongHuntConfig,
-  type SongHuntHint,
-} from "@herzies/shared";
+import type { SongHuntConfig, SongHuntHint } from "@herzies/shared";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  type AdminEvent,
+  adminFetch,
+  type CatalogItem,
+  datetimeLocalToIso,
+  EVENT_TYPE_LABELS,
+  type EventSeries,
+  getEventStatus,
+  INPUT,
+  isoToDatetimeLocal,
+  STATUS_STYLES,
+  toDatetimeLocalValue,
+} from "./admin-shared";
+import { EventCalendar } from "./EventCalendar";
+import { EventSeriesPanel } from "./EventSeriesPanel";
+import {
+  BossFightConfigFields,
+  type BossFightConfigForm,
+  bossFightConfigFromRecord,
+  bossFightFormToConfig,
+  defaultBossFightConfig,
+  defaultMerchantConfig,
+  MerchantConfigFields,
+  type MerchantConfigForm,
+  merchantConfigFromRecord,
+  merchantFormToConfig,
+} from "./event-fields";
 import { NotificationsPanel } from "./NotificationsPanel";
 
 const SECRET_KEY = "herzies-admin-secret";
-const INPUT =
-  "w-full bg-bg border border-border rounded-sm px-3 py-2 text-sm focus:outline-none focus:border-purple";
 const RARITIES = ["common", "uncommon", "rare", "legendary"] as const;
 
-type CatalogItem = {
-  id: string;
-  name: string;
-  description: string;
-  rarity: string;
-  sell_price?: number | null;
-  stackable?: boolean | null;
-  equipable?: boolean | null;
-  equip_slot?: string | null;
-};
-
-export type AdminEvent = {
-  id: string;
-  type: string;
-  title: string;
-  description: string | null;
-  active: boolean;
-  starts_at: string;
-  ends_at: string;
-  config: Record<string, unknown>;
-  created_at: string;
-  /** Live HP, present on boss_fight events only. */
-  boss?: { hp: number; maxHp: number; killed: boolean; escaped: boolean };
-};
-
-export type EventStatus = "running" | "scheduled" | "ended" | "inactive";
-
-type AdminTab = "items" | "grant" | "boss" | "events" | "notifications";
+type AdminTab = "items" | "grant" | "events" | "notifications";
 
 type SongHuntHintForm = {
   text: string;
@@ -58,30 +51,11 @@ type SongHuntConfigForm = {
   hints: SongHuntHintForm[];
 };
 
-type BossFightConfigForm = {
-  hatedGenres: Genre[];
-  maxHp: string;
-  rewardItemId: string;
-  topRewardItemId: string;
-  topCount: string;
-};
-
-type BossSettings = {
-  autoSpawn: boolean;
-  defaultHp: number | null;
-  rewardItemId: string;
-  topRewardItemId: string | null;
-  topCount: number;
-};
-
-export type BossSettingsResponse = {
-  settings: BossSettings;
-  skippedWeeks: string[];
-  autoHp: number;
-};
-
 type EventFormState = {
   id?: string;
+  /** Set when editing an occurrence of a recurring series. */
+  seriesId?: string | null;
+  skipped?: boolean;
   type: string;
   title: string;
   description: string;
@@ -91,6 +65,7 @@ type EventFormState = {
   configJson: string;
   songHunt: SongHuntConfigForm;
   bossFight: BossFightConfigForm;
+  merchant: MerchantConfigForm;
 };
 
 const EQUIP_SLOT_OPTIONS = [
@@ -111,22 +86,6 @@ type ItemFormState = {
   stackable: boolean;
   equipable: boolean;
   equipSlot: "" | (typeof EQUIP_SLOT_OPTIONS)[number];
-};
-
-export function getEventStatus(event: AdminEvent, now: Date): EventStatus {
-  if (!event.active) return "inactive";
-  const start = new Date(event.starts_at);
-  const end = new Date(event.ends_at);
-  if (now < start) return "scheduled";
-  if (now > end) return "ended";
-  return "running";
-}
-
-export const STATUS_STYLES: Record<EventStatus, string> = {
-  running: "text-green",
-  scheduled: "text-yellow",
-  ended: "text-text-dim",
-  inactive: "text-red",
 };
 
 const DEFAULT_CONFIGS: Record<string, string> = {
@@ -154,24 +113,6 @@ const DEFAULT_CONFIGS: Record<string, string> = {
     2,
   ),
 };
-
-/** Format for native `<input type="datetime-local">` values (local wall clock). */
-function toDatetimeLocalValue(date: Date): string {
-  if (Number.isNaN(date.getTime())) return "";
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-function isoToDatetimeLocal(iso: string): string {
-  return toDatetimeLocalValue(new Date(iso));
-}
-
-/** Convert a datetime-local string to ISO for the API. */
-function datetimeLocalToIso(value: string): string {
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return value;
-  return d.toISOString();
-}
 
 function defaultWindow(): { startsAt: string; endsAt: string } {
   const start = new Date();
@@ -252,60 +193,6 @@ function songHuntConfigToPayload(
   return payload;
 }
 
-/** The weekly spawn's window: Thursday 00:00 UTC for four days (00073). */
-const BOSS_WINDOW_MS = 4 * 24 * 60 * 60 * 1000;
-
-/** The next `count` Thursdays (UTC midnight) the weekly spawn fires on. */
-function upcomingBossWeeks(now: Date, count: number): Date[] {
-  const first = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
-  );
-  first.setUTCDate(first.getUTCDate() + ((4 - first.getUTCDay() + 7) % 7));
-  // Today is Thursday but the cron has already fired — start from next week.
-  if (first.getTime() < now.getTime() - 60_000) {
-    first.setUTCDate(first.getUTCDate() + 7);
-  }
-  return Array.from({ length: count }, (_, i) => {
-    const d = new Date(first);
-    d.setUTCDate(d.getUTCDate() + i * 7);
-    return d;
-  });
-}
-
-function defaultBossFightConfig(
-  defaults?: BossSettingsResponse | null,
-): BossFightConfigForm {
-  const s = defaults?.settings;
-  return {
-    hatedGenres: [],
-    maxHp: String(s?.defaultHp ?? defaults?.autoHp ?? 900),
-    rewardItemId: s?.rewardItemId ?? "cd",
-    topRewardItemId: s ? (s.topRewardItemId ?? "") : "cd",
-    topCount: String(s?.topCount ?? 3),
-  };
-}
-
-function bossFightConfigFromEvent(event: AdminEvent): BossFightConfigForm {
-  const config = event.config;
-  const maxHp =
-    event.boss?.maxHp ??
-    (typeof config.maxHp === "number" ? config.maxHp : undefined);
-  return {
-    hatedGenres: Array.isArray(config.hatedGenres)
-      ? (config.hatedGenres.filter((g) =>
-          (GENRES as readonly unknown[]).includes(g),
-        ) as Genre[])
-      : [],
-    maxHp: maxHp != null ? String(maxHp) : "",
-    rewardItemId:
-      typeof config.rewardItemId === "string" ? config.rewardItemId : "",
-    topRewardItemId:
-      typeof config.topRewardItemId === "string" ? config.topRewardItemId : "",
-    topCount:
-      typeof config.topCount === "number" ? String(config.topCount) : "3",
-  };
-}
-
 function newEventForm(overrides?: Partial<EventFormState>): EventFormState {
   const { startsAt, endsAt } = defaultWindow();
   return {
@@ -318,6 +205,7 @@ function newEventForm(overrides?: Partial<EventFormState>): EventFormState {
     configJson: DEFAULT_CONFIGS.secret_track,
     songHunt: defaultSongHuntConfig(),
     bossFight: defaultBossFightConfig(),
+    merchant: defaultMerchantConfig(),
     ...overrides,
   };
 }
@@ -325,6 +213,8 @@ function newEventForm(overrides?: Partial<EventFormState>): EventFormState {
 function eventToForm(event: AdminEvent): EventFormState {
   return {
     id: event.id,
+    seriesId: event.series_id ?? null,
+    skipped: event.skipped ?? false,
     type: event.type,
     title: event.title,
     description: event.description ?? "",
@@ -338,8 +228,12 @@ function eventToForm(event: AdminEvent): EventFormState {
         : defaultSongHuntConfig(),
     bossFight:
       event.type === "boss_fight"
-        ? bossFightConfigFromEvent(event)
+        ? bossFightConfigFromRecord(event.config, event.boss?.maxHp)
         : defaultBossFightConfig(),
+    merchant:
+      event.type === "merchant"
+        ? merchantConfigFromRecord(event.config)
+        : defaultMerchantConfig(),
   };
 }
 
@@ -389,28 +283,6 @@ function itemFormToPayload(form: ItemFormState) {
   };
 }
 
-async function adminFetch<T>(
-  path: string,
-  secret: string,
-  init?: RequestInit,
-): Promise<T> {
-  const res = await fetch(path, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      "x-admin-secret": secret,
-      ...init?.headers,
-    },
-  });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error(
-      (body as { error?: string }).error ?? `Request failed (${res.status})`,
-    );
-  }
-  return body as T;
-}
-
 function parseEventConfig(json: string): Record<string, unknown> | string {
   try {
     return JSON.parse(json) as Record<string, unknown>;
@@ -442,31 +314,10 @@ function buildEventConfig(
     return { ...songHuntConfigToPayload(songHunt) };
   }
   if (form.type === "boss_fight") {
-    const { bossFight } = form;
-    if (bossFight.hatedGenres.length === 0) {
-      return "Pick at least one hated genre";
-    }
-    const maxHp = Number(bossFight.maxHp);
-    if (!Number.isFinite(maxHp) || maxHp <= 0) {
-      return "Boss HP must be a positive number";
-    }
-    if (!bossFight.rewardItemId) return "Reward item is required";
-    const topCount = Number.parseInt(bossFight.topCount, 10);
-    if (!Number.isFinite(topCount) || topCount < 0) {
-      return "Top count must be zero or more";
-    }
-    if (new Date(form.endsAt) <= new Date(form.startsAt)) {
-      return "Boss must end after it starts";
-    }
-    return {
-      hatedGenres: bossFight.hatedGenres,
-      maxHp,
-      rewardItemId: bossFight.rewardItemId,
-      ...(bossFight.topRewardItemId
-        ? { topRewardItemId: bossFight.topRewardItemId }
-        : {}),
-      topCount,
-    };
+    return bossFightFormToConfig(form.bossFight);
+  }
+  if (form.type === "merchant") {
+    return merchantFormToConfig(form.merchant);
   }
   return parseEventConfig(form.configJson);
 }
@@ -777,195 +628,6 @@ function SongHuntConfigFields({
   );
 }
 
-function BossFightConfigFields({
-  form,
-  setForm,
-  catalogItems,
-  fieldIdPrefix,
-  bossDefaults,
-  live,
-}: {
-  form: EventFormState;
-  setForm: React.Dispatch<React.SetStateAction<EventFormState>>;
-  catalogItems: CatalogItem[];
-  fieldIdPrefix: string;
-  bossDefaults: BossSettingsResponse | null;
-  live?: AdminEvent["boss"];
-}) {
-  const boss = form.bossFight;
-  const update = (patch: Partial<BossFightConfigForm>) => {
-    setForm((f) => ({ ...f, bossFight: { ...f.bossFight, ...patch } }));
-  };
-  const toggleGenre = (genre: Genre) => {
-    update({
-      hatedGenres: boss.hatedGenres.includes(genre)
-        ? boss.hatedGenres.filter((g) => g !== genre)
-        : [...boss.hatedGenres, genre],
-    });
-  };
-  const defaultHp =
-    bossDefaults?.settings.defaultHp ?? bossDefaults?.autoHp ?? null;
-
-  return (
-    <div className="space-y-4 border border-border rounded-sm p-4 bg-bg">
-      <p className="text-xs text-cyan">boss fight config</p>
-      <fieldset>
-        <legend className="block text-xs text-text-dim mb-2">
-          hated genres (listening to these deals damage)
-        </legend>
-        <div className="flex flex-wrap gap-x-4 gap-y-2">
-          {GENRES.map((genre) => (
-            <label
-              key={genre}
-              className="flex items-center gap-1.5 text-xs cursor-pointer"
-            >
-              <input
-                type="checkbox"
-                checked={boss.hatedGenres.includes(genre)}
-                onChange={() => toggleGenre(genre)}
-              />
-              {genre}
-            </label>
-          ))}
-        </div>
-        {boss.hatedGenres.includes("pop") && (
-          <p className="text-yellow text-xs mt-2">
-            Pop is the fallback genre for unmatched tags — nearly every listen
-            will hit this boss.
-          </p>
-        )}
-      </fieldset>
-      <div className="grid sm:grid-cols-2 gap-4">
-        <div>
-          <label
-            className="block text-xs text-text-dim mb-1"
-            htmlFor={`${fieldIdPrefix}-boss-hp`}
-          >
-            max hp
-          </label>
-          <input
-            id={`${fieldIdPrefix}-boss-hp`}
-            type="number"
-            min={1}
-            required
-            value={boss.maxHp}
-            onChange={(e) => update({ maxHp: e.target.value })}
-            className={INPUT}
-          />
-          <p className="text-xs text-text-dim mt-1">
-            {live
-              ? `current: ${Math.round(live.hp)} / ${Math.round(live.maxHp)}${live.killed ? " (killed)" : live.escaped ? " (escaped)" : ""} — damage already dealt is kept`
-              : defaultHp != null
-                ? `default: ${Math.round(defaultHp)}`
-                : null}
-            {!live && defaultHp != null && String(defaultHp) !== boss.maxHp && (
-              <button
-                type="button"
-                onClick={() => update({ maxHp: String(defaultHp) })}
-                className="text-purple bg-transparent border-0 cursor-pointer ml-2"
-              >
-                reset
-              </button>
-            )}
-          </p>
-        </div>
-        <div>
-          <label
-            className="block text-xs text-text-dim mb-1"
-            htmlFor={`${fieldIdPrefix}-boss-top-count`}
-          >
-            top dealers who get the top reward
-          </label>
-          <input
-            id={`${fieldIdPrefix}-boss-top-count`}
-            type="number"
-            min={0}
-            required
-            value={boss.topCount}
-            onChange={(e) => update({ topCount: e.target.value })}
-            className={INPUT}
-          />
-        </div>
-      </div>
-      <div className="grid sm:grid-cols-2 gap-4">
-        <div>
-          <label
-            className="block text-xs text-text-dim mb-1"
-            htmlFor={`${fieldIdPrefix}-boss-reward`}
-          >
-            reward item (everyone who dealt damage)
-          </label>
-          <CatalogItemSelect
-            id={`${fieldIdPrefix}-boss-reward`}
-            value={boss.rewardItemId}
-            onChange={(rewardItemId) => update({ rewardItemId })}
-            catalogItems={catalogItems}
-            required
-          />
-        </div>
-        <div>
-          <label
-            className="block text-xs text-text-dim mb-1"
-            htmlFor={`${fieldIdPrefix}-boss-top-reward`}
-          >
-            top reward item (optional, on top of the reward)
-          </label>
-          <CatalogItemSelect
-            id={`${fieldIdPrefix}-boss-top-reward`}
-            value={boss.topRewardItemId}
-            onChange={(topRewardItemId) => update({ topRewardItemId })}
-            catalogItems={catalogItems}
-            emptyLabel="none"
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** Item picker limited to the catalog — boss rewards are never auto-created. */
-function CatalogItemSelect({
-  id,
-  value,
-  onChange,
-  catalogItems,
-  required,
-  emptyLabel = "select item…",
-}: {
-  id: string;
-  value: string;
-  onChange: (itemId: string) => void;
-  catalogItems: CatalogItem[];
-  required?: boolean;
-  emptyLabel?: string;
-}) {
-  const missing = !!value && !catalogItems.some((i) => i.id === value);
-  return (
-    <>
-      <select
-        id={id}
-        required={required}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className={INPUT}
-      >
-        <option value="">{emptyLabel}</option>
-        {missing && <option value={value}>{value} (not in catalog)</option>}
-        {catalogItems.map((item) => (
-          <option key={item.id} value={item.id}>
-            {item.name} ({item.id})
-          </option>
-        ))}
-      </select>
-      {missing && (
-        <p className="text-red text-xs mt-1">
-          Item not in catalog — saving will be refused.
-        </p>
-      )}
-    </>
-  );
-}
-
 function EventForm({
   form,
   setForm,
@@ -975,7 +637,6 @@ function EventForm({
   disabled,
   catalogItems,
   secret,
-  bossDefaults,
   live,
 }: {
   form: EventFormState;
@@ -986,7 +647,6 @@ function EventForm({
   disabled?: boolean;
   catalogItems: CatalogItem[];
   secret: string;
-  bossDefaults: BossSettingsResponse | null;
   live?: AdminEvent["boss"];
 }) {
   return (
@@ -1014,8 +674,10 @@ function EventForm({
                     type === "song_hunt" ? defaultSongHuntConfig() : f.songHunt,
                   bossFight:
                     type === "boss_fight"
-                      ? defaultBossFightConfig(bossDefaults)
+                      ? defaultBossFightConfig()
                       : f.bossFight,
+                  merchant:
+                    type === "merchant" ? defaultMerchantConfig() : f.merchant,
                 };
               });
             }}
@@ -1024,6 +686,7 @@ function EventForm({
             <option value="secret_track">secret_track</option>
             <option value="song_hunt">song_hunt</option>
             <option value="boss_fight">boss_fight</option>
+            <option value="merchant">merchant (Good ol&apos; George)</option>
           </select>
         </div>
         <div>
@@ -1102,14 +765,34 @@ function EventForm({
           />
         </div>
       </div>
-      <label className="flex items-center gap-2 text-xs cursor-pointer">
-        <input
-          type="checkbox"
-          checked={form.active}
-          onChange={(e) => setForm((f) => ({ ...f, active: e.target.checked }))}
-        />
-        active
-      </label>
+      {form.seriesId ? (
+        // Occurrences go live on their own once complete; skip is the off
+        // switch (see /api/admin/events).
+        <label className="flex items-center gap-2 text-xs cursor-pointer">
+          <input
+            type="checkbox"
+            checked={!!form.skipped}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, skipped: e.target.checked }))
+            }
+          />
+          skip this occurrence
+          <span className="text-text-dim">
+            (part of a series — goes live by itself once it&apos;s set up)
+          </span>
+        </label>
+      ) : (
+        <label className="flex items-center gap-2 text-xs cursor-pointer">
+          <input
+            type="checkbox"
+            checked={form.active}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, active: e.target.checked }))
+            }
+          />
+          active
+        </label>
+      )}
       {form.type === "song_hunt" ? (
         <SongHuntConfigFields
           form={form}
@@ -1120,12 +803,20 @@ function EventForm({
         />
       ) : form.type === "boss_fight" ? (
         <BossFightConfigFields
-          form={form}
-          setForm={setForm}
+          boss={form.bossFight}
+          update={(patch) =>
+            setForm((f) => ({ ...f, bossFight: { ...f.bossFight, ...patch } }))
+          }
           catalogItems={catalogItems}
           fieldIdPrefix={form.id ?? "new"}
-          bossDefaults={bossDefaults}
           live={live}
+        />
+      ) : form.type === "merchant" ? (
+        <MerchantConfigFields
+          merchant={form.merchant}
+          setMerchant={(merchant) => setForm((f) => ({ ...f, merchant }))}
+          catalogItems={catalogItems}
+          fieldIdPrefix={form.id ?? "new"}
         />
       ) : (
         <div>
@@ -1364,26 +1055,31 @@ function EventRow({
   secret,
   onChange,
   catalogItems,
-  bossDefaults,
+  defaultEditing = false,
 }: {
   event: AdminEvent;
   secret: string;
   onChange: () => void;
   catalogItems: CatalogItem[];
-  bossDefaults: BossSettingsResponse | null;
+  defaultEditing?: boolean;
 }) {
   const now = new Date();
   const status = getEventStatus(event, now);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(defaultEditing);
+  const fromSeries = !!event.series_id;
+  // Deleting a series occurrence that hasn't ended just brings it back on the
+  // next materialize run — skipping is how you cancel one.
+  const canDelete = !fromSeries || status === "ended" || status === "inactive";
   const [form, setForm] = useState(() => eventToForm(event));
 
   useEffect(() => {
     if (!editing) setForm(eventToForm(event));
   }, [event, editing]);
 
-  const toggleActive = async () => {
+  /** Re-save the event as it is, plus `extra` (skip, activate, approve). */
+  const quickSave = async (extra: Record<string, unknown>) => {
     setBusy(true);
     setError(null);
     try {
@@ -1394,10 +1090,10 @@ function EventRow({
           type: event.type,
           title: event.title,
           description: event.description ?? undefined,
-          active: !event.active,
           startsAt: event.starts_at,
           endsAt: event.ends_at,
           config: event.config,
+          ...extra,
         }),
       });
       onChange();
@@ -1407,6 +1103,11 @@ function EventRow({
       setBusy(false);
     }
   };
+
+  const toggleActive = () =>
+    quickSave(
+      fromSeries ? { skipped: !event.skipped } : { active: !event.active },
+    );
 
   const remove = async () => {
     if (!confirm(`Delete event "${event.title}"?`)) return;
@@ -1442,6 +1143,9 @@ function EventRow({
           title: form.title,
           description: form.description || undefined,
           active: form.active,
+          // Saving the form is the admin curating it, which approves any
+          // pending curator proposal it replaces.
+          ...(fromSeries ? { skipped: !!form.skipped, approve: true } : {}),
           startsAt: datetimeLocalToIso(form.startsAt),
           endsAt: datetimeLocalToIso(form.endsAt),
           config,
@@ -1461,7 +1165,27 @@ function EventRow({
       <tr className="border-t border-border align-top">
         <td className="py-3 pr-4">
           <div className="font-medium">{event.title}</div>
-          <div className="text-text-dim text-xs mt-0.5">{event.type}</div>
+          <div className="text-text-dim text-xs mt-0.5">
+            {EVENT_TYPE_LABELS[event.type] ?? event.type}
+            {fromSeries && (
+              <span className="ml-2 text-cyan">
+                recurring{event.customized ? " · edited" : ""}
+              </span>
+            )}
+          </div>
+          {event.type === "song_hunt" &&
+            typeof event.config.trackTitle === "string" && (
+              <div className="text-xs mt-1">
+                <span className="text-text-dim">answer: </span>
+                {String(event.config.trackArtist)} – {event.config.trackTitle}
+                {Array.isArray(event.config.hints) && (
+                  <span className="text-text-dim">
+                    {" "}
+                    · {event.config.hints.length} hints
+                  </span>
+                )}
+              </div>
+            )}
           {event.description && (
             <div className="text-text-dim text-xs mt-1 max-w-xs">
               {event.description}
@@ -1470,9 +1194,13 @@ function EventRow({
         </td>
         <td className="py-3 pr-4">
           <span className={STATUS_STYLES[status]}>{status}</span>
-          {!event.active && status !== "inactive" && (
-            <span className="text-text-dim text-xs block">flag off</span>
-          )}
+          {!event.active &&
+            status !== "inactive" &&
+            status !== "skipped" &&
+            status !== "needs setup" &&
+            status !== "awaiting approval" && (
+              <span className="text-text-dim text-xs block">flag off</span>
+            )}
         </td>
         <td className="py-3 pr-4 text-xs text-text-dim whitespace-nowrap">
           <div>{new Date(event.starts_at).toLocaleString()}</div>
@@ -1481,7 +1209,9 @@ function EventRow({
         <td className="py-3 pr-4 text-xs text-text-dim max-w-[200px] truncate">
           {typeof event.config.rewardItemId === "string"
             ? event.config.rewardItemId
-            : "—"}
+            : Array.isArray(event.config.stock)
+              ? `${event.config.stock.length} item${event.config.stock.length === 1 ? "" : "s"} for sale`
+              : "—"}
           {event.boss && (
             <div className="mt-0.5">
               hp {Math.round(event.boss.hp)} / {Math.round(event.boss.maxHp)}
@@ -1499,22 +1229,40 @@ function EventRow({
           >
             {editing ? "close" : "edit"}
           </button>
+          {status === "awaiting approval" && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => quickSave({ approve: true })}
+              className="text-green text-xs bg-transparent border-0 cursor-pointer disabled:opacity-50 mr-3"
+            >
+              approve
+            </button>
+          )}
           <button
             type="button"
             disabled={busy}
             onClick={toggleActive}
             className="text-cyan text-xs bg-transparent border-0 cursor-pointer disabled:opacity-50 mr-3"
           >
-            {event.active ? "deactivate" : "activate"}
+            {fromSeries
+              ? event.skipped
+                ? "unskip"
+                : "skip"
+              : event.active
+                ? "deactivate"
+                : "activate"}
           </button>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={remove}
-            className="text-red text-xs bg-transparent border-0 cursor-pointer disabled:opacity-50"
-          >
-            delete
-          </button>
+          {canDelete && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={remove}
+              className="text-red text-xs bg-transparent border-0 cursor-pointer disabled:opacity-50"
+            >
+              delete
+            </button>
+          )}
           {error && !editing && (
             <div className="text-red text-xs mt-1">{error}</div>
           )}
@@ -1537,7 +1285,6 @@ function EventRow({
               disabled={busy}
               catalogItems={catalogItems}
               secret={secret}
-              bossDefaults={bossDefaults}
               live={event.boss}
             />
             {error && <p className="text-red text-xs mt-2">{error}</p>}
@@ -1680,14 +1427,15 @@ function EventsTable({
   onChange,
   emptyLabel,
   catalogItems,
-  bossDefaults,
+  openId,
 }: {
   events: AdminEvent[];
   secret: string;
   onChange: () => void;
   emptyLabel: string;
   catalogItems: CatalogItem[];
-  bossDefaults: BossSettingsResponse | null;
+  /** Row to open in edit mode on mount. */
+  openId?: string;
 }) {
   if (events.length === 0) {
     return <p className="text-text-dim text-xs py-4">{emptyLabel}</p>;
@@ -1713,7 +1461,7 @@ function EventsTable({
               secret={secret}
               onChange={onChange}
               catalogItems={catalogItems}
-              bossDefaults={bossDefaults}
+              defaultEditing={e.id === openId}
             />
           ))}
         </tbody>
@@ -1876,283 +1624,17 @@ function GrantItemPanel({
   );
 }
 
-function bossSettingsToForm(settings: BossSettings) {
-  return {
-    autoSpawn: settings.autoSpawn,
-    defaultHp: settings.defaultHp != null ? String(settings.defaultHp) : "",
-    rewardItemId: settings.rewardItemId,
-    topRewardItemId: settings.topRewardItemId ?? "",
-    topCount: String(settings.topCount),
-  };
-}
-
-function BossSchedulePanel({
-  secret,
-  catalogItems,
-  data,
-  events,
-  onChange,
-  onCustomize,
-}: {
-  secret: string;
-  catalogItems: CatalogItem[];
-  data: BossSettingsResponse;
-  events: AdminEvent[];
-  onChange: () => void;
-  onCustomize: (weekStart: Date) => void;
-}) {
-  const [form, setForm] = useState(() => bossSettingsToForm(data.settings));
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-
-  useEffect(() => {
-    setForm(bossSettingsToForm(data.settings));
-  }, [data.settings]);
-
-  const save = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    setSaved(false);
-    const defaultHp =
-      form.defaultHp.trim() === "" ? null : Number(form.defaultHp);
-    if (defaultHp !== null && (!Number.isFinite(defaultHp) || defaultHp <= 0)) {
-      setError("Default HP must be a positive number, or empty for auto");
-      return;
-    }
-    const topCount = Number.parseInt(form.topCount, 10);
-    if (!Number.isFinite(topCount) || topCount < 0) {
-      setError("Top count must be zero or more");
-      return;
-    }
-    setBusy(true);
-    try {
-      await adminFetch("/api/admin/boss-fight", secret, {
-        method: "POST",
-        body: JSON.stringify({
-          autoSpawn: form.autoSpawn,
-          defaultHp,
-          rewardItemId: form.rewardItemId,
-          topRewardItemId: form.topRewardItemId || null,
-          topCount,
-        }),
-      });
-      setSaved(true);
-      onChange();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const setSkip = async (weekOf: string, skip: boolean) => {
-    setBusy(true);
-    setError(null);
-    try {
-      await adminFetch("/api/admin/boss-fight", secret, {
-        method: "PUT",
-        body: JSON.stringify({ weekOf, skip }),
-      });
-      onChange();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update week");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const weeks = upcomingBossWeeks(new Date(), 6).map((start) => {
-    const end = new Date(start.getTime() + BOSS_WINDOW_MS);
-    const weekOf = start.toISOString().slice(0, 10);
-    // Any active boss overlapping this window makes the cron no-op (00076).
-    const custom = events.find(
-      (e) =>
-        e.type === "boss_fight" &&
-        e.active &&
-        new Date(e.starts_at) < end &&
-        new Date(e.ends_at) > start,
-    );
-    return {
-      start,
-      weekOf,
-      custom,
-      skipped: data.skippedWeeks.includes(weekOf),
-    };
-  });
-
-  return (
-    <div className="border border-border rounded-sm p-6 bg-bg-panel space-y-6">
-      <form onSubmit={save} className="space-y-4">
-        <label className="flex items-center gap-2 text-xs cursor-pointer">
-          <input
-            type="checkbox"
-            checked={form.autoSpawn}
-            onChange={(e) =>
-              setForm((f) => ({ ...f, autoSpawn: e.target.checked }))
-            }
-          />
-          spawn a boss automatically every Thursday 00:00 UTC (runs 4 days)
-        </label>
-        <div className="grid sm:grid-cols-2 gap-4">
-          <div>
-            <label
-              className="block text-xs text-text-dim mb-1"
-              htmlFor="boss-default-hp"
-            >
-              default hp
-            </label>
-            <input
-              id="boss-default-hp"
-              type="number"
-              min={1}
-              value={form.defaultHp}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, defaultHp: e.target.value }))
-              }
-              className={INPUT}
-              placeholder={`auto (currently ${data.autoHp})`}
-            />
-            <p className="text-xs text-text-dim mt-1">
-              empty = 35 per active player, 900–50,000
-            </p>
-          </div>
-          <div>
-            <label
-              className="block text-xs text-text-dim mb-1"
-              htmlFor="boss-default-top-count"
-            >
-              top dealers who get the top reward
-            </label>
-            <input
-              id="boss-default-top-count"
-              type="number"
-              min={0}
-              value={form.topCount}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, topCount: e.target.value }))
-              }
-              className={INPUT}
-            />
-          </div>
-        </div>
-        <div className="grid sm:grid-cols-2 gap-4">
-          <div>
-            <label
-              className="block text-xs text-text-dim mb-1"
-              htmlFor="boss-default-reward"
-            >
-              default reward item
-            </label>
-            <CatalogItemSelect
-              id="boss-default-reward"
-              value={form.rewardItemId}
-              onChange={(rewardItemId) =>
-                setForm((f) => ({ ...f, rewardItemId }))
-              }
-              catalogItems={catalogItems}
-              required
-            />
-          </div>
-          <div>
-            <label
-              className="block text-xs text-text-dim mb-1"
-              htmlFor="boss-default-top-reward"
-            >
-              default top reward item
-            </label>
-            <CatalogItemSelect
-              id="boss-default-top-reward"
-              value={form.topRewardItemId}
-              onChange={(topRewardItemId) =>
-                setForm((f) => ({ ...f, topRewardItemId }))
-              }
-              catalogItems={catalogItems}
-              emptyLabel="none"
-            />
-          </div>
-        </div>
-        <div className="flex items-center gap-4">
-          <button
-            type="submit"
-            disabled={busy || !form.rewardItemId}
-            className="text-sm text-purple bg-transparent border border-border px-4 py-2 rounded-sm cursor-pointer hover:border-purple disabled:opacity-50"
-          >
-            save settings
-          </button>
-          {saved && <span className="text-green text-xs">saved</span>}
-          {error && <span className="text-red text-xs">{error}</span>}
-        </div>
-      </form>
-
-      <div>
-        <p className="text-xs text-text-dim mb-2">upcoming weeks</p>
-        <table className="w-full text-sm text-left">
-          <tbody>
-            {weeks.map((w) => (
-              <tr key={w.weekOf} className="border-t border-border">
-                <td className="py-2 pr-4 text-xs whitespace-nowrap">
-                  Thu {w.weekOf}
-                </td>
-                <td className="py-2 pr-4 text-xs">
-                  {w.custom ? (
-                    <span className="text-cyan">
-                      custom: {w.custom.title} (
-                      {new Date(w.custom.starts_at).toLocaleString()} →{" "}
-                      {new Date(w.custom.ends_at).toLocaleString()})
-                    </span>
-                  ) : w.skipped ? (
-                    <span className="text-red">skipped</span>
-                  ) : form.autoSpawn ? (
-                    <span className="text-green">automatic</span>
-                  ) : (
-                    <span className="text-text-dim">
-                      none (weekly spawn off)
-                    </span>
-                  )}
-                </td>
-                <td className="py-2 text-right whitespace-nowrap">
-                  {!w.custom && (
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => onCustomize(w.start)}
-                      className="text-purple text-xs bg-transparent border-0 cursor-pointer disabled:opacity-50 mr-3"
-                    >
-                      custom boss
-                    </button>
-                  )}
-                  {!w.custom && (
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => setSkip(w.weekOf, !w.skipped)}
-                      className="text-cyan text-xs bg-transparent border-0 cursor-pointer disabled:opacity-50"
-                    >
-                      {w.skipped ? "unskip" : "skip"}
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <p className="text-xs text-text-dim mt-2">
-          A custom boss overlapping a week replaces that week&apos;s automatic
-          one. Edit or delete it in the events list below.
-        </p>
-      </div>
-    </div>
-  );
-}
-
 export function GameAdmin() {
   const [tab, setTab] = useState<AdminTab>("items");
   const [secret, setSecret] = useState("");
   const [secretInput, setSecretInput] = useState("");
   const [items, setItems] = useState<CatalogItem[]>([]);
   const [events, setEvents] = useState<AdminEvent[]>([]);
-  const [boss, setBoss] = useState<BossSettingsResponse | null>(null);
+  const [series, setSeries] = useState<EventSeries[]>([]);
+  /** Series API failed — almost always 00081 not applied to this database. */
+  const [seriesMissing, setSeriesMissing] = useState(false);
+  /** Occurrence picked on the calendar, shown open for editing. */
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showEventForm, setShowEventForm] = useState(false);
@@ -2175,17 +1657,19 @@ export function GameAdmin() {
     setLoading(true);
     setError(null);
     try {
-      const [itemsRes, eventsRes, bossRes] = await Promise.all([
+      const [itemsRes, eventsRes, seriesRes] = await Promise.all([
         adminFetch<{ items: CatalogItem[] }>("/api/admin/items", secret),
         adminFetch<{ events: AdminEvent[] }>("/api/admin/events", secret),
-        // Optional: without 00076 applied the rest of the page still works.
-        adminFetch<BossSettingsResponse>("/api/admin/boss-fight", secret).catch(
-          () => null,
-        ),
+        // Optional: without 00081 applied the rest of the page still works.
+        adminFetch<{ series: EventSeries[] }>(
+          "/api/admin/event-series",
+          secret,
+        ).catch(() => null),
       ]);
       setItems(itemsRes.items);
       setEvents(eventsRes.events);
-      setBoss(bossRes);
+      setSeries(seriesRes?.series ?? []);
+      setSeriesMissing(!seriesRes);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load");
     } finally {
@@ -2208,41 +1692,45 @@ export function GameAdmin() {
     setSecretInput("");
     setItems([]);
     setEvents([]);
-    setBoss(null);
-  };
-
-  /** Open the new-event form as a boss filling that week's usual window. */
-  const customizeBossWeek = (weekStart: Date) => {
-    setEventForm(
-      newEventForm({
-        type: "boss_fight",
-        title: "Nohoot Henry",
-        description: "Listen to what it hates.",
-        startsAt: toDatetimeLocalValue(weekStart),
-        endsAt: toDatetimeLocalValue(
-          new Date(weekStart.getTime() + BOSS_WINDOW_MS),
-        ),
-        bossFight: defaultBossFightConfig(boss),
-      }),
-    );
-    setShowEventForm(true);
-    setTab("events");
+    setSeries([]);
   };
 
   const now = new Date();
-  const { running, previous } = useMemo(() => {
-    const runningList: AdminEvent[] = [];
+  const { upcoming, previous } = useMemo(() => {
+    const upcomingList: AdminEvent[] = [];
     const previousList: AdminEvent[] = [];
+    // Series run four weeks ahead; the list only needs the next one of each.
+    const nextOfSeries = new Map<string, AdminEvent>();
     for (const e of events) {
       const status = getEventStatus(e, now);
-      if (status === "running" || status === "scheduled") {
-        runningList.push(e);
+      if (status === "running") {
+        upcomingList.push(e);
+      } else if (
+        status === "scheduled" ||
+        status === "needs setup" ||
+        status === "awaiting approval" ||
+        (status === "skipped" && new Date(e.ends_at) > now)
+      ) {
+        if (!e.series_id) {
+          upcomingList.push(e);
+          continue;
+        }
+        const seen = nextOfSeries.get(e.series_id);
+        if (!seen || e.starts_at < seen.starts_at) {
+          nextOfSeries.set(e.series_id, e);
+        }
       } else {
         previousList.push(e);
       }
     }
-    return { running: runningList, previous: previousList };
+    upcomingList.push(...nextOfSeries.values());
+    upcomingList.sort((a, b) => a.starts_at.localeCompare(b.starts_at));
+    return { upcoming: upcomingList, previous: previousList };
   }, [events, now]);
+
+  const selected = selectedId
+    ? events.find((e) => e.id === selectedId)
+    : undefined;
 
   const createEvent = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -2362,7 +1850,7 @@ export function GameAdmin() {
         </p>
       )}
 
-      <AdminTabBar tab={tab} setTab={setTab} hasBoss={!!boss} />
+      <AdminTabBar tab={tab} setTab={setTab} />
 
       <section className={tab === "items" ? undefined : "hidden"}>
         <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
@@ -2435,86 +1923,127 @@ export function GameAdmin() {
         <GrantItemPanel secret={secret} catalogItems={items} />
       </section>
 
-      {boss && (
-        <section className={tab === "boss" ? undefined : "hidden"}>
-          <h2 className="text-sm text-cyan mb-4">weekly boss fight</h2>
-          <BossSchedulePanel
-            secret={secret}
-            catalogItems={items}
-            data={boss}
-            events={events}
-            onChange={load}
-            onCustomize={customizeBossWeek}
-          />
-        </section>
-      )}
-
       <section
         id="events-section"
-        className={tab === "events" ? undefined : "hidden"}
+        className={tab === "events" ? "space-y-8" : "hidden"}
       >
-        <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
-          <h2 className="text-sm text-cyan">events</h2>
-          <button
-            type="button"
-            onClick={() => {
-              setShowEventForm((v) => !v);
-              if (showEventForm) setEventForm(newEventForm());
-            }}
-            className="text-xs text-purple bg-transparent border border-border px-3 py-1.5 rounded-sm cursor-pointer hover:border-purple"
-          >
-            {showEventForm ? "cancel" : "+ new event"}
-          </button>
+        <div>
+          <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
+            <h2 className="text-sm text-cyan">calendar</h2>
+            <button
+              type="button"
+              onClick={() => {
+                setShowEventForm((v) => !v);
+                if (showEventForm) setEventForm(newEventForm());
+              }}
+              className="text-xs text-purple bg-transparent border border-border px-3 py-1.5 rounded-sm cursor-pointer hover:border-purple"
+            >
+              {showEventForm ? "cancel" : "+ one-off event"}
+            </button>
+          </div>
+
+          {showEventForm && (
+            <div className="border border-border rounded-sm p-6 bg-bg-panel mb-8">
+              <p className="text-xs text-text-dim mb-4">new one-off event</p>
+              <EventForm
+                form={eventForm}
+                setForm={setEventForm}
+                onSubmit={createEvent}
+                onCancel={() => {
+                  setShowEventForm(false);
+                  setEventForm(newEventForm());
+                }}
+                submitLabel="create event"
+                disabled={loading}
+                catalogItems={items}
+                secret={secret}
+              />
+            </div>
+          )}
+
+          <EventCalendar
+            events={events}
+            now={now}
+            selectedId={selectedId}
+            onSelect={(id) => setSelectedId((cur) => (cur === id ? null : id))}
+          />
+
+          {selected && (
+            <div className="mt-4">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-xs text-text-dim uppercase tracking-wide">
+                  selected
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setSelectedId(null)}
+                  className="text-xs text-text-dim bg-transparent border-0 cursor-pointer"
+                >
+                  close
+                </button>
+              </div>
+              <EventsTable
+                // Remount per selection so the row opens in edit mode.
+                key={selected.id}
+                events={[selected]}
+                secret={secret}
+                onChange={load}
+                emptyLabel=""
+                catalogItems={items}
+                openId={selected.id}
+              />
+            </div>
+          )}
         </div>
 
-        {showEventForm && (
-          <div className="border border-border rounded-sm p-6 bg-bg-panel mb-8">
-            <p className="text-xs text-text-dim mb-4">new event</p>
-            <EventForm
-              form={eventForm}
-              setForm={setEventForm}
-              onSubmit={createEvent}
-              onCancel={() => {
-                setShowEventForm(false);
-                setEventForm(newEventForm());
-              }}
-              submitLabel="create event"
-              disabled={loading}
-              catalogItems={items}
-              secret={secret}
-              bossDefaults={boss}
-            />
-          </div>
-        )}
+        <div>
+          <h3 className="text-xs text-text-dim mb-2 uppercase tracking-wide">
+            live & upcoming
+          </h3>
+          <EventsTable
+            events={upcoming}
+            secret={secret}
+            onChange={load}
+            emptyLabel="Nothing live or scheduled."
+            catalogItems={items}
+          />
+        </div>
 
-        <h3 className="text-xs text-text-dim mb-2 uppercase tracking-wide">
-          running & upcoming
-        </h3>
-        <EventsTable
-          events={running}
-          secret={secret}
-          onChange={load}
-          emptyLabel="No active or scheduled events."
-          catalogItems={items}
-          bossDefaults={boss}
-        />
+        <div>
+          <h2 className="text-sm text-cyan mb-4">recurring series</h2>
+          {seriesMissing && (
+            <p className="text-yellow text-xs mb-4">
+              Couldn&apos;t load series — this database probably doesn&apos;t
+              have migration 00081_event_series yet.
+            </p>
+          )}
+          <EventSeriesPanel
+            series={series}
+            events={events}
+            secret={secret}
+            catalogItems={items}
+            now={now}
+            onChange={load}
+          />
+        </div>
 
-        <h3 className="text-xs text-text-dim mb-2 mt-8 uppercase tracking-wide">
-          previous
-        </h3>
-        <EventsTable
-          events={previous}
-          secret={secret}
-          onChange={load}
-          emptyLabel="No ended or inactive events."
-          catalogItems={items}
-          bossDefaults={boss}
-        />
+        <div>
+          <h3 className="text-xs text-text-dim mb-2 uppercase tracking-wide">
+            previous
+          </h3>
+          <EventsTable
+            events={previous}
+            secret={secret}
+            onChange={load}
+            emptyLabel="No ended or inactive events."
+            catalogItems={items}
+          />
+        </div>
       </section>
 
       <section className={tab === "notifications" ? undefined : "hidden"}>
         <h2 className="text-sm text-cyan mb-4">notifications</h2>
-        <NotificationsPanel events={events} boss={boss} now={now} />
+        <NotificationsPanel events={events} series={series} now={now} />
       </section>
     </div>
   );
@@ -2523,18 +2052,13 @@ export function GameAdmin() {
 function AdminTabBar({
   tab,
   setTab,
-  hasBoss,
 }: {
   tab: AdminTab;
   setTab: (t: AdminTab) => void;
-  hasBoss: boolean;
 }) {
   const tabs: { id: AdminTab; label: string }[] = [
     { id: "items", label: "items" },
     { id: "grant", label: "grant item" },
-    ...(hasBoss
-      ? [{ id: "boss" as AdminTab, label: "weekly boss fight" }]
-      : []),
     { id: "events", label: "events" },
     { id: "notifications", label: "notifications" },
   ];

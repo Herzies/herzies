@@ -126,24 +126,48 @@ export const adminEventSchema = z.object({
   title: z.string().min(1),
   description: z.string().optional(),
   active: z.boolean().optional(),
+  /** Series occurrences only: skipped occurrences never go live. */
+  skipped: z.boolean().optional(),
+  /** Series occurrences only: approve a curator's proposal. */
+  approve: z.boolean().optional(),
   startsAt: z.string().min(1),
   endsAt: z.string().min(1),
   config: z.record(z.string(), z.unknown()).optional(),
 });
 
-export const adminBossSettingsSchema = z.object({
-  autoSpawn: z.boolean(),
-  /** null = scale with active players. */
-  defaultHp: z.number().positive().nullable(),
-  rewardItemId: z.string().min(1),
-  topRewardItemId: z.string().min(1).nullable(),
-  topCount: z.number().int().nonnegative(),
+export const adminEventSeriesSchema = z.object({
+  id: z.string().optional(),
+  type: z.enum(["song_hunt", "boss_fight", "merchant"]),
+  title: z.string().min(1),
+  description: z.string().optional(),
+  enabled: z.boolean().optional(),
+  anchorAt: z.string().min(1),
+  intervalDays: z.number().int().positive(),
+  durationMinutes: z.number().int().positive(),
+  until: z.string().nullable().optional(),
+  configTemplate: z.record(z.string(), z.unknown()).optional(),
 });
 
-export const adminBossSkipSchema = z.object({
-  /** UTC date (YYYY-MM-DD) of the Thursday the weekly spawn should skip. */
-  weekOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  skip: z.boolean(),
+export const curatorSongHuntSchema = z.object({
+  eventId: z.string().min(1),
+  title: z.string().min(1).optional(),
+  trackTitle: z.string().trim().min(1),
+  trackArtist: z.string().trim().min(1),
+  hints: z
+    .array(
+      z.object({
+        text: z.string().trim().min(1),
+        unlocksAt: z.string().min(1),
+      }),
+    )
+    .min(1)
+    .max(10),
+});
+
+export const merchantBuySchema = z.object({
+  eventId: z.string().min(1),
+  itemId: z.string().min(1),
+  quantity: z.number().int().min(1),
 });
 
 export const adminItemSchema = z.object({

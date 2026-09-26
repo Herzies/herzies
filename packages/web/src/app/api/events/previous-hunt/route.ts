@@ -55,6 +55,14 @@ export async function GET(request: Request) {
       // before its `ends_at` (the original multi-day window boundary).
       // Song Hunt never flips `active` early, so this is a no-op for it.
       .or(`active.eq.false,ends_at.lt.${nowIso}`)
+      // Series occurrences (00081) are also inactive while they are future
+      // drafts or skipped — neither ever ran, so neither is "previous". An
+      // uncurated hunt that lapsed has no answer to show either.
+      .lte("starts_at", nowIso)
+      .eq("skipped", false)
+      // A curator proposal nobody approved never ran either.
+      .eq("needs_approval", false)
+      .or("type.neq.song_hunt,config->>trackTitle.not.is.null")
       .order("starts_at", { ascending: false })
       .limit(1),
     admin

@@ -572,6 +572,39 @@ async fn buy_item(
     Ok(data)
 }
 
+/// Buys from Good ol' George (a live `merchant` event). Same state handling
+/// as `buy_item`; only the endpoint and the pricing source differ.
+#[tauri::command]
+async fn buy_from_merchant(
+    event_id: String,
+    item_id: String,
+    quantity: u32,
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    let client = Client::new();
+    let data = api::api_buy_from_merchant(&client, &event_id, &item_id, quantity).await?;
+
+    let mut s = state.lock().unwrap();
+    let mut changed = false;
+    if let Some(snapshot) = snapshot_from_response(&data, &s) {
+        apply_inventory(&mut s, snapshot, None);
+        changed = true;
+    }
+    if let Some(ref mut herzie) = s.herzie {
+        if let Some(new_currency) = data["newCurrency"].as_u64() {
+            herzie.currency = new_currency as u32;
+            storage::save_herzie(herzie);
+            changed = true;
+        }
+    }
+    drop(s);
+    if changed {
+        emit_state_update(&app);
+    }
+    Ok(data)
+}
+
 #[tauri::command]
 async fn collect_drop(
     app: AppHandle,
@@ -1817,7 +1850,10 @@ async fn events_watch_loop(app: AppHandle) {
             if !known.insert(event.id.clone()) {
                 continue;
             }
-            let title = if event.title.trim().is_empty() {
+            let title = if event.event_type == "merchant" {
+                // George isn't an event that "starts" — he turns up.
+                format!("{} is in town!", event.title)
+            } else if event.title.trim().is_empty() {
                 "A new event is starting!".to_string()
             } else {
                 format!("{} is starting!", event.title)
@@ -2236,6 +2272,7 @@ pub fn run() {
             sell_item,
             apply_dice_upgrade,
             buy_item,
+            buy_from_merchant,
             collect_drop,
             spawn_debug_drop,
             equip_item,

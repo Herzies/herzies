@@ -764,6 +764,27 @@ pub async fn api_buy_item(
     Ok(data)
 }
 
+pub async fn api_buy_from_merchant(
+    client: &Client,
+    event_id: &str,
+    item_id: &str,
+    quantity: u32,
+) -> Result<serde_json::Value, String> {
+    let body = serde_json::json!({ "eventId": event_id, "itemId": item_id, "quantity": quantity });
+    let resp = api_fetch(client, reqwest::Method::POST, "/events/merchant/buy", Some(body))
+        .await
+        .ok_or_else(|| "Network error".to_string())?;
+    let status = resp.status();
+    let text = resp.text().await.map_err(|e| format!("Read error: {e}"))?;
+    let data: serde_json::Value =
+        serde_json::from_str(&text).map_err(|_| format!("Server returned {status}"))?;
+    if !status.is_success() {
+        let msg = data["error"].as_str().unwrap_or("Unknown error");
+        return Err(msg.to_string());
+    }
+    Ok(data)
+}
+
 pub async fn api_fetch_store_products(client: &Client) -> Option<Vec<StoreProduct>> {
     let resp = api_fetch(client, reqwest::Method::GET, "/store/products", None).await?;
     if !resp.status().is_success() {

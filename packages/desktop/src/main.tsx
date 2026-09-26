@@ -807,6 +807,8 @@ function App() {
             debugForceActive={hasActiveEventOverride}
             debugForceBoss={debugBossOverride}
             equipped={state.equipped}
+            currency={state.inventoryCurrency}
+            onLog={addLog}
           />
         </div>
 

@@ -1,7 +1,7 @@
 /**
- * Integration tests for the Boss Fight admin controls (00076): the weekly
- * spawn's on/off switch and skips, settings defaults, and bosses created or
- * resized from the admin page.
+ * Integration tests for bosses created or resized from the admin page (00076).
+ * The weekly schedule is now an event series; see
+ * event-series.integration.test.ts.
  *
  * Requires: `npx supabase start`
  */
@@ -49,14 +49,6 @@ function bossBody(overrides: Record<string, unknown> = {}) {
   };
 }
 
-async function setSettings(patch: Record<string, unknown>) {
-  const { error } = await admin()
-    .from("boss_fight_settings")
-    .update(patch)
-    .eq("id", true);
-  if (error) throw new Error(error.message);
-}
-
 async function bossState(eventId: string) {
   const { data } = await admin()
     .from("boss_state")
@@ -77,12 +69,6 @@ async function hit(eventId: string, damage: number) {
   if (error) throw new Error(error.message);
 }
 
-async function scheduledSpawn() {
-  const { data, error } = await admin().rpc("spawn_scheduled_boss_fight");
-  if (error) throw new Error(error.message);
-  return data as string | null;
-}
-
 beforeEach(async () => {
   setLocalEnv();
   process.env.GAME_ADMIN_SECRET = ADMIN_SECRET;
@@ -91,84 +77,6 @@ beforeEach(async () => {
 
 afterAll(async () => {
   await cleanupTestData();
-});
-
-describe("weekly spawn", () => {
-  it("spawns with the defaults when nothing is configured", async () => {
-    const id = await scheduledSpawn();
-    expect(id).toBeTruthy();
-    const { data: event } = await admin()
-      .from("events")
-      .select("config")
-      .eq("id", id)
-      .single();
-    expect(event!.config.rewardItemId).toBe("cd");
-    expect(event!.config.hatedGenres).toHaveLength(3);
-  });
-
-  it("does nothing while the weekly spawn is turned off", async () => {
-    await setSettings({ auto_spawn: false });
-    expect(await scheduledSpawn()).toBeNull();
-  });
-
-  it("does nothing on a skipped week", async () => {
-    const today = new Date().toISOString().slice(0, 10);
-    await admin().from("boss_fight_skips").insert({ week_of: today });
-    expect(await scheduledSpawn()).toBeNull();
-  });
-
-  it("uses the configured default HP and rewards", async () => {
-    await admin().from("items").upsert({
-      id: "boss-test-fang",
-      name: "Test Fang",
-      description: "test",
-      rarity: "rare",
-    });
-    await setSettings({
-      default_hp: 1234,
-      reward_item_id: "boss-test-fang",
-      top_reward_item_id: null,
-      top_count: 5,
-    });
-
-    const id = (await scheduledSpawn())!;
-    const { data: event } = await admin()
-      .from("events")
-      .select("config")
-      .eq("id", id)
-      .single();
-
-    expect((await bossState(id))!.max_hp).toBe(1234);
-    expect(event!.config.rewardItemId).toBe("boss-test-fang");
-    expect(event!.config.topRewardItemId).toBeNull();
-    expect(event!.config.topCount).toBe(5);
-  });
-
-  it("is replaced by a custom boss overlapping its window", async () => {
-    // Starts later this week — the cron's four-day window overlaps it.
-    const res = await adminPost(
-      bossBody({
-        startsAt: new Date(Date.now() + 2 * HOUR).toISOString(),
-        endsAt: new Date(Date.now() + 5 * HOUR).toISOString(),
-      }),
-    );
-    expect(res.status).toBe(201);
-    expect(await scheduledSpawn()).toBeNull();
-  });
-
-  it("is not blocked by a custom boss scheduled weeks ahead", async () => {
-    // The pre-00076 guard ("any boss ending in the future") would have
-    // blocked every weekly spawn until this one ran.
-    const inTwoWeeks = Date.now() + 14 * 24 * HOUR;
-    const res = await adminPost(
-      bossBody({
-        startsAt: new Date(inTwoWeeks).toISOString(),
-        endsAt: new Date(inTwoWeeks + 4 * 24 * HOUR).toISOString(),
-      }),
-    );
-    expect(res.status).toBe(201);
-    expect(await scheduledSpawn()).toBeTruthy();
-  });
 });
 
 describe("admin-created bosses", () => {

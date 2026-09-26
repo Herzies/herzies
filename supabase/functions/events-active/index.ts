@@ -16,11 +16,14 @@ import { createClient } from "@supabase/supabase-js";
 import type {
   BossFightConfig,
   GameEvent,
+  MerchantConfig,
   SongHuntConfig,
 } from "../_shared/shared/game-rules.ts";
 import {
   buildBossFightConfig,
+  buildMerchantConfig,
   buildSongHuntConfig,
+  fetchUpcomingEvents,
 } from "../_shared/shared/game-events.ts";
 import { corsHeaders, jsonResponse } from "../_shared/cors.ts";
 
@@ -98,6 +101,13 @@ Deno.serve(async (request) => {
             e.config as BossFightConfig,
             user.id,
           );
+        } else if (e.type === "merchant") {
+          config = await buildMerchantConfig(
+            admin,
+            e.id,
+            e.config as MerchantConfig,
+            user.id,
+          );
         } else {
           config = e.config as Record<string, unknown>;
         }
@@ -115,7 +125,9 @@ Deno.serve(async (request) => {
       }),
     );
 
-    return jsonResponse({ events });
+    const upcoming = await fetchUpcomingEvents(admin, now);
+
+    return jsonResponse({ events, upcoming });
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "Internal server error";

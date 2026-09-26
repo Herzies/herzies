@@ -1,11 +1,18 @@
-import type { Equipped, GameEvent } from "@herzies/shared";
-import { getItem, RARITY_COLORS as ITEM_RARITY_COLORS } from "@herzies/shared";
+import type { BossFightView, Equipped, GameEvent } from "@herzies/shared";
+import {
+  getItem,
+  RARITY_COLORS as ITEM_RARITY_COLORS,
+  MERCHANT_NAME,
+} from "@herzies/shared";
 import { useEffect, useRef, useState } from "react";
+import { cn } from "../lib/utils";
 import { herzies, useWindowFocused } from "../tauri-bridge";
+import { BackButton } from "./BackButton";
 import { BossFightHelp, BossFightPanel, makeDebugBoss } from "./BossFightPanel";
 import ItemInspectOverlay from "./ItemInspectOverlay";
 import { ItemTypeIcon } from "./icons/ItemTypeIcon";
 import { List } from "./List";
+import { MerchantPanel } from "./MerchantPanel";
 import { View } from "./View";
 
 function formatCountdown(endsAt: string): string {
@@ -61,11 +68,38 @@ type SongHuntConfig = {
 
 const EVENTS_POLL_MS = 10_000;
 
+/** List order, and what each event type is called on its card. */
+const EVENT_TYPES: { type: string; label: string }[] = [
+  { type: "boss_fight", label: "Boss Fight" },
+  { type: "song_hunt", label: "Song Hunt" },
+  { type: "merchant", label: MERCHANT_NAME },
+];
+const typeLabel = (type: string) =>
+  EVENT_TYPES.find((t) => t.type === type)?.label ?? type;
+const typeRank = (type: string) => {
+  const i = EVENT_TYPES.findIndex((t) => t.type === type);
+  return i === -1 ? EVENT_TYPES.length : i;
+};
+
+type EventCard = {
+  /** What opening the card selects: an event id, or "song_hunt" for the hunt
+   * view (which also covers "no hunt live, here's the last one"). */
+  key: string;
+  type: string;
+  title: string;
+  live: boolean;
+  /** Ends-at when live, starts-at when upcoming. */
+  at: string | null;
+  detail?: string;
+};
+
 export function EventsView({
   eventsTabVisible,
   debugForceActive = false,
   debugForceBoss = false,
   equipped,
+  currency = 0,
+  onLog,
 }: {
   /** Tab stays mounted but hidden; only poll while user is on Events. */
   eventsTabVisible: boolean;
@@ -75,8 +109,15 @@ export function EventsView({
   debugForceBoss?: boolean;
   /** Current deck, used to show set progress in the reward preview. */
   equipped?: Equipped | null;
+  /** Player's coins, for George's buy buttons. */
+  currency?: number;
+  onLog?: (msg: string) => void;
 }) {
   const [events, setEvents] = useState<GameEvent[]>([]);
+  const [upcoming, setUpcoming] = useState<GameEvent[]>([]);
+  /** Open card (see EventCard.key); null shows the list. */
+  const [selected, setSelected] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
   const [previousEvent, setPreviousEvent] = useState<GameEvent | null>(null);
   const [nextHunt, setNextHunt] = useState<GameEvent | null>(null);
   const [loading, setLoading] = useState(true);
@@ -128,6 +169,8 @@ export function EventsView({
   // fetched once on mount — meaning every launch paid for /events/previous-hunt
   // (a slow Vercel route) whether or not the player ever opened Events, and
   // opening the tab then immediately re-fetched the same two endpoints.
+  // reloadKey is a trigger, not a value: George's stall bumps it after a buy.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reloadKey re-runs the fetch
   useEffect(() => {
     if (!eventsTabVisible) return;
     let cancelled = false;
@@ -137,6 +180,7 @@ export function EventsView({
         .then(([active, previous]) => {
           if (cancelled) return;
           setEvents(active.events);
+          setUpcoming(active.upcoming ?? []);
           setPreviousEvent(previous.events[0] ?? null);
           setNextHunt(previous.next);
           setLoading(false);
@@ -151,7 +195,7 @@ export function EventsView({
       cancelled = true;
       if (interval) clearInterval(interval);
     };
-  }, [focused, eventsTabVisible]);
+  }, [focused, eventsTabVisible, reloadKey]);
 
   if (loading) {
     return (
@@ -161,23 +205,138 @@ export function EventsView({
     );
   }
 
-  // Per-type dispatch. Boss windows (Thu-Sun) and hunts are scheduled not to
-  // overlap, so this ordering is only a tie-break for the case where an admin
-  // has forced both to be live at once.
-  const boss =
-    events.find((e) => e.type === "boss_fight") ??
-    (previousEvent?.type === "boss_fight" ? previousEvent : undefined) ??
-    (debugForceBoss ? makeDebugBoss() : undefined);
-  if (boss) {
+  const back = <BackButton colour="cyan" onClick={() => setSelected(null)} />;
+
+  const previousHunt =
+    previousEvent?.type === "song_hunt" ? previousEvent : null;
+  const debugBoss = debugForceBoss ? makeDebugBoss() : undefined;
+  const liveEvents = [...events, ...(debugBoss ? [debugBoss] : [])];
+
+  if (selected === null) {
+    const cards: EventCard[] = liveEvents.map((e) => {
+      const boss =
+        e.type === "boss_fight" ? (e.config as unknown as BossFightView) : null;
+      return {
+        key: e.type === "song_hunt" ? "song_hunt" : e.id,
+        type: e.type,
+        title: e.title,
+        live: true,
+        at: e.endsAt,
+        detail: boss
+          ? boss.killed
+            ? "Defeated!"
+            : `HP ${Math.round(boss.hp)} / ${Math.round(boss.maxHp)}`
+          : undefined,
+      };
+    });
+    if (
+      debugForceActive &&
+      previousHunt &&
+      !cards.some((c) => c.type === "song_hunt")
+    ) {
+      cards.push({
+        key: "song_hunt",
+        type: "song_hunt",
+        title: previousHunt.title,
+        live: true,
+        at: previousHunt.endsAt,
+      });
+    }
+    // One countdown per type that has nothing live. Older servers don't send
+    // `upcoming`, so the hunt falls back to /events/previous-hunt's `next`.
+    const nextByType = new Map(upcoming.map((u) => [u.type, u]));
+    if (nextHunt && !nextByType.has("song_hunt")) {
+      nextByType.set("song_hunt", nextHunt);
+    }
+    for (const [type, next] of nextByType) {
+      if (cards.some((c) => c.type === type)) continue;
+      cards.push({
+        key: type === "song_hunt" ? "song_hunt" : next.id,
+        type,
+        title: next.title,
+        live: false,
+        at: next.startsAt,
+      });
+    }
+    // A boss that just went down (or got away) keeps its results card for a
+    // few days, like the hunt's previous answer below.
+    if (
+      previousEvent?.type === "boss_fight" &&
+      !cards.some((c) => c.type === "boss_fight" && c.live) &&
+      Date.now() - new Date(previousEvent.endsAt).getTime() < 3 * 86_400_000
+    ) {
+      const boss = previousEvent.config as unknown as BossFightView;
+      cards.push({
+        key: previousEvent.id,
+        type: "boss_fight",
+        title: previousEvent.title,
+        live: false,
+        at: null,
+        detail: boss.killed ? "Defeated! See results" : "It got away",
+      });
+    }
+    // Nothing live or scheduled, but last week's answer is still worth a look.
+    if (previousHunt && !cards.some((c) => c.type === "song_hunt")) {
+      cards.push({
+        key: "song_hunt",
+        type: "song_hunt",
+        title: previousHunt.title,
+        live: false,
+        at: null,
+        detail: "See last hunt's answer",
+      });
+    }
+    cards.sort(
+      (a, b) =>
+        Number(b.live) - Number(a.live) || typeRank(a.type) - typeRank(b.type),
+    );
+
+    return (
+      <View
+        title="Events"
+        colour="cyan"
+        childrenClassName="flex min-h-0 flex-col"
+      >
+        {cards.length === 0 ? (
+          <div className="flex flex-1 items-center justify-center text-center text-xs text-text-dim">
+            Nothing happening right now. Check back later!
+          </div>
+        ) : (
+          <List className="min-h-0 flex-1">
+            {cards.map((card) => (
+              <EventCardRow
+                key={`${card.key}-${card.live}`}
+                card={card}
+                // Upcoming events have nothing to show yet except the hunt's
+                // previous-results view.
+                onOpen={
+                  card.live || card.at === null || card.key === "song_hunt"
+                    ? () => setSelected(card.key)
+                    : undefined
+                }
+              />
+            ))}
+          </List>
+        )}
+      </View>
+    );
+  }
+
+  const selectedEvent =
+    liveEvents.find((e) => e.id === selected) ??
+    (previousEvent?.id === selected ? previousEvent : undefined);
+
+  if (selectedEvent?.type === "boss_fight") {
     return (
       <View
         title="Boss Fight"
         colour="cyan"
         childrenClassName="flex min-h-0 flex-col"
+        backButton={back}
         action={<BossFightHelp />}
       >
         <BossFightPanel
-          event={boss}
+          event={selectedEvent}
           paused={!eventsTabVisible || !focused}
           onInspectReward={(itemId) => setInspectItemId(itemId)}
           equipped={equipped}
@@ -193,8 +352,37 @@ export function EventsView({
     );
   }
 
-  const previousHunt =
-    previousEvent?.type === "song_hunt" ? previousEvent : null;
+  if (selectedEvent?.type === "merchant") {
+    return (
+      <View
+        title={MERCHANT_NAME}
+        colour="yellow"
+        childrenClassName="flex min-h-0 flex-col"
+        backButton={back}
+        action={formatCountdown(selectedEvent.endsAt)}
+      >
+        <MerchantPanel
+          event={selectedEvent}
+          currency={currency}
+          equipped={equipped}
+          onBought={() => setReloadKey((k) => k + 1)}
+          onLog={onLog}
+        />
+      </View>
+    );
+  }
+
+  if (selected !== "song_hunt") {
+    // The opened event ended between polls.
+    return (
+      <View title="Events" colour="cyan" backButton={back}>
+        <div className="flex h-full items-center justify-center text-center text-xs text-text-dim">
+          This event has ended.
+        </div>
+      </View>
+    );
+  }
+
   const hunt =
     events.find((e) => e.type === "song_hunt") ??
     (debugForceActive ? (previousHunt ?? undefined) : undefined);
@@ -217,6 +405,7 @@ export function EventsView({
         title="Events"
         colour="cyan"
         childrenClassName="flex min-h-0 flex-col"
+        backButton={back}
       >
         <div className="flex min-h-0 flex-1 flex-col">
           <div>
@@ -345,9 +534,11 @@ export function EventsView({
 
   if (!hunt) {
     return (
-      <div className="flex h-full items-center justify-center text-center text-xs text-text-dim">
-        No active Song Hunt. Check back later!
-      </div>
+      <View title="Song Hunt" colour="cyan" backButton={back}>
+        <div className="flex h-full items-center justify-center text-center text-xs text-text-dim">
+          No active Song Hunt. Check back later!
+        </div>
+      </View>
     );
   }
 
@@ -374,6 +565,7 @@ export function EventsView({
       title="Song Hunt"
       colour="cyan"
       childrenClassName="flex flex-col h-full"
+      backButton={back}
     >
       <div className="grid flex-1 place-items-center">
         <div>
@@ -531,4 +723,67 @@ function formatStartsIn(date: Date): string {
   }
   const onlyHours = Math.floor(diff / (1000 * 60 * 60));
   return `${onlyHours}h`;
+}
+
+/** "2d 4h", "5h", "12m" — for card countdowns. */
+function formatIn(at: string): string {
+  const ms = new Date(at).getTime() - Date.now();
+  if (ms <= 0) return "now";
+  const minutes = Math.floor(ms / 60_000);
+  const days = Math.floor(minutes / 1440);
+  const hours = Math.floor((minutes % 1440) / 60);
+  if (days > 0) return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
+  if (hours > 0) return `${hours}h`;
+  return `${Math.max(1, minutes)}m`;
+}
+
+function EventCardRow({
+  card,
+  onOpen,
+}: {
+  card: EventCard;
+  onOpen?: () => void;
+}) {
+  const body = (
+    <>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-ui font-bold">{typeLabel(card.type)}</span>
+        {card.live ? (
+          <span className="text-ui-sm font-bold text-green">LIVE</span>
+        ) : card.at ? (
+          <span className="text-ui-sm text-yellow">SCHEDULED</span>
+        ) : null}
+      </div>
+      <div className="flex items-center justify-between gap-2 text-ui text-text-dim">
+        <span className="truncate">{card.title}</span>
+        <span className="shrink-0">
+          {card.at
+            ? card.live
+              ? `ends in ${formatIn(card.at)}`
+              : `next in ${formatIn(card.at)}`
+            : null}
+        </span>
+      </div>
+      {card.detail ? (
+        <div className="text-ui-sm text-text-dim">{card.detail}</div>
+      ) : null}
+    </>
+  );
+
+  return onOpen ? (
+    <button
+      type="button"
+      onClick={onOpen}
+      className={cn(
+        "block w-full cursor-pointer border-0 border-b border-border bg-transparent py-2 text-left last:border-b-0 hover:bg-bg-panel",
+        card.live ? "text-text" : "text-text-dim",
+      )}
+    >
+      {body}
+    </button>
+  ) : (
+    <div className="border-b border-border py-2 text-text-dim last:border-b-0">
+      {body}
+    </div>
+  );
 }

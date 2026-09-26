@@ -2,10 +2,10 @@
 
 import {
   type AdminEvent,
-  type BossSettingsResponse,
+  type EventSeries,
   getEventStatus,
   STATUS_STYLES,
-} from "./GameAdmin";
+} from "./admin-shared";
 
 type NotificationRow = {
   name: string;
@@ -28,7 +28,7 @@ const NOTIFICATION_ROWS: NotificationRow[] = [
     trigger: "sync tick (game-server.ts)",
     gate: "events.active + time window",
     delivery: "native + activity log",
-    eventTypes: ["boss_fight", "song_hunt", "secret_track"],
+    eventTypes: ["boss_fight", "song_hunt", "secret_track", "merchant"],
   },
   {
     name: "Song hunt first-finder",
@@ -42,13 +42,13 @@ const NOTIFICATION_ROWS: NotificationRow[] = [
     trigger: "events_watch_loop, 30s poll (lib.rs)",
     gate: "events.active + time window",
     delivery: "native + activity log",
-    eventTypes: ["boss_fight", "song_hunt", "secret_track"],
+    eventTypes: ["boss_fight", "song_hunt", "secret_track", "merchant"],
   },
   {
     name: "Boss fight starting",
     trigger:
-      "events_watch_loop poll + weekly cron (spawn_scheduled_boss_fight)",
-    gate: "boss_fight_settings.auto_spawn, not in boss_fight_skips this week",
+      "events_watch_loop poll; bosses come from recurring series (materialize_event_series, hourly)",
+    gate: "series enabled, occurrence not skipped",
     delivery: "native + activity log",
     eventTypes: ["boss_fight"],
   },
@@ -105,13 +105,14 @@ function LiveEvents({
 
 export function NotificationsPanel({
   events,
-  boss,
+  series,
   now,
 }: {
   events: AdminEvent[];
-  boss: BossSettingsResponse | null;
+  series: EventSeries[];
   now: Date;
 }) {
+  const bossSeries = series.filter((s) => s.type === "boss_fight");
   return (
     <div className="space-y-6">
       <p className="text-xs text-text-dim max-w-2xl">
@@ -144,30 +145,19 @@ export function NotificationsPanel({
                 <td className="py-2 px-4">
                   {row.name === "Boss fight starting" ? (
                     <div className="space-y-1">
-                      {boss ? (
-                        <>
-                          <div>
-                            auto-spawn:{" "}
+                      {bossSeries.length === 0 ? (
+                        <span className="text-text-dim">no boss series</span>
+                      ) : (
+                        bossSeries.map((b) => (
+                          <div key={b.id}>
+                            {b.title}:{" "}
                             <span
-                              className={
-                                boss.settings.autoSpawn
-                                  ? "text-green"
-                                  : "text-red"
-                              }
+                              className={b.enabled ? "text-green" : "text-red"}
                             >
-                              {boss.settings.autoSpawn ? "on" : "off"}
+                              {b.enabled ? "on" : "paused"}
                             </span>
                           </div>
-                          {boss.skippedWeeks.length > 0 && (
-                            <div className="text-yellow">
-                              skipped: {boss.skippedWeeks.join(", ")}
-                            </div>
-                          )}
-                        </>
-                      ) : (
-                        <span className="text-text-dim">
-                          boss settings not loaded
-                        </span>
+                        ))
                       )}
                       {row.eventTypes && (
                         <LiveEvents
