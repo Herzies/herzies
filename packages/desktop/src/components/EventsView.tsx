@@ -9,7 +9,6 @@ import { cn } from "../lib/utils";
 import { herzies, useWindowFocused } from "../tauri-bridge";
 import { BackButton } from "./BackButton";
 import { BossFightHelp, BossFightPanel, makeDebugBoss } from "./BossFightPanel";
-import { EventEmblem } from "./EventEmblem";
 import ItemInspectOverlay from "./ItemInspectOverlay";
 import { ItemTypeIcon } from "./icons/ItemTypeIcon";
 import { List } from "./List";
@@ -69,6 +68,46 @@ type SongHuntConfig = {
 
 const EVENTS_POLL_MS = 10_000;
 
+/** Fixture George for the Settings debug toggle. Not a real event, so any
+ * buy is refused server-side — this is for looking, not shopping. */
+const DEBUG_MERCHANT: GameEvent = {
+  id: "debug-merchant",
+  type: "merchant",
+  title: MERCHANT_NAME,
+  description: "He's got stuff. Good stuff.",
+  active: true,
+  startsAt: new Date(Date.now() - 3_600_000).toISOString(),
+  endsAt: new Date(Date.now() + 2 * 86_400_000).toISOString(),
+  config: {
+    stock: [
+      {
+        itemId: "cd",
+        price: 25,
+        perPlayerLimit: 3,
+        totalStock: 40,
+        remaining: 31,
+        yourBought: 1,
+      },
+      {
+        itemId: "spirit-orb",
+        price: 900,
+        perPlayerLimit: 1,
+        totalStock: null,
+        remaining: null,
+        yourBought: 0,
+      },
+      {
+        itemId: "headphones",
+        price: 400,
+        perPlayerLimit: null,
+        totalStock: 5,
+        remaining: 0,
+        yourBought: 0,
+      },
+    ],
+  },
+};
+
 /** List order, and what each event type is called on its card. */
 const EVENT_TYPES: { type: string; label: string }[] = [
   { type: "boss_fight", label: "Boss Fight" },
@@ -92,7 +131,7 @@ type EventCard = {
   /** What opening the card selects (an event id, or "song_hunt" for the hunt
    * view); null when there is nothing to open yet. */
   openKey: string | null;
-  /** Seeds the boss's look, so the card shows the boss you'll actually fight. */
+  /** For a stable React key. */
   eventId?: string;
 };
 
@@ -100,6 +139,7 @@ export function EventsView({
   eventsTabVisible,
   debugForceActive = false,
   debugForceBoss = false,
+  debugForceMerchant = false,
   equipped,
   currency = 0,
   onLog,
@@ -110,6 +150,8 @@ export function EventsView({
   debugForceActive?: boolean;
   /** Debug: render a fixture boss, so the panel can be reviewed without a live one. */
   debugForceBoss?: boolean;
+  /** Debug: a fixture Good ol' George visit (buying from it will fail). */
+  debugForceMerchant?: boolean;
   /** Current deck, used to show set progress in the reward preview. */
   equipped?: Equipped | null;
   /** Player's coins, for George's buy buttons. */
@@ -213,7 +255,11 @@ export function EventsView({
   const previousHunt =
     previousEvent?.type === "song_hunt" ? previousEvent : null;
   const debugBoss = debugForceBoss ? makeDebugBoss() : undefined;
-  const liveEvents = [...events, ...(debugBoss ? [debugBoss] : [])];
+  const liveEvents = [
+    ...events,
+    ...(debugBoss ? [debugBoss] : []),
+    ...(debugForceMerchant ? [DEBUG_MERCHANT] : []),
+  ];
 
   if (selected === null) {
     const cards: EventCard[] = [];
@@ -330,7 +376,6 @@ export function EventsView({
               <EventCardRow
                 key={`${card.type}-${card.eventId ?? card.status}`}
                 card={card}
-                paused={!eventsTabVisible || !focused}
                 onOpen={
                   card.openKey
                     ? () => setSelected(card.openKey as string)
@@ -389,6 +434,7 @@ export function EventsView({
           equipped={equipped}
           onBought={() => setReloadKey((k) => k + 1)}
           onLog={onLog}
+          paused={!eventsTabVisible || !focused}
         />
       </View>
     );
@@ -769,24 +815,15 @@ const TYPE_ACCENT: Record<string, string> = {
 function EventCardRow({
   card,
   onOpen,
-  paused,
 }: {
   card: EventCard;
   onOpen?: () => void;
-  paused: boolean;
 }) {
   const accent = TYPE_ACCENT[card.type] ?? "text-text";
   const idle = card.status === "idle";
 
   const body = (
     <div className="flex items-center gap-3">
-      <EventEmblem
-        type={card.type}
-        eventId={card.eventId}
-        // Nothing on the horizon sits still; everything else is alive.
-        paused={paused || idle}
-        dim={idle}
-      />
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
           <span className={cn("text-ui font-bold", accent)}>

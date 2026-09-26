@@ -23,6 +23,8 @@ export function SettingsView({
   hasActiveEventOverride,
   debugBossOverride,
   onToggleDebugBoss,
+  debugMerchantOverride,
+  onToggleDebugMerchant,
   onToggleActiveEventOverride,
   onSpawnDebugDrop,
 }: {
@@ -38,6 +40,8 @@ export function SettingsView({
   hasActiveEventOverride: boolean;
   debugBossOverride: boolean;
   onToggleDebugBoss: () => void;
+  debugMerchantOverride: boolean;
+  onToggleDebugMerchant: () => void;
   onToggleActiveEventOverride: () => void;
   /** `diceOnly` narrows the spawned drop to a dice-type item — see the
    * "Spawn Dice Drop" button below. */
@@ -156,6 +160,18 @@ export function SettingsView({
               onClick={onToggleDebugBoss}
             >
               {debugBossOverride ? "Boss Fight: On" : "Test Boss Fight"}
+            </button>
+            <button
+              type="button"
+              className={cn(
+                "btn",
+                debugMerchantOverride
+                  ? "border-yellow text-yellow"
+                  : "border-[#555] text-text-dim",
+              )}
+              onClick={onToggleDebugMerchant}
+            >
+              {debugMerchantOverride ? "George: On" : "Test George"}
             </button>
             <button
               type="button"

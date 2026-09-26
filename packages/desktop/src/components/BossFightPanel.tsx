@@ -11,6 +11,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../lib/utils";
 import { ItemTypeIcon } from "./icons/ItemTypeIcon";
 import { SegmentBar } from "./SegmentBar";
+import { SpeechBubble, useChatter } from "./SpeechBubble";
 import { HoverPreview } from "./Tooltip";
 
 /**
@@ -51,11 +52,6 @@ function hatedPhrase(genres: string[]): string {
   return `${genres.slice(0, -1).join(", ")} and ${genres[genres.length - 1]}`;
 }
 
-const LINE_EVERY_MS = 10_000;
-const LINE_VISIBLE_MS = 7_000;
-/** Per character. ~28ms reads as deliberate rather than laggy. */
-const TYPE_SPEED_MS = 28;
-
 /**
  * What the boss says while you fight it.
  *
@@ -89,80 +85,31 @@ const BOSS_LINES: { text: string; above?: number; below?: number }[] = [
   { text: "Okay — OKAY! Enough!", below: 0.3 },
   { text: "Please. Anything but {genre}.", below: 0.3 },
 ];
+const BOSS_TEXTS = BOSS_LINES.map((l) => l.text);
 
 /**
  * Cycles the boss's speech: a new line every 10s, on screen for 7s, typed out
  * a character at a time.
  *
- * Health and genre are read through refs on purpose. Both change while the
- * fight is running — HP on the 10s poll, and this component re-renders every
- * second for the countdown — so putting either in the dependency array would
- * restart the cycle mid-sentence and the boss would stutter the same opening
- * words forever.
+ * Health is read through a ref on purpose (useChatter's `pick`). It changes
+ * while the fight is running — on the 10s poll, and this component re-renders
+ * every second for the countdown — so restarting on it would cut the boss off
+ * mid-sentence and it would stutter the same opening words forever.
  */
 function useBossChatter(hpFraction: number, genre: string, active: boolean) {
-  const [line, setLine] = useState<string | null>(null);
-  const [typed, setTyped] = useState(0);
-
   const hpRef = useRef(hpFraction);
   hpRef.current = hpFraction;
-  const genreRef = useRef(genre);
-  genreRef.current = genre;
-  const lastRef = useRef<string | null>(null);
-  const hideRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    if (!active) {
-      setLine(null);
-      return;
-    }
-
-    const speak = () => {
-      if (hideRef.current) clearTimeout(hideRef.current);
-
-      const hp = hpRef.current;
-      const eligible = BOSS_LINES.filter(
-        (l) =>
-          (l.above === undefined || hp >= l.above) &&
-          (l.below === undefined || hp <= l.below),
+  const { line, typed } = useChatter(BOSS_TEXTS, active, (texts) => {
+    const hp = hpRef.current;
+    return texts.filter((_, i) => {
+      const l = BOSS_LINES[i];
+      return (
+        (l.above === undefined || hp >= l.above) &&
+        (l.below === undefined || hp <= l.below)
       );
-      if (eligible.length === 0) return;
-
-      // Don't repeat the previous line unless it is the only one that fits.
-      const fresh = eligible.filter((l) => l.text !== lastRef.current);
-      const pool = fresh.length > 0 ? fresh : eligible;
-      const chosen = pool[Math.floor(Math.random() * pool.length)];
-
-      lastRef.current = chosen.text;
-      setLine(chosen.text.replace("{genre}", genreRef.current));
-      hideRef.current = setTimeout(() => setLine(null), LINE_VISIBLE_MS);
-    };
-
-    speak();
-    const cycle = setInterval(speak, LINE_EVERY_MS);
-    return () => {
-      clearInterval(cycle);
-      if (hideRef.current) clearTimeout(hideRef.current);
-    };
-  }, [active]);
-
-  // Typewriter reveal, restarted whenever a new line arrives.
-  useEffect(() => {
-    if (!line) return;
-    setTyped(0);
-    const id = setInterval(() => {
-      setTyped((n) => {
-        if (n >= line.length) {
-          clearInterval(id);
-          return n;
-        }
-        return n + 1;
-      });
-    }, TYPE_SPEED_MS);
-    return () => clearInterval(id);
-  }, [line]);
-
-  return { line, typed };
+    });
+  });
+  return { line: line?.replace("{genre}", genre) ?? null, typed };
 }
 
 export function BossFightPanel({
@@ -313,30 +260,7 @@ export function BossFightPanel({
         {/* Deliberately NOT drawn into the ASCII canvas: glyph art can't be
             read at this size, and the hated genres are the one thing a player
             has to actually read to know what to play. */}
-        {line ? (
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex flex-col items-center">
-            {/* Tail above the bubble, pointing up at the boss. The bubble sits
-                at the bottom because up top it covered the face and horns —
-                and the boss's legs fade into near-black down here, so this is
-                the cheapest part of the silhouette to overlap. */}
-            <div className="h-0 w-0 border-r-[5px] border-b-[5px] border-l-[5px] border-r-transparent border-b-white border-l-transparent" />
-            <div className="relative max-w-full rounded bg-white px-1.5 py-1 text-left text-ui text-black">
-              {/* The full line, invisible, reserves the bubble's final size so
-                  the box doesn't grow or reflow as characters arrive — the
-                  typed text is overlaid on top of it. Without this the bubble
-                  jitters wider and taller on nearly every keystroke. */}
-              <span className="invisible" aria-hidden="true">
-                {line}
-              </span>
-              <span className="absolute inset-0 px-1.5 py-1">
-                {line.slice(0, typed)}
-                {typed < line.length ? (
-                  <span className="opacity-60">▍</span>
-                ) : null}
-              </span>
-            </div>
-          </div>
-        ) : null}
+        <SpeechBubble line={line} typed={typed} />
 
         {dead || escaped ? (
           <div

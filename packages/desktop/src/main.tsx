@@ -140,6 +140,7 @@ function App() {
   const [hasActiveEvent, setHasActiveEvent] = useState(false);
   const [hasActiveEventOverride, setHasActiveEventOverride] = useState(false);
   const [debugBossOverride, setDebugBossOverride] = useState(false);
+  const [debugMerchantOverride, setDebugMerchantOverride] = useState(false);
   const [hasActiveBoss, setHasActiveBoss] = useState(false);
   const [bossHatedGenres, setBossHatedGenres] = useState<string[]>([]);
   const [chatProfileCode, setChatProfileCode] = useState<string | null>(null);
@@ -806,6 +807,7 @@ function App() {
             eventsTabVisible={view === "events"}
             debugForceActive={hasActiveEventOverride}
             debugForceBoss={debugBossOverride}
+            debugForceMerchant={debugMerchantOverride}
             equipped={state.equipped}
             currency={state.inventoryCurrency}
             onLog={addLog}
@@ -874,6 +876,8 @@ function App() {
             }
             debugBossOverride={debugBossOverride}
             onToggleDebugBoss={() => setDebugBossOverride((v) => !v)}
+            debugMerchantOverride={debugMerchantOverride}
+            onToggleDebugMerchant={() => setDebugMerchantOverride((v) => !v)}
             onSpawnDebugDrop={handleSpawnDebugDrop}
             availableUpdate={availableUpdate}
             installStatus={updateInstallStatus}
@@ -911,7 +915,10 @@ function App() {
           view={view}
           setView={switchView}
           hasActiveEvent={
-            hasActiveEvent || hasActiveEventOverride || debugBossOverride
+            hasActiveEvent ||
+            hasActiveEventOverride ||
+            debugBossOverride ||
+            debugMerchantOverride
           }
         />
       )}
