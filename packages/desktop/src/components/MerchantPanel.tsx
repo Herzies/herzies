@@ -129,7 +129,7 @@ export function MerchantPanel({
           aria-hidden="true"
           style={{
             background:
-              "radial-gradient(ellipse 55% 60% at 50% 55%, rgba(212, 160, 23, 0.35) 0%, rgba(166, 124, 0, 0.14) 45%, transparent 75%)",
+              "radial-gradient(ellipse 80% 85% at 50% 55%, rgba(212, 160, 23, 0.22) 0%, rgba(166, 124, 0, 0.1) 50%, transparent 90%)",
           }}
         />
         <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden">
