@@ -112,10 +112,7 @@ export function MerchantPanel({
   const { line, typed } = useChatter(GEORGE_LINES, !paused);
 
   return (
-    // `isolate` makes this panel its own stacking context, so the glow's
-    // -z-10 lands behind George and the list but above whatever the app
-    // paints outside the panel (without it the glow sank out of sight).
-    <div className="relative isolate flex min-h-0 flex-1 flex-col gap-2">
+    <div className="flex min-h-0 flex-1 flex-col gap-2">
       {/* His name as the heading, as BossFightPanel does with the boss's. */}
       <div className="text-center text-ui-2xl font-bold text-yellow">
         {MERCHANT_NAME}
@@ -125,20 +122,7 @@ export function MerchantPanel({
           his patter in a bubble at his feet. A fixed height rather than
           flex-1, because here the stock list below is what needs the room. */}
       <div className="relative flex h-[190px] shrink-0 flex-col">
-        {/* A warm glow behind George, lighter than the gold window, so he
-            stands in a pool of light rather than on a flat backdrop. It
-            overhangs the stage on every side and fades out exactly at its own
-            edges (closest-side), so nothing ever shows a cut-off rim; -z-10
-            keeps it under the stock list it spills behind (see `isolate` above). */}
-        <div
-          className="pointer-events-none absolute -inset-x-10 -top-16 -bottom-28 -z-10"
-          aria-hidden="true"
-          style={{
-            background:
-              "radial-gradient(closest-side, rgba(212, 160, 23, 0.22) 0%, rgba(166, 124, 0, 0.1) 50%, transparent 100%)",
-          }}
-        />
-        <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden">
+        <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden">
           <SharedHerzie3D
             userId={GEORGE_SEED}
             stage={2}
