@@ -448,7 +448,9 @@ export function EventsView({
         title={MERCHANT_NAME}
         colour="yellow"
         childrenClassName="flex min-h-0 flex-col"
-        backButton={back}
+        backButton={
+          <BackButton colour="yellow" onClick={() => setSelected(null)} />
+        }
         action={formatCountdown(selectedEvent.endsAt)}
       >
         <MerchantPanel
