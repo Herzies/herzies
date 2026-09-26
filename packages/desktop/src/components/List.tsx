@@ -10,9 +10,15 @@ import { cn } from "../lib/utils";
 export function List({
   children,
   className,
+  contentStyle,
 }: {
   children: React.ReactNode;
   className?: string;
+  /** Style for the wrapper around `children`. Give it a percentage `height` to
+   * make the content a multiple of the visible area, so something inside can
+   * size itself in percentages of that — the wrapper has to be the content's
+   * real height, or the bottom fade (which sits after it) lands mid-list. */
+  contentStyle?: React.CSSProperties;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -58,7 +64,9 @@ export function List({
           atTop ? "opacity-0" : "opacity-100",
         )}
       />
-      <div ref={contentRef}>{children}</div>
+      <div ref={contentRef} style={contentStyle}>
+        {children}
+      </div>
       <div
         className={cn(
           "pointer-events-none sticky bottom-0 -mt-4 h-4 bg-gradient-to-t from-bg-panel to-transparent transition-opacity",

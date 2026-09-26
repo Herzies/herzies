@@ -21,6 +21,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   type ActiveMultiplier,
   applyXp,
+  bankCapacity,
   bossDamagePerMinute,
   calculateXpGain,
   classifyGenre,
@@ -282,6 +283,8 @@ export async function processSync(
   inventory: Record<string, number>;
   equipped: Record<string, unknown>;
   itemUpgrades: Record<string, number>;
+  /** Inventory Expansions owned — see `bankCapacity`. */
+  bankExpansions: number;
 }> {
   const source = options.source ?? "cli";
   // 1. Fetch everything this sync reads, in one round trip.
@@ -693,6 +696,9 @@ export async function processSync(
           running,
           normalizeEquipped(row.equipped),
           drop.itemId,
+          // `row` is sync_context's to_jsonb(herzies), so the count is here
+          // with no extra query.
+          bankCapacity(row.bank_expansions as number | undefined),
           bankLookup,
         )
       ) {
@@ -844,7 +850,7 @@ export async function processSync(
     .from("herzies")
     .update(updateData)
     .eq("user_id", userId)
-    .select("inventory_v2, equipped, item_upgrades")
+    .select("inventory_v2, equipped, item_upgrades, bank_expansions")
     .single();
 
   // 8. Pending trade request — resolved with the initiator's name in
@@ -916,6 +922,12 @@ export async function processSync(
     itemUpgrades: (syncedRow?.item_upgrades ??
       row.item_upgrades ??
       {}) as Record<string, number>,
+    // How many Inventory Expansions the player owns (see bankCapacity). Bought
+    // out-of-band by the Stripe webhook, so it rides the regular sync cadence
+    // rather than the purchase response — the grid grows within one poll.
+    bankExpansions: (syncedRow?.bank_expansions ??
+      row.bank_expansions ??
+      0) as number,
   };
 }
 

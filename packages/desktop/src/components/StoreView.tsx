@@ -1,11 +1,20 @@
 import type { Equipped, Inventory, PremiumItem } from "@herzies/shared";
-import { getItem, hasRoomFor, ITEMS } from "@herzies/shared";
+import {
+  BANK_EXPANSION,
+  bankCapacity,
+  getItem,
+  hasRoomFor,
+  ITEMS,
+  MAX_BANK_EXPANSIONS,
+} from "@herzies/shared";
 import { useEffect, useRef, useState } from "react";
 import { formatAmount, formatPrice } from "../lib/utils";
 import { herzies, useWindowFocused } from "../tauri-bridge";
 import { Coin } from "./Coin";
+import { ExpansionInspectOverlay } from "./ExpansionInspectOverlay";
 import ItemInspectOverlay from "./ItemInspectOverlay";
 import { ItemRow } from "./ItemRow";
+import { BankExpansionIcon } from "./icons/BankExpansionIcon";
 import { List } from "./List";
 import { TabButton } from "./TabButton";
 import { Tooltip } from "./Tooltip";
@@ -19,6 +28,7 @@ export function StoreView({
   inventory: cachedInventory,
   currency: cachedCurrency,
   equipped,
+  bankExpansions,
   active = true,
   onLog,
 }: {
@@ -26,10 +36,13 @@ export function StoreView({
   currency: number;
   /** Current deck, used to show set progress in the item preview. */
   equipped: Equipped;
+  /** Inventory Expansions already bought — sets the bank's capacity. */
+  bankExpansions: number;
   /** False while another tab is shown. */
   active?: boolean;
   onLog?: (msg: string) => void;
 }) {
+  const capacity = bankCapacity(bankExpansions);
   const [tab, setTab] = useState<StoreTab>("premium");
   const [inventory, setInventory] = useState(cachedInventory);
   const [currency, setCurrency] = useState(cachedCurrency);
@@ -112,6 +125,11 @@ export function StoreView({
    * moves it to this shelf by itself — there is no second place to remember
    * to take it off the coin one.
    */
+  // The Inventory Expansion arrives in the same list but is not a catalog item,
+  // so it is picked out here and rendered on its own (first on the shelf).
+  const expansionListing = premiumByItem.get(BANK_EXPANSION.id);
+  const expansionMaxed = bankExpansions >= MAX_BANK_EXPANSIONS;
+  const expansionPending = pendingProductId === BANK_EXPANSION.id;
   const premiumItems = (premium ?? []).flatMap((p) => {
     const def = getItem(p.itemId);
     return def ? [def] : [];
@@ -120,12 +138,15 @@ export function StoreView({
   const shopItems = tab === "premium" ? premiumItems : coinItems;
 
   const inspected = inspectItem ? getItem(inspectItem) : null;
+  const inspectedIsExpansion = inspectItem === BANK_EXPANSION.id;
   const inspectedOwned = inspectItem ? (inventory?.[inspectItem] ?? 0) : 0;
   const inspectedPrice = inspected?.buyPrice ?? 0;
   // Same rule as the list: owning one is no reason not to buy another, but
   // having nowhere to put it is.
   const inspectedNoRoom =
-    !!inspectItem && !hasRoomFor(inventory, equipped, inspectItem);
+    !!inspectItem &&
+    !!inspected &&
+    !hasRoomFor(inventory, equipped, inspectItem, capacity);
   const inspectedPaid = inspectItem
     ? premiumByItem.get(inspectItem)
     : undefined;
@@ -191,77 +212,125 @@ export function StoreView({
           <div className="pt-5 text-center text-ui text-text-dim">
             Loading...
           </div>
-        ) : shopItems.length === 0 ? (
+        ) : shopItems.length === 0 &&
+          !(tab === "premium" && expansionListing) ? (
           <div className="pt-5 text-center text-ui text-text-dim">
             {tab === "premium"
               ? "Nothing in the premium shop right now."
               : "No cards available right now."}
           </div>
         ) : (
-          shopItems.map((item) => {
-            const paid = premiumByItem.get(item.id);
-            const owned = inventory?.[item.id] ?? 0;
-            const price = item.buyPrice ?? 0;
-            const canAfford = paid ? true : currency >= price;
-            const insufficientFunds = !canAfford;
-            // Duplicates are fine — items are tradable, so a spare is a
-            // legitimate thing to buy. Having nowhere to put it is not:
-            // the bank is a fixed 18 slots and anything past that doesn't
-            // render, so it would be bought and invisible. The server
-            // refuses this too; disabling here just explains why.
-            const noRoom = !hasRoomFor(inventory, equipped, item.id);
-            // Paid purchases leave for the browser and are credited by the
-            // webhook, so they share the coin-pack pending state and its
-            // refresh-on-return — not handleBuyItem, which spends coins.
-            const pending = paid
-              ? pendingProductId === item.id
-              : pendingItemId === item.id;
-            const buyButton = (
-              <button
-                type="button"
-                className="btn"
-                disabled={!canAfford || noRoom || pending}
-                onClick={() =>
-                  paid ? handleBuyCurrency(item.id) : handleBuyItem(item.id)
-                }
-              >
-                {pending ? "Buying..." : "Buy"}
-              </button>
-            );
-            return (
+          <>
+            {tab === "premium" && expansionListing && (
               <ItemRow
-                key={item.id}
-                itemId={item.id}
+                itemId={BANK_EXPANSION.id}
+                name={BANK_EXPANSION.name}
+                icon={
+                  <BankExpansionIcon className="h-4 w-4 shrink-0 text-yellow" />
+                }
                 onInspect={setInspectItem}
-                inspectTitle="Inspect card"
+                inspectTitle="Inspect expansion"
                 colour="yellow"
-                // The price always shows, since it can always be bought
-                // again; how many you already hold rides alongside it
-                // rather than replacing it.
                 subtitle={
                   <>
-                    {paid ? (
-                      formatPrice(paid.amount, paid.currency)
-                    ) : (
-                      <Coin amount={price} />
+                    {formatPrice(
+                      expansionListing.amount,
+                      expansionListing.currency,
                     )}
-                    {owned > 0 && ` · ${owned} owned`}
+                    {bankExpansions > 0 &&
+                      ` · ${bankExpansions}/${MAX_BANK_EXPANSIONS} bought`}
                   </>
                 }
                 action={
-                  noRoom ? (
-                    <Tooltip label="Bank full — sell something first">
-                      {buyButton}
+                  expansionMaxed ? (
+                    <Tooltip label="You already have the maximum inventory size">
+                      <button type="button" className="btn" disabled>
+                        Maxed
+                      </button>
                     </Tooltip>
-                  ) : insufficientFunds ? (
-                    <Tooltip label="Insufficient funds">{buyButton}</Tooltip>
                   ) : (
-                    buyButton
+                    <button
+                      type="button"
+                      className="btn"
+                      disabled={expansionPending}
+                      onClick={() => handleBuyCurrency(BANK_EXPANSION.id)}
+                    >
+                      {expansionPending ? "Buying..." : "Buy"}
+                    </button>
                   )
                 }
               />
-            );
-          })
+            )}
+            {shopItems.map((item) => {
+              const paid = premiumByItem.get(item.id);
+              const owned = inventory?.[item.id] ?? 0;
+              const price = item.buyPrice ?? 0;
+              const canAfford = paid ? true : currency >= price;
+              const insufficientFunds = !canAfford;
+              // Duplicates are fine — items are tradable, so a spare is a
+              // legitimate thing to buy. Having nowhere to put it is not:
+              // the bank is a fixed 18 slots and anything past that doesn't
+              // render, so it would be bought and invisible. The server
+              // refuses this too; disabling here just explains why.
+              const noRoom = !hasRoomFor(
+                inventory,
+                equipped,
+                item.id,
+                capacity,
+              );
+              // Paid purchases leave for the browser and are credited by the
+              // webhook, so they share the coin-pack pending state and its
+              // refresh-on-return — not handleBuyItem, which spends coins.
+              const pending = paid
+                ? pendingProductId === item.id
+                : pendingItemId === item.id;
+              const buyButton = (
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={!canAfford || noRoom || pending}
+                  onClick={() =>
+                    paid ? handleBuyCurrency(item.id) : handleBuyItem(item.id)
+                  }
+                >
+                  {pending ? "Buying..." : "Buy"}
+                </button>
+              );
+              return (
+                <ItemRow
+                  key={item.id}
+                  itemId={item.id}
+                  onInspect={setInspectItem}
+                  inspectTitle="Inspect card"
+                  colour="yellow"
+                  // The price always shows, since it can always be bought
+                  // again; how many you already hold rides alongside it
+                  // rather than replacing it.
+                  subtitle={
+                    <>
+                      {paid ? (
+                        formatPrice(paid.amount, paid.currency)
+                      ) : (
+                        <Coin amount={price} />
+                      )}
+                      {owned > 0 && ` · ${owned} owned`}
+                    </>
+                  }
+                  action={
+                    noRoom ? (
+                      <Tooltip label="Bank full — sell something first">
+                        {buyButton}
+                      </Tooltip>
+                    ) : insufficientFunds ? (
+                      <Tooltip label="Insufficient funds">{buyButton}</Tooltip>
+                    ) : (
+                      buyButton
+                    )
+                  }
+                />
+              );
+            })}
+          </>
         )}
       </List>
 
@@ -274,6 +343,32 @@ export function StoreView({
 
       {error && (
         <div className="pt-1 text-center text-[10px] text-red">{error}</div>
+      )}
+
+      {inspectedIsExpansion && expansionListing && (
+        <ExpansionInspectOverlay
+          onClose={() => setInspectItem(null)}
+          meta={
+            <>
+              {formatPrice(expansionListing.amount, expansionListing.currency)}
+              {` · ${bankExpansions}/${MAX_BANK_EXPANSIONS} bought`}
+            </>
+          }
+          footer={
+            <button
+              type="button"
+              className="btn"
+              disabled={expansionMaxed || expansionPending}
+              onClick={() => handleBuyCurrency(BANK_EXPANSION.id)}
+            >
+              {expansionMaxed
+                ? "Maxed"
+                : expansionPending
+                  ? "Buying..."
+                  : `Buy (${formatPrice(expansionListing.amount, expansionListing.currency)})`}
+            </button>
+          }
+        />
       )}
 
       {inspectItem && inspected && (

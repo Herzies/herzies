@@ -1,4 +1,4 @@
-import { hasRoomFor, normalizeEquipped } from "@herzies/shared";
+import { bankCapacity, hasRoomFor, normalizeEquipped } from "@herzies/shared";
 import { NextResponse } from "next/server";
 import { getStripe } from "@/lib/stripe";
 import { createAdminClient } from "@/lib/supabase-admin";
@@ -55,7 +55,7 @@ export async function POST(request: Request) {
     if (order?.grant_item_id && order.status !== "completed") {
       const { data: herzie } = await admin
         .from("herzies")
-        .select("inventory_v2, equipped")
+        .select("inventory_v2, equipped, bank_expansions")
         .eq("user_id", order.user_id as string)
         .single();
 
@@ -63,6 +63,7 @@ export async function POST(request: Request) {
         (herzie?.inventory_v2 ?? {}) as Record<string, number>,
         normalizeEquipped(herzie?.equipped),
         order.grant_item_id as string,
+        bankCapacity(herzie?.bank_expansions),
       );
     }
 

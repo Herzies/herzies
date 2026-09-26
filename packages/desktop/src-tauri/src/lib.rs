@@ -477,6 +477,7 @@ async fn sell_item(
                     s.inventory_currency,
                     &s.item_upgrades,
                     &s.units,
+                    s.bank_expansions,
                 );
             }
             changed = true;
@@ -1068,7 +1069,13 @@ fn apply_inventory(s: &mut ManagedState, snapshot: ItemSnapshot, equip_epoch_bef
             s.units = units;
         }
     }
-    storage::save_inventory_cache(&inventory, currency, &item_upgrades, &s.units);
+    storage::save_inventory_cache(
+        &inventory,
+        currency,
+        &item_upgrades,
+        &s.units,
+        s.bank_expansions,
+    );
 }
 
 /// Reads the item state out of an inventory-changing response (sell, buy,
@@ -1995,6 +2002,13 @@ async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
         // here or removing those fetches would leave the coin stale.
         s.inventory_currency = sync_resp.herzie.currency;
 
+        // Capacity is credited out-of-band by the Stripe webhook and only ever
+        // grows, so unlike inventory it needs no epoch guard: a stale sync can
+        // at worst report a count that is one poll behind.
+        if let Some(expansions) = sync_resp.bank_expansions {
+            s.bank_expansions = expansions;
+        }
+
         // Guarded on its own epoch rather than drop_epoch/equip_epoch: buying
         // changes inventory without touching either of those, so overloading
         // them would let a sync issued before a purchase reinstate the old
@@ -2018,6 +2032,7 @@ async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
                     s.inventory_currency,
                     &s.item_upgrades,
                     &s.units,
+                    s.bank_expansions,
                 );
             }
         }

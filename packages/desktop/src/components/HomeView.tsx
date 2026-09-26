@@ -1,4 +1,5 @@
 import {
+  bankCapacity,
   bossDamagePerMinute,
   getHerzieStats,
   getHerzieStatsFromUnits,
@@ -17,6 +18,7 @@ import {
   useWindowPinned,
 } from "../tauri-bridge";
 import { Herzie3D } from "./Herzie3D";
+import { HEADER_ICON_HIT } from "./headerIconHit";
 import { CARD_SHAPE_CLIP, ItemTypeIcon } from "./icons/ItemTypeIcon";
 import { ModifiersButton } from "./ModifiersButton";
 import { StatsButton } from "./StatsButton";
@@ -74,7 +76,9 @@ export function HomeView({
     itemUpgrades,
     units,
     pendingDrops,
+    bankExpansions,
   } = state;
+  const capacity = bankCapacity(bankExpansions);
   const [globalRank, setGlobalRank] = useState<number | undefined>(undefined);
   const [globalTotal, setGlobalTotal] = useState<number | undefined>(undefined);
   const [collectingIds, setCollectingIds] = useState<Set<string>>(new Set());
@@ -113,7 +117,7 @@ export function HomeView({
   const hasSpiritOrb =
     equipped.ground_left === "spirit-orb" ||
     equipped.ground_right === "spirit-orb";
-  const bankFull = isBankFull(inventory, equipped);
+  const bankFull = isBankFull(inventory, equipped, capacity);
   // Any number of drops can be pending at once — every item is independently
   // collectible.
   const dropItems: GroundDrop[] = pendingDrops.map((d) => ({
@@ -135,7 +139,7 @@ export function HomeView({
     //
     // hasRoomFor, not isBankFull: another copy of a stackable already in the
     // bank shares its slot and still fits at capacity.
-    if (!hasRoomFor(inventory, equipped, drop.itemId)) {
+    if (!hasRoomFor(inventory, equipped, drop.itemId, capacity)) {
       const name = getItem(drop.itemId)?.name ?? drop.itemId;
       onActivity?.(`Inventory full — couldn't pick up "${name}"`);
       return false;
@@ -253,6 +257,7 @@ export function HomeView({
               type="button"
               onClick={togglePin}
               className={cn(
+                HEADER_ICON_HIT,
                 "flex h-5 w-5 cursor-pointer items-center justify-center rounded-lg border-none p-0",
                 pinned
                   ? "bg-cyan/20 text-cyan"
@@ -281,6 +286,7 @@ export function HomeView({
               type="button"
               onClick={toggleGhostMode}
               className={cn(
+                HEADER_ICON_HIT,
                 "flex h-5 w-5 cursor-pointer items-center justify-center rounded-lg border-none p-0",
                 ghostMode
                   ? "bg-purple/20 text-purple"
@@ -309,7 +315,10 @@ export function HomeView({
             <button
               type="button"
               onClick={onOpenSettings}
-              className="flex h-5 w-5 cursor-pointer items-center justify-center rounded-lg border-none bg-transparent p-0 text-text-dim hover:text-text"
+              className={cn(
+                HEADER_ICON_HIT,
+                "flex h-5 w-5 cursor-pointer items-center justify-center rounded-lg border-none bg-transparent p-0 text-text-dim hover:text-text",
+              )}
             >
               <svg
                 width="11"

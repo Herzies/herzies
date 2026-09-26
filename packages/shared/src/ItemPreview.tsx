@@ -18,7 +18,9 @@ import {
 import type { ItemDef } from "./items.js";
 
 interface Props {
-  item: ItemDef;
+  /** Only what previewing needs, so a listing that is not a catalog item (the
+   * Bigger Bag) can be spun too. */
+  item: Pick<ItemDef, "name" | "frames"> & { dice?: boolean };
   /** Fixed square (px) footprint every preview renders within. Default: 120. */
   box?: number;
   /** Cycle ASCII animation frames. Default: true. */

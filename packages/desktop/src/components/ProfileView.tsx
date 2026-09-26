@@ -1,4 +1,9 @@
-import type { HerzieProfile } from "@herzies/shared";
+import {
+  getHerzieStats,
+  type HerzieProfile,
+  STAT_KEYS,
+  STAT_LABELS,
+} from "@herzies/shared";
 import { useEffect, useState } from "react";
 import { BackButton } from "./BackButton";
 import { Herzie3D } from "./Herzie3D";
@@ -8,7 +13,7 @@ import { TrackCard } from "./TrackCard";
 import { View } from "./View";
 
 /** Profile content tabs. "music" (now playing / last played) is the default. */
-type ProfileTab = "music" | "artists";
+type ProfileTab = "music" | "artists" | "stats";
 
 function formatTimeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -72,6 +77,11 @@ export function ProfileView({
   // Drop recently played artists that came through without a name — they'd
   // otherwise render as a blank, rankless row.
   const topArtists = (profile.topArtists ?? []).filter((a) => a.name?.trim());
+
+  // The server's totals include dice upgrades; without them (an older server,
+  // or a profile cached before the field existed) fall back to summing what is
+  // equipped, which is right except for upgrade levels.
+  const stats = profile.stats ?? getHerzieStats(profile.equipped);
 
   return (
     <View
@@ -179,6 +189,13 @@ export function ProfileView({
           >
             Top Artists
           </TabButton>
+          <TabButton
+            colour="cyan"
+            active={tab === "stats"}
+            onClick={() => setTab("stats")}
+          >
+            Stats
+          </TabButton>
         </div>
 
         {/* Fixed panel height: the herzie above takes the leftover space, so
@@ -186,7 +203,25 @@ export function ProfileView({
             and the tab row would jump as the viewer switches tabs. Tall
             enough for the tallest panel — three top artist rows. */}
         <div className="min-h-16">
-          {!isFriend ? (
+          {/* Stats are game data, not listening data, so unlike the other two
+              tabs they are not held back from non-friends. */}
+          {tab === "stats" ? (
+            <div>
+              {STAT_KEYS.map((key) => (
+                <div
+                  key={key}
+                  className="flex justify-between border-b border-[#222] py-0.5 text-ui last:border-b-0"
+                >
+                  <span className="text-text-dim">{STAT_LABELS[key]}</span>
+                  <span
+                    className={stats[key] > 0 ? "text-cyan" : "text-text-dim"}
+                  >
+                    {stats[key] ?? 0}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : !isFriend ? (
             <div>
               <div className="text-ui-sm text-[#444]">
                 Become friends to share music

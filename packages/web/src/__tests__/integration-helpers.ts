@@ -240,6 +240,13 @@ export async function cleanupTestData() {
     .from("trades")
     .delete()
     .neq("id", "00000000-0000-0000-0000-000000000000");
+  // Orders reference auth.users with no ON DELETE CASCADE, so a player who has
+  // one can't be deleted below — the delete fails quietly and the user (and
+  // their fixed-session-id orders) leak into the next run.
+  await admin
+    .from("store_orders")
+    .delete()
+    .neq("id", "00000000-0000-0000-0000-000000000000");
   await admin
     .from("herzies")
     .delete()

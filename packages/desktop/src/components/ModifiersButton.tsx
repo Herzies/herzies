@@ -1,5 +1,6 @@
 import type { ActiveMultiplier } from "@herzies/shared";
 import { cn } from "../lib/utils";
+import { HEADER_ICON_HIT } from "./headerIconHit";
 import { Tooltip } from "./Tooltip";
 
 /** Wide enough that the name/bonus columns don't sit on top of each other. */
@@ -45,6 +46,7 @@ export function ModifiersButton({
       <button
         type="button"
         className={cn(
+          HEADER_ICON_HIT,
           "flex h-5 w-5 cursor-default items-center justify-center rounded-lg border-none bg-transparent p-0",
           hasActive ? "text-yellow" : "text-text-dim hover:text-text",
         )}

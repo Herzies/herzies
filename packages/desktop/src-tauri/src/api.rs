@@ -601,6 +601,23 @@ mod lookup_tests {
             serde_json::Value::String("headphones".to_string()),
         );
         assert_eq!(profile.equipped.as_ref(), Some(&expected));
+        // A server that predates stats sends none; that must parse, as `None`.
+        assert!(profile.stats.is_none());
+    }
+
+    #[test]
+    fn herzie_profile_parses_stats_from_lookup_json() {
+        let sample = serde_json::json!({
+            "name": "Mafacka",
+            "friendCode": "HERZ-ABCD",
+            "stage": 1,
+            "level": 5,
+            "stats": { "sonicPower": 4, "luck": 0 }
+        });
+        let profile: HerzieProfile = serde_json::from_value(sample).expect("parse profile");
+        let stats = profile.stats.expect("stats");
+        assert_eq!(stats["sonicPower"], 4.0);
+        assert_eq!(stats["luck"], 0.0);
     }
 }
 

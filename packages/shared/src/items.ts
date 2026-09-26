@@ -127,11 +127,34 @@ export function isModifierEquipped(
   return !!equipped?.modifier?.includes(itemId);
 }
 
-/** Fixed bank capacity in the desktop Cards grid (6×3 — see InventoryView's
- * GRID_COLS/GRID_ROWS, which must stay in sync with this). Exported here so
- * non-UI code (e.g. deciding whether to warn before a purchase or pickup)
- * doesn't have to duplicate the slot-counting rules below. */
+/** Every player's starting bank capacity: the desktop Cards grid's first
+ * three rows of six (see InventoryView's GRID_COLS, which must stay in sync
+ * with this). A player's actual capacity is this plus what they've bought —
+ * see `bankCapacity`. Exported here so non-UI code (e.g. deciding whether to
+ * warn before a purchase or pickup) doesn't have to duplicate the
+ * slot-counting rules below. */
 export const BANK_SLOT_COUNT = 18;
+
+/** Slots one Inventory Expansion adds. Two full grid rows, so the extra
+ * capacity always lands on whole rows of the scrolling grid. */
+export const BANK_EXPANSION_SLOTS = 12;
+
+/** How many expansions one player can own. Enforced at checkout only — never
+ * once the money is taken — so two concurrent checkouts can overshoot it by
+ * one, which is harmless. */
+export const MAX_BANK_EXPANSIONS = 5;
+
+/** A player's bank capacity given how many expansions they own. Everything
+ * that asks "is there room" takes this rather than reading BANK_SLOT_COUNT,
+ * so a bought expansion is honoured everywhere at once. Tolerates a missing or
+ * junk count (an older payload) as none owned. */
+export function bankCapacity(expansions: number | null | undefined): number {
+  const owned =
+    typeof expansions === "number" && Number.isFinite(expansions)
+      ? Math.max(0, Math.floor(expansions))
+      : 0;
+  return BANK_SLOT_COUNT + owned * BANK_EXPANSION_SLOTS;
+}
 
 /** The only two item facts bank-slot counting needs. */
 export interface BankItemInfo {
@@ -153,7 +176,7 @@ const catalogBankLookup: BankItemLookup = (itemId) => {
   return { stackable: item.stackable, category: getItemCategory(item) };
 };
 
-/** How many of the fixed bank slots (see BANK_SLOT_COUNT) `inventory`
+/** How many bank slots (see `bankCapacity`) `inventory`
  * currently needs: one slot per stackable item id owned (any quantity),
  * plus one per unit of a non-stackable item — except whatever's currently
  * equipped, which reserves a unit as "worn" and frees its bank slot. Mirrors
@@ -185,13 +208,16 @@ export function bankSlotsUsed(
 }
 
 /** Whether the bank has no free slot left for a fresh item — see
- * bankSlotsUsed. */
+ * bankSlotsUsed. `capacity` is the player's own (`bankCapacity`), required
+ * rather than defaulted so a caller that forgets it fails to compile instead of
+ * quietly treating an expanded bank as the starting 18. */
 export function isBankFull(
   inventory: Record<string, number> | null | undefined,
   equipped: Equipped | null | undefined,
+  capacity: number,
   lookup: BankItemLookup = catalogBankLookup,
 ): boolean {
-  return bankSlotsUsed(inventory, equipped, lookup) >= BANK_SLOT_COUNT;
+  return bankSlotsUsed(inventory, equipped, lookup) >= capacity;
 }
 
 /**
@@ -209,11 +235,12 @@ export function hasRoomFor(
   inventory: Record<string, number> | null | undefined,
   equipped: Equipped | null | undefined,
   itemId: string,
+  capacity: number,
   lookup: BankItemLookup = catalogBankLookup,
 ): boolean {
   const current = inventory ?? {};
   const next = { ...current, [itemId]: (current[itemId] ?? 0) + 1 };
-  return bankSlotsUsed(next, equipped, lookup) <= BANK_SLOT_COUNT;
+  return bankSlotsUsed(next, equipped, lookup) <= capacity;
 }
 
 /** Normalize API/cache payloads that may still be a legacy string[]. */
@@ -1906,6 +1933,148 @@ const thanksForAllTheFishFrames = generateFrames(
   renderThanksForAllTheFishFrame,
 );
 const spiritOrbFrames = generateFrames(renderSpiritOrbFrame);
+
+// --- Bigger Bag: a drawstring sack, ray-marched rather than built from quads ---
+//
+// Every other item here is a flat card or a convex solid of flat faces. A sack
+// is neither, so it is a signed-distance shape sphere-traced per character
+// cell instead: a squat ellipsoid body smoothly joined to a cinched neck that
+// flares into a gathered mouth. Cheap at this resolution (SW x SH cells), and
+// it needs no depth buffer — the ray stops at the first thing it hits.
+
+/** How much bigger than its modelled size the bag is traced, so it fills more
+ * of the SW x SH grid: the preview crops and rescales to a box anyway, so this
+ * buys resolution (more cells on the bag) rather than on-screen size. */
+const BAG_SCALE = 1.4;
+/** The bag leans a little (about its own axis, fixed in view space) so it reads
+ * as an object sitting there rather than a diagram of one. Cards get the same
+ * treatment via TILT. */
+const BAG_TILT = 9 * (Math.PI / 180);
+const BAG_BODY_COLOR = "#c49a5a";
+const BAG_ROPE_COLOR = "#7a4a24";
+const BAG_PATCH_COLOR = "#f2d16b";
+
+function bagSmoothMin(a: number, b: number, k: number): number {
+  const h = Math.max(k - Math.abs(a - b), 0) / k;
+  return Math.min(a, b) - h * h * k * 0.25;
+}
+
+/** Signed distance to the bag in its own space (y grows downward, like the
+ * screen, so the mouth is at negative y). Not an exact distance — the neck is
+ * scaled down to stay conservative — but the marcher only needs it never to
+ * overshoot. */
+function bagSdf(x: number, y: number, z: number): number {
+  const rx = 0.68;
+  const ry = 0.56;
+  const rz = 0.6;
+  const px = x / rx;
+  const py = (y - 0.22) / ry;
+  const pz = z / rz;
+  const k0 = Math.hypot(px, py, pz);
+  const k1 = Math.hypot(px / rx, py / ry, pz / rz);
+  const body = k1 > 1e-6 ? (k0 * (k0 - 1)) / k1 : -rx;
+
+  // Neck: a radius that pinches from the flared mouth (y = -0.92) down to the
+  // drawstring at y = -0.55, then holds.
+  const mouthY = -0.92;
+  const cinchY = -0.55;
+  const t = Math.min(1, Math.max(0, (y - mouthY) / (cinchY - mouthY)));
+  const radius = 0.17 + 0.29 * (1 - t) * (1 - t);
+  const neck = Math.max((Math.hypot(x, z) - radius) * 0.8, mouthY - y, y - 0.1);
+  return bagSmoothMin(body, neck, 0.24);
+}
+
+function bagNormal(x: number, y: number, z: number): V3 {
+  const e = 0.01;
+  return normV([
+    bagSdf(x + e, y, z) - bagSdf(x - e, y, z),
+    bagSdf(x, y + e, z) - bagSdf(x, y - e, z),
+    bagSdf(x, y, z + e) - bagSdf(x, y, z - e),
+  ]);
+}
+
+/** What colour the bag is at a point on its surface: rope round the cinch, a
+ * gold "H" (for herzies) on the side facing the camera at rest, sacking
+ * elsewhere. */
+function bagColor(x: number, y: number, z: number): string {
+  if (y > -0.64 && y < -0.5) return BAG_ROPE_COLOR;
+  const dy = y - 0.22;
+  // Two uprights and a crossbar between them.
+  const inH =
+    (Math.abs(x) > 0.15 && Math.abs(x) < 0.28 && Math.abs(dy) < 0.34) ||
+    (Math.abs(x) <= 0.15 && Math.abs(dy) < 0.07);
+  if (z < -0.15 && inH) return BAG_PATCH_COLOR;
+  return BAG_BODY_COLOR;
+}
+
+function renderBiggerBagFrame(yAngle: number): string[] {
+  const kx = CAM * SW * 0.22 * CHAR_ASPECT;
+  const ky = CAM * SH * 0.28;
+  const rows: string[] = [];
+  for (let sy = 0; sy < SH; sy++) {
+    let row = "";
+    for (let sx = 0; sx < SW; sx++) {
+      // The camera sits at z = -CAM looking down +z (see project); un-spin
+      // the ray into the bag's own space rather than spinning the bag.
+      const dir = normV([
+        (sx + 0.5 - SW / 2) / kx,
+        (sy + 0.5 - SH / 2) / ky,
+        1,
+      ]);
+      // View -> bag: undo the lean, then the spin (the bag spins about its own
+      // axis, then leans).
+      const o = rotY(rotZ([0, 0, -CAM], -BAG_TILT), -yAngle);
+      const d = rotY(rotZ(dir, -BAG_TILT), -yAngle);
+      let t = CAM - 2.4;
+      let hit = false;
+      for (let i = 0; i < 48 && t < CAM + 2.4; i++) {
+        const dist =
+          bagSdf(
+            (o[0] + d[0] * t) / BAG_SCALE,
+            (o[1] + d[1] * t) / BAG_SCALE,
+            (o[2] + d[2] * t) / BAG_SCALE,
+          ) * BAG_SCALE;
+        if (dist < 0.004) {
+          hit = true;
+          break;
+        }
+        t += dist;
+      }
+      if (!hit) {
+        row += " ";
+        continue;
+      }
+      const x = (o[0] + d[0] * t) / BAG_SCALE;
+      const y = (o[1] + d[1] * t) / BAG_SCALE;
+      const z = (o[2] + d[2] * t) / BAG_SCALE;
+      const n = rotZ(rotY(bagNormal(x, y, z), yAngle), BAG_TILT);
+      const diffuse = Math.max(0, dot3(n, LIGHT));
+      const bright = 0.3 + 0.7 * diffuse;
+      const idx = Math.min(
+        Math.floor(bright * (RAMP_ITEM.length - 1)),
+        RAMP_ITEM.length - 1,
+      );
+      const ch = RAMP_ITEM[idx];
+      row += ch === " " ? " " : col(bagColor(x, y, z), ch);
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+
+const biggerBagFrames = generateFrames(renderBiggerBagFrame);
+
+/** The Bigger Bag as a store listing. Deliberately not an `ItemDef`: it is
+ * never owned, placed or worn, so it has no rarity or slot — buying it just
+ * raises `bankCapacity`. It does have `frames`, so `ItemPreview` can spin it.
+ * The Stripe product carries only the price; its `metadata.perk_id` is this id
+ * (see /api/store/premium). */
+export const BANK_EXPANSION = {
+  id: "bank-expansion",
+  name: "Bigger Bag",
+  description: `Adds ${BANK_EXPANSION_SLOTS} fresh slots to your inventory`,
+  frames: biggerBagFrames,
+};
 
 // --- Clouds card ---
 function cloudCardIcon(u: number, v: number): TexSample | null {
