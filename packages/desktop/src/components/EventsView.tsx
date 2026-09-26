@@ -306,11 +306,16 @@ export function EventsView({
         openKey: null,
       });
     }
-    const statusRank = { live: 0, scheduled: 1, idle: 2 };
+    // Nearest in time first: what's on now, then what starts soonest, then
+    // types with nothing on the calendar.
+    const when = (c: EventCard) =>
+      c.status === "live"
+        ? 0
+        : c.at
+          ? new Date(c.at).getTime()
+          : Number.POSITIVE_INFINITY;
     cards.sort(
-      (a, b) =>
-        statusRank[a.status] - statusRank[b.status] ||
-        typeRank(a.type) - typeRank(b.type),
+      (a, b) => when(a) - when(b) || typeRank(a.type) - typeRank(b.type),
     );
 
     return (
@@ -320,7 +325,7 @@ export function EventsView({
         childrenClassName="flex min-h-0 flex-col"
       >
         <List className="min-h-0 flex-1">
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col divide-y divide-border">
             {cards.map((card) => (
               <EventCardRow
                 key={`${card.type}-${card.eventId ?? card.status}`}
@@ -754,11 +759,11 @@ function formatIn(at: string): string {
   return `${Math.max(1, minutes)}m`;
 }
 
-/** Per-type accent: border, badge and name colour. */
-const TYPE_ACCENT: Record<string, { border: string; text: string }> = {
-  boss_fight: { border: "border-l-red", text: "text-red" },
-  song_hunt: { border: "border-l-cyan", text: "text-cyan" },
-  merchant: { border: "border-l-yellow", text: "text-yellow" },
+/** Per-type name colour. */
+const TYPE_ACCENT: Record<string, string> = {
+  boss_fight: "text-red",
+  song_hunt: "text-cyan",
+  merchant: "text-yellow",
 };
 
 function EventCardRow({
@@ -770,10 +775,7 @@ function EventCardRow({
   onOpen?: () => void;
   paused: boolean;
 }) {
-  const accent = TYPE_ACCENT[card.type] ?? {
-    border: "border-l-border",
-    text: "text-text",
-  };
+  const accent = TYPE_ACCENT[card.type] ?? "text-text";
   const idle = card.status === "idle";
 
   const body = (
@@ -787,7 +789,7 @@ function EventCardRow({
       />
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
-          <span className={cn("text-ui font-bold", accent.text)}>
+          <span className={cn("text-ui font-bold", accent)}>
             {typeLabel(card.type)}
           </span>
           {card.status === "live" ? (
@@ -820,11 +822,7 @@ function EventCardRow({
     </div>
   );
 
-  const frame = cn(
-    "block w-full border border-l-2 border-border bg-bg-panel/40 p-2 text-left",
-    accent.border,
-    idle && "opacity-70",
-  );
+  const frame = cn("block w-full py-2 text-left", idle && "opacity-70");
 
   return onOpen ? (
     <button

@@ -61,7 +61,7 @@ export function EventEmblem({
         stage={2}
         size={1.9}
         cols={40}
-        animate={!paused}
+        animate={false}
         draggable={false}
         paused={paused}
         ariaLabel="Good ol' George"
