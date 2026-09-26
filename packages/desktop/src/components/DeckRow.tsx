@@ -79,9 +79,10 @@ function DeckGroup({
       </div>
       {/* No `gap`: the spacing between boxes is baked into each slot's own hit
           area (see SLOT_HIT), so the pointer is always over some slot while it
-          crosses the row. The negative margin puts the first box's visible
-          edge back in line with the title above it. */}
-      <div className="-mx-0.5 flex items-center">
+          crosses the row. The negative margin (left only — a right one
+          widens the row past its column and the deck scrolls sideways) puts the
+          first box's visible edge back in line with the title above it. */}
+      <div className="-ml-0.5 flex items-center">
         {Array.from({ length: group.count }, (_, i) => {
           const storedSlot =
             group.slots === "modifier" ? undefined : group.slots[i];
