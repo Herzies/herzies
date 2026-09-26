@@ -24,7 +24,7 @@ import {
   RARITY_LABELS,
   unitsBestFirst,
 } from "@herzies/shared";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ToggleEquipResult } from "../hooks/useOptimisticUnits";
 import { cn, formatAmount } from "../lib/utils";
@@ -196,9 +196,6 @@ const GRID_COLS = 6;
  * grows by whole rows per Inventory Expansion, so the grid scrolls once it has
  * more than this — see the row sizing below. */
 const VISIBLE_ROWS = 3;
-/** Row height to fall back on until the viewport has been measured (it is 0
- * while this tab is hidden). */
-const FALLBACK_ROW_PX = 40;
 /** How close to the viewport's top/bottom edge a drag starts scrolling it. */
 const AUTOSCROLL_EDGE_PX = 28;
 const AUTOSCROLL_STEP_PX = 10;
@@ -423,6 +420,20 @@ function ItemGridCell({
           dragVisualClasses(isDragging, isDragOver),
         )}
       >
+        {def && (
+          // Rarity, as a small right triangle in the bottom-left corner, inset
+          // by the same 2px as the +N and xN badges, in the rarity's own colour (the same one the preview card
+          // and the item's name use). Grid only — the Deck tab's boxes are too
+          // small to carry one.
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute bottom-0.5 left-0.5 h-1.5 w-1.5"
+            style={{
+              background: RARITY_COLORS[def.rarity],
+              clipPath: "polygon(0 0, 0 100%, 100% 100%)",
+            }}
+          />
+        )}
         {level > 0 && (
           <span className="absolute top-0.5 left-0.5 rounded bg-black/60 px-1 text-[9px] text-cyan">
             +{level}
@@ -566,6 +577,12 @@ export function InventoryView({
   const [slotOrder, setSlotOrder] = useState<(string | null)[]>(() =>
     loadSlotOrder(herzie.friendCode, capacity),
   );
+  /** Rows the grid has — capacity always lands on whole rows, and never fewer
+   * than the three that fill the panel. */
+  const gridRows = Math.max(
+    VISIBLE_ROWS,
+    Math.ceil(slotOrder.length / GRID_COLS),
+  );
   // Capacity arrives after mount (from the first sync, or right after a
   // purchase), so the arrangement has to grow to meet it. Existing placements
   // are untouched; the new slots are simply empty.
@@ -576,28 +593,12 @@ export function InventoryView({
     });
   }, [capacity]);
 
-  /** The grid's scroll viewport, measured so each row is exactly a third of it:
-   * three rows fill the panel at any capacity and the rest scrolls. */
+  /** The grid's scroll viewport — for the drag auto-scroll, which reaches its
+   * scroller (List's own element) through it. Rows are sized in CSS (see the
+   * grid below), not from this: a measurement reads 0 while the view is hidden
+   * and then jumps when it is shown, which made the grid pop into place every
+   * time the view was navigated to. */
   const gridViewportRef = useRef<HTMLDivElement | null>(null);
-  const [gridViewport, setGridViewport] = useState<HTMLDivElement | null>(null);
-  const [rowHeight, setRowHeight] = useState(0);
-  // A callback ref, not useRef + a mount effect: the viewport only exists on
-  // the Cards tab once the inventory has loaded, so it appears late (first
-  // load) and is replaced on every Deck -> Cards switch. Keying the observer on
-  // the element itself re-attaches it to whichever one is current.
-  const attachGridViewport = useCallback((el: HTMLDivElement | null) => {
-    gridViewportRef.current = el;
-    setGridViewport(el);
-  }, []);
-  useEffect(() => {
-    if (!gridViewport) return;
-    const measure = () =>
-      setRowHeight(gridViewport.clientHeight / VISIBLE_ROWS);
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(gridViewport);
-    return () => observer.disconnect();
-  }, [gridViewport]);
   // { index, itemId } once a drag has actually started (past DRAG_THRESHOLD)
   // — null while just holding the button down without having moved yet.
   const [dragVisual, setDragVisual] = useState<{
@@ -656,7 +657,7 @@ export function InventoryView({
   // hit-testing instead. Listens on the window (not the individual cells)
   // so the drag keeps tracking even once the cursor leaves the origin cell.
   useEffect(() => {
-    const DRAG_THRESHOLD = 4;
+    const DRAG_THRESHOLD = 6;
 
     const handlePointerMove = (e: PointerEvent) => {
       const state = dragRef.current;
@@ -733,15 +734,14 @@ export function InventoryView({
       dragRef.current = null;
       setDragVisual(null);
       if (!state?.dragging) return;
-      // Only a drag that actually moved the item to a *different* slot is a
-      // drop whose trailing click needs suppressing. Releasing on the slot you
-      // pressed is a click by every platform convention — and since
-      // DRAG_THRESHOLD is only 4px, a normal click with the faintest mouse or
-      // trackpad drift lands here, so suppressing it swallowed the equip and
-      // made items need clicking twice.
+      // Any drag that got this far ends in a click the item must not act on —
+      // including one let go over the slot it started on, which is "picked it
+      // up and put it back", not a request to equip. What keeps a click with a
+      // little hand drift working is DRAG_THRESHOLD, not this: drift under it
+      // never becomes a drag at all.
       const { index, overIndex } = state;
-      if (overIndex === null || overIndex === index) return;
       suppressClickRef.current = true;
+      if (overIndex === null || overIndex === index) return;
       setSlotOrder((prev) => {
         const next = [...prev];
         [next[index], next[overIndex]] = [next[overIndex], next[index]];
@@ -1238,13 +1238,23 @@ export function InventoryView({
           // Three rows fill the panel; past that (each Inventory Expansion adds
           // two rows) it scrolls, with List's edge fades as the only hint —
           // scrollbars are hidden app-wide.
-          <div ref={attachGridViewport} className="min-h-0 flex-1">
-            <List className="h-full">
+          <div ref={gridViewportRef} className="min-h-0 flex-1">
+            {/* Each row is a third of the visible height, in CSS, so the rows
+                are right on the very first frame — no measuring, and nothing to
+                jump when the view is shown. The content is `rows / 3` viewports
+                tall (a percentage of the scroller) and the grid splits that
+                evenly, which is what makes each row a third. It has to be the
+                content's true height: List's bottom fade sits after it, and
+                would otherwise land in the middle of the list. */}
+            <List
+              className="h-full"
+              contentStyle={{
+                height: `${(gridRows * 100) / VISIBLE_ROWS}%`,
+              }}
+            >
               <div
-                className="grid grid-cols-6"
-                style={{
-                  gridAutoRows: `${rowHeight > 0 ? rowHeight : FALLBACK_ROW_PX}px`,
-                }}
+                className="grid h-full grid-cols-6"
+                style={{ gridAutoRows: `${100 / gridRows}%` }}
               >
                 {slotOrder.map((key, i) => {
                   const isLastCol = i % GRID_COLS === GRID_COLS - 1;

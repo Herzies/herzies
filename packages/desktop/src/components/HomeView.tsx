@@ -18,6 +18,7 @@ import {
   useWindowPinned,
 } from "../tauri-bridge";
 import { Herzie3D } from "./Herzie3D";
+import { HEADER_ICON_HIT } from "./headerIconHit";
 import { CARD_SHAPE_CLIP, ItemTypeIcon } from "./icons/ItemTypeIcon";
 import { ModifiersButton } from "./ModifiersButton";
 import { StatsButton } from "./StatsButton";
@@ -256,6 +257,7 @@ export function HomeView({
               type="button"
               onClick={togglePin}
               className={cn(
+                HEADER_ICON_HIT,
                 "flex h-5 w-5 cursor-pointer items-center justify-center rounded-lg border-none p-0",
                 pinned
                   ? "bg-cyan/20 text-cyan"
@@ -284,6 +286,7 @@ export function HomeView({
               type="button"
               onClick={toggleGhostMode}
               className={cn(
+                HEADER_ICON_HIT,
                 "flex h-5 w-5 cursor-pointer items-center justify-center rounded-lg border-none p-0",
                 ghostMode
                   ? "bg-purple/20 text-purple"
@@ -312,7 +315,10 @@ export function HomeView({
             <button
               type="button"
               onClick={onOpenSettings}
-              className="flex h-5 w-5 cursor-pointer items-center justify-center rounded-lg border-none bg-transparent p-0 text-text-dim hover:text-text"
+              className={cn(
+                HEADER_ICON_HIT,
+                "flex h-5 w-5 cursor-pointer items-center justify-center rounded-lg border-none bg-transparent p-0 text-text-dim hover:text-text",
+              )}
             >
               <svg
                 width="11"

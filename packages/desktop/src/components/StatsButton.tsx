@@ -1,5 +1,6 @@
 import { type HerzieStats, STAT_KEYS, STAT_LABELS } from "@herzies/shared";
 import { cn } from "../lib/utils";
+import { HEADER_ICON_HIT } from "./headerIconHit";
 import { Tooltip } from "./Tooltip";
 
 /** Wide enough that the name/value columns don't sit on top of each other. */
@@ -33,6 +34,7 @@ export function StatsButton({ stats }: { stats: HerzieStats }) {
       <button
         type="button"
         className={cn(
+          HEADER_ICON_HIT,
           "flex h-5 w-5 cursor-default items-center justify-center rounded-lg border-none bg-transparent p-0",
           hasStats ? "text-cyan" : "text-text-dim hover:text-text",
         )}

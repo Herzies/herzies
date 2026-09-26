@@ -19,6 +19,15 @@ import {
 } from "./icons/ItemTypeIcon";
 import { HoverPreview, Tooltip } from "./Tooltip";
 
+/** A slot's hit area: the 16px card plus 2px of transparent margin either
+ * side, so neighbouring slots touch and there is no dead zone between them —
+ * which used to be a 4px gap, and the clip-path on the visible card shape
+ * clipped its pointer hit-testing too. The visible card is a child of this
+ * button (see SLOT_CARD), so looks and spacing are unchanged. `group` lets the
+ * card respond to the hover the whole area receives. */
+const SLOT_HIT =
+  "group flex h-4 w-5 shrink-0 cursor-pointer items-center justify-center border-none bg-transparent p-0";
+
 const groupByLabel = (label: string): DeckSlotGroup => {
   const group = DECK_SLOT_GROUPS.find((g) => g.label === label);
   if (!group) throw new Error(`Unknown deck slot group: ${label}`);
@@ -68,7 +77,11 @@ function DeckGroup({
       <div className="mb-1 text-[10px] text-text-dim">
         {group.label} ({equippedCount}/{group.count})
       </div>
-      <div className="flex items-center gap-1">
+      {/* No `gap`: the spacing between boxes is baked into each slot's own hit
+          area (see SLOT_HIT), so the pointer is always over some slot while it
+          crosses the row. The negative margin puts the first box's visible
+          edge back in line with the title above it. */}
+      <div className="-mx-0.5 flex items-center">
         {Array.from({ length: group.count }, (_, i) => {
           const storedSlot =
             group.slots === "modifier" ? undefined : group.slots[i];
@@ -231,9 +244,13 @@ function DeckSlot({
               onPlaceRequest(e.clientX, e.clientY);
             }
           }}
-          className="h-4 w-4 shrink-0 cursor-pointer border-none bg-text-dim/10 p-0 transition-colors hover:bg-text-dim/25"
-          style={{ clipPath: CARD_SHAPE_CLIP }}
-        />
+          className={SLOT_HIT}
+        >
+          <span
+            className="h-4 w-4 bg-text-dim/10 transition-colors group-hover:bg-text-dim/25"
+            style={{ clipPath: CARD_SHAPE_CLIP }}
+          />
+        </button>
       </Tooltip>
     );
   }
@@ -253,18 +270,22 @@ function DeckSlot({
       // act on it until the next sync brings the copies.
       disabled={!worn}
       onClick={() => worn && onUnequip(worn.id)}
-      className="flex h-4 w-4 shrink-0 cursor-pointer items-center justify-center bg-bg-panel/50 transition-opacity hover:opacity-75"
-      style={{ clipPath: CARD_SHAPE_CLIP }}
+      className={SLOT_HIT}
     >
-      {def ? (
-        <ItemTypeIcon item={def} className="h-full w-full" />
-      ) : (
-        // Equipped-but-missing-from-catalog (stale/desynced data): render
-        // filled but generic rather than silently falling back to empty — an
-        // empty box would hide a real data problem and make the item
-        // un-unequippable here.
-        <GenericTypeIcon type={fallbackType} className="h-full w-full" />
-      )}
+      <span
+        className="flex h-4 w-4 items-center justify-center bg-bg-panel/50 transition-opacity group-hover:opacity-75"
+        style={{ clipPath: CARD_SHAPE_CLIP }}
+      >
+        {def ? (
+          <ItemTypeIcon item={def} className="h-full w-full" />
+        ) : (
+          // Equipped-but-missing-from-catalog (stale/desynced data): render
+          // filled but generic rather than silently falling back to empty — an
+          // empty box would hide a real data problem and make the item
+          // un-unequippable here.
+          <GenericTypeIcon type={fallbackType} className="h-full w-full" />
+        )}
+      </span>
     </button>
   );
 
