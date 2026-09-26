@@ -8,6 +8,7 @@ import {
   DEFAULT_Y_ANGLE,
   GOLD_SCHEME_ID,
   getItem,
+  MERCHANT_NAME,
   Herzie3D as SharedHerzie3D,
 } from "@herzies/shared";
 import { useEffect, useState } from "react";
@@ -111,6 +112,11 @@ export function MerchantPanel({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
+      {/* His name as the heading, as BossFightPanel does with the boss's. */}
+      <div className="text-center text-ui-lg font-bold text-yellow">
+        {MERCHANT_NAME}
+      </div>
+
       {/* Same staging as BossFightPanel: George square-on, not spinning, with
           his patter in a bubble at his feet. A fixed height rather than
           flex-1, because here the stock list below is what needs the room. */}
