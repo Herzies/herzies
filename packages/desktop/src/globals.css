@@ -165,7 +165,7 @@
   /* George's stall bathes the window in deep gold, the same way. */
   html.merchant-mode,
   html.merchant-mode body {
-    background-color: #2a1f05;
+    background-color: #1e1400;
   }
 
   /* Window drag — scoped to Tauri markup, not global body (breaks sandbox herzie drag). */
