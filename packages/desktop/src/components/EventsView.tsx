@@ -847,7 +847,12 @@ function EventCardRow({
     </div>
   );
 
-  const frame = cn("block w-full py-2 text-left", idle && "opacity-70");
+  // Live at full strength; scheduled a little dimmer; nothing-on dimmer still.
+  const frame = cn(
+    "block w-full py-2 text-left",
+    card.status === "scheduled" && "opacity-80",
+    idle && "opacity-60",
+  );
 
   return onOpen ? (
     <button
