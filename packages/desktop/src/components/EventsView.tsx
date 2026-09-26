@@ -141,6 +141,7 @@ export function EventsView({
   debugForceActive = false,
   debugForceBoss = false,
   debugForceMerchant = false,
+  onScreenChange,
   equipped,
   currency = 0,
   onLog,
@@ -153,6 +154,9 @@ export function EventsView({
   debugForceBoss?: boolean;
   /** Debug: a fixture Good ol' George visit (buying from it will fail). */
   debugForceMerchant?: boolean;
+  /** Which full-screen event view is open, so the app can recolour the
+   * window: a live boss blacks it out, George turns it gold. */
+  onScreenChange?: (screen: "boss" | "merchant" | null) => void;
   /** Current deck, used to show set progress in the reward preview. */
   equipped?: Equipped | null;
   /** Player's coins, for George's buy buttons. */
@@ -242,6 +246,21 @@ export function EventsView({
       if (interval) clearInterval(interval);
     };
   }, [focused, eventsTabVisible, reloadKey]);
+
+  // Tell the app which full-screen view is open (see onScreenChange). Up here,
+  // above the early returns, so the hook order never changes.
+  useEffect(() => {
+    if (!onScreenChange) return;
+    const open =
+      selected === "debug-boss-fight" && debugForceBoss
+        ? "boss_fight"
+        : selected === DEBUG_MERCHANT.id && debugForceMerchant
+          ? "merchant"
+          : events.find((e) => e.id === selected)?.type;
+    onScreenChange(
+      open === "boss_fight" ? "boss" : open === "merchant" ? "merchant" : null,
+    );
+  }, [selected, events, debugForceBoss, debugForceMerchant, onScreenChange]);
 
   if (loading) {
     return (
