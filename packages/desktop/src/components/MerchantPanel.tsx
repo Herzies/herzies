@@ -114,7 +114,7 @@ export function MerchantPanel({
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
       {/* His name as the heading, as BossFightPanel does with the boss's. */}
-      <div className="text-center text-ui-2xl font-bold text-yellow">
+      <div className="text-center text-[16px] font-bold text-yellow">
         {MERCHANT_NAME}
       </div>
 
