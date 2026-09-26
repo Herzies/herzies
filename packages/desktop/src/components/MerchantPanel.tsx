@@ -123,13 +123,16 @@ export function MerchantPanel({
           flex-1, because here the stock list below is what needs the room. */}
       <div className="relative flex h-[190px] shrink-0 flex-col">
         {/* A warm glow behind George, lighter than the gold window, so he
-            stands in a pool of light rather than on a flat backdrop. */}
+            stands in a pool of light rather than on a flat backdrop. It
+            overhangs the stage on every side and fades out exactly at its own
+            edges (closest-side), so nothing ever shows a cut-off rim; -z-10
+            keeps it under the stock list it spills behind. */}
         <div
-          className="pointer-events-none absolute inset-0"
+          className="pointer-events-none absolute -inset-x-10 -top-16 -bottom-28 -z-10"
           aria-hidden="true"
           style={{
             background:
-              "radial-gradient(ellipse 80% 85% at 50% 55%, rgba(212, 160, 23, 0.22) 0%, rgba(166, 124, 0, 0.1) 50%, transparent 90%)",
+              "radial-gradient(closest-side, rgba(212, 160, 23, 0.22) 0%, rgba(166, 124, 0, 0.1) 50%, transparent 100%)",
           }}
         />
         <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden">
