@@ -122,7 +122,17 @@ export function MerchantPanel({
           his patter in a bubble at his feet. A fixed height rather than
           flex-1, because here the stock list below is what needs the room. */}
       <div className="relative flex h-[190px] shrink-0 flex-col">
-        <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden">
+        {/* A warm glow behind George, lighter than the gold window, so he
+            stands in a pool of light rather than on a flat backdrop. */}
+        <div
+          className="pointer-events-none absolute inset-0"
+          aria-hidden="true"
+          style={{
+            background:
+              "radial-gradient(ellipse 55% 60% at 50% 55%, rgba(212, 160, 23, 0.35) 0%, rgba(166, 124, 0, 0.14) 45%, transparent 75%)",
+          }}
+        />
+        <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden">
           <SharedHerzie3D
             userId={GEORGE_SEED}
             stage={2}
