@@ -111,10 +111,6 @@ export function MerchantPanel({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
-      {event.description ? (
-        <div className="text-ui text-text-dim">{event.description}</div>
-      ) : null}
-
       {/* Same staging as BossFightPanel: George square-on, not spinning, with
           his patter in a bubble at his feet. A fixed height rather than
           flex-1, because here the stock list below is what needs the room. */}

@@ -124,6 +124,7 @@ const typeRank = (type: string) => {
 type EventCard = {
   type: string;
   title: string;
+  description: string | null;
   status: "live" | "scheduled" | "idle";
   /** Ends-at when live, starts-at when scheduled. */
   at: string | null;
@@ -286,6 +287,7 @@ export function EventsView({
         cards.push({
           type,
           title: e.title,
+          description: e.description,
           status: "live",
           at: e.endsAt,
           openKey: type === "song_hunt" ? "song_hunt" : e.id,
@@ -324,6 +326,7 @@ export function EventsView({
       cards.push({
         type,
         title: next?.title ?? previous?.title ?? typeLabel(type),
+        description: next?.description ?? previous?.description ?? null,
         status: next ? "scheduled" : "idle",
         at: next?.startsAt ?? null,
         openKey: previous
@@ -347,6 +350,7 @@ export function EventsView({
       cards.push({
         type: e.type,
         title: e.title,
+        description: e.description,
         status: "live",
         at: e.endsAt,
         openKey: null,
@@ -805,13 +809,6 @@ function formatIn(at: string): string {
   return `${Math.max(1, minutes)}m`;
 }
 
-/** Per-type name colour. */
-const TYPE_ACCENT: Record<string, string> = {
-  boss_fight: "text-red",
-  song_hunt: "text-cyan",
-  merchant: "text-yellow",
-};
-
 function EventCardRow({
   card,
   onOpen,
@@ -819,43 +816,34 @@ function EventCardRow({
   card: EventCard;
   onOpen?: () => void;
 }) {
-  const accent = TYPE_ACCENT[card.type] ?? "text-text";
   const idle = card.status === "idle";
 
   const body = (
-    <div className="flex items-center gap-3">
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center justify-between gap-2">
-          <span className={cn("text-ui font-bold", accent)}>
-            {typeLabel(card.type)}
+    <div className="min-w-0">
+      <div className="flex items-center justify-between gap-2">
+        <span className="truncate text-ui font-bold">{card.title}</span>
+        {card.status === "live" ? (
+          <span className="flex items-center gap-1 text-ui-sm font-bold text-green">
+            <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-green" />
+            LIVE
           </span>
-          {card.status === "live" ? (
-            <span className="flex items-center gap-1 text-ui-sm font-bold text-green">
-              <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-green" />
-              LIVE
-            </span>
-          ) : card.status === "scheduled" ? (
-            <span className="text-ui-sm text-yellow">SCHEDULED</span>
-          ) : null}
-        </div>
-        <div className="flex items-center justify-between gap-2 text-ui">
-          <span
-            className={cn("truncate", idle ? "text-text-dim" : "text-text")}
-          >
-            {card.title}
-          </span>
-          {card.at ? (
-            <span className="shrink-0 text-text-dim">
-              {card.status === "live"
-                ? `ends in ${formatIn(card.at)}`
-                : `in ${formatIn(card.at)}`}
-            </span>
-          ) : null}
-        </div>
-        {card.detail ? (
-          <div className="truncate text-ui-sm text-text-dim">{card.detail}</div>
+        ) : card.status === "scheduled" ? (
+          <span className="text-ui-sm text-yellow">SCHEDULED</span>
         ) : null}
       </div>
+      <div className="flex items-center justify-between gap-2 text-ui text-text-dim">
+        <span className="truncate">{card.description}</span>
+        {card.at ? (
+          <span className="shrink-0">
+            {card.status === "live"
+              ? `ends in ${formatIn(card.at)}`
+              : `in ${formatIn(card.at)}`}
+          </span>
+        ) : null}
+      </div>
+      {card.detail ? (
+        <div className="truncate text-ui-sm text-text-dim">{card.detail}</div>
+      ) : null}
     </div>
   );
 
