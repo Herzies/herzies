@@ -21,6 +21,11 @@ struct InventoryCacheFile {
     /// existed still loads — with none, and the next sync fills them in.
     #[serde(default)]
     units: Vec<crate::types::ItemUnit>,
+    /// Inventory Expansions owned — cached so the grid opens at its real size
+    /// rather than shrinking to the starting 18 (and hiding tiles) until the
+    /// first sync lands. Defaulted so an older cache file still loads.
+    #[serde(default)]
+    bank_expansions: u32,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -273,8 +278,13 @@ pub fn clear_equipped() {
     }
 }
 
-pub fn load_inventory_cache() -> Option<(Inventory, u32, ItemUpgrades, Vec<crate::types::ItemUnit>)>
-{
+pub fn load_inventory_cache() -> Option<(
+    Inventory,
+    u32,
+    ItemUpgrades,
+    Vec<crate::types::ItemUnit>,
+    u32,
+)> {
     let path = config_dir().join("inventory_cache.json");
     if !path.exists() {
         return None;
@@ -286,6 +296,7 @@ pub fn load_inventory_cache() -> Option<(Inventory, u32, ItemUpgrades, Vec<crate
         file.currency,
         file.item_upgrades,
         file.units,
+        file.bank_expansions,
     ))
 }
 
@@ -294,6 +305,7 @@ pub fn save_inventory_cache(
     currency: u32,
     item_upgrades: &ItemUpgrades,
     units: &[crate::types::ItemUnit],
+    bank_expansions: u32,
 ) {
     ensure_dir();
     let path = config_dir().join("inventory_cache.json");
@@ -302,6 +314,7 @@ pub fn save_inventory_cache(
         currency,
         item_upgrades: item_upgrades.clone(),
         units: units.to_vec(),
+        bank_expansions,
     };
     let data = serde_json::to_string(&file).unwrap();
     write_secure(&path, &data);
@@ -429,6 +442,8 @@ mod tests {
         assert_eq!(file.currency, 10);
         // No copies yet; the next sync fills them in.
         assert!(file.units.is_empty());
+        // Nor any expansions: the grid opens at the starting 18 until told more.
+        assert_eq!(file.bank_expansions, 0);
     }
 
     #[test]
@@ -443,10 +458,12 @@ mod tests {
                 upgrade_level: 3,
                 equipped_slot: Some("ground_left".to_string()),
             }],
+            bank_expansions: 2,
         };
         let back: InventoryCacheFile =
             serde_json::from_str(&serde_json::to_string(&file).unwrap()).unwrap();
         assert_eq!(back.units, file.units);
+        assert_eq!(back.bank_expansions, 2);
     }
 
     #[test]

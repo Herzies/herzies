@@ -1,5 +1,5 @@
 import "./globals.css";
-import { type HerzieProfile, isBankFull } from "@herzies/shared";
+import { bankCapacity, type HerzieProfile, isBankFull } from "@herzies/shared";
 import { attachConsole } from "@tauri-apps/plugin-log";
 import {
   isPermissionGranted,
@@ -64,6 +64,7 @@ function App() {
     inventoryCurrency: 0,
     itemUpgrades: {},
     units: [],
+    bankExpansions: 0,
     friends: {},
     pendingTradeRequest: null,
     pendingFriendRequest: null,
@@ -239,7 +240,11 @@ function App() {
     }
   }, [state.pendingFriendRequest]);
 
-  const inventoryFull = isBankFull(state.inventory, state.equipped);
+  const inventoryFull = isBankFull(
+    state.inventory,
+    state.equipped,
+    bankCapacity(state.bankExpansions),
+  );
   useEffect(() => {
     if (!inventoryFull) setDismissedInventoryFull(false);
   }, [inventoryFull]);
@@ -784,6 +789,7 @@ function App() {
               equipped={state.equipped}
               onToggleEquip={toggleEquip}
               onPredictUnits={predict}
+              bankExpansions={state.bankExpansions}
               onLog={addLog}
               active={view === "inventory"}
             />
@@ -841,6 +847,7 @@ function App() {
             inventory={state.inventory}
             currency={state.inventoryCurrency}
             equipped={state.equipped}
+            bankExpansions={state.bankExpansions}
             active={view === "store"}
             onLog={addLog}
           />

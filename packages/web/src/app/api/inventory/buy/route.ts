@@ -1,5 +1,5 @@
 import {
-  BANK_SLOT_COUNT,
+  bankCapacity,
   bankSlotsUsed,
   normalizeEquipped,
 } from "@herzies/shared";
@@ -42,7 +42,7 @@ export async function POST(request: Request) {
 
   const { data: herzie } = await admin
     .from("herzies")
-    .select("inventory_v2, equipped")
+    .select("inventory_v2, equipped, bank_expansions")
     .eq("user_id", auth.userId)
     .single();
 
@@ -54,15 +54,16 @@ export async function POST(request: Request) {
 
   // Duplicates are allowed: items are tradable, so a spare is a legitimate
   // thing to buy. What is not allowed is buying one with nowhere to put it —
-  // the bank is a fixed BANK_SLOT_COUNT slots and anything past that simply
-  // does not render, so it would be paid for and invisible. This check is the
+  // the bank is a fixed number of slots (bankCapacity) and anything past that
+  // simply does not render, so it would be paid for and invisible. This check is the
   // reason the one-per-item rule could be lifted at all.
   //
   // It stays here rather than in the RPC because slot counting lives in
   // @herzies/shared — one implementation, not a second copy in SQL to drift.
   const next = { ...inv, [itemId]: (inv[itemId] ?? 0) + quantity };
   if (
-    bankSlotsUsed(next, normalizeEquipped(herzie.equipped)) > BANK_SLOT_COUNT
+    bankSlotsUsed(next, normalizeEquipped(herzie.equipped)) >
+    bankCapacity(herzie.bank_expansions)
   ) {
     return NextResponse.json(
       { error: "Your bank is full — sell something first" },

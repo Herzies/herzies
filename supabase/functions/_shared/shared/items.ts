@@ -131,11 +131,44 @@ export function isModifierEquipped(
   return !!equipped?.modifier?.includes(itemId);
 }
 
-/** Fixed bank capacity in the desktop Cards grid (6×3 — see InventoryView's
- * GRID_COLS/GRID_ROWS, which must stay in sync with this). Exported here so
- * non-UI code (e.g. deciding whether to warn before a purchase or pickup)
- * doesn't have to duplicate the slot-counting rules below. */
+/** Every player's starting bank capacity: the desktop Cards grid's first
+ * three rows of six (see InventoryView's GRID_COLS, which must stay in sync
+ * with this). A player's actual capacity is this plus what they've bought —
+ * see `bankCapacity`. Exported here so non-UI code (e.g. deciding whether to
+ * warn before a purchase or pickup) doesn't have to duplicate the
+ * slot-counting rules below. */
 export const BANK_SLOT_COUNT = 18;
+
+/** Slots one Inventory Expansion adds. Two full grid rows, so the extra
+ * capacity always lands on whole rows of the scrolling grid. */
+export const BANK_EXPANSION_SLOTS = 12;
+
+/** How many expansions one player can own. Enforced at checkout only — never
+ * once the money is taken — so two concurrent checkouts can overshoot it by
+ * one, which is harmless. */
+export const MAX_BANK_EXPANSIONS = 5;
+
+/** The Inventory Expansion as a store listing. Deliberately not an `ItemDef`:
+ * it is never owned, placed or worn, so it has no frames, rarity or slot —
+ * buying it just raises `bankCapacity`. The Stripe product carries only the
+ * price; its `metadata.perk_id` is this id (see /api/store/premium). */
+export const BANK_EXPANSION = {
+  id: "bank-expansion",
+  name: "Inventory Expansion",
+  description: `Adds ${BANK_EXPANSION_SLOTS} slots to your inventory as soon as your payment goes through.`,
+} as const;
+
+/** A player's bank capacity given how many expansions they own. Everything
+ * that asks "is there room" takes this rather than reading BANK_SLOT_COUNT,
+ * so a bought expansion is honoured everywhere at once. Tolerates a missing or
+ * junk count (an older payload) as none owned. */
+export function bankCapacity(expansions: number | null | undefined): number {
+  const owned =
+    typeof expansions === "number" && Number.isFinite(expansions)
+      ? Math.max(0, Math.floor(expansions))
+      : 0;
+  return BANK_SLOT_COUNT + owned * BANK_EXPANSION_SLOTS;
+}
 
 /** The only two item facts bank-slot counting needs. */
 export interface BankItemInfo {
@@ -157,7 +190,7 @@ const catalogBankLookup: BankItemLookup = (itemId) => {
   return { stackable: item.stackable, category: getItemCategory(item) };
 };
 
-/** How many of the fixed bank slots (see BANK_SLOT_COUNT) `inventory`
+/** How many bank slots (see `bankCapacity`) `inventory`
  * currently needs: one slot per stackable item id owned (any quantity),
  * plus one per unit of a non-stackable item — except whatever's currently
  * equipped, which reserves a unit as "worn" and frees its bank slot. Mirrors
@@ -189,13 +222,16 @@ export function bankSlotsUsed(
 }
 
 /** Whether the bank has no free slot left for a fresh item — see
- * bankSlotsUsed. */
+ * bankSlotsUsed. `capacity` is the player's own (`bankCapacity`), required
+ * rather than defaulted so a caller that forgets it fails to compile instead of
+ * quietly treating an expanded bank as the starting 18. */
 export function isBankFull(
   inventory: Record<string, number> | null | undefined,
   equipped: Equipped | null | undefined,
+  capacity: number,
   lookup: BankItemLookup = catalogBankLookup,
 ): boolean {
-  return bankSlotsUsed(inventory, equipped, lookup) >= BANK_SLOT_COUNT;
+  return bankSlotsUsed(inventory, equipped, lookup) >= capacity;
 }
 
 /**
@@ -213,11 +249,12 @@ export function hasRoomFor(
   inventory: Record<string, number> | null | undefined,
   equipped: Equipped | null | undefined,
   itemId: string,
+  capacity: number,
   lookup: BankItemLookup = catalogBankLookup,
 ): boolean {
   const current = inventory ?? {};
   const next = { ...current, [itemId]: (current[itemId] ?? 0) + 1 };
-  return bankSlotsUsed(next, equipped, lookup) <= BANK_SLOT_COUNT;
+  return bankSlotsUsed(next, equipped, lookup) <= capacity;
 }
 
 /** Normalize API/cache payloads that may still be a legacy string[]. */

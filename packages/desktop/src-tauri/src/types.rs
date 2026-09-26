@@ -147,6 +147,11 @@ pub struct SyncResponse {
     /// when talking to a server older than this field.
     #[serde(default)]
     pub units: Option<Vec<ItemUnit>>,
+    /// Inventory Expansions owned — see `bankCapacity` in @herzies/shared.
+    /// `None` only when talking to a server older than this field, in which
+    /// case the local count is left alone.
+    #[serde(default)]
+    pub bank_expansions: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -312,7 +317,9 @@ pub struct StoreProduct {
 
 /// A catalog item sold for real money rather than coins. Carries no name or
 /// art: the app already has those in its own catalog under `item_id`, which
-/// is the whole point of joining on the id (see /api/store/premium).
+/// is the whole point of joining on the id (see /api/store/premium). The
+/// exception is the Inventory Expansion, whose `item_id` is
+/// `BANK_EXPANSION.id` in @herzies/shared rather than a catalog id.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PremiumItem {
@@ -357,6 +364,10 @@ pub struct AppState {
     /// derived id-keyed views.
     #[serde(default)]
     pub units: Vec<ItemUnit>,
+    /// Inventory Expansions owned; the grid's capacity is
+    /// `bankCapacity(bankExpansions)` in @herzies/shared.
+    #[serde(default)]
+    pub bank_expansions: u32,
     pub friends: HashMap<String, HerzieProfile>,
     /// Present while the server reports an incoming trade you have not joined yet.
     #[serde(skip_serializing_if = "Option::is_none")]

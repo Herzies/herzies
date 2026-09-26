@@ -37,6 +37,7 @@ export async function POST(request: Request) {
       inventory: result.inventory,
       equipped: result.equipped,
       itemUpgrades: result.itemUpgrades,
+      bankExpansions: result.bankExpansions,
     };
 
     return NextResponse.json(response);

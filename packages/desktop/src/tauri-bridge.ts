@@ -96,6 +96,8 @@ export interface AppState {
    * slot. The source of truth: `inventory` and `equipped` are the derived
    * id-keyed views (what the creature is drawn from, and cheap counts). */
   units: ItemUnit[];
+  /** Inventory Expansions bought; the grid's size is `bankCapacity` of this. */
+  bankExpansions: number;
   friends: Record<string, HerzieProfile>;
   pendingTradeRequest?: PendingTradeRequest | null;
   pendingFriendRequest?: PendingFriendRequest | null;

@@ -47,6 +47,11 @@ pub struct ManagedState {
     /// — the source of truth that `inventory`, `equipped` and `item_upgrades`
     /// are derived from server-side. Cached alongside them.
     pub units: Vec<ItemUnit>,
+    /// Inventory Expansions the player has bought — see `bankCapacity` in
+    /// @herzies/shared. Only the sync loop sets it: the purchase completes in
+    /// the browser and is credited by the Stripe webhook, so no response the app
+    /// makes carries it. Cached so the grid opens at its real size.
+    pub bank_expansions: u32,
     /// Friend profiles keyed by friend code (persisted when codes match).
     pub friends: HashMap<String, HerzieProfile>,
     /// Latest incoming trade from `/sync` (cleared when absent on a successful sync).
@@ -96,10 +101,12 @@ impl ManagedState {
             .as_ref()
             .map(|h| h.friend_codes.clone())
             .unwrap_or_default();
-        let (inventory, inventory_currency, item_upgrades, units) =
+        let (inventory, inventory_currency, item_upgrades, units, bank_expansions) =
             match crate::storage::load_inventory_cache() {
-                Some((inv, cur, upgrades, units)) => (Some(inv), cur, upgrades, units),
-                None => (None, 0, ItemUpgrades::new(), Vec::new()),
+                Some((inv, cur, upgrades, units, expansions)) => {
+                    (Some(inv), cur, upgrades, units, expansions)
+                }
+                None => (None, 0, ItemUpgrades::new(), Vec::new(), 0),
             };
         Self {
             herzie,
@@ -121,6 +128,7 @@ impl ManagedState {
             inventory_currency,
             item_upgrades,
             units,
+            bank_expansions,
             friends: crate::storage::load_friends_cache(&friend_codes),
             pending_trade_request: None,
             pending_friend_request: None,
@@ -165,6 +173,7 @@ impl ManagedState {
         self.inventory_currency = 0;
         self.item_upgrades.clear();
         self.units.clear();
+        self.bank_expansions = 0;
         self.friends.clear();
         self.pending_trade_request = None;
         self.pending_friend_request = None;
@@ -229,6 +238,7 @@ impl ManagedState {
             inventory_currency: self.inventory_currency,
             item_upgrades: self.item_upgrades.clone(),
             units: self.units.clone(),
+            bank_expansions: self.bank_expansions,
             friends: self.friends.clone(),
             pending_trade_request: self.pending_trade_request.clone(),
             pending_friend_request: self.pending_friend_request.clone(),
@@ -340,6 +350,7 @@ mod tests {
             inventory_currency: 0,
             item_upgrades: ItemUpgrades::new(),
             units: Vec::new(),
+            bank_expansions: 0,
             friends: HashMap::new(),
             pending_trade_request: None,
             pending_friend_request: None,

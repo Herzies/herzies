@@ -15,6 +15,7 @@ import { createClient } from "@supabase/supabase-js";
 import { corsHeaders, jsonResponse } from "../_shared/cors.ts";
 import {
   type BankItemLookup,
+  bankCapacity,
   getItem,
   hasRoomFor,
 } from "../_shared/shared/game-rules.ts";
@@ -83,7 +84,7 @@ Deno.serve(async (request) => {
         .maybeSingle(),
       admin
         .from("herzies")
-        .select("inventory_v2, equipped")
+        .select("inventory_v2, equipped, bank_expansions")
         .eq("user_id", user.id)
         .maybeSingle(),
     ]);
@@ -107,7 +108,15 @@ Deno.serve(async (request) => {
         category: "deck",
       });
 
-      if (!hasRoomFor(inventory, herzieRow.equipped, incoming, lookup)) {
+      if (
+        !hasRoomFor(
+          inventory,
+          herzieRow.equipped,
+          incoming,
+          bankCapacity(herzieRow.bank_expansions),
+          lookup,
+        )
+      ) {
         return jsonResponse(
           { error: "Inventory full", reason: "inventory-full" },
           409,

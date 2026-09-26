@@ -3,8 +3,10 @@ import {
   applyEquip,
   applyItemUpgrade,
   applySell,
+  BANK_EXPANSION_SLOTS,
   BANK_SLOT_COUNT,
   type BankItemLookup,
+  bankCapacity,
   bankSlotsUsed,
   bankTiles,
   bestUnitOf,
@@ -370,15 +372,19 @@ describe("bank capacity", () => {
       headphones: BANK_SLOT_COUNT - 2,
     };
     expect(bankSlotsUsed(inventory, {})).toBe(BANK_SLOT_COUNT);
-    expect(isBankFull(inventory, {})).toBe(true);
+    expect(isBankFull(inventory, {}, BANK_SLOT_COUNT)).toBe(true);
     expect(
-      isBankFull({ ...inventory, headphones: BANK_SLOT_COUNT - 3 }, {}),
+      isBankFull(
+        { ...inventory, headphones: BANK_SLOT_COUNT - 3 },
+        {},
+        BANK_SLOT_COUNT,
+      ),
     ).toBe(false);
   });
 
   it("treats a null/empty inventory as empty", () => {
     expect(bankSlotsUsed(null, {})).toBe(0);
-    expect(isBankFull(null, {})).toBe(false);
+    expect(isBankFull(null, {}, BANK_SLOT_COUNT)).toBe(false);
   });
 
   // No catalog item is both stackable and equipable any more (First Edition
@@ -678,12 +684,12 @@ describe("hasRoomFor", () => {
   it("allows a new item while there is a free slot", () => {
     const almost = fullBank();
     delete almost[`filler-0`];
-    expect(hasRoomFor(almost, {}, "cd")).toBe(true);
+    expect(hasRoomFor(almost, {}, "cd", BANK_SLOT_COUNT)).toBe(true);
   });
 
   it("blocks a new non-stackable item at capacity", () => {
-    expect(isBankFull(fullBank(), {})).toBe(true);
-    expect(hasRoomFor(fullBank(), {}, "cd")).toBe(false);
+    expect(isBankFull(fullBank(), {}, BANK_SLOT_COUNT)).toBe(true);
+    expect(hasRoomFor(fullBank(), {}, "cd", BANK_SLOT_COUNT)).toBe(false);
   });
 
   /** Treats only the named ids as stackable; everything else is not. */
@@ -699,25 +705,58 @@ describe("hasRoomFor", () => {
     // 17 one-per-slot fillers plus a stack that occupies exactly one slot.
     const full: Record<string, number> = { ...fullBank(), stack: 3 };
     delete full["filler-0"];
-    expect(isBankFull(full, {}, lookup)).toBe(true);
-    expect(hasRoomFor(full, {}, "stack", lookup)).toBe(true);
+    expect(isBankFull(full, {}, BANK_SLOT_COUNT, lookup)).toBe(true);
+    expect(hasRoomFor(full, {}, "stack", BANK_SLOT_COUNT, lookup)).toBe(true);
   });
 
   it("blocks a stackable not yet owned when full", () => {
     const lookup = stackableOnly("brand-new");
-    expect(isBankFull(fullBank(), {}, lookup)).toBe(true);
-    expect(hasRoomFor(fullBank(), {}, "brand-new", lookup)).toBe(false);
+    expect(isBankFull(fullBank(), {}, BANK_SLOT_COUNT, lookup)).toBe(true);
+    expect(
+      hasRoomFor(fullBank(), {}, "brand-new", BANK_SLOT_COUNT, lookup),
+    ).toBe(false);
   });
 
   it("counts an equipped copy as freeing its bank slot", () => {
     // Equipping reserves a unit as worn, so the bank has room again.
     const full = fullBank();
-    expect(hasRoomFor(full, { head: "filler-0" }, "cd")).toBe(true);
+    expect(hasRoomFor(full, { head: "filler-0" }, "cd", BANK_SLOT_COUNT)).toBe(
+      true,
+    );
   });
 
   it("treats an empty inventory as having room", () => {
-    expect(hasRoomFor(null, {}, "cd")).toBe(true);
-    expect(hasRoomFor({}, {}, "cd")).toBe(true);
+    expect(hasRoomFor(null, {}, "cd", BANK_SLOT_COUNT)).toBe(true);
+    expect(hasRoomFor({}, {}, "cd", BANK_SLOT_COUNT)).toBe(true);
+  });
+
+  it("has room in an expanded bank that a plain one has run out of", () => {
+    const expanded = bankCapacity(1);
+    expect(hasRoomFor(fullBank(), {}, "cd", BANK_SLOT_COUNT)).toBe(false);
+    expect(hasRoomFor(fullBank(), {}, "cd", expanded)).toBe(true);
+    expect(isBankFull(fullBank(), {}, expanded)).toBe(false);
+  });
+});
+
+describe("bankCapacity", () => {
+  it("is the starting bank when nothing has been bought", () => {
+    expect(bankCapacity(0)).toBe(BANK_SLOT_COUNT);
+  });
+
+  it("adds BANK_EXPANSION_SLOTS per expansion owned", () => {
+    expect(bankCapacity(1)).toBe(BANK_SLOT_COUNT + BANK_EXPANSION_SLOTS);
+    expect(bankCapacity(3)).toBe(BANK_SLOT_COUNT + 3 * BANK_EXPANSION_SLOTS);
+  });
+
+  it("treats a missing or junk count as none owned", () => {
+    expect(bankCapacity(undefined)).toBe(BANK_SLOT_COUNT);
+    expect(bankCapacity(null)).toBe(BANK_SLOT_COUNT);
+    expect(bankCapacity(-2)).toBe(BANK_SLOT_COUNT);
+    expect(bankCapacity(Number.NaN)).toBe(BANK_SLOT_COUNT);
+  });
+
+  it("grows the grid by whole rows of six", () => {
+    expect(BANK_EXPANSION_SLOTS % 6).toBe(0);
   });
 });
 

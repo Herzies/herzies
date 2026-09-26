@@ -12,6 +12,7 @@ import {
   applyItemUpgrade,
   applySell,
   BANK_SLOT_COUNT,
+  bankCapacity,
   bankTiles,
   bestUnitOf,
   DECK_SLOT_GROUPS,
@@ -23,7 +24,7 @@ import {
   RARITY_LABELS,
   unitsBestFirst,
 } from "@herzies/shared";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ToggleEquipResult } from "../hooks/useOptimisticUnits";
 import { cn, formatAmount } from "../lib/utils";
@@ -191,14 +192,23 @@ function SellBox({
 type InventoryTab = "cards" | "deck";
 
 const GRID_COLS = 6;
-const GRID_ROWS = 3;
-/** Fixed inventory capacity — 18 slots (6×3) for now, always shown whether
- * filled or empty. A freshly-seen item fills the first empty slot (in
- * current sort order); from there the player can drag items to any slot,
- * including swapping two filled ones. Sourced from @herzies/shared so
- * non-UI code (deciding whether to warn before a purchase or pickup) agrees
- * with this grid's actual capacity. */
-const TOTAL_SLOTS = BANK_SLOT_COUNT;
+/** Rows visible at once. Capacity starts at BANK_SLOT_COUNT (3 rows of 6) and
+ * grows by whole rows per Inventory Expansion, so the grid scrolls once it has
+ * more than this — see the row sizing below. */
+const VISIBLE_ROWS = 3;
+/** Row height to fall back on until the viewport has been measured (it is 0
+ * while this tab is hidden). */
+const FALLBACK_ROW_PX = 40;
+/** How close to the viewport's top/bottom edge a drag starts scrolling it. */
+const AUTOSCROLL_EDGE_PX = 28;
+const AUTOSCROLL_STEP_PX = 10;
+
+// Capacity is `bankCapacity(...)` from @herzies/shared — every slot shown
+// whether filled or empty. A freshly-seen item fills the first empty slot (in
+// current sort order); from there the player can drag items to any slot,
+// including swapping two filled ones. Sourced from @herzies/shared so non-UI
+// code (deciding whether to warn before a purchase or pickup) agrees with this
+// grid's actual capacity.
 
 /** v2: the arrangement is now keyed by tile (a copy's own id, or `stack:<item>`)
  * rather than by item id, so an arrangement saved under the old key — plain
@@ -208,18 +218,38 @@ const TOTAL_SLOTS = BANK_SLOT_COUNT;
 const slotStorageKey = (friendCode: string) =>
   `herzies:inventory-slots:v2:${friendCode}`;
 
-/** Loads the saved slot arrangement, padded/truncated to `TOTAL_SLOTS` and
- * with anything that isn't a string coerced to an empty slot. */
-function loadSlotOrder(friendCode: string): (string | null)[] {
+/** Pads a slot arrangement out to `capacity`, and trims empty slots off the end
+ * beyond it — but never a filled one. Capacity only ever grows, yet the view can
+ * briefly be handed a smaller one than the arrangement it saved (the app's state
+ * starts at zero expansions until the first sync lands), and truncating then
+ * would throw away where the player had put their cards. */
+function fitSlotOrder(
+  order: (string | null)[],
+  capacity: number,
+): (string | null)[] {
+  let length = order.length;
+  while (length > capacity && order[length - 1] === null) length--;
+  const fitted = order.slice(0, length);
+  while (fitted.length < capacity) fitted.push(null);
+  return fitted;
+}
+
+/** Loads the saved slot arrangement, fitted to `capacity` (see fitSlotOrder)
+ * and with anything that isn't a string coerced to an empty slot. */
+function loadSlotOrder(
+  friendCode: string,
+  capacity: number,
+): (string | null)[] {
   try {
     const raw = localStorage.getItem(slotStorageKey(friendCode));
     const parsed: unknown = raw ? JSON.parse(raw) : null;
-    if (!Array.isArray(parsed)) return Array(TOTAL_SLOTS).fill(null);
-    return Array.from({ length: TOTAL_SLOTS }, (_, i) =>
-      typeof parsed[i] === "string" ? parsed[i] : null,
+    if (!Array.isArray(parsed)) return Array(capacity).fill(null);
+    return fitSlotOrder(
+      parsed.map((k) => (typeof k === "string" ? k : null)),
+      capacity,
     );
   } catch {
-    return Array(TOTAL_SLOTS).fill(null);
+    return Array(capacity).fill(null);
   }
 }
 
@@ -287,13 +317,16 @@ function typeRank(itemId: string): number {
  *
  * `tiles` already arrives rarity-then-name sorted (see InventoryView's
  * `compareTiles`) and `sort` is stable, so ranking by type alone yields type →
- * rarity → name without a second comparator. Anything past `TOTAL_SLOTS` drops
+ * rarity → name without a second comparator. Anything past `slotCount` drops
  * off the grid, the same way `reconcileSlotOrder` drops it. */
-function sortSlotsByType(tiles: BankTile[]): (string | null)[] {
+function sortSlotsByType(
+  tiles: BankTile[],
+  slotCount: number,
+): (string | null)[] {
   const sorted = [...tiles].sort(
     (a, b) => typeRank(a.itemId) - typeRank(b.itemId),
   );
-  return Array.from({ length: TOTAL_SLOTS }, (_, i) => sorted[i]?.key ?? null);
+  return Array.from({ length: slotCount }, (_, i) => sorted[i]?.key ?? null);
 }
 
 /** Shared by both cell kinds: only the dragged cell dims, only the one
@@ -466,6 +499,7 @@ export function InventoryView({
   equipped,
   onToggleEquip,
   onPredictUnits,
+  bankExpansions,
   active = true,
 }: {
   herzie: Herzie;
@@ -491,9 +525,12 @@ export function InventoryView({
     update: (units: readonly ItemUnit[]) => ItemUnit[],
     settled: Promise<unknown>,
   ) => void;
+  /** Inventory Expansions bought — sets how many slots the grid has. */
+  bankExpansions: number;
   /** False while another tab is shown — pauses the 3D render. */
   active?: boolean;
 }) {
+  const capacity = bankCapacity(bankExpansions);
   const [currency, setCurrency] = useState(cachedCurrency || herzie.currency);
   /** Unsettled sells. While non-zero, an incoming snapshot is behind us. */
   const [sellsInFlight, setSellsInFlight] = useState(0);
@@ -527,8 +564,40 @@ export function InventoryView({
   const [slotPicker, setSlotPicker] = useState<EmptySlotTarget | null>(null);
   const [tab, setTab] = useState<InventoryTab>("cards");
   const [slotOrder, setSlotOrder] = useState<(string | null)[]>(() =>
-    loadSlotOrder(herzie.friendCode),
+    loadSlotOrder(herzie.friendCode, capacity),
   );
+  // Capacity arrives after mount (from the first sync, or right after a
+  // purchase), so the arrangement has to grow to meet it. Existing placements
+  // are untouched; the new slots are simply empty.
+  useEffect(() => {
+    setSlotOrder((prev) => {
+      const fitted = fitSlotOrder(prev, capacity);
+      return fitted.length === prev.length ? prev : fitted;
+    });
+  }, [capacity]);
+
+  /** The grid's scroll viewport, measured so each row is exactly a third of it:
+   * three rows fill the panel at any capacity and the rest scrolls. */
+  const gridViewportRef = useRef<HTMLDivElement | null>(null);
+  const [gridViewport, setGridViewport] = useState<HTMLDivElement | null>(null);
+  const [rowHeight, setRowHeight] = useState(0);
+  // A callback ref, not useRef + a mount effect: the viewport only exists on
+  // the Cards tab once the inventory has loaded, so it appears late (first
+  // load) and is replaced on every Deck -> Cards switch. Keying the observer on
+  // the element itself re-attaches it to whichever one is current.
+  const attachGridViewport = useCallback((el: HTMLDivElement | null) => {
+    gridViewportRef.current = el;
+    setGridViewport(el);
+  }, []);
+  useEffect(() => {
+    if (!gridViewport) return;
+    const measure = () =>
+      setRowHeight(gridViewport.clientHeight / VISIBLE_ROWS);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(gridViewport);
+    return () => observer.disconnect();
+  }, [gridViewport]);
   // { index, itemId } once a drag has actually started (past DRAG_THRESHOLD)
   // — null while just holding the button down without having moved yet.
   const [dragVisual, setDragVisual] = useState<{
@@ -549,6 +618,9 @@ export function InventoryView({
     startY: number;
     dragging: boolean;
     overIndex: number | null;
+    /** Latest cursor Y, for the edge auto-scroll loop. */
+    pointerY: number;
+    lastX: number;
   } | null>(null);
   // Set right before a real drag's pointerup so the click that (in a
   // browser) follows it gets ignored instead of also placing the item. Set
@@ -594,7 +666,10 @@ export function InventoryView({
         const dy = e.clientY - state.startY;
         if (Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
         state.dragging = true;
+        if (!frame) frame = requestAnimationFrame(autoScroll);
       }
+      state.pointerY = e.clientY;
+      state.lastX = e.clientX;
       const el = document.elementFromPoint(e.clientX, e.clientY);
       const slotEl = (el as HTMLElement | null)?.closest<HTMLElement>(
         `[${SLOT_INDEX_ATTR}]`,
@@ -610,6 +685,47 @@ export function InventoryView({
         x: e.clientX,
         y: e.clientY,
       });
+    };
+
+    // Scrolls the grid while a drag is held near its top or bottom edge, so a
+    // card can be dropped on a row that is currently off-screen. Runs on a frame
+    // loop rather than off pointermove: a cursor parked at the edge stops
+    // firing pointermove but should keep scrolling.
+    let frame = 0;
+    const autoScroll = () => {
+      const state = dragRef.current;
+      // Ends with the drag, so nothing runs per-frame while idle (this view
+      // stays mounted while another tab is showing).
+      if (!state?.dragging) {
+        frame = 0;
+        return;
+      }
+      frame = requestAnimationFrame(autoScroll);
+      const viewport = gridViewportRef.current;
+      // The scroller is List's own element, the viewport's only child.
+      const scroller = viewport?.firstElementChild;
+      if (!viewport || !(scroller instanceof HTMLElement)) return;
+      const rect = viewport.getBoundingClientRect();
+      if (state.pointerY < rect.top + AUTOSCROLL_EDGE_PX) {
+        scroller.scrollTop -= AUTOSCROLL_STEP_PX;
+      } else if (state.pointerY > rect.bottom - AUTOSCROLL_EDGE_PX) {
+        scroller.scrollTop += AUTOSCROLL_STEP_PX;
+      } else {
+        return;
+      }
+      // The cursor hasn't moved but the cell under it has: re-hit-test so the
+      // drop target follows the scroll.
+      const el = document.elementFromPoint(state.lastX, state.pointerY);
+      const slotEl = (el as HTMLElement | null)?.closest<HTMLElement>(
+        `[${SLOT_INDEX_ATTR}]`,
+      );
+      const overIndex = slotEl
+        ? Number(slotEl.getAttribute(SLOT_INDEX_ATTR))
+        : null;
+      if (overIndex !== state.overIndex) {
+        state.overIndex = overIndex;
+        setDragVisual((prev) => (prev ? { ...prev, overIndex } : prev));
+      }
     };
 
     const handlePointerUp = () => {
@@ -646,6 +762,7 @@ export function InventoryView({
     window.addEventListener("pointermove", handlePointerMove);
     window.addEventListener("pointerup", handlePointerUp);
     return () => {
+      if (frame) cancelAnimationFrame(frame);
       window.removeEventListener("pointerdown", handlePointerDown);
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
@@ -664,6 +781,8 @@ export function InventoryView({
       startY: e.clientY,
       dragging: false,
       overIndex: null,
+      pointerY: e.clientY,
+      lastX: e.clientX,
     };
   };
 
@@ -958,11 +1077,15 @@ export function InventoryView({
   // see reconcileSlotOrder. Keyed on the joined list (not `tiles`, a new array
   // whenever anything changes) so this only runs when the set of tiles does.
   const tileKeysJoined = tiles.map((t) => t.key).join(",");
+  // `capacity` is a dependency too: tiles that didn't fit before an expansion
+  // were left unplaced, and only a fresh reconcile seats them in the new slots.
+  // (The effect that pads the arrangement to the new capacity is declared
+  // earlier, so it has already run by the time this one reconciles.)
   useEffect(() => {
     setSlotOrder((prev) =>
       reconcileSlotOrder(prev, tileKeysJoined ? tileKeysJoined.split(",") : []),
     );
-  }, [tileKeysJoined]);
+  }, [tileKeysJoined, capacity]);
 
   useEffect(() => {
     try {
@@ -1076,7 +1199,9 @@ export function InventoryView({
                 <button
                   type="button"
                   aria-label="Quick sort"
-                  onClick={() => setSlotOrder(sortSlotsByType(tiles))}
+                  onClick={() =>
+                    setSlotOrder(sortSlotsByType(tiles, slotOrder.length))
+                  }
                   // Tighter vertical padding than TabButton's, so the taller
                   // icon doesn't grow the tab row: the flex row's default
                   // stretch sizes this button to the tabs anyway, and
@@ -1110,42 +1235,54 @@ export function InventoryView({
             Loading...
           </div>
         ) : (
-          <div className="grid min-h-0 flex-1 grid-cols-6 grid-rows-3">
-            {slotOrder.map((key, i) => {
-              const isLastCol = i % GRID_COLS === GRID_COLS - 1;
-              const isLastRow = i >= TOTAL_SLOTS - GRID_COLS;
-              const tile = key ? tileByKey.get(key) : undefined;
-              if (!tile) {
-                return (
-                  <EmptyGridCell
-                    key={`slot-${i}`}
-                    index={i}
-                    isLastCol={isLastCol}
-                    isLastRow={isLastRow}
-                    isDragOver={dragVisual?.overIndex === i}
-                  />
-                );
-              }
-              return (
-                <ItemGridCell
-                  key={`slot-${i}`}
-                  index={i}
-                  itemId={tile.itemId}
-                  qty={tile.unitIds.length}
-                  level={tile.upgradeLevel}
-                  isLastCol={isLastCol}
-                  isLastRow={isLastRow}
-                  isDragging={dragVisual?.index === i}
-                  isDragOver={dragVisual?.overIndex === i}
-                  equipped={equipped}
-                  onPlace={() => handleGridClick(tile)}
-                  onSellRequest={(x, y) =>
-                    setSellMenu({ tileKey: tile.key, x, y })
+          // Three rows fill the panel; past that (each Inventory Expansion adds
+          // two rows) it scrolls, with List's edge fades as the only hint —
+          // scrollbars are hidden app-wide.
+          <div ref={attachGridViewport} className="min-h-0 flex-1">
+            <List className="h-full">
+              <div
+                className="grid grid-cols-6"
+                style={{
+                  gridAutoRows: `${rowHeight > 0 ? rowHeight : FALLBACK_ROW_PX}px`,
+                }}
+              >
+                {slotOrder.map((key, i) => {
+                  const isLastCol = i % GRID_COLS === GRID_COLS - 1;
+                  const isLastRow = i >= slotOrder.length - GRID_COLS;
+                  const tile = key ? tileByKey.get(key) : undefined;
+                  if (!tile) {
+                    return (
+                      <EmptyGridCell
+                        key={`slot-${i}`}
+                        index={i}
+                        isLastCol={isLastCol}
+                        isLastRow={isLastRow}
+                        isDragOver={dragVisual?.overIndex === i}
+                      />
+                    );
                   }
-                  onDragPointerDown={handleDragPointerDown}
-                />
-              );
-            })}
+                  return (
+                    <ItemGridCell
+                      key={`slot-${i}`}
+                      index={i}
+                      itemId={tile.itemId}
+                      qty={tile.unitIds.length}
+                      level={tile.upgradeLevel}
+                      isLastCol={isLastCol}
+                      isLastRow={isLastRow}
+                      isDragging={dragVisual?.index === i}
+                      isDragOver={dragVisual?.overIndex === i}
+                      equipped={equipped}
+                      onPlace={() => handleGridClick(tile)}
+                      onSellRequest={(x, y) =>
+                        setSellMenu({ tileKey: tile.key, x, y })
+                      }
+                      onDragPointerDown={handleDragPointerDown}
+                    />
+                  );
+                })}
+              </div>
+            </List>
           </div>
         )}
       </div>

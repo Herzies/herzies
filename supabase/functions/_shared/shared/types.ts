@@ -134,6 +134,9 @@ export interface SyncResponse {
   /** Dice-upgrade levels (itemId -> 0-3), carried for the same reason as
    * `inventory` — see applyItemUpgrade / MAX_ITEM_UPGRADE_LEVEL. */
   itemUpgrades: Record<string, number>;
+  /** Inventory Expansions the player owns — see `bankCapacity`. Optional so a
+   * client built against an older server still typechecks; absent means none. */
+  bankExpansions?: number;
 }
 
 /** Notification that another player wants to trade */
@@ -367,6 +370,11 @@ export interface StoreProduct {
  * its own item catalog under `itemId`, and duplicating it here would create a
  * second copy to drift out of sync. Stripe owns the price, the catalog owns
  * the presentation, and `itemId` is the join.
+ *
+ * The one exception is the Inventory Expansion, which is not a catalog item:
+ * it arrives with `itemId === BANK_EXPANSION.id` and its presentation comes
+ * from the `BANK_EXPANSION` constant instead. A client that finds `itemId` in
+ * neither place should ignore the listing.
  */
 export interface PremiumItem {
   itemId: string;

@@ -1,4 +1,5 @@
 import {
+  bankCapacity,
   bossDamagePerMinute,
   getHerzieStats,
   getHerzieStatsFromUnits,
@@ -74,7 +75,9 @@ export function HomeView({
     itemUpgrades,
     units,
     pendingDrops,
+    bankExpansions,
   } = state;
+  const capacity = bankCapacity(bankExpansions);
   const [globalRank, setGlobalRank] = useState<number | undefined>(undefined);
   const [globalTotal, setGlobalTotal] = useState<number | undefined>(undefined);
   const [collectingIds, setCollectingIds] = useState<Set<string>>(new Set());
@@ -113,7 +116,7 @@ export function HomeView({
   const hasSpiritOrb =
     equipped.ground_left === "spirit-orb" ||
     equipped.ground_right === "spirit-orb";
-  const bankFull = isBankFull(inventory, equipped);
+  const bankFull = isBankFull(inventory, equipped, capacity);
   // Any number of drops can be pending at once — every item is independently
   // collectible.
   const dropItems: GroundDrop[] = pendingDrops.map((d) => ({
@@ -135,7 +138,7 @@ export function HomeView({
     //
     // hasRoomFor, not isBankFull: another copy of a stackable already in the
     // bank shares its slot and still fits at capacity.
-    if (!hasRoomFor(inventory, equipped, drop.itemId)) {
+    if (!hasRoomFor(inventory, equipped, drop.itemId, capacity)) {
       const name = getItem(drop.itemId)?.name ?? drop.itemId;
       onActivity?.(`Inventory full — couldn't pick up "${name}"`);
       return false;

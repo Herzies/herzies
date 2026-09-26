@@ -1,21 +1,40 @@
-import { getItem, hasRoomFor, normalizeEquipped } from "@herzies/shared";
+import {
+  BANK_EXPANSION,
+  bankCapacity,
+  getItem,
+  hasRoomFor,
+  MAX_BANK_EXPANSIONS,
+  normalizeEquipped,
+} from "@herzies/shared";
 import { NextResponse } from "next/server";
 import { authenticateRequest, isAuthError } from "@/lib/auth";
 import { checkoutSchema, isParseError, parseBody } from "@/lib/schemas";
 import { getStripe } from "@/lib/stripe";
 import { createAdminClient } from "@/lib/supabase-admin";
 
+/** What a premium purchase grants: a catalog item, or one Inventory Expansion
+ * (which is not an item — see BANK_EXPANSION). */
+type PremiumKind = "item" | "bank-expansion";
+
 /**
- * Resolves a premium item for sale, by the same rule the /store/premium
+ * Resolves a premium good for sale, by the same rule the /store/premium
  * listing uses: an active Stripe product whose `metadata.item_id` names a
- * real catalog item. Returns the price to charge and the item to grant.
+ * real catalog item, or whose `metadata.perk_id` is the Inventory Expansion.
+ * Returns the price to charge and what to grant.
  *
- * The item and the price are both read from Stripe here rather than taken
- * from the request. The client only ever names *which* item it wants — it can
- * neither choose the price nor smuggle in an item that isn't for sale.
+ * The good and the price are both read from Stripe here rather than taken
+ * from the request. The client only ever names *which* good it wants — it can
+ * neither choose the price nor smuggle in something that isn't for sale.
  */
-async function findPremiumItem(itemId: string) {
-  if (!getItem(itemId)) return null;
+async function findPremiumItem(
+  id: string,
+): Promise<{ priceId: string; kind: PremiumKind } | null> {
+  const kind: PremiumKind | null = getItem(id)
+    ? "item"
+    : id === BANK_EXPANSION.id
+      ? "bank-expansion"
+      : null;
+  if (!kind) return null;
 
   const stripe = getStripe();
   const products = await stripe.products.list({
@@ -25,11 +44,13 @@ async function findPremiumItem(itemId: string) {
   });
 
   for (const product of products.data) {
-    if (product.metadata?.item_id !== itemId) continue;
+    const listedAs =
+      kind === "item" ? product.metadata?.item_id : product.metadata?.perk_id;
+    if (listedAs !== id) continue;
     const price = product.default_price;
     if (!price || typeof price === "string") continue;
     if (!price.active || price.unit_amount == null) continue;
-    return { priceId: price.id };
+    return { priceId: price.id, kind };
   }
   return null;
 }
@@ -54,7 +75,7 @@ export async function POST(request: Request) {
   // `productId` is either an active coin pack or, failing that, a catalog item
   // id sold for money. Coin packs are checked first so a future item id that
   // collides with a pack id can't shadow it.
-  let premium: { priceId: string } | null = null;
+  let premium: { priceId: string; kind: PremiumKind } | null = null;
   if (!product?.active) {
     if (!process.env.STRIPE_SECRET_KEY) {
       return NextResponse.json({ error: "Product not found" }, { status: 404 });
@@ -64,28 +85,43 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Product not found" }, { status: 404 });
     }
 
-    // Refuse before taking money if there is nowhere to put the item. The
-    // bank is a fixed 18 slots and an over-capacity item simply does not
-    // render, so without this a player could pay for something they cannot
-    // see. The webhook re-checks at grant time, since the bank can fill while
-    // Stripe Checkout is open; there it diverts to the ground rather than
-    // refusing, because by then the money is taken.
     const { data: herzie } = await admin
       .from("herzies")
-      .select("inventory_v2, equipped")
+      .select("inventory_v2, equipped, bank_expansions")
       .eq("user_id", auth.userId)
       .single();
 
-    const room = hasRoomFor(
-      (herzie?.inventory_v2 ?? {}) as Record<string, number>,
-      normalizeEquipped(herzie?.equipped),
-      productId,
-    );
-    if (!room) {
-      return NextResponse.json(
-        { error: "Your bank is full — sell something first" },
-        { status: 409 },
+    if (premium.kind === "bank-expansion") {
+      // Nothing is placed in the bank, so a full bank is no reason to refuse —
+      // it is exactly when someone wants this. The only limit is the cap, and
+      // it is checked here, before money is taken, never at fulfilment (where
+      // refusing would destroy a paid purchase). Two checkouts opened at once
+      // can therefore overshoot it by one, which is harmless.
+      if ((herzie?.bank_expansions ?? 0) >= MAX_BANK_EXPANSIONS) {
+        return NextResponse.json(
+          { error: "You already have the maximum inventory size" },
+          { status: 409 },
+        );
+      }
+    } else {
+      // Refuse before taking money if there is nowhere to put the item. The
+      // bank is a fixed number of slots (bankCapacity) and an over-capacity
+      // item simply does not render, so without this a player could pay for
+      // something they cannot see. The webhook re-checks at grant time, since
+      // the bank can fill while Stripe Checkout is open; there it diverts to
+      // the ground rather than refusing, because by then the money is taken.
+      const room = hasRoomFor(
+        (herzie?.inventory_v2 ?? {}) as Record<string, number>,
+        normalizeEquipped(herzie?.equipped),
+        productId,
+        bankCapacity(herzie?.bank_expansions),
       );
+      if (!room) {
+        return NextResponse.json(
+          { error: "Your bank is full — sell something first" },
+          { status: 409 },
+        );
+      }
     }
   }
 
@@ -108,9 +144,10 @@ export async function POST(request: Request) {
       user_id: auth.userId,
       product_id: productId,
       stripe_checkout_session_id: sessionId,
-      // currency_amount is NOT NULL; an item purchase credits no coins.
+      // currency_amount is NOT NULL; an item or expansion credits no coins.
       currency_amount: premium ? 0 : (product?.currency_amount ?? 0),
-      grant_item_id: premium ? productId : null,
+      grant_item_id: premium?.kind === "item" ? productId : null,
+      grant_bank_expansions: premium?.kind === "bank-expansion" ? 1 : null,
     });
 
     if (insertError) {
@@ -169,7 +206,8 @@ export async function POST(request: Request) {
     product_id: productId,
     stripe_checkout_session_id: session.id,
     currency_amount: premium ? 0 : (product?.currency_amount ?? 0),
-    grant_item_id: premium ? productId : null,
+    grant_item_id: premium?.kind === "item" ? productId : null,
+    grant_bank_expansions: premium?.kind === "bank-expansion" ? 1 : null,
   });
 
   if (insertError) {

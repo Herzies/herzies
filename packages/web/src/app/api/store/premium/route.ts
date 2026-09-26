@@ -1,4 +1,4 @@
-import { getItem } from "@herzies/shared";
+import { BANK_EXPANSION, getItem } from "@herzies/shared";
 import { NextResponse } from "next/server";
 import { authenticateRequest, isAuthError } from "@/lib/auth";
 import { getStripe } from "@/lib/stripe";
@@ -12,6 +12,11 @@ import { getStripe } from "@/lib/stripe";
  * premium item is a Dashboard action — no migration, no deploy, no app
  * release. (Stripe only lets a custom product id be set through the API, not
  * the Dashboard, which is why the join lives in metadata instead.)
+ *
+ * The Inventory Expansion is listed the same way but joined on
+ * `metadata.perk_id` instead, since it is not a catalog item; it comes back in
+ * `items` under `itemId: BANK_EXPANSION.id`. The client tells the two apart by
+ * whether that id is in its catalog.
  *
  * Deliberately returns no name, art or description. The client already has
  * all of that in its own catalog under the same id, and echoing it here would
@@ -48,12 +53,18 @@ export async function GET(request: Request) {
   }
 
   const items = products.data.flatMap((product) => {
-    const itemId = product.metadata?.item_id;
-    // `metadata.item_id` is free text typed into the Stripe Dashboard, so
-    // treat it as untrusted: a typo here would otherwise list a card the
-    // client cannot render, and — worse — sell it. Same posture as
-    // filterDroppablePool takes with the items table.
-    if (!itemId || !getItem(itemId)) return [];
+    // `metadata.item_id` / `metadata.perk_id` are free text typed into the
+    // Stripe Dashboard, so treat them as untrusted: a typo here would otherwise
+    // list something the client cannot render, and — worse — sell it. Same
+    // posture as filterDroppablePool takes with the items table.
+    const rawItemId = product.metadata?.item_id;
+    const itemId =
+      rawItemId && getItem(rawItemId)
+        ? rawItemId
+        : product.metadata?.perk_id === BANK_EXPANSION.id
+          ? BANK_EXPANSION.id
+          : null;
+    if (!itemId) return [];
 
     const price = product.default_price;
     if (!price || typeof price === "string") return [];

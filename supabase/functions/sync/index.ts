@@ -121,6 +121,9 @@ Deno.serve(async (request) => {
       inventory: result.inventory,
       equipped: result.equipped,
       itemUpgrades: result.itemUpgrades,
+      // Drives the inventory grid's size (bankCapacity). Bought through the
+      // Stripe webhook, so this is the only way it reaches the app.
+      bankExpansions: result.bankExpansions,
     });
   } catch (err) {
     const message =
