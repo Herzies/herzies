@@ -2092,12 +2092,7 @@ const NOTE_COLOR = "#7ec8e3";
 const NOTE_SHINE_COLOR = "#c9f0ff";
 
 /** Distance to the segment a-b, fattened to radius r (a capsule). */
-function capsuleSdf(
-  p: V3,
-  a: V3,
-  b: V3,
-  r: number,
-): number {
+function capsuleSdf(p: V3, a: V3, b: V3, r: number): number {
   const pa: V3 = [p[0] - a[0], p[1] - a[1], p[2] - a[2]];
   const ba: V3 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
   const h = Math.min(1, Math.max(0, dot3(pa, ba) / dot3(ba, ba)));
@@ -2183,7 +2178,9 @@ function renderSongHuntNoteFrame(yAngle: number): string[] {
       );
       const ch = RAMP_ITEM[idx];
       row +=
-        ch === " " ? " " : col(bright > 0.85 ? NOTE_SHINE_COLOR : NOTE_COLOR, ch);
+        ch === " "
+          ? " "
+          : col(bright > 0.85 ? NOTE_SHINE_COLOR : NOTE_COLOR, ch);
     }
     rows.push(row);
   }

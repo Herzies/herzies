@@ -1,6 +1,7 @@
 import {
   BOSS_BODY_TYPE,
   DEFAULT_Y_ANGLE,
+  GOLD_SCHEME_ID,
   generateCreatureParams,
   ItemPreview,
   Herzie3D as SharedHerzie3D,
@@ -12,8 +13,10 @@ import { cn } from "../lib/utils";
 /** Square footprint of every emblem, so the cards line up. */
 const BOX = 56;
 
-/** George's look: one fixed seed, so he's the same herzie for everyone. */
+/** George's look: one fixed seed, so he's the same herzie for everyone —
+ * painted solid gold, because George is rich and wants you to know it. */
 const GEORGE_SEED = "npc:good-ol-george";
+const GEORGE_EQUIPPED = { color: GOLD_SCHEME_ID };
 
 /**
  * The little 3D mascot on each Events card: the boss you'll face (seeded by
@@ -59,6 +62,7 @@ export function EventEmblem({
       <SharedHerzie3D
         userId={GEORGE_SEED}
         stage={2}
+        equipped={GEORGE_EQUIPPED}
         size={1.9}
         cols={40}
         animate={false}

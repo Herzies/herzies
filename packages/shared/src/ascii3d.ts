@@ -106,6 +106,21 @@ export const TEAL_RAMP = [
 ] as const;
 
 /**
+ * Gold ramp for Good ol' George, the rich (and slightly sleazy) merchant NPC.
+ * Like VOID_RAMP it is not built around a CREATURE_PALETTE hue and no item
+ * grants it: polished highlights down to a deep bronze, so he reads as
+ * solid gold rather than as the palette's amber herzie.
+ */
+export const GOLD_RAMP = [
+  "#FFF4B8",
+  "#FFE066",
+  "#F5C518",
+  "#D4A017",
+  "#A67C00",
+  "#6E5200",
+] as const;
+
+/**
  * Boss ramp — the only ramp that is not built around a CREATURE_PALETTE hue,
  * because a boss is deliberately not a colour a herzie could hatch with.
  *
