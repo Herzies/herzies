@@ -405,7 +405,7 @@ export function EventsView({
         childrenClassName="flex min-h-0 flex-col"
       >
         <List className="min-h-0 flex-1">
-          <div className="flex flex-col divide-y divide-border">
+          <div className="flex flex-col">
             {cards.map((card) => (
               <EventCardRow
                 key={`${card.type}-${card.eventId ?? card.status}`}
@@ -841,6 +841,8 @@ function formatIn(at: string): string {
   return `${Math.max(1, minutes)}m`;
 }
 
+/** A row styled like ItemRow (the inventory/store lists): name over a small
+ * dim subtitle, with the status and countdown on the right. */
 function EventCardRow({
   card,
   onOpen,
@@ -848,53 +850,57 @@ function EventCardRow({
   card: EventCard;
   onOpen?: () => void;
 }) {
-  const idle = card.status === "idle";
+  const subtitle = card.description ?? card.detail;
 
-  const body = (
-    <div className="min-w-0">
-      <div className="flex items-center justify-between gap-2">
-        <span className="truncate text-ui font-bold">{card.title}</span>
-        {card.status === "live" ? (
-          <span className="flex items-center gap-1 text-ui-sm font-bold text-green">
-            <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-green" />
-            LIVE
-          </span>
-        ) : card.status === "scheduled" ? (
-          <span className="text-ui-sm text-yellow">SCHEDULED</span>
-        ) : null}
+  const left = (
+    <div className="min-w-0 flex-1">
+      <div className="truncate text-ui text-text group-hover:text-cyan">
+        {card.title}
       </div>
-      <div className="flex items-center justify-between gap-2 text-ui text-text-dim">
-        <span className="truncate">{card.description}</span>
-        {card.at ? (
-          <span className="shrink-0">
-            {card.status === "live"
-              ? `ends in ${formatIn(card.at)}`
-              : `in ${formatIn(card.at)}`}
-          </span>
-        ) : null}
-      </div>
-      {card.detail ? (
-        <div className="truncate text-ui-sm text-text-dim">{card.detail}</div>
+      {subtitle ? (
+        <div className="truncate text-[10px] text-text-dim">{subtitle}</div>
       ) : null}
     </div>
   );
 
-  // Live at full strength; scheduled a little dimmer; nothing-on dimmer still.
-  const frame = cn(
-    "block w-full py-2 text-left",
-    card.status === "scheduled" && "opacity-65",
-    idle && "opacity-50",
-  );
-
-  return onOpen ? (
-    <button
-      type="button"
-      onClick={onOpen}
-      className={cn(frame, "cursor-pointer hover:bg-bg-panel")}
+  return (
+    <div
+      className={cn(
+        "flex items-center justify-between gap-2 border-b border-[#222] py-1.5",
+        // Live at full strength; scheduled a little dimmer; nothing-on dimmer
+        // still.
+        card.status === "scheduled" && "opacity-65",
+        card.status === "idle" && "opacity-50",
+      )}
     >
-      {body}
-    </button>
-  ) : (
-    <div className={frame}>{body}</div>
+      {onOpen ? (
+        <button
+          type="button"
+          onClick={onOpen}
+          className="group flex min-w-0 flex-1 cursor-pointer items-center text-left"
+        >
+          {left}
+        </button>
+      ) : (
+        left
+      )}
+      <div className="shrink-0 text-right">
+        {card.status === "live" ? (
+          <div className="flex items-center justify-end gap-1 text-[10px] font-bold text-green">
+            <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-green" />
+            LIVE
+          </div>
+        ) : card.status === "scheduled" ? (
+          <div className="text-[10px] text-yellow">SCHEDULED</div>
+        ) : null}
+        {card.at ? (
+          <div className="text-[10px] text-text-dim">
+            {card.status === "live"
+              ? `ends in ${formatIn(card.at)}`
+              : `in ${formatIn(card.at)}`}
+          </div>
+        ) : null}
+      </div>
+    </div>
   );
 }
