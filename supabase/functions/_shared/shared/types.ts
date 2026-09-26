@@ -2,7 +2,7 @@
 // Source: packages/shared/src/types.ts
 // Run `pnpm vendor:shared` after changing the original.
 
-import type { Equipped, ItemUnit } from "./items.ts";
+import type { Equipped, HerzieStats, ItemUnit } from "./items.ts";
 
 export interface HerzieAppearance {
   headIndex: number;
@@ -73,6 +73,11 @@ export interface HerzieProfile {
   appearance?: HerzieAppearance;
   topArtists?: { name: string; plays: number }[];
   equipped?: Equipped;
+  /** What the equipped items (and their dice upgrades) add up to — see
+   * getHerzieStats. Public game data, so present whether or not the viewer is
+   * a friend. Absent from a server, or a cache, that predates it; clients fall
+   * back to summing `equipped` themselves (which misses upgrades). */
+  stats?: HerzieStats;
   nowPlaying?: { title: string; artist: string; albumArtUrl?: string } | null;
   lastPlayed?: {
     title: string;

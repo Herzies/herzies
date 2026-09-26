@@ -1,4 +1,8 @@
-import { isModifierEquipped, normalizeEquipped } from "@herzies/shared";
+import {
+  getHerzieStats,
+  isModifierEquipped,
+  normalizeEquipped,
+} from "@herzies/shared";
 import { NextResponse } from "next/server";
 import { authenticateRequest, isAuthError } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase-admin";
@@ -47,7 +51,7 @@ export async function GET(request: Request) {
     const { data, error } = await admin
       .from("herzies")
       .select(
-        "user_id, name, friend_code, stage, level, currency, appearance, equipped, now_playing",
+        "user_id, name, friend_code, stage, level, currency, appearance, equipped, item_upgrades, now_playing",
       )
       .eq("friend_code", singleCode.toUpperCase().trim())
       .single();
@@ -98,7 +102,7 @@ export async function GET(request: Request) {
   const { data, error } = await admin
     .from("herzies")
     .select(
-      "user_id, name, friend_code, stage, level, currency, appearance, equipped, now_playing",
+      "user_id, name, friend_code, stage, level, currency, appearance, equipped, item_upgrades, now_playing",
     )
     .in("friend_code", codes);
 
@@ -155,6 +159,8 @@ type HerzieRow = {
   currency: number | null;
   appearance: unknown;
   equipped: unknown;
+  /** Level of the worn copy of each item — see getHerzieStats. */
+  item_upgrades: Record<string, number> | null;
   now_playing: {
     title?: string;
     artist?: string;
@@ -194,6 +200,10 @@ function formatProfile(
     appearance: row.appearance,
     topArtists: canSeeListening ? topArtists : [],
     equipped: normalizeEquipped(row.equipped),
+    // Game stats, not listening data, so unlike the fields around it this is
+    // sent to everyone. Computed here rather than by the client because the
+    // dice-upgrade levels that feed it are not part of the profile.
+    stats: getHerzieStats(normalizeEquipped(row.equipped), row.item_upgrades),
     nowPlaying: canSeeListening ? formatNowPlaying(row.now_playing) : null,
     lastPlayed: canSeeListening ? lastPlayed : null,
     songHuntWins,

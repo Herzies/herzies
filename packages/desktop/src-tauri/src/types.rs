@@ -56,6 +56,11 @@ pub struct HerzieProfile {
     pub top_artists: Option<Vec<TopArtist>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub equipped: Option<HashMap<String, serde_json::Value>>,
+    /// Stat totals (statKey -> value) — see `getHerzieStats` in
+    /// @herzies/shared. Keyed by name rather than a fixed struct so a new stat
+    /// on the server does not need a Rust change to reach the UI.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stats: Option<HashMap<String, f64>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub now_playing: Option<ProfileNowPlaying>,
     #[serde(skip_serializing_if = "Option::is_none")]
