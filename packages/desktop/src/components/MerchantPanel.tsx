@@ -140,58 +140,54 @@ export function MerchantPanel({
         <SpeechBubble line={line} typed={typed} />
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col">
-        {/* Same section label as the hunt's "Clues" / "Finders". */}
-        <div className="mb-1 text-[10px] text-text-dim">Items</div>
-        <List className="min-h-0 flex-1">
-          {stock.length === 0 ? (
-            <div className="text-ui text-text-dim">
-              George has nothing left to sell.
-            </div>
-          ) : (
-            stock.map((line) => {
-              const reason = blockedReason(line, currency);
-              const pending = pendingItemId === line.itemId;
-              const button = (
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={!!reason || pendingItemId !== null}
-                  onClick={() => buy(line.itemId)}
-                >
-                  {pending ? "Buying..." : "Buy"}
-                </button>
-              );
-              const details = [
-                line.remaining != null ? `${line.remaining} left` : null,
-                line.perPlayerLimit != null
-                  ? `${line.yourBought}/${line.perPlayerLimit} bought`
-                  : line.yourBought > 0
-                    ? `${line.yourBought} bought`
-                    : null,
-              ].filter(Boolean);
-              return (
-                <ItemRow
-                  key={line.itemId}
-                  itemId={line.itemId}
-                  onInspect={setInspectItemId}
-                  inspectTitle="Inspect card"
-                  colour="yellow"
-                  subtitle={
-                    <>
-                      <Coin amount={line.price} />
-                      {details.length > 0 && ` · ${details.join(" · ")}`}
-                    </>
-                  }
-                  action={
-                    reason ? <Tooltip label={reason}>{button}</Tooltip> : button
-                  }
-                />
-              );
-            })
-          )}
-        </List>
-      </div>
+      <List className="min-h-0 flex-1">
+        {stock.length === 0 ? (
+          <div className="text-ui text-text-dim">
+            George has nothing left to sell.
+          </div>
+        ) : (
+          stock.map((line) => {
+            const reason = blockedReason(line, currency);
+            const pending = pendingItemId === line.itemId;
+            const button = (
+              <button
+                type="button"
+                className="btn"
+                disabled={!!reason || pendingItemId !== null}
+                onClick={() => buy(line.itemId)}
+              >
+                {pending ? "Buying..." : "Buy"}
+              </button>
+            );
+            const details = [
+              line.remaining != null ? `${line.remaining} left` : null,
+              line.perPlayerLimit != null
+                ? `${line.yourBought}/${line.perPlayerLimit} bought`
+                : line.yourBought > 0
+                  ? `${line.yourBought} bought`
+                  : null,
+            ].filter(Boolean);
+            return (
+              <ItemRow
+                key={line.itemId}
+                itemId={line.itemId}
+                onInspect={setInspectItemId}
+                inspectTitle="Inspect card"
+                colour="yellow"
+                subtitle={
+                  <>
+                    <Coin amount={line.price} />
+                    {details.length > 0 && ` · ${details.join(" · ")}`}
+                  </>
+                }
+                action={
+                  reason ? <Tooltip label={reason}>{button}</Tooltip> : button
+                }
+              />
+            );
+          })
+        )}
+      </List>
 
       {error && (
         <div className="pt-1 text-center text-[10px] text-red">{error}</div>
