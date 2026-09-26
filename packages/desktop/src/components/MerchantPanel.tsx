@@ -14,6 +14,7 @@ import {
 import { useEffect, useState } from "react";
 import { herzies } from "../tauri-bridge";
 import { Coin } from "./Coin";
+import { FloatingCoins } from "./FloatingCoins";
 import ItemInspectOverlay from "./ItemInspectOverlay";
 import { ItemRow } from "./ItemRow";
 import { List } from "./List";
@@ -135,6 +136,7 @@ export function MerchantPanel({
             ariaLabel="Good ol' George"
           />
         </div>
+        <FloatingCoins paused={paused} />
         <SpeechBubble line={line} typed={typed} />
       </div>
 
