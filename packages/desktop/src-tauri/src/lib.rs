@@ -864,7 +864,10 @@ async fn fetch_leaderboard(board: Option<String>) -> Result<serde_json::Value, S
 async fn fetch_active_events() -> Result<serde_json::Value, String> {
     let client = Client::new();
     match api::api_fetch_active_events(&client).await {
-        Some(events) => Ok(serde_json::json!({ "events": events })),
+        Some(data) => Ok(serde_json::json!({
+            "events": data.events,
+            "upcoming": data.upcoming,
+        })),
         None => Ok(serde_json::json!({ "events": [] })),
     }
 }
@@ -1832,7 +1835,10 @@ async fn events_watch_loop(app: AppHandle) {
             continue;
         }
 
-        let Some(events) = api::api_fetch_active_events(&client).await else {
+        let Some(events) = api::api_fetch_active_events(&client)
+            .await
+            .map(|data| data.events)
+        else {
             continue;
         };
 

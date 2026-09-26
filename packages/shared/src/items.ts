@@ -2076,6 +2076,119 @@ export const BANK_EXPANSION = {
   frames: biggerBagFrames,
 };
 
+// --- Song Hunt emblem ---
+//
+// A spinning eighth note for the Song Hunt card on the desktop Events tab.
+// Not an item either — like the Bigger Bag it only needs `frames` so
+// ItemPreview can spin it. Same sphere-traced SDF approach as the bag.
+
+const NOTE_SCALE = 1.35;
+const NOTE_TILT = -8 * (Math.PI / 180);
+const NOTE_COLOR = "#7ec8e3";
+const NOTE_SHINE_COLOR = "#c9f0ff";
+
+/** Distance to the segment a-b, fattened to radius r (a capsule). */
+function capsuleSdf(p: V3, a: V3, b: V3, r: number): number {
+  const pa: V3 = [p[0] - a[0], p[1] - a[1], p[2] - a[2]];
+  const ba: V3 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+  const h = Math.min(1, Math.max(0, dot3(pa, ba) / dot3(ba, ba)));
+  return (
+    Math.hypot(pa[0] - ba[0] * h, pa[1] - ba[1] * h, pa[2] - ba[2] * h) - r
+  );
+}
+
+/** The note in its own space (y grows downward): a tilted oval head at the
+ * bottom left, a stem up its right side, and a flag curling off the top. */
+function noteSdf(x: number, y: number, z: number): number {
+  // Head: an ellipsoid rotated so it leans like a printed notehead.
+  const hx = x + 0.22;
+  const hy = y - 0.52;
+  const c = Math.cos(0.45);
+  const sn = Math.sin(0.45);
+  const rx = (hx * c - hy * sn) / 0.34;
+  const ry = (hx * sn + hy * c) / 0.24;
+  const rz = z / 0.2;
+  const k0 = Math.hypot(rx, ry, rz);
+  const head = (k0 - 1) * 0.2;
+
+  const stem = capsuleSdf([x, y, z], [0.08, 0.45, 0], [0.08, -0.9, 0], 0.055);
+  // Flag: two short capsules bending out and down from the top of the stem.
+  const flag = Math.min(
+    capsuleSdf([x, y, z], [0.08, -0.9, 0], [0.34, -0.62, 0], 0.07),
+    capsuleSdf([x, y, z], [0.34, -0.62, 0], [0.4, -0.3, 0], 0.06),
+  );
+  return Math.min(head, stem, flag);
+}
+
+function noteNormal(x: number, y: number, z: number): V3 {
+  const e = 0.01;
+  return normV([
+    noteSdf(x + e, y, z) - noteSdf(x - e, y, z),
+    noteSdf(x, y + e, z) - noteSdf(x, y - e, z),
+    noteSdf(x, y, z + e) - noteSdf(x, y, z - e),
+  ]);
+}
+
+function renderSongHuntNoteFrame(yAngle: number): string[] {
+  const kx = CAM * SW * 0.22 * CHAR_ASPECT;
+  const ky = CAM * SH * 0.28;
+  const rows: string[] = [];
+  for (let sy = 0; sy < SH; sy++) {
+    let row = "";
+    for (let sx = 0; sx < SW; sx++) {
+      const dir = normV([
+        (sx + 0.5 - SW / 2) / kx,
+        (sy + 0.5 - SH / 2) / ky,
+        1,
+      ]);
+      const o = rotY(rotZ([0, 0, -CAM], -NOTE_TILT), -yAngle);
+      const d = rotY(rotZ(dir, -NOTE_TILT), -yAngle);
+      let t = CAM - 2.4;
+      let hit = false;
+      for (let i = 0; i < 64 && t < CAM + 2.4; i++) {
+        const dist =
+          noteSdf(
+            (o[0] + d[0] * t) / NOTE_SCALE,
+            (o[1] + d[1] * t) / NOTE_SCALE,
+            (o[2] + d[2] * t) / NOTE_SCALE,
+          ) * NOTE_SCALE;
+        if (dist < 0.004) {
+          hit = true;
+          break;
+        }
+        t += dist;
+      }
+      if (!hit) {
+        row += " ";
+        continue;
+      }
+      const x = (o[0] + d[0] * t) / NOTE_SCALE;
+      const y = (o[1] + d[1] * t) / NOTE_SCALE;
+      const z = (o[2] + d[2] * t) / NOTE_SCALE;
+      const n = rotZ(rotY(noteNormal(x, y, z), yAngle), NOTE_TILT);
+      const diffuse = Math.max(0, dot3(n, LIGHT));
+      const bright = 0.3 + 0.7 * diffuse;
+      const idx = Math.min(
+        Math.floor(bright * (RAMP_ITEM.length - 1)),
+        RAMP_ITEM.length - 1,
+      );
+      const ch = RAMP_ITEM[idx];
+      row +=
+        ch === " "
+          ? " "
+          : col(bright > 0.85 ? NOTE_SHINE_COLOR : NOTE_COLOR, ch);
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+
+/** The Song Hunt card's emblem, spun by ItemPreview like an item. */
+export const SONG_HUNT_EMBLEM = {
+  name: "Song Hunt",
+  frames: generateFrames(renderSongHuntNoteFrame),
+};
+
 // --- Clouds card ---
 function cloudCardIcon(u: number, v: number): TexSample | null {
   const [ix, iy] = iconUV(u, v);

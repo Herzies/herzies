@@ -9,6 +9,7 @@ import { cn } from "../lib/utils";
 import { herzies, useWindowFocused } from "../tauri-bridge";
 import { BackButton } from "./BackButton";
 import { BossFightHelp, BossFightPanel, makeDebugBoss } from "./BossFightPanel";
+import { EventEmblem } from "./EventEmblem";
 import ItemInspectOverlay from "./ItemInspectOverlay";
 import { ItemTypeIcon } from "./icons/ItemTypeIcon";
 import { List } from "./List";
@@ -82,15 +83,17 @@ const typeRank = (type: string) => {
 };
 
 type EventCard = {
-  /** What opening the card selects: an event id, or "song_hunt" for the hunt
-   * view (which also covers "no hunt live, here's the last one"). */
-  key: string;
   type: string;
   title: string;
-  live: boolean;
-  /** Ends-at when live, starts-at when upcoming. */
+  status: "live" | "scheduled" | "idle";
+  /** Ends-at when live, starts-at when scheduled. */
   at: string | null;
   detail?: string;
+  /** What opening the card selects (an event id, or "song_hunt" for the hunt
+   * view); null when there is nothing to open yet. */
+  openKey: string | null;
+  /** Seeds the boss's look, so the card shows the boss you'll actually fight. */
+  eventId?: string;
 };
 
 export function EventsView({
@@ -213,82 +216,101 @@ export function EventsView({
   const liveEvents = [...events, ...(debugBoss ? [debugBoss] : [])];
 
   if (selected === null) {
-    const cards: EventCard[] = liveEvents.map((e) => {
-      const boss =
-        e.type === "boss_fight" ? (e.config as unknown as BossFightView) : null;
-      return {
-        key: e.type === "song_hunt" ? "song_hunt" : e.id,
-        type: e.type,
-        title: e.title,
-        live: true,
-        at: e.endsAt,
-        detail: boss
-          ? boss.killed
-            ? "Defeated!"
-            : `HP ${Math.round(boss.hp)} / ${Math.round(boss.maxHp)}`
-          : undefined,
-      };
-    });
-    if (
-      debugForceActive &&
-      previousHunt &&
-      !cards.some((c) => c.type === "song_hunt")
-    ) {
-      cards.push({
-        key: "song_hunt",
-        type: "song_hunt",
-        title: previousHunt.title,
-        live: true,
-        at: previousHunt.endsAt,
-      });
-    }
-    // One countdown per type that has nothing live. Older servers don't send
-    // `upcoming`, so the hunt falls back to /events/previous-hunt's `next`.
+    const cards: EventCard[] = [];
+    // Older servers don't send `upcoming`, so the hunt falls back to
+    // /events/previous-hunt's `next`.
     const nextByType = new Map(upcoming.map((u) => [u.type, u]));
     if (nextHunt && !nextByType.has("song_hunt")) {
       nextByType.set("song_hunt", nextHunt);
     }
-    for (const [type, next] of nextByType) {
-      if (cards.some((c) => c.type === type)) continue;
+    const huntLive = debugForceActive && previousHunt ? previousHunt : null;
+
+    // Every known type always gets a card — live, scheduled, or idle — so the
+    // list reads as "what the game has" rather than only what is on now.
+    for (const { type } of EVENT_TYPES) {
+      const live = liveEvents.filter((e) => e.type === type);
+      if (type === "song_hunt" && live.length === 0 && huntLive) {
+        live.push(huntLive);
+      }
+      for (const e of live) {
+        const boss =
+          e.type === "boss_fight"
+            ? (e.config as unknown as BossFightView)
+            : null;
+        cards.push({
+          type,
+          title: e.title,
+          status: "live",
+          at: e.endsAt,
+          openKey: type === "song_hunt" ? "song_hunt" : e.id,
+          eventId: e.id,
+          detail: boss
+            ? boss.killed
+              ? "Defeated!"
+              : `HP ${Math.round(boss.hp)} / ${Math.round(boss.maxHp)}`
+            : type === "merchant"
+              ? "In town now — come have a look"
+              : undefined,
+        });
+      }
+      if (live.length > 0) continue;
+
+      const next = nextByType.get(type);
+      // What the last one left behind: the hunt's answer, or a boss's results
+      // for a few days after it went down (or got away).
+      let previous: GameEvent | null = null;
+      let previousDetail: string | undefined;
+      if (type === "song_hunt" && previousHunt) {
+        previous = previousHunt;
+        previousDetail = "Last hunt's answer inside";
+      } else if (
+        type === "boss_fight" &&
+        previousEvent?.type === "boss_fight" &&
+        Date.now() - new Date(previousEvent.endsAt).getTime() < 3 * 86_400_000
+      ) {
+        previous = previousEvent;
+        const last = previousEvent.config as unknown as BossFightView;
+        previousDetail = last.killed
+          ? "Last boss was defeated — see results"
+          : "Last boss got away";
+      }
+
       cards.push({
-        key: type === "song_hunt" ? "song_hunt" : next.id,
         type,
-        title: next.title,
-        live: false,
-        at: next.startsAt,
+        title: next?.title ?? previous?.title ?? typeLabel(type),
+        status: next ? "scheduled" : "idle",
+        at: next?.startsAt ?? null,
+        openKey: previous
+          ? type === "song_hunt"
+            ? "song_hunt"
+            : previous.id
+          : null,
+        eventId: next?.id ?? previous?.id,
+        detail:
+          previousDetail ??
+          (next
+            ? undefined
+            : type === "merchant"
+              ? "Not in town. Keep an eye out!"
+              : "Nothing scheduled yet"),
       });
     }
-    // A boss that just went down (or got away) keeps its results card for a
-    // few days, like the hunt's previous answer below.
-    if (
-      previousEvent?.type === "boss_fight" &&
-      !cards.some((c) => c.type === "boss_fight" && c.live) &&
-      Date.now() - new Date(previousEvent.endsAt).getTime() < 3 * 86_400_000
-    ) {
-      const boss = previousEvent.config as unknown as BossFightView;
+    // Anything else live (e.g. a secret track) still gets a card.
+    for (const e of liveEvents) {
+      if (EVENT_TYPES.some((t) => t.type === e.type)) continue;
       cards.push({
-        key: previousEvent.id,
-        type: "boss_fight",
-        title: previousEvent.title,
-        live: false,
-        at: null,
-        detail: boss.killed ? "Defeated! See results" : "It got away",
+        type: e.type,
+        title: e.title,
+        status: "live",
+        at: e.endsAt,
+        openKey: null,
       });
     }
-    // Nothing live or scheduled, but last week's answer is still worth a look.
-    if (previousHunt && !cards.some((c) => c.type === "song_hunt")) {
-      cards.push({
-        key: "song_hunt",
-        type: "song_hunt",
-        title: previousHunt.title,
-        live: false,
-        at: null,
-        detail: "See last hunt's answer",
-      });
-    }
+    const statusRank = { live: 0, scheduled: 1, idle: 2 };
     cards.sort(
       (a, b) =>
-        Number(b.live) - Number(a.live) || typeRank(a.type) - typeRank(b.type),
+        statusRank[a.status] - statusRank[b.status] ||
+        typeRank(a.type) - typeRank(b.type),
     );
 
     return (
@@ -297,27 +319,22 @@ export function EventsView({
         colour="cyan"
         childrenClassName="flex min-h-0 flex-col"
       >
-        {cards.length === 0 ? (
-          <div className="flex flex-1 items-center justify-center text-center text-xs text-text-dim">
-            Nothing happening right now. Check back later!
-          </div>
-        ) : (
-          <List className="min-h-0 flex-1">
+        <List className="min-h-0 flex-1">
+          <div className="flex flex-col gap-2">
             {cards.map((card) => (
               <EventCardRow
-                key={`${card.key}-${card.live}`}
+                key={`${card.type}-${card.eventId ?? card.status}`}
                 card={card}
-                // Upcoming events have nothing to show yet except the hunt's
-                // previous-results view.
+                paused={!eventsTabVisible || !focused}
                 onOpen={
-                  card.live || card.at === null || card.key === "song_hunt"
-                    ? () => setSelected(card.key)
+                  card.openKey
+                    ? () => setSelected(card.openKey as string)
                     : undefined
                 }
               />
             ))}
-          </List>
-        )}
+          </div>
+        </List>
       </View>
     );
   }
@@ -737,53 +754,87 @@ function formatIn(at: string): string {
   return `${Math.max(1, minutes)}m`;
 }
 
+/** Per-type accent: border, badge and name colour. */
+const TYPE_ACCENT: Record<string, { border: string; text: string }> = {
+  boss_fight: { border: "border-l-red", text: "text-red" },
+  song_hunt: { border: "border-l-cyan", text: "text-cyan" },
+  merchant: { border: "border-l-yellow", text: "text-yellow" },
+};
+
 function EventCardRow({
   card,
   onOpen,
+  paused,
 }: {
   card: EventCard;
   onOpen?: () => void;
+  paused: boolean;
 }) {
+  const accent = TYPE_ACCENT[card.type] ?? {
+    border: "border-l-border",
+    text: "text-text",
+  };
+  const idle = card.status === "idle";
+
   const body = (
-    <>
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-ui font-bold">{typeLabel(card.type)}</span>
-        {card.live ? (
-          <span className="text-ui-sm font-bold text-green">LIVE</span>
-        ) : card.at ? (
-          <span className="text-ui-sm text-yellow">SCHEDULED</span>
+    <div className="flex items-center gap-3">
+      <EventEmblem
+        type={card.type}
+        eventId={card.eventId}
+        // Nothing on the horizon sits still; everything else is alive.
+        paused={paused || idle}
+        dim={idle}
+      />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center justify-between gap-2">
+          <span className={cn("text-ui font-bold", accent.text)}>
+            {typeLabel(card.type)}
+          </span>
+          {card.status === "live" ? (
+            <span className="flex items-center gap-1 text-ui-sm font-bold text-green">
+              <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-green" />
+              LIVE
+            </span>
+          ) : card.status === "scheduled" ? (
+            <span className="text-ui-sm text-yellow">SCHEDULED</span>
+          ) : null}
+        </div>
+        <div className="flex items-center justify-between gap-2 text-ui">
+          <span
+            className={cn("truncate", idle ? "text-text-dim" : "text-text")}
+          >
+            {card.title}
+          </span>
+          {card.at ? (
+            <span className="shrink-0 text-text-dim">
+              {card.status === "live"
+                ? `ends in ${formatIn(card.at)}`
+                : `in ${formatIn(card.at)}`}
+            </span>
+          ) : null}
+        </div>
+        {card.detail ? (
+          <div className="truncate text-ui-sm text-text-dim">{card.detail}</div>
         ) : null}
       </div>
-      <div className="flex items-center justify-between gap-2 text-ui text-text-dim">
-        <span className="truncate">{card.title}</span>
-        <span className="shrink-0">
-          {card.at
-            ? card.live
-              ? `ends in ${formatIn(card.at)}`
-              : `next in ${formatIn(card.at)}`
-            : null}
-        </span>
-      </div>
-      {card.detail ? (
-        <div className="text-ui-sm text-text-dim">{card.detail}</div>
-      ) : null}
-    </>
+    </div>
+  );
+
+  const frame = cn(
+    "block w-full border border-l-2 border-border bg-bg-panel/40 p-2 text-left",
+    accent.border,
+    idle && "opacity-70",
   );
 
   return onOpen ? (
     <button
       type="button"
       onClick={onOpen}
-      className={cn(
-        "block w-full cursor-pointer border-0 border-b border-border bg-transparent py-2 text-left last:border-b-0 hover:bg-bg-panel",
-        card.live ? "text-text" : "text-text-dim",
-      )}
+      className={cn(frame, "cursor-pointer hover:bg-bg-panel")}
     >
       {body}
     </button>
   ) : (
-    <div className="border-b border-border py-2 text-text-dim last:border-b-0">
-      {body}
-    </div>
+    <div className={frame}>{body}</div>
   );
 }

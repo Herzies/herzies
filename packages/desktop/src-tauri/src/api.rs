@@ -1025,7 +1025,7 @@ pub async fn api_fetch_artist_image(client: &Client, artist: &str) -> Option<Str
     data["url"].as_str().map(str::to_string)
 }
 
-pub async fn api_fetch_active_events(client: &Client) -> Option<Vec<GameEvent>> {
+pub async fn api_fetch_active_events(client: &Client) -> Option<ActiveEventsResponse> {
     // Ported to a Supabase Edge Function (co-located with Postgres, off
     // Vercel), like /sync and /chat: it's polled every 30s regardless of
     // window visibility, so it was a steady source of Vercel invocations.
@@ -1038,7 +1038,7 @@ pub async fn api_fetch_active_events(client: &Client) -> Option<Vec<GameEvent>> 
         return None;
     }
     match resp.json::<ActiveEventsResponse>().await {
-        Ok(data) => Some(data.events),
+        Ok(data) => Some(data),
         Err(e) => {
             log::warn!("events-active response parse failed: {e}");
             None
