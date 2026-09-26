@@ -172,7 +172,7 @@ export function BossFightPanel({
       {/* The boss's name is the heading now — "BOSS FIGHT" used to sit above
           it, but the view header says that, so it was the same words twice.
           Dropping it also lifts the name toward the top of the panel. */}
-      <div className="text-center text-ui-lg font-bold text-red">
+      <div className="text-center text-ui-2xl font-bold text-red">
         {event.title}
       </div>
 

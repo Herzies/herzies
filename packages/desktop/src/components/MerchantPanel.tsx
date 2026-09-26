@@ -117,7 +117,7 @@ export function MerchantPanel({
     // paints outside the panel (without it the glow sank out of sight).
     <div className="relative isolate flex min-h-0 flex-1 flex-col gap-2">
       {/* His name as the heading, as BossFightPanel does with the boss's. */}
-      <div className="text-center text-ui-lg font-bold text-yellow">
+      <div className="text-center text-ui-2xl font-bold text-yellow">
         {MERCHANT_NAME}
       </div>
 
