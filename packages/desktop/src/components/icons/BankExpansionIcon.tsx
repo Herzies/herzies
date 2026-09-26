@@ -1,28 +1,13 @@
+import rawItemIconGrids from "./item-icon-grids.json";
 import { PixelIcon } from "./PixelIcon";
 
-// The inventory grid with one more row growing out of it: two solid rows of
-// slots, a third of hollow (still-empty) slots, and a slot-sized plus where the
-// last one would be. Hand-drawn as a 16x16 bitmap like SortIcon, so it sits with the
-// item pips and reads the same at 16px and blown up on the store's card.
-const BANK_EXPANSION = [
-  "................",
-  "................",
-  "..###.###.###...",
-  "..###.###.###...",
-  "..###.###.###...",
-  "................",
-  "..###.###.###...",
-  "..###.###.###...",
-  "..###.###.###...",
-  "................",
-  "..###.###..#....",
-  "..#.#.#.#.###...",
-  "..###.###..#....",
-  "................",
-  "................",
-  "................",
-];
+// The Inventory Expansion's store icon. Painted in the icon-editor
+// (`pnpm icon-editor`, listed there under EXTRA_ICONS) and stored beside the
+// item icons in item-icon-grids.json, so editing it there and saving takes
+// effect like any other source change. It is not a catalog item, so no
+// ItemTypeIcon lookup finds it — this is its only consumer.
+const { grid, palette } = rawItemIconGrids["bank-expansion"];
 
 export function BankExpansionIcon({ className }: { className?: string }) {
-  return <PixelIcon grid={BANK_EXPANSION} className={className} />;
+  return <PixelIcon grid={grid} palette={palette} className={className} />;
 }

@@ -1,9 +1,8 @@
-import { BANK_EXPANSION } from "@herzies/shared";
+import { BANK_EXPANSION, ItemPreview } from "@herzies/shared";
 import { useEffect } from "react";
-import { BankExpansionIcon } from "./icons/BankExpansionIcon";
 
-/** The Inventory Expansion's inspect card. It is not a catalog item, so it has
- * no `ItemPreviewCard` (art, rarity, sets) — just the icon, title and
+/** The Bigger Bag's inspect card. It is not a catalog item, so it has no
+ * `ItemPreviewCard` (rarity, sets) — just the spinning bag, title and
  * description, in the same overlay chrome `ItemInspectOverlay` uses. */
 export function ExpansionInspectOverlay({
   onClose,
@@ -32,15 +31,18 @@ export function ExpansionInspectOverlay({
         onClick={(e) => e.stopPropagation()}
         className="w-65 max-w-full border border-border bg-bg-panel p-2 text-center shadow-xl shadow-black/50"
       >
-        <div className="mb-3 flex justify-center pt-2">
-          <BankExpansionIcon className="h-20 w-20 text-yellow" />
+        <div className="mb-2 flex justify-center">
+          <ItemPreview item={BANK_EXPANSION} box={110} />
         </div>
         <div className="text-sm font-bold">"{BANK_EXPANSION.name}"</div>
         {meta && <div className="my-1 text-ui-sm text-text-dim">{meta}</div>}
-        <div className="mt-2 text-ui text-text-dim leading-snug">
+        {/* Same size and colour as ItemPreviewCard's description. */}
+        <div className="text-ui-sm text-text-dim">
           {BANK_EXPANSION.description}
         </div>
-        {footer && <div className="mt-3 flex justify-center">{footer}</div>}
+        {footer && (
+          <div className="mt-3 flex flex-col items-center gap-2">{footer}</div>
+        )}
       </div>
     </div>
   );

@@ -10,7 +10,12 @@ import { createServer } from "node:http";
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { getItemColor, getItemSet, ITEMS } from "@herzies/shared";
+import {
+  BANK_EXPANSION,
+  getItemColor,
+  getItemSet,
+  ITEMS,
+} from "@herzies/shared";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const GRIDS_PATH = resolve(
@@ -19,6 +24,19 @@ const GRIDS_PATH = resolve(
 );
 const HTML_PATH = resolve(__dirname, "index.html");
 const PORT = process.env.ICON_EDITOR_PORT ?? 4560;
+
+// Icons that live in the same JSON file but belong to no catalog item — a store
+// listing rather than a card, so there is no ItemDef to take a name or colour
+// from. Add one here and give it an entry in the JSON, and it shows up in the
+// editor like any item.
+const EXTRA_ICONS = [
+  {
+    id: BANK_EXPANSION.id,
+    name: BANK_EXPANSION.name,
+    autoColor: "#facc15",
+    gradient: null,
+  },
+];
 
 function readGrids() {
   return JSON.parse(readFileSync(GRIDS_PATH, "utf8"));
@@ -69,7 +87,7 @@ const server = createServer(async (req, res) => {
       const stored = readGrids();
       // Only items that already have a bespoke icon are editable here — the
       // generic per-type fallbacks live inline in ItemTypeIcon.tsx, not in
-      // this JSON file.
+      // this JSON file. (Plus the EXTRA_ICONS above.)
       const items = ITEMS.filter((item) => stored[item.id]).map((item) => {
         const set = getItemSet(item.id);
         return {
@@ -91,6 +109,7 @@ const server = createServer(async (req, res) => {
           { grid: entry.grid, palette: entry.palette },
         ]),
       );
+      items.push(...EXTRA_ICONS.filter((extra) => stored[extra.id]));
       sendJson(res, 200, { items, grids });
       return;
     }

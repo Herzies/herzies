@@ -146,8 +146,8 @@ export function fitMetrics(
  * changes the final on-screen size — the opposite of shrinking the baked
  * geometry, which (see the note on `fitMetrics`) changes the size not at
  * all and only costs resolution. */
-export function previewFillFraction(item: ItemDef): number {
-  return getItemType(item) === "dice" ? 0.62 : 1;
+export function previewFillFraction(item: { dice?: boolean }): number {
+  return item.dice ? 0.62 : 1;
 }
 
 /** Draw the cropped cell grid of a single frame onto a 2D canvas context. */
