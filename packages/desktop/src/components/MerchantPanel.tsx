@@ -112,7 +112,10 @@ export function MerchantPanel({
   const { line, typed } = useChatter(GEORGE_LINES, !paused);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2">
+    // `isolate` makes this panel its own stacking context, so the glow's
+    // -z-10 lands behind George and the list but above whatever the app
+    // paints outside the panel (without it the glow sank out of sight).
+    <div className="relative isolate flex min-h-0 flex-1 flex-col gap-2">
       {/* His name as the heading, as BossFightPanel does with the boss's. */}
       <div className="text-center text-ui-lg font-bold text-yellow">
         {MERCHANT_NAME}
@@ -126,7 +129,7 @@ export function MerchantPanel({
             stands in a pool of light rather than on a flat backdrop. It
             overhangs the stage on every side and fades out exactly at its own
             edges (closest-side), so nothing ever shows a cut-off rim; -z-10
-            keeps it under the stock list it spills behind. */}
+            keeps it under the stock list it spills behind (see `isolate` above). */}
         <div
           className="pointer-events-none absolute -inset-x-10 -top-16 -bottom-28 -z-10"
           aria-hidden="true"
