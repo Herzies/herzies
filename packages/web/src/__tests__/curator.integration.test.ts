@@ -9,6 +9,10 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { POST as saveSeriesRoute } from "@/app/api/admin/event-series/route";
 import { POST as saveEventRoute } from "@/app/api/admin/events/route";
 import {
+  GET as poolGet,
+  POST as poolPost,
+} from "@/app/api/admin/song-pool/route";
+import {
   GET as curatorGet,
   POST as curatorPost,
 } from "@/app/api/curator/song-hunt/route";
@@ -236,5 +240,64 @@ describe("proposals", () => {
       ),
     );
     expect(res.status).toBe(400);
+  });
+});
+
+describe("song pool", () => {
+  async function addToPool(trackTitle: string, trackArtist: string) {
+    return poolPost(
+      request("admin/song-pool", asAdmin, { trackTitle, trackArtist }),
+    );
+  }
+
+  it("feeds unused songs to the curator and drops them once a hunt uses one", async () => {
+    await admin().from("song_pool").delete().neq("track_title", "");
+    const [first] = await huntSeries();
+    expect((await addToPool("Proposed Song", "Proposed Artist")).status).toBe(
+      201,
+    );
+    expect((await addToPool("Other Song", "Other Artist")).status).toBe(201);
+
+    const before = await (
+      await curatorGet(
+        request("curator/song-hunt", asCurator, undefined, "GET"),
+      )
+    ).json();
+    expect(
+      before.pool.map((s: { trackTitle: string }) => s.trackTitle),
+    ).toEqual(["Proposed Song", "Other Song"]);
+
+    // Different case: matched the way plays are, so it still counts as used.
+    await curatorPost(
+      request(
+        "curator/song-hunt",
+        asCurator,
+        proposal(first, { trackTitle: "proposed song" }),
+      ),
+    );
+
+    const after = await (
+      await curatorGet(
+        request("curator/song-hunt", asCurator, undefined, "GET"),
+      )
+    ).json();
+    expect(after.pool.map((s: { trackTitle: string }) => s.trackTitle)).toEqual(
+      ["Other Song"],
+    );
+
+    const listed = await (
+      await poolGet(request("admin/song-pool", asAdmin, undefined, "GET"))
+    ).json();
+    expect(
+      listed.songs.find(
+        (s: { trackTitle: string }) => s.trackTitle === "Proposed Song",
+      ).usedBy,
+    ).toBe("Song Hunt #9");
+  });
+
+  it("refuses a duplicate", async () => {
+    await admin().from("song_pool").delete().neq("track_title", "");
+    expect((await addToPool("Dup", "Band")).status).toBe(201);
+    expect((await addToPool(" dup ", "BAND")).status).toBe(409);
   });
 });

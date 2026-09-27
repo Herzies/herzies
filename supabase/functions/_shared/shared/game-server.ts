@@ -109,8 +109,9 @@ function hasSpiritOrbEquipped(equipped: unknown): boolean {
   return e.ground_left === "spirit-orb" || e.ground_right === "spirit-orb";
 }
 
-/** Normalize a track string for fuzzy matching */
-function normalizeTrack(s: string): string {
+/** Normalize a track string for fuzzy matching. Exported so the song pool
+ * can tell "already used" the same way a play is matched to a hunt. */
+export function normalizeTrack(s: string): string {
   return s
     .toLowerCase()
     .replace(/\s*\(.*?\)\s*/g, "") // strip parenthetical: (Remastered), (feat. X)

@@ -30,6 +30,7 @@ import {
   merchantFormToConfig,
 } from "./event-fields";
 import { NotificationsPanel } from "./NotificationsPanel";
+import { SongPoolPanel } from "./SongPoolPanel";
 
 const SECRET_KEY = "herzies-admin-secret";
 const RARITIES = ["common", "uncommon", "rare", "legendary"] as const;
@@ -2023,6 +2024,11 @@ export function GameAdmin() {
             now={now}
             onChange={load}
           />
+        </div>
+
+        <div>
+          <h2 className="text-sm text-cyan mb-4">song pool</h2>
+          <SongPoolPanel secret={secret} events={events} />
         </div>
 
         <div>

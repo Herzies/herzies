@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { unauthorizedAdmin, verifyCurator } from "@/lib/admin-auth";
 import { curatorSongHuntSchema, isParseError, parseBody } from "@/lib/schemas";
+import { loadSongPool } from "@/lib/song-pool";
 import { createAdminClient } from "@/lib/supabase-admin";
 
 /**
@@ -84,7 +85,17 @@ export async function GET(request: Request) {
       proposalOnly: e.needs_approval,
     }));
 
-  return NextResponse.json({ drafts, pastAnswers });
+  // Unused songs the admin queued up; the routine must pick from these while
+  // any remain. Notes are the admin's pointers for the clue writer.
+  const pool = (await loadSongPool(admin))
+    .filter((s) => !s.usedBy)
+    .map((s) => ({
+      trackTitle: s.trackTitle,
+      trackArtist: s.trackArtist,
+      notes: s.notes,
+    }));
+
+  return NextResponse.json({ drafts, pastAnswers, pool });
 }
 
 /** Propose (or revise a proposal for) one upcoming song hunt. */
