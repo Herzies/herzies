@@ -111,6 +111,17 @@
   animation: prismatic-shift 14s linear infinite;
 }
 
+/* Good ol' George's coins: a slow bob with a little sideways drift. */
+@keyframes coin-float {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  50% {
+    transform: translate(2px, -7px);
+  }
+}
+
 @keyframes drop-float {
   0%,
   100% {
@@ -149,6 +160,12 @@
   html.boss-mode,
   html.boss-mode body {
     background-color: #000;
+  }
+
+  /* George's stall bathes the window in deep gold, the same way. */
+  html.merchant-mode,
+  html.merchant-mode body {
+    background-color: #1e1400;
   }
 
   /* Window drag — scoped to Tauri markup, not global body (breaks sandbox herzie drag). */

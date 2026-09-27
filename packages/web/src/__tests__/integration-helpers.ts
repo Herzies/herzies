@@ -225,17 +225,12 @@ export async function cleanupTestData() {
     .from("events")
     .delete()
     .neq("id", "00000000-0000-0000-0000-000000000000");
-  // Back to 00076's defaults: a test that turns the weekly spawn off or sets a
-  // default HP must not change what the next test's spawn does.
-  await admin.from("boss_fight_settings").upsert({
-    id: true,
-    auto_spawn: true,
-    default_hp: null,
-    reward_item_id: "cd",
-    top_reward_item_id: "cd",
-    top_count: 3,
-  });
-  await admin.from("boss_fight_skips").delete().gte("week_of", "1970-01-01");
+  // Series too: a leftover series re-materializes occurrences into the next
+  // test's window (00081). Deleting it only nulls series_id on any survivors.
+  await admin
+    .from("event_series")
+    .delete()
+    .neq("id", "00000000-0000-0000-0000-000000000000");
   await admin
     .from("trades")
     .delete()

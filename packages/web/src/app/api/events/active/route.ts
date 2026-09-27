@@ -1,11 +1,17 @@
 import type {
   BossFightConfig,
   GameEvent,
+  MerchantConfig,
   SongHuntConfig,
 } from "@herzies/shared";
 import { NextResponse } from "next/server";
 import { authenticateRequestOptional } from "@/lib/auth";
-import { buildBossFightConfig, buildSongHuntConfig } from "@/lib/events";
+import {
+  buildBossFightConfig,
+  buildMerchantConfig,
+  buildSongHuntConfig,
+  fetchUpcomingEvents,
+} from "@/lib/events";
 import { createAdminClient } from "@/lib/supabase-admin";
 
 export async function GET(request: Request) {
@@ -50,6 +56,13 @@ export async function GET(request: Request) {
           e.config as BossFightConfig,
           userId,
         );
+      } else if (e.type === "merchant") {
+        config = await buildMerchantConfig(
+          admin,
+          e.id,
+          e.config as MerchantConfig,
+          userId,
+        );
       } else {
         config = e.config as Record<string, unknown>;
       }
@@ -67,5 +80,7 @@ export async function GET(request: Request) {
     }),
   );
 
-  return NextResponse.json({ events });
+  const upcoming = await fetchUpcomingEvents(admin, now);
+
+  return NextResponse.json({ events, upcoming });
 }

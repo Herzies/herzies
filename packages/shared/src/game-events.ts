@@ -1,6 +1,6 @@
 /**
- * Song-hunt and secret-track event logic, shared by the Next.js API and the
- * Supabase edge functions.
+ * Event projection logic (song hunt, secret track, boss fight, merchant),
+ * shared by the Next.js API and the Supabase edge functions.
  *
  * Canonical source. `scripts/vendor-shared.mjs` regenerates the edge copy from
  * this file; `packages/web/src/lib/events.ts` re-exports it. Keep it free of
@@ -10,6 +10,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   BossDamageDealer,
   BossFightConfig,
+  GameEvent,
+  MerchantConfig,
+  MerchantStockView,
   SongHuntConfig,
   SongHuntFinder,
 } from "./game-rules.js";
@@ -192,4 +195,90 @@ export async function buildBossFightConfig(
     yourDamage,
     yourRank,
   };
+}
+
+/**
+ * Project a merchant (Good ol' George) event for a client: each stock line
+ * with how many are left and how many the caller has already bought.
+ */
+export async function buildMerchantConfig(
+  admin: SupabaseClient,
+  eventId: string,
+  config: MerchantConfig,
+  userId: string | null = null,
+): Promise<Record<string, unknown>> {
+  const { data: sales } = await admin
+    .from("merchant_sales")
+    .select("item_id, sold")
+    .eq("event_id", eventId);
+  const sold = new Map(
+    (sales ?? []).map((s) => [s.item_id as string, s.sold as number]),
+  );
+
+  let bought = new Map<string, number>();
+  if (userId) {
+    const { data: mine } = await admin
+      .from("merchant_purchases")
+      .select("item_id, quantity")
+      .eq("event_id", eventId)
+      .eq("user_id", userId);
+    bought = new Map(
+      (mine ?? []).map((p) => [p.item_id as string, p.quantity as number]),
+    );
+  }
+
+  const stock: MerchantStockView[] = (config.stock ?? []).map((entry) => {
+    const totalStock = entry.totalStock ?? null;
+    return {
+      itemId: entry.itemId,
+      price: entry.price,
+      perPlayerLimit: entry.perPlayerLimit ?? null,
+      totalStock,
+      remaining:
+        totalStock == null
+          ? null
+          : Math.max(0, totalStock - (sold.get(entry.itemId) ?? 0)),
+      yourBought: bought.get(entry.itemId) ?? 0,
+    };
+  });
+
+  return { stock };
+}
+
+/**
+ * The next scheduled occurrence of each event type, for "next in 2d 4h"
+ * countdowns. Titles and windows only: a hunt's track and hints, a boss's
+ * genres and George's stock are all part of the reveal, so no config at all
+ * leaves the server before an event starts.
+ */
+export async function fetchUpcomingEvents(
+  admin: SupabaseClient,
+  now: Date,
+): Promise<GameEvent[]> {
+  const { data } = await admin
+    .from("events")
+    .select("id, type, title, description, active, starts_at, ends_at")
+    .eq("active", true)
+    .gt("starts_at", now.toISOString())
+    .order("starts_at", { ascending: true })
+    // Four weeks materialized ahead, so even a daily series fits.
+    .limit(200);
+
+  const seen = new Set<string>();
+  const upcoming: GameEvent[] = [];
+  for (const e of data ?? []) {
+    if (seen.has(e.type as string)) continue;
+    seen.add(e.type as string);
+    upcoming.push({
+      id: e.id as string,
+      type: e.type as string,
+      title: e.title as string,
+      description: (e.description as string | null) ?? null,
+      active: true,
+      startsAt: e.starts_at as string,
+      endsAt: e.ends_at as string,
+      config: {},
+    });
+  }
+  return upcoming;
 }

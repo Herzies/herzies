@@ -12,6 +12,7 @@
 import {
   CHAR_ASPECT,
   dot3,
+  GOLD_RAMP,
   LIGHT,
   OCEAN_RAMP,
   RAINBOW_RAMP,
@@ -1247,6 +1248,10 @@ function appendWearableSpheres(
  * seeded body colour with a vertical gradient; the seed itself is untouched,
  * so unequipping restores the original creature.
  */
+/** Colour-scheme key for Good ol' George's solid-gold body. It lives in the
+ * `color` slot like a skin, but no catalog item has this id. */
+export const GOLD_SCHEME_ID = "npc-gold";
+
 const COLOR_SCHEMES: Record<string, readonly string[]> = {
   prism: RAINBOW_RAMP,
   "poseidons-gift": OCEAN_RAMP,
@@ -1255,6 +1260,9 @@ const COLOR_SCHEMES: Record<string, readonly string[]> = {
   // hatched with rather than introducing a new one.
   "purple-dane": VIOLET_RAMP,
   "thanks-for-all-the-fish": TEAL_RAMP,
+  // Not an item: Good ol' George's gold, applied only by the desktop's
+  // Events emblem (see GOLD_SCHEME_ID). No player can equip it.
+  [GOLD_SCHEME_ID]: GOLD_RAMP,
 };
 
 /** True for spheres that a colour scheme is allowed to repaint. */

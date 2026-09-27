@@ -302,6 +302,41 @@ export interface BossFightView {
   yourRank: number | null;
 }
 
+/** Display name of the NPC behind `merchant` events. */
+export const MERCHANT_NAME = "Good ol' George";
+
+/** One line of George's stock, as stored in `events.config.stock`. */
+export interface MerchantStockEntry {
+  itemId: string;
+  /** Coins per unit. */
+  price: number;
+  /** Max units one player can buy during this visit; absent = unlimited. */
+  perPlayerLimit?: number | null;
+  /** Units available to everyone combined; absent = unlimited. */
+  totalStock?: number | null;
+}
+
+/** Merchant (Good ol' George) event config as stored in `events.config`. */
+export interface MerchantConfig {
+  stock: MerchantStockEntry[];
+}
+
+/** One stock line as a client sees it, with live counts projected in. */
+export interface MerchantStockView {
+  itemId: string;
+  price: number;
+  perPlayerLimit: number | null;
+  totalStock: number | null;
+  /** Units left for everyone; null when there is no total cap. */
+  remaining: number | null;
+  /** How many the requesting player has bought during this visit. */
+  yourBought: number;
+}
+
+export interface MerchantView {
+  stock: MerchantStockView[];
+}
+
 export const GENRES = [
   "pop",
   "rock",

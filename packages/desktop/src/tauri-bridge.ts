@@ -195,6 +195,14 @@ export const herzies = {
       newCurrency: number;
       inventory: Inventory;
     }>("buy_item", { itemId, quantity }),
+  /** Buys from Good ol' George during a live merchant event. Throws with the
+   * server's message (sold out, limit reached, not enough currency, …). */
+  buyFromMerchant: (eventId: string, itemId: string, quantity: number) =>
+    invoke<{
+      spent: number;
+      newCurrency: number;
+      inventory: Inventory;
+    }>("buy_from_merchant", { eventId, itemId, quantity }),
   /** Manually collects one specific pending world drop by id. Resolves
    * `true` if it was collected, `false` if it no longer existed (e.g.
    * already collected by a racing Spirit Orb auto-collect). */
@@ -257,8 +265,12 @@ export const herzies = {
       return enabled;
     }),
 
+  /** Live events, plus the next scheduled one of each type (`upcoming`,
+   * titles and windows only — older servers omit it). */
   fetchActiveEvents: () =>
-    invoke<{ events: GameEvent[] }>("fetch_active_events"),
+    invoke<{ events: GameEvent[]; upcoming?: GameEvent[] }>(
+      "fetch_active_events",
+    ),
 
   fetchPreviousHunt: () =>
     invoke<{ events: GameEvent[]; next: GameEvent | null }>(

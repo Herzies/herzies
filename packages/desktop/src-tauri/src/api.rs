@@ -764,6 +764,32 @@ pub async fn api_buy_item(
     Ok(data)
 }
 
+pub async fn api_buy_from_merchant(
+    client: &Client,
+    event_id: &str,
+    item_id: &str,
+    quantity: u32,
+) -> Result<serde_json::Value, String> {
+    let body = serde_json::json!({ "eventId": event_id, "itemId": item_id, "quantity": quantity });
+    let resp = api_fetch(
+        client,
+        reqwest::Method::POST,
+        "/events/merchant/buy",
+        Some(body),
+    )
+    .await
+    .ok_or_else(|| "Network error".to_string())?;
+    let status = resp.status();
+    let text = resp.text().await.map_err(|e| format!("Read error: {e}"))?;
+    let data: serde_json::Value =
+        serde_json::from_str(&text).map_err(|_| format!("Server returned {status}"))?;
+    if !status.is_success() {
+        let msg = data["error"].as_str().unwrap_or("Unknown error");
+        return Err(msg.to_string());
+    }
+    Ok(data)
+}
+
 pub async fn api_fetch_store_products(client: &Client) -> Option<Vec<StoreProduct>> {
     let resp = api_fetch(client, reqwest::Method::GET, "/store/products", None).await?;
     if !resp.status().is_success() {
@@ -999,7 +1025,7 @@ pub async fn api_fetch_artist_image(client: &Client, artist: &str) -> Option<Str
     data["url"].as_str().map(str::to_string)
 }
 
-pub async fn api_fetch_active_events(client: &Client) -> Option<Vec<GameEvent>> {
+pub async fn api_fetch_active_events(client: &Client) -> Option<ActiveEventsResponse> {
     // Ported to a Supabase Edge Function (co-located with Postgres, off
     // Vercel), like /sync and /chat: it's polled every 30s regardless of
     // window visibility, so it was a steady source of Vercel invocations.
@@ -1012,7 +1038,7 @@ pub async fn api_fetch_active_events(client: &Client) -> Option<Vec<GameEvent>> 
         return None;
     }
     match resp.json::<ActiveEventsResponse>().await {
-        Ok(data) => Some(data.events),
+        Ok(data) => Some(data),
         Err(e) => {
             log::warn!("events-active response parse failed: {e}");
             None

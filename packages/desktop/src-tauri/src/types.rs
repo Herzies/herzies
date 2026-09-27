@@ -424,6 +424,10 @@ pub struct GameEvent {
 #[serde(rename_all = "camelCase")]
 pub struct ActiveEventsResponse {
     pub events: Vec<GameEvent>,
+    /// Next scheduled occurrence per event type (titles and windows only).
+    /// Absent from servers older than the event-series change.
+    #[serde(default)]
+    pub upcoming: Vec<GameEvent>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
