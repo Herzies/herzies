@@ -164,6 +164,12 @@ export const curatorSongHuntSchema = z.object({
     .max(10),
 });
 
+export const songPoolEntrySchema = z.object({
+  trackTitle: z.string().trim().min(1),
+  trackArtist: z.string().trim().min(1),
+  notes: z.string().optional(),
+});
+
 export const merchantBuySchema = z.object({
   eventId: z.string().min(1),
   itemId: z.string().min(1),
