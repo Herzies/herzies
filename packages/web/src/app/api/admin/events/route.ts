@@ -320,6 +320,29 @@ export async function DELETE(request: Request) {
   }
 
   const admin = createAdminClient();
+
+  // A series occurrence would just be written back by the next hourly
+  // materialize run, so record its slot as deleted on purpose first (00084).
+  const { data: event } = await admin
+    .from("events")
+    .select("series_id, occurrence_at")
+    .eq("id", id)
+    .maybeSingle();
+  if (event?.series_id && event.occurrence_at) {
+    const { error: excludeError } = await admin
+      .from("event_series_exclusions")
+      .upsert({
+        series_id: event.series_id,
+        occurrence_at: event.occurrence_at,
+      });
+    if (excludeError) {
+      return NextResponse.json(
+        { error: "Failed to delete event" },
+        { status: 500 },
+      );
+    }
+  }
+
   const { error } = await admin.from("events").delete().eq("id", id);
 
   if (error) {

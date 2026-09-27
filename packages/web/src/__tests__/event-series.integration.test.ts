@@ -10,7 +10,10 @@ import {
   DELETE as deleteSeriesRoute,
   POST as saveSeriesRoute,
 } from "@/app/api/admin/event-series/route";
-import { POST as saveEventRoute } from "@/app/api/admin/events/route";
+import {
+  DELETE as deleteEventRoute,
+  POST as saveEventRoute,
+} from "@/app/api/admin/events/route";
 import { GET as activeEvents } from "@/app/api/events/active/route";
 import {
   cleanupTestData,
@@ -185,6 +188,24 @@ describe("skipping", () => {
     await saveOccurrence(current, { config: CURATED, skipped: false });
     const [unskipped] = await occurrences(id);
     expect(unskipped).toMatchObject({ skipped: false, active: true });
+  });
+});
+
+describe("deleting an occurrence", () => {
+  it("removes it for good — the next materialize run doesn't bring it back", async () => {
+    const id = await saveSeries(huntSeries());
+    const [current, next] = await occurrences(id);
+
+    const res = await deleteEventRoute(
+      adminRequest(`events?id=${current.id}`, undefined, "DELETE"),
+    );
+    expect(res.status).toBe(200);
+
+    expect(await materialize(id)).toBe(0);
+    const ids = (await occurrences(id)).map((o) => o.id);
+    expect(ids).not.toContain(current.id);
+    expect(ids).toContain(next.id);
+    expect(ids).toHaveLength(4);
   });
 });
 
