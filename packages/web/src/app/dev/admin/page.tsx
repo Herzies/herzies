@@ -8,7 +8,7 @@ export const metadata: Metadata = {
 
 export default function DevAdminPage() {
   return (
-    <div className="max-w-5xl mx-auto px-6 py-8">
+    <div className="max-w-7xl mx-auto px-6 py-8">
       <h1 className="text-lg text-purple mb-2">game admin</h1>
       <GameAdmin />
     </div>
