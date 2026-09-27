@@ -79,8 +79,13 @@ export function SettingsView({
             disabled={loggingIn}
             onClick={async () => {
               setLoggingIn(true);
-              await herzies.login();
-              setLoggingIn(false);
+              try {
+                await herzies.login();
+              } catch {
+                // Failures are surfaced on the splash screen.
+              } finally {
+                setLoggingIn(false);
+              }
             }}
           >
             {loggingIn ? "Logging in..." : "Login"}

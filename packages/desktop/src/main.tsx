@@ -788,7 +788,7 @@ function App() {
               // player nothing until the first sync (and indefinitely offline),
               // so it counts as not loaded yet.
               loaded={
-                state.inventory !== null &&
+                state.inventory != null &&
                 (state.units.length > 0 ||
                   Object.keys(state.inventory).length === 0)
               }

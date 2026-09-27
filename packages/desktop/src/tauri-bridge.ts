@@ -120,7 +120,9 @@ export const herzies = {
     };
   },
 
-  login: () => invoke<boolean>("login"),
+  /** Rejects with a code: "cancelled" | "port_in_use" | "browser_open_failed" | "timed_out" | "invalid_callback". */
+  login: () => invoke<void>("login"),
+  cancelLogin: () => invoke<void>("cancel_login"),
   logout: () => invoke<void>("logout"),
   registerHerzie: (name: string) => invoke<void>("register_herzie", { name }),
 

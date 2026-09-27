@@ -29,6 +29,8 @@ use types::*;
 pub struct PendingDeepLink(pub Mutex<Option<String>>);
 pub struct LastTradeNotified(pub Mutex<Option<String>>);
 pub struct LastFriendNotified(pub Mutex<Option<String>>);
+/// Cancels the in-flight browser login, if any.
+pub struct LoginAttempt(pub Mutex<Option<tokio::sync::oneshot::Sender<()>>>);
 /// Whether the last sync tick found a pick-up accessory (spirit-orb) unable to
 /// collect a drop because the bank was full. A bool, not an id: unlike a trade
 /// or friend request there's no single thing to dedupe by, just a condition
@@ -44,8 +46,18 @@ fn get_state(state: tauri::State<SharedState>) -> AppState {
 }
 
 #[tauri::command]
-async fn login(app: AppHandle) -> Result<bool, String> {
-    Ok(auth::login(&app).await)
+async fn login(app: AppHandle, attempt: tauri::State<'_, LoginAttempt>) -> Result<(), String> {
+    // Replacing the sender drops (and so cancels) any attempt still in flight.
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    attempt.0.lock().unwrap().replace(tx);
+    auth::login(&app, rx).await.map_err(|e| e.code().to_string())
+}
+
+#[tauri::command]
+fn cancel_login(attempt: tauri::State<LoginAttempt>) {
+    if let Some(tx) = attempt.0.lock().unwrap().take() {
+        let _ = tx.send(());
+    }
 }
 
 #[tauri::command]
@@ -1349,24 +1361,23 @@ fn spawn_track_enrichment(app: &AppHandle, artist: String, title: String, track_
 }
 
 #[cfg(target_os = "macos")]
-fn fetch_system_artwork_url() -> Option<String> {
-    media_remote_adapter::fetch_system_artwork_url()
+async fn fetch_system_artwork_url() -> Option<String> {
+    media_remote_adapter::fetch_system_artwork_url().await
 }
 
 #[cfg(windows)]
-fn fetch_system_artwork_url() -> Option<String> {
-    smtc_adapter::fetch_system_artwork_url()
+async fn fetch_system_artwork_url() -> Option<String> {
+    tokio::task::spawn_blocking(smtc_adapter::fetch_system_artwork_url)
+        .await
+        .ok()
+        .flatten()
 }
 
 #[cfg(any(target_os = "macos", windows))]
 fn spawn_system_artwork_fetch(app: &AppHandle, track_key: String) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        let artwork = tokio::task::spawn_blocking(fetch_system_artwork_url)
-            .await
-            .ok()
-            .flatten();
-        let Some(artwork) = artwork else {
+        let Some(artwork) = fetch_system_artwork_url().await else {
             return;
         };
 
@@ -1615,8 +1626,8 @@ fn test_activity(app: AppHandle) {
 
 /// Raw JSON from macOS MediaRemote (debug). Returns `null` when unavailable or empty.
 #[tauri::command]
-fn debug_media_remote_now_playing() -> Option<String> {
-    nowplaying::raw_media_remote_json()
+async fn debug_media_remote_now_playing() -> Option<String> {
+    nowplaying::raw_media_remote_json().await
 }
 
 #[tauri::command]
@@ -2243,6 +2254,11 @@ pub fn run() {
                 .targets([
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview),
+                    // Persisted to ~/Library/Logs/<identifier>/ so issues
+                    // that need a restart to clear still leave a trail.
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                        file_name: None,
+                    }),
                 ])
                 .build(),
         )
@@ -2262,9 +2278,11 @@ pub fn run() {
         .manage(LastTradeNotified(Mutex::new(None)))
         .manage(LastFriendNotified(Mutex::new(None)))
         .manage(LastInventoryFullNotified(Mutex::new(false)))
+        .manage(LoginAttempt(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             get_state,
             login,
+            cancel_login,
             logout,
             register_herzie,
             friend_add,

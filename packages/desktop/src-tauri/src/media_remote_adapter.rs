@@ -3,8 +3,17 @@
 
 use crate::types::NowPlayingInfo;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::OnceLock;
+use std::time::Duration;
+use tokio::process::Command;
+use tokio::time::timeout;
+
+/// The adapter normally answers in well under a second; anything past this is
+/// a wedged MediaRemote call. The child is killed on timeout so a hang can't
+/// pile up processes (or, as before, blocking-pool threads).
+const GET_TIMEOUT: Duration = Duration::from_secs(5);
+/// Artwork payloads are larger, so allow a bit more.
+const ARTWORK_TIMEOUT: Duration = Duration::from_secs(10);
 
 static MEDIAREMOTE_SCRIPT: OnceLock<PathBuf> = OnceLock::new();
 static MEDIAREMOTE_FRAMEWORK: OnceLock<PathBuf> = OnceLock::new();
@@ -29,27 +38,37 @@ fn mediaremote_paths() -> Option<(PathBuf, PathBuf)> {
 }
 
 /// Raw JSON from `get --no-artwork`, or `null` when nothing is playing.
-pub fn raw_json() -> Option<String> {
-    fetch_get_json(false)
+pub async fn raw_json() -> Option<String> {
+    fetch_get_json(false).await
 }
 
 /// Album art from the active player as a `data:` URL (fetched once per track; can be large).
-pub fn fetch_system_artwork_url() -> Option<String> {
-    let json = fetch_get_json(true)?;
+pub async fn fetch_system_artwork_url() -> Option<String> {
+    let json = fetch_get_json(true).await?;
     let parsed: AdapterArtworkPayload = serde_json::from_str(&json).ok()?;
     parsed.artwork_data_url()
 }
 
-fn fetch_get_json(include_artwork: bool) -> Option<String> {
+async fn fetch_get_json(include_artwork: bool) -> Option<String> {
     let (script, framework) = mediaremote_paths()?;
     let framework_str = framework.to_string_lossy();
     let mut cmd = Command::new("/usr/bin/perl");
-    cmd.arg(&script).arg(Path::new(&*framework_str)).arg("get");
+    cmd.arg(&script)
+        .arg(Path::new(&*framework_str))
+        .arg("get")
+        .kill_on_drop(true);
     if !include_artwork {
         cmd.arg("--no-artwork");
     }
 
-    let output = cmd.output().ok()?;
+    let limit = if include_artwork { ARTWORK_TIMEOUT } else { GET_TIMEOUT };
+    let output = match timeout(limit, cmd.output()).await {
+        Ok(result) => result.ok()?,
+        Err(_) => {
+            log::warn!("mediaremote-adapter get timed out after {:?}", limit);
+            return None;
+        }
+    };
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -183,8 +202,8 @@ fn counts_as_music_listening(parsed: &AdapterNowPlaying) -> bool {
     has_title && has_artist
 }
 
-pub fn get_now_playing() -> Option<NowPlayingInfo> {
-    let json = raw_json()?;
+pub async fn get_now_playing() -> Option<NowPlayingInfo> {
+    let json = raw_json().await?;
     let parsed: AdapterNowPlaying = serde_json::from_str(&json).ok()?;
     if parsed.title.is_empty() || !parsed.playing || !counts_as_music_listening(&parsed) {
         return None;
