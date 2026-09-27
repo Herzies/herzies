@@ -1069,9 +1069,6 @@ function EventRow({
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(defaultEditing);
   const fromSeries = !!event.series_id;
-  // Deleting a series occurrence that hasn't ended just brings it back on the
-  // next materialize run — skipping is how you cancel one.
-  const canDelete = !fromSeries || status === "ended" || status === "inactive";
   const [form, setForm] = useState(() => eventToForm(event));
 
   useEffect(() => {
@@ -1110,7 +1107,10 @@ function EventRow({
     );
 
   const remove = async () => {
-    if (!confirm(`Delete event "${event.title}"?`)) return;
+    const prompt = fromSeries
+      ? `Delete this "${event.title}" for good? The series won't recreate it.`
+      : `Delete event "${event.title}"?`;
+    if (!confirm(prompt)) return;
     setBusy(true);
     setError(null);
     try {
@@ -1253,16 +1253,14 @@ function EventRow({
                 ? "deactivate"
                 : "activate"}
           </button>
-          {canDelete && (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={remove}
-              className="text-red text-xs bg-transparent border-0 cursor-pointer disabled:opacity-50"
-            >
-              delete
-            </button>
-          )}
+          <button
+            type="button"
+            disabled={busy}
+            onClick={remove}
+            className="text-red text-xs bg-transparent border-0 cursor-pointer disabled:opacity-50"
+          >
+            delete
+          </button>
           {error && !editing && (
             <div className="text-red text-xs mt-1">{error}</div>
           )}
