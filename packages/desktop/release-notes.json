@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.1.0-beta.43",
+    "highlights": [
+      "New: Events tab. Every live event in one list, with a countdown to the next of each kind",
+      "New: Good ol' George. A travelling merchant who drops by now and then with limited stock. Buy before he leaves",
+      "New: Bigger Bag in the store. Adds 12 slots to your inventory",
+      "New: Stats tab on profiles, so you can see how anyone's herzie is built",
+      "Your connection status is now a little heart in the home header",
+      "Inventory and deck polish: rarity corners on tiles, no more accidental equips when you drop an item back where it was"
+    ]
+  },
+  {
     "version": "0.1.0-beta.42",
     "highlights": [
       "New: Power Dice 1. Roll it onto a statted card to raise that card's stats, up to +3 per card",
