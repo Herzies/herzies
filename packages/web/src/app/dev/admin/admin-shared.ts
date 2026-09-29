@@ -88,7 +88,7 @@ export const STATUS_STYLES: Record<EventStatus, string> = {
 };
 
 export const EVENT_TYPE_LABELS: Record<string, string> = {
-  song_hunt: "song hunt",
+  song_hunt: "Orphiez (song hunt)",
   boss_fight: "boss fight",
   merchant: "Good ol' George",
   secret_track: "secret track",

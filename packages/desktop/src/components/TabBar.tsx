@@ -13,11 +13,12 @@ export type View =
 export function TabBar({
   view,
   setView,
-  hasActiveEvent = false,
+  visitorsInTown = 0,
 }: {
   view: View;
   setView: (v: View) => void;
-  hasActiveEvent?: boolean;
+  /** How many visitors are in Town right now; badges the tab when above 0. */
+  visitorsInTown?: number;
 }) {
   type Tab = {
     id: View;
@@ -29,9 +30,9 @@ export function TabBar({
   const tabs: Tab[] = [
     {
       id: "home",
-      label: "Herzie",
+      label: "Home",
       colour: "cyan",
-      title: "Your Herzie. Shortcut [h]",
+      title: "Home — your herzie. Shortcut [h]",
     },
     {
       id: "inventory",
@@ -41,9 +42,9 @@ export function TabBar({
     },
     {
       id: "events",
-      label: "Events",
+      label: "Town",
       colour: "cyan",
-      title: "Events. Shortcut [e]",
+      title: "Town — who's visiting. Shortcut [t]",
     },
     {
       id: "friends",
@@ -53,7 +54,7 @@ export function TabBar({
     },
     {
       id: "store",
-      label: "Store",
+      label: "Premium",
       colour: "yellow",
       title: "Expansions & premium cards. Shortcut [b]",
     },
@@ -79,8 +80,13 @@ export function TabBar({
         },
       )}
     >
-      {t.id === "events" && hasActiveEvent && <TabStarAccent />}
+      {t.id === "events" && visitorsInTown > 0 && <TabStarAccent />}
       <span className={cn("relative z-10")}>{t.label}</span>
+      {t.id === "events" && visitorsInTown > 0 && (
+        <span className="relative z-10 ml-0.5 align-super text-[8px] font-bold text-green">
+          {visitorsInTown}
+        </span>
+      )}
     </button>
   );
 

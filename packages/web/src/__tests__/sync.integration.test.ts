@@ -365,7 +365,7 @@ describe("Sync flow", () => {
         n.type === "info" && n.message.includes("FinderHerzie"),
     );
     expect(huntNotif).toBeDefined();
-    expect(huntNotif.message).toContain("found the song");
+    expect(huntNotif.message).toContain("found Orphiez's song");
 
     // Sync again — should NOT get the notification a second time
     const res2 = await syncRoute(
@@ -489,12 +489,12 @@ describe("Sync flow", () => {
         n.type === "item_granted" && !n.logOnly,
     );
     expect(winNotif).toBeDefined();
-    expect(winNotif.message).toContain("You found the song");
+    expect(winNotif.message).toContain("You found Orphiez's song");
     expect(winNotif.message.toLowerCase()).not.toContain("first");
 
     const firstFinderNotif = body.notifications.find(
       (n: { type: string; message: string }) =>
-        n.type === "info" && n.message.includes("found the song"),
+        n.type === "info" && n.message.includes("found Orphiez's song"),
     );
     expect(firstFinderNotif).toBeUndefined();
   });

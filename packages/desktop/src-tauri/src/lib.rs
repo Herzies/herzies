@@ -1847,20 +1847,25 @@ async fn events_watch_loop(app: AppHandle) {
             if !known.insert(event.id.clone()) {
                 continue;
             }
-            let title = if event.event_type == "merchant" {
-                // George isn't an event that "starts" — he turns up.
-                format!("{} is in town!", event.title)
-            } else if event.title.trim().is_empty() {
-                "A new event is starting!".to_string()
+            // Every event is a visitor arriving in Town (see VISITORS in
+            // @herzies/shared): George and bosses by their own names, a song
+            // hunt as Orphiez.
+            let title = match event.event_type.as_str() {
+                "song_hunt" => "Orphiez is in town!".to_string(),
+                _ if event.title.trim().is_empty() => "Someone's in town!".to_string(),
+                _ => format!("{} is in town!", event.title),
+            };
+            let fallback_body = if event.event_type == "song_hunt" {
+                "He's lost a song. Help him find it."
             } else {
-                format!("{} is starting!", event.title)
+                "Someone new has arrived in Town."
             };
             let body = event
                 .description
                 .as_deref()
                 .map(|d| d.trim())
                 .filter(|d| !d.is_empty())
-                .unwrap_or("A new event is live in Herzies.");
+                .unwrap_or(fallback_body);
             send_notification(&app, &title, body, Some("events"));
             let _ = app.emit("activity", format!("{}: {}", title, body));
         }

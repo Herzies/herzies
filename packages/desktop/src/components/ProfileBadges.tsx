@@ -97,7 +97,7 @@ export function ProfileBadges({ profile }: { profile: HerzieProfile }) {
   if (wins > 0) {
     badges.push({
       key: "song-hunts",
-      label: `${wins} song hunt${wins === 1 ? "" : "s"} won`,
+      label: `${wins} song${wins === 1 ? "" : "s"} found for Orphiez`,
       count: wins,
       icon: <BullseyeIcon />,
       colour: GOOD_EYE_SNIPER_RED,

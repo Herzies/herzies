@@ -8,8 +8,8 @@ const TITLEBAR_HEIGHT = 28;
 const CONTENT_PADDING = 12;
 
 const MOCK = {
-  title: "Song Hunt #4",
-  countdown: "1d 14h left",
+  title: "Orphiez is in town",
+  countdown: "Leaving town in 1d 14h",
   rewardItemId: "headphones",
   hints: [
     { text: "Released in '94. A name that aches.", unlocked: true },
@@ -51,7 +51,7 @@ export function DesktopEventsPreview() {
         </span>
       </div>
 
-      {/* Body — mirrors EventsView for an active song hunt */}
+      {/* Body — mirrors EventsView for an active song hunt (Orphiez's visit) */}
       <div
         className="flex flex-col overflow-hidden"
         style={{

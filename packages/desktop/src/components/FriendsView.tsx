@@ -609,7 +609,7 @@ export function FriendsView({
             ) : leaderboard.length === 0 ? (
               <div className="pt-5 text-center text-ui text-text-dim">
                 {leaderboardBoard === "song_hunt"
-                  ? "No song hunts won yet."
+                  ? "Nobody has found a song for Orphiez yet."
                   : "No herzies on the leaderboard yet."}
               </div>
             ) : (

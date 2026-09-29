@@ -797,7 +797,7 @@ export async function processSync(
       notifications.push({
         type: "info",
         title: hunt.title as string,
-        message: `${finderName} found the song! Find it yourself to claim your reward.`,
+        message: `${finderName} found Orphiez's song! Find it yourself to claim your reward.`,
       });
       notifiedHunts.push(hunt.id);
     }
@@ -1077,8 +1077,8 @@ async function checkSecretTrackEvents(
 
     const winMessage = isSongHunt
       ? isFirstFinder
-        ? `You won! You found "${config.trackTitle}" first.`
-        : `You found the song! You solved "${config.trackTitle}".`
+        ? `You won! You found Orphiez's song first: "${config.trackTitle}".`
+        : `You found Orphiez's song: "${config.trackTitle}".`
       : `You discovered the secret track "${config.trackTitle}"! You earned a collectible!`;
 
     // Native + log: the win / discovery line.

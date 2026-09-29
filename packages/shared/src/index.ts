@@ -15,3 +15,4 @@ export * from "./name.js";
 export * from "./Sky.js";
 export * from "./scenery-renderer.js";
 export * from "./types.js";
+export * from "./visitors.js";

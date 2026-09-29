@@ -109,8 +109,8 @@ export default function Home() {
 
         <TextAndMedia
           preTitle="Discover"
-          title="Participate in events"
-          description="Join secret song hunts, receive rewards, and discover new music."
+          title="Meet the visitors"
+          description="Help Orphiez find his lost songs, shop with Good ol' George, fight off bosses — and discover new music along the way."
           media={<DesktopEventsPreview />}
           position="left"
         />

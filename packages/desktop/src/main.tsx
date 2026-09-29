@@ -137,7 +137,9 @@ function App() {
   const [openChatRequested, setOpenChatRequested] = useState(false);
   /** "c" pressed mid-trade: open chat after the user confirms leaving the trade. */
   const openChatAfterLeaveRef = useRef(false);
-  const [hasActiveEvent, setHasActiveEvent] = useState(false);
+  /** Visitors in Town right now (live song hunt, boss, George) — the Town
+   * tab's badge. */
+  const [visitorsInTown, setVisitorsInTown] = useState(0);
   const [hasActiveEventOverride, setHasActiveEventOverride] = useState(false);
   const [debugBossOverride, setDebugBossOverride] = useState(false);
   const [debugMerchantOverride, setDebugMerchantOverride] = useState(false);
@@ -274,13 +276,13 @@ function App() {
     herzies
       .fetchActiveEvents()
       .then(({ events }) => {
-        setHasActiveEvent(
-          events.some(
+        setVisitorsInTown(
+          events.filter(
             (e) =>
               e.type === "song_hunt" ||
               e.type === "boss_fight" ||
               e.type === "merchant",
-          ),
+          ).length,
         );
         const boss = events.find((e) => e.type === "boss_fight");
         // Drives the red genre pills on the now-playing card, so the player
@@ -291,7 +293,7 @@ function App() {
         );
       })
       .catch(() => {
-        setHasActiveEvent(false);
+        setVisitorsInTown(0);
         setBossHatedGenres([]);
       });
   }, []);
@@ -494,7 +496,7 @@ function App() {
     const shortcuts: Record<string, View> = {
       h: "home",
       i: "inventory",
-      e: "events",
+      t: "events",
       f: "friends",
       b: "store",
     };
@@ -921,11 +923,11 @@ function App() {
         <TabBar
           view={view}
           setView={switchView}
-          hasActiveEvent={
-            hasActiveEvent ||
-            hasActiveEventOverride ||
-            debugBossOverride ||
-            debugMerchantOverride
+          visitorsInTown={
+            visitorsInTown +
+            Number(hasActiveEventOverride) +
+            Number(debugBossOverride) +
+            Number(debugMerchantOverride)
           }
         />
       )}
