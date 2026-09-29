@@ -14,10 +14,18 @@ import { BackButton } from "./BackButton";
 import { BossFightHelp, BossFightPanel, makeDebugBoss } from "./BossFightPanel";
 import ItemInspectOverlay from "./ItemInspectOverlay";
 import { ItemTypeIcon } from "./icons/ItemTypeIcon";
+import { VisitorIcon } from "./icons/VisitorIcon";
 import { List } from "./List";
 import { MerchantPanel } from "./MerchantPanel";
 import { OrphiezStage } from "./OrphiezStage";
+import { TabButton } from "./TabButton";
 import { View } from "./View";
+import { VisitorHelp } from "./VisitorHelp";
+import {
+  ROW_TEXT_SHADOW,
+  VISITOR_THEMES,
+  VisitorSparkles,
+} from "./VisitorRowTheme";
 
 function formatCountdown(endsAt: string): string {
   const ms = new Date(endsAt).getTime() - Date.now();
@@ -178,9 +186,12 @@ export function EventsView({
   const [reloadKey, setReloadKey] = useState(0);
   const [previousEvent, setPreviousEvent] = useState<GameEvent | null>(null);
   const [nextHunt, setNextHunt] = useState<GameEvent | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [activeLoaded, setActiveLoaded] = useState(false);
+  const [previousLoaded, setPreviousLoaded] = useState(false);
+  const [previousKey, setPreviousKey] = useState(0);
+  const liveIdsRef = useRef<string | null>(null);
   const [inspectOverlay, setInspectOverlay] = useState<"item" | null>(null);
-  const [inspectItemId, setInspectItemId] = useState<string | null>(null);
+  const [huntTab, setHuntTab] = useState<"clues" | "finders">("clues");
   const focused = useWindowFocused();
 
   // Optimistic override of playsRemaining, keyed by hint index — updated
@@ -224,9 +235,9 @@ export function EventsView({
 
   // Load when the tab is actually opened, and keep it fresh only while the
   // window is up. This view stays mounted when hidden, so it previously also
-  // fetched once on mount — meaning every launch paid for /events/previous-hunt
-  // (a slow Vercel route) whether or not the player ever opened Events, and
-  // opening the tab then immediately re-fetched the same two endpoints.
+  // fetched once on mount — meaning every launch paid for these whether or
+  // not the player ever opened Events, and opening the tab then immediately
+  // re-fetched the same endpoints.
   // reloadKey is a trigger, not a value: George's stall bumps it after a buy.
   // biome-ignore lint/correctness/useExhaustiveDependencies: reloadKey re-runs the fetch
   useEffect(() => {
@@ -234,17 +245,23 @@ export function EventsView({
     let cancelled = false;
 
     const refresh = () =>
-      Promise.all([herzies.fetchActiveEvents(), herzies.fetchPreviousHunt()])
-        .then(([active, previous]) => {
+      herzies
+        .fetchActiveEvents()
+        .then((active) => {
           if (cancelled) return;
           setEvents(active.events);
           setUpcoming(active.upcoming ?? []);
-          setPreviousEvent(previous.events[0] ?? null);
-          setNextHunt(previous.next);
-          setLoading(false);
+          setActiveLoaded(true);
+          // A visit started or ended: the previous hunt / next hunt may have
+          // moved too. The first load just records the set.
+          const ids = active.events.map((e) => e.id).join(",");
+          if (liveIdsRef.current !== null && liveIdsRef.current !== ids) {
+            setPreviousKey((k) => k + 1);
+          }
+          liveIdsRef.current = ids;
         })
         .catch(() => {
-          if (!cancelled) setLoading(false);
+          if (!cancelled) setActiveLoaded(true);
         });
 
     refresh();
@@ -254,6 +271,30 @@ export function EventsView({
       if (interval) clearInterval(interval);
     };
   }, [focused, eventsTabVisible, reloadKey]);
+
+  // /events/previous-hunt (a slow Vercel route) only changes when a visit
+  // ends or starts, so it isn't polled with the active events: it's fetched
+  // when the tab opens and again when the poll sees the live set change.
+  // previousKey is a trigger, not a value.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: previousKey re-runs the fetch
+  useEffect(() => {
+    if (!eventsTabVisible) return;
+    let cancelled = false;
+    herzies
+      .fetchPreviousHunt()
+      .then((previous) => {
+        if (cancelled) return;
+        setPreviousEvent(previous.events[0] ?? null);
+        setNextHunt(previous.next);
+        setPreviousLoaded(true);
+      })
+      .catch(() => {
+        if (!cancelled) setPreviousLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [eventsTabVisible, previousKey]);
 
   // Tell the app which full-screen view is open (see onScreenChange). Up here,
   // above the early returns, so the hook order never changes.
@@ -281,7 +322,7 @@ export function EventsView({
     onScreenChange,
   ]);
 
-  if (loading) {
+  if (!activeLoaded || !previousLoaded) {
     return (
       <div className="flex h-full items-center justify-center text-xs text-text-dim">
         Loading...
@@ -435,6 +476,7 @@ export function EventsView({
               <EventCardRow
                 key={`${card.type}-${card.eventId ?? card.status}`}
                 card={card}
+                paused={!eventsTabVisible || !focused}
                 onOpen={
                   card.openKey
                     ? () => setSelected(card.openKey as string)
@@ -459,21 +501,13 @@ export function EventsView({
         colour="cyan"
         childrenClassName="flex min-h-0 flex-col"
         backButton={back}
-        action={<BossFightHelp />}
+        action={<BossFightHelp event={selectedEvent} />}
       >
         <BossFightPanel
           event={selectedEvent}
           paused={!eventsTabVisible || !focused}
-          onInspectReward={(itemId) => setInspectItemId(itemId)}
           equipped={equipped}
         />
-        {inspectItemId ? (
-          <ItemInspectOverlay
-            itemId={inspectItemId}
-            onClose={() => setInspectItemId(null)}
-            equipped={equipped}
-          />
-        ) : null}
       </View>
     );
   }
@@ -684,59 +718,65 @@ export function EventsView({
     }>;
   };
 
-  const rewardItem = getItem(config.rewardItemId);
-
   return (
     <View
       title="Song Hunt"
       colour="cyan"
       childrenClassName="flex flex-col h-full"
       backButton={back}
+      action={
+        <VisitorHelp
+          label="What is a song hunt?"
+          text={`${VISITORS.song_hunt.name} is looking for a song. Work it out from the clues and play it — the first ${config.maxClaims} to find it get a reward.`}
+          rewards={[
+            {
+              label: "Reward",
+              itemId: config.rewardItemId,
+              note: `${config.maxClaims - config.firstFinders.length} left`,
+            },
+          ]}
+        />
+      }
     >
       <OrphiezStage paused={!eventsTabVisible || !focused} />
-      <div className="mt-1 flex shrink-0 justify-center">
-        <div>
-          <div className="text-center text-cyan">{hunt.title}</div>
-          <div className="text-ui text-text-dim mt-2">{hunt.description}</div>
-
-          <div className="mt-3 flex flex-col gap-0.5 text-center text-[10px] text-text-dim">
-            <div>Leaving town: {formatCountdown(hunt.endsAt)}</div>
-            {rewardItem ? (
-              <>
-                <div className="flex items-center justify-center gap-1">
-                  Reward:{" "}
-                  <ItemTypeIcon
-                    item={rewardItem}
-                    className="h-4 w-4 shrink-0"
-                  />
-                  <button
-                    className="cursor-pointer border-none bg-transparent text-ui underline"
-                    style={{ color: ITEM_RARITY_COLORS[rewardItem.rarity] }}
-                    type="button"
-                    onClick={() => setInspectOverlay("item")}
-                  >
-                    {rewardItem.name}
-                  </button>
-                </div>
-                <div>
-                  Rewards left: {config.maxClaims - config.firstFinders.length}
-                </div>
-              </>
-            ) : null}
-          </div>
+      {hunt.description ? (
+        <div className="mt-1 shrink-0 text-center text-ui text-text-dim">
+          {hunt.description}
         </div>
+      ) : null}
+
+      {/* mt-auto sinks the tabs and their list to the bottom, so a short
+          list leaves its slack above the tabs instead of under the list. */}
+      <div className="mt-auto flex shrink-0 gap-1 border-b border-border pt-2 text-ui">
+        <TabButton
+          active={huntTab === "clues"}
+          onClick={() => setHuntTab("clues")}
+        >
+          Clues
+        </TabButton>
+        <TabButton
+          active={huntTab === "finders"}
+          onClick={() => setHuntTab("finders")}
+        >
+          Finders ({config.firstFinders.length})
+        </TabButton>
       </div>
 
-      {/* The stage takes the room the centred header used to, so the clues
-          and finders scroll rather than push past the window. */}
-      <div className="mt-2 min-h-0 flex-1 overflow-y-auto">
-        <div>
-          <div className="mb-2.5">
-            <div className="mb-1 text-[10px] text-text-dim">Clues</div>
+      {/* No flex-1: the box is only as tall as the clues, and scrolls once
+          they'd push past the window. The clues always lay out (just hidden
+          on the Finders tab) and the finders sit over them at the same
+          height, scrolling if they run longer — so switching tabs never
+          moves the tab row. */}
+      <div className="mt-2 min-h-0 overflow-y-auto">
+        <div className="relative">
+          <div className={huntTab === "clues" ? undefined : "invisible"}>
             {config.hints.map((hint, i) => (
               <div
                 key={hint.unlocksAt}
-                className="mb-1 border-b border-border py-1"
+                className={cn(
+                  "py-1",
+                  i < config.hints.length - 1 && "mb-1 border-b border-border",
+                )}
               >
                 {hint.unlocked ? (
                   <div className="text-ui text-text">
@@ -789,44 +829,34 @@ export function EventsView({
               <div className="text-ui-sm text-red">{audioError}</div>
             ) : null}
           </div>
-
-          <div>
-            <div className="mb-1 text-[10px] text-text-dim">
-              Finders ({config?.firstFinders?.length ?? 0})
+          {huntTab === "finders" && (
+            <div className="absolute inset-0 flex flex-col">
+              {config.firstFinders.length > 0 ? (
+                <List className="min-h-0 flex-1">
+                  {config.firstFinders.map((finder, i) => (
+                    <div
+                      key={`${finder.name}-${finder.claimedAt}`}
+                      className="mb-1 flex justify-between border-b border-border py-1 text-ui last:mb-0 last:border-b-0"
+                    >
+                      <span className={i === 0 ? "text-yellow" : "text-text"}>
+                        {i + 1}. {finder.name}
+                      </span>
+                      <span className="text-text-dim">
+                        {timeAgo(finder.claimedAt)}
+                      </span>
+                    </div>
+                  ))}
+                </List>
+              ) : (
+                <div className="text-ui text-text-dim">
+                  Nobody has found it for him yet...
+                </div>
+              )}
             </div>
-            {config?.firstFinders?.length &&
-            config?.firstFinders?.length > 0 ? (
-              <List className="max-h-28">
-                {config.firstFinders.map((finder, i) => (
-                  <div
-                    key={`${finder.name}-${finder.claimedAt}`}
-                    className="flex justify-between border-b border-border py-0.5 text-ui last:border-b-0"
-                  >
-                    <span className="text-yellow">
-                      {i + 1}. {finder.name}
-                    </span>
-                    <span className="text-text-dim">
-                      {timeAgo(finder.claimedAt)}
-                    </span>
-                  </div>
-                ))}
-              </List>
-            ) : (
-              <div className="text-ui text-text-dim">
-                Nobody has found it for him yet...
-              </div>
-            )}
-          </div>
+          )}
         </div>
       </div>
 
-      {inspectOverlay === "item" && (
-        <ItemInspectOverlay
-          itemId={config.rewardItemId}
-          onClose={() => setInspectOverlay(null)}
-          equipped={equipped}
-        />
-      )}
       {/* biome-ignore lint/a11y/useMediaCaption: short game hint clips, no source track */}
       <audio
         ref={audioRef}
@@ -871,54 +901,103 @@ function formatIn(at: string): string {
 function EventCardRow({
   card,
   onOpen,
+  paused,
 }: {
   card: EventCard;
   onOpen?: () => void;
+  /** Tab hidden or window unfocused — freeze the sparkles. */
+  paused: boolean;
 }) {
   const subtitle = card.description ?? card.detail;
+  const live = card.status === "live";
+  // Only a visitor who's actually in town wears their theme.
+  const theme = live ? VISITOR_THEMES[card.type] : undefined;
+  const dim = theme ? { color: theme.dim } : undefined;
 
   const left = (
-    <div className="min-w-0 flex-1">
-      <div className="truncate text-ui text-text group-hover:text-cyan">
-        {card.title}
+    <div className="flex min-w-0 flex-1 items-center gap-2">
+      <VisitorIcon
+        type={card.type}
+        seed={card.eventId}
+        inTown={live}
+        className="h-6 w-6 shrink-0"
+      />
+      <div className="min-w-0 flex-1">
+        <div
+          className={cn(
+            "truncate text-ui",
+            theme ? "text-white" : "text-text group-hover:text-cyan",
+          )}
+        >
+          {card.title}
+        </div>
+        {subtitle ? (
+          <div className="truncate text-[10px] text-text-dim" style={dim}>
+            {subtitle}
+          </div>
+        ) : null}
       </div>
-      {subtitle ? (
-        <div className="truncate text-[10px] text-text-dim">{subtitle}</div>
-      ) : null}
     </div>
   );
 
   return (
     <div
       className={cn(
-        "flex items-center justify-between gap-2 border-b border-[#222] py-1.5",
+        "group relative flex items-center justify-between gap-2 overflow-hidden",
+        "border-b border-[#222] py-1.5",
+        theme && "pr-2",
         // Live at full strength; scheduled a little dimmer; nothing-on dimmer
         // still.
         card.status === "scheduled" && "opacity-65",
         card.status === "idle" && "opacity-50",
       )}
+      style={theme ? { textShadow: ROW_TEXT_SHADOW } : undefined}
     >
+      {theme && (
+        // The Now Playing card's backdrop treatment (see TrackCard): the
+        // visitor's colours fill the right half and fade into the app
+        // background toward the left, sparkles and all.
+        <div className="pointer-events-none absolute inset-y-0 right-0 w-1/2 overflow-hidden">
+          {/* Hover brightens only the colour, never the fade on top of it:
+              a filter on the whole row lit up the fade's bg-panel edge
+              into a visible box. */}
+          <div
+            className={cn(
+              "absolute inset-0",
+              onOpen &&
+                "transition-[filter] duration-100 group-hover:brightness-150",
+            )}
+            style={{ background: theme.background }}
+          />
+          {theme.sparkle && (
+            <VisitorSparkles sparkle={theme.sparkle} paused={paused} />
+          )}
+          <div className="absolute inset-0 bg-gradient-to-r from-bg-panel to-transparent" />
+        </div>
+      )}
       {onOpen ? (
         <button
           type="button"
           onClick={onOpen}
-          className="group flex min-w-0 flex-1 cursor-pointer items-center text-left"
+          className="relative flex min-w-0 flex-1 cursor-pointer items-center text-left"
         >
           {left}
         </button>
       ) : (
-        left
+        <div className="relative flex min-w-0 flex-1">{left}</div>
       )}
-      <div className="shrink-0 text-right">
-        {card.status === "live" ? (
-          <div className="flex items-center justify-end gap-1 text-[10px] font-bold text-green">
-            <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-green" />
+      <div className="relative shrink-0 text-right">
+        {live ? (
+          <div
+            className="text-[10px] font-bold text-green"
+            style={theme ? { color: theme.accent } : undefined}
+          >
             IN TOWN
           </div>
         ) : null}
         {card.at ? (
-          <div className="text-[10px] text-text-dim">
-            {card.status !== "live"
+          <div className="text-[10px] text-text-dim" style={dim}>
+            {!live
               ? `in ${formatIn(card.at)}`
               : // Every visitor leaves when their visit ends.
                 `leaving in ${formatIn(card.at)}`}

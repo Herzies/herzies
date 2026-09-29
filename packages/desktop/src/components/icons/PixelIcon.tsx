@@ -1,6 +1,6 @@
 import { type CSSProperties, useId } from "react";
 
-/** Renders a 16x16 bitmap as crisp SVG rects — one `<rect>` per horizontal
+/** Renders a square bitmap (16x16 for items) as crisp SVG rects — one `<rect>` per horizontal
  * run of same-character cells. Shared by the item-type and currency pixel
  * icons so each icon set only has to describe its grid, not the rasterizer.
  *
@@ -51,7 +51,8 @@ export function PixelIcon({
 
   return (
     <svg
-      viewBox="0 0 16 16"
+      // Square, sized by the grid: 16 for items, 24 for visitor portraits.
+      viewBox={`0 0 ${grid.length} ${grid.length}`}
       shapeRendering="crispEdges"
       fill={gradient ? `url(#${gradientId})` : "currentColor"}
       aria-hidden="true"

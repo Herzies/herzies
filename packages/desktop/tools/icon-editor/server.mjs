@@ -4,8 +4,9 @@
 // plain Node http server + a static page. Saving writes straight back to
 // that JSON file, which the running desktop app (via Vite) picks up like
 // any other source change. Each entry is `{ palette, grid }`: `grid` is
-// 16 rows of '.' (empty) / '0'-'9'/'a'-'f' (an index into `palette`) — a
-// per-pixel paint job, not one solid tint (see ItemTypeIcon.tsx).
+// N rows of N '.' (empty) / '0'-'9'/'a'-'f' (an index into `palette`) — a
+// per-pixel paint job, not one solid tint (see ItemTypeIcon.tsx). N is 16
+// for items, 24 for Town's visitor portraits (see VisitorIcon.tsx).
 import { createServer } from "node:http";
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -36,6 +37,21 @@ const EXTRA_ICONS = [
     autoColor: "#facc15",
     gradient: null,
   },
+  // Hand-tweaked Town portraits (VisitorIcon). Without an entry the portrait
+  // is drawn from the visitor's 3D look instead; the seeded entries started
+  // as a snapshot of exactly that.
+  {
+    id: "visitor-orphiez",
+    name: "Orphiez (Town portrait)",
+    autoColor: "#54cbc3",
+    gradient: null,
+  },
+  {
+    id: "visitor-george",
+    name: "Good ol' George (Town portrait)",
+    autoColor: "#f5c518",
+    gradient: null,
+  },
 ];
 
 function readGrids() {
@@ -55,14 +71,17 @@ function isValidPalette(palette) {
   );
 }
 
-function isValidGrid(grid, paletteLength) {
+// `size` is the stored icon's side length: an edit can repaint an icon but
+// never resize it.
+function isValidGrid(grid, paletteLength, size) {
   return (
     Array.isArray(grid) &&
-    grid.length === 16 &&
+    grid.length === size &&
     grid.every(
       (row) =>
         typeof row === "string" &&
-        /^[.0-9a-f]{16}$/i.test(row) &&
+        row.length === size &&
+        /^[.0-9a-f]+$/i.test(row) &&
         [...row].every((ch) => ch === "." || parseInt(ch, 16) < paletteLength),
     )
   );
@@ -138,10 +157,10 @@ const server = createServer(async (req, res) => {
         });
         return;
       }
-      if (!isValidGrid(payload.grid, payload.palette.length)) {
+      const size = stored[id].grid.length;
+      if (!isValidGrid(payload.grid, payload.palette.length, size)) {
         sendJson(res, 400, {
-          error:
-            "grid must be 16 rows of exactly 16 '.'/'0'-'9'/'a'-'f' characters, each index within the palette",
+          error: `grid must be ${size} rows of exactly ${size} '.'/'0'-'9'/'a'-'f' characters, each index within the palette`,
         });
         return;
       }
