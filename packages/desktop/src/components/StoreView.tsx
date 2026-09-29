@@ -5,7 +5,6 @@ import {
   getItem,
   hasRoomFor,
   MAX_BANK_EXPANSIONS,
-  MERCHANT_NAME,
 } from "@herzies/shared";
 import { useEffect, useRef, useState } from "react";
 import { formatAmount, formatPrice } from "../lib/utils";
@@ -19,10 +18,10 @@ import { List } from "./List";
 import { Tooltip } from "./Tooltip";
 
 /**
- * The real-money shelf: Inventory Expansions and whatever Stripe lists. It
- * sells nothing for coins — coins are spent with Good ol' George during his
- * visits, which is what keeps his stock worth turning up for. The balance
- * still shows here so the header reads the same on every tab.
+ * The Premium tab: Inventory Expansions and whatever Stripe lists. It sells
+ * nothing for coins — coins are spent with Good ol' George during his visits,
+ * which is what keeps his stock worth turning up for. The balance still shows
+ * here so the header reads the same on every tab.
  */
 
 export function StoreView({
@@ -31,7 +30,6 @@ export function StoreView({
   equipped,
   bankExpansions,
   active = true,
-  nextMerchantAt = null,
 }: {
   inventory: Inventory | null;
   currency: number;
@@ -41,8 +39,6 @@ export function StoreView({
   bankExpansions: number;
   /** False while another tab is shown. */
   active?: boolean;
-  /** When George next turns up (null while he's in town, or unscheduled). */
-  nextMerchantAt?: string | null;
 }) {
   const capacity = bankCapacity(bankExpansions);
   const [premium, setPremium] = useState<PremiumItem[] | null>(null);
@@ -140,7 +136,7 @@ export function StoreView({
   return (
     <div className="flex h-full flex-col">
       <div className="z-50 mb-4 flex items-center justify-between">
-        <h1 className="text-ui-lg font-bold text-yellow">Store</h1>
+        <h1 className="text-ui-lg font-bold text-yellow">Premium</h1>
         <Tooltip label={`${formatAmount(currency)} herzie coins`}>
           <div className="text-ui text-yellow">
             <Coin amount={currency} animate />
@@ -148,31 +144,13 @@ export function StoreView({
         </Tooltip>
       </div>
 
-      <p className="mb-1 text-[11px] text-text-dim leading-snug">
+      <p className="mb-2 text-[11px] text-text-dim leading-snug">
         {/* Deliberately doesn't claim these are unobtainable elsewhere: a
             listing is just a Stripe product, so nothing stops a droppable card
             being sold here too — and every item is tradable, so even a
             shop-only one can reach a player who never paid. */}
         Herzies is a one-person passion project. Buying here supports its
         development.
-      </p>
-      <p className="mb-2 text-[11px] leading-snug text-text-dim">
-        Got coins? Spend them with{" "}
-        <span className="text-yellow">{MERCHANT_NAME}</span> when he's in town
-        {nextMerchantAt ? (
-          <>
-            {" "}
-            — next visit{" "}
-            <span className="text-text">
-              {new Intl.DateTimeFormat(undefined, {
-                weekday: "short",
-                day: "numeric",
-                month: "short",
-              }).format(new Date(nextMerchantAt))}
-            </span>
-          </>
-        ) : null}
-        .
       </p>
       <List className="min-h-0 flex-1">
         {premium === null ? (
@@ -181,7 +159,7 @@ export function StoreView({
           </div>
         ) : premiumItems.length === 0 && !expansionListing ? (
           <div className="pt-5 text-center text-ui text-text-dim">
-            Nothing in the store right now.
+            Nothing here right now.
           </div>
         ) : (
           <>

@@ -54,7 +54,7 @@ export function TabBar({
     },
     {
       id: "store",
-      label: "Store",
+      label: "Premium",
       colour: "yellow",
       title: "Expansions & premium cards. Shortcut [b]",
     },

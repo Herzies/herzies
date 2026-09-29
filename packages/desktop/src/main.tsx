@@ -140,8 +140,6 @@ function App() {
   /** Visitors in Town right now (live song hunt, boss, George) — the Town
    * tab's badge. */
   const [visitorsInTown, setVisitorsInTown] = useState(0);
-  /** When George next turns up, for the Store's pointer to him. */
-  const [nextMerchantAt, setNextMerchantAt] = useState<string | null>(null);
   const [hasActiveEventOverride, setHasActiveEventOverride] = useState(false);
   const [debugBossOverride, setDebugBossOverride] = useState(false);
   const [debugMerchantOverride, setDebugMerchantOverride] = useState(false);
@@ -277,7 +275,7 @@ function App() {
   const refreshEventIndicator = useCallback(() => {
     herzies
       .fetchActiveEvents()
-      .then(({ events, upcoming }) => {
+      .then(({ events }) => {
         setVisitorsInTown(
           events.filter(
             (e) =>
@@ -285,11 +283,6 @@ function App() {
               e.type === "boss_fight" ||
               e.type === "merchant",
           ).length,
-        );
-        setNextMerchantAt(
-          events.some((e) => e.type === "merchant")
-            ? null
-            : (upcoming?.find((e) => e.type === "merchant")?.startsAt ?? null),
         );
         const boss = events.find((e) => e.type === "boss_fight");
         // Drives the red genre pills on the now-playing card, so the player
@@ -870,7 +863,6 @@ function App() {
             equipped={state.equipped}
             bankExpansions={state.bankExpansions}
             active={view === "store"}
-            nextMerchantAt={nextMerchantAt}
           />
         </div>
 
