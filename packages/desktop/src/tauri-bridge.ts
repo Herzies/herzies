@@ -8,6 +8,7 @@ import type {
   HerzieProfile,
   Inventory,
   ItemUnit,
+  ItemUpgradeResult,
   PendingDrop,
   PendingFriendRequest,
   PremiumItem,
@@ -120,7 +121,9 @@ export const herzies = {
     };
   },
 
-  login: () => invoke<boolean>("login"),
+  /** Rejects with a code: "cancelled" | "port_in_use" | "browser_open_failed" | "timed_out" | "invalid_callback". */
+  login: () => invoke<void>("login"),
+  cancelLogin: () => invoke<void>("cancel_login"),
   logout: () => invoke<void>("logout"),
   registerHerzie: (name: string) => invoke<void>("register_herzie", { name }),
 
@@ -175,18 +178,29 @@ export const herzies = {
       action,
       side,
     }),
-  /** Consumes one dice item to raise ONE specific card's upgrade level by one
-   * (see MAX_ITEM_UPGRADE_LEVEL) — a second copy of the same card is left
-   * alone. Throws with the server's error message (not owned, already maxed,
-   * target has no stats, etc.). */
-  applyDiceUpgrade: (diceItemId: string, targetUnitId: string) =>
+  /** Rolls a dice item onto ONE named card. The server rolls, never the
+   * client: `result` says whether it went up, a failed roll was absorbed by
+   * the Safety Pick (`protectionItemId`), or the card broke. Throws with the
+   * server's error message (not owned, wrong dice, already maxed, etc.). */
+  applyDiceUpgrade: (
+    diceItemId: string,
+    targetUnitId: string,
+    protectionItemId: string | null = null,
+  ) =>
     invoke<{
       ok: boolean;
+      result: ItemUpgradeResult;
       newLevel: number;
+      chance: number;
+      protected: boolean;
       inventory: Inventory;
       itemUpgrades: Record<string, number>;
       units: ItemUnit[];
-    } | null>("apply_dice_upgrade", { diceItemId, targetUnitId }),
+    } | null>("apply_dice_upgrade", {
+      diceItemId,
+      targetUnitId,
+      protectionItemId,
+    }),
   /** Buys an item with in-game currency (store's Items tab). Throws with the
    * server's error message (not enough currency, already owned, etc.). */
   buyItem: (itemId: string, quantity: number) =>

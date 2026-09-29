@@ -12,6 +12,8 @@ import { Tooltip } from "./Tooltip";
 
 export const ITEM_TYPE_TEXT_CLASSES: Record<ItemType, string> = {
   dice: "text-orange",
+  // Upgrade materials share a colour: a charm only matters next to a die.
+  charm: "text-orange",
   skin: "text-purple",
   sceneryCard: "text-green",
   equipable: "text-cyan",
@@ -22,6 +24,7 @@ export const ITEM_TYPE_TEXT_CLASSES: Record<ItemType, string> = {
 
 export const ITEM_TYPE_PILL_CLASSES: Record<ItemType, string> = {
   dice: "bg-orange/15 text-orange",
+  charm: "bg-orange/15 text-orange",
   skin: "bg-purple/15 text-purple",
   sceneryCard: "bg-green/15 text-green",
   equipable: "bg-cyan/15 text-cyan",
@@ -38,7 +41,10 @@ export function ItemTypeTag({
    * inline in an existing metadata line (e.g. next to the rarity label). */
   variant = "pill",
 }: {
-  item: Pick<ItemDef, "equipable" | "equipSlot" | "modifier" | "dice">;
+  item: Pick<
+    ItemDef,
+    "equipable" | "equipSlot" | "modifier" | "dice" | "protection"
+  >;
   className?: string;
   variant?: "pill" | "text";
 }) {

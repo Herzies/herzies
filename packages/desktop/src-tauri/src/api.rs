@@ -703,15 +703,22 @@ pub async fn api_equip_unit(
     Ok(data)
 }
 
-/// Consumes one dice item to raise ONE specific card's upgrade level by one.
-/// Surfaces the server's error message, same as `api_equip_unit`/`api_buy_item`
-/// (not owned, already maxed, target has no stats, etc.).
+/// Rolls one dice item onto ONE specific card. The server decides the outcome
+/// (`result`: upgraded / kept / destroyed) — a risky roll can break the card
+/// unless a protection item is sent along. Surfaces the server's error
+/// message, same as `api_equip_unit`/`api_buy_item` (not owned, wrong dice,
+/// already maxed, etc.).
 pub async fn api_apply_dice_upgrade(
     client: &Client,
     dice_item_id: &str,
     target_unit_id: &str,
+    protection_item_id: Option<&str>,
 ) -> Result<serde_json::Value, String> {
-    let body = serde_json::json!({ "diceItemId": dice_item_id, "targetUnitId": target_unit_id });
+    let body = serde_json::json!({
+        "diceItemId": dice_item_id,
+        "targetUnitId": target_unit_id,
+        "protectionItemId": protection_item_id,
+    });
     let resp = api_fetch(
         client,
         reqwest::Method::POST,

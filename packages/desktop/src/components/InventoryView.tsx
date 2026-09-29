@@ -6,6 +6,7 @@ import type {
   ItemType,
   ItemUnit,
   ItemUpgradeRejection,
+  ItemUpgradeResult,
   Rarity,
 } from "@herzies/shared";
 import {
@@ -16,12 +17,14 @@ import {
   bankTiles,
   bestUnitOf,
   DECK_SLOT_GROUPS,
+  DICE_TIERS,
   getItem,
   getItemType,
   MAX_MODIFIERS,
   pickPlainestUnitIds,
   RARITY_COLORS,
   RARITY_LABELS,
+  requiredDiceForLevel,
   unitsBestFirst,
 } from "@herzies/shared";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -49,6 +52,7 @@ import { HoverPreview, Tooltip } from "./Tooltip";
 const CONFIRM_SELL_RARITIES: ReadonlySet<Rarity> = new Set([
   "rare",
   "legendary",
+  "mythic",
 ]);
 
 /** Non-stackable items cap out at 1 per sell action regardless of how many
@@ -302,10 +306,29 @@ const TYPE_RANK = new Map<ItemType, number>(
   DECK_SLOT_GROUPS.map((group, i) => [group.itemType, i]),
 );
 
+/** Types with no deck slot, in the order they follow the deck groups: the
+ * upgrade kit (dice, then the Safety Pick that goes with them) before plain
+ * artefacts. */
+const UNSLOTTED_TYPE_ORDER: ItemType[] = ["dice", "charm"];
+
 function typeRank(itemId: string): number {
   const def = getItem(itemId);
-  const rank = def ? TYPE_RANK.get(getItemType(def)) : undefined;
-  return rank ?? TYPE_RANK.size;
+  if (!def) return TYPE_RANK.size + UNSLOTTED_TYPE_ORDER.length;
+  const type = getItemType(def);
+  const slotted = TYPE_RANK.get(type);
+  if (slotted !== undefined) return slotted;
+  const unslotted = UNSLOTTED_TYPE_ORDER.indexOf(type);
+  return (
+    TYPE_RANK.size +
+    (unslotted === -1 ? UNSLOTTED_TYPE_ORDER.length : unslotted)
+  );
+}
+
+/** Dice read in tier order — Power Dice 1, 2, 3 — the order they're spent
+ * in, rather than by rarity (which would put 3 first). Everything else ties. */
+function diceTierRank(itemId: string): number {
+  const tier = DICE_TIERS.findIndex((t) => t.diceItemId === itemId);
+  return tier === -1 ? 0 : tier;
 }
 
 /** Re-lays every tile out from the first slot, grouped by item type — the
@@ -313,15 +336,17 @@ function typeRank(itemId: string): number {
  * arrangement, so it also heals any drift (gaps left by sells, say) in one go.
  *
  * `tiles` already arrives rarity-then-name sorted (see InventoryView's
- * `compareTiles`) and `sort` is stable, so ranking by type alone yields type →
- * rarity → name without a second comparator. Anything past `slotCount` drops
+ * `compareTiles`) and `sort` is stable, so ranking by type yields type →
+ * rarity → name, except dice, which go by tier (see diceTierRank). Anything past `slotCount` drops
  * off the grid, the same way `reconcileSlotOrder` drops it. */
 function sortSlotsByType(
   tiles: BankTile[],
   slotCount: number,
 ): (string | null)[] {
   const sorted = [...tiles].sort(
-    (a, b) => typeRank(a.itemId) - typeRank(b.itemId),
+    (a, b) =>
+      typeRank(a.itemId) - typeRank(b.itemId) ||
+      diceTierRank(a.itemId) - diceTierRank(b.itemId),
   );
   return Array.from({ length: slotCount }, (_, i) => sorted[i]?.key ?? null);
 }
@@ -480,19 +505,22 @@ function EmptyGridCell({
   );
 }
 
-const RARITY_ORDER: Record<string, number> = {
-  legendary: 0,
-  rare: 1,
-  uncommon: 2,
-  common: 3,
+// Typed on Rarity so a new tier can't be forgotten here again — mythic was,
+// and fell through to common.
+const RARITY_ORDER: Record<Rarity, number> = {
+  mythic: 0,
+  legendary: 1,
+  rare: 2,
+  uncommon: 3,
+  common: 4,
 };
 
 /** Rarity, then name, then — so an upgraded copy leads its plainer twins —
  * highest level first. The order fresh tiles are placed in and the order the
  * quick sort starts from. */
 function compareTiles(a: BankTile, b: BankTile): number {
-  const ra = RARITY_ORDER[getItem(a.itemId)?.rarity ?? "common"] ?? 3;
-  const rb = RARITY_ORDER[getItem(b.itemId)?.rarity ?? "common"] ?? 3;
+  const ra = RARITY_ORDER[getItem(a.itemId)?.rarity ?? "common"];
+  const rb = RARITY_ORDER[getItem(b.itemId)?.rarity ?? "common"];
   if (ra !== rb) return ra - rb;
   const byName = (getItem(a.itemId)?.name ?? a.itemId).localeCompare(
     getItem(b.itemId)?.name ?? b.itemId,
@@ -877,47 +905,58 @@ export function InventoryView({
     }
   };
 
-  /** Applies a dice item to ONE named card, mirroring handleSell's predict-
-   * then-confirm shape: applyItemUpgrade is the same pure function the RPC
-   * enforces server-side, so the "+N" badge and the consumed dice both
-   * appear on click instead of after the round trip. Its twin — another copy
-   * of the same card — is untouched. */
+  /** Rolls a dice item onto ONE named card for DiceUpgradeOverlay. Not
+   * optimistic, unlike handleSell: the server rolls, and a risky roll can go
+   * three ways, so the overlay shows "Upgrading…" until the answer lands (the
+   * response's item state then replaces ours, a broken card included). The
+   * pre-check still runs here so a doomed request never leaves. Its twin —
+   * another copy of the same card — is untouched. */
   const handleApplyDiceUpgrade = async (
     diceItemId: string,
     targetUnitId: string,
-  ) => {
+    protectionItemId: string | null,
+  ): Promise<{ result: ItemUpgradeResult; newLevel: number }> => {
     const target = units.find((u) => u.id === targetUnitId);
     const targetName = getItem(target?.itemId ?? "")?.name ?? "that card";
-    const predicted = applyItemUpgrade(units, diceItemId, targetUnitId);
-    if (!predicted.ok) {
+    const needed = getItem(
+      requiredDiceForLevel(target?.upgradeLevel ?? 0) ?? "",
+    )?.name;
+    const checked = applyItemUpgrade(units, diceItemId, targetUnitId, {
+      protectionItemId,
+    });
+    if (!checked.ok) {
       const messages: Record<ItemUpgradeRejection, string> = {
         "not-dice": "Not a dice item",
         "dice-not-owned": "You don't have that dice",
         "target-not-owned": "You don't own that card",
         "not-statted": `"${targetName}" has no stats to upgrade`,
         "max-level": `"${targetName}" is already fully upgraded`,
+        "wrong-dice": `"${targetName}" needs ${needed ?? "a different dice"}`,
+        "protection-not-owned": "You don't have a Safety Pick",
       };
-      onLog?.(messages[predicted.reason]);
-      return;
+      onLog?.(messages[checked.reason]);
+      throw new Error(messages[checked.reason]);
     }
 
-    setDiceUpgradeItem(null);
-    const request = herzies.applyDiceUpgrade(diceItemId, targetUnitId);
-    onPredictUnits((base) => {
-      const outcome = applyItemUpgrade(base, diceItemId, targetUnitId);
-      return outcome.ok ? outcome.units : [...base];
-    }, request);
-
     try {
-      const result = await request;
-      if (result) {
-        onLog?.(`Upgraded "${targetName}" to +${result.newLevel}`);
-      } else {
-        onLog?.(`Failed to apply "${getItem(diceItemId)?.name ?? diceItemId}"`);
-      }
+      const out = await herzies.applyDiceUpgrade(
+        diceItemId,
+        targetUnitId,
+        protectionItemId,
+      );
+      if (!out) throw new Error("No response");
+      onLog?.(
+        out.result === "upgraded"
+          ? `Upgraded "${targetName}" to +${out.newLevel}`
+          : out.result === "kept"
+            ? `Upgrade failed — "${targetName}" kept at +${out.newLevel} (Safety Pick used)`
+            : `Upgrade failed — "${targetName}" broke`,
+      );
+      return { result: out.result, newLevel: out.newLevel };
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
-      onLog?.(`Failed to apply dice: ${msg}`);
+      onLog?.(`Failed to upgrade "${targetName}": ${msg}`);
+      throw e;
     }
   };
 
@@ -1354,8 +1393,12 @@ export function InventoryView({
         <DiceUpgradeOverlay
           diceItemId={diceUpgradeItem}
           units={units}
-          onPick={(targetUnitId) =>
-            handleApplyDiceUpgrade(diceUpgradeItem, targetUnitId)
+          onRoll={(targetUnitId, protectionItemId) =>
+            handleApplyDiceUpgrade(
+              diceUpgradeItem,
+              targetUnitId,
+              protectionItemId,
+            )
           }
           onClose={() => setDiceUpgradeItem(null)}
         />

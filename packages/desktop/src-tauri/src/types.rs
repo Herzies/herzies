@@ -357,7 +357,6 @@ pub struct AppState {
     pub version: String,
     pub equipped: HashMap<String, serde_json::Value>,
     pub chat_messages: Vec<ChatMessage>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub inventory: Option<Inventory>,
     pub inventory_currency: u32,
     /// Dice-upgrade levels (itemId -> 0-3) — see MAX_ITEM_UPGRADE_LEVEL in
@@ -375,10 +374,8 @@ pub struct AppState {
     pub bank_expansions: u32,
     pub friends: HashMap<String, HerzieProfile>,
     /// Present while the server reports an incoming trade you have not joined yet.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub pending_trade_request: Option<PendingTradeRequest>,
     /// Newest incoming friend request you haven't responded to (drives the overlay).
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub pending_friend_request: Option<PendingFriendRequest>,
     /// Friend requests sent to you that are still pending.
     pub incoming_friend_requests: Vec<FriendRequestSummary>,

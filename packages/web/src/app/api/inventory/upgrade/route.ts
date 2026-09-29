@@ -1,4 +1,4 @@
-import { getItem } from "@herzies/shared";
+import { getItem, type ItemUpgradeResult } from "@herzies/shared";
 import { NextResponse } from "next/server";
 import { authenticateRequest, isAuthError } from "@/lib/auth";
 import {
@@ -15,6 +15,7 @@ const REASONS: Record<string, string> = {
   "dice-not-owned": "You don't have that dice",
   "target-not-owned": "You don't own that card",
   "max-level": "That card is already fully upgraded",
+  "protection-not-owned": "You don't have a Safety Pick",
 };
 
 export async function POST(request: Request) {
@@ -54,7 +55,7 @@ export async function POST(request: Request) {
     targetItemId = target.itemId;
   } else {
     targetItemId = body.targetItemId;
-    const target = unitForLegacyUpgrade(units, targetItemId);
+    const target = unitForLegacyUpgrade(units, targetItemId, diceItemId);
     if (!target) {
       // Either not owned, or every copy is already maxed — say which.
       const owned = units.some((u) => u.itemId === targetItemId);
@@ -82,25 +83,35 @@ export async function POST(request: Request) {
     p_user_id: auth.userId,
     p_dice_item_id: diceItemId,
     p_target_unit_id: targetUnitId,
+    p_protection_item_id:
+      "protectionItemId" in body ? (body.protectionItemId ?? null) : null,
   });
 
   const result = data as {
     ok: boolean;
     reason?: string;
+    needed?: string;
+    result?: ItemUpgradeResult;
     newLevel?: number;
+    chance?: number;
+    protected?: boolean;
     state?: ItemState;
   } | null;
 
   if (error || !result?.ok || !result.state) {
-    return NextResponse.json(
-      { error: REASONS[result?.reason ?? ""] ?? "Upgrade failed" },
-      { status: 400 },
-    );
+    const message =
+      result?.reason === "wrong-dice"
+        ? `That card needs ${getItem(result.needed ?? "")?.name ?? "a different dice"}`
+        : (REASONS[result?.reason ?? ""] ?? "Upgrade failed");
+    return NextResponse.json({ error: message }, { status: 400 });
   }
 
   return NextResponse.json({
     ok: true,
+    result: result.result,
     newLevel: result.newLevel,
+    chance: result.chance,
+    protected: result.protected,
     ...itemResponse(result.state),
   });
 }

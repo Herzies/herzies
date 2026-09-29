@@ -39,6 +39,9 @@ export function SongPoolPanel({
         secret,
       );
       setSongs(res.songs);
+      // A load that works clears an earlier failed one; otherwise the old
+      // error sticks around until the page is reloaded.
+      setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load song pool");
     }

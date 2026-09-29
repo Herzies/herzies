@@ -16,6 +16,7 @@ import {
   toDatetimeLocalValue,
 } from "./admin-shared";
 import { EventCalendar } from "./EventCalendar";
+import { EventPreview, type PreviewEvent } from "./EventPreview";
 import { EventSeriesPanel } from "./EventSeriesPanel";
 import {
   BossFightConfigFields,
@@ -33,7 +34,7 @@ import { NotificationsPanel } from "./NotificationsPanel";
 import { SongPoolPanel } from "./SongPoolPanel";
 
 const SECRET_KEY = "herzies-admin-secret";
-const RARITIES = ["common", "uncommon", "rare", "legendary"] as const;
+const RARITIES = ["common", "uncommon", "rare", "legendary", "mythic"] as const;
 
 type AdminTab = "items" | "grant" | "events" | "notifications";
 
@@ -321,6 +322,39 @@ function buildEventConfig(
     return merchantFormToConfig(form.merchant);
   }
   return parseEventConfig(form.configJson);
+}
+
+/**
+ * The form as the preview sees it. A form that doesn't validate yet still
+ * previews what it has, with the reason alongside.
+ */
+function formToPreview(form: EventFormState): {
+  event: PreviewEvent;
+  problem: string | null;
+} {
+  const built = buildEventConfig(form);
+  const problem = typeof built === "string" ? built : null;
+  const config =
+    typeof built !== "string"
+      ? built
+      : form.type === "song_hunt"
+        ? { ...songHuntConfigToPayload(form.songHunt) }
+        : form.type === "boss_fight"
+          ? { ...form.bossFight }
+          : form.type === "merchant"
+            ? { ...form.merchant }
+            : {};
+  return {
+    event: {
+      type: form.type,
+      title: form.title,
+      description: form.description || null,
+      startsAt: datetimeLocalToIso(form.startsAt),
+      endsAt: datetimeLocalToIso(form.endsAt),
+      config,
+    },
+    problem,
+  };
 }
 
 function SongHuntConfigFields({
@@ -650,6 +684,8 @@ function EventForm({
   secret: string;
   live?: AdminEvent["boss"];
 }) {
+  const [previewing, setPreviewing] = useState(false);
+  const preview = previewing ? formToPreview(form) : null;
   return (
     <form onSubmit={onSubmit} className="space-y-4">
       <div className="grid sm:grid-cols-2 gap-4">
@@ -846,6 +882,13 @@ function EventForm({
         >
           {submitLabel}
         </button>
+        <button
+          type="button"
+          onClick={() => setPreviewing((v) => !v)}
+          className="text-sm text-cyan bg-transparent border-0 cursor-pointer"
+        >
+          {previewing ? "hide preview" : "preview"}
+        </button>
         {onCancel && (
           <button
             type="button"
@@ -856,6 +899,13 @@ function EventForm({
           </button>
         )}
       </div>
+      {preview && (
+        <EventPreview
+          event={preview.event}
+          problem={preview.problem}
+          catalogItems={catalogItems}
+        />
+      )}
     </form>
   );
 }
@@ -1069,6 +1119,7 @@ function EventRow({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(defaultEditing);
+  const [previewing, setPreviewing] = useState(false);
   const fromSeries = !!event.series_id;
   const [form, setForm] = useState(() => eventToForm(event));
 
@@ -1164,7 +1215,7 @@ function EventRow({
   return (
     <>
       <tr className="border-t border-border align-top">
-        <td className="py-3 pr-4">
+        <td className="py-3 px-4">
           <div className="font-medium">{event.title}</div>
           <div className="text-text-dim text-xs mt-0.5">
             {EVENT_TYPE_LABELS[event.type] ?? event.type}
@@ -1193,7 +1244,7 @@ function EventRow({
             </div>
           )}
         </td>
-        <td className="py-3 pr-4">
+        <td className="py-3 px-4">
           <span className={STATUS_STYLES[status]}>{status}</span>
           {!event.active &&
             status !== "inactive" &&
@@ -1203,11 +1254,11 @@ function EventRow({
               <span className="text-text-dim text-xs block">flag off</span>
             )}
         </td>
-        <td className="py-3 pr-4 text-xs text-text-dim whitespace-nowrap">
+        <td className="py-3 px-4 text-xs text-text-dim whitespace-nowrap">
           <div>{new Date(event.starts_at).toLocaleString()}</div>
           <div>→ {new Date(event.ends_at).toLocaleString()}</div>
         </td>
-        <td className="py-3 pr-4 text-xs text-text-dim max-w-[200px] truncate">
+        <td className="py-3 px-4 text-xs text-text-dim max-w-[200px] truncate">
           {typeof event.config.rewardItemId === "string"
             ? event.config.rewardItemId
             : Array.isArray(event.config.stock)
@@ -1221,7 +1272,7 @@ function EventRow({
             </div>
           )}
         </td>
-        <td className="py-3 text-right whitespace-nowrap">
+        <td className="py-3 px-4 text-right whitespace-nowrap">
           <button
             type="button"
             disabled={busy}
@@ -1230,6 +1281,15 @@ function EventRow({
           >
             {editing ? "close" : "edit"}
           </button>
+          {!editing && (
+            <button
+              type="button"
+              onClick={() => setPreviewing((v) => !v)}
+              className="text-cyan text-xs bg-transparent border-0 cursor-pointer mr-3"
+            >
+              {previewing ? "hide preview" : "preview"}
+            </button>
+          )}
           {status === "awaiting approval" && (
             <button
               type="button"
@@ -1267,6 +1327,23 @@ function EventRow({
           )}
         </td>
       </tr>
+      {previewing && !editing && (
+        <tr className="border-t border-border bg-bg-panel">
+          <td colSpan={5} className="p-4">
+            <EventPreview
+              event={{
+                type: event.type,
+                title: event.title,
+                description: event.description,
+                startsAt: event.starts_at,
+                endsAt: event.ends_at,
+                config: event.config,
+              }}
+              catalogItems={catalogItems}
+            />
+          </td>
+        </tr>
+      )}
       {editing && (
         <tr className="border-t border-border bg-bg-panel">
           <td colSpan={5} className="p-4">

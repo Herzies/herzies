@@ -97,18 +97,23 @@ describe("unitForLegacyUnequip", () => {
 });
 
 describe("unitForLegacyUpgrade", () => {
+  const pd1 = "power-dice-1";
+
   it("picks the copy furthest along that can still take a level", () => {
     const units = [
       unit("plain", "boombox"),
       unit("plus2", "boombox", 2),
       unit("plus1", "boombox", 1),
     ];
-    expect(unitForLegacyUpgrade(units, "boombox")?.id).toBe("plus2");
+    expect(unitForLegacyUpgrade(units, "boombox", pd1)?.id).toBe("plus2");
   });
 
-  it("skips copies already at the cap", () => {
-    const units = [unit("maxed", "boombox", 3), unit("plus1", "boombox", 1)];
-    expect(unitForLegacyUpgrade(units, "boombox")?.id).toBe("plus1");
+  it("skips copies past this die's band", () => {
+    const units = [unit("plus3", "boombox", 3), unit("plus1", "boombox", 1)];
+    expect(unitForLegacyUpgrade(units, "boombox", pd1)?.id).toBe("plus1");
+    expect(unitForLegacyUpgrade(units, "boombox", "power-dice-2")?.id).toBe(
+      "plus3",
+    );
   });
 
   it("lets the worn copy win a tie", () => {
@@ -116,14 +121,21 @@ describe("unitForLegacyUpgrade", () => {
       unit("a", "boombox", 1),
       unit("b", "boombox", 1, "ground_left"),
     ];
-    expect(unitForLegacyUpgrade(units, "boombox")?.id).toBe("b");
+    expect(unitForLegacyUpgrade(units, "boombox", pd1)?.id).toBe("b");
   });
 
-  it("is undefined when every copy is maxed, or none is owned", () => {
+  it("is undefined when no copy fits the die, or none is owned", () => {
     expect(
-      unitForLegacyUpgrade([unit("m", "boombox", 3)], "boombox"),
+      unitForLegacyUpgrade([unit("m", "boombox", 3)], "boombox", pd1),
     ).toBeUndefined();
-    expect(unitForLegacyUpgrade([], "boombox")).toBeUndefined();
+    expect(
+      unitForLegacyUpgrade(
+        [unit("m", "boombox", 10)],
+        "boombox",
+        "power-dice-3",
+      ),
+    ).toBeUndefined();
+    expect(unitForLegacyUpgrade([], "boombox", pd1)).toBeUndefined();
   });
 });
 

@@ -37,7 +37,7 @@ import {
 } from "./ascii3d.ts";
 import { BOSS_DAMAGE_PER_MINUTE } from "./types.ts";
 
-export type Rarity = "common" | "uncommon" | "rare" | "legendary";
+export type Rarity = "common" | "uncommon" | "rare" | "legendary" | "mythic";
 
 /** Inventory grouping. Most items are cards (some grant a visual, some a bonus); "misc" is for non-card items. */
 export type ItemCategory = "deck" | "misc";
@@ -605,45 +605,104 @@ export function applySell(
   };
 }
 
-/** How many times a card can be upgraded — Power Dice 1 and any future dice
- * item share this cap. The level-cap check inside apply_item_upgrade
- * (00079_item_units.sql) and item_units.upgrade_level's CHECK can't import this
- * constant — it's duplicated there as a bare 3, and they must stay in sync
- * (same arrangement as GROUND_DROP_CAP/BANK_SLOT_COUNT). */
-export const MAX_ITEM_UPGRADE_LEVEL = 3;
+/** How many times a card can be upgraded. The level-cap check inside
+ * apply_item_upgrade (00086_dice_tiers_and_mythic.sql) and
+ * item_units.upgrade_level's CHECK can't import this constant — it's
+ * duplicated there as a bare 10, and they must stay in sync (same arrangement
+ * as GROUND_DROP_CAP/BANK_SLOT_COUNT). */
+export const MAX_ITEM_UPGRADE_LEVEL = 10;
+
+/** Which die takes a card through which levels. A die only works inside its
+ * own band — a Power Dice 3 can't be spent on a +1 card. apply_item_upgrade
+ * duplicates these bands by hand (<3 → 1, <6 → 2, else 3); keep them in sync. */
+export const DICE_TIERS = [
+  { diceItemId: "power-dice-1", fromLevel: 0, toLevel: 3 },
+  { diceItemId: "power-dice-2", fromLevel: 3, toLevel: 6 },
+  { diceItemId: "power-dice-3", fromLevel: 6, toLevel: 10 },
+] as const;
+
+/** The die a card at `currentLevel` needs for its next level, or null once
+ * it's maxed. */
+export function requiredDiceForLevel(currentLevel: number): string | null {
+  return (
+    DICE_TIERS.find(
+      (t) => currentLevel >= t.fromLevel && currentLevel < t.toLevel,
+    )?.diceItemId ?? null
+  );
+}
+
+/** Odds that an upgrade FROM this level succeeds. Levels not listed always
+ * succeed; the listed ones are the risky band, where a failed roll destroys
+ * the card unless a protection item (Safety Pick) is spent. Duplicated by
+ * hand in apply_item_upgrade (latest: 00088) — keep them in sync. */
+export const UPGRADE_SUCCESS_CHANCE: Readonly<Record<number, number>> = {
+  6: 0.6,
+  7: 0.45,
+  8: 0.3,
+  9: 0.2,
+};
+
+export function upgradeSuccessChance(currentLevel: number): number {
+  return UPGRADE_SUCCESS_CHANCE[currentLevel] ?? 1;
+}
+
+/** The item that saves a card from a failed risky upgrade. */
+export const SAFETY_PICK_ID = "safety-pick";
+
+/** How a roll landed: the card went up, a failed roll was absorbed by a
+ * protection item, or a failed roll broke the card. */
+export type ItemUpgradeResult = "upgraded" | "kept" | "destroyed";
 
 export type ItemUpgradeRejection =
   | "not-dice"
   | "dice-not-owned"
   | "target-not-owned"
   | "not-statted"
-  | "max-level";
+  | "max-level"
+  | "wrong-dice"
+  | "protection-not-owned";
 
 export type ItemUpgradeOutcome =
   | {
       ok: true;
-      /** Units with one die consumed and the target's level raised by one. */
+      /** Units after the roll landed as `result`. */
       units: ItemUnit[];
+      /** The target's level afterwards (unchanged unless upgraded). */
       newLevel: number;
+      /** Odds this roll had of succeeding. */
+      chance: number;
+      /** Whether the protection item was actually spent — only ever on a
+       * risky roll, never on a safe one even when asked for. */
+      protected: boolean;
     }
   | { ok: false; reason: ItemUpgradeRejection };
 
 /**
- * What applying a die to one specific card does — raises THAT unit's level and
- * no other's, which is the whole point. The apply_item_upgrade RPC re-validates
- * ownership and the level cap under a row lock; the desktop predicts it so the
- * "+N" appears on click instead of after the round trip.
+ * What applying a die to one specific card does — touches THAT unit and no
+ * other, which is the whole point.
  *
- * Pure: never mutates `units`. Dice are fungible, so which die is consumed
- * doesn't matter (the first unworn one, matching the RPC). "Is this a statted
- * card" can only be checked here (and in the upgrade API route) since `stats`
- * lives only in this TS catalog, never in the DB `items` table.
+ * The roll itself happens only in the apply_item_upgrade RPC, under a row
+ * lock, so a client can never retry its way to a lucky one. This function is
+ * the pre-check (every rejection, plus the odds) and, given the RPC's
+ * `result`, the same state transition for tests and previews. Check order
+ * matches the RPC: max-level before wrong-dice, so a +10 card says max-level
+ * whichever die is offered.
+ *
+ * Pure: never mutates `units`. Dice and picks are fungible, so which copy is
+ * consumed doesn't matter (the first unworn one, matching the RPC). "Is this a
+ * statted card" can only be checked here (and in the upgrade API route) since
+ * `stats` lives only in this TS catalog, never in the DB `items` table.
  */
 export function applyItemUpgrade(
   units: readonly ItemUnit[],
   diceItemId: string,
   targetUnitId: string,
+  options: {
+    protectionItemId?: string | null;
+    result?: ItemUpgradeResult;
+  } = {},
 ): ItemUpgradeOutcome {
+  const { protectionItemId = null, result = "upgraded" } = options;
   if (!getItem(diceItemId)?.dice) return { ok: false, reason: "not-dice" };
 
   const dice = units.find(
@@ -663,13 +722,43 @@ export function applyItemUpgrade(
     return { ok: false, reason: "max-level" };
   }
 
-  const newLevel = target.upgradeLevel + 1;
+  if (requiredDiceForLevel(target.upgradeLevel) !== diceItemId) {
+    return { ok: false, reason: "wrong-dice" };
+  }
+
+  const chance = upgradeSuccessChance(target.upgradeLevel);
+  const risky = chance < 1;
+  let pick: ItemUnit | undefined;
+  if (risky && protectionItemId) {
+    pick = units.find(
+      (u) => u.itemId === protectionItemId && u.equippedSlot === null,
+    );
+    if (!getItem(protectionItemId)?.protection || !pick) {
+      return { ok: false, reason: "protection-not-owned" };
+    }
+  }
+
+  // A safe roll can't fail, whatever the caller claims.
+  const landed: ItemUpgradeResult = !risky
+    ? "upgraded"
+    : result === "upgraded"
+      ? "upgraded"
+      : pick
+        ? "kept"
+        : "destroyed";
+  const newLevel =
+    landed === "upgraded" ? target.upgradeLevel + 1 : target.upgradeLevel;
+  const spent = new Set([dice.id, pick?.id]);
+  if (landed === "destroyed") spent.add(target.id);
+
   return {
     ok: true,
     units: units
-      .filter((u) => u.id !== dice.id)
+      .filter((u) => !spent.has(u.id))
       .map((u) => (u.id === target.id ? { ...u, upgradeLevel: newLevel } : u)),
     newLevel,
+    chance,
+    protected: pick != null,
   };
 }
 
@@ -727,6 +816,10 @@ export interface ItemDef {
    * Mutually exclusive with equipable/equipSlot in practice — see
    * getItemType, which checks this first. */
   dice?: boolean;
+  /** Set when the item protects a card from a failed risky upgrade (the
+   * Safety Pick). Never worn and never clicked on its own — it's only
+   * offered inside the dice upgrade window. */
+  protection?: boolean;
 }
 
 export function getItemCategory(item: Pick<ItemDef, "category">): ItemCategory {
@@ -736,6 +829,7 @@ export function getItemCategory(item: Pick<ItemDef, "category">): ItemCategory {
 /** Display classification, derived from the equip fields rather than stored directly. */
 export type ItemType =
   | "dice"
+  | "charm"
   | "skin"
   | "sceneryCard"
   | "equipable"
@@ -744,9 +838,13 @@ export type ItemType =
   | "artefact";
 
 export function getItemType(
-  item: Pick<ItemDef, "equipable" | "equipSlot" | "modifier" | "dice">,
+  item: Pick<
+    ItemDef,
+    "equipable" | "equipSlot" | "modifier" | "dice" | "protection"
+  >,
 ): ItemType {
   if (item.dice) return "dice";
+  if (item.protection) return "charm";
   if (item.equipSlot === "color") return "skin";
   if (item.equipSlot === "modifier") return "modifier";
   if (item.equipSlot === "scenery") return "sceneryCard";
@@ -757,6 +855,7 @@ export function getItemType(
 
 export const ITEM_TYPE_LABELS: Record<ItemType, string> = {
   dice: "Dice",
+  charm: "Charm",
   skin: "Skin",
   sceneryCard: "Scenery",
   equipable: "Equipable",
@@ -866,6 +965,8 @@ export const RARITY_COLORS: Record<Rarity, string> = {
   uncommon: "#1eff00",
   rare: "#0070dd",
   legendary: "#ff8000",
+  // Above legendary, not WoW's epic-below-legendary — hence "mythic".
+  mythic: "#b84dff",
 };
 
 export const RARITY_LABELS: Record<Rarity, string> = {
@@ -873,6 +974,7 @@ export const RARITY_LABELS: Record<Rarity, string> = {
   uncommon: "Uncommon",
   rare: "Rare",
   legendary: "Legendary",
+  mythic: "Mythic",
 };
 
 /** Relative weight for random world drops — common is heaviest, legendary
@@ -896,6 +998,7 @@ export const RARITY_DROP_WEIGHTS: Record<Rarity, number> = {
   uncommon: 150,
   rare: 25,
   legendary: 3,
+  mythic: 1,
 };
 
 /** Items that can never appear as a random world drop, regardless of rarity. */
@@ -938,6 +1041,15 @@ export const MAX_DROP_ROLLS_PER_SYNC = 20;
  * the most likely drop by a wide margin. */
 export const ITEM_DROP_WEIGHT_OVERRIDES: Partial<Record<string, number>> = {
   cd: 4000,
+  // Upgrade materials are tuned on their own rather than riding their
+  // rarity's weight (legendary 3 / mythic 1 would put a full +10 at thousands
+  // of listening hours). At the live pool (total weight ~5,040, one roll per
+  // 10 listened minutes) each lands about every total / (6 × weight) hours:
+  // Power Dice 2 and the Safety Pick every ~105h, Power Dice 3 every ~280h.
+  // Event rewards are the intended shortcut on top of that.
+  "power-dice-2": 8,
+  "power-dice-3": 3,
+  "safety-pick": 8,
 };
 
 /** How much luck nudges a rarity's drop weight, as a fraction of that
@@ -947,8 +1059,8 @@ export const ITEM_DROP_WEIGHT_OVERRIDES: Partial<Record<string, number>> = {
  * flat tax on the whole pool, while staying the "very minor" nudge luck was
  * scoped as: at the live droppable pool (12 items: 1 common-override cd, 6
  * uncommon, 5 rare — power-dice-1 included, spirit-orb excluded per
- * NON_DROPPABLE_ITEM_IDS), +10 luck (First Edition Card's whole
- * contribution) moves a single rare item's odds from 0.498% to 0.565% of
+ * NON_DROPPABLE_ITEM_IDS), +10 luck (First Edition Card's base
+ * contribution — a +10 copy now gives +20) moves a single rare item's odds from 0.498% to 0.565% of
  * any roll (+13.6% relative), a single uncommon's from 2.985% to 3.095%
  * (+3.7% relative), and cd's from 79.60% to 78.60% (-1.3% relative). Common
  * is 0 so cd — the guaranteed-cadence item, see ITEM_DROP_WEIGHT_OVERRIDES —
@@ -956,12 +1068,14 @@ export const ITEM_DROP_WEIGHT_OVERRIDES: Partial<Record<string, number>> = {
  * though no droppable legendary exists today (spirit-orb is the only one,
  * and it's in NON_DROPPABLE_ITEM_IDS). These numbers shift again whenever
  * the droppable pool's item/rarity mix changes — recompute rather than trust
- * them blindly. */
+ * them blindly (they predate Power Dice 2/3 and the Safety Pick joining the
+ * pool, which dilutes every figure above slightly). */
 export const RARITY_LUCK_WEIGHT_BONUS: Record<Rarity, number> = {
   common: 0,
   uncommon: 0.005,
   rare: 0.015,
   legendary: 0.03,
+  mythic: 0.05,
 };
 
 /** Weighted-random pick from a rarity-tagged candidate pool. `luck` (default
@@ -1489,24 +1603,70 @@ const DICE_FACES: { corners: [V3, V3, V3, V3] }[] = [
   },
 ];
 
-const DICE_PIP_RADIUS = 0.16;
+/** One tier of Power Dice's look: body colour, pip colour, and how many pips
+ * sit on every face — the pip count is the tier, so a Power Dice 3 reads as
+ * "3" from any angle without being a physical 1-6 die. */
+interface DiceStyle {
+  face: string;
+  pip: string;
+  pips: 1 | 2 | 3;
+}
 
-// White body, red pip — matches the bespoke 16x16 pixel icon (see
-// item-icon-grids.json's power-dice-1 palette) so the flat inventory icon
-// and the spinning 3D card read as the same object, not two different dice.
-const DICE_FACE_COLOR = "#ffffff";
-const DICE_PIP_COLOR = "#ff1f1f";
+// Power Dice 1: white body, red pip — matches the bespoke 16x16 pixel icon
+// (see item-icon-grids.json's power-dice-1 palette) so the flat inventory
+// icon and the spinning 3D card read as the same object, not two different
+// dice. The higher tiers take their pips from their rarity colour.
+const POWER_DICE_1_STYLE: DiceStyle = {
+  face: "#ffffff",
+  pip: "#ff1f1f",
+  pips: 1,
+};
+const POWER_DICE_2_STYLE: DiceStyle = {
+  face: "#ffffff",
+  pip: "#ff8000",
+  pips: 2,
+};
+// Pale lavender rather than a dark body: the ramp encodes light as glyph
+// density and the colour only tints the glyph, so a dark face would vanish
+// into the dark UI.
+const POWER_DICE_3_STYLE: DiceStyle = {
+  face: "#ecdcff",
+  pip: "#9d2bff",
+  pips: 3,
+};
 
-/** Every face's pip: a single coloured divot sunk into the die's face
- * colour, dead centre. `null` (the face colour) elsewhere, same "return
- * null to fall through" convention as cardChrome/icon. */
-function dicePipIcon(u: number, v: number): TexSample | null {
-  const d = Math.hypot(u - 0.5, v - 0.5);
-  if (d >= DICE_PIP_RADIUS) return null;
-  return {
-    bright: d < DICE_PIP_RADIUS * 0.5 ? 1.0 : 0.88,
-    color: DICE_PIP_COLOR,
-  };
+/** Pip centres in face UV per pip count — a diagonal, like a real die's 2
+ * and 3 faces. */
+const DICE_PIP_LAYOUTS: Record<DiceStyle["pips"], V2[]> = {
+  1: [[0.5, 0.5]],
+  2: [
+    [0.3, 0.3],
+    [0.7, 0.7],
+  ],
+  3: [
+    [0.27, 0.27],
+    [0.5, 0.5],
+    [0.73, 0.73],
+  ],
+};
+
+/** A lone pip can be big; several have to share the face. */
+function dicePipRadius(pips: DiceStyle["pips"]): number {
+  return pips === 1 ? 0.16 : 0.12;
+}
+
+/** A face's pips: coloured divots sunk into the die's face colour. `null`
+ * (the face colour) elsewhere, same "return null to fall through"
+ * convention as cardChrome/icon. */
+function dicePipIcon(u: number, v: number, style: DiceStyle): TexSample | null {
+  const radius = dicePipRadius(style.pips);
+  for (const [cu, cv] of DICE_PIP_LAYOUTS[style.pips]) {
+    const d = Math.hypot(u - cu, v - cv);
+    if (d < radius) {
+      return { bright: d < radius * 0.5 ? 1.0 : 0.88, color: style.pip };
+    }
+  }
+  return null;
 }
 
 /** How far a point in face-local UV space sits from that face's nearest
@@ -1524,7 +1684,7 @@ function diceEdgeBevel(u: number, v: number): number {
   return edgeDist >= width ? 1 : 0.55 + 0.45 * (edgeDist / width);
 }
 
-function renderPowerDiceFrame(yAngle: number): string[] {
+function renderPowerDiceFrame(yAngle: number, style: DiceStyle): string[] {
   const bright: number[][] = Array.from({ length: SH }, () =>
     Array(SW).fill(-1),
   );
@@ -1592,14 +1752,14 @@ function renderPowerDiceFrame(yAngle: number): string[] {
           );
         if (!uv) continue;
         const [u, v] = uv;
-        const sample = dicePipIcon(u, v) ?? {
+        const sample = dicePipIcon(u, v, style) ?? {
           // Was 0.6 — capped every face at '+' (RAMP_ITEM index 6) even at
           // the single brightest-lit frame across the whole 36-frame spin
           // (diffuse maxes out around 0.98). A believable plastic face
           // needs to actually reach the ramp's dense end when it's lit
           // near head-on, not just approach the midpoint.
           bright: 0.95,
-          color: DICE_FACE_COLOR,
+          color: style.face,
         };
         // Was `0.25 + 0.75 * diffuse`: raising the floor a bit (so a
         // grazing face doesn't fade to near-nothing) while still leaving
@@ -1622,9 +1782,124 @@ function renderPowerDiceFrame(yAngle: number): string[] {
           RAMP_ITEM.length - 1,
         );
         const ch = RAMP_ITEM[idx];
-        return ch === " " ? " " : col(pixelColor[y][x] ?? DICE_FACE_COLOR, ch);
+        return ch === " " ? " " : col(pixelColor[y][x] ?? style.face, ch);
       })
       .join(""),
+  );
+}
+
+// --- Safety Pick: a guitar pick, not a card ---
+//
+// Same flat quad and projection as the card rig, but the quad is cut to a
+// pick's outline (see pickInside) instead of drawn edge to edge: rounded
+// shoulders up top, tapering to a point. Pearl body, gold rim, a small
+// stamped padlock in the middle.
+
+const PICK_PEARL = "#f4efe6";
+const PICK_RIM = "#e0b040";
+const PICK_STAMP = "#b07d18";
+
+/** Whether face UV (u across, v down) falls inside the pick's outline: two
+ * shoulder circles, the band between them, and a triangle down to the tip. */
+function pickInside(u: number, v: number): boolean {
+  const r = 0.24;
+  if (Math.hypot(u - 0.3, v - 0.3) < r || Math.hypot(u - 0.7, v - 0.3) < r) {
+    return true;
+  }
+  if (u >= 0.3 && u <= 0.7 && v >= 0.06 && v <= 0.3) return true;
+  if (v < 0.3 || v > 0.96) return false;
+  // The triangle narrows linearly from the shoulders' full width to the tip.
+  const half = 0.46 * (1 - (v - 0.3) / 0.66);
+  return Math.abs(u - 0.5) <= half;
+}
+
+/** The rim is whatever's inside the outline but outside a slightly shrunken
+ * copy of it. */
+function pickRim(u: number, v: number): boolean {
+  const k = 1.14;
+  return !pickInside(0.5 + (u - 0.5) * k, 0.48 + (v - 0.48) * k);
+}
+
+/** Padlock stamp: a body block and a shackle arc above it. */
+function pickStamp(u: number, v: number): boolean {
+  const [x, y] = [u - 0.5, v - 0.42];
+  if (Math.abs(x) <= 0.1 && y >= 0 && y <= 0.13) return true;
+  const d = Math.hypot(x, (y - 0.0) * 1.1);
+  return y < 0 && d >= 0.045 && d <= 0.075;
+}
+
+function renderSafetyPickFrame(yAngle: number): string[] {
+  const xf = CORNERS.map((v) => rotY(rotZ(v, TILT), yAngle));
+  const e1: V3 = [
+    xf[1][0] - xf[0][0],
+    xf[1][1] - xf[0][1],
+    xf[1][2] - xf[0][2],
+  ];
+  const e2: V3 = [
+    xf[3][0] - xf[0][0],
+    xf[3][1] - xf[0][1],
+    xf[3][2] - xf[0][2],
+  ];
+  const faceN = normV(cross(e1, e2));
+  const front = faceN[2] < 0;
+  const diffuse = Math.abs(dot3(faceN, LIGHT));
+  const pr = xf.map((v) => project(v));
+
+  return Array.from({ length: SH }, (_, sy) =>
+    Array.from({ length: SW }, (_, sx) => {
+      const px = sx + 0.5,
+        py = sy + 0.5;
+      const uv =
+        triUV(
+          px,
+          py,
+          pr[0][0],
+          pr[0][1],
+          UVS[0][0],
+          UVS[0][1],
+          pr[1][0],
+          pr[1][1],
+          UVS[1][0],
+          UVS[1][1],
+          pr[2][0],
+          pr[2][1],
+          UVS[2][0],
+          UVS[2][1],
+        ) ??
+        triUV(
+          px,
+          py,
+          pr[0][0],
+          pr[0][1],
+          UVS[0][0],
+          UVS[0][1],
+          pr[2][0],
+          pr[2][1],
+          UVS[2][0],
+          UVS[2][1],
+          pr[3][0],
+          pr[3][1],
+          UVS[3][0],
+          UVS[3][1],
+        );
+      if (!uv) return " ";
+      let [u, v] = uv;
+      if (!front) u = 1 - u;
+      if (!pickInside(u, v)) return " ";
+      // The stamp only shows on the front; the back is plain pearl.
+      const [tex, colour] = pickRim(u, v)
+        ? [0.9, PICK_RIM]
+        : front && pickStamp(u, v)
+          ? [0.75, PICK_STAMP]
+          : [front ? 0.85 : 0.6, PICK_PEARL];
+      const lit = tex * (0.3 + 0.7 * diffuse);
+      const idx = Math.min(
+        Math.floor(lit * (RAMP_ITEM.length - 1)),
+        RAMP_ITEM.length - 1,
+      );
+      const ch = RAMP_ITEM[idx];
+      return ch === " " ? " " : col(colour, ch);
+    }).join(""),
   );
 }
 
@@ -1925,7 +2200,16 @@ function generateFrames(
 
 const firstEditionFrames = generateFrames(renderCardFrame);
 const cdFrames = generateFrames(renderCdFrame);
-const powerDiceFrames = generateFrames(renderPowerDiceFrame);
+const powerDiceFrames = generateFrames((a) =>
+  renderPowerDiceFrame(a, POWER_DICE_1_STYLE),
+);
+const powerDice2Frames = generateFrames((a) =>
+  renderPowerDiceFrame(a, POWER_DICE_2_STYLE),
+);
+const powerDice3Frames = generateFrames((a) =>
+  renderPowerDiceFrame(a, POWER_DICE_3_STYLE),
+);
+const safetyPickFrames = generateFrames(renderSafetyPickFrame);
 const headphonesFrames = generateFrames(renderHeadphonesFrame);
 const rainbowHeadbandFrames = generateFrames(renderRainbowHeadbandFrame);
 const boomboxFrames = generateFrames(renderBoomboxFrame);
@@ -2163,7 +2447,7 @@ export const ITEMS: ItemDef[] = [
     id: "power-dice-1",
     name: "Power Dice 1",
     description:
-      "Roll it onto a statted card to bump every one of that card's stats by 1. Up to 3 rolls per card.",
+      "Roll it onto a statted card to bump every one of that card's stats by 1. Takes a card from +0 up to +3.",
     rarity: "rare",
     frames: powerDiceFrames,
     dice: true,
@@ -2172,6 +2456,41 @@ export const ITEMS: ItemDef[] = [
     // Not equipable — clicking it opens the upgrade-target picker instead
     // of placing it (see InventoryView's handleGridClick). No buyPrice: a
     // normal world drop, same pool as any other card.
+  },
+  {
+    id: "power-dice-2",
+    name: "Power Dice 2",
+    description:
+      "Roll it onto a +3 card or better to bump every one of its stats by 1. Takes a card from +3 up to +6.",
+    rarity: "legendary",
+    frames: powerDice2Frames,
+    dice: true,
+    stackable: true,
+    sellPrice: 600,
+  },
+  {
+    id: "power-dice-3",
+    name: "Power Dice 3",
+    description:
+      "Takes a card from +6 up to +10, one stat point at a time. Every roll can fail — and a failed roll breaks the card.",
+    rarity: "mythic",
+    frames: powerDice3Frames,
+    dice: true,
+    stackable: true,
+    sellPrice: 1500,
+  },
+  {
+    id: SAFETY_PICK_ID,
+    name: "Safety Pick",
+    description:
+      "Hold it while you roll. If the upgrade fails, your card survives. The pick doesn't.",
+    rarity: "legendary",
+    frames: safetyPickFrames,
+    protection: true,
+    stackable: true,
+    sellPrice: 400,
+    // Never clicked on its own — the dice upgrade window offers it on risky
+    // rolls (see DiceUpgradeOverlay).
   },
   {
     id: "headphones",

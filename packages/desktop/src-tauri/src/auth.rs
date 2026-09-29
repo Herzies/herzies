@@ -3,95 +3,186 @@ use crate::state::SharedState;
 use crate::storage;
 use crate::types::SessionData;
 use reqwest::Client;
-use std::io::Read;
-use std::net::TcpListener;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::oneshot;
 use tokio::time::timeout;
 
-pub async fn login(app: &AppHandle) -> bool {
-    let web_url =
-        std::env::var("HERZIES_WEB_URL").unwrap_or_else(|_| "https://www.herzies.app".to_string());
-    let port: u16 = 8974;
+const CALLBACK_PORT: u16 = 8974;
+/// How long we wait for the browser to hand the session back.
+const LOGIN_TIMEOUT: Duration = Duration::from_secs(120);
+/// Per-connection budget for reading one request off the callback socket.
+const REQUEST_READ_TIMEOUT: Duration = Duration::from_secs(5);
+/// Upper bound on a callback request (two JWTs plus headers fit comfortably).
+const MAX_REQUEST_BYTES: usize = 64 * 1024;
 
-    timeout(Duration::from_secs(120), do_login(app, &web_url, port))
-        .await
-        .unwrap_or_default()
+#[derive(Debug)]
+pub enum LoginError {
+    Cancelled,
+    PortInUse,
+    BrowserOpenFailed,
+    TimedOut,
+    InvalidCallback,
 }
 
-async fn do_login(app: &AppHandle, web_url: &str, port: u16) -> bool {
-    let listener = match TcpListener::bind(format!("127.0.0.1:{}", port)) {
-        Ok(l) => l,
-        Err(_) => return false,
+impl LoginError {
+    /// Stable string the frontend matches on.
+    pub fn code(&self) -> &'static str {
+        match self {
+            LoginError::Cancelled => "cancelled",
+            LoginError::PortInUse => "port_in_use",
+            LoginError::BrowserOpenFailed => "browser_open_failed",
+            LoginError::TimedOut => "timed_out",
+            LoginError::InvalidCallback => "invalid_callback",
+        }
+    }
+}
+
+/// Runs one browser login. Resolves early with `Cancelled` when `cancel`
+/// fires (or its sender is dropped by a newer attempt replacing it).
+///
+/// Everything here is async on purpose: the callback listener used to run in
+/// `spawn_blocking`, so a saturated blocking pool left the port bound but
+/// never accepted — the browser hung on "hang tight" until the app restarted.
+/// Dropping this future now drops the listener and frees the port.
+pub async fn login(app: &AppHandle, cancel: oneshot::Receiver<()>) -> Result<(), LoginError> {
+    let web_url =
+        std::env::var("HERZIES_WEB_URL").unwrap_or_else(|_| "https://www.herzies.app".to_string());
+
+    let body = tokio::select! {
+        res = timeout(LOGIN_TIMEOUT, wait_for_callback(&web_url, CALLBACK_PORT)) => match res {
+            Ok(r) => r?,
+            Err(_) => {
+                log::warn!("Login timed out waiting for the browser callback");
+                return Err(LoginError::TimedOut);
+            }
+        },
+        _ = cancel => {
+            log::info!("Login cancelled");
+            return Err(LoginError::Cancelled);
+        }
     };
 
-    // Open browser
-    let auth_url = format!("{}/auth/cli?port={}", web_url, port);
-    if open::that(&auth_url).is_err() {
-        return false;
-    }
+    finish_login(app, &body).await
+}
 
-    // Set non-blocking so we can poll with timeout
-    listener.set_nonblocking(true).ok();
-
-    // Wait for the callback POST in a blocking task
-    let result = tokio::task::spawn_blocking(move || {
-        let deadline = std::time::Instant::now() + Duration::from_secs(120);
-
-        loop {
-            if std::time::Instant::now() > deadline {
-                return None;
+async fn wait_for_callback(web_url: &str, port: u16) -> Result<String, LoginError> {
+    // A just-replaced attempt may still be dropping its listener on another
+    // task, so give the port a moment to free up before giving up.
+    let mut attempts = 0;
+    let listener = loop {
+        match TcpListener::bind(("127.0.0.1", port)).await {
+            Ok(l) => break l,
+            Err(e) if attempts < 10 => {
+                attempts += 1;
+                log::debug!("Login callback port {} busy ({}), retrying", port, e);
+                tokio::time::sleep(Duration::from_millis(100)).await;
             }
-
-            match listener.accept() {
-                Ok((mut stream, _)) => {
-                    let mut buf = Vec::new();
-                    stream
-                        .set_read_timeout(Some(Duration::from_secs(5)))
-                        .ok();
-                    let _ = stream.read_to_end(&mut buf);
-                    let request = String::from_utf8_lossy(&buf).to_string();
-
-                    // Check it's a POST to /callback
-                    if !request.starts_with("POST /callback") {
-                        let response = "HTTP/1.1 405 Method Not Allowed\r\n\r\n";
-                        let _ = std::io::Write::write_all(&mut stream, response.as_bytes());
-                        continue;
-                    }
-
-                    // Send response
-                    let html = "<h1>Logged in! You can close this window.</h1>";
-                    let response = format!(
-                        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\n\r\n{}",
-                        html.len(),
-                        html
-                    );
-                    let _ = std::io::Write::write_all(&mut stream, response.as_bytes());
-
-                    // Parse body (after \r\n\r\n)
-                    if let Some(body_start) = request.find("\r\n\r\n") {
-                        let body = &request[body_start + 4..];
-                        return Some(body.to_string());
-                    }
-                    return None;
-                }
-                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    std::thread::sleep(Duration::from_millis(100));
-                    continue;
-                }
-                Err(_) => return None,
+            Err(e) => {
+                log::warn!("Login callback port {} unavailable: {}", port, e);
+                return Err(LoginError::PortInUse);
             }
         }
-    })
-    .await
-    .ok()
-    .flatten();
+    };
+    log::info!("Login callback listening on 127.0.0.1:{}", port);
 
-    let body = match result {
-        Some(b) => b,
-        None => return false,
+    let auth_url = format!("{}/auth/cli?port={}", web_url, port);
+    if let Err(e) = open::that(&auth_url) {
+        log::warn!("Failed to open browser for login: {}", e);
+        return Err(LoginError::BrowserOpenFailed);
+    }
+
+    loop {
+        let (mut stream, _) = match listener.accept().await {
+            Ok(conn) => conn,
+            Err(e) => {
+                log::warn!("Login callback accept failed: {}", e);
+                continue;
+            }
+        };
+
+        let request = match timeout(REQUEST_READ_TIMEOUT, read_request(&mut stream)).await {
+            Ok(Some(r)) => r,
+            _ => continue,
+        };
+
+        if !request.head.starts_with("POST /callback") {
+            let _ = stream
+                .write_all(b"HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .await;
+            continue;
+        }
+
+        let html = "<h1>Logged in! You can close this window.</h1>";
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            html.len(),
+            html
+        );
+        let _ = stream.write_all(response.as_bytes()).await;
+        let _ = stream.shutdown().await;
+        log::info!("Login callback received");
+        return Ok(request.body);
+    }
+}
+
+struct RawRequest {
+    head: String,
+    body: String,
+}
+
+/// Reads the request head, then exactly `Content-Length` body bytes. Browsers
+/// keep the connection open, so reading to EOF would stall.
+async fn read_request(stream: &mut TcpStream) -> Option<RawRequest> {
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 4096];
+
+    let head_end = loop {
+        if let Some(i) = find_subslice(&buf, b"\r\n\r\n") {
+            break i;
+        }
+        if buf.len() > MAX_REQUEST_BYTES {
+            return None;
+        }
+        let n = stream.read(&mut chunk).await.ok()?;
+        if n == 0 {
+            return None;
+        }
+        buf.extend_from_slice(&chunk[..n]);
     };
 
+    let head = String::from_utf8_lossy(&buf[..head_end]).to_string();
+    let content_length = head
+        .lines()
+        .skip(1)
+        .filter_map(|l| l.split_once(':'))
+        .find(|(k, _)| k.trim().eq_ignore_ascii_case("content-length"))
+        .and_then(|(_, v)| v.trim().parse::<usize>().ok())
+        .unwrap_or(0);
+    if content_length > MAX_REQUEST_BYTES {
+        return None;
+    }
+
+    let body_start = head_end + 4;
+    while buf.len() < body_start + content_length {
+        let n = stream.read(&mut chunk).await.ok()?;
+        if n == 0 {
+            return None;
+        }
+        buf.extend_from_slice(&chunk[..n]);
+    }
+
+    let body = String::from_utf8_lossy(&buf[body_start..body_start + content_length]).to_string();
+    Some(RawRequest { head, body })
+}
+
+fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack.windows(needle.len()).position(|w| w == needle)
+}
+
+async fn finish_login(app: &AppHandle, body: &str) -> Result<(), LoginError> {
     // Parse URL-encoded body
     let params: std::collections::HashMap<String, String> =
         url::form_urlencoded::parse(body.as_bytes())
@@ -100,7 +191,7 @@ async fn do_login(app: &AppHandle, web_url: &str, port: u16) -> bool {
 
     let access_token = match params.get("access_token") {
         Some(t) if !t.is_empty() => t.clone(),
-        _ => return false,
+        _ => return Err(LoginError::InvalidCallback),
     };
     let refresh_token = params.get("refresh_token").cloned().unwrap_or_default();
     let expires_in: u64 = params
@@ -111,7 +202,7 @@ async fn do_login(app: &AppHandle, web_url: &str, port: u16) -> bool {
     // Decode JWT to get userId
     let parts: Vec<&str> = access_token.split('.').collect();
     if parts.len() < 2 {
-        return false;
+        return Err(LoginError::InvalidCallback);
     }
 
     use base64::Engine;
@@ -125,12 +216,12 @@ async fn do_login(app: &AppHandle, web_url: &str, port: u16) -> bool {
                 let payload: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or_default();
                 payload["sub"].as_str().unwrap_or_default().to_string()
             }
-            Err(_) => return false,
+            Err(_) => return Err(LoginError::InvalidCallback),
         }
     };
 
     if user_id.is_empty() {
-        return false;
+        return Err(LoginError::InvalidCallback);
     }
 
     let now_ms = std::time::SystemTime::now()
@@ -156,8 +247,12 @@ async fn do_login(app: &AppHandle, web_url: &str, port: u16) -> bool {
         s.herzie = local_for_user;
     }
 
-    // Sync herzie with server
-    let client = Client::new();
+    // Sync herzie with server. Bounded so a hung request can't pin the login
+    // command; the sync loop picks up anything missed here.
+    let client = Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .unwrap_or_default();
     let server_herzie = api::api_get_me(&client).await;
 
     if let Some(h) = server_herzie {
@@ -196,5 +291,40 @@ async fn do_login(app: &AppHandle, web_url: &str, port: u16) -> bool {
         crate::refresh_app_cache(&app_clone, &client).await;
     });
 
-    true
+    log::info!("Login complete");
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn reads_body_split_across_writes_on_open_connection() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let body = "access_token=a.b.c&refresh_token=r&expires_in=3600";
+
+        let client = tokio::spawn(async move {
+            let mut s = TcpStream::connect(addr).await.unwrap();
+            let head = format!(
+                "POST /callback HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: {}\r\n\r\n",
+                body.len()
+            );
+            s.write_all(head.as_bytes()).await.unwrap();
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            s.write_all(body.as_bytes()).await.unwrap();
+            // Keep the connection open like a browser would.
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        });
+
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let req = timeout(Duration::from_millis(500), read_request(&mut stream))
+            .await
+            .expect("should not wait for EOF")
+            .unwrap();
+        assert!(req.head.starts_with("POST /callback"));
+        assert_eq!(req.body, body);
+        client.abort();
+    }
 }

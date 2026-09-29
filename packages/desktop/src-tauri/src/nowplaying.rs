@@ -1,8 +1,8 @@
 use crate::types::NowPlayingInfo;
 #[cfg(target_os = "macos")]
-use std::process::Command;
-#[cfg(target_os = "macos")]
 use std::time::Duration;
+#[cfg(target_os = "macos")]
+use tokio::process::Command;
 #[cfg(target_os = "macos")]
 use tokio::time::timeout;
 
@@ -43,9 +43,7 @@ pub async fn get_now_playing() -> Option<NowPlayingInfo> {
     #[cfg(target_os = "macos")]
     {
         if crate::media_remote_adapter::is_configured() {
-            if let Ok(Some(info)) =
-                tokio::task::spawn_blocking(crate::media_remote_adapter::get_now_playing).await
-            {
+            if let Some(info) = crate::media_remote_adapter::get_now_playing().await {
                 return Some(info);
             }
         }
@@ -69,28 +67,30 @@ pub async fn get_now_playing() -> Option<NowPlayingInfo> {
 }
 
 #[cfg(target_os = "macos")]
-pub fn raw_media_remote_json() -> Option<String> {
-    crate::media_remote_adapter::raw_json()
+pub async fn raw_media_remote_json() -> Option<String> {
+    crate::media_remote_adapter::raw_json().await
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn raw_media_remote_json() -> Option<String> {
+pub async fn raw_media_remote_json() -> Option<String> {
     None
 }
 
 #[cfg(target_os = "macos")]
 async fn query_app(script: &str, source: &str) -> Option<NowPlayingInfo> {
-    let script = script.to_string();
     let source = source.to_string();
 
+    // kill_on_drop: when the timeout fires, the hung osascript is killed
+    // instead of lingering (it used to pin a blocking-pool thread forever,
+    // eventually starving everything else that needs one).
     let result = timeout(
         Duration::from_secs(5),
-        tokio::task::spawn_blocking(move || {
-            Command::new("osascript").args(["-e", &script]).output()
-        }),
+        Command::new("osascript")
+            .args(["-e", script])
+            .kill_on_drop(true)
+            .output(),
     )
     .await
-    .ok()?
     .ok()?
     .ok()?;
 
