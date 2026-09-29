@@ -55,7 +55,7 @@ export function TabBar({
       id: "store",
       label: "Store",
       colour: "yellow",
-      title: "Buy coins. Shortcut [b]",
+      title: "Expansions & premium cards. Shortcut [b]",
     },
   ];
 

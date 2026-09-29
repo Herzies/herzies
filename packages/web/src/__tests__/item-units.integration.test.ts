@@ -580,42 +580,24 @@ describe("selling specific copies", () => {
   });
 });
 
-describe("buying", () => {
-  it("adds the copies and charges once", async () => {
-    // A 3000-coin skin.
+describe("buying and selling", () => {
+  // Coins only buy through Good ol' George now (00089 cleared every
+  // buy_price); the route stays for older desktop builds and refuses.
+  it("the store sells nothing for coins, and charges nothing", async () => {
     const p = await makePlayer({}, { currency: 7000 });
-    const res = await call(buy, "/inventory/buy", p, {
-      itemId: "prism",
-      quantity: 2,
-    });
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.spent).toBe(6000);
-    expect(body.newCurrency).toBe(1000);
-    expect(await unitsOf(p, "prism")).toHaveLength(2);
-    await expectProjectionMatchesUnits(p);
-  });
-
-  it("refuses without enough coins, buying nothing", async () => {
-    const p = await makePlayer({}, { currency: 2999 });
     const res = await call(buy, "/inventory/buy", p, {
       itemId: "prism",
       quantity: 1,
     });
     expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/George/);
     expect(await unitsOf(p, "prism")).toHaveLength(0);
-  });
-
-  it("two simultaneous buys can't spend the same coins twice", async () => {
-    // Enough for exactly one. Before buying was a locked transaction, both could
-    // read the same balance and both succeed.
-    const p = await makePlayer({}, { currency: 3000 });
-    const results = await Promise.all([
-      call(buy, "/inventory/buy", p, { itemId: "prism", quantity: 1 }),
-      call(buy, "/inventory/buy", p, { itemId: "prism", quantity: 1 }),
-    ]);
-    expect(results.map((r) => r.status).sort()).toEqual([200, 400]);
-    expect(await unitsOf(p, "prism")).toHaveLength(1);
+    const { data } = await getAdminClient()
+      .from("herzies")
+      .select("currency")
+      .eq("user_id", p.userId)
+      .single();
+    expect(data?.currency).toBe(7000);
   });
 
   it("two simultaneous sells of the same copy pay out once", async () => {

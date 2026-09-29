@@ -706,8 +706,8 @@ pub async fn api_equip_unit(
 /// Rolls one dice item onto ONE specific card. The server decides the outcome
 /// (`result`: upgraded / kept / destroyed) — a risky roll can break the card
 /// unless a protection item is sent along. Surfaces the server's error
-/// message, same as `api_equip_unit`/`api_buy_item` (not owned, wrong dice,
-/// already maxed, etc.).
+/// message, same as `api_equip_unit`/`api_buy_from_merchant` (not owned, wrong
+/// dice, already maxed, etc.).
 pub async fn api_apply_dice_upgrade(
     client: &Client,
     dice_item_id: &str,
@@ -746,29 +746,6 @@ pub async fn api_sell_units(client: &Client, unit_ids: &[String]) -> Option<serd
         return None;
     }
     resp.json().await.ok()
-}
-
-/// Buys an item with in-game currency. Unlike `api_sell_item`, this surfaces
-/// the server's error message (e.g. "not enough currency", "already own
-/// this item") so the Items tab can show the user why a purchase failed.
-pub async fn api_buy_item(
-    client: &Client,
-    item_id: &str,
-    quantity: u32,
-) -> Result<serde_json::Value, String> {
-    let body = serde_json::json!({ "itemId": item_id, "quantity": quantity });
-    let resp = api_fetch(client, reqwest::Method::POST, "/inventory/buy", Some(body))
-        .await
-        .ok_or_else(|| "Network error".to_string())?;
-    let status = resp.status();
-    let text = resp.text().await.map_err(|e| format!("Read error: {e}"))?;
-    let data: serde_json::Value =
-        serde_json::from_str(&text).map_err(|_| format!("Server returned {status}"))?;
-    if !status.is_success() {
-        let msg = data["error"].as_str().unwrap_or("Unknown error");
-        return Err(msg.to_string());
-    }
-    Ok(data)
 }
 
 pub async fn api_buy_from_merchant(

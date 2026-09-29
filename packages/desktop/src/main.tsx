@@ -861,7 +861,6 @@ function App() {
             equipped={state.equipped}
             bankExpansions={state.bankExpansions}
             active={view === "store"}
-            onLog={addLog}
           />
         </div>
 

@@ -18,7 +18,7 @@ import {
   it,
   vi,
 } from "vitest";
-import { POST as buy } from "@/app/api/inventory/buy/route";
+import { POST as merchantBuy } from "@/app/api/events/merchant/buy/route";
 import { POST as checkout } from "@/app/api/store/checkout/route";
 import { GET as listPremium } from "@/app/api/store/premium/route";
 import { POST as syncRoute } from "@/app/api/sync/route";
@@ -313,11 +313,36 @@ describe("the column is not writable by the player", () => {
   });
 });
 
+/** A live Good ol' George visit selling Prism for 3000 — coin purchases
+ * only happen through him, and his route checks capacity like every other
+ * way into the bank. */
+async function georgeSellingPrism(): Promise<string> {
+  const { data, error } = await getAdminClient()
+    .from("events")
+    .insert({
+      type: "merchant",
+      title: "Good ol' George",
+      active: true,
+      starts_at: new Date(Date.now() - 3_600_000).toISOString(),
+      ends_at: new Date(Date.now() + 3_600_000).toISOString(),
+      config: { stock: [{ itemId: "prism", price: 3000 }] },
+    })
+    .select("id")
+    .single();
+  if (error || !data) throw new Error(error?.message);
+  return data.id as string;
+}
+
 describe("capacity is honoured server-side", () => {
   it("refuses a coin purchase on a full bank, then allows it once expanded", async () => {
     const p = await makePlayer(FULL);
+    const eventId = await georgeSellingPrism();
     const attempt = () =>
-      post(buy, "/inventory/buy", p, { itemId: "prism", quantity: 1 });
+      post(merchantBuy, "/events/merchant/buy", p, {
+        eventId,
+        itemId: "prism",
+        quantity: 1,
+      });
 
     expect((await attempt()).status).toBe(409);
     await buyExpansion(p);
@@ -326,13 +351,16 @@ describe("capacity is honoured server-side", () => {
 
   it("allows exactly BANK_EXPANSION_SLOTS more items, then refuses again", async () => {
     const p = await makePlayer(FULL, { currency: 100000 });
+    const eventId = await georgeSellingPrism();
     await buyExpansion(p);
-    const res = await post(buy, "/inventory/buy", p, {
+    const res = await post(merchantBuy, "/events/merchant/buy", p, {
+      eventId,
       itemId: "prism",
       quantity: BANK_EXPANSION_SLOTS,
     });
     expect(res.status).toBe(200);
-    const over = await post(buy, "/inventory/buy", p, {
+    const over = await post(merchantBuy, "/events/merchant/buy", p, {
+      eventId,
       itemId: "prism",
       quantity: 1,
     });
