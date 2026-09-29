@@ -61,7 +61,11 @@ async fn fetch_get_json(include_artwork: bool) -> Option<String> {
         cmd.arg("--no-artwork");
     }
 
-    let limit = if include_artwork { ARTWORK_TIMEOUT } else { GET_TIMEOUT };
+    let limit = if include_artwork {
+        ARTWORK_TIMEOUT
+    } else {
+        GET_TIMEOUT
+    };
     let output = match timeout(limit, cmd.output()).await {
         Ok(result) => result.ok()?,
         Err(_) => {

@@ -1,8 +1,8 @@
 use crate::types::NowPlayingInfo;
 #[cfg(target_os = "macos")]
-use tokio::process::Command;
-#[cfg(target_os = "macos")]
 use std::time::Duration;
+#[cfg(target_os = "macos")]
+use tokio::process::Command;
 #[cfg(target_os = "macos")]
 use tokio::time::timeout;
 

@@ -50,7 +50,9 @@ async fn login(app: AppHandle, attempt: tauri::State<'_, LoginAttempt>) -> Resul
     // Replacing the sender drops (and so cancels) any attempt still in flight.
     let (tx, rx) = tokio::sync::oneshot::channel();
     attempt.0.lock().unwrap().replace(tx);
-    auth::login(&app, rx).await.map_err(|e| e.code().to_string())
+    auth::login(&app, rx)
+        .await
+        .map_err(|e| e.code().to_string())
 }
 
 #[tauri::command]
