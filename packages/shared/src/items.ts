@@ -2441,7 +2441,7 @@ export const ITEMS: ItemDef[] = [
     id: "power-dice-1",
     name: "Power Dice 1",
     description:
-      "Roll it onto a statted card to bump every one of that card's stats by 1. Takes a card from +0 up to +3.",
+      "Upgrade cards +1 to +3.",
     rarity: "rare",
     frames: powerDiceFrames,
     dice: true,
@@ -2455,7 +2455,7 @@ export const ITEMS: ItemDef[] = [
     id: "power-dice-2",
     name: "Power Dice 2",
     description:
-      "Roll it onto a +3 card or better to bump every one of its stats by 1. Takes a card from +3 up to +6.",
+      "Upgrade cards +4 to +6.",
     rarity: "legendary",
     frames: powerDice2Frames,
     dice: true,
@@ -2466,7 +2466,7 @@ export const ITEMS: ItemDef[] = [
     id: "power-dice-3",
     name: "Power Dice 3",
     description:
-      "Takes a card from +6 up to +10, one stat point at a time. Every roll can fail — and a failed roll breaks the card.",
+      "Upgrade cards +7 to +10.",
     rarity: "mythic",
     frames: powerDice3Frames,
     dice: true,

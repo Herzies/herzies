@@ -417,7 +417,6 @@ function ItemGridCell({
       content={
         <ItemPreviewCard
           itemId={itemId}
-          meta={def?.stackable ? `x${qty}` : undefined}
           box={100}
           equipped={equipped}
           level={level}
@@ -1161,12 +1160,6 @@ export function InventoryView({
   // Quantity is only meaningful for stackable items — each non-stackable
   // card in the grid already represents exactly one copy, so showing "x2"
   // while inspecting one of them would be misleading.
-  const inspectedMeta = [
-    inspected?.stackable ? `x${inspectedQty}` : null,
-    inspectedGroundSide,
-  ]
-    .filter((part): part is string => Boolean(part))
-    .join(" · ");
 
   return (
     <div className="flex h-full flex-col">
@@ -1346,7 +1339,7 @@ export function InventoryView({
           }}
           equipped={equipped}
           level={inspectUnit?.upgradeLevel ?? 0}
-          meta={inspectedMeta || undefined}
+          meta={inspectedGroundSide || undefined}
           footer={
             <>
               {inspected.equipable &&

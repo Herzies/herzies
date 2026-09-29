@@ -6,8 +6,6 @@ import {
   RARITY_COLORS as ITEM_RARITY_COLORS,
   ItemPreview,
   RARITY_LABELS,
-  requiredDiceForLevel,
-  upgradeSuccessChance,
 } from "@herzies/shared";
 import { useEffect } from "react";
 import { cn } from "../lib/utils";
@@ -83,7 +81,6 @@ export function ItemPreviewCard({
         {meta ? <> · {meta}</> : null}
       </div>
       <ItemStatLines item={item} level={level} className="mb-1" />
-      <NextUpgradeLine item={item} level={level} />
       <div className="text-ui-sm text-text-dim">{item.description}</div>
       {set && (
         <div className="mt-2 border-t border-border pt-2 text-left text-ui-sm">
@@ -106,31 +103,6 @@ export function ItemPreviewCard({
       {footer && (
         <div className="mt-3 flex flex-col items-center gap-2">{footer}</div>
       )}
-    </div>
-  );
-}
-
-/** "Next upgrade: +8 · 40% · Power Dice 3" for a statted card that isn't
- * maxed — so the odds are visible before a die is ever clicked. */
-function NextUpgradeLine({
-  item,
-  level,
-}: {
-  item: NonNullable<ReturnType<typeof getItem>>;
-  level: number;
-}) {
-  const needs = requiredDiceForLevel(level);
-  if (!item.stats || Object.keys(item.stats).length === 0 || !needs) {
-    return null;
-  }
-  const chance = upgradeSuccessChance(level);
-  return (
-    <div className="mb-1 text-ui-sm text-text-dim">
-      Next upgrade: +{level + 1} ·{" "}
-      <span className={chance < 1 ? "text-red" : "text-green"}>
-        {Math.round(chance * 100)}%
-      </span>{" "}
-      · {getItem(needs)?.name ?? needs}
     </div>
   );
 }

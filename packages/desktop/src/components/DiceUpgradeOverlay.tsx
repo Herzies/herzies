@@ -2,7 +2,6 @@ import {
   getItem,
   ItemPreview,
   type ItemUnit,
-  MAX_ITEM_UPGRADE_LEVEL,
   RARITY_COLORS,
   requiredDiceForLevel,
   SAFETY_PICK_ID,
@@ -202,17 +201,13 @@ export function DiceUpgradeOverlay({
     body = (
       <div className="flex flex-col items-center gap-2 text-center">
         <ItemPreview item={def} box={110} />
-        <div className="text-ui" style={{ color: RARITY_COLORS[def.rarity] }}>
-          "{def.name}" +{level} → +{level + 1}
-        </div>
-        <div className="text-ui-sm text-text-dim">
-          {statLine(itemId, level + 1)}
-        </div>
-        <div className="text-ui-lg font-bold">
-          Success chance:{" "}
-          <span style={{ color: chanceColour(chance) }}>
-            {formatChance(chance)}
-          </span>
+        <div>
+          <div className="text-ui" style={{ color: RARITY_COLORS[def.rarity] }}>
+            "{def.name}" +{level} → +{level + 1}
+          </div>
+          <div className="mt-1 text-ui-sm text-text-dim">
+            {statLine(itemId, level + 1)}
+          </div>
         </div>
         {risky && (
           <SafetyPickToggle
@@ -242,7 +237,10 @@ export function DiceUpgradeOverlay({
           </button>
         </div>
         <div className="text-ui-sm text-text-dim">
-          Uses 1 of your {diceLeft} "{dice.name}"
+          Success chance:{" "}
+          <span style={{ color: chanceColour(chance) }}>
+            {formatChance(chance)}
+          </span>
         </div>
       </div>
     );
@@ -291,8 +289,7 @@ export function DiceUpgradeOverlay({
                       +{level + 1} ·{" "}
                       <span style={{ color: chanceColour(chance) }}>
                         {formatChance(chance)}
-                      </span>{" "}
-                      · {level}/{MAX_ITEM_UPGRADE_LEVEL}
+                      </span>
                     </>
                   ) : (
                     <>
@@ -319,9 +316,7 @@ export function DiceUpgradeOverlay({
           onClick={(e) => e.stopPropagation()}
           className="w-80 max-w-full border border-border bg-bg-panel p-3 shadow-xl shadow-black/50"
         >
-          <div className="mb-2 text-center text-sm font-bold">
-            Upgrade a card with "{dice.name}"
-          </div>
+          <div className="mb-2 text-center text-sm font-bold">Upgrade</div>
           {body}
         </div>
       </div>
