@@ -201,14 +201,6 @@ export const herzies = {
       targetUnitId,
       protectionItemId,
     }),
-  /** Buys an item with in-game currency (store's Items tab). Throws with the
-   * server's error message (not enough currency, already owned, etc.). */
-  buyItem: (itemId: string, quantity: number) =>
-    invoke<{
-      spent: number;
-      newCurrency: number;
-      inventory: Inventory;
-    }>("buy_item", { itemId, quantity }),
   /** Buys from Good ol' George during a live merchant event. Throws with the
    * server's message (sold out, limit reached, not enough currency, …). */
   buyFromMerchant: (eventId: string, itemId: string, quantity: number) =>

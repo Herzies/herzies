@@ -564,38 +564,8 @@ async fn equip_item(
     Ok(result)
 }
 
-#[tauri::command]
-async fn buy_item(
-    item_id: String,
-    quantity: u32,
-    app: AppHandle,
-    state: tauri::State<'_, SharedState>,
-) -> Result<serde_json::Value, String> {
-    let client = Client::new();
-    let data = api::api_buy_item(&client, &item_id, quantity).await?;
-
-    let mut s = state.lock().unwrap();
-    let mut changed = false;
-    if let Some(snapshot) = snapshot_from_response(&data, &s) {
-        apply_inventory(&mut s, snapshot, None);
-        changed = true;
-    }
-    if let Some(ref mut herzie) = s.herzie {
-        if let Some(new_currency) = data["newCurrency"].as_u64() {
-            herzie.currency = new_currency as u32;
-            storage::save_herzie(herzie);
-            changed = true;
-        }
-    }
-    drop(s);
-    if changed {
-        emit_state_update(&app);
-    }
-    Ok(data)
-}
-
-/// Buys from Good ol' George (a live `merchant` event). Same state handling
-/// as `buy_item`; only the endpoint and the pricing source differ.
+/// Buys from Good ol' George (a live `merchant` event) — the only way coins
+/// buy items. Applies the returned item state and the new coin balance.
 #[tauri::command]
 async fn buy_from_merchant(
     event_id: String,
@@ -2305,7 +2275,6 @@ pub fn run() {
             fetch_inventory,
             sell_item,
             apply_dice_upgrade,
-            buy_item,
             buy_from_merchant,
             collect_drop,
             spawn_debug_drop,

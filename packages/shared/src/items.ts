@@ -794,8 +794,6 @@ export interface ItemDef {
    * modifier items stack unbounded in Equipped.modifier. */
   equipSlot?: EquipSlot;
   sellPrice?: number;
-  /** Set when the item can be bought with in-game currency from the store's Items tab. */
-  buyPrice?: number;
   /** Inventory sub-tab grouping. Defaults to "deck" when unset. */
   category?: ItemCategory;
   /** Stats added to the herzie while this is equipped. Most items have none. */
@@ -2450,8 +2448,8 @@ export const ITEMS: ItemDef[] = [
     stackable: true,
     sellPrice: 200,
     // Not equipable — clicking it opens the upgrade-target picker instead
-    // of placing it (see InventoryView's handleGridClick). No buyPrice: a
-    // normal world drop, same pool as any other card.
+    // of placing it (see InventoryView's handleGridClick). A normal world
+    // drop, same pool as any other card.
   },
   {
     id: "power-dice-2",
@@ -2531,7 +2529,7 @@ export const ITEMS: ItemDef[] = [
     equipSlot: "modifier",
     sellPrice: 250,
     modifier: { label: "Exp boost", tooltip: "2% per song hunt won" },
-    // no buyPrice — reward-only, matches boombox
+    // reward-only, matches boombox
   },
   {
     id: "clouds",
@@ -2561,7 +2559,6 @@ export const ITEMS: ItemDef[] = [
     frames: prismFrames,
     equipable: true,
     equipSlot: "color",
-    buyPrice: 3000,
     sellPrice: 100,
   },
   {
@@ -2573,7 +2570,6 @@ export const ITEMS: ItemDef[] = [
     frames: poseidonsGiftFrames,
     equipable: true,
     equipSlot: "color",
-    buyPrice: 3000,
     sellPrice: 500,
   },
   {
@@ -2584,7 +2580,6 @@ export const ITEMS: ItemDef[] = [
     frames: purpleDaneFrames,
     equipable: true,
     equipSlot: "color",
-    buyPrice: 3000,
     sellPrice: 100,
   },
   {
@@ -2595,7 +2590,6 @@ export const ITEMS: ItemDef[] = [
     frames: thanksForAllTheFishFrames,
     equipable: true,
     equipSlot: "color",
-    buyPrice: 3000,
     sellPrice: 100,
   },
   {
@@ -2606,10 +2600,10 @@ export const ITEMS: ItemDef[] = [
     frames: spiritOrbFrames,
     equipable: true,
     equipSlot: "ground",
-    // No coin price: sold for money only, as a Stripe product whose
-    // metadata.item_id is "spirit-orb" (see /api/store/premium). It is the
-    // one item that cannot be earned by playing — see NON_DROPPABLE_ITEM_IDS
-    // — so a coin price would have made it grindable after all.
+    // Sold for money only, as a Stripe product whose metadata.item_id is
+    // "spirit-orb" (see /api/store/premium). It is the one item that cannot
+    // be earned by playing — see NON_DROPPABLE_ITEM_IDS — so keep it out of
+    // George's stock too, or coins make it grindable after all.
     sellPrice: 500,
   },
 ];

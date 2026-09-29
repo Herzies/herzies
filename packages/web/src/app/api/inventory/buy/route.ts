@@ -1,6 +1,7 @@
 import {
   bankCapacity,
   bankSlotsUsed,
+  MERCHANT_NAME,
   normalizeEquipped,
 } from "@herzies/shared";
 import { NextResponse } from "next/server";
@@ -9,9 +10,14 @@ import { type ItemState, itemResponse } from "@/lib/item-units";
 import { buyItemSchema, isParseError, parseBody } from "@/lib/schemas";
 import { createAdminClient } from "@/lib/supabase-admin";
 
+/** Every buy_price is null since 00089: coins only buy through Good ol'
+ * George now. This route stays so older desktop builds, which still show a
+ * coins tab, get told where to go instead of a bare refusal. */
+const NOT_SOLD_HERE = `The store doesn't sell cards for coins any more — spend them with ${MERCHANT_NAME}`;
+
 const REASONS: Record<string, { status: number; error: string }> = {
   "not-found": { status: 404, error: "Herzie not found" },
-  "not-for-sale": { status: 400, error: "Item cannot be bought" },
+  "not-for-sale": { status: 400, error: NOT_SOLD_HERE },
   "insufficient-funds": { status: 400, error: "Not enough currency" },
   "bad-quantity": { status: 400, error: "Invalid quantity" },
 };
@@ -34,10 +40,7 @@ export async function POST(request: Request) {
     .single();
 
   if (!item?.buy_price) {
-    return NextResponse.json(
-      { error: "Item cannot be bought" },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: NOT_SOLD_HERE }, { status: 400 });
   }
 
   const { data: herzie } = await admin

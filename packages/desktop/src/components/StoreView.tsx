@@ -4,8 +4,8 @@ import {
   bankCapacity,
   getItem,
   hasRoomFor,
-  ITEMS,
   MAX_BANK_EXPANSIONS,
+  MERCHANT_NAME,
 } from "@herzies/shared";
 import { useEffect, useRef, useState } from "react";
 import { formatAmount, formatPrice } from "../lib/utils";
@@ -16,21 +16,21 @@ import ItemInspectOverlay from "./ItemInspectOverlay";
 import { ItemRow } from "./ItemRow";
 import { BankExpansionIcon } from "./icons/BankExpansionIcon";
 import { List } from "./List";
-import { TabButton } from "./TabButton";
 import { Tooltip } from "./Tooltip";
 
-/** Two shelves, split by what you pay with rather than by what you get. */
-type StoreTab = "premium" | "coins";
-
-const BUYABLE_ITEMS = ITEMS.filter((item) => item.buyPrice != null);
+/**
+ * The real-money shelf: Inventory Expansions and whatever Stripe lists. It
+ * sells nothing for coins — coins are spent with Good ol' George during his
+ * visits, which is what keeps his stock worth turning up for. The balance
+ * still shows here so the header reads the same on every tab.
+ */
 
 export function StoreView({
-  inventory: cachedInventory,
-  currency: cachedCurrency,
+  inventory,
+  currency,
   equipped,
   bankExpansions,
   active = true,
-  onLog,
 }: {
   inventory: Inventory | null;
   currency: number;
@@ -40,24 +40,14 @@ export function StoreView({
   bankExpansions: number;
   /** False while another tab is shown. */
   active?: boolean;
-  onLog?: (msg: string) => void;
 }) {
   const capacity = bankCapacity(bankExpansions);
-  const [tab, setTab] = useState<StoreTab>("premium");
-  const [inventory, setInventory] = useState(cachedInventory);
-  const [currency, setCurrency] = useState(cachedCurrency);
   const [premium, setPremium] = useState<PremiumItem[] | null>(null);
   const [pendingProductId, setPendingProductId] = useState<string | null>(null);
-  const [pendingItemId, setPendingItemId] = useState<string | null>(null);
   const [inspectItem, setInspectItem] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const focused = useWindowFocused();
   const prevFocusedRef = useRef(focused);
-
-  useEffect(() => {
-    setInventory(cachedInventory);
-    setCurrency(cachedCurrency);
-  }, [cachedInventory, cachedCurrency]);
 
   useEffect(() => {
     // Falls back to an empty list so a broken feed can't blank the store —
@@ -101,30 +91,10 @@ export function StoreView({
     }
   };
 
-  const handleBuyItem = async (itemId: string) => {
-    setError(null);
-    setPendingItemId(itemId);
-    try {
-      const result = await herzies.buyItem(itemId, 1);
-      setInventory(result.inventory);
-      setCurrency(result.newCurrency);
-      onLog?.(`Bought "${getItem(itemId)?.name ?? itemId}"`);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setPendingItemId(null);
-    }
-  };
-
   /** Premium listings by item id — the join back to the bundled catalog. */
   const premiumByItem = new Map((premium ?? []).map((p) => [p.itemId, p]));
 
-  /**
-   * Everything Stripe is selling, as catalog entries. A premium listing wins
-   * over a coin price for the same item, so putting something up in Stripe
-   * moves it to this shelf by itself — there is no second place to remember
-   * to take it off the coin one.
-   */
+  /** Everything Stripe is selling, as catalog entries. */
   // The Inventory Expansion arrives in the same list but is not a catalog item,
   // so it is picked out here and rendered on its own (first on the shelf).
   const expansionListing = premiumByItem.get(BANK_EXPANSION.id);
@@ -134,13 +104,10 @@ export function StoreView({
     const def = getItem(p.itemId);
     return def ? [def] : [];
   });
-  const coinItems = BUYABLE_ITEMS.filter((item) => !premiumByItem.has(item.id));
-  const shopItems = tab === "premium" ? premiumItems : coinItems;
 
   const inspected = inspectItem ? getItem(inspectItem) : null;
   const inspectedIsExpansion = inspectItem === BANK_EXPANSION.id;
   const inspectedOwned = inspectItem ? (inventory?.[inspectItem] ?? 0) : 0;
-  const inspectedPrice = inspected?.buyPrice ?? 0;
   // Same rule as the list: owning one is no reason not to buy another, but
   // having nowhere to put it is.
   const inspectedNoRoom =
@@ -151,14 +118,11 @@ export function StoreView({
     ? premiumByItem.get(inspectItem)
     : undefined;
 
-  // Built as parts rather than one fragment so a card with no price shows no
-  // price. A premium card has no buyPrice at all, and rendering that as a coin
-  // amount printed a bare "H 0" next to its rarity.
-  const inspectedPriceNode = inspectedPaid ? (
-    formatPrice(inspectedPaid.amount, inspectedPaid.currency)
-  ) : inspected?.buyPrice != null ? (
-    <Coin amount={inspectedPrice} />
-  ) : null;
+  // Built as parts rather than one fragment so a card with no listing (one
+  // inspected after Stripe dropped it) shows no price rather than a bare 0.
+  const inspectedPriceNode = inspectedPaid
+    ? formatPrice(inspectedPaid.amount, inspectedPaid.currency)
+    : null;
   const inspectedOwnedText =
     inspectedOwned > 0 ? `${inspectedOwned} owned` : null;
   const inspectedMeta =
@@ -181,47 +145,30 @@ export function StoreView({
         </Tooltip>
       </div>
 
-      <div className="mb-2 flex gap-1 border-b border-border">
-        <TabButton
-          active={tab === "premium"}
-          onClick={() => setTab("premium")}
-          colour="yellow"
-        >
-          Premium
-        </TabButton>
-        <TabButton
-          active={tab === "coins"}
-          onClick={() => setTab("coins")}
-          colour="yellow"
-        >
-          <span className="italic">H</span> coins
-        </TabButton>
-      </div>
-
-      <p className="mb-2 text-[11px] text-text-dim leading-snug">
+      <p className="mb-1 text-[11px] text-text-dim leading-snug">
         {/* Deliberately doesn't claim these are unobtainable elsewhere: a
-            premium listing is just a Stripe product, so nothing stops a
-            droppable card being sold here too — and every item is tradable,
-            so even a shop-only one can reach a player who never paid. */}
-        {tab === "premium"
-          ? "Herzies is a one-person passion project. Buying here supports its development."
-          : "Spend coins you've earned on cards for your herzie. Purchases land straight in your inventory."}
+            listing is just a Stripe product, so nothing stops a droppable card
+            being sold here too — and every item is tradable, so even a
+            shop-only one can reach a player who never paid. */}
+        Herzies is a one-person passion project. Buying here supports its
+        development.
+      </p>
+      <p className="mb-2 text-[11px] leading-snug text-text-dim">
+        Got coins? Spend them with{" "}
+        <span className="text-yellow">{MERCHANT_NAME}</span> when he's in town.
       </p>
       <List className="min-h-0 flex-1">
-        {tab === "premium" && premium === null ? (
+        {premium === null ? (
           <div className="pt-5 text-center text-ui text-text-dim">
             Loading...
           </div>
-        ) : shopItems.length === 0 &&
-          !(tab === "premium" && expansionListing) ? (
+        ) : premiumItems.length === 0 && !expansionListing ? (
           <div className="pt-5 text-center text-ui text-text-dim">
-            {tab === "premium"
-              ? "Nothing in the premium shop right now."
-              : "No cards available right now."}
+            Nothing in the store right now.
           </div>
         ) : (
           <>
-            {tab === "premium" && expansionListing && (
+            {expansionListing && (
               <ItemRow
                 itemId={BANK_EXPANSION.id}
                 name={BANK_EXPANSION.name}
@@ -261,37 +208,30 @@ export function StoreView({
                 }
               />
             )}
-            {shopItems.map((item) => {
+            {premiumItems.map((item) => {
               const paid = premiumByItem.get(item.id);
+              if (!paid) return null;
               const owned = inventory?.[item.id] ?? 0;
-              const price = item.buyPrice ?? 0;
-              const canAfford = paid ? true : currency >= price;
-              const insufficientFunds = !canAfford;
               // Duplicates are fine — items are tradable, so a spare is a
               // legitimate thing to buy. Having nowhere to put it is not:
-              // the bank is a fixed 18 slots and anything past that doesn't
-              // render, so it would be bought and invisible. The server
-              // refuses this too; disabling here just explains why.
+              // anything past the bank's capacity doesn't render, so it would
+              // be bought and invisible. The webhook can't refuse after
+              // payment, so this check is the one that matters.
               const noRoom = !hasRoomFor(
                 inventory,
                 equipped,
                 item.id,
                 capacity,
               );
-              // Paid purchases leave for the browser and are credited by the
-              // webhook, so they share the coin-pack pending state and its
-              // refresh-on-return — not handleBuyItem, which spends coins.
-              const pending = paid
-                ? pendingProductId === item.id
-                : pendingItemId === item.id;
+              // Purchases leave for the browser and are credited by the
+              // webhook — see the refresh-on-return effect above.
+              const pending = pendingProductId === item.id;
               const buyButton = (
                 <button
                   type="button"
                   className="btn"
-                  disabled={!canAfford || noRoom || pending}
-                  onClick={() =>
-                    paid ? handleBuyCurrency(item.id) : handleBuyItem(item.id)
-                  }
+                  disabled={noRoom || pending}
+                  onClick={() => handleBuyCurrency(item.id)}
                 >
                   {pending ? "Buying..." : "Buy"}
                 </button>
@@ -308,11 +248,7 @@ export function StoreView({
                   // rather than replacing it.
                   subtitle={
                     <>
-                      {paid ? (
-                        formatPrice(paid.amount, paid.currency)
-                      ) : (
-                        <Coin amount={price} />
-                      )}
+                      {formatPrice(paid.amount, paid.currency)}
                       {owned > 0 && ` · ${owned} owned`}
                     </>
                   }
@@ -321,8 +257,6 @@ export function StoreView({
                       <Tooltip label="Bank full — sell something first">
                         {buyButton}
                       </Tooltip>
-                    ) : insufficientFunds ? (
-                      <Tooltip label="Insufficient funds">{buyButton}</Tooltip>
                     ) : (
                       buyButton
                     )
@@ -378,7 +312,7 @@ export function StoreView({
           equipped={equipped}
           meta={inspectedMeta}
           footer={
-            // Premium cards are bought the same way here as in the list:
+            // Cards are bought the same way here as in the list:
             // through the browser, credited by the webhook. Without this the
             // overlay was a dead end for exactly the cards the store most
             // wants to sell.
@@ -405,39 +339,7 @@ export function StoreView({
                     paidButton
                   );
                 })()
-              : inspected.buyPrice != null &&
-                (() => {
-                  const insufficientFunds = currency < inspectedPrice;
-                  const buyButton = (
-                    <button
-                      type="button"
-                      className="btn"
-                      disabled={
-                        insufficientFunds ||
-                        inspectedNoRoom ||
-                        pendingItemId === inspectItem
-                      }
-                      onClick={() => handleBuyItem(inspectItem)}
-                    >
-                      {pendingItemId === inspectItem ? (
-                        "Buying..."
-                      ) : (
-                        <>
-                          Buy (<Coin amount={inspectedPrice} />)
-                        </>
-                      )}
-                    </button>
-                  );
-                  return inspectedNoRoom ? (
-                    <Tooltip label="Bank full — sell something first">
-                      {buyButton}
-                    </Tooltip>
-                  ) : insufficientFunds ? (
-                    <Tooltip label="Insufficient funds">{buyButton}</Tooltip>
-                  ) : (
-                    buyButton
-                  );
-                })()
+              : undefined
           }
         />
       )}
