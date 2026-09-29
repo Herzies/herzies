@@ -5,6 +5,7 @@ import {
   normalizeEquipped,
   normalizeUnits,
   pickPlainestUnitIds,
+  requiredDiceForLevel,
 } from "@herzies/shared";
 import type { createAdminClient } from "@/lib/supabase-admin";
 
@@ -69,16 +70,21 @@ export function unitForLegacyUnequip(
   return units.find((u) => u.itemId === itemId && u.equippedSlot !== null);
 }
 
-/** "Upgrade this item": the copy furthest along that can still take a level, so
- * repeated upgrades from an older client concentrate on one card the way the
- * old per-item level did; the worn copy wins a tie. */
+/** "Upgrade this item": the copy furthest along that this die can still take
+ * a level, so repeated upgrades from an older client concentrate on one card
+ * the way the old per-item level did; the worn copy wins a tie. Copies past
+ * this die's band are skipped rather than picked and refused. */
 export function unitForLegacyUpgrade(
   units: readonly ItemUnit[],
   itemId: string,
+  diceItemId: string,
 ): ItemUnit | undefined {
   return units
     .filter(
-      (u) => u.itemId === itemId && u.upgradeLevel < MAX_ITEM_UPGRADE_LEVEL,
+      (u) =>
+        u.itemId === itemId &&
+        u.upgradeLevel < MAX_ITEM_UPGRADE_LEVEL &&
+        requiredDiceForLevel(u.upgradeLevel) === diceItemId,
     )
     .reduce<ItemUnit | undefined>((best, u) => {
       if (!best) return u;

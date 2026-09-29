@@ -69,7 +69,12 @@ export const equipItemSchema = z.union([
 
 /** Upgrade one named copy. `{targetItemId}` is the older client's spelling. */
 export const upgradeItemSchema = z.union([
-  z.object({ diceItemId: z.string().min(1), targetUnitId: unitId }),
+  z.object({
+    diceItemId: z.string().min(1),
+    targetUnitId: unitId,
+    // Only honoured on a risky roll; ignored (never spent) on a safe one.
+    protectionItemId: z.string().min(1).nullish(),
+  }),
   z.object({
     diceItemId: z.string().min(1),
     targetItemId: z.string().min(1),
@@ -180,7 +185,7 @@ export const adminItemSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   description: z.string().optional(),
-  rarity: z.enum(["common", "uncommon", "rare", "legendary"]),
+  rarity: z.enum(["common", "uncommon", "rare", "legendary", "mythic"]),
   sellPrice: z.number().int().nonnegative().nullable().optional(),
   stackable: z.boolean().optional(),
   equipable: z.boolean().optional(),

@@ -11,6 +11,7 @@ import {
   bankTiles,
   bestUnitOf,
   bossDamagePerMinute,
+  DICE_TIERS,
   EQUIP_SLOTS,
   EQUIPPED_SLOTS,
   equippedItemIds,
@@ -35,10 +36,13 @@ import {
   RARITY_DROP_WEIGHTS,
   RARITY_LUCK_WEIGHT_BONUS,
   type Rarity,
+  requiredDiceForLevel,
+  SAFETY_PICK_ID,
   unitsBestFirst,
   unitsPlainestFirst,
   unitsToEquipped,
   unitsToInventory,
+  upgradeSuccessChance,
 } from "./items.js";
 
 /** A unit with sensible defaults, so a test only states what it cares about. */
@@ -827,6 +831,31 @@ describe("herzie stats", () => {
   });
 });
 
+describe("requiredDiceForLevel", () => {
+  it("maps each band to its die and nothing past the cap", () => {
+    expect(requiredDiceForLevel(0)).toBe("power-dice-1");
+    expect(requiredDiceForLevel(2)).toBe("power-dice-1");
+    expect(requiredDiceForLevel(3)).toBe("power-dice-2");
+    expect(requiredDiceForLevel(5)).toBe("power-dice-2");
+    expect(requiredDiceForLevel(6)).toBe("power-dice-3");
+    expect(requiredDiceForLevel(9)).toBe("power-dice-3");
+    expect(requiredDiceForLevel(10)).toBeNull();
+  });
+
+  it("names dice that exist in the catalog", () => {
+    for (const t of DICE_TIERS) expect(getItem(t.diceItemId)?.dice).toBe(true);
+  });
+});
+
+describe("upgradeSuccessChance", () => {
+  it("is certain below +6 and risky from +6", () => {
+    for (let l = 0; l < 6; l++) expect(upgradeSuccessChance(l)).toBe(1);
+    expect([6, 7, 8, 9].map(upgradeSuccessChance)).toEqual([
+      0.6, 0.45, 0.3, 0.2,
+    ]);
+  });
+});
+
 describe("applyItemUpgrade", () => {
   const dice = "power-dice-1";
 
@@ -876,6 +905,8 @@ describe("applyItemUpgrade", () => {
       ok: true,
       units: [unit("d2", dice), unit("b", "boombox", 1)],
       newLevel: 1,
+      chance: 1,
+      protected: false,
     });
   });
 
@@ -907,6 +938,125 @@ describe("applyItemUpgrade", () => {
         "b",
       ),
     ).toEqual({ ok: false, reason: "dice-not-owned" });
+  });
+
+  it("only takes a die inside its own band", () => {
+    expect(
+      applyItemUpgrade([unit("d", dice), unit("b", "boombox", 3)], dice, "b"),
+    ).toEqual({ ok: false, reason: "wrong-dice" });
+    expect(
+      applyItemUpgrade(
+        [unit("d", "power-dice-3"), unit("b", "boombox", 1)],
+        "power-dice-3",
+        "b",
+      ),
+    ).toEqual({ ok: false, reason: "wrong-dice" });
+  });
+
+  it("says max-level at +10 whichever die is offered", () => {
+    for (const d of ["power-dice-1", "power-dice-3"]) {
+      expect(
+        applyItemUpgrade(
+          [unit("d", d), unit("b", "boombox", MAX_ITEM_UPGRADE_LEVEL)],
+          d,
+          "b",
+        ),
+      ).toEqual({ ok: false, reason: "max-level" });
+    }
+  });
+
+  it("walks a card from +0 to +10 with the right dice", () => {
+    let units: ItemUnit[] = [unit("b", "boombox")];
+    for (let level = 0; level < MAX_ITEM_UPGRADE_LEVEL; level++) {
+      const d = requiredDiceForLevel(level)!;
+      units = [...units, unit(`d${level}`, d)];
+      const out = applyItemUpgrade(units, d, "b");
+      if (!out.ok) throw new Error(out.reason);
+      units = out.units;
+    }
+    expect(units).toEqual([unit("b", "boombox", 10)]);
+  });
+
+  it("can't fail a safe roll, whatever result it's told", () => {
+    const out = applyItemUpgrade(
+      [unit("d", dice), unit("b", "boombox", 2)],
+      dice,
+      "b",
+      { result: "destroyed" },
+    );
+    expect(out.ok && out.newLevel).toBe(3);
+  });
+
+  it("breaks the card on an unprotected failed risky roll", () => {
+    const out = applyItemUpgrade(
+      [unit("d", "power-dice-3"), unit("b", "boombox", 7, "ground_left")],
+      "power-dice-3",
+      "b",
+      { result: "destroyed" },
+    );
+    expect(out).toEqual({
+      ok: true,
+      units: [],
+      newLevel: 7,
+      chance: 0.45,
+      protected: false,
+    });
+  });
+
+  it("keeps the card and spends the pick on a protected failed roll", () => {
+    const out = applyItemUpgrade(
+      [
+        unit("d", "power-dice-3"),
+        unit("p", SAFETY_PICK_ID),
+        unit("b", "boombox", 8),
+      ],
+      "power-dice-3",
+      "b",
+      { protectionItemId: SAFETY_PICK_ID, result: "kept" },
+    );
+    expect(out).toEqual({
+      ok: true,
+      units: [unit("b", "boombox", 8)],
+      newLevel: 8,
+      chance: 0.3,
+      protected: true,
+    });
+  });
+
+  it("spends the pick on a protected success too, but never on a safe roll", () => {
+    const risky = applyItemUpgrade(
+      [
+        unit("d", "power-dice-3"),
+        unit("p", SAFETY_PICK_ID),
+        unit("b", "boombox", 9),
+      ],
+      "power-dice-3",
+      "b",
+      { protectionItemId: SAFETY_PICK_ID },
+    );
+    expect(risky.ok && risky.units).toEqual([unit("b", "boombox", 10)]);
+
+    const safe = applyItemUpgrade(
+      [unit("d", dice), unit("p", SAFETY_PICK_ID), unit("b", "boombox")],
+      dice,
+      "b",
+      { protectionItemId: SAFETY_PICK_ID },
+    );
+    expect(safe.ok && safe.units).toEqual([
+      unit("p", SAFETY_PICK_ID),
+      unit("b", "boombox", 1),
+    ]);
+  });
+
+  it("rejects a protection item that isn't owned", () => {
+    expect(
+      applyItemUpgrade(
+        [unit("d", "power-dice-3"), unit("b", "boombox", 6)],
+        "power-dice-3",
+        "b",
+        { protectionItemId: SAFETY_PICK_ID },
+      ),
+    ).toEqual({ ok: false, reason: "protection-not-owned" });
   });
 
   it("never mutates its inputs", () => {

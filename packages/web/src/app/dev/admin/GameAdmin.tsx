@@ -34,7 +34,7 @@ import { NotificationsPanel } from "./NotificationsPanel";
 import { SongPoolPanel } from "./SongPoolPanel";
 
 const SECRET_KEY = "herzies-admin-secret";
-const RARITIES = ["common", "uncommon", "rare", "legendary"] as const;
+const RARITIES = ["common", "uncommon", "rare", "legendary", "mythic"] as const;
 
 type AdminTab = "items" | "grant" | "events" | "notifications";
 

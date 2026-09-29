@@ -171,6 +171,11 @@ export function HoverPreview({
         if (e.buttons !== 0) setVisible(false);
       }}
       onMouseLeave={() => setVisible(false)}
+      // A click is the player acting on the item — equipping it, opening
+      // the dice window, inspecting it — and the preview has done its job.
+      // It stays closed until the pointer leaves and comes back (only
+      // mouseenter re-opens it).
+      onPointerDown={() => setVisible(false)}
     >
       {children}
       {visible &&

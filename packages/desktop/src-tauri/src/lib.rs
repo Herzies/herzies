@@ -509,19 +509,27 @@ async fn sell_item(
     Ok(result)
 }
 
-/// Consumes one dice item to raise ONE specific card's upgrade level by one
-/// (see MAX_ITEM_UPGRADE_LEVEL in @herzies/shared) — its twin, a second copy of
-/// the same card, is untouched. Mirrors sell_item's shape: the response carries
-/// the authoritative item state, applied the same way a sell's does.
+/// Rolls one dice item onto ONE specific card (see DICE_TIERS in
+/// @herzies/shared) — its twin, a second copy of the same card, is untouched.
+/// The server rolls; the response says how it landed and carries the
+/// authoritative item state, applied the same way a sell's does (a destroyed
+/// card simply isn't in it any more).
 #[tauri::command]
 async fn apply_dice_upgrade(
     dice_item_id: String,
     target_unit_id: String,
+    protection_item_id: Option<String>,
     app: AppHandle,
     state: tauri::State<'_, SharedState>,
 ) -> Result<serde_json::Value, String> {
     let client = Client::new();
-    let data = api::api_apply_dice_upgrade(&client, &dice_item_id, &target_unit_id).await?;
+    let data = api::api_apply_dice_upgrade(
+        &client,
+        &dice_item_id,
+        &target_unit_id,
+        protection_item_id.as_deref(),
+    )
+    .await?;
 
     let mut s = state.lock().unwrap();
     if let Some(snapshot) = snapshot_from_response(&data, &s) {

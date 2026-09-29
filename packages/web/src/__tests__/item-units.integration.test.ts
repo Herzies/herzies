@@ -146,7 +146,23 @@ describe("dice upgrades land on one copy", () => {
 
   it("refuses past the level cap without spending a die", async () => {
     const p = await makePlayer(
-      { boombox: 1, "power-dice-1": 2 },
+      { boombox: 1, "power-dice-3": 2 },
+      { levels: { boombox: 10 } },
+    );
+    const [a] = await unitsOf(p, "boombox");
+
+    const res = await call(upgrade, "/inventory/upgrade", p, {
+      diceItemId: "power-dice-3",
+      targetUnitId: a.id,
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/fully upgraded/);
+    expect(await unitsOf(p, "power-dice-3")).toHaveLength(2);
+  });
+
+  it("refuses a die outside the card's band without spending it", async () => {
+    const p = await makePlayer(
+      { boombox: 1, "power-dice-1": 1 },
       { levels: { boombox: 3 } },
     );
     const [a] = await unitsOf(p, "boombox");
@@ -156,8 +172,9 @@ describe("dice upgrades land on one copy", () => {
       targetUnitId: a.id,
     });
     expect(res.status).toBe(400);
-    expect((await res.json()).error).toMatch(/fully upgraded/);
-    expect(await unitsOf(p, "power-dice-1")).toHaveLength(2);
+    expect((await res.json()).error).toMatch(/needs Power Dice 2/);
+    expect(await unitsOf(p, "power-dice-1")).toHaveLength(1);
+    expect((await unitsOf(p, "boombox"))[0].upgrade_level).toBe(3);
   });
 
   it("refuses when the player has no dice", async () => {
@@ -211,6 +228,134 @@ describe("dice upgrades land on one copy", () => {
       .map((u) => u.upgrade_level)
       .sort();
     expect(levels).toEqual([0, 2]);
+  });
+});
+
+describe("risky upgrades (+6 and up)", () => {
+  /** Straight to the RPC, so p_roll can force how the roll lands. */
+  const rollRpc = (
+    who: Player,
+    dice: string,
+    target: string,
+    opts: { pick?: boolean; roll: number },
+  ) =>
+    getAdminClient().rpc("apply_item_upgrade", {
+      p_user_id: who.userId,
+      p_dice_item_id: dice,
+      p_target_unit_id: target,
+      p_protection_item_id: opts.pick ? "safety-pick" : null,
+      p_roll: opts.roll,
+    });
+
+  it("walks a card from +0 to +10 with the right dice", async () => {
+    const p = await makePlayer({
+      boombox: 1,
+      "power-dice-1": 3,
+      "power-dice-2": 3,
+      "power-dice-3": 4,
+    });
+    const [a] = await unitsOf(p, "boombox");
+    for (let level = 0; level < 10; level++) {
+      const dice =
+        level < 3
+          ? "power-dice-1"
+          : level < 6
+            ? "power-dice-2"
+            : "power-dice-3";
+      const { data } = await rollRpc(p, dice, a.id, { roll: 0 });
+      expect(data).toMatchObject({
+        ok: true,
+        result: "upgraded",
+        newLevel: level + 1,
+      });
+    }
+    const after = await getUnits(p.userId);
+    expect(after.map((u) => [u.item_id, u.upgrade_level])).toEqual([
+      ["boombox", 10],
+    ]);
+  });
+
+  it("an unprotected failure destroys the card, worn or not", async () => {
+    const p = await makePlayer(
+      { boombox: 1, "power-dice-3": 1 },
+      { levels: { boombox: 7 }, equipped: { ground_left: "boombox" } },
+    );
+    const [a] = await unitsOf(p, "boombox");
+    expect(a.equipped_slot).toBe("ground_left");
+
+    const { data } = await rollRpc(p, "power-dice-3", a.id, { roll: 0.99 });
+    expect(data).toMatchObject({ ok: true, result: "destroyed", chance: 0.45 });
+    expect(await getUnits(p.userId)).toEqual([]);
+    await expectProjectionMatchesUnits(p);
+  });
+
+  it("a protected failure keeps the level and spends the die and the pick", async () => {
+    const p = await makePlayer(
+      { boombox: 1, "power-dice-3": 1, "safety-pick": 2 },
+      { levels: { boombox: 8 } },
+    );
+    const [a] = await unitsOf(p, "boombox");
+
+    const { data } = await rollRpc(p, "power-dice-3", a.id, {
+      pick: true,
+      roll: 0.99,
+    });
+    expect(data).toMatchObject({
+      ok: true,
+      result: "kept",
+      newLevel: 8,
+      protected: true,
+    });
+    expect((await unitsOf(p, "boombox"))[0].upgrade_level).toBe(8);
+    expect(await unitsOf(p, "power-dice-3")).toHaveLength(0);
+    expect(await unitsOf(p, "safety-pick")).toHaveLength(1);
+  });
+
+  it("a protected success still spends the pick", async () => {
+    const p = await makePlayer(
+      { boombox: 1, "power-dice-3": 1, "safety-pick": 1 },
+      { levels: { boombox: 6 } },
+    );
+    const [a] = await unitsOf(p, "boombox");
+    const { data } = await rollRpc(p, "power-dice-3", a.id, {
+      pick: true,
+      roll: 0,
+    });
+    expect(data).toMatchObject({ ok: true, result: "upgraded", newLevel: 7 });
+    expect(await unitsOf(p, "safety-pick")).toHaveLength(0);
+  });
+
+  it("never spends a pick on a safe roll", async () => {
+    const p = await makePlayer({
+      boombox: 1,
+      "power-dice-1": 1,
+      "safety-pick": 1,
+    });
+    const [a] = await unitsOf(p, "boombox");
+    const res = await call(upgrade, "/inventory/upgrade", p, {
+      diceItemId: "power-dice-1",
+      targetUnitId: a.id,
+      protectionItemId: "safety-pick",
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).result).toBe("upgraded");
+    expect(await unitsOf(p, "safety-pick")).toHaveLength(1);
+  });
+
+  it("refuses a pick that isn't owned, spending nothing", async () => {
+    const p = await makePlayer(
+      { boombox: 1, "power-dice-3": 1 },
+      { levels: { boombox: 6 } },
+    );
+    const [a] = await unitsOf(p, "boombox");
+    const res = await call(upgrade, "/inventory/upgrade", p, {
+      diceItemId: "power-dice-3",
+      targetUnitId: a.id,
+      protectionItemId: "safety-pick",
+    });
+    expect(res.status).toBe(400);
+    expect(await unitsOf(p, "power-dice-3")).toHaveLength(1);
+    expect((await unitsOf(p, "boombox"))[0].upgrade_level).toBe(6);
   });
 });
 

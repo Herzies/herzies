@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.1.0-beta.44",
+    "highlights": [
+      "Cards now upgrade all the way to +10",
+      "New: Power Dice 2 (Legendary) takes a card from +3 to +6, and Power Dice 3 (Mythic, a new rarity above Legendary) takes it from +6 to +10",
+      "Upgrades from +6 can fail, and a failed roll breaks the card. The upgrade window shows your odds before every roll",
+      "New: Safety Pick. Roll with one and a failed upgrade leaves your card as it was"
+    ]
+  },
+  {
     "version": "0.1.0-beta.43",
     "highlights": [
       "New: Events tab. Every live event in one list, with a countdown to the next of each kind",
