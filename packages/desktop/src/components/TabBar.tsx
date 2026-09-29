@@ -30,9 +30,9 @@ export function TabBar({
   const tabs: Tab[] = [
     {
       id: "home",
-      label: "Herzie",
+      label: "Home",
       colour: "cyan",
-      title: "Your Herzie. Shortcut [h]",
+      title: "Home — your herzie. Shortcut [h]",
     },
     {
       id: "inventory",

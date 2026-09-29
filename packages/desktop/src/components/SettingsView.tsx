@@ -51,7 +51,7 @@ export function SettingsView({
   const [mediaRemoteDebug, setMediaRemoteDebug] = useState<string | null>(null);
 
   const shortcuts: { key: string; label: string }[] = [
-    { key: "H", label: "Herzie" },
+    { key: "H", label: "Home" },
     { key: "I", label: "Inventory" },
     { key: "T", label: "Town" },
     { key: "F", label: "Social" },
