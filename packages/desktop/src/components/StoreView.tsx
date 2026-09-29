@@ -31,6 +31,7 @@ export function StoreView({
   equipped,
   bankExpansions,
   active = true,
+  nextMerchantAt = null,
 }: {
   inventory: Inventory | null;
   currency: number;
@@ -40,6 +41,8 @@ export function StoreView({
   bankExpansions: number;
   /** False while another tab is shown. */
   active?: boolean;
+  /** When George next turns up (null while he's in town, or unscheduled). */
+  nextMerchantAt?: string | null;
 }) {
   const capacity = bankCapacity(bankExpansions);
   const [premium, setPremium] = useState<PremiumItem[] | null>(null);
@@ -155,7 +158,21 @@ export function StoreView({
       </p>
       <p className="mb-2 text-[11px] leading-snug text-text-dim">
         Got coins? Spend them with{" "}
-        <span className="text-yellow">{MERCHANT_NAME}</span> when he's in town.
+        <span className="text-yellow">{MERCHANT_NAME}</span> when he's in town
+        {nextMerchantAt ? (
+          <>
+            {" "}
+            — next visit{" "}
+            <span className="text-text">
+              {new Intl.DateTimeFormat(undefined, {
+                weekday: "short",
+                day: "numeric",
+                month: "short",
+              }).format(new Date(nextMerchantAt))}
+            </span>
+          </>
+        ) : null}
+        .
       </p>
       <List className="min-h-0 flex-1">
         {premium === null ? (

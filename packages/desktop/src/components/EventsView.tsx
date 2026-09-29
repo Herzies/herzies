@@ -2,7 +2,10 @@ import type { BossFightView, Equipped, GameEvent } from "@herzies/shared";
 import {
   getItem,
   RARITY_COLORS as ITEM_RARITY_COLORS,
+  isVisitorType,
   MERCHANT_NAME,
+  VISITORS,
+  visitorName,
 } from "@herzies/shared";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "../lib/utils";
@@ -13,6 +16,7 @@ import ItemInspectOverlay from "./ItemInspectOverlay";
 import { ItemTypeIcon } from "./icons/ItemTypeIcon";
 import { List } from "./List";
 import { MerchantPanel } from "./MerchantPanel";
+import { OrphiezStage } from "./OrphiezStage";
 import { View } from "./View";
 
 function formatCountdown(endsAt: string): string {
@@ -108,14 +112,18 @@ const DEBUG_MERCHANT: GameEvent = {
   },
 };
 
-/** List order, and what each event type is called on its card. */
-const EVENT_TYPES: { type: string; label: string }[] = [
-  { type: "boss_fight", label: "Boss Fight" },
-  { type: "song_hunt", label: "Song Hunt" },
-  { type: "merchant", label: MERCHANT_NAME },
+/** List order of the visitors that always get a card in Town. */
+const EVENT_TYPES: { type: string }[] = [
+  { type: "boss_fight" },
+  { type: "song_hunt" },
+  { type: "merchant" },
 ];
-const typeLabel = (type: string) =>
-  EVENT_TYPES.find((t) => t.type === type)?.label ?? type;
+/** "<name> <tagline>" reads as a sentence; the card shows the tagline under
+ * the name, so it's capitalised there. */
+const taglineOf = (type: string) => {
+  const t = isVisitorType(type) ? VISITORS[type].tagline : "";
+  return t ? t.charAt(0).toUpperCase() + t.slice(1) : undefined;
+};
 const typeRank = (type: string) => {
   const i = EVENT_TYPES.findIndex((t) => t.type === type);
   return i === -1 ? EVENT_TYPES.length : i;
@@ -314,10 +322,12 @@ export function EventsView({
           e.type === "boss_fight"
             ? (e.config as unknown as BossFightView)
             : null;
+        // In Town every event is a visitor, so the card is named for who's
+        // here (the boss by its own name) with what they're up to under it.
         cards.push({
           type,
-          title: e.title,
-          description: e.description,
+          title: visitorName(type, e.title),
+          description: null,
           status: "live",
           at: e.endsAt,
           openKey: type === "song_hunt" ? "song_hunt" : e.id,
@@ -326,9 +336,7 @@ export function EventsView({
             ? boss.killed
               ? "Defeated!"
               : `HP ${Math.round(boss.hp)} / ${Math.round(boss.maxHp)}`
-            : type === "merchant"
-              ? "In town now — come have a look"
-              : undefined,
+            : taglineOf(type),
         });
       }
       if (live.length > 0) continue;
@@ -340,7 +348,7 @@ export function EventsView({
       let previousDetail: string | undefined;
       if (type === "song_hunt" && previousHunt) {
         previous = previousHunt;
-        previousDetail = "Last hunt's answer inside";
+        previousDetail = "See the last song he was looking for";
       } else if (
         type === "boss_fight" &&
         previousEvent?.type === "boss_fight" &&
@@ -355,8 +363,8 @@ export function EventsView({
 
       cards.push({
         type,
-        title: next?.title ?? previous?.title ?? typeLabel(type),
-        description: next?.description ?? previous?.description ?? null,
+        title: visitorName(type, next?.title ?? previous?.title),
+        description: null,
         status: next ? "scheduled" : "idle",
         at: next?.startsAt ?? null,
         openKey: previous
@@ -368,10 +376,10 @@ export function EventsView({
         detail:
           previousDetail ??
           (next
-            ? undefined
+            ? "On the way to town"
             : type === "merchant"
               ? "Not in town. Keep an eye out!"
-              : "Nothing scheduled yet"),
+              : "No visit planned yet"),
       });
     }
     // Anything else live (e.g. a secret track) still gets a card.
@@ -379,8 +387,8 @@ export function EventsView({
       if (EVENT_TYPES.some((t) => t.type === e.type)) continue;
       cards.push({
         type: e.type,
-        title: e.title,
-        description: e.description,
+        title: visitorName(e.type, e.title),
+        description: e.description ?? taglineOf(e.type) ?? null,
         status: "live",
         at: e.endsAt,
         openKey: null,
@@ -398,12 +406,29 @@ export function EventsView({
       (a, b) => when(a) - when(b) || typeRank(a.type) - typeRank(b.type),
     );
 
+    const inTown = cards.filter((c) => c.status === "live").length;
+    const nextArrival = cards.find((c) => c.status === "scheduled");
+
     return (
       <View
-        title="Events"
+        title="Town"
         colour="cyan"
         childrenClassName="flex min-h-0 flex-col"
       >
+        {inTown === 0 && (
+          // An empty Town reads as dead in a way an empty event list never
+          // did, so say it's quiet and who's coming next.
+          <div className="mb-2 border border-dashed border-border px-2 py-1.5 text-center text-ui text-text-dim">
+            Town is quiet right now.
+            {nextArrival?.at ? (
+              <>
+                {" "}
+                <span className="text-text">{nextArrival.title}</span> arrives
+                in {formatIn(nextArrival.at)}.
+              </>
+            ) : null}
+          </div>
+        )}
         <List className="min-h-0 flex-1">
           <div className="flex flex-col">
             {cards.map((card) => (
@@ -479,9 +504,9 @@ export function EventsView({
   if (selected !== "song_hunt") {
     // The opened event ended between polls.
     return (
-      <View title="Events" colour="cyan" backButton={back}>
+      <View title="Town" colour="cyan" backButton={back}>
         <div className="flex h-full items-center justify-center text-center text-xs text-text-dim">
-          This event has ended.
+          They've left town.
         </div>
       </View>
     );
@@ -506,7 +531,7 @@ export function EventsView({
     const nextStartsAt = nextHunt ? new Date(nextHunt.startsAt) : null;
     return (
       <View
-        title="Events"
+        title="Song Hunt"
         colour="cyan"
         childrenClassName="flex min-h-0 flex-col"
         backButton={back}
@@ -514,7 +539,7 @@ export function EventsView({
         <div className="flex min-h-0 flex-1 flex-col">
           <div>
             <h2 className="text-ui-2xl mb-3 font-bold">
-              Song Hunt{" "}
+              {VISITORS.song_hunt.name}{" "}
               {nextStartsAt ? (
                 <span className="text-ui text-text-dim">
                   (
@@ -529,15 +554,15 @@ export function EventsView({
 
             <div className="text-ui-lg">
               {nextStartsAt
-                ? `Starts in ${formatStartsIn(nextStartsAt)}.`
-                : "No hunt scheduled yet."}
+                ? `Arrives in town in ${formatStartsIn(nextStartsAt)}.`
+                : "Not in town, and no visit planned yet."}
             </div>
           </div>
 
           {previousHunt ? (
             <div className="mt-4 flex min-h-0 flex-1 flex-col border-t border-border pt-4">
               <h2 className="text-ui-lg mb-3 font-bold">
-                Previous{" "}
+                Last visit{" "}
                 <span className="text-ui text-text-dim">
                   (
                   {Intl.DateTimeFormat("en-US", {
@@ -551,12 +576,9 @@ export function EventsView({
               <div className="flex min-h-0 flex-1 flex-col gap-2">
                 <div className="flex min-h-0 flex-1 flex-col gap-2">
                   <div className="flex flex-col gap-1">
-                    <h2 className="text-ui font-bold text-text-dim">Type:</h2>
-                    <div className="text-ui">Song Hunt</div>
-                  </div>
-
-                  <div className="flex flex-col gap-1">
-                    <h2 className="text-ui font-bold text-text-dim">Answer:</h2>
+                    <h2 className="text-ui font-bold text-text-dim">
+                      The song he was looking for:
+                    </h2>
                     <div className="text-ui">
                       {previousHuntConfig?.trackArtist} -{" "}
                       {previousHuntConfig?.trackTitle}
@@ -614,7 +636,7 @@ export function EventsView({
                         })
                       ) : (
                         <div className="text-ui text-text-dim">
-                          No finders from the previous hunt.
+                          Nobody found it for him last time.
                         </div>
                       )}
                     </List>
@@ -640,7 +662,7 @@ export function EventsView({
     return (
       <View title="Song Hunt" colour="cyan" backButton={back}>
         <div className="flex h-full items-center justify-center text-center text-xs text-text-dim">
-          No active Song Hunt. Check back later!
+          {VISITORS.song_hunt.name} isn't in town. Check back later!
         </div>
       </View>
     );
@@ -671,13 +693,14 @@ export function EventsView({
       childrenClassName="flex flex-col h-full"
       backButton={back}
     >
-      <div className="grid flex-1 place-items-center">
+      <OrphiezStage paused={!eventsTabVisible || !focused} />
+      <div className="mt-1 flex shrink-0 justify-center">
         <div>
           <div className="text-center text-cyan">{hunt.title}</div>
           <div className="text-ui text-text-dim mt-2">{hunt.description}</div>
 
           <div className="mt-3 flex flex-col gap-0.5 text-center text-[10px] text-text-dim">
-            <div>Duration: {formatCountdown(hunt.endsAt)}</div>
+            <div>Leaving town: {formatCountdown(hunt.endsAt)}</div>
             {rewardItem ? (
               <>
                 <div className="flex items-center justify-center gap-1">
@@ -704,7 +727,9 @@ export function EventsView({
         </div>
       </div>
 
-      <div>
+      {/* The stage takes the room the centred header used to, so the clues
+          and finders scroll rather than push past the window. */}
+      <div className="mt-2 min-h-0 flex-1 overflow-y-auto">
         <div>
           <div className="mb-2.5">
             <div className="mb-1 text-[10px] text-text-dim">Clues</div>
@@ -788,7 +813,7 @@ export function EventsView({
               </List>
             ) : (
               <div className="text-ui text-text-dim">
-                No one has found it yet...
+                Nobody has found it for him yet...
               </div>
             )}
           </div>
@@ -888,17 +913,15 @@ function EventCardRow({
         {card.status === "live" ? (
           <div className="flex items-center justify-end gap-1 text-[10px] font-bold text-green">
             <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-green" />
-            {card.type === "merchant" ? "IN TOWN" : "LIVE"}
+            IN TOWN
           </div>
         ) : null}
         {card.at ? (
           <div className="text-[10px] text-text-dim">
             {card.status !== "live"
               ? `in ${formatIn(card.at)}`
-              : // George and the boss are visitors: they leave, or get away.
-                card.type === "merchant" || card.type === "boss_fight"
-                ? `leaving in ${formatIn(card.at)}`
-                : `ends in ${formatIn(card.at)}`}
+              : // Every visitor leaves when their visit ends.
+                `leaving in ${formatIn(card.at)}`}
           </div>
         ) : null}
       </div>

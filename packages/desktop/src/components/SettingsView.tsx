@@ -53,7 +53,7 @@ export function SettingsView({
   const shortcuts: { key: string; label: string }[] = [
     { key: "H", label: "Herzie" },
     { key: "I", label: "Inventory" },
-    { key: "E", label: "Events" },
+    { key: "T", label: "Town" },
     { key: "F", label: "Social" },
     { key: "S", label: "Settings" },
     { key: "C", label: "Open chat" },
@@ -152,7 +152,7 @@ export function SettingsView({
               )}
               onClick={onToggleActiveEventOverride}
             >
-              {hasActiveEventOverride ? "Live Event: On" : "Test Live Event"}
+              {hasActiveEventOverride ? "Orphiez: On" : "Test Orphiez"}
             </button>
             <button
               type="button"

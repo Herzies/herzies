@@ -424,7 +424,7 @@ function SeriesFormFields({
             }
             className={INPUT}
           >
-            <option value="song_hunt">song hunt</option>
+            <option value="song_hunt">Orphiez (song hunt)</option>
             <option value="boss_fight">boss fight</option>
             <option value="merchant">Good ol&apos; George</option>
           </select>

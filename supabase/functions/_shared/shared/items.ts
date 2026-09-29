@@ -2526,13 +2526,13 @@ export const ITEMS: ItemDef[] = [
     id: "good-eye-sniper",
     name: "Good Eye, Sniper",
     description:
-      "... and good ears! Displays your song hunt wins and boosts XP the more you rack up.",
+      "... and good ears! Counts the songs you've found for Orphiez and boosts XP the more you rack up.",
     rarity: "rare",
     frames: goodEyeSniperFrames,
     equipable: true,
     equipSlot: "modifier",
     sellPrice: 250,
-    modifier: { label: "Exp boost", tooltip: "2% per song hunt won" },
+    modifier: { label: "Exp boost", tooltip: "2% per song found for Orphiez" },
     // reward-only, matches boombox
   },
   {

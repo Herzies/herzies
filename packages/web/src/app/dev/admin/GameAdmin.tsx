@@ -721,7 +721,7 @@ function EventForm({
             className={INPUT}
           >
             <option value="secret_track">secret_track</option>
-            <option value="song_hunt">song_hunt</option>
+            <option value="song_hunt">song_hunt (Orphiez)</option>
             <option value="boss_fight">boss_fight</option>
             <option value="merchant">merchant (Good ol&apos; George)</option>
           </select>
