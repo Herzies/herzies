@@ -36,9 +36,9 @@ export function TabBar({
     },
     {
       id: "inventory",
-      label: "Inventory",
+      label: "Herzie",
       colour: "cyan",
-      title: "Your inventory. Shortcut [i]",
+      title: "Your herzie, deck & inventory. Shortcut [i]",
     },
     {
       id: "events",

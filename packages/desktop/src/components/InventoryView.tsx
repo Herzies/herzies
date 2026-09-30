@@ -1,6 +1,7 @@
 import type {
   BankTile,
   Equipped,
+  EquipSlot,
   GroundSide,
   Herzie,
   ItemType,
@@ -10,6 +11,7 @@ import type {
   Rarity,
 } from "@herzies/shared";
 import {
+  applyEquip,
   applyItemUpgrade,
   applySell,
   BANK_SLOT_COUNT,
@@ -18,8 +20,10 @@ import {
   bestUnitOf,
   DECK_SLOT_GROUPS,
   DICE_TIERS,
+  getHerzieStatsFromUnits,
   getItem,
   getItemType,
+  groundSlot,
   MAX_MODIFIERS,
   pickPlainestUnitIds,
   RARITY_COLORS,
@@ -29,15 +33,27 @@ import {
 } from "@herzies/shared";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { ToggleEquipResult } from "../hooks/useOptimisticUnits";
+import {
+  pickGroundSide,
+  type ToggleEquipResult,
+} from "../hooks/useOptimisticUnits";
 import { cn, formatAmount } from "../lib/utils";
 import { herzies } from "../tauri-bridge";
 import { Coin } from "./Coin";
 import { ContextMenu } from "./ContextMenu";
-import { DeckRow, type EmptySlotTarget } from "./DeckRow";
+import {
+  DECK_SIDE_ATTR,
+  DECK_SLOT_ATTR,
+  DECK_UNIT_ATTR,
+  type DeckBox,
+  type DeckDragState,
+  DeckOverlay,
+  type EmptySlotTarget,
+} from "./DeckOverlay";
 import { DeckSlotPicker, type PickerOption } from "./DeckSlotPicker";
 import { DiceUpgradeOverlay } from "./DiceUpgradeOverlay";
 import { Herzie3D } from "./Herzie3D";
+import { type Flight, ItemFlights } from "./ItemFlight";
 import ItemInspectOverlay, { ItemPreviewCard } from "./ItemInspectOverlay";
 import { DuplicatesIcon } from "./icons/DuplicatesIcon";
 import { ItemTypeIcon } from "./icons/ItemTypeIcon";
@@ -45,7 +61,7 @@ import { SortIcon } from "./icons/SortIcon";
 import { List } from "./List";
 import { NumberTicker } from "./NumberTicker";
 import { PromptOverlay } from "./PromptOverlay";
-import { TabButton } from "./TabButton";
+import { StatsPanel } from "./StatsPanel";
 import { HoverPreview, Tooltip } from "./Tooltip";
 
 /** Rarities worth a second look before they're sold for coin. */
@@ -190,11 +206,6 @@ function SellBox({
   );
 }
 
-/** The Misc category (see `ItemCategory` in @herzies/shared) has no catalog
- * items yet and no tab of its own — this view's second tab shows the
- * equipped deck instead. */
-type InventoryTab = "cards" | "deck";
-
 const GRID_COLS = 6;
 /** Rows visible at once. Capacity starts at BANK_SLOT_COUNT (3 rows of 6) and
  * grows by whole rows per Inventory Expansion, so the grid scrolls once it has
@@ -270,6 +281,8 @@ function loadSlotOrder(
 function reconcileSlotOrder(
   prev: (string | null)[],
   tileKeys: string[],
+  /** A card dragged out of the deck onto an empty bag slot lands there. */
+  preferred?: { key: string; index: number } | null,
 ): (string | null)[] {
   const present = new Set(tileKeys);
   const next = prev.map((key) =>
@@ -283,7 +296,10 @@ function reconcileSlotOrder(
 
   for (const key of tileKeys) {
     if (placed.has(key)) continue;
-    const slot = freed.shift() ?? next.indexOf(null);
+    const slot =
+      preferred?.key === key && next[preferred.index] === null
+        ? preferred.index
+        : (freed.shift() ?? next.indexOf(null));
     // No room left — over-capacity tiles simply don't show (the player is
     // warned separately — see isBankFull — before this can normally happen).
     if (slot === -1) break;
@@ -293,7 +309,7 @@ function reconcileSlotOrder(
   return next;
 }
 
-/** Rank per item type for the quick sort, taken from the Deck tab's own
+/** Rank per item type for the quick sort, taken from the deck's own
  * left-to-right grouping so a sorted grid reads in the same order as the
  * deck it fills, instead of a second ordering invented here that could drift
  * from it. A type with no deck slot of its own — artefacts, which aren't
@@ -366,15 +382,70 @@ function dragVisualClasses(isDragging: boolean, isDragOver: boolean) {
  * reliably deliver events for. */
 const SLOT_INDEX_ATTR = "data-slot-index";
 
+/** The copies behind a tile, space-separated — what a card flying back from
+ * the deck finds its landing tile by (`~=` matches one word of it, so a copy
+ * returning onto an existing stack finds the stack). */
+const TILE_UNITS_ATTR = "data-tile-units";
+
+/** Wraps the herzie and the deck laid over it: dropping a card anywhere in here
+ * places it (see handleDeckDrop). */
+const HERZIE_ZONE_ATTR = "data-herzie-zone";
+
+/** Where a flight lands (see ItemFlight): a worn copy's deck box, or the bag
+ * tile holding a copy. */
+const toDeck = (unitId: string) => `[${DECK_UNIT_ATTR}="${unitId}"]`;
+const toBank = (unitId: string) => `[${TILE_UNITS_ATTR}~="${unitId}"]`;
+
+/** The middle of an element, for a flight to take off from. */
+function centre(el: Element | null) {
+  const r = el?.getBoundingClientRect();
+  return r && { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+}
+
+/** Where a drag is: over a bank slot, and/or over the herzie — and if so, over
+ * which deck box, if any. */
+interface DragHit {
+  overIndex: number | null;
+  inZone: boolean;
+  overDeck: DeckBox | null;
+}
+
+/** Where a drag started: a bag tile, or a worn card in the deck. */
+type DragSource =
+  | { kind: "bag"; index: number; tile: BankTile }
+  | { kind: "deck"; unitId: string; itemId: string };
+
+const sourceItemId = (source: DragSource) =>
+  source.kind === "bag" ? source.tile.itemId : source.itemId;
+
+function hitTest(x: number, y: number): DragHit {
+  const el = document.elementFromPoint(x, y) as HTMLElement | null;
+  const slotEl = el?.closest<HTMLElement>(`[${SLOT_INDEX_ATTR}]`);
+  const deckEl = el?.closest<HTMLElement>(`[${DECK_SLOT_ATTR}]`);
+  return {
+    overIndex: slotEl ? Number(slotEl.getAttribute(SLOT_INDEX_ATTR)) : null,
+    inZone: !!el?.closest(`[${HERZIE_ZONE_ATTR}]`),
+    overDeck: deckEl
+      ? {
+          equipSlot: deckEl.getAttribute(DECK_SLOT_ATTR) as EquipSlot,
+          side: (deckEl.getAttribute(DECK_SIDE_ATTR) ?? undefined) as
+            | GroundSide
+            | undefined,
+        }
+      : null,
+  };
+}
+
 /** One grid cell: just the item's icon (coloured by its own art, not its
  * category — see getItemColor), a "+N" badge when the copy is upgraded and a
  * stack-count badge on a stack. No equipped ring — the bank only ever shows
  * unworn copies (wearing one takes it off the grid — see `bankTiles`), so
- * there's never a specific card here to mark as equipped; that's the Deck tab's
- * job. Hovering shows the full item preview (art, rarity, description, set
+ * there's never a specific card here to mark as equipped; that's the deck
+ * overlay's job. Hovering shows the full item preview (art, rarity, description, set
  * progress — no equip/sell actions); clicking places the copy directly;
  * right-clicking a sellable item opens a Sell menu. Press-and-drag onto any
- * other slot (empty or filled — filled swaps the two items).
+ * other slot (empty or filled — filled swaps the two items), or onto the
+ * herzie to place it.
  *
  * `border-r`/`border-b` only draw on non-edge cells (see `isLastCol`/
  * `isLastRow`) — the grid should show inner divider lines only, not an
@@ -382,12 +453,13 @@ const SLOT_INDEX_ATTR = "data-slot-index";
 function ItemGridCell({
   index,
   itemId,
-  qty,
+  unitIds,
   level,
   isLastCol,
   isLastRow,
   isDragging,
   isDragOver,
+  flying,
   equipped,
   onPlace,
   onSellRequest,
@@ -396,13 +468,15 @@ function ItemGridCell({
   index: number;
   itemId: string;
   /** Copies behind the tile: more than one only for a stack. */
-  qty: number;
+  unitIds: string[];
   /** This copy's dice-upgrade level (0 for a stack) — see ItemPreviewCard. */
   level: number;
   isLastCol: boolean;
   isLastRow: boolean;
   isDragging: boolean;
   isDragOver: boolean;
+  /** A copy is flying back onto this tile: hold its icon until it lands. */
+  flying: boolean;
   equipped: Equipped;
   /** The tile is the exact copy that was clicked — there is no "which of the
    * identical cards" to work out — so no slot index has to be threaded through. */
@@ -411,6 +485,7 @@ function ItemGridCell({
   onDragPointerDown: (index: number, e: React.PointerEvent) => void;
 }) {
   const def = getItem(itemId);
+  const qty = unitIds.length;
 
   return (
     <HoverPreview
@@ -426,6 +501,7 @@ function ItemGridCell({
       <button
         type="button"
         data-slot-index={index}
+        {...{ [TILE_UNITS_ATTR]: unitIds.join(" ") }}
         onPointerDown={(e) => onDragPointerDown(index, e)}
         onClick={onPlace}
         onContextMenu={(e) => {
@@ -444,31 +520,33 @@ function ItemGridCell({
           dragVisualClasses(isDragging, isDragOver),
         )}
       >
-        {def && (
-          // Rarity, as a small right triangle in the bottom-left corner, inset
-          // by the same 2px as the +N and xN badges, in the rarity's own colour (the same one the preview card
-          // and the item's name use). Grid only — the Deck tab's boxes are too
-          // small to carry one.
-          <span
-            aria-hidden="true"
-            className="pointer-events-none absolute bottom-0.5 left-0.5 h-1.5 w-1.5"
-            style={{
-              background: RARITY_COLORS[def.rarity],
-              clipPath: "polygon(0 0, 0 100%, 100% 100%)",
-            }}
-          />
-        )}
-        {level > 0 && (
-          <span className="absolute top-0.5 left-0.5 rounded bg-black/60 px-1 text-[9px] text-cyan">
-            +{level}
-          </span>
-        )}
-        {def?.stackable && qty > 1 && (
-          <span className="absolute top-0.5 right-0.5 rounded bg-black/60 px-1 text-[9px] text-text-dim">
-            x{qty}
-          </span>
-        )}
-        {def && <ItemTypeIcon item={def} className="h-4 w-4" />}
+        <span className={cn("contents", flying && "[&>*]:invisible")}>
+          {def && (
+            // Rarity, as a small right triangle in the bottom-left corner, inset
+            // by the same 2px as the +N and xN badges, in the rarity's own colour (the same one the preview card
+            // and the item's name use). Grid only — the deck's boxes are too
+            // small to carry one.
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute bottom-0.5 left-0.5 h-1.5 w-1.5"
+              style={{
+                background: RARITY_COLORS[def.rarity],
+                clipPath: "polygon(0 0, 0 100%, 100% 100%)",
+              }}
+            />
+          )}
+          {level > 0 && (
+            <span className="absolute top-0.5 left-0.5 rounded bg-black/60 px-1 text-[9px] text-cyan">
+              +{level}
+            </span>
+          )}
+          {def?.stackable && qty > 1 && (
+            <span className="absolute top-0.5 right-0.5 rounded bg-black/60 px-1 text-[9px] text-text-dim">
+              x{qty}
+            </span>
+          )}
+          {def && <ItemTypeIcon item={def} className="h-4 w-4" />}
+        </span>
       </button>
     </HoverPreview>
   );
@@ -539,7 +617,6 @@ export function InventoryView({
   onPredictUnits,
   bankExpansions,
   active = true,
-  rootKey = 0,
 }: {
   herzie: Herzie;
   initialItem?: string | null;
@@ -557,6 +634,8 @@ export function InventoryView({
   onToggleEquip: (
     unitId: string,
     side?: GroundSide,
+    /** Move a worn Accessory to `side` rather than take it off. */
+    move?: boolean,
   ) => Promise<ToggleEquipResult>;
   /** Show a change to the copies that a request issued here is performing (a
    * sell, a dice upgrade), held until that request settles. */
@@ -568,9 +647,6 @@ export function InventoryView({
   bankExpansions: number;
   /** False while another tab is shown — pauses the 3D render. */
   active?: boolean;
-  /** Bumped when the Inventory tab is re-selected while already on it:
-   * back from Deck to the cards. */
-  rootKey?: number;
 }) {
   const capacity = bankCapacity(bankExpansions);
   const [currency, setCurrency] = useState(cachedCurrency || herzie.currency);
@@ -604,15 +680,6 @@ export function InventoryView({
   const [sellDupesConfirm, setSellDupesConfirm] = useState(false);
   /** The empty deck slot whose picker is open (see DeckSlotPicker). */
   const [slotPicker, setSlotPicker] = useState<EmptySlotTarget | null>(null);
-  const [tab, setTab] = useState<InventoryTab>("cards");
-  // Compared against the last key rather than run on mount, so it only ever
-  // fires on a bump.
-  const rootKeyRef = useRef(rootKey);
-  useEffect(() => {
-    if (rootKeyRef.current === rootKey) return;
-    rootKeyRef.current = rootKey;
-    setTab("cards");
-  }, [rootKey]);
   const [slotOrder, setSlotOrder] = useState<(string | null)[]>(() =>
     loadSlotOrder(herzie.friendCode, capacity),
   );
@@ -640,33 +707,72 @@ export function InventoryView({
   const gridViewportRef = useRef<HTMLDivElement | null>(null);
   // { index, itemId } once a drag has actually started (past DRAG_THRESHOLD)
   // — null while just holding the button down without having moved yet.
-  const [dragVisual, setDragVisual] = useState<{
-    index: number;
-    itemId: string;
-    overIndex: number | null;
-    x: number;
-    y: number;
-  } | null>(null);
+  const [dragVisual, setDragVisual] = useState<
+    | (DragHit & {
+        source: DragSource;
+        x: number;
+        y: number;
+      })
+    | null
+  >(null);
   // Mutable, not reactive — the pointermove/pointerup listeners below read
   // and mutate this directly rather than through React state, since they're
   // plain DOM listeners (not React event handlers) and fire far more often
   // than a render is needed for.
-  const dragRef = useRef<{
-    index: number;
-    itemId: string;
-    startX: number;
-    startY: number;
-    dragging: boolean;
-    overIndex: number | null;
-    /** Latest cursor Y, for the edge auto-scroll loop. */
-    pointerY: number;
-    lastX: number;
-  } | null>(null);
+  const dragRef = useRef<
+    | (DragHit & {
+        /** Captured at pointerdown: the listeners below outlive the render
+         * they were made in, so they can't look the tile up in `slotOrder`. */
+        source: DragSource;
+        startX: number;
+        startY: number;
+        dragging: boolean;
+        /** Latest cursor Y, for the edge auto-scroll loop. */
+        pointerY: number;
+        lastX: number;
+      })
+    | null
+  >(null);
   // Set right before a real drag's pointerup so the click that (in a
   // browser) follows it gets ignored instead of also placing the item. Set
   // only for a drag that changed slots, and cleared when the next gesture
   // starts — see handlePointerUp/handlePointerDown for why both matter.
   const suppressClickRef = useRef(false);
+  /** The latest handleDeckDrop, for the drag listeners (which are set up once
+   * and would otherwise call a first-render copy with stale units). */
+  const deckDropRef = useRef<
+    (tile: BankTile, over: DeckBox | null, x: number, y: number) => void
+  >(() => {});
+  /** The latest handleReturnDrop, for the same reason. */
+  const returnDropRef = useRef<
+    (unitId: string, overIndex: number | null, x: number, y: number) => void
+  >(() => {});
+  /** The latest handleDeckMove, for the same reason. */
+  const deckMoveRef = useRef<
+    (unitId: string, over: DeckBox | null, x: number, y: number) => void
+  >(() => {});
+  /** Where a card dragged out of the deck asked to land in the bag, until
+   * reconcileSlotOrder has seated it. */
+  const preferredSlotRef = useRef<{ key: string; index: number } | null>(null);
+
+  /** Cards in the air between the bank and the deck (see ItemFlight). A copy
+   * in here is drawn invisible where it's landing until it arrives. */
+  const [flights, setFlights] = useState<Flight[]>([]);
+  const nextFlightId = useRef(0);
+  const flyingUnitIds = useMemo(
+    () => new Set(flights.map((f) => f.unitId)),
+    [flights],
+  );
+  const endFlight = (id: number) =>
+    setFlights((prev) => prev.filter((f) => f.id !== id));
+
+  /** A short message over the herzie — why a place or return was refused. */
+  const [notice, setNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (!notice) return;
+    const id = setTimeout(() => setNotice(null), 2500);
+    return () => clearTimeout(id);
+  }, [notice]);
 
   // What the grid shows: one tile per unworn copy, a stack folded into one.
   // Held behind `units`, which is identity-stable while its content is, so this
@@ -710,18 +816,11 @@ export function InventoryView({
       }
       state.pointerY = e.clientY;
       state.lastX = e.clientX;
-      const el = document.elementFromPoint(e.clientX, e.clientY);
-      const slotEl = (el as HTMLElement | null)?.closest<HTMLElement>(
-        `[${SLOT_INDEX_ATTR}]`,
-      );
-      const overIndex = slotEl
-        ? Number(slotEl.getAttribute(SLOT_INDEX_ATTR))
-        : null;
-      state.overIndex = overIndex;
+      const hit = hitTest(e.clientX, e.clientY);
+      Object.assign(state, hit);
       setDragVisual({
-        index: state.index,
-        itemId: state.itemId,
-        overIndex,
+        ...hit,
+        source: state.source,
         x: e.clientX,
         y: e.clientY,
       });
@@ -741,6 +840,9 @@ export function InventoryView({
         return;
       }
       frame = requestAnimationFrame(autoScroll);
+      // Up past the grid's top edge is the herzie: a card carried there is
+      // headed for the deck, not for a row scrolled out of sight.
+      if (state.inZone) return;
       const viewport = gridViewportRef.current;
       // The scroller is List's own element, the viewport's only child.
       const scroller = viewport?.firstElementChild;
@@ -755,20 +857,14 @@ export function InventoryView({
       }
       // The cursor hasn't moved but the cell under it has: re-hit-test so the
       // drop target follows the scroll.
-      const el = document.elementFromPoint(state.lastX, state.pointerY);
-      const slotEl = (el as HTMLElement | null)?.closest<HTMLElement>(
-        `[${SLOT_INDEX_ATTR}]`,
-      );
-      const overIndex = slotEl
-        ? Number(slotEl.getAttribute(SLOT_INDEX_ATTR))
-        : null;
+      const { overIndex } = hitTest(state.lastX, state.pointerY);
       if (overIndex !== state.overIndex) {
         state.overIndex = overIndex;
         setDragVisual((prev) => (prev ? { ...prev, overIndex } : prev));
       }
     };
 
-    const handlePointerUp = () => {
+    const handlePointerUp = (e: PointerEvent) => {
       const state = dragRef.current;
       dragRef.current = null;
       setDragVisual(null);
@@ -778,8 +874,28 @@ export function InventoryView({
       // up and put it back", not a request to equip. What keeps a click with a
       // little hand drift working is DRAG_THRESHOLD, not this: drift under it
       // never becomes a drag at all.
-      const { index, overIndex } = state;
+      const { source, overIndex } = state;
       suppressClickRef.current = true;
+      if (source.kind === "deck") {
+        // Let go over the herzie, it stays on — moving sides if it's an
+        // Accessory dropped on the other one; anywhere else, it comes off.
+        if (state.inZone) {
+          deckMoveRef.current(
+            source.unitId,
+            state.overDeck,
+            e.clientX,
+            e.clientY,
+          );
+        } else {
+          returnDropRef.current(source.unitId, overIndex, e.clientX, e.clientY);
+        }
+        return;
+      }
+      if (state.inZone) {
+        deckDropRef.current(source.tile, state.overDeck, e.clientX, e.clientY);
+        return;
+      }
+      const { index } = source;
       if (overIndex === null || overIndex === index) return;
       setSlotOrder((prev) => {
         const next = [...prev];
@@ -813,13 +929,26 @@ export function InventoryView({
     const key = slotOrder[index];
     const tile = key ? tileByKey.get(key) : undefined;
     if (!tile) return;
+    startDrag({ kind: "bag", index, tile }, e);
+  };
+
+  /** Pointer down on a worn card in the deck: the start of a drag out. */
+  const handleDeckPointerDown = (unitId: string, e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    const unit = units.find((u) => u.id === unitId);
+    if (!unit) return;
+    startDrag({ kind: "deck", unitId, itemId: unit.itemId }, e);
+  };
+
+  const startDrag = (source: DragSource, e: React.PointerEvent) => {
     dragRef.current = {
-      index,
-      itemId: tile.itemId,
+      source,
       startX: e.clientX,
       startY: e.clientY,
       dragging: false,
       overIndex: null,
+      inZone: false,
+      overDeck: null,
       pointerY: e.clientY,
       lastX: e.clientX,
     };
@@ -971,31 +1100,273 @@ export function InventoryView({
     }
   };
 
-  /** Wears or removes one specific copy. There is no slot bookkeeping here any
-   * more: a copy is its own tile, so when it leaves the grid the tile's slot
-   * empties on its own, and anything it displaces lands in that freed slot (see
-   * reconcileSlotOrder) — which is what used to need the clicked slot cleared
-   * by hand before the equip was sent, and restored by hand if it failed. */
-  const handleEquip = async (unitId: string, side?: GroundSide) => {
+  /** Wears or removes one specific copy, flying its card between the bank and
+   * the deck. There is no slot bookkeeping here: a copy is its own tile, so
+   * when it leaves the grid the tile's slot empties on its own, and anything it
+   * displaces lands in that freed slot (see reconcileSlotOrder).
+   *
+   * Every way in — a grid click, a deck click, a drop on the herzie, the
+   * inspect overlay — comes through here, so this is where a full bank refuses
+   * a return. Nothing else would: the server takes a card back into a full bank
+   * and the grid then simply has no slot to show it in.
+   *
+   * `from` is where the card should take off; without one it leaves from its
+   * own tile or deck box. */
+  const handleEquip = async (
+    unitId: string,
+    side?: GroundSide,
+    from?: { x: number; y: number },
+  ): Promise<boolean> => {
     const unit = units.find((u) => u.id === unitId);
-    const name = getItem(unit?.itemId ?? "")?.name ?? "item";
+    if (!unit) return false;
+    const def = getItem(unit.itemId);
+    const name = def?.name ?? "item";
+    const returning = unit.equippedSlot !== null;
+
+    // Whether the bank still fits once this lands — a return adds a tile, and
+    // so does a place that knocks something else off. Only a move that grows
+    // the bank past capacity is refused: a swap that nets out, a return onto
+    // an existing stack, and a bank that is somehow already over (a snapshot
+    // from before an expansion was counted) all go through.
+    const predicted = applyEquip(
+      units,
+      unitId,
+      returning ? "unequip" : "equip",
+      def?.equipSlot,
+      !returning && def?.equipSlot === "ground"
+        ? (side ?? pickGroundSide(equipped))
+        : undefined,
+    );
+    if (predicted.ok) {
+      const after = bankTiles(predicted.units).length;
+      if (after > capacity && after > tiles.length) {
+        setNotice(
+          returning
+            ? `Inventory full — "${name}" can't be returned`
+            : `Inventory full — no room for what "${name}" replaces`,
+        );
+        onLog?.(
+          `Couldn't ${returning ? "return" : "place"} "${name}": inventory full`,
+        );
+        return false;
+      }
+    }
+
+    // Only a move that will happen gets a flight — a refused one (a full
+    // Modifier row, say) is known now, and has nowhere to fly to.
+    const created: Flight[] = [];
+    if (predicted.ok) {
+      // Measured before the move: the tile or box it leaves is gone after it.
+      const origin =
+        from ??
+        centre(
+          document.querySelector(returning ? toDeck(unitId) : toBank(unitId)),
+        );
+      if (origin) {
+        created.push({
+          id: nextFlightId.current++,
+          itemId: unit.itemId,
+          unitId,
+          from: origin,
+          target: returning ? toBank(unitId) : toDeck(unitId),
+        });
+      }
+      // Whatever a place knocks off flies back to the bank too — from its box,
+      // which the incoming card is about to take over.
+      if (!returning) {
+        for (const before of units) {
+          if (before.id === unitId || before.equippedSlot === null) continue;
+          const after = predicted.units.find((u) => u.id === before.id);
+          if (after?.equippedSlot !== null) continue;
+          const boxAt = centre(document.querySelector(toDeck(before.id)));
+          if (!boxAt) continue;
+          created.push({
+            id: nextFlightId.current++,
+            itemId: before.itemId,
+            unitId: before.id,
+            from: boxAt,
+            target: toBank(before.id),
+          });
+        }
+      }
+      // Set in the same tick as the optimistic move below, so each card's new
+      // spot renders hidden on its very first frame rather than flashing in
+      // before the flight gets there.
+      if (created.length > 0) setFlights((prev) => [...prev, ...created]);
+    }
+
     const result = await onToggleEquip(unitId, side);
     if (result.ok) {
       onLog?.(
         result.action === "equip" ? `Placed "${name}"` : `Returned "${name}"`,
       );
-    } else {
-      const verb = result.action === "equip" ? "place" : "return";
-      onLog?.(`Failed to ${verb} "${name}": ${result.error}`);
+      return true;
+    }
+    // Nothing moved (or it moved back), so there's nothing to fly to.
+    for (const f of created) endFlight(f.id);
+    if (!result.sent) setNotice(result.error);
+    const verb = result.action === "equip" ? "place" : "return";
+    onLog?.(`Failed to ${verb} "${name}": ${result.error}`);
+    return false;
+  };
+
+  /** The one deck box a card of `equipSlot` would land in if dropped now —
+   * both what the drop does and what the deck lights up while dragging, so
+   * the two can't disagree. `aimed` is the box under the cursor, if any.
+   *
+   *  - Modifiers go in the next free box, whichever one was aimed at; with
+   *    none free there's nowhere to land (the equip refuses it).
+   *  - Accessories go on the side aimed at if it's free. Aimed at a taken
+   *    side while the other is free, they take the free one — replacing an
+   *    Accessory means dropping on it with both sides full. Not aimed at all,
+   *    the first free side, else the left.
+   *  - Everything else has exactly one box. */
+  const landingBox = (
+    equipSlot: EquipSlot,
+    aimed: DeckBox | null,
+  ): DeckBox | null => {
+    if (equipSlot === "modifier") {
+      return (equipped.modifier?.length ?? 0) < MAX_MODIFIERS
+        ? { equipSlot, side: undefined }
+        : null;
+    }
+    if (equipSlot !== "ground") return { equipSlot, side: undefined };
+    const free = (s: GroundSide) => !equipped[groundSlot(s)];
+    const at = aimed?.equipSlot === "ground" ? aimed.side : undefined;
+    const side: GroundSide =
+      at && free(at)
+        ? at
+        : free("left")
+          ? "left"
+          : free("right")
+            ? "right"
+            : (at ?? "left");
+    return { equipSlot, side };
+  };
+
+  /** A bag card let go over the herzie: anywhere on it counts, a box of the
+   * wrong kind included, and it goes in its landingBox. A full Modifier row
+   * is refused by the equip itself (see handleEquip's notice). Anything that
+   * can't be worn — dice, charms, artefacts — does nothing. */
+  const handleDeckDrop = (
+    tile: BankTile,
+    over: DeckBox | null,
+    x: number,
+    y: number,
+  ) => {
+    const def = getItem(tile.itemId);
+    if (!def?.equipable || !def.equipSlot) return;
+    handleEquip(tile.unitIds[0], landingBox(def.equipSlot, over)?.side, {
+      x,
+      y,
+    });
+  };
+  deckDropRef.current = handleDeckDrop;
+
+  /** A worn card dragged out of the deck and let go off the herzie: it comes
+   * off, landing on the bag slot it was dropped on if that one is empty. */
+  const handleReturnDrop = async (
+    unitId: string,
+    overIndex: number | null,
+    x: number,
+    y: number,
+  ) => {
+    const unit = units.find((u) => u.id === unitId);
+    if (!unit) return;
+    const key = getItem(unit.itemId)?.stackable
+      ? `stack:${unit.itemId}`
+      : unitId;
+    if (overIndex !== null && slotOrder[overIndex] === null) {
+      preferredSlotRef.current = { key, index: overIndex };
+    }
+    const ok = await handleEquip(unitId, undefined, { x, y });
+    if (!ok) preferredSlotRef.current = null;
+  };
+  returnDropRef.current = handleReturnDrop;
+
+  /** The side a worn Accessory would move to if let go over `over` — the other
+   * Accessory box, or nothing. It's the only move there is within the deck:
+   * every other box takes a slot of its own, and Modifiers have no order to
+   * keep. */
+  const sideMoveTarget = (
+    unitId: string,
+    over: DeckBox | null,
+  ): GroundSide | null => {
+    const from = units.find((u) => u.id === unitId)?.equippedSlot;
+    if (from !== "ground_left" && from !== "ground_right") return null;
+    if (over?.equipSlot !== "ground" || !over.side) return null;
+    return groundSlot(over.side) === from ? null : over.side;
+  };
+
+  /** A worn card let go over the herzie. An Accessory dropped on the other
+   * Accessory box moves there, and whatever was in that box takes its old
+   * side — a swap. Anything else stays where it was.
+   *
+   * Two requests, both sent at once: equip_unit moves a worn copy by freeing
+   * its old slot and displacing the incumbent, so whichever lands first, the
+   * pair ends with the two sides exchanged. No bank check either: the card
+   * the first one displaces is back in the deck a moment later. */
+  const handleDeckMove = async (
+    unitId: string,
+    over: DeckBox | null,
+    x: number,
+    y: number,
+  ) => {
+    const to = sideMoveTarget(unitId, over);
+    const unit = units.find((u) => u.id === unitId);
+    if (!to || !unit) return;
+    const from: GroundSide = to === "left" ? "right" : "left";
+    const other = units.find((u) => u.equippedSlot === groundSlot(to));
+
+    const created: Flight[] = [
+      {
+        id: nextFlightId.current++,
+        itemId: unit.itemId,
+        unitId,
+        from: { x, y },
+        target: toDeck(unitId),
+      },
+    ];
+    const otherAt = other && centre(document.querySelector(toDeck(other.id)));
+    if (other && otherAt) {
+      created.push({
+        id: nextFlightId.current++,
+        itemId: other.itemId,
+        unitId: other.id,
+        from: otherAt,
+        target: toDeck(other.id),
+      });
+    }
+    setFlights((prev) => [...prev, ...created]);
+
+    const name = (u: ItemUnit) => getItem(u.itemId)?.name ?? "item";
+    const results = await Promise.all([
+      onToggleEquip(unitId, to, true),
+      ...(other ? [onToggleEquip(other.id, from, true)] : []),
+    ]);
+    const failed = results.find((r) => !r.ok);
+    if (!failed) {
+      onLog?.(
+        other
+          ? `Swapped "${name(unit)}" and "${name(other)}"`
+          : `Moved "${name(unit)}" to the ${to}`,
+      );
+      return;
+    }
+    for (const f of created) endFlight(f.id);
+    if (!failed.ok) {
+      if (!failed.sent) setNotice(failed.error);
+      onLog?.(`Failed to move "${name(unit)}": ${failed.error}`);
     }
   };
+  deckMoveRef.current = handleDeckMove;
 
   // Grid click places a copy directly — a no-op for non-equipable items
   // (e.g. plain collectible cards) rather than a doomed equip attempt. Also a
   // no-op right after a drag that moved the item to another slot, so dropping
   // it doesn't also place it (see suppressClickRef).
   //
-  // Never a *return*, unlike the Deck tab and the inspect overlay: every tile on
+  // Never a *return*, unlike the deck and the inspect overlay: every tile on
   // this grid is by construction a copy that isn't being worn, so a click here
   // can only mean "place this copy". If another copy of the same item is
   // already worn that's a swap — the worn one comes off, this one goes on — so
@@ -1132,9 +1503,12 @@ export function InventoryView({
   // (The effect that pads the arrangement to the new capacity is declared
   // earlier, so it has already run by the time this one reconciles.)
   useEffect(() => {
-    setSlotOrder((prev) =>
-      reconcileSlotOrder(prev, tileKeysJoined ? tileKeysJoined.split(",") : []),
-    );
+    const keys = tileKeysJoined ? tileKeysJoined.split(",") : [];
+    const preferred = preferredSlotRef.current;
+    setSlotOrder((prev) => reconcileSlotOrder(prev, keys, preferred));
+    if (preferred && keys.includes(preferred.key)) {
+      preferredSlotRef.current = null;
+    }
   }, [tileKeysJoined, capacity]);
 
   useEffect(() => {
@@ -1148,6 +1522,56 @@ export function InventoryView({
       // browsing quotas, etc.) — the next reconcile just re-derives it.
     }
   }, [slotOrder, herzie.friendCode]);
+
+  /** What the deck shows of a bag card being dragged: which cluster it
+   * belongs in, and the box it would land in. Only for cards that can be worn. */
+  const dragSource = dragVisual?.source;
+  const draggedDef = dragSource ? getItem(sourceItemId(dragSource)) : undefined;
+  // A worn card being dragged only has somewhere to land if it's an Accessory
+  // over the other Accessory box (see sideMoveTarget).
+  const deckMoveSide =
+    dragVisual && dragSource?.kind === "deck"
+      ? sideMoveTarget(dragSource.unitId, dragVisual.overDeck)
+      : null;
+  const deckDrag: DeckDragState | null =
+    dragVisual && draggedDef?.equipable && draggedDef.equipSlot
+      ? {
+          equipSlot: draggedDef.equipSlot,
+          landing:
+            dragSource?.kind === "bag"
+              ? landingBox(draggedDef.equipSlot, dragVisual.overDeck)
+              : deckMoveSide
+                ? { equipSlot: "ground", side: deckMoveSide }
+                : null,
+          inZone: dragVisual.inZone,
+        }
+      : null;
+  const draggingOutUnitId =
+    dragSource?.kind === "deck" ? dragSource.unitId : null;
+  /** A deck card is being carried over the bag, where letting go returns it. */
+  const returningOverBag = draggingOutUnitId !== null && !dragVisual?.inZone;
+
+  // Read off the copies, so each worn one counts at its own upgrade level.
+  const stats = getHerzieStatsFromUnits(units);
+  /** What the stats would become if the card being dragged were let go now:
+   * a bag card over the herzie going on, a deck card off it coming off. */
+  const statsPreview = (() => {
+    if (!dragVisual || !dragSource || !draggedDef) return null;
+    if (dragSource.kind === "bag") {
+      if (!deckDrag?.inZone || !deckDrag.landing) return null;
+      const out = applyEquip(
+        units,
+        dragSource.tile.unitIds[0],
+        "equip",
+        draggedDef.equipSlot,
+        deckDrag.landing.side,
+      );
+      return out.ok ? getHerzieStatsFromUnits(out.units) : null;
+    }
+    if (dragVisual.inZone) return null;
+    const out = applyEquip(units, dragSource.unitId, "unequip", undefined);
+    return out.ok ? getHerzieStatsFromUnits(out.units) : null;
+  })();
 
   // The overlay opens on an item id (a deep link from a notification), so it
   // shows the copy that id most plausibly means: the one worn, else the best.
@@ -1176,7 +1600,9 @@ export function InventoryView({
   return (
     <div className="flex h-full flex-col">
       <div className="z-50 mb-1 flex items-center justify-between">
-        <h1 className="text-ui-lg font-bold text-cyan">Inventory</h1>
+        {/* leading-5: a whole-pixel header height keeps the deck's pixel-art
+            icons below it on whole pixels (see OVERLAY_TITLE). */}
+        <h1 className="text-ui-lg leading-5 font-bold text-cyan">Herzie</h1>
         <Tooltip label={`${formatAmount(currency)} herzie coins`}>
           <div className="text-ui text-cyan">
             <Coin amount={currency} animate />
@@ -1184,8 +1610,10 @@ export function InventoryView({
         </Tooltip>
       </div>
 
-      {/* 3D render */}
-      <div className="min-h-0 flex-1">
+      {/* The herzie, with the deck on its left and its stats on its right —
+          so whatever goes on shows on the creature right there. The whole
+          area takes a dropped card. */}
+      <div {...{ [HERZIE_ZONE_ATTR]: "" }} className="relative min-h-0 flex-1">
         <div className="flex h-full items-center justify-center">
           <Herzie3D
             userId={herzie.friendCode}
@@ -1194,87 +1622,91 @@ export function InventoryView({
             paused={!active}
           />
         </div>
+        {/* Stats in the top right, the deck full width along the bottom. */}
+        <div className="pointer-events-none absolute top-1.5 right-1.5 z-10">
+          <StatsPanel stats={stats} preview={statsPreview} />
+        </div>
+        <div className="pointer-events-none absolute inset-x-0 bottom-1.5 z-10">
+          <DeckOverlay
+            equipped={equipped}
+            units={units}
+            flyingUnitIds={flyingUnitIds}
+            drag={deckDrag}
+            draggingUnitId={draggingOutUnitId}
+            onUnequip={(unitId) => {
+              // Dragged out and dropped straight back on its own box.
+              if (suppressClickRef.current) {
+                suppressClickRef.current = false;
+                return;
+              }
+              handleEquip(unitId);
+            }}
+            onDragStart={handleDeckPointerDown}
+            onPlaceRequest={setSlotPicker}
+          />
+        </div>
+        {notice && (
+          <div
+            role="status"
+            className="pointer-events-none absolute inset-x-0 top-2 z-20 flex justify-center"
+          >
+            <div className="border border-red/60 bg-bg-panel px-2 py-1 text-ui-sm text-red">
+              {notice}
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Item list — bottom ~48% */}
-      <div className="z-10 flex h-[44%] min-h-0 shrink-0 flex-col">
-        <div className="flex gap-1 border-b border-border">
-          <TabButton
-            active={tab === "cards"}
-            onClick={() => setTab("cards")}
-            colour="cyan"
-          >
-            Inventory
-          </TabButton>
-          <TabButton
-            active={tab === "deck"}
-            onClick={() => setTab("deck")}
-            colour="cyan"
-          >
-            Deck
-          </TabButton>
-          {/* Cards only — the Deck tab has fixed slots, so there's neither an
-              arrangement of its own to sort nor a bank to clear. Both live in
-              one wrapper so they read as a pair: it carries the `ml-auto` that
-              pushes them right, and it keeps the row's `gap-1` from opening a
-              third gap between two buttons that already pad themselves. */}
-          {tab === "cards" && (
-            <div className="ml-auto flex items-center">
-              <Tooltip
-                label={
-                  duplicatesCount > 0
-                    ? `Sell ${duplicatesCount} duplicate${duplicatesCount === 1 ? "" : "s"}, keeping the best of each`
-                    : "No duplicates to sell"
-                }
+      {/* Item grid — bottom ~44% */}
+      {/* 44%, rounded down to a whole pixel: the herzie area above takes the
+          rest, and the deck sits on its bottom edge — a fractional height
+          would put the deck's pixel-art icons between pixels (see
+          OVERLAY_TITLE). */}
+      <div className="z-10 flex h-[round(down,44%,1px)] min-h-0 shrink-0 flex-col">
+        {/* Both buttons live in one wrapper so they read as a pair, and the
+            wrapper's `ml-auto` pushes them right. */}
+        <div className="mb-0.5 flex items-center border-b border-border">
+          <span className="py-0.5 text-ui font-bold text-text-dim">Bag</span>
+          <div className="ml-auto flex items-center">
+            <Tooltip
+              label={
+                duplicatesCount > 0
+                  ? `Sell ${duplicatesCount} duplicate${duplicatesCount === 1 ? "" : "s"}, keeping the best of each`
+                  : "No duplicates to sell"
+              }
+            >
+              <button
+                type="button"
+                aria-label="Sell duplicates"
+                disabled={duplicatesCount === 0}
+                onClick={() => setSellDupesConfirm(true)}
+                className="flex cursor-pointer items-center border-none bg-transparent px-1.5 py-0.5 text-text-dim hover:text-cyan disabled:cursor-default disabled:opacity-40 disabled:hover:text-text-dim"
               >
-                <button
-                  type="button"
-                  aria-label="Sell duplicates"
-                  disabled={duplicatesCount === 0}
-                  onClick={() => setSellDupesConfirm(true)}
-                  // Same tight padding as the sort button beside it, so neither
-                  // icon grows the tab row.
-                  className="flex cursor-pointer items-center border-none bg-transparent px-1.5 py-0.5 text-text-dim hover:text-cyan disabled:cursor-default disabled:opacity-40 disabled:hover:text-text-dim"
-                >
-                  <DuplicatesIcon className="h-3.5 w-3.5" />
-                </button>
-              </Tooltip>
-              <Tooltip label="Quick sort">
-                <button
-                  type="button"
-                  aria-label="Quick sort"
-                  onClick={() =>
-                    setSlotOrder(sortSlotsByType(tiles, slotOrder.length))
-                  }
-                  // Tighter vertical padding than TabButton's, so the taller
-                  // icon doesn't grow the tab row: the flex row's default
-                  // stretch sizes this button to the tabs anyway, and
-                  // items-center then centres the icon against their text.
-                  className="flex cursor-pointer items-center border-none bg-transparent px-1.5 py-0.5 text-text-dim hover:text-cyan"
-                >
-                  {/* 14px rather than the item pips' 16px: these are chrome
-                    beside the tab labels, not content, and read better a
+                <DuplicatesIcon className="h-3.5 w-3.5" />
+              </button>
+            </Tooltip>
+            <Tooltip label="Quick sort">
+              <button
+                type="button"
+                aria-label="Quick sort"
+                onClick={() =>
+                  setSlotOrder(sortSlotsByType(tiles, slotOrder.length))
+                }
+                className="flex cursor-pointer items-center border-none bg-transparent px-1.5 py-0.5 text-text-dim hover:text-cyan"
+              >
+                {/* 14px rather than the item pips' 16px: these are chrome
+                    beside the bar's label, not content, and read better a
                     little smaller. A 16x16 PixelIcon only lands on whole
                     device pixels at 16px (or a multiple), so both glyphs are
                     drawn at 2px stroke weight to survive the fractional
                     scale — a 1px feature here would go visibly soft. */}
-                  <SortIcon className="h-3.5 w-3.5" />
-                </button>
-              </Tooltip>
-            </div>
-          )}
+                <SortIcon className="h-3.5 w-3.5" />
+              </button>
+            </Tooltip>
+          </div>
         </div>
 
-        {tab === "deck" ? (
-          <List className="min-h-0 flex-1">
-            <DeckRow
-              equipped={equipped}
-              units={units}
-              onUnequip={(unitId) => handleEquip(unitId)}
-              onPlaceRequest={setSlotPicker}
-            />
-          </List>
-        ) : loading ? (
+        {loading ? (
           <div className="pt-5 text-center text-ui text-text-dim">
             Loading...
           </div>
@@ -1282,7 +1714,13 @@ export function InventoryView({
           // Three rows fill the panel; past that (each Inventory Expansion adds
           // two rows) it scrolls, with List's edge fades as the only hint —
           // scrollbars are hidden app-wide.
-          <div ref={gridViewportRef} className="min-h-0 flex-1">
+          <div
+            ref={gridViewportRef}
+            className={cn(
+              "min-h-0 flex-1",
+              returningOverBag && "ring-1 ring-inset ring-cyan/50",
+            )}
+          >
             {/* Each row is a third of the visible height, in CSS, so the rows
                 are right on the very first frame — no measuring, and nothing to
                 jump when the view is shown. The content is `rows / 3` viewports
@@ -1320,12 +1758,20 @@ export function InventoryView({
                       key={`slot-${i}`}
                       index={i}
                       itemId={tile.itemId}
-                      qty={tile.unitIds.length}
+                      unitIds={tile.unitIds}
                       level={tile.upgradeLevel}
                       isLastCol={isLastCol}
                       isLastRow={isLastRow}
-                      isDragging={dragVisual?.index === i}
-                      isDragOver={dragVisual?.overIndex === i}
+                      isDragging={
+                        dragSource?.kind === "bag" && dragSource.index === i
+                      }
+                      // A card from the deck can only be dropped on an empty
+                      // slot — dropped on a full one it finds its own.
+                      isDragOver={
+                        dragSource?.kind === "bag" &&
+                        dragVisual?.overIndex === i
+                      }
+                      flying={tile.unitIds.some((id) => flyingUnitIds.has(id))}
                       equipped={equipped}
                       onPlace={() => handleGridClick(tile)}
                       onSellRequest={(x, y) =>
@@ -1340,6 +1786,8 @@ export function InventoryView({
           </div>
         )}
       </div>
+
+      <ItemFlights flights={flights} onDone={endFlight} />
 
       {inspectItem && inspected && (
         <ItemInspectOverlay
@@ -1586,7 +2034,6 @@ export function InventoryView({
 
       {dragVisual &&
         (() => {
-          const draggedDef = getItem(dragVisual.itemId);
           if (!draggedDef) return null;
           return createPortal(
             <div
