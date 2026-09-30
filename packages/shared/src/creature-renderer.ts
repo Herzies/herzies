@@ -1971,6 +1971,38 @@ function renderCreatureFrame(
 const frameCache = new Map<string, FrameData[]>();
 
 /**
+ * An array of `length` frames, each rendered the first time it's read and
+ * kept from then on. Rendering a whole loop up front cost 40–90ms per new
+ * look — every equip or unequip stalled on it before the herzie could show
+ * the change — when the first frame alone is under a millisecond. Lazily, the
+ * rest cost one frame's render per animation tick, the first time round.
+ *
+ * Still a real array (length, indexing, iteration all work), so callers and
+ * the cache see no difference.
+ */
+function lazyFrames(
+  length: number,
+  render: (i: number) => FrameData,
+): FrameData[] {
+  const frames = new Array<FrameData>(length);
+  for (let i = 0; i < length; i++) {
+    Object.defineProperty(frames, i, {
+      configurable: true,
+      enumerable: true,
+      get() {
+        const frame = render(i);
+        Object.defineProperty(frames, i, {
+          value: frame,
+          enumerable: true,
+        });
+        return frame;
+      },
+    });
+  }
+  return frames;
+}
+
+/**
  * Idle or dance loop, the dance loop optionally as a Greedy Spirit hop
  * variant. With a variant, frames outside its hops are the plain loop's own
  * objects, so a variant costs only the handful of frames it re-renders. The
@@ -2016,7 +2048,7 @@ function generateLoopFrames(
   const scheme = colorSchemeFor(equipped, params);
 
   const length = dancing ? DANCE_FRAMES : IDLE_FRAMES;
-  const frames = Array.from({ length }, (_, i) => {
+  const frames = lazyFrames(length, (i) => {
     if (plain && !isSpiritHopFrame(spiritHopVariant as number, i)) {
       return plain[i];
     }
@@ -2086,7 +2118,7 @@ export function generateRotationFrames(
   const colors = buildColorTriplet(CREATURE_PALETTE[params.colorIndex]);
   const scheme = colorSchemeFor(equipped, params);
 
-  const frames = Array.from({ length: frameCount }, (_, i) =>
+  const frames = lazyFrames(frameCount, (i) =>
     renderCreatureFrame(
       spheres,
       (i / frameCount) * Math.PI * 2,
