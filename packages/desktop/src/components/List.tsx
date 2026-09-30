@@ -57,7 +57,12 @@ export function List({
   // `absolute`) collapses to zero height whenever that sizing doesn't come
   // from a flex parent stretching it (e.g. a bare `max-h-*` caller).
   return (
-    <div ref={scrollRef} className={cn("overflow-y-auto", className)}>
+    // cursor-default: a list's plain text rows aren't for selecting, so no
+    // I-beam over them; rows that do something set their own pointer.
+    <div
+      ref={scrollRef}
+      className={cn("cursor-default overflow-y-auto", className)}
+    >
       <div
         className={cn(
           "pointer-events-none sticky top-0 -mb-4 h-4 bg-gradient-to-b from-bg-panel to-transparent transition-opacity",

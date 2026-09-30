@@ -34,7 +34,6 @@ import {
   type EventNotification,
   type FriendRequestSummary,
   filterDroppablePool,
-  getDailyCraving,
   getHerzieStats,
   getHerzieStatsFromUnits,
   getItem,
@@ -44,7 +43,6 @@ import {
   type ItemUnit,
   isModifierEquipped,
   MAX_DROP_ROLLS_PER_SYNC,
-  matchesCraving,
   NON_DROPPABLE_ITEM_IDS,
   normalizeEquipped,
   normalizeUnits,
@@ -55,7 +53,9 @@ import {
   recordGenreMinutes,
   type SecretTrackConfig,
   type Stage,
+  scaledBonus,
   stageForLevel,
+  xpBonusConfig,
 } from "./game-rules.ts";
 
 /** Minimum gap between two *billable* syncs, measured from `last_billed_at`.
@@ -228,6 +228,14 @@ interface SyncContext {
     bonus: number;
     schedule: MultiplierSchedule | null;
   }[];
+  /** The built-in bonuses' tunable rules (00091). Absent on a database that
+   * predates that migration, which reads as the old hard-coded values. */
+  xp_bonuses?: {
+    id: string;
+    enabled: boolean;
+    amount: number;
+    cap: number | null;
+  }[];
   pending_drops: { id: string; item_id: string; dropped_at: string }[];
   /**
    * The player's owned copies (item_units, 00079). Absent on a database that
@@ -358,6 +366,8 @@ export async function processSync(
   }
 
   // 2. Update daily streak (if user is listening)
+  const xpBonuses = xpBonusConfig(ctx.xp_bonuses);
+
   if (minutesListened > 0 && herzie.streakLastDate !== today) {
     const yesterday = new Date(now);
     yesterday.setDate(yesterday.getDate() - 1);
@@ -374,11 +384,14 @@ export async function processSync(
     }
     herzie.streakLastDate = today;
 
-    if (herzie.streakDays > 1) {
+    // The streak still counts while its bonus is off; it just isn't
+    // announced as paying anything.
+    const paying = scaledBonus(xpBonuses.streak, herzie.streakDays);
+    if (herzie.streakDays > 1 && paying > 0) {
       notifications.push({
         type: "info",
         title: "Streak!",
-        message: `${herzie.streakDays}-day streak! +${herzie.streakDays}% XP`,
+        message: `${herzie.streakDays}-day streak! +${Math.round(paying * 100)}% XP`,
       });
     }
   }
@@ -390,27 +403,37 @@ export async function processSync(
     .filter((m) => !m.schedule || isScheduleActive(m.schedule, now))
     .map((m) => ({ name: m.name, bonus: m.bonus }));
 
+  // The built-in bonuses below follow xp_bonuses (tunable in the dev admin).
   // Add BOOST if active (stored on the herzie, not in multipliers table)
   const allMultipliers = [...serverMultipliers];
-  if (herzie.boostUntil && now.getTime() < herzie.boostUntil) {
-    allMultipliers.push({ name: "BOOST", bonus: 10.0 });
+  if (
+    xpBonuses.boost.enabled &&
+    herzie.boostUntil &&
+    now.getTime() < herzie.boostUntil
+  ) {
+    allMultipliers.push({ name: "BOOST", bonus: xpBonuses.boost.amount });
   }
 
-  // Add streak bonus (1% per day)
-  if (herzie.streakDays > 0) {
+  // Streak bonus (by default 1% per day, uncapped)
+  const streakBonus = scaledBonus(xpBonuses.streak, herzie.streakDays);
+  if (streakBonus > 0) {
     allMultipliers.push({
       name: `${herzie.streakDays}-day streak`,
-      bonus: herzie.streakDays * 0.01,
+      bonus: streakBonus,
     });
   }
 
-  // Good Eye Sniper bonus (2% XP per song hunt won, capped at 30%). Added on
+  // Good Eye Sniper bonus (by default 2% XP per song hunt won, capped at
+  // 30%). Added on
   // every sync while equipped, like the boost and streak above — `multipliers`
   // is also what the client displays, and gating this on credited minutes made
   // it vanish on every cooldown-throttled sync (the desktop syncs every 5s
   // against an 8s billing cooldown), so it blinked in and out of the home
   // view. The win-count RPC only runs for herzies wearing the card.
-  if (hasGoodEyeSniperEquipped(row.equipped)) {
+  if (
+    xpBonuses.good_eye_sniper.enabled &&
+    hasGoodEyeSniperEquipped(row.equipped)
+  ) {
     const { data: songHuntWins, error: sniperError } = await admin.rpc(
       "count_song_hunt_wins",
       { p_user_id: userId },
@@ -418,7 +441,10 @@ export async function processSync(
     // Skip the bonus (rather than treating a query error as 0 wins) so a
     // transient RPC failure can't silently zero out an earned bonus.
     if (!sniperError) {
-      const bonus = goodEyeSniperBonus(songHuntWins as number);
+      const bonus = goodEyeSniperBonus(
+        songHuntWins as number,
+        xpBonuses.good_eye_sniper,
+      );
       if (bonus > 0) {
         allMultipliers.push({ name: "Good Eye Sniper", bonus });
       }
@@ -434,8 +460,6 @@ export async function processSync(
   if (minutesListened > 0) {
     const classifiedGenres =
       genres.length > 0 ? classifyGenre(genres) : classifyGenre(["pop"]);
-    const craving = getDailyCraving(herzie.id);
-    const isCraving = genres.length > 0 && matchesCraving(genres, craving);
 
     let minutes = minutesListened;
 
@@ -468,12 +492,7 @@ export async function processSync(
     }
     // Spotify source: no caps — deduplication handled by spotify_play_log
 
-    const xp = calculateXpGain(
-      minutes,
-      herzie.friendCodes.length,
-      isCraving,
-      allMultipliers,
-    );
+    const xp = calculateXpGain(minutes, allMultipliers);
 
     const events = applyXp(herzie, xp);
     herzie.totalMinutesListened += minutes;

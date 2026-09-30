@@ -94,7 +94,7 @@ export default function Home() {
         <TextAndMedia
           preTitle="Listen"
           title="Your Herzie is unique"
-          description="Every Herzie is different. Your Herzie grows with every track you listen to. Daily streaks, and friends give bonus XP."
+          description="Every Herzie is different. Your Herzie grows with every track you listen to, and daily streaks give bonus XP."
           media={<DesktopHomePreview />}
           position="left"
         />

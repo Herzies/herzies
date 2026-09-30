@@ -17,8 +17,7 @@ export default function AboutPage() {
         <p className="text-[13px]">
           Herzies is your digital pet that grows by listening to music. Hatch
           your herzie, play your favourite tracks, and watch it evolve through
-          three stages. Every genre counts, friends give bonus XP, and daily
-          cravings keep things interesting.
+          three stages. Every genre counts, and daily streaks give bonus XP.
         </p>
         <p className="text-[13px]">
           Collect cards from limited-time events, build daily listening streaks

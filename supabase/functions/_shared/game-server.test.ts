@@ -225,6 +225,29 @@ Deno.test("adds streak and BOOST multipliers on top of the server ones", async (
   assertEquals(names.includes("4-day streak"), true);
 });
 
+Deno.test("xp_bonuses from sync_context can switch off and retune the built-ins", async () => {
+  const { admin } = fakeAdmin(
+    context({
+      herzie: herzieRow({
+        streak_days: 4,
+        boost_until: Date.now() + 60_000,
+      }),
+      xp_bonuses: [
+        { id: "boost", enabled: false, amount: 10, cap: null },
+        { id: "streak", enabled: true, amount: 0.05, cap: 0.1 },
+      ],
+    }),
+  );
+
+  const out = await processSync(admin, USER, null, 0, []);
+  const names = out.multipliers.map((m) => m.name);
+  const streak = out.multipliers.find((m) => m.name === "4-day streak");
+
+  assertEquals(names.includes("BOOST"), false);
+  // 4 days x 5% = 20%, capped at 10%.
+  assertEquals(Math.round((streak?.bonus ?? 0) * 100), 10);
+});
+
 Deno.test("throws when sync_context finds no herzie", async () => {
   const { admin } = fakeAdmin(context({ herzie: null }));
   let threw = false;

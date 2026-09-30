@@ -10,6 +10,7 @@ import { cn } from "../lib/utils";
 import { SegmentBar } from "./SegmentBar";
 import { SpeechBubble, useChatter } from "./SpeechBubble";
 import { VisitorHelp, type VisitorReward } from "./VisitorHelp";
+import { VISITOR_THEMES } from "./VisitorRowTheme";
 
 /**
  * Time left, to the second.
@@ -366,6 +367,7 @@ export function BossFightHelp({ event }: { event: GameEvent }) {
   return (
     <VisitorHelp
       label="What is a boss fight?"
+      colour={VISITOR_THEMES.boss_fight.accent}
       text={
         <>
           Defeat the boss and receive rewards. You&apos;ll have to work together

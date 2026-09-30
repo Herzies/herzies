@@ -1,7 +1,7 @@
 import type { createAdminClient } from "@/lib/supabase-admin";
 
 /** Maximum number of friends a herzie may have. */
-export const MAX_FRIENDS = 20;
+export const MAX_FRIENDS = 50;
 
 /**
  * Mark a friend request accepted and create the bidirectional friendship.

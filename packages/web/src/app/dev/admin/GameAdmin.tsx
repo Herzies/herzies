@@ -32,11 +32,12 @@ import {
 } from "./event-fields";
 import { NotificationsPanel } from "./NotificationsPanel";
 import { SongPoolPanel } from "./SongPoolPanel";
+import { XpPanel } from "./XpPanel";
 
 const SECRET_KEY = "herzies-admin-secret";
 const RARITIES = ["common", "uncommon", "rare", "legendary", "mythic"] as const;
 
-type AdminTab = "items" | "grant" | "events" | "notifications";
+type AdminTab = "items" | "grant" | "events" | "xp" | "notifications";
 
 type SongHuntHintForm = {
   text: string;
@@ -2122,6 +2123,11 @@ export function GameAdmin() {
         </div>
       </section>
 
+      <section className={tab === "xp" ? undefined : "hidden"}>
+        <h2 className="text-sm text-cyan mb-4">xp multipliers</h2>
+        <XpPanel secret={secret} />
+      </section>
+
       <section className={tab === "notifications" ? undefined : "hidden"}>
         <h2 className="text-sm text-cyan mb-4">notifications</h2>
         <NotificationsPanel events={events} series={series} now={now} />
@@ -2141,6 +2147,7 @@ function AdminTabBar({
     { id: "items", label: "items" },
     { id: "grant", label: "grant item" },
     { id: "events", label: "events" },
+    { id: "xp", label: "xp" },
     { id: "notifications", label: "notifications" },
   ];
 

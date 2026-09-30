@@ -1,5 +1,6 @@
 import { getItem, RARITY_COLORS as ITEM_RARITY_COLORS } from "@herzies/shared";
 import { ItemTypeIcon } from "./icons/ItemTypeIcon";
+import { PixelIcon } from "./icons/PixelIcon";
 import { HoverPreview } from "./Tooltip";
 
 export type VisitorReward = {
@@ -10,8 +11,30 @@ export type VisitorReward = {
   note?: string;
 };
 
+/** A pixel speech bubble with a "?" in it: the visitor has something to
+ * tell you. 0 is the outline and the "?", 1 the bubble's dark fill. */
+const BUBBLE = [
+  "................",
+  "..000000000000..",
+  ".01111111111110.",
+  ".01111000011110.",
+  ".01110111101110.",
+  ".01111111101110.",
+  ".01111110011110.",
+  ".01111101111110.",
+  ".01111101111110.",
+  ".01111111111110.",
+  ".01111101111110.",
+  ".01111111111110.",
+  "..010000000000..",
+  "..00............",
+  "..0.............",
+  "................",
+];
+const BUBBLE_FILL = "#0b0e16";
+
 /**
- * The "?" in a visitor's header: what the visit is about and what it pays.
+ * The "?" bubble in a visitor's header: what the visit is about and what it pays.
  * Every visitor puts its rewards here rather than in its own panel, so they
  * read the same way across Town.
  *
@@ -24,11 +47,14 @@ export function VisitorHelp({
   text,
   rewards = [],
   label,
+  colour,
 }: {
   text: React.ReactNode;
   rewards?: VisitorReward[];
   /** aria-label for the "?" button. */
   label: string;
+  /** The visitor's colour, for the bubble. */
+  colour: string;
 }) {
   const shown = rewards.flatMap((r) => {
     const item = getItem(r.itemId);
@@ -71,10 +97,14 @@ export function VisitorHelp({
     >
       <button
         type="button"
-        className="cursor-help border-none bg-transparent text-ui text-text-dim hover:text-cyan"
+        className="flex cursor-help border-none bg-transparent p-0 transition-[filter] duration-100 hover:brightness-150"
         aria-label={label}
       >
-        ?
+        <PixelIcon
+          grid={BUBBLE}
+          palette={[colour, BUBBLE_FILL]}
+          className="h-5 w-5"
+        />
       </button>
     </HoverPreview>
   );

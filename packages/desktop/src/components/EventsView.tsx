@@ -161,9 +161,13 @@ export function EventsView({
   equipped,
   currency = 0,
   onLog,
+  rootKey = 0,
 }: {
   /** Tab stays mounted but hidden; only poll while user is on Events. */
   eventsTabVisible: boolean;
+  /** Bumped when the Town tab is re-selected while already on it: back to
+   * the visitor list. */
+  rootKey?: number;
   /** Debug: render the previous hunt as if it were live, to preview the active-event UI. */
   debugForceActive?: boolean;
   /** Debug: render a fixture boss, so the panel can be reviewed without a live one. */
@@ -190,7 +194,18 @@ export function EventsView({
   const [previousLoaded, setPreviousLoaded] = useState(false);
   const [previousKey, setPreviousKey] = useState(0);
   const liveIdsRef = useRef<string | null>(null);
+
   const [inspectOverlay, setInspectOverlay] = useState<"item" | null>(null);
+
+  // Re-selecting Town closes whichever visitor is open. Compared against the
+  // last key rather than run on mount, so it only ever fires on a bump.
+  const rootKeyRef = useRef(rootKey);
+  useEffect(() => {
+    if (rootKeyRef.current === rootKey) return;
+    rootKeyRef.current = rootKey;
+    setSelected(null);
+    setInspectOverlay(null);
+  }, [rootKey]);
   const [huntTab, setHuntTab] = useState<"clues" | "finders">("clues");
   const focused = useWindowFocused();
 
@@ -727,6 +742,7 @@ export function EventsView({
       action={
         <VisitorHelp
           label="What is a song hunt?"
+          colour={VISITOR_THEMES.song_hunt.accent}
           text={`${VISITORS.song_hunt.name} is looking for a song. Work it out from the clues and play it — the first ${config.maxClaims} to find it get a reward.`}
           rewards={[
             {
@@ -767,7 +783,7 @@ export function EventsView({
           on the Finders tab) and the finders sit over them at the same
           height, scrolling if they run longer — so switching tabs never
           moves the tab row. */}
-      <div className="mt-2 min-h-0 overflow-y-auto">
+      <div className="mt-2 min-h-0 cursor-default overflow-y-auto">
         <div className="relative">
           <div className={huntTab === "clues" ? undefined : "invisible"}>
             {config.hints.map((hint, i) => (
@@ -926,7 +942,9 @@ function EventCardRow({
         <div
           className={cn(
             "truncate text-ui",
-            theme ? "text-white" : "text-text group-hover:text-cyan",
+            theme ? "text-white" : "text-text",
+            // Only a row that opens something reacts to hover.
+            !theme && onOpen && "group-hover:text-cyan",
           )}
         >
           {card.title}

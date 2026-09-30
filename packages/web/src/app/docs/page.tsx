@@ -37,7 +37,7 @@ const commands = [
   },
   {
     name: "herzies friends add <code>",
-    description: "Add a friendzie by their code. Friends give bonus XP.",
+    description: "Add a friendzie by their code.",
   },
   {
     name: "herzies friends remove <code>",

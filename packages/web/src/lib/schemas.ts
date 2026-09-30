@@ -195,14 +195,31 @@ export const adminItemSchema = z.object({
     .optional(),
 });
 
+/** A recurring window for a multiplier (00005): these days, these hours. */
+const multiplierScheduleSchema = z.object({
+  days: z.array(z.number().int().min(0).max(6)).min(1),
+  hourStart: z.number().int().min(0).max(23),
+  hourEnd: z.number().int().min(1).max(24),
+});
+
 export const adminMultiplierSchema = z.object({
   id: z.string().optional(),
   name: z.string().min(1),
-  bonus: z.number(),
+  // Matches the table's check constraint.
+  bonus: z.number().positive(),
   active: z.boolean().optional(),
   startsAt: z.string().min(1),
   endsAt: z.string().min(1),
-  schedule: z.string().nullable().optional(),
+  // An object, stored as jsonb — processSync reads `schedule.days` off it.
+  // Omitted on an update leaves the stored schedule alone; null clears it.
+  schedule: multiplierScheduleSchema.nullable().optional(),
+});
+
+export const adminXpBonusSchema = z.object({
+  id: z.enum(["boost", "streak", "good_eye_sniper"]),
+  enabled: z.boolean(),
+  amount: z.number().positive(),
+  cap: z.number().positive().nullable(),
 });
 
 export const checkoutSchema = z.object({
