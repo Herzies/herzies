@@ -2444,8 +2444,7 @@ export const ITEMS: ItemDef[] = [
   {
     id: "power-dice-1",
     name: "Power Dice 1",
-    description:
-      "Upgrade cards +1 to +3.",
+    description: "Upgrade cards +1 to +3.",
     rarity: "rare",
     frames: powerDiceFrames,
     dice: true,
@@ -2458,8 +2457,7 @@ export const ITEMS: ItemDef[] = [
   {
     id: "power-dice-2",
     name: "Power Dice 2",
-    description:
-      "Upgrade cards +4 to +6.",
+    description: "Upgrade cards +4 to +6.",
     rarity: "legendary",
     frames: powerDice2Frames,
     dice: true,
@@ -2469,8 +2467,7 @@ export const ITEMS: ItemDef[] = [
   {
     id: "power-dice-3",
     name: "Power Dice 3",
-    description:
-      "Upgrade cards +7 to +10.",
+    description: "Upgrade cards +7 to +10.",
     rarity: "mythic",
     frames: powerDice3Frames,
     dice: true,
