@@ -107,6 +107,10 @@ function App() {
   // stays.
   useTradeRequests(rawState.isOnline);
   const [view, setView] = useState<View>("home");
+  // Bumped when the player re-selects the tab they're already on (click or
+  // shortcut), so a view that's drilled into a sub-screen — Town → George,
+  // Social → a profile — goes back to its top level.
+  const [rootKeys, setRootKeys] = useState<Partial<Record<View, number>>>({});
   const [tradeTarget, setTradeTarget] = useState<string | null>(null);
   const [incomingTradeId, setIncomingTradeId] = useState<string | null>(null);
   const [activityLog, setActivityLog] = useState<
@@ -472,6 +476,9 @@ function App() {
         setTradeTarget(null);
       }
       setSelfProfile(null);
+      if (v === view) {
+        setRootKeys((keys) => ({ ...keys, [v]: (keys[v] ?? 0) + 1 }));
+      }
       setView(v);
       return true;
     },
@@ -771,6 +778,7 @@ function App() {
               onTabChange={setFriendsTab}
               onActivity={addLog}
               active={view === "friends"}
+              rootKey={rootKeys.friends ?? 0}
             />
           </div>
         )}
@@ -802,6 +810,7 @@ function App() {
               bankExpansions={state.bankExpansions}
               onLog={addLog}
               active={view === "inventory"}
+              rootKey={rootKeys.inventory ?? 0}
             />
           </div>
         )}
@@ -814,6 +823,7 @@ function App() {
         >
           <EventsView
             eventsTabVisible={view === "events"}
+            rootKey={rootKeys.events ?? 0}
             debugForceActive={hasActiveEventOverride}
             debugForceBoss={debugBossOverride}
             debugForceMerchant={debugMerchantOverride}

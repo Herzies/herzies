@@ -3,7 +3,7 @@ import { SpeechBubble, useChatter } from "./SpeechBubble";
 
 /** Orphiez's look: a fixed seed like George's, in the teal skin, with
  * headphones on — he's listening for it everywhere. */
-const ORPHIEZ_EQUIPPED = {
+export const ORPHIEZ_EQUIPPED = {
   head: "headphones",
   color: "thanks-for-all-the-fish",
 };

@@ -48,6 +48,7 @@ export function FriendsView({
   onTabChange,
   onActivity,
   active = true,
+  rootKey = 0,
 }: {
   herzie: Herzie;
   friends: Record<string, HerzieProfile>;
@@ -66,6 +67,9 @@ export function FriendsView({
    * so it survives navigating away — without this gate the polls below kept
    * running from behind the Home screen, fetching data nobody could see. */
   active?: boolean;
+  /** Bumped when the Social tab is re-selected while already on it: back
+   * out of an open profile. */
+  rootKey?: number;
 }) {
   const [message, setMessage] = useState("");
   const [selectedFriend, setSelectedFriend] = useState<HerzieProfile | null>(
@@ -84,6 +88,16 @@ export function FriendsView({
     null,
   );
   const [friendMenu, setFriendMenu] = useState<FriendMenuTarget | null>(null);
+
+  // Compared against the last key rather than run on mount, so a profile
+  // opened from chat on first render isn't closed straight away.
+  const rootKeyRef = useRef(rootKey);
+  useEffect(() => {
+    if (rootKeyRef.current === rootKey) return;
+    rootKeyRef.current = rootKey;
+    setSelectedFriend(null);
+    setFriendMenu(null);
+  }, [rootKey]);
   const focused = useWindowFocused();
 
   const friendCodesKey = herzie.friendCodes.join(",");

@@ -2,11 +2,11 @@ import { useEffect, useState } from "react";
 
 /** A coin turning on its vertical axis, one glyph per step: face-on, then
  * narrowing to the edge and back. */
-const SPIN = ["O", "0", "o", "|", "o", "0"];
+export const COIN_SPIN = ["O", "0", "o", "|", "o", "0"];
 const SPIN_STEP_MS = 140;
 
-const GOLD = "#F5C518";
-const SHINE = "#FFF4B8";
+export const COIN_GOLD = "#F5C518";
+export const COIN_SHINE = "#FFF4B8";
 
 /** Where each coin hangs, as % of the stage, ringed around George rather
  * than over his face. Per coin: size (px), bob delay/duration (s), and a
@@ -40,7 +40,7 @@ export function FloatingCoins({ paused }: { paused: boolean }) {
   return (
     <div className="pointer-events-none absolute inset-0" aria-hidden="true">
       {COINS.map((coin) => {
-        const glyph = SPIN[(step + coin.spin) % SPIN.length];
+        const glyph = COIN_SPIN[(step + coin.spin) % COIN_SPIN.length];
         return (
           <span
             key={`${coin.x}-${coin.y}`}
@@ -51,8 +51,8 @@ export function FloatingCoins({ paused }: { paused: boolean }) {
               fontSize: coin.size,
               lineHeight: 1,
               // Face-on catches the light; edge-on is the darker rim.
-              color: glyph === "O" ? SHINE : GOLD,
-              textShadow: `0 0 4px ${GOLD}66`,
+              color: glyph === "O" ? COIN_SHINE : COIN_GOLD,
+              textShadow: `0 0 4px ${COIN_GOLD}66`,
               animation: `coin-float ${coin.dur}s ease-in-out ${coin.delay}s infinite`,
               animationPlayState: paused ? "paused" : "running",
             }}

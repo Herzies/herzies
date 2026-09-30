@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   applyXp,
   calculateXpGain,
+  DEFAULT_XP_BONUSES,
   goodEyeSniperBonus,
   levelProgress,
+  scaledBonus,
   stageForLevel,
   totalXpForLevel,
+  xpBonusConfig,
   xpForLevel,
   xpToNextLevel,
 } from "./leveling.js";
@@ -122,36 +125,25 @@ describe("stageForLevel", () => {
 
 describe("calculateXpGain", () => {
   it("returns base XP for 1 minute with no bonuses", () => {
-    expect(calculateXpGain(1, 0, false, [])).toBe(10);
+    expect(calculateXpGain(1, [])).toBe(10);
   });
 
   it("scales linearly with minutes", () => {
-    expect(calculateXpGain(5, 0, false, [])).toBe(50);
-  });
-
-  it("applies craving bonus (1.5x)", () => {
-    expect(calculateXpGain(1, 0, true, [])).toBe(15);
-  });
-
-  it("applies friend bonus capped at 20 friends", () => {
-    const with10 = calculateXpGain(1, 10, false, []);
-    const with20 = calculateXpGain(1, 20, false, []);
-    const with30 = calculateXpGain(1, 30, false, []); // capped at 20
-    expect(with10).toBe(10 * (1 + 10 * 0.02));
-    expect(with20).toBe(10 * (1 + 20 * 0.02));
-    expect(with30).toBe(with20); // cap at 20
+    expect(calculateXpGain(5, [])).toBe(50);
   });
 
   it("applies multipliers", () => {
     const multipliers = [{ name: "test", bonus: 1.0 }]; // +100%
-    const xp = calculateXpGain(1, 0, false, multipliers);
+    const xp = calculateXpGain(1, multipliers);
     expect(xp).toBe(20); // 10 * (1 + 1.0)
   });
 
-  it("stacks craving and multipliers", () => {
-    const multipliers = [{ name: "test", bonus: 1.0 }];
-    const xp = calculateXpGain(1, 0, true, multipliers);
-    expect(xp).toBe(30); // 10 * 1.5 craving * 2.0 multiplier
+  it("adds multipliers together rather than compounding them", () => {
+    const multipliers = [
+      { name: "a", bonus: 0.5 },
+      { name: "b", bonus: 0.5 },
+    ];
+    expect(calculateXpGain(1, multipliers)).toBe(20); // 10 * (1 + 0.5 + 0.5)
   });
 });
 
@@ -217,5 +209,38 @@ describe("applyXp", () => {
     const result = applyXp(h, xpForLevel(6));
     expect(result.leveledUp).toBe(true);
     expect(result.evolved).toBe(false);
+  });
+});
+
+describe("xpBonusConfig", () => {
+  it("uses the defaults when the database sends nothing", () => {
+    expect(xpBonusConfig(undefined)).toEqual(DEFAULT_XP_BONUSES);
+  });
+
+  it("takes rows over the defaults and ignores bad ones", () => {
+    const config = xpBonusConfig([
+      { id: "streak", enabled: false, amount: 0.05, cap: 0.5 },
+      { id: "boost", enabled: true, amount: 0, cap: null }, // amount must be > 0
+      { id: "unknown", enabled: true, amount: 1, cap: null },
+    ]);
+    expect(config.streak).toEqual({ enabled: false, amount: 0.05, cap: 0.5 });
+    expect(config.boost).toEqual(DEFAULT_XP_BONUSES.boost);
+    expect(Object.keys(config).sort()).toEqual([
+      "boost",
+      "good_eye_sniper",
+      "streak",
+    ]);
+  });
+});
+
+describe("scaledBonus", () => {
+  it("scales by count and respects the cap", () => {
+    const rule = { enabled: true, amount: 0.1, cap: 0.25 };
+    expect(scaledBonus(rule, 2)).toBeCloseTo(0.2);
+    expect(scaledBonus(rule, 5)).toBeCloseTo(0.25);
+  });
+
+  it("is zero when disabled", () => {
+    expect(scaledBonus({ enabled: false, amount: 0.1, cap: null }, 5)).toBe(0);
   });
 });

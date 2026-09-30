@@ -136,6 +136,22 @@
   animation: drop-float 2.2s ease-in-out infinite;
 }
 
+/* A visitor's Town portrait idling while they're in town: a one-pixel hop
+   with no easing, so it moves like a sprite rather than floating. */
+@keyframes visitor-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-1px);
+  }
+}
+
+@utility animate-visitor-bob {
+  animation: visitor-bob 1.2s steps(1, end) infinite;
+}
+
 @layer base {
   *,
   *::before,

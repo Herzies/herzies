@@ -42,16 +42,9 @@ const BASE_XP_PER_MINUTE = 10;
  */
 export function calculateXpGain(
   minutes: number,
-  friendCount: number,
-  isCravingGenre: boolean,
   multipliers: ActiveMultiplier[],
 ): number {
   let xp = minutes * BASE_XP_PER_MINUTE;
-  const friendBonus = Math.min(friendCount, 20) * 0.02;
-  xp *= 1 + friendBonus;
-  if (isCravingGenre) {
-    xp *= 1.5;
-  }
   if (multipliers.length > 0) {
     const totalBonus = multipliers.reduce((sum, m) => sum + m.bonus, 0);
     xp *= 1 + totalBonus;
@@ -59,15 +52,65 @@ export function calculateXpGain(
   return xp;
 }
 
-/** +2% XP per song hunt won while Good Eye Sniper is equipped, capped at +30% (15 wins). */
-const GOOD_EYE_SNIPER_XP_PER_WIN = 0.02;
-const GOOD_EYE_SNIPER_XP_CAP = 0.3;
+/** One built-in XP bonus's formula, tunable from the dev admin
+ * (public.xp_bonuses, 00091). `amount` is the flat bonus (boost), or the
+ * bonus per streak day / per song hunt won; `cap` bounds the total. */
+export type XpBonusRule = {
+  enabled: boolean;
+  amount: number;
+  cap: number | null;
+};
 
-export function goodEyeSniperBonus(songHuntWins: number): number {
-  return Math.min(
-    songHuntWins * GOOD_EYE_SNIPER_XP_PER_WIN,
-    GOOD_EYE_SNIPER_XP_CAP,
-  );
+export type XpBonusId = "boost" | "streak" | "good_eye_sniper";
+export type XpBonusConfig = Record<XpBonusId, XpBonusRule>;
+
+/** What the game used before these became editable — and still uses when
+ * the database doesn't send them (a sync_context predating 00091). */
+export const DEFAULT_XP_BONUSES: XpBonusConfig = {
+  boost: { enabled: true, amount: 10.0, cap: null },
+  streak: { enabled: true, amount: 0.01, cap: null },
+  good_eye_sniper: { enabled: true, amount: 0.02, cap: 0.3 },
+};
+
+/** Builds the config from sync_context's `xp_bonuses` rows, falling back to
+ * the defaults for anything missing or malformed. */
+export function xpBonusConfig(
+  rows:
+    | readonly {
+        id: string;
+        enabled: boolean;
+        amount: number;
+        cap: number | null;
+      }[]
+    | undefined,
+): XpBonusConfig {
+  const config = { ...DEFAULT_XP_BONUSES };
+  for (const row of rows ?? []) {
+    if (!(row.id in config) || !(row.amount > 0)) continue;
+    config[row.id as XpBonusId] = {
+      enabled: row.enabled,
+      amount: row.amount,
+      cap: row.cap != null && row.cap > 0 ? row.cap : null,
+    };
+  }
+  return config;
+}
+
+/** `count` units of a per-unit bonus (streak days, hunts won), capped; 0
+ * when the bonus is off. */
+export function scaledBonus(rule: XpBonusRule, count: number): number {
+  if (!rule.enabled || count <= 0) return 0;
+  const bonus = count * rule.amount;
+  return rule.cap == null ? bonus : Math.min(bonus, rule.cap);
+}
+
+/** Good Eye Sniper's bonus for this many song hunts won: by default +2% per
+ * win, capped at +30% (15 wins). */
+export function goodEyeSniperBonus(
+  songHuntWins: number,
+  rule: XpBonusRule = DEFAULT_XP_BONUSES.good_eye_sniper,
+): number {
+  return scaledBonus(rule, songHuntWins);
 }
 
 export function applyXp(

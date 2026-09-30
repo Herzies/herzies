@@ -70,7 +70,7 @@ export function CliPreview() {
             <div>
               <span className="font-bold">Code: </span>
               <span className="text-cyan">MCHI-7X2</span>
-              <span className="text-text-dim"> (3 friendzies, +6% XP)</span>
+              <span className="text-text-dim"> (3 friendzies)</span>
             </div>
           </div>
         </div>

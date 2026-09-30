@@ -417,7 +417,6 @@ function ItemGridCell({
       content={
         <ItemPreviewCard
           itemId={itemId}
-          meta={def?.stackable ? `x${qty}` : undefined}
           box={100}
           equipped={equipped}
           level={level}
@@ -540,6 +539,7 @@ export function InventoryView({
   onPredictUnits,
   bankExpansions,
   active = true,
+  rootKey = 0,
 }: {
   herzie: Herzie;
   initialItem?: string | null;
@@ -568,6 +568,9 @@ export function InventoryView({
   bankExpansions: number;
   /** False while another tab is shown — pauses the 3D render. */
   active?: boolean;
+  /** Bumped when the Inventory tab is re-selected while already on it:
+   * back from Deck to the cards. */
+  rootKey?: number;
 }) {
   const capacity = bankCapacity(bankExpansions);
   const [currency, setCurrency] = useState(cachedCurrency || herzie.currency);
@@ -602,6 +605,14 @@ export function InventoryView({
   /** The empty deck slot whose picker is open (see DeckSlotPicker). */
   const [slotPicker, setSlotPicker] = useState<EmptySlotTarget | null>(null);
   const [tab, setTab] = useState<InventoryTab>("cards");
+  // Compared against the last key rather than run on mount, so it only ever
+  // fires on a bump.
+  const rootKeyRef = useRef(rootKey);
+  useEffect(() => {
+    if (rootKeyRef.current === rootKey) return;
+    rootKeyRef.current = rootKey;
+    setTab("cards");
+  }, [rootKey]);
   const [slotOrder, setSlotOrder] = useState<(string | null)[]>(() =>
     loadSlotOrder(herzie.friendCode, capacity),
   );
@@ -1161,12 +1172,6 @@ export function InventoryView({
   // Quantity is only meaningful for stackable items — each non-stackable
   // card in the grid already represents exactly one copy, so showing "x2"
   // while inspecting one of them would be misleading.
-  const inspectedMeta = [
-    inspected?.stackable ? `x${inspectedQty}` : null,
-    inspectedGroundSide,
-  ]
-    .filter((part): part is string => Boolean(part))
-    .join(" · ");
 
   return (
     <div className="flex h-full flex-col">
@@ -1346,7 +1351,7 @@ export function InventoryView({
           }}
           equipped={equipped}
           level={inspectUnit?.upgradeLevel ?? 0}
-          meta={inspectedMeta || undefined}
+          meta={inspectedGroundSide || undefined}
           footer={
             <>
               {inspected.equipable &&

@@ -36,14 +36,16 @@ export async function POST(request: Request) {
 
   const { id, name, bonus, active, startsAt, endsAt, schedule } = body;
 
-  const row = {
+  // Only what was sent: an update that leaves out `active` or `schedule`
+  // keeps the stored value instead of resetting it.
+  const row: Record<string, unknown> = {
     name,
     bonus,
-    active: active ?? true,
     starts_at: startsAt,
     ends_at: endsAt,
-    schedule: schedule ?? null,
   };
+  if (active !== undefined) row.active = active;
+  if (schedule !== undefined) row.schedule = schedule;
 
   const admin = createAdminClient();
 

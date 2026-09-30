@@ -300,7 +300,6 @@ function DeckSlot({
       content={
         <ItemPreviewCard
           itemId={itemId}
-          meta={`x${units.filter((u) => u.itemId === itemId).length}`}
           box={100}
           equipped={equipped}
           level={worn?.upgradeLevel ?? 0}

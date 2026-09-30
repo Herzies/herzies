@@ -3,16 +3,14 @@ import {
   BOSS_BODY_TYPE,
   DEFAULT_Y_ANGLE,
   generateCreatureParams,
-  getItem,
-  RARITY_COLORS as ITEM_RARITY_COLORS,
   Herzie3D as SharedHerzie3D,
 } from "@herzies/shared";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../lib/utils";
-import { ItemTypeIcon } from "./icons/ItemTypeIcon";
 import { SegmentBar } from "./SegmentBar";
 import { SpeechBubble, useChatter } from "./SpeechBubble";
-import { HoverPreview } from "./Tooltip";
+import { VisitorHelp, type VisitorReward } from "./VisitorHelp";
+import { VISITOR_THEMES } from "./VisitorRowTheme";
 
 /**
  * Time left, to the second.
@@ -115,12 +113,10 @@ function useBossChatter(hpFraction: number, genre: string, active: boolean) {
 export function BossFightPanel({
   event,
   paused,
-  onInspectReward,
 }: {
   event: GameEvent;
   /** Tab hidden or window unfocused — stop the 3D frame timer and the clock. */
   paused: boolean;
-  onInspectReward: (itemId: string) => void;
   equipped?: Equipped | null;
 }) {
   const config = event.config as unknown as BossFightView;
@@ -141,13 +137,6 @@ export function BossFightPanel({
   const remaining = decided ? 0 : endsAt - now;
   const timeFrac = Math.max(0, remaining) / Math.max(1, endsAt - startsAt);
   const hpFrac = config.maxHp > 0 ? config.hp / config.maxHp : 0;
-
-  const rewardItem = config.rewardItemId
-    ? getItem(config.rewardItemId)
-    : undefined;
-  const topRewardItem = config.topRewardItemId
-    ? getItem(config.topRewardItemId)
-    : undefined;
 
   // The boss is not a herzie row and nothing about it is persisted — its
   // appearance is derived here from the event id, so every boss looks
@@ -175,42 +164,6 @@ export function BossFightPanel({
       <div className="text-center text-[16px] font-bold text-red">
         {event.title}
       </div>
-
-      {/* Only rendered once the reward is actually known. The server withholds
-          rewardItemId until the boss is dead, and a "Completion reward: ???"
-          placeholder just spent a line saying nothing — the mystery is
-          explained in the help popover instead. */}
-      {rewardItem ? (
-        <div className="flex items-center justify-center gap-1 text-[10px] text-text-dim">
-          Completion reward:
-          <ItemTypeIcon item={rewardItem} className="h-4 w-4 shrink-0" />
-          <button
-            className="cursor-pointer border-none bg-transparent text-ui underline"
-            style={{ color: ITEM_RARITY_COLORS[rewardItem.rarity] }}
-            type="button"
-            onClick={() => onInspectReward(rewardItem.id)}
-          >
-            {rewardItem.name}
-          </button>
-        </div>
-      ) : null}
-
-      {/* Same reveal gating as the base reward — withheld server-side until
-          killed, so there is never a "???" placeholder to show here either. */}
-      {topRewardItem ? (
-        <div className="flex items-center justify-center gap-1 text-[10px] text-text-dim">
-          Top {config.topCount} bonus:
-          <ItemTypeIcon item={topRewardItem} className="h-4 w-4 shrink-0" />
-          <button
-            className="cursor-pointer border-none bg-transparent text-ui underline"
-            style={{ color: ITEM_RARITY_COLORS[topRewardItem.rarity] }}
-            type="button"
-            onClick={() => onInspectReward(topRewardItem.id)}
-          >
-            {topRewardItem.name}
-          </button>
-        </div>
-      ) : null}
 
       {/* Takes all the vertical slack the rest of the panel doesn't need,
           rather than a fixed box. The renderer's grid is a fixed 48 rows and
@@ -395,39 +348,33 @@ export function makeDebugBoss(): GameEvent {
 }
 
 /**
- * The "?" that sits in the Events header while a boss is live.
- *
- * Built on `HoverPreview`, not `Tooltip`: Tooltip is `whitespace-nowrap` and
- * chases the cursor, which is right for a short label and wrong for a
- * paragraph — a multi-line string would run off the 380px window. HoverPreview
- * already solves the anchored, sized, portalled case, so this needs no new
- * popover machinery and leaves Tooltip untouched.
+ * The "?" that sits in the boss's header. The rewards only show once the
+ * boss is dead: the server withholds them until then, so a live boss's
+ * popover just explains the fight.
  */
-export function BossFightHelp() {
+export function BossFightHelp({ event }: { event: GameEvent }) {
+  const config = event.config as unknown as BossFightView;
+  const rewards: VisitorReward[] = [];
+  if (config.rewardItemId) {
+    rewards.push({ label: "Reward", itemId: config.rewardItemId });
+  }
+  if (config.topRewardItemId) {
+    rewards.push({
+      label: `Top ${config.topCount} bonus`,
+      itemId: config.topRewardItemId,
+    });
+  }
   return (
-    <HoverPreview
-      // Anchored under the icon: it lives in the header, so there is never
-      // room above it.
-      alwaysAbove={false}
-      // estWidth/estHeight only steer placement, but they have to track the
-      // real footprint or the popover is centred and fit-checked against the
-      // wrong box — hence the matching w-[220px].
-      estWidth={220}
-      estHeight={64}
-      content={
-        <div className="w-[220px] rounded border border-border bg-bg-panel p-2 text-left text-ui text-text-dim">
+    <VisitorHelp
+      label="What is a boss fight?"
+      colour={VISITOR_THEMES.boss_fight.accent}
+      text={
+        <>
           Defeat the boss and receive rewards. You&apos;ll have to work together
           to make it in time!
-        </div>
+        </>
       }
-    >
-      <button
-        type="button"
-        className="cursor-help border-none bg-transparent text-ui text-text-dim hover:text-cyan"
-        aria-label="What is a boss fight?"
-      >
-        ?
-      </button>
-    </HoverPreview>
+      rewards={rewards}
+    />
   );
 }

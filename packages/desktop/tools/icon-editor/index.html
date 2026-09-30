@@ -69,8 +69,6 @@
 
   #big-grid {
     display: grid;
-    grid-template-columns: repeat(16, 28px);
-    grid-template-rows: repeat(16, 28px);
     border: 1px solid #2a2d3a;
     width: max-content;
   }
@@ -93,17 +91,15 @@
     text-align: center;
   }
   #preview-canvas {
-    width: 16px;
-    height: 16px;
     image-rendering: pixelated;
     background: #05060a;
     border: 1px solid #2a2d3a;
   }
-  /* A second, larger copy of the same 16x16 buffer — same pixels, easier to
-     glance at without losing the true-size one above it. */
+  /* A second, larger copy of the same buffer — same pixels, easier to
+     glance at without losing the true-size one above it. Both are sized
+     per icon in JS (see sizeFor): most icons are 16x16, Town's visitor
+     portraits 24x24. */
   #preview-canvas-4x {
-    width: 64px;
-    height: 64px;
     image-rendering: pixelated;
     background: #05060a;
     border: 1px solid #2a2d3a;
@@ -184,7 +180,7 @@
       <div id="big-grid"></div>
 
       <div id="preview-column">
-        <div class="label">Actual size<br>(16×16, as shown in the app)</div>
+        <div class="label" id="preview-label">Actual size</div>
         <canvas id="preview-canvas" width="16" height="16"></canvas>
         <canvas id="preview-canvas-4x" width="16" height="16"></canvas>
       </div>
@@ -217,7 +213,7 @@ const state = {
   items: [],
   grids: {}, // id -> { grid, palette }, last-saved (or loaded) state
   selectedId: null,
-  currentGrid: null, // 16 rows, '.' or a hex digit indexing currentPalette
+  currentGrid: null, // N rows of N, '.' or a hex digit indexing currentPalette
   currentPalette: null, // hex colours, index-addressable by that digit
   paintColor: "#ffffff",
   eraseMode: false,
@@ -247,13 +243,19 @@ function itemById(id) {
   return state.items.find((item) => item.id === id);
 }
 
+// An icon's side length: its grid is square, 16 for items, 24 for Town's
+// visitor portraits.
+function sizeFor(grid) {
+  return grid.length;
+}
+
 function colorForChar(ch, palette) {
   if (ch === ".") return null;
   return palette[parseInt(ch, 16)] ?? "#ff00ff";
 }
 
-function buildGradient(ctx, stops) {
-  const gradient = ctx.createLinearGradient(0, 0, 16, 16);
+function buildGradient(ctx, stops, n) {
+  const gradient = ctx.createLinearGradient(0, 0, n, n);
   const denom = stops.length > 1 ? stops.length - 1 : 1;
   stops.forEach((color, i) => gradient.addColorStop(i / denom, color));
   return gradient;
@@ -264,19 +266,22 @@ function buildGradient(ctx, stops) {
 // the real app, so the preview shows that too, even though the big grid
 // below still lets you paint (and save) the real per-pixel colours.
 function drawGrid(canvas, grid, palette, item) {
+  const n = sizeFor(grid);
+  canvas.width = n;
+  canvas.height = n;
   const ctx = canvas.getContext("2d");
-  ctx.clearRect(0, 0, 16, 16);
+  ctx.clearRect(0, 0, n, n);
   if (item.gradient && item.gradient.length > 0) {
-    ctx.fillStyle = buildGradient(ctx, item.gradient);
-    for (let y = 0; y < 16; y++) {
-      for (let x = 0; x < 16; x++) {
+    ctx.fillStyle = buildGradient(ctx, item.gradient, n);
+    for (let y = 0; y < n; y++) {
+      for (let x = 0; x < n; x++) {
         if (grid[y][x] !== ".") ctx.fillRect(x, y, 1, 1);
       }
     }
     return;
   }
-  for (let y = 0; y < 16; y++) {
-    for (let x = 0; x < 16; x++) {
+  for (let y = 0; y < n; y++) {
+    for (let x = 0; x < n; x++) {
       const color = colorForChar(grid[y][x], palette);
       if (!color) continue;
       ctx.fillStyle = color;
@@ -294,8 +299,6 @@ function renderSidebar() {
     row.dataset.id = item.id;
 
     const canvas = document.createElement("canvas");
-    canvas.width = 16;
-    canvas.height = 16;
     const stored = state.grids[item.id];
     drawGrid(canvas, stored.grid, stored.palette, item);
 
@@ -367,11 +370,18 @@ function renderPaletteSwatches() {
 }
 
 function renderBigGrid() {
+  const n = sizeFor(state.currentGrid);
+  // Bigger grids get smaller cells so the editor stays about the same size.
+  const cellPx = n > 16 ? 20 : 28;
+  bigGridEl.style.gridTemplateColumns = `repeat(${n}, ${cellPx}px)`;
+  bigGridEl.style.gridTemplateRows = `repeat(${n}, ${cellPx}px)`;
   bigGridEl.innerHTML = "";
-  for (let y = 0; y < 16; y++) {
-    for (let x = 0; x < 16; x++) {
+  for (let y = 0; y < n; y++) {
+    for (let x = 0; x < n; x++) {
       const cell = document.createElement("div");
       cell.className = "cell";
+      cell.style.width = `${cellPx}px`;
+      cell.style.height = `${cellPx}px`;
       cell.dataset.x = String(x);
       cell.dataset.y = String(y);
       const color = colorForChar(state.currentGrid[y][x], state.currentPalette);
@@ -383,6 +393,13 @@ function renderBigGrid() {
 
 function renderPreview() {
   const item = itemById(state.selectedId);
+  const n = sizeFor(state.currentGrid);
+  const actual = document.getElementById("preview-canvas");
+  const big = document.getElementById("preview-canvas-4x");
+  actual.style.width = actual.style.height = `${n}px`;
+  big.style.width = big.style.height = `${n * 4}px`;
+  document.getElementById("preview-label").innerHTML =
+    `Actual size<br>(${n}×${n}, as shown in the app)`;
   drawGrid(document.getElementById("preview-canvas"), state.currentGrid, state.currentPalette, item);
   drawGrid(document.getElementById("preview-canvas-4x"), state.currentGrid, state.currentPalette, item);
   const thumb = sidebarListEl.querySelector(`.item-row[data-id="${state.selectedId}"] canvas`);
@@ -416,7 +433,7 @@ function setCell(x, y, value) {
   const row = state.currentGrid[y];
   if (row[x] === value) return;
   state.currentGrid[y] = row.slice(0, x) + value + row.slice(x + 1);
-  const idx = y * 16 + x;
+  const idx = y * sizeFor(state.currentGrid) + x;
   const color = colorForChar(value, state.currentPalette);
   bigGridEl.children[idx].style.background = color ?? "#05060a";
   state.dirty = true;

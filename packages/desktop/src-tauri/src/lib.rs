@@ -23,6 +23,8 @@ use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_autostart::MacosLauncher;
 use types::*;
 
+const MAX_FRIENDS: usize = 50;
+
 // Wrapped in newtype structs so Tauri's type-keyed state manager can
 // distinguish them — a plain `type` alias resolves to the same Rust type
 // and would collide on the second `.manage()` call.
@@ -188,10 +190,12 @@ async fn friend_add(
             message: "Already friends".into(),
         });
     }
-    if friend_codes_len >= 20 {
+    // Mirrors MAX_FRIENDS in packages/web/src/lib/friends.ts — the server
+    // enforces it; this just answers without a round trip.
+    if friend_codes_len >= MAX_FRIENDS {
         return Ok(FriendResult {
             success: false,
-            message: "Friend list full (max 20)".into(),
+            message: format!("Friend list full (max {MAX_FRIENDS})"),
         });
     }
 

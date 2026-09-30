@@ -197,17 +197,9 @@ impl ManagedState {
             return Some(herzie.clone());
         }
 
-        let craving = crate::game::get_daily_craving(&herzie.id, None);
-        let is_craving = !self.current_genres.is_empty()
-            && crate::game::matches_craving(&self.current_genres, &craving);
         // Same no-multiplier estimate the old local-application path used —
         // a display approximation only; the server remains authoritative.
-        let xp_gain = crate::game::calculate_xp_gain(
-            self.pending_minutes,
-            herzie.friend_codes.len(),
-            is_craving,
-            &[],
-        );
+        let xp_gain = crate::game::calculate_xp_gain(self.pending_minutes, &[]);
         let (xp, level, stage) =
             crate::game::project_xp(herzie.xp, herzie.level, herzie.stage, xp_gain);
 

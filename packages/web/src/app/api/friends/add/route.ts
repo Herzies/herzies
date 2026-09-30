@@ -49,7 +49,7 @@ export async function POST(request: Request) {
   }
   if (myCodes.length >= MAX_FRIENDS) {
     return NextResponse.json(
-      { error: "Friend list full (max 20)" },
+      { error: `Friend list full (max ${MAX_FRIENDS})` },
       { status: 409 },
     );
   }

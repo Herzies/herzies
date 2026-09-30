@@ -23,8 +23,8 @@ import { Tooltip } from "./Tooltip";
 
 /** George's look: one fixed seed, so he's the same herzie for everyone —
  * painted solid gold, because George is rich and wants you to know it. */
-const GEORGE_SEED = "npc:good-ol-george";
-const GEORGE_EQUIPPED = { color: GOLD_SCHEME_ID };
+export const GEORGE_SEED = "npc:good-ol-george";
+export const GEORGE_EQUIPPED = { color: GOLD_SCHEME_ID };
 
 /** Good ol' George's sales patter, cycled in a speech bubble like the boss. */
 const GEORGE_LINES = [
