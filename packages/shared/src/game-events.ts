@@ -178,14 +178,10 @@ export async function buildBossFightConfig(
 
   return {
     hatedGenres: config.hatedGenres ?? [],
-    // The reward is a mystery until the boss is down, and it is withheld
-    // SERVER-SIDE rather than merely hidden by the UI — clients cannot read
-    // `events` directly (00016), but anything projected into config is
-    // inspectable in the response. This is the same reasoning that makes
-    // buildSongHuntConfig garble locked hints instead of trusting the client
-    // not to look.
-    rewardItemId: killed ? config.rewardItemId : undefined,
-    topRewardItemId: killed ? config.topRewardItemId : undefined,
+    // Shown from the start, so players know what they're fighting for (the
+    // boss's "?" lists them). It used to be withheld until the boss was down.
+    rewardItemId: config.rewardItemId,
+    topRewardItemId: config.topRewardItemId,
     topCount: config.topCount ?? 3,
     hp: state?.hp ?? 0,
     maxHp: state?.max_hp ?? config.maxHp ?? 0,

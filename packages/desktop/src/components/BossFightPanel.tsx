@@ -330,11 +330,9 @@ export function makeDebugBoss(): GameEvent {
   const now = Date.now();
   const config: BossFightView = {
     hatedGenres: ["electronic"],
-    // Left undefined on purpose: the server withholds the reward until the
-    // boss is dead, so this is what a live boss actually looks like. Flip
-    // `killed` to true and set these to see the revealed state.
-    rewardItemId: undefined,
-    topRewardItemId: undefined,
+    // The rewards a live boss shows in its "?" (see BossFightHelp).
+    rewardItemId: "cd",
+    topRewardItemId: "cd",
     topCount: 3,
     hp: 42_180,
     maxHp: 100_000,
@@ -363,9 +361,9 @@ export function makeDebugBoss(): GameEvent {
 }
 
 /**
- * The "?" that sits in the boss's header. The rewards only show once the
- * boss is dead: the server withholds them until then, so a live boss's
- * popover just explains the fight.
+ * The "?" that sits in the boss's header: what the fight is, and what it
+ * pays — the reward for everyone who joins in, and the bonus for the top
+ * damage dealers.
  */
 export function BossFightHelp({ event }: { event: GameEvent }) {
   const config = event.config as unknown as BossFightView;
