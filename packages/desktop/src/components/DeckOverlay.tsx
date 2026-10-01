@@ -188,9 +188,10 @@ export function DeckOverlay(props: SlotHandlers) {
       </Tooltip>
       {/* One row, the sections spread across the full width: the empty
           boxes' hover labels name each one. */}
-      {/* pt-0.5: with the 2px the tooltip's inline wrapper adds under the
-          title, the title-to-boxes gap matches the bag's title-to-grid one. */}
-      <div className="flex justify-between pt-0.5 pb-1.5">
+      {/* No top padding: with the 2px the tooltip's inline wrapper adds under
+          the title, the title-to-boxes gap matches the bag's title-to-divider
+          one — the divider being where the bag visibly starts. */}
+      <div className="flex justify-between pb-1.5">
         {DECK_SLOT_ORDER.map((label) => (
           <DeckGroup key={label} group={groupByLabel(label)} {...props} />
         ))}
