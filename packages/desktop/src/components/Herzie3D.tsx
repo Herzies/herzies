@@ -14,6 +14,13 @@ import { useWindowVisible } from "../tauri-bridge";
 // generalizing to "any fully-equipped set" until a second one exists.
 const PRISMATIC_SET = ITEM_SETS.find((set) => set.id === "prismatic");
 
+/** The height of the herzie's stage on Home and on the Herzie view — the same
+ * in both, so the creature sits in the same place when switching between
+ * them. At most 262px, what Home has left once its header, XP bar,
+ * now-playing slot and collapsed chat (all fixed-height, the chat's input row
+ * included) have taken theirs; Home's spacer takes up the rest. */
+export const HERZIE_STAGE_HEIGHT = 240;
+
 interface Props {
   userId: string;
   stage?: number;

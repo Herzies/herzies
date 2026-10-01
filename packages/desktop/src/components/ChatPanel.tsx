@@ -1179,7 +1179,10 @@ export function ChatPanel({
             }}
             className={cn(
               "min-h-5 overflow-auto py-0.5",
-              expanded ? "min-h-0 flex-1" : "max-h-[58px]",
+              // Collapsed, a fixed height however many messages there are, so
+              // the views above it — and the herzie in them — don't shift as
+              // the feed fills.
+              expanded ? "min-h-0 flex-1" : "h-[58px]",
             )}
           >
             {feed.length === 0 && (
@@ -1249,158 +1252,164 @@ export function ChatPanel({
             <div ref={bottomAnchorRef} aria-hidden className="h-0 shrink-0" />
           </div>
 
-          {isOnline && (
-            <div className="relative">
-              {showItemAutocomplete &&
-                autocompleteItems.length > 0 &&
-                !userMenu && (
-                  <div
-                    ref={autocompleteListRef}
-                    id="chat-item-autocomplete"
-                    role="listbox"
-                    aria-label="Inventory items"
-                    className="absolute bottom-full left-0 right-0 z-[100] max-h-[88px] overflow-auto rounded border border-[#444] bg-bg-panel"
-                  >
-                    {autocompleteItems.map((x, i) => (
-                      <button
-                        key={x.id}
-                        type="button"
-                        role="option"
-                        aria-selected={i === autocompleteIndex}
-                        ref={(el) => {
-                          autocompleteOptionRefs.current[i] = el;
-                        }}
-                        onMouseEnter={() => {
-                          autocompleteIndexRef.current = i;
-                          setAutocompleteIndex(i);
-                        }}
-                        onClick={() => selectAutocomplete(x.id)}
-                        className={cn(
-                          "block w-full border-none text-left",
-                          DROPDOWN_ROW_CLASS,
-                          i === autocompleteIndex && DROPDOWN_ROW_ACTIVE_CLASS,
-                        )}
-                        style={{
-                          color: ITEM_RARITY_COLORS[x.item.rarity],
-                          ...(i === autocompleteIndex
-                            ? { filter: "brightness(1.25)" }
-                            : undefined),
-                        }}
-                      >
-                        {x.item.name}
-                        <span className="ml-1 text-text-dim">
-                          {RARITY_LABELS[x.item.rarity]}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              {showUserAutocomplete &&
-                userAutocompleteItems.length > 0 &&
-                !userMenu && (
-                  <div
-                    id="chat-user-autocomplete"
-                    role="listbox"
-                    aria-label="Mention people"
-                    className="absolute bottom-full left-0 right-0 z-[100] max-h-[88px] overflow-auto rounded border border-[#444] bg-bg-panel"
-                  >
-                    {userAutocompleteItems.map((u, i) => (
-                      <button
-                        key={u.friendCode}
-                        type="button"
-                        role="option"
-                        aria-selected={i === userAutocompleteIndex}
-                        ref={(el) => {
-                          userOptionRefs.current[i] = el;
-                        }}
-                        onMouseEnter={() => {
-                          userAutocompleteIndexRef.current = i;
-                          setUserAutocompleteIndex(i);
-                        }}
-                        onClick={() => selectUserMention(u)}
-                        className={cn(
-                          "block w-full border-none text-left",
-                          DROPDOWN_ROW_CLASS,
-                          i === userAutocompleteIndex &&
-                            DROPDOWN_ROW_ACTIVE_CLASS,
-                        )}
-                      >
-                        <span className="text-cyan">@{u.name}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              {showSlashCommands &&
-                slashCommandItems.length > 0 &&
-                !userMenu && (
-                  <div
-                    id="chat-slash-autocomplete"
-                    className="absolute bottom-full left-0 right-0 z-[100] max-h-[88px] overflow-auto rounded border border-[#444] bg-bg-panel"
-                  >
-                    {slashCommandItems.map((cmd, i) => (
-                      <button
-                        key={cmd.id}
-                        type="button"
-                        role="option"
-                        aria-selected={i === slashIndex}
-                        onMouseEnter={() => {
-                          slashIndexRef.current = i;
-                          setSlashIndex(i);
-                        }}
-                        onClick={() => selectSlashCommand(cmd.label)}
-                        className={cn(
-                          "block w-full border-none text-left",
-                          DROPDOWN_ROW_CLASS,
-                          i === slashIndex && DROPDOWN_ROW_ACTIVE_CLASS,
-                        )}
-                      >
-                        <span className="text-[#d51007]">/{cmd.label}</span>
-                        <span className="ml-1 text-text-dim">
-                          {cmd.description}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              <div className="flex gap-0.5 py-0.5">
-                <input
-                  ref={inputRef}
-                  className="input flex-1 text-[10px]"
-                  placeholder="Message… # items · @ people · / commands"
-                  value={input}
-                  onChange={handleInputChange}
-                  onFocus={handleInputFocus}
-                  aria-autocomplete="list"
-                  aria-expanded={
-                    showItemAutocomplete ||
-                    showUserAutocomplete ||
-                    showSlashCommands
-                  }
-                  aria-controls={
-                    showItemAutocomplete
-                      ? "chat-item-autocomplete"
-                      : showUserAutocomplete
-                        ? "chat-user-autocomplete"
-                        : showSlashCommands
-                          ? "chat-slash-autocomplete"
-                          : undefined
-                  }
-                  maxLength={CHAT_MESSAGE_MAX_LENGTH}
-                />
-                <button
-                  type="button"
-                  className={cn(
-                    "btn text-ui-sm",
-                    cooldown || !input.trim() ? "opacity-50" : "opacity-100",
+          {/* The input row's height is kept even offline, when there's no
+              input: the collapsed chat is then the same height either way, and
+              the herzie above doesn't move as the connection comes and goes. */}
+          <div className={cn("shrink-0", !expanded && "h-[26px]")}>
+            {isOnline && (
+              <div className="relative">
+                {showItemAutocomplete &&
+                  autocompleteItems.length > 0 &&
+                  !userMenu && (
+                    <div
+                      ref={autocompleteListRef}
+                      id="chat-item-autocomplete"
+                      role="listbox"
+                      aria-label="Inventory items"
+                      className="absolute bottom-full left-0 right-0 z-[100] max-h-[88px] overflow-auto rounded border border-[#444] bg-bg-panel"
+                    >
+                      {autocompleteItems.map((x, i) => (
+                        <button
+                          key={x.id}
+                          type="button"
+                          role="option"
+                          aria-selected={i === autocompleteIndex}
+                          ref={(el) => {
+                            autocompleteOptionRefs.current[i] = el;
+                          }}
+                          onMouseEnter={() => {
+                            autocompleteIndexRef.current = i;
+                            setAutocompleteIndex(i);
+                          }}
+                          onClick={() => selectAutocomplete(x.id)}
+                          className={cn(
+                            "block w-full border-none text-left",
+                            DROPDOWN_ROW_CLASS,
+                            i === autocompleteIndex &&
+                              DROPDOWN_ROW_ACTIVE_CLASS,
+                          )}
+                          style={{
+                            color: ITEM_RARITY_COLORS[x.item.rarity],
+                            ...(i === autocompleteIndex
+                              ? { filter: "brightness(1.25)" }
+                              : undefined),
+                          }}
+                        >
+                          {x.item.name}
+                          <span className="ml-1 text-text-dim">
+                            {RARITY_LABELS[x.item.rarity]}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
                   )}
-                  disabled={cooldown || !input.trim()}
-                  onClick={handleSend}
-                >
-                  Send
-                </button>
+                {showUserAutocomplete &&
+                  userAutocompleteItems.length > 0 &&
+                  !userMenu && (
+                    <div
+                      id="chat-user-autocomplete"
+                      role="listbox"
+                      aria-label="Mention people"
+                      className="absolute bottom-full left-0 right-0 z-[100] max-h-[88px] overflow-auto rounded border border-[#444] bg-bg-panel"
+                    >
+                      {userAutocompleteItems.map((u, i) => (
+                        <button
+                          key={u.friendCode}
+                          type="button"
+                          role="option"
+                          aria-selected={i === userAutocompleteIndex}
+                          ref={(el) => {
+                            userOptionRefs.current[i] = el;
+                          }}
+                          onMouseEnter={() => {
+                            userAutocompleteIndexRef.current = i;
+                            setUserAutocompleteIndex(i);
+                          }}
+                          onClick={() => selectUserMention(u)}
+                          className={cn(
+                            "block w-full border-none text-left",
+                            DROPDOWN_ROW_CLASS,
+                            i === userAutocompleteIndex &&
+                              DROPDOWN_ROW_ACTIVE_CLASS,
+                          )}
+                        >
+                          <span className="text-cyan">@{u.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                {showSlashCommands &&
+                  slashCommandItems.length > 0 &&
+                  !userMenu && (
+                    <div
+                      id="chat-slash-autocomplete"
+                      className="absolute bottom-full left-0 right-0 z-[100] max-h-[88px] overflow-auto rounded border border-[#444] bg-bg-panel"
+                    >
+                      {slashCommandItems.map((cmd, i) => (
+                        <button
+                          key={cmd.id}
+                          type="button"
+                          role="option"
+                          aria-selected={i === slashIndex}
+                          onMouseEnter={() => {
+                            slashIndexRef.current = i;
+                            setSlashIndex(i);
+                          }}
+                          onClick={() => selectSlashCommand(cmd.label)}
+                          className={cn(
+                            "block w-full border-none text-left",
+                            DROPDOWN_ROW_CLASS,
+                            i === slashIndex && DROPDOWN_ROW_ACTIVE_CLASS,
+                          )}
+                        >
+                          <span className="text-[#d51007]">/{cmd.label}</span>
+                          <span className="ml-1 text-text-dim">
+                            {cmd.description}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                <div className="flex gap-0.5 py-0.5">
+                  <input
+                    ref={inputRef}
+                    className="input flex-1 text-[10px]"
+                    placeholder="Message… # items · @ people · / commands"
+                    value={input}
+                    onChange={handleInputChange}
+                    onFocus={handleInputFocus}
+                    aria-autocomplete="list"
+                    aria-expanded={
+                      showItemAutocomplete ||
+                      showUserAutocomplete ||
+                      showSlashCommands
+                    }
+                    aria-controls={
+                      showItemAutocomplete
+                        ? "chat-item-autocomplete"
+                        : showUserAutocomplete
+                          ? "chat-user-autocomplete"
+                          : showSlashCommands
+                            ? "chat-slash-autocomplete"
+                            : undefined
+                    }
+                    maxLength={CHAT_MESSAGE_MAX_LENGTH}
+                  />
+                  <button
+                    type="button"
+                    className={cn(
+                      "btn text-ui-sm",
+                      cooldown || !input.trim() ? "opacity-50" : "opacity-100",
+                    )}
+                    disabled={cooldown || !input.trim()}
+                    onClick={handleSend}
+                  >
+                    Send
+                  </button>
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
 

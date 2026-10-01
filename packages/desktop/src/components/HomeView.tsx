@@ -17,7 +17,7 @@ import {
   useGhostMode,
   useWindowPinned,
 } from "../tauri-bridge";
-import { Herzie3D } from "./Herzie3D";
+import { HERZIE_STAGE_HEIGHT, Herzie3D } from "./Herzie3D";
 import { HEADER_ICON_HIT } from "./headerIconHit";
 import { CARD_SHAPE_CLIP, ItemTypeIcon } from "./icons/ItemTypeIcon";
 import { ModifiersButton } from "./ModifiersButton";
@@ -350,7 +350,11 @@ export function HomeView({
         </div>
       </div>
 
-      <div className="relative flex min-h-0 flex-1 items-center justify-center">
+      {/* The stage: HERZIE_STAGE_HEIGHT, the same as on the Herzie view. */}
+      <div
+        className="relative flex shrink-0 items-center justify-center"
+        style={{ height: HERZIE_STAGE_HEIGHT }}
+      >
         <Herzie3D
           userId={herzie.friendCode}
           stage={stageOverride ?? herzie.stage}
@@ -453,6 +457,9 @@ export function HomeView({
         )}
       </div>
 
+      {/* Whatever the fixed parts don't use, so the stage stays put. */}
+      <div className="min-h-0 flex-1" />
+
       <div className="mb-1.5">
         <div className="mb-0.5 flex items-baseline justify-between text-ui text-text-dim">
           <span>
@@ -473,53 +480,58 @@ export function HomeView({
         </div>
       </div>
 
-      {ghostMode ? (
-        <div className="border-t border-border pt-1.5 pb-2">
-          <div className="flex items-center gap-2">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded bg-purple/15 text-purple">
-              <svg
-                width="22"
-                height="22"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-                role="img"
-              >
-                <path d="M9 10h.01" />
-                <path d="M15 10h.01" />
-                <path d="M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8z" />
-              </svg>
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="text-ui font-bold text-purple">Ghost mode</div>
-              <div className="text-[10px] text-text-dim">
-                Music is not tracked
+      {/* A fixed height whatever is in it — a track, ghost mode, or nothing —
+          so the herzie above doesn't move when music starts or stops. 64px is
+          the track card's own height. */}
+      <div className="flex h-16 shrink-0 flex-col">
+        {ghostMode ? (
+          <div className="border-t border-border pt-1.5 pb-2">
+            <div className="flex items-center gap-2">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded bg-purple/15 text-purple">
+                <svg
+                  width="22"
+                  height="22"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                  role="img"
+                >
+                  <path d="M9 10h.01" />
+                  <path d="M15 10h.01" />
+                  <path d="M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8z" />
+                </svg>
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-ui font-bold text-purple">Ghost mode</div>
+                <div className="text-[10px] text-text-dim">
+                  Music is not tracked
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      ) : nowPlaying ? (
-        <TrackCard
-          title={nowPlaying.title}
-          artist={nowPlaying.artist}
-          albumArtUrl={nowPlaying.albumArtUrl}
-          artistImageUrl={nowPlaying.artistImageUrl}
-          tags={nowPlaying.tags}
-          hatedGenres={bossHatedGenres}
-          damagePerMinute={bossDamagePerMinute(stats)}
-          className="border-t border-border pt-1.5 pb-2"
-        />
-      ) : (
-        <div className="border-t border-border pt-1.5 pb-2">
-          <div className="text-center text-[10px] text-text-dim">
-            Play some music to start earning XP
+        ) : nowPlaying ? (
+          <TrackCard
+            title={nowPlaying.title}
+            artist={nowPlaying.artist}
+            albumArtUrl={nowPlaying.albumArtUrl}
+            artistImageUrl={nowPlaying.artistImageUrl}
+            tags={nowPlaying.tags}
+            hatedGenres={bossHatedGenres}
+            damagePerMinute={bossDamagePerMinute(stats)}
+            className="border-t border-border pt-1.5 pb-2"
+          />
+        ) : (
+          <div className="flex flex-1 items-center justify-center border-t border-border">
+            <div className="text-center text-[10px] text-text-dim">
+              Play some music to start earning XP
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
