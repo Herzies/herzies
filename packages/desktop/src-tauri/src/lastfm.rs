@@ -5,6 +5,9 @@ use std::time::{Duration, Instant};
 
 const API_BASE: &str = "https://ws.audioscrobbler.com/2.0/";
 pub const ENRICHMENT_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long `poll_tick` waits before retrying a failed lookup for an
+/// unverified source, which can't count until one succeeds.
+pub const ENRICHMENT_RETRY: Duration = Duration::from_secs(30);
 const RATE_LIMIT_BACKOFF: Duration = Duration::from_secs(60);
 
 /// Metadata from Last.fm (and future providers) for the current track.
@@ -18,8 +21,10 @@ pub struct TrackEnrichment {
     pub bpm: Option<u32>,
     /// Whether `track.getInfo` confirmed this artist+title is a real,
     /// catalogued track — as opposed to falling back to the artist's top
-    /// tags after a "not found". Used to gate XP for unverified sources
-    /// (browsers/YouTube) that can't be confirmed any other way.
+    /// tags after a "not found", or matching an entry that only exists
+    /// because someone scrobbled a video (see `is_catalogued_track`). Used
+    /// to gate XP for unverified sources (browsers/YouTube) that can't be
+    /// confirmed any other way.
     pub found: bool,
 }
 
@@ -92,6 +97,13 @@ fn is_version_marker(content: &str) -> bool {
         "version",
         "edit",
         "bonus",
+        // YouTube upload decorations: "(Official Music Video)", "[Lyric Video]", ...
+        "official",
+        "video",
+        "audio",
+        "lyric",
+        "lyrics",
+        "visualizer",
     ];
     content
         .to_lowercase()
@@ -137,6 +149,38 @@ pub fn normalize_title(title: &str) -> String {
     }
 }
 
+/// Strip YouTube channel decorations from an artist name — "Rick Astley -
+/// Topic", "RickAstleyVEVO" — so the lookup hits the artist's real entry.
+pub fn normalize_artist(artist: &str) -> String {
+    let a = artist.trim();
+    let a = a.strip_suffix(" - Topic").unwrap_or(a);
+    let a = a
+        .strip_suffix("VEVO")
+        .or_else(|| a.strip_suffix("Vevo"))
+        .filter(|rest| !rest.trim().is_empty())
+        .unwrap_or(a);
+    a.trim().to_string()
+}
+
+/// Title to look up on Last.fm: `normalize_title`, plus dropping a leading
+/// "Artist - " that YouTube uploads usually carry ("Rick Astley - Never
+/// Gonna Give You Up (Official Music Video)"). The prefix goes first —
+/// otherwise `normalize_title`'s dash rule would see "The Buggles - Video
+/// Killed the Radio Star" and strip the song name as a version marker.
+pub fn lookup_title(artist: &str, title: &str) -> String {
+    let t = title.trim();
+    let prefix = format!("{} - ", artist.trim()).to_lowercase();
+    let t = if t.len() > prefix.len()
+        && t.is_char_boundary(prefix.len())
+        && t[..prefix.len()].to_lowercase() == prefix
+    {
+        &t[prefix.len()..]
+    } else {
+        t
+    };
+    normalize_title(t)
+}
+
 pub fn track_key(artist: &str, title: &str) -> String {
     format!(
         "{}\0{}",
@@ -147,28 +191,16 @@ pub fn track_key(artist: &str, title: &str) -> String {
 
 /// Whether the current listen is confirmed as real music — gates both XP
 /// crediting and what `sync_tick` reports to the server (now-playing status,
-/// listen_log — the latter writes a permanent row the moment the track
-/// changes, so it must actually wait rather than fail open while a check is
-/// still pending). Trusted sources (Music/Spotify/Tidal, or anything the OS
-/// flags as a music app) always count. Everything else — mainly browser web
-/// players, including YouTube — only counts once Last.fm's `track.getInfo`
-/// confirms the artist+title is a real, catalogued track (`enrichment.found`).
-/// Once a lookup was actually attempted and settled one way or the other
-/// (`timed_out`) — or never happens at all (`!in_flight`, e.g. no API key) —
-/// this fails *open*: we'd rather credit/show a few extra seconds than
-/// punish a legitimate listen for our own infra hiccup. Only a genuinely
-/// pending check (`in_flight && !timed_out`) withholds, and only an explicit
-/// "not found" withholds permanently.
-pub fn is_confirmed_listen(
-    verified: bool,
-    enrichment: Option<&TrackEnrichment>,
-    in_flight: bool,
-    timed_out: bool,
-) -> bool {
-    verified
-        || enrichment
-            .map(|e| e.found)
-            .unwrap_or(timed_out || !in_flight)
+/// listen_log, which writes a permanent row). Trusted sources
+/// (Music/Spotify/Tidal, or anything the OS flags as a music app) always
+/// count. Everything else — mainly browser web players, including YouTube —
+/// only counts once Last.fm's `track.getInfo` confirms the artist+title is a
+/// real, catalogued track (`enrichment.found`). This fails *closed*: a
+/// pending, timed-out, rate-limited or failed lookup (or no API key at all)
+/// never confirms an unverified source, since browser audio is far more
+/// often a random video than music. `poll_tick` retries failed lookups.
+pub fn is_confirmed_listen(verified: bool, enrichment: Option<&TrackEnrichment>) -> bool {
+    verified || enrichment.is_some_and(|e| e.found)
 }
 
 /// Genres to use for XP / sync. Returns `None` while Last.fm enrichment is pending.
@@ -242,6 +274,29 @@ pub fn pick_vibe(tags: &[String]) -> Option<String> {
     None
 }
 
+/// Whether a `track.getInfo` hit is a real catalogued track rather than an
+/// entry that exists only because someone scrobbled a video (browser
+/// scrobblers happily submit "MrBeast — I Spent 50 Hours Buried Alive").
+/// Those scrobble-only entries have no catalogue duration and no album;
+/// listener counts don't separate them (a MrBeast video has more Last.fm
+/// listeners than plenty of real indie tracks).
+fn is_catalogued_track(track: &Value) -> bool {
+    let duration_ms = track
+        .get("duration")
+        .and_then(|d| {
+            d.as_str()
+                .and_then(|s| s.parse::<u64>().ok())
+                .or(d.as_u64())
+        })
+        .unwrap_or(0);
+    let has_album = track
+        .get("album")
+        .and_then(|a| a.get("title"))
+        .and_then(|t| t.as_str())
+        .is_some_and(|t| !t.trim().is_empty());
+    duration_ms > 0 || has_album
+}
+
 pub fn parse_track_response(body: &Value) -> Option<TrackEnrichment> {
     if body.get("error").is_some() {
         return None;
@@ -264,7 +319,7 @@ pub fn parse_track_response(body: &Value) -> Option<TrackEnrichment> {
         album_art_url,
         vibe,
         bpm: None,
-        found: true,
+        found: is_catalogued_track(track),
     })
 }
 
@@ -308,7 +363,8 @@ impl LastFmService {
 
     pub async fn fetch_track(&self, artist: &str, title: &str) -> Option<TrackEnrichment> {
         self.api_key.as_ref()?;
-        let lookup_title = normalize_title(title);
+        let artist = &normalize_artist(artist);
+        let lookup_title = lookup_title(artist, title);
         let cache_key = track_key(artist, &lookup_title);
 
         if let Some(cached) = self.cache.lock().unwrap().get(&cache_key).cloned() {
@@ -528,52 +584,91 @@ mod tests {
         assert_eq!(genres, vec!["indie"]);
     }
 
+    fn enrichment(found: bool) -> TrackEnrichment {
+        TrackEnrichment {
+            tags: vec![],
+            album_art_url: None,
+            vibe: None,
+            bpm: None,
+            found,
+        }
+    }
+
     #[test]
     fn confirmed_trusted_source_always_counts() {
-        assert!(is_confirmed_listen(true, None, false, false));
+        assert!(is_confirmed_listen(true, None));
     }
 
     #[test]
     fn confirmed_unverified_counts_once_lastfm_confirms() {
-        let enrichment = TrackEnrichment {
-            tags: vec![],
-            album_art_url: None,
-            vibe: None,
-            bpm: None,
-            found: true,
-        };
-        assert!(is_confirmed_listen(false, Some(&enrichment), false, false));
+        assert!(is_confirmed_listen(false, Some(&enrichment(true))));
     }
 
     #[test]
     fn confirmed_unverified_rejected_when_lastfm_says_not_found() {
-        let enrichment = TrackEnrichment {
-            tags: vec![],
-            album_art_url: None,
-            vibe: None,
-            bpm: None,
-            found: false,
-        };
-        assert!(!is_confirmed_listen(false, Some(&enrichment), false, false));
+        assert!(!is_confirmed_listen(false, Some(&enrichment(false))));
     }
 
     #[test]
-    fn confirmed_unverified_fails_open_when_never_checked() {
-        // No API key (or lookup hasn't started) — don't punish the listen
-        // for our own infra state.
-        assert!(is_confirmed_listen(false, None, false, false));
+    fn confirmed_unverified_fails_closed_without_a_lookup() {
+        // Pending, timed out, failed, or no API key — browser audio is more
+        // often a video than music, so it never counts unconfirmed.
+        assert!(!is_confirmed_listen(false, None));
     }
 
     #[test]
-    fn confirmed_unverified_fails_open_after_timeout() {
-        assert!(is_confirmed_listen(false, None, true, true));
+    fn parse_rejects_scrobble_only_video_entries() {
+        // What track.getInfo returns for a scrobbled YouTube video.
+        let body = json!({
+            "track": {
+                "name": "I Spent 50 Hours Buried Alive",
+                "duration": "0",
+                "listeners": "608",
+                "toptags": { "tag": [] }
+            }
+        });
+        assert!(!parse_track_response(&body).unwrap().found);
     }
 
     #[test]
-    fn confirmed_unverified_withheld_while_pending() {
-        // Lookup genuinely in flight and hasn't timed out — must wait,
-        // since a listen_log row written now can't be un-written later.
-        assert!(!is_confirmed_listen(false, None, true, false));
+    fn parse_accepts_catalogued_tracks() {
+        let with_duration = json!({ "track": { "duration": "212000" } });
+        assert!(parse_track_response(&with_duration).unwrap().found);
+        let with_album = json!({
+            "track": { "duration": "0", "album": { "title": "Whenever You Need Somebody" } }
+        });
+        assert!(parse_track_response(&with_album).unwrap().found);
+    }
+
+    #[test]
+    fn normalizes_youtube_artist_names() {
+        assert_eq!(normalize_artist("Rick Astley - Topic"), "Rick Astley");
+        assert_eq!(normalize_artist("RickAstleyVEVO"), "RickAstley");
+        assert_eq!(normalize_artist("Vevo"), "Vevo");
+        assert_eq!(normalize_artist("Duster"), "Duster");
+    }
+
+    #[test]
+    fn lookup_title_strips_youtube_decorations() {
+        assert_eq!(
+            lookup_title(
+                "Rick Astley",
+                "Rick Astley - Never Gonna Give You Up (Official Music Video)"
+            ),
+            "Never Gonna Give You Up"
+        );
+        assert_eq!(
+            lookup_title("Duster", "Inside Out [Lyric Video]"),
+            "Inside Out"
+        );
+        assert_eq!(lookup_title("Duster", "Inside Out"), "Inside Out");
+        assert_eq!(
+            lookup_title(
+                "The Buggles",
+                "The Buggles - Video Killed the Radio Star (Official Music Video)"
+            ),
+            "Video Killed the Radio Star"
+        );
     }
 
     #[test]
