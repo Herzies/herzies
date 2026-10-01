@@ -19,7 +19,18 @@ export interface Flight {
 }
 
 const SPRITE = 24;
-const DURATION_MS = 320;
+/** The icon size a card takes off from: bag and deck icons are both 16px. */
+const ICON = 16;
+/** Where in the flight the card is back to its landing size — before the end,
+ * so the last stretch is at the size it settles at rather than shrinking onto
+ * it, which read as a glitch. */
+const SETTLE_AT = 0.8;
+/** How big a card gets mid-flight, against its sprite: 24px, half again the
+ * 16px icon it took off from. */
+const PEAK_SCALE = 1;
+/** Also the length of the bag badges' fade-in (animate-flight-meta-in in
+ * globals.css) — keep the two in step. */
+const DURATION_MS = 160;
 /** Frames to wait for the landing spot before giving up on the flight — it
  * only happens when the move was refused, and then there's nowhere to go. */
 const MAX_WAIT_FRAMES = 20;
@@ -52,21 +63,41 @@ function FlightSprite({
       }
       // A returning card can land on a grid row that's scrolled out of view.
       target.scrollIntoView({ block: "nearest" });
-      const to = target.getBoundingClientRect();
+      // Lands exactly on the icon it lands on — the landing spot's own (hidden
+      // but laid out) icon, at its size and position. Aiming at the middle of
+      // a bag tile instead was half a pixel off where the tile centres its
+      // icon, a visible jump at the swap.
+      const icon = target.querySelector("svg")?.getBoundingClientRect();
+      const to = icon ?? target.getBoundingClientRect();
       const dx = to.left + to.width / 2 - flight.from.x;
       const dy = to.top + to.height / 2 - flight.from.y;
+      const start = ICON / SPRITE;
+      const end = (icon?.width || ICON) / SPRITE;
+      // The shortest way: every waypoint sits on the straight line from
+      // take-off to landing, at the same fraction of the way as of the time,
+      // so the card grows and settles without leaving the line.
+      const at = (f: number) => ({ x: dx * f, y: dy * f });
+      const mid = at(0.45);
+      const settle = at(SETTLE_AT);
       animation = ref.current?.animate(
         [
-          { transform: "translate(0, 0) scale(1)" },
           {
-            transform: `translate(${dx / 2}px, ${dy / 2 - 24}px) scale(1.4)`,
+            transform: `translate(0, 0) scale(${start})`,
+          },
+          {
+            transform: `translate(${mid.x}px, ${mid.y}px) scale(${PEAK_SCALE})`,
             offset: 0.45,
           },
-          { transform: `translate(${dx}px, ${dy}px) scale(0.85)` },
+          {
+            transform: `translate(${settle.x}px, ${settle.y}px) scale(${end})`,
+            offset: SETTLE_AT,
+          },
+          { transform: `translate(${dx}px, ${dy}px) scale(${end})` },
         ],
         {
           duration: DURATION_MS,
-          easing: "cubic-bezier(0.3, 0.7, 0.4, 1)",
+          // No easing: a steady speed the whole way.
+          easing: "linear",
           fill: "forwards",
         },
       );
@@ -91,6 +122,9 @@ function FlightSprite({
         top: flight.from.y - SPRITE / 2,
         width: SPRITE,
         height: SPRITE,
+        // Its take-off size, for the frame or two before the animation
+        // starts (while the landing spot is found).
+        transform: `scale(${ICON / SPRITE})`,
       }}
     >
       <ItemTypeIcon

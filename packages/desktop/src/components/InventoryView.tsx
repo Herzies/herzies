@@ -25,7 +25,6 @@ import {
   getItemType,
   groundSlot,
   MAX_MODIFIERS,
-  pickPlainestUnitIds,
   RARITY_COLORS,
   RARITY_LABELS,
   requiredDiceForLevel,
@@ -52,9 +51,9 @@ import {
 } from "./DeckOverlay";
 import { DeckSlotPicker, type PickerOption } from "./DeckSlotPicker";
 import { DiceUpgradeOverlay } from "./DiceUpgradeOverlay";
-import { Herzie3D } from "./Herzie3D";
+import { HERZIE_STAGE_HEIGHT, Herzie3D } from "./Herzie3D";
 import { type Flight, ItemFlights } from "./ItemFlight";
-import ItemInspectOverlay, { ItemPreviewCard } from "./ItemInspectOverlay";
+import ItemInspectOverlay, { CompactItemPreview } from "./ItemInspectOverlay";
 import { DuplicatesIcon } from "./icons/DuplicatesIcon";
 import { ItemTypeIcon } from "./icons/ItemTypeIcon";
 import { SortIcon } from "./icons/SortIcon";
@@ -211,8 +210,14 @@ const GRID_COLS = 6;
  * grows by whole rows per Inventory Expansion, so the grid scrolls once it has
  * more than this — see the row sizing below. */
 const VISIBLE_ROWS = 3;
-/** How close to the viewport's top/bottom edge a drag starts scrolling it. */
-const AUTOSCROLL_EDGE_PX = 28;
+/** How close to the viewport's top/bottom edge a drag starts scrolling it.
+ * Narrow: a row is only ~36px tall, and a wider band set the grid scrolling
+ * while the card was simply being held over the first or last row. Past the
+ * edge (onto the bag's title, or below the grid) it keeps scrolling. */
+const AUTOSCROLL_EDGE_PX = 10;
+/** How long a card has to stay at the edge before the grid starts scrolling,
+ * so passing over it on the way somewhere else doesn't move the grid. */
+const AUTOSCROLL_DELAY_MS = 250;
 const AUTOSCROLL_STEP_PX = 10;
 
 // Capacity is `bankCapacity(...)` from @herzies/shared — every slot shown
@@ -462,14 +467,14 @@ function ItemGridCell({
   flying,
   equipped,
   onPlace,
-  onSellRequest,
+  onMenuRequest,
   onDragPointerDown,
 }: {
   index: number;
   itemId: string;
   /** Copies behind the tile: more than one only for a stack. */
   unitIds: string[];
-  /** This copy's dice-upgrade level (0 for a stack) — see ItemPreviewCard. */
+  /** This copy's dice-upgrade level (0 for a stack) — see CompactItemPreview. */
   level: number;
   isLastCol: boolean;
   isLastRow: boolean;
@@ -481,21 +486,21 @@ function ItemGridCell({
   /** The tile is the exact copy that was clicked — there is no "which of the
    * identical cards" to work out — so no slot index has to be threaded through. */
   onPlace: () => void;
-  onSellRequest: (x: number, y: number) => void;
+  /** Right-click: the tile's menu (Inspect, and Sell where it sells). */
+  onMenuRequest: (x: number, y: number) => void;
   onDragPointerDown: (index: number, e: React.PointerEvent) => void;
 }) {
   const def = getItem(itemId);
   const qty = unitIds.length;
 
   return (
+    // The condensed card: browsing the bag wants a glance, not the full art.
+    // Right-click → Inspect opens the full one.
     <HoverPreview
+      estWidth={180}
+      estHeight={80}
       content={
-        <ItemPreviewCard
-          itemId={itemId}
-          box={100}
-          equipped={equipped}
-          level={level}
-        />
+        <CompactItemPreview itemId={itemId} equipped={equipped} level={level} />
       }
     >
       <button
@@ -506,7 +511,7 @@ function ItemGridCell({
         onClick={onPlace}
         onContextMenu={(e) => {
           e.preventDefault();
-          if (def?.sellPrice) onSellRequest(e.clientX, e.clientY);
+          onMenuRequest(e.clientX, e.clientY);
         }}
         className={cn(
           // w-full/h-full: Tooltip's trigger span is a flex item's only
@@ -520,7 +525,11 @@ function ItemGridCell({
           dragVisualClasses(isDragging, isDragOver),
         )}
       >
-        <span className={cn("contents", flying && "[&>*]:invisible")}>
+        {/* While a card flies back onto this tile, its icon waits for the
+            landing and the badges fade in during the flight. */}
+        <span
+          className={cn("contents", flying && "[&>*]:animate-flight-meta-in")}
+        >
           {def && (
             // Rarity, as a small right triangle in the bottom-left corner, inset
             // by the same 2px as the +N and xN badges, in the rarity's own colour (the same one the preview card
@@ -545,8 +554,13 @@ function ItemGridCell({
               x{qty}
             </span>
           )}
-          {def && <ItemTypeIcon item={def} className="h-4 w-4" />}
         </span>
+        {def && (
+          <ItemTypeIcon
+            item={def}
+            className={cn("h-4 w-4", flying && "invisible")}
+          />
+        )}
       </button>
     </HoverPreview>
   );
@@ -663,14 +677,25 @@ export function InventoryView({
   const [inspectItem, setInspectItem] = useState<string | null>(
     initialItem ?? null,
   );
-  /** Sell popover/menu, anchored where the right-click was. They name the TILE
+  /** The exact copy Inspect was opened on, so a plain copy doesn't show its
+   * +3 twin's level. A deep link names only an item, and falls back to the
+   * best copy. */
+  const [inspectUnitId, setInspectUnitId] = useState<string | null>(null);
+  /** Sell popover and the tile menu, anchored where the right-click was. They name the TILE
    * (which is what says exactly which copies), not an item id. */
   const [sellBox, setSellBox] = useState<{
     tileKey: string;
     x: number;
     y: number;
   } | null>(null);
-  const [sellMenu, setSellMenu] = useState<{
+  /** A filled deck box's right-click menu, naming the worn copy. */
+  const [deckMenu, setDeckMenu] = useState<{
+    unitId: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  /** A bag tile's right-click menu. */
+  const [tileMenu, setTileMenu] = useState<{
     tileKey: string;
     x: number;
     y: number;
@@ -793,7 +818,9 @@ export function InventoryView({
   }, [cachedCurrency, herzie.currency, sellsInFlight]);
 
   useEffect(() => {
-    if (initialItem) setInspectItem(initialItem);
+    if (!initialItem) return;
+    setInspectItem(initialItem);
+    setInspectUnitId(null);
   }, [initialItem]);
 
   // Custom press-and-drag instead of the native HTML5 Drag and Drop API —
@@ -831,30 +858,40 @@ export function InventoryView({
     // loop rather than off pointermove: a cursor parked at the edge stops
     // firing pointermove but should keep scrolling.
     let frame = 0;
+    /** When the card reached the edge it's at; 0 while it's at neither. */
+    let edgeSince = 0;
     const autoScroll = () => {
       const state = dragRef.current;
       // Ends with the drag, so nothing runs per-frame while idle (this view
       // stays mounted while another tab is showing).
       if (!state?.dragging) {
         frame = 0;
+        edgeSince = 0;
         return;
       }
       frame = requestAnimationFrame(autoScroll);
-      // Up past the grid's top edge is the herzie: a card carried there is
-      // headed for the deck, not for a row scrolled out of sight.
-      if (state.inZone) return;
       const viewport = gridViewportRef.current;
       // The scroller is List's own element, the viewport's only child.
       const scroller = viewport?.firstElementChild;
       if (!viewport || !(scroller instanceof HTMLElement)) return;
       const rect = viewport.getBoundingClientRect();
-      if (state.pointerY < rect.top + AUTOSCROLL_EDGE_PX) {
-        scroller.scrollTop -= AUTOSCROLL_STEP_PX;
-      } else if (state.pointerY > rect.bottom - AUTOSCROLL_EDGE_PX) {
-        scroller.scrollTop += AUTOSCROLL_STEP_PX;
-      } else {
+      // Up past the grid's top edge is the herzie: a card carried there is
+      // headed for the deck, not for a row scrolled out of sight.
+      const step = state.inZone
+        ? 0
+        : state.pointerY < rect.top + AUTOSCROLL_EDGE_PX
+          ? -AUTOSCROLL_STEP_PX
+          : state.pointerY > rect.bottom - AUTOSCROLL_EDGE_PX
+            ? AUTOSCROLL_STEP_PX
+            : 0;
+      if (step === 0) {
+        edgeSince = 0;
         return;
       }
+      const now = performance.now();
+      if (edgeSince === 0) edgeSince = now;
+      if (now - edgeSince < AUTOSCROLL_DELAY_MS) return;
+      scroller.scrollTop += step;
       // The cursor hasn't moved but the cell under it has: re-hit-test so the
       // drop target follows the scroll.
       const { overIndex } = hitTest(state.lastX, state.pointerY);
@@ -1576,10 +1613,10 @@ export function InventoryView({
   // The overlay opens on an item id (a deep link from a notification), so it
   // shows the copy that id most plausibly means: the one worn, else the best.
   const inspected = inspectItem ? getItem(inspectItem) : null;
-  const inspectUnit = inspectItem ? bestUnitOf(units, inspectItem) : undefined;
-  const inspectedQty = inspectItem
-    ? units.filter((u) => u.itemId === inspectItem).length
-    : 0;
+  const inspectUnit = inspectItem
+    ? (units.find((u) => u.id === inspectUnitId && u.itemId === inspectItem) ??
+      bestUnitOf(units, inspectItem))
+    : undefined;
   const inspectedEquipped = inspectUnit?.equippedSlot != null;
   const inspectedModifierCapped =
     !inspectedEquipped &&
@@ -1593,9 +1630,6 @@ export function InventoryView({
           ? "R"
           : null
       : null;
-  // Quantity is only meaningful for stackable items — each non-stackable
-  // card in the grid already represents exactly one copy, so showing "x2"
-  // while inspecting one of them would be misleading.
 
   return (
     <div className="flex h-full flex-col">
@@ -1610,23 +1644,39 @@ export function InventoryView({
         </Tooltip>
       </div>
 
-      {/* The herzie, with the deck on its left and its stats on its right —
-          so whatever goes on shows on the creature right there. The whole
-          area takes a dropped card. */}
-      <div {...{ [HERZIE_ZONE_ATTR]: "" }} className="relative min-h-0 flex-1">
-        <div className="flex h-full items-center justify-center">
-          <Herzie3D
-            userId={herzie.friendCode}
-            stage={herzie.stage}
-            equipped={equipped}
-            paused={!active}
-          />
+      {/* The herzie with its stats over it, then the deck beneath — so
+          whatever goes on shows on the creature right there. The whole
+          area, deck included, takes a dropped card. */}
+      <div {...{ [HERZIE_ZONE_ATTR]: "" }} className="flex shrink-0 flex-col">
+        {/* The stage: HERZIE_STAGE_HEIGHT, the same as on Home, so the herzie
+            doesn't move when switching between the two. */}
+        <div className="relative" style={{ height: HERZIE_STAGE_HEIGHT }}>
+          <div className="flex h-full items-center justify-center">
+            <Herzie3D
+              userId={herzie.friendCode}
+              stage={herzie.stage}
+              equipped={equipped}
+              paused={!active}
+            />
+          </div>
+          {/* Top left, flush with the view's edge like the deck below. */}
+          <div className="pointer-events-none absolute top-1.5 left-0 z-10">
+            <StatsPanel stats={stats} preview={statsPreview} />
+          </div>
+          {notice && (
+            <div
+              role="status"
+              className="pointer-events-none absolute inset-x-0 top-2 z-20 flex justify-center"
+            >
+              <div className="border border-red/60 bg-bg-panel px-2 py-1 text-ui-sm text-red">
+                {notice}
+              </div>
+            </div>
+          )}
         </div>
-        {/* Stats in the top right, the deck full width along the bottom. */}
-        <div className="pointer-events-none absolute top-1.5 right-1.5 z-10">
-          <StatsPanel stats={stats} preview={statsPreview} />
-        </div>
-        <div className="pointer-events-none absolute inset-x-0 bottom-1.5 z-10">
+        {/* Part of the content rather than laid over the herzie: its own
+            strip between the herzie and the bag. */}
+        <div className="z-10 shrink-0">
           <DeckOverlay
             equipped={equipped}
             units={units}
@@ -1642,27 +1692,14 @@ export function InventoryView({
               handleEquip(unitId);
             }}
             onDragStart={handleDeckPointerDown}
+            onMenuRequest={(unitId, x, y) => setDeckMenu({ unitId, x, y })}
             onPlaceRequest={setSlotPicker}
           />
         </div>
-        {notice && (
-          <div
-            role="status"
-            className="pointer-events-none absolute inset-x-0 top-2 z-20 flex justify-center"
-          >
-            <div className="border border-red/60 bg-bg-panel px-2 py-1 text-ui-sm text-red">
-              {notice}
-            </div>
-          </div>
-        )}
       </div>
 
-      {/* Item grid — bottom ~44% */}
-      {/* 44%, rounded down to a whole pixel: the herzie area above takes the
-          rest, and the deck sits on its bottom edge — a fractional height
-          would put the deck's pixel-art icons between pixels (see
-          OVERLAY_TITLE). */}
-      <div className="z-10 flex h-[round(down,44%,1px)] min-h-0 shrink-0 flex-col">
+      {/* The bag: whatever the stage and deck leave. */}
+      <div className="z-10 flex min-h-0 flex-1 flex-col">
         {/* Both buttons live in one wrapper so they read as a pair, and the
             wrapper's `ml-auto` pushes them right. */}
         <div className="mb-0.5 flex items-center border-b border-border">
@@ -1712,8 +1749,8 @@ export function InventoryView({
           </div>
         ) : (
           // Three rows fill the panel; past that (each Inventory Expansion adds
-          // two rows) it scrolls, with List's edge fades as the only hint —
-          // scrollbars are hidden app-wide.
+          // two rows) it scrolls. No fade hints at the edges, and scrollbars
+          // are hidden app-wide.
           <div
             ref={gridViewportRef}
             className={cn(
@@ -1725,11 +1762,10 @@ export function InventoryView({
                 are right on the very first frame — no measuring, and nothing to
                 jump when the view is shown. The content is `rows / 3` viewports
                 tall (a percentage of the scroller) and the grid splits that
-                evenly, which is what makes each row a third. It has to be the
-                content's true height: List's bottom fade sits after it, and
-                would otherwise land in the middle of the list. */}
+                evenly, which is what makes each row a third. */}
             <List
               className="h-full"
+              fades={false}
               contentStyle={{
                 height: `${(gridRows * 100) / VISIBLE_ROWS}%`,
               }}
@@ -1774,8 +1810,8 @@ export function InventoryView({
                       flying={tile.unitIds.some((id) => flyingUnitIds.has(id))}
                       equipped={equipped}
                       onPlace={() => handleGridClick(tile)}
-                      onSellRequest={(x, y) =>
-                        setSellMenu({ tileKey: tile.key, x, y })
+                      onMenuRequest={(x, y) =>
+                        setTileMenu({ tileKey: tile.key, x, y })
                       }
                       onDragPointerDown={handleDragPointerDown}
                     />
@@ -1824,19 +1860,7 @@ export function InventoryView({
                     button
                   );
                 })()}
-              {inspected.sellPrice && inspectedQty > 0 ? (
-                <SellControls
-                  qty={inspectedQty}
-                  price={inspected.sellPrice}
-                  stackable={inspected.stackable ?? false}
-                  onSell={(qty) => {
-                    // The overlay only knows an item id, so which copies goes
-                    // by the plainest-first rule: a spare, never the one worn.
-                    const ids = pickPlainestUnitIds(units, inspectItem, qty);
-                    if (ids) requestSell(inspectItem, ids);
-                  }}
-                />
-              ) : null}
+              {/* No Sell here: selling lives in the bag's right-click menu. */}
             </>
           }
         />
@@ -1857,26 +1881,75 @@ export function InventoryView({
         />
       )}
 
-      {sellMenu &&
+      {deckMenu &&
         (() => {
-          const tile = tileByKey.get(sellMenu.tileKey);
-          if (!tile) return null;
-          const qty = tile.unitIds.length;
-          const canSellAll =
-            (getItem(tile.itemId)?.stackable ?? false) && qty > 1;
+          const unit = units.find((u) => u.id === deckMenu.unitId);
+          if (!unit) return null;
           return (
             <ContextMenu
-              x={sellMenu.x}
-              y={sellMenu.y}
-              onClose={() => setSellMenu(null)}
+              x={deckMenu.x}
+              y={deckMenu.y}
+              onClose={() => setDeckMenu(null)}
               items={[
                 {
-                  label: "Sell",
+                  label: "Inspect",
                   onClick: () => {
-                    setSellBox(sellMenu);
-                    setSellMenu(null);
+                    setInspectItem(unit.itemId);
+                    setInspectUnitId(unit.id);
+                    setDeckMenu(null);
                   },
                 },
+                // Sells exactly the worn copy — a box holds one, so there's no
+                // quantity to pick. Selling it takes it off; rare and up still
+                // ask first (see requestSell).
+                ...(getItem(unit.itemId)?.sellPrice
+                  ? [
+                      {
+                        label: "Sell",
+                        onClick: () => {
+                          requestSell(unit.itemId, [unit.id]);
+                          setDeckMenu(null);
+                        },
+                      },
+                    ]
+                  : []),
+              ]}
+            />
+          );
+        })()}
+
+      {tileMenu &&
+        (() => {
+          const tile = tileByKey.get(tileMenu.tileKey);
+          if (!tile) return null;
+          const qty = tile.unitIds.length;
+          const def = getItem(tile.itemId);
+          const canSellAll = (def?.stackable ?? false) && qty > 1;
+          return (
+            <ContextMenu
+              x={tileMenu.x}
+              y={tileMenu.y}
+              onClose={() => setTileMenu(null)}
+              items={[
+                {
+                  label: "Inspect",
+                  onClick: () => {
+                    setInspectItem(tile.itemId);
+                    setInspectUnitId(tile.unitIds[0]);
+                    setTileMenu(null);
+                  },
+                },
+                ...(def?.sellPrice
+                  ? [
+                      {
+                        label: "Sell",
+                        onClick: () => {
+                          setSellBox(tileMenu);
+                          setTileMenu(null);
+                        },
+                      },
+                    ]
+                  : []),
                 // Skips the quantity popover and sells the whole stack.
                 ...(canSellAll
                   ? [
@@ -1884,7 +1957,7 @@ export function InventoryView({
                         label: "Sell all",
                         onClick: () => {
                           requestSell(tile.itemId, tile.unitIds);
-                          setSellMenu(null);
+                          setTileMenu(null);
                         },
                       },
                     ]

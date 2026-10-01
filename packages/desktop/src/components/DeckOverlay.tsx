@@ -12,7 +12,7 @@ import {
   type ItemUnit,
 } from "@herzies/shared";
 import { cn } from "../lib/utils";
-import { ItemPreviewCard } from "./ItemInspectOverlay";
+import { CompactItemPreview } from "./ItemInspectOverlay";
 import {
   CARD_SHAPE_CLIP,
   GenericTypeIcon,
@@ -88,19 +88,18 @@ interface SlotHandlers {
   onUnequip: (unitId: string) => void;
   /** Pointer down on a filled box: the start of a drag out of the deck. */
   onDragStart: (unitId: string, e: React.PointerEvent) => void;
+  /** Right-click on a filled box: its menu (Inspect), at the cursor. */
+  onMenuRequest: (unitId: string, x: number, y: number) => void;
   onPlaceRequest: (target: EmptySlotTarget) => void;
 }
 
-/** The look shared by the deck and the stats box: a translucent, blurred
- * panel, so the herzie shows through behind without the text on top getting
- * lost in it. */
-export const OVERLAY_PANEL =
-  "pointer-events-auto bg-bg/50 px-2 py-1.5 backdrop-blur-sm";
+/** The stats box: no panel behind it, and no side padding either, so its
+ * text lines up with the view's edge like "Herzie" and "Deck". */
+export const OVERLAY_PANEL = "pointer-events-auto py-1.5";
 
-/** A panel's title — "Deck", "Stats". */
-/** A whole-pixel line height (text-ui's default is 16.5px): the icons below
- * are crisp-edged pixel art, and a half-pixel offset snaps their rows
- * unevenly — they read as warped. */
+/** The deck's "Deck" title. A whole-pixel line height (text-ui's default is
+ * 16.5px): the icons below are crisp-edged pixel art, and a half-pixel offset
+ * snaps their rows unevenly — they read as warped. */
 export const OVERLAY_TITLE = "mb-1 text-ui leading-4 font-bold text-text-dim";
 
 /** One section of the deck: its boxes, unlabelled — each empty box names its
@@ -178,15 +177,23 @@ function DeckGroup({
   );
 }
 
-/** The deck, in one row along the bottom of the herzie so a change shows on
- * the creature the moment it's made. */
+/** The deck: one row of boxes beneath the herzie, so a change shows on the
+ * creature right above it the moment it's made. The boxes sit on a solid band
+ * of colour, so the deck reads apart from the herzie above and the bag below. */
 export function DeckOverlay(props: SlotHandlers) {
   return (
-    <div className={OVERLAY_PANEL}>
-      <div className={OVERLAY_TITLE}>Deck</div>
-      {/* One row, the sections spread across the full width: the empty
-          boxes' hover labels name each one. */}
-      <div className="flex justify-between">
+    // mb-2: breathing room between the deck's band and the bag below.
+    <div className="pointer-events-auto mb-2 pt-1.5">
+      <Tooltip label="Place cards here">
+        <div className={cn(OVERLAY_TITLE, "cursor-default")}>Deck</div>
+      </Tooltip>
+      {/* The boxes on a full-bleed band, the title kept off it: the band
+          reaches the window's edges (out past the view's 12px side padding,
+          the -mx-3), while the px-3 keeps the first and last boxes lined up
+          with everything else. One row, the sections spread across the full
+          width: the empty boxes' hover labels name each one. */}
+      {/* #07070c: a shade darker than the app's own background (#0c0c14). */}
+      <div className="-mx-3 flex justify-between bg-[#07070c] px-3 py-1.5">
         {DECK_SLOT_ORDER.map((label) => (
           <DeckGroup key={label} group={groupByLabel(label)} {...props} />
         ))}
@@ -219,6 +226,7 @@ function DeckSlot({
   draggingUnitId,
   onUnequip,
   onDragStart,
+  onMenuRequest,
   onPlaceRequest,
 }: Omit<SlotHandlers, "onPlaceRequest" | "drag"> & {
   itemId: string | undefined;
@@ -303,28 +311,44 @@ function DeckSlot({
       // act on it until the next sync brings the copies.
       disabled={!worn}
       onPointerDown={(e) => worn && onDragStart(worn.id, e)}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        if (worn) onMenuRequest(worn.id, e.clientX, e.clientY);
+      }}
       onClick={() => worn && onUnequip(worn.id)}
       className={hitClass}
     >
       <span
         className={cn(
-          "flex h-4 w-4 items-center justify-center transition-opacity group-hover:opacity-75",
+          "relative flex h-4 w-4 items-center justify-center transition-opacity group-hover:opacity-75",
           dragging && "opacity-30",
           // Still laid out (the flight measures it), just not drawn until the
           // flying copy arrives.
           flying && "invisible",
         )}
-        // No card-shaped clip here, unlike the empty box: the icon draws its
-        // own card frame, and the clip shaved off its right and bottom edges.
+        // No card-shaped clip on the icon, unlike the empty box: the icon draws
+        // its own card frame, and the clip shaved off its right and bottom
+        // edges.
       >
+        {/* The app background behind the card, clipped to its shape, so the
+            card's see-through middle shows that rather than the deck's band —
+            the same as a card in the bag. Only the backing is clipped. */}
+        <span
+          aria-hidden="true"
+          className="absolute inset-0 bg-bg"
+          style={{ clipPath: CARD_SHAPE_CLIP }}
+        />
         {def ? (
-          <ItemTypeIcon item={def} className="h-full w-full" />
+          <ItemTypeIcon item={def} className="relative h-full w-full" />
         ) : (
           // Equipped-but-missing-from-catalog (stale/desynced data): render
           // filled but generic rather than silently falling back to empty — an
           // empty box would hide a real data problem and make the item
           // un-unequippable here.
-          <GenericTypeIcon type={fallbackType} className="h-full w-full" />
+          <GenericTypeIcon
+            type={fallbackType}
+            className="relative h-full w-full"
+          />
         )}
       </span>
     </button>
@@ -333,14 +357,15 @@ function DeckSlot({
   if (!def) return <Tooltip label={itemId}>{button}</Tooltip>;
 
   return (
-    // Below, not above: the top row of clusters sits at the top of the
-    // render, where there's no room over it.
+    // The same condensed card as the bag's. Above the box when there's room
+    // (the deck sits at the bottom of the herzie), else below.
     <HoverPreview
       alwaysAbove={false}
+      estWidth={180}
+      estHeight={80}
       content={
-        <ItemPreviewCard
+        <CompactItemPreview
           itemId={itemId}
-          box={100}
           equipped={equipped}
           level={worn?.upgradeLevel ?? 0}
         />
