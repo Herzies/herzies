@@ -136,6 +136,22 @@
   animation: drop-float 2.2s ease-in-out infinite;
 }
 
+/* A bag tile's badges (+N, xN, rarity) while its card flies back from the
+   deck: they fade in over the flight, so the tile is dressed by the time the
+   card lands. 160ms is ItemFlight's DURATION_MS. */
+@keyframes flight-meta-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@utility animate-flight-meta-in {
+  animation: flight-meta-in 160ms ease-out both;
+}
+
 /* A visitor's Town portrait idling while they're in town: a one-pixel hop
    with no easing, so it moves like a sprite rather than floating. */
 @keyframes visitor-bob {

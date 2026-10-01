@@ -52,7 +52,7 @@ export function SettingsView({
 
   const shortcuts: { key: string; label: string }[] = [
     { key: "H", label: "Home" },
-    { key: "I", label: "Inventory" },
+    { key: "I", label: "Herzie" },
     { key: "T", label: "Town" },
     { key: "F", label: "Social" },
     { key: "S", label: "Settings" },

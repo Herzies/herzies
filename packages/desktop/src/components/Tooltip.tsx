@@ -113,6 +113,19 @@ const TRIGGER_GAP = 8;
 const PREVIEW_EST_WIDTH = 260;
 const PREVIEW_EST_HEIGHT = 300;
 
+/** How long the cursor has to rest on an item before its first preview opens,
+ * so sweeping across the grid on the way somewhere else doesn't flash cards. */
+const PREVIEW_OPEN_DELAY_MS = 350;
+/** Once a preview has been shown, moving on to the next item within this long
+ * opens its preview straight away — browsing item to item stays instant. */
+const PREVIEW_WARM_MS = 300;
+/** When the last preview closed, and how many are open now. Module-wide, so
+ * the warmth carries from one trigger to the next. */
+let previewClosedAt = Number.NEGATIVE_INFINITY;
+let previewsOpen = 0;
+const previewWarm = () =>
+  previewsOpen > 0 || performance.now() - previewClosedAt < PREVIEW_WARM_MS;
+
 /**
  * Shows `content` anchored to the trigger element's own position, not the
  * cursor — unlike `Tooltip`, position is measured once (on hover) from the
@@ -144,6 +157,45 @@ export function HoverPreview({
 }) {
   const ref = useRef<HTMLSpanElement>(null);
   const [visible, setVisible] = useState(false);
+  const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Tracks this preview in the module-wide warmth (see previewWarm).
+  useEffect(() => {
+    if (!visible) return;
+    previewsOpen++;
+    return () => {
+      previewsOpen--;
+      previewClosedAt = performance.now();
+    };
+  }, [visible]);
+
+  const cancelOpen = () => {
+    if (openTimer.current !== null) clearTimeout(openTimer.current);
+    openTimer.current = null;
+  };
+  // Unmounting mid-delay must not open a preview for a trigger that's gone.
+  useEffect(
+    () => () => {
+      if (openTimer.current !== null) clearTimeout(openTimer.current);
+    },
+    [],
+  );
+
+  const open = () => {
+    cancelOpen();
+    if (previewWarm()) {
+      setVisible(true);
+      return;
+    }
+    openTimer.current = setTimeout(() => {
+      openTimer.current = null;
+      setVisible(true);
+    }, PREVIEW_OPEN_DELAY_MS);
+  };
+  const hide = () => {
+    cancelOpen();
+    setVisible(false);
+  };
 
   const bubbleStyle = (): React.CSSProperties => {
     const rect = ref.current?.getBoundingClientRect();
@@ -165,17 +217,17 @@ export function HoverPreview({
     <span
       ref={ref}
       className={cn("inline-flex", className)}
-      onMouseEnter={(e) => setVisible(e.buttons === 0)}
+      onMouseEnter={(e) => (e.buttons === 0 ? open() : hide())}
       // Same drag guard as `Tooltip` — see its handleMove.
       onMouseMove={(e) => {
-        if (e.buttons !== 0) setVisible(false);
+        if (e.buttons !== 0) hide();
       }}
-      onMouseLeave={() => setVisible(false)}
+      onMouseLeave={hide}
       // A click is the player acting on the item — equipping it, opening
       // the dice window, inspecting it — and the preview has done its job.
       // It stays closed until the pointer leaves and comes back (only
       // mouseenter re-opens it).
-      onPointerDown={() => setVisible(false)}
+      onPointerDown={hide}
     >
       {children}
       {visible &&

@@ -29,7 +29,7 @@ const ORPHIEZ_LINES = [
  * character rather than a form. Sits at the top of the song hunt view.
  */
 export function OrphiezStage({ paused }: { paused: boolean }) {
-  const { line, typed } = useChatter(ORPHIEZ_LINES, !paused);
+  const { line, typed, advance } = useChatter(ORPHIEZ_LINES, !paused);
   const orphiez = VISITORS.song_hunt;
   return (
     <div className="flex shrink-0 flex-col gap-1">
@@ -51,6 +51,15 @@ export function OrphiezStage({ paused }: { paused: boolean }) {
             ariaLabel={orphiez.name}
           />
         </div>
+        {/* Clicking Orphiez hurries them along, as with George: the line
+            they're on shows in full, or the next one comes now. z-[2]: over
+            the canvas (its own z-index is 1), under the bubble. */}
+        <button
+          type="button"
+          aria-label={`Talk to ${orphiez.name}`}
+          onClick={advance}
+          className="absolute inset-0 z-[2] cursor-pointer border-none bg-transparent p-0"
+        />
         <SpeechBubble line={line} typed={typed} />
       </div>
     </div>

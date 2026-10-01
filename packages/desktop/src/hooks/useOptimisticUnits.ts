@@ -107,7 +107,7 @@ function sameOwned(a: OwnedState, b: OwnedState): boolean {
 }
 
 /** Ground items pick a side at equip time; prefer a free one, else replace left. */
-function pickGroundSide(equipped: Equipped): GroundSide {
+export function pickGroundSide(equipped: Equipped): GroundSide {
   if (!equipped.ground_left) return "left";
   if (!equipped.ground_right) return "right";
   return "left";
@@ -213,11 +213,15 @@ export function useOptimisticUnits(
     async (
       unitId: string,
       preferredSide?: GroundSide,
+      /** Force "equip" on a copy that's already worn: moving an Accessory to
+       * the other side (`preferredSide`), which equip_unit supports by freeing
+       * its old slot first. Otherwise a worn copy toggles off. */
+      move = false,
     ): Promise<ToggleEquipResult> => {
       const base = overlayRef.current ?? serverRef.current;
       const unit = base.units.find((u) => u.id === unitId);
       const worn = unit?.equippedSlot != null;
-      const action: "equip" | "unequip" = worn ? "unequip" : "equip";
+      const action: "equip" | "unequip" = worn && !move ? "unequip" : "equip";
       if (!unit) {
         return {
           ok: false,
@@ -255,10 +259,14 @@ export function useOptimisticUnits(
         };
       }
 
-      setOverlay({
+      // Into the ref now as well as state, so a second change made in the same
+      // tick (the two halves of an Accessory swap) builds on this one rather
+      // than on the render-old overlay.
+      overlayRef.current = {
         units: predicted.units,
         equipped: deriveEquipped(predicted.units, base.equipped),
-      });
+      };
+      setOverlay(overlayRef.current);
       setInFlight((n) => n + 1);
       try {
         await herzies.equipItem(unitId, action, side);
@@ -270,6 +278,7 @@ export function useOptimisticUnits(
         // way to rebuild the rest. Any still pending will be reflected once
         // the server confirms them and the next `state-update` lands; nothing
         // re-applies a prediction for them.
+        overlayRef.current = null;
         setOverlay(null);
         const error = e instanceof Error ? e.message : String(e);
         return { ok: false, action, error, sent: true };
@@ -299,7 +308,11 @@ export function useOptimisticUnits(
     ) => {
       const base = overlayRef.current ?? serverRef.current;
       const units = update(base.units);
-      setOverlay({ units, equipped: deriveEquipped(units, base.equipped) });
+      overlayRef.current = {
+        units,
+        equipped: deriveEquipped(units, base.equipped),
+      };
+      setOverlay(overlayRef.current);
       setInFlight((n) => n + 1);
       const release = () => setInFlight((n) => Math.max(0, n - 1));
       // Both arms, rather than .finally(), so a rejected `settled` doesn't

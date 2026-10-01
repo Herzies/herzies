@@ -83,8 +83,6 @@ const BOSS_LINES: { text: string; above?: number; below?: number }[] = [
   { text: "Okay — OKAY! Enough!", below: 0.3 },
   { text: "Please. Anything but {genre}.", below: 0.3 },
 ];
-const BOSS_TEXTS = BOSS_LINES.map((l) => l.text);
-
 /**
  * Cycles the boss's speech: a new line every 10s, on screen for 7s, typed out
  * a character at a time.
@@ -97,7 +95,15 @@ const BOSS_TEXTS = BOSS_LINES.map((l) => l.text);
 function useBossChatter(hpFraction: number, genre: string, active: boolean) {
   const hpRef = useRef(hpFraction);
   hpRef.current = hpFraction;
-  const { line, typed } = useChatter(BOSS_TEXTS, active, (texts) => {
+  // The genre goes in before the line is typed, not after: the typewriter
+  // counts characters of the line it's given, so swapping a longer phrase in
+  // afterwards left the end of every genre line untyped, the cursor stuck
+  // mid-sentence. Same order as BOSS_LINES, which `pick` indexes into.
+  const texts = useMemo(
+    () => BOSS_LINES.map((l) => l.text.replaceAll("{genre}", genre)),
+    [genre],
+  );
+  const { line, typed, advance } = useChatter(texts, active, (texts) => {
     const hp = hpRef.current;
     return texts.filter((_, i) => {
       const l = BOSS_LINES[i];
@@ -107,7 +113,7 @@ function useBossChatter(hpFraction: number, genre: string, active: boolean) {
       );
     });
   });
-  return { line: line?.replace("{genre}", genre) ?? null, typed };
+  return { line, typed, advance };
 }
 
 export function BossFightPanel({
@@ -148,11 +154,8 @@ export function BossFightPanel({
 
   const hated = hatedPhrase(config.hatedGenres ?? []);
   const escaped = config.escaped || (remaining <= 0 && !dead);
-  const { line, typed } = useBossChatter(
-    hpFrac,
-    hated,
-    !paused && !dead && !escaped,
-  );
+  const chatting = !paused && !dead && !escaped;
+  const { line, typed, advance } = useBossChatter(hpFrac, hated, chatting);
 
   return (
     // flex-1 so this fills the View's body; without a definite height the
@@ -213,6 +216,18 @@ export function BossFightPanel({
         {/* Deliberately NOT drawn into the ASCII canvas: glyph art can't be
             read at this size, and the hated genres are the one thing a player
             has to actually read to know what to play. */}
+        {/* Clicking the boss hurries it along, as with George: the line it's
+            on shows in full, or the next one comes now. Only while it's
+            talking — a decided fight is silent. z-[2]: over the canvas (its
+            own z-index is 1), under the bubble. */}
+        {chatting && (
+          <button
+            type="button"
+            aria-label={`Talk to ${event.title}`}
+            onClick={advance}
+            className="absolute inset-0 z-[2] cursor-pointer border-none bg-transparent p-0"
+          />
+        )}
         <SpeechBubble line={line} typed={typed} />
 
         {dead || escaped ? (
@@ -315,11 +330,9 @@ export function makeDebugBoss(): GameEvent {
   const now = Date.now();
   const config: BossFightView = {
     hatedGenres: ["electronic"],
-    // Left undefined on purpose: the server withholds the reward until the
-    // boss is dead, so this is what a live boss actually looks like. Flip
-    // `killed` to true and set these to see the revealed state.
-    rewardItemId: undefined,
-    topRewardItemId: undefined,
+    // The rewards a live boss shows in its "?" (see BossFightHelp).
+    rewardItemId: "cd",
+    topRewardItemId: "cd",
     topCount: 3,
     hp: 42_180,
     maxHp: 100_000,
@@ -348,9 +361,9 @@ export function makeDebugBoss(): GameEvent {
 }
 
 /**
- * The "?" that sits in the boss's header. The rewards only show once the
- * boss is dead: the server withholds them until then, so a live boss's
- * popover just explains the fight.
+ * The "?" that sits in the boss's header: what the fight is, and what it
+ * pays — the reward for everyone who joins in, and the bonus for the top
+ * damage dealers.
  */
 export function BossFightHelp({ event }: { event: GameEvent }) {
   const config = event.config as unknown as BossFightView;

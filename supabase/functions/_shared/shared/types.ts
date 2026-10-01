@@ -289,10 +289,8 @@ export interface BossDamageDealer {
  */
 export interface BossFightView {
   hatedGenres: Genre[];
-  /**
-   * Withheld until the boss is dead — the reward is part of the mystery, and
-   * hiding it only in the UI would leave it readable in the response.
-   */
+  /** What everyone who dealt damage gets — shown from the start. Optional
+   * only for an event whose config has none. */
   rewardItemId?: string;
   topRewardItemId?: string;
   topCount: number;

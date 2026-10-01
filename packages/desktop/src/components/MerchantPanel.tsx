@@ -109,7 +109,7 @@ export function MerchantPanel({
   };
 
   const inspected = stock.find((l) => l.itemId === inspectItemId);
-  const { line, typed } = useChatter(GEORGE_LINES, !paused);
+  const { line, typed, advance } = useChatter(GEORGE_LINES, !paused);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
@@ -137,6 +137,15 @@ export function MerchantPanel({
           />
         </div>
         <FloatingCoins paused={paused} />
+        {/* Clicking George hurries him along: the line he's on shows in full,
+            or he moves on to the next. z-[2]: over the canvas, which sets its
+            own z-index of 1; under the bubble (z-10, no pointer events). */}
+        <button
+          type="button"
+          aria-label="Talk to George"
+          onClick={advance}
+          className="absolute inset-0 z-[2] cursor-pointer border-none bg-transparent p-0"
+        />
         <SpeechBubble line={line} typed={typed} />
       </div>
 

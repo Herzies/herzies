@@ -107,6 +107,49 @@ export function ItemPreviewCard({
   );
 }
 
+/** The condensed hover preview for the bag and the deck: name, rarity and
+ * type, stats and set progress — no art, icon or description, so it reads at
+ * a glance while browsing. Right-click → Inspect opens the full card. */
+export function CompactItemPreview({
+  itemId,
+  equipped,
+  level = 0,
+}: {
+  itemId: string;
+  /** Current deck — for set progress, as in ItemPreviewCard. */
+  equipped?: Equipped | null;
+  level?: number;
+}) {
+  const item = getItem(itemId);
+  const set = getItemSet(itemId);
+  if (!item) return null;
+  const equippedIds = new Set(equippedItemIds(equipped));
+  const setCount = set?.itemIds.filter((id) => equippedIds.has(id)).length;
+
+  return (
+    // Text only, no icon: the card's own tile is right there under the cursor.
+    <div className="w-[180px] border border-border bg-bg-panel p-2 text-left shadow-xl shadow-black/50">
+      <div className="text-ui font-bold leading-4 text-text">
+        {item.name}
+        {level > 0 ? <span className="text-cyan"> +{level}</span> : null}
+      </div>
+      <div className="text-ui-sm">
+        <span style={{ color: ITEM_RARITY_COLORS[item.rarity] }}>
+          {RARITY_LABELS[item.rarity]}
+        </span>{" "}
+        · <ItemTypeTag item={item} variant="text" />
+      </div>
+      {/* No margins, so the lines are evenly spaced. */}
+      <ItemStatLines item={item} level={level} className="text-left" />
+      {set && (
+        <div className="text-ui-sm text-text-dim">
+          {set.name} set {setCount}/{set.itemIds.length}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ItemInspectOverlay({
   itemId,
   onClose,

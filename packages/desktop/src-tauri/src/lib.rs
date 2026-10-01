@@ -13,7 +13,7 @@ mod storage;
 mod tray;
 mod types;
 
-use lastfm::{LastFmService, TrackEnrichment, ENRICHMENT_TIMEOUT};
+use lastfm::{LastFmService, TrackEnrichment, ENRICHMENT_RETRY, ENRICHMENT_TIMEOUT};
 use reqwest::Client;
 use state::{ManagedState, SharedState};
 use std::collections::{HashMap, HashSet};
@@ -1498,6 +1498,20 @@ async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: u64) -> Resu
                         spawn_enrichment =
                             Some((info.artist.clone(), info.title.clone(), key.clone()));
                     }
+                } else if !info.verified
+                    && s.enrichment.is_none()
+                    && !s.enrichment_in_flight
+                    && lastfm.has_api_key()
+                    && s.enrichment_requested_at
+                        .is_none_or(|t| t.elapsed() > ENRICHMENT_RETRY)
+                {
+                    // An unverified source only counts once Last.fm confirms
+                    // it (see `is_confirmed_listen`), so a failed lookup
+                    // (network error, rate-limit backoff) would otherwise
+                    // block the whole track. Retry, throttled.
+                    s.enrichment_requested_at = Some(Instant::now());
+                    s.enrichment_in_flight = true;
+                    spawn_enrichment = Some((info.artist.clone(), info.title.clone(), key.clone()));
                 }
 
                 let timed_out = s
@@ -1518,12 +1532,7 @@ async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: u64) -> Resu
                 // non-music video too — only credit them, and only show them
                 // as "now playing" (even locally), once Last.fm confirms the
                 // track is real. See `is_confirmed_listen`.
-                let confirmed = lastfm::is_confirmed_listen(
-                    info.verified,
-                    s.enrichment.as_ref(),
-                    s.enrichment_in_flight,
-                    timed_out,
-                );
+                let confirmed = lastfm::is_confirmed_listen(info.verified, s.enrichment.as_ref());
 
                 let minutes = elapsed_secs as f64 / 60.0;
                 if minutes > 0.01 && confirmed {

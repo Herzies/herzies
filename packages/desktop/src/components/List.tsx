@@ -11,6 +11,7 @@ export function List({
   children,
   className,
   contentStyle,
+  fades = true,
 }: {
   children: React.ReactNode;
   className?: string;
@@ -19,6 +20,9 @@ export function List({
    * size itself in percentages of that — the wrapper has to be the content's
    * real height, or the bottom fade (which sits after it) lands mid-list. */
   contentStyle?: React.CSSProperties;
+  /** The top/bottom fade hints. Off for a list that wants none (the Herzie
+   * view's bag). */
+  fades?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -63,21 +67,25 @@ export function List({
       ref={scrollRef}
       className={cn("cursor-default overflow-y-auto", className)}
     >
-      <div
-        className={cn(
-          "pointer-events-none sticky top-0 -mb-4 h-4 bg-gradient-to-b from-bg-panel to-transparent transition-opacity",
-          atTop ? "opacity-0" : "opacity-100",
-        )}
-      />
+      {fades && (
+        <div
+          className={cn(
+            "pointer-events-none sticky top-0 -mb-4 h-4 bg-gradient-to-b from-bg-panel to-transparent transition-opacity",
+            atTop ? "opacity-0" : "opacity-100",
+          )}
+        />
+      )}
       <div ref={contentRef} style={contentStyle}>
         {children}
       </div>
-      <div
-        className={cn(
-          "pointer-events-none sticky bottom-0 -mt-4 h-4 bg-gradient-to-t from-bg-panel to-transparent transition-opacity",
-          atBottom ? "opacity-0" : "opacity-100",
-        )}
-      />
+      {fades && (
+        <div
+          className={cn(
+            "pointer-events-none sticky bottom-0 -mt-4 h-4 bg-gradient-to-t from-bg-panel to-transparent transition-opacity",
+            atBottom ? "opacity-0" : "opacity-100",
+          )}
+        />
+      )}
     </div>
   );
 }

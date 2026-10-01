@@ -958,11 +958,18 @@ function EventCardRow({
     </div>
   );
 
+  // The whole row is the click target when it opens something, padding
+  // included — a button nested inside left the row's top and bottom edges
+  // (and the status column) dead.
+  const Row = onOpen ? "button" : "div";
+
   return (
-    <div
+    <Row
+      {...(onOpen ? { type: "button" as const, onClick: onOpen } : {})}
       className={cn(
-        "group relative flex items-center justify-between gap-2 overflow-hidden",
+        "group relative flex w-full items-center justify-between gap-2 overflow-hidden text-left",
         "border-b border-[#222] py-1.5",
+        onOpen && "cursor-pointer",
         theme && "pr-2",
         // Live at full strength; scheduled a little dimmer; nothing-on dimmer
         // still.
@@ -993,17 +1000,7 @@ function EventCardRow({
           <div className="absolute inset-0 bg-gradient-to-r from-bg-panel to-transparent" />
         </div>
       )}
-      {onOpen ? (
-        <button
-          type="button"
-          onClick={onOpen}
-          className="relative flex min-w-0 flex-1 cursor-pointer items-center text-left"
-        >
-          {left}
-        </button>
-      ) : (
-        <div className="relative flex min-w-0 flex-1">{left}</div>
-      )}
+      <div className="relative flex min-w-0 flex-1">{left}</div>
       <div className="relative shrink-0 text-right">
         {live ? (
           <div
@@ -1022,6 +1019,6 @@ function EventCardRow({
           </div>
         ) : null}
       </div>
-    </div>
+    </Row>
   );
 }
