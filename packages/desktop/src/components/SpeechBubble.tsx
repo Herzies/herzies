@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 /** How often a character says something, and how long each line stays up. */
 export const LINE_EVERY_MS = 10_000;
@@ -6,9 +6,20 @@ export const LINE_VISIBLE_MS = 7_000;
 /** Per character. ~28ms reads as deliberate rather than laggy. */
 const TYPE_SPEED_MS = 28;
 
-/** Typewriter reveal of `line`, restarted whenever a new line arrives. */
-export function useTypewriter(line: string | null): number {
+/** Typewriter reveal of `line`, restarted whenever a new line arrives.
+ * `finish` shows the rest of it at once. */
+export function useTypewriter(line: string | null): {
+  typed: number;
+  finish: () => void;
+} {
   const [typed, setTyped] = useState(0);
+  const lineRef = useRef(line);
+  lineRef.current = line;
+  // The interval stops itself once `typed` reaches the end, so jumping there
+  // is all finishing takes.
+  const finish = useCallback(() => {
+    if (lineRef.current) setTyped(lineRef.current.length);
+  }, []);
   useEffect(() => {
     if (!line) return;
     setTyped(0);
@@ -23,7 +34,7 @@ export function useTypewriter(line: string | null): number {
     }, TYPE_SPEED_MS);
     return () => clearInterval(id);
   }, [line]);
-  return typed;
+  return { typed, finish };
 }
 
 /**
@@ -32,6 +43,10 @@ export function useTypewriter(line: string | null): number {
  * narrows the pool at speaking time (the boss filters by remaining HP) and
  * is read through a ref, so a caller re-rendering every second doesn't
  * restart the cycle mid-sentence.
+ *
+ * `advance` is the player clicking whoever's talking: a line still being
+ * typed shows in full at once; otherwise the next line comes now, and the
+ * cycle restarts from it so an automatic one doesn't follow straight after.
  */
 export function useChatter(
   lines: readonly string[],
@@ -45,6 +60,8 @@ export function useChatter(
   pickRef.current = pick;
   const lastRef = useRef<string | null>(null);
   const hideRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Speaks now and restarts the cycle; null while not active. */
+  const speakNowRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     if (!active) {
@@ -68,15 +85,27 @@ export function useChatter(
     };
 
     speak();
-    const cycle = setInterval(speak, LINE_EVERY_MS);
+    let cycle = setInterval(speak, LINE_EVERY_MS);
+    speakNowRef.current = () => {
+      speak();
+      clearInterval(cycle);
+      cycle = setInterval(speak, LINE_EVERY_MS);
+    };
     return () => {
+      speakNowRef.current = null;
       clearInterval(cycle);
       if (hideRef.current) clearTimeout(hideRef.current);
     };
   }, [active]);
 
-  const typed = useTypewriter(line);
-  return { line, typed };
+  const { typed, finish } = useTypewriter(line);
+  const typingRef = useRef(false);
+  typingRef.current = line !== null && typed < line.length;
+  const advance = useCallback(() => {
+    if (typingRef.current) finish();
+    else speakNowRef.current?.();
+  }, [finish]);
+  return { line, typed, advance };
 }
 
 /**
