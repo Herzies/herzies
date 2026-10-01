@@ -100,7 +100,7 @@ export const OVERLAY_PANEL = "pointer-events-auto py-1.5";
 /** The deck's "Deck" title. A whole-pixel line height (text-ui's default is
  * 16.5px): the icons below are crisp-edged pixel art, and a half-pixel offset
  * snaps their rows unevenly — they read as warped. */
-export const OVERLAY_TITLE = "mb-1 text-ui leading-4 font-bold text-text-dim";
+export const OVERLAY_TITLE = "text-ui leading-4 font-bold text-text-dim";
 
 /** One section of the deck: its boxes, unlabelled — each empty box names its
  * slot on hover. While a card that belongs here is dragged, the section is
@@ -178,22 +178,19 @@ function DeckGroup({
 }
 
 /** The deck: one row of boxes beneath the herzie, so a change shows on the
- * creature right above it the moment it's made. The boxes sit on a solid band
- * of colour, so the deck reads apart from the herzie above and the bag below. */
+ * creature right above it the moment it's made. */
 export function DeckOverlay(props: SlotHandlers) {
   return (
-    // mb-2: breathing room between the deck's band and the bag below.
+    // mb-2: breathing room between the deck and the bag below.
     <div className="pointer-events-auto mb-2 pt-1.5">
       <Tooltip label="Place cards here">
         <div className={cn(OVERLAY_TITLE, "cursor-default")}>Deck</div>
       </Tooltip>
-      {/* The boxes on a full-bleed band, the title kept off it: the band
-          reaches the window's edges (out past the view's 12px side padding,
-          the -mx-3), while the px-3 keeps the first and last boxes lined up
-          with everything else. One row, the sections spread across the full
-          width: the empty boxes' hover labels name each one. */}
-      {/* #07070c: a shade darker than the app's own background (#0c0c14). */}
-      <div className="-mx-3 flex justify-between bg-[#07070c] px-3 py-1.5">
+      {/* One row, the sections spread across the full width: the empty
+          boxes' hover labels name each one. */}
+      {/* pt-0.5: with the 2px the tooltip's inline wrapper adds under the
+          title, the title-to-boxes gap matches the bag's title-to-grid one. */}
+      <div className="flex justify-between pt-0.5 pb-1.5">
         {DECK_SLOT_ORDER.map((label) => (
           <DeckGroup key={label} group={groupByLabel(label)} {...props} />
         ))}
@@ -331,8 +328,8 @@ function DeckSlot({
         // edges.
       >
         {/* The app background behind the card, clipped to its shape, so the
-            card's see-through middle shows that rather than the deck's band —
-            the same as a card in the bag. Only the backing is clipped. */}
+            card's see-through middle shows that, the same as a card in the
+            bag, whatever is behind the deck. Only the backing is clipped. */}
         <span
           aria-hidden="true"
           className="absolute inset-0 bg-bg"
