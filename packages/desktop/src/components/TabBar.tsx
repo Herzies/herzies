@@ -91,7 +91,10 @@ export function TabBar({
   );
 
   return (
-    <div className="flex items-center justify-between border-t border-border px-3 py-1.5">
+    // Full-bleed: the top border runs to the window's edges (out past the
+    // app's 12px side padding, the -mx-3), while px-6 leaves the tabs where
+    // they were.
+    <div className="-mx-3 flex items-center justify-between border-t border-border px-6 py-1.5">
       {tabs.map(renderTab)}
     </div>
   );
