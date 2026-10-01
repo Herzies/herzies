@@ -2,10 +2,16 @@
   {
     "version": "0.1.0-beta.44",
     "highlights": [
+      "New: Town. Events are now visitors: Good ol' George, each boss by name, and Orphiez, who has lost a song and needs your help finding it",
+      "Coins are now spent with George during his visits. The Store is now Premium",
+      "New: the Herzie tab. Your deck sits right over your herzie: click or drag cards to put them on and take them off, and see your stats change before you commit",
       "Cards now upgrade all the way to +10",
       "New: Power Dice 2 (Legendary) takes a card from +3 to +6, and Power Dice 3 (Mythic, a new rarity above Legendary) takes it from +6 to +10",
       "Upgrades from +6 can fail, and a failed roll breaks the card. The upgrade window shows your odds before every roll",
-      "New: Safety Pick. Roll with one and a failed upgrade leaves your card as it was"
+      "New: Safety Pick. Roll with one and a failed upgrade leaves your card as it was",
+      "A boss's rewards show from the start of the fight. Click any visitor's \"?\" to inspect them",
+      "You can now have up to 50 friends",
+      "Browser audio only counts when it's a real track, so random videos no longer earn XP"
     ]
   },
   {
