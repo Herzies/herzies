@@ -11,6 +11,7 @@ import {
   createTestUser,
   getAdminClient,
   getAnonClient,
+  getUserClient,
   setLocalEnv,
 } from "./integration-helpers";
 
@@ -241,6 +242,29 @@ describe("Herzies column privacy", () => {
       .eq("user_id", user.userId);
 
     // now_playing is not granted to anon — selecting it is denied.
+    expect(error).not.toBeNull();
+  });
+
+  it("a signed-in user can read public leaderboard columns", async () => {
+    const { data, error } = await getUserClient(user.accessToken)
+      .from("herzies")
+      .select(
+        "name, stage, level, xp, appearance, total_minutes_listened, genre_minutes",
+      )
+      .limit(5);
+
+    expect(error).toBeNull();
+    expect((data ?? []).length).toBeGreaterThan(0);
+  });
+
+  it("a signed-in user cannot read now_playing", async () => {
+    // Even their own: the desktop app gets that from the game server, and a
+    // per-row exception would need a policy rather than a column grant.
+    const { error } = await getUserClient(user.accessToken)
+      .from("herzies")
+      .select("now_playing")
+      .limit(1);
+
     expect(error).not.toBeNull();
   });
 });
