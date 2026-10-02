@@ -35,6 +35,14 @@ pub struct Herzie {
     pub streak_days: u32,
     pub streak_last_date: Option<String>,
     pub currency: u32,
+    /// "Share what you're listening to" in Settings. Herzies saved to disk
+    /// (or served) before the setting existed read as sharing, its default.
+    #[serde(default = "default_true")]
+    pub share_listening: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,6 +75,12 @@ pub struct HerzieProfile {
     pub last_played: Option<ProfileLastPlayed>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub song_hunt_wins: Option<u32>,
+    /// Set on a friend who keeps their listening private: now/last played and
+    /// top artists are withheld, and `is_listening` is all there is to go on.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub listening_hidden: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_listening: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

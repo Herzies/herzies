@@ -150,6 +150,7 @@ export function rowToHerzie(row: Record<string, unknown>): Herzie {
     streakDays: (row.streak_days ?? 0) as number,
     streakLastDate: (row.streak_last_date ?? null) as string | null,
     currency: (row.currency ?? 0) as number,
+    shareListening: (row.share_listening ?? true) as boolean,
   };
 }
 

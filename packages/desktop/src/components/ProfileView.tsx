@@ -16,6 +16,13 @@ import { View } from "./View";
 /** Profile content tabs. "music" (now playing / last played) is the default. */
 type ProfileTab = "music" | "artists" | "stats";
 
+/** Whether a friend is playing something right now — from their track, or,
+ * for a friend who keeps their listening private, from the bare flag the
+ * server sends in its place. */
+export function isListening(profile: HerzieProfile | undefined): boolean {
+  return !!profile?.nowPlaying || !!profile?.isListening;
+}
+
 function formatTimeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
   const mins = Math.floor(diff / 60_000);
@@ -97,7 +104,7 @@ export function ProfileView({
           <Herzie3D
             userId={profile.friendCode}
             stage={stageOverride ?? profile.stage}
-            isPlaying={isFriend ? !!profile.nowPlaying : false}
+            isPlaying={isFriend ? isListening(profile) : false}
             equipped={profile.equipped ?? {}}
             paused={!active}
           />
@@ -176,7 +183,7 @@ export function ProfileView({
             active={tab === "music"}
             onClick={() => setTab("music")}
           >
-            {isFriend && profile.nowPlaying ? "Now playing" : "Last played"}
+            {isFriend && isListening(profile) ? "Now playing" : "Last played"}
           </TabButton>
           <TabButton
             colour="cyan"
@@ -222,6 +229,12 @@ export function ProfileView({
               <div className="text-ui-sm text-[#444]">
                 Become friends to share music
               </div>
+            </div>
+          ) : profile.listeningHidden ? (
+            <div className="text-ui-sm text-[#444]">
+              {tab === "music" && isListening(profile)
+                ? `${profile.name} is listening, but keeps what to themselves`
+                : `${profile.name} keeps their listening private`}
             </div>
           ) : tab === "music" ? (
             profile.nowPlaying ? (

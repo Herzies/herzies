@@ -3,6 +3,7 @@ import { useState } from "react";
 import { cn } from "../lib/utils";
 import type { AppState } from "../tauri-bridge";
 import { herzies } from "../tauri-bridge";
+import { Checkbox } from "./Checkbox";
 import { View } from "./View";
 
 type UpdateInstallStatus =
@@ -49,6 +50,9 @@ export function SettingsView({
 }) {
   const [loggingIn, setLoggingIn] = useState(false);
   const [mediaRemoteDebug, setMediaRemoteDebug] = useState<string | null>(null);
+  const [savingPrivacy, setSavingPrivacy] = useState(false);
+  const [privacyError, setPrivacyError] = useState<string | null>(null);
+  const shareListening = state.herzie?.shareListening ?? true;
 
   const shortcuts: { key: string; label: string }[] = [
     { key: "H", label: "Home" },
@@ -61,7 +65,11 @@ export function SettingsView({
   ];
 
   return (
-    <View title="Settings" colour="cyan" childrenClassName="flex flex-col">
+    <View
+      title="Settings"
+      colour="cyan"
+      childrenClassName="flex min-h-0 flex-col overflow-y-auto"
+    >
       <div className="mb-4">
         <div className="mb-1.5 text-ui text-text-dim">Account</div>
         {state.isOnline ? (
@@ -92,6 +100,44 @@ export function SettingsView({
           </button>
         )}
       </div>
+
+      {state.herzie && (
+        <div className="mb-4">
+          <div className="mb-1.5 text-ui text-text-dim">Privacy</div>
+          <Checkbox
+            checked={shareListening}
+            disabled={!state.isOnline || savingPrivacy}
+            onChange={async (share) => {
+              setSavingPrivacy(true);
+              setPrivacyError(null);
+              try {
+                await herzies.setShareListening(share);
+              } catch (e) {
+                setPrivacyError(String(e));
+              } finally {
+                setSavingPrivacy(false);
+              }
+            }}
+            className="items-start"
+          >
+            <span className="min-w-0">
+              <span className="block text-ui">
+                Share what you're listening to
+              </span>
+              <span className="block text-ui-sm text-text-dim">
+                Turn off to hide what you're listening to right now, and your
+                listening history for others. You'll still earn XP, drops, and
+                will be able to participate in events.
+              </span>
+            </span>
+          </Checkbox>
+          {privacyError && (
+            <div className="mt-1 text-[10px] text-red">
+              Couldn't save: {privacyError}
+            </div>
+          )}
+        </div>
+      )}
 
       {import.meta.env.DEV && (
         <div className="mb-4">

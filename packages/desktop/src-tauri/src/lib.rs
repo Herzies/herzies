@@ -352,6 +352,24 @@ async fn friend_request_cancel(
 }
 
 #[tauri::command]
+async fn set_share_listening(
+    share: bool,
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<(), String> {
+    let client = Client::new();
+    let server = api::api_set_share_listening(&client, share).await?;
+    let mut s = state.lock().unwrap();
+    if let Some(ref mut herzie) = s.herzie {
+        herzie.share_listening = server.share_listening;
+        storage::save_herzie(herzie);
+    }
+    drop(s);
+    emit_state_update(&app);
+    Ok(())
+}
+
+#[tauri::command]
 async fn friend_search(query: String) -> Result<Vec<FriendSearchResult>, String> {
     let client = Client::new();
     api::api_search_friends(&client, &query).await
@@ -2290,6 +2308,7 @@ pub fn run() {
             friend_request_decline,
             friend_request_cancel,
             friend_search,
+            set_share_listening,
             fetch_inventory,
             sell_item,
             apply_dice_upgrade,
