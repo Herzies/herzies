@@ -1,5 +1,12 @@
 [
   {
+    "version": "0.1.0-beta.45",
+    "highlights": [
+      "New: Privacy in Settings. Turn off \"Share what you're listening to\" and friends see that you're listening, but not what, and none of your history. You still earn XP and drops and can join events",
+      "Settings now scrolls when it doesn't fit"
+    ]
+  },
+  {
     "version": "0.1.0-beta.44",
     "highlights": [
       "New: Town. Events are now visitors: Good ol' George, each boss by name, and Orphiez, who has lost a song and needs your help finding it",

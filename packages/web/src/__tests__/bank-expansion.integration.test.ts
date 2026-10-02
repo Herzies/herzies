@@ -29,6 +29,7 @@ import {
   createTestUser,
   getAdminClient,
   getAnonClient,
+  getUserClient,
   setLocalEnv,
 } from "./integration-helpers";
 
@@ -278,8 +279,10 @@ describe("fulfilment", () => {
 });
 
 describe("the column is not writable by the player", () => {
-  // The herzies UPDATE policy limits rows, not columns, so without the guard
-  // trigger any signed-in player could PATCH themselves free capacity.
+  // The herzies RLS policies limit rows, not columns, so this used to rest on
+  // the guard trigger alone. Since 00094 players hold no write grant on
+  // herzies at all and are refused before the trigger runs — either refusal
+  // keeps the capacity unbought.
   it("rejects a client write of bank_expansions", async () => {
     const p = await makePlayer();
     const client = getAnonClient();
@@ -291,7 +294,9 @@ describe("the column is not writable by the player", () => {
       .from("herzies")
       .update({ bank_expansions: 50 })
       .eq("user_id", p.userId);
-    expect(error?.message).toMatch(/bank_expansions/);
+    expect(error?.message).toMatch(
+      /bank_expansions|permission denied for table herzies/,
+    );
     expect(await bankExpansionsOf(p)).toBe(0);
   });
 
@@ -309,7 +314,31 @@ describe("the column is not writable by the player", () => {
       appearance: {},
       bank_expansions: 9,
     });
-    expect(error?.message).toMatch(/bank_expansions/);
+    expect(error?.message).toMatch(
+      /bank_expansions|permission denied for table herzies/,
+    );
+  });
+
+  it("rejects a client inserting a herzie with made-up stats", async () => {
+    // No guard trigger covers these — only the missing grant does.
+    const user = await createTestUser();
+    const { error } = await getUserClient(user.accessToken)
+      .from("herzies")
+      .insert({
+        user_id: user.userId,
+        name: `Cheat-${Date.now()}`,
+        friend_code: "HERZ-CHEAT2",
+        appearance: {},
+        level: 99,
+        currency: 1_000_000,
+      });
+    expect(error?.message).toMatch(/permission denied for table herzies/);
+
+    const { data } = await getAdminClient()
+      .from("herzies")
+      .select("id")
+      .eq("user_id", user.userId);
+    expect(data ?? []).toHaveLength(0);
   });
 });
 

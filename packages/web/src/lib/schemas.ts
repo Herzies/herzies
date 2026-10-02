@@ -20,6 +20,10 @@ export const registerHerzieSchema = z.object({
   friendCode: z.string().min(1),
 });
 
+export const updateMeSchema = z.object({
+  shareListening: z.boolean(),
+});
+
 export const syncRequestSchema = z.object({
   nowPlaying: z
     .object({

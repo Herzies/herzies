@@ -131,6 +131,8 @@ export const herzies = {
     invoke<{ success: boolean; message: string }>("friend_add", { code }),
   friendRemove: (code: string) =>
     invoke<{ success: boolean; message: string }>("friend_remove", { code }),
+  setShareListening: (share: boolean) =>
+    invoke<void>("set_share_listening", { share }),
   friendLookup: (codes: string[]) =>
     invoke<Record<string, HerzieProfile>>("friend_lookup", { codes }),
   friendRequestAccept: (requestId: string) =>

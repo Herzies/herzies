@@ -25,6 +25,15 @@ export function getAnonClient(): SupabaseClient {
   });
 }
 
+/** Client acting as a signed-in user — PostgREST sees the authenticated
+ * role, so this is what RLS and column grants apply to. */
+export function getUserClient(accessToken: string): SupabaseClient {
+  return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: { autoRefreshToken: false, persistSession: false },
+    global: { headers: { Authorization: `Bearer ${accessToken}` } },
+  });
+}
+
 let userCounter = 0;
 
 /** Create a test user in Supabase Auth and return their ID + access token */

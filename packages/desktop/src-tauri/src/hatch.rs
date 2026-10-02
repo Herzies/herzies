@@ -51,6 +51,7 @@ pub fn new_herzie(name: String) -> Herzie {
         streak_days: 0,
         streak_last_date: None,
         currency: 0,
+        share_listening: true,
     }
 }
 

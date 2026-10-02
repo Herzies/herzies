@@ -318,6 +318,7 @@ mod tests {
             streak_days: 0,
             streak_last_date: None,
             currency: 0,
+            share_listening: true,
         }
     }
 

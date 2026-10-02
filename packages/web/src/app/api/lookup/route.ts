@@ -12,9 +12,11 @@ import { createAdminClient } from "@/lib/supabase-admin";
  *
  * A herzie's listening data (now playing, last played, top artists) is
  * private: it is only included in the response when the authenticated caller
- * is friends with that herzie (or is looking up their own profile). For
- * everyone else only the public game stats (name, level, stage, appearance,
- * rank, …) are returned.
+ * is looking up their own profile, or is friends with that herzie and the
+ * herzie shares what they listen to (`share_listening`). Friends of a herzie
+ * that doesn't still learn whether it's listening right now (`isListening`),
+ * just not to what. Everyone else only gets the public game stats (name,
+ * level, stage, appearance, rank, …).
  *
  * GET /api/lookup?code=HERZ-XXXX          — single lookup
  * GET /api/lookup?codes=HERZ-XXXX,HERZ-YYYY — batch lookup
@@ -36,22 +38,27 @@ export async function GET(request: Request) {
 
   const admin = createAdminClient();
 
-  // Codes whose listening data the caller is allowed to see: their own and
-  // their confirmed friends.
   const { data: me } = await admin
     .from("herzies")
     .select("friend_code, friend_codes")
     .eq("user_id", auth.userId)
     .single();
 
-  const visibleCodes = new Set<string>(me?.friend_codes ?? []);
-  if (me?.friend_code) visibleCodes.add(me.friend_code);
+  const friendCodes = new Set<string>(me?.friend_codes ?? []);
+  const access = (row: HerzieRow): ListeningAccess =>
+    row.friend_code === me?.friend_code
+      ? "full"
+      : friendCodes.has(row.friend_code)
+        ? row.share_listening === false
+          ? "presence"
+          : "full"
+        : "none";
 
   if (singleCode) {
     const { data, error } = await admin
       .from("herzies")
       .select(
-        "user_id, name, friend_code, stage, level, currency, appearance, equipped, item_upgrades, now_playing",
+        "user_id, name, friend_code, stage, level, currency, appearance, equipped, item_upgrades, now_playing, share_listening",
       )
       .eq("friend_code", singleCode.toUpperCase().trim())
       .single();
@@ -60,7 +67,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ herzie: null });
     }
 
-    const canSeeListening = visibleCodes.has(data.friend_code);
+    const listeningAccess = access(data);
     const equipped = normalizeEquipped(data.equipped);
     const wantsSongHuntWins = hasGoodEyeSniperEquipped(equipped);
 
@@ -68,7 +75,7 @@ export async function GET(request: Request) {
       fetchBatchDetails(
         admin,
         [data.user_id],
-        canSeeListening ? [data.user_id] : [],
+        listeningAccess === "full" ? [data.user_id] : [],
       ),
       wantsSongHuntWins
         ? getSongHuntWins(admin, data.user_id)
@@ -79,7 +86,7 @@ export async function GET(request: Request) {
     return NextResponse.json({
       herzie: formatProfile(
         data,
-        canSeeListening,
+        listeningAccess,
         details.topArtists.get(data.user_id) ?? [],
         details.lastPlayed.get(data.user_id) ?? null,
         rank?.globalRank,
@@ -102,7 +109,7 @@ export async function GET(request: Request) {
   const { data, error } = await admin
     .from("herzies")
     .select(
-      "user_id, name, friend_code, stage, level, currency, appearance, equipped, item_upgrades, now_playing",
+      "user_id, name, friend_code, stage, level, currency, appearance, equipped, item_upgrades, now_playing, share_listening",
     )
     .in("friend_code", codes);
 
@@ -113,9 +120,7 @@ export async function GET(request: Request) {
   const details = await fetchBatchDetails(
     admin,
     data.map((row) => row.user_id),
-    data
-      .filter((row) => visibleCodes.has(row.friend_code))
-      .map((row) => row.user_id),
+    data.filter((row) => access(row) === "full").map((row) => row.user_id),
   );
 
   // Still per row, but only for herzies wearing the Good Eye Sniper, which is
@@ -138,7 +143,7 @@ export async function GET(request: Request) {
     const rank = details.ranks.get(row.user_id);
     return formatProfile(
       row,
-      visibleCodes.has(row.friend_code),
+      access(row),
       details.topArtists.get(row.user_id) ?? [],
       details.lastPlayed.get(row.user_id) ?? null,
       rank?.globalRank,
@@ -166,7 +171,15 @@ type HerzieRow = {
     artist?: string;
     albumArtUrl?: string;
   } | null;
+  share_listening: boolean;
 };
+
+/**
+ * How much of a herzie's listening the caller may see: everything (their own
+ * herzie, or a friend who shares it), only whether they're listening right
+ * now (a friend who doesn't share), or nothing (not a friend).
+ */
+type ListeningAccess = "full" | "presence" | "none";
 
 function formatNowPlaying(
   np: { title?: string; artist?: string; albumArtUrl?: string } | null,
@@ -177,7 +190,7 @@ function formatNowPlaying(
 
 function formatProfile(
   row: HerzieRow,
-  canSeeListening: boolean,
+  listeningAccess: ListeningAccess,
   topArtists: { name: string; plays: number }[],
   lastPlayed: {
     title: string;
@@ -189,6 +202,8 @@ function formatProfile(
   globalTotal?: number,
   songHuntWins?: number,
 ) {
+  const canSeeListening = listeningAccess === "full";
+  const nowPlaying = formatNowPlaying(row.now_playing);
   return {
     name: row.name,
     friendCode: row.friend_code,
@@ -204,8 +219,14 @@ function formatProfile(
     // sent to everyone. Computed here rather than by the client because the
     // dice-upgrade levels that feed it are not part of the profile.
     stats: getHerzieStats(normalizeEquipped(row.equipped), row.item_upgrades),
-    nowPlaying: canSeeListening ? formatNowPlaying(row.now_playing) : null,
+    nowPlaying: canSeeListening ? nowPlaying : null,
     lastPlayed: canSeeListening ? lastPlayed : null,
+    // Only for friends who keep their listening private: the rest either see
+    // nowPlaying itself or aren't owed presence at all.
+    ...(listeningAccess === "presence" && {
+      listeningHidden: true,
+      isListening: nowPlaying !== null,
+    }),
     songHuntWins,
   };
 }

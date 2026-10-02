@@ -442,6 +442,23 @@ pub async fn api_get_me(client: &Client) -> Option<Herzie> {
     serde_json::from_value(data["herzie"].clone()).ok()
 }
 
+/// Save "Share what you're listening to", returning the updated herzie.
+pub async fn api_set_share_listening(client: &Client, share: bool) -> Result<Herzie, String> {
+    let body = serde_json::json!({ "shareListening": share });
+    let resp = api_fetch(client, reqwest::Method::PATCH, "/me", Some(body))
+        .await
+        .ok_or_else(|| "Network error".to_string())?;
+    let status = resp.status();
+    let data: serde_json::Value = resp.json().await.map_err(|e| format!("Read error: {e}"))?;
+    if !status.is_success() {
+        return Err(data["error"]
+            .as_str()
+            .unwrap_or("Something went wrong")
+            .to_string());
+    }
+    serde_json::from_value(data["herzie"].clone()).map_err(|e| format!("Malformed response: {e}"))
+}
+
 pub enum RegisterError {
     NameTaken,
     FriendCodeCollision,
@@ -618,6 +635,43 @@ mod lookup_tests {
         let stats = profile.stats.expect("stats");
         assert_eq!(stats["sonicPower"], 4.0);
         assert_eq!(stats["luck"], 0.0);
+    }
+
+    #[test]
+    fn herzie_profile_parses_private_listening_from_lookup_json() {
+        let sample = serde_json::json!({
+            "name": "Mafacka",
+            "friendCode": "HERZ-ABCD",
+            "stage": 1,
+            "level": 5,
+            "nowPlaying": null,
+            "listeningHidden": true,
+            "isListening": true
+        });
+        let profile: HerzieProfile = serde_json::from_value(sample).expect("parse profile");
+        assert_eq!(profile.listening_hidden, Some(true));
+        assert_eq!(profile.is_listening, Some(true));
+        // And they reach the UI under the names it reads.
+        let out = serde_json::to_value(&profile).unwrap();
+        assert_eq!(out["listeningHidden"], true);
+        assert_eq!(out["isListening"], true);
+    }
+
+    #[test]
+    fn a_herzie_saved_before_share_listening_reads_as_sharing() {
+        let sample = serde_json::json!({
+            "id": "id", "name": "Old", "createdAt": "2026-01-01",
+            "appearance": {
+                "headIndex": 0, "eyesIndex": 0, "mouthIndex": 0, "accessoryIndex": 0,
+                "limbsIndex": 0, "bodyIndex": 0, "legsIndex": 0, "colorScheme": "x"
+            },
+            "xp": 0.0, "level": 1, "stage": 1, "totalMinutesListened": 0.0,
+            "genreMinutes": {}, "friendCode": "HERZ-OLD", "friendCodes": [],
+            "lastCravingDate": "", "lastCravingGenre": "", "streakDays": 0,
+            "streakLastDate": null, "currency": 0
+        });
+        let herzie: crate::types::Herzie = serde_json::from_value(sample).expect("parse herzie");
+        assert!(herzie.share_listening);
     }
 }
 

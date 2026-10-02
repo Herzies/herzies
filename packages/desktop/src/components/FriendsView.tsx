@@ -14,7 +14,7 @@ import {
 } from "../tauri-bridge";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { List } from "./List";
-import { ProfileView } from "./ProfileView";
+import { isListening, ProfileView } from "./ProfileView";
 import { TabButton } from "./TabButton";
 import { View } from "./View";
 
@@ -307,8 +307,7 @@ export function FriendsView({
     herzie.friendCodes.some((code) => !friends[code]);
 
   const sortedCodes = [...herzie.friendCodes].sort(
-    (a, b) =>
-      Number(!!friends[b]?.nowPlaying) - Number(!!friends[a]?.nowPlaying),
+    (a, b) => Number(isListening(friends[b])) - Number(isListening(friends[a])),
   );
 
   return (
@@ -386,7 +385,7 @@ export function FriendsView({
             ) : (
               sortedCodes.map((code) => {
                 const profile = friends[code];
-                const online = !!profile?.nowPlaying;
+                const online = isListening(profile);
                 return (
                   <div
                     key={code}

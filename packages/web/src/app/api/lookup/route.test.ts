@@ -25,6 +25,8 @@ type Profile = {
   topArtists: { name: string; plays: number }[];
   lastPlayed: { title: string } | null;
   nowPlaying: { title: string } | null;
+  isListening?: boolean;
+  listeningHidden?: boolean;
 };
 
 function getRequest(codes: string): Request {
@@ -36,9 +38,10 @@ function getRequest(codes: string): Request {
 
 /**
  * The caller (HERZ-ME) is friends with HERZ-FRIEND only. HERZ-STRANGER is a
- * non-friend whose listening data must stay private.
+ * non-friend whose listening data must stay private. `friendShares: false`
+ * turns HERZ-FRIEND's "Share what you're listening to" setting off.
  */
-function adminWithTwoHerzies() {
+function adminWithTwoHerzies({ friendShares = true } = {}) {
   const admin = createMockAdmin(
     {},
     {
@@ -94,6 +97,7 @@ function adminWithTwoHerzies() {
                   appearance: null,
                   equipped: null,
                   now_playing: { title: "Roygbiv", artist: "Boards" },
+                  share_listening: friendShares,
                 },
                 {
                   user_id: "user-stranger",
@@ -105,6 +109,7 @@ function adminWithTwoHerzies() {
                   appearance: null,
                   equipped: null,
                   now_playing: { title: "Secret", artist: "Nobody" },
+                  share_listening: true,
                 },
               ],
               error: null,
@@ -116,7 +121,11 @@ function adminWithTwoHerzies() {
 }
 
 /** Same fixture data, but shaped for the ?code= branch's .single() call. */
-function singleHerzieAdmin(friendCode: string, userId: string) {
+function singleHerzieAdmin(
+  friendCode: string,
+  userId: string,
+  shareListening = true,
+) {
   const admin = adminWithTwoHerzies();
   const originalFrom = admin.from;
   let herzieCalls = 0;
@@ -137,6 +146,7 @@ function singleHerzieAdmin(friendCode: string, userId: string) {
           appearance: null,
           equipped: null,
           now_playing: null,
+          share_listening: shareListening,
         },
         error: null,
       });
@@ -194,6 +204,52 @@ describe("GET /api/lookup", () => {
       const call = admin.rpc.mock.calls.find(([name]) => name === rpc);
       expect(call?.[1]).toMatchObject({ p_user_ids: ["user-friend"] });
     }
+  });
+
+  it("tells friends only whether a private herzie is listening, not to what", async () => {
+    mockAuth.mockResolvedValue({ userId: "user-me" });
+    const admin = adminWithTwoHerzies({ friendShares: false });
+    mockAdmin.mockReturnValue(admin as never);
+
+    const res = await GET(getRequest("HERZ-FRIEND,HERZ-STRANGER"));
+    const { herzies } = (await responseJson(res)) as { herzies: Profile[] };
+
+    const friend = herzies.find((h) => h.friendCode === "HERZ-FRIEND");
+    expect(friend).toMatchObject({
+      nowPlaying: null,
+      lastPlayed: null,
+      topArtists: [],
+      isListening: true,
+      listeningHidden: true,
+    });
+
+    // Strangers get no presence either way — that's a friends-only signal.
+    const stranger = herzies.find((h) => h.friendCode === "HERZ-STRANGER");
+    expect(stranger?.isListening).toBeUndefined();
+    expect(stranger?.listeningHidden).toBeUndefined();
+
+    // And the private friend's history is never even queried.
+    for (const rpc of ["top_artists_for_users", "last_played_for_users"]) {
+      expect(admin.rpc.mock.calls.some(([name]) => name === rpc)).toBe(false);
+    }
+  });
+
+  it("still shows a private herzie its own listening", async () => {
+    mockAuth.mockResolvedValue({ userId: "user-me" });
+    const admin = singleHerzieAdmin("HERZ-ME", "user-me", false);
+    mockAdmin.mockReturnValue(admin as never);
+
+    const res = await GET(
+      new Request("http://localhost/api/lookup?code=HERZ-ME", {
+        headers: { Authorization: "Bearer valid-token" },
+      }),
+    );
+    const { herzie } = (await responseJson(res)) as { herzie: Profile };
+
+    const called = admin.rpc.mock.calls.map(([name]) => name);
+    expect(called).toContain("top_artists_for_users");
+    expect(called).toContain("last_played_for_users");
+    expect(herzie.listeningHidden).toBeUndefined();
   });
 
   it("resolves rank per herzie rather than applying one to all", async () => {

@@ -56,6 +56,12 @@ export interface Herzie {
 
   // Economy
   currency: number;
+
+  // Privacy
+  /** "Share what you're listening to" in Settings. When off, friends see
+   * that this herzie is listening but not what, and none of its history.
+   * Absent from a server that predates the setting, which means on. */
+  shareListening?: boolean;
 }
 
 export interface HerzieProfile {
@@ -82,6 +88,11 @@ export interface HerzieProfile {
     albumArtUrl?: string;
   } | null;
   songHuntWins?: number;
+  /** Set (true) when this is a friend who keeps their listening private:
+   * nowPlaying, lastPlayed and topArtists are withheld, and only
+   * `isListening` says whether they're playing something right now. */
+  listeningHidden?: boolean;
+  isListening?: boolean;
 }
 
 // --- Game Server API types ---
