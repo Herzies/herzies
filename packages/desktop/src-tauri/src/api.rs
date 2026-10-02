@@ -451,7 +451,10 @@ pub async fn api_set_share_listening(client: &Client, share: bool) -> Result<Her
     let status = resp.status();
     let data: serde_json::Value = resp.json().await.map_err(|e| format!("Read error: {e}"))?;
     if !status.is_success() {
-        return Err(data["error"].as_str().unwrap_or("Something went wrong").to_string());
+        return Err(data["error"]
+            .as_str()
+            .unwrap_or("Something went wrong")
+            .to_string());
     }
     serde_json::from_value(data["herzie"].clone()).map_err(|e| format!("Malformed response: {e}"))
 }
