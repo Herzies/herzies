@@ -806,6 +806,10 @@ export function InventoryView({
     bag: 0,
     deck: 0,
   });
+  /** Tabs mid-bump. Cleared when the animation ends: a class left on would
+   * replay it every time the view is shown again (display:none → flex
+   * restarts CSS animations). */
+  const [bumping, setBumping] = useState<ReadonlySet<Panel>>(new Set());
   /** A flight reaching its spot (ItemFlights' onDone), unlike endFlight,
    * which also drops refused ones: landing on a tab bumps it. */
   const landFlight = (id: number) => {
@@ -813,6 +817,7 @@ export function InventoryView({
     for (const tab of ["bag", "deck"] as const) {
       if (target === toTab(tab)) {
         setTabBumps((b) => ({ ...b, [tab]: b[tab] + 1 }));
+        setBumping((current) => new Set(current).add(tab));
       }
     }
     endFlight(id);
@@ -1760,8 +1765,15 @@ export function InventoryView({
                 {...{ [PANEL_TAB_ATTR]: tab }}
                 className={cn(
                   "inline-block",
-                  tabBumps[tab] > 0 && "animate-tab-bump",
+                  bumping.has(tab) && "animate-tab-bump",
                 )}
+                onAnimationEnd={() =>
+                  setBumping((current) => {
+                    const next = new Set(current);
+                    next.delete(tab);
+                    return next;
+                  })
+                }
               >
                 {tab === "bag" ? "Bag" : "Deck"}
               </span>
