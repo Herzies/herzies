@@ -6,7 +6,9 @@ import {
   CREATURE_PARAM_BOUNDS,
   type CreatureParams,
   clearCreatureCache,
+  type DangleConfig,
   DEFAULT_BOOMBOX_CONFIG,
+  DEFAULT_DANGLE_CONFIG,
   earAngleFromDeg,
   earAngleToDeg,
   generateCreatureParams,
@@ -40,6 +42,9 @@ function Sandbox() {
   const [showSky, setShowSky] = useState(false);
   const [wearables, setWearables] = useState<string[]>([]);
   const [boombox, setBoombox] = useState<BoomboxConfig>(DEFAULT_BOOMBOX_CONFIG);
+  const [dangle, setDangle] = useState<DangleConfig>(DEFAULT_DANGLE_CONFIG);
+  const swings =
+    wearables.includes("gold-chain") || wearables.includes("pearl-necklace");
   const [jsonOpen, setJsonOpen] = useState(false);
 
   const patchBoombox = (partial: Partial<BoomboxConfig>) => {
@@ -78,6 +83,7 @@ function Sandbox() {
     stage,
     creatureParams: params,
     ...(wearables.includes("boombox") ? { boomboxConfig: boombox } : {}),
+    ...(swings ? { dangleConfig: dangle } : {}),
   });
 
   const copyJson = async () => {
@@ -292,6 +298,40 @@ function Sandbox() {
           </Section>
         )}
 
+        {swings && (
+          <Section title="spin physics">
+            <SliderField
+              label="stiffness"
+              value={dangle.stiffness}
+              bounds={{ min: 5, max: 300, step: 1 }}
+              onChange={(v) => setDangle((d) => ({ ...d, stiffness: v }))}
+            />
+            <SliderField
+              label="damping"
+              value={dangle.damping}
+              bounds={{ min: 0, max: 30, step: 0.1 }}
+              onChange={(v) => setDangle((d) => ({ ...d, damping: v }))}
+            />
+            <SliderField
+              label="max swing (rad)"
+              value={dangle.maxSwing}
+              bounds={{ min: 0.05, max: 1.5, step: 0.01 }}
+              onChange={(v) => setDangle((d) => ({ ...d, maxSwing: v }))}
+            />
+            <SliderField
+              label="flare speed (rad/s)"
+              value={dangle.flareSpeed}
+              bounds={{ min: 1, max: 40, step: 0.5 }}
+              onChange={(v) => setDangle((d) => ({ ...d, flareSpeed: v }))}
+            />
+            <div className="mt-1.5">
+              <Btn onClick={() => setDangle(DEFAULT_DANGLE_CONFIG)}>
+                reset physics
+              </Btn>
+            </div>
+          </Section>
+        )}
+
         <div className="mt-3 flex flex-wrap gap-1.5">
           <Btn onClick={() => setJsonOpen((v) => !v)}>
             {jsonOpen ? "hide json" : "show json"}
@@ -316,6 +356,7 @@ function Sandbox() {
           wearables={wearables}
           creatureParams={params}
           boomboxConfig={boombox}
+          dangleConfig={dangle}
           showSky={showSky}
           draggable={draggable}
         />

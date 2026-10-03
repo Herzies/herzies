@@ -1,6 +1,7 @@
 import {
   type BoomboxConfig,
   type CreatureParams,
+  type DangleConfig,
   type Equipped,
   equippedItemIds,
   ITEM_SETS,
@@ -32,6 +33,7 @@ interface Props {
   wearables?: string[];
   creatureParams?: CreatureParams;
   boomboxConfig?: BoomboxConfig;
+  dangleConfig?: DangleConfig;
   showSky?: boolean;
   draggable?: boolean;
   /** Pause animation regardless of window visibility (e.g. tab hidden). */
@@ -54,6 +56,7 @@ export function Herzie3D({
   wearables,
   creatureParams,
   boomboxConfig,
+  dangleConfig,
   showSky = true,
   draggable,
   paused: pausedProp = false,
@@ -140,6 +143,7 @@ export function Herzie3D({
         wearables={wearables}
         creatureParams={creatureParams}
         boomboxConfig={boomboxConfig}
+        dangleConfig={dangleConfig}
         draggable={draggable}
         paused={paused}
         wrapperStyle={

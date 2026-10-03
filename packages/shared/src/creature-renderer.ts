@@ -24,6 +24,11 @@ import {
   VOID_RAMP,
 } from "./ascii3d.js";
 import {
+  type DangleState,
+  DEFAULT_DANGLE_CONFIG,
+  steadyDangle,
+} from "./dangle-physics.js";
+import {
   EQUIPPED_SLOTS,
   type Equipped,
   type GroundSide,
@@ -231,6 +236,19 @@ export interface Sphere {
   part: string;
   /** Fixed color for wearables (shaded by lighting at render time). */
   color?: string;
+  /** Set on spheres that hang loose (necklace links) and so react to a spin —
+   * see applyDangle and dangle-physics.ts. */
+  dangle?: Dangle;
+}
+
+interface Dangle {
+  /** How much of the chain's swing this sphere takes: ~0 at the back of the
+   * neck where it's held, 1 at the pendant. */
+  weight: number;
+  /** How far it hangs below where it's held — what a flare lifts back up. */
+  hang: number;
+  /** The vertical axis it swings around (the neck's), as [x, z]. */
+  pivot: [number, number];
 }
 
 // --- Dance animation offsets ---
@@ -1017,6 +1035,8 @@ function buildNecklaceBeads(
     beadRadius: (i: number) => number;
     color: (i: number) => string;
     sag: number;
+    /** Scales how far these beads swing on a spin: heavier swings further. */
+    heft: number;
   },
 ): { beads: Sphere[]; front: V3 } {
   const [nx, ny, nz] = neck.center;
@@ -1041,6 +1061,12 @@ function buildNecklaceBeads(
       zone: "wearable",
       part: "body",
       color: opts.color(i),
+      // The front sags and swings most; the back, held at the neck, barely.
+      dangle: {
+        weight: (0.2 + 0.8 * frontWeight) * opts.heft,
+        hang: y - ny,
+        pivot: [nx, nz],
+      },
     });
   }
   return { beads, front };
@@ -1057,6 +1083,7 @@ function buildGoldChainSpheres(spheres: Sphere[]): Sphere[] {
     beadRadius: (i) => (i % 2 === 0 ? big : small),
     color: (i) => (i % 2 === 0 ? GOLD_RAMP[2] : GOLD_RAMP[3]),
     sag: neck.size * 0.3,
+    heft: 1,
   });
   // Medallion hanging off the lowest link, standing proud of the chest.
   const pendR = neck.size * 0.17;
@@ -1068,6 +1095,11 @@ function buildGoldChainSpheres(spheres: Sphere[]): Sphere[] {
     zone: "wearable",
     part: "body",
     color: GOLD_RAMP[1],
+    dangle: {
+      weight: 1,
+      hang: py - neck.center[1],
+      pivot: [neck.center[0], neck.center[2]],
+    },
   });
   return beads;
 }
@@ -1080,6 +1112,8 @@ function buildPearlNecklaceSpheres(spheres: Sphere[]): Sphere[] {
     beadRadius: () => neck.size * 0.1,
     color: (i) => (i % 2 === 0 ? "#FBF7EE" : "#EDE4D3"),
     sag: neck.size * 0.18,
+    // Lighter than the chain and with no pendant: a smaller, quicker swing.
+    heft: 0.7,
   }).beads;
 }
 
@@ -1106,6 +1140,34 @@ function buildBowtieSpheres(spheres: Sphere[]): Sphere[] {
     part: "body",
     color,
   }));
+}
+
+/** Poses the dangling spheres for a spin's swing and flare. Flare first —
+ * lifting each sphere back up by part of its hang and out from the neck —
+ * then the swing, a rotation about the neck's axis. Rotating about that axis
+ * keeps a link on the body's surface, since the body is round about it. */
+function applyDangle(spheres: Sphere[], state: DangleState): Sphere[] {
+  if (state.swing === 0 && state.flare === 0) return spheres;
+  return spheres.map((s) => {
+    if (!s.dangle) return s;
+    const { weight, hang, pivot } = s.dangle;
+    let x = s.center[0] - pivot[0];
+    let z = s.center[2] - pivot[1];
+    const y = s.center[1] - state.flare * hang * 0.8;
+    const r = Math.hypot(x, z);
+    if (r > 0) {
+      const out = 1 + (state.flare * hang * 0.6) / r;
+      x *= out;
+      z *= out;
+    }
+    const [rx, , rz] = rotY([x, 0, z], state.swing * weight);
+    return { ...s, center: [rx + pivot[0], y, rz + pivot[1]] as V3 };
+  });
+}
+
+/** Whether anything worn swings when the herzie is spun. */
+export function hasDangleEquipped(equipped?: Equipped): boolean {
+  return equipped?.body === "gold-chain" || equipped?.body === "pearl-necklace";
 }
 
 const BODY_ITEM_BUILDERS: Record<string, (spheres: Sphere[]) => Sphere[]> = {
@@ -2247,9 +2309,19 @@ export function generateIdleFrames(
   );
 }
 
+/** How long each frame of the rotation loop shows, in ms (Herzie3D's tick). */
+export const ROTATION_FRAME_MS = 80;
+
+/** The steady trail and flare a dangling item holds through the rotation
+ * loop: a spin of one turn per `frameCount` frames at ROTATION_FRAME_MS. */
+export function rotationLoopDangle(frameCount = 36): DangleState {
+  const speed = (Math.PI * 2) / ((frameCount * ROTATION_FRAME_MS) / 1000);
+  return steadyDangle(speed, DEFAULT_DANGLE_CONFIG);
+}
+
 /**
  * Generate rotation animation frames — continuous Y-axis spin.
- * 36 frames at 80ms.
+ * 36 frames at 80ms. Anything dangling holds the trail a steady spin gives it.
  */
 export function generateRotationFrames(
   userId: string,
@@ -2265,8 +2337,9 @@ export function generateRotationFrames(
   if (cached) return cached;
 
   const params = resolveCreatureParams(userId, paramsOverride);
-  const spheres = buildCreatureSpheres(params, stage);
-  appendWearableSpheres(spheres, equipped, cols, boomboxConfig);
+  const built = buildCreatureSpheres(params, stage);
+  appendWearableSpheres(built, equipped, cols, boomboxConfig);
+  const spheres = applyDangle(built, rotationLoopDangle(frameCount));
   const anchors = getAnchors(spheres, params, stage);
   const colors = buildColorTriplet(CREATURE_PALETTE[params.colorIndex]);
   const scheme = colorSchemeFor(equipped, params);
@@ -2331,10 +2404,13 @@ export function renderCreatureAtAngle(
   cols: number = SW,
   boomboxConfig?: BoomboxConfig,
   spiritHopVariant?: number,
+  /** Pose for anything dangling, from Herzie3D's spin physics. */
+  dangle?: DangleState,
 ): FrameData {
   const params = resolveCreatureParams(userId, paramsOverride);
-  const baseSpheres = buildCreatureSpheres(params, stage);
-  appendWearableSpheres(baseSpheres, equipped, cols, boomboxConfig);
+  const built = buildCreatureSpheres(params, stage);
+  appendWearableSpheres(built, equipped, cols, boomboxConfig);
+  const baseSpheres = dangle ? applyDangle(built, dangle) : built;
   const anchors = getAnchors(baseSpheres, params, stage);
   const colors = buildColorTriplet(CREATURE_PALETTE[params.colorIndex]);
   const scheme = colorSchemeFor(equipped, params);

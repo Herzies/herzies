@@ -292,6 +292,30 @@ describe("neckwear", () => {
     }
   });
 
+  it("swings the chain but nothing else", () => {
+    const at = (body: string, swing: number) =>
+      renderCreatureAtAngle(
+        USER,
+        3,
+        1.2345,
+        0,
+        false,
+        { body },
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { swing, flare: 0 },
+      ).cells;
+    expect(JSON.stringify(at("gold-chain", 0.5))).not.toBe(
+      JSON.stringify(at("gold-chain", 0)),
+    );
+    // The bowtie is rigid: no swing however the herzie is spun.
+    expect(JSON.stringify(at("bowtie", 0.5))).toBe(
+      JSON.stringify(at("bowtie", 0)),
+    );
+  });
+
   it("draws nothing before stage 3, when there's no body to sit on", () => {
     for (const stage of [1, 2]) {
       expect(draw(stage, "gold-chain")).toBe(draw(stage));

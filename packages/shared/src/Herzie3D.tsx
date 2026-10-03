@@ -17,13 +17,27 @@ import {
   generateDanceFrames,
   generateIdleFrames,
   generateRotationFrames,
+  hasDangleEquipped,
   hasSpiritEquipped,
   isSpiritHopFrame,
+  ROTATION_FRAME_MS,
   renderCreatureAtAngle,
+  rotationLoopDangle,
   SH,
   SPIRIT_DANCE_HOP_VARIANT_COUNT,
   SW,
 } from "./creature-renderer.js";
+import {
+  combineDangle,
+  createDangleSim,
+  type DangleConfig,
+  type DangleSim,
+  type DangleState,
+  DEFAULT_DANGLE_CONFIG,
+  dangleState,
+  isDangleSettled,
+  stepDangle,
+} from "./dangle-physics.js";
 import type { Equipped } from "./items.js";
 
 const FONT_FAMILY = "'SF Mono', 'Menlo', monospace";
@@ -56,6 +70,8 @@ interface Props {
   creatureParams?: CreatureParams;
   /** Override boombox placement/rotation (sandbox / tooling). */
   boomboxConfig?: BoomboxConfig;
+  /** Override the spin physics of dangling items (sandbox / tooling). */
+  dangleConfig?: DangleConfig;
   /** Enable click-drag rotation with momentum. Default: true. */
   draggable?: boolean;
   /** Stop the frame timer to save CPU while the host is hidden / unfocused. */
@@ -100,6 +116,7 @@ export function Herzie3D({
   wearables,
   creatureParams,
   boomboxConfig,
+  dangleConfig = DEFAULT_DANGLE_CONFIG,
   draggable = true,
   paused = false,
   wrapperStyle,
@@ -140,6 +157,58 @@ export function Herzie3D({
   const momentumRaf = useRef(0);
 
   const hasDragged = dragAngle !== 0;
+
+  // --- Spin physics for dangling items (the chain, the pearls) ---
+  // A damped spring tied to dragAngle (see dangle-physics.ts), stepped on its
+  // own rAF loop for as long as anything is still moving. `dangle` is null at
+  // rest, which is what lets rendering fall back to the per-angle cache.
+  const [dangle, setDangle] = useState<DangleState | null>(null);
+  const dangleSim = useRef<DangleSim | null>(null);
+  const dangleRaf = useRef(0);
+  const dragAngleRef = useRef(dragAngle);
+  dragAngleRef.current = dragAngle;
+  // The angle the body last rested at, so a new sim starts from where the
+  // chain actually was rather than one drag step behind it.
+  const restAngle = useRef(dragAngle);
+  const dangleConfigRef = useRef(dangleConfig);
+  dangleConfigRef.current = dangleConfig;
+  const dangles = hasDangleEquipped(equipped);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: dragAngle is the trigger — the loop reads it through dragAngleRef
+  useEffect(() => {
+    if (!dangles) {
+      restAngle.current = dragAngleRef.current;
+      return;
+    }
+    if (dangleRaf.current) return;
+    dangleSim.current ??= createDangleSim(restAngle.current);
+    let last = performance.now();
+    const tick = (now: number) => {
+      const sim = dangleSim.current;
+      if (!sim) return;
+      const body = dragAngleRef.current;
+      stepDangle(sim, body, (now - last) / 1000, dangleConfigRef.current);
+      last = now;
+      if (isDangleSettled(sim, body)) {
+        dangleSim.current = null;
+        dangleRaf.current = 0;
+        restAngle.current = body;
+        setDangle(null);
+        return;
+      }
+      setDangle(dangleState(sim, body, dangleConfigRef.current));
+      dangleRaf.current = requestAnimationFrame(tick);
+    };
+    dangleRaf.current = requestAnimationFrame(tick);
+  }, [dragAngle, dangles]);
+
+  useEffect(
+    () => () => {
+      cancelAnimationFrame(dangleRaf.current);
+      dangleRaf.current = 0;
+    },
+    [],
+  );
   const wantsDancing = animate !== false && isPlaying;
 
   useEffect(() => {
@@ -212,7 +281,7 @@ export function Herzie3D({
     });
   }, [frame, canHop]);
 
-  const interval = dancing ? 65 : animate ? 80 : 50;
+  const interval = dancing ? 65 : animate ? ROTATION_FRAME_MS : 50;
 
   // Frames rendered at an arbitrary drag angle can't come from the module-level
   // frameCache — its keys carry no angle, and a live drag would add an entry per
@@ -368,11 +437,17 @@ export function Herzie3D({
         hopVariant !== undefined &&
         isSpiritHopFrame(hopVariant, frame);
       const cacheKey = hopFrame ? `${hopVariant}:${frame}` : `${frame}`;
-      let cells = angleFrames.get(cacheKey);
+      // A swinging chain is a new pose every frame: render it live and keep it
+      // out of the cache, which only holds the at-rest pose.
+      let cells = dangle ? undefined : angleFrames.get(cacheKey);
       if (!cells) {
         const yAngle = animate
           ? (frame / frames.length) * Math.PI * 2 + dragAngle
           : DEFAULT_Y_ANGLE + dragAngle;
+        const pose = combineDangle(
+          animate && dangles ? rotationLoopDangle(frames.length) : undefined,
+          dangle,
+        );
         cells = renderCreatureAtAngle(
           userId,
           stage,
@@ -384,8 +459,9 @@ export function Herzie3D({
           cols,
           boomboxConfig,
           hopFrame ? hopVariant : undefined,
+          pose,
         ).cells;
-        angleFrames.set(cacheKey, cells);
+        if (!dangle) angleFrames.set(cacheKey, cells);
       }
       drawFrame(cells);
     } else {
@@ -408,6 +484,8 @@ export function Herzie3D({
     cols,
     boomboxConfig,
     hopVariant,
+    dangle,
+    dangles,
   ]);
 
   return (
