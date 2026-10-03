@@ -67,7 +67,9 @@ export function TabBar({
       onClick={() => setView(t.id)}
       title={t.title}
       className={cn(
-        "relative overflow-visible border-none bg-transparent py-1 text-[10px] cursor-pointer",
+        // flex-1 and the bar's full height: the whole cell is the hit area,
+        // not just the label.
+        "flex flex-1 cursor-pointer justify-center overflow-visible border-none bg-transparent py-1.5 text-[10px]",
         {
           "font-bold text-cyan": view === t.id && t.colour === "cyan",
           "hover:text-cyan/80": view !== t.id && t.colour === "cyan",
@@ -80,21 +82,25 @@ export function TabBar({
         },
       )}
     >
-      {t.id === "events" && visitorsInTown > 0 && <TabStarAccent />}
-      <span className={cn("relative z-10")}>{t.label}</span>
-      {t.id === "events" && visitorsInTown > 0 && (
-        <span className="relative z-10 ml-0.5 align-super text-[8px] font-bold text-green">
-          {visitorsInTown}
-        </span>
-      )}
+      {/* The label's own box, the size the tab used to be: the sparkle
+          positions against it, not the whole cell. */}
+      <span className="relative py-1">
+        {t.id === "events" && visitorsInTown > 0 && <TabStarAccent />}
+        <span className="relative z-10">{t.label}</span>
+        {t.id === "events" && visitorsInTown > 0 && (
+          <span className="relative z-10 ml-0.5 align-super text-[8px] font-bold text-green">
+            {visitorsInTown}
+          </span>
+        )}
+      </span>
     </button>
   );
 
   return (
     // Full-bleed: the top border runs to the window's edges (out past the
-    // app's 12px side padding, the -mx-3), while px-6 leaves the tabs where
-    // they were.
-    <div className="-mx-3 flex items-center justify-between border-t border-border px-6 py-1.5">
+    // app's 12px side padding, the -mx-3), and so do the tabs' cells, which
+    // split the width evenly with each label centred in its own.
+    <div className="-mx-3 flex items-stretch border-t border-border">
       {tabs.map(renderTab)}
     </div>
   );
