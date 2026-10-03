@@ -1239,8 +1239,8 @@ export const DEFAULT_BOOMBOX_CONFIG: BoomboxConfig = {
   yawDeg: -33,
   offsetX: 0.18,
   // Lifted: it sits in front of the herzie, so resting on the floor itself
-  // drew it a couple of rows below the feet. Matches Jack's lift.
-  offsetY: -0.22,
+  // drew it a couple of rows below the feet. Tuned by eye in the app.
+  offsetY: -0.42,
   scale: 1.15,
 };
 
