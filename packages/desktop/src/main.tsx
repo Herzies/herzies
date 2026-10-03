@@ -48,7 +48,7 @@ const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1h
 const WHATS_NEW_SEEN_KEY = "herzies:whats-new-seen-version";
 /** The camera on the Herzie view, relative to Home's: pulled back and raised
  * a little to make room for the deck over the stage's floor. */
-const HERZIE_VIEW_ZOOM = 0.8;
+const HERZIE_VIEW_ZOOM = 0.83;
 /** px; negative is up. */
 const HERZIE_VIEW_OFFSET_Y = -14;
 
