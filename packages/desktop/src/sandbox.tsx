@@ -8,10 +8,12 @@ import {
   clearCreatureCache,
   type DangleConfig,
   DEFAULT_BOOMBOX_CONFIG,
+  DEFAULT_CAMERA_DISTANCE,
   DEFAULT_DANGLE_CONFIG,
   earAngleFromDeg,
   earAngleToDeg,
   generateCreatureParams,
+  setCameraDistance,
 } from "@herzies/shared";
 import { useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -49,6 +51,12 @@ function Sandbox() {
   const [wearables, setWearables] = useState<string[]>([]);
   const [boombox, setBoombox] = useState<BoomboxConfig>(DEFAULT_BOOMBOX_CONFIG);
   const [dangle, setDangle] = useState<DangleConfig>(DEFAULT_DANGLE_CONFIG);
+  const [camera, setCamera] = useState(DEFAULT_CAMERA_DISTANCE);
+  const changeCamera = (distance: number) => {
+    setCameraDistance(distance);
+    clearCreatureCache();
+    setCamera(distance);
+  };
   const swings =
     wearables.includes("gold-chain") || wearables.includes("pearl-necklace");
   const [jsonOpen, setJsonOpen] = useState(false);
@@ -90,6 +98,7 @@ function Sandbox() {
     creatureParams: params,
     ...(wearables.includes("boombox") ? { boomboxConfig: boombox } : {}),
     ...(swings ? { dangleConfig: dangle } : {}),
+    cameraDistance: camera,
   });
 
   const copyJson = async () => {
@@ -304,6 +313,20 @@ function Sandbox() {
           </Section>
         )}
 
+        <Section title="camera">
+          <SliderField
+            label="distance (lower = more perspective)"
+            value={camera}
+            bounds={{ min: 1.5, max: 12, step: 0.1 }}
+            onChange={changeCamera}
+          />
+          <div className="mt-1.5">
+            <Btn onClick={() => changeCamera(DEFAULT_CAMERA_DISTANCE)}>
+              reset camera
+            </Btn>
+          </div>
+        </Section>
+
         {swings && (
           <Section title="spin physics">
             <SliderField
@@ -360,6 +383,9 @@ function Sandbox() {
 
       <main className="flex min-h-screen flex-1 items-center justify-center p-6">
         <Herzie3D
+          // Remount on a camera move: the component memoizes its frames, and
+          // nothing it's given changes when only the camera does.
+          key={camera}
           userId={userId}
           stage={stage}
           size={size}

@@ -39,16 +39,32 @@ import {
 // --- Creature viewport ---
 const SW = 80;
 const SH = 48;
-const CAM = 2.0;
-const FOV_Y = 1.8;
-const HALF_H = Math.tan(FOV_Y / 2);
+/**
+ * Camera distance from the herzie's centre. Closer means stronger perspective:
+ * whatever swings toward the camera (a limb, the eyes) is drawn bigger. The
+ * field of view follows it so the frame at the centre stays the same size —
+ * moving the camera changes depth exaggeration, not framing.
+ */
+export const DEFAULT_CAMERA_DISTANCE = 2.0;
+/** View-plane half-height at the herzie's centre (z = 0), in world units.
+ * Fixed: it is the framing. Was tan(1.8 / 2) at the original 2.0 distance. */
+const FRAME_HALF_H = DEFAULT_CAMERA_DISTANCE * Math.tan(1.8 / 2);
+
+let CAM = DEFAULT_CAMERA_DISTANCE;
+let HALF_H = FRAME_HALF_H / CAM;
+
+/** Tooling (the sandbox): move the camera, keeping the framing. Callers must
+ * clearCreatureCache() afterwards — cached frames were rendered at the old
+ * distance. */
+export function setCameraDistance(distance: number): void {
+  CAM = distance;
+  HALF_H = FRAME_HALF_H / CAM;
+}
 
 /** Horizontal half-extent of the view plane for a given column count. */
 function halfWidthFor(cols: number): number {
   return HALF_H * ((cols / SH) * (1 / CHAR_ASPECT));
 }
-
-const HALF_W = halfWidthFor(SW);
 const TILT = 8 * (Math.PI / 180);
 const TILT_COS = Math.cos(TILT);
 const TILT_SIN = Math.sin(TILT);
@@ -786,7 +802,7 @@ function buildBoss(p: CreatureParams, _stage: number): Sphere[] {
       center: [
         headX + Math.cos(a) * ringR,
         headY - headR * 0.5 - len * 0.5,
-        // Z kept deliberately shallow. CAM is only 2.0 units out, so anything
+        // Z kept deliberately shallow. CAM is only 2.0 units out by default, so anything
         // with real depth swells hugely as it rotates toward the camera and
         // pushes the creature past SH=48. The ring reads as a ring from the
         // silhouette alone; it does not need the depth to sell it.
@@ -1228,7 +1244,7 @@ function groundCornerX(
   bz: number,
   offsetX: number,
 ): number {
-  const halfW = cols === SW ? HALF_W : halfWidthFor(cols);
+  const halfW = halfWidthFor(cols);
   const relZClose = zFace + bz + CAM;
   const marginCols = 2;
   if (side === "left") {
@@ -2217,7 +2233,7 @@ function renderCreatureFrame(
   cols: number = SW,
   colorScheme?: readonly string[],
 ): FrameData {
-  const halfW = cols === SW ? HALF_W : halfWidthFor(cols);
+  const halfW = halfWidthFor(cols);
   const transformed = spheres.map((s) => {
     const tilted: V3 = [
       s.center[0],
