@@ -303,7 +303,7 @@ function Sandbox() {
             <SliderField
               label="stiffness"
               value={dangle.stiffness}
-              bounds={{ min: 5, max: 300, step: 1 }}
+              bounds={{ min: 20, max: 600, step: 5 }}
               onChange={(v) => setDangle((d) => ({ ...d, stiffness: v }))}
             />
             <SliderField
@@ -311,6 +311,12 @@ function Sandbox() {
               value={dangle.damping}
               bounds={{ min: 0, max: 30, step: 0.1 }}
               onChange={(v) => setDangle((d) => ({ ...d, damping: v }))}
+            />
+            <SliderField
+              label="air drag"
+              value={dangle.drag}
+              bounds={{ min: 0, max: 10, step: 0.1 }}
+              onChange={(v) => setDangle((d) => ({ ...d, drag: v }))}
             />
             <SliderField
               label="max swing (rad)"

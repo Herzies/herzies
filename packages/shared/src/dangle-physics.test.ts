@@ -52,6 +52,13 @@ describe("dangle physics", () => {
     ).toBeLessThan(0.015);
   });
 
+  it("isn't towed behind a steady spin, only swung by it changing", () => {
+    // A fast, steady drag (~1300px/s). The old model damped against the
+    // chain's absolute speed, which pinned it at maxSwing for the whole drag.
+    const { spinning } = run(20, 2, 0);
+    expect(Math.abs(spinning.at(-1) ?? 0)).toBeLessThan(0.15);
+  });
+
   it("never swings past maxSwing however hard it's spun", () => {
     const { spinning, held } = run(80, 0.5, 2);
     for (const swing of [...spinning, ...held]) {

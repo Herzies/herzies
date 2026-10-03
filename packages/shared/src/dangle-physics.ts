@@ -10,9 +10,10 @@
  *  - overshoot: stop and it swings past, wobbling a few times before settling;
  *  - flare: spin fast and it's thrown outward, lifting off the chest.
  *
- * The spring's damping acts on the chain's own speed, not its speed relative
- * to the body, which is what makes a steady spin hold a steady trailing lag
- * (−damping·ω/stiffness) instead of snapping back to rest.
+ * Like a real chain, it's the spin *changing* that swings it: damping acts on
+ * the chain's motion relative to the body, so a steady spin doesn't hold it
+ * back. Only a little air drag does (−drag·ω/stiffness) — a slight trail,
+ * not the chain being towed behind through syrup.
  *
  * Angles are in the renderer's yAngle units (radians). Pure: Herzie3D owns a
  * DangleSim and steps it each animation frame; the renderer only ever sees
@@ -22,20 +23,24 @@
 export interface DangleConfig {
   /** Spring pull back toward the body. Higher = quicker, tighter wobble. */
   stiffness: number;
-  /** How fast the wobble dies out, and how far a steady spin trails. */
+  /** How fast the wobble dies out (acts on the swing, not the spin). */
   damping: number;
+  /** Air drag: how far a steady spin trails. Keep it small. */
+  drag: number;
   /** Largest swing shown, in radians. Past it the swing eases off (tanh). */
   maxSwing: number;
   /** Spin speed (rad/s) at which the flare is at full lift. */
   flareSpeed: number;
 }
 
-// ~0.8s period, damping ratio ~0.26: about three visible wobbles after a stop.
+// ~0.42s period, damping ratio ~0.27: a snappy swing-through and a couple of
+// quick wobbles after a stop, settled within about a second.
 export const DEFAULT_DANGLE_CONFIG: DangleConfig = {
-  stiffness: 60,
-  damping: 4,
+  stiffness: 220,
+  damping: 8,
+  drag: 1.5,
   maxSwing: 0.7,
-  flareSpeed: 12,
+  flareSpeed: 20,
 };
 
 /** What the renderer applies to dangling spheres. */
@@ -52,16 +57,28 @@ export interface DangleSim {
   flare: number;
   /** The body angle at the end of the last step. */
   body: number;
+  /** The body's spin speed, smoothed over a few frames. */
+  bodyVelocity: number;
 }
 
 export function createDangleSim(bodyAngle: number): DangleSim {
-  return { angle: bodyAngle, velocity: 0, flare: 0, body: bodyAngle };
+  return {
+    angle: bodyAngle,
+    velocity: 0,
+    flare: 0,
+    body: bodyAngle,
+    bodyVelocity: 0,
+  };
 }
 
 // Fixed substep so a dropped frame can't make the spring blow up.
 const SUBSTEP = 1 / 240;
+// Time constant (s) the body's spin speed is smoothed over. Mouse events don't
+// land evenly on frames — one frame gets two moves, the next none — and the
+// damping term would turn that unevenness straight into flicker.
+const BODY_VELOCITY_SMOOTHING = 0.06;
 // How quickly the flare follows the spin, per second.
-const FLARE_RATE = 8;
+const FLARE_RATE = 14;
 
 function flareTarget(speed: number, config: DangleConfig): number {
   return Math.min(1, (speed / config.flareSpeed) ** 2);
@@ -75,6 +92,13 @@ export function stepDangle(
 ): void {
   const span = Math.min(dt, 0.1);
   const from = sim.body;
+  if (span > 0) {
+    const raw = (bodyAngle - from) / span;
+    sim.bodyVelocity +=
+      (raw - sim.bodyVelocity) *
+      (1 - Math.exp(-span / BODY_VELOCITY_SMOOTHING));
+  }
+  const bodyVelocity = sim.bodyVelocity;
   let done = 0;
   while (done < span) {
     const h = Math.min(SUBSTEP, span - done);
@@ -84,7 +108,9 @@ export function stepDangle(
     const body =
       span > 0 ? from + (bodyAngle - from) * (done / span) : bodyAngle;
     const accel =
-      -config.stiffness * (sim.angle - body) - config.damping * sim.velocity;
+      -config.stiffness * (sim.angle - body) -
+      config.damping * (sim.velocity - bodyVelocity) -
+      config.drag * sim.velocity;
     // Semi-implicit Euler: stable for a spring at this step size.
     sim.velocity += accel * h;
     sim.angle += sim.velocity * h;
@@ -109,9 +135,12 @@ export function dangleState(
 /** At rest on a still body — the caller can stop stepping and drop the sim. */
 export function isDangleSettled(sim: DangleSim, bodyAngle: number): boolean {
   return (
-    Math.abs(sim.angle - bodyAngle) < 1e-3 &&
-    Math.abs(sim.velocity) < 1e-3 &&
-    sim.flare < 1e-3
+    // Well under a cell of movement: past this nobody can see it, and every
+    // frame the sim keeps running is a live render instead of a cached one.
+    Math.abs(sim.angle - bodyAngle) < 0.005 &&
+    Math.abs(sim.velocity - sim.bodyVelocity) < 0.02 &&
+    Math.abs(sim.bodyVelocity) < 0.02 &&
+    sim.flare < 0.01
   );
 }
 
@@ -121,7 +150,7 @@ export function steadyDangle(
   speed: number,
   config: DangleConfig = DEFAULT_DANGLE_CONFIG,
 ): DangleState {
-  const raw = (-config.damping * speed) / config.stiffness;
+  const raw = (-config.drag * speed) / config.stiffness;
   return {
     swing: config.maxSwing * Math.tanh(raw / config.maxSwing),
     flare: flareTarget(Math.abs(speed), config),
