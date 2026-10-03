@@ -7,7 +7,7 @@
  * rotation, which is enough for the three things a real chain visibly does:
  *
  *  - lag: start spinning and it trails behind the body;
- *  - overshoot: stop and it swings past, wobbling a few times before settling;
+ *  - follow-through: stop and it keeps swinging on, then eases back to rest;
  *  - flare: spin fast and it's thrown outward, lifting off the chest.
  *
  * Like a real chain, it's the spin *changing* that swings it: damping acts on
@@ -33,11 +33,12 @@ export interface DangleConfig {
   flareSpeed: number;
 }
 
-// ~0.42s period, damping ratio ~0.27: a snappy swing-through and a couple of
-// quick wobbles after a stop, settled within about a second.
+// Tuned by feel in the sandbox. Overdamped (damping ratio ~1.3): the chain
+// swings with the spin and eases back to rest without wobbling — a heavy
+// chain, not a spring.
 export const DEFAULT_DANGLE_CONFIG: DangleConfig = {
-  stiffness: 220,
-  damping: 8,
+  stiffness: 105,
+  damping: 26.7,
   drag: 1.5,
   maxSwing: 0.7,
   flareSpeed: 20,

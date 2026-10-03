@@ -35,7 +35,7 @@ describe("dangle physics", () => {
     expect(Math.min(...spinning)).toBeLessThan(-0.05);
   });
 
-  it("swings past rest when the spin stops, then settles", () => {
+  it("follows through when the spin stops, then settles", () => {
     const { sim, body, held } = run(6, 0.5, 6);
     // Overshoot: it was trailing (negative), so it swings positive.
     expect(Math.max(...held)).toBeGreaterThan(0.05);
@@ -56,7 +56,9 @@ describe("dangle physics", () => {
     // A fast, steady drag (~1300px/s). The old model damped against the
     // chain's absolute speed, which pinned it at maxSwing for the whole drag.
     const { spinning } = run(20, 2, 0);
-    expect(Math.abs(spinning.at(-1) ?? 0)).toBeLessThan(0.15);
+    expect(Math.abs(spinning.at(-1) ?? 0)).toBeLessThan(
+      DEFAULT_DANGLE_CONFIG.maxSwing / 2,
+    );
   });
 
   it("never swings past maxSwing however hard it's spun", () => {
