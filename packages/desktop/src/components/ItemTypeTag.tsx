@@ -99,16 +99,26 @@ export function SetTag({
 export function ItemStatLines({
   item,
   level = 0,
+  dim = false,
   className,
 }: {
   item: Pick<ItemDef, "stats">;
   level?: number;
+  /** Dimmed instead of cyan — for the condensed preview, where they're
+   * detail under the name rather than the headline. */
+  dim?: boolean;
   className?: string;
 }) {
   const keys = STAT_KEYS.filter((key) => item.stats?.[key] !== undefined);
   if (keys.length === 0) return null;
   return (
-    <div className={cn("text-ui-sm text-cyan", className)}>
+    <div
+      className={cn(
+        "text-ui-sm",
+        dim ? "text-text-dim" : "text-cyan",
+        className,
+      )}
+    >
       {keys.map((key) => (
         <div key={key}>
           {STAT_LABELS[key]}: +{(item.stats?.[key] ?? 0) + level}

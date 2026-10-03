@@ -137,7 +137,7 @@ export function CompactItemPreview({
         <ItemTypeTag item={item} variant="text" />
       </div>
       {/* No margins, so the lines are evenly spaced. */}
-      <ItemStatLines item={item} level={level} className="text-left" />
+      <ItemStatLines item={item} level={level} dim className="text-left" />
       {set && (
         <div className="text-ui-sm text-text-dim">
           {set.name} set {setCount}/{set.itemIds.length}
