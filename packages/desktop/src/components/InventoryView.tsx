@@ -414,10 +414,12 @@ type Panel = "bag" | "deck";
 const PANEL_TAB_ATTR = "data-panel-tab";
 const toTab = (panel: Panel) => `[${PANEL_TAB_ATTR}="${panel}"]`;
 
-/** The middle of an element, for a flight to take off from. */
+/** The middle of an element, for a flight to take off from, and the size of
+ * the icon in it (bag and deck icons differ). */
 function centre(el: Element | null) {
   const r = el?.getBoundingClientRect();
-  return r && { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  const size = el?.querySelector("svg")?.getBoundingClientRect().width;
+  return r && { x: r.left + r.width / 2, y: r.top + r.height / 2, size };
 }
 
 /** Where a drag is: over a bank slot, and/or over the herzie — and if so, over
@@ -569,9 +571,10 @@ function ItemGridCell({
           )}
         </span>
         {def && (
+          // h-6: the 16px grid at 1.5x.
           <ItemTypeIcon
             item={def}
-            className={cn("h-4 w-4", flying && "invisible")}
+            className={cn("h-6 w-6", flying && "invisible")}
           />
         )}
       </button>
@@ -1263,6 +1266,8 @@ export function InventoryView({
           itemId: unit.itemId,
           unitId,
           from: origin,
+          // A drop point (`from`) has no icon of its own to size from.
+          fromSize: from ? undefined : (origin as { size?: number }).size,
           target: returning ? bagSpot(unitId) : deckSpot(unitId),
         });
       }
@@ -1280,6 +1285,7 @@ export function InventoryView({
             itemId: before.itemId,
             unitId: before.id,
             from: boxAt,
+            fromSize: boxAt.size,
             target: bagSpot(before.id),
           });
         }
@@ -1429,6 +1435,7 @@ export function InventoryView({
         itemId: other.itemId,
         unitId: other.id,
         from: otherAt,
+        fromSize: otherAt.size,
         target: toDeck(other.id),
       });
     }

@@ -12,6 +12,8 @@ export interface Flight {
   /** Where it took off, captured before the move: the tile or box it left is
    * gone by the time the flight starts. */
   from: { x: number; y: number };
+  /** The icon's size there, px. Default: ICON. */
+  fromSize?: number;
   /** Finds where it lands. Resolved each frame until it exists, since the
    * landing spot isn't always drawn yet — a card returning to the bank only
    * gets its grid slot once the arrangement reconciles, a render later. */
@@ -19,7 +21,8 @@ export interface Flight {
 }
 
 const SPRITE = 24;
-/** The icon size a card takes off from: bag and deck icons are both 16px. */
+/** The icon size a card takes off from when the flight doesn't say: the
+ * deck's 16px (the bag's are 24px, and its flights pass that). */
 const ICON = 16;
 /** Where in the flight the card is back to its landing size — before the end,
  * so the last stretch is at the size it settles at rather than shrinking onto
@@ -71,7 +74,7 @@ function FlightSprite({
       const to = icon ?? target.getBoundingClientRect();
       const dx = to.left + to.width / 2 - flight.from.x;
       const dy = to.top + to.height / 2 - flight.from.y;
-      const start = ICON / SPRITE;
+      const start = (flight.fromSize || ICON) / SPRITE;
       const end = (icon?.width || ICON) / SPRITE;
       // The shortest way: every waypoint sits on the straight line from
       // take-off to landing, at the same fraction of the way as of the time,
@@ -124,7 +127,7 @@ function FlightSprite({
         height: SPRITE,
         // Its take-off size, for the frame or two before the animation
         // starts (while the landing spot is found).
-        transform: `scale(${ICON / SPRITE})`,
+        transform: `scale(${(flight.fromSize || ICON) / SPRITE})`,
       }}
     >
       <ItemTypeIcon

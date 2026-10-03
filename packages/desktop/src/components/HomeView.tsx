@@ -424,7 +424,7 @@ export function HomeView({
                         }
                       >
                         {item ? (
-                          <span className="relative inline-block h-4 w-4">
+                          <span className="relative inline-block h-6 w-6">
                             {/* Card-shaped backing in the app's own
                                 background colour so the icon reads as an
                                 opaque card instead of a bare wireframe
@@ -436,7 +436,7 @@ export function HomeView({
                             />
                             <ItemTypeIcon
                               item={item}
-                              className="relative block h-4 w-4"
+                              className="relative block h-6 w-6"
                             />
                           </span>
                         ) : (
@@ -452,7 +452,7 @@ export function HomeView({
                           </span>
                         )}
                       </div>
-                      <div className="h-1 w-3.5 rounded-full bg-black/40 blur-[1px]" />
+                      <div className="h-1 w-5 rounded-full bg-black/40 blur-[1px]" />
                     </button>
                   </Tooltip>
                 </span>
