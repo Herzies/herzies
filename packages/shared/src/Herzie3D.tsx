@@ -4,6 +4,7 @@ import {
   type CSSProperties,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -290,15 +291,22 @@ export function Herzie3D({
   // `offsetY` props together. While the zoom is between values, frames are
   // rendered live at it (like a drag); once it lands, the cached frames at
   // the new zoom take over. The offset is only a draw shift. Starts at the
-  // props so mounting doesn't animate.
+  // props so mounting doesn't animate, and jumps straight there when the
+  // herzie was paused (hidden) as they changed — nobody saw it move. A layout
+  // effect, so that jump lands before the first paint.
   const [camera, setCamera] = useState({ zoom, offsetY });
   const liveZoom = camera.zoom;
   const zooming = liveZoom !== zoom;
   const cameraRef = useRef(camera);
   cameraRef.current = camera;
-  useEffect(() => {
+  const wasPaused = useRef(paused);
+  useLayoutEffect(() => {
     const from = cameraRef.current;
     if (from.zoom === zoom && from.offsetY === offsetY) return;
+    if (wasPaused.current) {
+      setCamera({ zoom, offsetY });
+      return;
+    }
     let raf = 0;
     let last = performance.now();
     const tick = (now: number) => {
@@ -320,6 +328,11 @@ export function Herzie3D({
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [zoom, offsetY]);
+  // After the camera effect, so it sees whether the herzie was paused before
+  // this commit, not after.
+  useLayoutEffect(() => {
+    wasPaused.current = paused;
+  }, [paused]);
 
   // Re-roll the Greedy Spirit's dance hop at each loop wrap: none or one of the
   // variants, never the same variant twice running. Every variant is the plain
