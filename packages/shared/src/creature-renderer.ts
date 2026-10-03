@@ -879,11 +879,16 @@ export const BOSS_BODY_TYPE = 4;
 
 // --- Wearable sphere builders ---
 
-/** Bounding sphere for all head parts (supports multi-sphere heads). */
+/** Bounding sphere for all head parts (supports multi-sphere heads). Worn
+ * items tagged part "head" so they move with it (fangs, a hat) are not the
+ * head: counting them let fangs on the face pull a hat forward toward the
+ * camera, where perspective blew it up. */
 function getHeadBounds(
   spheres: Sphere[],
 ): { center: V3; radius: number } | null {
-  const heads = spheres.filter((s) => s.part === "head");
+  const heads = spheres.filter(
+    (s) => s.part === "head" && s.zone !== "wearable",
+  );
   if (heads.length === 0) return null;
   if (heads.length === 1) {
     return { center: heads[0].center, radius: heads[0].radius };

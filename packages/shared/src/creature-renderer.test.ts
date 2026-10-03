@@ -365,6 +365,31 @@ describe("Halloween items", () => {
     );
   });
 
+  it("doesn't let the fangs move the hat", () => {
+    // Everything the fangs add on top of a hat must be what they add alone.
+    const cells = (equipped: Equipped) =>
+      renderCreatureAtAngle(USER, 3, 1.2345, 0, false, equipped, undefined, 126)
+        .cells;
+    const changed = (a: Equipped, b: Equipped) => {
+      const ca = cells(a);
+      const cb = cells(b);
+      return ca.flatMap((row, y) =>
+        row.flatMap((c, x) =>
+          c.ch !== cb[y][x].ch || c.color !== cb[y][x].color
+            ? [`${y},${x}`]
+            : [],
+        ),
+      );
+    };
+    const fangsOnHat = changed(
+      { head: "witch-hat", face: "fangs" },
+      { head: "witch-hat" },
+    );
+    const fangsAlone = new Set(changed({ face: "fangs" }, {}));
+    expect(fangsOnHat.length).toBeGreaterThan(0);
+    for (const cell of fangsOnHat) expect(fangsAlone.has(cell)).toBe(true);
+  });
+
   it("keeps the pets in place while the herzie spins", () => {
     // The cells the pets cover outside the herzie's own silhouette. If they
     // turned with the herzie, these would change between the two angles.
