@@ -963,6 +963,157 @@ function buildRainbowHeadbandSpheres(spheres: Sphere[]): Sphere[] {
   return result;
 }
 
+/** Where neckwear sits: the circle where the head sphere meets the body
+ * sphere. Body items need stage 3 (see ItemDef.minStage), so there is always
+ * a body to sit on; without one this is null and nothing is drawn. `size` is
+ * the head radius, the scale every neck item is sized from. */
+interface Neck {
+  center: V3;
+  radius: number;
+  size: number;
+  body: Sphere;
+}
+
+function largestPart(spheres: Sphere[], part: string): Sphere | undefined {
+  let best: Sphere | undefined;
+  for (const s of spheres) {
+    if (s.part === part && (!best || s.radius > best.radius)) best = s;
+  }
+  return best;
+}
+
+function getNeck(spheres: Sphere[]): Neck | null {
+  const head = largestPart(spheres, "head");
+  const body = largestPart(spheres, "body");
+  if (!head || !body) return null;
+  const [hx, hy, hz] = head.center;
+  const hr = head.radius;
+  // Circle where the two spheres intersect, measured down from the head.
+  const d = body.center[1] - hy;
+  const a = (d * d + hr * hr - body.radius ** 2) / (2 * d);
+  return {
+    center: [hx, hy + a, hz],
+    radius: Math.sqrt(Math.max(0, hr * hr - a * a)),
+    size: hr,
+    body,
+  };
+}
+
+/** Distance from the neck's vertical axis to the visible surface at height
+ * `y`: the body below the seam, the seam ring itself at or above it. */
+function neckSurfaceRadius(neck: Neck, y: number): number {
+  if (y <= neck.center[1]) return neck.radius;
+  const dy = y - neck.body.center[1];
+  return Math.sqrt(Math.max(0, neck.body.radius ** 2 - dy * dy));
+}
+
+/** A loop of beads around the neck that sags toward the front (-Z), riding
+ * the body's surface as it drops. Returns the front-most point so a pendant
+ * can hang from it. */
+function buildNecklaceBeads(
+  neck: Neck,
+  opts: {
+    count: number;
+    beadRadius: (i: number) => number;
+    color: (i: number) => string;
+    sag: number;
+  },
+): { beads: Sphere[]; front: V3 } {
+  const [nx, ny, nz] = neck.center;
+  const beads: Sphere[] = [];
+  let front: V3 = [nx, ny, nz];
+  for (let i = 0; i < opts.count; i++) {
+    const angle = (i / opts.count) * Math.PI * 2 + Math.PI / 2;
+    // sin(angle) = -1 at the front face (toward camera)
+    const frontWeight = Math.max(0, -Math.sin(angle)) ** 1.6;
+    const r = opts.beadRadius(i);
+    const y = ny + frontWeight * opts.sag;
+    const ringR = neckSurfaceRadius(neck, y) + r * 0.55;
+    const center: V3 = [
+      nx + Math.cos(angle) * ringR,
+      y,
+      nz + Math.sin(angle) * ringR,
+    ];
+    if (center[2] < front[2]) front = center;
+    beads.push({
+      center,
+      radius: r,
+      zone: "wearable",
+      part: "body",
+      color: opts.color(i),
+    });
+  }
+  return { beads, front };
+}
+
+function buildGoldChainSpheres(spheres: Sphere[]): Sphere[] {
+  const neck = getNeck(spheres);
+  if (!neck) return [];
+  const big = neck.size * 0.11;
+  const small = neck.size * 0.08;
+  const { beads, front } = buildNecklaceBeads(neck, {
+    count: 24,
+    // Alternating link sizes and tones, so it reads as links rather than a tube.
+    beadRadius: (i) => (i % 2 === 0 ? big : small),
+    color: (i) => (i % 2 === 0 ? GOLD_RAMP[2] : GOLD_RAMP[3]),
+    sag: neck.size * 0.3,
+  });
+  // Medallion hanging off the lowest link, standing proud of the chest.
+  const pendR = neck.size * 0.17;
+  const py = front[1] + big + pendR * 0.6;
+  const pz = neck.center[2] - (neckSurfaceRadius(neck, py) + pendR * 0.55);
+  beads.push({
+    center: [front[0], py, pz],
+    radius: pendR,
+    zone: "wearable",
+    part: "body",
+    color: GOLD_RAMP[1],
+  });
+  return beads;
+}
+
+function buildPearlNecklaceSpheres(spheres: Sphere[]): Sphere[] {
+  const neck = getNeck(spheres);
+  if (!neck) return [];
+  return buildNecklaceBeads(neck, {
+    count: 20,
+    beadRadius: () => neck.size * 0.1,
+    color: (i) => (i % 2 === 0 ? "#FBF7EE" : "#EDE4D3"),
+    sag: neck.size * 0.18,
+  }).beads;
+}
+
+function buildBowtieSpheres(spheres: Sphere[]): Sphere[] {
+  const neck = getNeck(spheres);
+  if (!neck) return [];
+  const k = neck.size * 0.13;
+  const y = neck.center[1] + k * 0.4;
+  const z = neck.center[2] - (neckSurfaceRadius(neck, y) + k * 0.7);
+  const wing = "#E03131";
+  const knot = "#A61E1E";
+  const local: [number, number, number, string][] = [[0, 0, k * 0.9, knot]];
+  // Each wing is narrow at the knot and flares out to the tips.
+  for (const side of [-1, 1]) {
+    local.push([side * k * 1.2, 0, k * 0.8, wing]);
+    local.push([side * k * 2.1, -k * 0.6, k * 0.75, wing]);
+    local.push([side * k * 2.1, k * 0.6, k * 0.75, wing]);
+    local.push([side * k * 2.4, 0, k * 0.7, wing]);
+  }
+  return local.map(([dx, dy, r, color]) => ({
+    center: [neck.center[0] + dx, y + dy, z] as V3,
+    radius: r,
+    zone: "wearable" as const,
+    part: "body",
+    color,
+  }));
+}
+
+const BODY_ITEM_BUILDERS: Record<string, (spheres: Sphere[]) => Sphere[]> = {
+  "gold-chain": buildGoldChainSpheres,
+  "pearl-necklace": buildPearlNecklaceSpheres,
+  bowtie: buildBowtieSpheres,
+};
+
 /** Placement/orientation overrides for the boombox ground prop. */
 export interface BoomboxConfig {
   /** Yaw rotation around the vertical axis, in degrees. */
@@ -1232,6 +1383,8 @@ function appendWearableSpheres(
   if (equipped.head === "rainbow-headband") {
     spheres.push(...buildRainbowHeadbandSpheres(spheres));
   }
+  const bodyBuilder = equipped.body && BODY_ITEM_BUILDERS[equipped.body];
+  if (bodyBuilder) spheres.push(...bodyBuilder(spheres));
 
   for (const side of ["left", "right"] as const) {
     const itemId = equipped[groundSlot(side)];

@@ -25,6 +25,7 @@ import {
   getItemType,
   groundSlot,
   MAX_MODIFIERS,
+  meetsMinStage,
   RARITY_COLORS,
   RARITY_LABELS,
   requiredDiceForLevel,
@@ -1622,6 +1623,10 @@ export function InventoryView({
     !inspectedEquipped &&
     inspected?.equipSlot === "modifier" &&
     (equipped.modifier?.length ?? 0) >= MAX_MODIFIERS;
+  const inspectedStageLocked =
+    !inspectedEquipped &&
+    !!inspected &&
+    !meetsMinStage(inspected, herzie.stage);
   const inspectedGroundSide =
     inspected?.equipSlot === "ground"
       ? inspectUnit?.equippedSlot === "ground_left"
@@ -1844,12 +1849,25 @@ export function InventoryView({
                     <button
                       type="button"
                       className="btn"
-                      disabled={inspectedModifierCapped || !inspectUnit}
+                      disabled={
+                        inspectedModifierCapped ||
+                        inspectedStageLocked ||
+                        !inspectUnit
+                      }
                       onClick={() => inspectUnit && handleEquip(inspectUnit.id)}
                     >
                       {inspectedEquipped ? "Return" : "Place"}
                     </button>
                   );
+                  if (inspectedStageLocked) {
+                    return (
+                      <Tooltip
+                        label={`Your herzie needs to reach stage ${inspected.minStage} to wear this`}
+                      >
+                        {button}
+                      </Tooltip>
+                    );
+                  }
                   return inspectedModifierCapped ? (
                     <Tooltip
                       label={`Max modifiers placed (${MAX_MODIFIERS}/${MAX_MODIFIERS})`}

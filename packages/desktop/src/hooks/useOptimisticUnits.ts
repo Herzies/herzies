@@ -39,6 +39,7 @@ const REJECTION_MESSAGES: Record<EquipRejection, string> = {
   "max-modifiers": "No modifier slots left",
   "missing-side": "No free ground slot",
   "no-slot": "This item can't be placed",
+  "stage-too-low": "Your herzie isn't grown enough to wear this",
 };
 
 export type ToggleEquipResult =
@@ -143,6 +144,8 @@ export function pickGroundSide(equipped: Equipped): GroundSide {
 export function useOptimisticUnits(
   serverEquipped: Equipped,
   serverUnits: ItemUnit[],
+  /** The herzie's stage, for items with a `minStage`. */
+  stage: number,
 ) {
   const [overlay, setOverlay] = useState<OwnedState | null>(null);
   /** Unsettled changes. While non-zero, more server transitions are coming. */
@@ -172,6 +175,9 @@ export function useOptimisticUnits(
     };
   }
   const server = serverRef.current;
+  // Read through a ref so toggleEquip keeps its identity as the herzie grows.
+  const stageRef = useRef(stage);
+  stageRef.current = stage;
 
   // Read inside callbacks without making them depend on (and be recreated by)
   // every render — same pattern as FriendsView's friendsRef.
@@ -247,6 +253,7 @@ export function useOptimisticUnits(
         action,
         item?.equipSlot,
         side,
+        { minStage: item?.minStage, stage: stageRef.current },
       );
       if (!predicted.ok) {
         // Refused against our own state — the server would refuse it too, so
@@ -254,7 +261,10 @@ export function useOptimisticUnits(
         return {
           ok: false,
           action,
-          error: REJECTION_MESSAGES[predicted.reason],
+          error:
+            predicted.reason === "stage-too-low"
+              ? `Your herzie needs to reach stage ${item?.minStage} to wear this`
+              : REJECTION_MESSAGES[predicted.reason],
           sent: false,
         };
       }

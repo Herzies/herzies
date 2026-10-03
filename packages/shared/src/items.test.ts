@@ -426,6 +426,31 @@ describe("applyEquip", () => {
     return outcome.units;
   };
 
+  it("refuses an item until the herzie reaches its minimum stage", () => {
+    const units = [unit("u1", "gold-chain")];
+    const minStage = getItem("gold-chain")?.minStage;
+    expect(minStage).toBe(3);
+    expect(
+      applyEquip(units, "u1", "equip", "body", undefined, {
+        minStage,
+        stage: 2,
+      }),
+    ).toEqual({ ok: false, reason: "stage-too-low" });
+    const next = after(
+      applyEquip(units, "u1", "equip", "body", undefined, {
+        minStage,
+        stage: 3,
+      }),
+    );
+    expect(unitsToEquipped(next)).toEqual({ body: "gold-chain" });
+  });
+
+  it("gates every body item at stage 3", () => {
+    const body = ITEMS.filter((i) => i.equipSlot === "body");
+    expect(body.length).toBeGreaterThan(0);
+    for (const item of body) expect(item.minStage).toBe(3);
+  });
+
   it("puts a single-value item in its own slot", () => {
     const next = after(equip([unit("u1", "headphones")], "u1", "head"));
     expect(unitsToEquipped(next)).toEqual({ head: "headphones" });

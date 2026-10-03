@@ -280,6 +280,25 @@ describe("renderCreatureAtAngle", () => {
   });
 });
 
+describe("neckwear", () => {
+  const draw = (stage: number, body?: string) =>
+    JSON.stringify(
+      renderCreatureAtAngle(USER, stage, 1.2345, 0, false, { body }).cells,
+    );
+
+  it("is drawn on a herzie with a body", () => {
+    for (const body of ["gold-chain", "pearl-necklace", "bowtie"]) {
+      expect(draw(3, body)).not.toBe(draw(3));
+    }
+  });
+
+  it("draws nothing before stage 3, when there's no body to sit on", () => {
+    for (const stage of [1, 2]) {
+      expect(draw(stage, "gold-chain")).toBe(draw(stage));
+    }
+  });
+});
+
 describe("boss body type", () => {
   const bossParams = () => ({
     ...generateCreatureParams(USER),

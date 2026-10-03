@@ -18,6 +18,7 @@ import {
   col,
   cross,
   dot3,
+  GOLD_RAMP,
   LIGHT,
   normV,
   OCEAN_RAMP,
@@ -31,7 +32,7 @@ import {
   type V3,
   VIOLET_RAMP,
 } from "./ascii3d.js";
-import { BOSS_DAMAGE_PER_MINUTE } from "./types.js";
+import { BOSS_DAMAGE_PER_MINUTE, type Stage } from "./types.js";
 
 export type Rarity = "common" | "uncommon" | "rare" | "legendary" | "mythic";
 
@@ -466,7 +467,24 @@ export type EquipRejection =
   | "not-equipped"
   | "max-modifiers"
   | "missing-side"
-  | "no-slot";
+  | "no-slot"
+  | "stage-too-low";
+
+/** The stage gate an equip is checked against: the item's `minStage` and the
+ * herzie's current stage. Like `equipSlot`, it's passed in because the server
+ * reads it from the items row and the client from the bundled catalog. */
+export interface StageGate {
+  minStage?: number;
+  stage: number;
+}
+
+/** Whether a herzie at `stage` is grown enough to wear `item`. */
+export function meetsMinStage(
+  item: Pick<ItemDef, "minStage"> | undefined,
+  stage: number,
+): boolean {
+  return stage >= (item?.minStage ?? 1);
+}
 
 export type EquipOutcome =
   | { ok: true; units: ItemUnit[] }
@@ -496,6 +514,7 @@ export function applyEquip(
   action: "equip" | "unequip",
   equipSlot: EquipSlot | undefined,
   side?: GroundSide,
+  gate?: StageGate,
 ): EquipOutcome {
   const unit = units.find((u) => u.id === unitId);
   if (!unit) return { ok: false, reason: "not-owned" };
@@ -512,6 +531,9 @@ export function applyEquip(
   }
 
   if (!equipSlot) return { ok: false, reason: "no-slot" };
+  if (gate && gate.stage < (gate.minStage ?? 1)) {
+    return { ok: false, reason: "stage-too-low" };
+  }
 
   let slot: UnitSlot;
   if (equipSlot === "ground") {
@@ -814,6 +836,10 @@ export interface ItemDef {
    * Safety Pick). Never worn and never clicked on its own — it's only
    * offered inside the dice upgrade window. */
   protection?: boolean;
+  /** The stage a herzie must have reached to wear this. Body items are 3: the
+   * neckwear sits where the head meets the body, which a herzie only grows
+   * at stage 3. */
+  minStage?: Stage;
 }
 
 export function getItemCategory(item: Pick<ItemDef, "category">): ItemCategory {
@@ -1989,6 +2015,84 @@ function renderRainbowHeadbandFrame(yAngle: number): string[] {
   );
 }
 
+// --- Neckwear cards ---
+// Beads strung along the lower half of a circle, like a necklace laid flat.
+function necklaceBeadsIcon(
+  ix: number,
+  iy: number,
+  count: number,
+  beadR: number,
+  color: (i: number) => string,
+): TexSample | null {
+  const R = 0.24;
+  for (let i = 0; i < count; i++) {
+    const a = 0.25 + (i / (count - 1)) * (Math.PI - 0.5);
+    const d = Math.sqrt(
+      (ix - R * Math.cos(a)) ** 2 + (iy + 0.06 - R * Math.sin(a)) ** 2,
+    );
+    if (d < beadR)
+      return { bright: d < beadR * 0.5 ? 0.95 : 0.75, color: color(i) };
+  }
+  return null;
+}
+
+function goldChainCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  const dm = Math.sqrt(ix * ix + (iy - 0.26) ** 2);
+  if (dm < 0.08) return { bright: dm < 0.04 ? 0.95 : 0.8, color: GOLD_RAMP[1] };
+  return necklaceBeadsIcon(ix, iy, 11, 0.045, (i) =>
+    i % 2 === 0 ? GOLD_RAMP[2] : GOLD_RAMP[3],
+  );
+}
+
+function renderGoldChainFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#F5C518",
+    "#A67C00",
+    "#6E5200",
+    goldChainCardIcon,
+  );
+}
+
+function pearlNecklaceCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  return necklaceBeadsIcon(ix, iy, 9, 0.055, (i) =>
+    i % 2 === 0 ? "#FBF7EE" : "#EDE4D3",
+  );
+}
+
+function renderPearlNecklaceFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#e8e2d0",
+    "#8f8672",
+    "#5c5648",
+    pearlNecklaceCardIcon,
+  );
+}
+
+function bowtieCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  const ax = Math.abs(ix);
+  if (ax < 0.06 && Math.abs(iy) < 0.07)
+    return { bright: 0.7, color: "#A61E1E" };
+  // Each wing widens from the knot out to its tip.
+  if (ax < 0.28 && Math.abs(iy) < 0.04 + ax * 0.55)
+    return { bright: 0.85, color: "#E03131" };
+  return null;
+}
+
+function renderBowtieFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#E03131",
+    "#8a3a3a",
+    "#4a2020",
+    bowtieCardIcon,
+  );
+}
+
 // --- Boombox card ---
 function boomboxNoteIcon(u: number, v: number): TexSample | null {
   const [ix, iy] = iconUV(u, v);
@@ -2206,6 +2310,9 @@ const powerDice3Frames = generateFrames((a) =>
 const safetyPickFrames = generateFrames(renderSafetyPickFrame);
 const headphonesFrames = generateFrames(renderHeadphonesFrame);
 const rainbowHeadbandFrames = generateFrames(renderRainbowHeadbandFrame);
+const goldChainFrames = generateFrames(renderGoldChainFrame);
+const pearlNecklaceFrames = generateFrames(renderPearlNecklaceFrame);
+const bowtieFrames = generateFrames(renderBowtieFrame);
 const boomboxFrames = generateFrames(renderBoomboxFrame);
 const goodEyeSniperFrames = generateFrames(renderGoodEyeSniperFrame);
 const prismFrames = generateFrames(renderPrismFrame);
@@ -2502,6 +2609,39 @@ export const ITEMS: ItemDef[] = [
     frames: rainbowHeadbandFrames,
     equipable: true,
     equipSlot: "head",
+    sellPrice: 100,
+  },
+  {
+    id: "gold-chain",
+    name: "Certified Drip",
+    description: "Heavy gold around the neck. Your herzie has gone platinum.",
+    rarity: "rare",
+    frames: goldChainFrames,
+    equipable: true,
+    equipSlot: "body",
+    minStage: 3,
+    sellPrice: 250,
+  },
+  {
+    id: "pearl-necklace",
+    name: "Clam's Finest",
+    description: "A string of pearls, for the herzie with refined taste.",
+    rarity: "uncommon",
+    frames: pearlNecklaceFrames,
+    equipable: true,
+    equipSlot: "body",
+    minStage: 3,
+    sellPrice: 100,
+  },
+  {
+    id: "bowtie",
+    name: "Black Tie Optional",
+    description: "Ignored the dress code anyway. Red bowtie, front and centre.",
+    rarity: "uncommon",
+    frames: bowtieFrames,
+    equipable: true,
+    equipSlot: "body",
+    minStage: 3,
     sellPrice: 100,
   },
   {

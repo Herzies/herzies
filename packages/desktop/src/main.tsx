@@ -83,7 +83,11 @@ function App() {
     predictedInventory,
     toggleEquip,
     predict,
-  } = useOptimisticUnits(rawState.equipped, rawState.units);
+  } = useOptimisticUnits(
+    rawState.equipped,
+    rawState.units,
+    rawState.herzie?.stage ?? 1,
+  );
   // Memoized on its inputs, each of which is itself identity-stable while its
   // content is unchanged — so this object only changes when something really
   // did, and an unrelated App re-render (a view switch, a local toggle) doesn't
