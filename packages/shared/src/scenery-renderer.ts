@@ -93,6 +93,15 @@ function ensureCache(userId: string) {
 export type SceneryVariant = "clouds" | "stars" | "blood-moon" | null;
 
 const MOON_COLOR = "#E8552B";
+/** One star's brightness cycle under the Blood Moon, with a warm peak. */
+const BLOOD_MOON_STAR_PULSE = [
+  "#4A5566",
+  SKY_COLOR,
+  BRIGHT_STAR_COLOR,
+  "#FFE9D6",
+  BRIGHT_STAR_COLOR,
+  SKY_COLOR,
+];
 const MOON_SHADE_COLOR = "#9C2F14";
 const BAT_COLOR = "#8E6FB0";
 // Over the moon a bat is a silhouette, not a purple smudge.
@@ -170,6 +179,20 @@ export function renderSky(opts: {
       if (star.musicOnly && !isPlaying) continue;
       const col = Math.floor(star.fractionalCol * cols);
       if (col >= cols) continue;
+      if (variant === "blood-moon") {
+        // Livelier than the Starfield: quicker steps, and each star pulses
+        // dim → bright → dim as well as changing shape.
+        const step = Math.floor(
+          (twinkleFrame + star.phase) / (isPlaying ? 3 : 4),
+        );
+        skyGrid[star.row][col] =
+          STAR_TWINKLE_VARIANTS[step % STAR_TWINKLE_VARIANTS.length];
+        colorGrid[star.row][col] =
+          BLOOD_MOON_STAR_PULSE[
+            (step + (star.bright ? 2 : 0)) % BLOOD_MOON_STAR_PULSE.length
+          ];
+        continue;
+      }
       const tickRate = isPlaying ? 8 : 12;
       const variantIdx =
         Math.floor((twinkleFrame + star.phase) / tickRate) %
