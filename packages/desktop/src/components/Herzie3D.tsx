@@ -5,14 +5,14 @@ import {
   type Equipped,
   equippedItemIds,
   ITEM_SETS,
+  SH,
   Herzie3D as SharedHerzie3D,
   Sky,
 } from "@herzies/shared";
 import { useEffect, useState } from "react";
 import { useWindowVisible } from "../tauri-bridge";
 
-// Only one set has a visual effect today; look it up by id rather than
-// generalizing to "any fully-equipped set" until a second one exists.
+// Each set's effect is its own overlay below, so they're looked up by id.
 const PRISMATIC_SET = ITEM_SETS.find((set) => set.id === "prismatic");
 const HAUNTED_SET = ITEM_SETS.find((set) => set.id === "haunted");
 
@@ -22,6 +22,10 @@ const HAUNTED_SET = ITEM_SETS.find((set) => set.id === "haunted");
  * now-playing slot and collapsed chat (all fixed-height, the chat's input row
  * included) have taken theirs; Home's spacer takes up the rest. */
 export const HERZIE_STAGE_HEIGHT = 240;
+
+/** How far above the stage's bottom edge a grounded herzie's feet sit — level
+ * with dropped items, which sit at the stage's `bottom-2`. */
+const STAGE_FLOOR_INSET = 6;
 
 interface Props {
   userId: string;
@@ -39,6 +43,9 @@ interface Props {
   draggable?: boolean;
   /** Pause animation regardless of window visibility (e.g. tab hidden). */
   paused?: boolean;
+  /** Stand the herzie on the bottom of a HERZIE_STAGE_HEIGHT stage (it must
+   * be centred in one) instead of centring it. */
+  grounded?: boolean;
 }
 
 /**
@@ -61,6 +68,7 @@ export function Herzie3D({
   showSky = true,
   draggable,
   paused: pausedProp = false,
+  grounded = false,
 }: Props) {
   // Full-window-width column count, shared by the sky and the creature
   // viewport so both span the window without stretching their contents.
@@ -170,6 +178,7 @@ export function Herzie3D({
         dangleConfig={dangleConfig}
         draggable={draggable}
         paused={paused}
+        groundInset={grounded ? groundInsetFor(size) : undefined}
         wrapperStyle={
           showSky
             ? {
@@ -182,4 +191,13 @@ export function Herzie3D({
       />
     </>
   );
+}
+
+/** The canvas is taller than the stage and centred on it, so its bottom edge
+ * hangs (canvasH - stage) / 2 below the stage's. The feet go that far plus
+ * the floor inset above the canvas bottom. Must match the shared Herzie3D's
+ * canvas sizing (SH rows of size * 1.35 px). */
+function groundInsetFor(size: number): number {
+  const canvasH = Math.ceil(SH * size * 1.35);
+  return (canvasH - HERZIE_STAGE_HEIGHT) / 2 + STAGE_FLOOR_INSET;
 }

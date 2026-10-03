@@ -82,6 +82,10 @@ interface Props {
   ariaLabel?: string;
   /** Y-axis rotation offset in radians (added to the default tilt). */
   defaultAngle?: number;
+  /** Stand the herzie on a floor: draw it so its feet (the lowest row of its
+   * resting pose) sit this many px above the canvas's bottom edge. Omitted,
+   * the creature stays vertically centred in the canvas. */
+  groundInset?: number;
 }
 
 function resolveEquipped(
@@ -130,6 +134,7 @@ export function Herzie3D({
   wrapperClassName,
   ariaLabel,
   defaultAngle = 0,
+  groundInset,
 }: Props) {
   const equippedRaw = resolveEquipped(equippedProp, wearables);
   // The parent may hand us a brand-new (but content-identical) `equipped`
@@ -333,6 +338,39 @@ export function Herzie3D({
     };
   }, [size, cols]);
 
+  // How far down to draw everything so the feet land groundInset px above the
+  // canvas bottom. Measured on the idle loop's resting frame, not the current
+  // one, so bobbing, dancing and spinning never move the floor.
+  const groundShift = useMemo(() => {
+    if (groundInset === undefined) return 0;
+    const rest = generateIdleFrames(
+      userId,
+      stage,
+      equipped,
+      creatureParams,
+      cols,
+      boomboxConfig,
+    )[0]?.cells;
+    if (!rest) return 0;
+    let feetRow = -1;
+    rest.forEach((row, y) => {
+      if (row.some((c) => c.ch !== " ")) feetRow = y;
+    });
+    if (feetRow < 0) return 0;
+    return Math.round(
+      metrics.canvasH - groundInset - (feetRow + 1) * metrics.lineH,
+    );
+  }, [
+    groundInset,
+    userId,
+    stage,
+    equipped,
+    creatureParams,
+    cols,
+    boomboxConfig,
+    metrics,
+  ]);
+
   const drawFrame = useCallback(
     (cells: Cell[][]) => {
       const canvas = canvasRef.current;
@@ -346,7 +384,7 @@ export function Herzie3D({
 
       for (let y = 0; y < cells.length; y++) {
         const row = cells[y];
-        const py = y * metrics.lineH;
+        const py = y * metrics.lineH + groundShift;
         for (let x = 0; x < row.length; x++) {
           const cell = row[x];
           if (cell.ch === " ") continue;
@@ -355,7 +393,7 @@ export function Herzie3D({
         }
       }
     },
-    [size, metrics],
+    [size, metrics, groundShift],
   );
 
   const startMomentum = useCallback(() => {

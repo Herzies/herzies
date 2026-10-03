@@ -1662,6 +1662,7 @@ export function InventoryView({
               stage={herzie.stage}
               equipped={equipped}
               paused={!active}
+              grounded
             />
           </div>
           {/* Top left, flush with the view's edge like the deck below. */}

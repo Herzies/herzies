@@ -350,6 +350,11 @@ export function HomeView({
         </div>
       </div>
 
+      {/* Whatever the fixed parts don't use, above the stage: everything below
+          it is fixed-height, so the stage stays put, and it sits right on
+          the level bar with the herzie standing on its floor. */}
+      <div className="min-h-0 flex-1" />
+
       {/* The stage: HERZIE_STAGE_HEIGHT, the same as on the Herzie view. */}
       <div
         className="relative flex shrink-0 items-center justify-center"
@@ -361,6 +366,7 @@ export function HomeView({
           isPlaying={!!nowPlaying}
           equipped={equipped}
           paused={!active}
+          grounded
         />
         {dropItems.length > 0 && (!hasSpiritOrb || bankFull) && (
           // pointer-events-none on the wrapper keeps the gaps between items
@@ -456,9 +462,6 @@ export function HomeView({
           </div>
         )}
       </div>
-
-      {/* Whatever the fixed parts don't use, so the stage stays put. */}
-      <div className="min-h-0 flex-1" />
 
       <div className="mb-1.5">
         <div className="mb-0.5 flex items-baseline justify-between text-ui text-text-dim">
