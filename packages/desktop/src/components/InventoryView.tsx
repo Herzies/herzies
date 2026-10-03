@@ -1654,9 +1654,18 @@ export function InventoryView({
         </Tooltip>
       </div>
 
-      {/* The herzie with its stats over it, then the deck beneath — so
-          whatever goes on shows on the creature right there. The whole
-          area, deck included, takes a dropped card. */}
+      {/* Stats just under the title, flush left like the deck below. A
+          zero-height row, so they float over the sky without pushing the
+          stage down (which would undo its alignment with Home's). */}
+      <div className="relative h-0 shrink-0">
+        <div className="pointer-events-none absolute top-2 left-0 z-10">
+          <StatsPanel stats={stats} preview={statsPreview} />
+        </div>
+      </div>
+
+      {/* The herzie, then the deck beneath — so whatever goes on shows on the
+          creature right there. The whole area, deck included, takes a
+          dropped card. */}
       {/* Pads the stage down to where Home's sits, so the herzie doesn't jump
           when switching views (see useStageAlignment). */}
       <div className="shrink-0" style={{ height: stagePad }} />
@@ -1676,10 +1685,6 @@ export function InventoryView({
               paused={!active}
               grounded
             />
-          </div>
-          {/* Top left, flush with the view's edge like the deck below. */}
-          <div className="pointer-events-none absolute top-1.5 left-0 z-10">
-            <StatsPanel stats={stats} preview={statsPreview} />
           </div>
           {notice && (
             <div
