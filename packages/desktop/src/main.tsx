@@ -858,6 +858,7 @@ function App() {
               bankExpansions={state.bankExpansions}
               onLog={addLog}
               active={view === "inventory"}
+              rootKey={rootKeys.inventory ?? 0}
             />
           </div>
         )}

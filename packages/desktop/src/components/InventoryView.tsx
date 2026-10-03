@@ -644,6 +644,7 @@ export function InventoryView({
   onPredictUnits,
   bankExpansions,
   active = true,
+  rootKey = 0,
 }: {
   herzie: Herzie;
   initialItem?: string | null;
@@ -674,6 +675,8 @@ export function InventoryView({
   bankExpansions: number;
   /** False while another tab is shown — pauses the 3D render. */
   active?: boolean;
+  /** Bumped when the Herzie tab is re-selected while shown: back to the bag. */
+  rootKey?: number;
 }) {
   const capacity = bankCapacity(bankExpansions);
   const [currency, setCurrency] = useState(cachedCurrency || herzie.currency);
@@ -807,6 +810,17 @@ export function InventoryView({
   /** Which panel shows under the herzie. Cards headed for the other one fly
    * to its tab, which bumps as they land, so it's clear where they went. */
   const [panel, setPanel] = useState<Panel>("bag");
+  // The view always opens on the bag: reset while hidden, so coming back
+  // never flashes the deck first, and when the tab is pressed again.
+  useEffect(() => {
+    if (!active) setPanel("bag");
+  }, [active]);
+  const rootKeyRef = useRef(rootKey);
+  useEffect(() => {
+    if (rootKeyRef.current === rootKey) return;
+    rootKeyRef.current = rootKey;
+    setPanel("bag");
+  }, [rootKey]);
   const [tabBumps, setTabBumps] = useState<Record<Panel, number>>({
     bag: 0,
     deck: 0,
