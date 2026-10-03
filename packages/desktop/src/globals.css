@@ -111,6 +111,21 @@
   animation: prismatic-shift 14s linear infinite;
 }
 
+/* Herzie view: a panel tab swelling briefly as a card lands on it. */
+@keyframes tab-bump {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  35% {
+    transform: scale(1.35);
+  }
+}
+
+@utility animate-tab-bump {
+  animation: tab-bump 320ms ease-out;
+}
+
 /* Haunted set: fog drifting slowly sideways and swelling a little. */
 @keyframes haunted-fog {
   0%,

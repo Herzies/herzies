@@ -97,11 +97,6 @@ interface SlotHandlers {
  * text lines up with the view's edge like "Herzie" and "Deck". */
 export const OVERLAY_PANEL = "pointer-events-auto py-1.5";
 
-/** The deck's "Deck" title. A whole-pixel line height (text-ui's default is
- * 16.5px): the icons below are crisp-edged pixel art, and a half-pixel offset
- * snaps their rows unevenly — they read as warped. */
-export const OVERLAY_TITLE = "text-ui leading-4 font-bold text-text-dim";
-
 /** One section of the deck: its boxes, unlabelled — each empty box names its
  * slot on hover. While a card that belongs here is dragged, the section is
  * tinted, and the one box it would land in lights up. */
@@ -182,15 +177,10 @@ function DeckGroup({
 export function DeckOverlay(props: SlotHandlers) {
   return (
     // mb-2: breathing room between the deck and the bag below.
-    <div className="pointer-events-auto mb-2 pt-1.5">
-      <Tooltip label="Place cards here">
-        <div className={cn(OVERLAY_TITLE, "cursor-default")}>Deck</div>
-      </Tooltip>
+    // Untitled: it shows under the Herzie view's "Deck" tab, which names it.
+    <div className="pointer-events-auto pt-2">
       {/* One row, the sections spread across the full width: the empty
           boxes' hover labels name each one. */}
-      {/* No top padding: with the 2px the tooltip's inline wrapper adds under
-          the title, the title-to-boxes gap matches the bag's title-to-divider
-          one — the divider being where the bag visibly starts. */}
       <div className="flex justify-between pb-1.5">
         {DECK_SLOT_ORDER.map((label) => (
           <DeckGroup key={label} group={groupByLabel(label)} {...props} />
