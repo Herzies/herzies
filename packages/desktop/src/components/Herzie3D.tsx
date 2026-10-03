@@ -23,9 +23,9 @@ const HAUNTED_SET = ITEM_SETS.find((set) => set.id === "haunted");
  * included) have taken theirs; Home's spacer takes up the rest. */
 export const HERZIE_STAGE_HEIGHT = 240;
 
-/** How far above the stage's bottom edge a grounded herzie's feet sit — level
- * with dropped items, which sit at the stage's `bottom-2`. */
-const STAGE_FLOOR_INSET = 6;
+/** How far above the stage's bottom edge a grounded herzie's feet sit — a
+ * little above dropped items, which sit at the stage's `bottom-2`. */
+const STAGE_FLOOR_INSET = 24;
 
 interface Props {
   userId: string;
