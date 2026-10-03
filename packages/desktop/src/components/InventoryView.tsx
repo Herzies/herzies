@@ -31,13 +31,13 @@ import {
   requiredDiceForLevel,
   unitsBestFirst,
 } from "@herzies/shared";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   pickGroundSide,
   type ToggleEquipResult,
 } from "../hooks/useOptimisticUnits";
-import { useAlignToHomeStage } from "../hooks/useStageAlignment";
+import { useHomeStageOffset } from "../hooks/useStageAlignment";
 import { cn, formatAmount } from "../lib/utils";
 import { herzies } from "../tauri-bridge";
 import { Coin } from "./Coin";
@@ -1637,13 +1637,24 @@ export function InventoryView({
           : null
       : null;
 
-  const viewRef = useRef<HTMLDivElement>(null);
-  const stageRef = useRef<HTMLDivElement>(null);
-  const stagePad = useAlignToHomeStage(viewRef, stageRef, active);
+  // The stage sits where Home's does (see useStageAlignment), or straight
+  // under the header until Home has been measured.
+  const homeStageOffset = useHomeStageOffset();
+  const headerRef = useRef<HTMLDivElement>(null);
+  const [headerBottom, setHeaderBottom] = useState(0);
+  useLayoutEffect(() => {
+    const header = headerRef.current;
+    // + the header's mb-1.
+    if (header) setHeaderBottom(header.offsetTop + header.offsetHeight + 4);
+  }, []);
+  const stageTop = homeStageOffset ?? headerBottom;
 
   return (
-    <div ref={viewRef} className="flex h-full flex-col">
-      <div className="z-50 mb-1 flex items-center justify-between">
+    <div className="relative flex h-full flex-col">
+      <div
+        ref={headerRef}
+        className="z-50 mb-1 flex items-center justify-between"
+      >
         {/* leading-5: a whole-pixel header height keeps the deck's pixel-art
             icons below it on whole pixels (see OVERLAY_TITLE). */}
         <h1 className="text-ui-lg leading-5 font-bold text-cyan">Herzie</h1>
@@ -1663,43 +1674,43 @@ export function InventoryView({
         </div>
       </div>
 
-      {/* The herzie, then the deck beneath — so whatever goes on shows on the
-          creature right there. The whole area, deck included, takes a
+      {/* The stage: HERZIE_STAGE_HEIGHT at the same offset as Home's, so the
+          herzie doesn't move when switching views. Absolute, behind the deck
+          and bag: the bag keeps square cells by taking a fixed height, and
+          the deck may overlap the stage's floor. It and the deck both take a
           dropped card. */}
-      {/* Pads the stage down to where Home's sits, so the herzie doesn't jump
-          when switching views (see useStageAlignment). */}
-      <div className="shrink-0" style={{ height: stagePad }} />
       <div
-        ref={stageRef}
         {...{ [HERZIE_ZONE_ATTR]: "" }}
-        className="flex shrink-0 flex-col"
+        className="absolute inset-x-0"
+        style={{ top: stageTop, height: HERZIE_STAGE_HEIGHT }}
       >
-        {/* The stage: HERZIE_STAGE_HEIGHT, the same as on Home, so the herzie
-            doesn't move when switching between the two. */}
-        <div className="relative" style={{ height: HERZIE_STAGE_HEIGHT }}>
-          <div className="flex h-full items-center justify-center">
-            <Herzie3D
-              userId={herzie.friendCode}
-              stage={herzie.stage}
-              equipped={equipped}
-              paused={!active}
-              grounded
-            />
-          </div>
-          {notice && (
-            <div
-              role="status"
-              className="pointer-events-none absolute inset-x-0 top-2 z-20 flex justify-center"
-            >
-              <div className="border border-red/60 bg-bg-panel px-2 py-1 text-ui-sm text-red">
-                {notice}
-              </div>
-            </div>
-          )}
+        <div className="flex h-full items-center justify-center">
+          <Herzie3D
+            userId={herzie.friendCode}
+            stage={herzie.stage}
+            equipped={equipped}
+            paused={!active}
+            grounded
+          />
         </div>
-        {/* Part of the content rather than laid over the herzie: its own
-            strip between the herzie and the bag. */}
-        <div className="z-10 shrink-0">
+        {notice && (
+          <div
+            role="status"
+            className="pointer-events-none absolute inset-x-0 top-2 z-20 flex justify-center"
+          >
+            <div className="border border-red/60 bg-bg-panel px-2 py-1 text-ui-sm text-red">
+              {notice}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Whatever the deck and bag don't use. */}
+      <div className="min-h-0 flex-1" />
+
+      <div className="flex shrink-0 flex-col">
+        {/* The deck: its own strip above the bag, over the stage's floor. */}
+        <div {...{ [HERZIE_ZONE_ATTR]: "" }} className="relative z-10 shrink-0">
           <DeckOverlay
             equipped={equipped}
             units={units}
@@ -1721,8 +1732,8 @@ export function InventoryView({
         </div>
       </div>
 
-      {/* The bag: whatever the stage and deck leave. */}
-      <div className="z-10 flex min-h-0 flex-1 flex-col">
+      {/* The bag: three rows of square cells; more rows scroll. */}
+      <div className="z-10 flex shrink-0 flex-col">
         {/* Both buttons live in one wrapper so they read as a pair, and the
             wrapper's `ml-auto` pushes them right. */}
         <div className="mb-0.5 flex items-center border-b border-border">
@@ -1777,9 +1788,10 @@ export function InventoryView({
           <div
             ref={gridViewportRef}
             className={cn(
-              "min-h-0 flex-1",
+              "shrink-0",
               returningOverBag && "ring-1 ring-inset ring-cyan/50",
             )}
+            style={{ aspectRatio: `${GRID_COLS} / ${VISIBLE_ROWS}` }}
           >
             {/* Each row is a third of the visible height, in CSS, so the rows
                 are right on the very first frame — no measuring, and nothing to
