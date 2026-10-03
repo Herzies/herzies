@@ -139,7 +139,7 @@ function moonCell(
   centerCol: number,
 ): { ch: string; color: string } | null {
   const radius = 3.6; // in rows
-  const centerRow = 3.5;
+  const centerRow = 6.5;
   const dx = (col - centerCol) / CELL_ASPECT;
   const dy = row - centerRow;
   const d = Math.sqrt(dx * dx + dy * dy);

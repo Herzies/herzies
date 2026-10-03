@@ -1394,26 +1394,27 @@ function buildSpiritOrbSpheres(
     { c: [eyeX, eyeY, ez + pupilZOff], r: pupilR, color: pupilColor },
   ];
 
-  return placeFloatingPet(local, midY, orbR, cols, side, "spirit");
+  return placeCompanion(local, midY, orbR, cols, side, "spirit");
 }
 
 /**
- * Places a floating pet, built around its own origin, beside the herzie.
+ * Places a companion (a pet, or a small ground prop like Jack), built around
+ * its own origin, beside the herzie at height `y`.
  *
  * Horizontal placement reuses the same bottom-corner scheme as the boombox
- * (still respects left/right slot + camera-FOV margin math), but it floats at
- * `midY` instead of resting on the ground. Like the boombox, its part keeps
- * it fixed while the herzie is manually rotated, but unlike the boombox it
- * gets a slow breathing bob — see applyIdleOffsets. The Greedy Spirit uses
- * part "spirit" (it also hops when dancing); every other pet uses "pet".
+ * (still respects left/right slot + camera-FOV margin math). The part decides
+ * how it moves: all three keep it fixed while the herzie is manually
+ * rotated; "spirit" (the Greedy Spirit, which also hops when dancing) and
+ * "pet" get a slow breathing bob (see applyIdleOffsets), while "ground"
+ * stays on the floor and bounces with the boombox on the beat.
  */
-function placeFloatingPet(
+function placeCompanion(
   local: readonly { c: V3; r: number; color: string }[],
-  midY: number,
+  y: number,
   size: number,
   cols: number,
   side: GroundSide,
-  part: "spirit" | "pet",
+  part: "spirit" | "pet" | "ground",
 ): Sphere[] {
   const bz = -size * 1.6;
   const bx = groundCornerX(cols, side, size, size, -size, bz, 0.1);
@@ -1426,7 +1427,7 @@ function placeFloatingPet(
   return local.map((ls) => {
     const r = rotY(ls.c, yaw);
     return {
-      center: [bx + r[0], midY + r[1], bz + r[2]] as V3,
+      center: [bx + r[0], y + r[1], bz + r[2]] as V3,
       radius: ls.r,
       zone: "wearable" as const,
       part,
@@ -1438,19 +1439,26 @@ function placeFloatingPet(
 /** How high above the floor (the herzie's feet) floating pets hover, in the
  * same fixed world units as the boombox — so a pet sits at the same height on
  * a stage-1 herzie as a stage-3 one, rather than tracking its midpoint. */
-const PET_HOVER_HEIGHT = BOOMBOX_REF_HEIGHT * 0.6;
+const PET_HOVER_HEIGHT = BOOMBOX_REF_HEIGHT * 1.0;
 
-/** Where a floating pet's centre goes: PET_HOVER_HEIGHT above the feet. */
-function petHoverY(spheres: Sphere[]): number {
+/** The floor: the lowest point of everything so far (the herzie's feet). */
+function floorY(spheres: Sphere[]): number {
   let floor = -Infinity;
   for (const s of spheres) floor = Math.max(floor, s.center[1] + s.radius);
-  // World +y points down the screen.
-  return floor - PET_HOVER_HEIGHT;
+  return floor;
+}
+
+/** Where a floating pet's centre goes: PET_HOVER_HEIGHT above the feet.
+ * World +y points down the screen. */
+function petHoverY(spheres: Sphere[]): number {
+  return floorY(spheres) - PET_HOVER_HEIGHT;
 }
 
 /** A carved pumpkin: a ribbed orange cluster with a green stem and a
  * candle-lit face. The "cut-outs" are glowing yellow spheres set into the
- * front, since a sphere renderer has no holes to cut. */
+ * front, since a sphere renderer has no holes to cut. It sits on the ground
+ * like the boombox (part "ground": fixed while the herzie spins, bouncing
+ * with it on the beat). */
 function buildJackOLanternSpheres(
   spheres: Sphere[],
   cols: number,
@@ -1483,7 +1491,9 @@ function buildJackOLanternSpheres(
     const t = i / 4 - 0.5; // -0.5..0.5 across the grin
     face(t * R * 0.9, R * 0.28 + R * 0.12 * (1 - (2 * t) ** 2), R * 0.11);
   }
-  return placeFloatingPet(local, petHoverY(spheres), R, cols, side, "pet");
+  // Resting on the floor: the lowest lobes reach about 0.65R below centre.
+  const restY = floorY(spheres) - R * 0.65;
+  return placeCompanion(local, restY, R, cols, side, "ground");
 }
 
 /** A sheet ghost: a round head over a body that flares out to a wavy hem. */
@@ -1529,7 +1539,7 @@ function buildGhostSpheres(
     r: R * 0.1,
     color: "#1A1A2E",
   });
-  return placeFloatingPet(local, petHoverY(spheres), R, cols, side, "pet");
+  return placeCompanion(local, petHoverY(spheres), R, cols, side, "pet");
 }
 
 /** Pointed witch hat: a brim, an orange band, and a cone of shrinking
