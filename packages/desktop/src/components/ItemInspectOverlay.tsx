@@ -107,9 +107,9 @@ export function ItemPreviewCard({
   );
 }
 
-/** The condensed hover preview for the bag and the deck: name, rarity and
- * type, stats and set progress — no art, icon or description, so it reads at
- * a glance while browsing. Right-click → Inspect opens the full card. */
+/** The condensed hover preview for the bag and the deck: name, type, stats and
+ * set progress — no art, icon, rarity or description, so it reads at a glance
+ * while browsing. Right-click → Inspect opens the full card. */
 export function CompactItemPreview({
   itemId,
   equipped,
@@ -134,10 +134,7 @@ export function CompactItemPreview({
         {level > 0 ? <span className="text-cyan"> +{level}</span> : null}
       </div>
       <div className="text-ui-sm">
-        <span style={{ color: ITEM_RARITY_COLORS[item.rarity] }}>
-          {RARITY_LABELS[item.rarity]}
-        </span>{" "}
-        · <ItemTypeTag item={item} variant="text" />
+        <ItemTypeTag item={item} variant="text" />
       </div>
       {/* No margins, so the lines are evenly spaced. */}
       <ItemStatLines item={item} level={level} className="text-left" />
