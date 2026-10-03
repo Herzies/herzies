@@ -1475,7 +1475,7 @@ function placeCompanion(
 /** How high above the floor (the herzie's feet) floating pets hover, in the
  * same fixed world units as the boombox — so a pet sits at the same height on
  * a stage-1 herzie as a stage-3 one, rather than tracking its midpoint. */
-const PET_HOVER_HEIGHT = BOOMBOX_REF_HEIGHT * 1.0;
+const PET_HOVER_HEIGHT = BOOMBOX_REF_HEIGHT * 1.2;
 
 /** The floor: the lowest point of everything so far (the herzie's feet). */
 function floorY(spheres: Sphere[]): number {
