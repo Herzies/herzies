@@ -87,7 +87,9 @@ function ensureCache(userId: string) {
   cachedStars = generateStars(rng);
   // Drawn after the clouds and stars so existing skies keep their layout.
   cachedBats = generateBats(rng);
-  cachedMoonFraction = 0.68 + rng() * 0.18;
+  // Right of centre but clear of the top-right corner, where the Herzie view
+  // shows the coin balance.
+  cachedMoonFraction = 0.62 + rng() * 0.12;
 }
 
 export type SceneryVariant = "clouds" | "stars" | "blood-moon" | null;
