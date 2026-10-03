@@ -69,8 +69,8 @@ function halfWidthFor(cols: number): number {
   return HALF_H * ((cols / SH) * (1 / CHAR_ASPECT));
 }
 /** How far the herzie leans back toward the camera, in degrees: positive
- * shows more of the top of its head. */
-export const DEFAULT_CAMERA_TILT_DEG = 8;
+ * shows more of the top of its head. Tuned in the sandbox (was 8). */
+export const DEFAULT_CAMERA_TILT_DEG = 3;
 let TILT_COS = Math.cos((DEFAULT_CAMERA_TILT_DEG * Math.PI) / 180);
 let TILT_SIN = Math.sin((DEFAULT_CAMERA_TILT_DEG * Math.PI) / 180);
 
