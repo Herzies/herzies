@@ -37,6 +37,7 @@ import {
   pickGroundSide,
   type ToggleEquipResult,
 } from "../hooks/useOptimisticUnits";
+import { useAlignToHomeStage } from "../hooks/useStageAlignment";
 import { cn, formatAmount } from "../lib/utils";
 import { herzies } from "../tauri-bridge";
 import { Coin } from "./Coin";
@@ -1636,8 +1637,12 @@ export function InventoryView({
           : null
       : null;
 
+  const viewRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const stagePad = useAlignToHomeStage(viewRef, stageRef, active);
+
   return (
-    <div className="flex h-full flex-col">
+    <div ref={viewRef} className="flex h-full flex-col">
       <div className="z-50 mb-1 flex items-center justify-between">
         {/* leading-5: a whole-pixel header height keeps the deck's pixel-art
             icons below it on whole pixels (see OVERLAY_TITLE). */}
@@ -1652,7 +1657,14 @@ export function InventoryView({
       {/* The herzie with its stats over it, then the deck beneath — so
           whatever goes on shows on the creature right there. The whole
           area, deck included, takes a dropped card. */}
-      <div {...{ [HERZIE_ZONE_ATTR]: "" }} className="flex shrink-0 flex-col">
+      {/* Pads the stage down to where Home's sits, so the herzie doesn't jump
+          when switching views (see useStageAlignment). */}
+      <div className="shrink-0" style={{ height: stagePad }} />
+      <div
+        ref={stageRef}
+        {...{ [HERZIE_ZONE_ATTR]: "" }}
+        className="flex shrink-0 flex-col"
+      >
         {/* The stage: HERZIE_STAGE_HEIGHT, the same as on Home, so the herzie
             doesn't move when switching between the two. */}
         <div className="relative" style={{ height: HERZIE_STAGE_HEIGHT }}>

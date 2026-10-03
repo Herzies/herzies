@@ -10,6 +10,7 @@ import {
   xpToNextLevel,
 } from "@herzies/shared";
 import { useEffect, useRef, useState } from "react";
+import { useReportHomeStage } from "../hooks/useStageAlignment";
 import { cn } from "../lib/utils";
 import {
   type AppState,
@@ -211,13 +212,18 @@ export function HomeView({
     };
   }, [friendCode]);
 
+  // The Herzie view lines its stage up with this one (see useStageAlignment).
+  const viewRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+  useReportHomeStage(viewRef, stageRef, active);
+
   if (!herzie) return null;
 
   const progress = levelProgress(herzie);
   const toNext = xpToNextLevel(herzie);
 
   return (
-    <div className="flex h-full flex-col">
+    <div ref={viewRef} className="flex h-full flex-col">
       <div className="mb-1 flex items-center justify-between z-50">
         <span className="text-ui-lg font-bold text-cyan">
           <Tooltip label="View your profile">
@@ -357,6 +363,7 @@ export function HomeView({
 
       {/* The stage: HERZIE_STAGE_HEIGHT, the same as on the Herzie view. */}
       <div
+        ref={stageRef}
         className="relative flex shrink-0 items-center justify-center"
         style={{ height: HERZIE_STAGE_HEIGHT }}
       >

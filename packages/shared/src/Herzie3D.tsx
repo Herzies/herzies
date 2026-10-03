@@ -340,13 +340,20 @@ export function Herzie3D({
 
   // How far down to draw everything so the feet land groundInset px above the
   // canvas bottom. Measured on the idle loop's resting frame, not the current
-  // one, so bobbing, dancing and spinning never move the floor.
+  // one, so bobbing, dancing and spinning never move the floor — and without
+  // the ground slots, whose props (boombox, Jack) sit in front of the herzie
+  // and reach a little lower than its feet, so equipping one would otherwise
+  // lift the herzie.
   const groundShift = useMemo(() => {
     if (groundInset === undefined) return 0;
     const rest = generateIdleFrames(
       userId,
       stage,
-      equipped,
+      equipped && {
+        ...equipped,
+        ground_left: undefined,
+        ground_right: undefined,
+      },
       creatureParams,
       cols,
       boomboxConfig,

@@ -1415,13 +1415,19 @@ function placeCompanion(
   cols: number,
   side: GroundSide,
   part: "spirit" | "pet" | "ground",
+  /** Turn it slightly toward the herzie, so it reads as watching over it
+   * rather than staring at the camera. Off for things that should face front. */
+  faceHerzie = true,
 ): Sphere[] {
   const bz = -size * 1.6;
   const bx = groundCornerX(cols, side, size, size, -size, bz, 0.1);
 
-  // Turned slightly toward the herzie, so it reads as watching over it rather
-  // than staring at the camera. Same sign convention as the boombox's yaw.
-  const yawDeg = side === "left" ? -SPIRIT_ORB_YAW_DEG : SPIRIT_ORB_YAW_DEG;
+  // Same sign convention as the boombox's yaw.
+  const yawDeg = !faceHerzie
+    ? 0
+    : side === "left"
+      ? -SPIRIT_ORB_YAW_DEG
+      : SPIRIT_ORB_YAW_DEG;
   const yaw = (yawDeg * Math.PI) / 180;
 
   return local.map((ls) => {
@@ -1491,9 +1497,13 @@ function buildJackOLanternSpheres(
     const t = i / 4 - 0.5; // -0.5..0.5 across the grin
     face(t * R * 0.9, R * 0.28 + R * 0.12 * (1 - (2 * t) ** 2), R * 0.11);
   }
-  // Resting on the floor: the lowest lobes reach about 0.65R below centre.
-  const restY = floorY(spheres) - R * 0.65;
-  return placeCompanion(local, restY, R, cols, side, "ground");
+  // On the floor, its base level with the herzie's feet on screen: it sits in
+  // front of the herzie (closer to the camera), so resting it on the floor
+  // itself would draw it a couple of rows lower than the feet. The lowest
+  // lobes reach about 0.65R below centre. Faces front: turned like the
+  // spirit, the ribbed shell read as skewed.
+  const restY = floorY(spheres) - R * 0.65 - R * 0.9;
+  return placeCompanion(local, restY, R, cols, side, "ground", false);
 }
 
 /** A sheet ghost: a round head over a body that flares out to a wavy hem. */
