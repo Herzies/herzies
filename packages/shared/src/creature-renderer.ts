@@ -1541,7 +1541,7 @@ function buildGhostSpheres(
   side: GroundSide,
 ): Sphere[] {
   if (spheres.length === 0) return [];
-  const R = BOOMBOX_REF_HEIGHT * 0.16;
+  const R = BOOMBOX_REF_HEIGHT * 0.2;
   const sheet = "#F2F2FA";
   const shade = "#D8D8E6";
   const headR = R * 0.75;
