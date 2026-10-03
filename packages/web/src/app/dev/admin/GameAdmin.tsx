@@ -1597,7 +1597,8 @@ function GrantItemPanel({
       setResult(
         `Granted ${res.quantity}× ${name} to ${target.trim()} (new total: ${res.total})`,
       );
-      setTarget("");
+      // Keep the target: granting several items to the same player is the
+      // common case, and clearing it left the button disabled after a grant.
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to grant item");
     } finally {
