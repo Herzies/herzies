@@ -55,7 +55,13 @@ export async function middleware(request: NextRequest) {
     return new NextResponse(null, { status: 404 });
   }
 
-  // Rate-limit API routes
+  // Rate-limit API routes. Production only: a local dev server is one
+  // long-lived process where every client (desktop app, browser tabs) shares
+  // one address, so the per-IP buckets fill from your whole setup at once and
+  // start refusing ordinary clicks.
+  if (pathname.startsWith("/api/") && process.env.NODE_ENV !== "production") {
+    return NextResponse.next();
+  }
   if (pathname.startsWith("/api/")) {
     const ip = getIp(request);
     let bucket: string;
