@@ -2187,17 +2187,23 @@ function applyTexture(
   }
 }
 
+/** Cache-key suffix for a camera zoom; empty at 1 so existing keys hold. */
+function zoomKey(zoom: number): string {
+  return zoom === 1 ? "" : `:z${zoom}`;
+}
+
 // --- Anchor projection (FOV-based) ---
 
 function projectPoint(
   p: V3,
   cols: number,
   halfW: number,
+  halfH: number,
 ): [number, number, number] {
   const relZ = p[2] + CAM;
   if (relZ <= 0.01) return [cols / 2, SH / 2, 0];
   const ndcX = p[0] / (relZ * halfW);
-  const ndcY = p[1] / (relZ * HALF_H);
+  const ndcY = p[1] / (relZ * halfH);
   return [(ndcX + 1) * 0.5 * cols, (ndcY + 1) * 0.5 * SH, relZ];
 }
 
@@ -2246,8 +2252,12 @@ function renderCreatureFrame(
   colors: ColorTriplet,
   cols: number = SW,
   colorScheme?: readonly string[],
+  zoom = 1,
 ): FrameData {
-  const halfW = halfWidthFor(cols);
+  // Zooming widens (or narrows) the view plane about its centre: the camera
+  // sees more of the scene through the same grid of cells.
+  const halfW = halfWidthFor(cols) / zoom;
+  const halfH = HALF_H / zoom;
   const transformed = spheres.map((s) => {
     const tilted: V3 = [
       s.center[0],
@@ -2305,7 +2315,7 @@ function renderCreatureFrame(
       const ndcX = ((sx + 0.5) / cols) * 2 - 1;
       const ndcY = ((sy + 0.5) / SH) * 2 - 1;
       const px = ndcX * halfW;
-      const py = ndcY * HALF_H;
+      const py = ndcY * halfH;
       const dLen = Math.sqrt(px * px + py * py + 1);
       const dx = px / dLen;
       const dy = py / dLen;
@@ -2428,7 +2438,7 @@ function renderCreatureFrame(
     // skip the Y-rotation too (otherwise they'd drift off the prop).
     const isFixed = anchor.parentPart === "ground";
     const rotated = isFixed ? tilted : rotY(tilted, yAngle);
-    const [screenX, screenY, depth] = projectPoint(rotated, cols, halfW);
+    const [screenX, screenY, depth] = projectPoint(rotated, cols, halfW, halfH);
 
     const nTilted: V3 = [
       anchor.normalDir[0],
@@ -2505,13 +2515,14 @@ function generateLoopFrames(
   cols: number,
   boomboxConfig: BoomboxConfig | undefined,
   spiritHopVariant: number | undefined,
+  zoom: number,
 ): FrameData[] {
   const dancing = mode === "dance";
   const hops =
     dancing && hasSpiritEquipped(equipped)
       ? spiritHopsFor(spiritHopVariant)
       : undefined;
-  const key = `${mode}:${paramsCacheKey(userId, paramsOverride)}:${stage}:${equippedCacheKey(equipped)}:${cols}:${boomboxKey(boomboxConfig)}${hops ? `:hop${spiritHopVariant}` : ""}`;
+  const key = `${mode}:${paramsCacheKey(userId, paramsOverride)}:${stage}:${equippedCacheKey(equipped)}:${cols}:${boomboxKey(boomboxConfig)}${hops ? `:hop${spiritHopVariant}` : ""}${zoomKey(zoom)}`;
   const cached = frameCache.get(key);
   if (cached) return cached;
 
@@ -2525,6 +2536,7 @@ function generateLoopFrames(
         cols,
         boomboxConfig,
         undefined,
+        zoom,
       )
     : undefined;
 
@@ -2551,6 +2563,7 @@ function generateLoopFrames(
       colors,
       cols,
       scheme,
+      zoom,
     );
   });
 
@@ -2569,6 +2582,8 @@ export function generateIdleFrames(
   paramsOverride?: CreatureParams,
   cols: number = SW,
   boomboxConfig?: BoomboxConfig,
+  /** Camera zoom about the frame's centre (see renderCreatureFrame). */
+  zoom = 1,
 ): FrameData[] {
   return generateLoopFrames(
     "idle",
@@ -2579,6 +2594,7 @@ export function generateIdleFrames(
     cols,
     boomboxConfig,
     undefined,
+    zoom,
   );
 }
 
@@ -2604,8 +2620,9 @@ export function generateRotationFrames(
   paramsOverride?: CreatureParams,
   cols: number = SW,
   boomboxConfig?: BoomboxConfig,
+  zoom = 1,
 ): FrameData[] {
-  const key = `rot:${paramsCacheKey(userId, paramsOverride)}:${stage}:${equippedCacheKey(equipped)}:${cols}:${boomboxKey(boomboxConfig)}`;
+  const key = `rot:${paramsCacheKey(userId, paramsOverride)}:${stage}:${equippedCacheKey(equipped)}:${cols}:${boomboxKey(boomboxConfig)}${zoomKey(zoom)}`;
   const cached = frameCache.get(key);
   if (cached) return cached;
 
@@ -2626,6 +2643,7 @@ export function generateRotationFrames(
       colors,
       cols,
       scheme,
+      zoom,
     ),
   );
 
@@ -2648,6 +2666,7 @@ export function generateDanceFrames(
   cols: number = SW,
   boomboxConfig?: BoomboxConfig,
   spiritHopVariant?: number,
+  zoom = 1,
 ): FrameData[] {
   return generateLoopFrames(
     "dance",
@@ -2658,6 +2677,7 @@ export function generateDanceFrames(
     cols,
     boomboxConfig,
     spiritHopVariant,
+    zoom,
   );
 }
 
@@ -2679,6 +2699,7 @@ export function renderCreatureAtAngle(
   spiritHopVariant?: number,
   /** Pose for anything dangling, from Herzie3D's spin physics. */
   dangle?: DangleState,
+  zoom = 1,
 ): FrameData {
   const params = resolveCreatureParams(userId, paramsOverride);
   const built = buildCreatureSpheres(params, stage);
@@ -2698,6 +2719,7 @@ export function renderCreatureAtAngle(
     colors,
     cols,
     scheme,
+    zoom,
   );
 }
 

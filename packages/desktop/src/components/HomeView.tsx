@@ -18,7 +18,7 @@ import {
   useGhostMode,
   useWindowPinned,
 } from "../tauri-bridge";
-import { HERZIE_STAGE_HEIGHT, Herzie3D } from "./Herzie3D";
+import { HERZIE_STAGE_HEIGHT } from "./Herzie3D";
 import { HEADER_ICON_HIT } from "./headerIconHit";
 import { CARD_SHAPE_CLIP, ItemTypeIcon } from "./icons/ItemTypeIcon";
 import { ModifiersButton } from "./ModifiersButton";
@@ -44,7 +44,6 @@ const DROP_EXIT_MS = 260;
 
 export function HomeView({
   state,
-  stageOverride,
   onOpenProfile,
   onOpenSettings,
   onActivity,
@@ -52,7 +51,6 @@ export function HomeView({
   bossHatedGenres,
 }: {
   state: AppState;
-  stageOverride?: number | null;
   /**
    * Home is the visible view. Views are only hidden with a CSS class, so
    * without this the creature and its sky keep animating inside a
@@ -361,20 +359,14 @@ export function HomeView({
           the level bar with the herzie standing on its floor. */}
       <div className="min-h-0 flex-1" />
 
-      {/* The stage: HERZIE_STAGE_HEIGHT, the same as on the Herzie view. */}
+      {/* The stage: HERZIE_STAGE_HEIGHT, the same as on the Herzie view. The
+          herzie itself is drawn over it by main.tsx (one renderer shared with
+          the Herzie view, so switching views doesn't reset it). */}
       <div
         ref={stageRef}
         className="relative flex shrink-0 items-center justify-center"
         style={{ height: HERZIE_STAGE_HEIGHT }}
       >
-        <Herzie3D
-          userId={herzie.friendCode}
-          stage={stageOverride ?? herzie.stage}
-          isPlaying={!!nowPlaying}
-          equipped={equipped}
-          paused={!active}
-          grounded
-        />
         {dropItems.length > 0 && (!hasSpiritOrb || bankFull) && (
           // pointer-events-none on the wrapper keeps the gaps between items
           // from blocking herzie drag; each item re-enables pointer events

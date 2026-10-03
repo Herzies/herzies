@@ -46,6 +46,10 @@ interface Props {
   /** Stand the herzie on the bottom of a HERZIE_STAGE_HEIGHT stage (it must
    * be centred in one) instead of centring it. */
   grounded?: boolean;
+  /** Camera zoom about the herzie's centre; eases to a new value. Default: 1. */
+  zoom?: number;
+  /** Camera pan in px (negative: up); eases along with `zoom`. Default: 0. */
+  offsetY?: number;
 }
 
 /**
@@ -69,6 +73,8 @@ export function Herzie3D({
   draggable,
   paused: pausedProp = false,
   grounded = false,
+  zoom,
+  offsetY,
 }: Props) {
   // Full-window-width column count, shared by the sky and the creature
   // viewport so both span the window without stretching their contents.
@@ -179,6 +185,8 @@ export function Herzie3D({
         draggable={draggable}
         paused={paused}
         groundInset={grounded ? groundInsetFor(size) : undefined}
+        zoom={zoom}
+        offsetY={offsetY}
         wrapperStyle={
           showSky
             ? {

@@ -12,10 +12,11 @@ import { createRoot } from "react-dom/client";
 import { ChatPanel } from "./components/ChatPanel";
 import { EventsView } from "./components/EventsView";
 import { FriendsView } from "./components/FriendsView";
+import { HERZIE_STAGE_HEIGHT, Herzie3D } from "./components/Herzie3D";
 import { HomeView } from "./components/HomeView";
 import { IncomingFriendOverlay } from "./components/IncomingFriendOverlay";
 import { IncomingTradeOverlay } from "./components/IncomingTradeOverlay";
-import { InventoryView } from "./components/InventoryView";
+import { HERZIE_ZONE_ATTR, InventoryView } from "./components/InventoryView";
 import { OnboardingScreen } from "./components/OnboardingScreen";
 import { ProfileView } from "./components/ProfileView";
 import { PromptOverlay } from "./components/PromptOverlay";
@@ -27,6 +28,7 @@ import { TradeView } from "./components/TradeView";
 import { UpdateAvailableOverlay } from "./components/UpdateAvailableOverlay";
 import { WhatsNewOverlay } from "./components/WhatsNewOverlay";
 import { useOptimisticUnits } from "./hooks/useOptimisticUnits";
+import { useHomeStageOffset } from "./hooks/useStageAlignment";
 import { useTradeRequests } from "./hooks/useTradeRequests";
 import { cn } from "./lib/utils";
 import { RELEASE_NOTES } from "./release-notes";
@@ -44,6 +46,11 @@ import {
 const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1h
 
 const WHATS_NEW_SEEN_KEY = "herzies:whats-new-seen-version";
+/** The camera on the Herzie view, relative to Home's: pulled back and raised
+ * a little to make room for the deck over the stage's floor. */
+const HERZIE_VIEW_ZOOM = 0.8;
+/** px; negative is up. */
+const HERZIE_VIEW_OFFSET_Y = -14;
 
 type UpdateInstallStatus =
   | { kind: "idle" }
@@ -550,6 +557,9 @@ function App() {
     return () => window.removeEventListener("keydown", handler);
   }, [state.isOnline, herzie, previewOnboarding, switchView, requestOpenChat]);
 
+  // Where Home's and the Herzie view's stages sit (see useStageAlignment).
+  const herzieStageTop = useHomeStageOffset();
+
   if (!state.isOnline) {
     return <SplashScreen />;
   }
@@ -710,6 +720,41 @@ function App() {
           (view !== "home" || !!selfProfile) && view !== "inventory" && "mb-2",
         )}
       >
+        {/* The herzie on Home and the Herzie view: one renderer over both
+            views' stages, so switching between them keeps its rotation and
+            animation and just eases the camera out a little on the Herzie
+            view (room for the deck over its floor). Hidden, never unmounted,
+            elsewhere. A zero-height row, so it positions against the views'
+            top edge without being a containing block for anything else. */}
+        <div
+          className={cn(
+            "relative h-0 shrink-0",
+            ((view !== "home" && view !== "inventory") ||
+              (view === "home" && !!selfProfile) ||
+              herzieStageTop === null) &&
+              "hidden",
+          )}
+        >
+          <div
+            {...(view === "inventory" ? { [HERZIE_ZONE_ATTR]: "" } : {})}
+            className="absolute inset-x-0 flex items-center justify-center"
+            style={{ top: herzieStageTop ?? 0, height: HERZIE_STAGE_HEIGHT }}
+          >
+            <Herzie3D
+              userId={herzie.friendCode}
+              stage={stageOverride ?? herzie.stage}
+              isPlaying={!!state.nowPlaying}
+              equipped={state.equipped}
+              paused={
+                (view !== "home" && view !== "inventory") ||
+                (view === "home" && !!selfProfile)
+              }
+              zoom={view === "inventory" ? HERZIE_VIEW_ZOOM : 1}
+              offsetY={view === "inventory" ? HERZIE_VIEW_OFFSET_Y : 0}
+              grounded
+            />
+          </div>
+        </div>
         <div
           className={cn(
             "min-h-0 flex-1 flex-col",
@@ -751,7 +796,6 @@ function App() {
           ) : (
             <HomeView
               state={state}
-              stageOverride={stageOverride}
               active={view === "home"}
               onOpenProfile={handleOpenSelfProfile}
               onOpenSettings={() => switchView("settings")}

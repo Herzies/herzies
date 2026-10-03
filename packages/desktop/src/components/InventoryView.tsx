@@ -37,7 +37,10 @@ import {
   pickGroundSide,
   type ToggleEquipResult,
 } from "../hooks/useOptimisticUnits";
-import { useHomeStageOffset } from "../hooks/useStageAlignment";
+import {
+  useFallbackStageOffset,
+  useHomeStageOffset,
+} from "../hooks/useStageAlignment";
 import { cn, formatAmount } from "../lib/utils";
 import { herzies } from "../tauri-bridge";
 import { Coin } from "./Coin";
@@ -53,7 +56,7 @@ import {
 } from "./DeckOverlay";
 import { DeckSlotPicker, type PickerOption } from "./DeckSlotPicker";
 import { DiceUpgradeOverlay } from "./DiceUpgradeOverlay";
-import { HERZIE_STAGE_HEIGHT, Herzie3D } from "./Herzie3D";
+import { HERZIE_STAGE_HEIGHT } from "./Herzie3D";
 import { type Flight, ItemFlights } from "./ItemFlight";
 import ItemInspectOverlay, { CompactItemPreview } from "./ItemInspectOverlay";
 import { DuplicatesIcon } from "./icons/DuplicatesIcon";
@@ -397,7 +400,9 @@ const TILE_UNITS_ATTR = "data-tile-units";
 
 /** Wraps the herzie and the deck laid over it: dropping a card anywhere in here
  * places it (see handleDeckDrop). */
-const HERZIE_ZONE_ATTR = "data-herzie-zone";
+/** Marks where a dropped card equips. main.tsx puts it on the shared herzie
+ * too, which sits over this view's stage but outside it in the DOM. */
+export const HERZIE_ZONE_ATTR = "data-herzie-zone";
 
 /** Where a flight lands (see ItemFlight): a worn copy's deck box, or the bag
  * tile holding a copy — or, when that panel isn't the one showing, its tab. */
@@ -1685,6 +1690,7 @@ export function InventoryView({
     if (header) setHeaderBottom(header.offsetTop + header.offsetHeight + 4);
   }, []);
   const stageTop = homeStageOffset ?? headerBottom;
+  useFallbackStageOffset(headerBottom, active);
 
   return (
     <div className="relative flex h-full flex-col">
@@ -1712,25 +1718,16 @@ export function InventoryView({
         </div>
       </div>
 
-      {/* The stage: HERZIE_STAGE_HEIGHT at the same offset as Home's, so the
-          herzie doesn't move when switching views. Absolute, behind the deck
-          and bag: the bag keeps square cells by taking a fixed height, and
-          the deck may overlap the stage's floor. It and the deck both take a
-          dropped card. */}
+      {/* The stage: HERZIE_STAGE_HEIGHT at the same offset as Home's, where
+          main.tsx draws the herzie (one renderer shared with Home, zoomed out
+          a little here). Absolute, behind the deck and bag: the bag keeps
+          square cells by taking a fixed height, and the deck may overlap the
+          stage's floor. It and the deck both take a dropped card. */}
       <div
         {...{ [HERZIE_ZONE_ATTR]: "" }}
         className="absolute inset-x-0"
         style={{ top: stageTop, height: HERZIE_STAGE_HEIGHT }}
       >
-        <div className="flex h-full items-center justify-center">
-          <Herzie3D
-            userId={herzie.friendCode}
-            stage={herzie.stage}
-            equipped={equipped}
-            paused={!active}
-            grounded
-          />
-        </div>
         {notice && (
           <div
             role="status"

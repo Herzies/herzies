@@ -47,6 +47,9 @@ const MIN_VELOCITY = 0.0005;
 /** Chance that a dance loop (1.56s) with a Greedy Spirit plays without a
  * hop — roughly one hop every 4s. */
 const SPIRIT_CALM_LOOP_CHANCE = 0.6;
+/** How quickly the camera eases toward a new `zoom`: the fraction of the
+ * remaining distance covered per 60fps frame. */
+const ZOOM_EASE = 0.18;
 
 interface Props {
   userId: string;
@@ -86,6 +89,13 @@ interface Props {
    * resting pose) sit this many px above the canvas's bottom edge. Omitted,
    * the creature stays vertically centred in the canvas. */
   groundInset?: number;
+  /** Camera zoom about the herzie's centre: below 1 the camera sees more of
+   * the scene through the same cells (the herzie draws smaller at the same
+   * resolution). Eases to a new value when it changes. Default: 1. */
+  zoom?: number;
+  /** Camera pan: draws the scene this many px lower (negative: higher),
+   * easing along with `zoom`. Default: 0. */
+  offsetY?: number;
 }
 
 function resolveEquipped(
@@ -135,6 +145,8 @@ export function Herzie3D({
   ariaLabel,
   defaultAngle = 0,
   groundInset,
+  zoom = 1,
+  offsetY = 0,
 }: Props) {
   const equippedRaw = resolveEquipped(equippedProp, wearables);
   // The parent may hand us a brand-new (but content-identical) `equipped`
@@ -239,6 +251,7 @@ export function Herzie3D({
         cols,
         boomboxConfig,
         hopVariant,
+        zoom,
       );
     if (animate)
       return generateRotationFrames(
@@ -249,6 +262,7 @@ export function Herzie3D({
         creatureParams,
         cols,
         boomboxConfig,
+        zoom,
       );
     return generateIdleFrames(
       userId,
@@ -257,6 +271,7 @@ export function Herzie3D({
       creatureParams,
       cols,
       boomboxConfig,
+      zoom,
     );
   }, [
     userId,
@@ -268,7 +283,43 @@ export function Herzie3D({
     cols,
     boomboxConfig,
     hopVariant,
+    zoom,
   ]);
+
+  // The camera being drawn right now, eased toward the `zoom` and
+  // `offsetY` props together. While the zoom is between values, frames are
+  // rendered live at it (like a drag); once it lands, the cached frames at
+  // the new zoom take over. The offset is only a draw shift. Starts at the
+  // props so mounting doesn't animate.
+  const [camera, setCamera] = useState({ zoom, offsetY });
+  const liveZoom = camera.zoom;
+  const zooming = liveZoom !== zoom;
+  const cameraRef = useRef(camera);
+  cameraRef.current = camera;
+  useEffect(() => {
+    const from = cameraRef.current;
+    if (from.zoom === zoom && from.offsetY === offsetY) return;
+    let raf = 0;
+    let last = performance.now();
+    const tick = (now: number) => {
+      const current = cameraRef.current;
+      const dz = zoom - current.zoom;
+      const dy = offsetY - current.offsetY;
+      if (Math.abs(dz) < 0.002 && Math.abs(dy) < 0.5) {
+        setCamera({ zoom, offsetY });
+        return;
+      }
+      const t = 1 - (1 - ZOOM_EASE) ** ((now - last) / (1000 / 60));
+      last = now;
+      setCamera({
+        zoom: current.zoom + dz * t,
+        offsetY: current.offsetY + dy * t,
+      });
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [zoom, offsetY]);
 
   // Re-roll the Greedy Spirit's dance hop at each loop wrap: none or one of the
   // variants, never the same variant twice running. Every variant is the plain
@@ -324,6 +375,7 @@ export function Herzie3D({
       creatureParams,
       cols,
       boomboxConfig,
+      zoom,
     ],
   );
 
@@ -378,6 +430,9 @@ export function Herzie3D({
     metrics,
   ]);
 
+  // Whole pixels, so the glyphs stay crisp mid-pan.
+  const cameraShift = Math.round(camera.offsetY);
+
   const drawFrame = useCallback(
     (cells: Cell[][]) => {
       const canvas = canvasRef.current;
@@ -391,7 +446,7 @@ export function Herzie3D({
 
       for (let y = 0; y < cells.length; y++) {
         const row = cells[y];
-        const py = y * metrics.lineH + groundShift;
+        const py = y * metrics.lineH + groundShift + cameraShift;
         for (let x = 0; x < row.length; x++) {
           const cell = row[x];
           if (cell.ch === " ") continue;
@@ -400,7 +455,7 @@ export function Herzie3D({
         }
       }
     },
-    [size, metrics, groundShift],
+    [size, metrics, groundShift, cameraShift],
   );
 
   const startMomentum = useCallback(() => {
@@ -476,12 +531,20 @@ export function Herzie3D({
     return () => clearInterval(id);
   }, [frames.length, interval, paused]);
 
+  // A new loop starts from its first frame — except when only the zoom moved,
+  // which is the same loop seen from further back and must not jump.
+  const framesZoom = useRef(zoom);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: frames is the trigger; zoom is read to tell a zoom change apart
   useEffect(() => {
+    if (framesZoom.current !== zoom) {
+      framesZoom.current = zoom;
+      return;
+    }
     setFrame(0);
   }, [frames]);
 
   useEffect(() => {
-    if (hasDragged) {
+    if (hasDragged || zooming) {
       // Keyed so hop variants share every frame outside their hops with the
       // calm loop — otherwise each re-roll would re-render a whole loop live.
       const hopFrame =
@@ -491,7 +554,7 @@ export function Herzie3D({
       const cacheKey = hopFrame ? `${hopVariant}:${frame}` : `${frame}`;
       // A swinging chain is a new pose every frame: render it live and keep it
       // out of the cache, which only holds the at-rest pose.
-      let cells = dangle ? undefined : angleFrames.get(cacheKey);
+      let cells = dangle || zooming ? undefined : angleFrames.get(cacheKey);
       if (!cells) {
         const yAngle = animate
           ? (frame / frames.length) * Math.PI * 2 + dragAngle
@@ -512,8 +575,9 @@ export function Herzie3D({
           boomboxConfig,
           hopFrame ? hopVariant : undefined,
           pose,
+          liveZoom,
         ).cells;
-        if (!dangle) angleFrames.set(cacheKey, cells);
+        if (!dangle && !zooming) angleFrames.set(cacheKey, cells);
       }
       drawFrame(cells);
     } else {
@@ -538,6 +602,8 @@ export function Herzie3D({
     hopVariant,
     dangle,
     dangles,
+    zooming,
+    liveZoom,
   ]);
 
   return (
