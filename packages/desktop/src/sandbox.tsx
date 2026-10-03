@@ -9,11 +9,13 @@ import {
   type DangleConfig,
   DEFAULT_BOOMBOX_CONFIG,
   DEFAULT_CAMERA_DISTANCE,
+  DEFAULT_CAMERA_TILT_DEG,
   DEFAULT_DANGLE_CONFIG,
   earAngleFromDeg,
   earAngleToDeg,
   generateCreatureParams,
   setCameraDistance,
+  setCameraTilt,
 } from "@herzies/shared";
 import { useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -57,6 +59,12 @@ function Sandbox() {
     clearCreatureCache();
     setCamera(distance);
   };
+  const [tilt, setTilt] = useState(DEFAULT_CAMERA_TILT_DEG);
+  const changeTilt = (degrees: number) => {
+    setCameraTilt(degrees);
+    clearCreatureCache();
+    setTilt(degrees);
+  };
   const swings =
     wearables.includes("gold-chain") || wearables.includes("pearl-necklace");
   const [jsonOpen, setJsonOpen] = useState(false);
@@ -99,6 +107,7 @@ function Sandbox() {
     ...(wearables.includes("boombox") ? { boomboxConfig: boombox } : {}),
     ...(swings ? { dangleConfig: dangle } : {}),
     cameraDistance: camera,
+    cameraTiltDeg: tilt,
   });
 
   const copyJson = async () => {
@@ -320,8 +329,19 @@ function Sandbox() {
             bounds={{ min: 1.5, max: 12, step: 0.1 }}
             onChange={changeCamera}
           />
+          <SliderField
+            label="tilt ° (higher = more top of head)"
+            value={tilt}
+            bounds={{ min: -20, max: 45, step: 0.5 }}
+            onChange={changeTilt}
+          />
           <div className="mt-1.5">
-            <Btn onClick={() => changeCamera(DEFAULT_CAMERA_DISTANCE)}>
+            <Btn
+              onClick={() => {
+                changeCamera(DEFAULT_CAMERA_DISTANCE);
+                changeTilt(DEFAULT_CAMERA_TILT_DEG);
+              }}
+            >
               reset camera
             </Btn>
           </div>
@@ -383,9 +403,9 @@ function Sandbox() {
 
       <main className="flex min-h-screen flex-1 items-center justify-center p-6">
         <Herzie3D
-          // Remount on a camera move: the component memoizes its frames, and
-          // nothing it's given changes when only the camera does.
-          key={camera}
+          // Remount on a camera move or tilt: the component memoizes its
+          // frames, and nothing it's given changes when only the camera does.
+          key={`${camera}:${tilt}`}
           userId={userId}
           stage={stage}
           size={size}

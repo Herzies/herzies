@@ -45,10 +45,13 @@ const SH = 48;
  * field of view follows it so the frame at the centre stays the same size —
  * moving the camera changes depth exaggeration, not framing.
  */
-export const DEFAULT_CAMERA_DISTANCE = 2.0;
+// Tuned by eye in the sandbox: 2.0 (the original) swelled limbs badly as they
+// swung toward the camera.
+export const DEFAULT_CAMERA_DISTANCE = 2.7;
 /** View-plane half-height at the herzie's centre (z = 0), in world units.
- * Fixed: it is the framing. Was tan(1.8 / 2) at the original 2.0 distance. */
-const FRAME_HALF_H = DEFAULT_CAMERA_DISTANCE * Math.tan(1.8 / 2);
+ * Fixed: it is the framing — the original camera's (distance 2.0, vertical
+ * field of view 1.8 rad), whatever the distance now. */
+const FRAME_HALF_H = 2.0 * Math.tan(1.8 / 2);
 
 let CAM = DEFAULT_CAMERA_DISTANCE;
 let HALF_H = FRAME_HALF_H / CAM;
@@ -65,9 +68,18 @@ export function setCameraDistance(distance: number): void {
 function halfWidthFor(cols: number): number {
   return HALF_H * ((cols / SH) * (1 / CHAR_ASPECT));
 }
-const TILT = 8 * (Math.PI / 180);
-const TILT_COS = Math.cos(TILT);
-const TILT_SIN = Math.sin(TILT);
+/** How far the herzie leans back toward the camera, in degrees: positive
+ * shows more of the top of its head. */
+export const DEFAULT_CAMERA_TILT_DEG = 8;
+let TILT_COS = Math.cos((DEFAULT_CAMERA_TILT_DEG * Math.PI) / 180);
+let TILT_SIN = Math.sin((DEFAULT_CAMERA_TILT_DEG * Math.PI) / 180);
+
+/** Tooling (the sandbox): change the tilt. Like setCameraDistance, callers
+ * must clearCreatureCache() afterwards. */
+export function setCameraTilt(degrees: number): void {
+  TILT_COS = Math.cos((degrees * Math.PI) / 180);
+  TILT_SIN = Math.sin((degrees * Math.PI) / 180);
+}
 
 // Default viewing angle — slightly off front-facing
 export const DEFAULT_Y_ANGLE = 17 * (Math.PI / 180);
