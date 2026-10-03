@@ -15,16 +15,19 @@ import {
   EQUIP_SLOTS,
   EQUIPPED_SLOTS,
   equippedItemIds,
+  filterDroppablePool,
   findEquippedSlot,
   getHerzieStats,
   getHerzieStatsFromUnits,
   getItem,
   getItemType,
+  HALLOWEEN_DROP_WINDOW,
   hasRoomFor,
   ITEM_DROP_WEIGHT_OVERRIDES,
   ITEMS,
   type ItemUnit,
   isBankFull,
+  isInDropWindow,
   isModifierEquipped,
   MAX_ITEM_UPGRADE_LEVEL,
   MAX_MODIFIERS,
@@ -248,6 +251,57 @@ describe("NON_DROPPABLE_ITEM_IDS", () => {
   it("only references real catalog ids", () => {
     for (const id of NON_DROPPABLE_ITEM_IDS) {
       expect(getItem(id)).toBeDefined();
+    }
+  });
+});
+
+describe("seasonal drop windows", () => {
+  const on = (iso: string) => new Date(`${iso}T12:00:00Z`);
+  const halloween = { dropWindow: HALLOWEEN_DROP_WINDOW };
+
+  it("lets an item without a window drop any day", () => {
+    expect(isInDropWindow({}, on("2026-03-01"))).toBe(true);
+  });
+
+  it("opens and closes on the window's days, inclusive", () => {
+    expect(isInDropWindow(halloween, on("2026-10-19"))).toBe(false);
+    expect(isInDropWindow(halloween, on("2026-10-20"))).toBe(true);
+    expect(isInDropWindow(halloween, on("2026-10-31"))).toBe(true);
+    expect(isInDropWindow(halloween, on("2026-11-02"))).toBe(true);
+    expect(isInDropWindow(halloween, on("2026-11-03"))).toBe(false);
+  });
+
+  it("handles a window that wraps the new year", () => {
+    const winter = { dropWindow: { from: [12, 20], to: [1, 5] } as const };
+    expect(isInDropWindow(winter, on("2026-12-25"))).toBe(true);
+    expect(isInDropWindow(winter, on("2027-01-03"))).toBe(true);
+    expect(isInDropWindow(winter, on("2026-06-01"))).toBe(false);
+  });
+
+  it("keeps out-of-season items out of the drop pool", () => {
+    const rows = [
+      { id: "headphones", rarity: "uncommon" },
+      { id: "ghost", rarity: "rare" },
+    ];
+    const ids = (now: Date | null) =>
+      filterDroppablePool(rows, now).map((r) => r.id);
+    expect(ids(on("2026-06-01"))).toEqual(["headphones"]);
+    expect(ids(on("2026-10-31"))).toEqual(["headphones", "ghost"]);
+    // Debug tooling ignores the season.
+    expect(ids(null)).toEqual(["headphones", "ghost"]);
+  });
+
+  it("puts every Halloween item in the Halloween window", () => {
+    for (const id of [
+      "witch-hat",
+      "fangs",
+      "pumpkin-spice",
+      "jack-o-lantern",
+      "ghost",
+      "blood-moon",
+      "trick-or-treat",
+    ]) {
+      expect(getItem(id)?.dropWindow).toBe(HALLOWEEN_DROP_WINDOW);
     }
   });
 });

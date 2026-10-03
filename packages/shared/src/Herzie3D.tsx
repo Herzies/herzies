@@ -97,7 +97,14 @@ function resolveEquipped(
     else if (id === "clouds" || id === "stars") out.scenery = id;
     else if (id === "gold-chain" || id === "pearl-necklace" || id === "bowtie")
       out.body = id;
-    else if (id === "boombox") {
+    else if (id === "witch-hat") out.head = id;
+    else if (id === "fangs") out.face = id;
+    else if (id === "blood-moon") out.scenery = id;
+    else if (id === "pumpkin-spice") out.color = id;
+    else if (id === "jack-o-lantern" || id === "ghost") {
+      if (!out.ground_left) out.ground_left = id;
+      else out.ground_right = id;
+    } else if (id === "boombox") {
       if (!out.ground_left) out.ground_left = id;
       else out.ground_right = id;
     }

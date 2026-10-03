@@ -15,6 +15,7 @@ import {
   GOLD_RAMP,
   LIGHT,
   OCEAN_RAMP,
+  PUMPKIN_RAMP,
   RAINBOW_RAMP,
   RAMP_HERZIE,
   rotY,
@@ -288,9 +289,18 @@ function applyDanceOffsets(
     hops,
     yOff(DANCE.spirit.amp, DANCE.spirit.cycles, Math.PI / 5),
   );
+  // Other floating pets keep the spirit's slow bob but never hop: the hop
+  // poses are the Greedy Spirit's, keyed on its single core sphere.
+  const petOff = yOff(DANCE.spirit.amp, DANCE.spirit.cycles, Math.PI / 5);
 
   return spheres.map((s) => {
     if (s.part === "spirit") return moveSpirit(s);
+    if (s.part === "pet") {
+      return {
+        ...s,
+        center: [s.center[0], s.center[1] + petOff, s.center[2]] as V3,
+      };
+    }
     let dy = 0;
     let dx = 0;
     if (s.part === "body") dy = bodyOff;
@@ -1167,7 +1177,11 @@ function applyDangle(spheres: Sphere[], state: DangleState): Sphere[] {
 
 /** Whether anything worn swings when the herzie is spun. */
 export function hasDangleEquipped(equipped?: Equipped): boolean {
-  return equipped?.body === "gold-chain" || equipped?.body === "pearl-necklace";
+  return (
+    equipped?.body === "gold-chain" ||
+    equipped?.body === "pearl-necklace" ||
+    equipped?.head === "witch-hat"
+  );
 }
 
 const BODY_ITEM_BUILDERS: Record<string, (spheres: Sphere[]) => Sphere[]> = {
@@ -1382,16 +1396,29 @@ function buildSpiritOrbSpheres(
     { c: [eyeX, eyeY, ez + pupilZOff], r: pupilR, color: pupilColor },
   ];
 
-  // Horizontal placement reuses the same bottom-corner scheme as the
-  // boombox (still respects left/right slot + camera-FOV margin math), but
-  // the vertical placement floats at midY instead of the ground. Its part is
-  // "spirit", not "ground" — like the boombox, renderCreatureFrame keeps it
-  // fixed while the herzie is manually rotated, but unlike the boombox it
-  // gets its own slow breathing bob baked into the idle loop — see
-  // applyIdleOffsets.
-  const bz = -orbR * 1.6;
-  const by = midY;
-  const bx = groundCornerX(cols, side, orbR, orbR, -orbR, bz, 0.1);
+  return placeFloatingPet(local, midY, orbR, cols, side, "spirit");
+}
+
+/**
+ * Places a floating pet, built around its own origin, beside the herzie.
+ *
+ * Horizontal placement reuses the same bottom-corner scheme as the boombox
+ * (still respects left/right slot + camera-FOV margin math), but it floats at
+ * `midY` instead of resting on the ground. Like the boombox, its part keeps
+ * it fixed while the herzie is manually rotated, but unlike the boombox it
+ * gets a slow breathing bob — see applyIdleOffsets. The Greedy Spirit uses
+ * part "spirit" (it also hops when dancing); every other pet uses "pet".
+ */
+function placeFloatingPet(
+  local: readonly { c: V3; r: number; color: string }[],
+  midY: number,
+  size: number,
+  cols: number,
+  side: GroundSide,
+  part: "spirit" | "pet",
+): Sphere[] {
+  const bz = -size * 1.6;
+  const bx = groundCornerX(cols, side, size, size, -size, bz, 0.1);
 
   // Turned slightly toward the herzie, so it reads as watching over it rather
   // than staring at the camera. Same sign convention as the boombox's yaw.
@@ -1401,13 +1428,197 @@ function buildSpiritOrbSpheres(
   return local.map((ls) => {
     const r = rotY(ls.c, yaw);
     return {
-      center: [bx + r[0], by + r[1], bz + r[2]] as V3,
+      center: [bx + r[0], midY + r[1], bz + r[2]] as V3,
       radius: ls.r,
       zone: "wearable" as const,
-      part: "spirit",
+      part,
       color: ls.color,
     };
   });
+}
+
+/** The herzie's vertical midpoint, where floating pets hover. */
+function creatureMidY(spheres: Sphere[]): number {
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const s of spheres) {
+    minY = Math.min(minY, s.center[1] - s.radius);
+    maxY = Math.max(maxY, s.center[1] + s.radius);
+  }
+  return (minY + maxY) / 2;
+}
+
+/** A carved pumpkin: a ribbed orange cluster with a green stem and a
+ * candle-lit face. The "cut-outs" are glowing yellow spheres set into the
+ * front, since a sphere renderer has no holes to cut. */
+function buildJackOLanternSpheres(
+  spheres: Sphere[],
+  cols: number,
+  side: GroundSide,
+): Sphere[] {
+  if (spheres.length === 0) return [];
+  const R = BOOMBOX_REF_HEIGHT * 0.2;
+  const local: { c: V3; r: number; color: string }[] = [
+    { c: [0, 0, 0], r: R * 0.8, color: "#F27B13" },
+  ];
+  // Ribs: a ring of overlapping lobes, alternating tone for the grooves.
+  const ribs = 8;
+  for (let i = 0; i < ribs; i++) {
+    const a = (i / ribs) * Math.PI * 2;
+    local.push({
+      c: [Math.cos(a) * R * 0.42, R * 0.05, Math.sin(a) * R * 0.42],
+      r: R * 0.6,
+      color: i % 2 === 0 ? "#F27B13" : "#D9620A",
+    });
+  }
+  local.push({ c: [0, -R * 0.95, 0], r: R * 0.17, color: "#3A6B1F" });
+  local.push({ c: [R * 0.06, -R * 1.12, 0], r: R * 0.12, color: "#4E8A2A" });
+  // Face, toward the camera (-Z).
+  const face = (x: number, y: number, r: number) =>
+    local.push({ c: [x, y, eyeZ(R * 1.02, x, y, r)], r, color: "#FFD43B" });
+  face(-R * 0.36, -R * 0.2, R * 0.17);
+  face(R * 0.36, -R * 0.2, R * 0.17);
+  face(0, R * 0.04, R * 0.1);
+  for (let i = 0; i < 5; i++) {
+    const t = i / 4 - 0.5; // -0.5..0.5 across the grin
+    face(t * R * 0.9, R * 0.28 + R * 0.12 * (1 - (2 * t) ** 2), R * 0.11);
+  }
+  return placeFloatingPet(local, creatureMidY(spheres), R, cols, side, "pet");
+}
+
+/** A sheet ghost: a round head over a body that flares out to a wavy hem. */
+function buildGhostSpheres(
+  spheres: Sphere[],
+  cols: number,
+  side: GroundSide,
+): Sphere[] {
+  if (spheres.length === 0) return [];
+  const R = BOOMBOX_REF_HEIGHT * 0.16;
+  const sheet = "#F2F2FA";
+  const shade = "#D8D8E6";
+  const headR = R * 0.75;
+  const headY = -R * 0.45;
+  const local: { c: V3; r: number; color: string }[] = [
+    { c: [0, headY, 0], r: headR, color: sheet },
+    { c: [0, R * 0.15, 0], r: R * 0.72, color: sheet },
+    { c: [0, R * 0.55, 0], r: R * 0.74, color: sheet },
+  ];
+  // Wavy hem: lobes alternating up and down around the bottom edge.
+  const lobes = 10;
+  for (let i = 0; i < lobes; i++) {
+    const a = (i / lobes) * Math.PI * 2;
+    local.push({
+      c: [
+        Math.cos(a) * R * 0.62,
+        R * 0.95 + (i % 2 === 0 ? R * 0.1 : -R * 0.02),
+        Math.sin(a) * R * 0.62,
+      ],
+      r: R * 0.24,
+      color: i % 2 === 0 ? sheet : shade,
+    });
+  }
+  const eyeR = R * 0.16;
+  const ex = R * 0.27;
+  const ey = -R * 0.12; // relative to the head
+  const ez = eyeZ(headR, ex, ey, eyeR);
+  local.push({ c: [-ex, headY + ey, ez], r: eyeR, color: "#1A1A2E" });
+  local.push({ c: [ex, headY + ey, ez], r: eyeR, color: "#1A1A2E" });
+  const mouthY = R * 0.22;
+  local.push({
+    c: [0, headY + mouthY, eyeZ(headR, 0, mouthY, R * 0.1)],
+    r: R * 0.1,
+    color: "#1A1A2E",
+  });
+  return placeFloatingPet(local, creatureMidY(spheres), R, cols, side, "pet");
+}
+
+/** Pointed witch hat: a brim, an orange band, and a cone of shrinking
+ * spheres whose top bends over. The bent tip carries dangle weights, so it
+ * swings round the hat's axis when the herzie is spun (see applyDangle). */
+function buildWitchHatSpheres(spheres: Sphere[]): Sphere[] {
+  const head = getHeadBounds(spheres);
+  if (!head) return [];
+  const [hx, hy, hz] = head.center;
+  const hr = head.radius;
+  const felt = "#6B4A94";
+  const result: Sphere[] = [];
+  const push = (c: V3, r: number, color: string, dangle?: Dangle) =>
+    result.push({
+      center: c,
+      radius: r,
+      zone: "wearable",
+      part: "head",
+      color,
+      dangle,
+    });
+
+  // Brim: a wide ring resting on the crown, with a band just above it.
+  const brimY = hy - hr * 0.62;
+  const ring = (
+    steps: number,
+    y: number,
+    radius: number,
+    r: number,
+    color: string,
+  ) => {
+    for (let i = 0; i < steps; i++) {
+      const a = (i / steps) * Math.PI * 2;
+      push([hx + Math.cos(a) * radius, y, hz + Math.sin(a) * radius], r, color);
+    }
+  };
+  ring(22, brimY, hr * 0.9, hr * 0.16, felt);
+  ring(16, brimY - hr * 0.16, hr * 0.6, hr * 0.15, "#F27B13");
+
+  // Cone: straight for most of its height, then the top bends over to one
+  // side and droops a little. Squat on purpose: a grown herzie's head sits
+  // close to the top of the frame, and a classic tall hat would be cut off.
+  const steps = 9;
+  const bendFrom = 5;
+  const height = hr * 0.85;
+  let x = hx;
+  for (let i = 0; i < steps; i++) {
+    const t = i / (steps - 1);
+    let y = brimY - hr * 0.15 - t * height;
+    let dangle: Dangle | undefined;
+    if (i >= bendFrom) {
+      const k = (i - bendFrom + 1) / (steps - bendFrom);
+      x += hr * 0.2 * k;
+      y += hr * 0.08 * k * k;
+      dangle = { weight: k, hang: 0, pivot: [hx, hz] };
+    }
+    push([x, y, hz], hr * (0.58 - 0.48 * t), felt, dangle);
+  }
+  return result;
+}
+
+/** Two small fangs on the front of the head, just below the eyes. */
+function buildFangSpheres(spheres: Sphere[]): Sphere[] {
+  const head = largestPart(spheres, "head");
+  const eyes = spheres.filter((s) => s.part === "eye");
+  if (!head || eyes.length < 2) return [];
+  const [hx, hy, hz] = head.center;
+  const er = Math.min(...eyes.map((e) => e.radius));
+  const eyeBottom = Math.max(...eyes.map((e) => e.center[1] + e.radius));
+  const spread = Math.abs(eyes[0].center[0] - eyes[1].center[0]) * 0.22;
+  const result: Sphere[] = [];
+  for (const side of [-1, 1]) {
+    const fx = side * spread;
+    // A larger root with a smaller tip below it, so each reads as a point.
+    for (const [dy, r] of [
+      [er * 0.9, er * 0.32],
+      [er * 1.3, er * 0.2],
+    ] as const) {
+      const y = eyeBottom + dy - hy;
+      result.push({
+        center: [hx + fx, hy + y, hz + eyeZ(head.radius, fx, y, r)],
+        radius: r,
+        zone: "wearable",
+        part: "head",
+        color: "#FFFFFF",
+      });
+    }
+  }
+  return result;
 }
 
 /** Whether a Greedy Spirit sits in either ground slot. */
@@ -1439,8 +1650,14 @@ function appendWearableSpheres(
 ): void {
   if (!equipped) return;
 
+  if (equipped.face === "fangs") {
+    spheres.push(...buildFangSpheres(spheres));
+  }
   if (equipped.head === "headphones") {
     spheres.push(...buildHeadphoneSpheres(spheres));
+  }
+  if (equipped.head === "witch-hat") {
+    spheres.push(...buildWitchHatSpheres(spheres));
   }
   if (equipped.head === "rainbow-headband") {
     spheres.push(...buildRainbowHeadbandSpheres(spheres));
@@ -1454,6 +1671,10 @@ function appendWearableSpheres(
       spheres.push(...buildBoomboxSpheres(spheres, cols, side, boomboxConfig));
     } else if (itemId === "spirit-orb") {
       spheres.push(...buildSpiritOrbSpheres(spheres, cols, side));
+    } else if (itemId === "jack-o-lantern") {
+      spheres.push(...buildJackOLanternSpheres(spheres, cols, side));
+    } else if (itemId === "ghost") {
+      spheres.push(...buildGhostSpheres(spheres, cols, side));
     }
   }
 }
@@ -1475,6 +1696,7 @@ const COLOR_SCHEMES: Record<string, readonly string[]> = {
   // hatched with rather than introducing a new one.
   "purple-dane": VIOLET_RAMP,
   "thanks-for-all-the-fish": TEAL_RAMP,
+  "pumpkin-spice": PUMPKIN_RAMP,
   // Not an item: Good ol' George's gold, applied only by the desktop's
   // Events emblem (see GOLD_SCHEME_ID). No player can equip it.
   [GOLD_SCHEME_ID]: GOLD_RAMP,
@@ -1789,7 +2011,7 @@ function applyIdleOffsets(spheres: Sphere[], frameIdx: number): Sphere[] {
 
   return spheres.map((s) => {
     let dy = 0;
-    if (s.part === "spirit") dy = spiritOff;
+    if (s.part === "spirit" || s.part === "pet") dy = spiritOff;
     else if (s.part === "body") dy = bodyOff;
     else if (s.part === "head") dy = headOff;
     else if (s.part === "eye" || s.part === "pupil") dy = eyeOff;
@@ -1987,7 +2209,8 @@ function renderCreatureFrame(
     // herzie spins around its Y axis (manual drag-rotation shouldn't drag the
     // orb along with it). The orb gets its own independent breathing bob
     // instead, via applyIdleOffsets.
-    const isFixed = s.part === "ground" || s.part === "spirit";
+    const isFixed =
+      s.part === "ground" || s.part === "spirit" || s.part === "pet";
     return {
       center: isFixed ? tilted : rotY(tilted, yAngle),
       radius: s.radius,

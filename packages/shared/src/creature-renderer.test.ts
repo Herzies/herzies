@@ -13,6 +13,8 @@ import {
   renderCreatureAtAngle,
   SPIRIT_DANCE_HOP_VARIANT_COUNT,
 } from "./creature-renderer.js";
+import type { DangleState } from "./dangle-physics.js";
+import type { Equipped } from "./items.js";
 
 const USER = "test-herzie";
 
@@ -320,6 +322,85 @@ describe("neckwear", () => {
     for (const stage of [1, 2]) {
       expect(draw(stage, "gold-chain")).toBe(draw(stage));
     }
+  });
+});
+
+describe("Halloween items", () => {
+  const draw = (equipped: Equipped, yAngle = 1.2345, dangle?: DangleState) =>
+    JSON.stringify(
+      renderCreatureAtAngle(
+        USER,
+        3,
+        yAngle,
+        0,
+        false,
+        equipped,
+        undefined,
+        126,
+        undefined,
+        undefined,
+        dangle,
+      ).cells,
+    );
+
+  it("draws each one", () => {
+    for (const equipped of [
+      { head: "witch-hat" },
+      { face: "fangs" },
+      { color: "pumpkin-spice" },
+      { ground_left: "jack-o-lantern" },
+      { ground_right: "ghost" },
+    ] as Equipped[]) {
+      expect(draw(equipped)).not.toBe(draw({}));
+    }
+  });
+
+  it("swings the witch hat's tip on a spin, but not the fangs", () => {
+    const swing = { swing: 0.6, flare: 0 };
+    expect(draw({ head: "witch-hat" }, 1.2345, swing)).not.toBe(
+      draw({ head: "witch-hat" }),
+    );
+    expect(draw({ face: "fangs" }, 1.2345, swing)).toBe(
+      draw({ face: "fangs" }),
+    );
+  });
+
+  it("keeps the pets in place while the herzie spins", () => {
+    // The cells the pets cover outside the herzie's own silhouette. If they
+    // turned with the herzie, these would change between the two angles.
+    const petCells = (yAngle: number) => {
+      const withPets = renderCreatureAtAngle(
+        USER,
+        3,
+        yAngle,
+        0,
+        false,
+        {
+          ground_left: "jack-o-lantern",
+          ground_right: "ghost",
+        },
+        undefined,
+        126,
+      ).cells;
+      const bare = renderCreatureAtAngle(
+        USER,
+        3,
+        yAngle,
+        0,
+        false,
+        {},
+        undefined,
+        126,
+      ).cells;
+      return withPets
+        .flatMap((row, y) =>
+          row.map((c, x) =>
+            c.ch !== " " && bare[y][x].ch === " " ? `${y},${x}` : null,
+          ),
+        )
+        .filter((k) => k !== null);
+    };
+    expect(petCells(0.3)).toEqual(petCells(2.1));
   });
 });
 

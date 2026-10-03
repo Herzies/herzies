@@ -110,6 +110,20 @@ export const TEAL_RAMP = [
 ] as const;
 
 /**
+ * Pumpkin ramp for the Pumpkin Spice colour scheme (Halloween): a lit
+ * pumpkin's orange walking down to a near-black rind, so a herzie reads as
+ * carved and candle-lit rather than as the palette's warm-orange hatch.
+ */
+export const PUMPKIN_RAMP = [
+  "#FFD08A",
+  "#FFA53D",
+  "#F27B13",
+  "#C4570A",
+  "#7A3307",
+  "#2B1405",
+] as const;
+
+/**
  * Gold ramp for Good ol' George, the rich (and slightly sleazy) merchant NPC.
  * Like VOID_RAMP it is not built around a CREATURE_PALETTE hue and no item
  * grants it: polished highlights down to a deep bronze, so he reads as

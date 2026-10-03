@@ -25,6 +25,12 @@ const WEARABLE_OPTIONS = [
   "pearl-necklace",
   "bowtie",
   "boombox",
+  "witch-hat",
+  "fangs",
+  "pumpkin-spice",
+  "jack-o-lantern",
+  "ghost",
+  "blood-moon",
 ];
 
 const DEFAULT_USER = "sandbox-user";
