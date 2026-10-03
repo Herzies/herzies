@@ -1,7 +1,7 @@
 /**
  * Background scenery renderer for Herzie3D.
  *
- * Sky (9 rows): clouds by day, stars by night, or the Blood Moon (Halloween):
+ * Sky (18 rows): clouds by day, stars by night, or the Blood Moon (Halloween):
  * stars plus a big moon with bats flitting across it. Anchored to window top.
  */
 
@@ -10,7 +10,10 @@ import { mulberry32, simpleHash } from "./creature-renderer.js";
 const SKY_COLOR = "#8899aa";
 const BRIGHT_STAR_COLOR = "#ccddee";
 
-const SKY_ROWS = 9;
+const SKY_ROWS = 18;
+/** Clouds and stars were tuned for a 9-row sky; their counts scale with it
+ * so a taller sky isn't sparser. */
+const SKY_DENSITY = SKY_ROWS / 9;
 
 const CLOUD_CHARS = [".", "-", "~", ".", "~"];
 
@@ -31,7 +34,7 @@ interface Star {
 }
 
 function generateClouds(rng: () => number): Cloud[] {
-  const count = 3 + Math.floor(rng() * 2);
+  const count = Math.round((3 + Math.floor(rng() * 2)) * SKY_DENSITY);
   const clouds: Cloud[] = [];
   for (let i = 0; i < count; i++) {
     const row = Math.floor(rng() * SKY_ROWS);
@@ -52,8 +55,8 @@ function generateClouds(rng: () => number): Cloud[] {
 
 function generateStars(rng: () => number): Star[] {
   const stars: Star[] = [];
-  const count = 15 + Math.floor(rng() * 6);
-  const extraCount = 4 + Math.floor(rng() * 3);
+  const count = Math.round((15 + Math.floor(rng() * 6)) * SKY_DENSITY);
+  const extraCount = Math.round((4 + Math.floor(rng() * 3)) * SKY_DENSITY);
   const totalCount = count + extraCount;
 
   for (let i = 0; i < totalCount; i++) {

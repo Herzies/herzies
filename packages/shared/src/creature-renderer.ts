@@ -1362,16 +1362,9 @@ function buildSpiritOrbSpheres(
 ): Sphere[] {
   if (spheres.length === 0) return [];
 
-  // Floats roughly level with the herzie's vertical midpoint rather than
-  // resting on the ground like the boombox — reads as a hovering companion,
-  // not a prop sitting at its feet.
-  let minY = Infinity;
-  let maxY = -Infinity;
-  for (const s of spheres) {
-    minY = Math.min(minY, s.center[1] - s.radius);
-    maxY = Math.max(maxY, s.center[1] + s.radius);
-  }
-  const midY = (minY + maxY) / 2;
+  // Hovers a fixed height above the floor (see PET_HOVER_HEIGHT), so it
+  // stays put whatever the herzie's size or stage.
+  const midY = petHoverY(spheres);
 
   const bodyColor = "#c9b8ff";
   const eyeColor = "#1a1a2e";
@@ -1442,15 +1435,17 @@ function placeFloatingPet(
   });
 }
 
-/** The herzie's vertical midpoint, where floating pets hover. */
-function creatureMidY(spheres: Sphere[]): number {
-  let minY = Infinity;
-  let maxY = -Infinity;
-  for (const s of spheres) {
-    minY = Math.min(minY, s.center[1] - s.radius);
-    maxY = Math.max(maxY, s.center[1] + s.radius);
-  }
-  return (minY + maxY) / 2;
+/** How high above the floor (the herzie's feet) floating pets hover, in the
+ * same fixed world units as the boombox — so a pet sits at the same height on
+ * a stage-1 herzie as a stage-3 one, rather than tracking its midpoint. */
+const PET_HOVER_HEIGHT = BOOMBOX_REF_HEIGHT * 0.6;
+
+/** Where a floating pet's centre goes: PET_HOVER_HEIGHT above the feet. */
+function petHoverY(spheres: Sphere[]): number {
+  let floor = -Infinity;
+  for (const s of spheres) floor = Math.max(floor, s.center[1] + s.radius);
+  // World +y points down the screen.
+  return floor - PET_HOVER_HEIGHT;
 }
 
 /** A carved pumpkin: a ribbed orange cluster with a green stem and a
@@ -1488,7 +1483,7 @@ function buildJackOLanternSpheres(
     const t = i / 4 - 0.5; // -0.5..0.5 across the grin
     face(t * R * 0.9, R * 0.28 + R * 0.12 * (1 - (2 * t) ** 2), R * 0.11);
   }
-  return placeFloatingPet(local, creatureMidY(spheres), R, cols, side, "pet");
+  return placeFloatingPet(local, petHoverY(spheres), R, cols, side, "pet");
 }
 
 /** A sheet ghost: a round head over a body that flares out to a wavy hem. */
@@ -1534,7 +1529,7 @@ function buildGhostSpheres(
     r: R * 0.1,
     color: "#1A1A2E",
   });
-  return placeFloatingPet(local, creatureMidY(spheres), R, cols, side, "pet");
+  return placeFloatingPet(local, petHoverY(spheres), R, cols, side, "pet");
 }
 
 /** Pointed witch hat: a brim, an orange band, and a cone of shrinking
