@@ -189,7 +189,7 @@ function DeckGroup({
  * columns, Modifiers (the longest run) across the bottom. */
 export function DeckOverlay(props: SlotHandlers) {
   return (
-    <div className="pointer-events-auto grid w-full grid-cols-2 gap-x-4 gap-y-3 pt-3">
+    <div className="pointer-events-auto grid w-full grid-cols-2 gap-x-4 gap-y-1.5 pt-1.5">
       {DECK_SLOT_ORDER.map((label) => (
         <DeckGroup
           key={label}
