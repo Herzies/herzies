@@ -499,8 +499,9 @@ function ItemGridCell({
   flying: boolean;
   equipped: Equipped;
   /** The tile is the exact copy that was clicked — there is no "which of the
-   * identical cards" to work out — so no slot index has to be threaded through. */
-  onPlace: () => void;
+   * identical cards" to work out — so no slot index has to be threaded through.
+   * `inspect`: Shift was held — open Inspect instead. */
+  onPlace: (inspect: boolean) => void;
   /** Right-click: the tile's menu (Inspect, and Sell where it sells). */
   onMenuRequest: (x: number, y: number) => void;
   onDragPointerDown: (index: number, e: React.PointerEvent) => void;
@@ -523,7 +524,7 @@ function ItemGridCell({
         data-slot-index={index}
         {...{ [TILE_UNITS_ATTR]: unitIds.join(" ") }}
         onPointerDown={(e) => onDragPointerDown(index, e)}
-        onClick={onPlace}
+        onClick={(e) => onPlace(e.shiftKey)}
         onContextMenu={(e) => {
           e.preventDefault();
           onMenuRequest(e.clientX, e.clientY);
@@ -707,6 +708,13 @@ export function InventoryView({
    * selector), so the card grows out of that icon and shrinks back into it —
    * wherever the copy is by then. */
   const [inspectOrigin, setInspectOrigin] = useState<string | null>(null);
+  /** Opens Inspect on one copy, growing the card out of that copy's icon in
+   * the bag or the deck (wherever it is). */
+  const openInspect = (itemId: string, unitId: string) => {
+    setInspectItem(itemId);
+    setInspectUnitId(unitId);
+    setInspectOrigin(`${toBank(unitId)}, ${toDeck(unitId)}`);
+  };
   /** Sell popover and the tile menu, anchored where the right-click was. They name the TILE
    * (which is what says exactly which copies), not an item id. */
   const [sellBox, setSellBox] = useState<{
@@ -1481,9 +1489,15 @@ export function InventoryView({
   // can only mean "place this copy". If another copy of the same item is
   // already worn that's a swap — the worn one comes off, this one goes on — so
   // a +3 can replace a plain one just by clicking it.
-  const handleGridClick = (tile: BankTile) => {
+  const handleGridClick = (tile: BankTile, inspect = false) => {
     if (suppressClickRef.current) {
       suppressClickRef.current = false;
+      return;
+    }
+    // Shift+click: Inspect, the same as the tile menu's.
+    if (inspect) {
+      window.getSelection()?.removeAllRanges(); // Shift+click extends one
+      openInspect(tile.itemId, tile.unitIds[0]);
       return;
     }
     const def = getItem(tile.itemId);
@@ -1944,7 +1958,7 @@ export function InventoryView({
                           flyingUnitIds.has(id),
                         )}
                         equipped={equipped}
-                        onPlace={() => handleGridClick(tile)}
+                        onPlace={(inspect) => handleGridClick(tile, inspect)}
                         onMenuRequest={(x, y) =>
                           setTileMenu({ tileKey: tile.key, x, y })
                         }
@@ -2043,9 +2057,7 @@ export function InventoryView({
                 {
                   label: "Inspect",
                   onClick: () => {
-                    setInspectItem(unit.itemId);
-                    setInspectUnitId(unit.id);
-                    setInspectOrigin(`${toDeck(unit.id)}, ${toBank(unit.id)}`);
+                    openInspect(unit.itemId, unit.id);
                     setDeckMenu(null);
                   },
                 },
@@ -2084,11 +2096,7 @@ export function InventoryView({
                 {
                   label: "Inspect",
                   onClick: () => {
-                    setInspectItem(tile.itemId);
-                    setInspectUnitId(tile.unitIds[0]);
-                    setInspectOrigin(
-                      `${toBank(tile.unitIds[0])}, ${toDeck(tile.unitIds[0])}`,
-                    );
+                    openInspect(tile.itemId, tile.unitIds[0]);
                     setTileMenu(null);
                   },
                 },
