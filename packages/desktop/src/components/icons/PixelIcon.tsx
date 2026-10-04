@@ -1,6 +1,6 @@
 import { type CSSProperties, useId } from "react";
 
-/** Renders a square bitmap (24x24 for items) as crisp SVG rects — one `<rect>` per horizontal
+/** Renders a bitmap (24x24 for icons, 32x24 for card artwork) as crisp SVG rects — one `<rect>` per horizontal
  * run of same-character cells. Shared by the item-type and currency pixel
  * icons so each icon set only has to describe its grid, not the rasterizer.
  *
@@ -55,6 +55,7 @@ export function PixelIcon({
   });
 
   const gradientId = useId();
+  const width = grid[0]?.length ?? grid.length;
   const stops = gradient ?? tint;
 
   // `painted`: each run in its palette colour; otherwise every run takes the
@@ -73,8 +74,8 @@ export function PixelIcon({
 
   return (
     <svg
-      // Square, sized by the grid (24 for items and visitor portraits).
-      viewBox={`0 0 ${grid.length} ${grid.length}`}
+      // Sized by the grid (24x24 for icons and visitor portraits).
+      viewBox={`0 0 ${width} ${grid.length}`}
       shapeRendering="crispEdges"
       fill={stops ? `url(#${gradientId})` : "currentColor"}
       aria-hidden="true"
@@ -100,7 +101,7 @@ export function PixelIcon({
             gradientUnits="userSpaceOnUse"
             x1="0"
             y1="0"
-            x2={grid.length}
+            x2={width}
             y2={grid.length}
           >
             {stops.map((color, i) => (

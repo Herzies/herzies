@@ -9,6 +9,11 @@
 //   (an index into `palette`) — a per-pixel paint job, not one solid tint
 //   (see ItemTypeIcon.tsx). N is 24, for items and Town's visitor portraits
 //   (see VisitorIcon.tsx) alike.
+// - Card artwork: the pixel picture in a card's art window when it has no
+//   uploaded illustration — 32x24 (4:3), same dialect as the icons, in
+//   ../../src/components/icons/item-artwork-grids.json. An item without an
+//   entry derives it from its icon (artwork-from-icon.ts, which the page
+//   loads too), so it only gets an entry once it's edited on its own.
 // - Card illustrations: the art on an item's collector card (see
 //   ItemCardArt.tsx). The artist's original is kept untouched in
 //   ../../art-sources/card-art/ (outside src/, so it is never bundled); the
@@ -25,6 +30,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
+import { stripTypeScriptTypes } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -34,12 +40,24 @@ import {
   getItemType,
   ITEMS,
 } from "@herzies/shared";
+import {
+  ARTWORK_H,
+  ARTWORK_W,
+} from "../../src/components/icons/artwork-from-icon.ts";
 import { TYPE_ICON_GRIDS } from "../../src/components/icons/type-icon-grids.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const GRIDS_PATH = resolve(
   __dirname,
   "../../src/components/icons/item-icon-grids.json",
+);
+const ARTWORK_PATH = resolve(
+  __dirname,
+  "../../src/components/icons/item-artwork-grids.json",
+);
+const ARTWORK_LIB_PATH = resolve(
+  __dirname,
+  "../../src/components/icons/artwork-from-icon.ts",
 );
 const CARD_ART_DIR = resolve(__dirname, "../../src/assets/card-art");
 const CARD_ART_MANIFEST = resolve(CARD_ART_DIR, "card-art.json");
@@ -169,6 +187,14 @@ const EXTRA_ICONS = [
   },
 ];
 
+function readArtwork() {
+  return JSON.parse(readFileSync(ARTWORK_PATH, "utf8"));
+}
+
+function writeArtwork(artwork) {
+  writeFileSync(ARTWORK_PATH, `${JSON.stringify(artwork, null, 2)}\n`);
+}
+
 function readGrids() {
   return JSON.parse(readFileSync(GRIDS_PATH, "utf8"));
 }
@@ -198,16 +224,16 @@ function isValidPalette(palette) {
   );
 }
 
-// `size` is the stored icon's side length: an edit can repaint an icon but
-// never resize it.
-function isValidGrid(grid, paletteLength, size) {
+// `width` x `height` is the stored grid's size: an edit can repaint an icon
+// but never resize it.
+function isValidGrid(grid, paletteLength, width, height = width) {
   return (
     Array.isArray(grid) &&
-    grid.length === size &&
+    grid.length === height &&
     grid.every(
       (row) =>
         typeof row === "string" &&
-        row.length === size &&
+        row.length === width &&
         /^[.0-9a-f]+$/i.test(row) &&
         [...row].every((ch) => ch === "." || parseInt(ch, 16) < paletteLength),
     )
@@ -222,6 +248,58 @@ function sendJson(res, status, body) {
 const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://${req.headers.host}`);
+
+    // The artwork derivation, for the page: the same module the app and this
+    // server use, with its types stripped.
+    if (req.method === "GET" && url.pathname === "/lib/artwork-from-icon.js") {
+      res.writeHead(200, {
+        "Content-Type": "text/javascript; charset=utf-8",
+        "Cache-Control": "no-store",
+      });
+      res.end(stripTypeScriptTypes(readFileSync(ARTWORK_LIB_PATH, "utf8")));
+      return;
+    }
+
+    if (url.pathname.startsWith("/api/artwork/")) {
+      const id = decodeURIComponent(url.pathname.slice("/api/artwork/".length));
+      if (!ITEMS.some((item) => item.id === id)) {
+        sendJson(res, 404, { error: `Unknown item id: ${id}` });
+        return;
+      }
+      const artwork = readArtwork();
+      if (req.method === "POST") {
+        let payload;
+        try {
+          payload = JSON.parse((await readBody(req, 256 * 1024))?.toString("utf8") ?? "");
+        } catch {
+          sendJson(res, 400, { error: "Invalid JSON body" });
+          return;
+        }
+        if (!isValidPalette(payload.palette)) {
+          sendJson(res, 400, {
+            error: "palette must be 1-16 '#rrggbb' hex colours",
+          });
+          return;
+        }
+        if (!isValidGrid(payload.grid, payload.palette.length, ARTWORK_W, ARTWORK_H)) {
+          sendJson(res, 400, {
+            error: `grid must be ${ARTWORK_H} rows of exactly ${ARTWORK_W} '.'/'0'-'9'/'a'-'f' characters, each index within the palette`,
+          });
+          return;
+        }
+        artwork[id] = { palette: payload.palette, grid: payload.grid };
+        writeArtwork(artwork);
+        sendJson(res, 200, { ok: true });
+        return;
+      }
+      // Back to deriving it from the icon.
+      if (req.method === "DELETE") {
+        delete artwork[id];
+        writeArtwork(artwork);
+        sendJson(res, 200, { ok: true });
+        return;
+      }
+    }
 
     if (req.method === "GET" && url.pathname === "/") {
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
@@ -260,7 +338,14 @@ const server = createServer(async (req, res) => {
       items.push(...EXTRA_ICONS.filter((extra) => stored[extra.id]));
       // Only catalog items have a card, so only they take an illustration.
       adoptLegacyCardArt();
-      sendJson(res, 200, { items, grids, cardArt: readCardArt() });
+      sendJson(res, 200, {
+        items,
+        grids,
+        // Only hand-edited artwork; the page derives the rest from the icon
+        // as it's painted.
+        artwork: readArtwork(),
+        cardArt: readCardArt(),
+      });
       return;
     }
 

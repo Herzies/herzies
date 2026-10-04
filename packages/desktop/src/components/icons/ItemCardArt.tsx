@@ -1,7 +1,14 @@
-import type { ItemDef } from "@herzies/shared";
+import {
+  getItemColor,
+  getItemIconGradient,
+  type ItemDef,
+} from "@herzies/shared";
 import rawCardArt from "../../assets/card-art/card-art.json";
 import { cn } from "../../lib/utils";
-import { ItemTypeIcon } from "./ItemTypeIcon";
+import { artworkFromIcon } from "./artwork-from-icon";
+import { getItemIcon } from "./ItemTypeIcon";
+import rawArtworkGrids from "./item-artwork-grids.json";
+import { PixelIcon } from "./PixelIcon";
 
 /** Commissioned card illustrations, keyed by item id — managed in the item
  * editor (`pnpm item-editor`). `file` is the finished 4:3 image next to
@@ -32,9 +39,29 @@ export function getCardIllustration(
   return url ? { url, artist: entry.artist } : undefined;
 }
 
-/** The card's 4:3 art window content: the item's illustration, or — for any
- * item without one — its pixel icon, square at the window's full height and
- * centred (crispEdges keeps it sharp), exactly as it looks elsewhere. */
+/** Hand-edited pixel artwork, keyed by item id (32x24, the icon's
+ * `{ palette, grid }` dialect) — painted in the item editor's Artwork tab.
+ * An item without an entry derives its artwork from its icon instead (see
+ * artworkFromIcon), so icon edits keep flowing through until the artwork is
+ * edited on its own. */
+const ARTWORK_GRIDS: Partial<
+  Record<string, { grid: string[]; palette: string[] }>
+> = rawArtworkGrids;
+
+/** The item's pixel artwork: its own, or derived from its icon. */
+export function getItemArtwork(item: ItemDef): {
+  grid: string[];
+  palette?: readonly string[];
+} {
+  const own = ARTWORK_GRIDS[item.id];
+  if (own) return own;
+  const icon = getItemIcon(item);
+  return { grid: artworkFromIcon(icon.grid), palette: icon.palette };
+}
+
+/** The card's 4:3 art window content: the item's uploaded illustration, or
+ * its pixel artwork (32x24, at 6x — crispEdges keeps it sharp), coloured
+ * exactly as the item's icon is (a set's gradient tints it too). */
 export function ItemCardArt({
   item,
   className,
@@ -44,10 +71,22 @@ export function ItemCardArt({
 }) {
   const art = getCardIllustration(item.id);
   if (!art) {
+    const { grid, palette } = getItemArtwork(item);
+    const gradient = getItemIconGradient(item.id);
     return (
-      <div className={cn("flex justify-center", className)}>
-        <ItemTypeIcon item={item} className="aspect-square h-full" />
-      </div>
+      <PixelIcon
+        grid={grid}
+        palette={palette}
+        className={className}
+        {...(gradient
+          ? palette
+            ? { tint: gradient }
+            : { gradient }
+          : palette
+            ? {}
+            : // The generic type icon's solid fill, as on the icon.
+              { style: { color: getItemColor(item) } })}
+      />
     );
   }
   return (

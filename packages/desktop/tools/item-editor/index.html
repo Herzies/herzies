@@ -262,7 +262,7 @@
   button.action.small { padding: 4px 10px; font-size: 12px; }
   #art-form button:disabled, #art-form input:disabled { opacity: 0.4; cursor: not-allowed; }
   #art-info { color: #8b8fa3; font-size: 12px; line-height: 1.5; }
-  #art-info .warn { color: #e0b84d; }
+  #art-info .warn, .hint .warn { color: #e0b84d; }
   #art-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   #art-status { color: #8b8fa3; font-size: 12px; }
   #art-status.saved { color: #57c785; }
@@ -281,11 +281,12 @@
 
     <div id="tabs">
       <button type="button" data-tab="icon" class="active">Icon</button>
+      <button type="button" data-tab="artwork">Card artwork</button>
       <button type="button" data-tab="art">Card illustration</button>
     </div>
 
     <section id="icon-panel">
-    <div class="hint">Click, or click-drag, to paint pixels with the selected colour below.</div>
+    <div class="hint"><span id="pixel-hint"></span><br>Click, or click-drag, to paint pixels with the selected colour below.</div>
 
     <div id="editor">
       <div id="big-grid"></div>
@@ -313,6 +314,7 @@
     <div id="controls">
       <button class="action primary" id="save-btn">Save to file</button>
       <button class="action" id="revert-btn">Revert</button>
+      <button class="action" id="reset-artwork-btn" type="button" hidden>Reset to icon</button>
       <span id="status"></span>
     </div>
     </section>
@@ -320,7 +322,7 @@
     <section id="art-panel" hidden>
       <div class="hint">
         The art on this item's collector card. Without one, the card shows the
-        icon. Upload the artist's original (PNG, JPEG, WebP, GIF or AVIF, up to
+        pixel artwork. Upload the artist's original (PNG, JPEG, WebP, GIF or AVIF, up to
         10&nbsp;MB, ideally 768&times;576&nbsp;px or more). The card shows it 4:3
         landscape. It's kept
         untouched; frame and filter it here, then save the card image.
@@ -385,17 +387,35 @@ const MAX_PALETTE = 16;
 
 const state = {
   items: [],
-  grids: {}, // id -> { grid, palette }, last-saved (or loaded) state
+  grids: {}, // id -> { grid, palette }, last-saved (or loaded) icons
+  artwork: {}, // id -> { grid, palette }, hand-edited card artwork only
   cardArt: {}, // id -> card-art.json entry ({ file, source, crop, filter, artist?, pixelated? })
-  tab: "icon", // "icon" | "art"
+  tab: "icon", // "icon" | "artwork" | "art"
   artDirty: false, // unsaved framing / filter / credit edits
   selectedId: null,
-  currentGrid: null, // N rows of N, '.' or a hex digit indexing currentPalette
-  currentPalette: null, // hex colours, index-addressable by that digit
+  // The two pixel grids of the selected item, each edited in the same
+  // painter: its 24x24 icon and its 32x24 card artwork. `derived` artwork
+  // is computed from the icon (artworkFromIcon) and follows it until it's
+  // saved as its own.
+  buffers: { icon: null, artwork: null }, // { grid, palette, dirty, derived? }
+  pixelMode: "icon", // which buffer the painter is on
   paintColor: "#ffffff",
   eraseMode: false,
-  dirty: false,
 };
+// The painter works on "the current grid"; these point it at whichever
+// buffer is being edited.
+for (const key of ["grid", "palette", "dirty"]) {
+  const prop = { grid: "currentGrid", palette: "currentPalette", dirty: "dirty" }[key];
+  Object.defineProperty(state, prop, {
+    get: () => state.buffers[state.pixelMode]?.[key] ?? null,
+    set: (value) => {
+      state.buffers[state.pixelMode][key] = value;
+    },
+  });
+}
+
+// Loaded from the server: the same module the app derives artwork with.
+let artworkLib = null;
 
 const bigGridEl = document.getElementById("big-grid");
 const sidebarListEl = document.getElementById("sidebar-list");
@@ -406,12 +426,19 @@ const useAutoBtn = document.getElementById("use-auto-btn");
 const eraserBtn = document.getElementById("eraser-btn");
 const paintHintEl = document.getElementById("paint-hint");
 const paletteSwatchesEl = document.getElementById("palette-swatches");
+const pixelHintEl = document.getElementById("pixel-hint");
+const resetArtworkBtn = document.getElementById("reset-artwork-btn");
 
 async function load() {
-  const res = await fetch("/api/icons");
+  const [res, lib] = await Promise.all([
+    fetch("/api/icons"),
+    import("/lib/artwork-from-icon.js"),
+  ]);
+  artworkLib = lib;
   const data = await res.json();
   state.items = data.items;
   state.grids = data.grids;
+  state.artwork = data.artwork ?? {};
   state.cardArt = data.cardArt;
   renderSidebar();
   if (state.items.length > 0) selectItem(state.items[0].id);
@@ -421,10 +448,10 @@ function itemById(id) {
   return state.items.find((item) => item.id === id);
 }
 
-// An icon's side length: its grid is square, 24 for items and Town's
-// visitor portraits.
-function sizeFor(grid) {
-  return grid.length;
+// A grid's size: 24x24 for icons and Town's visitor portraits, 32x24 for
+// card artwork.
+function dims(grid) {
+  return { w: grid[0]?.length ?? 0, h: grid.length };
 }
 
 function colorForChar(ch, palette) {
@@ -432,8 +459,8 @@ function colorForChar(ch, palette) {
   return palette[parseInt(ch, 16)] ?? "#ff00ff";
 }
 
-function buildGradient(ctx, stops, n) {
-  const gradient = ctx.createLinearGradient(0, 0, n, n);
+function buildGradient(ctx, stops, w, h) {
+  const gradient = ctx.createLinearGradient(0, 0, w, h);
   const denom = stops.length > 1 ? stops.length - 1 : 1;
   stops.forEach((color, i) => gradient.addColorStop(i / denom, color));
   return gradient;
@@ -445,22 +472,22 @@ function buildGradient(ctx, stops, n) {
 // `tint`), so the preview shows that too, while the big grid below still
 // paints (and saves) the real per-pixel colours.
 function drawGrid(canvas, grid, palette, item) {
-  const n = sizeFor(grid);
-  canvas.width = n;
-  canvas.height = n;
+  const { w, h } = dims(grid);
+  canvas.width = w;
+  canvas.height = h;
   const ctx = canvas.getContext("2d");
-  ctx.clearRect(0, 0, n, n);
+  ctx.clearRect(0, 0, w, h);
   if (item.gradient && item.gradient.length > 0) {
-    ctx.fillStyle = buildGradient(ctx, item.gradient, n);
-    for (let y = 0; y < n; y++) {
-      for (let x = 0; x < n; x++) {
+    ctx.fillStyle = buildGradient(ctx, item.gradient, w, h);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
         if (grid[y][x] !== ".") ctx.fillRect(x, y, 1, 1);
       }
     }
     ctx.globalCompositeOperation = "luminosity";
   }
-  for (let y = 0; y < n; y++) {
-    for (let x = 0; x < n; x++) {
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
       const color = colorForChar(grid[y][x], palette);
       if (!color) continue;
       ctx.fillStyle = color;
@@ -506,31 +533,60 @@ function updateSelectedRowStyles() {
   }
 }
 
+/** The artwork buffer for the selected item: its saved artwork, or — not
+ * saved yet — derived from the icon buffer as it currently stands. */
+function artworkBuffer(id) {
+  const saved = state.artwork[id];
+  if (saved) {
+    return { grid: [...saved.grid], palette: [...saved.palette], dirty: false, derived: false };
+  }
+  const icon = state.buffers.icon;
+  return {
+    grid: artworkLib.artworkFromIcon(icon.grid),
+    palette: [...icon.palette],
+    dirty: false,
+    derived: true,
+  };
+}
+
 function selectItem(id) {
-  if (state.dirty && !confirm("Discard unsaved changes to this icon?")) return;
+  if (state.buffers.icon?.dirty && !confirm("Discard unsaved changes to this icon?")) return;
+  if (state.buffers.artwork?.dirty && !confirm("Discard unsaved changes to this artwork?")) return;
   if (state.artDirty && !confirm("Discard unsaved changes to this card illustration?")) return;
   const stored = state.grids[id];
   state.selectedId = id;
-  state.currentGrid = [...stored.grid];
-  state.currentPalette = [...stored.palette];
-  state.paintColor = stored.palette[0] ?? itemById(id).autoColor;
+  state.buffers.icon = { grid: [...stored.grid], palette: [...stored.palette], dirty: false };
+  const hasCard = itemById(id).isItem;
+  state.buffers.artwork = hasCard ? artworkBuffer(id) : null;
   state.eraseMode = false;
-  state.dirty = false;
   updateSelectedRowStyles();
   titleEl.textContent = itemById(id).name;
-  renderBigGrid();
-  renderPreview();
-  renderPaletteSwatches();
-  updatePaintControls();
   setStatus("");
   state.artDirty = false;
   // Only catalog items have a card (not the store's Bigger Bag or Town's
   // portraits, which share the icon file).
-  const hasCard = itemById(id).isItem;
-  artTabBtn.disabled = !hasCard;
+  artTabBtn.disabled = artworkTabBtn.disabled = !hasCard;
   showTab(hasCard ? state.tab : "icon");
   renderArtPanel();
   setArtStatus("");
+}
+
+/** Points the painter at the icon or the artwork and redraws it. */
+function setPixelMode(mode) {
+  state.pixelMode = mode;
+  const buffer = state.buffers[mode];
+  // Derived artwork follows the icon until it's edited: pick up any icon
+  // painting done since.
+  if (mode === "artwork" && buffer.derived && !buffer.dirty) {
+    state.buffers.artwork = artworkBuffer(state.selectedId);
+  }
+  state.paintColor = state.currentPalette[0] ?? itemById(state.selectedId).autoColor;
+  state.eraseMode = false;
+  renderBigGrid();
+  renderPreview();
+  renderPaletteSwatches();
+  updatePaintControls();
+  setStatus(state.dirty ? "Unsaved changes" : "", state.dirty ? "dirty" : "");
 }
 
 function updatePaintControls() {
@@ -542,6 +598,22 @@ function updatePaintControls() {
     item.gradient && item.gradient.length > 0
       ? "This item is in a set with a shared gradient — the app tints it with that, keeping only the lightness of what you paint here."
       : "";
+  const artwork = state.pixelMode === "artwork";
+  resetArtworkBtn.hidden = !artwork;
+  if (!artwork) {
+    pixelHintEl.textContent = "The item's icon: bag tiles, deck boxes, the store, and everywhere else at 24px.";
+    return;
+  }
+  const buffer = state.buffers.artwork;
+  resetArtworkBtn.disabled = buffer.derived && !buffer.dirty;
+  const notes = [
+    buffer.derived
+      ? "The card's artwork, made from the icon with its frame removed. It follows the icon until you save it here."
+      : "The card's artwork, edited on its own. Reset to icon to make it follow the icon again.",
+  ];
+  if (state.cardArt[item.id]?.file)
+    notes.push('<span class="warn">This card shows its uploaded illustration instead; the artwork only shows without one.</span>');
+  pixelHintEl.innerHTML = notes.join("<br>");
 }
 
 function renderPaletteSwatches() {
@@ -567,14 +639,14 @@ function renderPaletteSwatches() {
 }
 
 function renderBigGrid() {
-  const n = sizeFor(state.currentGrid);
-  // Bigger grids get smaller cells so the editor stays about the same size.
-  const cellPx = n > 16 ? 20 : 28;
-  bigGridEl.style.gridTemplateColumns = `repeat(${n}, ${cellPx}px)`;
-  bigGridEl.style.gridTemplateRows = `repeat(${n}, ${cellPx}px)`;
+  const { w, h } = dims(state.currentGrid);
+  // Wider grids get smaller cells so the editor stays about the same size.
+  const cellPx = w > 24 ? 16 : w > 16 ? 20 : 28;
+  bigGridEl.style.gridTemplateColumns = `repeat(${w}, ${cellPx}px)`;
+  bigGridEl.style.gridTemplateRows = `repeat(${h}, ${cellPx}px)`;
   bigGridEl.innerHTML = "";
-  for (let y = 0; y < n; y++) {
-    for (let x = 0; x < n; x++) {
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
       const cell = document.createElement("div");
       cell.className = "cell";
       cell.style.width = `${cellPx}px`;
@@ -590,17 +662,25 @@ function renderBigGrid() {
 
 function renderPreview() {
   const item = itemById(state.selectedId);
-  const n = sizeFor(state.currentGrid);
+  const { w, h } = dims(state.currentGrid);
+  const artwork = state.pixelMode === "artwork";
+  // The artwork's big preview is the card's 192x144 art window (6x).
+  const scale = artwork ? 6 : 4;
   const actual = document.getElementById("preview-canvas");
   const big = document.getElementById("preview-canvas-4x");
-  actual.style.width = actual.style.height = `${n}px`;
-  big.style.width = big.style.height = `${n * 4}px`;
-  document.getElementById("preview-label").innerHTML =
-    `Actual size<br>(${n}×${n}, as shown in the app)`;
-  drawGrid(document.getElementById("preview-canvas"), state.currentGrid, state.currentPalette, item);
-  drawGrid(document.getElementById("preview-canvas-4x"), state.currentGrid, state.currentPalette, item);
-  const thumb = sidebarListEl.querySelector(`.item-row[data-id="${state.selectedId}"] canvas`);
-  if (thumb) drawGrid(thumb, state.currentGrid, state.currentPalette, item);
+  actual.style.width = `${w}px`;
+  actual.style.height = `${h}px`;
+  big.style.width = `${w * scale}px`;
+  big.style.height = `${h * scale}px`;
+  document.getElementById("preview-label").innerHTML = artwork
+    ? `Actual size (${w}×${h})<br>and as on the card, 6×`
+    : `Actual size<br>(${w}×${h}, as shown in the app)`;
+  drawGrid(actual, state.currentGrid, state.currentPalette, item);
+  drawGrid(big, state.currentGrid, state.currentPalette, item);
+  if (!artwork) {
+    const thumb = sidebarListEl.querySelector(`.item-row[data-id="${state.selectedId}"] canvas`);
+    if (thumb) drawGrid(thumb, state.currentGrid, state.currentPalette, item);
+  }
 }
 
 // Returns the grid character to paint with right now (a palette digit, or
@@ -630,11 +710,12 @@ function setCell(x, y, value) {
   const row = state.currentGrid[y];
   if (row[x] === value) return;
   state.currentGrid[y] = row.slice(0, x) + value + row.slice(x + 1);
-  const idx = y * sizeFor(state.currentGrid) + x;
+  const idx = y * dims(state.currentGrid).w + x;
   const color = colorForChar(value, state.currentPalette);
   bigGridEl.children[idx].style.background = color ?? "#05060a";
   state.dirty = true;
   renderPreview();
+  updatePaintControls();
   setStatus("Unsaved changes", "dirty");
 }
 
@@ -688,25 +769,31 @@ function setStatus(text, kind) {
 
 document.getElementById("save-btn").addEventListener("click", async () => {
   if (!state.selectedId) return;
+  const id = state.selectedId;
+  const artwork = state.pixelMode === "artwork";
   setStatus("Saving...");
   try {
-    const res = await fetch(`/api/icons/${encodeURIComponent(state.selectedId)}`, {
+    const res = await fetch(`/api/${artwork ? "artwork" : "icons"}/${encodeURIComponent(id)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ grid: state.currentGrid, palette: state.currentPalette }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || res.statusText);
-    state.grids[state.selectedId] = {
-      grid: [...state.currentGrid],
-      palette: [...state.currentPalette],
-    };
+    const saved = { grid: [...state.currentGrid], palette: [...state.currentPalette] };
     state.dirty = false;
-    const saved = itemById(state.selectedId);
-    if (saved?.unpainted) {
-      saved.unpainted = false;
-      renderSidebar();
+    if (artwork) {
+      state.artwork[id] = saved;
+      state.buffers.artwork.derived = false;
+    } else {
+      state.grids[id] = saved;
+      const item = itemById(id);
+      if (item?.unpainted) {
+        item.unpainted = false;
+        renderSidebar();
+      }
     }
+    updatePaintControls();
     setStatus("Saved — the app will pick this up automatically", "saved");
   } catch (err) {
     setStatus(`Error: ${err.message}`, "error");
@@ -715,17 +802,34 @@ document.getElementById("save-btn").addEventListener("click", async () => {
 
 document.getElementById("revert-btn").addEventListener("click", () => {
   if (!state.selectedId) return;
-  const stored = state.grids[state.selectedId];
-  state.currentGrid = [...stored.grid];
-  state.currentPalette = [...stored.palette];
-  state.paintColor = stored.palette[0] ?? itemById(state.selectedId).autoColor;
-  state.eraseMode = false;
-  state.dirty = false;
-  renderBigGrid();
-  renderPreview();
-  renderPaletteSwatches();
-  updatePaintControls();
-  setStatus("");
+  const id = state.selectedId;
+  if (state.pixelMode === "artwork") {
+    state.buffers.artwork = artworkBuffer(id);
+  } else {
+    const stored = state.grids[id];
+    state.buffers.icon = { grid: [...stored.grid], palette: [...stored.palette], dirty: false };
+  }
+  setPixelMode(state.pixelMode);
+});
+
+// Drops the artwork's own edits: it goes back to being made from the icon.
+resetArtworkBtn.addEventListener("click", async () => {
+  const id = state.selectedId;
+  if (state.artwork[id]) {
+    if (!confirm("Delete this card's own artwork and go back to making it from the icon?")) return;
+    try {
+      const res = await fetch(`/api/artwork/${encodeURIComponent(id)}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || res.statusText);
+      delete state.artwork[id];
+    } catch (err) {
+      setStatus(`Error: ${err.message}`, "error");
+      return;
+    }
+  }
+  state.buffers.artwork = artworkBuffer(id);
+  setPixelMode("artwork");
+  setStatus("Back to the icon's artwork — the app will pick this up automatically", "saved");
 });
 
 // --- Card illustration ---
@@ -745,6 +849,7 @@ const MAX_ZOOM = 8;
 const iconPanelEl = document.getElementById("icon-panel");
 const artPanelEl = document.getElementById("art-panel");
 const artTabBtn = document.querySelector('#tabs button[data-tab="art"]');
+const artworkTabBtn = document.querySelector('#tabs button[data-tab="artwork"]');
 const artCanvasActual = document.getElementById("art-canvas-actual");
 const artCanvasBig = document.getElementById("art-canvas-big");
 const artDropEl = document.getElementById("art-drop");
@@ -786,8 +891,10 @@ function settingsFromEntry(entry) {
 
 function showTab(tab) {
   state.tab = tab;
-  iconPanelEl.hidden = tab !== "icon";
+  // The icon and the artwork share one painter.
+  iconPanelEl.hidden = tab === "art";
   artPanelEl.hidden = tab !== "art";
+  if (tab !== "art") setPixelMode(tab);
   for (const btn of document.querySelectorAll("#tabs button")) {
     btn.classList.toggle("active", btn.dataset.tab === tab);
   }
@@ -920,14 +1027,16 @@ function drawPreviews() {
   }
   artCanvasBig.classList.toggle("empty", !art.source);
   if (!art.source) {
-    const icon = document.createElement("canvas");
-    drawGrid(icon, state.currentGrid, state.currentPalette, item);
+    // No illustration: the card shows its pixel artwork (as it stands in
+    // the Card artwork tab, following any icon painting if it's derived).
+    let buffer = state.buffers.artwork;
+    if (buffer.derived && !buffer.dirty) buffer = state.buffers.artwork = artworkBuffer(item.id);
+    const pixels = document.createElement("canvas");
+    drawGrid(pixels, buffer.grid, buffer.palette, item);
     for (const canvas of [artCanvasActual, artCanvasBig]) {
       const ctx = canvas.getContext("2d");
       ctx.imageSmoothingEnabled = false;
-      // Square icon, full height and centred, as the card shows it.
-      const side = canvas.height;
-      ctx.drawImage(icon, (canvas.width - side) / 2, 0, side, side);
+      ctx.drawImage(pixels, 0, 0, canvas.width, canvas.height);
     }
     return;
   }
@@ -955,7 +1064,7 @@ function syncArtControls() {
     ? "Drop a new original here, or click to replace it"
     : "Drop an image here, or click to choose one";
   if (!has) {
-    artInfoEl.textContent = "No illustration yet: the card shows the icon.";
+    artInfoEl.textContent = "No illustration: the card shows its pixel artwork (Card artwork tab).";
     artZoomEl.value = 100;
     artZoomValueEl.textContent = "100%";
     artDetailRowEl.style.visibility = "hidden";
@@ -1189,7 +1298,7 @@ artRemoveBtn.addEventListener("click", async () => {
     art.source = null;
     renderSidebar();
     await renderArtPanel();
-    setArtStatus("Removed: the card shows the icon again", "saved");
+    setArtStatus("Removed: the card shows its pixel artwork again", "saved");
   } catch (err) {
     setArtStatus(`Error: ${err.message}`, "error");
   }

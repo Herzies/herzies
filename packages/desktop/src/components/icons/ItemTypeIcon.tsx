@@ -45,6 +45,15 @@ export function GenericTypeIcon({
   return <PixelIcon grid={GRIDS[type]} className={className} />;
 }
 
+/** The grid an item's icon is drawn from: its bespoke paletted one, or —
+ * until it has one — the generic type icon (no palette: one solid fill). */
+export function getItemIcon(item: ItemDef): {
+  grid: string[];
+  palette?: readonly string[];
+} {
+  return ITEM_ICON_GRIDS[item.id] ?? { grid: GRIDS[getItemType(item)] };
+}
+
 export function ItemTypeIcon({
   item,
   className,
