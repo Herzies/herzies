@@ -97,8 +97,8 @@
   }
   /* A second, larger copy of the same buffer — same pixels, easier to
      glance at without losing the true-size one above it. Both are sized
-     per icon in JS (see sizeFor): most icons are 16x16, Town's visitor
-     portraits 24x24. */
+     per icon in JS (see sizeFor): every icon is 24x24 now, items and
+     Town's visitor portraits alike. */
   #preview-canvas-4x {
     image-rendering: pixelated;
     background: #05060a;
@@ -181,8 +181,8 @@
 
       <div id="preview-column">
         <div class="label" id="preview-label">Actual size</div>
-        <canvas id="preview-canvas" width="16" height="16"></canvas>
-        <canvas id="preview-canvas-4x" width="16" height="16"></canvas>
+        <canvas id="preview-canvas" width="24" height="24"></canvas>
+        <canvas id="preview-canvas-4x" width="24" height="24"></canvas>
       </div>
     </div>
 
@@ -243,7 +243,7 @@ function itemById(id) {
   return state.items.find((item) => item.id === id);
 }
 
-// An icon's side length: its grid is square, 16 for items, 24 for Town's
+// An icon's side length: its grid is square, 24 for items and Town's
 // visitor portraits.
 function sizeFor(grid) {
   return grid.length;
@@ -262,9 +262,10 @@ function buildGradient(ctx, stops, n) {
 }
 
 // `item` only contributes `.gradient` here — a set's shared visual clue
-// (e.g. Prismatic's rainbow) overrides this icon's own painted colours in
-// the real app, so the preview shows that too, even though the big grid
-// below still lets you paint (and save) the real per-pixel colours.
+// (e.g. Prismatic's rainbow) tints this icon in the real app: the
+// gradient's hue with each painted pixel's own lightness (PixelIcon's
+// `tint`), so the preview shows that too, while the big grid below still
+// paints (and saves) the real per-pixel colours.
 function drawGrid(canvas, grid, palette, item) {
   const n = sizeFor(grid);
   canvas.width = n;
@@ -278,7 +279,7 @@ function drawGrid(canvas, grid, palette, item) {
         if (grid[y][x] !== ".") ctx.fillRect(x, y, 1, 1);
       }
     }
-    return;
+    ctx.globalCompositeOperation = "luminosity";
   }
   for (let y = 0; y < n; y++) {
     for (let x = 0; x < n; x++) {
@@ -288,6 +289,7 @@ function drawGrid(canvas, grid, palette, item) {
       ctx.fillRect(x, y, 1, 1);
     }
   }
+  ctx.globalCompositeOperation = "source-over";
 }
 
 function renderSidebar() {
@@ -344,7 +346,7 @@ function updatePaintControls() {
   eraserBtn.classList.toggle("active", state.eraseMode);
   paintHintEl.textContent =
     item.gradient && item.gradient.length > 0
-      ? "This item is in a set with a shared gradient — the app shows that instead of whatever you paint here, but painting still saves."
+      ? "This item is in a set with a shared gradient — the app tints it with that, keeping only the lightness of what you paint here."
       : "";
 }
 

@@ -1,6 +1,6 @@
 import { type CSSProperties, useId } from "react";
 
-/** Renders a square bitmap (16x16 for items) as crisp SVG rects — one `<rect>` per horizontal
+/** Renders a square bitmap (24x24 for items) as crisp SVG rects — one `<rect>` per horizontal
  * run of same-character cells. Shared by the item-type and currency pixel
  * icons so each icon set only has to describe its grid, not the rasterizer.
  *
@@ -19,6 +19,7 @@ export function PixelIcon({
   className,
   style,
   gradient,
+  tint,
 }: {
   grid: string[];
   palette?: readonly string[];
@@ -29,6 +30,12 @@ export function PixelIcon({
    * `<linearGradient>` id collision-free when many icons render at once
    * (the inventory grid alone can have 18 on screen). */
   gradient?: readonly string[];
+  /** Like `gradient`, but for a paletted icon: the gradient's hue replaces
+   * the painted colours while each pixel keeps its own lightness, so the
+   * icon's shading survives — e.g. a set's clue over a shaded item icon.
+   * Drawn as the gradient silhouette with the painted pixels blended over it
+   * in `luminosity` mode. */
+  tint?: readonly string[];
 }) {
   const rects: { x: number; y: number; w: number; fill?: string }[] = [];
   grid.forEach((row, y) => {
@@ -48,13 +55,28 @@ export function PixelIcon({
   });
 
   const gradientId = useId();
+  const stops = gradient ?? tint;
+
+  // `painted`: each run in its palette colour; otherwise every run takes the
+  // inherited fill.
+  const drawRects = (painted: boolean) =>
+    rects.map((r) => (
+      <rect
+        key={`${r.x}-${r.y}`}
+        x={r.x}
+        y={r.y}
+        width={r.w}
+        height={1}
+        {...(painted && r.fill ? { fill: r.fill } : {})}
+      />
+    ));
 
   return (
     <svg
-      // Square, sized by the grid: 16 for items, 24 for visitor portraits.
+      // Square, sized by the grid (24 for items and visitor portraits).
       viewBox={`0 0 ${grid.length} ${grid.length}`}
       shapeRendering="crispEdges"
-      fill={gradient ? `url(#${gradientId})` : "currentColor"}
+      fill={stops ? `url(#${gradientId})` : "currentColor"}
       aria-hidden="true"
       // Chrome treats a bare <svg> as draggable by default (unlike other
       // inline elements, and unlike what `SVGProps` even exposes a
@@ -64,12 +86,13 @@ export function PixelIcon({
       // started from stuck (see the Tooltip glitch this was fixed alongside).
       ref={(node) => node?.setAttribute("draggable", "false")}
       className={className}
-      style={style}
+      // Keeps the tint's blend to this icon's own layers.
+      style={tint ? { isolation: "isolate", ...style } : style}
     >
-      {gradient && (
+      {stops && (
         <defs>
           {/* userSpaceOnUse (viewBox coords) so the gradient spans the whole
-              16x16 icon once — the default objectBoundingBox would instead
+              icon once — the default objectBoundingBox would instead
               resolve per-rect, since `fill` is set on the <svg> and inherited
               by each individual <rect>. */}
           <linearGradient
@@ -77,29 +100,29 @@ export function PixelIcon({
             gradientUnits="userSpaceOnUse"
             x1="0"
             y1="0"
-            x2="16"
-            y2="16"
+            x2={grid.length}
+            y2={grid.length}
           >
-            {gradient.map((color, i) => (
+            {stops.map((color, i) => (
               <stop
                 key={color}
-                offset={`${(i / (gradient.length - 1)) * 100}%`}
+                offset={`${(i / (stops.length - 1)) * 100}%`}
                 stopColor={color}
               />
             ))}
           </linearGradient>
         </defs>
       )}
-      {rects.map((r) => (
-        <rect
-          key={`${r.x}-${r.y}`}
-          x={r.x}
-          y={r.y}
-          width={r.w}
-          height={1}
-          {...(r.fill ? { fill: r.fill } : {})}
-        />
-      ))}
+      {tint ? (
+        <>
+          {/* The silhouette in the gradient, then the painted pixels'
+              lightness over it. */}
+          {drawRects(false)}
+          <g style={{ mixBlendMode: "luminosity" }}>{drawRects(true)}</g>
+        </>
+      ) : (
+        drawRects(true)
+      )}
     </svg>
   );
 }

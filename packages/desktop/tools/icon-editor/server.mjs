@@ -5,8 +5,8 @@
 // that JSON file, which the running desktop app (via Vite) picks up like
 // any other source change. Each entry is `{ palette, grid }`: `grid` is
 // N rows of N '.' (empty) / '0'-'9'/'a'-'f' (an index into `palette`) — a
-// per-pixel paint job, not one solid tint (see ItemTypeIcon.tsx). N is 16
-// for items, 24 for Town's visitor portraits (see VisitorIcon.tsx).
+// per-pixel paint job, not one solid tint (see ItemTypeIcon.tsx). N is 24,
+// for items and Town's visitor portraits (see VisitorIcon.tsx) alike.
 import { createServer } from "node:http";
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -60,7 +60,7 @@ function readGrids() {
   return JSON.parse(readFileSync(GRIDS_PATH, "utf8"));
 }
 
-const ITEM_ICON_SIZE = 16;
+const ITEM_ICON_SIZE = 24;
 
 /** An item with no bespoke icon yet starts from the generic type icon the app
  * shows for it, in its card art's colour. Saving it creates its entry. */
