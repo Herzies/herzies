@@ -158,7 +158,7 @@ export function VisitorHelp({
                     className="group flex cursor-pointer items-center gap-1 border-none bg-transparent p-0 text-left text-ui text-text-dim"
                   >
                     <span className="shrink-0">{what}:</span>
-                    <ItemTypeIcon item={item} className="h-4 w-4 shrink-0" />
+                    <ItemTypeIcon item={item} className="h-6 w-6 shrink-0" />
                     <span
                       className="truncate group-hover:underline"
                       style={{ color: ITEM_RARITY_COLORS[item.rarity] }}

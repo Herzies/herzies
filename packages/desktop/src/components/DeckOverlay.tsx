@@ -36,7 +36,7 @@ export const DECK_UNIT_ATTR = "data-deck-unit";
  * (the clip-path on the visible card clips its hit-testing too). `group` lets
  * the card respond to the hover the whole area receives. */
 const SLOT_HIT =
-  "group flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center border-none p-0";
+  "group flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center border-none p-0";
 
 const groupByLabel = (label: string): DeckSlotGroup => {
   const group = DECK_SLOT_GROUPS.find((g) => g.label === label);
@@ -283,7 +283,7 @@ function DeckSlot({
         >
           <span
             className={cn(
-              "h-4 w-4 bg-text-dim/20 transition-colors group-hover:bg-text-dim/35",
+              "h-6 w-6 bg-text-dim/20 transition-colors group-hover:bg-text-dim/35",
             )}
             style={{ clipPath: CARD_SHAPE_CLIP }}
           />
@@ -320,7 +320,7 @@ function DeckSlot({
     >
       <span
         className={cn(
-          "relative flex h-4 w-4 items-center justify-center transition-opacity group-hover:opacity-75",
+          "relative flex h-6 w-6 items-center justify-center transition-opacity group-hover:opacity-75",
           dragging && "opacity-30",
           // Still laid out (the flight measures it), just not drawn until the
           // flying copy arrives.

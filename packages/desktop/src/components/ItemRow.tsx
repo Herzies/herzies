@@ -38,7 +38,7 @@ export function ItemRow({
         title={inspectTitle}
       >
         {icon ??
-          (def && <ItemTypeIcon item={def} className="h-4 w-4 shrink-0" />)}
+          (def && <ItemTypeIcon item={def} className="h-6 w-6 shrink-0" />)}
         <div className="min-w-0 flex-1">
           <div
             className={cn("truncate text-ui text-text", {

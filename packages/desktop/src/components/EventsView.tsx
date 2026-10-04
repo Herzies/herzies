@@ -642,7 +642,7 @@ export function EventsView({
                       <div className="flex items-center gap-1 text-ui">
                         <ItemTypeIcon
                           item={previousRewardItem}
-                          className="h-4 w-4 shrink-0"
+                          className="h-6 w-6 shrink-0"
                         />
                         <button
                           className="cursor-pointer border-none bg-transparent text-ui underline"

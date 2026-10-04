@@ -168,7 +168,7 @@ export function StoreView({
                 itemId={BANK_EXPANSION.id}
                 name={BANK_EXPANSION.name}
                 icon={
-                  <BankExpansionIcon className="h-4 w-4 shrink-0 text-yellow" />
+                  <BankExpansionIcon className="h-6 w-6 shrink-0 text-yellow" />
                 }
                 onInspect={setInspectItem}
                 inspectTitle="Inspect expansion"

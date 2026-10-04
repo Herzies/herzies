@@ -126,7 +126,7 @@ export function DeckSlotPicker({
                 onClick={() => onPick(option.unitId)}
               >
                 {def && (
-                  <ItemTypeIcon item={def} className="h-3 w-3 shrink-0" />
+                  <ItemTypeIcon item={def} className="h-6 w-6 shrink-0" />
                 )}
                 <span className="min-w-0 flex-1 truncate">
                   {def?.name ?? option.itemId}

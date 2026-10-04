@@ -196,7 +196,7 @@ function SellBox({
       style={{ left, top }}
     >
       <div className="flex items-center gap-1.5 text-ui-sm text-text">
-        <ItemTypeIcon item={item} className="h-4 w-4 shrink-0" />
+        <ItemTypeIcon item={item} className="h-6 w-6 shrink-0" />
         <span className="truncate">{item.name}</span>
       </div>
       <SellControls
@@ -571,7 +571,7 @@ function ItemGridCell({
           )}
         </span>
         {def && (
-          // h-6: the 16px grid at 1.5x.
+          // h-6: the 24px grid at 1:1.
           <ItemTypeIcon
             item={def}
             className={cn("h-6 w-6", flying && "invisible")}
