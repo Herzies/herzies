@@ -1,5 +1,27 @@
 import { type CSSProperties, useId } from "react";
 
+/** A grid as one rect per horizontal run of the same character; `fill` is
+ * the run's palette colour, if it has one. */
+function toRuns(grid: string[], palette?: readonly string[]) {
+  const runs: { x: number; y: number; w: number; fill?: string }[] = [];
+  grid.forEach((row, y) => {
+    let x = 0;
+    while (x < row.length) {
+      const ch = row[x];
+      if (ch !== ".") {
+        const start = x;
+        while (x < row.length && row[x] === ch) x++;
+        const fill =
+          palette && ch !== "#" ? palette[parseInt(ch, 36)] : undefined;
+        runs.push({ x: start, y, w: x - start, fill });
+      } else {
+        x++;
+      }
+    }
+  });
+  return runs;
+}
+
 /** Renders a bitmap (24x24 for icons, 32x24 for card artwork) as crisp SVG rects — one `<rect>` per horizontal
  * run of same-character cells. Shared by the item-type and currency pixel
  * icons so each icon set only has to describe its grid, not the rasterizer.
@@ -20,6 +42,7 @@ export function PixelIcon({
   style,
   gradient,
   tint,
+  overlay,
 }: {
   grid: string[];
   palette?: readonly string[];
@@ -36,23 +59,12 @@ export function PixelIcon({
    * Drawn as the gradient silhouette with the painted pixels blended over it
    * in `luminosity` mode. */
   tint?: readonly string[];
+  /** A paletted grid (same size, '.' where it's clear) drawn over the icon
+   * as painted — untouched by `gradient`/`tint`. E.g. an icon's card frame
+   * in its rarity colour, over a set-tinted picture. */
+  overlay?: { grid: string[]; palette: readonly string[] };
 }) {
-  const rects: { x: number; y: number; w: number; fill?: string }[] = [];
-  grid.forEach((row, y) => {
-    let x = 0;
-    while (x < row.length) {
-      const ch = row[x];
-      if (ch !== ".") {
-        const start = x;
-        while (x < row.length && row[x] === ch) x++;
-        const fill =
-          palette && ch !== "#" ? palette[parseInt(ch, 36)] : undefined;
-        rects.push({ x: start, y, w: x - start, fill });
-      } else {
-        x++;
-      }
-    }
-  });
+  const rects = toRuns(grid, palette);
 
   const gradientId = useId();
   const width = grid[0]?.length ?? grid.length;
@@ -124,6 +136,17 @@ export function PixelIcon({
       ) : (
         drawRects(true)
       )}
+      {overlay &&
+        toRuns(overlay.grid, overlay.palette).map((r) => (
+          <rect
+            key={`o${r.x}-${r.y}`}
+            x={r.x}
+            y={r.y}
+            width={r.w}
+            height={1}
+            fill={r.fill}
+          />
+        ))}
     </svg>
   );
 }
