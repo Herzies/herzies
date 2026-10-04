@@ -303,7 +303,8 @@ function renderSidebar() {
     drawGrid(canvas, stored.grid, stored.palette, item);
 
     const label = document.createElement("span");
-    label.textContent = item.name;
+    // Unpainted: still on its generic type icon (no entry in the JSON yet).
+    label.textContent = item.unpainted ? `${item.name} (new)` : item.name;
 
     row.append(canvas, label);
     row.addEventListener("click", () => selectItem(item.id));
@@ -505,6 +506,11 @@ document.getElementById("save-btn").addEventListener("click", async () => {
       palette: [...state.currentPalette],
     };
     state.dirty = false;
+    const saved = itemById(state.selectedId);
+    if (saved?.unpainted) {
+      saved.unpainted = false;
+      renderSidebar();
+    }
     setStatus("Saved — the app will pick this up automatically", "saved");
   } catch (err) {
     setStatus(`Error: ${err.message}`, "error");

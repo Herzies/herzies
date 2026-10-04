@@ -15,8 +15,10 @@ import {
   BANK_EXPANSION,
   getItemColor,
   getItemSet,
+  getItemType,
   ITEMS,
 } from "@herzies/shared";
+import { TYPE_ICON_GRIDS } from "../../src/components/icons/type-icon-grids.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const GRIDS_PATH = resolve(
@@ -56,6 +58,18 @@ const EXTRA_ICONS = [
 
 function readGrids() {
   return JSON.parse(readFileSync(GRIDS_PATH, "utf8"));
+}
+
+const ITEM_ICON_SIZE = 16;
+
+/** An item with no bespoke icon yet starts from the generic type icon the app
+ * shows for it, in its card art's colour. Saving it creates its entry. */
+function seedFor(item) {
+  const grid = TYPE_ICON_GRIDS[getItemType(item)] ?? [];
+  return {
+    grid: grid.map((row) => row.replaceAll("#", "0")),
+    palette: [getItemColor(item)],
+  };
 }
 
 function isValidColor(color) {
@@ -104,10 +118,9 @@ const server = createServer(async (req, res) => {
 
     if (req.method === "GET" && url.pathname === "/api/icons") {
       const stored = readGrids();
-      // Only items that already have a bespoke icon are editable here — the
-      // generic per-type fallbacks live inline in ItemTypeIcon.tsx, not in
-      // this JSON file. (Plus the EXTRA_ICONS above.)
-      const items = ITEMS.filter((item) => stored[item.id]).map((item) => {
+      // Every catalog item, painted or not (see seedFor), plus the
+      // EXTRA_ICONS above.
+      const items = ITEMS.map((item) => {
         const set = getItemSet(item.id);
         return {
           id: item.id,
@@ -117,6 +130,7 @@ const server = createServer(async (req, res) => {
           // is not what's currently on the icon (that's in `grids` below).
           autoColor: getItemColor(item),
           gradient: set?.visual?.gradient ?? null,
+          unpainted: !stored[item.id],
         };
       });
       // The editable pixel data itself — kept out of `items` since it's
@@ -128,6 +142,7 @@ const server = createServer(async (req, res) => {
           { grid: entry.grid, palette: entry.palette },
         ]),
       );
+      for (const item of ITEMS) grids[item.id] ??= seedFor(item);
       items.push(...EXTRA_ICONS.filter((extra) => stored[extra.id]));
       sendJson(res, 200, { items, grids });
       return;
@@ -138,7 +153,9 @@ const server = createServer(async (req, res) => {
         url.pathname.slice("/api/icons/".length),
       );
       const stored = readGrids();
-      if (!(id in stored)) {
+      // A catalog item without an entry yet gets one on its first save.
+      const isItem = ITEMS.some((item) => item.id === id);
+      if (!(id in stored) && !isItem) {
         sendJson(res, 404, { error: `Unknown icon id: ${id}` });
         return;
       }
@@ -157,7 +174,7 @@ const server = createServer(async (req, res) => {
         });
         return;
       }
-      const size = stored[id].grid.length;
+      const size = stored[id]?.grid.length ?? ITEM_ICON_SIZE;
       if (!isValidGrid(payload.grid, payload.palette.length, size)) {
         sendJson(res, 400, {
           error: `grid must be ${size} rows of exactly ${size} '.'/'0'-'9'/'a'-'f' characters, each index within the palette`,
