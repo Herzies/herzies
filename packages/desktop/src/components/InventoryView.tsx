@@ -703,6 +703,10 @@ export function InventoryView({
    * +3 twin's level. A deep link names only an item, and falls back to the
    * best copy. */
   const [inspectUnitId, setInspectUnitId] = useState<string | null>(null);
+  /** Where the inspected copy's icon is (its tile or deck box, by flight
+   * selector), so the card grows out of that icon and shrinks back into it —
+   * wherever the copy is by then. */
+  const [inspectOrigin, setInspectOrigin] = useState<string | null>(null);
   /** Sell popover and the tile menu, anchored where the right-click was. They name the TILE
    * (which is what says exactly which copies), not an item id. */
   const [sellBox, setSellBox] = useState<{
@@ -883,6 +887,7 @@ export function InventoryView({
     if (!initialItem) return;
     setInspectItem(initialItem);
     setInspectUnitId(null);
+    setInspectOrigin(null);
   }, [initialItem]);
 
   // Custom press-and-drag instead of the native HTML5 Drag and Drop API —
@@ -1959,11 +1964,11 @@ export function InventoryView({
       {inspectItem && inspected && (
         <ItemInspectOverlay
           itemId={inspectItem}
+          origin={inspectOrigin ?? undefined}
           // Escape reaches both this and the sell confirmation; let it only
           // dismiss the prompt, leaving the preview open underneath.
-          onClose={() => {
-            if (!sellConfirm) setInspectItem(null);
-          }}
+          closeBlocked={!!sellConfirm}
+          onClose={() => setInspectItem(null)}
           equipped={equipped}
           level={inspectUnit?.upgradeLevel ?? 0}
           meta={inspectedGroundSide || undefined}
@@ -2040,6 +2045,7 @@ export function InventoryView({
                   onClick: () => {
                     setInspectItem(unit.itemId);
                     setInspectUnitId(unit.id);
+                    setInspectOrigin(`${toDeck(unit.id)}, ${toBank(unit.id)}`);
                     setDeckMenu(null);
                   },
                 },
@@ -2080,6 +2086,9 @@ export function InventoryView({
                   onClick: () => {
                     setInspectItem(tile.itemId);
                     setInspectUnitId(tile.unitIds[0]);
+                    setInspectOrigin(
+                      `${toBank(tile.unitIds[0])}, ${toDeck(tile.unitIds[0])}`,
+                    );
                     setTileMenu(null);
                   },
                 },
