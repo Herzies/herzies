@@ -2,7 +2,7 @@ import type { ItemType } from "@herzies/shared";
 
 // The generic per-type icons: what an item shows until it gets a bespoke one
 // in item-icon-grids.json. Plain TS with no runtime imports, so the
-// icon-editor's server (plain Node) can load it too and start an unpainted
+// item editor's server (plain Node) can load it too and start an unpainted
 // item from exactly what the app shows for it.
 
 // Every item is a card (the store's buy tab is literally called "Cards"), so

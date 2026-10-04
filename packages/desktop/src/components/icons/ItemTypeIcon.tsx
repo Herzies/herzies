@@ -17,8 +17,8 @@ import { TYPE_ICON_GRIDS as GRIDS } from "./type-icon-grids";
  * (type-icon-grids.ts) for any item without one yet — e.g. a newly added
  * item.
  *
- * Lives in its own JSON file (rather than inline here) so the icon-editor
- * tool (`pnpm icon-editor`, see `tools/icon-editor/`) can read and overwrite
+ * Lives in its own JSON file (rather than inline here) so the item editor
+ * tool (`pnpm item-editor`, see `tools/item-editor/`) can read and overwrite
  * it directly — painting it there and saving takes effect immediately, the
  * same live-reload any other source edit gets. */
 const ITEM_ICON_GRIDS: Partial<

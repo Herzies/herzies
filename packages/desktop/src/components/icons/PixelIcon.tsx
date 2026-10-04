@@ -9,7 +9,7 @@ import { type CSSProperties, useId } from "react";
  *   icon (`currentColor`/`style.color`, or `gradient` if given) — what every
  *   hand-typed grid (`GRIDS`, `SORT`, `COIN_PACK`, …) still uses.
  * - `palette` given: '.' empty, '0'-'9'/'a'-'f' index into `palette` — a
- *   per-pixel colour, painted in the icon-editor tool (see
+ *   per-pixel colour, painted in the item editor tool (see
  *   ITEM_ICON_GRIDS). A '#' cell is still allowed and still means "use the
  *   inherited solid fill", so a paletted icon can mix its own painted
  *   pixels with an unpainted currentColor/gradient fill if it wants to. */

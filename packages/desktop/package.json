@@ -11,7 +11,7 @@
     "vite:dev": "vite dev --port 1420",
     "vite:build": "vite build",
     "sandbox": "vite dev --port 1420 --open /sandbox.html",
-    "icon-editor": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tools/icon-editor/server.mjs"
+    "item-editor": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tools/item-editor/server.mjs"
   },
   "dependencies": {
     "@herzies/shared": "workspace:*",

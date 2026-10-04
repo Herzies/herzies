@@ -12,7 +12,7 @@ import { ORPHIEZ_EQUIPPED } from "../OrphiezStage";
 import rawItemIconGrids from "./item-icon-grids.json";
 import { PixelIcon } from "./PixelIcon";
 
-// Hand-tweaked portraits, painted in the icon-editor (`pnpm icon-editor`,
+// Hand-tweaked portraits, painted in the item editor (`pnpm item-editor`,
 // listed there under EXTRA_ICONS) and stored beside the item icons. A
 // visitor with one shows it; one without (every boss, each with its own
 // face) is drawn from their 3D look below. The seeded entries began as a
