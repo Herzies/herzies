@@ -949,6 +949,8 @@ export interface ItemSet {
    * instead of the item's usual solid dominant-colour tint, so set members
    * read as related regardless of their individual icon depiction. */
   visual?: { gradient: readonly string[] };
+  /** Members whose icon keeps its own painted colours instead of `visual`. */
+  visualExempt?: string[];
 }
 
 export const ITEM_SETS: ItemSet[] = [
@@ -965,11 +967,22 @@ export const ITEM_SETS: ItemSet[] = [
     effect: "A spooky fog rolls in",
     itemIds: ["witch-hat", "pumpkin-spice", "jack-o-lantern"],
     visual: { gradient: PUMPKIN_RAMP },
+    visualExempt: ["witch-hat"],
   },
 ];
 
 export function getItemSet(itemId: string): ItemSet | undefined {
   return ITEM_SETS.find((set) => set.itemIds.includes(itemId));
+}
+
+/** The set gradient this item's small icon is filled with, if any — its
+ * set's `visual`, unless the item is exempt from it. */
+export function getItemIconGradient(
+  itemId: string,
+): readonly string[] | undefined {
+  const set = getItemSet(itemId);
+  if (set?.visualExempt?.includes(itemId)) return undefined;
+  return set?.visual?.gradient;
 }
 
 /** Whether every item in `set` is currently equipped. */

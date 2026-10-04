@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import {
   BANK_EXPANSION,
   getItemColor,
-  getItemSet,
+  getItemIconGradient,
   getItemType,
   ITEMS,
 } from "@herzies/shared";
@@ -121,7 +121,6 @@ const server = createServer(async (req, res) => {
       // Every catalog item, painted or not (see seedFor), plus the
       // EXTRA_ICONS above.
       const items = ITEMS.map((item) => {
-        const set = getItemSet(item.id);
         return {
           id: item.id,
           name: item.name,
@@ -129,7 +128,7 @@ const server = createServer(async (req, res) => {
           // quick "start painting with this colour" pick, nothing more; it
           // is not what's currently on the icon (that's in `grids` below).
           autoColor: getItemColor(item),
-          gradient: set?.visual?.gradient ?? null,
+          gradient: getItemIconGradient(item.id) ?? null,
           unpainted: !stored[item.id],
         };
       });

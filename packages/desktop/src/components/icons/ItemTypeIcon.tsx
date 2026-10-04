@@ -1,6 +1,6 @@
 import {
   getItemColor,
-  getItemSet,
+  getItemIconGradient,
   getItemType,
   type ItemDef,
   type ItemType,
@@ -53,23 +53,18 @@ export function ItemTypeIcon({
 }) {
   const type = getItemType(item);
   const bespoke = ITEM_ICON_GRIDS[item.id];
-  const set = getItemSet(item.id);
+  const gradient = getItemIconGradient(item.id);
 
-  if (set?.visual) {
+  if (gradient) {
     // A set's shared visual clue (e.g. Prismatic's rainbow) overrides
     // whatever this item's own icon was painted — only its shape carries
     // over (any painted cell counts as filled) — so members read as related
-    // regardless of their individual icon's colours.
+    // regardless of their individual icon's colours. Unless the set exempts
+    // the item (visualExempt).
     const shape = (bespoke?.grid ?? GRIDS[type]).map((row) =>
       row.replace(/[^.]/g, "#"),
     );
-    return (
-      <PixelIcon
-        grid={shape}
-        className={className}
-        gradient={set.visual.gradient}
-      />
-    );
+    return <PixelIcon grid={shape} className={className} gradient={gradient} />;
   }
 
   if (bespoke) {
