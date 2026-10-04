@@ -339,7 +339,11 @@ function DeckSlot({
           style={{ clipPath: CARD_SHAPE_CLIP }}
         />
         {def ? (
-          <ItemTypeIcon item={def} className="relative h-full w-full" />
+          <ItemTypeIcon
+            item={def}
+            rarityFrame
+            className="relative h-full w-full"
+          />
         ) : (
           // Equipped-but-missing-from-catalog (stale/desynced data): render
           // filled but generic rather than silently falling back to empty — an

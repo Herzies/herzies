@@ -60,7 +60,7 @@ import { HERZIE_STAGE_HEIGHT } from "./Herzie3D";
 import { type Flight, ItemFlights } from "./ItemFlight";
 import ItemInspectOverlay, { CompactItemPreview } from "./ItemInspectOverlay";
 import { DuplicatesIcon } from "./icons/DuplicatesIcon";
-import { ItemTypeIcon } from "./icons/ItemTypeIcon";
+import { hasRarityFrame, ItemTypeIcon } from "./icons/ItemTypeIcon";
 import { SortIcon } from "./icons/SortIcon";
 import { List } from "./List";
 import { NumberTicker } from "./NumberTicker";
@@ -545,11 +545,12 @@ function ItemGridCell({
         <span
           className={cn("contents", flying && "[&>*]:animate-flight-meta-in")}
         >
-          {def && (
+          {def && !hasRarityFrame(def) && (
             // Rarity, as a small right triangle in the bottom-left corner, inset
             // by the same 2px as the +N and xN badges, in the rarity's own colour (the same one the preview card
-            // and the item's name use). Grid only — the deck's boxes are too
-            // small to carry one.
+            // and the item's name use) — only for icons whose card frame
+            // can't carry it (see hasRarityFrame). Grid only — the deck's
+            // boxes are too small to carry one.
             <span
               aria-hidden="true"
               className="pointer-events-none absolute bottom-0.5 left-0.5 h-1.5 w-1.5"
@@ -571,9 +572,11 @@ function ItemGridCell({
           )}
         </span>
         {def && (
-          // h-6: the 24px grid at 1:1.
+          // h-6: the 24px grid at 1:1. The card frame shows the rarity, as
+          // the opened card's does.
           <ItemTypeIcon
             item={def}
+            rarityFrame
             className={cn("h-6 w-6", flying && "invisible")}
           />
         )}

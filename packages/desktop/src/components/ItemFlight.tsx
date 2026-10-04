@@ -132,6 +132,7 @@ function FlightSprite({
     >
       <ItemTypeIcon
         item={def}
+        rarityFrame
         className="h-full w-full drop-shadow-[0_0_4px_rgba(0,0,0,0.8)]"
       />
     </div>

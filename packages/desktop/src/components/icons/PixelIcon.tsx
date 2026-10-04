@@ -8,7 +8,7 @@ import { type CSSProperties, useId } from "react";
  * - No `palette`: plain '#' filled / '.' empty, one solid fill for the whole
  *   icon (`currentColor`/`style.color`, or `gradient` if given) — what every
  *   hand-typed grid (`GRIDS`, `SORT`, `COIN_PACK`, …) still uses.
- * - `palette` given: '.' empty, '0'-'9'/'a'-'f' index into `palette` — a
+ * - `palette` given: '.' empty, '0'-'9'/'a'-'z' index into `palette` (hand-painted grids stop at 'f') — a
  *   per-pixel colour, painted in the item editor tool (see
  *   ITEM_ICON_GRIDS). A '#' cell is still allowed and still means "use the
  *   inherited solid fill", so a paletted icon can mix its own painted
@@ -46,7 +46,7 @@ export function PixelIcon({
         const start = x;
         while (x < row.length && row[x] === ch) x++;
         const fill =
-          palette && ch !== "#" ? palette[parseInt(ch, 16)] : undefined;
+          palette && ch !== "#" ? palette[parseInt(ch, 36)] : undefined;
         rects.push({ x: start, y, w: x - start, fill });
       } else {
         x++;
