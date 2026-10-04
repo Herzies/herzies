@@ -262,11 +262,12 @@ export function CompactItemPreview({
 /** The flight between a bag/deck icon and the open card, each way. */
 const FLIGHT_MS = 650;
 const FLIGHT_EASING = "cubic-bezier(0.22, 0.8, 0.24, 1)";
-/** FLIGHT_EASING mirrored, for the flight home. Played in reverse, an
- * ease-out turns into an ease-in — slow to leave, fast to land — so the
- * return felt slower; the mirror plays the same fast-then-settle shape
- * backwards. */
-const FLIGHT_EASING_HOME = "cubic-bezier(0.76, 0, 0.78, 0.2)";
+/** The flight home retraces the open — spinning back the way it came —
+ * but with its own timing: the open's curve played backwards turned its
+ * long settle (fine for the big card arriving) into a long crawl of the
+ * tiny icon into its tile. Shorter, eased in and out. */
+const HOME_MS = 480;
+const HOME_EASING = "cubic-bezier(0.45, 0, 0.25, 1)";
 
 /** The card's back, seen mid-spin: the same frame, a patterned face and the
  * rarity diamond the front's small print carries. */
@@ -277,6 +278,7 @@ function CardBack({ itemId }: { itemId: string }) {
   return (
     <div
       aria-hidden="true"
+      data-card-back=""
       className="absolute inset-0 rotate-y-180 rounded-lg p-[5px] backface-hidden"
       style={{ background: frameBackground(item.id, item.rarity) }}
     >
@@ -344,7 +346,10 @@ export default function ItemInspectOverlay({
   const ghostRef = useRef<HTMLDivElement>(null);
   const footerRef = useRef<HTMLDivElement>(null);
   const faceRef = useRef<HTMLElement | null>(null);
+  const backRef = useRef<HTMLElement | null>(null);
   const closing = useRef(false);
+  /** The opening flight's animations, while it may still be playing. */
+  const opening = useRef<Animation[]>([]);
   const hidden = useRef<SVGElement | null>(null);
   const [flying] = useState(
     () =>
@@ -357,48 +362,107 @@ export default function ItemInspectOverlay({
    * equipped and its tile is no more). */
   const measureFrom = useCallback(() => {
     const icon = originIcon(origin)?.getBoundingClientRect();
-    const ghost = ghostRef.current?.getBoundingClientRect();
-    if (!icon || !ghost || icon.width === 0) return null;
-    const dx = icon.left + icon.width / 2 - (ghost.left + ghost.width / 2);
-    const dy = icon.top + icon.height / 2 - (ghost.top + ghost.height / 2);
-    return `perspective(1000px) translate(${dx}px, ${dy}px) scale(${icon.width / ghost.width}) rotateY(0deg)`;
+    const ghost = ghostRef.current;
+    const flight = flightRef.current;
+    const base = flight?.offsetParent?.getBoundingClientRect();
+    if (!icon || !ghost || !flight || !base || icon.width === 0) return null;
+    // Where the card's icon sits with the card at rest, from layout offsets
+    // (which ignore transforms) off its untransformed parent — not its
+    // on-screen box: measured mid-3D (the open card, turned and in
+    // perspective), WebKit reported it far too small, so the card flew home
+    // at nearly full size.
+    const side = ghost.offsetWidth;
+    const x = base.left + flight.offsetLeft + ghost.offsetLeft + side / 2;
+    const y = base.top + flight.offsetTop + ghost.offsetTop + side / 2;
+    const dx = icon.left + icon.width / 2 - x;
+    const dy = icon.top + icon.height / 2 - y;
+    return `perspective(1000px) translate(${dx}px, ${dy}px) scale(${icon.width / side}) rotateY(0deg)`;
   }, [origin]);
 
-  /** One flight, out (open) or home (close). The card's transform spins it
-   * a full turn while it travels; the icon riding on top fades out as the
-   * card's face fades in (the "merge"), with the card's back showing for the
-   * half-turn in between. */
-  const fly = useCallback((from: string, direction: "normal" | "reverse") => {
-    const to =
-      "perspective(1000px) translate(0px, 0px) scale(1) rotateY(360deg)";
+  /** One flight, out (open) or home (close). In the bag and the deck a
+   * card lies face down — its icon is its back — so it travels turning half
+   * over: out from face down on its tile to face up and full size, home the
+   * same way back. Its back starts (and ends) as just the icon, the card
+   * back's pattern fading in around it as it grows; the front comes into view
+   * as the card turns past edge-on. `tile` is the transform that puts the
+   * card on the icon (measureFrom). */
+  const fly = useCallback((tile: string, way: "out" | "home") => {
+    const open = `perspective(1000px) translate(0px, 0px) scale(1) rotateY(360deg)`;
+    // Face down: half a turn from face up.
+    const faceDown = tile.replace("rotateY(0deg)", "rotateY(180deg)");
+    const out = way === "out";
     const timing = {
-      duration: FLIGHT_MS,
-      easing: direction === "reverse" ? FLIGHT_EASING_HOME : FLIGHT_EASING,
-      direction,
+      duration: out ? FLIGHT_MS : HOME_MS,
+      easing: out ? FLIGHT_EASING : HOME_EASING,
       fill: "both" as const,
     };
-    const animations = [
-      flightRef.current?.animate({ transform: [from, to] }, timing),
-      faceRef.current?.animate(
-        { opacity: [0, 0, 1, 1], offset: [0, 0.3, 0.55, 1] },
-        timing,
-      ),
-      ghostRef.current?.animate(
-        { opacity: [1, 1, 0, 0], offset: [0, 0.4, 0.7, 1] },
-        timing,
-      ),
-      backdropRef.current?.animate(
-        { opacity: [0, 1] },
-        {
-          ...timing,
-          duration: FLIGHT_MS * 0.6,
-        },
-      ),
-      footerRef.current?.animate(
-        { opacity: [0, 0, 1], offset: [0, 0.7, 1] },
-        timing,
-      ),
-    ];
+    // Which side faces you is switched here, exactly at edge-on (halfway:
+    // the turn is linear in progress) — not left to backface-visibility,
+    // which WebKit (the desktop app's engine) ignores on the card's face:
+    // its front showed, mirrored, all the way home.
+    const EDGE = 0.5;
+    const JUST = 0.0001;
+    const animations = out
+      ? [
+          // Turned 180 + 180·progress: the back faces you until halfway.
+          flightRef.current?.animate({ transform: [faceDown, open] }, timing),
+          faceRef.current?.animate(
+            { opacity: [0, 0, 1, 1], offset: [0, EDGE, EDGE + JUST, 1] },
+            timing,
+          ),
+          ghostRef.current?.animate(
+            { opacity: [1, 1, 0, 0], offset: [0, EDGE, EDGE + JUST, 1] },
+            timing,
+          ),
+          // The back's pattern fades in around the icon as the card grows.
+          backRef.current?.animate(
+            {
+              opacity: [0, 1, 1, 0, 0],
+              offset: [0, 0.25, EDGE, EDGE + JUST, 1],
+            },
+            timing,
+          ),
+          backdropRef.current?.animate(
+            { opacity: [0, 1] },
+            { ...timing, duration: FLIGHT_MS * 0.6 },
+          ),
+          footerRef.current?.animate(
+            { opacity: [0, 0, 1], offset: [0, 0.7, 1] },
+            timing,
+          ),
+        ]
+      : [
+          // Turning back the way it came, 360 − 180·progress: the front
+          // faces you until halfway, the back from then on.
+          flightRef.current?.animate({ transform: [open, faceDown] }, timing),
+          faceRef.current?.animate(
+            { opacity: [1, 1, 0, 0], offset: [0, EDGE, EDGE + JUST, 1] },
+            timing,
+          ),
+          ghostRef.current?.animate(
+            { opacity: [0, 0, 1, 1], offset: [0, EDGE - JUST, EDGE, 1] },
+            timing,
+          ),
+          // Only a glimpse of the back's pattern past edge-on, gone soon
+          // after, so it's the icon — not a card-sized back — that shrinks
+          // into the tile.
+          backRef.current?.animate(
+            {
+              opacity: [0, 0, 0.6, 0, 0],
+              offset: [0, EDGE - JUST, EDGE, 0.65, 1],
+            },
+            timing,
+          ),
+          backdropRef.current?.animate(
+            { opacity: [1, 0] },
+            { ...timing, duration: HOME_MS * 0.7 },
+          ),
+          footerRef.current?.animate(
+            { opacity: [1, 0, 0], offset: [0, 0.2, 1] },
+            timing,
+          ),
+        ];
+    if (out) opening.current = animations.filter((a) => a !== undefined);
     return Promise.all(
       animations.map((a) => a?.finished.catch(() => undefined)),
     );
@@ -408,10 +472,11 @@ export default function ItemInspectOverlay({
     if (!flying) return;
     faceRef.current =
       flightRef.current?.querySelector<HTMLElement>("[data-card-face]") ?? null;
-    // The ghost icon sits over the art window's middle square at its full
-    // height. The card's pixel artwork (derived from the icon) draws the
-    // icon's face on exactly those pixels, so the frame melts away and the
-    // background widens around a picture that doesn't move.
+    backRef.current =
+      flightRef.current?.querySelector<HTMLElement>("[data-card-back]") ?? null;
+    // The icon on the card's back sits behind the art window's middle
+    // square, at its full height — the card's horizontal centre, so the
+    // half turn (about its centre) keeps it in place.
     const flight = flightRef.current?.getBoundingClientRect();
     const art = flightRef.current
       ?.querySelector("[data-card-art]")
@@ -436,7 +501,7 @@ export default function ItemInspectOverlay({
     // The icon leaves its tile: it's in the air now.
     hidden.current = originIcon(origin);
     if (hidden.current) hidden.current.style.visibility = "hidden";
-    fly(from, "normal");
+    fly(from, "out");
     return () => {
       if (hidden.current) hidden.current.style.visibility = "";
     };
@@ -449,13 +514,36 @@ export default function ItemInspectOverlay({
       onClose();
       return;
     }
-    // Home to wherever the copy's icon is now — it may have moved between
-    // bag and deck (Place / Return) while the card was open.
-    const from = measureFrom();
     const restore = () => {
       if (hidden.current) hidden.current.style.visibility = "";
       hidden.current = null;
     };
+    // Dismissed while still opening: play the opening backwards from
+    // wherever it's got to, retracing its path into the tile. Starting the
+    // flight home instead snapped the card to full size first (that flight
+    // starts from the open card), with the unfinished opening showing
+    // through around it.
+    const stillOpening = opening.current.some((a) => a.playState === "running");
+    if (stillOpening) {
+      // Every part rewinds from the flight's own elapsed time — the
+      // backdrop's shorter fade may have finished already — so they all
+      // arrive back together.
+      const elapsed = Number(opening.current[0]?.currentTime ?? 0);
+      for (const a of opening.current) {
+        a.currentTime = Math.min(Number(a.currentTime ?? 0), elapsed);
+        a.reverse();
+      }
+      void Promise.all(
+        opening.current.map((a) => a.finished.catch(() => undefined)),
+      ).then(() => {
+        restore();
+        onClose();
+      });
+      return;
+    }
+    // Home to wherever the copy's icon is now — it may have moved between
+    // bag and deck (Place / Return) while the card was open.
+    const from = measureFrom();
     if (!from) {
       // Its icon is gone (sold, say): nowhere to land, so the card fades.
       restore();
@@ -475,7 +563,7 @@ export default function ItemInspectOverlay({
     restore();
     hidden.current = originIcon(origin);
     if (hidden.current) hidden.current.style.visibility = "hidden";
-    void fly(from, "reverse").then(() => {
+    void fly(from, "home").then(() => {
       restore();
       onClose();
     });
@@ -515,7 +603,13 @@ export default function ItemInspectOverlay({
                 <div
                   ref={ghostRef}
                   aria-hidden="true"
-                  className="pointer-events-none absolute opacity-0 backface-hidden"
+                  // On the card's back: mirrored, so it reads right while the
+                  // card is turned over, and a hair toward the back's side.
+                  // Plain 2D, no backface-visibility — WebKit (the desktop
+                  // app's engine) didn't draw it as a rotated, backface-
+                  // hidden layer. The flight shows it only while the back
+                  // faces you instead.
+                  className="pointer-events-none absolute opacity-0 [transform:translateZ(-1px)_scaleX(-1)]"
                 >
                   <ItemTypeIcon item={item} rarityFrame className="size-full" />
                 </div>
