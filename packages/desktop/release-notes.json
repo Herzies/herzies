@@ -1,5 +1,19 @@
 [
   {
+    "version": "0.1.0-beta.46",
+    "highlights": [
+      "New: collector cards. Shift+click any card in your bag or deck to flip it over and see it as a full card with its own pixel artwork",
+      "Every item icon has been repainted, sharper and with shading, and an icon's frame now shows its rarity",
+      "New: neckwear for fully grown herzies. Certified Drip, Clam's Finest and Black Tie Optional swing when you spin your herzie",
+      "From Oct 20 to Nov 2, seven Halloween items drop for a limited time, including Jack and Boo-tleg, two floating pets, and the Blood Moon. Wear the full Haunted set to bring in the fog",
+      "The Herzie view now has Bag and Deck tabs, and your herzie stands on the ground",
+      "The app does far less in the background while it's hidden in the tray",
+      "Signing in from the app is more secure",
+      "Adding a friend shows one line in your activity, with their name",
+      "The window no longer reopens on a monitor that's been unplugged"
+    ]
+  },
+  {
     "version": "0.1.0-beta.45",
     "highlights": [
       "New: Privacy in Settings. Turn off \"Share what you're listening to\" and friends see that you're listening, but not what, and none of your history. You still earn XP and drops and can join events",
