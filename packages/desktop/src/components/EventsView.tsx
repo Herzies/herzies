@@ -12,7 +12,10 @@ import { cn } from "../lib/utils";
 import { herzies, useWindowFocused } from "../tauri-bridge";
 import { BackButton } from "./BackButton";
 import { BossFightHelp, BossFightPanel, makeDebugBoss } from "./BossFightPanel";
-import ItemInspectOverlay from "./ItemInspectOverlay";
+import ItemInspectOverlay, {
+  INSPECT_ORIGIN_ATTR,
+  inspectOrigin,
+} from "./ItemInspectOverlay";
 import { ItemTypeIcon } from "./icons/ItemTypeIcon";
 import { VisitorIcon } from "./icons/VisitorIcon";
 import { List } from "./List";
@@ -639,7 +642,11 @@ export function EventsView({
                       <h2 className="text-ui font-bold text-text-dim">
                         Reward:
                       </h2>
-                      <div className="flex items-center gap-1 text-ui">
+                      <div
+                        className="flex items-center gap-1 text-ui"
+                        // Inspect grows the card out of this icon.
+                        {...{ [INSPECT_ORIGIN_ATTR]: "hunt-reward" }}
+                      >
                         <ItemTypeIcon
                           item={previousRewardItem}
                           className="h-6 w-6 shrink-0"
@@ -699,6 +706,7 @@ export function EventsView({
         {inspectOverlay === "item" && previousHuntConfig?.rewardItemId && (
           <ItemInspectOverlay
             itemId={previousHuntConfig.rewardItemId}
+            origin={inspectOrigin("hunt-reward")}
             onClose={() => setInspectOverlay(null)}
             equipped={equipped}
           />

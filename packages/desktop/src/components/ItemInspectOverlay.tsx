@@ -16,6 +16,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import { cn } from "../lib/utils";
 import {
   ItemStatLines,
@@ -24,7 +25,6 @@ import {
   SetTag,
 } from "./ItemTypeTag";
 import { getCardIllustration, ItemCardArt } from "./icons/ItemCardArt";
-import { ItemTypeIcon } from "./icons/ItemTypeIcon";
 import { TiltCard } from "./TiltCard";
 
 /** How strongly each rarity's frame shines (the `.holo-foil` layer's
@@ -300,10 +300,28 @@ function CardBack({ itemId }: { itemId: string }) {
   );
 }
 
+/** Marks an element holding an item's icon as somewhere an inspected card
+ * can grow out of — a store row, a reward link. Pass
+ * `inspectOrigin(key)` as ItemInspectOverlay's `origin`. (The bag and deck
+ * use their own flight selectors instead.) */
+export const INSPECT_ORIGIN_ATTR = "data-inspect-origin";
+export const inspectOrigin = (key: string) =>
+  `[${INSPECT_ORIGIN_ATTR}="${CSS.escape(key)}"]`;
+
+/** Puts a copy of `icon` on the card's back, so what flies is exactly the
+ * icon it left — the bag's rarity frame, a store row's plain one. */
+function copyIconInto(ghost: HTMLElement | null, icon: SVGElement | null) {
+  if (!ghost || !icon) return;
+  const copy = icon.cloneNode(true) as SVGElement;
+  copy.removeAttribute("class");
+  copy.style.cssText = "display:block;width:100%;height:100%";
+  ghost.replaceChildren(copy);
+}
+
 /** The icon `origin` points at — what the card grows out of and shrinks back
- * into. `origin` is a selector for the tile or deck box (the bag's own
- * flight selectors, possibly several, comma-separated), resolved fresh each
- * time since the bag re-renders and the copy may have moved. */
+ * into. `origin` is a selector for the element holding it (possibly several,
+ * comma-separated), resolved fresh each time since the view re-renders and,
+ * in the bag, the copy may have moved. */
 function originIcon(origin: string | undefined): SVGElement | null {
   if (!origin) return null;
   return document.querySelector(origin)?.querySelector("svg") ?? null;
@@ -499,6 +517,7 @@ export default function ItemInspectOverlay({
     const from = measureFrom();
     if (!from) return;
     // The icon leaves its tile: it's in the air now.
+    copyIconInto(ghost, originIcon(origin));
     hidden.current = originIcon(origin);
     if (hidden.current) hidden.current.style.visibility = "hidden";
     fly(from, "out");
@@ -561,6 +580,8 @@ export default function ItemInspectOverlay({
       return;
     }
     restore();
+    // The icon as it is now: the copy may have moved (bag <-> deck).
+    copyIconInto(ghostRef.current, originIcon(origin));
     hidden.current = originIcon(origin);
     if (hidden.current) hidden.current.style.visibility = "hidden";
     void fly(from, "home").then(() => {
@@ -580,7 +601,10 @@ export default function ItemInspectOverlay({
   const item = getItem(itemId);
   if (!item) return null;
 
-  return (
+  // At the document's top level, so its z-index outranks everything — a
+  // popover it was opened from included (George's help, portalled itself),
+  // which the view it's rendered in can't otherwise get above.
+  return createPortal(
     <div
       onClick={requestClose}
       className="fixed inset-0 z-[1000] flex items-center justify-center"
@@ -609,15 +633,15 @@ export default function ItemInspectOverlay({
                   // app's engine) didn't draw it as a rotated, backface-
                   // hidden layer. The flight shows it only while the back
                   // faces you instead.
+                  // Filled with a copy of the origin's icon (copyIconInto).
                   className="pointer-events-none absolute opacity-0 [transform:translateZ(-1px)_scaleX(-1)]"
-                >
-                  <ItemTypeIcon item={item} rarityFrame className="size-full" />
-                </div>
+                />
               </>
             )
           }
         />
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

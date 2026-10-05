@@ -11,7 +11,7 @@ import { formatAmount, formatPrice } from "../lib/utils";
 import { herzies, useWindowFocused } from "../tauri-bridge";
 import { Coin } from "./Coin";
 import { ExpansionInspectOverlay } from "./ExpansionInspectOverlay";
-import ItemInspectOverlay from "./ItemInspectOverlay";
+import ItemInspectOverlay, { inspectOrigin } from "./ItemInspectOverlay";
 import { ItemRow } from "./ItemRow";
 import { BankExpansionIcon } from "./icons/BankExpansionIcon";
 import { List } from "./List";
@@ -303,6 +303,7 @@ export function StoreView({
       {inspectItem && inspected && (
         <ItemInspectOverlay
           itemId={inspectItem}
+          origin={inspectOrigin(inspectItem)}
           onClose={() => setInspectItem(null)}
           equipped={equipped}
           meta={inspectedMeta}

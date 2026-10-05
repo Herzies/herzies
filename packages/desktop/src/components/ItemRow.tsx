@@ -1,5 +1,6 @@
 import { getItem } from "@herzies/shared";
 import { cn } from "../lib/utils";
+import { INSPECT_ORIGIN_ATTR } from "./ItemInspectOverlay";
 import { ItemTypeIcon } from "./icons/ItemTypeIcon";
 import type { TabColour } from "./TabButton";
 
@@ -34,6 +35,8 @@ export function ItemRow({
       <button
         type="button"
         onClick={() => onInspect(itemId)}
+        // Inspect grows the card out of this row's icon.
+        {...{ [INSPECT_ORIGIN_ATTR]: itemId }}
         className="group flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
         title={inspectTitle}
       >
