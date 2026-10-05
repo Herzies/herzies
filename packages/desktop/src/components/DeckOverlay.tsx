@@ -86,6 +86,8 @@ interface SlotHandlers {
   /** The worn copy being dragged out of its box, if one is. */
   draggingUnitId: string | null;
   onUnequip: (unitId: string) => void;
+  /** Shift+click on a filled box: Inspect, as its menu's. */
+  onInspectRequest: (unitId: string) => void;
   /** Pointer down on a filled box: the start of a drag out of the deck. */
   onDragStart: (unitId: string, e: React.PointerEvent) => void;
   /** Right-click on a filled box: its menu (Inspect), at the cursor. */
@@ -225,6 +227,7 @@ function DeckSlot({
   flyingUnitIds,
   draggingUnitId,
   onUnequip,
+  onInspectRequest,
   onDragStart,
   onMenuRequest,
   onPlaceRequest,
@@ -315,7 +318,11 @@ function DeckSlot({
         e.preventDefault();
         if (worn) onMenuRequest(worn.id, e.clientX, e.clientY);
       }}
-      onClick={() => worn && onUnequip(worn.id)}
+      onClick={(e) => {
+        if (!worn) return;
+        if (e.shiftKey) onInspectRequest(worn.id);
+        else onUnequip(worn.id);
+      }}
       className={hitClass}
     >
       <span

@@ -1885,6 +1885,15 @@ export function InventoryView({
                   }
                   handleEquip(unitId);
                 }}
+                onInspectRequest={(unitId) => {
+                  if (suppressClickRef.current) {
+                    suppressClickRef.current = false;
+                    return;
+                  }
+                  window.getSelection()?.removeAllRanges(); // Shift+click extends one
+                  const unit = units.find((u) => u.id === unitId);
+                  if (unit) openInspect(unit.itemId, unit.id);
+                }}
                 onDragStart={handleDeckPointerDown}
                 onMenuRequest={(unitId, x, y) => setDeckMenu({ unitId, x, y })}
                 onPlaceRequest={setSlotPicker}
