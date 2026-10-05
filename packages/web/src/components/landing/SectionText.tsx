@@ -44,12 +44,16 @@ export function SectionFrame({
   id,
   className,
   style,
+  overlayHeader,
   children,
   ref,
 }: {
   id?: string;
   className?: string;
   style?: React.CSSProperties;
+  /** Lay the site header over this section rather than above it (see
+   * globals.css), for a page whose first section fills the screen. */
+  overlayHeader?: boolean;
   children: React.ReactNode;
   ref?: React.Ref<HTMLElement>;
 }) {
@@ -58,6 +62,7 @@ export function SectionFrame({
       ref={ref}
       id={id}
       style={style}
+      data-overlay-header={overlayHeader ? "" : undefined}
       className={cn(
         "relative flex min-h-dvh w-full items-center overflow-x-clip py-16",
         className,

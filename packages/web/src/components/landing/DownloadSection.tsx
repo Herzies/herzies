@@ -32,8 +32,18 @@ function useFooterHeight() {
 /** The last screen: the download buttons. It's shorter than the others by
  * the footer's height, so that it and the footer together fill exactly one
  * screen, and its content sits centred above the footer once you've
- * scrolled to the bottom. */
-export function DownloadSection() {
+ * scrolled to the bottom. The download page is this same section. */
+export function DownloadSection({
+  page = false,
+  children,
+}: {
+  /** On the download page, where this is the whole page: its heading is the
+   * page's h1, and the header lies over it, so it too fills the screen. */
+  page?: boolean;
+  /** Small print under the buttons. */
+  children?: React.ReactNode;
+}) {
+  const Heading = page ? "h1" : "h2";
   const ref = useRef<HTMLElement>(null);
   useReveal(ref);
   const footerHeight = useFooterHeight();
@@ -42,6 +52,7 @@ export function DownloadSection() {
     <SectionFrame
       ref={ref}
       id="download"
+      overlayHeader={page}
       style={{ minHeight: `calc(100dvh - ${footerHeight}px)` }}
     >
       <div className="flex flex-col items-center text-center">
@@ -49,7 +60,7 @@ export function DownloadSection() {
           <p className="mb-2 text-sm uppercase tracking-widest text-text-dim">
             Open beta
           </p>
-          <h2 className={SECTION_TITLE}>Download Herzies</h2>
+          <Heading className={SECTION_TITLE}>Download Herzies</Heading>
           <p className="mx-auto mb-8 max-w-sm text-sm text-text-dim">
             Free for macOS and Windows. Hatch your herzie and press play.
           </p>
@@ -60,6 +71,7 @@ export function DownloadSection() {
           className="flex flex-col items-center"
         >
           <DownloadButtons />
+          {children}
         </div>
       </div>
     </SectionFrame>

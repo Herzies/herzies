@@ -60,7 +60,10 @@ export function Hero() {
         </p>
 
         <div data-hero-copy="">
-          <Link href="/download" className="inline-block mt-6">
+          <Link
+            href="/download"
+            className="mt-6 inline-block no-underline hover:no-underline"
+          >
             <Button className="inline">Download Herzies</Button>
           </Link>
         </div>
