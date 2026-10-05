@@ -9,6 +9,10 @@
 //   (an index into `palette`) — a per-pixel paint job, not one solid tint
 //   (see ItemTypeIcon.tsx). N is 24, for items and Town's visitor portraits
 //   (see VisitorIcon.tsx) alike.
+// - Names and descriptions: written straight into the catalog's source,
+//   ../../../shared/src/items.ts, then the shared package is rebuilt (the
+//   app runs on its build) and the Supabase functions' copy of it
+//   regenerated (scripts/vendor-shared.mjs), so all three stay in step.
 // - Card artwork: the pixel picture in a card's art window when it has no
 //   uploaded illustration — 32x24 (4:3), same dialect as the icons, in
 //   ../../src/components/icons/item-artwork-grids.json. An item without an
@@ -22,6 +26,7 @@
 //   only file the app ships. card-art.json beside it records both files,
 //   the artist credit and the settings, so the art can be re-framed from
 //   the original at any time. An item without one shows its icon instead.
+import { execFile } from "node:child_process";
 import { createServer } from "node:http";
 import {
   copyFileSync,
@@ -33,6 +38,7 @@ import {
 import { stripTypeScriptTypes } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import {
   BANK_EXPANSION,
   getItemColor,
@@ -47,6 +53,65 @@ import {
 import { TYPE_ICON_GRIDS } from "../../src/components/icons/type-icon-grids.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = resolve(__dirname, "../../../..");
+const ITEMS_SOURCE_PATH = resolve(REPO_ROOT, "packages/shared/src/items.ts");
+const run = promisify(execFile);
+
+const MAX_NAME = 40;
+const MAX_DESCRIPTION = 200;
+
+// A double-quoted TS string literal — the only form names and descriptions
+// take in items.ts, and one JSON can read and write.
+const STRING_LITERAL = String.raw`"(?:[^"\\\n]|\\.)*"`;
+
+/** Where an item's name and description literals sit in items.ts. An item's
+ * `id:` is a string or an exported constant (`id: SAFETY_PICK_ID`), so a
+ * constant is resolved through its `export const`. Null if the item isn't
+ * written in the expected shape — then it isn't edited, rather than guessed
+ * at. */
+function locateItemText(source, id) {
+  const constants = new Map(
+    [...source.matchAll(/^export const (\w+) = "([^"]+)";$/gm)].map((m) => [
+      m[2],
+      m[1],
+    ]),
+  );
+  const idForms = [`id: ${JSON.stringify(id)},`];
+  if (constants.has(id)) idForms.push(`id: ${constants.get(id)},`);
+  const catalog = source.indexOf("export const ITEMS: ItemDef[] = [");
+  const at = idForms
+    .map((form) => source.indexOf(`\n    ${form}`, catalog))
+    .find((i) => i >= 0);
+  if (catalog < 0 || at === undefined) return null;
+  const end = source.indexOf("\n  },", at);
+  const block = source.slice(at, end);
+  const field = (key) => {
+    const m = new RegExp(`\\n    ${key}:\\s*(${STRING_LITERAL}),`).exec(block);
+    if (!m) return null;
+    const start = at + m.index + m[0].indexOf(m[1]);
+    return { start, end: start + m[1].length, value: JSON.parse(m[1]) };
+  };
+  const name = field("name");
+  const description = field("description");
+  return name && description ? { name, description } : null;
+}
+
+/** Every catalog item's current name and description, from source (the
+ * build may be behind it). */
+function readItemTexts() {
+  const source = readFileSync(ITEMS_SOURCE_PATH, "utf8");
+  return Object.fromEntries(
+    ITEMS.map((item) => {
+      const text = locateItemText(source, item.id);
+      return [
+        item.id,
+        text
+          ? { name: text.name.value, description: text.description.value }
+          : null,
+      ];
+    }),
+  );
+}
 const GRIDS_PATH = resolve(
   __dirname,
   "../../src/components/icons/item-icon-grids.json",
@@ -251,6 +316,81 @@ const server = createServer(async (req, res) => {
 
     // The artwork derivation, for the page: the same module the app and this
     // server use, with its types stripped.
+    // An item's name and description: rewritten in items.ts, then the
+    // shared build and the Supabase copy are brought up to date.
+    if (req.method === "POST" && url.pathname.startsWith("/api/items/")) {
+      const id = decodeURIComponent(url.pathname.slice("/api/items/".length));
+      if (!ITEMS.some((item) => item.id === id)) {
+        sendJson(res, 404, { error: `Unknown item id: ${id}` });
+        return;
+      }
+      let payload;
+      try {
+        payload = JSON.parse((await readBody(req, 16 * 1024))?.toString("utf8") ?? "");
+      } catch {
+        sendJson(res, 400, { error: "Invalid JSON body" });
+        return;
+      }
+      // One line each: the card prints them as single paragraphs.
+      const clean = (v) =>
+        typeof v === "string" ? v.replace(/\s+/g, " ").trim() : "";
+      const name = clean(payload.name);
+      const description = clean(payload.description);
+      if (!name || name.length > MAX_NAME) {
+        sendJson(res, 400, { error: `Name must be 1-${MAX_NAME} characters` });
+        return;
+      }
+      if (!description || description.length > MAX_DESCRIPTION) {
+        sendJson(res, 400, {
+          error: `Description must be 1-${MAX_DESCRIPTION} characters`,
+        });
+        return;
+      }
+      const clash = ITEMS.find(
+        (item) =>
+          item.id !== id &&
+          readItemTexts()[item.id]?.name.toLowerCase() === name.toLowerCase(),
+      );
+      if (clash) {
+        sendJson(res, 400, { error: `"${name}" is already ${clash.id}'s name` });
+        return;
+      }
+      const source = readFileSync(ITEMS_SOURCE_PATH, "utf8");
+      const text = locateItemText(source, id);
+      if (!text) {
+        sendJson(res, 500, {
+          error: `Couldn't find ${id}'s name and description in items.ts`,
+        });
+        return;
+      }
+      // Description first: it comes after the name, so the name's offsets
+      // still hold once it's replaced.
+      let next = source;
+      next =
+        next.slice(0, text.description.start) +
+        JSON.stringify(description) +
+        next.slice(text.description.end);
+      next =
+        next.slice(0, text.name.start) +
+        JSON.stringify(name) +
+        next.slice(text.name.end);
+      writeFileSync(ITEMS_SOURCE_PATH, next);
+      // The app runs on the shared build; the edge functions on their copy.
+      try {
+        await run("pnpm", ["--filter", "@herzies/shared", "build"], {
+          cwd: REPO_ROOT,
+        });
+        await run("node", ["scripts/vendor-shared.mjs"], { cwd: REPO_ROOT });
+      } catch (err) {
+        sendJson(res, 500, {
+          error: `Saved to items.ts, but rebuilding failed: ${String(err.stderr || err.stdout || err.message).slice(0, 600)}`,
+        });
+        return;
+      }
+      sendJson(res, 200, { ok: true, name, description });
+      return;
+    }
+
     if (req.method === "GET" && url.pathname === "/lib/artwork-from-icon.js") {
       res.writeHead(200, {
         "Content-Type": "text/javascript; charset=utf-8",
@@ -311,10 +451,15 @@ const server = createServer(async (req, res) => {
       const stored = readGrids();
       // Every catalog item, painted or not (see seedFor), plus the
       // EXTRA_ICONS above.
+      const texts = readItemTexts();
       const items = ITEMS.map((item) => {
         return {
           id: item.id,
-          name: item.name,
+          name: texts[item.id]?.name ?? item.name,
+          description: texts[item.id]?.description ?? item.description,
+          // Whether its name and description can be edited (found in
+          // items.ts in the expected shape).
+          editableText: !!texts[item.id],
           // Sampled from this item's card art — offered in the UI as a
           // quick "start painting with this colour" pick, nothing more; it
           // is not what's currently on the icon (that's in `grids` below).

@@ -165,6 +165,31 @@
   #status.saved { color: #57c785; }
   #status.error { color: #e05d5d; }
 
+  #details {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-width: 640px;
+    margin: 8px 0 4px;
+  }
+  #details label { color: #8b8fa3; font-size: 12px; display: flex; flex-direction: column; gap: 4px; }
+  #details input, #details textarea {
+    font: inherit;
+    font-size: 13px;
+    padding: 6px 8px;
+    border-radius: 4px;
+    border: 1px solid #3d4258;
+    background: #05060a;
+    color: #e6e6e6;
+    resize: vertical;
+  }
+  #details .count { color: #5b5f73; font-size: 11px; align-self: flex-end; }
+  #details-actions { display: flex; gap: 10px; align-items: center; }
+  #details-status { color: #8b8fa3; font-size: 12px; }
+  #details-status.saved { color: #57c785; }
+  #details-status.error { color: #e05d5d; }
+  #details-status.dirty { color: #e0b84d; }
+
   .art-badge {
     margin-left: auto;
     font-size: 10px;
@@ -278,6 +303,25 @@
 
   <div id="main">
     <h2 id="editor-title">Select an item</h2>
+
+    <!-- A catalog item's name and description, written into
+         packages/shared/src/items.ts (see the server). -->
+    <div id="details" hidden>
+      <label>
+        Name
+        <input type="text" id="details-name" maxlength="40" />
+      </label>
+      <label>
+        Description
+        <textarea id="details-description" rows="2" maxlength="200"></textarea>
+        <span class="count" id="details-count"></span>
+      </label>
+      <div id="details-actions">
+        <button class="action primary" id="details-save-btn" type="button">Save name &amp; description</button>
+        <button class="action" id="details-revert-btn" type="button">Revert</button>
+        <span id="details-status"></span>
+      </div>
+    </div>
 
     <div id="tabs">
       <button type="button" data-tab="icon" class="active">Icon</button>
@@ -553,6 +597,7 @@ function selectItem(id) {
   if (state.buffers.icon?.dirty && !confirm("Discard unsaved changes to this icon?")) return;
   if (state.buffers.artwork?.dirty && !confirm("Discard unsaved changes to this artwork?")) return;
   if (state.artDirty && !confirm("Discard unsaved changes to this card illustration?")) return;
+  if (detailsDirty() && !confirm("Discard unsaved changes to this item's name and description?")) return;
   const stored = state.grids[id];
   state.selectedId = id;
   state.buffers.icon = { grid: [...stored.grid], palette: [...stored.palette], dirty: false };
@@ -561,6 +606,7 @@ function selectItem(id) {
   state.eraseMode = false;
   updateSelectedRowStyles();
   titleEl.textContent = itemById(id).name;
+  renderDetails();
   setStatus("");
   state.artDirty = false;
   // Only catalog items have a card (not the store's Bigger Bag or Town's
@@ -830,6 +876,89 @@ resetArtworkBtn.addEventListener("click", async () => {
   state.buffers.artwork = artworkBuffer(id);
   setPixelMode("artwork");
   setStatus("Back to the icon's artwork — the app will pick this up automatically", "saved");
+});
+
+// --- Name & description ---
+
+const detailsEl = document.getElementById("details");
+const detailsNameEl = document.getElementById("details-name");
+const detailsDescriptionEl = document.getElementById("details-description");
+const detailsCountEl = document.getElementById("details-count");
+const detailsSaveBtn = document.getElementById("details-save-btn");
+const detailsRevertBtn = document.getElementById("details-revert-btn");
+const detailsStatusEl = document.getElementById("details-status");
+
+function setDetailsStatus(text, kind) {
+  detailsStatusEl.textContent = text;
+  detailsStatusEl.className = kind || "";
+}
+
+function detailsDirty() {
+  const item = itemById(state.selectedId);
+  if (!item || detailsEl.hidden) return false;
+  return (
+    detailsNameEl.value !== item.name ||
+    detailsDescriptionEl.value !== item.description
+  );
+}
+
+function updateDetailsCount() {
+  detailsCountEl.textContent = `${detailsDescriptionEl.value.length}/200`;
+}
+
+// Fills the form from the selected item. Only catalog items whose text the
+// server found in items.ts can be edited.
+function renderDetails() {
+  const item = itemById(state.selectedId);
+  detailsEl.hidden = !item?.isItem || !item.editableText;
+  if (detailsEl.hidden) return;
+  detailsNameEl.value = item.name;
+  detailsDescriptionEl.value = item.description;
+  updateDetailsCount();
+  setDetailsStatus("");
+}
+
+for (const el of [detailsNameEl, detailsDescriptionEl]) {
+  el.addEventListener("input", () => {
+    updateDetailsCount();
+    setDetailsStatus(detailsDirty() ? "Unsaved changes" : "", detailsDirty() ? "dirty" : "");
+  });
+}
+
+detailsRevertBtn.addEventListener("click", renderDetails);
+
+detailsSaveBtn.addEventListener("click", async () => {
+  const id = state.selectedId;
+  if (!detailsDirty()) return;
+  detailsSaveBtn.disabled = true;
+  setDetailsStatus("Saving and rebuilding the shared package…");
+  try {
+    const res = await fetch(`/api/items/${encodeURIComponent(id)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: detailsNameEl.value,
+        description: detailsDescriptionEl.value,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || res.statusText);
+    const item = itemById(id);
+    item.name = data.name;
+    item.description = data.description;
+    if (state.selectedId === id) {
+      titleEl.textContent = data.name;
+      renderDetails();
+    }
+    // The sidebar label.
+    const label = sidebarListEl.querySelector(`.item-row[data-id="${id}"] span`);
+    if (label) label.textContent = item.unpainted ? `${data.name} (new)` : data.name;
+    setDetailsStatus("Saved — the app will pick this up automatically", "saved");
+  } catch (err) {
+    setDetailsStatus(`Error: ${err.message}`, "error");
+  } finally {
+    detailsSaveBtn.disabled = false;
+  }
 });
 
 // --- Card illustration ---
