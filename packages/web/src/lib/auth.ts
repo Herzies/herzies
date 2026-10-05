@@ -2,7 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 
 /**
- * Verify the Bearer token from the CLI and return the authenticated user ID.
+ * Verify the Bearer token from the desktop app and return the authenticated user ID.
  * Returns null if authentication fails.
  */
 export async function authenticateRequest(

@@ -1,7 +1,7 @@
 /**
- * CORS headers. The CLI (node fetch) and desktop (Tauri) clients aren't
- * browsers and don't need these, but they keep the function callable from the
- * web dashboard or local tooling during evaluation.
+ * CORS headers. The desktop (Tauri) client isn't a browser and doesn't need
+ * these, but they keep the function callable from the web dashboard or local
+ * tooling during evaluation.
  */
 export const corsHeaders = {
   "Access-Control-Allow-Origin": "*",

@@ -200,8 +200,8 @@ export function HerzieArt({
   const accent = ACCENT_COLORS[herzie.colorScheme] ?? ACCENT_COLORS.pink;
   const bounceOffset = animate && tick % 2 === 0 ? 0 : animate ? -4 : 0;
 
-  // In the CLI, the accessory line uses accent color, head uses main color,
-  // and for stage 2 limbs use accent, for stage 3 body uses accent.
+  // The accessory line uses accent color, head uses main color, and for
+  // stage 2 limbs use accent, for stage 3 body uses accent.
   const coloredLines = lines.map((line, i) => {
     if (i < accentLineCount) {
       // First line (accessory) always accent; for stage 3, body lines are also accent
