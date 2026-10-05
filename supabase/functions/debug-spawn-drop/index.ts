@@ -97,7 +97,9 @@ Deno.serve(async (request) => {
         "in",
         `(${NON_DROPPABLE_ITEM_IDS.map((id) => `"${id}"`).join(",")})`,
       );
-    let droppable = pool ? filterDroppablePool(pool) : [];
+    // null: ignore seasonal drop windows, so seasonal items can be tested
+    // outside their season.
+    let droppable = pool ? filterDroppablePool(pool, null) : [];
     if (diceOnly) {
       droppable = droppable.filter((item) => getItem(item.id)?.dice);
     }

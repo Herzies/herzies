@@ -55,7 +55,9 @@ export async function POST(request: Request) {
     );
   }
 
-  const { error } = await admin
+  // Conditional on the state we read: a lock racing an offer change must not
+  // resurrect a state that change just released.
+  const { data: locked, error } = await admin
     .from("trades")
     .update({
       state: newState,
@@ -63,12 +65,22 @@ export async function POST(request: Request) {
       // Keep the trade alive while both sides are actively progressing it.
       expires_at: new Date(Date.now() + 5 * 60_000).toISOString(),
     })
-    .eq("id", tradeId);
+    .eq("id", tradeId)
+    .eq("state", state)
+    .eq("updated_at", trade.updated_at)
+    .select("id")
+    .maybeSingle();
 
   if (error) {
     return NextResponse.json(
       { error: "Failed to lock trade" },
       { status: 500 },
+    );
+  }
+  if (!locked) {
+    return NextResponse.json(
+      { error: "The trade changed — try again" },
+      { status: 409 },
     );
   }
 

@@ -1,7 +1,10 @@
 import { getItem, RARITY_COLORS as ITEM_RARITY_COLORS } from "@herzies/shared";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import ItemInspectOverlay from "./ItemInspectOverlay";
+import ItemInspectOverlay, {
+  INSPECT_ORIGIN_ATTR,
+  inspectOrigin,
+} from "./ItemInspectOverlay";
 import { ItemTypeIcon } from "./icons/ItemTypeIcon";
 import { PixelIcon } from "./icons/PixelIcon";
 
@@ -64,13 +67,19 @@ export function VisitorHelp({
   colour: string;
 }) {
   const [anchor, setAnchor] = useState<DOMRect | null>(null);
-  const [inspectItemId, setInspectItemId] = useState<string | null>(null);
+  /** The reward card being inspected, and which reward line it came from. */
+  const [inspecting, setInspecting] = useState<{
+    itemId: string;
+    line: string;
+  } | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const open = anchor !== null;
 
   useEffect(() => {
-    if (!open) return;
+    // Paused while a reward card is inspected over it: the card owns clicks
+    // and Escape then, and flies back into this popover's icon on close.
+    if (!open || inspecting) return;
     const close = () => setAnchor(null);
     const handlePointerDown = (e: MouseEvent) => {
       const target = e.target as Node;
@@ -91,7 +100,7 @@ export function VisitorHelp({
       window.removeEventListener("keydown", handleKey);
       window.removeEventListener("scroll", close, true);
     };
-  }, [open]);
+  }, [open, inspecting]);
 
   const shown = rewards.flatMap((r) => {
     const item = getItem(r.itemId);
@@ -149,16 +158,16 @@ export function VisitorHelp({
                   <button
                     key={what}
                     type="button"
-                    // The popover closes as the preview opens: the preview is
-                    // a modal, and Escape or a click would close both anyway.
-                    onClick={() => {
-                      setAnchor(null);
-                      setInspectItemId(item.id);
-                    }}
+                    // The popover stays under the card, so it can fly back into
+                    // this icon — and stays open after.
+                    onClick={() =>
+                      setInspecting({ itemId: item.id, line: what })
+                    }
+                    {...{ [INSPECT_ORIGIN_ATTR]: `visitor-reward-${what}` }}
                     className="group flex cursor-pointer items-center gap-1 border-none bg-transparent p-0 text-left text-ui text-text-dim"
                   >
                     <span className="shrink-0">{what}:</span>
-                    <ItemTypeIcon item={item} className="h-4 w-4 shrink-0" />
+                    <ItemTypeIcon item={item} className="h-6 w-6 shrink-0" />
                     <span
                       className="truncate group-hover:underline"
                       style={{ color: ITEM_RARITY_COLORS[item.rarity] }}
@@ -176,10 +185,12 @@ export function VisitorHelp({
           document.body,
         )}
 
-      {inspectItemId && (
+      {inspecting && (
         <ItemInspectOverlay
-          itemId={inspectItemId}
-          onClose={() => setInspectItemId(null)}
+          itemId={inspecting.itemId}
+          origin={inspectOrigin(`visitor-reward-${inspecting.line}`)}
+          // The popover stays open: back where you were.
+          onClose={() => setInspecting(null)}
         />
       )}
     </>

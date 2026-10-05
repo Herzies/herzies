@@ -51,7 +51,24 @@ export async function POST(request: Request) {
     update.target_accepted = true;
   }
 
-  await admin.from("trades").update(update).eq("id", tradeId);
+  // Only if the trade is exactly as we read it. Otherwise the partner may
+  // have changed their offer in between (which resets both accepts), and this
+  // accept would land on a deal the player never saw.
+  const { data: accepted } = await admin
+    .from("trades")
+    .update(update)
+    .eq("id", tradeId)
+    .eq("state", "both_locked")
+    .eq("updated_at", trade.updated_at)
+    .select("id")
+    .maybeSingle();
+
+  if (!accepted) {
+    return NextResponse.json(
+      { error: "The trade changed — check the offer and accept again" },
+      { status: 409 },
+    );
+  }
 
   // Check if both have now accepted
   const otherAccepted = isInitiator

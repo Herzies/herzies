@@ -15,7 +15,7 @@ import { useEffect, useState } from "react";
 import { herzies } from "../tauri-bridge";
 import { Coin } from "./Coin";
 import { FloatingCoins } from "./FloatingCoins";
-import ItemInspectOverlay from "./ItemInspectOverlay";
+import ItemInspectOverlay, { inspectOrigin } from "./ItemInspectOverlay";
 import { ItemRow } from "./ItemRow";
 import { List } from "./List";
 import { SpeechBubble, useChatter } from "./SpeechBubble";
@@ -205,6 +205,7 @@ export function MerchantPanel({
       {inspected && (
         <ItemInspectOverlay
           itemId={inspected.itemId}
+          origin={inspectOrigin(inspected.itemId)}
           onClose={() => setInspectItemId(null)}
           equipped={equipped}
           meta={<Coin amount={inspected.price} />}

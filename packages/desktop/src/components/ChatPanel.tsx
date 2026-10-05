@@ -10,10 +10,11 @@ import {
   type MentionableChatUser,
   RARITY_LABELS,
 } from "@herzies/shared";
-import { createClient, type RealtimeChannel } from "@supabase/supabase-js";
+import type { RealtimeChannel } from "@supabase/supabase-js";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { closeChannel, openChannel, realtimeClient } from "../lib/realtime";
 import { chatUserColor, cn } from "../lib/utils";
-import { type ChatMessage, herzies } from "../tauri-bridge";
+import { type ChatMessage, herzies, useWindowFocused } from "../tauri-bridge";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import ItemInspectOverlay from "./ItemInspectOverlay";
 
@@ -242,7 +243,8 @@ export function ChatPanel({
   const [userRefs, setUserRefs] = useState<string[]>([]);
   const [cooldown, setCooldown] = useState(false);
   const [inspectItem, setInspectItem] = useState<string | null>(null);
-  const [inventory, setInventory] = useState<Inventory | null>(cachedInventory);
+  const inventory = cachedInventory;
+  const focused = useWindowFocused();
   const [showItemAutocomplete, setShowItemAutocomplete] = useState(false);
   const [autocompleteFilter, setAutocompleteFilter] = useState("");
   const [autocompleteIndex, setAutocompleteIndex] = useState(0);
@@ -366,7 +368,7 @@ export function ChatPanel({
     // Bumped on every (re)connect; status callbacks from a stale channel
     // compare against this so they can't trigger spurious reconnects.
     let generation = 0;
-    let supabase: ReturnType<typeof createClient> | null = null;
+    const topic = "chat";
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let reconnectAttempts = 0;
 
@@ -392,24 +394,28 @@ export function ChatPanel({
       const myGen = ++generation;
       // Tear down any previous channel so we don't stack subscriptions.
       if (channelRef.current) {
-        channelRef.current.unsubscribe();
+        closeChannel(channelRef.current);
         channelRef.current = null;
       }
       // Always pull a fresh token: a stale/expired access token is the most
       // common reason realtime quietly stops delivering messages.
       herzies
         .getAuthConfig()
-        .then((config) => {
+        .then(async (config) => {
           if (cancelled || myGen !== generation || !config) return;
-          if (!supabase) {
-            supabase = createClient(config.supabaseUrl, config.anonKey);
-          }
+          const supabase = realtimeClient(config.supabaseUrl, config.anonKey);
           supabase.realtime.setAuth(config.accessToken);
+          const fresh = await openChannel(supabase, topic, {
+            config: { private: true },
+          });
+          if (cancelled || myGen !== generation) {
+            closeChannel(fresh);
+            return;
+          }
 
           // Private Broadcast topic — requires auth (setAuth above) and the
           // Broadcast-authorization RLS policy on realtime.messages.
-          const channel = supabase
-            .channel("chat", { config: { private: true } })
+          const channel = fresh
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             .on(
               "broadcast" as any,
@@ -445,11 +451,6 @@ export function ChatPanel({
 
     connect();
 
-    // Fallback: even if realtime is wedged, periodically reconcile the chat.
-    const pollInterval = setInterval(() => {
-      if (!cancelled) herzies.chatFetch();
-    }, 15_000);
-
     // Reopening the tray window (or refocusing) should show fresh messages
     // immediately rather than waiting for the next poll.
     const onFocus = () => {
@@ -461,18 +462,23 @@ export function ChatPanel({
       cancelled = true;
       generation += 1;
       clearReconnect();
-      clearInterval(pollInterval);
       window.removeEventListener("focus", onFocus);
       if (channelRef.current) {
-        channelRef.current.unsubscribe();
+        closeChannel(channelRef.current);
         channelRef.current = null;
       }
     };
   }, [isOnline]);
 
+  // Fallback: even if realtime is wedged, periodically reconcile the chat —
+  // only while someone can see it. Hidden, it was 4 calls a minute for nothing:
+  // the refetch on focus above brings it up to date the moment the window
+  // opens.
   useEffect(() => {
-    setInventory(cachedInventory);
-  }, [cachedInventory]);
+    if (!isOnline || !focused) return;
+    const pollInterval = setInterval(() => herzies.chatFetch(), 15_000);
+    return () => clearInterval(pollInterval);
+  }, [isOnline, focused]);
 
   // "c" shortcut (or any caller) asked for the chat to open: focusing the
   // input expands the panel via its onFocus handler.
@@ -640,8 +646,9 @@ export function ChatPanel({
     switch (actionId) {
       case "add": {
         if (!canAddFriend(code)) return;
-        const result = await herzies.friendAdd(code!);
-        onActivity?.(result.message);
+        const result = await herzies.friendAdd(code!, userMenu.username);
+        // Success is logged by the backend, with their name.
+        if (!result.success) onActivity?.(result.message);
         break;
       }
       case "profile": {
@@ -807,7 +814,7 @@ export function ChatPanel({
   };
 
   chatKeyStateRef.current = {
-    inventory: cachedInventory ?? inventory,
+    inventory,
     mentionableUsers,
     userMenu,
     expanded,

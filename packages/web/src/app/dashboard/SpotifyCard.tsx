@@ -55,7 +55,7 @@ export function SpotifyCard({
         <div>
           <p className="text-[13px] text-text-dim mb-3">
             connect your Spotify account so your herzie earns XP automatically,
-            even when you're not running the CLI.
+            even when the herzies app isn't running.
           </p>
           <a
             href="/api/spotify/connect"

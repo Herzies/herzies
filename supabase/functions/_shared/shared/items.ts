@@ -22,9 +22,11 @@ import {
   col,
   cross,
   dot3,
+  GOLD_RAMP,
   LIGHT,
   normV,
   OCEAN_RAMP,
+  PUMPKIN_RAMP,
   RAINBOW_RAMP,
   RAMP_ITEM,
   rotX,
@@ -35,7 +37,7 @@ import {
   type V3,
   VIOLET_RAMP,
 } from "./ascii3d.ts";
-import { BOSS_DAMAGE_PER_MINUTE } from "./types.ts";
+import { BOSS_DAMAGE_PER_MINUTE, type Stage } from "./types.ts";
 
 export type Rarity = "common" | "uncommon" | "rare" | "legendary" | "mythic";
 
@@ -470,7 +472,24 @@ export type EquipRejection =
   | "not-equipped"
   | "max-modifiers"
   | "missing-side"
-  | "no-slot";
+  | "no-slot"
+  | "stage-too-low";
+
+/** The stage gate an equip is checked against: the item's `minStage` and the
+ * herzie's current stage. Like `equipSlot`, it's passed in because the server
+ * reads it from the items row and the client from the bundled catalog. */
+export interface StageGate {
+  minStage?: number;
+  stage: number;
+}
+
+/** Whether a herzie at `stage` is grown enough to wear `item`. */
+export function meetsMinStage(
+  item: Pick<ItemDef, "minStage"> | undefined,
+  stage: number,
+): boolean {
+  return stage >= (item?.minStage ?? 1);
+}
 
 export type EquipOutcome =
   | { ok: true; units: ItemUnit[] }
@@ -500,6 +519,7 @@ export function applyEquip(
   action: "equip" | "unequip",
   equipSlot: EquipSlot | undefined,
   side?: GroundSide,
+  gate?: StageGate,
 ): EquipOutcome {
   const unit = units.find((u) => u.id === unitId);
   if (!unit) return { ok: false, reason: "not-owned" };
@@ -516,6 +536,9 @@ export function applyEquip(
   }
 
   if (!equipSlot) return { ok: false, reason: "no-slot" };
+  if (gate && gate.stage < (gate.minStage ?? 1)) {
+    return { ok: false, reason: "stage-too-low" };
+  }
 
   let slot: UnitSlot;
   if (equipSlot === "ground") {
@@ -818,6 +841,44 @@ export interface ItemDef {
    * Safety Pick). Never worn and never clicked on its own — it's only
    * offered inside the dice upgrade window. */
   protection?: boolean;
+  /** The stage a herzie must have reached to wear this. Body items are 3: the
+   * neckwear sits where the head meets the body, which a herzie only grows
+   * at stage 3. */
+  minStage?: Stage;
+  /** A seasonal item only drops inside this yearly window (UTC, inclusive,
+   * may wrap the new year). Copies already owned are unaffected outside it. */
+  dropWindow?: DropWindow;
+}
+
+/** [month 1-12, day 1-31]. */
+export type MonthDay = readonly [number, number];
+
+export interface DropWindow {
+  from: MonthDay;
+  to: MonthDay;
+}
+
+/** When the Halloween items drop: the run-up to Halloween through the Day of
+ * the Dead. */
+export const HALLOWEEN_DROP_WINDOW: DropWindow = {
+  from: [10, 20],
+  to: [11, 2],
+};
+
+/** Whether `item` can drop at `now`. Items without a window always can. */
+export function isInDropWindow(
+  item: Pick<ItemDef, "dropWindow"> | undefined,
+  now: Date,
+): boolean {
+  const w = item?.dropWindow;
+  if (!w) return true;
+  const key = (m: number, d: number) => m * 100 + d;
+  const today = key(now.getUTCMonth() + 1, now.getUTCDate());
+  const from = key(...w.from);
+  const to = key(...w.to);
+  return from <= to
+    ? today >= from && today <= to
+    : today >= from || today <= to;
 }
 
 export function getItemCategory(item: Pick<ItemDef, "category">): ItemCategory {
@@ -892,6 +953,8 @@ export interface ItemSet {
    * instead of the item's usual solid dominant-colour tint, so set members
    * read as related regardless of their individual icon depiction. */
   visual?: { gradient: readonly string[] };
+  /** Members whose icon keeps its own painted colours instead of `visual`. */
+  visualExempt?: string[];
 }
 
 export const ITEM_SETS: ItemSet[] = [
@@ -902,10 +965,28 @@ export const ITEM_SETS: ItemSet[] = [
     itemIds: ["rainbow-headband", "prism"],
     visual: { gradient: RAINBOW_RAMP },
   },
+  {
+    id: "haunted",
+    name: "Haunted",
+    effect: "A spooky fog rolls in",
+    itemIds: ["witch-hat", "pumpkin-spice", "jack-o-lantern"],
+    visual: { gradient: PUMPKIN_RAMP },
+    visualExempt: ["witch-hat"],
+  },
 ];
 
 export function getItemSet(itemId: string): ItemSet | undefined {
   return ITEM_SETS.find((set) => set.itemIds.includes(itemId));
+}
+
+/** The set gradient this item's small icon is filled with, if any — its
+ * set's `visual`, unless the item is exempt from it. */
+export function getItemIconGradient(
+  itemId: string,
+): readonly string[] | undefined {
+  const set = getItemSet(itemId);
+  if (set?.visualExempt?.includes(itemId)) return undefined;
+  return set?.visual?.gradient;
 }
 
 /** Whether every item in `set` is currently equipped. */
@@ -1993,6 +2074,84 @@ function renderRainbowHeadbandFrame(yAngle: number): string[] {
   );
 }
 
+// --- Neckwear cards ---
+// Beads strung along the lower half of a circle, like a necklace laid flat.
+function necklaceBeadsIcon(
+  ix: number,
+  iy: number,
+  count: number,
+  beadR: number,
+  color: (i: number) => string,
+): TexSample | null {
+  const R = 0.24;
+  for (let i = 0; i < count; i++) {
+    const a = 0.25 + (i / (count - 1)) * (Math.PI - 0.5);
+    const d = Math.sqrt(
+      (ix - R * Math.cos(a)) ** 2 + (iy + 0.06 - R * Math.sin(a)) ** 2,
+    );
+    if (d < beadR)
+      return { bright: d < beadR * 0.5 ? 0.95 : 0.75, color: color(i) };
+  }
+  return null;
+}
+
+function goldChainCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  const dm = Math.sqrt(ix * ix + (iy - 0.26) ** 2);
+  if (dm < 0.08) return { bright: dm < 0.04 ? 0.95 : 0.8, color: GOLD_RAMP[1] };
+  return necklaceBeadsIcon(ix, iy, 11, 0.045, (i) =>
+    i % 2 === 0 ? GOLD_RAMP[2] : GOLD_RAMP[3],
+  );
+}
+
+function renderGoldChainFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#F5C518",
+    "#A67C00",
+    "#6E5200",
+    goldChainCardIcon,
+  );
+}
+
+function pearlNecklaceCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  return necklaceBeadsIcon(ix, iy, 9, 0.055, (i) =>
+    i % 2 === 0 ? "#FBF7EE" : "#EDE4D3",
+  );
+}
+
+function renderPearlNecklaceFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#e8e2d0",
+    "#8f8672",
+    "#5c5648",
+    pearlNecklaceCardIcon,
+  );
+}
+
+function bowtieCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  const ax = Math.abs(ix);
+  if (ax < 0.06 && Math.abs(iy) < 0.07)
+    return { bright: 0.7, color: "#A61E1E" };
+  // Each wing widens from the knot out to its tip.
+  if (ax < 0.28 && Math.abs(iy) < 0.04 + ax * 0.55)
+    return { bright: 0.85, color: "#E03131" };
+  return null;
+}
+
+function renderBowtieFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#E03131",
+    "#8a3a3a",
+    "#4a2020",
+    bowtieCardIcon,
+  );
+}
+
 // --- Boombox card ---
 function boomboxNoteIcon(u: number, v: number): TexSample | null {
   const [ix, iy] = iconUV(u, v);
@@ -2182,6 +2341,141 @@ function renderThanksForAllTheFishFrame(yAngle: number): string[] {
   return renderGradientCardFrame(yAngle, TEAL_RAMP);
 }
 
+// --- Halloween cards ---
+function renderPumpkinSpiceFrame(yAngle: number): string[] {
+  return renderGradientCardFrame(yAngle, PUMPKIN_RAMP);
+}
+
+function witchHatCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  // Brim: a flat ellipse.
+  if ((ix / 0.3) ** 2 + ((iy - 0.18) / 0.06) ** 2 < 1)
+    return { bright: 0.8, color: "#8E6FB0" };
+  if (iy > 0.06 && iy < 0.13 && Math.abs(ix) < 0.13)
+    return { bright: 0.9, color: "#F27B13" };
+  // Cone, its tip leaning right.
+  const t = (0.13 - iy) / 0.42; // 0 at the band, 1 at the tip
+  if (t >= 0 && t <= 1) {
+    const cx = 0.12 * t * t;
+    if (Math.abs(ix - cx) < 0.13 * (1 - t) + 0.015)
+      return { bright: 0.85, color: "#8E6FB0" };
+  }
+  return null;
+}
+
+function renderWitchHatFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#8E6FB0",
+    "#5A3D7A",
+    "#2E1F40",
+    witchHatCardIcon,
+  );
+}
+
+function fangsCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  for (const cx of [-0.1, 0.1]) {
+    // A downward-pointing triangle per fang.
+    const t = (iy + 0.12) / 0.3; // 0 at the gum, 1 at the point
+    if (t >= 0 && t <= 1 && Math.abs(ix - cx) < 0.07 * (1 - t))
+      return { bright: 0.95, color: "#FFFFFF" };
+  }
+  if (iy > -0.18 && iy < -0.11 && Math.abs(ix) < 0.22)
+    return { bright: 0.7, color: "#C0392B" };
+  return null;
+}
+
+function renderFangsFrame(yAngle: number): string[] {
+  return renderIconCard(yAngle, "#E05050", "#8a3a3a", "#4a2020", fangsCardIcon);
+}
+
+function jackOLanternCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  if (Math.abs(ix - 0.02) < 0.03 && iy > -0.3 && iy < -0.2)
+    return { bright: 0.8, color: "#4E8A2A" };
+  if ((ix / 0.27) ** 2 + ((iy - 0.02) / 0.22) ** 2 > 1) return null;
+  const eye = (cx: number) =>
+    Math.abs(ix - cx) < 0.05 && iy > -0.08 && iy < -0.08 + 0.07;
+  const grin = iy > 0.06 && iy < 0.12 && Math.abs(ix) < 0.15;
+  if (eye(-0.1) || eye(0.1) || grin) return { bright: 0.95, color: "#FFD43B" };
+  return { bright: 0.75, color: "#F27B13" };
+}
+
+function renderJackOLanternFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#F27B13",
+    "#C4570A",
+    "#5A2A05",
+    jackOLanternCardIcon,
+  );
+}
+
+function ghostCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  const inHead = ix * ix + (iy + 0.08) ** 2 < 0.17 ** 2;
+  const inBody = Math.abs(ix) < 0.17 && iy > -0.08 && iy < 0.2;
+  // Wavy hem: scallops cut into the bottom edge.
+  const hem = iy > 0.2 - (0.04 * (1 + Math.cos(ix * 38))) / 2;
+  if (!(inHead || inBody) || (inBody && !inHead && hem)) return null;
+  const eye = (cx: number) => (ix - cx) ** 2 + (iy + 0.1) ** 2 < 0.035 ** 2;
+  if (eye(-0.06) || eye(0.06)) return { bright: 0.4, color: "#1A1A2E" };
+  return { bright: 0.95, color: "#F2F2FA" };
+}
+
+function renderGhostFrame(yAngle: number): string[] {
+  return renderIconCard(yAngle, "#D8D8E6", "#8a8a9a", "#3a3a4a", ghostCardIcon);
+}
+
+function bloodMoonCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  const bat = Math.abs(iy + 0.2) < 0.025 && Math.abs(ix + 0.14) < 0.07;
+  if (bat) return { bright: 0.5, color: "#2A0E08" };
+  const d = Math.sqrt((ix - 0.04) ** 2 + (iy - 0.03) ** 2);
+  if (d < 0.23)
+    return {
+      bright: d < 0.15 ? 0.9 : 0.65,
+      color: d < 0.15 ? "#E8552B" : "#9C2F14",
+    };
+  return null;
+}
+
+function renderBloodMoonFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#E8552B",
+    "#9C2F14",
+    "#3A1008",
+    bloodMoonCardIcon,
+  );
+}
+
+function trickOrTreatCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  // A wrapped sweet: a round middle with twisted ends either side.
+  if ((ix / 0.13) ** 2 + (iy / 0.09) ** 2 < 1) {
+    return {
+      bright: 0.9,
+      color: Math.floor((ix + 0.13) / 0.05) % 2 === 0 ? "#F27B13" : "#FFFFFF",
+    };
+  }
+  const ax = Math.abs(ix);
+  if (ax > 0.12 && ax < 0.25 && Math.abs(iy) < (ax - 0.12) * 0.8 + 0.02)
+    return { bright: 0.8, color: "#8E6FB0" };
+  return null;
+}
+
+function renderTrickOrTreatFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#F27B13",
+    "#C4570A",
+    "#5A2A05",
+    trickOrTreatCardIcon,
+  );
+}
+
 function generateFrames(
   renderFn: (angle: number) => string[],
   count = 36,
@@ -2210,6 +2504,9 @@ const powerDice3Frames = generateFrames((a) =>
 const safetyPickFrames = generateFrames(renderSafetyPickFrame);
 const headphonesFrames = generateFrames(renderHeadphonesFrame);
 const rainbowHeadbandFrames = generateFrames(renderRainbowHeadbandFrame);
+const goldChainFrames = generateFrames(renderGoldChainFrame);
+const pearlNecklaceFrames = generateFrames(renderPearlNecklaceFrame);
+const bowtieFrames = generateFrames(renderBowtieFrame);
 const boomboxFrames = generateFrames(renderBoomboxFrame);
 const goodEyeSniperFrames = generateFrames(renderGoodEyeSniperFrame);
 const prismFrames = generateFrames(renderPrismFrame);
@@ -2219,6 +2516,13 @@ const thanksForAllTheFishFrames = generateFrames(
   renderThanksForAllTheFishFrame,
 );
 const spiritOrbFrames = generateFrames(renderSpiritOrbFrame);
+const witchHatFrames = generateFrames(renderWitchHatFrame);
+const fangsFrames = generateFrames(renderFangsFrame);
+const pumpkinSpiceFrames = generateFrames(renderPumpkinSpiceFrame);
+const jackOLanternFrames = generateFrames(renderJackOLanternFrame);
+const ghostFrames = generateFrames(renderGhostFrame);
+const bloodMoonFrames = generateFrames(renderBloodMoonFrame);
+const trickOrTreatFrames = generateFrames(renderTrickOrTreatFrame);
 
 // --- Bigger Bag: a drawstring sack, ray-marched rather than built from quads ---
 //
@@ -2509,6 +2813,39 @@ export const ITEMS: ItemDef[] = [
     sellPrice: 100,
   },
   {
+    id: "gold-chain",
+    name: "Certified Drip",
+    description: "Heavy gold around the neck. Your herzie has gone platinum.",
+    rarity: "rare",
+    frames: goldChainFrames,
+    equipable: true,
+    equipSlot: "body",
+    minStage: 3,
+    sellPrice: 250,
+  },
+  {
+    id: "pearl-necklace",
+    name: "Clam's Finest",
+    description: "A string of pearls, for the herzie with refined taste.",
+    rarity: "uncommon",
+    frames: pearlNecklaceFrames,
+    equipable: true,
+    equipSlot: "body",
+    minStage: 3,
+    sellPrice: 100,
+  },
+  {
+    id: "bowtie",
+    name: "Black Tie Optional",
+    description: "Ignored the dress code anyway. Red bowtie, front and centre.",
+    rarity: "uncommon",
+    frames: bowtieFrames,
+    equipable: true,
+    equipSlot: "body",
+    minStage: 3,
+    sellPrice: 100,
+  },
+  {
     id: "boombox",
     name: "Box of Boom",
     description: "Grants your herzie real street cred.",
@@ -2561,6 +2898,88 @@ export const ITEMS: ItemDef[] = [
     equipable: true,
     equipSlot: "color",
     sellPrice: 100,
+  },
+  // --- Halloween: seasonal drops (see HALLOWEEN_DROP_WINDOW) ---
+  {
+    id: "witch-hat",
+    name: "Hex Appeal",
+    description:
+      "A pointy hat with a floppy tip. Spin your herzie and watch it go.",
+    rarity: "uncommon",
+    frames: witchHatFrames,
+    equipable: true,
+    equipSlot: "head",
+    sellPrice: 100,
+    dropWindow: HALLOWEEN_DROP_WINDOW,
+  },
+  {
+    id: "fangs",
+    name: "Fang Club",
+    description: "Two little fangs. Your herzie vants to suck your playlist.",
+    rarity: "uncommon",
+    frames: fangsFrames,
+    equipable: true,
+    equipSlot: "face",
+    sellPrice: 100,
+    dropWindow: HALLOWEEN_DROP_WINDOW,
+  },
+  {
+    id: "pumpkin-spice",
+    name: "Pumpkin Spice",
+    description: "Candle-lit orange down to a dark rind. Very seasonal.",
+    rarity: "uncommon",
+    frames: pumpkinSpiceFrames,
+    equipable: true,
+    equipSlot: "color",
+    sellPrice: 100,
+    dropWindow: HALLOWEEN_DROP_WINDOW,
+  },
+  {
+    id: "jack-o-lantern",
+    name: "Jack",
+    description:
+      "A carved pumpkin that floats along beside your herzie, grinning.",
+    rarity: "rare",
+    frames: jackOLanternFrames,
+    equipable: true,
+    equipSlot: "ground",
+    sellPrice: 250,
+    dropWindow: HALLOWEEN_DROP_WINDOW,
+  },
+  {
+    id: "ghost",
+    name: "Boo-tleg",
+    description: "A friendly little sheet ghost. Haunts your herzie, nicely.",
+    rarity: "rare",
+    frames: ghostFrames,
+    equipable: true,
+    equipSlot: "ground",
+    sellPrice: 250,
+    dropWindow: HALLOWEEN_DROP_WINDOW,
+  },
+  {
+    id: "blood-moon",
+    name: "Blood Moon",
+    description: "Hangs a huge red moon in your herzie's sky. Bats included.",
+    rarity: "rare",
+    frames: bloodMoonFrames,
+    equipable: true,
+    equipSlot: "scenery",
+    sellPrice: 250,
+    dropWindow: HALLOWEEN_DROP_WINDOW,
+  },
+  {
+    id: "trick-or-treat",
+    name: "Trick or Treat",
+    description: "A pocketful of sweets. Somehow the drops feel luckier.",
+    rarity: "uncommon",
+    frames: trickOrTreatFrames,
+    equipable: true,
+    equipSlot: "modifier",
+    sellPrice: 100,
+    stats: { luck: 5 },
+    modifier: { label: "Luck", tooltip: "+5 luck: slightly better drop odds" },
+    dropWindow: HALLOWEEN_DROP_WINDOW,
   },
   {
     id: "poseidons-gift",
@@ -2686,9 +3105,16 @@ export function bossDamagePerMinute(stats: HerzieStats): number {
  * block that user from ever getting another drop. */
 export function filterDroppablePool<T extends { id: string; rarity: string }>(
   rows: T[],
+  /** Drops seasonal items outside their window as of this date. null keeps
+   * them all (debug tooling, so a seasonal drop can be tested any time). */
+  now: Date | null = new Date(),
 ): (T & { rarity: Rarity })[] {
-  return rows.filter(
-    (r): r is T & { rarity: Rarity } =>
-      getItem(r.id) !== undefined && r.rarity in RARITY_DROP_WEIGHTS,
-  );
+  return rows.filter((r): r is T & { rarity: Rarity } => {
+    const item = getItem(r.id);
+    return (
+      item !== undefined &&
+      r.rarity in RARITY_DROP_WEIGHTS &&
+      (now === null || isInDropWindow(item, now))
+    );
+  });
 }

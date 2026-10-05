@@ -36,7 +36,7 @@ export const DECK_UNIT_ATTR = "data-deck-unit";
  * (the clip-path on the visible card clips its hit-testing too). `group` lets
  * the card respond to the hover the whole area receives. */
 const SLOT_HIT =
-  "group flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center border-none p-0";
+  "group flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center border-none p-0";
 
 const groupByLabel = (label: string): DeckSlotGroup => {
   const group = DECK_SLOT_GROUPS.find((g) => g.label === label);
@@ -86,6 +86,8 @@ interface SlotHandlers {
   /** The worn copy being dragged out of its box, if one is. */
   draggingUnitId: string | null;
   onUnequip: (unitId: string) => void;
+  /** Shift+click on a filled box: Inspect, as its menu's. */
+  onInspectRequest: (unitId: string) => void;
   /** Pointer down on a filled box: the start of a drag out of the deck. */
   onDragStart: (unitId: string, e: React.PointerEvent) => void;
   /** Right-click on a filled box: its menu (Inspect), at the cursor. */
@@ -97,111 +99,113 @@ interface SlotHandlers {
  * text lines up with the view's edge like "Herzie" and "Deck". */
 export const OVERLAY_PANEL = "pointer-events-auto py-1.5";
 
-/** The deck's "Deck" title. A whole-pixel line height (text-ui's default is
- * 16.5px): the icons below are crisp-edged pixel art, and a half-pixel offset
- * snaps their rows unevenly — they read as warped. */
-export const OVERLAY_TITLE = "text-ui leading-4 font-bold text-text-dim";
-
-/** One section of the deck: its boxes, unlabelled — each empty box names its
- * slot on hover. While a card that belongs here is dragged, the section is
- * tinted, and the one box it would land in lights up. */
+/** One section of the deck: a title naming it and how many of its slots are
+ * filled, above its row of boxes (each empty box also names its slot on
+ * hover). While a card that belongs here is dragged, the row is tinted, and
+ * the one box it would land in lights up. */
 function DeckGroup({
   group,
+  className,
   ...handlers
 }: SlotHandlers & {
   group: DeckSlotGroup;
+  className?: string;
 }) {
   const { equipped, drag } = handlers;
   const target = drag !== null && groupAccepts(group, drag.equipSlot);
+  const filled =
+    group.slots === "modifier"
+      ? (equipped.modifier?.length ?? 0)
+      : group.slots.filter((slot) => equipped[slot]).length;
 
   return (
-    // No `gap`: the spacing between boxes is baked into each slot's own hit
-    // area (see SLOT_HIT), so the pointer is always over some slot while it
-    // crosses the row.
-    <div
-      className={cn(
-        "-mx-0.5 flex",
-        target && (drag.inZone ? "bg-cyan/15" : "bg-cyan/5"),
-      )}
-    >
-      {Array.from({ length: group.count }, (_, i) => {
-        const storedSlot =
-          group.slots === "modifier" ? undefined : group.slots[i];
-        const itemId = storedSlot
-          ? equipped[storedSlot]
-          : equipped.modifier?.[i];
-        // Modifiers have no per-box identity: `applyEquip` appends to the
-        // list, so an item picked from *any* empty modifier box lands at
-        // the first free position rather than at the box that was clicked.
-        const equipSlot = storedSlot ? equipSlotFor(storedSlot) : "modifier";
-        const side = storedSlot ? groundSideOf(storedSlot) : undefined;
-        // How many boxes in this group take the *same* equip slot, which is
-        // what decides whether a box needs a "#N" to be identifiable.
-        const alike =
-          group.slots === "modifier"
-            ? group.count
-            : group.slots.filter((s) => equipSlotFor(s) === equipSlot).length;
-        // Exactly one box lights up: where the card would land. Modifier
-        // boxes have no identity of their own, so that's the next free one.
-        const landing = drag?.inZone ? drag.landing : null;
-        const hovered =
-          landing !== null &&
-          landing.equipSlot === equipSlot &&
-          (equipSlot === "modifier"
-            ? i === (equipped.modifier?.length ?? 0)
-            : landing.side === side);
-        return (
-          <DeckSlot
-            key={i}
-            itemId={itemId}
-            fallbackType={group.itemType}
-            equipSlot={equipSlot}
-            side={side}
-            slotNumber={i + 1}
-            slotCount={alike}
-            hovered={hovered}
-            {...handlers}
-            onPlaceRequest={(x, y) =>
-              handlers.onPlaceRequest({
-                equipSlot,
-                side,
-                label: EQUIP_SLOT_LABELS[equipSlot],
-                x,
-                y,
-              })
-            }
-          />
-        );
-      })}
-    </div>
-  );
-}
-
-/** The deck: one row of boxes beneath the herzie, so a change shows on the
- * creature right above it the moment it's made. */
-export function DeckOverlay(props: SlotHandlers) {
-  return (
-    // mb-2: breathing room between the deck and the bag below.
-    <div className="pointer-events-auto mb-2 pt-1.5">
-      <Tooltip label="Place cards here">
-        <div className={cn(OVERLAY_TITLE, "cursor-default")}>Deck</div>
-      </Tooltip>
-      {/* One row, the sections spread across the full width: the empty
-          boxes' hover labels name each one. */}
-      {/* No top padding: with the 2px the tooltip's inline wrapper adds under
-          the title, the title-to-boxes gap matches the bag's title-to-divider
-          one — the divider being where the bag visibly starts. */}
-      <div className="flex justify-between pb-1.5">
-        {DECK_SLOT_ORDER.map((label) => (
-          <DeckGroup key={label} group={groupByLabel(label)} {...props} />
-        ))}
+    <div className={className}>
+      <div className="mb-1 text-[10px] text-text-dim">
+        {group.label} ({filled}/{group.count})
+      </div>
+      {/* No `gap`: the spacing between boxes is baked into each slot's own hit
+        area (see SLOT_HIT), so the pointer is always over some slot while it
+        crosses the row. The negative left margin puts the first box's visible
+        edge in line with the title above it. */}
+      <div
+        className={cn(
+          "-ml-0.5 flex w-fit",
+          target && (drag.inZone ? "bg-cyan/15" : "bg-cyan/5"),
+        )}
+      >
+        {Array.from({ length: group.count }, (_, i) => {
+          const storedSlot =
+            group.slots === "modifier" ? undefined : group.slots[i];
+          const itemId = storedSlot
+            ? equipped[storedSlot]
+            : equipped.modifier?.[i];
+          // Modifiers have no per-box identity: `applyEquip` appends to the
+          // list, so an item picked from *any* empty modifier box lands at
+          // the first free position rather than at the box that was clicked.
+          const equipSlot = storedSlot ? equipSlotFor(storedSlot) : "modifier";
+          const side = storedSlot ? groundSideOf(storedSlot) : undefined;
+          // How many boxes in this group take the *same* equip slot, which is
+          // what decides whether a box needs a "#N" to be identifiable.
+          const alike =
+            group.slots === "modifier"
+              ? group.count
+              : group.slots.filter((s) => equipSlotFor(s) === equipSlot).length;
+          // Exactly one box lights up: where the card would land. Modifier
+          // boxes have no identity of their own, so that's the next free one.
+          const landing = drag?.inZone ? drag.landing : null;
+          const hovered =
+            landing !== null &&
+            landing.equipSlot === equipSlot &&
+            (equipSlot === "modifier"
+              ? i === (equipped.modifier?.length ?? 0)
+              : landing.side === side);
+          return (
+            <DeckSlot
+              key={i}
+              itemId={itemId}
+              fallbackType={group.itemType}
+              equipSlot={equipSlot}
+              side={side}
+              slotNumber={i + 1}
+              slotCount={alike}
+              hovered={hovered}
+              {...handlers}
+              onPlaceRequest={(x, y) =>
+                handlers.onPlaceRequest({
+                  equipSlot,
+                  side,
+                  label: EQUIP_SLOT_LABELS[equipSlot],
+                  x,
+                  y,
+                })
+              }
+            />
+          );
+        })}
       </div>
     </div>
   );
 }
 
-/** Left to right: what's worn on the body first, then the herzie's look,
- * then the Modifiers, the longest run. */
+/** The deck, under the Herzie view's "Deck" tab: its sections in two
+ * columns, Modifiers (the longest run) across the bottom. */
+export function DeckOverlay(props: SlotHandlers) {
+  return (
+    <div className="pointer-events-auto grid w-full grid-cols-2 gap-x-4 gap-y-1.5 pt-1.5">
+      {DECK_SLOT_ORDER.map((label) => (
+        <DeckGroup
+          key={label}
+          group={groupByLabel(label)}
+          className={label === "Modifiers" ? "col-span-2" : undefined}
+          {...props}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** Reading order, two to a row: what's worn on the body first, then the
+ * herzie's look, then the Modifiers, the longest run, on a row of their own. */
 const DECK_SLOT_ORDER = [
   "Equipment",
   "Accessories",
@@ -223,6 +227,7 @@ function DeckSlot({
   flyingUnitIds,
   draggingUnitId,
   onUnequip,
+  onInspectRequest,
   onDragStart,
   onMenuRequest,
   onPlaceRequest,
@@ -281,7 +286,7 @@ function DeckSlot({
         >
           <span
             className={cn(
-              "h-4 w-4 bg-text-dim/20 transition-colors group-hover:bg-text-dim/35",
+              "h-6 w-6 bg-text-dim/20 transition-colors group-hover:bg-text-dim/35",
             )}
             style={{ clipPath: CARD_SHAPE_CLIP }}
           />
@@ -313,12 +318,16 @@ function DeckSlot({
         e.preventDefault();
         if (worn) onMenuRequest(worn.id, e.clientX, e.clientY);
       }}
-      onClick={() => worn && onUnequip(worn.id)}
+      onClick={(e) => {
+        if (!worn) return;
+        if (e.shiftKey) onInspectRequest(worn.id);
+        else onUnequip(worn.id);
+      }}
       className={hitClass}
     >
       <span
         className={cn(
-          "relative flex h-4 w-4 items-center justify-center transition-opacity group-hover:opacity-75",
+          "relative flex h-6 w-6 items-center justify-center transition-opacity group-hover:opacity-75",
           dragging && "opacity-30",
           // Still laid out (the flight measures it), just not drawn until the
           // flying copy arrives.
@@ -337,7 +346,11 @@ function DeckSlot({
           style={{ clipPath: CARD_SHAPE_CLIP }}
         />
         {def ? (
-          <ItemTypeIcon item={def} className="relative h-full w-full" />
+          <ItemTypeIcon
+            item={def}
+            rarityFrame
+            className="relative h-full w-full"
+          />
         ) : (
           // Equipped-but-missing-from-catalog (stale/desynced data): render
           // filled but generic rather than silently falling back to empty — an

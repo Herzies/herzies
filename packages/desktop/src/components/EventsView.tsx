@@ -7,12 +7,15 @@ import {
   VISITORS,
   visitorName,
 } from "@herzies/shared";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { cn } from "../lib/utils";
 import { herzies, useWindowFocused } from "../tauri-bridge";
 import { BackButton } from "./BackButton";
 import { BossFightHelp, BossFightPanel, makeDebugBoss } from "./BossFightPanel";
-import ItemInspectOverlay from "./ItemInspectOverlay";
+import ItemInspectOverlay, {
+  INSPECT_ORIGIN_ATTR,
+  inspectOrigin,
+} from "./ItemInspectOverlay";
 import { ItemTypeIcon } from "./icons/ItemTypeIcon";
 import { VisitorIcon } from "./icons/VisitorIcon";
 import { List } from "./List";
@@ -152,7 +155,7 @@ type EventCard = {
   eventId?: string;
 };
 
-export function EventsView({
+function EventsViewImpl({
   eventsTabVisible,
   debugForceActive = false,
   debugForceBoss = false,
@@ -287,13 +290,26 @@ export function EventsView({
     };
   }, [focused, eventsTabVisible, reloadKey]);
 
+  // /events/previous-hunt returns the last ended hunt *or* boss, whichever is
+  // newer. While Orphiez is in town his card is live and never shows the last
+  // hunt, so the call is only needed for the boss card's results — and not
+  // even that while a boss is live too.
+  const huntIsLive = events.some((e) => e.type === "song_hunt");
+  const bossIsLive = events.some((e) => e.type === "boss_fight");
+  const previousNeeded = !(huntIsLive && bossIsLive);
+
   // /events/previous-hunt (a slow Vercel route) only changes when a visit
   // ends or starts, so it isn't polled with the active events: it's fetched
   // when the tab opens and again when the poll sees the live set change.
+  // Waits for the active events, which decide whether it's needed at all.
   // previousKey is a trigger, not a value.
   // biome-ignore lint/correctness/useExhaustiveDependencies: previousKey re-runs the fetch
   useEffect(() => {
-    if (!eventsTabVisible) return;
+    if (!eventsTabVisible || !activeLoaded) return;
+    if (!previousNeeded) {
+      setPreviousLoaded(true);
+      return;
+    }
     let cancelled = false;
     herzies
       .fetchPreviousHunt()
@@ -309,7 +325,7 @@ export function EventsView({
     return () => {
       cancelled = true;
     };
-  }, [eventsTabVisible, previousKey]);
+  }, [eventsTabVisible, activeLoaded, previousNeeded, previousKey]);
 
   // Tell the app which full-screen view is open (see onScreenChange). Up here,
   // above the early returns, so the hook order never changes.
@@ -639,10 +655,14 @@ export function EventsView({
                       <h2 className="text-ui font-bold text-text-dim">
                         Reward:
                       </h2>
-                      <div className="flex items-center gap-1 text-ui">
+                      <div
+                        className="flex items-center gap-1 text-ui"
+                        // Inspect grows the card out of this icon.
+                        {...{ [INSPECT_ORIGIN_ATTR]: "hunt-reward" }}
+                      >
                         <ItemTypeIcon
                           item={previousRewardItem}
-                          className="h-4 w-4 shrink-0"
+                          className="h-6 w-6 shrink-0"
                         />
                         <button
                           className="cursor-pointer border-none bg-transparent text-ui underline"
@@ -699,6 +719,7 @@ export function EventsView({
         {inspectOverlay === "item" && previousHuntConfig?.rewardItemId && (
           <ItemInspectOverlay
             itemId={previousHuntConfig.rewardItemId}
+            origin={inspectOrigin("hunt-reward")}
             onClose={() => setInspectOverlay(null)}
             equipped={equipped}
           />
@@ -1022,3 +1043,8 @@ function EventCardRow({
     </Row>
   );
 }
+
+/** Memoized: mounted (hidden) for the app's whole life, so without this it
+ * re-rendered on every App render, i.e. every state push. Its props are all
+ * identity-stable while unchanged (see stableMerge in main.tsx). */
+export const EventsView = memo(EventsViewImpl);

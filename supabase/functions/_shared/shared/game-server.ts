@@ -69,7 +69,7 @@ import {
  * either. Keeping the two clocks separate is what fixes that. */
 const BILL_COOLDOWN_MS = 8_000;
 
-/** Hard ceiling on listened minutes credited by a single CLI sync. */
+/** Hard ceiling on listened minutes credited by a single client sync. */
 const MAX_MINUTES_PER_SYNC = 10;
 
 /** Grace added to the wall-clock cap to absorb clock skew between the client's
@@ -179,7 +179,7 @@ function herzieToRow(
 }
 
 /**
- * Process a sync request from the CLI daemon.
+ * Process a sync request from the desktop app.
  * This is the core game loop — server is the authority for XP and items.
  */
 interface MultiplierSchedule {
@@ -204,7 +204,11 @@ function isScheduleActive(schedule: MultiplierSchedule, now: Date): boolean {
 // with isScheduleActive above. The Next.js copy still has the function.
 
 export interface SyncOptions {
-  /** "cli" (default) applies wall-clock and per-sync caps. "spotify" skips them (dedup via play log). */
+  /**
+   * "cli" (default) is a sync reported by the desktop app — the name predates
+   * it and is stored in `listen_log.source`, so it stays. It applies the
+   * wall-clock and per-sync caps. "spotify" skips them (dedup via play log).
+   */
   source?: "cli" | "spotify";
   /**
    * Dev-only: roll for a drop on every sync instead of every 10 listened
@@ -345,7 +349,7 @@ export async function processSync(
   const collectedUnits: ItemUnit[] = [];
   let unitsStale = false;
 
-  // Log track change to listen_log (CLI source only — Spotify logged in cron)
+  // Log track change to listen_log (client source only — Spotify logged in cron)
   if (source === "cli" && nowPlaying) {
     const prev = row.now_playing as { title?: string; artist?: string } | null;
     const trackChanged =
@@ -464,7 +468,7 @@ export async function processSync(
 
     let minutes = minutesListened;
 
-    // CLI sync: cap to prevent abuse via rapid requests
+    // Client sync: cap to prevent abuse via rapid requests
     if (source === "cli") {
       // Cap at 10 minutes per sync hard limit
       minutes = Math.min(minutes, MAX_MINUTES_PER_SYNC);

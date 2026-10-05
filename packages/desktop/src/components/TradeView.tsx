@@ -2,13 +2,19 @@ import type { Herzie, ItemUnit, Trade, TradeOffer } from "@herzies/shared";
 import { getItem } from "@herzies/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cn, formatAmount } from "../lib/utils";
-import { herzies } from "../tauri-bridge";
+import { herzies, useWindowFocused } from "../tauri-bridge";
 import { Coin } from "./Coin";
 import { NumberTicker } from "./NumberTicker";
 import { PromptOverlay } from "./PromptOverlay";
 
-/** How often we poll `/trade/status` while a trade is open (ms). */
+/** How often we poll `/trade/status` while both sides are in the trade and
+ * the window is focused (ms) — tight, so a partner's lock/accept lands fast. */
 const TRADE_POLL_MS = 650;
+/** While the partner hasn't joined yet: nothing moves until they do. */
+const TRADE_WAITING_POLL_MS = 2_000;
+/** While the window is unfocused or hidden. A trade left open in the tray used
+ * to poll `/trade/status` (a Vercel route) at 650ms until it expired. */
+const TRADE_BACKGROUND_POLL_MS = 5_000;
 
 /** Copies of one item at one level: interchangeable, so offered by count. A
  * copy at another level is a different row, which is what lets a player offer
@@ -104,11 +110,11 @@ export function TradeView({
   const [message, setMessage] = useState("");
   const [confirmCancel, setConfirmCancel] = useState(false);
   const creatingRef = useRef(false);
-  const [units, setUnits] = useState<ItemUnit[]>(cachedUnits);
+  const units = cachedUnits;
   /** How many copies of each group are on offer. */
   const [offerCounts, setOfferCounts] = useState<Record<string, number>>({});
   const [offerCurrency, setOfferCurrency] = useState(0);
-  const [currency, setCurrency] = useState(cachedCurrency || herzie.currency);
+  const currency = cachedCurrency || herzie.currency;
   const lastSentOfferRef = useRef<string | null>(null);
   const closeScheduledRef = useRef(false);
 
@@ -133,29 +139,43 @@ export function TradeView({
     return t;
   }, [tradeId]);
 
+  // A completed trade moved items both ways, and /trade/accept doesn't return
+  // the result — pull the inventory once so the bank (and this view's offer
+  // list, via props) show what changed hands now rather than at the next sync.
+  // This used to happen as a side effect of an unconditional /inventory fetch
+  // on every mount, which also ran at every app launch.
+  const completed = trade?.state === "completed";
   useEffect(() => {
-    setUnits(cachedUnits);
-    setCurrency(cachedCurrency || herzie.currency);
-  }, [cachedUnits, cachedCurrency, herzie.currency]);
+    if (completed) void herzies.fetchInventory();
+  }, [completed]);
 
+  // Read by the poll loop on each reschedule, so focus or state changes adjust
+  // its pace without restarting it.
+  const focused = useWindowFocused();
+  const pollDelayRef = useRef(TRADE_POLL_MS);
+  pollDelayRef.current = !focused
+    ? TRADE_BACKGROUND_POLL_MS
+    : trade?.state === "pending"
+      ? TRADE_WAITING_POLL_MS
+      : TRADE_POLL_MS;
+  /** Runs the next poll now (set by the loop below). */
+  const pollNowRef = useRef<(() => void) | null>(null);
+  // Coming back to the window shouldn't wait out a 5s background delay.
   useEffect(() => {
-    herzies.fetchInventory().then((data) => {
-      if (data) {
-        setUnits(data.units);
-        setCurrency(data.currency);
-      }
-    });
-  }, []);
+    if (focused) pollNowRef.current?.();
+  }, [focused]);
 
-  // Hydrate + keep trade fresh. Poll even when the window is blurred so partner
-  // lock/accept updates arrive quickly (trade sessions are short-lived).
+  // Hydrate + keep trade fresh. Keeps polling (slower) while the window is
+  // blurred so a partner's lock/accept still lands, and stops once the trade
+  // is over.
   useEffect(() => {
     if (!tradeId) return;
     let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
 
-    const tick = async () => {
+    const tick = async (): Promise<boolean> => {
       const t = await herzies.tradePoll(tradeId);
-      if (cancelled) return;
+      if (cancelled) return false;
       if (t) setTrade(t);
       if (t?.state === "completed" || t?.state === "cancelled") {
         setMessage(
@@ -168,14 +188,32 @@ export function TradeView({
             onCloseRef.current();
           }, 2000);
         }
+        return false;
       }
+      return true;
     };
 
-    void tick();
-    const interval = setInterval(tick, TRADE_POLL_MS);
+    let inFlight = false;
+    const run = async () => {
+      if (timer) clearTimeout(timer);
+      timer = null;
+      if (inFlight) return;
+      inFlight = true;
+      // A failed poll (IPC error) must not end the loop the way a finished
+      // trade does — the old setInterval kept going regardless.
+      const keepGoing = await tick().catch(() => true);
+      inFlight = false;
+      if (keepGoing && !cancelled) {
+        timer = setTimeout(run, pollDelayRef.current);
+      }
+    };
+    pollNowRef.current = () => void run();
+
+    void run();
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      pollNowRef.current = null;
+      if (timer) clearTimeout(timer);
     };
     // The poll's lifetime is tied to the trade, not to the parent's render
     // identity — see onCloseRef above.

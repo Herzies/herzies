@@ -272,7 +272,7 @@ export function DiceUpgradeOverlay({
                 fits ? "cursor-pointer hover:bg-white/5" : "opacity-45",
               )}
             >
-              <ItemTypeIcon item={def} className="h-4 w-4 shrink-0" />
+              <ItemTypeIcon item={def} className="h-6 w-6 shrink-0" />
               <div className="min-w-0 flex-1">
                 <div
                   className="truncate text-ui"
@@ -387,7 +387,7 @@ function SafetyPickToggle({
         className="flex shrink-0 transition-[filter] duration-100"
         style={on ? undefined : { filter: "grayscale(1) opacity(0.6)" }}
       >
-        <ItemTypeIcon item={pick} className="h-4 w-4" />
+        <ItemTypeIcon item={pick} className="h-6 w-6" />
       </span>
       <span className="min-w-0 flex-1">
         <span

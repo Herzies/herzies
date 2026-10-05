@@ -1,138 +1,38 @@
 import {
   getItemColor,
-  getItemSet,
+  getItemIconGradient,
   getItemType,
   type ItemDef,
   type ItemType,
+  RARITY_COLORS,
 } from "@herzies/shared";
+import { hasCardFrame } from "./artwork-from-icon";
 import rawItemIconGrids from "./item-icon-grids.json";
 import { PixelIcon } from "./PixelIcon";
+import { TYPE_ICON_GRIDS as GRIDS } from "./type-icon-grids";
 
-/** Bespoke 16x16 pip per item id, depicting what that specific item actually
+/** Bespoke 24x24 icon per item id, depicting what that specific item actually
  * is or does (e.g. the headphones item gets an actual pair of headphones)
- * rather than its generic type shape, painted per-pixel rather than in one
- * solid tint — `grid` indexes into `palette` per cell ('.' empty, '0'-'9'/
- * 'a'-'f' a palette slot). Falls back to `GRIDS` below for any item without
- * one yet — e.g. a newly added item.
+ * rather than its generic type shape, painted per-pixel with simple shading
+ * rather than in one solid tint — `grid` indexes into `palette` per cell
+ * ('.' empty, '0'-'9'/'a'-'f' a palette slot). Falls back to `GRIDS`
+ * (type-icon-grids.ts) for any item without one yet — e.g. a newly added
+ * item.
  *
- * Lives in its own JSON file (rather than inline here) so the icon-editor
- * tool (`pnpm icon-editor`, see `tools/icon-editor/`) can read and overwrite
+ * Lives in its own JSON file (rather than inline here) so the item editor
+ * tool (`pnpm item-editor`, see `tools/item-editor/`) can read and overwrite
  * it directly — painting it there and saving takes effect immediately, the
  * same live-reload any other source edit gets. */
 const ITEM_ICON_GRIDS: Partial<
   Record<string, { grid: string[]; palette: string[] }>
 > = rawItemIconGrids;
 
-// Every item is a card (the store's buy tab is literally called "Cards"), so
-// each type icon is the same chamfered-corner card outline with a small pip
-// marking the category — like a suit mark on a playing card.
-const CARD_FRAME = [
-  "................",
-  "....########....",
-  "...#........#...",
-  "...#........#...",
-  "...#........#...",
-  "...#........#...",
-  "...#........#...",
-  "...#........#...",
-  "...#........#...",
-  "...#........#...",
-  "...#........#...",
-  "...#........#...",
-  "...#........#...",
-  "...#........#...",
-  "....########....",
-  "................",
-];
-
-function cardIcon(pipRows: string[], startRow: number): string[] {
-  const rows = [...CARD_FRAME];
-  pipRows.forEach((seg, i) => {
-    const r = startRow + i;
-    rows[r] = rows[r].slice(0, 4) + seg + rows[r].slice(12);
-  });
-  return rows;
-}
-
 /** Chamfered card silhouette, in the same proportions as CARD_FRAME's
- * outline above (16x16 grid, border pixels at x=3/4/12/13, y=1/2/14/15) —
- * for clipping something else (a background tint, a solid fill) into the
- * same card shape instead of a plain square. */
+ * outline in type-icon-grids.ts (24x24 grid, border pixels at x=4/5/18/19,
+ * y=1/2/21/22) — for clipping something else (a background tint, a solid
+ * fill) into the same card shape instead of a plain square. */
 export const CARD_SHAPE_CLIP =
-  "polygon(25% 6.25%, 75% 6.25%, 75% 12.5%, 81.25% 12.5%, 81.25% 87.5%, 75% 87.5%, 75% 93.75%, 25% 93.75%, 25% 87.5%, 18.75% 87.5%, 18.75% 12.5%, 25% 12.5%)";
-
-const GRIDS: Record<ItemType, string[]> = {
-  // A plain square die face (5-pip layout) — deliberately NOT cardIcon/
-  // CARD_FRAME. Every other type icon (including artefact) is fine sharing
-  // that chamfered card-shaped outline since those items genuinely are
-  // cards; a die isn't, and wrapping its pips in the card frame was the
-  // same "reads as a card" complaint at 16x16 instead of full size (see
-  // renderPowerDiceFrame's block comment). Square outline, not tall.
-  dice: [
-    "................",
-    "................",
-    "................",
-    "................",
-    "....########....",
-    "....#......#....",
-    "....#.#..#.#....",
-    "....#......#....",
-    "....#...#..#....",
-    "....#.#..#.#....",
-    "....#......#....",
-    "....########....",
-    "................",
-    "................",
-    "................",
-    "................",
-  ],
-  // A guitar pick — like dice, not a card, so no card frame.
-  charm: [
-    "................",
-    "................",
-    "................",
-    "....########....",
-    "...#........#...",
-    "...#........#...",
-    "...#........#...",
-    "....#......#....",
-    "....#......#....",
-    ".....#....#.....",
-    ".....#....#.....",
-    "......#..#......",
-    ".......##.......",
-    "................",
-    "................",
-    "................",
-  ],
-  // Paint drop — appearance/palette, no hue needed to read as "color".
-  skin: cardIcon(
-    ["...##...", "..####..", "..####..", "..####..", "...##..."],
-    6,
-  ),
-  // Sun + mountain — background scenery.
-  sceneryCard: cardIcon(
-    [".....##.", ".....##.", "...##...", "..####..", ".######."],
-    6,
-  ),
-  // Shield — generic catch-all gear.
-  equipable: cardIcon(
-    ["..####..", "..####..", "...##...", "...##...", "...##..."],
-    5,
-  ),
-  // Ribboned box — a placed prop, not something worn.
-  accessory: cardIcon(
-    [".######.", ".##..##.", ".##..##.", ".##..##.", ".######."],
-    6,
-  ),
-  // Up-arrow — a stat-changing effect.
-  modifier: cardIcon(
-    ["...##...", "..####..", "...##...", "...##...", "...##..."],
-    6,
-  ),
-  // Faceted gem — rare, uncategorized treasure.
-  artefact: cardIcon(["..####..", ".######.", "..####..", "...##..."], 6),
-};
+  "polygon(20.833% 4.167%, 79.167% 4.167%, 79.167% 8.333%, 83.333% 8.333%, 83.333% 91.667%, 79.167% 91.667%, 79.167% 95.833%, 20.833% 95.833%, 20.833% 91.667%, 16.667% 91.667%, 16.667% 8.333%, 20.833% 8.333%)";
 
 /** Generic per-type pip with no item-specific art or colour — used only when
  * an equipped itemId is missing from the catalog (stale/desynced data), so
@@ -147,31 +47,103 @@ export function GenericTypeIcon({
   return <PixelIcon grid={GRIDS[type]} className={className} />;
 }
 
+/** The grid an item's icon is drawn from: its bespoke paletted one, or —
+ * until it has one — the generic type icon (no palette: one solid fill). */
+export function getItemIcon(item: ItemDef): {
+  grid: string[];
+  palette?: readonly string[];
+} {
+  return ITEM_ICON_GRIDS[item.id] ?? { grid: GRIDS[getItemType(item)] };
+}
+
+/** Mixes `hex` toward `toward` by `amount` (0-1). */
+function mixHex(hex: string, toward: string, amount: number): string {
+  const ch = (h: string, i: number) => parseInt(h.slice(i, i + 2), 16);
+  return `#${[1, 3, 5]
+    .map((i) =>
+      Math.round(ch(hex, i) + (ch(toward, i) - ch(hex, i)) * amount)
+        .toString(16)
+        .padStart(2, "0"),
+    )
+    .join("")}`;
+}
+
+/** Whether `rarityFrame` will paint this item's icon frame: any painted
+ * card icon (the Safety Pick has no card frame). Where it doesn't, the bag
+ * falls back to its corner rarity marker. */
+export function hasRarityFrame(item: ItemDef): boolean {
+  const bespoke = ITEM_ICON_GRIDS[item.id];
+  return !!bespoke && hasCardFrame(bespoke.grid);
+}
+
+/** A card icon's frame alone, in the rarity's colour — the same clue as the
+ * opened card's frame — keeping the frame's shading: its four corner
+ * highlights lightest, top and left lit, right and bottom in shadow. Drawn
+ * as an overlay, so a set's gradient tint (on the picture) leaves it be. */
+function rarityFrameOverlay(rarityColor: string): {
+  grid: string[];
+  palette: string[];
+} {
+  const corners = new Set(["5,2", "18,2", "5,21", "18,21"]);
+  const grid = Array.from({ length: 24 }, (_, y) =>
+    Array.from({ length: 24 }, (_, x) => {
+      if (corners.has(`${x},${y}`)) return "0";
+      const inFrameRows = y >= 2 && y <= 21;
+      if ((y === 1 && x >= 5 && x <= 18) || (x === 4 && inFrameRows))
+        return "1";
+      if ((y === 22 && x >= 5 && x <= 18) || (x === 19 && inFrameRows))
+        return "2";
+      return ".";
+    }).join(""),
+  );
+  return {
+    grid,
+    palette: [
+      mixHex(rarityColor, "#ffffff", 0.45),
+      rarityColor,
+      mixHex(rarityColor, "#000000", 0.45),
+    ],
+  };
+}
+
 export function ItemTypeIcon({
   item,
   className,
+  rarityFrame = false,
 }: {
   item: ItemDef;
   className?: string;
+  /** Paint the icon's card frame in the item's rarity colour (see
+   * hasRarityFrame for which icons it applies to). */
+  rarityFrame?: boolean;
 }) {
   const type = getItemType(item);
   const bespoke = ITEM_ICON_GRIDS[item.id];
-  const set = getItemSet(item.id);
+  const overlay =
+    rarityFrame && hasRarityFrame(item)
+      ? rarityFrameOverlay(RARITY_COLORS[item.rarity])
+      : undefined;
+  const gradient = getItemIconGradient(item.id);
 
-  if (set?.visual) {
-    // A set's shared visual clue (e.g. Prismatic's rainbow) overrides
-    // whatever this item's own icon was painted — only its shape carries
-    // over (any painted cell counts as filled) — so members read as related
-    // regardless of their individual icon's colours.
-    const shape = (bespoke?.grid ?? GRIDS[type]).map((row) =>
-      row.replace(/[^.]/g, "#"),
-    );
+  if (gradient) {
+    // A set's shared visual clue (e.g. Prismatic's rainbow) overrides the
+    // colours this item's own icon was painted in, so members read as
+    // related regardless of them — but the icon's shape and shading carry
+    // over (the gradient tints it). Unless the set exempts the item
+    // (visualExempt).
+    if (bespoke) {
+      return (
+        <PixelIcon
+          grid={bespoke.grid}
+          palette={bespoke.palette}
+          className={className}
+          tint={gradient}
+          overlay={overlay}
+        />
+      );
+    }
     return (
-      <PixelIcon
-        grid={shape}
-        className={className}
-        gradient={set.visual.gradient}
-      />
+      <PixelIcon grid={GRIDS[type]} className={className} gradient={gradient} />
     );
   }
 
@@ -181,6 +153,7 @@ export function ItemTypeIcon({
         grid={bespoke.grid}
         palette={bespoke.palette}
         className={className}
+        overlay={overlay}
       />
     );
   }

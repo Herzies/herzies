@@ -97,7 +97,7 @@ export interface HerzieProfile {
 
 // --- Game Server API types ---
 
-/** CLI → Server: heartbeat sync payload */
+/** Client → Server: heartbeat sync payload */
 export interface SyncRequest {
   nowPlaying: {
     title: string;
@@ -111,7 +111,7 @@ export interface SyncRequest {
   genres: string[];
 }
 
-/** Server → CLI: sync response */
+/** Server → Client: sync response */
 export interface SyncResponse {
   herzie: Herzie;
   /** Event notifications triggered by this sync */

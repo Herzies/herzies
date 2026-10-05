@@ -19,6 +19,7 @@ const REASONS: Record<string, string> = {
   "missing-side": "side (left|right) is required for ground items",
   "no-slot": "Item is not equipable",
   "bad-action": "Invalid action",
+  "stage-too-low": "Your herzie isn't grown enough to wear this",
 };
 
 export async function POST(request: Request) {

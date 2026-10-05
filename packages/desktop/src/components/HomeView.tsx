@@ -10,6 +10,7 @@ import {
   xpToNextLevel,
 } from "@herzies/shared";
 import { useEffect, useRef, useState } from "react";
+import { useReportHomeStage } from "../hooks/useStageAlignment";
 import { cn } from "../lib/utils";
 import {
   type AppState,
@@ -17,7 +18,7 @@ import {
   useGhostMode,
   useWindowPinned,
 } from "../tauri-bridge";
-import { HERZIE_STAGE_HEIGHT, Herzie3D } from "./Herzie3D";
+import { HERZIE_STAGE_HEIGHT } from "./Herzie3D";
 import { HEADER_ICON_HIT } from "./headerIconHit";
 import { CARD_SHAPE_CLIP, ItemTypeIcon } from "./icons/ItemTypeIcon";
 import { ModifiersButton } from "./ModifiersButton";
@@ -43,7 +44,6 @@ const DROP_EXIT_MS = 260;
 
 export function HomeView({
   state,
-  stageOverride,
   onOpenProfile,
   onOpenSettings,
   onActivity,
@@ -51,7 +51,6 @@ export function HomeView({
   bossHatedGenres,
 }: {
   state: AppState;
-  stageOverride?: number | null;
   /**
    * Home is the visible view. Views are only hidden with a CSS class, so
    * without this the creature and its sky keep animating inside a
@@ -211,13 +210,18 @@ export function HomeView({
     };
   }, [friendCode]);
 
+  // The Herzie view lines its stage up with this one (see useStageAlignment).
+  const viewRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+  useReportHomeStage(viewRef, stageRef, active);
+
   if (!herzie) return null;
 
   const progress = levelProgress(herzie);
   const toNext = xpToNextLevel(herzie);
 
   return (
-    <div className="flex h-full flex-col">
+    <div ref={viewRef} className="flex h-full flex-col">
       <div className="mb-1 flex items-center justify-between z-50">
         <span className="text-ui-lg font-bold text-cyan">
           <Tooltip label="View your profile">
@@ -350,18 +354,19 @@ export function HomeView({
         </div>
       </div>
 
-      {/* The stage: HERZIE_STAGE_HEIGHT, the same as on the Herzie view. */}
+      {/* Whatever the fixed parts don't use, above the stage: everything below
+          it is fixed-height, so the stage stays put, and it sits right on
+          the level bar with the herzie standing on its floor. */}
+      <div className="min-h-0 flex-1" />
+
+      {/* The stage: HERZIE_STAGE_HEIGHT, the same as on the Herzie view. The
+          herzie itself is drawn over it by main.tsx (one renderer shared with
+          the Herzie view, so switching views doesn't reset it). */}
       <div
+        ref={stageRef}
         className="relative flex shrink-0 items-center justify-center"
         style={{ height: HERZIE_STAGE_HEIGHT }}
       >
-        <Herzie3D
-          userId={herzie.friendCode}
-          stage={stageOverride ?? herzie.stage}
-          isPlaying={!!nowPlaying}
-          equipped={equipped}
-          paused={!active}
-        />
         {dropItems.length > 0 && (!hasSpiritOrb || bankFull) && (
           // pointer-events-none on the wrapper keeps the gaps between items
           // from blocking herzie drag; each item re-enables pointer events
@@ -419,7 +424,7 @@ export function HomeView({
                         }
                       >
                         {item ? (
-                          <span className="relative inline-block h-4 w-4">
+                          <span className="relative inline-block h-6 w-6">
                             {/* Card-shaped backing in the app's own
                                 background colour so the icon reads as an
                                 opaque card instead of a bare wireframe
@@ -431,7 +436,7 @@ export function HomeView({
                             />
                             <ItemTypeIcon
                               item={item}
-                              className="relative block h-4 w-4"
+                              className="relative block h-6 w-6"
                             />
                           </span>
                         ) : (
@@ -447,7 +452,7 @@ export function HomeView({
                           </span>
                         )}
                       </div>
-                      <div className="h-1 w-3.5 rounded-full bg-black/40 blur-[1px]" />
+                      <div className="h-1 w-5 rounded-full bg-black/40 blur-[1px]" />
                     </button>
                   </Tooltip>
                 </span>
@@ -456,9 +461,6 @@ export function HomeView({
           </div>
         )}
       </div>
-
-      {/* Whatever the fixed parts don't use, so the stage stays put. */}
-      <div className="min-h-0 flex-1" />
 
       <div className="mb-1.5">
         <div className="mb-0.5 flex items-baseline justify-between text-ui text-text-dim">

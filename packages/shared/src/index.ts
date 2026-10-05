@@ -3,6 +3,7 @@ export * from "./chat.js";
 export * from "./chat-mentions.js";
 export * from "./craving.js";
 export * from "./creature-renderer.js";
+export * from "./dangle-physics.js";
 export * from "./genres.js";
 export * from "./Herzie3D.js";
 export * from "./ItemDisplay.js";

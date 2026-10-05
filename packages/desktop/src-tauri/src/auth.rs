@@ -51,8 +51,13 @@ pub async fn login(app: &AppHandle, cancel: oneshot::Receiver<()>) -> Result<(),
     let web_url =
         std::env::var("HERZIES_WEB_URL").unwrap_or_else(|_| "https://www.herzies.app".to_string());
 
+    // Echoed back by the browser with the session. Any other local page can
+    // POST to the callback port too, so without this one could log the app
+    // into an account of its choosing while we wait.
+    let login_state = hex::encode(rand::random::<[u8; 16]>());
+
     let body = tokio::select! {
-        res = timeout(LOGIN_TIMEOUT, wait_for_callback(&web_url, CALLBACK_PORT)) => match res {
+        res = timeout(LOGIN_TIMEOUT, wait_for_callback(&web_url, CALLBACK_PORT, &login_state)) => match res {
             Ok(r) => r?,
             Err(_) => {
                 log::warn!("Login timed out waiting for the browser callback");
@@ -68,7 +73,11 @@ pub async fn login(app: &AppHandle, cancel: oneshot::Receiver<()>) -> Result<(),
     finish_login(app, &body).await
 }
 
-async fn wait_for_callback(web_url: &str, port: u16) -> Result<String, LoginError> {
+async fn wait_for_callback(
+    web_url: &str,
+    port: u16,
+    login_state: &str,
+) -> Result<String, LoginError> {
     // A just-replaced attempt may still be dropping its listener on another
     // task, so give the port a moment to free up before giving up.
     let mut attempts = 0;
@@ -88,7 +97,7 @@ async fn wait_for_callback(web_url: &str, port: u16) -> Result<String, LoginErro
     };
     log::info!("Login callback listening on 127.0.0.1:{}", port);
 
-    let auth_url = format!("{}/auth/cli?port={}", web_url, port);
+    let auth_url = format!("{}/auth/desktop?state={}", web_url, login_state);
     if let Err(e) = open::that(&auth_url) {
         log::warn!("Failed to open browser for login: {}", e);
         return Err(LoginError::BrowserOpenFailed);
@@ -115,6 +124,16 @@ async fn wait_for_callback(web_url: &str, port: u16) -> Result<String, LoginErro
             continue;
         }
 
+        if !carries_state(&request.body, login_state) {
+            log::warn!("Login callback rejected: state mismatch");
+            let _ = stream
+                .write_all(
+                    b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
+                .await;
+            continue;
+        }
+
         let html = "<h1>Logged in! You can close this window.</h1>";
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -126,6 +145,11 @@ async fn wait_for_callback(web_url: &str, port: u16) -> Result<String, LoginErro
         log::info!("Login callback received");
         return Ok(request.body);
     }
+}
+
+/// Whether a URL-encoded callback body carries this attempt's `state`.
+fn carries_state(body: &str, login_state: &str) -> bool {
+    url::form_urlencoded::parse(body.as_bytes()).any(|(k, v)| k == "state" && v == login_state)
 }
 
 struct RawRequest {
@@ -287,8 +311,8 @@ async fn finish_login(app: &AppHandle, body: &str) -> Result<(), LoginError> {
 
     let app_clone = app.clone();
     tauri::async_runtime::spawn(async move {
-        let client = reqwest::Client::new();
-        crate::refresh_app_cache(&app_clone, &client).await;
+        let client = crate::api::http();
+        crate::refresh_app_cache(&app_clone, &client, true).await;
     });
 
     log::info!("Login complete");
@@ -298,6 +322,21 @@ async fn finish_login(app: &AppHandle, body: &str) -> Result<(), LoginError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn callback_must_carry_the_issued_state() {
+        let state = "0123456789abcdef0123456789abcdef";
+        assert!(carries_state(
+            &format!("access_token=a.b.c&refresh_token=r&state={state}"),
+            state
+        ));
+        assert!(!carries_state("access_token=a.b.c&refresh_token=r", state));
+        assert!(!carries_state(
+            "access_token=a.b.c&state=ffffffffffffffffffffffffffffffff",
+            state
+        ));
+        assert!(!carries_state("access_token=a.b.c&state=", state));
+    }
 
     #[tokio::test]
     async fn reads_body_split_across_writes_on_open_connection() {

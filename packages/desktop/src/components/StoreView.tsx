@@ -6,12 +6,12 @@ import {
   hasRoomFor,
   MAX_BANK_EXPANSIONS,
 } from "@herzies/shared";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { formatAmount, formatPrice } from "../lib/utils";
 import { herzies, useWindowFocused } from "../tauri-bridge";
 import { Coin } from "./Coin";
 import { ExpansionInspectOverlay } from "./ExpansionInspectOverlay";
-import ItemInspectOverlay from "./ItemInspectOverlay";
+import ItemInspectOverlay, { inspectOrigin } from "./ItemInspectOverlay";
 import { ItemRow } from "./ItemRow";
 import { BankExpansionIcon } from "./icons/BankExpansionIcon";
 import { List } from "./List";
@@ -24,7 +24,7 @@ import { Tooltip } from "./Tooltip";
  * here so the header reads the same on every tab.
  */
 
-export function StoreView({
+function StoreViewImpl({
   inventory,
   currency,
   equipped,
@@ -168,7 +168,7 @@ export function StoreView({
                 itemId={BANK_EXPANSION.id}
                 name={BANK_EXPANSION.name}
                 icon={
-                  <BankExpansionIcon className="h-4 w-4 shrink-0 text-yellow" />
+                  <BankExpansionIcon className="h-6 w-6 shrink-0 text-yellow" />
                 }
                 onInspect={setInspectItem}
                 inspectTitle="Inspect expansion"
@@ -303,6 +303,7 @@ export function StoreView({
       {inspectItem && inspected && (
         <ItemInspectOverlay
           itemId={inspectItem}
+          origin={inspectOrigin(inspectItem)}
           onClose={() => setInspectItem(null)}
           equipped={equipped}
           meta={inspectedMeta}
@@ -341,3 +342,8 @@ export function StoreView({
     </div>
   );
 }
+
+/** Memoized: mounted (hidden) for the app's whole life, so without this it
+ * re-rendered on every App render, i.e. every state push. Its props are all
+ * identity-stable while unchanged (see stableMerge in main.tsx). */
+export const StoreView = memo(StoreViewImpl);

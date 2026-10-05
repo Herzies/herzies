@@ -3,8 +3,30 @@ use crate::types::*;
 use reqwest::{Client, StatusCode};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::OnceLock;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
+
+/// The one HTTP client the app talks to its backend with. A `Client` owns a
+/// connection pool, so building one per command (as every command used to)
+/// paid a fresh TCP + TLS handshake on each call — including the trade poll,
+/// which runs every 650ms. Cloning is cheap (it's an `Arc`) and shares the pool.
+///
+/// The timeouts matter as much as the pooling: reqwest has none by default, so
+/// one stalled connection used to hang `sync_loop` (which awaits each tick
+/// before sleeping) indefinitely, silently stopping XP sync until relaunch.
+pub fn http() -> Client {
+    static CLIENT: OnceLock<Client> = OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            Client::builder()
+                .connect_timeout(Duration::from_secs(10))
+                .timeout(Duration::from_secs(30))
+                .build()
+                .unwrap_or_else(|_| Client::new())
+        })
+        .clone()
+}
 
 /// Serializes refresh attempts so concurrent callers can't all race the same
 /// refresh_token against Supabase's 10s reuse window (which, on a miss, would
@@ -301,6 +323,12 @@ async fn api_fetch_full(
     apikey: Option<&str>,
 ) -> Option<reqwest::Response> {
     let token = get_token(client).await?;
+
+    // Opt-in request log for measuring backend traffic per endpoint
+    // (`HERZIES_LOG_REQUESTS=1 pnpm dev`, then count lines per minute).
+    if std::env::var_os("HERZIES_LOG_REQUESTS").is_some() {
+        log::info!("request {} {}", method, url);
+    }
 
     let build = |tok: &str| {
         let mut req = client.request(method.clone(), url).bearer_auth(tok);
@@ -1130,27 +1158,6 @@ pub async fn api_fetch_previous_hunt(
         }
     });
     Some((events, next))
-}
-
-/// GET /trade/pending — lightweight check for an incoming trade invite.
-/// Outer `None` = request failed; inner `None` = no pending invite.
-///
-/// Ported to a Supabase Edge Function (co-located with Postgres, off
-/// Vercel), like /sync and /chat: trade_watch_loop hits this every 5s
-/// whenever the window is hidden, so it was the single largest source of
-/// Vercel invocations.
-pub async fn api_check_pending_trade(client: &Client) -> Option<Option<PendingTradeRequest>> {
-    let url = format!("{}/trade-pending", functions_base());
-    let anon = supabase_anon_key();
-    let resp = api_fetch_full(client, reqwest::Method::GET, &url, None, Some(&anon)).await?;
-    if !resp.status().is_success() {
-        return None;
-    }
-    let data: serde_json::Value = resp.json().await.ok()?;
-    Some(
-        serde_json::from_value::<Option<PendingTradeRequest>>(data["pending"].clone())
-            .unwrap_or(None),
-    )
 }
 
 /// GET /trade/ongoing — all non-terminal trades for the current user, so the

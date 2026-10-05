@@ -204,12 +204,13 @@ export function FriendsView({
 
   const outgoingCodes = new Set(outgoingRequests.map((r) => r.friendCode));
 
-  const handleSendRequest = async (code: string) => {
+  const handleSendRequest = async (code: string, name?: string) => {
     const normalized = code.trim().toUpperCase();
     if (!normalized) return;
-    const result = await herzies.friendAdd(normalized);
+    const result = await herzies.friendAdd(normalized, name);
     flash(result.message);
-    onActivity?.(result.message);
+    // Success is logged by the backend, with their name.
+    if (!result.success) onActivity?.(result.message);
     if (result.success) {
       setSearchResults((prev) =>
         prev.map((r) =>
@@ -287,7 +288,7 @@ export function FriendsView({
           onStartTrade(code);
         }}
         onAdd={async () => {
-          await handleSendRequest(code);
+          await handleSendRequest(code, selectedFriend.name);
         }}
         onRemove={async () => {
           await handleRemove(code);
@@ -709,7 +710,7 @@ function SearchResults({
 }: {
   results: FriendSearchResult[];
   searching: boolean;
-  onSend: (code: string) => void;
+  onSend: (code: string, name: string) => void;
 }) {
   if (searching && results.length === 0) {
     return (
@@ -744,7 +745,7 @@ function SearchResults({
             <button
               type="button"
               className="btn shrink-0 text-green"
-              onClick={() => onSend(r.friendCode)}
+              onClick={() => onSend(r.friendCode, r.name)}
               title="They already requested you"
             >
               Accept
@@ -753,7 +754,7 @@ function SearchResults({
             <button
               type="button"
               className="btn shrink-0 text-green"
-              onClick={() => onSend(r.friendCode)}
+              onClick={() => onSend(r.friendCode, r.name)}
             >
               Add
             </button>

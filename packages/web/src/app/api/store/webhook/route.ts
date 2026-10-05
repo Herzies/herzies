@@ -33,6 +33,12 @@ export async function POST(request: Request) {
   if (event.type === "checkout.session.completed") {
     const session = event.data
       .object as import("stripe").Stripe.Checkout.Session;
+    // "completed" only means the customer finished checkout. With a delayed
+    // payment method the money hasn't moved yet, so grant nothing until it
+    // has. (No such method is enabled today; this keeps it that way safely.)
+    if (session.payment_status === "unpaid") {
+      return NextResponse.json({ received: true });
+    }
     const admin = createAdminClient();
 
     // Where an item purchase should land. Checkout already refused if the

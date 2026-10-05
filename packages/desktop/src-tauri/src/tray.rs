@@ -21,6 +21,16 @@ pub fn is_window_visible() -> bool {
     WINDOW_VISIBLE.load(Ordering::Relaxed)
 }
 
+/// Whether the window has keyboard focus — narrower than visible: a pinned
+/// window stays visible after the user moves on to another app. Lets loops
+/// whose results only matter to someone actively looking (sync cadence) relax
+/// for a pinned window sitting in the background.
+static WINDOW_FOCUSED: AtomicBool = AtomicBool::new(false);
+
+pub fn is_window_focused() -> bool {
+    WINDOW_FOCUSED.load(Ordering::Relaxed)
+}
+
 /// When pinned, the window stays open on blur (it is NOT always-on-top —
 /// other windows can cover it; it just doesn't auto-hide).
 static WINDOW_PINNED: AtomicBool = AtomicBool::new(false);
@@ -197,28 +207,61 @@ fn show_window(app: &AppHandle, window: &tauri::WebviewWindow) {
     #[cfg(target_os = "macos")]
     let _ = app.set_activation_policy(ActivationPolicy::Regular);
 
-    // Use saved user position if available, otherwise anchor below tray icon
-    if HAS_USER_POSITION.load(Ordering::Relaxed) {
-        let x = USER_X.load(Ordering::Relaxed) as i32;
-        let y = USER_Y.load(Ordering::Relaxed) as i32;
-        let _ = window.set_position(PhysicalPosition::new(x, y));
-    } else {
+    // Use saved user position if available, otherwise anchor below tray icon.
+    // Either may point at a display that has since been disconnected, so only
+    // use a position whose window would still land on a connected monitor.
+    let user_pos = HAS_USER_POSITION.load(Ordering::Relaxed).then(|| {
+        PhysicalPosition::new(
+            USER_X.load(Ordering::Relaxed) as i32,
+            USER_Y.load(Ordering::Relaxed) as i32,
+        )
+    });
+    let tray_pos = {
         let tray_x = TRAY_X.load(Ordering::Relaxed) as i32;
         let tray_y = TRAY_Y.load(Ordering::Relaxed) as i32;
         let tray_w = TRAY_WIDTH.load(Ordering::Relaxed) as i32;
-        if tray_x > 0 || tray_y > 0 {
-            if let Ok(win_size) = window.outer_size() {
-                let win_w = win_size.width as i32;
-                let x = tray_x + (tray_w / 2) - (win_w / 2);
-                let _ = window.set_position(PhysicalPosition::new(x, tray_y));
-            }
-        } else {
+        (tray_x > 0 || tray_y > 0)
+            .then(|| window.outer_size().ok())
+            .flatten()
+            .map(|win_size| {
+                let x = tray_x + (tray_w / 2) - (win_size.width as i32 / 2);
+                PhysicalPosition::new(x, tray_y)
+            })
+    };
+    let pos = user_pos.filter(|p| is_on_screen(window, *p)).or_else(|| {
+        // The saved spot is gone (e.g. external monitor unplugged) — forget it.
+        HAS_USER_POSITION.store(false, Ordering::Relaxed);
+        tray_pos.filter(|p| is_on_screen(window, *p))
+    });
+    match pos {
+        Some(p) => {
+            let _ = window.set_position(p);
+        }
+        None => {
             let _ = window.center();
         }
     }
 
     let _ = window.show();
     let _ = window.set_focus();
+}
+
+/// Whether a window placed at `pos` would have its center on a connected
+/// monitor. Fails open if the monitor list can't be read.
+fn is_on_screen(window: &tauri::WebviewWindow, pos: PhysicalPosition<i32>) -> bool {
+    let Ok(monitors) = window.available_monitors() else {
+        return true;
+    };
+    let (w, h) = window
+        .outer_size()
+        .map(|s| (s.width as i32, s.height as i32))
+        .unwrap_or((0, 0));
+    let (cx, cy) = (pos.x + w / 2, pos.y + h / 2);
+    monitors.iter().any(|m| {
+        let mp = m.position();
+        let ms = m.size();
+        cx >= mp.x && cx < mp.x + ms.width as i32 && cy >= mp.y && cy < mp.y + ms.height as i32
+    })
 }
 
 fn hide_window(app: &AppHandle, window: &tauri::WebviewWindow) {
@@ -229,6 +272,7 @@ fn hide_window(app: &AppHandle, window: &tauri::WebviewWindow) {
         HAS_USER_POSITION.store(true, Ordering::Relaxed);
     }
     WINDOW_VISIBLE.store(false, Ordering::Relaxed);
+    WINDOW_FOCUSED.store(false, Ordering::Relaxed);
     let _ = window.hide();
     // Switch back to Accessory (no dock icon) — macOS only.
     #[cfg(target_os = "macos")]
@@ -242,6 +286,7 @@ pub fn on_focus(app: &AppHandle) {
     HIDE_PENDING.store(false, Ordering::Relaxed);
     // Focus implies the window is on-screen; covers dev mode where show_window isn't used.
     WINDOW_VISIBLE.store(true, Ordering::Relaxed);
+    WINDOW_FOCUSED.store(true, Ordering::Relaxed);
     // Same rationale as in show_window: refresh derived state (connectivity,
     // multipliers, etc.) immediately on re-focus.
     emit_state_update(app);
@@ -256,6 +301,7 @@ pub fn on_focus(app: &AppHandle) {
 /// Called when the window loses focus.
 /// Schedules a delayed hide so that tray-click re-focus can cancel it.
 pub fn on_blur(app: &AppHandle) {
+    WINDOW_FOCUSED.store(false, Ordering::Relaxed);
     // Pinned windows stay open when they lose focus.
     if is_pinned() {
         return;

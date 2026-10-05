@@ -13,6 +13,8 @@ import {
   renderCreatureAtAngle,
   SPIRIT_DANCE_HOP_VARIANT_COUNT,
 } from "./creature-renderer.js";
+import type { DangleState } from "./dangle-physics.js";
+import type { Equipped } from "./items.js";
 
 const USER = "test-herzie";
 
@@ -277,6 +279,153 @@ describe("renderCreatureAtAngle", () => {
     ).some((f) => JSON.stringify(f.cells) !== JSON.stringify(base.cells));
 
     expect(differs).toBe(true);
+  });
+});
+
+describe("neckwear", () => {
+  const draw = (stage: number, body?: string) =>
+    JSON.stringify(
+      renderCreatureAtAngle(USER, stage, 1.2345, 0, false, { body }).cells,
+    );
+
+  it("is drawn on a herzie with a body", () => {
+    for (const body of ["gold-chain", "pearl-necklace", "bowtie"]) {
+      expect(draw(3, body)).not.toBe(draw(3));
+    }
+  });
+
+  it("swings the chain but nothing else", () => {
+    const at = (body: string, swing: number) =>
+      renderCreatureAtAngle(
+        USER,
+        3,
+        1.2345,
+        0,
+        false,
+        { body },
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { swing, flare: 0 },
+      ).cells;
+    expect(JSON.stringify(at("gold-chain", 0.5))).not.toBe(
+      JSON.stringify(at("gold-chain", 0)),
+    );
+    // The bowtie is rigid: no swing however the herzie is spun.
+    expect(JSON.stringify(at("bowtie", 0.5))).toBe(
+      JSON.stringify(at("bowtie", 0)),
+    );
+  });
+
+  it("draws nothing before stage 3, when there's no body to sit on", () => {
+    for (const stage of [1, 2]) {
+      expect(draw(stage, "gold-chain")).toBe(draw(stage));
+    }
+  });
+});
+
+describe("Halloween items", () => {
+  const draw = (equipped: Equipped, yAngle = 1.2345, dangle?: DangleState) =>
+    JSON.stringify(
+      renderCreatureAtAngle(
+        USER,
+        3,
+        yAngle,
+        0,
+        false,
+        equipped,
+        undefined,
+        126,
+        undefined,
+        undefined,
+        dangle,
+      ).cells,
+    );
+
+  it("draws each one", () => {
+    for (const equipped of [
+      { head: "witch-hat" },
+      { face: "fangs" },
+      { color: "pumpkin-spice" },
+      { ground_left: "jack-o-lantern" },
+      { ground_right: "ghost" },
+    ] as Equipped[]) {
+      expect(draw(equipped)).not.toBe(draw({}));
+    }
+  });
+
+  it("swings the witch hat's tip on a spin, but not the fangs", () => {
+    const swing = { swing: 0.6, flare: 0 };
+    expect(draw({ head: "witch-hat" }, 1.2345, swing)).not.toBe(
+      draw({ head: "witch-hat" }),
+    );
+    expect(draw({ face: "fangs" }, 1.2345, swing)).toBe(
+      draw({ face: "fangs" }),
+    );
+  });
+
+  it("doesn't let the fangs move the hat", () => {
+    // Everything the fangs add on top of a hat must be what they add alone.
+    const cells = (equipped: Equipped) =>
+      renderCreatureAtAngle(USER, 3, 1.2345, 0, false, equipped, undefined, 126)
+        .cells;
+    const changed = (a: Equipped, b: Equipped) => {
+      const ca = cells(a);
+      const cb = cells(b);
+      return ca.flatMap((row, y) =>
+        row.flatMap((c, x) =>
+          c.ch !== cb[y][x].ch || c.color !== cb[y][x].color
+            ? [`${y},${x}`]
+            : [],
+        ),
+      );
+    };
+    const fangsOnHat = changed(
+      { head: "witch-hat", face: "fangs" },
+      { head: "witch-hat" },
+    );
+    const fangsAlone = new Set(changed({ face: "fangs" }, {}));
+    expect(fangsOnHat.length).toBeGreaterThan(0);
+    for (const cell of fangsOnHat) expect(fangsAlone.has(cell)).toBe(true);
+  });
+
+  it("keeps the pets in place while the herzie spins", () => {
+    // The cells the pets cover outside the herzie's own silhouette. If they
+    // turned with the herzie, these would change between the two angles.
+    const petCells = (yAngle: number) => {
+      const withPets = renderCreatureAtAngle(
+        USER,
+        3,
+        yAngle,
+        0,
+        false,
+        {
+          ground_left: "jack-o-lantern",
+          ground_right: "ghost",
+        },
+        undefined,
+        126,
+      ).cells;
+      const bare = renderCreatureAtAngle(
+        USER,
+        3,
+        yAngle,
+        0,
+        false,
+        {},
+        undefined,
+        126,
+      ).cells;
+      return withPets
+        .flatMap((row, y) =>
+          row.map((c, x) =>
+            c.ch !== " " && bare[y][x].ch === " " ? `${y},${x}` : null,
+          ),
+        )
+        .filter((k) => k !== null);
+    };
+    expect(petCells(0.3)).toEqual(petCells(2.1));
   });
 });
 

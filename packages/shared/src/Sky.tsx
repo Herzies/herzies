@@ -63,7 +63,8 @@ export function Sky({
     if (paused || variant === null) return;
 
     // One timer, not two. renderSky reads cloudOffset for "clouds" and
-    // twinkleFrame for "stars" and ignores the other entirely, so the variant
+    // twinkleFrame for "stars" and "blood-moon" (its bats fly on it too) and
+    // ignores the other entirely, so the variant
     // picks which counter advances — previously both timers ran for both
     // variants and each called the full render, so half the work drew a frame
     // identical to the one before it.

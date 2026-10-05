@@ -6,17 +6,36 @@ import {
   CREATURE_PARAM_BOUNDS,
   type CreatureParams,
   clearCreatureCache,
+  type DangleConfig,
   DEFAULT_BOOMBOX_CONFIG,
+  DEFAULT_CAMERA_DISTANCE,
+  DEFAULT_CAMERA_TILT_DEG,
+  DEFAULT_DANGLE_CONFIG,
   earAngleFromDeg,
   earAngleToDeg,
   generateCreatureParams,
+  setCameraDistance,
+  setCameraTilt,
 } from "@herzies/shared";
 import { useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Herzie3D } from "./components/Herzie3D";
 import { cn } from "./lib/utils";
 
-const WEARABLE_OPTIONS = ["headphones", "rainbow-headband", "boombox"];
+const WEARABLE_OPTIONS = [
+  "headphones",
+  "rainbow-headband",
+  "gold-chain",
+  "pearl-necklace",
+  "bowtie",
+  "boombox",
+  "witch-hat",
+  "fangs",
+  "pumpkin-spice",
+  "jack-o-lantern",
+  "ghost",
+  "blood-moon",
+];
 
 const DEFAULT_USER = "sandbox-user";
 
@@ -33,6 +52,21 @@ function Sandbox() {
   const [showSky, setShowSky] = useState(false);
   const [wearables, setWearables] = useState<string[]>([]);
   const [boombox, setBoombox] = useState<BoomboxConfig>(DEFAULT_BOOMBOX_CONFIG);
+  const [dangle, setDangle] = useState<DangleConfig>(DEFAULT_DANGLE_CONFIG);
+  const [camera, setCamera] = useState(DEFAULT_CAMERA_DISTANCE);
+  const changeCamera = (distance: number) => {
+    setCameraDistance(distance);
+    clearCreatureCache();
+    setCamera(distance);
+  };
+  const [tilt, setTilt] = useState(DEFAULT_CAMERA_TILT_DEG);
+  const changeTilt = (degrees: number) => {
+    setCameraTilt(degrees);
+    clearCreatureCache();
+    setTilt(degrees);
+  };
+  const swings =
+    wearables.includes("gold-chain") || wearables.includes("pearl-necklace");
   const [jsonOpen, setJsonOpen] = useState(false);
 
   const patchBoombox = (partial: Partial<BoomboxConfig>) => {
@@ -71,6 +105,9 @@ function Sandbox() {
     stage,
     creatureParams: params,
     ...(wearables.includes("boombox") ? { boomboxConfig: boombox } : {}),
+    ...(swings ? { dangleConfig: dangle } : {}),
+    cameraDistance: camera,
+    cameraTiltDeg: tilt,
   });
 
   const copyJson = async () => {
@@ -285,6 +322,71 @@ function Sandbox() {
           </Section>
         )}
 
+        <Section title="camera">
+          <SliderField
+            label="distance (lower = more perspective)"
+            value={camera}
+            bounds={{ min: 1.5, max: 12, step: 0.1 }}
+            onChange={changeCamera}
+          />
+          <SliderField
+            label="tilt ° (higher = more top of head)"
+            value={tilt}
+            bounds={{ min: -20, max: 45, step: 0.5 }}
+            onChange={changeTilt}
+          />
+          <div className="mt-1.5">
+            <Btn
+              onClick={() => {
+                changeCamera(DEFAULT_CAMERA_DISTANCE);
+                changeTilt(DEFAULT_CAMERA_TILT_DEG);
+              }}
+            >
+              reset camera
+            </Btn>
+          </div>
+        </Section>
+
+        {swings && (
+          <Section title="spin physics">
+            <SliderField
+              label="stiffness"
+              value={dangle.stiffness}
+              bounds={{ min: 20, max: 600, step: 5 }}
+              onChange={(v) => setDangle((d) => ({ ...d, stiffness: v }))}
+            />
+            <SliderField
+              label="damping"
+              value={dangle.damping}
+              bounds={{ min: 0, max: 30, step: 0.1 }}
+              onChange={(v) => setDangle((d) => ({ ...d, damping: v }))}
+            />
+            <SliderField
+              label="air drag"
+              value={dangle.drag}
+              bounds={{ min: 0, max: 10, step: 0.1 }}
+              onChange={(v) => setDangle((d) => ({ ...d, drag: v }))}
+            />
+            <SliderField
+              label="max swing (rad)"
+              value={dangle.maxSwing}
+              bounds={{ min: 0.05, max: 1.5, step: 0.01 }}
+              onChange={(v) => setDangle((d) => ({ ...d, maxSwing: v }))}
+            />
+            <SliderField
+              label="flare speed (rad/s)"
+              value={dangle.flareSpeed}
+              bounds={{ min: 1, max: 40, step: 0.5 }}
+              onChange={(v) => setDangle((d) => ({ ...d, flareSpeed: v }))}
+            />
+            <div className="mt-1.5">
+              <Btn onClick={() => setDangle(DEFAULT_DANGLE_CONFIG)}>
+                reset physics
+              </Btn>
+            </div>
+          </Section>
+        )}
+
         <div className="mt-3 flex flex-wrap gap-1.5">
           <Btn onClick={() => setJsonOpen((v) => !v)}>
             {jsonOpen ? "hide json" : "show json"}
@@ -301,6 +403,9 @@ function Sandbox() {
 
       <main className="flex min-h-screen flex-1 items-center justify-center p-6">
         <Herzie3D
+          // Remount on a camera move or tilt: the component memoizes its
+          // frames, and nothing it's given changes when only the camera does.
+          key={`${camera}:${tilt}`}
           userId={userId}
           stage={stage}
           size={size}
@@ -309,6 +414,7 @@ function Sandbox() {
           wearables={wearables}
           creatureParams={params}
           boomboxConfig={boombox}
+          dangleConfig={dangle}
           showSky={showSky}
           draggable={draggable}
         />

@@ -127,8 +127,12 @@ export const herzies = {
   logout: () => invoke<void>("logout"),
   registerHerzie: (name: string) => invoke<void>("register_herzie", { name }),
 
-  friendAdd: (code: string) =>
-    invoke<{ success: boolean; message: string }>("friend_add", { code }),
+  /** `name` labels the activity line; the code is the fallback. */
+  friendAdd: (code: string, name?: string) =>
+    invoke<{ success: boolean; message: string }>("friend_add", {
+      code,
+      name: name ?? null,
+    }),
   friendRemove: (code: string) =>
     invoke<{ success: boolean; message: string }>("friend_remove", { code }),
   setShareListening: (share: boolean) =>

@@ -1,0 +1,41 @@
+{
+  "clouds": {
+    "file": "clouds.webp",
+    "source": "clouds.jpg",
+    "crop": {
+      "zoom": 1,
+      "x": 50,
+      "y": 50
+    },
+    "filter": {
+      "type": "lofi",
+      "detail": 25
+    }
+  },
+  "poseidons-gift": {
+    "file": "poseidons-gift.webp",
+    "source": "poseidons-gift.jpg",
+    "crop": {
+      "zoom": 1,
+      "x": 50,
+      "y": 50
+    },
+    "filter": {
+      "type": "lofi",
+      "detail": 25
+    }
+  },
+  "stars": {
+    "file": "stars.webp",
+    "source": "stars.png",
+    "crop": {
+      "zoom": 1,
+      "x": 50,
+      "y": 50
+    },
+    "filter": {
+      "type": "lofi",
+      "detail": 25
+    }
+  }
+}

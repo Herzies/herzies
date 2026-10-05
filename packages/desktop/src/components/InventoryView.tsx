@@ -25,17 +25,29 @@ import {
   getItemType,
   groundSlot,
   MAX_MODIFIERS,
+  meetsMinStage,
   RARITY_COLORS,
   RARITY_LABELS,
   requiredDiceForLevel,
   unitsBestFirst,
 } from "@herzies/shared";
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import {
   pickGroundSide,
   type ToggleEquipResult,
 } from "../hooks/useOptimisticUnits";
+import {
+  useFallbackStageOffset,
+  useHomeStageOffset,
+} from "../hooks/useStageAlignment";
 import { cn, formatAmount } from "../lib/utils";
 import { herzies } from "../tauri-bridge";
 import { Coin } from "./Coin";
@@ -51,16 +63,17 @@ import {
 } from "./DeckOverlay";
 import { DeckSlotPicker, type PickerOption } from "./DeckSlotPicker";
 import { DiceUpgradeOverlay } from "./DiceUpgradeOverlay";
-import { HERZIE_STAGE_HEIGHT, Herzie3D } from "./Herzie3D";
+import { HERZIE_STAGE_HEIGHT } from "./Herzie3D";
 import { type Flight, ItemFlights } from "./ItemFlight";
 import ItemInspectOverlay, { CompactItemPreview } from "./ItemInspectOverlay";
 import { DuplicatesIcon } from "./icons/DuplicatesIcon";
-import { ItemTypeIcon } from "./icons/ItemTypeIcon";
+import { hasRarityFrame, ItemTypeIcon } from "./icons/ItemTypeIcon";
 import { SortIcon } from "./icons/SortIcon";
 import { List } from "./List";
 import { NumberTicker } from "./NumberTicker";
 import { PromptOverlay } from "./PromptOverlay";
 import { StatsPanel } from "./StatsPanel";
+import { TabButton } from "./TabButton";
 import { HoverPreview, Tooltip } from "./Tooltip";
 
 /** Rarities worth a second look before they're sold for coin. */
@@ -190,7 +203,7 @@ function SellBox({
       style={{ left, top }}
     >
       <div className="flex items-center gap-1.5 text-ui-sm text-text">
-        <ItemTypeIcon item={item} className="h-4 w-4 shrink-0" />
+        <ItemTypeIcon item={item} className="h-6 w-6 shrink-0" />
         <span className="truncate">{item.name}</span>
       </div>
       <SellControls
@@ -394,17 +407,26 @@ const TILE_UNITS_ATTR = "data-tile-units";
 
 /** Wraps the herzie and the deck laid over it: dropping a card anywhere in here
  * places it (see handleDeckDrop). */
-const HERZIE_ZONE_ATTR = "data-herzie-zone";
+/** Marks where a dropped card equips. main.tsx puts it on the shared herzie
+ * too, which sits over this view's stage but outside it in the DOM. */
+export const HERZIE_ZONE_ATTR = "data-herzie-zone";
 
 /** Where a flight lands (see ItemFlight): a worn copy's deck box, or the bag
- * tile holding a copy. */
+ * tile holding a copy — or, when that panel isn't the one showing, its tab. */
 const toDeck = (unitId: string) => `[${DECK_UNIT_ATTR}="${unitId}"]`;
 const toBank = (unitId: string) => `[${TILE_UNITS_ATTR}~="${unitId}"]`;
 
-/** The middle of an element, for a flight to take off from. */
+/** The Herzie view's two panels under the herzie. */
+type Panel = "bag" | "deck";
+const PANEL_TAB_ATTR = "data-panel-tab";
+const toTab = (panel: Panel) => `[${PANEL_TAB_ATTR}="${panel}"]`;
+
+/** The middle of an element, for a flight to take off from, and the size of
+ * the icon in it (bag and deck icons differ). */
 function centre(el: Element | null) {
   const r = el?.getBoundingClientRect();
-  return r && { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  const size = el?.querySelector("svg")?.getBoundingClientRect().width;
+  return r && { x: r.left + r.width / 2, y: r.top + r.height / 2, size };
 }
 
 /** Where a drag is: over a bank slot, and/or over the herzie — and if so, over
@@ -484,8 +506,9 @@ function ItemGridCell({
   flying: boolean;
   equipped: Equipped;
   /** The tile is the exact copy that was clicked — there is no "which of the
-   * identical cards" to work out — so no slot index has to be threaded through. */
-  onPlace: () => void;
+   * identical cards" to work out — so no slot index has to be threaded through.
+   * `inspect`: Shift was held — open Inspect instead. */
+  onPlace: (inspect: boolean) => void;
   /** Right-click: the tile's menu (Inspect, and Sell where it sells). */
   onMenuRequest: (x: number, y: number) => void;
   onDragPointerDown: (index: number, e: React.PointerEvent) => void;
@@ -508,7 +531,7 @@ function ItemGridCell({
         data-slot-index={index}
         {...{ [TILE_UNITS_ATTR]: unitIds.join(" ") }}
         onPointerDown={(e) => onDragPointerDown(index, e)}
-        onClick={onPlace}
+        onClick={(e) => onPlace(e.shiftKey)}
         onContextMenu={(e) => {
           e.preventDefault();
           onMenuRequest(e.clientX, e.clientY);
@@ -530,11 +553,12 @@ function ItemGridCell({
         <span
           className={cn("contents", flying && "[&>*]:animate-flight-meta-in")}
         >
-          {def && (
+          {def && !hasRarityFrame(def) && (
             // Rarity, as a small right triangle in the bottom-left corner, inset
             // by the same 2px as the +N and xN badges, in the rarity's own colour (the same one the preview card
-            // and the item's name use). Grid only — the deck's boxes are too
-            // small to carry one.
+            // and the item's name use) — only for icons whose card frame
+            // can't carry it (see hasRarityFrame). Grid only — the deck's
+            // boxes are too small to carry one.
             <span
               aria-hidden="true"
               className="pointer-events-none absolute bottom-0.5 left-0.5 h-1.5 w-1.5"
@@ -556,9 +580,12 @@ function ItemGridCell({
           )}
         </span>
         {def && (
+          // h-6: the 24px grid at 1:1. The card frame shows the rarity, as
+          // the opened card's does.
           <ItemTypeIcon
             item={def}
-            className={cn("h-4 w-4", flying && "invisible")}
+            rarityFrame
+            className={cn("h-6 w-6", flying && "invisible")}
           />
         )}
       </button>
@@ -619,7 +646,7 @@ function compareTiles(a: BankTile, b: BankTile): number {
   return byName || b.upgradeLevel - a.upgradeLevel;
 }
 
-export function InventoryView({
+function InventoryViewImpl({
   herzie,
   initialItem,
   onLog,
@@ -631,6 +658,7 @@ export function InventoryView({
   onPredictUnits,
   bankExpansions,
   active = true,
+  rootKey = 0,
 }: {
   herzie: Herzie;
   initialItem?: string | null;
@@ -661,6 +689,8 @@ export function InventoryView({
   bankExpansions: number;
   /** False while another tab is shown — pauses the 3D render. */
   active?: boolean;
+  /** Bumped when the Herzie tab is re-selected while shown: back to the bag. */
+  rootKey?: number;
 }) {
   const capacity = bankCapacity(bankExpansions);
   const [currency, setCurrency] = useState(cachedCurrency || herzie.currency);
@@ -681,6 +711,17 @@ export function InventoryView({
    * +3 twin's level. A deep link names only an item, and falls back to the
    * best copy. */
   const [inspectUnitId, setInspectUnitId] = useState<string | null>(null);
+  /** Where the inspected copy's icon is (its tile or deck box, by flight
+   * selector), so the card grows out of that icon and shrinks back into it —
+   * wherever the copy is by then. */
+  const [inspectOrigin, setInspectOrigin] = useState<string | null>(null);
+  /** Opens Inspect on one copy, growing the card out of that copy's icon in
+   * the bag or the deck (wherever it is). */
+  const openInspect = (itemId: string, unitId: string) => {
+    setInspectItem(itemId);
+    setInspectUnitId(unitId);
+    setInspectOrigin(`${toBank(unitId)}, ${toDeck(unitId)}`);
+  };
   /** Sell popover and the tile menu, anchored where the right-click was. They name the TILE
    * (which is what says exactly which copies), not an item id. */
   const [sellBox, setSellBox] = useState<{
@@ -791,6 +832,46 @@ export function InventoryView({
   const endFlight = (id: number) =>
     setFlights((prev) => prev.filter((f) => f.id !== id));
 
+  /** Which panel shows under the herzie. Cards headed for the other one fly
+   * to its tab, which bumps as they land, so it's clear where they went. */
+  const [panel, setPanel] = useState<Panel>("bag");
+  // The view always opens on the bag: reset while hidden, so coming back
+  // never flashes the deck first, and when the tab is pressed again.
+  useEffect(() => {
+    if (!active) setPanel("bag");
+  }, [active]);
+  const rootKeyRef = useRef(rootKey);
+  useEffect(() => {
+    if (rootKeyRef.current === rootKey) return;
+    rootKeyRef.current = rootKey;
+    setPanel("bag");
+  }, [rootKey]);
+  const [tabBumps, setTabBumps] = useState<Record<Panel, number>>({
+    bag: 0,
+    deck: 0,
+  });
+  /** Tabs mid-bump. Cleared when the animation ends: a class left on would
+   * replay it every time the view is shown again (display:none → flex
+   * restarts CSS animations). */
+  const [bumping, setBumping] = useState<ReadonlySet<Panel>>(new Set());
+  /** A flight reaching its spot (ItemFlights' onDone), unlike endFlight,
+   * which also drops refused ones: landing on a tab bumps it. */
+  const landFlight = (id: number) => {
+    const target = flights.find((f) => f.id === id)?.target;
+    for (const tab of ["bag", "deck"] as const) {
+      if (target === toTab(tab)) {
+        setTabBumps((b) => ({ ...b, [tab]: b[tab] + 1 }));
+        setBumping((current) => new Set(current).add(tab));
+      }
+    }
+    endFlight(id);
+  };
+  /** Where a copy shows: its spot when that panel is open, else the tab. */
+  const deckSpot = (unitId: string) =>
+    panel === "deck" ? toDeck(unitId) : toTab("deck");
+  const bagSpot = (unitId: string) =>
+    panel === "bag" ? toBank(unitId) : toTab("bag");
+
   /** A short message over the herzie — why a place or return was refused. */
   const [notice, setNotice] = useState<string | null>(null);
   useEffect(() => {
@@ -821,6 +902,7 @@ export function InventoryView({
     if (!initialItem) return;
     setInspectItem(initialItem);
     setInspectUnitId(null);
+    setInspectOrigin(null);
   }, [initialItem]);
 
   // Custom press-and-drag instead of the native HTML5 Drag and Drop API —
@@ -1197,7 +1279,9 @@ export function InventoryView({
       const origin =
         from ??
         centre(
-          document.querySelector(returning ? toDeck(unitId) : toBank(unitId)),
+          document.querySelector(
+            returning ? deckSpot(unitId) : bagSpot(unitId),
+          ),
         );
       if (origin) {
         created.push({
@@ -1205,7 +1289,9 @@ export function InventoryView({
           itemId: unit.itemId,
           unitId,
           from: origin,
-          target: returning ? toBank(unitId) : toDeck(unitId),
+          // A drop point (`from`) has no icon of its own to size from.
+          fromSize: from ? undefined : (origin as { size?: number }).size,
+          target: returning ? bagSpot(unitId) : deckSpot(unitId),
         });
       }
       // Whatever a place knocks off flies back to the bank too — from its box,
@@ -1215,14 +1301,15 @@ export function InventoryView({
           if (before.id === unitId || before.equippedSlot === null) continue;
           const after = predicted.units.find((u) => u.id === before.id);
           if (after?.equippedSlot !== null) continue;
-          const boxAt = centre(document.querySelector(toDeck(before.id)));
+          const boxAt = centre(document.querySelector(deckSpot(before.id)));
           if (!boxAt) continue;
           created.push({
             id: nextFlightId.current++,
             itemId: before.itemId,
             unitId: before.id,
             from: boxAt,
-            target: toBank(before.id),
+            fromSize: boxAt.size,
+            target: bagSpot(before.id),
           });
         }
       }
@@ -1371,6 +1458,7 @@ export function InventoryView({
         itemId: other.itemId,
         unitId: other.id,
         from: otherAt,
+        fromSize: otherAt.size,
         target: toDeck(other.id),
       });
     }
@@ -1408,9 +1496,15 @@ export function InventoryView({
   // can only mean "place this copy". If another copy of the same item is
   // already worn that's a swap — the worn one comes off, this one goes on — so
   // a +3 can replace a plain one just by clicking it.
-  const handleGridClick = (tile: BankTile) => {
+  const handleGridClick = (tile: BankTile, inspect = false) => {
     if (suppressClickRef.current) {
       suppressClickRef.current = false;
+      return;
+    }
+    // Shift+click: Inspect, the same as the tile menu's.
+    if (inspect) {
+      window.getSelection()?.removeAllRanges(); // Shift+click extends one
+      openInspect(tile.itemId, tile.unitIds[0]);
       return;
     }
     const def = getItem(tile.itemId);
@@ -1622,6 +1716,10 @@ export function InventoryView({
     !inspectedEquipped &&
     inspected?.equipSlot === "modifier" &&
     (equipped.modifier?.length ?? 0) >= MAX_MODIFIERS;
+  const inspectedStageLocked =
+    !inspectedEquipped &&
+    !!inspected &&
+    !meetsMinStage(inspected, herzie.stage);
   const inspectedGroundSide =
     inspected?.equipSlot === "ground"
       ? inspectUnit?.equippedSlot === "ground_left"
@@ -1631,11 +1729,28 @@ export function InventoryView({
           : null
       : null;
 
+  // The stage sits where Home's does (see useStageAlignment), or straight
+  // under the header until Home has been measured.
+  const homeStageOffset = useHomeStageOffset();
+  const headerRef = useRef<HTMLDivElement>(null);
+  const [headerBottom, setHeaderBottom] = useState(0);
+  useLayoutEffect(() => {
+    const header = headerRef.current;
+    // + the header's mb-1.
+    if (header) setHeaderBottom(header.offsetTop + header.offsetHeight + 4);
+  }, []);
+  const stageTop = homeStageOffset ?? headerBottom;
+  useFallbackStageOffset(headerBottom, active);
+
   return (
-    <div className="flex h-full flex-col">
-      <div className="z-50 mb-1 flex items-center justify-between">
-        {/* leading-5: a whole-pixel header height keeps the deck's pixel-art
-            icons below it on whole pixels (see OVERLAY_TITLE). */}
+    <div className="relative flex h-full flex-col">
+      <div
+        ref={headerRef}
+        className="z-50 mb-1 flex items-center justify-between"
+      >
+        {/* leading-5: a whole-pixel header height keeps the pixel-art icons
+            below it on whole pixels — a half-pixel offset snaps their rows
+            unevenly, and they read as warped. */}
         <h1 className="text-ui-lg leading-5 font-bold text-cyan">Herzie</h1>
         <Tooltip label={`${formatAmount(currency)} herzie coins`}>
           <div className="text-ui text-cyan">
@@ -1644,67 +1759,79 @@ export function InventoryView({
         </Tooltip>
       </div>
 
-      {/* The herzie with its stats over it, then the deck beneath — so
-          whatever goes on shows on the creature right there. The whole
-          area, deck included, takes a dropped card. */}
-      <div {...{ [HERZIE_ZONE_ATTR]: "" }} className="flex shrink-0 flex-col">
-        {/* The stage: HERZIE_STAGE_HEIGHT, the same as on Home, so the herzie
-            doesn't move when switching between the two. */}
-        <div className="relative" style={{ height: HERZIE_STAGE_HEIGHT }}>
-          <div className="flex h-full items-center justify-center">
-            <Herzie3D
-              userId={herzie.friendCode}
-              stage={herzie.stage}
-              equipped={equipped}
-              paused={!active}
-            />
-          </div>
-          {/* Top left, flush with the view's edge like the deck below. */}
-          <div className="pointer-events-none absolute top-1.5 left-0 z-10">
-            <StatsPanel stats={stats} preview={statsPreview} />
-          </div>
-          {notice && (
-            <div
-              role="status"
-              className="pointer-events-none absolute inset-x-0 top-2 z-20 flex justify-center"
-            >
-              <div className="border border-red/60 bg-bg-panel px-2 py-1 text-ui-sm text-red">
-                {notice}
-              </div>
-            </div>
-          )}
-        </div>
-        {/* Part of the content rather than laid over the herzie: its own
-            strip between the herzie and the bag. */}
-        <div className="z-10 shrink-0">
-          <DeckOverlay
-            equipped={equipped}
-            units={units}
-            flyingUnitIds={flyingUnitIds}
-            drag={deckDrag}
-            draggingUnitId={draggingOutUnitId}
-            onUnequip={(unitId) => {
-              // Dragged out and dropped straight back on its own box.
-              if (suppressClickRef.current) {
-                suppressClickRef.current = false;
-                return;
-              }
-              handleEquip(unitId);
-            }}
-            onDragStart={handleDeckPointerDown}
-            onMenuRequest={(unitId, x, y) => setDeckMenu({ unitId, x, y })}
-            onPlaceRequest={setSlotPicker}
-          />
+      {/* Stats just under the title, flush left like the deck below. A
+          zero-height row, so they float over the sky without pushing the
+          stage down (which would undo its alignment with Home's). */}
+      <div className="relative h-0 shrink-0">
+        <div className="pointer-events-none absolute top-2 left-0 z-10">
+          <StatsPanel stats={stats} preview={statsPreview} />
         </div>
       </div>
 
-      {/* The bag: whatever the stage and deck leave. */}
-      <div className="z-10 flex min-h-0 flex-1 flex-col">
-        {/* Both buttons live in one wrapper so they read as a pair, and the
-            wrapper's `ml-auto` pushes them right. */}
-        <div className="mb-0.5 flex items-center border-b border-border">
-          <span className="py-0.5 text-ui font-bold text-text-dim">Bag</span>
-          <div className="ml-auto flex items-center">
+      {/* The stage: HERZIE_STAGE_HEIGHT at the same offset as Home's, where
+          main.tsx draws the herzie (one renderer shared with Home, zoomed out
+          a little here). Absolute, behind the deck and bag: the bag keeps
+          square cells by taking a fixed height, and the deck may overlap the
+          stage's floor. It and the deck both take a dropped card. */}
+      <div
+        {...{ [HERZIE_ZONE_ATTR]: "" }}
+        className="absolute inset-x-0"
+        style={{ top: stageTop, height: HERZIE_STAGE_HEIGHT }}
+      >
+        {notice && (
+          <div
+            role="status"
+            className="pointer-events-none absolute inset-x-0 top-2 z-20 flex justify-center"
+          >
+            <div className="border border-red/60 bg-bg-panel px-2 py-1 text-ui-sm text-red">
+              {notice}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Whatever the deck and bag don't use. */}
+      <div className="min-h-0 flex-1" />
+
+      {/* The bag and the deck, one at a time, over the stage's floor. */}
+      <div className="z-10 flex shrink-0 flex-col">
+        {/* The bag's two buttons live in one wrapper so they read as a pair,
+            and the wrapper's `ml-auto` pushes them right. */}
+        {/* h-6: a whole-pixel row height, for the same reason as the
+            header's leading-5 — the deck's and bag's icons sit below it. */}
+        <div className="mb-0.5 flex h-6 items-center border-b border-border">
+          {(["bag", "deck"] as const).map((tab) => (
+            <TabButton
+              key={tab}
+              active={panel === tab}
+              onClick={() => setPanel(tab)}
+            >
+              {/* Re-keyed on each bump so the animation restarts. */}
+              <span
+                key={tabBumps[tab]}
+                {...{ [PANEL_TAB_ATTR]: tab }}
+                className={cn(
+                  "inline-block",
+                  bumping.has(tab) && "animate-tab-bump",
+                )}
+                onAnimationEnd={() =>
+                  setBumping((current) => {
+                    const next = new Set(current);
+                    next.delete(tab);
+                    return next;
+                  })
+                }
+              >
+                {tab === "bag" ? "Bag" : "Deck"}
+              </span>
+            </TabButton>
+          ))}
+          <div
+            className={cn(
+              "ml-auto flex items-center",
+              panel !== "bag" && "invisible",
+            )}
+          >
             <Tooltip
               label={
                 duplicatesCount > 0
@@ -1743,96 +1870,135 @@ export function InventoryView({
           </div>
         </div>
 
-        {loading ? (
-          <div className="pt-5 text-center text-ui text-text-dim">
-            Loading...
-          </div>
-        ) : (
-          // Three rows fill the panel; past that (each Inventory Expansion adds
-          // two rows) it scrolls. No fade hints at the edges, and scrollbars
-          // are hidden app-wide.
-          <div
-            ref={gridViewportRef}
-            className={cn(
-              "min-h-0 flex-1",
-              returningOverBag && "ring-1 ring-inset ring-cyan/50",
-            )}
-          >
-            {/* Each row is a third of the visible height, in CSS, so the rows
+        {/* One size for both panels — three rows of square bag cells — so
+            switching tabs never moves anything. */}
+        <div
+          className="shrink-0"
+          style={{ aspectRatio: `${GRID_COLS} / ${VISIBLE_ROWS}` }}
+        >
+          {panel === "deck" ? (
+            <div {...{ [HERZIE_ZONE_ATTR]: "" }} className="relative h-full">
+              <DeckOverlay
+                equipped={equipped}
+                units={units}
+                flyingUnitIds={flyingUnitIds}
+                drag={deckDrag}
+                draggingUnitId={draggingOutUnitId}
+                onUnequip={(unitId) => {
+                  // Dragged out and dropped straight back on its own box.
+                  if (suppressClickRef.current) {
+                    suppressClickRef.current = false;
+                    return;
+                  }
+                  handleEquip(unitId);
+                }}
+                onInspectRequest={(unitId) => {
+                  if (suppressClickRef.current) {
+                    suppressClickRef.current = false;
+                    return;
+                  }
+                  window.getSelection()?.removeAllRanges(); // Shift+click extends one
+                  const unit = units.find((u) => u.id === unitId);
+                  if (unit) openInspect(unit.itemId, unit.id);
+                }}
+                onDragStart={handleDeckPointerDown}
+                onMenuRequest={(unitId, x, y) => setDeckMenu({ unitId, x, y })}
+                onPlaceRequest={setSlotPicker}
+              />
+            </div>
+          ) : loading ? (
+            <div className="pt-5 text-center text-ui text-text-dim">
+              Loading...
+            </div>
+          ) : (
+            // Three rows fill the panel; past that (each Inventory Expansion adds
+            // two rows) it scrolls. No fade hints at the edges, and scrollbars
+            // are hidden app-wide.
+            <div
+              ref={gridViewportRef}
+              className={cn(
+                "h-full",
+                returningOverBag && "ring-1 ring-inset ring-cyan/50",
+              )}
+            >
+              {/* Each row is a third of the visible height, in CSS, so the rows
                 are right on the very first frame — no measuring, and nothing to
                 jump when the view is shown. The content is `rows / 3` viewports
                 tall (a percentage of the scroller) and the grid splits that
                 evenly, which is what makes each row a third. */}
-            <List
-              className="h-full"
-              fades={false}
-              contentStyle={{
-                height: `${(gridRows * 100) / VISIBLE_ROWS}%`,
-              }}
-            >
-              <div
-                className="grid h-full grid-cols-6"
-                style={{ gridAutoRows: `${100 / gridRows}%` }}
+              <List
+                className="h-full"
+                fades={false}
+                contentStyle={{
+                  height: `${(gridRows * 100) / VISIBLE_ROWS}%`,
+                }}
               >
-                {slotOrder.map((key, i) => {
-                  const isLastCol = i % GRID_COLS === GRID_COLS - 1;
-                  const isLastRow = i >= slotOrder.length - GRID_COLS;
-                  const tile = key ? tileByKey.get(key) : undefined;
-                  if (!tile) {
+                <div
+                  className="grid h-full grid-cols-6"
+                  style={{ gridAutoRows: `${100 / gridRows}%` }}
+                >
+                  {slotOrder.map((key, i) => {
+                    const isLastCol = i % GRID_COLS === GRID_COLS - 1;
+                    const isLastRow = i >= slotOrder.length - GRID_COLS;
+                    const tile = key ? tileByKey.get(key) : undefined;
+                    if (!tile) {
+                      return (
+                        <EmptyGridCell
+                          key={`slot-${i}`}
+                          index={i}
+                          isLastCol={isLastCol}
+                          isLastRow={isLastRow}
+                          isDragOver={dragVisual?.overIndex === i}
+                        />
+                      );
+                    }
                     return (
-                      <EmptyGridCell
+                      <ItemGridCell
                         key={`slot-${i}`}
                         index={i}
+                        itemId={tile.itemId}
+                        unitIds={tile.unitIds}
+                        level={tile.upgradeLevel}
                         isLastCol={isLastCol}
                         isLastRow={isLastRow}
-                        isDragOver={dragVisual?.overIndex === i}
+                        isDragging={
+                          dragSource?.kind === "bag" && dragSource.index === i
+                        }
+                        // A card from the deck can only be dropped on an empty
+                        // slot — dropped on a full one it finds its own.
+                        isDragOver={
+                          dragSource?.kind === "bag" &&
+                          dragVisual?.overIndex === i
+                        }
+                        flying={tile.unitIds.some((id) =>
+                          flyingUnitIds.has(id),
+                        )}
+                        equipped={equipped}
+                        onPlace={(inspect) => handleGridClick(tile, inspect)}
+                        onMenuRequest={(x, y) =>
+                          setTileMenu({ tileKey: tile.key, x, y })
+                        }
+                        onDragPointerDown={handleDragPointerDown}
                       />
                     );
-                  }
-                  return (
-                    <ItemGridCell
-                      key={`slot-${i}`}
-                      index={i}
-                      itemId={tile.itemId}
-                      unitIds={tile.unitIds}
-                      level={tile.upgradeLevel}
-                      isLastCol={isLastCol}
-                      isLastRow={isLastRow}
-                      isDragging={
-                        dragSource?.kind === "bag" && dragSource.index === i
-                      }
-                      // A card from the deck can only be dropped on an empty
-                      // slot — dropped on a full one it finds its own.
-                      isDragOver={
-                        dragSource?.kind === "bag" &&
-                        dragVisual?.overIndex === i
-                      }
-                      flying={tile.unitIds.some((id) => flyingUnitIds.has(id))}
-                      equipped={equipped}
-                      onPlace={() => handleGridClick(tile)}
-                      onMenuRequest={(x, y) =>
-                        setTileMenu({ tileKey: tile.key, x, y })
-                      }
-                      onDragPointerDown={handleDragPointerDown}
-                    />
-                  );
-                })}
-              </div>
-            </List>
-          </div>
-        )}
+                  })}
+                </div>
+              </List>
+            </div>
+          )}
+        </div>
       </div>
 
-      <ItemFlights flights={flights} onDone={endFlight} />
+      <ItemFlights flights={flights} onDone={landFlight} />
 
       {inspectItem && inspected && (
         <ItemInspectOverlay
           itemId={inspectItem}
+          origin={inspectOrigin ?? undefined}
           // Escape reaches both this and the sell confirmation; let it only
           // dismiss the prompt, leaving the preview open underneath.
-          onClose={() => {
-            if (!sellConfirm) setInspectItem(null);
-          }}
+          closeBlocked={!!sellConfirm}
+          onClose={() => setInspectItem(null)}
           equipped={equipped}
           level={inspectUnit?.upgradeLevel ?? 0}
           meta={inspectedGroundSide || undefined}
@@ -1844,12 +2010,25 @@ export function InventoryView({
                     <button
                       type="button"
                       className="btn"
-                      disabled={inspectedModifierCapped || !inspectUnit}
+                      disabled={
+                        inspectedModifierCapped ||
+                        inspectedStageLocked ||
+                        !inspectUnit
+                      }
                       onClick={() => inspectUnit && handleEquip(inspectUnit.id)}
                     >
                       {inspectedEquipped ? "Return" : "Place"}
                     </button>
                   );
+                  if (inspectedStageLocked) {
+                    return (
+                      <Tooltip
+                        label={`Your herzie needs to reach stage ${inspected.minStage} to wear this`}
+                      >
+                        {button}
+                      </Tooltip>
+                    );
+                  }
                   return inspectedModifierCapped ? (
                     <Tooltip
                       label={`Max modifiers placed (${MAX_MODIFIERS}/${MAX_MODIFIERS})`}
@@ -1894,8 +2073,7 @@ export function InventoryView({
                 {
                   label: "Inspect",
                   onClick: () => {
-                    setInspectItem(unit.itemId);
-                    setInspectUnitId(unit.id);
+                    openInspect(unit.itemId, unit.id);
                     setDeckMenu(null);
                   },
                 },
@@ -1934,8 +2112,7 @@ export function InventoryView({
                 {
                   label: "Inspect",
                   onClick: () => {
-                    setInspectItem(tile.itemId);
-                    setInspectUnitId(tile.unitIds[0]);
+                    openInspect(tile.itemId, tile.unitIds[0]);
                     setTileMenu(null);
                   },
                 },
@@ -2124,3 +2301,8 @@ export function InventoryView({
     </div>
   );
 }
+
+/** Memoized: mounted (hidden) for the app's whole life, so without this it
+ * re-rendered on every App render, i.e. every state push. Its props are all
+ * identity-stable while unchanged (see stableMerge in main.tsx). */
+export const InventoryView = memo(InventoryViewImpl);
