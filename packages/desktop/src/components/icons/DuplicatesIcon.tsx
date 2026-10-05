@@ -1,4 +1,4 @@
-import { PixelIcon } from "./PixelIcon";
+import { PixelIcon } from "@herzies/shared";
 
 // Two offset card outlines — the conventional "duplicate" glyph, hand-drawn
 // as a 16x16 bitmap (rather than a stroked vector) to match the SortIcon it

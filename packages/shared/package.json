@@ -20,11 +20,13 @@
       "import": "./dist/game-events.js",
       "require": "./dist/game-events.js",
       "types": "./dist/game-events.d.ts"
-    }
+    },
+    "./card-art/*": "./card-art/*"
   },
   "files": [
     "dist",
-    "theme.css"
+    "theme.css",
+    "card-art"
   ],
   "scripts": {
     "build": "tsc",

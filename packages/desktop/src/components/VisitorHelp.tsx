@@ -1,12 +1,15 @@
-import { getItem, RARITY_COLORS as ITEM_RARITY_COLORS } from "@herzies/shared";
+import {
+  getItem,
+  RARITY_COLORS as ITEM_RARITY_COLORS,
+  ItemTypeIcon,
+  PixelIcon,
+} from "@herzies/shared";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import ItemInspectOverlay, {
   INSPECT_ORIGIN_ATTR,
   inspectOrigin,
 } from "./ItemInspectOverlay";
-import { ItemTypeIcon } from "./icons/ItemTypeIcon";
-import { PixelIcon } from "./icons/PixelIcon";
 
 export type VisitorReward = {
   /** What earns it, e.g. "Reward" or "Top 3 bonus". */

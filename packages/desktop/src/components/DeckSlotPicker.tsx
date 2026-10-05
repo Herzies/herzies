@@ -1,7 +1,6 @@
-import { getItem } from "@herzies/shared";
+import { getItem, ItemTypeIcon } from "@herzies/shared";
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { ItemTypeIcon } from "./icons/ItemTypeIcon";
 import { List } from "./List";
 
 const EDGE_PADDING = 8;

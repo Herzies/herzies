@@ -1,5 +1,7 @@
+"use client";
+
 import { type CSSProperties, type ReactNode, useEffect, useRef } from "react";
-import { cn } from "../lib/utils";
+import { cx } from "./cx.js";
 
 /** How far (deg) the card leans at the very edge of its face. */
 const MAX_TILT = 10;
@@ -73,7 +75,7 @@ export function TiltCard({
 
   return (
     <div ref={wrapRef}>
-      <div ref={cardRef} className={cn("holo-card", className)} style={style}>
+      <div ref={cardRef} className={cx("holo-card", className)} style={style}>
         {children}
       </div>
     </div>

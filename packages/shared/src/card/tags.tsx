@@ -1,3 +1,4 @@
+import type { ReactElement, ReactNode } from "react";
 import {
   getItemSet,
   getItemType,
@@ -6,9 +7,13 @@ import {
   type ItemType,
   STAT_KEYS,
   STAT_LABELS,
-} from "@herzies/shared";
-import { cn } from "../lib/utils";
-import { Tooltip } from "./Tooltip";
+} from "../items.js";
+import { cx as cn } from "./cx.js";
+
+/** Wraps a tag in the host app's hover tooltip. The shared tags carry no
+ * tooltip of their own (the desktop has one, the website doesn't), so a host
+ * that wants one passes it in; without it the tag renders bare. */
+export type TagTooltip = (label: string, tag: ReactElement) => ReactNode;
 
 export const ITEM_TYPE_TEXT_CLASSES: Record<ItemType, string> = {
   dice: "text-orange",
@@ -71,24 +76,25 @@ export function ItemTypeTag({
 export function SetTag({
   itemId,
   className,
+  tooltip,
 }: {
   itemId: string;
   className?: string;
+  tooltip?: TagTooltip;
 }) {
   const set = getItemSet(itemId);
   if (!set) return null;
-  return (
-    <Tooltip label={set.effect}>
-      <span
-        className={cn(
-          "rounded-full border border-border bg-bg px-1.5 py-px text-ui-sm text-text-dim",
-          className,
-        )}
-      >
-        {set.name}
-      </span>
-    </Tooltip>
+  const tag = (
+    <span
+      className={cn(
+        "rounded-full border border-border bg-bg px-1.5 py-px text-ui-sm text-text-dim",
+        className,
+      )}
+    >
+      {set.name}
+    </span>
   );
+  return tooltip ? tooltip(set.effect, tag) : tag;
 }
 
 /** The stats an item adds to its wearer, one per line (e.g. "Sonic power:
@@ -132,21 +138,22 @@ export function ItemStatLines({
 export function ModifierEffectTag({
   item,
   className,
+  tooltip,
 }: {
   item: Pick<ItemDef, "modifier">;
   className?: string;
+  tooltip?: TagTooltip;
 }) {
   if (!item.modifier) return null;
-  return (
-    <Tooltip label={item.modifier.tooltip}>
-      <span
-        className={cn(
-          "rounded-full bg-yellow/15 px-1.5 py-px text-ui-sm text-yellow",
-          className,
-        )}
-      >
-        {item.modifier.label}
-      </span>
-    </Tooltip>
+  const tag = (
+    <span
+      className={cn(
+        "rounded-full bg-yellow/15 px-1.5 py-px text-ui-sm text-yellow",
+        className,
+      )}
+    >
+      {item.modifier.label}
+    </span>
   );
+  return tooltip ? tooltip(item.modifier.tooltip, tag) : tag;
 }

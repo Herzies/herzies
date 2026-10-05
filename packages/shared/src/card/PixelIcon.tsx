@@ -1,3 +1,5 @@
+"use client";
+
 import { type CSSProperties, useId } from "react";
 
 /** A grid as one rect per horizontal run of the same character; `fill` is

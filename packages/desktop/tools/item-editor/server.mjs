@@ -1,13 +1,16 @@
 #!/usr/bin/env node
 // Tiny local item editor — no build step, just a plain Node http server + a
-// static page. Everything it saves goes straight into the desktop source,
-// which the running app (via Vite) picks up like any other source change.
+// static page. Everything it saves goes straight into the shared package's
+// source (the collector card lives there, so the desktop app and the website
+// draw the same art); data the app reads from the shared build is rebuilt
+// after each save, and the running app (via Vite) picks it up from there.
 //
 // - Icons: the per-item pixel icons in
-//   ../../src/components/icons/item-icon-grids.json. Each entry is
+//   ../../../shared/src/card/item-icon-grids.json (rebuilt into the shared
+//   package on save). Each entry is
 //   `{ palette, grid }`: `grid` is N rows of N '.' (empty) / '0'-'9'/'a'-'f'
 //   (an index into `palette`) — a per-pixel paint job, not one solid tint
-//   (see ItemTypeIcon.tsx). N is 24, for items and Town's visitor portraits
+//   (see shared's card/ItemTypeIcon.tsx). N is 24, for items and Town's visitor portraits
 //   (see VisitorIcon.tsx) alike.
 // - Names and descriptions: written straight into the catalog's source,
 //   ../../../shared/src/items.ts, then the shared package is rebuilt (the
@@ -15,15 +18,16 @@
 //   regenerated (scripts/vendor-shared.mjs), so all three stay in step.
 // - Card artwork: the pixel picture in a card's art window when it has no
 //   uploaded illustration — 32x24 (4:3), same dialect as the icons, in
-//   ../../src/components/icons/item-artwork-grids.json. An item without an
+//   ../../../shared/src/card/item-artwork-grids.json (rebuilt on save, like
+//   the icons). An item without an
 //   entry derives it from its icon (artwork-from-icon.ts, which the page
 //   loads too), so it only gets an entry once it's edited on its own.
 // - Card illustrations: the art on an item's collector card (see
-//   ItemCardArt.tsx). The artist's original is kept untouched in
+//   shared's card/ItemCardArt.tsx). The artist's original is kept untouched in
 //   ../../art-sources/card-art/ (outside src/, so it is never bundled); the
 //   page crops, zooms and filters it on a canvas and saves the finished
-//   4:3 image to ../../src/assets/card-art/ as `<itemId>.<ext>` — the
-//   only file the app ships. card-art.json beside it records both files,
+//   4:3 image to ../../../shared/card-art/ as `<itemId>.<ext>` — the
+//   only file the apps ship (read from source, so no rebuild). card-art.json beside it records both files,
 //   the artist credit and the settings, so the art can be re-framed from
 //   the original at any time. An item without one shows its icon instead.
 import { execFile } from "node:child_process";
@@ -49,8 +53,8 @@ import {
 import {
   ARTWORK_H,
   ARTWORK_W,
-} from "../../src/components/icons/artwork-from-icon.ts";
-import { TYPE_ICON_GRIDS } from "../../src/components/icons/type-icon-grids.ts";
+} from "../../../shared/src/card/artwork-from-icon.ts";
+import { TYPE_ICON_GRIDS } from "../../../shared/src/card/type-icon-grids.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "../../../..");
@@ -112,19 +116,11 @@ function readItemTexts() {
     }),
   );
 }
-const GRIDS_PATH = resolve(
-  __dirname,
-  "../../src/components/icons/item-icon-grids.json",
-);
-const ARTWORK_PATH = resolve(
-  __dirname,
-  "../../src/components/icons/item-artwork-grids.json",
-);
-const ARTWORK_LIB_PATH = resolve(
-  __dirname,
-  "../../src/components/icons/artwork-from-icon.ts",
-);
-const CARD_ART_DIR = resolve(__dirname, "../../src/assets/card-art");
+const CARD_SOURCE_DIR = resolve(REPO_ROOT, "packages/shared/src/card");
+const GRIDS_PATH = resolve(CARD_SOURCE_DIR, "item-icon-grids.json");
+const ARTWORK_PATH = resolve(CARD_SOURCE_DIR, "item-artwork-grids.json");
+const ARTWORK_LIB_PATH = resolve(CARD_SOURCE_DIR, "artwork-from-icon.ts");
+const CARD_ART_DIR = resolve(REPO_ROOT, "packages/shared/card-art");
 const CARD_ART_MANIFEST = resolve(CARD_ART_DIR, "card-art.json");
 const CARD_ART_SOURCE_DIR = resolve(__dirname, "../../art-sources/card-art");
 const HTML_PATH = resolve(__dirname, "index.html");
@@ -260,6 +256,28 @@ function writeArtwork(artwork) {
   writeFileSync(ARTWORK_PATH, `${JSON.stringify(artwork, null, 2)}\n`);
 }
 
+/** Rebuilds the shared package, which the apps run on — after a grid save,
+ * since the grids are bundled into its build. */
+function rebuildShared() {
+  return run("pnpm", ["--filter", "@herzies/shared", "build"], {
+    cwd: REPO_ROOT,
+  });
+}
+
+/** Rebuilds the shared package after a save to `file`, and answers with
+ * `ok`, or with what went wrong. */
+async function sendAfterRebuild(res, file) {
+  try {
+    await rebuildShared();
+  } catch (err) {
+    sendJson(res, 500, {
+      error: `Saved to ${file}, but rebuilding shared failed: ${String(err.stderr || err.stdout || err.message).slice(0, 600)}`,
+    });
+    return;
+  }
+  sendJson(res, 200, { ok: true });
+}
+
 function readGrids() {
   return JSON.parse(readFileSync(GRIDS_PATH, "utf8"));
 }
@@ -377,9 +395,7 @@ const server = createServer(async (req, res) => {
       writeFileSync(ITEMS_SOURCE_PATH, next);
       // The app runs on the shared build; the edge functions on their copy.
       try {
-        await run("pnpm", ["--filter", "@herzies/shared", "build"], {
-          cwd: REPO_ROOT,
-        });
+        await rebuildShared();
         await run("node", ["scripts/vendor-shared.mjs"], { cwd: REPO_ROOT });
       } catch (err) {
         sendJson(res, 500, {
@@ -429,14 +445,14 @@ const server = createServer(async (req, res) => {
         }
         artwork[id] = { palette: payload.palette, grid: payload.grid };
         writeArtwork(artwork);
-        sendJson(res, 200, { ok: true });
+        await sendAfterRebuild(res, "item-artwork-grids.json");
         return;
       }
       // Back to deriving it from the icon.
       if (req.method === "DELETE") {
         delete artwork[id];
         writeArtwork(artwork);
-        sendJson(res, 200, { ok: true });
+        await sendAfterRebuild(res, "item-artwork-grids.json");
         return;
       }
     }
@@ -645,7 +661,7 @@ const server = createServer(async (req, res) => {
       }
       stored[id] = { grid: payload.grid, palette: payload.palette };
       writeFileSync(GRIDS_PATH, `${JSON.stringify(stored, null, 2)}\n`);
-      sendJson(res, 200, { ok: true });
+      await sendAfterRebuild(res, "item-icon-grids.json");
       return;
     }
 

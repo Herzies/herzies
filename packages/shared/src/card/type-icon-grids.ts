@@ -1,4 +1,4 @@
-import type { ItemType } from "@herzies/shared";
+import type { ItemType } from "../items.js";
 
 // The generic per-type icons: what an item shows until it gets a bespoke one
 // in item-icon-grids.json. Plain TS with no runtime imports, so the

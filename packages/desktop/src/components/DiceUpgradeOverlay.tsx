@@ -1,5 +1,6 @@
 import {
   getItem,
+  ItemTypeIcon,
   type ItemUnit,
   RARITY_COLORS,
   requiredDiceForLevel,
@@ -13,7 +14,6 @@ import { type UpgradeRollFn, useUpgradeRoll } from "../hooks/useUpgradeRoll";
 import { cn } from "../lib/utils";
 import { Checkbox } from "./Checkbox";
 import { ItemPreviewCard } from "./ItemInspectOverlay";
-import { ItemTypeIcon } from "./icons/ItemTypeIcon";
 import { List } from "./List";
 import { PromptOverlay } from "./PromptOverlay";
 
@@ -51,7 +51,7 @@ function formatChance(chance: number): string {
 
 /** The card at full size is too tall for the modal in the 520px window. */
 const CARD_SCALE = 0.7;
-/** ItemPreviewCard's fixed width (its TiltCard is w-[218px]). */
+/** ItemPreviewCard's fixed width (ItemCard's frame is w-[218px]). */
 const CARD_WIDTH = 218;
 
 /** The card being upgraded, as its collector card, shrunk with a transform

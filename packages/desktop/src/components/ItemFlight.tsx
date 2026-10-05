@@ -1,7 +1,6 @@
-import { getItem } from "@herzies/shared";
+import { getItem, ItemTypeIcon } from "@herzies/shared";
 import { useLayoutEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { ItemTypeIcon } from "./icons/ItemTypeIcon";
 
 /** One card on its way between the bank and the deck. */
 export interface Flight {

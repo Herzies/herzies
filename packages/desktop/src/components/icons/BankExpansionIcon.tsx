@@ -1,5 +1,4 @@
-import rawItemIconGrids from "./item-icon-grids.json";
-import { PixelIcon } from "./PixelIcon";
+import { PixelIcon, ICON_GRID_JSON as rawItemIconGrids } from "@herzies/shared";
 
 // The Inventory Expansion's store icon. Painted in the item editor
 // (`pnpm item-editor`, listed there under EXTRA_ICONS) and stored beside the

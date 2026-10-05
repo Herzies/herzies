@@ -1,12 +1,11 @@
-import { DEFAULT_Y_ANGLE, Herzie3D, VISITORS } from "@herzies/shared";
-import { SpeechBubble, useChatter } from "./SpeechBubble";
-
-/** Orphiez's look: a fixed seed like George's, in the teal skin, with
- * headphones on — he's listening for it everywhere. */
-export const ORPHIEZ_EQUIPPED = {
-  head: "headphones",
-  color: "thanks-for-all-the-fish",
-};
+import {
+  DEFAULT_Y_ANGLE,
+  Herzie3D,
+  ORPHIEZ_EQUIPPED,
+  SpeechBubble,
+  useChatter,
+  VISITORS,
+} from "@herzies/shared";
 
 /** What Orphiez mutters while players hunt. Flavour only — never a clue:
  * the clues are the hunt's own, and deliberately hard. */

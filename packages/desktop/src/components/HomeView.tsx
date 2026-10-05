@@ -1,10 +1,12 @@
 import {
   bankCapacity,
   bossDamagePerMinute,
+  CARD_SHAPE_CLIP,
   getHerzieStats,
   getHerzieStatsFromUnits,
   getItem,
   hasRoomFor,
+  ItemTypeIcon,
   isBankFull,
   levelProgress,
   xpToNextLevel,
@@ -20,7 +22,6 @@ import {
 } from "../tauri-bridge";
 import { HERZIE_STAGE_HEIGHT } from "./Herzie3D";
 import { HEADER_ICON_HIT } from "./headerIconHit";
-import { CARD_SHAPE_CLIP, ItemTypeIcon } from "./icons/ItemTypeIcon";
 import { ModifiersButton } from "./ModifiersButton";
 import { StatsButton } from "./StatsButton";
 import { Tooltip } from "./Tooltip";
