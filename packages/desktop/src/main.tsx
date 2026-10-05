@@ -30,6 +30,7 @@ import { WhatsNewOverlay } from "./components/WhatsNewOverlay";
 import { useOptimisticUnits } from "./hooks/useOptimisticUnits";
 import { useHomeStageOffset } from "./hooks/useStageAlignment";
 import { useTradeRequests } from "./hooks/useTradeRequests";
+import { stableMerge } from "./lib/stableMerge";
 import { cn } from "./lib/utils";
 import { RELEASE_NOTES } from "./release-notes";
 import {
@@ -96,9 +97,10 @@ function App() {
     rawState.herzie?.stage ?? 1,
   );
   // Memoized on its inputs, each of which is itself identity-stable while its
-  // content is unchanged — so this object only changes when something really
-  // did, and an unrelated App re-render (a view switch, a local toggle) doesn't
-  // hand every view a new `state` and re-render the lot.
+  // content is unchanged (`rawState` via stableMerge, field by field) — so this
+  // object only changes when something really did, and an unrelated App
+  // re-render (a view switch, a local toggle) doesn't hand every view a new
+  // `state` and re-render the lot.
   //
   // `inventory` (the counts) follows the predicted copies only while something
   // is predicted: otherwise it stays the server's own, which is all there is to
@@ -219,8 +221,11 @@ function App() {
   }, []);
 
   useEffect(() => {
-    herzies.getState().then(setState);
-    const unlistenState = herzies.onStateUpdate(setState);
+    // Merged rather than replaced: see stableMerge for why identity matters.
+    const applyState = (next: AppState) =>
+      setState((prev) => stableMerge(prev, next));
+    herzies.getState().then(applyState);
+    const unlistenState = herzies.onStateUpdate(applyState);
     const unlistenActivity = herzies.onActivity(addLog);
     const unlistenDeepLink = herzies.onDeepLink((payload) => {
       if (payload.startsWith("trade:")) {

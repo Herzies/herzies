@@ -31,7 +31,14 @@ import {
   requiredDiceForLevel,
   unitsBestFirst,
 } from "@herzies/shared";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import {
   pickGroundSide,
@@ -639,7 +646,7 @@ function compareTiles(a: BankTile, b: BankTile): number {
   return byName || b.upgradeLevel - a.upgradeLevel;
 }
 
-export function InventoryView({
+function InventoryViewImpl({
   herzie,
   initialItem,
   onLog,
@@ -2294,3 +2301,8 @@ export function InventoryView({
     </div>
   );
 }
+
+/** Memoized: mounted (hidden) for the app's whole life, so without this it
+ * re-rendered on every App render, i.e. every state push. Its props are all
+ * identity-stable while unchanged (see stableMerge in main.tsx). */
+export const InventoryView = memo(InventoryViewImpl);

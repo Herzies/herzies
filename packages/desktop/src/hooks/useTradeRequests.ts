@@ -1,5 +1,6 @@
-import { createClient, type RealtimeChannel } from "@supabase/supabase-js";
+import type { RealtimeChannel } from "@supabase/supabase-js";
 import { useEffect, useRef } from "react";
+import { closeChannel, openChannel, realtimeClient } from "../lib/realtime";
 import { herzies, type PendingTradeRequest } from "../tauri-bridge";
 
 /**
@@ -19,8 +20,12 @@ import { herzies, type PendingTradeRequest } from "../tauri-bridge";
  *     down and rebuilt on every navigation away from Home, which would be a
  *     correctness bug here rather than just wasted reconnects.
  *  2. **It must not be the only path.** A hidden window is exactly where the OS
- *     is most likely to throttle or drop a websocket, so trade_watch_loop in
- *     lib.rs still polls as a fallback, at 60s instead of 5s.
+ *     is most likely to throttle or drop a websocket. The fallback is the
+ *     `pendingTradeRequest` every /sync carries (at most 60s apart while hidden,
+ *     notification included) — so a missed broadcast means an invite up to a
+ *     minute late, not a lost one. (A dedicated 5s /trade-pending poll used to
+ *     cover this, at ~17k calls a day per idle install; it was dropped
+ *     without first confirming broadcasts survive a long stay in the tray.)
  *
  * Connection handling mirrors ChatPanel's: fresh token per connect (a stale
  * access token is the usual reason realtime goes quiet), a generation counter
@@ -34,7 +39,6 @@ export function useTradeRequests(isOnline: boolean) {
     if (!isOnline) return;
     let cancelled = false;
     let generation = 0;
-    let supabase: ReturnType<typeof createClient> | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let reconnectAttempts = 0;
 
@@ -59,23 +63,28 @@ export function useTradeRequests(isOnline: boolean) {
       if (cancelled) return;
       const myGen = ++generation;
       if (channelRef.current) {
-        channelRef.current.unsubscribe();
+        closeChannel(channelRef.current);
         channelRef.current = null;
       }
       herzies
         .getAuthConfig()
-        .then((config) => {
+        .then(async (config) => {
           if (cancelled || myGen !== generation || !config) return;
-          if (!supabase) {
-            supabase = createClient(config.supabaseUrl, config.anonKey);
-          }
+          // Shared with ChatPanel: one socket, one channel per feature.
+          const supabase = realtimeClient(config.supabaseUrl, config.anonKey);
           supabase.realtime.setAuth(config.accessToken);
 
           // Per-user topic. The Broadcast-authorization policy on
           // realtime.messages checks this against auth.uid(), so subscribing to
           // someone else's topic yields nothing rather than their invites.
-          const channel = supabase
-            .channel(`trade:${config.userId}`, { config: { private: true } })
+          const fresh = await openChannel(supabase, `trade:${config.userId}`, {
+            config: { private: true },
+          });
+          if (cancelled || myGen !== generation) {
+            closeChannel(fresh);
+            return;
+          }
+          const channel = fresh
             // supabase-js types "broadcast" as a literal union its own .on()
             // overloads won't accept for a custom event name, so the arguments
             // are cast. Same shape as ChatPanel's chat subscription.
@@ -117,7 +126,7 @@ export function useTradeRequests(isOnline: boolean) {
       generation += 1;
       clearReconnect();
       if (channelRef.current) {
-        channelRef.current.unsubscribe();
+        closeChannel(channelRef.current);
         channelRef.current = null;
       }
     };

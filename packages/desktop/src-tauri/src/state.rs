@@ -93,6 +93,26 @@ pub struct ManagedState {
     /// contents. Distinct from `equip_epoch`/`drop_epoch` because buying
     /// changes inventory without touching either.
     pub inventory_epoch: u64,
+    /// Bumped whenever a trade invite arrives over Realtime
+    /// (`trade_request_ingest`). Same purpose as `friend_epoch`: `sync_tick`
+    /// captures it before its network call and skips the response's
+    /// `pending_trade_request` if it moved — otherwise a sync issued just
+    /// before the trade was created hides the invite the broadcast just
+    /// showed, and the next sync notifies about it again.
+    pub trade_epoch: u64,
+    /// Active XP multipliers from the last `/sync`. Held here (and persisted
+    /// for the next launch) rather than re-read from disk by every
+    /// `to_app_state`, which runs every few seconds under this state's lock.
+    pub multipliers: Option<Vec<ActiveMultiplier>>,
+    /// When `pending_minutes` was last persisted. `poll_tick` grows it every
+    /// few seconds; writing it each time was a disk write per tick, so it is
+    /// throttled (see `PENDING_MINUTES_SAVE_EVERY` in lib.rs) and flushed on
+    /// quit/relaunch.
+    pub pending_minutes_saved_at: Option<Instant>,
+    /// When the current track started (as `poll_tick` first saw it). Decides
+    /// whether a track played long enough to be flushed to the server when it
+    /// ends — see `OutgoingTrack` in lib.rs.
+    pub track_started_at: Option<Instant>,
 }
 
 impl ManagedState {
@@ -139,6 +159,10 @@ impl ManagedState {
             drop_epoch: 0,
             equip_epoch: 0,
             inventory_epoch: 0,
+            trade_epoch: 0,
+            multipliers: crate::storage::load_multipliers(),
+            pending_minutes_saved_at: None,
+            track_started_at: None,
         }
     }
 
@@ -216,7 +240,7 @@ impl ManagedState {
         AppState {
             herzie: self.display_herzie(),
             now_playing: self.current_now_playing.clone(),
-            multipliers: crate::storage::load_multipliers(),
+            multipliers: self.multipliers.clone(),
             is_online: is_logged_in,
             is_connected: compute_is_connected(
                 is_logged_in,
@@ -354,6 +378,10 @@ mod tests {
             drop_epoch: 0,
             equip_epoch: 0,
             inventory_epoch: 0,
+            trade_epoch: 0,
+            multipliers: None,
+            pending_minutes_saved_at: None,
+            track_started_at: None,
         }
     }
 

@@ -21,6 +21,16 @@ pub fn is_window_visible() -> bool {
     WINDOW_VISIBLE.load(Ordering::Relaxed)
 }
 
+/// Whether the window has keyboard focus — narrower than visible: a pinned
+/// window stays visible after the user moves on to another app. Lets loops
+/// whose results only matter to someone actively looking (sync cadence) relax
+/// for a pinned window sitting in the background.
+static WINDOW_FOCUSED: AtomicBool = AtomicBool::new(false);
+
+pub fn is_window_focused() -> bool {
+    WINDOW_FOCUSED.load(Ordering::Relaxed)
+}
+
 /// When pinned, the window stays open on blur (it is NOT always-on-top —
 /// other windows can cover it; it just doesn't auto-hide).
 static WINDOW_PINNED: AtomicBool = AtomicBool::new(false);
@@ -262,6 +272,7 @@ fn hide_window(app: &AppHandle, window: &tauri::WebviewWindow) {
         HAS_USER_POSITION.store(true, Ordering::Relaxed);
     }
     WINDOW_VISIBLE.store(false, Ordering::Relaxed);
+    WINDOW_FOCUSED.store(false, Ordering::Relaxed);
     let _ = window.hide();
     // Switch back to Accessory (no dock icon) — macOS only.
     #[cfg(target_os = "macos")]
@@ -275,6 +286,7 @@ pub fn on_focus(app: &AppHandle) {
     HIDE_PENDING.store(false, Ordering::Relaxed);
     // Focus implies the window is on-screen; covers dev mode where show_window isn't used.
     WINDOW_VISIBLE.store(true, Ordering::Relaxed);
+    WINDOW_FOCUSED.store(true, Ordering::Relaxed);
     // Same rationale as in show_window: refresh derived state (connectivity,
     // multipliers, etc.) immediately on re-focus.
     emit_state_update(app);
@@ -289,6 +301,7 @@ pub fn on_focus(app: &AppHandle) {
 /// Called when the window loses focus.
 /// Schedules a delayed hide so that tray-click re-focus can cancel it.
 pub fn on_blur(app: &AppHandle) {
+    WINDOW_FOCUSED.store(false, Ordering::Relaxed);
     // Pinned windows stay open when they lose focus.
     if is_pinned() {
         return;

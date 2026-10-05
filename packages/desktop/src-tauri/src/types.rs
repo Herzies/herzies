@@ -399,7 +399,7 @@ pub struct AppState {
     pub pending_drops: Vec<PendingDrop>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NowPlayingDisplay {
     pub title: String,

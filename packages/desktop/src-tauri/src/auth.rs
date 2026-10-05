@@ -287,8 +287,8 @@ async fn finish_login(app: &AppHandle, body: &str) -> Result<(), LoginError> {
 
     let app_clone = app.clone();
     tauri::async_runtime::spawn(async move {
-        let client = reqwest::Client::new();
-        crate::refresh_app_cache(&app_clone, &client).await;
+        let client = crate::api::http();
+        crate::refresh_app_cache(&app_clone, &client, true).await;
     });
 
     log::info!("Login complete");

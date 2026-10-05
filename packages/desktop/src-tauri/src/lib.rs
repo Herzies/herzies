@@ -18,7 +18,7 @@ use reqwest::Client;
 use state::{ManagedState, SharedState};
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_autostart::MacosLauncher;
 use types::*;
@@ -38,6 +38,76 @@ pub struct LoginAttempt(pub Mutex<Option<tokio::sync::oneshot::Sender<()>>>);
 /// or friend request there's no single thing to dedupe by, just a condition
 /// that can flip back and forth as slots free up and fill again.
 pub struct LastInventoryFullNotified(pub Mutex<bool>);
+/// Hands `sync_loop` a track that just ended, so it's synced right away under
+/// its own now-playing and genres — see `OutgoingTrack`.
+pub struct SyncNudge(pub tokio::sync::mpsc::UnboundedSender<OutgoingTrack>);
+
+/// A track that just stopped being current (the next one started, or playback
+/// stopped), captured by `poll_tick` before it overwrites the state.
+///
+/// While hidden, the regular sync only runs every 60s, and a sync is the only
+/// moment the server sees what's playing: song-hunt detection and the
+/// `listen_log` row both key off a sync's `nowPlaying`, and the minutes it
+/// bills are credited to its `genres` (genre XP, boss damage). On a timer
+/// alone, a song shorter than the interval could play start to finish between
+/// syncs and never be seen, and minutes from one track were billed to
+/// whichever track happened to be playing when the timer fired. Flushing each
+/// track as it ends fixes both — it sees every track, and bills its minutes to
+/// its own genres.
+pub struct OutgoingTrack {
+    pub now_playing: NowPlayingPayload,
+    pub genres: Vec<String>,
+}
+
+/// A track has to have played this long to be flushed when it ends, so
+/// skipping through a playlist doesn't fire a sync per skipped track.
+const MIN_FLUSH_PLAY: Duration = Duration::from_secs(15);
+
+/// Minimum gap between syncs when a flush comes in right after another sync.
+/// Just above the server's 8s billing cooldown, so a flush's minutes are
+/// actually billed rather than deferred.
+const MIN_SYNC_SPACING: Duration = Duration::from_secs(10);
+
+/// What `/sync` should report as now playing, from the current state.
+///
+/// `current_now_playing` is only ever populated once `poll_tick` has confirmed
+/// the play (see `is_confirmed_listen` there) — an unconfirmed browser/YouTube
+/// play never lands here, so nothing further to gate: syncing it as-is means
+/// the server never sees it either (no now-playing status, no listen_log row
+/// to pollute "listening now", "last played", or "top artists" on the
+/// profile).
+fn now_playing_payload(s: &ManagedState) -> Option<NowPlayingPayload> {
+    s.current_now_playing.as_ref().map(|np| {
+        let genre = if s.current_genres.is_empty() {
+            None
+        } else {
+            game::classify_genre(&s.current_genres).into_iter().next()
+        };
+        NowPlayingPayload {
+            title: np.title.clone(),
+            artist: np.artist.clone(),
+            genre,
+            // Sync only Last.fm's remote artwork, not `np.album_art_url`
+            // (which prefers the local system artwork data: URL) — that blob
+            // is fine for this device's own widget but too large, macOS-only,
+            // and not durable enough to store/serve to friends.
+            album_art_url: s.enrichment.as_ref().and_then(|e| e.album_art_url.clone()),
+        }
+    })
+}
+
+/// The current track as an `OutgoingTrack`, if it should be flushed now that
+/// it's ending. Never in ghost mode: switching ghost mode on also ends the
+/// track, and that must not report it.
+fn outgoing_track(s: &ManagedState) -> Option<OutgoingTrack> {
+    if tray::is_ghost_mode() || s.track_started_at?.elapsed() < MIN_FLUSH_PLAY {
+        return None;
+    }
+    Some(OutgoingTrack {
+        now_playing: now_playing_payload(s)?,
+        genres: s.current_genres.clone(),
+    })
+}
 
 // --- Tauri commands ---
 
@@ -105,7 +175,7 @@ async fn register_herzie(
         return Err("Not logged in.".into());
     }
 
-    let client = Client::new();
+    let client = api::http();
 
     // Retry on friend-code collision (vanishingly rare but cheap to handle).
     let mut last_err: Option<String> = None;
@@ -122,8 +192,8 @@ async fn register_herzie(
                 let _ = app.emit("activity", format!("{} has hatched!", trimmed));
                 let app_clone = app.clone();
                 tauri::async_runtime::spawn(async move {
-                    let client = Client::new();
-                    refresh_app_cache(&app_clone, &client).await;
+                    let client = api::http();
+                    refresh_app_cache(&app_clone, &client, true).await;
                 });
                 return Ok(());
             }
@@ -199,7 +269,7 @@ async fn friend_add(
         });
     }
 
-    let client = Client::new();
+    let client = api::http();
     match api::api_send_friend_request(&client, &friend_code, &code).await {
         Ok(accepted) => {
             if accepted {
@@ -243,7 +313,7 @@ fn add_friend_locally(app: &AppHandle, state: &tauri::State<'_, SharedState>, co
     let _ = app.emit("activity", format!("Added friend {}", code));
     let app_clone = app.clone();
     tauri::async_runtime::spawn(async move {
-        let client = Client::new();
+        let client = api::http();
         refresh_friends_cache(&app_clone, &client).await;
     });
 }
@@ -263,7 +333,7 @@ async fn friend_request_accept(
             .map(|r| r.friend_code.clone())
     };
 
-    let client = Client::new();
+    let client = api::http();
     match api::api_accept_friend_request(&client, &request_id).await {
         Ok(()) => {
             {
@@ -298,7 +368,7 @@ async fn friend_request_decline(
     app: AppHandle,
     state: tauri::State<'_, SharedState>,
 ) -> Result<FriendResult, String> {
-    let client = Client::new();
+    let client = api::http();
     match api::api_decline_friend_request(&client, &request_id).await {
         Ok(()) => {
             {
@@ -329,7 +399,7 @@ async fn friend_request_cancel(
     app: AppHandle,
     state: tauri::State<'_, SharedState>,
 ) -> Result<FriendResult, String> {
-    let client = Client::new();
+    let client = api::http();
     match api::api_cancel_friend_request(&client, &request_id).await {
         Ok(()) => {
             {
@@ -357,7 +427,7 @@ async fn set_share_listening(
     app: AppHandle,
     state: tauri::State<'_, SharedState>,
 ) -> Result<(), String> {
-    let client = Client::new();
+    let client = api::http();
     let server = api::api_set_share_listening(&client, share).await?;
     let mut s = state.lock().unwrap();
     if let Some(ref mut herzie) = s.herzie {
@@ -371,7 +441,7 @@ async fn set_share_listening(
 
 #[tauri::command]
 async fn friend_search(query: String) -> Result<Vec<FriendSearchResult>, String> {
-    let client = Client::new();
+    let client = api::http();
     api::api_search_friends(&client, &query).await
 }
 
@@ -394,7 +464,7 @@ async fn friend_remove(
         }
     };
 
-    let client = Client::new();
+    let client = api::http();
     let ok = api::api_remove_friend(&client, &friend_code, &code).await;
     if ok {
         let mut s = state.lock().unwrap();
@@ -428,7 +498,7 @@ async fn friend_lookup(
     app: AppHandle,
     state: tauri::State<'_, SharedState>,
 ) -> Result<HashMap<String, HerzieProfile>, String> {
-    let client = Client::new();
+    let client = api::http();
     if let Some(profiles) = api::api_lookup_herzies(&client, &codes).await {
         let mut s = state.lock().unwrap();
         for (code, profile) in &profiles {
@@ -457,7 +527,7 @@ async fn fetch_inventory(
     if !api::is_logged_in() {
         return Ok(None);
     }
-    let client = Client::new();
+    let client = api::http();
     let epoch_before = { state.lock().unwrap().equip_epoch };
     match api::api_fetch_inventory(&client).await {
         Some(snapshot) => {
@@ -491,7 +561,7 @@ async fn sell_item(
     app: AppHandle,
     state: tauri::State<'_, SharedState>,
 ) -> Result<Option<serde_json::Value>, String> {
-    let client = Client::new();
+    let client = api::http();
     let result = api::api_sell_units(&client, &unit_ids).await;
     if let Some(ref data) = result {
         let mut s = state.lock().unwrap();
@@ -546,7 +616,7 @@ async fn apply_dice_upgrade(
     app: AppHandle,
     state: tauri::State<'_, SharedState>,
 ) -> Result<serde_json::Value, String> {
-    let client = Client::new();
+    let client = api::http();
     let data = api::api_apply_dice_upgrade(
         &client,
         &dice_item_id,
@@ -572,7 +642,7 @@ async fn equip_item(
     app: AppHandle,
     state: tauri::State<'_, SharedState>,
 ) -> Result<serde_json::Value, String> {
-    let client = Client::new();
+    let client = api::http();
     let result = api::api_equip_unit(&client, &unit_id, &action, side.as_deref()).await?;
     let mut s = state.lock().unwrap();
     if let Some(snapshot) = snapshot_from_response(&result, &s) {
@@ -596,7 +666,7 @@ async fn buy_from_merchant(
     app: AppHandle,
     state: tauri::State<'_, SharedState>,
 ) -> Result<serde_json::Value, String> {
-    let client = Client::new();
+    let client = api::http();
     let data = api::api_buy_from_merchant(&client, &event_id, &item_id, quantity).await?;
 
     let mut s = state.lock().unwrap();
@@ -625,7 +695,7 @@ async fn collect_drop(
     state: tauri::State<'_, SharedState>,
     drop_id: String,
 ) -> Result<bool, String> {
-    let client = Client::new();
+    let client = api::http();
 
     // Optimistic: remove the drop and credit the item to inventory locally
     // right away, before the round trip even starts, so the card
@@ -727,7 +797,7 @@ async fn spawn_debug_drop(
     app: AppHandle,
     state: tauri::State<'_, SharedState>,
 ) -> Result<(), String> {
-    let client = Client::new();
+    let client = api::http();
     let drop = api::api_spawn_debug_drop(&client, dice_only).await?;
     {
         let mut s = state.lock().unwrap();
@@ -740,7 +810,7 @@ async fn spawn_debug_drop(
 
 #[tauri::command]
 async fn fetch_store_products() -> Result<Vec<StoreProduct>, String> {
-    let client = Client::new();
+    let client = api::http();
     Ok(api::api_fetch_store_products(&client)
         .await
         .unwrap_or_default())
@@ -748,7 +818,7 @@ async fn fetch_store_products() -> Result<Vec<StoreProduct>, String> {
 
 #[tauri::command]
 async fn fetch_premium_items() -> Result<Vec<PremiumItem>, String> {
-    let client = Client::new();
+    let client = api::http();
     Ok(api::api_fetch_premium_items(&client)
         .await
         .unwrap_or_default())
@@ -768,7 +838,7 @@ async fn start_purchase(
     app: AppHandle,
     state: tauri::State<'_, SharedState>,
 ) -> Result<bool, String> {
-    let client = Client::new();
+    let client = api::http();
     match api::api_create_checkout(&client, &product_id).await? {
         Some(url) => {
             let parsed = url::Url::parse(&url).map_err(|e| e.to_string())?;
@@ -795,49 +865,49 @@ async fn start_purchase(
 
 #[tauri::command]
 async fn trade_create(target_code: String) -> Result<Option<serde_json::Value>, String> {
-    let client = Client::new();
+    let client = api::http();
     Ok(api::api_create_trade(&client, &target_code).await)
 }
 
 #[tauri::command]
 async fn trade_join(trade_id: String) -> Result<bool, String> {
-    let client = Client::new();
+    let client = api::http();
     Ok(api::api_join_trade(&client, &trade_id).await)
 }
 
 #[tauri::command]
 async fn trade_offer(trade_id: String, offer: TradeOfferRequest) -> Result<bool, String> {
-    let client = Client::new();
+    let client = api::http();
     Ok(api::api_update_trade_offer(&client, &trade_id, &offer).await)
 }
 
 #[tauri::command]
 async fn trade_lock(trade_id: String) -> Result<bool, String> {
-    let client = Client::new();
+    let client = api::http();
     Ok(api::api_lock_trade(&client, &trade_id).await)
 }
 
 #[tauri::command]
 async fn trade_accept(trade_id: String) -> Result<Option<serde_json::Value>, String> {
-    let client = Client::new();
+    let client = api::http();
     Ok(api::api_accept_trade(&client, &trade_id).await)
 }
 
 #[tauri::command]
 async fn trade_cancel(trade_id: String) -> Result<bool, String> {
-    let client = Client::new();
+    let client = api::http();
     Ok(api::api_cancel_trade(&client, &trade_id).await)
 }
 
 #[tauri::command]
 async fn trade_poll(trade_id: String) -> Result<Option<Trade>, String> {
-    let client = Client::new();
+    let client = api::http();
     Ok(api::api_poll_trade(&client, &trade_id).await)
 }
 
 #[tauri::command]
 async fn fetch_ongoing_trades() -> Result<serde_json::Value, String> {
-    let client = Client::new();
+    let client = api::http();
     match api::api_fetch_ongoing_trades(&client).await {
         Some(trades) => Ok(serde_json::json!({ "trades": trades })),
         None => Ok(serde_json::json!({ "trades": [] })),
@@ -867,7 +937,7 @@ fn get_ghost_mode() -> bool {
 
 #[tauri::command]
 async fn fetch_leaderboard(board: Option<String>) -> Result<serde_json::Value, String> {
-    let client = Client::new();
+    let client = api::http();
     match api::api_fetch_leaderboard(&client, board.as_deref()).await {
         Some(entries) => Ok(serde_json::json!({ "entries": entries })),
         None => Ok(serde_json::json!({ "entries": [] })),
@@ -876,7 +946,7 @@ async fn fetch_leaderboard(board: Option<String>) -> Result<serde_json::Value, S
 
 #[tauri::command]
 async fn fetch_active_events() -> Result<serde_json::Value, String> {
-    let client = Client::new();
+    let client = api::http();
     match api::api_fetch_active_events(&client).await {
         Some(data) => Ok(serde_json::json!({
             "events": data.events,
@@ -888,7 +958,7 @@ async fn fetch_active_events() -> Result<serde_json::Value, String> {
 
 #[tauri::command]
 async fn fetch_previous_hunt() -> Result<serde_json::Value, String> {
-    let client = Client::new();
+    let client = api::http();
     match api::api_fetch_previous_hunt(&client).await {
         Some((events, next)) => Ok(serde_json::json!({ "events": events, "next": next })),
         None => Ok(serde_json::json!({ "events": [], "next": null })),
@@ -897,13 +967,13 @@ async fn fetch_previous_hunt() -> Result<serde_json::Value, String> {
 
 #[tauri::command]
 async fn play_hint_audio(event_id: String, hint_index: u32) -> Result<serde_json::Value, String> {
-    let client = Client::new();
+    let client = api::http();
     api::api_play_hint_audio(&client, &event_id, hint_index).await
 }
 
 #[tauri::command]
 async fn get_auth_config() -> Result<Option<AuthConfig>, String> {
-    let client = Client::new();
+    let client = api::http();
     let token = api::get_token_public(&client).await;
     let session = storage::load_session();
 
@@ -934,7 +1004,7 @@ async fn chat_fetch(
     if !api::is_logged_in() {
         return Ok(None);
     }
-    let client = Client::new();
+    let client = api::http();
     if let Some(chat) = api::api_chat_fetch(&client).await {
         let mut s = state.lock().unwrap();
         s.chat_messages = chat.messages.clone();
@@ -958,7 +1028,7 @@ async fn chat_send(
     if !api::is_logged_in() {
         return Ok(None);
     }
-    let client = Client::new();
+    let client = api::http();
     match api::api_chat_send(&client, &content, &item_refs, &user_refs).await {
         Some(msg) => {
             let mut s = state.lock().unwrap();
@@ -1004,14 +1074,17 @@ fn chat_ingest(
 
 /// Ingest a trade request that arrived over the Realtime broadcast channel.
 ///
-/// Counterpart to `chat_ingest`, and the push half of what `trade_watch_loop`
-/// used to poll for every 5s. The DB trigger
+/// Counterpart to `chat_ingest`. This is the only fast path for invites: the
+/// 5s hidden-window `/trade-pending` poll that backed it up is gone, leaving
+/// `sync_tick` (at most 60s apart while hidden) as the fallback if the webview's
+/// socket drops while the window sits in the tray. The DB trigger
 /// (00058_trade_request_broadcast.sql) sends the initiator's name and friend
 /// code with the payload, so this needs no round-trip to render.
 ///
-/// Safe to race with the fallback poll and with `sync_tick`: whichever arrives
-/// first sets the same state, and `notify_pending_trade` dedupes on trade id so
-/// only one notification fires.
+/// Races with `sync_tick` are handled by
+/// `trade_epoch`: a poll that was already in flight when this landed predates
+/// the trade, and would otherwise hide the invite again (and reset the
+/// notification dedupe, so the next poll re-notified).
 #[tauri::command]
 fn trade_request_ingest(
     request: PendingTradeRequest,
@@ -1031,6 +1104,7 @@ fn trade_request_ingest(
             return Ok(());
         }
         s.pending_trade_request = Some(request.clone());
+        s.trade_epoch += 1;
         let app_state = s.to_app_state(env!("CARGO_PKG_VERSION"));
         drop(s);
         let _ = app.emit("state-update", &app_state);
@@ -1184,7 +1258,11 @@ async fn refresh_friends_cache(app: &AppHandle, client: &Client) {
 }
 
 /// Fetch inventory, chat, and friends in parallel into AppState.
-async fn refresh_app_cache(app: &AppHandle, client: &Client) {
+///
+/// `include_inventory` is false at launch, where a `sync_tick` has just run and
+/// `/sync` already carries the full inventory; after login or hatching no sync
+/// has loaded it yet, so those callers still fetch it.
+async fn refresh_app_cache(app: &AppHandle, client: &Client, include_inventory: bool) {
     if !api::is_logged_in() {
         return;
     }
@@ -1210,11 +1288,16 @@ async fn refresh_app_cache(app: &AppHandle, client: &Client) {
 
     let equip_epoch_before = { shared.lock().unwrap().equip_epoch };
 
-    let (inv_result, chat_result, friends_result) = tokio::join!(
-        api::api_fetch_inventory(client),
-        api::api_chat_fetch(client),
-        friends_fut,
-    );
+    let inventory_fut = async {
+        if include_inventory {
+            api::api_fetch_inventory(client).await
+        } else {
+            None
+        }
+    };
+
+    let (inv_result, chat_result, friends_result) =
+        tokio::join!(inventory_fut, api::api_chat_fetch(client), friends_fut,);
 
     let mut changed = false;
     {
@@ -1243,20 +1326,32 @@ async fn refresh_app_cache(app: &AppHandle, client: &Client) {
 // --- Background loops ---
 
 async fn poll_loop(app: AppHandle) {
-    let client = Client::new();
+    let client = api::http();
+    let mut last_tick = Instant::now();
 
     loop {
         // 3s while the window is open (tight feedback for the now-playing card),
         // 6s while hidden — XP/min is unchanged because poll_tick credits real
-        // elapsed seconds, not a fixed 3s slice.
+        // elapsed time, not a fixed slice. Real elapsed includes the previous
+        // tick's own duration (the now-playing read can take seconds through
+        // the AppleScript fallback), which crediting `delay` alone dropped.
+        // Capped so a machine waking from sleep doesn't bill the whole nap to
+        // whatever was playing when the lid closed.
         let delay = if tray::is_window_visible() { 3 } else { 6 };
         tokio::time::sleep(Duration::from_secs(delay)).await;
 
-        if let Err(e) = poll_tick(&app, &client, delay).await {
+        let elapsed = last_tick.elapsed().as_secs_f64().min(2.0 * delay as f64);
+        last_tick = Instant::now();
+        if let Err(e) = poll_tick(&app, &client, elapsed).await {
             log::warn!("Poll error: {}", e);
         }
     }
 }
+
+/// How often `poll_tick` persists the growing `pending_minutes` (see
+/// `ManagedState::pending_minutes_saved_at`). A crash loses at most this much
+/// unsynced listening; a clean quit or relaunch loses none (`flush_pending_sync`).
+const PENDING_MINUTES_SAVE_EVERY: Duration = Duration::from_secs(30);
 
 fn display_tags(
     enrichment: Option<&TrackEnrichment>,
@@ -1411,7 +1506,7 @@ fn spawn_system_artwork_fetch(_app: &AppHandle, _track_key: String) {}
 fn spawn_artist_image_fetch(app: &AppHandle, artist: String, track_key: String) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        let client = Client::new();
+        let client = api::http();
         let Some(image_url) = api::api_fetch_artist_image(&client, &artist).await else {
             return;
         };
@@ -1432,13 +1527,17 @@ fn spawn_artist_image_fetch(app: &AppHandle, artist: String, track_key: String) 
     });
 }
 
-async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: u64) -> Result<(), String> {
+async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: f64) -> Result<(), String> {
     let state = app.state::<SharedState>();
     let lastfm = app.state::<LastFmService>();
 
-    let has_herzie = {
+    let (has_herzie, np_before, minutes_before) = {
         let s = state.lock().unwrap();
-        s.herzie.is_some()
+        (
+            s.herzie.is_some(),
+            s.current_now_playing.clone(),
+            s.pending_minutes,
+        )
     };
 
     if !has_herzie {
@@ -1451,6 +1550,7 @@ async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: u64) -> Resu
     let mut spawn_enrichment: Option<(String, String, String)> = None;
     let mut spawn_artwork: Option<String> = None;
     let mut spawn_artist_image: Option<(String, String)> = None;
+    let mut outgoing: Option<OutgoingTrack> = None;
 
     {
         let mut s = state.lock().unwrap();
@@ -1473,6 +1573,8 @@ async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: u64) -> Resu
                 s.source_verified = info.verified;
 
                 if track_changed {
+                    outgoing = outgoing_track(&s);
+                    s.track_started_at = Some(Instant::now());
                     // Distinct from track_changed: an artist photo only needs
                     // re-fetching when the artist itself changes, so back-to-back
                     // tracks off the same album keep their background image
@@ -1552,7 +1654,7 @@ async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: u64) -> Resu
                 // track is real. See `is_confirmed_listen`.
                 let confirmed = lastfm::is_confirmed_listen(info.verified, s.enrichment.as_ref());
 
-                let minutes = elapsed_secs as f64 / 60.0;
+                let minutes = elapsed_secs / 60.0;
                 if minutes > 0.01 && confirmed {
                     // Only accumulated here — never applied to herzie.xp/level
                     // locally. The server is the sole authority on XP; this
@@ -1562,7 +1664,12 @@ async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: u64) -> Resu
                     // Persisted so a relaunch (e.g. an app update) doesn't drop
                     // it before it reaches the server.
                     s.pending_minutes += minutes;
-                    storage::save_pending_minutes(s.pending_minutes);
+                    if s.pending_minutes_saved_at
+                        .is_none_or(|t| t.elapsed() >= PENDING_MINUTES_SAVE_EVERY)
+                    {
+                        storage::save_pending_minutes(s.pending_minutes);
+                        s.pending_minutes_saved_at = Some(Instant::now());
+                    }
                 }
 
                 if let Some(ref genres) = genre_list {
@@ -1584,6 +1691,10 @@ async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: u64) -> Resu
                 };
             }
             _ => {
+                if s.last_track_key.is_some() {
+                    outgoing = outgoing_track(&s);
+                }
+                s.track_started_at = None;
                 s.current_now_playing = None;
                 s.current_genres.clear();
                 s.current_local_genre = None;
@@ -1607,11 +1718,26 @@ async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: u64) -> Resu
     if let Some((artist, key)) = spawn_artist_image {
         spawn_artist_image_fetch(app, artist, key);
     }
+    if let Some(track) = outgoing {
+        if let Some(nudge) = app.try_state::<SyncNudge>() {
+            let _ = nudge.0.send(track);
+        }
+    }
 
     // Level-up/evolution notifications are sent from sync_tick, once the
     // server confirms the crossing — poll_tick no longer applies XP locally.
+    //
+    // This runs every 3s and the push carries the whole AppState (inventory,
+    // chat, friends…), so only send it when this tick changed something the
+    // window shows — the now-playing card or the optimistic XP (which follows
+    // pending_minutes) — and only while someone can see it: showing the
+    // window pushes fresh state anyway (tray::on_focus / show_window).
     let app_state = {
         let s = state.lock().unwrap();
+        let changed = s.current_now_playing != np_before || s.pending_minutes != minutes_before;
+        if !changed || !tray::is_window_visible() {
+            return Ok(());
+        }
         s.to_app_state(env!("CARGO_PKG_VERSION"))
     };
     let _ = app.emit("state-update", &app_state);
@@ -1665,8 +1791,13 @@ fn open_external_url(url: String) -> Result<(), String> {
 /// storage::save_pending_minutes), so a failed or timed-out flush just means
 /// it's picked up on the next launch instead of being lost.
 async fn flush_pending_sync(app: &AppHandle) {
-    let client = Client::new();
+    let client = api::http();
     let _ = tokio::time::timeout(Duration::from_secs(3), sync_tick(app, &client)).await;
+    // poll_tick only persists pending_minutes every PENDING_MINUTES_SAVE_EVERY,
+    // so write whatever the sync didn't bill before the process goes away.
+    let s = app.state::<SharedState>();
+    let s = s.lock().unwrap();
+    storage::save_pending_minutes(s.pending_minutes);
 }
 
 #[tauri::command]
@@ -1726,25 +1857,51 @@ fn send_notification(app: &AppHandle, title: &str, body: &str, deep_link: Option
     }
 }
 
-async fn sync_loop(app: AppHandle) {
-    let client = Client::new();
+async fn sync_loop(
+    app: AppHandle,
+    mut nudges: tokio::sync::mpsc::UnboundedReceiver<OutgoingTrack>,
+) {
+    let client = api::http();
+    let mut last_sync: Option<Instant> = None;
 
     loop {
-        // 5s when the window is visible — keeps pending trade invites and
-        // server state reasonably fresh without the old 10s+ perceived lag.
-        // 60s when hidden (still flushes listening minutes; avoids idle cost).
-        let delay = if tray::is_window_visible() { 5 } else { 60 };
-        tokio::time::sleep(Duration::from_secs(delay)).await;
+        // 10s while focused: the server only bills a sync every 8s (see the
+        // cooldown note in sync_tick), so the old 5s cadence made every other
+        // call a full-cost no-op. Trade invites and chat no longer depend on
+        // this — they arrive over Realtime. 30s for a pinned window the user
+        // has moved away from (still on screen, nobody interacting), 60s when
+        // hidden. Every track that ends is also synced on its own via
+        // `OutgoingTrack` (which restarts this timer), so short songs are
+        // never missed between ticks.
+        let delay = if tray::is_window_focused() {
+            10
+        } else if tray::is_window_visible() {
+            30
+        } else {
+            60
+        };
+        let outgoing = tokio::select! {
+            _ = tokio::time::sleep(Duration::from_secs(delay)) => None,
+            Some(track) = nudges.recv() => Some(track),
+        };
+        if outgoing.is_some() {
+            if let Some(since) = last_sync.map(|t| t.elapsed()) {
+                if since < MIN_SYNC_SPACING {
+                    tokio::time::sleep(MIN_SYNC_SPACING - since).await;
+                }
+            }
+        }
 
-        if let Err(e) = sync_tick(&app, &client).await {
+        if let Err(e) = sync_tick_with(&app, &client, outgoing).await {
             log::warn!("Sync error: {}", e);
         }
+        last_sync = Some(Instant::now());
     }
 }
 
 /// Show a system notification for an incoming trade invite — deduped by trade
 /// ID so we don't re-notify on every poll while the trade is pending. Shared
-/// by sync_tick and trade_watch_loop.
+/// by sync_tick and trade_request_ingest.
 fn notify_pending_trade(app: &AppHandle, pending: Option<&PendingTradeRequest>) {
     if let Some(trade_req) = pending {
         let should_notify = {
@@ -1772,69 +1929,82 @@ fn notify_pending_trade(app: &AppHandle, pending: Option<&PendingTradeRequest>) 
     }
 }
 
-/// How often the backup trade poll runs while the window is hidden.
-///
-/// DELIBERATELY STILL 5s, and this is the single biggest remaining cost lever
-/// in the app — see the note below before changing it.
-///
-/// Trade invites now also arrive over a Realtime broadcast
-/// (00058_trade_request_broadcast.sql -> useTradeRequests -> trade_request_ingest),
-/// which is what makes them instant instead of up to 5s late. Raising this to
-/// 60s (or deleting this loop outright — sync_loop already refreshes the same
-/// field every 60s while hidden, notification included) would remove almost
-/// all of those calls.
-///
-/// What blocks that: the websocket lives in the webview, and this loop only
-/// runs while the window is hidden — which is exactly the state where macOS is
-/// most likely to throttle or drop it. Nobody has yet confirmed that a
-/// broadcast actually lands with the window in the tray. Until someone
-/// watches that happen, widening this trades a verified 5s worst case for an
-/// unverified one, in the only scenario the feature exists for.
-///
-/// To confirm: run the app, hide the window, insert a pending trade targeting
-/// your user, and check the native notification fires within a second or two.
-const TRADE_WATCH_SECS: u64 = 5;
-
-/// Backup poll for incoming trade invites while the window is hidden.
-///
-/// The broadcast channel is the fast path; this catches anything it misses.
-/// While visible, sync_loop already covers the same data every 5s.
-async fn trade_watch_loop(app: AppHandle) {
-    let client = Client::new();
-
-    loop {
-        tokio::time::sleep(Duration::from_secs(TRADE_WATCH_SECS)).await;
-
-        if tray::is_window_visible() {
-            continue;
-        }
-        if !api::is_logged_in() {
-            continue;
-        }
-
-        let Some(pending) = api::api_check_pending_trade(&client).await else {
-            continue;
-        };
-
-        let state = app.state::<SharedState>();
-        let app_state = {
-            let mut s = state.lock().unwrap();
-            if s.herzie.is_none() {
-                continue;
-            }
-            s.pending_trade_request = pending.clone();
-            s.to_app_state(env!("CARGO_PKG_VERSION"))
-        };
-        let _ = app.emit("state-update", &app_state);
-
-        notify_pending_trade(&app, pending.as_ref());
-    }
-}
-
 /// How often to check for newly-started events. `/events/active` only returns
 /// events whose `starts_at <= now <= ends_at`, so polling it and watching for
 /// IDs we haven't seen before tells us exactly when an event has started.
-const EVENTS_WATCH_SECS: u64 = 30;
+///
+/// Scheduled events don't depend on this interval: the response also lists the
+/// next `upcoming` start per type, and the loop wakes just after the soonest
+/// one (see `next_events_wake`). The interval only bounds how late an event
+/// created to start immediately (admin tools) can be noticed. It was 30s, which
+/// made this the second-largest source of calls for an idle app.
+const EVENTS_WATCH_SECS: u64 = 120;
+
+/// Grace after an upcoming event's `starts_at` before checking for it, so the
+/// fetch doesn't land a hair early (clock skew) and miss it.
+const EVENTS_START_GRACE_SECS: u64 = 3;
+
+/// Seconds since the UNIX epoch for an RFC 3339 timestamp as Postgres/PostgREST
+/// emits them (`2026-10-05T18:00:00+00:00`, `...00.123Z`). `None` for anything
+/// else — the caller then just falls back to the regular interval.
+fn parse_rfc3339_secs(ts: &str) -> Option<i64> {
+    let b = ts.as_bytes();
+    let num = |r: std::ops::Range<usize>| -> Option<i64> { ts.get(r)?.parse().ok() };
+    if b.len() < 19 || b[4] != b'-' || b[7] != b'-' || !matches!(b[10], b'T' | b' ') {
+        return None;
+    }
+    let (y, mo, d) = (num(0..4)?, num(5..7)?, num(8..10)?);
+    let (h, mi, sec) = (num(11..13)?, num(14..16)?, num(17..19)?);
+    // Skip fractional seconds, then read the offset.
+    let mut i = 19;
+    if b.get(i) == Some(&b'.') {
+        i += 1;
+        while b.get(i).is_some_and(u8::is_ascii_digit) {
+            i += 1;
+        }
+    }
+    let offset = match b.get(i) {
+        Some(b'Z') | None => 0,
+        Some(sign @ (b'+' | b'-')) => {
+            let oh = num(i + 1..i + 3)?;
+            let om = if b.get(i + 3) == Some(&b':') {
+                num(i + 4..i + 6)?
+            } else {
+                num(i + 3..i + 5).unwrap_or(0)
+            };
+            let o = oh * 3600 + om * 60;
+            if *sign == b'+' {
+                o
+            } else {
+                -o
+            }
+        }
+        _ => return None,
+    };
+    // Days from civil (Howard Hinnant's algorithm).
+    let y = if mo <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let mp = (mo + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    Some(days * 86_400 + h * 3600 + mi * 60 + sec - offset)
+}
+
+/// How long `events_watch_loop` should sleep: the regular interval, or less if
+/// an upcoming event starts sooner than that.
+fn next_events_wake(upcoming: &[GameEvent], now_secs: i64) -> Duration {
+    let soonest = upcoming
+        .iter()
+        .filter_map(|e| parse_rfc3339_secs(&e.starts_at))
+        .filter(|&t| t > now_secs)
+        .min();
+    let until = soonest.map_or(EVENTS_WATCH_SECS, |t| {
+        ((t - now_secs) as u64 + EVENTS_START_GRACE_SECS).min(EVENTS_WATCH_SECS)
+    });
+    Duration::from_secs(until)
+}
 
 /// Watches for events that have just started and fires a native notification
 /// for each one — even while the menu-bar window is hidden, which is the whole
@@ -1846,23 +2016,30 @@ const EVENTS_WATCH_SECS: u64 = 30;
 /// fire a burst of notifications for events that were already running when the
 /// app launched.
 async fn events_watch_loop(app: AppHandle) {
-    let client = Client::new();
+    let client = api::http();
     let mut known: HashSet<String> = HashSet::new();
     let mut seeded = false;
+    // First fetch soon after launch: it seeds `known` without notifying, so
+    // anything that starts before it lands is never announced — a full
+    // interval here would silently swallow two minutes of event starts.
+    let mut wake = Duration::from_secs(5);
 
     loop {
-        tokio::time::sleep(Duration::from_secs(EVENTS_WATCH_SECS)).await;
+        tokio::time::sleep(wake).await;
+        wake = Duration::from_secs(EVENTS_WATCH_SECS);
 
         if !api::is_logged_in() {
             continue;
         }
 
-        let Some(events) = api::api_fetch_active_events(&client)
-            .await
-            .map(|data| data.events)
-        else {
+        let Some(data) = api::api_fetch_active_events(&client).await else {
             continue;
         };
+        let now_secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs() as i64);
+        wake = next_events_wake(&data.upcoming, now_secs);
+        let events = data.events;
 
         let active_now: HashSet<String> = events.iter().map(|e| e.id.clone()).collect();
 
@@ -1908,6 +2085,16 @@ async fn events_watch_loop(app: AppHandle) {
 }
 
 async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
+    sync_tick_with(app, client, None).await
+}
+
+/// `sync_tick`, optionally reporting a track that just ended (`outgoing`) in
+/// place of the current one — see `OutgoingTrack`.
+async fn sync_tick_with(
+    app: &AppHandle,
+    client: &Client,
+    outgoing: Option<OutgoingTrack>,
+) -> Result<(), String> {
     let state = app.state::<SharedState>();
 
     let (
@@ -1920,35 +2107,16 @@ async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
         drop_epoch_before,
         equip_epoch_before,
         inventory_epoch_before,
+        trade_epoch_before,
     ) = {
         let s = state.lock().unwrap();
         let has = s.herzie.is_some();
         let logged = api::is_logged_in();
         let mins = s.pending_minutes.min(10.0);
-        // `current_now_playing` is only ever populated once `poll_tick` has
-        // confirmed the play (see `is_confirmed_listen` there) — an
-        // unconfirmed browser/YouTube play never lands here, so nothing
-        // further to gate: syncing it as-is means the server never sees it
-        // either (no now-playing status, no listen_log row to pollute
-        // "listening now", "last played", or "top artists" on the profile).
-        let np = s.current_now_playing.as_ref().map(|np| {
-            let genre = if s.current_genres.is_empty() {
-                None
-            } else {
-                game::classify_genre(&s.current_genres).into_iter().next()
-            };
-            NowPlayingPayload {
-                title: np.title.clone(),
-                artist: np.artist.clone(),
-                genre,
-                // Sync only Last.fm's remote artwork, not `np.album_art_url`
-                // (which prefers the local system artwork data: URL) — that
-                // blob is fine for this device's own widget but too large,
-                // macOS-only, and not durable enough to store/serve to friends.
-                album_art_url: s.enrichment.as_ref().and_then(|e| e.album_art_url.clone()),
-            }
-        });
-        let g = s.current_genres.clone();
+        let (np, g) = match outgoing {
+            Some(track) => (Some(track.now_playing), track.genres),
+            None => (now_playing_payload(&s), s.current_genres.clone()),
+        };
         (
             has,
             logged,
@@ -1959,6 +2127,7 @@ async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
             s.drop_epoch,
             s.equip_epoch,
             s.inventory_epoch,
+            s.trade_epoch,
         )
     };
 
@@ -1992,8 +2161,8 @@ async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
 
         // The server can credit less than minutes_to_sync (its own elapsed-
         // wall-clock cap, or the per-sync cooldown, can reduce this to zero —
-        // easy to hit here since this loop's 5s cadence is shorter than the
-        // server's 8s cooldown between billable syncs). Only consume what was
+        // e.g. a flush_pending_sync landing right after a regular tick, inside
+        // the server's 8s cooldown between billable syncs). Only consume what was
         // actually billed, derived from the real total_minutes_listened delta
         // it returns; blindly subtracting minutes_to_sync discarded the
         // shortfall forever instead of retrying it on the next tick, which is
@@ -2044,8 +2213,15 @@ async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
         };
 
         storage::save_multipliers(&sync_resp.multipliers);
+        s.multipliers = Some(sync_resp.multipliers.clone());
 
-        s.pending_trade_request = sync_resp.pending_trade_request.clone();
+        // A trade invite arrived over Realtime while this /sync was in
+        // flight, so its pending_trade_request may predate it; applying it
+        // would hide the invite just shown. The next sync reconciles.
+        let trade_state_stale = s.trade_epoch != trade_epoch_before;
+        if !trade_state_stale {
+            s.pending_trade_request = sync_resp.pending_trade_request.clone();
+        }
         // A drop was collected (or a debug drop spawned) locally while this
         // /sync was in flight, so its server snapshot of pending_drops is
         // stale — applying it would reinstate a drop the user just picked
@@ -2124,7 +2300,9 @@ async fn sync_tick(app: &AppHandle, client: &Client) -> Result<(), String> {
         }
 
         // Show notification for incoming trade requests.
-        notify_pending_trade(app, sync_resp.pending_trade_request.as_ref());
+        if !trade_state_stale {
+            notify_pending_trade(app, sync_resp.pending_trade_request.as_ref());
+        }
 
         // Show notification for incoming friend requests — dedupe by request ID
         // so we don't re-notify on every sync tick while it's pending.
@@ -2253,6 +2431,8 @@ pub fn run() {
         herzie.as_ref().map(|h| h.name.as_str()).unwrap_or("null")
     );
 
+    let (nudge_tx, nudge_rx) = tokio::sync::mpsc::unbounded_channel();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
@@ -2294,6 +2474,7 @@ pub fn run() {
         .manage(LastTradeNotified(Mutex::new(None)))
         .manage(LastFriendNotified(Mutex::new(None)))
         .manage(LastInventoryFullNotified(Mutex::new(false)))
+        .manage(SyncNudge(nudge_tx))
         .manage(LoginAttempt(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             get_state,
@@ -2347,7 +2528,7 @@ pub fn run() {
             flush_before_relaunch,
             open_external_url,
         ])
-        .setup(|app| {
+        .setup(move |app| {
             #[cfg(target_os = "macos")]
             {
                 use std::path::PathBuf;
@@ -2453,10 +2634,7 @@ pub fn run() {
             tauri::async_runtime::spawn(poll_loop(app_handle));
 
             let app_handle = app.handle().clone();
-            tauri::async_runtime::spawn(sync_loop(app_handle));
-
-            let app_handle = app.handle().clone();
-            tauri::async_runtime::spawn(trade_watch_loop(app_handle));
+            tauri::async_runtime::spawn(sync_loop(app_handle, nudge_rx));
 
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(events_watch_loop(app_handle));
@@ -2464,11 +2642,11 @@ pub fn run() {
             // Initial poll + sync + home cache (equipped + chat)
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                let client = Client::new();
+                let client = api::http();
                 // Initial tick credits no listening minutes (no prior interval).
-                let _ = poll_tick(&app_handle, &client, 0).await;
+                let _ = poll_tick(&app_handle, &client, 0.0).await;
                 let _ = sync_tick(&app_handle, &client).await;
-                refresh_app_cache(&app_handle, &client).await;
+                refresh_app_cache(&app_handle, &client, false).await;
             });
 
             Ok(())
@@ -2562,5 +2740,65 @@ mod item_state_tests {
         let s = state_with_currency(0);
         assert!(snapshot_from_response(&serde_json::json!({ "error": "nope" }), &s).is_none());
         assert!(snapshot_from_response(&serde_json::json!({ "newCurrency": 5 }), &s).is_none());
+    }
+}
+
+#[cfg(test)]
+mod events_watch_tests {
+    use super::*;
+
+    fn upcoming_at(starts_at: &str) -> GameEvent {
+        GameEvent {
+            id: "e".into(),
+            event_type: "song_hunt".into(),
+            title: String::new(),
+            description: None,
+            active: true,
+            starts_at: starts_at.into(),
+            ends_at: starts_at.into(),
+            config: serde_json::Value::Null,
+        }
+    }
+
+    #[test]
+    fn parses_the_timestamp_shapes_postgres_emits() {
+        // 2026-10-05T18:00:00Z
+        let t = 1_791_223_200;
+        assert_eq!(parse_rfc3339_secs("2026-10-05T18:00:00+00:00"), Some(t));
+        assert_eq!(parse_rfc3339_secs("2026-10-05T18:00:00Z"), Some(t));
+        assert_eq!(
+            parse_rfc3339_secs("2026-10-05T18:00:00.123456+00:00"),
+            Some(t)
+        );
+        assert_eq!(parse_rfc3339_secs("2026-10-05T20:00:00+02:00"), Some(t));
+        assert_eq!(parse_rfc3339_secs("1970-01-01T00:00:00Z"), Some(0));
+        assert_eq!(
+            parse_rfc3339_secs("2024-02-29T00:00:00Z"),
+            Some(1_709_164_800)
+        );
+        assert_eq!(parse_rfc3339_secs("not a date"), None);
+    }
+
+    #[test]
+    fn wakes_just_after_an_upcoming_start_inside_the_interval() {
+        let now = 1_791_223_200 - 40;
+        let wake = next_events_wake(&[upcoming_at("2026-10-05T18:00:00+00:00")], now);
+        assert_eq!(wake, Duration::from_secs(40 + EVENTS_START_GRACE_SECS));
+    }
+
+    #[test]
+    fn falls_back_to_the_interval_for_far_past_or_unparseable_starts() {
+        let now = 1_791_223_200;
+        let full = Duration::from_secs(EVENTS_WATCH_SECS);
+        assert_eq!(next_events_wake(&[], now), full);
+        assert_eq!(
+            next_events_wake(&[upcoming_at("2026-10-06T18:00:00Z")], now),
+            full
+        );
+        assert_eq!(
+            next_events_wake(&[upcoming_at("2026-10-04T18:00:00Z")], now),
+            full
+        );
+        assert_eq!(next_events_wake(&[upcoming_at("garbage")], now), full);
     }
 }

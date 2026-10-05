@@ -34,10 +34,15 @@ struct FriendsCacheFile {
     friend_codes: Vec<String>,
     profiles: HashMap<String, HerzieProfile>,
 }
+use std::collections::hash_map::DefaultHasher;
 use std::fs;
+use std::hash::{Hash, Hasher};
+use std::io::Write;
 #[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::PathBuf;
+use std::sync::Mutex;
+use std::time::SystemTime;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -71,10 +76,112 @@ fn ensure_dir() {
     }
 }
 
+/// Hash of what this process last wrote to each file, so a write whose
+/// content hasn't changed can be skipped. The background loops re-save the
+/// herzie, equipped set, multipliers and inventory cache after every sync, and
+/// nearly all of those writes used to be byte-identical rewrites.
+static LAST_WRITTEN: Mutex<Option<HashMap<PathBuf, u64>>> = Mutex::new(None);
+
+/// Hash of the *content* of a JSON document, independent of object key order.
+/// The cached state is full of `HashMap`s (inventory, equipped, upgrades,
+/// friends, genre minutes), and each one freshly deserialized from a response
+/// iterates in a new random order — so hashing the serialized text would see
+/// every rewrite as a change. Non-JSON data falls back to the raw text.
+fn content_hash(data: &str) -> u64 {
+    let mut h = DefaultHasher::new();
+    match serde_json::from_str::<serde_json::Value>(data) {
+        Ok(value) => hash_json(&value, &mut h),
+        Err(_) => data.hash(&mut h),
+    }
+    h.finish()
+}
+
+fn hash_json(value: &serde_json::Value, h: &mut DefaultHasher) {
+    use serde_json::Value;
+    match value {
+        Value::Null => 0u8.hash(h),
+        Value::Bool(b) => (1u8, b).hash(h),
+        Value::Number(n) => (2u8, n.to_string()).hash(h),
+        Value::String(s) => (3u8, s).hash(h),
+        Value::Array(items) => {
+            (4u8, items.len()).hash(h);
+            for item in items {
+                hash_json(item, h);
+            }
+        }
+        Value::Object(map) => {
+            (5u8, map.len()).hash(h);
+            let mut entries: Vec<_> = map.iter().collect();
+            entries.sort_by(|a, b| a.0.cmp(b.0));
+            for (key, item) in entries {
+                key.hash(h);
+                hash_json(item, h);
+            }
+        }
+    }
+}
+
+/// Write `data` to `path` atomically and owner-only.
+///
+/// Atomic: written to a sibling temp file and renamed over the target, so a
+/// crash or power loss mid-write leaves either the old file or the new one —
+/// never the truncated, half-written file `fs::write` could leave behind, which
+/// for session.json meant being silently logged out.
+///
+/// Owner-only from the start: the temp file is created 0600, rather than
+/// created with the umask's permissions and only then tightened.
 fn write_secure(path: &PathBuf, data: &str) {
-    fs::write(path, data).ok();
+    let hash = content_hash(data);
+    {
+        let cache = LAST_WRITTEN.lock().unwrap();
+        // Still re-written if the file has gone missing behind our back.
+        if cache.as_ref().and_then(|c| c.get(path)) == Some(&hash) && path.exists() {
+            return;
+        }
+    }
+
+    // Unique per write: two writers of the same file (a token refresh saving
+    // the session while a failed request clears it) must not share a temp
+    // file, or one could rename the other's half-written bytes into place.
+    let tmp = path.with_extension(format!("json.{}.tmp", uuid::Uuid::new_v4().simple()));
+    let mut opts = fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    opts.mode(0o600);
+    let written = opts.open(&tmp).and_then(|mut f| {
+        f.write_all(data.as_bytes())?;
+        f.sync_all()
+    });
+    if let Err(e) = written.and_then(|()| fs::rename(&tmp, path)) {
+        log::warn!("Failed to write {}: {e}", path.display());
+        fs::remove_file(&tmp).ok();
+        forget_written(path);
+        return;
+    }
+    // A file that predates this (written by an older build) keeps whatever
+    // mode it had; the rename replaced it with the 0600 temp file, but tighten
+    // anyway in case the umask widened the create.
     #[cfg(unix)]
     fs::set_permissions(path, fs::Permissions::from_mode(0o600)).ok();
+    LAST_WRITTEN
+        .lock()
+        .unwrap()
+        .get_or_insert_with(HashMap::new)
+        .insert(path.clone(), hash);
+}
+
+fn forget_written(path: &PathBuf) {
+    if let Some(cache) = LAST_WRITTEN.lock().unwrap().as_mut() {
+        cache.remove(path);
+    }
+}
+
+/// Delete a file written by `write_secure`, keeping the write cache honest.
+fn remove_secure(path: &PathBuf) {
+    if path.exists() {
+        fs::remove_file(path).ok();
+    }
+    forget_written(path);
 }
 
 /// Compute HMAC-SHA256 over cheat-sensitive fields, bound to the owning user_id.
@@ -195,23 +302,34 @@ pub fn save_herzie_with_owner(herzie: &Herzie, owner: &str) {
 pub fn clear_herzie() {
     ensure_dir();
     let path = config_dir().join("herzie.json");
-    if path.exists() {
-        fs::remove_file(&path).ok();
-    }
+    remove_secure(&path);
 }
 
+/// The last parsed session.json, keyed on the file's modification time and
+/// length. `load_session` runs several times per request and on every state
+/// push (`is_logged_in`); this turns each of those from a read + JSON parse
+/// into a single stat. Keyed on the file rather than updated by `save_session`
+/// so a write from anywhere else is still picked up.
+static SESSION_CACHE: Mutex<Option<(SystemTime, u64, Option<SessionData>)>> = Mutex::new(None);
+
 pub fn load_session() -> Option<SessionData> {
-    ensure_dir();
     let path = config_dir().join("session.json");
-    if !path.exists() {
+    let Ok(meta) = fs::metadata(&path) else {
+        *SESSION_CACHE.lock().unwrap() = None;
         return None;
+    };
+    let stamp = (meta.modified().ok()?, meta.len());
+    if let Some((mtime, len, ref session)) = *SESSION_CACHE.lock().unwrap() {
+        if (mtime, len) == stamp {
+            return session.clone();
+        }
     }
-    let raw = fs::read_to_string(&path).ok()?;
-    let session: SessionData = serde_json::from_str(&raw).ok()?;
-    if session.access_token.is_empty() || session.user_id.is_empty() {
-        return None;
-    }
-    Some(session)
+    let session = fs::read_to_string(&path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<SessionData>(&raw).ok())
+        .filter(|s| !s.access_token.is_empty() && !s.user_id.is_empty());
+    *SESSION_CACHE.lock().unwrap() = Some((stamp.0, stamp.1, session.clone()));
+    session
 }
 
 pub fn save_session(session: &SessionData) {
@@ -273,9 +391,7 @@ pub fn save_equipped(equipped: &HashMap<String, serde_json::Value>) {
 pub fn clear_equipped() {
     ensure_dir();
     let path = config_dir().join("equipped.json");
-    if path.exists() {
-        fs::remove_file(&path).ok();
-    }
+    remove_secure(&path);
 }
 
 pub fn load_inventory_cache() -> Option<(
@@ -323,9 +439,7 @@ pub fn save_inventory_cache(
 pub fn clear_inventory_cache() {
     ensure_dir();
     let path = config_dir().join("inventory_cache.json");
-    if path.exists() {
-        fs::remove_file(&path).ok();
-    }
+    remove_secure(&path);
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Default)]
@@ -393,9 +507,7 @@ pub fn save_friends_cache(friend_codes: &[String], profiles: &HashMap<String, He
 pub fn clear_friends_cache() {
     ensure_dir();
     let path = config_dir().join("friends_cache.json");
-    if path.exists() {
-        fs::remove_file(&path).ok();
-    }
+    remove_secure(&path);
 }
 
 /// Minutes of listening time accrued locally but not yet confirmed by `/sync`.
@@ -424,6 +536,40 @@ pub fn save_pending_minutes(minutes: f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn content_hash_ignores_map_order_but_not_content() {
+        let mut a = HashMap::new();
+        let mut b = HashMap::new();
+        for (k, v) in [
+            ("cd", 1u32),
+            ("boombox", 2),
+            ("headphones", 3),
+            ("vinyl", 4),
+        ] {
+            a.insert(k.to_string(), v);
+        }
+        for (k, v) in [
+            ("vinyl", 4u32),
+            ("headphones", 3),
+            ("boombox", 2),
+            ("cd", 1),
+        ] {
+            b.insert(k.to_string(), v);
+        }
+        let ja =
+            serde_json::to_string(&serde_json::json!({ "inventory": a, "currency": 5 })).unwrap();
+        let jb =
+            serde_json::to_string(&serde_json::json!({ "currency": 5, "inventory": b })).unwrap();
+        assert_eq!(content_hash(&ja), content_hash(&jb));
+        // Hand-built so the key order genuinely differs in the text.
+        assert_eq!(
+            content_hash(r#"{"a":1,"b":{"x":[1,2],"y":null}}"#),
+            content_hash(r#"{"b":{"y":null,"x":[1,2]},"a":1}"#)
+        );
+        assert_ne!(content_hash(r#"{"a":1}"#), content_hash(r#"{"a":2}"#));
+        assert_ne!(content_hash(r#"[1,2]"#), content_hash(r#"[2,1]"#));
+    }
     use std::sync::Mutex;
 
     // These tests touch the real `~/.config/herzies/pending_minutes.json` (the
