@@ -2811,7 +2811,8 @@ export const ITEMS: ItemDef[] = [
   {
     id: "gold-chain",
     name: "Ludvig's Lariat",
-    description: "He's been dreaming of this gold ornament since he first entered the world of Herzies.",
+    description:
+      "He's been dreaming of this gold ornament since he first entered the world of Herzies.",
     rarity: "rare",
     frames: goldChainFrames,
     equipable: true,
@@ -2833,7 +2834,8 @@ export const ITEMS: ItemDef[] = [
   {
     id: "bowtie",
     name: "ur mom's favourite",
-    description: "Good compensation for bad cooking and nonexistent social skills.",
+    description:
+      "Good compensation for bad cooking and nonexistent social skills.",
     rarity: "uncommon",
     frames: bowtieFrames,
     equipable: true,
