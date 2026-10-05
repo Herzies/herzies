@@ -178,12 +178,27 @@ export async function POST(request: Request) {
     update.expires_at = new Date(Date.now() + 5 * 60_000).toISOString();
   }
 
-  const { error } = await admin.from("trades").update(update).eq("id", tradeId);
+  // Conditional on the trade being as we read it, so the lock and accept
+  // resets above are computed from the state they actually replace.
+  const { data: saved, error } = await admin
+    .from("trades")
+    .update(update)
+    .eq("id", tradeId)
+    .eq("state", trade.state)
+    .eq("updated_at", trade.updated_at)
+    .select("id")
+    .maybeSingle();
 
   if (error) {
     return NextResponse.json(
       { error: "Failed to update offer" },
       { status: 500 },
+    );
+  }
+  if (!saved) {
+    return NextResponse.json(
+      { error: "The trade changed — try again" },
+      { status: 409 },
     );
   }
 

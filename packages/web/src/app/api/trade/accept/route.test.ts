@@ -167,4 +167,29 @@ describe("POST /api/trade/accept", () => {
     const res = await POST(fakeRequest({ tradeId: "trade-1" }));
     expect(res.status).toBe(409);
   });
+
+  it("returns 409 and does not execute when the trade changed since it was read", async () => {
+    mockAuth.mockResolvedValue({ userId: "user-1" });
+    const trade = {
+      id: "trade-1",
+      initiator_id: "user-1",
+      target_id: "user-2",
+      state: "both_locked",
+      initiator_accepted: false,
+      target_accepted: true,
+      updated_at: "2026-10-05T12:00:00.000+00:00",
+    };
+    const admin = createMockAdmin({}, { execute_trade: { data: true } });
+    const read = createMockAdmin({ trades: { data: trade } });
+    // First query reads the trade; the conditional update then matches no
+    // row, as when the partner changed their offer in between.
+    admin.from
+      .mockImplementationOnce(read.from)
+      .mockImplementationOnce(createMockAdmin({ trades: { data: null } }).from);
+    mockAdmin.mockReturnValue(admin as never);
+
+    const res = await POST(fakeRequest({ tradeId: "trade-1" }));
+    expect(res.status).toBe(409);
+    expect(admin.rpc).not.toHaveBeenCalled();
+  });
 });
