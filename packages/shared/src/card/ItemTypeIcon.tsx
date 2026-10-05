@@ -1,15 +1,15 @@
+import { getItemColor } from "../item-canvas.js";
 import {
-  getItemColor,
   getItemIconGradient,
   getItemType,
   type ItemDef,
   type ItemType,
   RARITY_COLORS,
-} from "@herzies/shared";
-import { hasCardFrame } from "./artwork-from-icon";
-import rawItemIconGrids from "./item-icon-grids.json";
-import { PixelIcon } from "./PixelIcon";
-import { TYPE_ICON_GRIDS as GRIDS } from "./type-icon-grids";
+} from "../items.js";
+import { hasCardFrame } from "./artwork-from-icon.js";
+import rawItemIconGrids from "./item-icon-grids.json" with { type: "json" };
+import { PixelIcon } from "./PixelIcon.js";
+import { TYPE_ICON_GRIDS as GRIDS } from "./type-icon-grids.js";
 
 /** Bespoke 24x24 icon per item id, depicting what that specific item actually
  * is or does (e.g. the headphones item gets an actual pair of headphones)
@@ -19,13 +19,18 @@ import { TYPE_ICON_GRIDS as GRIDS } from "./type-icon-grids";
  * (type-icon-grids.ts) for any item without one yet — e.g. a newly added
  * item.
  *
- * Lives in its own JSON file (rather than inline here) so the item editor
- * tool (`pnpm item-editor`, see `tools/item-editor/`) can read and overwrite
- * it directly — painting it there and saving takes effect immediately, the
- * same live-reload any other source edit gets. */
+ * Lives in its own JSON file (rather than inline here) so the desktop's item
+ * editor tool (`pnpm item-editor`, see `packages/desktop/tools/item-editor/`)
+ * can read and overwrite it directly — saving there rebuilds this package,
+ * which the running app picks up. */
 const ITEM_ICON_GRIDS: Partial<
   Record<string, { grid: string[]; palette: string[] }>
 > = rawItemIconGrids;
+
+/** The same grids with their exact JSON type, for icons looked up by an id
+ * that is known to be in the file (the visitor portraits, the Bigger Bag) —
+ * not catalog items. */
+export const ICON_GRID_JSON = rawItemIconGrids;
 
 /** Chamfered card silhouette, in the same proportions as CARD_FRAME's
  * outline in type-icon-grids.ts (24x24 grid, border pixels at x=4/5/18/19,

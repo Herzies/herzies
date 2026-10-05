@@ -4,11 +4,12 @@ import {
   DEFAULT_Y_ANGLE,
   generateCreatureParams,
   Herzie3D as SharedHerzie3D,
+  SpeechBubble,
+  useChatter,
 } from "@herzies/shared";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../lib/utils";
 import { SegmentBar } from "./SegmentBar";
-import { SpeechBubble, useChatter } from "./SpeechBubble";
 import { VisitorHelp, type VisitorReward } from "./VisitorHelp";
 import { VISITOR_THEMES } from "./VisitorRowTheme";
 

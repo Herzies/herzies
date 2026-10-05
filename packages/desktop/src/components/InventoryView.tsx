@@ -24,6 +24,8 @@ import {
   getItem,
   getItemType,
   groundSlot,
+  hasRarityFrame,
+  ItemTypeIcon,
   MAX_MODIFIERS,
   meetsMinStage,
   RARITY_COLORS,
@@ -67,7 +69,6 @@ import { HERZIE_STAGE_HEIGHT } from "./Herzie3D";
 import { type Flight, ItemFlights } from "./ItemFlight";
 import ItemInspectOverlay, { CompactItemPreview } from "./ItemInspectOverlay";
 import { DuplicatesIcon } from "./icons/DuplicatesIcon";
-import { hasRarityFrame, ItemTypeIcon } from "./icons/ItemTypeIcon";
 import { SortIcon } from "./icons/SortIcon";
 import { List } from "./List";
 import { NumberTicker } from "./NumberTicker";

@@ -1,4 +1,5 @@
 export * from "./ascii3d.js";
+export * from "./card/index.js";
 export * from "./chat.js";
 export * from "./chat-mentions.js";
 export * from "./craving.js";
@@ -13,7 +14,9 @@ export * from "./items.js";
 export * from "./lastfm-link.js";
 export * from "./leveling.js";
 export * from "./name.js";
+export * from "./npc-looks.js";
 export * from "./Sky.js";
+export * from "./SpeechBubble.js";
 export * from "./scenery-renderer.js";
 export * from "./types.js";
 export * from "./visitors.js";

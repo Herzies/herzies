@@ -7,10 +7,13 @@ import type {
 } from "@herzies/shared";
 import {
   DEFAULT_Y_ANGLE,
-  GOLD_SCHEME_ID,
+  GEORGE_EQUIPPED,
+  GEORGE_SEED,
   getItem,
   MERCHANT_NAME,
   Herzie3D as SharedHerzie3D,
+  SpeechBubble,
+  useChatter,
 } from "@herzies/shared";
 import { useEffect, useState } from "react";
 import { herzies } from "../tauri-bridge";
@@ -19,13 +22,7 @@ import { FloatingCoins } from "./FloatingCoins";
 import ItemInspectOverlay, { inspectOrigin } from "./ItemInspectOverlay";
 import { ItemRow } from "./ItemRow";
 import { List } from "./List";
-import { SpeechBubble, useChatter } from "./SpeechBubble";
 import { Tooltip } from "./Tooltip";
-
-/** George's look: one fixed seed, so he's the same herzie for everyone —
- * painted solid gold, because George is rich and wants you to know it. */
-export const GEORGE_SEED = "npc:good-ol-george";
-export const GEORGE_EQUIPPED = { color: GOLD_SCHEME_ID };
 
 /** Good ol' George's sales patter, cycled in a speech bubble like the boss. */
 const GEORGE_LINES = [

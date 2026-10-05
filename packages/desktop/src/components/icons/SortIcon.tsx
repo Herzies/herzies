@@ -1,4 +1,4 @@
-import { PixelIcon } from "./PixelIcon";
+import { PixelIcon } from "@herzies/shared";
 
 // Down arrow beside three shortening bars — the conventional "sort" glyph,
 // hand-drawn as a 16x16 bitmap (rather than a stroked vector) so it stays

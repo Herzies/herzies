@@ -1,16 +1,17 @@
 import {
   BOSS_BODY_TYPE,
   type Equipped,
+  GEORGE_EQUIPPED,
+  GEORGE_SEED,
   generateCreatureParams,
+  ORPHIEZ_EQUIPPED,
+  PixelIcon,
+  ICON_GRID_JSON as rawItemIconGrids,
   renderCreatureAtAngle,
   VISITORS,
 } from "@herzies/shared";
 import { useMemo } from "react";
 import { cn } from "../../lib/utils";
-import { GEORGE_EQUIPPED, GEORGE_SEED } from "../MerchantPanel";
-import { ORPHIEZ_EQUIPPED } from "../OrphiezStage";
-import rawItemIconGrids from "./item-icon-grids.json";
-import { PixelIcon } from "./PixelIcon";
 
 // Hand-tweaked portraits, painted in the item editor (`pnpm item-editor`,
 // listed there under EXTRA_ICONS) and stored beside the item icons. A

@@ -1,7 +1,6 @@
-import { getItem } from "@herzies/shared";
+import { getItem, ItemTypeIcon } from "@herzies/shared";
 import { cn } from "../lib/utils";
 import { INSPECT_ORIGIN_ATTR } from "./ItemInspectOverlay";
-import { ItemTypeIcon } from "./icons/ItemTypeIcon";
 import type { TabColour } from "./TabButton";
 
 /** One inventory/store row: name + subtitle on the left, an optional action on the right. */

@@ -1,13 +1,13 @@
 import {
+  cardFrameBackground,
   type Equipped,
   equippedItemIds,
   getItem,
-  getItemIconGradient,
   getItemSet,
   RARITY_COLORS as ITEM_RARITY_COLORS,
-  ITEMS,
-  RARITY_LABELS,
-  type Rarity,
+  ItemCard,
+  ItemStatLines,
+  ItemTypeTag,
 } from "@herzies/shared";
 import {
   useCallback,
@@ -17,45 +17,14 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { getCardIllustration } from "../lib/card-art";
 import { cn } from "../lib/utils";
-import {
-  ItemStatLines,
-  ItemTypeTag,
-  ModifierEffectTag,
-  SetTag,
-} from "./ItemTypeTag";
-import { getCardIllustration, ItemCardArt } from "./icons/ItemCardArt";
-import { TiltCard } from "./TiltCard";
+import { Tooltip } from "./Tooltip";
 
-/** How strongly each rarity's frame shines (the `.holo-foil` layer's
- * `--foil`) — a common card is plain cardstock, a mythic one full foil. */
-const RARITY_FOIL: Record<Rarity, number> = {
-  common: 0,
-  uncommon: 0.35,
-  rare: 0.55,
-  legendary: 0.8,
-  mythic: 1,
-};
-
-/** Rarities whose art window is foil too, like a real holo card's. */
-const HOLO_ART: ReadonlySet<Rarity> = new Set(["legendary", "mythic"]);
-
-/** The card's metallic frame: the set's gradient for a set member (the same
- * clue its small icon wears), otherwise the rarity colour, lit from the
- * top-left. */
-function frameBackground(itemId: string, rarity: Rarity): string {
-  const gradient = getItemIconGradient(itemId);
-  if (gradient) return `linear-gradient(135deg, ${gradient.join(", ")})`;
-  const c = ITEM_RARITY_COLORS[rarity];
-  return `linear-gradient(135deg, color-mix(in srgb, ${c} 55%, white), color-mix(in srgb, ${c} 75%, #12121e) 35%, color-mix(in srgb, ${c} 40%, #12121e) 70%, color-mix(in srgb, ${c} 70%, #12121e))`;
-}
-
-/** The item as a collector card — framed art (its commissioned
- * illustration, or its pixel icon until it has one), with its name, type,
- * rarity, stats, description and set progress printed on the card, which
- * leans toward the cursor with a rarity-scaled holo foil (TiltCard). The
- * content of the click-to-inspect modal; `footer` actions render below the
- * card, outside the tilt, so the buttons stay put under the cursor. */
+/** The item's collector card (ItemCard), as the content of the
+ * click-to-inspect modal: the card can fly in from its tile (`flightRef`,
+ * `flightLayers`), and `footer` actions render below it, outside the tilt, so
+ * the buttons stay put under the cursor. */
 export function ItemPreviewCard({
   itemId,
   meta,
@@ -72,12 +41,9 @@ export function ItemPreviewCard({
   meta?: React.ReactNode;
   /** Actions rendered below the card (e.g. equip / sell controls). */
   footer?: React.ReactNode;
-  /** Current deck, used to show set progress (e.g. "Prismatic set 1/2") —
-   * a set effect is only active while its members are equipped, so owning
-   * them isn't enough. */
+  /** Current deck, used to show set progress (e.g. "Prismatic set 1/2"). */
   equipped?: Equipped | null;
-  /** Current dice-upgrade level (0-MAX_ITEM_UPGRADE_LEVEL) — renders as a
-   * "+N" next to the name and feeds ItemStatLines' effective totals. */
+  /** Current dice-upgrade level (0-MAX_ITEM_UPGRADE_LEVEL). */
   level?: number;
   className?: string;
   /** The card's flying layer (see ItemInspectOverlay's flight): the card,
@@ -87,17 +53,7 @@ export function ItemPreviewCard({
   flightLayers?: React.ReactNode;
   footerRef?: React.Ref<HTMLDivElement>;
 }) {
-  const item = getItem(itemId);
-  const set = getItemSet(itemId);
-  const equippedIds = new Set(equippedItemIds(equipped));
-  const equippedCount =
-    set?.itemIds.filter((id) => equippedIds.has(id)).length ?? 0;
-
-  if (!item) return null;
-
-  const rarityColor = ITEM_RARITY_COLORS[item.rarity];
-  const number = ITEMS.findIndex((i) => i.id === item.id) + 1;
-  const artist = getCardIllustration(item.id)?.artist;
+  if (!getItem(itemId)) return null;
 
   return (
     <div className={cn("flex flex-col items-center", className)}>
@@ -105,106 +61,14 @@ export function ItemPreviewCard({
         {/* backface-hidden: mid-spin, the card's back (a flight layer) shows
           instead of its mirrored face. */}
         <div data-card-face="" className="backface-hidden">
-          <TiltCard
-            className="relative w-[218px] rounded-lg p-[5px] shadow-2xl shadow-black/60"
-            style={
-              {
-                background: frameBackground(item.id, item.rarity),
-                "--foil": RARITY_FOIL[item.rarity],
-              } as React.CSSProperties
-            }
-          >
-            {/* Shows only on the frame: the opaque face below covers the rest. */}
-            <div className="holo-foil rounded-lg" />
-            <div className="relative flex min-h-[314px] flex-col gap-1.5 rounded-[5px] bg-bg-panel p-1.5 text-left">
-              <div className="truncate text-ui font-bold text-text">
-                {item.name}
-                {level > 0 ? (
-                  <span className="text-cyan"> +{level}</span>
-                ) : null}
-              </div>
-
-              <div
-                data-card-art=""
-                className="relative overflow-hidden border-2 bg-bg"
-                style={{
-                  borderColor: `color-mix(in srgb, ${rarityColor} 45%, #2a2a3a)`,
-                }}
-              >
-                {/* 192x144: 4:3, and a 24px icon fills its height at exactly 6x. */}
-                <ItemCardArt item={item} className="block h-36 w-48" />
-                {HOLO_ART.has(item.rarity) && (
-                  <div
-                    className="holo-foil"
-                    style={{ "--foil": 0.6 } as React.CSSProperties}
-                  />
-                )}
-              </div>
-
-              <div className="-mt-0.5 flex items-center gap-1">
-                <ItemTypeTag item={item} className="shrink-0" />
-                <ModifierEffectTag item={item} />
-                <SetTag itemId={itemId} />
-                <span
-                  className="ml-auto text-ui-sm italic"
-                  style={{ color: rarityColor }}
-                >
-                  {RARITY_LABELS[item.rarity]}
-                </span>
-              </div>
-
-              <ItemStatLines
-                item={item}
-                level={level}
-                className="border border-border bg-bg px-1.5 py-1"
-              />
-
-              <div className="text-ui-sm italic leading-snug text-text-dim">
-                {item.description}
-              </div>
-
-              {set && (
-                <div className="border-t border-border pt-1 text-ui-sm leading-snug">
-                  <div className="font-bold text-text">
-                    {set.name} set {equippedCount}/{set.itemIds.length}
-                  </div>
-                  <div className="text-text-dim">{set.effect}</div>
-                  <div>
-                    {set.itemIds.map((id, i) => (
-                      <span
-                        key={id}
-                        className={
-                          equippedIds.has(id) ? "text-white" : "text-text-dim"
-                        }
-                      >
-                        {i > 0 ? " · " : ""}
-                        {getItem(id)?.name ?? id}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="mt-auto flex items-center gap-1 text-[8px] text-text-dim">
-                <span
-                  className="inline-block size-1.5 rotate-45"
-                  style={{ background: rarityColor }}
-                />
-                {meta ? <span>{meta}</span> : null}
-                {artist ? (
-                  <span className="ml-auto truncate italic">
-                    Illus. {artist}
-                  </span>
-                ) : null}
-                {number > 0 && (
-                  <span className={cn("shrink-0", !artist && "ml-auto")}>
-                    № {number}/{ITEMS.length}
-                  </span>
-                )}
-              </div>
-            </div>
-            <div className="holo-glare rounded-lg" />
-          </TiltCard>
+          <ItemCard
+            itemId={itemId}
+            meta={meta}
+            equipped={equipped}
+            level={level}
+            illustration={getCardIllustration(itemId)}
+            tooltip={tagTooltip}
+          />
         </div>
         {flightLayers}
       </div>
@@ -215,6 +79,11 @@ export function ItemPreviewCard({
       )}
     </div>
   );
+}
+
+/** The card's set and modifier tags explain themselves on hover. */
+function tagTooltip(label: string, tag: React.ReactElement) {
+  return <Tooltip label={label}>{tag}</Tooltip>;
 }
 
 /** The condensed hover preview for the bag and the deck: name, type, stats and
@@ -278,7 +147,7 @@ function CardBack({ itemId }: { itemId: string }) {
       aria-hidden="true"
       data-card-back=""
       className="absolute inset-0 rotate-y-180 rounded-lg p-[5px] backface-hidden"
-      style={{ background: frameBackground(item.id, item.rarity) }}
+      style={{ background: cardFrameBackground(item.id, item.rarity) }}
     >
       <div
         className="flex h-full items-center justify-center rounded-[5px] bg-bg-panel"

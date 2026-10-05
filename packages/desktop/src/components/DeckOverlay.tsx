@@ -1,23 +1,21 @@
 import {
+  CARD_SHAPE_CLIP,
   DECK_SLOT_GROUPS,
   type DeckSlotGroup,
   EQUIP_SLOT_LABELS,
   type Equipped,
   type EquipSlot,
   equipSlotFor,
+  GenericTypeIcon,
   type GroundSide,
   getItem,
   groundSideOf,
   type ItemType,
+  ItemTypeIcon,
   type ItemUnit,
 } from "@herzies/shared";
 import { cn } from "../lib/utils";
 import { CompactItemPreview } from "./ItemInspectOverlay";
-import {
-  CARD_SHAPE_CLIP,
-  GenericTypeIcon,
-  ItemTypeIcon,
-} from "./icons/ItemTypeIcon";
 import { HoverPreview, Tooltip } from "./Tooltip";
 
 /** Marks every deck box with the equip slot it takes, so a drag from the bank

@@ -1,4 +1,4 @@
-import { PixelIcon } from "./PixelIcon";
+import { PixelIcon } from "@herzies/shared";
 
 // Two overlapping coins — computed from circle math rather than hand-drawn,
 // since a hand-authored bitmap circle at this size reads lumpy. The back

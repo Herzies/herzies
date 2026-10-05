@@ -7,6 +7,7 @@ import type {
 import {
   getItem,
   RARITY_COLORS as ITEM_RARITY_COLORS,
+  ItemTypeIcon,
   isVisitorType,
   MERCHANT_NAME,
   VISITORS,
@@ -21,7 +22,6 @@ import ItemInspectOverlay, {
   INSPECT_ORIGIN_ATTR,
   inspectOrigin,
 } from "./ItemInspectOverlay";
-import { ItemTypeIcon } from "./icons/ItemTypeIcon";
 import { VisitorIcon } from "./icons/VisitorIcon";
 import { List } from "./List";
 import { MerchantPanel } from "./MerchantPanel";
