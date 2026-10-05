@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.1.0-beta.47",
+    "highlights": [
+      "Upgrading with a Power Dice now shows the full card, with each stat before and after",
+      "After a roll, upgrade the same card again right away if you have dice left",
+      "Good ol' George now shows how many of each card you own",
+      "The neckwear has new names and its own artwork",
+      "A card's type now sits next to its set and rarity"
+    ]
+  },
+  {
     "version": "0.1.0-beta.46",
     "highlights": [
       "New: collector cards. Shift+click any card in your bag or deck to flip it over and see it as a full card with its own pixel artwork",

@@ -1,4 +1,9 @@
-import type { BossFightView, Equipped, GameEvent } from "@herzies/shared";
+import type {
+  BossFightView,
+  Equipped,
+  GameEvent,
+  ItemUnit,
+} from "@herzies/shared";
 import {
   getItem,
   RARITY_COLORS as ITEM_RARITY_COLORS,
@@ -162,6 +167,7 @@ function EventsViewImpl({
   debugForceMerchant = false,
   onScreenChange,
   equipped,
+  units = [],
   currency = 0,
   onLog,
   rootKey = 0,
@@ -182,6 +188,8 @@ function EventsViewImpl({
   onScreenChange?: (screen: "boss" | "merchant" | null) => void;
   /** Current deck, used to show set progress in the reward preview. */
   equipped?: Equipped | null;
+  /** Every owned copy, for George's "N owned" counts. */
+  units?: readonly ItemUnit[];
   /** Player's coins, for George's buy buttons. */
   currency?: number;
   onLog?: (msg: string) => void;
@@ -558,6 +566,7 @@ function EventsViewImpl({
           event={selectedEvent}
           currency={currency}
           equipped={equipped}
+          units={units}
           onBought={() => setReloadKey((k) => k + 1)}
           onLog={onLog}
           paused={!eventsTabVisible || !focused}

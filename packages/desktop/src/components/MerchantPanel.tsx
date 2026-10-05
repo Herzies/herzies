@@ -1,6 +1,7 @@
 import type {
   Equipped,
   GameEvent,
+  ItemUnit,
   MerchantStockView,
   MerchantView,
 } from "@herzies/shared";
@@ -61,6 +62,7 @@ export function MerchantPanel({
   event,
   currency,
   equipped,
+  units,
   onBought,
   onLog,
   paused,
@@ -70,6 +72,8 @@ export function MerchantPanel({
   paused: boolean;
   currency: number;
   equipped?: Equipped | null;
+  /** Every owned copy (worn or not), for each line's "N owned". */
+  units: readonly ItemUnit[];
   /** Refetch events so remaining stock and "bought" counts catch up. */
   onBought: () => void;
   onLog?: (msg: string) => void;
@@ -83,6 +87,9 @@ export function MerchantPanel({
   // Fresh counts from the server already include those buys.
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset on each new poll result
   useEffect(() => setBoughtNow({}), [event.config]);
+
+  const owned = (itemId: string) =>
+    units.filter((u) => u.itemId === itemId).length;
 
   const stock = (view.stock ?? []).map((line) => {
     const extra = boughtNow[line.itemId] ?? 0;
@@ -170,11 +177,7 @@ export function MerchantPanel({
             );
             const details = [
               line.remaining != null ? `${line.remaining} left` : null,
-              line.perPlayerLimit != null
-                ? `${line.yourBought}/${line.perPlayerLimit} bought`
-                : line.yourBought > 0
-                  ? `${line.yourBought} bought`
-                  : null,
+              owned(line.itemId) > 0 ? `${owned(line.itemId)} owned` : null,
             ].filter(Boolean);
             return (
               <ItemRow

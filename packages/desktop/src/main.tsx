@@ -883,6 +883,7 @@ function App() {
             debugForceMerchant={debugMerchantOverride}
             onScreenChange={setEventsScreen}
             equipped={state.equipped}
+            units={state.units}
             currency={state.inventoryCurrency}
             onLog={addLog}
           />

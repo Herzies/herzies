@@ -2810,8 +2810,9 @@ export const ITEMS: ItemDef[] = [
   },
   {
     id: "gold-chain",
-    name: "Certified Drip",
-    description: "Heavy gold around the neck. Your herzie has gone platinum.",
+    name: "Ludvig's Lariat",
+    description:
+      "He's been dreaming of this gold ornament since he first entered the world of Herzies.",
     rarity: "rare",
     frames: goldChainFrames,
     equipable: true,
@@ -2821,8 +2822,8 @@ export const ITEMS: ItemDef[] = [
   },
   {
     id: "pearl-necklace",
-    name: "Clam's Finest",
-    description: "A string of pearls, for the herzie with refined taste.",
+    name: "Hardened Tears of Joy",
+    description: "Aphrodite's most commercially successful product yet.",
     rarity: "uncommon",
     frames: pearlNecklaceFrames,
     equipable: true,
@@ -2832,8 +2833,9 @@ export const ITEMS: ItemDef[] = [
   },
   {
     id: "bowtie",
-    name: "Black Tie Optional",
-    description: "Ignored the dress code anyway. Red bowtie, front and centre.",
+    name: "ur mom's favourite",
+    description:
+      "Good compensation for bad cooking and nonexistent social skills.",
     rarity: "uncommon",
     frames: bowtieFrames,
     equipable: true,

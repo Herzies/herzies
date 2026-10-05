@@ -1,6 +1,5 @@
 import {
   getItem,
-  ItemPreview,
   type ItemUnit,
   RARITY_COLORS,
   requiredDiceForLevel,
@@ -9,10 +8,11 @@ import {
   STAT_LABELS,
   upgradeSuccessChance,
 } from "@herzies/shared";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { type UpgradeRollFn, useUpgradeRoll } from "../hooks/useUpgradeRoll";
 import { cn } from "../lib/utils";
 import { Checkbox } from "./Checkbox";
+import { ItemPreviewCard } from "./ItemInspectOverlay";
 import { ItemTypeIcon } from "./icons/ItemTypeIcon";
 import { List } from "./List";
 import { PromptOverlay } from "./PromptOverlay";
@@ -38,10 +38,6 @@ interface Rolled {
   itemId: string;
   level: number;
   protectedRoll: boolean;
-  /** Dice of this kind left once this roll has spent one — counted at roll
-   * start rather than read back from `units`, which may not have caught up
-   * with the server by the time the result shows. */
-  diceLeftAfter: number;
 }
 
 /** Green at 100% sliding to red at the long shots. */
@@ -53,10 +49,56 @@ function formatChance(chance: number): string {
   return `${Math.round(chance * 100)}%`;
 }
 
-function statLine(itemId: string, level: number): string {
+/** The card at full size is too tall for the modal in the 520px window. */
+const CARD_SCALE = 0.7;
+/** ItemPreviewCard's fixed width (its TiltCard is w-[218px]). */
+const CARD_WIDTH = 218;
+
+/** The card being upgraded, as its collector card, shrunk with a transform
+ * (CSS zoom misplaces the art and tilt in WebKit). A transform doesn't
+ * shrink the layout box, so the wrapper is sized to the scaled card — its
+ * height measured, since set members print extra lines. */
+function UpgradeCard({ itemId, level }: { itemId: string; level: number }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [height, setHeight] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => setHeight(el.offsetHeight);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  return (
+    <div
+      style={{
+        width: CARD_WIDTH * CARD_SCALE,
+        height: height === null ? undefined : height * CARD_SCALE,
+      }}
+    >
+      <div
+        ref={ref}
+        style={{
+          width: CARD_WIDTH,
+          transform: `scale(${CARD_SCALE})`,
+          transformOrigin: "top left",
+        }}
+      >
+        <ItemPreviewCard itemId={itemId} level={level} />
+      </div>
+    </div>
+  );
+}
+
+/** Each stat before and after the next level, e.g. "Luck: +10 → +11". */
+function statChange(itemId: string, level: number): string {
   const def = getItem(itemId);
   return STAT_KEYS.filter((k) => def?.stats?.[k] !== undefined)
-    .map((k) => `${STAT_LABELS[k]}: +${(def?.stats?.[k] ?? 0) + level}`)
+    .map((k) => {
+      const base = def?.stats?.[k] ?? 0;
+      return `${STAT_LABELS[k]}: +${base + level} → +${base + level + 1}`;
+    })
     .join(" · ");
 }
 
@@ -152,7 +194,6 @@ export function DiceUpgradeOverlay({
       itemId: selectedUnit.itemId,
       level: selectedUnit.upgradeLevel,
       protectedRoll,
-      diceLeftAfter: diceLeft - 1,
     });
     start(selectedUnit.id, protectedRoll ? SAFETY_PICK_ID : null);
   };
@@ -170,16 +211,16 @@ export function DiceUpgradeOverlay({
     setSelected(null);
   };
 
-  // Once a roll lands, the window has done its job if this die can't be
-  // rolled again on anything useful: none left, or the card it just went
-  // onto now needs a higher die (or is maxed). A broken card with dice to
-  // spare goes back to the list instead, as does an error.
-  const doneAfterRoll =
-    rolled !== null &&
+  // Once a roll lands, `units` holds the server's answer (it replaces ours
+  // before the result shows), so the card and dice counts are current here.
+  // The same card can go again if it survived, this die still fits its new
+  // level and there's a die left; otherwise, with dice to spare, the list.
+  const canRollAgain =
     "newLevel" in phase &&
-    (rolled.diceLeftAfter <= 0 ||
-      (phase.status !== "destroyed" &&
-        requiredDiceForLevel(phase.newLevel) !== diceItemId));
+    phase.status !== "destroyed" &&
+    selectedUnit !== null &&
+    requiredDiceForLevel(selectedUnit.upgradeLevel) === diceItemId &&
+    diceLeft > 0;
 
   let body: React.ReactNode;
   if (rolled && phase.status !== "idle") {
@@ -188,8 +229,19 @@ export function DiceUpgradeOverlay({
         rolled={rolled}
         phase={phase}
         diceItemId={diceItemId}
-        continueLabel={doneAfterRoll ? "Done" : "Continue"}
-        onContinue={doneAfterRoll ? onClose : backToList}
+        nextChance={
+          canRollAgain && selectedUnit
+            ? upgradeSuccessChance(selectedUnit.upgradeLevel)
+            : null
+        }
+        nextStats={
+          canRollAgain && selectedUnit
+            ? statChange(selectedUnit.itemId, selectedUnit.upgradeLevel)
+            : null
+        }
+        onBack={diceLeft > 0 ? backToList : null}
+        onRollAgain={onUpgradeClick}
+        onDone={onClose}
       />
     );
   } else if (selectedUnit) {
@@ -200,13 +252,13 @@ export function DiceUpgradeOverlay({
     const protectedRoll = risky && usePick && picksLeft > 0;
     body = (
       <div className="flex flex-col items-center gap-2 text-center">
-        <ItemPreview item={def} box={110} />
+        <UpgradeCard itemId={itemId} level={level} />
         <div>
           <div className="text-ui" style={{ color: RARITY_COLORS[def.rarity] }}>
             "{def.name}" +{level} → +{level + 1}
           </div>
           <div className="mt-1 text-ui-sm text-text-dim">
-            {statLine(itemId, level + 1)}
+            {statChange(itemId, level)}
           </div>
         </div>
         {risky && (
@@ -314,7 +366,7 @@ export function DiceUpgradeOverlay({
       >
         <div
           onClick={(e) => e.stopPropagation()}
-          className="w-80 max-w-full border border-border bg-bg-panel p-3 shadow-xl shadow-black/50"
+          className="max-h-full w-80 max-w-full overflow-y-auto border border-border bg-bg-panel p-3 shadow-xl shadow-black/50"
         >
           <div className="mb-2 text-center text-sm font-bold">Upgrade</div>
           {body}
@@ -419,35 +471,43 @@ function RollStage({
   rolled,
   phase,
   diceItemId,
-  continueLabel,
-  onContinue,
+  nextChance,
+  nextStats,
+  onBack,
+  onRollAgain,
+  onDone,
 }: {
   rolled: Rolled;
   phase: ReturnType<typeof useUpgradeRoll>["phase"];
   diceItemId: string;
-  continueLabel: string;
-  onContinue: () => void;
+  /** The odds of rolling this card again, or null when it can't be. */
+  nextChance: number | null;
+  /** What rolling it again would do to its stats (see statChange). */
+  nextStats: string | null;
+  /** Back to the card list — null when no dice of this kind are left. */
+  onBack: (() => void) | null;
+  onRollAgain: () => void;
+  onDone: () => void;
 }) {
   const def = getItem(rolled.itemId);
   const dice = getItem(diceItemId);
   const pick = getItem(SAFETY_PICK_ID);
   if (!def || !dice) return null;
 
+  const rolling = phase.status === "rolling";
   const level = phase.status === "upgraded" ? phase.newLevel : rolled.level;
   const glow = RARITY_COLORS[dice.rarity];
 
   const headline =
     phase.status === "rolling"
       ? "Upgrading…"
-      : phase.status === "upgraded"
-        ? `Upgraded to +${phase.newLevel}!`
-        : phase.status === "kept"
-          ? "Upgrade failed"
-          : phase.status === "destroyed"
-            ? `"${def.name}" broke`
-            : phase.status === "error"
-              ? `Upgrade failed: ${phase.message}`
-              : "";
+      : phase.status === "kept"
+        ? "Upgrade failed"
+        : phase.status === "destroyed"
+          ? `"${def.name}" broke`
+          : phase.status === "error"
+            ? `Upgrade failed: ${phase.message}`
+            : "";
 
   return (
     <div className="flex flex-col items-center gap-2 text-center">
@@ -464,11 +524,11 @@ function RollStage({
             phase.status === "destroyed" && "upgrade-destroyed",
           )}
         >
-          <ItemPreview item={def} box={110} />
+          <UpgradeCard itemId={def.id} level={level} />
         </div>
         {phase.status === "rolling" && (
           <div className="dice-tumble pointer-events-none absolute -top-2 -right-4">
-            <ItemPreview item={dice} box={40} />
+            <ItemTypeIcon item={dice} className="h-10 w-10" />
           </div>
         )}
         {rolled.protectedRoll && pick && phase.status !== "upgraded" && (
@@ -478,7 +538,7 @@ function RollStage({
               phase.status === "rolling" ? "dice-tumble" : "pick-shatter",
             )}
           >
-            <ItemPreview item={pick} box={36} />
+            <ItemTypeIcon item={pick} className="h-9 w-9" />
           </div>
         )}
       </div>
@@ -494,26 +554,55 @@ function RollStage({
           +{level}
         </span>
       </div>
-      <div
-        className={cn(
-          "text-ui-lg font-bold",
-          phase.status === "rolling" && "animate-pulse text-text",
-          phase.status === "upgraded" && "text-green",
-          phase.status === "kept" && "text-text-dim",
-          (phase.status === "destroyed" || phase.status === "error") &&
-            "text-red",
+      {headline && (
+        <div
+          className={cn(
+            "text-ui-lg font-bold",
+            phase.status === "rolling" && "animate-pulse text-text",
+            phase.status === "upgraded" && "text-green",
+            phase.status === "kept" && "text-text-dim",
+            (phase.status === "destroyed" || phase.status === "error") &&
+              "text-red",
+          )}
+        >
+          {headline}
+        </div>
+      )}
+      {nextStats && <div className="text-ui-sm text-text-dim">{nextStats}</div>}
+      <div className="flex gap-2">
+        {onBack && (
+          <button
+            type="button"
+            className="btn text-text-dim"
+            disabled={rolling}
+            onClick={onBack}
+          >
+            Back
+          </button>
         )}
-      >
-        {headline}
+        {nextChance !== null ? (
+          <button type="button" className="btn text-cyan" onClick={onRollAgain}>
+            Upgrade again
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="btn text-cyan"
+            disabled={rolling}
+            onClick={onDone}
+          >
+            Done
+          </button>
+        )}
       </div>
-      <button
-        type="button"
-        className="btn text-cyan"
-        disabled={phase.status === "rolling"}
-        onClick={onContinue}
-      >
-        {continueLabel}
-      </button>
+      {nextChance !== null && (
+        <div className="text-ui-sm text-text-dim">
+          Success chance:{" "}
+          <span style={{ color: chanceColour(nextChance) }}>
+            {formatChance(nextChance)}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
