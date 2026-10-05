@@ -181,6 +181,16 @@ export function Herzie3D({
   const velocity = useRef(0);
   const momentumRaf = useRef(0);
 
+  // A new `defaultAngle` turns the herzie to it (a host turning it, e.g. the
+  // website's herzie facing whoever it stands beside), unless it's being
+  // dragged right now. Hosts that never change it are unaffected.
+  const lastDefaultAngle = useRef(defaultAngle);
+  useEffect(() => {
+    if (defaultAngle === lastDefaultAngle.current) return;
+    lastDefaultAngle.current = defaultAngle;
+    if (!dragging.current) setDragAngle(defaultAngle);
+  }, [defaultAngle]);
+
   const hasDragged = dragAngle !== 0;
 
   // --- Spin physics for dangling items (the chain, the pearls) ---

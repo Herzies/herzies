@@ -2,6 +2,10 @@
 @import "tailwindcss";
 @import "@herzies/shared/theme.css";
 
+/* Tailwind skips node_modules, so the shared components' classes (the
+   collector card) are pointed at explicitly. */
+@source "../../../shared/src";
+
 @layer base {
   *,
   *::before,
@@ -51,8 +55,14 @@
   }
 }
 
-@utility hero {
-  padding: clamp(0px, 2vh, 10rem) 0 clamp(0.5rem, 3vh, 6rem);
+/* A page whose first section fills the screen on its own (the homepage
+   hero) marks it with data-overlay-header, and the header lies over it
+   instead of pushing it down. */
+body:has([data-overlay-header]) > nav {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  z-index: 10;
 }
 
 @utility banner {
