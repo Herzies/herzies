@@ -220,11 +220,19 @@ async fn register_herzie(
 #[tauri::command]
 async fn friend_add(
     code: String,
+    name: Option<String>,
     app: AppHandle,
     state: tauri::State<'_, SharedState>,
 ) -> Result<FriendResult, String> {
-    let (friend_code, friend_codes_len, already_has) = {
+    let (friend_code, friend_codes_len, already_has, requested_name) = {
         let s = state.lock().unwrap();
+        // If they already asked us, this send auto-accepts — and their
+        // request carries the name to log it under.
+        let requested_name = s
+            .incoming_friend_requests
+            .iter()
+            .find(|r| r.friend_code == code)
+            .map(|r| r.name.clone());
         let herzie = match &s.herzie {
             Some(h) => h,
             None => {
@@ -238,8 +246,10 @@ async fn friend_add(
             herzie.friend_code.clone(),
             herzie.friend_codes.len(),
             herzie.friend_codes.contains(&code),
+            requested_name,
         )
     };
+    let name = requested_name.or(name);
 
     let re = regex_lite::Regex::new(r"^HERZ-[A-Z0-9]{4}$").unwrap();
     if !re.is_match(&code) {
@@ -274,13 +284,19 @@ async fn friend_add(
         Ok(accepted) => {
             if accepted {
                 // They had already requested us, so the friendship is live now.
-                add_friend_locally(&app, &state, &code);
+                add_friend_locally(&app, &state, &code, name.as_deref());
                 Ok(FriendResult {
                     success: true,
                     message: "Friend added!".into(),
                 })
             } else {
-                let _ = app.emit("activity", format!("Friend request sent to {}", code));
+                let _ = app.emit(
+                    "activity",
+                    format!(
+                        "Friend request sent to \"{}\"",
+                        name.as_deref().unwrap_or(&code)
+                    ),
+                );
                 Ok(FriendResult {
                     success: true,
                     message: "Friend request sent!".into(),
@@ -296,7 +312,14 @@ async fn friend_add(
 
 /// Push a newly-confirmed friend code into local state, persist, emit, and
 /// refresh the cached profiles. Shared by send (auto-accept) and accept paths.
-fn add_friend_locally(app: &AppHandle, state: &tauri::State<'_, SharedState>, code: &str) {
+/// This emits the one activity line for the new friendship; callers don't log
+/// their own. `name` is the friend's display name, the code only a fallback.
+fn add_friend_locally(
+    app: &AppHandle,
+    state: &tauri::State<'_, SharedState>,
+    code: &str,
+    name: Option<&str>,
+) {
     {
         let mut s = state.lock().unwrap();
         if let Some(ref mut herzie) = s.herzie {
@@ -310,7 +333,10 @@ fn add_friend_locally(app: &AppHandle, state: &tauri::State<'_, SharedState>, co
         drop(s);
         let _ = app.emit("state-update", &app_state);
     }
-    let _ = app.emit("activity", format!("Added friend {}", code));
+    let _ = app.emit(
+        "activity",
+        format!("Added friend \"{}\"", name.unwrap_or(code)),
+    );
     let app_clone = app.clone();
     tauri::async_runtime::spawn(async move {
         let client = api::http();
@@ -324,13 +350,22 @@ async fn friend_request_accept(
     app: AppHandle,
     state: tauri::State<'_, SharedState>,
 ) -> Result<FriendResult, String> {
-    // Resolve the friend code for this request so we can update local state.
-    let code = {
+    // Resolve who sent this request so we can update local state and log it.
+    let (code, name) = {
         let s = state.lock().unwrap();
-        s.incoming_friend_requests
+        match s
+            .incoming_friend_requests
             .iter()
             .find(|r| r.request_id == request_id)
-            .map(|r| r.friend_code.clone())
+        {
+            Some(r) => (Some(r.friend_code.clone()), Some(r.name.clone())),
+            None => match s.pending_friend_request.as_ref() {
+                Some(p) if p.request_id == request_id => {
+                    (Some(p.from_friend_code.clone()), Some(p.from_name.clone()))
+                }
+                _ => (None, None),
+            },
+        }
     };
 
     let client = api::http();
@@ -346,7 +381,7 @@ async fn friend_request_accept(
                 s.bump_friend_epoch();
             }
             if let Some(code) = code {
-                add_friend_locally(&app, &state, &code);
+                add_friend_locally(&app, &state, &code, name.as_deref());
             } else {
                 emit_state_update(&app);
             }

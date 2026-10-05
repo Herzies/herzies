@@ -646,8 +646,9 @@ export function ChatPanel({
     switch (actionId) {
       case "add": {
         if (!canAddFriend(code)) return;
-        const result = await herzies.friendAdd(code!);
-        onActivity?.(result.message);
+        const result = await herzies.friendAdd(code!, userMenu.username);
+        // Success is logged by the backend, with their name.
+        if (!result.success) onActivity?.(result.message);
         break;
       }
       case "profile": {

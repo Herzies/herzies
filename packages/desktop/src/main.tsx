@@ -675,8 +675,9 @@ function App() {
     setFriendOverlayBusy("accept");
     try {
       const result = await herzies.friendRequestAccept(pendingFriend.requestId);
-      addLog(result.message);
+      // Success is logged by the backend ("Added friend …"), with their name.
       if (result.success) setIgnoredFriendRequestId(pendingFriend.requestId);
+      else addLog(result.message);
     } finally {
       setFriendOverlayBusy(null);
     }
