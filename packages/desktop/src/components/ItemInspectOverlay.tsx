@@ -117,14 +117,11 @@ export function ItemPreviewCard({
             {/* Shows only on the frame: the opaque face below covers the rest. */}
             <div className="holo-foil rounded-lg" />
             <div className="relative flex min-h-[314px] flex-col gap-1.5 rounded-[5px] bg-bg-panel p-1.5 text-left">
-              <div className="flex items-center gap-1">
-                <div className="min-w-0 flex-1 truncate text-ui font-bold text-text">
-                  {item.name}
-                  {level > 0 ? (
-                    <span className="text-cyan"> +{level}</span>
-                  ) : null}
-                </div>
-                <ItemTypeTag item={item} className="shrink-0" />
+              <div className="truncate text-ui font-bold text-text">
+                {item.name}
+                {level > 0 ? (
+                  <span className="text-cyan"> +{level}</span>
+                ) : null}
               </div>
 
               <div
@@ -145,6 +142,7 @@ export function ItemPreviewCard({
               </div>
 
               <div className="-mt-0.5 flex items-center gap-1">
+                <ItemTypeTag item={item} className="shrink-0" />
                 <ModifierEffectTag item={item} />
                 <SetTag itemId={itemId} />
                 <span
