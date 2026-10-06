@@ -16,6 +16,7 @@ export function SettingsView({
   stageOverride,
   onStageOverride,
   onPreviewOnboarding,
+  onPreviewLoading,
   onTestUpdateAlert,
   onTestWhatsNew,
   availableUpdate,
@@ -33,6 +34,7 @@ export function SettingsView({
   stageOverride: number | null;
   onStageOverride: (v: number | null) => void;
   onPreviewOnboarding: () => void;
+  onPreviewLoading: () => void;
   onTestUpdateAlert: () => void;
   onTestWhatsNew: () => void;
   availableUpdate: Update | null;
@@ -181,6 +183,9 @@ export function SettingsView({
             </button>
             <button type="button" className="btn" onClick={onPreviewOnboarding}>
               Preview Onboarding
+            </button>
+            <button type="button" className="btn" onClick={onPreviewLoading}>
+              Preview Loading
             </button>
             <button type="button" className="btn" onClick={onTestUpdateAlert}>
               Test Update Alert

@@ -303,6 +303,9 @@ pub struct ItemSnapshot {
     /// `None` when the server predates copies, in which case the local ones are
     /// left as they are rather than cleared.
     pub units: Option<Vec<ItemUnit>>,
+    /// Inventory Expansions owned. `None` when the response doesn't carry it
+    /// (mutation responses, older servers), leaving the local count alone.
+    pub bank_expansions: Option<u32>,
 }
 
 /// One owned copy of an item — the unit of ownership. It is what a bank tile
@@ -397,6 +400,10 @@ pub struct AppState {
     pub outgoing_friend_requests: Vec<FriendRequestSummary>,
     /// World drops waiting to be collected (each removed once collected).
     pub pending_drops: Vec<PendingDrop>,
+    /// True from the moment a login's callback is accepted until its herzie
+    /// and items are loaded. The session already exists by then, so without
+    /// it the UI would render a half-loaded account.
+    pub logging_in: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

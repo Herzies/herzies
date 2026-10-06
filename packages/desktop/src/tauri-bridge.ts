@@ -105,6 +105,8 @@ export interface AppState {
   incomingFriendRequests: FriendRequestSummary[];
   outgoingFriendRequests: FriendRequestSummary[];
   pendingDrops: PendingDrop[];
+  /** A login was accepted and its herzie and items are still loading. */
+  loggingIn: boolean;
 }
 
 export const herzies = {

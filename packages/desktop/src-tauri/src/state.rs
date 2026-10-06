@@ -113,6 +113,8 @@ pub struct ManagedState {
     /// whether a track played long enough to be flushed to the server when it
     /// ends — see `OutgoingTrack` in lib.rs.
     pub track_started_at: Option<Instant>,
+    /// See `AppState::logging_in`.
+    pub logging_in: bool,
 }
 
 impl ManagedState {
@@ -163,6 +165,7 @@ impl ManagedState {
             multipliers: crate::storage::load_multipliers(),
             pending_minutes_saved_at: None,
             track_started_at: None,
+            logging_in: false,
         }
     }
 
@@ -241,7 +244,9 @@ impl ManagedState {
             herzie: self.display_herzie(),
             now_playing: self.current_now_playing.clone(),
             multipliers: self.multipliers.clone(),
-            is_online: is_logged_in,
+            // Withheld until a login finishes loading, so the renderer sees
+            // the logged-in transition once, with the herzie already there.
+            is_online: is_logged_in && !self.logging_in,
             is_connected: compute_is_connected(
                 is_logged_in,
                 self.last_sync_ok,
@@ -261,6 +266,7 @@ impl ManagedState {
             incoming_friend_requests: self.incoming_friend_requests.clone(),
             outgoing_friend_requests: self.outgoing_friend_requests.clone(),
             pending_drops: self.pending_drops.clone(),
+            logging_in: self.logging_in,
         }
     }
 }
@@ -382,6 +388,7 @@ mod tests {
             multipliers: None,
             pending_minutes_saved_at: None,
             track_started_at: None,
+            logging_in: false,
         }
     }
 

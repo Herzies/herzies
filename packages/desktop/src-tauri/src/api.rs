@@ -745,12 +745,14 @@ pub async fn api_fetch_inventory(client: &Client) -> Option<ItemSnapshot> {
     let item_upgrades: ItemUpgrades =
         serde_json::from_value(data["itemUpgrades"].clone()).unwrap_or_default();
     let units = serde_json::from_value::<Vec<ItemUnit>>(data["units"].clone()).ok();
+    let bank_expansions = data["bankExpansions"].as_u64().map(|n| n as u32);
     Some(ItemSnapshot {
         inventory,
         currency,
         equipped,
         item_upgrades,
         units,
+        bank_expansions,
     })
 }
 

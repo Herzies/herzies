@@ -17,6 +17,7 @@ import { HomeView } from "./components/HomeView";
 import { IncomingFriendOverlay } from "./components/IncomingFriendOverlay";
 import { IncomingTradeOverlay } from "./components/IncomingTradeOverlay";
 import { HERZIE_ZONE_ATTR, InventoryView } from "./components/InventoryView";
+import { LoadingSplash } from "./components/LoadingSplash";
 import { OnboardingScreen } from "./components/OnboardingScreen";
 import { ProfileView } from "./components/ProfileView";
 import { PromptOverlay } from "./components/PromptOverlay";
@@ -79,7 +80,11 @@ function App() {
     incomingFriendRequests: [],
     outgoingFriendRequests: [],
     pendingDrops: [],
+    loggingIn: false,
   });
+  /** False until the first state arrives from the backend; the placeholder
+   * above would otherwise flash the logged-out splash on every launch. */
+  const [hydrated, setHydrated] = useState(false);
   // Equipping, selling and dice upgrades are predicted locally so they land
   // instantly (see useOptimisticUnits). Overlaying the result onto `state` here,
   // rather than threading it to each consumer, is what keeps the 3D herzie, the
@@ -132,6 +137,16 @@ function App() {
   const [deepLinkItem, setDeepLinkItem] = useState<string | null>(null);
   const [stageOverride, setStageOverride] = useState<number | null>(null);
   const [previewOnboarding, setPreviewOnboarding] = useState(false);
+  /** Debug: hold the loading splash up until Escape. */
+  const [previewLoading, setPreviewLoading] = useState(false);
+  useEffect(() => {
+    if (!previewLoading) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPreviewLoading(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [previewLoading]);
   const [availableUpdate, setAvailableUpdate] = useState<Update | null>(null);
   /** Version the user dismissed the update overlay for; suppresses re-showing it. */
   const [dismissedUpdateVersion, setDismissedUpdateVersion] = useState<
@@ -224,7 +239,10 @@ function App() {
     // Merged rather than replaced: see stableMerge for why identity matters.
     const applyState = (next: AppState) =>
       setState((prev) => stableMerge(prev, next));
-    herzies.getState().then(applyState);
+    herzies.getState().then((next) => {
+      applyState(next);
+      setHydrated(true);
+    });
     const unlistenState = herzies.onStateUpdate(applyState);
     const unlistenActivity = herzies.onActivity(addLog);
     const unlistenDeepLink = herzies.onDeepLink((payload) => {
@@ -570,6 +588,18 @@ function App() {
 
   // Where Home's and the Herzie view's stages sit (see useStageAlignment).
   const herzieStageTop = useHomeStageOffset();
+
+  if (!hydrated) {
+    return <LoadingSplash />;
+  }
+
+  if (state.loggingIn) {
+    return <LoadingSplash label="loading your herzie" />;
+  }
+
+  if (previewLoading) {
+    return <LoadingSplash label="loading your herzie (esc to close)" />;
+  }
 
   if (!state.isOnline) {
     return <SplashScreen />;
@@ -948,6 +978,7 @@ function App() {
             stageOverride={stageOverride}
             onStageOverride={setStageOverride}
             onPreviewOnboarding={() => setPreviewOnboarding(true)}
+            onPreviewLoading={() => setPreviewLoading(true)}
             onTestUpdateAlert={() => setTestUpdateOverlay(true)}
             onTestWhatsNew={() => setTestWhatsNewOverlay(true)}
             hasActiveEventOverride={hasActiveEventOverride}

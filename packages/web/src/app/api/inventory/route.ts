@@ -11,7 +11,7 @@ export async function GET(request: Request) {
   const admin = createAdminClient();
   const { data, error } = await admin
     .from("herzies")
-    .select("inventory_v2, currency, equipped, item_upgrades")
+    .select("inventory_v2, currency, equipped, item_upgrades, bank_expansions")
     .eq("user_id", auth.userId)
     .single();
 
@@ -37,5 +37,8 @@ export async function GET(request: Request) {
     items: items ?? [],
     equipped: normalizeEquipped(data.equipped),
     itemUpgrades: (data.item_upgrades ?? {}) as Record<string, number>,
+    // Capacity has to arrive with the contents: the desktop judges "inventory
+    // full" from both, and loads this one before any /sync has run.
+    bankExpansions: data.bank_expansions ?? 0,
   });
 }

@@ -253,31 +253,41 @@ async fn finish_login(app: &AppHandle, body: &str) -> Result<(), LoginError> {
         .unwrap()
         .as_millis() as u64;
 
+    let state = app.state::<SharedState>();
+
+    // From here the session exists, so the UI would otherwise treat us as
+    // logged in while the herzie and items are still loading: it showed the
+    // herzie bare (or the onboarding screen) for a moment, and judged the bag
+    // full against the base capacity. Hold it on a loading splash instead.
+    // Nothing below returns early, so this is always cleared.
+    state.lock().unwrap().logging_in = true;
     storage::save_session(&SessionData {
         access_token,
         refresh_token,
         expires_at: now_ms + expires_in * 1000,
         user_id,
     });
-
-    let state = app.state::<SharedState>();
+    crate::emit_state_update(app);
 
     // Reconcile any in-memory or on-disk herzie against the new session. If
     // the local data belongs to a different user (or no one), it gets wiped
     // here so we don't accidentally re-register someone else's pet.
     let local_for_user = crate::adopt_local_herzie();
-    {
+    let equip_epoch_before = {
         let mut s = state.lock().unwrap();
         s.herzie = local_for_user;
-    }
+        s.equip_epoch
+    };
 
-    // Sync herzie with server. Bounded so a hung request can't pin the login
+    // Load the herzie and its items together, so the first state shown after
+    // the splash is complete. Bounded so a hung request can't pin the login
     // command; the sync loop picks up anything missed here.
     let client = Client::builder()
         .timeout(Duration::from_secs(15))
         .build()
         .unwrap_or_default();
-    let server_herzie = api::api_get_me(&client).await;
+    let (server_herzie, items) =
+        tokio::join!(api::api_get_me(&client), api::api_fetch_inventory(&client));
 
     if let Some(h) = server_herzie {
         storage::save_herzie(&h);
@@ -303,16 +313,21 @@ async fn finish_login(app: &AppHandle, body: &str) -> Result<(), LoginError> {
 
     {
         let mut s = state.lock().unwrap();
+        if let Some(snapshot) = items {
+            crate::apply_inventory(&mut s, snapshot, Some(equip_epoch_before));
+        }
         s.last_sync_ok = true;
+        s.logging_in = false;
         let app_state = s.to_app_state(env!("CARGO_PKG_VERSION"));
         drop(s);
         let _ = app.emit("state-update", &app_state);
     }
 
+    // Items are already in; chat and friends can follow.
     let app_clone = app.clone();
     tauri::async_runtime::spawn(async move {
         let client = crate::api::http();
-        crate::refresh_app_cache(&app_clone, &client, true).await;
+        crate::refresh_app_cache(&app_clone, &client, false).await;
     });
 
     log::info!("Login complete");

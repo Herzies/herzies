@@ -421,6 +421,78 @@
   animation: upgrade-pop-in 0.45s ease-out;
 }
 
+/* LoadingSplash: the wordmark breathes while a short purple bar sweeps a
+   hairline track. Fades in after a beat, so a load that finishes quickly
+   never flashes it at all. */
+.loading-splash {
+  animation: loading-splash-in 0.3s ease-out 0.15s both;
+}
+
+.loading-splash-banner {
+  animation: loading-splash-breathe 2.4s ease-in-out infinite;
+}
+
+.loading-splash-track {
+  position: relative;
+  width: 140px;
+  height: 2px;
+  overflow: hidden;
+  background: var(--color-border);
+}
+
+.loading-splash-track::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--color-purple),
+    transparent
+  );
+  animation: loading-splash-sweep 1.2s ease-in-out infinite;
+}
+
+@keyframes loading-splash-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes loading-splash-breathe {
+  0%,
+  100% {
+    opacity: 0.75;
+    text-shadow: 0 0 6px
+      color-mix(in srgb, var(--color-purple) 25%, transparent);
+  }
+  50% {
+    opacity: 1;
+    text-shadow: 0 0 14px
+      color-mix(in srgb, var(--color-purple) 55%, transparent);
+  }
+}
+
+@keyframes loading-splash-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-splash-banner,
+  .loading-splash-track::after {
+    animation: none;
+  }
+}
+
 /* Freeze CSS animations while the window is blurred (set in main.tsx) —
    a pinned window stays on screen but nobody is looking at it. */
 :root[data-window-blurred] *,
@@ -428,4 +500,13 @@
 :root[data-window-blurred] *::after {
   /* biome-ignore lint/complexity/noImportantStyles: must beat inline `animation` shorthands, which reset play-state to running */
   animation-play-state: paused !important;
+}
+
+/* Except the loading splash: it's up while the user is still in the browser
+   finishing a login, and paused it sits at its first frame — invisible. */
+:root[data-window-blurred] .loading-splash,
+:root[data-window-blurred] .loading-splash *,
+:root[data-window-blurred] .loading-splash *::after {
+  /* biome-ignore lint/complexity/noImportantStyles: must beat the blurred pause above */
+  animation-play-state: running !important;
 }

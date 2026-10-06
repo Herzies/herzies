@@ -1209,8 +1209,15 @@ fn apply_inventory(s: &mut ManagedState, snapshot: ItemSnapshot, equip_epoch_bef
         equipped,
         item_upgrades,
         units,
+        bank_expansions,
     } = snapshot;
     s.inventory = Some(inventory.clone());
+    // Only ever grows (see sync_tick), and the "inventory full" check needs it
+    // alongside the contents: a full bag judged against the base capacity
+    // reads as overflowing.
+    if let Some(expansions) = bank_expansions {
+        s.bank_expansions = expansions;
+    }
     s.inventory_currency = currency;
     s.item_upgrades = item_upgrades.clone();
     // Any `/sync` already in flight predates this and must not reinstate the
@@ -1261,6 +1268,7 @@ fn snapshot_from_response(data: &serde_json::Value, s: &ManagedState) -> Option<
         equipped,
         item_upgrades,
         units,
+        bank_expansions: None,
     })
 }
 
@@ -1295,8 +1303,9 @@ async fn refresh_friends_cache(app: &AppHandle, client: &Client) {
 /// Fetch inventory, chat, and friends in parallel into AppState.
 ///
 /// `include_inventory` is false at launch, where a `sync_tick` has just run and
-/// `/sync` already carries the full inventory; after login or hatching no sync
-/// has loaded it yet, so those callers still fetch it.
+/// `/sync` already carries the full inventory, and after login, which loads it
+/// itself before showing the herzie; after hatching no sync has loaded it yet,
+/// so that caller still fetches it.
 async fn refresh_app_cache(app: &AppHandle, client: &Client, include_inventory: bool) {
     if !api::is_logged_in() {
         return;

@@ -1,14 +1,7 @@
 import { useState } from "react";
 import { cn } from "../lib/utils";
 import { herzies } from "../tauri-bridge";
-
-const BANNER = `\
- _                   _
-| |                 (_)
-| |__   ___ _ __ _____  ___  ___
-| '_ \\ / _ \\ '__|_  / |/ _ \\/ __|
-| | | |  __/ |   / /| |  __/\\__ \\
-|_| |_|\\___|_|  /___|_|\\___||___/`;
+import { BANNER } from "./banner";
 
 const LOGIN_ERRORS: Record<string, string> = {
   timed_out: "Login timed out. Try again.",

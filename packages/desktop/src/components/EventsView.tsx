@@ -24,6 +24,7 @@ import ItemInspectOverlay, {
 } from "./ItemInspectOverlay";
 import { VisitorIcon } from "./icons/VisitorIcon";
 import { List } from "./List";
+import { LoadingSplash } from "./LoadingSplash";
 import { MerchantPanel } from "./MerchantPanel";
 import { OrphiezStage } from "./OrphiezStage";
 import { TabButton } from "./TabButton";
@@ -362,11 +363,7 @@ function EventsViewImpl({
   ]);
 
   if (!activeLoaded || !previousLoaded) {
-    return (
-      <div className="flex h-full items-center justify-center text-xs text-text-dim">
-        Loading...
-      </div>
-    );
+    return <LoadingSplash overlay label="loading town" />;
   }
 
   const back = <BackButton colour="cyan" onClick={() => setSelected(null)} />;
