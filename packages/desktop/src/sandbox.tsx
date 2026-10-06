@@ -32,7 +32,6 @@ const WEARABLE_OPTIONS = [
   "witch-hat",
   "fangs",
   "pumpkin-spice",
-  "jack-o-lantern",
   "ghost",
   "blood-moon",
 ];

@@ -1428,7 +1428,7 @@ function buildSpiritOrbSpheres(
 }
 
 /**
- * Places a companion (a pet, or a small ground prop like Jack), built around
+ * Places a companion (a pet, or a small ground prop), built around
  * its own origin, beside the herzie at height `y`.
  *
  * Horizontal placement reuses the same bottom-corner scheme as the boombox
@@ -1488,52 +1488,6 @@ function floorY(spheres: Sphere[]): number {
  * World +y points down the screen. */
 function petHoverY(spheres: Sphere[]): number {
   return floorY(spheres) - PET_HOVER_HEIGHT;
-}
-
-/** A carved pumpkin: a ribbed orange cluster with a green stem and a
- * candle-lit face. The "cut-outs" are glowing yellow spheres set into the
- * front, since a sphere renderer has no holes to cut. It sits on the ground
- * like the boombox (part "ground": fixed while the herzie spins, bouncing
- * with it on the beat). */
-function buildJackOLanternSpheres(
-  spheres: Sphere[],
-  cols: number,
-  side: GroundSide,
-): Sphere[] {
-  if (spheres.length === 0) return [];
-  const R = BOOMBOX_REF_HEIGHT * 0.2;
-  const local: { c: V3; r: number; color: string }[] = [
-    { c: [0, 0, 0], r: R * 0.8, color: "#F27B13" },
-  ];
-  // Ribs: a ring of overlapping lobes, alternating tone for the grooves.
-  const ribs = 8;
-  for (let i = 0; i < ribs; i++) {
-    const a = (i / ribs) * Math.PI * 2;
-    local.push({
-      c: [Math.cos(a) * R * 0.42, R * 0.05, Math.sin(a) * R * 0.42],
-      r: R * 0.6,
-      color: i % 2 === 0 ? "#F27B13" : "#D9620A",
-    });
-  }
-  local.push({ c: [0, -R * 0.95, 0], r: R * 0.17, color: "#3A6B1F" });
-  local.push({ c: [R * 0.06, -R * 1.12, 0], r: R * 0.12, color: "#4E8A2A" });
-  // Face, toward the camera (-Z).
-  const face = (x: number, y: number, r: number) =>
-    local.push({ c: [x, y, eyeZ(R * 1.02, x, y, r)], r, color: "#FFD43B" });
-  face(-R * 0.36, -R * 0.2, R * 0.17);
-  face(R * 0.36, -R * 0.2, R * 0.17);
-  face(0, R * 0.04, R * 0.1);
-  for (let i = 0; i < 5; i++) {
-    const t = i / 4 - 0.5; // -0.5..0.5 across the grin
-    face(t * R * 0.9, R * 0.28 + R * 0.12 * (1 - (2 * t) ** 2), R * 0.11);
-  }
-  // On the floor, its base level with the herzie's feet on screen: it sits in
-  // front of the herzie (closer to the camera), so resting it on the floor
-  // itself would draw it a couple of rows lower than the feet. The lowest
-  // lobes reach about 0.65R below centre. Faces front: turned like the
-  // spirit, the ribbed shell read as skewed.
-  const restY = floorY(spheres) - R * 0.65 - R * 0.9;
-  return placeCompanion(local, restY, R, cols, side, "ground", false);
 }
 
 /** A sheet ghost: a round head over a body that flares out to a wavy hem. */
@@ -1671,13 +1625,15 @@ function buildFangSpheres(spheres: Sphere[]): Sphere[] {
   return result;
 }
 
-/** Whether a Greedy Spirit sits in either ground slot. */
+/** Whether the Greedy Spirit is the worn spirit. */
 export function hasSpiritEquipped(equipped?: Equipped): boolean {
-  return (
-    equipped?.ground_left === "spirit-orb" ||
-    equipped?.ground_right === "spirit-orb"
-  );
+  return equipped?.spirit === "spirit-orb";
 }
+
+/** Which side the worn spirit floats on. It has a slot of its own rather than
+ * a ground side, so it always takes the same one, hovering above whatever
+ * accessory stands there. */
+const SPIRIT_SIDE: GroundSide = "right";
 
 export function equippedCacheKey(equipped?: Equipped): string {
   if (!equipped) return "";
@@ -1719,13 +1675,13 @@ function appendWearableSpheres(
     const itemId = equipped[groundSlot(side)];
     if (itemId === "boombox") {
       spheres.push(...buildBoomboxSpheres(spheres, cols, side, boomboxConfig));
-    } else if (itemId === "spirit-orb") {
-      spheres.push(...buildSpiritOrbSpheres(spheres, cols, side));
-    } else if (itemId === "jack-o-lantern") {
-      spheres.push(...buildJackOLanternSpheres(spheres, cols, side));
-    } else if (itemId === "ghost") {
-      spheres.push(...buildGhostSpheres(spheres, cols, side));
     }
+  }
+
+  if (equipped.spirit === "spirit-orb") {
+    spheres.push(...buildSpiritOrbSpheres(spheres, cols, SPIRIT_SIDE));
+  } else if (equipped.spirit === "ghost") {
+    spheres.push(...buildGhostSpheres(spheres, cols, SPIRIT_SIDE));
   }
 }
 

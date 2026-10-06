@@ -14,7 +14,6 @@ import { useWindowFocused } from "../tauri-bridge";
 
 // Each set's effect is its own overlay below, so they're looked up by id.
 const PRISMATIC_SET = ITEM_SETS.find((set) => set.id === "prismatic");
-const HAUNTED_SET = ITEM_SETS.find((set) => set.id === "haunted");
 
 /** The height of the herzie's stage on Home and on the Herzie view — the same
  * in both, so the creature sits in the same place when switching between
@@ -103,8 +102,6 @@ export function Herzie3D({
         : null;
   const prismaticActive =
     !!PRISMATIC_SET && PRISMATIC_SET.itemIds.every((id) => ids.includes(id));
-  const hauntedActive =
-    !!HAUNTED_SET && HAUNTED_SET.itemIds.every((id) => ids.includes(id));
 
   // Fades the bottom of the prismatic layer into transparency (revealing
   // the app's own background underneath, whatever that is, rather than
@@ -130,25 +127,6 @@ export function Herzie3D({
             mixBlendMode: "screen",
             WebkitMaskImage: prismaticMask,
             maskImage: prismaticMask,
-            zIndex: 0,
-          }}
-        />
-      )}
-      {showSky && hauntedActive && (
-        // Fog from the bottom of the window, the opposite end from the
-        // prismatic glow: purple haze over a low orange glow.
-        <div
-          aria-hidden="true"
-          className="animate-haunted-fog pointer-events-none fixed"
-          style={{
-            bottom: 0,
-            left: 0,
-            width: "100vw",
-            height: "40vh",
-            background:
-              "radial-gradient(ellipse at 30% 100%, #8E6FB0 0%, transparent 60%), radial-gradient(ellipse at 75% 100%, #F27B13 0%, transparent 55%)",
-            backgroundSize: "160% 100%",
-            mixBlendMode: "screen",
             zIndex: 0,
           }}
         />

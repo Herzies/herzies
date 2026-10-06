@@ -122,23 +122,6 @@
   animation: tab-bump 320ms ease-out;
 }
 
-/* Haunted set: fog drifting slowly sideways and swelling a little. */
-@keyframes haunted-fog {
-  0%,
-  100% {
-    background-position: 0% 100%;
-    opacity: 0.12;
-  }
-  50% {
-    background-position: 100% 100%;
-    opacity: 0.2;
-  }
-}
-
-@utility animate-haunted-fog {
-  animation: haunted-fog 18s ease-in-out infinite;
-}
-
 /* Good ol' George's coins: a slow bob with a little sideways drift. */
 @keyframes coin-float {
   0%,

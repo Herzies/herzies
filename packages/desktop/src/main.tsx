@@ -336,7 +336,7 @@ function App() {
       });
   }, []);
 
-  // CSS keyframe loops (marquees, fog, floating drops) can't read the hook, so
+  // CSS keyframe loops (marquees, floating drops) can't read the hook, so
   // flag the root and let globals.css pause them while the window is blurred.
   useEffect(() => {
     document.documentElement.toggleAttribute("data-window-blurred", !focused);

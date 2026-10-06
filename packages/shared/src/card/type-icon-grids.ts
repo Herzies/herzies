@@ -160,6 +160,20 @@ export const TYPE_ICON_GRIDS: Record<ItemType, string[]> = {
     ],
     8,
   ),
+  // Sheet ghost — a floating pet that picks things up.
+  spirit: cardIcon(
+    [
+      "...####...",
+      "..######..",
+      ".##.##.##.",
+      ".########.",
+      ".########.",
+      ".########.",
+      ".########.",
+      ".#.##.##.#",
+    ],
+    8,
+  ),
   // Up-arrow — a stat-changing effect.
   modifier: cardIcon(
     [

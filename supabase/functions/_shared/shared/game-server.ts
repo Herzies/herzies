@@ -102,13 +102,6 @@ function hasGoodEyeSniperEquipped(equipped: unknown): boolean {
   return isModifierEquipped(normalizeEquipped(equipped), "good-eye-sniper");
 }
 
-/** Spirit Orb occupies a ground slot (either side) and auto-collects pending
- * world drops so the user doesn't have to manually click to collect. */
-function hasSpiritOrbEquipped(equipped: unknown): boolean {
-  const e = normalizeEquipped(equipped);
-  return e.ground_left === "spirit-orb" || e.ground_right === "spirit-orb";
-}
-
 /** Normalize a track string for fuzzy matching. Exported so the song pool
  * can tell "already used" the same way a play is matched to a hunt. */
 export function normalizeTrack(s: string): string {
@@ -695,7 +688,8 @@ export async function processSync(
     }));
   }
 
-  if (pendingDrops.length > 0 && hasSpiritOrbEquipped(row.equipped)) {
+  const wornSpirit = normalizeEquipped(row.equipped).spirit;
+  if (pendingDrops.length > 0 && wornSpirit) {
     // Auto-collect only what the bank can hold. `collect_pending_drop` credits
     // inventory unconditionally, and an over-capacity item stays owned with no
     // grid slot to render in — so it would silently vanish from view. Anything
@@ -751,7 +745,8 @@ export async function processSync(
         running[drop.itemId] = (running[drop.itemId] ?? 0) + 1;
         notifications.push({
           type: "item_granted",
-          title: "Greedy Spirit",
+          // The worn spirit's own name: "Greedy Spirit", "Herman".
+          title: getItem(wornSpirit)?.name ?? "Spirit",
           // Display name from the shared catalog — collectedId is the raw
           // item id (e.g. "cd"), not something to show a player.
           message: `Picked up "${getItem(collectedId as string)?.name ?? collectedId}"`,

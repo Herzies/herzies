@@ -186,30 +186,27 @@ function DeckGroup({
 }
 
 /** The deck, under the Herzie view's "Deck" tab: its sections in two
- * columns, Modifiers (the longest run) across the bottom. */
+ * columns. The left one is as wide as its widest section (Modifiers, the
+ * longest run) so that run never has to squeeze into half the row. */
 export function DeckOverlay(props: SlotHandlers) {
   return (
-    <div className="pointer-events-auto grid w-full grid-cols-2 gap-x-4 gap-y-1.5 pt-1.5">
+    <div className="pointer-events-auto grid w-full grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 pt-1.5">
       {DECK_SLOT_ORDER.map((label) => (
-        <DeckGroup
-          key={label}
-          group={groupByLabel(label)}
-          className={label === "Modifiers" ? "col-span-2" : undefined}
-          {...props}
-        />
+        <DeckGroup key={label} group={groupByLabel(label)} {...props} />
       ))}
     </div>
   );
 }
 
 /** Reading order, two to a row: what's worn on the body first, then the
- * herzie's look, then the Modifiers, the longest run, on a row of their own. */
+ * herzie's look, then the Modifiers with the Spirit beside them. */
 const DECK_SLOT_ORDER = [
   "Equipment",
   "Accessories",
   "Skin",
   "Scenery",
   "Modifiers",
+  "Spirit",
 ] as const;
 
 function DeckSlot({

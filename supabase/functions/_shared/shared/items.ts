@@ -46,13 +46,14 @@ export type ItemCategory = "deck" | "misc";
 
 /** Catalog equip categories (item.equip_slot). Ground items choose a side at equip time.
  * "modifier" stacks up to MAX_MODIFIERS — see EQUIPPED_SLOTS below, it isn't one of the
- * single-value slots. */
+ * single-value slots. "spirit" holds one pickup pet (see hasPickupSpiritEquipped). */
 export const EQUIP_SLOTS = [
   "head",
   "face",
   "body",
   "scenery",
   "ground",
+  "spirit",
   "color",
   "modifier",
 ] as const;
@@ -68,6 +69,7 @@ export const EQUIPPED_SLOTS = [
   "scenery",
   "ground_left",
   "ground_right",
+  "spirit",
   "color",
 ] as const;
 export type EquippedSlot = (typeof EQUIPPED_SLOTS)[number];
@@ -124,6 +126,14 @@ export function findEquippedSlot(
     if (equipped[slot] === itemId) return slot;
   }
   return null;
+}
+
+/** Whether a spirit is worn. Every spirit auto-collects pending world drops,
+ * so the player doesn't have to click them up off the ground. */
+export function hasPickupSpiritEquipped(
+  equipped: Equipped | null | undefined,
+): boolean {
+  return !!equipped?.spirit;
 }
 
 export function isModifierEquipped(
@@ -893,6 +903,7 @@ export type ItemType =
   | "sceneryCard"
   | "equipable"
   | "accessory"
+  | "spirit"
   | "modifier"
   | "artefact";
 
@@ -908,6 +919,7 @@ export function getItemType(
   if (item.equipSlot === "modifier") return "modifier";
   if (item.equipSlot === "scenery") return "sceneryCard";
   if (item.equipSlot === "ground") return "accessory";
+  if (item.equipSlot === "spirit") return "spirit";
   if (item.equipable) return "equipable";
   return "artefact";
 }
@@ -919,6 +931,7 @@ export const ITEM_TYPE_LABELS: Record<ItemType, string> = {
   sceneryCard: "Scenery",
   equipable: "Equipable",
   accessory: "Accessory",
+  spirit: "Spirit",
   modifier: "Modifier",
   artefact: "Artefact",
 };
@@ -933,6 +946,7 @@ export const EQUIP_SLOT_LABELS: Record<EquipSlot, string> = {
   body: "Body",
   scenery: "Scenery",
   ground: "Accessory",
+  spirit: "Spirit",
   color: "Skin",
   modifier: "Modifier",
 };
@@ -964,14 +978,6 @@ export const ITEM_SETS: ItemSet[] = [
     effect: "Even more rainbow",
     itemIds: ["rainbow-headband", "prism"],
     visual: { gradient: RAINBOW_RAMP },
-  },
-  {
-    id: "haunted",
-    name: "Haunted",
-    effect: "A spooky fog rolls in",
-    itemIds: ["witch-hat", "pumpkin-spice", "jack-o-lantern"],
-    visual: { gradient: PUMPKIN_RAMP },
-    visualExempt: ["witch-hat"],
   },
 ];
 
@@ -1023,6 +1029,7 @@ export const DECK_SLOT_GROUPS: DeckSlotGroup[] = [
     slots: ["ground_left", "ground_right"],
     count: 2,
   },
+  { label: "Spirit", itemType: "spirit", slots: ["spirit"], count: 1 },
   { label: "Scenery", itemType: "sceneryCard", slots: ["scenery"], count: 1 },
   {
     label: "Modifiers",
@@ -1033,7 +1040,7 @@ export const DECK_SLOT_GROUPS: DeckSlotGroup[] = [
   { label: "Skin", itemType: "skin", slots: ["color"], count: 1 },
 ];
 
-/** Total fixed slot capacity across all groups (3+2+1+6+1 = 13). */
+/** Total fixed slot capacity across all groups (3+2+1+1+6+1 = 14). */
 export const DECK_TOTAL_SLOTS = DECK_SLOT_GROUPS.reduce(
   (sum, g) => sum + g.count,
   0,
@@ -1081,7 +1088,11 @@ export const RARITY_DROP_WEIGHTS: Record<Rarity, number> = {
 };
 
 /** Items that can never appear as a random world drop, regardless of rarity. */
-export const NON_DROPPABLE_ITEM_IDS = ["first-edition", "spirit-orb"] as const;
+export const NON_DROPPABLE_ITEM_IDS = [
+  "first-edition",
+  "spirit-orb",
+  "ghost",
+] as const;
 
 /** How many uncollected drops may stand on the ground at once.
  *
@@ -1144,8 +1155,8 @@ export const ITEM_DROP_WEIGHT_OVERRIDES: Partial<Record<string, number>> = {
  * (+3.7% relative), and cd's from 79.60% to 78.60% (-1.3% relative). Common
  * is 0 so cd — the guaranteed-cadence item, see ITEM_DROP_WEIGHT_OVERRIDES —
  * stays luck-independent. Legendary is filled in for completeness even
- * though no droppable legendary exists today (spirit-orb is the only one,
- * and it's in NON_DROPPABLE_ITEM_IDS). These numbers shift again whenever
+ * though no droppable legendary exists today (the spirits are the only ones,
+ * and they're in NON_DROPPABLE_ITEM_IDS). These numbers shift again whenever
  * the droppable pool's item/rarity mix changes — recompute rather than trust
  * them blindly (they predate Power Dice 2/3 and the Safety Pick joining the
  * pool, which dilutes every figure above slightly). */
@@ -2390,28 +2401,6 @@ function renderFangsFrame(yAngle: number): string[] {
   return renderIconCard(yAngle, "#E05050", "#8a3a3a", "#4a2020", fangsCardIcon);
 }
 
-function jackOLanternCardIcon(u: number, v: number): TexSample | null {
-  const [ix, iy] = iconUV(u, v);
-  if (Math.abs(ix - 0.02) < 0.03 && iy > -0.3 && iy < -0.2)
-    return { bright: 0.8, color: "#4E8A2A" };
-  if ((ix / 0.27) ** 2 + ((iy - 0.02) / 0.22) ** 2 > 1) return null;
-  const eye = (cx: number) =>
-    Math.abs(ix - cx) < 0.05 && iy > -0.08 && iy < -0.08 + 0.07;
-  const grin = iy > 0.06 && iy < 0.12 && Math.abs(ix) < 0.15;
-  if (eye(-0.1) || eye(0.1) || grin) return { bright: 0.95, color: "#FFD43B" };
-  return { bright: 0.75, color: "#F27B13" };
-}
-
-function renderJackOLanternFrame(yAngle: number): string[] {
-  return renderIconCard(
-    yAngle,
-    "#F27B13",
-    "#C4570A",
-    "#5A2A05",
-    jackOLanternCardIcon,
-  );
-}
-
 function ghostCardIcon(u: number, v: number): TexSample | null {
   const [ix, iy] = iconUV(u, v);
   const inHead = ix * ix + (iy + 0.08) ** 2 < 0.17 ** 2;
@@ -2519,7 +2508,6 @@ const spiritOrbFrames = generateFrames(renderSpiritOrbFrame);
 const witchHatFrames = generateFrames(renderWitchHatFrame);
 const fangsFrames = generateFrames(renderFangsFrame);
 const pumpkinSpiceFrames = generateFrames(renderPumpkinSpiceFrame);
-const jackOLanternFrames = generateFrames(renderJackOLanternFrame);
 const ghostFrames = generateFrames(renderGhostFrame);
 const bloodMoonFrames = generateFrames(renderBloodMoonFrame);
 const trickOrTreatFrames = generateFrames(renderTrickOrTreatFrame);
@@ -2823,6 +2811,7 @@ export const ITEMS: ItemDef[] = [
     equipSlot: "body",
     minStage: 3,
     sellPrice: 250,
+    stats: { luck: 10 },
   },
   {
     id: "pearl-necklace",
@@ -2834,6 +2823,7 @@ export const ITEMS: ItemDef[] = [
     equipSlot: "body",
     minStage: 3,
     sellPrice: 100,
+    stats: { luck: 5 },
   },
   {
     id: "bowtie",
@@ -2907,11 +2897,12 @@ export const ITEMS: ItemDef[] = [
     name: "Hex Appeal",
     description:
       "A pointy hat with a floppy tip. Spin your herzie and watch it go.",
-    rarity: "uncommon",
+    rarity: "rare",
     frames: witchHatFrames,
     equipable: true,
     equipSlot: "head",
-    sellPrice: 100,
+    sellPrice: 250,
+    stats: { luck: 10 },
     dropWindow: HALLOWEEN_DROP_WINDOW,
   },
   {
@@ -2923,6 +2914,7 @@ export const ITEMS: ItemDef[] = [
     equipable: true,
     equipSlot: "face",
     sellPrice: 100,
+    stats: { luck: 5 },
     dropWindow: HALLOWEEN_DROP_WINDOW,
   },
   {
@@ -2937,27 +2929,18 @@ export const ITEMS: ItemDef[] = [
     dropWindow: HALLOWEEN_DROP_WINDOW,
   },
   {
-    id: "jack-o-lantern",
-    name: "Jack",
-    description:
-      "A carved pumpkin that floats along beside your herzie, grinning.",
-    rarity: "rare",
-    frames: jackOLanternFrames,
-    equipable: true,
-    equipSlot: "ground",
-    sellPrice: 250,
-    dropWindow: HALLOWEEN_DROP_WINDOW,
-  },
-  {
     id: "ghost",
-    name: "Boo-tleg",
-    description: "A friendly little sheet ghost. Haunts your herzie, nicely.",
-    rarity: "rare",
+    name: "Herman",
+    description: "Swoops up items for you.",
+    rarity: "legendary",
     frames: ghostFrames,
     equipable: true,
-    equipSlot: "ground",
-    sellPrice: 250,
-    dropWindow: HALLOWEEN_DROP_WINDOW,
+    equipSlot: "spirit",
+    // Like the Greedy Spirit: sold for money only, as a limited-time Stripe
+    // product whose metadata.item_id is "ghost" — its availability is the
+    // product's, not a drop window. Kept out of the drop pool by
+    // NON_DROPPABLE_ITEM_IDS, and out of George's stock.
+    sellPrice: 500,
   },
   {
     id: "blood-moon",
@@ -3021,11 +3004,11 @@ export const ITEMS: ItemDef[] = [
     rarity: "legendary",
     frames: spiritOrbFrames,
     equipable: true,
-    equipSlot: "ground",
+    equipSlot: "spirit",
     // Sold for money only, as a Stripe product whose metadata.item_id is
-    // "spirit-orb" (see /api/store/premium). It is the one item that cannot
-    // be earned by playing — see NON_DROPPABLE_ITEM_IDS — so keep it out of
-    // George's stock too, or coins make it grindable after all.
+    // "spirit-orb" (see /api/store/premium). It cannot be earned by playing —
+    // see NON_DROPPABLE_ITEM_IDS — so keep it out of George's stock too, or
+    // coins make it grindable after all.
     sellPrice: 500,
   },
 ];

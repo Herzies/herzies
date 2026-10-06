@@ -5,6 +5,7 @@ import {
   getHerzieStats,
   getHerzieStatsFromUnits,
   getItem,
+  hasPickupSpiritEquipped,
   hasRoomFor,
   ItemTypeIcon,
   isBankFull,
@@ -106,16 +107,14 @@ export function HomeView({
     return x;
   };
 
-  // A Spirit Orb auto-collects drops server-side within one sync tick, so the
+  // A spirit auto-collects drops server-side within one sync tick, so the
   // manual "Collect" affordance would almost always be stale — skip it when
-  // either ground slot has one equipped. Except when the bank is full: then
+  // one is worn. Except when the bank is full: then
   // auto-collect can't land anything either, so drops pile up right where a
-  // non-Orb player's would (same GROUND_DROP_CAP of 10) — showing them here
+  // spiritless player's would (same GROUND_DROP_CAP of 10) — showing them here
   // is what keeps that backlog visible instead of it building up unseen and
   // then landing in the bank all at once the moment a slot frees up.
-  const hasSpiritOrb =
-    equipped.ground_left === "spirit-orb" ||
-    equipped.ground_right === "spirit-orb";
+  const hasSpirit = hasPickupSpiritEquipped(equipped);
   const bankFull = isBankFull(inventory, equipped, capacity);
   // Any number of drops can be pending at once — every item is independently
   // collectible.
@@ -368,7 +367,7 @@ export function HomeView({
         className="relative flex shrink-0 items-center justify-center"
         style={{ height: HERZIE_STAGE_HEIGHT }}
       >
-        {dropItems.length > 0 && (!hasSpiritOrb || bankFull) && (
+        {dropItems.length > 0 && (!hasSpirit || bankFull) && (
           // pointer-events-none on the wrapper keeps the gaps between items
           // from blocking herzie drag; each item re-enables pointer events
           // on itself. z-10: the herzie canvas sets its own z-index: 1 (see

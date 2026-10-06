@@ -112,25 +112,22 @@ describe("prism colour scheme", () => {
 });
 
 describe("spirit orb pet", () => {
-  it("renders without throwing on either ground slot", () => {
+  it("renders without throwing in the spirit slot", () => {
     expect(() =>
-      generateRotationFrames(USER, 3, 8, { ground_left: "spirit-orb" }),
-    ).not.toThrow();
-    expect(() =>
-      generateRotationFrames(USER, 3, 8, { ground_right: "spirit-orb" }),
+      generateRotationFrames(USER, 3, 8, { spirit: "spirit-orb" }),
     ).not.toThrow();
   });
 
   it("adds pixels beyond the plain body", () => {
     const plain = generateRotationFrames(USER, 3, 12);
     const withOrb = generateRotationFrames(USER, 3, 12, {
-      ground_left: "spirit-orb",
+      spirit: "spirit-orb",
     });
     expect(hueSet(withOrb).size).toBeGreaterThan(hueSet(plain).size);
   });
 
   it("dance hop variants reuse plain frames outside the hop", () => {
-    const eq = { ground_left: "spirit-orb" } as const;
+    const eq = { spirit: "spirit-orb" } as const;
     const plain = generateDanceFrames(USER, 3, eq);
     for (let v = 0; v < SPIRIT_DANCE_HOP_VARIANT_COUNT; v++) {
       const hop = generateDanceFrames(
@@ -158,7 +155,7 @@ describe("spirit orb pet", () => {
     // would snap the spirit sideways once its hops end (those frames are
     // reused from the plain loop). Re-render the last frame with the variant's
     // pose actually applied and compare pixels.
-    const eq = { ground_left: "spirit-orb" } as const;
+    const eq = { spirit: "spirit-orb" } as const;
     const plain = generateDanceFrames(USER, 3, eq);
     const last = plain.length - 1;
     for (let v = 0; v < SPIRIT_DANCE_HOP_VARIANT_COUNT; v++) {
@@ -192,13 +189,15 @@ describe("spirit orb pet", () => {
     ).toBe(generateDanceFrames(USER, 3));
   });
 
-  it("coexists with a boombox on the other ground slot", () => {
-    expect(() =>
-      generateRotationFrames(USER, 3, 8, {
-        ground_left: "spirit-orb",
-        ground_right: "boombox",
-      }),
-    ).not.toThrow();
+  it("coexists with a boombox on either ground slot", () => {
+    for (const side of ["ground_left", "ground_right"] as const) {
+      expect(() =>
+        generateRotationFrames(USER, 3, 8, {
+          spirit: "spirit-orb",
+          [side]: "boombox",
+        }),
+      ).not.toThrow();
+    }
   });
 });
 
@@ -348,8 +347,7 @@ describe("Halloween items", () => {
       { head: "witch-hat" },
       { face: "fangs" },
       { color: "pumpkin-spice" },
-      { ground_left: "jack-o-lantern" },
-      { ground_right: "ghost" },
+      { spirit: "ghost" },
     ] as Equipped[]) {
       expect(draw(equipped)).not.toBe(draw({}));
     }
@@ -401,8 +399,7 @@ describe("Halloween items", () => {
         0,
         false,
         {
-          ground_left: "jack-o-lantern",
-          ground_right: "ghost",
+          spirit: "ghost",
         },
         undefined,
         126,

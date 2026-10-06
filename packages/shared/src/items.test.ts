@@ -20,11 +20,13 @@ import {
   getHerzieStats,
   getHerzieStatsFromUnits,
   getItem,
+  getItemSet,
   getItemType,
   HALLOWEEN_DROP_WINDOW,
   hasRoomFor,
   ITEM_DROP_WEIGHT_OVERRIDES,
   ITEMS,
+  type ItemDef,
   type ItemUnit,
   isBankFull,
   isInDropWindow,
@@ -223,12 +225,13 @@ describe("modifier slot", () => {
 describe("spirit-orb", () => {
   const spiritOrb = getItem("spirit-orb");
 
-  it("exists in the catalog as a ground-slot accessory", () => {
+  it("exists in the catalog as a spirit", () => {
     expect(spiritOrb).toMatchObject({
       id: "spirit-orb",
       equipable: true,
-      equipSlot: "ground",
+      equipSlot: "spirit",
     });
+    expect(getItemType(spiritOrb as ItemDef)).toBe("spirit");
   });
 
   it("has renderable card art", () => {
@@ -281,14 +284,14 @@ describe("seasonal drop windows", () => {
   it("keeps out-of-season items out of the drop pool", () => {
     const rows = [
       { id: "headphones", rarity: "uncommon" },
-      { id: "ghost", rarity: "rare" },
+      { id: "blood-moon", rarity: "rare" },
     ];
     const ids = (now: Date | null) =>
       filterDroppablePool(rows, now).map((r) => r.id);
     expect(ids(on("2026-06-01"))).toEqual(["headphones"]);
-    expect(ids(on("2026-10-31"))).toEqual(["headphones", "ghost"]);
+    expect(ids(on("2026-10-31"))).toEqual(["headphones", "blood-moon"]);
     // Debug tooling ignores the season.
-    expect(ids(null)).toEqual(["headphones", "ghost"]);
+    expect(ids(null)).toEqual(["headphones", "blood-moon"]);
   });
 
   it("puts every Halloween item in the Halloween window", () => {
@@ -296,13 +299,36 @@ describe("seasonal drop windows", () => {
       "witch-hat",
       "fangs",
       "pumpkin-spice",
-      "jack-o-lantern",
-      "ghost",
       "blood-moon",
       "trick-or-treat",
     ]) {
       expect(getItem(id)?.dropWindow).toBe(HALLOWEEN_DROP_WINDOW);
     }
+  });
+
+  it("sells Herman for money only, outside any drop window", () => {
+    const herman = getItem("ghost");
+    expect(herman).toMatchObject({
+      name: "Herman",
+      rarity: "legendary",
+      equipSlot: "spirit",
+    });
+    expect(herman?.dropWindow).toBeUndefined();
+    expect(NON_DROPPABLE_ITEM_IDS).toContain("ghost");
+  });
+
+  it("has no Jack and no Haunted set any more", () => {
+    expect(getItem("jack-o-lantern")).toBeUndefined();
+    expect(getItemSet("witch-hat")).toBeUndefined();
+  });
+
+  it("gives the luck cosmetics their luck", () => {
+    expect(getItem("witch-hat")?.rarity).toBe("rare");
+    expect(getHerzieStats({ head: "witch-hat" }).luck).toBe(10);
+    expect(getHerzieStats({ face: "fangs" }).luck).toBe(5);
+    expect(getHerzieStats({ body: "gold-chain" }).luck).toBe(10);
+    expect(getHerzieStats({ body: "pearl-necklace" }).luck).toBe(5);
+    expect(getHerzieStats({ body: "bowtie" }).luck).toBe(0);
   });
 });
 
@@ -581,6 +607,23 @@ describe("applyEquip", () => {
     expect(
       equip([unit("u1", "boost", 0, "modifier")], "u1", "modifier"),
     ).toEqual({ ok: false, reason: "already-equipped" });
+  });
+
+  it("wears one spirit at a time: a second swaps out the first", () => {
+    const next = equip(
+      [
+        unit("orb", "spirit-orb", 0, "spirit"),
+        unit("herman", "ghost"),
+        unit("box", "boombox", 0, "ground_right"),
+      ],
+      "herman",
+      "spirit",
+    );
+    if (!next.ok) throw new Error(next.reason);
+    expect(unitsToEquipped(next.units)).toEqual({
+      spirit: "ghost",
+      ground_right: "boombox",
+    });
   });
 
   it("refuses an equipable item with no slot", () => {
