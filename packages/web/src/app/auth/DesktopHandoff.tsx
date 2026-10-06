@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { DESKTOP_CALLBACK_URL } from "@/lib/desktop-login";
-import { createSupabaseClient } from "@/lib/supabase";
+import { getDesktopLoginClient } from "@/lib/supabase";
 
 /** How long to wait for the OAuth code to be exchanged for a session. */
 const SESSION_WAIT_MS = 10_000;
@@ -45,7 +45,7 @@ export function DesktopHandoff({
       return;
     }
 
-    const supabase = createSupabaseClient();
+    const supabase = getDesktopLoginClient();
     let settled = false;
 
     const forwardSession = (session: {
