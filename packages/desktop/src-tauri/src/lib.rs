@@ -2639,22 +2639,17 @@ pub fn run() {
                         _ => {}
                     });
                 }
+            }
 
-                // Cold start: if the user opened the app themselves (rather than
-                // it being launched at login), surface the window. Without this,
-                // quitting and reopening the app only re-shows the tray icon and
-                // nothing visibly happens.
-                let launched_at_login = std::env::args().any(|arg| arg == "--autostart");
-                if !launched_at_login {
-                    tray::ensure_visible(app.handle());
-                }
-            } else {
-                // In dev, show window immediately
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.center();
-                    let _ = window.show();
-                    tray::on_focus(app.handle());
-                }
+            // Cold start — whether opened by the user, launched at login, or
+            // run in dev — always surfaces the window. Goes through the tray's
+            // show path rather than a bare window.show(): that also activates
+            // the app, without which the window opens behind whatever is
+            // frontmost and nothing visibly happens.
+            tray::ensure_visible(app.handle());
+            if tauri::is_dev() {
+                // No focus listener in dev, so mark the window focused by hand.
+                tray::on_focus(app.handle());
             }
 
             // Enable autostart
