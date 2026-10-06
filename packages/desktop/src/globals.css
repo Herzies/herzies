@@ -420,3 +420,12 @@
 .upgrade-pop {
   animation: upgrade-pop-in 0.45s ease-out;
 }
+
+/* Freeze CSS animations while the window is blurred (set in main.tsx) —
+   a pinned window stays on screen but nobody is looking at it. */
+:root[data-window-blurred] *,
+:root[data-window-blurred] *::before,
+:root[data-window-blurred] *::after {
+  /* biome-ignore lint/complexity/noImportantStyles: must beat inline `animation` shorthands, which reset play-state to running */
+  animation-play-state: paused !important;
+}

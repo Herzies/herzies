@@ -10,7 +10,7 @@ import {
   Sky,
 } from "@herzies/shared";
 import { useEffect, useState } from "react";
-import { useWindowVisible } from "../tauri-bridge";
+import { useWindowFocused } from "../tauri-bridge";
 
 // Each set's effect is its own overlay below, so they're looked up by id.
 const PRISMATIC_SET = ITEM_SETS.find((set) => set.id === "prismatic");
@@ -90,8 +90,8 @@ export function Herzie3D({
     return () => window.removeEventListener("resize", onResize);
   }, [size]);
 
-  const visible = useWindowVisible();
-  const paused = !visible || pausedProp;
+  const focused = useWindowFocused();
+  const paused = !focused || pausedProp;
 
   const ids = equipped ? equippedItemIds(equipped) : (wearables ?? []);
   const scenery = ids.includes("blood-moon")

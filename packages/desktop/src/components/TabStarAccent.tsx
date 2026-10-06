@@ -1,6 +1,6 @@
 import { STAR_TWINKLE_VARIANTS } from "@herzies/shared";
 import { useEffect, useState } from "react";
-import { useWindowVisible } from "../tauri-bridge";
+import { useWindowFocused } from "../tauri-bridge";
 
 /** Scattered pixel stars around the tab edges (Sky scene glyphs). */
 const STAR_SLOTS = [
@@ -17,13 +17,13 @@ export function TabStarAccent() {
   // Frozen while nobody can see it, like VisitorSparkles — it shows whenever a
   // visitor is in town, which can be hours of a hidden window re-rendering at
   // 5fps.
-  const visible = useWindowVisible();
+  const focused = useWindowFocused();
 
   useEffect(() => {
-    if (!visible) return;
+    if (!focused) return;
     const id = setInterval(() => setFrame((f) => f + 1), 200);
     return () => clearInterval(id);
-  }, [visible]);
+  }, [focused]);
 
   return (
     // Fixed-size positioning box, centered on the tab and independent of its

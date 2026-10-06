@@ -318,6 +318,12 @@ function App() {
       });
   }, []);
 
+  // CSS keyframe loops (marquees, fog, floating drops) can't read the hook, so
+  // flag the root and let globals.css pause them while the window is blurred.
+  useEffect(() => {
+    document.documentElement.toggleAttribute("data-window-blurred", !focused);
+  }, [focused]);
+
   // One effect, not two: a second copy gated on `state.isOnline` alone fired a
   // duplicate of this every time connectivity flipped while the window was
   // open, which is part of why opening the tray produced a burst of identical

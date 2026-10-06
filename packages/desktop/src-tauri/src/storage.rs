@@ -442,11 +442,25 @@ pub fn clear_inventory_cache() {
     remove_secure(&path);
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Default)]
+#[derive(serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SettingsFile {
-    #[serde(default)]
+    /// Pinned unless the user has explicitly unpinned — a missing settings
+    /// file or key means pinned.
+    #[serde(default = "default_pin_window")]
     pin_window: bool,
+}
+
+fn default_pin_window() -> bool {
+    true
+}
+
+impl Default for SettingsFile {
+    fn default() -> Self {
+        Self {
+            pin_window: default_pin_window(),
+        }
+    }
 }
 
 fn load_settings() -> SettingsFile {

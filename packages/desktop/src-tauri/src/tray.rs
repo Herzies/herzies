@@ -33,7 +33,7 @@ pub fn is_window_focused() -> bool {
 
 /// When pinned, the window stays open on blur (it is NOT always-on-top —
 /// other windows can cover it; it just doesn't auto-hide).
-static WINDOW_PINNED: AtomicBool = AtomicBool::new(false);
+static WINDOW_PINNED: AtomicBool = AtomicBool::new(true);
 
 pub fn set_pinned(pinned: bool) {
     WINDOW_PINNED.store(pinned, Ordering::Relaxed);
