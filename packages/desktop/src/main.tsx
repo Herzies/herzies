@@ -175,6 +175,8 @@ function App() {
   const [hasActiveEventOverride, setHasActiveEventOverride] = useState(false);
   const [debugBossOverride, setDebugBossOverride] = useState(false);
   const [debugMerchantOverride, setDebugMerchantOverride] = useState(false);
+  const [debugTreatTraderOverride, setDebugTreatTraderOverride] =
+    useState(false);
   /** Which full-screen event view the Events tab has open, if any. */
   const [eventsScreen, setEventsScreen] = useState<"boss" | "merchant" | null>(
     null,
@@ -917,6 +919,7 @@ function App() {
             debugForceActive={hasActiveEventOverride}
             debugForceBoss={debugBossOverride}
             debugForceMerchant={debugMerchantOverride}
+            debugForceTreatTrader={debugTreatTraderOverride}
             onScreenChange={setEventsScreen}
             equipped={state.equipped}
             units={state.units}
@@ -989,6 +992,10 @@ function App() {
             onToggleDebugBoss={() => setDebugBossOverride((v) => !v)}
             debugMerchantOverride={debugMerchantOverride}
             onToggleDebugMerchant={() => setDebugMerchantOverride((v) => !v)}
+            debugTreatTraderOverride={debugTreatTraderOverride}
+            onToggleDebugTreatTrader={() =>
+              setDebugTreatTraderOverride((v) => !v)
+            }
             onSpawnDebugDrop={handleSpawnDebugDrop}
             availableUpdate={availableUpdate}
             installStatus={updateInstallStatus}
@@ -1029,7 +1036,8 @@ function App() {
             visitorsInTown +
             Number(hasActiveEventOverride) +
             Number(debugBossOverride) +
-            Number(debugMerchantOverride)
+            Number(debugMerchantOverride) +
+            Number(debugTreatTraderOverride)
           }
         />
       )}

@@ -11,7 +11,13 @@ import {
 const WEEKS = 5;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const TYPE_ORDER = ["boss_fight", "song_hunt", "merchant", "secret_track"];
+const TYPE_ORDER = [
+  "boss_fight",
+  "song_hunt",
+  "merchant",
+  "treat_trader",
+  "secret_track",
+];
 
 /** Local midnight of this week's Monday. */
 function startOfWeek(now: Date): Date {

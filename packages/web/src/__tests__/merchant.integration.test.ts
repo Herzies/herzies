@@ -1,6 +1,7 @@
 /**
  * Integration tests for Good ol' George (00081): buying from a live merchant
  * event, its per-player and total limits, and what the events feed shows.
+ * Also Nandor the Treatless (00100), the same stall paid in treats.
  *
  * Requires: `npx supabase start`
  */
@@ -30,12 +31,13 @@ type Stock = {
 async function george(
   stock: Stock[],
   window = { from: -HOUR, to: HOUR },
+  type: "merchant" | "treat_trader" = "merchant",
 ): Promise<string> {
   const { data, error } = await admin()
     .from("events")
     .insert({
-      type: "merchant",
-      title: "Good ol' George",
+      type,
+      title: type === "merchant" ? "Good ol' George" : "Nandor the Treatless",
       active: true,
       starts_at: new Date(Date.now() + window.from).toISOString(),
       ends_at: new Date(Date.now() + window.to).toISOString(),
@@ -47,11 +49,18 @@ async function george(
   return data.id as string;
 }
 
-async function player(currency = 1000) {
+const nandor = (stock: Stock[], window = { from: -HOUR, to: HOUR }) =>
+  george(stock, window, "treat_trader");
+
+async function player(currency = 1000, inventory: Record<string, number> = {}) {
   const user = await createTestUser();
-  await createTestHerzie(user.userId, { inventory_v2: {}, currency });
+  await createTestHerzie(user.userId, { inventory_v2: inventory, currency });
   return user;
 }
+
+const treatsOf = async (userId: string) =>
+  (await getUnits(userId)).filter((u) => u.item_id === "trick-or-treat")
+    .length;
 
 function buy(token: string, eventId: string, itemId: string, quantity = 1) {
   return buyRoute(
@@ -157,6 +166,67 @@ describe("buying from George", () => {
     expect(res.status).toBe(400);
     expect(await currencyOf(p.userId)).toBe(100);
     expect(await getUnits(p.userId)).toHaveLength(0);
+  });
+});
+
+describe("buying from Nandor", () => {
+  it("takes treats, not coins", async () => {
+    const eventId = await nandor([{ itemId: "fangs", price: 3 }]);
+    const p = await player(100, { "trick-or-treat": 5 });
+
+    const res = await buy(p.accessToken, eventId, "fangs");
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({ ok: true, spent: 3 });
+    expect(body.newCurrency).toBeUndefined();
+
+    expect(await currencyOf(p.userId)).toBe(100);
+    expect(await treatsOf(p.userId)).toBe(2);
+    expect(
+      (await getUnits(p.userId)).filter((u) => u.item_id === "fangs"),
+    ).toHaveLength(1);
+  });
+
+  it("refuses without enough treats, taking nothing", async () => {
+    const eventId = await nandor([{ itemId: "fangs", price: 3 }]);
+    const p = await player(1000, { "trick-or-treat": 2 });
+    const res = await buy(p.accessToken, eventId, "fangs");
+    expect(res.status).toBe(400);
+    expect((await res.json()).reason).toBe("insufficient-treats");
+    expect(await treatsOf(p.userId)).toBe(2);
+    expect(await currencyOf(p.userId)).toBe(1000);
+  });
+
+  it("never spends a worn treat", async () => {
+    const eventId = await nandor([{ itemId: "fangs", price: 2 }]);
+    const p = await player(0, { "trick-or-treat": 2 });
+    const [worn] = await getUnits(p.userId);
+    await admin()
+      .from("item_units")
+      .update({ equipped_slot: "modifier" })
+      .eq("id", worn.id);
+
+    const res = await buy(p.accessToken, eventId, "fangs");
+    expect((await res.json()).reason).toBe("insufficient-treats");
+    expect(await treatsOf(p.userId)).toBe(2);
+  });
+
+  it("keeps his limits and leaves on time", async () => {
+    const eventId = await nandor([
+      { itemId: "witch-hat", price: 1, perPlayerLimit: 1 },
+    ]);
+    const p = await player(0, { "trick-or-treat": 5 });
+    expect((await buy(p.accessToken, eventId, "witch-hat")).status).toBe(200);
+    const again = await buy(p.accessToken, eventId, "witch-hat");
+    expect((await again.json()).reason).toBe("limit-reached");
+
+    const gone = await nandor([{ itemId: "fangs", price: 1 }], {
+      from: -2 * HOUR,
+      to: -HOUR,
+    });
+    const res = await buy(p.accessToken, gone, "fangs");
+    expect((await res.json()).reason).toBe("not-live");
+    expect(await treatsOf(p.userId)).toBe(4);
   });
 });
 

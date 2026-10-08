@@ -323,11 +323,14 @@ export function MerchantConfigFields({
   setMerchant,
   catalogItems,
   fieldIdPrefix,
+  priceLabel = "price",
 }: {
   merchant: MerchantConfigForm;
   setMerchant: (next: MerchantConfigForm) => void;
   catalogItems: CatalogItem[];
   fieldIdPrefix: string;
+  /** "price (treats)" for Nandor, whose stock is priced in treats. */
+  priceLabel?: string;
 }) {
   const updateLine = (i: number, patch: Partial<MerchantStockForm>) => {
     setMerchant({
@@ -339,11 +342,11 @@ export function MerchantConfigFields({
 
   return (
     <div className="space-y-3 border border-border rounded-sm p-4 bg-bg">
-      <p className="text-xs text-cyan">Good ol&apos; George&apos;s stock</p>
+      <p className="text-xs text-cyan">Stock</p>
       {merchant.stock.length === 0 && (
         <p className="text-xs text-purple">
-          Nothing stocked — George won&apos;t show up until he has something to
-          sell.
+          Nothing stocked — the visit won&apos;t go live until there&apos;s
+          something to sell.
         </p>
       )}
       {merchant.stock.map((line, i) => (
@@ -372,7 +375,7 @@ export function MerchantConfigFields({
               className="block text-xs text-text-dim mb-1"
               htmlFor={`${fieldIdPrefix}-stock-${i}-price`}
             >
-              price
+              {priceLabel}
             </label>
             <input
               id={`${fieldIdPrefix}-stock-${i}-price`}

@@ -346,6 +346,17 @@ export interface MerchantView {
   stock: MerchantStockView[];
 }
 
+/** Display name of the NPC behind `treat_trader` events: the Halloween
+ * vampire, who sells for Treats rather than coins. */
+export const TREAT_TRADER_NAME = "Nandor the Treatless";
+
+/** The item a treat_trader is paid in (the Treat; its id predates the rename). */
+export const TREAT_ITEM_ID = "trick-or-treat";
+
+/** A treat_trader event's config: George's shape, priced in treats. Its
+ * client view is a MerchantView. */
+export type TreatTraderConfig = MerchantConfig;
+
 export const GENRES = [
   "pop",
   "rock",

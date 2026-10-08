@@ -1,6 +1,6 @@
 "use client";
 
-import { MERCHANT_NAME } from "@herzies/shared";
+import { MERCHANT_NAME, TREAT_TRADER_NAME } from "@herzies/shared";
 import { useState } from "react";
 import { isEventConfigComplete } from "@/lib/event-config";
 import {
@@ -121,7 +121,9 @@ export function EventPreview({
           <span>
             {event.type === "merchant"
               ? MERCHANT_NAME
-              : event.type.replace("_", " ")}
+              : event.type === "treat_trader"
+                ? TREAT_TRADER_NAME
+                : event.type.replace("_", " ")}
           </span>
           <span className="text-text-dim normal-case">{phase}</span>
         </div>
@@ -130,7 +132,7 @@ export function EventPreview({
             <SongHuntPreview event={event} moment={moment} item={item} />
           ) : event.type === "boss_fight" ? (
             <BossPreview event={event} item={item} />
-          ) : event.type === "merchant" ? (
+          ) : event.type === "merchant" || event.type === "treat_trader" ? (
             <MerchantPreview event={event} item={item} />
           ) : (
             <>
@@ -305,10 +307,13 @@ function MerchantPreview({
   const stock = (
     Array.isArray(event.config.stock) ? event.config.stock : []
   ) as StockLine[];
+  const treats = event.type === "treat_trader";
   return (
     <>
-      <div className="text-center text-yellow font-bold">
-        {event.title || MERCHANT_NAME}
+      <div
+        className={`text-center font-bold ${treats ? "text-orange" : "text-yellow"}`}
+      >
+        {event.title || (treats ? TREAT_TRADER_NAME : MERCHANT_NAME)}
       </div>
       {event.description && (
         <div className="text-xs text-text-dim mt-2 text-center">
@@ -338,8 +343,11 @@ function MerchantPreview({
                   .join(" · ") || "unlimited"}
               </div>
             </div>
-            <span className="text-yellow whitespace-nowrap">
-              {present(line.price) ? line.price : "?"} coins
+            <span
+              className={`whitespace-nowrap ${treats ? "text-orange" : "text-yellow"}`}
+            >
+              {present(line.price) ? line.price : "?"}{" "}
+              {treats ? "treats" : "coins"}
             </span>
           </div>
         ))}

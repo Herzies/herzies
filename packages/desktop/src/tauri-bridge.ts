@@ -209,12 +209,14 @@ export const herzies = {
       targetUnitId,
       protectionItemId,
     }),
-  /** Buys from Good ol' George during a live merchant event. Throws with the
-   * server's message (sold out, limit reached, not enough currency, …). */
+  /** Buys from a live merchant (Good ol' George, for coins) or treat_trader
+   * (Nandor the Treatless, for treats). Throws with the server's message
+   * (sold out, limit reached, not enough currency, …). `newCurrency` is
+   * absent when paid in treats. */
   buyFromMerchant: (eventId: string, itemId: string, quantity: number) =>
     invoke<{
       spent: number;
-      newCurrency: number;
+      newCurrency?: number;
       inventory: Inventory;
     }>("buy_from_merchant", { eventId, itemId, quantity }),
   /** Manually collects one specific pending world drop by id. Resolves

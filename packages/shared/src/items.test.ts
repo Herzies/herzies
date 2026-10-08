@@ -42,6 +42,7 @@ import {
   RARITY_LUCK_WEIGHT_BONUS,
   type Rarity,
   requiredDiceForLevel,
+  rollSeasonalBonusDrops,
   SAFETY_PICK_ID,
   unitsBestFirst,
   unitsPlainestFirst,
@@ -284,26 +285,43 @@ describe("seasonal drop windows", () => {
   it("keeps out-of-season items out of the drop pool", () => {
     const rows = [
       { id: "headphones", rarity: "uncommon" },
-      { id: "blood-moon", rarity: "rare" },
+      { id: "trick-or-treat", rarity: "common" },
     ];
     const ids = (now: Date | null) =>
       filterDroppablePool(rows, now).map((r) => r.id);
     expect(ids(on("2026-06-01"))).toEqual(["headphones"]);
-    expect(ids(on("2026-10-31"))).toEqual(["headphones", "blood-moon"]);
+    expect(ids(on("2026-10-31"))).toEqual(["headphones", "trick-or-treat"]);
     // Debug tooling ignores the season.
-    expect(ids(null)).toEqual(["headphones", "blood-moon"]);
+    expect(ids(null)).toEqual(["headphones", "trick-or-treat"]);
   });
 
-  it("puts every Halloween item in the Halloween window", () => {
-    for (const id of [
-      "witch-hat",
-      "fangs",
-      "pumpkin-spice",
-      "blood-moon",
-      "trick-or-treat",
-    ]) {
-      expect(getItem(id)?.dropWindow).toBe(HALLOWEEN_DROP_WINDOW);
+  it("makes the Treat a common, stackable, unworn Halloween drop", () => {
+    expect(getItem("trick-or-treat")).toMatchObject({
+      name: "Treat",
+      rarity: "common",
+      stackable: true,
+      dropWindow: HALLOWEEN_DROP_WINDOW,
+    });
+    expect(getItem("trick-or-treat")?.equipable).toBeFalsy();
+    expect(getItem("trick-or-treat")?.stats).toBeUndefined();
+    // It drops from its own roll, never the weighted pool.
+    expect(NON_DROPPABLE_ITEM_IDS).toContain("trick-or-treat");
+  });
+
+  it("only sells the rest of the Halloween set for treats", () => {
+    for (const id of ["witch-hat", "fangs", "pumpkin-spice", "blood-moon"]) {
+      expect(getItem(id)?.dropWindow).toBeUndefined();
+      expect(NON_DROPPABLE_ITEM_IDS).toContain(id);
     }
+  });
+
+  it("rolls the Treat as a bonus drop only inside the window", () => {
+    expect(rollSeasonalBonusDrops(on("2026-10-25"), () => 0)).toEqual([
+      "trick-or-treat",
+    ]);
+    // The roll is a 1-in-3 coin toss.
+    expect(rollSeasonalBonusDrops(on("2026-10-25"), () => 0.34)).toEqual([]);
+    expect(rollSeasonalBonusDrops(on("2026-06-01"), () => 0)).toEqual([]);
   });
 
   it("sells Herman for money only, outside any drop window", () => {

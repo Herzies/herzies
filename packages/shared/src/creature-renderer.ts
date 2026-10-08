@@ -14,6 +14,7 @@ import {
   dot3,
   GOLD_RAMP,
   LIGHT,
+  NANDOR_RAMP,
   OCEAN_RAMP,
   PUMPKIN_RAMP,
   RAINBOW_RAMP,
@@ -1693,6 +1694,9 @@ function appendWearableSpheres(
 /** Colour-scheme key for Good ol' George's solid-gold body. It lives in the
  * `color` slot like a skin, but no catalog item has this id. */
 export const GOLD_SCHEME_ID = "npc-gold";
+/** Colour-scheme key for Nandor the Treatless, the same arrangement as
+ * GOLD_SCHEME_ID. */
+export const NANDOR_SCHEME_ID = "npc-nandor";
 
 const COLOR_SCHEMES: Record<string, readonly string[]> = {
   prism: RAINBOW_RAMP,
@@ -1706,6 +1710,7 @@ const COLOR_SCHEMES: Record<string, readonly string[]> = {
   // Not an item: Good ol' George's gold, applied only by the desktop's
   // Events emblem (see GOLD_SCHEME_ID). No player can equip it.
   [GOLD_SCHEME_ID]: GOLD_RAMP,
+  [NANDOR_SCHEME_ID]: NANDOR_RAMP,
 };
 
 /** True for spheres that a colour scheme is allowed to repaint. */

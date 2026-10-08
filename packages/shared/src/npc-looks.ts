@@ -1,4 +1,4 @@
-import { GOLD_SCHEME_ID } from "./creature-renderer.js";
+import { GOLD_SCHEME_ID, NANDOR_SCHEME_ID } from "./creature-renderer.js";
 import type { Equipped } from "./items.js";
 
 // How the Town's visitors look, shared so the desktop and the website draw
@@ -16,4 +16,12 @@ export const GEORGE_EQUIPPED: Equipped = { color: GOLD_SCHEME_ID };
 export const ORPHIEZ_EQUIPPED: Equipped = {
   head: "headphones",
   color: "thanks-for-all-the-fish",
+};
+
+/** Nandor the Treatless's look: a vampire, so fangs on a pale face over a
+ * blood-red cloak (NANDOR_RAMP). */
+export const NANDOR_SEED = "npc:nandor-the-treatless";
+export const NANDOR_EQUIPPED: Equipped = {
+  face: "fangs",
+  color: NANDOR_SCHEME_ID,
 };

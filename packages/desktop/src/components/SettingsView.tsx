@@ -27,6 +27,8 @@ export function SettingsView({
   onToggleDebugBoss,
   debugMerchantOverride,
   onToggleDebugMerchant,
+  debugTreatTraderOverride,
+  onToggleDebugTreatTrader,
   onToggleActiveEventOverride,
   onSpawnDebugDrop,
 }: {
@@ -45,6 +47,8 @@ export function SettingsView({
   onToggleDebugBoss: () => void;
   debugMerchantOverride: boolean;
   onToggleDebugMerchant: () => void;
+  debugTreatTraderOverride: boolean;
+  onToggleDebugTreatTrader: () => void;
   onToggleActiveEventOverride: () => void;
   /** `diceOnly` narrows the spawned drop to a dice-type item — see the
    * "Spawn Dice Drop" button below. */
@@ -228,6 +232,18 @@ export function SettingsView({
               onClick={onToggleDebugMerchant}
             >
               {debugMerchantOverride ? "George: On" : "Test George"}
+            </button>
+            <button
+              type="button"
+              className={cn(
+                "btn",
+                debugTreatTraderOverride
+                  ? "border-red text-red"
+                  : "border-[#555] text-text-dim",
+              )}
+              onClick={onToggleDebugTreatTrader}
+            >
+              {debugTreatTraderOverride ? "Nandor: On" : "Test Nandor"}
             </button>
             <button
               type="button"

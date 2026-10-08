@@ -28,7 +28,13 @@ const NOTIFICATION_ROWS: NotificationRow[] = [
     trigger: "sync tick (game-server.ts)",
     gate: "events.active + time window",
     delivery: "native + activity log",
-    eventTypes: ["boss_fight", "song_hunt", "secret_track", "merchant"],
+    eventTypes: [
+      "boss_fight",
+      "song_hunt",
+      "secret_track",
+      "merchant",
+      "treat_trader",
+    ],
   },
   {
     name: "Song hunt first-finder",
@@ -42,7 +48,13 @@ const NOTIFICATION_ROWS: NotificationRow[] = [
     trigger: "events_watch_loop, 30s poll (lib.rs)",
     gate: "events.active + time window",
     delivery: "native + activity log",
-    eventTypes: ["boss_fight", "song_hunt", "secret_track", "merchant"],
+    eventTypes: [
+      "boss_fight",
+      "song_hunt",
+      "secret_track",
+      "merchant",
+      "treat_trader",
+    ],
   },
   {
     name: "Boss fight starting",

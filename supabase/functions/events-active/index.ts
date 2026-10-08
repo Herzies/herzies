@@ -101,7 +101,7 @@ Deno.serve(async (request) => {
             e.config as BossFightConfig,
             user.id,
           );
-        } else if (e.type === "merchant") {
+        } else if (e.type === "merchant" || e.type === "treat_trader") {
           config = await buildMerchantConfig(
             admin,
             e.id,

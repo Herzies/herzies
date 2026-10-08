@@ -64,6 +64,12 @@ export const VISITOR_THEMES: Record<string, VisitorTheme> = {
     dim: "#d9a0a0",
     accent: "#ff9a8a",
   },
+  // Nandor the Treatless: a crypt-dark crimson, and no sparkles.
+  treat_trader: {
+    background: "linear-gradient(90deg, #12030a 0%, #3a0a18 55%, #0d0207 100%)",
+    dim: "#c9a3b0",
+    accent: "#ff6b81",
+  },
 };
 
 /** Legible over any backdrop: a hard one-pixel drop like the pixel art's. */

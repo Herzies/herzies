@@ -4,6 +4,8 @@ import {
   GEORGE_EQUIPPED,
   GEORGE_SEED,
   generateCreatureParams,
+  NANDOR_EQUIPPED,
+  NANDOR_SEED,
   ORPHIEZ_EQUIPPED,
   PixelIcon,
   ICON_GRID_JSON as rawItemIconGrids,
@@ -62,6 +64,8 @@ function portraitFor(type: string, seed: string | undefined): Portrait | null {
     ).cells;
   } else if (type === "merchant") {
     cells = at(GEORGE_SEED, 2, GEORGE_EQUIPPED).cells;
+  } else if (type === "treat_trader") {
+    cells = at(NANDOR_SEED, 2, NANDOR_EQUIPPED).cells;
   } else if (type === "boss_fight") {
     // Each boss looks different (seeded by its event, as in BossFightPanel),
     // so a live or scheduled boss shows its own face.

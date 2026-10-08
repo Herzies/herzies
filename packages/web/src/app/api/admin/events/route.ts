@@ -112,7 +112,7 @@ export async function POST(request: Request) {
     return saveBossFight(admin, body, occurrence);
   }
 
-  if (type === "merchant") {
+  if (type === "merchant" || type === "treat_trader") {
     const result = await validateMerchantConfig(admin, config);
     if ("error" in result) return badRequest(result.error);
     config = result.config;

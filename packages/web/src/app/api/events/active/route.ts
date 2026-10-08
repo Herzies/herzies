@@ -56,7 +56,7 @@ export async function GET(request: Request) {
           e.config as BossFightConfig,
           userId,
         );
-      } else if (e.type === "merchant") {
+      } else if (e.type === "merchant" || e.type === "treat_trader") {
         config = await buildMerchantConfig(
           admin,
           e.id,

@@ -692,7 +692,9 @@ async fn equip_item(
 }
 
 /// Buys from Good ol' George (a live `merchant` event) — the only way coins
-/// buy items. Applies the returned item state and the new coin balance.
+/// buy items — or from Nandor the Treatless (a `treat_trader`), paid in
+/// treats. Applies the returned item state, and the new coin balance when
+/// coins were spent.
 #[tauri::command]
 async fn buy_from_merchant(
     event_id: String,

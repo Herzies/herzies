@@ -91,6 +91,7 @@ export const EVENT_TYPE_LABELS: Record<string, string> = {
   song_hunt: "Orphiez (song hunt)",
   boss_fight: "boss fight",
   merchant: "Good ol' George",
+  treat_trader: "Nandor the Treatless (treats)",
   secret_track: "secret track",
 };
 
@@ -99,6 +100,7 @@ export const EVENT_TYPE_STYLES: Record<string, string> = {
   song_hunt: "border-cyan text-cyan bg-cyan/10",
   boss_fight: "border-red text-red bg-red/10",
   merchant: "border-yellow text-yellow bg-yellow/10",
+  treat_trader: "border-orange text-orange bg-orange/10",
   secret_track: "border-purple text-purple bg-purple/10",
 };
 

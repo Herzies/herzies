@@ -47,6 +47,7 @@ import {
   type PendingTradeRequest,
   pickWeightedDrop,
   recordGenreMinutes,
+  rollSeasonalBonusDrops,
   type SecretTrackConfig,
   type Stage,
   scaledBonus,
@@ -641,6 +642,10 @@ export async function processSync(
       if (!dropTestMode && Math.random() >= DROP_CHANCE_PER_TICK) continue;
       const picked = pickWeightedDrop(droppable, herzieStats.luck);
       if (picked) pickedIds.push(picked.id);
+      // Seasonal extras (the Halloween Treat) roll on their own, on top —
+      // only on a roll actually taken (see rollsConsumed), so a failed pool
+      // query can't pay them out twice.
+      if (droppable.length > 0) pickedIds.push(...rollSeasonalBonusDrops(now));
     }
     if (pickedIds.length > 0) {
       // Returns how many it actually inserted, which is fewer than it was

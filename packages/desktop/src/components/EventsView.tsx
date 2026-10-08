@@ -10,6 +10,7 @@ import {
   ItemTypeIcon,
   isVisitorType,
   MERCHANT_NAME,
+  TREAT_TRADER_NAME,
   VISITORS,
   visitorName,
 } from "@herzies/shared";
@@ -129,6 +130,49 @@ const DEBUG_MERCHANT: GameEvent = {
   },
 };
 
+/** Fixture Nandor for the Settings debug toggle, like DEBUG_MERCHANT. */
+const DEBUG_TREAT_TRADER: GameEvent = {
+  id: "debug-treat-trader",
+  type: "treat_trader",
+  title: TREAT_TRADER_NAME,
+  description: "He wants your treats.",
+  active: true,
+  startsAt: new Date(Date.now() - 3_600_000).toISOString(),
+  endsAt: new Date(Date.now() + 5 * 86_400_000).toISOString(),
+  config: {
+    stock: [
+      {
+        itemId: "fangs",
+        price: 20,
+        perPlayerLimit: null,
+        totalStock: null,
+        remaining: null,
+        yourBought: 0,
+      },
+      {
+        itemId: "witch-hat",
+        price: 50,
+        perPlayerLimit: 1,
+        totalStock: null,
+        remaining: null,
+        yourBought: 0,
+      },
+      {
+        itemId: "blood-moon",
+        price: 50,
+        perPlayerLimit: 1,
+        totalStock: 100,
+        remaining: 0,
+        yourBought: 0,
+      },
+    ],
+  },
+};
+
+/** Limited visitors: only in Town while visiting or on the way, never as an
+ * idle card. */
+const LIMITED_TYPES = ["treat_trader"];
+
 /** List order of the visitors that always get a card in Town. */
 const EVENT_TYPES: { type: string }[] = [
   { type: "boss_fight" },
@@ -166,6 +210,7 @@ function EventsViewImpl({
   debugForceActive = false,
   debugForceBoss = false,
   debugForceMerchant = false,
+  debugForceTreatTrader = false,
   onScreenChange,
   equipped,
   units = [],
@@ -184,8 +229,10 @@ function EventsViewImpl({
   debugForceBoss?: boolean;
   /** Debug: a fixture Good ol' George visit (buying from it will fail). */
   debugForceMerchant?: boolean;
+  /** Debug: a fixture Nandor the Treatless visit (buying from it will fail). */
+  debugForceTreatTrader?: boolean;
   /** Which full-screen event view is open, so the app can recolour the
-   * window: a live boss blacks it out, George turns it gold. */
+   * window: a live boss or Nandor blacks it out, George turns it gold. */
   onScreenChange?: (screen: "boss" | "merchant" | null) => void;
   /** Current deck, used to show set progress in the reward preview. */
   equipped?: Equipped | null;
@@ -345,13 +392,20 @@ function EventsViewImpl({
         ? "boss_fight"
         : selected === DEBUG_MERCHANT.id && debugForceMerchant
           ? "merchant"
-          : // The previous event too: an ended boss's results stay blacked out.
+          : selected === DEBUG_TREAT_TRADER.id && debugForceTreatTrader
+            ? "treat_trader"
+            : // The previous event too: an ended boss's results stay blacked out.
             (
               events.find((e) => e.id === selected) ??
               (previousEvent?.id === selected ? previousEvent : undefined)
             )?.type;
+    // Nandor shares the boss's blackout: a vampire keeps the lights off.
     onScreenChange(
-      open === "boss_fight" ? "boss" : open === "merchant" ? "merchant" : null,
+      open === "boss_fight" || open === "treat_trader"
+        ? "boss"
+        : open === "merchant"
+          ? "merchant"
+          : null,
     );
   }, [
     selected,
@@ -359,6 +413,7 @@ function EventsViewImpl({
     previousEvent,
     debugForceBoss,
     debugForceMerchant,
+    debugForceTreatTrader,
     onScreenChange,
   ]);
 
@@ -375,6 +430,7 @@ function EventsViewImpl({
     ...events,
     ...(debugBoss ? [debugBoss] : []),
     ...(debugForceMerchant ? [DEBUG_MERCHANT] : []),
+    ...(debugForceTreatTrader ? [DEBUG_TREAT_TRADER] : []),
   ];
 
   if (selected === null) {
@@ -459,16 +515,37 @@ function EventsViewImpl({
               : "No visit planned yet"),
       });
     }
-    // Anything else live (e.g. a secret track) still gets a card.
+    // Anything else live (e.g. a secret track) still gets a card. A limited
+    // visitor (Nandor) opens his stall like George does.
     for (const e of liveEvents) {
       if (EVENT_TYPES.some((t) => t.type === e.type)) continue;
+      const limited = LIMITED_TYPES.includes(e.type);
       cards.push({
         type: e.type,
         title: visitorName(e.type, e.title),
-        description: e.description ?? taglineOf(e.type) ?? null,
+        description: limited
+          ? null
+          : (e.description ?? taglineOf(e.type) ?? null),
         status: "live",
         at: e.endsAt,
+        openKey: limited ? e.id : null,
+        eventId: e.id,
+        detail: limited ? taglineOf(e.type) : undefined,
+      });
+    }
+    // A limited visitor on the way, so players can save up for him.
+    for (const type of LIMITED_TYPES) {
+      const next = nextByType.get(type);
+      if (!next || liveEvents.some((e) => e.type === type)) continue;
+      cards.push({
+        type,
+        title: visitorName(type, next.title),
+        description: null,
+        status: "scheduled",
+        at: next.startsAt,
         openKey: null,
+        eventId: next.id,
+        detail: "On the way to town",
       });
     }
     // Nearest in time first: what's on now, then what starts soonest, then
@@ -548,16 +625,34 @@ function EventsViewImpl({
     );
   }
 
-  if (selectedEvent?.type === "merchant") {
+  if (
+    selectedEvent?.type === "merchant" ||
+    selectedEvent?.type === "treat_trader"
+  ) {
+    const nandor = selectedEvent.type === "treat_trader";
+    const colour = nandor ? "red" : "yellow";
     return (
       <View
-        title={MERCHANT_NAME}
-        colour="yellow"
+        title={nandor ? TREAT_TRADER_NAME : MERCHANT_NAME}
+        colour={colour}
         childrenClassName="flex min-h-0 flex-col"
         backButton={
-          <BackButton colour="yellow" onClick={() => setSelected(null)} />
+          <BackButton colour={colour} onClick={() => setSelected(null)} />
         }
-        action={formatCountdown(selectedEvent.endsAt)}
+        action={
+          nandor ? (
+            <span className="flex items-center gap-2">
+              {formatCountdown(selectedEvent.endsAt)}
+              <VisitorHelp
+                label={`What does ${TREAT_TRADER_NAME} want?`}
+                colour={VISITOR_THEMES.treat_trader.accent}
+                text="Collect treats by listening to music"
+              />
+            </span>
+          ) : (
+            formatCountdown(selectedEvent.endsAt)
+          )
+        }
       >
         <MerchantPanel
           event={selectedEvent}

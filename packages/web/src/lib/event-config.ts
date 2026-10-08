@@ -1,4 +1,4 @@
-import { GENRES } from "@herzies/shared";
+import { GENRES, TREAT_ITEM_ID } from "@herzies/shared";
 import type { createAdminClient } from "@/lib/supabase-admin";
 
 type Admin = ReturnType<typeof createAdminClient>;
@@ -23,7 +23,7 @@ export function isEventConfigComplete(type: string, config: Config): boolean {
       config.hints.length > 0
     );
   }
-  if (type === "merchant") {
+  if (type === "merchant" || type === "treat_trader") {
     return Array.isArray(config.stock) && config.stock.length > 0;
   }
   return true;
@@ -95,9 +95,14 @@ export async function validateBossConfig(
   };
 }
 
+/** Never sold by a visitor: the spirits are money-only (Stripe products),
+ * and the Treat is the treat_trader's currency. */
+const UNSELLABLE_ITEM_IDS = new Set(["ghost", "spirit-orb", TREAT_ITEM_ID]);
+
 /**
- * Validate George's stock. An empty list is allowed — the occurrence just
- * stays a draft until something is stocked.
+ * Validate a merchant's stock: George's (coins) or Nandor's (treats), which
+ * share a shape. An empty list is allowed — the occurrence just stays a draft
+ * until something is stocked.
  */
 export async function validateMerchantConfig(
   admin: Admin,
@@ -112,6 +117,9 @@ export async function validateMerchantConfig(
     const itemId = entry?.itemId;
     if (typeof itemId !== "string" || !itemId) {
       return { error: "Every stock line needs an item" };
+    }
+    if (UNSELLABLE_ITEM_IDS.has(itemId)) {
+      return { error: `"${itemId}" can't be sold here` };
     }
     if (seen.has(itemId)) {
       return { error: `"${itemId}" is stocked twice` };

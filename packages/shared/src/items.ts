@@ -1088,6 +1088,13 @@ export const NON_DROPPABLE_ITEM_IDS = [
   "first-edition",
   "spirit-orb",
   "ghost",
+  // The Halloween set is sold by Nandor for Treats, and the Treat drops from
+  // its own roll (SEASONAL_BONUS_DROPS) rather than the weighted pool.
+  "witch-hat",
+  "fangs",
+  "pumpkin-spice",
+  "blood-moon",
+  "trick-or-treat",
 ] as const;
 
 /** How many uncollected drops may stand on the ground at once.
@@ -1113,6 +1120,28 @@ export const DROP_TICK_MINUTES = 10;
  * 1 = guaranteed — every 10-minute tick drops something, with which item
  * decided by ITEM_DROP_WEIGHT_OVERRIDES / RARITY_DROP_WEIGHTS below. */
 export const DROP_CHANCE_PER_TICK = 1;
+
+/** Seasonal items rolled on their own, on top of every drop tick's normal
+ * pick, while their dropWindow is open. Each is a separate coin toss, so it
+ * adds drops rather than taking a share of the weighted pool — the other
+ * items' odds don't move. The ground cap (GROUND_DROP_CAP) still applies.
+ *
+ * Treats at 1/3 per 10-minute tick come to about two per listened hour. */
+export const SEASONAL_BONUS_DROPS: readonly {
+  itemId: string;
+  chance: number;
+}[] = [{ itemId: "trick-or-treat", chance: 1 / 3 }];
+
+/** The seasonal bonus drops one tick earns at `now`. `random` is injectable
+ * for tests. */
+export function rollSeasonalBonusDrops(
+  now: Date,
+  random: () => number = Math.random,
+): string[] {
+  return SEASONAL_BONUS_DROPS.filter(
+    (b) => isInDropWindow(getItem(b.itemId), now) && random() < b.chance,
+  ).map((b) => b.itemId);
+}
 
 /** Ceiling on how many owed rolls a single sync may award. The desktop path
  * never owes more than one (its minutes are capped per sync), but the Spotify
@@ -2887,7 +2916,9 @@ export const ITEMS: ItemDef[] = [
     equipSlot: "color",
     sellPrice: 100,
   },
-  // --- Halloween: seasonal drops (see HALLOWEEN_DROP_WINDOW) ---
+  // --- Halloween: sold for Treats by Nandor the Treatless, never dropped
+  // (see NON_DROPPABLE_ITEM_IDS). Only the Treat itself drops, inside
+  // HALLOWEEN_DROP_WINDOW. ---
   {
     id: "witch-hat",
     name: "Hex Appeal",
@@ -2899,7 +2930,6 @@ export const ITEMS: ItemDef[] = [
     equipSlot: "head",
     sellPrice: 250,
     stats: { luck: 10 },
-    dropWindow: HALLOWEEN_DROP_WINDOW,
   },
   {
     id: "fangs",
@@ -2911,7 +2941,6 @@ export const ITEMS: ItemDef[] = [
     equipSlot: "face",
     sellPrice: 100,
     stats: { luck: 5 },
-    dropWindow: HALLOWEEN_DROP_WINDOW,
   },
   {
     id: "pumpkin-spice",
@@ -2922,7 +2951,6 @@ export const ITEMS: ItemDef[] = [
     equipable: true,
     equipSlot: "color",
     sellPrice: 100,
-    dropWindow: HALLOWEEN_DROP_WINDOW,
   },
   {
     id: "ghost",
@@ -2947,19 +2975,19 @@ export const ITEMS: ItemDef[] = [
     equipable: true,
     equipSlot: "scenery",
     sellPrice: 250,
-    dropWindow: HALLOWEEN_DROP_WINDOW,
   },
   {
     id: "trick-or-treat",
-    name: "Trick or Treat",
-    description: "A pocketful of sweets. Somehow the drops feel luckier.",
-    rarity: "uncommon",
+    name: "Treat",
+    description: "A sticky handful of sweets. Nandor will want these.",
+    rarity: "common",
     frames: trickOrTreatFrames,
-    equipable: true,
-    equipSlot: "modifier",
-    sellPrice: 100,
-    stats: { luck: 5 },
-    modifier: { label: "Luck", tooltip: "+5 luck: slightly better drop odds" },
+    stackable: true,
+    sellPrice: 5,
+    // Currency for Nandor the Treatless (a treat_trader visit), who sells the
+    // rest of the Halloween set for them. Kept out of the weighted pool by
+    // NON_DROPPABLE_ITEM_IDS: it lands from a roll of its own on every drop
+    // tick instead (SEASONAL_BONUS_DROPS), so it never thins out other drops.
     dropWindow: HALLOWEEN_DROP_WINDOW,
   },
   {

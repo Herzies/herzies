@@ -1,9 +1,10 @@
-import { MERCHANT_NAME } from "./types.js";
+import { MERCHANT_NAME, TREAT_TRADER_NAME } from "./types.js";
 
 /** Event types that show up in Town as a visitor. */
 export type VisitorEventType =
   | "song_hunt"
   | "merchant"
+  | "treat_trader"
   | "boss_fight"
   | "secret_track";
 
@@ -38,6 +39,13 @@ export const VISITORS: Record<VisitorEventType, Visitor> = {
     name: MERCHANT_NAME,
     tagline: "has wares, if you have coin",
     seed: "npc:good-ol-george",
+  },
+  // A spin on Nandor the Relentless (What We Do in the Shadows). A limited
+  // Halloween visitor who trades the season's items for Treats.
+  treat_trader: {
+    name: TREAT_TRADER_NAME,
+    tagline: "demands your treats",
+    seed: "npc:nandor-the-treatless",
   },
   boss_fight: {
     name: "The next boss",
