@@ -404,37 +404,15 @@
   animation: upgrade-pop-in 0.45s ease-out;
 }
 
-/* LoadingSplash: the wordmark breathes while a short purple bar sweeps a
-   hairline track. Fades in after a beat, so a load that finishes quickly
-   never flashes it at all. */
+/* LoadingSplash: the wordmark breathes while a swell runs along a row of
+   ASCII beads (a canvas, see LoadingSplash.tsx). Fades in after a beat, so a
+   load that finishes quickly never flashes it at all. */
 .loading-splash {
   animation: loading-splash-in 0.3s ease-out 0.15s both;
 }
 
 .loading-splash-banner {
   animation: loading-splash-breathe 2.4s ease-in-out infinite;
-}
-
-.loading-splash-track {
-  position: relative;
-  width: 140px;
-  height: 2px;
-  overflow: hidden;
-  background: var(--color-border);
-}
-
-.loading-splash-track::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  width: 40%;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    var(--color-purple),
-    transparent
-  );
-  animation: loading-splash-sweep 1.2s ease-in-out infinite;
 }
 
 @keyframes loading-splash-in {
@@ -460,18 +438,8 @@
   }
 }
 
-@keyframes loading-splash-sweep {
-  from {
-    transform: translateX(-100%);
-  }
-  to {
-    transform: translateX(250%);
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .loading-splash-banner,
-  .loading-splash-track::after {
+  .loading-splash-banner {
     animation: none;
   }
 }
@@ -488,8 +456,7 @@
 /* Except the loading splash: it's up while the user is still in the browser
    finishing a login, and paused it sits at its first frame — invisible. */
 :root[data-window-blurred] .loading-splash,
-:root[data-window-blurred] .loading-splash *,
-:root[data-window-blurred] .loading-splash *::after {
+:root[data-window-blurred] .loading-splash * {
   /* biome-ignore lint/complexity/noImportantStyles: must beat the blurred pause above */
   animation-play-state: running !important;
 }
