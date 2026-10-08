@@ -11,6 +11,7 @@ import {
   generateRotationFrames,
   isSpiritHopFrame,
   renderCreatureAtAngle,
+  renderCreaturePose,
   SPIRIT_DANCE_HOP_VARIANT_COUNT,
 } from "./creature-renderer.js";
 import type { DangleState } from "./dangle-physics.js";
@@ -656,5 +657,165 @@ describe("herzie anatomy", () => {
       ).filter((s) => s.part === "spike");
       expect(spikes.length > 0).toBe(bodyType === 3);
     }
+  });
+});
+
+describe("renderCreaturePose", () => {
+  const lowestRow = (cells: { ch: string }[][]) => {
+    let lowest = -1;
+    cells.forEach((row, y) => {
+      if (row.some((c) => c.ch !== " ")) lowest = y;
+    });
+    return lowest;
+  };
+  const drawn = (cells: { ch: string; color: string }[][]) =>
+    cells.map((r) => r.map((c) => `${c.ch}${c.color}`).join("")).join("\n");
+
+  it("standing still draws exactly the idle loop", () => {
+    for (const stage of [1, 2, 3]) {
+      for (const frame of [0, 37, 90]) {
+        const pose = renderCreaturePose(USER, stage, {
+          yAngle: DEFAULT_Y_ANGLE,
+          idleFrame: frame,
+          walkPhase: 0.3,
+          walkWeight: 0,
+        });
+        const idle = renderCreatureAtAngle(USER, stage, DEFAULT_Y_ANGLE, frame);
+        expect(drawn(pose.cells)).toBe(drawn(idle.cells));
+      }
+    }
+  });
+
+  it("walks: the pose changes through the cycle", () => {
+    for (const stage of [1, 2, 3]) {
+      const at = (walkPhase: number) =>
+        drawn(
+          renderCreaturePose(USER, stage, {
+            yAngle: Math.PI / 2,
+            idleFrame: 0,
+            walkPhase,
+            walkWeight: 1,
+          }).cells,
+        );
+      expect(at(0.25)).not.toBe(at(0.75));
+    }
+  });
+
+  it("a legless herzie hops off the ground mid-step", () => {
+    const at = (walkPhase: number) =>
+      lowestRow(
+        renderCreaturePose(USER, 1, {
+          yAngle: 0,
+          idleFrame: 0,
+          walkPhase,
+          walkWeight: 1,
+        }).cells,
+      );
+    // Rows grow downward: in the air, the lowest drawn row is higher up.
+    expect(at(0.25)).toBeLessThan(at(0));
+  });
+
+  it("left and right steps mirror each other from the front", () => {
+    const at = (walkPhase: number) =>
+      renderCreaturePose(USER, 3, {
+        yAngle: 0,
+        idleFrame: 0,
+        walkPhase,
+        walkWeight: 1,
+      }).cells.map((row) => row.map((c) => c.ch !== " "));
+    const a = at(0.25);
+    const b = at(0.75);
+    // Same silhouette mirrored left-right, give or take a column of rounding.
+    let diff = 0;
+    for (let y = 0; y < a.length; y++) {
+      const w = a[y].length;
+      for (let x = 0; x < w; x++) if (a[y][x] !== b[y][w - 1 - x]) diff++;
+    }
+    const filled = a.flat().filter(Boolean).length;
+    expect(diff / filled).toBeLessThan(0.15);
+  });
+
+  it("renders every body (boss included) at any pitch without NaN glyphs", () => {
+    const bossParams = {
+      ...generateCreatureParams("boss:test"),
+      bodyType: BOSS_BODY_TYPE,
+    };
+    const looks = [
+      { stage: 1 },
+      { stage: 2 },
+      { stage: 3 },
+      { stage: 3, params: bossParams },
+    ];
+    for (const { stage, params } of looks) {
+      for (const pitch of [0, 0.3, 0.6]) {
+        const frame = renderCreaturePose(
+          "boss:test",
+          stage,
+          { yAngle: 1, pitch, idleFrame: 10, walkPhase: 0.4, walkWeight: 0.5 },
+          undefined,
+          params,
+          48,
+        );
+        for (const row of frame.cells) {
+          for (const c of row) {
+            expect(typeof c.ch).toBe("string");
+            expect(c.color).not.toContain("NaN");
+          }
+        }
+        expect(lowestRow(frame.cells)).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("a finer grid frames the herzie the same, just at higher resolution", () => {
+    const extent = (cols: number, rows: number) => {
+      const cells = renderCreaturePose(
+        USER,
+        3,
+        { yAngle: 0, idleFrame: 0, walkPhase: 0, walkWeight: 0 },
+        undefined,
+        undefined,
+        cols,
+        rows,
+      ).cells;
+      expect(cells.length).toBe(rows);
+      expect(cells[0].length).toBe(cols);
+      let top = -1;
+      let bottom = -1;
+      cells.forEach((row, y) => {
+        if (!row.some((c) => c.ch !== " ")) return;
+        if (top < 0) top = y;
+        bottom = y;
+      });
+      return { top: top / rows, bottom: (bottom + 1) / rows };
+    };
+    const base = extent(48, 48);
+    const fine = extent(64, 64);
+    expect(fine.top).toBeCloseTo(base.top, 1);
+    expect(fine.bottom).toBeCloseTo(base.bottom, 1);
+  });
+
+  it("is cheap enough to render live (logs ms per frame)", () => {
+    const n = 60;
+    const t0 = performance.now();
+    for (let i = 0; i < n; i++) {
+      renderCreaturePose(
+        USER,
+        3,
+        {
+          yAngle: i * 0.1,
+          pitch: 0.2,
+          idleFrame: i,
+          walkPhase: i / n,
+          walkWeight: 1,
+        },
+        { head: "headphones" },
+        undefined,
+        48,
+      );
+    }
+    const ms = (performance.now() - t0) / n;
+    console.log(`renderCreaturePose: ${ms.toFixed(2)} ms/frame (48 cols)`);
+    expect(ms).toBeLessThan(50);
   });
 });

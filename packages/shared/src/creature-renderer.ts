@@ -66,8 +66,8 @@ export function setCameraDistance(distance: number): void {
 }
 
 /** Horizontal half-extent of the view plane for a given column count. */
-function halfWidthFor(cols: number): number {
-  return HALF_H * ((cols / SH) * (1 / CHAR_ASPECT));
+function halfWidthFor(cols: number, rows: number = SH): number {
+  return HALF_H * ((cols / rows) * (1 / CHAR_ASPECT));
 }
 /** How far the herzie leans back toward the camera, in degrees: positive
  * shows more of the top of its head. Tuned in the sandbox (was 8). */
@@ -1998,9 +1998,10 @@ function spiritMover(
 }
 
 // --- Idle animation offsets ---
-// Returns a copy of the sphere list with per-part Y offsets applied.
 
-function applyIdleOffsets(spheres: Sphere[], frameIdx: number): Sphere[] {
+/** Each sphere's idle Y offset for `frameIdx`, as a per-sphere delta so a
+ * pose can blend it with the walk cycle (see renderCreaturePose). */
+function idleDeltas(spheres: Sphere[], frameIdx: number): number[] {
   function offset(
     part: { amp: number; cycles: number },
     phase: number,
@@ -2021,20 +2022,117 @@ function applyIdleOffsets(spheres: Sphere[], frameIdx: number): Sphere[] {
   const spiritOff = offset(IDLE.spirit, Math.PI / 5);
 
   return spheres.map((s) => {
-    let dy = 0;
-    if (s.part === "spirit" || s.part === "pet") dy = spiritOff;
-    else if (s.part === "body") dy = bodyOff;
-    else if (s.part === "head") dy = headOff;
-    else if (s.part === "eye" || s.part === "pupil") dy = eyeOff;
-    else if (s.part === "ear") dy = earOff;
-    else if (s.part === "spike") dy = spikeOff;
-    else if (s.part === "arm-l" || s.part === "leg-l") dy = limbLOff;
-    else if (s.part === "arm-r" || s.part === "leg-r") dy = limbROff;
+    if (s.part === "spirit" || s.part === "pet") return spiritOff;
+    if (s.part === "body") return bodyOff;
+    if (s.part === "head") return headOff;
+    if (s.part === "eye" || s.part === "pupil") return eyeOff;
+    if (s.part === "ear") return earOff;
+    if (s.part === "spike") return spikeOff;
+    if (s.part === "arm-l" || s.part === "leg-l") return limbLOff;
+    if (s.part === "arm-r" || s.part === "leg-r") return limbROff;
+    return 0;
+  });
+}
 
-    return {
-      ...s,
-      center: [s.center[0], s.center[1] + dy, s.center[2]] as V3,
-    };
+// Returns a copy of the sphere list with per-part Y offsets applied.
+function applyIdleOffsets(spheres: Sphere[], frameIdx: number): Sphere[] {
+  const dy = idleDeltas(spheres, frameIdx);
+  return spheres.map((s, i) => ({
+    ...s,
+    center: [s.center[0], s.center[1] + dy[i], s.center[2]] as V3,
+  }));
+}
+
+// --- Walk animation offsets ---
+// One walk cycle is two steps (left, then right), as a fraction 0..1. The
+// host advances it by distance covered, not by time, so the feet never
+// slide. Amplitudes are fractions of the herzie's body scale, so they fit a
+// stage 1 head as well as a stage 3 body. Creature space: front is -z, up is
+// -y.
+
+const WALK = {
+  /** Stage 3: how far a foot swings forward and back. The hip swings this
+   * times WALK.hipShare, so the leg reads as pivoting from the body. */
+  legSwing: 0.2,
+  hipShare: 0.4,
+  /** Stage 3: how high a foot lifts on its forward swing. */
+  footLift: 0.14,
+  /** Arms swing against the leg on their side. */
+  armSwing: 0.14,
+  /** Stage 3: the body rises as the legs pass each other, twice a cycle. */
+  bodyBob: 0.05,
+  /** Stages 1-2 (no legs): one hop per step… */
+  hop: 0.2,
+  /** …rocking onto each side in turn (radians, about the bottom)… */
+  roll: 0.08,
+  /** …with ears and spikes trailing the hop by this fraction of a cycle. */
+  flopLag: 0.08,
+} as const;
+
+/** Parts anchored to the scene rather than the creature: they never walk. */
+const isSceneFixed = (part: string) =>
+  part === "ground" || part === "spirit" || part === "pet";
+
+/** Each sphere's walk offset at `phase` (0..1 of a cycle), as a delta. */
+function walkDeltas(spheres: Sphere[], phase: number, stage: number): V3[] {
+  const s = HERZIE_BODY.scale * CS;
+  const theta = 2 * Math.PI * phase;
+  const sin = Math.sin(theta);
+  const cos = Math.cos(theta);
+  const hasLegs = spheres.some((sp) => sp.part === "leg-l");
+
+  if (hasLegs && stage >= 3) {
+    // The lower sphere of each leg is the foot; the upper one the hip.
+    const footY = (side: string) =>
+      Math.max(
+        ...spheres.filter((sp) => sp.part === side).map((sp) => sp.center[1]),
+      );
+    const footL = footY("leg-l");
+    const footR = footY("leg-r");
+    // Right runs half a cycle behind the left: sin/cos flip sign.
+    const swing = (side: 1 | -1) => -side * sin * WALK.legSwing * s;
+    const lift = (side: 1 | -1) => -Math.max(0, side * cos) * WALK.footLift * s;
+    const bob = -Math.abs(cos) * WALK.bodyBob * s;
+
+    return spheres.map((sp) => {
+      if (isSceneFixed(sp.part)) return [0, 0, 0];
+      if (sp.part === "leg-l" || sp.part === "leg-r") {
+        const side = sp.part === "leg-l" ? 1 : -1;
+        const foot = sp.center[1] === (side === 1 ? footL : footR);
+        return foot
+          ? [0, lift(side), swing(side)]
+          : [0, 0, swing(side) * WALK.hipShare];
+      }
+      if (sp.part === "arm-l") return [0, bob, sin * WALK.armSwing * s];
+      if (sp.part === "arm-r") return [0, bob, -sin * WALK.armSwing * s];
+      return [0, bob, 0];
+    });
+  }
+
+  // No legs: a waddle. A hop per step, rocking onto alternate sides.
+  const hopAt = (t: number) =>
+    -Math.abs(Math.sin(2 * Math.PI * t)) * WALK.hop * s;
+  const hop = hopAt(phase);
+  const flop = hopAt(phase - WALK.flopLag);
+  const roll = sin * WALK.roll;
+  // Rock about the bottom of the creature, so it pivots on its base.
+  let bottom = Number.NEGATIVE_INFINITY;
+  for (const sp of spheres) {
+    if (!isSceneFixed(sp.part)) {
+      bottom = Math.max(bottom, sp.center[1] + sp.radius);
+    }
+  }
+  return spheres.map((sp) => {
+    if (isSceneFixed(sp.part)) return [0, 0, 0];
+    const [x, y] = sp.center;
+    // Small-angle rotation about (0, bottom) in the x-y plane.
+    const rx = -(y - bottom) * roll;
+    const ry = x * roll;
+    const dy = sp.part === "ear" || sp.part === "spike" ? flop : hop;
+    let dz = 0;
+    if (sp.part === "arm-l") dz = sin * WALK.armSwing * s;
+    else if (sp.part === "arm-r") dz = -sin * WALK.armSwing * s;
+    return [rx, dy + ry, dz];
   });
 }
 
@@ -2153,6 +2251,18 @@ function zoomKey(zoom: number): string {
   return zoom === 1 ? "" : `:z${zoom}`;
 }
 
+function rowsKey(rows: number): string {
+  return rows === SH ? "" : `:r${rows}`;
+}
+
+/** The column count wearables are placed against. Props that sit at the
+ * frame's edge (the boombox, a floating pet) are placed from `cols`, which
+ * assumes the default SH rows; a finer grid has more of both for the same
+ * view, so this scales its cols back to the default grid's. */
+function layoutCols(cols: number, rows: number): number {
+  return rows === SH ? cols : Math.round((cols * SH) / rows);
+}
+
 // --- Anchor projection (FOV-based) ---
 
 function projectPoint(
@@ -2160,12 +2270,13 @@ function projectPoint(
   cols: number,
   halfW: number,
   halfH: number,
+  rows: number = SH,
 ): [number, number, number] {
   const relZ = p[2] + CAM;
-  if (relZ <= 0.01) return [cols / 2, SH / 2, 0];
+  if (relZ <= 0.01) return [cols / 2, rows / 2, 0];
   const ndcX = p[0] / (relZ * halfW);
   const ndcY = p[1] / (relZ * halfH);
-  return [(ndcX + 1) * 0.5 * cols, (ndcY + 1) * 0.5 * SH, relZ];
+  return [(ndcX + 1) * 0.5 * cols, (ndcY + 1) * 0.5 * rows, relZ];
 }
 
 // --- Color for zone ---
@@ -2214,12 +2325,37 @@ function renderCreatureFrame(
   cols: number = SW,
   colorScheme?: readonly string[],
   zoom = 1,
+  /** A camera pitch (radians, positive looks down on the herzie), applied
+   * after the turn like a real camera's elevation. Omitted, the fixed
+   * DEFAULT_CAMERA_TILT_DEG tilt applies before the turn, as it always has. */
+  pitch?: number,
+  /** Rows in the grid (default SH). Scaling rows and cols together keeps the
+   * framing and only changes the resolution. */
+  rows: number = SH,
 ): FrameData {
   // Zooming widens (or narrows) the view plane about its centre: the camera
   // sees more of the scene through the same grid of cells.
-  const halfW = halfWidthFor(cols) / zoom;
+  const halfW = halfWidthFor(cols, rows) / zoom;
   const halfH = HALF_H / zoom;
+  const pitchCos = pitch === undefined ? 1 : Math.cos(pitch);
+  const pitchSin = pitch === undefined ? 0 : Math.sin(pitch);
   const transformed = spheres.map((s) => {
+    if (pitch !== undefined) {
+      const fixed =
+        s.part === "ground" || s.part === "spirit" || s.part === "pet";
+      const turned = fixed ? s.center : rotY(s.center, yAngle);
+      return {
+        center: [
+          turned[0],
+          turned[1] * pitchCos - turned[2] * pitchSin,
+          turned[1] * pitchSin + turned[2] * pitchCos,
+        ] as V3,
+        radius: s.radius,
+        zone: s.zone,
+        part: s.part,
+        color: s.color,
+      };
+    }
     const tilted: V3 = [
       s.center[0],
       s.center[1] * TILT_COS - s.center[2] * TILT_SIN,
@@ -2241,13 +2377,13 @@ function renderCreatureFrame(
     };
   });
 
-  const bright: number[][] = Array.from({ length: SH }, () =>
+  const bright: number[][] = Array.from({ length: rows }, () =>
     Array(cols).fill(-1),
   );
-  const zones: ColorZone[][] = Array.from({ length: SH }, () =>
+  const zones: ColorZone[][] = Array.from({ length: rows }, () =>
     Array<ColorZone>(cols).fill("primary"),
   );
-  const pixelColors: (string | null)[][] = Array.from({ length: SH }, () =>
+  const pixelColors: (string | null)[][] = Array.from({ length: rows }, () =>
     Array(cols).fill(null),
   );
 
@@ -2271,10 +2407,10 @@ function renderCreatureFrame(
 
   const oz = -CAM;
 
-  for (let sy = 0; sy < SH; sy++) {
+  for (let sy = 0; sy < rows; sy++) {
     for (let sx = 0; sx < cols; sx++) {
       const ndcX = ((sx + 0.5) / cols) * 2 - 1;
-      const ndcY = ((sy + 0.5) / SH) * 2 - 1;
+      const ndcY = ((sy + 0.5) / rows) * 2 - 1;
       const px = ndcX * halfW;
       const py = ndcY * halfH;
       const dLen = Math.sqrt(px * px + py * py + 1);
@@ -2399,7 +2535,13 @@ function renderCreatureFrame(
     // skip the Y-rotation too (otherwise they'd drift off the prop).
     const isFixed = anchor.parentPart === "ground";
     const rotated = isFixed ? tilted : rotY(tilted, yAngle);
-    const [screenX, screenY, depth] = projectPoint(rotated, cols, halfW, halfH);
+    const [screenX, screenY, depth] = projectPoint(
+      rotated,
+      cols,
+      halfW,
+      halfH,
+      rows,
+    );
 
     const nTilted: V3 = [
       anchor.normalDir[0],
@@ -2477,13 +2619,14 @@ function generateLoopFrames(
   boomboxConfig: BoomboxConfig | undefined,
   spiritHopVariant: number | undefined,
   zoom: number,
+  rows: number = SH,
 ): FrameData[] {
   const dancing = mode === "dance";
   const hops =
     dancing && hasSpiritEquipped(equipped)
       ? spiritHopsFor(spiritHopVariant)
       : undefined;
-  const key = `${mode}:${paramsCacheKey(userId, paramsOverride)}:${stage}:${equippedCacheKey(equipped)}:${cols}:${boomboxKey(boomboxConfig)}${hops ? `:hop${spiritHopVariant}` : ""}${zoomKey(zoom)}`;
+  const key = `${mode}:${paramsCacheKey(userId, paramsOverride)}:${stage}:${equippedCacheKey(equipped)}:${cols}:${boomboxKey(boomboxConfig)}${hops ? `:hop${spiritHopVariant}` : ""}${zoomKey(zoom)}${rowsKey(rows)}`;
   const cached = frameCache.get(key);
   if (cached) return cached;
 
@@ -2498,12 +2641,18 @@ function generateLoopFrames(
         boomboxConfig,
         undefined,
         zoom,
+        rows,
       )
     : undefined;
 
   const params = resolveCreatureParams(userId, paramsOverride);
   const baseSpheres = buildCreatureSpheres(params, stage);
-  appendWearableSpheres(baseSpheres, equipped, cols, boomboxConfig);
+  appendWearableSpheres(
+    baseSpheres,
+    equipped,
+    layoutCols(cols, rows),
+    boomboxConfig,
+  );
   const anchors = getAnchors(baseSpheres, params, stage);
   const colors = buildColorTriplet(CREATURE_PALETTE[params.colorIndex]);
   const scheme = colorSchemeFor(equipped, params);
@@ -2525,6 +2674,8 @@ function generateLoopFrames(
       cols,
       scheme,
       zoom,
+      undefined,
+      rows,
     );
   });
 
@@ -2545,6 +2696,8 @@ export function generateIdleFrames(
   boomboxConfig?: BoomboxConfig,
   /** Camera zoom about the frame's centre (see renderCreatureFrame). */
   zoom = 1,
+  /** Grid rows (see renderCreatureFrame): more rows and cols, finer. */
+  rows: number = SH,
 ): FrameData[] {
   return generateLoopFrames(
     "idle",
@@ -2556,6 +2709,7 @@ export function generateIdleFrames(
     boomboxConfig,
     undefined,
     zoom,
+    rows,
   );
 }
 
@@ -2582,14 +2736,15 @@ export function generateRotationFrames(
   cols: number = SW,
   boomboxConfig?: BoomboxConfig,
   zoom = 1,
+  rows: number = SH,
 ): FrameData[] {
-  const key = `rot:${paramsCacheKey(userId, paramsOverride)}:${stage}:${equippedCacheKey(equipped)}:${cols}:${boomboxKey(boomboxConfig)}${zoomKey(zoom)}`;
+  const key = `rot:${paramsCacheKey(userId, paramsOverride)}:${stage}:${equippedCacheKey(equipped)}:${cols}:${boomboxKey(boomboxConfig)}${zoomKey(zoom)}${rowsKey(rows)}`;
   const cached = frameCache.get(key);
   if (cached) return cached;
 
   const params = resolveCreatureParams(userId, paramsOverride);
   const built = buildCreatureSpheres(params, stage);
-  appendWearableSpheres(built, equipped, cols, boomboxConfig);
+  appendWearableSpheres(built, equipped, layoutCols(cols, rows), boomboxConfig);
   const spheres = applyDangle(built, rotationLoopDangle(frameCount));
   const anchors = getAnchors(spheres, params, stage);
   const colors = buildColorTriplet(CREATURE_PALETTE[params.colorIndex]);
@@ -2605,6 +2760,8 @@ export function generateRotationFrames(
       cols,
       scheme,
       zoom,
+      undefined,
+      rows,
     ),
   );
 
@@ -2628,6 +2785,7 @@ export function generateDanceFrames(
   boomboxConfig?: BoomboxConfig,
   spiritHopVariant?: number,
   zoom = 1,
+  rows: number = SH,
 ): FrameData[] {
   return generateLoopFrames(
     "dance",
@@ -2639,6 +2797,7 @@ export function generateDanceFrames(
     boomboxConfig,
     spiritHopVariant,
     zoom,
+    rows,
   );
 }
 
@@ -2661,10 +2820,11 @@ export function renderCreatureAtAngle(
   /** Pose for anything dangling, from Herzie3D's spin physics. */
   dangle?: DangleState,
   zoom = 1,
+  rows: number = SH,
 ): FrameData {
   const params = resolveCreatureParams(userId, paramsOverride);
   const built = buildCreatureSpheres(params, stage);
-  appendWearableSpheres(built, equipped, cols, boomboxConfig);
+  appendWearableSpheres(built, equipped, layoutCols(cols, rows), boomboxConfig);
   const baseSpheres = dangle ? applyDangle(built, dangle) : built;
   const anchors = getAnchors(baseSpheres, params, stage);
   const colors = buildColorTriplet(CREATURE_PALETTE[params.colorIndex]);
@@ -2681,6 +2841,109 @@ export function renderCreatureAtAngle(
     cols,
     scheme,
     zoom,
+    undefined,
+    rows,
+  );
+}
+
+/** A herzie's pose for renderCreaturePose: a blend of the idle loop and the
+ * walk cycle, seen from a free camera. */
+export interface CreaturePose {
+  /** Turn about the vertical axis; 0 is square-on to the camera. */
+  yAngle: number;
+  /** Camera elevation in radians (see renderCreatureFrame's `pitch`). */
+  pitch?: number;
+  /** Frame of the idle loop, 0..IDLE_LOOP_FRAMES. */
+  idleFrame: number;
+  /** How far through a walk cycle (two steps), 0..1. */
+  walkPhase: number;
+  /** 0 standing (pure idle) to 1 walking (pure walk cycle). */
+  walkWeight: number;
+}
+
+/** Frames in the idle loop, which Herzie3D plays at 50ms a frame. */
+export const IDLE_LOOP_FRAMES = IDLE_FRAMES;
+
+/** Built sphere lists for renderCreaturePose, which a host calls every
+ * frame: building a creature and its wearables is pure, so it's done once
+ * per look. Bounded, since every distinct look adds an entry. */
+const poseBuildCache = new Map<
+  string,
+  {
+    spheres: Sphere[];
+    anchors: AnchorPoint[];
+    colors: ColorTriplet;
+    scheme: readonly string[] | undefined;
+    textureType: number;
+  }
+>();
+const POSE_BUILD_CACHE_MAX = 32;
+
+/**
+ * Renders a herzie in any pose a game needs: any turn and camera pitch, and
+ * anywhere between standing (the idle loop) and walking (the walk cycle).
+ * With `walkWeight: 0` and no pitch it draws exactly what
+ * renderCreatureAtAngle draws for the same idle frame.
+ */
+export function renderCreaturePose(
+  userId: string,
+  stage: number,
+  pose: CreaturePose,
+  equipped?: Equipped,
+  paramsOverride?: CreatureParams,
+  cols: number = SW,
+  /** Grid rows (default SH): more rows and cols, same framing, finer. */
+  rows: number = SH,
+): FrameData {
+  const key = `${paramsCacheKey(userId, paramsOverride)}:${stage}:${equippedCacheKey(equipped)}:${cols}${rowsKey(rows)}`;
+  let built = poseBuildCache.get(key);
+  if (!built) {
+    const params = resolveCreatureParams(userId, paramsOverride);
+    const spheres = buildCreatureSpheres(params, stage);
+    appendWearableSpheres(spheres, equipped, layoutCols(cols, rows));
+    built = {
+      spheres,
+      anchors: getAnchors(spheres, params, stage),
+      colors: buildColorTriplet(CREATURE_PALETTE[params.colorIndex]),
+      scheme: colorSchemeFor(equipped, params),
+      textureType: params.textureType,
+    };
+    if (poseBuildCache.size >= POSE_BUILD_CACHE_MAX) {
+      const oldest = poseBuildCache.keys().next().value;
+      if (oldest !== undefined) poseBuildCache.delete(oldest);
+    }
+    poseBuildCache.set(key, built);
+  }
+
+  const { spheres } = built;
+  const w = Math.min(1, Math.max(0, pose.walkWeight));
+  const idle = idleDeltas(spheres, pose.idleFrame);
+  const walk = w > 0 ? walkDeltas(spheres, pose.walkPhase, stage) : null;
+  const animated = spheres.map((s, i) => {
+    // Scene-anchored parts (a floating pet) keep their own idle bob even
+    // mid-stride; everything else fades from idle into the walk.
+    const iw = walk && !isSceneFixed(s.part) ? 1 - w : 1;
+    const d = walk?.[i];
+    return {
+      ...s,
+      center: [
+        s.center[0] + (d ? d[0] * w : 0),
+        s.center[1] + idle[i] * iw + (d ? d[1] * w : 0),
+        s.center[2] + (d ? d[2] * w : 0),
+      ] as V3,
+    };
+  });
+  return renderCreatureFrame(
+    animated,
+    pose.yAngle,
+    built.textureType,
+    built.anchors,
+    built.colors,
+    cols,
+    built.scheme,
+    1,
+    pose.pitch,
+    rows,
   );
 }
 

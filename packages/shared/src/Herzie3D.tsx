@@ -97,6 +97,13 @@ interface Props {
   /** Camera pan: draws the scene this many px lower (negative: higher),
    * easing along with `zoom`. Default: 0. */
   offsetY?: number;
+  /** Paint each cell as a solid block instead of a glyph: no gaps between
+   * rows, no dither, still pixel-chunky. Default: false (glyphs). */
+  solid?: boolean;
+  /** Render-grid density: 1 is the classic grid; above 1 the same view is
+   * rendered through more, smaller cells (the canvas keeps its size).
+   * Default: 1. */
+  resolution?: number;
 }
 
 function resolveEquipped(
@@ -125,6 +132,24 @@ function resolveEquipped(
   return out;
 }
 
+/** A shared scratch canvas for solid drawing, one pixel per cell. Reused
+ * across draws and herzies (drawing is synchronous), resized as needed. */
+let scratch: {
+  canvas: HTMLCanvasElement;
+  ctx: CanvasRenderingContext2D;
+} | null = null;
+function solidScratch(w: number, h: number) {
+  if (!scratch) {
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    scratch = { canvas, ctx };
+  }
+  if (scratch.canvas.width !== w) scratch.canvas.width = w;
+  if (scratch.canvas.height !== h) scratch.canvas.height = h;
+  return scratch;
+}
+
 export function Herzie3D({
   userId,
   stage = 1,
@@ -146,7 +171,12 @@ export function Herzie3D({
   groundInset,
   zoom = 1,
   offsetY = 0,
+  solid = false,
+  resolution = 1,
 }: Props) {
+  // The grid actually rendered: `cols` x SH at resolution 1, denser above.
+  const gridCols = Math.round(cols * resolution);
+  const gridRows = Math.round(SH * resolution);
   const equippedRaw = resolveEquipped(equippedProp, wearables);
   // The parent may hand us a brand-new (but content-identical) `equipped`
   // object on every render — a fresh AppState push, an unrelated background
@@ -257,10 +287,11 @@ export function Herzie3D({
         stage,
         equipped,
         creatureParams,
-        cols,
+        gridCols,
         boomboxConfig,
         hopVariant,
         zoom,
+        gridRows,
       );
     if (animate)
       return generateRotationFrames(
@@ -269,18 +300,20 @@ export function Herzie3D({
         undefined,
         equipped,
         creatureParams,
-        cols,
+        gridCols,
         boomboxConfig,
         zoom,
+        gridRows,
       );
     return generateIdleFrames(
       userId,
       stage,
       equipped,
       creatureParams,
-      cols,
+      gridCols,
       boomboxConfig,
       zoom,
+      gridRows,
     );
   }, [
     userId,
@@ -289,7 +322,8 @@ export function Herzie3D({
     dancing,
     equipped,
     creatureParams,
-    cols,
+    gridCols,
+    gridRows,
     boomboxConfig,
     hopVariant,
     zoom,
@@ -394,22 +428,25 @@ export function Herzie3D({
       dancing,
       equipped,
       creatureParams,
-      cols,
+      gridCols,
+      gridRows,
       boomboxConfig,
       zoom,
     ],
   );
 
+  // The canvas is sized for `cols` x SH cells at `size`; a denser grid
+  // just fits smaller cells into it.
   const metrics = useMemo(() => {
-    const charW = size * 0.6;
-    const lineH = size * 1.35;
+    const charW = (size * 0.6) / resolution;
+    const lineH = (size * 1.35) / resolution;
     return {
       charW,
       lineH,
-      canvasW: Math.ceil(cols * charW),
-      canvasH: Math.ceil(SH * lineH),
+      canvasW: Math.ceil(cols * size * 0.6),
+      canvasH: Math.ceil(SH * size * 1.35),
     };
-  }, [size, cols]);
+  }, [size, cols, resolution]);
 
   // How far down to draw everything so the feet land groundInset px above the
   // canvas bottom. Measured on the idle loop's resting frame, not the current
@@ -428,8 +465,10 @@ export function Herzie3D({
         ground_right: undefined,
       },
       creatureParams,
-      cols,
+      gridCols,
       boomboxConfig,
+      1,
+      gridRows,
     )[0]?.cells;
     if (!rest) return 0;
     let feetRow = -1;
@@ -446,7 +485,8 @@ export function Herzie3D({
     stage,
     equipped,
     creatureParams,
-    cols,
+    gridCols,
+    gridRows,
     boomboxConfig,
     metrics,
   ]);
@@ -462,9 +502,36 @@ export function Herzie3D({
       if (!ctx) return;
 
       ctx.clearRect(0, 0, metrics.canvasW, metrics.canvasH);
-      ctx.font = `${size}px ${FONT_FAMILY}`;
-      ctx.textBaseline = "top";
 
+      if (solid) {
+        // One pixel per cell on a scratch canvas, then scaled up without
+        // smoothing: every cell becomes a solid block, and blocks of
+        // fractional size come out as even as nearest scaling can make them.
+        const grid = solidScratch(cells[0]?.length ?? 0, cells.length);
+        if (!grid) return;
+        grid.ctx.clearRect(0, 0, grid.canvas.width, grid.canvas.height);
+        for (let y = 0; y < cells.length; y++) {
+          const row = cells[y];
+          for (let x = 0; x < row.length; x++) {
+            const cell = row[x];
+            if (cell.ch === " ") continue;
+            grid.ctx.fillStyle = cell.color;
+            grid.ctx.fillRect(x, y, 1, 1);
+          }
+        }
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(
+          grid.canvas,
+          0,
+          groundShift + cameraShift,
+          (cells[0]?.length ?? 0) * metrics.charW,
+          cells.length * metrics.lineH,
+        );
+        return;
+      }
+
+      ctx.font = `${size / resolution}px ${FONT_FAMILY}`;
+      ctx.textBaseline = "top";
       for (let y = 0; y < cells.length; y++) {
         const row = cells[y];
         const py = y * metrics.lineH + groundShift + cameraShift;
@@ -476,7 +543,7 @@ export function Herzie3D({
         }
       }
     },
-    [size, metrics, groundShift, cameraShift],
+    [size, resolution, solid, metrics, groundShift, cameraShift],
   );
 
   const startMomentum = useCallback(() => {
@@ -592,11 +659,12 @@ export function Herzie3D({
           dancing,
           equipped,
           creatureParams,
-          cols,
+          gridCols,
           boomboxConfig,
           hopFrame ? hopVariant : undefined,
           pose,
           liveZoom,
+          gridRows,
         ).cells;
         if (!dangle && !zooming) angleFrames.set(cacheKey, cells);
       }
@@ -618,7 +686,8 @@ export function Herzie3D({
     dancing,
     equipped,
     creatureParams,
-    cols,
+    gridCols,
+    gridRows,
     boomboxConfig,
     hopVariant,
     dangle,
