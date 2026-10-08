@@ -30,7 +30,7 @@ import type { TabColour } from "./TabButton";
 import { Tooltip } from "./Tooltip";
 
 /** Good ol' George's sales patter, cycled in a speech bubble like the boss. */
-const GEORGE_LINES = [
+export const GEORGE_LINES = [
   "Psst. Over here. Good ol' George has what you need.",
   "Everything's legit. Mostly.",
   "Prices this good? I must be out of my mind.",
@@ -47,7 +47,7 @@ const GEORGE_LINES = [
 
 /** Nandor the Treatless's patter: a centuries-old warlord, deadly serious
  * about sweets. */
-const NANDOR_LINES = [
+export const NANDOR_LINES = [
   "I am Nandor the Treatless. Bring me treats.",
   "In my village we paid in treats. Also in goats.",
   "Once I conquered a thousand villages. Now I want a lollipop.",

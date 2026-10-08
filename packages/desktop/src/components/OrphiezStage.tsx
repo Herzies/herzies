@@ -9,7 +9,7 @@ import {
 
 /** What Orphiez mutters while players hunt. Flavour only — never a clue:
  * the clues are the hunt's own, and deliberately hard. */
-const ORPHIEZ_LINES = [
+export const ORPHIEZ_LINES = [
   "It went something like… no. Gone again.",
   "I had it. I had it, and then I looked back.",
   "Somewhere down there is a song that's mine.",

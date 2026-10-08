@@ -59,7 +59,7 @@ function hatedPhrase(genres: string[]): string {
  * saying the same things at 90% and 5%. Ungated lines can land at any point.
  * `{genre}` is substituted with the hated-genre phrase.
  */
-const BOSS_LINES: { text: string; above?: number; below?: number }[] = [
+export const BOSS_LINES: { text: string; above?: number; below?: number }[] = [
   // Healthy — still in control, and cocky enough to give the game away.
   {
     text: "I probably shouldn't say this, but {genre} music is my Achilles heel.",

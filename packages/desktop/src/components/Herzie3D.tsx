@@ -49,6 +49,10 @@ interface Props {
   zoom?: number;
   /** Camera pan in px (negative: up); eases along with `zoom`. Default: 0. */
   offsetY?: number;
+  /** Solid blocks instead of glyphs (see the shared Herzie3D). */
+  solid?: boolean;
+  /** Render-grid density (see the shared Herzie3D). Default: 1. */
+  resolution?: number;
 }
 
 /**
@@ -74,6 +78,8 @@ export function Herzie3D({
   grounded = false,
   zoom,
   offsetY,
+  solid,
+  resolution,
 }: Props) {
   // Full-window-width column count, shared by the sky and the creature
   // viewport so both span the window without stretching their contents.
@@ -165,6 +171,8 @@ export function Herzie3D({
         groundInset={grounded ? groundInsetFor(size) : undefined}
         zoom={zoom}
         offsetY={offsetY}
+        solid={solid}
+        resolution={resolution}
         wrapperStyle={
           showSky
             ? {

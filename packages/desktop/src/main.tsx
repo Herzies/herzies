@@ -48,6 +48,9 @@ import {
 const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1h
 
 const WHATS_NEW_SEEN_KEY = "herzies:whats-new-seen-version";
+/** Render-grid density of the herzie on Home and the Herzie view: a third
+ * finer than the classic grid, drawn as solid blocks. */
+const HERZIE_RESOLUTION = 4 / 3;
 /** The camera on the Herzie view, relative to Home's: pulled back and raised
  * a little to make room for the deck over the stage's floor. */
 const HERZIE_VIEW_ZOOM = 0.83;
@@ -178,9 +181,9 @@ function App() {
   const [debugTreatTraderOverride, setDebugTreatTraderOverride] =
     useState(false);
   /** Which full-screen event view the Events tab has open, if any. */
-  const [eventsScreen, setEventsScreen] = useState<"boss" | "merchant" | null>(
-    null,
-  );
+  const [eventsScreen, setEventsScreen] = useState<
+    "boss" | "merchant" | "world" | null
+  >(null);
   const [bossHatedGenres, setBossHatedGenres] = useState<string[]>([]);
   const [chatProfileCode, setChatProfileCode] = useState<string | null>(null);
   const [selfProfile, setSelfProfile] = useState<HerzieProfile | null>(null);
@@ -529,13 +532,20 @@ function App() {
 
   /** "c" shortcut: go home and focus the chat. Mid-trade this routes through
    * the leave-trade confirmation like every other view switch. */
+  /** The Town's 3D world is on screen: it fills the window, and the chat
+   * floats over it. */
+  const townWorld = view === "events" && eventsScreen === "world";
+
   const requestOpenChat = useCallback(() => {
-    if (switchView("home")) {
+    // The Town carries its own chat, so open that one where it is.
+    if (townWorld) {
+      setOpenChatRequested(true);
+    } else if (switchView("home")) {
       setOpenChatRequested(true);
     } else {
       openChatAfterLeaveRef.current = true;
     }
-  }, [switchView]);
+  }, [switchView, townWorld]);
 
   // Tab keyboard shortcuts (advertised in the tab bar tooltips). Skipped
   // while typing in an input so chat/search fields don't switch views.
@@ -744,6 +754,32 @@ function App() {
     setIgnoredFriendRequestId(pendingFriend.requestId);
   };
 
+  // The chat docks under Home, and floats over the Town's world.
+  const chatPanel =
+    herzie && ((view === "home" && !selfProfile) || townWorld) ? (
+      <ChatPanel
+        activityLog={activityLog}
+        isOnline={state.isOnline}
+        messages={state.chatMessages}
+        inventory={state.inventory}
+        friends={state.friends}
+        herzie={herzie}
+        nowPlaying={state.nowPlaying}
+        pendingFriendCodes={[
+          ...state.incomingFriendRequests.map((r) => r.friendCode),
+          ...state.outgoingFriendRequests.map((r) => r.friendCode),
+        ]}
+        openRequested={openChatRequested}
+        onOpenHandled={() => setOpenChatRequested(false)}
+        onOpenProfile={(code) => {
+          setChatProfileCode(code);
+          switchView("friends");
+        }}
+        onStartTrade={handleStartTrade}
+        onActivity={addLog}
+      />
+    ) : null;
+
   return (
     <div
       data-tauri-drag-region
@@ -755,13 +791,19 @@ function App() {
       <div
         className={cn(
           "flex min-h-0 flex-1 flex-col overflow-hidden",
+          // The Town's 3D world fills the window down to the tab bar: out
+          // past the app's side and top padding.
+          townWorld && "-mx-3 -mt-3",
           // Home supplies its own bottom breathing room (HomeView's now-playing
           // bar) so its artist-image background can reach the chat's top
           // border instead of stopping short of an outer margin. The viewer's
           // own profile shares the home slot but has no such bar, so it takes
           // the margin like every other view — otherwise it sits tighter to
           // the chat than the same profile opened from Social.
-          (view !== "home" || !!selfProfile) && view !== "inventory" && "mb-2",
+          (view !== "home" || !!selfProfile) &&
+            view !== "inventory" &&
+            !townWorld &&
+            "mb-2",
         )}
       >
         {/* The herzie on Home and the Herzie view: one renderer over both
@@ -796,6 +838,9 @@ function App() {
               zoom={view === "inventory" ? HERZIE_VIEW_ZOOM : 1}
               offsetY={view === "inventory" ? HERZIE_VIEW_OFFSET_Y : 0}
               grounded
+              // Solid pixels on a third-finer grid, like the Town's herzies.
+              solid
+              resolution={HERZIE_RESOLUTION}
             />
           </div>
         </div>
@@ -915,6 +960,7 @@ function App() {
         >
           <EventsView
             eventsTabVisible={view === "events"}
+            chatOverlay
             rootKey={rootKeys.events ?? 0}
             debugForceActive={hasActiveEventOverride}
             debugForceBoss={debugBossOverride}
@@ -925,6 +971,8 @@ function App() {
             units={state.units}
             currency={state.inventoryCurrency}
             onLog={addLog}
+            playerSeed={herzie?.friendCode}
+            playerStage={stageOverride ?? herzie?.stage}
           />
         </div>
 
@@ -1004,29 +1052,19 @@ function App() {
         </div>
       </div>
 
-      {herzie && view === "home" && !selfProfile && (
-        <ChatPanel
-          activityLog={activityLog}
-          isOnline={state.isOnline}
-          messages={state.chatMessages}
-          inventory={state.inventory}
-          friends={state.friends}
-          herzie={herzie}
-          nowPlaying={state.nowPlaying}
-          pendingFriendCodes={[
-            ...state.incomingFriendRequests.map((r) => r.friendCode),
-            ...state.outgoingFriendRequests.map((r) => r.friendCode),
-          ]}
-          openRequested={openChatRequested}
-          onOpenHandled={() => setOpenChatRequested(false)}
-          onOpenProfile={(code) => {
-            setChatProfileCode(code);
-            switchView("friends");
-          }}
-          onStartTrade={handleStartTrade}
-          onActivity={addLog}
-        />
-      )}
+      {chatPanel &&
+        (townWorld ? (
+          // Over the bottom of the Town's world, edge to edge, on a
+          // translucent backing so the world shows through. A zero-height
+          // row: the world keeps its full height underneath.
+          <div className="relative -mx-3 h-0">
+            <div className="absolute inset-x-0 bottom-0 z-20 bg-black/55 px-3 backdrop-blur-[2px]">
+              {chatPanel}
+            </div>
+          </div>
+        ) : (
+          chatPanel
+        ))}
 
       {herzie && (
         <TabBar

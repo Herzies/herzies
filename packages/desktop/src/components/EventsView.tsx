@@ -23,19 +23,16 @@ import ItemInspectOverlay, {
   INSPECT_ORIGIN_ATTR,
   inspectOrigin,
 } from "./ItemInspectOverlay";
-import { VisitorIcon } from "./icons/VisitorIcon";
 import { List } from "./List";
 import { LoadingSplash } from "./LoadingSplash";
 import { MerchantPanel } from "./MerchantPanel";
 import { OrphiezStage } from "./OrphiezStage";
 import { TabButton } from "./TabButton";
+import { type EventCard, formatIn } from "./TownScene";
+import { TownWorld } from "./TownWorld";
 import { View } from "./View";
 import { VisitorHelp } from "./VisitorHelp";
-import {
-  ROW_TEXT_SHADOW,
-  VISITOR_THEMES,
-  VisitorSparkles,
-} from "./VisitorRowTheme";
+import { VISITOR_THEMES } from "./VisitorRowTheme";
 
 function formatCountdown(endsAt: string): string {
   const ms = new Date(endsAt).getTime() - Date.now();
@@ -190,21 +187,6 @@ const typeRank = (type: string) => {
   return i === -1 ? EVENT_TYPES.length : i;
 };
 
-type EventCard = {
-  type: string;
-  title: string;
-  description: string | null;
-  status: "live" | "scheduled" | "idle";
-  /** Ends-at when live, starts-at when scheduled. */
-  at: string | null;
-  detail?: string;
-  /** What opening the card selects (an event id, or "song_hunt" for the hunt
-   * view); null when there is nothing to open yet. */
-  openKey: string | null;
-  /** For a stable React key. */
-  eventId?: string;
-};
-
 function EventsViewImpl({
   eventsTabVisible,
   debugForceActive = false,
@@ -217,7 +199,15 @@ function EventsViewImpl({
   currency = 0,
   onLog,
   rootKey = 0,
+  playerSeed,
+  playerStage,
+  chatOverlay = false,
 }: {
+  /** The app floats its chat over the bottom of the Town's world. */
+  chatOverlay?: boolean;
+  /** The player's herzie, walking around the Town. */
+  playerSeed?: string;
+  playerStage?: number;
   /** Tab stays mounted but hidden; only poll while user is on Events. */
   eventsTabVisible: boolean;
   /** Bumped when the Town tab is re-selected while already on it: back to
@@ -232,8 +222,9 @@ function EventsViewImpl({
   /** Debug: a fixture Nandor the Treatless visit (buying from it will fail). */
   debugForceTreatTrader?: boolean;
   /** Which full-screen event view is open, so the app can recolour the
-   * window: a live boss or Nandor blacks it out, George turns it gold. */
-  onScreenChange?: (screen: "boss" | "merchant" | null) => void;
+   * window (a live boss or Nandor blacks it out, George turns it gold) or,
+   * for the 3D world, let it fill the window. */
+  onScreenChange?: (screen: "boss" | "merchant" | "world" | null) => void;
   /** Current deck, used to show set progress in the reward preview. */
   equipped?: Equipped | null;
   /** Every owned copy, for George's "N owned" counts. */
@@ -395,17 +386,19 @@ function EventsViewImpl({
           : selected === DEBUG_TREAT_TRADER.id && debugForceTreatTrader
             ? "treat_trader"
             : // The previous event too: an ended boss's results stay blacked out.
-            (
-              events.find((e) => e.id === selected) ??
-              (previousEvent?.id === selected ? previousEvent : undefined)
-            )?.type;
+              (
+                events.find((e) => e.id === selected) ??
+                (previousEvent?.id === selected ? previousEvent : undefined)
+              )?.type;
     // Nandor shares the boss's blackout: a vampire keeps the lights off.
     onScreenChange(
-      open === "boss_fight" || open === "treat_trader"
-        ? "boss"
-        : open === "merchant"
-          ? "merchant"
-          : null,
+      selected === null
+        ? "world"
+        : open === "boss_fight" || open === "treat_trader"
+          ? "boss"
+          : open === "merchant"
+            ? "merchant"
+            : null,
     );
   }, [
     selected,
@@ -564,42 +557,34 @@ function EventsViewImpl({
     const nextArrival = cards.find((c) => c.status === "scheduled");
 
     return (
-      <View
-        title="Town"
-        colour="cyan"
-        childrenClassName="flex min-h-0 flex-col"
-      >
-        {inTown === 0 && (
-          // An empty Town reads as dead in a way an empty event list never
-          // did, so say it's quiet and who's coming next.
-          <div className="mb-2 border border-dashed border-border px-2 py-1.5 text-center text-ui text-text-dim">
-            Town is quiet right now.
-            {nextArrival?.at ? (
-              <>
-                {" "}
-                <span className="text-text">{nextArrival.title}</span> arrives
-                in {formatIn(nextArrival.at)}.
-              </>
-            ) : null}
-          </div>
-        )}
-        <List className="min-h-0 flex-1">
-          <div className="flex flex-col">
-            {cards.map((card) => (
-              <EventCardRow
-                key={`${card.type}-${card.eventId ?? card.status}`}
-                card={card}
-                paused={!eventsTabVisible || !focused}
-                onOpen={
-                  card.openKey
-                    ? () => setSelected(card.openKey as string)
-                    : undefined
-                }
-              />
-            ))}
-          </div>
-        </List>
-      </View>
+      // No title: the world fills the window (see onScreenChange "world").
+      <TownWorld
+        chatOverlay={chatOverlay}
+        cards={cards}
+        paused={!eventsTabVisible || !focused}
+        onOpen={setSelected}
+        player={{
+          seed: playerSeed ?? "npc:townsfolk",
+          stage: playerStage ?? 1,
+          equipped,
+        }}
+        notice={
+          inTown === 0 ? (
+            // An empty Town reads as dead in a way an empty event list
+            // never did, so say it's quiet and who's coming next.
+            <>
+              Town is quiet right now.
+              {nextArrival?.at ? (
+                <>
+                  {" "}
+                  <span className="text-white">{nextArrival.title}</span>{" "}
+                  arrives in {formatIn(nextArrival.at)}.
+                </>
+              ) : null}
+            </>
+          ) : null
+        }
+      />
     );
   }
 
@@ -1023,127 +1008,6 @@ function formatStartsIn(date: Date): string {
 }
 
 /** "2d 4h", "5h", "12m" — for card countdowns. */
-function formatIn(at: string): string {
-  const ms = new Date(at).getTime() - Date.now();
-  if (ms <= 0) return "now";
-  const minutes = Math.floor(ms / 60_000);
-  const days = Math.floor(minutes / 1440);
-  const hours = Math.floor((minutes % 1440) / 60);
-  if (days > 0) return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
-  if (hours > 0) return `${hours}h`;
-  return `${Math.max(1, minutes)}m`;
-}
-
-/** A row styled like ItemRow (the inventory/store lists): name over a small
- * dim subtitle, with the status and countdown on the right. */
-function EventCardRow({
-  card,
-  onOpen,
-  paused,
-}: {
-  card: EventCard;
-  onOpen?: () => void;
-  /** Tab hidden or window unfocused — freeze the sparkles. */
-  paused: boolean;
-}) {
-  const subtitle = card.description ?? card.detail;
-  const live = card.status === "live";
-  // Only a visitor who's actually in town wears their theme.
-  const theme = live ? VISITOR_THEMES[card.type] : undefined;
-  const dim = theme ? { color: theme.dim } : undefined;
-
-  const left = (
-    <div className="flex min-w-0 flex-1 items-center gap-2">
-      <VisitorIcon
-        type={card.type}
-        seed={card.eventId}
-        inTown={live}
-        className="h-6 w-6 shrink-0"
-      />
-      <div className="min-w-0 flex-1">
-        <div
-          className={cn(
-            "truncate text-ui",
-            theme ? "text-white" : "text-text",
-            // Only a row that opens something reacts to hover.
-            !theme && onOpen && "group-hover:text-cyan",
-          )}
-        >
-          {card.title}
-        </div>
-        {subtitle ? (
-          <div className="truncate text-[10px] text-text-dim" style={dim}>
-            {subtitle}
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
-
-  // The whole row is the click target when it opens something, padding
-  // included — a button nested inside left the row's top and bottom edges
-  // (and the status column) dead.
-  const Row = onOpen ? "button" : "div";
-
-  return (
-    <Row
-      {...(onOpen ? { type: "button" as const, onClick: onOpen } : {})}
-      className={cn(
-        "group relative flex w-full items-center justify-between gap-2 overflow-hidden text-left",
-        "border-b border-[#222] py-1.5",
-        onOpen && "cursor-pointer",
-        theme && "pr-2",
-        // Live at full strength; scheduled a little dimmer; nothing-on dimmer
-        // still.
-        card.status === "scheduled" && "opacity-65",
-        card.status === "idle" && "opacity-50",
-      )}
-      style={theme ? { textShadow: ROW_TEXT_SHADOW } : undefined}
-    >
-      {theme && (
-        // The Now Playing card's backdrop treatment (see TrackCard): the
-        // visitor's colours fill the right half and fade into the app
-        // background toward the left, sparkles and all.
-        <div className="pointer-events-none absolute inset-y-0 right-0 w-1/2 overflow-hidden">
-          {/* Hover brightens only the colour, never the fade on top of it:
-              a filter on the whole row lit up the fade's bg-panel edge
-              into a visible box. */}
-          <div
-            className={cn(
-              "absolute inset-0",
-              onOpen &&
-                "transition-[filter] duration-100 group-hover:brightness-150",
-            )}
-            style={{ background: theme.background }}
-          />
-          {theme.sparkle && (
-            <VisitorSparkles sparkle={theme.sparkle} paused={paused} />
-          )}
-          <div className="absolute inset-0 bg-gradient-to-r from-bg-panel to-transparent" />
-        </div>
-      )}
-      <div className="relative flex min-w-0 flex-1">{left}</div>
-      <div className="relative shrink-0 text-right">
-        {live ? (
-          <div
-            className="text-[10px] font-bold text-green"
-            style={theme ? { color: theme.accent } : undefined}
-          >
-            IN TOWN
-          </div>
-        ) : null}
-        {card.at ? (
-          <div className="text-[10px] text-text-dim" style={dim}>
-            {!live
-              ? `in ${formatIn(card.at)}`
-              : // Every visitor leaves when their visit ends.
-                `leaving in ${formatIn(card.at)}`}
-          </div>
-        ) : null}
-      </div>
-    </Row>
-  );
-}
 
 /** Memoized: mounted (hidden) for the app's whole life, so without this it
  * re-rendered on every App render, i.e. every state push. Its props are all
