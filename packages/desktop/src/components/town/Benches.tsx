@@ -3,7 +3,15 @@ import { useLayoutEffect, useMemo } from "react";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { seeThrough } from "./ambient";
-import { cellCenter, MAP_SIZE, objectAt, type TownMap, terrainAt } from "./map";
+import {
+  cellCenter,
+  EIGHTH,
+  facingAt,
+  MAP_SIZE,
+  objectAt,
+  type TownMap,
+  terrainAt,
+} from "./map";
 
 // Park benches: wooden slats on iron ends, two seats each. Press E by one
 // to sit (see TownCanvas's Systems), walk off or press E again to stand.
@@ -35,9 +43,12 @@ export type Seat = {
 };
 export type Bench = { x: number; z: number; yaw: number; seats: Seat[] };
 
-/** Which way a bench faces: toward the nearest path, or the middle of
- * town; squared to the eight compass points, so it sits neatly. */
-function facing(map: TownMap, col: number, row: number): number {
+/** Which way a bench faces: the way it was turned in the editor, else
+ * toward the nearest path, or the middle of town; squared to the eight
+ * compass points, so it sits neatly. */
+export function benchFacing(map: TownMap, col: number, row: number): number {
+  const turned = facingAt(map, col, row);
+  if (turned !== undefined) return turned;
   const [x, z] = cellCenter(col, row);
   let best = Number.POSITIVE_INFINITY;
   let to: [number, number] = [-x, -z];
@@ -55,7 +66,7 @@ function facing(map: TownMap, col: number, row: number): number {
     }
   }
   const yaw = Math.atan2(to[0], to[1]);
-  return Math.round(yaw / (Math.PI / 4)) * (Math.PI / 4);
+  return Math.round(yaw / EIGHTH) * EIGHTH;
 }
 
 /** Every bench on the map, with its seats. */
@@ -65,7 +76,7 @@ export function benchesOf(map: TownMap): Bench[] {
     for (let col = 0; col < MAP_SIZE; col++) {
       if (objectAt(map, col, row) !== BENCH) continue;
       const [x, z] = cellCenter(col, row);
-      const yaw = facing(map, col, row);
+      const yaw = benchFacing(map, col, row);
       // Forward is (sin, cos); along the bench, at right angles to it.
       const fx = Math.sin(yaw);
       const fz = Math.cos(yaw);

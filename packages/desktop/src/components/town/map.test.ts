@@ -6,15 +6,18 @@ import {
   cellAt,
   cellCenter,
   emptyMap,
+  facingAt,
   inland,
   MAP_SIZE,
   OFF,
   onIsland,
   parseMap,
+  pruneFacing,
   SPOT_NAMES,
   serializeMap,
   type TownMap,
   waterRuns,
+  withFacing,
 } from "./map";
 import homeMap from "./maps/home.json";
 
@@ -157,5 +160,36 @@ describe("town map", () => {
       paint(map, "objects", MID + i * 2, MID, ch);
     }
     expect(() => parseMap(map)).not.toThrow();
+  });
+});
+
+describe("turned objects", () => {
+  it("keeps turns through saving and loading", () => {
+    let map = emptyMap();
+    const mid = MAP_SIZE / 2;
+    const line = map.objects[mid];
+    map.objects[mid] = `${line.slice(0, mid)}R${line.slice(mid + 1)}`;
+    map = withFacing(map, mid, mid, 3);
+    const back = parseMap(JSON.parse(serializeMap(map)));
+    expect(back.facing).toEqual({ [`${mid},${mid}`]: 3 });
+    expect(facingAt(back, mid, mid)).toBeCloseTo((3 * Math.PI) / 4, 9);
+    // Wrapping round: 8 is 0, -1 is 7.
+    expect(withFacing(map, mid, mid, 8).facing?.[`${mid},${mid}`]).toBe(0);
+    expect(withFacing(map, mid, mid, -1).facing?.[`${mid},${mid}`]).toBe(7);
+  });
+
+  it("forgets a turn when its object is painted away", () => {
+    const mid = MAP_SIZE / 2;
+    const map = withFacing(emptyMap(), mid, mid, 2);
+    expect(pruneFacing(map).facing).toEqual({});
+  });
+
+  it("turns away a bad turn", () => {
+    const map = { ...emptyMap(), facing: { "1,2,x": 9 } };
+    expect(() => parseMap(JSON.parse(JSON.stringify(map)))).toThrow(/facing/);
+  });
+
+  it("leaves maps without turns as they were", () => {
+    expect(serializeMap(emptyMap())).not.toContain("facing");
   });
 });

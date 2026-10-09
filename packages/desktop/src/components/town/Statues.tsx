@@ -10,7 +10,7 @@ import { ambient, seeThrough } from "./ambient";
 const seeThroughLambert = (p: THREE.MeshLambertMaterialParameters) =>
   seeThrough(new THREE.MeshLambertMaterial(p));
 
-import { cellCenter, MAP_SIZE, objectAt, type TownMap } from "./map";
+import { cellCenter, facingAt, MAP_SIZE, objectAt, type TownMap } from "./map";
 
 /** Who a statue shows: whoever came out on top in the last boss fight. */
 export type Champion = { look: Look; name: string };
@@ -47,23 +47,26 @@ const capMaterial = seeThroughLambert({
   flatShading: true,
 });
 
-export function statueSpots(map: TownMap): [number, number][] {
-  const spots: [number, number][] = [];
+export function statueSpots(map: TownMap): [number, number, number][] {
+  const spots: [number, number, number][] = [];
   for (let row = 0; row < MAP_SIZE; row++) {
     for (let col = 0; col < MAP_SIZE; col++) {
-      if (objectAt(map, col, row) === "@") spots.push(cellCenter(col, row));
+      if (objectAt(map, col, row) !== "@") continue;
+      const [x, z] = cellCenter(col, row);
+      // The way it was turned in the editor, else the middle of town.
+      spots.push([x, z, facingAt(map, col, row) ?? Math.atan2(-x, -z)]);
     }
   }
   return spots;
 }
 
 /** One statue: the champion in stone on a plinth, facing the middle of
- * town, with a plaque. */
+ * town (or the way it was turned), with a plaque. */
 function Statue({
-  at: [x, z],
+  at: [x, z, heading],
   champion,
 }: {
-  at: [number, number];
+  at: [number, number, number];
   champion: Champion;
 }) {
   const lookKey = JSON.stringify(champion.look);
@@ -71,9 +74,9 @@ function Statue({
   const herzie = useMemo(() => {
     const h = new HerzieModel(champion.look, { lighting: ambient });
     h.petrify();
-    h.heading = Math.atan2(-x, -z);
+    h.heading = heading;
     return h;
-  }, [lookKey, x, z]);
+  }, [lookKey, x, z, heading]);
   useEffect(() => () => herzie.dispose(), [herzie]);
   // Posed once, where it stands (its bands are laid out by world height).
   const posed = useRef<HerzieModel | null>(null);

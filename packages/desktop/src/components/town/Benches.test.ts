@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { BENCH, benchesOf, SIT_RANGE, seatNear } from "./Benches";
-import { emptyMap, MAP_SIZE, type TownMap } from "./map";
+import { emptyMap, MAP_SIZE, type TownMap, withFacing } from "./map";
 
 const MID = MAP_SIZE / 2;
 
@@ -44,5 +44,19 @@ describe("benches", () => {
     expect(seatNear(benches, a.stand.x, a.stand.z, () => true)).toBeNull();
     // Too far.
     expect(seatNear(benches, a.x + SIT_RANGE + 2, a.z, free)).toBeNull();
+  });
+});
+
+describe("turned benches", () => {
+  it("face the way they were turned, path or not", () => {
+    let map = emptyMap();
+    put(map, BENCH, MID, MID);
+    pave(map, MID, MID + 3);
+    map = withFacing(map, MID, MID, 2);
+    const [bench] = benchesOf(map);
+    expect(bench.yaw).toBeCloseTo(Math.PI / 2, 9);
+    // Seats along z now, standing up toward +x.
+    const [a] = bench.seats;
+    expect(a.stand.x).toBeGreaterThan(a.x + 1);
   });
 });

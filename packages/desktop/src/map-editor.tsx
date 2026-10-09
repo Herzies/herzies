@@ -7,21 +7,29 @@ import "./globals.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { EventCard } from "./components/TownScene";
+import { benchFacing } from "./components/town/Benches";
 import { localHours } from "./components/town/DayCycle";
 import {
+  cellCenter,
+  EIGHTH,
+  facingAt,
   ISLAND_RADIUS,
   inland,
   isSunk,
   MAP_SIZE,
   OBJECTS,
   OFF,
+  objectAt,
+  objectJitter,
   onIsland,
   type Point,
   parseMap,
+  pruneFacing,
   SPOT_NAMES,
   TERRAIN,
   type TownMap,
   WORLD_RADIUS,
+  withFacing,
 } from "./components/town/map";
 import { HOME_MAP, spotsOf, type TownSpot } from "./components/town/runtime";
 import TownCanvas, { PIXEL_SCALE } from "./components/town/TownCanvas";
@@ -70,11 +78,28 @@ const toDraft = (m: TownMap): Draft => ({
   terrain: m.terrain.map((r) => [...r]),
   objects: m.objects.map((r) => [...r]),
 });
-const fromDraft = (m: TownMap, d: Draft): TownMap => ({
-  ...m,
-  terrain: d.terrain.map((r) => r.join("")),
-  objects: d.objects.map((r) => r.join("")),
-});
+const fromDraft = (m: TownMap, d: Draft): TownMap =>
+  pruneFacing({
+    ...m,
+    terrain: d.terrain.map((r) => r.join("")),
+    objects: d.objects.map((r) => r.join("")),
+  });
+
+/** Which way an object faces now, in eighths of a turn: as turned, else
+ * its own way (a bench toward the path, a statue toward town, anything
+ * else as it fell), to the nearest eighth. */
+function eighthsAt(map: TownMap, col: number, row: number): number {
+  const o = objectAt(map, col, row);
+  const [x, z] = cellCenter(col, row);
+  const yaw =
+    facingAt(map, col, row) ??
+    (o === "_"
+      ? benchFacing(map, col, row)
+      : o === "@"
+        ? Math.atan2(-x, -z)
+        : objectJitter(col, row).yaw);
+  return Math.round(yaw / EIGHTH);
+}
 
 /** Paint one cell, keeping the map valid: water only inland, nothing
  * standing in water. */
@@ -309,6 +334,24 @@ function drawMap(
     );
   }
 
+  // Which way turned objects face: a tick from the middle of the cell.
+  ctx.strokeStyle = "#ffffffd0";
+  ctx.lineWidth = Math.max(1, zoom / 6);
+  for (const k of Object.keys(map.facing ?? {})) {
+    const [c, r] = k.split(",").map(Number);
+    const yaw = facingAt(map, c, r) ?? 0;
+    const cx = (c + 0.5) * zoom;
+    const cy = (r + 0.5) * zoom;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(
+      cx + Math.sin(yaw) * zoom * 0.6,
+      cy + Math.cos(yaw) * zoom * 0.6,
+    );
+    ctx.stroke();
+  }
+  ctx.lineWidth = 1;
+
   // Markers.
   ctx.font = `bold ${Math.max(10, zoom * 1.2)}px ui-monospace, monospace`;
   ctx.textAlign = "center";
@@ -435,6 +478,9 @@ function MapEditor() {
     { draft: Draft; p: Paint } | { marker: MarkerId } | null
   >(null);
   const mapRef = useRef(map);
+  // The cell under the pointer, for the keyboard (Q turns what's there).
+  const hoverRef = useRef(hover);
+  hoverRef.current = hover;
   mapRef.current = map;
 
   const dirty = map !== saved;
@@ -626,6 +672,20 @@ function MapEditor() {
         });
       } else if (e.key === "p") {
         setRespawn((n) => n + 1);
+      } else if (e.key.toLowerCase() === "q") {
+        // Turn what's under the pointer an eighth: clockwise, or back with
+        // shift.
+        const at = hoverRef.current;
+        const m = mapRef.current;
+        if (
+          !at ||
+          objectAt(m, at[0], at[1]) === "." ||
+          objectAt(m, at[0], at[1]) === OFF
+        )
+          return;
+        checkpoint();
+        const step = e.shiftKey ? 1 : -1;
+        setMap(withFacing(m, at[0], at[1], eighthsAt(m, at[0], at[1]) + step));
       } else {
         const t = TOOLS.find((t) => t.key === e.key);
         if (t) setTool(t.tool);
@@ -633,7 +693,7 @@ function MapEditor() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [save, doUndo, doRedo]);
+  }, [save, doUndo, doRedo, checkpoint]);
 
   // Don't lose unsaved work to a stray reload.
   useEffect(() => {
@@ -732,6 +792,9 @@ function MapEditor() {
               <span style={{ color: "#6b7090" }}>{t.key.toUpperCase()}</span>
             </button>
           ))}
+          <span style={{ marginLeft: 6, color: "#8b8fa3" }}>
+            Q turn (shift: back)
+          </span>
           <span style={{ marginLeft: 6, color: "#8b8fa3" }}>size [ ]</span>
           {BRUSH_SIZES.map((b) => (
             <button

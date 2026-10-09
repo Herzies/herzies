@@ -63,7 +63,54 @@ export type TownMap = {
   spare: Point[];
   /** Where you start, and which way you face (forward is (sin, cos)). */
   spawn: { at: Point; heading: number };
+  /** Objects turned by hand in the editor: "col,row" → eighths of a turn
+   * (0–7, 0 facing +z). Anything not listed faces its own way (a bench
+   * the nearest path, a rock wherever it fell). */
+  facing?: Record<string, number>;
 };
+
+/** An eighth of a turn: the steps objects are turned in. */
+export const EIGHTH = Math.PI / 4;
+
+/** Which way an object was turned to by hand (forward is (sin, cos)), or
+ * undefined if it faces its own way. */
+export function facingAt(
+  map: TownMap,
+  col: number,
+  row: number,
+): number | undefined {
+  const n = map.facing?.[`${col},${row}`];
+  return n === undefined ? undefined : n * EIGHTH;
+}
+
+/** The map with one object turned to `n` eighths (undefined: back to its
+ * own way). */
+export function withFacing(
+  map: TownMap,
+  col: number,
+  row: number,
+  n: number | undefined,
+): TownMap {
+  const facing = { ...map.facing };
+  if (n === undefined) delete facing[`${col},${row}`];
+  else facing[`${col},${row}`] = ((Math.round(n) % 8) + 8) % 8;
+  return { ...map, facing };
+}
+
+/** Turns only on cells that still have something on them: painting an
+ * object away forgets its turn. */
+export function pruneFacing(map: TownMap): TownMap {
+  if (!map.facing) return map;
+  const facing = Object.fromEntries(
+    Object.entries(map.facing).filter(([k]) => {
+      const [c, r] = k.split(",").map(Number);
+      return objectAt(map, c, r) !== ".";
+    }),
+  );
+  return Object.keys(facing).length === Object.keys(map.facing).length
+    ? map
+    : { ...map, facing };
+}
 
 /** Visitor kinds with a spot of their own, as the editor names them. */
 export const SPOT_NAMES: Record<string, string> = {
@@ -213,6 +260,20 @@ export function parseMap(json: unknown): TownMap {
   } else {
     for (const [i, p] of m.spare.entries()) where(`spare[${i}]`, p);
   }
+  if (m.facing !== undefined) {
+    if (!m.facing || typeof m.facing !== "object") {
+      errors.push('facing: expected { "col,row": eighths }');
+    } else {
+      for (const [k, n] of Object.entries(m.facing)) {
+        const [c, r] = k.split(",").map(Number);
+        if (!Number.isInteger(c) || !Number.isInteger(r) || !onIsland(c, r)) {
+          errors.push(`facing.${k}: not a cell on the island`);
+        } else if (!Number.isInteger(n) || n < 0 || n > 7) {
+          errors.push(`facing.${k}: expected 0–7`);
+        }
+      }
+    }
+  }
   if (!m.spawn || typeof m.spawn.heading !== "number") {
     errors.push("spawn: expected { at, heading }");
   } else where("spawn.at", m.spawn.at);
@@ -230,6 +291,15 @@ export function serializeMap(map: TownMap): string {
   const rows = (rs: string[]) =>
     `[\n${rs.map((r) => `    ${JSON.stringify(r)}`).join(",\n")}\n  ]`;
   const pt = ([x, z]: Point) => `[${x}, ${z}]`;
+  // Turned objects, top row first.
+  const turned = Object.entries(map.facing ?? {}).sort(([a], [b]) => {
+    const [ac, ar] = a.split(",").map(Number);
+    const [bc, br] = b.split(",").map(Number);
+    return ar - br || ac - bc;
+  });
+  const facing = turned.length
+    ? `\n  "facing": { ${turned.map(([k, n]) => `${JSON.stringify(k)}: ${n}`).join(", ")} },`
+    : "";
   const spots = Object.entries(map.spots)
     .map(([k, p]) => `    ${JSON.stringify(k)}: ${pt(p)}`)
     .join(",\n");
@@ -238,7 +308,7 @@ export function serializeMap(map: TownMap): string {
   "size": ${map.size},
   "spawn": { "at": ${pt(map.spawn.at)}, "heading": ${map.spawn.heading} },
   "spots": {${spots ? `\n${spots}\n  ` : ""}},
-  "spare": [${map.spare.map(pt).join(", ")}],
+  "spare": [${map.spare.map(pt).join(", ")}],${facing}
   "terrain": ${rows(map.terrain)},
   "objects": ${rows(map.objects)}
 }
@@ -328,6 +398,13 @@ export function objectJitter(
     scale: 0.85 + rand() * 0.4,
     yaw: rand() * Math.PI * 2,
   };
+}
+
+/** A thing's place within its cell (see objectJitter), turned the way it
+ * was turned in the editor, if it was. */
+export function objectPlace(map: TownMap, col: number, row: number) {
+  const place = objectJitter(col, row);
+  return { ...place, yaw: facingAt(map, col, row) ?? place.yaw };
 }
 
 /** A rectangle of cells. */

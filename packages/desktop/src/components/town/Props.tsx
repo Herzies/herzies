@@ -24,7 +24,7 @@ import {
 import {
   MAP_SIZE,
   objectAt,
-  objectJitter,
+  objectPlace,
   type TownMap,
   waterRuns,
 } from "./map";
@@ -322,10 +322,10 @@ function placeAll(map: TownMap) {
       if (o === "T") {
         const kind = treeSpecies(map, col, row);
         const { variant, ...look } = treeLook(col, row, kind);
-        const tree = { ...objectJitter(col, row), ...look };
+        const tree = { ...objectPlace(map, col, row), ...look };
         trees[`${kind}${variant}`].push(tree);
         species[kind].push(tree);
-      } else if (o in KINDS) placed[o as Kind].push(objectJitter(col, row));
+      } else if (o in KINDS) placed[o as Kind].push(objectPlace(map, col, row));
     }
   }
   return { placed, trees, species };
