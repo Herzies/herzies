@@ -13,12 +13,7 @@ const seeThroughLambert = (p: THREE.MeshLambertMaterialParameters) =>
   seeThrough(new THREE.MeshLambertMaterial(p));
 
 import { BuildingColliders, Buildings } from "./Buildings";
-import {
-  leafGeometry,
-  leafMaterial,
-  trunkGeometry,
-  trunkMaterial,
-} from "./Islands";
+import { trunkMaterial } from "./Islands";
 import {
   MAP_SIZE,
   objectAt,
@@ -27,8 +22,28 @@ import {
   waterRuns,
 } from "./map";
 import { type Champion, StatueColliders, Statues } from "./Statues";
+import {
+  SPECIES,
+  type Species,
+  TREE_RADIUS,
+  TREE_VARIANTS,
+  treeLook,
+  treeMaterial,
+  treeSpecies,
+} from "./trees";
 
-type Placed = { x: number; z: number; scale: number; yaw: number };
+type Placed = {
+  x: number;
+  z: number;
+  scale: number;
+  yaw: number;
+  /** Stretched taller (or shorter) than its scale. */
+  tall?: number;
+  /** Leaning over, about x and z, in radians. */
+  tilt?: [number, number];
+  /** Tinted (times its own colours). */
+  tint?: THREE.Color;
+};
 /** One of several drawn per thing (a flower in a patch): its offset in
  * the thing's own frame, and its size. */
 type Copy = { x: number; z: number; s: number };
@@ -115,12 +130,7 @@ const stemMaterial = swayInWind(
   new THREE.MeshLambertMaterial({ color: "#3f7a3a" }),
   { amount: 0.4, from: 0, bend: 1 },
 );
-/** The town's own leaves: the canopy sways above the trunk. (The distant
- * islands' trees keep the still original.) */
-const swayingLeaves = seeThrough(
-  swayInWind(leafMaterial.clone(), { amount: 0.035, from: 2.8 }),
-);
-/** The town's own trunks (and stumps), see-through like the leaves. */
+/** The town's stumps, see-through like the trees. */
 const townTrunk = seeThrough(trunkMaterial.clone());
 const FLOWERS = scatter(99, 6, 0.4);
 const stemGeometry = new THREE.CylinderGeometry(0.02, 0.02, 0.3, 3);
@@ -193,25 +203,6 @@ const BERRIES: Copy[] = [
 /** What each kind of thing is drawn with, and how wide it blocks (0: you
  * walk through it). */
 const KINDS = {
-  T: {
-    parts: [
-      // Stretched taller than the distant islands' trees: up close, a
-      // tree should tower over a herzie.
-      {
-        geometry: leafGeometry,
-        material: swayingLeaves,
-        y: 6.8,
-        shape: [1.4, 2.6, 1.4],
-      },
-      {
-        geometry: trunkGeometry,
-        material: townTrunk,
-        y: 1.5,
-        shape: [1.5, 3, 1.5],
-      },
-    ],
-    radius: 0.45,
-  },
   R: {
     parts: [
       {
@@ -287,22 +278,41 @@ const KINDS = {
 type Kind = keyof typeof KINDS;
 const ONCE: Copy[] = [{ x: 0, z: 0, s: 1 }];
 
-function placeAll(map: TownMap): Record<Kind, Placed[]> {
+/** The trees, by kind and shape: one draw call each. */
+const TREE_BUCKETS = SPECIES.flatMap((species) =>
+  TREE_VARIANTS[species].map((geometry, variant) => ({
+    key: `${species}${variant}`,
+    species,
+    part: { geometry, material: treeMaterial, y: 0 } satisfies Part,
+  })),
+);
+
+function placeAll(map: TownMap) {
   const placed = Object.fromEntries(
     Object.keys(KINDS).map((k) => [k, []]),
   ) as unknown as Record<Kind, Placed[]>;
+  const trees: Record<string, Placed[]> = Object.fromEntries(
+    TREE_BUCKETS.map((b) => [b.key, []]),
+  );
+  const species: Record<Species, Placed[]> = { pine: [], birch: [], oak: [] };
   for (let row = 0; row < MAP_SIZE; row++) {
     for (let col = 0; col < MAP_SIZE; col++) {
       const o = objectAt(map, col, row);
-      if (o in KINDS) placed[o as Kind].push(objectJitter(col, row));
+      if (o === "T") {
+        const kind = treeSpecies(map, col, row);
+        const { variant, ...look } = treeLook(col, row, kind);
+        const tree = { ...objectJitter(col, row), ...look };
+        trees[`${kind}${variant}`].push(tree);
+        species[kind].push(tree);
+      } else if (o in KINDS) placed[o as Kind].push(objectJitter(col, row));
     }
   }
-  return placed;
+  return { placed, trees, species };
 }
 
 /** What casts a shadow in the sun: the small stuff (grass, flowers,
  * mushrooms) isn't worth drawing a second time for it. */
-const CASTS = new Set<Kind>(["T", "R", "S", "B"]);
+const CASTS = new Set<Kind>(["R", "S", "B"]);
 
 /** One part (say, every tree's leaves) as one instanced draw call. */
 function PartMesh({
@@ -320,6 +330,8 @@ function PartMesh({
     if (!mesh) return;
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
+    const lean = new THREE.Quaternion();
+    const euler = new THREE.Euler();
     const up = new THREE.Vector3(0, 1, 0);
     const [sx, sy, sz] = part.shape ?? [1, 1, 1];
     const copies = part.copies ?? ONCE;
@@ -327,6 +339,10 @@ function PartMesh({
     let i = 0;
     for (const t of things) {
       q.setFromAxisAngle(up, t.yaw);
+      if (t.tilt) {
+        q.premultiply(lean.setFromEuler(euler.set(t.tilt[0], 0, t.tilt[1])));
+      }
+      const tall = t.tall ?? 1;
       const cos = Math.cos(t.yaw);
       const sin = Math.sin(t.yaw);
       for (const [j, cp] of copies.entries()) {
@@ -338,14 +354,14 @@ function PartMesh({
             t.z + (cp.z * cos - cp.x * sin) * t.scale,
           ),
           q,
-          new THREE.Vector3(sx * s, sy * s, sz * s),
+          new THREE.Vector3(sx * s, sy * s * tall, sz * s),
         );
         mesh.setMatrixAt(i, m);
         if (part.palette) {
           const pick = mulberry32(Math.round(t.x * 131 + t.z * 7919) + j)();
           color.set(part.palette[Math.floor(pick * part.palette.length)]);
           mesh.setColorAt(i, color);
-        }
+        } else if (t.tint) mesh.setColorAt(i, t.tint);
         i++;
       }
     }
@@ -381,9 +397,12 @@ export function Props({
   /** Who the statues show. */
   champion: Champion;
 }) {
-  const placed = useMemo(() => placeAll(map), [map]);
+  const { placed, trees } = useMemo(() => placeAll(map), [map]);
   return (
     <>
+      {TREE_BUCKETS.map((b) => (
+        <PartMesh key={b.key} part={b.part} things={trees[b.key]} cast />
+      ))}
       {(Object.keys(KINDS) as Kind[]).flatMap((k) =>
         KINDS[k].parts.map((part, i) => (
           <PartMesh
@@ -407,10 +426,19 @@ export function Props({
  * per run of open water (bridges have none, so you can cross them).
  */
 export function MapColliders({ map }: { map: TownMap }) {
-  const placed = useMemo(() => placeAll(map), [map]);
+  const { placed, species } = useMemo(() => placeAll(map), [map]);
   const runs = useMemo(() => waterRuns(map), [map]);
   return (
     <RigidBody type="fixed" colliders={false}>
+      {SPECIES.flatMap((k) =>
+        species[k].map((t) => (
+          <CylinderCollider
+            key={`T${t.x},${t.z}`}
+            args={[1, TREE_RADIUS[k] * t.scale]}
+            position={[t.x, 1, t.z]}
+          />
+        )),
+      )}
       {(Object.keys(KINDS) as Kind[]).flatMap((k) =>
         KINDS[k].radius === 0
           ? []
