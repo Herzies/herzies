@@ -560,15 +560,11 @@ function shopGeometry(b: Building) {
     const { x, z, yaw } = door;
     const at = (g: THREE.BufferGeometry, y: number, out: number, c: string) =>
       body.push(painted(onWall(g, x, y, z, yaw, out), c));
-    // A round glass door in a dark frame, split down the middle.
+    // A round, solid door in the shop's colour, in a dark frame, with a
+    // brass knob in the middle.
     at(disc(DOOR_RADIUS + 0.14, 0.08), DOOR_Y, 0.03, "#3a3a44");
-    glow.push(onWall(disc(DOOR_RADIUS, 0.04), x, DOOR_Y, z, yaw, 0.07));
-    at(
-      new THREE.BoxGeometry(0.08, DOOR_RADIUS * 2, 0.04),
-      DOOR_Y,
-      0.1,
-      "#3a3a44",
-    );
+    at(disc(DOOR_RADIUS, 0.08), DOOR_Y, 0.07, dark);
+    at(disc(0.11, 0.08), DOOR_Y, 0.14, "#e0c060");
     at(new THREE.BoxGeometry(2.3, 0.12, 0.6), 0.06, 0.32, STEP);
     // The sign: a board in the shop's colour with a white band across it.
     at(new THREE.BoxGeometry(2.4, 0.6, 0.1), SIGN_Y, 0.06, color);
