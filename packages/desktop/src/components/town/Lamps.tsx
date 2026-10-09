@@ -263,8 +263,9 @@ export function NightLights({ map }: { map: TownMap }) {
         return;
       }
       light.position.set(...g.at);
-      const aim = aimOf(g).position;
-      windowAims[k].position.copy(aim);
+      // Its own aim, made once (this runs most frames while walking).
+      const aim = aims[nearestWindows[k]];
+      if (aim) windowAims[k].position.copy(aim.position);
       windowAims[k].updateMatrixWorld();
       light.intensity = g.intensity * level;
       light.shadow.intensity = windowFades[k];
