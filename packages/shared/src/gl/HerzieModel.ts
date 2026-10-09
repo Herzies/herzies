@@ -5,6 +5,7 @@ import {
   type CreatureModel,
   type CreatureParams,
   creaturePoseOffsets,
+  creatureSeatDrop,
   DANCE_LOOP_FRAMES,
   hasDangleEquipped,
   primitiveShading,
@@ -70,6 +71,8 @@ const DANCE_FPS = 1000 / 65;
 const SPIRIT_CALM_LOOP_CHANCE = 0.6;
 /** How quickly dancing fades in and out, per second. */
 const DANCE_BLEND_RATE = 6;
+/** How quickly it sits down and stands up (per second). */
+const SIT_BLEND_RATE = 14;
 /** World units per creature unit: the renderer's whole frame (at the
  * herzie's centre) is 4.5 world units tall, the size the sprites were. */
 export const MODEL_SCALE = 4.5 / CREATURE_FRAME_HEIGHT;
@@ -179,7 +182,8 @@ function geometryFor(s: Sphere): THREE.BufferGeometry {
  * layer — breathing squash, landing squash. The sun casts its shadow.
  */
 export class HerzieModel {
-  /** Add this to the scene; its position is the herzie's feet. */
+  /** Add this to the scene; its position is the herzie's feet — or its
+   * bottom, sitting. */
   readonly root = new THREE.Group();
   /** Height of the top of the head above the feet, in world units. */
   readonly height: number;
@@ -191,6 +195,8 @@ export class HerzieModel {
   readonly anim: AnimationState;
   /** Music is playing: dance (fades in and out). */
   dancing = false;
+  /** On a seat: legs out in front, resting on its bottom (eased). */
+  sitting = false;
   /** Whether anything worn that dangles (the chain, the pearls, the witch
    * hat's tip) swings as it turns — a host can hold it still. */
   dangles = true;
@@ -206,6 +212,11 @@ export class HerzieModel {
   /** 0 not dancing to 1 dancing, eased. */
   private danceWeight = 0;
   private danceTime = 0;
+  /** 0 standing to 1 seated, eased. */
+  private sitWeight = 0;
+  /** How far it settles when seated, in creature units (see
+   * creatureSeatDrop). */
+  private readonly seatDrop: number;
   private hopVariant: number | undefined;
 
   private readonly look: HerzieLook;
@@ -264,6 +275,7 @@ export class HerzieModel {
     this.height = (feet - top) * MODEL_SCALE;
     this.centerHeight = feet * MODEL_SCALE;
     this.span = schemeSpan(spheres);
+    this.seatDrop = this.hasLegs ? creatureSeatDrop(spheres, look.stage) : 0;
 
     const ramp = scheme ? schemeShades(scheme) : null;
     const byShading = new Map<string, THREE.ShaderMaterial>();
@@ -314,6 +326,7 @@ export class HerzieModel {
   update(dt: number, speed: number): void {
     stepAnimation(this.anim, dt, speed);
     this.stepDance(dt);
+    this.stepSit(dt);
     this.swing(dt);
     this.turn.rotation.y = this.heading;
     this.pose();
@@ -373,6 +386,13 @@ export class HerzieModel {
     } else if (before === 0) this.rerollHop();
   }
 
+  private stepSit(dt: number) {
+    const target = this.sitting ? 1 : 0;
+    this.sitWeight +=
+      (target - this.sitWeight) * (1 - Math.exp(-SIT_BLEND_RATE * dt));
+    if (Math.abs(this.sitWeight - target) < 1e-3) this.sitWeight = target;
+  }
+
   /** The Greedy Spirit picks its hop afresh each loop: none, or a variant
    * other than the last, so hops land irregularly. */
   private rerollHop() {
@@ -398,6 +418,7 @@ export class HerzieModel {
       danceWeight: this.danceWeight,
       spiritHopVariant: this.hopVariant,
       dangle: this.dangle,
+      sitWeight: this.sitWeight,
     });
     for (let i = 0; i < spheres.length; i++) {
       const [x, y, z] = spheres[i].center;
@@ -425,8 +446,10 @@ export class HerzieModel {
     const wide = MODEL_SCALE * (1 - breath * 0.6 + squash * 0.7);
     const tall = MODEL_SCALE * (1 + breath - squash);
     this.creature.scale.set(wide, tall, wide);
-    // Squash toward the feet: they stay on the ground.
-    this.creature.position.y = this.feetY * tall;
+    // Squash toward the feet: they stay on the ground. Seated, it settles
+    // onto its bottom instead.
+    this.creature.position.y =
+      (this.feetY - this.seatDrop * this.sitWeight) * tall;
     // What stays put doesn't breathe with the body.
     this.anchored?.scale.setScalar(MODEL_SCALE);
     this.anchored?.position.set(0, this.feetY * MODEL_SCALE, 0);

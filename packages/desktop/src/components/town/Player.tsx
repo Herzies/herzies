@@ -187,6 +187,7 @@ export function Player({
   useFrame((_, dt) => {
     // Sitting: on the seat, not the ground.
     herzie.root.position.y = townLive.seat ? SEAT_Y : 0;
+    herzie.sitting = !!townLive.seat;
     herzie.update(dt, rt.playerSpeed);
   });
 

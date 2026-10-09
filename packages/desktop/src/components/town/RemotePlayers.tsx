@@ -78,6 +78,7 @@ function RemoteHerzie({
     // Sitting on a bench: on its seat, not the ground.
     const seated = (s.flags & TOWN_FLAG_SITTING) !== 0;
     herzie.root.position.set(s.x, seated ? SEAT_Y : 0, s.z);
+    herzie.sitting = seated;
     herzie.heading = s.heading;
     herzie.update(dt, s.speed);
     tagAnchor.current?.position.set(

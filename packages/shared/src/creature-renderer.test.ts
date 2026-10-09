@@ -6,6 +6,7 @@ import {
   buildCreatureSpheres,
   CREATURE_PARAM_BOUNDS,
   creaturePoseOffsets,
+  creatureSeatDrop,
   DEFAULT_Y_ANGLE,
   generateCreatureParams,
   generateDanceFrames,
@@ -219,6 +220,68 @@ describe("model for 3D hosts", () => {
       walkWeight: 1,
     });
     expect(walking.some((d) => d[2] !== 0)).toBe(true);
+  });
+});
+
+describe("sitting", () => {
+  const pose = (stage: number, sitWeight: number) =>
+    creaturePoseOffsets(buildCreatureModel(USER, stage).spheres, stage, {
+      idleFrame: 0,
+      walkPhase: 0,
+      walkWeight: 0,
+      sitWeight,
+    });
+
+  it("brings a herzie's legs out in front, and nothing else", () => {
+    const { spheres } = buildCreatureModel(USER, 3);
+    const standing = pose(3, 0);
+    const seated = pose(3, 1);
+    let feet = 0;
+    spheres.forEach((sp, i) => {
+      const dy = seated[i][1] - standing[i][1];
+      const dz = seated[i][2] - standing[i][2];
+      const isFoot =
+        (sp.part === "leg-l" || sp.part === "leg-r") &&
+        sp.center[1] ===
+          Math.max(
+            ...spheres
+              .filter((o) => o.part === sp.part)
+              .map((o) => o.center[1]),
+          );
+      if (isFoot) feet++;
+      if (sp.part === "leg-l" || sp.part === "leg-r") {
+        // Up (−y) and forward (−z).
+        expect(dy).toBeLessThan(0);
+        expect(dz).toBeLessThan(0);
+      } else {
+        expect(dy).toBe(0);
+        expect(dz).toBe(0);
+      }
+    });
+    expect(feet).toBe(2);
+  });
+
+  it("settles a herzie with legs onto its bottom", () => {
+    const { spheres } = buildCreatureModel(USER, 3);
+    const bottom = (sp: (typeof spheres)[number]) => sp.center[1] + sp.radius;
+    const body = spheres.find((sp) => sp.part === "body");
+    if (!body) throw new Error("no body");
+    const feet = Math.max(
+      ...spheres.filter((sp) => sp.part.startsWith("leg")).map(bottom),
+    );
+    const drop = creatureSeatDrop(spheres, 3);
+    expect(drop).toBeGreaterThan(0);
+    // Down to the hips, at most: never sunk past its belly.
+    expect(drop).toBeLessThanOrEqual(feet - bottom(body));
+  });
+
+  it("leaves herzies without legs as they stand", () => {
+    for (const stage of [1, 2]) {
+      expect(pose(stage, 1)).toEqual(pose(stage, 0));
+      expect(
+        creatureSeatDrop(buildCreatureModel(USER, stage).spheres, stage),
+      ).toBe(0);
+    }
   });
 });
 

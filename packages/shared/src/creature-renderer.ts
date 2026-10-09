@@ -2190,6 +2190,61 @@ function walkDeltas(spheres: Sphere[], phase: number, stage: number): V3[] {
   });
 }
 
+/** Sitting (on a bench): the hips come out from under the body, as
+ * thighs (fractions of the body scale, like WALK's)… */
+const SIT = {
+  hipReach: 0.28,
+  hipLift: 0.05,
+  /** …and each foot swings forward about its hip, a little short of
+   * straight out, so the feet droop (radians). */
+  legAngle: (80 * Math.PI) / 180,
+} as const;
+
+/** Each sphere's offset when seated, as a delta: legs out in front.
+ * Herzies without legs just sit as they stand. */
+function sitDeltas(spheres: Sphere[], stage: number): V3[] {
+  const zero = spheres.map((): V3 => [0, 0, 0]);
+  if (stage < 3 || !spheres.some((sp) => sp.part === "leg-l")) return zero;
+  const s = HERZIE_BODY.scale * CS;
+  // The lower sphere of each leg is the foot; the upper one the hip.
+  const span = (side: string) => {
+    const ys = spheres
+      .filter((sp) => sp.part === side)
+      .map((sp) => sp.center[1]);
+    return { hip: Math.min(...ys), foot: Math.max(...ys) };
+  };
+  const legs = { "leg-l": span("leg-l"), "leg-r": span("leg-r") };
+  const hip: V3 = [0, -SIT.hipLift * s, -SIT.hipReach * s];
+  return spheres.map((sp, i) => {
+    if (sp.part !== "leg-l" && sp.part !== "leg-r") return zero[i];
+    const leg = legs[sp.part];
+    if (sp.center[1] !== leg.foot) return hip;
+    // Down (+y) from the hip, turned toward the front (−z).
+    const len = leg.foot - leg.hip;
+    return [
+      0,
+      hip[1] + len * (Math.cos(SIT.legAngle) - 1),
+      hip[2] - len * Math.sin(SIT.legAngle),
+    ];
+  });
+}
+
+/**
+ * How far a seated herzie settles below where its feet stood, in creature
+ * units: with its legs out, it rests on its bottom. 0 without legs.
+ */
+export function creatureSeatDrop(spheres: Sphere[], stage: number): number {
+  const sit = sitDeltas(spheres, stage);
+  let standing = Number.NEGATIVE_INFINITY;
+  let seated = Number.NEGATIVE_INFINITY;
+  spheres.forEach((sp, i) => {
+    if (isSceneFixed(sp.part)) return;
+    standing = Math.max(standing, sp.center[1] + sp.radius);
+    seated = Math.max(seated, sp.center[1] + sit[i][1] + sp.radius);
+  });
+  return Math.max(0, standing - seated);
+}
+
 // --- Anchor points ---
 
 function getAnchors(
@@ -3270,6 +3325,8 @@ export type CreatureMotion = Pick<
   spiritHopVariant?: number;
   /** How far anything worn that dangles (the chain, the pearls) swings. */
   dangle?: DangleState;
+  /** 0 standing to 1 seated (on a bench): legs out in front. */
+  sitWeight?: number;
 };
 
 /**
@@ -3288,6 +3345,8 @@ export function creaturePoseOffsets(
   const dw = Math.min(1, Math.max(0, pose.danceWeight ?? 0));
   const idle = idleDeltas(base, pose.idleFrame);
   const walk = w > 0 ? walkDeltas(base, pose.walkPhase, stage) : null;
+  const sw = Math.min(1, Math.max(0, pose.sitWeight ?? 0));
+  const sit = sw > 0 ? sitDeltas(base, stage) : null;
   const dance =
     dw > 0
       ? applyDanceOffsets(
@@ -3307,6 +3366,12 @@ export function creaturePoseOffsets(
     let x = d ? d[0] * w : 0;
     let y = idle[i] * iw + (d ? d[1] * w : 0);
     let z = d ? d[2] * w : 0;
+    const seated = sit?.[i];
+    if (seated) {
+      x += seated[0] * sw;
+      y += seated[1] * sw;
+      z += seated[2] * sw;
+    }
     const moved = dance?.[i].center;
     if (moved) {
       x = x * (1 - dw) + (moved[0] - b[0]) * dw;
