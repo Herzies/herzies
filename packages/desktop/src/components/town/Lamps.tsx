@@ -51,17 +51,24 @@ export const lanternGlassGeometry = new THREE.BoxGeometry(0.32, 0.46, 0.32);
 export const nightLights = { level: 0 };
 
 const LAMP_COLOR = new THREE.Color("#ffc47a");
-/** How bright a lamp post, and a lit window's spill, at full night. */
+/** How bright a lamp post, and a lit window, at full night. */
 const LAMP_INTENSITY = 16;
 /** How far a lamp post's light reaches (a window's: LAMP_REACH). */
 const LAMP_POST_REACH = 10;
-const WINDOW_INTENSITY = 5;
-/** How strongly each lights the herzies (see herzieMaterial). */
+const WINDOW_INTENSITY = 7;
+/** A window's light: a cone out of the glass, aimed down at the ground
+ * this far out, this wide (half-angle) — so it lands as a pool in front
+ * of the house, and the wall round the window stays dark. */
+const WINDOW_AIM = 2.6;
+const WINDOW_CONE = 0.8;
+/** How strongly each lights the herzies (see herzieMaterial); a window
+ * from just in front of it, so it's herzies out front it lights. */
 const LAMP_ON_HERZIES = 0.6;
 const WINDOW_ON_HERZIES = 0.3;
-/** How many of the little lights cast shadows: the ones nearest the
- * player. Each is the scene drawn six more times a frame (a cube of
- * shadow), so only a few, and only at night. */
+const WINDOW_ON_HERZIES_OUT = 1.2;
+/** How many lamp posts cast shadows: the ones nearest the player. Each is
+ * the scene drawn six more times a frame (a cube of shadow), so only a
+ * few, and only at night. */
 const SHADOW_LIGHTS = 3;
 /** Shadows start this far from a light: past the lantern's own frame and
  * glass, which would otherwise shade everything round it. */
@@ -70,7 +77,10 @@ const SHADOW_NEAR = 0.45;
 const DARK_ENOUGH = 0.05;
 
 type Glow = {
+  /** Where the light is. */
   at: [number, number, number];
+  /** A window's: which way it looks out (a lamp shines every way). */
+  out?: [number, number];
   intensity: number;
   reach: number;
   onHerzies: number;
@@ -93,10 +103,12 @@ export function glowsOf(map: TownMap): Glow[] {
     }
   }
   const windows = windowLightsOf(map)
-    .sort((a, b) => Math.hypot(a[0], a[2]) - Math.hypot(b[0], b[2]))
+    .sort((a, b) => Math.hypot(a.at[0], a.at[2]) - Math.hypot(b.at[0], b.at[2]))
     .map(
-      (at): Glow => ({
-        at,
+      (w): Glow => ({
+        // Just off the glass, so the wall behind it is out of the cone.
+        at: [w.at[0] + w.out[0] * 0.15, w.at[1], w.at[2] + w.out[1] * 0.15],
+        out: w.out,
         intensity: WINDOW_INTENSITY,
         reach: LAMP_REACH,
         onHerzies: WINDOW_ON_HERZIES,
@@ -105,29 +117,55 @@ export function glowsOf(map: TownMap): Glow[] {
   return [...lamps, ...windows].slice(0, MAX_LAMPS);
 }
 
+/** Where a light lights herzies from: a lamp from its lantern, a window
+ * from a little out in front of it. */
+const herzieLightAt = (g: Glow): [number, number, number] =>
+  g.out
+    ? [
+        g.at[0] + g.out[0] * WINDOW_ON_HERZIES_OUT,
+        g.at[1],
+        g.at[2] + g.out[1] * WINDOW_ON_HERZIES_OUT,
+      ]
+    : g.at;
+
+/** Where a window's cone points: down at the ground in front. */
+function aimOf(g: Glow): THREE.Object3D {
+  const target = new THREE.Object3D();
+  const [ox, oz] = g.out ?? [0, 0];
+  target.position.set(g.at[0] + ox * WINDOW_AIM, 0, g.at[2] + oz * WINDOW_AIM);
+  target.updateMatrixWorld();
+  return target;
+}
+
 /**
  * The town's little lights at night: a warm point light at every lamp
- * post and outside each lit stretch of windows, so their glow spills onto
- * the ground, the walls and the trees — and onto herzies, whose own shader
- * reads them from `ambient.uLamps`. Off by day; as many lights at noon as
- * at midnight, so nothing recompiles as the day turns.
+ * post, and a cone of light out of every lit window onto the ground in
+ * front — so the glow spills onto the ground, the walls and trees nearby,
+ * and (through `ambient.uLamps`, which their own shader reads) onto
+ * herzies. Off by day; as many lights at noon as at midnight, so nothing
+ * recompiles as the day turns.
  *
- * The few nearest the player cast shadows: a small pool of shadow-casting
- * lights that move to them (the plain light there going dark meanwhile).
- * They only cast at night — turning that on and off recompiles the
- * materials, once at dusk and once at dawn.
+ * The few lamp posts nearest the player cast shadows: a small pool of
+ * shadow-casting lights that move to them (the plain light there going
+ * dark meanwhile). They only cast at night — turning that on and off
+ * recompiles the materials, once at dusk and once at dawn.
  */
 export function NightLights({ map }: { map: TownMap }) {
   const glows = useMemo(() => glowsOf(map), [map]);
-  const lights = useRef<(THREE.PointLight | null)[]>([]);
+  const aims = useMemo(
+    () => glows.map((g) => (g.out ? aimOf(g) : null)),
+    [glows],
+  );
+  const lights = useRef<(THREE.Light | null)[]>([]);
   const casters = useRef<(THREE.PointLight | null)[]>([]);
   const shown = useRef({ level: -1, x: Number.NaN, z: Number.NaN });
+  const lampCount = glows.filter((g) => !g.out).length;
 
   useLayoutEffect(() => {
     const lamps = ambient.uLamps.value;
     for (let i = 0; i < lamps.length; i++) {
       const g = glows[i];
-      if (g) lamps[i].set(...g.at, 0);
+      if (g) lamps[i].set(...herzieLightAt(g), 0);
       else lamps[i].set(0, 0, 0, 0);
     }
     shown.current.level = -1;
@@ -144,8 +182,10 @@ export function NightLights({ map }: { map: TownMap }) {
     if (level === s.level && Math.hypot(x - s.x, z - s.z) < 0.5) return;
     Object.assign(s, { level, x, z });
 
+    // The lamp posts nearest the player cast shadows (windows don't).
     const nearest = glows
-      .map((g, i) => ({ i, d: Math.hypot(g.at[0] - x, g.at[2] - z) }))
+      .map((g, i) => ({ i, g, d: Math.hypot(g.at[0] - x, g.at[2] - z) }))
+      .filter((n) => !n.g.out)
       .sort((a, b) => a.d - b.d)
       .slice(0, SHADOW_LIGHTS)
       .map((n) => n.i);
@@ -164,28 +204,49 @@ export function NightLights({ map }: { map: TownMap }) {
         return;
       }
       light.position.set(...g.at);
-      light.distance = g.reach;
       light.intensity = g.intensity * level;
     });
   });
 
   return (
     <>
-      {glows.map((g, i) => (
-        <pointLight
-          // biome-ignore lint/suspicious/noArrayIndexKey: fixed per map
-          key={i}
-          ref={(l) => {
-            lights.current[i] = l;
-          }}
-          position={g.at}
-          color={LAMP_COLOR}
-          intensity={0}
-          distance={g.reach}
-          decay={2}
-        />
-      ))}
-      {Array.from({ length: Math.min(SHADOW_LIGHTS, glows.length) }, (_, k) => (
+      {glows.map((g, i) => {
+        const keep = (l: THREE.Light | null) => {
+          lights.current[i] = l;
+        };
+        const aim = aims[i];
+        return aim ? (
+          <group
+            // biome-ignore lint/suspicious/noArrayIndexKey: fixed per map
+            key={i}
+          >
+            <primitive object={aim} />
+            <spotLight
+              ref={keep}
+              position={g.at}
+              target={aim}
+              color={LAMP_COLOR}
+              intensity={0}
+              distance={g.reach}
+              decay={2}
+              angle={WINDOW_CONE}
+              penumbra={0.75}
+            />
+          </group>
+        ) : (
+          <pointLight
+            // biome-ignore lint/suspicious/noArrayIndexKey: fixed per map
+            key={i}
+            ref={keep}
+            position={g.at}
+            color={LAMP_COLOR}
+            intensity={0}
+            distance={g.reach}
+            decay={2}
+          />
+        );
+      })}
+      {Array.from({ length: Math.min(SHADOW_LIGHTS, lampCount) }, (_, k) => (
         <pointLight
           // biome-ignore lint/suspicious/noArrayIndexKey: a fixed pool
           key={`cast${k}`}

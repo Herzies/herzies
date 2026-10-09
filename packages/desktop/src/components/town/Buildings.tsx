@@ -420,24 +420,35 @@ export function chimneysOf(map: TownMap): [number, number, number][] {
   });
 }
 
-/** Where each lit stretch of windows throws its light at night: out in
- * front of the middle of its windows, at window height (see NightLights). */
-export function windowLightsOf(map: TownMap): [number, number, number][] {
+/** How far apart a building's windows are on a wall facing `yaw`: shop
+ * windows along a shop's front closer together. */
+function spacingFor(b: Building, door: Door | null) {
+  return (yaw: number) =>
+    b.kind === "shop" && door !== null && Math.abs(yaw - door.yaw) < 1e-6
+      ? SHOP_WINDOW_SPACING
+      : WINDOW_SPACING;
+}
+
+/** A lit window at night: where it is (on the glass, at its middle), and
+ * which way it looks out (see NightLights). */
+export type WindowLight = {
+  at: [number, number, number];
+  out: [number, number];
+};
+
+/** Every ground-floor window that lights up at night. */
+export function windowLightsOf(map: TownMap): WindowLight[] {
   return buildingsOf(map).flatMap((b) => {
     if (b.kind === "cave") return [];
     const isPart = partOf(b);
     const door = doorAt(b);
     return b.rects.flatMap((r) =>
-      windowRuns(r, isPart, door, () => WINDOW_SPACING).map((run) => {
-        const x = run.reduce((t, w) => t + w.x, 0) / run.length;
-        const z = run.reduce((t, w) => t + w.z, 0) / run.length;
-        const { yaw } = run[0];
-        return [x + Math.sin(yaw) * 1.3, 2.2, z + Math.cos(yaw) * 1.3] as [
-          number,
-          number,
-          number,
-        ];
-      }),
+      windowRuns(r, isPart, door, spacingFor(b, door))
+        .flat()
+        .map((w) => ({
+          at: [w.x, GROUND_FLOOR, w.z] as [number, number, number],
+          out: [Math.sin(w.yaw), Math.cos(w.yaw)] as [number, number],
+        })),
     );
   });
 }
@@ -599,9 +610,7 @@ function shopGeometry(b: Building) {
     );
     const front = (yaw: number) =>
       door !== null && Math.abs(yaw - door.yaw) < 1e-6;
-    const runs = windowRuns(r, isPart, door, (yaw) =>
-      front(yaw) ? SHOP_WINDOW_SPACING : WINDOW_SPACING,
-    );
+    const runs = windowRuns(r, isPart, door, spacingFor(b, door));
     for (const w of runs.flat()) {
       if (front(w.yaw)) {
         // Shop window: big, framed, under a striped awning.
