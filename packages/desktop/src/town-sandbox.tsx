@@ -2,6 +2,8 @@
 // and a player, without logging in. `pnpm vite:dev`, then open
 // /town-sandbox.html. `?shadows=0` turns the sun's shadows off, and
 // `?bench=1` times the renderer (see bench).
+// `?time=` sets the hour, and `&speed=` runs the clock on from there,
+// that many hours a second (to watch the light and shadows move).
 // `?net=local` joins the multiplayer Town on `wrangler dev` (in
 // packages/town-server, with TOWN_TICKET_SECRET=dev-town-secret in .dev.vars);
 // `&name=` and `&server=ws://…` to taste. Open it twice to see each other.
@@ -25,6 +27,14 @@ import {
 import TownCanvas from "./components/town/TownCanvas";
 
 const params = new URLSearchParams(location.search);
+
+const startHour = params.has("time") ? Number(params.get("time")) : null;
+const speed = Number(params.get("speed") ?? 0);
+const startedAt = performance.now();
+const sandboxHour =
+  startHour !== null && speed > 0
+    ? () => (startHour + ((performance.now() - startedAt) / 1000) * speed) % 24
+    : startHour;
 
 const card = (type: string, title: string): EventCard => ({
   type,
@@ -194,7 +204,7 @@ function Sandbox() {
       net={net}
       bubbles={bubbles}
       paused={false}
-      hour={params.has("time") ? Number(params.get("time")) : null}
+      hour={sandboxHour}
       shadows={params.get("shadows") !== "0"}
       onCreated={params.has("bench") ? bench : undefined}
       onOpen={(key) => console.log("[town-sandbox] open", key)}
