@@ -31,10 +31,10 @@ import { type Champion, StatueColliders, Statues } from "./Statues";
 import {
   SPECIES,
   type Species,
+  TREE_MATERIALS,
   TREE_RADIUS,
   TREE_VARIANTS,
   treeLook,
-  treeMaterial,
   treeSpecies,
 } from "./trees";
 
@@ -303,7 +303,7 @@ const TREE_BUCKETS = SPECIES.flatMap((species) =>
   TREE_VARIANTS[species].map((geometry, variant) => ({
     key: `${species}${variant}`,
     species,
-    part: { geometry, material: treeMaterial, y: 0 } satisfies Part,
+    part: { geometry, material: TREE_MATERIALS[species], y: 0 } satisfies Part,
   })),
 );
 

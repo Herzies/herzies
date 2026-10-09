@@ -37,6 +37,8 @@ export type Sway = {
   /** How far it leans away from the player walking through it (0: not
    * at all). */
   bend?: number;
+  /** How far leaves flutter: a quick shimmer, each spot its own (0: none). */
+  flutter?: number;
 };
 
 /**
@@ -53,6 +55,7 @@ export function swayInWind<M extends THREE.Material>(
     uSway: { value: sway.amount },
     uSwayFrom: { value: sway.from },
     uBend: { value: sway.bend ?? 0 },
+    uFlutter: { value: sway.flutter ?? 0 },
   };
   material.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, ambient, own);
@@ -65,7 +68,8 @@ uniform vec3 uPlayer;
 uniform vec2 uWindDir;
 uniform float uSway;
 uniform float uSwayFrom;
-uniform float uBend;`,
+uniform float uBend;
+uniform float uFlutter;`,
       )
       .replace(
         "#include <project_vertex>",
@@ -88,12 +92,22 @@ float push = uBend * smoothstep( 1.5, 0.3, dist );
 lean += push * away / max( dist, 0.001 ) * 2.5;
 worldPos.xz += lean * above * uSway;
 worldPos.y -= push * above * 0.35;
+// Leaves fluttering: quick and small, out of step from spot to spot (the
+// same at the same spot, so faces sharing a corner stay joined).
+if ( uFlutter > 0.0 && above > 0.0 ) {
+  float phase = dot( worldPos.xyz, vec3( 1.7, 2.3, 1.3 ) );
+  worldPos.xyz += uFlutter * swell * vec3(
+    sin( uTime * 4.1 + phase ),
+    0.6 * sin( uTime * 5.3 + phase * 1.3 ),
+    sin( uTime * 3.7 + phase * 0.7 )
+  );
+}
 mvPosition = viewMatrix * worldPos;
 gl_Position = projectionMatrix * mvPosition;`,
       );
   };
   material.customProgramCacheKey = () =>
-    `sway:${sway.amount}:${sway.from}:${sway.bend ?? 0}`;
+    `sway:${sway.amount}:${sway.from}:${sway.bend ?? 0}:${sway.flutter ?? 0}`;
   return material;
 }
 
