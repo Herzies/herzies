@@ -21,6 +21,11 @@
       "require": "./dist/game-events.js",
       "types": "./dist/game-events.d.ts"
     },
+    "./town-net": {
+      "types": "./dist/town-net.d.ts",
+      "import": "./dist/town-net.js",
+      "require": "./dist/town-net.js"
+    },
     "./card-art/*": "./card-art/*"
   },
   "files": [

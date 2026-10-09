@@ -18,5 +18,7 @@ export * from "./npc-looks.js";
 export * from "./Sky.js";
 export * from "./SpeechBubble.js";
 export * from "./scenery-renderer.js";
+export * from "./town-interpolation.js";
+export * from "./town-net.js";
 export * from "./types.js";
 export * from "./visitors.js";

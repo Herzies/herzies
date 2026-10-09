@@ -2,10 +2,15 @@
 // and a player, without logging in. `pnpm vite:dev`, then open
 // /town-sandbox.html. `?shadows=0` turns the sun's shadows off, and
 // `?bench=1` times the renderer (see bench).
+// `?net=local` joins the multiplayer Town on `wrangler dev` (in
+// packages/town-server, with TOWN_TICKET_SECRET=dev-town-secret in .dev.vars);
+// `&name=` and `&server=ws://…` to taste. Open it twice to see each other.
 import "./globals.css";
+import { signTownTicket } from "@herzies/shared";
 import type { RootState } from "@react-three/fiber";
 import { createRoot } from "react-dom/client";
 import type { EventCard } from "./components/TownScene";
+import { setTownTicketSource, townNet } from "./components/town/net/townNet";
 import {
   SPARE_SPOTS,
   SPOTS,
@@ -124,6 +129,33 @@ async function bench(state: RootState) {
   state.setFrameloop("always");
 }
 
+function localNet() {
+  const uid = `sandbox-${Math.random().toString(36).slice(2, 8)}`;
+  const name = params.get("name") ?? uid;
+  setTownTicketSource(async () => {
+    const exp = Math.floor(Date.now() / 1000) + 600;
+    const look = {
+      seed: player.seed,
+      stage: player.stage,
+      equipped: player.equipped,
+    };
+    return {
+      ticket: await signTownTicket({ uid, name, look, exp }, "dev-town-secret"),
+      url: params.get("server") ?? "ws://localhost:8787",
+      exp,
+    };
+  });
+  const net = townNet();
+  net.start();
+  net.subscribe(() =>
+    console.log("[town-sandbox] net", net.status, net.remotes.size),
+  );
+  return net;
+}
+const net = params.get("net") === "local" ? localNet() : null;
+// For poking at from the console and browser tests.
+Object.assign(window, { townNet: net });
+
 const root = document.getElementById("root");
 if (root) {
   root.style.height = "100vh";
@@ -131,6 +163,7 @@ if (root) {
     <TownCanvas
       spots={spots}
       player={player}
+      net={net}
       paused={false}
       hour={params.has("time") ? Number(params.get("time")) : null}
       shadows={params.get("shadows") !== "0"}

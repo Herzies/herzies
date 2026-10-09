@@ -44,6 +44,18 @@ export const townSave = {
   polar: 1.2,
 };
 
+/** What the player's herzie is doing right now, for the multiplayer Town
+ * (which runs outside the frame loop and outlives the world's mounting). */
+export const townLive = {
+  /** Ground speed last physics step; 0 while the world isn't running. */
+  speed: 0,
+  /** When the player last pressed or held anything, performance.now() ms. */
+  lastInputAt: 0,
+  /** Set to move the herzie straight there next step (the server refused a
+   * move); Player clears it. */
+  teleport: null as { x: number; z: number } | null,
+};
+
 type Spot = { x: number; z: number };
 const spot = ([x, z]: [number, number]): Spot => ({ x, z });
 

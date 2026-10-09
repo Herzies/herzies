@@ -288,6 +288,11 @@ export const herzies = {
       "fetch_active_events",
     ),
 
+  /** A signed pass into the multiplayer Town. Rejects with "off" when
+   * multiplayer is switched off server-side. */
+  fetchTownTicket: () =>
+    invoke<{ ticket: string; url: string; exp: number }>("fetch_town_ticket"),
+
   fetchPreviousHunt: () =>
     invoke<{ events: GameEvent[]; next: GameEvent | null }>(
       "fetch_previous_hunt",

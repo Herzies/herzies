@@ -1,8 +1,9 @@
 import type { Equipped } from "@herzies/shared";
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../lib/utils";
 import { LoadingSplash } from "./LoadingSplash";
 import { type EventCard, formatIn, isDown } from "./TownScene";
+import { useTownNet, useTownNetVersion } from "./town/net/townNet";
 import { SPARE_SPOTS, SPOTS, type TownSpot } from "./town/runtime";
 
 // three.js, Rapier's WASM and friends: loaded the first time someone opens
@@ -37,6 +38,9 @@ export function TownWorld({
   player: { seed: string; stage: number; equipped?: Equipped | null };
 }) {
   const [near, setNear] = useState<TownSpot | null>(null);
+  // Everyone else with the Town open, on the same island.
+  const net = useTownNet(!paused);
+  useTownNetVersion(net);
   // The Town tab is mounted (hidden) for the app's whole life, so wait for
   // it to be opened before loading the 3D world and starting a WebGL
   // context — then keep them.
@@ -87,6 +91,17 @@ export function TownWorld({
     }),
     [player.seed, player.stage, equippedKey],
   );
+  // A new outfit: a fresh ticket carries it to everyone else (after a beat,
+  // so the server has the change saved).
+  const lookKey = `${player.seed}|${player.stage}|${equippedKey}`;
+  const firstLook = useRef(lookKey);
+  useEffect(() => {
+    if (firstLook.current === lookKey) return;
+    firstLook.current = lookKey;
+    const t = setTimeout(() => net.refreshLook(), 1_500);
+    return () => clearTimeout(t);
+  }, [lookKey, net]);
+  const others = net.remotes.size;
 
   const talkTo = near?.card.openKey;
   return (
@@ -96,10 +111,23 @@ export function TownWorld({
           {notice}
         </div>
       ) : null}
+      {net.status === "outdated" || others > 0 ? (
+        <div
+          className={cn(
+            "pointer-events-none absolute right-2 z-30 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white/70",
+            notice ? "top-9" : "top-2",
+          )}
+        >
+          {net.status === "outdated"
+            ? "Update Herzies to see other players"
+            : `${others} other${others === 1 ? "" : "s"} here`}
+        </div>
+      ) : null}
       {opened && (
         <Suspense fallback={<LoadingSplash overlay label="loading town" />}>
           <TownCanvas
             spots={spots}
+            net={net}
             player={look}
             paused={paused}
             onOpen={onOpen}

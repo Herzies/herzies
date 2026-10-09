@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "herzies-town",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "durable_objects": {
+    "bindings": [{ "name": "TOWN_ROOM", "class_name": "TownRoom" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TownRoom"] }],
+  "observability": { "enabled": true }
+  // Secret: TOWN_TICKET_SECRET (`wrangler secret put`, same value as the
+  // Supabase edge function's). Locally it comes from .dev.vars.
+}

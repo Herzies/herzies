@@ -7,7 +7,9 @@ import { CameraRig } from "./CameraRig";
 import type { Hour } from "./DayCycle";
 import { type TownInput, useTownInput } from "./input";
 import type { TownMap } from "./map";
+import type { TownConnection } from "./net/TownConnection";
 import { Player } from "./Player";
+import { RemotePlayers } from "./RemotePlayers";
 import {
   HOME_MAP,
   TALK_RANGE,
@@ -42,6 +44,8 @@ export type TownCanvasProps = {
   hour?: Hour;
   /** Cast shadows from the sun (default: on; off to measure the cost). */
   shadows?: boolean;
+  /** The multiplayer Town: draws everyone else on it. */
+  net?: TownConnection | null;
   /** Called once the renderer is up (the sandbox's benchmark uses it). */
   onCreated?: (state: RootState) => void;
 };
@@ -97,6 +101,7 @@ export default function TownCanvas(props: TownCanvasProps) {
             <Visitor key={s.key} spot={s} onOpen={props.onOpen} />
           ))}
         </Physics>
+        {props.net && <RemotePlayers net={props.net} />}
         <CameraRig />
       </TownRuntimeContext.Provider>
     </Canvas>

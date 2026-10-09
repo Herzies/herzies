@@ -994,6 +994,11 @@ async fn fetch_active_events() -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
+async fn fetch_town_ticket() -> Result<serde_json::Value, String> {
+    api::api_fetch_town_ticket(&api::http()).await
+}
+
+#[tauri::command]
 async fn fetch_previous_hunt() -> Result<serde_json::Value, String> {
     let client = api::http();
     match api::api_fetch_previous_hunt(&client).await {
@@ -2553,6 +2558,7 @@ pub fn run() {
             set_ghost_mode,
             get_ghost_mode,
             fetch_active_events,
+            fetch_town_ticket,
             fetch_previous_hunt,
             play_hint_audio,
             fetch_leaderboard,

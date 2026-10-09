@@ -1,0 +1,350 @@
+/**
+ * The multiplayer Town's wire protocol, shared by the desktop client, the
+ * town server (a Cloudflare Durable Object) and the `town-ticket` edge
+ * function.
+ *
+ * Movement is the hot path and travels as small fixed-size binary frames;
+ * everything else (joining, looks, errors) is JSON text. Each client predicts
+ * its own herzie and reports where it is; the server checks the report,
+ * batches everyone's changes into one snapshot per tick and sends it to the
+ * whole room — one message per player per tick instead of one per pair.
+ *
+ * Kept free of React and the DOM: this file is bundled into the Worker and
+ * vendored into the Deno edge functions.
+ */
+import type { Equipped } from "./items.js";
+
+/** Bumped on any incompatible change; the server turns away other versions
+ * with {@link TOWN_CLOSE.outdated} so old desktop betas say "update" instead of
+ * misreading frames. */
+export const TOWN_PROTOCOL = 1;
+
+/** Server snapshot rate. */
+export const TOWN_TICK_HZ = 15;
+export const TOWN_TICK_MS = 1000 / TOWN_TICK_HZ;
+/** Players per room before newcomers spill into the next shard. */
+export const TOWN_ROOM_CAPACITY = 40;
+/** Shards a map may be split into. */
+export const TOWN_MAX_SHARDS = 16;
+
+/** The maps a client may ask for, with what the server needs to check
+ * movement: the walkable radius and where a respawn puts you. Must match the
+ * desktop's map file and `WORLD_RADIUS` (checked by a desktop test). */
+export const TOWN_MAPS = {
+  home: { radius: 40, spawn: { x: 0, z: 10 } },
+} as const;
+export type TownMapId = keyof typeof TOWN_MAPS;
+export function isTownMapId(id: string): id is TownMapId {
+  return Object.hasOwn(TOWN_MAPS, id);
+}
+
+/** Top walking speed, world units a second (the desktop's `WALK_SPEED`). */
+export const TOWN_WALK_SPEED = 4.5;
+
+/** WebSocket close codes the server uses, so the client knows whether to
+ * retry, move shard, or give up. */
+export const TOWN_CLOSE = {
+  /** Bad, missing or expired ticket: fetch a new one, then retry. */
+  auth: 4001,
+  /** Protocol version mismatch: stop and ask for an update. */
+  outdated: 4002,
+  /** Room is full: try the next shard. */
+  full: 4003,
+  /** The same herzie connected again elsewhere: stop. */
+  replaced: 4004,
+  /** Too many messages or impossible movement: back off. */
+  kicked: 4005,
+  /** Went quiet (no pings): reconnect. */
+  idle: 4006,
+} as const;
+
+// ---------------------------------------------------------------------------
+// Looks and tickets
+
+/** What other players need to draw you. */
+export type TownLook = {
+  /** The render seed: the herzie's friend code. */
+  seed: string;
+  stage: number;
+  equipped?: Equipped;
+};
+
+export type TownTicketPayload = {
+  /** Supabase user id: one connection per user. */
+  uid: string;
+  name: string;
+  look: TownLook;
+  /** Expiry, unix seconds. */
+  exp: number;
+};
+
+/** How long a ticket lasts; the client renews well before this. */
+export const TOWN_TICKET_TTL_S = 10 * 60;
+
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+
+function base64url(bytes: Uint8Array): string {
+  let s = "";
+  for (const b of bytes) s += String.fromCharCode(b);
+  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function fromBase64url(s: string): Uint8Array<ArrayBuffer> | null {
+  if (!/^[A-Za-z0-9_-]*$/.test(s)) return null;
+  try {
+    const bin = atob(
+      s.replace(/-/g, "+").replace(/_/g, "/") +
+        "=".repeat((4 - (s.length % 4)) % 4),
+    );
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+function hmacKey(secret: string, use: "sign" | "verify"): Promise<CryptoKey> {
+  return crypto.subtle.importKey(
+    "raw",
+    encoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    [use],
+  );
+}
+
+/** `payload.signature`, both base64url: an HMAC-SHA256 ticket the edge
+ * function issues and the town server checks, so the server trusts who you
+ * are and how you look without its own database access. */
+export async function signTownTicket(
+  payload: TownTicketPayload,
+  secret: string,
+): Promise<string> {
+  const body = base64url(encoder.encode(JSON.stringify(payload)));
+  const sig = await crypto.subtle.sign(
+    "HMAC",
+    await hmacKey(secret, "sign"),
+    encoder.encode(body),
+  );
+  return `${body}.${base64url(new Uint8Array(sig))}`;
+}
+
+/** The ticket's payload if its signature holds and it hasn't expired. */
+export async function verifyTownTicket(
+  ticket: string,
+  secret: string,
+  nowSeconds: number = Date.now() / 1000,
+): Promise<TownTicketPayload | null> {
+  if (typeof ticket !== "string" || ticket.length > 8192) return null;
+  const dot = ticket.indexOf(".");
+  if (dot < 0) return null;
+  const body = ticket.slice(0, dot);
+  const sig = fromBase64url(ticket.slice(dot + 1));
+  const raw = fromBase64url(body);
+  if (!sig || !raw) return null;
+  // subtle.verify compares in constant time.
+  const ok = await crypto.subtle.verify(
+    "HMAC",
+    await hmacKey(secret, "verify"),
+    sig,
+    encoder.encode(body),
+  );
+  if (!ok) return null;
+  let payload: TownTicketPayload;
+  try {
+    payload = JSON.parse(decoder.decode(raw));
+  } catch {
+    return null;
+  }
+  if (
+    typeof payload?.uid !== "string" ||
+    typeof payload.name !== "string" ||
+    typeof payload.look?.seed !== "string" ||
+    typeof payload.look.stage !== "number" ||
+    typeof payload.exp !== "number" ||
+    payload.exp <= nowSeconds
+  ) {
+    return null;
+  }
+  return payload;
+}
+
+// ---------------------------------------------------------------------------
+// Movement frames (binary)
+
+/** Where a herzie is and what it's doing, as the wire carries it. */
+export type TownState = {
+  x: number;
+  z: number;
+  /** Radians, any range; sent modulo 2π. */
+  heading: number;
+  /** Ground speed, units a second: drives the walk cycle. */
+  speed: number;
+  flags: number;
+};
+
+/** Away from keyboard: shown dimmed. */
+export const TOWN_FLAG_AFK = 1;
+
+const OP_STATE = 1;
+const OP_SNAPSHOT = 2;
+
+/** Positions in centimetres in an int16: ±327 units, well past the island. */
+const POS_SCALE = 100;
+const POS_MAX = 32767 / POS_SCALE;
+const TAU = Math.PI * 2;
+const HEADING_SCALE = 65536 / TAU;
+/** Speed in 5 cm/s steps in a uint8: up to 12.75 units a second. */
+const SPEED_SCALE = 20;
+
+/** op + seq + entity state. */
+export const STATE_FRAME_BYTES = 1 + 2 + 8;
+/** Per entity in a snapshot: id + age + state. */
+const SNAPSHOT_ENTRY_BYTES = 2 + 1 + 8;
+/** op + count + server time. */
+const SNAPSHOT_HEADER_BYTES = 1 + 2 + 8;
+
+function writeState(v: DataView, at: number, s: TownState): void {
+  const clampPos = (n: number) =>
+    Math.round(Math.max(-POS_MAX, Math.min(POS_MAX, n)) * POS_SCALE);
+  v.setInt16(at, clampPos(s.x));
+  v.setInt16(at + 2, clampPos(s.z));
+  const h = ((s.heading % TAU) + TAU) % TAU;
+  v.setUint16(at + 4, Math.round(h * HEADING_SCALE) & 0xffff);
+  v.setUint8(
+    at + 6,
+    Math.max(0, Math.min(255, Math.round(s.speed * SPEED_SCALE))),
+  );
+  v.setUint8(at + 7, s.flags & 0xff);
+}
+
+function readState(v: DataView, at: number): TownState {
+  return {
+    x: v.getInt16(at) / POS_SCALE,
+    z: v.getInt16(at + 2) / POS_SCALE,
+    heading: v.getUint16(at + 4) / HEADING_SCALE,
+    speed: v.getUint8(at + 6) / SPEED_SCALE,
+    flags: v.getUint8(at + 7),
+  };
+}
+
+/** Rounds a state the way the wire would, so the sender and the server agree
+ * on exactly where a herzie is. */
+export function quantizeState(s: TownState): TownState {
+  const buf = new DataView(new ArrayBuffer(8));
+  writeState(buf, 0, s);
+  return readState(buf, 0);
+}
+
+/** Client → server: "I am here". `seq` wraps at 65536. */
+export function encodeStateFrame(seq: number, s: TownState): ArrayBuffer {
+  const buf = new ArrayBuffer(STATE_FRAME_BYTES);
+  const v = new DataView(buf);
+  v.setUint8(0, OP_STATE);
+  v.setUint16(1, seq & 0xffff);
+  writeState(v, 3, s);
+  return buf;
+}
+
+export function decodeStateFrame(
+  data: ArrayBuffer,
+): { seq: number; state: TownState } | null {
+  if (data.byteLength !== STATE_FRAME_BYTES) return null;
+  const v = new DataView(data);
+  if (v.getUint8(0) !== OP_STATE) return null;
+  return { seq: v.getUint16(1), state: readState(v, 3) };
+}
+
+export type SnapshotEntry = {
+  id: number;
+  /** How long before the snapshot's time the server received this state, in
+   * ms (0–255). Timing each state by its arrival rather than by the tick
+   * that carried it keeps remote walking speeds even. */
+  age: number;
+  state: TownState;
+};
+
+/** Server → client: everyone who changed since the last tick (or the whole
+ * room, for a newcomer), stamped with the server's clock in ms. */
+export function encodeSnapshot(
+  serverTime: number,
+  entries: readonly SnapshotEntry[],
+): ArrayBuffer {
+  const buf = new ArrayBuffer(
+    SNAPSHOT_HEADER_BYTES + entries.length * SNAPSHOT_ENTRY_BYTES,
+  );
+  const v = new DataView(buf);
+  v.setUint8(0, OP_SNAPSHOT);
+  v.setUint16(1, entries.length);
+  v.setFloat64(3, serverTime);
+  let at = SNAPSHOT_HEADER_BYTES;
+  for (const e of entries) {
+    v.setUint16(at, e.id);
+    v.setUint8(at + 2, Math.max(0, Math.min(255, Math.round(e.age))));
+    writeState(v, at + 3, e.state);
+    at += SNAPSHOT_ENTRY_BYTES;
+  }
+  return buf;
+}
+
+export function decodeSnapshot(
+  data: ArrayBuffer,
+): { serverTime: number; entries: SnapshotEntry[] } | null {
+  if (data.byteLength < SNAPSHOT_HEADER_BYTES) return null;
+  const v = new DataView(data);
+  if (v.getUint8(0) !== OP_SNAPSHOT) return null;
+  const count = v.getUint16(1);
+  if (data.byteLength !== SNAPSHOT_HEADER_BYTES + count * SNAPSHOT_ENTRY_BYTES)
+    return null;
+  const entries: SnapshotEntry[] = [];
+  let at = SNAPSHOT_HEADER_BYTES;
+  for (let i = 0; i < count; i++) {
+    entries.push({
+      id: v.getUint16(at),
+      age: v.getUint8(at + 2),
+      state: readState(v, at + 3),
+    });
+    at += SNAPSHOT_ENTRY_BYTES;
+  }
+  return { serverTime: v.getFloat64(3), entries };
+}
+
+// ---------------------------------------------------------------------------
+// Control messages (JSON text)
+
+/** Liveness ping. The server answers "pong" without waking up (a Durable
+ * Object auto-response), so idle rooms stay hibernated. */
+export const TOWN_PING = "ping";
+export const TOWN_PONG = "pong";
+
+export type TownPlayer = {
+  id: number;
+  name: string;
+  look: TownLook;
+};
+
+export type ClientMessage =
+  /** First message on a socket. `at` is where the herzie stands now. */
+  | { t: "hello"; v: number; ticket: string; at: TownState }
+  /** A fresh ticket: renews the session and carries look changes. */
+  | { t: "ticket"; ticket: string };
+
+export type ServerMessage =
+  /** Accepted: your entity id and everyone else here. A full snapshot follows. */
+  | { t: "welcome"; you: number; players: TownPlayer[] }
+  | { t: "join"; player: TownPlayer }
+  | { t: "leave"; id: number }
+  | { t: "look"; player: TownPlayer }
+  /** The server refused a move: put your herzie back here. */
+  | { t: "correct"; x: number; z: number };
+
+export function parseServerMessage(text: string): ServerMessage | null {
+  try {
+    const m = JSON.parse(text);
+    return m && typeof m.t === "string" ? (m as ServerMessage) : null;
+  } catch {
+    return null;
+  }
+}

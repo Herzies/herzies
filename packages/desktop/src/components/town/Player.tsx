@@ -12,7 +12,7 @@ import type { Look } from "../TownScene";
 import { HerzieModel } from "./HerzieModel";
 import type { TownMap } from "./map";
 import { type Mover, stepMover, walkAzimuth } from "./movement";
-import { townSave, useTownRuntime, WORLD_RADIUS } from "./runtime";
+import { townLive, townSave, useTownRuntime, WORLD_RADIUS } from "./runtime";
 
 /** The capsule the controller pushes around: radius and half-height of its
  * straight part, standing on the ground. */
@@ -75,6 +75,13 @@ export function Player({
     herzie.heading = townSave.heading;
     return () => herzie.dispose();
   }, [herzie]);
+  // Gone from the world means standing still, as far as others can tell.
+  useEffect(
+    () => () => {
+      townLive.speed = 0;
+    },
+    [],
+  );
 
   const spawned = useRef(respawn);
   // biome-ignore lint/correctness/useExhaustiveDependencies: only on a bump
@@ -97,6 +104,22 @@ export function Player({
     const dt = w.timestep;
     const input = rt.input.current;
     const m = mover.current;
+    if (input && Object.values(input).some(Boolean))
+      townLive.lastInputAt = performance.now();
+
+    // The town server refused a move (too fast, say): go back where it
+    // last agreed the herzie was.
+    const to = townLive.teleport;
+    if (to) {
+      townLive.teleport = null;
+      m.vx = m.vz = 0;
+      b.setTranslation({ x: to.x, y: 0, z: to.z }, true);
+      b.setNextKinematicTranslation({ x: to.x, y: 0, z: to.z });
+      townSave.x = to.x;
+      townSave.z = to.z;
+      rt.playerSpeed = townLive.speed = 0;
+      return;
+    }
     walkAz.current = walkAzimuth(walkAz.current, rt.cameraAzimuth, input);
     m.heading = herzie.heading;
     stepMover(m, input, walkAz.current, dt);
@@ -119,6 +142,7 @@ export function Player({
     // The walk cycle follows the distance actually covered: pushing into a
     // tree stops the feet too.
     rt.playerSpeed = Math.hypot(x - p.x, z - p.z) / dt;
+    townLive.speed = rt.playerSpeed;
     b.setNextKinematicTranslation({ x, y: p.y, z });
     townSave.x = x;
     townSave.z = z;

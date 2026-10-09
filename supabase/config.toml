@@ -418,6 +418,15 @@ verify_jwt = true
 import_map = "./functions/deno.json"
 entrypoint = "./functions/events-active/index.ts"
 
+# Signs the ticket the desktop app shows the multiplayer Town server
+# (packages/town-server): who you are and how you look. Set
+# TOWN_MULTIPLAYER=off to switch multiplayer off for everyone.
+[functions.town-ticket]
+enabled = true
+verify_jwt = true
+import_map = "./functions/deno.json"
+entrypoint = "./functions/town-ticket/index.ts"
+
 # New (not a port): manually collects a pending world drop into the caller's
 # inventory. Called when the user clicks "Collect" on the pending-drop UI.
 [functions.collect-drop]
