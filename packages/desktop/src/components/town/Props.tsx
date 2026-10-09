@@ -7,10 +7,7 @@ import {
 import { useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import { seeThrough, swayInWind } from "./ambient";
-
-const seeThroughLambert = (p: THREE.MeshLambertMaterialParameters) =>
-  seeThrough(new THREE.MeshLambertMaterial(p));
+import { swayInWind } from "./ambient";
 
 import { BenchColliders, Benches } from "./Benches";
 import { BuildingColliders, Buildings, lanternMaterial } from "./Buildings";
@@ -67,7 +64,9 @@ type Part = {
 };
 
 const rockGeometry = new THREE.DodecahedronGeometry(0.55, 0);
-const rockMaterial = seeThroughLambert({
+/** Rocks and stumps aren't see-through like the trees: low on the
+ * ground, they never hide the player, and dithered they only speckle. */
+const rockMaterial = new THREE.MeshLambertMaterial({
   color: "#7d7a80",
   flatShading: true,
 });
@@ -137,8 +136,6 @@ const stemMaterial = swayInWind(
   new THREE.MeshLambertMaterial({ color: "#3f7a3a" }),
   { amount: 0.4, from: 0, bend: 1 },
 );
-/** The town's stumps, see-through like the trees. */
-const townTrunk = seeThrough(trunkMaterial.clone());
 const FLOWERS = scatter(99, 6, 0.4);
 const stemGeometry = new THREE.CylinderGeometry(0.02, 0.02, 0.3, 3);
 const blossomGeometry = new THREE.OctahedronGeometry(0.09, 0);
@@ -230,7 +227,7 @@ const KINDS = {
   },
   S: {
     parts: [
-      { geometry: stumpGeometry, material: townTrunk, y: 0.225 },
+      { geometry: stumpGeometry, material: trunkMaterial, y: 0.225 },
       { geometry: stumpTopGeometry, material: stumpTopMaterial, y: 0.45 },
     ],
     radius: 0.42,

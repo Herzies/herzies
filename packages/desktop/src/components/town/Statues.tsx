@@ -5,10 +5,7 @@ import { CylinderCollider } from "@react-three/rapier";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import type { Look } from "../TownScene";
-import { ambient, seeThrough } from "./ambient";
-
-const seeThroughLambert = (p: THREE.MeshLambertMaterialParameters) =>
-  seeThrough(new THREE.MeshLambertMaterial(p));
+import { ambient } from "./ambient";
 
 import { cellCenter, facingAt, MAP_SIZE, objectAt, type TownMap } from "./map";
 
@@ -38,11 +35,12 @@ const PLINTH_HEIGHT = 0.7;
 const STATUE_SCALE = 1.4;
 const plinthGeometry = new THREE.BoxGeometry(1.15, PLINTH_HEIGHT, 1.15);
 const capGeometry = new THREE.BoxGeometry(1.3, 0.12, 1.3);
-const plinthMaterial = seeThroughLambert({
+// Plinths stay solid: low, and the statue on top never goes see-through.
+const plinthMaterial = new THREE.MeshLambertMaterial({
   color: "#8f8a82",
   flatShading: true,
 });
-const capMaterial = seeThroughLambert({
+const capMaterial = new THREE.MeshLambertMaterial({
   color: "#a9a49b",
   flatShading: true,
 });
