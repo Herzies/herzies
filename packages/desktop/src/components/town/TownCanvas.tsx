@@ -1,21 +1,28 @@
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Physics } from "@react-three/rapier";
-import { useMemo, useRef, useState } from "react";
-import type * as THREE from "three";
+import { useMemo, useRef } from "react";
 import type { Look } from "../TownScene";
+import { ambient } from "./ambient";
 import { CameraRig } from "./CameraRig";
-import { resetFrameBudget } from "./HerzieSprite";
+import type { Hour } from "./DayCycle";
 import { type TownInput, useTownInput } from "./input";
+import type { TownMap } from "./map";
 import { Player } from "./Player";
 import {
+  HOME_MAP,
   TALK_RANGE,
   type TownRuntime,
   TownRuntimeContext,
   type TownSpot,
   townSave,
 } from "./runtime";
+import type { Champion } from "./Statues";
 import { Visitor } from "./Visitor";
 import { World } from "./World";
+
+/** The Town's resolution as a fraction of the screen's: each drawn pixel
+ * covers 1/PIXEL_SCALE screen pixels square. */
+const PIXEL_SCALE = 1 / 3;
 
 export type TownCanvasProps = {
   spots: TownSpot[];
@@ -24,6 +31,15 @@ export type TownCanvasProps = {
   onOpen: (openKey: string) => void;
   /** Who's close enough to talk to (null: nobody), when that changes. */
   onNearChange: (spot: TownSpot | null) => void;
+  /** The island to draw (the map editor's preview passes its own). */
+  map?: TownMap;
+  /** Bump to put the player back at the map's spawn. */
+  respawn?: number;
+  /** Who the statues show: the last boss fight's champion (a stand-in
+   * until there's one). */
+  champion?: Champion;
+  /** Show the world at this hour (default: the local clock). */
+  hour?: Hour;
 };
 
 /**
@@ -35,18 +51,24 @@ export type TownCanvasProps = {
 export default function TownCanvas(props: TownCanvasProps) {
   const input = useRef<TownInput>(null) as React.RefObject<TownInput>;
   const runtime = useMemo<TownRuntime>(
-    () => ({ input, playerBody: null, playerSpeed: 0, cameraAzimuth: 0 }),
+    () => ({
+      input,
+      playerBody: null,
+      playerSpeed: 0,
+      cameraAzimuth: 0,
+    }),
     [],
   );
-  const [treeMeshes, setTreeMeshes] = useState<THREE.Object3D[]>([]);
+  const map = props.map ?? HOME_MAP;
 
   return (
     <Canvas
-      // Chunky pixels, to sit with the ASCII herzies.
-      dpr={1}
+      // Chunky pixels, to sit with the ASCII herzies: drawn at a fraction of
+      // the screen's resolution and scaled up without smoothing.
+      dpr={PIXEL_SCALE}
       gl={{ antialias: false }}
       style={{ imageRendering: "pixelated" }}
-      camera={{ fov: 55, near: 0.1, far: 120 }}
+      camera={{ fov: 55, near: 0.1, far: 400 }}
       frameloop={props.paused ? "never" : "always"}
     >
       <TownRuntimeContext.Provider value={runtime}>
@@ -58,20 +80,24 @@ export default function TownCanvas(props: TownCanvasProps) {
           paused={props.paused}
           updatePriority={-3}
         >
-          <World onTreeMeshes={setTreeMeshes} />
-          <Player look={props.player} />
+          <World map={map} champion={props.champion} hour={props.hour} />
+          <Player
+            look={props.player}
+            spawn={map.spawn}
+            respawn={props.respawn}
+          />
           {props.spots.map((s) => (
             <Visitor key={s.key} spot={s} onOpen={props.onOpen} />
           ))}
         </Physics>
-        <CameraRig colliders={treeMeshes} />
+        <CameraRig />
       </TownRuntimeContext.Provider>
     </Canvas>
   );
 }
 
-/** Per-frame housekeeping: input, the sprite render budget, and who the
- * player is close enough to talk to. */
+/** Per-frame housekeeping: input, and who the player is close enough to
+ * talk to. */
 function Systems({
   spots,
   paused,
@@ -90,8 +116,10 @@ function Systems({
   });
   input.current = live.current;
 
-  useFrame(() => {
-    resetFrameBudget();
+  useFrame(({ clock }) => {
+    // The shared uniforms the wind, water and sky read (see ambient.ts).
+    ambient.uTime.value = clock.elapsedTime;
+    ambient.uPlayer.value.set(townSave.x, 0, townSave.z);
 
     let closest: TownSpot | null = null;
     let best = TALK_RANGE;

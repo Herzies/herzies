@@ -1,4 +1,4 @@
-import { type CreaturePose, IDLE_LOOP_FRAMES } from "@herzies/shared";
+import { IDLE_LOOP_FRAMES } from "@herzies/shared";
 import { MathUtils } from "three";
 
 /** The idle loop's frame rate: Herzie3D plays it at 50ms a frame. */
@@ -11,14 +11,6 @@ export const WALK_SPEED = 4.5;
 export const STRIDE = 2.4;
 /** How fast the blend between standing and walking follows the speed. */
 const WALK_BLEND_RATE = 12;
-
-/** Turn steps the rotation is drawn at (one per 10°), and camera pitch
- * steps (one per 5°, up to 45°). */
-const TURN_STEPS = 36;
-const PITCH_STEP = (5 * Math.PI) / 180;
-const PITCH_STEPS = 9;
-/** Walk-cycle frames: 16 a cycle, 8 a step. */
-const WALK_STEPS = 16;
 
 export type AnimationState = {
   /** Seconds into the idle loop. */
@@ -47,48 +39,6 @@ export function stepAnimation(
   const target = MathUtils.clamp(speed / (WALK_SPEED * 0.5), 0, 1);
   s.walkWeight = MathUtils.damp(s.walkWeight, target, WALK_BLEND_RATE, dt);
   if (s.walkWeight < 1e-3) s.walkWeight = 0;
-}
-
-/**
- * Snaps a continuous pose onto the frames worth caching, and names it.
- * Everything a frame depends on is in the key, and nothing else: a walking
- * herzie's frame doesn't depend on its idle clock (unless it has a pet
- * floating beside it, which keeps breathing), and a standing one's doesn't
- * depend on the walk phase.
- */
-export function quantizePose(p: {
-  yAngle: number;
-  pitch: number;
-  anim: AnimationState;
-  breathesWhileWalking: boolean;
-}): { key: string; pose: CreaturePose } {
-  const turn =
-    (((Math.round(p.yAngle / ((Math.PI * 2) / TURN_STEPS)) % TURN_STEPS) +
-      TURN_STEPS) %
-      TURN_STEPS) |
-    0;
-  const pitch = MathUtils.clamp(
-    Math.round(p.pitch / PITCH_STEP),
-    0,
-    PITCH_STEPS,
-  );
-  const w = p.anim.walkWeight < 0.15 ? 0 : p.anim.walkWeight > 0.85 ? 1 : 0.5;
-  const idle =
-    w === 1 && !p.breathesWhileWalking
-      ? 0
-      : Math.floor(p.anim.idleTime * IDLE_FPS) % IDLE_LOOP_FRAMES;
-  const phase =
-    w === 0 ? 0 : Math.round(p.anim.walkPhase * WALK_STEPS) % WALK_STEPS;
-  return {
-    key: `${turn}|${pitch}|${idle}|${phase}|${w}`,
-    pose: {
-      yAngle: (turn / TURN_STEPS) * Math.PI * 2,
-      pitch: pitch * PITCH_STEP,
-      idleFrame: idle,
-      walkPhase: phase / WALK_STEPS,
-      walkWeight: w,
-    },
-  };
 }
 
 /** The signed shortest turn from `from` to `to`, in (-π, π]. */

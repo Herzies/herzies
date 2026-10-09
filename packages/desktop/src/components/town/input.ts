@@ -7,6 +7,11 @@ export type TownInput = {
   back: boolean;
   left: boolean;
   right: boolean;
+  /** Arrow keys: orbit the camera left/right, tilt it up/down. */
+  turnLeft: boolean;
+  turnRight: boolean;
+  tiltUp: boolean;
+  tiltDown: boolean;
   /** Mouse buttons held over the world. */
   mouseLeft: boolean;
   mouseRight: boolean;
@@ -14,13 +19,13 @@ export type TownInput = {
 
 const MOVE_KEYS: Record<string, keyof TownInput> = {
   KeyW: "forward",
-  ArrowUp: "forward",
   KeyS: "back",
-  ArrowDown: "back",
   KeyA: "left",
-  ArrowLeft: "left",
   KeyD: "right",
-  ArrowRight: "right",
+  ArrowLeft: "turnLeft",
+  ArrowRight: "turnRight",
+  ArrowUp: "tiltUp",
+  ArrowDown: "tiltDown",
 };
 
 const idle = (): TownInput => ({
@@ -28,6 +33,10 @@ const idle = (): TownInput => ({
   back: false,
   left: false,
   right: false,
+  turnLeft: false,
+  turnRight: false,
+  tiltUp: false,
+  tiltDown: false,
   mouseLeft: false,
   mouseRight: false,
 });

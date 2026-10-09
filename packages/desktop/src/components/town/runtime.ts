@@ -1,6 +1,13 @@
 import { createContext, type RefObject, useContext } from "react";
 import type * as THREE from "three";
 import type { TownInput } from "./input";
+import { parseMap, type TownMap } from "./map";
+import homeMap from "./maps/home.json";
+
+export { ISLAND_RADIUS, WORLD_RADIUS } from "./map";
+
+/** The home island, as painted in the map editor (`pnpm map-editor`). */
+export const HOME_MAP: TownMap = parseMap(homeMap);
 
 /** Per-frame state the scene's parts share, outside React (they all read
  * and write it inside the frame loop, where re-rendering is no option). */
@@ -28,31 +35,37 @@ export function useTownRuntime(): TownRuntime {
  * visitor's screen (the world unmounts while one is open): coming back from
  * George's stall puts you back at his stall. */
 export const townSave = {
-  x: 0,
-  z: 10,
-  /** Forward is (sin, cos) on the ground; π faces the plaza from spawn. */
-  heading: Math.PI,
-  azimuth: 0,
+  x: HOME_MAP.spawn.at[0],
+  z: HOME_MAP.spawn.at[1],
+  /** Forward is (sin, cos) on the ground. */
+  heading: HOME_MAP.spawn.heading,
+  // Behind the player, looking the way it faces.
+  azimuth: HOME_MAP.spawn.heading - Math.PI,
   polar: 1.2,
-  distance: 9,
 };
 
-/** Spots (x, z) where each visitor stands, around the plaza at the origin:
- * the boss up north, George to the west, Orphiez to the east, Nandor down
- * south-west. Anyone else takes the next spare spot. */
-export const SPOTS: Record<string, { x: number; z: number }> = {
-  boss_fight: { x: 0, z: -9 },
-  merchant: { x: -8, z: -1 },
-  song_hunt: { x: 8, z: -1 },
-  treat_trader: { x: -5, z: 7 },
-};
-export const SPARE_SPOTS = [
-  { x: 5, z: 7 },
-  { x: 0, z: -15 },
-];
+type Spot = { x: number; z: number };
+const spot = ([x, z]: [number, number]): Spot => ({ x, z });
 
-/** How far you can walk from the middle of town. */
-export const WORLD_RADIUS = 40;
+/** Where each visitor stands (x, z), from the map. Anyone else takes the
+ * next spare spot. */
+export function spotsOf(map: TownMap): {
+  spots: Record<string, Spot>;
+  spare: Spot[];
+} {
+  return {
+    spots: Object.fromEntries(
+      Object.entries(map.spots).map(([k, p]) => [k, spot(p)]),
+    ),
+    spare: map.spare.map(spot),
+  };
+}
+export const { spots: SPOTS, spare: SPARE_SPOTS } = spotsOf(HOME_MAP);
+
+/** Where the sun shines from (it lights from this point toward the
+ * origin). Herzies shade by it too, see herzieMaterial. */
+export const SUN_POSITION: [number, number, number] = [-10, 20, 8];
+
 /** How close you have to be to talk to someone… */
 export const TALK_RANGE = 3.4;
 /** …and for them to turn and look at you. */

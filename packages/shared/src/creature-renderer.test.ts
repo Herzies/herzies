@@ -2,14 +2,19 @@ import { describe, expect, it } from "vitest";
 import { RAINBOW_RAMP, VOID_RAMP } from "./ascii3d.js";
 import {
   BOSS_BODY_TYPE,
+  buildCreatureModel,
   buildCreatureSpheres,
   CREATURE_PARAM_BOUNDS,
+  creaturePoseOffsets,
   DEFAULT_Y_ANGLE,
   generateCreatureParams,
   generateDanceFrames,
   generateIdleFrames,
   generateRotationFrames,
   isSpiritHopFrame,
+  primitiveNormal,
+  primitiveShading,
+  rayPrimitive,
   renderCreatureAtAngle,
   renderCreaturePose,
   SPIRIT_DANCE_HOP_VARIANT_COUNT,
@@ -49,6 +54,214 @@ describe("frame cells", () => {
   });
 });
 
+describe("capsule and cylinder primitives", () => {
+  // A ray from z = -5 straight down +z, offset in x and y.
+  const cast = (x: number, y: number, p: Parameters<typeof rayPrimitive>[6]) =>
+    rayPrimitive(x, y, -5, 0, 0, 1, p);
+  const near = (a: number[], b: number[]) =>
+    a.forEach((v, i) => {
+      expect(v).toBeCloseTo(b[i], 6);
+    });
+
+  const capsule = {
+    center: [0, 0, 0] as [number, number, number],
+    radius: 0.5,
+    shape: {
+      kind: "capsule" as const,
+      axis: [2, 0, 0] as [number, number, number],
+    },
+  };
+  const cylinder = {
+    ...capsule,
+    shape: { ...capsule.shape, kind: "cylinder" as const },
+  };
+
+  it("hits a capsule's side and its rounded ends", () => {
+    expect(cast(1, 0, capsule)).toBeCloseTo(4.5); // side, flat in x
+    expect(cast(2.3, 0, capsule)).toBeCloseTo(5 - Math.sqrt(0.25 - 0.09)); // end ball
+    expect(cast(2.6, 0, capsule)).toBe(-1);
+    expect(cast(0, 0.6, capsule)).toBe(-1);
+  });
+
+  it("stops a cylinder flat at its ends", () => {
+    expect(cast(1.9, 0, cylinder)).toBeCloseTo(4.5);
+    expect(cast(2.1, 0, cylinder)).toBe(-1);
+  });
+
+  it("hits a cylinder's flat cap when seen end-on", () => {
+    const endOn = {
+      ...cylinder,
+      shape: {
+        kind: "cylinder" as const,
+        axis: [0, 0, 1] as [number, number, number],
+      },
+    };
+    expect(cast(0.4, 0, endOn)).toBeCloseTo(4);
+    expect(cast(0.6, 0, endOn)).toBe(-1);
+    near(primitiveNormal(endOn, [0.4, 0, -1]), [0, 0, -1]);
+  });
+
+  const endOn = (dome: number) => ({
+    center: [0, 0, 0] as [number, number, number],
+    radius: 0.5,
+    shape: {
+      kind: "cylinder" as const,
+      axis: [0, 0, 1] as [number, number, number],
+      dome,
+    },
+  });
+
+  it("domes a cylinder's ends outward", () => {
+    const cup = endOn(0.2);
+    expect(cast(0, 0, cup)).toBeCloseTo(3.8); // the middle stands proud
+    expect(cast(0.49, 0, cup)).toBeCloseTo(4 - 0.2 * (1 - 0.49 ** 2 / 0.25));
+    expect(cast(0.51, 0, cup)).toBe(-1);
+    // Down the cap's slope the normal tips out, away from the axis.
+    const n = primitiveNormal(cup, [0.4, 0, -1 - 0.2 * (1 - 0.16 / 0.25)]);
+    expect(n[2]).toBeLessThan(0);
+    expect(n[0]).toBeGreaterThan(0);
+  });
+
+  it("dishes a cylinder's ends inward with a negative dome", () => {
+    const cup = endOn(-0.2);
+    expect(cast(0, 0, cup)).toBeCloseTo(4.2); // the middle sits deepest
+    // A slanted ray that crosses the bowl's paraboloid past the rim still
+    // lands in the bowl instead of passing through the cup.
+    const d = [0.6, 0, 0.8];
+    const t = rayPrimitive(-1.5, 0, -2, d[0], d[1], d[2], cup);
+    expect(t).toBeGreaterThan(0);
+    const hit = [-1.5 + d[0] * t, 0, -2 + d[2] * t];
+    expect(Math.abs(hit[0])).toBeLessThanOrEqual(0.5);
+    expect(hit[2]).toBeLessThan(0);
+    const n = primitiveNormal(cup, [0.4, 0, -1 + 0.2 * (1 - 0.16 / 0.25)]);
+    expect(n[0]).toBeLessThan(0);
+  });
+
+  it("points normals out of the surface", () => {
+    near(primitiveNormal(capsule, [1, 0, -0.5]), [0, 0, -1]);
+    near(primitiveNormal(capsule, [2.5, 0, 0]), [1, 0, 0]);
+    near(primitiveNormal(cylinder, [1, 0.5, 0]), [0, 1, 0]);
+    near(primitiveNormal(cylinder, [-2, 0.1, 0]), [-1, 0, 0]);
+  });
+
+  it("treats a shapeless primitive as a sphere", () => {
+    const sphere = { center: capsule.center, radius: 0.5 };
+    expect(cast(0, 0, sphere)).toBeCloseTo(4.5);
+    near(primitiveNormal(sphere, [0, 0, -0.5]), [0, 0, -1]);
+  });
+});
+
+describe("model for 3D hosts", () => {
+  const colorsOf = (frame: { cells: { ch: string; color: string }[][] }) =>
+    new Set(frame.cells.flat().map((c) => c.color));
+  const model = buildCreatureModel(USER, 3, { head: "headphones" });
+  const frame = renderCreatureAtAngle(USER, 3, DEFAULT_Y_ANGLE, 0, false, {
+    head: "headphones",
+  });
+  const drawn = colorsOf(frame);
+  const shadesOf = (zone: string, withColor = false) => {
+    const sp = model.spheres.find(
+      (s) => s.zone === zone && Boolean(s.color) === withColor,
+    );
+    if (!sp) throw new Error(`no ${zone} sphere`);
+    return primitiveShading(sp, model.colors, model.scheme);
+  };
+
+  it("shades eyes and pupils the colours the ray caster draws", () => {
+    for (const zone of ["eye", "pupil"]) {
+      const sh = shadesOf(zone);
+      expect(new Set(sh.shades).size).toBe(1);
+      expect(drawn).toContain(sh.shades[0]);
+    }
+    expect(shadesOf("pupil").gain).toBe(0);
+  });
+
+  it("shades the body from its palette, textured", () => {
+    const sh = shadesOf("primary");
+    expect(sh.textured).toBe(true);
+    expect(sh.shades.filter((c) => drawn.has(c)).length).toBeGreaterThan(1);
+  });
+
+  it("shades a worn item by its own colour, untextured", () => {
+    const sh = shadesOf("wearable", true);
+    expect(sh.textured).toBe(false);
+    expect(sh.shades[1]).toBe("#666666");
+    expect(sh.shades.some((c) => drawn.has(c))).toBe(true);
+  });
+
+  it("shades a colourless worn item like the body, in greys", () => {
+    const sh = primitiveShading({ zone: "wearable" }, model.colors);
+    expect(sh.textured).toBe(true);
+    expect(sh.shades).toEqual(["#444", "#666", "#888"]);
+  });
+
+  it("marks scheme-painted parts", () => {
+    const prism = buildCreatureModel(USER, 3, { color: "prism" });
+    const body = prism.spheres.find((s) => s.zone === "primary");
+    if (!body) throw new Error("no body");
+    expect(
+      primitiveShading(body, prism.colors, prism.scheme).schemePainted,
+    ).toBe(true);
+  });
+
+  it("poses with the idle loop alone when standing", () => {
+    const still = creaturePoseOffsets(model.spheres, 3, {
+      idleFrame: 30,
+      walkPhase: 0.4,
+      walkWeight: 0,
+    });
+    // Nothing moves sideways or in depth while idling, and the head bobs.
+    expect(still.every((d) => d[0] === 0 && d[2] === 0)).toBe(true);
+    expect(still.some((d) => d[1] !== 0)).toBe(true);
+    const walking = creaturePoseOffsets(model.spheres, 3, {
+      idleFrame: 30,
+      walkPhase: 0.25,
+      walkWeight: 1,
+    });
+    expect(walking.some((d) => d[2] !== 0)).toBe(true);
+  });
+});
+
+describe("headphones", () => {
+  it("arch a band over the head at every angle", () => {
+    // Headphone cells above the top of the head prove the band is drawn,
+    // turned with the herzie, and still found by the ray caster.
+    for (const pitch of [undefined, 0.3]) {
+      for (let i = 0; i < 8; i++) {
+        const frame = renderCreaturePose(
+          USER,
+          3,
+          {
+            yAngle: (i / 8) * 2 * Math.PI,
+            pitch,
+            idleFrame: 0,
+            walkPhase: 0,
+            walkWeight: 0,
+          },
+          { head: "headphones" },
+        );
+        const bare = renderCreaturePose(USER, 3, {
+          yAngle: (i / 8) * 2 * Math.PI,
+          pitch,
+          idleFrame: 0,
+          walkPhase: 0,
+          walkWeight: 0,
+        });
+        const top = (f: typeof frame) =>
+          f.cells.findIndex((row) => row.some((c) => c.ch !== " "));
+        expect(top(frame)).toBeLessThanOrEqual(top(bare));
+        const greys = frame.cells
+          .flat()
+          .filter(
+            (c) =>
+              c.color !== "#111111" && /^#([0-9A-F]{2})\1\1$/.test(c.color),
+          );
+        expect(greys.length).toBeGreaterThan(0);
+      }
+    }
+  });
+});
+
 const hueSet = (frames: { cells: { ch: string; color: string }[][] }[]) => {
   const s = new Set<string>();
   for (const f of frames)
@@ -81,10 +294,8 @@ describe("prism colour scheme", () => {
       head: "headphones",
     });
     const colors = hueSet(withHat);
-    // Headphones shade through the "wearable" zone greys.
-    expect([...colors].some((c) => ["#888", "#666", "#444"].includes(c))).toBe(
-      true,
-    );
+    // Headphones keep their own grey shell.
+    expect(colors).toContain("#666666");
   });
 
   it("does not crawl through rotation", () => {

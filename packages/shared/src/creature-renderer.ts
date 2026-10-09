@@ -53,6 +53,9 @@ export const DEFAULT_CAMERA_DISTANCE = 2.7;
  * Fixed: it is the framing — the original camera's (distance 2.0, vertical
  * field of view 1.8 rad), whatever the distance now. */
 const FRAME_HALF_H = 2.0 * Math.tan(1.8 / 2);
+/** The frame's full height at the herzie's centre, in creature units: what
+ * a host drawing herzies in its own 3D space scales against. */
+export const CREATURE_FRAME_HEIGHT = 2 * FRAME_HALF_H;
 
 let CAM = DEFAULT_CAMERA_DISTANCE;
 let HALF_H = FRAME_HALF_H / CAM;
@@ -114,7 +117,7 @@ const EVIL_EYE_DIM = "#7A0C04";
 
 // --- HSL color utilities ---
 
-interface ColorTriplet {
+export interface ColorTriplet {
   dim: string;
   base: string;
   bright: string;
@@ -269,7 +272,25 @@ export interface Sphere {
   /** Set on spheres that hang loose (necklace links) and so react to a spin —
    * see applyDangle and dangle-physics.ts. */
   dangle?: Dangle;
+  /** Absent, this is a sphere. Otherwise a solid around the segment from
+   * center − axis to center + axis, `radius` thick: a capsule (rounded ends)
+   * or a cylinder (flat ends). The axis is relative to the center, so the
+   * animations, which only move centers, carry it along untouched; only
+   * renderCreatureFrame's camera turn rotates it. (applyDangle doesn't, so
+   * dangling parts must stay spheres.) */
+  shape?: Shape;
 }
+
+export interface Shape {
+  kind: "capsule" | "cylinder";
+  axis: V3;
+  /** Cylinders only: how far the middle of each end bulges out past the rim,
+   * as a paraboloid cap (an ear cup's domed face). Negative dishes it in. */
+  dome?: number;
+}
+
+/** What the ray caster needs of a primitive. */
+type Primitive = Pick<Sphere, "center" | "radius" | "shape">;
 
 interface Dangle {
   /** How much of the chain's swing this sphere takes: ~0 at the back of the
@@ -941,6 +962,9 @@ function getHeadBounds(
   return { center: [cx, cy, hz], radius };
 }
 
+const HEADPHONE_SHELL = "#666666";
+const HEADPHONE_CUSHION = "#2A2A2A";
+
 function buildHeadphoneSpheres(spheres: Sphere[]): Sphere[] {
   const head = getHeadBounds(spheres);
   if (!head) return [];
@@ -948,36 +972,66 @@ function buildHeadphoneSpheres(spheres: Sphere[]): Sphere[] {
   const [hx, hy, hz] = head.center;
   const hr = head.radius;
   const result: Sphere[] = [];
-
-  // Ear cups — two spheres at ±headRadius, vertically centered on head
-  const cupR = hr * 0.28;
-  result.push({
-    center: [hx - hr * 0.95, hy, hz],
-    radius: cupR,
+  const part = (
+    center: V3,
+    radius: number,
+    color: string,
+    shape?: Shape,
+  ): Sphere => ({
+    center,
+    radius,
     zone: "wearable",
     part: "head",
-  });
-  result.push({
-    center: [hx + hr * 0.95, hy, hz],
-    radius: cupR,
-    zone: "wearable",
-    part: "head",
+    color,
+    shape,
   });
 
-  // Band — arc of spheres over the top of the head
-  const bandR = hr * 0.18;
-  const bandSteps = 9;
-  for (let i = 0; i <= bandSteps; i++) {
-    const t = i / bandSteps; // 0 = left cup, 1 = right cup
-    const angle = Math.PI * t; // π to 0 — arc over the top
-    const bx = hx + Math.cos(angle) * hr * 0.95;
-    const by = hy - Math.sin(angle) * hr * 1.05;
-    result.push({
-      center: [bx, by, hz],
-      radius: bandR,
-      zone: "wearable",
-      part: "head",
-    });
+  for (const side of [-1, 1]) {
+    // Ear cup: a flat-faced disc on its side, its face out from the head.
+    result.push(
+      part([hx + side * hr * 1.02, hy, hz], hr * 0.3, HEADPHONE_SHELL, {
+        kind: "cylinder",
+        axis: [hr * 0.12, 0, 0],
+        dome: hr * 0.09,
+      }),
+    );
+    // Cushion: a darker, slimmer pad between the cup and the head.
+    result.push(
+      part([hx + side * hr * 0.86, hy, hz], hr * 0.27, HEADPHONE_CUSHION, {
+        kind: "cylinder",
+        axis: [hr * 0.06, 0, 0],
+      }),
+    );
+  }
+
+  // Band: one smooth tube arcing over the head from cup to cup, as capsules
+  // chained end to end (each shares its ends with its neighbours). It must
+  // stay at least ~1.5 cells thick on the default grid, or it breaks into
+  // dots as the herzie turns.
+  const bandR = hr * 0.11;
+  const bandSteps = 12;
+  const arcPoint = (i: number): V3 => {
+    const angle = Math.PI * (i / bandSteps); // 0 = right cup, π = left
+    return [
+      hx + Math.cos(angle) * hr * 1.04,
+      hy - Math.sin(angle) * hr * 1.12,
+      hz,
+    ];
+  };
+  for (let i = 0; i < bandSteps; i++) {
+    const a = arcPoint(i);
+    const b = arcPoint(i + 1);
+    result.push(
+      part(
+        [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2],
+        bandR,
+        HEADPHONE_SHELL,
+        {
+          kind: "capsule",
+          axis: [(b[0] - a[0]) / 2, (b[1] - a[1]) / 2, (b[2] - a[2]) / 2],
+        },
+      ),
+    );
   }
 
   return result;
@@ -2223,6 +2277,169 @@ function raySphere(
   return t > 0 ? t : -1;
 }
 
+function axisLength(axis: V3): number {
+  return Math.sqrt(axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]);
+}
+
+/** Distance along a unit ray to where it first enters `p`, or -1 for a miss.
+ * Exported for tests. Capsules and cylinders are convex, so the first hit is
+ * the nearest of their surfaces' hits: the side, then either the flat caps
+ * (cylinder) or the end spheres (capsule). */
+export function rayPrimitive(
+  ox: number,
+  oy: number,
+  oz: number,
+  dx: number,
+  dy: number,
+  dz: number,
+  p: Primitive,
+): number {
+  const [cx, cy, cz] = p.center;
+  const r = p.radius;
+  const shape = p.shape;
+  if (!shape) return raySphere(ox, oy, oz, dx, dy, dz, cx, cy, cz, r);
+
+  const h = axisLength(shape.axis);
+  if (h < 1e-9) return raySphere(ox, oy, oz, dx, dy, dz, cx, cy, cz, r);
+  const ux = shape.axis[0] / h;
+  const uy = shape.axis[1] / h;
+  const uz = shape.axis[2] / h;
+
+  // Work in the axis' frame: `along` is the position along it, the rest is
+  // perpendicular to it.
+  const lx = ox - cx;
+  const ly = oy - cy;
+  const lz = oz - cz;
+  const along = lx * ux + ly * uy + lz * uz;
+  const dAlong = dx * ux + dy * uy + dz * uz;
+  const px = lx - ux * along;
+  const py = ly - uy * along;
+  const pz = lz - uz * along;
+  const qx = dx - ux * dAlong;
+  const qy = dy - uy * dAlong;
+  const qz = dz - uz * dAlong;
+
+  let best = Number.POSITIVE_INFINITY;
+  const a = qx * qx + qy * qy + qz * qz;
+  if (a > 1e-12) {
+    const b = 2 * (px * qx + py * qy + pz * qz);
+    const c = px * px + py * py + pz * pz - r * r;
+    const disc = b * b - 4 * a * c;
+    if (disc >= 0) {
+      const t = (-b - Math.sqrt(disc)) / (2 * a);
+      if (t > 0 && Math.abs(along + t * dAlong) <= h) best = t;
+    }
+  }
+
+  if (shape.kind === "capsule") {
+    for (let side = -1; side <= 1; side += 2) {
+      const t = raySphere(
+        ox,
+        oy,
+        oz,
+        dx,
+        dy,
+        dz,
+        cx + ux * h * side,
+        cy + uy * h * side,
+        cz + uz * h * side,
+        r,
+      );
+      if (t > 0 && t < best) best = t;
+    }
+  } else if (shape.dome) {
+    // A domed end sits where side·along = h + dome·(1 − ρ²/r²), ρ being the
+    // distance from the axis; along the ray that's a quadratic in t. Dished
+    // (dome < 0), the solid isn't convex, but the camera is outside it, so
+    // the nearest surface hit is still where the ray enters.
+    const k = -shape.dome / (r * r);
+    const ka = k * a;
+    const kc = k * (px * px + py * py + pz * pz) + h + shape.dome;
+    const pq = 2 * k * (px * qx + py * qy + pz * qz);
+    // Both roots matter: a slanted ray can cross the paraboloid out past the
+    // rim (not on the cup) before it meets the end itself.
+    const tryHit = (t: number) => {
+      if (t <= 0 || t >= best) return;
+      const ex = px + qx * t;
+      const ey = py + qy * t;
+      const ez = pz + qz * t;
+      if (ex * ex + ey * ey + ez * ez <= r * r) best = t;
+    };
+    for (let side = -1; side <= 1; side += 2) {
+      const qb = pq - side * dAlong;
+      const qc = kc - side * along;
+      if (Math.abs(ka) < 1e-12) {
+        if (Math.abs(qb) > 1e-12) tryHit(-qc / qb);
+        continue;
+      }
+      const disc = qb * qb - 4 * ka * qc;
+      if (disc < 0) continue;
+      const sq = Math.sqrt(disc);
+      tryHit((-qb - sq) / (2 * ka));
+      tryHit((-qb + sq) / (2 * ka));
+    }
+  } else if (Math.abs(dAlong) > 1e-12) {
+    for (let side = -1; side <= 1; side += 2) {
+      const t = (side * h - along) / dAlong;
+      if (t <= 0 || t >= best) continue;
+      const ex = px + qx * t;
+      const ey = py + qy * t;
+      const ez = pz + qz * t;
+      if (ex * ex + ey * ey + ez * ez <= r * r) best = t;
+    }
+  }
+
+  return best === Number.POSITIVE_INFINITY ? -1 : best;
+}
+
+/** The unit surface normal of `p` at a point on its surface. Exported for
+ * tests. */
+export function primitiveNormal(p: Primitive, hit: V3): V3 {
+  const [cx, cy, cz] = p.center;
+  const lx = hit[0] - cx;
+  const ly = hit[1] - cy;
+  const lz = hit[2] - cz;
+  const shape = p.shape;
+  const h = shape ? axisLength(shape.axis) : 0;
+  if (!shape || h < 1e-9) {
+    return [lx / p.radius, ly / p.radius, lz / p.radius];
+  }
+  const ux = shape.axis[0] / h;
+  const uy = shape.axis[1] / h;
+  const uz = shape.axis[2] / h;
+  const along = lx * ux + ly * uy + lz * uz;
+  const ex = lx - ux * along;
+  const ey = ly - uy * along;
+  const ez = lz - uz * along;
+  const radial = Math.sqrt(ex * ex + ey * ey + ez * ez);
+
+  if (shape.kind === "capsule") {
+    // Away from the nearest point on the segment.
+    const s = Math.max(-h, Math.min(h, along));
+    const nx = lx - ux * s;
+    const ny = ly - uy * s;
+    const nz = lz - uz * s;
+    const len = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+    return [nx / len, ny / len, nz / len];
+  }
+  // Cylinder: on whichever surface the point is nearest, an end or the side.
+  const r = p.radius;
+  const dome = shape.dome ?? 0;
+  const endAlong = h + dome * (1 - (radial * radial) / (r * r));
+  if (Math.abs(endAlong - Math.abs(along)) < r - radial || radial < 1e-9) {
+    const sign = along < 0 ? -1 : 1;
+    if (!dome || radial < 1e-9) return [ux * sign, uy * sign, uz * sign];
+    // The cap's slope tips the normal out from the axis (in, when dished).
+    const slope = (-2 * dome) / (r * r);
+    const nx = ux * sign - ex * slope;
+    const ny = uy * sign - ey * slope;
+    const nz = uz * sign - ez * slope;
+    const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
+    return [nx / len, ny / len, nz / len];
+  }
+  return [ex / radial, ey / radial, ez / radial];
+}
+
 // --- Texture patterns ---
 
 function applyTexture(
@@ -2314,6 +2531,126 @@ function zoneColor(
   }
 }
 
+/**
+ * How a primitive is shaded, for a host drawing the model with its own
+ * lights. Mirrors renderCreatureFrame: with `diffuse` the light's
+ * max(0, n·l),
+ *
+ *   lit = (gain + texture) · (floor + (1 − floor) · diffuse)
+ *
+ * (texture only when `textured`, see applyTexture), and the colour is
+ * `shades[2]` above `hi`, `shades[1]` above `lo`, else `shades[0]`. A
+ * scheme-painted primitive takes its shades from the scheme's band at the
+ * height drawn instead (see schemeShades).
+ */
+export interface PrimitiveShading {
+  gain: number;
+  floor: number;
+  textured: boolean;
+  lo: number;
+  hi: number;
+  /** dim, base, bright. */
+  shades: [string, string, string];
+  schemePainted: boolean;
+}
+
+/** The shades shadeWearableColor gives `hex`, dim to bright. */
+function wearableShades(hex: string): [string, string, string] {
+  return [
+    shadeWearableColor(hex, 0),
+    shadeWearableColor(hex, 0.45),
+    shadeWearableColor(hex, 1),
+  ];
+}
+
+export function primitiveShading(
+  sp: Pick<Sphere, "zone" | "color">,
+  colors: ColorTriplet,
+  scheme?: readonly string[],
+): PrimitiveShading {
+  // Lighting goes by zone, then by an own colour — as renderCreatureFrame's
+  // `lit` does.
+  let gain = 0.5;
+  let floor = 0.15;
+  let textured = false;
+  if (sp.zone === "pupil") gain = 0;
+  else if (sp.zone === "eye") gain = 0.75;
+  else if (sp.zone === "eye-evil") {
+    gain = 1;
+    floor = 0.55;
+  } else if (sp.color) {
+    gain = 0.7;
+    floor = 0.3;
+  } else textured = true;
+
+  // Colour goes by an own colour, then the scheme, then the zone — as its
+  // cell colours do.
+  const shading = (
+    lo: number,
+    hi: number,
+    shades: [string, string, string],
+    schemePainted = false,
+  ): PrimitiveShading => ({
+    gain,
+    floor,
+    textured,
+    lo,
+    hi,
+    shades,
+    schemePainted,
+  });
+  if (sp.color) return shading(0.3, 0.6, wearableShades(sp.color));
+  if (scheme && isSchemePaintable(sp.zone, false)) {
+    return shading(0.3, 0.6, wearableShades(scheme[0]), true);
+  }
+  switch (sp.zone) {
+    case "eye":
+      return shading(0.3, 0.6, [EYE_COLOR, EYE_COLOR, EYE_COLOR]);
+    case "eye-evil":
+      return shading(0.34, 0.62, [
+        EVIL_EYE_DIM,
+        EVIL_EYE_BASE,
+        EVIL_EYE_BRIGHT,
+      ]);
+    case "pupil":
+      return shading(0.3, 0.6, ["#111111", "#111111", "#111111"]);
+    case "accent":
+      return shading(0.45, Number.POSITIVE_INFINITY, [
+        colors.dim,
+        colors.base,
+        colors.base,
+      ]);
+    case "dark":
+      return shading(0.3, 0.6, [colors.dim, colors.dim, colors.dim]);
+    case "wearable":
+      return shading(0.3, 0.6, ["#444", "#666", "#888"]);
+    default:
+      return shading(0.3, 0.6, [colors.dim, colors.base, colors.bright]);
+  }
+}
+
+/** Each band of a colour scheme's shades (dim, base, bright), top band
+ * first: the scheme paints by height, splitting the painted surface's span
+ * into equal bands. */
+export function schemeShades(
+  scheme: readonly string[],
+): [string, string, string][] {
+  return scheme.map(wearableShades);
+}
+
+/** The bounds of the scheme-painted surface on the y axis (creature space, y
+ * down): the span schemeShades' bands divide. */
+export function schemeSpan(spheres: Sphere[]): [number, number] {
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  for (const sp of spheres) {
+    if (!isSchemePaintable(sp.zone, Boolean(sp.color))) continue;
+    min = Math.min(min, sp.center[1] - sp.radius);
+    max = Math.max(max, sp.center[1] + sp.radius);
+  }
+  return [min, max];
+}
+
 // --- Frame renderer ---
 
 function renderCreatureFrame(
@@ -2340,27 +2677,6 @@ function renderCreatureFrame(
   const pitchCos = pitch === undefined ? 1 : Math.cos(pitch);
   const pitchSin = pitch === undefined ? 0 : Math.sin(pitch);
   const transformed = spheres.map((s) => {
-    if (pitch !== undefined) {
-      const fixed =
-        s.part === "ground" || s.part === "spirit" || s.part === "pet";
-      const turned = fixed ? s.center : rotY(s.center, yAngle);
-      return {
-        center: [
-          turned[0],
-          turned[1] * pitchCos - turned[2] * pitchSin,
-          turned[1] * pitchSin + turned[2] * pitchCos,
-        ] as V3,
-        radius: s.radius,
-        zone: s.zone,
-        part: s.part,
-        color: s.color,
-      };
-    }
-    const tilted: V3 = [
-      s.center[0],
-      s.center[1] * TILT_COS - s.center[2] * TILT_SIN,
-      s.center[1] * TILT_SIN + s.center[2] * TILT_COS,
-    ];
     // Ground props (e.g. the boombox) and the Spirit Orb ("spirit") are both
     // anchored to the scene, not the creature — they keep their facing as the
     // herzie spins around its Y axis (manual drag-rotation shouldn't drag the
@@ -2368,12 +2684,34 @@ function renderCreatureFrame(
     // instead, via applyIdleOffsets.
     const isFixed =
       s.part === "ground" || s.part === "spirit" || s.part === "pet";
+    // Rotations are linear, so a shape's axis turns exactly as a point does.
+    const view = (p: V3): V3 => {
+      if (pitch !== undefined) {
+        const turned = isFixed ? p : rotY(p, yAngle);
+        return [
+          turned[0],
+          turned[1] * pitchCos - turned[2] * pitchSin,
+          turned[1] * pitchSin + turned[2] * pitchCos,
+        ];
+      }
+      const tilted: V3 = [
+        p[0],
+        p[1] * TILT_COS - p[2] * TILT_SIN,
+        p[1] * TILT_SIN + p[2] * TILT_COS,
+      ];
+      return isFixed ? tilted : rotY(tilted, yAngle);
+    };
     return {
-      center: isFixed ? tilted : rotY(tilted, yAngle),
+      center: view(s.center),
       radius: s.radius,
       zone: s.zone,
       part: s.part,
       color: s.color,
+      shape: s.shape && { ...s.shape, axis: view(s.shape.axis) },
+      // A sphere enclosing the primitive, for a cheap reject per ray.
+      bound: s.shape
+        ? s.radius + axisLength(s.shape.axis) + Math.abs(s.shape.dome ?? 0)
+        : s.radius,
     };
   });
 
@@ -2423,18 +2761,36 @@ function renderCreatureFrame(
 
       for (let i = 0; i < transformed.length; i++) {
         const sp = transformed[i];
-        const t = raySphere(
-          0,
-          0,
-          oz,
-          dx,
-          dy,
-          dz,
-          sp.center[0],
-          sp.center[1],
-          sp.center[2],
-          sp.radius,
-        );
+        // Runs for every primitive in every cell. Nearly everything is a
+        // sphere, tested directly; a shape only gets the full test once the
+        // ray hits its bounding sphere.
+        const t = sp.shape
+          ? raySphere(
+              0,
+              0,
+              oz,
+              dx,
+              dy,
+              dz,
+              sp.center[0],
+              sp.center[1],
+              sp.center[2],
+              sp.bound,
+            ) > 0
+            ? rayPrimitive(0, 0, oz, dx, dy, dz, sp)
+            : -1
+          : raySphere(
+              0,
+              0,
+              oz,
+              dx,
+              dy,
+              dz,
+              sp.center[0],
+              sp.center[1],
+              sp.center[2],
+              sp.radius,
+            );
         if (t > 0 && t < nearestT) {
           nearestT = t;
           nearestIdx = i;
@@ -2448,11 +2804,8 @@ function renderCreatureFrame(
       const hy = dy * nearestT;
       const hz = oz + dz * nearestT;
 
-      const nx = (hx - sp.center[0]) / sp.radius;
-      const ny = (hy - sp.center[1]) / sp.radius;
-      const nz = (hz - sp.center[2]) / sp.radius;
-
-      const normal: V3 = [nx, ny, nz];
+      const normal = primitiveNormal(sp, [hx, hy, hz]);
+      const [nx, ny, nz] = normal;
       // Directional diffuse — max(0, ...) produces proper lit/shadow gradient
       const diffuse = Math.max(0, dot3(normal, LIGHT));
 
@@ -2864,18 +3217,72 @@ export interface CreaturePose {
 /** Frames in the idle loop, which Herzie3D plays at 50ms a frame. */
 export const IDLE_LOOP_FRAMES = IDLE_FRAMES;
 
-/** Built sphere lists for renderCreaturePose, which a host calls every
- * frame: building a creature and its wearables is pure, so it's done once
- * per look. Bounded, since every distinct look adds an entry. */
+/** A herzie and everything it wears, in creature space (y down, front −z),
+ * with what its colours are made from: what the ray caster draws, and what
+ * a real-3D host (the Town) builds meshes from. */
+export interface CreatureModel {
+  spheres: Sphere[];
+  colors: ColorTriplet;
+  /** The colour scheme painting it (a prism…), if any. */
+  scheme: readonly string[] | undefined;
+  textureType: number;
+}
+
+/**
+ * Builds a herzie's model. Props placed at the frame's edge (a floating pet)
+ * are placed against `cols` x `rows`, the grid it would be drawn on.
+ */
+export function buildCreatureModel(
+  userId: string,
+  stage: number,
+  equipped?: Equipped,
+  paramsOverride?: CreatureParams,
+  cols: number = SW,
+  rows: number = SH,
+): CreatureModel {
+  const params = resolveCreatureParams(userId, paramsOverride);
+  const spheres = buildCreatureSpheres(params, stage);
+  appendWearableSpheres(spheres, equipped, layoutCols(cols, rows));
+  return {
+    spheres,
+    colors: buildColorTriplet(CREATURE_PALETTE[params.colorIndex]),
+    scheme: colorSchemeFor(equipped, params),
+    textureType: params.textureType,
+  };
+}
+
+/**
+ * Each sphere's offset from its rest position in a pose: the idle loop
+ * blended into the walk cycle by `walkWeight`. `idleFrame` may be
+ * fractional, for a host animating continuously.
+ */
+export function creaturePoseOffsets(
+  spheres: Sphere[],
+  stage: number,
+  pose: Pick<CreaturePose, "idleFrame" | "walkPhase" | "walkWeight">,
+): V3[] {
+  const w = Math.min(1, Math.max(0, pose.walkWeight));
+  const idle = idleDeltas(spheres, pose.idleFrame);
+  const walk = w > 0 ? walkDeltas(spheres, pose.walkPhase, stage) : null;
+  return spheres.map((s, i) => {
+    // Scene-anchored parts (a floating pet) keep their own idle bob even
+    // mid-stride; everything else fades from idle into the walk.
+    const iw = walk && !isSceneFixed(s.part) ? 1 - w : 1;
+    const d = walk?.[i];
+    return [
+      d ? d[0] * w : 0,
+      idle[i] * iw + (d ? d[1] * w : 0),
+      d ? d[2] * w : 0,
+    ];
+  });
+}
+
+/** Built models for renderCreaturePose, which a host calls every frame:
+ * building a creature and its wearables is pure, so it's done once per
+ * look. Bounded, since every distinct look adds an entry. */
 const poseBuildCache = new Map<
   string,
-  {
-    spheres: Sphere[];
-    anchors: AnchorPoint[];
-    colors: ColorTriplet;
-    scheme: readonly string[] | undefined;
-    textureType: number;
-  }
+  CreatureModel & { anchors: AnchorPoint[] }
 >();
 const POSE_BUILD_CACHE_MAX = 32;
 
@@ -2898,15 +3305,21 @@ export function renderCreaturePose(
   const key = `${paramsCacheKey(userId, paramsOverride)}:${stage}:${equippedCacheKey(equipped)}:${cols}${rowsKey(rows)}`;
   let built = poseBuildCache.get(key);
   if (!built) {
-    const params = resolveCreatureParams(userId, paramsOverride);
-    const spheres = buildCreatureSpheres(params, stage);
-    appendWearableSpheres(spheres, equipped, layoutCols(cols, rows));
+    const model = buildCreatureModel(
+      userId,
+      stage,
+      equipped,
+      paramsOverride,
+      cols,
+      rows,
+    );
     built = {
-      spheres,
-      anchors: getAnchors(spheres, params, stage),
-      colors: buildColorTriplet(CREATURE_PALETTE[params.colorIndex]),
-      scheme: colorSchemeFor(equipped, params),
-      textureType: params.textureType,
+      ...model,
+      anchors: getAnchors(
+        model.spheres,
+        resolveCreatureParams(userId, paramsOverride),
+        stage,
+      ),
     };
     if (poseBuildCache.size >= POSE_BUILD_CACHE_MAX) {
       const oldest = poseBuildCache.keys().next().value;
@@ -2916,20 +3329,15 @@ export function renderCreaturePose(
   }
 
   const { spheres } = built;
-  const w = Math.min(1, Math.max(0, pose.walkWeight));
-  const idle = idleDeltas(spheres, pose.idleFrame);
-  const walk = w > 0 ? walkDeltas(spheres, pose.walkPhase, stage) : null;
+  const offsets = creaturePoseOffsets(spheres, stage, pose);
   const animated = spheres.map((s, i) => {
-    // Scene-anchored parts (a floating pet) keep their own idle bob even
-    // mid-stride; everything else fades from idle into the walk.
-    const iw = walk && !isSceneFixed(s.part) ? 1 - w : 1;
-    const d = walk?.[i];
+    const d = offsets[i];
     return {
       ...s,
       center: [
-        s.center[0] + (d ? d[0] * w : 0),
-        s.center[1] + idle[i] * iw + (d ? d[1] * w : 0),
-        s.center[2] + (d ? d[2] * w : 0),
+        s.center[0] + d[0],
+        s.center[1] + d[1],
+        s.center[2] + d[2],
       ] as V3,
     };
   });

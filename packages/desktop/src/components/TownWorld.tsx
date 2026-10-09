@@ -126,7 +126,7 @@ export function TownWorld({
             chatOverlay ? "bottom-[96px]" : "bottom-2",
           )}
         >
-          WASD move · drag look · right-drag steer · scroll zoom
+          WASD move · arrows/drag look · right-drag steer
         </div>
       )}
     </div>

@@ -18,7 +18,7 @@ export type Mover = { vx: number; vz: number; heading: number };
  * to go and which way it faces. Pure, so the controls can be tested
  * without a scene.
  *
- * - WASD / arrows walk relative to the camera (`azimuth`, camera-controls'
+ * - WASD walks relative to the camera (`azimuth`, camera-controls'
  *   convention: 0 puts the camera on the +z side, looking toward -z).
  * - Holding the right mouse button turns the herzie with the camera, so
  *   A/D strafe; holding both buttons walks forward.

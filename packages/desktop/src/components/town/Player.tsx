@@ -9,7 +9,8 @@ import {
 } from "@react-three/rapier";
 import { useEffect, useMemo, useRef } from "react";
 import type { Look } from "../TownScene";
-import { HerzieSprite } from "./HerzieSprite";
+import { HerzieModel } from "./HerzieModel";
+import type { TownMap } from "./map";
 import { type Mover, stepMover, walkAzimuth } from "./movement";
 import { townSave, useTownRuntime, WORLD_RADIUS } from "./runtime";
 
@@ -26,12 +27,21 @@ const SKIN = 0.02;
  * trees. Movement runs in the fixed physics step; the body's drawn position
  * is interpolated between steps by <Physics interpolate>.
  *
- * Controls: WASD / arrows walk relative to the camera. Left-dragging only
+ * Controls: WASD walks relative to the camera (arrows turn it). Left-dragging only
  * looks around — the herzie keeps walking the way it was. Holding the right
  * button turns the herzie with the camera (and A/D then strafe); holding
  * both walks forward.
  */
-export function Player({ look }: { look: Look }) {
+export function Player({
+  look,
+  spawn,
+  respawn = 0,
+}: {
+  look: Look;
+  spawn: TownMap["spawn"];
+  /** Bumped to put the player back at `spawn`. */
+  respawn?: number;
+}) {
   const rt = useTownRuntime();
   const { world } = useRapier();
   const body = useRef<RapierRigidBody>(null);
@@ -57,14 +67,27 @@ export function Player({ look }: { look: Look }) {
 
   const equippedKey = JSON.stringify(look.equipped ?? null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the look's content
-  const sprite = useMemo(
-    () => new HerzieSprite(look),
+  const herzie = useMemo(
+    () => new HerzieModel(look),
     [look.seed, look.stage, equippedKey],
   );
   useEffect(() => {
-    sprite.heading = townSave.heading;
-    return () => sprite.dispose();
-  }, [sprite]);
+    herzie.heading = townSave.heading;
+    return () => herzie.dispose();
+  }, [herzie]);
+
+  const spawned = useRef(respawn);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only on a bump
+  useEffect(() => {
+    if (spawned.current === respawn) return;
+    spawned.current = respawn;
+    const [x, z] = spawn.at;
+    Object.assign(townSave, { x, z, heading: spawn.heading });
+    herzie.heading = spawn.heading;
+    mover.current = { vx: 0, vz: 0, heading: spawn.heading };
+    body.current?.setTranslation({ x, y: 0, z }, true);
+    body.current?.setNextKinematicTranslation({ x, y: 0, z });
+  }, [respawn]);
 
   useBeforePhysicsStep((w) => {
     const b = body.current;
@@ -75,9 +98,9 @@ export function Player({ look }: { look: Look }) {
     const input = rt.input.current;
     const m = mover.current;
     walkAz.current = walkAzimuth(walkAz.current, rt.cameraAzimuth, input);
-    m.heading = sprite.heading;
+    m.heading = herzie.heading;
     stepMover(m, input, walkAz.current, dt);
-    sprite.heading = m.heading;
+    herzie.heading = m.heading;
 
     kcc.computeColliderMovement(col, {
       x: m.vx * dt,
@@ -99,11 +122,11 @@ export function Player({ look }: { look: Look }) {
     b.setNextKinematicTranslation({ x, y: p.y, z });
     townSave.x = x;
     townSave.z = z;
-    townSave.heading = sprite.heading;
+    townSave.heading = herzie.heading;
   });
 
-  useFrame(({ camera }, dt) => {
-    sprite.update(dt, rt.playerSpeed, camera);
+  useFrame((_, dt) => {
+    herzie.update(dt, rt.playerSpeed);
   });
 
   return (
@@ -126,7 +149,7 @@ export function Player({ look }: { look: Look }) {
           rt.playerBody = g;
         }}
       >
-        <primitive object={sprite.root} />
+        <primitive object={herzie.root} />
       </group>
     </RigidBody>
   );

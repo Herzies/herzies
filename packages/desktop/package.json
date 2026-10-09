@@ -11,6 +11,7 @@
     "vite:dev": "vite dev --port 1420",
     "vite:build": "vite build",
     "sandbox": "vite dev --port 1420 --open /sandbox.html",
+    "map-editor": "vite dev --port 1420 --open /map-editor.html",
     "item-editor": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tools/item-editor/server.mjs",
     "test": "vitest run"
   },
@@ -26,7 +27,6 @@
     "@tauri-apps/plugin-notification": "^2.3.3",
     "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-updater": "^2.10.1",
-    "lru-cache": "^11.5.3",
     "three": "^0.186.1"
   },
   "devDependencies": {

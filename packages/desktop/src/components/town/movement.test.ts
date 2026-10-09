@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   angleDelta,
   newAnimationState,
-  quantizePose,
   STRIDE,
   stepAnimation,
   WALK_SPEED,
@@ -18,6 +17,10 @@ const idle = (): TownInput => ({
   right: false,
   mouseLeft: false,
   mouseRight: false,
+  turnLeft: false,
+  turnRight: false,
+  tiltUp: false,
+  tiltDown: false,
 });
 const run = (
   m: Mover,
@@ -134,29 +137,5 @@ describe("animation clocks", () => {
     expect(s.walkWeight).toBeGreaterThan(0.99);
     for (let i = 0; i < 60; i++) stepAnimation(s, DT, 0);
     expect(s.walkWeight).toBe(0);
-  });
-
-  it("caches standing frames without the walk phase, and walking ones without the breath", () => {
-    const s = newAnimationState();
-    const key = (anim: typeof s) =>
-      quantizePose({ yAngle: 0, pitch: 0, anim, breathesWhileWalking: false })
-        .key;
-    expect(key({ ...s, walkPhase: 0.1 })).toBe(key({ ...s, walkPhase: 0.6 }));
-    const walking = { ...s, walkWeight: 1 };
-    expect(key({ ...walking, idleTime: 0.1 })).toBe(
-      key({ ...walking, idleTime: 2 }),
-    );
-    expect(key({ ...walking, walkPhase: 0.1 })).not.toBe(
-      key({ ...walking, walkPhase: 0.6 }),
-    );
-  });
-
-  it("wraps turn angles into one of 36 steps", () => {
-    const anim = newAnimationState();
-    const at = (yAngle: number) =>
-      quantizePose({ yAngle, pitch: 0, anim, breathesWhileWalking: false }).pose
-        .yAngle;
-    expect(at(-0.01)).toBeCloseTo(0, 6);
-    expect(at(Math.PI * 4 + 0.17)).toBeCloseTo((Math.PI * 2) / 36, 6);
   });
 });
