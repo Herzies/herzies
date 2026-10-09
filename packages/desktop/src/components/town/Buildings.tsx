@@ -21,9 +21,9 @@ import {
  * this wide across, their bottom a little sunk into the step. */
 const DOOR_RADIUS = 1.25;
 const DOOR_Y = 1.15;
-/** Window rows (their middles): downstairs, tops level with the door's;
- * upstairs, in the middle of the second storey. Between them, a trim band
- * marks the floor. */
+/** Window heights (their middles): downstairs, tops level with the door's;
+ * upstairs (only the round window over a home's door), in the middle of
+ * the second storey. Between them, a trim band marks the floor. */
 const GROUND_FLOOR = 1.95;
 const UPSTAIRS = 3.6;
 const FLOOR_BAND = 2.86;
@@ -506,10 +506,9 @@ function homeGeometry(b: Building) {
       painted(box(r.w + 0.04, 0.1, r.h + 0.04, cx, FLOOR_BAND, cz), TRIM),
       ...roof(e, roofColors, wall, PLANKS),
     );
-    // Windows downstairs, and the same upstairs over them.
+    // Windows downstairs only (upstairs, just the round one over the door).
     for (const w of windowRuns(r, isH, door, () => WINDOW_SPACING).flat()) {
       framedWindow(w, body, glow);
-      framedWindow(w, body, glow, UPSTAIRS);
     }
   }
   // A round window over the door.
@@ -541,8 +540,7 @@ const SHOP_WALL_HEIGHT = 5.2;
 const SHOP_WALL = "#b25c42";
 /** The sign: just over the door, however tall the shop. */
 const SIGN_Y = 3.0;
-/** The shop's upstairs windows, over a band at SHOP_FLOOR_BAND. */
-const SHOP_UPSTAIRS = 4.2;
+/** The band marking the shop's upper storey. */
 const SHOP_FLOOR_BAND = 3.55;
 const SHOPS: [string, string][] = [
   ["#3f72d0", "#2c559f"],
@@ -626,8 +624,6 @@ function shopGeometry(b: Building) {
           body.push(painted(on(strip, 2.4, 0.3), i % 2 === 0 ? color : TRIM));
         }
       } else framedWindow(w, body, glow);
-      // Upstairs windows over them, above the awnings and the sign.
-      framedWindow(w, body, glow, SHOP_UPSTAIRS);
     }
   }
   return { body, glow };
