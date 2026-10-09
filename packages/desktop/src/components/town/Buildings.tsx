@@ -12,7 +12,7 @@ import {
   type TownMap,
 } from "./map";
 
-// Houses after the early Pokémon towns: short cream walls on a dark
+// Houses after the early Pokémon towns: short plank walls on a dark
 // footing, a big striped roof in a bold colour that does most of the
 // talking, a round framed door with a step and a mailbox, framed windows either
 // side of it, and a chimney on the bigger ones.
@@ -34,7 +34,8 @@ const OVERHANG = 0.35;
 const FOOTING = 0.28;
 /** Roof strips are about this deep, alternating light and dark. */
 const STRIP = 0.32;
-const WALLS = ["#efe6cf", "#f3eee2", "#e9dcc0", "#efe2d0"];
+/** Plank walls: honey, weathered grey, barn red, pale pine. */
+const WALLS = ["#b98a5a", "#9a8c7c", "#a5624a", "#d0ae80"];
 /** Roof colours, light and dark strip: red, blue, green, orange, purple. */
 const ROOFS: [string, string][] = [
   ["#d4483b", "#a8332b"],
@@ -63,9 +64,33 @@ function bounds(r: CellRect) {
 }
 type Bounds = ReturnType<typeof bounds>;
 
+/** What a wall is made of, drawn on by the building shader (see
+ * `patterned`): plain paint, wooden planks, or brick. */
+const PLAIN = 0;
+const PLANKS = 1;
+const BRICK = 2;
+type Surface = typeof PLAIN | typeof PLANKS | typeof BRICK;
+
+/** Mark what a geometry is made of (every part gets a mark, as
+ * mergeGeometries wants the same attributes on all of them). */
+function madeOf(g: THREE.BufferGeometry, surface: Surface) {
+  g.setAttribute(
+    "surface",
+    new THREE.Float32BufferAttribute(
+      new Array(g.attributes.position.count).fill(surface),
+      1,
+    ),
+  );
+  return g;
+}
+
 /** Paint a geometry one colour, in the shape mergeGeometries wants: no
- * index, no uvs, normals and colours. */
-function painted(g: THREE.BufferGeometry, color: string): THREE.BufferGeometry {
+ * index, no uvs, normals, colours and what it's made of. */
+function painted(
+  g: THREE.BufferGeometry,
+  color: string,
+  surface: Surface = PLAIN,
+): THREE.BufferGeometry {
   const out = g.index ? g.toNonIndexed() : g;
   out.deleteAttribute("uv");
   if (!out.attributes.normal) out.computeVertexNormals();
@@ -78,7 +103,7 @@ function painted(g: THREE.BufferGeometry, color: string): THREE.BufferGeometry {
       3,
     ),
   );
-  return out;
+  return madeOf(out, surface);
 }
 
 function box(
@@ -135,7 +160,12 @@ function roofShape({ x0, x1, z0, z1 }: Bounds) {
 
 /** A gabled roof over a rect: each slope in strips, light and dark, a
  * ridge cap, a dark underside, and wall-coloured gable ends. */
-function roof(e: Bounds, colors: [string, string], wall: string) {
+function roof(
+  e: Bounds,
+  colors: [string, string],
+  wall: string,
+  wallSurface: Surface,
+) {
   const s = roofShape(e);
   const { a0, a1, b0, b1, bc, half, top, p } = s;
   const o = OVERHANG;
@@ -182,6 +212,7 @@ function roof(e: Bounds, colors: [string, string], wall: string) {
         p(a1, top, bc),
       ),
       wall,
+      wallSurface,
     ),
   );
   return out;
@@ -398,7 +429,7 @@ function homeGeometry(b: Building) {
     const cx = (e.x0 + e.x1) / 2;
     const cz = (e.z0 + e.z1) / 2;
     body.push(
-      painted(box(r.w, WALL, r.h, cx, WALL / 2, cz), wall),
+      painted(box(r.w, WALL, r.h, cx, WALL / 2, cz), wall, PLANKS),
       // A dark footing, and a white band under the eaves.
       painted(
         box(r.w + 0.08, FOOTING, r.h + 0.08, cx, FOOTING / 2, cz),
@@ -408,7 +439,7 @@ function homeGeometry(b: Building) {
       // slopes down past them.)
       painted(box(r.w + 0.04, 0.1, r.h + 0.04, cx, WALL - 0.17, cz), TRIM),
       painted(box(r.w + 0.04, 0.1, r.h + 0.04, cx, FLOOR_BAND, cz), TRIM),
-      ...roof(e, roofColors, wall),
+      ...roof(e, roofColors, wall, PLANKS),
     );
     for (const w of outsideWalls(r, isH)) {
       if (windowFits(w, door)) framedWindow(w, body, glow);
@@ -430,7 +461,7 @@ function homeGeometry(b: Building) {
   if (c) {
     const { x, z, base, h } = c;
     body.push(
-      painted(box(0.36, h, 0.36, x, base + h / 2, z), CHIMNEY),
+      painted(box(0.36, h, 0.36, x, base + h / 2, z), CHIMNEY, BRICK),
       painted(box(0.44, 0.1, 0.44, x, base + h, z), "#6a3a2c"),
     );
   }
@@ -438,12 +469,12 @@ function homeGeometry(b: Building) {
   return { body, glow };
 }
 
-/** Shops: white walls a little taller than a home's, a flat roof in the
+/** Shops: brick walls a little taller than a home's, a flat roof in the
  * shop's colour with a dark cornice, a sign over glass double doors, and
  * big lit shop windows under striped awnings along the front — a Poké
  * Mart, more or less. Other walls get ordinary windows. */
 const SHOP_WALL_HEIGHT = 5.2;
-const SHOP_WALL = "#f4f2ec";
+const SHOP_WALL = "#b25c42";
 /** The sign: just over the door, however tall the shop. */
 const SIGN_Y = 3.0;
 /** The shop's upstairs windows, over a band at SHOP_FLOOR_BAND. */
@@ -487,7 +518,7 @@ function shopGeometry(b: Building) {
     const cx = (e.x0 + e.x1) / 2;
     const cz = (e.z0 + e.z1) / 2;
     body.push(
-      painted(box(r.w, H, r.h, cx, H / 2, cz), SHOP_WALL),
+      painted(box(r.w, H, r.h, cx, H / 2, cz), SHOP_WALL, BRICK),
       painted(
         box(r.w + 0.08, FOOTING, r.h + 0.08, cx, FOOTING / 2, cz),
         FOOTING_COLOR,
@@ -586,7 +617,7 @@ function caveGeometry(b: Building) {
     }
     g.deleteAttribute("uv");
     g.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
-    body.push(g);
+    body.push(madeOf(g, PLAIN));
   }
   const door = doorAt(b);
   if (door) {
@@ -631,12 +662,100 @@ function buildingGeometry(b: Building) {
   };
 }
 
+/** Brick courses and plank boards: chunky enough to read at the Town's
+ * big pixels. */
+const BRICK_HEIGHT = 0.3;
+const BRICK_LENGTH = 0.66;
+const PLANK_HEIGHT = 0.4;
+
+/**
+ * Draw what walls are made of onto a material: brick (a running bond,
+ * each brick its own shade, in pale mortar) or planks (clapboard: each
+ * board shaded under the lip of the one above, its own tone, with butt
+ * joints and a faint grain). Worked from the wall's own position, so it
+ * runs on across walls and gables of any size; only upright faces.
+ */
+function patterned<M extends THREE.Material>(material: M): M {
+  material.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        "#include <common>",
+        /* glsl */ `#include <common>
+attribute float surface;
+varying float vSurface;
+varying vec3 vWallPos;
+varying vec3 vWallNormal;`,
+      )
+      .replace(
+        "#include <begin_vertex>",
+        /* glsl */ `#include <begin_vertex>
+vSurface = surface;
+vWallPos = position;
+vWallNormal = normal;`,
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        "#include <common>",
+        /* glsl */ `#include <common>
+varying float vSurface;
+varying vec3 vWallPos;
+varying vec3 vWallNormal;
+float wallHash( vec2 p ) {
+  p = fract( p * vec2( 123.34, 456.21 ) );
+  p += dot( p, p + 45.32 );
+  return fract( p.x * p.y );
+}`,
+      )
+      .replace(
+        "#include <color_fragment>",
+        /* glsl */ `#include <color_fragment>
+if ( vSurface > 0.5 && abs( vWallNormal.y ) < 0.5 ) {
+  // Along the wall, and up it.
+  float u = abs( vWallNormal.x ) > abs( vWallNormal.z ) ? vWallPos.z : vWallPos.x;
+  float v = vWallPos.y;
+  // How much wall a pixel covers, to keep the lines soft but solid.
+  float px = max( fwidth( u ), fwidth( v ) );
+  if ( vSurface > 1.5 ) {
+    const float H = ${BRICK_HEIGHT.toFixed(3)};
+    const float L = ${BRICK_LENGTH.toFixed(3)};
+    float row = floor( v / H );
+    float along = u / L + mod( row, 2.0 ) * 0.5;
+    float col = floor( along );
+    vec2 f = vec2( fract( along ) * L, fract( v / H ) * H );
+    float edge = min( min( f.x, L - f.x ), min( f.y, H - f.y ) );
+    float mortar = 1.0 - smoothstep( 0.02, 0.02 + px, edge );
+    float tone = 0.8 + 0.32 * wallHash( vec2( col, row ) );
+    diffuseColor.rgb = mix( diffuseColor.rgb * tone, vec3( 0.8, 0.76, 0.7 ), mortar );
+  } else {
+    const float H = ${PLANK_HEIGHT.toFixed(3)};
+    float row = floor( v / H );
+    float f = fract( v / H );
+    // Butt joints, staggered row to row.
+    float along = u / 2.3 + wallHash( vec2( row, 7.0 ) );
+    float joint = floor( along );
+    float tone = 0.84 + 0.26 * wallHash( vec2( row, joint ) );
+    // Lit along its bottom lip, shaded up under the board above.
+    float lap = mix( 1.06, 0.8, f );
+    float seam = 1.0 - smoothstep( 0.0, px * 1.5 / H, min( f, 1.0 - f ) );
+    float butt = 1.0 - smoothstep( 0.0, px * 1.5, fract( along ) * 2.3 );
+    float grain = 1.0 + 0.05 * sin( u * 7.0 + sin( u * 1.3 + row ) * 2.5 + row * 13.0 );
+    diffuseColor.rgb *= tone * lap * grain * ( 1.0 - 0.45 * max( seam, butt ) );
+  }
+}`,
+      );
+  };
+  material.customProgramCacheKey = () => "patterned";
+  return material;
+}
+
 const bodyMaterial = seeThrough(
-  new THREE.MeshLambertMaterial({
-    vertexColors: true,
-    flatShading: true,
-    side: THREE.DoubleSide,
-  }),
+  patterned(
+    new THREE.MeshLambertMaterial({
+      vertexColors: true,
+      flatShading: true,
+      side: THREE.DoubleSide,
+    }),
+  ),
 );
 /** Unlit, so the windows glow against the evening sky; the day cycle
  * turns them down by day (see DayLight). */
