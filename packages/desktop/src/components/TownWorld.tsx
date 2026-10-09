@@ -9,8 +9,10 @@ import {
   useState,
 } from "react";
 import { cn } from "../lib/utils";
+import type { ChatMessage } from "../tauri-bridge";
 import { LoadingSplash } from "./LoadingSplash";
 import { type EventCard, formatIn, isDown } from "./TownScene";
+import { useChatBubbles } from "./town/chatBubbles";
 import { useTownNet, useTownNetVersion } from "./town/net/townNet";
 import { SPARE_SPOTS, SPOTS, type TownSpot } from "./town/runtime";
 
@@ -28,6 +30,7 @@ const spotKey = (card: EventCard) =>
  */
 export function TownWorld({
   loading = false,
+  chatMessages,
   cards,
   paused,
   onOpen,
@@ -35,6 +38,8 @@ export function TownWorld({
   notice,
   chatOverlay = false,
 }: {
+  /** The chat, for lines over the speakers' heads. */
+  chatMessages?: ChatMessage[];
   /** The Town's events are still loading: keep the splash up. */
   loading?: boolean;
   /** The chat floats over the bottom of the world: keep the prompt above
@@ -52,6 +57,7 @@ export function TownWorld({
   // Everyone else with the Town open, on the same island.
   const net = useTownNet(!paused);
   useTownNetVersion(net);
+  const bubbles = useChatBubbles(chatMessages, !paused);
   // The Town tab is mounted (hidden) for the app's whole life, so wait for
   // it to be opened before loading the 3D world and starting a WebGL
   // context — then keep them.
@@ -141,6 +147,7 @@ export function TownWorld({
           <TownCanvas
             spots={spots}
             net={net}
+            bubbles={bubbles}
             player={look}
             paused={paused}
             onOpen={onOpen}

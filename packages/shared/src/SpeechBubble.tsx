@@ -118,14 +118,30 @@ export function useChatter(
 export function SpeechBubble({
   line,
   typed,
+  tail = "up",
 }: {
   line: string | null;
   typed: number;
+  /** "down": a bubble over someone's head, in normal flow, tail pointing
+   * down at them (the Town's chat bubbles). */
+  tail?: "up" | "down";
 }) {
   if (!line) return null;
+  const down = tail === "down";
+  const tip = down ? (
+    <div className="h-0 w-0 border-t-[5px] border-r-[5px] border-l-[5px] border-t-white border-r-transparent border-l-transparent" />
+  ) : (
+    <div className="h-0 w-0 border-r-[5px] border-b-[5px] border-l-[5px] border-r-transparent border-b-white border-l-transparent" />
+  );
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex flex-col items-center">
-      <div className="h-0 w-0 border-r-[5px] border-b-[5px] border-l-[5px] border-r-transparent border-b-white border-l-transparent" />
+    <div
+      className={
+        down
+          ? "pointer-events-none flex flex-col items-center"
+          : "pointer-events-none absolute inset-x-0 bottom-0 z-10 flex flex-col items-center"
+      }
+    >
+      {down ? null : tip}
       <div className="relative max-w-full rounded bg-white px-1.5 py-1 text-left text-ui text-black">
         {/* The full line, invisible, reserves the bubble's final size so it
             doesn't grow or reflow as characters arrive — the typed text is
@@ -138,6 +154,7 @@ export function SpeechBubble({
           {typed < line.length ? <span className="opacity-60">▍</span> : null}
         </span>
       </div>
+      {down ? tip : null}
     </div>
   );
 }

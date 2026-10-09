@@ -975,6 +975,7 @@ function App() {
           <EventsView
             eventsTabVisible={view === "events"}
             chatOverlay
+            chatMessages={state.chatMessages}
             rootKey={rootKeys.events ?? 0}
             debugForceActive={hasActiveEventOverride}
             debugForceBoss={debugBossOverride}

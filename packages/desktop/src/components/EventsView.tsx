@@ -16,7 +16,7 @@ import {
 } from "@herzies/shared";
 import { memo, useEffect, useRef, useState } from "react";
 import { cn } from "../lib/utils";
-import { herzies, useWindowFocused } from "../tauri-bridge";
+import { type ChatMessage, herzies, useWindowFocused } from "../tauri-bridge";
 import { BackButton } from "./BackButton";
 import { BossFightHelp, BossFightPanel, makeDebugBoss } from "./BossFightPanel";
 import ItemInspectOverlay, {
@@ -202,9 +202,12 @@ function EventsViewImpl({
   playerSeed,
   playerStage,
   chatOverlay = false,
+  chatMessages,
 }: {
   /** The app floats its chat over the bottom of the Town's world. */
   chatOverlay?: boolean;
+  /** The chat, for lines over the speakers' heads in the Town. */
+  chatMessages?: ChatMessage[];
   /** The player's herzie, walking around the Town. */
   playerSeed?: string;
   playerStage?: number;
@@ -563,6 +566,7 @@ function EventsViewImpl({
       // No title: the world fills the window (see onScreenChange "world").
       <TownWorld
         loading={loading}
+        chatMessages={chatMessages}
         chatOverlay={chatOverlay}
         cards={cards}
         paused={!eventsTabVisible || !focused}

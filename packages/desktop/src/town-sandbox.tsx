@@ -8,8 +8,13 @@
 import "./globals.css";
 import { signTownTicket } from "@herzies/shared";
 import type { RootState } from "@react-three/fiber";
+import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { EventCard } from "./components/TownScene";
+import {
+  bubbleDuration,
+  type ChatBubbles,
+} from "./components/town/chatBubbles";
 import { setTownTicketSource, townNet } from "./components/town/net/townNet";
 import {
   SPARE_SPOTS,
@@ -156,20 +161,50 @@ const net = params.get("net") === "local" ? localNet() : null;
 // For poking at from the console and browser tests.
 Object.assign(window, { townNet: net });
 
-const root = document.getElementById("root");
-if (root) {
-  root.style.height = "100vh";
-  createRoot(root).render(
+/**
+ * The sandbox's Town, with chat bubbles driven from the console:
+ * `say("bot-seed-3", "hello")` (a friend code, or a bot's seed; the player's
+ * own seed for yours).
+ */
+function Sandbox() {
+  const [bubbles, setBubbles] = useState<ChatBubbles>(new Map());
+  useEffect(() => {
+    let n = 0;
+    Object.assign(window, {
+      say: (code: string, text: string) => {
+        const key = `say-${n++}`;
+        setBubbles((b) => new Map(b).set(code, { key, text }));
+        setTimeout(
+          () =>
+            setBubbles((b) => {
+              if (b.get(code)?.key !== key) return b;
+              const next = new Map(b);
+              next.delete(code);
+              return next;
+            }),
+          bubbleDuration(text),
+        );
+      },
+    });
+  }, []);
+  return (
     <TownCanvas
       spots={spots}
       player={player}
       net={net}
+      bubbles={bubbles}
       paused={false}
       hour={params.has("time") ? Number(params.get("time")) : null}
       shadows={params.get("shadows") !== "0"}
       onCreated={params.has("bench") ? bench : undefined}
       onOpen={(key) => console.log("[town-sandbox] open", key)}
       onNearChange={(s) => console.log("[town-sandbox] near", s?.key ?? null)}
-    />,
+    />
   );
+}
+
+const root = document.getElementById("root");
+if (root) {
+  root.style.height = "100vh";
+  createRoot(root).render(<Sandbox />);
 }

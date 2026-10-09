@@ -4,6 +4,7 @@ import { Suspense, useMemo, useRef } from "react";
 import type { Look } from "../TownScene";
 import { ambient } from "./ambient";
 import { CameraRig } from "./CameraRig";
+import type { ChatBubbles } from "./chatBubbles";
 import type { Hour } from "./DayCycle";
 import { type TownInput, useTownInput } from "./input";
 import type { TownMap } from "./map";
@@ -44,6 +45,8 @@ export type TownCanvasProps = {
   hour?: Hour;
   /** Cast shadows from the sun (default: on; off to measure the cost). */
   shadows?: boolean;
+  /** Chat lines over herzies' heads, by friend code. */
+  bubbles?: ChatBubbles;
   /** The multiplayer Town: draws everyone else on it. */
   net?: TownConnection | null;
   /** Called once the world has drawn its first frame. */
@@ -102,13 +105,14 @@ export default function TownCanvas(props: TownCanvasProps) {
               look={props.player}
               spawn={map.spawn}
               respawn={props.respawn}
+              bubble={props.bubbles?.get(props.player.seed)}
             />
             {props.spots.map((s) => (
               <Visitor key={s.key} spot={s} onOpen={props.onOpen} />
             ))}
           </Physics>
         </Suspense>
-        {props.net && <RemotePlayers net={props.net} />}
+        {props.net && <RemotePlayers net={props.net} bubbles={props.bubbles} />}
         <CameraRig />
       </TownRuntimeContext.Provider>
     </Canvas>

@@ -1,3 +1,4 @@
+import { Html } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import {
   CapsuleCollider,
@@ -9,6 +10,8 @@ import {
 } from "@react-three/rapier";
 import { useEffect, useMemo, useRef } from "react";
 import type { Look } from "../TownScene";
+import type { ChatBubble } from "./chatBubbles";
+import { HeadBubble } from "./HeadBubble";
 import { HerzieModel } from "./HerzieModel";
 import type { TownMap } from "./map";
 import { type Mover, stepMover, walkAzimuth } from "./movement";
@@ -36,7 +39,10 @@ export function Player({
   look,
   spawn,
   respawn = 0,
+  bubble,
 }: {
+  /** What the player just said in chat, over their head. */
+  bubble?: ChatBubble;
   look: Look;
   spawn: TownMap["spawn"];
   /** Bumped to put the player back at `spawn`. */
@@ -175,6 +181,13 @@ export function Player({
       >
         <primitive object={herzie.root} />
       </group>
+      {bubble ? (
+        <Html position={[0, herzie.height + 0.3, 0]} zIndexRange={[19, 0]}>
+          <div className="-translate-x-1/2 -translate-y-full">
+            <HeadBubble key={bubble.key} bubble={bubble} />
+          </div>
+        </Html>
+      ) : null}
     </RigidBody>
   );
 }

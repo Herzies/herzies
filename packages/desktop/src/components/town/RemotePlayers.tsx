@@ -4,17 +4,32 @@ import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import type { Group } from "three";
 import { ROW_TEXT_SHADOW } from "../VisitorRowTheme";
+import { BUBBLE_RANGE, type ChatBubble, type ChatBubbles } from "./chatBubbles";
+import { HeadBubble } from "./HeadBubble";
 import { HerzieModel } from "./HerzieModel";
 import type { RemotePlayer, TownConnection } from "./net/TownConnection";
 import { useTownNetVersion } from "./net/townNet";
+import { townSave } from "./runtime";
 
 /** Everyone else in the Town. */
-export function RemotePlayers({ net }: { net: TownConnection }) {
+export function RemotePlayers({
+  net,
+  bubbles,
+}: {
+  net: TownConnection;
+  /** What people are saying, by friend code. */
+  bubbles?: ChatBubbles;
+}) {
   useTownNetVersion(net);
   return (
     <>
       {[...net.remotes.values()].map((r) => (
-        <RemoteHerzie key={r.id} remote={r} net={net} />
+        <RemoteHerzie
+          key={r.id}
+          remote={r}
+          net={net}
+          bubble={bubbles?.get(r.look.seed)}
+        />
       ))}
     </>
   );
@@ -30,9 +45,11 @@ export function RemotePlayers({ net }: { net: TownConnection }) {
 function RemoteHerzie({
   remote,
   net,
+  bubble,
 }: {
   remote: RemotePlayer;
   net: TownConnection;
+  bubble?: ChatBubble;
 }) {
   const { look } = remote;
   const lookKey = JSON.stringify(look);
@@ -49,6 +66,7 @@ function RemoteHerzie({
   const tag = useRef<HTMLDivElement>(null);
   const tagAnchor = useRef<Group>(null);
   const afk = useRef(false);
+  const bubbleBox = useRef<HTMLDivElement>(null);
 
   useFrame((_, dt) => {
     const s = remote.buffer.sample(net.clock.renderTime(performance.now()));
@@ -58,7 +76,14 @@ function RemoteHerzie({
     herzie.root.position.set(s.x, 0, s.z);
     herzie.heading = s.heading;
     herzie.update(dt, s.speed);
-    tagAnchor.current?.position.set(s.x, herzie.height + 0.5, s.z);
+    tagAnchor.current?.position.set(s.x, herzie.height + 0.3, s.z);
+    // Chat is one room for everyone; the Town only shows what's said near
+    // you.
+    if (bubbleBox.current) {
+      const near =
+        Math.hypot(s.x - townSave.x, s.z - townSave.z) <= BUBBLE_RANGE;
+      bubbleBox.current.style.display = near ? "" : "none";
+    }
     const away = (s.flags & TOWN_FLAG_AFK) !== 0;
     if (away !== afk.current && tag.current) {
       afk.current = away;
@@ -71,14 +96,20 @@ function RemoteHerzie({
     <>
       <primitive object={herzie.root} />
       <group ref={tagAnchor}>
-        <Html center zIndexRange={[19, 0]}>
-          <div
-            ref={tag}
-            className="pointer-events-none whitespace-nowrap rounded bg-black/40 px-1.5 py-0.5 text-[10px] leading-tight text-white/90 transition-opacity"
-            // Hidden until the first state arrives, rather than at the origin.
-            style={{ textShadow: ROW_TEXT_SHADOW, visibility: "hidden" }}
-          >
-            {remote.name}
+        <Html zIndexRange={[19, 0]}>
+          {/* Stacked up from the anchor: the bubble over the name. */}
+          <div className="flex -translate-x-1/2 -translate-y-full flex-col items-center">
+            <div ref={bubbleBox}>
+              {bubble ? <HeadBubble key={bubble.key} bubble={bubble} /> : null}
+            </div>
+            <div
+              ref={tag}
+              className="pointer-events-none whitespace-nowrap rounded bg-black/40 px-1.5 py-0.5 text-[10px] leading-tight text-white/90 transition-opacity"
+              // Hidden until the first state arrives, rather than at the origin.
+              style={{ textShadow: ROW_TEXT_SHADOW, visibility: "hidden" }}
+            >
+              {remote.name}
+            </div>
           </div>
         </Html>
       </group>
