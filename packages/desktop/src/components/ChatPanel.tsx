@@ -1175,7 +1175,7 @@ export function ChatPanel({
           className={cn(
             "flex flex-col border-t border-border",
             expanded &&
-              "fixed inset-x-3 bottom-10 z-[201] h-[50vh] max-h-[50vh] px-2 py-1 shadow-[0_-8px_32px_rgba(0,0,0,0.45)] ring-1 ring-border",
+              "fixed inset-x-0 bottom-10 z-[201] h-[50vh] max-h-[50vh] border-b border-border px-3 py-1 shadow-[0_-8px_32px_rgba(0,0,0,0.45)]",
             expanded &&
               (frosted ? "bg-black/55 backdrop-blur-md" : "bg-bg-panel"),
           )}
