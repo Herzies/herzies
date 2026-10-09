@@ -554,6 +554,9 @@ function App() {
    * floats over it. */
   const townWorld = view === "events" && eventsScreen === "world";
 
+  /** Where the chat is shown (see chatPanel). */
+  const chatOnScreen = (view === "home" && !selfProfile) || townWorld;
+
   const requestOpenChat = useCallback(() => {
     // The Town carries its own chat, so open that one where it is.
     if (townWorld) {
@@ -600,6 +603,20 @@ function App() {
           target.isContentEditable)
       )
         return;
+      // Enter opens the chat where it's on screen (Home, the Town), like
+      // a game's chat key — but not off a focused button or link, which
+      // Enter presses.
+      if (
+        event.key === "Enter" &&
+        chatOnScreen &&
+        target?.tagName !== "BUTTON" &&
+        target?.tagName !== "A" &&
+        target?.tagName !== "SELECT"
+      ) {
+        event.preventDefault();
+        setOpenChatRequested(true);
+        return;
+      }
       const key = event.key.toLowerCase();
       if (key === "c") {
         // Without this the same keydown types a "c" into the freshly focused
@@ -614,7 +631,14 @@ function App() {
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [state.isOnline, herzie, previewOnboarding, switchView, requestOpenChat]);
+  }, [
+    state.isOnline,
+    herzie,
+    previewOnboarding,
+    switchView,
+    requestOpenChat,
+    chatOnScreen,
+  ]);
 
   // Where Home's and the Herzie view's stages sit (see useStageAlignment).
   const herzieStageTop = useHomeStageOffset();
@@ -774,7 +798,7 @@ function App() {
 
   // The chat docks under Home, and floats over the Town's world.
   const chatPanel =
-    herzie && ((view === "home" && !selfProfile) || townWorld) ? (
+    herzie && chatOnScreen ? (
       <ChatPanel
         activityLog={activityLog}
         isOnline={state.isOnline}
