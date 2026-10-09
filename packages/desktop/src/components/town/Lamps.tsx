@@ -53,10 +53,10 @@ export const nightLights = { level: 0 };
 const LAMP_COLOR = new THREE.Color("#ffc47a");
 /** How bright a lamp post, and a lit window's spill, at full night. */
 const LAMP_INTENSITY = 10;
-const WINDOW_INTENSITY = 9;
+const WINDOW_INTENSITY = 12;
 /** How strongly each lights the herzies (see herzieMaterial). */
 const LAMP_ON_HERZIES = 1;
-const WINDOW_ON_HERZIES = 0.8;
+const WINDOW_ON_HERZIES = 0.9;
 /** How many of the little lights cast shadows: the ones nearest the
  * player. Each is the scene drawn six more times a frame (a cube of
  * shadow), so only a few, and only at night. */
