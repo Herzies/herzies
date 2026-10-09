@@ -1,5 +1,13 @@
 import type { Equipped } from "@herzies/shared";
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { cn } from "../lib/utils";
 import { LoadingSplash } from "./LoadingSplash";
 import { type EventCard, formatIn, isDown } from "./TownScene";
@@ -19,6 +27,7 @@ const spotKey = (card: EventCard) =>
  * town and press E (or click their name) to open their screen.
  */
 export function TownWorld({
+  loading = false,
   cards,
   paused,
   onOpen,
@@ -26,6 +35,8 @@ export function TownWorld({
   notice,
   chatOverlay = false,
 }: {
+  /** The Town's events are still loading: keep the splash up. */
+  loading?: boolean;
   /** The chat floats over the bottom of the world: keep the prompt above
    * it. */
   chatOverlay?: boolean;
@@ -48,6 +59,11 @@ export function TownWorld({
   useEffect(() => {
     if (!paused) setOpened(true);
   }, [paused]);
+  // One splash from opening until the world has drawn its first frame —
+  // not one per thing that loads (the code, Rapier, the events), which
+  // blinked as each handed over to the next.
+  const [ready, setReady] = useState(false);
+  const onReady = useCallback(() => setReady(true), []);
 
   const spots = useMemo<TownSpot[]>(() => {
     let spare = 0;
@@ -101,7 +117,6 @@ export function TownWorld({
     const t = setTimeout(() => net.refreshLook(), 1_500);
     return () => clearTimeout(t);
   }, [lookKey, net]);
-  const others = net.remotes.size;
 
   const talkTo = near?.card.openKey;
   return (
@@ -111,20 +126,18 @@ export function TownWorld({
           {notice}
         </div>
       ) : null}
-      {net.status === "outdated" || others > 0 ? (
+      {net.status === "outdated" ? (
         <div
           className={cn(
             "pointer-events-none absolute right-2 z-30 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white/70",
             notice ? "top-9" : "top-2",
           )}
         >
-          {net.status === "outdated"
-            ? "Update Herzies to see other players"
-            : `${others} other${others === 1 ? "" : "s"} here`}
+          Update Herzies to see other players
         </div>
       ) : null}
       {opened && (
-        <Suspense fallback={<LoadingSplash overlay label="loading town" />}>
+        <Suspense fallback={null}>
           <TownCanvas
             spots={spots}
             net={net}
@@ -132,9 +145,13 @@ export function TownWorld({
             paused={paused}
             onOpen={onOpen}
             onNearChange={setNear}
+            onReady={onReady}
           />
         </Suspense>
       )}
+      {!paused && (loading || !ready) ? (
+        <LoadingSplash overlay label="loading town" />
+      ) : null}
 
       {talkTo && near ? (
         <button
@@ -147,16 +164,7 @@ export function TownWorld({
         >
           Talk to {near.card.title} <span className="text-text-dim">[E]</span>
         </button>
-      ) : (
-        <div
-          className={cn(
-            "pointer-events-none absolute left-1/2 z-30 -translate-x-1/2 whitespace-nowrap text-[9px] text-white/50",
-            chatOverlay ? "bottom-[96px]" : "bottom-2",
-          )}
-        >
-          WASD move · arrows/drag look · right-drag steer
-        </div>
-      )}
+      ) : null}
     </div>
   );
 }

@@ -211,17 +211,11 @@
     background-color: #1e1400;
   }
 
-  /* Window drag — scoped to Tauri markup, not global body (breaks sandbox herzie drag). */
-  [data-tauri-drag-region]:not([data-tauri-drag-region="false"]) {
-    -webkit-app-region: drag;
-  }
-
-  button,
-  a,
-  input,
-  [data-tauri-drag-region="false"] {
-    -webkit-app-region: no-drag;
-  }
+  /* Window drag is Tauri's own `data-tauri-drag-region` script, which moves
+     the window only when the press lands on the marked element itself. No
+     CSS `-webkit-app-region: drag`: Windows' WebView2 honours it, and on a
+     region covering the whole app every press (rotating a herzie, orbiting
+     the Town camera) became a window move the page never saw. */
 
   input[type="number"]::-webkit-inner-spin-button,
   input[type="number"]::-webkit-outer-spin-button {

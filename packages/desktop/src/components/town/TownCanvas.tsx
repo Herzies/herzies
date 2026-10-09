@@ -1,6 +1,6 @@
 import { Canvas, type RootState, useFrame, useThree } from "@react-three/fiber";
 import { Physics } from "@react-three/rapier";
-import { useMemo, useRef } from "react";
+import { Suspense, useMemo, useRef } from "react";
 import type { Look } from "../TownScene";
 import { ambient } from "./ambient";
 import { CameraRig } from "./CameraRig";
@@ -46,6 +46,8 @@ export type TownCanvasProps = {
   shadows?: boolean;
   /** The multiplayer Town: draws everyone else on it. */
   net?: TownConnection | null;
+  /** Called once the world has drawn its first frame. */
+  onReady?: () => void;
   /** Called once the renderer is up (the sandbox's benchmark uses it). */
   onCreated?: (state: RootState) => void;
 };
@@ -84,23 +86,28 @@ export default function TownCanvas(props: TownCanvasProps) {
     >
       <TownRuntimeContext.Provider value={runtime}>
         <Systems {...props} input={input} />
-        <Physics
-          timeStep={1 / 60}
-          interpolate
-          gravity={[0, 0, 0]}
-          paused={props.paused}
-          updatePriority={-3}
-        >
-          <World map={map} champion={props.champion} hour={props.hour} />
-          <Player
-            look={props.player}
-            spawn={map.spawn}
-            respawn={props.respawn}
-          />
-          {props.spots.map((s) => (
-            <Visitor key={s.key} spot={s} onOpen={props.onOpen} />
-          ))}
-        </Physics>
+        {/* Rapier's WASM loads here: wait inside the canvas instead of
+            suspending the whole Town again (the splash would blink). */}
+        <Suspense fallback={null}>
+          <Physics
+            timeStep={1 / 60}
+            interpolate
+            gravity={[0, 0, 0]}
+            paused={props.paused}
+            updatePriority={-3}
+          >
+            {props.onReady && <FirstFrame onReady={props.onReady} />}
+            <World map={map} champion={props.champion} hour={props.hour} />
+            <Player
+              look={props.player}
+              spawn={map.spawn}
+              respawn={props.respawn}
+            />
+            {props.spots.map((s) => (
+              <Visitor key={s.key} spot={s} onOpen={props.onOpen} />
+            ))}
+          </Physics>
+        </Suspense>
         {props.net && <RemotePlayers net={props.net} />}
         <CameraRig />
       </TownRuntimeContext.Provider>
@@ -151,5 +158,17 @@ function Systems({
     }
   }, -4);
 
+  return null;
+}
+
+/** Calls back once the world has drawn a frame. */
+function FirstFrame({ onReady }: { onReady: () => void }) {
+  const done = useRef(false);
+  useFrame(() => {
+    if (done.current) return;
+    done.current = true;
+    // After this frame reaches the screen, not before it's drawn.
+    requestAnimationFrame(() => onReady());
+  });
   return null;
 }

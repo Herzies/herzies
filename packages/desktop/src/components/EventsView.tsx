@@ -410,7 +410,10 @@ function EventsViewImpl({
     onScreenChange,
   ]);
 
-  if (!activeLoaded || !previousLoaded) {
+  const loading = !activeLoaded || !previousLoaded;
+  // The Town draws its own splash while it loads (the world and the events
+  // together, so there's one splash rather than one per stage).
+  if (loading && selected !== null) {
     return <LoadingSplash overlay label="loading town" />;
   }
 
@@ -559,6 +562,7 @@ function EventsViewImpl({
     return (
       // No title: the world fills the window (see onScreenChange "world").
       <TownWorld
+        loading={loading}
         chatOverlay={chatOverlay}
         cards={cards}
         paused={!eventsTabVisible || !focused}
