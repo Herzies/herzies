@@ -127,7 +127,7 @@ function geometryFor(s: Sphere): THREE.BufferGeometry {
  * ray caster draws (spheres, capsules, cylinders) as real geometry, so the
  * camera can see it from any side, smoothly. Its parts animate with the
  * same idle loop and walk cycle, continuously; on top sits a whole-body
- * layer — breathing squash, landing squash, a blob shadow.
+ * layer — breathing squash, landing squash. The sun casts its shadow.
  */
 export class HerzieModel {
   /** Add this to the scene; its position is the herzie's feet. */
@@ -146,7 +146,6 @@ export class HerzieModel {
   private readonly creature = new THREE.Group();
   private readonly meshes: THREE.Mesh[] = [];
   private readonly materials: THREE.ShaderMaterial[] = [];
-  private readonly shadow: THREE.Mesh;
   /** Creature-space y of the feet, and of the scheme's painted span. */
   private readonly feetY: number;
   private readonly span: [number, number];
@@ -208,22 +207,7 @@ export class HerzieModel {
     }
     this.creature.rotation.x = Math.PI;
 
-    // A faint dark disc right under it: the sun casts the real shadow, but
-    // when it's high that is barely wider than the feet.
-    this.shadow = new THREE.Mesh(
-      new THREE.CircleGeometry(1, 24),
-      new THREE.MeshBasicMaterial({
-        color: 0x000000,
-        transparent: true,
-        opacity: 0.12,
-        depthWrite: false,
-      }),
-    );
-    this.shadow.rotation.x = -Math.PI / 2;
-    this.shadow.position.y = 0.02;
-    this.shadow.renderOrder = -1;
-
-    this.root.add(this.shadow, this.creature);
+    this.root.add(this.creature);
     this.pose();
     this.animateBody();
   }
@@ -252,7 +236,7 @@ export class HerzieModel {
     }
   }
 
-  /** The whole-body layer: squash and stretch, and the shadow. */
+  /** The whole-body layer: squash and stretch. */
   private animateBody() {
     const { idleTime, walkPhase, walkWeight: w } = this.anim;
     // A slow breath, fading out as it starts to walk.
@@ -260,7 +244,7 @@ export class HerzieModel {
     let squash = 0;
     let lift = 0;
     if (!this.hasLegs) {
-      // Each hop lands with a squash; the shadow shrinks while airborne.
+      // Each hop lands with a squash.
       lift = Math.abs(Math.sin(walkPhase * Math.PI * 2)) * w;
       squash = (1 - lift) ** 4 * 0.08 * w;
     }
@@ -277,9 +261,6 @@ export class HerzieModel {
     this.scheme.uTop.value =
       this.root.getWorldPosition(scratch).y + (this.feetY - spanTop) * tall * k;
     this.scheme.uSpan.value = Math.max(1e-6, (spanBottom - spanTop) * tall * k);
-
-    const s = 1 - lift * 0.3;
-    this.shadow.scale.set(this.height * 0.36 * s, this.height * 0.22 * s, 1);
   }
 
   /**
@@ -288,9 +269,6 @@ export class HerzieModel {
    * once, before it's drawn.
    */
   petrify(): void {
-    // Carved onto its plinth: no blob shadow (wider than the plinth's top,
-    // it'd hang in the air past its edges).
-    this.shadow.visible = false;
     const stone = new THREE.Color("#b6b1a7");
     for (const m of this.materials) {
       for (const name of ["uShades", "uRamp"] as const) {
@@ -304,7 +282,5 @@ export class HerzieModel {
 
   dispose() {
     for (const m of this.materials) m.dispose();
-    this.shadow.geometry.dispose();
-    (this.shadow.material as THREE.Material).dispose();
   }
 }
