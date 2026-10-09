@@ -356,7 +356,7 @@ describe("spirit orb pet", () => {
         if (isSpiritHopFrame(v, i)) expect(frame).not.toBe(plain[i]);
         else expect(frame).toBe(plain[i]);
       });
-      // Seamless at the loop boundary, where Herzie3D swaps variants.
+      // Seamless at the loop boundary, where a host swaps variants.
       expect(isSpiritHopFrame(v, 0)).toBe(false);
       expect(isSpiritHopFrame(v, plain.length - 1)).toBe(false);
     }
@@ -468,7 +468,7 @@ describe("prism band spread", () => {
 });
 
 describe("renderCreatureAtAngle", () => {
-  // Herzie3D caches this per settled drag angle, keyed on frame index alone.
+  // The old renderer cached this per settled drag angle, keyed on frame index alone.
   // That is only sound while the function is pure — if it ever picks up a
   // time or random source, the cache would silently freeze the animation
   // after the user's first drag rather than fail loudly.

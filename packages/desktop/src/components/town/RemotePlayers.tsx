@@ -1,12 +1,13 @@
 import { TOWN_FLAG_AFK } from "@herzies/shared";
+import { HerzieModel } from "@herzies/shared/gl";
 import { Html } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import type { Group } from "three";
 import { ROW_TEXT_SHADOW } from "../VisitorRowTheme";
+import { ambient } from "./ambient";
 import { BUBBLE_RANGE, type ChatBubble, type ChatBubbles } from "./chatBubbles";
 import { HeadBubble } from "./HeadBubble";
-import { HerzieModel } from "./HerzieModel";
 import type { RemotePlayer, TownConnection } from "./net/TownConnection";
 import { useTownNetVersion } from "./net/townNet";
 import { townSave } from "./runtime";
@@ -55,7 +56,7 @@ function RemoteHerzie({
   const lookKey = JSON.stringify(look);
   // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the look's content
   const herzie = useMemo(
-    () => new HerzieModel(look, remote.id * 7),
+    () => new HerzieModel(look, { seed: remote.id * 7, lighting: ambient }),
     [lookKey, remote.id],
   );
   useEffect(() => {

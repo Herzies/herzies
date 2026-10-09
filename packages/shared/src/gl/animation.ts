@@ -1,7 +1,7 @@
-import { IDLE_LOOP_FRAMES } from "@herzies/shared";
 import { MathUtils } from "three";
+import { IDLE_LOOP_FRAMES } from "../creature-renderer.js";
 
-/** The idle loop's frame rate: Herzie3D plays it at 50ms a frame. */
+/** The idle loop's frame rate: 50ms a frame, as it was first played. */
 export const IDLE_FPS = 20;
 /** Top walking speed, in world units a second. */
 export const WALK_SPEED = 4.5;

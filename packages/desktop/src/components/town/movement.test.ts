@@ -1,11 +1,11 @@
-import { describe, expect, it } from "vitest";
 import {
   angleDelta,
   newAnimationState,
   STRIDE,
   stepAnimation,
   WALK_SPEED,
-} from "./animation";
+} from "@herzies/shared/gl";
+import { describe, expect, it } from "vitest";
 import type { TownInput } from "./input";
 import { type Mover, stepMover, walkAzimuth } from "./movement";
 

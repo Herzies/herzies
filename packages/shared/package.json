@@ -26,6 +26,11 @@
       "import": "./dist/town-net.js",
       "require": "./dist/town-net.js"
     },
+    "./gl": {
+      "types": "./dist/gl/index.d.ts",
+      "import": "./dist/gl/index.js",
+      "require": "./dist/gl/index.js"
+    },
     "./card-art/*": "./card-art/*"
   },
   "files": [
@@ -40,18 +45,24 @@
     "test": "vitest run"
   },
   "peerDependencies": {
+    "@supabase/supabase-js": "^2",
     "react": ">=19",
-    "@supabase/supabase-js": "^2"
+    "three": ">=0.186"
   },
   "devDependencies": {
+    "@supabase/supabase-js": "^2.105.1",
     "@types/node": "^25.6.0",
     "@types/react": "^19.2.14",
+    "@types/three": "^0.186.0",
     "react": "^19.2.5",
-    "typescript": "^6.0.3",
-    "@supabase/supabase-js": "^2.105.1"
+    "three": "^0.186.1",
+    "typescript": "^6.0.3"
   },
   "peerDependenciesMeta": {
     "@supabase/supabase-js": {
+      "optional": true
+    },
+    "three": {
       "optional": true
     }
   }

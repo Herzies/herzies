@@ -1,5 +1,5 @@
 /**
- * Background scenery renderer for Herzie3D.
+ * Background scenery renderer (the sky behind a herzie).
  *
  * Sky (18 rows): clouds by day, stars by night, or the Blood Moon (Halloween):
  * stars plus a big moon with bats flitting across it. Anchored to window top.

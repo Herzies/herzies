@@ -1,6 +1,7 @@
 "use client";
 
-import { Herzie3D, ItemCard } from "@herzies/shared";
+import { ItemCard } from "@herzies/shared";
+import { HerzieView } from "@herzies/shared/gl";
 import { type RefObject, useRef } from "react";
 import { getCardIllustration } from "@/lib/card-art";
 import { gsap, useGSAP } from "./gsap";
@@ -126,7 +127,7 @@ export function CollectSection({
         {travel ? (
           <div ref={travel.slot} style={herzieSize} />
         ) : (
-          <Herzie3D
+          <HerzieView
             userId={OUR_SEED}
             stage={3}
             size={collectHerzieSize(wide)}

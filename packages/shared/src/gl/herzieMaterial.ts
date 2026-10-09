@@ -1,13 +1,32 @@
-import type { PrimitiveShading } from "@herzies/shared";
 import * as THREE from "three";
-import { ambient } from "./ambient";
+import type { PrimitiveShading } from "../creature-renderer.js";
 
-/** Uniforms every scheme-painted part of one herzie shares, so the herzie
- * moves them all at once: the world height where the scheme's top band
- * starts, and how tall the painted span is. */
+/** Where a herzie's light comes from and what colour it is: uniforms shared
+ * by reference, so a host (the Town's day cycle) moves them for every herzie
+ * at once. */
+export type HerzieLighting = {
+  /** Unit vector toward the light, in world space. */
+  uSun: THREE.IUniform<THREE.Vector3>;
+  /** Tint over the bands' own colours (white: as painted). */
+  uLight: THREE.IUniform<THREE.Color>;
+};
+
+/** A herzie on its own (Home, a profile): lit like the ray caster lit it,
+ * from up and to the left of the viewer, in plain white light. */
+export const studioLighting: HerzieLighting = {
+  uSun: { value: new THREE.Vector3(-0.45, 0.7, 0.55).normalize() },
+  uLight: { value: new THREE.Color(1, 1, 1) },
+};
+
+/** Uniforms every part of one herzie shares, so the herzie sets them all at
+ * once: the world height where its colour scheme's top band starts and how
+ * tall the painted span is, and how greyed out and see-through it is. */
 export type SchemeUniforms = {
   uTop: THREE.IUniform<number>;
   uSpan: THREE.IUniform<number>;
+  /** 0 in colour to 1 fully grey. */
+  uGrey: THREE.IUniform<number>;
+  uOpacity: THREE.IUniform<number>;
 };
 
 /** Most bands a scheme can have (its ramp is uploaded as 3 shades each). */
@@ -37,7 +56,7 @@ void main() {
 `;
 
 // Ports renderCreatureFrame's shading (see primitiveShading) and its
-// applyTexture, lit by the Town's sun instead of a camera-fixed light.
+// applyTexture, lit by the host's light (the Town's sun, or a studio light).
 const fragmentShader = /* glsl */ `
 #include <common>
 #include <packing>
@@ -58,6 +77,8 @@ uniform int uBands;
 uniform vec3 uRamp[${MAX_BANDS * 3}];
 uniform float uTop;
 uniform float uSpan;
+uniform float uGrey;
+uniform float uOpacity;
 varying vec3 vWorldNormal;
 varying vec3 vLocalNormal;
 varying float vWorldY;
@@ -84,7 +105,9 @@ void main() {
   } else {
     color = uShades[shade];
   }
-  gl_FragColor = vec4(color * uLight, 1.0);
+  color *= uLight;
+  color = mix(color, vec3(dot(color, vec3(0.2126, 0.7152, 0.0722))), uGrey);
+  gl_FragColor = vec4(color, uOpacity);
   #include <colorspace_fragment>
   #include <fog_fragment>
 }
@@ -101,6 +124,7 @@ export function herzieMaterial(
   textureType: number,
   ramp: [string, string, string][] | null,
   scheme: SchemeUniforms,
+  lighting: HerzieLighting = studioLighting,
 ): THREE.ShaderMaterial {
   const painted = shading.schemePainted && !!ramp;
   const rampColors = Array.from(
@@ -122,9 +146,9 @@ export function herzieMaterial(
       ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog),
       ...THREE.UniformsUtils.clone(THREE.UniformsLib.lights),
       // Shared: the day cycle moves the sun for every herzie at once.
-      uSun: ambient.uSun,
+      uSun: lighting.uSun,
       // Shared: the day cycle dims every herzie at once.
-      uLight: ambient.uLight,
+      uLight: lighting.uLight,
       uGain: { value: shading.gain },
       uFloor: { value: shading.floor },
       uLo: { value: shading.lo },
@@ -137,6 +161,8 @@ export function herzieMaterial(
       // Shared by reference: the herzie updates them once for all its parts.
       uTop: scheme.uTop,
       uSpan: scheme.uSpan,
+      uGrey: scheme.uGrey,
+      uOpacity: scheme.uOpacity,
     },
   });
 }

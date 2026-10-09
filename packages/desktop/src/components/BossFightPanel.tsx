@@ -3,10 +3,10 @@ import {
   BOSS_BODY_TYPE,
   DEFAULT_Y_ANGLE,
   generateCreatureParams,
-  Herzie3D as SharedHerzie3D,
   SpeechBubble,
   useChatter,
 } from "@herzies/shared";
+import { HerzieView } from "@herzies/shared/gl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../lib/utils";
 import { SegmentBar } from "./SegmentBar";
@@ -183,10 +183,9 @@ export function BossFightPanel({
         <div
           className={cn(
             "flex min-h-0 flex-1 items-center justify-center overflow-hidden",
-            (dead || escaped) && "grayscale opacity-50",
           )}
         >
-          <SharedHerzie3D
+          <HerzieView
             userId={`boss:${event.id}`}
             stage={3}
             // Sized for the face-on pose specifically. Head-on the boss is
@@ -210,6 +209,9 @@ export function BossFightPanel({
             defaultAngle={-DEFAULT_Y_ANGLE}
             draggable={false}
             paused={paused}
+            // Beaten or gone: greyed and faded.
+            grey={dead || escaped ? 1 : 0}
+            opacity={dead || escaped ? 0.5 : 1}
             ariaLabel="The boss"
           />
         </div>

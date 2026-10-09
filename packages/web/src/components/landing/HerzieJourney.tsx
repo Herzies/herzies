@@ -1,6 +1,6 @@
 "use client";
 
-import { Herzie3D } from "@herzies/shared";
+import { HerzieView } from "@herzies/shared/gl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CollectSection, collectHerzieSize } from "./CollectSection";
 import { gsap, ScrollTrigger, useGSAP } from "./gsap";
@@ -29,8 +29,8 @@ function footing(el: HTMLElement, herzieHeight: number) {
   };
 }
 
-/** How finely the herzie's turn follows the scroll: Herzie3D redraws for
- * every new angle, so it turns in small steps rather than continuously. */
+/** How finely the herzie's turn follows the scroll, in radians: it turns
+ * in small steps rather than continuously. */
 const TURN_STEP = 0.05;
 
 /**
@@ -194,7 +194,7 @@ export function HerzieJourney() {
         >
           <div ref={grow}>
             <div ref={pop} className="origin-bottom">
-              <Herzie3D
+              <HerzieView
                 userId={OUR_SEED}
                 stage={3}
                 size={size}

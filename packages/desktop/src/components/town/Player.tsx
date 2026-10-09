@@ -1,3 +1,4 @@
+import { HerzieModel } from "@herzies/shared/gl";
 import { Html } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import {
@@ -10,9 +11,9 @@ import {
 } from "@react-three/rapier";
 import { useEffect, useMemo, useRef } from "react";
 import type { Look } from "../TownScene";
+import { ambient } from "./ambient";
 import type { ChatBubble } from "./chatBubbles";
 import { HeadBubble } from "./HeadBubble";
-import { HerzieModel } from "./HerzieModel";
 import type { TownMap } from "./map";
 import { type Mover, stepMover, walkAzimuth } from "./movement";
 import { townLive, townSave, useTownRuntime, WORLD_RADIUS } from "./runtime";
@@ -74,7 +75,7 @@ export function Player({
   const equippedKey = JSON.stringify(look.equipped ?? null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the look's content
   const herzie = useMemo(
-    () => new HerzieModel(look),
+    () => new HerzieModel(look, { lighting: ambient }),
     [look.seed, look.stage, equippedKey],
   );
   useEffect(() => {

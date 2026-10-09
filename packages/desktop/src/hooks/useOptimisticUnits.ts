@@ -160,7 +160,7 @@ export function useOptimisticUnits(
   // Held behind a content key so a content-identical snapshot keeps its object
   // identity: `state-update` fires every few seconds with freshly deserialized
   // values, and without this every one of them would be a new reference. Same
-  // trick the shared Herzie3D uses via equippedCacheKey.
+  // trick HerzieView uses via equippedCacheKey.
   const serverKey = `${JSON.stringify(normalizeEquipped(serverEquipped))}|${unitsKey(normalizeUnits(serverUnits))}`;
   const serverRef = useRef<OwnedState>({
     equipped: normalizeEquipped(serverEquipped),

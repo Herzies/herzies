@@ -13,12 +13,12 @@ import {
   MERCHANT_NAME,
   NANDOR_EQUIPPED,
   NANDOR_SEED,
-  Herzie3D as SharedHerzie3D,
   SpeechBubble,
   TREAT_ITEM_ID,
   TREAT_TRADER_NAME,
   useChatter,
 } from "@herzies/shared";
+import { HerzieView } from "@herzies/shared/gl";
 import { type ReactNode, useEffect, useState } from "react";
 import { herzies } from "../tauri-bridge";
 import { Coin } from "./Coin";
@@ -224,7 +224,7 @@ export function MerchantPanel({
           flex-1, because here the stock list below is what needs the room. */}
       <div className="relative flex h-[190px] shrink-0 flex-col">
         <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden">
-          <SharedHerzie3D
+          <HerzieView
             userId={persona.seed}
             stage={2}
             size={5}

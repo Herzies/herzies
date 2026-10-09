@@ -7,8 +7,8 @@ import {
   TOWN_WALK_SPEED,
   type TownState,
 } from "@herzies/shared";
+import { WALK_SPEED } from "@herzies/shared/gl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { WALK_SPEED } from "../animation";
 import { HOME_MAP, WORLD_RADIUS } from "../runtime";
 import { socketBase, TownConnection } from "./TownConnection";
 

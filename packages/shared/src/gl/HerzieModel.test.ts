@@ -1,7 +1,7 @@
-import { buildCreatureModel } from "@herzies/shared";
 import * as THREE from "three";
 import { describe, expect, it } from "vitest";
-import { HerzieModel, MODEL_SCALE } from "./HerzieModel";
+import { buildCreatureModel } from "../creature-renderer.js";
+import { HerzieModel, MODEL_SCALE } from "./HerzieModel.js";
 
 const LOOK = { seed: "model-test", stage: 3, equipped: { head: "headphones" } };
 

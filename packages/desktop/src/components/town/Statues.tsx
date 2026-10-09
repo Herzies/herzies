@@ -1,11 +1,11 @@
+import { HerzieModel } from "@herzies/shared/gl";
 import { Html } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import { CylinderCollider } from "@react-three/rapier";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import type { Look } from "../TownScene";
-import { seeThrough } from "./ambient";
-import { HerzieModel } from "./HerzieModel";
+import { ambient, seeThrough } from "./ambient";
 
 const seeThroughLambert = (p: THREE.MeshLambertMaterialParameters) =>
   seeThrough(new THREE.MeshLambertMaterial(p));
@@ -69,7 +69,7 @@ function Statue({
   const lookKey = JSON.stringify(champion.look);
   // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the look's content
   const herzie = useMemo(() => {
-    const h = new HerzieModel(champion.look);
+    const h = new HerzieModel(champion.look, { lighting: ambient });
     h.petrify();
     h.heading = Math.atan2(-x, -z);
     return h;

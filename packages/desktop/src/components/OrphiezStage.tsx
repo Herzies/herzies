@@ -1,11 +1,11 @@
 import {
   DEFAULT_Y_ANGLE,
-  Herzie3D,
   ORPHIEZ_EQUIPPED,
   SpeechBubble,
   useChatter,
   VISITORS,
 } from "@herzies/shared";
+import { HerzieView } from "@herzies/shared/gl";
 
 /** What Orphiez mutters while players hunt. Flavour only — never a clue:
  * the clues are the hunt's own, and deliberately hard. */
@@ -37,7 +37,7 @@ export function OrphiezStage({ paused }: { paused: boolean }) {
       </div>
       <div className="relative flex h-[150px] shrink-0 flex-col">
         <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden">
-          <Herzie3D
+          <HerzieView
             userId={orphiez.seed ?? "npc:orphiez"}
             stage={2}
             size={5}

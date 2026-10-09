@@ -6,11 +6,11 @@ import {
   DEFAULT_Y_ANGLE,
   type Equipped,
   generateCreatureParams,
-  Herzie3D,
   ORPHIEZ_EQUIPPED,
   SpeechBubble,
   VISITORS,
 } from "@herzies/shared";
+import { HerzieView } from "@herzies/shared/gl";
 import { type RefObject, useRef, useState } from "react";
 import { ScrollTrigger, useGSAP } from "./gsap";
 import {
@@ -127,7 +127,7 @@ function VisitorSection({
   const drawn = companion.slot ? (
     <div ref={companion.slot} style={ours} />
   ) : (
-    <Herzie3D
+    <HerzieView
       userId={OUR_SEED}
       stage={3}
       size={companionSize(wide)}
@@ -168,7 +168,7 @@ function VisitorSection({
         <div className="-mt-28 flex items-end justify-center gap-4 md:-mt-40 md:gap-8">
           {companion.side === "left" ? herzie : spacer}
           <div data-reveal={from} className="flex flex-col items-center">
-            <Herzie3D
+            <HerzieView
               userId={seed}
               stage={stage}
               size={wide ? size.wide : size.narrow}

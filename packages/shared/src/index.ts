@@ -6,7 +6,6 @@ export * from "./craving.js";
 export * from "./creature-renderer.js";
 export * from "./dangle-physics.js";
 export * from "./genres.js";
-export * from "./Herzie3D.js";
 export * from "./ItemDisplay.js";
 export * from "./ItemPreview.js";
 export * from "./item-canvas.js";

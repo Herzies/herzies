@@ -65,7 +65,7 @@ import {
 } from "./DeckOverlay";
 import { DeckSlotPicker, type PickerOption } from "./DeckSlotPicker";
 import { DiceUpgradeOverlay } from "./DiceUpgradeOverlay";
-import { HERZIE_STAGE_HEIGHT } from "./Herzie3D";
+import { HERZIE_STAGE_HEIGHT } from "./HerzieWithSky";
 import { type Flight, ItemFlights } from "./ItemFlight";
 import ItemInspectOverlay, { CompactItemPreview } from "./ItemInspectOverlay";
 import { DuplicatesIcon } from "./icons/DuplicatesIcon";

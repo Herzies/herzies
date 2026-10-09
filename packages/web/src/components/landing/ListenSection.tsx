@@ -1,6 +1,6 @@
 "use client";
 
-import { Herzie3D } from "@herzies/shared";
+import { HerzieView } from "@herzies/shared/gl";
 import { type RefObject, useRef } from "react";
 import { gsap, useGSAP } from "./gsap";
 import { canvasSize, OUR_SEED } from "./journey";
@@ -84,7 +84,7 @@ export function ListenSection({
             <div key={stage} ref={travel.slot} style={canvasSize(size, COLS)} />
           ) : (
             <div key={stage} data-stage="">
-              <Herzie3D
+              <HerzieView
                 userId={OUR_SEED}
                 stage={stage}
                 size={size}

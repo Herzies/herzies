@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-/** Whether the viewport is at least Tailwind's `md` (768px). Herzie3D takes
+/** Whether the viewport is at least Tailwind's `md` (768px). HerzieView takes
  * its cell size in px rather than from CSS, so sections use this to draw
  * their herzies smaller on phones. False during server render and the first
  * client render, so the two match; it flips straight after. */

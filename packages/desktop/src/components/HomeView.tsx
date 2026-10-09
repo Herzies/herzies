@@ -21,7 +21,7 @@ import {
   useGhostMode,
   useWindowPinned,
 } from "../tauri-bridge";
-import { HERZIE_STAGE_HEIGHT } from "./Herzie3D";
+import { HERZIE_STAGE_HEIGHT } from "./HerzieWithSky";
 import { HEADER_ICON_HIT } from "./headerIconHit";
 import { ModifiersButton } from "./ModifiersButton";
 import { StatsButton } from "./StatsButton";
@@ -371,7 +371,7 @@ export function HomeView({
           // pointer-events-none on the wrapper keeps the gaps between items
           // from blocking herzie drag; each item re-enables pointer events
           // on itself. z-10: the herzie canvas sets its own z-index: 1 (see
-          // Herzie3D.tsx), which otherwise sits above this overlay in the
+          // HerzieWithSky.tsx), which otherwise sits above this overlay in the
           // stacking order and swallows clicks even though it's visually
           // behind. Items sit directly on the ground (no box/panel) at a
           // random x picked once at spawn.

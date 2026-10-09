@@ -45,7 +45,7 @@ export function LoadingSplash({
   );
 }
 
-// Drawn like Herzie3D: lit spheres raycast onto a grid of RAMP_HERZIE glyphs
+// Drawn like the old herzie renderer: lit spheres raycast onto a grid of RAMP_HERZIE glyphs
 // at the same cell metrics, coloured from the Purple Dane ramp. A swell runs
 // along a row of beads, lifting and lighting each in turn, and wraps.
 const FONT_SIZE = 5;

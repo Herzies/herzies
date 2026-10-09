@@ -1,14 +1,13 @@
 import {
-  type BoomboxConfig,
   type CreatureParams,
   type DangleConfig,
   type Equipped,
   equippedItemIds,
   ITEM_SETS,
   SH,
-  Herzie3D as SharedHerzie3D,
   Sky,
 } from "@herzies/shared";
+import { HerzieView } from "@herzies/shared/gl";
 import { useEffect, useState } from "react";
 import { useWindowFocused } from "../tauri-bridge";
 
@@ -33,10 +32,7 @@ interface Props {
   animate?: boolean;
   isPlaying?: boolean;
   equipped?: Equipped;
-  /** @deprecated Prefer `equipped`. */
-  wearables?: string[];
   creatureParams?: CreatureParams;
-  boomboxConfig?: BoomboxConfig;
   dangleConfig?: DangleConfig;
   showSky?: boolean;
   draggable?: boolean;
@@ -49,28 +45,22 @@ interface Props {
   zoom?: number;
   /** Camera pan in px (negative: up); eases along with `zoom`. Default: 0. */
   offsetY?: number;
-  /** Solid blocks instead of glyphs (see the shared Herzie3D). */
-  solid?: boolean;
-  /** Render-grid density (see the shared Herzie3D). Default: 1. */
-  resolution?: number;
 }
 
 /**
- * Desktop-tuned composition of the shared Sky + Herzie3D primitives.
+ * Desktop-tuned composition of the shared Sky + HerzieView.
  *
  * The Tauri window is fixed-size (380×520, borderless), so the sky is anchored
  * to the window's top edge and the drag area spans the full window width.
  */
-export function Herzie3D({
+export function HerzieWithSky({
   userId,
   stage = 1,
   size = 5,
   animate,
   isPlaying = false,
   equipped,
-  wearables,
   creatureParams,
-  boomboxConfig,
   dangleConfig,
   showSky = true,
   draggable,
@@ -78,8 +68,6 @@ export function Herzie3D({
   grounded = false,
   zoom,
   offsetY,
-  solid,
-  resolution,
 }: Props) {
   // Full-window-width column count, shared by the sky and the creature
   // viewport so both span the window without stretching their contents.
@@ -98,7 +86,7 @@ export function Herzie3D({
   const focused = useWindowFocused();
   const paused = !focused || pausedProp;
 
-  const ids = equipped ? equippedItemIds(equipped) : (wearables ?? []);
+  const ids = equipped ? equippedItemIds(equipped) : [];
   const scenery = ids.includes("blood-moon")
     ? "blood-moon"
     : ids.includes("stars")
@@ -154,7 +142,7 @@ export function Herzie3D({
           }}
         />
       )}
-      <SharedHerzie3D
+      <HerzieView
         userId={userId}
         stage={stage}
         size={size}
@@ -162,17 +150,13 @@ export function Herzie3D({
         animate={animate}
         isPlaying={isPlaying}
         equipped={equipped}
-        wearables={wearables}
         creatureParams={creatureParams}
-        boomboxConfig={boomboxConfig}
         dangleConfig={dangleConfig}
         draggable={draggable}
         paused={paused}
         groundInset={grounded ? groundInsetFor(size) : undefined}
         zoom={zoom}
         offsetY={offsetY}
-        solid={solid}
-        resolution={resolution}
         wrapperStyle={
           showSky
             ? {
@@ -189,8 +173,8 @@ export function Herzie3D({
 
 /** The canvas is taller than the stage and centred on it, so its bottom edge
  * hangs (canvasH - stage) / 2 below the stage's. The feet go that far plus
- * the floor inset above the canvas bottom. Must match the shared Herzie3D's
- * canvas sizing (SH rows of size * 1.35 px). */
+ * the floor inset above the canvas bottom. Must match HerzieView's
+ * box sizing (SH rows of size * 1.35 px). */
 function groundInsetFor(size: number): number {
   const canvasH = Math.ceil(SH * size * 1.35);
   return (canvasH - HERZIE_STAGE_HEIGHT) / 2 + STAGE_FLOOR_INSET;

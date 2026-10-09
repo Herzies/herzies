@@ -1,3 +1,4 @@
+import { HerzieModel, turnToward } from "@herzies/shared/gl";
 import { Html } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import { CylinderCollider, RigidBody } from "@react-three/rapier";
@@ -5,8 +6,7 @@ import { useEffect, useMemo } from "react";
 import { cn } from "../../lib/utils";
 import { lookOf } from "../TownScene";
 import { ROW_TEXT_SHADOW, VISITOR_THEMES } from "../VisitorRowTheme";
-import { turnToward } from "./animation";
-import { HerzieModel } from "./HerzieModel";
+import { ambient } from "./ambient";
 import { NOTICE_RANGE, type TownSpot, townSave } from "./runtime";
 
 /** The boss looms: drawn this much bigger than it's built (a stage-3
@@ -40,7 +40,10 @@ export function Visitor({
   // biome-ignore lint/correctness/useExhaustiveDependencies: see above
   const herzie = useMemo(() => {
     if (!standing) return null;
-    const s = new HerzieModel(lookOf(card), at.x * 7 + at.z * 3);
+    const s = new HerzieModel(lookOf(card), {
+      seed: at.x * 7 + at.z * 3,
+      lighting: ambient,
+    });
     s.heading = plaza;
     s.root.position.set(at.x, 0, at.z);
     s.root.scale.setScalar(size);

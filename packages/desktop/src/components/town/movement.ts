@@ -1,5 +1,5 @@
+import { turnToward, WALK_SPEED } from "@herzies/shared/gl";
 import { MathUtils } from "three";
-import { turnToward, WALK_SPEED } from "./animation";
 import type { TownInput } from "./input";
 
 /** Speeding up and slowing down (per second, MathUtils.damp rates):

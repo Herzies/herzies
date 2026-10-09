@@ -192,7 +192,7 @@ function buildColorTriplet(hex: string): ColorTriplet {
 // Amplitudes in world units, applied to already-scaled sphere positions.
 // Tuned so motion is ~0.3-0.5 pixels — visible but slow and organic.
 // `cycles` is full sine cycles per loop, so every part tiles seamlessly.
-const IDLE_FRAMES = 120; // at 50ms per frame (Herzie3D) — a 6000ms loop
+const IDLE_FRAMES = 120; // at 50ms per frame — a 6000ms loop
 
 const IDLE = {
   body: { amp: 0.04, cycles: 4 }, // 1500ms
@@ -1813,7 +1813,7 @@ export function buildCreatureSpheres(
 // reads as alive rather than as a prop on a sine wave. A hop baked into the
 // loop would recur on the exact same beat forever, which is the opposite of
 // alive, so hops live in separate loop *variants* instead: identical to the
-// plain dance loop except for the spirit during its hop(s). Herzie3D picks
+// plain dance loop except for the spirit during its hop(s). the host picks
 // plain or a random variant at each loop boundary, so hops land at irregular
 // times, heights and spacings. A variant only re-renders the frames its hops
 // touch and shares the rest with the plain loop (see generateLoopFrames).
@@ -1892,7 +1892,7 @@ const DANCE_SPIRIT_HOPS: readonly (readonly SpiritHop[])[] = [
   ],
 ];
 
-/** Dance hop variants Herzie3D can choose between (indices 0..n-1). */
+/** Dance hop variants a host can choose between (indices 0..n-1). */
 export const SPIRIT_DANCE_HOP_VARIANT_COUNT = DANCE_SPIRIT_HOPS.length;
 
 function spiritHopsFor(
@@ -3066,7 +3066,7 @@ export function generateIdleFrames(
   );
 }
 
-/** How long each frame of the rotation loop shows, in ms (Herzie3D's tick). */
+/** How long each frame of the rotation loop shows, in ms (the old renderer's tick). */
 export const ROTATION_FRAME_MS = 80;
 
 /** The steady trail and flare a dangling item holds through the rotation
@@ -3170,7 +3170,7 @@ export function renderCreatureAtAngle(
   cols: number = SW,
   boomboxConfig?: BoomboxConfig,
   spiritHopVariant?: number,
-  /** Pose for anything dangling, from Herzie3D's spin physics. */
+  /** Pose for anything dangling, from the host's spin physics. */
   dangle?: DangleState,
   zoom = 1,
   rows: number = SH,
@@ -3214,7 +3214,7 @@ export interface CreaturePose {
   walkWeight: number;
 }
 
-/** Frames in the idle loop, which Herzie3D plays at 50ms a frame. */
+/** Frames in the idle loop, played at 50ms a frame. */
 export const IDLE_LOOP_FRAMES = IDLE_FRAMES;
 
 /** A herzie and everything it wears, in creature space (y down, front −z),
@@ -3251,30 +3251,79 @@ export function buildCreatureModel(
   };
 }
 
+/** Frames in the dance loop, which the old renderer played at 65ms a
+ * frame (a 1.56s loop). */
+export const DANCE_LOOP_FRAMES = DANCE_FRAMES;
+
+/** What a continuously animating host poses a herzie with (see
+ * creaturePoseOffsets). */
+export type CreatureMotion = Pick<
+  CreaturePose,
+  "idleFrame" | "walkPhase" | "walkWeight"
+> & {
+  /** Frame of the dance loop, 0..DANCE_LOOP_FRAMES (may be fractional). */
+  danceFrame?: number;
+  /** 0 not dancing to 1 dancing (music playing). */
+  danceWeight?: number;
+  /** The Greedy Spirit's hop variant for this dance loop, if any (see
+   * SPIRIT_DANCE_HOP_VARIANT_COUNT). */
+  spiritHopVariant?: number;
+  /** How far anything worn that dangles (the chain, the pearls) swings. */
+  dangle?: DangleState;
+};
+
 /**
  * Each sphere's offset from its rest position in a pose: the idle loop
- * blended into the walk cycle by `walkWeight`. `idleFrame` may be
- * fractional, for a host animating continuously.
+ * blended into the walk cycle by `walkWeight` and into the dance by
+ * `danceWeight`, with anything dangling swung by `dangle`. `idleFrame` and
+ * `danceFrame` may be fractional, for a host animating continuously.
  */
 export function creaturePoseOffsets(
   spheres: Sphere[],
   stage: number,
-  pose: Pick<CreaturePose, "idleFrame" | "walkPhase" | "walkWeight">,
+  pose: CreatureMotion,
 ): V3[] {
+  const base = pose.dangle ? applyDangle(spheres, pose.dangle) : spheres;
   const w = Math.min(1, Math.max(0, pose.walkWeight));
-  const idle = idleDeltas(spheres, pose.idleFrame);
-  const walk = w > 0 ? walkDeltas(spheres, pose.walkPhase, stage) : null;
+  const dw = Math.min(1, Math.max(0, pose.danceWeight ?? 0));
+  const idle = idleDeltas(base, pose.idleFrame);
+  const walk = w > 0 ? walkDeltas(base, pose.walkPhase, stage) : null;
+  const dance =
+    dw > 0
+      ? applyDanceOffsets(
+          base,
+          pose.danceFrame ?? 0,
+          hasSpiritPart(base)
+            ? spiritHopsFor(pose.spiritHopVariant)
+            : undefined,
+        )
+      : null;
   return spheres.map((s, i) => {
+    const b = base[i].center;
     // Scene-anchored parts (a floating pet) keep their own idle bob even
     // mid-stride; everything else fades from idle into the walk.
     const iw = walk && !isSceneFixed(s.part) ? 1 - w : 1;
     const d = walk?.[i];
+    let x = d ? d[0] * w : 0;
+    let y = idle[i] * iw + (d ? d[1] * w : 0);
+    let z = d ? d[2] * w : 0;
+    const moved = dance?.[i].center;
+    if (moved) {
+      x = x * (1 - dw) + (moved[0] - b[0]) * dw;
+      y = y * (1 - dw) + (moved[1] - b[1]) * dw;
+      z = z * (1 - dw) + (moved[2] - b[2]) * dw;
+    }
+    // Plus where the swing put it.
     return [
-      d ? d[0] * w : 0,
-      idle[i] * iw + (d ? d[1] * w : 0),
-      d ? d[2] * w : 0,
+      x + b[0] - s.center[0],
+      y + b[1] - s.center[1],
+      z + b[2] - s.center[2],
     ];
   });
+}
+
+function hasSpiritPart(spheres: Sphere[]): boolean {
+  return spheres.some((s) => s.part === "spirit");
 }
 
 /** Built models for renderCreaturePose, which a host calls every frame:

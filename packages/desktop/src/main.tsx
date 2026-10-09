@@ -1,5 +1,6 @@
 import "./globals.css";
 import { bankCapacity, type HerzieProfile, isBankFull } from "@herzies/shared";
+import { herzieStage } from "@herzies/shared/gl";
 import { attachConsole } from "@tauri-apps/plugin-log";
 import {
   isPermissionGranted,
@@ -12,7 +13,7 @@ import { createRoot } from "react-dom/client";
 import { ChatPanel } from "./components/ChatPanel";
 import { EventsView } from "./components/EventsView";
 import { FriendsView } from "./components/FriendsView";
-import { HERZIE_STAGE_HEIGHT, Herzie3D } from "./components/Herzie3D";
+import { HERZIE_STAGE_HEIGHT, HerzieWithSky } from "./components/HerzieWithSky";
 import { HomeView } from "./components/HomeView";
 import { IncomingFriendOverlay } from "./components/IncomingFriendOverlay";
 import { IncomingTradeOverlay } from "./components/IncomingTradeOverlay";
@@ -48,9 +49,6 @@ import {
 const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1h
 
 const WHATS_NEW_SEEN_KEY = "herzies:whats-new-seen-version";
-/** Render-grid density of the herzie on Home and the Herzie view: a third
- * finer than the classic grid, drawn as solid blocks. */
-const HERZIE_RESOLUTION = 4 / 3;
 /** The camera on the Herzie view, relative to Home's: pulled back and raised
  * a little to make room for the deck over the stage's floor. */
 const HERZIE_VIEW_ZOOM = 0.83;
@@ -247,6 +245,11 @@ function App() {
   } | null>(null);
   const focused = useWindowFocused();
   const ghostMode = useGhostMode();
+  // The herzies are drawn on their own canvas, outside the app's root, so
+  // ghost mode's grey has to reach them separately.
+  useEffect(() => {
+    herzieStage.setFilter(ghostMode ? "grayscale(1)" : "");
+  }, [ghostMode]);
 
   const addLog = useCallback((message: string) => {
     const time = new Date().toISOString();
@@ -840,7 +843,7 @@ function App() {
             className="absolute inset-x-0 flex items-center justify-center"
             style={{ top: herzieStageTop ?? 0, height: HERZIE_STAGE_HEIGHT }}
           >
-            <Herzie3D
+            <HerzieWithSky
               userId={herzie.friendCode}
               stage={stageOverride ?? herzie.stage}
               isPlaying={!!state.nowPlaying}
@@ -852,9 +855,6 @@ function App() {
               zoom={view === "inventory" ? HERZIE_VIEW_ZOOM : 1}
               offsetY={view === "inventory" ? HERZIE_VIEW_OFFSET_Y : 0}
               grounded
-              // Solid pixels on a third-finer grid, like the Town's herzies.
-              solid
-              resolution={HERZIE_RESOLUTION}
             />
           </div>
         </div>

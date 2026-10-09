@@ -1,6 +1,6 @@
 "use client";
 
-import { Herzie3D } from "@herzies/shared";
+import { HerzieView } from "@herzies/shared/gl";
 import Link from "next/link";
 import { useRef } from "react";
 import Button from "@/components/button";
@@ -72,7 +72,7 @@ export function Hero() {
           data-hero-right=""
           className="absolute bottom-0 right-0 translate-y-[110px] md:translate-y-[50px] translate-x-[80px]"
         >
-          <Herzie3D
+          <HerzieView
             userId="e"
             stage={2}
             size={4}
@@ -87,7 +87,7 @@ export function Hero() {
           data-hero-left=""
           className="hidden sm:block absolute top-0 left-0 translate-x-[-100px]"
         >
-          <Herzie3D
+          <HerzieView
             userId="t"
             stage={1}
             size={4}

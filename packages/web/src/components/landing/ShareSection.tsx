@@ -1,6 +1,7 @@
 "use client";
 
-import { type Equipped, Herzie3D } from "@herzies/shared";
+import type { Equipped } from "@herzies/shared";
+import { HerzieView } from "@herzies/shared/gl";
 import { type RefObject, useRef } from "react";
 import { gsap, useGSAP } from "./gsap";
 import {
@@ -160,7 +161,7 @@ export function ShareSection({
     const f = FRIENDS[side];
     return (
       <div ref={side === "left" ? leftRef : undefined} data-friend={side}>
-        <Herzie3D
+        <HerzieView
           userId={f.seed}
           stage={f.stage}
           size={friendSize}
@@ -208,7 +209,7 @@ export function ShareSection({
             {travel ? (
               <div ref={travel.slot} style={canvasSize(oursSize, OUR_COLS)} />
             ) : (
-              <Herzie3D
+              <HerzieView
                 userId={OUR_SEED}
                 stage={3}
                 size={oursSize}

@@ -25,7 +25,7 @@ export function outfitFor(count: number): Equipped {
 /** Wide enough for the boombox standing beside it. */
 export const OUR_COLS = 72;
 
-/** Herzie3D's canvas size for a given cell size and width (mirrors its own
+/** HerzieView's box size for a given cell size and width (mirrors its own
  * metrics), so a placeholder can hold exactly the room a herzie takes. */
 export function canvasSize(size: number, cols: number) {
   return {
@@ -40,7 +40,7 @@ export function companionSize(wide: boolean) {
 }
 
 /** How far your herzie turns (radians) to face the visitor it stands
- * beside: Orphiez on its right, the boss on its left. Herzie3D adds its
+ * beside: Orphiez on its right, the boss on its left. HerzieView adds its
  * usual three-quarter turn (DEFAULT_Y_ANGLE) to any angle, so that's taken
  * off first: these are measured from square-on. A negative angle turns it
  * to its right (the viewer's right). */
