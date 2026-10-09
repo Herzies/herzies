@@ -55,8 +55,8 @@ const LAMP_COLOR = new THREE.Color("#ffc47a");
 const LAMP_INTENSITY = 10;
 const WINDOW_INTENSITY = 5;
 /** How strongly each lights the herzies (see herzieMaterial). */
-const LAMP_ON_HERZIES = 1;
-const WINDOW_ON_HERZIES = 0.5;
+const LAMP_ON_HERZIES = 0.6;
+const WINDOW_ON_HERZIES = 0.3;
 /** How many of the little lights cast shadows: the ones nearest the
  * player. Each is the scene drawn six more times a frame (a cube of
  * shadow), so only a few, and only at night. */
