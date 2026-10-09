@@ -280,12 +280,17 @@ function windowRuns(
   door: Door | null,
   spacing: (yaw: number) => number,
 ): Spot[][] {
+  // outsideWalls lists the sides interleaved (n, s, n, s…): by side first,
+  // then into runs of neighbouring cells.
   const runs: Wall[][] = [];
-  for (const w of outsideWalls(r, isPart)) {
-    const last = runs.at(-1)?.at(-1);
-    if (last && last.side === w.side && last.i === w.i - 1) {
-      runs[runs.length - 1].push(w);
-    } else runs.push([w]);
+  for (const side of ["n", "s", "w", "e"] as const) {
+    let last: Wall | undefined;
+    for (const w of outsideWalls(r, isPart)) {
+      if (w.side !== side) continue;
+      if (last && last.i === w.i - 1) runs[runs.length - 1].push(w);
+      else runs.push([w]);
+      last = w;
+    }
   }
   return runs.flatMap((run) => {
     const { yaw } = run[0];

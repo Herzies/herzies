@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chimneysOf } from "./Buildings";
+import { chimneysOf, windowLightsOf } from "./Buildings";
 import { emptyMap, MAP_SIZE, type TownMap } from "./map";
 
 const MID = MAP_SIZE / 2;
@@ -34,5 +34,15 @@ describe("chimneys", () => {
     const line = map.objects[MID];
     map.objects[MID] = `${line.slice(0, MID)}H${line.slice(MID + 1)}`;
     expect(chimneysOf(map)).toEqual([]);
+  });
+});
+
+describe("window lights", () => {
+  it("lights every wall of a home with windows on it", () => {
+    const map = emptyMap();
+    paintHome(map, MID, MID);
+    // A 3×3 home: a window each on its three plain walls (its door wall
+    // is too short either side of the door for one).
+    expect(windowLightsOf(map)).toHaveLength(3);
   });
 });
