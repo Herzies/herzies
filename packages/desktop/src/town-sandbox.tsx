@@ -1,7 +1,8 @@
 // Dev only (not in the build's inputs): the 3D Town with made-up visitors
 // and a player, without logging in. `pnpm vite:dev`, then open
-// /town-sandbox.html. `?shadows=0` turns the sun's shadows off, and
-// `?bench=1` times the renderer (see bench).
+// /town-sandbox.html. `?shadows=0` turns the sun's shadows off, `?ao=0`
+// the ambient occlusion, and `?bench=1` times the renderer (`?bench=frame`
+// whole frames, composer included; see bench).
 // `?time=` sets the hour, and `&speed=` runs the clock on from there,
 // that many hours a second (to watch the light and shadows move).
 // `?net=local` joins the multiplayer Town on `wrangler dev` (in
@@ -105,13 +106,19 @@ async function bench(state: RootState) {
   const pixel = new Uint8Array(4);
   const finish = () =>
     ctx.readPixels(0, 0, 1, 1, ctx.RGBA, ctx.UNSIGNED_BYTE, pixel);
-  for (let i = 0; i < 20; i++) gl.render(scene, camera);
+  // `?bench=frame`: whole frames (every useFrame, and the ambient
+  // occlusion composer, which draws instead of gl.render).
+  const whole = params.get("bench") === "frame";
+  const render = whole
+    ? () => state.advance(performance.now())
+    : () => gl.render(scene, camera);
+  for (let i = 0; i < 20; i++) render();
   finish();
   const frames = Number(params.get("frames") ?? 300);
   const runs: number[] = [];
   for (let r = 0; r < 5; r++) {
     const t0 = performance.now();
-    for (let i = 0; i < frames / 5; i++) gl.render(scene, camera);
+    for (let i = 0; i < frames / 5; i++) render();
     finish();
     runs.push((performance.now() - t0) / (frames / 5));
     await wait(50);
@@ -119,6 +126,7 @@ async function bench(state: RootState) {
   runs.sort((a, b) => a - b);
   const result = {
     shadows: gl.shadowMap.enabled,
+    whole,
     gpu,
     size: [ctx.drawingBufferWidth, ctx.drawingBufferHeight],
     msPerFrame: Number(runs[2].toFixed(3)),
@@ -206,6 +214,7 @@ function Sandbox() {
       paused={false}
       hour={sandboxHour}
       shadows={params.get("shadows") !== "0"}
+      ao={params.get("ao") !== "0"}
       onCreated={params.has("bench") ? bench : undefined}
       onOpen={(key) => console.log("[town-sandbox] open", key)}
       onNearChange={(s) => console.log("[town-sandbox] near", s?.key ?? null)}

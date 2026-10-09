@@ -4,7 +4,7 @@ import * as THREE from "three";
 import { ambient } from "./ambient";
 import { windowMaterial } from "./Buildings";
 import { dayLook, type Hour, localHours, skyLights } from "./DayCycle";
-import { CLOUD_SHADE, cloudShadows } from "./fog";
+import { CLOUD_SHADE, townLook } from "./depth";
 import { skyUniforms } from "./Islands";
 import { nightLights } from "./Lamps";
 import { ISLAND_RADIUS } from "./runtime";
@@ -40,7 +40,7 @@ export function DayLight({ hour }: { hour?: Hour }) {
   // Town is gone.
   useEffect(
     () => () => {
-      cloudShadows.w = 0;
+      townLook.w = 0;
     },
     [],
   );
@@ -67,7 +67,7 @@ export function DayLight({ hour }: { hour?: Hour }) {
       // Not a distance: how thick the haze is (see fog.ts).
       scene.fog.far = look.haze;
     }
-    cloudShadows.w = CLOUD_SHADE * (1 - look.night);
+    townLook.w = CLOUD_SHADE * (1 - look.night);
     if (hemi.current) {
       hemi.current.color.copy(look.hemiSky);
       hemi.current.groundColor.copy(look.hemiGround);

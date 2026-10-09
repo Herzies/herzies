@@ -1,7 +1,7 @@
 import { Clouds } from "./Clouds";
 import type { Hour } from "./DayCycle";
 import { DayLight } from "./DayLight";
-import { HAZE_START } from "./fog";
+import { HAZE_START } from "./depth";
 import { Ground } from "./Ground";
 import { DistantIslands, HomeIsland, SKY, Sky } from "./Islands";
 import type { TownMap } from "./map";

@@ -8,10 +8,11 @@ import { benchesOf, type Seat, seatNear } from "./Benches";
 import { CameraRig } from "./CameraRig";
 import type { ChatBubbles } from "./chatBubbles";
 import type { Hour } from "./DayCycle";
-import { driftClouds } from "./fog";
+import { driftClouds } from "./depth";
 import { type TownInput, useTownInput } from "./input";
 import type { TownMap } from "./map";
 import type { TownConnection } from "./net/TownConnection";
+import { Occlusion } from "./Occlusion";
 import { Player } from "./Player";
 import { RemotePlayers } from "./RemotePlayers";
 import "./shadows";
@@ -57,6 +58,8 @@ export type TownCanvasProps = {
   pixelScale?: number;
   /** Cast shadows from the sun (default: on; off to measure the cost). */
   shadows?: boolean;
+  /** Ambient occlusion (default: on; off to measure the cost). */
+  ao?: boolean;
   /** Chat lines over herzies' heads, by friend code. */
   bubbles?: ChatBubbles;
   /** The multiplayer Town: draws everyone else on it. */
@@ -126,6 +129,7 @@ export default function TownCanvas(props: TownCanvasProps) {
         </Suspense>
         {props.net && <RemotePlayers net={props.net} bubbles={props.bubbles} />}
         <CameraRig />
+        {props.ao !== false && <Occlusion />}
       </TownRuntimeContext.Provider>
     </Canvas>
   );
