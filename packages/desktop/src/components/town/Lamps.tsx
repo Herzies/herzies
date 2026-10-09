@@ -70,6 +70,9 @@ const WINDOW_ON_HERZIES_OUT = 1.2;
  * the scene drawn six more times a frame (a cube of shadow), so only a
  * few, and only at night. */
 const SHADOW_LIGHTS = 3;
+/** And how many windows: a spot light's shadow is one view, not six, so
+ * cheaper — enough for the windows you're walking past. */
+const WINDOW_SHADOWS = 2;
 /** Shadows start this far from a light: past the lantern's own frame and
  * glass, which would otherwise shade everything round it. */
 const SHADOW_NEAR = 0.45;
@@ -145,9 +148,9 @@ function aimOf(g: Glow): THREE.Object3D {
  * herzies. Off by day; as many lights at noon as at midnight, so nothing
  * recompiles as the day turns.
  *
- * The few lamp posts nearest the player cast shadows: a small pool of
- * shadow-casting lights that move to them (the plain light there going
- * dark meanwhile). They only cast at night — turning that on and off
+ * The few lamp posts and windows nearest the player cast shadows: small
+ * pools of shadow-casting lights that move to them (the plain light there
+ * going dark meanwhile). They only cast at night — turning that on and off
  * recompiles the materials, once at dusk and once at dawn.
  */
 export function NightLights({ map }: { map: TownMap }) {
@@ -158,8 +161,15 @@ export function NightLights({ map }: { map: TownMap }) {
   );
   const lights = useRef<(THREE.Light | null)[]>([]);
   const casters = useRef<(THREE.PointLight | null)[]>([]);
+  const windowCasters = useRef<(THREE.SpotLight | null)[]>([]);
+  // Where each window caster aims (moved with it).
+  const windowAims = useMemo(
+    () => Array.from({ length: WINDOW_SHADOWS }, () => new THREE.Object3D()),
+    [],
+  );
   const shown = useRef({ level: -1, x: Number.NaN, z: Number.NaN });
   const lampCount = glows.filter((g) => !g.out).length;
+  const windowCount = glows.length - lampCount;
 
   useLayoutEffect(() => {
     const lamps = ambient.uLamps.value;
@@ -182,16 +192,22 @@ export function NightLights({ map }: { map: TownMap }) {
     if (level === s.level && Math.hypot(x - s.x, z - s.z) < 0.5) return;
     Object.assign(s, { level, x, z });
 
-    // The lamp posts nearest the player cast shadows (windows don't).
-    const nearest = glows
+    // The lamp posts and windows nearest the player cast shadows.
+    const byDistance = glows
       .map((g, i) => ({ i, g, d: Math.hypot(g.at[0] - x, g.at[2] - z) }))
+      .sort((a, b) => a.d - b.d);
+    const nearest = byDistance
       .filter((n) => !n.g.out)
-      .sort((a, b) => a.d - b.d)
       .slice(0, SHADOW_LIGHTS)
+      .map((n) => n.i);
+    const nearestWindows = byDistance
+      .filter((n) => n.g.out)
+      .slice(0, WINDOW_SHADOWS)
       .map((n) => n.i);
     glows.forEach((g, i) => {
       const light = lights.current[i];
-      const cast = level > 0 && nearest.includes(i);
+      const cast =
+        level > 0 && (nearest.includes(i) || nearestWindows.includes(i));
       if (light) light.intensity = cast ? 0 : g.intensity * level;
       ambient.uLamps.value[i].w = g.onHerzies * level;
     });
@@ -204,6 +220,20 @@ export function NightLights({ map }: { map: TownMap }) {
         return;
       }
       light.position.set(...g.at);
+      light.intensity = g.intensity * level;
+    });
+    windowCasters.current.forEach((light, k) => {
+      if (!light) return;
+      const g = glows[nearestWindows[k]];
+      light.castShadow = level > 0;
+      if (!g || level === 0) {
+        light.intensity = 0;
+        return;
+      }
+      light.position.set(...g.at);
+      const aim = aimOf(g).position;
+      windowAims[k].position.copy(aim);
+      windowAims[k].updateMatrixWorld();
       light.intensity = g.intensity * level;
     });
   });
@@ -263,6 +293,32 @@ export function NightLights({ map }: { map: TownMap }) {
           shadow-camera-far={LAMP_POST_REACH}
         />
       ))}
+      {windowAims
+        .slice(0, Math.min(WINDOW_SHADOWS, windowCount))
+        .map((aim, k) => (
+          <group
+            // biome-ignore lint/suspicious/noArrayIndexKey: a fixed pool
+            key={`wcast${k}`}
+          >
+            <primitive object={aim} />
+            <spotLight
+              ref={(l) => {
+                windowCasters.current[k] = l;
+              }}
+              target={aim}
+              color={LAMP_COLOR}
+              intensity={0}
+              distance={LAMP_REACH}
+              decay={2}
+              angle={WINDOW_CONE}
+              penumbra={0.75}
+              shadow-mapSize={[256, 256]}
+              shadow-bias={-0.002}
+              shadow-camera-near={0.1}
+              shadow-camera-far={LAMP_REACH}
+            />
+          </group>
+        ))}
     </>
   );
 }
