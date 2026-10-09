@@ -24,7 +24,7 @@ import {
   WORLD_RADIUS,
 } from "./components/town/map";
 import { HOME_MAP, spotsOf, type TownSpot } from "./components/town/runtime";
-import TownCanvas from "./components/town/TownCanvas";
+import TownCanvas, { PIXEL_SCALE } from "./components/town/TownCanvas";
 
 const HALF = MAP_SIZE / 2;
 
@@ -389,6 +389,12 @@ function MapEditor() {
     p: Paint;
   } | null>(null);
   const [respawn, setRespawn] = useState(0);
+  // The preview's resolution, as screen pixels per drawn pixel: whole
+  // ones, so every pixel comes out the same size.
+  const [pixelSize, setPixelSize] = useState(() =>
+    Math.round(window.devicePixelRatio / PIXEL_SCALE),
+  );
+  const pixelScale = window.devicePixelRatio / pixelSize;
   // The preview's time of day: the real clock, a time you set, or time
   // running fast so you can watch the day go by. `?time=21.5` starts at a
   // set time. The hour lives in a ref the preview reads every frame, so
@@ -855,6 +861,7 @@ function MapEditor() {
           paused={false}
           respawn={respawn}
           hour={timeMode === "clock" ? null : readHour}
+          pixelScale={pixelScale}
           onOpen={() => {}}
           onNearChange={() => {}}
         />
@@ -911,6 +918,35 @@ function MapEditor() {
           />
           <span style={{ width: 40, textAlign: "right" }}>
             {timeMode === "clock" ? "now" : clockText(shownHour)}
+          </span>
+        </div>
+        <div
+          style={{
+            position: "absolute",
+            right: 8,
+            bottom: 44,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            color: "#ffffffc0",
+            background: "#0008",
+            padding: "4px 6px",
+            borderRadius: 4,
+          }}
+          title="Screen pixels per Town pixel. The game uses PIXEL_SCALE in TownCanvas."
+        >
+          Resolution
+          <input
+            type="range"
+            // Fine on the left, chunky on the right.
+            min={1}
+            max={10}
+            step={1}
+            value={pixelSize}
+            onChange={(e) => setPixelSize(Number(e.target.value))}
+          />
+          <span style={{ width: 110, textAlign: "right" }}>
+            {pixelSize}px · scale {pixelScale.toFixed(2)}
           </span>
         </div>
       </div>

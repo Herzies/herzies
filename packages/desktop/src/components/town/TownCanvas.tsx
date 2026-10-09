@@ -26,7 +26,7 @@ import { World } from "./World";
 /** The Town's resolution as a fraction of the screen's: each drawn pixel
  * covers 1/PIXEL_SCALE screen pixels square (2.5: five device pixels on a
  * Retina screen, so the pixels all come out the same size). */
-const PIXEL_SCALE = 0.4;
+export const PIXEL_SCALE = 0.4;
 
 export type TownCanvasProps = {
   spots: TownSpot[];
@@ -44,6 +44,9 @@ export type TownCanvasProps = {
   champion?: Champion;
   /** Show the world at this hour (default: the local clock). */
   hour?: Hour;
+  /** Drawn at this fraction of the screen's resolution (default:
+   * PIXEL_SCALE; the map editor tries others). */
+  pixelScale?: number;
   /** Cast shadows from the sun (default: on; off to measure the cost). */
   shadows?: boolean;
   /** Chat lines over herzies' heads, by friend code. */
@@ -79,7 +82,7 @@ export default function TownCanvas(props: TownCanvasProps) {
     <Canvas
       // Chunky pixels, to sit with the ASCII herzies: drawn at a fraction of
       // the screen's resolution and scaled up without smoothing.
-      dpr={PIXEL_SCALE}
+      dpr={props.pixelScale ?? PIXEL_SCALE}
       gl={{ antialias: false }}
       // Plain PCF: soft enough, and at these pixels the edge reads clean.
       shadows={props.shadows === false ? false : "percentage"}
