@@ -825,6 +825,11 @@ const bodyMaterial = seeThrough(
 export const windowMaterial = seeThrough(
   new THREE.MeshBasicMaterial({ color: "#ffd98a" }),
 );
+/** A lantern's glass: lit like the windows (it shares their colour), but
+ * never see-through — like the post it sits on, too slight to hide the
+ * player, so dithering it would only speckle whoever's behind it. */
+export const lanternMaterial = new THREE.MeshBasicMaterial();
+lanternMaterial.color = windowMaterial.color;
 
 /**
  * The buildings — homes, shops and caves — each patch of cells as one,

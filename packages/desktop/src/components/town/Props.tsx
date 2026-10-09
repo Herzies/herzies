@@ -13,7 +13,7 @@ const seeThroughLambert = (p: THREE.MeshLambertMaterialParameters) =>
   seeThrough(new THREE.MeshLambertMaterial(p));
 
 import { BenchColliders, Benches } from "./Benches";
-import { BuildingColliders, Buildings, windowMaterial } from "./Buildings";
+import { BuildingColliders, Buildings, lanternMaterial } from "./Buildings";
 import { trunkMaterial } from "./Islands";
 import {
   LANTERN_Y,
@@ -207,8 +207,12 @@ const BERRIES: Copy[] = [
   { x: -0.25, z: -0.5, s: 1 },
 ];
 
-/** Lamp posts: dark iron, see-through like the trees. */
-const ironMaterial = seeThroughLambert({ color: "#2b2d33", flatShading: true });
+/** Lamp posts: dark iron. Not see-through like the trees: a post is too
+ * slight to hide the player, and dithered it only speckles them. */
+const ironMaterial = new THREE.MeshLambertMaterial({
+  color: "#2b2d33",
+  flatShading: true,
+});
 
 /** What each kind of thing is drawn with, and how wide it blocks (0: you
  * walk through it). */
@@ -289,7 +293,7 @@ const KINDS = {
       { geometry: lampPostGeometry(), material: ironMaterial, y: 0 },
       {
         geometry: lanternGlassGeometry,
-        material: windowMaterial,
+        material: lanternMaterial,
         y: LANTERN_Y,
       },
     ],
