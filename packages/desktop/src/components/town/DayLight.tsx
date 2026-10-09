@@ -18,6 +18,9 @@ const DAY_WINDOW = new THREE.Color("#9fb3c4");
 const SHADOW_REACH = ISLAND_RADIUS + 4;
 /** How far out the light sits, along its direction. */
 const SUN_DISTANCE = 60;
+/** How soft the sun's shadow edges are, in shadow-map texels (see
+ * shadows.ts). */
+const SUN_SHADOW_SOFTNESS = 2;
 /** Moonlight casts paler shadows than the sun. */
 const MOON_SHADOW = 0.7;
 
@@ -84,6 +87,7 @@ export function DayLight({ hour }: { hour?: Hour }) {
         shadow-mapSize={[2048, 2048]}
         shadow-bias={-0.0005}
         shadow-normalBias={0.04}
+        shadow-radius={SUN_SHADOW_SOFTNESS}
         shadow-camera-left={-SHADOW_REACH}
         shadow-camera-right={SHADOW_REACH}
         shadow-camera-top={SHADOW_REACH}

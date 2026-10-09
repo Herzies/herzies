@@ -73,9 +73,16 @@ const SHADOW_LIGHTS = 3;
 /** And how many windows: a spot light's shadow is one view, not six, so
  * cheaper — enough for the windows you're walking past. */
 const WINDOW_SHADOWS = 2;
+/** Each casting light's shadow map, a side (a lamp post's, per cube face). */
+const LAMP_SHADOW_MAP = 512;
+/** How soft their edges are, in shadow-map texels (see shadows.ts). */
+const LAMP_SHADOW_SOFTNESS = 3;
 /** Shadows start this far from a light: past the lantern's own frame and
  * glass, which would otherwise shade everything round it. */
 const SHADOW_NEAR = 0.45;
+/** A casting light's shadow fades out over this last stretch before the
+ * next light along takes its place, so the hand-over doesn't pop. */
+const SHADOW_FADE = 2;
 /** Below this, the lights (and their shadows) are off. */
 const DARK_ENOUGH = 0.05;
 
@@ -88,6 +95,25 @@ type Glow = {
   reach: number;
   onHerzies: number;
 };
+
+/**
+ * How strongly each of the `count` nearest lights casts its shadow, given
+ * every light's distance, nearest first: fully, fading to nothing as the
+ * next one along (which doesn't cast) comes as near — so when the two
+ * swap, neither shadow is showing.
+ */
+export function casterFades(
+  distances: number[],
+  count: number,
+  fade = SHADOW_FADE,
+): number[] {
+  const next = distances[count];
+  return distances
+    .slice(0, count)
+    .map((d) =>
+      next === undefined ? 1 : Math.min(1, Math.max(0, (next - d) / fade)),
+    );
+}
 
 /** Every little light on the map: the lamp posts first, then the windows
  * nearest the middle of town, up to MAX_LAMPS. */
@@ -188,22 +214,27 @@ export function NightLights({ map }: { map: TownMap }) {
     const level = nightLights.level < DARK_ENOUGH ? 0 : nightLights.level;
     const { x, z } = ambient.uPlayer.value;
     const s = shown.current;
-    // Re-placed when the light changes or the player has moved a bit.
-    if (level === s.level && Math.hypot(x - s.x, z - s.z) < 0.5) return;
+    // Re-placed when the light changes or the player has moved a little
+    // (little enough that the shadows' fades move smoothly).
+    if (level === s.level && Math.hypot(x - s.x, z - s.z) < 0.05) return;
     Object.assign(s, { level, x, z });
 
     // The lamp posts and windows nearest the player cast shadows.
     const byDistance = glows
       .map((g, i) => ({ i, g, d: Math.hypot(g.at[0] - x, g.at[2] - z) }))
       .sort((a, b) => a.d - b.d);
-    const nearest = byDistance
-      .filter((n) => !n.g.out)
-      .slice(0, SHADOW_LIGHTS)
-      .map((n) => n.i);
-    const nearestWindows = byDistance
-      .filter((n) => n.g.out)
-      .slice(0, WINDOW_SHADOWS)
-      .map((n) => n.i);
+    const lampsNear = byDistance.filter((n) => !n.g.out);
+    const windowsNear = byDistance.filter((n) => n.g.out);
+    const nearest = lampsNear.slice(0, SHADOW_LIGHTS).map((n) => n.i);
+    const nearestWindows = windowsNear.slice(0, WINDOW_SHADOWS).map((n) => n.i);
+    const fades = casterFades(
+      lampsNear.map((n) => n.d),
+      SHADOW_LIGHTS,
+    );
+    const windowFades = casterFades(
+      windowsNear.map((n) => n.d),
+      WINDOW_SHADOWS,
+    );
     glows.forEach((g, i) => {
       const light = lights.current[i];
       const cast =
@@ -221,6 +252,7 @@ export function NightLights({ map }: { map: TownMap }) {
       }
       light.position.set(...g.at);
       light.intensity = g.intensity * level;
+      light.shadow.intensity = fades[k];
     });
     windowCasters.current.forEach((light, k) => {
       if (!light) return;
@@ -235,6 +267,7 @@ export function NightLights({ map }: { map: TownMap }) {
       windowAims[k].position.copy(aim);
       windowAims[k].updateMatrixWorld();
       light.intensity = g.intensity * level;
+      light.shadow.intensity = windowFades[k];
     });
   });
 
@@ -287,8 +320,10 @@ export function NightLights({ map }: { map: TownMap }) {
           intensity={0}
           distance={LAMP_POST_REACH}
           decay={2}
-          shadow-mapSize={[256, 256]}
+          shadow-mapSize={[LAMP_SHADOW_MAP, LAMP_SHADOW_MAP]}
           shadow-bias={-0.002}
+          shadow-normalBias={0.03}
+          shadow-radius={LAMP_SHADOW_SOFTNESS}
           shadow-camera-near={SHADOW_NEAR}
           shadow-camera-far={LAMP_POST_REACH}
         />
@@ -312,8 +347,10 @@ export function NightLights({ map }: { map: TownMap }) {
               decay={2}
               angle={WINDOW_CONE}
               penumbra={0.75}
-              shadow-mapSize={[256, 256]}
+              shadow-mapSize={[LAMP_SHADOW_MAP, LAMP_SHADOW_MAP]}
               shadow-bias={-0.002}
+              shadow-normalBias={0.03}
+              shadow-radius={LAMP_SHADOW_SOFTNESS}
               shadow-camera-near={0.1}
               shadow-camera-far={LAMP_REACH}
             />

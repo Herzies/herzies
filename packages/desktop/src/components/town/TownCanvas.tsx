@@ -13,6 +13,7 @@ import type { TownMap } from "./map";
 import type { TownConnection } from "./net/TownConnection";
 import { Player } from "./Player";
 import { RemotePlayers } from "./RemotePlayers";
+import "./shadows";
 import {
   HOME_MAP,
   TALK_RANGE,
