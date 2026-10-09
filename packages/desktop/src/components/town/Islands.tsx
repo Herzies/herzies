@@ -167,20 +167,21 @@ export function Sky() {
             vec3 c = h > 0.0
               ? mix(uHorizon, uTop, smoothstep(0.0, 0.6, h))
               : mix(uHorizon, uBottom, smoothstep(0.0, 0.5, -h));
-            // Both set behind the horizon, which cuts their discs off.
-            if (h > 0.0) {
-              float toSun = dot(dir, uSunDir);
-              float toMoon = -toSun;
-              float sunUp = smoothstep(-0.08, 0.02, uSunDir.y);
-              // A wide warm glow, then a hard-edged disc that stays crisp
-              // in the Town's chunky pixels.
-              vec3 sun = mix(uSunColor, vec3(1.0, 0.98, 0.9), 0.55);
-              c += uSunColor * pow(max(toSun, 0.0), 48.0) * 0.35 * sunUp;
-              c = mix(c, sun, step(SUN_DISC, toSun) * sunUp);
-              float moonUp = smoothstep(-0.08, 0.02, -uSunDir.y);
-              c += vec3(0.55, 0.62, 0.8) * pow(max(toMoon, 0.0), 200.0) * 0.25 * moonUp;
-              c = mix(c, vec3(0.88, 0.9, 0.96), step(MOON_DISC, toMoon) * moonUp);
-            }
+            // Each sinks into the haze at the horizon: dimmer the lower the
+            // pixel, and fading out as it sets rather than cut off by it.
+            float haze = smoothstep(-0.03, 0.14, h);
+            float toSun = dot(dir, uSunDir);
+            float toMoon = -toSun;
+            float sunUp = smoothstep(-0.1, 0.12, uSunDir.y) * haze;
+            // A wide warm glow, then a hard-edged disc that stays crisp
+            // in the Town's chunky pixels — warmer and hazier as it sets.
+            vec3 sun = mix(uSunColor, vec3(1.0, 0.98, 0.9), 0.55);
+            sun = mix(mix(uHorizon, uSunColor, 0.7), sun, haze);
+            c += uSunColor * pow(max(toSun, 0.0), 48.0) * 0.35 * sunUp;
+            c = mix(c, sun, step(SUN_DISC, toSun) * sunUp);
+            float moonUp = smoothstep(-0.1, 0.12, -uSunDir.y) * haze;
+            c += vec3(0.55, 0.62, 0.8) * pow(max(toMoon, 0.0), 200.0) * 0.25 * moonUp;
+            c = mix(c, vec3(0.88, 0.9, 0.96), step(MOON_DISC, toMoon) * moonUp);
             gl_FragColor = vec4(c, 1.0);
             #include <colorspace_fragment>
           }
