@@ -75,9 +75,9 @@ export function spotsOf(map: TownMap): {
 export const { spots: SPOTS, spare: SPARE_SPOTS } = spotsOf(HOME_MAP);
 
 /** How close you have to be to talk to someone… */
-export const TALK_RANGE = 3.4;
+export const TALK_RANGE = 5;
 /** …and for them to turn and look at you. */
-export const NOTICE_RANGE = 7;
+export const NOTICE_RANGE = 8;
 
 /** A visitor's place in the world, and how they're doing. */
 export type TownSpot = {
