@@ -144,3 +144,69 @@ export type Hour = number | (() => number) | null;
 export function localHours(now = new Date()): number {
   return now.getHours() + now.getMinutes() / 60 + now.getSeconds() / 3600;
 }
+
+/** When the sun crosses the horizon, in hours past midnight (the dawn and
+ * dusk keys above). */
+export const SUNRISE = 6.5;
+export const SUNSET = 18.5;
+/** How high the sun gets at noon (the moon, opposite it, at midnight). */
+const NOON_ELEVATION = (55 * Math.PI) / 180;
+/** The light never comes in lower than this: grazing light stretches
+ * shadows across the whole island. */
+const MIN_LIGHT_ELEVATION = (12 * Math.PI) / 180;
+/** The herzies' own light stays between these, so they neither wash out
+ * at noon nor go dark at dusk (their bands were tuned for a mid sun). */
+const HERZIE_ELEVATION = [(25 * Math.PI) / 180, (60 * Math.PI) / 180];
+
+/** Where the sun and moon are, and where the light comes from. */
+export type SkyLights = {
+  /** Towards the sun (unit; below the horizon at night). */
+  sun: THREE.Vector3;
+  /** Towards the moon: always opposite the sun. */
+  moon: THREE.Vector3;
+  /** Towards whichever is up, never lower than MIN_LIGHT_ELEVATION. */
+  light: THREE.Vector3;
+  /** How much of the directional light, and its shadows, to use (0–1):
+   * none with the sun or moon on the horizon, where the light switches
+   * from one to the other. */
+  strength: number;
+  /** The herzies' light: `light`, held to a mid height. */
+  herzie: THREE.Vector3;
+};
+
+/** Turns `dir` (unit) to the given elevation, keeping its bearing. */
+function atElevation(dir: THREE.Vector3, elevation: number): THREE.Vector3 {
+  const flat = Math.hypot(dir.x, dir.z) || 1;
+  const c = Math.cos(elevation);
+  return new THREE.Vector3(
+    (dir.x / flat) * c,
+    Math.sin(elevation),
+    (dir.z / flat) * c,
+  );
+}
+
+/**
+ * The sky's lights at `hours` past midnight: the sun rises in the east
+ * (+x) at SUNRISE, climbs to NOON_ELEVATION over the south (+z) and sets
+ * in the west at SUNSET — one circle a day, so the moon (opposite) does
+ * the same by night.
+ */
+export function skyLights(hours: number): SkyLights {
+  const h = ((hours % 24) + 24) % 24;
+  const a = (Math.PI * (h - SUNRISE)) / (SUNSET - SUNRISE);
+  const sun = new THREE.Vector3(
+    Math.cos(a),
+    Math.sin(a) * Math.sin(NOON_ELEVATION),
+    Math.sin(a) * Math.cos(NOON_ELEVATION),
+  );
+  const moon = sun.clone().negate();
+  const up = sun.y >= 0 ? sun : moon;
+  const elevation = Math.asin(THREE.MathUtils.clamp(up.y, -1, 1));
+  const light = atElevation(up, Math.max(elevation, MIN_LIGHT_ELEVATION));
+  const herzie = atElevation(
+    up,
+    THREE.MathUtils.clamp(elevation, HERZIE_ELEVATION[0], HERZIE_ELEVATION[1]),
+  );
+  const strength = THREE.MathUtils.smoothstep(up.y, 0.02, 0.2);
+  return { sun, moon, light, strength, herzie };
+}

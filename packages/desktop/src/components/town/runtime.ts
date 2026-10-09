@@ -62,10 +62,6 @@ export function spotsOf(map: TownMap): {
 }
 export const { spots: SPOTS, spare: SPARE_SPOTS } = spotsOf(HOME_MAP);
 
-/** Where the sun shines from (it lights from this point toward the
- * origin). Herzies shade by it too, see herzieMaterial. */
-export const SUN_POSITION: [number, number, number] = [-10, 20, 8];
-
 /** How close you have to be to talk to someone… */
 export const TALK_RANGE = 3.4;
 /** …and for them to turn and look at you. */

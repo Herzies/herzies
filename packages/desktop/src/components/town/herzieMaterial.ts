@@ -1,7 +1,6 @@
 import type { PrimitiveShading } from "@herzies/shared";
 import * as THREE from "three";
 import { ambient } from "./ambient";
-import { SUN_POSITION } from "./runtime";
 
 /** Uniforms every scheme-painted part of one herzie shares, so the herzie
  * moves them all at once: the world height where the scheme's top band
@@ -14,11 +13,10 @@ export type SchemeUniforms = {
 /** Most bands a scheme can have (its ramp is uploaded as 3 shades each). */
 const MAX_BANDS = 8;
 
-const SUN = new THREE.Vector3(...SUN_POSITION).normalize();
-
 const vertexShader = /* glsl */ `
 #include <common>
 #include <fog_pars_vertex>
+#include <shadowmap_pars_vertex>
 varying vec3 vWorldNormal;
 varying vec3 vLocalNormal;
 varying float vWorldY;
@@ -27,10 +25,13 @@ void main() {
   // ray caster's textures are laid out in.
   vLocalNormal = normal;
   vWorldNormal = normalize(mat3(modelMatrix) * normal);
-  vec4 world = modelMatrix * vec4(position, 1.0);
-  vWorldY = world.y;
-  vec4 mvPosition = viewMatrix * world;
+  vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+  vWorldY = worldPosition.y;
+  vec4 mvPosition = viewMatrix * worldPosition;
   gl_Position = projectionMatrix * mvPosition;
+  // What three's shadow chunk reads, by these names.
+  vec3 transformedNormal = normalMatrix * normal;
+  #include <shadowmap_vertex>
   #include <fog_vertex>
 }
 `;
@@ -39,7 +40,11 @@ void main() {
 // applyTexture, lit by the Town's sun instead of a camera-fixed light.
 const fragmentShader = /* glsl */ `
 #include <common>
+#include <packing>
 #include <fog_pars_fragment>
+#include <lights_pars_begin>
+#include <shadowmap_pars_fragment>
+#include <shadowmask_pars_fragment>
 uniform vec3 uSun;
 uniform vec3 uLight;
 uniform float uGain;
@@ -67,7 +72,8 @@ float pattern(vec3 n) {
 }
 
 void main() {
-  float d = max(0.0, dot(normalize(vWorldNormal), uSun));
+  // In the shade of something, a part drops to its darker bands.
+  float d = max(0.0, dot(normalize(vWorldNormal), uSun)) * getShadowMask();
   float lit = (uGain + pattern(normalize(vLocalNormal))) * (uFloor + (1.0 - uFloor) * d);
   int shade = lit > uHi ? 2 : lit > uLo ? 1 : 0;
   vec3 color;
@@ -110,9 +116,13 @@ export function herzieMaterial(
     vertexShader,
     fragmentShader,
     fog: true,
+    // Only for the sun's shadow map: the colour is the bands' own.
+    lights: true,
     uniforms: {
       ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog),
-      uSun: { value: SUN },
+      ...THREE.UniformsUtils.clone(THREE.UniformsLib.lights),
+      // Shared: the day cycle moves the sun for every herzie at once.
+      uSun: ambient.uSun,
       // Shared: the day cycle dims every herzie at once.
       uLight: ambient.uLight,
       uGain: { value: shading.gain },

@@ -672,7 +672,12 @@ export function Buildings({ map }: { map: TownMap }) {
   if (!built) return null;
   return (
     <>
-      <mesh geometry={built.body} material={bodyMaterial} />
+      <mesh
+        geometry={built.body}
+        material={bodyMaterial}
+        castShadow
+        receiveShadow
+      />
       {built.glow && <mesh geometry={built.glow} material={windowMaterial} />}
     </>
   );

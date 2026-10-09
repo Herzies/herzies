@@ -334,6 +334,8 @@ function Boards({
       key={boards.length}
       ref={ref}
       args={[geometry, material, boards.length]}
+      castShadow
+      receiveShadow
     />
   );
 }
@@ -351,7 +353,7 @@ export function Ground({ map }: { map: TownMap }) {
 
   return (
     <>
-      <mesh geometry={ground} material={groundMaterial} />
+      <mesh geometry={ground} material={groundMaterial} receiveShadow />
       <Water map={map} />
       <Boards
         boards={bridges.planks}

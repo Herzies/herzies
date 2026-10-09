@@ -1,4 +1,4 @@
-import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { Canvas, type RootState, useFrame, useThree } from "@react-three/fiber";
 import { Physics } from "@react-three/rapier";
 import { useMemo, useRef } from "react";
 import type { Look } from "../TownScene";
@@ -40,6 +40,10 @@ export type TownCanvasProps = {
   champion?: Champion;
   /** Show the world at this hour (default: the local clock). */
   hour?: Hour;
+  /** Cast shadows from the sun (default: on; off to measure the cost). */
+  shadows?: boolean;
+  /** Called once the renderer is up (the sandbox's benchmark uses it). */
+  onCreated?: (state: RootState) => void;
 };
 
 /**
@@ -67,9 +71,12 @@ export default function TownCanvas(props: TownCanvasProps) {
       // the screen's resolution and scaled up without smoothing.
       dpr={PIXEL_SCALE}
       gl={{ antialias: false }}
+      // Plain PCF: soft enough, and at these pixels the edge reads clean.
+      shadows={props.shadows === false ? false : "percentage"}
       style={{ imageRendering: "pixelated" }}
       camera={{ fov: 55, near: 0.1, far: 400 }}
       frameloop={props.paused ? "never" : "always"}
+      onCreated={props.onCreated}
     >
       <TownRuntimeContext.Provider value={runtime}>
         <Systems {...props} input={input} />

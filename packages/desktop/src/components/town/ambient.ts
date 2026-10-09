@@ -15,6 +15,9 @@ export const ambient = {
   /** How herzies are lit: their own shader ignores the scene's lights, so
    * the day cycle tints them through this. */
   uLight: { value: new THREE.Color(1, 1, 1) },
+  /** Where herzies are lit from: the sun (or moon), held to a mid height
+   * (see skyLights). */
+  uSun: { value: new THREE.Vector3(-10, 20, 8).normalize() },
   /** The player's chest, in view space (camera at the origin): what the
    * camera looks at, for see-through occluders (set by CameraRig). */
   uPlayerView: { value: new THREE.Vector3(0, 0, -12) },

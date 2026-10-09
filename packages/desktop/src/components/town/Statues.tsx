@@ -89,11 +89,15 @@ function Statue({
         geometry={plinthGeometry}
         material={plinthMaterial}
         position-y={PLINTH_HEIGHT / 2}
+        castShadow
+        receiveShadow
       />
       <mesh
         geometry={capGeometry}
         material={capMaterial}
         position-y={PLINTH_HEIGHT + 0.06}
+        castShadow
+        receiveShadow
       />
       <group position-y={PLINTH_HEIGHT + 0.12} scale={STATUE_SCALE}>
         <primitive object={herzie.root} />

@@ -26,12 +26,7 @@ import {
   type TownMap,
   waterRuns,
 } from "./map";
-import {
-  type Champion,
-  StatueColliders,
-  Statues,
-  statueSpots,
-} from "./Statues";
+import { type Champion, StatueColliders, Statues } from "./Statues";
 
 type Placed = { x: number; z: number; scale: number; yaw: number };
 /** One of several drawn per thing (a flower in a patch): its offset in
@@ -305,8 +300,20 @@ function placeAll(map: TownMap): Record<Kind, Placed[]> {
   return placed;
 }
 
+/** What casts a shadow in the sun: the small stuff (grass, flowers,
+ * mushrooms) isn't worth drawing a second time for it. */
+const CASTS = new Set<Kind>(["T", "R", "S", "B"]);
+
 /** One part (say, every tree's leaves) as one instanced draw call. */
-function PartMesh({ part, things }: { part: Part; things: Placed[] }) {
+function PartMesh({
+  part,
+  things,
+  cast,
+}: {
+  part: Part;
+  things: Placed[];
+  cast: boolean;
+}) {
   const ref = useRef<THREE.InstancedMesh>(null);
   useLayoutEffect(() => {
     const mesh = ref.current;
@@ -354,6 +361,8 @@ function PartMesh({ part, things }: { part: Part; things: Placed[] }) {
       key={count}
       ref={ref}
       args={[part.geometry, part.material, count]}
+      castShadow={cast}
+      receiveShadow
     />
   );
 }
@@ -382,70 +391,13 @@ export function Props({
             key={`${k}${i}`}
             part={part}
             things={placed[k]}
+            cast={CASTS.has(k)}
           />
         )),
       )}
-      <BlobShadows map={map} placed={placed} />
       <Buildings map={map} />
       <Statues map={map} champion={champion} />
     </>
-  );
-}
-
-/** How wide a soft shadow each kind of thing casts (× its size). */
-const SHADOW_RADIUS: Partial<Record<Kind, number>> = {
-  B: 1.1,
-  T: 1.5,
-  R: 0.85,
-  S: 0.6,
-};
-const shadowGeometry = new THREE.CircleGeometry(1, 16).rotateX(-Math.PI / 2);
-const shadowMaterial = new THREE.MeshBasicMaterial({
-  color: 0x000000,
-  transparent: true,
-  opacity: 0.22,
-  depthWrite: false,
-  polygonOffset: true,
-  polygonOffsetFactor: -2,
-});
-
-/** Soft dark discs under trees, rocks, stumps and statues, so they stand
- * on the ground rather than float on it (herzies have their own). */
-function BlobShadows({
-  map,
-  placed,
-}: {
-  map: TownMap;
-  placed: Record<Kind, Placed[]>;
-}) {
-  const discs = useMemo(() => {
-    const out: { x: number; z: number; r: number }[] = [];
-    for (const [k, r] of Object.entries(SHADOW_RADIUS) as [Kind, number][]) {
-      for (const t of placed[k]) out.push({ x: t.x, z: t.z, r: r * t.scale });
-    }
-    for (const [x, z] of statueSpots(map)) out.push({ x, z, r: 1 });
-    return out;
-  }, [map, placed]);
-  const ref = useRef<THREE.InstancedMesh>(null);
-  useLayoutEffect(() => {
-    const mesh = ref.current;
-    if (!mesh) return;
-    const m = new THREE.Matrix4();
-    discs.forEach((d, i) => {
-      m.makeScale(d.r, 1, d.r).setPosition(d.x, 0.02, d.z);
-      mesh.setMatrixAt(i, m);
-    });
-    mesh.instanceMatrix.needsUpdate = true;
-    mesh.computeBoundingSphere();
-  }, [discs]);
-  if (discs.length === 0) return null;
-  return (
-    <instancedMesh
-      key={discs.length}
-      ref={ref}
-      args={[shadowGeometry, shadowMaterial, discs.length]}
-      renderOrder={-1}
-    />
   );
 }
 

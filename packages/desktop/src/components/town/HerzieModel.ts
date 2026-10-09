@@ -195,6 +195,8 @@ export class HerzieModel {
         this.materials.push(material);
       }
       const mesh = new THREE.Mesh(geometryFor(s), material);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
       if (!s.shape) mesh.scale.setScalar(s.radius);
       else {
         const axis = new THREE.Vector3(...s.shape.axis).normalize();
@@ -206,13 +208,14 @@ export class HerzieModel {
     }
     this.creature.rotation.x = Math.PI;
 
-    // A soft dark disc on the ground: what makes a herzie stand somewhere.
+    // A faint dark disc right under it: the sun casts the real shadow, but
+    // when it's high that is barely wider than the feet.
     this.shadow = new THREE.Mesh(
       new THREE.CircleGeometry(1, 24),
       new THREE.MeshBasicMaterial({
         color: 0x000000,
         transparent: true,
-        opacity: 0.28,
+        opacity: 0.12,
         depthWrite: false,
       }),
     );

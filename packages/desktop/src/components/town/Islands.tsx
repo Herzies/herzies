@@ -11,11 +11,14 @@ export const SKY = {
   bottom: "#141f3a",
 };
 
-/** The sky dome's colours, top to bottom, as live uniforms. */
+/** The sky dome's colours, top to bottom, and where the sun is (the
+ * moon is opposite), as live uniforms (see DayLight). */
 export const skyUniforms = {
   uTop: { value: new THREE.Color(SKY.top) },
   uHorizon: { value: new THREE.Color(SKY.horizon) },
   uBottom: { value: new THREE.Color(SKY.bottom) },
+  uSunDir: { value: new THREE.Vector3(0, -1, 0) },
+  uSunColor: { value: new THREE.Color("#fff4e0") },
 };
 
 const GRASS = new THREE.Color("#2f5233");
@@ -152,12 +155,32 @@ export function Sky() {
           uniform vec3 uTop;
           uniform vec3 uHorizon;
           uniform vec3 uBottom;
+          uniform vec3 uSunDir;
+          uniform vec3 uSunColor;
           varying vec3 vDir;
+          // Angular radii, as cosines: the sun about 2.6 degrees, the moon 1.8.
+          const float SUN_DISC = 0.99897;
+          const float MOON_DISC = 0.99951;
           void main() {
-            float h = vDir.y;
+            vec3 dir = normalize(vDir);
+            float h = dir.y;
             vec3 c = h > 0.0
               ? mix(uHorizon, uTop, smoothstep(0.0, 0.6, h))
               : mix(uHorizon, uBottom, smoothstep(0.0, 0.5, -h));
+            // Both set behind the horizon, which cuts their discs off.
+            if (h > 0.0) {
+              float toSun = dot(dir, uSunDir);
+              float toMoon = -toSun;
+              float sunUp = smoothstep(-0.08, 0.02, uSunDir.y);
+              // A wide warm glow, then a hard-edged disc that stays crisp
+              // in the Town's chunky pixels.
+              vec3 sun = mix(uSunColor, vec3(1.0, 0.98, 0.9), 0.55);
+              c += uSunColor * pow(max(toSun, 0.0), 48.0) * 0.35 * sunUp;
+              c = mix(c, sun, step(SUN_DISC, toSun) * sunUp);
+              float moonUp = smoothstep(-0.08, 0.02, -uSunDir.y);
+              c += vec3(0.55, 0.62, 0.8) * pow(max(toMoon, 0.0), 200.0) * 0.25 * moonUp;
+              c = mix(c, vec3(0.88, 0.9, 0.96), step(MOON_DISC, toMoon) * moonUp);
+            }
             gl_FragColor = vec4(c, 1.0);
             #include <colorspace_fragment>
           }
