@@ -62,6 +62,19 @@ type UpdateInstallStatus =
   | { kind: "installing"; downloaded: number; total: number | undefined }
   | { kind: "error"; message: string };
 
+/** Publishes the dock's (chat + tab bar) height as `--dock-height`, for
+ * whatever floats above it over the Town (the "Talk to" prompt). */
+const dockObserver = new ResizeObserver(([entry]) => {
+  document.documentElement.style.setProperty(
+    "--dock-height",
+    `${(entry.target as HTMLElement).offsetHeight}px`,
+  );
+});
+function observeDock(el: HTMLDivElement | null) {
+  dockObserver.disconnect();
+  if (el) dockObserver.observe(el);
+}
+
 function App() {
   const [rawState, setState] = useState<AppState>({
     herzie: null,
@@ -777,6 +790,7 @@ function App() {
         }}
         onStartTrade={handleStartTrade}
         onActivity={addLog}
+        frosted={townWorld}
       />
     ) : null;
 
@@ -791,9 +805,9 @@ function App() {
       <div
         className={cn(
           "flex min-h-0 flex-1 flex-col overflow-hidden",
-          // The Town's 3D world fills the window down to the tab bar: out
-          // past the app's side and top padding.
-          townWorld && "-mx-3 -mt-3",
+          // The Town's 3D world fills the whole window, out past the app's
+          // padding; the chat and the tab bar float over it (the dock).
+          townWorld && "-mx-3 -mt-3 -mb-1",
           // Home supplies its own bottom breathing room (HomeView's now-playing
           // bar) so its artist-image background can reach the chat's top
           // border instead of stopping short of an outer margin. The viewer's
@@ -1052,33 +1066,49 @@ function App() {
         </div>
       </div>
 
-      {chatPanel &&
-        (townWorld ? (
-          // Over the bottom of the Town's world, edge to edge, on a
-          // translucent backing so the world shows through. A zero-height
-          // row: the world keeps its full height underneath.
-          <div className="relative -mx-3 h-0">
-            <div className="absolute inset-x-0 bottom-0 z-20 bg-black/55 px-3 backdrop-blur-[2px]">
-              {chatPanel}
-            </div>
+      {/* The dock: chat and tab bar. Over the Town it floats on the world,
+          frosted; elsewhere it sits under the view on the window's own
+          colour. One structure for both, so switching fades the frosting
+          rather than swapping elements. A zero-height row over the Town:
+          the world keeps its full height underneath. */}
+      <div className={cn("relative -mx-3", townWorld && "h-0")}>
+        <div
+          ref={observeDock}
+          className={cn(
+            "px-3",
+            townWorld
+              ? "absolute inset-x-0 bottom-0 z-40 -mb-1 pb-1"
+              : "relative",
+          )}
+        >
+          {/* The frosting is a layer beside the content, never around it:
+              a backdrop-filter on an ancestor would become the containing
+              block for the chat's fixed-position expanded panel. */}
+          <div
+            aria-hidden="true"
+            className={cn(
+              "pointer-events-none absolute inset-0 bg-black/45 backdrop-blur-md transition-opacity duration-[450ms] ease-in-out",
+              townWorld ? "opacity-100" : "opacity-0",
+            )}
+          />
+          <div className="relative">
+            {chatPanel}
+            {herzie && (
+              <TabBar
+                view={view}
+                setView={switchView}
+                visitorsInTown={
+                  visitorsInTown +
+                  Number(hasActiveEventOverride) +
+                  Number(debugBossOverride) +
+                  Number(debugMerchantOverride) +
+                  Number(debugTreatTraderOverride)
+                }
+              />
+            )}
           </div>
-        ) : (
-          chatPanel
-        ))}
-
-      {herzie && (
-        <TabBar
-          view={view}
-          setView={switchView}
-          visitorsInTown={
-            visitorsInTown +
-            Number(hasActiveEventOverride) +
-            Number(debugBossOverride) +
-            Number(debugMerchantOverride) +
-            Number(debugTreatTraderOverride)
-          }
-        />
-      )}
+        </div>
+      </div>
 
       {pendingLeaveView && (
         <PromptOverlay

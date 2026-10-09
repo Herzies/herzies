@@ -215,6 +215,7 @@ export function ChatPanel({
   onOpenProfile,
   onStartTrade,
   onActivity,
+  frosted = false,
 }: {
   activityLog: { time: string; message: string }[];
   isOnline: boolean;
@@ -237,6 +238,9 @@ export function ChatPanel({
   onOpenProfile: (friendCode: string) => void;
   onStartTrade: (friendCode: string) => void;
   onActivity?: (message: string) => void;
+  /** Over the Town's world: the open chat is frosted glass rather than the
+   * window's colour, like the dock it opens from. */
+  frosted?: boolean;
 }) {
   const [input, setInput] = useState("");
   const [itemRefs, setItemRefs] = useState<string[]>([]);
@@ -1151,7 +1155,10 @@ export function ChatPanel({
         <button
           type="button"
           aria-label="Close chat"
-          className="fixed inset-0 z-[200] cursor-default border-none bg-black/55 p-0"
+          className={cn(
+            "fixed inset-0 z-[200] cursor-default border-none p-0",
+            frosted ? "bg-black/25" : "bg-black/55",
+          )}
           onMouseDown={(e) => {
             e.preventDefault();
             collapseChat();
@@ -1168,7 +1175,9 @@ export function ChatPanel({
           className={cn(
             "flex flex-col border-t border-border",
             expanded &&
-              "fixed inset-x-3 bottom-10 z-[201] h-[50vh] max-h-[50vh] bg-bg-panel shadow-[0_-8px_32px_rgba(0,0,0,0.45)] ring-1 ring-border",
+              "fixed inset-x-3 bottom-10 z-[201] h-[50vh] max-h-[50vh] shadow-[0_-8px_32px_rgba(0,0,0,0.45)] ring-1 ring-border",
+            expanded &&
+              (frosted ? "bg-black/55 backdrop-blur-md" : "bg-bg-panel"),
           )}
         >
           <div

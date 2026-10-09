@@ -159,7 +159,10 @@ export function TownWorld({
           onClick={() => onOpen(talkTo)}
           className={cn(
             "absolute left-1/2 z-30 -translate-x-1/2 cursor-pointer whitespace-nowrap rounded border border-white/40 bg-black/70 px-2 py-1 text-ui text-white hover:bg-black/85",
-            chatOverlay ? "bottom-[100px]" : "bottom-3",
+            // Above the dock (chat + tab bar) floating over the world.
+            chatOverlay
+              ? "bottom-[calc(var(--dock-height,0px)+12px)]"
+              : "bottom-3",
           )}
         >
           Talk to {near.card.title} <span className="text-text-dim">[E]</span>
