@@ -191,6 +191,8 @@ export type TownState = {
 
 /** Away from keyboard: shown dimmed. */
 export const TOWN_FLAG_AFK = 1;
+/** Sitting on a bench (at its seat): drawn seated. */
+export const TOWN_FLAG_SITTING = 2;
 
 const OP_STATE = 1;
 const OP_SNAPSHOT = 2;
