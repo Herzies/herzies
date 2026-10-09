@@ -46,13 +46,22 @@ describe("daytime depth", () => {
   });
 
   it("drifts the clouds downwind, wrapping without a jump", () => {
-    const wind = new THREE.Vector2(1, 0);
-    driftClouds(10, wind);
-    const a = townLook.x;
-    driftClouds(11, wind);
-    expect(townLook.x).toBeLessThan(a);
-    // Far enough on to have wrapped: still on the noise's own period.
-    driftClouds(1e7, wind);
-    expect(Math.abs(townLook.x)).toBeLessThan(14 * 256);
+    const wind = new THREE.Vector2(0.8, 0.6);
+    const wrap = 14 * 256;
+    // A step, modulo the noise's period: a wrap is exactly one period, so
+    // it disappears here, and anything else shows.
+    const moved = (d: number) => (((d % wrap) + wrap * 1.5) % wrap) - wrap / 2;
+    // Steady drift on each axis at any moment, including across x's first
+    // wrap (3584 / (0.8 * 0.8) = 5600 s) and y's (~7466.7 s) — and 4480 s,
+    // where wrapping the distance travelled, not each axis, jumped.
+    for (const t of [10, 4479.9, 5599.9, 7466.6, 1e6 + 0.3]) {
+      driftClouds(t, wind);
+      const a = { ...townLook };
+      driftClouds(t + 0.5, wind);
+      expect(moved(townLook.x - a.x)).toBeCloseTo(-0.8 * 0.8 * 0.5, 6);
+      expect(moved(townLook.y - a.y)).toBeCloseTo(-0.6 * 0.8 * 0.5, 6);
+      expect(Math.abs(townLook.x)).toBeLessThan(wrap);
+      expect(Math.abs(townLook.y)).toBeLessThan(wrap);
+    }
   });
 });

@@ -40,8 +40,8 @@ const MIST_TO = -36;
 const MIST_MAX = 0.75;
 /** How big the cloud shadows' noise cells are, in world units. */
 const CLOUD_CELL = 14;
-/** The noise repeats every this many cells: the drift wraps by exactly
- * that much, so it never pops (see driftClouds). */
+/** The noise repeats every this many cells, on each axis: the drift wraps
+ * by exactly that much, axis by axis, so it never pops (see driftClouds). */
 const CLOUD_PERIOD = 256;
 /** How fast the cloud shadows drift, in world units a second (about the
  * sky's own clouds, see Clouds). */
@@ -61,10 +61,9 @@ export const townLook = { x: 0, y: 0, z: 0, w: 0 };
 /** Moves the cloud shadows downwind to where they are at `time`. */
 export function driftClouds(time: number, wind: THREE.Vector2) {
   const wrap = CLOUD_CELL * CLOUD_PERIOD;
-  const travel = (time * CLOUD_SPEED) % wrap;
   // The pattern moves downwind: sample upwind of each point.
-  townLook.x = -wind.x * travel;
-  townLook.y = -wind.y * travel;
+  townLook.x = -(wind.x * time * CLOUD_SPEED) % wrap;
+  townLook.y = -(wind.y * time * CLOUD_SPEED) % wrap;
 }
 
 /** A world position from a view-space one (the view matrix is a rotation
