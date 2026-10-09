@@ -62,4 +62,59 @@ describe("HerzieModel", () => {
       );
     }
   });
+
+  describe("what dangles", () => {
+    const CHAIN = {
+      seed: "model-test",
+      stage: 3,
+      equipped: { body: "gold-chain" },
+    };
+    const swing = (h: HerzieModel) =>
+      (h as unknown as { dangle?: { swing: number } }).dangle?.swing ?? 0;
+    /** Turns it by `by` over a few frames, then lets it hang. */
+    function turn(h: HerzieModel, from: number, by: number) {
+      h.heading = from;
+      h.update(1 / 60, 0);
+      for (let i = 1; i <= 6; i++) {
+        h.heading = from + (by * i) / 6;
+        h.update(1 / 60, 0);
+      }
+    }
+
+    it("swings when it turns, then settles", () => {
+      const h = new HerzieModel(CHAIN);
+      turn(h, 0, 1.2);
+      expect(h.dangleSettled).toBe(false);
+      expect(Math.abs(swing(h))).toBeGreaterThan(0.05);
+      for (let i = 0; i < 180; i++) h.update(1 / 60, 0);
+      expect(h.dangleSettled).toBe(true);
+      expect(swing(h)).toBe(0);
+    });
+
+    it("doesn't fling the chain when the heading wraps round", () => {
+      const h = new HerzieModel(CHAIN);
+      h.heading = Math.PI - 0.01;
+      h.update(1 / 60, 0);
+      h.heading = -Math.PI + 0.01;
+      h.update(1 / 60, 0);
+      expect(Math.abs(swing(h))).toBeLessThan(0.05);
+    });
+
+    it("doesn't swing where it's first put", () => {
+      const h = new HerzieModel(CHAIN);
+      h.heading = 2.5;
+      h.update(1 / 60, 0);
+      expect(h.dangleSettled).toBe(true);
+    });
+
+    it("holds still when told to, or with nothing dangling", () => {
+      const held = new HerzieModel(CHAIN);
+      held.dangles = false;
+      turn(held, 0, 1.2);
+      expect(held.dangleSettled).toBe(true);
+      const bare = new HerzieModel(LOOK);
+      turn(bare, 0, 1.2);
+      expect(bare.dangleSettled).toBe(true);
+    });
+  });
 });

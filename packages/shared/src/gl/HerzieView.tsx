@@ -15,19 +15,10 @@ import {
   DEFAULT_CAMERA_TILT_DEG,
   DEFAULT_Y_ANGLE,
   equippedCacheKey,
-  hasDangleEquipped,
   SH,
   SW,
 } from "../creature-renderer.js";
-import {
-  createDangleSim,
-  type DangleConfig,
-  type DangleSim,
-  DEFAULT_DANGLE_CONFIG,
-  dangleState,
-  isDangleSettled,
-  stepDangle,
-} from "../dangle-physics.js";
+import { type DangleConfig, DEFAULT_DANGLE_CONFIG } from "../dangle-physics.js";
 import type { Equipped } from "../items.js";
 import { HerzieModel, MODEL_SCALE } from "./HerzieModel.js";
 import { herzieStage } from "./stage.js";
@@ -154,7 +145,7 @@ export function HerzieView({
     zoom,
     offsetY,
     groundInset,
-    dangles: draggable && hasDangleEquipped(equipped),
+    dangles: draggable,
     dangleConfig,
     grey,
     opacity,
@@ -186,7 +177,6 @@ export function HerzieView({
     const scene = new THREE.Scene();
     scene.add(model.root);
     const cam = new THREE.PerspectiveCamera(50, 1, 0.05, 100);
-    let sim: DangleSim | null = null;
     // What was last drawn, to tell when a paused herzie needs drawing again.
     const drawn = { angle: Number.NaN, grey: -1, opacity: -1 };
 
@@ -202,7 +192,7 @@ export function HerzieView({
           l.paused &&
           !s.dragging &&
           s.velocity === 0 &&
-          sim === null &&
+          model.dangleSettled &&
           s.angle === drawn.angle &&
           l.grey === drawn.grey &&
           c.zoom === l.zoom &&
@@ -225,27 +215,21 @@ export function HerzieView({
           s.angle += s.velocity * dt * 60;
         }
 
-        // Anything dangling swings as it's spun, then settles.
-        if (l.dangles) {
-          sim ??= createDangleSim(s.angle);
-          stepDangle(sim, s.angle, dt, l.dangleConfig);
-          if (isDangleSettled(sim, s.angle)) {
-            sim = null;
-            model.dangle = undefined;
-          } else model.dangle = dangleState(sim, s.angle, l.dangleConfig);
-        } else if (model.dangle) {
-          sim = null;
-          model.dangle = undefined;
-        }
-
         // The old renderer turned the creature by +yAngle in its own space
         // (y down, front −z): seen in the world (y up), that's the other
         // way round.
         model.heading = -(DEFAULT_Y_ANGLE + s.angle);
         drawn.angle = s.angle;
         model.dancing = l.dancing;
+        // Anything dangling swings as it's spun, then settles — even with
+        // the rest held still.
+        model.dangles = l.dangles;
+        model.dangleConfig = l.dangleConfig;
         if (!l.paused) model.update(dt, 0);
-        else model.update(0, 0);
+        else {
+          model.swing(dt);
+          model.update(0, 0);
+        }
 
         const c = camera.current;
         const t = 1 - (1 - ZOOM_EASE) ** (dt * 60);

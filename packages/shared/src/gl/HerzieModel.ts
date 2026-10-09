@@ -6,13 +6,23 @@ import {
   type CreatureParams,
   creaturePoseOffsets,
   DANCE_LOOP_FRAMES,
+  hasDangleEquipped,
   primitiveShading,
   SPIRIT_DANCE_HOP_VARIANT_COUNT,
   type Sphere,
   schemeShades,
   schemeSpan,
 } from "../creature-renderer.js";
-import type { DangleState } from "../dangle-physics.js";
+import {
+  createDangleSim,
+  type DangleConfig,
+  type DangleSim,
+  type DangleState,
+  DEFAULT_DANGLE_CONFIG,
+  dangleState,
+  isDangleSettled,
+  stepDangle,
+} from "../dangle-physics.js";
 import type { Equipped } from "../items.js";
 import {
   type AnimationState,
@@ -181,9 +191,18 @@ export class HerzieModel {
   readonly anim: AnimationState;
   /** Music is playing: dance (fades in and out). */
   dancing = false;
-  /** How far anything worn that dangles swings, set by a host spinning the
-   * herzie (see dangle-physics). */
-  dangle: DangleState | undefined;
+  /** Whether anything worn that dangles (the chain, the pearls, the witch
+   * hat's tip) swings as it turns — a host can hold it still. */
+  dangles = true;
+  dangleConfig: DangleConfig = DEFAULT_DANGLE_CONFIG;
+  /** How far it's swung (see dangle-physics); undefined at rest. */
+  private dangle: DangleState | undefined;
+  private dangleSim: DangleSim | null = null;
+  private readonly canDangle: boolean;
+  /** The turn, unwound (so crossing ±π doesn't fling the chain), in the
+   * old renderer's yAngle sense: the other way round from the heading. */
+  private bodyAngle = 0;
+  private lastHeading = Number.NaN;
   /** 0 not dancing to 1 dancing, eased. */
   private danceWeight = 0;
   private danceTime = 0;
@@ -218,6 +237,7 @@ export class HerzieModel {
     // herzies only grow legs at stage 3.
     this.hasLegs = look.stage >= 3 && !look.params;
     this.anim = newAnimationState(options.seed ?? 0);
+    this.canDangle = hasDangleEquipped(look.equipped);
     this.model = buildCreatureModel(
       look.seed,
       look.stage,
@@ -294,9 +314,45 @@ export class HerzieModel {
   update(dt: number, speed: number): void {
     stepAnimation(this.anim, dt, speed);
     this.stepDance(dt);
+    this.swing(dt);
     this.turn.rotation.y = this.heading;
     this.pose();
     this.animateBody();
+  }
+
+  /** Swings anything dangling with the turn since last time, and settles
+   * it. update() does this; a host holding the rest of the animation still
+   * (update(0, 0)) can call it on its own, so a spin still swings. */
+  swing(dt: number): void {
+    if (Number.isNaN(this.lastHeading)) this.lastHeading = this.heading;
+    let turned = this.heading - this.lastHeading;
+    turned -= Math.round(turned / (Math.PI * 2)) * Math.PI * 2;
+    this.lastHeading = this.heading;
+    this.bodyAngle -= turned;
+    if (!this.dangles || !this.canDangle) {
+      this.dangleSim = null;
+      this.dangle = undefined;
+      return;
+    }
+    // Nothing to do until it turns.
+    if (!this.dangleSim && turned === 0) return;
+    this.dangleSim ??= createDangleSim(this.bodyAngle - turned);
+    stepDangle(this.dangleSim, this.bodyAngle, dt, this.dangleConfig);
+    if (isDangleSettled(this.dangleSim, this.bodyAngle)) {
+      this.dangleSim = null;
+      this.dangle = undefined;
+    } else {
+      this.dangle = dangleState(
+        this.dangleSim,
+        this.bodyAngle,
+        this.dangleConfig,
+      );
+    }
+  }
+
+  /** Nothing dangling is still moving. */
+  get dangleSettled(): boolean {
+    return this.dangleSim === null;
   }
 
   private stepDance(dt: number) {
