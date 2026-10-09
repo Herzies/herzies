@@ -415,7 +415,29 @@ export function chimneysOf(map: TownMap): [number, number, number][] {
   });
 }
 
-/** A home: cream walls, a big striped gabled roof, a framed door with a
+/** Where each lit stretch of windows throws its light at night: out in
+ * front of the middle of its windows, at window height (see NightLights). */
+export function windowLightsOf(map: TownMap): [number, number, number][] {
+  return buildingsOf(map).flatMap((b) => {
+    if (b.kind === "cave") return [];
+    const isPart = partOf(b);
+    const door = doorAt(b);
+    return b.rects.flatMap((r) =>
+      windowRuns(r, isPart, door, () => WINDOW_SPACING).map((run) => {
+        const x = run.reduce((t, w) => t + w.x, 0) / run.length;
+        const z = run.reduce((t, w) => t + w.z, 0) / run.length;
+        const { yaw } = run[0];
+        return [x + Math.sin(yaw) * 1.3, 2.2, z + Math.cos(yaw) * 1.3] as [
+          number,
+          number,
+          number,
+        ];
+      }),
+    );
+  });
+}
+
+/** A home: plank walls, a big striped gabled roof, a framed door with a
  * step and a mailbox, windows either side, maybe a chimney. */
 function homeGeometry(b: Building) {
   const isH = partOf(b);

@@ -5,6 +5,7 @@ import { ambient } from "./ambient";
 import { windowMaterial } from "./Buildings";
 import { dayLook, type Hour, localHours, skyLights } from "./DayCycle";
 import { skyUniforms } from "./Islands";
+import { nightLights } from "./Lamps";
 import { ISLAND_RADIUS } from "./runtime";
 
 const LIT_WINDOW = new THREE.Color("#ffd98a");
@@ -63,6 +64,7 @@ export function DayLight({ hour }: { hour?: Hour }) {
     }
     ambient.uSun.value.copy(lights.herzie);
     windowMaterial.color.lerpColors(DAY_WINDOW, LIT_WINDOW, look.windows);
+    nightLights.level = look.windows;
     ambient.uNight.value = look.night;
     ambient.uLight.value.copy(look.herzieLight);
   });

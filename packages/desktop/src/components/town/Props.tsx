@@ -12,8 +12,14 @@ import { seeThrough, swayInWind } from "./ambient";
 const seeThroughLambert = (p: THREE.MeshLambertMaterialParameters) =>
   seeThrough(new THREE.MeshLambertMaterial(p));
 
-import { BuildingColliders, Buildings } from "./Buildings";
+import { BuildingColliders, Buildings, windowMaterial } from "./Buildings";
 import { trunkMaterial } from "./Islands";
+import {
+  LANTERN_Y,
+  lampPostGeometry,
+  lanternGlassGeometry,
+  NightLights,
+} from "./Lamps";
 import {
   MAP_SIZE,
   objectAt,
@@ -200,6 +206,9 @@ const BERRIES: Copy[] = [
   { x: -0.25, z: -0.5, s: 1 },
 ];
 
+/** Lamp posts: dark iron, see-through like the trees. */
+const ironMaterial = seeThroughLambert({ color: "#2b2d33", flatShading: true });
+
 /** What each kind of thing is drawn with, and how wide it blocks (0: you
  * walk through it). */
 const KINDS = {
@@ -274,6 +283,17 @@ const KINDS = {
     ],
     radius: 0.7,
   },
+  L: {
+    parts: [
+      { geometry: lampPostGeometry(), material: ironMaterial, y: 0 },
+      {
+        geometry: lanternGlassGeometry,
+        material: windowMaterial,
+        y: LANTERN_Y,
+      },
+    ],
+    radius: 0.2,
+  },
 } satisfies Record<string, { parts: Part[]; radius: number }>;
 type Kind = keyof typeof KINDS;
 const ONCE: Copy[] = [{ x: 0, z: 0, s: 1 }];
@@ -312,7 +332,7 @@ function placeAll(map: TownMap) {
 
 /** What casts a shadow in the sun: the small stuff (grass, flowers,
  * mushrooms) isn't worth drawing a second time for it. */
-const CASTS = new Set<Kind>(["R", "S", "B"]);
+const CASTS = new Set<Kind>(["R", "S", "B", "L"]);
 
 /** One part (say, every tree's leaves) as one instanced draw call. */
 function PartMesh({
@@ -415,6 +435,7 @@ export function Props({
         )),
       )}
       <Buildings map={map} />
+      <NightLights map={map} />
       <Statues map={map} champion={champion} />
     </>
   );

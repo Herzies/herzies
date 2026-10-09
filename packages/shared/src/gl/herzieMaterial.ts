@@ -9,7 +9,22 @@ export type HerzieLighting = {
   uSun: THREE.IUniform<THREE.Vector3>;
   /** Tint over the bands' own colours (white: as painted). */
   uLight: THREE.IUniform<THREE.Color>;
+  /** Little lights nearby (a lamp post, a lit window), each a world
+   * position and its strength (0: off); up to MAX_LAMPS. */
+  uLamps?: THREE.IUniform<THREE.Vector4[]>;
+  /** Their colour. */
+  uLampColor?: THREE.IUniform<THREE.Color>;
 };
+
+/** The most little lights a herzie is lit by. */
+export const MAX_LAMPS = 24;
+/** How far a little light reaches. */
+export const LAMP_REACH = 7;
+
+/** A set of little lights, all off. */
+export function noLamps(): THREE.Vector4[] {
+  return Array.from({ length: MAX_LAMPS }, () => new THREE.Vector4());
+}
 
 /** A herzie on its own (Home, a profile): lit like the ray caster lit it,
  * from up and to the left of the viewer, in plain white light. */
@@ -39,6 +54,7 @@ const vertexShader = /* glsl */ `
 varying vec3 vWorldNormal;
 varying vec3 vLocalNormal;
 varying float vWorldY;
+varying vec3 vWorldPos;
 void main() {
   // The geometry's own normal is in creature space (y down), the space the
   // ray caster's textures are laid out in.
@@ -46,6 +62,7 @@ void main() {
   vWorldNormal = normalize(mat3(modelMatrix) * normal);
   vec4 worldPosition = modelMatrix * vec4(position, 1.0);
   vWorldY = worldPosition.y;
+  vWorldPos = worldPosition.xyz;
   vec4 mvPosition = viewMatrix * worldPosition;
   gl_Position = projectionMatrix * mvPosition;
   // What three's shadow chunk reads, by these names.
@@ -79,9 +96,27 @@ uniform float uTop;
 uniform float uSpan;
 uniform float uGrey;
 uniform float uOpacity;
+uniform vec4 uLamps[${MAX_LAMPS}];
+uniform vec3 uLampColor;
 varying vec3 vWorldNormal;
 varying vec3 vLocalNormal;
 varying float vWorldY;
+varying vec3 vWorldPos;
+
+// How much the little lights nearby light this point: each by how close,
+// and how squarely it faces it.
+float lampLight(vec3 n) {
+  float sum = 0.0;
+  for (int i = 0; i < ${MAX_LAMPS}; i++) {
+    vec4 lamp = uLamps[i];
+    if (lamp.w <= 0.0) continue;
+    vec3 to = lamp.xyz - vWorldPos;
+    float dist = length(to);
+    float fall = clamp(1.0 - dist / ${LAMP_REACH.toFixed(1)}, 0.0, 1.0);
+    sum += lamp.w * fall * fall * (0.35 + 0.65 * max(0.0, dot(n, to / max(dist, 0.001))));
+  }
+  return sum;
+}
 
 // Spots (texture 1) aren't drawn in the Town: laid out on the body rather
 // than the view, they read as stains.
@@ -105,7 +140,7 @@ void main() {
   } else {
     color = uShades[shade];
   }
-  color *= uLight;
+  color *= uLight + uLampColor * lampLight(normalize(vWorldNormal));
   color = mix(color, vec3(dot(color, vec3(0.2126, 0.7152, 0.0722))), uGrey);
   gl_FragColor = vec4(color, uOpacity);
   #include <colorspace_fragment>
@@ -149,6 +184,9 @@ export function herzieMaterial(
       uSun: lighting.uSun,
       // Shared: the day cycle dims every herzie at once.
       uLight: lighting.uLight,
+      // Shared too: the Town lights its lamps for every herzie at once.
+      uLamps: lighting.uLamps ?? { value: noLamps() },
+      uLampColor: lighting.uLampColor ?? { value: new THREE.Color(0, 0, 0) },
       uGain: { value: shading.gain },
       uFloor: { value: shading.floor },
       uLo: { value: shading.lo },

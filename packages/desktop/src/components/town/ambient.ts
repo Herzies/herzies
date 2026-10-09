@@ -1,3 +1,4 @@
+import { noLamps } from "@herzies/shared/gl";
 import * as THREE from "three";
 
 /**
@@ -21,6 +22,10 @@ export const ambient = {
   /** The player's chest, in view space (camera at the origin): what the
    * camera looks at, for see-through occluders (set by CameraRig). */
   uPlayerView: { value: new THREE.Vector3(0, 0, -12) },
+  /** The lamp posts and lit windows near enough to light herzies, and
+   * their colour (see NightLights). */
+  uLamps: { value: noLamps() },
+  uLampColor: { value: new THREE.Color("#ffc47a") },
 };
 
 /** How a material moves in the wind. */
