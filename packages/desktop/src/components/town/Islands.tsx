@@ -182,8 +182,8 @@ export function Sky() {
             c += uSunColor * pow(max(toSun, 0.0), 48.0) * 0.35 * sunUp;
             c = mix(c, sun, step(SUN_DISC, toSun) * sunUp);
             float moonUp = smoothstep(-0.06, 0.06, uMoonDir.y) * haze;
-            c += vec3(0.55, 0.62, 0.8) * pow(max(toMoon, 0.0), 200.0) * 0.25 * moonUp;
-            c = mix(c, vec3(0.88, 0.9, 0.96), step(MOON_DISC, toMoon) * moonUp);
+            c += vec3(0.55, 0.62, 0.8) * pow(max(toMoon, 0.0), 90.0) * 0.4 * moonUp;
+            c = mix(c, vec3(0.95, 0.97, 1.0), step(MOON_DISC, toMoon) * moonUp);
             gl_FragColor = vec4(c, 1.0);
             #include <colorspace_fragment>
           }

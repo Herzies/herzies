@@ -19,7 +19,7 @@ const SHADOW_REACH = ISLAND_RADIUS + 4;
 /** How far out the light sits, along its direction. */
 const SUN_DISTANCE = 60;
 /** Moonlight casts paler shadows than the sun. */
-const MOON_SHADOW = 0.55;
+const MOON_SHADOW = 0.7;
 
 /**
  * The time of day, applied: the sky, the fog and background, the lights,
