@@ -60,6 +60,13 @@ type UpdateInstallStatus =
   | { kind: "installing"; downloaded: number; total: number | undefined }
   | { kind: "error"; message: string };
 
+/** Every herzie is drawn on one shared canvas (see herzieStage); it goes
+ * inside the app's root, so it stacks under the app's overlays and takes
+ * its filters (ghost mode's grey). */
+function hostHerzies(el: HTMLDivElement | null) {
+  herzieStage.setHost(el);
+}
+
 /** Publishes the dock's (chat + tab bar) height as `--dock-height`, for
  * whatever floats above it over the Town (the "Talk to" prompt). */
 const dockObserver = new ResizeObserver(([entry]) => {
@@ -245,11 +252,6 @@ function App() {
   } | null>(null);
   const focused = useWindowFocused();
   const ghostMode = useGhostMode();
-  // The herzies are drawn on their own canvas, outside the app's root, so
-  // ghost mode's grey has to reach them separately.
-  useEffect(() => {
-    herzieStage.setFilter(ghostMode ? "grayscale(1)" : "");
-  }, [ghostMode]);
 
   const addLog = useCallback((message: string) => {
     const time = new Date().toISOString();
@@ -800,6 +802,7 @@ function App() {
   return (
     <div
       data-tauri-drag-region
+      ref={hostHerzies}
       className={cn(
         "relative flex h-screen flex-col px-3 pt-3 pb-1",
         ghostMode && "grayscale",

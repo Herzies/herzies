@@ -135,7 +135,6 @@ export function HerzieView({
     [userId, stage, equippedKey, paramsKey, cols],
   );
   useEffect(() => () => model.dispose(), [model]);
-  useEffect(() => model.setTint(grey, opacity), [model, grey, opacity]);
 
   // Everything the frame loop reads, kept current without re-registering.
   const live = useRef({
@@ -146,6 +145,8 @@ export function HerzieView({
     groundInset,
     dangles: false,
     dangleConfig,
+    grey,
+    opacity,
   });
   live.current = {
     paused,
@@ -155,6 +156,8 @@ export function HerzieView({
     groundInset,
     dangles: draggable && hasDangleEquipped(equipped),
     dangleConfig,
+    grey,
+    opacity,
   };
 
   /** The turn, in the old renderer's units (added to DEFAULT_Y_ANGLE). */
@@ -184,14 +187,38 @@ export function HerzieView({
     scene.add(model.root);
     const cam = new THREE.PerspectiveCamera(50, 1, 0.05, 100);
     let sim: DangleSim | null = null;
+    // What was last drawn, to tell when a paused herzie needs drawing again.
+    const drawn = { angle: Number.NaN, grey: -1, opacity: -1 };
 
     return herzieStage.add({
       element,
       scene,
       camera: cam,
-      update(dt, w, h) {
+      idle() {
         const l = live.current;
         const s = spin.current;
+        const c = camera.current;
+        return (
+          l.paused &&
+          !s.dragging &&
+          s.velocity === 0 &&
+          sim === null &&
+          s.angle === drawn.angle &&
+          l.grey === drawn.grey &&
+          c.zoom === l.zoom &&
+          c.offsetY === l.offsetY
+        );
+      },
+      update(dt, w, h, alpha) {
+        const l = live.current;
+        const s = spin.current;
+        // Faded with the page (a wrapper fading in), on top of its own.
+        const opacity = l.opacity * alpha;
+        if (l.grey !== drawn.grey || opacity !== drawn.opacity) {
+          model.setTint(l.grey, opacity);
+          drawn.grey = l.grey;
+          drawn.opacity = opacity;
+        }
         if (!s.dragging && s.velocity !== 0) {
           s.velocity *= FRICTION ** (dt * 60);
           if (Math.abs(s.velocity) < MIN_VELOCITY) s.velocity = 0;
@@ -215,6 +242,7 @@ export function HerzieView({
         // (y down, front −z): seen in the world (y up), that's the other
         // way round.
         model.heading = -(DEFAULT_Y_ANGLE + s.angle);
+        drawn.angle = s.angle;
         model.dancing = l.dancing;
         if (!l.paused) model.update(dt, 0);
         else model.update(0, 0);
