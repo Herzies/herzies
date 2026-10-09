@@ -18,10 +18,10 @@ const TURN_RATE = 6;
 const MAX_TURN_SPEED = 5;
 
 /**
- * A visitor's spot: a ring on the ground in their colour, and — while
- * they're in town — the visitor themselves, breathing, turning to look at
- * you as you come near, and solid enough to bump into. Their name tag opens
- * them.
+ * A visitor's spot: while they're in town, a ring on the ground in their
+ * colour and the visitor themselves, breathing, turning to look at
+ * you as you come near, and solid enough to bump into, with their name
+ * over their head (which opens them). Away, there's nothing.
  */
 export function Visitor({
   spot,
@@ -76,49 +76,40 @@ export function Visitor({
           </RigidBody>
         </>
       )}
-      <mesh rotation-x={-Math.PI / 2} position={[at.x, 0.03, at.z]}>
-        <ringGeometry args={[1.05 * size, 1.05 * size + 0.2, 40]} />
-        <meshBasicMaterial
-          color={theme?.accent ?? "#ffffff"}
-          transparent
-          opacity={live ? 0.85 : 0.25}
-          depthWrite={false}
-        />
-      </mesh>
-      <Html
-        position={[at.x, (herzie?.height ?? 0) * size + 0.5, at.z]}
-        center
-        // Under the app's own overlays (chat, menus), not drei's default
-        // of nearly the top of the stack.
-        zIndexRange={[20, 0]}
-      >
-        <Tag
-          {...(open
-            ? { type: "button" as const, onClick: () => onOpen(open) }
-            : {})}
-          aria-label={`${card.title}: ${status}`}
-          className={cn(
-            "flex flex-col items-center whitespace-nowrap rounded border-none bg-black/55 px-1.5 py-0.5 text-center",
-            open && "cursor-pointer hover:bg-black/75",
-          )}
-          style={{ textShadow: ROW_TEXT_SHADOW }}
+      {herzie && (
+        <mesh rotation-x={-Math.PI / 2} position={[at.x, 0.03, at.z]}>
+          <ringGeometry args={[1.05 * size, 1.05 * size + 0.2, 40]} />
+          <meshBasicMaterial
+            color={theme?.accent ?? "#ffffff"}
+            transparent
+            opacity={0.85}
+            depthWrite={false}
+          />
+        </mesh>
+      )}
+      {herzie && (
+        <Html
+          position={[at.x, herzie.height * size + 0.5, at.z]}
+          center
+          // Under the app's own overlays (chat, menus), not drei's default
+          // of nearly the top of the stack.
+          zIndexRange={[20, 0]}
         >
-          <span
+          <Tag
+            {...(open
+              ? { type: "button" as const, onClick: () => onOpen(open) }
+              : {})}
+            aria-label={`${card.title}: ${status}`}
             className={cn(
-              "text-[10px] leading-tight",
-              live ? "text-white" : "text-text-dim",
+              "whitespace-nowrap rounded border-none bg-black/55 px-1.5 py-0.5 text-[10px] leading-tight text-white",
+              open && "cursor-pointer hover:bg-black/75",
             )}
+            style={{ textShadow: ROW_TEXT_SHADOW }}
           >
             {card.title}
-          </span>
-          <span
-            className="text-[9px] leading-tight text-text-dim"
-            style={theme ? { color: theme.accent } : undefined}
-          >
-            {status}
-          </span>
-        </Tag>
-      </Html>
+          </Tag>
+        </Html>
+      )}
     </>
   );
 }

@@ -285,6 +285,9 @@ export class HerzieModel {
    * once, before it's drawn.
    */
   petrify(): void {
+    // Carved onto its plinth: no blob shadow (wider than the plinth's top,
+    // it'd hang in the air past its edges).
+    this.shadow.visible = false;
     const stone = new THREE.Color("#b6b1a7");
     for (const m of this.materials) {
       for (const name of ["uShades", "uRamp"] as const) {

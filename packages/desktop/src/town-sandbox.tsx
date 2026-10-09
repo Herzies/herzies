@@ -4,7 +4,7 @@
 import "./globals.css";
 import { createRoot } from "react-dom/client";
 import type { EventCard } from "./components/TownScene";
-import { SPOTS, type TownSpot } from "./components/town/runtime";
+import { SPOTS, type TownSpot, townSave } from "./components/town/runtime";
 import TownCanvas from "./components/town/TownCanvas";
 
 const card = (type: string, title: string): EventCard => ({
@@ -31,6 +31,11 @@ const spots: TownSpot[] = [
 }));
 
 const params = new URLSearchParams(location.search);
+// Start somewhere else, looking some way: ?x=&z=&heading=&polar= .
+for (const k of ["x", "z", "heading", "polar"] as const) {
+  if (params.has(k)) townSave[k] = Number(params.get(k));
+}
+if (params.has("heading")) townSave.azimuth = townSave.heading - Math.PI;
 const player = {
   seed: params.get("seed") ?? "sandbox-player",
   stage: Number(params.get("stage") ?? 3),

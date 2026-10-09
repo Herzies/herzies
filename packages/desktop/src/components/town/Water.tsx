@@ -4,47 +4,55 @@ import { useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { ambient } from "./ambient";
 import {
+  BLEND_RADIUS,
   cellCenter,
+  groundBlend,
+  inland,
   isOpenWater,
   isSunk,
   MAP_SIZE,
   TERRAIN,
   type TownMap,
   terrainAt,
+  wetAtHeight,
 } from "./map";
 
 /** Where the water's surface sits (the ground is at 0, ponds' beds lower). */
 export const SURFACE = -0.15;
+const SHORE_WET = wetAtHeight(SURFACE);
 /** Each water cell's surface is this many quads a side, so it can ripple. */
-const SPLIT = 2;
+const SPLIT = 4;
 /** How far from the bank foam reaches. */
 const FOAM = 0.25;
 const MAX_SHORE = 2;
 
 const HALF = MAP_SIZE / 2;
 
-/** How far a point is from the nearest bank: the nearest cell around it
- * that isn't water. */
+/** How far a point is from the bank: how far past the shoreline (where
+ * the sloping ground goes under the surface) the blend is, in world units —
+ * 0 on dry ground. */
 export function shoreDistance(map: TownMap, x: number, z: number): number {
-  const c0 = Math.floor(x + HALF);
-  const r0 = Math.floor(z + HALF);
-  let best = MAX_SHORE;
-  for (let r = r0 - 2; r <= r0 + 2; r++) {
-    for (let c = c0 - 2; c <= c0 + 2; c++) {
-      if (isSunk(terrainAt(map, c, r))) continue;
-      // Distance to that cell's square.
-      const cx = c - HALF;
-      const cz = r - HALF;
-      const dx = Math.max(cx - x, 0, x - (cx + 1));
-      const dz = Math.max(cz - z, 0, z - (cz + 1));
-      best = Math.min(best, Math.hypot(dx, dz));
-    }
-  }
-  return best;
+  const { wet } = groundBlend(map, x, z);
+  const d = (wet - SHORE_WET) * 2 * BLEND_RADIUS;
+  return Math.min(MAX_SHORE, Math.max(0, d));
 }
 
-/** The water's surface over every sunk cell, finely split so it can
- * ripple, each vertex knowing how far it is from the bank (for foam). */
+/** Whether a cell gets water over it: it's sunk, or beside one that is —
+ * the banks curve out a little past a pond's cells, and the ground hides
+ * the surface wherever it's higher. */
+function underWater(map: TownMap, col: number, row: number): boolean {
+  // Whole cells only: one past the rim would stick out of the island's side.
+  if (!inland(col, row)) return false;
+  for (let r = row - 1; r <= row + 1; r++) {
+    for (let c = col - 1; c <= col + 1; c++) {
+      if (isSunk(terrainAt(map, c, r))) return true;
+    }
+  }
+  return false;
+}
+
+/** The water's surface over the ponds, finely split so it can ripple,
+ * each vertex knowing how far it is from the bank (for foam). */
 export function waterGeometry(map: TownMap): THREE.BufferGeometry {
   const pos: number[] = [];
   const shore: number[] = [];
@@ -55,7 +63,7 @@ export function waterGeometry(map: TownMap): THREE.BufferGeometry {
   };
   for (let row = 0; row < MAP_SIZE; row++) {
     for (let col = 0; col < MAP_SIZE; col++) {
-      if (!isSunk(terrainAt(map, col, row))) continue;
+      if (!underWater(map, col, row)) continue;
       for (let i = 0; i < SPLIT; i++) {
         for (let j = 0; j < SPLIT; j++) {
           const x0 = col - HALF + i * step;

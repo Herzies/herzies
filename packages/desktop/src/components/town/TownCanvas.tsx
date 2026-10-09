@@ -124,7 +124,9 @@ function Systems({
     let closest: TownSpot | null = null;
     let best = TALK_RANGE;
     for (const s of spotsRef.current) {
-      if (!s.standing || !s.card.openKey) continue;
+      // A live visitor who's down (a beaten boss) has no name tag to click,
+      // so stepping up to their ring still opens them.
+      if (s.card.status !== "live" || !s.card.openKey) continue;
       const d = Math.hypot(townSave.x - s.at.x, townSave.z - s.at.z);
       if (d < best) {
         best = d;

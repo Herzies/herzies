@@ -442,3 +442,83 @@ function doorOf(
 export function cellShade(col: number, row: number): number {
   return mulberry32(col * 31 + row * 1009 + 7)() * 2 - 1;
 }
+
+/** How far round a point the ground blends what's there: the half-width
+ * of the square the terrain is averaged over. Under a cell, so a 1-wide
+ * stream still reads as water down its middle. */
+export const BLEND_RADIUS = 0.6;
+
+/** What the ground at a point is, blended: how much of the square round it
+ * is grass, gravel and water (bridges count as water — they're over it).
+ * Edges between them blur into slopes and soft borders, and a corner's
+ * blend curves round it rather than squaring off. Sums to 1. */
+export type GroundBlend = { grass: number; gravel: number; wet: number };
+
+export function groundBlend(map: TownMap, x: number, z: number): GroundBlend {
+  const R = BLEND_RADIUS;
+  const out = { grass: 0, gravel: 0, wet: 0 };
+  const [c0, r0] = cellAt(x - R, z - R);
+  const [c1, r1] = cellAt(x + R, z + R);
+  for (let row = r0; row <= r1; row++) {
+    const cz = row - HALF;
+    const oz = Math.min(z + R, cz + 1) - Math.max(z - R, cz);
+    if (oz <= 0) continue;
+    for (let col = c0; col <= c1; col++) {
+      const cx = col - HALF;
+      const ox = Math.min(x + R, cx + 1) - Math.max(x - R, cx);
+      if (ox <= 0) continue;
+      const t = terrainAt(map, col, row);
+      const key = isSunk(t) ? "wet" : t === "g" ? "gravel" : "grass";
+      out[key] += ox * oz;
+    }
+  }
+  const area = 4 * R * R;
+  out.grass /= area;
+  out.gravel /= area;
+  out.wet /= area;
+  return out;
+}
+
+/** Whether a cell's ground is the same all over: it and every cell round
+ * it (within the blend) are one kind, so it needs no finer mesh. */
+export function blendsFlat(map: TownMap, col: number, row: number): boolean {
+  const kind = (t: string) => (isSunk(t) ? "~" : t === "g" ? "g" : ".");
+  const k = kind(terrainAt(map, col, row));
+  for (let r = row - 1; r <= row + 1; r++) {
+    for (let c = col - 1; c <= col + 1; c++) {
+      if (kind(terrainAt(map, c, r)) !== k) return false;
+    }
+  }
+  return true;
+}
+
+/** How deep a pond's bed sits under the ground (at 0). */
+export const BED = -0.6;
+/** Where between dry (0) and all water (1) the bank starts down, and where
+ * it reaches the bed. Starting past half keeps the ground at a pond's edge
+ * cell all but level, so what you walk on doesn't dip. */
+const BANK_TOP = 0.45;
+const BANK_FOOT = 0.9;
+
+const smooth = (a: number, b: number, v: number) => {
+  const t = Math.min(1, Math.max(0, (v - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
+
+/** The ground's height for how wet it is there (`groundBlend`'s `wet`). */
+export function groundHeight(wet: number): number {
+  return BED * smooth(BANK_TOP, BANK_FOOT, wet);
+}
+
+/** How wet the ground is where it goes under a surface at `level` — the
+ * shoreline. */
+export function wetAtHeight(level: number): number {
+  let lo = BANK_TOP;
+  let hi = BANK_FOOT;
+  for (let i = 0; i < 30; i++) {
+    const mid = (lo + hi) / 2;
+    if (groundHeight(mid) > level) lo = mid;
+    else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
