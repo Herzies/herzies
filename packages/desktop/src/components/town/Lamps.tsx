@@ -52,11 +52,20 @@ export const nightLights = { level: 0 };
 
 const LAMP_COLOR = new THREE.Color("#ffc47a");
 /** How bright a lamp post, and a lit window's spill, at full night. */
-const LAMP_INTENSITY = 7;
-const WINDOW_INTENSITY = 4;
+const LAMP_INTENSITY = 10;
+const WINDOW_INTENSITY = 9;
 /** How strongly each lights the herzies (see herzieMaterial). */
-const LAMP_ON_HERZIES = 0.9;
-const WINDOW_ON_HERZIES = 0.55;
+const LAMP_ON_HERZIES = 1;
+const WINDOW_ON_HERZIES = 0.8;
+/** How many of the little lights cast shadows: the ones nearest the
+ * player. Each is the scene drawn six more times a frame (a cube of
+ * shadow), so only a few, and only at night. */
+const SHADOW_LIGHTS = 3;
+/** Shadows start this far from a light: past the lantern's own frame and
+ * glass, which would otherwise shade everything round it. */
+const SHADOW_NEAR = 0.45;
+/** Below this, the lights (and their shadows) are off. */
+const DARK_ENOUGH = 0.05;
 
 type Glow = {
   at: [number, number, number];
@@ -97,11 +106,17 @@ export function glowsOf(map: TownMap): Glow[] {
  * the ground, the walls and the trees — and onto herzies, whose own shader
  * reads them from `ambient.uLamps`. Off by day; as many lights at noon as
  * at midnight, so nothing recompiles as the day turns.
+ *
+ * The few nearest the player cast shadows: a small pool of shadow-casting
+ * lights that move to them (the plain light there going dark meanwhile).
+ * They only cast at night — turning that on and off recompiles the
+ * materials, once at dusk and once at dawn.
  */
 export function NightLights({ map }: { map: TownMap }) {
   const glows = useMemo(() => glowsOf(map), [map]);
   const lights = useRef<(THREE.PointLight | null)[]>([]);
-  const shown = useRef(-1);
+  const casters = useRef<(THREE.PointLight | null)[]>([]);
+  const shown = useRef({ level: -1, x: Number.NaN, z: Number.NaN });
 
   useLayoutEffect(() => {
     const lamps = ambient.uLamps.value;
@@ -110,20 +125,41 @@ export function NightLights({ map }: { map: TownMap }) {
       if (g) lamps[i].set(...g.at, 0);
       else lamps[i].set(0, 0, 0, 0);
     }
-    shown.current = -1;
+    shown.current.level = -1;
     return () => {
       for (const l of lamps) l.w = 0;
     };
   }, [glows]);
 
   useFrame(() => {
-    const level = nightLights.level;
-    if (level === shown.current) return;
-    shown.current = level;
+    const level = nightLights.level < DARK_ENOUGH ? 0 : nightLights.level;
+    const { x, z } = ambient.uPlayer.value;
+    const s = shown.current;
+    // Re-placed when the light changes or the player has moved a bit.
+    if (level === s.level && Math.hypot(x - s.x, z - s.z) < 0.5) return;
+    Object.assign(s, { level, x, z });
+
+    const nearest = glows
+      .map((g, i) => ({ i, d: Math.hypot(g.at[0] - x, g.at[2] - z) }))
+      .sort((a, b) => a.d - b.d)
+      .slice(0, SHADOW_LIGHTS)
+      .map((n) => n.i);
     glows.forEach((g, i) => {
       const light = lights.current[i];
-      if (light) light.intensity = g.intensity * level;
+      const cast = level > 0 && nearest.includes(i);
+      if (light) light.intensity = cast ? 0 : g.intensity * level;
       ambient.uLamps.value[i].w = g.onHerzies * level;
+    });
+    casters.current.forEach((light, k) => {
+      if (!light) return;
+      const g = glows[nearest[k]];
+      light.castShadow = level > 0;
+      if (!g || level === 0) {
+        light.intensity = 0;
+        return;
+      }
+      light.position.set(...g.at);
+      light.intensity = g.intensity * level;
     });
   });
 
@@ -141,6 +177,23 @@ export function NightLights({ map }: { map: TownMap }) {
           intensity={0}
           distance={LAMP_REACH}
           decay={2}
+        />
+      ))}
+      {Array.from({ length: Math.min(SHADOW_LIGHTS, glows.length) }, (_, k) => (
+        <pointLight
+          // biome-ignore lint/suspicious/noArrayIndexKey: a fixed pool
+          key={`cast${k}`}
+          ref={(l) => {
+            casters.current[k] = l;
+          }}
+          color={LAMP_COLOR}
+          intensity={0}
+          distance={LAMP_REACH}
+          decay={2}
+          shadow-mapSize={[256, 256]}
+          shadow-bias={-0.002}
+          shadow-camera-near={SHADOW_NEAR}
+          shadow-camera-far={LAMP_REACH}
         />
       ))}
     </>
