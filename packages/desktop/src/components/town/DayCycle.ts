@@ -19,6 +19,9 @@ export type DayLook = {
   night: number;
   /** How brightly lit windows glow, 0–1. */
   windows: number;
+  /** How thick the daytime haze is, 0–1 (see fog.ts): what makes the
+   * far side of the island read as far off by day. */
+  haze: number;
 };
 
 type Key = {
@@ -29,10 +32,13 @@ type Key = {
   herzie: string;
   night: number;
   windows: number;
+  haze: number;
 };
 
 /** The day, keyframed by the hour (and wrapping round midnight). Dusk is
- * the look the Town had before it had a clock. */
+ * the look the Town had before it had a clock. By day the sky's fill
+ * stays well under the sun, cool against its warmth, so the shaded sides
+ * of things read as shaded: the shapes, not just the colours. */
 const KEYS: Key[] = [
   {
     hour: 0,
@@ -42,6 +48,7 @@ const KEYS: Key[] = [
     herzie: "#262c44",
     night: 1,
     windows: 1,
+    haze: 0,
   },
   {
     hour: 5,
@@ -51,6 +58,7 @@ const KEYS: Key[] = [
     herzie: "#343c5a",
     night: 1,
     windows: 0.8,
+    haze: 0,
   },
   {
     hour: 6.5,
@@ -60,24 +68,27 @@ const KEYS: Key[] = [
     herzie: "#f0d8cc",
     night: 0.4,
     windows: 0.4,
+    haze: 0.6,
   },
   {
     hour: 8.5,
     sky: ["#3f7fd6", "#a9d4f5", "#6d93c4"],
-    hemi: ["#e6f2ff", "#7d8a6a", 1.9],
-    sun: ["#fff4e0", 1.7],
+    hemi: ["#d6e6ff", "#5f6e4c", 1.25],
+    sun: ["#fff0d6", 2.45],
     herzie: "#ffffff",
     night: 0,
     windows: 0,
+    haze: 1,
   },
   {
     hour: 16.5,
     sky: ["#3a76cc", "#b4d6f0", "#6a8ec0"],
-    hemi: ["#e6f2ff", "#7d8a6a", 1.85],
-    sun: ["#fff0d8", 1.6],
+    hemi: ["#d6e6ff", "#5f6e4c", 1.2],
+    sun: ["#ffe9cc", 2.35],
     herzie: "#ffffff",
     night: 0,
     windows: 0,
+    haze: 1,
   },
   {
     hour: 18.5,
@@ -87,6 +98,7 @@ const KEYS: Key[] = [
     herzie: "#f4d6cc",
     night: 0.45,
     windows: 0.7,
+    haze: 0.6,
   },
   {
     hour: 20,
@@ -96,6 +108,7 @@ const KEYS: Key[] = [
     herzie: "#e6ecff",
     night: 0.75,
     windows: 1,
+    haze: 0.2,
   },
   {
     hour: 22,
@@ -105,6 +118,7 @@ const KEYS: Key[] = [
     herzie: "#262c44",
     night: 1,
     windows: 1,
+    haze: 0,
   },
 ];
 
@@ -187,6 +201,7 @@ export function dayLook(hours: number): DayLook {
     ),
     night: mix(a.night, b.night, t),
     windows: mix(a.windows, b.windows, t),
+    haze: mix(a.haze, b.haze, t),
   };
 }
 

@@ -8,6 +8,7 @@ import { benchesOf, type Seat, seatNear } from "./Benches";
 import { CameraRig } from "./CameraRig";
 import type { ChatBubbles } from "./chatBubbles";
 import type { Hour } from "./DayCycle";
+import { driftClouds } from "./fog";
 import { type TownInput, useTownInput } from "./input";
 import type { TownMap } from "./map";
 import type { TownConnection } from "./net/TownConnection";
@@ -166,6 +167,7 @@ function Systems({
     // The shared uniforms the wind, water and sky read (see ambient.ts).
     ambient.uTime.value = clock.elapsedTime;
     ambient.uPlayer.value.set(townSave.x, 0, townSave.z);
+    driftClouds(clock.elapsedTime, ambient.uWindDir.value);
 
     let closest: TownSpot | null = null;
     let best = TALK_RANGE;

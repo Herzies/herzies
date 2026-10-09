@@ -27,6 +27,18 @@ describe("day cycle", () => {
     expect(dayLook(-12)).toEqual(dayLook(12));
   });
 
+  it("hazes the day, and leaves the night clear for the lamps", () => {
+    expect(dayLook(12).haze).toBe(1);
+    expect(dayLook(0).haze).toBe(0);
+    expect(dayLook(19).haze).toBeGreaterThan(0);
+    expect(dayLook(19).haze).toBeLessThan(1);
+  });
+
+  it("keeps the sky's fill well under the sun by day", () => {
+    const noon = dayLook(12);
+    expect(noon.hemiIntensity / noon.sunIntensity).toBeLessThan(0.6);
+  });
+
   it("changes gradually between keyframes", () => {
     const a = dayLook(18).night;
     const b = dayLook(18.1).night;

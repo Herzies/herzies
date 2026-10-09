@@ -1,9 +1,10 @@
 import { useFrame, useThree } from "@react-three/fiber";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { ambient } from "./ambient";
 import { windowMaterial } from "./Buildings";
 import { dayLook, type Hour, localHours, skyLights } from "./DayCycle";
+import { CLOUD_SHADE, cloudShadows } from "./fog";
 import { skyUniforms } from "./Islands";
 import { nightLights } from "./Lamps";
 import { ISLAND_RADIUS } from "./runtime";
@@ -25,16 +26,24 @@ const SUN_SHADOW_SOFTNESS = 2;
 const MOON_SHADOW = 0.7;
 
 /**
- * The time of day, applied: the sky, the fog and background, the lights,
- * the windows and the herzies' tint, from the local clock (or `hour`, to
- * look at a given time). Re-read a few times a second — the day doesn't
- * move faster than that.
+ * The time of day, applied: the sky, the fog and background, the haze
+ * and cloud shadows, the lights, the windows and the herzies' tint, from
+ * the local clock (or `hour`, to look at a given time). Re-read a few
+ * times a second — the day doesn't move faster than that.
  */
 export function DayLight({ hour }: { hour?: Hour }) {
   const hemi = useRef<THREE.HemisphereLight>(null);
   const sun = useRef<THREE.DirectionalLight>(null);
   const scene = useThree((s) => s.scene);
   const last = useRef({ at: -1, hour: Number.NaN });
+  // The cloud shadows are shared with every lit material: none once the
+  // Town is gone.
+  useEffect(
+    () => () => {
+      cloudShadows.w = 0;
+    },
+    [],
+  );
 
   useFrame(({ clock }) => {
     const t = clock.elapsedTime;
@@ -53,7 +62,12 @@ export function DayLight({ hour }: { hour?: Hour }) {
     if (scene.background instanceof THREE.Color) {
       scene.background.copy(look.skyHorizon);
     }
-    scene.fog?.color.copy(look.skyHorizon);
+    if (scene.fog instanceof THREE.Fog) {
+      scene.fog.color.copy(look.skyHorizon);
+      // Not a distance: how thick the haze is (see fog.ts).
+      scene.fog.far = look.haze;
+    }
+    cloudShadows.w = CLOUD_SHADE * (1 - look.night);
     if (hemi.current) {
       hemi.current.color.copy(look.hemiSky);
       hemi.current.groundColor.copy(look.hemiGround);

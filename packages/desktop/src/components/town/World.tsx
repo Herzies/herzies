@@ -1,6 +1,7 @@
 import { Clouds } from "./Clouds";
 import type { Hour } from "./DayCycle";
 import { DayLight } from "./DayLight";
+import { HAZE_START } from "./fog";
 import { Ground } from "./Ground";
 import { DistantIslands, HomeIsland, SKY, Sky } from "./Islands";
 import type { TownMap } from "./map";
@@ -41,7 +42,8 @@ export function World({
   return (
     <>
       <color attach="background" args={[SKY.horizon]} />
-      <fog attach="fog" args={[SKY.horizon, 40, 260]} />
+      {/* The haze (see fog.ts): `far` is its thickness, set by DayLight. */}
+      <fog attach="fog" args={[SKY.horizon, HAZE_START, 0]} />
       <Sky />
       <DistantIslands />
       <DayLight hour={hour} />
