@@ -34,8 +34,8 @@ const OVERHANG = 0.35;
 const FOOTING = 0.28;
 /** Roof strips are about this deep, alternating light and dark. */
 const STRIP = 0.32;
-/** Plank walls: honey, weathered grey, barn red, pale pine. */
-const WALLS = ["#b98a5a", "#9a8c7c", "#a5624a", "#d0ae80"];
+/** Plank walls, in pale woods: pine, driftwood, birch, oak. */
+const WALLS = ["#e6c898", "#dcc6a2", "#ebd3a8", "#d4b68a"];
 /** Roof colours, light and dark strip: red, blue, green, orange, purple. */
 const ROOFS: [string, string][] = [
   ["#d4483b", "#a8332b"],
@@ -257,31 +257,69 @@ function outsideWalls(
   return out;
 }
 
-/** Windows come in pairs either side of a wall's middle, every other
- * cell: a 3-wide front gets one each side of the door. */
-function hasWindow({ i, length }: Wall): boolean {
-  const d = Math.abs(i - (length - 1) / 2);
-  return length % 2 === 1 ? d % 2 === 1 : Math.floor(d) % 2 === 0;
-}
+/** A spot on a wall, facing out of it (yaw). */
+type Spot = { x: number; z: number; yaw: number };
+type Door = Spot;
 
-/** Whether a stretch of wall gets a window: clear of the big round door
- * (and then every other cell out from it), or the usual pattern on walls
- * without one. */
-function windowFits(w: Wall, door: Door | null): boolean {
-  const d = alongDoorWall(w, door);
-  if (d !== null) return d > DOOR_RADIUS + 0.5 && Math.round(d) % 2 === 0;
-  return hasWindow(w);
-}
+/** Windows (on homes and shops' sides) about this far apart. */
+const WINDOW_SPACING = 3.2;
+/** Shop windows along the front, closer together. */
+const SHOP_WINDOW_SPACING = 2.4;
+/** A stretch of wall shorter than this gets no window. */
+const MIN_WINDOW_WALL = 1.4;
 
-type Door = { x: number; z: number; yaw: number };
-
-/** How far along the door's wall a stretch of wall is from the door, or
- * null if it's on another wall. */
-function alongDoorWall(w: Wall, door: Door | null): number | null {
-  if (!door || Math.abs(w.yaw - door.yaw) > 1e-6) return null;
-  const facesZ = Math.abs(Math.cos(door.yaw)) > 0.5;
-  if (Math.abs(facesZ ? w.z - door.z : w.x - door.x) > 0.01) return null;
-  return Math.abs(facesZ ? w.x - door.x : w.z - door.z);
+/**
+ * Where windows go on a rect's outside walls: each straight run of wall
+ * gets a few, evenly spaced along it and centred, the door's run split
+ * either side of the door. Grouped by run, ground floor (upstairs ones
+ * stand over them).
+ */
+function windowRuns(
+  r: CellRect,
+  isPart: (c: number, row: number) => boolean,
+  door: Door | null,
+  spacing: (yaw: number) => number,
+): Spot[][] {
+  const runs: Wall[][] = [];
+  for (const w of outsideWalls(r, isPart)) {
+    const last = runs.at(-1)?.at(-1);
+    if (last && last.side === w.side && last.i === w.i - 1) {
+      runs[runs.length - 1].push(w);
+    } else runs.push([w]);
+  }
+  return runs.flatMap((run) => {
+    const { yaw } = run[0];
+    const alongX = Math.abs(Math.cos(yaw)) > 0.5;
+    // The run as a line: the fixed coordinate, and from where to where.
+    const fixed = alongX ? run[0].z : run[0].x;
+    const at = (w: Wall) => (alongX ? w.x : w.z);
+    let pieces: [number, number][] = [
+      [at(run[0]) - 0.5, at(run[run.length - 1]) + 0.5],
+    ];
+    if (
+      door &&
+      Math.abs(yaw - door.yaw) < 1e-6 &&
+      Math.abs((alongX ? door.z : door.x) - fixed) < 0.01
+    ) {
+      const d = alongX ? door.x : door.z;
+      const gap = DOOR_RADIUS + 0.5;
+      pieces = pieces.flatMap(([a, b]): [number, number][] => [
+        [a, Math.min(b, d - gap)],
+        [Math.max(a, d + gap), b],
+      ]);
+    }
+    return pieces.flatMap(([a, b]) => {
+      const len = b - a;
+      if (len < MIN_WINDOW_WALL) return [];
+      const n = Math.max(1, Math.round(len / spacing(yaw)));
+      return [
+        Array.from({ length: n }, (_, k) => {
+          const t = a + ((k + 0.5) * len) / n;
+          return alongX ? { x: t, z: fixed, yaw } : { x: fixed, z: t, yaw };
+        }),
+      ];
+    });
+  });
 }
 
 /** Something flat on a wall: `out` in front of it, at `y`, facing `yaw`. */
@@ -312,7 +350,7 @@ function partOf(b: Building): (c: number, r: number) => boolean {
 }
 
 /** Where the door is: mid-way along its side, facing out (yaw). */
-function doorAt(b: Building): { x: number; z: number; yaw: number } | null {
+function doorAt(b: Building): Door | null {
   if (!b.door) return null;
   const r = bounds(b.rects[b.door.rect]);
   const cx = (r.x0 + r.x1) / 2;
@@ -332,7 +370,7 @@ const randomFor = (b: Building) =>
 
 /** A framed window, lit from inside, with a cross of glazing bars. */
 function framedWindow(
-  w: Wall,
+  w: Spot,
   body: THREE.BufferGeometry[],
   glow: THREE.BufferGeometry[],
   y = GROUND_FLOOR,
@@ -441,19 +479,18 @@ function homeGeometry(b: Building) {
       painted(box(r.w + 0.04, 0.1, r.h + 0.04, cx, FLOOR_BAND, cz), TRIM),
       ...roof(e, roofColors, wall, PLANKS),
     );
-    for (const w of outsideWalls(r, isH)) {
-      if (windowFits(w, door)) framedWindow(w, body, glow);
-      // Upstairs: a row of windows, and a round one over the door.
-      const d = alongDoorWall(w, door);
-      if (d !== null && d < 0.1) {
-        const at = (g: THREE.BufferGeometry, out: number) =>
-          onWall(g, w.x, UPSTAIRS, w.z, w.yaw, out);
-        body.push(painted(at(disc(0.46, 0.06), 0.02), TRIM));
-        glow.push(at(disc(0.34, 0.04), 0.05));
-      } else if (hasWindow(w)) {
-        framedWindow(w, body, glow, UPSTAIRS);
-      }
+    // Windows downstairs, and the same upstairs over them.
+    for (const w of windowRuns(r, isH, door, () => WINDOW_SPACING).flat()) {
+      framedWindow(w, body, glow);
+      framedWindow(w, body, glow, UPSTAIRS);
     }
+  }
+  // A round window over the door.
+  if (door) {
+    const at = (g: THREE.BufferGeometry, out: number) =>
+      onWall(g, door.x, UPSTAIRS, door.z, door.yaw, out);
+    body.push(painted(at(disc(0.46, 0.06), 0.02), TRIM));
+    glow.push(at(disc(0.34, 0.04), 0.05));
   }
 
   // A brick chimney on the bigger houses, poking out of the back slope.
@@ -539,11 +576,13 @@ function shopGeometry(b: Building) {
         dark,
       ),
     );
-    for (const w of outsideWalls(r, isPart)) {
-      if (door && Math.hypot(w.x - door.x, w.z - door.z) < DOOR_RADIUS + 0.3) {
-        continue;
-      }
-      if (b.door && w.side === b.door.side) {
+    const front = (yaw: number) =>
+      door !== null && Math.abs(yaw - door.yaw) < 1e-6;
+    const runs = windowRuns(r, isPart, door, (yaw) =>
+      front(yaw) ? SHOP_WINDOW_SPACING : WINDOW_SPACING,
+    );
+    for (const w of runs.flat()) {
+      if (front(w.yaw)) {
         // Shop window: big, framed, under a striped awning.
         const on = (g: THREE.BufferGeometry, y: number, out: number) =>
           onWall(g, w.x, y, w.z, w.yaw, out);
@@ -559,13 +598,9 @@ function shopGeometry(b: Building) {
           strip.translate(-0.375 + i * 0.25, 0, 0);
           body.push(painted(on(strip, 2.4, 0.3), i % 2 === 0 ? color : TRIM));
         }
-      } else if (hasWindow(w)) {
-        framedWindow(w, body, glow);
-      }
-      // Upstairs windows all round, above the awnings and the sign.
-      if (hasWindow(w) && !(door && alongDoorWall(w, door) === 0)) {
-        framedWindow(w, body, glow, SHOP_UPSTAIRS);
-      }
+      } else framedWindow(w, body, glow);
+      // Upstairs windows over them, above the awnings and the sign.
+      framedWindow(w, body, glow, SHOP_UPSTAIRS);
     }
   }
   return { body, glow };
