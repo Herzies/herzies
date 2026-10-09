@@ -1,6 +1,6 @@
 import type * as THREE from "three";
 import { describe, expect, it } from "vitest";
-import { MAP_SIZE, objectAt, terrainAt } from "./map";
+import { MAP_SIZE, objectAt } from "./map";
 import { HOME_MAP } from "./runtime";
 import { SPECIES, TREE_VARIANTS, treeSpecies } from "./trees";
 
@@ -17,15 +17,6 @@ function homeTrees() {
   return out;
 }
 
-function nearWater(col: number, row: number, reach: number) {
-  for (let dr = -reach; dr <= reach; dr++) {
-    for (let dc = -reach; dc <= reach; dc++) {
-      if (terrainAt(HOME_MAP, col + dc, row + dr) === "~") return true;
-    }
-  }
-  return false;
-}
-
 describe("trees", () => {
   it("picks the same kind every time", () => {
     for (const { col, row, kind } of homeTrees()) {
@@ -33,22 +24,13 @@ describe("trees", () => {
     }
   });
 
-  it("mixes all three kinds on the home island", () => {
+  it("mixes both kinds on the home island", () => {
     const trees = homeTrees();
     for (const kind of SPECIES) {
       const share = trees.filter((t) => t.kind === kind).length / trees.length;
       expect(share).toBeGreaterThan(0);
-      expect(share).toBeLessThan(0.7);
+      expect(share).toBeLessThan(0.75);
     }
-  });
-
-  it("grows birches by the water", () => {
-    const trees = homeTrees();
-    const birchShare = (ts: typeof trees) =>
-      ts.filter((t) => t.kind === "birch").length / Math.max(1, ts.length);
-    const wet = trees.filter((t) => nearWater(t.col, t.row, 3));
-    const dry = trees.filter((t) => !nearWater(t.col, t.row, 3));
-    expect(birchShare(wet)).toBeGreaterThan(birchShare(dry));
   });
 
   it("stands every shape on the ground, taller than a herzie", () => {

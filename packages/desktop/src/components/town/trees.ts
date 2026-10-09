@@ -10,11 +10,11 @@ import {
   terrainAt,
 } from "./map";
 
-// The town's trees: pines, birches and oaks, a few shapes of each, every
+// The town's trees: pines and oaks, a few shapes of each, every
 // one leaning, stretched and tinted a little its own way — and which kind
 // stands where picked from the map, so they grow in kinds the way trees do.
 
-export const SPECIES = ["pine", "birch", "oak"] as const;
+export const SPECIES = ["pine", "oak"] as const;
 export type Species = (typeof SPECIES)[number];
 
 /** Colour a geometry by height: `shade(y, x, z)` per vertex. In the shape
@@ -134,48 +134,6 @@ function pine(seed: number): THREE.BufferGeometry {
   return mergeGeometries(parts) as THREE.BufferGeometry;
 }
 
-/** A birch: a slim white trunk flecked with dark bark, a couple of thin
- * branches, and a loose, light crown. */
-function birch(seed: number): THREE.BufferGeometry {
-  const rand = mulberry32(seed);
-  const height = 7 + rand() * 0.8;
-  const trunk = new THREE.CylinderGeometry(
-    0.13,
-    0.2,
-    height,
-    6,
-    14,
-  ).toNonIndexed();
-  trunk.translate(0, height / 2, 0);
-  // Bark: whole faces (both triangles of a quad, so flecks are crisp)
-  // painted dark here and there.
-  const pos = trunk.attributes.position;
-  const white = new THREE.Color("#ece8dc");
-  const fleck = new THREE.Color("#2e2a26");
-  const colors: number[] = [];
-  for (let quad = 0; quad < pos.count / 6; quad++) {
-    const c = rand() < 0.22 ? fleck : white;
-    for (let v = 0; v < 6; v++) colors.push(c.r, c.g, c.b);
-  }
-  trunk.deleteAttribute("uv");
-  trunk.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
-  const bark = flat("#d8d2c4");
-  const parts = [
-    trunk,
-    shaded(branch([0, 4.2, 0], 2.2, 0.08, 0.7, rand() * Math.PI * 2), bark),
-    shaded(branch([0, 5.0, 0], 1.8, 0.07, 0.8, rand() * Math.PI * 2), bark),
-    ...crown(
-      rand,
-      6 + Math.floor(rand() * 3),
-      [0.85, 1.35],
-      [5.4, height + 0.6],
-      1.35,
-      ["#6a8f2e", "#b9d25e"],
-    ),
-  ];
-  return mergeGeometries(parts) as THREE.BufferGeometry;
-}
-
 /** An oak: a thick, short trunk forking into heavy branches, under a
  * broad, lumpy crown. */
 function oak(seed: number): THREE.BufferGeometry {
@@ -197,7 +155,6 @@ function oak(seed: number): THREE.BufferGeometry {
 /** A few shapes of each kind, so neighbours differ. */
 export const TREE_VARIANTS: Record<Species, THREE.BufferGeometry[]> = {
   pine: [11, 23, 37].map(pine),
-  birch: [5, 17, 29].map(birch),
   oak: [3, 19].map(oak),
 };
 for (const variants of Object.values(TREE_VARIANTS)) {
@@ -216,7 +173,6 @@ export const treeMaterial = seeThrough(
 /** How wide a tree of each kind blocks the way (times its scale). */
 export const TREE_RADIUS: Record<Species, number> = {
   pine: 0.45,
-  birch: 0.35,
   oak: 0.6,
 };
 
@@ -257,8 +213,8 @@ function closeness(
 }
 
 /**
- * Which kind of tree stands on a tree cell. Pines in clumps, birches by
- * the water, oaks out in the open by the town; and on top of that, a
+ * Which kind of tree stands on a tree cell. Pines in clumps, oaks out in
+ * the open by the town; and on top of that, a
  * slow drift across the island so whole stretches lean one way — groves,
  * not a scatter. The same every time.
  */
@@ -270,7 +226,6 @@ export function treeSpecies(map: TownMap, col: number, row: number): Species {
     }
   }
   const density = Math.min(1, trees / 4);
-  const water = closeness(col, row, 6, (c, r) => terrainAt(map, c, r) === "~");
   const town = closeness(
     col,
     row,
@@ -279,11 +234,9 @@ export function treeSpecies(map: TownMap, col: number, row: number): Species {
       terrainAt(map, c, r) === "g" || isBuildingChar(objectAt(map, c, r)),
   );
   const drift = noise(col, row, 9, 0x51ed);
-  const drift2 = noise(col, row, 9, 0xb1c4);
   const jitter = mulberry32(col * 92821 + row * 68917 + 7)();
   const scores: Record<Species, number> = {
     pine: 0.9 * density + 0.7 * drift + 0.15 * jitter,
-    birch: 0.9 * water + 0.6 * drift2,
     oak: 0.9 * town + 0.3 * (1 - density) + 0.45 * (1 - drift),
   };
   return SPECIES.reduce((a, b) => (scores[b] > scores[a] ? b : a));

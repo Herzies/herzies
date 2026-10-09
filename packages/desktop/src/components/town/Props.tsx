@@ -314,7 +314,7 @@ function placeAll(map: TownMap) {
   const trees: Record<string, Placed[]> = Object.fromEntries(
     TREE_BUCKETS.map((b) => [b.key, []]),
   );
-  const species: Record<Species, Placed[]> = { pine: [], birch: [], oak: [] };
+  const species: Record<Species, Placed[]> = { pine: [], oak: [] };
   for (let row = 0; row < MAP_SIZE; row++) {
     for (let col = 0; col < MAP_SIZE; col++) {
       const o = objectAt(map, col, row);
