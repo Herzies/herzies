@@ -36,7 +36,7 @@ const KEYS: Key[] = [
     hour: 0,
     sky: ["#03060f", "#121c36", "#04070f"],
     hemi: ["#5a6aa0", "#1a1e30", 0.55],
-    sun: ["#9fb2ff", 0.45],
+    sun: ["#9fb2ff", 0.25],
     herzie: "#727ca6",
     night: 1,
     windows: 1,
@@ -45,7 +45,7 @@ const KEYS: Key[] = [
     hour: 5,
     sky: ["#060a1c", "#1c2a4c", "#070b18"],
     hemi: ["#6a7ab0", "#22273c", 0.7],
-    sun: ["#a8baff", 0.5],
+    sun: ["#a8baff", 0.3],
     herzie: "#8690b8",
     night: 1,
     windows: 0.8,
@@ -99,7 +99,7 @@ const KEYS: Key[] = [
     hour: 22,
     sky: ["#03060f", "#121c36", "#04070f"],
     hemi: ["#5a6aa0", "#1a1e30", 0.55],
-    sun: ["#9fb2ff", 0.45],
+    sun: ["#9fb2ff", 0.25],
     herzie: "#727ca6",
     night: 1,
     windows: 1,
@@ -149,8 +149,12 @@ export function localHours(now = new Date()): number {
  * dusk keys above). */
 export const SUNRISE = 6.5;
 export const SUNSET = 18.5;
-/** How high the sun gets at noon (the moon, opposite it, at midnight). */
+/** How high the sun gets at noon. */
 const NOON_ELEVATION = (55 * Math.PI) / 180;
+/** How high the moon gets at midnight: low, so it's in view under the
+ * Town's camera, which never looks far above the horizon. (Its light still
+ * comes from the sun's opposite, higher up, so shadows stay short.) */
+const MOON_ELEVATION = (13 * Math.PI) / 180;
 /** The light never comes in lower than this: grazing light stretches
  * shadows across the whole island. */
 const MIN_LIGHT_ELEVATION = (12 * Math.PI) / 180;
@@ -162,7 +166,7 @@ const HERZIE_ELEVATION = [(25 * Math.PI) / 180, (60 * Math.PI) / 180];
 export type SkyLights = {
   /** Towards the sun (unit; below the horizon at night). */
   sun: THREE.Vector3;
-  /** Towards the moon: always opposite the sun. */
+  /** Towards the moon: opposite the sun's bearing, on a lower arc. */
   moon: THREE.Vector3;
   /** Towards whichever is up, never lower than MIN_LIGHT_ELEVATION. */
   light: THREE.Vector3;
@@ -199,8 +203,13 @@ export function skyLights(hours: number): SkyLights {
     Math.sin(a) * Math.sin(NOON_ELEVATION),
     Math.sin(a) * Math.cos(NOON_ELEVATION),
   );
-  const moon = sun.clone().negate();
-  const up = sun.y >= 0 ? sun : moon;
+  const opposite = sun.clone().negate();
+  const moon = atElevation(
+    opposite,
+    Math.asin(THREE.MathUtils.clamp(opposite.y, -1, 1)) *
+      (MOON_ELEVATION / NOON_ELEVATION),
+  );
+  const up = sun.y >= 0 ? sun : opposite;
   const elevation = Math.asin(THREE.MathUtils.clamp(up.y, -1, 1));
   const light = atElevation(up, Math.max(elevation, MIN_LIGHT_ELEVATION));
   const herzie = atElevation(

@@ -45,6 +45,7 @@ export function DayLight({ hour }: { hour?: Hour }) {
     skyUniforms.uHorizon.value.copy(look.skyHorizon);
     skyUniforms.uBottom.value.copy(look.skyBottom);
     skyUniforms.uSunDir.value.copy(lights.sun);
+    skyUniforms.uMoonDir.value.copy(lights.moon);
     skyUniforms.uSunColor.value.copy(look.sun);
     if (scene.background instanceof THREE.Color) {
       scene.background.copy(look.skyHorizon);

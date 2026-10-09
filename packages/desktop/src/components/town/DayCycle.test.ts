@@ -38,7 +38,10 @@ describe("sun and moon", () => {
   it("has the sun up by day and the moon up by night", () => {
     expect(skyLights(12.5).sun.y).toBeGreaterThan(0.8);
     expect(skyLights(0.5).sun.y).toBeLessThan(-0.8);
-    expect(skyLights(0.5).moon.y).toBeGreaterThan(0.8);
+    // The moon rides low, but up.
+    expect(skyLights(0.5).moon.y).toBeGreaterThan(0.15);
+    expect(skyLights(0.5).moon.y).toBeLessThan(0.25);
+    expect(skyLights(12.5).moon.y).toBeLessThan(0);
     expect(Math.abs(skyLights(SUNRISE).sun.y)).toBeLessThan(1e-9);
     expect(Math.abs(skyLights(SUNSET).sun.y)).toBeLessThan(1e-9);
     // Rises in the east, sets in the west.
