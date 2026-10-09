@@ -16,6 +16,33 @@ function bounds(h: HerzieModel) {
 }
 
 describe("HerzieModel", () => {
+  it("is shaded by the sun's shadow alone, not the lamps'", () => {
+    const h = new HerzieModel(LOOK);
+    let shader = "";
+    h.root.traverse((o) => {
+      if (o instanceof THREE.Mesh && o.material instanceof THREE.ShaderMaterial)
+        shader = o.material.fragmentShader;
+    });
+    // getShadowMask() multiplies in every light's shadow.
+    expect(shader).not.toContain("getShadowMask(");
+    expect(shader).toContain("directionalShadowMap");
+  });
+
+  it("sits down on its bottom, and stands back up", () => {
+    const h = new HerzieModel(LOOK);
+    h.update(1 / 60, 0);
+    const standing = bounds(h);
+    h.sitting = true;
+    for (let i = 0; i < 60; i++) h.update(1 / 60, 0);
+    const seated = bounds(h);
+    // Still resting on the root (now its bottom), and lower.
+    expect(seated.min.y).toBeCloseTo(0, 1);
+    expect(seated.max.y).toBeLessThan(standing.max.y - 0.1);
+    h.sitting = false;
+    for (let i = 0; i < 60; i++) h.update(1 / 60, 0);
+    expect(bounds(h).max.y).toBeCloseTo(standing.max.y, 1);
+  });
+
   it("stands on the ground", () => {
     const box = bounds(new HerzieModel(LOOK));
     expect(box.min.y).toBeCloseTo(0, 1);

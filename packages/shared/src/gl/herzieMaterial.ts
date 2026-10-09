@@ -44,6 +44,10 @@ export type SchemeUniforms = {
   uOpacity: THREE.IUniform<number>;
 };
 
+/** How much a lamp's light counts toward a part's bands, against the
+ * sun's (whose full face-on light is 1). */
+const LAMP_BANDS = 1.6;
+
 /** Most bands a scheme can have (its ramp is uploaded as 3 shades each). */
 const MAX_BANDS = 8;
 
@@ -80,7 +84,6 @@ const fragmentShader = /* glsl */ `
 #include <fog_pars_fragment>
 #include <lights_pars_begin>
 #include <shadowmap_pars_fragment>
-#include <shadowmask_pars_fragment>
 uniform vec3 uSun;
 uniform vec3 uLight;
 uniform float uGain;
@@ -103,17 +106,38 @@ varying vec3 vLocalNormal;
 varying float vWorldY;
 varying vec3 vWorldPos;
 
+// The sun's (or moon's) shadow, and only its: three's own shadow mask
+// multiplies in every shadow-casting light's, so a lamp's shadow would
+// darken the moonlight too. As that mask's directional branch.
+float sunShadow() {
+  float shadow = 1.0;
+  #if defined(USE_SHADOWMAP) && NUM_DIR_LIGHT_SHADOWS > 0
+  DirectionalLightShadow directionalLight;
+  #pragma unroll_loop_start
+  for ( int i = 0; i < NUM_DIR_LIGHT_SHADOWS; i ++ ) {
+    directionalLight = directionalLightShadows[ i ];
+    shadow *= receiveShadow ? getShadow( directionalShadowMap[ i ], directionalLight.shadowMapSize, directionalLight.shadowIntensity, directionalLight.shadowBias, directionalLight.shadowRadius, vDirectionalShadowCoord[ i ] ) : 1.0;
+  }
+  #pragma unroll_loop_end
+  #endif
+  return shadow;
+}
+
 // How much the little lights nearby light this point: each by how close,
-// and how squarely it faces it.
-float lampLight(vec3 n) {
+// and how squarely it faces it. \`facing\` is the same without the wrap
+// round the sides: how lit it is for its bands.
+float lampLight(vec3 n, out float facing) {
   float sum = 0.0;
+  facing = 0.0;
   for (int i = 0; i < ${MAX_LAMPS}; i++) {
     vec4 lamp = uLamps[i];
     if (lamp.w <= 0.0) continue;
     vec3 to = lamp.xyz - vWorldPos;
     float dist = length(to);
     float fall = clamp(1.0 - dist / ${LAMP_REACH.toFixed(1)}, 0.0, 1.0);
-    sum += lamp.w * fall * fall * (0.35 + 0.65 * max(0.0, dot(n, to / max(dist, 0.001))));
+    float squarely = max(0.0, dot(n, to / max(dist, 0.001)));
+    sum += lamp.w * fall * fall * (0.35 + 0.65 * squarely);
+    facing += lamp.w * fall * fall * squarely;
   }
   return sum;
 }
@@ -128,8 +152,15 @@ float pattern(vec3 n) {
 }
 
 void main() {
-  // In the shade of something, a part drops to its darker bands.
-  float d = max(0.0, dot(normalize(vWorldNormal), uSun)) * getShadowMask();
+  vec3 n = normalize(vWorldNormal);
+  float lampFacing;
+  float lamps = lampLight(n, lampFacing);
+  // In the shade of something, a part drops to its darker bands — unless
+  // a lamp nearby lights it.
+  float d = max(
+    max(0.0, dot(n, uSun)) * sunShadow(),
+    min(1.0, lampFacing * ${LAMP_BANDS.toFixed(2)})
+  );
   float lit = (uGain + pattern(normalize(vLocalNormal))) * (uFloor + (1.0 - uFloor) * d);
   int shade = lit > uHi ? 2 : lit > uLo ? 1 : 0;
   vec3 color;
@@ -140,7 +171,7 @@ void main() {
   } else {
     color = uShades[shade];
   }
-  color *= uLight + uLampColor * lampLight(normalize(vWorldNormal));
+  color *= uLight + uLampColor * lamps;
   color = mix(color, vec3(dot(color, vec3(0.2126, 0.7152, 0.0722))), uGrey);
   gl_FragColor = vec4(color, uOpacity);
   #include <colorspace_fragment>
