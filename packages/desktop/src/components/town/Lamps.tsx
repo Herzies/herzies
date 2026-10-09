@@ -52,7 +52,9 @@ export const nightLights = { level: 0 };
 
 const LAMP_COLOR = new THREE.Color("#ffc47a");
 /** How bright a lamp post, and a lit window's spill, at full night. */
-const LAMP_INTENSITY = 10;
+const LAMP_INTENSITY = 16;
+/** How far a lamp post's light reaches (a window's: LAMP_REACH). */
+const LAMP_POST_REACH = 10;
 const WINDOW_INTENSITY = 5;
 /** How strongly each lights the herzies (see herzieMaterial). */
 const LAMP_ON_HERZIES = 0.6;
@@ -70,6 +72,7 @@ const DARK_ENOUGH = 0.05;
 type Glow = {
   at: [number, number, number];
   intensity: number;
+  reach: number;
   onHerzies: number;
 };
 
@@ -84,6 +87,7 @@ export function glowsOf(map: TownMap): Glow[] {
       lamps.push({
         at: [x, LANTERN_Y * scale, z],
         intensity: LAMP_INTENSITY,
+        reach: LAMP_POST_REACH,
         onHerzies: LAMP_ON_HERZIES,
       });
     }
@@ -94,6 +98,7 @@ export function glowsOf(map: TownMap): Glow[] {
       (at): Glow => ({
         at,
         intensity: WINDOW_INTENSITY,
+        reach: LAMP_REACH,
         onHerzies: WINDOW_ON_HERZIES,
       }),
     );
@@ -159,6 +164,7 @@ export function NightLights({ map }: { map: TownMap }) {
         return;
       }
       light.position.set(...g.at);
+      light.distance = g.reach;
       light.intensity = g.intensity * level;
     });
   });
@@ -175,7 +181,7 @@ export function NightLights({ map }: { map: TownMap }) {
           position={g.at}
           color={LAMP_COLOR}
           intensity={0}
-          distance={LAMP_REACH}
+          distance={g.reach}
           decay={2}
         />
       ))}
@@ -188,12 +194,12 @@ export function NightLights({ map }: { map: TownMap }) {
           }}
           color={LAMP_COLOR}
           intensity={0}
-          distance={LAMP_REACH}
+          distance={LAMP_POST_REACH}
           decay={2}
           shadow-mapSize={[256, 256]}
           shadow-bias={-0.002}
           shadow-camera-near={SHADOW_NEAR}
-          shadow-camera-far={LAMP_REACH}
+          shadow-camera-far={LAMP_POST_REACH}
         />
       ))}
     </>

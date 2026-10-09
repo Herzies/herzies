@@ -24,8 +24,9 @@ import { Visitor } from "./Visitor";
 import { World } from "./World";
 
 /** The Town's resolution as a fraction of the screen's: each drawn pixel
- * covers 1/PIXEL_SCALE screen pixels square. */
-const PIXEL_SCALE = 1 / 3;
+ * covers 1/PIXEL_SCALE screen pixels square (2.5: five device pixels on a
+ * Retina screen, so the pixels all come out the same size). */
+const PIXEL_SCALE = 0.4;
 
 export type TownCanvasProps = {
   spots: TownSpot[];
