@@ -89,3 +89,27 @@ describe("sun and moon", () => {
     }
   });
 });
+
+describe("herzies' light", () => {
+  const lum = (c: { r: number; g: number; b: number }) =>
+    0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+  /** The world's own light, roughly: sky plus sun or moon. */
+  const world = (h: number) => {
+    const l = dayLook(h);
+    return (
+      l.hemiIntensity * lum(l.hemiSky) +
+      l.sunIntensity * skyLights(h).strength * lum(l.sun)
+    );
+  };
+
+  it("is full by day, and dims with the world at night", () => {
+    expect(lum(dayLook(12).herzieLight)).toBeGreaterThan(0.9);
+    for (const h of [20, 21.4, 23, 2, 5]) {
+      const ratio = lum(dayLook(h).herzieLight) / world(h);
+      const noon = lum(dayLook(12).herzieLight) / world(12);
+      // (Below 1 where the tint is blue: blue light is dimmer to the eye.)
+      expect(ratio / noon).toBeGreaterThan(0.35);
+      expect(ratio / noon).toBeLessThan(1.6);
+    }
+  });
+});

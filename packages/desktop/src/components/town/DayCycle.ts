@@ -11,7 +11,9 @@ export type DayLook = {
   hemiIntensity: number;
   sun: THREE.Color;
   sunIntensity: number;
-  /** How herzies are tinted (their shader ignores the scene's lights). */
+  /** How herzies are tinted (their shader ignores the scene's lights):
+   * the keyframes' colour, as bright as the scene's own light (see
+   * sceneLight), so they never stand out lit against a dark world. */
   herzieLight: THREE.Color;
   /** 0 by day, 1 at night: fireflies, butterflies. */
   night: number;
@@ -110,6 +112,47 @@ const color = (a: string, b: string, t: number) =>
   new THREE.Color(a).lerp(new THREE.Color(b), t);
 const mix = (a: number, b: number, t: number) => a + (b - a) * t;
 
+const luminance = (c: THREE.Color) =>
+  0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+
+/** A colour at full strength: just its hue. */
+function tint(c: THREE.Color): THREE.Color {
+  const top = Math.max(c.r, c.g, c.b, 1e-6);
+  return c.multiplyScalar(1 / top);
+}
+
+/** How much light the scene's lights give at an hour: the sky's (the
+ * hemisphere) and the sun's or moon's, as far as it's up. */
+function sceneLight(
+  hours: number,
+  hemi: number,
+  hemiSky: THREE.Color,
+  sun: number,
+  sunColor: THREE.Color,
+): number {
+  return (
+    hemi * luminance(hemiSky) +
+    sun * skyLights(hours).strength * luminance(sunColor)
+  );
+}
+
+/** The scene's light at noon: herzies at full brightness. (Worked out
+ * on first use: skyLights' constants come later in the file.) */
+let noonLight = 0;
+function atNoon(): number {
+  if (!noonLight) {
+    const noon = KEYS.find((k) => k.hour === 8.5) as Key;
+    noonLight = sceneLight(
+      12,
+      noon.hemi[2],
+      new THREE.Color(noon.hemi[0]),
+      noon.sun[1],
+      new THREE.Color(noon.sun[0]),
+    );
+  }
+  return noonLight;
+}
+
 /** The world's look at `hours` past midnight (any number; wraps). */
 export function dayLook(hours: number): DayLook {
   const h = ((hours % 24) + 24) % 24;
@@ -130,7 +173,18 @@ export function dayLook(hours: number): DayLook {
     hemiIntensity: mix(a.hemi[2], b.hemi[2], t),
     sun: color(a.sun[0], b.sun[0], t),
     sunIntensity: mix(a.sun[1], b.sun[1], t),
-    herzieLight: color(a.herzie, b.herzie, t),
+    herzieLight: tint(color(a.herzie, b.herzie, t)).multiplyScalar(
+      Math.min(
+        1,
+        sceneLight(
+          h,
+          mix(a.hemi[2], b.hemi[2], t),
+          color(a.hemi[0], b.hemi[0], t),
+          mix(a.sun[1], b.sun[1], t),
+          color(a.sun[0], b.sun[0], t),
+        ) / atNoon(),
+      ),
+    ),
     night: mix(a.night, b.night, t),
     windows: mix(a.windows, b.windows, t),
   };
