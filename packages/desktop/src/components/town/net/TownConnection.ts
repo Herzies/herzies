@@ -6,6 +6,7 @@ import {
   quantizeState,
   ServerClock,
   TOWN_CLOSE,
+  TOWN_FLAG_AFK,
   TOWN_MAX_SHARDS,
   TOWN_PING,
   TOWN_PONG,
@@ -390,7 +391,10 @@ export class TownConnection {
 
   private currentState(): TownState {
     const s = this.opts.readState();
-    return quantizeState({ ...s, flags: this.afk ? 1 : 0 });
+    return quantizeState({
+      ...s,
+      flags: (s.flags & ~TOWN_FLAG_AFK) | (this.afk ? TOWN_FLAG_AFK : 0),
+    });
   }
 
   /** Sends where the herzie is, if it changed (or `force`). */

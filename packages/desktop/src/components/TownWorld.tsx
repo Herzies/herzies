@@ -14,7 +14,7 @@ import { LoadingSplash } from "./LoadingSplash";
 import { type EventCard, formatIn, isDown } from "./TownScene";
 import { useChatBubbles } from "./town/chatBubbles";
 import { useTownNet, useTownNetVersion } from "./town/net/townNet";
-import { SPARE_SPOTS, SPOTS, type TownSpot } from "./town/runtime";
+import { SPARE_SPOTS, SPOTS, type TownSpot, townLive } from "./town/runtime";
 
 // three.js, Rapier's WASM and friends: loaded the first time someone opens
 // the Town, not at app start.
@@ -54,6 +54,7 @@ export function TownWorld({
   player: { seed: string; stage: number; equipped?: Equipped | null };
 }) {
   const [near, setNear] = useState<TownSpot | null>(null);
+  const [bench, setBench] = useState<"sit" | "stand" | null>(null);
   // Everyone else with the Town open, on the same island.
   const net = useTownNet(!paused);
   useTownNetVersion(net);
@@ -152,6 +153,7 @@ export function TownWorld({
             paused={paused}
             onOpen={onOpen}
             onNearChange={setNear}
+            onBenchChange={setBench}
             onReady={onReady}
           />
         </Suspense>
@@ -173,6 +175,22 @@ export function TownWorld({
           )}
         >
           Talk to {near.card.title} <span className="text-text-dim">[E]</span>
+        </button>
+      ) : bench ? (
+        <button
+          type="button"
+          onClick={() => {
+            townLive.benchPressed = true;
+          }}
+          className={cn(
+            "absolute left-1/2 z-30 -translate-x-1/2 cursor-pointer whitespace-nowrap rounded border border-white/40 bg-black/70 px-2 py-1 text-ui text-white hover:bg-black/85",
+            chatOverlay
+              ? "bottom-[calc(var(--dock-height,0px)+12px)]"
+              : "bottom-3",
+          )}
+        >
+          {bench === "sit" ? "Sit down" : "Stand up"}{" "}
+          <span className="text-text-dim">[E]</span>
         </button>
       ) : null}
     </div>

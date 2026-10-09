@@ -12,6 +12,7 @@ import {
 import { useEffect, useMemo, useRef } from "react";
 import type { Look } from "../TownScene";
 import { ambient } from "./ambient";
+import { SEAT_Y } from "./Benches";
 import type { ChatBubble } from "./chatBubbles";
 import { HeadBubble } from "./HeadBubble";
 import type { TownMap } from "./map";
@@ -96,6 +97,7 @@ export function Player({
     if (spawned.current === respawn) return;
     spawned.current = respawn;
     const [x, z] = spawn.at;
+    townLive.seat = null;
     Object.assign(townSave, { x, z, heading: spawn.heading });
     herzie.heading = spawn.heading;
     mover.current = { vx: 0, vz: 0, heading: spawn.heading };
@@ -119,6 +121,7 @@ export function Player({
     const to = townLive.teleport;
     if (to) {
       townLive.teleport = null;
+      townLive.seat = null;
       m.vx = m.vz = 0;
       b.setTranslation({ x: to.x, y: 0, z: to.z }, true);
       b.setNextKinematicTranslation({ x: to.x, y: 0, z: to.z });
@@ -127,6 +130,31 @@ export function Player({
       rt.playerSpeed = townLive.speed = 0;
       return;
     }
+    // On a bench: stay put on the seat, facing out, until asked to stand
+    // (E again) or walked off it.
+    const seat = townLive.seat;
+    if (seat) {
+      const walking =
+        !!input &&
+        (input.forward ||
+          input.back ||
+          input.left ||
+          input.right ||
+          (input.mouseLeft && input.mouseRight));
+      const standing = walking || townLive.standUp;
+      if (standing) townLive.seat = null;
+      townLive.standUp = false;
+      const { x, z } = standing ? seat.stand : seat;
+      m.vx = m.vz = 0;
+      herzie.heading = m.heading = seat.heading;
+      b.setNextKinematicTranslation({ x, y: 0, z });
+      townSave.x = x;
+      townSave.z = z;
+      townSave.heading = seat.heading;
+      rt.playerSpeed = townLive.speed = 0;
+      return;
+    }
+    townLive.standUp = false;
     walkAz.current = walkAzimuth(walkAz.current, rt.cameraAzimuth, input);
     m.heading = herzie.heading;
     stepMover(m, input, walkAz.current, dt);
@@ -157,6 +185,8 @@ export function Player({
   });
 
   useFrame((_, dt) => {
+    // Sitting: on the seat, not the ground.
+    herzie.root.position.y = townLive.seat ? SEAT_Y : 0;
     herzie.update(dt, rt.playerSpeed);
   });
 

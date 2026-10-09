@@ -37,7 +37,7 @@ const PALETTE: Paint[] = [
     ...TERRAIN[ch],
   })),
   ...(
-    ["T", "R", "S", "v", "*", "m", "H", "$", "C", "@", "B", "L"] as const
+    ["T", "R", "S", "v", "*", "m", "H", "$", "C", "@", "B", "L", "_"] as const
   ).map((ch) => ({
     layer: "objects" as const,
     ch,
@@ -46,9 +46,10 @@ const PALETTE: Paint[] = [
   { layer: "objects", ch: ".", name: "Clear", color: "#000000" },
 ];
 /** Each palette entry's key, in order (clear last): the number row, then
- * K (shop, "kiosk"), C (cave), U (bush) and L (lamp post). Clear of the 3D preview's keys (WASD,
- * arrows, E) and the tools' (B, R, F, P). */
-const KEYS = [..."1234567890-", "k", "c", "=", "u", "l", "x"];
+ * K (shop, "kiosk"), C (cave), U (bush), L (lamp post) and N (bench).
+ * Clear of the 3D preview's keys (WASD, arrows, E) and the tools' (B, R,
+ * F, P). */
+const KEYS = [..."1234567890-", "k", "c", "=", "u", "l", "n", "x"];
 type Tool = "brush" | "rect" | "fill";
 const TOOLS: { tool: Tool; key: string; name: string }[] = [
   { tool: "brush", key: "b", name: "Brush" },

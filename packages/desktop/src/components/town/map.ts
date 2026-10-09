@@ -40,6 +40,7 @@ export const OBJECTS = {
   m: { name: "Mushrooms", color: "#d0473a" },
   B: { name: "Bush", color: "#3f7f3a" },
   L: { name: "Lamp post", color: "#ffd98a" },
+  _: { name: "Bench", color: "#a8743f" },
   H: { name: "Home", color: "#c9a27a" },
   $: { name: "Shop", color: "#6a9ae0" },
   C: { name: "Cave", color: "#8a8070" },

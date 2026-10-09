@@ -1,4 +1,4 @@
-import { TOWN_FLAG_AFK } from "@herzies/shared";
+import { TOWN_FLAG_AFK, TOWN_FLAG_SITTING } from "@herzies/shared";
 import { HerzieModel } from "@herzies/shared/gl";
 import { Html } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef } from "react";
 import type { Group } from "three";
 import { ROW_TEXT_SHADOW } from "../VisitorRowTheme";
 import { ambient } from "./ambient";
+import { SEAT_Y } from "./Benches";
 import { BUBBLE_RANGE, type ChatBubble, type ChatBubbles } from "./chatBubbles";
 import { HeadBubble } from "./HeadBubble";
 import type { RemotePlayer, TownConnection } from "./net/TownConnection";
@@ -74,10 +75,16 @@ function RemoteHerzie({
     if (!s) return;
     herzie.root.visible = true;
     if (tag.current) tag.current.style.visibility = "visible";
-    herzie.root.position.set(s.x, 0, s.z);
+    // Sitting on a bench: on its seat, not the ground.
+    const seated = (s.flags & TOWN_FLAG_SITTING) !== 0;
+    herzie.root.position.set(s.x, seated ? SEAT_Y : 0, s.z);
     herzie.heading = s.heading;
     herzie.update(dt, s.speed);
-    tagAnchor.current?.position.set(s.x, herzie.height + 0.3, s.z);
+    tagAnchor.current?.position.set(
+      s.x,
+      herzie.height + 0.3 + (seated ? SEAT_Y : 0),
+      s.z,
+    );
     // Chat is one room for everyone; the Town only shows what's said near
     // you.
     if (bubbleBox.current) {

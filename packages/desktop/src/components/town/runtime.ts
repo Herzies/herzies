@@ -1,5 +1,6 @@
 import { createContext, type RefObject, useContext } from "react";
 import type * as THREE from "three";
+import type { Seat } from "./Benches";
 import type { TownInput } from "./input";
 import { parseMap, type TownMap } from "./map";
 import homeMap from "./maps/home.json";
@@ -54,6 +55,13 @@ export const townLive = {
   /** Set to move the herzie straight there next step (the server refused a
    * move); Player clears it. */
   teleport: null as { x: number; z: number } | null,
+  /** The bench seat the herzie is sitting on, if any (see Benches). */
+  seat: null as Seat | null,
+  /** Stand up from it next step (Player clears it). */
+  standUp: false,
+  /** The bench prompt was clicked: sit or stand, as E would (Systems
+   * clears it). */
+  benchPressed: false,
 };
 
 type Spot = { x: number; z: number };

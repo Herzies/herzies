@@ -1,8 +1,10 @@
+import { TOWN_FLAG_SITTING } from "@herzies/shared";
 import { Canvas, type RootState, useFrame, useThree } from "@react-three/fiber";
 import { Physics } from "@react-three/rapier";
 import { Suspense, useMemo, useRef } from "react";
 import type { Look } from "../TownScene";
 import { ambient } from "./ambient";
+import { benchesOf, type Seat, seatNear } from "./Benches";
 import { CameraRig } from "./CameraRig";
 import type { ChatBubbles } from "./chatBubbles";
 import type { Hour } from "./DayCycle";
@@ -17,6 +19,7 @@ import {
   type TownRuntime,
   TownRuntimeContext,
   type TownSpot,
+  townLive,
   townSave,
 } from "./runtime";
 import type { Champion } from "./Statues";
@@ -35,6 +38,9 @@ export type TownCanvasProps = {
   onOpen: (openKey: string) => void;
   /** Who's close enough to talk to (null: nobody), when that changes. */
   onNearChange: (spot: TownSpot | null) => void;
+  /** What E would do at a bench right now — sit on one nearby, or stand
+   * up off it — when that changes (null: nothing). */
+  onBenchChange?: (prompt: "sit" | "stand" | null) => void;
   /** The island to draw (the map editor's preview passes its own). */
   map?: TownMap;
   /** Bump to put the player back at the map's spawn. */
@@ -130,17 +136,29 @@ function Systems({
   paused,
   onOpen,
   onNearChange,
+  onBenchChange,
+  map = HOME_MAP,
+  net,
   input,
 }: TownCanvasProps & { input: React.RefObject<TownInput> }) {
   const surface = useThree((s) => s.gl.domElement);
   const near = useRef<TownSpot | null>(null);
   const spotsRef = useRef(spots);
   spotsRef.current = spots;
+  const benches = useMemo(() => benchesOf(map), [map]);
+  /** The seat E would sit on, if any. */
+  const seat = useRef<Seat | null>(null);
+  const prompt = useRef<"sit" | "stand" | null>(null);
 
-  const live = useTownInput(!paused, surface, () => {
+  /** E (or a click on the prompt): talk to whoever's near; else sit on the
+   * bench nearby, or stand up off it. */
+  const interact = () => {
     const key = near.current?.card.openKey;
     if (key) onOpen(key);
-  });
+    else if (townLive.seat) townLive.standUp = true;
+    else if (seat.current) townLive.seat = seat.current;
+  };
+  const live = useTownInput(!paused, surface, interact);
   input.current = live.current;
 
   useFrame(({ clock }) => {
@@ -163,6 +181,32 @@ function Systems({
     if (closest?.key !== near.current?.key) {
       near.current = closest;
       onNearChange(closest);
+    }
+
+    // Benches: the free seat nearest, if no one's there to talk to. A seat
+    // is taken if another player is sitting on it.
+    seat.current = null;
+    if (!closest && !townLive.seat && benches.length > 0) {
+      const sitting: { x: number; z: number }[] = [];
+      if (net) {
+        const t = net.clock.renderTime(performance.now());
+        for (const r of net.remotes.values()) {
+          const st = r.buffer.sample(t);
+          if (st && st.flags & TOWN_FLAG_SITTING) sitting.push(st);
+        }
+      }
+      seat.current = seatNear(benches, townSave.x, townSave.z, (s) =>
+        sitting.some((p) => Math.hypot(p.x - s.x, p.z - s.z) < 0.4),
+      );
+    }
+    if (townLive.benchPressed) {
+      townLive.benchPressed = false;
+      if (!closest) interact();
+    }
+    const next = townLive.seat ? "stand" : seat.current ? "sit" : null;
+    if (next !== prompt.current) {
+      prompt.current = next;
+      onBenchChange?.(next);
     }
   }, -4);
 

@@ -12,6 +12,7 @@ import { seeThrough, swayInWind } from "./ambient";
 const seeThroughLambert = (p: THREE.MeshLambertMaterialParameters) =>
   seeThrough(new THREE.MeshLambertMaterial(p));
 
+import { BenchColliders, Benches } from "./Benches";
 import { BuildingColliders, Buildings, windowMaterial } from "./Buildings";
 import { trunkMaterial } from "./Islands";
 import {
@@ -436,6 +437,7 @@ export function Props({
       )}
       <Buildings map={map} />
       <NightLights map={map} />
+      <Benches map={map} />
       <Statues map={map} champion={champion} />
     </>
   );
@@ -479,6 +481,7 @@ export function MapColliders({ map }: { map: TownMap }) {
         />
       ))}
       <BuildingColliders map={map} />
+      <BenchColliders map={map} />
       <StatueColliders map={map} />
     </RigidBody>
   );
