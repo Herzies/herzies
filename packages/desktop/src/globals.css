@@ -398,15 +398,10 @@
   animation: upgrade-pop-in 0.45s ease-out;
 }
 
-/* LoadingSplash: the wordmark breathes while a swell runs along a row of
-   ASCII beads (a canvas, see LoadingSplash.tsx). Fades in after a beat, so a
-   load that finishes quickly never flashes it at all. */
+/* LoadingSplash: fades in after a beat, so a load that finishes quickly
+   never flashes it at all. */
 .loading-splash {
   animation: loading-splash-in 0.3s ease-out 0.15s both;
-}
-
-.loading-splash-banner {
-  animation: loading-splash-breathe 2.4s ease-in-out infinite;
 }
 
 @keyframes loading-splash-in {
@@ -415,26 +410,6 @@
   }
   to {
     opacity: 1;
-  }
-}
-
-@keyframes loading-splash-breathe {
-  0%,
-  100% {
-    opacity: 0.75;
-    text-shadow: 0 0 6px
-      color-mix(in srgb, var(--color-purple) 25%, transparent);
-  }
-  50% {
-    opacity: 1;
-    text-shadow: 0 0 14px
-      color-mix(in srgb, var(--color-purple) 55%, transparent);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .loading-splash-banner {
-    animation: none;
   }
 }
 

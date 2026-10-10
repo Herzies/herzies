@@ -62,9 +62,11 @@ export function SettingsView({
 
   const shortcuts: { key: string; label: string }[] = [
     { key: "H", label: "Home" },
-    { key: "I", label: "Herzie" },
+    { key: "I", label: "Deck" },
+    { key: "B", label: "Bag" },
     { key: "T", label: "Town" },
     { key: "F", label: "Social" },
+    { key: "P", label: "Premium shop" },
     { key: "S", label: "Settings" },
     { key: "C", label: "Open chat" },
     { key: "Esc", label: "Close chat or dialog" },

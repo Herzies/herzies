@@ -143,6 +143,14 @@ export function TownWorld({
           Update Herzies to see other players
         </div>
       ) : null}
+      {import.meta.env.DEV && opened && !paused ? (
+        <FrameRate
+          className={cn(
+            "pointer-events-none absolute left-2 z-30 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white/70 tabular-nums",
+            notice ? "top-9" : "top-2",
+          )}
+        />
+      ) : null}
       {opened && (
         <Suspense fallback={null}>
           <TownCanvas
@@ -195,4 +203,25 @@ export function TownWorld({
       ) : null}
     </div>
   );
+}
+
+/** Frames drawn per second, counted over each half second: the Town's,
+ * since it draws every frame the browser does. Dev builds only. */
+function FrameRate({ className }: { className?: string }) {
+  const [fps, setFps] = useState<number | null>(null);
+  useEffect(() => {
+    let frames = 0;
+    let since = performance.now();
+    let raf = requestAnimationFrame(function tick(now) {
+      frames++;
+      if (now - since >= 500) {
+        setFps(Math.round((frames * 1000) / (now - since)));
+        frames = 0;
+        since = now;
+      }
+      raf = requestAnimationFrame(tick);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  return fps === null ? null : <div className={className}>{fps} fps</div>;
 }

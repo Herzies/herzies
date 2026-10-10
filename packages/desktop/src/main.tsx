@@ -150,6 +150,8 @@ function App() {
   // shortcut), so a view that's drilled into a sub-screen — Town → George,
   // Social → a profile — goes back to its top level.
   const [rootKeys, setRootKeys] = useState<Partial<Record<View, number>>>({});
+  /** Which panel the Herzie view opens on: the deck, or the bag ([b]). */
+  const [inventoryPanel, setInventoryPanel] = useState<"deck" | "bag">("deck");
   const [tradeTarget, setTradeTarget] = useState<string | null>(null);
   const [incomingTradeId, setIncomingTradeId] = useState<string | null>(null);
   const [activityLog, setActivityLog] = useState<
@@ -576,9 +578,10 @@ function App() {
     const shortcuts: Record<string, View> = {
       h: "home",
       i: "inventory",
+      b: "inventory",
       t: "events",
       f: "friends",
-      b: "store",
+      p: "store",
     };
 
     const handler = (event: KeyboardEvent) => {
@@ -626,7 +629,9 @@ function App() {
         return;
       }
       const v = shortcuts[key];
-      if (v) switchView(v);
+      if (!v) return;
+      if (v === "inventory") setInventoryPanel(key === "b" ? "bag" : "deck");
+      switchView(v);
     };
 
     window.addEventListener("keydown", handler);
@@ -652,7 +657,7 @@ function App() {
   }
 
   if (previewLoading) {
-    return <LoadingSplash label="loading your herzie (esc to close)" />;
+    return <LoadingSplash label="loading your herzie" hint="esc to close" />;
   }
 
   if (!state.isOnline) {
@@ -989,6 +994,7 @@ function App() {
               onLog={addLog}
               active={view === "inventory"}
               rootKey={rootKeys.inventory ?? 0}
+              openPanel={inventoryPanel}
             />
           </div>
         )}
@@ -1124,7 +1130,10 @@ function App() {
             {herzie && (
               <TabBar
                 view={view}
-                setView={switchView}
+                setView={(v) => {
+                  if (v === "inventory") setInventoryPanel("deck");
+                  switchView(v);
+                }}
                 visitorsInTown={
                   visitorsInTown +
                   Number(hasActiveEventOverride) +

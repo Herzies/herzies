@@ -38,7 +38,7 @@ export function TabBar({
       id: "inventory",
       label: "Herzie",
       colour: "cyan",
-      title: "Your herzie, deck & inventory. Shortcut [i]",
+      title: "Your herzie, deck & bag. Shortcuts [i] deck, [b] bag",
     },
     {
       id: "events",
@@ -56,7 +56,7 @@ export function TabBar({
       id: "store",
       label: "Premium",
       colour: "yellow",
-      title: "Expansions & premium cards. Shortcut [b]",
+      title: "Expansions & premium cards. Shortcut [p]",
     },
   ];
 
