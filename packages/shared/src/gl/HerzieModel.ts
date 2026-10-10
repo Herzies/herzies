@@ -34,6 +34,12 @@ import {
   stepAnimation,
 } from "./animation.js";
 import {
+  type CompanionHost,
+  type CompanionState,
+  newCompanionState,
+  stepCompanion,
+} from "./companion.js";
+import {
   type HerzieLighting,
   herzieMaterial,
   type SchemeUniforms,
@@ -97,6 +103,91 @@ const geometries = new Map<string, THREE.BufferGeometry>();
 const UP = new THREE.Vector3(0, 1, 0);
 const scratch = new THREE.Vector3();
 const scratchScale = new THREE.Vector3();
+
+/** A string's hash, to seed something by it. */
+function hashSeed(text: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) {
+    h = Math.imul(h ^ text.charCodeAt(i), 16777619);
+  }
+  return h >>> 0;
+}
+
+/**
+ * A floating companion that flies about after the herzie on its own (see
+ * companion.ts), rather than riding along on it.
+ */
+type Follower = {
+  /** In root space, moved to wherever the companion is in the world. */
+  group: THREE.Group;
+  /** Turns and leans it, by its own heading. */
+  yaw: THREE.Group;
+  /** Undoes the turn placeCompanion gave it, so it faces the yaw's way. */
+  facing: THREE.Group;
+  state: CompanionState;
+  host: CompanionHost;
+};
+
+/**
+ * Lays out a follower for the companion's parts, with its core (its biggest
+ * part) at the group's origin, and where it rests beside the herzie.
+ */
+function makeFollower(
+  spheres: Sphere[],
+  feetY: number,
+  seed: number,
+): Follower | null {
+  const parts = spheres.filter(floats);
+  if (parts.length === 0) return null;
+  let core = parts[0];
+  for (const s of parts) if (s.radius > core.radius) core = s;
+  const [cx, cy, cz] = core.center;
+  // Its front: where its features (eyes, a mouth) sit off its core. In
+  // creature space front is −z; turned upright, (x, −z) on the ground.
+  let fx = 0;
+  let fz = 0;
+  let reachOut = 0;
+  for (const s of parts) {
+    const dx = s.center[0] - cx;
+    const dz = s.center[2] - cz;
+    fx += dx;
+    fz += dz;
+    reachOut = Math.max(reachOut, Math.hypot(dx, dz) + s.radius);
+  }
+  let bodyReach = 0;
+  for (const s of spheres) {
+    if (floats(s) || s.part === "ground") continue;
+    bodyReach = Math.max(
+      bodyReach,
+      Math.hypot(s.center[0], s.center[2]) + s.radius,
+    );
+  }
+  const rest = Math.hypot(cx, cz);
+  const group = new THREE.Group();
+  const yaw = new THREE.Group();
+  const facing = new THREE.Group();
+  const restHeading = Math.atan2(fx, -fz);
+  facing.rotation.y = -restHeading;
+  group.add(yaw);
+  yaw.add(facing);
+  return {
+    group,
+    yaw,
+    facing,
+    state: newCompanionState(seed),
+    host: {
+      position: new THREE.Vector3(),
+      heading: 0,
+      scale: 1,
+      slot: new THREE.Vector3(
+        cx * MODEL_SCALE,
+        (feetY - cy) * MODEL_SCALE,
+        -cz * MODEL_SCALE,
+      ),
+      clearance: Math.min(rest, bodyReach + reachOut * 0.8) * MODEL_SCALE,
+    },
+  };
+}
 
 function cached(key: string, make: () => THREE.BufferGeometry) {
   let g = geometries.get(key);
@@ -274,6 +365,9 @@ export class HerzieModel {
   private readonly anchored: THREE.Group | null;
   /** Turns with the heading. */
   private readonly turn = new THREE.Group();
+  /** The floating companion, flying after the herzie; null when it has none,
+   * or its scenery is anchored (then the companion stays put with it). */
+  private readonly follower: Follower | null;
   private readonly meshes: THREE.Mesh[] = [];
   private readonly materials: THREE.ShaderMaterial[] = [];
   /** Creature-space y of the feet, and of the scheme's painted span. */
@@ -321,6 +415,26 @@ export class HerzieModel {
     this.span = schemeSpan(spheres);
     this.bounds = turnBounds(spheres, feet);
     this.seatDrop = this.hasLegs ? creatureSeatDrop(spheres, look.stage) : 0;
+    this.follower = anchoring
+      ? null
+      : makeFollower(spheres, feet, hashSeed(look.seed) ^ (options.seed ?? 0));
+    // The companion's parts, in their own copy of creature space: upright,
+    // at the herzie's scale but none of its breathing, its core at the
+    // follower's origin.
+    let companionParts: THREE.Group | null = null;
+    if (this.follower) {
+      companionParts = new THREE.Group();
+      companionParts.rotation.x = Math.PI;
+      companionParts.scale.setScalar(MODEL_SCALE);
+      const { slot } = this.follower.host;
+      companionParts.position.set(
+        -slot.x,
+        feet * MODEL_SCALE - slot.y,
+        -slot.z,
+      );
+      this.follower.facing.add(companionParts);
+      this.root.add(this.follower.group);
+    }
 
     const ramp = scheme ? schemeShades(scheme) : null;
     const byShading = new Map<string, THREE.ShaderMaterial>();
@@ -349,9 +463,13 @@ export class HerzieModel {
       }
       mesh.position.set(...s.center);
       this.meshes.push(mesh);
-      (this.anchored && sceneFixed(s) ? this.anchored : this.creature).add(
-        mesh,
-      );
+      const parent =
+        companionParts && floats(s)
+          ? companionParts
+          : this.anchored && sceneFixed(s)
+            ? this.anchored
+            : this.creature;
+      parent.add(mesh);
     }
     this.creature.rotation.x = Math.PI;
     this.turn.add(this.creature);
@@ -376,6 +494,24 @@ export class HerzieModel {
     this.turn.rotation.y = this.heading;
     this.pose();
     this.animateBody();
+    this.follow(dt, speed);
+  }
+
+  /** Flies the companion on after the herzie, in the world. */
+  private follow(dt: number, speed: number) {
+    const f = this.follower;
+    if (!f) return;
+    const { host, state } = f;
+    // Fresh: a host may have moved it (or what it's on) this frame.
+    this.root.updateWorldMatrix(true, false);
+    this.root.getWorldPosition(host.position);
+    host.scale = this.root.getWorldScale(scratchScale).y;
+    host.heading = this.heading;
+    host.dancing = this.danceWeight > 0.5;
+    stepCompanion(state, host, speed, dt);
+    f.group.position.copy(state.position);
+    this.root.worldToLocal(f.group.position);
+    f.yaw.rotation.set(state.pitch, state.heading, state.roll, "YXZ");
   }
 
   /** Swings anything dangling with the turn since last time, and settles

@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 import { buildCreatureModel } from "../creature-renderer.js";
+import { WALK_SPEED } from "./animation.js";
 import { HerzieModel, MODEL_SCALE } from "./HerzieModel.js";
 
 const LOOK = { seed: "model-test", stage: 3, equipped: { head: "headphones" } };
@@ -215,5 +216,114 @@ describe("HerzieModel", () => {
       turn(bare, 0, 1.2);
       expect(bare.dangleSettled).toBe(true);
     });
+  });
+
+  describe("a spirit in the Town", () => {
+    const SPIRIT = { ...LOOK, equipped: { spirit: "spirit-orb" } };
+    /** Where the Spirit Orb's core (its biggest part) is, in the world. */
+    function spiritAt(h: HerzieModel) {
+      h.root.updateMatrixWorld(true);
+      const { spheres } = buildCreatureModel(SPIRIT.seed, 3, SPIRIT.equipped);
+      const core = Math.max(
+        ...spheres.filter((s) => s.part === "spirit").map((s) => s.radius),
+      );
+      const at: THREE.Vector3[] = [];
+      h.root.traverse((o) => {
+        if (o instanceof THREE.Mesh && o.scale.x === core)
+          at.push(o.getWorldPosition(new THREE.Vector3()));
+      });
+      expect(at).toHaveLength(1);
+      return at[0];
+    }
+
+    it("starts beside the herzie, clear of it, off the ground", () => {
+      const h = new HerzieModel(SPIRIT);
+      h.update(0, 0);
+      const at = spiritAt(h);
+      expect(Math.hypot(at.x, at.z)).toBeGreaterThan(0.5);
+      expect(at.y).toBeGreaterThan(0.5);
+      expect(at.y).toBeLessThan(h.height + 1);
+    });
+
+    it("follows the herzie on its own, rather than riding on it", () => {
+      const h = new HerzieModel(SPIRIT);
+      h.update(0, 0);
+      const start = spiritAt(h);
+      // The herzie jumps a step forward: the spirit lags, then follows.
+      h.root.position.z += 1;
+      h.update(1 / 60, WALK_SPEED);
+      expect(spiritAt(h).z - start.z).toBeLessThan(0.2);
+      for (let i = 0; i < 60 * 4; i++) h.update(1 / 60, 0);
+      expect(spiritAt(h).z - start.z).toBeGreaterThan(0.5);
+    });
+
+    it("doesn't snap round when the herzie turns", () => {
+      const h = new HerzieModel(SPIRIT);
+      h.update(0, 0);
+      const start = spiritAt(h);
+      h.heading = Math.PI;
+      h.update(1 / 60, 0);
+      expect(spiritAt(h).distanceTo(start)).toBeLessThan(0.2);
+    });
+
+    it("rides along unchanged where scenery is anchored", () => {
+      const h = new HerzieModel(SPIRIT, { anchorScenery: 0 });
+      h.update(0, 0);
+      const start = spiritAt(h);
+      h.root.position.z += 1;
+      h.update(1 / 60, 0);
+      expect(spiritAt(h).z - start.z).toBeCloseTo(1, 1);
+    });
+    for (const spirit of ["spirit-orb", "ghost"]) {
+      it(`${spirit} faces and leans the way it flies`, () => {
+        const equipped = { spirit };
+        const h = new HerzieModel({ ...LOOK, equipped });
+        const { spheres } = buildCreatureModel(LOOK.seed, 3, equipped);
+        const parts = spheres.filter(
+          (s) => s.part === "spirit" || s.part === "pet",
+        );
+        const core = Math.max(...parts.map((s) => s.radius));
+        // Its features: the smallest parts (eyes, pupils, a mouth).
+        const feature = Math.min(...parts.map((s) => s.radius)) * 2.01;
+        let coreMesh: THREE.Mesh | undefined;
+        h.root.traverse((o) => {
+          if (o instanceof THREE.Mesh && o.scale.x === core) coreMesh = o;
+        });
+        // core mesh → its creature space → facing → yaw (turns and leans).
+        const yaw = coreMesh?.parent?.parent?.parent as THREE.Object3D;
+        h.update(0, 0);
+        const up = new THREE.Vector3();
+        for (let i = 0; i < 120; i++) {
+          h.root.position.z += WALK_SPEED / 60;
+          h.update(1 / 60, WALK_SPEED);
+          if (i === 10) {
+            up.set(0, 1, 0).applyQuaternion(
+              yaw.getWorldQuaternion(new THREE.Quaternion()),
+            );
+          }
+        }
+        // Leaning into the start, forward rather than sideways.
+        expect(up.z).toBeGreaterThan(0.02);
+        expect(Math.abs(up.x)).toBeLessThan(up.z / 2);
+
+        h.root.updateMatrixWorld(true);
+        const at = (coreMesh as THREE.Mesh).getWorldPosition(
+          new THREE.Vector3(),
+        );
+        const front = new THREE.Vector3();
+        let n = 0;
+        yaw.traverse((o) => {
+          if (o instanceof THREE.Mesh && o.scale.x <= feature) {
+            front.add(o.getWorldPosition(new THREE.Vector3()));
+            n++;
+          }
+        });
+        expect(n).toBeGreaterThan(0);
+        // Its face is toward +z, the way it's flying (not off at an angle).
+        front.divideScalar(n).sub(at);
+        expect(front.z).toBeGreaterThan(0);
+        expect(Math.abs(front.x)).toBeLessThan(front.z * Math.tan(0.35));
+      });
+    }
   });
 });
