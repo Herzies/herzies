@@ -5,6 +5,7 @@ import {
   signTownTicket,
   TOWN_CLOSE,
   TOWN_PROTOCOL,
+  TOWN_SPRINT_SPEED,
   type TownState,
 } from "@herzies/shared/town-net";
 import { exports } from "cloudflare:workers";
@@ -87,7 +88,7 @@ async function join(shard: number, uid: string, pos = at(0, 0)) {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 describe("rules", () => {
-  it("allows walking and refuses running", () => {
+  it("allows walking and refuses impossible speeds", () => {
     const g = newGuard(0, 0, 0);
     let x = 0;
     for (let t = 66; t < 3000; t += 66) {
@@ -98,7 +99,7 @@ describe("rules", () => {
     let z = -20;
     let refused = false;
     for (let t = 66; t < 3000; t += 66) {
-      z += 15 * 0.066;
+      z += 20 * 0.066;
       if (!checkMove(r, 0, z, t, "home")) refused = true;
     }
     expect(refused).toBe(true);
@@ -107,7 +108,26 @@ describe("rules", () => {
   it("allows a jump back to the spawn point, but nowhere else", () => {
     const g = newGuard(30, 0, 0);
     expect(checkMove(g, -30, 0, 100, "home")).toBe(false);
-    expect(checkMove(g, 0, 10, 100, "home")).toBe(true);
+    // Home's spawn, as the map has it.
+    expect(checkMove(g, 8.5, 9, 100, "home")).toBe(true);
+  });
+
+  it("allows sprinting, and refuses anything faster", () => {
+    const g = newGuard(0, -20, 0);
+    let z = -20;
+    // Sprint speed, in the client's tick steps.
+    for (let t = 66; t < 3000; t += 66) {
+      z += TOWN_SPRINT_SPEED * 0.066;
+      expect(checkMove(g, 0, z, t, "home")).toBe(true);
+    }
+    const r = newGuard(0, -20, 0);
+    let y = -20;
+    let refused = false;
+    for (let t = 66; t < 3000; t += 66) {
+      y += 20 * 0.066;
+      if (!checkMove(r, 0, y, t, "home")) refused = true;
+    }
+    expect(refused).toBe(true);
   });
 
   it("refuses leaving the island", () => {

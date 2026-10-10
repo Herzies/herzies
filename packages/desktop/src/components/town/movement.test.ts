@@ -1,3 +1,4 @@
+import { TOWN_SPRINT_SPEED } from "@herzies/shared";
 import {
   angleDelta,
   newAnimationState,
@@ -21,6 +22,7 @@ const idle = (): TownInput => ({
   turnRight: false,
   tiltUp: false,
   tiltDown: false,
+  sprint: false,
 });
 const run = (
   m: Mover,
@@ -32,6 +34,28 @@ const run = (
     stepMover(m, { ...idle(), ...input }, azimuth, DT);
 };
 const mover = (heading = Math.PI): Mover => ({ vx: 0, vz: 0, heading });
+
+describe("sprinting", () => {
+  it("Shift runs faster than walking, up to the sprint speed", () => {
+    const walk = mover();
+    run(walk, { forward: true }, 0, 2);
+    const sprint = mover();
+    run(sprint, { forward: true, sprint: true }, 0, 2);
+    const speed = (m: Mover) => Math.hypot(m.vx, m.vz);
+    expect(speed(walk)).toBeCloseTo(WALK_SPEED, 1);
+    expect(speed(sprint)).toBeCloseTo(TOWN_SPRINT_SPEED, 1);
+    expect(speed(sprint)).toBeGreaterThan(speed(walk) * 1.2);
+  });
+
+  it("Shift alone goes nowhere, and diagonals aren't faster", () => {
+    const still = mover();
+    run(still, { sprint: true }, 0, 1);
+    expect(Math.hypot(still.vx, still.vz)).toBe(0);
+    const diag = mover();
+    run(diag, { forward: true, right: true, sprint: true }, 0, 2);
+    expect(Math.hypot(diag.vx, diag.vz)).toBeCloseTo(TOWN_SPRINT_SPEED, 1);
+  });
+});
 
 describe("stepMover", () => {
   it("W walks away from the camera, up to walking speed", () => {

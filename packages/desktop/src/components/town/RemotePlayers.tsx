@@ -8,13 +8,14 @@ import { Html } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import { type Group, Vector3 } from "three";
-import { ROW_TEXT_SHADOW } from "../VisitorRowTheme";
 import { ambient } from "./ambient";
 import { SEAT_Y } from "./Benches";
 import { BUBBLE_RANGE, type ChatBubble, type ChatBubbles } from "./chatBubbles";
 import { liveDummies } from "./combat/Dummies";
+import { bossFight } from "./combat/fight";
 import { assistTarget, type Vec3, waveField } from "./combat/waves";
 import { HeadBubble } from "./HeadBubble";
+import { NAME_SHADOW, nameOpacity } from "./nameFade";
 import type { RemotePlayer, TownConnection } from "./net/TownConnection";
 import { useTownNetVersion } from "./net/townNet";
 import { townSave } from "./runtime";
@@ -23,8 +24,11 @@ import { townSave } from "./runtime";
 export function RemotePlayers({
   net,
   bubbles,
+  onOpenProfile,
 }: {
   net: TownConnection;
+  /** Clicking a name opens that player's profile (by friend code). */
+  onOpenProfile?: (friendCode: string) => void;
   /** What people are saying, by friend code. */
   bubbles?: ChatBubbles;
 }) {
@@ -37,6 +41,7 @@ export function RemotePlayers({
           remote={r}
           net={net}
           bubble={bubbles?.get(r.look.seed)}
+          onOpenProfile={onOpenProfile}
         />
       ))}
     </>
@@ -54,10 +59,12 @@ function RemoteHerzie({
   remote,
   net,
   bubble,
+  onOpenProfile,
 }: {
   remote: RemotePlayer;
   net: TownConnection;
   bubble?: ChatBubble;
+  onOpenProfile?: (friendCode: string) => void;
 }) {
   const { look } = remote;
   const lookKey = JSON.stringify(look);
@@ -71,10 +78,12 @@ function RemoteHerzie({
     return () => herzie.dispose();
   }, [herzie]);
 
-  const tag = useRef<HTMLDivElement>(null);
+  const tag = useRef<HTMLButtonElement>(null);
   const tagAnchor = useRef<Group>(null);
   const afk = useRef(false);
   const bubbleBox = useRef<HTMLDivElement>(null);
+  const hpBox = useRef<HTMLDivElement>(null);
+  const hpFill = useRef<HTMLDivElement>(null);
   const hand = useMemo(() => new Vector3(), []);
 
   useFrame((_, dt) => {
@@ -116,12 +125,29 @@ function RemoteHerzie({
         Math.hypot(s.x - townSave.x, s.z - townSave.z) <= BUBBLE_RANGE;
       bubbleBox.current.style.display = near ? "" : "none";
     }
-    const away = (s.flags & TOWN_FLAG_AFK) !== 0;
-    if (away !== afk.current && tag.current) {
-      afk.current = away;
-      tag.current.style.opacity = away ? "0.45" : "1";
-      tag.current.dataset.afk = away ? "1" : "";
+    // In a fight, a small health bar under the name.
+    if (hpBox.current && hpFill.current) {
+      const h = bossFight.on ? bossFight.health.get(remote.id) : undefined;
+      hpBox.current.style.display = h ? "" : "none";
+      if (h) {
+        const f = Math.max(0, Math.min(1, h.hp / h.maxHp));
+        hpFill.current.style.width = `${f * 100}%`;
+        hpFill.current.style.background = f < 0.5 ? "#f87171" : "#34d399";
+      }
     }
+    // Names (and health bars) fade in as you come near; away dims them.
+    const away = (s.flags & TOWN_FLAG_AFK) !== 0;
+    const fade = nameOpacity(Math.hypot(s.x - townSave.x, s.z - townSave.z));
+    if (tag.current) {
+      tag.current.style.opacity = String(fade * (away ? 0.45 : 1));
+      // Faded out, so not clickable either.
+      tag.current.style.pointerEvents = fade < 0.1 ? "none" : "";
+      if (away !== afk.current) {
+        afk.current = away;
+        tag.current.dataset.afk = away ? "1" : "";
+      }
+    }
+    if (hpBox.current) hpBox.current.style.opacity = String(fade);
   });
 
   return (
@@ -134,13 +160,22 @@ function RemoteHerzie({
             <div ref={bubbleBox}>
               {bubble ? <HeadBubble key={bubble.key} bubble={bubble} /> : null}
             </div>
-            <div
+            <button
+              type="button"
               ref={tag}
-              className="pointer-events-none whitespace-nowrap rounded bg-black/40 px-1.5 py-0.5 text-[10px] leading-tight text-white/90 transition-opacity"
+              onClick={() => onOpenProfile?.(look.seed)}
+              className="cursor-pointer whitespace-nowrap border-0 bg-transparent p-0 text-[11px] font-medium leading-tight text-white hover:underline"
               // Hidden until the first state arrives, rather than at the origin.
-              style={{ textShadow: ROW_TEXT_SHADOW, visibility: "hidden" }}
+              style={{ textShadow: NAME_SHADOW, visibility: "hidden" }}
             >
               {remote.name}
+            </button>
+            <div
+              ref={hpBox}
+              className="pointer-events-none mt-px h-[3px] w-10 overflow-hidden rounded-sm bg-black/60"
+              style={{ display: "none" }}
+            >
+              <div ref={hpFill} className="h-full" />
             </div>
           </div>
         </Html>

@@ -35,17 +35,27 @@ export const TOWN_MAX_SHARDS = 16;
  * movement: the walkable radius and where a respawn puts you. Must match the
  * desktop's map files (checked by a desktop test). */
 export const TOWN_MAPS = {
-  home: { radius: 40, spawn: { x: 0, z: 10 } },
+  home: { radius: 40, spawn: { x: 8.5, z: 9 } },
   /** The testing ground, through the portal: training dummies. */
   arena: { radius: 17, spawn: { x: 0, z: -12 } },
+  /** The boss's cave: a small dark room, one shared fight. */
+  bossroom: { radius: 13, spawn: { x: 0, z: 10 } },
 } as const;
 export type TownMapId = keyof typeof TOWN_MAPS;
 export function isTownMapId(id: string): id is TownMapId {
   return Object.hasOwn(TOWN_MAPS, id);
 }
 
+/** Maps that are one room however many come: the boss is shared, so there is
+ * a single shard (and the room's capacity is the fight's). */
+export const TOWN_SINGLE_SHARD: ReadonlySet<TownMapId> = new Set(["bossroom"]);
+/** Maps that need a ticket carrying a `boss` claim (see TownTicketPayload). */
+export const TOWN_TICKETED_MAPS: ReadonlySet<TownMapId> = new Set(["bossroom"]);
+
 /** Top walking speed, world units a second (the desktop's `WALK_SPEED`). */
 export const TOWN_WALK_SPEED = 4.5;
+/** Top speed while sprinting (Shift held); the server allows up to this. */
+export const TOWN_SPRINT_SPEED = 6;
 
 /** WebSocket close codes the server uses, so the client knows whether to
  * retry, move shard, or give up. */
@@ -62,6 +72,10 @@ export const TOWN_CLOSE = {
   kicked: 4005,
   /** Went quiet (no pings): reconnect. */
   idle: 4006,
+  /** The room shut: the fight ended or the boss left. Go back to town. */
+  closed: 4007,
+  /** The room is sealed to you (no boss claim, or knocked out). */
+  sealed: 4008,
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -82,6 +96,17 @@ export type TownTicketPayload = {
   look: TownLook;
   /** Expiry, unix seconds. */
   exp: number;
+  /** Health when the ticket was issued; the Town server seeds a fight from
+   * it. Absent on tickets from before health existed. */
+  hp?: { hp: number; maxHp: number; down: boolean };
+  /** Combat stats, `[sonicPower, luck, critChance, critDamage]`, so the
+   * server can roll a cast's damage without a database. */
+  st?: [number, number, number, number];
+  /** Set only when the boss room is open: the boss event, when it ends
+   * (unix seconds), and the boss's health as of the ticket (the room starts
+   * a fight from it if it has none running). The boss room turns away
+   * tickets without it. */
+  boss?: { event: string; until: number; hp: number; maxHp: number };
 };
 
 /** How long a ticket lasts; the client renews well before this. */
@@ -178,6 +203,59 @@ export async function verifyTownTicket(
 }
 
 // ---------------------------------------------------------------------------
+// Town server → `town-vitals` requests
+
+/** Max age of a signed `town-vitals` request, so a captured one can't be
+ * replayed later. */
+export const VITALS_REQUEST_TTL_MS = 60_000;
+
+function vitalsMessage(body: string, ts: number, nonce: string): string {
+  // The "vitals:" prefix keeps these signatures from ever validating as a
+  // ticket body, though both use the same secret.
+  return `vitals:${ts}:${nonce}:${body}`;
+}
+
+/** The signature the Town server sends with a request to `town-vitals`. */
+export async function signVitalsRequest(
+  body: string,
+  ts: number,
+  nonce: string,
+  secret: string,
+): Promise<string> {
+  const sig = await crypto.subtle.sign(
+    "HMAC",
+    await hmacKey(secret, "sign"),
+    encoder.encode(vitalsMessage(body, ts, nonce)),
+  );
+  return base64url(new Uint8Array(sig));
+}
+
+/** Whether a `town-vitals` request is signed by the Town server and fresh. */
+export async function verifyVitalsRequest(
+  body: string,
+  ts: number,
+  nonce: string,
+  signature: string,
+  secret: string,
+  nowMs: number = Date.now(),
+): Promise<boolean> {
+  if (!Number.isFinite(ts) || Math.abs(nowMs - ts) > VITALS_REQUEST_TTL_MS) {
+    return false;
+  }
+  if (typeof nonce !== "string" || nonce.length < 8 || nonce.length > 64) {
+    return false;
+  }
+  const sig = fromBase64url(signature);
+  if (!sig) return false;
+  return crypto.subtle.verify(
+    "HMAC",
+    await hmacKey(secret, "verify"),
+    sig,
+    encoder.encode(vitalsMessage(body, ts, nonce)),
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Movement frames (binary)
 
 /** Where a herzie is and what it's doing, as the wire carries it. */
@@ -220,6 +298,7 @@ export function castsBetween(from: number, to: number): number {
 
 const OP_STATE = 1;
 const OP_SNAPSHOT = 2;
+const OP_CAST = 3;
 
 /** Positions in centimetres in an int16: ±327 units, well past the island. */
 const POS_SCALE = 100;
@@ -342,6 +421,43 @@ export function decodeSnapshot(
 }
 
 // ---------------------------------------------------------------------------
+// Casts (binary, client to server)
+
+/** op + seq + yaw + pitch. */
+export const CAST_FRAME_BYTES = 1 + 2 + 2 + 2;
+/** Angles travel as int16 ten-thousandths of a radian: ±3.2767. */
+const ANGLE_SCALE = 10_000;
+
+/** A sonic cast and where it was aimed, as the boss room needs it. Yaw and
+ * pitch are the unit direction's angles (see `aimAngles`). */
+export type CastFrame = { seq: number; yaw: number; pitch: number };
+
+const clampAngle = (a: number) =>
+  Math.round(Math.max(-3.2767, Math.min(3.2767, a)) * ANGLE_SCALE);
+
+export function encodeCastFrame(c: CastFrame): ArrayBuffer {
+  const buf = new ArrayBuffer(CAST_FRAME_BYTES);
+  const v = new DataView(buf);
+  v.setUint8(0, OP_CAST);
+  v.setUint16(1, c.seq & 0xffff);
+  v.setInt16(3, clampAngle(c.yaw));
+  v.setInt16(5, clampAngle(c.pitch));
+  return buf;
+}
+
+/** The cast in a frame, or null if it isn't one. */
+export function decodeCastFrame(buf: ArrayBuffer): CastFrame | null {
+  if (buf.byteLength !== CAST_FRAME_BYTES) return null;
+  const v = new DataView(buf);
+  if (v.getUint8(0) !== OP_CAST) return null;
+  return {
+    seq: v.getUint16(1),
+    yaw: v.getInt16(3) / ANGLE_SCALE,
+    pitch: v.getInt16(5) / ANGLE_SCALE,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Control messages (JSON text)
 
 /** Liveness ping. The server answers "pong" without waking up (a Durable
@@ -361,9 +477,53 @@ export type ClientMessage =
   /** A fresh ticket: renews the session and carries look changes. */
   | { t: "ticket"; ticket: string };
 
+/** A shape the boss is about to hit the floor with. Times are server clock
+ * (ms, the same clock as snapshots); a client shows the remaining windup
+ * from `hitAt`, so a late message still draws the right fill. */
+export type BossTelegraph = {
+  id: number;
+  kind: "circle" | "ring";
+  x: number;
+  z: number;
+  r: number;
+  /** A ring's safe middle; 0 for a circle. */
+  inner: number;
+  at: number;
+  hitAt: number;
+};
+
+/** What a newcomer to the boss room is told on arrival. */
+export type FightState = {
+  /** The boss's event id: the seed of its look, as it appears in town. */
+  event: string;
+  hp: number;
+  maxHp: number;
+  phase: 1 | 2 | 3;
+  telegraphs: BossTelegraph[];
+  /** Everyone's HP in the room, by entity id. */
+  health: { id: number; hp: number; maxHp: number }[];
+  /** Server clock now (ms), so telegraph times line up at once. */
+  now: number;
+};
+
 export type ServerMessage =
   /** Accepted: your entity id and everyone else here. A full snapshot follows. */
-  | { t: "welcome"; you: number; players: TownPlayer[] }
+  | { t: "welcome"; you: number; players: TownPlayer[]; fight?: FightState }
+  /** The boss's health and phase, when either changes. */
+  | { t: "boss"; hp: number; maxHp: number; phase: 1 | 2 | 3 }
+  | ({ t: "telegraph" } & BossTelegraph)
+  /** An attack landed (or was dodged): remove its shape. */
+  | { t: "resolve"; id: number; hits: number[] }
+  /** A herzie's health (yours too), after damage. */
+  | { t: "hp"; id: number; hp: number; maxHp: number }
+  /** Your cast hit the boss for this much (sent to you alone). */
+  | { t: "hit"; damage: number; crit: boolean }
+  /** You were knocked out. */
+  | { t: "down" }
+  /** The boss fell: the room closes shortly. */
+  | { t: "victory"; by: number; closesAt: number }
+  /** The room closes at `closesAt` (server ms): the boss left or won. */
+  | { t: "closing"; why: "victory" | "escaped" | "sealed"; closesAt: number }
   | { t: "join"; player: TownPlayer }
   | { t: "leave"; id: number }
   | { t: "look"; player: TownPlayer }

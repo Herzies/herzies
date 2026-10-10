@@ -3,12 +3,15 @@ import { EntityBuffer, ServerClock } from "./town-interpolation.js";
 import {
   castSeqOf,
   castsBetween,
+  decodeCastFrame,
   decodeSnapshot,
   decodeStateFrame,
+  encodeCastFrame,
   encodeSnapshot,
   encodeStateFrame,
   quantizeState,
   signTownTicket,
+  signVitalsRequest,
   TOWN_FLAG_AFK,
   TOWN_FLAG_COMBAT,
   TOWN_FLAG_DANCING,
@@ -17,6 +20,7 @@ import {
   type TownState,
   type TownTicketPayload,
   verifyTownTicket,
+  verifyVitalsRequest,
   withCastSeq,
 } from "./town-net.js";
 
@@ -212,5 +216,94 @@ describe("cast counts in the flags", () => {
     expect(castsBetween(2, 2)).toBe(0);
     expect(castsBetween(2, 5)).toBe(3);
     expect(castsBetween(6, 1)).toBe(3);
+  });
+});
+
+describe("vitals requests", () => {
+  const secret = "s3cret-for-tests";
+  const body = JSON.stringify({ action: "report", hp: [] });
+  const ts = 1_700_000_000_000;
+
+  it("verifies what the Town server signed", async () => {
+    const sig = await signVitalsRequest(body, ts, "nonce-12345", secret);
+    expect(
+      await verifyVitalsRequest(
+        body,
+        ts,
+        "nonce-12345",
+        sig,
+        secret,
+        ts + 1000,
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects a changed body, nonce, timestamp or secret", async () => {
+    const sig = await signVitalsRequest(body, ts, "nonce-12345", secret);
+    const ok = (b: string, t: number, n: string, s: string) =>
+      verifyVitalsRequest(b, t, n, sig, s, ts + 1000);
+    expect(await ok(`${body} `, ts, "nonce-12345", secret)).toBe(false);
+    expect(await ok(body, ts + 1, "nonce-12345", secret)).toBe(false);
+    expect(await ok(body, ts, "nonce-12346", secret)).toBe(false);
+    expect(await ok(body, ts, "nonce-12345", "other")).toBe(false);
+  });
+
+  it("rejects stale and future requests", async () => {
+    const sig = await signVitalsRequest(body, ts, "nonce-12345", secret);
+    expect(
+      await verifyVitalsRequest(
+        body,
+        ts,
+        "nonce-12345",
+        sig,
+        secret,
+        ts + 61_000,
+      ),
+    ).toBe(false);
+    expect(
+      await verifyVitalsRequest(
+        body,
+        ts,
+        "nonce-12345",
+        sig,
+        secret,
+        ts - 61_000,
+      ),
+    ).toBe(false);
+  });
+
+  it("is not a ticket signature, and a ticket signature is not this", async () => {
+    const ticket = await signTownTicket(
+      { uid: "u", name: "n", look: { seed: "s", stage: 1 }, exp: 9e9 },
+      secret,
+    );
+    const [, sig] = ticket.split(".");
+    expect(
+      await verifyVitalsRequest(body, ts, "nonce-12345", sig, secret, ts),
+    ).toBe(false);
+  });
+});
+
+describe("cast frames", () => {
+  it("round-trips an aim to the wire's precision", () => {
+    const out = decodeCastFrame(
+      encodeCastFrame({ seq: 70000, yaw: -2.5, pitch: 0.4 }),
+    );
+    expect(out?.seq).toBe(70000 & 0xffff);
+    expect(out?.yaw).toBeCloseTo(-2.5, 3);
+    expect(out?.pitch).toBeCloseTo(0.4, 3);
+  });
+
+  it("clamps rather than wrapping, and rejects other frames", () => {
+    const out = decodeCastFrame(
+      encodeCastFrame({ seq: 0, yaw: 99, pitch: -99 }),
+    );
+    expect(out?.yaw).toBeCloseTo(3.2767, 4);
+    expect(out?.pitch).toBeCloseTo(-3.2767, 4);
+    expect(decodeCastFrame(new ArrayBuffer(3))).toBeNull();
+    expect(decodeCastFrame(encodeStateFrame(0, state(0, 0)))).toBeNull();
+    expect(
+      decodeStateFrame(encodeCastFrame({ seq: 0, yaw: 0, pitch: 0 })),
+    ).toBeNull();
   });
 });

@@ -6,15 +6,20 @@ import type { Look } from "../TownScene";
 import { ambient } from "./ambient";
 import { benchesOf, type Seat, seatNear } from "./Benches";
 import { CameraRig } from "./CameraRig";
+import { CaveTimer } from "./CaveTimer";
+import { tryEnterCave, useCave } from "./cave";
 import type { ChatBubbles } from "./chatBubbles";
+import { Boss } from "./combat/Boss";
 import { Combat } from "./combat/Combat";
 import { CombatOverlay } from "./combat/DamageNumbers";
+import { Telegraphs } from "./combat/Telegraphs";
 import type { Hour } from "./DayCycle";
 import { driftClouds } from "./depth";
 import { type TownInput, useTownInput } from "./input";
 import { portalCells, type TownMap, worldRadius } from "./map";
 import type { TownConnection } from "./net/TownConnection";
 import { Player } from "./Player";
+import { isMouth } from "./Portals";
 import { Post } from "./Post";
 import {
   arrivalOn,
@@ -56,6 +61,9 @@ export type TownCanvasProps = {
   player: Look;
   paused: boolean;
   onOpen: (openKey: string) => void;
+  /** Another player's name was clicked: open their profile (by friend
+   * code). */
+  onOpenProfile?: (friendCode: string) => void;
   /** Who's close enough to talk to (null: nobody), when that changes. */
   onNearChange: (spot: TownSpot | null) => void;
   /** What E would do at a bench right now — sit on one nearby, or stand
@@ -168,9 +176,22 @@ export default function TownCanvas(props: TownCanvasProps) {
               stats={props.stats ?? NO_STATS}
               active={!props.paused}
             />
+            {map.id === "bossroom" && (
+              <>
+                <Boss />
+                <Telegraphs />
+              </>
+            )}
+            {portalsOf(map).some(isMouth) && <CaveTimer map={map} />}
           </Physics>
         </Suspense>
-        {props.net && <RemotePlayers net={props.net} bubbles={props.bubbles} />}
+        {props.net && (
+          <RemotePlayers
+            net={props.net}
+            bubbles={props.bubbles}
+            onOpenProfile={props.onOpenProfile}
+          />
+        )}
         <CameraRig />
         {map.combat && (
           <>
@@ -220,7 +241,12 @@ function Systems({
   /** The seat E would sit on, if any. */
   const seat = useRef<Seat | null>(null);
   const prompt = useRef<"sit" | "stand" | null>(null);
-  const portals = useMemo(() => (map ? portalsOf(map) : []), [map]);
+  // A closed cave has no mouth: nothing to see, step into or be prompted by.
+  const caveOpen = useCave().kind === "open";
+  const portals = useMemo(
+    () => (map ? portalsOf(map) : []).filter((p) => caveOpen || !isMouth(p)),
+    [map, caveOpen],
+  );
   /** The portal E would step into, if any. */
   const portal = useRef<Portal | null>(null);
   /** Where the player was last frame, on which island: walking through a
@@ -238,6 +264,8 @@ function Systems({
   };
   const enter = (to: string) => {
     if (warp.active) return;
+    // Into a room (the boss's cave): only while it's open, and says why not.
+    if (mapById(to).room && !tryEnterCave()) return;
     townLive.seat = null;
     startWarp(to);
     sfxPortal();

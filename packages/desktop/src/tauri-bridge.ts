@@ -15,6 +15,7 @@ import type {
   StoreProduct,
   Trade,
   TradeState,
+  Vitals,
 } from "@herzies/shared";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -290,8 +291,16 @@ export const herzies = {
 
   /** A signed pass into the multiplayer Town. Rejects with "off" when
    * multiplayer is switched off server-side. */
-  fetchTownTicket: () =>
-    invoke<{ ticket: string; url: string; exp: number }>("fetch_town_ticket"),
+  fetchTownTicket: (map?: string) =>
+    invoke<{ ticket: string; url: string; exp: number; vitals?: Vitals }>(
+      "fetch_town_ticket",
+      { map },
+    ),
+
+  /** The herzie's health: `"vitals"` reads it, `"respawn"` brings a
+   * knocked-out herzie back with half its health. */
+  townVitals: (action: "vitals" | "respawn") =>
+    invoke<{ vitals: Vitals }>("town_vitals", { action }),
 
   fetchPreviousHunt: () =>
     invoke<{ events: GameEvent[]; next: GameEvent | null }>(

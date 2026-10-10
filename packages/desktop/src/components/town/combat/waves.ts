@@ -1,3 +1,9 @@
+import {
+  WAVE_ASSIST_ANGLE,
+  WAVE_HIT_RADIUS,
+  WAVE_RANGE,
+  WAVE_SPEED,
+} from "@herzies/shared/combat";
 import { DUMMY, type DummyState, waveHitsDummy } from "./dummy";
 
 /**
@@ -8,18 +14,18 @@ import { DUMMY, type DummyState, waveHitsDummy } from "./dummy";
 
 export const WAVE = {
   /** How fast a wave travels, world units a second. */
-  speed: 26,
+  speed: WAVE_SPEED,
   /** How far it goes before it's spent, if it hits nothing. */
-  range: 42,
+  range: WAVE_RANGE,
   /** It spreads as it goes, as sound does: its front's radius at the hand,
    * and once it's spent. */
   startRadius: 0.22,
   endRadius: 1.15,
   /** How wide it is to a dummy (on top of the dummy's own radius). */
-  hitRadius: 0.2,
+  hitRadius: WAVE_HIT_RADIUS,
   /** Aim assist: a dummy this close to the line of aim (radians, as seen
    * from the hand) draws the wave in… */
-  assistAngle: (3 * Math.PI) / 180,
+  assistAngle: WAVE_ASSIST_ANGLE,
   /** …turning it at most this fast (radians a second). */
   homing: 3.2,
   /** A wake ring is left this often along the way (seconds). */

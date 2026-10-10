@@ -52,6 +52,7 @@ const aimingInput: TownInput = {
   turnRight: false,
   tiltUp: false,
   tiltDown: false,
+  sprint: false,
   mouseLeft: false,
   mouseRight: true,
 };

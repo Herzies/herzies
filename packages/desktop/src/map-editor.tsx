@@ -1252,6 +1252,16 @@ function IslandBar({
         />{" "}
         combat
       </label>
+      <label style={{ color: "#8b8fa3" }}>
+        <input
+          type="checkbox"
+          checked={map.room === "dark"}
+          onChange={(e) =>
+            onEdit({ room: e.target.checked ? "dark" : undefined })
+          }
+        />{" "}
+        dark room
+      </label>
       {links.map(([k, link]) => (
         <span key={k} style={{ color: "#d6b8ff" }}>
           portal {k} →{" "}

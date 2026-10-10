@@ -427,6 +427,15 @@ verify_jwt = true
 import_map = "./functions/deno.json"
 entrypoint = "./functions/town-ticket/index.ts"
 
+# Where herzie health is written. The Town server calls it signed (HMAC with
+# the ticket secret, not a JWT); players call it with their JWT to respawn.
+# Both are checked in the function, so the platform's JWT gate is off.
+[functions.town-vitals]
+enabled = true
+verify_jwt = false
+import_map = "./functions/deno.json"
+entrypoint = "./functions/town-vitals/index.ts"
+
 # New (not a port): manually collects a pending world drop into the caller's
 # inventory. Called when the user clicks "Collect" on the pending-drop UI.
 [functions.collect-drop]

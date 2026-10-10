@@ -179,3 +179,46 @@ export function sfxPortal(): void {
   noiseBurst(a, "bandpass", 200, 3200, 2, 0.35, 0.8);
   tone(a, "sine", 110, 440, 0.2, 0.2, 0.7);
 }
+
+/** An attack is coming: a rising tone for as long as the shape fills, so
+ * it can be heard as well as seen. `seconds` is the windup. */
+export function sfxWarn(seconds: number): void {
+  const a = audio();
+  if (!a) return;
+  const k = wobble(0.04);
+  tone(
+    a,
+    "sawtooth",
+    140 * k,
+    420 * k,
+    0.07,
+    Math.min(0.4, seconds / 2),
+    seconds,
+  );
+  tone(a, "sine", 70 * k, 110 * k, 0.18, 0.1, seconds);
+}
+
+/** The boss's attack landing: a deep slam. */
+export function sfxSlam(): void {
+  const a = audio();
+  if (!a) return;
+  const k = wobble(0.05);
+  tone(a, "sine", 95 * k, 28 * k, 0.9, 0.004, 0.5);
+  noiseBurst(a, "lowpass", 1400 * k, 120, 1.2, 0.45, 0.12);
+}
+
+/** Getting hit: a short, low crunch. */
+export function sfxHurt(): void {
+  const a = audio();
+  if (!a) return;
+  const k = wobble(0.06);
+  tone(a, "square", 220 * k, 70 * k, 0.22, 0.003, 0.18);
+  noiseBurst(a, "bandpass", 900 * k, 200, 1.4, 0.2, 0.1);
+}
+
+/** Knocked out: a falling tone. */
+export function sfxDown(): void {
+  const a = audio();
+  if (!a) return;
+  tone(a, "triangle", 440, 55, 0.3, 0.01, 0.9);
+}

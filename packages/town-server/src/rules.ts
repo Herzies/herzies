@@ -7,15 +7,15 @@
  */
 import {
   TOWN_MAPS,
-  TOWN_WALK_SPEED,
+  TOWN_SPRINT_SPEED,
   type TownMapId,
 } from "@herzies/shared/town-net";
 
-/** How much faster than walking a herzie may seem to go. Packets arrive
+/** How much faster than sprinting a herzie may seem to go. Packets arrive
  * bunched up, so some slack is needed on top of the real top speed. */
 const SPEED_SLACK = 1.5;
 /** Distance a herzie may build up while its packets are delayed. */
-const MAX_BUDGET = TOWN_WALK_SPEED * SPEED_SLACK * 2;
+const MAX_BUDGET = TOWN_SPRINT_SPEED * SPEED_SLACK * 2;
 /** A jump onto the spawn point is a respawn, which is allowed. */
 const SPAWN_TOLERANCE = 1.5;
 /** Leeway past the walkable edge, for rounding on the wire. */
@@ -48,7 +48,7 @@ export function checkMove(
   const elapsed = Math.max(0, now - g.at) / 1000;
   const budget = Math.min(
     MAX_BUDGET,
-    g.budget + elapsed * TOWN_WALK_SPEED * SPEED_SLACK,
+    g.budget + elapsed * TOWN_SPRINT_SPEED * SPEED_SLACK,
   );
   const distance = Math.hypot(x - g.x, z - g.z);
   const respawn = Math.hypot(x - spawn.x, z - spawn.z) <= SPAWN_TOLERANCE;

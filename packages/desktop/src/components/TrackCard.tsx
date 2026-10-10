@@ -1,40 +1,14 @@
-import {
-  BOSS_DAMAGE_PER_MINUTE,
-  classifyGenre,
-  lastFmTrackUrl,
-} from "@herzies/shared";
+import { lastFmTrackUrl } from "@herzies/shared";
 import { cn } from "../lib/utils";
 import { herzies } from "../tauri-bridge";
 import { MarqueeText } from "./MarqueeText";
-import { Tooltip } from "./Tooltip";
 
-/** A now-playing tag. Red, with a tooltip, when it is dealing damage to a boss. */
-function GenrePill({
-  tag,
-  hurts,
-  damagePerMinute,
-}: {
-  tag: string;
-  hurts: boolean;
-  damagePerMinute: number;
-}) {
-  const pill = (
-    <span
-      className={cn(
-        "cursor-default rounded-full px-1.5 py-px text-ui-sm lowercase",
-        hurts ? "bg-red/20 text-red" : "bg-purple/15 text-purple",
-      )}
-    >
+/** A now-playing tag. */
+function GenrePill({ tag }: { tag: string }) {
+  return (
+    <span className="cursor-default rounded-full bg-purple/15 px-1.5 py-px text-ui-sm lowercase text-purple">
       {tag.toLowerCase()}
     </span>
-  );
-  if (!hurts) return pill;
-  return (
-    <Tooltip
-      label={`Dealing ${Number(damagePerMinute.toFixed(2))} damage per minute`}
-    >
-      {pill}
-    </Tooltip>
   );
 }
 
@@ -51,8 +25,6 @@ export function TrackCard({
   albumArtUrl,
   artistImageUrl,
   tags,
-  hatedGenres,
-  damagePerMinute = BOSS_DAMAGE_PER_MINUTE,
   meta,
   className,
 }: {
@@ -62,20 +34,10 @@ export function TrackCard({
   /** Photo bled in behind the text, right-aligned. */
   artistImageUrl?: string;
   tags?: string[];
-  /**
-   * Genres a live boss hates. Any tag that classifies into one of these is
-   * currently dealing damage, and gets a red pill to say so.
-   */
-  hatedGenres?: string[];
-  /** Damage per minute the player's listening deals to a boss, sonic power
-   * included — what the red pills' tooltip says. */
-  damagePerMinute?: number;
   /** Extra dim line under the artist, e.g. how long ago it was played. */
   meta?: string;
   className?: string;
 }) {
-  const hated = hatedGenres ?? [];
-
   return (
     <div className={cn("relative overflow-hidden", className)}>
       {artistImageUrl ? (
@@ -124,24 +86,9 @@ export function TrackCard({
           ) : null}
           {tags && tags.length > 0 ? (
             <div className="mt-0.5 flex flex-wrap gap-1">
-              {tags.map((tag) => {
-                // Tags are raw Last.fm strings ("house", "techno") while a
-                // boss hates entries from the 15-value GENRES union, so the
-                // two have to be compared through the classifier rather than
-                // by string equality — "house" and "techno" both land on
-                // "electronic", and both really are dealing damage.
-                const hurts =
-                  hated.length > 0 &&
-                  classifyGenre([tag]).some((g) => hated.includes(g));
-                return (
-                  <GenrePill
-                    key={tag}
-                    tag={tag}
-                    hurts={hurts}
-                    damagePerMinute={damagePerMinute}
-                  />
-                );
-              })}
+              {tags.map((tag) => (
+                <GenrePill key={tag} tag={tag} />
+              ))}
             </div>
           ) : null}
         </div>

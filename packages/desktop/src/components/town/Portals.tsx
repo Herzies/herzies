@@ -1,78 +1,23 @@
 import { useFrame } from "@react-three/fiber";
-import { CuboidCollider } from "@react-three/rapier";
 import { useLayoutEffect, useMemo } from "react";
 import * as THREE from "three";
-import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import { ambient, seeThrough } from "./ambient";
+import { ambient } from "./ambient";
+import { useCave } from "./cave";
 import type { TownMap } from "./map";
 import { type Portal, portalsOf } from "./portal";
-import { townSave } from "./runtime";
+import { mapById, townSave } from "./runtime";
 import { distortionMaterial, distortionScene } from "./vfx/distortion";
 
 /**
- * Portals as they stand: a weathered stone arch, a disc of swirling light
- * in it — the air round it bending (see vfx/distortion.ts) — and motes
- * spiralling in. Walking through is handled by the Town's Systems.
+ * Portals as they stand: a disc of swirling light floating in the air, the
+ * air round it bending (see vfx/distortion.ts), and motes spiralling in.
+ * Nothing stands round it and nothing is in the way. Walking through is
+ * handled by the Town's Systems.
  */
 
 /** The disc: its middle's height, and its radius. */
 export const DISC_Y = 1.55;
 const DISC_R = 1.08;
-const PILLAR = { w: 0.42, h: 2.55, d: 0.5, x: 1.32 } as const;
-
-const STONE = "#8d8a99";
-const STONE_DARK = "#6c6879";
-const RUNE = "#c9a6ff";
-
-function colored(g: THREE.BufferGeometry, color: string): THREE.BufferGeometry {
-  const geo = g.index ? g.toNonIndexed() : g;
-  const c = new THREE.Color(color);
-  const n = geo.attributes.position.count;
-  const colors = new Float32Array(n * 3);
-  for (let i = 0; i < n; i++) c.toArray(colors, i * 3);
-  geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-  geo.deleteAttribute("uv");
-  return geo;
-}
-
-/** The arch: two pillars on footings, an arc of stones over them, a
- * keystone with a glowing rune. Facing +z. */
-function archGeometry(): THREE.BufferGeometry {
-  const parts: THREE.BufferGeometry[] = [];
-  for (const side of [-1, 1]) {
-    const pillar = new THREE.BoxGeometry(PILLAR.w, PILLAR.h, PILLAR.d);
-    pillar.translate(side * PILLAR.x, PILLAR.h / 2 + 0.12, 0);
-    parts.push(colored(pillar, STONE));
-    const foot = new THREE.BoxGeometry(PILLAR.w + 0.22, 0.24, PILLAR.d + 0.22);
-    foot.translate(side * PILLAR.x, 0.12, 0);
-    parts.push(colored(foot, STONE_DARK));
-  }
-  // The arc: a ring of blocks over the top.
-  const blocks = 9;
-  const r = PILLAR.x;
-  const top = PILLAR.h + 0.12;
-  for (let i = 0; i <= blocks; i++) {
-    const a = (i / blocks) * Math.PI;
-    const b = new THREE.BoxGeometry(0.5, 0.44, PILLAR.d);
-    b.rotateZ(a - Math.PI / 2);
-    b.translate(Math.cos(a) * r, top + Math.sin(a) * r * 0.62, 0);
-    parts.push(colored(b, i % 2 ? STONE : STONE_DARK));
-  }
-  const key = new THREE.BoxGeometry(0.4, 0.5, PILLAR.d + 0.08);
-  key.translate(0, top + r * 0.62 + 0.04, 0);
-  parts.push(colored(key, STONE_DARK));
-  const rune = new THREE.OctahedronGeometry(0.12);
-  rune.translate(0, top + r * 0.62 + 0.04, PILLAR.d / 2 + 0.06);
-  parts.push(colored(rune, RUNE));
-  return mergeGeometries(parts);
-}
-
-const archGeo = archGeometry();
-// Dithers away when it's between the camera and the herzie, like the
-// trees and houses do.
-const archMaterial = seeThrough(
-  new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }),
-);
 
 /** The swirl: light spiralling in to the middle, brightest at the rim,
  * through the haze like everything else. */
@@ -145,7 +90,7 @@ function motesMaterial(tint: THREE.Color): THREE.ShaderMaterial {
       void main() {
         float t = fract(uTime * 0.35 + aSeed);
         float a = aSeed * 40.0 + t * 7.0;
-        float r = mix(2.2, 0.05, t * t);
+        float r = mix(1.12, 0.05, t * t);
         vec3 p = vec3(cos(a) * r, sin(a) * r, (1.0 - t) * 0.9 * sign(fract(aSeed * 7.3) - 0.5));
         vAlpha = smoothstep(0.0, 0.15, t) * (1.0 - smoothstep(0.85, 1.0, t));
         vec4 mv = modelViewMatrix * vec4(p, 1.0);
@@ -185,12 +130,21 @@ const moteGeometry = (() => {
 const discGeometry = new THREE.CircleGeometry(DISC_R, 48);
 const ringGeometry = new THREE.TorusGeometry(DISC_R * 1.02, 0.16, 8, 40);
 const TINT = new THREE.Color("#a77cff");
+/** A cave's mouth glows the boss's colour instead. */
+const MOUTH_TINT = new THREE.Color("#ff5a4a");
+
+/** A portal into a room (the boss's cave) glows the boss's colour. */
+export function isMouth(portal: Portal): boolean {
+  return !!mapById(portal.to).room;
+}
 /** How near you have to be for the air round a portal to ripple. */
 const RIPPLE_REACH = 25;
 
-function PortalArch({ portal, live }: { portal: Portal; live: boolean }) {
-  const disc = useMemo(() => discMaterial(TINT), []);
-  const motes = useMemo(() => motesMaterial(TINT), []);
+function PortalDisc({ portal, live }: { portal: Portal; live: boolean }) {
+  const mouth = isMouth(portal);
+  const tint = mouth ? MOUTH_TINT : TINT;
+  const disc = useMemo(() => discMaterial(tint), [tint]);
+  const motes = useMemo(() => motesMaterial(tint), [tint]);
   // The air round the disc, rippling: in the distortion buffer.
   const ripple = useMemo(() => {
     const m = new THREE.InstancedMesh(ringGeometry, distortionMaterial(), 1);
@@ -246,12 +200,6 @@ function PortalArch({ portal, live }: { portal: Portal; live: boolean }) {
   });
   return (
     <group position={[portal.x, 0, portal.z]} rotation-y={portal.yaw}>
-      <mesh
-        geometry={archGeo}
-        material={archMaterial}
-        castShadow
-        receiveShadow
-      />
       <mesh geometry={discGeometry} material={disc} position-y={DISC_Y} />
       <points
         geometry={moteGeometry}
@@ -272,40 +220,17 @@ export function Portals({
   map: TownMap;
   live?: boolean;
 }) {
-  const portals = useMemo(() => portalsOf(map), [map]);
+  // The cave's mouth is there only while the cave is open.
+  const open = useCave().kind === "open";
+  const portals = useMemo(
+    () => portalsOf(map).filter((p) => open || !isMouth(p)),
+    [map, open],
+  );
   return (
     <>
       {portals.map((p) => (
-        <PortalArch key={p.key} portal={p} live={live} />
+        <PortalDisc key={p.key} portal={p} live={live} />
       ))}
-    </>
-  );
-}
-
-/** The pillars are solid; the way through isn't. */
-export function PortalColliders({ map }: { map: TownMap }) {
-  const portals = useMemo(() => portalsOf(map), [map]);
-  return (
-    <>
-      {portals.flatMap((p) =>
-        [-1, 1].map((side) => {
-          const c = Math.cos(p.yaw);
-          const s = Math.sin(p.yaw);
-          // The pillar's local +x, turned by yaw: (cos, -sin).
-          return (
-            <CuboidCollider
-              key={`o${p.key}${side}`}
-              args={[PILLAR.w / 2 + 0.05, PILLAR.h / 2, PILLAR.d / 2 + 0.05]}
-              position={[
-                p.x + c * side * PILLAR.x,
-                PILLAR.h / 2,
-                p.z - s * side * PILLAR.x,
-              ]}
-              rotation={[0, p.yaw, 0]}
-            />
-          );
-        }),
-      )}
     </>
   );
 }

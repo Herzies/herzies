@@ -3,7 +3,11 @@
  * to that shard's room. Everything else about a connection — who you are,
  * whether there's space — is the room's call.
  */
-import { isTownMapId, TOWN_MAX_SHARDS } from "@herzies/shared/town-net";
+import {
+  isTownMapId,
+  TOWN_MAX_SHARDS,
+  TOWN_SINGLE_SHARD,
+} from "@herzies/shared/town-net";
 import type { Env } from "./room";
 
 export { TownRoom } from "./room";
@@ -24,6 +28,9 @@ export default {
       return new Response("bad shard", { status: 400 });
 
     const map = match[1];
+    // One shared fight: everyone goes to the same room.
+    if (TOWN_SINGLE_SHARD.has(map as never) && shard !== 0)
+      return new Response("bad shard", { status: 400 });
     const room = env.TOWN_ROOM.get(env.TOWN_ROOM.idFromName(`${map}:${shard}`));
     const headers = new Headers(request.headers);
     headers.set("x-town-map", map);

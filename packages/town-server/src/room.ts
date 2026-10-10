@@ -14,6 +14,7 @@
 
 import { DurableObject } from "cloudflare:workers";
 import {
+  decodeCastFrame,
   decodeStateFrame,
   encodeSnapshot,
   isTownMapId,
@@ -21,11 +22,14 @@ import {
   type ServerMessage,
   type SnapshotEntry,
   TOWN_CLOSE,
+  TOWN_FLAG_SITTING,
   TOWN_PING,
   TOWN_PONG,
   TOWN_PROTOCOL,
   TOWN_ROOM_CAPACITY,
   TOWN_TICK_MS,
+  TOWN_TICKET_TTL_S,
+  TOWN_TICKETED_MAPS,
   type TownLook,
   type TownMapId,
   type TownPlayer,
@@ -33,6 +37,9 @@ import {
   type TownTicketPayload,
   verifyTownTicket,
 } from "@herzies/shared/town-net";
+import { benchBonusHp } from "@herzies/shared/vitals";
+import { DEV_EVENT, FightRuntime, type Outbound } from "./fight";
+import { RestMeter } from "./rest";
 import {
   checkMove,
   type MoveGuard,
@@ -40,12 +47,18 @@ import {
   RateLimiter,
   startingPoint,
 } from "./rules";
+import { postVitals } from "./vitals";
 
 export type Env = {
   TOWN_ROOM: DurableObjectNamespace<TownRoom>;
   TOWN_TICKET_SECRET: string;
   /** Overrides {@link TOWN_ROOM_CAPACITY} (tests). */
   ROOM_CAPACITY?: string;
+  /** The `town-vitals` edge function. Unset: the room reports no health. */
+  TOWN_VITALS_URL?: string;
+  /** Local dev only: let the boss room open without an event, with a
+   * throwaway boss that is never reported. */
+  DEV_BOSS?: string;
 };
 
 /** A socket must say hello this soon after connecting. */
@@ -64,6 +77,13 @@ const BURST = 45;
 /** Dropped or refused messages per sweep before a socket is kicked. */
 const MAX_STRIKES = 90;
 const MAX_TEXT = 8_192;
+/** First byte of a cast frame (see `encodeCastFrame`). */
+const CAST_OP = 3;
+
+/** How old a boss-room ticket may be. Its health is as of issue. */
+const FRESH_TICKET_MS = 2 * 60_000;
+/** Maps where sitting on a bench earns extra health: peaceful ones. */
+const REST_MAPS: ReadonlySet<TownMapId> = new Set(["home"]);
 
 /** Survives hibernation on the socket itself. */
 type Attachment = {
@@ -76,6 +96,7 @@ type Attachment = {
     look: TownLook;
     exp: number;
     state: TownState;
+    maxHp?: number;
   };
 };
 
@@ -87,6 +108,10 @@ type Session = {
     guard: MoveGuard;
     /** When the newest state arrived, ms. */
     receivedAt: number;
+    /** Max HP from the ticket, to size the bench bonus. */
+    maxHp?: number;
+    /** Seated time not yet reported. */
+    rest: RestMeter;
   };
   limiter: RateLimiter;
   strikes: number;
@@ -98,6 +123,10 @@ export class TownRoom extends DurableObject<Env> {
   private dirty = new Set<Session>();
   private ticker: ReturnType<typeof setInterval> | null = null;
   private quietTicks = 0;
+  /** The boss room's fight, once someone has arrived with a boss ticket. */
+  private fight: FightRuntime | null = null;
+  private reporting = false;
+  private closeScheduled = false;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -111,12 +140,19 @@ export class TownRoom extends DurableObject<Env> {
         ws.close(TOWN_CLOSE.auth, "no session");
         continue;
       }
+      // A boss room that woke from eviction has lost its fight; its
+      // players reconnect with fresh tickets and the fight resumes from them.
+      if (TOWN_TICKETED_MAPS.has(att.map)) {
+        ws.close(TOWN_CLOSE.auth, "room restarted");
+        continue;
+      }
       const session = this.session(ws, att, now);
       if (att.player) {
         session.player = {
           ...att.player,
           guard: newGuard(att.player.state.x, att.player.state.z, now),
           receivedAt: now,
+          rest: new RestMeter(),
         };
       }
     }
@@ -190,6 +226,10 @@ export class TownRoom extends DurableObject<Env> {
       this.drop(s, TOWN_CLOSE.auth, "state before hello");
       return;
     }
+    if (message.byteLength > 0 && new Uint8Array(message)[0] === CAST_OP) {
+      this.onCast(s, message, now);
+      return;
+    }
     const frame = decodeStateFrame(message);
     if (!frame) {
       this.strike(s);
@@ -202,8 +242,15 @@ export class TownRoom extends DurableObject<Env> {
       this.send(s, { t: "correct", x: p.state.x, z: p.state.z });
       return;
     }
+    const wasSeated = (p.state.flags & TOWN_FLAG_SITTING) !== 0;
     p.state = next;
     p.receivedAt = now;
+    const seated = (next.flags & TOWN_FLAG_SITTING) !== 0;
+    p.rest.tick(seated, now);
+    // Stood up: report what resting earned now, so the app's health bar
+    // (which counts the bench's speed itself) agrees when it looks.
+    if (wasSeated && !seated) this.flushRest(now, s);
+    this.fight?.onState(p.uid, next.x, next.z, now);
     this.dirty.add(s);
     this.startTicking();
   }
@@ -223,6 +270,11 @@ export class TownRoom extends DurableObject<Env> {
       return;
     }
     if (!this.sessions.has(s.ws)) return; // closed while verifying
+
+    // The boss room only takes tickets issued while the cave is open and
+    // the herzie is on its feet.
+    const ticketed = TOWN_TICKETED_MAPS.has(s.att.map);
+    if (ticketed && !this.admit(s, t, now)) return;
 
     // The same herzie again (a reconnect, or a second copy of the app):
     // the new socket takes over the old one's place and id, so others see
@@ -256,13 +308,26 @@ export class TownRoom extends DurableObject<Env> {
       state,
       guard: newGuard(state.x, state.z, now),
       receivedAt: now,
+      maxHp: t.hp?.maxHp,
+      rest: new RestMeter(),
     };
     this.persist(s);
+    const fp = this.fight?.join(t.uid, id, t, state, now);
 
     const others = [...this.sessions.values()].flatMap((o) =>
       o !== s && o.player ? [o.player] : [],
     );
-    this.send(s, { t: "welcome", you: id, players: others.map(playerOf) });
+    this.send(s, {
+      t: "welcome",
+      you: id,
+      players: others.map(playerOf),
+      fight: this.fight?.state(now),
+    });
+    if (fp) {
+      // Everyone else sees the newcomer's health bar.
+      this.broadcast({ t: "hp", id, hp: fp.hp, maxHp: fp.maxHp }, s);
+      if (fp.down) this.send(s, { t: "down" });
+    }
     if (others.length) {
       s.ws.send(
         encodeSnapshot(
@@ -293,6 +358,8 @@ export class TownRoom extends DurableObject<Env> {
     const changed =
       t.name !== p.name || JSON.stringify(t.look) !== JSON.stringify(p.look);
     p.exp = t.exp;
+    p.maxHp = t.hp?.maxHp;
+    this.fight?.renew(p.uid, t);
     p.name = t.name;
     p.look = t.look;
     this.persist(s);
@@ -333,8 +400,36 @@ export class TownRoom extends DurableObject<Env> {
       else if (s.player.exp + TICKET_GRACE_S < now / 1000)
         this.drop(s, TOWN_CLOSE.auth, "ticket expired");
     }
-    if (this.ctx.getWebSockets().length)
-      await this.ctx.storage.setAlarm(now + SWEEP_MS);
+    this.flushRest(now);
+    const closes = this.fight?.closesAt;
+    if (closes !== null && closes !== undefined && now >= closes) {
+      this.closeRoom(now);
+      return;
+    }
+    if (this.ctx.getWebSockets().length) {
+      const next =
+        closes && closes > now
+          ? Math.min(now + SWEEP_MS, closes)
+          : now + SWEEP_MS;
+      await this.ctx.storage.setAlarm(next);
+    }
+  }
+
+  /** Tell `town-vitals` how long each herzie sat on a bench, so resting
+   * earns its extra health. Only in peaceful maps, and only while the
+   * ticket says how much health the herzie has. */
+  private flushRest(now: number, only?: Session) {
+    const rest: { uid: string; bonus: number }[] = [];
+    for (const s of only ? [only] : this.sessions.values()) {
+      const p = s.player;
+      if (!p) continue;
+      p.rest.tick((p.state.flags & TOWN_FLAG_SITTING) !== 0, now);
+      const seconds = p.rest.take();
+      if (!p.maxHp || !REST_MAPS.has(s.att.map)) continue;
+      const bonus = benchBonusHp(p.maxHp, seconds);
+      if (bonus >= 0.5) rest.push({ uid: p.uid, bonus });
+    }
+    if (rest.length) void postVitals(this.env, { action: "report", rest });
   }
 
   private async ensureSweep() {
@@ -348,7 +443,8 @@ export class TownRoom extends DurableObject<Env> {
   }
 
   private tick() {
-    if (this.dirty.size === 0) {
+    if (this.fight) this.runFight(Date.now());
+    if (this.dirty.size === 0 && !this.fight) {
       if (++this.quietTicks >= IDLE_TICKS && this.ticker) {
         clearInterval(this.ticker);
         this.ticker = null;
@@ -357,6 +453,7 @@ export class TownRoom extends DurableObject<Env> {
     }
     this.quietTicks = 0;
     const now = Date.now();
+    if (this.dirty.size === 0) return;
     const entries: SnapshotEntry[] = [];
     for (const s of this.dirty) {
       if (!s.player) continue;
@@ -379,6 +476,15 @@ export class TownRoom extends DurableObject<Env> {
     this.sessions.delete(s.ws);
     this.dirty.delete(s);
     if (s.player) {
+      this.flushRest(Date.now(), s);
+      if (this.fight) {
+        this.fight.leave(s.player.uid);
+        this.maybeReport(Date.now(), true);
+        if (![...this.sessions.values()].some((o) => o.player) && this.ticker) {
+          clearInterval(this.ticker);
+          this.ticker = null;
+        }
+      }
       this.broadcast({ t: "leave", id: s.player.id });
       this.log("leave", s, why);
     }
@@ -401,6 +507,141 @@ export class TownRoom extends DurableObject<Env> {
     return id;
   }
 
+  /** Whether the boss room lets this ticket in. Starts the fight from the
+   * ticket's boss claim if none is running. */
+  private admit(s: Session, t: TownTicketPayload, now: number): boolean {
+    let claim = t.boss;
+    if (!claim && this.env.DEV_BOSS) {
+      claim = {
+        event: DEV_EVENT,
+        until: now / 1000 + 3_600,
+        hp: 20_000,
+        maxHp: 20_000,
+      };
+    }
+    if (!claim || claim.until * 1000 <= now) {
+      this.drop(s, TOWN_CLOSE.sealed, "sealed");
+      return false;
+    }
+    // The ticket carries health as of when it was issued: for the boss room
+    // that has to be recent, or a ticket from before a hit could heal you.
+    const issued = (t.exp - TOWN_TICKET_TTL_S) * 1000;
+    if (now - issued > FRESH_TICKET_MS) {
+      this.drop(s, TOWN_CLOSE.auth, "stale ticket");
+      return false;
+    }
+    if (t.hp?.down || (t.hp && t.hp.hp <= 0)) {
+      this.drop(s, TOWN_CLOSE.sealed, "down");
+      return false;
+    }
+    // A new boss after the last one's fight is over (or abandoned): start
+    // fresh rather than turn it away.
+    const old = this.fight;
+    if (
+      old &&
+      claim.event !== old.eventId &&
+      (!old.open || ![...this.sessions.values()].some((o) => o.player))
+    ) {
+      this.fight = null;
+      this.closeScheduled = false;
+    }
+    if (!this.fight) {
+      this.fight = new FightRuntime(claim, now);
+      if (!this.env.TOWN_VITALS_URL && claim.event !== DEV_EVENT) {
+        // The fight will look fine and save nothing: say so, loudly.
+        console.error(
+          JSON.stringify({
+            event: "misconfigured",
+            detail: "TOWN_VITALS_URL is not set: this fight will not be saved",
+            boss: claim.event,
+          }),
+        );
+      }
+    }
+    if (!this.fight.open || claim.event !== this.fight.eventId) {
+      // This fight is over, or it's another boss's: this room is done.
+      this.drop(s, TOWN_CLOSE.closed, "closed");
+      return false;
+    }
+    return true;
+  }
+
+  private onCast(s: Session, message: ArrayBuffer, now: number) {
+    const cast = decodeCastFrame(message);
+    const p = s.player;
+    if (!cast || !p || !this.fight) {
+      this.strike(s);
+      return;
+    }
+    const result = this.fight.cast(p.uid, cast.yaw, cast.pitch, now);
+    if (result === "cooldown") this.strike(s);
+  }
+
+  /** Step the fight and tell everyone what happened. */
+  private runFight(now: number) {
+    const fight = this.fight;
+    if (!fight) return;
+    const out = fight.step(now);
+    for (const o of out) this.dispatch(o);
+    if (fight.closesAt !== null && !this.closeScheduled) {
+      this.closeScheduled = true;
+      void this.ctx.storage.setAlarm(fight.closesAt);
+      console.log(
+        JSON.stringify({
+          event: "fight-over",
+          why: fight.closeWhy,
+          boss: fight.eventId,
+        }),
+      );
+    }
+    this.maybeReport(now);
+  }
+
+  private dispatch(o: Outbound) {
+    if (o.to === "all") {
+      this.broadcast(o.msg);
+      return;
+    }
+    const uid = o.to.uid;
+    for (const s of this.sessions.values())
+      if (s.player?.uid === uid) this.send(s, o.msg);
+  }
+
+  /** Send the fight's health and boss damage to `town-vitals`, one request
+   * at a time; a failed one is retried by the next report unchanged. */
+  private maybeReport(now: number, force = false) {
+    const fight = this.fight;
+    if (!fight || this.reporting) return;
+    const report = fight.report(now, force);
+    if (!report) return;
+    if (!report.hp.length && !report.boss) return;
+    this.reporting = true;
+    void postVitals(this.env, { action: "report", ...report })
+      .then((ok) => {
+        if (ok) fight.reported(report);
+      })
+      .finally(() => {
+        this.reporting = false;
+      });
+  }
+
+  /** Shut the room: the fight ended. Everyone goes back to town. */
+  private closeRoom(now: number) {
+    this.maybeReport(now, true);
+    for (const s of [...this.sessions.values()]) {
+      this.leave(s, "room closed");
+      this.close(s.ws, TOWN_CLOSE.closed, "closed");
+    }
+    if (this.ticker) {
+      clearInterval(this.ticker);
+      this.ticker = null;
+    }
+    // Done with this fight (its last report is on its way); the next boss
+    // gets a fresh room.
+    this.fight = null;
+    this.closeScheduled = false;
+  }
+
   private persist(s: Session) {
     const p = s.player;
     if (p) {
@@ -411,6 +652,7 @@ export class TownRoom extends DurableObject<Env> {
         look: p.look,
         exp: p.exp,
         state: p.state,
+        maxHp: p.maxHp,
       };
     }
     try {

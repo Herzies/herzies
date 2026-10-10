@@ -19,22 +19,26 @@ const FRAMING_LIFT = 1.4;
 const KEY_TURN_SPEED = 2;
 const KEY_TILT_SPEED = 1;
 
-/** Combat mode: the camera comes in over the right shoulder… */
+/** How high and how low the camera may go (polar angle from straight up;
+ * 1.57 is level with the herzie), walking or fighting alike. */
+const WALK_POLAR = { min: 0.85, max: 1.6 } as const;
+
+/** Combat mode keeps the walking camera: same distance, same tilt limits,
+ * same angle. The mouse still aims by turning the view (radians per pixel
+ * moved). The one change is that the herzie sits lower on the screen, so the
+ * crosshair in the middle isn't right on top of it. (It used to come in over
+ * the shoulder and level off; that is gone.) */
 const COMBAT = {
-  distance: 6.4,
-  /** …levelled off to look along the ground, not down at it… */
-  polar: 1.5,
-  /** …the herzie a little left of and below the crosshair… */
-  shoulder: 1.75,
-  lift: 1.05,
-  look: 1.5,
-  /** …free to look higher and lower than when walking… */
-  minPolar: 0.55,
-  maxPolar: 1.78,
-  /** …turned by the mouse: radians per pixel moved. */
+  distance: DISTANCE,
+  shoulder: 0,
+  /** How far up the view is shifted past the player: more than walking, so
+   * the herzie stands lower, clear of the crosshair. */
+  lift: FRAMING_LIFT + 0.5,
+  look: LOOK_HEIGHT,
+  minPolar: WALK_POLAR.min,
+  maxPolar: WALK_POLAR.max,
   sensitivity: 0.0024,
 } as const;
-const WALK_POLAR = { min: 0.85, max: 1.45 } as const;
 
 /** Camera shake (Squirrel Eiserloh's "trauma"): hits add trauma, which
  * drains away; the camera shakes by its square, so small knocks barely
@@ -92,7 +96,7 @@ export function CameraRig() {
     if (!c || !body) return;
     time.current += delta;
 
-    // Into or out of combat: over the shoulder, the mouse aiming — or back.
+    // Into or out of combat: the mouse aims (the view itself stays put).
     if (combat.on !== fighting.current) {
       const on = combat.on;
       fighting.current = on;
@@ -113,7 +117,6 @@ export function CameraRig() {
           : DISTANCE;
       });
       combat.lookX = combat.lookY = 0;
-      if (on) void c.rotatePolarTo(COMBAT.polar, true);
     }
     if (combat.on) {
       // Right looks right; up looks up.
@@ -179,8 +182,8 @@ export function CameraRig() {
       maxDistance={DISTANCE}
       // Polar angle is from straight up: keep between a high three-quarter
       // view and just above the ground.
-      minPolarAngle={0.85}
-      maxPolarAngle={1.45}
+      minPolarAngle={WALK_POLAR.min}
+      maxPolarAngle={WALK_POLAR.max}
       smoothTime={0.12}
       draggingSmoothTime={0.04}
       dollyToCursor={false}

@@ -3127,30 +3127,9 @@ export function bossDamagePerMinute(
   return BOSS_DAMAGE_PER_MINUTE * (1 + stats.sonicPower / 100);
 }
 
-/** What one sonic wave deals before sonic power: the training dummies'
- * numbers. */
-export const HIT_BASE = 100;
-/** How far a hit's damage wanders either way of its base, as a fraction. */
-export const HIT_SPREAD = 0.1;
-
-/** One hit of a herzie's sonic wave: the base, raised by sonic power the
- * way boss damage is (10 sonic power is +10%), wandering ±HIT_SPREAD; and,
- * at crit chance percent, a critical hit — crit damage percent on top.
- * `rand` is two uniform [0, 1) draws (spread, then crit), so a test can
- * pin them. */
-export function hitDamage(
-  stats: Pick<HerzieStats, "sonicPower" | "critChance" | "critDamage">,
-  rand: () => number = Math.random,
-): { amount: number; crit: boolean } {
-  const spread = 1 + (rand() * 2 - 1) * HIT_SPREAD;
-  const crit = rand() < stats.critChance / 100;
-  const amount =
-    HIT_BASE *
-    (1 + stats.sonicPower / 100) *
-    spread *
-    (crit ? 1 + stats.critDamage / 100 : 1);
-  return { amount: Math.round(amount), crit };
-}
+// One sonic wave's damage lives in combat.ts so the Town server can use it
+// without the item catalog; re-exported here for everyone else.
+export { HIT_BASE, HIT_SPREAD, hitDamage } from "./combat.js";
 
 // getItemColor lived here. It moved to item-canvas.ts — the module its three
 // dependencies already come from — so that this file stays free of the

@@ -4,11 +4,13 @@ import { useRapier } from "@react-three/rapier";
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import type { TownMap } from "../map";
+import { townNet } from "../net/townNet";
 import { useTownRuntime } from "../runtime";
 import { sfxCast, sfxCharge, sfxImpact } from "../sfx";
 import { pushDamageNumber } from "./DamageNumbers";
 import { liveDummies } from "./Dummies";
 import { DUMMY, hitDummy, meterDps } from "./dummy";
+import { bossFight } from "./fight";
 import { enterMouseLook, exitMouseLook } from "./mouseLook";
 import { CAST_BUFFER_MS, combat, setCombat, shake } from "./state";
 import { assistTarget, type Vec3, WAVE, waveField } from "./waves";
@@ -37,8 +39,8 @@ const typing = (t: EventTarget | null) => {
  * Fighting on the testing ground: combat mode's controls, your aim, your
  * casts, and every wave in flight — where it lands and what that does.
  *
- * - Tab: into combat mode (the mouse aims, the camera comes in over the
- *   shoulder); Esc, or Tab again: out.
+ * - Tab: into combat mode (the mouse aims; the camera stays as it is);
+ *   Esc, or Tab again: out.
  * - Left click or F: cast. Holding it keeps casting; a press mid-cast is
  *   kept for the next.
  *
@@ -250,6 +252,13 @@ export function Combat({
           reach: a.blocked && !target ? toAim + 0.2 : WAVE.range,
           target,
         });
+        // In the boss room, the server does the hitting: tell it the aim.
+        if (bossFight.on) {
+          townNet().sendCast(
+            Math.atan2(dir.x, dir.z),
+            Math.asin(Math.max(-1, Math.min(1, dir.y))),
+          );
+        }
         sfxCast();
         shake(0.05);
       }

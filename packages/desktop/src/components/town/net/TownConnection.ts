@@ -3,17 +3,21 @@ import {
   castsBetween,
   decodeSnapshot,
   EntityBuffer,
+  encodeCastFrame,
   encodeStateFrame,
   parseServerMessage,
   quantizeState,
   ServerClock,
+  type ServerMessage,
   TOWN_CLOSE,
   TOWN_FLAG_AFK,
   TOWN_MAX_SHARDS,
   TOWN_PING,
   TOWN_PONG,
   TOWN_PROTOCOL,
+  TOWN_SINGLE_SHARD,
   TOWN_TICK_MS,
+  TOWN_TICKETED_MAPS,
   type TownLook,
   type TownMapId,
   type TownPlayer,
@@ -56,7 +60,17 @@ const MAX_PENDING_CASTS = 3;
 
 export type TownConnectionOptions = {
   map: TownMapId;
-  getTicket: () => Promise<TownTicket>;
+  /** A ticket for `map`: rooms like the boss's cave need one issued for
+   * them. Rejects with a reason the server gave (`sealed`, `down`) when it
+   * turns the herzie away. */
+  getTicket: (map: TownMapId) => Promise<TownTicket>;
+  /** The boss room's fight messages (see `ServerMessage`), as they come. */
+  onMessage?: (m: ServerMessage) => void;
+  /** The server won't have us in this room: the cave is sealed, or we're
+   * knocked out. */
+  onRefused?: (why: "sealed" | "down" | "full") => void;
+  /** The room shut behind us (the fight ended). */
+  onRoomClosed?: () => void;
   /** Where the player's herzie is now. */
   readState: () => TownState;
   /** The server refused a move: put the herzie back here. */
@@ -104,7 +118,10 @@ export class TownConnection {
   private shard = 0;
   private attempt = 0;
   private ticket: TownTicket | null = null;
+  /** The map the held ticket was issued for. */
+  private ticketMap: TownMapId | null = null;
   private seq = 0;
+  private castSeq = 0;
   private lastSent: TownState | null = null;
   private lastHeard = 0;
   private afk = false;
@@ -173,7 +190,8 @@ export class TownConnection {
   async refreshLook() {
     if (!this.ws || this.status !== "online") return;
     try {
-      this.ticket = await this.opts.getTicket();
+      this.ticket = await this.opts.getTicket(this.opts.map);
+      this.ticketMap = this.opts.map;
       this.sendJson({ t: "ticket", ticket: this.ticket.ticket });
       this.scheduleRenew();
     } catch {
@@ -192,6 +210,14 @@ export class TownConnection {
       ticket = await this.freshTicket();
     } catch (e) {
       if (!this.wanted) return;
+      const refusal = (["sealed", "down"] as const).find((r) =>
+        String(e).includes(r),
+      );
+      if (refusal) {
+        this.setStatus("offline");
+        this.opts.onRefused?.(refusal);
+        return;
+      }
       if (String(e).includes("off")) {
         this.setStatus("off");
         this.retry(OFF_RETRY_MS);
@@ -237,8 +263,17 @@ export class TownConnection {
 
   private async freshTicket(): Promise<TownTicket> {
     const t = this.ticket;
-    if (t && t.exp - Date.now() / 1000 > RENEW_EARLY_S) return t;
-    this.ticket = await this.opts.getTicket();
+    // The boss room reads your health off the ticket, so one is fetched
+    // for every visit rather than reusing one from before you were hurt.
+    if (
+      t &&
+      this.ticketMap === this.opts.map &&
+      !TOWN_TICKETED_MAPS.has(this.opts.map) &&
+      t.exp - Date.now() / 1000 > RENEW_EARLY_S
+    )
+      return t;
+    this.ticket = await this.opts.getTicket(this.opts.map);
+    this.ticketMap = this.opts.map;
     return this.ticket;
   }
 
@@ -255,6 +290,12 @@ export class TownConnection {
         this.setStatus("replaced");
         return;
       case TOWN_CLOSE.full:
+        // A room that is one shared fight has no next shard: it's full.
+        if (TOWN_SINGLE_SHARD.has(this.opts.map)) {
+          this.setStatus("offline");
+          this.opts.onRefused?.("full");
+          return;
+        }
         // Spill into the next shard straight away.
         this.shard = (this.shard + 1) % TOWN_MAX_SHARDS;
         this.retry(0);
@@ -262,6 +303,16 @@ export class TownConnection {
       case TOWN_CLOSE.auth:
         this.ticket = null;
         break;
+      case TOWN_CLOSE.sealed:
+        this.ticket = null;
+        this.setStatus("offline");
+        this.opts.onRefused?.("sealed");
+        return;
+      case TOWN_CLOSE.closed:
+        this.ticket = null;
+        this.setStatus("offline");
+        this.opts.onRoomClosed?.();
+        return;
       case TOWN_CLOSE.kicked:
         this.setStatus("offline");
         this.retry(Math.max(KICKED_MIN_MS, this.backoff()));
@@ -330,6 +381,8 @@ export class TownConnection {
         this.attempt = 0;
         this.remotes.clear();
         for (const p of m.players) this.addRemote(p);
+        if (m.fight) this.clock.observe(m.fight.now, performance.now());
+        this.opts.onMessage?.(m);
         this.setStatus("online");
         this.emit();
         this.startLoops();
@@ -354,7 +407,18 @@ export class TownConnection {
         this.lastSent = null;
         this.opts.onCorrect?.(m.x, m.z);
         return;
+      default:
+        // The boss room's fight.
+        this.opts.onMessage?.(m);
     }
+  }
+
+  /** A sonic cast aimed at (`yaw`, `pitch`): the boss room counts it.
+   * Other rooms ignore the frame. */
+  sendCast(yaw: number, pitch: number) {
+    if (this.status !== "online") return;
+    this.castSeq = (this.castSeq + 1) & 0xffff;
+    this.sendRaw(encodeCastFrame({ seq: this.castSeq, yaw, pitch }));
   }
 
   private addRemote(p: TownPlayer) {
@@ -413,7 +477,8 @@ export class TownConnection {
     this.renewTimer = setTimeout(async () => {
       this.renewTimer = null;
       try {
-        this.ticket = await this.opts.getTicket();
+        this.ticket = await this.opts.getTicket(this.opts.map);
+        this.ticketMap = this.opts.map;
         this.sendJson({ t: "ticket", ticket: this.ticket.ticket });
         this.scheduleRenew();
       } catch {

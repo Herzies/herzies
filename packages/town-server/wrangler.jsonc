@@ -8,6 +8,8 @@
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TownRoom"] }],
   "observability": { "enabled": true }
+  // Var: TOWN_VITALS_URL, the `town-vitals` edge function's URL (bench rest
+  // and fight HP are reported there; unset, the room reports nothing).
   // Secret: TOWN_TICKET_SECRET (`wrangler secret put`, same value as the
   // Supabase edge function's). Locally it comes from .dev.vars.
 }

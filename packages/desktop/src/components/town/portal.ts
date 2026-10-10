@@ -5,10 +5,11 @@ import {
   objectAt,
   type TownMap,
 } from "./map";
+import { mapById } from "./maps";
 
 /**
- * Portals: an arch with a swirling disc in it, standing on one island and
- * leading to another. Walk through it (or press E beside it) and you're
+ * Portals: a swirling disc of light floating in the air, standing on one
+ * island and leading to another. Walk through it (or press E beside it) and you're
  * there, stepping out of the portal on the far side that leads back.
  */
 
@@ -27,10 +28,19 @@ export const PORTAL_REACH = 2.6;
 export const PORTAL_HALF_WIDTH = 1.05;
 /** Where you arrive: this far out in front of the portal on the far side. */
 const STEP_OUT = 2.4;
+/** A portal into a room (a cave's mouth) stands this far in front of its
+ * cell's middle. The cave behind it is solid right up to its face, and a
+ * herzie's body (0.55 across from its middle) can't get its middle to a
+ * plane that close; so the plane stands out where it can be crossed. */
+export const MOUTH_FORWARD = 0.5;
 
 /** Every portal on the map: facing the way it was turned, else the middle
  * of the island. */
-export function portalsOf(map: TownMap): Portal[] {
+export function portalsOf(
+  map: TownMap,
+  /** Whether a map is a room (default: ask the maps there are). */
+  isRoom: (id: MapId) => boolean = (id) => !!mapById(id).room,
+): Portal[] {
   const out: Portal[] = [];
   for (let row = 0; row < map.size; row++) {
     for (let col = 0; col < map.size; col++) {
@@ -38,12 +48,14 @@ export function portalsOf(map: TownMap): Portal[] {
       const key = `${col},${row}`;
       const to = map.portals?.[key]?.to;
       if (!to) continue;
-      const [x, z] = cellCenter(map, col, row);
+      const [cx, cz] = cellCenter(map, col, row);
+      const yaw = facingAt(map, col, row) ?? Math.atan2(-cx, -cz);
+      const forward = isRoom(to) ? MOUTH_FORWARD : 0;
       out.push({
         key,
-        x,
-        z,
-        yaw: facingAt(map, col, row) ?? Math.atan2(-x, -z),
+        x: cx + Math.sin(yaw) * forward,
+        z: cz + Math.cos(yaw) * forward,
+        yaw,
         to,
       });
     }

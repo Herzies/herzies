@@ -88,6 +88,10 @@ export type TownMap = {
   origin: [x: number, y: number, z: number];
   /** Whether you can fight here (the testing ground's dummies). */
   combat?: boolean;
+  /** An enclosed room instead of an island in the sky: no sky, clouds or
+   * other islands, a floor and walls, and a lamp-lit dark. The boss's
+   * cave. Room maps aren't drawn as islands in anyone else's sky. */
+  room?: "dark";
   /** Where each portal ("O") leads: "col,row" → link. */
   portals?: Record<string, PortalLink>;
   /** size rows of size terrain chars (OFF where off the island). */
@@ -149,9 +153,9 @@ export function pruneFacing(map: TownMap): TownMap {
     : { ...map, facing };
 }
 
-/** Visitor kinds with a spot of their own, as the editor names them. */
+/** Visitor kinds with a spot of their own, as the editor names them. (The
+ * boss has none: it is in its cave, not in town.) */
 export const SPOT_NAMES: Record<string, string> = {
-  boss_fight: "Boss",
   merchant: "George",
   song_hunt: "Orphiez",
   treat_trader: "Nandor",
@@ -290,6 +294,9 @@ export function parseMap(json: unknown): TownMap {
   if (!isOrigin(m.origin)) errors.push("origin: expected [x, y, z]");
   if (m.combat !== undefined && typeof m.combat !== "boolean") {
     errors.push("combat: expected true or false");
+  }
+  if (m.room !== undefined && m.room !== "dark") {
+    errors.push('room: expected "dark"');
   }
   const size = m.size as number;
   if (
@@ -434,12 +441,13 @@ export function serializeMap(map: TownMap): string {
     ? `\n  "portals": { ${links.map(([k, l]) => `${JSON.stringify(k)}: { "to": ${JSON.stringify(l.to)} }`).join(", ")} },`
     : "";
   const combat = map.combat ? `\n  "combat": true,` : "";
+  const room = map.room ? `\n  "room": ${JSON.stringify(map.room)},` : "";
   return `{
   "version": ${map.version},
   "id": ${JSON.stringify(map.id)},
   "name": ${JSON.stringify(map.name)},
   "size": ${map.size},
-  "origin": [${map.origin.join(", ")}],${combat}${portals}
+  "origin": [${map.origin.join(", ")}],${combat}${room}${portals}
   "spawn": { "at": ${pt(map.spawn.at)}, "heading": ${map.spawn.heading} },
   "spots": {${spots ? `\n${spots}\n  ` : ""}},
   "spare": [${map.spare.map(pt).join(", ")}],${facing}

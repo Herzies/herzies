@@ -12,6 +12,8 @@ export type TownInput = {
   turnRight: boolean;
   tiltUp: boolean;
   tiltDown: boolean;
+  /** Shift held: run. */
+  sprint: boolean;
   /** Mouse buttons held over the world. */
   mouseLeft: boolean;
   mouseRight: boolean;
@@ -26,6 +28,8 @@ const MOVE_KEYS: Record<string, keyof TownInput> = {
   ArrowRight: "turnRight",
   ArrowUp: "tiltUp",
   ArrowDown: "tiltDown",
+  ShiftLeft: "sprint",
+  ShiftRight: "sprint",
 };
 
 const idle = (): TownInput => ({
@@ -37,6 +41,7 @@ const idle = (): TownInput => ({
   turnRight: false,
   tiltUp: false,
   tiltDown: false,
+  sprint: false,
   mouseLeft: false,
   mouseRight: false,
 });
@@ -78,6 +83,10 @@ export function useTownInput(
       );
     };
     const onKeyDown = (e: KeyboardEvent) => {
+      // Tab is the game's (it starts a fight on the testing ground), not the
+      // browser's: don't let it walk focus along the buttons and links. In
+      // a text field it still moves between fields.
+      if (e.code === "Tab" && !typing(e.target)) e.preventDefault();
       if (e.metaKey || e.ctrlKey || e.altKey || typing(e.target)) return;
       if (e.code === "KeyE" && !e.repeat) {
         interact.current();

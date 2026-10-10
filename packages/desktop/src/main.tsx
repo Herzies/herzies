@@ -204,8 +204,10 @@ function App() {
   const [eventsScreen, setEventsScreen] = useState<
     "boss" | "merchant" | "world" | null
   >(null);
-  const [bossHatedGenres, setBossHatedGenres] = useState<string[]>([]);
   const [chatProfileCode, setChatProfileCode] = useState<string | null>(null);
+  /** Where Back on an opened profile goes, if not just the Social tab: set
+   * when a profile is opened from the Town. */
+  const [profileReturn, setProfileReturn] = useState<View | null>(null);
   const [selfProfile, setSelfProfile] = useState<HerzieProfile | null>(null);
   const [ignoredIncomingTradeId, setIgnoredIncomingTradeId] = useState<
     string | null
@@ -347,17 +349,9 @@ function App() {
               e.type === "merchant",
           ).length,
         );
-        const boss = events.find((e) => e.type === "boss_fight");
-        // Drives the red genre pills on the now-playing card, so the player
-        // can see a track is hurting the boss without opening the Events tab.
-        setBossHatedGenres(
-          ((boss?.config as { hatedGenres?: string[] } | undefined)
-            ?.hatedGenres ?? []) as string[],
-        );
       })
       .catch(() => {
         setVisitorsInTown(0);
-        setBossHatedGenres([]);
       });
   }, []);
 
@@ -541,6 +535,8 @@ function App() {
         setTradeTarget(null);
       }
       setSelfProfile(null);
+      // Moving on from the profile: Back no longer goes anywhere special.
+      if (v !== "friends") setProfileReturn(null);
       if (v === view) {
         setRootKeys((keys) => ({ ...keys, [v]: (keys[v] ?? 0) + 1 }));
       }
@@ -935,7 +931,6 @@ function App() {
               onOpenProfile={handleOpenSelfProfile}
               onOpenSettings={() => switchView("settings")}
               onActivity={addLog}
-              bossHatedGenres={bossHatedGenres}
             />
           )}
         </div>
@@ -957,6 +952,9 @@ function App() {
               stageOverride={stageOverride}
               openProfileCode={chatProfileCode}
               onProfileOpened={() => setChatProfileCode(null)}
+              onProfileBack={() => {
+                if (profileReturn) switchView(profileReturn);
+              }}
               tab={friendsTab}
               onTabChange={setFriendsTab}
               onActivity={addLog}
@@ -1022,6 +1020,11 @@ function App() {
             playerSeed={herzie?.friendCode}
             playerStage={stageOverride ?? herzie?.stage}
             musicPlaying={!!state.nowPlaying}
+            onOpenProfile={(code) => {
+              // Back from this profile returns to the Town.
+              setChatProfileCode(code);
+              if (switchView("friends")) setProfileReturn("events");
+            }}
           />
         </div>
 

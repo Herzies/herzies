@@ -1,0 +1,61 @@
+/**
+ * The Town server's line to `town-vitals`: signed with the ticket secret,
+ * since the Worker has no database access. Failures are logged and dropped;
+ * what's lost is a few seconds of bench regen, and a fight's HP re-sends on
+ * the next report.
+ */
+import { signVitalsRequest } from "@herzies/shared/town-net";
+import type { Env } from "./room";
+
+export type VitalsReport = {
+  action: "report";
+  /** Absolute HP for players in a fight. */
+  hp?: { uid: string; hp: number }[];
+  /** Extra HP earned resting on a bench. */
+  rest?: { uid: string; bonus: number }[];
+  /** Damage dealt to the boss, named by `batch` so a retry isn't counted
+   * twice. */
+  boss?: {
+    event: string;
+    batch: string;
+    damage: { uid: string; damage: number }[];
+  };
+};
+
+/** Send a report. Resolves true if `town-vitals` took it. A room with no
+ * `TOWN_VITALS_URL` (local dev, most tests) reports nothing. */
+export async function postVitals(
+  env: Pick<Env, "TOWN_TICKET_SECRET" | "TOWN_VITALS_URL">,
+  report: VitalsReport,
+): Promise<boolean> {
+  if (!env.TOWN_VITALS_URL) return false;
+  const body = JSON.stringify(report);
+  const ts = Date.now();
+  const nonce = crypto.randomUUID();
+  try {
+    const res = await fetch(env.TOWN_VITALS_URL, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-vitals-ts": String(ts),
+        "x-vitals-nonce": nonce,
+        "x-vitals-sig": await signVitalsRequest(
+          body,
+          ts,
+          nonce,
+          env.TOWN_TICKET_SECRET,
+        ),
+      },
+      body,
+    });
+    if (!res.ok) {
+      console.log(
+        JSON.stringify({ event: "vitals-failed", status: res.status }),
+      );
+    }
+    return res.ok;
+  } catch (e) {
+    console.log(JSON.stringify({ event: "vitals-error", detail: String(e) }));
+    return false;
+  }
+}

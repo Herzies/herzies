@@ -12,7 +12,11 @@ import { cn } from "../lib/utils";
 import type { ChatMessage } from "../tauri-bridge";
 import { LoadingSplash } from "./LoadingSplash";
 import { type EventCard, formatIn, isDown } from "./TownScene";
+import { TownVitals } from "./TownVitals";
+import { BossHud } from "./town/BossHud";
+import { setCave } from "./town/cave";
 import { useChatBubbles } from "./town/chatBubbles";
+import { resetBossFight } from "./town/combat/fight";
 import { useCombat } from "./town/combat/state";
 import type { TownMap } from "./town/map";
 import { useTownNet, useTownNetVersion } from "./town/net/townNet";
@@ -37,6 +41,7 @@ export function TownWorld({
   cards,
   paused,
   onOpen,
+  onOpenProfile,
   player,
   notice,
   chatOverlay = false,
@@ -57,6 +62,8 @@ export function TownWorld({
   cards: EventCard[];
   paused: boolean;
   onOpen: (openKey: string) => void;
+  /** Another player's name was clicked: open their profile. */
+  onOpenProfile?: (friendCode: string) => void;
   /** The player's own herzie. */
   player: { seed: string; stage: number; equipped?: Equipped | null };
   /** Music is playing: the herzie dances when it stands still. */
@@ -94,30 +101,52 @@ export function TownWorld({
   useEffect(() => {
     if (isTownMapId(map.id)) net.setMap(map.id);
   }, [map.id, net]);
+  // Out of the boss room, the fight is forgotten.
+  useEffect(() => {
+    if (map.id !== "bossroom") resetBossFight();
+  }, [map.id]);
+  // The cave's door and sign follow the boss in the events.
+  const bossCard = cards.find((c) => c.type === "boss_fight");
+  const bossStatus = bossCard?.status;
+  const bossAt = bossCard?.at;
+  const bossDown = bossCard ? isDown(bossCard) : false;
+  useEffect(() => {
+    const at = bossAt ? new Date(bossAt).getTime() : Number.NaN;
+    if (bossStatus === "live" && bossDown) setCave({ kind: "defeated" });
+    else if (bossStatus === "live" && Number.isFinite(at))
+      setCave({ kind: "open", endsAt: at });
+    else if (bossStatus === "scheduled" && Number.isFinite(at))
+      setCave({ kind: "soon", startsAt: at });
+    else setCave({ kind: "sealed" });
+  }, [bossStatus, bossAt, bossDown]);
   const spots = useMemo<TownSpot[]>(() => {
     if (Object.keys(map.spots).length === 0) return [];
     const { spots: SPOTS, spare: SPARE_SPOTS } = spotsOf(map);
     let spare = 0;
-    return cards
-      .filter((c) => c.type !== "treat_trader" || c.status !== "idle")
-      .map((card) => {
-        const live = card.status === "live";
-        return {
-          key: spotKey(card),
-          card,
-          at: SPOTS[card.type] ?? SPARE_SPOTS[spare++ % SPARE_SPOTS.length],
-          standing: live && !isDown(card),
-          status: live
-            ? card.type === "boss_fight" && card.detail
-              ? card.detail
+    return (
+      cards
+        // The boss isn't in town: it's in its cave (see CaveTimer).
+        .filter((c) => c.type !== "boss_fight")
+        .filter((c) => c.type !== "treat_trader" || c.status !== "idle")
+        .map((card) => {
+          const live = card.status === "live";
+          return {
+            key: spotKey(card),
+            card,
+            at: SPOTS[card.type] ?? SPARE_SPOTS[spare++ % SPARE_SPOTS.length],
+            standing: live && !isDown(card),
+            status: live
+              ? card.type === "boss_fight" && card.detail
+                ? card.detail
+                : card.at
+                  ? `${formatIn(card.at)} left`
+                  : "in town"
               : card.at
-                ? `${formatIn(card.at)} left`
-                : "in town"
-            : card.at
-              ? `in ${formatIn(card.at)}`
-              : "away",
-        };
-      });
+                ? `in ${formatIn(card.at)}`
+                : "away",
+          };
+        })
+    );
   }, [cards, map]);
 
   const equippedKey = JSON.stringify(player.equipped ?? null);
@@ -184,6 +213,7 @@ export function TownWorld({
             player={look}
             paused={paused}
             onOpen={onOpen}
+            onOpenProfile={onOpenProfile}
             onNearChange={setNear}
             onBenchChange={setBench}
             onPortalChange={setPortalTo}
@@ -192,6 +222,12 @@ export function TownWorld({
           />
         </Suspense>
       )}
+      {!paused ? (
+        <>
+          <TownVitals inFight={!!map.combat} chatOverlay={chatOverlay} />
+          <BossHud name={bossCard?.title ?? "The boss"} />
+        </>
+      ) : null}
       {map.combat && !paused ? (
         <div
           className={cn(
@@ -237,7 +273,7 @@ export function TownWorld({
           type="button"
           onClick={() => onOpen(talkTo)}
           className={cn(
-            "absolute left-1/2 z-30 -translate-x-1/2 cursor-pointer whitespace-nowrap rounded border border-white/40 bg-black/70 px-2 py-1 text-ui text-white hover:bg-black/85",
+            "absolute left-1/2 z-30 -translate-x-1/2 cursor-pointer whitespace-nowrap rounded border-0 bg-black/35 px-2.5 py-1 text-ui text-white backdrop-blur-md hover:bg-black/50",
             // Above the dock (chat + tab bar) floating over the world.
             chatOverlay
               ? "bottom-[calc(var(--dock-height,0px)+12px)]"
@@ -254,13 +290,17 @@ export function TownWorld({
             townLive.benchPressed = true;
           }}
           className={cn(
-            "absolute left-1/2 z-30 -translate-x-1/2 cursor-pointer whitespace-nowrap rounded border border-[#b07aff]/60 bg-black/70 px-2 py-1 text-ui text-white hover:bg-black/85",
+            "absolute left-1/2 z-30 -translate-x-1/2 cursor-pointer whitespace-nowrap rounded border-0 bg-black/35 px-2.5 py-1 text-ui text-white backdrop-blur-md hover:bg-black/50",
             chatOverlay
               ? "bottom-[calc(var(--dock-height,0px)+12px)]"
               : "bottom-3",
           )}
         >
-          {portalTo.id === "home" ? "Back to " : "Enter the "}
+          {portalTo.id === "home"
+            ? "Back to "
+            : portalTo.room
+              ? "Enter "
+              : "Enter the "}
           {portalTo.name} <span className="text-text-dim">[E]</span>
         </button>
       ) : bench ? (
@@ -270,7 +310,7 @@ export function TownWorld({
             townLive.benchPressed = true;
           }}
           className={cn(
-            "absolute left-1/2 z-30 -translate-x-1/2 cursor-pointer whitespace-nowrap rounded border border-white/40 bg-black/70 px-2 py-1 text-ui text-white hover:bg-black/85",
+            "absolute left-1/2 z-30 -translate-x-1/2 cursor-pointer whitespace-nowrap rounded border-0 bg-black/35 px-2.5 py-1 text-ui text-white backdrop-blur-md hover:bg-black/50",
             chatOverlay
               ? "bottom-[calc(var(--dock-height,0px)+12px)]"
               : "bottom-3",

@@ -25,13 +25,52 @@ const SUN_SHADOW_SOFTNESS = 2;
 /** Moonlight casts paler shadows than the sun. */
 const MOON_SHADOW = 0.7;
 
+/** A dark room: no sun, a faint cool glow from nowhere, and the lamps
+ * (which come on in the dark) doing the real lighting. Applied after the
+ * midnight look, overriding what makes it the open sky. */
+function applyRoomLook(
+  night: number,
+  scene: THREE.Scene,
+  hemi: THREE.HemisphereLight | null,
+  sun: THREE.DirectionalLight | null,
+) {
+  if (scene.background instanceof THREE.Color) {
+    scene.background.set(ROOM_AIR);
+  }
+  if (scene.fog instanceof THREE.Fog) {
+    scene.fog.color.set(ROOM_AIR);
+    scene.fog.far = 0.9;
+  }
+  if (hemi) {
+    hemi.color.set("#6f5f96");
+    hemi.groundColor.set("#1a1426");
+    hemi.intensity = 0.7;
+  }
+  if (sun) {
+    sun.intensity = 0;
+    sun.shadow.intensity = 0;
+  }
+  townLook.w = 0;
+  nightLights.level = 1;
+  ambient.uNight.value = Math.max(night, 1);
+  ambient.uLight.value.set(0.62, 0.58, 0.8);
+}
+
+const ROOM_AIR = "#09070e";
+
 /**
  * The time of day, applied: the sky, the fog and background, the haze
  * and cloud shadows, the lights, the windows and the herzies' tint, from
  * the local clock (or `hour`, to look at a given time). Re-read a few
  * times a second — the day doesn't move faster than that.
  */
-export function DayLight({ hour }: { hour?: Hour }) {
+export function DayLight({
+  hour,
+  room = false,
+}: {
+  hour?: Hour;
+  room?: boolean;
+}) {
   const hemi = useRef<THREE.HemisphereLight>(null);
   const sun = useRef<THREE.DirectionalLight>(null);
   const scene = useThree((s) => s.scene);
@@ -47,7 +86,12 @@ export function DayLight({ hour }: { hour?: Hour }) {
 
   useFrame(({ clock }) => {
     const t = clock.elapsedTime;
-    const h = typeof hour === "function" ? hour() : (hour ?? localHours());
+    // A room is always the dead of night, whatever the clock says.
+    const h = room
+      ? 0
+      : typeof hour === "function"
+        ? hour()
+        : (hour ?? localHours());
     if (t - last.current.at < 0.25 && h === last.current.hour) return;
     last.current = { at: t, hour: h };
     const look = dayLook(h);
@@ -85,6 +129,7 @@ export function DayLight({ hour }: { hour?: Hour }) {
     nightLights.level = look.windows;
     ambient.uNight.value = look.night;
     ambient.uLight.value.copy(look.herzieLight);
+    if (room) applyRoomLook(look.night, scene, hemi.current, sun.current);
   });
 
   return (

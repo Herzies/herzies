@@ -1115,11 +1115,19 @@ pub async fn api_fetch_active_events(client: &Client) -> Option<ActiveEventsResp
 }
 
 /// A signed pass into the multiplayer Town (`town-ticket` edge function):
-/// `{ ticket, url, exp }`. Errors are `"off"` when multiplayer is switched
-/// off server-side or not deployed yet (don't retry soon) and
-/// `"unavailable"` otherwise.
-pub async fn api_fetch_town_ticket(client: &Client) -> Result<serde_json::Value, String> {
-    let url = format!("{}/town-ticket", functions_base());
+/// `{ ticket, url, exp, vitals }`. `map` asks for a pass to a room that
+/// needs one (the boss room); the rest take any. Errors are `"off"` when
+/// multiplayer is switched off server-side or not deployed yet (don't retry
+/// soon), the server's own reason (`"sealed"`, `"down"`) when it turns the
+/// herzie away, and `"unavailable"` otherwise.
+pub async fn api_fetch_town_ticket(
+    client: &Client,
+    map: Option<&str>,
+) -> Result<serde_json::Value, String> {
+    let mut url = format!("{}/town-ticket", functions_base());
+    if let Some(map) = map {
+        url.push_str(&format!("?map={}", urlencoding::encode(map)));
+    }
     let anon = supabase_anon_key();
     let resp = api_fetch_full(client, reqwest::Method::GET, &url, None, Some(&anon))
         .await
@@ -1131,11 +1139,41 @@ pub async fn api_fetch_town_ticket(client: &Client) -> Result<serde_json::Value,
         return Err("off".into());
     }
     if !status.is_success() {
+        // A refusal the app can act on (the cave is sealed, you're knocked
+        // out) comes with a one-word reason.
+        if status == reqwest::StatusCode::FORBIDDEN {
+            if let Ok(data) = resp.json::<serde_json::Value>().await {
+                if let Some(reason) = data["reason"].as_str() {
+                    return Err(reason.to_string());
+                }
+            }
+        }
         log::warn!("town-ticket fetch failed: HTTP {status}");
         return Err("unavailable".into());
     }
     resp.json::<serde_json::Value>().await.map_err(|e| {
         log::warn!("town-ticket response parse failed: {e}");
+        "unavailable".to_string()
+    })
+}
+
+/// A herzie's health through the `town-vitals` edge function: `"vitals"`
+/// reads it, `"respawn"` brings a knocked-out herzie back with half its
+/// health. Returns `{ vitals }`.
+pub async fn api_town_vitals(client: &Client, action: &str) -> Result<serde_json::Value, String> {
+    let url = format!("{}/town-vitals", functions_base());
+    let anon = supabase_anon_key();
+    let body = serde_json::json!({ "action": action });
+    let resp = api_fetch_full(client, reqwest::Method::POST, &url, Some(body), Some(&anon))
+        .await
+        .ok_or_else(|| "unavailable".to_string())?;
+    let status = resp.status();
+    if !status.is_success() {
+        log::warn!("town-vitals {action} failed: HTTP {status}");
+        return Err("unavailable".into());
+    }
+    resp.json::<serde_json::Value>().await.map_err(|e| {
+        log::warn!("town-vitals response parse failed: {e}");
         "unavailable".to_string()
     })
 }

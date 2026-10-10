@@ -994,8 +994,17 @@ async fn fetch_active_events() -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
-async fn fetch_town_ticket() -> Result<serde_json::Value, String> {
-    api::api_fetch_town_ticket(&api::http()).await
+async fn fetch_town_ticket(map: Option<String>) -> Result<serde_json::Value, String> {
+    api::api_fetch_town_ticket(&api::http(), map.as_deref()).await
+}
+
+#[tauri::command]
+async fn town_vitals(action: String) -> Result<serde_json::Value, String> {
+    // Only what a player may ask of their own herzie.
+    if action != "vitals" && action != "respawn" {
+        return Err("unknown action".into());
+    }
+    api::api_town_vitals(&api::http(), &action).await
 }
 
 #[tauri::command]
@@ -2559,6 +2568,7 @@ pub fn run() {
             get_ghost_mode,
             fetch_active_events,
             fetch_town_ticket,
+            town_vitals,
             fetch_previous_hunt,
             play_hint_audio,
             fetch_leaderboard,

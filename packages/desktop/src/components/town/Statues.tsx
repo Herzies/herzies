@@ -6,8 +6,9 @@ import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import type { Look } from "../TownScene";
 import { ambient } from "./ambient";
-
 import { cellCenter, facingAt, objectAt, type TownMap } from "./map";
+import { nameOpacity } from "./nameFade";
+import { townSave } from "./runtime";
 
 /** Who a statue shows: whoever came out on top in the last boss fight. */
 export type Champion = { look: Look; name: string };
@@ -78,7 +79,14 @@ function Statue({
   useEffect(() => () => herzie.dispose(), [herzie]);
   // Posed once, where it stands (its bands are laid out by world height).
   const posed = useRef<HerzieModel | null>(null);
+  // The plaque fades in as you come near.
+  const plaque = useRef<HTMLDivElement>(null);
   useFrame(() => {
+    if (plaque.current) {
+      plaque.current.style.opacity = String(
+        nameOpacity(Math.hypot(townSave.x - x, townSave.z - z)),
+      );
+    }
     if (posed.current === herzie) return;
     herzie.update(0, 0);
     posed.current = herzie;
@@ -109,7 +117,11 @@ function Statue({
         zIndexRange={[20, 0]}
         style={{ pointerEvents: "none" }}
       >
-        <div className="whitespace-nowrap rounded bg-black/55 px-1.5 py-0.5 text-center text-[9px] leading-tight text-text-dim">
+        <div
+          ref={plaque}
+          style={{ opacity: 0 }}
+          className="whitespace-nowrap rounded bg-black/55 px-1.5 py-0.5 text-center text-[9px] leading-tight text-text-dim"
+        >
           champion
           <div className="text-[10px] text-white">{champion.name}</div>
         </div>

@@ -7,8 +7,12 @@ import { DistantIslands, HomeIsland, SKY, Sky } from "./Islands";
 import { islandRadius, type TownMap } from "./map";
 import { Particles } from "./Particles";
 import { MapColliders, Props } from "./Props";
+import { Room } from "./Room";
 import { HOME_MAP, TOWN_MAPS_LOCAL } from "./runtime";
 import { type Champion, PLACEHOLDER_CHAMPION } from "./Statues";
+
+/** The cave's air: nearly black, a touch of violet. */
+const DARK_ROOM = "#09070e";
 
 /** A fresh id per map object, so its colliders are rebuilt as a whole when
  * the map editor's preview changes the map. */
@@ -47,10 +51,25 @@ export function World({
   /** Who the statues show (see Statues). */
   champion?: Champion;
 }) {
+  // Rooms (the boss's cave) aren't islands in anyone's sky.
   const rest = (others ?? [...TOWN_MAPS_LOCAL.values()]).filter(
-    (m) => m.id !== map.id,
+    (m) => m.id !== map.id && !m.room,
   );
   const [ox, oy, oz] = map.origin;
+  if (map.room) {
+    return (
+      <>
+        <color attach="background" args={[DARK_ROOM]} />
+        <fog attach="fog" args={[DARK_ROOM, HAZE_START, 0]} />
+        <DayLight hour={hour} room />
+        <Room map={map} />
+        <Ground map={map} />
+        <Props map={map} champion={champion} />
+        <Particles map={map} />
+        <MapColliders key={mapId(map)} map={map} />
+      </>
+    );
+  }
   return (
     <>
       <color attach="background" args={[SKY.horizon]} />

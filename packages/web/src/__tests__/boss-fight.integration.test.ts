@@ -381,18 +381,10 @@ describe("leaderboard", () => {
 });
 
 /**
- * Damage from actually listening, through the real /sync route and the
- * canonical processSync — the piece that was missing entirely before: the
- * tests above only ever call deal_boss_damage directly.
+ * Listening used to wear the boss down (processSync's step 4b). The boss is
+ * fought live in its cave now, so a sync, whatever it plays, deals none.
  */
-describe("damage from listening", () => {
-  /**
-   * Rewind both billing clocks. Without this every sync after the first lands
-   * inside BILL_COOLDOWN_MS (8s), bills zero minutes, and deals zero damage —
-   * which would read as a broken hook rather than a throttled test.
-   * `last_billed_at` is what processSync measures from; `last_synced_at` only
-   * falls back for rows predating that column.
-   */
+describe("listening", () => {
   async function backdate(userId: string, msAgo = 10 * 60_000) {
     const at = new Date(Date.now() - msAgo).toISOString();
     await admin()
@@ -401,155 +393,27 @@ describe("damage from listening", () => {
       .eq("user_id", userId);
   }
 
-  async function listen(
-    user: { userId: string; accessToken: string },
-    genres: string[],
-    minutes = 5,
-  ) {
-    await backdate(user.userId);
+  it("no longer damages the boss, even for a hated genre", async () => {
+    const boss = (await spawnBoss(500))!;
+    const player = await makePlayer();
+    await backdate(player.userId);
+
     const res = await syncRoute(
-      authenticatedRequest("/sync", user.accessToken, {
-        nowPlaying: { title: "Track", artist: "Artist" },
-        minutesListened: minutes,
-        genres,
-      }),
-    );
-    expect(res.status).toBe(200);
-    return res.json();
-  }
-
-  async function damageOf(eventId: string, userId: string) {
-    const { data } = await admin()
-      .from("boss_damage")
-      .select("damage")
-      .eq("event_id", eventId)
-      .eq("user_id", userId)
-      .maybeSingle();
-    return data?.damage ?? 0;
-  }
-
-  it("damages the boss by the minutes billed for a hated genre", async () => {
-    const boss = (await spawnBoss(500))!;
-    const player = await makePlayer();
-
-    // A raw Last.fm tag, not the GENRES value: "techno" is classified onto
-    // "electronic", which is what this boss hates.
-    await listen(player, ["techno"], 5);
-
-    expect(await damageOf(boss, player.userId)).toBeCloseTo(5, 5);
-    expect((await bossState(boss)).hp).toBeCloseTo(495, 5);
-  });
-
-  it("deals more damage with sonic power equipped", async () => {
-    const boss = (await spawnBoss(500))!;
-    const plain = await makePlayer();
-    const boomer = await createTestUser();
-    // Box of Boom: +10 sonic power, which is +10% damage.
-    // A worn item is an owned copy, so the boomer has to own the box.
-    await createTestHerzie(boomer.userId, {
-      inventory_v2: { boombox: 1 },
-      equipped: { ground_left: "boombox" },
-    });
-
-    await listen(plain, ["techno"], 5);
-    await listen(boomer, ["techno"], 5);
-
-    // The plain player in the same test is the baseline, so the delta is the
-    // claim rather than a magic number.
-    const base = await damageOf(boss, plain.userId);
-    expect(base).toBeCloseTo(5, 4);
-    expect(await damageOf(boss, boomer.userId)).toBeCloseTo(base * 1.1, 4);
-  });
-
-  it("deals nothing for a genre the boss doesn't hate", async () => {
-    const boss = (await spawnBoss(500))!;
-    const player = await makePlayer();
-
-    await listen(player, ["jazz"], 5);
-
-    expect(await damageOf(boss, player.userId)).toBe(0);
-    expect((await bossState(boss)).hp).toBe(500);
-  });
-
-  it("deals nothing when the track has no tags at all", async () => {
-    // XP falls back to classifying an empty tag list as ["pop"]. The boss
-    // path must not inherit that: "we don't know what this is" is not a hit.
-    const boss = (await spawnBoss(500))!;
-    const player = await makePlayer();
-
-    await listen(player, [], 5);
-
-    expect(await damageOf(boss, player.userId)).toBe(0);
-  });
-
-  it("hits on any classified genre, not just the first", async () => {
-    // listen_log only keeps classifyGenre(...)[0]; damage must not.
-    const boss = (await spawnBoss(500))!;
-    const player = await makePlayer();
-
-    await listen(player, ["jazz", "techno"], 5);
-
-    expect(await damageOf(boss, player.userId)).toBeCloseTo(5, 5);
-  });
-
-  it("uses billed minutes, not the minutes the client claims", async () => {
-    // The client asserts minutesListened. The server caps it at 10 per sync,
-    // and that capped number is what must reach the boss.
-    const boss = (await spawnBoss(500))!;
-    const player = await makePlayer();
-
-    await listen(player, ["techno"], 10);
-    const first = await damageOf(boss, player.userId);
-    // Must see damage land first. Without this the assertion below passes
-    // vacuously — 0 before, 0 after — on a hook that never fires at all.
-    expect(first).toBeCloseTo(10, 5);
-
-    // Inside the cooldown, the same claim bills nothing and so deals nothing.
-    await syncRoute(
       authenticatedRequest("/sync", player.accessToken, {
         nowPlaying: { title: "Track", artist: "Artist" },
-        minutesListened: 10,
+        minutesListened: 5,
         genres: ["techno"],
       }),
     );
+    expect(res.status).toBe(200);
 
-    expect(await damageOf(boss, player.userId)).toBeCloseTo(first, 5);
-  });
-
-  it("announces the killing blow, and only the killing blow", async () => {
-    const boss = (await spawnBoss(8))!;
-    const player = await makePlayer();
-
-    const body = await listen(player, ["techno"], 5); // 8 -> 3
-    expect(
-      (body.notifications ?? []).some(
-        (n: { title: string }) => n.title === "Boss defeated!",
-      ),
-    ).toBe(false);
-
-    const finisher = await listen(player, ["techno"], 5); // 3 -> 0
-    const kill = (finisher.notifications ?? []).find(
-      (n: { title: string }) => n.title === "Boss defeated!",
-    );
-    expect(kill).toBeDefined();
-    // House style for log/notification lines: the name in quotes.
-    expect(kill.message).toBe('You landed the killing blow on "Test Boss".');
-    expect((await bossState(boss)).killed).toBe(true);
-  });
-
-  it("stops dealing damage once the boss is dead", async () => {
-    const boss = (await spawnBoss(5))!;
-    const player = await makePlayer();
-
-    await listen(player, ["techno"], 5); // kills it
-    const atDeath = await damageOf(boss, player.userId);
-    // Same trap as above: prove it actually died before asserting nothing
-    // more lands, or a dead hook passes this too.
-    expect(atDeath).toBeGreaterThan(0);
-    expect((await bossState(boss)).killed).toBe(true);
-
-    await listen(player, ["techno"], 5);
-
-    expect(await damageOf(boss, player.userId)).toBeCloseTo(atDeath, 5);
+    expect((await bossState(boss)).hp).toBe(500);
+    const { data } = await admin()
+      .from("boss_damage")
+      .select("damage")
+      .eq("event_id", boss)
+      .eq("user_id", player.userId)
+      .maybeSingle();
+    expect(data).toBeNull();
   });
 });

@@ -146,7 +146,7 @@ function cellsWhere(
 
 // --- Fireflies ---------------------------------------------------------------
 
-const FIREFLIES = 80;
+const FIREFLIES = 30;
 const FIREFLY = new THREE.Color("#fff08a");
 
 /** Warm sparks drifting low over tall grass, by the water and under the
@@ -199,7 +199,7 @@ function Fireflies({ map }: { map: TownMap }) {
         f.x + Math.sin(p) * 1.2 + Math.sin(p * 2.7) * 0.3,
         f.y + Math.sin(p * 1.3) * 0.4,
         f.z + Math.cos(p * 0.9) * 1.2,
-        0.24,
+        0.13,
         glow * night,
       );
     });
