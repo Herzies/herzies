@@ -139,6 +139,20 @@ export const GOLD_RAMP = [
 ] as const;
 
 /**
+ * Nandor the Treatless, the Halloween vampire NPC. Like GOLD_RAMP no item
+ * grants it: a deathly pale face that drains down into a blood-red cloak and
+ * then nearly black, so he reads as a vampire rather than as a red herzie.
+ */
+export const NANDOR_RAMP = [
+  "#F2E9EE",
+  "#D3C2CC",
+  "#A8344A",
+  "#7A1426",
+  "#4A0A16",
+  "#1E0308",
+] as const;
+
+/**
  * Boss ramp — the only ramp that is not built around a CREATURE_PALETTE hue,
  * because a boss is deliberately not a colour a herzie could hatch with.
  *

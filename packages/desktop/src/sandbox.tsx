@@ -1,25 +1,20 @@
 import "./globals.css";
 import {
-  type BoomboxConfig,
   CREATURE_BODY_TYPES,
   CREATURE_PALETTE,
   CREATURE_PARAM_BOUNDS,
   type CreatureParams,
   clearCreatureCache,
   type DangleConfig,
-  DEFAULT_BOOMBOX_CONFIG,
-  DEFAULT_CAMERA_DISTANCE,
-  DEFAULT_CAMERA_TILT_DEG,
   DEFAULT_DANGLE_CONFIG,
+  type Equipped,
   earAngleFromDeg,
   earAngleToDeg,
   generateCreatureParams,
-  setCameraDistance,
-  setCameraTilt,
 } from "@herzies/shared";
 import { useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Herzie3D } from "./components/Herzie3D";
+import { HerzieWithSky } from "./components/HerzieWithSky";
 import { cn } from "./lib/utils";
 
 const WEARABLE_OPTIONS = [
@@ -32,7 +27,6 @@ const WEARABLE_OPTIONS = [
   "witch-hat",
   "fangs",
   "pumpkin-spice",
-  "jack-o-lantern",
   "ghost",
   "blood-moon",
 ];
@@ -51,28 +45,10 @@ function Sandbox() {
   const [draggable, setDraggable] = useState(true);
   const [showSky, setShowSky] = useState(false);
   const [wearables, setWearables] = useState<string[]>([]);
-  const [boombox, setBoombox] = useState<BoomboxConfig>(DEFAULT_BOOMBOX_CONFIG);
   const [dangle, setDangle] = useState<DangleConfig>(DEFAULT_DANGLE_CONFIG);
-  const [camera, setCamera] = useState(DEFAULT_CAMERA_DISTANCE);
-  const changeCamera = (distance: number) => {
-    setCameraDistance(distance);
-    clearCreatureCache();
-    setCamera(distance);
-  };
-  const [tilt, setTilt] = useState(DEFAULT_CAMERA_TILT_DEG);
-  const changeTilt = (degrees: number) => {
-    setCameraTilt(degrees);
-    clearCreatureCache();
-    setTilt(degrees);
-  };
   const swings =
     wearables.includes("gold-chain") || wearables.includes("pearl-necklace");
   const [jsonOpen, setJsonOpen] = useState(false);
-
-  const patchBoombox = (partial: Partial<BoomboxConfig>) => {
-    setBoombox((b) => ({ ...b, ...partial }));
-    clearCreatureCache();
-  };
 
   const applySeed = useCallback((id: string) => {
     setParams(generateCreatureParams(id));
@@ -104,10 +80,7 @@ function Sandbox() {
     userId,
     stage,
     creatureParams: params,
-    ...(wearables.includes("boombox") ? { boomboxConfig: boombox } : {}),
     ...(swings ? { dangleConfig: dangle } : {}),
-    cameraDistance: camera,
-    cameraTiltDeg: tilt,
   });
 
   const copyJson = async () => {
@@ -283,70 +256,6 @@ function Sandbox() {
           </div>
         </Section>
 
-        {wearables.includes("boombox") && (
-          <Section title="boombox">
-            <SliderField
-              label="yaw (°)"
-              value={boombox.yawDeg}
-              bounds={{ min: -180, max: 180, step: 1 }}
-              onChange={(v) => patchBoombox({ yawDeg: v })}
-            />
-            <SliderField
-              label="offset x"
-              value={boombox.offsetX}
-              bounds={{ min: -4, max: 4, step: 0.05 }}
-              onChange={(v) => patchBoombox({ offsetX: v })}
-            />
-            <SliderField
-              label="offset y (down +)"
-              value={boombox.offsetY}
-              bounds={{ min: -3, max: 3, step: 0.05 }}
-              onChange={(v) => patchBoombox({ offsetY: v })}
-            />
-            <SliderField
-              label="scale"
-              value={boombox.scale}
-              bounds={{ min: 0.3, max: 3, step: 0.05 }}
-              onChange={(v) => patchBoombox({ scale: v })}
-            />
-            <div className="mt-1.5">
-              <Btn
-                onClick={() => {
-                  setBoombox(DEFAULT_BOOMBOX_CONFIG);
-                  clearCreatureCache();
-                }}
-              >
-                reset boombox
-              </Btn>
-            </div>
-          </Section>
-        )}
-
-        <Section title="camera">
-          <SliderField
-            label="distance (lower = more perspective)"
-            value={camera}
-            bounds={{ min: 1.5, max: 12, step: 0.1 }}
-            onChange={changeCamera}
-          />
-          <SliderField
-            label="tilt ° (higher = more top of head)"
-            value={tilt}
-            bounds={{ min: -20, max: 45, step: 0.5 }}
-            onChange={changeTilt}
-          />
-          <div className="mt-1.5">
-            <Btn
-              onClick={() => {
-                changeCamera(DEFAULT_CAMERA_DISTANCE);
-                changeTilt(DEFAULT_CAMERA_TILT_DEG);
-              }}
-            >
-              reset camera
-            </Btn>
-          </div>
-        </Section>
-
         {swings && (
           <Section title="spin physics">
             <SliderField
@@ -402,18 +311,14 @@ function Sandbox() {
       </aside>
 
       <main className="flex min-h-screen flex-1 items-center justify-center p-6">
-        <Herzie3D
-          // Remount on a camera move or tilt: the component memoizes its
-          // frames, and nothing it's given changes when only the camera does.
-          key={`${camera}:${tilt}`}
+        <HerzieWithSky
           userId={userId}
           stage={stage}
           size={size}
           animate={animate}
           isPlaying={isPlaying}
-          wearables={wearables}
+          equipped={toEquipped(wearables)}
           creatureParams={params}
-          boomboxConfig={boombox}
           dangleConfig={dangle}
           showSky={showSky}
           draggable={draggable}
@@ -421,6 +326,27 @@ function Sandbox() {
       </main>
     </div>
   );
+}
+
+/** The sandbox's wearable checkboxes as equipped slots. */
+function toEquipped(ids: string[]): Equipped {
+  const out: Equipped = {};
+  for (const id of ids) {
+    if (id === "headphones" || id === "rainbow-headband" || id === "witch-hat")
+      out.head = id;
+    else if (id === "clouds" || id === "stars" || id === "blood-moon")
+      out.scenery = id;
+    else if (id === "gold-chain" || id === "pearl-necklace" || id === "bowtie")
+      out.body = id;
+    else if (id === "fangs") out.face = id;
+    else if (id === "pumpkin-spice") out.color = id;
+    else if (id === "ghost" || id === "spirit-orb") out.spirit = id;
+    else if (id === "boombox") {
+      if (!out.ground_left) out.ground_left = id;
+      else out.ground_right = id;
+    }
+  }
+  return out;
 }
 
 function Section({

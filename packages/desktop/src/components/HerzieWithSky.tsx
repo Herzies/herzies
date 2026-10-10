@@ -1,20 +1,18 @@
 import {
-  type BoomboxConfig,
   type CreatureParams,
   type DangleConfig,
   type Equipped,
   equippedItemIds,
   ITEM_SETS,
   SH,
-  Herzie3D as SharedHerzie3D,
   Sky,
 } from "@herzies/shared";
+import { HerzieView } from "@herzies/shared/gl";
 import { useEffect, useState } from "react";
-import { useWindowVisible } from "../tauri-bridge";
+import { useWindowFocused } from "../tauri-bridge";
 
 // Each set's effect is its own overlay below, so they're looked up by id.
 const PRISMATIC_SET = ITEM_SETS.find((set) => set.id === "prismatic");
-const HAUNTED_SET = ITEM_SETS.find((set) => set.id === "haunted");
 
 /** The height of the herzie's stage on Home and on the Herzie view — the same
  * in both, so the creature sits in the same place when switching between
@@ -34,10 +32,7 @@ interface Props {
   animate?: boolean;
   isPlaying?: boolean;
   equipped?: Equipped;
-  /** @deprecated Prefer `equipped`. */
-  wearables?: string[];
   creatureParams?: CreatureParams;
-  boomboxConfig?: BoomboxConfig;
   dangleConfig?: DangleConfig;
   showSky?: boolean;
   draggable?: boolean;
@@ -53,21 +48,19 @@ interface Props {
 }
 
 /**
- * Desktop-tuned composition of the shared Sky + Herzie3D primitives.
+ * Desktop-tuned composition of the shared Sky + HerzieView.
  *
  * The Tauri window is fixed-size (380×520, borderless), so the sky is anchored
  * to the window's top edge and the drag area spans the full window width.
  */
-export function Herzie3D({
+export function HerzieWithSky({
   userId,
   stage = 1,
   size = 5,
   animate,
   isPlaying = false,
   equipped,
-  wearables,
   creatureParams,
-  boomboxConfig,
   dangleConfig,
   showSky = true,
   draggable,
@@ -90,10 +83,10 @@ export function Herzie3D({
     return () => window.removeEventListener("resize", onResize);
   }, [size]);
 
-  const visible = useWindowVisible();
-  const paused = !visible || pausedProp;
+  const focused = useWindowFocused();
+  const paused = !focused || pausedProp;
 
-  const ids = equipped ? equippedItemIds(equipped) : (wearables ?? []);
+  const ids = equipped ? equippedItemIds(equipped) : [];
   const scenery = ids.includes("blood-moon")
     ? "blood-moon"
     : ids.includes("stars")
@@ -103,8 +96,6 @@ export function Herzie3D({
         : null;
   const prismaticActive =
     !!PRISMATIC_SET && PRISMATIC_SET.itemIds.every((id) => ids.includes(id));
-  const hauntedActive =
-    !!HAUNTED_SET && HAUNTED_SET.itemIds.every((id) => ids.includes(id));
 
   // Fades the bottom of the prismatic layer into transparency (revealing
   // the app's own background underneath, whatever that is, rather than
@@ -134,25 +125,6 @@ export function Herzie3D({
           }}
         />
       )}
-      {showSky && hauntedActive && (
-        // Fog from the bottom of the window, the opposite end from the
-        // prismatic glow: purple haze over a low orange glow.
-        <div
-          aria-hidden="true"
-          className="animate-haunted-fog pointer-events-none fixed"
-          style={{
-            bottom: 0,
-            left: 0,
-            width: "100vw",
-            height: "40vh",
-            background:
-              "radial-gradient(ellipse at 30% 100%, #8E6FB0 0%, transparent 60%), radial-gradient(ellipse at 75% 100%, #F27B13 0%, transparent 55%)",
-            backgroundSize: "160% 100%",
-            mixBlendMode: "screen",
-            zIndex: 0,
-          }}
-        />
-      )}
       {showSky && (
         <Sky
           userId={userId}
@@ -170,7 +142,7 @@ export function Herzie3D({
           }}
         />
       )}
-      <SharedHerzie3D
+      <HerzieView
         userId={userId}
         stage={stage}
         size={size}
@@ -178,9 +150,7 @@ export function Herzie3D({
         animate={animate}
         isPlaying={isPlaying}
         equipped={equipped}
-        wearables={wearables}
         creatureParams={creatureParams}
-        boomboxConfig={boomboxConfig}
         dangleConfig={dangleConfig}
         draggable={draggable}
         paused={paused}
@@ -203,8 +173,8 @@ export function Herzie3D({
 
 /** The canvas is taller than the stage and centred on it, so its bottom edge
  * hangs (canvasH - stage) / 2 below the stage's. The feet go that far plus
- * the floor inset above the canvas bottom. Must match the shared Herzie3D's
- * canvas sizing (SH rows of size * 1.35 px). */
+ * the floor inset above the canvas bottom. Must match HerzieView's
+ * box sizing (SH rows of size * 1.35 px). */
 function groundInsetFor(size: number): number {
   const canvasH = Math.ceil(SH * size * 1.35);
   return (canvasH - HERZIE_STAGE_HEIGHT) / 2 + STAGE_FLOOR_INSET;

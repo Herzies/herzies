@@ -105,6 +105,8 @@ export interface AppState {
   incomingFriendRequests: FriendRequestSummary[];
   outgoingFriendRequests: FriendRequestSummary[];
   pendingDrops: PendingDrop[];
+  /** A login was accepted and its herzie and items are still loading. */
+  loggingIn: boolean;
 }
 
 export const herzies = {
@@ -207,12 +209,14 @@ export const herzies = {
       targetUnitId,
       protectionItemId,
     }),
-  /** Buys from Good ol' George during a live merchant event. Throws with the
-   * server's message (sold out, limit reached, not enough currency, …). */
+  /** Buys from a live merchant (Good ol' George, for coins) or treat_trader
+   * (Nandor the Treatless, for treats). Throws with the server's message
+   * (sold out, limit reached, not enough currency, …). `newCurrency` is
+   * absent when paid in treats. */
   buyFromMerchant: (eventId: string, itemId: string, quantity: number) =>
     invoke<{
       spent: number;
-      newCurrency: number;
+      newCurrency?: number;
       inventory: Inventory;
     }>("buy_from_merchant", { eventId, itemId, quantity }),
   /** Manually collects one specific pending world drop by id. Resolves
@@ -283,6 +287,11 @@ export const herzies = {
     invoke<{ events: GameEvent[]; upcoming?: GameEvent[] }>(
       "fetch_active_events",
     ),
+
+  /** A signed pass into the multiplayer Town. Rejects with "off" when
+   * multiplayer is switched off server-side. */
+  fetchTownTicket: () =>
+    invoke<{ ticket: string; url: string; exp: number }>("fetch_town_ticket"),
 
   fetchPreviousHunt: () =>
     invoke<{ events: GameEvent[]; next: GameEvent | null }>(
@@ -367,7 +376,8 @@ export const herzies = {
 // Pin state only changes through herzies.setWindowPinned above, so a
 // module-level cache + listener set is enough to keep hooks in sync without
 // a dedicated Tauri event.
-let pinnedCache = false;
+// Pinned by default (see SettingsFile in storage.rs).
+let pinnedCache = true;
 const pinnedListeners = new Set<(pinned: boolean) => void>();
 
 function updatePinnedCache(pinned: boolean) {
@@ -421,10 +431,10 @@ export function useGhostMode(): boolean {
 }
 
 /**
- * Tracks whether the Tauri window currently has focus. The tray window is
- * hidden when blurred (200ms after on_blur in tray.rs), so this doubles as
- * "is the window actually visible to the user." Use it to pause animation
- * timers that would otherwise keep burning CPU while the window is invisible.
+ * Tracks whether the Tauri window currently has focus. Use it to pause
+ * animation timers whenever the user isn't actively in the window — an
+ * unpinned window auto-hides on blur, and a pinned one is sitting in the
+ * background, so neither is worth burning CPU on.
  */
 export function useWindowFocused(): boolean {
   const [focused, setFocused] = useState(true);
@@ -445,17 +455,6 @@ export function useWindowFocused(): boolean {
     };
   }, []);
   return focused;
-}
-
-/**
- * True while the window is visible to the user: focused, or pinned (pinned
- * windows stay open on blur instead of auto-hiding). Use this instead of
- * useWindowFocused for pausing animations, so a pinned window keeps animating.
- */
-export function useWindowVisible(): boolean {
-  const focused = useWindowFocused();
-  const pinned = useWindowPinned();
-  return focused || pinned;
 }
 
 export type UpdateInstallEvent =

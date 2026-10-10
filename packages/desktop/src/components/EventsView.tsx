@@ -10,30 +10,29 @@ import {
   ItemTypeIcon,
   isVisitorType,
   MERCHANT_NAME,
+  TREAT_TRADER_NAME,
   VISITORS,
   visitorName,
 } from "@herzies/shared";
 import { memo, useEffect, useRef, useState } from "react";
 import { cn } from "../lib/utils";
-import { herzies, useWindowFocused } from "../tauri-bridge";
+import { type ChatMessage, herzies, useWindowFocused } from "../tauri-bridge";
 import { BackButton } from "./BackButton";
 import { BossFightHelp, BossFightPanel, makeDebugBoss } from "./BossFightPanel";
 import ItemInspectOverlay, {
   INSPECT_ORIGIN_ATTR,
   inspectOrigin,
 } from "./ItemInspectOverlay";
-import { VisitorIcon } from "./icons/VisitorIcon";
 import { List } from "./List";
+import { LoadingSplash } from "./LoadingSplash";
 import { MerchantPanel } from "./MerchantPanel";
 import { OrphiezStage } from "./OrphiezStage";
 import { TabButton } from "./TabButton";
+import { type EventCard, formatIn } from "./TownScene";
+import { TownWorld } from "./TownWorld";
 import { View } from "./View";
 import { VisitorHelp } from "./VisitorHelp";
-import {
-  ROW_TEXT_SHADOW,
-  VISITOR_THEMES,
-  VisitorSparkles,
-} from "./VisitorRowTheme";
+import { VISITOR_THEMES } from "./VisitorRowTheme";
 
 function formatCountdown(endsAt: string): string {
   const ms = new Date(endsAt).getTime() - Date.now();
@@ -128,6 +127,49 @@ const DEBUG_MERCHANT: GameEvent = {
   },
 };
 
+/** Fixture Nandor for the Settings debug toggle, like DEBUG_MERCHANT. */
+const DEBUG_TREAT_TRADER: GameEvent = {
+  id: "debug-treat-trader",
+  type: "treat_trader",
+  title: TREAT_TRADER_NAME,
+  description: "He wants your treats.",
+  active: true,
+  startsAt: new Date(Date.now() - 3_600_000).toISOString(),
+  endsAt: new Date(Date.now() + 5 * 86_400_000).toISOString(),
+  config: {
+    stock: [
+      {
+        itemId: "fangs",
+        price: 20,
+        perPlayerLimit: null,
+        totalStock: null,
+        remaining: null,
+        yourBought: 0,
+      },
+      {
+        itemId: "witch-hat",
+        price: 50,
+        perPlayerLimit: 1,
+        totalStock: null,
+        remaining: null,
+        yourBought: 0,
+      },
+      {
+        itemId: "blood-moon",
+        price: 50,
+        perPlayerLimit: 1,
+        totalStock: 100,
+        remaining: 0,
+        yourBought: 0,
+      },
+    ],
+  },
+};
+
+/** Limited visitors: only in Town while visiting or on the way, never as an
+ * idle card. */
+const LIMITED_TYPES = ["treat_trader"];
+
 /** List order of the visitors that always get a card in Town. */
 const EVENT_TYPES: { type: string }[] = [
   { type: "boss_fight" },
@@ -145,33 +187,34 @@ const typeRank = (type: string) => {
   return i === -1 ? EVENT_TYPES.length : i;
 };
 
-type EventCard = {
-  type: string;
-  title: string;
-  description: string | null;
-  status: "live" | "scheduled" | "idle";
-  /** Ends-at when live, starts-at when scheduled. */
-  at: string | null;
-  detail?: string;
-  /** What opening the card selects (an event id, or "song_hunt" for the hunt
-   * view); null when there is nothing to open yet. */
-  openKey: string | null;
-  /** For a stable React key. */
-  eventId?: string;
-};
-
 function EventsViewImpl({
   eventsTabVisible,
   debugForceActive = false,
   debugForceBoss = false,
   debugForceMerchant = false,
+  debugForceTreatTrader = false,
   onScreenChange,
   equipped,
   units = [],
   currency = 0,
   onLog,
   rootKey = 0,
+  playerSeed,
+  playerStage,
+  musicPlaying = false,
+  chatOverlay = false,
+  chatMessages,
 }: {
+  /** Music is playing: the player's herzie dances in the Town, standing
+   * still. */
+  musicPlaying?: boolean;
+  /** The app floats its chat over the bottom of the Town's world. */
+  chatOverlay?: boolean;
+  /** The chat, for lines over the speakers' heads in the Town. */
+  chatMessages?: ChatMessage[];
+  /** The player's herzie, walking around the Town. */
+  playerSeed?: string;
+  playerStage?: number;
   /** Tab stays mounted but hidden; only poll while user is on Events. */
   eventsTabVisible: boolean;
   /** Bumped when the Town tab is re-selected while already on it: back to
@@ -183,9 +226,12 @@ function EventsViewImpl({
   debugForceBoss?: boolean;
   /** Debug: a fixture Good ol' George visit (buying from it will fail). */
   debugForceMerchant?: boolean;
+  /** Debug: a fixture Nandor the Treatless visit (buying from it will fail). */
+  debugForceTreatTrader?: boolean;
   /** Which full-screen event view is open, so the app can recolour the
-   * window: a live boss blacks it out, George turns it gold. */
-  onScreenChange?: (screen: "boss" | "merchant" | null) => void;
+   * window (a live boss or Nandor blacks it out, George turns it gold) or,
+   * for the 3D world, let it fill the window. */
+  onScreenChange?: (screen: "boss" | "merchant" | "world" | null) => void;
   /** Current deck, used to show set progress in the reward preview. */
   equipped?: Equipped | null;
   /** Every owned copy, for George's "N owned" counts. */
@@ -344,13 +390,22 @@ function EventsViewImpl({
         ? "boss_fight"
         : selected === DEBUG_MERCHANT.id && debugForceMerchant
           ? "merchant"
-          : // The previous event too: an ended boss's results stay blacked out.
-            (
-              events.find((e) => e.id === selected) ??
-              (previousEvent?.id === selected ? previousEvent : undefined)
-            )?.type;
+          : selected === DEBUG_TREAT_TRADER.id && debugForceTreatTrader
+            ? "treat_trader"
+            : // The previous event too: an ended boss's results stay blacked out.
+              (
+                events.find((e) => e.id === selected) ??
+                (previousEvent?.id === selected ? previousEvent : undefined)
+              )?.type;
+    // Nandor shares the boss's blackout: a vampire keeps the lights off.
     onScreenChange(
-      open === "boss_fight" ? "boss" : open === "merchant" ? "merchant" : null,
+      selected === null
+        ? "world"
+        : open === "boss_fight" || open === "treat_trader"
+          ? "boss"
+          : open === "merchant"
+            ? "merchant"
+            : null,
     );
   }, [
     selected,
@@ -358,16 +413,11 @@ function EventsViewImpl({
     previousEvent,
     debugForceBoss,
     debugForceMerchant,
+    debugForceTreatTrader,
     onScreenChange,
   ]);
 
-  if (!activeLoaded || !previousLoaded) {
-    return (
-      <div className="flex h-full items-center justify-center text-xs text-text-dim">
-        Loading...
-      </div>
-    );
-  }
+  const loading = !activeLoaded || !previousLoaded;
 
   const back = <BackButton colour="cyan" onClick={() => setSelected(null)} />;
 
@@ -378,9 +428,13 @@ function EventsViewImpl({
     ...events,
     ...(debugBoss ? [debugBoss] : []),
     ...(debugForceMerchant ? [DEBUG_MERCHANT] : []),
+    ...(debugForceTreatTrader ? [DEBUG_TREAT_TRADER] : []),
   ];
 
-  if (selected === null) {
+  // The world stays mounted (hidden and paused) while a visitor's screen is
+  // open: coming back is then instant, instead of rebuilding the whole 3D
+  // Town (its WebGL context, physics, every herzie) behind a blank window.
+  const world = (() => {
     const cards: EventCard[] = [];
     // Older servers don't send `upcoming`, so the hunt falls back to
     // /events/previous-hunt's `next`.
@@ -462,16 +516,37 @@ function EventsViewImpl({
               : "No visit planned yet"),
       });
     }
-    // Anything else live (e.g. a secret track) still gets a card.
+    // Anything else live (e.g. a secret track) still gets a card. A limited
+    // visitor (Nandor) opens his stall like George does.
     for (const e of liveEvents) {
       if (EVENT_TYPES.some((t) => t.type === e.type)) continue;
+      const limited = LIMITED_TYPES.includes(e.type);
       cards.push({
         type: e.type,
         title: visitorName(e.type, e.title),
-        description: e.description ?? taglineOf(e.type) ?? null,
+        description: limited
+          ? null
+          : (e.description ?? taglineOf(e.type) ?? null),
         status: "live",
         at: e.endsAt,
+        openKey: limited ? e.id : null,
+        eventId: e.id,
+        detail: limited ? taglineOf(e.type) : undefined,
+      });
+    }
+    // A limited visitor on the way, so players can save up for him.
+    for (const type of LIMITED_TYPES) {
+      const next = nextByType.get(type);
+      if (!next || liveEvents.some((e) => e.type === type)) continue;
+      cards.push({
+        type,
+        title: visitorName(type, next.title),
+        description: null,
+        status: "scheduled",
+        at: next.startsAt,
         openKey: null,
+        eventId: next.id,
+        detail: "On the way to town",
       });
     }
     // Nearest in time first: what's on now, then what starts soonest, then
@@ -490,428 +565,466 @@ function EventsViewImpl({
     const nextArrival = cards.find((c) => c.status === "scheduled");
 
     return (
-      <View
-        title="Town"
-        colour="cyan"
-        childrenClassName="flex min-h-0 flex-col"
-      >
-        {inTown === 0 && (
-          // An empty Town reads as dead in a way an empty event list never
-          // did, so say it's quiet and who's coming next.
-          <div className="mb-2 border border-dashed border-border px-2 py-1.5 text-center text-ui text-text-dim">
-            Town is quiet right now.
-            {nextArrival?.at ? (
-              <>
-                {" "}
-                <span className="text-text">{nextArrival.title}</span> arrives
-                in {formatIn(nextArrival.at)}.
-              </>
+      // No title: the world fills the window (see onScreenChange "world").
+      <TownWorld
+        loading={loading}
+        chatMessages={chatMessages}
+        chatOverlay={chatOverlay}
+        cards={cards}
+        musicPlaying={musicPlaying}
+        paused={selected !== null || !eventsTabVisible || !focused}
+        onOpen={setSelected}
+        player={{
+          seed: playerSeed ?? "npc:townsfolk",
+          stage: playerStage ?? 1,
+          equipped,
+        }}
+        notice={
+          inTown === 0 ? (
+            // An empty Town reads as dead in a way an empty event list
+            // never did, so say it's quiet and who's coming next.
+            <>
+              Town is quiet right now.
+              {nextArrival?.at ? (
+                <>
+                  {" "}
+                  <span className="text-white">{nextArrival.title}</span>{" "}
+                  arrives in {formatIn(nextArrival.at)}.
+                </>
+              ) : null}
+            </>
+          ) : null
+        }
+      />
+    );
+  })();
+
+  const screen = (() => {
+    if (selected === null) return null;
+    // The Town draws its own splash while it loads (the world and the events
+    // together, so there's one splash rather than one per stage).
+    if (loading) return <LoadingSplash overlay label="loading town" />;
+
+    const selectedEvent =
+      liveEvents.find((e) => e.id === selected) ??
+      (previousEvent?.id === selected ? previousEvent : undefined);
+
+    if (selectedEvent?.type === "boss_fight") {
+      return (
+        <View
+          title="Boss Fight"
+          colour="cyan"
+          childrenClassName="flex min-h-0 flex-col"
+          backButton={back}
+          action={<BossFightHelp event={selectedEvent} />}
+        >
+          <BossFightPanel
+            event={selectedEvent}
+            paused={!eventsTabVisible || !focused}
+            equipped={equipped}
+          />
+        </View>
+      );
+    }
+
+    if (
+      selectedEvent?.type === "merchant" ||
+      selectedEvent?.type === "treat_trader"
+    ) {
+      const nandor = selectedEvent.type === "treat_trader";
+      const colour = nandor ? "red" : "yellow";
+      return (
+        <View
+          title={nandor ? TREAT_TRADER_NAME : MERCHANT_NAME}
+          colour={colour}
+          childrenClassName="flex min-h-0 flex-col"
+          backButton={
+            <BackButton colour={colour} onClick={() => setSelected(null)} />
+          }
+          action={
+            nandor ? (
+              <span className="flex items-center gap-2">
+                {formatCountdown(selectedEvent.endsAt)}
+                <VisitorHelp
+                  label={`What does ${TREAT_TRADER_NAME} want?`}
+                  colour={VISITOR_THEMES.treat_trader.accent}
+                  text="Collect treats by listening to music"
+                />
+              </span>
+            ) : (
+              formatCountdown(selectedEvent.endsAt)
+            )
+          }
+        >
+          <MerchantPanel
+            event={selectedEvent}
+            currency={currency}
+            equipped={equipped}
+            units={units}
+            onBought={() => setReloadKey((k) => k + 1)}
+            onLog={onLog}
+            paused={!eventsTabVisible || !focused}
+          />
+        </View>
+      );
+    }
+
+    if (selected !== "song_hunt") {
+      // The opened event ended between polls.
+      return (
+        <View title="Town" colour="cyan" backButton={back}>
+          <div className="flex h-full items-center justify-center text-center text-xs text-text-dim">
+            They've left town.
+          </div>
+        </View>
+      );
+    }
+
+    const hunt =
+      events.find((e) => e.type === "song_hunt") ??
+      (debugForceActive ? (previousHunt ?? undefined) : undefined);
+    const previousHuntConfig = previousHunt?.config as SongHuntConfig;
+    const previousRewardItem = previousHuntConfig?.rewardItemId
+      ? getItem(previousHuntConfig.rewardItemId)
+      : undefined;
+    const previousFinders = (previousHuntConfig?.firstFinders ?? [])
+      .slice()
+      .sort(
+        (a, b) =>
+          new Date(a.claimedAt).getTime() - new Date(b.claimedAt).getTime(),
+      )
+      .slice(0, 20);
+
+    if (!hunt && (previousHunt || nextHunt)) {
+      const nextStartsAt = nextHunt ? new Date(nextHunt.startsAt) : null;
+      return (
+        <View
+          title="Song Hunt"
+          colour="cyan"
+          childrenClassName="flex min-h-0 flex-col"
+          backButton={back}
+        >
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div>
+              <h2 className="text-ui-2xl mb-3 font-bold">
+                {VISITORS.song_hunt.name}{" "}
+                {nextStartsAt ? (
+                  <span className="text-ui text-text-dim">
+                    (
+                    {Intl.DateTimeFormat("en-US", {
+                      day: "numeric",
+                      month: "short",
+                    }).format(nextStartsAt)}
+                    )
+                  </span>
+                ) : null}
+              </h2>
+
+              <div className="text-ui-lg">
+                {nextStartsAt
+                  ? `Arrives in town in ${formatStartsIn(nextStartsAt)}.`
+                  : "Not in town, and no visit planned yet."}
+              </div>
+            </div>
+
+            {previousHunt ? (
+              <div className="mt-4 flex min-h-0 flex-1 flex-col border-t border-border pt-4">
+                <h2 className="text-ui-lg mb-3 font-bold">
+                  Last visit{" "}
+                  <span className="text-ui text-text-dim">
+                    (
+                    {Intl.DateTimeFormat("en-US", {
+                      day: "numeric",
+                      month: "short",
+                    }).format(new Date(previousHunt.startsAt))}
+                    )
+                  </span>
+                </h2>
+
+                <div className="flex min-h-0 flex-1 flex-col gap-2">
+                  <div className="flex min-h-0 flex-1 flex-col gap-2">
+                    <div className="flex flex-col gap-1">
+                      <h2 className="text-ui font-bold text-text-dim">
+                        The song he was looking for:
+                      </h2>
+                      <div className="text-ui">
+                        {previousHuntConfig?.trackArtist} -{" "}
+                        {previousHuntConfig?.trackTitle}
+                      </div>
+                    </div>
+
+                    {previousHuntConfig.rewardItemId && previousRewardItem ? (
+                      <div className="flex flex-col gap-1">
+                        <h2 className="text-ui font-bold text-text-dim">
+                          Reward:
+                        </h2>
+                        <div
+                          className="flex items-center gap-1 text-ui"
+                          // Inspect grows the card out of this icon.
+                          {...{ [INSPECT_ORIGIN_ATTR]: "hunt-reward" }}
+                        >
+                          <ItemTypeIcon
+                            item={previousRewardItem}
+                            className="h-6 w-6 shrink-0"
+                          />
+                          <button
+                            className="cursor-pointer border-none bg-transparent text-ui underline"
+                            style={{
+                              color:
+                                ITEM_RARITY_COLORS[previousRewardItem.rarity],
+                            }}
+                            type="button"
+                            onClick={() => setInspectOverlay("item")}
+                          >
+                            {previousRewardItem.name}
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    <div className="flex min-h-0 flex-1 flex-col gap-1">
+                      <h2 className="text-ui font-bold text-text-dim">
+                        Finders ({previousFinders.length}):
+                      </h2>
+
+                      <List className="min-h-0 flex-1">
+                        {previousFinders.length > 0 ? (
+                          previousFinders.map((finder, i) => {
+                            const elapsed = formatDuration(
+                              new Date(finder.claimedAt).getTime() -
+                                new Date(previousHunt.startsAt).getTime(),
+                            );
+                            return (
+                              <div
+                                key={`${finder.name}-${finder.claimedAt}`}
+                                className="flex justify-between border-b border-border py-0.5 text-ui last:border-b-0"
+                              >
+                                <span className="text-yellow">
+                                  {i + 1}. {finder.name}
+                                </span>
+                                <span className="text-text-dim">{elapsed}</span>
+                              </div>
+                            );
+                          })
+                        ) : (
+                          <div className="text-ui text-text-dim">
+                            Nobody found it for him last time.
+                          </div>
+                        )}
+                      </List>
+                    </div>
+                  </div>
+                </div>
+              </div>
             ) : null}
           </div>
-        )}
-        <List className="min-h-0 flex-1">
-          <div className="flex flex-col">
-            {cards.map((card) => (
-              <EventCardRow
-                key={`${card.type}-${card.eventId ?? card.status}`}
-                card={card}
-                paused={!eventsTabVisible || !focused}
-                onOpen={
-                  card.openKey
-                    ? () => setSelected(card.openKey as string)
-                    : undefined
-                }
-              />
-            ))}
+
+          {inspectOverlay === "item" && previousHuntConfig?.rewardItemId && (
+            <ItemInspectOverlay
+              itemId={previousHuntConfig.rewardItemId}
+              origin={inspectOrigin("hunt-reward")}
+              onClose={() => setInspectOverlay(null)}
+              equipped={equipped}
+            />
+          )}
+        </View>
+      );
+    }
+
+    if (!hunt) {
+      return (
+        <View title="Song Hunt" colour="cyan" backButton={back}>
+          <div className="flex h-full items-center justify-center text-center text-xs text-text-dim">
+            {VISITORS.song_hunt.name} isn't in town. Check back later!
           </div>
-        </List>
-      </View>
-    );
-  }
+        </View>
+      );
+    }
 
-  const selectedEvent =
-    liveEvents.find((e) => e.id === selected) ??
-    (previousEvent?.id === selected ? previousEvent : undefined);
+    const config = hunt.config as {
+      rewardItemId: string;
+      maxClaims: number;
+      hints: Array<{
+        text: string;
+        unlocksAt: string;
+        unlocked: boolean;
+        hasAudio?: boolean;
+        playsRemaining?: number;
+      }>;
+      firstFinders: Array<{
+        name: string;
+        claimedAt: string;
+      }>;
+    };
 
-  if (selectedEvent?.type === "boss_fight") {
-    return (
-      <View
-        title="Boss Fight"
-        colour="cyan"
-        childrenClassName="flex min-h-0 flex-col"
-        backButton={back}
-        action={<BossFightHelp event={selectedEvent} />}
-      >
-        <BossFightPanel
-          event={selectedEvent}
-          paused={!eventsTabVisible || !focused}
-          equipped={equipped}
-        />
-      </View>
-    );
-  }
-
-  if (selectedEvent?.type === "merchant") {
-    return (
-      <View
-        title={MERCHANT_NAME}
-        colour="yellow"
-        childrenClassName="flex min-h-0 flex-col"
-        backButton={
-          <BackButton colour="yellow" onClick={() => setSelected(null)} />
-        }
-        action={formatCountdown(selectedEvent.endsAt)}
-      >
-        <MerchantPanel
-          event={selectedEvent}
-          currency={currency}
-          equipped={equipped}
-          units={units}
-          onBought={() => setReloadKey((k) => k + 1)}
-          onLog={onLog}
-          paused={!eventsTabVisible || !focused}
-        />
-      </View>
-    );
-  }
-
-  if (selected !== "song_hunt") {
-    // The opened event ended between polls.
-    return (
-      <View title="Town" colour="cyan" backButton={back}>
-        <div className="flex h-full items-center justify-center text-center text-xs text-text-dim">
-          They've left town.
-        </div>
-      </View>
-    );
-  }
-
-  const hunt =
-    events.find((e) => e.type === "song_hunt") ??
-    (debugForceActive ? (previousHunt ?? undefined) : undefined);
-  const previousHuntConfig = previousHunt?.config as SongHuntConfig;
-  const previousRewardItem = previousHuntConfig?.rewardItemId
-    ? getItem(previousHuntConfig.rewardItemId)
-    : undefined;
-  const previousFinders = (previousHuntConfig?.firstFinders ?? [])
-    .slice()
-    .sort(
-      (a, b) =>
-        new Date(a.claimedAt).getTime() - new Date(b.claimedAt).getTime(),
-    )
-    .slice(0, 20);
-
-  if (!hunt && (previousHunt || nextHunt)) {
-    const nextStartsAt = nextHunt ? new Date(nextHunt.startsAt) : null;
     return (
       <View
         title="Song Hunt"
         colour="cyan"
-        childrenClassName="flex min-h-0 flex-col"
+        childrenClassName="flex flex-col h-full"
         backButton={back}
-      >
-        <div className="flex min-h-0 flex-1 flex-col">
-          <div>
-            <h2 className="text-ui-2xl mb-3 font-bold">
-              {VISITORS.song_hunt.name}{" "}
-              {nextStartsAt ? (
-                <span className="text-ui text-text-dim">
-                  (
-                  {Intl.DateTimeFormat("en-US", {
-                    day: "numeric",
-                    month: "short",
-                  }).format(nextStartsAt)}
-                  )
-                </span>
-              ) : null}
-            </h2>
-
-            <div className="text-ui-lg">
-              {nextStartsAt
-                ? `Arrives in town in ${formatStartsIn(nextStartsAt)}.`
-                : "Not in town, and no visit planned yet."}
-            </div>
-          </div>
-
-          {previousHunt ? (
-            <div className="mt-4 flex min-h-0 flex-1 flex-col border-t border-border pt-4">
-              <h2 className="text-ui-lg mb-3 font-bold">
-                Last visit{" "}
-                <span className="text-ui text-text-dim">
-                  (
-                  {Intl.DateTimeFormat("en-US", {
-                    day: "numeric",
-                    month: "short",
-                  }).format(new Date(previousHunt.startsAt))}
-                  )
-                </span>
-              </h2>
-
-              <div className="flex min-h-0 flex-1 flex-col gap-2">
-                <div className="flex min-h-0 flex-1 flex-col gap-2">
-                  <div className="flex flex-col gap-1">
-                    <h2 className="text-ui font-bold text-text-dim">
-                      The song he was looking for:
-                    </h2>
-                    <div className="text-ui">
-                      {previousHuntConfig?.trackArtist} -{" "}
-                      {previousHuntConfig?.trackTitle}
-                    </div>
-                  </div>
-
-                  {previousHuntConfig.rewardItemId && previousRewardItem ? (
-                    <div className="flex flex-col gap-1">
-                      <h2 className="text-ui font-bold text-text-dim">
-                        Reward:
-                      </h2>
-                      <div
-                        className="flex items-center gap-1 text-ui"
-                        // Inspect grows the card out of this icon.
-                        {...{ [INSPECT_ORIGIN_ATTR]: "hunt-reward" }}
-                      >
-                        <ItemTypeIcon
-                          item={previousRewardItem}
-                          className="h-6 w-6 shrink-0"
-                        />
-                        <button
-                          className="cursor-pointer border-none bg-transparent text-ui underline"
-                          style={{
-                            color:
-                              ITEM_RARITY_COLORS[previousRewardItem.rarity],
-                          }}
-                          type="button"
-                          onClick={() => setInspectOverlay("item")}
-                        >
-                          {previousRewardItem.name}
-                        </button>
-                      </div>
-                    </div>
-                  ) : null}
-
-                  <div className="flex min-h-0 flex-1 flex-col gap-1">
-                    <h2 className="text-ui font-bold text-text-dim">
-                      Finders ({previousFinders.length}):
-                    </h2>
-
-                    <List className="min-h-0 flex-1">
-                      {previousFinders.length > 0 ? (
-                        previousFinders.map((finder, i) => {
-                          const elapsed = formatDuration(
-                            new Date(finder.claimedAt).getTime() -
-                              new Date(previousHunt.startsAt).getTime(),
-                          );
-                          return (
-                            <div
-                              key={`${finder.name}-${finder.claimedAt}`}
-                              className="flex justify-between border-b border-border py-0.5 text-ui last:border-b-0"
-                            >
-                              <span className="text-yellow">
-                                {i + 1}. {finder.name}
-                              </span>
-                              <span className="text-text-dim">{elapsed}</span>
-                            </div>
-                          );
-                        })
-                      ) : (
-                        <div className="text-ui text-text-dim">
-                          Nobody found it for him last time.
-                        </div>
-                      )}
-                    </List>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : null}
-        </div>
-
-        {inspectOverlay === "item" && previousHuntConfig?.rewardItemId && (
-          <ItemInspectOverlay
-            itemId={previousHuntConfig.rewardItemId}
-            origin={inspectOrigin("hunt-reward")}
-            onClose={() => setInspectOverlay(null)}
-            equipped={equipped}
+        action={
+          <VisitorHelp
+            label="What is a song hunt?"
+            colour={VISITOR_THEMES.song_hunt.accent}
+            text={`${VISITORS.song_hunt.name} is looking for a song. Work it out from the clues and play it — the first ${config.maxClaims} to find it get a reward.`}
+            rewards={[
+              {
+                label: "Reward",
+                itemId: config.rewardItemId,
+                note: `${config.maxClaims - config.firstFinders.length} left`,
+              },
+            ]}
           />
-        )}
-      </View>
-    );
-  }
+        }
+      >
+        <OrphiezStage paused={!eventsTabVisible || !focused} />
+        {hunt.description ? (
+          <div className="mt-1 shrink-0 text-center text-ui text-text-dim">
+            {hunt.description}
+          </div>
+        ) : null}
 
-  if (!hunt) {
-    return (
-      <View title="Song Hunt" colour="cyan" backButton={back}>
-        <div className="flex h-full items-center justify-center text-center text-xs text-text-dim">
-          {VISITORS.song_hunt.name} isn't in town. Check back later!
-        </div>
-      </View>
-    );
-  }
-
-  const config = hunt.config as {
-    rewardItemId: string;
-    maxClaims: number;
-    hints: Array<{
-      text: string;
-      unlocksAt: string;
-      unlocked: boolean;
-      hasAudio?: boolean;
-      playsRemaining?: number;
-    }>;
-    firstFinders: Array<{
-      name: string;
-      claimedAt: string;
-    }>;
-  };
-
-  return (
-    <View
-      title="Song Hunt"
-      colour="cyan"
-      childrenClassName="flex flex-col h-full"
-      backButton={back}
-      action={
-        <VisitorHelp
-          label="What is a song hunt?"
-          colour={VISITOR_THEMES.song_hunt.accent}
-          text={`${VISITORS.song_hunt.name} is looking for a song. Work it out from the clues and play it — the first ${config.maxClaims} to find it get a reward.`}
-          rewards={[
-            {
-              label: "Reward",
-              itemId: config.rewardItemId,
-              note: `${config.maxClaims - config.firstFinders.length} left`,
-            },
-          ]}
-        />
-      }
-    >
-      <OrphiezStage paused={!eventsTabVisible || !focused} />
-      {hunt.description ? (
-        <div className="mt-1 shrink-0 text-center text-ui text-text-dim">
-          {hunt.description}
-        </div>
-      ) : null}
-
-      {/* mt-auto sinks the tabs and their list to the bottom, so a short
+        {/* mt-auto sinks the tabs and their list to the bottom, so a short
           list leaves its slack above the tabs instead of under the list. */}
-      <div className="mt-auto flex shrink-0 gap-1 border-b border-border pt-2 text-ui">
-        <TabButton
-          active={huntTab === "clues"}
-          onClick={() => setHuntTab("clues")}
-        >
-          Clues
-        </TabButton>
-        <TabButton
-          active={huntTab === "finders"}
-          onClick={() => setHuntTab("finders")}
-        >
-          Finders ({config.firstFinders.length})
-        </TabButton>
-      </div>
+        <div className="mt-auto flex shrink-0 gap-1 border-b border-border pt-2 text-ui">
+          <TabButton
+            active={huntTab === "clues"}
+            onClick={() => setHuntTab("clues")}
+          >
+            Clues
+          </TabButton>
+          <TabButton
+            active={huntTab === "finders"}
+            onClick={() => setHuntTab("finders")}
+          >
+            Finders ({config.firstFinders.length})
+          </TabButton>
+        </div>
 
-      {/* No flex-1: the box is only as tall as the clues, and scrolls once
+        {/* No flex-1: the box is only as tall as the clues, and scrolls once
           they'd push past the window. The clues always lay out (just hidden
           on the Finders tab) and the finders sit over them at the same
           height, scrolling if they run longer — so switching tabs never
           moves the tab row. */}
-      <div className="mt-2 min-h-0 cursor-default overflow-y-auto">
-        <div className="relative">
-          <div className={huntTab === "clues" ? undefined : "invisible"}>
-            {config.hints.map((hint, i) => (
-              <div
-                key={hint.unlocksAt}
-                className={cn(
-                  "py-1",
-                  i < config.hints.length - 1 && "mb-1 border-b border-border",
-                )}
-              >
-                {hint.unlocked ? (
-                  <div className="text-ui text-text">
-                    {i + 1}. {hint.text}
-                    {hint.hasAudio ? (
-                      <>
-                        <button
-                          type="button"
-                          disabled={
-                            playingHint !== null ||
-                            activeAudioHint !== null ||
-                            (audioOverrides[i] ?? hint.playsRemaining) === 0
-                          }
-                          onClick={() => playHintAudio(hunt.id, i)}
-                          className="ml-4 inline-block cursor-pointer border-none bg-transparent p-0 align-middle leading-none text-cyan disabled:cursor-not-allowed disabled:text-text-dim"
-                        >
-                          {activeAudioHint === i
-                            ? "▶ playing…"
-                            : (audioOverrides[i] ?? hint.playsRemaining ?? 0) >
-                                0
-                              ? "▶ play"
-                              : "no plays left"}
-                        </button>
-                        {(audioOverrides[i] ?? hint.playsRemaining ?? 0) > 0 ? (
-                          <span className="text-ui-sm text-text-dim">
-                            {" "}
-                            ({audioOverrides[i] ?? hint.playsRemaining}/3 left)
-                          </span>
-                        ) : null}
-                      </>
-                    ) : null}
-                  </div>
+        <div className="mt-2 min-h-0 cursor-default overflow-y-auto">
+          <div className="relative">
+            <div className={huntTab === "clues" ? undefined : "invisible"}>
+              {config.hints.map((hint, i) => (
+                <div
+                  key={hint.unlocksAt}
+                  className={cn(
+                    "py-1",
+                    i < config.hints.length - 1 &&
+                      "mb-1 border-b border-border",
+                  )}
+                >
+                  {hint.unlocked ? (
+                    <div className="text-ui text-text">
+                      {i + 1}. {hint.text}
+                      {hint.hasAudio ? (
+                        <>
+                          <button
+                            type="button"
+                            disabled={
+                              playingHint !== null ||
+                              activeAudioHint !== null ||
+                              (audioOverrides[i] ?? hint.playsRemaining) === 0
+                            }
+                            onClick={() => playHintAudio(hunt.id, i)}
+                            className="ml-4 inline-block cursor-pointer border-none bg-transparent p-0 align-middle leading-none text-cyan disabled:cursor-not-allowed disabled:text-text-dim"
+                          >
+                            {activeAudioHint === i
+                              ? "▶ playing…"
+                              : (audioOverrides[i] ??
+                                    hint.playsRemaining ??
+                                    0) > 0
+                                ? "▶ play"
+                                : "no plays left"}
+                          </button>
+                          {(audioOverrides[i] ?? hint.playsRemaining ?? 0) >
+                          0 ? (
+                            <span className="text-ui-sm text-text-dim">
+                              {" "}
+                              ({audioOverrides[i] ?? hint.playsRemaining}/3
+                              left)
+                            </span>
+                          ) : null}
+                        </>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <>
+                      <div className="font-mono text-ui text-text-dim">
+                        {i + 1}.{" "}
+                        <span className={hint.unlocked ? "" : "blur-[1px]"}>
+                          {hint.text}
+                        </span>
+                      </div>
+                      <div className="text-ui-sm text-[#444]">
+                        unlocks{" "}
+                        {formatCountdown(hint.unlocksAt).replace(" left", "")}
+                      </div>
+                    </>
+                  )}
+                </div>
+              ))}
+              {audioError ? (
+                <div className="text-ui-sm text-red">{audioError}</div>
+              ) : null}
+            </div>
+            {huntTab === "finders" && (
+              <div className="absolute inset-0 flex flex-col">
+                {config.firstFinders.length > 0 ? (
+                  <List className="min-h-0 flex-1">
+                    {config.firstFinders.map((finder, i) => (
+                      <div
+                        key={`${finder.name}-${finder.claimedAt}`}
+                        className="mb-1 flex justify-between border-b border-border py-1 text-ui last:mb-0 last:border-b-0"
+                      >
+                        <span className={i === 0 ? "text-yellow" : "text-text"}>
+                          {i + 1}. {finder.name}
+                        </span>
+                        <span className="text-text-dim">
+                          {timeAgo(finder.claimedAt)}
+                        </span>
+                      </div>
+                    ))}
+                  </List>
                 ) : (
-                  <>
-                    <div className="font-mono text-ui text-text-dim">
-                      {i + 1}.{" "}
-                      <span className={hint.unlocked ? "" : "blur-[1px]"}>
-                        {hint.text}
-                      </span>
-                    </div>
-                    <div className="text-ui-sm text-[#444]">
-                      unlocks{" "}
-                      {formatCountdown(hint.unlocksAt).replace(" left", "")}
-                    </div>
-                  </>
+                  <div className="text-ui text-text-dim">
+                    Nobody has found it for him yet...
+                  </div>
                 )}
               </div>
-            ))}
-            {audioError ? (
-              <div className="text-ui-sm text-red">{audioError}</div>
-            ) : null}
+            )}
           </div>
-          {huntTab === "finders" && (
-            <div className="absolute inset-0 flex flex-col">
-              {config.firstFinders.length > 0 ? (
-                <List className="min-h-0 flex-1">
-                  {config.firstFinders.map((finder, i) => (
-                    <div
-                      key={`${finder.name}-${finder.claimedAt}`}
-                      className="mb-1 flex justify-between border-b border-border py-1 text-ui last:mb-0 last:border-b-0"
-                    >
-                      <span className={i === 0 ? "text-yellow" : "text-text"}>
-                        {i + 1}. {finder.name}
-                      </span>
-                      <span className="text-text-dim">
-                        {timeAgo(finder.claimedAt)}
-                      </span>
-                    </div>
-                  ))}
-                </List>
-              ) : (
-                <div className="text-ui text-text-dim">
-                  Nobody has found it for him yet...
-                </div>
-              )}
-            </div>
-          )}
         </div>
-      </div>
 
-      {/* biome-ignore lint/a11y/useMediaCaption: short game hint clips, no source track */}
-      <audio
-        ref={audioRef}
-        hidden
-        onEnded={() => setActiveAudioHint(null)}
-        onPause={() => setActiveAudioHint(null)}
-        onError={() => setActiveAudioHint(null)}
-      />
-    </View>
+        {/* biome-ignore lint/a11y/useMediaCaption: short game hint clips, no source track */}
+        <audio
+          ref={audioRef}
+          hidden
+          onEnded={() => setActiveAudioHint(null)}
+          onPause={() => setActiveAudioHint(null)}
+          onError={() => setActiveAudioHint(null)}
+        />
+      </View>
+    );
+  })();
+
+  return (
+    <>
+      <div
+        className={cn(
+          "min-h-0 flex-1 flex-col",
+          selected === null ? "flex" : "hidden",
+        )}
+      >
+        {world}
+      </div>
+      {screen}
+    </>
   );
 }
 
@@ -931,127 +1044,6 @@ function formatStartsIn(date: Date): string {
 }
 
 /** "2d 4h", "5h", "12m" — for card countdowns. */
-function formatIn(at: string): string {
-  const ms = new Date(at).getTime() - Date.now();
-  if (ms <= 0) return "now";
-  const minutes = Math.floor(ms / 60_000);
-  const days = Math.floor(minutes / 1440);
-  const hours = Math.floor((minutes % 1440) / 60);
-  if (days > 0) return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
-  if (hours > 0) return `${hours}h`;
-  return `${Math.max(1, minutes)}m`;
-}
-
-/** A row styled like ItemRow (the inventory/store lists): name over a small
- * dim subtitle, with the status and countdown on the right. */
-function EventCardRow({
-  card,
-  onOpen,
-  paused,
-}: {
-  card: EventCard;
-  onOpen?: () => void;
-  /** Tab hidden or window unfocused — freeze the sparkles. */
-  paused: boolean;
-}) {
-  const subtitle = card.description ?? card.detail;
-  const live = card.status === "live";
-  // Only a visitor who's actually in town wears their theme.
-  const theme = live ? VISITOR_THEMES[card.type] : undefined;
-  const dim = theme ? { color: theme.dim } : undefined;
-
-  const left = (
-    <div className="flex min-w-0 flex-1 items-center gap-2">
-      <VisitorIcon
-        type={card.type}
-        seed={card.eventId}
-        inTown={live}
-        className="h-6 w-6 shrink-0"
-      />
-      <div className="min-w-0 flex-1">
-        <div
-          className={cn(
-            "truncate text-ui",
-            theme ? "text-white" : "text-text",
-            // Only a row that opens something reacts to hover.
-            !theme && onOpen && "group-hover:text-cyan",
-          )}
-        >
-          {card.title}
-        </div>
-        {subtitle ? (
-          <div className="truncate text-[10px] text-text-dim" style={dim}>
-            {subtitle}
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
-
-  // The whole row is the click target when it opens something, padding
-  // included — a button nested inside left the row's top and bottom edges
-  // (and the status column) dead.
-  const Row = onOpen ? "button" : "div";
-
-  return (
-    <Row
-      {...(onOpen ? { type: "button" as const, onClick: onOpen } : {})}
-      className={cn(
-        "group relative flex w-full items-center justify-between gap-2 overflow-hidden text-left",
-        "border-b border-[#222] py-1.5",
-        onOpen && "cursor-pointer",
-        theme && "pr-2",
-        // Live at full strength; scheduled a little dimmer; nothing-on dimmer
-        // still.
-        card.status === "scheduled" && "opacity-65",
-        card.status === "idle" && "opacity-50",
-      )}
-      style={theme ? { textShadow: ROW_TEXT_SHADOW } : undefined}
-    >
-      {theme && (
-        // The Now Playing card's backdrop treatment (see TrackCard): the
-        // visitor's colours fill the right half and fade into the app
-        // background toward the left, sparkles and all.
-        <div className="pointer-events-none absolute inset-y-0 right-0 w-1/2 overflow-hidden">
-          {/* Hover brightens only the colour, never the fade on top of it:
-              a filter on the whole row lit up the fade's bg-panel edge
-              into a visible box. */}
-          <div
-            className={cn(
-              "absolute inset-0",
-              onOpen &&
-                "transition-[filter] duration-100 group-hover:brightness-150",
-            )}
-            style={{ background: theme.background }}
-          />
-          {theme.sparkle && (
-            <VisitorSparkles sparkle={theme.sparkle} paused={paused} />
-          )}
-          <div className="absolute inset-0 bg-gradient-to-r from-bg-panel to-transparent" />
-        </div>
-      )}
-      <div className="relative flex min-w-0 flex-1">{left}</div>
-      <div className="relative shrink-0 text-right">
-        {live ? (
-          <div
-            className="text-[10px] font-bold text-green"
-            style={theme ? { color: theme.accent } : undefined}
-          >
-            IN TOWN
-          </div>
-        ) : null}
-        {card.at ? (
-          <div className="text-[10px] text-text-dim" style={dim}>
-            {!live
-              ? `in ${formatIn(card.at)}`
-              : // Every visitor leaves when their visit ends.
-                `leaving in ${formatIn(card.at)}`}
-          </div>
-        ) : null}
-      </div>
-    </Row>
-  );
-}
 
 /** Memoized: mounted (hidden) for the app's whole life, so without this it
  * re-rendered on every App render, i.e. every state push. Its props are all

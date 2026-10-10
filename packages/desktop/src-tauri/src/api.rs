@@ -745,12 +745,14 @@ pub async fn api_fetch_inventory(client: &Client) -> Option<ItemSnapshot> {
     let item_upgrades: ItemUpgrades =
         serde_json::from_value(data["itemUpgrades"].clone()).unwrap_or_default();
     let units = serde_json::from_value::<Vec<ItemUnit>>(data["units"].clone()).ok();
+    let bank_expansions = data["bankExpansions"].as_u64().map(|n| n as u32);
     Some(ItemSnapshot {
         inventory,
         currency,
         equipped,
         item_upgrades,
         units,
+        bank_expansions,
     })
 }
 
@@ -1110,6 +1112,32 @@ pub async fn api_fetch_active_events(client: &Client) -> Option<ActiveEventsResp
             None
         }
     }
+}
+
+/// A signed pass into the multiplayer Town (`town-ticket` edge function):
+/// `{ ticket, url, exp }`. Errors are `"off"` when multiplayer is switched
+/// off server-side or not deployed yet (don't retry soon) and
+/// `"unavailable"` otherwise.
+pub async fn api_fetch_town_ticket(client: &Client) -> Result<serde_json::Value, String> {
+    let url = format!("{}/town-ticket", functions_base());
+    let anon = supabase_anon_key();
+    let resp = api_fetch_full(client, reqwest::Method::GET, &url, None, Some(&anon))
+        .await
+        .ok_or_else(|| "unavailable".to_string())?;
+    let status = resp.status();
+    if status == reqwest::StatusCode::SERVICE_UNAVAILABLE
+        || status == reqwest::StatusCode::NOT_FOUND
+    {
+        return Err("off".into());
+    }
+    if !status.is_success() {
+        log::warn!("town-ticket fetch failed: HTTP {status}");
+        return Err("unavailable".into());
+    }
+    resp.json::<serde_json::Value>().await.map_err(|e| {
+        log::warn!("town-ticket response parse failed: {e}");
+        "unavailable".to_string()
+    })
 }
 
 /// Grants one play of a hint's audio snippet and returns a short-lived

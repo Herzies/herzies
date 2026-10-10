@@ -33,3 +33,7 @@ pnpm-debug.log*
 
 # Turbo
 .turbo
+
+# Cloudflare Workers
+.dev.vars
+.wrangler

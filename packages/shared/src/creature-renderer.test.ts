@@ -2,15 +2,22 @@ import { describe, expect, it } from "vitest";
 import { RAINBOW_RAMP, VOID_RAMP } from "./ascii3d.js";
 import {
   BOSS_BODY_TYPE,
+  buildCreatureModel,
   buildCreatureSpheres,
   CREATURE_PARAM_BOUNDS,
+  creaturePoseOffsets,
+  creatureSeatDrop,
   DEFAULT_Y_ANGLE,
   generateCreatureParams,
   generateDanceFrames,
   generateIdleFrames,
   generateRotationFrames,
   isSpiritHopFrame,
+  primitiveNormal,
+  primitiveShading,
+  rayPrimitive,
   renderCreatureAtAngle,
+  renderCreaturePose,
   SPIRIT_DANCE_HOP_VARIANT_COUNT,
 } from "./creature-renderer.js";
 import type { DangleState } from "./dangle-physics.js";
@@ -48,6 +55,463 @@ describe("frame cells", () => {
   });
 });
 
+describe("capsule and cylinder primitives", () => {
+  // A ray from z = -5 straight down +z, offset in x and y.
+  const cast = (x: number, y: number, p: Parameters<typeof rayPrimitive>[6]) =>
+    rayPrimitive(x, y, -5, 0, 0, 1, p);
+  const near = (a: number[], b: number[]) =>
+    a.forEach((v, i) => {
+      expect(v).toBeCloseTo(b[i], 6);
+    });
+
+  const capsule = {
+    center: [0, 0, 0] as [number, number, number],
+    radius: 0.5,
+    shape: {
+      kind: "capsule" as const,
+      axis: [2, 0, 0] as [number, number, number],
+    },
+  };
+  const cylinder = {
+    ...capsule,
+    shape: { ...capsule.shape, kind: "cylinder" as const },
+  };
+
+  it("hits a capsule's side and its rounded ends", () => {
+    expect(cast(1, 0, capsule)).toBeCloseTo(4.5); // side, flat in x
+    expect(cast(2.3, 0, capsule)).toBeCloseTo(5 - Math.sqrt(0.25 - 0.09)); // end ball
+    expect(cast(2.6, 0, capsule)).toBe(-1);
+    expect(cast(0, 0.6, capsule)).toBe(-1);
+  });
+
+  it("stops a cylinder flat at its ends", () => {
+    expect(cast(1.9, 0, cylinder)).toBeCloseTo(4.5);
+    expect(cast(2.1, 0, cylinder)).toBe(-1);
+  });
+
+  it("hits a cylinder's flat cap when seen end-on", () => {
+    const endOn = {
+      ...cylinder,
+      shape: {
+        kind: "cylinder" as const,
+        axis: [0, 0, 1] as [number, number, number],
+      },
+    };
+    expect(cast(0.4, 0, endOn)).toBeCloseTo(4);
+    expect(cast(0.6, 0, endOn)).toBe(-1);
+    near(primitiveNormal(endOn, [0.4, 0, -1]), [0, 0, -1]);
+  });
+
+  const endOn = (dome: number) => ({
+    center: [0, 0, 0] as [number, number, number],
+    radius: 0.5,
+    shape: {
+      kind: "cylinder" as const,
+      axis: [0, 0, 1] as [number, number, number],
+      dome,
+    },
+  });
+
+  it("domes a cylinder's ends outward", () => {
+    const cup = endOn(0.2);
+    expect(cast(0, 0, cup)).toBeCloseTo(3.8); // the middle stands proud
+    expect(cast(0.49, 0, cup)).toBeCloseTo(4 - 0.2 * (1 - 0.49 ** 2 / 0.25));
+    expect(cast(0.51, 0, cup)).toBe(-1);
+    // Down the cap's slope the normal tips out, away from the axis.
+    const n = primitiveNormal(cup, [0.4, 0, -1 - 0.2 * (1 - 0.16 / 0.25)]);
+    expect(n[2]).toBeLessThan(0);
+    expect(n[0]).toBeGreaterThan(0);
+  });
+
+  it("dishes a cylinder's ends inward with a negative dome", () => {
+    const cup = endOn(-0.2);
+    expect(cast(0, 0, cup)).toBeCloseTo(4.2); // the middle sits deepest
+    // A slanted ray that crosses the bowl's paraboloid past the rim still
+    // lands in the bowl instead of passing through the cup.
+    const d = [0.6, 0, 0.8];
+    const t = rayPrimitive(-1.5, 0, -2, d[0], d[1], d[2], cup);
+    expect(t).toBeGreaterThan(0);
+    const hit = [-1.5 + d[0] * t, 0, -2 + d[2] * t];
+    expect(Math.abs(hit[0])).toBeLessThanOrEqual(0.5);
+    expect(hit[2]).toBeLessThan(0);
+    const n = primitiveNormal(cup, [0.4, 0, -1 + 0.2 * (1 - 0.16 / 0.25)]);
+    expect(n[0]).toBeLessThan(0);
+  });
+
+  it("points normals out of the surface", () => {
+    near(primitiveNormal(capsule, [1, 0, -0.5]), [0, 0, -1]);
+    near(primitiveNormal(capsule, [2.5, 0, 0]), [1, 0, 0]);
+    near(primitiveNormal(cylinder, [1, 0.5, 0]), [0, 1, 0]);
+    near(primitiveNormal(cylinder, [-2, 0.1, 0]), [-1, 0, 0]);
+  });
+
+  // A cone along +x: radius 0.5 at x = −2 narrowing to 0.1 at x = 2.
+  const cone = {
+    ...capsule,
+    shape: { kind: "cone" as const, axis: capsule.shape.axis, tipRadius: 0.1 },
+  };
+
+  it("narrows a cone toward its tip", () => {
+    expect(cast(-2 + 1e-6, 0, cone)).toBeCloseTo(4.5); // the wide end
+    expect(cast(0, 0, cone)).toBeCloseTo(4.7); // halfway: radius 0.3
+    expect(cast(1.9, 0, cone)).toBeCloseTo(5 - 0.11);
+    expect(cast(0, 0.35, cone)).toBe(-1);
+    expect(cast(2.1, 0, cone)).toBe(-1);
+    // Not the mirrored cone out past where it would come to a point.
+    const pointed = { ...cone, shape: { ...cone.shape, tipRadius: 0 } };
+    expect(cast(2.5, 0, pointed)).toBe(-1);
+  });
+
+  it("caps a cone flat at each end, each its own size", () => {
+    const along = (x: number, y: number) =>
+      rayPrimitive(-5, x, y, 1, 0, 0, cone);
+    expect(along(0.4, 0)).toBeCloseTo(3); // the wide end's cap
+    expect(rayPrimitive(5, 0.05, 0, -1, 0, 0, cone)).toBeCloseTo(3); // tip's
+    expect(rayPrimitive(5, 0.2, 0, -1, 0, 0, cone)).toBeGreaterThan(3);
+    near(primitiveNormal(cone, [-2, 0.3, 0]), [-1, 0, 0]);
+    near(primitiveNormal(cone, [2, 0.05, 0]), [1, 0, 0]);
+  });
+
+  it("tips a cone's side normal toward its narrow end", () => {
+    const n = primitiveNormal(cone, [0, 0, -0.3]);
+    const slope = 0.4 / 4;
+    near(
+      n,
+      [slope, 0, -1].map((v) => v / Math.hypot(slope, 1)),
+    );
+  });
+
+  it("treats a shapeless primitive as a sphere", () => {
+    const sphere = { center: capsule.center, radius: 0.5 };
+    expect(cast(0, 0, sphere)).toBeCloseTo(4.5);
+    near(primitiveNormal(sphere, [0, 0, -0.5]), [0, 0, -1]);
+  });
+});
+
+describe("model for 3D hosts", () => {
+  const colorsOf = (frame: { cells: { ch: string; color: string }[][] }) =>
+    new Set(frame.cells.flat().map((c) => c.color));
+  const model = buildCreatureModel(USER, 3, { head: "headphones" });
+  const frame = renderCreatureAtAngle(USER, 3, DEFAULT_Y_ANGLE, 0, false, {
+    head: "headphones",
+  });
+  const drawn = colorsOf(frame);
+  const shadesOf = (zone: string, withColor = false) => {
+    const sp = model.spheres.find(
+      (s) => s.zone === zone && Boolean(s.color) === withColor,
+    );
+    if (!sp) throw new Error(`no ${zone} sphere`);
+    return primitiveShading(sp, model.colors, model.scheme);
+  };
+
+  it("shades eyes and pupils the colours the ray caster draws", () => {
+    for (const zone of ["eye", "pupil"]) {
+      const sh = shadesOf(zone);
+      expect(new Set(sh.shades).size).toBe(1);
+      expect(drawn).toContain(sh.shades[0]);
+    }
+    expect(shadesOf("pupil").gain).toBe(0);
+  });
+
+  it("shades the body from its palette, textured", () => {
+    const sh = shadesOf("primary");
+    expect(sh.textured).toBe(true);
+    expect(sh.shades.filter((c) => drawn.has(c)).length).toBeGreaterThan(1);
+  });
+
+  it("shades a worn item by its own colour, untextured", () => {
+    const sh = shadesOf("wearable", true);
+    expect(sh.textured).toBe(false);
+    expect(sh.shades[1]).toBe("#666666");
+    expect(sh.shades.some((c) => drawn.has(c))).toBe(true);
+  });
+
+  it("shades a colourless worn item like the body, in greys", () => {
+    const sh = primitiveShading({ zone: "wearable" }, model.colors);
+    expect(sh.textured).toBe(true);
+    expect(sh.shades).toEqual(["#444", "#666", "#888"]);
+  });
+
+  it("marks scheme-painted parts", () => {
+    const prism = buildCreatureModel(USER, 3, { color: "prism" });
+    const body = prism.spheres.find((s) => s.zone === "primary");
+    if (!body) throw new Error("no body");
+    expect(
+      primitiveShading(body, prism.colors, prism.scheme).schemePainted,
+    ).toBe(true);
+  });
+
+  it("poses with the idle loop alone when standing", () => {
+    const still = creaturePoseOffsets(model.spheres, 3, {
+      idleFrame: 30,
+      walkPhase: 0.4,
+      walkWeight: 0,
+    });
+    // Nothing moves sideways or in depth while idling, and the head bobs.
+    expect(still.every((d) => d[0] === 0 && d[2] === 0)).toBe(true);
+    expect(still.some((d) => d[1] !== 0)).toBe(true);
+    const walking = creaturePoseOffsets(model.spheres, 3, {
+      idleFrame: 30,
+      walkPhase: 0.25,
+      walkWeight: 1,
+    });
+    expect(walking.some((d) => d[2] !== 0)).toBe(true);
+  });
+});
+
+describe("sitting", () => {
+  const pose = (stage: number, sitWeight: number) =>
+    creaturePoseOffsets(buildCreatureModel(USER, stage).spheres, stage, {
+      idleFrame: 0,
+      walkPhase: 0,
+      walkWeight: 0,
+      sitWeight,
+    });
+
+  it("brings a herzie's legs out in front, and nothing else", () => {
+    const { spheres } = buildCreatureModel(USER, 3);
+    const standing = pose(3, 0);
+    const seated = pose(3, 1);
+    let feet = 0;
+    spheres.forEach((sp, i) => {
+      const dy = seated[i][1] - standing[i][1];
+      const dz = seated[i][2] - standing[i][2];
+      const isFoot =
+        (sp.part === "leg-l" || sp.part === "leg-r") &&
+        sp.center[1] ===
+          Math.max(
+            ...spheres
+              .filter((o) => o.part === sp.part)
+              .map((o) => o.center[1]),
+          );
+      if (isFoot) feet++;
+      if (sp.part === "leg-l" || sp.part === "leg-r") {
+        // Up (−y) and forward (−z).
+        expect(dy).toBeLessThan(0);
+        expect(dz).toBeLessThan(0);
+      } else {
+        expect(dy).toBe(0);
+        expect(dz).toBe(0);
+      }
+    });
+    expect(feet).toBe(2);
+  });
+
+  it("settles a herzie with legs onto its bottom", () => {
+    const { spheres } = buildCreatureModel(USER, 3);
+    const bottom = (sp: (typeof spheres)[number]) => sp.center[1] + sp.radius;
+    const body = spheres.find((sp) => sp.part === "body");
+    if (!body) throw new Error("no body");
+    const feet = Math.max(
+      ...spheres.filter((sp) => sp.part.startsWith("leg")).map(bottom),
+    );
+    const drop = creatureSeatDrop(spheres, 3);
+    expect(drop).toBeGreaterThan(0);
+    // Down to the hips, at most: never sunk past its belly.
+    expect(drop).toBeLessThanOrEqual(feet - bottom(body));
+    // About where the old two-sphere legs settled it (0.2416).
+    expect(drop).toBeCloseTo(0.24, 1);
+  });
+
+  it("swings the legs well out in front", () => {
+    const { spheres } = buildCreatureModel(USER, 3);
+    const body = spheres.find((sp) => sp.part === "body");
+    if (!body) throw new Error("no body");
+    const seated = pose(3, 1);
+    spheres.forEach((sp, i) => {
+      if (!sp.part.startsWith("leg")) return;
+      // Half a body radius forward (−z), at least.
+      expect(seated[i][2]).toBeLessThan(-0.5 * body.radius);
+    });
+  });
+
+  it("leaves herzies without legs as they stand", () => {
+    for (const stage of [1, 2]) {
+      expect(pose(stage, 1)).toEqual(pose(stage, 0));
+      expect(
+        creatureSeatDrop(buildCreatureModel(USER, stage).spheres, stage),
+      ).toBe(0);
+    }
+  });
+});
+
+describe("limbs", () => {
+  const spikySeed =
+    Array.from({ length: 120 }, (_, i) => `herzie-${i}`).find(
+      (seed) => generateCreatureParams(seed).bodyType === 3,
+    ) ?? "";
+  const LIMBS = ["arm-l", "arm-r", "leg-l", "leg-r"];
+  type Sp = ReturnType<typeof buildCreatureModel>["spheres"][number];
+  const dist = (a: number[], b: number[]) =>
+    Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+  const moved = (sp: Sp, d: number[]) => [
+    sp.center[0] + d[0],
+    sp.center[1] + d[1],
+    sp.center[2] + d[2],
+  ];
+
+  /** Every pose worth checking: idle, walking, dancing, and blends. */
+  function poses() {
+    const out: Parameters<typeof creaturePoseOffsets>[2][] = [];
+    for (let f = 0; f < 120; f += 3) {
+      out.push({ idleFrame: f, walkPhase: 0, walkWeight: 0 });
+    }
+    for (let p = 0; p < 1; p += 0.05) {
+      out.push({ idleFrame: 0, walkPhase: p, walkWeight: 1 });
+    }
+    for (let f = 0; f < 24; f += 0.5) {
+      out.push({
+        idleFrame: f,
+        walkPhase: 0,
+        walkWeight: 0,
+        danceFrame: f,
+        danceWeight: 1,
+      });
+      out.push({
+        idleFrame: f,
+        walkPhase: f / 24,
+        walkWeight: 0.5,
+        danceFrame: f,
+        danceWeight: 0.5,
+      });
+    }
+    return out;
+  }
+
+  for (const seed of [USER, spikySeed]) {
+    for (const stage of [2, 3]) {
+      it(`gives a ${seed} one sphere per limb at stage ${stage}`, () => {
+        const { spheres } = buildCreatureModel(seed, stage);
+        for (const part of LIMBS) {
+          const n = spheres.filter((sp) => sp.part === part).length;
+          expect(n).toBe(part.startsWith("leg") && stage < 3 ? 0 : 1);
+        }
+      });
+
+      it(`keeps a ${seed}'s limbs on in every pose at stage ${stage}`, () => {
+        const { spheres } = buildCreatureModel(seed, stage);
+        const parent = spheres.find(
+          (sp) => sp.part === (stage >= 3 ? "body" : "head"),
+        );
+        if (!parent) throw new Error("no parent");
+        const pi = spheres.indexOf(parent);
+        for (const pose of poses()) {
+          const d = creaturePoseOffsets(spheres, stage, pose);
+          const pc = moved(parent, d[pi]);
+          spheres.forEach((sp, i) => {
+            if (!LIMBS.includes(sp.part)) return;
+            // Sunk into its parent by a quarter of its radius, at least.
+            expect(dist(moved(sp, d[i]), pc)).toBeLessThan(
+              parent.radius + sp.radius * 0.75,
+            );
+          });
+        }
+      });
+    }
+  }
+
+  it("keeps a herzie with legs on its feet in every pose", () => {
+    const { spheres } = buildCreatureModel(USER, 3);
+    const legs = spheres.filter((sp) => sp.part.startsWith("leg"));
+    const floor = Math.max(...legs.map((sp) => sp.center[1] + sp.radius));
+    for (const pose of poses()) {
+      const d = creaturePoseOffsets(spheres, 3, pose);
+      const soles = spheres.flatMap((sp, i) =>
+        sp.part.startsWith("leg") ? [sp.center[1] + d[i][1] + sp.radius] : [],
+      );
+      expect(Math.max(...soles)).toBeCloseTo(floor, 9);
+    }
+  });
+
+  it("dances with a foot planted, the body dipping onto the legs", () => {
+    const { spheres } = buildCreatureModel(USER, 3);
+    const body = spheres.findIndex((sp) => sp.part === "body");
+    let dipped = false;
+    for (let f = 0; f < 24; f += 0.5) {
+      const d = creaturePoseOffsets(spheres, 3, {
+        idleFrame: 0,
+        walkPhase: 0,
+        walkWeight: 0,
+        danceFrame: f,
+        danceWeight: 1,
+      });
+      const feet = spheres.flatMap((sp, i) =>
+        sp.part.startsWith("leg") ? [Math.abs(d[i][1])] : [],
+      );
+      expect(Math.min(...feet)).toBeLessThan(1e-9);
+      // Never up off its legs; down onto them on the beat.
+      expect(d[body][1]).toBeGreaterThan(-1e-9);
+      if (d[body][1] > 0.05) dipped = true;
+    }
+    expect(dipped).toBe(true);
+  });
+
+  for (const stage of [1, 2]) {
+    it(`never dances a stage ${stage} herzie into the ground`, () => {
+      const { spheres } = buildCreatureModel(USER, stage);
+      const own = spheres.filter(
+        (sp) => !["ground", "spirit", "pet"].includes(sp.part),
+      );
+      const floor = Math.max(...own.map((sp) => sp.center[1] + sp.radius));
+      for (let f = 0; f < 24; f += 0.5) {
+        const d = creaturePoseOffsets(spheres, stage, {
+          idleFrame: f * 5,
+          walkPhase: 0,
+          walkWeight: 0,
+          danceFrame: f,
+          danceWeight: 1,
+        });
+        spheres.forEach((sp, i) => {
+          if (!own.includes(sp)) return;
+          expect(sp.center[1] + d[i][1] + sp.radius).toBeLessThanOrEqual(
+            floor + 1e-9,
+          );
+        });
+      }
+    });
+  }
+});
+
+describe("headphones", () => {
+  it("arch a band over the head at every angle", () => {
+    // Headphone cells above the top of the head prove the band is drawn,
+    // turned with the herzie, and still found by the ray caster.
+    for (const pitch of [undefined, 0.3]) {
+      for (let i = 0; i < 8; i++) {
+        const frame = renderCreaturePose(
+          USER,
+          3,
+          {
+            yAngle: (i / 8) * 2 * Math.PI,
+            pitch,
+            idleFrame: 0,
+            walkPhase: 0,
+            walkWeight: 0,
+          },
+          { head: "headphones" },
+        );
+        const bare = renderCreaturePose(USER, 3, {
+          yAngle: (i / 8) * 2 * Math.PI,
+          pitch,
+          idleFrame: 0,
+          walkPhase: 0,
+          walkWeight: 0,
+        });
+        const top = (f: typeof frame) =>
+          f.cells.findIndex((row) => row.some((c) => c.ch !== " "));
+        expect(top(frame)).toBeLessThanOrEqual(top(bare));
+        const greys = frame.cells
+          .flat()
+          .filter(
+            (c) =>
+              c.color !== "#111111" && /^#([0-9A-F]{2})\1\1$/.test(c.color),
+          );
+        expect(greys.length).toBeGreaterThan(0);
+      }
+    }
+  });
+});
+
 const hueSet = (frames: { cells: { ch: string; color: string }[][] }[]) => {
   const s = new Set<string>();
   for (const f of frames)
@@ -80,10 +544,8 @@ describe("prism colour scheme", () => {
       head: "headphones",
     });
     const colors = hueSet(withHat);
-    // Headphones shade through the "wearable" zone greys.
-    expect([...colors].some((c) => ["#888", "#666", "#444"].includes(c))).toBe(
-      true,
-    );
+    // Headphones keep their own grey shell.
+    expect(colors).toContain("#666666");
   });
 
   it("does not crawl through rotation", () => {
@@ -112,25 +574,22 @@ describe("prism colour scheme", () => {
 });
 
 describe("spirit orb pet", () => {
-  it("renders without throwing on either ground slot", () => {
+  it("renders without throwing in the spirit slot", () => {
     expect(() =>
-      generateRotationFrames(USER, 3, 8, { ground_left: "spirit-orb" }),
-    ).not.toThrow();
-    expect(() =>
-      generateRotationFrames(USER, 3, 8, { ground_right: "spirit-orb" }),
+      generateRotationFrames(USER, 3, 8, { spirit: "spirit-orb" }),
     ).not.toThrow();
   });
 
   it("adds pixels beyond the plain body", () => {
     const plain = generateRotationFrames(USER, 3, 12);
     const withOrb = generateRotationFrames(USER, 3, 12, {
-      ground_left: "spirit-orb",
+      spirit: "spirit-orb",
     });
     expect(hueSet(withOrb).size).toBeGreaterThan(hueSet(plain).size);
   });
 
   it("dance hop variants reuse plain frames outside the hop", () => {
-    const eq = { ground_left: "spirit-orb" } as const;
+    const eq = { spirit: "spirit-orb" } as const;
     const plain = generateDanceFrames(USER, 3, eq);
     for (let v = 0; v < SPIRIT_DANCE_HOP_VARIANT_COUNT; v++) {
       const hop = generateDanceFrames(
@@ -147,7 +606,7 @@ describe("spirit orb pet", () => {
         if (isSpiritHopFrame(v, i)) expect(frame).not.toBe(plain[i]);
         else expect(frame).toBe(plain[i]);
       });
-      // Seamless at the loop boundary, where Herzie3D swaps variants.
+      // Seamless at the loop boundary, where a host swaps variants.
       expect(isSpiritHopFrame(v, 0)).toBe(false);
       expect(isSpiritHopFrame(v, plain.length - 1)).toBe(false);
     }
@@ -158,7 +617,7 @@ describe("spirit orb pet", () => {
     // would snap the spirit sideways once its hops end (those frames are
     // reused from the plain loop). Re-render the last frame with the variant's
     // pose actually applied and compare pixels.
-    const eq = { ground_left: "spirit-orb" } as const;
+    const eq = { spirit: "spirit-orb" } as const;
     const plain = generateDanceFrames(USER, 3, eq);
     const last = plain.length - 1;
     for (let v = 0; v < SPIRIT_DANCE_HOP_VARIANT_COUNT; v++) {
@@ -192,13 +651,15 @@ describe("spirit orb pet", () => {
     ).toBe(generateDanceFrames(USER, 3));
   });
 
-  it("coexists with a boombox on the other ground slot", () => {
-    expect(() =>
-      generateRotationFrames(USER, 3, 8, {
-        ground_left: "spirit-orb",
-        ground_right: "boombox",
-      }),
-    ).not.toThrow();
+  it("coexists with a boombox on either ground slot", () => {
+    for (const side of ["ground_left", "ground_right"] as const) {
+      expect(() =>
+        generateRotationFrames(USER, 3, 8, {
+          spirit: "spirit-orb",
+          [side]: "boombox",
+        }),
+      ).not.toThrow();
+    }
   });
 });
 
@@ -257,7 +718,7 @@ describe("prism band spread", () => {
 });
 
 describe("renderCreatureAtAngle", () => {
-  // Herzie3D caches this per settled drag angle, keyed on frame index alone.
+  // The old renderer cached this per settled drag angle, keyed on frame index alone.
   // That is only sound while the function is pure — if it ever picks up a
   // time or random source, the cache would silently freeze the animation
   // after the user's first drag rather than fail loudly.
@@ -348,8 +809,7 @@ describe("Halloween items", () => {
       { head: "witch-hat" },
       { face: "fangs" },
       { color: "pumpkin-spice" },
-      { ground_left: "jack-o-lantern" },
-      { ground_right: "ghost" },
+      { spirit: "ghost" },
     ] as Equipped[]) {
       expect(draw(equipped)).not.toBe(draw({}));
     }
@@ -363,6 +823,44 @@ describe("Halloween items", () => {
     expect(draw({ face: "fangs" }, 1.2345, swing)).toBe(
       draw({ face: "fangs" }),
     );
+  });
+
+  it("keeps the head inside the witch hat's crown", () => {
+    for (const seed of ["a", "b", "c", "d", "e", "f"]) {
+      for (const stage of [1, 2, 3]) {
+        const { spheres } = buildCreatureModel(seed, stage, {
+          head: "witch-hat",
+        });
+        const [brim, , crown] = spheres.filter(
+          (s) => s.zone === "wearable" && s.shape,
+        );
+        const brimTop = brim.center[1] - Math.abs(brim.shape?.axis[1] ?? 0);
+        const half = Math.abs(crown.shape?.axis[1] ?? 0);
+        const tip = crown.shape?.tipRadius ?? 0;
+        const heads = spheres.filter(
+          (s) => s.part === "head" && s.zone !== "wearable",
+        );
+        for (const s of heads) {
+          for (let a = 0; a < 24; a++) {
+            for (let b = 1; b < 12; b++) {
+              const th = (a / 24) * 2 * Math.PI;
+              const ph = (b / 12) * Math.PI;
+              const x = s.center[0] + s.radius * Math.sin(ph) * Math.cos(th);
+              const y = s.center[1] - s.radius * Math.cos(ph);
+              const z = s.center[2] + s.radius * Math.sin(ph) * Math.sin(th);
+              if (y >= brimTop) continue; // under the brim
+              // −1 at the crown's base to 1 at its top (up is −y).
+              const along = (crown.center[1] - y) / half;
+              expect(along).toBeLessThanOrEqual(1);
+              const r = crown.radius + ((tip - crown.radius) * (along + 1)) / 2;
+              expect(
+                Math.hypot(x - crown.center[0], z - crown.center[2]),
+              ).toBeLessThanOrEqual(r);
+            }
+          }
+        }
+      }
+    }
   });
 
   it("doesn't let the fangs move the hat", () => {
@@ -401,8 +899,7 @@ describe("Halloween items", () => {
         0,
         false,
         {
-          ground_left: "jack-o-lantern",
-          ground_right: "ghost",
+          spirit: "ghost",
         },
         undefined,
         126,
@@ -659,5 +1156,165 @@ describe("herzie anatomy", () => {
       ).filter((s) => s.part === "spike");
       expect(spikes.length > 0).toBe(bodyType === 3);
     }
+  });
+});
+
+describe("renderCreaturePose", () => {
+  const lowestRow = (cells: { ch: string }[][]) => {
+    let lowest = -1;
+    cells.forEach((row, y) => {
+      if (row.some((c) => c.ch !== " ")) lowest = y;
+    });
+    return lowest;
+  };
+  const drawn = (cells: { ch: string; color: string }[][]) =>
+    cells.map((r) => r.map((c) => `${c.ch}${c.color}`).join("")).join("\n");
+
+  it("standing still draws exactly the idle loop", () => {
+    for (const stage of [1, 2, 3]) {
+      for (const frame of [0, 37, 90]) {
+        const pose = renderCreaturePose(USER, stage, {
+          yAngle: DEFAULT_Y_ANGLE,
+          idleFrame: frame,
+          walkPhase: 0.3,
+          walkWeight: 0,
+        });
+        const idle = renderCreatureAtAngle(USER, stage, DEFAULT_Y_ANGLE, frame);
+        expect(drawn(pose.cells)).toBe(drawn(idle.cells));
+      }
+    }
+  });
+
+  it("walks: the pose changes through the cycle", () => {
+    for (const stage of [1, 2, 3]) {
+      const at = (walkPhase: number) =>
+        drawn(
+          renderCreaturePose(USER, stage, {
+            yAngle: Math.PI / 2,
+            idleFrame: 0,
+            walkPhase,
+            walkWeight: 1,
+          }).cells,
+        );
+      expect(at(0.25)).not.toBe(at(0.75));
+    }
+  });
+
+  it("a legless herzie hops off the ground mid-step", () => {
+    const at = (walkPhase: number) =>
+      lowestRow(
+        renderCreaturePose(USER, 1, {
+          yAngle: 0,
+          idleFrame: 0,
+          walkPhase,
+          walkWeight: 1,
+        }).cells,
+      );
+    // Rows grow downward: in the air, the lowest drawn row is higher up.
+    expect(at(0.25)).toBeLessThan(at(0));
+  });
+
+  it("left and right steps mirror each other from the front", () => {
+    const at = (walkPhase: number) =>
+      renderCreaturePose(USER, 3, {
+        yAngle: 0,
+        idleFrame: 0,
+        walkPhase,
+        walkWeight: 1,
+      }).cells.map((row) => row.map((c) => c.ch !== " "));
+    const a = at(0.25);
+    const b = at(0.75);
+    // Same silhouette mirrored left-right, give or take a column of rounding.
+    let diff = 0;
+    for (let y = 0; y < a.length; y++) {
+      const w = a[y].length;
+      for (let x = 0; x < w; x++) if (a[y][x] !== b[y][w - 1 - x]) diff++;
+    }
+    const filled = a.flat().filter(Boolean).length;
+    expect(diff / filled).toBeLessThan(0.15);
+  });
+
+  it("renders every body (boss included) at any pitch without NaN glyphs", () => {
+    const bossParams = {
+      ...generateCreatureParams("boss:test"),
+      bodyType: BOSS_BODY_TYPE,
+    };
+    const looks = [
+      { stage: 1 },
+      { stage: 2 },
+      { stage: 3 },
+      { stage: 3, params: bossParams },
+    ];
+    for (const { stage, params } of looks) {
+      for (const pitch of [0, 0.3, 0.6]) {
+        const frame = renderCreaturePose(
+          "boss:test",
+          stage,
+          { yAngle: 1, pitch, idleFrame: 10, walkPhase: 0.4, walkWeight: 0.5 },
+          undefined,
+          params,
+          48,
+        );
+        for (const row of frame.cells) {
+          for (const c of row) {
+            expect(typeof c.ch).toBe("string");
+            expect(c.color).not.toContain("NaN");
+          }
+        }
+        expect(lowestRow(frame.cells)).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("a finer grid frames the herzie the same, just at higher resolution", () => {
+    const extent = (cols: number, rows: number) => {
+      const cells = renderCreaturePose(
+        USER,
+        3,
+        { yAngle: 0, idleFrame: 0, walkPhase: 0, walkWeight: 0 },
+        undefined,
+        undefined,
+        cols,
+        rows,
+      ).cells;
+      expect(cells.length).toBe(rows);
+      expect(cells[0].length).toBe(cols);
+      let top = -1;
+      let bottom = -1;
+      cells.forEach((row, y) => {
+        if (!row.some((c) => c.ch !== " ")) return;
+        if (top < 0) top = y;
+        bottom = y;
+      });
+      return { top: top / rows, bottom: (bottom + 1) / rows };
+    };
+    const base = extent(48, 48);
+    const fine = extent(64, 64);
+    expect(fine.top).toBeCloseTo(base.top, 1);
+    expect(fine.bottom).toBeCloseTo(base.bottom, 1);
+  });
+
+  it("is cheap enough to render live (logs ms per frame)", () => {
+    const n = 60;
+    const t0 = performance.now();
+    for (let i = 0; i < n; i++) {
+      renderCreaturePose(
+        USER,
+        3,
+        {
+          yAngle: i * 0.1,
+          pitch: 0.2,
+          idleFrame: i,
+          walkPhase: i / n,
+          walkWeight: 1,
+        },
+        { head: "headphones" },
+        undefined,
+        48,
+      );
+    }
+    const ms = (performance.now() - t0) / n;
+    console.log(`renderCreaturePose: ${ms.toFixed(2)} ms/frame (48 cols)`);
+    expect(ms).toBeLessThan(50);
   });
 });

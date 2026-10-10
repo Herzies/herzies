@@ -65,6 +65,13 @@ body:has([data-overlay-header]) > nav {
   z-index: 10;
 }
 
+/* And the hero fills what the footer leaves of the screen (flex-1), so the
+   whole page fits without scrolling. */
+body:has([data-overlay-header]) > main {
+  display: flex;
+  flex-direction: column;
+}
+
 @utility banner {
   font-size: clamp(10px, 3.8vw, 28px);
 }

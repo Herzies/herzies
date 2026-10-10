@@ -665,6 +665,38 @@ describe("World drops", () => {
     expect(data!.drop_rolls_done).toBe(2);
   });
 
+  it("auto-collects with Herman too, under his own name", async () => {
+    const admin = getAdminClient();
+    const petUser = await createTestUser();
+    await createTestHerzie(petUser.userId, {
+      inventory_v2: { ghost: 1 },
+      equipped: { spirit: "ghost" },
+    });
+
+    await admin.rpc("roll_pending_drop", {
+      p_user_id: petUser.userId,
+      p_item_id: "headphones",
+    });
+
+    const res = await syncRoute(
+      authenticatedRequest("/sync", petUser.accessToken, {
+        nowPlaying: null,
+        minutesListened: 0,
+        genres: [],
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+
+    expect(body.pendingDrops).toEqual([]);
+    const collectedNotif = body.notifications.find(
+      (n: { type: string; itemId?: string }) =>
+        n.type === "item_granted" && n.itemId === "headphones",
+    );
+    expect(collectedNotif?.title).toBe("Herman");
+    expect(collectedNotif?.message).toBe('Picked up "Intimite Music Device"');
+  });
+
   it("auto-collects a pending drop in the same tick when Spirit Orb is equipped", async () => {
     const admin = getAdminClient();
     const petUser = await createTestUser();
@@ -672,7 +704,7 @@ describe("World drops", () => {
     // "equipped but not owned" (which the old columns could express) can't exist.
     await createTestHerzie(petUser.userId, {
       inventory_v2: { "spirit-orb": 1 },
-      equipped: { ground_left: "spirit-orb" },
+      equipped: { spirit: "spirit-orb" },
     });
 
     await admin.rpc("roll_pending_drop", {

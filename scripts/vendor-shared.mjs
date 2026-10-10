@@ -41,6 +41,8 @@ const ENTRIES = [
   join(ROOT, "packages/shared/src/game-rules.ts"),
   join(ROOT, "packages/shared/src/game-server.ts"),
   join(ROOT, "packages/shared/src/game-events.ts"),
+  // Signs the multiplayer Town's tickets (town-ticket function).
+  join(ROOT, "packages/shared/src/town-net.ts"),
 ];
 
 const BANNED = [

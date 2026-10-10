@@ -692,7 +692,9 @@ async fn equip_item(
 }
 
 /// Buys from Good ol' George (a live `merchant` event) — the only way coins
-/// buy items. Applies the returned item state and the new coin balance.
+/// buy items — or from Nandor the Treatless (a `treat_trader`), paid in
+/// treats. Applies the returned item state, and the new coin balance when
+/// coins were spent.
 #[tauri::command]
 async fn buy_from_merchant(
     event_id: String,
@@ -776,7 +778,7 @@ async fn collect_drop(
             // sequential round trips — the second to Vercel `/api/inventory` —
             // and lagged visibly behind the item vanishing from the ground.
             //
-            // Same `Picked up "<name>"` wording as the Greedy Spirit's
+            // Same `Picked up "<name>"` wording as a spirit's
             // server-side auto-collect (see game-server.ts) — this path has
             // no SyncResponse to ride along on, so log it directly.
             let _ = app.emit("activity", format!("Picked up \"{name}\""));
@@ -989,6 +991,11 @@ async fn fetch_active_events() -> Result<serde_json::Value, String> {
         })),
         None => Ok(serde_json::json!({ "events": [] })),
     }
+}
+
+#[tauri::command]
+async fn fetch_town_ticket() -> Result<serde_json::Value, String> {
+    api::api_fetch_town_ticket(&api::http()).await
 }
 
 #[tauri::command]
@@ -1209,8 +1216,15 @@ fn apply_inventory(s: &mut ManagedState, snapshot: ItemSnapshot, equip_epoch_bef
         equipped,
         item_upgrades,
         units,
+        bank_expansions,
     } = snapshot;
     s.inventory = Some(inventory.clone());
+    // Only ever grows (see sync_tick), and the "inventory full" check needs it
+    // alongside the contents: a full bag judged against the base capacity
+    // reads as overflowing.
+    if let Some(expansions) = bank_expansions {
+        s.bank_expansions = expansions;
+    }
     s.inventory_currency = currency;
     s.item_upgrades = item_upgrades.clone();
     // Any `/sync` already in flight predates this and must not reinstate the
@@ -1261,6 +1275,7 @@ fn snapshot_from_response(data: &serde_json::Value, s: &ManagedState) -> Option<
         equipped,
         item_upgrades,
         units,
+        bank_expansions: None,
     })
 }
 
@@ -1295,8 +1310,9 @@ async fn refresh_friends_cache(app: &AppHandle, client: &Client) {
 /// Fetch inventory, chat, and friends in parallel into AppState.
 ///
 /// `include_inventory` is false at launch, where a `sync_tick` has just run and
-/// `/sync` already carries the full inventory; after login or hatching no sync
-/// has loaded it yet, so those callers still fetch it.
+/// `/sync` already carries the full inventory, and after login, which loads it
+/// itself before showing the herzie; after hatching no sync has loaded it yet,
+/// so that caller still fetches it.
 async fn refresh_app_cache(app: &AppHandle, client: &Client, include_inventory: bool) {
     if !api::is_logged_in() {
         return;
@@ -2361,24 +2377,18 @@ async fn sync_tick_with(
             *last = None;
         }
 
-        // A pick-up accessory (spirit-orb, "Greedy Spirit") auto-collects world
-        // drops quietly — the whole point is not having to watch the ground.
-        // That means a full bank blocks it silently too, unless we say
-        // something: the server already leaves any drop it couldn't fit room
-        // for in `pending_drops` (see hasSpiritOrbEquipped in game-server.ts),
-        // so a non-empty list here with the accessory equipped means it's
-        // stuck.
-        let has_spirit_orb = app_state
+        // A spirit (the Greedy Spirit, Herman) auto-collects world drops
+        // quietly — the whole point is not having to watch the ground. That
+        // means a full bank blocks it silently too, unless we say something:
+        // the server already leaves any drop it couldn't fit room for in
+        // `pending_drops` (see the spirit pickup in game-server.ts), so a
+        // non-empty list here with a spirit worn means it's stuck.
+        let has_spirit = app_state
             .equipped
-            .get("ground_left")
+            .get("spirit")
             .and_then(|v| v.as_str())
-            == Some("spirit-orb")
-            || app_state
-                .equipped
-                .get("ground_right")
-                .and_then(|v| v.as_str())
-                == Some("spirit-orb");
-        let pickup_blocked = has_spirit_orb && !app_state.pending_drops.is_empty();
+            .is_some_and(|id| !id.is_empty());
+        let pickup_blocked = has_spirit && !app_state.pending_drops.is_empty();
         if let Ok(mut last) = app.state::<LastInventoryFullNotified>().0.lock() {
             if pickup_blocked {
                 // While the window is open, the in-app "Inventory full" prompt
@@ -2392,7 +2402,7 @@ async fn sync_tick_with(
                     send_notification(
                         app,
                         "Inventory full",
-                        "Your Greedy Spirit found something but there's no room for it. Free up a slot to keep collecting.",
+                        "Your spirit found something but there's no room for it. Free up a slot to keep collecting.",
                         None,
                     );
                     *last = true;
@@ -2548,6 +2558,7 @@ pub fn run() {
             set_ghost_mode,
             get_ghost_mode,
             fetch_active_events,
+            fetch_town_ticket,
             fetch_previous_hunt,
             play_hint_audio,
             fetch_leaderboard,
@@ -2639,22 +2650,17 @@ pub fn run() {
                         _ => {}
                     });
                 }
+            }
 
-                // Cold start: if the user opened the app themselves (rather than
-                // it being launched at login), surface the window. Without this,
-                // quitting and reopening the app only re-shows the tray icon and
-                // nothing visibly happens.
-                let launched_at_login = std::env::args().any(|arg| arg == "--autostart");
-                if !launched_at_login {
-                    tray::ensure_visible(app.handle());
-                }
-            } else {
-                // In dev, show window immediately
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.center();
-                    let _ = window.show();
-                    tray::on_focus(app.handle());
-                }
+            // Cold start — whether opened by the user, launched at login, or
+            // run in dev — always surfaces the window. Goes through the tray's
+            // show path rather than a bare window.show(): that also activates
+            // the app, without which the window opens behind whatever is
+            // frontmost and nothing visibly happens.
+            tray::ensure_visible(app.handle());
+            if tauri::is_dev() {
+                // No focus listener in dev, so mark the window focused by hand.
+                tray::on_focus(app.handle());
             }
 
             // Enable autostart

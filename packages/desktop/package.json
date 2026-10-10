@@ -1,6 +1,6 @@
 {
   "name": "herzies-desktop",
-  "version": "0.1.0-beta.47",
+  "version": "0.1.0-beta.48",
   "private": true,
   "description": "Herzies desktop app for macOS",
   "scripts": {
@@ -11,17 +11,24 @@
     "vite:dev": "vite dev --port 1420",
     "vite:build": "vite build",
     "sandbox": "vite dev --port 1420 --open /sandbox.html",
-    "item-editor": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tools/item-editor/server.mjs"
+    "map-editor": "vite dev --port 1420 --open /map-editor.html",
+    "item-editor": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tools/item-editor/server.mjs",
+    "test": "vitest run"
   },
   "dependencies": {
     "@herzies/shared": "workspace:*",
     "@radix-ui/react-tooltip": "^1.2.16",
+    "@react-three/drei": "^10.7.9",
+    "@react-three/fiber": "^9.8.1",
+    "@react-three/postprocessing": "^3.1.3",
+    "@react-three/rapier": "^2.2.0",
     "@supabase/supabase-js": "^2.105.1",
     "@tauri-apps/api": "^2.5.0",
     "@tauri-apps/plugin-log": "^2.9.1",
     "@tauri-apps/plugin-notification": "^2.3.3",
     "@tauri-apps/plugin-process": "^2.3.1",
-    "@tauri-apps/plugin-updater": "^2.10.1"
+    "@tauri-apps/plugin-updater": "^2.10.1",
+    "three": "^0.186.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.0",
@@ -29,6 +36,7 @@
     "@types/node": "^25.6.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.1.6",
+    "@types/three": "^0.186.0",
     "@vitejs/plugin-react": "^4.5.2",
     "clsx": "^2.1.1",
     "postcss": "^8.5.14",
@@ -37,6 +45,7 @@
     "tailwind-merge": "^3.6.0",
     "tailwindcss": "^4.3.0",
     "typescript": "^6.0.3",
-    "vite": "^6.3.5"
+    "vite": "^6.3.5",
+    "vitest": "^4.1.5"
   }
 }

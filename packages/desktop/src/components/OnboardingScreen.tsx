@@ -1,7 +1,8 @@
-import { Herzie3D, validateName } from "@herzies/shared";
+import { validateName } from "@herzies/shared";
+import { HerzieView } from "@herzies/shared/gl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../lib/utils";
-import { herzies, useWindowVisible } from "../tauri-bridge";
+import { herzies, useWindowFocused } from "../tauri-bridge";
 
 export function OnboardingScreen({ onClose }: { onClose?: () => void }) {
   const [name, setName] = useState("");
@@ -22,7 +23,7 @@ export function OnboardingScreen({ onClose }: { onClose?: () => void }) {
   const trimmed = name.trim();
   const clientError = trimmed === "" ? null : validateName(trimmed);
   const canSubmit = trimmed !== "" && !clientError && !hatching;
-  const visible = useWindowVisible();
+  const focused = useWindowFocused();
 
   async function submit() {
     if (!canSubmit) return;
@@ -63,13 +64,16 @@ export function OnboardingScreen({ onClose }: { onClose?: () => void }) {
       >
         {loggingOut ? "Logging out..." : "Logout"}
       </button>
-      <div className="pointer-events-none opacity-35 grayscale">
-        <Herzie3D
+      <div className="pointer-events-none">
+        <HerzieView
           userId={mysterySeed}
           stage={1}
           size={5}
           draggable={false}
-          paused={!visible}
+          paused={!focused}
+          // Not hatched yet: a grey ghost of a herzie.
+          grey={1}
+          opacity={0.35}
           ariaLabel="A mysterious herzie waiting to hatch"
         />
       </div>

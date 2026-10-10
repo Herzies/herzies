@@ -15,7 +15,7 @@
  * back. Only a little air drag does (−drag·ω/stiffness) — a slight trail,
  * not the chain being towed behind through syrup.
  *
- * Angles are in the renderer's yAngle units (radians). Pure: Herzie3D owns a
+ * Angles are in the renderer's yAngle units (radians). Pure: HerzieView owns a
  * DangleSim and steps it each animation frame; the renderer only ever sees
  * the resulting DangleState.
  */

@@ -1,7 +1,5 @@
 import type { Metadata } from "next";
-import { DownloadSection } from "@/components/landing/DownloadSection";
 import { Hero } from "@/components/landing/Hero";
-import { HerzieJourney } from "@/components/landing/HerzieJourney";
 
 export const metadata: Metadata = {
   title: "Herzies — Your digital pet that grows by listening to music",
@@ -32,8 +30,6 @@ export default function Home() {
       />
 
       <Hero />
-      <HerzieJourney />
-      <DownloadSection />
     </>
   );
 }

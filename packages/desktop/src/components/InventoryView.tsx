@@ -65,7 +65,7 @@ import {
 } from "./DeckOverlay";
 import { DeckSlotPicker, type PickerOption } from "./DeckSlotPicker";
 import { DiceUpgradeOverlay } from "./DiceUpgradeOverlay";
-import { HERZIE_STAGE_HEIGHT } from "./Herzie3D";
+import { HERZIE_STAGE_HEIGHT } from "./HerzieWithSky";
 import { type Flight, ItemFlights } from "./ItemFlight";
 import ItemInspectOverlay, { CompactItemPreview } from "./ItemInspectOverlay";
 import { DuplicatesIcon } from "./icons/DuplicatesIcon";
@@ -660,6 +660,7 @@ function InventoryViewImpl({
   bankExpansions,
   active = true,
   rootKey = 0,
+  openPanel = "deck",
 }: {
   herzie: Herzie;
   initialItem?: string | null;
@@ -690,8 +691,11 @@ function InventoryViewImpl({
   bankExpansions: number;
   /** False while another tab is shown — pauses the 3D render. */
   active?: boolean;
-  /** Bumped when the Herzie tab is re-selected while shown: back to the bag. */
+  /** Bumped when the Herzie tab is re-selected while shown: back to
+   * `openPanel`. */
   rootKey?: number;
+  /** The panel it opens on, and goes back to when re-selected. */
+  openPanel?: Panel;
 }) {
   const capacity = bankCapacity(bankExpansions);
   const [currency, setCurrency] = useState(cachedCurrency || herzie.currency);
@@ -835,18 +839,14 @@ function InventoryViewImpl({
 
   /** Which panel shows under the herzie. Cards headed for the other one fly
    * to its tab, which bumps as they land, so it's clear where they went. */
-  const [panel, setPanel] = useState<Panel>("bag");
-  // The view always opens on the bag: reset while hidden, so coming back
-  // never flashes the deck first, and when the tab is pressed again.
-  useEffect(() => {
-    if (!active) setPanel("bag");
-  }, [active]);
-  const rootKeyRef = useRef(rootKey);
-  useEffect(() => {
-    if (rootKeyRef.current === rootKey) return;
-    rootKeyRef.current = rootKey;
-    setPanel("bag");
-  }, [rootKey]);
+  const [panel, setPanel] = useState<Panel>(openPanel);
+  // Opens on `openPanel` (the deck, or the bag by its shortcut), and goes
+  // back to it when the tab is pressed again. Before paint, so coming back
+  // never flashes the other one first.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: rootKey re-opens it
+  useLayoutEffect(() => {
+    if (active) setPanel(openPanel);
+  }, [active, openPanel, rootKey]);
   const [tabBumps, setTabBumps] = useState<Record<Panel, number>>({
     bag: 0,
     deck: 0,
@@ -1801,7 +1801,7 @@ function InventoryViewImpl({
         {/* h-6: a whole-pixel row height, for the same reason as the
             header's leading-5 — the deck's and bag's icons sit below it. */}
         <div className="mb-0.5 flex h-6 items-center border-b border-border">
-          {(["bag", "deck"] as const).map((tab) => (
+          {(["deck", "bag"] as const).map((tab) => (
             <TabButton
               key={tab}
               active={panel === tab}

@@ -14,6 +14,7 @@ import {
   dot3,
   GOLD_RAMP,
   LIGHT,
+  NANDOR_RAMP,
   OCEAN_RAMP,
   PUMPKIN_RAMP,
   RAINBOW_RAMP,
@@ -52,6 +53,9 @@ export const DEFAULT_CAMERA_DISTANCE = 2.7;
  * Fixed: it is the framing — the original camera's (distance 2.0, vertical
  * field of view 1.8 rad), whatever the distance now. */
 const FRAME_HALF_H = 2.0 * Math.tan(1.8 / 2);
+/** The frame's full height at the herzie's centre, in creature units: what
+ * a host drawing herzies in its own 3D space scales against. */
+export const CREATURE_FRAME_HEIGHT = 2 * FRAME_HALF_H;
 
 let CAM = DEFAULT_CAMERA_DISTANCE;
 let HALF_H = FRAME_HALF_H / CAM;
@@ -65,8 +69,8 @@ export function setCameraDistance(distance: number): void {
 }
 
 /** Horizontal half-extent of the view plane for a given column count. */
-function halfWidthFor(cols: number): number {
-  return HALF_H * ((cols / SH) * (1 / CHAR_ASPECT));
+function halfWidthFor(cols: number, rows: number = SH): number {
+  return HALF_H * ((cols / rows) * (1 / CHAR_ASPECT));
 }
 /** How far the herzie leans back toward the camera, in degrees: positive
  * shows more of the top of its head. Tuned in the sandbox (was 8). */
@@ -113,7 +117,7 @@ const EVIL_EYE_DIM = "#7A0C04";
 
 // --- HSL color utilities ---
 
-interface ColorTriplet {
+export interface ColorTriplet {
   dim: string;
   base: string;
   bright: string;
@@ -188,13 +192,14 @@ function buildColorTriplet(hex: string): ColorTriplet {
 // Amplitudes in world units, applied to already-scaled sphere positions.
 // Tuned so motion is ~0.3-0.5 pixels — visible but slow and organic.
 // `cycles` is full sine cycles per loop, so every part tiles seamlessly.
-const IDLE_FRAMES = 120; // at 50ms per frame (Herzie3D) — a 6000ms loop
+const IDLE_FRAMES = 120; // at 50ms per frame — a 6000ms loop
 
 const IDLE = {
   body: { amp: 0.04, cycles: 4 }, // 1500ms
   head: { amp: 0.025, cycles: 2 }, // 3000ms
   eye: { amp: 0.025, cycles: 2 }, // follows head
-  limb: { amp: 0.03, cycles: 4 }, // 1500ms
+  arm: { amp: 0.1, cycles: 4 }, // radians about the shoulder; 1500ms
+  limb: { amp: 0.03, cycles: 4 }, // the boss's chained arms; 1500ms
   ear: { amp: 0.02, cycles: 2 }, // 3000ms
   spike: { amp: 0.015, cycles: 2 }, // follows ears
   // Spirit Orb — one slow breath across the whole loop, deliberately calmer
@@ -203,19 +208,39 @@ const IDLE = {
 } as const;
 
 // --- Dance animation constants ---
-// Energetic rhythmic motion — ~2.5-3× idle amplitudes, faster cycle.
 const DANCE_FRAMES = 24;
 // 65ms per frame → 1560ms loop (~77 BPM); interval applied by the animator.
 
 const DANCE = {
-  body: { amp: 0.11, cycles: 2 },
-  head: { amp: 0.07, cycles: 2 }, // phase π/3 — nods slightly behind body
-  eye: { amp: 0.07, cycles: 2 }, // follows head
-  limb: { amp: 0.09, cycles: 2 }, // L at 0, R at π — alternating sway
-  ear: { amp: 0.055, cycles: 4 }, // double body freq — floppy
-  spike: { amp: 0.04, cycles: 4, xAmp: 0.03, xCycles: 2 }, // Y bounce + lateral X sway
   ground: { amp: 0.06, cycles: 2 }, // boombox hop — upward bounce on the beat
   spirit: { amp: 0.08, cycles: 1 }, // Spirit Orb — slow smooth float, not a hop
+} as const;
+
+/**
+ * The herzie's own groove, in fractions of its body scale (lengths) and
+ * radians (turns). Lags are fractions of a beat: each part follows the one
+ * it hangs off a little late, as a loose thing would.
+ */
+const GROOVE = {
+  /** With legs: the body sinks onto them on each beat, knees bending… */
+  dip: 0.07,
+  /** …and rocks over onto each foot in turn, once a loop, about the feet. */
+  rock: 0.07,
+  /** The foot it rocks off taps between beats; the other stays planted. */
+  tap: 0.06,
+  /** Without legs: a little hop between beats, landing on each one. */
+  hop: 0.06,
+  /** The head nods after the body. */
+  nod: 0.035,
+  nodLag: 0.12,
+  /** Ears and spikes flop after the head. */
+  flop: 0.05,
+  flopLag: 0.25,
+  /** The arms fly up after the dip and fall back… */
+  armLift: 0.55,
+  armLag: 0.2,
+  /** …and swing forward and back, one each way, every two beats. */
+  armSwing: 0.4,
 } as const;
 
 // --- Seeded PRNG ---
@@ -268,7 +293,27 @@ export interface Sphere {
   /** Set on spheres that hang loose (necklace links) and so react to a spin —
    * see applyDangle and dangle-physics.ts. */
   dangle?: Dangle;
+  /** Absent, this is a sphere. Otherwise a solid around the segment from
+   * center − axis to center + axis, `radius` thick: a capsule (rounded ends)
+   * or a cylinder (flat ends). The axis is relative to the center, so the
+   * animations, which only move centers, carry it along untouched; only
+   * renderCreatureFrame's camera turn and applyDangle's swing rotate it. */
+  shape?: Shape;
 }
+
+export interface Shape {
+  kind: "capsule" | "cylinder" | "cone";
+  axis: V3;
+  /** Cones only: the radius at the +axis end (`radius` is the −axis end's);
+   * 0 comes to a point. The ends are flat. */
+  tipRadius?: number;
+  /** Cylinders only: how far the middle of each end bulges out past the rim,
+   * as a paraboloid cap (an ear cup's domed face). Negative dishes it in. */
+  dome?: number;
+}
+
+/** What the ray caster needs of a primitive. */
+type Primitive = Pick<Sphere, "center" | "radius" | "shape">;
 
 interface Dangle {
   /** How much of the chain's swing this sphere takes: ~0 at the back of the
@@ -281,30 +326,116 @@ interface Dangle {
 }
 
 // --- Dance animation offsets ---
-// Returns a copy of the sphere list with per-part dance offsets applied.
-// Adds X-axis sway for spikes in addition to Y-axis bounce.
 
+/** 1 on the beat, easing to 0 halfway between beats. */
+function onBeat(phase: number): number {
+  return ((1 + Math.cos(2 * Math.PI * phase)) / 2) ** 2;
+}
+
+/** How far through the current beat `frameIdx` is (0..1), `lag` beats
+ * late. */
+function beatPhase(frameIdx: number, lag = 0): number {
+  const p = (frameIdx / DANCE_BEAT - lag) % 1;
+  return p < 0 ? p + 1 : p;
+}
+
+/**
+ * How high a herzie without legs is off the ground mid-dance, 0 (landing, on
+ * the beat) to 1 (between beats): what a host squashes its landings by.
+ */
+export function danceHopLift(frameIdx: number): number {
+  const p = beatPhase(frameIdx);
+  return 4 * p * (1 - p);
+}
+
+/**
+ * Each of the herzie's own spheres' dance offsets at `frameIdx`, as deltas.
+ * The body leads; the head, ears and arms ride it and follow a little late.
+ * With legs it stays on its feet: the body dips onto them on the beat and
+ * rocks from foot to foot, one foot always planted. Without legs it hops,
+ * landing on the beat. Scene-fixed parts (the boombox, a companion) aren't
+ * moved here.
+ */
+function danceDeltas(spheres: Sphere[], frameIdx: number): V3[] {
+  const s = HERZIE_BODY.scale * CS;
+  const rig = buildRig(spheres);
+  const t = frameIdx / DANCE_FRAMES;
+  // +1 rocked over onto its right foot (+x), −1 its left.
+  const sway = Math.sin(2 * Math.PI * t);
+  const rock = GROOVE.rock * sway;
+  // The beat's drop: down (+y) onto the legs, or the landing of a hop.
+  const drop = (lag: number) =>
+    rig.legs
+      ? GROOVE.dip * s * onBeat(beatPhase(frameIdx, lag))
+      : -GROOVE.hop * s * danceHopLift(frameIdx - lag * DANCE_BEAT);
+  const bodyDrop = drop(0);
+  // With legs the head nods on the body after the dip, and the ears flop
+  // after that. Without, the head is what lands, so it can't nod into the
+  // ground: the ears just trail the hop.
+  const nod = rig.legs
+    ? bodyDrop + GROOVE.nod * s * onBeat(beatPhase(frameIdx, GROOVE.nodLag))
+    : bodyDrop;
+  const flop = rig.legs
+    ? nod + GROOVE.flop * s * onBeat(beatPhase(frameIdx, GROOVE.flopLag))
+    : drop(GROOVE.flopLag);
+  // Everything above the feet rocks about the point between them (the
+  // bottom, without legs), then drops by `dy`.
+  const pivot: V3 = [0, rig.floor, 0];
+  const ride = (p: V3, dy: number): V3 =>
+    add(turnAbout(p, pivot, rock), [0, dy, 0]);
+  const armLift = GROOVE.armLift * onBeat(beatPhase(frameIdx, GROOVE.armLag));
+  const armSwing =
+    GROOVE.armSwing * Math.sin((Math.PI * frameIdx) / DANCE_BEAT);
+
+  const deltas = spheres.map((sp): V3 => {
+    const c = sp.center;
+    if (isSceneFixed(sp.part)) return [0, 0, 0];
+    if (isLeg(sp.part)) {
+      // The foot it has rocked off taps up between beats; the other is
+      // planted.
+      const off = Math.max(0, -LIMB_SIDE[sp.part] * sway);
+      const tap =
+        GROOVE.tap * s * off * off * (1 - onBeat(beatPhase(frameIdx)));
+      return [0, -tap, 0];
+    }
+    const shoulder = rig.shoulders[sp.part];
+    if (shoulder) {
+      // Turned about the shoulder, then carried along with its parent.
+      const side = LIMB_SIDE[sp.part];
+      const arm = turnAbout(c, shoulder, -side * armLift, 0, armSwing);
+      return sub(ride(arm, rig.body ? bodyDrop : nod), c);
+    }
+    let dy = bodyDrop;
+    if (sp.part === "head" || sp.part === "eye" || sp.part === "pupil") {
+      dy = nod;
+    } else if (sp.part === "ear") dy = flop;
+    else if (sp.part === "spike") dy = spikeOnBody(sp, rig) ? bodyDrop : flop;
+    return sub(ride(c, dy), c);
+  });
+  if (rig.legs) return deltas;
+  // Rocked about the point it stands on, a round bottom would dip through
+  // the ground (it rocks, rather than rolls): lift it back out.
+  let lowest = Number.NEGATIVE_INFINITY;
+  spheres.forEach((sp, i) => {
+    if (isSceneFixed(sp.part)) return;
+    lowest = Math.max(lowest, sp.center[1] + deltas[i][1] + sp.radius);
+  });
+  const lift = Math.min(0, rig.floor - lowest);
+  return deltas.map((d, i) =>
+    isSceneFixed(spheres[i].part) ? d : [d[0], d[1] + lift, d[2]],
+  );
+}
+
+/** Returns a copy of the sphere list in its dance pose at `frameIdx`: the
+ * herzie's groove, the boombox's bounce, and the spirit's float and hops. */
 function applyDanceOffsets(
   spheres: Sphere[],
   frameIdx: number,
   hops: readonly SpiritHop[] = [],
 ): Sphere[] {
-  const t = frameIdx / DANCE_FRAMES; // normalized 0..1
-
-  function yOff(amp: number, cycles: number, phase: number): number {
-    return Math.sin(2 * Math.PI * t * cycles + phase) * amp;
-  }
-
-  const bodyOff = yOff(DANCE.body.amp, DANCE.body.cycles, 0);
-  const headOff = yOff(DANCE.head.amp, DANCE.head.cycles, Math.PI / 3);
-  const eyeOff = headOff;
-  const earOff = yOff(DANCE.ear.amp, DANCE.ear.cycles, Math.PI / 6);
-  const spikeYOff = yOff(DANCE.spike.amp, DANCE.spike.cycles, Math.PI / 4);
-  const spikeXOff =
-    Math.sin(2 * Math.PI * t * DANCE.spike.xCycles + Math.PI / 4) *
-    DANCE.spike.xAmp;
-  const limbLOff = yOff(DANCE.limb.amp, DANCE.limb.cycles, 0);
-  const limbROff = yOff(DANCE.limb.amp, DANCE.limb.cycles, Math.PI);
+  const t = frameIdx / DANCE_FRAMES;
+  const yOff = (amp: number, cycles: number, phase: number) =>
+    Math.sin(2 * Math.PI * t * cycles + phase) * amp;
   // Boombox hops upward on the beat (negative Y is up).
   const groundOff =
     -Math.abs(Math.sin(2 * Math.PI * t * DANCE.ground.cycles)) *
@@ -320,32 +451,16 @@ function applyDanceOffsets(
   // Other floating pets keep the spirit's slow bob but never hop: the hop
   // poses are the Greedy Spirit's, keyed on its single core sphere.
   const petOff = yOff(DANCE.spirit.amp, DANCE.spirit.cycles, Math.PI / 5);
+  const groove = danceDeltas(spheres, frameIdx);
 
-  return spheres.map((s) => {
+  return spheres.map((s, i) => {
     if (s.part === "spirit") return moveSpirit(s);
-    if (s.part === "pet") {
-      return {
-        ...s,
-        center: [s.center[0], s.center[1] + petOff, s.center[2]] as V3,
-      };
+    if (s.part === "pet")
+      return { ...s, center: add(s.center, [0, petOff, 0]) };
+    if (s.part === "ground") {
+      return { ...s, center: add(s.center, [0, groundOff, 0]) };
     }
-    let dy = 0;
-    let dx = 0;
-    if (s.part === "body") dy = bodyOff;
-    else if (s.part === "head") dy = headOff;
-    else if (s.part === "eye" || s.part === "pupil") dy = eyeOff;
-    else if (s.part === "ear") dy = earOff;
-    else if (s.part === "spike") {
-      dy = spikeYOff;
-      dx = spikeXOff;
-    } else if (s.part === "arm-l" || s.part === "leg-l") dy = limbLOff;
-    else if (s.part === "arm-r" || s.part === "leg-r") dy = limbROff;
-    else if (s.part === "ground") dy = groundOff;
-
-    return {
-      ...s,
-      center: [s.center[0] + dx, s.center[1] + dy, s.center[2]] as V3,
-    };
+    return { ...s, center: add(s.center, groove[i]) };
   });
 }
 
@@ -563,6 +678,14 @@ const HERZIE_BODY = {
   legLength: 0.3828585948329419,
 } as const;
 
+/** How far out an arm's centre sits past the surface it hangs off, in arm
+ * radii: the rest of the arm is sunk into it. */
+const ARM_SINK = 0.4;
+/** How far below horizontal the arms hang off the shoulder (radians): off
+ * the head at stage 2, and higher on the body from stage 3. */
+const ARM_DROOP = (15 * Math.PI) / 180;
+const BODY_ARM_DROOP = (5 * Math.PI) / 180;
+
 /** The body type whose herzies carry spikes instead of ears. 0-2 all build
  * the same body now; the roll is unchanged (see generateCreatureParams). */
 const SPIKY_BODY_TYPE = 3;
@@ -624,36 +747,11 @@ function buildHerzie(p: CreatureParams, stage: number): Sphere[] {
     }
   }
 
-  if (stage >= 2) {
-    const armY = stage === 3 ? 0.1 * s : headY + headR * 0.35;
-    const armX = headR + 0.12 * s;
-    spheres.push({
-      center: [-armX, armY, 0],
-      radius: 0.17 * s,
-      zone: "primary",
-      part: "arm-l",
-    });
-    spheres.push({
-      center: [armX, armY, 0],
-      radius: 0.17 * s,
-      zone: "primary",
-      part: "arm-r",
-    });
-    if (spiky) {
-      for (const side of [-1, 1]) {
-        spheres.push({
-          center: [side * (armX + 0.14 * s), armY, 0],
-          radius: 0.07 * s,
-          zone: "accent",
-          part: "spike",
-        });
-      }
-    }
-  }
-
+  // The body comes before the arms: they hang off it at stage 3 (off the
+  // head at stage 2, before there is one).
+  const bodyR = 0.5 * s;
+  const bodyY = 0.18 * s;
   if (stage >= 3) {
-    const bodyR = 0.5 * s;
-    const bodyY = 0.18 * s;
     spheres.push({
       center: [0, bodyY, 0],
       radius: bodyR,
@@ -670,33 +768,49 @@ function buildHerzie(p: CreatureParams, stage: number): Sphere[] {
         });
       }
     }
+  }
 
-    const legY = bodyY + bodyR * 0.75;
-    const legX = 0.32 * s;
-    spheres.push({
-      center: [-legX, legY, 0],
-      radius: 0.19 * s,
-      zone: "accent",
-      part: "leg-l",
-    });
-    spheres.push({
-      center: [legX, legY, 0],
-      radius: 0.19 * s,
-      zone: "accent",
-      part: "leg-r",
-    });
-    spheres.push({
-      center: [-legX, legY + HERZIE_BODY.legLength * 0.4 * s, 0],
-      radius: 0.15 * s,
-      zone: "accent",
-      part: "leg-l",
-    });
-    spheres.push({
-      center: [legX, legY + HERZIE_BODY.legLength * 0.4 * s, 0],
-      radius: 0.15 * s,
-      zone: "accent",
-      part: "leg-r",
-    });
+  if (stage >= 2) {
+    // One sphere an arm, sunk a little into whatever it hangs off and angled
+    // down from it, so it reads as joined at the shoulder.
+    const armR = 0.17 * s;
+    const [parentY, parentR] = stage >= 3 ? [bodyY, bodyR] : [headY, headR];
+    const reach = parentR + ARM_SINK * armR;
+    const droop = stage >= 3 ? BODY_ARM_DROOP : ARM_DROOP;
+    for (const [side, part] of [
+      [-1, "arm-l"],
+      [1, "arm-r"],
+    ] as const) {
+      spheres.push({
+        center: [
+          side * reach * Math.cos(droop),
+          parentY + reach * Math.sin(droop),
+          0,
+        ],
+        radius: armR,
+        zone: "primary",
+        part,
+      });
+    }
+  }
+
+  if (stage >= 3) {
+    // One sphere a leg, tucked under the body. Its bottom is where the old
+    // hip-and-foot pair's was, so the herzie stands exactly as tall.
+    const legR = 0.2 * s;
+    const sole =
+      bodyY + bodyR * 0.75 + HERZIE_BODY.legLength * 0.4 * s + 0.15 * s;
+    for (const [side, part] of [
+      [-1, "leg-l"],
+      [1, "leg-r"],
+    ] as const) {
+      spheres.push({
+        center: [side * 0.3 * s, sole - legR, 0],
+        radius: legR,
+        zone: "accent",
+        part,
+      });
+    }
   }
 
   return spheres;
@@ -940,6 +1054,9 @@ function getHeadBounds(
   return { center: [cx, cy, hz], radius };
 }
 
+const HEADPHONE_SHELL = "#666666";
+const HEADPHONE_CUSHION = "#2A2A2A";
+
 function buildHeadphoneSpheres(spheres: Sphere[]): Sphere[] {
   const head = getHeadBounds(spheres);
   if (!head) return [];
@@ -947,36 +1064,66 @@ function buildHeadphoneSpheres(spheres: Sphere[]): Sphere[] {
   const [hx, hy, hz] = head.center;
   const hr = head.radius;
   const result: Sphere[] = [];
-
-  // Ear cups — two spheres at ±headRadius, vertically centered on head
-  const cupR = hr * 0.28;
-  result.push({
-    center: [hx - hr * 0.95, hy, hz],
-    radius: cupR,
+  const part = (
+    center: V3,
+    radius: number,
+    color: string,
+    shape?: Shape,
+  ): Sphere => ({
+    center,
+    radius,
     zone: "wearable",
     part: "head",
-  });
-  result.push({
-    center: [hx + hr * 0.95, hy, hz],
-    radius: cupR,
-    zone: "wearable",
-    part: "head",
+    color,
+    shape,
   });
 
-  // Band — arc of spheres over the top of the head
-  const bandR = hr * 0.18;
-  const bandSteps = 9;
-  for (let i = 0; i <= bandSteps; i++) {
-    const t = i / bandSteps; // 0 = left cup, 1 = right cup
-    const angle = Math.PI * t; // π to 0 — arc over the top
-    const bx = hx + Math.cos(angle) * hr * 0.95;
-    const by = hy - Math.sin(angle) * hr * 1.05;
-    result.push({
-      center: [bx, by, hz],
-      radius: bandR,
-      zone: "wearable",
-      part: "head",
-    });
+  for (const side of [-1, 1]) {
+    // Ear cup: a flat-faced disc on its side, its face out from the head.
+    result.push(
+      part([hx + side * hr * 1.02, hy, hz], hr * 0.3, HEADPHONE_SHELL, {
+        kind: "cylinder",
+        axis: [hr * 0.12, 0, 0],
+        dome: hr * 0.09,
+      }),
+    );
+    // Cushion: a darker, slimmer pad between the cup and the head.
+    result.push(
+      part([hx + side * hr * 0.86, hy, hz], hr * 0.27, HEADPHONE_CUSHION, {
+        kind: "cylinder",
+        axis: [hr * 0.06, 0, 0],
+      }),
+    );
+  }
+
+  // Band: one smooth tube arcing over the head from cup to cup, as capsules
+  // chained end to end (each shares its ends with its neighbours). It must
+  // stay at least ~1.5 cells thick on the default grid, or it breaks into
+  // dots as the herzie turns.
+  const bandR = hr * 0.11;
+  const bandSteps = 12;
+  const arcPoint = (i: number): V3 => {
+    const angle = Math.PI * (i / bandSteps); // 0 = right cup, π = left
+    return [
+      hx + Math.cos(angle) * hr * 1.04,
+      hy - Math.sin(angle) * hr * 1.12,
+      hz,
+    ];
+  };
+  for (let i = 0; i < bandSteps; i++) {
+    const a = arcPoint(i);
+    const b = arcPoint(i + 1);
+    result.push(
+      part(
+        [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2],
+        bandR,
+        HEADPHONE_SHELL,
+        {
+          kind: "capsule",
+          axis: [(b[0] - a[0]) / 2, (b[1] - a[1]) / 2, (b[2] - a[2]) / 2],
+        },
+      ),
+    );
   }
 
   return result;
@@ -1204,8 +1351,20 @@ function applyDangle(spheres: Sphere[], state: DangleState): Sphere[] {
       z *= out;
     }
     const [rx, , rz] = rotY([x, 0, z], state.swing * weight);
-    return { ...s, center: [rx + pivot[0], y, rz + pivot[1]] as V3 };
+    return {
+      ...s,
+      center: [rx + pivot[0], y, rz + pivot[1]] as V3,
+      shape: s.shape && { ...s.shape, axis: dangledAxis(s, state) },
+    };
   });
+}
+
+/** A shaped part's axis, turned with its swing (as applyDangle turns it):
+ * for a renderer that moves only centres, to turn the part itself. */
+export function dangledAxis(s: Sphere, state: DangleState | undefined): V3 {
+  const axis = s.shape?.axis ?? [0, 1, 0];
+  if (!s.dangle || !state || state.swing === 0) return axis;
+  return rotY(axis, state.swing * s.dangle.weight);
 }
 
 /** Whether anything worn swings when the herzie is spun. */
@@ -1237,7 +1396,7 @@ export interface BoomboxConfig {
 
 export const DEFAULT_BOOMBOX_CONFIG: BoomboxConfig = {
   yawDeg: -33,
-  offsetX: 0.18,
+  offsetX: 0.48,
   // Lifted: it sits in front of the herzie, so resting on the floor itself
   // drew it a couple of rows below the feet. Tuned by eye in the app.
   offsetY: -0.42,
@@ -1428,7 +1587,7 @@ function buildSpiritOrbSpheres(
 }
 
 /**
- * Places a companion (a pet, or a small ground prop like Jack), built around
+ * Places a companion (a pet, or a small ground prop), built around
  * its own origin, beside the herzie at height `y`.
  *
  * Horizontal placement reuses the same bottom-corner scheme as the boombox
@@ -1490,52 +1649,6 @@ function petHoverY(spheres: Sphere[]): number {
   return floorY(spheres) - PET_HOVER_HEIGHT;
 }
 
-/** A carved pumpkin: a ribbed orange cluster with a green stem and a
- * candle-lit face. The "cut-outs" are glowing yellow spheres set into the
- * front, since a sphere renderer has no holes to cut. It sits on the ground
- * like the boombox (part "ground": fixed while the herzie spins, bouncing
- * with it on the beat). */
-function buildJackOLanternSpheres(
-  spheres: Sphere[],
-  cols: number,
-  side: GroundSide,
-): Sphere[] {
-  if (spheres.length === 0) return [];
-  const R = BOOMBOX_REF_HEIGHT * 0.2;
-  const local: { c: V3; r: number; color: string }[] = [
-    { c: [0, 0, 0], r: R * 0.8, color: "#F27B13" },
-  ];
-  // Ribs: a ring of overlapping lobes, alternating tone for the grooves.
-  const ribs = 8;
-  for (let i = 0; i < ribs; i++) {
-    const a = (i / ribs) * Math.PI * 2;
-    local.push({
-      c: [Math.cos(a) * R * 0.42, R * 0.05, Math.sin(a) * R * 0.42],
-      r: R * 0.6,
-      color: i % 2 === 0 ? "#F27B13" : "#D9620A",
-    });
-  }
-  local.push({ c: [0, -R * 0.95, 0], r: R * 0.17, color: "#3A6B1F" });
-  local.push({ c: [R * 0.06, -R * 1.12, 0], r: R * 0.12, color: "#4E8A2A" });
-  // Face, toward the camera (-Z).
-  const face = (x: number, y: number, r: number) =>
-    local.push({ c: [x, y, eyeZ(R * 1.02, x, y, r)], r, color: "#FFD43B" });
-  face(-R * 0.36, -R * 0.2, R * 0.17);
-  face(R * 0.36, -R * 0.2, R * 0.17);
-  face(0, R * 0.04, R * 0.1);
-  for (let i = 0; i < 5; i++) {
-    const t = i / 4 - 0.5; // -0.5..0.5 across the grin
-    face(t * R * 0.9, R * 0.28 + R * 0.12 * (1 - (2 * t) ** 2), R * 0.11);
-  }
-  // On the floor, its base level with the herzie's feet on screen: it sits in
-  // front of the herzie (closer to the camera), so resting it on the floor
-  // itself would draw it a couple of rows lower than the feet. The lowest
-  // lobes reach about 0.65R below centre. Faces front: turned like the
-  // spirit, the ribbed shell read as skewed.
-  const restY = floorY(spheres) - R * 0.65 - R * 0.9;
-  return placeCompanion(local, restY, R, cols, side, "ground", false);
-}
-
 /** A sheet ghost: a round head over a body that flares out to a wavy hem. */
 function buildGhostSpheres(
   spheres: Sphere[],
@@ -1582,9 +1695,10 @@ function buildGhostSpheres(
   return placeCompanion(local, petHoverY(spheres), R, cols, side, "pet");
 }
 
-/** Pointed witch hat: a brim, an orange band, and a cone of shrinking
- * spheres whose top bends over. The bent tip carries dangle weights, so it
- * swings round the hat's axis when the herzie is spun (see applyDangle). */
+/** Pointed witch hat: a flat brim, an orange band, and a cone whose top
+ * bends over in a few tapering segments to a point. The bent tip carries
+ * dangle weights, so it swings round the hat's axis when the herzie is spun
+ * (see applyDangle). */
 function buildWitchHatSpheres(spheres: Sphere[]): Sphere[] {
   const head = getHeadBounds(spheres);
   if (!head) return [];
@@ -1592,51 +1706,102 @@ function buildWitchHatSpheres(spheres: Sphere[]): Sphere[] {
   const hr = head.radius;
   const felt = "#6B4A94";
   const result: Sphere[] = [];
-  const push = (c: V3, r: number, color: string, dangle?: Dangle) =>
+  const push = (
+    center: V3,
+    radius: number,
+    color: string,
+    shape?: Shape,
+    dangle?: Dangle,
+  ) =>
     result.push({
-      center: c,
-      radius: r,
+      center,
+      radius,
       zone: "wearable",
       part: "head",
       color,
+      shape,
       dangle,
     });
-
-  // Brim: a wide ring resting on the crown, with a band just above it.
+  // Creature space is y down: up is −y.
   const brimY = hy - hr * 0.62;
-  const ring = (
-    steps: number,
-    y: number,
-    radius: number,
-    r: number,
-    color: string,
-  ) => {
-    for (let i = 0; i < steps; i++) {
-      const a = (i / steps) * Math.PI * 2;
-      push([hx + Math.cos(a) * radius, y, hz + Math.sin(a) * radius], r, color);
-    }
-  };
-  ring(22, brimY, hr * 0.9, hr * 0.16, felt);
-  ring(16, brimY - hr * 0.16, hr * 0.6, hr * 0.15, "#F27B13");
+  const brimHalf = hr * 0.04;
+  const crownBase = brimY - brimHalf;
+  // Squat on purpose: a grown herzie's head sits close to the top of the
+  // frame, and a classic tall hat would be cut off.
+  const crownHalf = hr * 0.28;
+  const crownTop = hr * 0.32;
 
-  // Cone: straight for most of its height, then the top bends over to one
-  // side and droops a little. Squat on purpose: a grown herzie's head sits
-  // close to the top of the frame, and a classic tall hat would be cut off.
-  const steps = 9;
-  const bendFrom = 5;
-  const height = hr * 0.85;
-  let x = hx;
-  for (let i = 0; i < steps; i++) {
-    const t = i / (steps - 1);
-    let y = brimY - hr * 0.15 - t * height;
-    let dangle: Dangle | undefined;
-    if (i >= bendFrom) {
-      const k = (i - bendFrom + 1) / (steps - bendFrom);
-      x += hr * 0.2 * k;
-      y += hr * 0.08 * k * k;
-      dangle = { weight: k, hang: 0, pivot: [hx, hz] };
+  // The crown is solid now, not a pile of balls, so the head mustn't poke
+  // out through its sides (seen from above): wide enough at its base that,
+  // tapering, it still clears the head all the way up.
+  const heads = spheres.filter(
+    (s) => s.part === "head" && s.zone !== "wearable",
+  );
+  const headWidth = (y: number) => {
+    let w = 0;
+    for (const s of heads) {
+      const dy = y - s.center[1];
+      if (Math.abs(dy) >= s.radius) continue;
+      const off = Math.hypot(s.center[0] - hx, s.center[2] - hz);
+      w = Math.max(w, off + Math.sqrt(s.radius ** 2 - dy * dy));
     }
-    push([x, y, hz], hr * (0.58 - 0.48 * t), felt, dangle);
+    return w;
+  };
+  let crownR = hr * 0.56;
+  for (let i = 0; i < 8; i++) {
+    const t = i / 8; // up the crown, 0 at its base
+    const clear = headWidth(crownBase - t * 2 * crownHalf) + hr * 0.04;
+    crownR = Math.max(crownR, (clear - crownTop * t) / (1 - t));
+  }
+
+  // Brim: a wide disc resting on the head, the band just above it.
+  push([hx, brimY, hz], Math.max(hr, crownR + hr * 0.4), felt, {
+    kind: "cylinder",
+    axis: [0, brimHalf, 0],
+  });
+  const bandHalf = hr * 0.09;
+  push([hx, crownBase - bandHalf, hz], crownR + hr * 0.04, "#F27B13", {
+    kind: "cylinder",
+    axis: [0, bandHalf, 0],
+  });
+  push([hx, crownBase - crownHalf, hz], crownR, felt, {
+    kind: "cone",
+    axis: [0, -crownHalf, 0],
+    tipRadius: crownTop,
+  });
+
+  // Tip: segments bending further over to one side each, down to a point.
+  // A ball at each bend fills the wedge the turn opens between them.
+  const segments = [
+    { tilt: 30, length: 0.22, radius: 0.22 },
+    { tilt: 62, length: 0.2, radius: 0.13 },
+    { tilt: 100, length: 0.2, radius: 0 },
+  ];
+  let at: V3 = [hx, crownBase - 2 * crownHalf, hz];
+  let r = crownTop;
+  const along = segments.reduce((sum, seg) => sum + seg.length, 0);
+  let done = 0;
+  const swing = (d: number): Dangle | undefined =>
+    d > 0 ? { weight: d / along, hang: 0, pivot: [hx, hz] } : undefined;
+  for (const seg of segments) {
+    push(at, r, felt, undefined, swing(done));
+    const a = (seg.tilt * Math.PI) / 180;
+    const half: V3 = [
+      (Math.sin(a) * seg.length * hr) / 2,
+      (-Math.cos(a) * seg.length * hr) / 2,
+      0,
+    ];
+    const center: V3 = [at[0] + half[0], at[1] + half[1], at[2]];
+    push(
+      center,
+      r,
+      felt,
+      { kind: "cone", axis: half, tipRadius: seg.radius * hr },
+      swing(done + seg.length / 2),
+    );
+    at = [center[0] + half[0], center[1] + half[1], at[2]];
+    r = seg.radius * hr;
+    done += seg.length;
   }
   return result;
 }
@@ -1671,13 +1836,15 @@ function buildFangSpheres(spheres: Sphere[]): Sphere[] {
   return result;
 }
 
-/** Whether a Greedy Spirit sits in either ground slot. */
+/** Whether the Greedy Spirit is the worn spirit. */
 export function hasSpiritEquipped(equipped?: Equipped): boolean {
-  return (
-    equipped?.ground_left === "spirit-orb" ||
-    equipped?.ground_right === "spirit-orb"
-  );
+  return equipped?.spirit === "spirit-orb";
 }
+
+/** Which side the worn spirit floats on. It has a slot of its own rather than
+ * a ground side, so it always takes the same one, hovering above whatever
+ * accessory stands there. */
+const SPIRIT_SIDE: GroundSide = "right";
 
 export function equippedCacheKey(equipped?: Equipped): string {
   if (!equipped) return "";
@@ -1719,13 +1886,13 @@ function appendWearableSpheres(
     const itemId = equipped[groundSlot(side)];
     if (itemId === "boombox") {
       spheres.push(...buildBoomboxSpheres(spheres, cols, side, boomboxConfig));
-    } else if (itemId === "spirit-orb") {
-      spheres.push(...buildSpiritOrbSpheres(spheres, cols, side));
-    } else if (itemId === "jack-o-lantern") {
-      spheres.push(...buildJackOLanternSpheres(spheres, cols, side));
-    } else if (itemId === "ghost") {
-      spheres.push(...buildGhostSpheres(spheres, cols, side));
     }
+  }
+
+  if (equipped.spirit === "spirit-orb") {
+    spheres.push(...buildSpiritOrbSpheres(spheres, cols, SPIRIT_SIDE));
+  } else if (equipped.spirit === "ghost") {
+    spheres.push(...buildGhostSpheres(spheres, cols, SPIRIT_SIDE));
   }
 }
 
@@ -1737,6 +1904,9 @@ function appendWearableSpheres(
 /** Colour-scheme key for Good ol' George's solid-gold body. It lives in the
  * `color` slot like a skin, but no catalog item has this id. */
 export const GOLD_SCHEME_ID = "npc-gold";
+/** Colour-scheme key for Nandor the Treatless, the same arrangement as
+ * GOLD_SCHEME_ID. */
+export const NANDOR_SCHEME_ID = "npc-nandor";
 
 const COLOR_SCHEMES: Record<string, readonly string[]> = {
   prism: RAINBOW_RAMP,
@@ -1750,6 +1920,7 @@ const COLOR_SCHEMES: Record<string, readonly string[]> = {
   // Not an item: Good ol' George's gold, applied only by the desktop's
   // Events emblem (see GOLD_SCHEME_ID). No player can equip it.
   [GOLD_SCHEME_ID]: GOLD_RAMP,
+  [NANDOR_SCHEME_ID]: NANDOR_RAMP,
 };
 
 /** True for spheres that a colour scheme is allowed to repaint. */
@@ -1798,7 +1969,7 @@ export function buildCreatureSpheres(
 // reads as alive rather than as a prop on a sine wave. A hop baked into the
 // loop would recur on the exact same beat forever, which is the opposite of
 // alive, so hops live in separate loop *variants* instead: identical to the
-// plain dance loop except for the spirit during its hop(s). Herzie3D picks
+// plain dance loop except for the spirit during its hop(s). the host picks
 // plain or a random variant at each loop boundary, so hops land at irregular
 // times, heights and spacings. A variant only re-renders the frames its hops
 // touch and shares the rest with the plain loop (see generateLoopFrames).
@@ -1877,7 +2048,7 @@ const DANCE_SPIRIT_HOPS: readonly (readonly SpiritHop[])[] = [
   ],
 ];
 
-/** Dance hop variants Herzie3D can choose between (indices 0..n-1). */
+/** Dance hop variants a host can choose between (indices 0..n-1). */
 export const SPIRIT_DANCE_HOP_VARIANT_COUNT = DANCE_SPIRIT_HOPS.length;
 
 function spiritHopsFor(
@@ -2036,45 +2207,309 @@ function spiritMover(
   };
 }
 
-// --- Idle animation offsets ---
-// Returns a copy of the sphere list with per-part Y offsets applied.
+// --- The rig ---
+// A herzie's arms and legs are one sphere each, hung off a parent: the body
+// at stage 3, the head before it. Every pose moves a limb by turning it about
+// its joint, a point inside both the limb and its parent, so no pose can pull
+// it off. Everything above the legs moves with the body or the head.
 
-function applyIdleOffsets(spheres: Sphere[], frameIdx: number): Sphere[] {
-  function offset(
-    part: { amp: number; cycles: number },
-    phase: number,
-  ): number {
-    return (
-      Math.sin(2 * Math.PI * (frameIdx / IDLE_FRAMES) * part.cycles + phase) *
-      part.amp
-    );
+/** Which side a limb is on: −1 the creature's left (−x), 1 its right. */
+const LIMB_SIDE: Record<string, -1 | 1> = {
+  "arm-l": -1,
+  "arm-r": 1,
+  "leg-l": -1,
+  "leg-r": 1,
+};
+const isArm = (part: string) => part === "arm-l" || part === "arm-r";
+const isLeg = (part: string) => part === "leg-l" || part === "leg-r";
+
+/** How deep a shoulder sits inside the arm's parent, in arm radii. */
+const SHOULDER_DEPTH = 0.3;
+/** How high in the body the hips are, as a fraction of its radius below its
+ * centre (y down). */
+const HIP_HEIGHT = 0.35;
+
+interface Rig {
+  head: Sphere | undefined;
+  body: Sphere | undefined;
+  /** Each arm part's joint. */
+  shoulders: Record<string, V3>;
+  /** Each leg part's joint. */
+  hips: Record<string, V3>;
+  legs: boolean;
+  /** Its arms are chains of spheres (the boss's), not one each. */
+  chained: boolean;
+  /** Creature-space y of its lowest point at rest: the soles, with legs. */
+  floor: number;
+}
+
+function buildRig(spheres: Sphere[]): Rig {
+  const head = largestPart(spheres, "head");
+  const body = largestPart(spheres, "body");
+  const parent = body ?? head;
+  const shoulders: Record<string, V3> = {};
+  const hips: Record<string, V3> = {};
+  let floor = Number.NEGATIVE_INFINITY;
+  for (const sp of spheres) {
+    if (isSceneFixed(sp.part)) continue;
+    floor = Math.max(floor, sp.center[1] + sp.radius);
+    if (isArm(sp.part) && parent) {
+      // The arm sphere nearest the parent carries the shoulder (the boss's
+      // arms are a chain of them).
+      const prev = shoulders[sp.part];
+      const d = Math.hypot(...sub(sp.center, parent.center));
+      if (prev && Math.hypot(...sub(prev, parent.center)) <= d) continue;
+      const depth = parent.radius - SHOULDER_DEPTH * sp.radius;
+      shoulders[sp.part] = add(
+        parent.center,
+        scale(sub(sp.center, parent.center), depth / Math.max(d, 1e-9)),
+      );
+    } else if (isLeg(sp.part) && !hips[sp.part]) {
+      hips[sp.part] = [
+        sp.center[0],
+        body ? body.center[1] + HIP_HEIGHT * body.radius : sp.center[1],
+        sp.center[2],
+      ];
+    }
+  }
+  return {
+    head,
+    body,
+    shoulders,
+    hips,
+    legs: Object.keys(hips).length > 0,
+    chained: spheres.filter((sp) => sp.part === "arm-l").length > 1,
+    floor,
+  };
+}
+
+function add(a: V3, b: V3): V3 {
+  return [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+}
+function sub(a: V3, b: V3): V3 {
+  return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+}
+function scale(a: V3, k: number): V3 {
+  return [a[0] * k, a[1] * k, a[2] * k];
+}
+
+/**
+ * `p` turned about `pivot`: by `roll` in the frontal plane (x-y; positive
+ * tips the top toward +x), then `pitch` in the side plane (y-z; positive
+ * swings what hangs below toward the back, +z), then `yaw` about the
+ * vertical (positive swings +x toward the front, −z). Creature space: y down,
+ * front −z.
+ */
+function turnAbout(p: V3, pivot: V3, roll: number, pitch = 0, yaw = 0): V3 {
+  let [x, y, z] = sub(p, pivot);
+  let c = Math.cos(roll);
+  let s = Math.sin(roll);
+  [x, y] = [x * c - y * s, x * s + y * c];
+  c = Math.cos(pitch);
+  s = Math.sin(pitch);
+  [y, z] = [y * c - z * s, y * s + z * c];
+  c = Math.cos(yaw);
+  s = Math.sin(yaw);
+  [x, z] = [x * c + z * s, -x * s + z * c];
+  return add(pivot, [x, y, z]);
+}
+
+/** What a spike moves with: the body (one on its flank) or the head (the
+ * crest). */
+function spikeOnBody(sp: Sphere, rig: Rig): boolean {
+  const gap = (o: Sphere | undefined) =>
+    o
+      ? Math.hypot(...sub(sp.center, o.center)) - o.radius
+      : Number.POSITIVE_INFINITY;
+  return gap(rig.body) < gap(rig.head);
+}
+
+// --- Idle animation offsets ---
+
+/** Each sphere's idle offset for `frameIdx`, as a delta so a pose can blend
+ * it with the walk cycle (see creaturePoseOffsets). With legs, the body and
+ * head breathe above feet that stay put; without, the herzie sits still on
+ * the ground and only its ears and arms stir. */
+function idleDeltas(spheres: Sphere[], frameIdx: number): V3[] {
+  const t = frameIdx / IDLE_FRAMES;
+  function wave(part: { amp: number; cycles: number }, phase: number) {
+    return Math.sin(2 * Math.PI * t * part.cycles + phase) * part.amp;
   }
 
-  const bodyOff = offset(IDLE.body, 0);
-  const headOff = offset(IDLE.head, 0);
-  const eyeOff = headOff; // eyes follow head exactly
-  const earOff = offset(IDLE.ear, Math.PI / 4);
-  const spikeOff = offset(IDLE.spike, Math.PI / 3);
-  const limbLOff = offset(IDLE.limb, 0);
-  const limbROff = offset(IDLE.limb, Math.PI); // mirrored phase
-  const spiritOff = offset(IDLE.spirit, Math.PI / 5);
+  const rig = buildRig(spheres);
+  // A herzie without a body sits on its head, so that stays put. (The
+  // boss has a body, and no legs: it breathes as it always did.)
+  const bodyOff = rig.body ? wave(IDLE.body, 0) : 0;
+  const headOff = rig.body ? wave(IDLE.head, 0) : 0;
+  const earOff = headOff + wave(IDLE.ear, Math.PI / 4);
+  const spikeOff = wave(IDLE.spike, Math.PI / 3);
+  const spiritOff = wave(IDLE.spirit, Math.PI / 5);
+  // The arms ride their parent, and sway about the shoulder in turn.
+  const armParentOff = rig.body ? bodyOff : headOff;
 
-  return spheres.map((s) => {
-    let dy = 0;
-    if (s.part === "spirit" || s.part === "pet") dy = spiritOff;
-    else if (s.part === "body") dy = bodyOff;
-    else if (s.part === "head") dy = headOff;
-    else if (s.part === "eye" || s.part === "pupil") dy = eyeOff;
-    else if (s.part === "ear") dy = earOff;
-    else if (s.part === "spike") dy = spikeOff;
-    else if (s.part === "arm-l" || s.part === "leg-l") dy = limbLOff;
-    else if (s.part === "arm-r" || s.part === "leg-r") dy = limbROff;
+  if (rig.chained) {
+    // The boss, as it always breathed: each part bobs on its own, its long
+    // arms in turn.
+    const limb = (side: number) => wave(IDLE.limb, side === 1 ? Math.PI : 0);
+    return spheres.map((s): V3 => {
+      if (s.part === "spirit" || s.part === "pet") return [0, spiritOff, 0];
+      if (s.part === "body") return [0, bodyOff, 0];
+      if (s.part === "head" || s.part === "eye" || s.part === "pupil") {
+        return [0, headOff, 0];
+      }
+      if (s.part === "ear") return [0, earOff - headOff, 0];
+      if (s.part === "spike") return [0, spikeOff, 0];
+      const side = LIMB_SIDE[s.part];
+      return [0, side ? limb(side) : 0, 0];
+    });
+  }
 
-    return {
-      ...s,
-      center: [s.center[0], s.center[1] + dy, s.center[2]] as V3,
-    };
+  return spheres.map((s): V3 => {
+    if (s.part === "spirit" || s.part === "pet") return [0, spiritOff, 0];
+    if (s.part === "body") return [0, bodyOff, 0];
+    if (s.part === "head" || s.part === "eye" || s.part === "pupil") {
+      return [0, headOff, 0];
+    }
+    if (s.part === "ear") return [0, earOff, 0];
+    if (s.part === "spike") {
+      return [0, (spikeOnBody(s, rig) ? bodyOff : headOff) + spikeOff, 0];
+    }
+    const shoulder = rig.shoulders[s.part];
+    if (shoulder) {
+      const side = LIMB_SIDE[s.part];
+      const raise = wave(IDLE.arm, side === 1 ? Math.PI : 0);
+      const turned = turnAbout(s.center, shoulder, -side * raise);
+      return add(sub(turned, s.center), [0, armParentOff, 0]);
+    }
+    return [0, 0, 0];
   });
+}
+
+// Returns a copy of the sphere list with the idle offsets applied.
+function applyIdleOffsets(spheres: Sphere[], frameIdx: number): Sphere[] {
+  const d = idleDeltas(spheres, frameIdx);
+  return spheres.map((s, i) => ({ ...s, center: add(s.center, d[i]) }));
+}
+
+// --- Walk animation offsets ---
+// One walk cycle is two steps (left, then right), as a fraction 0..1. The
+// host advances it by distance covered, not by time, so the feet never
+// slide. Lengths are fractions of the herzie's body scale, so they fit a
+// stage 1 head as well as a stage 3 body. Creature space: front is -z, up is
+// -y.
+
+const WALK = {
+  /** Stage 3: how far each leg swings forward and back about its hip
+   * (radians). The body drops as the legs spread, which the grounding in
+   * creaturePoseOffsets takes care of. */
+  legAngle: 0.72,
+  /** Stage 3: how high a foot lifts on its forward swing. */
+  footLift: 0.14,
+  /** Arms swing about the shoulder against the leg on their side (radians). */
+  armAngle: 0.7,
+  /** Stages 1-2 (no legs): one hop per step… */
+  hop: 0.2,
+  /** …rocking onto each side in turn (radians, about the bottom)… */
+  roll: 0.08,
+  /** …with ears and spikes trailing the hop by this fraction of a cycle. */
+  flopLag: 0.08,
+} as const;
+
+/** Parts anchored to the scene rather than the creature: they never walk. */
+const isSceneFixed = (part: string) =>
+  part === "ground" || part === "spirit" || part === "pet";
+
+/** Each sphere's walk offset at `phase` (0..1 of a cycle), as a delta. */
+function walkDeltas(spheres: Sphere[], phase: number, stage: number): V3[] {
+  const s = HERZIE_BODY.scale * CS;
+  const theta = 2 * Math.PI * phase;
+  const sin = Math.sin(theta);
+  const cos = Math.cos(theta);
+  const rig = buildRig(spheres);
+  // Arms swing forward against the leg on their side: the left back while
+  // the left leg goes forward.
+  const swingArm = (sp: Sphere): V3 => {
+    const shoulder = rig.shoulders[sp.part];
+    if (!shoulder) return [0, 0, 0];
+    return sub(
+      turnAbout(sp.center, shoulder, 0, 0, sin * WALK.armAngle),
+      sp.center,
+    );
+  };
+
+  if (rig.legs && stage >= 3) {
+    return spheres.map((sp): V3 => {
+      if (isSceneFixed(sp.part)) return [0, 0, 0];
+      const hip = rig.hips[sp.part];
+      if (hip) {
+        // Right runs half a cycle behind the left: sin and cos flip sign.
+        // A foot lifts while it swings forward.
+        const side = LIMB_SIDE[sp.part];
+        const swung = turnAbout(sp.center, hip, 0, side * sin * WALK.legAngle);
+        const lift = -Math.max(0, -side * cos) * WALK.footLift * s;
+        return add(sub(swung, sp.center), [0, lift, 0]);
+      }
+      return swingArm(sp);
+    });
+  }
+
+  // No legs: a waddle. A hop per step, rocking onto alternate sides.
+  const hopAt = (t: number) =>
+    -Math.abs(Math.sin(2 * Math.PI * t)) * WALK.hop * s;
+  const hop = hopAt(phase);
+  const flop = hopAt(phase - WALK.flopLag);
+  const roll = sin * WALK.roll;
+  return spheres.map((sp): V3 => {
+    if (isSceneFixed(sp.part)) return [0, 0, 0];
+    // Rock about the bottom of the creature, so it pivots on its base.
+    const [x, y] = sp.center;
+    const rx = -(y - rig.floor) * roll;
+    const ry = x * roll;
+    const dy = sp.part === "ear" || sp.part === "spike" ? flop : hop;
+    return add(swingArm(sp), [rx, dy + ry, 0]);
+  });
+}
+
+/** Sitting (on a bench): the hips come forward and up off the seat, as
+ * thighs would (fractions of the body scale, like WALK's)… */
+const SIT = {
+  hipReach: 0.28,
+  hipLift: 0.05,
+  /** …and each leg swings forward about its hip, a little short of
+   * straight out, so the feet droop (radians). */
+  legAngle: (80 * Math.PI) / 180,
+} as const;
+
+/** Each sphere's offset when seated, as a delta: legs out in front.
+ * Herzies without legs just sit as they stand. */
+function sitDeltas(spheres: Sphere[], stage: number): V3[] {
+  const zero = spheres.map((): V3 => [0, 0, 0]);
+  const rig = buildRig(spheres);
+  if (stage < 3 || !rig.legs) return zero;
+  const s = HERZIE_BODY.scale * CS;
+  const shift: V3 = [0, -SIT.hipLift * s, -SIT.hipReach * s];
+  return spheres.map((sp, i) => {
+    const hip = rig.hips[sp.part];
+    if (!hip) return zero[i];
+    const out = turnAbout(sp.center, hip, 0, -SIT.legAngle);
+    return add(sub(out, sp.center), shift);
+  });
+}
+
+/**
+ * How far a seated herzie settles below where its feet stood, in creature
+ * units: with its legs out, it rests on its bottom. 0 without legs.
+ */
+export function creatureSeatDrop(spheres: Sphere[], stage: number): number {
+  const sit = sitDeltas(spheres, stage);
+  let standing = Number.NEGATIVE_INFINITY;
+  let seated = Number.NEGATIVE_INFINITY;
+  spheres.forEach((sp, i) => {
+    if (isSceneFixed(sp.part)) return;
+    standing = Math.max(standing, sp.center[1] + sp.radius);
+    seated = Math.max(seated, sp.center[1] + sit[i][1] + sp.radius);
+  });
+  return Math.max(0, standing - seated);
 }
 
 // --- Anchor points ---
@@ -2164,6 +2599,223 @@ function raySphere(
   return t > 0 ? t : -1;
 }
 
+function axisLength(axis: V3): number {
+  return Math.sqrt(axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]);
+}
+
+/** Distance along a unit ray to where it first enters `p`, or -1 for a miss.
+ * Exported for tests. Capsules, cylinders and cones are convex, so the first
+ * hit is the nearest of their surfaces' hits: the side, then either the flat
+ * caps (cylinder, cone) or the end spheres (capsule). */
+export function rayPrimitive(
+  ox: number,
+  oy: number,
+  oz: number,
+  dx: number,
+  dy: number,
+  dz: number,
+  p: Primitive,
+): number {
+  const [cx, cy, cz] = p.center;
+  const r = p.radius;
+  const shape = p.shape;
+  if (!shape) return raySphere(ox, oy, oz, dx, dy, dz, cx, cy, cz, r);
+
+  const h = axisLength(shape.axis);
+  if (h < 1e-9) return raySphere(ox, oy, oz, dx, dy, dz, cx, cy, cz, r);
+  const ux = shape.axis[0] / h;
+  const uy = shape.axis[1] / h;
+  const uz = shape.axis[2] / h;
+
+  // Work in the axis' frame: `along` is the position along it, the rest is
+  // perpendicular to it.
+  const lx = ox - cx;
+  const ly = oy - cy;
+  const lz = oz - cz;
+  const along = lx * ux + ly * uy + lz * uz;
+  const dAlong = dx * ux + dy * uy + dz * uz;
+  const px = lx - ux * along;
+  const py = ly - uy * along;
+  const pz = lz - uz * along;
+  const qx = dx - ux * dAlong;
+  const qy = dy - uy * dAlong;
+  const qz = dz - uz * dAlong;
+
+  let best = Number.POSITIVE_INFINITY;
+  const a = qx * qx + qy * qy + qz * qz;
+  if (shape.kind === "cone") {
+    // The side's radius runs linearly from r at −axis to the tip's at +axis:
+    // ρ(s) = mid + slope·s. Squared along the ray, a quadratic in t; it also
+    // meets the mirrored cone past the apex, which the range check drops.
+    const tip = shape.tipRadius ?? 0;
+    const slope = (tip - r) / (2 * h);
+    const r0 = (r + tip) / 2 + slope * along;
+    const ka = a - slope * slope * dAlong * dAlong;
+    const kb = 2 * (px * qx + py * qy + pz * qz - slope * r0 * dAlong);
+    const kc = px * px + py * py + pz * pz - r0 * r0;
+    const sideHit = (t: number) => {
+      const s = along + t * dAlong;
+      if (t > 0 && t < best && Math.abs(s) <= h && r0 + slope * t * dAlong >= 0)
+        best = t;
+    };
+    if (Math.abs(ka) < 1e-12) {
+      if (Math.abs(kb) > 1e-12) sideHit(-kc / kb);
+    } else {
+      const disc = kb * kb - 4 * ka * kc;
+      if (disc >= 0) {
+        const sq = Math.sqrt(disc);
+        sideHit((-kb - sq) / (2 * ka));
+        sideHit((-kb + sq) / (2 * ka));
+      }
+    }
+    if (Math.abs(dAlong) > 1e-12) {
+      for (let side = -1; side <= 1; side += 2) {
+        const t = (side * h - along) / dAlong;
+        if (t <= 0 || t >= best) continue;
+        const ex = px + qx * t;
+        const ey = py + qy * t;
+        const ez = pz + qz * t;
+        const cap = side < 0 ? r : tip;
+        if (ex * ex + ey * ey + ez * ez <= cap * cap) best = t;
+      }
+    }
+    return best === Number.POSITIVE_INFINITY ? -1 : best;
+  }
+  if (a > 1e-12) {
+    const b = 2 * (px * qx + py * qy + pz * qz);
+    const c = px * px + py * py + pz * pz - r * r;
+    const disc = b * b - 4 * a * c;
+    if (disc >= 0) {
+      const t = (-b - Math.sqrt(disc)) / (2 * a);
+      if (t > 0 && Math.abs(along + t * dAlong) <= h) best = t;
+    }
+  }
+
+  if (shape.kind === "capsule") {
+    for (let side = -1; side <= 1; side += 2) {
+      const t = raySphere(
+        ox,
+        oy,
+        oz,
+        dx,
+        dy,
+        dz,
+        cx + ux * h * side,
+        cy + uy * h * side,
+        cz + uz * h * side,
+        r,
+      );
+      if (t > 0 && t < best) best = t;
+    }
+  } else if (shape.dome) {
+    // A domed end sits where side·along = h + dome·(1 − ρ²/r²), ρ being the
+    // distance from the axis; along the ray that's a quadratic in t. Dished
+    // (dome < 0), the solid isn't convex, but the camera is outside it, so
+    // the nearest surface hit is still where the ray enters.
+    const k = -shape.dome / (r * r);
+    const ka = k * a;
+    const kc = k * (px * px + py * py + pz * pz) + h + shape.dome;
+    const pq = 2 * k * (px * qx + py * qy + pz * qz);
+    // Both roots matter: a slanted ray can cross the paraboloid out past the
+    // rim (not on the cup) before it meets the end itself.
+    const tryHit = (t: number) => {
+      if (t <= 0 || t >= best) return;
+      const ex = px + qx * t;
+      const ey = py + qy * t;
+      const ez = pz + qz * t;
+      if (ex * ex + ey * ey + ez * ez <= r * r) best = t;
+    };
+    for (let side = -1; side <= 1; side += 2) {
+      const qb = pq - side * dAlong;
+      const qc = kc - side * along;
+      if (Math.abs(ka) < 1e-12) {
+        if (Math.abs(qb) > 1e-12) tryHit(-qc / qb);
+        continue;
+      }
+      const disc = qb * qb - 4 * ka * qc;
+      if (disc < 0) continue;
+      const sq = Math.sqrt(disc);
+      tryHit((-qb - sq) / (2 * ka));
+      tryHit((-qb + sq) / (2 * ka));
+    }
+  } else if (Math.abs(dAlong) > 1e-12) {
+    for (let side = -1; side <= 1; side += 2) {
+      const t = (side * h - along) / dAlong;
+      if (t <= 0 || t >= best) continue;
+      const ex = px + qx * t;
+      const ey = py + qy * t;
+      const ez = pz + qz * t;
+      if (ex * ex + ey * ey + ez * ez <= r * r) best = t;
+    }
+  }
+
+  return best === Number.POSITIVE_INFINITY ? -1 : best;
+}
+
+/** The unit surface normal of `p` at a point on its surface. Exported for
+ * tests. */
+export function primitiveNormal(p: Primitive, hit: V3): V3 {
+  const [cx, cy, cz] = p.center;
+  const lx = hit[0] - cx;
+  const ly = hit[1] - cy;
+  const lz = hit[2] - cz;
+  const shape = p.shape;
+  const h = shape ? axisLength(shape.axis) : 0;
+  if (!shape || h < 1e-9) {
+    return [lx / p.radius, ly / p.radius, lz / p.radius];
+  }
+  const ux = shape.axis[0] / h;
+  const uy = shape.axis[1] / h;
+  const uz = shape.axis[2] / h;
+  const along = lx * ux + ly * uy + lz * uz;
+  const ex = lx - ux * along;
+  const ey = ly - uy * along;
+  const ez = lz - uz * along;
+  const radial = Math.sqrt(ex * ex + ey * ey + ez * ez);
+
+  if (shape.kind === "capsule") {
+    // Away from the nearest point on the segment.
+    const s = Math.max(-h, Math.min(h, along));
+    const nx = lx - ux * s;
+    const ny = ly - uy * s;
+    const nz = lz - uz * s;
+    const len = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+    return [nx / len, ny / len, nz / len];
+  }
+  const r = p.radius;
+  if (shape.kind === "cone") {
+    // On an end if nearer it than the side, else out from the axis, tipped
+    // toward the narrow end by the side's slant.
+    const tip = shape.tipRadius ?? 0;
+    const slope = (tip - r) / (2 * h);
+    const rho = (r + tip) / 2 + slope * along;
+    if (h - Math.abs(along) < Math.abs(rho - radial) || radial < 1e-9) {
+      const sign = along < 0 ? -1 : 1;
+      return [ux * sign, uy * sign, uz * sign];
+    }
+    const nx = ex / radial - ux * slope;
+    const ny = ey / radial - uy * slope;
+    const nz = ez / radial - uz * slope;
+    const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
+    return [nx / len, ny / len, nz / len];
+  }
+  // Cylinder: on whichever surface the point is nearest, an end or the side.
+  const dome = shape.dome ?? 0;
+  const endAlong = h + dome * (1 - (radial * radial) / (r * r));
+  if (Math.abs(endAlong - Math.abs(along)) < r - radial || radial < 1e-9) {
+    const sign = along < 0 ? -1 : 1;
+    if (!dome || radial < 1e-9) return [ux * sign, uy * sign, uz * sign];
+    // The cap's slope tips the normal out from the axis (in, when dished).
+    const slope = (-2 * dome) / (r * r);
+    const nx = ux * sign - ex * slope;
+    const ny = uy * sign - ey * slope;
+    const nz = uz * sign - ez * slope;
+    const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
+    return [nx / len, ny / len, nz / len];
+  }
+  return [ex / radial, ey / radial, ez / radial];
+}
+
 // --- Texture patterns ---
 
 function applyTexture(
@@ -2192,6 +2844,18 @@ function zoomKey(zoom: number): string {
   return zoom === 1 ? "" : `:z${zoom}`;
 }
 
+function rowsKey(rows: number): string {
+  return rows === SH ? "" : `:r${rows}`;
+}
+
+/** The column count wearables are placed against. Props that sit at the
+ * frame's edge (the boombox, a floating pet) are placed from `cols`, which
+ * assumes the default SH rows; a finer grid has more of both for the same
+ * view, so this scales its cols back to the default grid's. */
+function layoutCols(cols: number, rows: number): number {
+  return rows === SH ? cols : Math.round((cols * SH) / rows);
+}
+
 // --- Anchor projection (FOV-based) ---
 
 function projectPoint(
@@ -2199,12 +2863,13 @@ function projectPoint(
   cols: number,
   halfW: number,
   halfH: number,
+  rows: number = SH,
 ): [number, number, number] {
   const relZ = p[2] + CAM;
-  if (relZ <= 0.01) return [cols / 2, SH / 2, 0];
+  if (relZ <= 0.01) return [cols / 2, rows / 2, 0];
   const ndcX = p[0] / (relZ * halfW);
   const ndcY = p[1] / (relZ * halfH);
-  return [(ndcX + 1) * 0.5 * cols, (ndcY + 1) * 0.5 * SH, relZ];
+  return [(ndcX + 1) * 0.5 * cols, (ndcY + 1) * 0.5 * rows, relZ];
 }
 
 // --- Color for zone ---
@@ -2242,6 +2907,126 @@ function zoneColor(
   }
 }
 
+/**
+ * How a primitive is shaded, for a host drawing the model with its own
+ * lights. Mirrors renderCreatureFrame: with `diffuse` the light's
+ * max(0, n·l),
+ *
+ *   lit = (gain + texture) · (floor + (1 − floor) · diffuse)
+ *
+ * (texture only when `textured`, see applyTexture), and the colour is
+ * `shades[2]` above `hi`, `shades[1]` above `lo`, else `shades[0]`. A
+ * scheme-painted primitive takes its shades from the scheme's band at the
+ * height drawn instead (see schemeShades).
+ */
+export interface PrimitiveShading {
+  gain: number;
+  floor: number;
+  textured: boolean;
+  lo: number;
+  hi: number;
+  /** dim, base, bright. */
+  shades: [string, string, string];
+  schemePainted: boolean;
+}
+
+/** The shades shadeWearableColor gives `hex`, dim to bright. */
+function wearableShades(hex: string): [string, string, string] {
+  return [
+    shadeWearableColor(hex, 0),
+    shadeWearableColor(hex, 0.45),
+    shadeWearableColor(hex, 1),
+  ];
+}
+
+export function primitiveShading(
+  sp: Pick<Sphere, "zone" | "color">,
+  colors: ColorTriplet,
+  scheme?: readonly string[],
+): PrimitiveShading {
+  // Lighting goes by zone, then by an own colour — as renderCreatureFrame's
+  // `lit` does.
+  let gain = 0.5;
+  let floor = 0.15;
+  let textured = false;
+  if (sp.zone === "pupil") gain = 0;
+  else if (sp.zone === "eye") gain = 0.75;
+  else if (sp.zone === "eye-evil") {
+    gain = 1;
+    floor = 0.55;
+  } else if (sp.color) {
+    gain = 0.7;
+    floor = 0.3;
+  } else textured = true;
+
+  // Colour goes by an own colour, then the scheme, then the zone — as its
+  // cell colours do.
+  const shading = (
+    lo: number,
+    hi: number,
+    shades: [string, string, string],
+    schemePainted = false,
+  ): PrimitiveShading => ({
+    gain,
+    floor,
+    textured,
+    lo,
+    hi,
+    shades,
+    schemePainted,
+  });
+  if (sp.color) return shading(0.3, 0.6, wearableShades(sp.color));
+  if (scheme && isSchemePaintable(sp.zone, false)) {
+    return shading(0.3, 0.6, wearableShades(scheme[0]), true);
+  }
+  switch (sp.zone) {
+    case "eye":
+      return shading(0.3, 0.6, [EYE_COLOR, EYE_COLOR, EYE_COLOR]);
+    case "eye-evil":
+      return shading(0.34, 0.62, [
+        EVIL_EYE_DIM,
+        EVIL_EYE_BASE,
+        EVIL_EYE_BRIGHT,
+      ]);
+    case "pupil":
+      return shading(0.3, 0.6, ["#111111", "#111111", "#111111"]);
+    case "accent":
+      return shading(0.45, Number.POSITIVE_INFINITY, [
+        colors.dim,
+        colors.base,
+        colors.base,
+      ]);
+    case "dark":
+      return shading(0.3, 0.6, [colors.dim, colors.dim, colors.dim]);
+    case "wearable":
+      return shading(0.3, 0.6, ["#444", "#666", "#888"]);
+    default:
+      return shading(0.3, 0.6, [colors.dim, colors.base, colors.bright]);
+  }
+}
+
+/** Each band of a colour scheme's shades (dim, base, bright), top band
+ * first: the scheme paints by height, splitting the painted surface's span
+ * into equal bands. */
+export function schemeShades(
+  scheme: readonly string[],
+): [string, string, string][] {
+  return scheme.map(wearableShades);
+}
+
+/** The bounds of the scheme-painted surface on the y axis (creature space, y
+ * down): the span schemeShades' bands divide. */
+export function schemeSpan(spheres: Sphere[]): [number, number] {
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  for (const sp of spheres) {
+    if (!isSchemePaintable(sp.zone, Boolean(sp.color))) continue;
+    min = Math.min(min, sp.center[1] - sp.radius);
+    max = Math.max(max, sp.center[1] + sp.radius);
+  }
+  return [min, max];
+}
+
 // --- Frame renderer ---
 
 function renderCreatureFrame(
@@ -2253,17 +3038,21 @@ function renderCreatureFrame(
   cols: number = SW,
   colorScheme?: readonly string[],
   zoom = 1,
+  /** A camera pitch (radians, positive looks down on the herzie), applied
+   * after the turn like a real camera's elevation. Omitted, the fixed
+   * DEFAULT_CAMERA_TILT_DEG tilt applies before the turn, as it always has. */
+  pitch?: number,
+  /** Rows in the grid (default SH). Scaling rows and cols together keeps the
+   * framing and only changes the resolution. */
+  rows: number = SH,
 ): FrameData {
   // Zooming widens (or narrows) the view plane about its centre: the camera
   // sees more of the scene through the same grid of cells.
-  const halfW = halfWidthFor(cols) / zoom;
+  const halfW = halfWidthFor(cols, rows) / zoom;
   const halfH = HALF_H / zoom;
+  const pitchCos = pitch === undefined ? 1 : Math.cos(pitch);
+  const pitchSin = pitch === undefined ? 0 : Math.sin(pitch);
   const transformed = spheres.map((s) => {
-    const tilted: V3 = [
-      s.center[0],
-      s.center[1] * TILT_COS - s.center[2] * TILT_SIN,
-      s.center[1] * TILT_SIN + s.center[2] * TILT_COS,
-    ];
     // Ground props (e.g. the boombox) and the Spirit Orb ("spirit") are both
     // anchored to the scene, not the creature — they keep their facing as the
     // herzie spins around its Y axis (manual drag-rotation shouldn't drag the
@@ -2271,22 +3060,44 @@ function renderCreatureFrame(
     // instead, via applyIdleOffsets.
     const isFixed =
       s.part === "ground" || s.part === "spirit" || s.part === "pet";
+    // Rotations are linear, so a shape's axis turns exactly as a point does.
+    const view = (p: V3): V3 => {
+      if (pitch !== undefined) {
+        const turned = isFixed ? p : rotY(p, yAngle);
+        return [
+          turned[0],
+          turned[1] * pitchCos - turned[2] * pitchSin,
+          turned[1] * pitchSin + turned[2] * pitchCos,
+        ];
+      }
+      const tilted: V3 = [
+        p[0],
+        p[1] * TILT_COS - p[2] * TILT_SIN,
+        p[1] * TILT_SIN + p[2] * TILT_COS,
+      ];
+      return isFixed ? tilted : rotY(tilted, yAngle);
+    };
     return {
-      center: isFixed ? tilted : rotY(tilted, yAngle),
+      center: view(s.center),
       radius: s.radius,
       zone: s.zone,
       part: s.part,
       color: s.color,
+      shape: s.shape && { ...s.shape, axis: view(s.shape.axis) },
+      // A sphere enclosing the primitive, for a cheap reject per ray.
+      bound: s.shape
+        ? s.radius + axisLength(s.shape.axis) + Math.abs(s.shape.dome ?? 0)
+        : s.radius,
     };
   });
 
-  const bright: number[][] = Array.from({ length: SH }, () =>
+  const bright: number[][] = Array.from({ length: rows }, () =>
     Array(cols).fill(-1),
   );
-  const zones: ColorZone[][] = Array.from({ length: SH }, () =>
+  const zones: ColorZone[][] = Array.from({ length: rows }, () =>
     Array<ColorZone>(cols).fill("primary"),
   );
-  const pixelColors: (string | null)[][] = Array.from({ length: SH }, () =>
+  const pixelColors: (string | null)[][] = Array.from({ length: rows }, () =>
     Array(cols).fill(null),
   );
 
@@ -2310,10 +3121,10 @@ function renderCreatureFrame(
 
   const oz = -CAM;
 
-  for (let sy = 0; sy < SH; sy++) {
+  for (let sy = 0; sy < rows; sy++) {
     for (let sx = 0; sx < cols; sx++) {
       const ndcX = ((sx + 0.5) / cols) * 2 - 1;
-      const ndcY = ((sy + 0.5) / SH) * 2 - 1;
+      const ndcY = ((sy + 0.5) / rows) * 2 - 1;
       const px = ndcX * halfW;
       const py = ndcY * halfH;
       const dLen = Math.sqrt(px * px + py * py + 1);
@@ -2326,18 +3137,36 @@ function renderCreatureFrame(
 
       for (let i = 0; i < transformed.length; i++) {
         const sp = transformed[i];
-        const t = raySphere(
-          0,
-          0,
-          oz,
-          dx,
-          dy,
-          dz,
-          sp.center[0],
-          sp.center[1],
-          sp.center[2],
-          sp.radius,
-        );
+        // Runs for every primitive in every cell. Nearly everything is a
+        // sphere, tested directly; a shape only gets the full test once the
+        // ray hits its bounding sphere.
+        const t = sp.shape
+          ? raySphere(
+              0,
+              0,
+              oz,
+              dx,
+              dy,
+              dz,
+              sp.center[0],
+              sp.center[1],
+              sp.center[2],
+              sp.bound,
+            ) > 0
+            ? rayPrimitive(0, 0, oz, dx, dy, dz, sp)
+            : -1
+          : raySphere(
+              0,
+              0,
+              oz,
+              dx,
+              dy,
+              dz,
+              sp.center[0],
+              sp.center[1],
+              sp.center[2],
+              sp.radius,
+            );
         if (t > 0 && t < nearestT) {
           nearestT = t;
           nearestIdx = i;
@@ -2351,11 +3180,8 @@ function renderCreatureFrame(
       const hy = dy * nearestT;
       const hz = oz + dz * nearestT;
 
-      const nx = (hx - sp.center[0]) / sp.radius;
-      const ny = (hy - sp.center[1]) / sp.radius;
-      const nz = (hz - sp.center[2]) / sp.radius;
-
-      const normal: V3 = [nx, ny, nz];
+      const normal = primitiveNormal(sp, [hx, hy, hz]);
+      const [nx, ny, nz] = normal;
       // Directional diffuse — max(0, ...) produces proper lit/shadow gradient
       const diffuse = Math.max(0, dot3(normal, LIGHT));
 
@@ -2438,7 +3264,13 @@ function renderCreatureFrame(
     // skip the Y-rotation too (otherwise they'd drift off the prop).
     const isFixed = anchor.parentPart === "ground";
     const rotated = isFixed ? tilted : rotY(tilted, yAngle);
-    const [screenX, screenY, depth] = projectPoint(rotated, cols, halfW, halfH);
+    const [screenX, screenY, depth] = projectPoint(
+      rotated,
+      cols,
+      halfW,
+      halfH,
+      rows,
+    );
 
     const nTilted: V3 = [
       anchor.normalDir[0],
@@ -2516,13 +3348,14 @@ function generateLoopFrames(
   boomboxConfig: BoomboxConfig | undefined,
   spiritHopVariant: number | undefined,
   zoom: number,
+  rows: number = SH,
 ): FrameData[] {
   const dancing = mode === "dance";
   const hops =
     dancing && hasSpiritEquipped(equipped)
       ? spiritHopsFor(spiritHopVariant)
       : undefined;
-  const key = `${mode}:${paramsCacheKey(userId, paramsOverride)}:${stage}:${equippedCacheKey(equipped)}:${cols}:${boomboxKey(boomboxConfig)}${hops ? `:hop${spiritHopVariant}` : ""}${zoomKey(zoom)}`;
+  const key = `${mode}:${paramsCacheKey(userId, paramsOverride)}:${stage}:${equippedCacheKey(equipped)}:${cols}:${boomboxKey(boomboxConfig)}${hops ? `:hop${spiritHopVariant}` : ""}${zoomKey(zoom)}${rowsKey(rows)}`;
   const cached = frameCache.get(key);
   if (cached) return cached;
 
@@ -2537,12 +3370,18 @@ function generateLoopFrames(
         boomboxConfig,
         undefined,
         zoom,
+        rows,
       )
     : undefined;
 
   const params = resolveCreatureParams(userId, paramsOverride);
   const baseSpheres = buildCreatureSpheres(params, stage);
-  appendWearableSpheres(baseSpheres, equipped, cols, boomboxConfig);
+  appendWearableSpheres(
+    baseSpheres,
+    equipped,
+    layoutCols(cols, rows),
+    boomboxConfig,
+  );
   const anchors = getAnchors(baseSpheres, params, stage);
   const colors = buildColorTriplet(CREATURE_PALETTE[params.colorIndex]);
   const scheme = colorSchemeFor(equipped, params);
@@ -2564,6 +3403,8 @@ function generateLoopFrames(
       cols,
       scheme,
       zoom,
+      undefined,
+      rows,
     );
   });
 
@@ -2584,6 +3425,8 @@ export function generateIdleFrames(
   boomboxConfig?: BoomboxConfig,
   /** Camera zoom about the frame's centre (see renderCreatureFrame). */
   zoom = 1,
+  /** Grid rows (see renderCreatureFrame): more rows and cols, finer. */
+  rows: number = SH,
 ): FrameData[] {
   return generateLoopFrames(
     "idle",
@@ -2595,10 +3438,11 @@ export function generateIdleFrames(
     boomboxConfig,
     undefined,
     zoom,
+    rows,
   );
 }
 
-/** How long each frame of the rotation loop shows, in ms (Herzie3D's tick). */
+/** How long each frame of the rotation loop shows, in ms (the old renderer's tick). */
 export const ROTATION_FRAME_MS = 80;
 
 /** The steady trail and flare a dangling item holds through the rotation
@@ -2621,14 +3465,15 @@ export function generateRotationFrames(
   cols: number = SW,
   boomboxConfig?: BoomboxConfig,
   zoom = 1,
+  rows: number = SH,
 ): FrameData[] {
-  const key = `rot:${paramsCacheKey(userId, paramsOverride)}:${stage}:${equippedCacheKey(equipped)}:${cols}:${boomboxKey(boomboxConfig)}${zoomKey(zoom)}`;
+  const key = `rot:${paramsCacheKey(userId, paramsOverride)}:${stage}:${equippedCacheKey(equipped)}:${cols}:${boomboxKey(boomboxConfig)}${zoomKey(zoom)}${rowsKey(rows)}`;
   const cached = frameCache.get(key);
   if (cached) return cached;
 
   const params = resolveCreatureParams(userId, paramsOverride);
   const built = buildCreatureSpheres(params, stage);
-  appendWearableSpheres(built, equipped, cols, boomboxConfig);
+  appendWearableSpheres(built, equipped, layoutCols(cols, rows), boomboxConfig);
   const spheres = applyDangle(built, rotationLoopDangle(frameCount));
   const anchors = getAnchors(spheres, params, stage);
   const colors = buildColorTriplet(CREATURE_PALETTE[params.colorIndex]);
@@ -2644,6 +3489,8 @@ export function generateRotationFrames(
       cols,
       scheme,
       zoom,
+      undefined,
+      rows,
     ),
   );
 
@@ -2667,6 +3514,7 @@ export function generateDanceFrames(
   boomboxConfig?: BoomboxConfig,
   spiritHopVariant?: number,
   zoom = 1,
+  rows: number = SH,
 ): FrameData[] {
   return generateLoopFrames(
     "dance",
@@ -2678,6 +3526,7 @@ export function generateDanceFrames(
     boomboxConfig,
     spiritHopVariant,
     zoom,
+    rows,
   );
 }
 
@@ -2697,13 +3546,14 @@ export function renderCreatureAtAngle(
   cols: number = SW,
   boomboxConfig?: BoomboxConfig,
   spiritHopVariant?: number,
-  /** Pose for anything dangling, from Herzie3D's spin physics. */
+  /** Pose for anything dangling, from the host's spin physics. */
   dangle?: DangleState,
   zoom = 1,
+  rows: number = SH,
 ): FrameData {
   const params = resolveCreatureParams(userId, paramsOverride);
   const built = buildCreatureSpheres(params, stage);
-  appendWearableSpheres(built, equipped, cols, boomboxConfig);
+  appendWearableSpheres(built, equipped, layoutCols(cols, rows), boomboxConfig);
   const baseSpheres = dangle ? applyDangle(built, dangle) : built;
   const anchors = getAnchors(baseSpheres, params, stage);
   const colors = buildColorTriplet(CREATURE_PALETTE[params.colorIndex]);
@@ -2720,6 +3570,248 @@ export function renderCreatureAtAngle(
     cols,
     scheme,
     zoom,
+    undefined,
+    rows,
+  );
+}
+
+/** A herzie's pose for renderCreaturePose: a blend of the idle loop and the
+ * walk cycle, seen from a free camera. */
+export interface CreaturePose {
+  /** Turn about the vertical axis; 0 is square-on to the camera. */
+  yAngle: number;
+  /** Camera elevation in radians (see renderCreatureFrame's `pitch`). */
+  pitch?: number;
+  /** Frame of the idle loop, 0..IDLE_LOOP_FRAMES. */
+  idleFrame: number;
+  /** How far through a walk cycle (two steps), 0..1. */
+  walkPhase: number;
+  /** 0 standing (pure idle) to 1 walking (pure walk cycle). */
+  walkWeight: number;
+}
+
+/** Frames in the idle loop, played at 50ms a frame. */
+export const IDLE_LOOP_FRAMES = IDLE_FRAMES;
+
+/** A herzie and everything it wears, in creature space (y down, front −z),
+ * with what its colours are made from: what the ray caster draws, and what
+ * a real-3D host (the Town) builds meshes from. */
+export interface CreatureModel {
+  spheres: Sphere[];
+  colors: ColorTriplet;
+  /** The colour scheme painting it (a prism…), if any. */
+  scheme: readonly string[] | undefined;
+  textureType: number;
+}
+
+/**
+ * Builds a herzie's model. Props placed at the frame's edge (a floating pet)
+ * are placed against `cols` x `rows`, the grid it would be drawn on.
+ */
+export function buildCreatureModel(
+  userId: string,
+  stage: number,
+  equipped?: Equipped,
+  paramsOverride?: CreatureParams,
+  cols: number = SW,
+  rows: number = SH,
+): CreatureModel {
+  const params = resolveCreatureParams(userId, paramsOverride);
+  const spheres = buildCreatureSpheres(params, stage);
+  appendWearableSpheres(spheres, equipped, layoutCols(cols, rows));
+  return {
+    spheres,
+    colors: buildColorTriplet(CREATURE_PALETTE[params.colorIndex]),
+    scheme: colorSchemeFor(equipped, params),
+    textureType: params.textureType,
+  };
+}
+
+/** Frames in the dance loop, which the old renderer played at 65ms a
+ * frame (a 1.56s loop). */
+export const DANCE_LOOP_FRAMES = DANCE_FRAMES;
+
+/** What a continuously animating host poses a herzie with (see
+ * creaturePoseOffsets). */
+export type CreatureMotion = Pick<
+  CreaturePose,
+  "idleFrame" | "walkPhase" | "walkWeight"
+> & {
+  /** Frame of the dance loop, 0..DANCE_LOOP_FRAMES (may be fractional). */
+  danceFrame?: number;
+  /** 0 not dancing to 1 dancing (music playing). */
+  danceWeight?: number;
+  /** The Greedy Spirit's hop variant for this dance loop, if any (see
+   * SPIRIT_DANCE_HOP_VARIANT_COUNT). */
+  spiritHopVariant?: number;
+  /** How far anything worn that dangles (the chain, the pearls) swings. */
+  dangle?: DangleState;
+  /** 0 standing to 1 seated (on a bench): legs out in front. */
+  sitWeight?: number;
+};
+
+/**
+ * Each sphere's offset from its rest position in a pose: the idle loop
+ * blended into the walk cycle by `walkWeight` and into the dance by
+ * `danceWeight`, with anything dangling swung by `dangle`. `idleFrame` and
+ * `danceFrame` may be fractional, for a host animating continuously.
+ */
+export function creaturePoseOffsets(
+  spheres: Sphere[],
+  stage: number,
+  pose: CreatureMotion,
+): V3[] {
+  const base = pose.dangle ? applyDangle(spheres, pose.dangle) : spheres;
+  const w = Math.min(1, Math.max(0, pose.walkWeight));
+  const dw = Math.min(1, Math.max(0, pose.danceWeight ?? 0));
+  const idle = idleDeltas(base, pose.idleFrame);
+  const walk = w > 0 ? walkDeltas(base, pose.walkPhase, stage) : null;
+  const sw = Math.min(1, Math.max(0, pose.sitWeight ?? 0));
+  const sit = sw > 0 ? sitDeltas(base, stage) : null;
+  const dance =
+    dw > 0
+      ? applyDanceOffsets(
+          base,
+          pose.danceFrame ?? 0,
+          hasSpiritPart(base)
+            ? spiritHopsFor(pose.spiritHopVariant)
+            : undefined,
+        )
+      : null;
+  const offsets = spheres.map((s, i): V3 => {
+    const b = base[i].center;
+    // Scene-anchored parts (a floating pet) keep their own idle bob even
+    // mid-stride; everything else fades from idle into the walk.
+    const iw = walk && !isSceneFixed(s.part) ? 1 - w : 1;
+    const d = walk?.[i];
+    let x = idle[i][0] * iw + (d ? d[0] * w : 0);
+    let y = idle[i][1] * iw + (d ? d[1] * w : 0);
+    let z = idle[i][2] * iw + (d ? d[2] * w : 0);
+    const seated = sit?.[i];
+    if (seated) {
+      x += seated[0] * sw;
+      y += seated[1] * sw;
+      z += seated[2] * sw;
+    }
+    const moved = dance?.[i].center;
+    if (moved) {
+      x = x * (1 - dw) + (moved[0] - b[0]) * dw;
+      y = y * (1 - dw) + (moved[1] - b[1]) * dw;
+      z = z * (1 - dw) + (moved[2] - b[2]) * dw;
+    }
+    // Plus where the swing put it.
+    return [
+      x + b[0] - s.center[0],
+      y + b[1] - s.center[1],
+      z + b[2] - s.center[2],
+    ];
+  });
+  return grounded(spheres, offsets, 1 - sw);
+}
+
+/**
+ * `offsets` with the herzie moved up or down so its lowest foot is on the
+ * ground, by `weight` (0 seated, when it rests on its bottom instead). Each
+ * motion keeps a foot planted on its own; blended together they needn't,
+ * and this is what keeps a herzie from floating or sinking. It's also the
+ * walk's bob: the body drops as the legs spread. No legs, no change.
+ */
+function grounded(spheres: Sphere[], offsets: V3[], weight: number): V3[] {
+  if (weight <= 0) return offsets;
+  let rest = Number.NEGATIVE_INFINITY;
+  let lowest = Number.NEGATIVE_INFINITY;
+  spheres.forEach((sp, i) => {
+    if (!isLeg(sp.part)) return;
+    rest = Math.max(rest, sp.center[1] + sp.radius);
+    lowest = Math.max(lowest, sp.center[1] + offsets[i][1] + sp.radius);
+  });
+  if (rest === Number.NEGATIVE_INFINITY) return offsets;
+  const dy = (rest - lowest) * weight;
+  if (Math.abs(dy) < 1e-12) return offsets;
+  return offsets.map((d, i) =>
+    isSceneFixed(spheres[i].part) ? d : [d[0], d[1] + dy, d[2]],
+  );
+}
+
+function hasSpiritPart(spheres: Sphere[]): boolean {
+  return spheres.some((s) => s.part === "spirit");
+}
+
+/** Built models for renderCreaturePose, which a host calls every frame:
+ * building a creature and its wearables is pure, so it's done once per
+ * look. Bounded, since every distinct look adds an entry. */
+const poseBuildCache = new Map<
+  string,
+  CreatureModel & { anchors: AnchorPoint[] }
+>();
+const POSE_BUILD_CACHE_MAX = 32;
+
+/**
+ * Renders a herzie in any pose a game needs: any turn and camera pitch, and
+ * anywhere between standing (the idle loop) and walking (the walk cycle).
+ * With `walkWeight: 0` and no pitch it draws exactly what
+ * renderCreatureAtAngle draws for the same idle frame.
+ */
+export function renderCreaturePose(
+  userId: string,
+  stage: number,
+  pose: CreaturePose,
+  equipped?: Equipped,
+  paramsOverride?: CreatureParams,
+  cols: number = SW,
+  /** Grid rows (default SH): more rows and cols, same framing, finer. */
+  rows: number = SH,
+): FrameData {
+  const key = `${paramsCacheKey(userId, paramsOverride)}:${stage}:${equippedCacheKey(equipped)}:${cols}${rowsKey(rows)}`;
+  let built = poseBuildCache.get(key);
+  if (!built) {
+    const model = buildCreatureModel(
+      userId,
+      stage,
+      equipped,
+      paramsOverride,
+      cols,
+      rows,
+    );
+    built = {
+      ...model,
+      anchors: getAnchors(
+        model.spheres,
+        resolveCreatureParams(userId, paramsOverride),
+        stage,
+      ),
+    };
+    if (poseBuildCache.size >= POSE_BUILD_CACHE_MAX) {
+      const oldest = poseBuildCache.keys().next().value;
+      if (oldest !== undefined) poseBuildCache.delete(oldest);
+    }
+    poseBuildCache.set(key, built);
+  }
+
+  const { spheres } = built;
+  const offsets = creaturePoseOffsets(spheres, stage, pose);
+  const animated = spheres.map((s, i) => {
+    const d = offsets[i];
+    return {
+      ...s,
+      center: [
+        s.center[0] + d[0],
+        s.center[1] + d[1],
+        s.center[2] + d[2],
+      ] as V3,
+    };
+  });
+  return renderCreatureFrame(
+    animated,
+    pose.yAngle,
+    built.textureType,
+    built.anchors,
+    built.colors,
+    cols,
+    built.scheme,
+    1,
+    pose.pitch,
+    rows,
   );
 }
 

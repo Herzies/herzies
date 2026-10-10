@@ -6,7 +6,7 @@ import {
 } from "@herzies/shared";
 import { useEffect, useState } from "react";
 import { BackButton } from "./BackButton";
-import { Herzie3D } from "./Herzie3D";
+import { HerzieWithSky } from "./HerzieWithSky";
 import { ProfileBadges } from "./ProfileBadges";
 import { TabButton } from "./TabButton";
 import { Tooltip } from "./Tooltip";
@@ -101,7 +101,7 @@ export function ProfileView({
     >
       {profile.friendCode && (
         <div className="flex min-h-0 flex-1 items-center justify-center *:shrink-0">
-          <Herzie3D
+          <HerzieWithSky
             userId={profile.friendCode}
             stage={stageOverride ?? profile.stage}
             isPlaying={isFriend ? isListening(profile) : false}
@@ -112,7 +112,7 @@ export function ProfileView({
       )}
 
       {/* The herzie canvas paints at its own z-index: 1 (see shared's
-          Herzie3D) and the sky sits fixed behind everything, so the text UI
+          HerzieWithSky) and the sky sits fixed behind everything, so the text UI
           needs its own stacking context above them — otherwise a tall
           creature overlaps and hides these rows. */}
       <div className="relative z-10 shrink-0">

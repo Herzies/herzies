@@ -16,6 +16,7 @@ export function SettingsView({
   stageOverride,
   onStageOverride,
   onPreviewOnboarding,
+  onPreviewLoading,
   onTestUpdateAlert,
   onTestWhatsNew,
   availableUpdate,
@@ -26,6 +27,8 @@ export function SettingsView({
   onToggleDebugBoss,
   debugMerchantOverride,
   onToggleDebugMerchant,
+  debugTreatTraderOverride,
+  onToggleDebugTreatTrader,
   onToggleActiveEventOverride,
   onSpawnDebugDrop,
 }: {
@@ -33,6 +36,7 @@ export function SettingsView({
   stageOverride: number | null;
   onStageOverride: (v: number | null) => void;
   onPreviewOnboarding: () => void;
+  onPreviewLoading: () => void;
   onTestUpdateAlert: () => void;
   onTestWhatsNew: () => void;
   availableUpdate: Update | null;
@@ -43,6 +47,8 @@ export function SettingsView({
   onToggleDebugBoss: () => void;
   debugMerchantOverride: boolean;
   onToggleDebugMerchant: () => void;
+  debugTreatTraderOverride: boolean;
+  onToggleDebugTreatTrader: () => void;
   onToggleActiveEventOverride: () => void;
   /** `diceOnly` narrows the spawned drop to a dice-type item — see the
    * "Spawn Dice Drop" button below. */
@@ -56,9 +62,11 @@ export function SettingsView({
 
   const shortcuts: { key: string; label: string }[] = [
     { key: "H", label: "Home" },
-    { key: "I", label: "Herzie" },
+    { key: "I", label: "Deck" },
+    { key: "B", label: "Bag" },
     { key: "T", label: "Town" },
     { key: "F", label: "Social" },
+    { key: "P", label: "Premium shop" },
     { key: "S", label: "Settings" },
     { key: "C", label: "Open chat" },
     { key: "Esc", label: "Close chat or dialog" },
@@ -182,6 +190,9 @@ export function SettingsView({
             <button type="button" className="btn" onClick={onPreviewOnboarding}>
               Preview Onboarding
             </button>
+            <button type="button" className="btn" onClick={onPreviewLoading}>
+              Preview Loading
+            </button>
             <button type="button" className="btn" onClick={onTestUpdateAlert}>
               Test Update Alert
             </button>
@@ -223,6 +234,18 @@ export function SettingsView({
               onClick={onToggleDebugMerchant}
             >
               {debugMerchantOverride ? "George: On" : "Test George"}
+            </button>
+            <button
+              type="button"
+              className={cn(
+                "btn",
+                debugTreatTraderOverride
+                  ? "border-red text-red"
+                  : "border-[#555] text-text-dim",
+              )}
+              onClick={onToggleDebugTreatTrader}
+            >
+              {debugTreatTraderOverride ? "Nandor: On" : "Test Nandor"}
             </button>
             <button
               type="button"

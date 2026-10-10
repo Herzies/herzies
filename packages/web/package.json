@@ -26,12 +26,14 @@
     "stripe": "^22.6.1",
     "tailwind-merge": "^3.6.0",
     "tailwindcss": "^4.3.0",
+    "three": "^0.186.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@types/three": "^0.186.0",
     "typescript": "^6.0.3"
   }
 }

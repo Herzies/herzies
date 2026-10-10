@@ -234,7 +234,7 @@ function eventToForm(event: AdminEvent): EventFormState {
         ? bossFightConfigFromRecord(event.config, event.boss?.maxHp)
         : defaultBossFightConfig(),
     merchant:
-      event.type === "merchant"
+      event.type === "merchant" || event.type === "treat_trader"
         ? merchantConfigFromRecord(event.config)
         : defaultMerchantConfig(),
   };
@@ -319,7 +319,7 @@ function buildEventConfig(
   if (form.type === "boss_fight") {
     return bossFightFormToConfig(form.bossFight);
   }
-  if (form.type === "merchant") {
+  if (form.type === "merchant" || form.type === "treat_trader") {
     return merchantFormToConfig(form.merchant);
   }
   return parseEventConfig(form.configJson);
@@ -342,7 +342,7 @@ function formToPreview(form: EventFormState): {
         ? { ...songHuntConfigToPayload(form.songHunt) }
         : form.type === "boss_fight"
           ? { ...form.bossFight }
-          : form.type === "merchant"
+          : form.type === "merchant" || form.type === "treat_trader"
             ? { ...form.merchant }
             : {};
   return {
@@ -715,7 +715,9 @@ function EventForm({
                       ? defaultBossFightConfig()
                       : f.bossFight,
                   merchant:
-                    type === "merchant" ? defaultMerchantConfig() : f.merchant,
+                    type === "merchant" || type === "treat_trader"
+                      ? defaultMerchantConfig()
+                      : f.merchant,
                 };
               });
             }}
@@ -725,6 +727,9 @@ function EventForm({
             <option value="song_hunt">song_hunt (Orphiez)</option>
             <option value="boss_fight">boss_fight</option>
             <option value="merchant">merchant (Good ol&apos; George)</option>
+            <option value="treat_trader">
+              treat_trader (Nandor the Treatless, priced in treats)
+            </option>
           </select>
         </div>
         <div>
@@ -849,8 +854,9 @@ function EventForm({
           fieldIdPrefix={form.id ?? "new"}
           live={live}
         />
-      ) : form.type === "merchant" ? (
+      ) : form.type === "merchant" || form.type === "treat_trader" ? (
         <MerchantConfigFields
+          priceLabel={form.type === "treat_trader" ? "price (treats)" : "price"}
           merchant={form.merchant}
           setMerchant={(merchant) => setForm((f) => ({ ...f, merchant }))}
           catalogItems={catalogItems}

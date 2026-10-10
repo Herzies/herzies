@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { createSupabaseClient } from "@/lib/supabase";
+import { getDesktopLoginClient } from "@/lib/supabase";
 
 /**
  * Sign-in form for a desktop app login. `callbackPath` is where OAuth returns
@@ -21,7 +21,7 @@ export function DesktopSignIn({
     setLoading(true);
 
     if (!callbackPath) return;
-    const supabase = createSupabaseClient();
+    const supabase = getDesktopLoginClient();
     const redirectTo = `${window.location.origin}${callbackPath}`;
 
     const { error } = await supabase.auth.signInWithOAuth({

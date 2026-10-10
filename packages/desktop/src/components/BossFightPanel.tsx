@@ -3,10 +3,10 @@ import {
   BOSS_BODY_TYPE,
   DEFAULT_Y_ANGLE,
   generateCreatureParams,
-  Herzie3D as SharedHerzie3D,
   SpeechBubble,
   useChatter,
 } from "@herzies/shared";
+import { HerzieView } from "@herzies/shared/gl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../lib/utils";
 import { SegmentBar } from "./SegmentBar";
@@ -59,7 +59,7 @@ function hatedPhrase(genres: string[]): string {
  * saying the same things at 90% and 5%. Ungated lines can land at any point.
  * `{genre}` is substituted with the hated-genre phrase.
  */
-const BOSS_LINES: { text: string; above?: number; below?: number }[] = [
+export const BOSS_LINES: { text: string; above?: number; below?: number }[] = [
   // Healthy — still in control, and cocky enough to give the game away.
   {
     text: "I probably shouldn't say this, but {genre} music is my Achilles heel.",
@@ -183,10 +183,9 @@ export function BossFightPanel({
         <div
           className={cn(
             "flex min-h-0 flex-1 items-center justify-center overflow-hidden",
-            (dead || escaped) && "grayscale opacity-50",
           )}
         >
-          <SharedHerzie3D
+          <HerzieView
             userId={`boss:${event.id}`}
             stage={3}
             // Sized for the face-on pose specifically. Head-on the boss is
@@ -210,6 +209,9 @@ export function BossFightPanel({
             defaultAngle={-DEFAULT_Y_ANGLE}
             draggable={false}
             paused={paused}
+            // Beaten or gone: greyed and faded.
+            grey={dead || escaped ? 1 : 0}
+            opacity={dead || escaped ? 0.5 : 1}
             ariaLabel="The boss"
           />
         </div>

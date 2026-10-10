@@ -51,6 +51,7 @@ import {
   type PendingTradeRequest,
   pickWeightedDrop,
   recordGenreMinutes,
+  rollSeasonalBonusDrops,
   type SecretTrackConfig,
   type Stage,
   scaledBonus,
@@ -102,13 +103,6 @@ function hasGoodEyeSniperEquipped(equipped: unknown): boolean {
   return isModifierEquipped(normalizeEquipped(equipped), "good-eye-sniper");
 }
 
-/** Spirit Orb occupies a ground slot (either side) and auto-collects pending
- * world drops so the user doesn't have to manually click to collect. */
-function hasSpiritOrbEquipped(equipped: unknown): boolean {
-  const e = normalizeEquipped(equipped);
-  return e.ground_left === "spirit-orb" || e.ground_right === "spirit-orb";
-}
-
 /** Normalize a track string for fuzzy matching. Exported so the song pool
  * can tell "already used" the same way a play is matched to a hunt. */
 export function normalizeTrack(s: string): string {
@@ -120,18 +114,28 @@ export function normalizeTrack(s: string): string {
     .trim();
 }
 
+/** The first credited artist, normalized. Apps credit collaborations
+ * differently: Apple Music reports "Gil Scott-Heron & Jamie xx" where
+ * Spotify reports just "Gil Scott-Heron", so artists match on the lead. */
+function leadArtist(s: string): string {
+  return normalizeTrack(s)
+    .split(/\s*(?:&|,|\bfeat\.|\bft\.|\bfeaturing\b|\bwith\b)\s*/)[0]
+    .trim();
+}
+
 /** Check if a now_playing matches a secret track event config */
-function matchesSecretTrack(
+export function matchesSecretTrack(
   title: string,
   artist: string,
-  config: SecretTrackConfig,
+  config: Pick<SecretTrackConfig, "trackTitle" | "trackArtist">,
 ): boolean {
   const normTitle = normalizeTrack(title);
-  const normArtist = normalizeTrack(artist);
   const configTitle = normalizeTrack(config.trackTitle);
-  const configArtist = normalizeTrack(config.trackArtist);
 
-  return normTitle === configTitle && normArtist === configArtist;
+  return (
+    normTitle === configTitle &&
+    leadArtist(artist) === leadArtist(config.trackArtist)
+  );
 }
 
 /** Convert a Supabase herzie row to the shared Herzie type */
@@ -652,6 +656,10 @@ export async function processSync(
       if (!dropTestMode && Math.random() >= DROP_CHANCE_PER_TICK) continue;
       const picked = pickWeightedDrop(droppable, herzieStats.luck);
       if (picked) pickedIds.push(picked.id);
+      // Seasonal extras (the Halloween Treat) roll on their own, on top —
+      // only on a roll actually taken (see rollsConsumed), so a failed pool
+      // query can't pay them out twice.
+      if (droppable.length > 0) pickedIds.push(...rollSeasonalBonusDrops(now));
     }
     if (pickedIds.length > 0) {
       // Returns how many it actually inserted, which is fewer than it was
@@ -695,7 +703,8 @@ export async function processSync(
     }));
   }
 
-  if (pendingDrops.length > 0 && hasSpiritOrbEquipped(row.equipped)) {
+  const wornSpirit = normalizeEquipped(row.equipped).spirit;
+  if (pendingDrops.length > 0 && wornSpirit) {
     // Auto-collect only what the bank can hold. `collect_pending_drop` credits
     // inventory unconditionally, and an over-capacity item stays owned with no
     // grid slot to render in — so it would silently vanish from view. Anything
@@ -751,7 +760,8 @@ export async function processSync(
         running[drop.itemId] = (running[drop.itemId] ?? 0) + 1;
         notifications.push({
           type: "item_granted",
-          title: "Greedy Spirit",
+          // The worn spirit's own name: "Greedy Spirit", "Herman".
+          title: getItem(wornSpirit)?.name ?? "Spirit",
           // Display name from the shared catalog — collectedId is the raw
           // item id (e.g. "cd"), not something to show a player.
           message: `Picked up "${getItem(collectedId as string)?.name ?? collectedId}"`,

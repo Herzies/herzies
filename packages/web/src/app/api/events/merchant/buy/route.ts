@@ -11,17 +11,20 @@ import { createAdminClient } from "@/lib/supabase-admin";
 
 const REASONS: Record<string, { status: number; error: string }> = {
   "not-found": { status: 404, error: "Herzie not found" },
-  "not-live": { status: 409, error: "George has packed up and left" },
-  "not-sold-here": { status: 400, error: "George doesn't sell that" },
+  "not-live": { status: 409, error: "They've packed up and left" },
+  "not-sold-here": { status: 400, error: "That isn't for sale here" },
   "sold-out": { status: 409, error: "Sold out" },
   "limit-reached": { status: 409, error: "You've bought as many as you can" },
   "insufficient-funds": { status: 400, error: "Not enough currency" },
+  "insufficient-treats": { status: 400, error: "Not enough treats" },
   "bad-quantity": { status: 400, error: "Invalid quantity" },
 };
 
 /**
- * Buy from Good ol' George. Same shape as /api/inventory/buy, but the price
- * and limits come from the live merchant event rather than the catalog.
+ * Buy from a visiting merchant: Good ol' George (coins) or Nandor the
+ * Treatless (treats — the RPC takes payment by event type). Same shape as
+ * /api/inventory/buy, but the price and limits come from the live event
+ * rather than the catalog. `newCurrency` is absent when paid in treats.
  */
 export async function POST(request: Request) {
   const auth = await authenticateRequest(request);
@@ -45,7 +48,9 @@ export async function POST(request: Request) {
   }
 
   // Same bank-space rule as /api/inventory/buy, for the same reason: a copy
-  // past the bank's capacity would be paid for and never render.
+  // past the bank's capacity would be paid for and never render. Treats spent
+  // are not counted as freed: the check stays conservative by one tile at
+  // most, when a purchase uses up the last of them.
   const inv = (herzie.inventory_v2 ?? {}) as Record<string, number>;
   const next = { ...inv, [itemId]: (inv[itemId] ?? 0) + quantity };
   if (
@@ -69,7 +74,7 @@ export async function POST(request: Request) {
     ok: boolean;
     reason?: string;
     spent?: number;
-    newCurrency?: number;
+    newCurrency?: number | null;
     state?: ItemState;
   } | null;
 
@@ -87,7 +92,7 @@ export async function POST(request: Request) {
   return NextResponse.json({
     ok: true,
     spent: result.spent,
-    newCurrency: result.newCurrency,
+    ...(result.newCurrency != null ? { newCurrency: result.newCurrency } : {}),
     ...itemResponse(result.state),
   });
 }
