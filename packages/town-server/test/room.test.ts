@@ -9,7 +9,7 @@ import {
 } from "@herzies/shared/town-net";
 import { exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
-import { checkMove, newGuard, RateLimiter } from "../src/rules";
+import { checkMove, newGuard, RateLimiter, startingPoint } from "../src/rules";
 
 const SECRET = "test-secret";
 let shardSeq = 0;
@@ -113,6 +113,14 @@ describe("rules", () => {
   it("refuses leaving the island", () => {
     const g = newGuard(39.9, 0, 0);
     expect(checkMove(g, 41, 0, 1000, "home")).toBe(false);
+  });
+
+  it("holds the testing ground to its own, smaller island and spawn", () => {
+    const g = newGuard(16.5, 0, 0);
+    expect(checkMove(g, 18, 0, 1000, "arena")).toBe(false);
+    expect(checkMove(g, 0, -12, 100, "arena")).toBe(true);
+    expect(startingPoint("arena", 30, 0)).toEqual({ x: 0, z: -12 });
+    expect(startingPoint("arena", 0, 10)).toEqual({ x: 0, z: 10 });
   });
 
   it("rate-limits bursts", () => {

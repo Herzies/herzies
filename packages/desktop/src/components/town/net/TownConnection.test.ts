@@ -6,6 +6,7 @@ import {
   TOWN_TICK_MS,
   TOWN_WALK_SPEED,
   type TownState,
+  withCastSeq,
 } from "@herzies/shared";
 import { WALK_SPEED } from "@herzies/shared/gl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -153,6 +154,58 @@ describe("TownConnection", () => {
     );
     expect(conn.remotes.get(2)?.buffer.sample(5000)?.x).toBe(3);
     expect(conn.remotes.has(1)).toBe(false);
+  });
+
+  it("counts another player's casts off each state as it arrives", async () => {
+    const { conn } = setup();
+    conn.start();
+    await settle();
+    latest().open();
+    latest().json({
+      t: "welcome",
+      you: 1,
+      players: [{ id: 2, name: "b", look: { seed: "s", stage: 1 } }],
+    });
+    const cast = (n: number, t: number) =>
+      latest().receive(
+        encodeSnapshot(t, [
+          {
+            id: 2,
+            age: 0,
+            state: {
+              x: 0,
+              z: 0,
+              heading: 0,
+              speed: 0,
+              flags: withCastSeq(0, n),
+            },
+          },
+        ]),
+      );
+    const r = () => conn.remotes.get(2);
+    // The first count heard is where they're at, not casts to show.
+    cast(6, 5000);
+    expect(r()?.pendingCasts).toBe(0);
+    // Two casts, round the wrap, between ticks.
+    cast(0, 5066);
+    expect(r()?.pendingCasts).toBe(2);
+    cast(0, 5132);
+    expect(r()?.pendingCasts).toBe(2);
+    // A backlog is capped.
+    cast(7, 5200);
+    expect(r()?.pendingCasts).toBe(3);
+  });
+
+  it("moves to another island's room", async () => {
+    const { conn } = setup();
+    conn.start();
+    await settle();
+    latest().open();
+    latest().json({ t: "welcome", you: 1, players: [] });
+    conn.setMap("arena");
+    await settle();
+    expect(latest().url).toBe("wss://town.test/v1/town/arena?shard=0");
+    expect(FakeSocket.all.length).toBe(2);
   });
 
   it("moves to the next shard when a room is full", async () => {

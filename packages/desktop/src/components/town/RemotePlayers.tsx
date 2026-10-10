@@ -7,11 +7,13 @@ import { HerzieModel } from "@herzies/shared/gl";
 import { Html } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
-import type { Group } from "three";
+import { type Group, Vector3 } from "three";
 import { ROW_TEXT_SHADOW } from "../VisitorRowTheme";
 import { ambient } from "./ambient";
 import { SEAT_Y } from "./Benches";
 import { BUBBLE_RANGE, type ChatBubble, type ChatBubbles } from "./chatBubbles";
+import { liveDummies } from "./combat/Dummies";
+import { assistTarget, type Vec3, waveField } from "./combat/waves";
 import { HeadBubble } from "./HeadBubble";
 import type { RemotePlayer, TownConnection } from "./net/TownConnection";
 import { useTownNetVersion } from "./net/townNet";
@@ -73,6 +75,7 @@ function RemoteHerzie({
   const tagAnchor = useRef<Group>(null);
   const afk = useRef(false);
   const bubbleBox = useRef<HTMLDivElement>(null);
+  const hand = useMemo(() => new Vector3(), []);
 
   useFrame((_, dt) => {
     const s = remote.buffer.sample(net.clock.renderTime(performance.now()));
@@ -85,7 +88,22 @@ function RemoteHerzie({
     herzie.sitting = seated;
     herzie.dancing = (s.flags & TOWN_FLAG_DANCING) !== 0;
     herzie.heading = s.heading;
+    // They cast: the same thrust, and a wave from the hand the way they
+    // face (only the cast count travels, not where they aimed).
+    if (remote.pendingCasts > 0 && !herzie.casting) {
+      remote.pendingCasts--;
+      herzie.cast(0);
+    }
     herzie.update(dt, s.speed);
+    if (herzie.released) {
+      herzie.handWorldPosition(hand);
+      const from: Vec3 = [hand.x, hand.y, hand.z];
+      const dir: Vec3 = [Math.sin(s.heading), 0, Math.cos(s.heading)];
+      waveField.cast(from, dir, {
+        mine: false,
+        target: assistTarget(from, dir, liveDummies),
+      });
+    }
     tagAnchor.current?.position.set(
       s.x,
       herzie.height + 0.3 + (seated ? SEAT_Y : 0),

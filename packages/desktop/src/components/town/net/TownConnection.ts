@@ -1,4 +1,6 @@
 import {
+  castSeqOf,
+  castsBetween,
   decodeSnapshot,
   EntityBuffer,
   encodeStateFrame,
@@ -41,7 +43,16 @@ export type RemotePlayer = {
   name: string;
   look: TownLook;
   buffer: EntityBuffer;
+  /** The cast count last heard from them (null: nothing yet), and casts
+   * heard but not yet shown. Counted off every state as it arrives, not
+   * the drawn (interpolated) one, so no cast between two draws is lost. */
+  castSeq: number | null;
+  pendingCasts: number;
 };
+
+/** More casts than this queued for one player are dropped: catching up
+ * on a backlog would only look like a stutter. */
+const MAX_PENDING_CASTS = 3;
 
 export type TownConnectionOptions = {
   map: TownMapId;
@@ -354,6 +365,8 @@ export class TownConnection {
       name: p.name,
       look: p.look,
       buffer: existing?.buffer ?? new EntityBuffer(),
+      castSeq: existing?.castSeq ?? null,
+      pendingCasts: existing?.pendingCasts ?? 0,
     });
   }
 
@@ -364,7 +377,17 @@ export class TownConnection {
     this.clock.observe(snap.serverTime, now);
     for (const e of snap.entries) {
       if (e.id === this.you) continue;
-      this.remotes.get(e.id)?.buffer.push(snap.serverTime - e.age, e.state);
+      const r = this.remotes.get(e.id);
+      if (!r) continue;
+      r.buffer.push(snap.serverTime - e.age, e.state);
+      const seq = castSeqOf(e.state.flags);
+      if (r.castSeq !== null) {
+        r.pendingCasts = Math.min(
+          MAX_PENDING_CASTS,
+          r.pendingCasts + castsBetween(r.castSeq, seq),
+        );
+      }
+      r.castSeq = seq;
     }
   }
 

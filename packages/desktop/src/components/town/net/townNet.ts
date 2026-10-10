@@ -1,10 +1,13 @@
 import {
   isTownMapId,
+  TOWN_FLAG_COMBAT,
   TOWN_FLAG_DANCING,
   TOWN_FLAG_SITTING,
+  withCastSeq,
 } from "@herzies/shared";
 import { useEffect, useSyncExternalStore } from "react";
 import { herzies } from "../../../tauri-bridge";
+import { combat } from "../combat/state";
 import { townLive, townSave } from "../runtime";
 import { TownConnection, type TownTicket } from "./TownConnection";
 
@@ -34,9 +37,12 @@ export function townNet(): TownConnection {
       z: townSave.z,
       heading: townSave.heading,
       speed: townLive.speed,
-      flags:
+      flags: withCastSeq(
         (townLive.seat ? TOWN_FLAG_SITTING : 0) |
-        (townLive.dancing ? TOWN_FLAG_DANCING : 0),
+          (townLive.dancing ? TOWN_FLAG_DANCING : 0) |
+          (combat.on ? TOWN_FLAG_COMBAT : 0),
+        combat.casts,
+      ),
     }),
     onCorrect: (x, z) => {
       townLive.teleport = { x, z };
