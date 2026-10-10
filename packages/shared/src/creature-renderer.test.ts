@@ -825,6 +825,44 @@ describe("Halloween items", () => {
     );
   });
 
+  it("keeps the head inside the witch hat's crown", () => {
+    for (const seed of ["a", "b", "c", "d", "e", "f"]) {
+      for (const stage of [1, 2, 3]) {
+        const { spheres } = buildCreatureModel(seed, stage, {
+          head: "witch-hat",
+        });
+        const [brim, , crown] = spheres.filter(
+          (s) => s.zone === "wearable" && s.shape,
+        );
+        const brimTop = brim.center[1] - Math.abs(brim.shape?.axis[1] ?? 0);
+        const half = Math.abs(crown.shape?.axis[1] ?? 0);
+        const tip = crown.shape?.tipRadius ?? 0;
+        const heads = spheres.filter(
+          (s) => s.part === "head" && s.zone !== "wearable",
+        );
+        for (const s of heads) {
+          for (let a = 0; a < 24; a++) {
+            for (let b = 1; b < 12; b++) {
+              const th = (a / 24) * 2 * Math.PI;
+              const ph = (b / 12) * Math.PI;
+              const x = s.center[0] + s.radius * Math.sin(ph) * Math.cos(th);
+              const y = s.center[1] - s.radius * Math.cos(ph);
+              const z = s.center[2] + s.radius * Math.sin(ph) * Math.sin(th);
+              if (y >= brimTop) continue; // under the brim
+              // −1 at the crown's base to 1 at its top (up is −y).
+              const along = (crown.center[1] - y) / half;
+              expect(along).toBeLessThanOrEqual(1);
+              const r = crown.radius + ((tip - crown.radius) * (along + 1)) / 2;
+              expect(
+                Math.hypot(x - crown.center[0], z - crown.center[2]),
+              ).toBeLessThanOrEqual(r);
+            }
+          }
+        }
+      }
+    }
+  });
+
   it("doesn't let the fangs move the hat", () => {
     // Everything the fangs add on top of a hat must be what they add alone.
     const cells = (equipped: Equipped) =>

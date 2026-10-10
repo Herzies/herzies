@@ -1725,24 +1725,46 @@ function buildWitchHatSpheres(spheres: Sphere[]): Sphere[] {
   // Creature space is y down: up is −y.
   const brimY = hy - hr * 0.62;
   const brimHalf = hr * 0.07;
+  const crownBase = brimY - brimHalf;
+  // Squat on purpose: a grown herzie's head sits close to the top of the
+  // frame, and a classic tall hat would be cut off.
+  const crownHalf = hr * 0.28;
+  const crownTop = hr * 0.32;
 
-  // Brim: a wide disc resting on the crown, the band just above it.
-  push([hx, brimY, hz], hr, felt, {
+  // The crown is solid now, not a pile of balls, so the head mustn't poke
+  // out through its sides (seen from above): wide enough at its base that,
+  // tapering, it still clears the head all the way up.
+  const heads = spheres.filter(
+    (s) => s.part === "head" && s.zone !== "wearable",
+  );
+  const headWidth = (y: number) => {
+    let w = 0;
+    for (const s of heads) {
+      const dy = y - s.center[1];
+      if (Math.abs(dy) >= s.radius) continue;
+      const off = Math.hypot(s.center[0] - hx, s.center[2] - hz);
+      w = Math.max(w, off + Math.sqrt(s.radius ** 2 - dy * dy));
+    }
+    return w;
+  };
+  let crownR = hr * 0.56;
+  for (let i = 0; i < 8; i++) {
+    const t = i / 8; // up the crown, 0 at its base
+    const clear = headWidth(crownBase - t * 2 * crownHalf) + hr * 0.04;
+    crownR = Math.max(crownR, (clear - crownTop * t) / (1 - t));
+  }
+
+  // Brim: a wide disc resting on the head, the band just above it.
+  push([hx, brimY, hz], Math.max(hr, crownR + hr * 0.4), felt, {
     kind: "cylinder",
     axis: [0, brimHalf, 0],
   });
   const bandHalf = hr * 0.09;
-  push([hx, brimY - brimHalf - bandHalf, hz], hr * 0.6, "#F27B13", {
+  push([hx, crownBase - bandHalf, hz], crownR + hr * 0.04, "#F27B13", {
     kind: "cylinder",
     axis: [0, bandHalf, 0],
   });
-
-  // Crown: straight up from the brim, tapering. Squat on purpose: a grown
-  // herzie's head sits close to the top of the frame, and a classic tall
-  // hat would be cut off.
-  const crownHalf = hr * 0.28;
-  const crownTop = hr * 0.32;
-  push([hx, brimY - brimHalf - crownHalf, hz], hr * 0.56, felt, {
+  push([hx, crownBase - crownHalf, hz], crownR, felt, {
     kind: "cone",
     axis: [0, -crownHalf, 0],
     tipRadius: crownTop,
@@ -1755,7 +1777,7 @@ function buildWitchHatSpheres(spheres: Sphere[]): Sphere[] {
     { tilt: 62, length: 0.2, radius: 0.13 },
     { tilt: 100, length: 0.2, radius: 0 },
   ];
-  let at: V3 = [hx, brimY - brimHalf - 2 * crownHalf, hz];
+  let at: V3 = [hx, crownBase - 2 * crownHalf, hz];
   let r = crownTop;
   const along = segments.reduce((sum, seg) => sum + seg.length, 0);
   let done = 0;
