@@ -27,9 +27,10 @@ export function noLamps(): THREE.Vector4[] {
 }
 
 /** A herzie on its own (Home, a profile): lit like the ray caster lit it,
- * from up and to the left of the viewer, in plain white light. */
+ * from up, to the right and in front of the viewer (its LIGHT, turned out
+ * of creature space), in plain white light. */
 export const studioLighting: HerzieLighting = {
-  uSun: { value: new THREE.Vector3(-0.45, 0.7, 0.55).normalize() },
+  uSun: { value: new THREE.Vector3(0.4, 0.6, 0.8).normalize() },
   uLight: { value: new THREE.Color(1, 1, 1) },
 };
 

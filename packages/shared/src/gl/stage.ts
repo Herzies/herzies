@@ -40,7 +40,7 @@ type Entry = { view: StageView; clips: HTMLElement[]; clipAge: number };
  */
 class HerzieStage {
   /** Drawn pixels per CSS pixel. */
-  pixelScale = 1 / 3;
+  pixelScale = 1 / 4;
   private renderer: THREE.WebGLRenderer | null = null;
   private host: HTMLElement | null = null;
   private entries = new Set<Entry>();
