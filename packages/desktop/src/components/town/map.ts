@@ -1,24 +1,41 @@
 import { mulberry32 } from "@herzies/shared";
 
 /**
- * The home island as a map: two layers of characters on a square grid of
- * 1-unit cells centred on the origin — what the ground is, and what stands
- * on it — plus where the visitors stand and where you start. Written by the
- * map editor (`pnpm map-editor`) to maps/home.json, one row per line, so a
- * map reads (and diffs) as a picture.
+ * An island as a map: two layers of characters on a square grid of 1-unit
+ * cells centred on the island's middle — what the ground is, and what
+ * stands on it — plus where the visitors stand and where you start.
+ * Written by the map editor (`pnpm map-editor`) to maps/<id>.json, one row
+ * per line, so a map reads (and diffs) as a picture.
  *
- * Cell (col, row) covers x in [col - HALF, col - HALF + 1], z likewise with
- * the row: row 0 is the north edge (-z), col 0 the west (-x).
+ * Every island is round and fills its grid: its radius is half the grid's
+ * size. Cell (col, row) covers x in [col - size/2, col - size/2 + 1], z
+ * likewise with the row: row 0 is the north edge (-z), col 0 the west (-x).
  */
 
-/** How far you can walk from the middle of town. */
-export const WORLD_RADIUS = 40;
-/** How far the island the town stands on reaches: a little past where you
- * can walk, so you can look over the edge but not fall off it. */
-export const ISLAND_RADIUS = WORLD_RADIUS + 3;
-/** Cells per side: the whole island, edge to edge. */
-export const MAP_SIZE = ISLAND_RADIUS * 2;
-const HALF = MAP_SIZE / 2;
+/** How far short of an island's edge you can walk: you can look over the
+ * edge but not fall off it. */
+export const EDGE_MARGIN = 3;
+/** The home island's grid: cells per side. */
+export const MAP_SIZE = 86;
+/** Smallest and largest islands the editor makes. */
+export const MIN_MAP_SIZE = 24;
+export const MAX_MAP_SIZE = 120;
+
+/** Anything with a grid: a map, or just its size. */
+export type Grid = { size: number };
+
+/** How far an island reaches from its middle. */
+export function islandRadius(g: Grid): number {
+  return g.size / 2;
+}
+/** How far you can walk from an island's middle. */
+export function worldRadius(g: Grid): number {
+  return g.size / 2 - EDGE_MARGIN;
+}
+/** The home island's walkable radius (the town server checks moves
+ * against it). */
+export const WORLD_RADIUS = worldRadius({ size: MAP_SIZE });
+export const ISLAND_RADIUS = islandRadius({ size: MAP_SIZE });
 
 export const TERRAIN = {
   ".": { name: "Grass", color: "#2f5233" },
@@ -45,15 +62,35 @@ export const OBJECTS = {
   $: { name: "Shop", color: "#6a9ae0" },
   C: { name: "Cave", color: "#8a8070" },
   "@": { name: "Statue", color: "#d8d4cc" },
+  D: { name: "Training dummy", color: "#d9b26a" },
+  O: { name: "Portal", color: "#b07aff" },
 } as const;
 export type ObjectChar = keyof typeof OBJECTS;
 
 export type Point = [x: number, z: number];
 
+/** A map's name in files, URLs and the town server's rooms. */
+export type MapId = string;
+export const MAP_ID = /^[a-z][a-z0-9-]{1,23}$/;
+
+/** Where a portal leads. */
+export type PortalLink = { to: MapId };
+
 export type TownMap = {
-  version: 1;
+  version: 2;
+  id: MapId;
+  /** What the game calls it ("Enter the Testing Ground"). */
+  name: string;
   size: number;
-  /** MAP_SIZE rows of MAP_SIZE terrain chars (OFF where off the island). */
+  /** Where the island floats in the one sky every island shares: the
+   * island you're on is drawn at the origin, the others where they float
+   * relative to it. Home is at [0, 0, 0]. */
+  origin: [x: number, y: number, z: number];
+  /** Whether you can fight here (the testing ground's dummies). */
+  combat?: boolean;
+  /** Where each portal ("O") leads: "col,row" → link. */
+  portals?: Record<string, PortalLink>;
+  /** size rows of size terrain chars (OFF where off the island). */
   terrain: string[];
   /** Same shape: what stands on each cell ('.' nothing, OFF off-island). */
   objects: string[];
@@ -121,18 +158,24 @@ export const SPOT_NAMES: Record<string, string> = {
 };
 
 /** The centre of a cell, in world (x, z). */
-export function cellCenter(col: number, row: number): Point {
-  return [col - HALF + 0.5, row - HALF + 0.5];
+export function cellCenter(g: Grid, col: number, row: number): Point {
+  const half = g.size / 2;
+  return [col - half + 0.5, row - half + 0.5];
 }
 
 /** The cell a world point falls in (may be off the grid). */
-export function cellAt(x: number, z: number): [col: number, row: number] {
-  return [Math.floor(x + HALF), Math.floor(z + HALF)];
+export function cellAt(
+  g: Grid,
+  x: number,
+  z: number,
+): [col: number, row: number] {
+  const half = g.size / 2;
+  return [Math.floor(x + half), Math.floor(z + half)];
 }
 
-function cellCorners(col: number, row: number): Point[] {
-  const x = col - HALF;
-  const z = row - HALF;
+function cellCorners(g: Grid, col: number, row: number): Point[] {
+  const x = col - g.size / 2;
+  const z = row - g.size / 2;
   return [
     [x, z],
     [x + 1, z],
@@ -142,21 +185,21 @@ function cellCorners(col: number, row: number): Point[] {
 }
 
 /** Whether any of the cell is on the island. */
-export function onIsland(col: number, row: number): boolean {
-  if (col < 0 || row < 0 || col >= MAP_SIZE || row >= MAP_SIZE) return false;
-  const x0 = col - HALF;
-  const z0 = row - HALF;
+export function onIsland(g: Grid, col: number, row: number): boolean {
+  if (col < 0 || row < 0 || col >= g.size || row >= g.size) return false;
+  const x0 = col - g.size / 2;
+  const z0 = row - g.size / 2;
   // The cell's nearest point to the island's middle.
   const nx = Math.max(x0, Math.min(0, x0 + 1));
   const nz = Math.max(z0, Math.min(0, z0 + 1));
-  return Math.hypot(nx, nz) < ISLAND_RADIUS;
+  return Math.hypot(nx, nz) < islandRadius(g);
 }
 
 /** Whether the whole cell is on the island — only those can hold water
  * (a pond cut into the rim would open a hole in the island's side). */
-export function inland(col: number, row: number): boolean {
-  return cellCorners(col, row).every(
-    ([x, z]) => Math.hypot(x, z) <= ISLAND_RADIUS,
+export function inland(g: Grid, col: number, row: number): boolean {
+  return cellCorners(g, col, row).every(
+    ([x, z]) => Math.hypot(x, z) <= islandRadius(g),
   );
 }
 
@@ -174,16 +217,24 @@ export function objectAt(map: TownMap, col: number, row: number): string {
 }
 
 /** A blank island: all grass, nothing on it, everyone in the middle. */
-export function emptyMap(): TownMap {
+export function emptyMap(
+  size = MAP_SIZE,
+  id: MapId = "home",
+  name = "Town",
+): TownMap {
+  const g = { size };
   const rows = (fill: string) =>
-    Array.from({ length: MAP_SIZE }, (_, r) =>
-      Array.from({ length: MAP_SIZE }, (_, c) =>
-        onIsland(c, r) ? fill : OFF,
+    Array.from({ length: size }, (_, r) =>
+      Array.from({ length: size }, (_, c) =>
+        onIsland(g, c, r) ? fill : OFF,
       ).join(""),
     );
   return {
-    version: 1,
-    size: MAP_SIZE,
+    version: 2,
+    id,
+    name,
+    size,
+    origin: [0, 0, 0],
     terrain: rows("."),
     objects: rows("."),
     spots: {},
@@ -197,31 +248,77 @@ const isPoint = (p: unknown): p is Point =>
   p.length === 2 &&
   p.every((n) => typeof n === "number" && Number.isFinite(n));
 
+const isOrigin = (p: unknown): p is TownMap["origin"] =>
+  Array.isArray(p) &&
+  p.length === 3 &&
+  p.every((n) => typeof n === "number" && Number.isFinite(n));
+
+/** The cells holding a portal, as "col,row" keys. */
+export function portalCells(map: TownMap): string[] {
+  const out: string[] = [];
+  for (let row = 0; row < map.size; row++) {
+    for (let col = 0; col < map.size; col++) {
+      if (objectAt(map, col, row) === "O") out.push(`${col},${row}`);
+    }
+  }
+  return out;
+}
+
 /**
  * Check a map read from JSON. Throws with every problem found (up to a
- * few), rather than drawing a world from a broken file.
+ * few), rather than drawing a world from a broken file. A version 1 file
+ * (before there was more than one island) is the home island.
+ *
+ * Where portals lead is only checked against the other maps by the map
+ * registry (maps/index.ts), which knows them all.
  */
 export function parseMap(json: unknown): TownMap {
   const errors: string[] = [];
-  const m = json as Partial<TownMap> | null;
-  if (!m || typeof m !== "object") throw new Error("map: not an object");
-  if (m.version !== 1) errors.push(`version ${m.version}, expected 1`);
-  if (m.size !== MAP_SIZE) errors.push(`size ${m.size}, expected ${MAP_SIZE}`);
+  const raw = json as Partial<TownMap> | null;
+  if (!raw || typeof raw !== "object") throw new Error("map: not an object");
+  const m: Partial<TownMap> =
+    (raw.version as number) === 1
+      ? { ...raw, version: 2, id: "home", name: "Town", origin: [0, 0, 0] }
+      : { ...raw };
+  if (m.version !== 2) errors.push(`version ${m.version}, expected 2`);
+  if (typeof m.id !== "string" || !MAP_ID.test(m.id)) {
+    errors.push(`id ${JSON.stringify(m.id)}: expected a-z, 0-9 and -`);
+  }
+  if (typeof m.name !== "string" || m.name.trim() === "") {
+    errors.push("name: missing");
+  }
+  if (!isOrigin(m.origin)) errors.push("origin: expected [x, y, z]");
+  if (m.combat !== undefined && typeof m.combat !== "boolean") {
+    errors.push("combat: expected true or false");
+  }
+  const size = m.size as number;
+  if (
+    !Number.isInteger(size) ||
+    size % 2 !== 0 ||
+    size < MIN_MAP_SIZE ||
+    size > MAX_MAP_SIZE
+  ) {
+    errors.push(
+      `size ${m.size}, expected an even number from ${MIN_MAP_SIZE} to ${MAX_MAP_SIZE}`,
+    );
+    throw new Error(`map: ${errors.join("; ")}`);
+  }
+  const g = { size };
 
   const grid = (name: "terrain" | "objects", chars: string) => {
     const rows = m[name];
-    if (!Array.isArray(rows) || rows.length !== MAP_SIZE) {
-      errors.push(`${name}: expected ${MAP_SIZE} rows`);
+    if (!Array.isArray(rows) || rows.length !== size) {
+      errors.push(`${name}: expected ${size} rows`);
       return;
     }
     rows.forEach((row, r) => {
-      if (typeof row !== "string" || row.length !== MAP_SIZE) {
-        errors.push(`${name} row ${r}: expected ${MAP_SIZE} chars`);
+      if (typeof row !== "string" || row.length !== size) {
+        errors.push(`${name} row ${r}: expected ${size} chars`);
         return;
       }
-      for (let c = 0; c < MAP_SIZE; c++) {
+      for (let c = 0; c < size; c++) {
         const ch = row[c];
-        if (!onIsland(c, r)) {
+        if (!onIsland(g, c, r)) {
           if (ch !== OFF) errors.push(`${name} (${c}, ${r}): off the island`);
         } else if (!chars.includes(ch)) {
           errors.push(`${name} (${c}, ${r}): unknown "${ch}"`);
@@ -234,10 +331,10 @@ export function parseMap(json: unknown): TownMap {
 
   if (errors.length === 0) {
     const map = m as TownMap;
-    for (let r = 0; r < MAP_SIZE; r++) {
-      for (let c = 0; c < MAP_SIZE; c++) {
+    for (let r = 0; r < size; r++) {
+      for (let c = 0; c < size; c++) {
         const t = terrainAt(map, c, r);
-        if (isSunk(t) && !inland(c, r)) {
+        if (isSunk(t) && !inland(g, c, r)) {
           errors.push(`terrain (${c}, ${r}): water on the rim`);
         }
         if (isSunk(t) && objectAt(map, c, r) !== ".") {
@@ -245,11 +342,34 @@ export function parseMap(json: unknown): TownMap {
         }
       }
     }
+    // Every portal leads somewhere, and only portals have links.
+    const cells = new Set(portalCells(map));
+    const links = m.portals ?? {};
+    if (!links || typeof links !== "object") {
+      errors.push('portals: expected { "col,row": { to } }');
+    } else {
+      for (const k of cells) {
+        if (!links[k]) errors.push(`portals.${k}: leads nowhere`);
+      }
+      for (const [k, link] of Object.entries(links)) {
+        if (!cells.has(k)) errors.push(`portals.${k}: no portal there`);
+        else if (
+          !link ||
+          typeof link.to !== "string" ||
+          !MAP_ID.test(link.to)
+        ) {
+          errors.push(`portals.${k}: expected { to: map id }`);
+        } else if (link.to === m.id) {
+          errors.push(`portals.${k}: leads back to this island`);
+        }
+      }
+    }
   }
 
+  const reach = worldRadius(g);
   const where = (label: string, p: unknown) => {
     if (!isPoint(p)) errors.push(`${label}: expected [x, z]`);
-    else if (Math.hypot(p[0], p[1]) > WORLD_RADIUS) {
+    else if (Math.hypot(p[0], p[1]) > reach) {
       errors.push(`${label}: past the edge`);
     }
   };
@@ -266,7 +386,11 @@ export function parseMap(json: unknown): TownMap {
     } else {
       for (const [k, n] of Object.entries(m.facing)) {
         const [c, r] = k.split(",").map(Number);
-        if (!Number.isInteger(c) || !Number.isInteger(r) || !onIsland(c, r)) {
+        if (
+          !Number.isInteger(c) ||
+          !Number.isInteger(r) ||
+          !onIsland(g, c, r)
+        ) {
           errors.push(`facing.${k}: not a cell on the island`);
         } else if (!Number.isInteger(n) || n < 0 || n > 7) {
           errors.push(`facing.${k}: expected 0–7`);
@@ -303,9 +427,19 @@ export function serializeMap(map: TownMap): string {
   const spots = Object.entries(map.spots)
     .map(([k, p]) => `    ${JSON.stringify(k)}: ${pt(p)}`)
     .join(",\n");
+  const links = Object.entries(map.portals ?? {}).sort(([a], [b]) =>
+    a.localeCompare(b),
+  );
+  const portals = links.length
+    ? `\n  "portals": { ${links.map(([k, l]) => `${JSON.stringify(k)}: { "to": ${JSON.stringify(l.to)} }`).join(", ")} },`
+    : "";
+  const combat = map.combat ? `\n  "combat": true,` : "";
   return `{
   "version": ${map.version},
+  "id": ${JSON.stringify(map.id)},
+  "name": ${JSON.stringify(map.name)},
   "size": ${map.size},
+  "origin": [${map.origin.join(", ")}],${combat}${portals}
   "spawn": { "at": ${pt(map.spawn.at)}, "heading": ${map.spawn.heading} },
   "spots": {${spots ? `\n${spots}\n  ` : ""}},
   "spare": [${map.spare.map(pt).join(", ")}],${facing}
@@ -332,11 +466,11 @@ export type WaterBox = { x0: number; x1: number; z0: number; z1: number };
 export function waterRuns(map: TownMap): WaterBox[] {
   const bridge = (c: number, r: number) => terrainAt(map, c, r) === "=";
   const runs: WaterBox[] = [];
-  for (let row = 0; row < MAP_SIZE; row++) {
+  for (let row = 0; row < map.size; row++) {
     let start = -1;
     let edges = "";
     const close = (end: number) => {
-      const [x0, z0] = cellCenter(start, row).map((v) => v - 0.5);
+      const [x0, z0] = cellCenter(map, start, row).map((v) => v - 0.5);
       const pull = (b: boolean) => (b ? BRIDGE_CLEARANCE : 0);
       runs.push({
         x0: x0 + pull(bridge(start - 1, row)),
@@ -346,8 +480,8 @@ export function waterRuns(map: TownMap): WaterBox[] {
       });
       start = -1;
     };
-    for (let col = 0; col <= MAP_SIZE; col++) {
-      const wet = col < MAP_SIZE && isOpenWater(map, col, row);
+    for (let col = 0; col <= map.size; col++) {
+      const wet = col < map.size && isOpenWater(map, col, row);
       // A run is cut where a bridge starts or stops along its side.
       const e = `${bridge(col, row - 1)}${bridge(col, row + 1)}`;
       if (start >= 0 && (!wet || e !== edges)) close(col);
@@ -387,11 +521,12 @@ export function bridgeAxis(map: TownMap, col: number, row: number): "x" | "z" {
 /** A thing's place within its cell: nudged off-centre, sized and turned a
  * little, the same every time — so a forest doesn't look planted in rows. */
 export function objectJitter(
+  g: Grid,
   col: number,
   row: number,
 ): { x: number; z: number; scale: number; yaw: number } {
   const rand = mulberry32(col * 7919 + row * 104729 + 20261008);
-  const [cx, cz] = cellCenter(col, row);
+  const [cx, cz] = cellCenter(g, col, row);
   return {
     x: cx + (rand() - 0.5) * 0.5,
     z: cz + (rand() - 0.5) * 0.5,
@@ -403,7 +538,7 @@ export function objectJitter(
 /** A thing's place within its cell (see objectJitter), turned the way it
  * was turned in the editor, if it was. */
 export function objectPlace(map: TownMap, col: number, row: number) {
-  const place = objectJitter(col, row);
+  const place = objectJitter(map, col, row);
   return { ...place, yaw: facingAt(map, col, row) ?? place.yaw };
 }
 
@@ -419,13 +554,19 @@ export type BuildingKind = (typeof BUILDING_KINDS)[keyof typeof BUILDING_KINDS];
 export const isBuildingChar = (ch: string): ch is keyof typeof BUILDING_KINDS =>
   ch in BUILDING_KINDS;
 
+/** A building's rectangle, with where its north-west corner is in the
+ * world. */
+export type BuildingRect = CellRect & { x0: number; z0: number };
+
 export type Building = {
   kind: BuildingKind;
-  rects: CellRect[];
+  rects: BuildingRect[];
   /** The door: which rect, and which way it faces. */
   door: { rect: number; side: "n" | "s" | "e" | "w" } | null;
   /** Steady per building, for its colours. */
   seed: number;
+  /** Half its island's size: a cell's offset from the world's origin. */
+  half: number;
 };
 
 /**
@@ -436,10 +577,11 @@ export type Building = {
  */
 export function buildingsOf(map: TownMap): Building[] {
   const seen = new Set<number>();
-  const key = (c: number, r: number) => r * MAP_SIZE + c;
+  const size = map.size;
+  const key = (c: number, r: number) => r * size + c;
   const out: Building[] = [];
-  for (let row = 0; row < MAP_SIZE; row++) {
-    for (let col = 0; col < MAP_SIZE; col++) {
+  for (let row = 0; row < size; row++) {
+    for (let col = 0; col < size; col++) {
       const ch = objectAt(map, col, row);
       if (!isBuildingChar(ch) || seen.has(key(col, row))) continue;
       // Cells of the same kind that touch are one building.
@@ -462,8 +604,8 @@ export function buildingsOf(map: TownMap): Building[] {
       while (left.size > 0) {
         let best: CellRect | null = null;
         for (const k of left) {
-          const c0 = k % MAP_SIZE;
-          const r0 = Math.floor(k / MAP_SIZE);
+          const c0 = k % size;
+          const r0 = Math.floor(k / size);
           let maxW = Infinity;
           for (let r = r0; has(c0, r); r++) {
             let w = 0;
@@ -481,11 +623,13 @@ export function buildingsOf(map: TownMap): Building[] {
         }
         rects.push(b);
       }
+      const half = size / 2;
       out.push({
         kind: BUILDING_KINDS[ch],
-        rects,
-        door: doorOf(rects[0], isH),
+        rects: rects.map((r) => ({ ...r, x0: r.col - half, z0: r.row - half })),
+        door: doorOf(map, rects[0], isH),
         seed: key(col, row),
+        half,
       });
     }
   }
@@ -493,13 +637,14 @@ export function buildingsOf(map: TownMap): Building[] {
 }
 
 function doorOf(
+  g: Grid,
   rect: CellRect,
   isH: (c: number, r: number) => boolean,
 ): Building["door"] {
   const midC = rect.col + Math.floor(rect.w / 2);
   const midR = rect.row + Math.floor(rect.h / 2);
   // Toward the middle of town, from the rect's centre.
-  const [cx, cz] = cellCenter(rect.col, rect.row).map(
+  const [cx, cz] = cellCenter(g, rect.col, rect.row).map(
     (v, i) => v - 0.5 + (i === 0 ? rect.w : rect.h) / 2,
   );
   const sides = (
@@ -536,14 +681,15 @@ export type GroundBlend = { grass: number; gravel: number; wet: number };
 export function groundBlend(map: TownMap, x: number, z: number): GroundBlend {
   const R = BLEND_RADIUS;
   const out = { grass: 0, gravel: 0, wet: 0 };
-  const [c0, r0] = cellAt(x - R, z - R);
-  const [c1, r1] = cellAt(x + R, z + R);
+  const half = map.size / 2;
+  const [c0, r0] = cellAt(map, x - R, z - R);
+  const [c1, r1] = cellAt(map, x + R, z + R);
   for (let row = r0; row <= r1; row++) {
-    const cz = row - HALF;
+    const cz = row - half;
     const oz = Math.min(z + R, cz + 1) - Math.max(z - R, cz);
     if (oz <= 0) continue;
     for (let col = c0; col <= c1; col++) {
-      const cx = col - HALF;
+      const cx = col - half;
       const ox = Math.min(x + R, cx + 1) - Math.max(x - R, cx);
       if (ox <= 0) continue;
       const t = terrainAt(map, col, row);

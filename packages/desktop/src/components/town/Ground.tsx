@@ -6,9 +6,8 @@ import {
   cellShade,
   groundBlend,
   groundHeight,
-  ISLAND_RADIUS,
+  islandRadius,
   isOpenWater,
-  MAP_SIZE,
   onIsland,
   TERRAIN,
   type TownMap,
@@ -28,14 +27,13 @@ const RAIL_HEIGHT = 0.45;
  * borders blend smoothly. A cell that's the same all round stays one. */
 const SUB = 4;
 
-const HALF = MAP_SIZE / 2;
-
 /** A cell corner, pulled in onto the island's edge if it's past it — so
  * the rim cells fill the island out to a round edge. */
-function corner(x: number, z: number): [number, number] {
+function corner(map: TownMap, x: number, z: number): [number, number] {
   const r = Math.hypot(x, z);
-  if (r <= ISLAND_RADIUS) return [x, z];
-  const s = ISLAND_RADIUS / r;
+  const edge = islandRadius(map);
+  if (r <= edge) return [x, z];
+  const s = edge / r;
   return [x * s, z * s];
 }
 
@@ -46,9 +44,9 @@ const smooth = (a: number, b: number, v: number) => {
 
 /** Each cell's shade wobble, eased between cell centres so it doesn't
  * step at the finer cells' edges. */
-function shadeAt(x: number, z: number): number {
-  const u = x + HALF - 0.5;
-  const v = z + HALF - 0.5;
+function shadeAt(map: TownMap, x: number, z: number): number {
+  const u = x + map.size / 2 - 0.5;
+  const v = z + map.size / 2 - 0.5;
   const c = Math.floor(u);
   const r = Math.floor(v);
   const fu = u - c;
@@ -73,7 +71,7 @@ function groundPoint(
   const { grass, gravel, wet } = groundBlend(map, x, z);
   under.copy(BANK_COLOR).lerp(BED_COLOR, smooth(0.6, 0.9, wet));
   const k = smooth(0.3, 0.6, wet);
-  const shade = shadeAt(x, z) * 0.012;
+  const shade = shadeAt(map, x, z) * 0.012;
   asGrass.copy(GRASS_COLOR).lerp(under, k).offsetHSL(0, 0, shade);
   asGravel.copy(GRAVEL_COLOR).lerp(under, k).offsetHSL(0, 0, shade);
   const dry = grass + gravel;
@@ -87,6 +85,7 @@ function groundPoint(
  * so its edges come out round instead of in steps.
  */
 function groundGeometry(map: TownMap): THREE.BufferGeometry {
+  const HALF = map.size / 2;
   const pos: number[] = [];
   const col: number[] = [];
   const gravelCol: number[] = [];
@@ -94,7 +93,7 @@ function groundGeometry(map: TownMap): THREE.BufferGeometry {
   const a = new THREE.Color();
   const b = new THREE.Color();
   const vertex = (vx: number, vz: number) => {
-    const [x, z] = corner(vx, vz);
+    const [x, z] = corner(map, vx, vz);
     const p = groundPoint(map, x, z, a, b);
     pos.push(x, p.y, z);
     col.push(a.r, a.g, a.b);
@@ -103,10 +102,10 @@ function groundGeometry(map: TownMap): THREE.BufferGeometry {
   };
 
   const split = (cl: number, row: number) =>
-    onIsland(cl, row) && !blendsFlat(map, cl, row) ? SUB : 1;
-  for (let row = 0; row < MAP_SIZE; row++) {
-    for (let cl = 0; cl < MAP_SIZE; cl++) {
-      if (!onIsland(cl, row)) continue;
+    onIsland(map, cl, row) && !blendsFlat(map, cl, row) ? SUB : 1;
+  for (let row = 0; row < map.size; row++) {
+    for (let cl = 0; cl < map.size; cl++) {
+      if (!onIsland(map, cl, row)) continue;
       const x0 = cl - HALF;
       const z0 = row - HALF;
       const n = split(cl, row);
@@ -194,11 +193,12 @@ type Board = { x: number; y: number; z: number; yaw: number; shade: number };
 /** Bridge timber: the planks of each deck, and a rail (beam on two posts)
  * along each side that drops into water. */
 function bridgeParts(map: TownMap) {
+  const HALF = map.size / 2;
   const planks: Board[] = [];
   const beams: Board[] = [];
   const posts: Board[] = [];
-  for (let row = 0; row < MAP_SIZE; row++) {
-    for (let cl = 0; cl < MAP_SIZE; cl++) {
+  for (let row = 0; row < map.size; row++) {
+    for (let cl = 0; cl < map.size; cl++) {
       if (terrainAt(map, cl, row) !== "=") continue;
       const x = cl - HALF + 0.5;
       const z = row - HALF + 0.5;

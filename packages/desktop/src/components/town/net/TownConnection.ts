@@ -132,6 +132,17 @@ export class TownConnection {
     this.connect();
   }
 
+  /** Move to another island's room: everyone there instead of here. */
+  setMap(map: TownMapId) {
+    if (this.opts.map === map) return;
+    this.opts = { ...this.opts, map };
+    this.shard = 0;
+    this.attempt = 0;
+    this.clearRetry();
+    this.teardown(1000, "moving");
+    if (this.wanted && this.status !== "outdated") this.connect();
+  }
+
   /** Leave the Town. */
   stop() {
     this.wanted = false;

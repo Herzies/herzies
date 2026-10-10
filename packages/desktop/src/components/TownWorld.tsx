@@ -1,4 +1,4 @@
-import type { Equipped } from "@herzies/shared";
+import { type Equipped, isTownMapId } from "@herzies/shared";
 import {
   lazy,
   Suspense,
@@ -14,7 +14,7 @@ import { LoadingSplash } from "./LoadingSplash";
 import { type EventCard, formatIn, isDown } from "./TownScene";
 import { useChatBubbles } from "./town/chatBubbles";
 import { useTownNet, useTownNetVersion } from "./town/net/townNet";
-import { SPARE_SPOTS, SPOTS, type TownSpot, townLive } from "./town/runtime";
+import { spotsOf, type TownSpot, townLive, useTownMap } from "./town/runtime";
 
 // three.js, Rapier's WASM and friends: loaded the first time someone opens
 // the Town, not at app start.
@@ -78,7 +78,16 @@ export function TownWorld({
   const [ready, setReady] = useState(false);
   const onReady = useCallback(() => setReady(true), []);
 
+  // The visitors stand on islands with spots for them (home), not out on
+  // the testing ground.
+  const map = useTownMap();
+  // Everyone else on the island you're on.
+  useEffect(() => {
+    if (isTownMapId(map.id)) net.setMap(map.id);
+  }, [map.id, net]);
   const spots = useMemo<TownSpot[]>(() => {
+    if (Object.keys(map.spots).length === 0) return [];
+    const { spots: SPOTS, spare: SPARE_SPOTS } = spotsOf(map);
     let spare = 0;
     return cards
       .filter((c) => c.type !== "treat_trader" || c.status !== "idle")
@@ -100,7 +109,7 @@ export function TownWorld({
               : "away",
         };
       });
-  }, [cards]);
+  }, [cards, map]);
 
   const equippedKey = JSON.stringify(player.equipped ?? null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the look's content

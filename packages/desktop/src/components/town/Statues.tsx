@@ -7,7 +7,7 @@ import * as THREE from "three";
 import type { Look } from "../TownScene";
 import { ambient } from "./ambient";
 
-import { cellCenter, facingAt, MAP_SIZE, objectAt, type TownMap } from "./map";
+import { cellCenter, facingAt, objectAt, type TownMap } from "./map";
 
 /** Who a statue shows: whoever came out on top in the last boss fight. */
 export type Champion = { look: Look; name: string };
@@ -47,10 +47,10 @@ const capMaterial = new THREE.MeshLambertMaterial({
 
 export function statueSpots(map: TownMap): [number, number, number][] {
   const spots: [number, number, number][] = [];
-  for (let row = 0; row < MAP_SIZE; row++) {
-    for (let col = 0; col < MAP_SIZE; col++) {
+  for (let row = 0; row < map.size; row++) {
+    for (let col = 0; col < map.size; col++) {
       if (objectAt(map, col, row) !== "@") continue;
-      const [x, z] = cellCenter(col, row);
+      const [x, z] = cellCenter(map, col, row);
       // The way it was turned in the editor, else the middle of town.
       spots.push([x, z, facingAt(map, col, row) ?? Math.atan2(-x, -z)]);
     }

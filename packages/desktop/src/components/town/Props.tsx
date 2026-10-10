@@ -18,13 +18,7 @@ import {
   lanternGlassGeometry,
   NightLights,
 } from "./Lamps";
-import {
-  MAP_SIZE,
-  objectAt,
-  objectPlace,
-  type TownMap,
-  waterRuns,
-} from "./map";
+import { objectAt, objectPlace, type TownMap, waterRuns } from "./map";
 import { type Champion, StatueColliders, Statues } from "./Statues";
 import {
   SPECIES,
@@ -317,8 +311,8 @@ function placeAll(map: TownMap) {
     TREE_BUCKETS.map((b) => [b.key, []]),
   );
   const species: Record<Species, Placed[]> = { pine: [], oak: [] };
-  for (let row = 0; row < MAP_SIZE; row++) {
-    for (let col = 0; col < MAP_SIZE; col++) {
+  for (let row = 0; row < map.size; row++) {
+    for (let col = 0; col < map.size; col++) {
       const o = objectAt(map, col, row);
       if (o === "T") {
         const kind = treeSpecies(map, col, row);
@@ -414,10 +408,14 @@ function PartMesh({
 export function Props({
   map,
   champion,
+  backdrop = false,
 }: {
   map: TownMap;
   /** Who the statues show. */
   champion: Champion;
+  /** Another island, seen across the sky: no lamps lighting this one, and
+   * no statues (their plaques would float over it). */
+  backdrop?: boolean;
 }) {
   const { placed, trees } = useMemo(() => placeAll(map), [map]);
   return (
@@ -437,9 +435,9 @@ export function Props({
         )),
       )}
       <Buildings map={map} />
-      <NightLights map={map} />
+      {!backdrop && <NightLights map={map} />}
       <Benches map={map} />
-      <Statues map={map} champion={champion} />
+      {!backdrop && <Statues map={map} champion={champion} />}
     </>
   );
 }

@@ -1,14 +1,18 @@
-import { createContext, type RefObject, useContext } from "react";
+import {
+  createContext,
+  type RefObject,
+  useContext,
+  useSyncExternalStore,
+} from "react";
 import type * as THREE from "three";
 import type { Seat } from "./Benches";
 import type { TownInput } from "./input";
-import { parseMap, type TownMap } from "./map";
-import homeMap from "./maps/home.json";
+import type { MapId, TownMap } from "./map";
+import { HOME_MAP, mapById } from "./maps";
 
 export { ISLAND_RADIUS, WORLD_RADIUS } from "./map";
 
-/** The home island, as painted in the map editor (`pnpm map-editor`). */
-export const HOME_MAP: TownMap = parseMap(homeMap);
+export { HOME_MAP, mapById, TOWN_MAPS_LOCAL } from "./maps";
 
 /** Per-frame state the scene's parts share, outside React (they all read
  * and write it inside the frame loop, where re-rendering is no option). */
@@ -38,6 +42,8 @@ export function useTownRuntime(): TownRuntime {
  * visitor's screen (the world unmounts while one is open): coming back from
  * George's stall puts you back at his stall. */
 export const townSave = {
+  /** The island you're on. Home again each time the app starts. */
+  map: HOME_MAP.id as MapId,
   x: HOME_MAP.spawn.at[0],
   z: HOME_MAP.spawn.at[1],
   /** Forward is (sin, cos) on the ground. */
@@ -87,7 +93,6 @@ export function spotsOf(map: TownMap): {
     spare: map.spare.map(spot),
   };
 }
-export const { spots: SPOTS, spare: SPARE_SPOTS } = spotsOf(HOME_MAP);
 
 /** How close you have to be to talk to someone… */
 export const TALK_RANGE = 5;
@@ -104,3 +109,42 @@ export type TownSpot = {
   /** "2d left", "in 4h", "HP 812 / 1000"… */
   status: string;
 };
+
+const mapListeners = new Set<() => void>();
+
+/** Go to another island: you arrive at `at` (the map's spawn if not
+ * given), facing `heading`. The world swaps its island under you. */
+export function goToMap(
+  id: MapId,
+  at?: { x: number; z: number; heading: number },
+): void {
+  const map = mapById(id);
+  const to = at ?? {
+    x: map.spawn.at[0],
+    z: map.spawn.at[1],
+    heading: map.spawn.heading,
+  };
+  Object.assign(townSave, {
+    map: map.id,
+    x: to.x,
+    z: to.z,
+    heading: to.heading,
+    // Behind the herzie, looking the way it faces.
+    azimuth: to.heading - Math.PI,
+  });
+  townLive.seat = null;
+  townLive.teleport = null;
+  for (const l of mapListeners) l();
+}
+
+/** The island you're on, re-rendering when you go to another. */
+export function useTownMap(): TownMap {
+  const id = useSyncExternalStore(
+    (l) => {
+      mapListeners.add(l);
+      return () => mapListeners.delete(l);
+    },
+    () => townSave.map,
+  );
+  return mapById(id);
+}

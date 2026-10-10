@@ -17,7 +17,7 @@ import type { ChatBubble } from "./chatBubbles";
 import { HeadBubble } from "./HeadBubble";
 import type { TownMap } from "./map";
 import { type Mover, stepMover, walkAzimuth } from "./movement";
-import { townLive, townSave, useTownRuntime, WORLD_RADIUS } from "./runtime";
+import { townLive, townSave, useTownRuntime } from "./runtime";
 
 /** The capsule the controller pushes around: radius and half-height of its
  * straight part, standing on the ground. */
@@ -44,8 +44,11 @@ export function Player({
   look,
   spawn,
   respawn = 0,
+  reach,
   bubble,
 }: {
+  /** How far from the island's middle it can walk. */
+  reach: number;
   /** What the player just said in chat, over their head. */
   bubble?: ChatBubble;
   look: Look;
@@ -173,9 +176,9 @@ export function Player({
     let x = p.x + move.x;
     let z = p.z + move.z;
     const r = Math.hypot(x, z);
-    if (r > WORLD_RADIUS) {
-      x = (x / r) * WORLD_RADIUS;
-      z = (z / r) * WORLD_RADIUS;
+    if (r > reach) {
+      x = (x / r) * reach;
+      z = (z / r) * reach;
     }
     // The walk cycle follows the distance actually covered: pushing into a
     // tree stops the feet too.

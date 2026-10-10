@@ -21,8 +21,9 @@ import {
 } from "./components/town/chatBubbles";
 import { setTownTicketSource, townNet } from "./components/town/net/townNet";
 import {
-  SPARE_SPOTS,
-  SPOTS,
+  goToMap,
+  HOME_MAP,
+  spotsOf,
   type TownSpot,
   townLive,
   townSave,
@@ -30,6 +31,9 @@ import {
 import TownCanvas from "./components/town/TownCanvas";
 
 const params = new URLSearchParams(location.search);
+const { spots: SPOTS, spare: SPARE_SPOTS } = spotsOf(HOME_MAP);
+// Start on another island: ?map=arena .
+if (params.has("map")) goToMap(params.get("map") as string);
 
 const startHour = params.has("time") ? Number(params.get("time")) : null;
 const speed = Number(params.get("speed") ?? 0);

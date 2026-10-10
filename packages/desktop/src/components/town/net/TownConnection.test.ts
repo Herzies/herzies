@@ -9,7 +9,8 @@ import {
 } from "@herzies/shared";
 import { WALK_SPEED } from "@herzies/shared/gl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { HOME_MAP, WORLD_RADIUS } from "../runtime";
+import { worldRadius } from "../map";
+import { HOME_MAP, TOWN_MAPS_LOCAL, WORLD_RADIUS } from "../runtime";
 import { socketBase, TownConnection } from "./TownConnection";
 
 /** Just enough of a browser WebSocket to drive the connection. */
@@ -231,6 +232,16 @@ describe("the server's idea of the Town matches the app's", () => {
       HOME_MAP.spawn.at,
     );
     expect(TOWN_WALK_SPEED).toBe(WALK_SPEED);
+  });
+
+  it("knows every island there is, and each one's size and spawn", () => {
+    const ids = [...TOWN_MAPS_LOCAL.keys()].sort();
+    expect(Object.keys(TOWN_MAPS).sort()).toEqual(ids);
+    for (const map of TOWN_MAPS_LOCAL.values()) {
+      const server = TOWN_MAPS[map.id as keyof typeof TOWN_MAPS];
+      expect(server.radius).toBe(worldRadius(map));
+      expect([server.spawn.x, server.spawn.z]).toEqual(map.spawn.at);
+    }
   });
 });
 

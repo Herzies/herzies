@@ -5,7 +5,7 @@ import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { ambient } from "./ambient";
 import { windowLightsOf } from "./Buildings";
-import { MAP_SIZE, objectAt, objectJitter, type TownMap } from "./map";
+import { objectAt, objectJitter, type TownMap } from "./map";
 
 // Old-school lamp posts — an iron pole, a lantern on top — and the light
 // the town gives off at night: from the lamps, and from lit windows.
@@ -119,10 +119,10 @@ export function casterFades(
  * nearest the middle of town, up to MAX_LAMPS. */
 export function glowsOf(map: TownMap): Glow[] {
   const lamps: Glow[] = [];
-  for (let row = 0; row < MAP_SIZE; row++) {
-    for (let col = 0; col < MAP_SIZE; col++) {
+  for (let row = 0; row < map.size; row++) {
+    for (let col = 0; col < map.size; col++) {
       if (objectAt(map, col, row) !== "L") continue;
-      const { x, z, scale } = objectJitter(col, row);
+      const { x, z, scale } = objectJitter(map, col, row);
       lamps.push({
         at: [x, LANTERN_Y * scale, z],
         intensity: LAMP_INTENSITY,

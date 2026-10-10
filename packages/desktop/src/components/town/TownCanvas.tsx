@@ -10,20 +10,20 @@ import type { ChatBubbles } from "./chatBubbles";
 import type { Hour } from "./DayCycle";
 import { driftClouds } from "./depth";
 import { type TownInput, useTownInput } from "./input";
-import type { TownMap } from "./map";
+import { type TownMap, worldRadius } from "./map";
 import type { TownConnection } from "./net/TownConnection";
 import { Occlusion } from "./Occlusion";
 import { Player } from "./Player";
 import { RemotePlayers } from "./RemotePlayers";
 import "./shadows";
 import {
-  HOME_MAP,
   TALK_RANGE,
   type TownRuntime,
   TownRuntimeContext,
   type TownSpot,
   townLive,
   townSave,
+  useTownMap,
 } from "./runtime";
 import type { Champion } from "./Statues";
 import { Visitor } from "./Visitor";
@@ -46,6 +46,8 @@ export type TownCanvasProps = {
   onBenchChange?: (prompt: "sit" | "stand" | null) => void;
   /** The island to draw (the map editor's preview passes its own). */
   map?: TownMap;
+  /** The other islands in the sky (default: every map there is). */
+  others?: TownMap[];
   /** Bump to put the player back at the map's spawn. */
   respawn?: number;
   /** Who the statues show: the last boss fight's champion (a stand-in
@@ -88,7 +90,10 @@ export default function TownCanvas(props: TownCanvasProps) {
     }),
     [],
   );
-  const map = props.map ?? HOME_MAP;
+  const current = useTownMap();
+  const map = props.map ?? current;
+  // Visitors stand on islands with spots for them.
+  const spots = Object.keys(map.spots).length > 0 ? props.spots : [];
 
   return (
     <Canvas
@@ -104,11 +109,13 @@ export default function TownCanvas(props: TownCanvasProps) {
       onCreated={props.onCreated}
     >
       <TownRuntimeContext.Provider value={runtime}>
-        <Systems {...props} input={input} />
+        <Systems {...props} map={map} spots={spots} input={input} />
         {/* Rapier's WASM loads here: wait inside the canvas instead of
             suspending the whole Town again (the splash would blink). */}
         <Suspense fallback={null}>
           <Physics
+            // A new island: a new physics world, with only its colliders.
+            key={map.id}
             timeStep={1 / 60}
             interpolate
             gravity={[0, 0, 0]}
@@ -116,14 +123,20 @@ export default function TownCanvas(props: TownCanvasProps) {
             updatePriority={-3}
           >
             {props.onReady && <FirstFrame onReady={props.onReady} />}
-            <World map={map} champion={props.champion} hour={props.hour} />
+            <World
+              map={map}
+              others={props.others}
+              champion={props.champion}
+              hour={props.hour}
+            />
             <Player
               look={props.player}
               spawn={map.spawn}
+              reach={worldRadius(map)}
               respawn={props.respawn}
               bubble={props.bubbles?.get(props.player.seed)}
             />
-            {props.spots.map((s) => (
+            {spots.map((s) => (
               <Visitor key={s.key} spot={s} onOpen={props.onOpen} />
             ))}
           </Physics>
@@ -144,7 +157,7 @@ function Systems({
   onOpen,
   onNearChange,
   onBenchChange,
-  map = HOME_MAP,
+  map,
   net,
   input,
 }: TownCanvasProps & { input: React.RefObject<TownInput> }) {
@@ -152,7 +165,7 @@ function Systems({
   const near = useRef<TownSpot | null>(null);
   const spotsRef = useRef(spots);
   spotsRef.current = spots;
-  const benches = useMemo(() => benchesOf(map), [map]);
+  const benches = useMemo(() => (map ? benchesOf(map) : []), [map]);
   /** The seat E would sit on, if any. */
   const seat = useRef<Seat | null>(null);
   const prompt = useRef<"sit" | "stand" | null>(null);

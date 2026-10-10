@@ -1,8 +1,8 @@
-// Dev only (not in the build's inputs): paint the Town's home island.
+// Dev only (not in the build's inputs): paint the Town's islands.
 // `pnpm map-editor`. The left is the map, cell by cell; the right is the
 // real 3D Town drawn from it, live, to walk around in. Saving writes
-// src/components/town/maps/home.json (via the dev server — see
-// vite.config.ts), which is what the app builds the island from.
+// src/components/town/maps/<id>.json (via the dev server — see
+// vite.config.ts), which is what the app builds each island from.
 import "./globals.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -12,11 +12,14 @@ import { localHours } from "./components/town/DayCycle";
 import {
   cellCenter,
   EIGHTH,
+  emptyMap,
   facingAt,
-  ISLAND_RADIUS,
   inland,
+  islandRadius,
   isSunk,
-  MAP_SIZE,
+  MAP_ID,
+  MAX_MAP_SIZE,
+  MIN_MAP_SIZE,
   OBJECTS,
   OFF,
   objectAt,
@@ -24,17 +27,22 @@ import {
   onIsland,
   type Point,
   parseMap,
+  portalCells,
   pruneFacing,
   SPOT_NAMES,
   TERRAIN,
   type TownMap,
-  WORLD_RADIUS,
   withFacing,
+  worldRadius,
 } from "./components/town/map";
-import { HOME_MAP, spotsOf, type TownSpot } from "./components/town/runtime";
+import { checkLinks } from "./components/town/maps";
+import {
+  HOME_MAP,
+  spotsOf,
+  TOWN_MAPS_LOCAL,
+  type TownSpot,
+} from "./components/town/runtime";
 import TownCanvas, { PIXEL_SCALE } from "./components/town/TownCanvas";
-
-const HALF = MAP_SIZE / 2;
 
 type Layer = "terrain" | "objects";
 type Paint = { layer: Layer; ch: string; name: string; color: string };
@@ -45,7 +53,23 @@ const PALETTE: Paint[] = [
     ...TERRAIN[ch],
   })),
   ...(
-    ["T", "R", "S", "v", "*", "m", "H", "$", "C", "@", "B", "L", "_"] as const
+    [
+      "T",
+      "R",
+      "S",
+      "v",
+      "*",
+      "m",
+      "H",
+      "$",
+      "C",
+      "@",
+      "B",
+      "L",
+      "_",
+      "D",
+      "O",
+    ] as const
   ).map((ch) => ({
     layer: "objects" as const,
     ch,
@@ -54,10 +78,10 @@ const PALETTE: Paint[] = [
   { layer: "objects", ch: ".", name: "Clear", color: "#000000" },
 ];
 /** Each palette entry's key, in order (clear last): the number row, then
- * K (shop, "kiosk"), C (cave), U (bush), L (lamp post) and N (bench).
- * Clear of the 3D preview's keys (WASD, arrows, E) and the tools' (B, R,
- * F, P). */
-const KEYS = [..."1234567890-", "k", "c", "=", "u", "l", "n", "x"];
+ * K (shop, "kiosk"), C (cave), U (bush), L (lamp post), N (bench), Y
+ * (training dummy) and O (portal). Clear of the 3D preview's keys (WASD,
+ * arrows, E) and the tools' (B, R, F, P). */
+const KEYS = [..."1234567890-", "k", "c", "=", "u", "l", "n", "y", "o", "x"];
 type Tool = "brush" | "rect" | "fill";
 const TOOLS: { tool: Tool; key: string; name: string }[] = [
   { tool: "brush", key: "b", name: "Brush" },
@@ -73,40 +97,63 @@ type MarkerId =
   | { kind: "spawn" };
 
 /** The grids as rows of chars, to paint into. */
-type Draft = { terrain: string[][]; objects: string[][] };
+type Draft = { size: number; terrain: string[][]; objects: string[][] };
 const toDraft = (m: TownMap): Draft => ({
+  size: m.size,
   terrain: m.terrain.map((r) => [...r]),
   objects: m.objects.map((r) => [...r]),
 });
 const fromDraft = (m: TownMap, d: Draft): TownMap =>
-  pruneFacing({
+  syncPortals(
+    pruneFacing({
+      ...m,
+      terrain: d.terrain.map((r) => r.join("")),
+      objects: d.objects.map((r) => r.join("")),
+    }),
+  );
+
+/** Links for just the portals there are: a new one leads home (or, from
+ * home, to the first other island), a painted-over one is forgotten. */
+function syncPortals(m: TownMap): TownMap {
+  const cells = portalCells(m);
+  const old = m.portals ?? {};
+  if (cells.length === Object.keys(old).length && cells.every((k) => old[k])) {
+    return m;
+  }
+  const fallback =
+    m.id === "home"
+      ? ([...TOWN_MAPS_LOCAL.keys()].find((id) => id !== "home") ?? "home")
+      : "home";
+  return {
     ...m,
-    terrain: d.terrain.map((r) => r.join("")),
-    objects: d.objects.map((r) => r.join("")),
-  });
+    portals: Object.fromEntries(
+      cells.map((k) => [k, old[k] ?? { to: fallback }]),
+    ),
+  };
+}
 
 /** Which way an object faces now, in eighths of a turn: as turned, else
  * its own way (a bench toward the path, a statue toward town, anything
  * else as it fell), to the nearest eighth. */
 function eighthsAt(map: TownMap, col: number, row: number): number {
   const o = objectAt(map, col, row);
-  const [x, z] = cellCenter(col, row);
+  const [x, z] = cellCenter(map, col, row);
   const yaw =
     facingAt(map, col, row) ??
     (o === "_"
       ? benchFacing(map, col, row)
       : o === "@"
         ? Math.atan2(-x, -z)
-        : objectJitter(col, row).yaw);
+        : objectJitter(map, col, row).yaw);
   return Math.round(yaw / EIGHTH);
 }
 
 /** Paint one cell, keeping the map valid: water only inland, nothing
  * standing in water. */
 function paintCell(d: Draft, col: number, row: number, p: Paint): void {
-  if (!onIsland(col, row)) return;
+  if (!onIsland(d, col, row)) return;
   if (p.layer === "terrain") {
-    if (isSunk(p.ch) && !inland(col, row)) return;
+    if (isSunk(p.ch) && !inland(d, col, row)) return;
     d.terrain[row][col] = p.ch;
     if (isSunk(p.ch)) d.objects[row][col] = ".";
   } else {
@@ -131,7 +178,7 @@ function fill(d: Draft, col: number, row: number, p: Paint): void {
   const seen = new Set<number>();
   while (stack.length > 0) {
     const [c, r] = stack.pop() as [number, number];
-    const k = r * MAP_SIZE + c;
+    const k = r * d.size + c;
     if (seen.has(k) || grid[r]?.[c] !== from) continue;
     seen.add(k);
     paintCell(d, c, r, p);
@@ -140,10 +187,11 @@ function fill(d: Draft, col: number, row: number, p: Paint): void {
 }
 
 const snap = (v: number) => Math.round(v * 2) / 2;
-function clampToWorld([x, z]: Point): Point {
+function clampToWorld(m: TownMap, [x, z]: Point): Point {
   const r = Math.hypot(x, z);
-  if (r <= WORLD_RADIUS) return [snap(x), snap(z)];
-  const s = (WORLD_RADIUS - 0.5) / r;
+  const reach = worldRadius(m);
+  if (r <= reach) return [snap(x), snap(z)];
+  const s = (reach - 0.5) / r;
   return [snap(x * s), snap(z * s)];
 }
 
@@ -170,8 +218,10 @@ function markers(m: TownMap): { id: MarkerId; label: string; at: Point }[] {
   ];
 }
 
-/** The map, every visitor kind given a spot (new ones start mid-plaza). */
+/** The map, every visitor kind given a spot (new ones start mid-plaza) —
+ * on islands visitors stand on at all (home, not the testing ground). */
 function withAllSpots(m: TownMap): TownMap {
+  if (Object.keys(m.spots).length === 0) return m;
   const spots = { ...m.spots };
   for (const key of Object.keys(SPOT_NAMES)) spots[key] ??= [0, 0];
   return { ...m, spots };
@@ -186,12 +236,13 @@ function drawMap(
   brush: number,
   tool: Tool,
 ) {
-  const size = MAP_SIZE * zoom;
+  const HALF = map.size / 2;
+  const size = map.size * zoom;
   ctx.clearRect(0, 0, size, size);
   ctx.fillStyle = "#0b0f1c";
   ctx.fillRect(0, 0, size, size);
-  for (let r = 0; r < MAP_SIZE; r++) {
-    for (let c = 0; c < MAP_SIZE; c++) {
+  for (let r = 0; r < map.size; r++) {
+    for (let c = 0; c < map.size; c++) {
       const t = map.terrain[r][c];
       if (t === OFF) continue;
       ctx.fillStyle = TERRAIN[t as keyof typeof TERRAIN]?.color ?? "#f0f";
@@ -262,6 +313,18 @@ function drawMap(
           ctx.beginPath();
           ctx.fillStyle = "#5b5850";
           ctx.arc(cx, cy, zoom * 0.22, 0, Math.PI * 2);
+        } else if (o === "D") {
+          // A post with a round head: a dummy.
+          ctx.rect(cx - zoom * 0.08, cy - zoom * 0.1, zoom * 0.16, zoom * 0.5);
+          ctx.moveTo(cx + zoom * 0.28, cy - zoom * 0.18);
+          ctx.arc(cx, cy - zoom * 0.18, zoom * 0.28, 0, Math.PI * 2);
+        } else if (o === "O") {
+          // A ring.
+          ctx.arc(cx, cy, zoom * 0.45, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.beginPath();
+          ctx.fillStyle = "#1a0f33";
+          ctx.arc(cx, cy, zoom * 0.25, 0, Math.PI * 2);
         } else ctx.arc(cx, cy, zoom * 0.26, 0, Math.PI * 2);
         ctx.fill();
         if (o === "H" || o === "$" || o === "C") {
@@ -285,7 +348,7 @@ function drawMap(
     ctx.strokeStyle = "#ffffff12";
     ctx.lineWidth = 1;
     ctx.beginPath();
-    for (let i = 0; i <= MAP_SIZE; i++) {
+    for (let i = 0; i <= map.size; i++) {
       ctx.moveTo(i * zoom + 0.5, 0);
       ctx.lineTo(i * zoom + 0.5, size);
       ctx.moveTo(0, i * zoom + 0.5);
@@ -297,12 +360,12 @@ function drawMap(
   const mid = HALF * zoom;
   ctx.strokeStyle = "#ffffff50";
   ctx.beginPath();
-  ctx.arc(mid, mid, ISLAND_RADIUS * zoom, 0, Math.PI * 2);
+  ctx.arc(mid, mid, islandRadius(map) * zoom, 0, Math.PI * 2);
   ctx.stroke();
   ctx.setLineDash([4, 4]);
   ctx.strokeStyle = "#ffffff30";
   ctx.beginPath();
-  ctx.arc(mid, mid, WORLD_RADIUS * zoom, 0, Math.PI * 2);
+  ctx.arc(mid, mid, worldRadius(map) * zoom, 0, Math.PI * 2);
   ctx.stroke();
   ctx.setLineDash([]);
 
@@ -383,6 +446,18 @@ function drawMap(
     ctx.fillStyle = "#fff";
     ctx.fillText(m.label, x, y - zoom * 1.2);
   }
+  // Where each portal leads.
+  for (const [k, link] of Object.entries(map.portals ?? {})) {
+    const [c, r] = k.split(",").map(Number);
+    const label = `→ ${link.to}`;
+    const x = (c + 0.5) * zoom;
+    const y = r * zoom - zoom * 0.4;
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "#000";
+    ctx.strokeText(label, x, y);
+    ctx.fillStyle = "#d6b8ff";
+    ctx.fillText(label, x, y);
+  }
   ctx.lineWidth = 1;
 }
 
@@ -416,8 +491,17 @@ const TIME_MODES: { mode: TimeMode; label: string; title: string }[] = [
 const clockText = (h: number) =>
   `${Math.floor(h)}:${String(Math.floor((h % 1) * 60)).padStart(2, "0")}`;
 
+/** Every island as last saved (or made, this session), by id. */
+type Islands = Record<string, TownMap>;
+
 function MapEditor() {
-  const [map, setMap] = useState<TownMap>(() => withAllSpots(HOME_MAP));
+  const [islands, setIslands] = useState<Islands>(() =>
+    Object.fromEntries(TOWN_MAPS_LOCAL),
+  );
+  const [map, setMap] = useState<TownMap>(() => {
+    const id = new URLSearchParams(location.search).get("map");
+    return withAllSpots(TOWN_MAPS_LOCAL.get(id ?? "") ?? HOME_MAP);
+  });
   const [undo, setUndo] = useState<TownMap[]>([]);
   const [redo, setRedo] = useState<TownMap[]>([]);
   const [saved, setSaved] = useState<TownMap>(map);
@@ -525,8 +609,8 @@ function MapEditor() {
   const worldOf = (e: React.PointerEvent): Point => {
     const box = (e.target as HTMLCanvasElement).getBoundingClientRect();
     return [
-      (e.clientX - box.left) / zoom - HALF,
-      (e.clientY - box.top) / zoom - HALF,
+      (e.clientX - box.left) / zoom - map.size / 2,
+      (e.clientY - box.top) / zoom - map.size / 2,
     ];
   };
 
@@ -575,7 +659,7 @@ function MapEditor() {
     if (rect) {
       setRect({ ...rect, b: cell });
     } else if (s && "marker" in s) {
-      setMap((m) => withMarker(m, s.marker, clampToWorld(worldOf(e))));
+      setMap((m) => withMarker(m, s.marker, clampToWorld(m, worldOf(e))));
     } else if (s) {
       brushAt(s.draft, cell, s.p);
       setMap((m) => fromDraft(m, s.draft));
@@ -616,21 +700,76 @@ function MapEditor() {
     }));
   };
 
+  const islandsRef = useRef(islands);
+  islandsRef.current = islands;
   const save = useCallback(async () => {
     const m = mapRef.current;
     try {
       parseMap(m);
-      const res = await fetch("/__town-map", {
+      checkLinks(Object.values({ ...islandsRef.current, [m.id]: m }));
+      const res = await fetch(`/__town-map/${m.id}`, {
         method: "PUT",
         body: JSON.stringify(m),
       });
       if (!res.ok) throw new Error(await res.text());
       setSaved(m);
-      setStatus(`Saved ${new Date().toLocaleTimeString()}`);
+      setIslands((all) => ({ ...all, [m.id]: m }));
+      setStatus(`Saved ${m.id} ${new Date().toLocaleTimeString()}`);
     } catch (e) {
       setStatus(`Not saved: ${e instanceof Error ? e.message : e}`);
     }
   }, []);
+
+  /** Open another island (asking first if this one has unsaved work). */
+  const open = (m: TownMap) => {
+    if (dirty && !window.confirm(`Drop unsaved changes to ${map.id}?`)) {
+      return;
+    }
+    const next = withAllSpots(m);
+    setMap(next);
+    setSaved(next);
+    setPreview(next);
+    setUndo([]);
+    setRedo([]);
+    setRespawn((n) => n + 1);
+    history.replaceState(null, "", `?map=${m.id}`);
+  };
+  /** A blank island, floating off to the side of the others. */
+  const create = () => {
+    const id = window.prompt("New island's id (a-z, 0-9, -):")?.trim();
+    if (!id) return;
+    if (!MAP_ID.test(id) || islands[id]) {
+      setStatus(`Can't make "${id}": taken, or not a-z, 0-9 and -`);
+      return;
+    }
+    const size = Number(
+      window.prompt(
+        `Size, ${MIN_MAP_SIZE}–${MAX_MAP_SIZE} cells across:`,
+        "40",
+      ),
+    );
+    if (
+      !Number.isInteger(size) ||
+      size % 2 !== 0 ||
+      size < MIN_MAP_SIZE ||
+      size > MAX_MAP_SIZE
+    ) {
+      setStatus(`Size must be even, ${MIN_MAP_SIZE}–${MAX_MAP_SIZE}`);
+      return;
+    }
+    const m: TownMap = {
+      ...emptyMap(size, id, id[0].toUpperCase() + id.slice(1)),
+      origin: [120, 10, 0],
+    };
+    setIslands((all) => ({ ...all, [id]: m }));
+    open(m);
+    // Unsaved until saved.
+    setSaved(HOME_MAP);
+  };
+  const edit = (change: Partial<TownMap>) => {
+    checkpoint();
+    setMap((m) => ({ ...m, ...change }));
+  };
 
   const doUndo = useCallback(() => {
     setUndo((u) => {
@@ -735,6 +874,14 @@ function MapEditor() {
           width: "min(720px, 55vw)",
         }}
       >
+        <IslandBar
+          map={map}
+          islands={islands}
+          btn={btn}
+          onOpen={open}
+          onCreate={create}
+          onEdit={edit}
+        />
         <div
           style={{
             display: "flex",
@@ -882,8 +1029,8 @@ function MapEditor() {
         <div style={{ overflow: "auto", flex: 1, padding: 8 }}>
           <canvas
             ref={canvas}
-            width={MAP_SIZE * zoom}
-            height={MAP_SIZE * zoom}
+            width={map.size * zoom}
+            height={map.size * zoom}
             style={{
               display: "block",
               cursor: "crosshair",
@@ -920,6 +1067,7 @@ function MapEditor() {
       >
         <TownCanvas
           map={preview}
+          others={Object.values({ ...islands, [preview.id]: preview })}
           spots={spots}
           player={PLAYER}
           paused={false}
@@ -1014,6 +1162,118 @@ function MapEditor() {
           </span>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Which island is open, and what's special about it: its name, where it
+ * floats, whether you can fight there, and where its portals lead. */
+function IslandBar({
+  map,
+  islands,
+  btn,
+  onOpen,
+  onCreate,
+  onEdit,
+}: {
+  map: TownMap;
+  islands: Islands;
+  btn: (on: boolean) => React.CSSProperties;
+  onOpen: (m: TownMap) => void;
+  onCreate: () => void;
+  onEdit: (change: Partial<TownMap>) => void;
+}) {
+  const field: React.CSSProperties = {
+    ...btn(false),
+    width: 56,
+    padding: "3px 4px",
+    cursor: "text",
+  };
+  const links = Object.entries(map.portals ?? {});
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexWrap: "wrap",
+        gap: 6,
+        padding: 8,
+        borderBottom: "1px solid #2a2d3a",
+        alignItems: "center",
+      }}
+    >
+      <span style={{ color: "#8b8fa3" }}>island</span>
+      <select
+        style={btn(false)}
+        value={map.id}
+        onChange={(e) => onOpen(islands[e.target.value])}
+      >
+        {Object.keys({ ...islands, [map.id]: map }).map((id) => (
+          <option key={id} value={id}>
+            {id}
+          </option>
+        ))}
+      </select>
+      <button type="button" style={btn(false)} onClick={onCreate}>
+        New island
+      </button>
+      <input
+        style={{ ...field, width: 130 }}
+        value={map.name}
+        title="What the game calls it"
+        onChange={(e) => onEdit({ name: e.target.value })}
+      />
+      <span
+        style={{ color: "#8b8fa3" }}
+        title="Where it floats in the sky: home is at 0, 0, 0"
+      >
+        at
+      </span>
+      {(["x", "y", "z"] as const).map((axis, i) => (
+        <input
+          key={axis}
+          type="number"
+          step={5}
+          style={field}
+          title={axis}
+          value={map.origin[i]}
+          disabled={map.id === "home"}
+          onChange={(e) => {
+            const origin = [...map.origin] as TownMap["origin"];
+            origin[i] = Number(e.target.value) || 0;
+            onEdit({ origin });
+          }}
+        />
+      ))}
+      <label style={{ color: "#8b8fa3" }}>
+        <input
+          type="checkbox"
+          checked={!!map.combat}
+          onChange={(e) => onEdit({ combat: e.target.checked || undefined })}
+        />{" "}
+        combat
+      </label>
+      {links.map(([k, link]) => (
+        <span key={k} style={{ color: "#d6b8ff" }}>
+          portal {k} →{" "}
+          <select
+            style={btn(false)}
+            value={link.to}
+            onChange={(e) =>
+              onEdit({
+                portals: { ...map.portals, [k]: { to: e.target.value } },
+              })
+            }
+          >
+            {Object.keys(islands)
+              .filter((id) => id !== map.id)
+              .map((id) => (
+                <option key={id} value={id}>
+                  {id}
+                </option>
+              ))}
+          </select>
+        </span>
+      ))}
     </div>
   );
 }

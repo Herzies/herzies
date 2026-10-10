@@ -1,4 +1,8 @@
-import { TOWN_FLAG_DANCING, TOWN_FLAG_SITTING } from "@herzies/shared";
+import {
+  isTownMapId,
+  TOWN_FLAG_DANCING,
+  TOWN_FLAG_SITTING,
+} from "@herzies/shared";
 import { useEffect, useSyncExternalStore } from "react";
 import { herzies } from "../../../tauri-bridge";
 import { townLive, townSave } from "../runtime";
@@ -23,7 +27,7 @@ let net: TownConnection | null = null;
 /** The app's one connection to the multiplayer Town. */
 export function townNet(): TownConnection {
   net ??= new TownConnection({
-    map: "home",
+    map: isTownMapId(townSave.map) ? townSave.map : "home",
     getTicket: () => ticketSource(),
     readState: () => ({
       x: townSave.x,
