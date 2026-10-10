@@ -90,6 +90,30 @@ describe("HerzieModel", () => {
     }
   });
 
+  it("keeps a ground prop in the same spot on either side, mirrored", () => {
+    // As HerzieView builds it: props placed in the window's grid, held
+    // still while the herzie turns.
+    const options = { layoutCols: 105, layoutRows: 40, anchorScenery: 0 };
+    const prop = (side: "ground_left" | "ground_right") => {
+      const h = new HerzieModel(
+        { ...LOOK, equipped: { [side]: "boombox" } },
+        options,
+      );
+      h.root.updateMatrixWorld(true);
+      // The anchored parts are the root's second group (the first turns).
+      const groups = h.root.children.filter((c) => c instanceof THREE.Group);
+      return new THREE.Box3()
+        .setFromObject(groups[1])
+        .getCenter(new THREE.Vector3());
+    };
+    const left = prop("ground_left");
+    const right = prop("ground_right");
+    expect(left.x).toBeLessThan(0);
+    expect(right.x).toBeCloseTo(-left.x, 6);
+    expect(right.y).toBeCloseTo(left.y, 6);
+    expect(right.z).toBeCloseTo(left.z, 6);
+  });
+
   describe("what dangles", () => {
     const CHAIN = {
       seed: "model-test",

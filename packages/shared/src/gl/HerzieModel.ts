@@ -58,9 +58,11 @@ export type HerzieModelOptions = {
   layoutCols?: number;
   layoutRows?: number;
   /** Keep ground props (the boombox) and floating companions (a spirit, a
-   * pet) where the old renderer put them, facing this way, instead of
-   * turning with the herzie: a herzie spun on its own stage, not one
-   * walking about. Default: they go with it (the Town). */
+   * pet) where the old renderer put them, turned this far (0: as it drew
+   * them, unturned — any other turn swings the corner props toward or away
+   * from the camera, one side nearer than the other), instead of turning
+   * with the herzie: a herzie spun on its own stage, not one walking about.
+   * Default: they go with it (the Town). */
   anchorScenery?: number;
 };
 

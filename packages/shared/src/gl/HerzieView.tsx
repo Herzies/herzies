@@ -120,7 +120,7 @@ export function HerzieView({
         {
           layoutCols: cols,
           layoutRows: SH,
-          anchorScenery: -DEFAULT_Y_ANGLE,
+          anchorScenery: 0,
         },
       ),
     [userId, stage, equippedKey, paramsKey, cols],
