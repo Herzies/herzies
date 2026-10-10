@@ -262,15 +262,16 @@ const DUST = 24;
 const DUST_LIFE = 0.45;
 /** Ground covered between puffs, in world units. */
 const DUST_EVERY = 0.4;
-/** How far either side of its path a foot comes down. */
+/** How far either side of its path a foot comes down (two-legged). */
 const DUST_FOOT = 0.22;
 
 /** Small, faint puffs at the player's feet while they run, the colour of
  * what they're running on — none on bridges or in water. Dropped where the
  * herzie is drawn (its interpolated body, not the physics step ahead of
  * it), every so far walked rather than every so often, so they stay
- * evenly spaced at its feet through a slow frame. Left foot, right foot:
- * one puff dead centre behind it read as something else entirely. */
+ * evenly spaced at its feet through a slow frame. A hopping herzie leaves
+ * one line; one on legs leaves two, left foot, right foot (one line dead
+ * centre behind it read as something else entirely). */
 function Dust({ map }: { map: TownMap }) {
   const rt = useTownRuntime();
   const pts = usePoints(DUST, THREE.NormalBlending);
@@ -304,7 +305,7 @@ function Dust({ map }: { map: TownMap }) {
         // Off to the side of the way it's going, a foot at a time.
         const moved = Math.hypot(feet.x - last.x, feet.z - last.z);
         foot.current = -foot.current;
-        const side = foot.current * DUST_FOOT;
+        const side = rt.playerLegs ? foot.current * DUST_FOOT : 0;
         const fx = feet.x + (-(feet.z - last.z) / moved) * side;
         const fz = feet.z + ((feet.x - last.x) / moved) * side;
         lastPuff.current = { x: feet.x, z: feet.z };

@@ -19,6 +19,8 @@ export type TownRuntime = {
   /** Ground speed the player actually moved at last step (after
    * collisions), for its walk cycle. */
   playerSpeed: number;
+  /** The player's herzie walks on two feet (stage 3) rather than hopping. */
+  playerLegs: boolean;
   /** The camera's azimuth (camera-controls' convention: 0 puts the camera
    * on the target's +z side). Movement is relative to it. */
   cameraAzimuth: number;

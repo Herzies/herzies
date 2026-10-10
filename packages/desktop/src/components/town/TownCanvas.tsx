@@ -83,6 +83,7 @@ export default function TownCanvas(props: TownCanvasProps) {
       input,
       playerBody: null,
       playerSpeed: 0,
+      playerLegs: false,
       cameraAzimuth: 0,
     }),
     [],

@@ -188,6 +188,8 @@ export function Player({
   });
 
   const stillFor = useRef(0);
+  // Herzies grow legs at stage 3 (see HerzieModel).
+  rt.playerLegs = look.stage >= 3;
   useFrame((_, dt) => {
     // Sitting: on the seat, not the ground.
     herzie.root.position.y = townLive.seat ? SEAT_Y : 0;
