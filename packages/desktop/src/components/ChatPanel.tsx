@@ -262,6 +262,8 @@ export function ChatPanel({
   const [expanded, setExpanded] = useState(false);
   /** In-flow height of the dock when collapsed; keeps flex layout stable while expanded (fixed) panel is out of flow. */
   const [dockHeight, setDockHeight] = useState(88);
+  /** Gap between the collapsed dock and the window's bottom; the expanded panel is pinned there, so the input doesn't move as it opens. */
+  const [dockBottom, setDockBottom] = useState(40);
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomAnchorRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
@@ -500,12 +502,19 @@ export function ChatPanel({
     if (expanded) return;
     const panel = panelRef.current;
     if (!panel) return;
-    const ro = new ResizeObserver(() => {
-      setDockHeight(panel.getBoundingClientRect().height);
-    });
+    const measure = () => {
+      const rect = panel.getBoundingClientRect();
+      setDockHeight(rect.height);
+      setDockBottom(window.innerHeight - rect.bottom);
+    };
+    const ro = new ResizeObserver(measure);
     ro.observe(panel);
-    setDockHeight(panel.getBoundingClientRect().height);
-    return () => ro.disconnect();
+    window.addEventListener("resize", measure);
+    measure();
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", measure);
+    };
   }, [expanded]);
 
   useLayoutEffect(() => {
@@ -1172,10 +1181,14 @@ export function ChatPanel({
       >
         <div
           ref={panelRef}
+          style={expanded ? { bottom: dockBottom } : undefined}
           className={cn(
-            "flex flex-col border-t border-border",
+            // Collapsed, the same bottom padding and border as expanded, so
+            // the input keeps its gap above the tabs either way.
+            "flex flex-col border-t border-b border-border pb-1",
+            !expanded && "border-b-transparent pt-px",
             expanded &&
-              "fixed inset-x-0 bottom-10 z-[201] h-[50vh] max-h-[50vh] border-b border-border px-3 py-1 shadow-[0_-8px_32px_rgba(0,0,0,0.45)]",
+              "fixed inset-x-0 z-[201] h-[50vh] max-h-[50vh] px-3 pt-[5px] shadow-[0_-8px_32px_rgba(0,0,0,0.45)]",
             expanded &&
               (frosted ? "bg-black/55 backdrop-blur-md" : "bg-bg-panel"),
           )}
