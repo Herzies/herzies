@@ -14,7 +14,7 @@ import {
   type TownMap,
   terrainAt,
 } from "./map";
-import { townSave, useTownRuntime } from "./runtime";
+import { useTownRuntime } from "./runtime";
 
 /**
  * Little things that move: fireflies at night, smoke from chimneys,
@@ -259,10 +259,15 @@ function Smoke({ map }: { map: TownMap }) {
 // --- Footstep dust -------------------------------------------------------------
 
 const DUST = 24;
-const DUST_LIFE = 0.6;
+const DUST_LIFE = 0.45;
+/** Ground covered between puffs, in world units. */
+const DUST_EVERY = 0.4;
 
-/** Small puffs at the player's feet while they run, the colour of what
- * they're running on — none on bridges or in water. */
+/** Small, faint puffs at the player's feet while they run, the colour of
+ * what they're running on — none on bridges or in water. Dropped where the
+ * herzie is drawn (its interpolated body, not the physics step ahead of
+ * it), every so far walked rather than every so often, so they stay
+ * evenly spaced at its feet through a slow frame. */
 function Dust({ map }: { map: TownMap }) {
   const rt = useTownRuntime();
   const pts = usePoints(DUST, THREE.NormalBlending);
@@ -276,30 +281,38 @@ function Dust({ map }: { map: TownMap }) {
     })),
   );
   const next = useRef(0);
-  const lastPuff = useRef(0);
+  /** Where the last puff dropped, or null when not running. */
+  const lastPuff = useRef<{ x: number; z: number } | null>(null);
+  const feet = useMemo(() => new THREE.Vector3(), []);
   const rand = useMemo(() => mulberry32(99), []);
   const gravel = useMemo(() => new THREE.Color("#a89c8c"), []);
   const grass = useMemo(() => new THREE.Color("#7a9a6a"), []);
 
   useFrame(({ clock }) => {
     const t = clock.elapsedTime;
-    if (rt.playerSpeed > 2.5 && t - lastPuff.current > 0.09) {
-      const [c, r] = cellAt(townSave.x, townSave.z);
-      const ground = terrainAt(map, c, r);
-      if (ground === "g" || ground === ".") {
-        lastPuff.current = t;
-        const i = next.current;
-        next.current = (i + 1) % DUST;
-        pool.current[i] = {
-          x: townSave.x + (rand() - 0.5) * 0.5,
-          z: townSave.z + (rand() - 0.5) * 0.5,
-          born: t,
-          dx: (rand() - 0.5) * 0.6,
-          dz: (rand() - 0.5) * 0.6,
-        };
-        pts.color(i, ground === "g" ? gravel : grass);
+    const body = rt.playerBody;
+    if (body && rt.playerSpeed > 2.5) {
+      body.getWorldPosition(feet);
+      const last = lastPuff.current;
+      if (!last) lastPuff.current = { x: feet.x, z: feet.z };
+      else if (Math.hypot(feet.x - last.x, feet.z - last.z) >= DUST_EVERY) {
+        lastPuff.current = { x: feet.x, z: feet.z };
+        const [c, r] = cellAt(feet.x, feet.z);
+        const ground = terrainAt(map, c, r);
+        if (ground === "g" || ground === ".") {
+          const i = next.current;
+          next.current = (i + 1) % DUST;
+          pool.current[i] = {
+            x: feet.x + (rand() - 0.5) * 0.3,
+            z: feet.z + (rand() - 0.5) * 0.3,
+            born: t,
+            dx: (rand() - 0.5) * 0.3,
+            dz: (rand() - 0.5) * 0.3,
+          };
+          pts.color(i, ground === "g" ? gravel : grass);
+        }
       }
-    }
+    } else lastPuff.current = null;
     pool.current.forEach((p, i) => {
       const age = (t - p.born) / DUST_LIFE;
       if (age > 1) {
@@ -309,10 +322,10 @@ function Dust({ map }: { map: TownMap }) {
       pts.set(
         i,
         p.x + p.dx * age,
-        0.08 + age * 0.35,
+        0.06 + age * 0.18,
         p.z + p.dz * age,
-        0.18 + age * 0.3,
-        0.6 * (1 - age),
+        0.1 + age * 0.12,
+        0.35 * (1 - age),
       );
     });
     pts.flush();
