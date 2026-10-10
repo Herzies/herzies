@@ -1,4 +1,4 @@
-import { TOWN_FLAG_SITTING } from "@herzies/shared";
+import { TOWN_FLAG_DANCING, TOWN_FLAG_SITTING } from "@herzies/shared";
 import { useEffect, useSyncExternalStore } from "react";
 import { herzies } from "../../../tauri-bridge";
 import { townLive, townSave } from "../runtime";
@@ -30,7 +30,9 @@ export function townNet(): TownConnection {
       z: townSave.z,
       heading: townSave.heading,
       speed: townLive.speed,
-      flags: townLive.seat ? TOWN_FLAG_SITTING : 0,
+      flags:
+        (townLive.seat ? TOWN_FLAG_SITTING : 0) |
+        (townLive.dancing ? TOWN_FLAG_DANCING : 0),
     }),
     onCorrect: (x, z) => {
       townLive.teleport = { x, z };

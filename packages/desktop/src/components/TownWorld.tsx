@@ -37,6 +37,7 @@ export function TownWorld({
   player,
   notice,
   chatOverlay = false,
+  musicPlaying = false,
 }: {
   /** The chat, for lines over the speakers' heads. */
   chatMessages?: ChatMessage[];
@@ -52,7 +53,12 @@ export function TownWorld({
   onOpen: (openKey: string) => void;
   /** The player's own herzie. */
   player: { seed: string; stage: number; equipped?: Equipped | null };
+  /** Music is playing: the herzie dances when it stands still. */
+  musicPlaying?: boolean;
 }) {
+  useEffect(() => {
+    townLive.music = musicPlaying;
+  }, [musicPlaying]);
   const [near, setNear] = useState<TownSpot | null>(null);
   const [bench, setBench] = useState<"sit" | "stand" | null>(null);
   // Everyone else with the Town open, on the same island.

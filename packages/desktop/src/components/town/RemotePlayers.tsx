@@ -1,4 +1,8 @@
-import { TOWN_FLAG_AFK, TOWN_FLAG_SITTING } from "@herzies/shared";
+import {
+  TOWN_FLAG_AFK,
+  TOWN_FLAG_DANCING,
+  TOWN_FLAG_SITTING,
+} from "@herzies/shared";
 import { HerzieModel } from "@herzies/shared/gl";
 import { Html } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
@@ -79,6 +83,7 @@ function RemoteHerzie({
     const seated = (s.flags & TOWN_FLAG_SITTING) !== 0;
     herzie.root.position.set(s.x, seated ? SEAT_Y : 0, s.z);
     herzie.sitting = seated;
+    herzie.dancing = (s.flags & TOWN_FLAG_DANCING) !== 0;
     herzie.heading = s.heading;
     herzie.update(dt, s.speed);
     tagAnchor.current?.position.set(

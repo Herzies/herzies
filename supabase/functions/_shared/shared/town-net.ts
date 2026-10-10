@@ -193,6 +193,8 @@ export type TownState = {
 export const TOWN_FLAG_AFK = 1;
 /** Sitting on a bench (at its seat): drawn seated. */
 export const TOWN_FLAG_SITTING = 2;
+/** Standing still with music playing: drawn dancing. */
+export const TOWN_FLAG_DANCING = 4;
 
 const OP_STATE = 1;
 const OP_SNAPSHOT = 2;

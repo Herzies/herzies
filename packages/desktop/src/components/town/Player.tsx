@@ -25,6 +25,9 @@ const RADIUS = 0.55;
 const HALF_HEIGHT = 0.35;
 /** Gap the controller keeps from whatever it slides along. */
 const SKIN = 0.02;
+/** How long it stands still, music playing, before it starts dancing (s):
+ * a pause mid-walk isn't a dance. */
+const DANCE_AFTER = 0.4;
 
 /**
  * The player's herzie: a kinematic body moved by Rapier's character
@@ -184,10 +187,16 @@ export function Player({
     townSave.heading = herzie.heading;
   });
 
+  const stillFor = useRef(0);
   useFrame((_, dt) => {
     // Sitting: on the seat, not the ground.
     herzie.root.position.y = townLive.seat ? SEAT_Y : 0;
     herzie.sitting = !!townLive.seat;
+    // Standing still to music: dance.
+    stillFor.current = rt.playerSpeed > 0.05 ? 0 : stillFor.current + dt;
+    townLive.dancing =
+      townLive.music && !townLive.seat && stillFor.current >= DANCE_AFTER;
+    herzie.dancing = townLive.dancing;
     herzie.update(dt, rt.playerSpeed);
   });
 

@@ -62,6 +62,11 @@ export const townLive = {
   /** The bench prompt was clicked: sit or stand, as E would (Systems
    * clears it). */
   benchPressed: false,
+  /** Music is playing (the app's now-playing): the herzie dances when it
+   * stands still. */
+  music: false,
+  /** It's dancing right now (Player sets it; sent to everyone else). */
+  dancing: false,
 };
 
 type Spot = { x: number; z: number };

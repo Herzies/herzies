@@ -8,6 +8,7 @@
 // `?net=local` joins the multiplayer Town on `wrangler dev` (in
 // packages/town-server, with TOWN_TICKET_SECRET=dev-town-secret in .dev.vars);
 // `&name=` and `&server=ws://…` to taste. Open it twice to see each other.
+// `?music=1` plays music, as it were: stand still and the herzie dances.
 import "./globals.css";
 import { signTownTicket } from "@herzies/shared";
 import type { RootState } from "@react-three/fiber";
@@ -23,6 +24,7 @@ import {
   SPARE_SPOTS,
   SPOTS,
   type TownSpot,
+  townLive,
   townSave,
 } from "./components/town/runtime";
 import TownCanvas from "./components/town/TownCanvas";
@@ -76,6 +78,7 @@ for (const k of ["x", "z", "heading", "polar"] as const) {
   if (params.has(k)) townSave[k] = Number(params.get(k));
 }
 if (params.has("heading")) townSave.azimuth = townSave.heading - Math.PI;
+townLive.music = params.get("music") === "1";
 const player = {
   seed: params.get("seed") ?? "sandbox-player",
   stage: Number(params.get("stage") ?? 3),

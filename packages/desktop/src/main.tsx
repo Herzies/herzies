@@ -1021,6 +1021,7 @@ function App() {
             onLog={addLog}
             playerSeed={herzie?.friendCode}
             playerStage={stageOverride ?? herzie?.stage}
+            musicPlaying={!!state.nowPlaying}
           />
         </div>
 
