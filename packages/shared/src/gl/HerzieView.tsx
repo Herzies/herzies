@@ -21,6 +21,7 @@ import {
 import { type DangleConfig, DEFAULT_DANGLE_CONFIG } from "../dangle-physics.js";
 import type { Equipped } from "../items.js";
 import { HerzieModel, MODEL_SCALE } from "./HerzieModel.js";
+import { studioLighting } from "./herzieMaterial.js";
 import { herzieStage } from "./stage.js";
 
 const DRAG_SENSITIVITY = Math.PI / 200; // ~180° per 200px
@@ -34,6 +35,36 @@ const ZOOM_EASE = 0.18;
 const FRAME_HEIGHT = 4.5;
 const CAMERA_DISTANCE = DEFAULT_CAMERA_DISTANCE * MODEL_SCALE;
 const TILT = (DEFAULT_CAMERA_TILT_DEG * Math.PI) / 180;
+/** The studio sun's shadow map, a side. A herzie is drawn ~100 px tall (the
+ * stage draws at a quarter of the screen's resolution), and a page can hold
+ * many: small is plenty. */
+const SHADOW_MAP = 512;
+
+/**
+ * The studio light's shadow: a herzie's own parts shade each other (an arm
+ * darkens the body behind it), as the Town's sun does. The colour is the
+ * bands' own (see herzieMaterial), so this light only casts.
+ */
+function studioSun(model: HerzieModel): THREE.DirectionalLight {
+  const { center, radius } = model.bounds;
+  const light = new THREE.DirectionalLight();
+  light.castShadow = true;
+  light.position
+    .copy(studioLighting.uSun.value)
+    .multiplyScalar(radius * 2)
+    .add(center);
+  light.target.position.copy(center);
+  const cam = light.shadow.camera;
+  cam.left = cam.bottom = -radius;
+  cam.right = cam.top = radius;
+  cam.near = radius;
+  cam.far = radius * 3;
+  light.shadow.mapSize.set(SHADOW_MAP, SHADOW_MAP);
+  light.shadow.bias = -0.0005;
+  light.shadow.normalBias = 0.02;
+  light.shadow.radius = 2;
+  return light;
+}
 
 export type HerzieViewProps = {
   /** The render seed: a herzie's friend code, or an NPC's own seed. */
@@ -176,11 +207,13 @@ export function HerzieView({
     if (!element) return;
     const scene = new THREE.Scene();
     scene.add(model.root);
+    const sun = studioSun(model);
+    scene.add(sun, sun.target);
     const cam = new THREE.PerspectiveCamera(50, 1, 0.05, 100);
     // What was last drawn, to tell when a paused herzie needs drawing again.
     const drawn = { angle: Number.NaN, grey: -1, opacity: -1 };
 
-    return herzieStage.add({
+    const remove = herzieStage.add({
       element,
       scene,
       camera: cam,
@@ -261,6 +294,10 @@ export function HerzieView({
         cam.updateProjectionMatrix();
       },
     });
+    return () => {
+      remove();
+      sun.dispose();
+    };
   }, [model]);
 
   const [grabbing, setGrabbing] = useState(false);

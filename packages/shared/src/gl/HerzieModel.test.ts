@@ -28,6 +28,33 @@ describe("HerzieModel", () => {
     expect(shader).toContain("directionalShadowMap");
   });
 
+  it("bounds every part, scenery too, at any turn", () => {
+    const h = new HerzieModel(
+      {
+        seed: "model-test",
+        stage: 3,
+        equipped: { head: "witch-hat", ground_left: "boombox" },
+      },
+      { anchorScenery: 0 },
+    );
+    for (const heading of [0, 1, 2.5, 4]) {
+      h.heading = heading;
+      h.update(1 / 60, 0);
+      h.root.updateMatrixWorld(true);
+      h.root.traverse((o) => {
+        if (!(o instanceof THREE.Mesh)) return;
+        o.geometry.computeBoundingSphere();
+        const part = o.geometry.boundingSphere
+          ?.clone()
+          .applyMatrix4(o.matrixWorld);
+        if (!part) return;
+        expect(
+          h.bounds.center.distanceTo(part.center) + part.radius,
+        ).toBeLessThanOrEqual(h.bounds.radius);
+      });
+    }
+  });
+
   it("sits down on its bottom, and stands back up", () => {
     const h = new HerzieModel(LOOK);
     h.update(1 / 60, 0);
@@ -156,6 +183,27 @@ describe("HerzieModel", () => {
       h.heading = 2.5;
       h.update(1 / 60, 0);
       expect(h.dangleSettled).toBe(true);
+    });
+
+    it("turns the witch hat's bent tip with its swing", () => {
+      const h = new HerzieModel({
+        seed: "model-test",
+        stage: 3,
+        equipped: { head: "witch-hat" },
+      });
+      const tips = () =>
+        (h as unknown as { meshes: THREE.Mesh[] }).meshes
+          .filter((m) => m.geometry instanceof THREE.CylinderGeometry)
+          .map((m) => m.quaternion.clone());
+      const rest = tips();
+      expect(rest.length).toBeGreaterThan(1);
+      turn(h, 0, 1.2);
+      const swung = tips();
+      // The crown stays upright; the bent segments above it turn.
+      expect(swung[0].angleTo(rest[0])).toBeCloseTo(0, 6);
+      expect(
+        swung.at(-1)?.angleTo(rest.at(-1) as THREE.Quaternion),
+      ).toBeGreaterThan(0.01);
     });
 
     it("holds still when told to, or with nothing dangling", () => {

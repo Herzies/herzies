@@ -81,6 +81,9 @@ class HerzieStage {
     const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: false });
     renderer.setClearColor(0x000000, 0);
     renderer.setScissorTest(true);
+    // A view's own sun can cast shadows (see HerzieView), as in the Town.
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFShadowMap;
     const c = renderer.domElement;
     c.setAttribute("aria-hidden", "true");
     Object.assign(c.style, {

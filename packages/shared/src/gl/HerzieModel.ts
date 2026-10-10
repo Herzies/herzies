@@ -8,6 +8,7 @@ import {
   creatureSeatDrop,
   DANCE_LOOP_FRAMES,
   danceHopLift,
+  dangledAxis,
   hasDangleEquipped,
   primitiveShading,
   SPIRIT_DANCE_HOP_VARIANT_COUNT,
@@ -159,6 +160,35 @@ function besideHerzie(spheres: Sphere[]) {
   }
 }
 
+/** How far a part reaches from its centre, whatever its shape. */
+function reach(s: Sphere): number {
+  if (!s.shape) return s.radius;
+  return Math.hypot(...s.shape.axis) + s.radius + Math.abs(s.shape.dome ?? 0);
+}
+
+/** A sphere round every part at any turn (see HerzieModel.bounds), with
+ * room for the poses to move them a little. */
+function turnBounds(spheres: Sphere[], feetY: number): THREE.Sphere {
+  // Root space: up is −y in creature space, measured from the feet.
+  let lo = Number.POSITIVE_INFINITY;
+  let hi = Number.NEGATIVE_INFINITY;
+  for (const s of spheres) {
+    const y = feetY - s.center[1];
+    lo = Math.min(lo, y - reach(s));
+    hi = Math.max(hi, y + reach(s));
+  }
+  const cy = (lo + hi) / 2;
+  let r = 0;
+  for (const s of spheres) {
+    const d = Math.hypot(s.center[0], feetY - s.center[1] - cy, s.center[2]);
+    r = Math.max(r, d + reach(s));
+  }
+  return new THREE.Sphere(
+    new THREE.Vector3(0, cy * MODEL_SCALE, 0),
+    r * MODEL_SCALE * 1.15,
+  );
+}
+
 function geometryFor(s: Sphere): THREE.BufferGeometry {
   const shape = s.shape;
   if (!shape) return UNIT_SPHERE;
@@ -169,6 +199,14 @@ function geometryFor(s: Sphere): THREE.BufferGeometry {
     return cached(
       `capsule:${k(r)}:${k(h)}`,
       () => new THREE.CapsuleGeometry(r, 2 * h, 6, 16),
+    );
+  }
+  if (shape.kind === "cone") {
+    const tip = shape.tipRadius ?? 0;
+    // CylinderGeometry's top is +y, which the mesh turns onto +axis.
+    return cached(
+      `cone:${k(r)}:${k(tip)}:${k(h)}`,
+      () => new THREE.CylinderGeometry(tip, r, 2 * h, 24),
     );
   }
   const dome = shape.dome ?? 0;
@@ -193,6 +231,9 @@ export class HerzieModel {
   /** Creature-space y of the frame's centre, as world height above the feet
    * at rest: where the old renderer's camera looked. */
   readonly centerHeight: number;
+  /** Encloses every part, scenery too, at any turn: centred on the axis it
+   * turns about, in root space (world units, feet at the origin). */
+  readonly bounds: THREE.Sphere;
   /** Which way it faces: forward is (sin, cos) on the ground (x, z). */
   heading = 0;
   readonly anim: AnimationState;
@@ -278,6 +319,7 @@ export class HerzieModel {
     this.height = (feet - top) * MODEL_SCALE;
     this.centerHeight = feet * MODEL_SCALE;
     this.span = schemeSpan(spheres);
+    this.bounds = turnBounds(spheres, feet);
     this.seatDrop = this.hasLegs ? creatureSeatDrop(spheres, look.stage) : 0;
 
     const ramp = scheme ? schemeShades(scheme) : null;
@@ -424,9 +466,16 @@ export class HerzieModel {
       sitWeight: this.sitWeight,
     });
     for (let i = 0; i < spheres.length; i++) {
-      const [x, y, z] = spheres[i].center;
+      const s = spheres[i];
+      const [x, y, z] = s.center;
       const d = offsets[i];
-      this.meshes[i].position.set(x + d[0], y + d[1], z + d[2]);
+      const mesh = this.meshes[i];
+      mesh.position.set(x + d[0], y + d[1], z + d[2]);
+      // A dangling solid (the witch hat's tip) turns with its swing, too.
+      if (s.shape && s.dangle) {
+        scratch.set(...dangledAxis(s, this.dangle)).normalize();
+        mesh.quaternion.setFromUnitVectors(UP, scratch);
+      }
     }
   }
 

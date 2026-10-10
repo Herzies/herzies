@@ -297,14 +297,16 @@ export interface Sphere {
    * center − axis to center + axis, `radius` thick: a capsule (rounded ends)
    * or a cylinder (flat ends). The axis is relative to the center, so the
    * animations, which only move centers, carry it along untouched; only
-   * renderCreatureFrame's camera turn rotates it. (applyDangle doesn't, so
-   * dangling parts must stay spheres.) */
+   * renderCreatureFrame's camera turn and applyDangle's swing rotate it. */
   shape?: Shape;
 }
 
 export interface Shape {
-  kind: "capsule" | "cylinder";
+  kind: "capsule" | "cylinder" | "cone";
   axis: V3;
+  /** Cones only: the radius at the +axis end (`radius` is the −axis end's);
+   * 0 comes to a point. The ends are flat. */
+  tipRadius?: number;
   /** Cylinders only: how far the middle of each end bulges out past the rim,
    * as a paraboloid cap (an ear cup's domed face). Negative dishes it in. */
   dome?: number;
@@ -1349,8 +1351,20 @@ function applyDangle(spheres: Sphere[], state: DangleState): Sphere[] {
       z *= out;
     }
     const [rx, , rz] = rotY([x, 0, z], state.swing * weight);
-    return { ...s, center: [rx + pivot[0], y, rz + pivot[1]] as V3 };
+    return {
+      ...s,
+      center: [rx + pivot[0], y, rz + pivot[1]] as V3,
+      shape: s.shape && { ...s.shape, axis: dangledAxis(s, state) },
+    };
   });
+}
+
+/** A shaped part's axis, turned with its swing (as applyDangle turns it):
+ * for a renderer that moves only centres, to turn the part itself. */
+export function dangledAxis(s: Sphere, state: DangleState | undefined): V3 {
+  const axis = s.shape?.axis ?? [0, 1, 0];
+  if (!s.dangle || !state || state.swing === 0) return axis;
+  return rotY(axis, state.swing * s.dangle.weight);
 }
 
 /** Whether anything worn swings when the herzie is spun. */
@@ -1681,9 +1695,10 @@ function buildGhostSpheres(
   return placeCompanion(local, petHoverY(spheres), R, cols, side, "pet");
 }
 
-/** Pointed witch hat: a brim, an orange band, and a cone of shrinking
- * spheres whose top bends over. The bent tip carries dangle weights, so it
- * swings round the hat's axis when the herzie is spun (see applyDangle). */
+/** Pointed witch hat: a flat brim, an orange band, and a cone whose top
+ * bends over in a few tapering segments to a point. The bent tip carries
+ * dangle weights, so it swings round the hat's axis when the herzie is spun
+ * (see applyDangle). */
 function buildWitchHatSpheres(spheres: Sphere[]): Sphere[] {
   const head = getHeadBounds(spheres);
   if (!head) return [];
@@ -1691,51 +1706,80 @@ function buildWitchHatSpheres(spheres: Sphere[]): Sphere[] {
   const hr = head.radius;
   const felt = "#6B4A94";
   const result: Sphere[] = [];
-  const push = (c: V3, r: number, color: string, dangle?: Dangle) =>
+  const push = (
+    center: V3,
+    radius: number,
+    color: string,
+    shape?: Shape,
+    dangle?: Dangle,
+  ) =>
     result.push({
-      center: c,
-      radius: r,
+      center,
+      radius,
       zone: "wearable",
       part: "head",
       color,
+      shape,
       dangle,
     });
-
-  // Brim: a wide ring resting on the crown, with a band just above it.
+  // Creature space is y down: up is −y.
   const brimY = hy - hr * 0.62;
-  const ring = (
-    steps: number,
-    y: number,
-    radius: number,
-    r: number,
-    color: string,
-  ) => {
-    for (let i = 0; i < steps; i++) {
-      const a = (i / steps) * Math.PI * 2;
-      push([hx + Math.cos(a) * radius, y, hz + Math.sin(a) * radius], r, color);
-    }
-  };
-  ring(22, brimY, hr * 0.9, hr * 0.16, felt);
-  ring(16, brimY - hr * 0.16, hr * 0.6, hr * 0.15, "#F27B13");
+  const brimHalf = hr * 0.07;
 
-  // Cone: straight for most of its height, then the top bends over to one
-  // side and droops a little. Squat on purpose: a grown herzie's head sits
-  // close to the top of the frame, and a classic tall hat would be cut off.
-  const steps = 9;
-  const bendFrom = 5;
-  const height = hr * 0.85;
-  let x = hx;
-  for (let i = 0; i < steps; i++) {
-    const t = i / (steps - 1);
-    let y = brimY - hr * 0.15 - t * height;
-    let dangle: Dangle | undefined;
-    if (i >= bendFrom) {
-      const k = (i - bendFrom + 1) / (steps - bendFrom);
-      x += hr * 0.2 * k;
-      y += hr * 0.08 * k * k;
-      dangle = { weight: k, hang: 0, pivot: [hx, hz] };
-    }
-    push([x, y, hz], hr * (0.58 - 0.48 * t), felt, dangle);
+  // Brim: a wide disc resting on the crown, the band just above it.
+  push([hx, brimY, hz], hr, felt, {
+    kind: "cylinder",
+    axis: [0, brimHalf, 0],
+  });
+  const bandHalf = hr * 0.09;
+  push([hx, brimY - brimHalf - bandHalf, hz], hr * 0.6, "#F27B13", {
+    kind: "cylinder",
+    axis: [0, bandHalf, 0],
+  });
+
+  // Crown: straight up from the brim, tapering. Squat on purpose: a grown
+  // herzie's head sits close to the top of the frame, and a classic tall
+  // hat would be cut off.
+  const crownHalf = hr * 0.28;
+  const crownTop = hr * 0.32;
+  push([hx, brimY - brimHalf - crownHalf, hz], hr * 0.56, felt, {
+    kind: "cone",
+    axis: [0, -crownHalf, 0],
+    tipRadius: crownTop,
+  });
+
+  // Tip: segments bending further over to one side each, down to a point.
+  // A ball at each bend fills the wedge the turn opens between them.
+  const segments = [
+    { tilt: 30, length: 0.22, radius: 0.22 },
+    { tilt: 62, length: 0.2, radius: 0.13 },
+    { tilt: 100, length: 0.2, radius: 0 },
+  ];
+  let at: V3 = [hx, brimY - brimHalf - 2 * crownHalf, hz];
+  let r = crownTop;
+  const along = segments.reduce((sum, seg) => sum + seg.length, 0);
+  let done = 0;
+  const swing = (d: number): Dangle | undefined =>
+    d > 0 ? { weight: d / along, hang: 0, pivot: [hx, hz] } : undefined;
+  for (const seg of segments) {
+    push(at, r, felt, undefined, swing(done));
+    const a = (seg.tilt * Math.PI) / 180;
+    const half: V3 = [
+      (Math.sin(a) * seg.length * hr) / 2,
+      (-Math.cos(a) * seg.length * hr) / 2,
+      0,
+    ];
+    const center: V3 = [at[0] + half[0], at[1] + half[1], at[2]];
+    push(
+      center,
+      r,
+      felt,
+      { kind: "cone", axis: half, tipRadius: seg.radius * hr },
+      swing(done + seg.length / 2),
+    );
+    at = [center[0] + half[0], center[1] + half[1], at[2]];
+    r = seg.radius * hr;
+    done += seg.length;
   }
   return result;
 }
@@ -2538,9 +2582,9 @@ function axisLength(axis: V3): number {
 }
 
 /** Distance along a unit ray to where it first enters `p`, or -1 for a miss.
- * Exported for tests. Capsules and cylinders are convex, so the first hit is
- * the nearest of their surfaces' hits: the side, then either the flat caps
- * (cylinder) or the end spheres (capsule). */
+ * Exported for tests. Capsules, cylinders and cones are convex, so the first
+ * hit is the nearest of their surfaces' hits: the side, then either the flat
+ * caps (cylinder, cone) or the end spheres (capsule). */
 export function rayPrimitive(
   ox: number,
   oy: number,
@@ -2577,6 +2621,44 @@ export function rayPrimitive(
 
   let best = Number.POSITIVE_INFINITY;
   const a = qx * qx + qy * qy + qz * qz;
+  if (shape.kind === "cone") {
+    // The side's radius runs linearly from r at −axis to the tip's at +axis:
+    // ρ(s) = mid + slope·s. Squared along the ray, a quadratic in t; it also
+    // meets the mirrored cone past the apex, which the range check drops.
+    const tip = shape.tipRadius ?? 0;
+    const slope = (tip - r) / (2 * h);
+    const r0 = (r + tip) / 2 + slope * along;
+    const ka = a - slope * slope * dAlong * dAlong;
+    const kb = 2 * (px * qx + py * qy + pz * qz - slope * r0 * dAlong);
+    const kc = px * px + py * py + pz * pz - r0 * r0;
+    const sideHit = (t: number) => {
+      const s = along + t * dAlong;
+      if (t > 0 && t < best && Math.abs(s) <= h && r0 + slope * t * dAlong >= 0)
+        best = t;
+    };
+    if (Math.abs(ka) < 1e-12) {
+      if (Math.abs(kb) > 1e-12) sideHit(-kc / kb);
+    } else {
+      const disc = kb * kb - 4 * ka * kc;
+      if (disc >= 0) {
+        const sq = Math.sqrt(disc);
+        sideHit((-kb - sq) / (2 * ka));
+        sideHit((-kb + sq) / (2 * ka));
+      }
+    }
+    if (Math.abs(dAlong) > 1e-12) {
+      for (let side = -1; side <= 1; side += 2) {
+        const t = (side * h - along) / dAlong;
+        if (t <= 0 || t >= best) continue;
+        const ex = px + qx * t;
+        const ey = py + qy * t;
+        const ez = pz + qz * t;
+        const cap = side < 0 ? r : tip;
+        if (ex * ex + ey * ey + ez * ez <= cap * cap) best = t;
+      }
+    }
+    return best === Number.POSITIVE_INFINITY ? -1 : best;
+  }
   if (a > 1e-12) {
     const b = 2 * (px * qx + py * qy + pz * qz);
     const c = px * px + py * py + pz * pz - r * r;
@@ -2678,8 +2760,24 @@ export function primitiveNormal(p: Primitive, hit: V3): V3 {
     const len = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
     return [nx / len, ny / len, nz / len];
   }
-  // Cylinder: on whichever surface the point is nearest, an end or the side.
   const r = p.radius;
+  if (shape.kind === "cone") {
+    // On an end if nearer it than the side, else out from the axis, tipped
+    // toward the narrow end by the side's slant.
+    const tip = shape.tipRadius ?? 0;
+    const slope = (tip - r) / (2 * h);
+    const rho = (r + tip) / 2 + slope * along;
+    if (h - Math.abs(along) < Math.abs(rho - radial) || radial < 1e-9) {
+      const sign = along < 0 ? -1 : 1;
+      return [ux * sign, uy * sign, uz * sign];
+    }
+    const nx = ex / radial - ux * slope;
+    const ny = ey / radial - uy * slope;
+    const nz = ez / radial - uz * slope;
+    const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
+    return [nx / len, ny / len, nz / len];
+  }
+  // Cylinder: on whichever surface the point is nearest, an end or the side.
   const dome = shape.dome ?? 0;
   const endAlong = h + dome * (1 - (radial * radial) / (r * r));
   if (Math.abs(endAlong - Math.abs(along)) < r - radial || radial < 1e-9) {

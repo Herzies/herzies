@@ -145,6 +145,42 @@ describe("capsule and cylinder primitives", () => {
     near(primitiveNormal(cylinder, [-2, 0.1, 0]), [-1, 0, 0]);
   });
 
+  // A cone along +x: radius 0.5 at x = −2 narrowing to 0.1 at x = 2.
+  const cone = {
+    ...capsule,
+    shape: { kind: "cone" as const, axis: capsule.shape.axis, tipRadius: 0.1 },
+  };
+
+  it("narrows a cone toward its tip", () => {
+    expect(cast(-2 + 1e-6, 0, cone)).toBeCloseTo(4.5); // the wide end
+    expect(cast(0, 0, cone)).toBeCloseTo(4.7); // halfway: radius 0.3
+    expect(cast(1.9, 0, cone)).toBeCloseTo(5 - 0.11);
+    expect(cast(0, 0.35, cone)).toBe(-1);
+    expect(cast(2.1, 0, cone)).toBe(-1);
+    // Not the mirrored cone out past where it would come to a point.
+    const pointed = { ...cone, shape: { ...cone.shape, tipRadius: 0 } };
+    expect(cast(2.5, 0, pointed)).toBe(-1);
+  });
+
+  it("caps a cone flat at each end, each its own size", () => {
+    const along = (x: number, y: number) =>
+      rayPrimitive(-5, x, y, 1, 0, 0, cone);
+    expect(along(0.4, 0)).toBeCloseTo(3); // the wide end's cap
+    expect(rayPrimitive(5, 0.05, 0, -1, 0, 0, cone)).toBeCloseTo(3); // tip's
+    expect(rayPrimitive(5, 0.2, 0, -1, 0, 0, cone)).toBeGreaterThan(3);
+    near(primitiveNormal(cone, [-2, 0.3, 0]), [-1, 0, 0]);
+    near(primitiveNormal(cone, [2, 0.05, 0]), [1, 0, 0]);
+  });
+
+  it("tips a cone's side normal toward its narrow end", () => {
+    const n = primitiveNormal(cone, [0, 0, -0.3]);
+    const slope = 0.4 / 4;
+    near(
+      n,
+      [slope, 0, -1].map((v) => v / Math.hypot(slope, 1)),
+    );
+  });
+
   it("treats a shapeless primitive as a sphere", () => {
     const sphere = { center: capsule.center, radius: 0.5 };
     expect(cast(0, 0, sphere)).toBeCloseTo(4.5);
