@@ -13,8 +13,11 @@ import type { ChatMessage } from "../tauri-bridge";
 import { LoadingSplash } from "./LoadingSplash";
 import { type EventCard, formatIn, isDown } from "./TownScene";
 import { useChatBubbles } from "./town/chatBubbles";
+import { useCombat } from "./town/combat/state";
+import type { TownMap } from "./town/map";
 import { useTownNet, useTownNetVersion } from "./town/net/townNet";
 import { spotsOf, type TownSpot, townLive, useTownMap } from "./town/runtime";
+import { setSfxMuted, sfxMuted } from "./town/sfx";
 
 // three.js, Rapier's WASM and friends: loaded the first time someone opens
 // the Town, not at app start.
@@ -64,6 +67,9 @@ export function TownWorld({
   }, [musicPlaying]);
   const [near, setNear] = useState<TownSpot | null>(null);
   const [bench, setBench] = useState<"sit" | "stand" | null>(null);
+  const [portalTo, setPortalTo] = useState<TownMap | null>(null);
+  const fighting = useCombat();
+  const [muted, setMuted] = useState(sfxMuted);
   // Everyone else with the Town open, on the same island.
   const net = useTownNet(!paused);
   useTownNetVersion(net);
@@ -180,11 +186,48 @@ export function TownWorld({
             onOpen={onOpen}
             onNearChange={setNear}
             onBenchChange={setBench}
+            onPortalChange={setPortalTo}
             onReady={onReady}
             stats={stats}
           />
         </Suspense>
       )}
+      {map.combat && !paused ? (
+        <div
+          className={cn(
+            "pointer-events-none absolute left-2 z-30 flex items-center gap-2 rounded bg-black/55 px-2 py-1 text-[10px] text-white/80",
+            chatOverlay
+              ? "bottom-[calc(var(--dock-height,0px)+12px)]"
+              : "bottom-3",
+          )}
+        >
+          {fighting ? (
+            <>
+              <span>
+                <Key>Click</Key> / <Key>F</Key> cast
+              </span>
+              <span>
+                <Key>Esc</Key> stop
+              </span>
+            </>
+          ) : (
+            <span>
+              <Key>Tab</Key> fight
+            </span>
+          )}
+          <button
+            type="button"
+            className="pointer-events-auto cursor-pointer text-white/60 hover:text-white"
+            title={muted ? "Sounds off" : "Sounds on"}
+            onClick={() => {
+              setSfxMuted(!muted);
+              setMuted(!muted);
+            }}
+          >
+            {muted ? "♪̸" : "♪"}
+          </button>
+        </div>
+      ) : null}
       {!paused && (loading || !ready) ? (
         <LoadingSplash overlay label="loading town" />
       ) : null}
@@ -202,6 +245,23 @@ export function TownWorld({
           )}
         >
           Talk to {near.card.title} <span className="text-text-dim">[E]</span>
+        </button>
+      ) : portalTo ? (
+        <button
+          type="button"
+          onClick={() => {
+            // E's job, from the prompt (see Systems).
+            townLive.benchPressed = true;
+          }}
+          className={cn(
+            "absolute left-1/2 z-30 -translate-x-1/2 cursor-pointer whitespace-nowrap rounded border border-[#b07aff]/60 bg-black/70 px-2 py-1 text-ui text-white hover:bg-black/85",
+            chatOverlay
+              ? "bottom-[calc(var(--dock-height,0px)+12px)]"
+              : "bottom-3",
+          )}
+        >
+          {portalTo.id === "home" ? "Back to " : "Enter the "}
+          {portalTo.name} <span className="text-text-dim">[E]</span>
         </button>
       ) : bench ? (
         <button
@@ -221,6 +281,15 @@ export function TownWorld({
         </button>
       ) : null}
     </div>
+  );
+}
+
+/** A key, as the hints show it. */
+function Key({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="rounded border border-white/30 px-1 text-white">
+      {children}
+    </span>
   );
 }
 

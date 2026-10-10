@@ -16,9 +16,23 @@ import { portalCells, type TownMap, worldRadius } from "./map";
 import type { TownConnection } from "./net/TownConnection";
 import { Player } from "./Player";
 import { Post } from "./Post";
+import {
+  arrivalOn,
+  PORTAL_REACH,
+  type Portal,
+  portalsOf,
+  startWarp,
+  WARP_IN,
+  WARP_OUT,
+  walkedThrough,
+  warp,
+} from "./portal";
 import { RemotePlayers } from "./RemotePlayers";
+import { sfxPortal } from "./sfx";
 import "./shadows";
 import {
+  goToMap,
+  mapById,
   TALK_RANGE,
   type TownRuntime,
   TownRuntimeContext,
@@ -47,6 +61,9 @@ export type TownCanvasProps = {
   /** What E would do at a bench right now — sit on one nearby, or stand
    * up off it — when that changes (null: nothing). */
   onBenchChange?: (prompt: "sit" | "stand" | null) => void;
+  /** The island a portal nearby leads to (E steps in), when that changes
+   * (null: none near). */
+  onPortalChange?: (to: TownMap | null) => void;
   /** The island to draw (the map editor's preview passes its own). */
   map?: TownMap;
   /** The other islands in the sky (default: every map there is). */
@@ -190,6 +207,7 @@ function Systems({
   onOpen,
   onNearChange,
   onBenchChange,
+  onPortalChange,
   map,
   net,
   input,
@@ -202,19 +220,71 @@ function Systems({
   /** The seat E would sit on, if any. */
   const seat = useRef<Seat | null>(null);
   const prompt = useRef<"sit" | "stand" | null>(null);
+  const portals = useMemo(() => (map ? portalsOf(map) : []), [map]);
+  /** The portal E would step into, if any. */
+  const portal = useRef<Portal | null>(null);
+  /** Where the player was last frame, on which island: walking through a
+   * disc is going from one side of it to the other. */
+  const last = useRef({ map: "", x: 0, z: 0 });
 
-  /** E (or a click on the prompt): talk to whoever's near; else sit on the
-   * bench nearby, or stand up off it. */
+  /** E (or a click on the prompt): talk to whoever's near; else step into
+   * the portal nearby; else sit on the bench nearby, or stand up off it. */
   const interact = () => {
     const key = near.current?.card.openKey;
     if (key) onOpen(key);
+    else if (portal.current) enter(portal.current.to);
     else if (townLive.seat) townLive.standUp = true;
     else if (seat.current) townLive.seat = seat.current;
+  };
+  const enter = (to: string) => {
+    if (warp.active) return;
+    townLive.seat = null;
+    startWarp(to);
+    sfxPortal();
   };
   const live = useTownInput(!paused, surface, interact);
   input.current = live.current;
 
-  useFrame(({ clock }) => {
+  useFrame(({ clock }, dt) => {
+    // Through a portal: out, swap islands at the white-out, back in.
+    if (warp.active) {
+      warp.t += Math.min(dt, 0.05);
+      if (!warp.swapped && warp.t >= WARP_OUT) {
+        warp.swapped = true;
+        const from = townSave.map;
+        goToMap(warp.to, arrivalOn(mapById(warp.to), from));
+      }
+      if (warp.t >= WARP_OUT + WARP_IN) warp.active = false;
+    }
+    townLive.frozen = warp.active;
+    if (map) {
+      const l = last.current;
+      if (l.map === map.id && !warp.active) {
+        for (const p of portals) {
+          if (walkedThrough(p, l.x, l.z, townSave.x, townSave.z)) {
+            enter(p.to);
+            break;
+          }
+        }
+      }
+      Object.assign(l, { map: map.id, x: townSave.x, z: townSave.z });
+    }
+    // The portal close enough to step into with E.
+    let nearest: Portal | null = null;
+    let reach = PORTAL_REACH;
+    for (const p of portals) {
+      const d = Math.hypot(townSave.x - p.x, townSave.z - p.z);
+      if (d < reach) {
+        reach = d;
+        nearest = p;
+      }
+    }
+    if (warp.active) nearest = null;
+    if (nearest?.key !== portal.current?.key) {
+      portal.current = nearest;
+      onPortalChange?.(nearest ? mapById(nearest.to) : null);
+    }
+
     // The shared uniforms the wind, water and sky read (see ambient.ts).
     ambient.uTime.value = clock.elapsedTime;
     ambient.uPlayer.value.set(townSave.x, 0, townSave.z);
@@ -240,7 +310,7 @@ function Systems({
     // Benches: the free seat nearest, if no one's there to talk to. A seat
     // is taken if another player is sitting on it.
     seat.current = null;
-    if (!closest && !townLive.seat && benches.length > 0) {
+    if (!closest && !portal.current && !townLive.seat && benches.length > 0) {
       const sitting: { x: number; z: number }[] = [];
       if (net) {
         const t = net.clock.renderTime(performance.now());

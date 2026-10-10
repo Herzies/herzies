@@ -81,6 +81,8 @@ export const townLive = {
   music: false,
   /** It's dancing right now (Player sets it; sent to everyone else). */
   dancing: false,
+  /** Going through a portal: the herzie can't be steered. */
+  frozen: false,
 };
 
 type Spot = { x: number; z: number };

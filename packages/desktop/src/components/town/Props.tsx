@@ -20,6 +20,7 @@ import {
   NightLights,
 } from "./Lamps";
 import { objectAt, objectPlace, type TownMap, waterRuns } from "./map";
+import { PortalColliders, Portals } from "./Portals";
 import { type Champion, StatueColliders, Statues } from "./Statues";
 import {
   SPECIES,
@@ -440,6 +441,7 @@ export function Props({
       <Benches map={map} />
       {!backdrop && <Statues map={map} champion={champion} />}
       <Dummies map={map} live={!backdrop} />
+      <Portals map={map} live={!backdrop} />
     </>
   );
 }
@@ -485,6 +487,7 @@ export function MapColliders({ map }: { map: TownMap }) {
       <BenchColliders map={map} />
       <StatueColliders map={map} />
       <DummyColliders map={map} />
+      <PortalColliders map={map} />
     </RigidBody>
   );
 }

@@ -154,7 +154,28 @@ export class SonicDistortionEffect extends Effect {
       uniform float uChroma;
       uniform float uGlow;
       uniform float uActive;
+      uniform float uWarp;
       void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth, out vec4 outputColor) {
+        if (uWarp > 0.0) {
+          // Stepping through a portal: the whole view swirls in on itself
+          // and whites out.
+          vec2 c = uv - 0.5;
+          float r = length(c);
+          float turn = uWarp * 5.0 * (1.0 - smoothstep(0.0, 0.75, r));
+          float cs = cos(turn), sn = sin(turn);
+          c = mat2(cs, -sn, sn, cs) * c * (1.0 - uWarp * 0.35);
+          vec2 w = c + 0.5;
+          vec2 split = c * uWarp * 0.04;
+          vec3 color = vec3(
+            texture2D(inputBuffer, w + split).r,
+            texture2D(inputBuffer, w).g,
+            texture2D(inputBuffer, w - split).b
+          );
+          vec3 white = vec3(0.93, 0.88, 1.0);
+          color = mix(color, white, smoothstep(0.55, 1.0, uWarp));
+          outputColor = vec4(color, inputColor.a);
+          return;
+        }
         if (uActive < 0.5) { outputColor = inputColor; return; }
         vec4 d = texture2D(tDistortion, uv);
         // Only where the wave is in front of what's there.
@@ -184,9 +205,15 @@ export class SonicDistortionEffect extends Effect {
           ["uChroma", new THREE.Uniform(0.55)],
           ["uGlow", new THREE.Uniform(0.035)],
           ["uActive", new THREE.Uniform(0)],
+          ["uWarp", new THREE.Uniform(0)],
         ]),
       },
     );
+  }
+
+  /** How far through stepping through a portal, 0–1 (see warp). */
+  set warp(k: number) {
+    (this.uniforms.get("uWarp") as THREE.Uniform).value = k;
   }
 
   /** Whether there's anything to bend this frame. */

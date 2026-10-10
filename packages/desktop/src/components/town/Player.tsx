@@ -19,6 +19,7 @@ import { HeadBubble } from "./HeadBubble";
 import type { TownInput } from "./input";
 import type { TownMap } from "./map";
 import { type Mover, stepMover, walkAzimuth } from "./movement";
+import { warpAmount } from "./portal";
 import { townLive, townSave, useTownRuntime } from "./runtime";
 
 /** The capsule the controller pushes around: radius and half-height of its
@@ -165,6 +166,12 @@ export function Player({
       rt.playerSpeed = townLive.speed = 0;
       return;
     }
+    // Going through a portal: carried, not walking.
+    if (townLive.frozen) {
+      m.vx = m.vz = 0;
+      rt.playerSpeed = townLive.speed = 0;
+      return;
+    }
     // On a bench: stay put on the seat, facing out, until asked to stand
     // (E again) or walked off it.
     const seat = townLive.seat;
@@ -232,6 +239,11 @@ export function Player({
       townLive.music && !townLive.seat && stillFor.current >= DANCE_AFTER;
     herzie.dancing = townLive.dancing;
     herzie.update(dt, rt.playerSpeed);
+    // Through a portal: spun down into the disc, and back up out of the
+    // far one.
+    const k = warpAmount();
+    herzie.root.scale.setScalar(1 - 0.85 * k);
+    herzie.root.rotation.y = k * k * Math.PI * 4;
   });
 
   return (

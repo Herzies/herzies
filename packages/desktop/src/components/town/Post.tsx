@@ -3,6 +3,7 @@ import { EffectComposer, N8AO } from "@react-three/postprocessing";
 import { type ComponentProps, useEffect, useMemo, useRef } from "react";
 import { ambient } from "./ambient";
 import { townLook } from "./depth";
+import { warpAmount } from "./portal";
 import { DistortionBuffer, SonicDistortionEffect } from "./vfx/distortion";
 
 /** How dark the occlusion gets by day. */
@@ -56,7 +57,10 @@ export function Post({ ao, distort }: { ao: boolean; distort: boolean }) {
       aoPass.current.configuration.intensity =
         DAY_AO * (1 - night * (1 - NIGHT_AO));
     }
-    if (distort) effect.active = buffer.render(gl, camera);
+    if (distort) {
+      effect.active = buffer.render(gl, camera);
+      effect.warp = warpAmount();
+    }
   });
   return (
     <EffectComposer multisampling={0}>
