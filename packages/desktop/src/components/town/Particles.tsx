@@ -262,12 +262,15 @@ const DUST = 24;
 const DUST_LIFE = 0.45;
 /** Ground covered between puffs, in world units. */
 const DUST_EVERY = 0.4;
+/** How far either side of its path a foot comes down. */
+const DUST_FOOT = 0.22;
 
 /** Small, faint puffs at the player's feet while they run, the colour of
  * what they're running on — none on bridges or in water. Dropped where the
  * herzie is drawn (its interpolated body, not the physics step ahead of
  * it), every so far walked rather than every so often, so they stay
- * evenly spaced at its feet through a slow frame. */
+ * evenly spaced at its feet through a slow frame. Left foot, right foot:
+ * one puff dead centre behind it read as something else entirely. */
 function Dust({ map }: { map: TownMap }) {
   const rt = useTownRuntime();
   const pts = usePoints(DUST, THREE.NormalBlending);
@@ -283,6 +286,8 @@ function Dust({ map }: { map: TownMap }) {
   const next = useRef(0);
   /** Where the last puff dropped, or null when not running. */
   const lastPuff = useRef<{ x: number; z: number } | null>(null);
+  /** Which foot is next: 1 or −1. */
+  const foot = useRef(1);
   const feet = useMemo(() => new THREE.Vector3(), []);
   const rand = useMemo(() => mulberry32(99), []);
   const gravel = useMemo(() => new THREE.Color("#a89c8c"), []);
@@ -296,15 +301,21 @@ function Dust({ map }: { map: TownMap }) {
       const last = lastPuff.current;
       if (!last) lastPuff.current = { x: feet.x, z: feet.z };
       else if (Math.hypot(feet.x - last.x, feet.z - last.z) >= DUST_EVERY) {
+        // Off to the side of the way it's going, a foot at a time.
+        const moved = Math.hypot(feet.x - last.x, feet.z - last.z);
+        foot.current = -foot.current;
+        const side = foot.current * DUST_FOOT;
+        const fx = feet.x + (-(feet.z - last.z) / moved) * side;
+        const fz = feet.z + ((feet.x - last.x) / moved) * side;
         lastPuff.current = { x: feet.x, z: feet.z };
-        const [c, r] = cellAt(feet.x, feet.z);
+        const [c, r] = cellAt(fx, fz);
         const ground = terrainAt(map, c, r);
         if (ground === "g" || ground === ".") {
           const i = next.current;
           next.current = (i + 1) % DUST;
           pool.current[i] = {
-            x: feet.x + (rand() - 0.5) * 0.3,
-            z: feet.z + (rand() - 0.5) * 0.3,
+            x: fx + (rand() - 0.5) * 0.08,
+            z: fz + (rand() - 0.5) * 0.08,
             born: t,
             dx: (rand() - 0.5) * 0.3,
             dz: (rand() - 0.5) * 0.3,
