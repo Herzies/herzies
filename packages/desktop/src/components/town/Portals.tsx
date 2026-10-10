@@ -6,6 +6,7 @@ import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js
 import { ambient, seeThrough } from "./ambient";
 import type { TownMap } from "./map";
 import { type Portal, portalsOf } from "./portal";
+import { townSave } from "./runtime";
 import { distortionMaterial, distortionScene } from "./vfx/distortion";
 
 /**
@@ -184,6 +185,8 @@ const moteGeometry = (() => {
 const discGeometry = new THREE.CircleGeometry(DISC_R, 48);
 const ringGeometry = new THREE.TorusGeometry(DISC_R * 1.02, 0.16, 8, 40);
 const TINT = new THREE.Color("#a77cff");
+/** How near you have to be for the air round a portal to ripple. */
+const RIPPLE_REACH = 25;
 
 function PortalArch({ portal, live }: { portal: Portal; live: boolean }) {
   const disc = useMemo(() => discMaterial(TINT), []);
@@ -227,6 +230,10 @@ function PortalArch({ portal, live }: { portal: Portal; live: boolean }) {
   }, []);
   useFrame(({ clock }) => {
     if (!live) return;
+    // Too far off to see the air bend: skip the distortion pass's work.
+    ripple.mesh.visible =
+      Math.hypot(townSave.x - portal.x, townSave.z - portal.z) < RIPPLE_REACH;
+    if (!ripple.mesh.visible) return;
     const t = clock.elapsedTime;
     const pulse = 1 + Math.sin(t * 2.4) * 0.05;
     place.p.set(portal.x, DISC_Y, portal.z);

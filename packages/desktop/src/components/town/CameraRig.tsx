@@ -99,6 +99,9 @@ export function CameraRig() {
       const look = on ? ACTION.NONE : ACTION.ROTATE;
       c.mouseButtons.left = look;
       c.mouseButtons.right = look;
+      // Aiming wants the view right under the mouse: barely smoothed.
+      c.smoothTime = on ? 0.03 : 0.12;
+      c.draggingSmoothTime = on ? 0.01 : 0.04;
       c.minPolarAngle = on ? COMBAT.minPolar : WALK_POLAR.min;
       c.maxPolarAngle = on ? COMBAT.maxPolar : WALK_POLAR.max;
       const d = on ? COMBAT.distance : DISTANCE;

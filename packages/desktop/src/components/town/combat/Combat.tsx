@@ -105,8 +105,14 @@ export function Combat({
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.code === "KeyF") combat.fireHeld = false;
     };
+    // Anywhere in the window: with the cursor held still or hidden (not
+    // pointer-locked), it may be over the chat or the HUD rather than the
+    // world. A click there casts, and mustn't focus the chat (which would
+    // end combat).
     const onPointerDown = (e: PointerEvent) => {
       if (!combat.on || e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
       combat.queuedAt = performance.now();
       combat.fireHeld = true;
     };
@@ -126,7 +132,7 @@ export function Combat({
     window.addEventListener("blur", leave);
     document.addEventListener("focusin", onFocusIn);
     document.addEventListener("visibilitychange", onHidden);
-    surface.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("pointerdown", onPointerDown, true);
     return () => {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
@@ -134,7 +140,7 @@ export function Combat({
       window.removeEventListener("blur", leave);
       document.removeEventListener("focusin", onFocusIn);
       document.removeEventListener("visibilitychange", onHidden);
-      surface.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("pointerdown", onPointerDown, true);
       leave();
     };
   }, [canFight, surface]);

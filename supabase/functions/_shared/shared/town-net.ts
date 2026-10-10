@@ -197,6 +197,26 @@ export const TOWN_FLAG_AFK = 1;
 export const TOWN_FLAG_SITTING = 2;
 /** Standing still with music playing: drawn dancing. */
 export const TOWN_FLAG_DANCING = 4;
+/** Three bits counting sonic casts, mod 8 (see castSeqOf): whenever they
+ * change, the herzie cast as many waves, facing its heading. A count, not
+ * an "is casting" bit, so two casts between ticks aren't one. */
+export const TOWN_CAST_SHIFT = 3;
+export const TOWN_CAST_MASK = 0b111 << TOWN_CAST_SHIFT;
+/** In combat mode, on the testing ground. */
+export const TOWN_FLAG_COMBAT = 64;
+
+/** The cast count carried in a state's flags. */
+export function castSeqOf(flags: number): number {
+  return (flags & TOWN_CAST_MASK) >> TOWN_CAST_SHIFT;
+}
+/** `flags` carrying cast count `seq` (mod 8). */
+export function withCastSeq(flags: number, seq: number): number {
+  return (flags & ~TOWN_CAST_MASK) | ((seq & 0b111) << TOWN_CAST_SHIFT);
+}
+/** How many casts it took to get from count `from` to `to` (mod 8). */
+export function castsBetween(from: number, to: number): number {
+  return (to - from + 8) & 0b111;
+}
 
 const OP_STATE = 1;
 const OP_SNAPSHOT = 2;
