@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { matchesSecretTrack } from "./game-server";
+import { matchesSecretTrack } from "./game-server.js";
 
 describe("matchesSecretTrack", () => {
   const hunt = {
