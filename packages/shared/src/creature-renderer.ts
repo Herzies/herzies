@@ -1724,7 +1724,7 @@ function buildWitchHatSpheres(spheres: Sphere[]): Sphere[] {
     });
   // Creature space is y down: up is −y.
   const brimY = hy - hr * 0.62;
-  const brimHalf = hr * 0.07;
+  const brimHalf = hr * 0.04;
   const crownBase = brimY - brimHalf;
   // Squat on purpose: a grown herzie's head sits close to the top of the
   // frame, and a classic tall hat would be cut off.
