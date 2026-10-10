@@ -328,6 +328,9 @@ function placeAll(map: TownMap) {
   return { placed, trees, species };
 }
 
+/** What isn't drawn on an island seen across the sky (see Backdrop). */
+const TOO_SMALL_TO_SEE = new Set<Kind>(["v", "*", "m", "S"]);
+
 /** What casts a shadow in the sun: the small stuff (grass, flowers,
  * mushrooms) isn't worth drawing a second time for it. */
 const CASTS = new Set<Kind>(["R", "S", "B", "L"]);
@@ -426,15 +429,18 @@ export function Props({
         <PartMesh key={b.key} part={b.part} things={trees[b.key]} cast />
       ))}
       {(Object.keys(KINDS) as Kind[]).flatMap((k) =>
-        KINDS[k].parts.map((part, i) => (
-          <PartMesh
-            // biome-ignore lint/suspicious/noArrayIndexKey: fixed parts list
-            key={`${k}${i}`}
-            part={part}
-            things={placed[k]}
-            cast={CASTS.has(k)}
-          />
-        )),
+        // Across the sky, the little things can't be made out.
+        backdrop && TOO_SMALL_TO_SEE.has(k)
+          ? []
+          : KINDS[k].parts.map((part, i) => (
+              <PartMesh
+                // biome-ignore lint/suspicious/noArrayIndexKey: fixed parts list
+                key={`${k}${i}`}
+                part={part}
+                things={placed[k]}
+                cast={CASTS.has(k)}
+              />
+            )),
       )}
       <Buildings map={map} />
       {!backdrop && <NightLights map={map} />}

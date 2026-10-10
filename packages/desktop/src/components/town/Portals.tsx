@@ -3,7 +3,7 @@ import { CuboidCollider } from "@react-three/rapier";
 import { useLayoutEffect, useMemo } from "react";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import { ambient } from "./ambient";
+import { ambient, seeThrough } from "./ambient";
 import type { TownMap } from "./map";
 import { type Portal, portalsOf } from "./portal";
 import { distortionMaterial, distortionScene } from "./vfx/distortion";
@@ -67,10 +67,11 @@ function archGeometry(): THREE.BufferGeometry {
 }
 
 const archGeo = archGeometry();
-const archMaterial = new THREE.MeshLambertMaterial({
-  vertexColors: true,
-  flatShading: true,
-});
+// Dithers away when it's between the camera and the herzie, like the
+// trees and houses do.
+const archMaterial = seeThrough(
+  new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }),
+);
 
 /** The swirl: light spiralling in to the middle, brightest at the rim,
  * through the haze like everything else. */
@@ -147,7 +148,7 @@ function motesMaterial(tint: THREE.Color): THREE.ShaderMaterial {
         vec3 p = vec3(cos(a) * r, sin(a) * r, (1.0 - t) * 0.9 * sign(fract(aSeed * 7.3) - 0.5));
         vAlpha = smoothstep(0.0, 0.15, t) * (1.0 - smoothstep(0.85, 1.0, t));
         vec4 mv = modelViewMatrix * vec4(p, 1.0);
-        gl_PointSize = max(1.0, 0.07 * 260.0 / -mv.z);
+        gl_PointSize = max(1.0, 0.05 * 200.0 / -mv.z);
         gl_Position = projectionMatrix * mv;
       }
     `,
