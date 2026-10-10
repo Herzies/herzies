@@ -59,8 +59,7 @@ async function player(currency = 1000, inventory: Record<string, number> = {}) {
 }
 
 const treatsOf = async (userId: string) =>
-  (await getUnits(userId)).filter((u) => u.item_id === "trick-or-treat")
-    .length;
+  (await getUnits(userId)).filter((u) => u.item_id === "trick-or-treat").length;
 
 function buy(token: string, eventId: string, itemId: string, quantity = 1) {
   return buyRoute(
