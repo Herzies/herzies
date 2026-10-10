@@ -120,18 +120,28 @@ export function normalizeTrack(s: string): string {
     .trim();
 }
 
+/** The first credited artist, normalized. Apps credit collaborations
+ * differently: Apple Music reports "Gil Scott-Heron & Jamie xx" where
+ * Spotify reports just "Gil Scott-Heron", so artists match on the lead. */
+function leadArtist(s: string): string {
+  return normalizeTrack(s)
+    .split(/\s*(?:&|,|\bfeat\.|\bft\.|\bfeaturing\b|\bwith\b)\s*/)[0]
+    .trim();
+}
+
 /** Check if a now_playing matches a secret track event config */
-function matchesSecretTrack(
+export function matchesSecretTrack(
   title: string,
   artist: string,
-  config: SecretTrackConfig,
+  config: Pick<SecretTrackConfig, "trackTitle" | "trackArtist">,
 ): boolean {
   const normTitle = normalizeTrack(title);
-  const normArtist = normalizeTrack(artist);
   const configTitle = normalizeTrack(config.trackTitle);
-  const configArtist = normalizeTrack(config.trackArtist);
 
-  return normTitle === configTitle && normArtist === configArtist;
+  return (
+    normTitle === configTitle &&
+    leadArtist(artist) === leadArtist(config.trackArtist)
+  );
 }
 
 /** Convert a Supabase herzie row to the shared Herzie type */
