@@ -1,9 +1,12 @@
 import * as THREE from "three";
 import {
   buildCreatureModel,
+  CAST,
   CREATURE_FRAME_HEIGHT,
   type CreatureModel,
   type CreatureParams,
+  castHand,
+  castWeight,
   creaturePoseOffsets,
   creatureSeatDrop,
   DANCE_LOOP_FRAMES,
@@ -83,6 +86,14 @@ const SPIRIT_CALM_LOOP_CHANCE = 0.6;
 const DANCE_BLEND_RATE = 6;
 /** How quickly it sits down and stands up (per second). */
 const SIT_BLEND_RATE = 14;
+/** How long a sonic cast takes, draw to home again, in seconds. The wave
+ * leaves the hand CAST.release of the way through. */
+export const CAST_SECONDS = 0.4;
+/** How soon after cast() the wave leaves the hand, in seconds. */
+export const CAST_RELEASE_SECONDS = CAST_SECONDS * CAST.release;
+/** A herzie with no arms (stage 1) grows a little hand to cast with: this
+ * big, as a fraction of its head. */
+const POP_HAND = 0.3;
 /** World units per creature unit: the renderer's whole frame (at the
  * herzie's centre) is 4.5 world units tall, the size the sprites were. */
 export const MODEL_SCALE = 4.5 / CREATURE_FRAME_HEIGHT;
@@ -353,6 +364,20 @@ export class HerzieModel {
    * creatureSeatDrop). */
   private readonly seatDrop: number;
   private hopVariant: number | undefined;
+  /** Seconds into a sonic cast; undefined when it isn't casting. */
+  private castTime: number | undefined;
+  private castPitch = 0;
+  /** The hand the wave leaves from: the right arm's part, if it has one. */
+  private readonly castArm: number;
+  /** For a herzie with no arms: the hand it grows to cast with, beside its
+   * head, and where on the head it grows from. */
+  private readonly popHand: {
+    mesh: THREE.Mesh;
+    head: Sphere;
+    radius: number;
+  } | null = null;
+  /** The wave left the hand during the last update(). */
+  released = false;
 
   private readonly look: HerzieLook;
   private readonly model: CreatureModel;
@@ -471,6 +496,19 @@ export class HerzieModel {
             : this.creature;
       parent.add(mesh);
     }
+    this.castArm = spheres.findIndex((sp) => sp.part === "arm-r");
+    const headAt = spheres.findIndex((sp) => sp.part === "head");
+    if (this.castArm < 0 && headAt >= 0 && !look.params) {
+      const head = spheres[headAt];
+      const mesh = new THREE.Mesh(
+        geometryFor({ ...head, shape: undefined }),
+        this.meshes[headAt].material,
+      );
+      mesh.castShadow = true;
+      mesh.visible = false;
+      this.creature.add(mesh);
+      this.popHand = { mesh, head, radius: head.radius * POP_HAND };
+    }
     this.creature.rotation.x = Math.PI;
     this.turn.add(this.creature);
     this.root.add(this.turn);
@@ -485,11 +523,26 @@ export class HerzieModel {
     this.animateBody();
   }
 
+  /** Cast a sonic wave from its hand, aimed `pitch` radians above level:
+   * draw, thrust, follow through. `released` turns true on the update the
+   * wave leaves the hand. Casting again mid-cast starts afresh. */
+  cast(pitch = 0): void {
+    this.castTime = 0;
+    this.castPitch = Math.max(-0.7, Math.min(0.7, pitch));
+    this.released = false;
+  }
+
+  /** It's mid-cast. */
+  get casting(): boolean {
+    return this.castTime !== undefined;
+  }
+
   /** Advances the animation and poses the parts. Call every frame. */
   update(dt: number, speed: number): void {
     stepAnimation(this.anim, dt, speed);
     this.stepDance(dt);
     this.stepSit(dt);
+    this.stepCast(dt);
     this.swing(dt);
     this.turn.rotation.y = this.heading;
     this.pose();
@@ -567,6 +620,75 @@ export class HerzieModel {
     } else if (before === 0) this.rerollHop();
   }
 
+  private stepCast(dt: number) {
+    this.released = false;
+    if (this.castTime === undefined) return;
+    const before = this.castTime;
+    this.castTime += dt;
+    if (
+      before < CAST_RELEASE_SECONDS &&
+      this.castTime >= CAST_RELEASE_SECONDS
+    ) {
+      this.released = true;
+    }
+    if (this.castTime >= CAST_SECONDS) this.castTime = undefined;
+  }
+
+  /**
+   * Where the casting hand's palm is, in the world: the front of the right
+   * arm (or of the hand an armless herzie grows). Call after update() — and
+   * after anything moves it — so it's this frame's.
+   */
+  handWorldPosition(out: THREE.Vector3): THREE.Vector3 {
+    const phase =
+      this.castTime === undefined ? 1 : this.castTime / CAST_SECONDS;
+    const { dir } = castHand(phase, this.castPitch);
+    if (this.castArm >= 0) {
+      const arm = this.model.spheres[this.castArm];
+      const p = this.meshes[this.castArm].position;
+      out.set(
+        p.x + dir[0] * arm.radius,
+        p.y + dir[1] * arm.radius,
+        p.z + dir[2] * arm.radius,
+      );
+    } else if (this.popHand) {
+      const { mesh, radius } = this.popHand;
+      out.set(
+        mesh.position.x + dir[0] * radius,
+        mesh.position.y + dir[1] * radius,
+        mesh.position.z + dir[2] * radius,
+      );
+    } else {
+      // The boss: the front of its middle.
+      out.set(0, this.feetY * 0.5, -1);
+    }
+    this.root.updateWorldMatrix(true, true);
+    return this.creature.localToWorld(out);
+  }
+
+  /** The armless herzie's hand: out from the side of its head for the
+   * cast, back in after. */
+  private posePopHand(phase: number | undefined) {
+    const pop = this.popHand;
+    if (!pop) return;
+    const w = phase === undefined ? 0 : castWeight(phase);
+    pop.mesh.visible = w > 0.01;
+    if (!pop.mesh.visible || phase === undefined) return;
+    const { head, radius } = pop;
+    const { dir, reach } = castHand(phase, this.castPitch);
+    // The "shoulder": just inside the head's right side.
+    const sx = head.center[0] + head.radius * 0.75;
+    const sy = head.center[1] + head.radius * 0.15;
+    const sz = head.center[2];
+    const length = head.radius * 0.55 * reach;
+    pop.mesh.position.set(
+      sx + dir[0] * length,
+      sy + dir[1] * length,
+      sz + dir[2] * length,
+    );
+    pop.mesh.scale.setScalar(radius * w);
+  }
+
   private stepSit(dt: number) {
     const target = this.sitting ? 1 : 0;
     this.sitWeight +=
@@ -600,7 +722,13 @@ export class HerzieModel {
       spiritHopVariant: this.hopVariant,
       dangle: this.dangle,
       sitWeight: this.sitWeight,
+      castPhase:
+        this.castTime === undefined ? undefined : this.castTime / CAST_SECONDS,
+      castPitch: this.castPitch,
     });
+    this.posePopHand(
+      this.castTime === undefined ? undefined : this.castTime / CAST_SECONDS,
+    );
     for (let i = 0; i < spheres.length; i++) {
       const s = spheres[i];
       const [x, y, z] = s.center;
