@@ -3,6 +3,7 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { ambient } from "./ambient";
+import { combat } from "./combat/state";
 import { townSave, useTownRuntime } from "./runtime";
 
 const { ACTION } = CameraControlsImpl;
@@ -17,6 +18,34 @@ const FRAMING_LIFT = 1.4;
 /** Arrow-key camera speeds, in radians per second. */
 const KEY_TURN_SPEED = 2;
 const KEY_TILT_SPEED = 1;
+
+/** Combat mode: the camera comes in over the right shoulder… */
+const COMBAT = {
+  distance: 6.4,
+  /** …levelled off to look along the ground, not down at it… */
+  polar: 1.5,
+  /** …the herzie a little left of and below the crosshair… */
+  shoulder: 1.75,
+  lift: 1.05,
+  look: 1.5,
+  /** …free to look higher and lower than when walking… */
+  minPolar: 0.55,
+  maxPolar: 1.78,
+  /** …turned by the mouse: radians per pixel moved. */
+  sensitivity: 0.0024,
+} as const;
+const WALK_POLAR = { min: 0.85, max: 1.45 } as const;
+
+/** Camera shake (Squirrel Eiserloh's "trauma"): hits add trauma, which
+ * drains away; the camera shakes by its square, so small knocks barely
+ * register and big ones jolt. Smooth noise, not random jitter. */
+const SHAKE = { drain: 1.8, offset: 0.22, speed: 26 } as const;
+
+/** Smooth noise in -1..1: a few sines at unrelated rates. */
+const wave = (t: number, seed: number) =>
+  Math.sin(t * 1.0 + seed) * 0.5 +
+  Math.sin(t * 2.31 + seed * 1.7) * 0.3 +
+  Math.sin(t * 4.79 + seed * 2.9) * 0.2;
 
 /**
  * The third-person camera: camera-controls orbiting the player, which it
@@ -35,6 +64,10 @@ export function CameraRig() {
   const camera = useThree((s) => s.camera);
   const controls = useRef<CameraControlsImpl>(null);
   const at = useRef(new THREE.Vector3());
+  const fighting = useRef(false);
+  const time = useRef(0);
+  /** 0 walking to 1 in combat, eased. */
+  const blend = useRef(0);
 
   // Restore where the camera was, and save it again on the way out.
   useEffect(() => {
@@ -57,6 +90,56 @@ export function CameraRig() {
     const c = controls.current;
     const body = rt.playerBody;
     if (!c || !body) return;
+    time.current += delta;
+
+    // Into or out of combat: over the shoulder, the mouse aiming — or back.
+    if (combat.on !== fighting.current) {
+      const on = combat.on;
+      fighting.current = on;
+      const look = on ? ACTION.NONE : ACTION.ROTATE;
+      c.mouseButtons.left = look;
+      c.mouseButtons.right = look;
+      c.minPolarAngle = on ? COMBAT.minPolar : WALK_POLAR.min;
+      c.maxPolarAngle = on ? COMBAT.maxPolar : WALK_POLAR.max;
+      const d = on ? COMBAT.distance : DISTANCE;
+      c.minDistance = Math.min(d, c.distance);
+      c.maxDistance = Math.max(d, c.distance);
+      void c.dollyTo(d, true).then(() => {
+        c.minDistance = c.maxDistance = fighting.current
+          ? COMBAT.distance
+          : DISTANCE;
+      });
+      combat.lookX = combat.lookY = 0;
+      if (on) void c.rotatePolarTo(COMBAT.polar, true);
+    }
+    if (combat.on) {
+      // Right looks right; up looks up.
+      c.rotate(
+        -combat.lookX * COMBAT.sensitivity,
+        -combat.lookY * COMBAT.sensitivity,
+        false,
+      );
+      combat.lookX = combat.lookY = 0;
+    }
+    // Eased between walking and combat framing, plus shake on top.
+    blend.current = THREE.MathUtils.damp(
+      blend.current,
+      combat.on ? 1 : 0,
+      10,
+      delta,
+    );
+    const b = blend.current;
+    combat.trauma = Math.max(0, combat.trauma - SHAKE.drain * delta);
+    const k = combat.trauma ** 2;
+    const t = time.current * SHAKE.speed;
+    c.setFocalOffset(
+      COMBAT.shoulder * b + wave(t, 1) * SHAKE.offset * k,
+      -FRAMING_LIFT +
+        (FRAMING_LIFT - COMBAT.lift) * b +
+        wave(t, 7) * SHAKE.offset * k,
+      0,
+      false,
+    );
     const input = rt.input.current;
     if (input) {
       // Left looks left: a growing azimuth swings the view anticlockwise.
@@ -72,7 +155,9 @@ export function CameraRig() {
       }
     }
     body.getWorldPosition(at.current);
-    c.moveTo(at.current.x, at.current.y + LOOK_HEIGHT, at.current.z, false);
+    const lookHeight =
+      LOOK_HEIGHT + (COMBAT.look - LOOK_HEIGHT) * blend.current;
+    c.moveTo(at.current.x, at.current.y + lookHeight, at.current.z, false);
     // Where the player is as the camera sees it, for whatever's in the way
     // to turn see-through (see `seeThrough`). The camera last moved a frame
     // ago, which is close enough.

@@ -223,6 +223,14 @@ function Sandbox() {
       shadows={params.get("shadows") !== "0"}
       ao={params.get("ao") !== "0"}
       onCreated={params.has("bench") ? bench : undefined}
+      // ?sp=&cc=&cd= : sonic power, crit chance and crit damage, to try
+      // the dummies with.
+      stats={{
+        sonicPower: Number(params.get("sp") ?? 0),
+        luck: 0,
+        critChance: Number(params.get("cc") ?? 0),
+        critDamage: Number(params.get("cd") ?? 0),
+      }}
       onOpen={(key) => console.log("[town-sandbox] open", key)}
       onNearChange={(s) => console.log("[town-sandbox] near", s?.key ?? null)}
     />

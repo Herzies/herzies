@@ -1,3 +1,5 @@
+import type { HerzieModel } from "@herzies/shared/gl";
+import type { RapierRigidBody } from "@react-three/rapier";
 import {
   createContext,
   type RefObject,
@@ -25,6 +27,10 @@ export type TownRuntime = {
   playerSpeed: number;
   /** The player's herzie walks on two feet (stage 3) rather than hopping. */
   playerLegs: boolean;
+  /** The player's herzie itself, for casting (see Combat). */
+  playerHerzie: HerzieModel | null;
+  /** The player's physics body, so aiming can look past it. */
+  playerRigidBody: RapierRigidBody | null;
   /** The camera's azimuth (camera-controls' convention: 0 puts the camera
    * on the target's +z side). Movement is relative to it. */
   cameraAzimuth: number;

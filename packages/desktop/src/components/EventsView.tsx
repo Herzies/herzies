@@ -5,6 +5,8 @@ import type {
   ItemUnit,
 } from "@herzies/shared";
 import {
+  getHerzieStats,
+  getHerzieStatsFromUnits,
   getItem,
   RARITY_COLORS as ITEM_RARITY_COLORS,
   ItemTypeIcon,
@@ -579,6 +581,11 @@ function EventsViewImpl({
           stage: playerStage ?? 1,
           equipped,
         }}
+        stats={
+          units.length > 0
+            ? getHerzieStatsFromUnits(units)
+            : getHerzieStats(equipped)
+        }
         notice={
           inTown === 0 ? (
             // An empty Town reads as dead in a way an empty event list

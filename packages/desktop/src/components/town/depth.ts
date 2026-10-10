@@ -13,7 +13,7 @@ import { replaceExactly } from "./shadows";
 // - Cloud shadows: soft patches of shade drifting across the island with
 //   the wind, on the sun's light only.
 // - Tone mapping kept in the shaders while the ambient occlusion pass
-//   (Occlusion) draws the scene off-screen: three only tone-maps what it
+//   (Post) draws the scene off-screen: three only tone-maps what it
 //   draws straight to the screen, and doing it after, in the composer,
 //   would tone-map the fog and the sky too, which three never does.
 //
@@ -52,7 +52,7 @@ export const CLOUD_SHADE = 0.4;
 /**
  * The Town's own look, as a uniform every built-in material shares: xy the
  * cloud shadows' drift, z 1 to tone-map in the shader regardless (see
- * Occlusion), w the cloud shadows' strength. All 0 by default, so a scene
+ * Post), w the cloud shadows' strength. All 0 by default, so a scene
  * that isn't the Town is untouched. A plain object, not a THREE.Vector4:
  * three clones those per material, but hands plain values on by reference.
  */
@@ -111,7 +111,7 @@ export function fogFragmentChunk(chunk: string): string {
 		fogFactor = 1.0 - ( 1.0 - fogFactor ) * ( 1.0 - haze ) * ( 1.0 - mist );`,
     1,
   );
-  // Off-screen (see Occlusion) the colour and the fog's are both still
+  // Off-screen (see Post) the colour and the fog's are both still
   // linear here; on screen three has already encoded both to sRGB, and
   // mixes them there. Mix the same way either way, or the haze comes out
   // far thicker.

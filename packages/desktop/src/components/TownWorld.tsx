@@ -1,4 +1,4 @@
-import { type Equipped, isTownMapId } from "@herzies/shared";
+import { type Equipped, type HerzieStats, isTownMapId } from "@herzies/shared";
 import {
   lazy,
   Suspense,
@@ -38,7 +38,10 @@ export function TownWorld({
   notice,
   chatOverlay = false,
   musicPlaying = false,
+  stats,
 }: {
+  /** The player's herzie's stats: how hard its waves hit. */
+  stats?: HerzieStats;
   /** The chat, for lines over the speakers' heads. */
   chatMessages?: ChatMessage[];
   /** The Town's events are still loading: keep the splash up. */
@@ -178,6 +181,7 @@ export function TownWorld({
             onNearChange={setNear}
             onBenchChange={setBench}
             onReady={onReady}
+            stats={stats}
           />
         </Suspense>
       )}

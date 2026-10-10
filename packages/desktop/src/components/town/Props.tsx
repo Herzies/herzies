@@ -11,6 +11,7 @@ import { swayInWind } from "./ambient";
 
 import { BenchColliders, Benches } from "./Benches";
 import { BuildingColliders, Buildings, lanternMaterial } from "./Buildings";
+import { Dummies, DummyColliders } from "./combat/Dummies";
 import { trunkMaterial } from "./Islands";
 import {
   LANTERN_Y,
@@ -438,6 +439,7 @@ export function Props({
       {!backdrop && <NightLights map={map} />}
       <Benches map={map} />
       {!backdrop && <Statues map={map} champion={champion} />}
+      <Dummies map={map} live={!backdrop} />
     </>
   );
 }
@@ -482,6 +484,7 @@ export function MapColliders({ map }: { map: TownMap }) {
       <BuildingColliders map={map} />
       <BenchColliders map={map} />
       <StatueColliders map={map} />
+      <DummyColliders map={map} />
     </RigidBody>
   );
 }

@@ -28,6 +28,7 @@
     "@tauri-apps/plugin-notification": "^2.3.3",
     "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-updater": "^2.10.1",
+    "postprocessing": "^6.39.5",
     "three": "^0.186.1"
   },
   "devDependencies": {

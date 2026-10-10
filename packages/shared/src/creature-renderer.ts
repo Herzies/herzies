@@ -2528,12 +2528,32 @@ const ease = (a: number, b: number, v: number) => {
 const easeOut = (t: number) => 1 - (1 - t) ** 3;
 const easeIn = (t: number) => t * t * t;
 
+/** The arm a herzie casts with: the one on its right as you look at its
+ * back — the side a third-person camera sits over. (Creature space's +x
+ * is its left from behind, once turned upright.) */
+export const CAST_ARM = "arm-l";
+/** Which way is outward for the casting arm, along creature x. */
+const CAST_SIDE = -1;
+
 /** Where the casting hand is, `phase` through a cast aimed `pitch` above
  * level, as a direction from the shoulder (creature space: y down, front
  * −z) and how far along it, in arm lengths. */
 export function castHand(phase: number, pitch = 0): { dir: V3; reach: number } {
+  const hand = castHandOutward(phase, pitch);
+  hand.dir[0] *= CAST_SIDE;
+  return hand;
+}
+
+/** castHand, for an arm on the +x side. */
+function castHandOutward(
+  phase: number,
+  pitch: number,
+): { dir: V3; reach: number } {
   const back: V3 = [0.55, 0.15, 0.82];
-  const front: V3 = [-0.12, -Math.sin(pitch), -Math.cos(pitch)];
+  // Out front and a little to its side, palm to the target: clear of the
+  // body, so it reads from behind (where the camera is) as well as from
+  // the front.
+  const front: V3 = [0.42, -Math.sin(pitch) - 0.12, -Math.cos(pitch)];
   const mix = (a: V3, b: V3, t: number): V3 => {
     const v = add(scale(a, 1 - t), scale(b, t));
     return scale(v, 1 / Math.max(1e-9, Math.hypot(...v)));
@@ -2580,12 +2600,12 @@ function castDeltas(spheres: Sphere[], phase: number, pitch: number): V3[] {
         (CAST.rock + CAST.lean) *
           easeIn(Math.max(0, phase - CAST.drawn) / (CAST.release - CAST.drawn))
       : CAST.lean * (1 - ease(CAST.release, 1, phase));
-  const shoulder = rig.shoulders["arm-r"];
+  const shoulder = rig.shoulders[CAST_ARM];
   const hand = castHand(phase, pitch);
   return spheres.map((sp): V3 => {
     if (isSceneFixed(sp.part) || isLeg(sp.part)) return [0, 0, 0];
     const leaning: V3 = [0, 0, -lean * s];
-    if (sp.part !== "arm-r" || !shoulder) return leaning;
+    if (sp.part !== CAST_ARM || !shoulder) return leaning;
     const length = Math.hypot(...sub(sp.center, shoulder));
     const at = add(shoulder, scale(hand.dir, length * hand.reach));
     return add(sub(at, sp.center), leaning);
@@ -3808,7 +3828,7 @@ export function creaturePoseOffsets(
     // A cast takes the casting arm over; the lean adds to whatever else.
     const c = cast?.[i];
     if (c) {
-      const own = s.part === "arm-r" ? cw : 0;
+      const own = s.part === CAST_ARM ? cw : 0;
       x = x * (1 - own) + c[0] * cw;
       y = y * (1 - own) + c[1] * cw;
       z = z * (1 - own) + c[2] * cw;

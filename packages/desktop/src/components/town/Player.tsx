@@ -14,7 +14,9 @@ import type { Look } from "../TownScene";
 import { ambient } from "./ambient";
 import { SEAT_Y } from "./Benches";
 import type { ChatBubble } from "./chatBubbles";
+import { combat } from "./combat/state";
 import { HeadBubble } from "./HeadBubble";
+import type { TownInput } from "./input";
 import type { TownMap } from "./map";
 import { type Mover, stepMover, walkAzimuth } from "./movement";
 import { townLive, townSave, useTownRuntime } from "./runtime";
@@ -40,6 +42,26 @@ const DANCE_AFTER = 0.4;
  * button turns the herzie with the camera (and A/D then strafe); holding
  * both walks forward.
  */
+const aimingInput: TownInput = {
+  forward: false,
+  back: false,
+  left: false,
+  right: false,
+  turnLeft: false,
+  turnRight: false,
+  tiltUp: false,
+  tiltDown: false,
+  mouseLeft: false,
+  mouseRight: true,
+};
+/** The keys as they are, with the mouse read as steering (combat mode). */
+function aiming(input: TownInput): TownInput {
+  return Object.assign(aimingInput, input, {
+    mouseLeft: false,
+    mouseRight: true,
+  });
+}
+
 export function Player({
   look,
   spawn,
@@ -87,8 +109,12 @@ export function Player({
   );
   useEffect(() => {
     herzie.heading = townSave.heading;
-    return () => herzie.dispose();
-  }, [herzie]);
+    rt.playerHerzie = herzie;
+    return () => {
+      if (rt.playerHerzie === herzie) rt.playerHerzie = null;
+      herzie.dispose();
+    };
+  }, [herzie, rt]);
   // Gone from the world means standing still, as far as others can tell.
   useEffect(
     () => () => {
@@ -117,7 +143,10 @@ export function Player({
     const kcc = controller.current;
     if (!b || !col || !kcc) return;
     const dt = w.timestep;
-    const input = rt.input.current;
+    // In combat the herzie faces where the camera looks and strafes, as
+    // with the right button held; the left button casts rather than looks.
+    const raw = rt.input.current;
+    const input = combat.on && raw ? aiming(raw) : raw;
     const m = mover.current;
     if (input && Object.values(input).some(Boolean))
       townLive.lastInputAt = performance.now();
@@ -209,6 +238,7 @@ export function Player({
     <RigidBody
       ref={(b) => {
         body.current = b;
+        rt.playerRigidBody = b;
       }}
       type="kinematicPosition"
       colliders={false}

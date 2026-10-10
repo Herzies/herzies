@@ -2,6 +2,7 @@ import * as THREE from "three";
 import {
   buildCreatureModel,
   CAST,
+  CAST_ARM,
   CREATURE_FRAME_HEIGHT,
   type CreatureModel,
   type CreatureParams,
@@ -496,7 +497,7 @@ export class HerzieModel {
             : this.creature;
       parent.add(mesh);
     }
-    this.castArm = spheres.findIndex((sp) => sp.part === "arm-r");
+    this.castArm = spheres.findIndex((sp) => sp.part === CAST_ARM);
     const headAt = spheres.findIndex((sp) => sp.part === "head");
     if (this.castArm < 0 && headAt >= 0 && !look.params) {
       const head = spheres[headAt];
@@ -677,7 +678,7 @@ export class HerzieModel {
     const { head, radius } = pop;
     const { dir, reach } = castHand(phase, this.castPitch);
     // The "shoulder": just inside the head's right side.
-    const sx = head.center[0] + head.radius * 0.75;
+    const sx = head.center[0] - head.radius * 0.75;
     const sy = head.center[1] + head.radius * 0.15;
     const sz = head.center[2];
     const length = head.radius * 0.55 * reach;

@@ -1,16 +1,23 @@
 import { describe, expect, it } from "vitest";
 import { EntityBuffer, ServerClock } from "./town-interpolation.js";
 import {
+  castSeqOf,
+  castsBetween,
   decodeSnapshot,
   decodeStateFrame,
   encodeSnapshot,
   encodeStateFrame,
   quantizeState,
   signTownTicket,
+  TOWN_FLAG_AFK,
+  TOWN_FLAG_COMBAT,
+  TOWN_FLAG_DANCING,
+  TOWN_FLAG_SITTING,
   TOWN_TICK_MS,
   type TownState,
   type TownTicketPayload,
   verifyTownTicket,
+  withCastSeq,
 } from "./town-net.js";
 
 const state = (x: number, z: number, speed = 4.5, heading = 0): TownState => ({
@@ -184,5 +191,26 @@ describe("EntityBuffer", () => {
     expect(
       (b as unknown as { samples: unknown[] }).samples.length,
     ).toBeLessThan(25);
+  });
+});
+
+describe("cast counts in the flags", () => {
+  it("carries a count of casts beside the other flags, untouched", () => {
+    const others =
+      TOWN_FLAG_AFK | TOWN_FLAG_SITTING | TOWN_FLAG_DANCING | TOWN_FLAG_COMBAT;
+    for (let seq = 0; seq < 20; seq++) {
+      const flags = withCastSeq(others, seq);
+      expect(castSeqOf(flags)).toBe(seq % 8);
+      expect(flags & others).toBe(others);
+      // It survives the trip, in its byte.
+      const back = quantizeState({ x: 0, z: 0, heading: 0, speed: 0, flags });
+      expect(back.flags).toBe(flags);
+    }
+  });
+
+  it("counts the casts between two counts, round the wrap", () => {
+    expect(castsBetween(2, 2)).toBe(0);
+    expect(castsBetween(2, 5)).toBe(3);
+    expect(castsBetween(6, 1)).toBe(3);
   });
 });

@@ -1,4 +1,4 @@
-import { TOWN_FLAG_SITTING } from "@herzies/shared";
+import { type HerzieStats, TOWN_FLAG_SITTING } from "@herzies/shared";
 import { Canvas, type RootState, useFrame, useThree } from "@react-three/fiber";
 import { Physics } from "@react-three/rapier";
 import { Suspense, useMemo, useRef } from "react";
@@ -7,13 +7,15 @@ import { ambient } from "./ambient";
 import { benchesOf, type Seat, seatNear } from "./Benches";
 import { CameraRig } from "./CameraRig";
 import type { ChatBubbles } from "./chatBubbles";
+import { Combat } from "./combat/Combat";
+import { CombatOverlay } from "./combat/DamageNumbers";
 import type { Hour } from "./DayCycle";
 import { driftClouds } from "./depth";
 import { type TownInput, useTownInput } from "./input";
-import { type TownMap, worldRadius } from "./map";
+import { portalCells, type TownMap, worldRadius } from "./map";
 import type { TownConnection } from "./net/TownConnection";
-import { Occlusion } from "./Occlusion";
 import { Player } from "./Player";
+import { Post } from "./Post";
 import { RemotePlayers } from "./RemotePlayers";
 import "./shadows";
 import {
@@ -27,6 +29,7 @@ import {
 } from "./runtime";
 import type { Champion } from "./Statues";
 import { Visitor } from "./Visitor";
+import { SonicVFX } from "./vfx/SonicVFX";
 import { World } from "./World";
 
 /** The Town's resolution as a fraction of the screen's: each drawn pixel
@@ -68,6 +71,8 @@ export type TownCanvasProps = {
   net?: TownConnection | null;
   /** Called once the world has drawn its first frame. */
   onReady?: () => void;
+  /** The player's herzie's stats: how hard its waves hit. */
+  stats?: HerzieStats;
   /** Called once the renderer is up (the sandbox's benchmark uses it). */
   onCreated?: (state: RootState) => void;
 };
@@ -86,6 +91,8 @@ export default function TownCanvas(props: TownCanvasProps) {
       playerBody: null,
       playerSpeed: 0,
       playerLegs: false,
+      playerHerzie: null,
+      playerRigidBody: null,
       cameraAzimuth: 0,
     }),
     [],
@@ -139,14 +146,40 @@ export default function TownCanvas(props: TownCanvasProps) {
             {spots.map((s) => (
               <Visitor key={s.key} spot={s} onOpen={props.onOpen} />
             ))}
+            <Combat
+              map={map}
+              stats={props.stats ?? NO_STATS}
+              active={!props.paused}
+            />
           </Physics>
         </Suspense>
         {props.net && <RemotePlayers net={props.net} bubbles={props.bubbles} />}
         <CameraRig />
-        {props.ao !== false && <Occlusion />}
+        {map.combat && (
+          <>
+            <SonicVFX />
+            <CombatOverlay />
+          </>
+        )}
+        {(props.ao !== false || distorts(map)) && (
+          <Post ao={props.ao !== false} distort={distorts(map)} />
+        )}
       </TownRuntimeContext.Provider>
     </Canvas>
   );
+}
+
+const NO_STATS: HerzieStats = {
+  sonicPower: 0,
+  luck: 0,
+  critChance: 0,
+  critDamage: 0,
+};
+
+/** Whether anything on the island bends light: sound waves (where you can
+ * fight) or a portal. */
+function distorts(map: TownMap): boolean {
+  return !!map.combat || portalCells(map).length > 0;
 }
 
 /** Per-frame housekeeping: input, and who the player is close enough to
