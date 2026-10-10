@@ -1,4 +1,10 @@
-import { type HerzieStats, STAT_KEYS, STAT_LABELS } from "@herzies/shared";
+import {
+  formatStat,
+  type HerzieStats,
+  STAT_KEYS,
+  STAT_LABELS,
+  shownStatKeys,
+} from "@herzies/shared";
 import { cn } from "../lib/utils";
 import { HEADER_ICON_HIT } from "./headerIconHit";
 import { Tooltip } from "./Tooltip";
@@ -18,11 +24,11 @@ export function StatsButton({ stats }: { stats: HerzieStats }) {
   const card = (
     <div className="text-[10px]" style={{ minWidth: CARD_WIDTH }}>
       <div className="mb-0.5 text-ui-sm font-bold text-text">Stats</div>
-      {STAT_KEYS.map((key) => (
+      {shownStatKeys(stats).map((key) => (
         <div key={key} className="flex justify-between gap-2">
           <span className="text-text-dim">{STAT_LABELS[key]}</span>
           <span className={stats[key] > 0 ? "text-cyan" : "text-text-dim"}>
-            {stats[key]}
+            {formatStat(key, stats[key])}
           </span>
         </div>
       ))}

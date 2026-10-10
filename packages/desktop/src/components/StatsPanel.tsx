@@ -1,4 +1,9 @@
-import { type HerzieStats, STAT_KEYS, STAT_LABELS } from "@herzies/shared";
+import {
+  formatStat,
+  type HerzieStats,
+  STAT_LABELS,
+  shownStatKeys,
+} from "@herzies/shared";
 import { cn } from "../lib/utils";
 import { OVERLAY_PANEL } from "./DeckOverlay";
 
@@ -16,7 +21,7 @@ export function StatsPanel({
     <div
       className={cn("min-w-[100px] text-[9px] leading-tight", OVERLAY_PANEL)}
     >
-      {STAT_KEYS.map((key) => {
+      {shownStatKeys(stats, preview).map((key) => {
         const delta = preview ? preview[key] - stats[key] : 0;
         return (
           <div key={key} className="flex justify-between gap-2">
@@ -34,7 +39,10 @@ export function StatsPanel({
                     : "text-text-dim"
               }
             >
-              {delta !== 0 && preview ? preview[key] : stats[key]}
+              {formatStat(
+                key,
+                delta !== 0 && preview ? preview[key] : stats[key],
+              )}
             </span>
           </div>
         );

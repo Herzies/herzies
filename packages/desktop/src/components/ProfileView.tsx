@@ -1,8 +1,9 @@
 import {
+  formatStat,
   getHerzieStats,
   type HerzieProfile,
-  STAT_KEYS,
   STAT_LABELS,
+  shownStatKeys,
 } from "@herzies/shared";
 import { useEffect, useState } from "react";
 import { BackButton } from "./BackButton";
@@ -210,7 +211,7 @@ export function ProfileView({
               tabs they are not held back from non-friends. */}
           {tab === "stats" ? (
             <div>
-              {STAT_KEYS.map((key) => (
+              {shownStatKeys(stats).map((key) => (
                 <div
                   key={key}
                   className="flex justify-between border-b border-[#222] py-0.5 text-ui last:border-b-0"
@@ -219,7 +220,7 @@ export function ProfileView({
                   <span
                     className={stats[key] > 0 ? "text-cyan" : "text-text-dim"}
                   >
-                    {stats[key] ?? 0}
+                    {formatStat(key, stats[key] ?? 0)}
                   </span>
                 </div>
               ))}

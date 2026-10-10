@@ -33,9 +33,11 @@ export const TOWN_MAX_SHARDS = 16;
 
 /** The maps a client may ask for, with what the server needs to check
  * movement: the walkable radius and where a respawn puts you. Must match the
- * desktop's map file and `WORLD_RADIUS` (checked by a desktop test). */
+ * desktop's map files (checked by a desktop test). */
 export const TOWN_MAPS = {
   home: { radius: 40, spawn: { x: 0, z: 10 } },
+  /** The testing ground, through the portal: training dummies. */
+  arena: { radius: 17, spawn: { x: 0, z: -12 } },
 } as const;
 export type TownMapId = keyof typeof TOWN_MAPS;
 export function isTownMapId(id: string): id is TownMapId {
