@@ -198,7 +198,8 @@ const IDLE = {
   body: { amp: 0.04, cycles: 4 }, // 1500ms
   head: { amp: 0.025, cycles: 2 }, // 3000ms
   eye: { amp: 0.025, cycles: 2 }, // follows head
-  limb: { amp: 0.03, cycles: 4 }, // 1500ms
+  arm: { amp: 0.1, cycles: 4 }, // radians about the shoulder; 1500ms
+  limb: { amp: 0.03, cycles: 4 }, // the boss's chained arms; 1500ms
   ear: { amp: 0.02, cycles: 2 }, // 3000ms
   spike: { amp: 0.015, cycles: 2 }, // follows ears
   // Spirit Orb — one slow breath across the whole loop, deliberately calmer
@@ -207,19 +208,39 @@ const IDLE = {
 } as const;
 
 // --- Dance animation constants ---
-// Energetic rhythmic motion — ~2.5-3× idle amplitudes, faster cycle.
 const DANCE_FRAMES = 24;
 // 65ms per frame → 1560ms loop (~77 BPM); interval applied by the animator.
 
 const DANCE = {
-  body: { amp: 0.11, cycles: 2 },
-  head: { amp: 0.07, cycles: 2 }, // phase π/3 — nods slightly behind body
-  eye: { amp: 0.07, cycles: 2 }, // follows head
-  limb: { amp: 0.09, cycles: 2 }, // L at 0, R at π — alternating sway
-  ear: { amp: 0.055, cycles: 4 }, // double body freq — floppy
-  spike: { amp: 0.04, cycles: 4, xAmp: 0.03, xCycles: 2 }, // Y bounce + lateral X sway
   ground: { amp: 0.06, cycles: 2 }, // boombox hop — upward bounce on the beat
   spirit: { amp: 0.08, cycles: 1 }, // Spirit Orb — slow smooth float, not a hop
+} as const;
+
+/**
+ * The herzie's own groove, in fractions of its body scale (lengths) and
+ * radians (turns). Lags are fractions of a beat: each part follows the one
+ * it hangs off a little late, as a loose thing would.
+ */
+const GROOVE = {
+  /** With legs: the body sinks onto them on each beat, knees bending… */
+  dip: 0.07,
+  /** …and rocks over onto each foot in turn, once a loop, about the feet. */
+  rock: 0.07,
+  /** The foot it rocks off taps between beats; the other stays planted. */
+  tap: 0.06,
+  /** Without legs: a little hop between beats, landing on each one. */
+  hop: 0.06,
+  /** The head nods after the body. */
+  nod: 0.035,
+  nodLag: 0.12,
+  /** Ears and spikes flop after the head. */
+  flop: 0.05,
+  flopLag: 0.25,
+  /** The arms fly up after the dip and fall back… */
+  armLift: 0.55,
+  armLag: 0.2,
+  /** …and swing forward and back, one each way, every two beats. */
+  armSwing: 0.4,
 } as const;
 
 // --- Seeded PRNG ---
@@ -303,30 +324,116 @@ interface Dangle {
 }
 
 // --- Dance animation offsets ---
-// Returns a copy of the sphere list with per-part dance offsets applied.
-// Adds X-axis sway for spikes in addition to Y-axis bounce.
 
+/** 1 on the beat, easing to 0 halfway between beats. */
+function onBeat(phase: number): number {
+  return ((1 + Math.cos(2 * Math.PI * phase)) / 2) ** 2;
+}
+
+/** How far through the current beat `frameIdx` is (0..1), `lag` beats
+ * late. */
+function beatPhase(frameIdx: number, lag = 0): number {
+  const p = (frameIdx / DANCE_BEAT - lag) % 1;
+  return p < 0 ? p + 1 : p;
+}
+
+/**
+ * How high a herzie without legs is off the ground mid-dance, 0 (landing, on
+ * the beat) to 1 (between beats): what a host squashes its landings by.
+ */
+export function danceHopLift(frameIdx: number): number {
+  const p = beatPhase(frameIdx);
+  return 4 * p * (1 - p);
+}
+
+/**
+ * Each of the herzie's own spheres' dance offsets at `frameIdx`, as deltas.
+ * The body leads; the head, ears and arms ride it and follow a little late.
+ * With legs it stays on its feet: the body dips onto them on the beat and
+ * rocks from foot to foot, one foot always planted. Without legs it hops,
+ * landing on the beat. Scene-fixed parts (the boombox, a companion) aren't
+ * moved here.
+ */
+function danceDeltas(spheres: Sphere[], frameIdx: number): V3[] {
+  const s = HERZIE_BODY.scale * CS;
+  const rig = buildRig(spheres);
+  const t = frameIdx / DANCE_FRAMES;
+  // +1 rocked over onto its right foot (+x), −1 its left.
+  const sway = Math.sin(2 * Math.PI * t);
+  const rock = GROOVE.rock * sway;
+  // The beat's drop: down (+y) onto the legs, or the landing of a hop.
+  const drop = (lag: number) =>
+    rig.legs
+      ? GROOVE.dip * s * onBeat(beatPhase(frameIdx, lag))
+      : -GROOVE.hop * s * danceHopLift(frameIdx - lag * DANCE_BEAT);
+  const bodyDrop = drop(0);
+  // With legs the head nods on the body after the dip, and the ears flop
+  // after that. Without, the head is what lands, so it can't nod into the
+  // ground: the ears just trail the hop.
+  const nod = rig.legs
+    ? bodyDrop + GROOVE.nod * s * onBeat(beatPhase(frameIdx, GROOVE.nodLag))
+    : bodyDrop;
+  const flop = rig.legs
+    ? nod + GROOVE.flop * s * onBeat(beatPhase(frameIdx, GROOVE.flopLag))
+    : drop(GROOVE.flopLag);
+  // Everything above the feet rocks about the point between them (the
+  // bottom, without legs), then drops by `dy`.
+  const pivot: V3 = [0, rig.floor, 0];
+  const ride = (p: V3, dy: number): V3 =>
+    add(turnAbout(p, pivot, rock), [0, dy, 0]);
+  const armLift = GROOVE.armLift * onBeat(beatPhase(frameIdx, GROOVE.armLag));
+  const armSwing =
+    GROOVE.armSwing * Math.sin((Math.PI * frameIdx) / DANCE_BEAT);
+
+  const deltas = spheres.map((sp): V3 => {
+    const c = sp.center;
+    if (isSceneFixed(sp.part)) return [0, 0, 0];
+    if (isLeg(sp.part)) {
+      // The foot it has rocked off taps up between beats; the other is
+      // planted.
+      const off = Math.max(0, -LIMB_SIDE[sp.part] * sway);
+      const tap =
+        GROOVE.tap * s * off * off * (1 - onBeat(beatPhase(frameIdx)));
+      return [0, -tap, 0];
+    }
+    const shoulder = rig.shoulders[sp.part];
+    if (shoulder) {
+      // Turned about the shoulder, then carried along with its parent.
+      const side = LIMB_SIDE[sp.part];
+      const arm = turnAbout(c, shoulder, -side * armLift, 0, armSwing);
+      return sub(ride(arm, rig.body ? bodyDrop : nod), c);
+    }
+    let dy = bodyDrop;
+    if (sp.part === "head" || sp.part === "eye" || sp.part === "pupil") {
+      dy = nod;
+    } else if (sp.part === "ear") dy = flop;
+    else if (sp.part === "spike") dy = spikeOnBody(sp, rig) ? bodyDrop : flop;
+    return sub(ride(c, dy), c);
+  });
+  if (rig.legs) return deltas;
+  // Rocked about the point it stands on, a round bottom would dip through
+  // the ground (it rocks, rather than rolls): lift it back out.
+  let lowest = Number.NEGATIVE_INFINITY;
+  spheres.forEach((sp, i) => {
+    if (isSceneFixed(sp.part)) return;
+    lowest = Math.max(lowest, sp.center[1] + deltas[i][1] + sp.radius);
+  });
+  const lift = Math.min(0, rig.floor - lowest);
+  return deltas.map((d, i) =>
+    isSceneFixed(spheres[i].part) ? d : [d[0], d[1] + lift, d[2]],
+  );
+}
+
+/** Returns a copy of the sphere list in its dance pose at `frameIdx`: the
+ * herzie's groove, the boombox's bounce, and the spirit's float and hops. */
 function applyDanceOffsets(
   spheres: Sphere[],
   frameIdx: number,
   hops: readonly SpiritHop[] = [],
 ): Sphere[] {
-  const t = frameIdx / DANCE_FRAMES; // normalized 0..1
-
-  function yOff(amp: number, cycles: number, phase: number): number {
-    return Math.sin(2 * Math.PI * t * cycles + phase) * amp;
-  }
-
-  const bodyOff = yOff(DANCE.body.amp, DANCE.body.cycles, 0);
-  const headOff = yOff(DANCE.head.amp, DANCE.head.cycles, Math.PI / 3);
-  const eyeOff = headOff;
-  const earOff = yOff(DANCE.ear.amp, DANCE.ear.cycles, Math.PI / 6);
-  const spikeYOff = yOff(DANCE.spike.amp, DANCE.spike.cycles, Math.PI / 4);
-  const spikeXOff =
-    Math.sin(2 * Math.PI * t * DANCE.spike.xCycles + Math.PI / 4) *
-    DANCE.spike.xAmp;
-  const limbLOff = yOff(DANCE.limb.amp, DANCE.limb.cycles, 0);
-  const limbROff = yOff(DANCE.limb.amp, DANCE.limb.cycles, Math.PI);
+  const t = frameIdx / DANCE_FRAMES;
+  const yOff = (amp: number, cycles: number, phase: number) =>
+    Math.sin(2 * Math.PI * t * cycles + phase) * amp;
   // Boombox hops upward on the beat (negative Y is up).
   const groundOff =
     -Math.abs(Math.sin(2 * Math.PI * t * DANCE.ground.cycles)) *
@@ -342,32 +449,16 @@ function applyDanceOffsets(
   // Other floating pets keep the spirit's slow bob but never hop: the hop
   // poses are the Greedy Spirit's, keyed on its single core sphere.
   const petOff = yOff(DANCE.spirit.amp, DANCE.spirit.cycles, Math.PI / 5);
+  const groove = danceDeltas(spheres, frameIdx);
 
-  return spheres.map((s) => {
+  return spheres.map((s, i) => {
     if (s.part === "spirit") return moveSpirit(s);
-    if (s.part === "pet") {
-      return {
-        ...s,
-        center: [s.center[0], s.center[1] + petOff, s.center[2]] as V3,
-      };
+    if (s.part === "pet")
+      return { ...s, center: add(s.center, [0, petOff, 0]) };
+    if (s.part === "ground") {
+      return { ...s, center: add(s.center, [0, groundOff, 0]) };
     }
-    let dy = 0;
-    let dx = 0;
-    if (s.part === "body") dy = bodyOff;
-    else if (s.part === "head") dy = headOff;
-    else if (s.part === "eye" || s.part === "pupil") dy = eyeOff;
-    else if (s.part === "ear") dy = earOff;
-    else if (s.part === "spike") {
-      dy = spikeYOff;
-      dx = spikeXOff;
-    } else if (s.part === "arm-l" || s.part === "leg-l") dy = limbLOff;
-    else if (s.part === "arm-r" || s.part === "leg-r") dy = limbROff;
-    else if (s.part === "ground") dy = groundOff;
-
-    return {
-      ...s,
-      center: [s.center[0] + dx, s.center[1] + dy, s.center[2]] as V3,
-    };
+    return { ...s, center: add(s.center, groove[i]) };
   });
 }
 
@@ -585,6 +676,14 @@ const HERZIE_BODY = {
   legLength: 0.3828585948329419,
 } as const;
 
+/** How far out an arm's centre sits past the surface it hangs off, in arm
+ * radii: the rest of the arm is sunk into it. */
+const ARM_SINK = 0.4;
+/** How far below horizontal the arms hang off the shoulder (radians): off
+ * the head at stage 2, and higher on the body from stage 3. */
+const ARM_DROOP = (15 * Math.PI) / 180;
+const BODY_ARM_DROOP = (5 * Math.PI) / 180;
+
 /** The body type whose herzies carry spikes instead of ears. 0-2 all build
  * the same body now; the roll is unchanged (see generateCreatureParams). */
 const SPIKY_BODY_TYPE = 3;
@@ -646,36 +745,11 @@ function buildHerzie(p: CreatureParams, stage: number): Sphere[] {
     }
   }
 
-  if (stage >= 2) {
-    const armY = stage === 3 ? 0.1 * s : headY + headR * 0.35;
-    const armX = headR + 0.12 * s;
-    spheres.push({
-      center: [-armX, armY, 0],
-      radius: 0.17 * s,
-      zone: "primary",
-      part: "arm-l",
-    });
-    spheres.push({
-      center: [armX, armY, 0],
-      radius: 0.17 * s,
-      zone: "primary",
-      part: "arm-r",
-    });
-    if (spiky) {
-      for (const side of [-1, 1]) {
-        spheres.push({
-          center: [side * (armX + 0.14 * s), armY, 0],
-          radius: 0.07 * s,
-          zone: "accent",
-          part: "spike",
-        });
-      }
-    }
-  }
-
+  // The body comes before the arms: they hang off it at stage 3 (off the
+  // head at stage 2, before there is one).
+  const bodyR = 0.5 * s;
+  const bodyY = 0.18 * s;
   if (stage >= 3) {
-    const bodyR = 0.5 * s;
-    const bodyY = 0.18 * s;
     spheres.push({
       center: [0, bodyY, 0],
       radius: bodyR,
@@ -692,33 +766,49 @@ function buildHerzie(p: CreatureParams, stage: number): Sphere[] {
         });
       }
     }
+  }
 
-    const legY = bodyY + bodyR * 0.75;
-    const legX = 0.32 * s;
-    spheres.push({
-      center: [-legX, legY, 0],
-      radius: 0.19 * s,
-      zone: "accent",
-      part: "leg-l",
-    });
-    spheres.push({
-      center: [legX, legY, 0],
-      radius: 0.19 * s,
-      zone: "accent",
-      part: "leg-r",
-    });
-    spheres.push({
-      center: [-legX, legY + HERZIE_BODY.legLength * 0.4 * s, 0],
-      radius: 0.15 * s,
-      zone: "accent",
-      part: "leg-l",
-    });
-    spheres.push({
-      center: [legX, legY + HERZIE_BODY.legLength * 0.4 * s, 0],
-      radius: 0.15 * s,
-      zone: "accent",
-      part: "leg-r",
-    });
+  if (stage >= 2) {
+    // One sphere an arm, sunk a little into whatever it hangs off and angled
+    // down from it, so it reads as joined at the shoulder.
+    const armR = 0.17 * s;
+    const [parentY, parentR] = stage >= 3 ? [bodyY, bodyR] : [headY, headR];
+    const reach = parentR + ARM_SINK * armR;
+    const droop = stage >= 3 ? BODY_ARM_DROOP : ARM_DROOP;
+    for (const [side, part] of [
+      [-1, "arm-l"],
+      [1, "arm-r"],
+    ] as const) {
+      spheres.push({
+        center: [
+          side * reach * Math.cos(droop),
+          parentY + reach * Math.sin(droop),
+          0,
+        ],
+        radius: armR,
+        zone: "primary",
+        part,
+      });
+    }
+  }
+
+  if (stage >= 3) {
+    // One sphere a leg, tucked under the body. Its bottom is where the old
+    // hip-and-foot pair's was, so the herzie stands exactly as tall.
+    const legR = 0.2 * s;
+    const sole =
+      bodyY + bodyR * 0.75 + HERZIE_BODY.legLength * 0.4 * s + 0.15 * s;
+    for (const [side, part] of [
+      [-1, "leg-l"],
+      [1, "leg-r"],
+    ] as const) {
+      spheres.push({
+        center: [side * 0.3 * s, sole - legR, 0],
+        radius: legR,
+        zone: "accent",
+        part,
+      });
+    }
   }
 
   return spheres;
@@ -2051,70 +2141,206 @@ function spiritMover(
   };
 }
 
+// --- The rig ---
+// A herzie's arms and legs are one sphere each, hung off a parent: the body
+// at stage 3, the head before it. Every pose moves a limb by turning it about
+// its joint, a point inside both the limb and its parent, so no pose can pull
+// it off. Everything above the legs moves with the body or the head.
+
+/** Which side a limb is on: −1 the creature's left (−x), 1 its right. */
+const LIMB_SIDE: Record<string, -1 | 1> = {
+  "arm-l": -1,
+  "arm-r": 1,
+  "leg-l": -1,
+  "leg-r": 1,
+};
+const isArm = (part: string) => part === "arm-l" || part === "arm-r";
+const isLeg = (part: string) => part === "leg-l" || part === "leg-r";
+
+/** How deep a shoulder sits inside the arm's parent, in arm radii. */
+const SHOULDER_DEPTH = 0.3;
+/** How high in the body the hips are, as a fraction of its radius below its
+ * centre (y down). */
+const HIP_HEIGHT = 0.35;
+
+interface Rig {
+  head: Sphere | undefined;
+  body: Sphere | undefined;
+  /** Each arm part's joint. */
+  shoulders: Record<string, V3>;
+  /** Each leg part's joint. */
+  hips: Record<string, V3>;
+  legs: boolean;
+  /** Its arms are chains of spheres (the boss's), not one each. */
+  chained: boolean;
+  /** Creature-space y of its lowest point at rest: the soles, with legs. */
+  floor: number;
+}
+
+function buildRig(spheres: Sphere[]): Rig {
+  const head = largestPart(spheres, "head");
+  const body = largestPart(spheres, "body");
+  const parent = body ?? head;
+  const shoulders: Record<string, V3> = {};
+  const hips: Record<string, V3> = {};
+  let floor = Number.NEGATIVE_INFINITY;
+  for (const sp of spheres) {
+    if (isSceneFixed(sp.part)) continue;
+    floor = Math.max(floor, sp.center[1] + sp.radius);
+    if (isArm(sp.part) && parent) {
+      // The arm sphere nearest the parent carries the shoulder (the boss's
+      // arms are a chain of them).
+      const prev = shoulders[sp.part];
+      const d = Math.hypot(...sub(sp.center, parent.center));
+      if (prev && Math.hypot(...sub(prev, parent.center)) <= d) continue;
+      const depth = parent.radius - SHOULDER_DEPTH * sp.radius;
+      shoulders[sp.part] = add(
+        parent.center,
+        scale(sub(sp.center, parent.center), depth / Math.max(d, 1e-9)),
+      );
+    } else if (isLeg(sp.part) && !hips[sp.part]) {
+      hips[sp.part] = [
+        sp.center[0],
+        body ? body.center[1] + HIP_HEIGHT * body.radius : sp.center[1],
+        sp.center[2],
+      ];
+    }
+  }
+  return {
+    head,
+    body,
+    shoulders,
+    hips,
+    legs: Object.keys(hips).length > 0,
+    chained: spheres.filter((sp) => sp.part === "arm-l").length > 1,
+    floor,
+  };
+}
+
+function add(a: V3, b: V3): V3 {
+  return [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+}
+function sub(a: V3, b: V3): V3 {
+  return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+}
+function scale(a: V3, k: number): V3 {
+  return [a[0] * k, a[1] * k, a[2] * k];
+}
+
+/**
+ * `p` turned about `pivot`: by `roll` in the frontal plane (x-y; positive
+ * tips the top toward +x), then `pitch` in the side plane (y-z; positive
+ * swings what hangs below toward the back, +z), then `yaw` about the
+ * vertical (positive swings +x toward the front, −z). Creature space: y down,
+ * front −z.
+ */
+function turnAbout(p: V3, pivot: V3, roll: number, pitch = 0, yaw = 0): V3 {
+  let [x, y, z] = sub(p, pivot);
+  let c = Math.cos(roll);
+  let s = Math.sin(roll);
+  [x, y] = [x * c - y * s, x * s + y * c];
+  c = Math.cos(pitch);
+  s = Math.sin(pitch);
+  [y, z] = [y * c - z * s, y * s + z * c];
+  c = Math.cos(yaw);
+  s = Math.sin(yaw);
+  [x, z] = [x * c + z * s, -x * s + z * c];
+  return add(pivot, [x, y, z]);
+}
+
+/** What a spike moves with: the body (one on its flank) or the head (the
+ * crest). */
+function spikeOnBody(sp: Sphere, rig: Rig): boolean {
+  const gap = (o: Sphere | undefined) =>
+    o
+      ? Math.hypot(...sub(sp.center, o.center)) - o.radius
+      : Number.POSITIVE_INFINITY;
+  return gap(rig.body) < gap(rig.head);
+}
+
 // --- Idle animation offsets ---
 
-/** Each sphere's idle Y offset for `frameIdx`, as a per-sphere delta so a
- * pose can blend it with the walk cycle (see renderCreaturePose). */
-function idleDeltas(spheres: Sphere[], frameIdx: number): number[] {
-  function offset(
-    part: { amp: number; cycles: number },
-    phase: number,
-  ): number {
-    return (
-      Math.sin(2 * Math.PI * (frameIdx / IDLE_FRAMES) * part.cycles + phase) *
-      part.amp
-    );
+/** Each sphere's idle offset for `frameIdx`, as a delta so a pose can blend
+ * it with the walk cycle (see creaturePoseOffsets). With legs, the body and
+ * head breathe above feet that stay put; without, the herzie sits still on
+ * the ground and only its ears and arms stir. */
+function idleDeltas(spheres: Sphere[], frameIdx: number): V3[] {
+  const t = frameIdx / IDLE_FRAMES;
+  function wave(part: { amp: number; cycles: number }, phase: number) {
+    return Math.sin(2 * Math.PI * t * part.cycles + phase) * part.amp;
   }
 
-  const bodyOff = offset(IDLE.body, 0);
-  const headOff = offset(IDLE.head, 0);
-  const eyeOff = headOff; // eyes follow head exactly
-  const earOff = offset(IDLE.ear, Math.PI / 4);
-  const spikeOff = offset(IDLE.spike, Math.PI / 3);
-  const limbLOff = offset(IDLE.limb, 0);
-  const limbROff = offset(IDLE.limb, Math.PI); // mirrored phase
-  const spiritOff = offset(IDLE.spirit, Math.PI / 5);
+  const rig = buildRig(spheres);
+  // A herzie without a body sits on its head, so that stays put. (The
+  // boss has a body, and no legs: it breathes as it always did.)
+  const bodyOff = rig.body ? wave(IDLE.body, 0) : 0;
+  const headOff = rig.body ? wave(IDLE.head, 0) : 0;
+  const earOff = headOff + wave(IDLE.ear, Math.PI / 4);
+  const spikeOff = wave(IDLE.spike, Math.PI / 3);
+  const spiritOff = wave(IDLE.spirit, Math.PI / 5);
+  // The arms ride their parent, and sway about the shoulder in turn.
+  const armParentOff = rig.body ? bodyOff : headOff;
 
-  return spheres.map((s) => {
-    if (s.part === "spirit" || s.part === "pet") return spiritOff;
-    if (s.part === "body") return bodyOff;
-    if (s.part === "head") return headOff;
-    if (s.part === "eye" || s.part === "pupil") return eyeOff;
-    if (s.part === "ear") return earOff;
-    if (s.part === "spike") return spikeOff;
-    if (s.part === "arm-l" || s.part === "leg-l") return limbLOff;
-    if (s.part === "arm-r" || s.part === "leg-r") return limbROff;
-    return 0;
+  if (rig.chained) {
+    // The boss, as it always breathed: each part bobs on its own, its long
+    // arms in turn.
+    const limb = (side: number) => wave(IDLE.limb, side === 1 ? Math.PI : 0);
+    return spheres.map((s): V3 => {
+      if (s.part === "spirit" || s.part === "pet") return [0, spiritOff, 0];
+      if (s.part === "body") return [0, bodyOff, 0];
+      if (s.part === "head" || s.part === "eye" || s.part === "pupil") {
+        return [0, headOff, 0];
+      }
+      if (s.part === "ear") return [0, earOff - headOff, 0];
+      if (s.part === "spike") return [0, spikeOff, 0];
+      const side = LIMB_SIDE[s.part];
+      return [0, side ? limb(side) : 0, 0];
+    });
+  }
+
+  return spheres.map((s): V3 => {
+    if (s.part === "spirit" || s.part === "pet") return [0, spiritOff, 0];
+    if (s.part === "body") return [0, bodyOff, 0];
+    if (s.part === "head" || s.part === "eye" || s.part === "pupil") {
+      return [0, headOff, 0];
+    }
+    if (s.part === "ear") return [0, earOff, 0];
+    if (s.part === "spike") {
+      return [0, (spikeOnBody(s, rig) ? bodyOff : headOff) + spikeOff, 0];
+    }
+    const shoulder = rig.shoulders[s.part];
+    if (shoulder) {
+      const side = LIMB_SIDE[s.part];
+      const raise = wave(IDLE.arm, side === 1 ? Math.PI : 0);
+      const turned = turnAbout(s.center, shoulder, -side * raise);
+      return add(sub(turned, s.center), [0, armParentOff, 0]);
+    }
+    return [0, 0, 0];
   });
 }
 
-// Returns a copy of the sphere list with per-part Y offsets applied.
+// Returns a copy of the sphere list with the idle offsets applied.
 function applyIdleOffsets(spheres: Sphere[], frameIdx: number): Sphere[] {
-  const dy = idleDeltas(spheres, frameIdx);
-  return spheres.map((s, i) => ({
-    ...s,
-    center: [s.center[0], s.center[1] + dy[i], s.center[2]] as V3,
-  }));
+  const d = idleDeltas(spheres, frameIdx);
+  return spheres.map((s, i) => ({ ...s, center: add(s.center, d[i]) }));
 }
 
 // --- Walk animation offsets ---
 // One walk cycle is two steps (left, then right), as a fraction 0..1. The
 // host advances it by distance covered, not by time, so the feet never
-// slide. Amplitudes are fractions of the herzie's body scale, so they fit a
+// slide. Lengths are fractions of the herzie's body scale, so they fit a
 // stage 1 head as well as a stage 3 body. Creature space: front is -z, up is
 // -y.
 
 const WALK = {
-  /** Stage 3: how far a foot swings forward and back. The hip swings this
-   * times WALK.hipShare, so the leg reads as pivoting from the body. */
-  legSwing: 0.2,
-  hipShare: 0.4,
+  /** Stage 3: how far each leg swings forward and back about its hip
+   * (radians). The body drops as the legs spread, which the grounding in
+   * creaturePoseOffsets takes care of. */
+  legAngle: 0.72,
   /** Stage 3: how high a foot lifts on its forward swing. */
   footLift: 0.14,
-  /** Arms swing against the leg on their side. */
-  armSwing: 0.14,
-  /** Stage 3: the body rises as the legs pass each other, twice a cycle. */
-  bodyBob: 0.05,
+  /** Arms swing about the shoulder against the leg on their side (radians). */
+  armAngle: 0.7,
   /** Stages 1-2 (no legs): one hop per step… */
   hop: 0.2,
   /** …rocking onto each side in turn (radians, about the bottom)… */
@@ -2133,33 +2359,31 @@ function walkDeltas(spheres: Sphere[], phase: number, stage: number): V3[] {
   const theta = 2 * Math.PI * phase;
   const sin = Math.sin(theta);
   const cos = Math.cos(theta);
-  const hasLegs = spheres.some((sp) => sp.part === "leg-l");
+  const rig = buildRig(spheres);
+  // Arms swing forward against the leg on their side: the left back while
+  // the left leg goes forward.
+  const swingArm = (sp: Sphere): V3 => {
+    const shoulder = rig.shoulders[sp.part];
+    if (!shoulder) return [0, 0, 0];
+    return sub(
+      turnAbout(sp.center, shoulder, 0, 0, sin * WALK.armAngle),
+      sp.center,
+    );
+  };
 
-  if (hasLegs && stage >= 3) {
-    // The lower sphere of each leg is the foot; the upper one the hip.
-    const footY = (side: string) =>
-      Math.max(
-        ...spheres.filter((sp) => sp.part === side).map((sp) => sp.center[1]),
-      );
-    const footL = footY("leg-l");
-    const footR = footY("leg-r");
-    // Right runs half a cycle behind the left: sin/cos flip sign.
-    const swing = (side: 1 | -1) => -side * sin * WALK.legSwing * s;
-    const lift = (side: 1 | -1) => -Math.max(0, side * cos) * WALK.footLift * s;
-    const bob = -Math.abs(cos) * WALK.bodyBob * s;
-
-    return spheres.map((sp) => {
+  if (rig.legs && stage >= 3) {
+    return spheres.map((sp): V3 => {
       if (isSceneFixed(sp.part)) return [0, 0, 0];
-      if (sp.part === "leg-l" || sp.part === "leg-r") {
-        const side = sp.part === "leg-l" ? 1 : -1;
-        const foot = sp.center[1] === (side === 1 ? footL : footR);
-        return foot
-          ? [0, lift(side), swing(side)]
-          : [0, 0, swing(side) * WALK.hipShare];
+      const hip = rig.hips[sp.part];
+      if (hip) {
+        // Right runs half a cycle behind the left: sin and cos flip sign.
+        // A foot lifts while it swings forward.
+        const side = LIMB_SIDE[sp.part];
+        const swung = turnAbout(sp.center, hip, 0, side * sin * WALK.legAngle);
+        const lift = -Math.max(0, -side * cos) * WALK.footLift * s;
+        return add(sub(swung, sp.center), [0, lift, 0]);
       }
-      if (sp.part === "arm-l") return [0, bob, sin * WALK.armSwing * s];
-      if (sp.part === "arm-r") return [0, bob, -sin * WALK.armSwing * s];
-      return [0, bob, 0];
+      return swingArm(sp);
     });
   }
 
@@ -2169,33 +2393,23 @@ function walkDeltas(spheres: Sphere[], phase: number, stage: number): V3[] {
   const hop = hopAt(phase);
   const flop = hopAt(phase - WALK.flopLag);
   const roll = sin * WALK.roll;
-  // Rock about the bottom of the creature, so it pivots on its base.
-  let bottom = Number.NEGATIVE_INFINITY;
-  for (const sp of spheres) {
-    if (!isSceneFixed(sp.part)) {
-      bottom = Math.max(bottom, sp.center[1] + sp.radius);
-    }
-  }
-  return spheres.map((sp) => {
+  return spheres.map((sp): V3 => {
     if (isSceneFixed(sp.part)) return [0, 0, 0];
+    // Rock about the bottom of the creature, so it pivots on its base.
     const [x, y] = sp.center;
-    // Small-angle rotation about (0, bottom) in the x-y plane.
-    const rx = -(y - bottom) * roll;
+    const rx = -(y - rig.floor) * roll;
     const ry = x * roll;
     const dy = sp.part === "ear" || sp.part === "spike" ? flop : hop;
-    let dz = 0;
-    if (sp.part === "arm-l") dz = sin * WALK.armSwing * s;
-    else if (sp.part === "arm-r") dz = -sin * WALK.armSwing * s;
-    return [rx, dy + ry, dz];
+    return add(swingArm(sp), [rx, dy + ry, 0]);
   });
 }
 
-/** Sitting (on a bench): the hips come out from under the body, as
- * thighs (fractions of the body scale, like WALK's)… */
+/** Sitting (on a bench): the hips come forward and up off the seat, as
+ * thighs would (fractions of the body scale, like WALK's)… */
 const SIT = {
   hipReach: 0.28,
   hipLift: 0.05,
-  /** …and each foot swings forward about its hip, a little short of
+  /** …and each leg swings forward about its hip, a little short of
    * straight out, so the feet droop (radians). */
   legAngle: (80 * Math.PI) / 180,
 } as const;
@@ -2204,28 +2418,15 @@ const SIT = {
  * Herzies without legs just sit as they stand. */
 function sitDeltas(spheres: Sphere[], stage: number): V3[] {
   const zero = spheres.map((): V3 => [0, 0, 0]);
-  if (stage < 3 || !spheres.some((sp) => sp.part === "leg-l")) return zero;
+  const rig = buildRig(spheres);
+  if (stage < 3 || !rig.legs) return zero;
   const s = HERZIE_BODY.scale * CS;
-  // The lower sphere of each leg is the foot; the upper one the hip.
-  const span = (side: string) => {
-    const ys = spheres
-      .filter((sp) => sp.part === side)
-      .map((sp) => sp.center[1]);
-    return { hip: Math.min(...ys), foot: Math.max(...ys) };
-  };
-  const legs = { "leg-l": span("leg-l"), "leg-r": span("leg-r") };
-  const hip: V3 = [0, -SIT.hipLift * s, -SIT.hipReach * s];
+  const shift: V3 = [0, -SIT.hipLift * s, -SIT.hipReach * s];
   return spheres.map((sp, i) => {
-    if (sp.part !== "leg-l" && sp.part !== "leg-r") return zero[i];
-    const leg = legs[sp.part];
-    if (sp.center[1] !== leg.foot) return hip;
-    // Down (+y) from the hip, turned toward the front (−z).
-    const len = leg.foot - leg.hip;
-    return [
-      0,
-      hip[1] + len * (Math.cos(SIT.legAngle) - 1),
-      hip[2] - len * Math.sin(SIT.legAngle),
-    ];
+    const hip = rig.hips[sp.part];
+    if (!hip) return zero[i];
+    const out = turnAbout(sp.center, hip, 0, -SIT.legAngle);
+    return add(sub(out, sp.center), shift);
   });
 }
 
@@ -3357,15 +3558,15 @@ export function creaturePoseOffsets(
             : undefined,
         )
       : null;
-  return spheres.map((s, i) => {
+  const offsets = spheres.map((s, i): V3 => {
     const b = base[i].center;
     // Scene-anchored parts (a floating pet) keep their own idle bob even
     // mid-stride; everything else fades from idle into the walk.
     const iw = walk && !isSceneFixed(s.part) ? 1 - w : 1;
     const d = walk?.[i];
-    let x = d ? d[0] * w : 0;
-    let y = idle[i] * iw + (d ? d[1] * w : 0);
-    let z = d ? d[2] * w : 0;
+    let x = idle[i][0] * iw + (d ? d[0] * w : 0);
+    let y = idle[i][1] * iw + (d ? d[1] * w : 0);
+    let z = idle[i][2] * iw + (d ? d[2] * w : 0);
     const seated = sit?.[i];
     if (seated) {
       x += seated[0] * sw;
@@ -3385,6 +3586,31 @@ export function creaturePoseOffsets(
       z + b[2] - s.center[2],
     ];
   });
+  return grounded(spheres, offsets, 1 - sw);
+}
+
+/**
+ * `offsets` with the herzie moved up or down so its lowest foot is on the
+ * ground, by `weight` (0 seated, when it rests on its bottom instead). Each
+ * motion keeps a foot planted on its own; blended together they needn't,
+ * and this is what keeps a herzie from floating or sinking. It's also the
+ * walk's bob: the body drops as the legs spread. No legs, no change.
+ */
+function grounded(spheres: Sphere[], offsets: V3[], weight: number): V3[] {
+  if (weight <= 0) return offsets;
+  let rest = Number.NEGATIVE_INFINITY;
+  let lowest = Number.NEGATIVE_INFINITY;
+  spheres.forEach((sp, i) => {
+    if (!isLeg(sp.part)) return;
+    rest = Math.max(rest, sp.center[1] + sp.radius);
+    lowest = Math.max(lowest, sp.center[1] + offsets[i][1] + sp.radius);
+  });
+  if (rest === Number.NEGATIVE_INFINITY) return offsets;
+  const dy = (rest - lowest) * weight;
+  if (Math.abs(dy) < 1e-12) return offsets;
+  return offsets.map((d, i) =>
+    isSceneFixed(spheres[i].part) ? d : [d[0], d[1] + dy, d[2]],
+  );
 }
 
 function hasSpiritPart(spheres: Sphere[]): boolean {

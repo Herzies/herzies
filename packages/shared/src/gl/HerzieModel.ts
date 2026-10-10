@@ -7,6 +7,7 @@ import {
   creaturePoseOffsets,
   creatureSeatDrop,
   DANCE_LOOP_FRAMES,
+  danceHopLift,
   hasDangleEquipped,
   primitiveShading,
   SPIRIT_DANCE_HOP_VARIANT_COUNT,
@@ -441,9 +442,14 @@ export class HerzieModel {
     let squash = 0;
     let lift = 0;
     if (!this.hasLegs) {
-      // Each hop lands with a squash.
+      // Each hop lands with a squash, walking or dancing.
       lift = Math.abs(Math.sin(walkPhase * Math.PI * 2)) * w;
       squash = (1 - lift) ** 4 * 0.08 * w;
+      const dw = this.danceWeight * (1 - w);
+      if (dw > 0) {
+        const hop = danceHopLift(this.danceTime * DANCE_FPS);
+        squash = Math.max(squash, (1 - hop) ** 4 * 0.08 * dw);
+      }
     }
     const wide = MODEL_SCALE * (1 - breath * 0.6 + squash * 0.7);
     const tall = MODEL_SCALE * (1 + breath - squash);

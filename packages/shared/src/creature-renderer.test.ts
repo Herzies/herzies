@@ -273,6 +273,20 @@ describe("sitting", () => {
     expect(drop).toBeGreaterThan(0);
     // Down to the hips, at most: never sunk past its belly.
     expect(drop).toBeLessThanOrEqual(feet - bottom(body));
+    // About where the old two-sphere legs settled it (0.2416).
+    expect(drop).toBeCloseTo(0.24, 1);
+  });
+
+  it("swings the legs well out in front", () => {
+    const { spheres } = buildCreatureModel(USER, 3);
+    const body = spheres.find((sp) => sp.part === "body");
+    if (!body) throw new Error("no body");
+    const seated = pose(3, 1);
+    spheres.forEach((sp, i) => {
+      if (!sp.part.startsWith("leg")) return;
+      // Half a body radius forward (−z), at least.
+      expect(seated[i][2]).toBeLessThan(-0.5 * body.radius);
+    });
   });
 
   it("leaves herzies without legs as they stand", () => {
@@ -283,6 +297,143 @@ describe("sitting", () => {
       ).toBe(0);
     }
   });
+});
+
+describe("limbs", () => {
+  const spikySeed =
+    Array.from({ length: 120 }, (_, i) => `herzie-${i}`).find(
+      (seed) => generateCreatureParams(seed).bodyType === 3,
+    ) ?? "";
+  const LIMBS = ["arm-l", "arm-r", "leg-l", "leg-r"];
+  type Sp = ReturnType<typeof buildCreatureModel>["spheres"][number];
+  const dist = (a: number[], b: number[]) =>
+    Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+  const moved = (sp: Sp, d: number[]) => [
+    sp.center[0] + d[0],
+    sp.center[1] + d[1],
+    sp.center[2] + d[2],
+  ];
+
+  /** Every pose worth checking: idle, walking, dancing, and blends. */
+  function poses() {
+    const out: Parameters<typeof creaturePoseOffsets>[2][] = [];
+    for (let f = 0; f < 120; f += 3) {
+      out.push({ idleFrame: f, walkPhase: 0, walkWeight: 0 });
+    }
+    for (let p = 0; p < 1; p += 0.05) {
+      out.push({ idleFrame: 0, walkPhase: p, walkWeight: 1 });
+    }
+    for (let f = 0; f < 24; f += 0.5) {
+      out.push({
+        idleFrame: f,
+        walkPhase: 0,
+        walkWeight: 0,
+        danceFrame: f,
+        danceWeight: 1,
+      });
+      out.push({
+        idleFrame: f,
+        walkPhase: f / 24,
+        walkWeight: 0.5,
+        danceFrame: f,
+        danceWeight: 0.5,
+      });
+    }
+    return out;
+  }
+
+  for (const seed of [USER, spikySeed]) {
+    for (const stage of [2, 3]) {
+      it(`gives a ${seed} one sphere per limb at stage ${stage}`, () => {
+        const { spheres } = buildCreatureModel(seed, stage);
+        for (const part of LIMBS) {
+          const n = spheres.filter((sp) => sp.part === part).length;
+          expect(n).toBe(part.startsWith("leg") && stage < 3 ? 0 : 1);
+        }
+      });
+
+      it(`keeps a ${seed}'s limbs on in every pose at stage ${stage}`, () => {
+        const { spheres } = buildCreatureModel(seed, stage);
+        const parent = spheres.find(
+          (sp) => sp.part === (stage >= 3 ? "body" : "head"),
+        );
+        if (!parent) throw new Error("no parent");
+        const pi = spheres.indexOf(parent);
+        for (const pose of poses()) {
+          const d = creaturePoseOffsets(spheres, stage, pose);
+          const pc = moved(parent, d[pi]);
+          spheres.forEach((sp, i) => {
+            if (!LIMBS.includes(sp.part)) return;
+            // Sunk into its parent by a quarter of its radius, at least.
+            expect(dist(moved(sp, d[i]), pc)).toBeLessThan(
+              parent.radius + sp.radius * 0.75,
+            );
+          });
+        }
+      });
+    }
+  }
+
+  it("keeps a herzie with legs on its feet in every pose", () => {
+    const { spheres } = buildCreatureModel(USER, 3);
+    const legs = spheres.filter((sp) => sp.part.startsWith("leg"));
+    const floor = Math.max(...legs.map((sp) => sp.center[1] + sp.radius));
+    for (const pose of poses()) {
+      const d = creaturePoseOffsets(spheres, 3, pose);
+      const soles = spheres.flatMap((sp, i) =>
+        sp.part.startsWith("leg") ? [sp.center[1] + d[i][1] + sp.radius] : [],
+      );
+      expect(Math.max(...soles)).toBeCloseTo(floor, 9);
+    }
+  });
+
+  it("dances with a foot planted, the body dipping onto the legs", () => {
+    const { spheres } = buildCreatureModel(USER, 3);
+    const body = spheres.findIndex((sp) => sp.part === "body");
+    let dipped = false;
+    for (let f = 0; f < 24; f += 0.5) {
+      const d = creaturePoseOffsets(spheres, 3, {
+        idleFrame: 0,
+        walkPhase: 0,
+        walkWeight: 0,
+        danceFrame: f,
+        danceWeight: 1,
+      });
+      const feet = spheres.flatMap((sp, i) =>
+        sp.part.startsWith("leg") ? [Math.abs(d[i][1])] : [],
+      );
+      expect(Math.min(...feet)).toBeLessThan(1e-9);
+      // Never up off its legs; down onto them on the beat.
+      expect(d[body][1]).toBeGreaterThan(-1e-9);
+      if (d[body][1] > 0.05) dipped = true;
+    }
+    expect(dipped).toBe(true);
+  });
+
+  for (const stage of [1, 2]) {
+    it(`never dances a stage ${stage} herzie into the ground`, () => {
+      const { spheres } = buildCreatureModel(USER, stage);
+      const own = spheres.filter(
+        (sp) => !["ground", "spirit", "pet"].includes(sp.part),
+      );
+      const floor = Math.max(...own.map((sp) => sp.center[1] + sp.radius));
+      for (let f = 0; f < 24; f += 0.5) {
+        const d = creaturePoseOffsets(spheres, stage, {
+          idleFrame: f * 5,
+          walkPhase: 0,
+          walkWeight: 0,
+          danceFrame: f,
+          danceWeight: 1,
+        });
+        spheres.forEach((sp, i) => {
+          if (!own.includes(sp)) return;
+          expect(sp.center[1] + d[i][1] + sp.radius).toBeLessThanOrEqual(
+            floor + 1e-9,
+          );
+        });
+      }
+    });
+  }
 });
 
 describe("headphones", () => {
