@@ -4,6 +4,7 @@
  * `@herzies/shared/gl`, so pages without herzies don't load three.js.
  */
 export * from "./animation.js";
+export * from "./companion.js";
 export * from "./HerzieModel.js";
 export * from "./HerzieView.js";
 export * from "./herzieMaterial.js";
