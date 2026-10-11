@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
 
 /**
- * Combat on the testing ground: whether you're in it, and what the frame
+ * Combat on the training grounds: whether you're in it, and what the frame
  * loop needs to share about it outside React — your aim, your casts, and
  * how hard the last hit shook the camera.
  */

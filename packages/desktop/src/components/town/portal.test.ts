@@ -13,7 +13,7 @@ import {
 const facingSouth: Portal = { key: "0,0", x: 0, z: 0, yaw: 0, to: "home" };
 
 describe("portals", () => {
-  it("link home and the testing ground both ways", () => {
+  it("link home and the training grounds both ways", () => {
     const home = portalsOf(mapById("home"));
     const arena = portalsOf(mapById("arena"));
     expect(home.map((p) => p.to)).toContain("arena");

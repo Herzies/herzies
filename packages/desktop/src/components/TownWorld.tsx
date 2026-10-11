@@ -120,7 +120,7 @@ export function TownWorld({
   const onReady = useCallback(() => setReady(true), []);
 
   // The visitors stand on islands with spots for them (home), not out on
-  // the testing ground.
+  // the training grounds.
   const map = useTownMap();
   // Everyone else on the island you're on.
   useEffect(() => {
@@ -204,6 +204,37 @@ export function TownWorld({
   }, [lookKey, net]);
 
   const talkTo = near?.card.openKey;
+  // Where combat's allowed, the keys for it: sat right on top of the XP
+  // bar (or in the corner, without one).
+  const combatHint =
+    map.combat && !paused ? (
+      <div
+        className={cn(
+          "pointer-events-none absolute z-30 flex items-center gap-2 rounded bg-black/55 px-2 py-1 text-[10px] text-white/80",
+          profile
+            ? "bottom-full left-2 mb-1.5"
+            : chatOverlay
+              ? "bottom-[calc(var(--dock-height,0px)+4.5rem)] left-2"
+              : "bottom-3 left-2",
+        )}
+      >
+        <span>
+          <Key>Tab</Key> {fighting ? "roam" : "aim"}
+        </span>
+        <button
+          type="button"
+          className="pointer-events-auto cursor-pointer text-white/60 hover:text-white"
+          title={muted ? "Sounds off" : "Sounds on"}
+          onClick={() => {
+            setSfxMuted(!muted);
+            setMuted(!muted);
+          }}
+        >
+          {muted ? "♪̸" : "♪"}
+        </button>
+      </div>
+    ) : null;
+
   return (
     <div className="relative min-h-0 flex-1 overflow-hidden">
       {notice ? (
@@ -252,6 +283,7 @@ export function TownWorld({
               chatOverlay ? "bottom-[var(--dock-height,0px)]" : "bottom-0",
             )}
           >
+            {combatHint}
             <div className="mb-0.5 flex items-baseline justify-between text-ui text-white/70">
               <span>Level {profile.level}</span>
               <span className="text-ui-sm">
@@ -281,6 +313,7 @@ export function TownWorld({
           </div>
         </>
       ) : null}
+      {profile ? null : combatHint}
       {fpsShown && opened && !paused ? (
         <FrameRate
           className={cn(
@@ -312,42 +345,6 @@ export function TownWorld({
           <TownVitals inFight={!!map.combat} chatOverlay={chatOverlay} />
           <BossHud name={bossCard?.title ?? "The boss"} />
         </>
-      ) : null}
-      {map.combat && !paused ? (
-        <div
-          className={cn(
-            "pointer-events-none absolute left-2 z-30 flex items-center gap-2 rounded bg-black/55 px-2 py-1 text-[10px] text-white/80",
-            chatOverlay
-              ? "bottom-[calc(var(--dock-height,0px)+4.5rem)]"
-              : "bottom-3",
-          )}
-        >
-          {fighting ? (
-            <>
-              <span>
-                <Key>Click</Key> / <Key>F</Key> cast
-              </span>
-              <span>
-                <Key>Esc</Key> stop
-              </span>
-            </>
-          ) : (
-            <span>
-              <Key>Tab</Key> fight
-            </span>
-          )}
-          <button
-            type="button"
-            className="pointer-events-auto cursor-pointer text-white/60 hover:text-white"
-            title={muted ? "Sounds off" : "Sounds on"}
-            onClick={() => {
-              setSfxMuted(!muted);
-              setMuted(!muted);
-            }}
-          >
-            {muted ? "♪̸" : "♪"}
-          </button>
-        </div>
       ) : null}
       {!paused && (loading || !ready) ? (
         <LoadingSplash overlay label="loading town" />

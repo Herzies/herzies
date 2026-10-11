@@ -3,9 +3,9 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { ambient } from "./ambient";
+import { aimSensitivity } from "./combat/sensitivity";
 import { combat } from "./combat/state";
 import { townSave, useTownRuntime } from "./runtime";
-import { aimSensitivity } from "./combat/sensitivity";
 
 const { ACTION } = CameraControlsImpl;
 

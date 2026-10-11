@@ -7,7 +7,7 @@ import type { TownMap } from "../map";
 import { DUMMY, type DummyState, dummiesOf, stepDummy } from "./dummy";
 
 /**
- * The testing ground's training dummies: a stuffed burlap herzie on a post,
+ * The training grounds' training dummies: a stuffed burlap herzie on a post,
  * a target painted on its chest, stitched-cross eyes. A hit rocks it about
  * its base on a spring, bobbles its head, and flashes it white.
  *

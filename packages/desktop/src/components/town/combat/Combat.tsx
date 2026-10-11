@@ -36,7 +36,7 @@ const typing = (t: EventTarget | null) => {
 };
 
 /**
- * Fighting on the testing ground: combat mode's controls, your aim, your
+ * Fighting on the training grounds: combat mode's controls, your aim, your
  * casts, and every wave in flight — where it lands and what that does.
  *
  * - Tab: into combat mode (the mouse aims; the camera stays as it is);

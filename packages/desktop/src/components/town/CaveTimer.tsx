@@ -71,9 +71,7 @@ export function CaveTimer({ map }: { map: TownMap }) {
         className="whitespace-nowrap rounded bg-black/65 px-2 py-1 text-center text-[11px] leading-tight tabular-nums"
         style={{ color: tone, border: `1px solid ${tone}55`, opacity: 0 }}
       >
-        <div className="text-[9px] opacity-70">
-          Nohoot Henry's lair
-        </div>
+        <div className="text-[9px] opacity-70">Nohoot Henry's lair</div>
         {text}
       </div>
     </Html>

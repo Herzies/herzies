@@ -1,7 +1,7 @@
 {
   "version": 2,
   "id": "arena",
-  "name": "Testing Ground",
+  "name": "Training Grounds",
   "size": 40,
   "origin": [0, 4, -112],
   "combat": true,

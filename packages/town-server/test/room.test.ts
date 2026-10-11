@@ -135,7 +135,7 @@ describe("rules", () => {
     expect(checkMove(g, 41, 0, 1000, "home")).toBe(false);
   });
 
-  it("holds the testing ground to its own, smaller island and spawn", () => {
+  it("holds the training grounds to its own, smaller island and spawn", () => {
     const g = newGuard(16.5, 0, 0);
     expect(checkMove(g, 18, 0, 1000, "arena")).toBe(false);
     expect(checkMove(g, 0, -12, 100, "arena")).toBe(true);

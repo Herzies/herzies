@@ -206,7 +206,7 @@ describe("turned objects", () => {
   });
 
   it("sizes each island by its own grid", () => {
-    const small = emptyMap(36, "arena", "Testing Ground");
+    const small = emptyMap(36, "arena", "Training Grounds");
     expect(islandRadius(small)).toBe(18);
     expect(worldRadius(small)).toBe(15);
     expect(small.terrain).toHaveLength(36);
@@ -217,7 +217,7 @@ describe("turned objects", () => {
   });
 
   it("needs every portal to lead somewhere, and links only on portals", () => {
-    const map = emptyMap(36, "arena", "Testing Ground");
+    const map = emptyMap(36, "arena", "Training Grounds");
     paint(map, "objects", 18, 18, "O");
     expect(() => parseMap(map)).toThrow(/leads nowhere/);
     map.portals = { "18,18": { to: "home" } };

@@ -219,7 +219,7 @@ function markers(m: TownMap): { id: MarkerId; label: string; at: Point }[] {
 }
 
 /** The map, every visitor kind given a spot (new ones start mid-plaza) —
- * on islands visitors stand on at all (home, not the testing ground). */
+ * on islands visitors stand on at all (home, not the training grounds). */
 function withAllSpots(m: TownMap): TownMap {
   if (Object.keys(m.spots).length === 0) return m;
   const spots = { ...m.spots };

@@ -79,14 +79,14 @@ export type PortalLink = { to: MapId };
 export type TownMap = {
   version: 2;
   id: MapId;
-  /** What the game calls it ("Enter the Testing Ground"). */
+  /** What the game calls it ("Enter the Training Grounds"). */
   name: string;
   size: number;
   /** Where the island floats in the one sky every island shares: the
    * island you're on is drawn at the origin, the others where they float
    * relative to it. Home is at [0, 0, 0]. */
   origin: [x: number, y: number, z: number];
-  /** Whether you can fight here (the testing ground's dummies). */
+  /** Whether you can fight here (the training grounds' dummies). */
   combat?: boolean;
   /** An enclosed room instead of an island in the sky: no sky, clouds or
    * other islands, a floor and walls, and a lamp-lit dark. The boss's

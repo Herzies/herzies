@@ -36,7 +36,7 @@ export const TOWN_MAX_SHARDS = 16;
  * desktop's map files (checked by a desktop test). */
 export const TOWN_MAPS = {
   home: { radius: 40, spawn: { x: 8.5, z: 9 } },
-  /** The testing ground, through the portal: training dummies. */
+  /** The training grounds, through the portal: training dummies. */
   arena: { radius: 17, spawn: { x: 0, z: -12 } },
   /** The boss's cave: a small dark room, one shared fight. */
   bossroom: { radius: 13, spawn: { x: 0, z: 10 } },
@@ -280,7 +280,7 @@ export const TOWN_FLAG_DANCING = 4;
  * an "is casting" bit, so two casts between ticks aren't one. */
 export const TOWN_CAST_SHIFT = 3;
 export const TOWN_CAST_MASK = 0b111 << TOWN_CAST_SHIFT;
-/** In combat mode, on the testing ground. */
+/** In combat mode, on the training grounds. */
 export const TOWN_FLAG_COMBAT = 64;
 
 /** The cast count carried in a state's flags. */
