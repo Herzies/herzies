@@ -396,3 +396,60 @@ describe("casting", () => {
     expect(bounds(b).min.toArray()).toEqual(bounds(a).min.toArray());
   });
 });
+
+describe("a spirit dancing", () => {
+  const WITH_SPIRIT = {
+    seed: "model-test",
+    stage: 3,
+    equipped: { spirit: "spirit-orb" },
+  };
+  /** How high the spirit flies over its herzie's feet (world units). */
+  const spiritHeight = (h: HerzieModel) => {
+    h.root.updateMatrixWorld(true);
+    // The follower: the root's first child, added before the herzie's own.
+    return h.root.children[0].getWorldPosition(new THREE.Vector3()).y;
+  };
+
+  for (const [where, options] of [
+    ["in the Town", {}],
+    ["on its own stage", { anchorScenery: 0 }],
+  ] as const) {
+    it(`surges up now and then, and settles when the music stops (${where})`, () => {
+      const h = new HerzieModel(WITH_SPIRIT, options);
+      const measure = () => {
+        if (!("anchorScenery" in options)) return spiritHeight(h);
+        // Anchored: the spirit's own parts move. Its highest part.
+        let top = Number.NEGATIVE_INFINITY;
+        h.root.updateMatrixWorld(true);
+        const { model, meshes } = h as unknown as {
+          model: { spheres: { part: string }[] };
+          meshes: THREE.Mesh[];
+        };
+        model.spheres.forEach((s, k) => {
+          if (s.part === "spirit")
+            top = Math.max(
+              top,
+              meshes[k].getWorldPosition(new THREE.Vector3()).y,
+            );
+        });
+        return top;
+      };
+      h.update(1 / 60, 0);
+      const rest = measure();
+      h.dancing = true;
+      let most = rest;
+      for (let i = 0; i < 6 * 60; i++) {
+        h.update(1 / 60, 0);
+        most = Math.max(most, measure());
+      }
+      // Well above the dance's own gentle bob.
+      expect(most - rest).toBeGreaterThan(0.12 * MODEL_SCALE * 1.5);
+      h.dancing = false;
+      for (let i = 0; i < 4 * 60; i++) h.update(1 / 60, 0);
+      // Its surge let go (it idles about on its own, after).
+      const { surge } = h as unknown as { surge: { y: number; pulse: null } };
+      expect(surge.pulse).toBeNull();
+      expect(Math.abs(surge.y)).toBeLessThan(1e-3);
+    });
+  }
+});

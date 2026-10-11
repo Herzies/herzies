@@ -3746,6 +3746,8 @@ export function buildCreatureModel(
 /** Frames in the dance loop, which the old renderer played at 65ms a
  * frame (a 1.56s loop). */
 export const DANCE_LOOP_FRAMES = DANCE_FRAMES;
+/** Frames between the dance's beats (the boombox's touchdowns). */
+export const DANCE_BEAT_FRAMES = DANCE_BEAT;
 
 /** What a continuously animating host poses a herzie with (see
  * creaturePoseOffsets). */

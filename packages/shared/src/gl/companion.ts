@@ -106,7 +106,7 @@ export type CompanionHost = {
 
 /** A small seeded PRNG (mulberry32), so a crowd's companions wander out of
  * step but each always the same way. */
-function seededRandom(seed: number): () => number {
+export function seededRandom(seed: number): () => number {
   let a = seed >>> 0;
   return () => {
     a = (a + 0x6d2b79f5) >>> 0;
