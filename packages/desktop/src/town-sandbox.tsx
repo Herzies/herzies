@@ -12,6 +12,8 @@
 // with a made-up boss (and `&cave=open` opens the cave's door in town); the
 // HUD is drawn over it. `&boss=<hp>` sets the boss's health, `&hp=<n>` yours.
 // `?music=1` plays music, as it were: stand still and the herzie dances.
+// `?color=`, `?head=` and `?spirit=` dress the player (`?head=rainbow-headband`
+// with the default prism skin is the full Prismatic set).
 import "./globals.css";
 import { signTownTicket } from "@herzies/shared";
 import type { RootState } from "@react-three/fiber";
@@ -65,13 +67,16 @@ const spots: TownSpot[] = [
   ["treat_trader", "Nandor"],
   ["boss_fight", "The boss"],
   ["song_hunt", "Orphiez"],
-].map(([type, title]) => ({
-  key: type,
-  card: card(type, title),
-  at: SPOTS[type],
-  standing: true,
-  status: "in town",
-}));
+]
+  // Only those the map has a spot for (the boss lives in its cave now).
+  .filter(([type]) => SPOTS[type])
+  .map(([type, title]) => ({
+    key: type,
+    card: card(type, title),
+    at: SPOTS[type],
+    standing: true,
+    status: "in town",
+  }));
 // `?visitors=6` fills the spare spots too: the most the Town shows.
 const extra = Math.max(0, Number(params.get("visitors") ?? 4) - spots.length);
 SPARE_SPOTS.slice(0, extra).forEach((at, i) => {
@@ -95,7 +100,7 @@ const player = {
   stage: Number(params.get("stage") ?? 3),
   equipped: {
     color: params.get("color") ?? "prism",
-    head: "headphones",
+    head: params.get("head") ?? "headphones",
     spirit: params.get("spirit") ?? "spirit-orb",
   },
 };
