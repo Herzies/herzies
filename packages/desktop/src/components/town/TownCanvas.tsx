@@ -35,6 +35,7 @@ import {
 import { RemotePlayers } from "./RemotePlayers";
 import { sfxPortal } from "./sfx";
 import "./shadows";
+import { PIXEL_SCALE, useTownPixelSize } from "./pixelSize";
 import {
   goToMap,
   mapById,
@@ -51,10 +52,7 @@ import { Visitor } from "./Visitor";
 import { SonicVFX } from "./vfx/SonicVFX";
 import { World } from "./World";
 
-/** The Town's resolution as a fraction of the screen's: each drawn pixel
- * covers 1/PIXEL_SCALE screen pixels square (2.5: five device pixels on a
- * Retina screen, so the pixels all come out the same size). */
-export const PIXEL_SCALE = 0.4;
+export { PIXEL_SCALE } from "./pixelSize";
 
 export type TownCanvasProps = {
   spots: TownSpot[];
@@ -124,6 +122,8 @@ export default function TownCanvas(props: TownCanvasProps) {
   );
   const current = useTownMap();
   const map = props.map ?? current;
+  // A debug override of PIXEL_SCALE (Settings, dev builds).
+  const pixelSize = useTownPixelSize();
   // Visitors stand on islands with spots for them.
   const spots = Object.keys(map.spots).length > 0 ? props.spots : [];
 
@@ -131,7 +131,10 @@ export default function TownCanvas(props: TownCanvasProps) {
     <Canvas
       // Chunky pixels, to sit with the ASCII herzies: drawn at a fraction of
       // the screen's resolution and scaled up without smoothing.
-      dpr={props.pixelScale ?? PIXEL_SCALE}
+      dpr={
+        props.pixelScale ??
+        (pixelSize ? window.devicePixelRatio / pixelSize : PIXEL_SCALE)
+      }
       gl={{ antialias: false }}
       // Plain PCF: soft enough, and at these pixels the edge reads clean.
       shadows={props.shadows === false ? false : "percentage"}

@@ -4,6 +4,7 @@ import { cn } from "../lib/utils";
 import type { AppState } from "../tauri-bridge";
 import { herzies } from "../tauri-bridge";
 import { Checkbox } from "./Checkbox";
+import { TabButton } from "./TabButton";
 import {
   aimSensitivity,
   SENSITIVITY_MAX,
@@ -11,7 +12,21 @@ import {
   setAimSensitivity,
 } from "./town/combat/sensitivity";
 import { setFpsShown, useFpsShown } from "./town/fps";
+import {
+  defaultPixelSize,
+  PIXEL_SIZE_MAX,
+  PIXEL_SIZE_MIN,
+  setTownPixelSize,
+  useTownPixelSize,
+} from "./town/pixelSize";
 import { View } from "./View";
+
+/** Debug is for dev builds only. */
+const TABS = ["Account", "Controls", "Debug"] as const;
+type SettingsTab = (typeof TABS)[number];
+const tabs: readonly SettingsTab[] = import.meta.env.DEV
+  ? TABS
+  : TABS.filter((t) => t !== "Debug");
 
 type UpdateInstallStatus =
   | { kind: "idle" }
@@ -67,6 +82,8 @@ export function SettingsView({
   const [privacyError, setPrivacyError] = useState<string | null>(null);
   const [aim, setAim] = useState(aimSensitivity);
   const fpsShown = useFpsShown();
+  const pixelSize = useTownPixelSize();
+  const [tab, setTab] = useState<SettingsTab>("Account");
   const shareListening = state.herzie?.shareListening ?? true;
 
   const shortcuts: { key: string; label: string }[] = [
@@ -87,269 +104,318 @@ export function SettingsView({
       colour="cyan"
       childrenClassName="flex min-h-0 flex-col overflow-y-auto"
     >
-      <div className="mb-4">
-        <div className="mb-1.5 text-ui text-text-dim">Account</div>
-        {state.isOnline ? (
-          <button
-            type="button"
-            className="btn text-red"
-            onClick={() => herzies.logout()}
-          >
-            Logout
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="btn text-green"
-            disabled={loggingIn}
-            onClick={async () => {
-              setLoggingIn(true);
-              try {
-                await herzies.login();
-              } catch {
-                // Failures are surfaced on the splash screen.
-              } finally {
-                setLoggingIn(false);
-              }
-            }}
-          >
-            {loggingIn ? "Logging in..." : "Login"}
-          </button>
-        )}
+      <div className="mb-3 flex shrink-0 gap-1 border-b border-border text-ui">
+        {tabs.map((t) => (
+          <TabButton key={t} active={tab === t} onClick={() => setTab(t)}>
+            {t}
+          </TabButton>
+        ))}
       </div>
 
-      {state.herzie && (
-        <div className="mb-4">
-          <div className="mb-1.5 text-ui text-text-dim">Privacy</div>
-          <Checkbox
-            checked={shareListening}
-            disabled={!state.isOnline || savingPrivacy}
-            onChange={async (share) => {
-              setSavingPrivacy(true);
-              setPrivacyError(null);
-              try {
-                await herzies.setShareListening(share);
-              } catch (e) {
-                setPrivacyError(String(e));
-              } finally {
-                setSavingPrivacy(false);
-              }
-            }}
-            className="items-start"
-          >
-            <span className="min-w-0">
-              <span className="block text-ui">
-                Share what you're listening to
-              </span>
-              <span className="block text-ui-sm text-text-dim">
-                Turn off to hide what you're listening to right now, and your
-                listening history for others. You'll still earn XP, drops, and
-                will be able to participate in events.
-              </span>
-            </span>
-          </Checkbox>
-          {privacyError && (
-            <div className="mt-1 text-[10px] text-red">
-              Couldn't save: {privacyError}
+      {tab === "Account" && (
+        <>
+          <div className="mb-4">
+            <div className="mb-1.5 text-ui text-text-dim">Account</div>
+            {state.isOnline ? (
+              <button
+                type="button"
+                className="btn text-red"
+                onClick={() => herzies.logout()}
+              >
+                Logout
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn text-green"
+                disabled={loggingIn}
+                onClick={async () => {
+                  setLoggingIn(true);
+                  try {
+                    await herzies.login();
+                  } catch {
+                    // Failures are surfaced on the splash screen.
+                  } finally {
+                    setLoggingIn(false);
+                  }
+                }}
+              >
+                {loggingIn ? "Logging in..." : "Login"}
+              </button>
+            )}
+          </div>
+          {state.herzie && (
+            <div className="mb-4">
+              <div className="mb-1.5 text-ui text-text-dim">Privacy</div>
+              <Checkbox
+                checked={shareListening}
+                disabled={!state.isOnline || savingPrivacy}
+                onChange={async (share) => {
+                  setSavingPrivacy(true);
+                  setPrivacyError(null);
+                  try {
+                    await herzies.setShareListening(share);
+                  } catch (e) {
+                    setPrivacyError(String(e));
+                  } finally {
+                    setSavingPrivacy(false);
+                  }
+                }}
+                className="items-start"
+              >
+                <span className="min-w-0">
+                  <span className="block text-ui">
+                    Share what you're listening to
+                  </span>
+                  <span className="block text-ui-sm text-text-dim">
+                    Turn off to hide what you're listening to right now, and
+                    your listening history for others. You'll still earn XP,
+                    drops, and will be able to participate in events.
+                  </span>
+                </span>
+              </Checkbox>
+              {privacyError && (
+                <div className="mt-1 text-[10px] text-red">
+                  Couldn't save: {privacyError}
+                </div>
+              )}
             </div>
           )}
-        </div>
+        </>
       )}
 
-      <div className="mb-4">
-        <div className="mb-1.5 text-ui text-text-dim">Aiming</div>
-        <label className="flex items-center gap-2 text-ui">
-          <span className="shrink-0">Mouse sensitivity</span>
-          <input
-            type="range"
-            min={SENSITIVITY_MIN}
-            max={SENSITIVITY_MAX}
-            step={0.05}
-            value={aim}
-            onChange={(e) => {
-              const v = Number(e.target.value);
-              setAim(v);
-              setAimSensitivity(v);
-            }}
-            className="min-w-0 flex-1"
-          />
-          <span className="w-10 shrink-0 text-right tabular-nums text-text-dim">
-            {aim.toFixed(2)}×
-          </span>
-        </label>
-      </div>
-
-      {import.meta.env.DEV && (
-        <div className="mb-4">
-          <div className="mb-1.5 text-ui text-text-dim">Debug</div>
-          <div className="flex flex-wrap gap-1">
-            <button
-              type="button"
-              className="btn"
-              onClick={() => herzies.testNotification()}
-            >
-              Test Notification
-            </button>
-            <button
-              type="button"
-              className={cn(
-                "btn",
-                fpsShown
-                  ? "border-cyan text-cyan"
-                  : "border-[#555] text-text-dim",
-              )}
-              onClick={() => setFpsShown(!fpsShown)}
-            >
-              {fpsShown ? "Town FPS: On" : "Town FPS"}
-            </button>
-            <button
-              type="button"
-              className="btn"
-              onClick={() => herzies.testActivity()}
-            >
-              Test Activity Log
-            </button>
-            <button
-              type="button"
-              className="btn"
-              onClick={async () => {
-                const raw = await herzies.debugMediaRemoteNowPlaying();
-                let text: string;
-                if (raw === null) {
-                  text =
-                    "(null — no now playing data from adapter; is music playing?)";
-                } else {
-                  try {
-                    text = JSON.stringify(JSON.parse(raw), null, 2);
-                  } catch {
-                    text = raw;
-                  }
-                }
-                console.log("[MediaRemote]", raw ?? null);
-                setMediaRemoteDebug(text);
-              }}
-            >
-              MediaRemote JSON
-            </button>
-            <button type="button" className="btn" onClick={onPreviewOnboarding}>
-              Preview Onboarding
-            </button>
-            <button type="button" className="btn" onClick={onPreviewLoading}>
-              Preview Loading
-            </button>
-            <button type="button" className="btn" onClick={onTestUpdateAlert}>
-              Test Update Alert
-            </button>
-            <button type="button" className="btn" onClick={onTestWhatsNew}>
-              Test What's New
-            </button>
-            <button
-              type="button"
-              className={cn(
-                "btn",
-                hasActiveEventOverride
-                  ? "border-cyan text-cyan"
-                  : "border-[#555] text-text-dim",
-              )}
-              onClick={onToggleActiveEventOverride}
-            >
-              {hasActiveEventOverride ? "Orphiez: On" : "Test Orphiez"}
-            </button>
-            <button
-              type="button"
-              className={cn(
-                "btn",
-                debugBossOverride
-                  ? "border-red text-red"
-                  : "border-[#555] text-text-dim",
-              )}
-              onClick={onToggleDebugBoss}
-            >
-              {debugBossOverride ? "Boss Fight: On" : "Test Boss Fight"}
-            </button>
-            <button
-              type="button"
-              className={cn(
-                "btn",
-                debugMerchantOverride
-                  ? "border-yellow text-yellow"
-                  : "border-[#555] text-text-dim",
-              )}
-              onClick={onToggleDebugMerchant}
-            >
-              {debugMerchantOverride ? "George: On" : "Test George"}
-            </button>
-            <button
-              type="button"
-              className={cn(
-                "btn",
-                debugTreatTraderOverride
-                  ? "border-red text-red"
-                  : "border-[#555] text-text-dim",
-              )}
-              onClick={onToggleDebugTreatTrader}
-            >
-              {debugTreatTraderOverride ? "Nandor: On" : "Test Nandor"}
-            </button>
-            <button
-              type="button"
-              className="btn"
-              onClick={() => onSpawnDebugDrop()}
-            >
-              Spawn Item Drop
-            </button>
-            <button
-              type="button"
-              className="btn"
-              onClick={() => onSpawnDebugDrop(true)}
-            >
-              Spawn Dice Drop
-            </button>
+      {tab === "Controls" && (
+        <>
+          <div className="mb-4">
+            <div className="mb-1.5 text-ui text-text-dim">Aiming</div>
+            <label className="flex items-center gap-2 text-ui">
+              <span className="shrink-0">Mouse sensitivity</span>
+              <input
+                type="range"
+                min={SENSITIVITY_MIN}
+                max={SENSITIVITY_MAX}
+                step={0.05}
+                value={aim}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  setAim(v);
+                  setAimSensitivity(v);
+                }}
+                className="min-w-0 flex-1"
+              />
+              <span className="w-10 shrink-0 text-right tabular-nums text-text-dim">
+                {aim.toFixed(2)}×
+              </span>
+            </label>
           </div>
-          {mediaRemoteDebug !== null && (
-            <pre className="mt-2 max-h-40 overflow-auto rounded border border-border bg-[#111] p-2 text-[10px] text-text-dim whitespace-pre-wrap break-all">
-              {mediaRemoteDebug}
-            </pre>
-          )}
-        </div>
+          <div className="mb-4">
+            <div className="mb-1.5 text-ui text-text-dim">
+              Keyboard shortcuts
+            </div>
+            <div className="flex flex-col gap-0.5">
+              {shortcuts.map((s) => (
+                <div key={s.key} className="flex items-center gap-2 text-ui-sm">
+                  <kbd className="inline-flex min-w-[18px] justify-center rounded border border-border bg-bg-panel px-1 py-px text-ui-sm text-text">
+                    {s.key}
+                  </kbd>
+                  <span className="text-text-dim">{s.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
       )}
 
-      {import.meta.env.DEV && (
-        <div className="mb-4">
-          <div className="mb-1.5 text-ui text-text-dim">Stage Preview</div>
-          <div className="flex gap-1">
-            {[null, 1, 2, 3].map((s) => (
+      {tab === "Debug" && (
+        <>
+          <div className="mb-4">
+            <div className="mb-1.5 text-ui text-text-dim">Town</div>
+            <label className="flex items-center gap-2 text-ui">
+              <span className="shrink-0">Pixel size</span>
+              <input
+                type="range"
+                min={PIXEL_SIZE_MIN}
+                max={PIXEL_SIZE_MAX}
+                step={1}
+                value={pixelSize ?? defaultPixelSize()}
+                onChange={(e) => setTownPixelSize(Number(e.target.value))}
+                className="min-w-0 flex-1"
+              />
+              <span className="w-10 shrink-0 text-right tabular-nums text-text-dim">
+                {pixelSize ?? defaultPixelSize()}px
+              </span>
               <button
-                key={s ?? "default"}
+                type="button"
+                className="btn"
+                disabled={pixelSize === null}
+                onClick={() => setTownPixelSize(null)}
+              >
+                Reset
+              </button>
+            </label>
+            <div className="mt-0.5 text-ui-sm text-text-dim">
+              Screen pixels per Town pixel. Unset, the game's own (
+              {defaultPixelSize()}px).
+            </div>
+          </div>
+          <div className="mb-4">
+            <div className="mb-1.5 text-ui text-text-dim">Debug</div>
+            <div className="flex flex-wrap gap-1">
+              <button
+                type="button"
+                className="btn"
+                onClick={() => herzies.testNotification()}
+              >
+                Test Notification
+              </button>
+              <button
                 type="button"
                 className={cn(
                   "btn",
-                  stageOverride === s
+                  fpsShown
                     ? "border-cyan text-cyan"
                     : "border-[#555] text-text-dim",
                 )}
-                onClick={() => onStageOverride(s)}
+                onClick={() => setFpsShown(!fpsShown)}
               >
-                {s === null ? "Default" : `Stage ${s}`}
+                {fpsShown ? "Town FPS: On" : "Town FPS"}
               </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div className="mb-4">
-        <div className="mb-1.5 text-ui text-text-dim">Keyboard shortcuts</div>
-        <div className="flex flex-col gap-0.5">
-          {shortcuts.map((s) => (
-            <div key={s.key} className="flex items-center gap-2 text-ui-sm">
-              <kbd className="inline-flex min-w-[18px] justify-center rounded border border-border bg-bg-panel px-1 py-px text-ui-sm text-text">
-                {s.key}
-              </kbd>
-              <span className="text-text-dim">{s.label}</span>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => herzies.testActivity()}
+              >
+                Test Activity Log
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={async () => {
+                  const raw = await herzies.debugMediaRemoteNowPlaying();
+                  let text: string;
+                  if (raw === null) {
+                    text =
+                      "(null — no now playing data from adapter; is music playing?)";
+                  } else {
+                    try {
+                      text = JSON.stringify(JSON.parse(raw), null, 2);
+                    } catch {
+                      text = raw;
+                    }
+                  }
+                  console.log("[MediaRemote]", raw ?? null);
+                  setMediaRemoteDebug(text);
+                }}
+              >
+                MediaRemote JSON
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={onPreviewOnboarding}
+              >
+                Preview Onboarding
+              </button>
+              <button type="button" className="btn" onClick={onPreviewLoading}>
+                Preview Loading
+              </button>
+              <button type="button" className="btn" onClick={onTestUpdateAlert}>
+                Test Update Alert
+              </button>
+              <button type="button" className="btn" onClick={onTestWhatsNew}>
+                Test What's New
+              </button>
+              <button
+                type="button"
+                className={cn(
+                  "btn",
+                  hasActiveEventOverride
+                    ? "border-cyan text-cyan"
+                    : "border-[#555] text-text-dim",
+                )}
+                onClick={onToggleActiveEventOverride}
+              >
+                {hasActiveEventOverride ? "Orphiez: On" : "Test Orphiez"}
+              </button>
+              <button
+                type="button"
+                className={cn(
+                  "btn",
+                  debugBossOverride
+                    ? "border-red text-red"
+                    : "border-[#555] text-text-dim",
+                )}
+                onClick={onToggleDebugBoss}
+              >
+                {debugBossOverride ? "Boss Fight: On" : "Test Boss Fight"}
+              </button>
+              <button
+                type="button"
+                className={cn(
+                  "btn",
+                  debugMerchantOverride
+                    ? "border-yellow text-yellow"
+                    : "border-[#555] text-text-dim",
+                )}
+                onClick={onToggleDebugMerchant}
+              >
+                {debugMerchantOverride ? "George: On" : "Test George"}
+              </button>
+              <button
+                type="button"
+                className={cn(
+                  "btn",
+                  debugTreatTraderOverride
+                    ? "border-red text-red"
+                    : "border-[#555] text-text-dim",
+                )}
+                onClick={onToggleDebugTreatTrader}
+              >
+                {debugTreatTraderOverride ? "Nandor: On" : "Test Nandor"}
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => onSpawnDebugDrop()}
+              >
+                Spawn Item Drop
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => onSpawnDebugDrop(true)}
+              >
+                Spawn Dice Drop
+              </button>
             </div>
-          ))}
-        </div>
-      </div>
+            {mediaRemoteDebug !== null && (
+              <pre className="mt-2 max-h-40 overflow-auto rounded border border-border bg-[#111] p-2 text-[10px] text-text-dim whitespace-pre-wrap break-all">
+                {mediaRemoteDebug}
+              </pre>
+            )}
+          </div>
+          <div className="mb-4">
+            <div className="mb-1.5 text-ui text-text-dim">Stage Preview</div>
+            <div className="flex gap-1">
+              {[null, 1, 2, 3].map((s) => (
+                <button
+                  key={s ?? "default"}
+                  type="button"
+                  className={cn(
+                    "btn",
+                    stageOverride === s
+                      ? "border-cyan text-cyan"
+                      : "border-[#555] text-text-dim",
+                  )}
+                  onClick={() => onStageOverride(s)}
+                >
+                  {s === null ? "Default" : `Stage ${s}`}
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
 
       {availableUpdate && (
         <div className="mt-auto mb-4">
