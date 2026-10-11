@@ -120,7 +120,7 @@ function Statue({
         <div
           ref={plaque}
           style={{ opacity: 0 }}
-          className="whitespace-nowrap rounded bg-black/55 px-1.5 py-0.5 text-center text-[9px] leading-tight text-text-dim"
+          className="whitespace-nowrap text-center text-[9px] leading-tight text-white/70 [text-shadow:0_1px_3px_#000,0_0_6px_#000]"
         >
           champion
           <div className="text-[10px] text-white">{champion.name}</div>

@@ -1,5 +1,11 @@
 import "./globals.css";
-import { bankCapacity, type HerzieProfile, isBankFull } from "@herzies/shared";
+import {
+  bankCapacity,
+  type HerzieProfile,
+  isBankFull,
+  levelProgress,
+  xpToNextLevel,
+} from "@herzies/shared";
 import { herzieStage } from "@herzies/shared/gl";
 import { attachConsole } from "@tauri-apps/plugin-log";
 import {
@@ -1019,6 +1025,17 @@ function App() {
             onLog={addLog}
             playerSeed={herzie?.friendCode}
             playerStage={stageOverride ?? herzie?.stage}
+            playerProfile={
+              herzie
+                ? {
+                    friendCode: herzie.friendCode,
+                    name: herzie.name,
+                    level: herzie.level,
+                    progress: levelProgress(herzie),
+                    toNext: xpToNextLevel(herzie),
+                  }
+                : undefined
+            }
             musicPlaying={!!state.nowPlaying}
             onOpenProfile={(code) => {
               // Back from this profile returns to the Town.

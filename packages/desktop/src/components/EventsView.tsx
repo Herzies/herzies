@@ -233,6 +233,7 @@ function EventsViewImpl({
   rootKey = 0,
   playerSeed,
   playerStage,
+  playerProfile,
   musicPlaying = false,
   onOpenProfile,
   chatOverlay = false,
@@ -250,6 +251,14 @@ function EventsViewImpl({
   /** The player's herzie, walking around the Town. */
   playerSeed?: string;
   playerStage?: number;
+  /** Name, level and XP progress, shown top left in the Town. */
+  playerProfile?: {
+    friendCode?: string;
+    name: string;
+    level: number;
+    progress: number;
+    toNext: number;
+  };
   /** Tab stays mounted but hidden; only poll while user is on Events. */
   eventsTabVisible: boolean;
   /** Bumped when the Town tab is re-selected while already on it: back to
@@ -655,6 +664,7 @@ function EventsViewImpl({
           stage: playerStage ?? 1,
           equipped,
         }}
+        profile={playerProfile}
         stats={
           units.length > 0
             ? getHerzieStatsFromUnits(units)

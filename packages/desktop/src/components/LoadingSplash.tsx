@@ -30,8 +30,12 @@ export function LoadingSplash({
       role="status"
       aria-live="polite"
       className={cn(
-        "loading-splash flex flex-col items-center justify-center gap-1 text-ui text-text-dim",
-        overlay ? "fixed inset-0 z-1000 bg-bg-panel" : "h-screen",
+        "flex flex-col items-center justify-center gap-1 text-ui text-text-dim",
+        // The overlay covers a view that is already drawn (the Town's UI),
+        // so it can't wait out the fade-in delay: it would show through.
+        overlay
+          ? "fixed inset-0 z-1000 bg-bg-panel"
+          : "loading-splash h-screen",
       )}
     >
       <div className="relative">

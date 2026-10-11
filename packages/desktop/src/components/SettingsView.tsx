@@ -10,6 +10,7 @@ import {
   SENSITIVITY_MIN,
   setAimSensitivity,
 } from "./town/combat/sensitivity";
+import { setFpsShown, useFpsShown } from "./town/fps";
 import { View } from "./View";
 
 type UpdateInstallStatus =
@@ -65,6 +66,7 @@ export function SettingsView({
   const [savingPrivacy, setSavingPrivacy] = useState(false);
   const [privacyError, setPrivacyError] = useState<string | null>(null);
   const [aim, setAim] = useState(aimSensitivity);
+  const fpsShown = useFpsShown();
   const shareListening = state.herzie?.shareListening ?? true;
 
   const shortcuts: { key: string; label: string }[] = [
@@ -187,6 +189,18 @@ export function SettingsView({
               onClick={() => herzies.testNotification()}
             >
               Test Notification
+            </button>
+            <button
+              type="button"
+              className={cn(
+                "btn",
+                fpsShown
+                  ? "border-cyan text-cyan"
+                  : "border-[#555] text-text-dim",
+              )}
+              onClick={() => setFpsShown(!fpsShown)}
+            >
+              {fpsShown ? "Town FPS: On" : "Town FPS"}
             </button>
             <button
               type="button"

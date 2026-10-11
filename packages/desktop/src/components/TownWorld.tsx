@@ -9,7 +9,7 @@ import {
   useState,
 } from "react";
 import { cn } from "../lib/utils";
-import type { ChatMessage } from "../tauri-bridge";
+import { type ChatMessage, herzies } from "../tauri-bridge";
 import { LoadingSplash } from "./LoadingSplash";
 import { type EventCard, formatIn, isDown } from "./TownScene";
 import { TownVitals } from "./TownVitals";
@@ -18,7 +18,9 @@ import { setCave } from "./town/cave";
 import { useChatBubbles } from "./town/chatBubbles";
 import { resetBossFight } from "./town/combat/fight";
 import { useCombat } from "./town/combat/state";
+import { useFpsShown } from "./town/fps";
 import type { TownMap } from "./town/map";
+import { NAME_SHADOW } from "./town/nameFade";
 import { useTownNet, useTownNetVersion } from "./town/net/townNet";
 import { spotsOf, type TownSpot, townLive, useTownMap } from "./town/runtime";
 import { setSfxMuted, sfxMuted } from "./town/sfx";
@@ -47,9 +49,18 @@ export function TownWorld({
   chatOverlay = false,
   musicPlaying = false,
   stats,
+  profile,
 }: {
   /** The player's herzie's stats: how hard its waves hit. */
   stats?: HerzieStats;
+  /** Name, level and progress to the next level, for the card top left. */
+  profile?: {
+    friendCode?: string;
+    name: string;
+    level: number;
+    progress: number;
+    toNext: number;
+  };
   /** The chat, for lines over the speakers' heads. */
   chatMessages?: ChatMessage[];
   /** The Town's events are still loading: keep the splash up. */
@@ -76,6 +87,20 @@ export function TownWorld({
   const [bench, setBench] = useState<"sit" | "stand" | null>(null);
   const [portalTo, setPortalTo] = useState<TownMap | null>(null);
   const fighting = useCombat();
+  const fpsShown = useFpsShown();
+  // Shown after the name, as on Home.
+  const friendCode = profile?.friendCode;
+  const [globalRank, setGlobalRank] = useState<number | undefined>();
+  useEffect(() => {
+    if (!friendCode) return;
+    let cancelled = false;
+    herzies.friendLookup([friendCode]).then((result) => {
+      if (!cancelled) setGlobalRank(result[friendCode]?.globalRank);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [friendCode]);
   const [muted, setMuted] = useState(sfxMuted);
   // Everyone else with the Town open, on the same island.
   const net = useTownNet(!paused);
@@ -196,7 +221,67 @@ export function TownWorld({
           Update Herzies to see other players
         </div>
       ) : null}
-      {import.meta.env.DEV && opened && !paused ? (
+      {profile && !paused ? (
+        <>
+          {/* Centred in a 20px row, like home's (its icon buttons are h-5), so
+              the name doesn't shift when switching tabs. */}
+          <div
+            className={cn(
+              "pointer-events-none absolute left-3 z-30 flex h-5 max-w-[60%] items-center",
+              notice ? "top-[3rem]" : "top-3",
+            )}
+          >
+            <span
+              className="whitespace-nowrap text-ui-lg font-bold text-white"
+              style={{ textShadow: NAME_SHADOW }}
+            >
+              {profile.name}
+              {globalRank ? (
+                <span
+                  className="ml-1 text-[10px] font-normal text-white/70"
+                  title={`Ranked #${globalRank} globally`}
+                >
+                  #{globalRank}
+                </span>
+              ) : null}
+            </span>
+          </div>
+          <div
+            className={cn(
+              "pointer-events-none absolute inset-x-0 z-30 bg-black/45 px-3 py-2 backdrop-blur-md",
+              chatOverlay ? "bottom-[var(--dock-height,0px)]" : "bottom-0",
+            )}
+          >
+            <div className="mb-0.5 flex items-baseline justify-between text-ui text-white/70">
+              <span>Level {profile.level}</span>
+              <span className="text-ui-sm">
+                {Math.ceil(profile.toNext)} XP to next
+              </span>
+            </div>
+            <div
+              role="progressbar"
+              aria-label="Experience"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(profile.progress * 100)}
+              className="flex h-2 w-full gap-0.5"
+            >
+              {Array.from({ length: 40 }, (_, i) => (
+                <div
+                  key={i}
+                  className={cn(
+                    "flex-1",
+                    i < Math.round(profile.progress * 40)
+                      ? "bg-green"
+                      : "bg-[#333]",
+                  )}
+                />
+              ))}
+            </div>
+          </div>
+        </>
+      ) : null}
+      {fpsShown && opened && !paused ? (
         <FrameRate
           className={cn(
             "pointer-events-none absolute left-2 z-30 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white/70 tabular-nums",
@@ -233,7 +318,7 @@ export function TownWorld({
           className={cn(
             "pointer-events-none absolute left-2 z-30 flex items-center gap-2 rounded bg-black/55 px-2 py-1 text-[10px] text-white/80",
             chatOverlay
-              ? "bottom-[calc(var(--dock-height,0px)+12px)]"
+              ? "bottom-[calc(var(--dock-height,0px)+4.5rem)]"
               : "bottom-3",
           )}
         >
@@ -276,7 +361,7 @@ export function TownWorld({
             "absolute left-1/2 z-30 -translate-x-1/2 cursor-pointer whitespace-nowrap rounded border-0 bg-black/35 px-2.5 py-1 text-ui text-white backdrop-blur-md hover:bg-black/50",
             // Above the dock (chat + tab bar) floating over the world.
             chatOverlay
-              ? "bottom-[calc(var(--dock-height,0px)+12px)]"
+              ? "bottom-[calc(var(--dock-height,0px)+4.5rem)]"
               : "bottom-3",
           )}
         >
@@ -292,7 +377,7 @@ export function TownWorld({
           className={cn(
             "absolute left-1/2 z-30 -translate-x-1/2 cursor-pointer whitespace-nowrap rounded border-0 bg-black/35 px-2.5 py-1 text-ui text-white backdrop-blur-md hover:bg-black/50",
             chatOverlay
-              ? "bottom-[calc(var(--dock-height,0px)+12px)]"
+              ? "bottom-[calc(var(--dock-height,0px)+4.5rem)]"
               : "bottom-3",
           )}
         >
@@ -312,7 +397,7 @@ export function TownWorld({
           className={cn(
             "absolute left-1/2 z-30 -translate-x-1/2 cursor-pointer whitespace-nowrap rounded border-0 bg-black/35 px-2.5 py-1 text-ui text-white backdrop-blur-md hover:bg-black/50",
             chatOverlay
-              ? "bottom-[calc(var(--dock-height,0px)+12px)]"
+              ? "bottom-[calc(var(--dock-height,0px)+4.5rem)]"
               : "bottom-3",
           )}
         >
@@ -334,7 +419,7 @@ function Key({ children }: { children: React.ReactNode }) {
 }
 
 /** Frames drawn per second, counted over each half second: the Town's,
- * since it draws every frame the browser does. Dev builds only. */
+ * since it draws every frame the browser does. Shown from Settings → Debug. */
 function FrameRate({ className }: { className?: string }) {
   const [fps, setFps] = useState<number | null>(null);
   useEffect(() => {
