@@ -5,21 +5,21 @@ import { herzies } from "../tauri-bridge";
 import { goToMap } from "./town/runtime";
 import { refreshVitals, setVitals, useLiveHp } from "./town/vitals";
 
-/** Seconds to a full bar, shown while resting. */
-const label = (hp: number, max: number) => `${Math.ceil(hp)} / ${max}`;
-
 /**
- * The herzie's health bar over the Town, and the screen that comes up when
- * it runs out. The bar stays out of the way while health is full outside of
- * a fight.
+ * The herzie's health in the Town's top right corner, opposite its name,
+ * and the screen that comes up when it runs out. Out of the way while
+ * health is full outside of a fight.
  */
 export function TownVitals({
   inFight,
   chatOverlay = false,
+  belowNotice = false,
 }: {
   /** On a combat map: show the bar even at full health. */
   inFight: boolean;
   chatOverlay?: boolean;
+  /** A notice is across the top: sit below it, as the name does. */
+  belowNotice?: boolean;
 }) {
   const live = useLiveHp();
   const [busy, setBusy] = useState(false);
@@ -63,21 +63,21 @@ export function TownVitals({
           aria-valuemax={maxHp}
           aria-valuenow={Math.round(hp)}
           className={cn(
-            "pointer-events-none absolute left-1/2 z-30 -translate-x-1/2",
-            // In a fight the boss's bar is up top; yours sits low.
-            inFight ? "bottom-3 w-64" : "top-2 w-44",
-            "rounded bg-black/55 px-1.5 py-1 text-[10px] text-white/85 tabular-nums",
+            "pointer-events-none absolute right-3 z-30 w-28 tabular-nums",
+            belowNotice ? "top-[3rem]" : "top-3",
           )}
         >
-          <div className="mb-0.5 flex justify-between">
-            <span>HP</span>
-            <span>{label(hp, maxHp)}</span>
+          <div className="mb-1 flex items-baseline justify-between text-[10px] [text-shadow:0_1px_2px_#000]">
+            <span className="text-white/60">HP</span>
+            <span className={low ? "text-red-300" : "text-white/90"}>
+              {Math.ceil(hp)}
+            </span>
           </div>
-          <div className="h-1.5 overflow-hidden rounded-sm bg-white/15">
+          <div className="h-1 overflow-hidden rounded-full bg-white/15">
             <div
               className={cn(
                 "h-full transition-[width] duration-300",
-                low ? "bg-red-400" : "bg-emerald-400",
+                low ? "bg-red-400/80" : "bg-emerald-400/70",
               )}
               style={{ width: `${frac * 100}%` }}
             />
