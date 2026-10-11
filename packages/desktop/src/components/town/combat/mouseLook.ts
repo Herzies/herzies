@@ -33,8 +33,24 @@ export async function enterMouseLook(
   onLost: () => void,
 ): Promise<LookMode> {
   exitMouseLook();
-  const onMove = (e: MouseEvent) => {
-    if (e.movementX || e.movementY) onDelta(e.movementX, e.movementY);
+  // Pointer moves, summed over the ones the webview merged into this one:
+  // with no button held WebKit delivers about a move a frame and drops the
+  // rest's movement, so aiming crawled next to aiming while firing (which
+  // gets every move).
+  const onMove = (e: PointerEvent) => {
+    const all = e.getCoalescedEvents?.() ?? [];
+    let dx = 0;
+    let dy = 0;
+    if (all.length) {
+      for (const c of all) {
+        dx += c.movementX;
+        dy += c.movementY;
+      }
+    } else {
+      dx = e.movementX;
+      dy = e.movementY;
+    }
+    if (dx || dy) onDelta(dx, dy);
   };
   const mode = await hold(el);
   let done = false;
@@ -46,11 +62,11 @@ export async function enterMouseLook(
     }
   };
   const cleanup = () => {
-    document.removeEventListener("mousemove", onMove);
+    document.removeEventListener("pointermove", onMove);
     document.removeEventListener("pointerlockchange", onLockChange);
     el.style.cursor = "";
   };
-  document.addEventListener("mousemove", onMove);
+  document.addEventListener("pointermove", onMove);
   if (mode === "locked") {
     document.addEventListener("pointerlockchange", onLockChange);
   } else {
@@ -120,8 +136,22 @@ function pointerLock(el: HTMLElement): Promise<boolean> {
 /** The app's own hold on the cursor (Tauri), hidden. */
 async function grab(on: boolean): Promise<boolean> {
   try {
-    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    const { getCurrentWindow, PhysicalPosition } = await import(
+      "@tauri-apps/api/window"
+    );
     const w = getCurrentWindow();
+    if (on) {
+      // Bring the cursor into the window first: a cursor frozen outside it
+      // sends no moves, and aiming would be stuck.
+      try {
+        const size = await w.innerSize();
+        await w.setCursorPosition(
+          new PhysicalPosition(size.width / 2, size.height / 2),
+        );
+      } catch {
+        // Grab it where it is, then.
+      }
+    }
     await w.setCursorGrab(on);
     await w.setCursorVisible(!on);
     return true;

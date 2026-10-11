@@ -5,6 +5,7 @@ import * as THREE from "three";
 import { ambient } from "./ambient";
 import { combat } from "./combat/state";
 import { townSave, useTownRuntime } from "./runtime";
+import { aimSensitivity } from "./combat/sensitivity";
 
 const { ACTION } = CameraControlsImpl;
 
@@ -24,10 +25,10 @@ const KEY_TILT_SPEED = 1;
 const WALK_POLAR = { min: 0.85, max: 1.6 } as const;
 
 /** Combat mode keeps the walking camera: same distance, same tilt limits,
- * same angle. The mouse still aims by turning the view (radians per pixel
- * moved). The one change is that the herzie sits lower on the screen, so the
- * crosshair in the middle isn't right on top of it. (It used to come in over
- * the shoulder and level off; that is gone.) */
+ * same angle. The mouse still aims by turning the view. The one change is
+ * that the herzie sits lower on the screen, so the crosshair in the middle
+ * isn't right on top of it. (It used to come in over the shoulder and level
+ * off; that is gone.) */
 const COMBAT = {
   distance: DISTANCE,
   shoulder: 0,
@@ -37,8 +38,11 @@ const COMBAT = {
   look: LOOK_HEIGHT,
   minPolar: WALK_POLAR.min,
   maxPolar: WALK_POLAR.max,
-  sensitivity: 0.0024,
 } as const;
+
+/** Aiming turns this much of what dragging the view would: precise, not
+ * sweeping. */
+const AIM_SCALE = 0.25;
 
 /** Camera shake (Squirrel Eiserloh's "trauma"): hits add trauma, which
  * drains away; the camera shakes by its square, so small knocks barely
@@ -66,6 +70,7 @@ const wave = (t: number, seed: number) =>
 export function CameraRig() {
   const rt = useTownRuntime();
   const camera = useThree((s) => s.camera);
+  const size = useThree((s) => s.size);
   const controls = useRef<CameraControlsImpl>(null);
   const at = useRef(new THREE.Vector3());
   const fighting = useRef(false);
@@ -103,9 +108,12 @@ export function CameraRig() {
       const look = on ? ACTION.NONE : ACTION.ROTATE;
       c.mouseButtons.left = look;
       c.mouseButtons.right = look;
+      // Drags must not also turn the view (the aim already does): off
+      // altogether while fighting, so a held cast can't double the turn.
+      c.enabled = !on;
       // Aiming wants the view right under the mouse: barely smoothed.
-      c.smoothTime = on ? 0.03 : 0.12;
-      c.draggingSmoothTime = on ? 0.01 : 0.04;
+      c.smoothTime = on ? 0.04 : 0.12;
+      c.draggingSmoothTime = 0.04;
       c.minPolarAngle = on ? COMBAT.minPolar : WALK_POLAR.min;
       c.maxPolarAngle = on ? COMBAT.maxPolar : WALK_POLAR.max;
       const d = on ? COMBAT.distance : DISTANCE;
@@ -119,12 +127,14 @@ export function CameraRig() {
       combat.lookX = combat.lookY = 0;
     }
     if (combat.on) {
-      // Right looks right; up looks up.
-      c.rotate(
-        -combat.lookX * COMBAT.sensitivity,
-        -combat.lookY * COMBAT.sensitivity,
-        false,
-      );
+      // Dragging the view's way (camera-controls' own scale: a full turn per
+      // screen height of movement, eased the same), scaled down to aim, times
+      // the chosen sensitivity. Right looks right; up looks up.
+      const perPixel =
+        ((2 * Math.PI) / Math.max(1, size.height)) *
+        AIM_SCALE *
+        aimSensitivity();
+      c.rotate(-combat.lookX * perPixel, -combat.lookY * perPixel, true);
       combat.lookX = combat.lookY = 0;
     }
     // Eased between walking and combat framing, plus shake on top.

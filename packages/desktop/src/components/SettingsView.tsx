@@ -4,6 +4,12 @@ import { cn } from "../lib/utils";
 import type { AppState } from "../tauri-bridge";
 import { herzies } from "../tauri-bridge";
 import { Checkbox } from "./Checkbox";
+import {
+  aimSensitivity,
+  SENSITIVITY_MAX,
+  SENSITIVITY_MIN,
+  setAimSensitivity,
+} from "./town/combat/sensitivity";
 import { View } from "./View";
 
 type UpdateInstallStatus =
@@ -58,6 +64,7 @@ export function SettingsView({
   const [mediaRemoteDebug, setMediaRemoteDebug] = useState<string | null>(null);
   const [savingPrivacy, setSavingPrivacy] = useState(false);
   const [privacyError, setPrivacyError] = useState<string | null>(null);
+  const [aim, setAim] = useState(aimSensitivity);
   const shareListening = state.herzie?.shareListening ?? true;
 
   const shortcuts: { key: string; label: string }[] = [
@@ -146,6 +153,29 @@ export function SettingsView({
           )}
         </div>
       )}
+
+      <div className="mb-4">
+        <div className="mb-1.5 text-ui text-text-dim">Aiming</div>
+        <label className="flex items-center gap-2 text-ui">
+          <span className="shrink-0">Mouse sensitivity</span>
+          <input
+            type="range"
+            min={SENSITIVITY_MIN}
+            max={SENSITIVITY_MAX}
+            step={0.05}
+            value={aim}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              setAim(v);
+              setAimSensitivity(v);
+            }}
+            className="min-w-0 flex-1"
+          />
+          <span className="w-10 shrink-0 text-right tabular-nums text-text-dim">
+            {aim.toFixed(2)}×
+          </span>
+        </label>
+      </div>
 
       {import.meta.env.DEV && (
         <div className="mb-4">

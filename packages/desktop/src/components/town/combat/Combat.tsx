@@ -113,10 +113,14 @@ export function Combat({
     // end combat).
     const onPointerDown = (e: PointerEvent) => {
       if (!combat.on || e.button !== 0) return;
-      e.preventDefault();
+      // Not preventDefault: that would silence mouse moves until the button
+      // is let go (the mousedown below keeps the chat from taking focus).
       e.stopPropagation();
       combat.queuedAt = performance.now();
       combat.fireHeld = true;
+    };
+    const onMouseDown = (e: MouseEvent) => {
+      if (combat.on && e.button === 0) e.preventDefault();
     };
     const onPointerUp = (e: PointerEvent) => {
       if (e.button === 0) combat.fireHeld = false;
@@ -135,6 +139,7 @@ export function Combat({
     document.addEventListener("focusin", onFocusIn);
     document.addEventListener("visibilitychange", onHidden);
     document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("mousedown", onMouseDown, true);
     return () => {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
@@ -143,6 +148,7 @@ export function Combat({
       document.removeEventListener("focusin", onFocusIn);
       document.removeEventListener("visibilitychange", onHidden);
       document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("mousedown", onMouseDown, true);
       leave();
     };
   }, [canFight, surface]);
