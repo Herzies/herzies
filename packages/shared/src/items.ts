@@ -793,7 +793,12 @@ export function applyItemUpgrade(
 
 /** The stats a herzie has. Add a key here (and a label in STAT_LABELS) and
  * every item, tooltip and total below picks it up. */
-export const STAT_KEYS = ["sonicPower", "luck"] as const;
+export const STAT_KEYS = [
+  "sonicPower",
+  "luck",
+  "critChance",
+  "critDamage",
+] as const;
 export type StatKey = (typeof STAT_KEYS)[number];
 
 /** What an item adds to its wearer. Most items add nothing, so every key is
@@ -808,7 +813,30 @@ export type HerzieStats = Record<StatKey, number>;
 export const STAT_LABELS: Record<StatKey, string> = {
   sonicPower: "Sonic power",
   luck: "Luck",
+  critChance: "Crit chance",
+  critDamage: "Crit damage",
 };
+
+/** Stats counted in percent (a 5 reads "5%"). */
+const PERCENT_STATS = new Set<StatKey>(["critChance", "critDamage"]);
+/** Stats every herzie lists, even at 0. The rest only show once something
+ * gives them: a list of zeroes for things no item grants yet says nothing. */
+const ALWAYS_SHOWN = new Set<StatKey>(["sonicPower", "luck"]);
+
+/** A stat's value as it reads: "12", or "5%". */
+export function formatStat(key: StatKey, value: number): string {
+  return PERCENT_STATS.has(key) ? `${value}%` : String(value);
+}
+
+/** Which stats to list for these totals (and, say, the totals a held card
+ * would make): the always-shown ones, and any other above 0 in either. */
+export function shownStatKeys(
+  ...totals: (Partial<HerzieStats> | null | undefined)[]
+): StatKey[] {
+  return STAT_KEYS.filter(
+    (key) => ALWAYS_SHOWN.has(key) || totals.some((t) => (t?.[key] ?? 0) > 0),
+  );
+}
 
 export interface ItemDef {
   id: string;
@@ -3093,9 +3121,15 @@ export function getHerzieStatsFromUnits(
  * every other bonus in the game is a fraction of what it modifies. Both
  * `processSync` and the desktop tooltip call this, so what a player is told
  * is what the server bills. */
-export function bossDamagePerMinute(stats: HerzieStats): number {
+export function bossDamagePerMinute(
+  stats: Pick<HerzieStats, "sonicPower">,
+): number {
   return BOSS_DAMAGE_PER_MINUTE * (1 + stats.sonicPower / 100);
 }
+
+// One sonic wave's damage lives in combat.ts so the Town server can use it
+// without the item catalog; re-exported here for everyone else.
+export { HIT_BASE, HIT_SPREAD, hitDamage } from "./combat.js";
 
 // getItemColor lived here. It moved to item-canvas.ts — the module its three
 // dependencies already come from — so that this file stays free of the

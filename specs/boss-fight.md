@@ -1,5 +1,35 @@
 # Boss Fight
 
+> **Update — the boss is fought live, in a cave (migrations 00101 and 00102).**
+> Everything below describes the first version: a passive fight where listening to
+> the boss's hated genres drained a shared HP pool. That damage source is gone.
+> What is *still* true below: the shared HP row and its locked RPC
+> (`deal_boss_damage`), the per-user damage table and leaderboard, settling and
+> rewards on a cron, the event window, and the boss's look. What changed:
+>
+> - **Damage comes from sonic waves** cast in the boss's room, a small dark map
+>   (`bossroom`) entered through the cave's mouth in town. The cave is open only
+>   while the boss event is live; a sign over it counts down from the same events.
+> - **The room is authoritative.** The Town server (`packages/town-server`, a
+>   Cloudflare Durable Object per room) runs the boss, its floor attacks, hit
+>   detection and player health, and reports damage in idempotent batches to the
+>   `town-vitals` edge function (`apply_boss_damage_batch`). This reverses this
+>   spec's old no-gos of "no realtime" and "no renderer changes": the cave is a
+>   realtime room and the boss is drawn in the Town's 3D scene.
+> - **Herzies have health** (`herzies.hp`, `hp_at`, `down`), stored lazily so it
+>   regenerates while the app is closed: slowly anywhere, faster on a bench, not at
+>   all in a fight. At 0 a herzie is knocked out ("Oh no! You need some rest") and
+>   respawns in town with half its health.
+> - **The boss attacks the floor.** Every attack is telegraphed on the ground for
+>   at least a second before it lands (circles on players, a ring with a safe
+>   middle), capped in number and damage so it can be read and dodged; hits are
+>   judged against where the player stood a moment ago as well as now.
+> - `hatedGenres` is no longer used by anything that plays; it remains in event
+>   configs. `sync_context.active_boss` is no longer read.
+>
+> The rest of this document is kept for the history of the shared-HP design.
+
+
 ## Problem
 
 Every event Herzies has shipped is single-player. `secret_track` and `song_hunt` are both "match a track, claim a reward" — the only social surface is a first-finders list, which is a scoreboard of people racing each other, not playing together. There is no reason for two herzies to ever coordinate.

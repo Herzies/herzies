@@ -14,10 +14,13 @@ import type { Look } from "../TownScene";
 import { ambient } from "./ambient";
 import { SEAT_Y } from "./Benches";
 import type { ChatBubble } from "./chatBubbles";
+import { combat } from "./combat/state";
 import { HeadBubble } from "./HeadBubble";
+import type { TownInput } from "./input";
 import type { TownMap } from "./map";
 import { type Mover, stepMover, walkAzimuth } from "./movement";
-import { townLive, townSave, useTownRuntime, WORLD_RADIUS } from "./runtime";
+import { warpAmount } from "./portal";
+import { townLive, townSave, useTownRuntime } from "./runtime";
 
 /** The capsule the controller pushes around: radius and half-height of its
  * straight part, standing on the ground. */
@@ -40,12 +43,36 @@ const DANCE_AFTER = 0.4;
  * button turns the herzie with the camera (and A/D then strafe); holding
  * both walks forward.
  */
+const aimingInput: TownInput = {
+  forward: false,
+  back: false,
+  left: false,
+  right: false,
+  turnLeft: false,
+  turnRight: false,
+  tiltUp: false,
+  tiltDown: false,
+  sprint: false,
+  mouseLeft: false,
+  mouseRight: true,
+};
+/** The keys as they are, with the mouse read as steering (combat mode). */
+function aiming(input: TownInput): TownInput {
+  return Object.assign(aimingInput, input, {
+    mouseLeft: false,
+    mouseRight: true,
+  });
+}
+
 export function Player({
   look,
   spawn,
   respawn = 0,
+  reach,
   bubble,
 }: {
+  /** How far from the island's middle it can walk. */
+  reach: number;
   /** What the player just said in chat, over their head. */
   bubble?: ChatBubble;
   look: Look;
@@ -84,8 +111,12 @@ export function Player({
   );
   useEffect(() => {
     herzie.heading = townSave.heading;
-    return () => herzie.dispose();
-  }, [herzie]);
+    rt.playerHerzie = herzie;
+    return () => {
+      if (rt.playerHerzie === herzie) rt.playerHerzie = null;
+      herzie.dispose();
+    };
+  }, [herzie, rt]);
   // Gone from the world means standing still, as far as others can tell.
   useEffect(
     () => () => {
@@ -114,7 +145,10 @@ export function Player({
     const kcc = controller.current;
     if (!b || !col || !kcc) return;
     const dt = w.timestep;
-    const input = rt.input.current;
+    // In combat the herzie faces where the camera looks and strafes, as
+    // with the right button held; the left button casts rather than looks.
+    const raw = rt.input.current;
+    const input = combat.on && raw ? aiming(raw) : raw;
     const m = mover.current;
     if (input && Object.values(input).some(Boolean))
       townLive.lastInputAt = performance.now();
@@ -130,6 +164,12 @@ export function Player({
       b.setNextKinematicTranslation({ x: to.x, y: 0, z: to.z });
       townSave.x = to.x;
       townSave.z = to.z;
+      rt.playerSpeed = townLive.speed = 0;
+      return;
+    }
+    // Going through a portal: carried, not walking.
+    if (townLive.frozen) {
+      m.vx = m.vz = 0;
       rt.playerSpeed = townLive.speed = 0;
       return;
     }
@@ -173,9 +213,9 @@ export function Player({
     let x = p.x + move.x;
     let z = p.z + move.z;
     const r = Math.hypot(x, z);
-    if (r > WORLD_RADIUS) {
-      x = (x / r) * WORLD_RADIUS;
-      z = (z / r) * WORLD_RADIUS;
+    if (r > reach) {
+      x = (x / r) * reach;
+      z = (z / r) * reach;
     }
     // The walk cycle follows the distance actually covered: pushing into a
     // tree stops the feet too.
@@ -200,12 +240,18 @@ export function Player({
       townLive.music && !townLive.seat && stillFor.current >= DANCE_AFTER;
     herzie.dancing = townLive.dancing;
     herzie.update(dt, rt.playerSpeed);
+    // Through a portal: spun down into the disc, and back up out of the
+    // far one.
+    const k = warpAmount();
+    herzie.root.scale.setScalar(1 - 0.85 * k);
+    herzie.root.rotation.y = k * k * Math.PI * 4;
   });
 
   return (
     <RigidBody
       ref={(b) => {
         body.current = b;
+        rt.playerRigidBody = b;
       }}
       type="kinematicPosition"
       colliders={false}

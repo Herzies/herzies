@@ -2,11 +2,12 @@ import { HerzieModel, turnToward } from "@herzies/shared/gl";
 import { Html } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import { CylinderCollider, RigidBody } from "@react-three/rapier";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { cn } from "../../lib/utils";
 import { lookOf } from "../TownScene";
-import { ROW_TEXT_SHADOW, VISITOR_THEMES } from "../VisitorRowTheme";
+import { VISITOR_THEMES } from "../VisitorRowTheme";
 import { ambient } from "./ambient";
+import { NAME_SHADOW, nameOpacity } from "./nameFade";
 import { NOTICE_RANGE, type TownSpot, townSave } from "./runtime";
 
 /** The boss looms: drawn this much bigger than it's built (a stage-3
@@ -51,10 +52,18 @@ export function Visitor({
   }, [standing, card.type, card.eventId]);
   useEffect(() => () => herzie?.dispose(), [herzie]);
 
+  // The name fades in as you come near.
+  const name = useRef<HTMLDivElement>(null);
   useFrame((_, dt) => {
     if (!herzie) return;
     const dx = townSave.x - at.x;
     const dz = townSave.z - at.z;
+    if (name.current) {
+      const o = nameOpacity(Math.hypot(dx, dz));
+      name.current.style.opacity = String(o);
+      // Not there, so not clickable either.
+      name.current.style.pointerEvents = o < 0.1 ? "none" : "";
+    }
     const target =
       Math.hypot(dx, dz) < NOTICE_RANGE ? Math.atan2(dx, dz) : plaza;
     herzie.heading = turnToward(
@@ -98,19 +107,21 @@ export function Visitor({
           // of nearly the top of the stack.
           zIndexRange={[20, 0]}
         >
-          <Tag
-            {...(open
-              ? { type: "button" as const, onClick: () => onOpen(open) }
-              : {})}
-            aria-label={`${card.title}: ${status}`}
-            className={cn(
-              "whitespace-nowrap rounded border-none bg-black/55 px-1.5 py-0.5 text-[10px] leading-tight text-white",
-              open && "cursor-pointer hover:bg-black/75",
-            )}
-            style={{ textShadow: ROW_TEXT_SHADOW }}
-          >
-            {card.title}
-          </Tag>
+          <div ref={name} style={{ opacity: 0 }}>
+            <Tag
+              {...(open
+                ? { type: "button" as const, onClick: () => onOpen(open) }
+                : {})}
+              aria-label={`${card.title}: ${status}`}
+              className={cn(
+                "whitespace-nowrap border-none bg-transparent p-0 text-[11px] font-medium leading-tight text-white",
+                open && "cursor-pointer hover:underline",
+              )}
+              style={{ textShadow: NAME_SHADOW }}
+            >
+              {card.title}
+            </Tag>
+          </div>
         </Html>
       )}
     </>

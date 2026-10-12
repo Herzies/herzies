@@ -8,7 +8,6 @@ import {
   cellAt,
   cellCenter,
   isSunk,
-  MAP_SIZE,
   objectAt,
   objectJitter,
   type TownMap,
@@ -133,11 +132,12 @@ function usePoints(count: number, blending: THREE.Blending) {
 }
 
 function cellsWhere(
+  map: TownMap,
   test: (col: number, row: number) => boolean,
 ): [number, number][] {
   const out: [number, number][] = [];
-  for (let row = 0; row < MAP_SIZE; row++) {
-    for (let col = 0; col < MAP_SIZE; col++) {
+  for (let row = 0; row < map.size; row++) {
+    for (let col = 0; col < map.size; col++) {
       if (test(col, row)) out.push([col, row]);
     }
   }
@@ -146,7 +146,7 @@ function cellsWhere(
 
 // --- Fireflies ---------------------------------------------------------------
 
-const FIREFLIES = 80;
+const FIREFLIES = 30;
 const FIREFLY = new THREE.Color("#fff08a");
 
 /** Warm sparks drifting low over tall grass, by the water and under the
@@ -154,7 +154,7 @@ const FIREFLY = new THREE.Color("#fff08a");
 function Fireflies({ map }: { map: TownMap }) {
   const pts = usePoints(FIREFLIES, THREE.AdditiveBlending);
   const flies = useMemo(() => {
-    const homes = cellsWhere((c, r) => {
+    const homes = cellsWhere(map, (c, r) => {
       const o = objectAt(map, c, r);
       if (o === "v" || o === "T" || o === "*") return true;
       // Beside water.
@@ -170,7 +170,10 @@ function Fireflies({ map }: { map: TownMap }) {
     });
     const rand = mulberry32(31337);
     return Array.from({ length: homes.length > 0 ? FIREFLIES : 0 }, () => {
-      const [x, z] = cellCenter(...homes[Math.floor(rand() * homes.length)]);
+      const [x, z] = cellCenter(
+        map,
+        ...homes[Math.floor(rand() * homes.length)],
+      );
       return {
         x,
         z,
@@ -196,7 +199,7 @@ function Fireflies({ map }: { map: TownMap }) {
         f.x + Math.sin(p) * 1.2 + Math.sin(p * 2.7) * 0.3,
         f.y + Math.sin(p * 1.3) * 0.4,
         f.z + Math.cos(p * 0.9) * 1.2,
-        0.24,
+        0.13,
         glow * night,
       );
     });
@@ -309,7 +312,7 @@ function Dust({ map }: { map: TownMap }) {
         const fx = feet.x + (-(feet.z - last.z) / moved) * side;
         const fz = feet.z + ((feet.x - last.x) / moved) * side;
         lastPuff.current = { x: feet.x, z: feet.z };
-        const [c, r] = cellAt(fx, fz);
+        const [c, r] = cellAt(map, fx, fz);
         const ground = terrainAt(map, c, r);
         if (ground === "g" || ground === ".") {
           const i = next.current;
@@ -378,11 +381,11 @@ const wingMaterial = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
 /** A few butterflies over the flower patches by day, fluttering about. */
 function Butterflies({ map }: { map: TownMap }) {
   const flies = useMemo(() => {
-    const beds = cellsWhere((c, r) => objectAt(map, c, r) === "*");
+    const beds = cellsWhere(map, (c, r) => objectAt(map, c, r) === "*");
     const rand = mulberry32(2024);
     const n = Math.min(MAX_BUTTERFLIES, Math.ceil(beds.length / 2));
     return Array.from({ length: n }, () => {
-      const [x, z] = cellCenter(...beds[Math.floor(rand() * beds.length)]);
+      const [x, z] = cellCenter(map, ...beds[Math.floor(rand() * beds.length)]);
       return {
         x,
         z,
@@ -453,8 +456,8 @@ const LEAF_COLORS = ["#4f8a3e", "#6a9a3a", "#c8a03a", "#b8702e"];
 function FallingLeaves({ map }: { map: TownMap }) {
   const trees = useMemo(
     () =>
-      cellsWhere((c, r) => objectAt(map, c, r) === "T").map(([c, r]) =>
-        objectJitter(c, r),
+      cellsWhere(map, (c, r) => objectAt(map, c, r) === "T").map(([c, r]) =>
+        objectJitter(map, c, r),
       ),
     [map],
   );

@@ -289,8 +289,25 @@ function DistantIsland({ island }: { island: Distant }) {
 }
 
 /** The other islands, out in the sky. */
-export function DistantIslands() {
-  const islands = useMemo(scatterIslands, []);
+export function DistantIslands({
+  avoid = [],
+}: {
+  /** Where the islands you can visit float (each [x, y, z] and radius):
+   * no made-up island drifts through one. */
+  avoid?: { at: readonly number[]; radius: number }[];
+}) {
+  const key = JSON.stringify(avoid);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on content
+  const islands = useMemo(
+    () =>
+      scatterIslands().filter((d) =>
+        avoid.every(
+          (a) =>
+            Math.hypot(d.x - a.at[0], d.z - a.at[2]) > d.radius + a.radius + 25,
+        ),
+      ),
+    [key],
+  );
   return (
     <>
       {islands.map((island) => (

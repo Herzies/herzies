@@ -5,6 +5,8 @@ import type {
   ItemUnit,
 } from "@herzies/shared";
 import {
+  getHerzieStats,
+  getHerzieStatsFromUnits,
   getItem,
   RARITY_COLORS as ITEM_RARITY_COLORS,
   ItemTypeIcon,
@@ -127,6 +129,36 @@ const DEBUG_MERCHANT: GameEvent = {
   },
 };
 
+/** Fixture Orphiez hunt for the Settings debug toggle, for when there is no
+ * past hunt to replay (the server's "previous" is just the latest finished
+ * event of any kind, so a recently beaten boss leaves no hunt). Not a real
+ * event: nothing can be claimed from it. */
+const DEBUG_HUNT: GameEvent = {
+  id: "debug-song-hunt",
+  type: "song_hunt",
+  title: "Song Hunt",
+  description: "Find the song.",
+  active: true,
+  startsAt: new Date(Date.now() - 3 * 86_400_000).toISOString(),
+  endsAt: new Date(Date.now() + 2 * 86_400_000).toISOString(),
+  config: {
+    trackTitle: "Debug Track",
+    trackArtist: "Debug Artist",
+    rewardItemId: "cd",
+    maxClaims: 10,
+    hints: [
+      {
+        text: "It starts quietly.",
+        unlocksAt: new Date(Date.now() - 2 * 86_400_000).toISOString(),
+      },
+      {
+        text: "You've heard it somewhere warm.",
+        unlocksAt: new Date(Date.now() - 86_400_000).toISOString(),
+      },
+    ],
+  },
+};
+
 /** Fixture Nandor for the Settings debug toggle, like DEBUG_MERCHANT. */
 const DEBUG_TREAT_TRADER: GameEvent = {
   id: "debug-treat-trader",
@@ -201,13 +233,17 @@ function EventsViewImpl({
   rootKey = 0,
   playerSeed,
   playerStage,
+  playerProfile,
   musicPlaying = false,
+  onOpenProfile,
   chatOverlay = false,
   chatMessages,
 }: {
   /** Music is playing: the player's herzie dances in the Town, standing
    * still. */
   musicPlaying?: boolean;
+  /** Another player in the Town was clicked: open their profile. */
+  onOpenProfile?: (friendCode: string) => void;
   /** The app floats its chat over the bottom of the Town's world. */
   chatOverlay?: boolean;
   /** The chat, for lines over the speakers' heads in the Town. */
@@ -215,6 +251,14 @@ function EventsViewImpl({
   /** The player's herzie, walking around the Town. */
   playerSeed?: string;
   playerStage?: number;
+  /** Name, level and XP progress, shown top left in the Town. */
+  playerProfile?: {
+    friendCode?: string;
+    name: string;
+    level: number;
+    progress: number;
+    toNext: number;
+  };
   /** Tab stays mounted but hidden; only poll while user is on Events. */
   eventsTabVisible: boolean;
   /** Bumped when the Town tab is re-selected while already on it: back to
@@ -245,6 +289,7 @@ function EventsViewImpl({
   /** Open card (see EventCard.key); null shows the list. */
   const [selected, setSelected] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+
   const [previousEvent, setPreviousEvent] = useState<GameEvent | null>(null);
   const [nextHunt, setNextHunt] = useState<GameEvent | null>(null);
   const [activeLoaded, setActiveLoaded] = useState(false);
@@ -265,6 +310,40 @@ function EventsViewImpl({
   }, [rootKey]);
   const [huntTab, setHuntTab] = useState<"clues" | "finders">("clues");
   const focused = useWindowFocused();
+
+  // Leaving an NPC: Esc, or any key that would walk the herzie (WASD, the
+  // arrows), takes you back out to the Town. Keys typed into a field (a
+  // quantity, say) are left alone, and so are shortcuts.
+  const leaving = selected !== null && eventsTabVisible && focused;
+  useEffect(() => {
+    if (!leaving) return;
+    const LEAVE_KEYS = new Set([
+      "Escape",
+      "KeyW",
+      "KeyA",
+      "KeyS",
+      "KeyD",
+      "ArrowUp",
+      "ArrowDown",
+      "ArrowLeft",
+      "ArrowRight",
+    ]);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey || !LEAVE_KEYS.has(e.code)) return;
+      const el = e.target as HTMLElement | null;
+      if (
+        el &&
+        (el.tagName === "INPUT" ||
+          el.tagName === "TEXTAREA" ||
+          el.tagName === "SELECT" ||
+          el.isContentEditable)
+      )
+        return;
+      setSelected(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [leaving]);
 
   // Optimistic override of playsRemaining, keyed by hint index — updated
   // immediately from a play response so the button reflects the new count
@@ -442,7 +521,7 @@ function EventsViewImpl({
     if (nextHunt && !nextByType.has("song_hunt")) {
       nextByType.set("song_hunt", nextHunt);
     }
-    const huntLive = debugForceActive && previousHunt ? previousHunt : null;
+    const huntLive = debugForceActive ? (previousHunt ?? DEBUG_HUNT) : null;
 
     // Every known type always gets a card — live, scheduled, or idle — so the
     // list reads as "what the game has" rather than only what is on now.
@@ -561,8 +640,13 @@ function EventsViewImpl({
       (a, b) => when(a) - when(b) || typeRank(a.type) - typeRank(b.type),
     );
 
-    const inTown = cards.filter((c) => c.status === "live").length;
-    const nextArrival = cards.find((c) => c.status === "scheduled");
+    // The boss lives in its cave, not in town.
+    const inTown = cards.filter(
+      (c) => c.status === "live" && c.type !== "boss_fight",
+    ).length;
+    const nextArrival = cards.find(
+      (c) => c.status === "scheduled" && c.type !== "boss_fight",
+    );
 
     return (
       // No title: the world fills the window (see onScreenChange "world").
@@ -574,11 +658,18 @@ function EventsViewImpl({
         musicPlaying={musicPlaying}
         paused={selected !== null || !eventsTabVisible || !focused}
         onOpen={setSelected}
+        onOpenProfile={onOpenProfile}
         player={{
           seed: playerSeed ?? "npc:townsfolk",
           stage: playerStage ?? 1,
           equipped,
         }}
+        profile={playerProfile}
+        stats={
+          units.length > 0
+            ? getHerzieStatsFromUnits(units)
+            : getHerzieStats(equipped)
+        }
         notice={
           inTown === 0 ? (
             // An empty Town reads as dead in a way an empty event list
@@ -682,7 +773,7 @@ function EventsViewImpl({
 
     const hunt =
       events.find((e) => e.type === "song_hunt") ??
-      (debugForceActive ? (previousHunt ?? undefined) : undefined);
+      (debugForceActive ? (previousHunt ?? DEBUG_HUNT) : undefined);
     const previousHuntConfig = previousHunt?.config as SongHuntConfig;
     const previousRewardItem = previousHuntConfig?.rewardItemId
       ? getItem(previousHuntConfig.rewardItemId)

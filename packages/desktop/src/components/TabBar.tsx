@@ -88,7 +88,7 @@ export function TabBar({
         {t.id === "events" && visitorsInTown > 0 && <TabStarAccent />}
         <span className="relative z-10">{t.label}</span>
         {t.id === "events" && visitorsInTown > 0 && (
-          <span className="relative z-10 ml-0.5 align-super text-[8px] font-bold text-green">
+          <span className="absolute top-0 left-full z-10 ml-0.5 text-[8px] leading-none font-bold text-green">
             {visitorsInTown}
           </span>
         )}
@@ -100,7 +100,7 @@ export function TabBar({
     // Full-bleed: the top border runs to the window's edges (out past the
     // app's 12px side padding, the -mx-3), and so do the tabs' cells, which
     // split the width evenly with each label centred in its own.
-    <div className="-mx-3 flex items-stretch border-t border-border">
+    <div className="-mx-3 flex items-stretch border-t border-white/15">
       {tabs.map(renderTab)}
     </div>
   );

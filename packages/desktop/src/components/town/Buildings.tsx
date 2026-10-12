@@ -6,9 +6,8 @@ import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js
 import { seeThrough } from "./ambient";
 import {
   type Building,
+  type BuildingRect,
   buildingsOf,
-  type CellRect,
-  MAP_SIZE,
   type TownMap,
 } from "./map";
 
@@ -54,12 +53,9 @@ const CHIMNEY = "#9a5a44";
 const MAILBOX = "#d4483b";
 const POST = "#6a4a30";
 
-const HALF = MAP_SIZE / 2;
-
 /** A rect's extent in the world. */
-function bounds(r: CellRect) {
-  const x0 = r.col - HALF;
-  const z0 = r.row - HALF;
+function bounds(r: BuildingRect) {
+  const { x0, z0 } = r;
   return { x0, x1: x0 + r.w, z0, z1: z0 + r.h };
 }
 type Bounds = ReturnType<typeof bounds>;
@@ -231,7 +227,7 @@ type Wall = {
 /** Each cell's stretch of outside wall: its middle, and which way it
  * faces. */
 function outsideWalls(
-  r: CellRect,
+  r: BuildingRect,
   isH: (c: number, row: number) => boolean,
 ): Wall[] {
   const { x0, x1, z0, z1 } = bounds(r);
@@ -275,7 +271,7 @@ const MIN_WINDOW_WALL = 1.4;
  * stand over them).
  */
 function windowRuns(
-  r: CellRect,
+  r: BuildingRect,
   isPart: (c: number, row: number) => boolean,
   door: Door | null,
   spacing: (yaw: number) => number,
@@ -667,7 +663,7 @@ function caveGeometry(b: Building) {
     const g = new THREE.IcosahedronGeometry(1, 1);
     g.scale(wide, h, wide);
     g.rotateY(rand() * Math.PI);
-    g.translate(c - HALF + 0.5, 0, r - HALF + 0.5);
+    g.translate(c - b.half + 0.5, 0, r - b.half + 0.5);
     // Rock darkening toward the ground, moss on top.
     const pos = g.attributes.position;
     const colors: number[] = [];

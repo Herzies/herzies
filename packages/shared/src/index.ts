@@ -21,3 +21,4 @@ export * from "./town-interpolation.js";
 export * from "./town-net.js";
 export * from "./types.js";
 export * from "./visitors.js";
+export * from "./vitals.js";

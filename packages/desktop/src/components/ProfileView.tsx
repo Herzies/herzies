@@ -1,12 +1,15 @@
 import {
+  formatStat,
   getHerzieStats,
   type HerzieProfile,
-  STAT_KEYS,
   STAT_LABELS,
+  shownStatKeys,
 } from "@herzies/shared";
 import { useEffect, useState } from "react";
+import { useHomeStageOffset } from "../hooks/useStageAlignment";
+import { cn } from "../lib/utils";
 import { BackButton } from "./BackButton";
-import { HerzieWithSky } from "./HerzieWithSky";
+import { HERZIE_STAGE_HEIGHT, HerzieWithSky } from "./HerzieWithSky";
 import { ProfileBadges } from "./ProfileBadges";
 import { TabButton } from "./TabButton";
 import { Tooltip } from "./Tooltip";
@@ -90,6 +93,7 @@ export function ProfileView({
   // or a profile cached before the field existed) fall back to summing what is
   // equipped, which is right except for upgrade levels.
   const stats = profile.stats ?? getHerzieStats(profile.equipped);
+  const homeStageOffset = useHomeStageOffset();
 
   return (
     <View
@@ -97,11 +101,28 @@ export function ProfileView({
       backButton={<BackButton colour="cyan" onClick={onBack} />}
       action={<ProfileBadges profile={profile} />}
       colour="cyan"
+      className="relative"
       childrenClassName="flex min-h-0 flex-col"
     >
+      {/* The herzie stands where it does on Home (see useStageAlignment): the
+          stage is absolute at Home's offset, with the flex-1 spacer keeping
+          the info below it. Until Home has been measured, centred in the
+          free space. */}
       {profile.friendCode && (
-        <div className="flex min-h-0 flex-1 items-center justify-center *:shrink-0">
+        <div
+          className={cn(
+            homeStageOffset === null
+              ? "flex min-h-0 flex-1 items-center justify-center *:shrink-0"
+              : "absolute inset-x-0 flex items-center justify-center",
+          )}
+          style={
+            homeStageOffset === null
+              ? undefined
+              : { top: homeStageOffset, height: HERZIE_STAGE_HEIGHT }
+          }
+        >
           <HerzieWithSky
+            grounded={homeStageOffset !== null}
             userId={profile.friendCode}
             stage={stageOverride ?? profile.stage}
             isPlaying={isFriend ? isListening(profile) : false}
@@ -110,6 +131,8 @@ export function ProfileView({
           />
         </div>
       )}
+
+      {homeStageOffset !== null && <div className="min-h-0 flex-1" />}
 
       {/* The herzie canvas paints at its own z-index: 1 (see shared's
           HerzieWithSky) and the sky sits fixed behind everything, so the text UI
@@ -210,7 +233,7 @@ export function ProfileView({
               tabs they are not held back from non-friends. */}
           {tab === "stats" ? (
             <div>
-              {STAT_KEYS.map((key) => (
+              {shownStatKeys(stats).map((key) => (
                 <div
                   key={key}
                   className="flex justify-between border-b border-[#222] py-0.5 text-ui last:border-b-0"
@@ -219,7 +242,7 @@ export function ProfileView({
                   <span
                     className={stats[key] > 0 ? "text-cyan" : "text-text-dim"}
                   >
-                    {stats[key] ?? 0}
+                    {formatStat(key, stats[key] ?? 0)}
                   </span>
                 </div>
               ))}

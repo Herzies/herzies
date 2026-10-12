@@ -1,9 +1,13 @@
 import * as THREE from "three";
 import {
   buildCreatureModel,
+  CAST,
+  CAST_ARM,
   CREATURE_FRAME_HEIGHT,
   type CreatureModel,
   type CreatureParams,
+  castHand,
+  castWeight,
   creaturePoseOffsets,
   creatureSeatDrop,
   DANCE_LOOP_FRAMES,
@@ -11,7 +15,6 @@ import {
   dangledAxis,
   hasDangleEquipped,
   primitiveShading,
-  SPIRIT_DANCE_HOP_VARIANT_COUNT,
   type Sphere,
   schemeShades,
   schemeSpan,
@@ -37,6 +40,7 @@ import {
   type CompanionHost,
   type CompanionState,
   newCompanionState,
+  seededRandom,
   stepCompanion,
 } from "./companion.js";
 import {
@@ -44,6 +48,14 @@ import {
   herzieMaterial,
   type SchemeUniforms,
 } from "./herzieMaterial.js";
+import {
+  GHOST_SURGE,
+  newSurgeState,
+  SPIRIT_SURGE,
+  type SurgeState,
+  type SurgeTuning,
+  stepSurge,
+} from "./surge.js";
 
 /** Which herzie, and dressed how. */
 export type HerzieLook = {
@@ -76,13 +88,18 @@ export type HerzieModelOptions = {
 
 /** The old renderer's dance loop: 65ms a frame. */
 const DANCE_FPS = 1000 / 65;
-/** Chance a dance loop with a Greedy Spirit plays without a hop: roughly
- * one hop every 4s, as before. */
-const SPIRIT_CALM_LOOP_CHANCE = 0.6;
 /** How quickly dancing fades in and out, per second. */
 const DANCE_BLEND_RATE = 6;
 /** How quickly it sits down and stands up (per second). */
 const SIT_BLEND_RATE = 14;
+/** How long a sonic cast takes, draw to home again, in seconds. The wave
+ * leaves the hand CAST.release of the way through. */
+export const CAST_SECONDS = 0.4;
+/** How soon after cast() the wave leaves the hand, in seconds. */
+export const CAST_RELEASE_SECONDS = CAST_SECONDS * CAST.release;
+/** A herzie with no arms (stage 1) grows a little hand to cast with: this
+ * big, as a fraction of its head. */
+const POP_HAND = 0.3;
 /** World units per creature unit: the renderer's whole frame (at the
  * herzie's centre) is 4.5 world units tall, the size the sprites were. */
 export const MODEL_SCALE = 4.5 / CREATURE_FRAME_HEIGHT;
@@ -95,6 +112,15 @@ const sceneFixed = (s: Sphere) => floats(s) || s.part === "ground";
 
 /** Air between a floating companion and the herzie, in creature units. */
 const COMPANION_GAP = 0.15;
+/** A surging companion stretches up as it rises and squashes as it sinks
+ * (keeping its volume): this much per creature unit a second, at most
+ * SURGE_MAX_STRETCH. */
+const SURGE_STRETCH = 0.05;
+const SURGE_MAX_STRETCH = 0.07;
+/** And tips back as it rises (radians per creature unit a second), at most
+ * SURGE_MAX_TILT. */
+const SURGE_TILT = 0.1;
+const SURGE_MAX_TILT = 0.12;
 
 // Geometries are shared between herzies, cached by size, and kept for the
 // app's lifetime: there are only a handful of distinct ones.
@@ -251,6 +277,20 @@ function besideHerzie(spheres: Sphere[]) {
   }
 }
 
+/** How much wider and taller a surging companion is, rising at `v`
+ * (creature units a second): taller rising, squatter sinking, its volume
+ * kept. */
+function surgeStretch(v: number): [number, number] {
+  const tall =
+    1 +
+    THREE.MathUtils.clamp(
+      v * SURGE_STRETCH,
+      -SURGE_MAX_STRETCH,
+      SURGE_MAX_STRETCH,
+    );
+  return [1 / Math.sqrt(tall), tall];
+}
+
 /** How far a part reaches from its centre, whatever its shape. */
 function reach(s: Sphere): number {
   if (!s.shape) return s.radius;
@@ -352,7 +392,29 @@ export class HerzieModel {
   /** How far it settles when seated, in creature units (see
    * creatureSeatDrop). */
   private readonly seatDrop: number;
-  private hopVariant: number | undefined;
+  /** A floating companion's dance surges (see surge.ts); null with none. */
+  private readonly surge: SurgeState | null;
+  private readonly surgeTuning: SurgeTuning;
+  /** Seconds since it started dancing (0 when it isn't): the surges' beat. */
+  private danceClock = 0;
+  /** The companion's biggest part (its core), and which side of the herzie
+   * it's on (+1: the herzie is toward +x), for surging it in place. */
+  private readonly surgeCore: number;
+  private readonly surgeToward: number;
+  /** Seconds into a sonic cast; undefined when it isn't casting. */
+  private castTime: number | undefined;
+  private castPitch = 0;
+  /** The hand the wave leaves from: the right arm's part, if it has one. */
+  private readonly castArm: number;
+  /** For a herzie with no arms: the hand it grows to cast with, beside its
+   * head, and where on the head it grows from. */
+  private readonly popHand: {
+    mesh: THREE.Mesh;
+    head: Sphere;
+    radius: number;
+  } | null = null;
+  /** The wave left the hand during the last update(). */
+  released = false;
 
   private readonly look: HerzieLook;
   private readonly model: CreatureModel;
@@ -415,9 +477,27 @@ export class HerzieModel {
     this.span = schemeSpan(spheres);
     this.bounds = turnBounds(spheres, feet);
     this.seatDrop = this.hasLegs ? creatureSeatDrop(spheres, look.stage) : 0;
+    const companionSeed = hashSeed(look.seed) ^ (options.seed ?? 0);
     this.follower = anchoring
       ? null
-      : makeFollower(spheres, feet, hashSeed(look.seed) ^ (options.seed ?? 0));
+      : makeFollower(spheres, feet, companionSeed);
+    this.surgeCore = -1;
+    for (let i = 0; i < spheres.length; i++) {
+      const s = spheres[i];
+      if (
+        floats(s) &&
+        (this.surgeCore < 0 || s.radius > spheres[this.surgeCore].radius)
+      )
+        this.surgeCore = i;
+    }
+    this.surgeToward =
+      this.surgeCore >= 0 && spheres[this.surgeCore].center[0] < 0 ? 1 : -1;
+    this.surge =
+      this.surgeCore >= 0
+        ? newSurgeState(seededRandom(companionSeed ^ 0x5eed))
+        : null;
+    this.surgeTuning =
+      look.equipped?.spirit === "ghost" ? GHOST_SURGE : SPIRIT_SURGE;
     // The companion's parts, in their own copy of creature space: upright,
     // at the herzie's scale but none of its breathing, its core at the
     // follower's origin.
@@ -471,6 +551,19 @@ export class HerzieModel {
             : this.creature;
       parent.add(mesh);
     }
+    this.castArm = spheres.findIndex((sp) => sp.part === CAST_ARM);
+    const headAt = spheres.findIndex((sp) => sp.part === "head");
+    if (this.castArm < 0 && headAt >= 0 && !look.params) {
+      const head = spheres[headAt];
+      const mesh = new THREE.Mesh(
+        geometryFor({ ...head, shape: undefined }),
+        this.meshes[headAt].material,
+      );
+      mesh.castShadow = true;
+      mesh.visible = false;
+      this.creature.add(mesh);
+      this.popHand = { mesh, head, radius: head.radius * POP_HAND };
+    }
     this.creature.rotation.x = Math.PI;
     this.turn.add(this.creature);
     this.root.add(this.turn);
@@ -485,11 +578,35 @@ export class HerzieModel {
     this.animateBody();
   }
 
+  /** Cast a sonic wave from its hand, aimed `pitch` radians above level:
+   * draw, thrust, follow through. `released` turns true on the update the
+   * wave leaves the hand. Casting again mid-cast starts afresh. */
+  cast(pitch = 0): void {
+    this.castTime = 0;
+    this.castPitch = Math.max(-0.7, Math.min(0.7, pitch));
+    this.released = false;
+  }
+
+  /** It's mid-cast. */
+  get casting(): boolean {
+    return this.castTime !== undefined;
+  }
+
   /** Advances the animation and poses the parts. Call every frame. */
   update(dt: number, speed: number): void {
     stepAnimation(this.anim, dt, speed);
     this.stepDance(dt);
+    if (this.surge) {
+      stepSurge(
+        this.surge,
+        dt,
+        this.danceClock,
+        this.dancing,
+        this.surgeTuning,
+      );
+    }
     this.stepSit(dt);
+    this.stepCast(dt);
     this.swing(dt);
     this.turn.rotation.y = this.heading;
     this.pose();
@@ -510,8 +627,35 @@ export class HerzieModel {
     host.dancing = this.danceWeight > 0.5;
     stepCompanion(state, host, speed, dt);
     f.group.position.copy(state.position);
+    let heading = state.heading;
+    let pitch = state.pitch;
+    const surge = this.surge;
+    if (surge) {
+      // Lifted on the music, and over toward the herzie (world units).
+      const unit = MODEL_SCALE * host.scale;
+      const dx = host.position.x - state.position.x;
+      const dz = host.position.z - state.position.z;
+      const d = Math.hypot(dx, dz);
+      f.group.position.y += surge.y * unit;
+      if (d > 1e-6) {
+        f.group.position.x += (dx / d) * surge.x * unit;
+        f.group.position.z += (dz / d) * surge.x * unit;
+        // Glancing at the herzie: turned toward it, never past it.
+        let toward = Math.atan2(dx, dz) - heading;
+        toward -= Math.round(toward / (Math.PI * 2)) * Math.PI * 2;
+        heading += Math.sign(toward) * Math.min(Math.abs(toward), surge.glance);
+      }
+      heading += surge.spin;
+      pitch -= THREE.MathUtils.clamp(
+        surge.v * SURGE_TILT,
+        -SURGE_MAX_TILT,
+        SURGE_MAX_TILT,
+      );
+      const [wide, tall] = surgeStretch(surge.v);
+      f.yaw.scale.set(wide, tall, wide);
+    }
     this.root.worldToLocal(f.group.position);
-    f.yaw.rotation.set(state.pitch, state.heading, state.roll, "YXZ");
+    f.yaw.rotation.set(pitch, heading, state.roll, "YXZ");
   }
 
   /** Swings anything dangling with the turn since last time, and settles
@@ -556,15 +700,80 @@ export class HerzieModel {
     if (Math.abs(this.danceWeight - target) < 1e-3) this.danceWeight = target;
     if (this.danceWeight === 0) {
       this.danceTime = 0;
+      this.danceClock = 0;
       return;
     }
-    const before = this.danceTime * DANCE_FPS;
-    this.danceTime += dt;
-    const loop = DANCE_LOOP_FRAMES / DANCE_FPS;
-    if (this.danceTime >= loop) {
-      this.danceTime %= loop;
-      this.rerollHop();
-    } else if (before === 0) this.rerollHop();
+    this.danceTime = (this.danceTime + dt) % (DANCE_LOOP_FRAMES / DANCE_FPS);
+    this.danceClock += dt;
+  }
+
+  private stepCast(dt: number) {
+    this.released = false;
+    if (this.castTime === undefined) return;
+    const before = this.castTime;
+    this.castTime += dt;
+    if (
+      before < CAST_RELEASE_SECONDS &&
+      this.castTime >= CAST_RELEASE_SECONDS
+    ) {
+      this.released = true;
+    }
+    if (this.castTime >= CAST_SECONDS) this.castTime = undefined;
+  }
+
+  /**
+   * Where the casting hand's palm is, in the world: the front of the right
+   * arm (or of the hand an armless herzie grows). Call after update() — and
+   * after anything moves it — so it's this frame's.
+   */
+  handWorldPosition(out: THREE.Vector3): THREE.Vector3 {
+    const phase =
+      this.castTime === undefined ? 1 : this.castTime / CAST_SECONDS;
+    const { dir } = castHand(phase, this.castPitch);
+    if (this.castArm >= 0) {
+      const arm = this.model.spheres[this.castArm];
+      const p = this.meshes[this.castArm].position;
+      out.set(
+        p.x + dir[0] * arm.radius,
+        p.y + dir[1] * arm.radius,
+        p.z + dir[2] * arm.radius,
+      );
+    } else if (this.popHand) {
+      const { mesh, radius } = this.popHand;
+      out.set(
+        mesh.position.x + dir[0] * radius,
+        mesh.position.y + dir[1] * radius,
+        mesh.position.z + dir[2] * radius,
+      );
+    } else {
+      // The boss: the front of its middle.
+      out.set(0, this.feetY * 0.5, -1);
+    }
+    this.root.updateWorldMatrix(true, true);
+    return this.creature.localToWorld(out);
+  }
+
+  /** The armless herzie's hand: out from the side of its head for the
+   * cast, back in after. */
+  private posePopHand(phase: number | undefined) {
+    const pop = this.popHand;
+    if (!pop) return;
+    const w = phase === undefined ? 0 : castWeight(phase);
+    pop.mesh.visible = w > 0.01;
+    if (!pop.mesh.visible || phase === undefined) return;
+    const { head, radius } = pop;
+    const { dir, reach } = castHand(phase, this.castPitch);
+    // The "shoulder": just inside the head's right side.
+    const sx = head.center[0] - head.radius * 0.75;
+    const sy = head.center[1] + head.radius * 0.15;
+    const sz = head.center[2];
+    const length = head.radius * 0.55 * reach;
+    pop.mesh.position.set(
+      sx + dir[0] * length,
+      sy + dir[1] * length,
+      sz + dir[2] * length,
+    );
+    pop.mesh.scale.setScalar(radius * w);
   }
 
   private stepSit(dt: number) {
@@ -572,19 +781,6 @@ export class HerzieModel {
     this.sitWeight +=
       (target - this.sitWeight) * (1 - Math.exp(-SIT_BLEND_RATE * dt));
     if (Math.abs(this.sitWeight - target) < 1e-3) this.sitWeight = target;
-  }
-
-  /** The Greedy Spirit picks its hop afresh each loop: none, or a variant
-   * other than the last, so hops land irregularly. */
-  private rerollHop() {
-    if (Math.random() < SPIRIT_CALM_LOOP_CHANCE) {
-      this.hopVariant = undefined;
-      return;
-    }
-    let next = Math.floor(Math.random() * SPIRIT_DANCE_HOP_VARIANT_COUNT);
-    if (next === this.hopVariant)
-      next = (next + 1) % SPIRIT_DANCE_HOP_VARIANT_COUNT;
-    this.hopVariant = next;
   }
 
   /** Each part at its rest position plus the pose's offset. */
@@ -597,10 +793,15 @@ export class HerzieModel {
       walkWeight,
       danceFrame: this.danceTime * DANCE_FPS,
       danceWeight: this.danceWeight,
-      spiritHopVariant: this.hopVariant,
       dangle: this.dangle,
       sitWeight: this.sitWeight,
+      castPhase:
+        this.castTime === undefined ? undefined : this.castTime / CAST_SECONDS,
+      castPitch: this.castPitch,
     });
+    this.posePopHand(
+      this.castTime === undefined ? undefined : this.castTime / CAST_SECONDS,
+    );
     for (let i = 0; i < spheres.length; i++) {
       const s = spheres[i];
       const [x, y, z] = s.center;
@@ -612,6 +813,44 @@ export class HerzieModel {
         scratch.set(...dangledAxis(s, this.dangle)).normalize();
         mesh.quaternion.setFromUnitVectors(UP, scratch);
       }
+    }
+    if (!this.follower) this.surgeInPlace(offsets);
+  }
+
+  /**
+   * A companion that doesn't fly after the herzie (its scenery anchored)
+   * surges where it is: its parts lifted, drifted toward the herzie,
+   * glanced and twirled about its core, and stretched with the rise — what
+   * follow() does to a flying one's group, done to its parts.
+   */
+  private surgeInPlace(offsets: [number, number, number][]) {
+    const surge = this.surge;
+    if (!surge) return;
+    const { spheres } = this.model;
+    const core = spheres[this.surgeCore];
+    const co = offsets[this.surgeCore];
+    // Creature space: y is down.
+    const cx = core.center[0] + co[0];
+    const cy = core.center[1] + co[1];
+    const cz = core.center[2] + co[2];
+    const yaw = -this.surgeToward * surge.glance + surge.spin;
+    const cos = Math.cos(yaw);
+    const sin = Math.sin(yaw);
+    const [wide, tall] = surgeStretch(surge.v);
+    for (let i = 0; i < spheres.length; i++) {
+      const s = spheres[i];
+      if (!floats(s)) continue;
+      const mesh = this.meshes[i];
+      const rx = mesh.position.x - cx;
+      const ry = mesh.position.y - cy;
+      const rz = mesh.position.z - cz;
+      mesh.position.set(
+        cx + (rx * cos + rz * sin) * wide + this.surgeToward * surge.x,
+        cy + ry * tall - surge.y,
+        cz + (-rx * sin + rz * cos) * wide,
+      );
+      if (!s.shape)
+        mesh.scale.set(s.radius * wide, s.radius * tall, s.radius * wide);
     }
   }
 

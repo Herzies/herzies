@@ -1,5 +1,6 @@
 import type { ReactElement, ReactNode } from "react";
 import {
+  formatStat,
   getItemSet,
   getItemType,
   ITEM_TYPE_LABELS,
@@ -130,7 +131,8 @@ export function ItemStatLines({
     >
       {keys.map((key) => (
         <div key={key}>
-          {STAT_LABELS[key]}: +{(item.stats?.[key] ?? 0) + level}
+          {STAT_LABELS[key]}: +
+          {formatStat(key, (item.stats?.[key] ?? 0) + level)}
         </div>
       ))}
     </div>

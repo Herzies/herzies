@@ -13,11 +13,16 @@
  * an empty Town.
  */
 import { createClient } from "@supabase/supabase-js";
-import { normalizeEquipped } from "../_shared/shared/items.ts";
+import {
+  getHerzieStatsFromUnits,
+  normalizeEquipped,
+  normalizeUnits,
+} from "../_shared/shared/items.ts";
 import {
   signTownTicket,
   TOWN_TICKET_TTL_S,
 } from "../_shared/shared/town-net.ts";
+import { vitalsOf } from "../_shared/shared/vitals.ts";
 import { corsHeaders, jsonResponse } from "../_shared/cors.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -42,6 +47,7 @@ Deno.serve(async (request) => {
     return jsonResponse({ error: "Multiplayer is off" }, 503);
   }
 
+  const map = new URL(request.url).searchParams.get("map");
   const authHeader = request.headers.get("authorization");
   if (!authHeader?.startsWith("Bearer ")) {
     return jsonResponse(
@@ -65,7 +71,7 @@ Deno.serve(async (request) => {
   });
   const { data: herzie, error } = await admin
     .from("herzies")
-    .select("name, friend_code, stage, equipped")
+    .select("name, friend_code, stage, equipped, level, hp, hp_at, down")
     .eq("user_id", user.id)
     .maybeSingle();
   if (error) {
@@ -79,15 +85,67 @@ Deno.serve(async (request) => {
   const { ground_left: _l, ground_right: _r, ...equipped } = normalizeEquipped(
     herzie.equipped,
   );
-  const exp = Math.floor(Date.now() / 1000) + TOWN_TICKET_TTL_S;
+
+  // Health, and the combat stats the Town server rolls a cast's damage from.
+  // Both come from the stored rows, never from anything the client sent.
+  const now = Date.now();
+  const vitals = vitalsOf(
+    {
+      hp: herzie.hp,
+      hpAt: herzie.hp_at ? Date.parse(herzie.hp_at) : null,
+      down: herzie.down,
+    },
+    herzie.level,
+    now,
+  );
+  const { data: unitRows } = await admin.rpc("item_units_json", {
+    p_user_id: user.id,
+  });
+  const stats = getHerzieStatsFromUnits(
+    Array.isArray(unitRows) ? normalizeUnits(unitRows) : [],
+  );
+
+  // The boss room: only while the cave is open, and only on your feet.
+  let boss:
+    | { event: string; until: number; hp: number; maxHp: number }
+    | undefined;
+  if (map === "bossroom") {
+    if (vitals.down) {
+      return jsonResponse({ error: "Knocked out", reason: "down" }, 403);
+    }
+    if (Deno.env.get("BOSS_ROOM") === "off") {
+      return jsonResponse(
+        { error: "The cave is sealed", reason: "sealed" },
+        403,
+      );
+    }
+    const { data: open } = await admin.rpc("open_boss_json");
+    if (!open) {
+      return jsonResponse(
+        { error: "The cave is sealed", reason: "sealed" },
+        403,
+      );
+    }
+    boss = open as typeof boss;
+  }
+
+  const exp = Math.floor(now / 1000) + TOWN_TICKET_TTL_S;
   const ticket = await signTownTicket(
     {
       uid: user.id,
       name: herzie.name,
       look: { seed: herzie.friend_code, stage: herzie.stage, equipped },
       exp,
+      hp: { hp: vitals.hp, maxHp: vitals.maxHp, down: vitals.down },
+      st: [
+        stats.sonicPower,
+        stats.luck,
+        stats.critChance,
+        stats.critDamage,
+      ],
+      boss,
     },
     TOWN_TICKET_SECRET,
   );
-  return jsonResponse({ ticket, url: TOWN_SERVER_URL, exp });
+  return jsonResponse({ ticket, url: TOWN_SERVER_URL, exp, vitals });
 });

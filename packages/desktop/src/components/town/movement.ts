@@ -1,3 +1,4 @@
+import { TOWN_SPRINT_SPEED } from "@herzies/shared";
 import { turnToward, WALK_SPEED } from "@herzies/shared/gl";
 import { MathUtils } from "three";
 import type { TownInput } from "./input";
@@ -22,6 +23,7 @@ export type Mover = { vx: number; vz: number; heading: number };
  *   convention: 0 puts the camera on the +z side, looking toward -z).
  * - Holding the right mouse button turns the herzie with the camera, so
  *   A/D strafe; holding both buttons walks forward.
+ * - Holding Shift runs.
  * - Otherwise the herzie turns to face where it walks.
  */
 export function stepMover(
@@ -47,8 +49,10 @@ export function stepMover(
   }
 
   const rate = len > 0 ? ACCELERATION : DECELERATION;
-  m.vx = MathUtils.damp(m.vx, mx * WALK_SPEED, rate, dt);
-  m.vz = MathUtils.damp(m.vz, mz * WALK_SPEED, rate, dt);
+  // Holding Shift runs. (The server allows up to TOWN_SPRINT_SPEED.)
+  const top = input.sprint ? TOWN_SPRINT_SPEED : WALK_SPEED;
+  m.vx = MathUtils.damp(m.vx, mx * top, rate, dt);
+  m.vz = MathUtils.damp(m.vz, mz * top, rate, dt);
 
   if (input.mouseRight) {
     m.heading = turnToward(

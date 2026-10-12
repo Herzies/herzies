@@ -63,6 +63,12 @@ export class ServerClock {
     return this.offset !== null;
   }
 
+  /** A server time as a local one (`performance.now()` terms), for things
+   * the server schedules: attacks that land at a given server time. */
+  toLocal(serverTime: number): number {
+    return serverTime + (this.offset ?? 0);
+  }
+
   /** The server time to draw remote herzies at. */
   renderTime(localNow: number): number {
     return localNow - (this.offset ?? 0) - this.delay;

@@ -8,6 +8,7 @@ import {
   emptyMap,
   facingAt,
   inland,
+  islandRadius,
   MAP_SIZE,
   OFF,
   onIsland,
@@ -18,7 +19,9 @@ import {
   type TownMap,
   waterRuns,
   withFacing,
+  worldRadius,
 } from "./map";
+import { checkLinks, TOWN_MAPS_LOCAL } from "./maps";
 import homeMap from "./maps/home.json";
 
 const MID = MAP_SIZE / 2;
@@ -55,15 +58,16 @@ describe("town map", () => {
   });
 
   it("maps cells to the world and back", () => {
-    expect(cellCenter(MID, MID)).toEqual([0.5, 0.5]);
-    expect(cellAt(0.5, 0.5)).toEqual([MID, MID]);
-    expect(cellAt(-0.1, -0.1)).toEqual([MID - 1, MID - 1]);
-    expect(onIsland(0, 0)).toBe(false);
-    expect(onIsland(0, MID)).toBe(true);
+    const g = { size: MAP_SIZE };
+    expect(cellCenter(g, MID, MID)).toEqual([0.5, 0.5]);
+    expect(cellAt(g, 0.5, 0.5)).toEqual([MID, MID]);
+    expect(cellAt(g, -0.1, -0.1)).toEqual([MID - 1, MID - 1]);
+    expect(onIsland(g, 0, 0)).toBe(false);
+    expect(onIsland(g, 0, MID)).toBe(true);
     // The western rim cell is partly over the edge: on the island, but not
     // inland.
-    expect(inland(0, MID)).toBe(false);
-    expect(inland(MID, MID)).toBe(true);
+    expect(inland(g, 0, MID)).toBe(false);
+    expect(inland(g, MID, MID)).toBe(true);
   });
 
   it("rejects broken maps", () => {
@@ -143,10 +147,12 @@ describe("town map", () => {
 
     const [l, hut] = buildingsOf(map);
     expect(l.rects).toEqual([
-      { col: 20, row: 10, w: 3, h: 2 },
-      { col: 20, row: 12, w: 1, h: 2 },
+      { col: 20, row: 10, w: 3, h: 2, x0: -23, z0: -33 },
+      { col: 20, row: 12, w: 1, h: 2, x0: -23, z0: -31 },
     ]);
-    expect(hut.rects).toEqual([{ col: 60, row: 60, w: 1, h: 1 }]);
+    expect(hut.rects).toEqual([
+      { col: 60, row: 60, w: 1, h: 1, x0: 17, z0: 17 },
+    ]);
     // The L is north-west of town: its door faces south-east, and the
     // south side's middle is open ground (the wing is on the west end).
     expect(l.door?.side).toBe("s");
@@ -191,5 +197,57 @@ describe("turned objects", () => {
 
   it("leaves maps without turns as they were", () => {
     expect(serializeMap(emptyMap())).not.toContain("facing");
+  });
+
+  it("reads a version 1 file as the home island", () => {
+    const { id, name, origin, version, ...rest } = emptyMap();
+    const back = parseMap({ ...rest, version: 1 });
+    expect(back).toMatchObject({ version: 2, id: "home", origin: [0, 0, 0] });
+  });
+
+  it("sizes each island by its own grid", () => {
+    const small = emptyMap(36, "arena", "Training Grounds");
+    expect(islandRadius(small)).toBe(18);
+    expect(worldRadius(small)).toBe(15);
+    expect(small.terrain).toHaveLength(36);
+    expect(cellCenter(small, 18, 18)).toEqual([0.5, 0.5]);
+    expect(parseMap(JSON.parse(serializeMap(small)))).toEqual(small);
+    const odd = { ...emptyMap(36, "arena", "x"), size: 35 };
+    expect(() => parseMap(odd)).toThrow(/even/);
+  });
+
+  it("needs every portal to lead somewhere, and links only on portals", () => {
+    const map = emptyMap(36, "arena", "Training Grounds");
+    paint(map, "objects", 18, 18, "O");
+    expect(() => parseMap(map)).toThrow(/leads nowhere/);
+    map.portals = { "18,18": { to: "home" } };
+    const back = parseMap(JSON.parse(serializeMap(map)));
+    expect(back.portals).toEqual({ "18,18": { to: "home" } });
+    map.portals = { "18,18": { to: "home" }, "17,18": { to: "home" } };
+    expect(() => parseMap(map)).toThrow(/no portal there/);
+    map.portals = { "18,18": { to: "arena" } };
+    expect(() => parseMap(map)).toThrow(/back to this island/);
+  });
+
+  it("links every committed island's portals to an island there is", () => {
+    expect(() => checkLinks(TOWN_MAPS_LOCAL.values())).not.toThrow();
+    const lost = emptyMap(36, "lost", "Lost");
+    paint(lost, "objects", 18, 18, "O");
+    lost.portals = { "18,18": { to: "nowhere" } };
+    expect(() => checkLinks([lost])).toThrow(/no "nowhere"/);
+  });
+});
+
+describe("committed maps", () => {
+  it("are saved as the editor saves them", () => {
+    const files = import.meta.glob<string>("./maps/*.json", {
+      eager: true,
+      query: "?raw",
+      import: "default",
+    });
+    for (const text of Object.values(files)) {
+      expect(serializeMap(parseMap(JSON.parse(text)))).toBe(text);
+    }
+    expect(Object.keys(files).length).toBeGreaterThan(1);
   });
 });

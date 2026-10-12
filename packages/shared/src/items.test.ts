@@ -17,13 +17,17 @@ import {
   equippedItemIds,
   filterDroppablePool,
   findEquippedSlot,
+  formatStat,
   getHerzieStats,
   getHerzieStatsFromUnits,
   getItem,
   getItemSet,
   getItemType,
   HALLOWEEN_DROP_WINDOW,
+  HIT_BASE,
+  HIT_SPREAD,
   hasRoomFor,
+  hitDamage,
   ITEM_DROP_WEIGHT_OVERRIDES,
   ITEMS,
   type ItemDef,
@@ -44,6 +48,7 @@ import {
   requiredDiceForLevel,
   rollSeasonalBonusDrops,
   SAFETY_PICK_ID,
+  shownStatKeys,
   unitsBestFirst,
   unitsPlainestFirst,
   unitsToEquipped,
@@ -902,8 +907,18 @@ describe("herzie stats", () => {
   });
 
   it("is zero for a herzie with nothing equipped", () => {
-    expect(getHerzieStats({})).toEqual({ sonicPower: 0, luck: 0 });
-    expect(getHerzieStats(null)).toEqual({ sonicPower: 0, luck: 0 });
+    expect(getHerzieStats({})).toEqual({
+      sonicPower: 0,
+      luck: 0,
+      critChance: 0,
+      critDamage: 0,
+    });
+    expect(getHerzieStats(null)).toEqual({
+      sonicPower: 0,
+      luck: 0,
+      critChance: 0,
+      critDamage: 0,
+    });
   });
 
   it("adds up the stats of equipped items", () => {
@@ -958,7 +973,12 @@ describe("herzie stats", () => {
           "rainbow-headband": 3,
         },
       ),
-    ).toEqual({ sonicPower: 0, luck: 0 });
+    ).toEqual({
+      sonicPower: 0,
+      luck: 0,
+      critChance: 0,
+      critDamage: 0,
+    });
   });
 });
 
@@ -1267,28 +1287,83 @@ describe("item units", () => {
   });
 
   it("is zero with nothing worn", () => {
-    expect(getHerzieStatsFromUnits(null)).toEqual({ sonicPower: 0, luck: 0 });
+    expect(getHerzieStatsFromUnits(null)).toEqual({
+      sonicPower: 0,
+      luck: 0,
+      critChance: 0,
+      critDamage: 0,
+    });
     expect(getHerzieStatsFromUnits([unit("a", "boombox", 3)])).toEqual({
       sonicPower: 0,
       luck: 0,
+      critChance: 0,
+      critDamage: 0,
     });
   });
 });
 
 describe("bossDamagePerMinute", () => {
   it("is the base rate with no sonic power", () => {
-    expect(bossDamagePerMinute({ sonicPower: 0, luck: 0 })).toBe(1);
+    expect(bossDamagePerMinute({ sonicPower: 0 })).toBe(1);
   });
 
   it("treats sonic power as a percentage on top of the base rate", () => {
-    expect(bossDamagePerMinute({ sonicPower: 10, luck: 0 })).toBeCloseTo(
-      1.1,
-      10,
+    expect(bossDamagePerMinute({ sonicPower: 10 })).toBeCloseTo(1.1, 10);
+    expect(bossDamagePerMinute({ sonicPower: 50 })).toBeCloseTo(1.5, 10);
+  });
+});
+
+describe("hitDamage", () => {
+  const none = { sonicPower: 0, critChance: 0, critDamage: 0 };
+  /** Draws these in turn: the spread, then the crit roll. */
+  const draws =
+    (...v: number[]) =>
+    () =>
+      v.shift() ?? 0.5;
+
+  it("is the base at the middle of its spread, with no stats", () => {
+    expect(hitDamage(none, draws(0.5, 0.99))).toEqual({
+      amount: HIT_BASE,
+      crit: false,
+    });
+  });
+
+  it("wanders up to HIT_SPREAD either way", () => {
+    expect(hitDamage(none, draws(0, 0.99)).amount).toBe(
+      Math.round(HIT_BASE * (1 - HIT_SPREAD)),
     );
-    expect(bossDamagePerMinute({ sonicPower: 50, luck: 0 })).toBeCloseTo(
-      1.5,
-      10,
+    expect(hitDamage(none, draws(0.999999, 0.99)).amount).toBe(
+      Math.round(HIT_BASE * (1 + HIT_SPREAD)),
     );
+  });
+
+  it("raises it by sonic power as a percentage", () => {
+    const s = { ...none, sonicPower: 15 };
+    expect(hitDamage(s, draws(0.5, 0.99)).amount).toBe(115);
+  });
+
+  it("never crits at 0% crit chance", () => {
+    expect(hitDamage(none, draws(0.5, 0)).crit).toBe(false);
+  });
+
+  it("crits at crit chance, for crit damage on top", () => {
+    const s = { sonicPower: 10, critChance: 25, critDamage: 50 };
+    expect(hitDamage(s, draws(0.5, 0.2))).toEqual({ amount: 165, crit: true });
+    expect(hitDamage(s, draws(0.5, 0.3))).toEqual({ amount: 110, crit: false });
+  });
+});
+
+describe("stats", () => {
+  it("lists crit stats only once something gives them", () => {
+    const base = { sonicPower: 0, luck: 0, critChance: 0, critDamage: 0 };
+    expect(shownStatKeys(base)).toEqual(["sonicPower", "luck"]);
+    expect(shownStatKeys(base, { ...base, critDamage: 5 })).toEqual([
+      "sonicPower",
+      "luck",
+      "critDamage",
+    ]);
+    expect(formatStat("critChance", 5)).toBe("5%");
+    expect(formatStat("sonicPower", 5)).toBe("5");
   });
 });
 

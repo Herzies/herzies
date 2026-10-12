@@ -1,4 +1,4 @@
-import { TOWN_FLAG_SITTING } from "@herzies/shared";
+import { type HerzieStats, TOWN_FLAG_SITTING } from "@herzies/shared";
 import { Canvas, type RootState, useFrame, useThree } from "@react-three/fiber";
 import { Physics } from "@react-three/rapier";
 import { Suspense, useMemo, useRef } from "react";
@@ -6,46 +6,74 @@ import type { Look } from "../TownScene";
 import { ambient } from "./ambient";
 import { benchesOf, type Seat, seatNear } from "./Benches";
 import { CameraRig } from "./CameraRig";
+import { CaveTimer } from "./CaveTimer";
+import { tryEnterCave, useCave } from "./cave";
 import type { ChatBubbles } from "./chatBubbles";
+import { Boss } from "./combat/Boss";
+import { Combat } from "./combat/Combat";
+import { CombatOverlay } from "./combat/DamageNumbers";
+import { Telegraphs } from "./combat/Telegraphs";
 import type { Hour } from "./DayCycle";
 import { driftClouds } from "./depth";
 import { type TownInput, useTownInput } from "./input";
-import type { TownMap } from "./map";
+import { portalCells, type TownMap, worldRadius } from "./map";
 import type { TownConnection } from "./net/TownConnection";
-import { Occlusion } from "./Occlusion";
 import { Player } from "./Player";
-import { RemotePlayers } from "./RemotePlayers";
-import "./shadows";
+import { isMouth } from "./Portals";
+import { Post } from "./Post";
 import {
-  HOME_MAP,
+  arrivalOn,
+  PORTAL_REACH,
+  type Portal,
+  portalsOf,
+  startWarp,
+  WARP_IN,
+  WARP_OUT,
+  walkedThrough,
+  warp,
+} from "./portal";
+import { RemotePlayers } from "./RemotePlayers";
+import { sfxPortal } from "./sfx";
+import "./shadows";
+import { PIXEL_SCALE, useTownPixelSize } from "./pixelSize";
+import {
+  goToMap,
+  mapById,
   TALK_RANGE,
   type TownRuntime,
   TownRuntimeContext,
   type TownSpot,
   townLive,
   townSave,
+  useTownMap,
 } from "./runtime";
 import type { Champion } from "./Statues";
 import { Visitor } from "./Visitor";
+import { SonicVFX } from "./vfx/SonicVFX";
 import { World } from "./World";
 
-/** The Town's resolution as a fraction of the screen's: each drawn pixel
- * covers 1/PIXEL_SCALE screen pixels square (2.5: five device pixels on a
- * Retina screen, so the pixels all come out the same size). */
-export const PIXEL_SCALE = 0.4;
+export { PIXEL_SCALE } from "./pixelSize";
 
 export type TownCanvasProps = {
   spots: TownSpot[];
   player: Look;
   paused: boolean;
   onOpen: (openKey: string) => void;
+  /** Another player's name was clicked: open their profile (by friend
+   * code). */
+  onOpenProfile?: (friendCode: string) => void;
   /** Who's close enough to talk to (null: nobody), when that changes. */
   onNearChange: (spot: TownSpot | null) => void;
   /** What E would do at a bench right now — sit on one nearby, or stand
    * up off it — when that changes (null: nothing). */
   onBenchChange?: (prompt: "sit" | "stand" | null) => void;
+  /** The island a portal nearby leads to (E steps in), when that changes
+   * (null: none near). */
+  onPortalChange?: (to: TownMap | null) => void;
   /** The island to draw (the map editor's preview passes its own). */
   map?: TownMap;
+  /** The other islands in the sky (default: every map there is). */
+  others?: TownMap[];
   /** Bump to put the player back at the map's spawn. */
   respawn?: number;
   /** Who the statues show: the last boss fight's champion (a stand-in
@@ -66,6 +94,8 @@ export type TownCanvasProps = {
   net?: TownConnection | null;
   /** Called once the world has drawn its first frame. */
   onReady?: () => void;
+  /** The player's herzie's stats: how hard its waves hit. */
+  stats?: HerzieStats;
   /** Called once the renderer is up (the sandbox's benchmark uses it). */
   onCreated?: (state: RootState) => void;
 };
@@ -84,17 +114,27 @@ export default function TownCanvas(props: TownCanvasProps) {
       playerBody: null,
       playerSpeed: 0,
       playerLegs: false,
+      playerHerzie: null,
+      playerRigidBody: null,
       cameraAzimuth: 0,
     }),
     [],
   );
-  const map = props.map ?? HOME_MAP;
+  const current = useTownMap();
+  const map = props.map ?? current;
+  // A debug override of PIXEL_SCALE (Settings, dev builds).
+  const pixelSize = useTownPixelSize();
+  // Visitors stand on islands with spots for them.
+  const spots = Object.keys(map.spots).length > 0 ? props.spots : [];
 
   return (
     <Canvas
       // Chunky pixels, to sit with the ASCII herzies: drawn at a fraction of
       // the screen's resolution and scaled up without smoothing.
-      dpr={props.pixelScale ?? PIXEL_SCALE}
+      dpr={
+        props.pixelScale ??
+        (pixelSize ? window.devicePixelRatio / pixelSize : PIXEL_SCALE)
+      }
       gl={{ antialias: false }}
       // Plain PCF: soft enough, and at these pixels the edge reads clean.
       shadows={props.shadows === false ? false : "percentage"}
@@ -104,11 +144,13 @@ export default function TownCanvas(props: TownCanvasProps) {
       onCreated={props.onCreated}
     >
       <TownRuntimeContext.Provider value={runtime}>
-        <Systems {...props} input={input} />
+        <Systems {...props} map={map} spots={spots} input={input} />
         {/* Rapier's WASM loads here: wait inside the canvas instead of
             suspending the whole Town again (the splash would blink). */}
         <Suspense fallback={null}>
           <Physics
+            // A new island: a new physics world, with only its colliders.
+            key={map.id}
             timeStep={1 / 60}
             interpolate
             gravity={[0, 0, 0]}
@@ -116,24 +158,69 @@ export default function TownCanvas(props: TownCanvasProps) {
             updatePriority={-3}
           >
             {props.onReady && <FirstFrame onReady={props.onReady} />}
-            <World map={map} champion={props.champion} hour={props.hour} />
+            <World
+              map={map}
+              others={props.others}
+              champion={props.champion}
+              hour={props.hour}
+            />
             <Player
               look={props.player}
               spawn={map.spawn}
+              reach={worldRadius(map)}
               respawn={props.respawn}
               bubble={props.bubbles?.get(props.player.seed)}
             />
-            {props.spots.map((s) => (
+            {spots.map((s) => (
               <Visitor key={s.key} spot={s} onOpen={props.onOpen} />
             ))}
+            <Combat
+              map={map}
+              stats={props.stats ?? NO_STATS}
+              active={!props.paused}
+            />
+            {map.id === "bossroom" && (
+              <>
+                <Boss />
+                <Telegraphs />
+              </>
+            )}
+            {portalsOf(map).some(isMouth) && <CaveTimer map={map} />}
           </Physics>
         </Suspense>
-        {props.net && <RemotePlayers net={props.net} bubbles={props.bubbles} />}
+        {props.net && (
+          <RemotePlayers
+            net={props.net}
+            bubbles={props.bubbles}
+            onOpenProfile={props.onOpenProfile}
+          />
+        )}
         <CameraRig />
-        {props.ao !== false && <Occlusion />}
+        {map.combat && (
+          <>
+            <SonicVFX />
+            <CombatOverlay />
+          </>
+        )}
+        {(props.ao !== false || distorts(map)) && (
+          <Post ao={props.ao !== false} distort={distorts(map)} />
+        )}
       </TownRuntimeContext.Provider>
     </Canvas>
   );
+}
+
+const NO_STATS: HerzieStats = {
+  sonicPower: 0,
+  luck: 0,
+  critChance: 0,
+  critDamage: 0,
+};
+
+/** Whether anything on the island bends light: sound waves (where you can
+ * fight) or a portal. */
+function distorts(map: TownMap): boolean {
+  return !!map.combat || portalCells(map).length > 0;
 }
 
 /** Per-frame housekeeping: input, and who the player is close enough to
@@ -144,7 +231,8 @@ function Systems({
   onOpen,
   onNearChange,
   onBenchChange,
-  map = HOME_MAP,
+  onPortalChange,
+  map,
   net,
   input,
 }: TownCanvasProps & { input: React.RefObject<TownInput> }) {
@@ -152,23 +240,82 @@ function Systems({
   const near = useRef<TownSpot | null>(null);
   const spotsRef = useRef(spots);
   spotsRef.current = spots;
-  const benches = useMemo(() => benchesOf(map), [map]);
+  const benches = useMemo(() => (map ? benchesOf(map) : []), [map]);
   /** The seat E would sit on, if any. */
   const seat = useRef<Seat | null>(null);
   const prompt = useRef<"sit" | "stand" | null>(null);
+  // A closed cave has no mouth: nothing to see, step into or be prompted by.
+  const caveOpen = useCave().kind === "open";
+  const portals = useMemo(
+    () => (map ? portalsOf(map) : []).filter((p) => caveOpen || !isMouth(p)),
+    [map, caveOpen],
+  );
+  /** The portal E would step into, if any. */
+  const portal = useRef<Portal | null>(null);
+  /** Where the player was last frame, on which island: walking through a
+   * disc is going from one side of it to the other. */
+  const last = useRef({ map: "", x: 0, z: 0 });
 
-  /** E (or a click on the prompt): talk to whoever's near; else sit on the
-   * bench nearby, or stand up off it. */
+  /** E (or a click on the prompt): talk to whoever's near; else step into
+   * the portal nearby; else sit on the bench nearby, or stand up off it. */
   const interact = () => {
     const key = near.current?.card.openKey;
     if (key) onOpen(key);
+    else if (portal.current) enter(portal.current.to);
     else if (townLive.seat) townLive.standUp = true;
     else if (seat.current) townLive.seat = seat.current;
+  };
+  const enter = (to: string) => {
+    if (warp.active) return;
+    // Into a room (the boss's cave): only while it's open, and says why not.
+    if (mapById(to).room && !tryEnterCave()) return;
+    townLive.seat = null;
+    startWarp(to);
+    sfxPortal();
   };
   const live = useTownInput(!paused, surface, interact);
   input.current = live.current;
 
-  useFrame(({ clock }) => {
+  useFrame(({ clock }, dt) => {
+    // Through a portal: out, swap islands at the white-out, back in.
+    if (warp.active) {
+      warp.t += Math.min(dt, 0.05);
+      if (!warp.swapped && warp.t >= WARP_OUT) {
+        warp.swapped = true;
+        const from = townSave.map;
+        goToMap(warp.to, arrivalOn(mapById(warp.to), from));
+      }
+      if (warp.t >= WARP_OUT + WARP_IN) warp.active = false;
+    }
+    townLive.frozen = warp.active;
+    if (map) {
+      const l = last.current;
+      if (l.map === map.id && !warp.active) {
+        for (const p of portals) {
+          if (walkedThrough(p, l.x, l.z, townSave.x, townSave.z)) {
+            enter(p.to);
+            break;
+          }
+        }
+      }
+      Object.assign(l, { map: map.id, x: townSave.x, z: townSave.z });
+    }
+    // The portal close enough to step into with E.
+    let nearest: Portal | null = null;
+    let reach = PORTAL_REACH;
+    for (const p of portals) {
+      const d = Math.hypot(townSave.x - p.x, townSave.z - p.z);
+      if (d < reach) {
+        reach = d;
+        nearest = p;
+      }
+    }
+    if (warp.active) nearest = null;
+    if (nearest?.key !== portal.current?.key) {
+      portal.current = nearest;
+      onPortalChange?.(nearest ? mapById(nearest.to) : null);
+    }
+
     // The shared uniforms the wind, water and sky read (see ambient.ts).
     ambient.uTime.value = clock.elapsedTime;
     ambient.uPlayer.value.set(townSave.x, 0, townSave.z);
@@ -194,7 +341,7 @@ function Systems({
     // Benches: the free seat nearest, if no one's there to talk to. A seat
     // is taken if another player is sitting on it.
     seat.current = null;
-    if (!closest && !townLive.seat && benches.length > 0) {
+    if (!closest && !portal.current && !townLive.seat && benches.length > 0) {
       const sitting: { x: number; z: number }[] = [];
       if (net) {
         const t = net.clock.renderTime(performance.now());

@@ -2497,6 +2497,122 @@ function sitDeltas(spheres: Sphere[], stage: number): V3[] {
 }
 
 /**
+ * A sonic cast, as fractions of its whole (castPhase 0..1): the right hand
+ * draws back and in (anticipation), snaps out to the front, palm to the
+ * target, at RELEASE — when the wave leaves it — holds there through a
+ * little recoil (follow-through), and eases home.
+ */
+export const CAST = {
+  /** End of the draw back. */
+  drawn: 0.2,
+  /** The hand is out: the wave leaves it. */
+  release: 0.3,
+  /** End of the hold, recoil and all. */
+  held: 0.52,
+  /** How far behind the shoulder the hand draws (fractions of the arm's
+   * reach) and how far past its reach it thrusts. */
+  draw: 0.75,
+  reach: 1.45,
+  /** The recoil: how far the hand gives back after the thrust. */
+  recoil: 0.18,
+  /** The body leans into the thrust (fractions of the body scale)… */
+  lean: 0.09,
+  /** …having rocked back on the draw. */
+  rock: 0.04,
+} as const;
+
+const ease = (a: number, b: number, v: number) => {
+  const t = Math.min(1, Math.max(0, (v - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
+const easeOut = (t: number) => 1 - (1 - t) ** 3;
+const easeIn = (t: number) => t * t * t;
+
+/** The arm a herzie casts with: the one on its right as you look at its
+ * back — the side a third-person camera sits over. (Creature space's +x
+ * is its left from behind, once turned upright.) */
+export const CAST_ARM = "arm-l";
+/** Which way is outward for the casting arm, along creature x. */
+const CAST_SIDE = -1;
+
+/** Where the casting hand is, `phase` through a cast aimed `pitch` above
+ * level, as a direction from the shoulder (creature space: y down, front
+ * −z) and how far along it, in arm lengths. */
+export function castHand(phase: number, pitch = 0): { dir: V3; reach: number } {
+  const hand = castHandOutward(phase, pitch);
+  hand.dir[0] *= CAST_SIDE;
+  return hand;
+}
+
+/** castHand, for an arm on the +x side. */
+function castHandOutward(
+  phase: number,
+  pitch: number,
+): { dir: V3; reach: number } {
+  const back: V3 = [0.55, 0.15, 0.82];
+  // Out front and a little to its side, palm to the target: clear of the
+  // body, so it reads from behind (where the camera is) as well as from
+  // the front.
+  const front: V3 = [0.42, -Math.sin(pitch) - 0.12, -Math.cos(pitch)];
+  const mix = (a: V3, b: V3, t: number): V3 => {
+    const v = add(scale(a, 1 - t), scale(b, t));
+    return scale(v, 1 / Math.max(1e-9, Math.hypot(...v)));
+  };
+  if (phase < CAST.drawn) {
+    const t = easeOut(phase / CAST.drawn);
+    return { dir: mix([1, 0, 0], back, t), reach: 1 + (CAST.draw - 1) * t };
+  }
+  if (phase < CAST.release) {
+    const t = easeIn((phase - CAST.drawn) / (CAST.release - CAST.drawn));
+    return {
+      dir: mix(back, front, t),
+      reach: CAST.draw + (CAST.reach - CAST.draw) * t,
+    };
+  }
+  if (phase < CAST.held) {
+    // A quick give, then steady.
+    const t = (phase - CAST.release) / (CAST.held - CAST.release);
+    const give = Math.sin(Math.min(1, t * 2) * Math.PI) * CAST.recoil;
+    return { dir: front, reach: CAST.reach - give };
+  }
+  const t = ease(CAST.held, 1, phase);
+  return {
+    dir: mix(front, [1, 0, 0], t),
+    reach: CAST.reach + (1 - CAST.reach) * t,
+  };
+}
+
+/** How much a cast takes over the pose at `phase`: in quickly, out as the
+ * hand comes home, so it blends with the walk either side. */
+export function castWeight(phase: number): number {
+  return ease(0, 0.06, phase) * (1 - ease(0.75, 1, phase));
+}
+
+/** Each sphere's offset at `phase` through a cast, as a delta from rest:
+ * the right arm, and a lean of everything with it. */
+function castDeltas(spheres: Sphere[], phase: number, pitch: number): V3[] {
+  const rig = buildRig(spheres);
+  const s = HERZIE_BODY.scale * CS;
+  // Back on the draw, into the thrust, settling after.
+  const lean =
+    phase < CAST.release
+      ? -CAST.rock * ease(0, CAST.drawn, phase) +
+        (CAST.rock + CAST.lean) *
+          easeIn(Math.max(0, phase - CAST.drawn) / (CAST.release - CAST.drawn))
+      : CAST.lean * (1 - ease(CAST.release, 1, phase));
+  const shoulder = rig.shoulders[CAST_ARM];
+  const hand = castHand(phase, pitch);
+  return spheres.map((sp): V3 => {
+    if (isSceneFixed(sp.part) || isLeg(sp.part)) return [0, 0, 0];
+    const leaning: V3 = [0, 0, -lean * s];
+    if (sp.part !== CAST_ARM || !shoulder) return leaning;
+    const length = Math.hypot(...sub(sp.center, shoulder));
+    const at = add(shoulder, scale(hand.dir, length * hand.reach));
+    return add(sub(at, sp.center), leaning);
+  });
+}
+
+/**
  * How far a seated herzie settles below where its feet stood, in creature
  * units: with its legs out, it rests on its bottom. 0 without legs.
  */
@@ -3630,6 +3746,8 @@ export function buildCreatureModel(
 /** Frames in the dance loop, which the old renderer played at 65ms a
  * frame (a 1.56s loop). */
 export const DANCE_LOOP_FRAMES = DANCE_FRAMES;
+/** Frames between the dance's beats (the boombox's touchdowns). */
+export const DANCE_BEAT_FRAMES = DANCE_BEAT;
 
 /** What a continuously animating host poses a herzie with (see
  * creaturePoseOffsets). */
@@ -3648,6 +3766,11 @@ export type CreatureMotion = Pick<
   dangle?: DangleState;
   /** 0 standing to 1 seated (on a bench): legs out in front. */
   sitWeight?: number;
+  /** How far through a sonic cast it is, 0..1 (see CAST); undefined when
+   * it isn't casting. */
+  castPhase?: number;
+  /** Where the cast is aimed: radians above level (negative: below). */
+  castPitch?: number;
 };
 
 /**
@@ -3678,6 +3801,11 @@ export function creaturePoseOffsets(
             : undefined,
         )
       : null;
+  const cast =
+    pose.castPhase !== undefined
+      ? castDeltas(base, pose.castPhase, pose.castPitch ?? 0)
+      : null;
+  const cw = pose.castPhase !== undefined ? castWeight(pose.castPhase) : 0;
   const offsets = spheres.map((s, i): V3 => {
     const b = base[i].center;
     // Scene-anchored parts (a floating pet) keep their own idle bob even
@@ -3698,6 +3826,14 @@ export function creaturePoseOffsets(
       x = x * (1 - dw) + (moved[0] - b[0]) * dw;
       y = y * (1 - dw) + (moved[1] - b[1]) * dw;
       z = z * (1 - dw) + (moved[2] - b[2]) * dw;
+    }
+    // A cast takes the casting arm over; the lean adds to whatever else.
+    const c = cast?.[i];
+    if (c) {
+      const own = s.part === CAST_ARM ? cw : 0;
+      x = x * (1 - own) + c[0] * cw;
+      y = y * (1 - own) + c[1] * cw;
+      z = z * (1 - own) + c[2] * cw;
     }
     // Plus where the swing put it.
     return [

@@ -26,6 +26,16 @@
       "import": "./dist/town-net.js",
       "require": "./dist/town-net.js"
     },
+    "./combat": {
+      "types": "./dist/combat.d.ts",
+      "import": "./dist/combat.js",
+      "require": "./dist/combat.js"
+    },
+    "./vitals": {
+      "types": "./dist/vitals.d.ts",
+      "import": "./dist/vitals.js",
+      "require": "./dist/vitals.js"
+    },
     "./gl": {
       "types": "./dist/gl/index.d.ts",
       "import": "./dist/gl/index.js",

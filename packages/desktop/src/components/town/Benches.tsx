@@ -6,7 +6,6 @@ import {
   cellCenter,
   EIGHTH,
   facingAt,
-  MAP_SIZE,
   objectAt,
   type TownMap,
   terrainAt,
@@ -48,14 +47,14 @@ export type Bench = { x: number; z: number; yaw: number; seats: Seat[] };
 export function benchFacing(map: TownMap, col: number, row: number): number {
   const turned = facingAt(map, col, row);
   if (turned !== undefined) return turned;
-  const [x, z] = cellCenter(col, row);
+  const [x, z] = cellCenter(map, col, row);
   let best = Number.POSITIVE_INFINITY;
   let to: [number, number] = [-x, -z];
   for (let dr = -PATH_REACH; dr <= PATH_REACH; dr++) {
     for (let dc = -PATH_REACH; dc <= PATH_REACH; dc++) {
       const c = col + dc;
       const r = row + dr;
-      if (c < 0 || r < 0 || c >= MAP_SIZE || r >= MAP_SIZE) continue;
+      if (c < 0 || r < 0 || c >= map.size || r >= map.size) continue;
       if (terrainAt(map, c, r) !== "g") continue;
       const d = Math.hypot(dc, dr);
       if (d > 0 && d < best) {
@@ -71,10 +70,10 @@ export function benchFacing(map: TownMap, col: number, row: number): number {
 /** Every bench on the map, with its seats. */
 export function benchesOf(map: TownMap): Bench[] {
   const out: Bench[] = [];
-  for (let row = 0; row < MAP_SIZE; row++) {
-    for (let col = 0; col < MAP_SIZE; col++) {
+  for (let row = 0; row < map.size; row++) {
+    for (let col = 0; col < map.size; col++) {
       if (objectAt(map, col, row) !== BENCH) continue;
-      const [x, z] = cellCenter(col, row);
+      const [x, z] = cellCenter(map, col, row);
       const yaw = benchFacing(map, col, row);
       // Forward is (sin, cos); along the bench, at right angles to it.
       const fx = Math.sin(yaw);

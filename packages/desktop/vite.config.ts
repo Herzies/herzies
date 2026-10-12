@@ -2,14 +2,14 @@ import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
-import { parseMap, serializeMap } from "./src/components/town/map";
+import { MAP_ID, parseMap, serializeMap } from "./src/components/town/map";
 
-const TOWN_MAP = resolve(__dirname, "src/components/town/maps/home.json");
+const TOWN_MAPS = resolve(__dirname, "src/components/town/maps");
 
 /**
- * Dev only: lets the map editor (/map-editor.html) save the home island.
- * `PUT /__town-map` with the map's JSON checks it and writes it to
- * maps/home.json, one row per line.
+ * Dev only: lets the map editor (/map-editor.html) save an island.
+ * `PUT /__town-map/<id>` with the map's JSON checks it and writes it to
+ * maps/<id>.json, one row per line.
  */
 function townMapEditor(): Plugin {
   return {
@@ -17,8 +17,10 @@ function townMapEditor(): Plugin {
     apply: "serve",
     configureServer(server) {
       server.middlewares.use("/__town-map", (req, res) => {
-        if (req.method !== "PUT") {
-          res.statusCode = 405;
+        // Mounted at /__town-map, so the url is what's after it: /<id>.
+        const id = (req.url ?? "").replace(/^\//, "").split("?")[0];
+        if (req.method !== "PUT" || !MAP_ID.test(id)) {
+          res.statusCode = req.method !== "PUT" ? 405 : 400;
           res.end();
           return;
         }
@@ -28,7 +30,9 @@ function townMapEditor(): Plugin {
         });
         req.on("end", () => {
           try {
-            writeFileSync(TOWN_MAP, serializeMap(parseMap(JSON.parse(body))));
+            const map = parseMap(JSON.parse(body));
+            if (map.id !== id) throw new Error(`id "${map.id}" is not "${id}"`);
+            writeFileSync(resolve(TOWN_MAPS, `${id}.json`), serializeMap(map));
             res.statusCode = 204;
             res.end();
           } catch (e) {
@@ -42,7 +46,7 @@ function townMapEditor(): Plugin {
     // reload it under the editor when it saves. An open town sandbox needs a
     // refresh to pick the new map up.
     handleHotUpdate({ file }) {
-      if (file === TOWN_MAP) return [];
+      if (file.startsWith(TOWN_MAPS) && file.endsWith(".json")) return [];
     },
   };
 }

@@ -1185,7 +1185,7 @@ export function ChatPanel({
           className={cn(
             // Collapsed, the same bottom padding and border as expanded, so
             // the input keeps its gap above the tabs either way.
-            "flex flex-col border-t border-b border-border pb-1",
+            "flex flex-col border-t border-b border-white/15 pb-1",
             !expanded && "border-b-transparent pt-px",
             expanded &&
               "fixed inset-x-0 z-[201] h-[50vh] max-h-[50vh] px-3 pt-[5px] shadow-[0_-8px_32px_rgba(0,0,0,0.45)]",
@@ -1211,7 +1211,7 @@ export function ChatPanel({
               // Collapsed, a fixed height however many messages there are, so
               // the views above it — and the herzie in them — don't shift as
               // the feed fills.
-              expanded ? "min-h-0 flex-1" : "h-[58px]",
+              expanded ? "min-h-0 flex-1" : "h-[36px]",
             )}
           >
             {feed.length === 0 && (

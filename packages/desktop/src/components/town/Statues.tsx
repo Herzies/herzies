@@ -6,8 +6,9 @@ import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import type { Look } from "../TownScene";
 import { ambient } from "./ambient";
-
-import { cellCenter, facingAt, MAP_SIZE, objectAt, type TownMap } from "./map";
+import { cellCenter, facingAt, objectAt, type TownMap } from "./map";
+import { nameOpacity } from "./nameFade";
+import { townSave } from "./runtime";
 
 /** Who a statue shows: whoever came out on top in the last boss fight. */
 export type Champion = { look: Look; name: string };
@@ -47,10 +48,10 @@ const capMaterial = new THREE.MeshLambertMaterial({
 
 export function statueSpots(map: TownMap): [number, number, number][] {
   const spots: [number, number, number][] = [];
-  for (let row = 0; row < MAP_SIZE; row++) {
-    for (let col = 0; col < MAP_SIZE; col++) {
+  for (let row = 0; row < map.size; row++) {
+    for (let col = 0; col < map.size; col++) {
       if (objectAt(map, col, row) !== "@") continue;
-      const [x, z] = cellCenter(col, row);
+      const [x, z] = cellCenter(map, col, row);
       // The way it was turned in the editor, else the middle of town.
       spots.push([x, z, facingAt(map, col, row) ?? Math.atan2(-x, -z)]);
     }
@@ -78,7 +79,14 @@ function Statue({
   useEffect(() => () => herzie.dispose(), [herzie]);
   // Posed once, where it stands (its bands are laid out by world height).
   const posed = useRef<HerzieModel | null>(null);
+  // The plaque fades in as you come near.
+  const plaque = useRef<HTMLDivElement>(null);
   useFrame(() => {
+    if (plaque.current) {
+      plaque.current.style.opacity = String(
+        nameOpacity(Math.hypot(townSave.x - x, townSave.z - z)),
+      );
+    }
     if (posed.current === herzie) return;
     herzie.update(0, 0);
     posed.current = herzie;
@@ -109,7 +117,11 @@ function Statue({
         zIndexRange={[20, 0]}
         style={{ pointerEvents: "none" }}
       >
-        <div className="whitespace-nowrap rounded bg-black/55 px-1.5 py-0.5 text-center text-[9px] leading-tight text-text-dim">
+        <div
+          ref={plaque}
+          style={{ opacity: 0 }}
+          className="whitespace-nowrap text-center text-[9px] leading-tight text-white/70 [text-shadow:0_1px_3px_#000,0_0_6px_#000]"
+        >
           champion
           <div className="text-[10px] text-white">{champion.name}</div>
         </div>

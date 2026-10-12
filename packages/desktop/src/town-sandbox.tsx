@@ -8,28 +8,41 @@
 // `?net=local` joins the multiplayer Town on `wrangler dev` (in
 // packages/town-server, with TOWN_TICKET_SECRET=dev-town-secret in .dev.vars);
 // `&name=` and `&server=ws://…` to taste. Open it twice to see each other.
+// `?map=bossroom` (with `?net=local`) joins the boss's cave on `wrangler dev`
+// with a made-up boss (and `&cave=open` opens the cave's door in town); the
+// HUD is drawn over it. `&boss=<hp>` sets the boss's health, `&hp=<n>` yours.
 // `?music=1` plays music, as it were: stand still and the herzie dances.
+// `?color=`, `?head=` and `?spirit=` dress the player (`?head=rainbow-headband`
+// with the default prism skin is the full Prismatic set).
 import "./globals.css";
 import { signTownTicket } from "@herzies/shared";
 import type { RootState } from "@react-three/fiber";
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { EventCard } from "./components/TownScene";
+import { TownVitals } from "./components/TownVitals";
+import { BossHud } from "./components/town/BossHud";
+import { setCave } from "./components/town/cave";
 import {
   bubbleDuration,
   type ChatBubbles,
 } from "./components/town/chatBubbles";
 import { setTownTicketSource, townNet } from "./components/town/net/townNet";
 import {
-  SPARE_SPOTS,
-  SPOTS,
+  goToMap,
+  HOME_MAP,
+  spotsOf,
   type TownSpot,
   townLive,
   townSave,
 } from "./components/town/runtime";
 import TownCanvas from "./components/town/TownCanvas";
+import { setVitals } from "./components/town/vitals";
 
 const params = new URLSearchParams(location.search);
+const { spots: SPOTS, spare: SPARE_SPOTS } = spotsOf(HOME_MAP);
+// Start on another island: ?map=arena .
+if (params.has("map")) goToMap(params.get("map") as string);
 
 const startHour = params.has("time") ? Number(params.get("time")) : null;
 const speed = Number(params.get("speed") ?? 0);
@@ -54,13 +67,16 @@ const spots: TownSpot[] = [
   ["treat_trader", "Nandor"],
   ["boss_fight", "The boss"],
   ["song_hunt", "Orphiez"],
-].map(([type, title]) => ({
-  key: type,
-  card: card(type, title),
-  at: SPOTS[type],
-  standing: true,
-  status: "in town",
-}));
+]
+  // Only those the map has a spot for (the boss lives in its cave now).
+  .filter(([type]) => SPOTS[type])
+  .map(([type, title]) => ({
+    key: type,
+    card: card(type, title),
+    at: SPOTS[type],
+    standing: true,
+    status: "in town",
+  }));
 // `?visitors=6` fills the spare spots too: the most the Town shows.
 const extra = Math.max(0, Number(params.get("visitors") ?? 4) - spots.length);
 SPARE_SPOTS.slice(0, extra).forEach((at, i) => {
@@ -84,7 +100,7 @@ const player = {
   stage: Number(params.get("stage") ?? 3),
   equipped: {
     color: params.get("color") ?? "prism",
-    head: "headphones",
+    head: params.get("head") ?? "headphones",
     spirit: params.get("spirit") ?? "spirit-orb",
   },
 };
@@ -158,15 +174,44 @@ async function bench(state: RootState) {
 function localNet() {
   const uid = `sandbox-${Math.random().toString(36).slice(2, 8)}`;
   const name = params.get("name") ?? uid;
-  setTownTicketSource(async () => {
+  const maxHp = 300;
+  const hp = Number(params.get("hp") ?? maxHp);
+  setVitals({ hp, maxHp, stored: hp, hpAt: Date.now(), down: hp <= 0 });
+  setTownTicketSource(async (map) => {
     const exp = Math.floor(Date.now() / 1000) + 600;
     const look = {
       seed: player.seed,
       stage: player.stage,
       equipped: player.equipped,
     };
+    const bossHp = Number(params.get("boss") ?? 60_000);
     return {
-      ticket: await signTownTicket({ uid, name, look, exp }, "dev-town-secret"),
+      ticket: await signTownTicket(
+        {
+          uid,
+          name,
+          look,
+          exp,
+          hp: { hp, maxHp, down: hp <= 0 },
+          st: [
+            Number(params.get("sp") ?? 0),
+            0,
+            Number(params.get("cc") ?? 0),
+            Number(params.get("cd") ?? 0),
+          ],
+          // Only the cave needs a boss; the sandbox makes one up.
+          boss:
+            map === "bossroom"
+              ? {
+                  event: "sandbox",
+                  until: exp + 3_000,
+                  hp: bossHp,
+                  maxHp: bossHp,
+                }
+              : undefined,
+        },
+        "dev-town-secret",
+      ),
       url: params.get("server") ?? "ws://localhost:8787",
       exp,
     };
@@ -177,6 +222,11 @@ function localNet() {
     console.log("[town-sandbox] net", net.status, net.remotes.size),
   );
   return net;
+}
+if (params.get("cave") === "open") {
+  setCave({ kind: "open", endsAt: Date.now() + 3_600_000 });
+} else if (params.get("cave") === "soon") {
+  setCave({ kind: "soon", startsAt: Date.now() + 7_500_000 });
 }
 const net = params.get("net") === "local" ? localNet() : null;
 // For poking at from the console and browser tests.
@@ -209,19 +259,31 @@ function Sandbox() {
     });
   }, []);
   return (
-    <TownCanvas
-      spots={spots}
-      player={player}
-      net={net}
-      bubbles={bubbles}
-      paused={false}
-      hour={sandboxHour}
-      shadows={params.get("shadows") !== "0"}
-      ao={params.get("ao") !== "0"}
-      onCreated={params.has("bench") ? bench : undefined}
-      onOpen={(key) => console.log("[town-sandbox] open", key)}
-      onNearChange={(s) => console.log("[town-sandbox] near", s?.key ?? null)}
-    />
+    <div style={{ position: "relative", height: "100%" }}>
+      <TownVitals inFight={params.get("map") === "bossroom"} />
+      <BossHud name="The boss" />
+      <TownCanvas
+        spots={spots}
+        player={player}
+        net={net}
+        bubbles={bubbles}
+        paused={false}
+        hour={sandboxHour}
+        shadows={params.get("shadows") !== "0"}
+        ao={params.get("ao") !== "0"}
+        onCreated={params.has("bench") ? bench : undefined}
+        // ?sp=&cc=&cd= : sonic power, crit chance and crit damage, to try
+        // the dummies with.
+        stats={{
+          sonicPower: Number(params.get("sp") ?? 0),
+          luck: 0,
+          critChance: Number(params.get("cc") ?? 0),
+          critDamage: Number(params.get("cd") ?? 0),
+        }}
+        onOpen={(key) => console.log("[town-sandbox] open", key)}
+        onNearChange={(s) => console.log("[town-sandbox] near", s?.key ?? null)}
+      />
+    </div>
   );
 }
 

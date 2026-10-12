@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.1.0-beta.50",
+    "highlights": [
+      "New: the Training Grounds. Step through the portal in the Town, press Tab to aim, and blast training dummies with sonic waves",
+      "Face the boss live with other players in Nohoot Henry's lair, through the cave in the Town",
+      "Herzies now have health. Keep an eye on it in the Town's top right corner",
+      "Your name, rank, level and XP now show in the Town",
+      "Spirits float up on the music instead of hopping",
+      "Settings are split into tabs, with a new aim sensitivity setting"
+    ]
+  },
+  {
     "version": "0.1.0-beta.49",
     "highlights": [
       "Spirits now follow your herzie around the Town on their own"

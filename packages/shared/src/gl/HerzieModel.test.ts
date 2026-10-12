@@ -2,7 +2,12 @@ import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 import { buildCreatureModel } from "../creature-renderer.js";
 import { WALK_SPEED } from "./animation.js";
-import { HerzieModel, MODEL_SCALE } from "./HerzieModel.js";
+import {
+  CAST_RELEASE_SECONDS,
+  CAST_SECONDS,
+  HerzieModel,
+  MODEL_SCALE,
+} from "./HerzieModel.js";
 
 const LOOK = { seed: "model-test", stage: 3, equipped: { head: "headphones" } };
 
@@ -326,4 +331,125 @@ describe("HerzieModel", () => {
       });
     }
   });
+});
+
+describe("casting", () => {
+  /** Runs it in small steps for `seconds`, noting when the wave left. */
+  function run(h: HerzieModel, seconds: number) {
+    let released = -1;
+    for (let t = 0; t < seconds; t += 1 / 120) {
+      h.update(1 / 120, 0);
+      if (h.released) released = t;
+    }
+    return released;
+  }
+  const forward = (h: HerzieModel) =>
+    new THREE.Vector3(Math.sin(h.heading), 0, Math.cos(h.heading));
+
+  it("lets the wave go once, at the release, and finishes", () => {
+    const h = new HerzieModel(LOOK);
+    h.cast();
+    expect(h.casting).toBe(true);
+    const at = run(h, CAST_SECONDS + 0.1);
+    expect(at).toBeGreaterThan(CAST_RELEASE_SECONDS - 0.02);
+    expect(at).toBeLessThan(CAST_RELEASE_SECONDS + 0.02);
+    expect(h.casting).toBe(false);
+  });
+
+  for (const stage of [1, 2, 3]) {
+    it(`thrusts a hand out in front at stage ${stage}`, () => {
+      const h = new HerzieModel({ ...LOOK, stage });
+      h.heading = 1.1;
+      h.update(0, 0);
+      const middle = new THREE.Vector3(0, h.height / 2, 0);
+      h.cast();
+      run(h, CAST_RELEASE_SECONDS + 0.01);
+      const hand = h.handWorldPosition(new THREE.Vector3());
+      const ahead = hand.clone().sub(middle).dot(forward(h));
+      // Out in front of its middle, at about its own height.
+      expect(ahead).toBeGreaterThan(0.3);
+      expect(hand.y).toBeGreaterThan(0);
+      expect(hand.y).toBeLessThan(h.height);
+    });
+  }
+
+  it("aims the hand up when the cast is aimed up", () => {
+    const level = new HerzieModel(LOOK);
+    const up = new HerzieModel(LOOK);
+    level.cast(0);
+    up.cast(0.6);
+    run(level, CAST_RELEASE_SECONDS + 0.01);
+    run(up, CAST_RELEASE_SECONDS + 0.01);
+    const v = new THREE.Vector3();
+    expect(up.handWorldPosition(v).y).toBeGreaterThan(
+      level.handWorldPosition(new THREE.Vector3()).y,
+    );
+  });
+
+  it("is back as it was once the cast is over", () => {
+    const a = new HerzieModel(LOOK);
+    const b = new HerzieModel(LOOK);
+    b.cast();
+    run(a, CAST_SECONDS + 0.2);
+    run(b, CAST_SECONDS + 0.2);
+    expect(bounds(b).max.toArray()).toEqual(bounds(a).max.toArray());
+    expect(bounds(b).min.toArray()).toEqual(bounds(a).min.toArray());
+  });
+});
+
+describe("a spirit dancing", () => {
+  const WITH_SPIRIT = {
+    seed: "model-test",
+    stage: 3,
+    equipped: { spirit: "spirit-orb" },
+  };
+  /** How high the spirit flies over its herzie's feet (world units). */
+  const spiritHeight = (h: HerzieModel) => {
+    h.root.updateMatrixWorld(true);
+    // The follower: the root's first child, added before the herzie's own.
+    return h.root.children[0].getWorldPosition(new THREE.Vector3()).y;
+  };
+
+  for (const [where, options] of [
+    ["in the Town", {}],
+    ["on its own stage", { anchorScenery: 0 }],
+  ] as const) {
+    it(`surges up now and then, and settles when the music stops (${where})`, () => {
+      const h = new HerzieModel(WITH_SPIRIT, options);
+      const measure = () => {
+        if (!("anchorScenery" in options)) return spiritHeight(h);
+        // Anchored: the spirit's own parts move. Its highest part.
+        let top = Number.NEGATIVE_INFINITY;
+        h.root.updateMatrixWorld(true);
+        const { model, meshes } = h as unknown as {
+          model: { spheres: { part: string }[] };
+          meshes: THREE.Mesh[];
+        };
+        model.spheres.forEach((s, k) => {
+          if (s.part === "spirit")
+            top = Math.max(
+              top,
+              meshes[k].getWorldPosition(new THREE.Vector3()).y,
+            );
+        });
+        return top;
+      };
+      h.update(1 / 60, 0);
+      const rest = measure();
+      h.dancing = true;
+      let most = rest;
+      for (let i = 0; i < 6 * 60; i++) {
+        h.update(1 / 60, 0);
+        most = Math.max(most, measure());
+      }
+      // Well above the dance's own gentle bob.
+      expect(most - rest).toBeGreaterThan(0.12 * MODEL_SCALE * 1.5);
+      h.dancing = false;
+      for (let i = 0; i < 4 * 60; i++) h.update(1 / 60, 0);
+      // Its surge let go (it idles about on its own, after).
+      const { surge } = h as unknown as { surge: { y: number; pulse: null } };
+      expect(surge.pulse).toBeNull();
+      expect(Math.abs(surge.y)).toBeLessThan(1e-3);
+    });
+  }
 });

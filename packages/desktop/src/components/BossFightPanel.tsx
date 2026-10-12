@@ -44,45 +44,34 @@ function formatRemaining(ms: number): string {
   return days > 0 ? `${days}d ${hh}:${mm}:${ss}` : `${hh}:${mm}:${ss}`;
 }
 
-/** "electronic" -> "electronic"; three -> "a, b and c". Reads as speech. */
-function hatedPhrase(genres: string[]): string {
-  if (genres.length === 0) return "all";
-  if (genres.length === 1) return genres[0];
-  return `${genres.slice(0, -1).join(", ")} and ${genres[genres.length - 1]}`;
-}
-
 /**
- * What the boss says while you fight it.
+ * What the boss says in its panel.
  *
  * `above`/`below` gate a line to a band of remaining health (as a fraction),
  * so the boss talks its way down from dismissive to panicking rather than
  * saying the same things at 90% and 5%. Ungated lines can land at any point.
- * `{genre}` is substituted with the hated-genre phrase.
  */
 export const BOSS_LINES: { text: string; above?: number; below?: number }[] = [
-  // Healthy — still in control, and cocky enough to give the game away.
-  {
-    text: "I probably shouldn't say this, but {genre} music is my Achilles heel.",
-    above: 0.6,
-  },
-  { text: "You call that music?", above: 0.6 },
+  // Healthy — still in control.
+  { text: "Come into my lair. I dare you.", above: 0.6 },
+  { text: "You call that a sonic wave?", above: 0.6 },
   { text: "Is that the best you've got?", above: 0.6 },
 
   // Any time.
-  { text: "{genre} music is the worst." },
+  { text: "Watch the floor. It glows before it hurts." },
   { text: "I just want peace and quiet!" },
-  { text: "Can you turn the volume down, please?" },
-  { text: "Who put this playlist on?" },
+  { text: "Rest up. You'll need it." },
+  { text: "Bring friends. You'll need those too." },
 
   // Wearing down.
   { text: "I can feel my health declining...", below: 0.6 },
-  { text: "I can't take much more of this {genre} music.", below: 0.6 },
+  { text: "You're louder than you look.", below: 0.6 },
   { text: "My horns are ringing.", below: 0.6 },
 
   // Nearly finished.
   { text: "Ahhhhhh!! My ears are bleeding!", below: 0.3 },
   { text: "Okay — OKAY! Enough!", below: 0.3 },
-  { text: "Please. Anything but {genre}.", below: 0.3 },
+  { text: "Please. No more sonic waves.", below: 0.3 },
 ];
 /**
  * Cycles the boss's speech: a new line every 10s, on screen for 7s, typed out
@@ -93,17 +82,11 @@ export const BOSS_LINES: { text: string; above?: number; below?: number }[] = [
  * every second for the countdown — so restarting on it would cut the boss off
  * mid-sentence and it would stutter the same opening words forever.
  */
-function useBossChatter(hpFraction: number, genre: string, active: boolean) {
+function useBossChatter(hpFraction: number, active: boolean) {
   const hpRef = useRef(hpFraction);
   hpRef.current = hpFraction;
-  // The genre goes in before the line is typed, not after: the typewriter
-  // counts characters of the line it's given, so swapping a longer phrase in
-  // afterwards left the end of every genre line untyped, the cursor stuck
-  // mid-sentence. Same order as BOSS_LINES, which `pick` indexes into.
-  const texts = useMemo(
-    () => BOSS_LINES.map((l) => l.text.replaceAll("{genre}", genre)),
-    [genre],
-  );
+  // Same order as BOSS_LINES, which `pick` indexes into.
+  const texts = useMemo(() => BOSS_LINES.map((l) => l.text), []);
   const { line, typed, advance } = useChatter(texts, active, (texts) => {
     const hp = hpRef.current;
     return texts.filter((_, i) => {
@@ -153,10 +136,9 @@ export function BossFightPanel({
     return { ...base, bodyType: BOSS_BODY_TYPE };
   }, [event.id]);
 
-  const hated = hatedPhrase(config.hatedGenres ?? []);
   const escaped = config.escaped || (remaining <= 0 && !dead);
   const chatting = !paused && !dead && !escaped;
-  const { line, typed, advance } = useBossChatter(hpFrac, hated, chatting);
+  const { line, typed, advance } = useBossChatter(hpFrac, chatting);
 
   return (
     // flex-1 so this fills the View's body; without a definite height the
@@ -217,8 +199,7 @@ export function BossFightPanel({
         </div>
 
         {/* Deliberately NOT drawn into the ASCII canvas: glyph art can't be
-            read at this size, and the hated genres are the one thing a player
-            has to actually read to know what to play. */}
+            read at this size. */}
         {/* Clicking the boss hurries it along, as with George: the line it's
             on shows in full, or the next one comes now. Only while it's
             talking — a decided fight is silent. z-[2]: over the canvas (its
@@ -309,7 +290,7 @@ export function BossFightPanel({
 
       {config.yourDamage === 0 && !dead && !escaped ? (
         <div className="text-center text-[10px] text-text-dim">
-          Play something it hates to hurt it.
+          Fight it in its lair. Look for the glowing door in town.
         </div>
       ) : null}
     </div>
@@ -354,7 +335,7 @@ export function makeDebugBoss(): GameEvent {
     id: "debug-boss-fight",
     type: "boss_fight",
     title: "Nohoot Henry",
-    description: "Listen to what it hates.",
+    description: "Fight it in its lair.",
     active: true,
     // Mid-window, so both bars sit somewhere interesting rather than full.
     startsAt: new Date(now - 36 * 3_600_000).toISOString(),
@@ -386,8 +367,9 @@ export function BossFightHelp({ event }: { event: GameEvent }) {
       colour={VISITOR_THEMES.boss_fight.accent}
       text={
         <>
-          Defeat the boss and receive rewards. You&apos;ll have to work together
-          to make it in time!
+          Defeat the boss and receive rewards. Fight it in its lair while it is
+          open: dodge the glowing floor, cast sonic waves at it, and rest to
+          heal. You&apos;ll have to work together to make it in time!
         </>
       }
       rewards={rewards}

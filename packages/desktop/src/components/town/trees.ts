@@ -2,13 +2,7 @@ import { mulberry32 } from "@herzies/shared";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { seeThrough, swayInWind } from "./ambient";
-import {
-  isBuildingChar,
-  MAP_SIZE,
-  objectAt,
-  type TownMap,
-  terrainAt,
-} from "./map";
+import { isBuildingChar, objectAt, type TownMap, terrainAt } from "./map";
 
 // The town's trees: pines and oaks, a few shapes of each, every
 // one leaning, stretched and tinted a little its own way — and which kind
@@ -282,6 +276,7 @@ function noise(col: number, row: number, size: number, seed: number): number {
 /** 1 right beside the nearest cell that `is`, falling to 0 `reach` cells
  * away (and beyond). */
 function closeness(
+  map: TownMap,
   col: number,
   row: number,
   reach: number,
@@ -292,7 +287,7 @@ function closeness(
     for (let dc = -reach; dc <= reach; dc++) {
       const c = col + dc;
       const r = row + dr;
-      if (c < 0 || r < 0 || c >= MAP_SIZE || r >= MAP_SIZE) continue;
+      if (c < 0 || r < 0 || c >= map.size || r >= map.size) continue;
       if (is(c, r)) best = Math.min(best, Math.hypot(dc, dr));
     }
   }
@@ -314,6 +309,7 @@ export function treeSpecies(map: TownMap, col: number, row: number): Species {
   }
   const density = Math.min(1, trees / 4);
   const town = closeness(
+    map,
     col,
     row,
     5,

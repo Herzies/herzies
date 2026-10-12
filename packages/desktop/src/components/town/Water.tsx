@@ -10,7 +10,6 @@ import {
   inland,
   isOpenWater,
   isSunk,
-  MAP_SIZE,
   TERRAIN,
   type TownMap,
   terrainAt,
@@ -26,8 +25,6 @@ const SPLIT = 4;
 const FOAM = 0.25;
 const MAX_SHORE = 2;
 
-const HALF = MAP_SIZE / 2;
-
 /** How far a point is from the bank: how far past the shoreline (where
  * the sloping ground goes under the surface) the blend is, in world units —
  * 0 on dry ground. */
@@ -42,7 +39,7 @@ export function shoreDistance(map: TownMap, x: number, z: number): number {
  * the surface wherever it's higher. */
 function underWater(map: TownMap, col: number, row: number): boolean {
   // Whole cells only: one past the rim would stick out of the island's side.
-  if (!inland(col, row)) return false;
+  if (!inland(map, col, row)) return false;
   for (let r = row - 1; r <= row + 1; r++) {
     for (let c = col - 1; c <= col + 1; c++) {
       if (isSunk(terrainAt(map, c, r))) return true;
@@ -57,12 +54,13 @@ export function waterGeometry(map: TownMap): THREE.BufferGeometry {
   const pos: number[] = [];
   const shore: number[] = [];
   const step = 1 / SPLIT;
+  const HALF = map.size / 2;
   const vertex = (x: number, z: number) => {
     pos.push(x, SURFACE, z);
     shore.push(shoreDistance(map, x, z));
   };
-  for (let row = 0; row < MAP_SIZE; row++) {
-    for (let col = 0; col < MAP_SIZE; col++) {
+  for (let row = 0; row < map.size; row++) {
+    for (let col = 0; col < map.size; col++) {
       if (!underWater(map, col, row)) continue;
       for (let i = 0; i < SPLIT; i++) {
         for (let j = 0; j < SPLIT; j++) {
@@ -175,9 +173,9 @@ const ringGeometry = new THREE.RingGeometry(0.85, 1, 24).rotateX(-Math.PI / 2);
 function FishRings({ map }: { map: TownMap }) {
   const spots = useMemo(() => {
     const out: [number, number][] = [];
-    for (let row = 0; row < MAP_SIZE; row++) {
-      for (let col = 0; col < MAP_SIZE; col++) {
-        if (isOpenWater(map, col, row)) out.push(cellCenter(col, row));
+    for (let row = 0; row < map.size; row++) {
+      for (let col = 0; col < map.size; col++) {
+        if (isOpenWater(map, col, row)) out.push(cellCenter(map, col, row));
       }
     }
     return out;

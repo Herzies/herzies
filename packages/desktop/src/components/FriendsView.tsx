@@ -44,6 +44,7 @@ export function FriendsView({
   stageOverride,
   openProfileCode,
   onProfileOpened,
+  onProfileBack,
   tab,
   onTabChange,
   onActivity,
@@ -59,6 +60,9 @@ export function FriendsView({
   stageOverride?: number | null;
   openProfileCode?: string | null;
   onProfileOpened?: () => void;
+  /** Back was pressed on a profile: lets whoever opened it take the player
+   * back to where they came from (the Town, say). */
+  onProfileBack?: () => void;
   tab: Tab;
   onTabChange: (tab: Tab) => void;
   onActivity?: (message: string) => void;
@@ -282,7 +286,10 @@ export function FriendsView({
     return (
       <ProfileView
         profile={selectedFriend}
-        onBack={() => setSelectedFriend(null)}
+        onBack={() => {
+          setSelectedFriend(null);
+          onProfileBack?.();
+        }}
         onTrade={() => {
           setSelectedFriend(null);
           onStartTrade(code);
