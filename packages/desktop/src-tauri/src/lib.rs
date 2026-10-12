@@ -2054,6 +2054,15 @@ fn parse_rfc3339_secs(ts: &str) -> Option<i64> {
 
 /// How long `events_watch_loop` should sleep: the regular interval, or less if
 /// an upcoming event starts sooner than that.
+/// Whether any pending drop has landed (`dropped_at` not in the future). A
+/// timestamp that won't parse counts as landed, as every drop did before
+/// boss loot.
+fn has_landed_drop(drops: &[PendingDrop], now_secs: i64) -> bool {
+    drops
+        .iter()
+        .any(|d| parse_rfc3339_secs(&d.dropped_at).is_none_or(|t| t <= now_secs))
+}
+
 fn next_events_wake(upcoming: &[GameEvent], now_secs: i64) -> Duration {
     let soonest = upcoming
         .iter()
@@ -2391,13 +2400,18 @@ async fn sync_tick_with(
         // means a full bank blocks it silently too, unless we say something:
         // the server already leaves any drop it couldn't fit room for in
         // `pending_drops` (see the spirit pickup in game-server.ts), so a
-        // non-empty list here with a spirit worn means it's stuck.
+        // non-empty list here with a spirit worn means it's stuck — except a
+        // boss's loot, which lands a little in the future (00105) and is left
+        // alone until then, bank full or not. Only landed drops count.
         let has_spirit = app_state
             .equipped
             .get("spirit")
             .and_then(|v| v.as_str())
             .is_some_and(|id| !id.is_empty());
-        let pickup_blocked = has_spirit && !app_state.pending_drops.is_empty();
+        let now_secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs() as i64);
+        let pickup_blocked = has_spirit && has_landed_drop(&app_state.pending_drops, now_secs);
         if let Ok(mut last) = app.state::<LastInventoryFullNotified>().0.lock() {
             if pickup_blocked {
                 // While the window is open, the in-app "Inventory full" prompt
@@ -2851,5 +2865,33 @@ mod events_watch_tests {
             full
         );
         assert_eq!(next_events_wake(&[upcoming_at("garbage")], now), full);
+    }
+}
+
+#[cfg(test)]
+mod landed_drop_tests {
+    use super::*;
+
+    fn drop_at(dropped_at: &str) -> PendingDrop {
+        PendingDrop {
+            id: "d".into(),
+            item_id: "cd".into(),
+            dropped_at: dropped_at.into(),
+        }
+    }
+
+    #[test]
+    fn a_boss_drop_still_in_the_air_is_not_landed() {
+        let now = parse_rfc3339_secs("2026-10-12T20:00:00+00:00").unwrap();
+        assert!(!has_landed_drop(
+            &[drop_at("2026-10-12T20:01:30.123456+00:00")],
+            now
+        ));
+        assert!(has_landed_drop(
+            &[drop_at("2026-10-12T19:59:00+00:00")],
+            now
+        ));
+        assert!(has_landed_drop(&[drop_at("not a time")], now));
+        assert!(!has_landed_drop(&[], now));
     }
 }
