@@ -422,6 +422,17 @@ export function serializeMap(map: TownMap): string {
   const rows = (rs: string[]) =>
     `[\n${rs.map((r) => `    ${JSON.stringify(r)}`).join(",\n")}\n  ]`;
   const pt = ([x, z]: Point) => `[${x}, ${z}]`;
+  // A top-level field on one line when it fits in 80 columns, else one item
+  // per line: how Biome formats it, so saved maps pass `biome ci`.
+  const field = (key: string, [open, close]: string, items: string[]) => {
+    const line = `  ${JSON.stringify(key)}: ${open}${
+      open === "{" && items.length ? ` ${items.join(", ")} ` : items.join(", ")
+    }${close},`;
+    if (line.length <= 80 || !items.length) return `\n${line}`;
+    return `\n  ${JSON.stringify(key)}: ${open}\n${items
+      .map((i) => `    ${i}`)
+      .join(",\n")}\n  ${close},`;
+  };
   // Turned objects, top row first.
   const turned = Object.entries(map.facing ?? {}).sort(([a], [b]) => {
     const [ac, ar] = a.split(",").map(Number);
@@ -429,7 +440,11 @@ export function serializeMap(map: TownMap): string {
     return ar - br || ac - bc;
   });
   const facing = turned.length
-    ? `\n  "facing": { ${turned.map(([k, n]) => `${JSON.stringify(k)}: ${n}`).join(", ")} },`
+    ? field(
+        "facing",
+        "{}",
+        turned.map(([k, n]) => `${JSON.stringify(k)}: ${n}`),
+      )
     : "";
   const spots = Object.entries(map.spots)
     .map(([k, p]) => `    ${JSON.stringify(k)}: ${pt(p)}`)
@@ -438,7 +453,13 @@ export function serializeMap(map: TownMap): string {
     a.localeCompare(b),
   );
   const portals = links.length
-    ? `\n  "portals": { ${links.map(([k, l]) => `${JSON.stringify(k)}: { "to": ${JSON.stringify(l.to)} }`).join(", ")} },`
+    ? field(
+        "portals",
+        "{}",
+        links.map(
+          ([k, l]) => `${JSON.stringify(k)}: { "to": ${JSON.stringify(l.to)} }`,
+        ),
+      )
     : "";
   const combat = map.combat ? `\n  "combat": true,` : "";
   const room = map.room ? `\n  "room": ${JSON.stringify(map.room)},` : "";
@@ -449,8 +470,7 @@ export function serializeMap(map: TownMap): string {
   "size": ${map.size},
   "origin": [${map.origin.join(", ")}],${combat}${room}${portals}
   "spawn": { "at": ${pt(map.spawn.at)}, "heading": ${map.spawn.heading} },
-  "spots": {${spots ? `\n${spots}\n  ` : ""}},
-  "spare": [${map.spare.map(pt).join(", ")}],${facing}
+  "spots": {${spots ? `\n${spots}\n  ` : ""}},${field("spare", "[]", map.spare.map(pt))}${facing}
   "terrain": ${rows(map.terrain)},
   "objects": ${rows(map.objects)}
 }
