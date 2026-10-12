@@ -123,7 +123,7 @@ export function SpeechBubble({
   line: string | null;
   typed: number;
   /** "down": a bubble over someone's head, in normal flow, tail pointing
-   * down at them (the Town's chat bubbles). */
+   * down at them, in a smaller font (the Town's chat bubbles). */
   tail?: "up" | "down";
 }) {
   if (!line) return null;
@@ -142,7 +142,9 @@ export function SpeechBubble({
       }
     >
       {down ? null : tip}
-      <div className="relative max-w-full rounded bg-white px-1.5 py-1 text-left text-ui text-black">
+      <div
+        className={`relative max-w-full rounded bg-white px-1.5 py-1 text-left text-black ${down ? "text-ui-sm" : "text-ui"}`}
+      >
         {/* The full line, invisible, reserves the bubble's final size so it
             doesn't grow or reflow as characters arrive — the typed text is
             overlaid on top. Without this the bubble jitters on every key. */}
