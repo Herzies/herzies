@@ -2,9 +2,9 @@ import "./globals.css";
 import {
   bankCapacity,
   type HerzieProfile,
+  hasRoomFor,
   isBankFull,
   levelProgress,
-  xpToNextLevel,
 } from "@herzies/shared";
 import { herzieStage } from "@herzies/shared/gl";
 import { attachConsole } from "@tauri-apps/plugin-log";
@@ -33,6 +33,7 @@ import { SplashScreen } from "./components/SplashScreen";
 import { StoreView } from "./components/StoreView";
 import { TabBar, type View } from "./components/TabBar";
 import { TradeView } from "./components/TradeView";
+import { setLootRoom } from "./components/town/combat/lootFeed";
 import { UpdateAvailableOverlay } from "./components/UpdateAvailableOverlay";
 import { WhatsNewOverlay } from "./components/WhatsNewOverlay";
 import { useOptimisticUnits } from "./hooks/useOptimisticUnits";
@@ -262,6 +263,14 @@ function App() {
   } | null>(null);
   const focused = useWindowFocused();
   const ghostMode = useGhostMode();
+
+  // The cave's loot asks the bank before picking up, as Home's drops do.
+  useEffect(() => {
+    const capacity = bankCapacity(state.bankExpansions);
+    setLootRoom((itemId) =>
+      hasRoomFor(state.inventory, state.equipped, itemId, capacity),
+    );
+  }, [state.inventory, state.equipped, state.bankExpansions]);
 
   const addLog = useCallback((message: string) => {
     const time = new Date().toISOString();
@@ -1032,7 +1041,6 @@ function App() {
                     name: herzie.name,
                     level: herzie.level,
                     progress: levelProgress(herzie),
-                    toNext: xpToNextLevel(herzie),
                   }
                 : undefined
             }

@@ -506,6 +506,9 @@ export type FightState = {
   now: number;
 };
 
+/** One piece of boss loot: a pending drop's id and its item id. */
+export type LootDrop = { id: string; item: string };
+
 export type ServerMessage =
   /** Accepted: your entity id and everyone else here. A full snapshot follows. */
   | { t: "welcome"; you: number; players: TownPlayer[]; fight?: FightState }
@@ -522,6 +525,10 @@ export type ServerMessage =
   | { t: "down" }
   /** The boss fell: the room closes shortly. */
   | { t: "victory"; by: number; closesAt: number }
+  /** What you got for the boss, dropped in the cave for you to pick up:
+   * each a ground drop (its id, for collect-drop) and the item it is.
+   * Whatever isn't picked up here waits on your Home ground. */
+  | { t: "loot"; drops: LootDrop[] }
   /** The room closes at `closesAt` (server ms): the boss left or won. */
   | { t: "closing"; why: "victory" | "escaped" | "sealed"; closesAt: number }
   | { t: "join"; player: TownPlayer }

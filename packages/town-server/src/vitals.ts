@@ -4,7 +4,7 @@
  * what's lost is a few seconds of bench regen, and a fight's HP re-sends on
  * the next report.
  */
-import { signVitalsRequest } from "@herzies/shared/town-net";
+import { type LootDrop, signVitalsRequest } from "@herzies/shared/town-net";
 import type { Env } from "./room";
 
 export type VitalsReport = {
@@ -22,13 +22,24 @@ export type VitalsReport = {
   };
 };
 
-/** Send a report. Resolves true if `town-vitals` took it. A room with no
- * `TOWN_VITALS_URL` (local dev, most tests) reports nothing. */
+/** What `town-vitals` answers. Only the boss part is read: `loot` is set
+ * on the report that found the boss dead (see 00105). */
+export type VitalsReply = {
+  boss?: {
+    hp: number;
+    killed: boolean;
+    loot?: Record<string, LootDrop[]> | null;
+  } | null;
+};
+
+/** Send a report. Resolves with the reply if `town-vitals` took it, else
+ * null. A room with no `TOWN_VITALS_URL` (local dev, most tests) reports
+ * nothing. */
 export async function postVitals(
   env: Pick<Env, "TOWN_TICKET_SECRET" | "TOWN_VITALS_URL">,
   report: VitalsReport,
-): Promise<boolean> {
-  if (!env.TOWN_VITALS_URL) return false;
+): Promise<VitalsReply | null> {
+  if (!env.TOWN_VITALS_URL) return null;
   const body = JSON.stringify(report);
   const ts = Date.now();
   const nonce = crypto.randomUUID();
@@ -52,10 +63,11 @@ export async function postVitals(
       console.log(
         JSON.stringify({ event: "vitals-failed", status: res.status }),
       );
+      return null;
     }
-    return res.ok;
+    return ((await res.json().catch(() => ({}))) ?? {}) as VitalsReply;
   } catch (e) {
     console.log(JSON.stringify({ event: "vitals-error", detail: String(e) }));
-    return false;
+    return null;
   }
 }

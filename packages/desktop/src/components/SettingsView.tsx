@@ -5,6 +5,7 @@ import type { AppState } from "../tauri-bridge";
 import { herzies } from "../tauri-bridge";
 import { Checkbox } from "./Checkbox";
 import { TabButton } from "./TabButton";
+import { debugDropLoot } from "./town/combat/fight";
 import {
   aimSensitivity,
   SENSITIVITY_MAX,
@@ -348,6 +349,14 @@ export function SettingsView({
                 onClick={onToggleDebugBoss}
               >
                 {debugBossOverride ? "Boss Fight: On" : "Test Boss Fight"}
+              </button>
+              <button
+                type="button"
+                className="btn border-[#555] text-text-dim"
+                title="Drops a random item in front of you in the Town (nothing is granted)"
+                onClick={debugDropLoot}
+              >
+                Drop Test Loot
               </button>
               <button
                 type="button"

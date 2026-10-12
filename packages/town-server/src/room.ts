@@ -617,8 +617,11 @@ export class TownRoom extends DurableObject<Env> {
     if (!report.hp.length && !report.boss) return;
     this.reporting = true;
     void postVitals(this.env, { action: "report", ...report })
-      .then((ok) => {
-        if (ok) fight.reported(report);
+      .then((reply) => {
+        if (!reply) return;
+        fight.reported(report);
+        const loot = reply.boss?.loot;
+        if (loot) for (const o of fight.loot(loot)) this.dispatch(o);
       })
       .finally(() => {
         this.reporting = false;

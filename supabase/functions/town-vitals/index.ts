@@ -118,12 +118,31 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
         }).then((res) => ({ ok: true, res }), () => ({ ok: false, res: null }))
         : Promise.resolve(null),
     ]);
+    // The boss fell: put the rewards on the ground now rather than on the
+    // next minute's cron (still the backstop; settling twice pays once), and
+    // say which drops are whose so the cave can drop them to be picked up
+    // (00105). A retried batch that finds the boss already dead lands here
+    // too, so a lost reply still gets its loot.
+    let loot: Record<string, { id: string; item: string }[]> | null = null;
+    if (b?.ok && boss && (b.res as { killed?: boolean } | null)?.killed) {
+      try {
+        await rpc(db, "settle_boss_fight", { p_event_id: boss.event });
+        loot = await rpc(db, "boss_loot_json", { p_event: boss.event });
+      } catch {
+        // The cron settles it within a minute; the cave just drops nothing,
+        // and the loot waits on everyone's Home ground.
+      }
+    }
     // A failed HP write or boss batch is retried by the Town server, which
     // re-sends the same values (HP is absolute, a batch has an id), so ask
     // for that with an error status. Rest is additive and never retried.
     const failed = h.failed > 0 || (b !== null && !b.ok);
     return jsonResponse(
-      { hp: h, rest: r, boss: b?.res ?? null },
+      {
+        hp: h,
+        rest: r,
+        boss: b?.res ? { ...(b.res as object), loot } : null,
+      },
       failed ? 502 : 200,
     );
   }

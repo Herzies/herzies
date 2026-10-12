@@ -189,3 +189,29 @@ describe("stepCompanion", () => {
     expect(s.position.y).toBeCloseTo(3, 6);
   });
 });
+
+describe("fetching", () => {
+  it("flies out to something past its leash, and home again after", () => {
+    const s = newCompanionState(1);
+    const h = host();
+    stepCompanion(s, h, 0, 0);
+    // Further than it would ever snap back from while following.
+    s.target = new Vector3(14, 0.6, 3);
+    const dt = 1 / 60;
+    let closest = Number.POSITIVE_INFINITY;
+    for (let t = 0; t < 3; t += dt) {
+      stepCompanion(s, h, 0, dt);
+      closest = Math.min(closest, s.position.distanceTo(s.target));
+    }
+    expect(closest).toBeLessThan(0.3);
+    // Moving, not teleporting: it never covers more than its top speed.
+    s.target = null;
+    let last = s.position.clone();
+    for (let t = 0; t < 4; t += dt) {
+      stepCompanion(s, h, 0, dt);
+      expect(s.position.distanceTo(last)).toBeLessThan(WALK_SPEED * 5 * dt);
+      last = s.position.clone();
+    }
+    expect(s.position.distanceTo(new Vector3(1.2, 1.5, 0))).toBeLessThan(0.8);
+  });
+});

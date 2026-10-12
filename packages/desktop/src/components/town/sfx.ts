@@ -222,3 +222,111 @@ export function sfxDown(): void {
   if (!a) return;
   tone(a, "triangle", 440, 55, 0.3, 0.01, 0.9);
 }
+
+// --- Loot ------------------------------------------------------------------
+
+/** How grand a drop sounds, 0 (common) to 4 (mythic). */
+export type LootTier = 0 | 1 | 2 | 3 | 4;
+
+/** A major pentatonic run from C6, so pickups in a row climb a scale. */
+const LADDER = [1047, 1175, 1319, 1568, 1760, 2093, 2349, 2637];
+
+/** The stone boss bursting: a crack, a deep boom, a shower of grit. */
+export function sfxLootBurst(): void {
+  const a = audio();
+  if (!a) return;
+  noiseBurst(a, "highpass", 5000, 1400, 0.9, 0.35, 0.09);
+  tone(a, "sine", 80, 30, 0.9, 0.004, 0.7);
+  noiseBurst(a, "lowpass", 2400, 200, 0.8, 0.3, 0.6);
+}
+
+/** A drop landing: a clink, and above uncommon a chord that grows with
+ * the rarity — the sound tells you what fell before you look. */
+export function sfxLootLand(tier: LootTier): void {
+  const a = audio();
+  if (!a) return;
+  const k = wobble(0.03);
+  tone(a, "triangle", 1568 * k, 1568 * k, 0.12, 0.002, 0.18);
+  noiseBurst(a, "highpass", 6000 * k, 3000, 1, 0.08, 0.05);
+  const chord = [523, 659, 784, 1047, 1319].slice(0, tier + 1);
+  if (tier < 2) return;
+  for (const [i, f] of chord.entries())
+    tone(
+      a,
+      "sine",
+      f * k,
+      f * k,
+      0.06 + tier * 0.015,
+      0.01,
+      0.9 + tier * 0.25,
+      0.06 * i,
+    );
+}
+
+/** Rare and up hum while they lie there, so they can be found by ear.
+ * `level` (0..1) is how close you are. */
+export function sfxLootHum(tier: LootTier): {
+  level: (v: number) => void;
+  stop: () => void;
+} | null {
+  if (tier < 2) return null;
+  const a = audio();
+  if (!a) return null;
+  const { ctx: c, out } = a;
+  const g = c.createGain();
+  g.gain.value = 0;
+  g.connect(out);
+  const base = [220, 247, 262, 294, 330][tier];
+  const oscs = [base, base * 1.5, base * 2.004].map((f, i) => {
+    const o = c.createOscillator();
+    o.type = i === 0 ? "sine" : "triangle";
+    o.frequency.value = f;
+    const og = c.createGain();
+    og.gain.value = i === 0 ? 1 : 0.25;
+    o.connect(og).connect(g);
+    o.start();
+    return o;
+  });
+  // A slow swell, so it breathes rather than drones.
+  const lfo = c.createOscillator();
+  lfo.frequency.value = 0.35;
+  const depth = c.createGain();
+  depth.gain.value = 0.25;
+  const swell = c.createGain();
+  swell.gain.value = 0.75;
+  lfo.connect(depth).connect(swell.gain);
+  g.disconnect();
+  g.connect(swell).connect(out);
+  lfo.start();
+  const peak = 0.02 + tier * 0.008;
+  return {
+    level: (v) => g.gain.setTargetAtTime(peak * v, c.currentTime, 0.15),
+    stop: () => {
+      const t = c.currentTime;
+      g.gain.setTargetAtTime(0, t, 0.08);
+      for (const o of [...oscs, lfo]) o.stop(t + 0.5);
+    },
+  };
+}
+
+/** Picking one up: a bright chime that climbs with each pickup in a row,
+ * and a little sparkle on top for the rare ones. */
+export function sfxLootPickup(step: number, tier: LootTier): void {
+  const a = audio();
+  if (!a) return;
+  const f = LADDER[Math.min(step, LADDER.length - 1)];
+  tone(a, "triangle", f, f, 0.16, 0.003, 0.35);
+  tone(a, "sine", f * 2, f * 2, 0.05, 0.003, 0.25, 0.04);
+  if (tier >= 2) {
+    tone(a, "triangle", f * 1.5, f * 1.5, 0.07, 0.003, 0.5, 0.09);
+    tone(a, "sine", f * 3, f * 3, 0.03, 0.003, 0.6, 0.14);
+  }
+}
+
+/** The spirit noticing something: a quick upward chirp. */
+export function sfxSpiritNotice(): void {
+  const a = audio();
+  if (!a) return;
+  tone(a, "sine", 880, 1760, 0.08, 0.005, 0.12);
+  tone(a, "sine", 1320, 2200, 0.05, 0.005, 0.1, 0.07);
+}
