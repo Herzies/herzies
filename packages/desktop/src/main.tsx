@@ -60,7 +60,7 @@ const WHATS_NEW_SEEN_KEY = "herzies:whats-new-seen-version";
  * a little to make room for the deck over the stage's floor. */
 const HERZIE_VIEW_ZOOM = 0.83;
 /** px; negative is up. */
-const HERZIE_VIEW_OFFSET_Y = -14;
+const HERZIE_VIEW_OFFSET_Y = -46;
 
 type UpdateInstallStatus =
   | { kind: "idle" }
@@ -1211,16 +1211,17 @@ function App() {
               onClick: () => setDismissedInventoryFull(true),
             },
             {
-              label: "Open inventory",
+              label: "Open bag",
               colour: "text-purple",
               onClick: () => {
                 setDismissedInventoryFull(true);
+                setInventoryPanel("bag");
                 switchView("inventory");
               },
             },
           ]}
         >
-          Your inventory is full. Sell something from Cards to free up a slot
+          Your inventory is full. Sell something from your bag to free up a slot
           before you pick up or buy anything else.
         </PromptOverlay>
       )}
