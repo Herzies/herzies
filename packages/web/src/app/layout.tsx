@@ -28,7 +28,7 @@ export const metadata: Metadata = {
     url: "https://www.herzies.app",
     images: [
       {
-        url: "/og.png",
+        url: "/og.png?v=2",
         width: 1200,
         height: 630,
         alt: "Herzies — your digital pet that grows by listening to music",
@@ -39,7 +39,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "Herzies",
     description: "Your digital pet that grows by listening to music.",
-    images: ["/og.png"],
+    images: ["/og.png?v=2"],
   },
   robots: {
     index: true,
