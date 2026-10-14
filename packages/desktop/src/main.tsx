@@ -1,6 +1,7 @@
 import "./globals.css";
 import {
   bankCapacity,
+  CLASS_DEFS,
   type HerzieClass,
   type HerzieProfile,
   hasRoomFor,
@@ -201,8 +202,23 @@ function App() {
   const [classOverride, setClassOverride] = useState<HerzieClass | null>(null);
   /** Dev-only: opens the class choice whatever the herzie's state. */
   const [testClassChoice, setTestClassChoice] = useState(false);
-  // The Town's skill bar follows the class skill the app knows about.
-  useEffect(() => setMySkill(rawState.skills), [rawState.skills]);
+  // The Town's skill bar follows the class skill the app knows about — or,
+  // under a Class Preview, that class's starter skill at Lv. 1 (practice on
+  // the training grounds works; the cave's server refuses it).
+  useEffect(
+    () =>
+      setMySkill(
+        classOverride
+          ? [
+              {
+                skillId: CLASS_DEFS[classOverride].starterSkill,
+                level: 1,
+              },
+            ]
+          : rawState.skills,
+      ),
+    [rawState.skills, classOverride],
+  );
   /** "Later" on the class choice: asked again next launch. */
   const [classChoiceLater, setClassChoiceLater] = useState(false);
   /** Captured the first time `state.isOnline` is true this session: was this
@@ -1050,7 +1066,11 @@ function App() {
             debugForceMerchant={debugMerchantOverride}
             debugForceTreatTrader={debugTreatTraderOverride}
             onScreenChange={setEventsScreen}
-            equipped={state.equipped}
+            equipped={
+              classOverride
+                ? withClassGear(state.equipped, classOverride)
+                : state.equipped
+            }
             units={state.units}
             currency={state.inventoryCurrency}
             onLog={addLog}
