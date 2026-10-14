@@ -65,6 +65,11 @@ const FACE_MAX_TURN_SPEED = 7;
 const LEAN_PER_ACCEL = 0.025;
 const MAX_LEAN = 0.22;
 const LEAN_RATE = 8;
+/** Fetching (see CompanionState.target), it darts: a quick, barely
+ * bouncy spring, and allowed this many times its usual top speed. */
+const FETCH_FREQUENCY = 1.9;
+const FETCH_DAMPING = 0.82;
+const FETCH_SPEED = 2.4;
 
 export type CompanionState = {
   /** Where it is (world space), and how fast it's going. */
@@ -86,6 +91,11 @@ export type CompanionState = {
   wanderIn: number;
   started: boolean;
   random: () => number;
+  /** Off to fetch something (world space): it flies there instead of
+   * keeping its slot, however far, until this is cleared. */
+  target: Vector3 | null;
+  /** Flying back from a fetch: still darting, and never snapped home. */
+  returning: boolean;
 };
 
 /** Where the herzie is and how it's laid out, this step. */
@@ -131,6 +141,8 @@ export function newCompanionState(seed = 0): CompanionState {
     wanderIn: 0,
     started: false,
     random: seededRandom(seed),
+    target: null,
+    returning: false,
   };
 }
 
@@ -208,6 +220,7 @@ function snap(state: CompanionState, host: CompanionHost) {
   state.pitch = state.roll = 0;
   state.heading = keepingCompany(state, host);
   state.started = true;
+  state.returning = state.target !== null;
 }
 
 /** The way it looks when it isn't flying anywhere: at a point in front of
@@ -252,7 +265,9 @@ export function stepCompanion(
   );
   slotAt(slot, host, state.slotHeading);
 
-  const still = speed < STILL_SPEED && !host.dancing;
+  if (state.target) state.returning = true;
+  const fetching = state.returning;
+  const still = speed < STILL_SPEED && !host.dancing && !fetching;
   state.idle = MathUtils.damp(state.idle, still ? 1 : 0, IDLE_BLEND_RATE, dt);
   if (still) {
     // Shuffling about on the spot doesn't drag it along; a real move does.
@@ -278,37 +293,53 @@ export function stepCompanion(
       ),
     );
 
+  if (state.target) goal.copy(state.target);
+
   const away = state.position.distanceTo(goal);
-  if (away > SNAP_DISTANCE * scale) {
+  // Home from a fetch: back to following as usual.
+  if (!state.target && state.returning && away < LEASH * scale * 0.5)
+    state.returning = false;
+  if (away > SNAP_DISTANCE * scale && !fetching) {
     snap(state, host);
     return;
   }
   const hurry = MathUtils.smoothstep(away, LEASH * scale * 0.7, LEASH * scale);
-  const frequency =
-    MathUtils.lerp(FOLLOW_FREQUENCY, IDLE_FREQUENCY, state.idle) *
-    MathUtils.lerp(1, LEASH_HURRY, hurry);
-  const damping = MathUtils.lerp(FOLLOW_DAMPING, IDLE_DAMPING, state.idle);
+  const frequency = fetching
+    ? FETCH_FREQUENCY
+    : MathUtils.lerp(FOLLOW_FREQUENCY, IDLE_FREQUENCY, state.idle) *
+      MathUtils.lerp(1, LEASH_HURRY, hurry);
+  const damping = fetching
+    ? FETCH_DAMPING
+    : MathUtils.lerp(FOLLOW_DAMPING, IDLE_DAMPING, state.idle);
 
   before.copy(state.velocity);
   const p = state.position;
   const v = state.velocity;
   const nx = springStep(p.x, v.x, goal.x, frequency, damping, dt);
   const nz = springStep(p.z, v.z, goal.z, frequency, damping, dt);
-  const ny = springStep(p.y, v.y, goal.y, LIFT_FREQUENCY, LIFT_DAMPING, dt);
-  // No faster than MAX_SPEED across the ground.
+  const ny = springStep(
+    p.y,
+    v.y,
+    goal.y,
+    fetching ? FETCH_FREQUENCY : LIFT_FREQUENCY,
+    fetching ? FETCH_DAMPING : LIFT_DAMPING,
+    dt,
+  );
+  // No faster than MAX_SPEED across the ground (a fetch, FETCH_SPEED times).
+  const top = MAX_SPEED * (fetching ? FETCH_SPEED : 1);
   let mx = nx[0] - p.x;
   let mz = nz[0] - p.z;
   const moved = Math.hypot(mx, mz);
-  const most = MAX_SPEED * scale * dt;
+  const most = top * scale * dt;
   let vx = nx[1];
   let vz = nz[1];
   if (moved > most) {
     mx *= most / moved;
     mz *= most / moved;
     const vs = Math.hypot(vx, vz);
-    if (vs > MAX_SPEED * scale) {
-      vx *= (MAX_SPEED * scale) / vs;
-      vz *= (MAX_SPEED * scale) / vs;
+    if (vs > top * scale) {
+      vx *= (top * scale) / vs;
+      vz *= (top * scale) / vs;
     }
   }
   p.set(p.x + mx, ny[0], p.z + mz);

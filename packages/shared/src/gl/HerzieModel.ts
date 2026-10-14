@@ -614,6 +614,29 @@ export class HerzieModel {
     this.follow(dt, speed);
   }
 
+  /** Whether it has a floating companion of its own (a spirit) to send. */
+  get hasCompanion(): boolean {
+    return this.follower !== null;
+  }
+
+  /** Sends the companion to `point` (world space) and keeps it there until
+   * called again with null, when it flies back to its herzie. */
+  fetch(point: THREE.Vector3 | null): void {
+    const f = this.follower;
+    if (!f) return;
+    if (!point) {
+      f.state.target = null;
+      return;
+    }
+    f.state.target ??= new THREE.Vector3();
+    f.state.target.copy(point);
+  }
+
+  /** Where the companion is (world space, its core); null with none. */
+  companionPosition(out: THREE.Vector3): THREE.Vector3 | null {
+    return this.follower ? out.copy(this.follower.state.position) : null;
+  }
+
   /** Flies the companion on after the herzie, in the world. */
   private follow(dt: number, speed: number) {
     const f = this.follower;

@@ -1,6 +1,8 @@
+import { getItemIcon, ITEMS } from "@herzies/shared";
 import type {
   BossTelegraph,
   FightState,
+  LootDrop,
   ServerMessage,
 } from "@herzies/shared/town-net";
 import { useSyncExternalStore } from "react";
@@ -44,8 +46,20 @@ export const bossFight = {
   health: new Map<number, { hp: number; maxHp: number }>(),
   you: null as number | null,
   closing: null as Closing | null,
-  /** The boss fell (and who landed the blow, an entity id). */
-  victory: null as { by: number } | null,
+  /** The boss fell: who landed the blow (an entity id), and when
+   * (performance.now() ms). */
+  victory: null as { by: number; at: number } | null,
+  /** What you got for it (item ids), and when the room said so
+   * (performance.now() ms); dropped at your feet by LootDrops. */
+  loot: null as {
+    id: number;
+    /** The pending drops behind it (an empty id: a dev drop, nothing to
+     * collect). */
+    drops: LootDrop[];
+    at: number;
+    /** Tossed down in front of you (the dev drop), not out of the boss. */
+    here?: boolean;
+  } | null,
   /** When the boss was last hit and when you last were (performance.now()
    * ms), for the bar's flash and the screen's. */
   bossHitAt: Number.NEGATIVE_INFINITY,
@@ -55,6 +69,8 @@ export const bossFight = {
 };
 
 let version = 0;
+/** Tells one drop of loot from the next (LootDrops keys on it). */
+let lootSeq = 0;
 const listeners = new Set<() => void>();
 const emit = () => {
   version++;
@@ -74,7 +90,13 @@ export function useBossFight(): number {
 
 /** Out of the boss room: forget the fight. */
 export function resetBossFight(): void {
-  if (!bossFight.on && !bossFight.shapes.length && !bossFight.closing) return;
+  if (
+    !bossFight.on &&
+    !bossFight.shapes.length &&
+    !bossFight.closing &&
+    !bossFight.loot
+  )
+    return;
   bossFight.on = false;
   setRegenFrozen(false);
   bossFight.event = "";
@@ -82,6 +104,7 @@ export function resetBossFight(): void {
   bossFight.health.clear();
   bossFight.closing = null;
   bossFight.victory = null;
+  bossFight.loot = null;
   bossFight.you = null;
   emit();
 }
@@ -175,11 +198,16 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       emit();
       return;
     case "victory":
-      bossFight.victory = { by: m.by };
+      bossFight.victory = { by: m.by, at: now };
       bossFight.closing = {
         why: "victory",
         at: clock.toLocal(m.closesAt),
       };
+      emit();
+      return;
+    case "loot":
+      if (!m.drops.length) return;
+      bossFight.loot = { id: ++lootSeq, drops: m.drops, at: now };
       emit();
       return;
     case "closing":
@@ -205,6 +233,7 @@ function applyFight(f: FightState, clock: Clock, you: number) {
   );
   bossFight.closing = null;
   bossFight.victory = null;
+  bossFight.loot = null;
 }
 
 /** Drop shapes that landed a while ago. Called by the frame loop. */
@@ -219,4 +248,23 @@ export function pruneShapes(now: number): void {
     // Re-render, so a landed shape is taken off the floor.
     emit();
   }
+}
+
+/**
+ * Dev only (Settings > Debug > "Drop Test Loot"): a random item tossed down
+ * in front of you, wherever you are in the Town, to watch and tune the
+ * drop, the pickup and the spirit's fetch. Nothing is granted.
+ */
+export function debugDropLoot(): void {
+  const pool = ITEMS.filter((i) => getItemIcon(i));
+  const item = pool[Math.floor(Math.random() * pool.length)];
+  // Stamped NaN: the Town isn't drawing while Settings is open, so the
+  // drop starts on its first frame back.
+  bossFight.loot = {
+    id: ++lootSeq,
+    drops: [{ id: "", item: item.id }],
+    at: Number.NaN,
+    here: true,
+  };
+  emit();
 }

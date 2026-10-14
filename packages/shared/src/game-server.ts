@@ -672,6 +672,13 @@ export async function processSync(
 
     const uncollected: PendingDrop[] = [];
     for (const drop of pendingDrops) {
+      // A boss's loot lands with dropped_at a little in the future (00105):
+      // the cave gets first go at it, where the spirit fetches it in plain
+      // sight. Leave it until it has "landed"; a later sync takes it.
+      if (Date.parse(drop.droppedAt) > now.getTime()) {
+        uncollected.push(drop);
+        continue;
+      }
       if (
         !hasRoomFor(
           running,

@@ -2,24 +2,33 @@ import { LOW_HP_FRACTION } from "@herzies/shared";
 import { useEffect, useState } from "react";
 import { cn } from "../lib/utils";
 import { herzies } from "../tauri-bridge";
+import { HpBar } from "./SquareBar";
 import { goToMap } from "./town/runtime";
 import { refreshVitals, setVitals, useLiveHp } from "./town/vitals";
 
 /**
- * The herzie's health in the Town's top right corner, opposite its name,
- * and the screen that comes up when it runs out. Out of the way while
- * health is full outside of a fight.
+ * The herzie's health in the Town card, above its exp. Out of the way while
+ * health is full outside of a fight, or once it has run out.
+ */
+export function TownHpBar({ inFight }: { inFight: boolean }) {
+  const live = useLiveHp();
+  if (!live || live.down) return null;
+  const { hp, maxHp } = live;
+  if (!inFight && hp >= maxHp) return null;
+  return <HpBar hp={hp} maxHp={maxHp} className="mb-px text-white/70" />;
+}
+
+/**
+ * The red edge as health runs low, and the screen that comes up when it runs
+ * out.
  */
 export function TownVitals({
   inFight,
   chatOverlay = false,
-  belowNotice = false,
 }: {
-  /** On a combat map: show the bar even at full health. */
+  /** Refetch health on entering or leaving a fight. */
   inFight: boolean;
   chatOverlay?: boolean;
-  /** A notice is across the top: sit below it, as the name does. */
-  belowNotice?: boolean;
 }) {
   const live = useLiveHp();
   const [busy, setBusy] = useState(false);
@@ -55,35 +64,6 @@ export function TownVitals({
 
   return (
     <>
-      {(inFight || frac < 1) && !down ? (
-        <div
-          role="progressbar"
-          aria-label="Health"
-          aria-valuemin={0}
-          aria-valuemax={maxHp}
-          aria-valuenow={Math.round(hp)}
-          className={cn(
-            "pointer-events-none absolute right-3 z-30 w-28 tabular-nums",
-            belowNotice ? "top-[3rem]" : "top-3",
-          )}
-        >
-          <div className="mb-1 flex items-baseline justify-between text-[10px] [text-shadow:0_1px_2px_#000]">
-            <span className="text-white/60">HP</span>
-            <span className={low ? "text-red-300" : "text-white/90"}>
-              {Math.ceil(hp)}
-            </span>
-          </div>
-          <div className="h-1 overflow-hidden rounded-full bg-white/15">
-            <div
-              className={cn(
-                "h-full transition-[width] duration-300",
-                low ? "bg-red-400/80" : "bg-emerald-400/70",
-              )}
-              style={{ width: `${frac * 100}%` }}
-            />
-          </div>
-        </div>
-      ) : null}
       {low && !down ? (
         <div
           aria-hidden

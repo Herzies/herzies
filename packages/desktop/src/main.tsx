@@ -2,9 +2,9 @@ import "./globals.css";
 import {
   bankCapacity,
   type HerzieProfile,
+  hasRoomFor,
   isBankFull,
   levelProgress,
-  xpToNextLevel,
 } from "@herzies/shared";
 import { herzieStage } from "@herzies/shared/gl";
 import { attachConsole } from "@tauri-apps/plugin-log";
@@ -33,6 +33,7 @@ import { SplashScreen } from "./components/SplashScreen";
 import { StoreView } from "./components/StoreView";
 import { TabBar, type View } from "./components/TabBar";
 import { TradeView } from "./components/TradeView";
+import { setLootRoom } from "./components/town/combat/lootFeed";
 import { UpdateAvailableOverlay } from "./components/UpdateAvailableOverlay";
 import { WhatsNewOverlay } from "./components/WhatsNewOverlay";
 import { useOptimisticUnits } from "./hooks/useOptimisticUnits";
@@ -59,7 +60,7 @@ const WHATS_NEW_SEEN_KEY = "herzies:whats-new-seen-version";
  * a little to make room for the deck over the stage's floor. */
 const HERZIE_VIEW_ZOOM = 0.83;
 /** px; negative is up. */
-const HERZIE_VIEW_OFFSET_Y = -14;
+const HERZIE_VIEW_OFFSET_Y = -46;
 
 type UpdateInstallStatus =
   | { kind: "idle" }
@@ -262,6 +263,14 @@ function App() {
   } | null>(null);
   const focused = useWindowFocused();
   const ghostMode = useGhostMode();
+
+  // The cave's loot asks the bank before picking up, as Home's drops do.
+  useEffect(() => {
+    const capacity = bankCapacity(state.bankExpansions);
+    setLootRoom((itemId) =>
+      hasRoomFor(state.inventory, state.equipped, itemId, capacity),
+    );
+  }, [state.inventory, state.equipped, state.bankExpansions]);
 
   const addLog = useCallback((message: string) => {
     const time = new Date().toISOString();
@@ -1032,7 +1041,6 @@ function App() {
                     name: herzie.name,
                     level: herzie.level,
                     progress: levelProgress(herzie),
-                    toNext: xpToNextLevel(herzie),
                   }
                 : undefined
             }
@@ -1203,16 +1211,17 @@ function App() {
               onClick: () => setDismissedInventoryFull(true),
             },
             {
-              label: "Open inventory",
+              label: "Open bag",
               colour: "text-purple",
               onClick: () => {
                 setDismissedInventoryFull(true);
+                setInventoryPanel("bag");
                 switchView("inventory");
               },
             },
           ]}
         >
-          Your inventory is full. Sell something from Cards to free up a slot
+          Your inventory is full. Sell something from your bag to free up a slot
           before you pick up or buy anything else.
         </PromptOverlay>
       )}

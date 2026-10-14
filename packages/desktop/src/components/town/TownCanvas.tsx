@@ -12,6 +12,7 @@ import type { ChatBubbles } from "./chatBubbles";
 import { Boss } from "./combat/Boss";
 import { Combat } from "./combat/Combat";
 import { CombatOverlay } from "./combat/DamageNumbers";
+import { LootDrops } from "./combat/LootDrops";
 import { Telegraphs } from "./combat/Telegraphs";
 import type { Hour } from "./DayCycle";
 import { driftClouds } from "./depth";
@@ -185,6 +186,8 @@ export default function TownCanvas(props: TownCanvasProps) {
                 <Telegraphs />
               </>
             )}
+            {/* The bossroom's loot; anywhere, for the dev drop. */}
+            <LootDrops />
             {portalsOf(map).some(isMouth) && <CaveTimer map={map} />}
           </Physics>
         </Suspense>

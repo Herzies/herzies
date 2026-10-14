@@ -697,6 +697,52 @@ describe("World drops", () => {
     expect(collectedNotif?.message).toBe('Picked up "Intimite Music Device"');
   });
 
+  it("leaves a boss's loot for the cave until it has landed (00105)", async () => {
+    const admin = getAdminClient();
+    const petUser = await createTestUser();
+    await createTestHerzie(petUser.userId, {
+      inventory_v2: { "spirit-orb": 1 },
+      equipped: { spirit: "spirit-orb" },
+    });
+    // As settle_boss_fight drops it: "landing" a little in the future.
+    const { data: held } = await admin
+      .from("pending_drops")
+      .insert({
+        user_id: petUser.userId,
+        item_id: "headphones",
+        dropped_at: new Date(Date.now() + 90_000).toISOString(),
+      })
+      .select("id")
+      .single();
+
+    const res = await syncRoute(
+      authenticatedRequest("/sync", petUser.accessToken, {
+        nowPlaying: null,
+        minutesListened: 0,
+        genres: [],
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.pendingDrops.map((d: { id: string }) => d.id)).toEqual([
+      held!.id,
+    ]);
+
+    // Landed: the spirit takes it as usual.
+    await admin
+      .from("pending_drops")
+      .update({ dropped_at: new Date(Date.now() - 1_000).toISOString() })
+      .eq("id", held!.id);
+    const later = await syncRoute(
+      authenticatedRequest("/sync", petUser.accessToken, {
+        nowPlaying: null,
+        minutesListened: 0,
+        genres: [],
+      }),
+    );
+    expect((await later.json()).pendingDrops).toEqual([]);
+  });
+
   it("auto-collects a pending drop in the same tick when Spirit Orb is equipped", async () => {
     const admin = getAdminClient();
     const petUser = await createTestUser();

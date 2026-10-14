@@ -9,9 +9,8 @@ import {
   ItemTypeIcon,
   isBankFull,
   levelProgress,
-  xpToNextLevel,
 } from "@herzies/shared";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useReportHomeStage } from "../hooks/useStageAlignment";
 import { cn } from "../lib/utils";
 import {
@@ -23,6 +22,7 @@ import {
 import { HERZIE_STAGE_HEIGHT } from "./HerzieWithSky";
 import { HEADER_ICON_HIT } from "./headerIconHit";
 import { ModifiersButton } from "./ModifiersButton";
+import { ExpBar } from "./SquareBar";
 import { StatsButton } from "./StatsButton";
 import { Tooltip } from "./Tooltip";
 import { TrackCard } from "./TrackCard";
@@ -76,7 +76,6 @@ export function HomeView({
     bankExpansions,
   } = state;
   const capacity = bankCapacity(bankExpansions);
-  const [globalRank, setGlobalRank] = useState<number | undefined>(undefined);
   const [collectingIds, setCollectingIds] = useState<Set<string>>(new Set());
   // Read off the copies, so each worn one counts at its OWN upgrade level. A
   // cache from before copies existed has none yet, and falls back to the
@@ -87,7 +86,6 @@ export function HomeView({
       : getHerzieStats(equipped, itemUpgrades);
   const pinned = useWindowPinned();
   const ghostMode = useGhostMode();
-  const friendCode = herzie?.friendCode;
 
   // Real drops have no ground position of their own (the server only tracks
   // id/itemId/droppedAt) — pick one client-side the first time a given drop
@@ -194,27 +192,12 @@ export function HomeView({
     herzies.setGhostMode(!ghostMode).catch(() => {});
   };
 
-  useEffect(() => {
-    if (!friendCode) return;
-    let cancelled = false;
-    herzies.friendLookup([friendCode]).then((result) => {
-      if (cancelled) return;
-      setGlobalRank(result[friendCode]?.globalRank);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [friendCode]);
-
   // The Herzie view lines its stage up with this one (see useStageAlignment).
   const viewRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   useReportHomeStage(viewRef, stageRef, active);
 
   if (!herzie) return null;
-
-  const progress = levelProgress(herzie);
-  const toNext = xpToNextLevel(herzie);
 
   return (
     <div ref={viewRef} className="flex h-full flex-col">
@@ -229,13 +212,9 @@ export function HomeView({
               {herzie.name}
             </button>
           </Tooltip>
-          {globalRank ? (
-            <Tooltip label={`Ranked #${globalRank} globally`} className="ml-1">
-              <span className="cursor-default text-[10px] font-normal text-text-dim">
-                #{globalRank}
-              </span>
-            </Tooltip>
-          ) : null}
+          <span className="ml-2 text-[10px] font-normal text-text-dim">
+            Lv. {herzie.level}
+          </span>
         </span>
         <div className="flex items-center gap-1.5">
           {!isConnected && (
@@ -253,7 +232,7 @@ export function HomeView({
                 HEADER_ICON_HIT,
                 "flex h-5 w-5 cursor-pointer items-center justify-center rounded-lg border-none p-0",
                 pinned
-                  ? "bg-cyan/20 text-cyan"
+                  ? "bg-transparent text-cyan"
                   : "bg-transparent text-text-dim hover:text-text",
               )}
             >
@@ -282,7 +261,7 @@ export function HomeView({
                 HEADER_ICON_HIT,
                 "flex h-5 w-5 cursor-pointer items-center justify-center rounded-lg border-none p-0",
                 ghostMode
-                  ? "bg-purple/20 text-purple"
+                  ? "bg-transparent text-purple"
                   : "bg-transparent text-text-dim hover:text-text",
               )}
             >
@@ -458,30 +437,17 @@ export function HomeView({
         )}
       </div>
 
-      <div className="mb-1.5">
-        <div className="mb-0.5 flex items-baseline justify-between text-ui text-text-dim">
-          <span>
-            Level {herzie.level} (Stage {herzie.stage})
-          </span>
-          <span className="text-ui-sm">{Math.ceil(toNext)} XP to next</span>
-        </div>
-        <div className="flex h-2 gap-0.5">
-          {Array.from({ length: 40 }, (_, i) => (
-            <div
-              key={i}
-              className={cn(
-                "flex-1",
-                i < Math.round(progress * 40) ? "bg-green" : "bg-[#333]",
-              )}
-            />
-          ))}
-        </div>
-      </div>
+      {/* relative z-10, as the row below: the herzie canvas sets its own
+          z-index: 1 and would otherwise swallow the bar's hover tooltip. */}
+      <ExpBar
+        progress={levelProgress(herzie)}
+        className="relative z-10 mb-1.5 text-text-dim"
+      />
 
       {/* A fixed height whatever is in it — a track, ghost mode, or nothing —
           so the herzie above doesn't move when music starts or stops. 64px is
           the track card's own height. */}
-      <div className="flex h-16 shrink-0 flex-col">
+      <div className="relative z-10 flex h-16 shrink-0 flex-col">
         {ghostMode ? (
           <div className="border-t border-border pt-1.5 pb-2">
             <div className="flex items-center gap-2">

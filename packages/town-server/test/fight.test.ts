@@ -205,6 +205,50 @@ describe("how it ends", () => {
     expect(f.cast("a", yaw, pitch, T0 + 2_000)).toBe("ignored");
   });
 
+  /** A fight that `a` and `b` are in and `a` has just won. */
+  function won() {
+    const f = new FightRuntime(claim({ hp: 40, maxHp: 10_000 }), T0);
+    f.join("a", 1, ticket("a"), { x: 0, z: 8 }, T0 - 5_000);
+    f.join("b", 2, ticket("b"), { x: 2, z: 8 }, T0 - 5_000);
+    f.onState("a", 0, 8, T0);
+    const yaw = Math.atan2(0, TUNING.boss.z - 8);
+    const pitch = Math.atan2(TUNING.boss.chest - 1.2, Math.abs(TUNING.boss.z - 8));
+    f.cast("a", yaw, pitch, T0);
+    f.step(T0 + 1_000);
+    return f;
+  }
+
+  const cd = (id: string) => ({ id, item: "cd" });
+
+  it("the loot goes to each herzie still here, once", () => {
+    const f = won();
+    f.leave("b");
+    const mine = [cd("d1"), { id: "d2", item: "clouds" }];
+    const out = f.loot({ a: mine, b: [cd("d3")], c: [cd("d4")] });
+    expect(out).toEqual([{ to: { uid: "a" }, msg: { t: "loot", drops: mine } }]);
+    expect(f.loot({ a: [cd("d5")] })).toEqual([]);
+  });
+
+  it("no loot before the boss has fallen", () => {
+    const f = new FightRuntime(claim(), T0);
+    f.join("a", 1, ticket("a"), { x: 0, z: 8 }, T0);
+    expect(f.loot({ a: [cd("d1")] })).toEqual([]);
+    // ...and that early answer doesn't use up the real one.
+    expect(won().loot({ a: [cd("d1")] })).toHaveLength(1);
+  });
+
+  it("the local-dev boss drops a CD for everyone on the kill", () => {
+    const f = new FightRuntime(claim({ event: "dev", hp: 40 }), T0);
+    f.join("a", 1, ticket("a"), { x: 0, z: 8 }, T0 - 5_000);
+    f.onState("a", 0, 8, T0);
+    const yaw = Math.atan2(0, TUNING.boss.z - 8);
+    const pitch = Math.atan2(TUNING.boss.chest - 1.2, Math.abs(TUNING.boss.z - 8));
+    f.cast("a", yaw, pitch, T0);
+    expect(msgs(f.step(T0 + 1_000), "loot")).toEqual([
+      { to: { uid: "a" }, msg: { t: "loot", drops: [cd("")] } },
+    ]);
+  });
+
   it("the boss escapes when the event ends", () => {
     const f = new FightRuntime(claim({ until: (T0 + 10_000) / 1000 }), T0);
     f.join("a", 1, ticket("a"), { x: 0, z: 8 }, T0);

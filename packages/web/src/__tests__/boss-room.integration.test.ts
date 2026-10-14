@@ -1,6 +1,7 @@
 /**
  * Integration tests for boss damage from the cave (00102): batches apply
- * exactly once, and the open boss is found for tickets.
+ * exactly once, the open boss is found for tickets, and the rewards a kill
+ * put on the ground can be read back for the cave's loot drop (00105).
  *
  * Requires: `npx supabase start`
  */
@@ -49,6 +50,7 @@ async function clearBosses() {
   await admin().from("boss_state").delete().neq("hp", -1);
   await admin().from("boss_damage").delete().neq("damage", -1);
   await admin().from("boss_damage_batches").delete().neq("batch", "");
+  await admin().from("pending_drops").delete().not("source_event", "is", null);
   await admin().from("events").delete().eq("type", "boss_fight");
 }
 
@@ -109,6 +111,76 @@ describe("boss damage batches", () => {
     const after = await batch("b5", event, [{ uid: a, damage: 50 }]);
     expect(after.hp).toBe(0);
     expect(after.killed).toBe(true);
+  });
+
+  it("puts the loot on the ground, held for the cave (00105)", async () => {
+    const event = await spawnBoss(1000);
+    const [a, b] = [await player(), await player()];
+    // Only the top dealer gets the rarer item on top.
+    await admin()
+      .from("events")
+      .update({
+        config: { rewardItemId: "cd", topRewardItemId: "headphones", topCount: 1 },
+      })
+      .eq("id", event);
+    const loot = async () =>
+      (await admin().rpc("boss_loot_json", { p_event: event })).data as Record<
+        string,
+        { id: string; item: string }[]
+      >;
+    const units = async (uid: string) =>
+      (
+        await admin()
+          .from("item_units")
+          .select("id", { count: "exact", head: true })
+          .eq("user_id", uid)
+          .in("item_id", ["cd", "headphones"])
+      ).count;
+
+    // What a test herzie starts out owning.
+    const before = await units(a);
+
+    await batch("b7", event, [
+      { uid: a, damage: 700 },
+      { uid: b, damage: 300 },
+    ]);
+    expect(await loot()).toEqual({});
+    await admin().rpc("settle_boss_fight", { p_event_id: event });
+
+    // On the ground, not in the bank: base item first.
+    const dropped = await loot();
+    expect(dropped[a].map((d) => d.item)).toEqual(["cd", "headphones"]);
+    expect(dropped[b].map((d) => d.item)).toEqual(["cd"]);
+    expect(await units(a)).toBe(before);
+    // Held for the cave: it "lands" in the future, so a spirit's sync
+    // auto-collect leaves it be for now.
+    const { data: rows } = await admin()
+      .from("pending_drops")
+      .select("dropped_at, source_event")
+      .eq("user_id", a);
+    for (const r of rows ?? []) {
+      expect(r.source_event).toBe(event);
+      expect(Date.parse(r.dropped_at)).toBeGreaterThan(Date.now() + 60_000);
+    }
+
+    // Settling again (the cron after town-vitals) drops nothing more.
+    await admin().rpc("settle_boss_fight", { p_event_id: event });
+    expect((await loot())[a]).toHaveLength(2);
+
+    // Picking one up is what puts it in the bank, once.
+    const first = dropped[a][0].id;
+    const { data: got } = await admin().rpc("collect_pending_drop", {
+      p_user_id: a,
+      p_drop_id: first,
+    });
+    expect(got).toBe("cd");
+    const { data: again } = await admin().rpc("collect_pending_drop", {
+      p_user_id: a,
+      p_drop_id: first,
+    });
+    expect(again).toBeNull();
+    expect(await units(a)).toBe((before ?? 0) + 1);
+    expect((await loot())[a].map((d) => d.item)).toEqual(["headphones"]);
   });
 
   it("one bad row doesn't lose the others", async () => {

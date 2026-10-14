@@ -251,13 +251,12 @@ function EventsViewImpl({
   /** The player's herzie, walking around the Town. */
   playerSeed?: string;
   playerStage?: number;
-  /** Name, level and XP progress, shown top left in the Town. */
+  /** Name, level and progress to the next level, shown top left in the Town. */
   playerProfile?: {
     friendCode?: string;
     name: string;
     level: number;
     progress: number;
-    toNext: number;
   };
   /** Tab stays mounted but hidden; only poll while user is on Events. */
   eventsTabVisible: boolean;
@@ -651,6 +650,7 @@ function EventsViewImpl({
     return (
       // No title: the world fills the window (see onScreenChange "world").
       <TownWorld
+        onLog={onLog}
         loading={loading}
         chatMessages={chatMessages}
         chatOverlay={chatOverlay}

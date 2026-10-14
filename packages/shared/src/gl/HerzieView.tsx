@@ -281,16 +281,19 @@ export function HerzieView({
         );
         cam.aspect = w / h;
         const targetY =
-          (l.groundInset !== undefined
+          l.groundInset !== undefined
             ? (h / 2 - l.groundInset) * perPx
-            : model.centerHeight) +
-          c.offsetY * perPx;
+            : model.centerHeight;
         cam.position.set(
           0,
           targetY + CAMERA_DISTANCE * Math.sin(TILT),
           CAMERA_DISTANCE * Math.cos(TILT),
         );
         cam.lookAt(0, targetY, 0);
+        // `offsetY` pans the picture, not the camera: moving the camera would
+        // also change the angle, looking up at the herzie as it rises.
+        if (c.offsetY !== 0) cam.setViewOffset(w, h, 0, -c.offsetY, w, h);
+        else cam.clearViewOffset();
         cam.updateProjectionMatrix();
       },
     });

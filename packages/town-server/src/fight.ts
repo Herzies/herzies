@@ -7,6 +7,7 @@ import type { HitStats } from "@herzies/shared/combat";
 import type {
   BossTelegraph,
   FightState,
+  LootDrop,
   ServerMessage,
   TownTicketPayload,
 } from "@herzies/shared/town-net";
@@ -15,8 +16,9 @@ import { PositionHistory } from "./history";
 
 /** How often HP and boss damage are reported while nothing urgent happens. */
 export const REPORT_EVERY_MS = 2_000;
-/** After the boss falls, how long the room stays open for a victory lap. */
-export const VICTORY_LINGER_MS = 30_000;
+/** After the boss falls, how long the room stays open for a victory lap
+ * and to pick up the loot. */
+export const VICTORY_LINGER_MS = 45_000;
 /** After the event ends with the boss alive, how long until the doors close. */
 export const ESCAPE_LINGER_MS = 5_000;
 
@@ -80,6 +82,8 @@ export class FightRuntime {
   private reportNow = false;
   private nextReportAt: number;
   private batchSeq = 0;
+  /** The rewards have been handed out; they only ever drop once. */
+  private looted = false;
 
   constructor(claim: Claim, now: number, seed = now) {
     this.eventId = claim.event;
@@ -277,6 +281,15 @@ export class FightRuntime {
           to: "all",
           msg: { t: "victory", by, closesAt: this.closesAt },
         });
+        // The local-dev boss is never reported, so nothing would ever say
+        // what dropped: give everyone here a CD to look at (no real drop
+        // behind it, so picking it up collects nothing).
+        if (this.eventId === DEV_EVENT) {
+          const loot: Record<string, LootDrop[]> = {};
+          for (const p of this.players.values())
+            loot[p.uid] = [{ id: "", item: "cd" }];
+          out.push(...this.loot(loot));
+        }
         break;
       }
     }
@@ -326,6 +339,22 @@ export class FightRuntime {
     if (report.boss && this.inflight?.batch === report.boss.batch) {
       this.inflight = null;
     }
+  }
+
+  /** The boss fell and its loot is on the ground: tell each herzie still
+   * here which drops are theirs, once, for the cave to drop them. `loot` is
+   * `town-vitals`' word, by user id. Anyone who already left finds theirs
+   * on their Home ground. */
+  loot(loot: Record<string, LootDrop[]>): Outbound[] {
+    if (this.looted || this.closeWhy !== "victory") return [];
+    this.looted = true;
+    const out: Outbound[] = [];
+    for (const p of this.players.values()) {
+      const drops = loot[p.uid];
+      if (!p.present || !drops?.length) continue;
+      out.push({ to: { uid: p.uid }, msg: { t: "loot", drops } });
+    }
+    return out;
   }
 
   /** Whether anything still needs reporting. */

@@ -9,14 +9,16 @@ import {
   useState,
 } from "react";
 import { cn } from "../lib/utils";
-import { type ChatMessage, herzies } from "../tauri-bridge";
+import type { ChatMessage } from "../tauri-bridge";
 import { LoadingSplash } from "./LoadingSplash";
+import { ExpBar } from "./SquareBar";
 import { type EventCard, formatIn, isDown } from "./TownScene";
-import { TownVitals } from "./TownVitals";
+import { TownHpBar, TownVitals } from "./TownVitals";
 import { BossHud } from "./town/BossHud";
 import { setCave } from "./town/cave";
 import { useChatBubbles } from "./town/chatBubbles";
 import { resetBossFight } from "./town/combat/fight";
+import { onLootLog } from "./town/combat/lootFeed";
 import { useCombat } from "./town/combat/state";
 import { useFpsShown } from "./town/fps";
 import type { TownMap } from "./town/map";
@@ -48,6 +50,7 @@ export function TownWorld({
   notice,
   chatOverlay = false,
   musicPlaying = false,
+  onLog,
   stats,
   profile,
 }: {
@@ -59,7 +62,6 @@ export function TownWorld({
     name: string;
     level: number;
     progress: number;
-    toNext: number;
   };
   /** The chat, for lines over the speakers' heads. */
   chatMessages?: ChatMessage[];
@@ -79,28 +81,19 @@ export function TownWorld({
   player: { seed: string; stage: number; equipped?: Equipped | null };
   /** Music is playing: the herzie dances when it stands still. */
   musicPlaying?: boolean;
+  /** A line for the activity log (loot picked up). */
+  onLog?: (message: string) => void;
 }) {
   useEffect(() => {
     townLive.music = musicPlaying;
   }, [musicPlaying]);
+  // The cave's loot writes to the log like any other pickup.
+  useEffect(() => onLootLog((message) => onLog?.(message)), [onLog]);
   const [near, setNear] = useState<TownSpot | null>(null);
   const [bench, setBench] = useState<"sit" | "stand" | null>(null);
   const [portalTo, setPortalTo] = useState<TownMap | null>(null);
   const fighting = useCombat();
   const fpsShown = useFpsShown();
-  // Shown after the name, as on Home.
-  const friendCode = profile?.friendCode;
-  const [globalRank, setGlobalRank] = useState<number | undefined>();
-  useEffect(() => {
-    if (!friendCode) return;
-    let cancelled = false;
-    herzies.friendLookup([friendCode]).then((result) => {
-      if (!cancelled) setGlobalRank(result[friendCode]?.globalRank);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [friendCode]);
   const [muted, setMuted] = useState(sfxMuted);
   // Everyone else with the Town open, on the same island.
   const net = useTownNet(!paused);
@@ -267,49 +260,20 @@ export function TownWorld({
               style={{ textShadow: NAME_SHADOW }}
             >
               {profile.name}
-              {globalRank ? (
-                <span
-                  className="ml-1 text-[10px] font-normal text-white/70"
-                  title={`Ranked #${globalRank} globally`}
-                >
-                  #{globalRank}
-                </span>
-              ) : null}
+              <span className="ml-2 text-[10px] font-normal text-white/70">
+                Lv. {profile.level}
+              </span>
             </span>
           </div>
           <div
             className={cn(
-              "pointer-events-none absolute inset-x-0 z-30 bg-black/45 px-3 py-2 backdrop-blur-md",
+              "pointer-events-none absolute inset-x-0 z-30 px-3 py-2",
               chatOverlay ? "bottom-[var(--dock-height,0px)]" : "bottom-0",
             )}
           >
             {combatHint}
-            <div className="mb-0.5 flex items-baseline justify-between text-ui text-white/70">
-              <span>Level {profile.level}</span>
-              <span className="text-ui-sm">
-                {Math.ceil(profile.toNext)} XP to next
-              </span>
-            </div>
-            <div
-              role="progressbar"
-              aria-label="Experience"
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={Math.round(profile.progress * 100)}
-              className="flex h-2 w-full gap-0.5"
-            >
-              {Array.from({ length: 40 }, (_, i) => (
-                <div
-                  key={i}
-                  className={cn(
-                    "flex-1",
-                    i < Math.round(profile.progress * 40)
-                      ? "bg-green"
-                      : "bg-[#333]",
-                  )}
-                />
-              ))}
-            </div>
+            <TownHpBar inFight={!!map.combat} />
+            <ExpBar progress={profile.progress} className="text-white/70" />
           </div>
         </>
       ) : null}
@@ -342,11 +306,7 @@ export function TownWorld({
       )}
       {!paused ? (
         <>
-          <TownVitals
-            inFight={!!map.combat}
-            chatOverlay={chatOverlay}
-            belowNotice={!!notice}
-          />
+          <TownVitals inFight={!!map.combat} chatOverlay={chatOverlay} />
           <BossHud name={bossCard?.title ?? "The boss"} />
         </>
       ) : null}

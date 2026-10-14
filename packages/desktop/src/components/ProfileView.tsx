@@ -12,7 +12,6 @@ import { BackButton } from "./BackButton";
 import { HERZIE_STAGE_HEIGHT, HerzieWithSky } from "./HerzieWithSky";
 import { ProfileBadges } from "./ProfileBadges";
 import { TabButton } from "./TabButton";
-import { Tooltip } from "./Tooltip";
 import { TrackCard } from "./TrackCard";
 import { View } from "./View";
 
@@ -139,22 +138,11 @@ export function ProfileView({
           needs its own stacking context above them — otherwise a tall
           creature overlaps and hides these rows. */}
       <div className="relative z-10 shrink-0">
-        <div className="mb-2">
-          <div className="flex items-baseline gap-1.5">
-            <span className="text-ui-lg font-bold text-text">
-              {profile.name}
-            </span>
-            {profile.globalRank ? (
-              <Tooltip label={`Ranked #${profile.globalRank} globally`}>
-                <span className="cursor-default text-[10px] text-text-dim">
-                  #{profile.globalRank}
-                </span>
-              </Tooltip>
-            ) : null}
-          </div>
-          <div className="text-ui text-text-dim">
-            Level {profile.level} (Stage {profile.stage})
-          </div>
+        <div className="mb-2 text-ui-lg font-bold text-text">
+          {profile.name}
+          <span className="ml-2 text-[10px] font-normal text-text-dim">
+            Lv. {profile.level}
+          </span>
         </div>
 
         {!isSelf && (
