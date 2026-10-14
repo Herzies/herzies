@@ -29,6 +29,11 @@ const WEARABLE_OPTIONS = [
   "pumpkin-spice",
   "ghost",
   "blood-moon",
+  // Class gear (stage 2 and up: it's held in the hands).
+  "lute",
+  "compact-discs",
+  "worn-stick",
+  "old-cymbal",
 ];
 
 const DEFAULT_USER = "sandbox-user";
@@ -341,6 +346,9 @@ function toEquipped(ids: string[]): Equipped {
     else if (id === "fangs") out.face = id;
     else if (id === "pumpkin-spice") out.color = id;
     else if (id === "ghost" || id === "spirit-orb") out.spirit = id;
+    else if (id === "old-cymbal") out.off_hand = id;
+    else if (id === "lute" || id === "compact-discs" || id === "worn-stick")
+      out.main_hand = id;
     else if (id === "boombox") {
       if (!out.ground_left) out.ground_left = id;
       else out.ground_right = id;

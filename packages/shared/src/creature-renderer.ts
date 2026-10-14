@@ -1890,6 +1890,10 @@ interface Hand {
   side: -1 | 1;
   /** The arm's radius: props are sized by it, so they fit any stage. */
   r: number;
+  /** The front of what the arm hangs off (the body, or the head before
+   * it), along z (front is −z): a prop held across the herzie sits ahead
+   * of this, or the body swallows it. */
+  front: number;
 }
 
 function handOf(spheres: Sphere[], arm: string): Hand | null {
@@ -1901,11 +1905,13 @@ function handOf(spheres: Sphere[], arm: string): Hand | null {
   const v = sub(sp.center, shoulder);
   const len = Math.max(1e-9, Math.hypot(...v));
   const dir = scale(v, 1 / len);
+  const parent = rig.body ?? rig.head;
   return {
     at: add(sp.center, scale(dir, sp.radius * 0.7)),
     dir,
     side: LIMB_SIDE[arm] ?? 1,
     r: sp.radius,
+    front: parent ? parent.center[2] - parent.radius : sp.center[2],
   };
 }
 
@@ -1923,10 +1929,11 @@ const held = (
   shape?: Shape,
 ): Sphere => ({ center, radius, zone: "wearable", part, color, shape });
 
-/** Worn Stick: a drumstick out of the fist, tip forward and up. */
+/** Worn Stick: a drumstick out of the fist, tip up and out, a little
+ * forward — raised, so it reads against the sky rather than the body. */
 const buildWornStick: HeldBuilder = (_s, part, { at, side, r }) => {
-  const half = r * 1.15;
-  const axis = norm([side * 0.15, -0.45, -0.88]);
+  const half = r * 1.3;
+  const axis = norm([side * 0.45, -0.8, -0.4]);
   const mid = add(at, scale(axis, half * 0.7));
   return [
     held(part, mid, r * 0.14, "#c8a46e", {
@@ -1995,8 +2002,13 @@ const buildCompactDiscs: HeldBuilder = (spheres, part, hand) => {
 
 /** Lute: the body in the strumming hand, in front of the herzie; the neck
  * runs across and up toward the other side. */
-const buildLute: HeldBuilder = (_s, part, { at, side, r }) => {
-  const body = add(at, [-side * r * 0.55, -r * 0.2, -r * 1.0]);
+const buildLute: HeldBuilder = (_s, part, { at, side, r, front }) => {
+  // Across the belly, just clear of it.
+  const body: V3 = [
+    at[0] - side * r * 0.9,
+    at[1] - r * 0.2,
+    Math.min(at[2] - r, front - r * 0.3),
+  ];
   const face: V3 = [0, 0, -1];
   const neckDir = norm([-side * 0.8, -0.6, 0]);
   const neckHalf = r * 1.1;
