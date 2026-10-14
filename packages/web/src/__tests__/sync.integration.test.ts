@@ -727,6 +727,8 @@ describe("World drops", () => {
     expect(body.pendingDrops.map((d: { id: string }) => d.id)).toEqual([
       held!.id,
     ]);
+    // Still in the air isn't the bank being full.
+    expect(body.pickupBlocked).toBe(false);
 
     // Landed: the spirit takes it as usual.
     await admin
@@ -741,6 +743,32 @@ describe("World drops", () => {
       }),
     );
     expect((await later.json()).pendingDrops).toEqual([]);
+  });
+
+  it("reports pickupBlocked only when the bank has no room for a drop", async () => {
+    const admin = getAdminClient();
+    const petUser = await createTestUser();
+    // 18 headphones fill the starting bank; the worn orb takes no slot.
+    await createTestHerzie(petUser.userId, {
+      inventory_v2: { "spirit-orb": 1, headphones: 18 },
+      equipped: { spirit: "spirit-orb" },
+    });
+    await admin.rpc("roll_pending_drop", {
+      p_user_id: petUser.userId,
+      p_item_id: "prism",
+    });
+
+    const res = await syncRoute(
+      authenticatedRequest("/sync", petUser.accessToken, {
+        nowPlaying: null,
+        minutesListened: 0,
+        genres: [],
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.pickupBlocked).toBe(true);
+    expect(body.pendingDrops).toHaveLength(1);
   });
 
   it("auto-collects a pending drop in the same tick when Spirit Orb is equipped", async () => {
@@ -769,6 +797,7 @@ describe("World drops", () => {
     const body = await res.json();
 
     expect(body.pendingDrops).toEqual([]);
+    expect(body.pickupBlocked).toBe(false);
 
     const collectedNotif = body.notifications.find(
       (n: { type: string; itemId?: string }) =>

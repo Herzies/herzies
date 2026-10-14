@@ -148,6 +148,11 @@ pub struct SyncResponse {
     pub outgoing_friend_requests: Vec<FriendRequestSummary>,
     #[serde(default)]
     pub pending_drops: Vec<PendingDrop>,
+    /// A worn spirit left a landed drop behind for want of bank room — the
+    /// server's own verdict, since only its pickup pass checks for room.
+    /// `None` from a server older than this field.
+    #[serde(default)]
+    pub pickup_blocked: Option<bool>,
     /// Authoritative inventory, carried on every sync so mutations don't each
     /// have to re-fetch `/inventory`. `None` only when talking to a server
     /// older than this field.

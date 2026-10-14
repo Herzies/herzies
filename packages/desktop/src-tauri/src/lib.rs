@@ -2397,21 +2397,24 @@ async fn sync_tick_with(
 
         // A spirit (the Greedy Spirit, Herman) auto-collects world drops
         // quietly — the whole point is not having to watch the ground. That
-        // means a full bank blocks it silently too, unless we say something:
-        // the server already leaves any drop it couldn't fit room for in
-        // `pending_drops` (see the spirit pickup in game-server.ts), so a
-        // non-empty list here with a spirit worn means it's stuck — except a
-        // boss's loot, which lands a little in the future (00105) and is left
-        // alone until then, bank full or not. Only landed drops count.
-        let has_spirit = app_state
-            .equipped
-            .get("spirit")
-            .and_then(|v| v.as_str())
-            .is_some_and(|id| !id.is_empty());
-        let now_secs = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |d| d.as_secs() as i64);
-        let pickup_blocked = has_spirit && has_landed_drop(&app_state.pending_drops, now_secs);
+        // means a full bank blocks it silently too, unless we say something.
+        // The server says when (`pickup_blocked`): its pickup pass is the only
+        // thing that checks for room. Guessing from "spirit worn + a landed
+        // drop still pending" called the bag full whenever a drop merely
+        // hadn't been taken yet — boss loot landing between syncs, or one
+        // picked up in the cave while the sync ran. The guess is kept only
+        // for a server too old to say.
+        let pickup_blocked = sync_resp.pickup_blocked.unwrap_or_else(|| {
+            let has_spirit = app_state
+                .equipped
+                .get("spirit")
+                .and_then(|v| v.as_str())
+                .is_some_and(|id| !id.is_empty());
+            let now_secs = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs() as i64);
+            has_spirit && has_landed_drop(&app_state.pending_drops, now_secs)
+        });
         if let Ok(mut last) = app.state::<LastInventoryFullNotified>().0.lock() {
             if pickup_blocked {
                 // While the window is open, the in-app "Inventory full" prompt

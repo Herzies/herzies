@@ -129,6 +129,9 @@ export interface SyncResponse {
   /** World drops waiting to be collected. Each persists until collected (no
    * expiry) — any number can be pending at once. */
   pendingDrops: PendingDrop[];
+  /** A worn spirit left a landed drop on the ground for want of bank room —
+   * what the desktop's "Inventory full" notification goes by. */
+  pickupBlocked: boolean;
   /** Every owned copy of every item, each with its own upgrade level and worn
    * slot. The source of truth: `inventory`, `equipped` and `itemUpgrades`
    * below are derived from these and only remain for clients that predate

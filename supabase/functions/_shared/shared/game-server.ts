@@ -297,6 +297,12 @@ export async function processSync(
   incomingFriendRequests: FriendRequestSummary[];
   outgoingFriendRequests: FriendRequestSummary[];
   pendingDrops: PendingDrop[];
+  /** A worn spirit left at least one landed drop on the ground because the
+   * bank had no room for it. The desktop's "Inventory full" notification
+   * goes by this alone: only this pass checks for room, so a drop that is
+   * merely still pending (boss loot in the air, one picked up elsewhere in
+   * the same moment) can't read as a full bag. */
+  pickupBlocked: boolean;
   /** Every owned copy, with its own level and worn slot. Absent — not empty —
    * when they couldn't be read: a client must take that as "unknown, keep what
    * you have", since an empty list would read as "owns nothing". */
@@ -651,6 +657,7 @@ export async function processSync(
   }
 
   const wornSpirit = normalizeEquipped(row.equipped).spirit;
+  let pickupBlocked = false;
   if (pendingDrops.length > 0 && wornSpirit) {
     // Auto-collect only what the bank can hold. `collect_pending_drop` credits
     // inventory unconditionally, and an over-capacity item stays owned with no
@@ -695,9 +702,10 @@ export async function processSync(
         )
       ) {
         uncollected.push(drop);
+        pickupBlocked = true;
         continue;
       }
-      const { data: collectedId } = await admin.rpc("collect_pending_drop", {
+      const { data: collectedId, error: collectError } = await admin.rpc("collect_pending_drop", {
         p_user_id: userId,
         p_drop_id: drop.id,
       });
@@ -725,9 +733,12 @@ export async function processSync(
           // up quietly, so no native notification per item.
           logOnly: true,
         });
-      } else {
+      } else if (collectError) {
         uncollected.push(drop);
       }
+      // No id and no error: the drop was already gone — collected on Home or
+      // in the cave while this sync ran. Leave it out, or the client keeps
+      // drawing it on the ground until the next sync.
     }
     pendingDrops = uncollected;
   }
@@ -898,6 +909,7 @@ export async function processSync(
     incomingFriendRequests,
     outgoingFriendRequests,
     pendingDrops,
+    pickupBlocked,
     units,
     // Carried on the regular sync cadence so clients don't have to re-fetch
     // /inventory after every mutation. Falls back to the pre-update row if the
