@@ -197,7 +197,7 @@ function DeckGroup({
  * longest run) so that run never has to squeeze into half the row. */
 export function DeckOverlay({ showInstrument, ...props }: DeckOverlayProps) {
   return (
-    <div className="pointer-events-auto grid w-full grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 pt-1.5">
+    <div className="pointer-events-auto grid w-full grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 pt-1.5 pb-4">
       {DECK_SLOT_ORDER.filter(
         (label) => label !== "Instrument" || showInstrument,
       ).map((label) => (
