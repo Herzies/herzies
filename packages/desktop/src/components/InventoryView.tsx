@@ -1878,7 +1878,12 @@ function InventoryViewImpl({
           style={{ aspectRatio: `${GRID_COLS} / ${VISIBLE_ROWS}` }}
         >
           {panel === "deck" ? (
-            <div {...{ [HERZIE_ZONE_ATTR]: "" }} className="relative h-full">
+            // Scrolls when the deck's sections outgrow the panel (the
+            // Instrument row, once there's a class).
+            <div
+              {...{ [HERZIE_ZONE_ATTR]: "" }}
+              className="relative h-full overflow-y-auto overscroll-contain"
+            >
               <DeckOverlay
                 showInstrument={
                   !!herzie.class || !!equipped.main_hand || !!equipped.off_hand
