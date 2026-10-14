@@ -2493,6 +2493,39 @@ async fn sync_tick_with(
     Ok(())
 }
 
+/// On launch: a herzie old enough for a class but saved without one asks
+/// `/me` once. A sync from a server that predated classes used to wipe the
+/// class from the saved herzie, and the choice would come back.
+async fn recover_class(app: AppHandle) {
+    let needs = {
+        let state = app.state::<SharedState>();
+        let s = state.lock().unwrap();
+        s.herzie
+            .as_ref()
+            .is_some_and(|h| h.stage >= 2 && h.class.is_none())
+    };
+    if !needs {
+        return;
+    }
+    let Some(server) = api::api_get_me(&api::http()).await else {
+        return;
+    };
+    if server.class.is_none() {
+        return;
+    }
+    {
+        let state = app.state::<SharedState>();
+        let mut s = state.lock().unwrap();
+        if let Some(ref mut herzie) = s.herzie {
+            if herzie.class.is_none() {
+                herzie.class = server.class;
+                storage::save_herzie(herzie);
+            }
+        }
+    }
+    emit_state_update(&app);
+}
+
 /// Decide whether the on-disk herzie belongs to the current session and
 /// should be loaded into memory. Wipes orphaned data so the onboarding
 /// screen can take over.
@@ -2739,6 +2772,9 @@ pub fn run() {
 
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(events_watch_loop(app_handle));
+
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(recover_class(app_handle));
 
             // Initial poll + sync + home cache (equipped + chat)
             let app_handle = app.handle().clone();

@@ -17,8 +17,6 @@ export interface ClassDef {
   name: string;
   emoji: string;
   role: ClassRole;
-  /** One line for the choice screen. */
-  blurb: string;
   /** Item ids handed over, already worn, when the class is chosen. */
   equipment: string[];
   /** The skill every herzie of this class starts with. */
@@ -34,7 +32,6 @@ export const CLASS_DEFS: Record<HerzieClass, ClassDef> = {
     name: "Bard",
     emoji: "💓",
     role: "support",
-    blurb: "Keeps the band alive. Heals everyone close enough to hear.",
     equipment: ["lute"],
     starterSkill: "soothing-drones",
   },
@@ -43,7 +40,6 @@ export const CLASS_DEFS: Record<HerzieClass, ClassDef> = {
     name: "Record Slinger",
     emoji: "📀",
     role: "dps",
-    blurb: "A disc in each hand and no patience. Hits hard, from range.",
     equipment: ["compact-discs"],
     starterSkill: "backspin",
   },
@@ -52,7 +48,6 @@ export const CLASS_DEFS: Record<HerzieClass, ClassDef> = {
     name: "Percussionist",
     emoji: "🥁",
     role: "tank",
-    blurb: "Draws the boss's eye and takes the hit under a giant cymbal.",
     equipment: ["worn-stick", "old-cymbal"],
     starterSkill: "cymbrella",
   },
@@ -60,7 +55,7 @@ export const CLASS_DEFS: Record<HerzieClass, ClassDef> = {
 
 export const CLASS_ROLE_LABELS: Record<ClassRole, string> = {
   support: "Support",
-  dps: "Damage",
+  dps: "DPS",
   tank: "Tank",
 };
 

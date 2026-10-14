@@ -1,6 +1,7 @@
 import {
   CLASS_DEFS,
   CLASS_IDS,
+  CLASS_ROLE_LABELS,
   type Equipped,
   type HerzieClass,
 } from "@herzies/shared";
@@ -26,7 +27,7 @@ export function withClassGear(
 }
 
 /**
- * Picking a class, once, at stage 2: a tab per class and what it's about,
+ * Picking a class, once, at stage 2: a tab per class and its role,
  * then a second ask, since it's for good.
  */
 export function ClassChoiceOverlay({
@@ -109,7 +110,9 @@ export function ClassChoiceOverlay({
           })}
         </div>
 
-        <div className="mb-3 text-ui text-text">{def.blurb}</div>
+        <div className="mb-3 text-ui text-text">
+          {CLASS_ROLE_LABELS[def.role]}
+        </div>
 
         {error && <div className="mb-2 text-ui text-red">{error}</div>}
 
