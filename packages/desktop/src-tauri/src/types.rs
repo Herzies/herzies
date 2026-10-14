@@ -524,6 +524,40 @@ pub struct NowPlayingInfo {
 
 #[cfg(test)]
 mod tests {
+    /// A /sync answer from a server with classes: the class, its skills,
+    /// and a copy held in the new main_hand slot.
+    #[test]
+    fn sync_response_with_class_and_skills_parses() {
+        let raw = serde_json::json!({
+            "herzie": {
+                "id": "h1", "name": "x", "createdAt": "2026-01-01",
+                "appearance": {
+                    "headIndex": 0, "eyesIndex": 0, "mouthIndex": 0,
+                    "accessoryIndex": 0, "limbsIndex": 0, "bodyIndex": 0,
+                    "legsIndex": 0, "colorScheme": "blue"
+                },
+                "xp": 1.0, "level": 27, "stage": 3, "class": "record_slinger",
+                "totalMinutesListened": 10.0, "genreMinutes": {},
+                "friendCode": "HERZ-1", "friendCodes": [],
+                "lastCravingDate": "", "lastCravingGenre": "",
+                "boostUntil": null, "streakDays": 0, "streakLastDate": null,
+                "currency": 5, "shareListening": true
+            },
+            "skills": [{ "skillId": "backspin", "level": 1, "xp": 0 }],
+            "notifications": [], "multipliers": [],
+            "incomingFriendRequests": [], "outgoingFriendRequests": [],
+            "pendingDrops": [], "pickupBlocked": false,
+            "units": [{ "id": "u1", "itemId": "compact-discs", "upgradeLevel": 0, "equippedSlot": "main_hand" }],
+            "inventory": { "compact-discs": 1 },
+            "equipped": { "main_hand": "compact-discs" },
+            "itemUpgrades": {},
+            "bankExpansions": 0
+        });
+        let r: SyncResponse = serde_json::from_value(raw).expect("parses");
+        assert_eq!(r.herzie.class.as_deref(), Some("record_slinger"));
+        assert_eq!(r.skills.map(|s| s.len()), Some(1));
+    }
+
     use super::*;
 
     #[test]
