@@ -25,6 +25,7 @@ import type { TownMap } from "./town/map";
 import { NAME_SHADOW } from "./town/nameFade";
 import { useTownNet, useTownNetVersion } from "./town/net/townNet";
 import { spotsOf, type TownSpot, townLive, useTownMap } from "./town/runtime";
+import { SkillHud } from "./town/SkillHud";
 import { setSfxMuted, sfxMuted } from "./town/sfx";
 
 // three.js, Rapier's WASM and friends: loaded the first time someone opens
@@ -308,6 +309,7 @@ export function TownWorld({
         <>
           <TownVitals inFight={!!map.combat} chatOverlay={chatOverlay} />
           <BossHud name={bossCard?.title ?? "The boss"} />
+          {map.combat ? <SkillHud /> : null}
         </>
       ) : null}
       {!paused && (loading || !ready) ? (

@@ -1,4 +1,10 @@
-import { type HerzieStats, hitDamage } from "@herzies/shared";
+import {
+  BACKSPIN_DISCS,
+  BACKSPIN_SPREAD,
+  type HerzieStats,
+  hitDamage,
+  skillValue,
+} from "@herzies/shared";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useRapier } from "@react-three/rapier";
 import { useEffect, useRef } from "react";
@@ -12,6 +18,13 @@ import { liveDummies } from "./Dummies";
 import { DUMMY, hitDummy, meterDps } from "./dummy";
 import { bossFight } from "./fight";
 import { enterMouseLook, exitMouseLook } from "./mouseLook";
+import {
+  entityAt,
+  mySkillReady,
+  noteSkillCast,
+  skills,
+  startMyCooldown,
+} from "./skills";
 import { CAST_BUFFER_MS, combat, setCombat, shake } from "./state";
 import { assistTarget, type Vec3, WAVE, waveField } from "./waves";
 
@@ -43,6 +56,8 @@ const typing = (t: EventTarget | null) => {
  *   Esc, or Tab again: out.
  * - Left click or F: cast. Holding it keeps casting; a press mid-cast is
  *   kept for the next.
+ * - Q or 1: your class skill, if you have one. In the boss room the server
+ *   runs it; on the training grounds it's practice (no XP).
  *
  * Aiming is the usual third-person way: a ray from the camera through the
  * crosshair finds what you're pointing at, and the wave flies from the
@@ -102,6 +117,13 @@ export function Combat({
         e.preventDefault();
         if (!e.repeat) combat.queuedAt = performance.now();
         combat.fireHeld = true;
+      } else if (
+        (e.code === "KeyQ" || e.code === "Digit1") &&
+        !e.repeat &&
+        skills.mine
+      ) {
+        e.preventDefault();
+        skillQueuedAt = performance.now();
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {
@@ -224,6 +246,72 @@ export function Combat({
       combat.onTarget = false;
     }
 
+    // Where you are, for effects that follow you (a Cymbrella overhead).
+    if (herzie) {
+      herzie.root.getWorldPosition(chest);
+      entityAt.set(bossFight.you ?? -1, {
+        x: chest.x,
+        z: chest.z,
+        top: chest.y + herzie.height,
+      });
+    }
+
+    // --- Your class skill: pressed (or pressed just before it was ready).
+    const mine = skills.mine;
+    if (
+      herzie &&
+      mine &&
+      now - skillQueuedAt < CAST_BUFFER_MS &&
+      mySkillReady(now)
+    ) {
+      skillQueuedAt = Number.NEGATIVE_INFINITY;
+      const seq = startMyCooldown(now);
+      herzie.root.getWorldPosition(chest);
+      chest.y += herzie.height * 0.55;
+      // Aimed like a cast in combat mode; otherwise the way you face.
+      let yaw = herzie.heading;
+      let pitch = 0;
+      if (combat.on) {
+        const dx = a.point.x - chest.x;
+        const dz = a.point.z - chest.z;
+        const flat = Math.max(Math.hypot(dx, dz), 0.5);
+        yaw = Math.atan2(dx, dz);
+        pitch = Math.atan2(a.point.y - chest.y, flat);
+        if (flat > 0.5) herzie.heading = yaw;
+      }
+      noteSkillCast({
+        by: bossFight.you ?? -1,
+        skill: mine.id,
+        level: mine.level,
+        x: chest.x,
+        z: chest.z,
+        yaw,
+        at: now,
+      });
+      if (bossFight.on) {
+        townNet().sendSkill(mine.id, seq, yaw, pitch);
+      } else if (mine.id === "backspin") {
+        // Practice: the discs hit the dummies, for their share of a wave.
+        const half = (BACKSPIN_DISCS - 1) / 2;
+        for (let i = 0; i < BACKSPIN_DISCS; i++) {
+          const y = yaw + (i - half) * BACKSPIN_SPREAD;
+          const toward: Vec3 = [
+            Math.sin(y) * Math.cos(pitch),
+            Math.sin(pitch),
+            Math.cos(y) * Math.cos(pitch),
+          ];
+          const from: Vec3 = [chest.x, chest.y, chest.z];
+          waveField.cast(from, toward, {
+            mine: true,
+            target: assistTarget(from, toward, liveDummies),
+            scale: skillValue("backspin", mine.level),
+          });
+        }
+      }
+      sfxCast();
+      shake(0.15);
+    }
+
     // --- Casting.
     if (herzie) {
       const queued = now - combat.queuedAt < CAST_BUFFER_MS;
@@ -279,7 +367,9 @@ export function Combat({
         sfxImpact("hit");
         return "hit";
       }
-      const { amount, crit } = hitDamage(statsRef.current);
+      const rolled = hitDamage(statsRef.current);
+      const amount = Math.max(1, Math.round(rolled.amount * wave.scale));
+      const { crit } = rolled;
       hitDummy(dummy, wave.dir[0], wave.dir[2], amount, crit, now);
       pushDamageNumber(point, amount, crit);
       combat.hitAt = now;
@@ -298,6 +388,10 @@ export function Combat({
 
   return null;
 }
+
+/** When the skill key was last pressed (performance.now() ms): kept for
+ * CAST_BUFFER_MS, so a press just before it's ready still goes off. */
+let skillQueuedAt = Number.NEGATIVE_INFINITY;
 
 /** Out of combat mode, letting the mouse go. */
 function leave() {

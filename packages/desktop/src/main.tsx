@@ -40,6 +40,7 @@ import { StoreView } from "./components/StoreView";
 import { TabBar, type View } from "./components/TabBar";
 import { TradeView } from "./components/TradeView";
 import { setLootRoom } from "./components/town/combat/lootFeed";
+import { setMySkill } from "./components/town/combat/skills";
 import { UpdateAvailableOverlay } from "./components/UpdateAvailableOverlay";
 import { WhatsNewOverlay } from "./components/WhatsNewOverlay";
 import { useOptimisticUnits } from "./hooks/useOptimisticUnits";
@@ -200,6 +201,8 @@ function App() {
   const [classOverride, setClassOverride] = useState<HerzieClass | null>(null);
   /** Dev-only: opens the class choice whatever the herzie's state. */
   const [testClassChoice, setTestClassChoice] = useState(false);
+  // The Town's skill bar follows the class skill the app knows about.
+  useEffect(() => setMySkill(rawState.skills), [rawState.skills]);
   /** "Later" on the class choice: asked again next launch. */
   const [classChoiceLater, setClassChoiceLater] = useState(false);
   /** Captured the first time `state.isOnline` is true this session: was this

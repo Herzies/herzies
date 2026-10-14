@@ -13,6 +13,7 @@ import { SEAT_Y } from "./Benches";
 import { BUBBLE_RANGE, type ChatBubble, type ChatBubbles } from "./chatBubbles";
 import { liveDummies } from "./combat/Dummies";
 import { bossFight } from "./combat/fight";
+import { entityAt } from "./combat/skills";
 import { assistTarget, type Vec3, waveField } from "./combat/waves";
 import { HeadBubble } from "./HeadBubble";
 import { NAME_SHADOW, nameOpacity } from "./nameFade";
@@ -77,6 +78,7 @@ function RemoteHerzie({
     herzie.root.visible = false;
     return () => herzie.dispose();
   }, [herzie]);
+  useEffect(() => () => void entityAt.delete(remote.id), [remote.id]);
 
   const tag = useRef<HTMLButtonElement>(null);
   const tagAnchor = useRef<Group>(null);
@@ -118,6 +120,11 @@ function RemoteHerzie({
       herzie.height + 0.3 + (seated ? SEAT_Y : 0),
       s.z,
     );
+    entityAt.set(remote.id, {
+      x: s.x,
+      z: s.z,
+      top: herzie.height + (seated ? SEAT_Y : 0),
+    });
     // Chat is one room for everyone; the Town only shows what's said near
     // you.
     if (bubbleBox.current) {

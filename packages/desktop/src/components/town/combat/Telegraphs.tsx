@@ -8,6 +8,7 @@ import {
   SHAPE_FLASH_MS,
   useBossFight,
 } from "./fight";
+import { entityAt } from "./skills";
 
 /**
  * What the boss is about to hit, drawn on the floor so it can be stepped
@@ -15,6 +16,9 @@ import {
  * alone: a hatched fill, a dashed outline, and a fill that grows toward
  * the moment it lands (from the middle for a circle; from the safe middle
  * outward for a ring). It flashes white as it lands, then goes.
+ *
+ * A buster is the boss's mark on one herzie: the circle follows them, with
+ * a "!" overhead, because it lands on them wherever they go.
  */
 export function Telegraphs() {
   useBossFight();
@@ -110,8 +114,39 @@ function Shape({ shape }: { shape: FloorShape }) {
   }, [shape.r, shape.x, shape.z, material]);
   useEffect(() => () => mesh.geometry.dispose(), [mesh]);
 
+  // A buster's "!" over its target's head.
+  const mark = useMemo(() => {
+    if (shape.kind !== "buster") return null;
+    const g = new THREE.Group();
+    const red = new THREE.MeshBasicMaterial({ color: 0xff3b30, fog: false });
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.42, 0.12), red);
+    bar.position.y = 0.32;
+    const dot = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.12), red);
+    g.add(bar, dot);
+    return g;
+  }, [shape.kind]);
+  useEffect(
+    () => () => {
+      mark?.traverse((o) => {
+        if (o instanceof THREE.Mesh) {
+          o.geometry.dispose();
+          (o.material as THREE.Material).dispose();
+        }
+      });
+    },
+    [mark],
+  );
+
   useFrame(({ clock }) => {
     const now = performance.now();
+    if (shape.kind === "buster" && shape.target !== undefined) {
+      const at = entityAt.get(shape.target);
+      if (at) {
+        mesh.position.set(at.x, 0.05, at.z);
+        mark?.position.set(at.x, at.top + 0.45, at.z);
+      }
+      if (mark) mark.visible = !!at && shape.resolvedAt === null;
+    }
     const span = Math.max(1, shape.lands - shape.from);
     const done = shape.resolvedAt !== null;
     const u = material.uniforms;
@@ -125,5 +160,10 @@ function Shape({ shape }: { shape: FloorShape }) {
     u.uTime.value = clock.elapsedTime;
   });
 
-  return <primitive object={mesh} />;
+  return (
+    <>
+      <primitive object={mesh} />
+      {mark ? <primitive object={mark} /> : null}
+    </>
+  );
 }
