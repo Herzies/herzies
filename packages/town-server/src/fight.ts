@@ -316,7 +316,8 @@ export class FightRuntime {
 
   /** Skill XP for `uid`, toward the next report. */
   private earn(uid: string, skill: SkillId, xp: number) {
-    if (!(xp > 0)) return;
+    // The local-dev boss is never reported: nothing to earn toward.
+    if (!(xp > 0) || this.eventId === DEV_EVENT) return;
     const key = `${uid}|${skill}`;
     this.pendingXp.set(key, (this.pendingXp.get(key) ?? 0) + xp);
   }
@@ -428,6 +429,8 @@ export class FightRuntime {
           });
           if (p.hp <= 0) {
             p.down = true;
+            // Knocked out: nothing left to raise the stored health toward.
+            this.healed.delete(p.uid);
             out.push({ to: { uid: p.uid }, msg: { t: "down" } });
           }
           this.reportNow = true;

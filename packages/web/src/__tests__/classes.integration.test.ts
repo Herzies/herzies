@@ -9,13 +9,16 @@
  * Requires: `npx supabase start`
  */
 import { skillLevelForXp, skillTotalXpForLevel } from "@herzies/shared";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { POST as syncRoute } from "@/app/api/sync/route";
 import {
+  authenticatedRequest,
   cleanupTestData,
   createTestHerzie,
   createTestUser,
   getAdminClient,
   getUnits,
+  setLocalEnv,
 } from "./integration-helpers";
 
 const admin = () => getAdminClient();
@@ -256,5 +259,35 @@ describe("skill XP", () => {
       p_xp: [{ uid: userId, skill: "cymbrella", xp: 99_999 }],
     });
     expect((await skills(userId))[0].level).toBe(10);
+  });
+});
+
+describe("sync", () => {
+  beforeAll(setLocalEnv);
+  afterAll(cleanupTestData);
+
+  it("carries the class and its skills, and never clears the class", async () => {
+    const user = await createTestUser();
+    await createTestHerzie(user.userId, { stage: 2, level: 12 });
+    await rpc("choose_class", { p_user_id: user.userId, p_class: "bard" });
+    const res = await syncRoute(
+      authenticatedRequest("/sync", user.accessToken, {
+        nowPlaying: null,
+        minutesListened: 0,
+        genres: [],
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.herzie.class).toBe("bard");
+    expect(body.skills).toEqual([
+      { skillId: "soothing-drones", level: 1, xp: 0 },
+    ]);
+    const { data } = await admin()
+      .from("herzies")
+      .select("class")
+      .eq("user_id", user.userId)
+      .single();
+    expect(data?.class).toBe("bard");
   });
 });

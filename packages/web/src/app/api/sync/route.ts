@@ -39,6 +39,8 @@ export async function POST(request: Request) {
       equipped: result.equipped,
       itemUpgrades: result.itemUpgrades,
       bankExpansions: result.bankExpansions,
+      // The class skills, once a class is chosen.
+      skills: result.skills,
     };
 
     return NextResponse.json(response);

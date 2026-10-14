@@ -36,8 +36,9 @@ export interface SkillDef {
   /** Heals: who is in reach, metres from the caster. */
   radius?: number;
   /** Skill XP per unit of effect (per HP healed, per damage absorbed, per
-   * damage dealt). Normalises the three skills so each class levels at a
-   * similar pace over the same number of fights. */
+   * damage dealt). Meant to make each class level at a similar pace over
+   * the same number of fights — first guesses, not yet calibrated against
+   * a simulated fight with skill-using players. */
   xpPerUnit: number;
 }
 
@@ -69,7 +70,9 @@ export const SKILL_DEFS: Record<SkillId, SkillDef> = {
     value: [0.1, 0.4],
     cooldownMs: 20_000,
     durationMs: 6_000,
-    xpPerUnit: 1,
+    // A Cymbrella only absorbs a few HP a hit (10-40% of a slam or a
+    // buster), so each one pays more. Uncalibrated, like the others.
+    xpPerUnit: 4,
   },
 };
 
