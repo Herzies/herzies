@@ -2287,7 +2287,11 @@ async fn sync_tick_with(
             herzie.xp = server.xp;
             herzie.level = server.level;
             herzie.stage = server.stage;
-            herzie.class = server.class.clone();
+            // A class is permanent: a sync can set it but never clear it
+            // (a server that predates classes sends none).
+            if server.class.is_some() {
+                herzie.class = server.class.clone();
+            }
             herzie.total_minutes_listened = server.total_minutes_listened;
             herzie.genre_minutes = server.genre_minutes.clone();
             herzie.streak_days = server.streak_days;
