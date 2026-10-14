@@ -93,6 +93,13 @@ interface SlotHandlers {
   onPlaceRequest: (target: EmptySlotTarget) => void;
 }
 
+interface DeckOverlayProps extends SlotHandlers {
+  /** Show the Instrument section (class gear): once the herzie has a class,
+   * or holds something anyway. Before that its boxes could only ever be
+   * empty. */
+  showInstrument?: boolean;
+}
+
 /** The stats box: no panel behind it, and no side padding either, so its
  * text lines up with the view's edge like "Herzie" and "Deck". */
 export const OVERLAY_PANEL = "pointer-events-auto py-1.5";
@@ -188,10 +195,12 @@ function DeckGroup({
 /** The deck, under the Herzie view's "Deck" tab: its sections in two
  * columns. The left one is as wide as its widest section (Modifiers, the
  * longest run) so that run never has to squeeze into half the row. */
-export function DeckOverlay(props: SlotHandlers) {
+export function DeckOverlay({ showInstrument, ...props }: DeckOverlayProps) {
   return (
     <div className="pointer-events-auto grid w-full grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 pt-1.5">
-      {DECK_SLOT_ORDER.map((label) => (
+      {DECK_SLOT_ORDER.filter(
+        (label) => label !== "Instrument" || showInstrument,
+      ).map((label) => (
         <DeckGroup key={label} group={groupByLabel(label)} {...props} />
       ))}
     </div>
@@ -199,7 +208,8 @@ export function DeckOverlay(props: SlotHandlers) {
 }
 
 /** Reading order, two to a row: what's worn on the body first, then the
- * herzie's look, then the Modifiers with the Spirit beside them. */
+ * herzie's look, then the Modifiers with the Spirit beside them, then the
+ * class's Instrument (shown once there's a class). */
 const DECK_SLOT_ORDER = [
   "Equipment",
   "Accessories",
@@ -207,6 +217,7 @@ const DECK_SLOT_ORDER = [
   "Scenery",
   "Modifiers",
   "Spirit",
+  "Instrument",
 ] as const;
 
 function DeckSlot({

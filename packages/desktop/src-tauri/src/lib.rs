@@ -691,6 +691,30 @@ async fn equip_item(
     Ok(result)
 }
 
+/// Picks the herzie's class, once, at stage 2. The class gear arrives worn,
+/// so the response carries item state like an equip does.
+#[tauri::command]
+async fn choose_class(
+    class: String,
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    let client = api::http();
+    let result = api::api_choose_class(&client, &class).await?;
+    let mut s = state.lock().unwrap();
+    if let Some(snapshot) = snapshot_from_response(&result, &s) {
+        apply_inventory(&mut s, snapshot, None);
+        s.bump_equip_epoch();
+    }
+    if let Some(ref mut herzie) = s.herzie {
+        herzie.class = result["class"].as_str().map(str::to_string);
+        storage::save_herzie(herzie);
+    }
+    drop(s);
+    emit_state_update(&app);
+    Ok(result)
+}
+
 /// Buys from Good ol' George (a live `merchant` event) — the only way coins
 /// buy items — or from Nandor the Treatless (a `treat_trader`), paid in
 /// treats. Applies the returned item state, and the new coin balance when
@@ -2263,6 +2287,7 @@ async fn sync_tick_with(
             herzie.xp = server.xp;
             herzie.level = server.level;
             herzie.stage = server.stage;
+            herzie.class = server.class.clone();
             herzie.total_minutes_listened = server.total_minutes_listened;
             herzie.genre_minutes = server.genre_minutes.clone();
             herzie.streak_days = server.streak_days;
@@ -2319,6 +2344,9 @@ async fn sync_tick_with(
         // Capacity is credited out-of-band by the Stripe webhook and only ever
         // grows, so unlike inventory it needs no epoch guard: a stale sync can
         // at worst report a count that is one poll behind.
+        if let Some(skills) = sync_resp.skills.clone() {
+            s.skills = skills;
+        }
         if let Some(expansions) = sync_resp.bank_expansions {
             s.bank_expansions = expansions;
         }
@@ -2568,6 +2596,7 @@ pub fn run() {
             collect_drop,
             spawn_debug_drop,
             equip_item,
+            choose_class,
             fetch_store_products,
             fetch_premium_items,
             start_purchase,

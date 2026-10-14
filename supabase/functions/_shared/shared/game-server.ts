@@ -709,10 +709,13 @@ export async function processSync(
         pickupBlocked = true;
         continue;
       }
-      const { data: collectedId, error: collectError } = await admin.rpc("collect_pending_drop", {
-        p_user_id: userId,
-        p_drop_id: drop.id,
-      });
+      const { data: collectedId, error: collectError } = await admin.rpc(
+        "collect_pending_drop",
+        {
+          p_user_id: userId,
+          p_drop_id: drop.id,
+        },
+      );
       if (collectedId) {
         // collect_pending_drop mints the unit under the drop's own id.
         collectedUnits.push({

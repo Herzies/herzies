@@ -42,7 +42,11 @@ describe("skill XP", () => {
     expect(skillLevelForXp(skillTotalXpForLevel(2) - 1)).toBe(1);
     expect(skillLevelForXp(skillTotalXpForLevel(2))).toBe(2);
     const r = applySkillXp({ level: 1, xp: 0 }, skillTotalXpForLevel(3));
-    expect(r).toEqual({ level: 3, xp: skillTotalXpForLevel(3), leveledUp: true });
+    expect(r).toEqual({
+      level: 3,
+      xp: skillTotalXpForLevel(3),
+      leveledUp: true,
+    });
   });
 
   it("caps at the max level but keeps counting XP", () => {

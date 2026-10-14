@@ -2204,7 +2204,13 @@ function renderStickFrame(yAngle: number): string[] {
 }
 
 function renderCymbalFrame(yAngle: number): string[] {
-  return renderIconCard(yAngle, "#e8c860", "#8a7020", "#4a3c10", cymbalCardIcon);
+  return renderIconCard(
+    yAngle,
+    "#e8c860",
+    "#8a7020",
+    "#4a3c10",
+    cymbalCardIcon,
+  );
 }
 
 // --- Headphones card ---

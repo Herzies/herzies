@@ -39,6 +39,21 @@ pub struct Herzie {
     /// (or served) before the setting existed read as sharing, its default.
     #[serde(default = "default_true")]
     pub share_listening: bool,
+    /// Picked once at stage 2 ("bard", "record_slinger", "percussionist");
+    /// `None` until then, and from a server or a saved herzie that predates
+    /// classes.
+    #[serde(default)]
+    pub class: Option<String>,
+}
+
+/// One class skill the herzie knows. Mirrors `HerzieSkill` in @herzies/shared.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HerzieSkill {
+    pub skill_id: String,
+    pub level: u32,
+    /// Cumulative skill XP.
+    pub xp: f64,
 }
 
 fn default_true() -> bool {
@@ -176,6 +191,11 @@ pub struct SyncResponse {
     /// case the local count is left alone.
     #[serde(default)]
     pub bank_expansions: Option<u32>,
+    /// The class skills, once a class is chosen. `None` before then, from a
+    /// server older than classes, or when the read failed: the local list is
+    /// left alone.
+    #[serde(default)]
+    pub skills: Option<Vec<HerzieSkill>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -394,6 +414,9 @@ pub struct AppState {
     /// `bankCapacity(bankExpansions)` in @herzies/shared.
     #[serde(default)]
     pub bank_expansions: u32,
+    /// The class skills — see `HerzieSkill`.
+    #[serde(default)]
+    pub skills: Vec<HerzieSkill>,
     pub friends: HashMap<String, HerzieProfile>,
     /// Present while the server reports an incoming trade you have not joined yet.
     pub pending_trade_request: Option<PendingTradeRequest>,

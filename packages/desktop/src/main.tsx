@@ -1,10 +1,12 @@
 import "./globals.css";
 import {
   bankCapacity,
+  type HerzieClass,
   type HerzieProfile,
   hasRoomFor,
   isBankFull,
   levelProgress,
+  needsClassChoice,
 } from "@herzies/shared";
 import { herzieStage } from "@herzies/shared/gl";
 import { attachConsole } from "@tauri-apps/plugin-log";
@@ -17,6 +19,10 @@ import type { Update } from "@tauri-apps/plugin-updater";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ChatPanel } from "./components/ChatPanel";
+import {
+  ClassChoiceOverlay,
+  withClassGear,
+} from "./components/ClassChoiceOverlay";
 import { EventsView } from "./components/EventsView";
 import { FriendsView } from "./components/FriendsView";
 import { HERZIE_STAGE_HEIGHT, HerzieWithSky } from "./components/HerzieWithSky";
@@ -102,6 +108,7 @@ function App() {
     itemUpgrades: {},
     units: [],
     bankExpansions: 0,
+    skills: [],
     friends: {},
     pendingTradeRequest: null,
     pendingFriendRequest: null,
@@ -128,6 +135,7 @@ function App() {
     rawState.equipped,
     rawState.units,
     rawState.herzie?.stage ?? 1,
+    rawState.herzie?.class ?? null,
   );
   // Memoized on its inputs, each of which is itself identity-stable while its
   // content is unchanged (`rawState` via stableMerge, field by field) — so this
@@ -188,6 +196,12 @@ function App() {
   const [whatsNewVersion, setWhatsNewVersion] = useState<string | null>(null);
   /** Dev-only: shows the "What's new" overlay with sample notes (Settings → Debug). */
   const [testWhatsNewOverlay, setTestWhatsNewOverlay] = useState(false);
+  /** Dev-only: draws the herzie holding a class's gear (Settings → Debug). */
+  const [classOverride, setClassOverride] = useState<HerzieClass | null>(null);
+  /** Dev-only: opens the class choice whatever the herzie's state. */
+  const [testClassChoice, setTestClassChoice] = useState(false);
+  /** "Later" on the class choice: asked again next launch. */
+  const [classChoiceLater, setClassChoiceLater] = useState(false);
   /** Captured the first time `state.isOnline` is true this session: was this
    * device mid-onboarding (no herzie yet)? A fresh install or reinstall
    * shouldn't be told what's new in the version it just installed — only an
@@ -890,7 +904,11 @@ function App() {
               userId={herzie.friendCode}
               stage={stageOverride ?? herzie.stage}
               isPlaying={!!state.nowPlaying}
-              equipped={state.equipped}
+              equipped={
+                classOverride
+                  ? withClassGear(state.equipped, classOverride)
+                  : state.equipped
+              }
               paused={
                 (view !== "home" && view !== "inventory") ||
                 (view === "home" && !!selfProfile)
@@ -1105,6 +1123,9 @@ function App() {
             state={state}
             stageOverride={stageOverride}
             onStageOverride={setStageOverride}
+            classOverride={classOverride}
+            onClassOverride={setClassOverride}
+            onTestClassChoice={() => setTestClassChoice(true)}
             onPreviewOnboarding={() => setPreviewOnboarding(true)}
             onPreviewLoading={() => setPreviewLoading(true)}
             onTestUpdateAlert={() => setTestUpdateOverlay(true)}
@@ -1278,6 +1299,24 @@ function App() {
           installing={false}
         />
       )}
+
+      {herzie &&
+        ((needsClassChoice(herzie) && !classChoiceLater) ||
+          testClassChoice) && (
+          <ClassChoiceOverlay
+            userId={herzie.friendCode}
+            stage={Math.max(2, stageOverride ?? herzie.stage)}
+            equipped={state.equipped}
+            onChoose={async (c) => {
+              await herzies.chooseClass(c);
+              setTestClassChoice(false);
+            }}
+            onLater={() => {
+              setClassChoiceLater(true);
+              setTestClassChoice(false);
+            }}
+          />
+        )}
 
       {herzie && whatsNewVersion && (
         <WhatsNewOverlay

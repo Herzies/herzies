@@ -579,9 +579,12 @@ describe("applyEquip", () => {
 
   it("binds class equipment: no sell price, never dropped", () => {
     const gear = ITEMS.filter((i) => i.requiredClass);
-    expect(gear.map((i) => i.id).sort()).toEqual(
-      ["compact-discs", "lute", "old-cymbal", "worn-stick"],
-    );
+    expect(gear.map((i) => i.id).sort()).toEqual([
+      "compact-discs",
+      "lute",
+      "old-cymbal",
+      "worn-stick",
+    ]);
     for (const item of gear) {
       expect(item.sellPrice).toBeUndefined();
       expect(NON_DROPPABLE_ITEM_IDS).toContain(item.id);

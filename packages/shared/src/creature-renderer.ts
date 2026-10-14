@@ -1952,10 +1952,16 @@ const buildOldCymbal: HeldBuilder = (_s, part, { at, side, r }) => {
       kind: "cylinder",
       axis: scale(face, r * 0.08),
     }),
-    held(part, add(center, [side * r * 1.15, -r * 0.6, 0]), r * 0.22, "#6fa38a", {
-      kind: "cylinder",
-      axis: scale(face, r * 0.06),
-    }),
+    held(
+      part,
+      add(center, [side * r * 1.15, -r * 0.6, 0]),
+      r * 0.22,
+      "#6fa38a",
+      {
+        kind: "cylinder",
+        axis: scale(face, r * 0.06),
+      },
+    ),
   ];
 };
 
@@ -1977,7 +1983,10 @@ function discIn(part: string, { at, side, r }: Hand): Sphere[] {
 
 /** Compact Discs: one item, a disc in each hand. */
 const buildCompactDiscs: HeldBuilder = (spheres, part, hand) => {
-  const other = handOf(spheres, HELD_ARM[part === MAIN_HELD ? OFF_HELD : MAIN_HELD]);
+  const other = handOf(
+    spheres,
+    HELD_ARM[part === MAIN_HELD ? OFF_HELD : MAIN_HELD],
+  );
   return [
     ...discIn(part, hand),
     ...(other ? discIn(part === MAIN_HELD ? OFF_HELD : MAIN_HELD, other) : []),
@@ -2013,7 +2022,10 @@ const buildLute: HeldBuilder = (_s, part, { at, side, r }) => {
       add(neckMid, scale(neckDir, neckHalf + r * 0.25)),
       r * 0.2,
       "#4a2c18",
-      { kind: "capsule", axis: scale(norm([-side * 0.3, -0.2, 0.9]), r * 0.18) },
+      {
+        kind: "capsule",
+        axis: scale(norm([-side * 0.3, -0.2, 0.9]), r * 0.18),
+      },
     ),
   ];
 };

@@ -4,6 +4,7 @@ import {
   type EquipRejection,
   type GroundSide,
   getItem,
+  type HerzieClass,
   type ItemUnit,
   normalizeEquipped,
   normalizeUnits,
@@ -40,6 +41,7 @@ const REJECTION_MESSAGES: Record<EquipRejection, string> = {
   "missing-side": "No free ground slot",
   "no-slot": "This item can't be placed",
   "stage-too-low": "Your herzie isn't grown enough to wear this",
+  "class-required": "Only a herzie of this item's class can wear it",
 };
 
 export type ToggleEquipResult =
@@ -146,6 +148,8 @@ export function useOptimisticUnits(
   serverUnits: ItemUnit[],
   /** The herzie's stage, for items with a `minStage`. */
   stage: number,
+  /** The herzie's class, for class gear (`requiredClass`). */
+  herzieClass: HerzieClass | null = null,
 ) {
   const [overlay, setOverlay] = useState<OwnedState | null>(null);
   /** Unsettled changes. While non-zero, more server transitions are coming. */
@@ -178,6 +182,8 @@ export function useOptimisticUnits(
   // Read through a ref so toggleEquip keeps its identity as the herzie grows.
   const stageRef = useRef(stage);
   stageRef.current = stage;
+  const classRef = useRef(herzieClass);
+  classRef.current = herzieClass;
 
   // Read inside callbacks without making them depend on (and be recreated by)
   // every render — same pattern as FriendsView's friendsRef.
@@ -253,7 +259,12 @@ export function useOptimisticUnits(
         action,
         item?.equipSlot,
         side,
-        { minStage: item?.minStage, stage: stageRef.current },
+        {
+          minStage: item?.minStage,
+          stage: stageRef.current,
+          requiredClass: item?.requiredClass,
+          herzieClass: classRef.current,
+        },
       );
       if (!predicted.ok) {
         // Refused against our own state — the server would refuse it too, so

@@ -1,3 +1,4 @@
+import { CLASS_DEFS, CLASS_IDS, type HerzieClass } from "@herzies/shared";
 import type { Update } from "@tauri-apps/plugin-updater";
 import { useState } from "react";
 import { cn } from "../lib/utils";
@@ -38,6 +39,9 @@ export function SettingsView({
   state,
   stageOverride,
   onStageOverride,
+  classOverride,
+  onClassOverride,
+  onTestClassChoice,
   onPreviewOnboarding,
   onPreviewLoading,
   onTestUpdateAlert,
@@ -58,6 +62,11 @@ export function SettingsView({
   state: AppState;
   stageOverride: number | null;
   onStageOverride: (v: number | null) => void;
+  /** Dev-only: draws the herzie holding a class's gear, to eyeball it. */
+  classOverride: HerzieClass | null;
+  onClassOverride: (v: HerzieClass | null) => void;
+  /** Dev-only: opens the class choice; choosing in it is real. */
+  onTestClassChoice: () => void;
   onPreviewOnboarding: () => void;
   onPreviewLoading: () => void;
   onTestUpdateAlert: () => void;
@@ -421,6 +430,33 @@ export function SettingsView({
                   {s === null ? "Default" : `Stage ${s}`}
                 </button>
               ))}
+            </div>
+          </div>
+          <div className="mb-4">
+            <div className="mb-1.5 text-ui text-text-dim">Class Preview</div>
+            <div className="flex flex-wrap gap-1">
+              {[null, ...CLASS_IDS].map((c) => (
+                <button
+                  key={c ?? "default"}
+                  type="button"
+                  className={cn(
+                    "btn",
+                    classOverride === c
+                      ? "border-cyan text-cyan"
+                      : "border-[#555] text-text-dim",
+                  )}
+                  onClick={() => onClassOverride(c)}
+                >
+                  {c === null ? "Default" : CLASS_DEFS[c].name}
+                </button>
+              ))}
+              <button
+                type="button"
+                className="btn border-[#555] text-text-dim"
+                onClick={onTestClassChoice}
+              >
+                Class Choice…
+              </button>
             </div>
           </div>
         </>

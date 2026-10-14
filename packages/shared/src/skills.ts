@@ -83,7 +83,8 @@ export const SKILL_COOLDOWN_GRACE_MS = 150;
 
 export function isSkillId(value: unknown): value is SkillId {
   return (
-    typeof value === "string" && (SKILL_IDS as readonly string[]).includes(value)
+    typeof value === "string" &&
+    (SKILL_IDS as readonly string[]).includes(value)
   );
 }
 
@@ -193,7 +194,10 @@ export const MAX_DAMAGE_REDUCTION = 0.75;
 
 /** Damage after reductions: they multiply (two 50% shields take 75% off,
  * not 100%), and the total is clamped at MAX_DAMAGE_REDUCTION. */
-export function mitigate(damage: number, reductions: readonly number[]): number {
+export function mitigate(
+  damage: number,
+  reductions: readonly number[],
+): number {
   let kept = 1;
   for (const r of reductions) kept *= 1 - Math.min(1, Math.max(0, r));
   kept = Math.max(kept, 1 - MAX_DAMAGE_REDUCTION);

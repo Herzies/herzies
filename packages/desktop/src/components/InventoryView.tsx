@@ -1880,6 +1880,9 @@ function InventoryViewImpl({
           {panel === "deck" ? (
             <div {...{ [HERZIE_ZONE_ATTR]: "" }} className="relative h-full">
               <DeckOverlay
+                showInstrument={
+                  !!herzie.class || !!equipped.main_hand || !!equipped.off_hand
+                }
                 equipped={equipped}
                 units={units}
                 flyingUnitIds={flyingUnitIds}

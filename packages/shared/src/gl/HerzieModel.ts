@@ -847,7 +847,9 @@ export class HerzieModel {
       }
       const arm = s.shape && arms?.[s.part];
       if (arm && s.shape) {
-        scratch.set(...turnBetween(s.shape.axis, arm.rest, arm.now)).normalize();
+        scratch
+          .set(...turnBetween(s.shape.axis, arm.rest, arm.now))
+          .normalize();
         mesh.quaternion.setFromUnitVectors(UP, scratch);
       }
     }

@@ -787,6 +787,24 @@ pub async fn api_equip_unit(
     Ok(data)
 }
 
+/// Picks the herzie's class (permanent). Surfaces the server's message
+/// (already chosen, not grown enough) like the other item calls.
+pub async fn api_choose_class(client: &Client, class: &str) -> Result<serde_json::Value, String> {
+    let body = serde_json::json!({ "class": class });
+    let resp = api_fetch(client, reqwest::Method::POST, "/class/choose", Some(body))
+        .await
+        .ok_or_else(|| "Network error".to_string())?;
+    let status = resp.status();
+    let text = resp.text().await.map_err(|e| format!("Read error: {e}"))?;
+    let data: serde_json::Value =
+        serde_json::from_str(&text).map_err(|_| format!("Server returned {status}"))?;
+    if !status.is_success() {
+        let msg = data["error"].as_str().unwrap_or("Unknown error");
+        return Err(msg.to_string());
+    }
+    Ok(data)
+}
+
 /// Rolls one dice item onto ONE specific card. The server decides the outcome
 /// (`result`: upgraded / kept / destroyed) — a risky roll can break the card
 /// unless a protection item is sent along. Surfaces the server's error
