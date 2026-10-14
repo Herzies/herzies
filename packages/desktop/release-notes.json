@@ -1,5 +1,13 @@
 [
   {
+    "version": "0.1.0-beta.51",
+    "highlights": [
+      "Fixed: \"Inventory full\" no longer pops up when your bag has room",
+      "Beat the boss and its loot drops in the cave for you to pick up",
+      "Tidier herzie header and XP bar on Home and Profile"
+    ]
+  },
+  {
     "version": "0.1.0-beta.50",
     "highlights": [
       "New: the Training Grounds. Step through the portal in the Town, press Tab to aim, and blast training dummies with sonic waves",

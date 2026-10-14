@@ -2052,8 +2052,6 @@ fn parse_rfc3339_secs(ts: &str) -> Option<i64> {
     Some(days * 86_400 + h * 3600 + mi * 60 + sec - offset)
 }
 
-/// How long `events_watch_loop` should sleep: the regular interval, or less if
-/// an upcoming event starts sooner than that.
 /// Whether any pending drop has landed (`dropped_at` not in the future). A
 /// timestamp that won't parse counts as landed, as every drop did before
 /// boss loot.
@@ -2063,6 +2061,8 @@ fn has_landed_drop(drops: &[PendingDrop], now_secs: i64) -> bool {
         .any(|d| parse_rfc3339_secs(&d.dropped_at).is_none_or(|t| t <= now_secs))
 }
 
+/// How long `events_watch_loop` should sleep: the regular interval, or less if
+/// an upcoming event starts sooner than that.
 fn next_events_wake(upcoming: &[GameEvent], now_secs: i64) -> Duration {
     let soonest = upcoming
         .iter()
