@@ -1029,6 +1029,7 @@ function App() {
               active={view === "inventory"}
               rootKey={rootKeys.inventory ?? 0}
               openPanel={inventoryPanel}
+              skills={state.skills}
             />
           </div>
         )}

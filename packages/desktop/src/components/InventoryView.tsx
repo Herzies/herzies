@@ -4,6 +4,7 @@ import type {
   EquipSlot,
   GroundSide,
   Herzie,
+  HerzieSkill,
   ItemType,
   ItemUnit,
   ItemUpgradeRejection,
@@ -73,6 +74,7 @@ import { SortIcon } from "./icons/SortIcon";
 import { List } from "./List";
 import { NumberTicker } from "./NumberTicker";
 import { PromptOverlay } from "./PromptOverlay";
+import { SkillsPanel } from "./SkillsPanel";
 import { StatsPanel } from "./StatsPanel";
 import { TabButton } from "./TabButton";
 import { HoverPreview, Tooltip } from "./Tooltip";
@@ -417,8 +419,9 @@ export const HERZIE_ZONE_ATTR = "data-herzie-zone";
 const toDeck = (unitId: string) => `[${DECK_UNIT_ATTR}="${unitId}"]`;
 const toBank = (unitId: string) => `[${TILE_UNITS_ATTR}~="${unitId}"]`;
 
-/** The Herzie view's two panels under the herzie. */
-type Panel = "bag" | "deck";
+/** The Herzie view's panels under the herzie. Skills shows once there's a
+ * class. */
+type Panel = "bag" | "deck" | "skills";
 const PANEL_TAB_ATTR = "data-panel-tab";
 const toTab = (panel: Panel) => `[${PANEL_TAB_ATTR}="${panel}"]`;
 
@@ -661,6 +664,7 @@ function InventoryViewImpl({
   active = true,
   rootKey = 0,
   openPanel = "deck",
+  skills = [],
 }: {
   herzie: Herzie;
   initialItem?: string | null;
@@ -696,6 +700,8 @@ function InventoryViewImpl({
   rootKey?: number;
   /** The panel it opens on, and goes back to when re-selected. */
   openPanel?: Panel;
+  /** The class skills, for the Skills tab. */
+  skills?: readonly HerzieSkill[];
 }) {
   const capacity = bankCapacity(bankExpansions);
   const [currency, setCurrency] = useState(cachedCurrency || herzie.currency);
@@ -850,6 +856,7 @@ function InventoryViewImpl({
   const [tabBumps, setTabBumps] = useState<Record<Panel, number>>({
     bag: 0,
     deck: 0,
+    skills: 0,
   });
   /** Tabs mid-bump. Cleared when the animation ends: a class left on would
    * replay it every time the view is shown again (display:none → flex
@@ -1801,7 +1808,10 @@ function InventoryViewImpl({
         {/* h-6: a whole-pixel row height, for the same reason as the
             header's leading-5 — the deck's and bag's icons sit below it. */}
         <div className="mb-0.5 flex h-6 items-center border-b border-border">
-          {(["deck", "bag"] as const).map((tab) => (
+          {(herzie.class
+            ? (["deck", "bag", "skills"] as const)
+            : (["deck", "bag"] as const)
+          ).map((tab) => (
             <TabButton
               key={tab}
               active={panel === tab}
@@ -1823,7 +1833,7 @@ function InventoryViewImpl({
                   })
                 }
               >
-                {tab === "bag" ? "Bag" : "Deck"}
+                {tab === "bag" ? "Bag" : tab === "deck" ? "Deck" : "Skills"}
               </span>
             </TabButton>
           ))}
@@ -1877,7 +1887,11 @@ function InventoryViewImpl({
           className="shrink-0"
           style={{ aspectRatio: `${GRID_COLS} / ${VISIBLE_ROWS}` }}
         >
-          {panel === "deck" ? (
+          {panel === "skills" && herzie.class ? (
+            <div className="h-full overflow-y-auto overscroll-contain">
+              <SkillsPanel herzieClass={herzie.class} skills={skills} />
+            </div>
+          ) : panel === "deck" ? (
             // Scrolls when the deck's sections outgrow the panel (the
             // Instrument row, once there's a class).
             <div
