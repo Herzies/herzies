@@ -38,6 +38,7 @@ import {
   VIOLET_RAMP,
 } from "./ascii3d.ts";
 import type { HerzieClass } from "./classes.ts";
+import { normalizeStatPoints, STAT_TUNING, type StatPoints } from "./stats.ts";
 import { BOSS_DAMAGE_PER_MINUTE, type Stage } from "./types.ts";
 
 export type Rarity = "common" | "uncommon" | "rare" | "legendary" | "mythic";
@@ -811,6 +812,9 @@ export function applyItemUpgrade(
  * every item, tooltip and total below picks it up. */
 export const STAT_KEYS = [
   "sonicPower",
+  "stamina",
+  "euphony",
+  "def",
   "luck",
   "critChance",
   "critDamage",
@@ -828,6 +832,9 @@ export type HerzieStats = Record<StatKey, number>;
 
 export const STAT_LABELS: Record<StatKey, string> = {
   sonicPower: "Sonic power",
+  stamina: "Stamina",
+  euphony: "Euphony",
+  def: "Def",
   luck: "Luck",
   critChance: "Crit chance",
   critDamage: "Crit damage",
@@ -837,7 +844,12 @@ export const STAT_LABELS: Record<StatKey, string> = {
 const PERCENT_STATS = new Set<StatKey>(["critChance", "critDamage"]);
 /** Stats every herzie lists, even at 0. The rest only show once something
  * gives them: a list of zeroes for things no item grants yet says nothing. */
-const ALWAYS_SHOWN = new Set<StatKey>(["sonicPower", "luck"]);
+const ALWAYS_SHOWN = new Set<StatKey>([
+  "sonicPower",
+  "stamina",
+  "euphony",
+  "luck",
+]);
 
 /** A stat's value as it reads: "12", or "5%". */
 export function formatStat(key: StatKey, value: number): string {
@@ -3305,6 +3317,23 @@ export function getHerzieStatsFromUnits(
   return totals;
 }
 
+/** Item totals with the herzie's stat points on top: a point is one of its
+ * stat, and Stamina brings its Def along. What every fight and every bill
+ * reads; the item-only totals are for comparing gear. */
+export function withStatPoints(
+  items: HerzieStats,
+  points: StatPoints | null | undefined,
+): HerzieStats {
+  const p = normalizeStatPoints(points);
+  return {
+    ...items,
+    sonicPower: items.sonicPower + p.sonicPower,
+    stamina: items.stamina + p.stamina,
+    euphony: items.euphony + p.euphony,
+    def: items.def + STAT_TUNING.defPerStamina * (items.stamina + p.stamina),
+  };
+}
+
 /** Damage a listen deals to a boss per billed minute. Sonic power is a
  * percentage on top of the base rate — 10 sonic power is +10% — the same way
  * every other bonus in the game is a fraction of what it modifies. Both
@@ -3318,7 +3347,13 @@ export function bossDamagePerMinute(
 
 // One sonic wave's damage lives in combat.ts so the Town server can use it
 // without the item catalog; re-exported here for everyone else.
-export { HIT_BASE, HIT_SPREAD, hitDamage } from "./combat.ts";
+export {
+  CAST_INTERVAL_MS,
+  HIT_BASE,
+  HIT_SPREAD,
+  hitDamage,
+  waveDamage,
+} from "./combat.ts";
 
 // getItemColor lived here. It moved to item-canvas.ts — the module its three
 // dependencies already come from — so that this file stays free of the

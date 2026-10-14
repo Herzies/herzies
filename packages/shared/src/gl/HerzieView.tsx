@@ -210,6 +210,8 @@ export function HerzieView({
     const sun = studioSun(model);
     scene.add(sun, sun.target);
     const cam = new THREE.PerspectiveCamera(50, 1, 0.05, 100);
+    /** Scratch: the feet, projected to find where they land. */
+    const feet = new THREE.Vector3();
     // What was last drawn, to tell when a paused herzie needs drawing again.
     const drawn = { angle: Number.NaN, grey: -1, opacity: -1 };
 
@@ -273,26 +275,33 @@ export function HerzieView({
 
         // Framed like the old renderer: a perspective camera a fixed
         // distance from the herzie's centre, tilted down a little, its view
-        // FRAME_HEIGHT/zoom tall at the centre.
+        // FRAME_HEIGHT/zoom tall at the centre. Always the herzie's own
+        // centre, whatever its height: aiming at a fixed point instead put
+        // the camera above a small herzie's eyes, looking down on it.
         const frame = FRAME_HEIGHT / c.zoom;
-        const perPx = frame / h;
         cam.fov = THREE.MathUtils.radToDeg(
           2 * Math.atan(frame / 2 / CAMERA_DISTANCE),
         );
         cam.aspect = w / h;
-        const targetY =
-          l.groundInset !== undefined
-            ? (h / 2 - l.groundInset) * perPx
-            : model.centerHeight;
+        const targetY = model.centerHeight;
         cam.position.set(
           0,
           targetY + CAMERA_DISTANCE * Math.sin(TILT),
           CAMERA_DISTANCE * Math.cos(TILT),
         );
         cam.lookAt(0, targetY, 0);
-        // `offsetY` pans the picture, not the camera: moving the camera would
-        // also change the angle, looking up at the herzie as it rises.
-        if (c.offsetY !== 0) cam.setViewOffset(w, h, 0, -c.offsetY, w, h);
+        // Standing on a floor, the picture pans so the feet land
+        // `groundInset` px above the bottom edge. `offsetY` pans it too:
+        // panning, not moving the camera, keeps the angle the same.
+        let pan = -c.offsetY;
+        if (l.groundInset !== undefined) {
+          cam.clearViewOffset();
+          cam.updateProjectionMatrix();
+          cam.updateMatrixWorld();
+          const feetPx = ((1 - feet.set(0, 0, 0).project(cam).y) / 2) * h;
+          pan += feetPx - (h - l.groundInset);
+        }
+        if (pan !== 0) cam.setViewOffset(w, h, 0, pan, w, h);
         else cam.clearViewOffset();
         cam.updateProjectionMatrix();
       },

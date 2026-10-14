@@ -12,6 +12,7 @@ import {
   skillValue,
   skillXpFor,
 } from "@herzies/shared/skills";
+import { buffMult, healMult } from "@herzies/shared/stats";
 import type {
   BossTelegraph,
   FightState,
@@ -49,7 +50,7 @@ export type FightPlayer = {
   hp: number;
   maxHp: number;
   down: boolean;
-  stats: HitStats;
+  stats: FightStats;
   present: boolean;
   /** Class skills from the ticket, and their levels (raised by `skillUps`). */
   skills: Map<SkillId, number>;
@@ -161,14 +162,13 @@ export class FightRuntime {
     const hp = behind ? Math.min(known.hp, fromTicket) : fromTicket;
     const down = ticket.hp?.down || hp <= 0 || (behind && known.down);
     if (!down) this.downAcked.delete(uid);
-    const [sonicPower, , critChance, critDamage] = ticket.st ?? [0, 0, 0, 0];
     const p: FightPlayer = {
       uid,
       id,
       hp,
       maxHp,
       down: !!down,
-      stats: { sonicPower, critChance, critDamage },
+      stats: statsOf(ticket.st),
       present: true,
       skills: skillsOf(ticket),
       // A rejoin doesn't reset cooldowns.
@@ -191,7 +191,7 @@ export class FightRuntime {
   }
 
   /** A player's ticket was renewed: only stats may change; health never
-   * comes back up from a ticket mid-fight. */
+   * comes back up from a ticket mid-fight, and max HP stays as it joined. */
   renew(uid: string, ticket: TownTicketPayload): void {
     const p = this.players.get(uid);
     if (!p) return;
@@ -200,8 +200,7 @@ export class FightRuntime {
     for (const [skill, level] of skillsOf(ticket))
       p.skills.set(skill, Math.max(level, p.skills.get(skill) ?? 0));
     if (!ticket.st) return;
-    const [sonicPower, , critChance, critDamage] = ticket.st;
-    p.stats = { sonicPower, critChance, critDamage };
+    p.stats = statsOf(ticket.st);
   }
 
   player(uid: string): FightPlayer | undefined {
@@ -277,7 +276,10 @@ export class FightRuntime {
         if (!at) continue;
         if (Math.hypot(at.x - pos.x, at.z - pos.z) > (def.radius ?? 0))
           continue;
-        const heal = Math.min(o.maxHp - o.hp, value * o.maxHp);
+        const heal = Math.min(
+          o.maxHp - o.hp,
+          value * healMult(p.stats.euphony) * o.maxHp,
+        );
         if (heal <= 0) continue;
         o.hp += heal;
         restored += heal;
@@ -294,7 +296,7 @@ export class FightRuntime {
     } else if (skillId === "cymbrella") {
       const buff = this.engine.buff(uid, {
         id: "cymbrella",
-        value,
+        value: value * buffMult(p.stats.euphony),
         until: now + (def.durationMs ?? 0),
       });
       this.engine.addThreat(uid, TUNING.threat.cymbrella);
@@ -374,6 +376,7 @@ export class FightRuntime {
         uid: p.uid,
         alive: !p.down,
         maxHp: p.maxHp,
+        def: p.stats.def,
         posAt: (t) => this.history.at(p.uid, t),
       });
     }
@@ -606,6 +609,25 @@ export class FightRuntime {
 export const DEV_EVENT = "dev";
 
 /** The skills a ticket says this herzie has, at their levels. */
+/** What a fight reads off a player's stats: a cast's damage, their Def, and
+ * what Euphony does to their skills. */
+export type FightStats = HitStats & { def: number; euphony: number };
+
+/** Stats from a ticket's `st`; a ticket from before stat points has no Def
+ * or Euphony, and one from before stats has nothing. */
+export function statsOf(st: TownTicketPayload["st"]): FightStats {
+  const n = (v: number | undefined) =>
+    typeof v === "number" && Number.isFinite(v) ? v : 0;
+  const [sonicPower, , critChance, critDamage, , def, euphony] = st ?? [];
+  return {
+    sonicPower: n(sonicPower),
+    critChance: n(critChance),
+    critDamage: n(critDamage),
+    def: n(def),
+    euphony: n(euphony),
+  };
+}
+
 function skillsOf(ticket: TownTicketPayload): Map<SkillId, number> {
   const out = new Map<SkillId, number>();
   for (const entry of ticket.sk ?? []) {

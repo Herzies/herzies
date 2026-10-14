@@ -41,5 +41,6 @@ export * from "./items.ts";
 // XP curve, levelling, stage thresholds, multiplier application.
 export * from "./leveling.ts";
 export * from "./skills.ts";
+export * from "./stats.ts";
 // Core domain types (Herzie, Stage, drops, events, friend/trade requests).
 export * from "./types.ts";

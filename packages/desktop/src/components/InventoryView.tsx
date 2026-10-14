@@ -32,6 +32,7 @@ import {
   RARITY_COLORS,
   RARITY_LABELS,
   requiredDiceForLevel,
+  statPoints,
   unitsBestFirst,
 } from "@herzies/shared";
 import {
@@ -75,7 +76,7 @@ import { List } from "./List";
 import { NumberTicker } from "./NumberTicker";
 import { PromptOverlay } from "./PromptOverlay";
 import { SkillsPanel } from "./SkillsPanel";
-import { StatsPanel } from "./StatsPanel";
+import { StatsTab } from "./StatsTab";
 import { TabButton } from "./TabButton";
 import { HoverPreview, Tooltip } from "./Tooltip";
 
@@ -419,9 +420,15 @@ export const HERZIE_ZONE_ATTR = "data-herzie-zone";
 const toDeck = (unitId: string) => `[${DECK_UNIT_ATTR}="${unitId}"]`;
 const toBank = (unitId: string) => `[${TILE_UNITS_ATTR}~="${unitId}"]`;
 
-/** The Herzie view's panels under the herzie. Skills shows once there's a
- * class. */
-type Panel = "bag" | "deck" | "skills";
+/** The Herzie view's panels under the herzie. Stats shows once the server
+ * knows stat points, Skills once there's a class. */
+type Panel = "bag" | "deck" | "stats" | "skills";
+const PANEL_LABELS: Record<Panel, string> = {
+  deck: "Deck",
+  bag: "Bag",
+  stats: "Stats",
+  skills: "Skills",
+};
 const PANEL_TAB_ATTR = "data-panel-tab";
 const toTab = (panel: Panel) => `[${PANEL_TAB_ATTR}="${panel}"]`;
 
@@ -856,6 +863,7 @@ function InventoryViewImpl({
   const [tabBumps, setTabBumps] = useState<Record<Panel, number>>({
     bag: 0,
     deck: 0,
+    stats: 0,
     skills: 0,
   });
   /** Tabs mid-bump. Cleared when the animation ends: a class left on would
@@ -1692,25 +1700,9 @@ function InventoryViewImpl({
 
   // Read off the copies, so each worn one counts at its own upgrade level.
   const stats = getHerzieStatsFromUnits(units);
-  /** What the stats would become if the card being dragged were let go now:
-   * a bag card over the herzie going on, a deck card off it coming off. */
-  const statsPreview = (() => {
-    if (!dragVisual || !dragSource || !draggedDef) return null;
-    if (dragSource.kind === "bag") {
-      if (!deckDrag?.inZone || !deckDrag.landing) return null;
-      const out = applyEquip(
-        units,
-        dragSource.tile.unitIds[0],
-        "equip",
-        draggedDef.equipSlot,
-        deckDrag.landing.side,
-      );
-      return out.ok ? getHerzieStatsFromUnits(out.units) : null;
-    }
-    if (dragVisual.inZone) return null;
-    const out = applyEquip(units, dragSource.unitId, "unequip", undefined);
-    return out.ok ? getHerzieStatsFromUnits(out.units) : null;
-  })();
+  const unspentPoints = herzie?.statPoints
+    ? statPoints(herzie.level, herzie.statPoints).unspent
+    : 0;
 
   // The overlay opens on an item id (a deep link from a notification), so it
   // shows the copy that id most plausibly means: the one worn, else the best.
@@ -1754,26 +1746,26 @@ function InventoryViewImpl({
     <div className="relative flex h-full flex-col">
       <div
         ref={headerRef}
-        className="z-50 mb-1 flex items-center justify-between"
+        className="z-50 mb-1 flex min-h-5 items-center justify-between"
       >
-        {/* leading-5: a whole-pixel header height keeps the pixel-art icons
-            below it on whole pixels — a half-pixel offset snaps their rows
-            unevenly, and they read as warped. */}
-        <h1 className="text-ui-lg leading-5 font-bold text-cyan">Herzie</h1>
+        {/* The same markup as Home's header (whose name sits in a Tooltip's
+            inline-flex wrapper) in the same 20px row (Home's comes from its
+            h-5 buttons), so the name doesn't shift between the two views.
+            A whole-pixel row also keeps the pixel-art icons below it on
+            whole pixels — a half-pixel offset snaps their rows unevenly. */}
+        <h1 className="text-ui-lg font-bold text-cyan">
+          <span className="inline-flex">
+            <span className="font-bold text-cyan">{herzie.name}</span>
+          </span>
+          <span className="ml-2 text-[10px] font-normal text-text-dim">
+            Lv. {herzie.level}
+          </span>
+        </h1>
         <Tooltip label={`${formatAmount(currency)} herzie coins`}>
           <div className="text-ui text-cyan">
             <Coin amount={currency} animate />
           </div>
         </Tooltip>
-      </div>
-
-      {/* Stats just under the title, flush left like the deck below. A
-          zero-height row, so they float over the sky without pushing the
-          stage down (which would undo its alignment with Home's). */}
-      <div className="relative h-0 shrink-0">
-        <div className="pointer-events-none absolute top-2 left-0 z-10">
-          <StatsPanel stats={stats} preview={statsPreview} />
-        </div>
       </div>
 
       {/* The stage: HERZIE_STAGE_HEIGHT at the same offset as Home's, where
@@ -1808,9 +1800,13 @@ function InventoryViewImpl({
         {/* h-6: a whole-pixel row height, for the same reason as the
             header's leading-5 — the deck's and bag's icons sit below it. */}
         <div className="mb-0.5 flex h-6 items-center border-b border-border">
-          {(herzie.class
-            ? (["deck", "bag", "skills"] as const)
-            : (["deck", "bag"] as const)
+          {(
+            [
+              "deck",
+              "bag",
+              ...(herzie.statPoints ? (["stats"] as const) : []),
+              ...(herzie.class ? (["skills"] as const) : []),
+            ] as Panel[]
           ).map((tab) => (
             <TabButton
               key={tab}
@@ -1833,8 +1829,13 @@ function InventoryViewImpl({
                   })
                 }
               >
-                {tab === "bag" ? "Bag" : tab === "deck" ? "Deck" : "Skills"}
+                {PANEL_LABELS[tab]}
               </span>
+              {tab === "stats" && unspentPoints > 0 && (
+                <span className="ml-0.5 align-top text-[8px] leading-none font-bold text-yellow">
+                  +{unspentPoints}
+                </span>
+              )}
             </TabButton>
           ))}
           <div
@@ -1887,7 +1888,16 @@ function InventoryViewImpl({
           className="shrink-0"
           style={{ aspectRatio: `${GRID_COLS} / ${VISIBLE_ROWS}` }}
         >
-          {panel === "skills" && herzie.class ? (
+          {panel === "stats" && herzie.statPoints ? (
+            <div className="h-full overflow-y-auto overscroll-contain">
+              <StatsTab
+                stats={stats}
+                level={herzie.level}
+                points={herzie.statPoints}
+                onLog={onLog}
+              />
+            </div>
+          ) : panel === "skills" && herzie.class ? (
             <div className="h-full overflow-y-auto overscroll-contain">
               <SkillsPanel herzieClass={herzie.class} skills={skills} />
             </div>

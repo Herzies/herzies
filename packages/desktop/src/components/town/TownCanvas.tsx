@@ -217,6 +217,9 @@ export default function TownCanvas(props: TownCanvasProps) {
 
 const NO_STATS: HerzieStats = {
   sonicPower: 0,
+  stamina: 0,
+  euphony: 0,
+  def: 0,
   luck: 0,
   critChance: 0,
   critDamage: 0,

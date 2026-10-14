@@ -41,6 +41,11 @@
       "import": "./dist/skills.js",
       "require": "./dist/skills.js"
     },
+    "./stats": {
+      "types": "./dist/stats.d.ts",
+      "import": "./dist/stats.js",
+      "require": "./dist/stats.js"
+    },
     "./gl": {
       "types": "./dist/gl/index.d.ts",
       "import": "./dist/gl/index.js",

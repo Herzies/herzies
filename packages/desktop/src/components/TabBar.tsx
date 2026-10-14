@@ -14,11 +14,14 @@ export function TabBar({
   view,
   setView,
   visitorsInTown = 0,
+  unspentPoints = 0,
 }: {
   view: View;
   setView: (v: View) => void;
   /** How many visitors are in Town right now; badges the tab when above 0. */
   visitorsInTown?: number;
+  /** Stat points waiting to be spent; badges the Herzie tab when above 0. */
+  unspentPoints?: number;
 }) {
   type Tab = {
     id: View;
@@ -90,6 +93,14 @@ export function TabBar({
         {t.id === "events" && visitorsInTown > 0 && (
           <span className="absolute top-0 left-full z-10 ml-0.5 text-[8px] leading-none font-bold text-green">
             {visitorsInTown}
+          </span>
+        )}
+        {t.id === "inventory" && unspentPoints > 0 && (
+          <span
+            className="absolute top-0 left-full z-10 ml-0.5 text-[8px] leading-none font-bold text-yellow"
+            title={`${unspentPoints} stat point${unspentPoints === 1 ? "" : "s"} to spend`}
+          >
+            +{unspentPoints}
           </span>
         )}
       </span>

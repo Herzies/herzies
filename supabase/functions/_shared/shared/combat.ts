@@ -22,6 +22,16 @@ export const HIT_BASE = 100;
 /** How far a hit's damage wanders either way of its base, as a fraction. */
 export const HIT_SPREAD = 0.1;
 
+/** How often a herzie casts a sonic wave, in ms: the client's pace, which
+ * the Town server holds it to (with some slack for network jitter). */
+export const CAST_INTERVAL_MS = 500;
+
+/** What one wave deals at this sonic power, before its spread and crits:
+ * the number a player is shown as their damage. */
+export function waveDamage(sonicPower: number): number {
+  return Math.round(HIT_BASE * (1 + sonicPower / 100));
+}
+
 /** One hit of a herzie's sonic wave: the base, raised by sonic power the
  * way boss damage is (10 sonic power is +10%), wandering ±HIT_SPREAD; and,
  * at crit chance percent, a critical hit — crit damage percent on top.

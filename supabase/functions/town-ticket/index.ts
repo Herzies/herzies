@@ -17,6 +17,7 @@ import {
   getHerzieStatsFromUnits,
   normalizeEquipped,
   normalizeUnits,
+  withStatPoints,
 } from "../_shared/shared/items.ts";
 import {
   signTownTicket,
@@ -71,7 +72,7 @@ Deno.serve(async (request) => {
   });
   const { data: herzie, error } = await admin
     .from("herzies")
-    .select("name, friend_code, stage, equipped, level, hp, hp_at, down, class")
+    .select("name, friend_code, stage, equipped, level, hp, hp_at, down, class, stat_stamina, stat_sonic, stat_euphony")
     .eq("user_id", user.id)
     .maybeSingle();
   if (error) {
@@ -96,13 +97,22 @@ Deno.serve(async (request) => {
       down: herzie.down,
     },
     herzie.level,
+    herzie.stat_stamina ?? 0,
     now,
   );
   const { data: unitRows } = await admin.rpc("item_units_json", {
     p_user_id: user.id,
   });
-  const stats = getHerzieStatsFromUnits(
-    Array.isArray(unitRows) ? normalizeUnits(unitRows) : [],
+  // Items plus stat points, as the sync bills them.
+  const stats = withStatPoints(
+    getHerzieStatsFromUnits(
+      Array.isArray(unitRows) ? normalizeUnits(unitRows) : [],
+    ),
+    {
+      stamina: herzie.stat_stamina,
+      sonicPower: herzie.stat_sonic,
+      euphony: herzie.stat_euphony,
+    },
   );
 
   // Class skills and their levels: the Town server judges a skill's
@@ -156,6 +166,9 @@ Deno.serve(async (request) => {
         stats.luck,
         stats.critChance,
         stats.critDamage,
+        stats.stamina,
+        stats.def,
+        stats.euphony,
       ],
       boss,
       ...(herzie.class ? { cls: herzie.class as string, sk } : {}),

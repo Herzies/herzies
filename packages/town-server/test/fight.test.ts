@@ -103,7 +103,12 @@ describe("a fight", () => {
     expect(tg.length).toBeGreaterThan(0);
     expect(tg.every((o) => o.to === "all")).toBe(true);
     const hp = msgs(out, "hp");
-    expect(hp[0].msg).toMatchObject({ t: "hp", id: 1, hp: 160, maxHp: 200 });
+    expect(hp[0].msg).toMatchObject({
+      t: "hp",
+      id: 1,
+      hp: 200 - TUNING.slam.damage,
+      maxHp: 200,
+    });
     expect(msgs(out, "resolve")[0].msg).toMatchObject({ t: "resolve", hits: [1] });
   });
 

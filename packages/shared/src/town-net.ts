@@ -95,9 +95,11 @@ export type TownTicketPayload = {
   /** Health when the ticket was issued; the Town server seeds a fight from
    * it. Absent on tickets from before health existed. */
   hp?: { hp: number; maxHp: number; down: boolean };
-  /** Combat stats, `[sonicPower, luck, critChance, critDamage]`, so the
-   * server can roll a cast's damage without a database. */
-  st?: [number, number, number, number];
+  /** Combat stats, `[sonicPower, luck, critChance, critDamage, stamina,
+   * def, euphony]`, so the server can roll a cast's damage and judge a hit
+   * or a heal without a database. Tickets from before stat points stop
+   * after critDamage: read the rest as 0. */
+  st?: [number, number, number, number, number?, number?, number?];
   /** Set only when the boss room is open: the boss event, when it ends
    * (unix seconds), and the boss's health as of the ticket (the room starts
    * a fight from it if it has none running). The boss room turns away

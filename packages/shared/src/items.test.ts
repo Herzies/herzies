@@ -54,6 +54,7 @@ import {
   unitsToEquipped,
   unitsToInventory,
   upgradeSuccessChance,
+  withStatPoints,
 } from "./items.js";
 
 /** A unit with sensible defaults, so a test only states what it cares about. */
@@ -952,12 +953,18 @@ describe("herzie stats", () => {
   it("is zero for a herzie with nothing equipped", () => {
     expect(getHerzieStats({})).toEqual({
       sonicPower: 0,
+      stamina: 0,
+      euphony: 0,
+      def: 0,
       luck: 0,
       critChance: 0,
       critDamage: 0,
     });
     expect(getHerzieStats(null)).toEqual({
       sonicPower: 0,
+      stamina: 0,
+      euphony: 0,
+      def: 0,
       luck: 0,
       critChance: 0,
       critDamage: 0,
@@ -1018,6 +1025,9 @@ describe("herzie stats", () => {
       ),
     ).toEqual({
       sonicPower: 0,
+      stamina: 0,
+      euphony: 0,
+      def: 0,
       luck: 0,
       critChance: 0,
       critDamage: 0,
@@ -1332,12 +1342,18 @@ describe("item units", () => {
   it("is zero with nothing worn", () => {
     expect(getHerzieStatsFromUnits(null)).toEqual({
       sonicPower: 0,
+      stamina: 0,
+      euphony: 0,
+      def: 0,
       luck: 0,
       critChance: 0,
       critDamage: 0,
     });
     expect(getHerzieStatsFromUnits([unit("a", "boombox", 3)])).toEqual({
       sonicPower: 0,
+      stamina: 0,
+      euphony: 0,
+      def: 0,
       luck: 0,
       critChance: 0,
       critDamage: 0,
@@ -1398,15 +1414,43 @@ describe("hitDamage", () => {
 
 describe("stats", () => {
   it("lists crit stats only once something gives them", () => {
-    const base = { sonicPower: 0, luck: 0, critChance: 0, critDamage: 0 };
-    expect(shownStatKeys(base)).toEqual(["sonicPower", "luck"]);
+    const base = getHerzieStats({});
+    expect(shownStatKeys(base)).toEqual([
+      "sonicPower",
+      "stamina",
+      "euphony",
+      "luck",
+    ]);
     expect(shownStatKeys(base, { ...base, critDamage: 5 })).toEqual([
       "sonicPower",
+      "stamina",
+      "euphony",
       "luck",
       "critDamage",
     ]);
     expect(formatStat("critChance", 5)).toBe("5%");
     expect(formatStat("sonicPower", 5)).toBe("5");
+  });
+});
+
+describe("withStatPoints", () => {
+  it("adds points on top of items, and Stamina brings Def", () => {
+    const items = getHerzieStats({ ground_left: "boombox" });
+    const total = withStatPoints(items, {
+      stamina: 6,
+      sonicPower: 4,
+      euphony: 2,
+    });
+    expect(total.sonicPower).toBe(items.sonicPower + 4);
+    expect(total.stamina).toBe(6);
+    expect(total.def).toBe(6);
+    expect(total.euphony).toBe(2);
+    expect(total.luck).toBe(items.luck);
+  });
+
+  it("is the item totals with no points", () => {
+    const items = getHerzieStats({ head: "headphones" });
+    expect(withStatPoints(items, null)).toEqual(items);
   });
 });
 

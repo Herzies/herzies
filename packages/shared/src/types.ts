@@ -1,6 +1,7 @@
 import type { HerzieClass } from "./classes.js";
 import type { Equipped, HerzieStats, ItemUnit } from "./items.js";
 import type { SkillId } from "./skills.js";
+import type { StatPoints } from "./stats.js";
 
 export interface HerzieAppearance {
   headIndex: number;
@@ -39,6 +40,9 @@ export interface Herzie {
   /** Picked once at stage 2 (classes.ts); null until then. Set only by
    * choose_class — sync never writes it. Absent from an older server. */
   class?: HerzieClass | null;
+  /** Stat points spent (stats.ts). Set only by allocate_stats — sync never
+   * writes them. Absent from an older server. */
+  statPoints?: StatPoints;
 
   // Music stats
   totalMinutesListened: number;

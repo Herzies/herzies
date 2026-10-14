@@ -343,6 +343,7 @@ mod tests {
             level,
             stage,
             class: None,
+            stat_points: None,
             total_minutes_listened: 0.0,
             genre_minutes: HashMap::new(),
             friend_code: "ABCD".to_string(),

@@ -8,6 +8,7 @@ import {
   isBankFull,
   levelProgress,
   needsClassChoice,
+  statPoints,
 } from "@herzies/shared";
 import { herzieStage } from "@herzies/shared/gl";
 import { attachConsole } from "@tauri-apps/plugin-log";
@@ -1076,6 +1077,7 @@ function App() {
             onLog={addLog}
             playerSeed={herzie?.friendCode}
             playerStage={stageOverride ?? herzie?.stage}
+            playerStatPoints={herzie?.statPoints}
             playerProfile={
               herzie
                 ? {
@@ -1208,6 +1210,13 @@ function App() {
                   if (v === "inventory") setInventoryPanel("deck");
                   switchView(v);
                 }}
+                // Only once the server knows stat points: before that,
+                // every herzie would show its whole back pay unspendable.
+                unspentPoints={
+                  herzie.statPoints
+                    ? statPoints(herzie.level, herzie.statPoints).unspent
+                    : 0
+                }
                 visitorsInTown={
                   visitorsInTown +
                   Number(hasActiveEventOverride) +

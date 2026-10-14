@@ -1,6 +1,7 @@
 import {
   BACKSPIN_DISCS,
   BACKSPIN_SPREAD,
+  CAST_INTERVAL_MS,
   type HerzieStats,
   hitDamage,
   skillValue,
@@ -30,7 +31,7 @@ import { assistTarget, type Vec3, WAVE, waveField } from "./waves";
 
 /** How soon after one cast the next may start, in seconds: the hand is
  * on its way home by then, so a held button rolls into the next. */
-const CAST_INTERVAL = 0.34;
+const CAST_INTERVAL = CAST_INTERVAL_MS / 1000;
 /** How far the aim looks for something to land on. */
 const AIM_RANGE = 60;
 /** How slow waves and dummies go during a crit's hit-stop. */

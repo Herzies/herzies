@@ -44,6 +44,22 @@ pub struct Herzie {
     /// classes.
     #[serde(default)]
     pub class: Option<String>,
+    /// Stat points spent. `None` from a server or a saved herzie that
+    /// predates stat points; what's left to spend is the frontend's sum.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stat_points: Option<StatPoints>,
+}
+
+/// Points spent on each stat. Mirrors `StatPoints` in @herzies/shared.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatPoints {
+    #[serde(default)]
+    pub stamina: u32,
+    #[serde(default)]
+    pub sonic_power: u32,
+    #[serde(default)]
+    pub euphony: u32,
 }
 
 /// One class skill the herzie knows. Mirrors `HerzieSkill` in @herzies/shared.
@@ -537,6 +553,7 @@ mod tests {
                     "legsIndex": 0, "colorScheme": "blue"
                 },
                 "xp": 1.0, "level": 27, "stage": 3, "class": "record_slinger",
+                "statPoints": { "stamina": 10, "sonicPower": 4, "euphony": 0 },
                 "totalMinutesListened": 10.0, "genreMinutes": {},
                 "friendCode": "HERZ-1", "friendCodes": [],
                 "lastCravingDate": "", "lastCravingGenre": "",
@@ -555,6 +572,10 @@ mod tests {
         });
         let r: SyncResponse = serde_json::from_value(raw).expect("parses");
         assert_eq!(r.herzie.class.as_deref(), Some("record_slinger"));
+        assert_eq!(
+            r.herzie.stat_points,
+            Some(StatPoints { stamina: 10, sonic_power: 4, euphony: 0 })
+        );
         assert_eq!(r.skills.map(|s| s.len()), Some(1));
     }
 

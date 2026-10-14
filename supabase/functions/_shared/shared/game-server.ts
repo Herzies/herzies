@@ -45,10 +45,12 @@ import {
   MAX_DROP_ROLLS_PER_SYNC,
   NON_DROPPABLE_ITEM_IDS,
   normalizeEquipped,
+  normalizeStatPoints,
   normalizeUnits,
   type PendingDrop,
   type PendingFriendRequest,
   type PendingTradeRequest,
+  POINTS_PER_LEVEL,
   pickWeightedDrop,
   recordGenreMinutes,
   rollSeasonalBonusDrops,
@@ -57,6 +59,7 @@ import {
   type Stage,
   scaledBonus,
   stageForLevel,
+  withStatPoints,
   xpBonusConfig,
 } from "./game-rules.ts";
 
@@ -150,6 +153,11 @@ export function rowToHerzie(row: Record<string, unknown>): Herzie {
     level: row.level as number,
     stage: row.stage as Stage,
     class: (row.class ?? null) as Herzie["class"],
+    statPoints: normalizeStatPoints({
+      stamina: row.stat_stamina,
+      sonicPower: row.stat_sonic,
+      euphony: row.stat_euphony,
+    }),
     totalMinutesListened: row.total_minutes_listened as number,
     genreMinutes: (row.genre_minutes ?? {}) as Record<string, number>,
     friendCode: row.friend_code as string,
@@ -352,12 +360,16 @@ export async function processSync(
   const ctxUnits = Array.isArray(ctx.item_units)
     ? normalizeUnits(ctx.item_units)
     : null;
-  const herzieStats = ctxUnits
-    ? getHerzieStatsFromUnits(ctxUnits)
-    : getHerzieStats(
-        normalizeEquipped(row.equipped),
-        (row.item_upgrades ?? {}) as Record<string, number>,
-      );
+  // Stat points on top, so a point of Sonic Power bills like an item's.
+  const herzieStats = withStatPoints(
+    ctxUnits
+      ? getHerzieStatsFromUnits(ctxUnits)
+      : getHerzieStats(
+          normalizeEquipped(row.equipped),
+          (row.item_upgrades ?? {}) as Record<string, number>,
+        ),
+    herzie.statPoints,
+  );
   // Copies minted during this sync, so the response can carry them without
   // another query on a path that runs every few seconds per client.
   const collectedUnits: ItemUnit[] = [];
@@ -513,6 +525,7 @@ export async function processSync(
 
     const xp = calculateXpGain(minutes, allMultipliers);
 
+    const levelBefore = herzie.level;
     const events = applyXp(herzie, xp);
     herzie.totalMinutesListened += minutes;
     billedMinutes = minutes;
@@ -522,7 +535,7 @@ export async function processSync(
       notifications.push({
         type: "info",
         title: "Level Up!",
-        message: `${herzie.name} is now level ${herzie.level}!`,
+        message: `${herzie.name} is now level ${herzie.level}! (+${POINTS_PER_LEVEL * (herzie.level - levelBefore)} stat points)`,
       });
     }
     if (events.evolved && events.newStage) {

@@ -21,7 +21,15 @@ import {
   setTownPixelSize,
   useTownPixelSize,
 } from "./town/pixelSize";
+import { goToMap, useTownMap } from "./town/runtime";
+import { setSfxMuted, sfxMuted } from "./town/sfx";
 import { View } from "./View";
+
+/** Debug > Teleport: straight to a map's spawn, no portal needed. */
+const TELEPORTS = [
+  ["home", "Home"],
+  ["arena", "Training grounds"],
+] as const;
 
 /** Debug is for dev builds only. */
 const TABS = ["Account", "Controls", "Debug"] as const;
@@ -88,9 +96,11 @@ export function SettingsView({
 }) {
   const [loggingIn, setLoggingIn] = useState(false);
   const [mediaRemoteDebug, setMediaRemoteDebug] = useState<string | null>(null);
+  const townMap = useTownMap();
   const [savingPrivacy, setSavingPrivacy] = useState(false);
   const [privacyError, setPrivacyError] = useState<string | null>(null);
   const [aim, setAim] = useState(aimSensitivity);
+  const [townSounds, setTownSounds] = useState(() => !sfxMuted());
   const fpsShown = useFpsShown();
   const pixelSize = useTownPixelSize();
   const [tab, setTab] = useState<SettingsTab>("Account");
@@ -219,6 +229,24 @@ export function SettingsView({
             </label>
           </div>
           <div className="mb-4">
+            <div className="mb-1.5 text-ui text-text-dim">Sound</div>
+            <button
+              type="button"
+              className={cn(
+                "btn",
+                townSounds
+                  ? "border-cyan text-cyan"
+                  : "border-[#555] text-text-dim",
+              )}
+              onClick={() => {
+                setSfxMuted(townSounds);
+                setTownSounds(!townSounds);
+              }}
+            >
+              {townSounds ? "Town sounds: On" : "Town sounds: Off"}
+            </button>
+          </div>
+          <div className="mb-4">
             <div className="mb-1.5 text-ui text-text-dim">
               Keyboard shortcuts
             </div>
@@ -266,6 +294,24 @@ export function SettingsView({
             <div className="mt-0.5 text-ui-sm text-text-dim">
               Screen pixels per Town pixel. Unset, the game's own (
               {defaultPixelSize()}px).
+            </div>
+            <div className="mt-2 flex items-center gap-1 text-ui">
+              <span className="mr-1 shrink-0">Teleport</span>
+              {TELEPORTS.map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={cn(
+                    "btn",
+                    townMap.id === id
+                      ? "border-cyan text-cyan"
+                      : "border-[#555] text-text-dim",
+                  )}
+                  onClick={() => goToMap(id)}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
           </div>
           <div className="mb-4">

@@ -715,6 +715,30 @@ async fn choose_class(
     Ok(result)
 }
 
+/// Sets the herzie's stat points: the whole allocation, so a reset is all
+/// zeros. The answer carries the points as stored and the health they make.
+#[tauri::command]
+async fn allocate_stats(
+    stamina: u32,
+    sonic_power: u32,
+    euphony: u32,
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    let client = api::http();
+    let result = api::api_allocate_stats(&client, stamina, sonic_power, euphony).await?;
+    let points: Option<StatPoints> =
+        serde_json::from_value(result["statPoints"].clone()).ok();
+    let mut s = state.lock().unwrap();
+    if let (Some(points), Some(ref mut herzie)) = (points, s.herzie.as_mut()) {
+        herzie.stat_points = Some(points);
+        storage::save_herzie(herzie);
+    }
+    drop(s);
+    emit_state_update(&app);
+    Ok(result)
+}
+
 /// Buys from Good ol' George (a live `merchant` event) — the only way coins
 /// buy items — or from Nandor the Treatless (a `treat_trader`), paid in
 /// treats. Applies the returned item state, and the new coin balance when
@@ -2292,6 +2316,12 @@ async fn sync_tick_with(
             if server.class.is_some() {
                 herzie.class = server.class.clone();
             }
+            // Stat points can go down (a reset), so whatever the server
+            // says wins, zeros included; only an older server's silence
+            // keeps what's here.
+            if server.stat_points.is_some() {
+                herzie.stat_points = server.stat_points;
+            }
             herzie.total_minutes_listened = server.total_minutes_listened;
             herzie.genre_minutes = server.genre_minutes.clone();
             herzie.streak_days = server.streak_days;
@@ -2634,6 +2664,7 @@ pub fn run() {
             spawn_debug_drop,
             equip_item,
             choose_class,
+            allocate_stats,
             fetch_store_products,
             fetch_premium_items,
             start_purchase,

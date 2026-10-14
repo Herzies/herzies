@@ -2,6 +2,7 @@ import {
   getHerzieStats,
   isModifierEquipped,
   normalizeEquipped,
+  withStatPoints,
 } from "@herzies/shared";
 import { NextResponse } from "next/server";
 import { authenticateRequest, isAuthError } from "@/lib/auth";
@@ -58,7 +59,7 @@ export async function GET(request: Request) {
     const { data, error } = await admin
       .from("herzies")
       .select(
-        "user_id, name, friend_code, stage, level, currency, appearance, equipped, item_upgrades, now_playing, share_listening",
+        "user_id, name, friend_code, stage, level, currency, appearance, equipped, item_upgrades, now_playing, share_listening, stat_stamina, stat_sonic, stat_euphony",
       )
       .eq("friend_code", singleCode.toUpperCase().trim())
       .single();
@@ -109,7 +110,7 @@ export async function GET(request: Request) {
   const { data, error } = await admin
     .from("herzies")
     .select(
-      "user_id, name, friend_code, stage, level, currency, appearance, equipped, item_upgrades, now_playing, share_listening",
+      "user_id, name, friend_code, stage, level, currency, appearance, equipped, item_upgrades, now_playing, share_listening, stat_stamina, stat_sonic, stat_euphony",
     )
     .in("friend_code", codes);
 
@@ -172,6 +173,9 @@ type HerzieRow = {
     albumArtUrl?: string;
   } | null;
   share_listening: boolean;
+  stat_stamina: number;
+  stat_sonic: number;
+  stat_euphony: number;
 };
 
 /**
@@ -217,8 +221,16 @@ function formatProfile(
     equipped: normalizeEquipped(row.equipped),
     // Game stats, not listening data, so unlike the fields around it this is
     // sent to everyone. Computed here rather than by the client because the
-    // dice-upgrade levels that feed it are not part of the profile.
-    stats: getHerzieStats(normalizeEquipped(row.equipped), row.item_upgrades),
+    // dice-upgrade levels and stat points that feed it are not part of the
+    // profile.
+    stats: withStatPoints(
+      getHerzieStats(normalizeEquipped(row.equipped), row.item_upgrades),
+      {
+        stamina: row.stat_stamina,
+        sonicPower: row.stat_sonic,
+        euphony: row.stat_euphony,
+      },
+    ),
     nowPlaying: canSeeListening ? nowPlaying : null,
     lastPlayed: canSeeListening ? lastPlayed : null,
     // Only for friends who keep their listening private: the rest either see

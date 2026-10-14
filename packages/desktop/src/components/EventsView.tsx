@@ -12,9 +12,11 @@ import {
   ItemTypeIcon,
   isVisitorType,
   MERCHANT_NAME,
+  type StatPoints,
   TREAT_TRADER_NAME,
   VISITORS,
   visitorName,
+  withStatPoints,
 } from "@herzies/shared";
 import { memo, useEffect, useRef, useState } from "react";
 import { cn } from "../lib/utils";
@@ -30,7 +32,7 @@ import { LoadingSplash } from "./LoadingSplash";
 import { MerchantPanel } from "./MerchantPanel";
 import { OrphiezStage } from "./OrphiezStage";
 import { TabButton } from "./TabButton";
-import { type EventCard, formatIn } from "./TownScene";
+import type { EventCard } from "./TownScene";
 import { TownWorld } from "./TownWorld";
 import { View } from "./View";
 import { VisitorHelp } from "./VisitorHelp";
@@ -233,6 +235,7 @@ function EventsViewImpl({
   rootKey = 0,
   playerSeed,
   playerStage,
+  playerStatPoints,
   playerProfile,
   musicPlaying = false,
   onOpenProfile,
@@ -251,6 +254,8 @@ function EventsViewImpl({
   /** The player's herzie, walking around the Town. */
   playerSeed?: string;
   playerStage?: number;
+  /** Its stat points, added to what its cards give. */
+  playerStatPoints?: StatPoints;
   /** Name, level and progress to the next level, shown top left in the Town. */
   playerProfile?: {
     friendCode?: string;
@@ -639,14 +644,6 @@ function EventsViewImpl({
       (a, b) => when(a) - when(b) || typeRank(a.type) - typeRank(b.type),
     );
 
-    // The boss lives in its cave, not in town.
-    const inTown = cards.filter(
-      (c) => c.status === "live" && c.type !== "boss_fight",
-    ).length;
-    const nextArrival = cards.find(
-      (c) => c.status === "scheduled" && c.type !== "boss_fight",
-    );
-
     return (
       // No title: the world fills the window (see onScreenChange "world").
       <TownWorld
@@ -665,27 +662,13 @@ function EventsViewImpl({
           equipped,
         }}
         profile={playerProfile}
-        stats={
+        // Stat points on top: practice damage reads the full Sonic Power.
+        stats={withStatPoints(
           units.length > 0
             ? getHerzieStatsFromUnits(units)
-            : getHerzieStats(equipped)
-        }
-        notice={
-          inTown === 0 ? (
-            // An empty Town reads as dead in a way an empty event list
-            // never did, so say it's quiet and who's coming next.
-            <>
-              Town is quiet right now.
-              {nextArrival?.at ? (
-                <>
-                  {" "}
-                  <span className="text-white">{nextArrival.title}</span>{" "}
-                  arrives in {formatIn(nextArrival.at)}.
-                </>
-              ) : null}
-            </>
-          ) : null
-        }
+            : getHerzieStats(equipped),
+          playerStatPoints,
+        )}
       />
     );
   })();

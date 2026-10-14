@@ -53,6 +53,7 @@ pub fn new_herzie(name: String) -> Herzie {
         currency: 0,
         share_listening: true,
         class: None,
+        stat_points: None,
     }
 }
 

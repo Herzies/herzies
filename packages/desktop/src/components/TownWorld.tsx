@@ -21,12 +21,12 @@ import { resetBossFight } from "./town/combat/fight";
 import { onLootLog } from "./town/combat/lootFeed";
 import { useCombat } from "./town/combat/state";
 import { useFpsShown } from "./town/fps";
+import { Key } from "./town/Key";
 import type { TownMap } from "./town/map";
 import { NAME_SHADOW } from "./town/nameFade";
 import { useTownNet, useTownNetVersion } from "./town/net/townNet";
 import { spotsOf, type TownSpot, townLive, useTownMap } from "./town/runtime";
 import { SkillHud } from "./town/SkillHud";
-import { setSfxMuted, sfxMuted } from "./town/sfx";
 
 // three.js, Rapier's WASM and friends: loaded the first time someone opens
 // the Town, not at app start.
@@ -48,7 +48,6 @@ export function TownWorld({
   onOpen,
   onOpenProfile,
   player,
-  notice,
   chatOverlay = false,
   musicPlaying = false,
   onLog,
@@ -71,8 +70,6 @@ export function TownWorld({
   /** The chat floats over the bottom of the world: keep the prompt above
    * it. */
   chatOverlay?: boolean;
-  /** A line shown over the top of the world (e.g. "Town is quiet"). */
-  notice?: React.ReactNode;
   cards: EventCard[];
   paused: boolean;
   onOpen: (openKey: string) => void;
@@ -95,7 +92,6 @@ export function TownWorld({
   const [portalTo, setPortalTo] = useState<TownMap | null>(null);
   const fighting = useCombat();
   const fpsShown = useFpsShown();
-  const [muted, setMuted] = useState(sfxMuted);
   // Everyone else with the Town open, on the same island.
   const net = useTownNet(!paused);
   useTownNetVersion(net);
@@ -215,34 +211,13 @@ export function TownWorld({
         <span>
           <Key>Tab</Key> {fighting ? "roam" : "aim"}
         </span>
-        <button
-          type="button"
-          className="pointer-events-auto cursor-pointer text-white/60 hover:text-white"
-          title={muted ? "Sounds off" : "Sounds on"}
-          onClick={() => {
-            setSfxMuted(!muted);
-            setMuted(!muted);
-          }}
-        >
-          {muted ? "♪̸" : "♪"}
-        </button>
       </div>
     ) : null;
 
   return (
     <div className="relative min-h-0 flex-1 overflow-hidden">
-      {notice ? (
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-30 bg-black/50 px-3 py-1.5 text-center text-ui text-white/70">
-          {notice}
-        </div>
-      ) : null}
       {net.status === "outdated" ? (
-        <div
-          className={cn(
-            "pointer-events-none absolute right-2 z-30 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white/70",
-            notice ? "top-9" : "top-2",
-          )}
-        >
+        <div className="pointer-events-none absolute top-2 right-2 z-30 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white/70">
           Update Herzies to see other players
         </div>
       ) : null}
@@ -250,12 +225,7 @@ export function TownWorld({
         <>
           {/* Centred in a 20px row, like home's (its icon buttons are h-5), so
               the name doesn't shift when switching tabs. */}
-          <div
-            className={cn(
-              "pointer-events-none absolute left-3 z-30 flex h-5 max-w-[60%] items-center",
-              notice ? "top-[3rem]" : "top-3",
-            )}
-          >
+          <div className="pointer-events-none absolute top-3 left-3 z-30 flex h-5 max-w-[60%] items-center">
             <span
               className="whitespace-nowrap text-ui-lg font-bold text-white"
               style={{ textShadow: NAME_SHADOW }}
@@ -296,12 +266,7 @@ export function TownWorld({
         />
       )}
       {fpsShown && opened && !paused ? (
-        <FrameRate
-          className={cn(
-            "pointer-events-none absolute left-2 z-30 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white/70 tabular-nums",
-            notice ? "top-9" : "top-2",
-          )}
-        />
+        <FrameRate className="pointer-events-none absolute top-2 left-2 z-30 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white/70 tabular-nums" />
       ) : null}
       {opened && (
         <Suspense fallback={null}>
@@ -388,14 +353,6 @@ export function TownWorld({
 }
 
 /** A key, as the hints show it. */
-function Key({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="rounded border border-white/30 px-1 text-white">
-      {children}
-    </span>
-  );
-}
-
 /** Frames drawn per second, counted over each half second: the Town's,
  * since it draws every frame the browser does. Shown from Settings → Debug. */
 function FrameRate({ className }: { className?: string }) {

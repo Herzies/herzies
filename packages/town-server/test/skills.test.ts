@@ -7,7 +7,7 @@ import {
 import type { ServerMessage, TownTicketPayload } from "@herzies/shared/town-net";
 import { describe, expect, it } from "vitest";
 import { BossEngine, type BossPlayer, TUNING } from "../src/boss";
-import { FightRuntime, type Outbound } from "../src/fight";
+import { FightRuntime, type Outbound, statsOf } from "../src/fight";
 
 const T0 = 5_000_000;
 
@@ -170,6 +170,56 @@ describe("Cymbrella", () => {
   });
 });
 
+describe("Euphony", () => {
+  it("strengthens a Drones heal", () => {
+    const f = new FightRuntime(claim(), T0);
+    const bard = { ...ticket("bard", [["soothing-drones", 1]], 50) };
+    bard.st = [0, 0, 0, 0, 0, 0, 50];
+    f.join("bard", 1, bard, { x: 0, z: 8 }, T0 - 5_000);
+    f.onState("bard", 0, 8, T0);
+    f.skill("bard", "soothing-drones", 0, 0, T0);
+    // 50 Euphony: half again.
+    const heal = skillValue("soothing-drones", 1) * 1.5 * 200;
+    expect(f.player("bard")?.hp).toBeCloseTo(50 + heal);
+  });
+
+  it("strengthens a Cymbrella, by less", () => {
+    const f = new FightRuntime(claim(), T0);
+    const tank = ticket("tank", [["cymbrella", 1]]);
+    tank.st = [0, 0, 0, 0, 0, 0, 50];
+    f.join("tank", 1, tank, { x: 0, z: 8 }, T0 - 5_000);
+    f.onState("tank", 0, 8, T0);
+    const { out } = f.skill("tank", "cymbrella", 0, 0, T0);
+    const buff = msgs(out, "buff")[0].msg;
+    if (buff.t !== "buff") throw new Error("no buff");
+    // 50 Euphony: a quarter again.
+    expect(buff.value).toBeCloseTo(skillValue("cymbrella", 1) * 1.25);
+  });
+});
+
+describe("ticket stats", () => {
+  it("reads Def and Euphony when the ticket has them", () => {
+    expect(statsOf([12, 5, 3, 50, 20, 20, 8])).toEqual({
+      sonicPower: 12,
+      critChance: 3,
+      critDamage: 50,
+      def: 20,
+      euphony: 8,
+    });
+  });
+
+  it("reads them as 0 on a ticket from before stat points, or no stats", () => {
+    expect(statsOf([12, 5, 3, 50])).toEqual({
+      sonicPower: 12,
+      critChance: 3,
+      critDamage: 50,
+      def: 0,
+      euphony: 0,
+    });
+    expect(statsOf(undefined).def).toBe(0);
+  });
+});
+
 describe("Backspin", () => {
   it("throws three discs that land for a share of a hit, paying XP", () => {
     const f = new FightRuntime(claim(), T0);
@@ -201,7 +251,7 @@ describe("the boss's side", () => {
     for (let t = T0; t < T0 + 10_000 && !hits.length; t += 50) {
       for (const ev of boss.update(t, [a])) if (ev.t === "resolve") hits = ev.hits;
     }
-    const raw = TUNING.slam.fraction * 200;
+    const raw = TUNING.slam.damage;
     // 40% off once: two Cymbrellas are still one.
     expect(hits[0]).toEqual({
       uid: "a",

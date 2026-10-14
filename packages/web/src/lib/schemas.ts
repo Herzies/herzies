@@ -76,6 +76,15 @@ export const chooseClassSchema = z.object({
   class: z.enum(["bard", "record_slinger", "percussionist"]),
 });
 
+/** A whole stat-point allocation (a reset is all zeros). The level limit is
+ * allocate_stats's to enforce. */
+const statPoint = z.number().int().min(0).max(100_000);
+export const allocateStatsSchema = z.object({
+  stamina: statPoint,
+  sonicPower: statPoint,
+  euphony: statPoint,
+});
+
 /** Upgrade one named copy. `{targetItemId}` is the older client's spelling. */
 export const upgradeItemSchema = z.union([
   z.object({

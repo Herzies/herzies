@@ -53,7 +53,15 @@ describe("lookup stats", () => {
       ownerHerzie.friend_code as string,
     );
 
-    expect(profile.stats).toEqual({ sonicPower: 7, luck: 10 });
+    expect(profile.stats).toEqual({
+      sonicPower: 7,
+      luck: 10,
+      stamina: 0,
+      euphony: 0,
+      def: 0,
+      critChance: 0,
+      critDamage: 0,
+    });
     // Listening data stays private to non-friends; stats do not.
     expect(profile.topArtists).toEqual([]);
     expect(profile.nowPlaying).toBeNull();
@@ -68,6 +76,35 @@ describe("lookup stats", () => {
       owner.accessToken,
       ownerHerzie.friend_code as string,
     );
-    expect(profile.stats).toEqual({ sonicPower: 0, luck: 0 });
+    expect(profile.stats).toEqual({
+      sonicPower: 0,
+      luck: 0,
+      stamina: 0,
+      euphony: 0,
+      def: 0,
+      critChance: 0,
+      critDamage: 0,
+    });
+  });
+  it("adds stat points on top of items", async () => {
+    const owner = await createTestUser();
+    const ownerHerzie = await createTestHerzie(owner.userId, {
+      level: 10,
+      inventory_v2: { headphones: 1 },
+      equipped: { head: "headphones" },
+      stat_stamina: 6,
+      stat_sonic: 4,
+      stat_euphony: 2,
+    });
+    const profile = await look(
+      owner.accessToken,
+      ownerHerzie.friend_code as string,
+    );
+    expect(profile.stats).toMatchObject({
+      sonicPower: 9,
+      stamina: 6,
+      def: 6,
+      euphony: 2,
+    });
   });
 });

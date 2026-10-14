@@ -37,5 +37,6 @@ export * from "./items.js";
 // XP curve, levelling, stage thresholds, multiplier application.
 export * from "./leveling.js";
 export * from "./skills.js";
+export * from "./stats.js";
 // Core domain types (Herzie, Stage, drops, events, friend/trade requests).
 export * from "./types.js";

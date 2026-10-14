@@ -276,6 +276,9 @@ function Sandbox() {
         // the dummies with.
         stats={{
           sonicPower: Number(params.get("sp") ?? 0),
+          stamina: 0,
+          euphony: 0,
+          def: 0,
           luck: 0,
           critChance: Number(params.get("cc") ?? 0),
           critDamage: Number(params.get("cd") ?? 0),

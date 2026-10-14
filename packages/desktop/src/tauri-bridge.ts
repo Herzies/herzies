@@ -14,6 +14,7 @@ import type {
   PendingDrop,
   PendingFriendRequest,
   PremiumItem,
+  StatPoints,
   StoreProduct,
   Trade,
   TradeState,
@@ -198,6 +199,14 @@ export const herzies = {
       "choose_class",
       { class: herzieClass },
     ),
+  /** Sets the herzie's stat points: the whole allocation, so a reset is
+   * all zeros. Throws with the server's message (not enough points). */
+  allocateStats: (points: StatPoints) =>
+    invoke<{ statPoints: StatPoints; vitals: Vitals }>("allocate_stats", {
+      stamina: points.stamina,
+      sonicPower: points.sonicPower,
+      euphony: points.euphony,
+    }),
   /** Rolls a dice item onto ONE named card. The server rolls, never the
    * client: `result` says whether it went up, a failed roll was absorbed by
    * the Safety Pick (`protectionItemId`), or the card broke. Throws with the

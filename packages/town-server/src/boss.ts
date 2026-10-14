@@ -6,8 +6,8 @@
  *
  * Fairness rules every attack here follows (see the plan's research notes):
  * every attack is telegraphed on the floor for at least {@link MIN_WINDUP_MS}
- * before it lands; no single hit takes more than {@link MAX_HIT_FRACTION} of
- * a herzie's health; a herzie that was just hit, just arrived or just got
+ * before it lands; a hit deals flat damage, so health and Def matter, but
+ * never more than {@link MAX_HIT_FRACTION} of a herzie's health; a herzie that was just hit, just arrived or just got
  * back up can't be hit again straight away; at most {@link MAX_TELEGRAPHS}
  * shapes are on the floor at once; and a hit is judged against where the
  * player stood a moment ago as well as where they are now.
@@ -15,6 +15,7 @@
 import {
   aimDirection,
   BOSS_STAND,
+  CAST_INTERVAL_MS,
   type HitStats,
   hitDamage,
   WAVE_HAND_HEIGHT,
@@ -29,6 +30,7 @@ import {
   type Buff,
   mitigate,
 } from "@herzies/shared/skills";
+import { defReduction } from "@herzies/shared/stats";
 
 // ---------------------------------------------------------------------------
 // Tuning: every balance number lives here.
@@ -48,9 +50,9 @@ export const TUNING = {
   spawnSafeMs: 2_000,
   /** A hit is judged at this long before it lands too; defender's benefit. */
   rewindMs: 120,
-  /** A player may cast about this often; a short burst is allowed so network
-   * jitter never costs a real cast (the client casts every 340 ms). */
-  castEveryMs: 300,
+  /** A player may cast about this often: a little under the client's pace,
+   * with a short burst, so network jitter never costs a real cast. */
+  castEveryMs: Math.round(CAST_INTERVAL_MS * 0.88),
   castBurst: 2,
   /** Pause before the first attack of a fight, and after resuming. */
   openingMs: 3_000,
@@ -59,19 +61,24 @@ export const TUNING = {
     2: { fromHp: 0.66, everyMs: 2_700, slams: 3, ringChance: 0.35 },
     3: { fromHp: 0.33, everyMs: 2_000, slams: 4, ringChance: 0.4 },
   },
-  slam: { radius: 3, windupMs: 1_600, fraction: 0.2 },
-  ring: { inner: 6.5, windupMs: 3_000, fraction: 0.25 },
+  /** Damage is flat, before Def and buffs. Two-thirds of what a level-20
+   * herzie with no Stamina took when hits were a share of max HP: casts
+   * slowed to CAST_INTERVAL_MS, fights run longer, and the whole fight
+   * should still cost about the same health. */
+  slam: { radius: 3, windupMs: 1_600, damage: 27 },
+  ring: { inner: 6.5, windupMs: 3_000, damage: 34 },
   /** The tank-buster: aimed at whoever the boss hates most, and it follows
    * them — it can't be dodged, only taken (under a Cymbrella, ideally).
    * Only once there's a party to hold its attention: solo, there's no one
    * to tank for. */
-  buster: { everyMs: 10_000, windupMs: 2_000, fraction: 0.08, minPlayers: 2 },
+  buster: { everyMs: 10_000, windupMs: 2_000, damage: 11, minPlayers: 2 },
   /** What the boss hates: damage dealt, healing done, and the Cymbrella's
    * clang. Fades by `decayPerSec` a second, so it keeps moving. */
   threat: { perDamage: 1, perHeal: 0.5, cymbrella: 500, decayPerSec: 0.1 },
 } as const;
 
-/** The most of a herzie's health one hit may take. */
+/** The most of a herzie's health one hit may take, before Def and buffs:
+ * a low level can't be one-shot by flat damage. */
 export const MAX_HIT_FRACTION = 0.3;
 export const MIN_WINDUP_MS = TUNING.minWindupMs;
 export const MAX_TELEGRAPHS = TUNING.maxTelegraphs;
@@ -91,8 +98,8 @@ export type Telegraph = {
   /** When it appeared and when it lands (server ms). */
   at: number;
   hitAt: number;
-  /** Fraction of the target's max HP it takes. */
-  fraction: number;
+  /** Damage it deals, before the cap, Def and buffs. */
+  damage: number;
   /** A buster's target (user id); it lands on them wherever they are. */
   target?: string;
 };
@@ -102,6 +109,8 @@ export type BossPlayer = {
   uid: string;
   alive: boolean;
   maxHp: number;
+  /** Their Def (Stamina brings it): takes a share off every hit. */
+  def?: number;
   /** Where they stood at `t` (server ms), or null if unknown. */
   posAt: (t: number) => { x: number; z: number } | null;
 };
@@ -392,10 +401,14 @@ export class BossEngine {
           });
           if (!inside) continue;
         }
-        const raw = Math.min(tg.fraction, MAX_HIT_FRACTION) * p.maxHp;
-        const reductions = activeBuffs(this.buffs.get(p.uid) ?? [], tg.hitAt)
-          .filter((b) => b.id === "cymbrella")
-          .map((b) => b.value);
+        const raw = Math.min(tg.damage, MAX_HIT_FRACTION * p.maxHp);
+        // Def and a Cymbrella stack, under the overall clamp in `mitigate`.
+        const reductions = [
+          defReduction(p.def ?? 0),
+          ...activeBuffs(this.buffs.get(p.uid) ?? [], tg.hitAt)
+            .filter((b) => b.id === "cymbrella")
+            .map((b) => b.value),
+        ];
         const damage = Math.max(1, Math.round(mitigate(raw, reductions)));
         const absorbed = Math.max(0, Math.round(raw) - damage);
         hits.push({ uid: p.uid, damage, absorbed });
@@ -436,7 +449,7 @@ export class BossEngine {
         r: TUNING.roomRadius + 2,
         inner: TUNING.ring.inner,
         hitAt: now + TUNING.ring.windupMs,
-        fraction: TUNING.ring.fraction,
+        damage: TUNING.ring.damage,
       });
       return;
     }
@@ -454,7 +467,7 @@ export class BossEngine {
         r: TUNING.slam.radius,
         inner: 0,
         hitAt: now + TUNING.slam.windupMs,
-        fraction: TUNING.slam.fraction,
+        damage: TUNING.slam.damage,
       });
     }
   }
@@ -494,7 +507,7 @@ export class BossEngine {
       inner: 0,
       at: now,
       hitAt: now + cfg.windupMs,
-      fraction: cfg.fraction,
+      damage: cfg.damage,
       target: target.uid,
     };
     this.telegraphs.push(telegraph);

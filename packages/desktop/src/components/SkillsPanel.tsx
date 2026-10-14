@@ -39,10 +39,6 @@ export function SkillsPanel({
       ) : (
         known.map((s) => <SkillRow key={s.skillId} skill={s} />)
       )}
-      <div className="text-ui text-text-dim">
-        Skills grow by being used in boss fights. Press Q in the Town to use
-        one.
-      </div>
     </div>
   );
 }
