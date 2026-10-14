@@ -21,7 +21,7 @@ import type { Equipped } from "./items.ts";
 /** Bumped on any incompatible change; the server turns away other versions
  * with {@link TOWN_CLOSE.outdated} so old desktop betas say "update" instead of
  * misreading frames. */
-export const TOWN_PROTOCOL = 1;
+export const TOWN_PROTOCOL = 2;
 
 /** Server snapshot rate. */
 export const TOWN_TICK_HZ = 15;
@@ -107,6 +107,11 @@ export type TownTicketPayload = {
    * a fight from it if it has none running). The boss room turns away
    * tickets without it. */
   boss?: { event: string; until: number; hp: number; maxHp: number };
+  /** The herzie's class (classes.ts), once chosen. */
+  cls?: string;
+  /** Its class skills and their levels, `[skillId, level]`, so the server
+   * can judge a skill's strength without a database. */
+  sk?: [string, number][];
 };
 
 /** How long a ticket lasts; the client renews well before this. */
@@ -475,14 +480,19 @@ export type ClientMessage =
   /** First message on a socket. `at` is where the herzie stands now. */
   | { t: "hello"; v: number; ticket: string; at: TownState }
   /** A fresh ticket: renews the session and carries look changes. */
-  | { t: "ticket"; ticket: string };
+  | { t: "ticket"; ticket: string }
+  /** A class skill, aimed (yaw, pitch) like a cast. `seq` echoes back in a
+   * refusal, so the client can undo just that prediction. */
+  | { t: "skill"; skill: string; seq: number; yaw: number; pitch: number };
 
 /** A shape the boss is about to hit the floor with. Times are server clock
  * (ms, the same clock as snapshots); a client shows the remaining windup
  * from `hitAt`, so a late message still draws the right fill. */
 export type BossTelegraph = {
   id: number;
-  kind: "circle" | "ring";
+  /** A buster is aimed at one herzie, `target`, and lands on it wherever it
+   * goes: what a tank is for. */
+  kind: "circle" | "ring" | "buster";
   x: number;
   z: number;
   r: number;
@@ -490,6 +500,16 @@ export type BossTelegraph = {
   inner: number;
   at: number;
   hitAt: number;
+  /** A buster's target: an entity id. */
+  target?: number;
+};
+
+/** A buff on a herzie, as the wire carries it. `until` is server clock. */
+export type TownBuff = {
+  id: number;
+  buff: string;
+  value: number;
+  until: number;
 };
 
 /** What a newcomer to the boss room is told on arrival. */
@@ -502,6 +522,8 @@ export type FightState = {
   telegraphs: BossTelegraph[];
   /** Everyone's HP in the room, by entity id. */
   health: { id: number; hp: number; maxHp: number }[];
+  /** Buffs still running, by entity id. */
+  buffs?: TownBuff[];
   /** Server clock now (ms), so telegraph times line up at once. */
   now: number;
 };
@@ -535,7 +557,24 @@ export type ServerMessage =
   | { t: "leave"; id: number }
   | { t: "look"; player: TownPlayer }
   /** The server refused a move: put your herzie back here. */
-  | { t: "correct"; x: number; z: number };
+  | { t: "correct"; x: number; z: number }
+  /** Someone used a class skill, for everyone to see it. */
+  | {
+      t: "skill";
+      by: number;
+      skill: string;
+      level: number;
+      x: number;
+      z: number;
+      yaw: number;
+    }
+  /** A buff went on a herzie (or was refreshed). */
+  | ({ t: "buff" } & TownBuff)
+  /** Your skill was refused: it's ready again at `readyAt` (server clock),
+   * or 0 when it can't be used here at all. */
+  | { t: "skillDenied"; skill: string; seq: number; readyAt: number }
+  /** One of your skills levelled up (sent to you alone). */
+  | { t: "skillUp"; skill: string; level: number };
 
 export function parseServerMessage(text: string): ServerMessage | null {
   try {

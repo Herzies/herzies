@@ -210,7 +210,16 @@ export class TownRoom extends DurableObject<Env> {
         this.drop(s, TOWN_CLOSE.kicked, "too long");
         return;
       }
-      let m: { t?: unknown; v?: unknown; ticket?: unknown; at?: TownState };
+      let m: {
+        t?: unknown;
+        v?: unknown;
+        ticket?: unknown;
+        at?: TownState;
+        skill?: unknown;
+        seq?: unknown;
+        yaw?: unknown;
+        pitch?: unknown;
+      };
       try {
         m = JSON.parse(message);
       } catch {
@@ -219,6 +228,7 @@ export class TownRoom extends DurableObject<Env> {
       }
       if (m?.t === "hello" && !s.player) await this.hello(s, m, now);
       else if (m?.t === "ticket" && s.player) await this.renew(s, m.ticket);
+      else if (m?.t === "skill" && s.player) this.onSkill(s, m, now);
       else this.strike(s);
       return;
     }
@@ -577,6 +587,42 @@ export class TownRoom extends DurableObject<Env> {
     if (result === "cooldown") this.strike(s);
   }
 
+  /** A class skill. Only the boss room runs them; anywhere else they're
+   * the client's own practice (no effect, no XP), so they're dropped
+   * without a strike. */
+  private onSkill(
+    s: Session,
+    m: { skill?: unknown; seq?: unknown; yaw?: unknown; pitch?: unknown },
+    now: number,
+  ) {
+    const p = s.player;
+    if (!p || !this.fight) return;
+    const yaw = Number(m.yaw);
+    const pitch = Number(m.pitch);
+    const seq = Number(m.seq);
+    if (
+      typeof m.skill !== "string" ||
+      !Number.isFinite(yaw) ||
+      !Number.isFinite(pitch) ||
+      !Number.isInteger(seq)
+    ) {
+      this.strike(s);
+      return;
+    }
+    const { result, readyAt, out } = this.fight.skill(
+      p.uid,
+      m.skill,
+      yaw,
+      pitch,
+      now,
+    );
+    for (const o of out) this.dispatch(o);
+    if (result === "used" || result === "ignored") return;
+    // Refused: say when it's ready, so the client puts its cooldown right.
+    this.send(s, { t: "skillDenied", skill: m.skill, seq, readyAt });
+    if (result === "cooldown" || result === "unknown") this.strike(s);
+  }
+
   /** Step the fight and tell everyone what happened. */
   private runFight(now: number) {
     const fight = this.fight;
@@ -614,7 +660,7 @@ export class TownRoom extends DurableObject<Env> {
     if (!fight || this.reporting) return;
     const report = fight.report(now, force);
     if (!report) return;
-    if (!report.hp.length && !report.boss) return;
+    if (!report.hp.length && !report.boss && !report.skills) return;
     this.reporting = true;
     void postVitals(this.env, { action: "report", ...report })
       .then((reply) => {
@@ -622,6 +668,8 @@ export class TownRoom extends DurableObject<Env> {
         fight.reported(report);
         const loot = reply.boss?.loot;
         if (loot) for (const o of fight.loot(loot)) this.dispatch(o);
+        const levels = reply.skills?.levels;
+        if (levels) for (const o of fight.skillUps(levels)) this.dispatch(o);
       })
       .finally(() => {
         this.reporting = false;

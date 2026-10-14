@@ -21,6 +21,14 @@ import {
   WAVE_SPEED,
   waveReaches,
 } from "@herzies/shared/combat";
+import {
+  activeBuffs,
+  applyBuff,
+  BACKSPIN_DISCS,
+  BACKSPIN_SPREAD,
+  type Buff,
+  mitigate,
+} from "@herzies/shared/skills";
 
 // ---------------------------------------------------------------------------
 // Tuning: every balance number lives here.
@@ -53,6 +61,14 @@ export const TUNING = {
   },
   slam: { radius: 3, windupMs: 1_600, fraction: 0.2 },
   ring: { inner: 6.5, windupMs: 3_000, fraction: 0.25 },
+  /** The tank-buster: aimed at whoever the boss hates most, and it follows
+   * them — it can't be dodged, only taken (under a Cymbrella, ideally).
+   * Only once there's a party to hold its attention: solo, there's no one
+   * to tank for. */
+  buster: { everyMs: 10_000, windupMs: 2_000, fraction: 0.08, minPlayers: 2 },
+  /** What the boss hates: damage dealt, healing done, and the Cymbrella's
+   * clang. Fades by `decayPerSec` a second, so it keeps moving. */
+  threat: { perDamage: 1, perHeal: 0.5, cymbrella: 500, decayPerSec: 0.1 },
 } as const;
 
 /** The most of a herzie's health one hit may take. */
@@ -61,7 +77,7 @@ export const MIN_WINDUP_MS = TUNING.minWindupMs;
 export const MAX_TELEGRAPHS = TUNING.maxTelegraphs;
 
 export type Phase = 1 | 2 | 3;
-export type TelegraphKind = "circle" | "ring";
+export type TelegraphKind = "circle" | "ring" | "buster";
 
 export type Telegraph = {
   id: number;
@@ -77,6 +93,8 @@ export type Telegraph = {
   hitAt: number;
   /** Fraction of the target's max HP it takes. */
   fraction: number;
+  /** A buster's target (user id); it lands on them wherever they are. */
+  target?: string;
 };
 
 /** A player as the engine sees them each update. */
@@ -90,7 +108,12 @@ export type BossPlayer = {
 
 export type BossEvent =
   | { t: "telegraph"; telegraph: Telegraph }
-  | { t: "resolve"; id: number; hits: { uid: string; damage: number }[] }
+  | {
+      t: "resolve";
+      id: number;
+      /** `absorbed`: what buffs took off the hit. */
+      hits: { uid: string; damage: number; absorbed: number }[];
+    }
   | { t: "phase"; phase: Phase }
   | {
       t: "hit";
@@ -98,6 +121,8 @@ export type BossEvent =
       damage: number;
       crit: boolean;
       hp: number;
+      /** Set when a skill threw it, not a plain cast. */
+      skill?: string;
     }
   | { t: "killed"; by: string };
 
@@ -125,6 +150,7 @@ type PendingHit = {
   uid: string;
   damage: number;
   crit: boolean;
+  skill?: string;
 };
 
 export class BossEngine {
@@ -141,6 +167,12 @@ export class BossEngine {
   private safeUntil = new Map<string, number>();
   private killed = false;
   private readonly rand: () => number;
+  /** How much the boss hates each player (see TUNING.threat). */
+  private threat = new Map<string, number>();
+  private threatAt: number;
+  private nextBusterAt: number;
+  /** Buffs on players: one of each kind (applyBuff's no-stacking rule). */
+  private buffs = new Map<string, Buff[]>();
 
   constructor(opts: { hp: number; maxHp: number; seed: number; now: number }) {
     this.maxHp = Math.max(1, opts.maxHp);
@@ -148,6 +180,8 @@ export class BossEngine {
     this.rand = rng(opts.seed);
     this.phase = phaseFor(this.hp, this.maxHp);
     this.nextAttackAt = opts.now + TUNING.openingMs;
+    this.nextBusterAt = opts.now + TUNING.openingMs + TUNING.buster.everyMs;
+    this.threatAt = opts.now;
     this.killed = this.hp <= 0;
   }
 
@@ -174,6 +208,72 @@ export class BossEngine {
     this.casts.delete(uid);
     this.invulnUntil.delete(uid);
     this.safeUntil.delete(uid);
+    this.threat.delete(uid);
+    this.buffs.delete(uid);
+  }
+
+  /** The boss hates `uid` this much more. */
+  addThreat(uid: string, amount: number): void {
+    if (!(amount > 0)) return;
+    this.threat.set(uid, (this.threat.get(uid) ?? 0) + amount);
+  }
+
+  threatOf(uid: string): number {
+    return this.threat.get(uid) ?? 0;
+  }
+
+  /** A buff on `uid`; the same kind doesn't stack (the stronger wins). */
+  buff(uid: string, next: Buff): Buff {
+    const list = applyBuff(this.buffs.get(uid) ?? [], next);
+    this.buffs.set(uid, list);
+    return list.find((b) => b.id === next.id) as Buff;
+  }
+
+  /** Buffs still running, for a newcomer's welcome. */
+  activeBuffs(now: number): { uid: string; buff: Buff }[] {
+    const out: { uid: string; buff: Buff }[] = [];
+    for (const [uid, list] of this.buffs)
+      for (const buff of activeBuffs(list, now)) out.push({ uid, buff });
+    return out;
+  }
+
+  /**
+   * Backspin: three discs fanned about the aim, each a wave hit at `mult`
+   * of a cast's damage. Rate-limited by the skill's cooldown (the caller's),
+   * not the cast bucket. Returns how many will land.
+   */
+  backspin(
+    uid: string,
+    from: { x: number; z: number },
+    yaw: number,
+    pitch: number,
+    stats: HitStats,
+    mult: number,
+    now: number,
+  ): number {
+    if (this.killed) return 0;
+    let landed = 0;
+    const half = (BACKSPIN_DISCS - 1) / 2;
+    for (let i = 0; i < BACKSPIN_DISCS; i++) {
+      const dir = aimDirection(yaw + (i - half) * BACKSPIN_SPREAD, pitch);
+      const dist = waveReaches([from.x, WAVE_HAND_HEIGHT, from.z], dir, {
+        x: TUNING.boss.x,
+        y: TUNING.boss.chest,
+        z: TUNING.boss.z,
+        radius: TUNING.boss.radius,
+      });
+      if (dist === null) continue;
+      const { amount, crit } = hitDamage(stats, this.rand);
+      this.pending.push({
+        at: now + (dist / WAVE_SPEED) * 1000,
+        uid,
+        damage: Math.max(1, Math.round(amount * mult)),
+        crit,
+        skill: "backspin",
+      });
+      landed++;
+    }
+    return landed;
   }
 
   /**
@@ -225,6 +325,7 @@ export class BossEngine {
    * ones. Events come out in order. */
   update(now: number, players: readonly BossPlayer[]): BossEvent[] {
     const events: BossEvent[] = [];
+    this.decayThreat(now);
     this.landWaves(now, events);
     if (this.killed) {
       this.telegraphs = [];
@@ -242,12 +343,14 @@ export class BossEngine {
       const p = this.pending.shift() as PendingHit;
       if (this.killed) continue;
       this.hp = Math.max(0, this.hp - p.damage);
+      this.addThreat(p.uid, p.damage * TUNING.threat.perDamage);
       events.push({
         t: "hit",
         uid: p.uid,
         damage: p.damage,
         crit: p.crit,
         hp: this.hp,
+        ...(p.skill ? { skill: p.skill } : {}),
       });
       const phase = phaseFor(this.hp, this.maxHp);
       if (phase !== this.phase) {
@@ -273,22 +376,29 @@ export class BossEngine {
     if (!due.length) return;
     this.telegraphs = this.telegraphs.filter((t) => t.hitAt > now);
     for (const tg of due) {
-      const hits: { uid: string; damage: number }[] = [];
+      const hits: { uid: string; damage: number; absorbed: number }[] = [];
       for (const p of players) {
         if (!p.alive) continue;
         if ((this.safeUntil.get(p.uid) ?? 0) > tg.hitAt) continue;
         if ((this.invulnUntil.get(p.uid) ?? 0) > tg.hitAt) continue;
-        // Defender's benefit: in the zone now AND a moment before.
-        const inside = [tg.hitAt, tg.hitAt - TUNING.rewindMs].every((t) => {
-          const pos = p.posAt(t);
-          return !!pos && covers(tg, pos.x, pos.z);
-        });
-        if (!inside) continue;
-        const damage = Math.max(
-          1,
-          Math.round(Math.min(tg.fraction, MAX_HIT_FRACTION) * p.maxHp),
-        );
-        hits.push({ uid: p.uid, damage });
+        if (tg.kind === "buster") {
+          // It follows its target: no dodging, and no one else is hit.
+          if (p.uid !== tg.target) continue;
+        } else {
+          // Defender's benefit: in the zone now AND a moment before.
+          const inside = [tg.hitAt, tg.hitAt - TUNING.rewindMs].every((t) => {
+            const pos = p.posAt(t);
+            return !!pos && covers(tg, pos.x, pos.z);
+          });
+          if (!inside) continue;
+        }
+        const raw = Math.min(tg.fraction, MAX_HIT_FRACTION) * p.maxHp;
+        const reductions = activeBuffs(this.buffs.get(p.uid) ?? [], tg.hitAt)
+          .filter((b) => b.id === "cymbrella")
+          .map((b) => b.value);
+        const damage = Math.max(1, Math.round(mitigate(raw, reductions)));
+        const absorbed = Math.max(0, Math.round(raw) - damage);
+        hits.push({ uid: p.uid, damage, absorbed });
         this.invulnUntil.set(p.uid, tg.hitAt + TUNING.invulnMs);
       }
       events.push({ t: "resolve", id: tg.id, hits });
@@ -300,11 +410,12 @@ export class BossEngine {
     players: readonly BossPlayer[],
     events: BossEvent[],
   ) {
-    if (now < this.nextAttackAt) return;
-    const cfg = TUNING.phases[this.phase];
     const targets = players.filter(
       (p) => p.alive && (this.safeUntil.get(p.uid) ?? 0) <= now,
     );
+    this.startBuster(now, players, targets, events);
+    if (now < this.nextAttackAt) return;
+    const cfg = TUNING.phases[this.phase];
     if (!targets.length) {
       // Nobody to aim at: check again soon, without burning the cadence.
       this.nextAttackAt = now + 500;
@@ -347,10 +458,66 @@ export class BossEngine {
       });
     }
   }
+
+  /** The tank-buster, on its own clock: at the most hated player, once
+   * there's a party. */
+  private startBuster(
+    now: number,
+    players: readonly BossPlayer[],
+    targets: readonly BossPlayer[],
+    events: BossEvent[],
+  ) {
+    if (now < this.nextBusterAt) return;
+    const cfg = TUNING.buster;
+    const here = players.filter((p) => p.alive).length;
+    let target: BossPlayer | undefined;
+    for (const p of targets) {
+      if (!target || this.threatOf(p.uid) > this.threatOf(target.uid))
+        target = p;
+    }
+    if (here < cfg.minPlayers || !target || this.threatOf(target.uid) <= 0) {
+      this.nextBusterAt = now + 500;
+      return;
+    }
+    if (this.telegraphs.length >= MAX_TELEGRAPHS) {
+      this.nextBusterAt = now + 500;
+      return;
+    }
+    this.nextBusterAt = now + cfg.everyMs;
+    const pos = target.posAt(now) ?? { x: 0, z: 0 };
+    const telegraph: Telegraph = {
+      id: this.nextId++,
+      kind: "buster",
+      x: pos.x,
+      z: pos.z,
+      r: 1.2,
+      inner: 0,
+      at: now,
+      hitAt: now + cfg.windupMs,
+      fraction: cfg.fraction,
+      target: target.uid,
+    };
+    this.telegraphs.push(telegraph);
+    events.push({ t: "telegraph", telegraph });
+  }
+
+  private decayThreat(now: number) {
+    const dt = Math.max(0, now - this.threatAt) / 1000;
+    this.threatAt = now;
+    if (dt <= 0 || !this.threat.size) return;
+    const keep = (1 - TUNING.threat.decayPerSec) ** dt;
+    for (const [uid, v] of this.threat) {
+      const next = v * keep;
+      if (next < 0.5) this.threat.delete(uid);
+      else this.threat.set(uid, next);
+    }
+  }
 }
 
-/** Whether a telegraph covers a point. */
+/** Whether a telegraph covers a point. A buster covers its target, not a
+ * place: never by position. */
 export function covers(tg: Telegraph, x: number, z: number): boolean {
+  if (tg.kind === "buster") return false;
   const d = Math.hypot(x - tg.x, z - tg.z);
   return d <= tg.r && d >= tg.inner;
 }

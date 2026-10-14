@@ -131,7 +131,7 @@ describe("attacks", () => {
     const resolve = ev.find((x) => x.t === "resolve");
     expect(resolve).toBeTruthy();
     if (resolve?.t !== "resolve") return;
-    expect(resolve.hits).toEqual([{ uid: "a", damage: 60 }]);
+    expect(resolve.hits).toEqual([{ uid: "a", damage: 60, absorbed: 0 }]);
   });
 
   it("misses a player who walked out of the zone", () => {
