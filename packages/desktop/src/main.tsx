@@ -1307,9 +1307,6 @@ function App() {
         ((needsClassChoice(herzie) && !classChoiceLater) ||
           testClassChoice) && (
           <ClassChoiceOverlay
-            userId={herzie.friendCode}
-            stage={Math.max(2, stageOverride ?? herzie.stage)}
-            equipped={state.equipped}
             onChoose={async (c) => {
               await herzies.chooseClass(c);
               setTestClassChoice(false);
