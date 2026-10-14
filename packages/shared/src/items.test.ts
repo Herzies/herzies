@@ -548,6 +548,46 @@ describe("applyEquip", () => {
     expect(unitsToEquipped(next)).toEqual({ body: "gold-chain" });
   });
 
+  it("only lets a herzie of the item's class wear class equipment", () => {
+    const units = [unit("u1", "old-cymbal")];
+    const item = getItem("old-cymbal");
+    const gate = {
+      minStage: item?.minStage,
+      stage: 2,
+      requiredClass: item?.requiredClass,
+    };
+    expect(
+      applyEquip(units, "u1", "equip", "off_hand", undefined, {
+        ...gate,
+        herzieClass: "bard",
+      }),
+    ).toEqual({ ok: false, reason: "class-required" });
+    expect(
+      applyEquip(units, "u1", "equip", "off_hand", undefined, {
+        ...gate,
+        herzieClass: null,
+      }),
+    ).toEqual({ ok: false, reason: "class-required" });
+    const next = after(
+      applyEquip(units, "u1", "equip", "off_hand", undefined, {
+        ...gate,
+        herzieClass: "percussionist",
+      }),
+    );
+    expect(unitsToEquipped(next)).toEqual({ off_hand: "old-cymbal" });
+  });
+
+  it("binds class equipment: no sell price, never dropped", () => {
+    const gear = ITEMS.filter((i) => i.requiredClass);
+    expect(gear.map((i) => i.id).sort()).toEqual(
+      ["compact-discs", "lute", "old-cymbal", "worn-stick"],
+    );
+    for (const item of gear) {
+      expect(item.sellPrice).toBeUndefined();
+      expect(NON_DROPPABLE_ITEM_IDS).toContain(item.id);
+    }
+  });
+
   it("gates every body item at stage 3", () => {
     const body = ITEMS.filter((i) => i.equipSlot === "body");
     expect(body.length).toBeGreaterThan(0);

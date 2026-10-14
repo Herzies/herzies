@@ -1859,6 +1859,259 @@ export function equippedCacheKey(equipped?: Equipped): string {
   return `${slots},modifier:${modifiers}`;
 }
 
+// --- Held class equipment ---
+// Class gear (classes.ts) is held in the hands. A herzie's hand is the far
+// end of its one-sphere arm; the props are tagged with their own parts,
+// "held-l" and "held-r", not the arm's — more than one "arm-l" sphere would
+// read as the boss's chained arms (buildRig), and the cast poses the arm by
+// placing its one sphere outright. Instead creaturePoseOffsets turns each
+// held part with its arm, about the shoulder (followArms), and HerzieModel
+// turns their solids' axes to match (heldArmDirections).
+//
+// The main hand is the casting arm, CAST_ARM, so the wave leaves from the
+// stick, the disc or the lute; the off hand is the other.
+
+/** Which arm each held part rides. */
+export const HELD_ARM: Readonly<Record<string, string>> = {
+  "held-l": "arm-l",
+  "held-r": "arm-r",
+};
+/** The main hand's part: CAST_ARM's ("arm-l"). Spelled out, not derived,
+ * since CAST_ARM is declared further down; a test pins the two together. */
+export const MAIN_HELD = "held-l";
+const OFF_HELD = "held-r";
+
+interface Hand {
+  /** Where the palm is. */
+  at: V3;
+  /** Unit vector down the arm, shoulder to hand. */
+  dir: V3;
+  /** −1 the creature's left (−x), 1 its right. */
+  side: -1 | 1;
+  /** The arm's radius: props are sized by it, so they fit any stage. */
+  r: number;
+}
+
+function handOf(spheres: Sphere[], arm: string): Hand | null {
+  const sp = spheres.find((s) => s.part === arm);
+  if (!sp) return null;
+  const rig = buildRig(spheres);
+  const shoulder = rig.shoulders[arm];
+  if (!shoulder) return null;
+  const v = sub(sp.center, shoulder);
+  const len = Math.max(1e-9, Math.hypot(...v));
+  const dir = scale(v, 1 / len);
+  return {
+    at: add(sp.center, scale(dir, sp.radius * 0.7)),
+    dir,
+    side: LIMB_SIDE[arm] ?? 1,
+    r: sp.radius,
+  };
+}
+
+function norm(v: V3): V3 {
+  return scale(v, 1 / Math.max(1e-9, Math.hypot(...v)));
+}
+
+type HeldBuilder = (spheres: Sphere[], part: string, hand: Hand) => Sphere[];
+
+const held = (
+  part: string,
+  center: V3,
+  radius: number,
+  color: string,
+  shape?: Shape,
+): Sphere => ({ center, radius, zone: "wearable", part, color, shape });
+
+/** Worn Stick: a drumstick out of the fist, tip forward and up. */
+const buildWornStick: HeldBuilder = (_s, part, { at, side, r }) => {
+  const half = r * 1.15;
+  const axis = norm([side * 0.15, -0.45, -0.88]);
+  const mid = add(at, scale(axis, half * 0.7));
+  return [
+    held(part, mid, r * 0.14, "#c8a46e", {
+      kind: "capsule",
+      axis: scale(axis, half),
+    }),
+    held(part, add(mid, scale(axis, half)), r * 0.2, "#e6cfa3"),
+  ];
+};
+
+/** Old Cymbal: a shield-like disc held out in front, a little outward. */
+const buildOldCymbal: HeldBuilder = (_s, part, { at, side, r }) => {
+  const face = norm([side * 0.35, 0.1, -1]);
+  const center = add(at, add(scale(face, r * 0.5), [side * r * 0.2, 0, 0]));
+  return [
+    held(part, center, r * 1.5, "#d4b04c", {
+      kind: "cylinder",
+      axis: scale(face, r * 0.05),
+      dome: r * 0.12,
+    }),
+    // The bell, and verdigris at the rim.
+    held(part, add(center, scale(face, r * 0.1)), r * 0.35, "#b8923a", {
+      kind: "cylinder",
+      axis: scale(face, r * 0.08),
+    }),
+    held(part, add(center, [side * r * 1.15, -r * 0.6, 0]), r * 0.22, "#6fa38a", {
+      kind: "cylinder",
+      axis: scale(face, r * 0.06),
+    }),
+  ];
+};
+
+/** One Compact Disc, upright in the palm, its face to the side. */
+function discIn(part: string, { at, side, r }: Hand): Sphere[] {
+  const face: V3 = norm([side, 0, -0.25]);
+  const center = add(at, [side * r * 0.15, r * 0.2, -r * 0.55]);
+  return [
+    held(part, center, r * 0.95, "#d9d9e8", {
+      kind: "cylinder",
+      axis: scale(face, r * 0.04),
+    }),
+    held(part, center, r * 0.22, "#3a3a4a", {
+      kind: "cylinder",
+      axis: scale(face, r * 0.06),
+    }),
+  ];
+}
+
+/** Compact Discs: one item, a disc in each hand. */
+const buildCompactDiscs: HeldBuilder = (spheres, part, hand) => {
+  const other = handOf(spheres, HELD_ARM[part === MAIN_HELD ? OFF_HELD : MAIN_HELD]);
+  return [
+    ...discIn(part, hand),
+    ...(other ? discIn(part === MAIN_HELD ? OFF_HELD : MAIN_HELD, other) : []),
+  ];
+};
+
+/** Lute: the body in the strumming hand, in front of the herzie; the neck
+ * runs across and up toward the other side. */
+const buildLute: HeldBuilder = (_s, part, { at, side, r }) => {
+  const body = add(at, [-side * r * 0.55, -r * 0.2, -r * 1.0]);
+  const face: V3 = [0, 0, -1];
+  const neckDir = norm([-side * 0.8, -0.6, 0]);
+  const neckHalf = r * 1.1;
+  const neckMid = add(body, scale(neckDir, r * 0.9 + neckHalf));
+  return [
+    held(part, body, r * 0.95, "#c98a4b", {
+      kind: "cylinder",
+      axis: scale(face, r * 0.22),
+      dome: r * 0.25,
+    }),
+    // Sound hole.
+    held(part, add(body, [0, -r * 0.15, -r * 0.24]), r * 0.24, "#2b1a0e", {
+      kind: "cylinder",
+      axis: scale(face, r * 0.03),
+    }),
+    held(part, neckMid, r * 0.16, "#6b4226", {
+      kind: "capsule",
+      axis: scale(neckDir, neckHalf),
+    }),
+    // Pegbox, bent back.
+    held(
+      part,
+      add(neckMid, scale(neckDir, neckHalf + r * 0.25)),
+      r * 0.2,
+      "#4a2c18",
+      { kind: "capsule", axis: scale(norm([-side * 0.3, -0.2, 0.9]), r * 0.18) },
+    ),
+  ];
+};
+
+const HELD_ITEM_BUILDERS: Record<string, HeldBuilder> = {
+  "worn-stick": buildWornStick,
+  "old-cymbal": buildOldCymbal,
+  "compact-discs": buildCompactDiscs,
+  lute: buildLute,
+};
+
+function buildHeldSpheres(spheres: Sphere[], equipped: Equipped): Sphere[] {
+  const out: Sphere[] = [];
+  for (const [slot, part] of [
+    ["main_hand", MAIN_HELD],
+    ["off_hand", OFF_HELD],
+  ] as const) {
+    const id = equipped[slot];
+    const build = id && HELD_ITEM_BUILDERS[id];
+    const hand = build ? handOf(spheres, HELD_ARM[part]) : null;
+    if (build && hand) out.push(...build(spheres, part, hand));
+  }
+  return out;
+}
+
+/** Where each held part's arm points, from its shoulder: at rest, and with
+ * `offsets` applied. A held part is that turn, done about the shoulder; a
+ * held solid's axis takes the same turn. */
+export function heldArmDirections(
+  spheres: Sphere[],
+  offsets: readonly V3[],
+): Record<string, { shoulder: V3; shoulderNow: V3; rest: V3; now: V3 }> {
+  const out: Record<
+    string,
+    { shoulder: V3; shoulderNow: V3; rest: V3; now: V3 }
+  > = {};
+  if (!spheres.some((s) => s.part in HELD_ARM)) return out;
+  const rig = buildRig(spheres);
+  const parent = rig.body ?? rig.head;
+  const parentAt = parent ? spheres.indexOf(parent) : -1;
+  const parentOff: V3 = parentAt >= 0 ? offsets[parentAt] : [0, 0, 0];
+  for (const [heldPart, arm] of Object.entries(HELD_ARM)) {
+    const i = spheres.findIndex((s) => s.part === arm);
+    const shoulder = rig.shoulders[arm];
+    if (i < 0 || !shoulder) continue;
+    const shoulderNow = add(shoulder, parentOff);
+    out[heldPart] = {
+      shoulder,
+      shoulderNow,
+      rest: sub(spheres[i].center, shoulder),
+      now: sub(add(spheres[i].center, offsets[i]), shoulderNow),
+    };
+  }
+  return out;
+}
+
+/** `v` turned by the rotation that takes unit `from` to unit `to`
+ * (Rodrigues), the shortest way. */
+export function turnBetween(v: V3, from: V3, to: V3): V3 {
+  const a = norm(from);
+  const b = norm(to);
+  const k: V3 = [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0],
+  ];
+  const sin = Math.hypot(...k);
+  const cos = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  if (sin < 1e-9) return cos > 0 ? v : scale(v, -1);
+  const u = scale(k, 1 / sin);
+  const ux = u[1] * v[2] - u[2] * v[1];
+  const uy = u[2] * v[0] - u[0] * v[2];
+  const uz = u[0] * v[1] - u[1] * v[0];
+  const dot = u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+  return [
+    v[0] * cos + ux * sin + u[0] * dot * (1 - cos),
+    v[1] * cos + uy * sin + u[1] * dot * (1 - cos),
+    v[2] * cos + uz * sin + u[2] * dot * (1 - cos),
+  ];
+}
+
+/** `offsets` with every held part moved as its arm moved: turned about the
+ * shoulder, and stretched with the arm's reach (a cast reaches out). */
+function followArms(spheres: Sphere[], offsets: V3[]): V3[] {
+  const arms = heldArmDirections(spheres, offsets);
+  if (Object.keys(arms).length === 0) return offsets;
+  return offsets.map((d, i): V3 => {
+    const sp = spheres[i];
+    const arm = arms[sp.part];
+    if (!arm) return d;
+    const stretch =
+      Math.hypot(...arm.now) / Math.max(1e-9, Math.hypot(...arm.rest));
+    const rel = scale(sub(sp.center, arm.shoulder), stretch);
+    const at = add(arm.shoulderNow, turnBetween(rel, arm.rest, arm.now));
+    return sub(at, sp.center);
+  });
+}
+
 function appendWearableSpheres(
   spheres: Sphere[],
   equipped: Equipped | undefined,
@@ -1888,6 +2141,8 @@ function appendWearableSpheres(
       spheres.push(...buildBoomboxSpheres(spheres, cols, side, boomboxConfig));
     }
   }
+
+  spheres.push(...buildHeldSpheres(spheres, equipped));
 
   if (equipped.spirit === "spirit-orb") {
     spheres.push(...buildSpiritOrbSpheres(spheres, cols, SPIRIT_SIDE));
@@ -2252,6 +2507,8 @@ function buildRig(spheres: Sphere[]): Rig {
   let floor = Number.NEGATIVE_INFINITY;
   for (const sp of spheres) {
     if (isSceneFixed(sp.part)) continue;
+    // Held props can hang below a legless herzie; it still stands on itself.
+    if (sp.part in HELD_ARM) continue;
     floor = Math.max(floor, sp.center[1] + sp.radius);
     if (isArm(sp.part) && parent) {
       // The arm sphere nearest the parent carries the shoulder (the boss's
@@ -3842,7 +4099,7 @@ export function creaturePoseOffsets(
       z + b[2] - s.center[2],
     ];
   });
-  return grounded(spheres, offsets, 1 - sw);
+  return grounded(spheres, followArms(spheres, offsets), 1 - sw);
 }
 
 /**

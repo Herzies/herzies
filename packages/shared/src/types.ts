@@ -1,4 +1,6 @@
+import type { HerzieClass } from "./classes.js";
 import type { Equipped, HerzieStats, ItemUnit } from "./items.js";
+import type { SkillId } from "./skills.js";
 
 export interface HerzieAppearance {
   headIndex: number;
@@ -34,6 +36,9 @@ export interface Herzie {
   xp: number;
   level: number;
   stage: Stage;
+  /** Picked once at stage 2 (classes.ts); null until then. Set only by
+   * choose_class — sync never writes it. Absent from an older server. */
+  class?: HerzieClass | null;
 
   // Music stats
   totalMinutesListened: number;
@@ -152,6 +157,17 @@ export interface SyncResponse {
   /** Inventory Expansions the player owns — see `bankCapacity`. Optional so a
    * client built against an older server still typechecks; absent means none. */
   bankExpansions?: number;
+  /** The herzie's class skills, once it has a class. Absent from an older
+   * server, or before a class is chosen. */
+  skills?: HerzieSkill[];
+}
+
+/** One skill a herzie knows (public.herzie_skills). */
+export interface HerzieSkill {
+  skillId: SkillId;
+  level: number;
+  /** Cumulative skill XP. */
+  xp: number;
 }
 
 /** Notification that another player wants to trade */

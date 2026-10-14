@@ -26,6 +26,8 @@ export const ITEM_TYPE_TEXT_CLASSES: Record<ItemType, string> = {
   accessory: "text-red",
   // Shares skin's purple: the Greedy Spirit is lavender.
   spirit: "text-purple",
+  // Class gear: the herzie's instrument.
+  instrument: "text-pink",
   modifier: "text-yellow",
   artefact: "text-text-dim",
 };
@@ -38,6 +40,7 @@ export const ITEM_TYPE_PILL_CLASSES: Record<ItemType, string> = {
   equipable: "bg-cyan/15 text-cyan",
   accessory: "bg-red/15 text-red",
   spirit: "bg-purple/15 text-purple",
+  instrument: "bg-pink/15 text-pink",
   modifier: "bg-yellow/15 text-yellow",
   artefact: "bg-text-dim/15 text-text-dim",
 };

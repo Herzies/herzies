@@ -13,11 +13,14 @@ import {
   DANCE_LOOP_FRAMES,
   danceHopLift,
   dangledAxis,
+  HELD_ARM,
   hasDangleEquipped,
+  heldArmDirections,
   primitiveShading,
   type Sphere,
   schemeShades,
   schemeSpan,
+  turnBetween,
 } from "../creature-renderer.js";
 import {
   createDangleSim,
@@ -406,6 +409,9 @@ export class HerzieModel {
   private castPitch = 0;
   /** The hand the wave leaves from: the right arm's part, if it has one. */
   private readonly castArm: number;
+  /** It holds class gear (held-l/held-r parts), which pose() turns with the
+   * arms. */
+  private readonly holdsProps: boolean;
   /** For a herzie with no arms: the hand it grows to cast with, beside its
    * head, and where on the head it grows from. */
   private readonly popHand: {
@@ -552,6 +558,7 @@ export class HerzieModel {
       parent.add(mesh);
     }
     this.castArm = spheres.findIndex((sp) => sp.part === CAST_ARM);
+    this.holdsProps = spheres.some((sp) => sp.part in HELD_ARM);
     const headAt = spheres.findIndex((sp) => sp.part === "head");
     if (this.castArm < 0 && headAt >= 0 && !look.params) {
       const head = spheres[headAt];
@@ -825,6 +832,8 @@ export class HerzieModel {
     this.posePopHand(
       this.castTime === undefined ? undefined : this.castTime / CAST_SECONDS,
     );
+    // Held props (class gear) turn with their arm; a solid's axis with them.
+    const arms = this.holdsProps ? heldArmDirections(spheres, offsets) : null;
     for (let i = 0; i < spheres.length; i++) {
       const s = spheres[i];
       const [x, y, z] = s.center;
@@ -834,6 +843,11 @@ export class HerzieModel {
       // A dangling solid (the witch hat's tip) turns with its swing, too.
       if (s.shape && s.dangle) {
         scratch.set(...dangledAxis(s, this.dangle)).normalize();
+        mesh.quaternion.setFromUnitVectors(UP, scratch);
+      }
+      const arm = s.shape && arms?.[s.part];
+      if (arm && s.shape) {
+        scratch.set(...turnBetween(s.shape.axis, arm.rest, arm.now)).normalize();
         mesh.quaternion.setFromUnitVectors(UP, scratch);
       }
     }

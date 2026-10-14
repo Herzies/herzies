@@ -1,6 +1,7 @@
 export * from "./ascii3d.js";
 export * from "./card/index.js";
 export * from "./chat.js";
+export * from "./classes.js";
 export * from "./chat-mentions.js";
 export * from "./craving.js";
 export * from "./creature-renderer.js";
@@ -17,6 +18,7 @@ export * from "./npc-looks.js";
 export * from "./Sky.js";
 export * from "./SpeechBubble.js";
 export * from "./scenery-renderer.js";
+export * from "./skills.js";
 export * from "./town-interpolation.js";
 export * from "./town-net.js";
 export * from "./types.js";

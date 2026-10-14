@@ -34,6 +34,7 @@ import {
   getItem,
   goodEyeSniperBonus,
   type Herzie,
+  type HerzieSkill,
   hasRoomFor,
   type ItemUnit,
   isModifierEquipped,
@@ -48,6 +49,7 @@ import {
   recordGenreMinutes,
   rollSeasonalBonusDrops,
   type SecretTrackConfig,
+  type SkillId,
   type Stage,
   scaledBonus,
   stageForLevel,
@@ -143,6 +145,7 @@ export function rowToHerzie(row: Record<string, unknown>): Herzie {
     xp: row.xp as number,
     level: row.level as number,
     stage: row.stage as Stage,
+    class: (row.class ?? null) as Herzie["class"],
     totalMinutesListened: row.total_minutes_listened as number,
     genreMinutes: (row.genre_minutes ?? {}) as Record<string, number>,
     friendCode: row.friend_code as string,
@@ -286,6 +289,7 @@ export async function processSync(
   options: SyncOptions = {},
 ): Promise<{
   herzie: Herzie;
+  skills?: HerzieSkill[];
   notifications: EventNotification[];
   multipliers: ActiveMultiplier[];
   pendingTradeRequest?: PendingTradeRequest;
@@ -896,8 +900,26 @@ export async function processSync(
     units = [...ctxUnits, ...collectedUnits];
   }
 
+  // Class skills: one primary-key read, and only once a class is chosen
+  // (choose_class is what creates the rows). Left out on a failed read.
+  let skills: HerzieSkill[] | undefined;
+  if (herzie.class) {
+    const { data: skillRows, error: skillsError } = await admin
+      .from("herzie_skills")
+      .select("skill_id, level, xp")
+      .eq("user_id", userId);
+    if (!skillsError && Array.isArray(skillRows)) {
+      skills = skillRows.map((r) => ({
+        skillId: r.skill_id as SkillId,
+        level: r.level as number,
+        xp: Number(r.xp),
+      }));
+    }
+  }
+
   return {
     herzie,
+    skills,
     notifications,
     multipliers: allMultipliers,
     pendingTradeRequest,

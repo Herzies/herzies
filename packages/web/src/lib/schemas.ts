@@ -71,6 +71,11 @@ export const equipItemSchema = z.union([
   }),
 ]);
 
+/** Pick a class (once, from stage 2). Mirrors CLASS_IDS in @herzies/shared. */
+export const chooseClassSchema = z.object({
+  class: z.enum(["bard", "record_slinger", "percussionist"]),
+});
+
 /** Upgrade one named copy. `{targetItemId}` is the older client's spelling. */
 export const upgradeItemSchema = z.union([
   z.object({
