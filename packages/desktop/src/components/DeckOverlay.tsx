@@ -208,15 +208,15 @@ export function DeckOverlay({ showInstrument, ...props }: DeckOverlayProps) {
 
 /** Reading order, two to a row: what's worn on the body first, the class's
  * Instrument (shown once there's a class) beside the Equipment, then the
- * herzie's look, then the Modifiers and the Spirit. */
+ * herzie's look, then the Spirit and the Modifiers. */
 const DECK_SLOT_ORDER = [
   "Equipment",
   "Instrument",
   "Accessories",
   "Skin",
   "Scenery",
-  "Modifiers",
   "Spirit",
+  "Modifiers",
 ] as const;
 
 function DeckSlot({
