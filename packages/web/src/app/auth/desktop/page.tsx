@@ -10,6 +10,7 @@ function SignIn() {
   const state = useSearchParams().get("state");
   return (
     <DesktopSignIn
+      state={isValidLoginState(state) ? state : null}
       callbackPath={
         isValidLoginState(state)
           ? `/auth/desktop/callback?${new URLSearchParams({ state })}`
