@@ -273,12 +273,28 @@ export function TownWorld({
             )}
           >
             {combatHint}
+            {!paused ? (
+              <SkillHud
+                usable={!!map.combat}
+                className="bottom-full right-2 mb-1.5"
+              />
+            ) : null}
             <TownHpBar inFight={!!map.combat} />
             <ExpBar progress={profile.progress} className="text-white/70" />
           </div>
         </>
       ) : null}
       {profile ? null : combatHint}
+      {profile || paused ? null : (
+        <SkillHud
+          usable={!!map.combat}
+          className={
+            chatOverlay
+              ? "bottom-[calc(var(--dock-height,0px)+4.5rem)] right-2"
+              : "bottom-3 right-2"
+          }
+        />
+      )}
       {fpsShown && opened && !paused ? (
         <FrameRate
           className={cn(
@@ -309,7 +325,6 @@ export function TownWorld({
         <>
           <TownVitals inFight={!!map.combat} chatOverlay={chatOverlay} />
           <BossHud name={bossCard?.title ?? "The boss"} />
-          <SkillHud usable={!!map.combat} />
         </>
       ) : null}
       {!paused && (loading || !ready) ? (

@@ -19,7 +19,14 @@ const LEVEL_UP_MS = 3_500;
  * be used (only where you can fight). A Cymbrella you're under counts down
  * beside it; a level-up is announced over it.
  */
-export function SkillHud({ usable = true }: { usable?: boolean }) {
+export function SkillHud({
+  usable = true,
+  className = "bottom-3 right-2",
+}: {
+  usable?: boolean;
+  /** Where it sits: absolute-positioning classes. */
+  className?: string;
+}) {
   useSkills();
   const mine = skills.mine;
   const sweep = useRef<HTMLDivElement>(null);
@@ -71,7 +78,12 @@ export function SkillHud({ usable = true }: { usable?: boolean }) {
     levelUp && performance.now() - levelUp.at < LEVEL_UP_MS ? levelUp : null;
 
   return (
-    <div className="pointer-events-none absolute bottom-3 left-1/2 z-30 flex -translate-x-1/2 flex-col items-center gap-1">
+    <div
+      className={cn(
+        "pointer-events-none absolute z-30 flex flex-col items-center gap-1",
+        className,
+      )}
+    >
       {showLevelUp ? (
         <div className="rounded bg-black/70 px-2 py-0.5 text-ui text-yellow">
           Leveled up "{SKILL_DEFS[showLevelUp.skill].name}" to Lv.{" "}
