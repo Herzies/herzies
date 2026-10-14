@@ -85,7 +85,7 @@ export function SkillHud({ usable = true }: { usable?: boolean }) {
       />
       <div
         className={cn(
-          "relative flex h-11 w-11 items-center justify-center overflow-hidden rounded border border-white/30 bg-black/55 text-xl",
+          "pointer-events-auto relative flex h-11 w-11 items-center justify-center overflow-hidden rounded border border-white/30 bg-black/55 text-xl",
           !usable && "opacity-45",
         )}
         title={
