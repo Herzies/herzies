@@ -193,11 +193,10 @@ function DeckGroup({
 }
 
 /** The deck, under the Herzie view's "Deck" tab: its sections in two
- * columns. The left one is as wide as its widest section (Modifiers, the
- * longest run) so that run never has to squeeze into half the row. */
+ * equal columns. */
 export function DeckOverlay({ showInstrument, ...props }: DeckOverlayProps) {
   return (
-    <div className="pointer-events-auto grid w-full grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 pt-1.5 pb-4">
+    <div className="pointer-events-auto grid w-full grid-cols-2 gap-x-4 gap-y-1.5 pt-1.5 pb-4">
       {DECK_SLOT_ORDER.filter(
         (label) => label !== "Instrument" || showInstrument,
       ).map((label) => (
