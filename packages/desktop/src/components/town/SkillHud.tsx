@@ -14,11 +14,12 @@ const SKILL_ICONS: Record<SkillId, string> = {
 const LEVEL_UP_MS = 3_500;
 
 /**
- * Your class skill, bottom centre while you can fight: what it is, its
- * key, its level, and a sweep while it cools down. A Cymbrella you're
- * under counts down beside it; a level-up is announced over it.
+ * Your class skill, bottom centre anywhere in the Town: what it is, its
+ * key, its level, and a sweep while it cools down. Dimmed where it can't
+ * be used (only where you can fight). A Cymbrella you're under counts down
+ * beside it; a level-up is announced over it.
  */
-export function SkillHud() {
+export function SkillHud({ usable = true }: { usable?: boolean }) {
   useSkills();
   const mine = skills.mine;
   const sweep = useRef<HTMLDivElement>(null);
@@ -85,8 +86,13 @@ export function SkillHud() {
       <div
         className={cn(
           "relative flex h-11 w-11 items-center justify-center overflow-hidden rounded border border-white/30 bg-black/55 text-xl",
+          !usable && "opacity-45",
         )}
-        title={`${def.name} (Lv. ${mine.level}): ${skillPercent(mine.id, mine.level)}%`}
+        title={
+          usable
+            ? `${def.name} (Lv. ${mine.level}): ${skillPercent(mine.id, mine.level)}%`
+            : `${def.name}: usable on the training grounds and in the cave`
+        }
       >
         <span aria-hidden>{SKILL_ICONS[mine.id]}</span>
         <div ref={sweep} className="absolute inset-0" />

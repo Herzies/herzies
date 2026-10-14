@@ -309,7 +309,7 @@ export function TownWorld({
         <>
           <TownVitals inFight={!!map.combat} chatOverlay={chatOverlay} />
           <BossHud name={bossCard?.title ?? "The boss"} />
-          {map.combat ? <SkillHud /> : null}
+          <SkillHud usable={!!map.combat} />
         </>
       ) : null}
       {!paused && (loading || !ready) ? (
