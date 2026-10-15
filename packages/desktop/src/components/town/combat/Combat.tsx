@@ -4,6 +4,7 @@ import {
   CAST_INTERVAL_MS,
   type HerzieStats,
   hitDamage,
+  SKILL_DEFS,
   skillValue,
 } from "@herzies/shared";
 import {
@@ -48,6 +49,7 @@ import {
   entityAt,
   mySkillReady,
   noteSkillCast,
+  setBuff,
   skills,
   startMyCooldown,
 } from "./skills";
@@ -411,6 +413,16 @@ export function Combat({
         yaw,
         at: now,
       });
+      // A Cymbrella's on you at once, for as long as it lasts: in a fight
+      // the server's word replaces this (or a refusal takes it off); in
+      // practice there's no server to say so.
+      if (mine.id === "cymbrella") {
+        setBuff(bossFight.you ?? -1, {
+          buff: mine.id,
+          value: skillValue(mine.id, mine.level),
+          until: now + (SKILL_DEFS[mine.id].durationMs ?? 0),
+        });
+      }
       if (bossFight.on) {
         townNet().sendSkill(mine.id, seq, yaw, pitch);
       } else if (mine.id === "backspin") {

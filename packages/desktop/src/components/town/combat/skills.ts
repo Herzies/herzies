@@ -125,6 +125,17 @@ export function setBuff(id: number, buff: ActiveBuff): void {
   emitSkills();
 }
 
+/** Takes `buff` off `id` (a buff you predicted, refused). */
+export function clearBuff(id: number, buff: string): void {
+  const list = skills.buffs.get(id);
+  if (!list?.some((b) => b.buff === buff)) return;
+  skills.buffs.set(
+    id,
+    list.filter((b) => b.buff !== buff),
+  );
+  emitSkills();
+}
+
 export function buffOn(
   id: number | null,
   buff: string,

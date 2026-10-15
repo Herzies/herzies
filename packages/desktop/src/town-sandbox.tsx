@@ -13,7 +13,8 @@
 // HUD is drawn over it. `&boss=<hp>` sets the boss's health, `&hp=<n>` yours.
 // `?music=1` plays music, as it were: stand still and the herzie dances.
 // `?class=record_slinger` (or bard, percussionist) hands the player that
-// class's gear and basic attack (the cave's server hears of it too).
+// class's gear, basic attack and skill (Q; `&skill=` its level; the cave's
+// server hears of the class too).
 // `?color=`, `?head=` and `?spirit=` dress the player (`?head=rainbow-headband`
 // with the default prism skin is the full Prismatic set).
 import "./globals.css";
@@ -34,6 +35,7 @@ import {
   bubbleDuration,
   type ChatBubbles,
 } from "./components/town/chatBubbles";
+import { setMySkill } from "./components/town/combat/skills";
 import { combat } from "./components/town/combat/state";
 import { setTownTicketSource, townNet } from "./components/town/net/townNet";
 import {
@@ -121,6 +123,13 @@ if (isHerzieClass(cls)) {
   player.equipped.main_hand = main;
   if (off) player.equipped.off_hand = off;
   combat.attack = attackStyle(cls);
+  // And its skill (Q), at `?skill=` level.
+  setMySkill([
+    {
+      skillId: CLASS_DEFS[cls].starterSkill,
+      level: Number(params.get("skill") ?? 1),
+    },
+  ]);
 }
 
 /**

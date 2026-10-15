@@ -10,6 +10,7 @@ import { sfxDown, sfxHurt, sfxImpact, sfxSlam, sfxWarn } from "../sfx";
 import { setHpNow, setRegenFrozen } from "../vitals";
 import { pushDamageNumber } from "./DamageNumbers";
 import {
+  clearBuff,
   emitSkills,
   noteSkillCast,
   resetSkills,
@@ -247,6 +248,9 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       // The prediction was wrong: the server's word on when it's ready.
       if (m.seq === skills.seq) {
         skills.readyAt = m.readyAt > 0 ? clock.toLocal(m.readyAt) : now;
+        // Nor is the Cymbrella you put on.
+        if (skills.mine?.id === "cymbrella")
+          clearBuff(clock.you() ?? -1, "cymbrella");
         emitSkills();
       }
       return;

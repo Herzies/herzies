@@ -2,7 +2,6 @@ import { BACKSPIN_DISCS, BACKSPIN_SPREAD, SKILL_DEFS } from "@herzies/shared";
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo } from "react";
 import * as THREE from "three";
-import { bossFight } from "../combat/fight";
 import { buffOn, entityAt, SKILL_FX_MS, skills } from "../combat/skills";
 
 /** Rings a Soothing Drones sends out, one after another. */
@@ -134,18 +133,12 @@ export function SkillVFX() {
     for (; ring < fx.rings.length; ring++) fx.rings[ring].visible = false;
     for (; disc < fx.discs.length; disc++) fx.discs[disc].visible = false;
 
-    // A cymbal over everyone under a Cymbrella: the server's buff, or your
-    // own just pressed (before the server's word arrives).
+    // A cymbal over everyone under a Cymbrella, for as long as it lasts
+    // (yours from the moment you press it; see Combat).
     let cym = 0;
-    const you = bossFight.you ?? -1;
-    const ownPress = skills.casts.find(
-      (c) => c.skill === "cymbrella" && c.by === you,
-    );
     for (const [id, at] of entityAt) {
       if (cym >= fx.cymbals.length) break;
-      const under =
-        buffOn(id, "cymbrella", now) || (id === you && ownPress !== undefined);
-      if (!under) continue;
+      if (!buffOn(id, "cymbrella", now)) continue;
       const m = fx.cymbals[cym++];
       m.visible = true;
       m.position.set(at.x, at.top + 0.9 + Math.sin(now / 300) * 0.05, at.z);
