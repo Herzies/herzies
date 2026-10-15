@@ -124,7 +124,7 @@ export const SHEATHE_DELAY = 0.25;
  * moved: the threads don't feel it. */
 const THREAD_JUMP_SPEED = 60;
 /** Time constant (s) its velocity is smoothed over for the threads. */
-const THREAD_SMOOTHING = 0.06;
+const THREAD_SMOOTHING = 0.12;
 /** A herzie with no arms (stage 1) grows a little hand to cast with: this
  * big, as a fraction of its head. */
 const POP_HAND = 0.3;

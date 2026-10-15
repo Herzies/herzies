@@ -2256,6 +2256,7 @@ const buildCompactDiscs: HeldBuilder = (spheres, part, hand) => {
     rest: guess,
     center,
     clear: hung.map((h) => radius + lift(h)),
+    parts: hung.map((h) => h.part),
   };
   rig.rest = settleThread(rig);
   return hung.flatMap((h, index) =>
@@ -2537,15 +2538,18 @@ export function heldPoses(
         continue;
       }
       // Swung on its thread — settling back as the hand reaches for it, so
-      // the grab takes it from where it rests — and lying flat against the
-      // back wherever it's swung to.
+      // the grab takes it from where it rests — and hanging from it: it
+      // tilts as its thread does, like a pendulum's bob.
       const { rig, index } = socket.thread;
-      const d = scale(swung, 1 - ease(0, DRAW.grab, p));
+      const settle = 1 - ease(0, DRAW.grab, p);
+      const d = scale(swung, settle);
       const rest = rig.rest[index];
-      const turn = quatFromTo(
-        sub(rest, rig.center),
-        sub(add(rest, d), rig.center),
-      );
+      const tiedRest = index === 0 ? rig.knot : rig.rest[index - 1];
+      const tiedSwung = index === 0 ? undefined : sway?.[rig.parts[index - 1]];
+      const tiedNow = tiedSwung
+        ? add(tiedRest, scale(tiedSwung, settle))
+        : tiedRest;
+      const turn = quatFromTo(sub(tiedRest, rest), sub(tiedNow, add(rest, d)));
       const at = add(add(rest, ride), d);
       out[part] = {
         place: (x) => add(at, quatRotate(turn, sub(x, rest))),

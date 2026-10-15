@@ -29,6 +29,8 @@ export interface ThreadRig {
   center: V3;
   /** …and how far each weight's centre keeps from its middle. */
   clear: number[];
+  /** Which held part each weight is. */
+  parts: string[];
 }
 
 /** What moves the herzie, this step. */
@@ -50,6 +52,10 @@ export interface ThreadSim {
   prev: V3[];
   /** Turn rate at the last substep, for the turn's own speeding up. */
   turnRate: number;
+  /** The torso's offset last step, and how fast it was moving: the
+   * weights ride its bob, feeling only its jolts (by `response`). */
+  offset: V3;
+  bobVelocity: V3;
 }
 
 /** How the threads feel. Tuned in the sandbox (as the chain's is). */
@@ -63,17 +69,23 @@ export interface ThreadConfig {
   /** How hard the air of its going blows the weights back, per unit
    * speed: walking, they trail out a little behind it. */
   drag: number;
+  /** How much of the herzie's moving (speeding up, turning) the weights
+   * feel at all, 0 to 1: lower and they sit calmer on the back. */
+  response: number;
 }
 
 export const DEFAULT_THREAD_CONFIG: ThreadConfig = {
-  gravity: 26,
-  damping: 2.2,
-  drag: 2.5,
+  gravity: 70,
+  damping: 8,
+  drag: 6,
+  response: 0.55,
 };
 /** The most acceleration and turn the threads feel (a teleport, a portal's
  * spin, a dropped frame mustn't fling them across the map). */
-const MAX_ACCEL = 80;
-const MAX_TURN = 14;
+const MAX_ACCEL = 25;
+const MAX_TURN = 8;
+/** Time constant (s) a change of turn rate is felt over. */
+const TURN_EASE = 0.12;
 const MAX_SPEED = 12;
 
 // As dangle-physics: a fixed substep, so a long frame can't blow it up.
@@ -87,6 +99,8 @@ export function createThreadSim(rig: ThreadRig): ThreadSim {
     pos: rig.rest.map((p) => [...p] as V3),
     prev: rig.rest.map((p) => [...p] as V3),
     turnRate: 0,
+    offset: [0, 0, 0],
+    bobVelocity: [0, 0, 0],
   };
 }
 
@@ -101,18 +115,33 @@ export function stepThreadSim(
   if (dt <= 0) return;
   const steps = Math.min(MAX_SUBSTEPS, Math.ceil(dt / SUBSTEP));
   const h = dt / steps;
-  const accel = clampLength(input.accel, MAX_ACCEL);
+  // The torso's bob carries them along with it (rather than yanking them by
+  // the knot), and its jolts are felt like any other speeding up.
+  const carry = sub(input.offset, sim.offset);
+  const bobVelocity = scale(carry, 1 / dt);
+  const bobAccel = scale(sub(bobVelocity, sim.bobVelocity), 1 / dt);
+  sim.offset = [...input.offset];
+  sim.bobVelocity = bobVelocity;
+  sim.pos = sim.pos.map((p) => add(p, carry));
+  sim.prev = sim.prev.map((p) => add(p, carry));
+  const accel = scale(
+    clampLength(add(input.accel, bobAccel), MAX_ACCEL),
+    config.response,
+  );
   const wind = scale(
     clampLength(input.velocity ?? [0, 0, 0], MAX_SPEED),
     -config.drag,
   );
-  const turn = Math.max(-MAX_TURN, Math.min(MAX_TURN, input.turnRate));
+  const turn =
+    Math.max(-MAX_TURN, Math.min(MAX_TURN, input.turnRate)) * config.response;
   const center = add(rig.center, input.offset);
   const knot = add(rig.knot, input.offset);
   const keep = Math.exp(-config.damping * h);
   for (let s = 0; s < steps; s++) {
-    // The turn eases toward its new rate across the frame's substeps.
-    const w = sim.turnRate + ((turn - sim.turnRate) * (s + 1)) / steps;
+    // The turn eases toward its new rate over a moment, not a frame: a
+    // herzie snapping round to walk the other way mustn't fling them.
+    const w =
+      sim.turnRate + (turn - sim.turnRate) * (1 - Math.exp(-h / TURN_EASE));
     const spinUp = (w - sim.turnRate) / h;
     sim.pos.forEach((p, i) => {
       const v = scale(sub(p, sim.prev[i]), 1 / h);
@@ -121,10 +150,23 @@ export function stepThreadSim(
       // out (centrifugal), lag as it speeds up (Euler), Coriolis — and the
       // air it's going through.
       const r = sub(p, center);
+      // Turning, the back sweeps through the air too: that blows them
+      // back against the turn, so they keep trailing it.
+      const sweep = config.drag * w;
       const a: V3 = [
-        wind[0] - accel[0] + w * w * r[0] - spinUp * r[2] - 2 * w * v[2],
+        wind[0] -
+          sweep * r[2] -
+          accel[0] +
+          w * w * r[0] -
+          spinUp * r[2] -
+          2 * w * v[2],
         wind[1] + config.gravity - accel[1],
-        wind[2] - accel[2] + w * w * r[2] + spinUp * r[0] + 2 * w * v[0],
+        wind[2] +
+          sweep * r[0] -
+          accel[2] +
+          w * w * r[2] +
+          spinUp * r[0] +
+          2 * w * v[0],
       ];
       const next = add(
         p,

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildCreatureModel } from "./creature-renderer.js";
 import {
   createThreadSim,
+  DEFAULT_THREAD_CONFIG,
   isThreadSettled,
   stepThreadSim,
   type ThreadInput,
@@ -9,6 +10,10 @@ import {
 } from "./thread-physics.js";
 
 type V3 = [number, number, number];
+
+/** The defaults, feeling all of the herzie's moving: these test how the
+ * threads swing, not how lively they're tuned. */
+const FULL = { ...DEFAULT_THREAD_CONFIG, response: 1 };
 
 function rig(): ThreadRig {
   const { spheres } = buildCreatureModel("thread-test", 3, {
@@ -37,6 +42,7 @@ function run(
       r,
       1 / 60,
       typeof input === "function" ? input(t) : input,
+      FULL,
     );
     each?.();
   }
@@ -63,7 +69,7 @@ describe("discs on threads", () => {
         accel: [40 * Math.sin(t * 7), 0, 40 * Math.cos(t * 5)],
         turnRate: 8 * Math.sin(t * 3),
       };
-      stepThreadSim(sim, r, 1 / 60, input);
+      stepThreadSim(sim, r, 1 / 60, input, FULL);
       const moved = (v: V3): V3 => [
         v[0] + input.offset[0],
         v[1] + input.offset[1],
@@ -106,9 +112,10 @@ describe("discs on threads", () => {
   it("trails out behind as it walks", () => {
     const r = rig();
     const sim = createThreadSim(r);
-    // Walking forward (−z): the air blows them back, off the back (+z).
-    run(sim, r, 2, { ...STILL, velocity: [0, 0, -3] });
-    expect(sim.pos[1][2]).toBeGreaterThan(r.rest[1][2] + 0.01);
+    // Running forward (−z): the air blows them back, off the back (+z).
+    // (A walk's breeze is too light to lift them, pressed to the back.)
+    run(sim, r, 2, { ...STILL, velocity: [0, 0, -10] });
+    expect(sim.pos[1][2]).toBeGreaterThan(r.rest[1][2] + 0.001);
   });
 
   it("trails a turn", () => {
@@ -118,6 +125,6 @@ describe("discs on threads", () => {
     // the discs lag, toward −x.
     run(sim, r, 0.3, { ...STILL, turnRate: 6 });
     const [x] = sim.pos[1];
-    expect(x - r.rest[1][0]).toBeLessThan(-0.01);
+    expect(x - r.rest[1][0]).toBeLessThan(-0.001);
   });
 });

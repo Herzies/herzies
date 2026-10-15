@@ -330,6 +330,12 @@ function Sandbox() {
               bounds={{ min: 0, max: 10, step: 0.1 }}
               onChange={(v) => setThread((t) => ({ ...t, drag: v }))}
             />
+            <SliderField
+              label="response"
+              value={thread.response}
+              bounds={{ min: 0, max: 1, step: 0.05 }}
+              onChange={(v) => setThread((t) => ({ ...t, response: v }))}
+            />
             <div className="mt-1.5">
               <Btn onClick={() => setThread(DEFAULT_THREAD_CONFIG)}>
                 reset threads
