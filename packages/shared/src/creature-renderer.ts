@@ -303,6 +303,9 @@ export interface Sphere {
   /** Held class gear: the way from where it's slung (its center and axis)
    * to the hand. See heldPoses. */
   held?: HeldSocket;
+  /** Polished metal (the cymbal): it mirrors the sky, and its lathe grooves
+   * catch the sun in a bright bar across it. See herzieMaterial. */
+  finish?: "metal";
 }
 
 export interface Shape {
@@ -2112,7 +2115,16 @@ const held = (
   radius: number,
   color: string,
   shape?: Shape,
-): Sphere => ({ center, radius, zone: "wearable", part, color, shape });
+  finish?: Sphere["finish"],
+): Sphere => ({
+  center,
+  radius,
+  zone: "wearable",
+  part,
+  color,
+  shape,
+  ...(finish && { finish }),
+});
 
 /** Which way an arm points at the ready, its gear drawn, from its shoulder
  * (see drawHand): out to its side, low and a little forward. */
@@ -2163,11 +2175,13 @@ const buildWornStick: HeldBuilder = (_s, part, hand) => {
   return slung(
     hand,
     [
-      held(part, mid, r * 0.14, "#c8a46e", {
+      // Ebony, near black: dark against the cymbal's shine, and well below
+      // the lute's brown neck.
+      held(part, mid, r * 0.14, "#2a2422", {
         kind: "capsule",
         axis: scale(axis, half),
       }),
-      held(part, add(mid, scale(axis, half)), r * 0.2, "#e6cfa3"),
+      held(part, add(mid, scale(axis, half)), r * 0.2, "#3b3330"),
     ],
     { at, long: axis, face: cross(axis, atTheReady(hand, [0, 0, 1])) },
     {
@@ -2198,16 +2212,30 @@ const buildOldCymbal: HeldBuilder = (_s, part, hand) => {
   return slung(
     hand,
     [
-      held(part, center, r * 1.5, "#d4b04c", {
-        kind: "cylinder",
-        axis: scale(face, r * 0.05),
-        dome: r * 0.12,
-      }),
-      // The bell, and verdigris at the rim.
-      held(part, add(center, scale(face, r * 0.1)), r * 0.35, "#b8923a", {
-        kind: "cylinder",
-        axis: scale(face, r * 0.08),
-      }),
+      held(
+        part,
+        center,
+        r * 1.5,
+        "#d4b04c",
+        {
+          kind: "cylinder",
+          axis: scale(face, r * 0.05),
+          dome: r * 0.12,
+        },
+        "metal",
+      ),
+      // The bell, and verdigris at the rim: the patina stays dull.
+      held(
+        part,
+        add(center, scale(face, r * 0.1)),
+        r * 0.35,
+        "#b8923a",
+        {
+          kind: "cylinder",
+          axis: scale(face, r * 0.08),
+        },
+        "metal",
+      ),
       held(
         part,
         add(center, add(scale(forward, r * 1.15), scale(up, r * 0.6))),
@@ -4053,6 +4081,8 @@ export interface PrimitiveShading {
   /** dim, base, bright. */
   shades: [string, string, string];
   schemePainted: boolean;
+  /** Polished metal: see herzieMaterial. Absent otherwise. */
+  metal?: true;
 }
 
 /** The shades shadeWearableColor gives `hex`, dim to bright. */
@@ -4065,7 +4095,7 @@ function wearableShades(hex: string): [string, string, string] {
 }
 
 export function primitiveShading(
-  sp: Pick<Sphere, "zone" | "color">,
+  sp: Pick<Sphere, "zone" | "color" | "finish">,
   colors: ColorTriplet,
   scheme?: readonly string[],
 ): PrimitiveShading {
@@ -4100,6 +4130,11 @@ export function primitiveShading(
     shades,
     schemePainted,
   });
+  if (sp.color && sp.finish === "metal") {
+    // Its own bands, as paint's: herzieMaterial darkens them under what it
+    // mirrors.
+    return { ...shading(0.3, 0.6, wearableShades(sp.color)), metal: true };
+  }
   if (sp.color) return shading(0.3, 0.6, wearableShades(sp.color));
   if (scheme && isSchemePaintable(sp.zone, false)) {
     return shading(0.3, 0.6, wearableShades(scheme[0]), true);

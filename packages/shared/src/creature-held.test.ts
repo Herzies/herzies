@@ -60,6 +60,15 @@ describe("held class equipment", () => {
     expect(spheres.some((s) => s.part === "held-r")).toBe(true);
   });
 
+  it("polishes the cymbal, not its patina or the stick", () => {
+    const { spheres } = buildCreatureModel(USER, 3, PERCUSSIONIST);
+    const metal = (part: string) =>
+      spheres.filter((s) => s.part === part).map((s) => s.finish);
+    // Disc and bell shine; the verdigris stays dull.
+    expect(metal(OFF_HELD)).toEqual(["metal", "metal", undefined]);
+    expect(metal(MAIN_HELD).every((f) => f === undefined)).toBe(true);
+  });
+
   it("keeps a prop the same distance from its arm through a cast", () => {
     const { spheres } = buildCreatureModel(USER, 3, PERCUSSIONIST);
     const rest = creaturePoseOffsets(spheres, 3, {

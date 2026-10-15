@@ -629,7 +629,8 @@ export class HerzieModel {
     const byShading = new Map<string, THREE.ShaderMaterial>();
     for (const s of spheres) {
       const shading = primitiveShading(s, colors, scheme);
-      const key = JSON.stringify(shading);
+      // Metal's grooves are laid out by its radius: one material each.
+      const key = JSON.stringify(shading) + (shading.metal ? s.radius : "");
       let material = byShading.get(key);
       if (!material) {
         material = herzieMaterial(
@@ -638,6 +639,7 @@ export class HerzieModel {
           ramp,
           this.scheme,
           options.lighting,
+          s.radius,
         );
         byShading.set(key, material);
         this.materials.push(material);
