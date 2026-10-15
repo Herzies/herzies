@@ -8,7 +8,9 @@ import {
   creaturePoseOffsets,
   DRAW,
   HELD_ARM,
+  heldPoses,
   MAIN_HELD,
+  OFF_HELD,
   type Sphere,
 } from "./creature-renderer.js";
 import { type Equipped, getItem } from "./items.js";
@@ -87,6 +89,45 @@ describe("held class equipment", () => {
     expect(gap(casting)).toBeLessThan(gap(rest) * 1.6);
   });
 
+  it("holds the cymbal at its side and the stick like a wand, drawn", () => {
+    for (const stage of [2, 3]) {
+      const { spheres } = buildCreatureModel(USER, stage, PERCUSSIONIST);
+      const offsets = creaturePoseOffsets(spheres, stage, {
+        idleFrame: 0,
+        walkPhase: 0,
+        walkWeight: 0,
+        drawPhase: 1,
+      });
+      const poses = heldPoses(spheres, offsets, 1);
+      const unit = (v: number[]) => {
+        const n = Math.hypot(...v);
+        return v.map((x) => x / n);
+      };
+      // The cymbal (its biggest disc) faces out from its side (the off
+      // hand's, +x): edge to the front.
+      const cymbal = spheres
+        .filter((s) => s.part === OFF_HELD)
+        .sort((a, b) => b.radius - a.radius)[0];
+      if (!cymbal?.shape) throw new Error("no cymbal");
+      const face = unit(
+        poses[OFF_HELD].turn(cymbal.shape.axis as [number, number, number]),
+      );
+      expect(face[0]).toBeGreaterThan(0.9);
+      // The stick points forward (−z) and a little down (+y).
+      const stick = spheres.find(
+        (s) => s.part === MAIN_HELD && s.shape?.kind === "capsule",
+      );
+      if (!stick?.shape) throw new Error("no stick");
+      let along = unit(
+        poses[MAIN_HELD].turn(stick.shape.axis as [number, number, number]),
+      );
+      if (along[2] > 0) along = along.map((x) => -x);
+      expect(along[2]).toBeLessThan(-0.85);
+      expect(along[1]).toBeGreaterThan(0.1);
+      expect(along[1]).toBeLessThan(0.5);
+    }
+  });
+
   it("throws a disc with its other hand: that arm moves, not the casting one", () => {
     const { spheres } = buildCreatureModel(USER, 3, {
       main_hand: "compact-discs",
@@ -131,6 +172,47 @@ describe("held class equipment", () => {
     // The wind-up crosses the chest: toward the other side.
     const wound = castHand(CAST.drawn, 0, "arm-r", "throw");
     expect(wound.dir[0]).toBeLessThan(0);
+  });
+
+  it("strikes down out front, landing on the cast's beat", () => {
+    const raised = castHand(CAST.drawn, 0, CAST_ARM, "strike");
+    const struck = castHand(CAST.release, 0, CAST_ARM, "strike");
+    // Up (−y) at the wind-up; out front (−z) and low (+y) at the strike.
+    expect(raised.dir[1]).toBeLessThan(-0.6);
+    expect(struck.dir[2]).toBeLessThan(-0.8);
+    expect(struck.dir[1]).toBeGreaterThan(0.1);
+    expect(castHand(1, 0, CAST_ARM, "strike").reach).toBeCloseTo(1);
+  });
+
+  it("bumps the whole body forward, arms and all, and back", () => {
+    for (const stage of [1, 2]) {
+      const { spheres } = buildCreatureModel(USER, stage);
+      const at = (castPhase?: number) =>
+        creaturePoseOffsets(spheres, stage, {
+          idleFrame: 0,
+          walkPhase: 0,
+          walkWeight: 0,
+          castPhase,
+          castStyle: "bump",
+        });
+      const rest = at();
+      const hit = at(CAST.release);
+      const body = spheres.findIndex(
+        (s) => s.part === "body" || s.part === "head",
+      );
+      // Forward is −z.
+      expect(hit[body][2]).toBeLessThan(rest[body][2] - 0.05);
+      // An arm goes with the body rather than reaching out on its own.
+      const arm = spheres.findIndex((s) => s.part === CAST_ARM);
+      if (arm >= 0) {
+        expect(hit[arm][2] - rest[arm][2]).toBeCloseTo(
+          hit[body][2] - rest[body][2],
+          1,
+        );
+      }
+      const done = at(0.999);
+      expect(done[body][2]).toBeCloseTo(rest[body][2], 1);
+    }
   });
 
   it("jolts the catching arm back, then lets it go", () => {
@@ -282,13 +364,14 @@ describe("held class equipment", () => {
             : posed(spheres, DRAW.stagger + DRAW.grab * (1 - DRAW.stagger));
         const handle = socket.handle.map((v, k) => v + ride[k]);
         const gap = Math.hypot(...when[a].map((v, k) => v - handle[k]));
-        if (equipped.main_hand === "compact-discs") {
-          // Stacked down the spine, past a stubby arm's reach: it gets well
-          // over halfway, and the disc's caught the rest of the way.
+        if (equipped.main_hand !== "lute") {
+          // Stacked down the spine (the discs, or the stick under the
+          // cymbal), past a stubby arm's reach: it gets well over halfway,
+          // and the prop's caught the rest of the way.
           const from = Math.hypot(
             ...spheres[a].center.map((v, k) => v - handle[k]),
           );
-          expect(gap).toBeLessThan(from * 0.6);
+          expect(gap).toBeLessThan(from * 0.65);
           continue;
         }
         // The palm is just past the arm's middle: the arm's own size away.

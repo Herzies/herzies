@@ -40,8 +40,9 @@ export const combat = {
   hitCrit: false,
   /** Your best damage per second on any dummy, this session. */
   bestDps: 0,
-  /** Your class's basic attack: a wave, or a disc thrown from each hand. */
-  attack: "wave" as AttackStyle,
+  /** Your class's basic attack: a wave, a disc thrown from each hand, or a
+   * blow up close (without a class, too). */
+  attack: "melee" as AttackStyle,
   /** Throwing discs: which are in hand (the crosshair shows them), and
    * when each was last caught (performance.now ms). */
   discs: {

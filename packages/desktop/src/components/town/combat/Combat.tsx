@@ -6,7 +6,13 @@ import {
   hitDamage,
   skillValue,
 } from "@herzies/shared";
-import { BOSS_STAND, DISC_DAMAGE, DISC_RANGE } from "@herzies/shared/combat";
+import {
+  BOSS_STAND,
+  DISC_DAMAGE,
+  DISC_RANGE,
+  MELEE_DAMAGE,
+  meleeReaches,
+} from "@herzies/shared/combat";
 import type { HerzieModel } from "@herzies/shared/gl";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useRapier } from "@react-three/rapier";
@@ -23,6 +29,8 @@ import {
   sfxDiscThrow,
   sfxDiscTurn,
   sfxImpact,
+  sfxMeleeHit,
+  sfxSwing,
 } from "../sfx";
 import { pushDamageNumber } from "./DamageNumbers";
 import { liveDummies } from "./Dummies";
@@ -409,9 +417,12 @@ export function Combat({
       shake(0.15);
     }
 
-    // --- Casting: a wave from the hand, or — a Record Slinger — a disc
-    // thrown from whichever hand has one.
+    // --- Casting: a wave from the hand; a Record Slinger's disc thrown
+    // from whichever hand has one; or a blow up close — a Percussionist's
+    // stick, or (without a class) the herzie itself, bumped into it.
     const discs = combat.attack === "disc";
+    const melee = combat.attack === "melee";
+    const blow = herzie?.holdsGear ? "strike" : "bump";
     if (herzie) {
       const queued = now - combat.queuedAt < CAST_BUFFER_MS;
       const free = discs ? nextHand(discField, herzie) : null;
@@ -444,10 +455,58 @@ export function Combat({
         const flat = Math.hypot(dx, dz);
         // Face the aim, and raise the hand to it.
         if (flat > 0.5) herzie.heading = Math.atan2(dx, dz);
-        herzie.cast(Math.atan2(a.point.y - chest.y, Math.max(flat, 0.5)));
+        if (melee) {
+          herzie.cast(0, { style: blow });
+          combat.spread = 0.4;
+          sfxSwing(blow);
+        } else {
+          herzie.cast(Math.atan2(a.point.y - chest.y, Math.max(flat, 0.5)));
+          combat.spread = 1;
+          sfxCharge();
+        }
         combat.casts = (combat.casts + 1) & 0xffff;
-        combat.spread = 1;
-        sfxCharge();
+      }
+      // The blow lands: whatever's in front of it, in reach, is hit.
+      if (herzie.released && combat.on && melee) {
+        herzie.root.getWorldPosition(chest);
+        const yaw = herzie.heading;
+        const from = { x: chest.x, z: chest.z };
+        const height = herzie.height * (blow === "strike" ? 0.6 : 0.4);
+        let landed = false;
+        for (const d of liveDummies) {
+          if (!meleeReaches(from, yaw, { ...d, radius: DUMMY.radius }))
+            continue;
+          const toward = flatToward(from, d);
+          const point: Vec3 = [
+            d.x - toward[0] * DUMMY.radius,
+            Math.min(DUMMY.chest, height),
+            d.z - toward[2] * DUMMY.radius,
+          ];
+          const kind = myHit(d, toward, point, MELEE_DAMAGE, now);
+          waveField.burst(point, toward, kind);
+          landed = true;
+        }
+        if (bossFight.on) {
+          // The server judges it, and says what it did (the number, the
+          // sound); the burst is what you see land.
+          townNet().sendCast(yaw, 0);
+          const boss = { ...BOSS_STAND };
+          if (meleeReaches(from, yaw, boss)) {
+            const toward = flatToward(from, boss);
+            waveField.burst(
+              [
+                boss.x - toward[0] * boss.radius,
+                height,
+                boss.z - toward[2] * boss.radius,
+              ],
+              toward,
+              "hit",
+            );
+            landed = true;
+          }
+        }
+        if (landed) sfxMeleeHit(blow);
+        shake(landed ? 0.1 : 0.03);
       }
       // The hand is out: the disc leaves it.
       if (herzie.released && combat.on && discs) {
@@ -487,7 +546,7 @@ export function Combat({
         shake(0.04);
       }
       // The hand is out: the wave leaves it (Player's update, last frame).
-      if (herzie.released && combat.on && !discs) {
+      if (herzie.released && combat.on && combat.attack === "wave") {
         herzie.handWorldPosition(hand);
         dir.copy(a.point).sub(hand);
         const toAim = dir.length();
@@ -555,6 +614,17 @@ export function Combat({
   }, -2.5);
 
   return null;
+}
+
+/** The level way from `from` to `to`, as a unit direction. */
+function flatToward(
+  from: { x: number; z: number },
+  to: { x: number; z: number },
+): Vec3 {
+  const dx = to.x - from.x;
+  const dz = to.z - from.z;
+  const n = Math.hypot(dx, dz) || 1;
+  return [dx / n, 0, dz / n];
 }
 
 /** When the skill key was last pressed (performance.now() ms): kept for

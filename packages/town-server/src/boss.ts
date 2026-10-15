@@ -23,6 +23,9 @@ import {
   discLandsAfterMs,
   type HitStats,
   hitDamage,
+  MELEE_DAMAGE,
+  MELEE_REACH,
+  meleeReaches,
   WAVE_HAND_HEIGHT,
   WAVE_SPEED,
   waveReaches,
@@ -58,6 +61,9 @@ export const TUNING = {
   /** A player may cast about this often: a little under the client's pace,
    * with a short burst, so network jitter never costs a real cast. */
   castEveryMs: Math.round(CAST_INTERVAL_MS * 0.88),
+  /** Melee reaches this much further here than the client draws it: where
+   * the server has a player is a moment behind where they see themselves. */
+  meleeSlack: 0.75,
   castBurst: 2,
   /** Pause before the first attack of a fight, and after resuming. */
   openingMs: 3_000,
@@ -298,6 +304,9 @@ export class BossEngine {
    *
    * A Record Slinger's cast is a thrown disc (`attack` "disc"): shorter
    * reach, its own speed, and a little more damage. Only its way out hits.
+   * A melee blow (`attack` "melee": a Percussionist's, or a herzie without
+   * a class) hits harder, but only up close and facing it; the client
+   * sends it as it lands, so it lands now.
    */
   cast(
     uid: string,
@@ -321,6 +330,26 @@ export class BossEngine {
     this.casts.set(uid, bucket);
     if (bucket.tokens < 1) return "cooldown";
     bucket.tokens -= 1;
+    if (attack === "melee") {
+      const { x, z, radius } = TUNING.boss;
+      if (
+        !meleeReaches(
+          from,
+          yaw,
+          { x, z, radius },
+          MELEE_REACH + TUNING.meleeSlack,
+        )
+      )
+        return "miss";
+      const { amount, crit } = hitDamage(stats, this.rand);
+      this.pending.push({
+        at: now,
+        uid,
+        damage: Math.max(1, Math.round(amount * MELEE_DAMAGE)),
+        crit,
+      });
+      return "hit";
+    }
     const disc = attack === "disc";
     const dir = aimDirection(yaw, pitch);
     const dist = waveReaches(

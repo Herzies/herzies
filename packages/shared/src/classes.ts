@@ -12,9 +12,9 @@ export type HerzieClass = (typeof CLASS_IDS)[number];
 
 export type ClassRole = "support" | "dps" | "tank";
 
-/** A class's basic attack: a sonic wave from the hand, or a disc thrown
- * that comes back. */
-export type AttackStyle = "wave" | "disc";
+/** A class's basic attack: a sonic wave from the hand, a disc thrown that
+ * comes back, or a blow up close (a classless herzie's, too). */
+export type AttackStyle = "wave" | "disc" | "melee";
 
 export interface ClassDef {
   id: HerzieClass;
@@ -58,7 +58,7 @@ export const CLASS_DEFS: Record<HerzieClass, ClassDef> = {
     role: "tank",
     equipment: ["worn-stick", "old-cymbal"],
     starterSkill: "cymbrella",
-    attack: "wave",
+    attack: "melee",
   },
 };
 
@@ -75,9 +75,10 @@ export function isHerzieClass(value: unknown): value is HerzieClass {
   );
 }
 
-/** The basic attack of a herzie of class `cls` (a wave without one). */
+/** The basic attack of a herzie of class `cls`: without one, it bumps
+ * into things (melee). */
 export function attackStyle(cls: string | null | undefined): AttackStyle {
-  return isHerzieClass(cls) ? CLASS_DEFS[cls].attack : "wave";
+  return isHerzieClass(cls) ? CLASS_DEFS[cls].attack : "melee";
 }
 
 /** The basic attack that goes with the gear in a herzie's main hand: what
@@ -85,7 +86,7 @@ export function attackStyle(cls: string | null | undefined): AttackStyle {
 export function attackStyleOfGear(
   mainHand: string | null | undefined,
 ): AttackStyle {
-  if (!mainHand) return "wave";
+  if (!mainHand) return "melee";
   for (const def of Object.values(CLASS_DEFS))
     if (def.equipment[0] === mainHand) return def.attack;
   return "wave";

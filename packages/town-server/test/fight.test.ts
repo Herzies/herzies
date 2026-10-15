@@ -27,7 +27,9 @@ const ticket = (
 ): TownTicketPayload => ({
   uid,
   name: uid,
-  look: { seed: "s", stage: 1 },
+  look: { seed: "s", stage: 2 },
+  // A wave caster, unless a test says otherwise: most cast from afar.
+  cls: "bard",
   exp: 9e9,
   hp: { hp, maxHp: 200, down: false },
   st: [0, 0, 0, 0],
@@ -187,6 +189,30 @@ describe("a fight", () => {
     expect(
       at("bard", TUNING.boss.z + DISC_RANGE + 4).cast("a", far.yaw, far.pitch, T0),
     ).toBe("hit");
+  });
+
+  it("a melee blow lands up close, facing the boss, and only then", () => {
+    const at = (cls: string | undefined, x: number, z: number) => {
+      const f = new FightRuntime(claim(), T0);
+      f.join("a", 1, ticket("a", 200, { cls }), { x, z }, T0 - 5_000);
+      f.onState("a", x, z, T0);
+      return f;
+    };
+    const { boss } = TUNING;
+    // Just in front of it, facing it: a Percussionist's stick and a
+    // classless herzie's bump both land, at once.
+    const front = boss.z + boss.radius + 1;
+    for (const cls of ["percussionist", undefined]) {
+      const f = at(cls, 0, front);
+      expect(f.cast("a", Math.PI, 0, T0)).toBe("hit");
+      const hit = msgs(f.step(T0 + 1), "hit");
+      expect(hit).toHaveLength(1);
+    }
+    // Facing away, or from across the room, it misses.
+    expect(at("percussionist", 0, front).cast("a", 0, 0, T0)).toBe("miss");
+    expect(at("percussionist", 0, boss.z + 10).cast("a", Math.PI, 0, T0)).toBe(
+      "miss",
+    );
   });
 
   it("re-sends the same batch until a report lands, then moves on", () => {

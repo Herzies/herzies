@@ -6,6 +6,7 @@ import {
   getItemSet,
   RARITY_COLORS as ITEM_RARITY_COLORS,
   ItemCard,
+  ItemRequirementLine,
   ItemStatLines,
   ItemTypeTag,
 } from "@herzies/shared";
@@ -117,6 +118,7 @@ export function CompactItemPreview({
       </div>
       {/* No margins, so the lines are evenly spaced. */}
       <ItemStatLines item={item} level={level} dim className="text-left" />
+      <ItemRequirementLine item={item} />
       {set && (
         <div className="text-ui-sm text-text-dim">
           {set.name} set {setCount}/{set.itemIds.length}

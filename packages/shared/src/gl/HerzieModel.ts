@@ -724,7 +724,9 @@ export class HerzieModel {
    * wave leaves the hand. Casting again mid-cast starts afresh.
    *
    * `arm` casts with another arm than CAST_ARM; `style` "throw" throws
-   * what's in its hand (a disc) rather than thrusting a palm. */
+   * what's in its hand (a disc) rather than thrusting a palm, "strike"
+   * strikes with it (a stick), and "bump" lunges the whole herzie into
+   * what's ahead — `released` is then the moment it hits. */
   cast(
     pitch = 0,
     opts: { arm?: "arm-l" | "arm-r"; style?: CastStyle } = {},
@@ -743,6 +745,12 @@ export class HerzieModel {
         (1 - this.drawPhase) / CAST_RELEASE_SECONDS,
       );
     }
+  }
+
+  /** It has class gear to hold (so a melee blow is a strike with it,
+   * not a bump). */
+  get holdsGear(): boolean {
+    return this.holdsProps;
   }
 
   /** How far its class gear is drawn: 0 on its back to 1 in hand. */
@@ -1135,8 +1143,11 @@ export class HerzieModel {
       drawPhase: this.drawPhase,
       heldSway: this.heldSway,
     });
+    // A bump needs no hand.
     this.posePopHand(
-      this.castTime === undefined ? undefined : this.castTime / CAST_SECONDS,
+      this.castTime === undefined || this.castStyle === "bump"
+        ? undefined
+        : this.castTime / CAST_SECONDS,
     );
     // Held props (class gear) turn as they're drawn and with their arm; a
     // solid's axis with them.

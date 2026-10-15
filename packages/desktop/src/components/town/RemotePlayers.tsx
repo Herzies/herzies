@@ -5,6 +5,7 @@ import {
   TOWN_FLAG_DANCING,
   TOWN_FLAG_SITTING,
 } from "@herzies/shared";
+import { BOSS_STAND, meleeReaches } from "@herzies/shared/combat";
 import { HerzieModel } from "@herzies/shared/gl";
 import { Html } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
@@ -20,6 +21,7 @@ import {
   discField,
   nextHand as nextFreeHand,
 } from "./combat/discs";
+import { DUMMY, hitDummy } from "./combat/dummy";
 import { bossFight } from "./combat/fight";
 import { entityAt } from "./combat/skills";
 import { assistTarget, type Vec3, waveField } from "./combat/waves";
@@ -90,8 +92,12 @@ function RemoteHerzie({
     };
   }, [herzie]);
   // A Record Slinger throws its discs, a hand at a time; the server only
-  // says how many casts, so which hand is guessed (as Combat picks).
-  const throwsDiscs = attackStyleOfGear(look.equipped?.main_hand) === "disc";
+  // says how many casts, so which hand is guessed (as Combat picks). A
+  // Percussionist strikes with its stick, and a herzie without a class
+  // bumps into things.
+  const attack = attackStyleOfGear(look.equipped?.main_hand);
+  const throwsDiscs = attack === "disc";
+  const blow = herzie.holdsGear ? "strike" : "bump";
   const nextHand = useRef<DiscHand>("held-r");
   useEffect(() => () => void entityAt.delete(remote.id), [remote.id]);
 
@@ -132,6 +138,8 @@ function RemoteHerzie({
           nextFreeHand(discField, herzie) ??
           (last === "held-l" ? "held-r" : "held-l");
         herzie.cast(0, { arm: DISC_ARM[nextHand.current], style: "throw" });
+      } else if (attack === "melee") {
+        herzie.cast(0, { style: blow });
       } else {
         herzie.cast(0);
       }
@@ -150,6 +158,31 @@ function RemoteHerzie({
         hand: h,
         target: assistTarget(from, dir, liveDummies),
       });
+    } else if (herzie.released && attack === "melee") {
+      // Only for show: what's in front of them rocks (the server counts
+      // their hits on the boss).
+      const from = { x: s.x, z: s.z };
+      const height = herzie.height * 0.5;
+      const targets = [
+        ...liveDummies.map((d) => ({ d, radius: DUMMY.radius })),
+        ...(bossFight.on ? [{ d: null, radius: BOSS_STAND.radius }] : []),
+      ];
+      for (const { d, radius } of targets) {
+        const at = d ?? BOSS_STAND;
+        if (!meleeReaches(from, s.heading, { x: at.x, z: at.z, radius }))
+          continue;
+        const dx = at.x - s.x;
+        const dz = at.z - s.z;
+        const n = Math.hypot(dx, dz) || 1;
+        const dir: Vec3 = [dx / n, 0, dz / n];
+        if (d)
+          hitDummy(d, dir[0], dir[2], 100, false, performance.now(), false);
+        waveField.burst(
+          [at.x - dir[0] * radius, height, at.z - dir[2] * radius],
+          dir,
+          "hit",
+        );
+      }
     } else if (herzie.released) {
       herzie.handWorldPosition(hand);
       const from: Vec3 = [hand.x, hand.y, hand.z];

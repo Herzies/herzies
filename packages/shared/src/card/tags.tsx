@@ -1,4 +1,5 @@
 import type { ReactElement, ReactNode } from "react";
+import { CLASS_DEFS } from "../classes.js";
 import {
   formatStat,
   getItemSet,
@@ -164,4 +165,29 @@ export function ModifierEffectTag({
     </span>
   );
   return tooltip ? tooltip(item.modifier.tooltip, tag) : tag;
+}
+
+/** Who can wear an item: its class and the stage it needs, e.g.
+ * "🥁 Percussionist · Stage 2+". Nothing for an item anyone can wear. */
+export function ItemRequirementLine({
+  item,
+  className,
+}: {
+  item: Pick<ItemDef, "requiredClass" | "minStage">;
+  className?: string;
+}) {
+  const cls = item.requiredClass && CLASS_DEFS[item.requiredClass];
+  const stage = item.minStage && item.minStage > 1 ? item.minStage : null;
+  if (!cls && !stage) return null;
+  return (
+    <div className={cn("text-ui-sm leading-snug", className)}>
+      {cls && (
+        <span className="text-pink">
+          {cls.emoji} {cls.name}
+        </span>
+      )}
+      {cls && stage ? <span className="text-text-dim"> · </span> : null}
+      {stage && <span className="text-text-dim">Stage {stage}+</span>}
+    </div>
+  );
 }

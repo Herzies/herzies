@@ -16,6 +16,10 @@ export type HerzieClass = (typeof CLASS_IDS)[number];
 
 export type ClassRole = "support" | "dps" | "tank";
 
+/** A class's basic attack: a sonic wave from the hand, a disc thrown that
+ * comes back, or a blow up close (a classless herzie's, too). */
+export type AttackStyle = "wave" | "disc" | "melee";
+
 export interface ClassDef {
   id: HerzieClass;
   name: string;
@@ -25,6 +29,8 @@ export interface ClassDef {
   equipment: string[];
   /** The skill every herzie of this class starts with. */
   starterSkill: SkillId;
+  /** Its basic attack. */
+  attack: AttackStyle;
 }
 
 /** The stage at which a herzie picks its class. */
@@ -38,6 +44,7 @@ export const CLASS_DEFS: Record<HerzieClass, ClassDef> = {
     role: "support",
     equipment: ["lute"],
     starterSkill: "soothing-drones",
+    attack: "wave",
   },
   record_slinger: {
     id: "record_slinger",
@@ -46,6 +53,7 @@ export const CLASS_DEFS: Record<HerzieClass, ClassDef> = {
     role: "dps",
     equipment: ["compact-discs"],
     starterSkill: "backspin",
+    attack: "disc",
   },
   percussionist: {
     id: "percussionist",
@@ -54,6 +62,7 @@ export const CLASS_DEFS: Record<HerzieClass, ClassDef> = {
     role: "tank",
     equipment: ["worn-stick", "old-cymbal"],
     starterSkill: "cymbrella",
+    attack: "melee",
   },
 };
 
@@ -68,6 +77,23 @@ export function isHerzieClass(value: unknown): value is HerzieClass {
     typeof value === "string" &&
     (CLASS_IDS as readonly string[]).includes(value)
   );
+}
+
+/** The basic attack of a herzie of class `cls`: without one, it bumps
+ * into things (melee). */
+export function attackStyle(cls: string | null | undefined): AttackStyle {
+  return isHerzieClass(cls) ? CLASS_DEFS[cls].attack : "melee";
+}
+
+/** The basic attack that goes with the gear in a herzie's main hand: what
+ * someone else's herzie is seen to do, where its class isn't known. */
+export function attackStyleOfGear(
+  mainHand: string | null | undefined,
+): AttackStyle {
+  if (!mainHand) return "melee";
+  for (const def of Object.values(CLASS_DEFS))
+    if (def.equipment[0] === mainHand) return def.attack;
+  return "wave";
 }
 
 /** Whether a herzie should be asked to pick a class now. */

@@ -56,7 +56,9 @@ function ticket(uid: string, over: Partial<TownTicketPayload> = {}) {
     {
       uid,
       name: uid,
-      look: { seed: `HERZ-${uid}`, stage: 1 },
+      look: { seed: `HERZ-${uid}`, stage: 2 },
+      // A wave caster: these casts are from across the room.
+      cls: "bard",
       exp: Date.now() / 1000 + 600,
       hp: { hp: 200, maxHp: 200, down: false },
       st: [0, 0, 0, 0],

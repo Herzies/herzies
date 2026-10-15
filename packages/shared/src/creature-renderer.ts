@@ -1889,7 +1889,7 @@ export const HELD_ARM: Readonly<Record<string, string>> = {
 /** The main hand's part: CAST_ARM's ("arm-l"). Spelled out, not derived,
  * since CAST_ARM is declared further down; a test pins the two together. */
 export const MAIN_HELD = "held-l";
-const OFF_HELD = "held-r";
+export const OFF_HELD = "held-r";
 
 /** A held prop's way from the back to the hand. One per prop, shared by its
  * spheres, whose centers and axes are where it's slung. */
@@ -2114,15 +2114,52 @@ const held = (
   shape?: Shape,
 ): Sphere => ({ center, radius, zone: "wearable", part, color, shape });
 
-/** Worn Stick: a drumstick out of the fist, tip up and out, a little
- * forward — raised, so it reads against the sky rather than the body. On the
- * back, slung like a sword: the grip behind the casting shoulder, the tip
- * down across toward the other hip. */
+/** Which way an arm points at the ready, its gear drawn, from its shoulder
+ * (see drawHand): out to its side, low and a little forward. */
+function readyDir(side: number): V3 {
+  return norm([side * 0.8, 0.3, -0.55]);
+}
+
+/** A direction in the hand as it's built (the arm at rest), for one that
+ * should point `v` once the arm's at the ready: drawing turns the arm out
+ * to it, and whatever it holds with it. */
+function atTheReady(hand: Hand, v: V3): V3 {
+  return quatRotate(quatConj(quatFromTo(hand.dir, readyDir(hand.side))), v);
+}
+
+/** Where a Percussionist's gear lies on its back, stacked like the discs:
+ * the cymbal over the middle of the back, bell out, and the stick under
+ * it, its grip peeping up past the cymbal's top rim. */
+function percussionBack(hand: Hand) {
+  const { r } = hand;
+  // How far each rides off the back: the stick against it, the cymbal over
+  // the stick.
+  const cymbalLift = r * 0.45;
+  const center = onBack(hand, 0, 0.05, cymbalLift);
+  const out = norm(sub(center, hand.torso.center));
+  const up = upAcross(out);
+  return {
+    cymbal: { center, out, up },
+    // The grip above the rim; the stick leans a little toward its own
+    // shoulder, so it reads as one thing behind the other.
+    stickGrip: add(
+      add(center, add(scale(up, r * 2.2), [hand.side * r * 0.9, 0, 0])),
+      scale(out, -(cymbalLift - r * 0.2)),
+    ),
+    stickDown: norm(add(scale(up, -1), [-hand.side * 0.35, 0, 0])),
+  };
+}
+
+/** Worn Stick: held like a wand, easy — out of the fist pointing forward
+ * and a little down, once drawn. On the back, under the cymbal, grip up
+ * (see percussionBack). */
 const buildWornStick: HeldBuilder = (_s, part, hand) => {
-  const { at, side, r } = hand;
+  const { at, r } = hand;
   const half = r * 1.3;
-  const axis = norm([side * 0.45, -0.8, -0.4]);
-  const mid = add(at, scale(axis, half * 0.7));
+  const axis = atTheReady(hand, norm([-hand.side * 0.08, 0.32, -1]));
+  // The butt just behind the fist, the rest of it out ahead.
+  const mid = add(at, scale(axis, half * 0.85));
+  const back = percussionBack(hand);
   return slung(
     hand,
     [
@@ -2132,23 +2169,32 @@ const buildWornStick: HeldBuilder = (_s, part, hand) => {
       }),
       held(part, add(mid, scale(axis, half)), r * 0.2, "#e6cfa3"),
     ],
-    { at, long: axis, face: cross(axis, [0, 0, 1]) },
+    { at, long: axis, face: cross(axis, atTheReady(hand, [0, 0, 1])) },
     {
-      at: behindShoulder(hand, r * 0.2).at,
-      long: norm([-side * 0.45, 1, 0.3]),
-      face: [side, 0, 0],
+      at: back.stickGrip,
+      long: back.stickDown,
+      face: cross(back.stickDown, back.cymbal.out),
     },
   );
 };
 
-/** Old Cymbal: a shield-like disc held out in front, a little outward; on
- * the back like a shield, bell out, hung from behind its shoulder by the
- * rim. */
+/** Old Cymbal: held at its side, edge to the front, the inside of it along
+ * the herzie's flank and the bell out, once drawn. On the back, over the
+ * stick, bell out (see percussionBack). */
 const buildOldCymbal: HeldBuilder = (_s, part, hand) => {
   const { at, side, r } = hand;
-  const face = norm([side * 0.35, 0.1, -1]);
-  const center = add(at, add(scale(face, r * 0.5), [side * r * 0.2, 0, 0]));
-  const back = behindShoulder(hand, r * 0.35);
+  const face = atTheReady(hand, [side, 0, 0]);
+  const forward = atTheReady(hand, [0, 0, -1]);
+  const up = upAcross(face);
+  // Just outside the hand, so the hand's behind it, and a little forward.
+  const center = add(
+    at,
+    add(
+      scale(face, r * 0.35),
+      add(scale(forward, r * 0.3), scale(up, r * 0.2)),
+    ),
+  );
+  const back = percussionBack(hand).cymbal;
   return slung(
     hand,
     [
@@ -2164,7 +2210,7 @@ const buildOldCymbal: HeldBuilder = (_s, part, hand) => {
       }),
       held(
         part,
-        add(center, [side * r * 1.15, -r * 0.6, 0]),
+        add(center, add(scale(forward, r * 1.15), scale(up, r * 0.6))),
         r * 0.22,
         "#6fa38a",
         {
@@ -2174,10 +2220,23 @@ const buildOldCymbal: HeldBuilder = (_s, part, hand) => {
       ),
     ],
     // By the top of its rim.
-    { at: add(center, scale(upAcross(face), r * 1.3)), long: [0, -1, 0], face },
-    { at: back.at, long: norm([0, -1, -0.45]), face: back.out },
+    { at: add(center, scale(up, r * 1.3)), long: up, face },
+    {
+      at: add(back.center, scale(back.up, r * 1.3)),
+      long: back.up,
+      face: back.out,
+    },
+    // Taken by the rim nearest its shoulder, as a disc is.
+    rimToward(back.center, back.out, hand.shoulder, r * 1.4),
   );
 };
+
+/** The point on a disc's rim (`radius` from `center`, its face looking
+ * `out`) nearest `toward`. */
+function rimToward(center: V3, out: V3, toward: V3, radius: number): V3 {
+  const to = sub(toward, center);
+  return add(center, scale(norm(sub(to, scale(out, dot(to, out)))), radius));
+}
 
 /** One Compact Disc, upright in the palm, its face to the side; on the back
  * at `onIt`, lying flat against it. The hand takes it by the rim nearest
@@ -2424,7 +2483,7 @@ function drawHand(
     Math.max(0.6, Math.hypot(...toHandle) / palm),
   );
   // Out to its side, low and a little forward: the prop's at the ready.
-  const ready = norm([side * 0.8, 0.3, -0.55]);
+  const ready = readyDir(side);
   if (p < DRAW.grab) {
     // Up over the shoulder on the way: reaching straight for the back would
     // go through it.
@@ -3306,8 +3365,10 @@ export const CAST_ARM = "arm-l";
 /** Which way is outward for the casting arm, along creature x. */
 const CAST_SIDE = -1;
 
-/** How the hand moves: a sonic wave's palm thrust, or a disc's throw. */
-export type CastStyle = "cast" | "throw";
+/** How the hand moves: a sonic wave's palm thrust, a disc's throw, or a
+ * stick's strike. A "bump" moves no hand: the whole herzie lunges into
+ * what's in front of it (see BUMP). */
+export type CastStyle = "cast" | "throw" | "strike" | "bump";
 
 /**
  * A disc thrown backhand, like a frisbee, on CAST's timeline (so it leaves
@@ -3338,7 +3399,9 @@ export function castHand(
   const hand =
     style === "throw"
       ? throwHandOutward(phase, pitch)
-      : castHandOutward(phase, pitch);
+      : style === "strike"
+        ? strikeHandOutward(phase, pitch)
+        : castHandOutward(phase, pitch);
   hand.dir[0] *= LIMB_SIDE[arm] ?? CAST_SIDE;
   return hand;
 }
@@ -3382,6 +3445,83 @@ function throwHandOutward(
     dir: mix(after, rest, t),
     reach: THROW.follow + (1 - THROW.follow) * t,
   };
+}
+
+/**
+ * A stick's strike, on CAST's timeline (it lands at CAST.release): the
+ * hand comes up and back by the head at the wind-up, chops down and forward
+ * to strike out front, low, bounces off what it hit and comes home.
+ */
+export const STRIKE = {
+  /** How far the hand reaches at the wind-up, and at the strike (arm
+   * lengths). */
+  raise: 0.95,
+  reach: 1.35,
+  /** The bounce back off the hit. */
+  rebound: 0.15,
+} as const;
+
+/** castHand's strike, for an arm on the +x side. */
+function strikeHandOutward(
+  phase: number,
+  pitch: number,
+): { dir: V3; reach: number } {
+  const mix = (a: V3, b: V3, t: number): V3 =>
+    norm(add(scale(a, 1 - t), scale(b, t)));
+  const rest: V3 = [1, 0, 0];
+  // Up by its head, a little back: y is down.
+  const raised: V3 = norm([0.45, -0.85, 0.15]);
+  // Down out front, along the aim, a touch to its own side.
+  const struck: V3 = norm([0.25, 0.35 - Math.sin(pitch), -Math.cos(pitch)]);
+  if (phase < CAST.drawn) {
+    const t = easeOut(phase / CAST.drawn);
+    return { dir: mix(rest, raised, t), reach: 1 + (STRIKE.raise - 1) * t };
+  }
+  if (phase < CAST.release) {
+    const t = easeIn((phase - CAST.drawn) / (CAST.release - CAST.drawn));
+    return {
+      dir: mix(raised, struck, t),
+      reach: STRIKE.raise + (STRIKE.reach - STRIKE.raise) * t,
+    };
+  }
+  if (phase < CAST.held) {
+    const t = (phase - CAST.release) / (CAST.held - CAST.release);
+    const bounce = Math.sin(Math.min(1, t * 1.5) * Math.PI);
+    return {
+      dir: mix(struck, raised, bounce * STRIKE.rebound),
+      reach: STRIKE.reach,
+    };
+  }
+  const t = ease(CAST.held, 1, phase);
+  return {
+    dir: mix(struck, rest, t),
+    reach: STRIKE.reach + (1 - STRIKE.reach) * t,
+  };
+}
+
+/** A body bump, on CAST's timeline: it rears back on the wind-up, hops
+ * forward to hit at CAST.release, and settles back where it stood
+ * (fractions of the body scale). */
+export const BUMP = {
+  rear: 0.12,
+  lunge: 0.55,
+  hop: 0.14,
+} as const;
+
+/** How far forward (and up) a bump has carried the herzie at `phase`, in
+ * body scales: [up, forward]. */
+function bumpOffset(phase: number): [number, number] {
+  if (phase < CAST.drawn) {
+    return [0, -BUMP.rear * easeOut(phase / CAST.drawn)];
+  }
+  if (phase < CAST.release) {
+    const t = easeIn((phase - CAST.drawn) / (CAST.release - CAST.drawn));
+    return [
+      BUMP.hop * Math.sin(t * Math.PI),
+      -BUMP.rear + (BUMP.lunge + BUMP.rear) * t,
+    ];
+  }
+  return [0, BUMP.lunge * (1 - ease(CAST.release, 1, phase))];
 }
 
 /** How long a catch's jolt takes, in seconds. */
@@ -3451,6 +3591,17 @@ function castDeltas(
 ): V3[] {
   const rig = buildRig(spheres);
   const s = HERZIE_BODY.scale * CS;
+  if (style === "bump") {
+    // Everything but the legs (which stay planted, so it reads as a lunge
+    // off them) goes with it.
+    const [up, forward] = bumpOffset(phase);
+    return spheres.map(
+      (sp): V3 =>
+        isSceneFixed(sp.part) || isLeg(sp.part)
+          ? [0, 0, 0]
+          : [0, -up * s, -forward * s],
+    );
+  }
   // Back on the draw, into the thrust, settling after.
   const lean =
     phase < CAST.release
@@ -4723,7 +4874,7 @@ export function creaturePoseOffsets(
     // A cast takes the casting arm over; the lean adds to whatever else.
     const c = cast?.[i];
     if (c) {
-      const own = s.part === castArm ? cw : 0;
+      const own = s.part === castArm && pose.castStyle !== "bump" ? cw : 0;
       x = x * (1 - own) + c[0] * cw;
       y = y * (1 - own) + c[1] * cw;
       z = z * (1 - own) + c[2] * cw;

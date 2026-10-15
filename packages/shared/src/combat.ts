@@ -80,6 +80,41 @@ export function discLandsAfterMs(dist: number): number {
   return (dist / DISC_SPEED) * 1000;
 }
 
+// ---------------------------------------------------------------------------
+// Melee: a Percussionist's stick, or a classless herzie's body bump. Up
+// close, ahead of it, and only at the moment of contact: the client tells
+// the server when it lands, so there's no flight time.
+
+/** How far past its own middle and the target's surface a melee hit
+ * reaches, on the ground, in world units. */
+export const MELEE_REACH = 1.6;
+/** How far either way of where it faces a melee hit reaches (radians). */
+export const MELEE_ARC = (60 * Math.PI) / 180;
+/** A melee hit as a share of a wave's: more, for standing in its face. */
+export const MELEE_DAMAGE = 1.3;
+
+/** Whether a melee hit from `from`, facing `yaw`, reaches `target` (a
+ * circle on the ground): within `reach` of its surface, and within the
+ * arc of the way it faces. Right on top of it, it always does. */
+export function meleeReaches(
+  from: { x: number; z: number },
+  yaw: number,
+  target: { x: number; z: number; radius: number },
+  reach: number = MELEE_REACH,
+): boolean {
+  const dx = target.x - from.x;
+  const dz = target.z - from.z;
+  const dist = Math.hypot(dx, dz);
+  if (dist - target.radius > reach) return false;
+  if (dist <= target.radius) return true;
+  let off = Math.atan2(dx, dz) - yaw;
+  off = Math.atan2(Math.sin(off), Math.cos(off));
+  // The target's own width counts toward the arc.
+  return (
+    Math.abs(off) - Math.asin(Math.min(1, target.radius / dist)) <= MELEE_ARC
+  );
+}
+
 export type Vec3 = [number, number, number];
 
 /** The unit direction of a cast, from the yaw and pitch a client sends. */
