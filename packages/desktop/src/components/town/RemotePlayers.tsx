@@ -1,5 +1,6 @@
 import {
   TOWN_FLAG_AFK,
+  TOWN_FLAG_COMBAT,
   TOWN_FLAG_DANCING,
   TOWN_FLAG_SITTING,
 } from "@herzies/shared";
@@ -98,6 +99,8 @@ function RemoteHerzie({
     herzie.root.position.set(s.x, seated ? SEAT_Y : 0, s.z);
     herzie.sitting = seated;
     herzie.dancing = (s.flags & TOWN_FLAG_DANCING) !== 0;
+    // Aiming: their gear off their back and in hand.
+    herzie.armed = (s.flags & TOWN_FLAG_COMBAT) !== 0;
     herzie.heading = s.heading;
     // They cast: the same thrust, and a wave from the hand the way they
     // face (only the cast count travels, not where they aimed).

@@ -239,6 +239,8 @@ export function Player({
     townLive.dancing =
       townLive.music && !townLive.seat && stillFor.current >= DANCE_AFTER;
     herzie.dancing = townLive.dancing;
+    // Aiming: gear off its back and in hand.
+    herzie.armed = combat.on;
     herzie.update(dt, rt.playerSpeed);
     // Through a portal: spun down into the disc, and back up out of the
     // far one.

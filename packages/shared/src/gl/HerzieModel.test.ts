@@ -1,12 +1,15 @@
 import * as THREE from "three";
 import { describe, expect, it } from "vitest";
-import { buildCreatureModel } from "../creature-renderer.js";
+import { buildCreatureModel, type Sphere } from "../creature-renderer.js";
 import { WALK_SPEED } from "./animation.js";
 import {
   CAST_RELEASE_SECONDS,
   CAST_SECONDS,
+  DRAW_SECONDS,
   HerzieModel,
   MODEL_SCALE,
+  SHEATHE_DELAY,
+  SHEATHE_SECONDS,
 } from "./HerzieModel.js";
 
 const LOOK = { seed: "model-test", stage: 3, equipped: { head: "headphones" } };
@@ -452,4 +455,197 @@ describe("a spirit dancing", () => {
       expect(Math.abs(surge.y)).toBeLessThan(1e-3);
     });
   }
+});
+
+describe("drawing class gear", () => {
+  const BARD = {
+    seed: "model-test",
+    stage: 3,
+    equipped: { main_hand: "lute" },
+  };
+  const step = (h: HerzieModel, seconds: number) => {
+    for (let t = 0; t < seconds - 1e-9; t += 1 / 120) h.update(1 / 120, 0);
+  };
+
+  it("draws it as soon as it aims, quickly", () => {
+    const h = new HerzieModel(BARD);
+    h.update(0, 0);
+    expect(h.drawn).toBe(0);
+    h.armed = true;
+    step(h, DRAW_SECONDS + 1 / 60);
+    expect(h.drawn).toBe(1);
+  });
+
+  it("turns back the way it came when aiming stops mid-draw", () => {
+    const h = new HerzieModel(BARD);
+    h.armed = true;
+    step(h, DRAW_SECONDS / 2);
+    const half = h.drawn;
+    h.armed = false;
+    // Holds it a moment (aiming again inside that keeps it in hand)…
+    step(h, SHEATHE_DELAY - 0.02);
+    expect(h.drawn).toBeCloseTo(half, 5);
+    // …then eases it back, never past where it was.
+    step(h, 0.05);
+    expect(h.drawn).toBeLessThan(half);
+    step(h, SHEATHE_SECONDS);
+    expect(h.drawn).toBe(0);
+  });
+
+  it("has it in hand by the time a cast's wave leaves, aiming or not", () => {
+    const h = new HerzieModel(BARD);
+    h.update(0, 0);
+    h.cast();
+    let released = false;
+    for (let t = 0; t < CAST_SECONDS && !released; t += 1 / 120) {
+      h.update(1 / 120, 0);
+      released = h.released;
+    }
+    expect(released).toBe(true);
+    expect(h.drawn).toBeCloseTo(1, 5);
+    expect(CAST_RELEASE_SECONDS).toBeLessThan(DRAW_SECONDS);
+  });
+
+  it("keeps it inside its bounds all the way through the draw", () => {
+    for (const equipped of [
+      { main_hand: "lute" },
+      { main_hand: "worn-stick", off_hand: "old-cymbal" },
+      { main_hand: "compact-discs" },
+    ]) {
+      const h = new HerzieModel({ seed: "model-test", stage: 3, equipped });
+      h.armed = true;
+      for (let t = 0; t < DRAW_SECONDS + 0.05; t += 1 / 120) {
+        h.update(1 / 120, 0);
+        h.root.updateMatrixWorld(true);
+        h.root.traverse((o) => {
+          if (!(o instanceof THREE.Mesh)) return;
+          o.geometry.computeBoundingSphere();
+          const part = o.geometry.boundingSphere
+            ?.clone()
+            .applyMatrix4(o.matrixWorld);
+          if (!part) return;
+          expect(
+            h.bounds.center.distanceTo(part.center) + part.radius,
+          ).toBeLessThanOrEqual(h.bounds.radius);
+        });
+      }
+    }
+  });
+
+  it("starts with it drawn when built armed", () => {
+    const h = new HerzieModel(BARD, { armed: true });
+    expect(h.drawn).toBe(1);
+    expect(h.armed).toBe(true);
+  });
+
+  it("puts it away again after a cast it wasn't aiming for", () => {
+    const h = new HerzieModel(BARD);
+    h.cast();
+    step(h, CAST_SECONDS + SHEATHE_DELAY + SHEATHE_SECONDS + 0.05);
+    expect(h.drawn).toBe(0);
+  });
+});
+
+describe("discs on threads", () => {
+  const SLINGER = {
+    seed: "model-test",
+    stage: 3,
+    equipped: { main_hand: "compact-discs" },
+  };
+  /** Each disc's middle, in the world. */
+  const discs = (h: HerzieModel) => {
+    const inner = h as unknown as {
+      meshes: THREE.Mesh[];
+      model: { spheres: Sphere[] };
+    };
+    h.root.updateMatrixWorld(true);
+    return ["held-l", "held-r"].map((part) => {
+      const i = inner.model.spheres.findIndex((s) => s.part === part);
+      return inner.meshes[i].getWorldPosition(new THREE.Vector3());
+    });
+  };
+  const frames = (h: HerzieModel, seconds: number, each?: () => void) => {
+    for (let t = 0; t < seconds; t += 1 / 120) {
+      each?.();
+      h.update(1 / 120, 0);
+    }
+  };
+
+  it("trails behind as it turns", () => {
+    const h = new HerzieModel(SLINGER);
+    frames(h, 0.2);
+    frames(h, 0.3, () => {
+      h.heading += 5 / 120;
+    });
+    const [, lower] = discs(h);
+    // Angle about its vertical (forward is (sin, cos)): behind it is
+    // heading + π; the disc is short of that, back the way it came from.
+    const at = Math.atan2(lower.x, lower.z);
+    let lag = at - (h.heading + Math.PI);
+    lag -= Math.round(lag / (Math.PI * 2)) * Math.PI * 2;
+    expect(lag).toBeLessThan(-0.02);
+  });
+
+  it("trails out behind as it walks", () => {
+    const h = new HerzieModel(SLINGER);
+    frames(h, 0.2);
+    const behind = () => {
+      const [, lower] = discs(h);
+      // Behind its feet: against forward, (sin, cos) of the heading.
+      return (
+        -(lower.x - h.root.position.x) * Math.sin(h.heading) -
+        (lower.z - h.root.position.z) * Math.cos(h.heading)
+      );
+    };
+    const resting = behind();
+    frames(h, 1, () => {
+      h.root.position.z += 4.5 / 120;
+    });
+    expect(behind()).toBeGreaterThan(resting + 0.02);
+  });
+
+  it("is taken from mid-swing without a jump", () => {
+    const h = new HerzieModel(SLINGER);
+    frames(h, 0.2);
+    frames(h, 0.3, () => {
+      h.heading += 6 / 120;
+    });
+    h.armed = true;
+    let prev = discs(h);
+    const steps: number[][] = [[], []];
+    frames(h, DRAW_SECONDS + 0.1, () => {
+      const now = discs(h);
+      now.forEach((p, i) => {
+        steps[i].push(p.distanceTo(prev[i]));
+      });
+      prev = now;
+    });
+    for (const run of steps) {
+      run.forEach((step, k) => {
+        const near = Math.max(run[k - 1] ?? 0, run[k + 1] ?? 0);
+        expect(step).toBeLessThan(near * 3 + 0.02);
+      });
+    }
+  });
+
+  it("swings inside its bounds", () => {
+    const h = new HerzieModel(SLINGER);
+    frames(h, 1.5, () => {
+      h.heading += 10 / 120;
+      h.root.position.x += 6 / 120;
+      h.root.updateMatrixWorld(true);
+      const center = h.bounds.center.clone().add(h.root.position);
+      h.root.traverse((o) => {
+        if (!(o instanceof THREE.Mesh)) return;
+        o.geometry.computeBoundingSphere();
+        const part = o.geometry.boundingSphere
+          ?.clone()
+          .applyMatrix4(o.matrixWorld);
+        if (!part) return;
+        expect(
+          center.distanceTo(part.center) + part.radius,
+        ).toBeLessThanOrEqual(h.bounds.radius);
+      });
+    });
+  });
 });

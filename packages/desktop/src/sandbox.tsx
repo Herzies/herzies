@@ -7,10 +7,12 @@ import {
   clearCreatureCache,
   type DangleConfig,
   DEFAULT_DANGLE_CONFIG,
+  DEFAULT_THREAD_CONFIG,
   type Equipped,
   earAngleFromDeg,
   earAngleToDeg,
   generateCreatureParams,
+  type ThreadConfig,
 } from "@herzies/shared";
 import { useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -47,10 +49,12 @@ function Sandbox() {
   const [size, setSize] = useState(5);
   const [animate, setAnimate] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [armed, setArmed] = useState(false);
   const [draggable, setDraggable] = useState(true);
   const [showSky, setShowSky] = useState(false);
   const [wearables, setWearables] = useState<string[]>([]);
   const [dangle, setDangle] = useState<DangleConfig>(DEFAULT_DANGLE_CONFIG);
+  const [thread, setThread] = useState<ThreadConfig>(DEFAULT_THREAD_CONFIG);
   const swings =
     wearables.includes("gold-chain") || wearables.includes("pearl-necklace");
   const [jsonOpen, setJsonOpen] = useState(false);
@@ -243,6 +247,11 @@ function Sandbox() {
             onChange={setIsPlaying}
           />
           <Check
+            label="armed (gear in hand)"
+            checked={armed}
+            onChange={setArmed}
+          />
+          <Check
             label="draggable"
             checked={draggable}
             onChange={setDraggable}
@@ -301,6 +310,34 @@ function Sandbox() {
           </Section>
         )}
 
+        {wearables.includes("compact-discs") && (
+          <Section title="disc threads">
+            <SliderField
+              label="gravity"
+              value={thread.gravity}
+              bounds={{ min: 2, max: 80, step: 1 }}
+              onChange={(v) => setThread((t) => ({ ...t, gravity: v }))}
+            />
+            <SliderField
+              label="damping"
+              value={thread.damping}
+              bounds={{ min: 0, max: 15, step: 0.1 }}
+              onChange={(v) => setThread((t) => ({ ...t, damping: v }))}
+            />
+            <SliderField
+              label="air drag"
+              value={thread.drag}
+              bounds={{ min: 0, max: 10, step: 0.1 }}
+              onChange={(v) => setThread((t) => ({ ...t, drag: v }))}
+            />
+            <div className="mt-1.5">
+              <Btn onClick={() => setThread(DEFAULT_THREAD_CONFIG)}>
+                reset threads
+              </Btn>
+            </div>
+          </Section>
+        )}
+
         <div className="mt-3 flex flex-wrap gap-1.5">
           <Btn onClick={() => setJsonOpen((v) => !v)}>
             {jsonOpen ? "hide json" : "show json"}
@@ -322,9 +359,11 @@ function Sandbox() {
           size={size}
           animate={animate}
           isPlaying={isPlaying}
+          armed={armed}
           equipped={toEquipped(wearables)}
           creatureParams={params}
           dangleConfig={dangle}
+          threadConfig={thread}
           showSky={showSky}
           draggable={draggable}
         />

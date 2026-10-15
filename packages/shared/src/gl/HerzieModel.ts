@@ -15,12 +15,11 @@ import {
   dangledAxis,
   HELD_ARM,
   hasDangleEquipped,
-  heldArmDirections,
+  heldPoses,
   primitiveShading,
   type Sphere,
   schemeShades,
   schemeSpan,
-  turnBetween,
 } from "../creature-renderer.js";
 import {
   createDangleSim,
@@ -33,6 +32,16 @@ import {
   stepDangle,
 } from "../dangle-physics.js";
 import type { Equipped } from "../items.js";
+import {
+  createThreadSim,
+  DEFAULT_THREAD_CONFIG,
+  isThreadSettled,
+  stepThreadSim,
+  type ThreadConfig,
+  type ThreadRig,
+  type ThreadSim,
+  threadSway,
+} from "../thread-physics.js";
 import {
   type AnimationState,
   IDLE_FPS,
@@ -87,6 +96,9 @@ export type HerzieModelOptions = {
    * with the herzie: a herzie spun on its own stage, not one walking about.
    * Default: they go with it (the Town). */
   anchorScenery?: number;
+  /** Starts with its class gear already drawn (and `armed`), rather than
+   * drawing it off its back on the first frames. */
+  armed?: boolean;
 };
 
 /** The old renderer's dance loop: 65ms a frame. */
@@ -100,6 +112,19 @@ const SIT_BLEND_RATE = 14;
 export const CAST_SECONDS = 0.4;
 /** How soon after cast() the wave leaves the hand, in seconds. */
 export const CAST_RELEASE_SECONDS = CAST_SECONDS * CAST.release;
+/** How long it takes to draw its class gear off its back, in seconds:
+ * quick — it's what stands between Tab and the first cast. */
+export const DRAW_SECONDS = 0.25;
+/** How long putting it away takes. Nothing waits on it, so it can be easy. */
+export const SHEATHE_SECONDS = 0.35;
+/** How long after it stops aiming before it puts its gear away, in seconds:
+ * aiming again inside this, it's still in hand. */
+export const SHEATHE_DELAY = 0.25;
+/** Faster than this (world units/s) between frames, it jumped rather than
+ * moved: the threads don't feel it. */
+const THREAD_JUMP_SPEED = 60;
+/** Time constant (s) its velocity is smoothed over for the threads. */
+const THREAD_SMOOTHING = 0.06;
 /** A herzie with no arms (stage 1) grows a little hand to cast with: this
  * big, as a fraction of its head. */
 const POP_HAND = 0.3;
@@ -294,6 +319,11 @@ function surgeStretch(v: number): [number, number] {
   return [1 / Math.sqrt(tall), tall];
 }
 
+/** The arms that draw class gear. */
+const ARM_OF_HELD = new Set(Object.values(HELD_ARM));
+const add3 = (a: readonly number[], b: readonly number[]) =>
+  [a[0] + b[0], a[1] + b[1], a[2] + b[2]] as [number, number, number];
+
 /** How far a part reaches from its centre, whatever its shape. */
 function reach(s: Sphere): number {
   if (!s.shape) return s.radius;
@@ -375,10 +405,15 @@ export class HerzieModel {
   dancing = false;
   /** On a seat: legs out in front, resting on its bottom (eased). */
   sitting = false;
+  /** Aiming: its class gear in its hands, drawn off its back (see DRAW).
+   * Casting draws it too, whatever this says. */
+  armed = false;
   /** Whether anything worn that dangles (the chain, the pearls, the witch
    * hat's tip) swings as it turns — a host can hold it still. */
   dangles = true;
   dangleConfig: DangleConfig = DEFAULT_DANGLE_CONFIG;
+  /** How gear hung on threads (the discs) swings. */
+  threadConfig: ThreadConfig = DEFAULT_THREAD_CONFIG;
   /** How far it's swung (see dangle-physics); undefined at rest. */
   private dangle: DangleState | undefined;
   private dangleSim: DangleSim | null = null;
@@ -412,6 +447,23 @@ export class HerzieModel {
   /** It holds class gear (held-l/held-r parts), which pose() turns with the
    * arms. */
   private readonly holdsProps: boolean;
+  /** Gear hanging on threads down its back (the discs), and their swing:
+   * null with none. `parts` names the held part of each weight. */
+  private readonly threads: {
+    rig: ThreadRig;
+    sim: ThreadSim;
+    parts: string[];
+  } | null = null;
+  /** How far each thread-hung part has swung (see heldPoses). */
+  private heldSway: Record<string, [number, number, number]> | undefined;
+  /** Where the torso was moved by the last pose: the threads' knot rides
+   * it. */
+  private torsoOffset: [number, number, number] = [0, 0, 0];
+  private torsoAt = -1;
+  /** Its feet in the world last frame, and how fast they were going
+   * (smoothed): what accelerating it swings the threads by. */
+  private lastWorld: THREE.Vector3 | null = null;
+  private worldVelocity = new THREE.Vector3();
   /** For a herzie with no arms: the hand it grows to cast with, beside its
    * head, and where on the head it grows from. */
   private readonly popHand: {
@@ -419,6 +471,12 @@ export class HerzieModel {
     head: Sphere;
     radius: number;
   } | null = null;
+  /** How far its gear is drawn: 0 on its back to 1 in hand. */
+  private drawPhase = 0;
+  /** How quickly it's drawing, per second: faster when a cast won't wait. */
+  private drawRate = 1 / DRAW_SECONDS;
+  /** Seconds since it last wanted its gear in hand. */
+  private unarmedFor = 0;
   /** The wave left the hand during the last update(). */
   released = false;
 
@@ -472,8 +530,9 @@ export class HerzieModel {
     let feet = Number.NEGATIVE_INFINITY;
     for (const s of spheres) {
       // Ground props (the boombox) sit in front and reach a little below the
-      // feet: they don't set where the herzie stands either.
-      if (floats(s) || s.part === "ground") continue;
+      // feet: they don't set where the herzie stands either. Nor does gear
+      // it carries (see the renderer's buildRig).
+      if (floats(s) || s.part === "ground" || s.part in HELD_ARM) continue;
       top = Math.min(top, s.center[1] - s.radius);
       feet = Math.max(feet, s.center[1] + s.radius);
     }
@@ -481,7 +540,40 @@ export class HerzieModel {
     this.height = (feet - top) * MODEL_SCALE;
     this.centerHeight = feet * MODEL_SCALE;
     this.span = schemeSpan(spheres);
-    this.bounds = turnBounds(spheres, feet);
+    // Class gear rests on its back, but swings out and reaches further
+    // drawn: bound it all the way through the draw.
+    const drawing: Sphere[] = [];
+    if (spheres.some((s) => s.held)) {
+      for (let p = 0.1; p <= 1.0001; p += 0.1) {
+        const d = creaturePoseOffsets(spheres, look.stage, {
+          idleFrame: 0,
+          walkPhase: 0,
+          walkWeight: 0,
+          drawPhase: p,
+        });
+        spheres.forEach((s, i) => {
+          if (s.held || ARM_OF_HELD.has(s.part))
+            drawing.push({ ...s, center: add3(s.center, d[i]) });
+        });
+      }
+    }
+    // Gear on threads can swing anywhere its threads let it: round the knot,
+    // as far as they run.
+    for (const s of spheres) {
+      const thread = s.held?.thread;
+      if (!thread) continue;
+      const run = thread.rig.lengths
+        .slice(0, thread.index + 1)
+        .reduce((a, b) => a + b, 0);
+      const across = s.shape ? Math.hypot(...s.shape.axis) : 0;
+      drawing.push({
+        ...s,
+        shape: undefined,
+        center: thread.rig.knot,
+        radius: run + s.radius + across,
+      });
+    }
+    this.bounds = turnBounds([...spheres, ...drawing], feet);
     this.seatDrop = this.hasLegs ? creatureSeatDrop(spheres, look.stage) : 0;
     const companionSeed = hashSeed(look.seed) ^ (options.seed ?? 0);
     this.follower = anchoring
@@ -559,6 +651,29 @@ export class HerzieModel {
     }
     this.castArm = spheres.findIndex((sp) => sp.part === CAST_ARM);
     this.holdsProps = spheres.some((sp) => sp.part in HELD_ARM);
+    const hung = spheres.filter((sp) => sp.held?.thread);
+    const thread = hung[0]?.held?.thread;
+    if (thread) {
+      const parts: string[] = [];
+      for (const sp of hung) {
+        const t = sp.held?.thread;
+        if (t) parts[t.index] = sp.part;
+      }
+      this.threads = {
+        rig: thread.rig,
+        sim: createThreadSim(thread.rig),
+        parts,
+      };
+      const [cx, cy, cz] = thread.rig.center;
+      this.torsoAt = spheres.findIndex(
+        (sp) =>
+          sp.center[0] === cx && sp.center[1] === cy && sp.center[2] === cz,
+      );
+    }
+    if (options.armed) {
+      this.armed = true;
+      if (this.holdsProps) this.drawPhase = 1;
+    }
     const headAt = spheres.findIndex((sp) => sp.part === "head");
     if (this.castArm < 0 && headAt >= 0 && !look.params) {
       const head = spheres[headAt];
@@ -592,6 +707,19 @@ export class HerzieModel {
     this.castTime = 0;
     this.castPitch = Math.max(-0.7, Math.min(0.7, pitch));
     this.released = false;
+    // Casting with its gear still on its back: it's drawn on the way, in
+    // hand by the time the wave leaves.
+    if (this.holdsProps && this.drawPhase < 1) {
+      this.drawRate = Math.max(
+        1 / DRAW_SECONDS,
+        (1 - this.drawPhase) / CAST_RELEASE_SECONDS,
+      );
+    }
+  }
+
+  /** How far its class gear is drawn: 0 on its back to 1 in hand. */
+  get drawn(): number {
+    return this.drawPhase;
   }
 
   /** It's mid-cast. */
@@ -613,6 +741,7 @@ export class HerzieModel {
       );
     }
     this.stepSit(dt);
+    this.stepDraw(dt);
     this.stepCast(dt);
     this.swing(dt);
     this.turn.rotation.y = this.heading;
@@ -697,6 +826,7 @@ export class HerzieModel {
     turned -= Math.round(turned / (Math.PI * 2)) * Math.PI * 2;
     this.lastHeading = this.heading;
     this.bodyAngle -= turned;
+    this.stepThreads(dt, turned);
     if (!this.dangles || !this.canDangle) {
       this.dangleSim = null;
       this.dangle = undefined;
@@ -718,9 +848,65 @@ export class HerzieModel {
     }
   }
 
+  /** Swings gear hung on threads (the discs) with how it moved this frame:
+   * across the world (from where its root is) and round (`turned`). */
+  private stepThreads(dt: number, turned: number) {
+    const threads = this.threads;
+    if (!threads) return;
+    this.root.updateWorldMatrix(true, false);
+    const now = this.root.getWorldPosition(new THREE.Vector3());
+    // How fast it's going and speeding up, smoothed over a few frames
+    // (moves don't land evenly on frames) — nothing on the first, or across
+    // a jump (a portal, a respawn).
+    let accel = new THREE.Vector3();
+    if (this.lastWorld && dt > 0) {
+      const velocity = now.clone().sub(this.lastWorld).divideScalar(dt);
+      if (velocity.length() > THREAD_JUMP_SPEED) {
+        this.worldVelocity.set(0, 0, 0);
+      } else {
+        const before = this.worldVelocity.clone();
+        this.worldVelocity.lerp(velocity, 1 - Math.exp(-dt / THREAD_SMOOTHING));
+        accel = this.worldVelocity.clone().sub(before).divideScalar(dt);
+      }
+    }
+    this.lastWorld = now;
+    // Into creature space: unturned, upright flipped (y down, front −z),
+    // and in creature units.
+    const c = Math.cos(this.heading);
+    const sn = Math.sin(this.heading);
+    const toCreature = (v: THREE.Vector3): [number, number, number] => [
+      (c * v.x - sn * v.z) / MODEL_SCALE,
+      -v.y / MODEL_SCALE,
+      -(sn * v.x + c * v.z) / MODEL_SCALE,
+    ];
+    if (dt > 0) {
+      stepThreadSim(
+        threads.sim,
+        threads.rig,
+        dt,
+        {
+          offset: this.torsoOffset,
+          accel: toCreature(accel),
+          velocity: toCreature(this.worldVelocity),
+          // Turned upright, its heading's turn is the other way round its y.
+          turnRate: -turned / dt,
+        },
+        this.threadConfig,
+      );
+    }
+    const sway = threadSway(threads.sim, threads.rig, this.torsoOffset);
+    this.heldSway = {};
+    threads.parts.forEach((part, i) => {
+      if (this.heldSway) this.heldSway[part] = sway[i];
+    });
+  }
+
   /** Nothing dangling is still moving. */
   get dangleSettled(): boolean {
-    return this.dangleSim === null;
+    return (
+      this.dangleSim === null &&
+      (!this.threads || isThreadSettled(this.threads.sim))
+    );
   }
 
   private stepDance(dt: number) {
@@ -735,6 +921,20 @@ export class HerzieModel {
     }
     this.danceTime = (this.danceTime + dt) % (DANCE_LOOP_FRAMES / DANCE_FPS);
     this.danceClock += dt;
+  }
+
+  private stepDraw(dt: number) {
+    if (!this.holdsProps) return;
+    if (this.armed || this.castTime !== undefined) {
+      this.unarmedFor = 0;
+      this.drawPhase = Math.min(1, this.drawPhase + dt * this.drawRate);
+      if (this.drawPhase === 1) this.drawRate = 1 / DRAW_SECONDS;
+      return;
+    }
+    this.drawRate = 1 / DRAW_SECONDS;
+    this.unarmedFor += dt;
+    if (this.unarmedFor < SHEATHE_DELAY) return;
+    this.drawPhase = Math.max(0, this.drawPhase - dt / SHEATHE_SECONDS);
   }
 
   private stepCast(dt: number) {
@@ -828,12 +1028,17 @@ export class HerzieModel {
       castPhase:
         this.castTime === undefined ? undefined : this.castTime / CAST_SECONDS,
       castPitch: this.castPitch,
+      drawPhase: this.drawPhase,
+      heldSway: this.heldSway,
     });
     this.posePopHand(
       this.castTime === undefined ? undefined : this.castTime / CAST_SECONDS,
     );
-    // Held props (class gear) turn with their arm; a solid's axis with them.
-    const arms = this.holdsProps ? heldArmDirections(spheres, offsets) : null;
+    // Held props (class gear) turn as they're drawn and with their arm; a
+    // solid's axis with them.
+    const held = this.holdsProps
+      ? heldPoses(spheres, offsets, this.drawPhase, this.heldSway)
+      : null;
     for (let i = 0; i < spheres.length; i++) {
       const s = spheres[i];
       const [x, y, z] = s.center;
@@ -845,13 +1050,15 @@ export class HerzieModel {
         scratch.set(...dangledAxis(s, this.dangle)).normalize();
         mesh.quaternion.setFromUnitVectors(UP, scratch);
       }
-      const arm = s.shape && arms?.[s.part];
-      if (arm && s.shape) {
-        scratch
-          .set(...turnBetween(s.shape.axis, arm.rest, arm.now))
-          .normalize();
+      const prop = s.shape && held?.[s.part];
+      if (prop && s.shape) {
+        scratch.set(...prop.turn(s.shape.axis)).normalize();
         mesh.quaternion.setFromUnitVectors(UP, scratch);
       }
+    }
+    if (this.torsoAt >= 0) {
+      const [x, y, z] = offsets[this.torsoAt];
+      this.torsoOffset = [x, y, z];
     }
     if (!this.follower) this.surgeInPlace(offsets);
   }

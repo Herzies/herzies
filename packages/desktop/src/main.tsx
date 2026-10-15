@@ -935,6 +935,9 @@ function App() {
               }
               zoom={view === "inventory" ? HERZIE_VIEW_ZOOM : 1}
               offsetY={view === "inventory" ? HERZIE_VIEW_OFFSET_Y : 0}
+              // Class gear rides on its back, out of sight from the front:
+              // drawn in the inventory, where it's equipped.
+              armed={view === "inventory"}
               grounded
             />
           </div>

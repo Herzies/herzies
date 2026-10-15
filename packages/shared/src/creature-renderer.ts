@@ -36,6 +36,7 @@ import {
   type GroundSide,
   groundSlot,
 } from "./items.js";
+import { settleThread, type ThreadRig } from "./thread-physics.js";
 
 // --- Creature viewport ---
 const SW = 80;
@@ -299,6 +300,9 @@ export interface Sphere {
    * animations, which only move centers, carry it along untouched; only
    * renderCreatureFrame's camera turn and applyDangle's swing rotate it. */
   shape?: Shape;
+  /** Held class gear: the way from where it's slung (its center and axis)
+   * to the hand. See heldPoses. */
+  held?: HeldSocket;
 }
 
 export interface Shape {
@@ -1860,13 +1864,19 @@ export function equippedCacheKey(equipped?: Equipped): string {
 }
 
 // --- Held class equipment ---
-// Class gear (classes.ts) is held in the hands. A herzie's hand is the far
-// end of its one-sphere arm; the props are tagged with their own parts,
-// "held-l" and "held-r", not the arm's — more than one "arm-l" sphere would
-// read as the boss's chained arms (buildRig), and the cast poses the arm by
-// placing its one sphere outright. Instead creaturePoseOffsets turns each
-// held part with its arm, about the shoulder (followArms), and HerzieModel
-// turns their solids' axes to match (heldArmDirections).
+// Class gear (classes.ts) is slung on the herzie's back, and drawn into its
+// hands to fight. A herzie's hand is the far end of its one-sphere arm; the
+// props are tagged with their own parts, "held-l" and "held-r", not the
+// arm's — more than one "arm-l" sphere would read as the boss's chained arms
+// (buildRig), and the cast poses the arm by placing its one sphere outright.
+//
+// Each prop is built in the hand (posed against the arm at rest), then slung:
+// moved rigidly onto the back, which is where the model has it at rest — so
+// every still view shows it there. Its HeldSocket remembers the way back to
+// the hand. creaturePoseOffsets' drawPhase carries it between the two
+// (heldPoses): on the back it rides the body; drawn, it turns with its arm
+// about the shoulder; in between, the arm reaches up over its shoulder for it
+// (drawArmDeltas) and it swings from the one to the other.
 //
 // The main hand is the casting arm, CAST_ARM, so the wave leaves from the
 // stick, the disc or the lute; the off hand is the other.
@@ -1881,6 +1891,106 @@ export const HELD_ARM: Readonly<Record<string, string>> = {
 export const MAIN_HELD = "held-l";
 const OFF_HELD = "held-r";
 
+/** A held prop's way from the back to the hand. One per prop, shared by its
+ * spheres, whose centers and axes are where it's slung. */
+export interface HeldSocket {
+  /** The palm, as it holds the prop with the arm at rest. */
+  grip: V3;
+  /** That point of it, slung on the back. */
+  back: V3;
+  /** Where on the back the hand reaches to take hold of it: the handle. */
+  handle: V3;
+  /** Turns the prop from how it lies on the back to how it's held. */
+  toHand: Quat;
+  /** It hangs on a thread, the `index`th weight of `rig`, and swings (see
+   * thread-physics.ts). */
+  thread?: { rig: ThreadRig; index: number };
+}
+
+/** A rotation, as a unit quaternion [x, y, z, w]. */
+type Quat = [number, number, number, number];
+
+function cross(a: V3, b: V3): V3 {
+  return [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0],
+  ];
+}
+function dot(a: V3, b: V3): number {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+function quatMul(a: Quat, b: Quat): Quat {
+  const [ax, ay, az, aw] = a;
+  const [bx, by, bz, bw] = b;
+  return [
+    aw * bx + ax * bw + ay * bz - az * by,
+    aw * by - ax * bz + ay * bw + az * bx,
+    aw * bz + ax * by - ay * bx + az * bw,
+    aw * bw - ax * bx - ay * by - az * bz,
+  ];
+}
+const quatConj = (q: Quat): Quat => [-q[0], -q[1], -q[2], q[3]];
+function quatNorm(q: Quat): Quat {
+  const n = Math.max(1e-12, Math.hypot(...q));
+  return [q[0] / n, q[1] / n, q[2] / n, q[3] / n];
+}
+/** `v` turned by `q`. */
+function quatRotate(q: Quat, v: V3): V3 {
+  const u: V3 = [q[0], q[1], q[2]];
+  const t = scale(cross(u, v), 2);
+  return add(add(v, scale(t, q[3])), cross(u, t));
+}
+/** The shortest turn taking direction `from` to direction `to`. */
+function quatFromTo(from: V3, to: V3): Quat {
+  const a = norm(from);
+  const b = norm(to);
+  const d = dot(a, b);
+  if (d < -1 + 1e-9) {
+    const axis = norm(cross(a, Math.abs(a[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0]));
+    return [...axis, 0];
+  }
+  return quatNorm([...cross(a, b), 1 + d]);
+}
+function quatSlerp(a: Quat, b: Quat, t: number): Quat {
+  let d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
+  const to: Quat = d < 0 ? [-b[0], -b[1], -b[2], -b[3]] : b;
+  d = Math.abs(d);
+  if (d > 0.9995) {
+    return quatNorm([0, 1, 2, 3].map((k) => a[k] + (to[k] - a[k]) * t) as Quat);
+  }
+  const th = Math.acos(d);
+  const wa = Math.sin((1 - t) * th) / Math.sin(th);
+  const wb = Math.sin(t * th) / Math.sin(th);
+  return [0, 1, 2, 3].map((k) => a[k] * wa + to[k] * wb) as Quat;
+}
+/** The turn taking x, y and z to a frame whose x is `long` and whose y is
+ * `face` (made square to it). */
+function frameQuat(long: V3, face: V3): Quat {
+  const x = norm(long);
+  const y = norm(sub(face, scale(x, dot(face, x))));
+  const z = cross(x, y);
+  // Rows of the matrix whose columns are x, y, z.
+  const [m00, m01, m02] = [x[0], y[0], z[0]];
+  const [m10, m11, m12] = [x[1], y[1], z[1]];
+  const [m20, m21, m22] = [x[2], y[2], z[2]];
+  const trace = m00 + m11 + m22;
+  if (trace > 0) {
+    const s = 0.5 / Math.sqrt(trace + 1);
+    return [(m21 - m12) * s, (m02 - m20) * s, (m10 - m01) * s, 0.25 / s];
+  }
+  if (m00 > m11 && m00 > m22) {
+    const s = 2 * Math.sqrt(1 + m00 - m11 - m22);
+    return [0.25 * s, (m01 + m10) / s, (m02 + m20) / s, (m21 - m12) / s];
+  }
+  if (m11 > m22) {
+    const s = 2 * Math.sqrt(1 + m11 - m00 - m22);
+    return [(m01 + m10) / s, 0.25 * s, (m12 + m21) / s, (m02 - m20) / s];
+  }
+  const s = 2 * Math.sqrt(1 + m22 - m00 - m11);
+  return [(m02 + m20) / s, (m12 + m21) / s, 0.25 * s, (m10 - m01) / s];
+}
+
 interface Hand {
   /** Where the palm is. */
   at: V3;
@@ -1888,12 +1998,13 @@ interface Hand {
   dir: V3;
   /** −1 the creature's left (−x), 1 its right. */
   side: -1 | 1;
+  /** Where the arm joins the torso. */
+  shoulder: V3;
   /** The arm's radius: props are sized by it, so they fit any stage. */
   r: number;
-  /** The front of what the arm hangs off (the body, or the head before
-   * it), along z (front is −z): a prop held across the herzie sits ahead
-   * of this, or the body swallows it. */
-  front: number;
+  /** What the arm hangs off (the body, or the head before it): the prop is
+   * slung on its back. */
+  torso: { center: V3; radius: number };
 }
 
 function handOf(spheres: Sphere[], arm: string): Hand | null {
@@ -1901,22 +2012,96 @@ function handOf(spheres: Sphere[], arm: string): Hand | null {
   if (!sp) return null;
   const rig = buildRig(spheres);
   const shoulder = rig.shoulders[arm];
-  if (!shoulder) return null;
+  const parent = rig.body ?? rig.head;
+  if (!shoulder || !parent) return null;
   const v = sub(sp.center, shoulder);
   const len = Math.max(1e-9, Math.hypot(...v));
   const dir = scale(v, 1 / len);
-  const parent = rig.body ?? rig.head;
   return {
     at: add(sp.center, scale(dir, sp.radius * 0.7)),
     dir,
     side: LIMB_SIDE[arm] ?? 1,
+    shoulder,
     r: sp.radius,
-    front: parent ? parent.center[2] - parent.radius : sp.center[2],
+    torso: { center: parent.center, radius: parent.radius },
   };
 }
 
 function norm(v: V3): V3 {
   return scale(v, 1 / Math.max(1e-9, Math.hypot(...v)));
+}
+
+/** Where the hand takes hold of a prop on the back: behind the top of its
+ * shoulder, `reach` palm lengths from it — as far as its stubby arm goes —
+ * and at least `lift` clear of the torso; and which way is out from there. */
+function behindShoulder(hand: Hand, lift: number, reach = 1.45) {
+  const { center, radius } = hand.torso;
+  const palm = Math.hypot(...sub(hand.at, hand.shoulder));
+  const at = add(
+    hand.shoulder,
+    scale(norm([-hand.side * 0.15, -0.6, 0.8]), palm * reach),
+  );
+  const out = norm(sub(at, center));
+  const clear = radius + lift;
+  return {
+    at:
+      Math.hypot(...sub(at, center)) < clear
+        ? add(center, scale(out, clear))
+        : at,
+    out,
+  };
+}
+
+/** A point on the back: `x` across (+ the creature's right) and `y` down
+ * from the torso's middle, in torso radii, `lift` out from its surface. */
+function onBack(hand: Hand, x: number, y: number, lift: number): V3 {
+  const { center, radius } = hand.torso;
+  const out: V3 = [x, y, Math.sqrt(Math.max(0, 1 - x * x - y * y))];
+  return add(center, scale(out, radius + lift));
+}
+
+/** Up (−y), along a disc whose face looks along `face`. */
+function upAcross(face: V3): V3 {
+  return norm(sub([0, -1, 0], scale(face, -face[1])));
+}
+
+/** How a prop lies: a point of it, its length's direction, and the way its
+ * face looks. */
+interface Lie {
+  at: V3;
+  long: V3;
+  face: V3;
+}
+
+/** `inHand`, built in the hand as it `held` it, slung on the back as it
+ * lies there (`back`, the same point and directions of it). That point is
+ * its handle, where the hand takes hold of it on the back — unless `handle`
+ * says where that is instead (on the back). */
+function slung(
+  hand: Hand,
+  inHand: Sphere[],
+  held: Lie,
+  back: Lie,
+  handle: V3 = back.at,
+): Sphere[] {
+  const toHand = quatMul(
+    frameQuat(held.long, held.face),
+    quatConj(frameQuat(back.long, back.face)),
+  );
+  const toBack = quatConj(toHand);
+  const place = (p: V3) => add(back.at, quatRotate(toBack, sub(p, held.at)));
+  const socket: HeldSocket = {
+    grip: hand.at,
+    back: place(hand.at),
+    handle,
+    toHand,
+  };
+  return inHand.map((s) => ({
+    ...s,
+    center: place(s.center),
+    shape: s.shape && { ...s.shape, axis: quatRotate(toBack, s.shape.axis) },
+    held: socket,
+  }));
 }
 
 type HeldBuilder = (spheres: Sphere[], part: string, hand: Hand) => Sphere[];
@@ -1930,116 +2115,211 @@ const held = (
 ): Sphere => ({ center, radius, zone: "wearable", part, color, shape });
 
 /** Worn Stick: a drumstick out of the fist, tip up and out, a little
- * forward — raised, so it reads against the sky rather than the body. */
-const buildWornStick: HeldBuilder = (_s, part, { at, side, r }) => {
+ * forward — raised, so it reads against the sky rather than the body. On the
+ * back, slung like a sword: the grip behind the casting shoulder, the tip
+ * down across toward the other hip. */
+const buildWornStick: HeldBuilder = (_s, part, hand) => {
+  const { at, side, r } = hand;
   const half = r * 1.3;
   const axis = norm([side * 0.45, -0.8, -0.4]);
   const mid = add(at, scale(axis, half * 0.7));
-  return [
-    held(part, mid, r * 0.14, "#c8a46e", {
-      kind: "capsule",
-      axis: scale(axis, half),
-    }),
-    held(part, add(mid, scale(axis, half)), r * 0.2, "#e6cfa3"),
-  ];
+  return slung(
+    hand,
+    [
+      held(part, mid, r * 0.14, "#c8a46e", {
+        kind: "capsule",
+        axis: scale(axis, half),
+      }),
+      held(part, add(mid, scale(axis, half)), r * 0.2, "#e6cfa3"),
+    ],
+    { at, long: axis, face: cross(axis, [0, 0, 1]) },
+    {
+      at: behindShoulder(hand, r * 0.2).at,
+      long: norm([-side * 0.45, 1, 0.3]),
+      face: [side, 0, 0],
+    },
+  );
 };
 
-/** Old Cymbal: a shield-like disc held out in front, a little outward. */
-const buildOldCymbal: HeldBuilder = (_s, part, { at, side, r }) => {
+/** Old Cymbal: a shield-like disc held out in front, a little outward; on
+ * the back like a shield, bell out, hung from behind its shoulder by the
+ * rim. */
+const buildOldCymbal: HeldBuilder = (_s, part, hand) => {
+  const { at, side, r } = hand;
   const face = norm([side * 0.35, 0.1, -1]);
   const center = add(at, add(scale(face, r * 0.5), [side * r * 0.2, 0, 0]));
-  return [
-    held(part, center, r * 1.5, "#d4b04c", {
-      kind: "cylinder",
-      axis: scale(face, r * 0.05),
-      dome: r * 0.12,
-    }),
-    // The bell, and verdigris at the rim.
-    held(part, add(center, scale(face, r * 0.1)), r * 0.35, "#b8923a", {
-      kind: "cylinder",
-      axis: scale(face, r * 0.08),
-    }),
-    held(
-      part,
-      add(center, [side * r * 1.15, -r * 0.6, 0]),
-      r * 0.22,
-      "#6fa38a",
-      {
+  const back = behindShoulder(hand, r * 0.35);
+  return slung(
+    hand,
+    [
+      held(part, center, r * 1.5, "#d4b04c", {
         kind: "cylinder",
-        axis: scale(face, r * 0.06),
-      },
-    ),
-  ];
+        axis: scale(face, r * 0.05),
+        dome: r * 0.12,
+      }),
+      // The bell, and verdigris at the rim.
+      held(part, add(center, scale(face, r * 0.1)), r * 0.35, "#b8923a", {
+        kind: "cylinder",
+        axis: scale(face, r * 0.08),
+      }),
+      held(
+        part,
+        add(center, [side * r * 1.15, -r * 0.6, 0]),
+        r * 0.22,
+        "#6fa38a",
+        {
+          kind: "cylinder",
+          axis: scale(face, r * 0.06),
+        },
+      ),
+    ],
+    // By the top of its rim.
+    { at: add(center, scale(upAcross(face), r * 1.3)), long: [0, -1, 0], face },
+    { at: back.at, long: norm([0, -1, -0.45]), face: back.out },
+  );
 };
 
-/** One Compact Disc, upright in the palm, its face to the side. */
-function discIn(part: string, { at, side, r }: Hand): Sphere[] {
+/** One Compact Disc, upright in the palm, its face to the side; on the back
+ * at `onIt`, lying flat against it. The hand takes it by the rim nearest
+ * its shoulder. */
+function discIn(
+  part: string,
+  hand: Hand,
+  onIt: V3,
+  thread?: HeldSocket["thread"],
+): Sphere[] {
+  const { at, side, r } = hand;
   const face: V3 = norm([side, 0, -0.25]);
   const center = add(at, [side * r * 0.15, r * 0.2, -r * 0.55]);
-  return [
-    held(part, center, r * 0.95, "#d9d9e8", {
-      kind: "cylinder",
-      axis: scale(face, r * 0.04),
-    }),
-    held(part, center, r * 0.22, "#3a3a4a", {
-      kind: "cylinder",
-      axis: scale(face, r * 0.06),
-    }),
-  ];
+  const out = norm(sub(onIt, hand.torso.center));
+  // The rim toward its shoulder, along the disc.
+  const toShoulder = sub(hand.shoulder, onIt);
+  const rim = add(
+    onIt,
+    scale(norm(sub(toShoulder, scale(out, dot(toShoulder, out)))), r * 0.9),
+  );
+  const disc = slung(
+    hand,
+    [
+      held(part, center, r * 0.95, "#d9d9e8", {
+        kind: "cylinder",
+        axis: scale(face, r * 0.04),
+      }),
+      held(part, center, r * 0.22, "#3a3a4a", {
+        kind: "cylinder",
+        axis: scale(face, r * 0.06),
+      }),
+    ],
+    { at: center, long: [0, -1, 0], face },
+    { at: onIt, long: [0, -1, 0], face: out },
+    rim,
+  );
+  const socket = disc[0]?.held;
+  if (socket && thread) socket.thread = thread;
+  return disc;
 }
 
-/** Compact Discs: one item, a disc in each hand. */
-const buildCompactDiscs: HeldBuilder = (spheres, part, hand) => {
-  const other = handOf(
-    spheres,
-    HELD_ARM[part === MAIN_HELD ? OFF_HELD : MAIN_HELD],
-  );
-  return [
-    ...discIn(part, hand),
-    ...(other ? discIn(part === MAIN_HELD ? OFF_HELD : MAIN_HELD, other) : []),
-  ];
+/** How far each disc rides off the back, in arm radii: the upper one over
+ * the lower. */
+const DISC_LIFT: Record<string, number> = {
+  [MAIN_HELD]: 0.18,
+  [OFF_HELD]: 0.1,
 };
 
-/** Lute: the body in the strumming hand, in front of the herzie; the neck
- * runs across and up toward the other side. */
-const buildLute: HeldBuilder = (_s, part, { at, side, r, front }) => {
-  // Across the belly, just clear of it.
-  const body: V3 = [
-    at[0] - side * r * 0.9,
-    at[1] - r * 0.2,
-    Math.min(at[2] - r, front - r * 0.3),
-  ];
-  const face: V3 = [0, 0, -1];
-  const neckDir = norm([-side * 0.8, -0.6, 0]);
-  const neckHalf = r * 1.1;
-  const neckMid = add(body, scale(neckDir, r * 0.9 + neckHalf));
-  return [
-    held(part, body, r * 0.95, "#c98a4b", {
-      kind: "cylinder",
-      axis: scale(face, r * 0.22),
-      dome: r * 0.25,
-    }),
-    // Sound hole.
-    held(part, add(body, [0, -r * 0.15, -r * 0.24]), r * 0.24, "#2b1a0e", {
-      kind: "cylinder",
-      axis: scale(face, r * 0.03),
-    }),
-    held(part, neckMid, r * 0.16, "#6b4226", {
-      kind: "capsule",
-      axis: scale(neckDir, neckHalf),
-    }),
-    // Pegbox, bent back.
-    held(
-      part,
-      add(neckMid, scale(neckDir, neckHalf + r * 0.25)),
-      r * 0.2,
-      "#4a2c18",
-      {
-        kind: "capsule",
-        axis: scale(norm([-side * 0.3, -0.2, 0.9]), r * 0.18),
-      },
+/**
+ * Compact Discs: one item, a disc in each hand. On the back they hang down
+ * the spine on invisible threads — the main hand's tied up between the
+ * shoulders, the other tied to it — and swing as the herzie moves (see
+ * thread-physics.ts). Built where they settle, so a still herzie shows them
+ * as they'd really hang.
+ */
+const buildCompactDiscs: HeldBuilder = (spheres, part, hand) => {
+  const otherPart = part === MAIN_HELD ? OFF_HELD : MAIN_HELD;
+  const other = handOf(spheres, HELD_ARM[otherPart]);
+  const hung = [
+    { part, hand },
+    ...(other ? [{ part: otherPart, hand: other }] : []),
+  ].sort((a, b) => (a.part === MAIN_HELD ? -1 : b.part === MAIN_HELD ? 1 : 0));
+  const top = hung[0].hand;
+  const { center, radius } = top.torso;
+  const lift = (h: (typeof hung)[number]) => h.hand.r * DISC_LIFT[h.part];
+  // Where they'd hang: one above the other, down the spine.
+  const guess = hung.map((h, i) =>
+    onBack(h.hand, 0, i === 0 ? -0.32 : 0, lift(h)),
+  );
+  const knot = onBack(top, 0, -0.62, lift(hung[0]));
+  const rig: ThreadRig = {
+    knot,
+    lengths: guess.map((g, i) =>
+      Math.hypot(...sub(g, i === 0 ? knot : guess[i - 1])),
     ),
-  ];
+    rest: guess,
+    center,
+    clear: hung.map((h) => radius + lift(h)),
+  };
+  rig.rest = settleThread(rig);
+  return hung.flatMap((h, index) =>
+    discIn(h.part, h.hand, rig.rest[index], { rig, index }),
+  );
+};
+
+/** Lute: in the hand, its body at the palm and the neck pointing forward
+ * and a little down — carried easy. On the back, slung across: the neck up
+ * behind the casting shoulder, where the hand takes it, the body low across
+ * the back. */
+const buildLute: HeldBuilder = (_s, part, hand) => {
+  const { at, side, r } = hand;
+  // Its face looks outward, away from the herzie.
+  const face: V3 = [side, 0, 0];
+  const neckDir = norm([0, 0.35, -1]);
+  const body = add(at, [side * r * 0.35, -r * 0.1, 0]);
+  const neckHalf = r * 1.1;
+  const neckMid = add(body, scale(neckDir, r * 0.8 + neckHalf));
+  const handle = behindShoulder(hand, r * 0.2).at;
+  return slung(
+    hand,
+    [
+      held(part, body, r * 0.95, "#c98a4b", {
+        kind: "cylinder",
+        axis: scale(face, r * 0.22),
+        dome: r * 0.25,
+      }),
+      // Sound hole.
+      held(
+        part,
+        add(body, [side * r * 0.24, 0, -r * 0.15]),
+        r * 0.24,
+        "#2b1a0e",
+        {
+          kind: "cylinder",
+          axis: scale(face, r * 0.03),
+        },
+      ),
+      held(part, neckMid, r * 0.16, "#6b4226", {
+        kind: "capsule",
+        axis: scale(neckDir, neckHalf),
+      }),
+      // Pegbox, bent back.
+      held(
+        part,
+        add(neckMid, scale(neckDir, neckHalf + r * 0.25)),
+        r * 0.2,
+        "#4a2c18",
+        {
+          kind: "capsule",
+          axis: scale(norm([0, 0.9, -0.3]), r * 0.18),
+        },
+      ),
+    ],
+    // By the neck.
+    { at: add(neckMid, scale(neckDir, neckHalf * 0.3)), long: neckDir, face },
+    {
+      at: handle,
+      // From the middle of the back, where the body sits, clear of it.
+      long: norm(sub(handle, onBack(hand, -side * 0.15, 0.2, r * 0.7))),
+      face: [0, 0, 1],
+    },
+  );
 };
 
 const HELD_ITEM_BUILDERS: Record<string, HeldBuilder> = {
@@ -2063,10 +2343,135 @@ function buildHeldSpheres(spheres: Sphere[], equipped: Equipped): Sphere[] {
   return out;
 }
 
-/** Where each held part's arm points, from its shoulder: at rest, and with
- * `offsets` applied. A held part is that turn, done about the shoulder; a
- * held solid's axis takes the same turn. */
-export function heldArmDirections(
+/**
+ * Drawing class gear off the back, as fractions of the draw (drawPhase
+ * 0..1): the hand reaches up over its shoulder and back down to the prop's
+ * handle, takes hold of it at GRAB — the prop hasn't moved till then — and
+ * brings it round to the ready, overshooting a touch before it settles.
+ * Putting it away plays the same path backward.
+ */
+export const DRAW = {
+  /** The hand is at the handle: from here the prop goes with it. */
+  grab: 0.4,
+  /** The prop's settled in the hand the way it's held. */
+  held: 0.8,
+  /** The off hand draws this much later. */
+  stagger: 0.1,
+  /** How far up over its shoulder the reach bends (0: straight there). */
+  over: 1.2,
+  /** The furthest the arm stretches to reach a handle (arm lengths). Most
+   * handles are behind the shoulder, in reach (see behindShoulder); the
+   * discs, stacked down the spine, are past it — the hand gets as near as
+   * it can and the disc's caught into it from there. */
+  maxReach: 2,
+  /** The overshoot into the ready (easeOutBack's). */
+  overshoot: 1.6,
+  /** At the ready, how much of the idle and walk swing the arm keeps. */
+  sway: 0.5,
+} as const;
+
+const easeOutBack = (t: number) => {
+  const c = DRAW.overshoot;
+  return 1 + (c + 1) * (t - 1) ** 3 + c * (t - 1) ** 2;
+};
+
+/** How far drawn `part` is at `drawPhase`: the off hand a little behind. */
+function heldPhase(part: string, drawPhase: number): number {
+  if (part !== OFF_HELD) return drawPhase;
+  return Math.max(0, (drawPhase - DRAW.stagger) / (1 - DRAW.stagger));
+}
+
+/** The socket of each held part there is. */
+function heldSockets(spheres: Sphere[]): Record<string, HeldSocket> {
+  const out: Record<string, HeldSocket> = {};
+  for (const s of spheres) if (s.held && !out[s.part]) out[s.part] = s.held;
+  return out;
+}
+
+/** Where the arm is, `p` through drawing the prop in `socket`, from the
+ * `shoulder` it hangs off (`rest`: shoulder to arm, at rest): a direction,
+ * and how far along it in arm lengths — so the palm is that far along it in
+ * palm lengths. */
+function drawHand(
+  p: number,
+  socket: HeldSocket,
+  shoulder: V3,
+  rest: V3,
+  side: number,
+): { dir: V3; reach: number } {
+  const toHandle = sub(socket.handle, shoulder);
+  const palm = Math.max(1e-9, Math.hypot(...sub(socket.grip, shoulder)));
+  const grab = norm(toHandle);
+  const grabReach = Math.min(
+    DRAW.maxReach,
+    Math.max(0.6, Math.hypot(...toHandle) / palm),
+  );
+  // Out to its side, low and a little forward: the prop's at the ready.
+  const ready = norm([side * 0.8, 0.3, -0.55]);
+  if (p < DRAW.grab) {
+    // Up over the shoulder on the way: reaching straight for the back would
+    // go through it.
+    const u = easeOut(p / DRAW.grab);
+    const over = scale(norm([side * 0.35, -1, 0.35]), DRAW.over);
+    const dir = norm(
+      add(
+        add(scale(norm(rest), (1 - u) ** 2), scale(over, 2 * u * (1 - u))),
+        scale(grab, u * u),
+      ),
+    );
+    return { dir, reach: 1 + (grabReach - 1) * u };
+  }
+  // Eased in as well as out: straight off the grab at full speed would
+  // flick it round in a frame.
+  const t = easeOutBack(ease(DRAW.grab, 1, p));
+  return {
+    dir: norm(add(scale(grab, 1 - t), scale(ready, t))),
+    reach: grabReach + (1 - grabReach) * t,
+  };
+}
+
+/** Where each arm with a prop to draw is, `drawPhase` through the draw, as
+ * offsets from rest (`deltas`, by `weight`), and how much of its own swing
+ * it `keeps`: none through the draw, some at the ready. */
+function drawArmDeltas(
+  spheres: Sphere[],
+  drawPhase: number,
+): { deltas: V3[]; weight: number[]; keeps: number[] } {
+  const deltas = spheres.map((): V3 => [0, 0, 0]);
+  const weight = spheres.map(() => 0);
+  const keeps = spheres.map(() => 1);
+  const sockets = heldSockets(spheres);
+  if (drawPhase <= 0 || Object.keys(sockets).length === 0)
+    return { deltas, weight, keeps };
+  const rig = buildRig(spheres);
+  for (const [part, socket] of Object.entries(sockets)) {
+    const arm = HELD_ARM[part];
+    const i = spheres.findIndex((s) => s.part === arm);
+    const shoulder = rig.shoulders[arm];
+    if (i < 0 || !shoulder) continue;
+    const p = heldPhase(part, drawPhase);
+    const rest = sub(spheres[i].center, shoulder);
+    const length = Math.hypot(...rest);
+    const { dir, reach } = drawHand(
+      p,
+      socket,
+      shoulder,
+      rest,
+      LIMB_SIDE[arm] ?? 1,
+    );
+    deltas[i] = sub(
+      add(shoulder, scale(dir, length * reach)),
+      spheres[i].center,
+    );
+    weight[i] = ease(0, 0.12, p);
+    keeps[i] = 1 - weight[i] * (1 - DRAW.sway * ease(DRAW.held, 1, p));
+  }
+  return { deltas, weight, keeps };
+}
+
+/** Where each arm points, from its shoulder: at rest, and with `offsets`
+ * applied. */
+function armDirections(
   spheres: Sphere[],
   offsets: readonly V3[],
 ): Record<string, { shoulder: V3; shoulderNow: V3; rest: V3; now: V3 }> {
@@ -2074,7 +2479,6 @@ export function heldArmDirections(
     string,
     { shoulder: V3; shoulderNow: V3; rest: V3; now: V3 }
   > = {};
-  if (!spheres.some((s) => s.part in HELD_ARM)) return out;
   const rig = buildRig(spheres);
   const parent = rig.body ?? rig.head;
   const parentAt = parent ? spheres.indexOf(parent) : -1;
@@ -2094,45 +2498,111 @@ export function heldArmDirections(
   return out;
 }
 
-/** `v` turned by the rotation that takes unit `from` to unit `to`
- * (Rodrigues), the shortest way. */
-export function turnBetween(v: V3, from: V3, to: V3): V3 {
-  const a = norm(from);
-  const b = norm(to);
-  const k: V3 = [
-    a[1] * b[2] - a[2] * b[1],
-    a[2] * b[0] - a[0] * b[2],
-    a[0] * b[1] - a[1] * b[0],
-  ];
-  const sin = Math.hypot(...k);
-  const cos = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-  if (sin < 1e-9) return cos > 0 ? v : scale(v, -1);
-  const u = scale(k, 1 / sin);
-  const ux = u[1] * v[2] - u[2] * v[1];
-  const uy = u[2] * v[0] - u[0] * v[2];
-  const uz = u[0] * v[1] - u[1] * v[0];
-  const dot = u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
-  return [
-    v[0] * cos + ux * sin + u[0] * dot * (1 - cos),
-    v[1] * cos + uy * sin + u[1] * dot * (1 - cos),
-    v[2] * cos + uz * sin + u[2] * dot * (1 - cos),
-  ];
+/** A held prop, posed: where a point of it at rest (slung on the back) is
+ * now, and how a direction of it has turned. */
+export interface HeldPose {
+  place(p: V3): V3;
+  turn(v: V3): V3;
 }
 
-/** `offsets` with every held part moved as its arm moved: turned about the
- * shoulder, and stretched with the arm's reach (a cast reaches out). */
-function followArms(spheres: Sphere[], offsets: V3[]): V3[] {
-  const arms = heldArmDirections(spheres, offsets);
-  if (Object.keys(arms).length === 0) return offsets;
-  return offsets.map((d, i): V3 => {
-    const sp = spheres[i];
-    const arm = arms[sp.part];
-    if (!arm) return d;
+/**
+ * Each held part's pose, `drawPhase` of the way from the back to the hand,
+ * with the body and arms where `offsets` put them. On the back it rides the
+ * body. From the grab on it goes with the hand — turning with the arm about
+ * the shoulder, out with its reach (a cast reaches out) — held first just as
+ * it lay when the hand took it, then shifting round in the hand to how it's
+ * held. It's rigid throughout: nothing of it stretches.
+ */
+export function heldPoses(
+  spheres: Sphere[],
+  offsets: readonly V3[],
+  drawPhase: number,
+  /** How far each held part hanging on a thread has swung (see
+   * CreatureMotion's heldSway). */
+  sway?: Readonly<Record<string, V3>>,
+): Record<string, HeldPose> {
+  const out: Record<string, HeldPose> = {};
+  const sockets = heldSockets(spheres);
+  if (Object.keys(sockets).length === 0) return out;
+  const arms = armDirections(spheres, offsets);
+  for (const [part, socket] of Object.entries(sockets)) {
+    const arm = arms[part];
+    if (!arm) continue;
+    const p = heldPhase(part, drawPhase);
+    if (p <= DRAW.grab) {
+      const ride = sub(arm.shoulderNow, arm.shoulder);
+      const swung = sway?.[part];
+      if (!socket.thread || !swung) {
+        out[part] = { place: (x) => add(x, ride), turn: (v) => v };
+        continue;
+      }
+      // Swung on its thread — settling back as the hand reaches for it, so
+      // the grab takes it from where it rests — and lying flat against the
+      // back wherever it's swung to.
+      const { rig, index } = socket.thread;
+      const d = scale(swung, 1 - ease(0, DRAW.grab, p));
+      const rest = rig.rest[index];
+      const turn = quatFromTo(
+        sub(rest, rig.center),
+        sub(add(rest, d), rig.center),
+      );
+      const at = add(add(rest, ride), d);
+      out[part] = {
+        place: (x) => add(at, quatRotate(turn, sub(x, rest))),
+        turn: (v) => quatRotate(turn, v),
+      };
+      continue;
+    }
+    // The arm as the draw had it at the grab (taking the arm over, so it's
+    // where the arm was): how the prop lay against the hand.
+    const palm = Math.hypot(...sub(socket.grip, arm.shoulder));
+    const at = drawHand(
+      DRAW.grab,
+      socket,
+      arm.shoulder,
+      arm.rest,
+      LIMB_SIDE[HELD_ARM[part]] ?? 1,
+    );
+    const fromGrab = quatConj(quatFromTo(arm.rest, at.dir));
+    const grabPalm = add(arm.shoulder, scale(at.dir, palm * at.reach));
+    // In the hand's own terms: the handle, and the turn, from as it lay to
+    // as it's held. (Both ends are fixed, so the turn never flips.)
+    const s = ease(DRAW.grab, DRAW.held, p);
+    const inHand = quatSlerp(fromGrab, socket.toHand, s);
+    const handle = add(
+      scale(quatRotate(fromGrab, sub(socket.handle, grabPalm)), 1 - s),
+      scale(quatRotate(socket.toHand, sub(socket.handle, socket.back)), s),
+    );
+    // Where the hand is now.
     const stretch =
       Math.hypot(...arm.now) / Math.max(1e-9, Math.hypot(...arm.rest));
-    const rel = scale(sub(sp.center, arm.shoulder), stretch);
-    const at = add(arm.shoulderNow, turnBetween(rel, arm.rest, arm.now));
-    return sub(at, sp.center);
+    const armTurn = quatFromTo(arm.rest, arm.now);
+    const hand = add(
+      arm.shoulderNow,
+      quatRotate(armTurn, scale(sub(socket.grip, arm.shoulder), stretch)),
+    );
+    const turn = quatMul(armTurn, inHand);
+    const handleAt = add(hand, quatRotate(armTurn, handle));
+    out[part] = {
+      place: (x) => add(handleAt, quatRotate(turn, sub(x, socket.handle))),
+      turn: (v) => quatRotate(turn, v),
+    };
+  }
+  return out;
+}
+
+/** `offsets` with every held part posed (see heldPoses). */
+function holdProps(
+  spheres: Sphere[],
+  offsets: V3[],
+  drawPhase: number,
+  sway?: Readonly<Record<string, V3>>,
+): V3[] {
+  const poses = heldPoses(spheres, offsets, drawPhase, sway);
+  if (Object.keys(poses).length === 0) return offsets;
+  return offsets.map((d, i): V3 => {
+    const pose = poses[spheres[i].part];
+    return pose ? sub(pose.place(spheres[i].center), spheres[i].center) : d;
   });
 }
 
@@ -3985,6 +4455,10 @@ export interface CreaturePose {
   walkPhase: number;
   /** 0 standing (pure idle) to 1 walking (pure walk cycle). */
   walkWeight: number;
+  /** How far its class gear is drawn (see CreatureMotion). */
+  drawPhase?: number;
+  /** How far gear on threads has swung (see CreatureMotion). */
+  heldSway?: Readonly<Record<string, V3>>;
 }
 
 /** Frames in the idle loop, played at 50ms a frame. */
@@ -4052,6 +4526,12 @@ export type CreatureMotion = Pick<
   castPhase?: number;
   /** Where the cast is aimed: radians above level (negative: below). */
   castPitch?: number;
+  /** How far its class gear is drawn: 0 slung on its back to 1 in its
+   * hands (see DRAW). */
+  drawPhase?: number;
+  /** How far gear hanging on threads on its back has swung from where it
+   * rests, by held part (see thread-physics.ts). */
+  heldSway?: Readonly<Record<string, V3>>;
 };
 
 /**
@@ -4087,6 +4567,8 @@ export function creaturePoseOffsets(
       ? castDeltas(base, pose.castPhase, pose.castPitch ?? 0)
       : null;
   const cw = pose.castPhase !== undefined ? castWeight(pose.castPhase) : 0;
+  const drawPhase = Math.min(1, Math.max(0, pose.drawPhase ?? 0));
+  const draw = drawPhase > 0 ? drawArmDeltas(base, drawPhase) : null;
   const offsets = spheres.map((s, i): V3 => {
     const b = base[i].center;
     // Scene-anchored parts (a floating pet) keep their own idle bob even
@@ -4108,6 +4590,15 @@ export function creaturePoseOffsets(
       y = y * (1 - dw) + (moved[1] - b[1]) * dw;
       z = z * (1 - dw) + (moved[2] - b[2]) * dw;
     }
+    // Drawing gear takes its arm over (at the ready, it keeps some sway).
+    const held = draw?.weight[i] ?? 0;
+    if (draw && held > 0) {
+      const g = draw.deltas[i];
+      const keep = draw.keeps[i];
+      x = x * keep + g[0] * held;
+      y = y * keep + g[1] * held;
+      z = z * keep + g[2] * held;
+    }
     // A cast takes the casting arm over; the lean adds to whatever else.
     const c = cast?.[i];
     if (c) {
@@ -4123,7 +4614,11 @@ export function creaturePoseOffsets(
       z + b[2] - s.center[2],
     ];
   });
-  return grounded(spheres, followArms(spheres, offsets), 1 - sw);
+  return grounded(
+    spheres,
+    holdProps(spheres, offsets, drawPhase, pose.heldSway),
+    1 - sw,
+  );
 }
 
 /**
@@ -4207,8 +4702,10 @@ export function renderCreaturePose(
 
   const { spheres } = built;
   const offsets = creaturePoseOffsets(spheres, stage, pose);
+  const held = heldPoses(spheres, offsets, pose.drawPhase ?? 0, pose.heldSway);
   const animated = spheres.map((s, i) => {
     const d = offsets[i];
+    const prop = s.shape && held[s.part];
     return {
       ...s,
       center: [
@@ -4216,6 +4713,10 @@ export function renderCreaturePose(
         s.center[1] + d[1],
         s.center[2] + d[2],
       ] as V3,
+      shape:
+        prop && s.shape
+          ? { ...s.shape, axis: prop.turn(s.shape.axis) }
+          : s.shape,
     };
   });
   return renderCreatureFrame(

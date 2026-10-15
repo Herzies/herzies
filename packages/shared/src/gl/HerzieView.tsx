@@ -20,6 +20,7 @@ import {
 } from "../creature-renderer.js";
 import { type DangleConfig, DEFAULT_DANGLE_CONFIG } from "../dangle-physics.js";
 import type { Equipped } from "../items.js";
+import { DEFAULT_THREAD_CONFIG, type ThreadConfig } from "../thread-physics.js";
 import { HerzieModel, MODEL_SCALE } from "./HerzieModel.js";
 import { studioLighting } from "./herzieMaterial.js";
 import { herzieStage } from "./stage.js";
@@ -84,6 +85,8 @@ export type HerzieViewProps = {
   creatureParams?: CreatureParams;
   /** Spin physics of dangling items (sandbox / tooling). */
   dangleConfig?: DangleConfig;
+  /** How gear hung on threads (the discs) swings. */
+  threadConfig?: ThreadConfig;
   /** Drag to turn it, with momentum. Default: true. */
   draggable?: boolean;
   /** Freeze it (the host is hidden or unfocused). */
@@ -106,6 +109,10 @@ export type HerzieViewProps = {
   grey?: number;
   /** See-through, 1 (solid) to 0. */
   opacity?: number;
+  /** Its class gear drawn into its hands, as when aiming in the Town;
+   * otherwise it's slung on its back. Draws and puts away while it
+   * animates (not paused). */
+  armed?: boolean;
 };
 
 /**
@@ -124,6 +131,7 @@ export function HerzieView({
   equipped,
   creatureParams,
   dangleConfig = DEFAULT_DANGLE_CONFIG,
+  threadConfig = DEFAULT_THREAD_CONFIG,
   draggable = true,
   paused = false,
   wrapperStyle,
@@ -135,6 +143,7 @@ export function HerzieView({
   offsetY = 0,
   grey = 0,
   opacity = 1,
+  armed = false,
 }: HerzieViewProps) {
   const box = useRef<HTMLDivElement>(null);
   const width = Math.ceil(cols * size * 0.6);
@@ -152,6 +161,8 @@ export function HerzieView({
           layoutCols: cols,
           layoutRows: SH,
           anchorScenery: 0,
+          // A rebuild (other gear on) keeps it in hand, not drawn again.
+          armed,
         },
       ),
     [userId, stage, equippedKey, paramsKey, cols],
@@ -167,8 +178,10 @@ export function HerzieView({
     groundInset,
     dangles: false,
     dangleConfig,
+    threadConfig,
     grey,
     opacity,
+    armed,
   });
   live.current = {
     paused,
@@ -178,8 +191,10 @@ export function HerzieView({
     groundInset,
     dangles: draggable,
     dangleConfig,
+    threadConfig,
     grey,
     opacity,
+    armed,
   };
 
   /** The turn, in the old renderer's units (added to DEFAULT_Y_ANGLE). */
@@ -256,10 +271,12 @@ export function HerzieView({
         model.heading = -(DEFAULT_Y_ANGLE + s.angle);
         drawn.angle = s.angle;
         model.dancing = l.dancing;
+        model.armed = l.armed;
         // Anything dangling swings as it's spun, then settles — even with
         // the rest held still.
         model.dangles = l.dangles;
         model.dangleConfig = l.dangleConfig;
+        model.threadConfig = l.threadConfig;
         if (!l.paused) model.update(dt, 0);
         else {
           model.swing(dt);
