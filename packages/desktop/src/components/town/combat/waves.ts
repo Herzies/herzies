@@ -285,8 +285,13 @@ export function assistTarget(
   return best;
 }
 
-/** Turns a wave toward its target, a little each step. */
-function steer(w: Wave, dt: number) {
+/** Turns a wave (or a disc on its way out) toward its target, a little
+ * each step, at most `homing` radians a second. */
+export function steer(
+  w: { pos: Vec3; dir: Vec3; target: DummyState | null },
+  dt: number,
+  homing: number = WAVE.homing,
+) {
   const d = w.target;
   if (!d) return;
   const tx = d.x - w.pos[0];
@@ -306,7 +311,7 @@ function steer(w: Wave, dt: number) {
     w.target = null;
     return;
   }
-  const k = Math.min(1, (WAVE.homing * dt) / angle);
+  const k = Math.min(1, (homing * dt) / angle);
   w.dir[0] += (want[0] - w.dir[0]) * k;
   w.dir[1] += (want[1] - w.dir[1]) * k;
   w.dir[2] += (want[2] - w.dir[2]) * k;

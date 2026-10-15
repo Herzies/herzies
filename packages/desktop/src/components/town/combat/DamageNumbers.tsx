@@ -66,6 +66,11 @@ const STYLE = `
 .town-fx .cross .dot { width: 2px; height: 2px; left: -1px; top: -1px; }
 .town-fx .cross .t { width: 2px; height: 7px; left: -1px; }
 .town-fx .cross .l { width: 7px; height: 2px; top: -1px; }
+.town-fx .discs { position: absolute; left: 50%; top: 50%; width: 0; height: 0; opacity: 0; transition: opacity 0.15s; }
+.town-fx .discs.on { opacity: 1; }
+.town-fx .discs b { position: absolute; top: 20px; width: 6px; height: 6px; margin: -3px; border-radius: 50%;
+  border: 1px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,0.55); background: #fff; transition: background 0.08s; }
+.town-fx .discs b.out { background: transparent; }
 .town-fx .hit { position: absolute; left: 50%; top: 50%; width: 0; height: 0; opacity: 0; }
 .town-fx .hit i { position: absolute; width: 10px; height: 2px; left: -5px; top: -1px; background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,0.5); }
 .town-fx .hit.crit i { background: #ffd36b; }
@@ -111,6 +116,19 @@ export function CombatOverlay() {
     cross.append(dot);
     root.append(cross);
 
+    // A Record Slinger's discs, under the crosshair: filled while in hand,
+    // hollow while flying — the right one's the main hand's.
+    const discs = document.createElement("div");
+    discs.className = "discs";
+    const pips = {
+      "held-r": document.createElement("b"),
+      "held-l": document.createElement("b"),
+    };
+    pips["held-r"].style.left = "-6px";
+    pips["held-l"].style.left = "6px";
+    discs.append(pips["held-r"], pips["held-l"]);
+    root.append(discs);
+
     const hit = document.createElement("div");
     hit.className = "hit";
     const ticks = [45, 135, 225, 315].map((deg) => {
@@ -121,7 +139,7 @@ export function CombatOverlay() {
     root.append(hit);
 
     const meters = new Map<string, HTMLDivElement>();
-    return { root, floaters, cross, arms, hit, ticks, meters };
+    return { root, floaters, cross, arms, discs, pips, hit, ticks, meters };
   }, []);
 
   useLayoutEffect(() => {
@@ -197,6 +215,18 @@ export function CombatOverlay() {
     // The crosshair.
     const on = combat.on;
     ui.cross.classList.toggle("on", on);
+    const throwing = on && combat.attack === "disc";
+    ui.discs.classList.toggle("on", throwing);
+    if (throwing) {
+      for (const h of ["held-l", "held-r"] as const) {
+        const pip = ui.pips[h];
+        pip.classList.toggle("out", !combat.discs.in[h]);
+        // A pop as it's caught.
+        const since = (now - combat.discs.caughtAt[h]) / 1000;
+        const pop = since < 0.18 ? 1 + 0.8 * (1 - since / 0.18) ** 2 : 1;
+        pip.style.transform = `scale(${pop})`;
+      }
+    }
     if (on) {
       ui.cross.classList.toggle("target", combat.onTarget);
       const gap = 5 + combat.spread * 7;

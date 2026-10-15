@@ -1,5 +1,6 @@
 import "./globals.css";
 import {
+  attackStyle,
   bankCapacity,
   CLASS_DEFS,
   type HerzieClass,
@@ -43,6 +44,7 @@ import { TabBar, type View } from "./components/TabBar";
 import { TradeView } from "./components/TradeView";
 import { setLootRoom } from "./components/town/combat/lootFeed";
 import { setMySkill } from "./components/town/combat/skills";
+import { combat } from "./components/town/combat/state";
 import { UpdateAvailableOverlay } from "./components/UpdateAvailableOverlay";
 import { WhatsNewOverlay } from "./components/WhatsNewOverlay";
 import { useOptimisticUnits } from "./hooks/useOptimisticUnits";
@@ -220,6 +222,11 @@ function App() {
       ),
     [rawState.skills, classOverride],
   );
+  // How the Town's basic attack goes: by class (a Record Slinger throws its
+  // discs), the Class Preview's while one's on.
+  useEffect(() => {
+    combat.attack = attackStyle(classOverride ?? rawState.herzie?.class);
+  }, [rawState.herzie?.class, classOverride]);
   /** "Later" on the class choice: asked again next launch. */
   const [classChoiceLater, setClassChoiceLater] = useState(false);
   /** Captured the first time `state.isOnline` is true this session: was this

@@ -1,3 +1,4 @@
+import type { AttackStyle } from "@herzies/shared/classes";
 import { useSyncExternalStore } from "react";
 
 /**
@@ -39,6 +40,17 @@ export const combat = {
   hitCrit: false,
   /** Your best damage per second on any dummy, this session. */
   bestDps: 0,
+  /** Your class's basic attack: a wave, or a disc thrown from each hand. */
+  attack: "wave" as AttackStyle,
+  /** Throwing discs: which are in hand (the crosshair shows them), and
+   * when each was last caught (performance.now ms). */
+  discs: {
+    in: { "held-l": true, "held-r": true },
+    caughtAt: {
+      "held-l": Number.NEGATIVE_INFINITY,
+      "held-r": Number.NEGATIVE_INFINITY,
+    },
+  },
 };
 
 /** How long a press waits for the cast before it, in ms. */

@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import { CLASS_DEFS, CLASS_IDS } from "./classes.js";
 import {
   buildCreatureModel,
+  CAST,
   CAST_ARM,
+  castHand,
   creaturePoseOffsets,
   DRAW,
   HELD_ARM,
@@ -83,6 +85,71 @@ describe("held class equipment", () => {
     // the gap scales with it rather than staying exact.)
     expect(gap(casting)).toBeGreaterThan(gap(rest) * 0.7);
     expect(gap(casting)).toBeLessThan(gap(rest) * 1.6);
+  });
+
+  it("throws a disc with its other hand: that arm moves, not the casting one", () => {
+    const { spheres } = buildCreatureModel(USER, 3, {
+      main_hand: "compact-discs",
+    });
+    const pose = (castArm?: string) =>
+      creaturePoseOffsets(spheres, 3, {
+        idleFrame: 0,
+        walkPhase: 0,
+        walkWeight: 0,
+        castPhase: CAST.release,
+        castArm,
+        castStyle: "throw",
+        drawPhase: 1,
+      });
+    const rest = creaturePoseOffsets(spheres, 3, {
+      idleFrame: 0,
+      walkPhase: 0,
+      walkWeight: 0,
+      drawPhase: 1,
+    });
+    const moved = (offsets: number[][], part: string) => {
+      const i = spheres.findIndex((s) => s.part === part);
+      return Math.hypot(...offsets[i].map((v, k) => v - rest[i][k]));
+    };
+    // (Both lean into it, so both arms move some.)
+    const off = pose("arm-r");
+    const main = pose();
+    expect(moved(off, "arm-r")).toBeGreaterThan(moved(main, "arm-r") * 1.5);
+    expect(moved(main, "arm-l")).toBeGreaterThan(moved(off, "arm-l") * 1.5);
+  });
+
+  it("throws out front, mirrored by hand, letting go on the cast's beat", () => {
+    for (const arm of ["arm-l", "arm-r"]) {
+      const out = castHand(CAST.release, 0, arm, "throw");
+      // Front is −z in creature space; the hand's past the arm's rest.
+      expect(out.dir[2]).toBeLessThan(-0.8);
+      expect(out.reach).toBeGreaterThan(1.2);
+    }
+    const l = castHand(CAST.release, 0, "arm-l", "throw");
+    const r = castHand(CAST.release, 0, "arm-r", "throw");
+    expect(l.dir[0]).toBeCloseTo(-r.dir[0]);
+    // The wind-up crosses the chest: toward the other side.
+    const wound = castHand(CAST.drawn, 0, "arm-r", "throw");
+    expect(wound.dir[0]).toBeLessThan(0);
+  });
+
+  it("jolts the catching arm back, then lets it go", () => {
+    const { spheres } = buildCreatureModel(USER, 3, {
+      main_hand: "compact-discs",
+    });
+    const at = (catchPhase?: number) =>
+      creaturePoseOffsets(spheres, 3, {
+        idleFrame: 0,
+        walkPhase: 0,
+        walkWeight: 0,
+        drawPhase: 1,
+        catchPhase,
+        catchArm: "arm-r",
+      });
+    const i = spheres.findIndex((s) => s.part === "arm-r");
+    const rest = at();
+    expect(at(0.25)[i][2]).toBeGreaterThan(rest[i][2]);
+    expect(at(1)[i][2]).toBeCloseTo(rest[i][2], 1);
   });
 
   const GEAR: Equipped[] = [

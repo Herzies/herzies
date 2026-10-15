@@ -36,6 +36,11 @@
       "import": "./dist/vitals.js",
       "require": "./dist/vitals.js"
     },
+    "./classes": {
+      "types": "./dist/classes.d.ts",
+      "import": "./dist/classes.js",
+      "require": "./dist/classes.js"
+    },
     "./skills": {
       "types": "./dist/skills.d.ts",
       "import": "./dist/skills.js",

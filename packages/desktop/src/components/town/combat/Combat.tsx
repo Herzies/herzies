@@ -6,6 +6,8 @@ import {
   hitDamage,
   skillValue,
 } from "@herzies/shared";
+import { BOSS_STAND, DISC_DAMAGE, DISC_RANGE } from "@herzies/shared/combat";
+import type { HerzieModel } from "@herzies/shared/gl";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useRapier } from "@react-three/rapier";
 import { useEffect, useRef } from "react";
@@ -13,10 +15,25 @@ import * as THREE from "three";
 import type { TownMap } from "../map";
 import { townNet } from "../net/townNet";
 import { useTownRuntime } from "../runtime";
-import { sfxCast, sfxCharge, sfxImpact } from "../sfx";
+import {
+  sfxCast,
+  sfxCharge,
+  sfxDiscCatch,
+  sfxDiscClink,
+  sfxDiscThrow,
+  sfxDiscTurn,
+  sfxImpact,
+} from "../sfx";
 import { pushDamageNumber } from "./DamageNumbers";
 import { liveDummies } from "./Dummies";
-import { DUMMY, hitDummy, meterDps } from "./dummy";
+import {
+  DISC_ARM,
+  type DiscHand,
+  type DiscHooks,
+  discField,
+  nextHand,
+} from "./discs";
+import { DUMMY, type DummyState, hitDummy, meterDps } from "./dummy";
 import { bossFight } from "./fight";
 import { enterMouseLook, exitMouseLook } from "./mouseLook";
 import {
@@ -37,6 +54,7 @@ const AIM_RANGE = 60;
 /** How slow waves and dummies go during a crit's hit-stop. */
 const HIT_STOP_SCALE = 0.12;
 const HIT_STOP_MS = 65;
+const HANDS: readonly DiscHand[] = ["held-l", "held-r"];
 
 const typing = (t: EventTarget | null) => {
   const el = t as HTMLElement | null;
@@ -176,11 +194,25 @@ export function Combat({
     };
   }, [canFight, surface]);
 
+  // A new island (Combat comes and goes with its physics): discs still
+  // out are home in the hand, not flying across the portal after it.
+  useEffect(
+    () => () => {
+      const herzie = rt.playerHerzie;
+      if (herzie) discField.recall(herzie);
+    },
+    [rt],
+  );
+
   const aim = useRef({
     point: new THREE.Vector3(),
     /** The aim stopped on something solid that isn't a dummy. */
     blocked: false,
     castAt: Number.NEGATIVE_INFINITY,
+    /** The hand the disc under way is thrown from (a Record Slinger). */
+    throwing: "held-l" as DiscHand,
+    /** The dummy the crosshair's on, if any. */
+    dummy: null as DummyState | null,
   });
   const ray = useRef(
     new rapier.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: -1 }),
@@ -190,6 +222,68 @@ export function Combat({
     dir: new THREE.Vector3(),
     hand: new THREE.Vector3(),
     chest: new THREE.Vector3(),
+    held: new THREE.Vector3(),
+  });
+
+  /** A hit of yours on a dummy, at `scale` of a wave's: the number, the
+   * meter, the shake (and a crit's hit-stop). */
+  const myHit = (
+    dummy: DummyState,
+    dir: Readonly<Vec3>,
+    point: Vec3,
+    scale: number,
+    now: number,
+  ): "crit" | "hit" => {
+    const rolled = hitDamage(statsRef.current);
+    const amount = Math.max(1, Math.round(rolled.amount * scale));
+    const { crit } = rolled;
+    hitDummy(dummy, dir[0], dir[2], amount, crit, now);
+    pushDamageNumber(point, amount, crit);
+    combat.hitAt = now;
+    combat.hitCrit = crit;
+    combat.bestDps = Math.max(
+      combat.bestDps,
+      dummy.meter.hits >= 3 ? meterDps(dummy.meter, now) : 0,
+    );
+    shake(crit ? 0.32 : 0.12);
+    if (crit) combat.slowUntil = now + HIT_STOP_MS;
+    sfxImpact(crit ? "crit" : "hit");
+    return crit ? "crit" : "hit";
+  };
+
+  /** What the discs in flight do, whoever threw them. */
+  const discHooks = useRef<DiscHooks>({
+    handAt: (d, out) => {
+      const owner = d.owner as HerzieModel;
+      const p = owner.heldWorldPosition(d.hand, v.current.held);
+      out[0] = p.x;
+      out[1] = p.y;
+      out[2] = p.z;
+      return out;
+    },
+    onHit: ({ disc, dummy, point }) => {
+      const now = performance.now();
+      if (!disc.mine) {
+        hitDummy(dummy, disc.dir[0], disc.dir[2], 100, false, now, false);
+        waveField.burst(point, disc.dir, "hit");
+        sfxImpact("hit");
+        return "hit";
+      }
+      const kind = myHit(dummy, disc.dir, point, DISC_DAMAGE, now);
+      waveField.burst(point, disc.dir, kind);
+      return kind;
+    },
+    // The boss: the server says what it did (the number, the sound).
+    onStrike: (disc) => waveField.burst(disc.pos, disc.dir, "hit"),
+    onCatch: (disc) => {
+      const owner = disc.owner as HerzieModel;
+      owner.catchPulse(DISC_ARM[disc.hand]);
+      if (!disc.mine) return;
+      const main = disc.hand === "held-l";
+      sfxDiscCatch(main);
+      shake(0.03);
+      combat.discs.caughtAt[disc.hand] = performance.now();
+    },
   });
 
   // After physics (-3), before the camera follows (-2): last frame's camera
@@ -233,17 +327,19 @@ export function Combat({
       }
       a.point.copy(origin).addScaledVector(dir, reach);
       // On a dummy, it's a target, not a wall.
-      let onDummy = false;
+      let onDummy: DummyState | null = null;
       for (const d of liveDummies) {
         const near = Math.hypot(a.point.x - d.x, a.point.z - d.z);
         if (near < DUMMY.radius + 0.3 && a.point.y < DUMMY.top + 0.6) {
-          onDummy = true;
+          onDummy = d;
           break;
         }
       }
       a.blocked = blocked && !onDummy;
-      combat.onTarget = onDummy;
+      a.dummy = onDummy;
+      combat.onTarget = !!onDummy;
     } else {
+      a.dummy = null;
       combat.onTarget = false;
     }
 
@@ -313,11 +409,32 @@ export function Combat({
       shake(0.15);
     }
 
-    // --- Casting.
+    // --- Casting: a wave from the hand, or — a Record Slinger — a disc
+    // thrown from whichever hand has one.
+    const discs = combat.attack === "disc";
     if (herzie) {
       const queued = now - combat.queuedAt < CAST_BUFFER_MS;
-      const ready = (now - a.castAt) / 1000 >= CAST_INTERVAL;
-      if (combat.on && (queued || combat.fireHeld) && ready) {
+      const free = discs ? nextHand(discField, herzie) : null;
+      const ready =
+        (now - a.castAt) / 1000 >= CAST_INTERVAL && (!discs || free !== null);
+      if (combat.on && (queued || combat.fireHeld) && ready && discs && free) {
+        a.castAt = now;
+        a.throwing = free;
+        combat.queuedAt = Number.NEGATIVE_INFINITY;
+        herzie.root.getWorldPosition(chest);
+        chest.y += herzie.height * 0.55;
+        const dx = a.point.x - chest.x;
+        const dz = a.point.z - chest.z;
+        const flat = Math.hypot(dx, dz);
+        if (flat > 0.5) herzie.heading = Math.atan2(dx, dz);
+        herzie.cast(Math.atan2(a.point.y - chest.y, Math.max(flat, 0.5)), {
+          arm: DISC_ARM[free],
+          style: "throw",
+        });
+        combat.casts = (combat.casts + 1) & 0xffff;
+        combat.spread = 0.6;
+        sfxDiscThrow(free === "held-l");
+      } else if (combat.on && (queued || combat.fireHeld) && ready) {
         a.castAt = now;
         combat.queuedAt = Number.NEGATIVE_INFINITY;
         herzie.root.getWorldPosition(chest);
@@ -332,8 +449,45 @@ export function Combat({
         combat.spread = 1;
         sfxCharge();
       }
+      // The hand is out: the disc leaves it.
+      if (herzie.released && combat.on && discs) {
+        const h = a.throwing;
+        herzie.heldWorldPosition(h, hand);
+        // With the crosshair on a dummy, at its middle: the aim may be on
+        // its foot, and a disc from a low hand would meet the ground first.
+        const on = a.dummy;
+        if (on) dir.set(on.x, DUMMY.chest, on.z).sub(hand);
+        else dir.copy(a.point).sub(hand);
+        const toAim = dir.length();
+        dir.normalize();
+        const from: Vec3 = [hand.x, hand.y, hand.z];
+        const toward: Vec3 = [dir.x, dir.y, dir.z];
+        const target = on ?? assistTarget(from, toward, liveDummies);
+        // Short of a dummy and in reach, what the aim's on is where it
+        // turns back: the boss (a hit), or a wall (a clink).
+        const solid = a.blocked && !target && toAim < DISC_RANGE;
+        const onBoss =
+          bossFight.on &&
+          Math.hypot(a.point.x - BOSS_STAND.x, a.point.z - BOSS_STAND.z) <
+            BOSS_STAND.radius + 0.8;
+        discField.throw(from, toward, {
+          mine: true,
+          owner: herzie,
+          hand: h,
+          reach: solid ? toAim : DISC_RANGE,
+          strike: solid ? (onBoss ? "target" : "wall") : null,
+          target,
+        });
+        if (bossFight.on) {
+          townNet().sendCast(
+            Math.atan2(dir.x, dir.z),
+            Math.asin(Math.max(-1, Math.min(1, dir.y))),
+          );
+        }
+        shake(0.04);
+      }
       // The hand is out: the wave leaves it (Player's update, last frame).
-      if (herzie.released && combat.on) {
+      if (herzie.released && combat.on && !discs) {
         herzie.handWorldPosition(hand);
         dir.copy(a.point).sub(hand);
         const toAim = dir.length();
@@ -368,22 +522,35 @@ export function Combat({
         sfxImpact("hit");
         return "hit";
       }
-      const rolled = hitDamage(statsRef.current);
-      const amount = Math.max(1, Math.round(rolled.amount * wave.scale));
-      const { crit } = rolled;
-      hitDummy(dummy, wave.dir[0], wave.dir[2], amount, crit, now);
-      pushDamageNumber(point, amount, crit);
-      combat.hitAt = now;
-      combat.hitCrit = crit;
-      combat.bestDps = Math.max(
-        combat.bestDps,
-        dummy.meter.hits >= 3 ? meterDps(dummy.meter, now) : 0,
-      );
-      shake(crit ? 0.32 : 0.12);
-      if (crit) combat.slowUntil = now + HIT_STOP_MS;
-      sfxImpact(crit ? "crit" : "hit");
-      return crit ? "crit" : "hit";
+      return myHit(dummy, wave.dir, point, wave.scale, now);
     });
+    // Discs in flight, anyone's; and the sounds of yours turning and
+    // glancing off walls.
+    discField.step(dt * slow, liveDummies, discHooks.current);
+    for (const sp of discField.sparks) {
+      if (!sp.alive || sp.heard) continue;
+      sp.heard = true;
+      if (sp.kind === "throw" || sp.kind === "catch") continue;
+      const near =
+        !herzie ||
+        Math.hypot(
+          sp.pos[0] - herzie.root.position.x,
+          sp.pos[2] - herzie.root.position.z,
+        ) <
+          DISC_RANGE + 4;
+      if (!near) continue;
+      if (sp.kind === "turn") sfxDiscTurn();
+      else sfxDiscClink();
+    }
+    // Your discs: out of the hand while they fly (the crosshair says
+    // which).
+    if (herzie) {
+      for (const h of HANDS) {
+        const out = discField.isOut(herzie, h);
+        herzie.setHeldHidden(h, out);
+        combat.discs.in[h] = !out;
+      }
+    }
     combat.spread = Math.max(0, combat.spread - dt * 4);
   }, -2.5);
 

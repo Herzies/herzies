@@ -3,6 +3,7 @@
  * boss, and what to tell whom. `room.ts` feeds it frames and relays what it
  * returns, so everything here is tested without a Durable Object.
  */
+import { type AttackStyle, attackStyle } from "@herzies/shared/classes";
 import type { HitStats } from "@herzies/shared/combat";
 import {
   isSkillId,
@@ -56,6 +57,8 @@ export type FightPlayer = {
   skills: Map<SkillId, number>;
   /** When each skill is ready again (server ms). */
   ready: Map<SkillId, number>;
+  /** Its basic attack, from its class: a wave, or a thrown disc. */
+  attack: AttackStyle;
 };
 
 /** What became of a skill. "early" is a cooldown refusal inside the grace
@@ -171,6 +174,7 @@ export class FightRuntime {
       stats: statsOf(ticket.st),
       present: true,
       skills: skillsOf(ticket),
+      attack: attackStyle(ticket.cls),
       // A rejoin doesn't reset cooldowns.
       ready: known?.ready ?? new Map(),
     };
@@ -222,7 +226,7 @@ export class FightRuntime {
     if (!p?.present || p.down || !this.open) return "ignored";
     const pos = this.history.at(uid, now);
     if (!pos) return "ignored";
-    return this.engine.cast(uid, pos, yaw, pitch, p.stats, now);
+    return this.engine.cast(uid, pos, yaw, pitch, p.stats, now, p.attack);
   }
 
   /**

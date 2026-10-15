@@ -12,10 +12,17 @@
 // with a made-up boss (and `&cave=open` opens the cave's door in town); the
 // HUD is drawn over it. `&boss=<hp>` sets the boss's health, `&hp=<n>` yours.
 // `?music=1` plays music, as it were: stand still and the herzie dances.
+// `?class=record_slinger` (or bard, percussionist) hands the player that
+// class's gear and basic attack (the cave's server hears of it too).
 // `?color=`, `?head=` and `?spirit=` dress the player (`?head=rainbow-headband`
 // with the default prism skin is the full Prismatic set).
 import "./globals.css";
-import { signTownTicket } from "@herzies/shared";
+import {
+  attackStyle,
+  CLASS_DEFS,
+  isHerzieClass,
+  signTownTicket,
+} from "@herzies/shared";
 import type { RootState } from "@react-three/fiber";
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -27,6 +34,7 @@ import {
   bubbleDuration,
   type ChatBubbles,
 } from "./components/town/chatBubbles";
+import { combat } from "./components/town/combat/state";
 import { setTownTicketSource, townNet } from "./components/town/net/townNet";
 import {
   goToMap,
@@ -94,6 +102,9 @@ for (const k of ["x", "z", "heading", "polar"] as const) {
   if (params.has(k)) townSave[k] = Number(params.get(k));
 }
 if (params.has("heading")) townSave.azimuth = townSave.heading - Math.PI;
+// `?azimuth=` swings the camera round (radians; the heading's opposite is
+// behind it), to look at the herzie from the front or side.
+if (params.has("azimuth")) townSave.azimuth = Number(params.get("azimuth"));
 townLive.music = params.get("music") === "1";
 const player = {
   seed: params.get("seed") ?? "sandbox-player",
@@ -102,8 +113,15 @@ const player = {
     color: params.get("color") ?? "prism",
     head: params.get("head") ?? "headphones",
     spirit: params.get("spirit") ?? "spirit-orb",
-  },
+  } as Record<string, string>,
 };
+const cls = params.get("class");
+if (isHerzieClass(cls)) {
+  const [main, off] = CLASS_DEFS[cls].equipment;
+  player.equipped.main_hand = main;
+  if (off) player.equipped.off_hand = off;
+  combat.attack = attackStyle(cls);
+}
 
 /**
  * Times the renderer alone, with the frame loop stopped: a frame's worth of
@@ -199,6 +217,7 @@ function localNet() {
             Number(params.get("cc") ?? 0),
             Number(params.get("cd") ?? 0),
           ],
+          ...(isHerzieClass(cls) ? { cls } : {}),
           // Only the cave needs a boss; the sandbox makes one up.
           boss:
             map === "bossroom"

@@ -62,6 +62,24 @@ export const WAVE_HIT_RADIUS = 0.2;
 /** Height of the hand a wave leaves from, above the herzie's feet. */
 export const WAVE_HAND_HEIGHT = 1.2;
 
+// ---------------------------------------------------------------------------
+// Discs: the Record Slinger's attack. Thrown, they fly out straight and come
+// back to the hand; only the way out hits, so the server times a hit the way
+// it does a wave's, at the disc's own speed and reach.
+
+/** How fast a disc flies out, world units a second. */
+export const DISC_SPEED = 30;
+/** How far a disc flies before it turns back, if it hits nothing. */
+export const DISC_RANGE = 24;
+/** A disc's hit as a share of a wave's: a little more, for the wait while
+ * it comes back. */
+export const DISC_DAMAGE = 1.15;
+
+/** How long after the throw a disc that hits at `dist` lands, in ms. */
+export function discLandsAfterMs(dist: number): number {
+  return (dist / DISC_SPEED) * 1000;
+}
+
 export type Vec3 = [number, number, number];
 
 /** The unit direction of a cast, from the yaw and pitch a client sends. */
@@ -89,12 +107,13 @@ export function waveReaches(
   from: Readonly<Vec3>,
   dir: Readonly<Vec3>,
   target: { x: number; y: number; z: number; radius: number },
+  range: number = WAVE_RANGE,
 ): number | null {
   const tx = target.x - from[0];
   const ty = target.y - from[1];
   const tz = target.z - from[2];
   const dist = Math.hypot(tx, ty, tz);
-  if (dist < 1e-6 || dist > WAVE_RANGE) return null;
+  if (dist < 1e-6 || dist > range) return null;
   const cos = (tx * dir[0] + ty * dir[1] + tz * dir[2]) / dist;
   const angle =
     Math.acos(Math.min(1, Math.max(-1, cos))) -

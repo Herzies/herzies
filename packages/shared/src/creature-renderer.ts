@@ -2182,6 +2182,10 @@ const buildOldCymbal: HeldBuilder = (_s, part, hand) => {
 /** One Compact Disc, upright in the palm, its face to the side; on the back
  * at `onIt`, lying flat against it. The hand takes it by the rim nearest
  * its shoulder. */
+/** How far a held disc's middle is from its hand's, along the disc's face,
+ * in arm radii: past the hand's surface by the hub's half-thickness. */
+const DISC_STANDOFF = 1.08;
+
 function discIn(
   part: string,
   hand: Hand,
@@ -2189,8 +2193,20 @@ function discIn(
   thread?: HeldSocket["thread"],
 ): Sphere[] {
   const { at, side, r } = hand;
-  const face: V3 = norm([side, 0, -0.25]);
-  const center = add(at, [side * r * 0.15, r * 0.2, -r * 0.55]);
+  // Once drawn, its face out to the side of the hand and turned some 25°
+  // toward the front: the disc's plane runs mostly front to back. Drawing
+  // turns the arm out to the ready (see drawHand), and the disc with it,
+  // about 35° — so it's turned back by as much here.
+  const face: V3 = norm([side * 0.7, -0.1, 0.1]);
+  // Flat against the outside of the hand, palm on its face: clear of the
+  // hand's sphere (a disc no bigger than the hand, through it, shows the
+  // skin either side), and a little ahead of it and down.
+  const ball = sub(at, scale(hand.dir, r * 0.7));
+  const drop: V3 = [0, r * 0.15, -r * 0.5];
+  const center = add(
+    add(ball, scale(face, r * DISC_STANDOFF)),
+    sub(drop, scale(face, dot(drop, face))),
+  );
   const out = norm(sub(onIt, hand.torso.center));
   // The rim toward its shoulder, along the disc.
   const toShoulder = sub(hand.shoulder, onIt);
@@ -3290,13 +3306,94 @@ export const CAST_ARM = "arm-l";
 /** Which way is outward for the casting arm, along creature x. */
 const CAST_SIDE = -1;
 
+/** How the hand moves: a sonic wave's palm thrust, or a disc's throw. */
+export type CastStyle = "cast" | "throw";
+
+/**
+ * A disc thrown backhand, like a frisbee, on CAST's timeline (so it leaves
+ * the hand at CAST.release just the same): the hand crosses in front of the
+ * chest (the wind-up), whips out across to the front and its own side as it
+ * lets go, carries on round past it (the follow-through) and comes home.
+ */
+export const THROW = {
+  /** How far the hand tucks in at the wind-up, and reaches as it lets go
+   * and follows through (arm lengths). */
+  tuck: 0.8,
+  reach: 1.4,
+  follow: 1.25,
+  /** The flick's snap back, just after the release. */
+  recoil: 0.1,
+} as const;
+
 /** Where the casting hand is, `phase` through a cast aimed `pitch` above
  * level, as a direction from the shoulder (creature space: y down, front
- * −z) and how far along it, in arm lengths. */
-export function castHand(phase: number, pitch = 0): { dir: V3; reach: number } {
-  const hand = castHandOutward(phase, pitch);
-  hand.dir[0] *= CAST_SIDE;
+ * −z) and how far along it, in arm lengths. `arm` is the arm that casts
+ * (CAST_ARM unless it's throwing with its other hand); `style`, how. */
+export function castHand(
+  phase: number,
+  pitch = 0,
+  arm: string = CAST_ARM,
+  style: CastStyle = "cast",
+): { dir: V3; reach: number } {
+  const hand =
+    style === "throw"
+      ? throwHandOutward(phase, pitch)
+      : castHandOutward(phase, pitch);
+  hand.dir[0] *= LIMB_SIDE[arm] ?? CAST_SIDE;
   return hand;
+}
+
+/** castHand's throw, for an arm on the +x side. */
+function throwHandOutward(
+  phase: number,
+  pitch: number,
+): { dir: V3; reach: number } {
+  const mix = (a: V3, b: V3, t: number): V3 =>
+    norm(add(scale(a, 1 - t), scale(b, t)));
+  const rest: V3 = [1, 0, 0];
+  // Wound up across the chest, a little low: the disc held flat by the
+  // other shoulder.
+  const tucked: V3 = [-0.55, 0.12, -0.8];
+  // Let go out front, a touch to its own side, along the aim.
+  const front: V3 = norm([0.3, -Math.sin(pitch) - 0.05, -Math.cos(pitch)]);
+  // Carried round past it, out to the side.
+  const after: V3 = norm([0.9, -Math.sin(pitch) * 0.5, -0.45]);
+  if (phase < CAST.drawn) {
+    const t = easeOut(phase / CAST.drawn);
+    return { dir: mix(rest, tucked, t), reach: 1 + (THROW.tuck - 1) * t };
+  }
+  if (phase < CAST.release) {
+    const t = easeIn((phase - CAST.drawn) / (CAST.release - CAST.drawn));
+    return {
+      dir: mix(tucked, front, t),
+      reach: THROW.tuck + (THROW.reach - THROW.tuck) * t,
+    };
+  }
+  if (phase < CAST.held) {
+    const t = (phase - CAST.release) / (CAST.held - CAST.release);
+    const give = Math.sin(Math.min(1, t * 2) * Math.PI) * THROW.recoil;
+    return {
+      dir: mix(front, after, easeOut(t)),
+      reach: THROW.reach + (THROW.follow - THROW.reach) * t - give,
+    };
+  }
+  const t = ease(CAST.held, 1, phase);
+  return {
+    dir: mix(after, rest, t),
+    reach: THROW.follow + (1 - THROW.follow) * t,
+  };
+}
+
+/** How long a catch's jolt takes, in seconds. */
+export const CATCH_SECONDS = 0.2;
+
+/** The catching arm's jolt, `phase` 0..1 through a catch, as a share of
+ * the arm's radius: knocked back (creature +z) and down by the disc coming
+ * home, quickly, then easing back. */
+function catchJolt(phase: number): V3 {
+  const p = Math.min(1, Math.max(0, phase));
+  const k = Math.sin(Math.sqrt(p) * Math.PI) * (1 - p * 0.3);
+  return [0, 0.25 * k, 0.6 * k];
 }
 
 /** castHand, for an arm on the +x side. */
@@ -3345,7 +3442,13 @@ export function castWeight(phase: number): number {
 
 /** Each sphere's offset at `phase` through a cast, as a delta from rest:
  * the right arm, and a lean of everything with it. */
-function castDeltas(spheres: Sphere[], phase: number, pitch: number): V3[] {
+function castDeltas(
+  spheres: Sphere[],
+  phase: number,
+  pitch: number,
+  arm: string = CAST_ARM,
+  style: CastStyle = "cast",
+): V3[] {
   const rig = buildRig(spheres);
   const s = HERZIE_BODY.scale * CS;
   // Back on the draw, into the thrust, settling after.
@@ -3355,12 +3458,12 @@ function castDeltas(spheres: Sphere[], phase: number, pitch: number): V3[] {
         (CAST.rock + CAST.lean) *
           easeIn(Math.max(0, phase - CAST.drawn) / (CAST.release - CAST.drawn))
       : CAST.lean * (1 - ease(CAST.release, 1, phase));
-  const shoulder = rig.shoulders[CAST_ARM];
-  const hand = castHand(phase, pitch);
+  const shoulder = rig.shoulders[arm];
+  const hand = castHand(phase, pitch, arm, style);
   return spheres.map((sp): V3 => {
     if (isSceneFixed(sp.part) || isLeg(sp.part)) return [0, 0, 0];
     const leaning: V3 = [0, 0, -lean * s];
-    if (sp.part !== CAST_ARM || !shoulder) return leaning;
+    if (sp.part !== arm || !shoulder) return leaning;
     const length = Math.hypot(...sub(sp.center, shoulder));
     const at = add(shoulder, scale(hand.dir, length * hand.reach));
     return add(sub(at, sp.center), leaning);
@@ -4530,6 +4633,13 @@ export type CreatureMotion = Pick<
   castPhase?: number;
   /** Where the cast is aimed: radians above level (negative: below). */
   castPitch?: number;
+  /** The arm that casts (CAST_ARM unless given), and how (see THROW). */
+  castArm?: string;
+  castStyle?: CastStyle;
+  /** How far through a catch's jolt `catchArm` is, 0..1 (see
+   * CATCH_SECONDS); undefined when it isn't catching. */
+  catchPhase?: number;
+  catchArm?: string;
   /** How far its class gear is drawn: 0 slung on its back to 1 in its
    * hands (see DRAW). */
   drawPhase?: number;
@@ -4568,8 +4678,15 @@ export function creaturePoseOffsets(
       : null;
   const cast =
     pose.castPhase !== undefined
-      ? castDeltas(base, pose.castPhase, pose.castPitch ?? 0)
+      ? castDeltas(
+          base,
+          pose.castPhase,
+          pose.castPitch ?? 0,
+          pose.castArm,
+          pose.castStyle,
+        )
       : null;
+  const castArm = pose.castArm ?? CAST_ARM;
   const cw = pose.castPhase !== undefined ? castWeight(pose.castPhase) : 0;
   const drawPhase = Math.min(1, Math.max(0, pose.drawPhase ?? 0));
   const draw = drawPhase > 0 ? drawArmDeltas(base, drawPhase) : null;
@@ -4606,10 +4723,17 @@ export function creaturePoseOffsets(
     // A cast takes the casting arm over; the lean adds to whatever else.
     const c = cast?.[i];
     if (c) {
-      const own = s.part === CAST_ARM ? cw : 0;
+      const own = s.part === castArm ? cw : 0;
       x = x * (1 - own) + c[0] * cw;
       y = y * (1 - own) + c[1] * cw;
       z = z * (1 - own) + c[2] * cw;
+    }
+    // A disc caught: its arm jolted back.
+    if (pose.catchPhase !== undefined && s.part === pose.catchArm) {
+      const j = catchJolt(pose.catchPhase);
+      x += j[0] * s.radius;
+      y += j[1] * s.radius;
+      z += j[2] * s.radius;
     }
     // Plus where the swing put it.
     return [

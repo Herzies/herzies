@@ -172,6 +172,43 @@ export function sfxImpact(kind: "hit" | "crit" | "fizzle"): void {
   }
 }
 
+/** A disc flicked from the hand: a quick airy zip, rising, with a faint
+ * whirr of its spin. The off hand's is a little lower. */
+export function sfxDiscThrow(main: boolean): void {
+  const a = audio();
+  if (!a) return;
+  const k = wobble() * (main ? 1 : 0.89);
+  noiseBurst(a, "bandpass", 900 * k, 3600 * k, 2.2, 0.22, 0.13);
+  tone(a, "triangle", 520 * k, 780 * k, 0.04, 0.005, 0.16);
+}
+
+/** A disc turning at the end of its flight, far off: a tiny tick. */
+export function sfxDiscTurn(): void {
+  const a = audio();
+  if (!a) return;
+  tone(a, "sine", 2637 * wobble(0.03), 2637, 0.025, 0.002, 0.08);
+}
+
+/** A disc glancing off a wall: a small bright clink. */
+export function sfxDiscClink(): void {
+  const a = audio();
+  if (!a) return;
+  const k = wobble(0.04);
+  tone(a, "triangle", 2093 * k, 1975 * k, 0.08, 0.002, 0.14);
+  noiseBurst(a, "highpass", 5000 * k, 3000, 0.8, 0.1, 0.04);
+}
+
+/** A disc back in the hand: a crisp click, a semitone apart between the
+ * hands, so throwing both makes a little rhythm of it. */
+export function sfxDiscCatch(main: boolean): void {
+  const a = audio();
+  if (!a) return;
+  const k = wobble(0.015) * (main ? 1 : 0.944);
+  noiseBurst(a, "highpass", 4200 * k, 2400 * k, 1.2, 0.18, 0.03);
+  tone(a, "triangle", 1568 * k, 1480 * k, 0.07, 0.002, 0.09);
+  tone(a, "sine", 220 * k, 140 * k, 0.12, 0.002, 0.06);
+}
+
 /** Stepping through a portal: a long rising rush. */
 export function sfxPortal(): void {
   const a = audio();

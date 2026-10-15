@@ -3,6 +3,8 @@ import {
   buildCreatureModel,
   CAST,
   CAST_ARM,
+  CATCH_SECONDS,
+  type CastStyle,
   CREATURE_FRAME_HEIGHT,
   type CreatureModel,
   type CreatureParams,
@@ -442,8 +444,17 @@ export class HerzieModel {
   /** Seconds into a sonic cast; undefined when it isn't casting. */
   private castTime: number | undefined;
   private castPitch = 0;
-  /** The hand the wave leaves from: the right arm's part, if it has one. */
-  private readonly castArm: number;
+  /** The arm this cast is with, and how it moves (a disc is thrown). */
+  private castArmPart: string = CAST_ARM;
+  private castStyle: CastStyle = "cast";
+  /** Seconds into a catch's jolt, and the arm that caught. */
+  private catchTime: number | undefined;
+  private catchArm: string = CAST_ARM;
+  /** Each arm's part index, by part (-1 without it). */
+  private readonly armAt: Record<string, number>;
+  /** The meshes of each held part (class gear), by part: hidden while
+   * the gear's away from the hand (a disc in flight). */
+  private readonly heldMeshes: Record<string, number[]> = {};
   /** It holds class gear (held-l/held-r parts), which pose() turns with the
    * arms. */
   private readonly holdsProps: boolean;
@@ -649,7 +660,15 @@ export class HerzieModel {
             : this.creature;
       parent.add(mesh);
     }
-    this.castArm = spheres.findIndex((sp) => sp.part === CAST_ARM);
+    this.armAt = {
+      "arm-l": spheres.findIndex((sp) => sp.part === "arm-l"),
+      "arm-r": spheres.findIndex((sp) => sp.part === "arm-r"),
+    };
+    spheres.forEach((sp, i) => {
+      if (!(sp.part in HELD_ARM)) return;
+      this.heldMeshes[sp.part] ??= [];
+      this.heldMeshes[sp.part].push(i);
+    });
     this.holdsProps = spheres.some((sp) => sp.part in HELD_ARM);
     const hung = spheres.filter((sp) => sp.held?.thread);
     const thread = hung[0]?.held?.thread;
@@ -675,7 +694,7 @@ export class HerzieModel {
       if (this.holdsProps) this.drawPhase = 1;
     }
     const headAt = spheres.findIndex((sp) => sp.part === "head");
-    if (this.castArm < 0 && headAt >= 0 && !look.params) {
+    if (this.armAt[CAST_ARM] < 0 && headAt >= 0 && !look.params) {
       const head = spheres[headAt];
       const mesh = new THREE.Mesh(
         geometryFor({ ...head, shape: undefined }),
@@ -702,10 +721,19 @@ export class HerzieModel {
 
   /** Cast a sonic wave from its hand, aimed `pitch` radians above level:
    * draw, thrust, follow through. `released` turns true on the update the
-   * wave leaves the hand. Casting again mid-cast starts afresh. */
-  cast(pitch = 0): void {
+   * wave leaves the hand. Casting again mid-cast starts afresh.
+   *
+   * `arm` casts with another arm than CAST_ARM; `style` "throw" throws
+   * what's in its hand (a disc) rather than thrusting a palm. */
+  cast(
+    pitch = 0,
+    opts: { arm?: "arm-l" | "arm-r"; style?: CastStyle } = {},
+  ): void {
     this.castTime = 0;
     this.castPitch = Math.max(-0.7, Math.min(0.7, pitch));
+    this.castArmPart =
+      opts.arm && this.armAt[opts.arm] >= 0 ? opts.arm : CAST_ARM;
+    this.castStyle = opts.style ?? "cast";
     this.released = false;
     // Casting with its gear still on its back: it's drawn on the way, in
     // hand by the time the wave leaves.
@@ -727,6 +755,58 @@ export class HerzieModel {
     return this.castTime !== undefined;
   }
 
+  /** The arm the cast under way (or the last one) is with. */
+  get castingArm(): string {
+    return this.castArmPart;
+  }
+
+  /** It caught something (a disc) in `arm`'s hand: the arm jolts back. */
+  catchPulse(arm: "arm-l" | "arm-r"): void {
+    this.catchTime = 0;
+    this.catchArm = arm;
+  }
+
+  /** Hides (or shows again) the class gear held in `part` ("held-l",
+   * "held-r"): a disc that's been thrown isn't in the hand. */
+  setHeldHidden(part: string, hidden: boolean): void {
+    const at = this.heldMeshes[part];
+    if (!at) return;
+    for (const i of at) this.meshes[i].visible = !hidden;
+  }
+
+  /** Whether it has gear in `part` to hold. */
+  holds(part: string): boolean {
+    return !!this.heldMeshes[part];
+  }
+
+  /** How big the gear in `part` is: its biggest part's radius, in world
+   * units (0 with none) — a disc thrown from it is drawn this size. */
+  heldRadius(part: string): number {
+    let r = 0;
+    for (const i of this.heldMeshes[part] ?? [])
+      r = Math.max(r, this.model.spheres[i].radius);
+    return r * MODEL_SCALE * this.root.scale.x;
+  }
+
+  /**
+   * Where the gear in `part` is, in the world: the middle of its parts
+   * (posed even while hidden), or — with nothing there — the palm of its
+   * arm. Call after update().
+   */
+  heldWorldPosition(part: string, out: THREE.Vector3): THREE.Vector3 {
+    const at = this.heldMeshes[part];
+    if (!at?.length) {
+      const arm = HELD_ARM[part] as "arm-l" | "arm-r" | undefined;
+      return this.handWorldPosition(out, arm);
+    }
+    out.set(0, 0, 0);
+    for (const i of at) out.add(this.meshes[i].position);
+    out.multiplyScalar(1 / at.length);
+    this.root.updateWorldMatrix(true, true);
+    const parent = this.meshes[at[0]].parent;
+    return parent ? parent.localToWorld(out) : out;
+  }
+
   /** Advances the animation and poses the parts. Call every frame. */
   update(dt: number, speed: number): void {
     stepAnimation(this.anim, dt, speed);
@@ -743,6 +823,7 @@ export class HerzieModel {
     this.stepSit(dt);
     this.stepDraw(dt);
     this.stepCast(dt);
+    this.stepCatch(dt);
     this.swing(dt);
     this.turn.rotation.y = this.heading;
     this.pose();
@@ -937,6 +1018,12 @@ export class HerzieModel {
     this.drawPhase = Math.max(0, this.drawPhase - dt / SHEATHE_SECONDS);
   }
 
+  private stepCatch(dt: number) {
+    if (this.catchTime === undefined) return;
+    this.catchTime += dt;
+    if (this.catchTime >= CATCH_SECONDS) this.catchTime = undefined;
+  }
+
   private stepCast(dt: number) {
     this.released = false;
     if (this.castTime === undefined) return;
@@ -956,13 +1043,23 @@ export class HerzieModel {
    * arm (or of the hand an armless herzie grows). Call after update() — and
    * after anything moves it — so it's this frame's.
    */
-  handWorldPosition(out: THREE.Vector3): THREE.Vector3 {
-    const phase =
-      this.castTime === undefined ? 1 : this.castTime / CAST_SECONDS;
-    const { dir } = castHand(phase, this.castPitch);
-    if (this.castArm >= 0) {
-      const arm = this.model.spheres[this.castArm];
-      const p = this.meshes[this.castArm].position;
+  handWorldPosition(
+    out: THREE.Vector3,
+    which: "arm-l" | "arm-r" = this.castArmPart as "arm-l" | "arm-r",
+  ): THREE.Vector3 {
+    const casting = this.castTime !== undefined && which === this.castArmPart;
+    const phase = casting ? (this.castTime as number) / CAST_SECONDS : 1;
+    const { dir } = castHand(
+      phase,
+      this.castPitch,
+      which,
+      casting ? this.castStyle : "cast",
+    );
+    const armAt =
+      this.armAt[which] >= 0 ? this.armAt[which] : this.armAt[CAST_ARM];
+    if (armAt >= 0) {
+      const arm = this.model.spheres[armAt];
+      const p = this.meshes[armAt].position;
       out.set(
         p.x + dir[0] * arm.radius,
         p.y + dir[1] * arm.radius,
@@ -1028,6 +1125,13 @@ export class HerzieModel {
       castPhase:
         this.castTime === undefined ? undefined : this.castTime / CAST_SECONDS,
       castPitch: this.castPitch,
+      castArm: this.castArmPart,
+      castStyle: this.castStyle,
+      catchPhase:
+        this.catchTime === undefined
+          ? undefined
+          : this.catchTime / CATCH_SECONDS,
+      catchArm: this.catchArm,
       drawPhase: this.drawPhase,
       heldSway: this.heldSway,
     });

@@ -50,6 +50,7 @@ import {
 } from "./runtime";
 import type { Champion } from "./Statues";
 import { Visitor } from "./Visitor";
+import { DiscVFX } from "./vfx/DiscVFX";
 import { SkillVFX } from "./vfx/SkillVFX";
 import { SonicVFX } from "./vfx/SonicVFX";
 import { World } from "./World";
@@ -203,6 +204,7 @@ export default function TownCanvas(props: TownCanvasProps) {
         {map.combat && (
           <>
             <SonicVFX />
+            <DiscVFX />
             <SkillVFX />
             <CombatOverlay />
           </>

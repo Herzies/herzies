@@ -1,5 +1,6 @@
 import type { ServerMessage, TownTicketPayload } from "@herzies/shared/town-net";
 import { describe, expect, it } from "vitest";
+import { DISC_RANGE, DISC_SPEED, WAVE_SPEED } from "@herzies/shared/combat";
 import { TUNING } from "../src/boss";
 import {
   ESCAPE_LINGER_MS,
@@ -147,6 +148,45 @@ describe("a fight", () => {
     expect(r?.boss?.damage).toHaveLength(1);
     expect(r?.boss?.damage[0].uid).toBe("a");
     expect(r?.boss?.event).toBe("evt-1");
+  });
+
+  it("a Record Slinger throws a disc: its own speed and reach", () => {
+    const aim = (z: number) => {
+      const dz = TUNING.boss.z - z;
+      return {
+        yaw: Math.atan2(0, dz),
+        pitch: Math.atan2(TUNING.boss.chest - 1.2, Math.abs(dz)),
+        dist: Math.hypot(TUNING.boss.chest - 1.2, dz),
+      };
+    };
+    const at = (cls: string | undefined, z: number) => {
+      const f = new FightRuntime(claim(), T0);
+      f.join("a", 1, ticket("a", 200, { cls }), { x: 0, z }, T0 - 5_000);
+      f.onState("a", 0, z, T0);
+      return f;
+    };
+    // Lands after the disc's flight, not the wave's.
+    const near = aim(8);
+    const disc = at("record_slinger", 8);
+    expect(disc.cast("a", near.yaw, near.pitch, T0)).toBe("hit");
+    const discMs = (near.dist / DISC_SPEED) * 1000;
+    const waveMs = (near.dist / WAVE_SPEED) * 1000;
+    expect(discMs).toBeLessThan(waveMs);
+    expect(msgs(disc.step(T0 + discMs - 20), "hit")).toHaveLength(0);
+    expect(msgs(disc.step(T0 + discMs + 20), "hit")).toHaveLength(1);
+    // Past its reach, a disc misses where a wave still hits.
+    const far = aim(TUNING.boss.z + DISC_RANGE + 4);
+    expect(
+      at("record_slinger", TUNING.boss.z + DISC_RANGE + 4).cast(
+        "a",
+        far.yaw,
+        far.pitch,
+        T0,
+      ),
+    ).toBe("miss");
+    expect(
+      at("bard", TUNING.boss.z + DISC_RANGE + 4).cast("a", far.yaw, far.pitch, T0),
+    ).toBe("hit");
   });
 
   it("re-sends the same batch until a report lands, then moves on", () => {

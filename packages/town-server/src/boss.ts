@@ -12,10 +12,15 @@
  * shapes are on the floor at once; and a hit is judged against where the
  * player stood a moment ago as well as where they are now.
  */
+
+import type { AttackStyle } from "@herzies/shared/classes";
 import {
   aimDirection,
   BOSS_STAND,
   CAST_INTERVAL_MS,
+  DISC_DAMAGE,
+  DISC_RANGE,
+  discLandsAfterMs,
   type HitStats,
   hitDamage,
   WAVE_HAND_HEIGHT,
@@ -290,6 +295,9 @@ export class BossEngine {
    * casts that line up with the boss (with the same aim assist the client
    * draws) land after the wave's flight time. Returns whether it counted as
    * a cast (for rate limiting); a miss still uses the cooldown.
+   *
+   * A Record Slinger's cast is a thrown disc (`attack` "disc"): shorter
+   * reach, its own speed, and a little more damage. Only its way out hits.
    */
   cast(
     uid: string,
@@ -298,6 +306,7 @@ export class BossEngine {
     pitch: number,
     stats: HitStats,
     now: number,
+    attack: AttackStyle = "wave",
   ): "cooldown" | "miss" | "hit" | "dead" {
     if (this.killed) return "dead";
     const bucket = this.casts.get(uid) ?? {
@@ -312,19 +321,25 @@ export class BossEngine {
     this.casts.set(uid, bucket);
     if (bucket.tokens < 1) return "cooldown";
     bucket.tokens -= 1;
+    const disc = attack === "disc";
     const dir = aimDirection(yaw, pitch);
-    const dist = waveReaches([from.x, WAVE_HAND_HEIGHT, from.z], dir, {
-      x: TUNING.boss.x,
-      y: TUNING.boss.chest,
-      z: TUNING.boss.z,
-      radius: TUNING.boss.radius,
-    });
+    const dist = waveReaches(
+      [from.x, WAVE_HAND_HEIGHT, from.z],
+      dir,
+      {
+        x: TUNING.boss.x,
+        y: TUNING.boss.chest,
+        z: TUNING.boss.z,
+        radius: TUNING.boss.radius,
+      },
+      disc ? DISC_RANGE : undefined,
+    );
     if (dist === null) return "miss";
     const { amount, crit } = hitDamage(stats, this.rand);
     this.pending.push({
-      at: now + (dist / WAVE_SPEED) * 1000,
+      at: now + (disc ? discLandsAfterMs(dist) : (dist / WAVE_SPEED) * 1000),
       uid,
-      damage: amount,
+      damage: disc ? Math.max(1, Math.round(amount * DISC_DAMAGE)) : amount,
       crit,
     });
     return "hit";
