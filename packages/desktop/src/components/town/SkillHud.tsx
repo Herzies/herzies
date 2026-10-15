@@ -94,7 +94,7 @@ export function SkillHud({
         className={cn(
           // The "Tab aim" hint's look. mt-4: room above for the seconds
           // left, clear of the Cymbrella.
-          "pointer-events-auto mt-4 flex items-center gap-2 rounded bg-black/55 px-2 py-1 text-[10px] whitespace-nowrap",
+          "pointer-events-auto mt-4 flex items-center gap-2 rounded bg-black/55 px-1.5 py-1 text-[10px] whitespace-nowrap",
           !usable && "opacity-45",
         )}
         title={

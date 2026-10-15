@@ -200,7 +200,7 @@ export function TownWorld({
     map.combat && !paused ? (
       <div
         className={cn(
-          "pointer-events-none absolute z-30 flex items-center gap-2 rounded bg-black/55 px-2 py-1 text-[10px] text-white/80",
+          "pointer-events-none absolute z-30 flex items-center gap-2 rounded bg-black/55 px-1.5 py-1 text-[10px] text-white/80",
           profile
             ? "bottom-full left-2 mb-1.5"
             : chatOverlay
