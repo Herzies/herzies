@@ -8,6 +8,7 @@ import {
   CAST_SECONDS,
   DRAW_SECONDS,
   HerzieModel,
+  HITSTOP_SECONDS,
   MODEL_SCALE,
   SHEATHE_DELAY,
   SHEATHE_SECONDS,
@@ -357,6 +358,25 @@ describe("casting", () => {
     const at = run(h, CAST_SECONDS + 0.1);
     expect(at).toBeGreaterThan(CAST_RELEASE_SECONDS - 0.02);
     expect(at).toBeLessThan(CAST_RELEASE_SECONDS + 0.02);
+    expect(h.casting).toBe(false);
+  });
+
+  it("holds still on a blow that lands, then finishes that much later", () => {
+    const h = new HerzieModel(LOOK);
+    h.cast(0, { style: "strike" });
+    // Up to the blow…
+    const at = run(h, CAST_RELEASE_SECONDS + 0.01);
+    expect(at).toBeGreaterThan(0);
+    h.hitstop();
+    expect(h.stopped).toBe(true);
+    // …held there through the stop…
+    const phase = h.castPhase;
+    run(h, HITSTOP_SECONDS - 0.02);
+    expect(h.castPhase).toBe(phase);
+    // …then on, finishing late by the stop.
+    run(h, CAST_SECONDS - CAST_RELEASE_SECONDS - 0.01);
+    expect(h.casting).toBe(true);
+    run(h, HITSTOP_SECONDS + 0.02);
     expect(h.casting).toBe(false);
   });
 

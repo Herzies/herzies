@@ -51,6 +51,7 @@ import {
   skills,
   startMyCooldown,
 } from "./skills";
+import { slashField } from "./slashes";
 import { CAST_BUFFER_MS, combat, setCombat, shake } from "./state";
 import { assistTarget, type Vec3, WAVE, waveField } from "./waves";
 
@@ -351,6 +352,23 @@ export function Combat({
       combat.onTarget = false;
     }
 
+    // In a blow's reach: struck now, turned to the aim as a cast turns it,
+    // would it land? Judged as the blow itself is.
+    combat.inReach = false;
+    if (combat.on && combat.attack === "melee" && herzie) {
+      herzie.root.getWorldPosition(chest);
+      const dx = a.point.x - chest.x;
+      const dz = a.point.z - chest.z;
+      const yaw =
+        Math.hypot(dx, dz) > 0.5 ? Math.atan2(dx, dz) : herzie.heading;
+      const from = { x: chest.x, z: chest.z };
+      combat.inReach =
+        liveDummies.some((d) =>
+          meleeReaches(from, yaw, { ...d, radius: DUMMY.radius }),
+        ) ||
+        (bossFight.on && meleeReaches(from, yaw, BOSS_STAND));
+    }
+
     // Where you are, for effects that follow you (a Cymbrella overhead).
     if (herzie) {
       herzie.root.getWorldPosition(chest);
@@ -457,6 +475,7 @@ export function Combat({
         if (flat > 0.5) herzie.heading = Math.atan2(dx, dz);
         if (melee) {
           herzie.cast(0, { style: blow });
+          if (blow === "strike") slashField.strike(herzie, true);
           combat.spread = 0.4;
           sfxSwing(blow);
         } else {
@@ -505,7 +524,11 @@ export function Combat({
             landed = true;
           }
         }
-        if (landed) sfxMeleeHit(blow);
+        if (landed) {
+          sfxMeleeHit(blow);
+          // Held still on the contact, a beat, so it lands.
+          herzie.hitstop();
+        }
         shake(landed ? 0.1 : 0.03);
       }
       // The hand is out: the disc leaves it.

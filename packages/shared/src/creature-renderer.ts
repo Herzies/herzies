@@ -1905,6 +1905,9 @@ export interface HeldSocket {
   handle: V3;
   /** Turns the prop from how it lies on the back to how it's held. */
   toHand: Quat;
+  /** Its length, from the hand out (a stick's tip), as it lies on the back:
+   * what a swing lines up with the arm (see HeldSwing). */
+  long: V3;
   /** It hangs on a thread, the `index`th weight of `rig`, and swings (see
    * thread-physics.ts). */
   thread?: { rig: ThreadRig; index: number };
@@ -2098,6 +2101,7 @@ function slung(
     back: place(hand.at),
     handle,
     toHand,
+    long: quatRotate(toBack, held.long),
   };
   return inHand.map((s) => ({
     ...s,
@@ -2624,6 +2628,8 @@ export function heldPoses(
   /** How far each held part hanging on a thread has swung (see
    * CreatureMotion's heldSway). */
   sway?: Readonly<Record<string, V3>>,
+  /** A strike under way (see heldSwing): its stick lines up with its arm. */
+  swing?: HeldSwing,
 ): Record<string, HeldPose> {
   const out: Record<string, HeldPose> = {};
   const sockets = heldSockets(spheres);
@@ -2688,8 +2694,31 @@ export function heldPoses(
       arm.shoulderNow,
       quatRotate(armTurn, scale(sub(socket.grip, arm.shoulder), stretch)),
     );
-    const turn = quatMul(armTurn, inHand);
-    const handleAt = add(hand, quatRotate(armTurn, handle));
+    let turn = quatMul(armTurn, inHand);
+    let handleAt = add(hand, quatRotate(armTurn, handle));
+    // Swung, the wrist turns it out along the arm, a little raised, and
+    // round across the body as the swing goes, about the palm: a stick
+    // swept like a blade, not chopped at the ground.
+    if (swing && swing.weight > 0 && HELD_ARM[part] === swing.arm) {
+      // Round the vertical, toward the other side (y is down).
+      const a = (LIMB_SIDE[swing.arm] ?? 1) * swing.wrist;
+      const [ax, ay, az] = norm(arm.now);
+      const along = add(
+        [
+          ax * Math.cos(a) + az * Math.sin(a),
+          ay,
+          -ax * Math.sin(a) + az * Math.cos(a),
+        ],
+        [0, -STRIKE.wrist, 0],
+      );
+      const wrist = quatSlerp(
+        [0, 0, 0, 1],
+        quatFromTo(quatRotate(turn, socket.long), along),
+        swing.weight,
+      );
+      turn = quatMul(wrist, turn);
+      handleAt = add(hand, quatRotate(wrist, sub(handleAt, hand)));
+    }
     out[part] = {
       place: (x) => add(handleAt, quatRotate(turn, sub(x, socket.handle))),
       turn: (v) => quatRotate(turn, v),
@@ -2704,8 +2733,9 @@ function holdProps(
   offsets: V3[],
   drawPhase: number,
   sway?: Readonly<Record<string, V3>>,
+  swing?: HeldSwing,
 ): V3[] {
-  const poses = heldPoses(spheres, offsets, drawPhase, sway);
+  const poses = heldPoses(spheres, offsets, drawPhase, sway, swing);
   if (Object.keys(poses).length === 0) return offsets;
   return offsets.map((d, i): V3 => {
     const pose = poses[spheres[i].part];
@@ -3076,6 +3106,13 @@ const LIMB_SIDE: Record<string, -1 | 1> = {
   "leg-l": -1,
   "leg-r": 1,
 };
+
+/** Which side of the herzie a limb is on: −1 (−x) or 1 (+x), in creature
+ * space — and so in the world's, turned by its heading, as seen from
+ * behind: +1 is its left. */
+export function limbSide(part: string): -1 | 1 {
+  return LIMB_SIDE[part] ?? 1;
+}
 const isArm = (part: string) => part === "arm-l" || part === "arm-r";
 const isLeg = (part: string) => part === "leg-l" || part === "leg-r";
 
@@ -3476,54 +3513,131 @@ function throwHandOutward(
 }
 
 /**
- * A stick's strike, on CAST's timeline (it lands at CAST.release): the
- * hand comes up and back by the head at the wind-up, chops down and forward
- * to strike out front, low, bounces off what it hit and comes home.
+ * A stick's strike, on CAST's timeline (it lands at CAST.release): a
+ * forehand sweep, nearly level at the chest — the way a third-person camera
+ * behind the herzie sees a swing best. The hand cocks out and back by its
+ * own shoulder (the wind-up), sweeps round to the front as it lands and
+ * comes home. A herzie's arm is too short to cross its body, so the wrist
+ * carries the sweep on (see heldSwing): cocked back on the wind-up, it
+ * whips the stick through, and rolls it over across the front after —
+ * a drummer's wrist.
  */
 export const STRIKE = {
-  /** How far the hand reaches at the wind-up, and at the strike (arm
-   * lengths). */
-  raise: 0.95,
-  reach: 1.35,
-  /** The bounce back off the hit. */
-  rebound: 0.15,
+  /** Which way the hand points, about the shoulder, at the wind-up, the
+   * blow and the end of the follow-through: radians round from straight
+   * ahead toward its own side (negative: across the body), and above level
+   * (negative: below). */
+  wound: { yaw: 2.1, rise: 0.3 },
+  struck: { yaw: 0.25, rise: 0.05 },
+  follow: { yaw: 0.35, rise: -0.1 },
+  /** How far the hand reaches at each (arm lengths). */
+  windReach: 1.05,
+  reach: 1.4,
+  followReach: 1.3,
+  /** The stick, in the hand: raised this much off the arm's line… */
+  wrist: 0.3,
+  /** …and turned round from it, across the body (radians; negative: back
+   * behind the arm), at the wind-up, the blow and the end of the
+   * follow-through. */
+  cock: -0.55,
+  whip: 0.2,
+  roll: 1.25,
 } as const;
 
-/** castHand's strike, for an arm on the +x side. */
+/** How far the wrist turns the stick round from the arm's line, `phase`
+ * through a strike (see STRIKE's cock, whip and roll). */
+export function strikeWrist(phase: number): number {
+  const { cock, whip, roll } = STRIKE;
+  if (phase < CAST.drawn) return cock * easeOut(phase / CAST.drawn);
+  if (phase < CAST.release) {
+    const t = easeIn((phase - CAST.drawn) / (CAST.release - CAST.drawn));
+    return cock + (whip - cock) * t;
+  }
+  if (phase < CAST.held) {
+    const t = easeOut((phase - CAST.release) / (CAST.held - CAST.release));
+    return whip + (roll - whip) * t;
+  }
+  return roll * (1 - ease(CAST.held, 1, phase));
+}
+
+/** A direction about the shoulder, for an arm on the +x side: `yaw` round
+ * from straight ahead (−z) toward +x, `rise` above level (y is down). */
+function swingDir(yaw: number, rise: number): V3 {
+  const c = Math.cos(rise);
+  return [Math.sin(yaw) * c, -Math.sin(rise), -Math.cos(yaw) * c];
+}
+
+/** castHand's strike, for an arm on the +x side. The hand goes round the
+ * shoulder by its yaw, so the sweep keeps its reach rather than cutting
+ * in toward the chest. */
 function strikeHandOutward(
   phase: number,
   pitch: number,
 ): { dir: V3; reach: number } {
-  const mix = (a: V3, b: V3, t: number): V3 =>
-    norm(add(scale(a, 1 - t), scale(b, t)));
-  const rest: V3 = [1, 0, 0];
-  // Up by its head, a little back: y is down.
-  const raised: V3 = norm([0.45, -0.85, 0.15]);
-  // Down out front, along the aim, a touch to its own side.
-  const struck: V3 = norm([0.25, 0.35 - Math.sin(pitch), -Math.cos(pitch)]);
+  const { wound, struck, follow } = STRIKE;
+  const at = (
+    a: { yaw: number; rise: number },
+    b: { yaw: number; rise: number },
+    t: number,
+    lift = 0,
+  ) =>
+    swingDir(
+      a.yaw + (b.yaw - a.yaw) * t,
+      a.rise + (b.rise - a.rise) * t + lift,
+    );
+  // The blow follows the aim up or down; the sweep either side of it,
+  // halfway.
+  const aim = { yaw: struck.yaw, rise: struck.rise + pitch };
   if (phase < CAST.drawn) {
     const t = easeOut(phase / CAST.drawn);
-    return { dir: mix(rest, raised, t), reach: 1 + (STRIKE.raise - 1) * t };
+    const rest: V3 = [1, 0, 0];
+    const cocked = swingDir(wound.yaw, wound.rise + pitch * 0.5);
+    return {
+      dir: norm(add(scale(rest, 1 - t), scale(cocked, t))),
+      reach: 1 + (STRIKE.windReach - 1) * t,
+    };
   }
   if (phase < CAST.release) {
     const t = easeIn((phase - CAST.drawn) / (CAST.release - CAST.drawn));
     return {
-      dir: mix(raised, struck, t),
-      reach: STRIKE.raise + (STRIKE.reach - STRIKE.raise) * t,
+      dir: at({ ...wound, rise: wound.rise + pitch * 0.5 }, aim, t),
+      reach: STRIKE.windReach + (STRIKE.reach - STRIKE.windReach) * t,
     };
   }
   if (phase < CAST.held) {
-    const t = (phase - CAST.release) / (CAST.held - CAST.release);
-    const bounce = Math.sin(Math.min(1, t * 1.5) * Math.PI);
+    // Still fast off the blow, slowing as it runs out.
+    const t = easeOut((phase - CAST.release) / (CAST.held - CAST.release));
     return {
-      dir: mix(struck, raised, bounce * STRIKE.rebound),
-      reach: STRIKE.reach,
+      dir: at(aim, { ...follow, rise: follow.rise + pitch * 0.5 }, t),
+      reach: STRIKE.reach + (STRIKE.followReach - STRIKE.reach) * t,
     };
   }
   const t = ease(CAST.held, 1, phase);
+  const after = swingDir(follow.yaw, follow.rise + pitch * 0.5);
   return {
-    dir: mix(struck, rest, t),
-    reach: STRIKE.reach + (1 - STRIKE.reach) * t,
+    dir: norm(add(scale(after, 1 - t), scale([1, 0, 0], t))),
+    reach: STRIKE.followReach + (1 - STRIKE.followReach) * t,
+  };
+}
+
+/** A strike's hold on its stick: the arm swinging, and how much (see
+ * heldPoses). */
+export interface HeldSwing {
+  arm: string;
+  weight: number;
+  /** How far the wrist turns the stick across the body (see strikeWrist). */
+  wrist: number;
+}
+
+/** The strike in `pose`, if one's under way. */
+export function heldSwing(
+  pose: Pick<CreatureMotion, "castPhase" | "castStyle" | "castArm">,
+): HeldSwing | undefined {
+  if (pose.castPhase === undefined || pose.castStyle !== "strike") return;
+  return {
+    arm: pose.castArm ?? CAST_ARM,
+    weight: castWeight(pose.castPhase),
+    wrist: strikeWrist(pose.castPhase),
   };
 }
 
@@ -4930,7 +5044,7 @@ export function creaturePoseOffsets(
   });
   return grounded(
     spheres,
-    holdProps(spheres, offsets, drawPhase, pose.heldSway),
+    holdProps(spheres, offsets, drawPhase, pose.heldSway, heldSwing(pose)),
     1 - sw,
   );
 }

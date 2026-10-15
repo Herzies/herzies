@@ -7,6 +7,7 @@ import {
   type CastStyle,
   CREATURE_FRAME_HEIGHT,
   type CreatureModel,
+  type CreatureMotion,
   type CreatureParams,
   castHand,
   castWeight,
@@ -18,6 +19,7 @@ import {
   HELD_ARM,
   hasDangleEquipped,
   heldPoses,
+  heldSwing,
   primitiveShading,
   type Sphere,
   schemeShades,
@@ -114,6 +116,9 @@ const SIT_BLEND_RATE = 14;
 export const CAST_SECONDS = 0.4;
 /** How soon after cast() the wave leaves the hand, in seconds. */
 export const CAST_RELEASE_SECONDS = CAST_SECONDS * CAST.release;
+/** How long a blow that lands holds still (see hitstop), in seconds: long
+ * enough for the eye to catch the contact, short enough not to drag. */
+export const HITSTOP_SECONDS = 0.07;
 /** How long it takes to draw its class gear off its back, in seconds:
  * quick — it's what stands between Tab and the first cast. */
 export const DRAW_SECONDS = 0.25;
@@ -490,6 +495,8 @@ export class HerzieModel {
   private unarmedFor = 0;
   /** The wave left the hand during the last update(). */
   released = false;
+  /** Seconds the cast is still held still for (see hitstop). */
+  private stopFor = 0;
 
   private readonly look: HerzieLook;
   private readonly model: CreatureModel;
@@ -739,6 +746,7 @@ export class HerzieModel {
       opts.arm && this.armAt[opts.arm] >= 0 ? opts.arm : CAST_ARM;
     this.castStyle = opts.style ?? "cast";
     this.released = false;
+    this.stopFor = 0;
     // Casting with its gear still on its back: it's drawn on the way, in
     // hand by the time the wave leaves.
     if (this.holdsProps && this.drawPhase < 1) {
@@ -747,6 +755,31 @@ export class HerzieModel {
         (1 - this.drawPhase) / CAST_RELEASE_SECONDS,
       );
     }
+  }
+
+  /** The blow landed: the cast holds still a moment where it hit (hit
+   * stop, as fighting games do), so the eye catches the contact. */
+  hitstop(seconds = HITSTOP_SECONDS): void {
+    if (this.castTime !== undefined)
+      this.stopFor = Math.max(this.stopFor, seconds);
+  }
+
+  /** Held still on a blow that landed (see hitstop). */
+  get stopped(): boolean {
+    return this.stopFor > 0;
+  }
+
+  /** How far through the cast under way it is, 0..1; undefined when it
+   * isn't casting. */
+  get castPhase(): number | undefined {
+    return this.castTime === undefined
+      ? undefined
+      : this.castTime / CAST_SECONDS;
+  }
+
+  /** How the cast under way (or the last one) moves. */
+  get castMotion(): CastStyle {
+    return this.castStyle;
   }
 
   /** It has class gear to hold (so a melee blow is a strike with it,
@@ -1037,6 +1070,13 @@ export class HerzieModel {
   private stepCast(dt: number) {
     this.released = false;
     if (this.castTime === undefined) return;
+    if (this.stopFor > 0) {
+      // Held on the blow: what time is left over after the stop runs on.
+      const held = Math.min(dt, this.stopFor);
+      this.stopFor -= held;
+      dt -= held;
+      if (dt <= 0) return;
+    }
     const before = this.castTime;
     this.castTime += dt;
     if (
@@ -1124,7 +1164,7 @@ export class HerzieModel {
   private pose() {
     const { idleTime, walkPhase, walkWeight } = this.anim;
     const { spheres } = this.model;
-    const offsets = creaturePoseOffsets(spheres, this.look.stage, {
+    const motion: CreatureMotion = {
       idleFrame: idleTime * IDLE_FPS,
       walkPhase,
       walkWeight,
@@ -1144,7 +1184,8 @@ export class HerzieModel {
       catchArm: this.catchArm,
       drawPhase: this.drawPhase,
       heldSway: this.heldSway,
-    });
+    };
+    const offsets = creaturePoseOffsets(spheres, this.look.stage, motion);
     // A bump needs no hand.
     this.posePopHand(
       this.castTime === undefined || this.castStyle === "bump"
@@ -1154,7 +1195,13 @@ export class HerzieModel {
     // Held props (class gear) turn as they're drawn and with their arm; a
     // solid's axis with them.
     const held = this.holdsProps
-      ? heldPoses(spheres, offsets, this.drawPhase, this.heldSway)
+      ? heldPoses(
+          spheres,
+          offsets,
+          this.drawPhase,
+          this.heldSway,
+          heldSwing(motion),
+        )
       : null;
     for (let i = 0; i < spheres.length; i++) {
       const s = spheres[i];

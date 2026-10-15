@@ -15,7 +15,8 @@ import type { Vec3 } from "./waves";
  * - A meter over each dummy you're hitting: damage per second, total,
  *   hits and crits, clearing once you stop.
  * - The crosshair in combat mode: it opens on each cast and closes again,
- *   lights up over a dummy, and flashes a hit marker on a hit.
+ *   lights up over a dummy, and flashes a hit marker on a hit. Up close
+ *   (melee), a gold ring snaps round it while a blow would land.
  *
  * All pooled, and moved with transforms each frame: no React renders.
  */
@@ -63,6 +64,11 @@ const STYLE = `
 .town-fx .cross.on { opacity: 1; }
 .town-fx .cross i { position: absolute; background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,0.6); transition: background 0.1s; }
 .town-fx .cross.target i { background: #9fe8ff; }
+.town-fx .cross.reach i { background: #ffd36b; }
+.town-fx .cross i.ring { position: absolute; width: 22px; height: 22px; left: -11px; top: -11px; border-radius: 50%;
+  border: 2px solid #ffd36b; box-shadow: 0 0 0 1px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(0,0,0,0.35), 0 0 8px rgba(255, 190, 60, 0.6);
+  background: none; opacity: 0; transform: scale(1.6); transition: opacity 0.12s, transform 0.16s cubic-bezier(0.2, 1.6, 0.4, 1); }
+.town-fx .cross.reach i.ring { opacity: 1; transform: scale(1); }
 .town-fx .cross .dot { width: 2px; height: 2px; left: -1px; top: -1px; }
 .town-fx .cross .t { width: 2px; height: 7px; left: -1px; }
 .town-fx .cross .l { width: 7px; height: 2px; top: -1px; }
@@ -114,6 +120,9 @@ export function CombatOverlay() {
     const dot = document.createElement("i");
     dot.className = "dot";
     cross.append(dot);
+    const ring = document.createElement("i");
+    ring.className = "ring";
+    cross.append(ring);
     root.append(cross);
 
     // A Record Slinger's discs, under the crosshair: filled while in hand,
@@ -229,6 +238,7 @@ export function CombatOverlay() {
     }
     if (on) {
       ui.cross.classList.toggle("target", combat.onTarget);
+      ui.cross.classList.toggle("reach", combat.inReach);
       const gap = 5 + combat.spread * 7;
       const [top, bottom, left, right] = ui.arms;
       top.style.top = `${-gap - 7}px`;

@@ -27,6 +27,9 @@ export const combat = {
   spread: 0,
   /** Whether the crosshair is over a dummy. */
   onTarget: false,
+  /** A melee blow struck now would land on something: a dummy, or the
+   * boss (see meleeReaches). The crosshair says so. */
+  inReach: false,
   /** Mouse-look not yet turned into camera turn, in pixels (CameraRig takes
    * it each frame). */
   lookX: 0,

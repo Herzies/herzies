@@ -9,6 +9,7 @@ import {
   DRAW,
   HELD_ARM,
   heldPoses,
+  heldSwing,
   MAIN_HELD,
   OFF_HELD,
   type Sphere,
@@ -16,6 +17,8 @@ import {
 import { type Equipped, getItem } from "./items.js";
 
 const USER = "held-test-user";
+/** Which side of the herzie (creature x) the casting arm is on. */
+const LIMB_SIDE_OF_CAST = castHand(0.5, 0, CAST_ARM, "strike").dir[0];
 const PERCUSSIONIST: Equipped = {
   main_hand: "worn-stick",
   off_hand: "old-cymbal",
@@ -183,14 +186,92 @@ describe("held class equipment", () => {
     expect(wound.dir[0]).toBeLessThan(0);
   });
 
-  it("strikes down out front, landing on the cast's beat", () => {
-    const raised = castHand(CAST.drawn, 0, CAST_ARM, "strike");
+  it("sweeps level through the front, landing on the cast's beat", () => {
+    const side = Math.sign(castHand(0.5, 0, CAST_ARM, "strike").dir[0]) || 1;
+    const wound = castHand(CAST.drawn, 0, CAST_ARM, "strike");
     const struck = castHand(CAST.release, 0, CAST_ARM, "strike");
-    // Up (−y) at the wind-up; out front (−z) and low (+y) at the strike.
-    expect(raised.dir[1]).toBeLessThan(-0.6);
-    expect(struck.dir[2]).toBeLessThan(-0.8);
-    expect(struck.dir[1]).toBeGreaterThan(0.1);
+    const follow = castHand(CAST.held, 0, CAST_ARM, "strike");
+    // Cocked out and back by its own shoulder…
+    expect(wound.dir[0] * side).toBeGreaterThan(0.5);
+    expect(wound.dir[2]).toBeGreaterThan(0.2);
+    // …out front and near level as it lands (y is down: never a chop at
+    // the ground)…
+    expect(struck.dir[2]).toBeLessThan(-0.9);
+    expect(Math.abs(struck.dir[1])).toBeLessThan(0.15);
+    // …and still out front after: its arm's too short to cross its body
+    // (the wrist carries the stick on across).
+    expect(follow.dir[2]).toBeLessThan(-0.8);
     expect(castHand(1, 0, CAST_ARM, "strike").reach).toBeCloseTo(1);
+    // The other arm swings the mirror of it.
+    const other = castHand(CAST.release, 0, "arm-r", "strike");
+    expect(other.dir[0]).toBeCloseTo(-struck.dir[0]);
+  });
+
+  it("swings the stick like a blade, rigid, and clear of the body", () => {
+    for (const stage of [2, 3]) {
+      const { spheres } = buildCreatureModel(USER, stage, PERCUSSIONIST);
+      const stick = spheres.find(
+        (s) => s.part === MAIN_HELD && s.shape?.kind === "capsule",
+      );
+      const tip = spheres.find((s) => s.part === MAIN_HELD && !s.shape);
+      // What the hand mustn't pass through: the head, and the body below
+      // it (a stage 2 herzie is all head).
+      const trunk = spheres.filter(
+        (s) => (s.part === "body" || s.part === "head") && !s.shape,
+      );
+      const arm = spheres.findIndex((s) => s.part === CAST_ARM);
+      if (!stick?.shape || !tip) throw new Error("no stick");
+      for (let phase = 0; phase <= 1.0001; phase += 0.05) {
+        const motion = {
+          idleFrame: 0,
+          walkPhase: 0,
+          walkWeight: 0,
+          drawPhase: 1,
+          castPhase: phase,
+          castStyle: "strike" as const,
+        };
+        const offsets = creaturePoseOffsets(spheres, stage, motion);
+        const pose = heldPoses(
+          spheres,
+          offsets,
+          1,
+          undefined,
+          heldSwing(motion),
+        )[MAIN_HELD];
+        const at = (s: Sphere) => {
+          const i = spheres.indexOf(s);
+          return s.center.map((v, k) => v + offsets[i][k]);
+        };
+        // The tip stays on the end of the shaft: the offsets that place it
+        // and the turn that aims the shaft agree.
+        const along = pose.turn(stick.shape.axis);
+        const end = at(stick).map((v, k) => v + along[k]);
+        expect(Math.hypot(...end.map((v, k) => v - at(tip)[k]))).toBeLessThan(
+          stick.radius * 0.05,
+        );
+        // The swinging hand never passes through the body.
+        const hand = at(spheres[arm]);
+        for (const t of trunk) {
+          const gap = Math.hypot(...hand.map((v, k) => v - at(t)[k]));
+          // (Its middle may graze the surface: arms are set into it.)
+          expect(gap).toBeGreaterThan(t.radius * 0.95);
+        }
+        // Rolled over after the blow, the stick lies across the body.
+        if (Math.abs(phase - CAST.held) < 0.026) {
+          const n = Math.hypot(...along);
+          expect((along[0] / n) * Math.sign(LIMB_SIDE_OF_CAST)).toBeLessThan(
+            -0.3,
+          );
+        }
+        if (Math.abs(phase - CAST.release) < 0.026) {
+          // As it lands, the stick reaches out ahead, level or raised (y
+          // is down) — not at the ground.
+          const n = Math.hypot(...along);
+          expect(along[2] / n).toBeLessThan(-0.6);
+          expect(along[1] / n).toBeLessThan(0.05);
+        }
+      }
+    }
   });
 
   it("bumps the whole body forward, arms and all, and back", () => {

@@ -24,6 +24,7 @@ import {
 import { DUMMY, hitDummy } from "./combat/dummy";
 import { bossFight } from "./combat/fight";
 import { entityAt } from "./combat/skills";
+import { slashField } from "./combat/slashes";
 import { assistTarget, type Vec3, waveField } from "./combat/waves";
 import { HeadBubble } from "./HeadBubble";
 import { NAME_SHADOW, nameOpacity } from "./nameFade";
@@ -88,6 +89,7 @@ function RemoteHerzie({
     herzie.root.visible = false;
     return () => {
       discField.recall(herzie);
+      slashField.forget(herzie);
       herzie.dispose();
     };
   }, [herzie]);
@@ -140,6 +142,7 @@ function RemoteHerzie({
         herzie.cast(0, { arm: DISC_ARM[nextHand.current], style: "throw" });
       } else if (attack === "melee") {
         herzie.cast(0, { style: blow });
+        if (blow === "strike") slashField.strike(herzie, false);
       } else {
         herzie.cast(0);
       }
