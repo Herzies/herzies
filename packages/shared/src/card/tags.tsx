@@ -168,7 +168,7 @@ export function ModifierEffectTag({
 }
 
 /** Who can wear an item: its class and the stage it needs, e.g.
- * "🥁 Percussionist · Stage 2+". Nothing for an item anyone can wear. */
+ * "Percussionist · Stage 2+". Nothing for an item anyone can wear. */
 export function ItemRequirementLine({
   item,
   className,
@@ -181,11 +181,7 @@ export function ItemRequirementLine({
   if (!cls && !stage) return null;
   return (
     <div className={cn("text-ui-sm leading-snug", className)}>
-      {cls && (
-        <span className="text-pink">
-          {cls.emoji} {cls.name}
-        </span>
-      )}
+      {cls && <span className="text-pink">{cls.name}</span>}
       {cls && stage ? <span className="text-text-dim"> · </span> : null}
       {stage && <span className="text-text-dim">Stage {stage}+</span>}
     </div>
