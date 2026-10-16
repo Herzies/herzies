@@ -1230,14 +1230,17 @@ function App() {
           />
           <div className="relative">
             {/* The boss's end screen covers the Town down to the tabs: the
-                chat fades away under it, and back after. */}
+                chat folds away under it (fading, and its space closing, so
+                the dock's frosting shrinks to the tabs), and back after. */}
             <div
               className={cn(
-                "transition-opacity duration-300",
-                endScreen && "pointer-events-none opacity-0",
+                "grid grid-rows-[1fr] transition-[grid-template-rows,opacity] duration-300",
+                endScreen && "pointer-events-none grid-rows-[0fr] opacity-0",
               )}
             >
-              {chatPanel}
+              <div className={cn("min-h-0", endScreen && "overflow-hidden")}>
+                {chatPanel}
+              </div>
             </div>
             {herzie && (
               <div ref={observeNav}>
