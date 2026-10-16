@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.1.0-beta.52",
+    "highlights": [
+      "New: classes. At stage 2, pick a Bard, Record Slinger or Percussionist, each with its own gear and skill",
+      "Each class fights its own way: Bards cast sonic waves, Record Slingers throw discs that come back to the hand, and Percussionists strike up close with a stick",
+      "Press Q in the Town to use your class skill: Soothing Drones, Backspin or Cymbrella",
+      "Earn stat points as you level and put them into Stamina, Sonic Power or Euphony",
+      "A Skills tab, and a roomier two-column deck with your instrument beside your equipment",
+      "The boss now crumbles away when it's beaten"
+    ]
+  },
+  {
     "version": "0.1.0-beta.51",
     "highlights": [
       "Fixed: \"Inventory full\" no longer pops up when your bag has room",
