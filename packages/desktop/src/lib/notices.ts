@@ -71,8 +71,9 @@ function expire(id: number, after: number) {
   );
 }
 
-/** Say `text` to the player for a moment. `kind` sets its colour: an error
- * (refused, can't), news (`info`), or something that went well. */
+/** Say `text` to the player for a moment. Always white; `kind` (an error,
+ * news, or something that went well) only says what it is, for callers and
+ * for later. */
 export function notify(
   text: string,
   opts: { kind?: NoticeKind; holdMs?: number } = {},

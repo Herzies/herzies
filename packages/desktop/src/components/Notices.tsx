@@ -2,19 +2,13 @@ import { useLayoutEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { NOTICE_FADE_MS, type Notice, useNotices } from "../lib/notices";
 
-const COLOURS = {
-  error: "#ff6a5c",
-  info: "#ffd65c",
-  success: "#8ef08a",
-} as const;
-
 /** A hard dark outline, so the text reads over anything (the 3D Town, a
  * bright card) without a box behind it. */
 const OUTLINE =
   "0 1px 0 #000, 0 -1px 0 #000, 1px 0 0 #000, -1px 0 0 #000, 0 2px 4px rgba(0,0,0,0.6)";
 
 /** Each line's height in the stack, px. */
-const LINE = 24;
+const LINE = 20;
 
 const reducedMotion = () => {
   try {
@@ -93,8 +87,8 @@ function Line({ notice, up }: { notice: Notice; up: number }) {
     >
       <div
         ref={ref}
-        className="max-w-[80vw] px-2 text-center text-[15px] font-bold leading-6 tracking-wide"
-        style={{ color: COLOURS[notice.kind], textShadow: OUTLINE }}
+        className="max-w-[80vw] px-2 text-center text-[13px] font-bold leading-5 tracking-wide text-white"
+        style={{ textShadow: OUTLINE }}
       >
         {notice.text}
       </div>
