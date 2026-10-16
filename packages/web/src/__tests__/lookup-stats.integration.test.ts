@@ -100,10 +100,11 @@ describe("lookup stats", () => {
       owner.accessToken,
       ownerHerzie.friend_code as string,
     );
+    // Level 10 adds its own: +18 Sonic Power, +5.4 Def.
     expect(profile.stats).toMatchObject({
-      sonicPower: 9,
+      sonicPower: 27,
       stamina: 6,
-      def: 6,
+      def: 11.4,
       euphony: 2,
     });
   });

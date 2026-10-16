@@ -38,7 +38,12 @@ import {
   VIOLET_RAMP,
 } from "./ascii3d.ts";
 import type { HerzieClass } from "./classes.ts";
-import { normalizeStatPoints, STAT_TUNING, type StatPoints } from "./stats.ts";
+import {
+  levelStats,
+  normalizeStatPoints,
+  STAT_TUNING,
+  type StatPoints,
+} from "./stats.ts";
 import { BOSS_DAMAGE_PER_MINUTE, type Stage } from "./types.ts";
 
 export type Rarity = "common" | "uncommon" | "rare" | "legendary" | "mythic";
@@ -3428,14 +3433,21 @@ export function getHerzieStatsFromUnits(
 export function withStatPoints(
   items: HerzieStats,
   points: StatPoints | null | undefined,
+  /** The herzie's level: it adds Sonic Power and Def of its own
+   * (levelStats). Left out, none. */
+  level?: number | null,
 ): HerzieStats {
   const p = normalizeStatPoints(points);
+  const fromLevel = level ? levelStats(level) : { sonicPower: 0, def: 0 };
   return {
     ...items,
-    sonicPower: items.sonicPower + p.sonicPower,
+    sonicPower: items.sonicPower + p.sonicPower + fromLevel.sonicPower,
     stamina: items.stamina + p.stamina,
     euphony: items.euphony + p.euphony,
-    def: items.def + STAT_TUNING.defPerStamina * (items.stamina + p.stamina),
+    def:
+      items.def +
+      STAT_TUNING.defPerStamina * (items.stamina + p.stamina) +
+      fromLevel.def,
   };
 }
 

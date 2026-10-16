@@ -19,7 +19,11 @@ import { STAT_TUNING } from "./stats.ts";
 export function maxHp(level: number, stamina = 0): number {
   const l = Number.isFinite(level) ? Math.max(1, Math.floor(level)) : 1;
   const s = Number.isFinite(stamina) ? Math.max(0, Math.floor(stamina)) : 0;
-  return 100 + 5 * l + STAT_TUNING.hpPerStamina * s;
+  return (
+    STAT_TUNING.hpBase +
+    STAT_TUNING.hpPerLevel * (l - 1) +
+    STAT_TUNING.hpPerStamina * s
+  );
 }
 
 /** No regen for this long after the last write (damage), so a fight never

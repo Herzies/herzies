@@ -707,6 +707,7 @@ function EventsViewImpl({
             ? getHerzieStatsFromUnits(units)
             : getHerzieStats(equipped),
           playerStatPoints,
+          playerProfile?.level,
         )}
       />
     );

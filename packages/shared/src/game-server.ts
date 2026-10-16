@@ -365,6 +365,7 @@ export async function processSync(
           (row.item_upgrades ?? {}) as Record<string, number>,
         ),
     herzie.statPoints,
+    herzie.level,
   );
   // Copies minted during this sync, so the response can carry them without
   // another query on a path that runs every few seconds per client.

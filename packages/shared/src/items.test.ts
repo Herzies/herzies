@@ -1486,6 +1486,14 @@ describe("withStatPoints", () => {
     const items = getHerzieStats({ head: "headphones" });
     expect(withStatPoints(items, null)).toEqual(items);
   });
+
+  it("adds the level's own on top", () => {
+    const items = getHerzieStats({ head: "headphones" });
+    const at10 = withStatPoints(items, null, 10);
+    expect(at10.sonicPower).toBe(items.sonicPower + 18);
+    expect(at10.def).toBeCloseTo(items.def + 5.4);
+    expect(withStatPoints(items, null, 1)).toEqual(items);
+  });
 });
 
 describe("bank tiles", () => {

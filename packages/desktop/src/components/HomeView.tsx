@@ -87,6 +87,7 @@ export function HomeView({
       ? getHerzieStatsFromUnits(units)
       : getHerzieStats(equipped, itemUpgrades),
     herzie?.statPoints,
+    herzie?.level,
   );
   const pinned = useWindowPinned();
   const ghostMode = useGhostMode();

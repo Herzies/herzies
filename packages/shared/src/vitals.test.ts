@@ -14,8 +14,8 @@ const T = 1_700_000_000_000;
 
 describe("maxHp", () => {
   it("grows with level and tolerates junk", () => {
-    expect(maxHp(1)).toBe(105);
-    expect(maxHp(100)).toBe(600);
+    expect(maxHp(1)).toBe(110);
+    expect(maxHp(100)).toBe(902);
     expect(maxHp(0)).toBe(maxHp(1));
     expect(maxHp(Number.NaN)).toBe(maxHp(1));
   });
@@ -74,8 +74,8 @@ describe("respawnHp", () => {
 describe("vitalsOf / liveHp", () => {
   it("a client keeps counting regen from the handed-out stamp", () => {
     const v = vitalsOf({ hp: 20, hpAt: T, down: false }, 59, 0, T);
-    expect(v.maxHp).toBe(395);
+    expect(v.maxHp).toBe(574);
     expect(v.hp).toBe(20);
-    expect(liveHp(v, T + HP_REGEN_DELAY_MS + 60_000)).toBeCloseTo(20 + 395 / 5);
+    expect(liveHp(v, T + HP_REGEN_DELAY_MS + 60_000)).toBeCloseTo(20 + 574 / 5);
   });
 });

@@ -19,8 +19,8 @@ import {
 
 const admin = () => getAdminClient();
 
-/** Level 1 with no Stamina: max HP 105. */
-const MAX_HP = 105;
+/** Level 1 with no Stamina: max HP 110. */
+const MAX_HP = 110;
 
 async function player(over: Record<string, unknown> = {}) {
   const user = await createTestUser();

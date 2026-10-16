@@ -105,7 +105,7 @@ Deno.serve(async (request) => {
   const { data: unitRows } = await admin.rpc("item_units_json", {
     p_user_id: user.id,
   });
-  // Items plus stat points, as the sync bills them.
+  // Items, stat points and the level's own, as the sync bills them.
   const stats = withStatPoints(
     getHerzieStatsFromUnits(
       Array.isArray(unitRows) ? normalizeUnits(unitRows) : [],
@@ -115,6 +115,7 @@ Deno.serve(async (request) => {
       sonicPower: herzie.stat_sonic,
       euphony: herzie.stat_euphony,
     },
+    herzie.level,
   );
 
   // Class skills and their levels: the Town server judges a skill's
