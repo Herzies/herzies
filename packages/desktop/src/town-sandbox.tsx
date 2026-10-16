@@ -330,7 +330,7 @@ function Sandbox() {
       />
       {/* After the canvas, as in TownWorld: it has no z-index of its own,
           so the herzie stage can draw over it. */}
-      <BossResults name="The boss" />
+      <BossResults />
     </div>
   );
 }

@@ -23,7 +23,7 @@ import { letGoOfTownInput } from "./input";
  * herzie stage would be under its background, so its herzies have a stage
  * of their own, inside it.
  */
-export function BossResults({ name }: { name: string }) {
+export function BossResults() {
   const results = useBossResults();
   // Its herzies' own stage, its canvas inside the overlay.
   const [stage] = useState(() => new HerzieStage());
@@ -94,7 +94,7 @@ export function BossResults({ name }: { name: string }) {
             {won ? "VICTORY" : "DEFEAT"}
           </h2>
           <p className="mb-1 text-center text-[10px] text-text-dim">
-            {won ? `${name} has fallen.` : `${name} got away.`}
+            {won ? "The boss has fallen." : "The boss got away."}
           </p>
 
           {top.length ? (
