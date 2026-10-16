@@ -24,6 +24,8 @@ import {
   type SnapshotEntry,
   TOWN_CLOSE,
   TOWN_FLAG_SITTING,
+  TOWN_INSTANCED_MAPS,
+  TOWN_MAPS,
   TOWN_PING,
   TOWN_PONG,
   TOWN_PROTOCOL,
@@ -90,6 +92,8 @@ const REST_MAPS: ReadonlySet<TownMapId> = new Set(["home"]);
 type Attachment = {
   connectedAt: number;
   map: TownMapId;
+  /** An instanced map's room: whose it is (a user id). */
+  instance?: string;
   player?: {
     id: number;
     uid: string;
@@ -184,7 +188,8 @@ export class TownRoom extends DurableObject<Env> {
       return new Response(null, { status: 101, webSocket: client });
     }
     const now = Date.now();
-    const att: Attachment = { connectedAt: now, map };
+    const instance = request.headers.get("x-town-instance") ?? undefined;
+    const att: Attachment = { connectedAt: now, map, instance };
     server.serializeAttachment(att);
     this.session(server, att, now);
     setTimeout(() => {
@@ -232,6 +237,7 @@ export class TownRoom extends DurableObject<Env> {
       else if (m?.t === "ticket" && s.player) await this.renew(s, m.ticket);
       else if (m?.t === "skill" && s.player) this.onSkill(s, m, now);
       else if (m?.t === "eat" && s.player) await this.onEat(s, m, now);
+      else if (m?.t === "next" && s.player) this.onNext(s, now);
       else this.strike(s);
       return;
     }
@@ -523,6 +529,7 @@ export class TownRoom extends DurableObject<Env> {
   /** Whether the boss room lets this ticket in. Starts the fight from the
    * ticket's boss claim if none is running. */
   private admit(s: Session, t: TownTicketPayload, now: number): boolean {
+    if (s.att.map === "tower") return this.admitTower(s, t, now);
     let claim = t.boss;
     if (!claim && this.env.DEV_BOSS) {
       claim = {
@@ -577,6 +584,66 @@ export class TownRoom extends DurableObject<Env> {
       return false;
     }
     return true;
+  }
+
+  /** Whether this Tower room lets the ticket in: it's this herzie's own
+   * room, a Tower event is on, and they're on their feet. Starts their
+   * floor from the ticket's claim if none is running. */
+  private admitTower(s: Session, t: TownTicketPayload, now: number): boolean {
+    if (!TOWN_INSTANCED_MAPS.has(s.att.map) || s.att.instance !== t.uid) {
+      this.drop(s, TOWN_CLOSE.sealed, "not your room");
+      return false;
+    }
+    let claim = t.tower;
+    if (!claim && this.env.DEV_BOSS)
+      claim = { event: DEV_EVENT, until: now / 1000 + 3_600, floor: 1 };
+    if (!claim || claim.until * 1000 <= now) {
+      this.drop(s, TOWN_CLOSE.sealed, "sealed");
+      return false;
+    }
+    const issued = (t.exp - TOWN_TICKET_TTL_S) * 1000;
+    if (now - issued > FRESH_TICKET_MS) {
+      this.drop(s, TOWN_CLOSE.auth, "stale ticket");
+      return false;
+    }
+    if (t.hp?.down || (t.hp && t.hp.hp <= 0)) {
+      this.drop(s, TOWN_CLOSE.sealed, "down");
+      return false;
+    }
+    // Another event's Tower, or one that ended: start over.
+    if (
+      this.fight &&
+      (claim.event !== this.fight.eventId || !this.fight.open)
+    ) {
+      this.fight = null;
+      this.closeScheduled = false;
+    }
+    if (!this.fight) {
+      const { radius, spawn } = TOWN_MAPS.tower;
+      this.fight = FightRuntime.tower(
+        claim,
+        t.uid,
+        t.lv ?? 1,
+        { radius, entry: spawn },
+        now,
+      );
+    }
+    return true;
+  }
+
+  /** On to the next Tower floor (the client walked through the far
+   * portal); the herzie starts it back at the spawn. */
+  private onNext(s: Session, now: number) {
+    const p = s.player;
+    if (!p || !this.fight?.tower) {
+      this.strike(s);
+      return;
+    }
+    const out = this.fight.next(p.uid, now);
+    if (!out.length) return;
+    const { spawn } = TOWN_MAPS.tower;
+    p.guard = newGuard(spawn.x, spawn.z, now);
+    for (const o of out) this.dispatch(o);
   }
 
   private onCast(s: Session, message: ArrayBuffer, now: number) {
@@ -701,7 +768,13 @@ export class TownRoom extends DurableObject<Env> {
     if (!fight || this.reporting) return;
     const report = fight.report(now, force);
     if (!report) return;
-    if (!report.hp.length && !report.boss && !report.skills && !report.results)
+    if (
+      !report.hp.length &&
+      !report.boss &&
+      !report.skills &&
+      !report.results &&
+      !report.tower
+    )
       return;
     this.reporting = true;
     void postVitals(this.env, { action: "report", ...report })
@@ -714,6 +787,9 @@ export class TownRoom extends DurableObject<Env> {
         if (levels) for (const o of fight.skillUps(levels)) this.dispatch(o);
         if (report.results && reply.results)
           for (const o of fight.results(reply.results)) this.dispatch(o);
+        if (report.tower && reply.tower?.drops)
+          for (const o of fight.towerLoot(reply.tower.drops, report.tower))
+            this.dispatch(o);
       })
       .finally(() => {
         this.reporting = false;

@@ -36,6 +36,9 @@ export const TOWN_MAPS = {
   arena: { radius: 17, spawn: { x: 0, z: -12 } },
   /** The boss's cave: a small dark room, one shared fight. */
   bossroom: { radius: 13, spawn: { x: 0, z: 10 } },
+  /** The Tower (an event): a lush island fought floor by floor, alone. You
+   * arrive at the west end; each new floor puts you back there. */
+  tower: { radius: 21, spawn: { x: -16.5, z: 0.5 } },
 } as const;
 export type TownMapId = keyof typeof TOWN_MAPS;
 export function isTownMapId(id: string): id is TownMapId {
@@ -45,8 +48,15 @@ export function isTownMapId(id: string): id is TownMapId {
 /** Maps that are one room however many come: the boss is shared, so there is
  * a single shard (and the room's capacity is the fight's). */
 export const TOWN_SINGLE_SHARD: ReadonlySet<TownMapId> = new Set(["bossroom"]);
-/** Maps that need a ticket carrying a `boss` claim (see TownTicketPayload). */
-export const TOWN_TICKETED_MAPS: ReadonlySet<TownMapId> = new Set(["bossroom"]);
+/** Maps that need a ticket carrying a claim: a `boss` claim for the boss
+ * room, a `tower` claim for the Tower (see TownTicketPayload). */
+export const TOWN_TICKETED_MAPS: ReadonlySet<TownMapId> = new Set([
+  "bossroom",
+  "tower",
+]);
+/** Maps where every herzie gets a room of their own: the client names it
+ * with `?i=<user id>`, and the room only takes that herzie's ticket. */
+export const TOWN_INSTANCED_MAPS: ReadonlySet<TownMapId> = new Set(["tower"]);
 
 /** Top walking speed, world units a second (the desktop's `WALK_SPEED`). */
 export const TOWN_WALK_SPEED = 4.5;
@@ -105,6 +115,12 @@ export type TownTicketPayload = {
    * a fight from it if it has none running). The boss room turns away
    * tickets without it. */
   boss?: { event: string; until: number; hp: number; maxHp: number };
+  /** Set only while a Tower event is on: the event, when it ends (unix
+   * seconds), and the floor this herzie starts on (one past their best).
+   * The Tower turns away tickets without it. */
+  tower?: { event: string; until: number; floor: number };
+  /** The herzie's level, for the Tower's level gap. */
+  lv?: number;
   /** The herzie's class (classes.ts), once chosen. */
   cls?: string;
   /** Its class skills and their levels, `[skillId, level]`, so the server
@@ -488,7 +504,10 @@ export type ClientMessage =
   /** Eat a consumable (a Star Candy) in a boss fight, where the room holds
    * HP. `seq` echoes back in the answer. Elsewhere the client eats through
    * the API instead. */
-  | { t: "eat"; item: string; seq: number };
+  | { t: "eat"; item: string; seq: number }
+  /** In the Tower, on a cleared floor: on to the next one. The room puts
+   * you back at the map's spawn (the west end). */
+  | { t: "next" };
 
 /** Why the room refused to let you eat: knocked out, already at full HP,
  * too soon after the last one, none left in the bank, not something you
@@ -543,6 +562,30 @@ export type FightState = {
   buffs?: TownBuff[];
   /** Server clock now (ms), so telegraph times line up at once. */
   now: number;
+  /** In the Tower: the floor, as it stands. */
+  tower?: TowerFloor;
+};
+
+/** A Tower mob as the wire carries it: where it is and which way it faces,
+ * its health, and whether it's winding up a swing (`s` 1). */
+export type TowerMob = {
+  id: number;
+  x: number;
+  z: number;
+  yaw: number;
+  hp: number;
+  maxHp: number;
+  s: 0 | 1;
+};
+
+/** A Tower floor: its number, its mobs' level (and the herzie's, for the
+ * gap), the mobs, and whether it's cleared (the way on is open). */
+export type TowerFloor = {
+  floor: number;
+  level: number;
+  you: number;
+  mobs: TowerMob[];
+  cleared: boolean;
 };
 
 /** One piece of boss loot: a pending drop's id and its item id. */
@@ -570,8 +613,15 @@ export type ServerMessage =
   | { t: "resolve"; id: number; hits: number[] }
   /** A herzie's health (yours too), after damage. */
   | { t: "hp"; id: number; hp: number; maxHp: number }
-  /** Your cast hit the boss for this much (sent to you alone). */
-  | { t: "hit"; damage: number; crit: boolean }
+  /** Your cast hit the boss — or, in the Tower, mob `mob` — for this much
+   * (sent to you alone). */
+  | { t: "hit"; damage: number; crit: boolean; mob?: number }
+  /** The Tower's mobs, where they are now (every tick while any are up). */
+  | { t: "mobs"; mobs: TowerMob[] }
+  /** A Tower mob fell. */
+  | { t: "mobDown"; mob: number; x: number; z: number }
+  /** A Tower floor began, or was just cleared. */
+  | ({ t: "floor" } & TowerFloor)
   /** You were knocked out. */
   | { t: "down" }
   /** The boss fell: the room closes shortly. */
@@ -579,7 +629,12 @@ export type ServerMessage =
   /** What you got for the boss, dropped in the cave for you to pick up:
    * each a ground drop (its id, for collect-drop) and the item it is.
    * Whatever isn't picked up here waits on your Home ground. */
-  | { t: "loot"; drops: LootDrop[] }
+  | {
+      t: "loot";
+      drops: LootDrop[];
+      /** Where they drop from (a Tower mob); absent: out of the boss. */
+      at?: { x: number; z: number };
+    }
   /** The fight is over: how it went, its ten top damage dealers, and your
    * own place (null if you landed nothing). Sent once, to each herzie still
    * in the cave. */

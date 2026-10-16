@@ -5,6 +5,7 @@
  */
 import {
   isTownMapId,
+  TOWN_INSTANCED_MAPS,
   TOWN_MAX_SHARDS,
   TOWN_SINGLE_SHARD,
 } from "@herzies/shared/town-net";
@@ -31,9 +32,20 @@ export default {
     // One shared fight: everyone goes to the same room.
     if (TOWN_SINGLE_SHARD.has(map as never) && shard !== 0)
       return new Response("bad shard", { status: 400 });
-    const room = env.TOWN_ROOM.get(env.TOWN_ROOM.idFromName(`${map}:${shard}`));
+    // A room of your own: named by your user id (the room checks the
+    // ticket is yours).
+    let name = `${map}:${shard}`;
+    const instance = url.searchParams.get("i");
+    if (TOWN_INSTANCED_MAPS.has(map as never)) {
+      if (!instance || !/^[0-9a-f-]{8,64}$/i.test(instance))
+        return new Response("bad instance", { status: 400 });
+      name = `${map}:${instance}`;
+    }
+    const room = env.TOWN_ROOM.get(env.TOWN_ROOM.idFromName(name));
     const headers = new Headers(request.headers);
     headers.set("x-town-map", map);
+    if (instance) headers.set("x-town-instance", instance);
+    else headers.delete("x-town-instance");
     return room.fetch(new Request(request, { headers }));
   },
 } satisfies ExportedHandler<Env>;

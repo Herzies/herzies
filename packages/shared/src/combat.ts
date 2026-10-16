@@ -209,7 +209,27 @@ export function bossReaches(
   dir: Readonly<Vec3>,
   range: number = WAVE_RANGE,
 ): number | null {
-  const b = BOSS_STAND;
+  return bodyHitAt(from, dir, BOSS_STAND, range);
+}
+
+/** A standing body a cast can hit: where it stands, its radius, the height
+ * of its middle and of its top. */
+export type Body = {
+  x: number;
+  z: number;
+  radius: number;
+  chest: number;
+  top: number;
+};
+
+/** {@link bossReaches} for any standing body (a Tower mob): at its middle
+ * by the wave rule, or anywhere on it. */
+export function bodyHitAt(
+  from: Readonly<Vec3>,
+  dir: Readonly<Vec3>,
+  b: Body,
+  range: number = WAVE_RANGE,
+): number | null {
   const chest = waveReaches(
     from,
     dir,

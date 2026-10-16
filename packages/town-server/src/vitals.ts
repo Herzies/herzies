@@ -40,6 +40,15 @@ export type VitalsReport = {
   /** The fight is over: ask for the end screen's table, with the places of
    * these herzies (00110). */
   results?: { event: string; uids: string[] };
+  /** The Tower: kills since the last batch (each may drop an item and pays
+   * a little XP) and the best floor cleared, named by `batch`. */
+  tower?: {
+    event: string;
+    batch: string;
+    uid: string;
+    kills: { floor: number; x: number; z: number }[];
+    cleared?: number;
+  };
 };
 
 /** What `town-vitals` answers. Only the boss part is read: `loot` is set
@@ -57,6 +66,9 @@ export type VitalsReply = {
   /** The end screen's table, if it was asked for: the top ten, and each
    * asked-about herzie's place by user id (none if they dealt nothing). */
   results?: { top: BossPlace[]; you: Record<string, BossPlace> } | null;
+  /** What the Tower batch's kills dropped (empty on a replay: they were
+   * handed out the first time). */
+  tower?: { drops: LootDrop[] } | null;
 };
 
 /** Send a report. Resolves with the reply if `town-vitals` took it, else

@@ -42,6 +42,7 @@ import {
   TUNING,
 } from "./boss";
 import { PositionHistory } from "./history";
+import { type TowerArena, TowerEngine, type TowerEvent } from "./tower";
 
 /** The room holds eating to CONSUMABLE_COOLDOWN_MS less this, so a client
  * keeping to the full cooldown is never refused (or struck) for network
@@ -111,6 +112,19 @@ export type FightReport = {
   };
   /** The fight is over: the end screen's table, for these herzies. */
   results?: { event: string; uids: string[] };
+  /** In the Tower: the kills since the last batch (each may drop an item
+   * and pays a little XP) and the best floor cleared, named by `batch`
+   * like the boss damage. */
+  tower?: TowerBatch;
+};
+
+export type TowerBatch = {
+  event: string;
+  batch: string;
+  uid: string;
+  kills: { floor: number; x: number; z: number }[];
+  /** The highest floor cleared in this batch, if any was. */
+  cleared?: number;
 };
 
 /** What one herzie did for the fight since the last batch: damage dealt,
@@ -126,9 +140,10 @@ export type BossRow = {
 const RESULTS_RETRY_MS = 1_000;
 
 type Claim = NonNullable<TownTicketPayload["boss"]>;
+type TowerClaim = NonNullable<TownTicketPayload["tower"]>;
 
 export class FightRuntime {
-  readonly engine: BossEngine;
+  readonly engine: BossEngine | TowerEngine;
   readonly eventId: string;
   /** Unix ms when the boss escapes. */
   readonly until: number;
@@ -175,17 +190,68 @@ export class FightRuntime {
     batch: string;
     xp: { uid: string; skill: string; xp: number }[];
   } | null = null;
+  /** The Tower's kills and clears not yet in a batch, and the batch in
+   * flight. */
+  private towerKills: TowerBatch["kills"] = [];
+  private towerCleared = 0;
+  private towerInflight: TowerBatch | null = null;
+  /** The Tower's one herzie (a room of their own). */
+  private towerUid = "";
 
-  constructor(claim: Claim, now: number, seed = now) {
+  constructor(claim: Claim, now: number, seed = now, engine?: TowerEngine) {
     this.eventId = claim.event;
     this.until = claim.until * 1000;
-    this.engine = new BossEngine({
-      hp: claim.hp,
-      maxHp: claim.maxHp,
-      seed,
-      now,
-    });
+    this.engine =
+      engine ??
+      new BossEngine({
+        hp: claim.hp,
+        maxHp: claim.maxHp,
+        seed,
+        now,
+      });
     this.nextReportAt = now + REPORT_EVERY_MS;
+    // The Tower has no end screen.
+    if (engine) this.resultsSent = true;
+  }
+
+  /** A Tower floor for `uid`, from their ticket's claim. */
+  static tower(
+    claim: TowerClaim,
+    uid: string,
+    level: number,
+    arena: TowerArena,
+    now: number,
+    seed = now,
+  ): FightRuntime {
+    const engine = new TowerEngine(
+      { floor: claim.floor, level, seed, now },
+      arena,
+    );
+    const f = new FightRuntime(
+      { event: claim.event, until: claim.until, hp: 1, maxHp: 1 },
+      now,
+      seed,
+      engine,
+    );
+    f.towerUid = uid;
+    return f;
+  }
+
+  /** The Tower's floors, if this is the Tower. */
+  get tower(): TowerEngine | null {
+    return this.engine instanceof TowerEngine ? this.engine : null;
+  }
+
+  /** On to the next floor, if this one's cleared. */
+  next(uid: string, now: number): Outbound[] {
+    const tower = this.tower;
+    const p = this.players.get(uid);
+    if (!tower || !p?.present || p.down || !this.open) return [];
+    if (!tower.next(now)) return [];
+    // A breather on arrival, as on joining.
+    tower.noteSpawn(uid, now);
+    this.history.forget(uid);
+    return [{ to: "all", msg: { t: "floor", ...tower.view() } }];
   }
 
   get open(): boolean {
@@ -452,6 +518,7 @@ export class FightRuntime {
       health: [...this.players.values()]
         .filter((p) => p.present)
         .map((p) => ({ id: p.id, hp: p.hp, maxHp: p.maxHp })),
+      ...(this.tower ? { tower: this.tower.view() } : {}),
       buffs: this.engine.activeBuffs(now).flatMap(({ uid, buff }) => {
         const p = this.players.get(uid);
         return p?.present
@@ -478,6 +545,12 @@ export class FightRuntime {
     }
     if (this.open) {
       for (const ev of this.engine.update(now, alive)) this.apply(ev, out, now);
+      const tower = this.tower;
+      if (tower) {
+        this.bossDirty = false;
+        const mobs = tower.wireMobs();
+        if (mobs.length) out.push({ to: "all", msg: { t: "mobs", mobs } });
+      }
       if (this.bossDirty) {
         this.bossDirty = false;
         out.push({
@@ -506,8 +579,25 @@ export class FightRuntime {
     return out;
   }
 
-  private apply(ev: BossEvent, out: Outbound[], now: number) {
+  private apply(ev: BossEvent | TowerEvent, out: Outbound[], now: number) {
     switch (ev.t) {
+      case "mobDown":
+        this.towerKills.push({
+          floor: this.tower?.floor ?? 0,
+          x: round(ev.x),
+          z: round(ev.z),
+        });
+        out.push({
+          to: "all",
+          msg: { t: "mobDown", mob: ev.mob, x: round(ev.x), z: round(ev.z) },
+        });
+        break;
+      case "cleared":
+        this.towerCleared = Math.max(this.towerCleared, ev.floor);
+        this.reportNow = true;
+        if (this.tower)
+          out.push({ to: "all", msg: { t: "floor", ...this.tower.view() } });
+        break;
       case "telegraph":
         out.push({
           to: "all",
@@ -549,7 +639,12 @@ export class FightRuntime {
           this.earn(ev.uid, ev.skill, skillXpFor(ev.skill, ev.damage));
         out.push({
           to: { uid: ev.uid },
-          msg: { t: "hit", damage: ev.damage, crit: ev.crit },
+          msg: {
+            t: "hit",
+            damage: ev.damage,
+            crit: ev.crit,
+            ...(ev.mob !== undefined ? { mob: ev.mob } : {}),
+          },
         });
         break;
       }
@@ -622,6 +717,21 @@ export class FightRuntime {
           xp,
         };
     }
+    if (
+      !this.towerInflight &&
+      (this.towerKills.length || this.towerCleared) &&
+      this.eventId !== DEV_EVENT
+    ) {
+      this.towerInflight = {
+        event: this.eventId,
+        batch: `${this.eventId}:tower:${now}:${++this.batchSeq}:${crypto.randomUUID()}`,
+        uid: this.towerUid,
+        kills: this.towerKills,
+        ...(this.towerCleared ? { cleared: this.towerCleared } : {}),
+      };
+      this.towerKills = [];
+      this.towerCleared = 0;
+    }
     // Over: ask for the end screen's table, but only on a report whose
     // batch carries every hit there was (one re-sent from before would
     // leave the last of them out). Until it's back, report again soon.
@@ -655,6 +765,7 @@ export class FightRuntime {
         this.xpInflight && this.eventId !== DEV_EVENT
           ? this.xpInflight
           : undefined,
+      tower: this.towerInflight ?? undefined,
     };
   }
 
@@ -676,6 +787,27 @@ export class FightRuntime {
     if (report.skills && this.xpInflight?.batch === report.skills.batch) {
       this.xpInflight = null;
     }
+    if (report.tower && this.towerInflight?.batch === report.tower.batch) {
+      this.towerInflight = null;
+    }
+  }
+
+  /** What a Tower batch's kills dropped (`town-vitals`' word): to the
+   * herzie, to land where the last of those mobs fell. */
+  towerLoot(drops: LootDrop[], batch: TowerBatch): Outbound[] {
+    const p = this.players.get(batch.uid);
+    if (!drops.length || !p?.present) return [];
+    const last = batch.kills[batch.kills.length - 1];
+    return [
+      {
+        to: { uid: batch.uid },
+        msg: {
+          t: "loot",
+          drops,
+          ...(last ? { at: { x: last.x, z: last.z } } : {}),
+        },
+      },
+    ];
   }
 
   /** The boss fell and its loot is on the ground: tell each herzie still
@@ -766,7 +898,8 @@ export class FightRuntime {
   /** `uid` did `amount` of `kind` for the fight: into the next batch (and
    * the dev boss's own tally). */
   private credit(uid: string, kind: keyof Contribution, amount: number) {
-    if (!(amount > 0)) return;
+    // The Tower has no boss to tally against.
+    if (!(amount > 0) || this.tower) return;
     for (const tally of this.eventId === DEV_EVENT
       ? [this.pending, this.devDealt]
       : [this.pending]) {
@@ -780,6 +913,9 @@ export class FightRuntime {
   get unreported(): boolean {
     return (
       this.inflight !== null ||
+      this.towerInflight !== null ||
+      this.towerKills.length > 0 ||
+      this.towerCleared > 0 ||
       this.pending.size > 0 ||
       this.leftUnreported.size > 0 ||
       this.xpInflight !== null ||

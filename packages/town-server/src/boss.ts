@@ -113,6 +113,8 @@ export type Telegraph = {
   damage: number;
   /** A buster's target (user id); it lands on them wherever they are. */
   target?: string;
+  /** In the Tower: the mob swinging it. */
+  mob?: number;
 };
 
 /** A player as the engine sees them each update. */
@@ -133,7 +135,12 @@ export type BossEvent =
       id: number;
       /** `absorbed`: what Def and buffs took off the hit; `blocked`: the
        * Cymbrella's share of that alone. */
-      hits: { uid: string; damage: number; absorbed: number; blocked: number }[];
+      hits: {
+        uid: string;
+        damage: number;
+        absorbed: number;
+        blocked: number;
+      }[];
     }
   | { t: "phase"; phase: Phase }
   | {
@@ -144,6 +151,8 @@ export type BossEvent =
       hp: number;
       /** Set when a skill threw it, not a plain cast. */
       skill?: string;
+      /** In the Tower: the mob it hit. */
+      mob?: number;
     }
   | { t: "killed"; by: string };
 
