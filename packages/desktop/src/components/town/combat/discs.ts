@@ -156,6 +156,14 @@ export class DiscField {
     heard: false,
   }));
 
+  /** The hand each owner last threw from, so throws alternate. */
+  private readonly lastHand = new WeakMap<object, DiscHand>();
+
+  /** The hand `owner` last threw from, if any. */
+  lastThrown(owner: object): DiscHand | undefined {
+    return this.lastHand.get(owner);
+  }
+
   /**
    * Throws a disc from `owner`'s `hand`, at `from`, along `dir` (normalised
    * here) for at most `reach`. A disc of theirs still out from that hand is
@@ -178,6 +186,7 @@ export class DiscField {
       if (d.alive && d.owner === opts.owner && d.hand === opts.hand)
         d.alive = false;
     }
+    this.lastHand.set(opts.owner, opts.hand);
     const d = take(this.discs, (a, b) => a.age > b.age);
     const len = Math.hypot(dir[0], dir[1], dir[2]) || 1;
     d.alive = true;
@@ -395,15 +404,21 @@ export function backTime(dist: number): number {
   return Math.min(DISC.backMax, Math.max(DISC.backMin, dist / DISC.backSpeed));
 }
 
-/** Which hand throws next for `owner`: the main hand if its disc is in it,
- * else the other — or null with both out (or without gear in a hand,
- * `holds` says which it has). */
+/** Which hand throws next for `owner`: the other one from last time if its
+ * disc is in it (the main hand first), else the same one again — or null
+ * with both out (or without gear in a hand, `holds` says which it has). Up
+ * close a disc is back before the next throw, so without the turn about
+ * the main hand would throw every time. */
 export function nextHand(
   field: DiscField,
   owner: object,
   holds: (hand: DiscHand) => boolean = () => true,
 ): DiscHand | null {
-  for (const h of ["held-l", "held-r"] as const) {
+  const order: readonly DiscHand[] =
+    field.lastThrown(owner) === "held-l"
+      ? ["held-r", "held-l"]
+      : ["held-l", "held-r"];
+  for (const h of order) {
     if (holds(h) && !field.isOut(owner, h)) return h;
   }
   return null;

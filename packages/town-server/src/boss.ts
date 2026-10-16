@@ -17,6 +17,7 @@ import type { AttackStyle } from "@herzies/shared/classes";
 import {
   aimDirection,
   BOSS_STAND,
+  bossReaches,
   CAST_INTERVAL_MS,
   DISC_DAMAGE,
   DISC_RANGE,
@@ -28,7 +29,6 @@ import {
   meleeReaches,
   WAVE_HAND_HEIGHT,
   WAVE_SPEED,
-  waveReaches,
 } from "@herzies/shared/combat";
 import {
   activeBuffs,
@@ -276,12 +276,7 @@ export class BossEngine {
     const half = (BACKSPIN_DISCS - 1) / 2;
     for (let i = 0; i < BACKSPIN_DISCS; i++) {
       const dir = aimDirection(yaw + (i - half) * BACKSPIN_SPREAD, pitch);
-      const dist = waveReaches([from.x, WAVE_HAND_HEIGHT, from.z], dir, {
-        x: TUNING.boss.x,
-        y: TUNING.boss.chest,
-        z: TUNING.boss.z,
-        radius: TUNING.boss.radius,
-      });
+      const dist = bossReaches([from.x, WAVE_HAND_HEIGHT, from.z], dir);
       if (dist === null) continue;
       const { amount, crit } = hitDamage(stats, this.rand);
       this.pending.push({
@@ -352,15 +347,9 @@ export class BossEngine {
     }
     const disc = attack === "disc";
     const dir = aimDirection(yaw, pitch);
-    const dist = waveReaches(
+    const dist = bossReaches(
       [from.x, WAVE_HAND_HEIGHT, from.z],
       dir,
-      {
-        x: TUNING.boss.x,
-        y: TUNING.boss.chest,
-        z: TUNING.boss.z,
-        radius: TUNING.boss.radius,
-      },
       disc ? DISC_RANGE : undefined,
     );
     if (dist === null) return "miss";

@@ -161,7 +161,73 @@ export function waveReaches(
 export const BOSS_STAND = {
   x: 0,
   z: -4,
-  /** Its body's radius on the ground, and the height of its middle. */
+  /** Its body's radius on the ground, the height of its middle, and of
+   * its top. */
   radius: 2.2,
   chest: 2.4,
+  top: 4.8,
 } as const;
+
+/**
+ * How far along `dir` from `from` a cast reaches the boss, if it does: at
+ * its chest by the wave rule (aim assist and all), or anywhere on its body,
+ * a standing cylinder as tall as it is. Up close the crosshair sits on the
+ * near side of a big body, low or off to one side, well off the line to its
+ * chest, so the chest alone would let those throws through. Null if it
+ * misses or is out of range.
+ */
+export function bossReaches(
+  from: Readonly<Vec3>,
+  dir: Readonly<Vec3>,
+  range: number = WAVE_RANGE,
+): number | null {
+  const b = BOSS_STAND;
+  const chest = waveReaches(
+    from,
+    dir,
+    { x: b.x, y: b.chest, z: b.z, radius: b.radius },
+    range,
+  );
+  const body = bodyReaches(from, dir, b, b.radius + WAVE_HIT_RADIUS);
+  if (body === null || body > range) return chest;
+  return chest === null ? body : Math.min(chest, body);
+}
+
+/** Where a ray first meets a standing cylinder (its side or its top), as
+ * a distance along it; null if it doesn't, or meets the floor first. */
+function bodyReaches(
+  from: Readonly<Vec3>,
+  dir: Readonly<Vec3>,
+  body: { x: number; z: number; top: number },
+  radius: number,
+): number | null {
+  const ox = from[0] - body.x;
+  const oz = from[2] - body.z;
+  const top = body.top + WAVE_HIT_RADIUS;
+  const c = ox * ox + oz * oz - radius * radius;
+  // Already within it (pressed against it): hit as it leaves the hand, if
+  // thrown at it at all, not away.
+  if (c <= 0) {
+    const toward = -(ox * dir[0] + oz * dir[2]) > 0;
+    return toward && from[1] <= top ? 0 : null;
+  }
+  const a = dir[0] * dir[0] + dir[2] * dir[2];
+  if (a > 1e-9) {
+    const half = ox * dir[0] + oz * dir[2];
+    const disc = half * half - a * c;
+    if (disc >= 0) {
+      const t = (-half - Math.sqrt(disc)) / a;
+      if (t >= 0) {
+        const y = from[1] + dir[1] * t;
+        if (y < 0) return null;
+        if (y <= top) return t;
+      }
+    }
+  }
+  // Over its shoulder and down onto its top.
+  if (dir[1] >= 0 || from[1] <= top) return null;
+  const t = (top - from[1]) / dir[1];
+  const x = ox + dir[0] * t;
+  const z = oz + dir[2] * t;
+  return x * x + z * z <= radius * radius ? t : null;
+}

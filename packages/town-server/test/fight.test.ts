@@ -1,6 +1,13 @@
 import type { ServerMessage, TownTicketPayload } from "@herzies/shared/town-net";
 import { describe, expect, it } from "vitest";
-import { DISC_RANGE, DISC_SPEED, WAVE_SPEED } from "@herzies/shared/combat";
+import {
+  aimDirection,
+  bossReaches,
+  DISC_RANGE,
+  DISC_SPEED,
+  WAVE_HAND_HEIGHT,
+  WAVE_SPEED,
+} from "@herzies/shared/combat";
 import { TUNING } from "../src/boss";
 import {
   ESCAPE_LINGER_MS,
@@ -155,11 +162,12 @@ describe("a fight", () => {
   it("a Record Slinger throws a disc: its own speed and reach", () => {
     const aim = (z: number) => {
       const dz = TUNING.boss.z - z;
-      return {
-        yaw: Math.atan2(0, dz),
-        pitch: Math.atan2(TUNING.boss.chest - 1.2, Math.abs(dz)),
-        dist: Math.hypot(TUNING.boss.chest - 1.2, dz),
-      };
+      const yaw = Math.atan2(0, dz);
+      const pitch = Math.atan2(TUNING.boss.chest - 1.2, Math.abs(dz));
+      // It lands as it meets the boss's near side.
+      const dist =
+        bossReaches([0, WAVE_HAND_HEIGHT, z], aimDirection(yaw, pitch)) ?? 0;
+      return { yaw, pitch, dist };
     };
     const at = (cls: string | undefined, z: number) => {
       const f = new FightRuntime(claim(), T0);

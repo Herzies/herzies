@@ -207,6 +207,19 @@ describe("throwing with both hands", () => {
     expect(nextHand(f, {})).toBe("held-l");
   });
 
+  it("takes turns even when each disc is back before the next throw", () => {
+    const f = new DiscField();
+    const seen: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      const h = nextHand(f, OWNER);
+      if (!h) throw new Error("no hand");
+      seen.push(h);
+      f.throw(FROM, [0, 0, 1], { mine: true, owner: OWNER, hand: h });
+      f.recall(OWNER);
+    }
+    expect(seen).toEqual(["held-l", "held-r", "held-l", "held-r"]);
+  });
+
   it("someone else's throw never waits on our idea of their catch", () => {
     const f = new DiscField();
     const them = {};
