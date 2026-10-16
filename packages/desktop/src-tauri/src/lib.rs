@@ -2221,11 +2221,14 @@ async fn events_watch_loop(app: AppHandle) {
             // hunt as Orphiez.
             let title = match event.event_type.as_str() {
                 "song_hunt" => "Orphiez is in town!".to_string(),
+                "tower" => "The Tower is open!".to_string(),
                 _ if event.title.trim().is_empty() => "Someone's in town!".to_string(),
                 _ => format!("{} is in town!", event.title),
             };
             let fallback_body = if event.event_type == "song_hunt" {
                 "He's lost a song. Help him find it."
+            } else if event.event_type == "tower" {
+                "Climb it floor by floor, through the portal in Town."
             } else {
                 "Someone new has arrived in Town."
             };

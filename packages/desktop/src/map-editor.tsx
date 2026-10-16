@@ -1289,13 +1289,21 @@ function IslandBar({
           portal {k} →{" "}
           <select
             style={btn(false)}
-            value={link.to}
+            value={link.next ? NEXT_FLOOR : link.to}
             onChange={(e) =>
               onEdit({
-                portals: { ...map.portals, [k]: { to: e.target.value } },
+                portals: {
+                  ...map.portals,
+                  [k]:
+                    e.target.value === NEXT_FLOOR
+                      ? { to: map.id, next: true }
+                      : { to: e.target.value },
+                },
               })
             }
           >
+            {/* The Tower's way on: this island's next floor. */}
+            <option value={NEXT_FLOOR}>next floor</option>
             {Object.keys(islands)
               .filter((id) => id !== map.id)
               .map((id) => (
@@ -1309,6 +1317,9 @@ function IslandBar({
     </div>
   );
 }
+
+/** The portal-target choice for "this island's next floor" (the Tower). */
+const NEXT_FLOOR = "@next";
 
 const root = document.getElementById("root");
 if (root) createRoot(root).render(<MapEditor />);

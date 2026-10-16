@@ -111,6 +111,34 @@ describe("Sync flow", () => {
     expect(body.multipliers).toBeDefined();
   });
 
+  it("folds in the XP the Tower left waiting (00115)", async () => {
+    const admin = getAdminClient();
+    const { data: before } = await admin
+      .from("herzies")
+      .select("xp")
+      .eq("user_id", user.userId)
+      .single();
+    await admin
+      .from("herzies")
+      .update({ pending_xp: 7 })
+      .eq("user_id", user.userId);
+    const res = await syncRoute(
+      authenticatedRequest("/sync", user.accessToken, {
+        nowPlaying: null,
+        minutesListened: 0,
+        genres: [],
+      }),
+    );
+    expect(res.status).toBe(200);
+    const { data: after } = await admin
+      .from("herzies")
+      .select("xp, pending_xp")
+      .eq("user_id", user.userId)
+      .single();
+    expect(after?.pending_xp).toBe(0);
+    expect(after?.xp).toBe((before?.xp ?? 0) + 7);
+  });
+
   it("grants XP for listening time", async () => {
     // Backdate the sync clocks so the elapsed-time cap allows 5 minutes
     await backdateSyncClocks(user.userId, 10 * 60_000);

@@ -241,13 +241,15 @@ export class TowerEngine {
     const { entry, radius } = this.arena;
     // Far from the entry: on the far side of the middle, spread out.
     const away = Math.atan2(-entry.x, -entry.z);
-    const r = radius - 4;
+    // In the open meadow: the wooded rim (past about 13) is the client's
+    // trees, which mobs here know nothing of.
+    const r = Math.min(radius - 4, 12);
     for (let i = 0; i < n; i++) {
       let x = 0;
       let z = 0;
       for (let tries = 0; tries < 20; tries++) {
         const a = away + (this.rand() - 0.5) * 1.6;
-        const d = r * (0.25 + 0.7 * this.rand());
+        const d = r * (0.3 + 0.7 * this.rand());
         x = Math.sin(a) * d;
         z = Math.cos(a) * d;
         if (this.mobs.every((m) => Math.hypot(m.x - x, m.z - z) > 2.2)) break;

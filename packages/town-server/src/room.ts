@@ -639,11 +639,10 @@ export class TownRoom extends DurableObject<Env> {
       this.strike(s);
       return;
     }
-    const out = this.fight.next(p.uid, now);
-    if (!out.length) return;
-    const { spawn } = TOWN_MAPS.tower;
-    p.guard = newGuard(spawn.x, spawn.z, now);
-    for (const o of out) this.dispatch(o);
+    // The move back to the start needs nothing here: a jump onto the map's
+    // spawn is always allowed (checkMove), and the frames still on their
+    // way from the far portal must pass too.
+    for (const o of this.fight.next(p.uid, now)) this.dispatch(o);
   }
 
   private onCast(s: Session, message: ArrayBuffer, now: number) {

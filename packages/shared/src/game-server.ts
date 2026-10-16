@@ -547,9 +547,11 @@ export async function processSync(
   // herzies.pending_xp rather than going straight onto xp, which this sync
   // writes whole from what it read; taken (and zeroed) in one step here. A
   // database without it (before 00115) just has none to give.
-  const { data: towerXp } = await admin.rpc("take_pending_xp", {
-    p_user: userId,
-  });
+  // Only asked when the row read above says there's some (sync is hot).
+  const { data: towerXp } =
+    Number(row.pending_xp ?? 0) > 0
+      ? await admin.rpc("take_pending_xp", { p_user: userId })
+      : { data: 0 };
   if (typeof towerXp === "number" && towerXp > 0) {
     const levelBefore = herzie.level;
     const events = applyXp(herzie, towerXp);
