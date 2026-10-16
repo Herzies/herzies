@@ -1,8 +1,10 @@
 import { gapColour, MOB } from "@herzies/shared/tower";
+import { Html } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { NAME_SHADOW } from "../nameFade";
 import { liveDummies } from "./Dummies";
 import { type DummyState, newTarget } from "./dummy";
 import {
@@ -132,24 +134,10 @@ const GAP_COLOURS = {
   red: "#ff5a4f",
 } as const;
 
-/** The tag over a mob: "Lv 7" and its health bar, drawn on a canvas. */
-function drawTag(
-  ctx: CanvasRenderingContext2D,
-  level: number,
-  you: number,
-  hp: number,
-  maxHp: number,
-) {
+/** The health bar over a mob, drawn on a canvas. (Its level is a label
+ * over it: text this small doesn't survive the Town's pixelation.) */
+function drawTag(ctx: CanvasRenderingContext2D, hp: number, maxHp: number) {
   ctx.clearRect(0, 0, TAG_W, TAG_H);
-  ctx.font = "bold 18px sans-serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "top";
-  ctx.lineWidth = 4;
-  ctx.strokeStyle = "rgba(0,0,0,0.7)";
-  const label = `Lv ${level}`;
-  ctx.strokeText(label, TAG_W / 2, 2);
-  ctx.fillStyle = GAP_COLOURS[gapColour(level - you)];
-  ctx.fillText(label, TAG_W / 2, 2);
   const w = 100;
   const x = (TAG_W - w) / 2;
   ctx.fillStyle = "rgba(0,0,0,0.6)";
@@ -216,7 +204,9 @@ function Mob({ id }: { id: number }) {
     };
   }, [id]);
 
-  const drawn = useRef({ hp: -1, level: -1, you: -1 });
+  const tower = bossFight.tower;
+  const drawn = useRef({ hp: -1 });
+  const label = useRef<HTMLDivElement>(null);
   const crouch = useRef(0);
   useFrame((_, frameDt) => {
     const m: MobView | undefined = towerMobs.get(id);
@@ -240,6 +230,7 @@ function Mob({ id }: { id: number }) {
       g.scale.setScalar(Math.max(0.001, 1 - u * u));
       g.position.y = -u * 0.3;
       if (tag.current) tag.current.visible = false;
+      if (label.current) label.current.style.display = "none";
       if (u >= 1) g.visible = false;
       return;
     }
@@ -263,11 +254,11 @@ function Mob({ id }: { id: number }) {
     const tower = bossFight.tower;
     if (tower && tag.current) {
       const d = drawn.current;
-      if (d.hp !== m.hp || d.level !== tower.level || d.you !== tower.you) {
+      if (d.hp !== m.hp) {
         const ctx = canvas.getContext("2d");
-        if (ctx) drawTag(ctx, tower.level, tower.you, m.hp, m.maxHp);
+        if (ctx) drawTag(ctx, m.hp, m.maxHp);
         texture.needsUpdate = true;
-        Object.assign(d, { hp: m.hp, level: tower.level, you: tower.you });
+        d.hp = m.hp;
       }
     }
   });
@@ -288,6 +279,21 @@ function Mob({ id }: { id: number }) {
         scale={[1.3, (1.3 * TAG_H) / TAG_W, 1]}
         renderOrder={10}
       />
+      {tower ? (
+        // Just over the bar, as a name tag is: crisp at any pixel size.
+        <Html position={[0, MOB.top + 0.56, 0]} center zIndexRange={[19, 0]}>
+          <div
+            ref={label}
+            className="pointer-events-none whitespace-nowrap text-[11px] font-bold leading-none"
+            style={{
+              color: GAP_COLOURS[gapColour(tower.level - tower.you)],
+              textShadow: NAME_SHADOW,
+            }}
+          >
+            Lv {tower.level}
+          </div>
+        </Html>
+      ) : null}
     </group>
   );
 }
