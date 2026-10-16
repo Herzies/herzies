@@ -51,6 +51,7 @@ import {
   townLive,
   townSave,
 } from "./components/town/runtime";
+import { SkillHud } from "./components/town/SkillHud";
 import TownCanvas from "./components/town/TownCanvas";
 import { setVitals } from "./components/town/vitals";
 
@@ -304,6 +305,7 @@ function Sandbox() {
     <div style={{ position: "relative", height: "100%" }}>
       <TownVitals inFight={params.get("map") === "bossroom"} />
       <BossHud name="The boss" />
+      <SkillHud />
       <TownCanvas
         spots={spots}
         player={player}
