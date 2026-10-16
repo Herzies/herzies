@@ -1,12 +1,17 @@
+import { BOBOKU_KEY, MEDEA_KEY } from "@herzies/shared";
 import { useSyncExternalStore } from "react";
 import type { EventCard } from "../TownScene";
 
 // Who the player has talked to: a visitor nobody's talked to yet wears a "!"
 // over their head until they do. Each visit is its own arrival (George back
-// next week is new again). Boboku lives here, so he never wears one. Kept in
+// next week is new again). The residents live here, so they never wear one. Kept in
 // localStorage, per device: a "!" coming back on a new machine is harmless.
 
 const STORAGE_KEY = "herzies.town.met";
+
+/** Who lives in Town rather than visiting: they never arrive, so never wear
+ * a "!". */
+export const RESIDENTS: ReadonlySet<string> = new Set([BOBOKU_KEY, MEDEA_KEY]);
 /** Enough for every visit in a long while; the oldest are forgotten. */
 const MAX_KEPT = 200;
 

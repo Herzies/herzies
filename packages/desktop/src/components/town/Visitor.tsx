@@ -1,4 +1,3 @@
-import { BOBOKU_KEY } from "@herzies/shared";
 import { HerzieModel, turnToward } from "@herzies/shared/gl";
 import { Html } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
@@ -8,7 +7,7 @@ import { cn } from "../../lib/utils";
 import { lookOf } from "../TownScene";
 import { VISITOR_THEMES } from "../VisitorRowTheme";
 import { ambient } from "./ambient";
-import { markMet, useMet } from "./met";
+import { markMet, RESIDENTS, useMet } from "./met";
 import { NAME_SHADOW, nameOpacity } from "./nameFade";
 import { NOTICE_RANGE, type TownSpot, townSave } from "./runtime";
 
@@ -81,10 +80,9 @@ export function Visitor({
   const open = card.openKey;
   const Tag = open ? "button" : "div";
   // A visitor who's arrived and you haven't talked to yet: a "!" over their
-  // head. Boboku lives here, so he never arrives.
+  // head. The residents live here, so they never arrive.
   const met = useMet(card);
-  const fresh =
-    !!herzie && live && !!open && !met && card.type !== BOBOKU_KEY;
+  const fresh = !!herzie && live && !!open && !met && !RESIDENTS.has(card.type);
   const talk = () => {
     if (!open) return;
     markMet(card);

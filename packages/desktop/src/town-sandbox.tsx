@@ -21,6 +21,7 @@ import "./globals.css";
 import {
   attackStyle,
   CLASS_DEFS,
+  type ItemUnit,
   isHerzieClass,
   signTownTicket,
 } from "@herzies/shared";
@@ -42,6 +43,8 @@ import {
 } from "./components/town/combat/results";
 import { setMySkill } from "./components/town/combat/skills";
 import { combat } from "./components/town/combat/state";
+import { Hotbar } from "./components/town/Hotbar";
+import { assignHotbar } from "./components/town/hotbarSlots";
 import { setTownTicketSource, townNet } from "./components/town/net/townNet";
 import {
   goToMap,
@@ -74,8 +77,8 @@ const card = (type: string, title: string): EventCard => ({
   description: null,
   status: "live",
   at: null,
-  // Boboku opens; the rest are scenery.
-  openKey: type === "boboku" ? "boboku" : null,
+  // The residents open; the rest are scenery.
+  openKey: type === "boboku" || type === "medea" ? type : null,
   eventId: `sandbox-${type}`,
 });
 
@@ -85,6 +88,7 @@ const spots: TownSpot[] = [
   ["boss_fight", "The boss"],
   ["song_hunt", "Orphiez"],
   ["boboku", "Boboku"],
+  ["medea", "Medea"],
 ]
   // Only those the map has a spot for (the boss lives in its cave now).
   .filter(([type]) => SPOTS[type])
@@ -125,6 +129,17 @@ const player = {
     spirit: params.get("spirit") ?? "spirit-orb",
   } as Record<string, string>,
 };
+// `?hotbar=star-candy`: that item on slot 2, with three in a pretend bank.
+const hotbarParam = params.get("hotbar");
+if (hotbarParam) assignHotbar("2", hotbarParam);
+const hotbarUnits: ItemUnit[] = hotbarParam
+  ? [0, 1, 2].map((i) => ({
+      id: `sandbox-${i}`,
+      itemId: hotbarParam,
+      upgradeLevel: 0,
+      equippedSlot: null,
+    }))
+  : [];
 // The end screen with a made-up table: `?results=victory|defeat`, and
 // `&rank=` for your place (past 10 shows under the "…"; 0 for none).
 const resultsParam = params.get("results");
@@ -308,6 +323,10 @@ function Sandbox() {
       <TownVitals inFight={params.get("map") === "bossroom"} />
       <BossHud name="The boss" />
       <SkillHud />
+      <Hotbar
+        units={hotbarUnits}
+        className="bottom-3 left-1/2 -translate-x-1/2"
+      />
       <TownCanvas
         spots={spots}
         player={player}

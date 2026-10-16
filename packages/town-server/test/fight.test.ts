@@ -505,3 +505,52 @@ describe("being knocked out and coming back", () => {
     expect(f.report(T0 + 10_100, true)?.hp).toEqual([{ uid: "a", hp: 0 }]);
   });
 });
+
+describe("eating", () => {
+  const hurt = (hp: number) => {
+    const f = new FightRuntime(claim(), T0);
+    f.join("a", 1, ticket("a", hp), { x: 0, z: 8 }, T0);
+    return f;
+  };
+
+  it("heals, capped at max, and reports it like a skill's heal", () => {
+    const f = hurt(150);
+    expect(f.tryEat("a", T0)).toBeNull();
+    const out = f.eat("a", 100);
+    expect(f.player("a")?.hp).toBe(200);
+    expect(msgs(out, "hp")[0]?.msg).toEqual({
+      t: "hp",
+      id: 1,
+      hp: 200,
+      maxHp: 200,
+    });
+    const r = f.report(T0 + 10, true);
+    expect(r?.hp).toEqual([{ uid: "a", hp: 200, heal: 50 }]);
+  });
+
+  it("refuses at full health, while down, or before the cooldown", () => {
+    expect(hurt(200).tryEat("a", T0)).toBe("full");
+
+    const f = hurt(50);
+    expect(f.tryEat("a", T0)).toBeNull();
+    // A second while the first is still being used up.
+    expect(f.tryEat("a", T0 + 100)).toBe("cooldown");
+    // A client keeping to the cooldown, its press arriving a little early.
+    expect(f.tryEat("a", T0 + 900)).toBeNull();
+
+    const down = new FightRuntime(claim(), T0);
+    down.join(
+      "a",
+      1,
+      ticket("a", 0, { hp: { hp: 0, maxHp: 200, down: true } }),
+      { x: 0, z: 8 },
+      T0,
+    );
+    expect(down.tryEat("a", T0)).toBe("down");
+    expect(down.eat("a", 100)).toEqual([]);
+  });
+
+  it("isn't for anyone outside the fight", () => {
+    expect(hurt(50).tryEat("b", T0)).toBe("not-here");
+  });
+});

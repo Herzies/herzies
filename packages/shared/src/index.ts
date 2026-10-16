@@ -14,6 +14,7 @@ export * from "./item-canvas.js";
 export * from "./items.js";
 export * from "./lastfm-link.js";
 export * from "./leveling.js";
+export * from "./medea.js";
 export * from "./name.js";
 export * from "./npc-looks.js";
 export * from "./Sky.js";

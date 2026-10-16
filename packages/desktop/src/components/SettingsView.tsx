@@ -410,7 +410,7 @@ export function SettingsView({
                 type="button"
                 className="btn border-[#555] text-text-dim"
                 title="Drops a random item in front of you in the Town (nothing is granted)"
-                onClick={debugDropLoot}
+                onClick={() => debugDropLoot()}
               >
                 Drop Test Loot
               </button>

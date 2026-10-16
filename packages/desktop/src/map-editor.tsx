@@ -42,6 +42,7 @@ import {
   TOWN_MAPS_LOCAL,
   type TownSpot,
 } from "./components/town/runtime";
+import { STAND, standFacing } from "./components/town/Stands";
 import TownCanvas, { PIXEL_SCALE } from "./components/town/TownCanvas";
 
 type Layer = "terrain" | "objects";
@@ -67,6 +68,7 @@ const PALETTE: Paint[] = [
       "B",
       "L",
       "_",
+      "M",
       "D",
       "O",
     ] as const
@@ -78,10 +80,22 @@ const PALETTE: Paint[] = [
   { layer: "objects", ch: ".", name: "Clear", color: "#000000" },
 ];
 /** Each palette entry's key, in order (clear last): the number row, then
- * K (shop, "kiosk"), C (cave), U (bush), L (lamp post), N (bench), Y
- * (training dummy) and O (portal). Clear of the 3D preview's keys (WASD,
+ * K (shop, "kiosk"), C (cave), U (bush), L (lamp post), N (bench), T
+ * (market stand), Y (training dummy) and O (portal). Clear of the 3D preview's keys (WASD,
  * arrows, E) and the tools' (B, R, F, P). */
-const KEYS = [..."1234567890-", "k", "c", "=", "u", "l", "n", "y", "o", "x"];
+const KEYS = [
+  ..."1234567890-",
+  "k",
+  "c",
+  "=",
+  "u",
+  "l",
+  "n",
+  "t",
+  "y",
+  "o",
+  "x",
+];
 type Tool = "brush" | "rect" | "fill";
 const TOOLS: { tool: Tool; key: string; name: string }[] = [
   { tool: "brush", key: "b", name: "Brush" },
@@ -142,9 +156,11 @@ function eighthsAt(map: TownMap, col: number, row: number): number {
     facingAt(map, col, row) ??
     (o === "_"
       ? benchFacing(map, col, row)
-      : o === "@"
-        ? Math.atan2(-x, -z)
-        : objectJitter(map, col, row).yaw);
+      : o === STAND
+        ? standFacing(map, col, row)
+        : o === "@"
+          ? Math.atan2(-x, -z)
+          : objectJitter(map, col, row).yaw);
   return Math.round(yaw / EIGHTH);
 }
 

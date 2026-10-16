@@ -8,6 +8,7 @@
  *
  * Requires: `npx supabase start`
  */
+import { BOSS_BONUS_DROPS, bossLootWeights } from "@herzies/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { POST as syncRoute } from "@/app/api/sync/route";
 import {
@@ -16,7 +17,6 @@ import {
   createTestHerzie,
   createTestUser,
   getAdminClient,
-  seedInventory,
   setLocalEnv,
 } from "./integration-helpers";
 
@@ -67,6 +67,43 @@ async function bossState(eventId: string) {
     escaped: boolean;
   };
 }
+
+/** Give a boss rewards nothing else can drop, to tell them apart from its
+ * random loot (both are non-droppable, so never rolled). */
+const BASE_REWARD = "first-edition";
+const TOP_REWARD = "spirit-orb";
+async function setRewards(eventId: string) {
+  const { data } = await admin()
+    .from("events")
+    .select("config")
+    .eq("id", eventId)
+    .single();
+  await admin()
+    .from("events")
+    .update({
+      config: {
+        ...(data?.config ?? {}),
+        rewardItemId: BASE_REWARD,
+        topRewardItemId: TOP_REWARD,
+      },
+    })
+    .eq("id", eventId);
+}
+
+/** The items a fight dropped for a herzie, by item id. */
+async function dropsOf(eventId: string, userId: string) {
+  const { data } = await admin()
+    .from("pending_drops")
+    .select("item_id")
+    .eq("source_event", eventId)
+    .eq("user_id", userId);
+  const out: Record<string, number> = {};
+  for (const d of data ?? []) out[d.item_id] = (out[d.item_id] ?? 0) + 1;
+  return out;
+}
+
+const total = (drops: Record<string, number>) =>
+  Object.values(drops).reduce((a, n) => a + n, 0);
 
 async function inventoryOf(userId: string) {
   const { data } = await admin()
@@ -244,6 +281,7 @@ describe("the killing blow", () => {
 describe("settling", () => {
   it("pays every participant once and is safe to re-run", async () => {
     const boss = (await spawnBoss(60))!;
+    await setRewards(boss);
     const players = await Promise.all(
       Array.from({ length: 4 }, () => makePlayer()),
     );
@@ -260,11 +298,29 @@ describe("settling", () => {
     });
     expect(paid).toBe(4);
 
-    // Top 3 get base + gold; everyone else gets base only. Both ids are "cd"
-    // in this config, so the top three hold 2 and the tail holds 1.
-    expect((await inventoryOf(players[0].userId)).cd).toBe(2);
-    expect((await inventoryOf(players[2].userId)).cd).toBe(2);
-    expect((await inventoryOf(players[3].userId)).cd).toBe(1);
+    // Everyone: the base reward and ten random things; the top three the
+    // top reward too. All on the ground, from this fight.
+    const pool = new Set(bossLootWeights().map((w) => w.itemId));
+    const rolled = new Set<string>();
+    for (const [i, p] of players.entries()) {
+      const drops = await dropsOf(boss, p.userId);
+      const top = i < 3;
+      expect(total(drops)).toBe(top ? 12 : 11);
+      expect(drops[BASE_REWARD]).toBe(1);
+      expect(drops[TOP_REWARD] ?? 0).toBe(top ? 1 : 0);
+      const random = Object.entries(drops).filter(
+        ([id]) => id !== BASE_REWARD && id !== TOP_REWARD,
+      );
+      expect(random.reduce((a, [, n]) => a + n, 0)).toBe(BOSS_BONUS_DROPS);
+      for (const [id] of random) {
+        expect(pool.has(id)).toBe(true);
+        rolled.add(id);
+      }
+    }
+    // Forty rolls, each its own: all forty the same item (from a pool
+    // that's ~65% CDs) would be about 1 in 30 million, unless the roll ran
+    // once and was copied.
+    expect(rolled.size).toBeGreaterThan(1);
 
     // Re-running must be a no-op — this is what makes a cron-driven settle
     // safe, and what lets a half-finished payout be recovered.
@@ -272,12 +328,13 @@ describe("settling", () => {
       p_event_id: boss,
     });
     expect(again).toBe(0);
-    expect((await inventoryOf(players[0].userId)).cd).toBe(2);
+    expect(total(await dropsOf(boss, players[0].userId))).toBe(12);
     expect((await bossState(boss)).settled).toBe(true);
   });
 
   it("recovers a half-finished payout", async () => {
     const boss = (await spawnBoss(40))!;
+    await setRewards(boss);
     const players = await Promise.all(
       Array.from({ length: 4 }, () => makePlayer()),
     );
@@ -291,7 +348,7 @@ describe("settling", () => {
     await admin().rpc("settle_boss_fight", { p_event_id: boss });
 
     // Simulate a payout that died halfway through: for the first two players
-    // neither the claim nor the grant ever landed. Rolling back the claim
+    // neither the claim nor the drops ever landed. Rolling back the claim
     // alone would not be faithful — it would make a correct re-run look like
     // a double-pay.
     const unpaid = [players[0].userId, players[1].userId];
@@ -300,9 +357,11 @@ describe("settling", () => {
       .delete()
       .eq("event_id", boss)
       .in("user_id", unpaid);
-    // Their copies come from item_units now; inventory_v2 is derived from it
-    // and can't be written directly.
-    await Promise.all(unpaid.map((id) => seedInventory(id, {})));
+    await admin()
+      .from("pending_drops")
+      .delete()
+      .eq("source_event", boss)
+      .in("user_id", unpaid);
     await admin()
       .from("boss_state")
       .update({ settled: false })
@@ -314,11 +373,11 @@ describe("settling", () => {
     expect(paid).toBe(2);
 
     // The two who missed out are now paid, at their correct rank.
-    expect((await inventoryOf(players[0].userId)).cd).toBe(2);
-    expect((await inventoryOf(players[1].userId)).cd).toBe(2);
+    expect(total(await dropsOf(boss, players[0].userId))).toBe(12);
+    expect((await dropsOf(boss, players[1].userId))[TOP_REWARD]).toBe(1);
     // And the two already paid were not paid a second time.
-    expect((await inventoryOf(players[2].userId)).cd).toBe(2);
-    expect((await inventoryOf(players[3].userId)).cd).toBe(1);
+    expect(total(await dropsOf(boss, players[2].userId))).toBe(12);
+    expect(total(await dropsOf(boss, players[3].userId))).toBe(11);
   });
 
   it("does not settle a boss that is still alive", async () => {

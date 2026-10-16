@@ -46,6 +46,11 @@
       "import": "./dist/skills.js",
       "require": "./dist/skills.js"
     },
+    "./medea": {
+      "types": "./dist/medea.d.ts",
+      "import": "./dist/medea.js",
+      "require": "./dist/medea.js"
+    },
     "./stats": {
       "types": "./dist/stats.d.ts",
       "import": "./dist/stats.js",

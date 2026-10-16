@@ -16,6 +16,12 @@ import {
   GEORGE_EQUIPPED,
   GEORGE_SEED,
   getItem,
+  MEDEA_EQUIPPED,
+  MEDEA_KEY,
+  MEDEA_NAME,
+  MEDEA_SEED,
+  MEDEA_STAGE,
+  MEDEA_STOCK,
   MERCHANT_NAME,
   NANDOR_EQUIPPED,
   NANDOR_SEED,
@@ -76,6 +82,18 @@ export const BOBOKU_LINES = [
   "Pick your weapon. I mean instrument. Same thing.",
   "No rush, friend. I'm not going anywhere.",
   "Scratches add character. Ask any Record Slinger.",
+];
+
+/** Medea's murmurs: sweet on the surface, something older underneath. */
+export const MEDEA_LINES = [
+  "Sweets for the wounded. Potions for the brave.",
+  "Star Candy. Picked when the sky was falling. Mostly.",
+  "One bite and the bruises forget themselves.",
+  "Don't ask what's in it. You'll sleep better.",
+  "Hurt? Of course you are. Come closer.",
+  "The boss bites. My candy bites back.",
+  "I knew you'd come. They always come back.",
+  "Pink for the heart, blue for the stars. Eat it all.",
 ];
 
 /** Treats as a price or balance, the treat counterpart of <Coin>. */
@@ -153,14 +171,34 @@ const BOBOKU: MerchantPersona = {
   soldOut: "Boboku's shelves are bare.",
 };
 
-/** Boboku's price list as stall lines: no caps, no limits. */
-const BOBOKU_STALL: MerchantStockView[] = BOBOKU_STOCK.map((l) => ({
-  ...l,
-  perPlayerLimit: null,
-  totalStock: null,
-  remaining: null,
-  yourBought: 0,
-}));
+const MEDEA: MerchantPersona = {
+  name: MEDEA_NAME,
+  seed: MEDEA_SEED,
+  stage: MEDEA_STAGE,
+  equipped: MEDEA_EQUIPPED,
+  lines: MEDEA_LINES,
+  shortName: MEDEA_NAME,
+  colour: "cyan",
+  headingClass: "text-[#ff8fd0]",
+  price: (amount) => <Coin amount={amount} />,
+  broke: "Insufficient funds",
+  soldOut: "Medea's jars are empty.",
+};
+
+/** A resident's price list as stall lines: no caps, no limits. */
+const residentStall = (
+  stock: readonly { itemId: string; price: number }[],
+): MerchantStockView[] =>
+  stock.map((l) => ({
+    ...l,
+    perPlayerLimit: null,
+    totalStock: null,
+    remaining: null,
+    yourBought: 0,
+  }));
+
+const BOBOKU_STALL = residentStall(BOBOKU_STOCK);
+const MEDEA_STALL = residentStall(MEDEA_STOCK);
 
 /** Why a line can't be bought right now, or null if it can. */
 function blockedReason(
@@ -179,8 +217,9 @@ function blockedReason(
 /**
  * A merchant's stall: Good ol' George (`merchant`, coins) or Nandor the
  * Treatless (`treat_trader`, treats), whose prices and limits come from the
- * live event (projected by buildMerchantConfig) — or Boboku, always in Town,
- * selling from BOBOKU_STOCK with no event at all. The server re-checks
+ * live event (projected by buildMerchantConfig) — or Boboku or Medea,
+ * always in Town, selling from BOBOKU_STOCK / MEDEA_STOCK with no event at
+ * all. The server re-checks
  * everything on buy, so the disabled states here are only a courtesy.
  */
 export function MerchantPanel({
@@ -192,8 +231,9 @@ export function MerchantPanel({
   onLog,
   paused,
 }: {
-  /** The visit behind the stall, or Boboku's, which has none. */
-  event: GameEvent | typeof BOBOKU_KEY;
+  /** The visit behind the stall, or a resident's (Boboku, Medea), which
+   * has none. */
+  event: GameEvent | typeof BOBOKU_KEY | typeof MEDEA_KEY;
   /** Tab hidden or window unfocused — stop the 3D frame timer and chatter. */
   paused: boolean;
   currency: number;
@@ -205,7 +245,8 @@ export function MerchantPanel({
   onLog?: (msg: string) => void;
 }) {
   const boboku = event === BOBOKU_KEY;
-  const config = boboku ? null : event.config;
+  const medea = event === MEDEA_KEY;
+  const config = boboku || medea ? null : event.config;
   const [pendingItemId, setPendingItemId] = useState<string | null>(null);
   const [inspectItemId, setInspectItemId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -220,9 +261,11 @@ export function MerchantPanel({
 
   const persona = boboku
     ? BOBOKU
-    : event.type === "treat_trader"
-      ? NANDOR
-      : GEORGE;
+    : medea
+      ? MEDEA
+      : event.type === "treat_trader"
+        ? NANDOR
+        : GEORGE;
   // Nandor is paid in unworn treats; George in coins.
   const balance =
     persona === NANDOR
@@ -232,7 +275,9 @@ export function MerchantPanel({
 
   const lines = boboku
     ? BOBOKU_STALL
-    : ((config as unknown as MerchantView).stock ?? []);
+    : medea
+      ? MEDEA_STALL
+      : ((config as unknown as MerchantView).stock ?? []);
   const stock = lines.map((line) => {
     const extra = boughtNow[line.itemId] ?? 0;
     return {
@@ -247,6 +292,7 @@ export function MerchantPanel({
     setPendingItemId(itemId);
     try {
       if (boboku) await herzies.buyFromBoboku(itemId, 1);
+      else if (medea) await herzies.buyFromMedea(itemId, 1);
       else await herzies.buyFromMerchant(event.id, itemId, 1);
       setBoughtNow((b) => ({ ...b, [itemId]: (b[itemId] ?? 0) + 1 }));
       onLog?.(

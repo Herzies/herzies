@@ -11,6 +11,10 @@
  *
  * Everything lands in the RPCs of 00101, which only ever lower HP (a report)
  * or add a capped bonus (rest) or restore half (respawn from down).
+ *
+ * The room also asks here to use up a consumable a fighter eats (00113's
+ * eat_item, without touching HP: the room heals the fighter itself and
+ * reports it like a skill's heal).
  */
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { normalizeEquipped } from "../_shared/shared/items.ts";
@@ -88,6 +92,9 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
     };
     /** The fight is over: the cave's end screen, for these herzies. */
     results?: { event: string; uids: string[] };
+    /** action "eat": who ate what. */
+    uid?: string;
+    item?: string;
   };
   try {
     msg = JSON.parse(body);
@@ -95,6 +102,26 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
     return jsonResponse({ error: "Bad JSON" }, 400);
   }
   const db = admin();
+  if (msg.action === "eat") {
+    // Use one up; the room heals. Never retried, so it can't eat twice.
+    if (!UUID.test(msg.uid ?? "") || typeof msg.item !== "string") {
+      return jsonResponse({ error: "Bad eat" }, 400);
+    }
+    try {
+      const res = (await rpc(db, "eat_item", {
+        p_user_id: msg.uid,
+        p_item_id: msg.item,
+        p_apply_hp: false,
+      })) as { ok: boolean; heal?: number; reason?: string } | null;
+      return jsonResponse({
+        ok: !!res?.ok,
+        heal: res?.heal ?? 0,
+        reason: res?.reason ?? null,
+      });
+    } catch {
+      return jsonResponse({ ok: false, reason: "failed" }, 500);
+    }
+  }
   if (msg.action === "report") {
     const hp = (msg.hp ?? []).slice(0, MAX_BATCH).filter(
       (r) => UUID.test(r.uid) && Number.isFinite(r.hp),

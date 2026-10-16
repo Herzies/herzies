@@ -488,7 +488,23 @@ export type ClientMessage =
   | { t: "ticket"; ticket: string }
   /** A class skill, aimed (yaw, pitch) like a cast. `seq` echoes back in a
    * refusal, so the client can undo just that prediction. */
-  | { t: "skill"; skill: string; seq: number; yaw: number; pitch: number };
+  | { t: "skill"; skill: string; seq: number; yaw: number; pitch: number }
+  /** Eat a consumable (a Star Candy) in a boss fight, where the room holds
+   * HP. `seq` echoes back in the answer. Elsewhere the client eats through
+   * the API instead. */
+  | { t: "eat"; item: string; seq: number };
+
+/** Why the room refused to let you eat: knocked out, already at full HP,
+ * too soon after the last one, none left in the bank, not something you
+ * eat, or not in a fight (eat through the API instead). */
+export type EatRefusal =
+  | "down"
+  | "full"
+  | "cooldown"
+  | "none-left"
+  | "not-consumable"
+  | "not-here"
+  | "failed";
 
 /** A shape the boss is about to hit the floor with. Times are server clock
  * (ms, the same clock as snapshots); a client shows the remaining windup
@@ -600,7 +616,17 @@ export type ServerMessage =
    * or 0 when it can't be used here at all. */
   | { t: "skillDenied"; skill: string; seq: number; readyAt: number }
   /** One of your skills levelled up (sent to you alone). */
-  | { t: "skillUp"; skill: string; level: number };
+  | { t: "skillUp"; skill: string; level: number }
+  /** The answer to your `eat` (sent to you alone). The HP itself arrives as
+   * an `hp`, like any heal. */
+  | {
+      t: "ate";
+      seq: number;
+      item: string;
+      ok: boolean;
+      heal?: number;
+      reason?: EatRefusal;
+    };
 
 export function parseServerMessage(text: string): ServerMessage | null {
   try {

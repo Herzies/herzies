@@ -15,6 +15,7 @@ import {
   dot3,
   GOLD_RAMP,
   LIGHT,
+  MEDEA_RAMP,
   NANDOR_RAMP,
   OCEAN_RAMP,
   PUMPKIN_RAMP,
@@ -2849,6 +2850,8 @@ export const GOLD_SCHEME_ID = "npc-gold";
 export const NANDOR_SCHEME_ID = "npc-nandor";
 /** Colour-scheme key for Boboku's orange, the same arrangement again. */
 export const BOBOKU_SCHEME_ID = "npc-boboku";
+/** Colour-scheme key for Medea's pink-to-plum, the same arrangement again. */
+export const MEDEA_SCHEME_ID = "npc-medea";
 
 const COLOR_SCHEMES: Record<string, readonly string[]> = {
   prism: RAINBOW_RAMP,
@@ -2864,6 +2867,7 @@ const COLOR_SCHEMES: Record<string, readonly string[]> = {
   [GOLD_SCHEME_ID]: GOLD_RAMP,
   [NANDOR_SCHEME_ID]: NANDOR_RAMP,
   [BOBOKU_SCHEME_ID]: BOBOKU_RAMP,
+  [MEDEA_SCHEME_ID]: MEDEA_RAMP,
 };
 
 /** True for spheres that a colour scheme is allowed to repaint. */

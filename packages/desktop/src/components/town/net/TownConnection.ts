@@ -428,6 +428,14 @@ export class TownConnection {
     this.sendJson({ t: "skill", skill, seq, yaw, pitch });
   }
 
+  /** Eat a consumable in a boss fight, where the room holds HP. `seq`
+   * comes back in its `ate`. False if there's no room to ask. */
+  sendEat(item: string, seq: number): boolean {
+    if (this.status !== "online") return false;
+    this.sendJson({ t: "eat", item, seq });
+    return true;
+  }
+
   private addRemote(p: TownPlayer) {
     if (p.id === this.you) return;
     const existing = this.remotes.get(p.id);

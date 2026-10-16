@@ -1,4 +1,9 @@
-import { type Equipped, type HerzieStats, isTownMapId } from "@herzies/shared";
+import {
+  type Equipped,
+  type HerzieStats,
+  type ItemUnit,
+  isTownMapId,
+} from "@herzies/shared";
 import {
   lazy,
   Suspense,
@@ -23,6 +28,7 @@ import { onLootLog } from "./town/combat/lootFeed";
 import { useBossResultsShown } from "./town/combat/results";
 import { useCombat } from "./town/combat/state";
 import { useFpsShown } from "./town/fps";
+import { Hotbar } from "./town/Hotbar";
 import { Key } from "./town/Key";
 import type { TownMap } from "./town/map";
 import { markMet } from "./town/met";
@@ -56,7 +62,10 @@ export function TownWorld({
   onLog,
   stats,
   profile,
+  units = [],
 }: {
+  /** The bank's copies: how many of each hotbar item are left. */
+  units?: readonly ItemUnit[];
   /** The player's herzie's stats: how hard its waves hit. */
   stats?: HerzieStats;
   /** Name, level and progress to the next level, for the card top left. */
@@ -260,12 +269,29 @@ export function TownWorld({
                   className="bottom-full right-2 mb-1.5"
                 />
               ) : null}
+              {!paused ? (
+                <Hotbar
+                  units={units}
+                  className="bottom-full left-1/2 mb-1.5 -translate-x-1/2"
+                />
+              ) : null}
               <TownHpBar inFight={!!map.combat} />
               <ExpBar progress={profile.progress} className="text-white/70" />
             </div>
           </>
         ) : null}
         {profile ? null : combatHint}
+        {profile || paused ? null : (
+          <Hotbar
+            units={units}
+            className={cn(
+              "left-1/2 -translate-x-1/2",
+              chatOverlay
+                ? "bottom-[calc(var(--dock-height,0px)+4.5rem)]"
+                : "bottom-3",
+            )}
+          />
+        )}
         {profile || paused ? null : (
           <SkillHud
             usable={!!map.combat}

@@ -216,6 +216,18 @@ describe("room", () => {
     expect(await a.next("correct")).toMatchObject({ x: 0, z: 0 });
   });
 
+  it("tells an eater out of a fight to eat through the app", async () => {
+    const a = await join(++shardSeq, "eater");
+    a.ws.send(JSON.stringify({ t: "eat", item: "star-candy", seq: 7 }));
+    expect(await a.next("ate")).toEqual({
+      t: "ate",
+      seq: 7,
+      item: "star-candy",
+      ok: false,
+      reason: "not-here",
+    });
+  });
+
   it("lets a reconnecting herzie keep its place", async () => {
     const shard = ++shardSeq;
     const watcher = await join(shard, "w");

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   applyEquip,
@@ -6,11 +7,13 @@ import {
   BANK_EXPANSION_SLOTS,
   BANK_SLOT_COUNT,
   type BankItemLookup,
+  BOSS_BONUS_DROPS,
   bankCapacity,
   bankSlotsUsed,
   bankTiles,
   bestUnitOf,
   bossDamagePerMinute,
+  bossLootWeights,
   DICE_TIERS,
   EQUIP_SLOTS,
   EQUIPPED_SLOTS,
@@ -1600,5 +1603,53 @@ describe("choosing copies from an item id", () => {
     unitsPlainestFirst(units, "boombox");
     unitsBestFirst(units, "boombox");
     expect(units).toEqual(snapshot);
+  });
+});
+
+describe("boss loot", () => {
+  const sql = readFileSync(
+    new URL(
+      "../../../supabase/migrations/00114_boss_bonus_loot.sql",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  it("rolls from the same weights as bossLootWeights", () => {
+    const roll = sql.slice(
+      sql.indexOf("FUNCTION public.boss_loot_roll("),
+      sql.indexOf("$$;"),
+    );
+    const rows = [...roll.matchAll(/\('([a-z0-9-]+)', (\d+)\)/g)].map(
+      ([, itemId, weight]) => ({ itemId, weight: Number(weight) }),
+    );
+    expect(rows).toEqual(bossLootWeights());
+  });
+
+  it("drops BOSS_BONUS_DROPS of them per herzie", () => {
+    expect(sql).toContain(`generate_series(1, ${BOSS_BONUS_DROPS})`);
+  });
+
+  it("leans rarer than a listening drop", () => {
+    /** The share of the weight on rare-or-better items. */
+    const rareShare = (
+      weightOf: (itemId: string, rarity: Rarity) => number,
+    ) => {
+      let rare = 0;
+      let total = 0;
+      for (const { itemId } of bossLootWeights()) {
+        const rarity = getItem(itemId)?.rarity ?? "common";
+        const w = weightOf(itemId, rarity);
+        total += w;
+        if (rarity !== "common" && rarity !== "uncommon") rare += w;
+      }
+      return rare / total;
+    };
+    const boss = new Map(bossLootWeights().map((w) => [w.itemId, w.weight]));
+    const listening = rareShare(
+      (id, rarity) =>
+        ITEM_DROP_WEIGHT_OVERRIDES[id] ?? RARITY_DROP_WEIGHTS[rarity],
+    );
+    expect(rareShare((id) => boss.get(id) ?? 0)).toBeGreaterThan(listening);
   });
 });

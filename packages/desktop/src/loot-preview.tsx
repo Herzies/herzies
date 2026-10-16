@@ -79,7 +79,10 @@ function Preview() {
     townSave.heading = Math.PI;
     setWalking(false);
     setRun((r) => r + 1);
-    debugDropLoot();
+    // `?count=12`: a boss's full haul.
+    debugDropLoot(
+      Number(new URLSearchParams(location.search).get("count") ?? 1),
+    );
   };
   return (
     <div style={{ position: "fixed", inset: 0 }}>

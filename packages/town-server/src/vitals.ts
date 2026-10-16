@@ -25,7 +25,12 @@ export type VitalsReport = {
     event: string;
     batch: string;
     /** Each herzie's damage, and the HP they healed or blocked (00111). */
-    damage: { uid: string; damage: number; healing?: number; blocked?: number }[];
+    damage: {
+      uid: string;
+      damage: number;
+      healing?: number;
+      blocked?: number;
+    }[];
   };
   /** Skill XP earned, named by `batch` like the boss damage. */
   skills?: {
@@ -61,8 +66,42 @@ export async function postVitals(
   env: Pick<Env, "TOWN_TICKET_SECRET" | "TOWN_VITALS_URL">,
   report: VitalsReport,
 ): Promise<VitalsReply | null> {
+  return (await signedPost(env, report)) as VitalsReply | null;
+}
+
+/** What `town-vitals` says about a fighter's `eat`: whether a copy was
+ * used up, and how much it heals. */
+export type EatReply = { ok: boolean; heal: number; reason: string | null };
+
+/** Use up one `item` from `uid`'s bank (00113 eat_item, HP untouched: the
+ * fight heals). Null when it couldn't be asked, which eats nothing. Never
+ * retried, so a lost reply can't eat twice. */
+export async function eatInDb(
+  env: Pick<Env, "TOWN_TICKET_SECRET" | "TOWN_VITALS_URL">,
+  uid: string,
+  item: string,
+): Promise<EatReply | null> {
+  const reply = (await signedPost(env, {
+    action: "eat",
+    uid,
+    item,
+  })) as Partial<EatReply> | null;
+  if (!reply) return null;
+  return {
+    ok: !!reply.ok,
+    heal: Number(reply.heal) || 0,
+    reason: reply.reason ?? null,
+  };
+}
+
+/** POST `payload` to `town-vitals`, signed. The reply's JSON, or null on
+ * any failure (logged). */
+async function signedPost(
+  env: Pick<Env, "TOWN_TICKET_SECRET" | "TOWN_VITALS_URL">,
+  payload: unknown,
+): Promise<unknown> {
   if (!env.TOWN_VITALS_URL) return null;
-  const body = JSON.stringify(report);
+  const body = JSON.stringify(payload);
   const ts = Date.now();
   const nonce = crypto.randomUUID();
   try {
@@ -87,7 +126,7 @@ export async function postVitals(
       );
       return null;
     }
-    return ((await res.json().catch(() => ({}))) ?? {}) as VitalsReply;
+    return (await res.json().catch(() => ({}))) ?? {};
   } catch (e) {
     console.log(JSON.stringify({ event: "vitals-error", detail: String(e) }));
     return null;

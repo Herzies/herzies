@@ -317,14 +317,14 @@ export function pruneShapes(now: number): void {
  * in front of you, wherever you are in the Town, to watch and tune the
  * drop, the pickup and the spirit's fetch. Nothing is granted.
  */
-export function debugDropLoot(): void {
+export function debugDropLoot(count = 1): void {
   const pool = ITEMS.filter((i) => getItemIcon(i));
-  const item = pool[Math.floor(Math.random() * pool.length)];
+  const pick = () => pool[Math.floor(Math.random() * pool.length)].id;
   // Stamped NaN: the Town isn't drawing while Settings is open, so the
   // drop starts on its first frame back.
   bossFight.loot = {
     id: ++lootSeq,
-    drops: [{ id: "", item: item.id }],
+    drops: Array.from({ length: count }, () => ({ id: "", item: pick() })),
     at: Number.NaN,
     here: true,
   };

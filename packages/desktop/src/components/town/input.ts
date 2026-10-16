@@ -1,4 +1,6 @@
 import { useEffect, useRef } from "react";
+import { eat } from "./eat";
+import { HOTBAR_KEYS, type HotbarKey, hotbarItem } from "./hotbarSlots";
 
 /** What the player is asking for this frame. Read by the game loop; written
  * only by the listeners below. */
@@ -64,7 +66,8 @@ const idle = (): TownInput => ({
  * not walk the herzie, and keys held when the window loses focus must not
  * stay held. Both are handled here. Listens only while `active`.
  *
- * `onInteract` fires on E; Space raises `jump`, for the game loop to clear. `surface` is the element mouse buttons count on
+ * `onInteract` fires on E; Space raises `jump`, for the game loop to clear;
+ * 2, 3 and 4 eat from the hotbar (hotbar.ts). `surface` is the element mouse buttons count on
  * (the canvas); button releases are caught anywhere, since the camera
  * captures the pointer mid-drag.
  */
@@ -100,6 +103,14 @@ export function useTownInput(
       if (e.metaKey || e.ctrlKey || e.altKey || typing(e.target)) return;
       if (e.code === "KeyE" && !e.repeat) {
         interact.current();
+        return;
+      }
+      // 2, 3, 4: eat what's on that hotbar slot (1 is the class skill).
+      const slot = e.code.startsWith("Digit") ? e.code.slice(5) : "";
+      if (HOTBAR_KEYS.includes(slot as HotbarKey)) {
+        e.preventDefault();
+        const itemId = hotbarItem(slot as HotbarKey);
+        if (itemId && !e.repeat) void eat(itemId);
         return;
       }
       // Space would click whatever button has focus (or scroll): it's the

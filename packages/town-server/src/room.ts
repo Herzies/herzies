@@ -16,6 +16,7 @@ import { DurableObject } from "cloudflare:workers";
 import {
   decodeCastFrame,
   decodeStateFrame,
+  type EatRefusal,
   encodeSnapshot,
   isTownMapId,
   quantizeState,
@@ -47,7 +48,7 @@ import {
   RateLimiter,
   startingPoint,
 } from "./rules";
-import { postVitals } from "./vitals";
+import { eatInDb, postVitals } from "./vitals";
 
 export type Env = {
   TOWN_ROOM: DurableObjectNamespace<TownRoom>;
@@ -219,6 +220,7 @@ export class TownRoom extends DurableObject<Env> {
         seq?: unknown;
         yaw?: unknown;
         pitch?: unknown;
+        item?: unknown;
       };
       try {
         m = JSON.parse(message);
@@ -229,6 +231,7 @@ export class TownRoom extends DurableObject<Env> {
       if (m?.t === "hello" && !s.player) await this.hello(s, m, now);
       else if (m?.t === "ticket" && s.player) await this.renew(s, m.ticket);
       else if (m?.t === "skill" && s.player) this.onSkill(s, m, now);
+      else if (m?.t === "eat" && s.player) await this.onEat(s, m, now);
       else this.strike(s);
       return;
     }
@@ -621,6 +624,44 @@ export class TownRoom extends DurableObject<Env> {
     // Refused: say when it's ready, so the client puts its cooldown right.
     this.send(s, { t: "skillDenied", skill: m.skill, seq, readyAt });
     if (result === "cooldown" || result === "unknown") this.strike(s);
+  }
+
+  /** A consumable eaten in a fight, where this room holds HP: the database
+   * uses up the copy, then the fight heals. Anywhere else the client eats
+   * through the API, so an `eat` here is just told no. */
+  private async onEat(
+    s: Session,
+    m: { item?: unknown; seq?: unknown },
+    now: number,
+  ) {
+    const p = s.player;
+    const seq = Number(m.seq);
+    if (!p || typeof m.item !== "string" || !Number.isInteger(seq)) {
+      this.strike(s);
+      return;
+    }
+    const item = m.item;
+    const refuse = (reason: EatRefusal) =>
+      this.send(s, { t: "ate", seq, item, ok: false, reason });
+    const fight = this.fight;
+    if (!fight) return refuse("not-here");
+    const no = fight.tryEat(p.uid, now);
+    if (no) {
+      if (no === "cooldown") this.strike(s);
+      return refuse(no);
+    }
+    const reply = await eatInDb(this.env, p.uid, item);
+    if (!reply?.ok) {
+      const reason = reply?.reason;
+      return refuse(
+        reason === "none-left" || reason === "not-consumable"
+          ? reason
+          : "failed",
+      );
+    }
+    // The fight (or the herzie in it) may be gone after the await.
+    for (const o of this.fight?.eat(p.uid, reply.heal) ?? []) this.dispatch(o);
+    this.send(s, { t: "ate", seq, item, ok: true, heal: reply.heal });
   }
 
   /** Step the fight and tell everyone what happened. */

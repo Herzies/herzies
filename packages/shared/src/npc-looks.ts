@@ -1,6 +1,7 @@
 import {
   BOBOKU_SCHEME_ID,
   GOLD_SCHEME_ID,
+  MEDEA_SCHEME_ID,
   NANDOR_SCHEME_ID,
 } from "./creature-renderer.js";
 import type { Equipped } from "./items.js";
@@ -39,3 +40,8 @@ export const BOBOKU_EQUIPPED: Equipped = {
   body: "bowtie",
   color: BOBOKU_SCHEME_ID,
 };
+
+/** Medea's look: stage 2, candy pink sinking to plum (MEDEA_RAMP). */
+export const MEDEA_SEED = "npc:medea";
+export const MEDEA_STAGE = 2;
+export const MEDEA_EQUIPPED: Equipped = { color: MEDEA_SCHEME_ID };

@@ -167,6 +167,20 @@ export const BOBOKU_RAMP = [
 ] as const;
 
 /**
+ * Medea, who sells sweets and potions and is always in Town. No item grants
+ * it: candy pink at the crown sinking through orchid and violet into a plum
+ * that's nearly black at her feet — sweet on top, darker underneath.
+ */
+export const MEDEA_RAMP = [
+  "#FF8FD0",
+  "#E05AB8",
+  "#A23CA8",
+  "#6A2486",
+  "#3C1456",
+  "#1A0828",
+] as const;
+
+/**
  * Boss ramp — the only ramp that is not built around a CREATURE_PALETTE hue,
  * because a boss is deliberately not a colour a herzie could hatch with.
  *

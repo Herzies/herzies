@@ -13,6 +13,7 @@ import { showToast } from "../cave";
 import { setChampion } from "../champion";
 import { bossFight, handleBossMessage } from "../combat/fight";
 import { combat } from "../combat/state";
+import { settleEat } from "../eat";
 import { goToMap, townLive, townSave } from "../runtime";
 import { setVitals } from "../vitals";
 import { TownConnection, type TownTicket } from "./TownConnection";
@@ -47,11 +48,14 @@ export function townNet(): TownConnection {
   net ??= new TownConnection({
     map: isTownMapId(townSave.map) ? townSave.map : "home",
     getTicket: (map) => ticketSource(map),
-    onMessage: (m) =>
-      handleBossMessage(m, {
-        toLocal: (t) => net?.clock.toLocal(t) ?? t,
-        you: () => net?.you ?? null,
-      }),
+    onMessage: (m) => {
+      if (m.t === "ate") settleEat(m);
+      else
+        handleBossMessage(m, {
+          toLocal: (t) => net?.clock.toLocal(t) ?? t,
+          you: () => net?.you ?? null,
+        });
+    },
     onRefused: (why) => {
       // The cave won't have us: back to town, with the reason.
       showToast(

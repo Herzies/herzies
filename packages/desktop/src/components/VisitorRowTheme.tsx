@@ -76,6 +76,12 @@ export const VISITOR_THEMES: Record<string, VisitorTheme> = {
     dim: "#e0b48a",
     accent: "#ffb45c",
   },
+  // Medea: candy pink sinking into plum.
+  medea: {
+    background: "linear-gradient(90deg, #1a0828 0%, #3c1456 55%, #14061f 100%)",
+    dim: "#d7a6d0",
+    accent: "#ff8fd0",
+  },
 };
 
 /** Legible over any backdrop: a hard one-pixel drop like the pixel art's. */

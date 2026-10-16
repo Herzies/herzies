@@ -897,6 +897,23 @@ pub async fn api_buy_from_boboku(
     api_buy(client, "/npc/boboku/buy", body).await
 }
 
+/// Buys from Medea, who's always in Town: sweets and potions.
+pub async fn api_buy_from_medea(
+    client: &Client,
+    item_id: &str,
+    quantity: u32,
+) -> Result<serde_json::Value, String> {
+    let body = serde_json::json!({ "itemId": item_id, "quantity": quantity });
+    api_buy(client, "/npc/medea/buy", body).await
+}
+
+/// Eats one consumable from the bank; the reply carries the new item state
+/// and vitals, or the server's reason it refused (full, knocked out, …).
+pub async fn api_eat_item(client: &Client, item_id: &str) -> Result<serde_json::Value, String> {
+    let body = serde_json::json!({ "itemId": item_id });
+    api_buy(client, "/inventory/eat", body).await
+}
+
 /// POSTs a purchase, with the server's error message on a refusal.
 async fn api_buy(
     client: &Client,

@@ -13,6 +13,8 @@ import {
   RARITY_COLORS as ITEM_RARITY_COLORS,
   ItemTypeIcon,
   isVisitorType,
+  MEDEA_KEY,
+  MEDEA_NAME,
   MERCHANT_NAME,
   type StatPoints,
   TREAT_TRADER_NAME,
@@ -644,6 +646,16 @@ function EventsViewImpl({
       openKey: BOBOKU_KEY,
       detail: "Sells the basic instruments",
     });
+    // So is Medea.
+    cards.push({
+      type: MEDEA_KEY,
+      title: MEDEA_NAME,
+      description: null,
+      status: "live",
+      at: null,
+      openKey: MEDEA_KEY,
+      detail: "Sweets and potions",
+    });
     // Nearest in time first: what's on now, then what starts soonest, then
     // types with nothing on the calendar.
     const when = (c: EventCard) =>
@@ -674,6 +686,7 @@ function EventsViewImpl({
           equipped,
         }}
         profile={playerProfile}
+        units={units}
         // Stat points on top: practice damage reads the full Sonic Power.
         stats={withStatPoints(
           units.length > 0
@@ -755,16 +768,16 @@ function EventsViewImpl({
       );
     }
 
-    if (selected === BOBOKU_KEY) {
+    if (selected === BOBOKU_KEY || selected === MEDEA_KEY) {
       return (
         <View
-          title={BOBOKU_NAME}
+          title={selected === MEDEA_KEY ? MEDEA_NAME : BOBOKU_NAME}
           colour="cyan"
           childrenClassName="flex min-h-0 flex-col"
           backButton={back}
         >
           <MerchantPanel
-            event={BOBOKU_KEY}
+            event={selected}
             currency={currency}
             equipped={equipped}
             units={units}

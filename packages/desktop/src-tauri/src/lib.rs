@@ -769,6 +769,33 @@ async fn buy_from_boboku(
     Ok(data)
 }
 
+#[tauri::command]
+async fn buy_from_medea(
+    item_id: String,
+    quantity: u32,
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    let client = api::http();
+    let data = api::api_buy_from_medea(&client, &item_id, quantity).await?;
+    apply_purchase(&data, &app, &state);
+    Ok(data)
+}
+
+/// Eats one consumable (outside a boss fight, where the database holds HP).
+/// Applies the item state like a purchase; the caller takes the vitals.
+#[tauri::command]
+async fn eat_item(
+    item_id: String,
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    let client = api::http();
+    let data = api::api_eat_item(&client, &item_id).await?;
+    apply_purchase(&data, &app, &state);
+    Ok(data)
+}
+
 /// A purchase's new inventory and balance, saved and announced.
 fn apply_purchase(data: &serde_json::Value, app: &AppHandle, state: &SharedState) {
     let mut s = state.lock().unwrap();
@@ -2677,6 +2704,8 @@ pub fn run() {
             apply_dice_upgrade,
             buy_from_merchant,
             buy_from_boboku,
+            buy_from_medea,
+            eat_item,
             collect_drop,
             spawn_debug_drop,
             equip_item,

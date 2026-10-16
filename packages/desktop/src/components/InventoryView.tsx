@@ -79,6 +79,8 @@ import { SkillsPanel } from "./SkillsPanel";
 import { StatsTab } from "./StatsTab";
 import { TabButton } from "./TabButton";
 import { HoverPreview, Tooltip } from "./Tooltip";
+import { eat } from "./town/eat";
+import { assignHotbar, HOTBAR_KEYS } from "./town/hotbarSlots";
 
 /** Rarities worth a second look before they're sold for coin. */
 const CONFIRM_SELL_RARITIES: ReadonlySet<Rarity> = new Set([
@@ -2149,6 +2151,28 @@ function InventoryViewImpl({
                     setTileMenu(null);
                   },
                 },
+                // A consumable: eat one now, or put the stack on a Town
+                // hotbar key.
+                ...(def?.consumable
+                  ? [
+                      {
+                        label: "Eat",
+                        onClick: () => {
+                          void eat(tile.itemId, (why) =>
+                            onLog?.(`Couldn't eat "${def.name}": ${why}`),
+                          );
+                          setTileMenu(null);
+                        },
+                      },
+                      ...HOTBAR_KEYS.map((key) => ({
+                        label: `Hotbar ${key}`,
+                        onClick: () => {
+                          assignHotbar(key, tile.itemId);
+                          setTileMenu(null);
+                        },
+                      })),
+                    ]
+                  : []),
                 ...(def?.sellPrice
                   ? [
                       {

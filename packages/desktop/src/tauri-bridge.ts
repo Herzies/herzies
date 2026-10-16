@@ -248,6 +248,20 @@ export const herzies = {
       newCurrency: number;
       inventory: Inventory;
     }>("buy_from_boboku", { itemId, quantity }),
+  /** Buys from Medea, who's always in Town: sweets and potions. */
+  buyFromMedea: (itemId: string, quantity: number) =>
+    invoke<{
+      spent: number;
+      newCurrency: number;
+      inventory: Inventory;
+    }>("buy_from_medea", { itemId, quantity }),
+  /** Eats one consumable from the bank, outside a boss fight (in one, the
+   * Town server does it: see town/eat.ts). Rejects with the reason it
+   * refused (already full, knocked out, none left). */
+  eatItem: (itemId: string) =>
+    invoke<{ heal: number; vitals: Vitals; inventory: Inventory }>("eat_item", {
+      itemId,
+    }),
   /** Manually collects one specific pending world drop by id. Resolves
    * `true` if it was collected, `false` if it no longer existed (e.g.
    * already collected by a racing Spirit Orb auto-collect). */

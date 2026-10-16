@@ -14,6 +14,7 @@ import {
   type HitStats,
   meleeDamage,
 } from "@herzies/shared/combat";
+import { CONSUMABLE_COOLDOWN_MS } from "@herzies/shared/medea";
 import {
   isSkillId,
   SKILL_COOLDOWN_GRACE_MS,
@@ -26,6 +27,7 @@ import { buffMult, healMult } from "@herzies/shared/stats";
 import type {
   BossPlace,
   BossTelegraph,
+  EatRefusal,
   FightState,
   LootDrop,
   ServerMessage,
@@ -40,6 +42,11 @@ import {
   TUNING,
 } from "./boss";
 import { PositionHistory } from "./history";
+
+/** The room holds eating to CONSUMABLE_COOLDOWN_MS less this, so a client
+ * keeping to the full cooldown is never refused (or struck) for network
+ * jitter. */
+const EAT_COOLDOWN_GRACE_MS = 250;
 
 /** How often HP and boss damage are reported while nothing urgent happens. */
 export const REPORT_EVERY_MS = 2_000;
@@ -157,8 +164,11 @@ export class FightRuntime {
   /** The dev boss is never reported: what each herzie did against it,
    * for its end screen. */
   private devDealt = new Map<string, Contribution>();
-  /** HP skills restored, by player, not yet taken by the database. */
+  /** HP skills (and eaten candy) restored, by player, not yet taken by the
+   * database. */
   private healed = new Map<string, number>();
+  /** When each player last started eating (server ms). */
+  private ate = new Map<string, number>();
   /** Skill XP not yet reported, by `uid|skill` (fractions carry over). */
   private pendingXp = new Map<string, number>();
   private xpInflight: {
@@ -367,6 +377,39 @@ export class FightRuntime {
       this.engine.backspin(uid, pos, yaw, pitch, p.stats, value, now);
     }
     return { result: "used", readyAt: now + def.cooldownMs, out };
+  }
+
+  /**
+   * Whether `uid` may eat now: present, standing, hurt, and past the
+   * cooldown. Claims the cooldown when it says yes, so a second `eat` sent
+   * while the first is still being used up in the database is refused.
+   */
+  tryEat(uid: string, now: number): EatRefusal | null {
+    const p = this.players.get(uid);
+    if (!p?.present || !this.open) return "not-here";
+    if (p.down) return "down";
+    if (p.hp >= p.maxHp) return "full";
+    const since = now - (this.ate.get(uid) ?? Number.NEGATIVE_INFINITY);
+    if (since < CONSUMABLE_COOLDOWN_MS - EAT_COOLDOWN_GRACE_MS)
+      return "cooldown";
+    this.ate.set(uid, now);
+    return null;
+  }
+
+  /** What `uid` ate heals them, capped at their max; reported to the
+   * database through `healed`, like a skill's heal. Nothing if they were
+   * knocked out or left while it was being used up. */
+  eat(uid: string, amount: number): Outbound[] {
+    const p = this.players.get(uid);
+    if (!p?.present || p.down || amount <= 0) return [];
+    const heal = Math.min(p.maxHp - p.hp, amount);
+    if (heal <= 0) return [];
+    p.hp += heal;
+    this.healed.set(uid, (this.healed.get(uid) ?? 0) + heal);
+    this.reportNow = true;
+    return [
+      { to: "all", msg: { t: "hp", id: p.id, hp: p.hp, maxHp: p.maxHp } },
+    ];
   }
 
   /** Skill XP for `uid`, toward the next report. */
