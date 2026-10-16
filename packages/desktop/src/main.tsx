@@ -98,19 +98,6 @@ function observeDock(el: HTMLDivElement | null) {
   if (el) dockObserver.observe(el);
 }
 
-/** ...and the tab bar's alone as `--nav-height`, for what covers the Town
- * up to the tabs but not over them (the boss's end screen). */
-const navObserver = new ResizeObserver(([entry]) => {
-  document.documentElement.style.setProperty(
-    "--nav-height",
-    `${(entry.target as HTMLElement).offsetHeight}px`,
-  );
-});
-function observeNav(el: HTMLDivElement | null) {
-  navObserver.disconnect();
-  if (el) navObserver.observe(el);
-}
-
 function App() {
   const [rawState, setState] = useState<AppState>({
     herzie: null,
@@ -1227,29 +1214,27 @@ function App() {
           <div className="relative">
             {chatPanel}
             {herzie && (
-              <div ref={observeNav}>
-                <TabBar
-                  view={view}
-                  setView={(v) => {
-                    if (v === "inventory") setInventoryPanel("deck");
-                    switchView(v);
-                  }}
-                  // Only once the server knows stat points: before that,
-                  // every herzie would show its whole back pay unspendable.
-                  unspentPoints={
-                    herzie.statPoints
-                      ? statPoints(herzie.level, herzie.statPoints).unspent
-                      : 0
-                  }
-                  visitorsInTown={
-                    visitorsInTown +
-                    Number(hasActiveEventOverride) +
-                    Number(debugBossOverride) +
-                    Number(debugMerchantOverride) +
-                    Number(debugTreatTraderOverride)
-                  }
-                />
-              </div>
+              <TabBar
+                view={view}
+                setView={(v) => {
+                  if (v === "inventory") setInventoryPanel("deck");
+                  switchView(v);
+                }}
+                // Only once the server knows stat points: before that,
+                // every herzie would show its whole back pay unspendable.
+                unspentPoints={
+                  herzie.statPoints
+                    ? statPoints(herzie.level, herzie.statPoints).unspent
+                    : 0
+                }
+                visitorsInTown={
+                  visitorsInTown +
+                  Number(hasActiveEventOverride) +
+                  Number(debugBossOverride) +
+                  Number(debugMerchantOverride) +
+                  Number(debugTreatTraderOverride)
+                }
+              />
             )}
           </div>
         </div>
