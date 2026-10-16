@@ -42,6 +42,9 @@ async function bot(i) {
       uid,
       name: `cave bot ${i}`,
       look: { seed: `bot-seed-${i}`, stage: 2 },
+      // Wave casters: without a class a herzie melees, and these cast from
+      // across the room.
+      cls: "bard",
       exp: Math.floor(Date.now() / 1000) + 600,
       hp: { hp: 300, maxHp: 300, down: false },
       st: [10, 0, 5, 50],
