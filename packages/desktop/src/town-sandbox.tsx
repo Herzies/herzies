@@ -36,7 +36,10 @@ import {
   bubbleDuration,
   type ChatBubbles,
 } from "./components/town/chatBubbles";
-import { setBossResults } from "./components/town/combat/results";
+import {
+  sampleBossResults,
+  setBossResults,
+} from "./components/town/combat/results";
 import { setMySkill } from "./components/town/combat/skills";
 import { combat } from "./components/town/combat/state";
 import { setTownTicketSource, townNet } from "./components/town/net/townNet";
@@ -123,46 +126,10 @@ const player = {
 // `&rank=` for your place (past 10 shows under the "…"; 0 for none).
 const resultsParam = params.get("results");
 if (resultsParam === "victory" || resultsParam === "defeat") {
-  // The podium: one of each class, gear and all.
-  const looks = [
-    {
-      seed: "HERZ-2CCV",
-      stage: 3,
-      equipped: { main_hand: "compact-discs", head: "headphones" },
-    },
-    { seed: "HERZ-HOBG", stage: 2, equipped: { main_hand: "lute" } },
-    {
-      seed: "HERZ-RIMS",
-      stage: 3,
-      equipped: { main_hand: "worn-stick", off_hand: "old-cymbal" },
-    },
-  ];
-  const names = [
-    "eddie",
-    "hobgoblin",
-    "rimshot",
-    "Mathias",
-    "lutey",
-    "basslord",
-  ];
-  const table = names.map((name, i) => ({
-    rank: i + 1,
-    name,
-    damage: Math.round(48_000 / (i + 1.4)),
-    heal: i === 1 ? 1_240 : i === 2 ? 310 : 0,
-    look: looks[i],
-  }));
-  const rank = Number(params.get("rank") ?? 14);
-  const you =
-    rank > 0
-      ? (table[rank - 1] ?? {
-          rank,
-          name: "sandbox-player",
-          damage: 812,
-          heal: 96,
-        })
-      : null;
-  setBossResults({ outcome: resultsParam, top: table.slice(0, 3), you }, null);
+  setBossResults(
+    sampleBossResults(resultsParam, Number(params.get("rank") ?? 7)),
+    null,
+  );
 }
 const cls = params.get("class");
 if (isHerzieClass(cls)) {

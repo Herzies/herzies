@@ -7,6 +7,7 @@ import { herzies } from "../tauri-bridge";
 import { Checkbox } from "./Checkbox";
 import { TabButton } from "./TabButton";
 import { debugDropLoot } from "./town/combat/fight";
+import { debugBossResults } from "./town/combat/results";
 import {
   aimSensitivity,
   SENSITIVITY_MAX,
@@ -412,6 +413,14 @@ export function SettingsView({
                 onClick={debugDropLoot}
               >
                 Drop Test Loot
+              </button>
+              <button
+                type="button"
+                className="btn border-[#555] text-text-dim"
+                title="Shows a made-up boss end screen in the Town: victory and defeat in turn"
+                onClick={debugBossResults}
+              >
+                Test End Screen
               </button>
               <button
                 type="button"
