@@ -269,6 +269,7 @@ function EventsViewImpl({
     name: string;
     level: number;
     progress: number;
+    xp?: number;
   };
   /** Tab stays mounted but hidden; only poll while user is on Events. */
   eventsTabVisible: boolean;

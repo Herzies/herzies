@@ -74,6 +74,8 @@ export function TownWorld({
     name: string;
     level: number;
     progress: number;
+    /** Total XP, for the exp bar's tooltip. */
+    xp?: number;
   };
   /** The chat, for lines over the speakers' heads. */
   chatMessages?: ChatMessage[];
@@ -279,7 +281,12 @@ export function TownWorld({
                 />
               ) : null}
               <TownHpBar inFight={!!map.combat} />
-              <ExpBar progress={profile.progress} className="text-white/70" />
+              <ExpBar
+                progress={profile.progress}
+                level={profile.level}
+                xp={profile.xp}
+                className="text-white/70"
+              />
             </div>
           </>
         ) : null}

@@ -1131,6 +1131,7 @@ function App() {
                     name: herzie.name,
                     level: herzie.level,
                     progress: levelProgress(herzie),
+                    xp: herzie.xp,
                   }
                 : undefined
             }
