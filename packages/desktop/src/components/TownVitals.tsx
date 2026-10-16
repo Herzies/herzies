@@ -79,30 +79,39 @@ export function TownVitals({
         />
       ) : null}
       {down ? (
+        // As the boss fight's end screen: the window fills the Town down to
+        // just above the tab bar, the world blurred out behind it.
         <div
-          role="alertdialog"
-          aria-labelledby="down-title"
-          className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-3 bg-black/70 px-6 text-center"
+          className="absolute inset-x-3 top-3 z-50 flex"
+          style={{ bottom: "calc(var(--nav-height, 0px) + 0.75rem)" }}
         >
-          <h2 id="down-title" className="text-lg font-semibold text-white">
-            Oh no! You need some rest
-          </h2>
-          <p className="max-w-xs text-ui text-white/60">
-            Your herzie ran out of health. It will come back with half of it.
-          </p>
-          <button
-            type="button"
-            onClick={respawn}
-            disabled={busy}
-            className="rounded bg-white/90 px-4 py-1.5 text-ui font-medium text-black transition hover:bg-white disabled:opacity-60"
+          <section
+            role="alertdialog"
+            aria-labelledby="down-title"
+            className="relative flex min-h-0 w-full flex-col items-center justify-center gap-2 overflow-y-auto rounded border border-white/15 bg-black/45 px-4 py-3 text-center text-ui text-text shadow-lg backdrop-blur-md"
           >
-            {busy ? "Respawning…" : "Respawn in town"}
-          </button>
-          {failed ? (
-            <p className="text-[11px] text-red-300">
-              Couldn't reach the server. Try again.
+            <h2 id="down-title" className="text-xl font-bold text-text">
+              Oh no! You need some rest
+            </h2>
+            <p className="text-[10px] text-text-dim">
+              Your herzie ran out of health.
             </p>
-          ) : null}
+            <div className="mt-1.5 flex justify-center">
+              <button
+                type="button"
+                className="btn"
+                onClick={respawn}
+                disabled={busy}
+              >
+                {busy ? "Respawning…" : "Respawn in town"}
+              </button>
+            </div>
+            {failed ? (
+              <p className="text-[10px] text-text-dim">
+                Couldn't reach the server. Try again.
+              </p>
+            ) : null}
+          </section>
         </div>
       ) : null}
     </>
