@@ -194,7 +194,8 @@ export class TownConnection {
     this.sendState(true);
   }
 
-  /** Fetch a fresh ticket now, so others see a new outfit or name. */
+  /** Fetch a fresh ticket now, so others see a new outfit or name, and the
+   * server a new class, level or stats (it judges casts from them). */
   async refreshLook() {
     if (!this.ws || this.status !== "online") return;
     try {

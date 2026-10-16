@@ -296,6 +296,9 @@ export class FightRuntime {
     this.players.set(uid, p);
     this.history.record(uid, now, at.x, at.z);
     this.engine.noteSpawn(uid, now);
+    // The Tower's room outlives a visit: the level is today's, not the
+    // one it was made with.
+    if (this.tower && ticket.lv) this.tower.level = Math.max(1, ticket.lv);
     return p;
   }
 
@@ -309,17 +312,27 @@ export class FightRuntime {
     this.reportNow = true;
   }
 
-  /** A player's ticket was renewed: only stats may change; health never
-   * comes back up from a ticket mid-fight, and max HP stays as it joined. */
-  renew(uid: string, ticket: TownTicketPayload): void {
+  /** A player's ticket was renewed: stats, class (a class chosen mid-fight
+   * changes how they attack) and, in the Tower, level may change; health
+   * never comes back up from a ticket mid-fight, and max HP stays as it
+   * joined. Returns what to tell whom (the Tower's floor, if the level gap
+   * moved). */
+  renew(uid: string, ticket: TownTicketPayload): Outbound[] {
     const p = this.players.get(uid);
-    if (!p) return;
+    if (!p) return [];
     // Skill levels only go up: a ticket issued before a level-up this fight
     // reported mustn't take it back.
     for (const [skill, level] of skillsOf(ticket))
       p.skills.set(skill, Math.max(level, p.skills.get(skill) ?? 0));
-    if (!ticket.st) return;
-    p.stats = statsOf(ticket.st);
+    p.attack = attackStyle(ticket.cls);
+    p.melee = meleeDamage(isHerzieClass(ticket.cls));
+    if (ticket.st) p.stats = statsOf(ticket.st);
+    const tower = this.tower;
+    if (tower && ticket.lv && ticket.lv !== tower.level) {
+      tower.level = Math.max(1, ticket.lv);
+      return [{ to: "all", msg: { t: "floor", ...tower.view() } }];
+    }
+    return [];
   }
 
   player(uid: string): FightPlayer | undefined {

@@ -111,8 +111,9 @@ export type TowerEvent =
 
 export class TowerEngine {
   floor: number;
-  /** The herzie's level, against the floor's for the level gap. */
-  readonly level: number;
+  /** The herzie's level, against the floor's for the level gap. Kept up to
+   * date from their tickets (they level up by listening meanwhile). */
+  level: number;
   private mobs: Mob[] = [];
   private telegraphs: Telegraph[] = [];
   private pending: PendingHit[] = [];

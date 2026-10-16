@@ -47,6 +47,7 @@ import { setLootRoom } from "./components/town/combat/lootFeed";
 import { useBossResultsShown } from "./components/town/combat/results";
 import { setMySkill } from "./components/town/combat/skills";
 import { combat } from "./components/town/combat/state";
+import { townNet } from "./components/town/net/townNet";
 import { UpdateAvailableOverlay } from "./components/UpdateAvailableOverlay";
 import { WhatsNewOverlay } from "./components/WhatsNewOverlay";
 import { useOptimisticUnits } from "./hooks/useOptimisticUnits";
@@ -244,6 +245,17 @@ function App() {
   useEffect(() => {
     combat.attack = attackStyle(classOverride ?? rawState.herzie?.class);
   }, [rawState.herzie?.class, classOverride]);
+  // A new class or level: the Town server judges casts from the ticket (a
+  // class's attack; the Tower's level gap), so it gets a fresh one. After a
+  // beat, so the server has the change saved.
+  const ticketKey = `${rawState.herzie?.class ?? ""}|${rawState.herzie?.level ?? 0}`;
+  const firstTicketKey = useRef(ticketKey);
+  useEffect(() => {
+    if (firstTicketKey.current === ticketKey) return;
+    firstTicketKey.current = ticketKey;
+    const t = setTimeout(() => void townNet().refreshLook(), 1_500);
+    return () => clearTimeout(t);
+  }, [ticketKey]);
   /** "Later" on the class choice: asked again next launch. */
   const [classChoiceLater, setClassChoiceLater] = useState(false);
   /** Captured the first time `state.isOnline` is true this session: was this

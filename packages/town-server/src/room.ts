@@ -378,7 +378,7 @@ export class TownRoom extends DurableObject<Env> {
       t.name !== p.name || JSON.stringify(t.look) !== JSON.stringify(p.look);
     p.exp = t.exp;
     p.maxHp = t.hp?.maxHp;
-    this.fight?.renew(p.uid, t);
+    for (const o of this.fight?.renew(p.uid, t) ?? []) this.dispatch(o);
     p.name = t.name;
     p.look = t.look;
     this.persist(s);

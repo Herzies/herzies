@@ -198,7 +198,9 @@ export function TownWorld({
   );
   // A new outfit: a fresh ticket carries it to everyone else (after a beat,
   // so the server has the change saved).
-  const lookKey = `${player.seed}|${player.stage}|${equippedKey}`;
+  // Stats too (stat points, an upgrade): the server rolls casts from them.
+  const statsKey = stats ? JSON.stringify(stats) : "";
+  const lookKey = `${player.seed}|${player.stage}|${equippedKey}|${statsKey}`;
   const firstLook = useRef(lookKey);
   useEffect(() => {
     if (firstLook.current === lookKey) return;

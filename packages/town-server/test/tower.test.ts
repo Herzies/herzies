@@ -302,6 +302,31 @@ describe("FightRuntime in the Tower", () => {
     expect(tw.floor).toBe(2);
   });
 
+  it("takes a class and a level from a renewed ticket", () => {
+    const f = FightRuntime.tower(claim, "u", 1, ARENA, T0, 3);
+    // No class yet: a bump, only up close.
+    f.join("u", 1, ticket({ cls: undefined, lv: 1 }), { x: 0, z: 0 }, T0);
+    const tw = f.tower;
+    if (!tw) throw new Error("not a tower");
+    const mob = tw.wireMobs()[0];
+    const from = { x: mob.x - 8, z: mob.z };
+    f.onState("u", from.x, from.z, T0);
+    f.onState("u", from.x, from.z, T0 + 400);
+    expect(f.cast("u", Math.PI / 2, 0, T0 + 400)).toBe("miss");
+    // Picked a class and levelled up: the renewed ticket says so.
+    const out = f.renew("u", ticket({ cls: "record_slinger", lv: 15 }));
+    expect(tw.level).toBe(15);
+    expect(said(out, "floor")).toHaveLength(1);
+    f.onState("u", from.x, from.z, T0 + 1_400);
+    expect(f.cast("u", Math.PI / 2, 0, T0 + 1_400)).toBe("hit");
+  });
+
+  it("joins at today's level, though the room is older", () => {
+    const f = FightRuntime.tower(claim, "u", 1, ARENA, T0, 3);
+    f.join("u", 1, ticket({ lv: 12 }), ARENA.entry, T0);
+    expect(f.tower?.level).toBe(12);
+  });
+
   it("won't go on before the floor's cleared", () => {
     const f = tower();
     expect(f.next("u", T0)).toEqual([]);
