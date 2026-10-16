@@ -3214,13 +3214,14 @@ export const ITEMS: ItemDef[] = [
     sellPrice: 500,
   },
   // Class equipment (classes.ts): handed over, worn, when a class is chosen.
-  // Bound to the herzie — no sellPrice, never traded (trade_offer_unit_ids),
-  // never dropped (NON_DROPPABLE_ITEM_IDS).
+  // Sold for a little, like any common item (00109), but never traded
+  // (trade_offer_unit_ids) and never dropped (NON_DROPPABLE_ITEM_IDS).
   {
     id: "lute",
     name: "Lute",
     description: "Every Bard's first love. Slightly out of tune.",
     rarity: "common",
+    sellPrice: 10,
     frames: luteFrames,
     equipable: true,
     equipSlot: "main_hand",
@@ -3232,6 +3233,7 @@ export const ITEMS: ItemDef[] = [
     name: "Compact Discs",
     description: "One for each hand. Scratched, but they fly true.",
     rarity: "common",
+    sellPrice: 10,
     frames: discsFrames,
     equipable: true,
     equipSlot: "main_hand",
@@ -3243,6 +3245,7 @@ export const ITEMS: ItemDef[] = [
     name: "Worn Stick",
     description: "Chipped from a thousand rimshots.",
     rarity: "common",
+    sellPrice: 10,
     frames: stickFrames,
     equipable: true,
     equipSlot: "main_hand",
@@ -3254,6 +3257,7 @@ export const ITEMS: ItemDef[] = [
     name: "Old Cymbal",
     description: "Dented, green at the edges, still rings.",
     rarity: "common",
+    sellPrice: 10,
     frames: cymbalFrames,
     equipable: true,
     equipSlot: "off_hand",
