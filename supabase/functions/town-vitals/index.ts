@@ -13,6 +13,7 @@
  * or add a capped bonus (rest) or restore half (respawn from down).
  */
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { normalizeEquipped } from "../_shared/shared/items.ts";
 import { verifyVitalsRequest } from "../_shared/shared/town-net.ts";
 import { corsHeaders, jsonResponse } from "../_shared/cors.ts";
 
@@ -82,7 +83,8 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
     boss?: {
       event: string;
       batch: string;
-      damage: { uid: string; damage: number }[];
+      /** Damage, and the HP each healed or blocked (00111). */
+      damage: { uid: string; damage: number; healing?: number; blocked?: number }[];
     };
     /** The fight is over: the cave's end screen, for these herzies. */
     results?: { event: string; uids: string[] };
@@ -104,7 +106,10 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
     const bossDamage =
       boss && UUID.test(boss.event) && typeof boss.batch === "string"
         ? (boss.damage ?? []).slice(0, MAX_BATCH).filter(
-          (d) => UUID.test(d.uid) && Number.isFinite(d.damage) && d.damage > 0,
+          (d) =>
+            UUID.test(d.uid) &&
+            [d.damage, d.healing ?? 0, d.blocked ?? 0].every(Number.isFinite) &&
+            (d.damage > 0 || (d.healing ?? 0) > 0 || (d.blocked ?? 0) > 0),
         )
         : [];
     const skills = msg.skills;
@@ -180,10 +185,12 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
         .slice(0, MAX_BATCH)
         .filter((u) => typeof u === "string" && UUID.test(u));
       try {
-        results = await rpc(db, "boss_results_json", {
-          p_event: want.event,
-          p_uids: uids,
-        });
+        results = podiumLooks(
+          await rpc(db, "boss_results_json", {
+            p_event: want.event,
+            p_uids: uids,
+          }),
+        );
       } catch {
         results = null;
       }
@@ -266,3 +273,22 @@ Deno.serve(async (request) => {
     ? await handleRoom(request, body)
     : await handlePlayer(request, body);
 });
+
+/** The end screen's top three come with their looks, as the database has
+ * them: made into looks as others see them out walking (no ground
+ * accessories), like the statue's in town-ticket. */
+function podiumLooks(table: unknown): unknown {
+  const t = table as { top?: Record<string, unknown>[] } | null;
+  if (!t?.top) return table;
+  return {
+    ...t,
+    top: t.top.map(({ seed, stage, equipped, ...place }) => {
+      const { ground_left: _l, ground_right: _r, ...worn } = normalizeEquipped(
+        equipped,
+      );
+      return typeof seed === "string"
+        ? { ...place, look: { seed, stage: Number(stage) || 1, equipped: worn } }
+        : place;
+    }),
+  };
+}

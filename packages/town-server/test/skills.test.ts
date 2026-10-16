@@ -76,6 +76,17 @@ describe("Soothing Drones", () => {
     expect(msgs(out, "hp")).toHaveLength(2);
   });
 
+  it("what it restored counts as the healer's support, in the boss batch", () => {
+    const f = setup([{ uid: "near", x: 3, z: 8 }]);
+    f.skill("bard", "soothing-drones", 0, 0, T0);
+    const restored = 2 * skillValue("soothing-drones", 1) * 200;
+    // No damage, and the boss's HP untouched: only who healed, and how much.
+    expect(f.report(T0 + 1, true)?.boss?.damage).toEqual([
+      { uid: "bard", damage: 0, healing: restored },
+    ]);
+    expect(f.engine.hp).toBe(100_000);
+  });
+
   it("never heals past full, and overheal earns no XP", () => {
     const f = setup([], 200);
     f.skill("bard", "soothing-drones", 0, 0, T0);
@@ -247,17 +258,43 @@ describe("the boss's side", () => {
     boss.buff("a", { id: "cymbrella", value: 0.4, until: T0 + 60_000 });
     boss.buff("a", { id: "cymbrella", value: 0.4, until: T0 + 60_000 });
     const a = player("a", { x: 0, z: 8 });
-    let hits: { uid: string; damage: number; absorbed: number }[] = [];
+    let hits: {
+      uid: string;
+      damage: number;
+      absorbed: number;
+      blocked: number;
+    }[] = [];
     for (let t = T0; t < T0 + 10_000 && !hits.length; t += 50) {
       for (const ev of boss.update(t, [a])) if (ev.t === "resolve") hits = ev.hits;
     }
     const raw = TUNING.slam.damage;
-    // 40% off once: two Cymbrellas are still one.
+    // 40% off once: two Cymbrellas are still one. Without Def, all of what
+    // came off is the Cymbrella's.
+    const taken = Math.round(raw) - Math.round(raw * 0.6);
     expect(hits[0]).toEqual({
       uid: "a",
       damage: Math.round(raw * 0.6),
-      absorbed: Math.round(raw) - Math.round(raw * 0.6),
+      absorbed: taken,
+      blocked: taken,
     });
+  });
+
+  it("with Def too, only the Cymbrella's own share counts as blocked", () => {
+    const boss = new BossEngine({ hp: 1e6, maxHp: 1e6, seed: 1, now: T0 });
+    boss.buff("a", { id: "cymbrella", value: 0.4, until: T0 + 60_000 });
+    const a = { ...player("a", { x: 0, z: 8 }), def: 100 };
+    let hit: { damage: number; absorbed: number; blocked: number } | undefined;
+    for (let t = T0; t < T0 + 10_000 && !hit; t += 50) {
+      for (const ev of boss.update(t, [a]))
+        if (ev.t === "resolve") hit = ev.hits[0];
+    }
+    if (!hit) throw new Error("no hit");
+    const raw = TUNING.slam.damage;
+    // Def alone halves it; the Cymbrella takes 40% of what's left.
+    const defOnly = Math.round(raw / 2);
+    expect(hit.blocked).toBe(defOnly - hit.damage);
+    expect(hit.blocked).toBeLessThan(hit.absorbed);
+    expect(hit.blocked).toBeGreaterThan(0);
   });
 
   it("aims a buster at whoever it hates most, once there's a party", () => {

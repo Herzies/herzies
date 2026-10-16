@@ -8,7 +8,12 @@ import {
   attackStyle,
   isHerzieClass,
 } from "@herzies/shared/classes";
-import { type HitStats, meleeDamage } from "@herzies/shared/combat";
+import {
+  type Contribution,
+  contributionOf,
+  type HitStats,
+  meleeDamage,
+} from "@herzies/shared/combat";
 import {
   isSkillId,
   SKILL_COOLDOWN_GRACE_MS,
@@ -24,6 +29,7 @@ import type {
   FightState,
   LootDrop,
   ServerMessage,
+  TownLook,
   TownTicketPayload,
 } from "@herzies/shared/town-net";
 import {
@@ -51,8 +57,9 @@ export type Outbound = {
 
 export type FightPlayer = {
   uid: string;
-  /** The herzie's name, from the ticket. */
+  /** The herzie's name and look, from the ticket. */
   name: string;
+  look: TownLook;
   /** The room's entity id for this socket. */
   id: number;
   hp: number;
@@ -87,7 +94,7 @@ export type FightReport = {
   boss?: {
     event: string;
     batch: string;
-    damage: { uid: string; damage: number }[];
+    damage: BossRow[];
   };
   /** Skill XP earned since the last report, named by `batch` like the
    * boss damage. */
@@ -97,6 +104,15 @@ export type FightReport = {
   };
   /** The fight is over: the end screen's table, for these herzies. */
   results?: { event: string; uids: string[] };
+};
+
+/** What one herzie did for the fight since the last batch: damage dealt,
+ * and HP healed or blocked (support, 00111). Zero parts are left out. */
+export type BossRow = {
+  uid: string;
+  damage: number;
+  healing?: number;
+  blocked?: number;
 };
 
 /** Until the end screen's table comes back, the fight reports this often. */
@@ -117,10 +133,11 @@ export class FightRuntime {
   /** Everyone who has been in this fight, so leaving and rejoining can't
    * refill health. */
   private players = new Map<string, FightPlayer>();
-  private pendingDamage = new Map<string, number>();
+  /** What each herzie did since the last batch: damage, and support. */
+  private pending = new Map<string, Contribution>();
   private inflight: {
     batch: string;
-    damage: { uid: string; damage: number }[];
+    damage: BossRow[];
   } | null = null;
   /** Players who left since their health was last reported. */
   private leftUnreported = new Set<string>();
@@ -137,9 +154,9 @@ export class FightRuntime {
   private looted = false;
   /** The end screen went out (or there's no one to show it to). */
   private resultsSent = false;
-  /** The dev boss is never reported: what each herzie dealt it, for its
-   * end screen. */
-  private devDealt = new Map<string, number>();
+  /** The dev boss is never reported: what each herzie did against it,
+   * for its end screen. */
+  private devDealt = new Map<string, Contribution>();
   /** HP skills restored, by player, not yet taken by the database. */
   private healed = new Map<string, number>();
   /** Skill XP not yet reported, by `uid|skill` (fractions carry over). */
@@ -187,6 +204,7 @@ export class FightRuntime {
     const p: FightPlayer = {
       uid,
       name: ticket.name,
+      look: ticket.look,
       id,
       hp,
       maxHp,
@@ -326,6 +344,7 @@ export class FightRuntime {
       }
       // Overheal earns nothing: only what was really restored.
       this.earn(uid, skillId, skillXpFor(skillId, restored));
+      this.credit(uid, "healing", restored);
       this.engine.addThreat(uid, restored * TUNING.threat.perHeal);
     } else if (skillId === "cymbrella") {
       const buff = this.engine.buff(uid, {
@@ -459,10 +478,12 @@ export class FightRuntime {
           if (!p || p.down) continue;
           p.hp = Math.max(0, p.hp - h.damage);
           hit.push(p.id);
-          // Cymbrella is the only thing that absorbs today, and it's a self
-          // buff: what it took off pays its wearer.
-          if (h.absorbed > 0 && p.skills.has("cymbrella"))
-            this.earn(p.uid, "cymbrella", skillXpFor("cymbrella", h.absorbed));
+          // The Cymbrella is a self buff: what it took off (on top of Def)
+          // pays its wearer, and counts as their support.
+          if (h.blocked > 0) {
+            this.earn(p.uid, "cymbrella", skillXpFor("cymbrella", h.blocked));
+            this.credit(p.uid, "blocked", h.blocked);
+          }
           out.push({
             to: "all",
             msg: { t: "hp", id: p.id, hp: p.hp, maxHp: p.maxHp },
@@ -480,15 +501,7 @@ export class FightRuntime {
       }
       case "hit": {
         this.bossDirty = true;
-        this.pendingDamage.set(
-          ev.uid,
-          (this.pendingDamage.get(ev.uid) ?? 0) + ev.damage,
-        );
-        if (this.eventId === DEV_EVENT)
-          this.devDealt.set(
-            ev.uid,
-            (this.devDealt.get(ev.uid) ?? 0) + ev.damage,
-          );
+        this.credit(ev.uid, "damage", ev.damage);
         if (ev.skill && isSkillId(ev.skill))
           this.earn(ev.uid, ev.skill, skillXpFor(ev.skill, ev.damage));
         out.push({
@@ -536,15 +549,19 @@ export class FightRuntime {
       if (p && !p.present && p.down && this.downAcked.has(uid))
         this.leftUnreported.delete(uid);
     }
-    if (!this.inflight && this.pendingDamage.size) {
+    if (!this.inflight && this.pending.size) {
       this.inflight = {
         batch: `${this.eventId}:${now}:${++this.batchSeq}:${crypto.randomUUID()}`,
-        damage: [...this.pendingDamage].map(([uid, damage]) => ({
-          uid,
-          damage,
-        })),
+        damage: [...this.pending].map(([uid, c]) => {
+          const row: BossRow = { uid, damage: c.damage };
+          const healing = tenths(c.healing);
+          const blocked = tenths(c.blocked);
+          if (healing > 0) row.healing = healing;
+          if (blocked > 0) row.blocked = blocked;
+          return row;
+        }),
       };
-      this.pendingDamage.clear();
+      this.pending.clear();
     }
     if (!this.xpInflight) {
       const xp: { uid: string; skill: string; xp: number }[] = [];
@@ -567,7 +584,7 @@ export class FightRuntime {
     // leave the last of them out). Until it's back, report again soon.
     let results: FightReport["results"];
     if (this.closeWhy && !this.resultsSent && this.eventId !== DEV_EVENT) {
-      if (!this.pendingDamage.size)
+      if (!this.pending.size)
         results = {
           event: this.eventId,
           uids: [...this.players.values()]
@@ -636,8 +653,8 @@ export class FightRuntime {
 
   /**
    * The fight is over and `town-vitals` sent its table: the end screen, once,
-   * to each herzie still here, with their own place. Victory if the boss
-   * fell, defeat if it got away.
+   * to each herzie still here, with the top three and their own place.
+   * Victory if the boss fell, defeat if it got away.
    */
   results(table: {
     top: BossPlace[];
@@ -654,7 +671,7 @@ export class FightRuntime {
         msg: {
           t: "results",
           outcome,
-          top: table.top.slice(0, 10),
+          top: table.top.slice(0, 3),
           you: table.you[p.uid] ?? null,
         },
       });
@@ -666,18 +683,23 @@ export class FightRuntime {
    * reported). */
   private devTable(): { top: BossPlace[]; you: Record<string, BossPlace> } {
     const ranked = [...this.devDealt]
-      .filter(([, damage]) => damage > 0)
-      .sort(([ua, a], [ub, b]) => b - a || (ua < ub ? -1 : 1))
-      .map(([uid, damage], i) => ({
+      .map(([uid, c]) => ({ uid, c, score: contributionOf(c) }))
+      .filter((r) => r.score > 0)
+      .sort((a, b) => b.score - a.score || (a.uid < b.uid ? -1 : 1))
+      .map(({ uid, c }, i) => ({
         uid,
         place: {
           rank: i + 1,
           name: this.players.get(uid)?.name ?? "?",
-          damage: Math.round(damage),
+          damage: Math.round(c.damage),
+          heal: Math.round(c.healing + c.blocked),
         },
       }));
     return {
-      top: ranked.slice(0, 10).map((r) => r.place),
+      top: ranked.slice(0, 3).map((r) => ({
+        ...r.place,
+        look: this.players.get(r.uid)?.look,
+      })),
       you: Object.fromEntries(ranked.map((r) => [r.uid, r.place])),
     };
   }
@@ -698,11 +720,24 @@ export class FightRuntime {
     };
   }
 
+  /** `uid` did `amount` of `kind` for the fight: into the next batch (and
+   * the dev boss's own tally). */
+  private credit(uid: string, kind: keyof Contribution, amount: number) {
+    if (!(amount > 0)) return;
+    for (const tally of this.eventId === DEV_EVENT
+      ? [this.pending, this.devDealt]
+      : [this.pending]) {
+      const c = tally.get(uid) ?? { damage: 0, healing: 0, blocked: 0 };
+      c[kind] += amount;
+      tally.set(uid, c);
+    }
+  }
+
   /** Whether anything still needs reporting. */
   get unreported(): boolean {
     return (
       this.inflight !== null ||
-      this.pendingDamage.size > 0 ||
+      this.pending.size > 0 ||
       this.leftUnreported.size > 0 ||
       this.xpInflight !== null ||
       this.healed.size > 0
@@ -745,3 +780,8 @@ function skillsOf(ticket: TownTicketPayload): Map<SkillId, number> {
 }
 
 const round = (n: number) => Math.round(n * 100) / 100;
+
+/** To a tenth: healing comes in fractions of an HP. */
+function tenths(n: number): number {
+  return Math.round(n * 10) / 10;
+}

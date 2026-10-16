@@ -131,8 +131,9 @@ export type BossEvent =
   | {
       t: "resolve";
       id: number;
-      /** `absorbed`: what buffs took off the hit. */
-      hits: { uid: string; damage: number; absorbed: number }[];
+      /** `absorbed`: what Def and buffs took off the hit; `blocked`: the
+       * Cymbrella's share of that alone. */
+      hits: { uid: string; damage: number; absorbed: number; blocked: number }[];
     }
   | { t: "phase"; phase: Phase }
   | {
@@ -419,7 +420,12 @@ export class BossEngine {
     if (!due.length) return;
     this.telegraphs = this.telegraphs.filter((t) => t.hitAt > now);
     for (const tg of due) {
-      const hits: { uid: string; damage: number; absorbed: number }[] = [];
+      const hits: {
+        uid: string;
+        damage: number;
+        absorbed: number;
+        blocked: number;
+      }[] = [];
       for (const p of players) {
         if (!p.alive) continue;
         if ((this.safeUntil.get(p.uid) ?? 0) > tg.hitAt) continue;
@@ -445,7 +451,14 @@ export class BossEngine {
         ];
         const damage = Math.max(1, Math.round(mitigate(raw, reductions)));
         const absorbed = Math.max(0, Math.round(raw) - damage);
-        hits.push({ uid: p.uid, damage, absorbed });
+        // What the Cymbrella took off on top of Def: Def alone's hit, less
+        // this one.
+        const blocked = Math.max(
+          0,
+          Math.max(1, Math.round(mitigate(raw, reductions.slice(0, 1)))) -
+            damage,
+        );
+        hits.push({ uid: p.uid, damage, absorbed, blocked });
         this.invulnUntil.set(p.uid, tg.hitAt + TUNING.invulnMs);
       }
       events.push({ t: "resolve", id: tg.id, hits });

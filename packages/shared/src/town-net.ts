@@ -529,9 +529,17 @@ export type FightState = {
 /** One piece of boss loot: a pending drop's id and its item id. */
 export type LootDrop = { id: string; item: string };
 
-/** A place on a boss fight's damage table: its rank (1 is the top), the
- * herzie's name, and the damage they dealt over the whole fight. */
-export type BossPlace = { rank: number; name: string; damage: number };
+/** A place on a boss fight's table: its rank by contribution (1 is the
+ * top; see contributionOf), the herzie's name, the damage they dealt and the
+ * HP they healed or blocked over the whole fight, and — for the top three,
+ * drawn on the end screen — their look. */
+export type BossPlace = {
+  rank: number;
+  name: string;
+  damage: number;
+  heal: number;
+  look?: TownLook;
+};
 
 export type ServerMessage =
   /** Accepted: your entity id and everyone else here. A full snapshot follows. */

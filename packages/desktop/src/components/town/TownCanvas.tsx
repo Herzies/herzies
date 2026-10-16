@@ -142,7 +142,10 @@ export default function TownCanvas(props: TownCanvasProps) {
       gl={{ antialias: false }}
       // Plain PCF: soft enough, and at these pixels the edge reads clean.
       shadows={props.shadows === false ? false : "percentage"}
-      style={{ imageRendering: "pixelated" }}
+      // Its own stacking context: the name tags (drei's Html, inside this
+      // wrapper) stay under whatever comes after it, the boss's end screen
+      // included, and the herzie stage (fixed, z-index 1) draws over them.
+      style={{ imageRendering: "pixelated", isolation: "isolate" }}
       camera={{ fov: 55, near: 0.1, far: 400 }}
       frameloop={props.paused ? "never" : "always"}
       onCreated={props.onCreated}

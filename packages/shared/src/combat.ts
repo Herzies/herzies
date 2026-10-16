@@ -97,6 +97,24 @@ export const STRIKE_DAMAGE = 1;
  * picking a class at stage 2 is a step up. */
 export const BUMP_DAMAGE = 0.5;
 
+// ---------------------------------------------------------------------------
+// Contribution: how much a herzie did for a boss fight, which ranks its end
+// screen, rewards, statue and leaderboard. Damage counts as it is; healing
+// and what a Cymbrella blocked count this many times over, because a heal is
+// worth far more than a hit (a Bard restores ~100 HP in the time a damage
+// dealer hits for ~4,000). Mirrored by boss_contribution in 00111.
+
+/** How many points of damage one HP healed or blocked is worth. */
+export const CONTRIBUTION_SUPPORT_WEIGHT = 10;
+
+/** What a herzie did for a fight: damage dealt, HP healed, HP blocked. */
+export type Contribution = { damage: number; healing: number; blocked: number };
+
+/** A herzie's contribution score. */
+export function contributionOf(c: Contribution): number {
+  return c.damage + CONTRIBUTION_SUPPORT_WEIGHT * (c.healing + c.blocked);
+}
+
 /** A melee hit as a share of a wave's: a stick (with a class) or a bump
  * (without one). */
 export function meleeDamage(classed: boolean): number {

@@ -345,7 +345,12 @@ describe("the end screen", () => {
     yaw: Math.atan2(0, TUNING.boss.z - 8),
     pitch: Math.atan2(TUNING.boss.chest - 1.2, Math.abs(TUNING.boss.z - 8)),
   };
-  const place = (rank: number, name: string) => ({ rank, name, damage: 100 });
+  const place = (rank: number, name: string) => ({
+    rank,
+    name,
+    damage: 100,
+    heal: 0,
+  });
 
   it("is asked for once the boss falls, never before", () => {
     const f = new FightRuntime(claim({ hp: 40 }), T0);

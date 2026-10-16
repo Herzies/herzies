@@ -24,7 +24,8 @@ export type VitalsReport = {
   boss?: {
     event: string;
     batch: string;
-    damage: { uid: string; damage: number }[];
+    /** Each herzie's damage, and the HP they healed or blocked (00111). */
+    damage: { uid: string; damage: number; healing?: number; blocked?: number }[];
   };
   /** Skill XP earned, named by `batch` like the boss damage. */
   skills?: {

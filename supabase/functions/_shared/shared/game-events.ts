@@ -147,34 +147,41 @@ export async function buildBossFightConfig(
     p_limit: topCount,
   });
 
+  // Ranked by contribution: damage, plus healing and blocking (00111).
   const topDealers: BossDamageDealer[] = (
-    (board ?? []) as { name: string; damage: number; rank: number }[]
+    (board ?? []) as {
+      name: string;
+      damage: number;
+      heal?: number;
+      rank: number;
+    }[]
   ).map((r) => ({
     name: r.name ?? "Unknown",
     damage: Math.round(r.damage),
+    heal: Math.round(r.heal ?? 0),
     rank: Number(r.rank),
   }));
 
-  // The caller's own damage is a separate read: they are very often not in
+  // The caller's own place is a separate read: they are very often not in
   // the top N, and "you: 64" is the line that makes the board feel personal.
+  // boss_results_json ranks them as the board does.
   let yourDamage = 0;
+  let yourHeal = 0;
   let yourRank: number | null = null;
   if (userId) {
-    const { data: mine } = await admin
-      .from("boss_damage")
-      .select("damage")
-      .eq("event_id", eventId)
-      .eq("user_id", userId)
-      .maybeSingle();
-    yourDamage = Math.round((mine?.damage as number) ?? 0);
-
-    if (yourDamage > 0) {
-      const { count } = await admin
-        .from("boss_damage")
-        .select("user_id", { count: "exact", head: true })
-        .eq("event_id", eventId)
-        .gt("damage", (mine?.damage as number) ?? 0);
-      yourRank = (count ?? 0) + 1;
+    const { data: table } = await admin.rpc("boss_results_json", {
+      p_event: eventId,
+      p_uids: [userId],
+    });
+    const mine = (
+      table as {
+        you?: Record<string, { rank: number; damage: number; heal: number }>;
+      } | null
+    )?.you?.[userId];
+    if (mine) {
+      yourDamage = Math.round(mine.damage);
+      yourHeal = Math.round(mine.heal ?? 0);
+      yourRank = Number(mine.rank);
     }
   }
 
@@ -193,6 +200,7 @@ export async function buildBossFightConfig(
     escaped: state?.escaped ?? false,
     topDealers,
     yourDamage,
+    yourHeal,
     yourRank,
   };
 }

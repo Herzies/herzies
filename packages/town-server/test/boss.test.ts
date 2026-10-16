@@ -139,7 +139,7 @@ describe("attacks", () => {
     expect(resolve).toBeTruthy();
     if (resolve?.t !== "resolve") return;
     expect(resolve.hits).toEqual([
-      { uid: "a", damage: TUNING.slam.damage, absorbed: 0 },
+      { uid: "a", damage: TUNING.slam.damage, absorbed: 0, blocked: 0 },
     ]);
   });
 
@@ -161,8 +161,9 @@ describe("attacks", () => {
     if (resolve?.t !== "resolve") throw new Error("no hit");
     // 100 Def: half off.
     const damage = Math.round(TUNING.slam.damage / 2);
+    // Def isn't a Cymbrella: nothing blocked.
     expect(resolve.hits).toEqual([
-      { uid: "a", damage, absorbed: TUNING.slam.damage - damage },
+      { uid: "a", damage, absorbed: TUNING.slam.damage - damage, blocked: 0 },
     ]);
   });
 

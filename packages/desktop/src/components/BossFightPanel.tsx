@@ -255,7 +255,7 @@ export function BossFightPanel({
       {/* shrink-0, not flex-1: the leaderboard is a fixed four rows at most,
           so any spare height belongs to the boss render above. */}
       <div className="min-h-0 shrink-0">
-        <div className="mb-0.5 text-ui text-text-dim">Top damage dealers:</div>
+        <div className="mb-0.5 text-ui text-text-dim">Top contributors:</div>
         {(config.topDealers ?? []).length === 0 ? (
           <div className="text-[10px] text-text-dim">
             Nobody has hurt it yet.
@@ -272,23 +272,27 @@ export function BossFightPanel({
                 </span>
                 <span className="text-text-dim">
                   {d.damage.toLocaleString()}
+                  <Heal amount={d.heal} />
                 </span>
               </div>
             ))}
             {/* The player is usually not in the top N, and "you" is the line
                 that makes the board feel like it is about them. */}
-            {config.yourDamage > 0 &&
+            {config.yourRank !== null &&
             !config.topDealers.some((d) => d.rank === config.yourRank) ? (
               <div className="mt-0.5 flex items-baseline justify-between border-t border-[#333] pt-0.5 text-ui text-cyan">
                 <span>{config.yourRank ? `${config.yourRank}. ` : ""}you</span>
-                <span>{config.yourDamage.toLocaleString()}</span>
+                <span>
+                  {config.yourDamage.toLocaleString()}
+                  <Heal amount={config.yourHeal} />
+                </span>
               </div>
             ) : null}
           </div>
         )}
       </div>
 
-      {config.yourDamage === 0 && !dead && !escaped ? (
+      {config.yourRank === null && !dead && !escaped ? (
         <div className="text-center text-[10px] text-text-dim">
           Fight it in its lair. Look for the glowing door in town.
         </div>
@@ -374,5 +378,16 @@ export function BossFightHelp({ event }: { event: GameEvent }) {
       }
       rewards={rewards}
     />
+  );
+}
+
+/** What a herzie healed or blocked, after its damage — when there's any. */
+function Heal({ amount }: { amount?: number }) {
+  if (!amount) return null;
+  return (
+    <span className="text-green" title="Healed + blocked">
+      {" "}
+      +{amount.toLocaleString()}
+    </span>
   );
 }
