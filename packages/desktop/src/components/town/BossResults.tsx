@@ -12,7 +12,8 @@ import { clearBossResults, useBossResults } from "./combat/results";
  * and your own place under a "…" if you're not among them. Ranked by
  * contribution (damage, plus healing and blocking; see contributionOf).
  *
- * It covers the whole Town, chat and HUD included, down to the tab bar
+ * It shows just after the boss falls, before anyone goes for the loot,
+ * and goes with Continue or Esc. It covers the whole Town, chat and HUD included, down to the tab bar
  * (`--nav-height`), and is only drawn while the Town is the view. It stays
  * up back in town until you go on. Above all that, the page's shared
  * herzie stage would be under its background, so its herzies have a stage
@@ -36,6 +37,18 @@ export function BossResults({ name }: { name: string }) {
   useEffect(() => {
     if (shown) stage.setHost(overlay.current);
   }, [shown, stage]);
+  // Esc goes on too, before anything else in the Town hears it.
+  useEffect(() => {
+    if (!shown) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      clearBossResults();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [shown]);
   if (!results || !shown) return null;
 
   const { outcome, top, you } = results;
@@ -152,9 +165,8 @@ function Podium({
             equipped={look.equipped}
             size={first ? 3.4 : 2.7}
             cols={44}
-            // Turned toward the side, so the gear in hand shows across
-            // its body rather than end-on.
-            defaultAngle={-0.9}
+            // Turned to face us (0 is the usual three-quarter view).
+            defaultAngle={-0.4}
             groundInset={2}
             armed
             onStage={stage}
