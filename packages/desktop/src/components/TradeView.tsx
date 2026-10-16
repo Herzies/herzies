@@ -445,13 +445,15 @@ export function TradeView({
         </div>
       ) : (
         <>
-          <div className="grid flex-1 grid-cols-2 gap-2">
-            <div>
+          {/* Each side scrolls on its own when its list outgrows the panel;
+              the headings, and your coin row, stay put. */}
+          <div className="grid min-h-0 flex-1 grid-cols-2 grid-rows-1 gap-2">
+            <div className="flex min-h-0 flex-col">
               <div className="mb-1 text-ui text-text-dim">
                 Your offer {myLocked ? "🔒" : ""}
               </div>
               {myLocked ? (
-                <>
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
                   {describeOffer(myOffer).map((row) => (
                     <div key={row.key} className="text-ui text-text">
                       {row.name}
@@ -463,36 +465,38 @@ export function TradeView({
                       <Coin amount={myOffer.currency} />
                     </div>
                   )}
-                </>
+                </div>
               ) : (
                 <>
-                  {offerGroups(units).map((group) => {
-                    const item = getItem(group.itemId);
-                    if (!item) return null;
-                    const qty = group.unitIds.length;
-                    return (
-                      <div
-                        key={group.key}
-                        className="mb-0.5 flex items-center gap-1"
-                      >
-                        <span className="flex-1 text-[10px] text-text">
-                          {item.name}
-                          {group.level > 0 ? ` +${group.level}` : ""} ({qty})
-                        </span>
-                        <NumberTicker
-                          value={Math.min(offerCounts[group.key] ?? 0, qty)}
-                          max={qty}
-                          size="small"
-                          onChange={(v) =>
-                            setOfferCounts((prev) => ({
-                              ...prev,
-                              [group.key]: v,
-                            }))
-                          }
-                        />
-                      </div>
-                    );
-                  })}
+                  <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+                    {offerGroups(units).map((group) => {
+                      const item = getItem(group.itemId);
+                      if (!item) return null;
+                      const qty = group.unitIds.length;
+                      return (
+                        <div
+                          key={group.key}
+                          className="mb-0.5 flex items-center gap-1"
+                        >
+                          <span className="flex-1 text-[10px] text-text">
+                            {item.name}
+                            {group.level > 0 ? ` +${group.level}` : ""} ({qty})
+                          </span>
+                          <NumberTicker
+                            value={Math.min(offerCounts[group.key] ?? 0, qty)}
+                            max={qty}
+                            size="small"
+                            onChange={(v) =>
+                              setOfferCounts((prev) => ({
+                                ...prev,
+                                [group.key]: v,
+                              }))
+                            }
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
                   <div className="mt-1 flex items-center gap-1">
                     <span className="flex-1 text-[10px] text-yellow">
                       <span className="italic">H</span> (
@@ -508,24 +512,26 @@ export function TradeView({
                 </>
               )}
             </div>
-            <div>
+            <div className="flex min-h-0 flex-col">
               <div className="mb-1 text-ui text-text-dim">Their offer</div>
-              {describeOffer(theirOffer).map((row) => (
-                <div key={row.key} className="text-ui text-text">
-                  {row.name}
-                  {row.level > 0 ? ` +${row.level}` : ""} x{row.qty}
-                </div>
-              ))}
-              {theirOffer && theirOffer.currency > 0 && (
-                <div className="text-ui text-yellow">
-                  <Coin amount={theirOffer.currency} />
-                </div>
-              )}
-              {theirOffer &&
-                describeOffer(theirOffer).length === 0 &&
-                theirOffer.currency === 0 && (
-                  <div className="text-[10px] text-text">Empty</div>
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+                {describeOffer(theirOffer).map((row) => (
+                  <div key={row.key} className="text-ui text-text">
+                    {row.name}
+                    {row.level > 0 ? ` +${row.level}` : ""} x{row.qty}
+                  </div>
+                ))}
+                {theirOffer && theirOffer.currency > 0 && (
+                  <div className="text-ui text-yellow">
+                    <Coin amount={theirOffer.currency} />
+                  </div>
                 )}
+                {theirOffer &&
+                  describeOffer(theirOffer).length === 0 &&
+                  theirOffer.currency === 0 && (
+                    <div className="text-[10px] text-text">Empty</div>
+                  )}
+              </div>
             </div>
           </div>
 
