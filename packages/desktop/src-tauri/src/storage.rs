@@ -48,23 +48,48 @@ type HmacSha256 = Hmac<Sha256>;
 
 const HMAC_SALT: &str = "hrzs_v1_8f3a2c";
 
+/// Where the herzie, session and caches live. `HERZIES_CONFIG_DIR` moves
+/// them (scripts/local.sh does, for a local Supabase stack). Pointed at a
+/// local stack without it, they go to a `herzies-local` sibling anyway: a
+/// local login must never overwrite the real session.
+fn config_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("HERZIES_CONFIG_DIR").filter(|d| !d.is_empty()) {
+        return PathBuf::from(dir);
+    }
+    let local = ["NEXT_PUBLIC_SUPABASE_URL", "SUPABASE_URL"]
+        .iter()
+        .filter_map(|k| std::env::var(k).ok())
+        .next()
+        .is_some_and(|url| is_local_url(&url));
+    default_config_dir(if local { "herzies-local" } else { "herzies" })
+}
+
+fn is_local_url(url: &str) -> bool {
+    let host = url
+        .split("://")
+        .nth(1)
+        .unwrap_or(url)
+        .split(['/', ':'])
+        .next()
+        .unwrap_or("");
+    host == "localhost" || host == "127.0.0.1"
+}
+
 // Unix (including macOS) keeps its existing `~/.config/herzies` path
 // byte-for-byte — changing it would orphan every existing user's local
 // herzie/session data. Windows has no such history, so it gets the
 // platform-idiomatic `%APPDATA%\herzies` instead.
 #[cfg(unix)]
-fn config_dir() -> PathBuf {
+fn default_config_dir(name: &str) -> PathBuf {
     dirs::home_dir()
         .expect("No home directory")
         .join(".config")
-        .join("herzies")
+        .join(name)
 }
 
 #[cfg(windows)]
-fn config_dir() -> PathBuf {
-    dirs::config_dir()
-        .expect("No config directory")
-        .join("herzies")
+fn default_config_dir(name: &str) -> PathBuf {
+    dirs::config_dir().expect("No config directory").join(name)
 }
 
 fn ensure_dir() {
@@ -550,6 +575,14 @@ pub fn save_pending_minutes(minutes: f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_loopback_supabase_counts_as_local() {
+        assert!(is_local_url("http://127.0.0.1:54321"));
+        assert!(is_local_url("http://localhost:54321/"));
+        assert!(!is_local_url("https://ojqfqxolbjegorgoyond.supabase.co"));
+        assert!(!is_local_url("https://localhost.evil.example"));
+    }
 
     #[test]
     fn content_hash_ignores_map_order_but_not_content() {

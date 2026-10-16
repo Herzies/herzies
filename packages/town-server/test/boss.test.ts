@@ -1,3 +1,4 @@
+import { CAST_INTERVAL_MS } from "@herzies/shared/combat";
 import { TOWN_WALK_SPEED } from "@herzies/shared/town-net";
 import { describe, expect, it } from "vitest";
 import {
@@ -50,9 +51,10 @@ describe("tuning invariants", () => {
     expect(TUNING.ring.windupMs).toBeGreaterThanOrEqual(MIN_WINDUP_MS);
   });
 
-  it("no single hit takes more than the damage budget", () => {
-    expect(TUNING.slam.fraction).toBeLessThanOrEqual(MAX_HIT_FRACTION);
-    expect(TUNING.ring.fraction).toBeLessThanOrEqual(MAX_HIT_FRACTION);
+  it("a level-20 herzie with no Stamina takes hits within the budget", () => {
+    const max = 200;
+    expect(TUNING.slam.damage).toBeLessThanOrEqual(MAX_HIT_FRACTION * max);
+    expect(TUNING.ring.damage).toBeLessThanOrEqual(MAX_HIT_FRACTION * max);
   });
 
   it("a slam can be left on foot within its windup, with time to react", () => {
@@ -100,7 +102,7 @@ describe("covers", () => {
     inner: 0,
     at: 0,
     hitAt: 0,
-    fraction: 0.2,
+    damage: 40,
   };
   it("a circle covers its disc", () => {
     expect(covers(circle, 2.9, 0)).toBe(true);
@@ -124,14 +126,39 @@ describe("attacks", () => {
     expect(tgs[0].hitAt - tgs[0].at).toBeGreaterThanOrEqual(MIN_WINDUP_MS);
   });
 
-  it("hits a player who stays put, for a fraction of their max HP", () => {
+  it("hits a player who stays put, for flat damage", () => {
     const e = engine();
     const p = still("a", 0, 5, 300);
     const ev = run(e, T0, T0 + 6_000, [p]);
     const resolve = ev.find((x) => x.t === "resolve");
     expect(resolve).toBeTruthy();
     if (resolve?.t !== "resolve") return;
-    expect(resolve.hits).toEqual([{ uid: "a", damage: 60 }]);
+    expect(resolve.hits).toEqual([
+      { uid: "a", damage: TUNING.slam.damage, absorbed: 0 },
+    ]);
+  });
+
+  it("caps a hit at a share of a small herzie's health", () => {
+    const e = engine();
+    const p = still("a", 0, 5, 60);
+    const ev = run(e, T0, T0 + 6_000, [p]);
+    const resolve = ev.find((x) => x.t === "resolve");
+    if (resolve?.t !== "resolve") throw new Error("no hit");
+    expect(MAX_HIT_FRACTION * 60).toBeLessThan(TUNING.slam.damage);
+    expect(resolve.hits[0].damage).toBe(Math.round(MAX_HIT_FRACTION * 60));
+  });
+
+  it("Def takes its share off a hit", () => {
+    const e = engine();
+    const p = { ...still("a", 0, 5, 300), def: 100 };
+    const ev = run(e, T0, T0 + 6_000, [p]);
+    const resolve = ev.find((x) => x.t === "resolve");
+    if (resolve?.t !== "resolve") throw new Error("no hit");
+    // 100 Def: half off.
+    const damage = Math.round(TUNING.slam.damage / 2);
+    expect(resolve.hits).toEqual([
+      { uid: "a", damage, absorbed: TUNING.slam.damage - damage },
+    ]);
   });
 
   it("misses a player who walked out of the zone", () => {
@@ -248,7 +275,7 @@ describe("casts", () => {
     expect(e.cast("a", at, 0, pitch, STATS, T0)).toBe("miss");
     expect(e.cast("a", at, yaw, pitch, STATS, T0 + 10)).toBe("hit");
     expect(e.cast("a", at, yaw, pitch, STATS, T0 + 20)).toBe("cooldown");
-    // The pace refills: one more cast every 300 ms.
+    // The pace refills: one more cast every castEveryMs.
     expect(
       e.cast("a", at, yaw, pitch, STATS, T0 + 20 + TUNING.castEveryMs),
     ).toBe("hit");
@@ -260,9 +287,9 @@ describe("casts", () => {
     const at = { x: 0, z: 8 };
     let t = T0;
     for (let i = 0; i < 200; i++) {
-      // The client casts every 340 ms; the network adds up to 120 ms of
-      // jitter either way.
-      t += 340 + (i % 3 === 0 ? 120 : i % 3 === 1 ? -120 : 0);
+      // The client casts every CAST_INTERVAL_MS; the network adds up to
+      // 120 ms of jitter either way.
+      t += CAST_INTERVAL_MS + (i % 3 === 0 ? 120 : i % 3 === 1 ? -120 : 0);
       expect(e.cast("a", at, yaw, pitch, STATS, t), `cast ${i}`).not.toBe(
         "cooldown",
       );

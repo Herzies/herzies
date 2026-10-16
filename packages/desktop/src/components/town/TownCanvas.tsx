@@ -50,6 +50,9 @@ import {
 } from "./runtime";
 import type { Champion } from "./Statues";
 import { Visitor } from "./Visitor";
+import { DiscVFX } from "./vfx/DiscVFX";
+import { SkillVFX } from "./vfx/SkillVFX";
+import { SlashVFX } from "./vfx/SlashVFX";
 import { SonicVFX } from "./vfx/SonicVFX";
 import { World } from "./World";
 
@@ -202,6 +205,9 @@ export default function TownCanvas(props: TownCanvasProps) {
         {map.combat && (
           <>
             <SonicVFX />
+            <DiscVFX />
+            <SkillVFX />
+            <SlashVFX />
             <CombatOverlay />
           </>
         )}
@@ -215,6 +221,9 @@ export default function TownCanvas(props: TownCanvasProps) {
 
 const NO_STATS: HerzieStats = {
   sonicPower: 0,
+  stamina: 0,
+  euphony: 0,
+  def: 0,
   luck: 0,
   critChance: 0,
   critDamage: 0,

@@ -1,8 +1,11 @@
 import {
+  attackStyleOfGear,
   TOWN_FLAG_AFK,
+  TOWN_FLAG_COMBAT,
   TOWN_FLAG_DANCING,
   TOWN_FLAG_SITTING,
 } from "@herzies/shared";
+import { BOSS_STAND, meleeReaches } from "@herzies/shared/combat";
 import { HerzieModel } from "@herzies/shared/gl";
 import { Html } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
@@ -12,7 +15,16 @@ import { ambient } from "./ambient";
 import { SEAT_Y } from "./Benches";
 import { BUBBLE_RANGE, type ChatBubble, type ChatBubbles } from "./chatBubbles";
 import { liveDummies } from "./combat/Dummies";
+import {
+  DISC_ARM,
+  type DiscHand,
+  discField,
+  nextHand as nextFreeHand,
+} from "./combat/discs";
+import { DUMMY, hitDummy } from "./combat/dummy";
 import { bossFight } from "./combat/fight";
+import { entityAt } from "./combat/skills";
+import { slashField } from "./combat/slashes";
 import { assistTarget, type Vec3, waveField } from "./combat/waves";
 import { HeadBubble } from "./HeadBubble";
 import { NAME_SHADOW, nameOpacity } from "./nameFade";
@@ -75,8 +87,21 @@ function RemoteHerzie({
   );
   useEffect(() => {
     herzie.root.visible = false;
-    return () => herzie.dispose();
+    return () => {
+      discField.recall(herzie);
+      slashField.forget(herzie);
+      herzie.dispose();
+    };
   }, [herzie]);
+  // A Record Slinger throws its discs, a hand at a time; the server only
+  // says how many casts, so which hand is guessed (as Combat picks). A
+  // Percussionist strikes with its stick, and a herzie without a class
+  // bumps into things.
+  const attack = attackStyleOfGear(look.equipped?.main_hand);
+  const throwsDiscs = attack === "disc";
+  const blow = herzie.holdsGear ? "strike" : "bump";
+  const nextHand = useRef<DiscHand>("held-r");
+  useEffect(() => () => void entityAt.delete(remote.id), [remote.id]);
 
   const tag = useRef<HTMLButtonElement>(null);
   const tagAnchor = useRef<Group>(null);
@@ -96,15 +121,72 @@ function RemoteHerzie({
     herzie.root.position.set(s.x, seated ? SEAT_Y : 0, s.z);
     herzie.sitting = seated;
     herzie.dancing = (s.flags & TOWN_FLAG_DANCING) !== 0;
+    // Aiming: their gear off their back and in hand (and kept there while
+    // a disc of theirs is on its way back).
+    const discsOut =
+      discField.isOut(herzie, "held-l") || discField.isOut(herzie, "held-r");
+    herzie.armed = (s.flags & TOWN_FLAG_COMBAT) !== 0 || discsOut;
     herzie.heading = s.heading;
     // They cast: the same thrust, and a wave from the hand the way they
     // face (only the cast count travels, not where they aimed).
     if (remote.pendingCasts > 0 && !herzie.casting) {
       remote.pendingCasts--;
-      herzie.cast(0);
+      if (throwsDiscs) {
+        // The hand they'd throw from by the same rule as ours (the main
+        // hand if its disc is back), by our idea of their catches; with
+        // both out, the other one from last time.
+        const last = nextHand.current;
+        nextHand.current =
+          nextFreeHand(discField, herzie) ??
+          (last === "held-l" ? "held-r" : "held-l");
+        herzie.cast(0, { arm: DISC_ARM[nextHand.current], style: "throw" });
+      } else if (attack === "melee") {
+        herzie.cast(0, { style: blow });
+        if (blow === "strike") slashField.strike(herzie, false);
+      } else {
+        herzie.cast(0);
+      }
     }
     herzie.update(dt, s.speed);
-    if (herzie.released) {
+    if (herzie.released && throwsDiscs) {
+      // Never waiting on our idea of their catch: a disc of theirs still
+      // out from that hand is let go (see DiscField.throw).
+      const h = nextHand.current;
+      herzie.heldWorldPosition(h, hand);
+      const from: Vec3 = [hand.x, hand.y, hand.z];
+      const dir: Vec3 = [Math.sin(s.heading), 0, Math.cos(s.heading)];
+      discField.throw(from, dir, {
+        mine: false,
+        owner: herzie,
+        hand: h,
+        target: assistTarget(from, dir, liveDummies),
+      });
+    } else if (herzie.released && attack === "melee") {
+      // Only for show: what's in front of them rocks (the server counts
+      // their hits on the boss).
+      const from = { x: s.x, z: s.z };
+      const height = herzie.height * 0.5;
+      const targets = [
+        ...liveDummies.map((d) => ({ d, radius: DUMMY.radius })),
+        ...(bossFight.on ? [{ d: null, radius: BOSS_STAND.radius }] : []),
+      ];
+      for (const { d, radius } of targets) {
+        const at = d ?? BOSS_STAND;
+        if (!meleeReaches(from, s.heading, { x: at.x, z: at.z, radius }))
+          continue;
+        const dx = at.x - s.x;
+        const dz = at.z - s.z;
+        const n = Math.hypot(dx, dz) || 1;
+        const dir: Vec3 = [dx / n, 0, dz / n];
+        if (d)
+          hitDummy(d, dir[0], dir[2], 100, false, performance.now(), false);
+        waveField.burst(
+          [at.x - dir[0] * radius, height, at.z - dir[2] * radius],
+          dir,
+          "hit",
+        );
+      }
+    } else if (herzie.released) {
       herzie.handWorldPosition(hand);
       const from: Vec3 = [hand.x, hand.y, hand.z];
       const dir: Vec3 = [Math.sin(s.heading), 0, Math.cos(s.heading)];
@@ -113,11 +195,19 @@ function RemoteHerzie({
         target: assistTarget(from, dir, liveDummies),
       });
     }
+    // A thrown disc isn't in the hand.
+    herzie.setHeldHidden("held-l", discField.isOut(herzie, "held-l"));
+    herzie.setHeldHidden("held-r", discField.isOut(herzie, "held-r"));
     tagAnchor.current?.position.set(
       s.x,
       herzie.height + 0.3 + (seated ? SEAT_Y : 0),
       s.z,
     );
+    entityAt.set(remote.id, {
+      x: s.x,
+      z: s.z,
+      top: herzie.height + (seated ? SEAT_Y : 0),
+    });
     // Chat is one room for everyone; the Town only shows what's said near
     // you.
     if (bubbleBox.current) {

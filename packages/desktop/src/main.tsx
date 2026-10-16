@@ -1,10 +1,15 @@
 import "./globals.css";
 import {
+  attackStyle,
   bankCapacity,
+  CLASS_DEFS,
+  type HerzieClass,
   type HerzieProfile,
   hasRoomFor,
   isBankFull,
   levelProgress,
+  needsClassChoice,
+  statPoints,
 } from "@herzies/shared";
 import { herzieStage } from "@herzies/shared/gl";
 import { attachConsole } from "@tauri-apps/plugin-log";
@@ -17,6 +22,10 @@ import type { Update } from "@tauri-apps/plugin-updater";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ChatPanel } from "./components/ChatPanel";
+import {
+  ClassChoiceOverlay,
+  withClassGear,
+} from "./components/ClassChoiceOverlay";
 import { EventsView } from "./components/EventsView";
 import { FriendsView } from "./components/FriendsView";
 import { HERZIE_STAGE_HEIGHT, HerzieWithSky } from "./components/HerzieWithSky";
@@ -34,6 +43,8 @@ import { StoreView } from "./components/StoreView";
 import { TabBar, type View } from "./components/TabBar";
 import { TradeView } from "./components/TradeView";
 import { setLootRoom } from "./components/town/combat/lootFeed";
+import { setMySkill } from "./components/town/combat/skills";
+import { combat } from "./components/town/combat/state";
 import { UpdateAvailableOverlay } from "./components/UpdateAvailableOverlay";
 import { WhatsNewOverlay } from "./components/WhatsNewOverlay";
 import { useOptimisticUnits } from "./hooks/useOptimisticUnits";
@@ -102,6 +113,7 @@ function App() {
     itemUpgrades: {},
     units: [],
     bankExpansions: 0,
+    skills: [],
     friends: {},
     pendingTradeRequest: null,
     pendingFriendRequest: null,
@@ -128,6 +140,7 @@ function App() {
     rawState.equipped,
     rawState.units,
     rawState.herzie?.stage ?? 1,
+    rawState.herzie?.class ?? null,
   );
   // Memoized on its inputs, each of which is itself identity-stable while its
   // content is unchanged (`rawState` via stableMerge, field by field) — so this
@@ -188,6 +201,34 @@ function App() {
   const [whatsNewVersion, setWhatsNewVersion] = useState<string | null>(null);
   /** Dev-only: shows the "What's new" overlay with sample notes (Settings → Debug). */
   const [testWhatsNewOverlay, setTestWhatsNewOverlay] = useState(false);
+  /** Dev-only: draws the herzie holding a class's gear (Settings → Debug). */
+  const [classOverride, setClassOverride] = useState<HerzieClass | null>(null);
+  /** Dev-only: opens the class choice whatever the herzie's state. */
+  const [testClassChoice, setTestClassChoice] = useState(false);
+  // The Town's skill bar follows the class skill the app knows about — or,
+  // under a Class Preview, that class's starter skill at Lv. 1 (practice on
+  // the training grounds works; the cave's server refuses it).
+  useEffect(
+    () =>
+      setMySkill(
+        classOverride
+          ? [
+              {
+                skillId: CLASS_DEFS[classOverride].starterSkill,
+                level: 1,
+              },
+            ]
+          : rawState.skills,
+      ),
+    [rawState.skills, classOverride],
+  );
+  // How the Town's basic attack goes: by class (a Record Slinger throws its
+  // discs), the Class Preview's while one's on.
+  useEffect(() => {
+    combat.attack = attackStyle(classOverride ?? rawState.herzie?.class);
+  }, [rawState.herzie?.class, classOverride]);
+  /** "Later" on the class choice: asked again next launch. */
+  const [classChoiceLater, setClassChoiceLater] = useState(false);
   /** Captured the first time `state.isOnline` is true this session: was this
    * device mid-onboarding (no herzie yet)? A fresh install or reinstall
    * shouldn't be told what's new in the version it just installed — only an
@@ -890,13 +931,20 @@ function App() {
               userId={herzie.friendCode}
               stage={stageOverride ?? herzie.stage}
               isPlaying={!!state.nowPlaying}
-              equipped={state.equipped}
+              equipped={
+                classOverride
+                  ? withClassGear(state.equipped, classOverride)
+                  : state.equipped
+              }
               paused={
                 (view !== "home" && view !== "inventory") ||
                 (view === "home" && !!selfProfile)
               }
               zoom={view === "inventory" ? HERZIE_VIEW_ZOOM : 1}
               offsetY={view === "inventory" ? HERZIE_VIEW_OFFSET_Y : 0}
+              // Class gear rides on its back, out of sight from the front:
+              // drawn in the inventory, where it's equipped.
+              armed={view === "inventory"}
               grounded
             />
           </div>
@@ -1008,6 +1056,7 @@ function App() {
               active={view === "inventory"}
               rootKey={rootKeys.inventory ?? 0}
               openPanel={inventoryPanel}
+              skills={state.skills}
             />
           </div>
         )}
@@ -1028,12 +1077,17 @@ function App() {
             debugForceMerchant={debugMerchantOverride}
             debugForceTreatTrader={debugTreatTraderOverride}
             onScreenChange={setEventsScreen}
-            equipped={state.equipped}
+            equipped={
+              classOverride
+                ? withClassGear(state.equipped, classOverride)
+                : state.equipped
+            }
             units={state.units}
             currency={state.inventoryCurrency}
             onLog={addLog}
             playerSeed={herzie?.friendCode}
             playerStage={stageOverride ?? herzie?.stage}
+            playerStatPoints={herzie?.statPoints}
             playerProfile={
               herzie
                 ? {
@@ -1105,6 +1159,9 @@ function App() {
             state={state}
             stageOverride={stageOverride}
             onStageOverride={setStageOverride}
+            classOverride={classOverride}
+            onClassOverride={setClassOverride}
+            onTestClassChoice={() => setTestClassChoice(true)}
             onPreviewOnboarding={() => setPreviewOnboarding(true)}
             onPreviewLoading={() => setPreviewLoading(true)}
             onTestUpdateAlert={() => setTestUpdateOverlay(true)}
@@ -1163,6 +1220,13 @@ function App() {
                   if (v === "inventory") setInventoryPanel("deck");
                   switchView(v);
                 }}
+                // Only once the server knows stat points: before that,
+                // every herzie would show its whole back pay unspendable.
+                unspentPoints={
+                  herzie.statPoints
+                    ? statPoints(herzie.level, herzie.statPoints).unspent
+                    : 0
+                }
                 visitorsInTown={
                   visitorsInTown +
                   Number(hasActiveEventOverride) +
@@ -1278,6 +1342,21 @@ function App() {
           installing={false}
         />
       )}
+
+      {herzie &&
+        ((needsClassChoice(herzie) && !classChoiceLater) ||
+          testClassChoice) && (
+          <ClassChoiceOverlay
+            onChoose={async (c) => {
+              await herzies.chooseClass(c);
+              setTestClassChoice(false);
+            }}
+            onLater={() => {
+              setClassChoiceLater(true);
+              setTestClassChoice(false);
+            }}
+          />
+        )}
 
       {herzie && whatsNewVersion && (
         <WhatsNewOverlay

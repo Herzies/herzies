@@ -73,7 +73,7 @@ describe("respawnHp", () => {
 
 describe("vitalsOf / liveHp", () => {
   it("a client keeps counting regen from the handed-out stamp", () => {
-    const v = vitalsOf({ hp: 20, hpAt: T, down: false }, 59, T);
+    const v = vitalsOf({ hp: 20, hpAt: T, down: false }, 59, 0, T);
     expect(v.maxHp).toBe(395);
     expect(v.hp).toBe(20);
     expect(liveHp(v, T + HP_REGEN_DELAY_MS + 60_000)).toBeCloseTo(20 + 395 / 5);

@@ -18,6 +18,16 @@ export const HIT_BASE = 100;
 /** How far a hit's damage wanders either way of its base, as a fraction. */
 export const HIT_SPREAD = 0.1;
 
+/** How often a herzie casts a sonic wave, in ms: the client's pace, which
+ * the Town server holds it to (with some slack for network jitter). */
+export const CAST_INTERVAL_MS = 500;
+
+/** What one wave deals at this sonic power, before its spread and crits:
+ * the number a player is shown as their damage. */
+export function waveDamage(sonicPower: number): number {
+  return Math.round(HIT_BASE * (1 + sonicPower / 100));
+}
+
 /** One hit of a herzie's sonic wave: the base, raised by sonic power the
  * way boss damage is (10 sonic power is +10%), wandering ±HIT_SPREAD; and,
  * at crit chance percent, a critical hit — crit damage percent on top.
@@ -52,6 +62,59 @@ export const WAVE_HIT_RADIUS = 0.2;
 /** Height of the hand a wave leaves from, above the herzie's feet. */
 export const WAVE_HAND_HEIGHT = 1.2;
 
+// ---------------------------------------------------------------------------
+// Discs: the Record Slinger's attack. Thrown, they fly out straight and come
+// back to the hand; only the way out hits, so the server times a hit the way
+// it does a wave's, at the disc's own speed and reach.
+
+/** How fast a disc flies out, world units a second. */
+export const DISC_SPEED = 30;
+/** How far a disc flies before it turns back, if it hits nothing. */
+export const DISC_RANGE = 24;
+/** A disc's hit as a share of a wave's: a little more, for the wait while
+ * it comes back. */
+export const DISC_DAMAGE = 1.15;
+
+/** How long after the throw a disc that hits at `dist` lands, in ms. */
+export function discLandsAfterMs(dist: number): number {
+  return (dist / DISC_SPEED) * 1000;
+}
+
+// ---------------------------------------------------------------------------
+// Melee: a Percussionist's stick, or a classless herzie's body bump. Up
+// close, ahead of it, and only at the moment of contact: the client tells
+// the server when it lands, so there's no flight time.
+
+/** How far past its own middle and the target's surface a melee hit
+ * reaches, on the ground, in world units. */
+export const MELEE_REACH = 1.6;
+/** How far either way of where it faces a melee hit reaches (radians). */
+export const MELEE_ARC = (60 * Math.PI) / 180;
+/** A melee hit as a share of a wave's: more, for standing in its face. */
+export const MELEE_DAMAGE = 1.3;
+
+/** Whether a melee hit from `from`, facing `yaw`, reaches `target` (a
+ * circle on the ground): within `reach` of its surface, and within the
+ * arc of the way it faces. Right on top of it, it always does. */
+export function meleeReaches(
+  from: { x: number; z: number },
+  yaw: number,
+  target: { x: number; z: number; radius: number },
+  reach: number = MELEE_REACH,
+): boolean {
+  const dx = target.x - from.x;
+  const dz = target.z - from.z;
+  const dist = Math.hypot(dx, dz);
+  if (dist - target.radius > reach) return false;
+  if (dist <= target.radius) return true;
+  let off = Math.atan2(dx, dz) - yaw;
+  off = Math.atan2(Math.sin(off), Math.cos(off));
+  // The target's own width counts toward the arc.
+  return (
+    Math.abs(off) - Math.asin(Math.min(1, target.radius / dist)) <= MELEE_ARC
+  );
+}
+
 export type Vec3 = [number, number, number];
 
 /** The unit direction of a cast, from the yaw and pitch a client sends. */
@@ -79,12 +142,13 @@ export function waveReaches(
   from: Readonly<Vec3>,
   dir: Readonly<Vec3>,
   target: { x: number; y: number; z: number; radius: number },
+  range: number = WAVE_RANGE,
 ): number | null {
   const tx = target.x - from[0];
   const ty = target.y - from[1];
   const tz = target.z - from[2];
   const dist = Math.hypot(tx, ty, tz);
-  if (dist < 1e-6 || dist > WAVE_RANGE) return null;
+  if (dist < 1e-6 || dist > range) return null;
   const cos = (tx * dir[0] + ty * dir[1] + tz * dir[2]) / dist;
   const angle =
     Math.acos(Math.min(1, Math.max(-1, cos))) -
@@ -97,7 +161,73 @@ export function waveReaches(
 export const BOSS_STAND = {
   x: 0,
   z: -4,
-  /** Its body's radius on the ground, and the height of its middle. */
+  /** Its body's radius on the ground, the height of its middle, and of
+   * its top. */
   radius: 2.2,
   chest: 2.4,
+  top: 4.8,
 } as const;
+
+/**
+ * How far along `dir` from `from` a cast reaches the boss, if it does: at
+ * its chest by the wave rule (aim assist and all), or anywhere on its body,
+ * a standing cylinder as tall as it is. Up close the crosshair sits on the
+ * near side of a big body, low or off to one side, well off the line to its
+ * chest, so the chest alone would let those throws through. Null if it
+ * misses or is out of range.
+ */
+export function bossReaches(
+  from: Readonly<Vec3>,
+  dir: Readonly<Vec3>,
+  range: number = WAVE_RANGE,
+): number | null {
+  const b = BOSS_STAND;
+  const chest = waveReaches(
+    from,
+    dir,
+    { x: b.x, y: b.chest, z: b.z, radius: b.radius },
+    range,
+  );
+  const body = bodyReaches(from, dir, b, b.radius + WAVE_HIT_RADIUS);
+  if (body === null || body > range) return chest;
+  return chest === null ? body : Math.min(chest, body);
+}
+
+/** Where a ray first meets a standing cylinder (its side or its top), as
+ * a distance along it; null if it doesn't, or meets the floor first. */
+function bodyReaches(
+  from: Readonly<Vec3>,
+  dir: Readonly<Vec3>,
+  body: { x: number; z: number; top: number },
+  radius: number,
+): number | null {
+  const ox = from[0] - body.x;
+  const oz = from[2] - body.z;
+  const top = body.top + WAVE_HIT_RADIUS;
+  const c = ox * ox + oz * oz - radius * radius;
+  // Already within it (pressed against it): hit as it leaves the hand, if
+  // thrown at it at all, not away.
+  if (c <= 0) {
+    const toward = -(ox * dir[0] + oz * dir[2]) > 0;
+    return toward && from[1] <= top ? 0 : null;
+  }
+  const a = dir[0] * dir[0] + dir[2] * dir[2];
+  if (a > 1e-9) {
+    const half = ox * dir[0] + oz * dir[2];
+    const disc = half * half - a * c;
+    if (disc >= 0) {
+      const t = (-half - Math.sqrt(disc)) / a;
+      if (t >= 0) {
+        const y = from[1] + dir[1] * t;
+        if (y < 0) return null;
+        if (y <= top) return t;
+      }
+    }
+  }
+  // Over its shoulder and down onto its top.
+  if (dir[1] >= 0 || from[1] <= top) return null;
+  const t = (top - from[1]) / dir[1];
+  const x = ox + dir[0] * t;
+  const z = oz + dir[2] * t;
+  return x * x + z * z <= radius * radius ? t : null;
+}

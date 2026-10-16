@@ -251,19 +251,23 @@ export async function cleanupTestData() {
     .from("store_orders")
     .delete()
     .neq("id", "00000000-0000-0000-0000-000000000000");
-  await admin
-    .from("herzies")
-    .delete()
-    .neq("id", "00000000-0000-0000-0000-000000000000");
+  // Only the tests' own herzies: the local stack (scripts/local.sh) plays
+  // on this same database, and wiping every herzie took its players too.
+  const { data: users } = await admin.auth.admin.listUsers({ perPage: 1000 });
+  const testUsers = (users?.users ?? []).filter((u) =>
+    u.email?.endsWith("@herzies.test"),
+  );
+  const ids = testUsers.map((u) => u.id);
+  for (let i = 0; i < ids.length; i += 100) {
+    await admin
+      .from("herzies")
+      .delete()
+      .in("user_id", ids.slice(i, i + 100));
+  }
 
   // Delete test users from auth
-  const { data: users } = await admin.auth.admin.listUsers();
-  if (users?.users) {
-    for (const user of users.users) {
-      if (user.email?.endsWith("@herzies.test")) {
-        await admin.auth.admin.deleteUser(user.id);
-      }
-    }
+  for (const user of testUsers) {
+    await admin.auth.admin.deleteUser(user.id);
   }
 }
 

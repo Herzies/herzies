@@ -52,6 +52,8 @@ pub struct ManagedState {
     /// the browser and is credited by the Stripe webhook, so no response the app
     /// makes carries it. Cached so the grid opens at its real size.
     pub bank_expansions: u32,
+    /// The class skills, from the last sync that carried them.
+    pub skills: Vec<HerzieSkill>,
     /// Friend profiles keyed by friend code (persisted when codes match).
     pub friends: HashMap<String, HerzieProfile>,
     /// Latest incoming trade from `/sync` (cleared when absent on a successful sync).
@@ -151,6 +153,7 @@ impl ManagedState {
             item_upgrades,
             units,
             bank_expansions,
+            skills: Vec::new(),
             friends: crate::storage::load_friends_cache(&friend_codes),
             pending_trade_request: None,
             pending_friend_request: None,
@@ -260,6 +263,7 @@ impl ManagedState {
             item_upgrades: self.item_upgrades.clone(),
             units: self.units.clone(),
             bank_expansions: self.bank_expansions,
+            skills: self.skills.clone(),
             friends: self.friends.clone(),
             pending_trade_request: self.pending_trade_request.clone(),
             pending_friend_request: self.pending_friend_request.clone(),
@@ -338,6 +342,8 @@ mod tests {
             xp,
             level,
             stage,
+            class: None,
+            stat_points: None,
             total_minutes_listened: 0.0,
             genre_minutes: HashMap::new(),
             friend_code: "ABCD".to_string(),
@@ -374,6 +380,7 @@ mod tests {
             item_upgrades: ItemUpgrades::new(),
             units: Vec::new(),
             bank_expansions: 0,
+            skills: Vec::new(),
             friends: HashMap::new(),
             pending_trade_request: None,
             pending_friend_request: None,

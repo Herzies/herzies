@@ -421,6 +421,13 @@ export class TownConnection {
     this.sendRaw(encodeCastFrame({ seq: this.castSeq, yaw, pitch }));
   }
 
+  /** A class skill aimed at (`yaw`, `pitch`). Only the boss room runs
+   * them; `seq` comes back in a refusal. */
+  sendSkill(skill: string, seq: number, yaw: number, pitch: number) {
+    if (this.status !== "online") return;
+    this.sendJson({ t: "skill", skill, seq, yaw, pitch });
+  }
+
   private addRemote(p: TownPlayer) {
     if (p.id === this.you) return;
     const existing = this.remotes.get(p.id);

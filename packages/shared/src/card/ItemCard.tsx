@@ -14,6 +14,7 @@ import { cx } from "./cx.js";
 import { type CardIllustration, ItemCardArt } from "./ItemCardArt.js";
 import { TiltCard } from "./TiltCard.js";
 import {
+  ItemRequirementLine,
   ItemStatLines,
   ItemTypeTag,
   ModifierEffectTag,
@@ -153,6 +154,8 @@ export function ItemCard({
           level={level}
           className="border border-border bg-bg px-1.5 py-1"
         />
+
+        <ItemRequirementLine item={item} />
 
         <div className="text-ui-sm italic leading-snug text-text-dim">
           {item.description}

@@ -2,7 +2,8 @@
  * The whole fight, headless: scripted herzies against the boss, so tuning
  * that makes it unwinnable or trivial fails here rather than in a playtest.
  */
-import { WAVE_HAND_HEIGHT } from "@herzies/shared/combat";
+import { CAST_INTERVAL_MS, WAVE_HAND_HEIGHT } from "@herzies/shared/combat";
+import { STAT_TUNING } from "@herzies/shared/stats";
 import { maxHp as maxHpOf } from "@herzies/shared/vitals";
 import { TOWN_WALK_SPEED } from "@herzies/shared/town-net";
 import { describe, expect, it } from "vitest";
@@ -17,7 +18,7 @@ import { PositionHistory } from "../src/history";
 
 const STEP = 50;
 const REACTION_MS = 450;
-const CAST_EVERY_MS = 340; // the client's real pace (Combat's CAST_INTERVAL)
+const CAST_EVERY_MS = CAST_INTERVAL_MS; // the client's real pace
 const BOSS_HP = 250_000;
 
 type Bot = {
@@ -32,11 +33,16 @@ type Bot = {
   seen: Map<number, number>;
   nextCast: number;
   hitsTaken: number;
+  /** Points in Stamina: more health, and Def. */
+  stamina: number;
+  damageTaken: number;
+  /** When it was knocked out, ms into the fight. */
+  downAt: number | null;
 };
 
-function bot(i: number, dodges: boolean, level = 30): Bot {
+function bot(i: number, dodges: boolean, level = 30, stamina = 0): Bot {
   const angle = (i / 6) * Math.PI * 2;
-  const max = maxHpOf(level);
+  const max = maxHpOf(level, stamina);
   return {
     uid: `bot${i}`,
     x: Math.sin(angle) * 6,
@@ -48,6 +54,9 @@ function bot(i: number, dodges: boolean, level = 30): Bot {
     seen: new Map(),
     nextCast: 0,
     hitsTaken: 0,
+    stamina,
+    damageTaken: 0,
+    downAt: null,
   };
 }
 
@@ -81,7 +90,7 @@ function safeSpot(
   return best;
 }
 
-function fight(bots: Bot[], seed: number, limitMs = 20 * 60_000) {
+function fight(bots: Bot[], seed: number, limitMs = 30 * 60_000) {
   const t0 = 1_000_000;
   const boss = new BossEngine({ hp: BOSS_HP, maxHp: BOSS_HP, seed, now: t0 });
   const history = new PositionHistory();
@@ -135,6 +144,7 @@ function fight(bots: Bot[], seed: number, limitMs = 20 * 60_000) {
       uid: b.uid,
       alive: b.alive,
       maxHp: b.max,
+      def: b.stamina * STAT_TUNING.defPerStamina,
       posAt: (at) => history.at(b.uid, at),
     }));
     for (const ev of boss.update(t, players)) {
@@ -143,7 +153,11 @@ function fight(bots: Bot[], seed: number, limitMs = 20 * 60_000) {
           const b = bots.find((x) => x.uid === h.uid) as Bot;
           b.hp -= h.damage;
           b.hitsTaken++;
-          if (b.hp <= 0) b.alive = false;
+          b.damageTaken += h.damage;
+          if (b.hp <= 0 && b.alive) {
+            b.alive = false;
+            b.downAt = t - t0;
+          }
         }
       }
       if (ev.t === "killed") killedAt = t - t0;
@@ -187,6 +201,23 @@ describe("a full fight, simulated", () => {
     expect(killedAt).not.toBeNull();
     expect(bots.filter((b) => b.dodges).every((b) => b.alive)).toBe(true);
     expect(bots.filter((b) => !b.dodges).some((b) => b.hitsTaken > 0)).toBe(true);
+  });
+
+  it("Stamina lets someone who stands in it last much longer", () => {
+    // Level 30, every point in Stamina, standing still: no dodging at all.
+    const plain = [bot(0, false)];
+    const tank = [bot(0, false, 30, 60)];
+    fight(plain, 5, 10 * 60_000);
+    fight(tank, 5, 10 * 60_000);
+    expect(plain[0].downAt).not.toBeNull();
+    // Def takes a share off every hit…
+    expect(tank[0].damageTaken / tank[0].hitsTaken).toBeLessThan(
+      0.8 * (plain[0].damageTaken / plain[0].hitsTaken),
+    );
+    // …and the bigger bar lasts several times as long.
+    expect(tank[0].downAt ?? Infinity).toBeGreaterThan(
+      3 * (plain[0].downAt as number),
+    );
   });
 
   it("is winnable across seeds", () => {

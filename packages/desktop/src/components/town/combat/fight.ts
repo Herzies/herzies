@@ -1,4 +1,4 @@
-import { getItemIcon, ITEMS } from "@herzies/shared";
+import { getItemIcon, ITEMS, isSkillId } from "@herzies/shared";
 import type {
   BossTelegraph,
   FightState,
@@ -9,6 +9,14 @@ import { useSyncExternalStore } from "react";
 import { sfxDown, sfxHurt, sfxImpact, sfxSlam, sfxWarn } from "../sfx";
 import { setHpNow, setRegenFrozen } from "../vitals";
 import { pushDamageNumber } from "./DamageNumbers";
+import {
+  clearBuff,
+  emitSkills,
+  noteSkillCast,
+  resetSkills,
+  setBuff,
+  skills,
+} from "./skills";
 import { combat, shake } from "./state";
 
 /**
@@ -106,6 +114,7 @@ export function resetBossFight(): void {
   bossFight.victory = null;
   bossFight.loot = null;
   bossFight.you = null;
+  resetSkills();
   emit();
 }
 
@@ -214,6 +223,44 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       bossFight.closing = { why: m.why, at: clock.toLocal(m.closesAt) };
       emit();
       return;
+    case "skill": {
+      // Yours played the moment you pressed it.
+      if (m.by === clock.you() || !isSkillId(m.skill)) return;
+      noteSkillCast({
+        by: m.by,
+        skill: m.skill,
+        level: m.level,
+        x: m.x,
+        z: m.z,
+        yaw: m.yaw,
+        at: now,
+      });
+      return;
+    }
+    case "buff":
+      setBuff(m.id, {
+        buff: m.buff,
+        value: m.value,
+        until: clock.toLocal(m.until),
+      });
+      return;
+    case "skillDenied":
+      // The prediction was wrong: the server's word on when it's ready.
+      if (m.seq === skills.seq) {
+        skills.readyAt = m.readyAt > 0 ? clock.toLocal(m.readyAt) : now;
+        // Nor is the Cymbrella you put on.
+        if (skills.mine?.id === "cymbrella")
+          clearBuff(clock.you() ?? -1, "cymbrella");
+        emitSkills();
+      }
+      return;
+    case "skillUp":
+      if (!isSkillId(m.skill)) return;
+      if (skills.mine?.id === m.skill)
+        skills.mine = { id: m.skill, level: m.level };
+      skills.levelUp = { skill: m.skill, level: m.level, at: now };
+      emitSkills();
+      return;
   }
 }
 
@@ -234,6 +281,13 @@ function applyFight(f: FightState, clock: Clock, you: number) {
   bossFight.closing = null;
   bossFight.victory = null;
   bossFight.loot = null;
+  skills.buffs.clear();
+  for (const b of f.buffs ?? [])
+    setBuff(b.id, {
+      buff: b.buff,
+      value: b.value,
+      until: clock.toLocal(b.until),
+    });
 }
 
 /** Drop shapes that landed a while ago. Called by the frame loop. */

@@ -33,7 +33,7 @@ import { distortionMaterial, distortionScene } from "./distortion";
  */
 
 /** The wave's colour, where it glows. */
-const GLOW = new THREE.Color("#9fe8ff");
+export const GLOW = new THREE.Color("#9fe8ff");
 const GLOW_CRIT = new THREE.Color("#ffd36b");
 
 /** How far round a dome reaches from its front (radians). */
@@ -101,7 +101,7 @@ function rimMaterial(): THREE.ShaderMaterial {
 
 /** One kind of shape, instanced twice: into the distortion buffer and,
  * as a glowing rim, into the scene. */
-class FxLayer {
+export class FxLayer {
   readonly bend: THREE.InstancedMesh;
   readonly glow: THREE.InstancedMesh;
   private readonly fx: THREE.InstancedBufferAttribute;
@@ -194,9 +194,9 @@ function waveStrength(w: Wave): number {
 // --- Particles: sparks and notes -------------------------------------------
 
 /** What a particle is drawn as: a spark (a soft dot), or a note. */
-const SPARK = 0;
-const NOTE = 1;
-const NOTES = 2;
+export const SPARK = 0;
+export const NOTE = 1;
+export const NOTES = 2;
 
 type Mote = {
   alive: boolean;
@@ -237,7 +237,7 @@ function moteAtlas(): THREE.Texture {
   return t;
 }
 
-function useMotes() {
+export function useMotes() {
   const gl = useThree((s) => s.gl);
   const camera = useThree((s) => s.camera);
   return useMemo(() => {
@@ -393,7 +393,7 @@ function useMotes() {
 
 /** A random unit vector, roughly along `dir` within `spread` (0 straight,
  * 1 a hemisphere). */
-function scatter(dir: Readonly<Vec3>, spread: number, out: Vec3): Vec3 {
+export function scatter(dir: Readonly<Vec3>, spread: number, out: Vec3): Vec3 {
   const u = Math.random() * 2 - 1;
   const th = Math.random() * Math.PI * 2;
   const r = Math.sqrt(1 - u * u);
@@ -409,7 +409,7 @@ function scatter(dir: Readonly<Vec3>, spread: number, out: Vec3): Vec3 {
 
 const _v: Vec3 = [0, 0, 0];
 const _at: Vec3 = [0, 0, 0];
-const WHITE = new THREE.Color("#ffffff");
+export const WHITE = new THREE.Color("#ffffff");
 
 /** The waves, as the eye sees them. Mount once in the Town. */
 export function SonicVFX() {

@@ -6,6 +6,7 @@ import {
   ITEM_SETS,
   SH,
   Sky,
+  type ThreadConfig,
 } from "@herzies/shared";
 import { HerzieView } from "@herzies/shared/gl";
 import { useEffect, useState } from "react";
@@ -34,6 +35,7 @@ interface Props {
   equipped?: Equipped;
   creatureParams?: CreatureParams;
   dangleConfig?: DangleConfig;
+  threadConfig?: ThreadConfig;
   showSky?: boolean;
   draggable?: boolean;
   /** Pause animation regardless of window visibility (e.g. tab hidden). */
@@ -45,6 +47,8 @@ interface Props {
   zoom?: number;
   /** Camera pan in px (negative: up); eases along with `zoom`. Default: 0. */
   offsetY?: number;
+  /** Class gear drawn into its hands instead of slung on its back. */
+  armed?: boolean;
 }
 
 /**
@@ -62,12 +66,14 @@ export function HerzieWithSky({
   equipped,
   creatureParams,
   dangleConfig,
+  threadConfig,
   showSky = true,
   draggable,
   paused: pausedProp = false,
   grounded = false,
   zoom,
   offsetY,
+  armed,
 }: Props) {
   // Full-window-width column count, shared by the sky and the creature
   // viewport so both span the window without stretching their contents.
@@ -152,11 +158,13 @@ export function HerzieWithSky({
         equipped={equipped}
         creatureParams={creatureParams}
         dangleConfig={dangleConfig}
+        threadConfig={threadConfig}
         draggable={draggable}
         paused={paused}
         groundInset={grounded ? groundInsetFor(size) : undefined}
         zoom={zoom}
         offsetY={offsetY}
+        armed={armed}
         wrapperStyle={
           showSky
             ? {

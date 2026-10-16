@@ -20,6 +20,7 @@ import {
 } from "../creature-renderer.js";
 import { type DangleConfig, DEFAULT_DANGLE_CONFIG } from "../dangle-physics.js";
 import type { Equipped } from "../items.js";
+import { DEFAULT_THREAD_CONFIG, type ThreadConfig } from "../thread-physics.js";
 import { HerzieModel, MODEL_SCALE } from "./HerzieModel.js";
 import { studioLighting } from "./herzieMaterial.js";
 import { herzieStage } from "./stage.js";
@@ -84,6 +85,8 @@ export type HerzieViewProps = {
   creatureParams?: CreatureParams;
   /** Spin physics of dangling items (sandbox / tooling). */
   dangleConfig?: DangleConfig;
+  /** How gear hung on threads (the discs) swings. */
+  threadConfig?: ThreadConfig;
   /** Drag to turn it, with momentum. Default: true. */
   draggable?: boolean;
   /** Freeze it (the host is hidden or unfocused). */
@@ -106,6 +109,10 @@ export type HerzieViewProps = {
   grey?: number;
   /** See-through, 1 (solid) to 0. */
   opacity?: number;
+  /** Its class gear drawn into its hands, as when aiming in the Town;
+   * otherwise it's slung on its back. Draws and puts away while it
+   * animates (not paused). */
+  armed?: boolean;
 };
 
 /**
@@ -124,6 +131,7 @@ export function HerzieView({
   equipped,
   creatureParams,
   dangleConfig = DEFAULT_DANGLE_CONFIG,
+  threadConfig = DEFAULT_THREAD_CONFIG,
   draggable = true,
   paused = false,
   wrapperStyle,
@@ -135,6 +143,7 @@ export function HerzieView({
   offsetY = 0,
   grey = 0,
   opacity = 1,
+  armed = false,
 }: HerzieViewProps) {
   const box = useRef<HTMLDivElement>(null);
   const width = Math.ceil(cols * size * 0.6);
@@ -152,6 +161,8 @@ export function HerzieView({
           layoutCols: cols,
           layoutRows: SH,
           anchorScenery: 0,
+          // A rebuild (other gear on) keeps it in hand, not drawn again.
+          armed,
         },
       ),
     [userId, stage, equippedKey, paramsKey, cols],
@@ -167,8 +178,10 @@ export function HerzieView({
     groundInset,
     dangles: false,
     dangleConfig,
+    threadConfig,
     grey,
     opacity,
+    armed,
   });
   live.current = {
     paused,
@@ -178,8 +191,10 @@ export function HerzieView({
     groundInset,
     dangles: draggable,
     dangleConfig,
+    threadConfig,
     grey,
     opacity,
+    armed,
   };
 
   /** The turn, in the old renderer's units (added to DEFAULT_Y_ANGLE). */
@@ -210,6 +225,8 @@ export function HerzieView({
     const sun = studioSun(model);
     scene.add(sun, sun.target);
     const cam = new THREE.PerspectiveCamera(50, 1, 0.05, 100);
+    /** Scratch: the feet, projected to find where they land. */
+    const feet = new THREE.Vector3();
     // What was last drawn, to tell when a paused herzie needs drawing again.
     const drawn = { angle: Number.NaN, grey: -1, opacity: -1 };
 
@@ -254,10 +271,12 @@ export function HerzieView({
         model.heading = -(DEFAULT_Y_ANGLE + s.angle);
         drawn.angle = s.angle;
         model.dancing = l.dancing;
+        model.armed = l.armed;
         // Anything dangling swings as it's spun, then settles — even with
         // the rest held still.
         model.dangles = l.dangles;
         model.dangleConfig = l.dangleConfig;
+        model.threadConfig = l.threadConfig;
         if (!l.paused) model.update(dt, 0);
         else {
           model.swing(dt);
@@ -273,26 +292,33 @@ export function HerzieView({
 
         // Framed like the old renderer: a perspective camera a fixed
         // distance from the herzie's centre, tilted down a little, its view
-        // FRAME_HEIGHT/zoom tall at the centre.
+        // FRAME_HEIGHT/zoom tall at the centre. Always the herzie's own
+        // centre, whatever its height: aiming at a fixed point instead put
+        // the camera above a small herzie's eyes, looking down on it.
         const frame = FRAME_HEIGHT / c.zoom;
-        const perPx = frame / h;
         cam.fov = THREE.MathUtils.radToDeg(
           2 * Math.atan(frame / 2 / CAMERA_DISTANCE),
         );
         cam.aspect = w / h;
-        const targetY =
-          l.groundInset !== undefined
-            ? (h / 2 - l.groundInset) * perPx
-            : model.centerHeight;
+        const targetY = model.centerHeight;
         cam.position.set(
           0,
           targetY + CAMERA_DISTANCE * Math.sin(TILT),
           CAMERA_DISTANCE * Math.cos(TILT),
         );
         cam.lookAt(0, targetY, 0);
-        // `offsetY` pans the picture, not the camera: moving the camera would
-        // also change the angle, looking up at the herzie as it rises.
-        if (c.offsetY !== 0) cam.setViewOffset(w, h, 0, -c.offsetY, w, h);
+        // Standing on a floor, the picture pans so the feet land
+        // `groundInset` px above the bottom edge. `offsetY` pans it too:
+        // panning, not moving the camera, keeps the angle the same.
+        let pan = -c.offsetY;
+        if (l.groundInset !== undefined) {
+          cam.clearViewOffset();
+          cam.updateProjectionMatrix();
+          cam.updateMatrixWorld();
+          const feetPx = ((1 - feet.set(0, 0, 0).project(cam).y) / 2) * h;
+          pan += feetPx - (h - l.groundInset);
+        }
+        if (pan !== 0) cam.setViewOffset(w, h, 0, pan, w, h);
         else cam.clearViewOffset();
         cam.updateProjectionMatrix();
       },

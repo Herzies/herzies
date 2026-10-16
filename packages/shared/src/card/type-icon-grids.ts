@@ -174,6 +174,20 @@ export const TYPE_ICON_GRIDS: Record<ItemType, string[]> = {
     ],
     8,
   ),
+  // Eighth note — class gear, the herzie's instrument.
+  instrument: cardIcon(
+    [
+      "....####..",
+      "....#..##.",
+      "....#...#.",
+      "....#.....",
+      "....#.....",
+      "..###.....",
+      ".####.....",
+      "..##......",
+    ],
+    8,
+  ),
   // Up-arrow — a stat-changing effect.
   modifier: cardIcon(
     [

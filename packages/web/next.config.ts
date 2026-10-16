@@ -1,6 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+	// scripts/local.sh builds into its own folder: NEXT_PUBLIC_* values are
+	// baked into the client bundle, so sharing .next with a prod-backed dev
+	// server would hand the browser whichever stack built first.
+	distDir: process.env.NEXT_DIST_DIR || ".next",
 	transpilePackages: ["@herzies/shared"],
 	async headers() {
 		return [

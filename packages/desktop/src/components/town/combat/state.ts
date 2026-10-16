@@ -1,3 +1,4 @@
+import type { AttackStyle } from "@herzies/shared/classes";
 import { useSyncExternalStore } from "react";
 
 /**
@@ -26,6 +27,9 @@ export const combat = {
   spread: 0,
   /** Whether the crosshair is over a dummy. */
   onTarget: false,
+  /** A melee blow struck now would land on something: a dummy, or the
+   * boss (see meleeReaches). The crosshair says so. */
+  inReach: false,
   /** Mouse-look not yet turned into camera turn, in pixels (CameraRig takes
    * it each frame). */
   lookX: 0,
@@ -39,6 +43,18 @@ export const combat = {
   hitCrit: false,
   /** Your best damage per second on any dummy, this session. */
   bestDps: 0,
+  /** Your class's basic attack: a wave, a disc thrown from each hand, or a
+   * blow up close (without a class, too). */
+  attack: "melee" as AttackStyle,
+  /** Throwing discs: which are in hand (the crosshair shows them), and
+   * when each was last caught (performance.now ms). */
+  discs: {
+    in: { "held-l": true, "held-r": true },
+    caughtAt: {
+      "held-l": Number.NEGATIVE_INFINITY,
+      "held-r": Number.NEGATIVE_INFINITY,
+    },
+  },
 };
 
 /** How long a press waits for the cast before it, in ms. */

@@ -5,13 +5,16 @@ import type {
   FriendSearchResult,
   GameEvent,
   Herzie,
+  HerzieClass,
   HerzieProfile,
+  HerzieSkill,
   Inventory,
   ItemUnit,
   ItemUpgradeResult,
   PendingDrop,
   PendingFriendRequest,
   PremiumItem,
+  StatPoints,
   StoreProduct,
   Trade,
   TradeState,
@@ -100,6 +103,8 @@ export interface AppState {
   units: ItemUnit[];
   /** Inventory Expansions bought; the grid's size is `bankCapacity` of this. */
   bankExpansions: number;
+  /** The class skills, once a class is chosen (from the last sync). */
+  skills: HerzieSkill[];
   friends: Record<string, HerzieProfile>;
   pendingTradeRequest?: PendingTradeRequest | null;
   pendingFriendRequest?: PendingFriendRequest | null;
@@ -186,6 +191,21 @@ export const herzies = {
       unitId,
       action,
       side,
+    }),
+  /** Picks the herzie's class — permanent. The class gear arrives worn.
+   * Throws with the server's message (already chosen, not grown enough). */
+  chooseClass: (herzieClass: HerzieClass) =>
+    invoke<{ class: HerzieClass; equipped: Equipped; units: ItemUnit[] }>(
+      "choose_class",
+      { class: herzieClass },
+    ),
+  /** Sets the herzie's stat points: the whole allocation, so a reset is
+   * all zeros. Throws with the server's message (not enough points). */
+  allocateStats: (points: StatPoints) =>
+    invoke<{ statPoints: StatPoints; vitals: Vitals }>("allocate_stats", {
+      stamina: points.stamina,
+      sonicPower: points.sonicPower,
+      euphony: points.euphony,
     }),
   /** Rolls a dice item onto ONE named card. The server rolls, never the
    * client: `result` says whether it went up, a failed roll was absorbed by

@@ -60,7 +60,19 @@ varying vec3 vWorldNormal;
 varying vec3 vLocalNormal;
 varying float vWorldY;
 varying vec3 vWorldPos;
+#ifdef METAL
+varying vec3 vAround;
+varying vec3 vAxis;
+varying float vRho;
+#endif
 void main() {
+  #ifdef METAL
+  // Round its axis (the geometry's y), the way a lathe turned it: its
+  // grooves run this way.
+  vAround = mat3(modelMatrix) * vec3(-position.z, 0.0, position.x);
+  vAxis = mat3(modelMatrix) * vec3(0.0, 1.0, 0.0);
+  vRho = length(position.xz);
+  #endif
   // The geometry's own normal is in creature space (y down), the space the
   // ray caster's textures are laid out in.
   vLocalNormal = normal;
@@ -106,6 +118,12 @@ varying vec3 vWorldNormal;
 varying vec3 vLocalNormal;
 varying float vWorldY;
 varying vec3 vWorldPos;
+#ifdef METAL
+uniform float uRadius;
+varying vec3 vAround;
+varying vec3 vAxis;
+varying float vRho;
+#endif
 
 // The sun's (or moon's) shadow, and only its: three's own shadow mask
 // multiplies in every shadow-casting light's, so a lamp's shadow would
@@ -152,14 +170,77 @@ float pattern(vec3 n) {
   return 0.0;
 }
 
+#ifdef METAL
+// Polished metal, cel style: dark in itself, it shows what it mirrors —
+// bright sky over a dark horizon line and the ground — in hard bands, a
+// rim where it turns away, and, where its lathe grooves catch the sun, a
+// bright bar across it through its middle (a cymbal's shine). \`paint\` is
+// its banded colour, \`shadow\` the sun's.
+vec3 polished(vec3 paint, vec3 n, float shadow) {
+  vec3 v = normalize(cameraPosition - vWorldPos);
+  float rho = vRho / uRadius;
+  // Its colour, richer: a coloured metal tints all it mirrors.
+  vec3 tint = pow(uShades[2], vec3(1.35)) * 1.15;
+  // Mirrored as if it bulged far more than it does, so the world sweeps
+  // across its face — sky, horizon, ground — rather than lying flat on it
+  // as one tone.
+  vec3 outward = cross(vAxis, vAround);
+  float ol = length(outward);
+  vec3 bent = ol > 1e-5 ? normalize(n + outward / ol * rho * 1.1) : n;
+  // The sky above, warm white at its height; darkest just under the
+  // horizon; the ground lighter again below. Narrow steps keep the bands
+  // hard but unaliased.
+  float up = reflect(-v, bent).y;
+  vec3 sky = mix(tint * 1.05, tint * 0.75 + vec3(0.4, 0.36, 0.28), smoothstep(0.38, 0.44, up));
+  vec3 horizon = tint * tint * 0.35;
+  vec3 ground = tint * 0.52;
+  vec3 env = up > 0.0
+    ? mix(horizon, sky, smoothstep(0.03, 0.09, up))
+    : mix(horizon, ground, 1.0 - smoothstep(-0.2, -0.14, up));
+  vec3 color = mix(paint * 0.4, env, 0.8);
+
+  // The grooves' glint: sharp across them, drawn out along the radius, so
+  // it lies as a bar through the middle and slides round as the view does
+  // (anisotropic, after Ward). Faded at the middle, where "round" has no
+  // direction.
+  vec3 h = normalize(uSun + v);
+  vec3 t = vAround - n * dot(vAround, n);
+  float tl = length(t);
+  float glint = 0.0;
+  float nh = max(dot(n, h), 0.0);
+  if (tl > 1e-5 && nh > 0.0) {
+    t /= tl;
+    vec3 b = cross(n, t);
+    float th = dot(t, h) / 0.09;
+    float bh = dot(b, h) / 0.95;
+    glint = exp(-(th * th + bh * bh) / (nh * nh));
+  }
+  // The grooves themselves, fine rings that break the bar up as it runs
+  // out; gone where they'd be finer than a pixel.
+  float ringPhase = rho * 70.0;
+  float rings = 1.0 - 0.3 * (0.5 + 0.5 * sin(ringPhase * 6.2832))
+    * clamp(1.5 - fwidth(ringPhase) * 2.0, 0.0, 1.0);
+  float sunLit = max(dot(n, uSun), 0.0) * shadow;
+  float bar = glint * rings * sunLit * smoothstep(0.06, 0.2, rho);
+  color = mix(color, tint * 1.5 + 0.2, smoothstep(0.12, 0.24, bar));
+  color += vec3(1.0, 0.97, 0.9) * smoothstep(0.55, 0.7, bar);
+
+  // A rim where it turns away, mirroring the bright sky round it.
+  float rim = 1.0 - max(dot(n, v), 0.0);
+  color += tint * smoothstep(0.55, 0.75, rim * rim) * 0.35;
+  return color;
+}
+#endif
+
 void main() {
   vec3 n = normalize(vWorldNormal);
   float lampFacing;
   float lamps = lampLight(n, lampFacing);
   // In the shade of something, a part drops to its darker bands — unless
   // a lamp nearby lights it.
+  float shadow = sunShadow();
   float d = max(
-    max(0.0, dot(n, uSun)) * sunShadow(),
+    max(0.0, dot(n, uSun)) * shadow,
     min(1.0, lampFacing * ${LAMP_BANDS.toFixed(2)})
   );
   float lit = (uGain + pattern(normalize(vLocalNormal))) * (uFloor + (1.0 - uFloor) * d);
@@ -172,6 +253,9 @@ void main() {
   } else {
     color = uShades[shade];
   }
+  #ifdef METAL
+  color = polished(color, n, shadow);
+  #endif
   color *= uLight + uLampColor * lamps;
   color = mix(color, vec3(dot(color, vec3(0.2126, 0.7152, 0.0722))), uGrey);
   gl_FragColor = vec4(color, uOpacity);
@@ -192,6 +276,8 @@ export function herzieMaterial(
   ramp: [string, string, string][] | null,
   scheme: SchemeUniforms,
   lighting: HerzieLighting = studioLighting,
+  /** Metal only: how far its grooves run from its axis (its radius). */
+  metalRadius = 1,
 ): THREE.ShaderMaterial {
   const painted = shading.schemePainted && !!ramp;
   const rampColors = Array.from(
@@ -206,6 +292,7 @@ export function herzieMaterial(
   return new THREE.ShaderMaterial({
     vertexShader,
     fragmentShader,
+    defines: shading.metal ? { METAL: "" } : {},
     fog: true,
     // Only for the sun's shadow map: the colour is the bands' own.
     lights: true,
@@ -233,6 +320,7 @@ export function herzieMaterial(
       uSpan: scheme.uSpan,
       uGrey: scheme.uGrey,
       uOpacity: scheme.uOpacity,
+      uRadius: { value: metalRadius },
     },
   });
 }

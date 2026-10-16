@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { isLocalSupabase } from "@/lib/desktop-login";
 import { getDesktopLoginClient } from "@/lib/supabase";
+import { LocalDevSignIn } from "./LocalDevSignIn";
 
 /**
  * Sign-in form for a desktop app login. `callbackPath` is where OAuth returns
@@ -10,8 +12,11 @@ import { getDesktopLoginClient } from "@/lib/supabase";
  */
 export function DesktopSignIn({
   callbackPath,
+  state = null,
 }: {
   callbackPath: string | null;
+  /** The app's nonce, for the local-stack sign-in's handoff. */
+  state?: string | null;
 }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -43,6 +48,8 @@ export function DesktopSignIn({
           sign in to connect the herzies app
         </p>
       </div>
+
+      {isLocalSupabase() && callbackPath && <LocalDevSignIn state={state} />}
 
       <div className="bg-bg-panel border border-border rounded-md p-5 flex flex-col gap-4">
         {!callbackPath && (

@@ -1,3 +1,4 @@
+import { CLASS_DEFS, CLASS_IDS, type HerzieClass } from "@herzies/shared";
 import type { Update } from "@tauri-apps/plugin-updater";
 import { useState } from "react";
 import { cn } from "../lib/utils";
@@ -20,7 +21,15 @@ import {
   setTownPixelSize,
   useTownPixelSize,
 } from "./town/pixelSize";
+import { goToMap, useTownMap } from "./town/runtime";
+import { setSfxMuted, sfxMuted } from "./town/sfx";
 import { View } from "./View";
+
+/** Debug > Teleport: straight to a map's spawn, no portal needed. */
+const TELEPORTS = [
+  ["home", "Home"],
+  ["arena", "Training grounds"],
+] as const;
 
 /** Debug is for dev builds only. */
 const TABS = ["Account", "Controls", "Debug"] as const;
@@ -38,6 +47,9 @@ export function SettingsView({
   state,
   stageOverride,
   onStageOverride,
+  classOverride,
+  onClassOverride,
+  onTestClassChoice,
   onPreviewOnboarding,
   onPreviewLoading,
   onTestUpdateAlert,
@@ -58,6 +70,11 @@ export function SettingsView({
   state: AppState;
   stageOverride: number | null;
   onStageOverride: (v: number | null) => void;
+  /** Dev-only: draws the herzie holding a class's gear, to eyeball it. */
+  classOverride: HerzieClass | null;
+  onClassOverride: (v: HerzieClass | null) => void;
+  /** Dev-only: opens the class choice; choosing in it is real. */
+  onTestClassChoice: () => void;
   onPreviewOnboarding: () => void;
   onPreviewLoading: () => void;
   onTestUpdateAlert: () => void;
@@ -79,9 +96,11 @@ export function SettingsView({
 }) {
   const [loggingIn, setLoggingIn] = useState(false);
   const [mediaRemoteDebug, setMediaRemoteDebug] = useState<string | null>(null);
+  const townMap = useTownMap();
   const [savingPrivacy, setSavingPrivacy] = useState(false);
   const [privacyError, setPrivacyError] = useState<string | null>(null);
   const [aim, setAim] = useState(aimSensitivity);
+  const [townSounds, setTownSounds] = useState(() => !sfxMuted());
   const fpsShown = useFpsShown();
   const pixelSize = useTownPixelSize();
   const [tab, setTab] = useState<SettingsTab>("Account");
@@ -210,6 +229,24 @@ export function SettingsView({
             </label>
           </div>
           <div className="mb-4">
+            <div className="mb-1.5 text-ui text-text-dim">Sound</div>
+            <button
+              type="button"
+              className={cn(
+                "btn",
+                townSounds
+                  ? "border-cyan text-cyan"
+                  : "border-[#555] text-text-dim",
+              )}
+              onClick={() => {
+                setSfxMuted(townSounds);
+                setTownSounds(!townSounds);
+              }}
+            >
+              {townSounds ? "Town sounds: On" : "Town sounds: Off"}
+            </button>
+          </div>
+          <div className="mb-4">
             <div className="mb-1.5 text-ui text-text-dim">
               Keyboard shortcuts
             </div>
@@ -257,6 +294,24 @@ export function SettingsView({
             <div className="mt-0.5 text-ui-sm text-text-dim">
               Screen pixels per Town pixel. Unset, the game's own (
               {defaultPixelSize()}px).
+            </div>
+            <div className="mt-2 flex items-center gap-1 text-ui">
+              <span className="mr-1 shrink-0">Teleport</span>
+              {TELEPORTS.map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={cn(
+                    "btn",
+                    townMap.id === id
+                      ? "border-cyan text-cyan"
+                      : "border-[#555] text-text-dim",
+                  )}
+                  onClick={() => goToMap(id)}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
           </div>
           <div className="mb-4">
@@ -421,6 +476,33 @@ export function SettingsView({
                   {s === null ? "Default" : `Stage ${s}`}
                 </button>
               ))}
+            </div>
+          </div>
+          <div className="mb-4">
+            <div className="mb-1.5 text-ui text-text-dim">Class Preview</div>
+            <div className="flex flex-wrap gap-1">
+              {[null, ...CLASS_IDS].map((c) => (
+                <button
+                  key={c ?? "default"}
+                  type="button"
+                  className={cn(
+                    "btn",
+                    classOverride === c
+                      ? "border-cyan text-cyan"
+                      : "border-[#555] text-text-dim",
+                  )}
+                  onClick={() => onClassOverride(c)}
+                >
+                  {c === null ? "Default" : CLASS_DEFS[c].name}
+                </button>
+              ))}
+              <button
+                type="button"
+                className="btn border-[#555] text-text-dim"
+                onClick={onTestClassChoice}
+              >
+                Class Choice…
+              </button>
             </div>
           </div>
         </>

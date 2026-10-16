@@ -9,6 +9,7 @@ import {
   ItemTypeIcon,
   isBankFull,
   levelProgress,
+  withStatPoints,
 } from "@herzies/shared";
 import { useRef, useState } from "react";
 import { useReportHomeStage } from "../hooks/useStageAlignment";
@@ -80,10 +81,13 @@ export function HomeView({
   // Read off the copies, so each worn one counts at its OWN upgrade level. A
   // cache from before copies existed has none yet, and falls back to the
   // id-keyed levels until the first sync brings them.
-  const stats =
+  // Stat points on top, as the server bills them.
+  const stats = withStatPoints(
     units.length > 0
       ? getHerzieStatsFromUnits(units)
-      : getHerzieStats(equipped, itemUpgrades);
+      : getHerzieStats(equipped, itemUpgrades),
+    herzie?.statPoints,
+  );
   const pinned = useWindowPinned();
   const ghostMode = useGhostMode();
 

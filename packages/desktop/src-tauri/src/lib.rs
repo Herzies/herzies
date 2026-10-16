@@ -691,6 +691,53 @@ async fn equip_item(
     Ok(result)
 }
 
+/// Picks the herzie's class, once, at stage 2. The class gear arrives worn,
+/// so the response carries item state like an equip does.
+#[tauri::command]
+async fn choose_class(
+    class: String,
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    let client = api::http();
+    let result = api::api_choose_class(&client, &class).await?;
+    let mut s = state.lock().unwrap();
+    if let Some(snapshot) = snapshot_from_response(&result, &s) {
+        apply_inventory(&mut s, snapshot, None);
+        s.bump_equip_epoch();
+    }
+    if let Some(ref mut herzie) = s.herzie {
+        herzie.class = result["class"].as_str().map(str::to_string);
+        storage::save_herzie(herzie);
+    }
+    drop(s);
+    emit_state_update(&app);
+    Ok(result)
+}
+
+/// Sets the herzie's stat points: the whole allocation, so a reset is all
+/// zeros. The answer carries the points as stored and the health they make.
+#[tauri::command]
+async fn allocate_stats(
+    stamina: u32,
+    sonic_power: u32,
+    euphony: u32,
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    let client = api::http();
+    let result = api::api_allocate_stats(&client, stamina, sonic_power, euphony).await?;
+    let points: Option<StatPoints> = serde_json::from_value(result["statPoints"].clone()).ok();
+    let mut s = state.lock().unwrap();
+    if let (Some(points), Some(ref mut herzie)) = (points, s.herzie.as_mut()) {
+        herzie.stat_points = Some(points);
+        storage::save_herzie(herzie);
+    }
+    drop(s);
+    emit_state_update(&app);
+    Ok(result)
+}
+
 /// Buys from Good ol' George (a live `merchant` event) — the only way coins
 /// buy items — or from Nandor the Treatless (a `treat_trader`), paid in
 /// treats. Applies the returned item state, and the new coin balance when
@@ -2263,6 +2310,17 @@ async fn sync_tick_with(
             herzie.xp = server.xp;
             herzie.level = server.level;
             herzie.stage = server.stage;
+            // A class is permanent: a sync can set it but never clear it
+            // (a server that predates classes sends none).
+            if server.class.is_some() {
+                herzie.class = server.class.clone();
+            }
+            // Stat points can go down (a reset), so whatever the server
+            // says wins, zeros included; only an older server's silence
+            // keeps what's here.
+            if server.stat_points.is_some() {
+                herzie.stat_points = server.stat_points;
+            }
             herzie.total_minutes_listened = server.total_minutes_listened;
             herzie.genre_minutes = server.genre_minutes.clone();
             herzie.streak_days = server.streak_days;
@@ -2319,6 +2377,9 @@ async fn sync_tick_with(
         // Capacity is credited out-of-band by the Stripe webhook and only ever
         // grows, so unlike inventory it needs no epoch guard: a stale sync can
         // at worst report a count that is one poll behind.
+        if let Some(skills) = sync_resp.skills.clone() {
+            s.skills = skills;
+        }
         if let Some(expansions) = sync_resp.bank_expansions {
             s.bank_expansions = expansions;
         }
@@ -2461,6 +2522,39 @@ async fn sync_tick_with(
     Ok(())
 }
 
+/// On launch: a herzie old enough for a class but saved without one asks
+/// `/me` once. A sync from a server that predated classes used to wipe the
+/// class from the saved herzie, and the choice would come back.
+async fn recover_class(app: AppHandle) {
+    let needs = {
+        let state = app.state::<SharedState>();
+        let s = state.lock().unwrap();
+        s.herzie
+            .as_ref()
+            .is_some_and(|h| h.stage >= 2 && h.class.is_none())
+    };
+    if !needs {
+        return;
+    }
+    let Some(server) = api::api_get_me(&api::http()).await else {
+        return;
+    };
+    if server.class.is_none() {
+        return;
+    }
+    {
+        let state = app.state::<SharedState>();
+        let mut s = state.lock().unwrap();
+        if let Some(ref mut herzie) = s.herzie {
+            if herzie.class.is_none() {
+                herzie.class = server.class;
+                storage::save_herzie(herzie);
+            }
+        }
+    }
+    emit_state_update(&app);
+}
+
 /// Decide whether the on-disk herzie belongs to the current session and
 /// should be loaded into memory. Wipes orphaned data so the onboarding
 /// screen can take over.
@@ -2568,6 +2662,8 @@ pub fn run() {
             collect_drop,
             spawn_debug_drop,
             equip_item,
+            choose_class,
+            allocate_stats,
             fetch_store_products,
             fetch_premium_items,
             start_purchase,
@@ -2706,6 +2802,9 @@ pub fn run() {
 
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(events_watch_loop(app_handle));
+
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(recover_class(app_handle));
 
             // Initial poll + sync + home cache (equipped + chat)
             let app_handle = app.handle().clone();

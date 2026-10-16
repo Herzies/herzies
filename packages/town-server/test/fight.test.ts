@@ -1,5 +1,13 @@
 import type { ServerMessage, TownTicketPayload } from "@herzies/shared/town-net";
 import { describe, expect, it } from "vitest";
+import {
+  aimDirection,
+  bossReaches,
+  DISC_RANGE,
+  DISC_SPEED,
+  WAVE_HAND_HEIGHT,
+  WAVE_SPEED,
+} from "@herzies/shared/combat";
 import { TUNING } from "../src/boss";
 import {
   ESCAPE_LINGER_MS,
@@ -26,7 +34,9 @@ const ticket = (
 ): TownTicketPayload => ({
   uid,
   name: uid,
-  look: { seed: "s", stage: 1 },
+  look: { seed: "s", stage: 2 },
+  // A wave caster, unless a test says otherwise: most cast from afar.
+  cls: "bard",
   exp: 9e9,
   hp: { hp, maxHp: 200, down: false },
   st: [0, 0, 0, 0],
@@ -103,7 +113,12 @@ describe("a fight", () => {
     expect(tg.length).toBeGreaterThan(0);
     expect(tg.every((o) => o.to === "all")).toBe(true);
     const hp = msgs(out, "hp");
-    expect(hp[0].msg).toMatchObject({ t: "hp", id: 1, hp: 160, maxHp: 200 });
+    expect(hp[0].msg).toMatchObject({
+      t: "hp",
+      id: 1,
+      hp: 200 - TUNING.slam.damage,
+      maxHp: 200,
+    });
     expect(msgs(out, "resolve")[0].msg).toMatchObject({ t: "resolve", hits: [1] });
   });
 
@@ -142,6 +157,70 @@ describe("a fight", () => {
     expect(r?.boss?.damage).toHaveLength(1);
     expect(r?.boss?.damage[0].uid).toBe("a");
     expect(r?.boss?.event).toBe("evt-1");
+  });
+
+  it("a Record Slinger throws a disc: its own speed and reach", () => {
+    const aim = (z: number) => {
+      const dz = TUNING.boss.z - z;
+      const yaw = Math.atan2(0, dz);
+      const pitch = Math.atan2(TUNING.boss.chest - 1.2, Math.abs(dz));
+      // It lands as it meets the boss's near side.
+      const dist =
+        bossReaches([0, WAVE_HAND_HEIGHT, z], aimDirection(yaw, pitch)) ?? 0;
+      return { yaw, pitch, dist };
+    };
+    const at = (cls: string | undefined, z: number) => {
+      const f = new FightRuntime(claim(), T0);
+      f.join("a", 1, ticket("a", 200, { cls }), { x: 0, z }, T0 - 5_000);
+      f.onState("a", 0, z, T0);
+      return f;
+    };
+    // Lands after the disc's flight, not the wave's.
+    const near = aim(8);
+    const disc = at("record_slinger", 8);
+    expect(disc.cast("a", near.yaw, near.pitch, T0)).toBe("hit");
+    const discMs = (near.dist / DISC_SPEED) * 1000;
+    const waveMs = (near.dist / WAVE_SPEED) * 1000;
+    expect(discMs).toBeLessThan(waveMs);
+    expect(msgs(disc.step(T0 + discMs - 20), "hit")).toHaveLength(0);
+    expect(msgs(disc.step(T0 + discMs + 20), "hit")).toHaveLength(1);
+    // Past its reach, a disc misses where a wave still hits.
+    const far = aim(TUNING.boss.z + DISC_RANGE + 4);
+    expect(
+      at("record_slinger", TUNING.boss.z + DISC_RANGE + 4).cast(
+        "a",
+        far.yaw,
+        far.pitch,
+        T0,
+      ),
+    ).toBe("miss");
+    expect(
+      at("bard", TUNING.boss.z + DISC_RANGE + 4).cast("a", far.yaw, far.pitch, T0),
+    ).toBe("hit");
+  });
+
+  it("a melee blow lands up close, facing the boss, and only then", () => {
+    const at = (cls: string | undefined, x: number, z: number) => {
+      const f = new FightRuntime(claim(), T0);
+      f.join("a", 1, ticket("a", 200, { cls }), { x, z }, T0 - 5_000);
+      f.onState("a", x, z, T0);
+      return f;
+    };
+    const { boss } = TUNING;
+    // Just in front of it, facing it: a Percussionist's stick and a
+    // classless herzie's bump both land, at once.
+    const front = boss.z + boss.radius + 1;
+    for (const cls of ["percussionist", undefined]) {
+      const f = at(cls, 0, front);
+      expect(f.cast("a", Math.PI, 0, T0)).toBe("hit");
+      const hit = msgs(f.step(T0 + 1), "hit");
+      expect(hit).toHaveLength(1);
+    }
+    // Facing away, or from across the room, it misses.
+    expect(at("percussionist", 0, front).cast("a", 0, 0, T0)).toBe("miss");
+    expect(at("percussionist", 0, boss.z + 10).cast("a", Math.PI, 0, T0)).toBe(
+      "miss",
+    );
   });
 
   it("re-sends the same batch until a report lands, then moves on", () => {

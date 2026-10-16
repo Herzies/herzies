@@ -15,7 +15,8 @@ import type { Vec3 } from "./waves";
  * - A meter over each dummy you're hitting: damage per second, total,
  *   hits and crits, clearing once you stop.
  * - The crosshair in combat mode: it opens on each cast and closes again,
- *   lights up over a dummy, and flashes a hit marker on a hit.
+ *   lights up over a dummy, and flashes a hit marker on a hit. Up close
+ *   (melee), a gold ring snaps round it while a blow would land.
  *
  * All pooled, and moved with transforms each frame: no React renders.
  */
@@ -63,9 +64,19 @@ const STYLE = `
 .town-fx .cross.on { opacity: 1; }
 .town-fx .cross i { position: absolute; background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,0.6); transition: background 0.1s; }
 .town-fx .cross.target i { background: #9fe8ff; }
+.town-fx .cross.reach i { background: #ffd36b; }
+.town-fx .cross i.ring { position: absolute; width: 22px; height: 22px; left: -11px; top: -11px; border-radius: 50%;
+  border: 2px solid #ffd36b; box-shadow: 0 0 0 1px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(0,0,0,0.35), 0 0 8px rgba(255, 190, 60, 0.6);
+  background: none; opacity: 0; transform: scale(1.6); transition: opacity 0.12s, transform 0.16s cubic-bezier(0.2, 1.6, 0.4, 1); }
+.town-fx .cross.reach i.ring { opacity: 1; transform: scale(1); }
 .town-fx .cross .dot { width: 2px; height: 2px; left: -1px; top: -1px; }
 .town-fx .cross .t { width: 2px; height: 7px; left: -1px; }
 .town-fx .cross .l { width: 7px; height: 2px; top: -1px; }
+.town-fx .discs { position: absolute; left: 50%; top: 50%; width: 0; height: 0; opacity: 0; transition: opacity 0.15s; }
+.town-fx .discs.on { opacity: 1; }
+.town-fx .discs b { position: absolute; top: 20px; width: 6px; height: 6px; margin: -3px; border-radius: 50%;
+  border: 1px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,0.55); background: #fff; transition: background 0.08s; }
+.town-fx .discs b.out { background: transparent; }
 .town-fx .hit { position: absolute; left: 50%; top: 50%; width: 0; height: 0; opacity: 0; }
 .town-fx .hit i { position: absolute; width: 10px; height: 2px; left: -5px; top: -1px; background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,0.5); }
 .town-fx .hit.crit i { background: #ffd36b; }
@@ -109,7 +120,23 @@ export function CombatOverlay() {
     const dot = document.createElement("i");
     dot.className = "dot";
     cross.append(dot);
+    const ring = document.createElement("i");
+    ring.className = "ring";
+    cross.append(ring);
     root.append(cross);
+
+    // A Record Slinger's discs, under the crosshair: filled while in hand,
+    // hollow while flying — the right one's the main hand's.
+    const discs = document.createElement("div");
+    discs.className = "discs";
+    const pips = {
+      "held-r": document.createElement("b"),
+      "held-l": document.createElement("b"),
+    };
+    pips["held-r"].style.left = "-6px";
+    pips["held-l"].style.left = "6px";
+    discs.append(pips["held-r"], pips["held-l"]);
+    root.append(discs);
 
     const hit = document.createElement("div");
     hit.className = "hit";
@@ -121,7 +148,7 @@ export function CombatOverlay() {
     root.append(hit);
 
     const meters = new Map<string, HTMLDivElement>();
-    return { root, floaters, cross, arms, hit, ticks, meters };
+    return { root, floaters, cross, arms, discs, pips, hit, ticks, meters };
   }, []);
 
   useLayoutEffect(() => {
@@ -197,8 +224,21 @@ export function CombatOverlay() {
     // The crosshair.
     const on = combat.on;
     ui.cross.classList.toggle("on", on);
+    const throwing = on && combat.attack === "disc";
+    ui.discs.classList.toggle("on", throwing);
+    if (throwing) {
+      for (const h of ["held-l", "held-r"] as const) {
+        const pip = ui.pips[h];
+        pip.classList.toggle("out", !combat.discs.in[h]);
+        // A pop as it's caught.
+        const since = (now - combat.discs.caughtAt[h]) / 1000;
+        const pop = since < 0.18 ? 1 + 0.8 * (1 - since / 0.18) ** 2 : 1;
+        pip.style.transform = `scale(${pop})`;
+      }
+    }
     if (on) {
       ui.cross.classList.toggle("target", combat.onTarget);
+      ui.cross.classList.toggle("reach", combat.inReach);
       const gap = 5 + combat.spread * 7;
       const [top, bottom, left, right] = ui.arms;
       top.style.top = `${-gap - 7}px`;

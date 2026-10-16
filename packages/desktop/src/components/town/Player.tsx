@@ -14,6 +14,7 @@ import type { Look } from "../TownScene";
 import { ambient } from "./ambient";
 import { SEAT_Y } from "./Benches";
 import type { ChatBubble } from "./chatBubbles";
+import { discField } from "./combat/discs";
 import { combat } from "./combat/state";
 import { HeadBubble } from "./HeadBubble";
 import type { TownInput } from "./input";
@@ -239,6 +240,12 @@ export function Player({
     townLive.dancing =
       townLive.music && !townLive.seat && stillFor.current >= DANCE_AFTER;
     herzie.dancing = townLive.dancing;
+    // Aiming: gear off its back and in hand — and kept there while a disc
+    // it threw is still on its way back to it.
+    herzie.armed =
+      combat.on ||
+      discField.isOut(herzie, "held-l") ||
+      discField.isOut(herzie, "held-r");
     herzie.update(dt, rt.playerSpeed);
     // Through a portal: spun down into the disc, and back up out of the
     // far one.

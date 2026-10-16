@@ -12,11 +12,14 @@
  * written (`hp`, `hpAt`) and everything after that is computed, so regen
  * costs nothing and works while the app is closed. `hp === null` means full.
  */
+import { STAT_TUNING } from "./stats.ts";
 
-/** Max HP at a given level. */
-export function maxHp(level: number): number {
+/** Max HP at a given level, with this many points in Stamina. Mirrors
+ * `herzie_max_hp` in `00108_stat_points.sql`. */
+export function maxHp(level: number, stamina = 0): number {
   const l = Number.isFinite(level) ? Math.max(1, Math.floor(level)) : 1;
-  return 100 + 5 * l;
+  const s = Number.isFinite(stamina) ? Math.max(0, Math.floor(stamina)) : 0;
+  return 100 + 5 * l + STAT_TUNING.hpPerStamina * s;
 }
 
 /** No regen for this long after the last write (damage), so a fight never
@@ -79,8 +82,13 @@ export type Vitals = {
 };
 
 /** Build {@link Vitals} from a row at `now`. */
-export function vitalsOf(row: VitalsRow, level: number, now: number): Vitals {
-  const max = maxHp(level);
+export function vitalsOf(
+  row: VitalsRow,
+  level: number,
+  stamina: number,
+  now: number,
+): Vitals {
+  const max = maxHp(level, stamina);
   return {
     hp: effectiveHp(row, max, now),
     maxHp: max,

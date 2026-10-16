@@ -1212,6 +1212,8 @@ export function ChatPanel({
               // the views above it — and the herzie in them — don't shift as
               // the feed fills.
               expanded ? "min-h-0 flex-1" : "h-[36px]",
+              // Empty, the placeholder sits in the middle, whatever the height.
+              feed.length === 0 && "flex flex-col justify-center",
             )}
           >
             {feed.length === 0 && (

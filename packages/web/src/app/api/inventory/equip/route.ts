@@ -20,6 +20,7 @@ const REASONS: Record<string, string> = {
   "no-slot": "Item is not equipable",
   "bad-action": "Invalid action",
   "stage-too-low": "Your herzie isn't grown enough to wear this",
+  "class-required": "Only a herzie of this item's class can wear it",
 };
 
 export async function POST(request: Request) {

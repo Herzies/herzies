@@ -25,3 +25,42 @@ export function isValidLoginState(state: string | null): state is string {
 export function isLegacyDesktopPort(port: string | null): boolean {
   return port === String(DESKTOP_LOGIN_PORT);
 }
+
+/** POSTs a session to the desktop app's loopback listener, with the
+ * attempt's `state` (null for legacy builds, which send none). Navigates
+ * away: the app answers the POST with its own page. */
+export function postSessionToDesktop(
+  session: { access_token: string; refresh_token: string; expires_in?: number },
+  state: string | null,
+): void {
+  const form = document.createElement("form");
+  form.method = "POST";
+  form.action = DESKTOP_CALLBACK_URL;
+
+  const addField = (name: string, value: string) => {
+    const input = document.createElement("input");
+    input.type = "hidden";
+    input.name = name;
+    input.value = value;
+    form.appendChild(input);
+  };
+
+  addField("access_token", session.access_token);
+  addField("refresh_token", session.refresh_token);
+  addField("expires_in", String(session.expires_in ?? 3600));
+  if (state) addField("state", state);
+  document.body.appendChild(form);
+  form.submit();
+}
+
+/** A dev server pointed at a local Supabase stack (scripts/local.sh): the
+ * only place the password sign-in exists, since OAuth isn't set up there. */
+export function isLocalSupabase(): boolean {
+  if (process.env.NODE_ENV === "production") return false;
+  try {
+    const { hostname } = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? "");
+    return hostname === "127.0.0.1" || hostname === "localhost";
+  } catch {
+    return false;
+  }
+}

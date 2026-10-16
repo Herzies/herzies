@@ -34,23 +34,28 @@ import {
   getItem,
   goodEyeSniperBonus,
   type Herzie,
+  type HerzieSkill,
   hasRoomFor,
   type ItemUnit,
   isModifierEquipped,
   MAX_DROP_ROLLS_PER_SYNC,
   NON_DROPPABLE_ITEM_IDS,
   normalizeEquipped,
+  normalizeStatPoints,
   normalizeUnits,
   type PendingDrop,
   type PendingFriendRequest,
   type PendingTradeRequest,
+  POINTS_PER_LEVEL,
   pickWeightedDrop,
   recordGenreMinutes,
   rollSeasonalBonusDrops,
   type SecretTrackConfig,
+  type SkillId,
   type Stage,
   scaledBonus,
   stageForLevel,
+  withStatPoints,
   xpBonusConfig,
 } from "./game-rules.js";
 
@@ -143,6 +148,12 @@ export function rowToHerzie(row: Record<string, unknown>): Herzie {
     xp: row.xp as number,
     level: row.level as number,
     stage: row.stage as Stage,
+    class: (row.class ?? null) as Herzie["class"],
+    statPoints: normalizeStatPoints({
+      stamina: row.stat_stamina,
+      sonicPower: row.stat_sonic,
+      euphony: row.stat_euphony,
+    }),
     totalMinutesListened: row.total_minutes_listened as number,
     genreMinutes: (row.genre_minutes ?? {}) as Record<string, number>,
     friendCode: row.friend_code as string,
@@ -286,6 +297,7 @@ export async function processSync(
   options: SyncOptions = {},
 ): Promise<{
   herzie: Herzie;
+  skills?: HerzieSkill[];
   notifications: EventNotification[];
   multipliers: ActiveMultiplier[];
   pendingTradeRequest?: PendingTradeRequest;
@@ -344,12 +356,16 @@ export async function processSync(
   const ctxUnits = Array.isArray(ctx.item_units)
     ? normalizeUnits(ctx.item_units)
     : null;
-  const herzieStats = ctxUnits
-    ? getHerzieStatsFromUnits(ctxUnits)
-    : getHerzieStats(
-        normalizeEquipped(row.equipped),
-        (row.item_upgrades ?? {}) as Record<string, number>,
-      );
+  // Stat points on top, so a point of Sonic Power bills like an item's.
+  const herzieStats = withStatPoints(
+    ctxUnits
+      ? getHerzieStatsFromUnits(ctxUnits)
+      : getHerzieStats(
+          normalizeEquipped(row.equipped),
+          (row.item_upgrades ?? {}) as Record<string, number>,
+        ),
+    herzie.statPoints,
+  );
   // Copies minted during this sync, so the response can carry them without
   // another query on a path that runs every few seconds per client.
   const collectedUnits: ItemUnit[] = [];
@@ -505,6 +521,7 @@ export async function processSync(
 
     const xp = calculateXpGain(minutes, allMultipliers);
 
+    const levelBefore = herzie.level;
     const events = applyXp(herzie, xp);
     herzie.totalMinutesListened += minutes;
     billedMinutes = minutes;
@@ -514,7 +531,7 @@ export async function processSync(
       notifications.push({
         type: "info",
         title: "Level Up!",
-        message: `${herzie.name} is now level ${herzie.level}!`,
+        message: `${herzie.name} is now level ${herzie.level}! (+${POINTS_PER_LEVEL * (herzie.level - levelBefore)} stat points)`,
       });
     }
     if (events.evolved && events.newStage) {
@@ -701,10 +718,13 @@ export async function processSync(
         pickupBlocked = true;
         continue;
       }
-      const { data: collectedId, error: collectError } = await admin.rpc("collect_pending_drop", {
-        p_user_id: userId,
-        p_drop_id: drop.id,
-      });
+      const { data: collectedId, error: collectError } = await admin.rpc(
+        "collect_pending_drop",
+        {
+          p_user_id: userId,
+          p_drop_id: drop.id,
+        },
+      );
       if (collectedId) {
         // collect_pending_drop mints the unit under the drop's own id.
         collectedUnits.push({
@@ -896,8 +916,26 @@ export async function processSync(
     units = [...ctxUnits, ...collectedUnits];
   }
 
+  // Class skills: one primary-key read, and only once a class is chosen
+  // (choose_class is what creates the rows). Left out on a failed read.
+  let skills: HerzieSkill[] | undefined;
+  if (herzie.class) {
+    const { data: skillRows, error: skillsError } = await admin
+      .from("herzie_skills")
+      .select("skill_id, level, xp")
+      .eq("user_id", userId);
+    if (!skillsError && Array.isArray(skillRows)) {
+      skills = skillRows.map((r) => ({
+        skillId: r.skill_id as SkillId,
+        level: r.level as number,
+        xp: Number(r.xp),
+      }));
+    }
+  }
+
   return {
     herzie,
+    skills,
     notifications,
     multipliers: allMultipliers,
     pendingTradeRequest,

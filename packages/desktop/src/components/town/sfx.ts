@@ -172,6 +172,71 @@ export function sfxImpact(kind: "hit" | "crit" | "fizzle"): void {
   }
 }
 
+/** A disc flicked from the hand: a quick airy zip, rising, with a faint
+ * whirr of its spin. The off hand's is a little lower. */
+export function sfxDiscThrow(main: boolean): void {
+  const a = audio();
+  if (!a) return;
+  const k = wobble() * (main ? 1 : 0.89);
+  noiseBurst(a, "bandpass", 900 * k, 3600 * k, 2.2, 0.22, 0.13);
+  tone(a, "triangle", 520 * k, 780 * k, 0.04, 0.005, 0.16);
+}
+
+/** A disc turning at the end of its flight, far off: a tiny tick. */
+export function sfxDiscTurn(): void {
+  const a = audio();
+  if (!a) return;
+  tone(a, "sine", 2637 * wobble(0.03), 2637, 0.025, 0.002, 0.08);
+}
+
+/** A disc glancing off a wall: a small bright clink. */
+export function sfxDiscClink(): void {
+  const a = audio();
+  if (!a) return;
+  const k = wobble(0.04);
+  tone(a, "triangle", 2093 * k, 1975 * k, 0.08, 0.002, 0.14);
+  noiseBurst(a, "highpass", 5000 * k, 3000, 0.8, 0.1, 0.04);
+}
+
+/** A disc back in the hand: a crisp click, a semitone apart between the
+ * hands, so throwing both makes a little rhythm of it. */
+export function sfxDiscCatch(main: boolean): void {
+  const a = audio();
+  if (!a) return;
+  const k = wobble(0.015) * (main ? 1 : 0.944);
+  noiseBurst(a, "highpass", 4200 * k, 2400 * k, 1.2, 0.18, 0.03);
+  tone(a, "triangle", 1568 * k, 1480 * k, 0.07, 0.002, 0.09);
+  tone(a, "sine", 220 * k, 140 * k, 0.12, 0.002, 0.06);
+}
+
+/** A melee swing on its way: a stick's swish through the air, or a body
+ * bump's soft "hup" as it hops. */
+export function sfxSwing(style: "strike" | "bump"): void {
+  const a = audio();
+  if (!a) return;
+  const k = wobble();
+  if (style === "strike") {
+    noiseBurst(a, "bandpass", 3200 * k, 900 * k, 2.4, 0.2, 0.1);
+    return;
+  }
+  tone(a, "sine", 180 * k, 260 * k, 0.18, 0.01, 0.08);
+  noiseBurst(a, "lowpass", 700 * k, 300, 0.8, 0.08, 0.08);
+}
+
+/** A melee blow landing, under sfxImpact's thud: the stick's woody tock,
+ * or a body bump's squashy bonk. */
+export function sfxMeleeHit(style: "strike" | "bump"): void {
+  const a = audio();
+  if (!a) return;
+  const k = wobble(0.04);
+  if (style === "strike") {
+    tone(a, "triangle", 740 * k, 520 * k, 0.16, 0.002, 0.07);
+    noiseBurst(a, "bandpass", 2000 * k, 1200 * k, 3, 0.18, 0.04);
+    return;
+  }
+  tone(a, "sine", 260 * k, 90 * k, 0.35, 0.003, 0.12);
+}
+
 /** Stepping through a portal: a long rising rush. */
 export function sfxPortal(): void {
   const a = audio();

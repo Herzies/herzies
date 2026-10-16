@@ -73,8 +73,12 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
   }
   let msg: {
     action?: string;
-    hp?: { uid: string; hp: number }[];
+    hp?: { uid: string; hp: number; heal?: number }[];
     rest?: { uid: string; bonus: number }[];
+    skills?: {
+      batch: string;
+      xp: { uid: string; skill: string; xp: number }[];
+    };
     boss?: {
       event: string;
       batch: string;
@@ -101,10 +105,30 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
           (d) => UUID.test(d.uid) && Number.isFinite(d.damage) && d.damage > 0,
         )
         : [];
-    const [h, r, b] = await Promise.all([
+    const skills = msg.skills;
+    const skillXp =
+      skills && typeof skills.batch === "string"
+        ? (skills.xp ?? []).slice(0, MAX_BATCH).filter(
+          (x) =>
+            UUID.test(x.uid) &&
+            typeof x.skill === "string" &&
+            Number.isFinite(x.xp) &&
+            x.xp > 0,
+        )
+        : [];
+    const [h, r, b, s] = await Promise.all([
       each(
         hp,
-        (r) => rpc(db, "set_herzie_hp", { p_user: r.uid, p_hp: r.hp }),
+        // `heal`: how far skills may have raised it since the last report
+        // (00107); without it the write only ever lowers.
+        (r) =>
+          rpc(db, "set_herzie_hp", {
+            p_user: r.uid,
+            p_hp: r.hp,
+            p_heal: Number.isFinite(r.heal) && (r.heal as number) > 0
+              ? r.heal
+              : 0,
+          }),
       ),
       each(
         rest,
@@ -115,6 +139,12 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
           p_batch: boss.batch,
           p_event: boss.event,
           p_damage: bossDamage,
+        }).then((res) => ({ ok: true, res }), () => ({ ok: false, res: null }))
+        : Promise.resolve(null),
+      skills && skillXp.length
+        ? rpc(db, "apply_skill_xp_batch", {
+          p_batch: skills.batch,
+          p_xp: skillXp,
         }).then((res) => ({ ok: true, res }), () => ({ ok: false, res: null }))
         : Promise.resolve(null),
     ]);
@@ -136,12 +166,16 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
     // A failed HP write or boss batch is retried by the Town server, which
     // re-sends the same values (HP is absolute, a batch has an id), so ask
     // for that with an error status. Rest is additive and never retried.
-    const failed = h.failed > 0 || (b !== null && !b.ok);
+    const failed = h.failed > 0 || (b !== null && !b.ok) ||
+      (s !== null && !s.ok);
     return jsonResponse(
       {
         hp: h,
         rest: r,
         boss: b?.res ? { ...(b.res as object), loot } : null,
+        // Where each reported skill stands now, so the room can use (and
+        // announce) a level-up at once.
+        skills: s?.res ?? null,
       },
       failed ? 502 : 200,
     );

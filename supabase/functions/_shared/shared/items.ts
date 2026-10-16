@@ -37,6 +37,8 @@ import {
   type V3,
   VIOLET_RAMP,
 } from "./ascii3d.ts";
+import type { HerzieClass } from "./classes.ts";
+import { normalizeStatPoints, STAT_TUNING, type StatPoints } from "./stats.ts";
 import { BOSS_DAMAGE_PER_MINUTE, type Stage } from "./types.ts";
 
 export type Rarity = "common" | "uncommon" | "rare" | "legendary" | "mythic";
@@ -56,6 +58,8 @@ export const EQUIP_SLOTS = [
   "spirit",
   "color",
   "modifier",
+  "main_hand",
+  "off_hand",
 ] as const;
 export type EquipSlot = (typeof EQUIP_SLOTS)[number];
 
@@ -71,6 +75,8 @@ export const EQUIPPED_SLOTS = [
   "ground_right",
   "spirit",
   "color",
+  "main_hand",
+  "off_hand",
 ] as const;
 export type EquippedSlot = (typeof EQUIPPED_SLOTS)[number];
 
@@ -483,7 +489,8 @@ export type EquipRejection =
   | "max-modifiers"
   | "missing-side"
   | "no-slot"
-  | "stage-too-low";
+  | "stage-too-low"
+  | "class-required";
 
 /** The stage gate an equip is checked against: the item's `minStage` and the
  * herzie's current stage. Like `equipSlot`, it's passed in because the server
@@ -491,6 +498,9 @@ export type EquipRejection =
 export interface StageGate {
   minStage?: number;
   stage: number;
+  /** The item's `requiredClass`, and the herzie's class. */
+  requiredClass?: HerzieClass;
+  herzieClass?: HerzieClass | null;
 }
 
 /** Whether a herzie at `stage` is grown enough to wear `item`. */
@@ -548,6 +558,9 @@ export function applyEquip(
   if (!equipSlot) return { ok: false, reason: "no-slot" };
   if (gate && gate.stage < (gate.minStage ?? 1)) {
     return { ok: false, reason: "stage-too-low" };
+  }
+  if (gate?.requiredClass && gate.herzieClass !== gate.requiredClass) {
+    return { ok: false, reason: "class-required" };
   }
 
   let slot: UnitSlot;
@@ -799,6 +812,9 @@ export function applyItemUpgrade(
  * every item, tooltip and total below picks it up. */
 export const STAT_KEYS = [
   "sonicPower",
+  "stamina",
+  "euphony",
+  "def",
   "luck",
   "critChance",
   "critDamage",
@@ -816,6 +832,9 @@ export type HerzieStats = Record<StatKey, number>;
 
 export const STAT_LABELS: Record<StatKey, string> = {
   sonicPower: "Sonic power",
+  stamina: "Stamina",
+  euphony: "Euphony",
+  def: "Def",
   luck: "Luck",
   critChance: "Crit chance",
   critDamage: "Crit damage",
@@ -825,7 +844,12 @@ export const STAT_LABELS: Record<StatKey, string> = {
 const PERCENT_STATS = new Set<StatKey>(["critChance", "critDamage"]);
 /** Stats every herzie lists, even at 0. The rest only show once something
  * gives them: a list of zeroes for things no item grants yet says nothing. */
-const ALWAYS_SHOWN = new Set<StatKey>(["sonicPower", "luck"]);
+const ALWAYS_SHOWN = new Set<StatKey>([
+  "sonicPower",
+  "stamina",
+  "euphony",
+  "luck",
+]);
 
 /** A stat's value as it reads: "12", or "5%". */
 export function formatStat(key: StatKey, value: number): string {
@@ -883,6 +907,9 @@ export interface ItemDef {
    * neckwear sits where the head meets the body, which a herzie only grows
    * at stage 3. */
   minStage?: Stage;
+  /** Class equipment: only a herzie of this class can wear it, and it's
+   * bound to them — no sell price, never traded, never dropped. */
+  requiredClass?: HerzieClass;
   /** A seasonal item only drops inside this yearly window (UTC, inclusive,
    * may wrap the new year). Copies already owned are unaffected outside it. */
   dropWindow?: DropWindow;
@@ -932,6 +959,7 @@ export type ItemType =
   | "equipable"
   | "accessory"
   | "spirit"
+  | "instrument"
   | "modifier"
   | "artefact";
 
@@ -948,6 +976,8 @@ export function getItemType(
   if (item.equipSlot === "scenery") return "sceneryCard";
   if (item.equipSlot === "ground") return "accessory";
   if (item.equipSlot === "spirit") return "spirit";
+  if (item.equipSlot === "main_hand" || item.equipSlot === "off_hand")
+    return "instrument";
   if (item.equipable) return "equipable";
   return "artefact";
 }
@@ -960,6 +990,7 @@ export const ITEM_TYPE_LABELS: Record<ItemType, string> = {
   equipable: "Equipable",
   accessory: "Accessory",
   spirit: "Spirit",
+  instrument: "Instrument",
   modifier: "Modifier",
   artefact: "Artefact",
 };
@@ -977,6 +1008,8 @@ export const EQUIP_SLOT_LABELS: Record<EquipSlot, string> = {
   spirit: "Spirit",
   color: "Skin",
   modifier: "Modifier",
+  main_hand: "Main hand",
+  off_hand: "Off hand",
 };
 
 /** A set is a named group of items whose `effect` describes what equipping
@@ -1058,6 +1091,12 @@ export const DECK_SLOT_GROUPS: DeckSlotGroup[] = [
     count: 2,
   },
   { label: "Spirit", itemType: "spirit", slots: ["spirit"], count: 1 },
+  {
+    label: "Instrument",
+    itemType: "instrument",
+    slots: ["main_hand", "off_hand"],
+    count: 2,
+  },
   { label: "Scenery", itemType: "sceneryCard", slots: ["scenery"], count: 1 },
   {
     label: "Modifiers",
@@ -1068,7 +1107,7 @@ export const DECK_SLOT_GROUPS: DeckSlotGroup[] = [
   { label: "Skin", itemType: "skin", slots: ["color"], count: 1 },
 ];
 
-/** Total fixed slot capacity across all groups (3+2+1+1+6+1 = 14). */
+/** Total fixed slot capacity across all groups (3+2+1+2+1+6+1 = 16). */
 export const DECK_TOTAL_SLOTS = DECK_SLOT_GROUPS.reduce(
   (sum, g) => sum + g.count,
   0,
@@ -1127,6 +1166,11 @@ export const NON_DROPPABLE_ITEM_IDS = [
   "pumpkin-spice",
   "blood-moon",
   "trick-or-treat",
+  // Class equipment comes from choosing a class, never from a drop.
+  "lute",
+  "compact-discs",
+  "worn-stick",
+  "old-cymbal",
 ] as const;
 
 /** How many uncollected drops may stand on the ground at once.
@@ -2079,6 +2123,108 @@ function renderSpiritOrbFrame(yAngle: number): string[] {
   );
 }
 
+// --- Class equipment cards ---
+
+/** Distance from (px, py) to the segment a→b, in icon units. */
+function segDist(
+  px: number,
+  py: number,
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+): number {
+  const dx = bx - ax,
+    dy = by - ay;
+  const t = Math.max(
+    0,
+    Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)),
+  );
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+
+function luteCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  // Pear body low-left, neck up-right to the pegbox.
+  const bx = -0.06,
+    by = 0.08;
+  const body = Math.hypot((ix - bx) / 0.17, (iy - by) / 0.15);
+  if (body < 1) {
+    if (Math.hypot(ix - bx, iy - by + 0.02) < 0.045)
+      return { bright: 0.15, color: "#2b1a0e" };
+    return { bright: 0.85 - body * 0.3, color: "#c98a4b" };
+  }
+  if (segDist(ix, iy, bx + 0.1, by - 0.08, 0.2, -0.24) < 0.03)
+    return { bright: 0.6, color: "#6b4226" };
+  if (segDist(ix, iy, 0.2, -0.24, 0.26, -0.22) < 0.035)
+    return { bright: 0.45, color: "#4a2c18" };
+  return null;
+}
+
+function discsCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  for (const [cx, cy] of [
+    [-0.1, 0.05],
+    [0.1, -0.05],
+  ] as const) {
+    const r = Math.hypot(ix - cx, iy - cy);
+    const R = 0.15;
+    if (r < R && r > R * 0.18) {
+      const band = ((r / R) * 6) % 1;
+      return {
+        bright: band < 0.5 ? 0.9 : 0.55,
+        color: cx < 0 ? "#d9d9e8" : "#e8d9f0",
+      };
+    }
+  }
+  return null;
+}
+
+function stickCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  if (Math.hypot(ix - 0.17, iy + 0.19) < 0.04)
+    return { bright: 0.75, color: "#e6cfa3" };
+  if (segDist(ix, iy, -0.18, 0.2, 0.17, -0.19) < 0.028)
+    return { bright: 0.7, color: "#c8a46e" };
+  return null;
+}
+
+function cymbalCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  const r = Math.hypot(ix, iy / 0.55);
+  if (r > 0.27) return null;
+  if (r < 0.05) return { bright: 0.55, color: "#8a6a2a" };
+  // Old: patches of verdigris at the rim.
+  const green = r > 0.2 && Math.sin(Math.atan2(iy, ix) * 5) > 0.6;
+  const band = ((r / 0.27) * 8) % 1;
+  return {
+    bright: band < 0.5 ? 0.85 : 0.65,
+    color: green ? "#6fa38a" : "#d4b04c",
+  };
+}
+
+function renderLuteFrame(yAngle: number): string[] {
+  return renderIconCard(yAngle, "#e0a96d", "#8a5a30", "#4a2c18", luteCardIcon);
+}
+
+function renderDiscsFrame(yAngle: number): string[] {
+  return renderIconCard(yAngle, "#d0d0e8", "#7a7a9a", "#44445a", discsCardIcon);
+}
+
+function renderStickFrame(yAngle: number): string[] {
+  return renderIconCard(yAngle, "#e6cfa3", "#8a7350", "#4a3c26", stickCardIcon);
+}
+
+function renderCymbalFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#e8c860",
+    "#8a7020",
+    "#4a3c10",
+    cymbalCardIcon,
+  );
+}
+
 // --- Headphones card ---
 function headbandArcIcon(
   u: number,
@@ -2562,6 +2708,10 @@ const thanksForAllTheFishFrames = generateFrames(
   renderThanksForAllTheFishFrame,
 );
 const spiritOrbFrames = generateFrames(renderSpiritOrbFrame);
+const luteFrames = generateFrames(renderLuteFrame);
+const discsFrames = generateFrames(renderDiscsFrame);
+const stickFrames = generateFrames(renderStickFrame);
+const cymbalFrames = generateFrames(renderCymbalFrame);
 const witchHatFrames = generateFrames(renderWitchHatFrame);
 const fangsFrames = generateFrames(renderFangsFrame);
 const pumpkinSpiceFrames = generateFrames(renderPumpkinSpiceFrame);
@@ -3067,6 +3217,53 @@ export const ITEMS: ItemDef[] = [
     // coins make it grindable after all.
     sellPrice: 500,
   },
+  // Class equipment (classes.ts): handed over, worn, when a class is chosen.
+  // Bound to the herzie — no sellPrice, never traded (trade_offer_unit_ids),
+  // never dropped (NON_DROPPABLE_ITEM_IDS).
+  {
+    id: "lute",
+    name: "Lute",
+    description: "Every Bard's first love. Slightly out of tune.",
+    rarity: "common",
+    frames: luteFrames,
+    equipable: true,
+    equipSlot: "main_hand",
+    minStage: 2,
+    requiredClass: "bard",
+  },
+  {
+    id: "compact-discs",
+    name: "Compact Discs",
+    description: "One for each hand. Scratched, but they fly true.",
+    rarity: "common",
+    frames: discsFrames,
+    equipable: true,
+    equipSlot: "main_hand",
+    minStage: 2,
+    requiredClass: "record_slinger",
+  },
+  {
+    id: "worn-stick",
+    name: "Worn Stick",
+    description: "Chipped from a thousand rimshots.",
+    rarity: "common",
+    frames: stickFrames,
+    equipable: true,
+    equipSlot: "main_hand",
+    minStage: 2,
+    requiredClass: "percussionist",
+  },
+  {
+    id: "old-cymbal",
+    name: "Old Cymbal",
+    description: "Dented, green at the edges, still rings.",
+    rarity: "common",
+    frames: cymbalFrames,
+    equipable: true,
+    equipSlot: "off_hand",
+    minStage: 2,
+    requiredClass: "percussionist",
+  },
 ];
 
 export function getItem(id: string): ItemDef | undefined {
@@ -3120,6 +3317,23 @@ export function getHerzieStatsFromUnits(
   return totals;
 }
 
+/** Item totals with the herzie's stat points on top: a point is one of its
+ * stat, and Stamina brings its Def along. What every fight and every bill
+ * reads; the item-only totals are for comparing gear. */
+export function withStatPoints(
+  items: HerzieStats,
+  points: StatPoints | null | undefined,
+): HerzieStats {
+  const p = normalizeStatPoints(points);
+  return {
+    ...items,
+    sonicPower: items.sonicPower + p.sonicPower,
+    stamina: items.stamina + p.stamina,
+    euphony: items.euphony + p.euphony,
+    def: items.def + STAT_TUNING.defPerStamina * (items.stamina + p.stamina),
+  };
+}
+
 /** Damage a listen deals to a boss per billed minute. Sonic power is a
  * percentage on top of the base rate — 10 sonic power is +10% — the same way
  * every other bonus in the game is a fraction of what it modifies. Both
@@ -3133,7 +3347,13 @@ export function bossDamagePerMinute(
 
 // One sonic wave's damage lives in combat.ts so the Town server can use it
 // without the item catalog; re-exported here for everyone else.
-export { HIT_BASE, HIT_SPREAD, hitDamage } from "./combat.ts";
+export {
+  CAST_INTERVAL_MS,
+  HIT_BASE,
+  HIT_SPREAD,
+  hitDamage,
+  waveDamage,
+} from "./combat.ts";
 
 // getItemColor lived here. It moved to item-canvas.ts — the module its three
 // dependencies already come from — so that this file stays free of the

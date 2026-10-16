@@ -9,8 +9,10 @@ import type { Env } from "./room";
 
 export type VitalsReport = {
   action: "report";
-  /** Absolute HP for players in a fight. */
-  hp?: { uid: string; hp: number }[];
+  /** Absolute HP for players in a fight; `heal` is how far skills may have
+   * raised it since the last report taken (set_herzie_hp otherwise only
+   * lowers). */
+  hp?: { uid: string; hp: number; heal?: number }[];
   /** Extra HP earned resting on a bench. */
   rest?: { uid: string; bonus: number }[];
   /** Damage dealt to the boss, named by `batch` so a retry isn't counted
@@ -19,6 +21,11 @@ export type VitalsReport = {
     event: string;
     batch: string;
     damage: { uid: string; damage: number }[];
+  };
+  /** Skill XP earned, named by `batch` like the boss damage. */
+  skills?: {
+    batch: string;
+    xp: { uid: string; skill: string; xp: number }[];
   };
 };
 
@@ -29,6 +36,10 @@ export type VitalsReply = {
     hp: number;
     killed: boolean;
     loot?: Record<string, LootDrop[]> | null;
+  } | null;
+  /** Where the reported skills stand now, after the XP. */
+  skills?: {
+    levels: { uid: string; skill: string; level: number }[];
   } | null;
 };
 
