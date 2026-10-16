@@ -19,6 +19,7 @@ import {
 } from "@herzies/shared/skills";
 import { buffMult, healMult } from "@herzies/shared/stats";
 import type {
+  BossPlace,
   BossTelegraph,
   FightState,
   LootDrop,
@@ -40,7 +41,7 @@ export const REPORT_EVERY_MS = 2_000;
  * and to pick up the loot. */
 export const VICTORY_LINGER_MS = 45_000;
 /** After the event ends with the boss alive, how long until the doors close. */
-export const ESCAPE_LINGER_MS = 5_000;
+export const ESCAPE_LINGER_MS = 15_000;
 
 export type Outbound = {
   /** Everyone in the room, or one player. */
@@ -50,6 +51,8 @@ export type Outbound = {
 
 export type FightPlayer = {
   uid: string;
+  /** The herzie's name, from the ticket. */
+  name: string;
   /** The room's entity id for this socket. */
   id: number;
   hp: number;
@@ -92,7 +95,12 @@ export type FightReport = {
     batch: string;
     xp: { uid: string; skill: string; xp: number }[];
   };
+  /** The fight is over: the end screen's table, for these herzies. */
+  results?: { event: string; uids: string[] };
 };
+
+/** Until the end screen's table comes back, the fight reports this often. */
+const RESULTS_RETRY_MS = 1_000;
 
 type Claim = NonNullable<TownTicketPayload["boss"]>;
 
@@ -127,6 +135,11 @@ export class FightRuntime {
   private batchSeq = 0;
   /** The rewards have been handed out; they only ever drop once. */
   private looted = false;
+  /** The end screen went out (or there's no one to show it to). */
+  private resultsSent = false;
+  /** The dev boss is never reported: what each herzie dealt it, for its
+   * end screen. */
+  private devDealt = new Map<string, number>();
   /** HP skills restored, by player, not yet taken by the database. */
   private healed = new Map<string, number>();
   /** Skill XP not yet reported, by `uid|skill` (fractions carry over). */
@@ -173,6 +186,7 @@ export class FightRuntime {
     if (!down) this.downAcked.delete(uid);
     const p: FightPlayer = {
       uid,
+      name: ticket.name,
       id,
       hp,
       maxHp,
@@ -424,6 +438,9 @@ export class FightRuntime {
         });
       }
     }
+    // The dev boss's end screen comes from the room itself, at once.
+    if (this.closeWhy && this.eventId === DEV_EVENT && !this.resultsSent)
+      out.push(...this.results(this.devTable()));
     return out;
   }
 
@@ -467,6 +484,11 @@ export class FightRuntime {
           ev.uid,
           (this.pendingDamage.get(ev.uid) ?? 0) + ev.damage,
         );
+        if (this.eventId === DEV_EVENT)
+          this.devDealt.set(
+            ev.uid,
+            (this.devDealt.get(ev.uid) ?? 0) + ev.damage,
+          );
         if (ev.skill && isSkillId(ev.skill))
           this.earn(ev.uid, ev.skill, skillXpFor(ev.skill, ev.damage));
         out.push({
@@ -540,7 +562,22 @@ export class FightRuntime {
           xp,
         };
     }
+    // Over: ask for the end screen's table, but only on a report whose
+    // batch carries every hit there was (one re-sent from before would
+    // leave the last of them out). Until it's back, report again soon.
+    let results: FightReport["results"];
+    if (this.closeWhy && !this.resultsSent && this.eventId !== DEV_EVENT) {
+      if (!this.pendingDamage.size)
+        results = {
+          event: this.eventId,
+          uids: [...this.players.values()]
+            .filter((p) => p.present)
+            .map((p) => p.uid),
+        };
+      this.nextReportAt = Math.min(this.nextReportAt, now + RESULTS_RETRY_MS);
+    }
     return {
+      results,
       hp: [...this.players.values()]
         .filter((p) => p.present || this.leftUnreported.has(p.uid))
         .filter((p) => !(p.down && this.downAcked.has(p.uid)))
@@ -595,6 +632,54 @@ export class FightRuntime {
       out.push({ to: { uid: p.uid }, msg: { t: "loot", drops } });
     }
     return out;
+  }
+
+  /**
+   * The fight is over and `town-vitals` sent its table: the end screen, once,
+   * to each herzie still here, with their own place. Victory if the boss
+   * fell, defeat if it got away.
+   */
+  results(table: {
+    top: BossPlace[];
+    you: Record<string, BossPlace>;
+  }): Outbound[] {
+    if (this.resultsSent || !this.closeWhy) return [];
+    this.resultsSent = true;
+    const outcome = this.closeWhy === "victory" ? "victory" : "defeat";
+    const out: Outbound[] = [];
+    for (const p of this.players.values()) {
+      if (!p.present) continue;
+      out.push({
+        to: { uid: p.uid },
+        msg: {
+          t: "results",
+          outcome,
+          top: table.top.slice(0, 10),
+          you: table.you[p.uid] ?? null,
+        },
+      });
+    }
+    return out;
+  }
+
+  /** The dev boss's table, from what the room saw land (it's never
+   * reported). */
+  private devTable(): { top: BossPlace[]; you: Record<string, BossPlace> } {
+    const ranked = [...this.devDealt]
+      .filter(([, damage]) => damage > 0)
+      .sort(([ua, a], [ub, b]) => b - a || (ua < ub ? -1 : 1))
+      .map(([uid, damage], i) => ({
+        uid,
+        place: {
+          rank: i + 1,
+          name: this.players.get(uid)?.name ?? "?",
+          damage: Math.round(damage),
+        },
+      }));
+    return {
+      top: ranked.slice(0, 10).map((r) => r.place),
+      you: Object.fromEntries(ranked.map((r) => [r.uid, r.place])),
+    };
   }
 
   /** A telegraph as the wire carries it: a buster's target as an entity id. */

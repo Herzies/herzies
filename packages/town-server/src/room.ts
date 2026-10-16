@@ -660,7 +660,8 @@ export class TownRoom extends DurableObject<Env> {
     if (!fight || this.reporting) return;
     const report = fight.report(now, force);
     if (!report) return;
-    if (!report.hp.length && !report.boss && !report.skills) return;
+    if (!report.hp.length && !report.boss && !report.skills && !report.results)
+      return;
     this.reporting = true;
     void postVitals(this.env, { action: "report", ...report })
       .then((reply) => {
@@ -670,6 +671,8 @@ export class TownRoom extends DurableObject<Env> {
         if (loot) for (const o of fight.loot(loot)) this.dispatch(o);
         const levels = reply.skills?.levels;
         if (levels) for (const o of fight.skillUps(levels)) this.dispatch(o);
+        if (report.results && reply.results)
+          for (const o of fight.results(reply.results)) this.dispatch(o);
       })
       .finally(() => {
         this.reporting = false;

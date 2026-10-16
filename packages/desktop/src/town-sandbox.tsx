@@ -30,11 +30,13 @@ import { createRoot } from "react-dom/client";
 import type { EventCard } from "./components/TownScene";
 import { TownVitals } from "./components/TownVitals";
 import { BossHud } from "./components/town/BossHud";
+import { BossResults } from "./components/town/BossResults";
 import { setCave } from "./components/town/cave";
 import {
   bubbleDuration,
   type ChatBubbles,
 } from "./components/town/chatBubbles";
+import { setBossResults } from "./components/town/combat/results";
 import { setMySkill } from "./components/town/combat/skills";
 import { combat } from "./components/town/combat/state";
 import { setTownTicketSource, townNet } from "./components/town/net/townNet";
@@ -117,6 +119,35 @@ const player = {
     spirit: params.get("spirit") ?? "spirit-orb",
   } as Record<string, string>,
 };
+// The end screen with a made-up table: `?results=victory|defeat`, and
+// `&rank=` for your place (past 10 shows under the "…"; 0 for none).
+const resultsParam = params.get("results");
+if (resultsParam === "victory" || resultsParam === "defeat") {
+  const names = [
+    "eddie",
+    "hobgoblin",
+    "music_lover69",
+    "Mathias",
+    "lutey",
+    "discoBall",
+    "rimshot",
+    "sleepyhead",
+    "basslord",
+    "tinnitus",
+    "echo",
+  ];
+  const table = names.map((name, i) => ({
+    rank: i + 1,
+    name,
+    damage: Math.round(48_000 / (i + 1.4)),
+  }));
+  const rank = Number(params.get("rank") ?? 14);
+  const you =
+    rank > 0
+      ? (table[rank - 1] ?? { rank, name: "sandbox-player", damage: 812 })
+      : null;
+  setBossResults({ outcome: resultsParam, top: table.slice(0, 10), you }, null);
+}
 const cls = params.get("class");
 if (isHerzieClass(cls)) {
   const [main, off] = CLASS_DEFS[cls].equipment;
@@ -290,6 +321,7 @@ function Sandbox() {
     <div style={{ position: "relative", height: "100%" }}>
       <TownVitals inFight={params.get("map") === "bossroom"} />
       <BossHud name="The boss" />
+      <BossResults name="The boss" />
       <TownCanvas
         spots={spots}
         player={player}

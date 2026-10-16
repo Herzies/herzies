@@ -533,6 +533,10 @@ export type FightState = {
 /** One piece of boss loot: a pending drop's id and its item id. */
 export type LootDrop = { id: string; item: string };
 
+/** A place on a boss fight's damage table: its rank (1 is the top), the
+ * herzie's name, and the damage they dealt over the whole fight. */
+export type BossPlace = { rank: number; name: string; damage: number };
+
 export type ServerMessage =
   /** Accepted: your entity id and everyone else here. A full snapshot follows. */
   | { t: "welcome"; you: number; players: TownPlayer[]; fight?: FightState }
@@ -553,6 +557,15 @@ export type ServerMessage =
    * each a ground drop (its id, for collect-drop) and the item it is.
    * Whatever isn't picked up here waits on your Home ground. */
   | { t: "loot"; drops: LootDrop[] }
+  /** The fight is over: how it went, its ten top damage dealers, and your
+   * own place (null if you landed nothing). Sent once, to each herzie still
+   * in the cave. */
+  | {
+      t: "results";
+      outcome: "victory" | "defeat";
+      top: BossPlace[];
+      you: BossPlace | null;
+    }
   /** The room closes at `closesAt` (server ms): the boss left or won. */
   | { t: "closing"; why: "victory" | "escaped" | "sealed"; closesAt: number }
   | { t: "join"; player: TownPlayer }

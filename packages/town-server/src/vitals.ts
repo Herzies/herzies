@@ -4,7 +4,11 @@
  * what's lost is a few seconds of bench regen, and a fight's HP re-sends on
  * the next report.
  */
-import { type LootDrop, signVitalsRequest } from "@herzies/shared/town-net";
+import {
+  type BossPlace,
+  type LootDrop,
+  signVitalsRequest,
+} from "@herzies/shared/town-net";
 import type { Env } from "./room";
 
 export type VitalsReport = {
@@ -27,6 +31,9 @@ export type VitalsReport = {
     batch: string;
     xp: { uid: string; skill: string; xp: number }[];
   };
+  /** The fight is over: ask for the end screen's table, with the places of
+   * these herzies (00110). */
+  results?: { event: string; uids: string[] };
 };
 
 /** What `town-vitals` answers. Only the boss part is read: `loot` is set
@@ -41,6 +48,9 @@ export type VitalsReply = {
   skills?: {
     levels: { uid: string; skill: string; level: number }[];
   } | null;
+  /** The end screen's table, if it was asked for: the top ten, and each
+   * asked-about herzie's place by user id (none if they dealt nothing). */
+  results?: { top: BossPlace[]; you: Record<string, BossPlace> } | null;
 };
 
 /** Send a report. Resolves with the reply if `town-vitals` took it, else

@@ -9,6 +9,7 @@ import { useSyncExternalStore } from "react";
 import { sfxDown, sfxHurt, sfxImpact, sfxSlam, sfxWarn } from "../sfx";
 import { setHpNow, setRegenFrozen } from "../vitals";
 import { pushDamageNumber } from "./DamageNumbers";
+import { setBossResults } from "./results";
 import {
   clearBuff,
   emitSkills,
@@ -213,6 +214,13 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
         at: clock.toLocal(m.closesAt),
       };
       emit();
+      return;
+    case "results":
+      setBossResults(
+        { outcome: m.outcome, top: m.top, you: m.you },
+        bossFight.victory?.at ?? null,
+        now,
+      );
       return;
     case "loot":
       if (!m.drops.length) return;

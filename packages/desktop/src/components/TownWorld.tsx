@@ -15,6 +15,7 @@ import { ExpBar } from "./SquareBar";
 import { type EventCard, formatIn, isDown } from "./TownScene";
 import { TownHpBar, TownVitals } from "./TownVitals";
 import { BossHud } from "./town/BossHud";
+import { BossResults } from "./town/BossResults";
 import { setCave } from "./town/cave";
 import { useChatBubbles } from "./town/chatBubbles";
 import { resetBossFight } from "./town/combat/fight";
@@ -290,6 +291,7 @@ export function TownWorld({
         <>
           <TownVitals inFight={!!map.combat} chatOverlay={chatOverlay} />
           <BossHud name={bossCard?.title ?? "The boss"} />
+          <BossResults name={bossCard?.title ?? "The boss"} />
         </>
       ) : null}
       {!paused && (loading || !ready) ? (

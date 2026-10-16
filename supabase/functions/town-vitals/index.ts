@@ -84,6 +84,8 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
       batch: string;
       damage: { uid: string; damage: number }[];
     };
+    /** The fight is over: the cave's end screen, for these herzies. */
+    results?: { event: string; uids: string[] };
   };
   try {
     msg = JSON.parse(body);
@@ -168,6 +170,24 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
     // for that with an error status. Rest is additive and never retried.
     const failed = h.failed > 0 || (b !== null && !b.ok) ||
       (s !== null && !s.ok);
+    // The fight is over: who placed where (00110). Only once this report's
+    // damage has landed, so the last hits count; and a failed lookup never
+    // fails the report (the room would re-send it for nothing).
+    let results: unknown = null;
+    const want = msg.results;
+    if (!failed && want && UUID.test(want.event)) {
+      const uids = (Array.isArray(want.uids) ? want.uids : [])
+        .slice(0, MAX_BATCH)
+        .filter((u) => typeof u === "string" && UUID.test(u));
+      try {
+        results = await rpc(db, "boss_results_json", {
+          p_event: want.event,
+          p_uids: uids,
+        });
+      } catch {
+        results = null;
+      }
+    }
     return jsonResponse(
       {
         hp: h,
@@ -176,6 +196,7 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
         // Where each reported skill stands now, so the room can use (and
         // announce) a level-up at once.
         skills: s?.res ?? null,
+        results,
       },
       failed ? 502 : 200,
     );
