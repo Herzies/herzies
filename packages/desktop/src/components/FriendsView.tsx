@@ -108,9 +108,11 @@ export function FriendsView({
   const friendsRef = useRef(friends);
   friendsRef.current = friends;
 
-  /** Says how it went, for a moment (lib/notices.ts). */
-  const flash = (result: { success: boolean; message: string }) =>
-    notify(result.message, { kind: result.success ? "success" : "error" });
+  /** Says what went wrong, for a moment (lib/notices.ts). What went right
+   * the backend announces itself (an "activity", which main.tsx shows). */
+  const flash = (result: { success: boolean; message: string }) => {
+    if (!result.success) notify(result.message);
+  };
 
   // Background refresh when codes change and any profile is missing from cache.
   useEffect(() => {

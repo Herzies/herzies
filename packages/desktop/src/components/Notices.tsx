@@ -8,7 +8,7 @@ const OUTLINE =
   "0 1px 0 #000, 0 -1px 0 #000, 1px 0 0 #000, -1px 0 0 #000, 0 2px 4px rgba(0,0,0,0.6)";
 
 /** Each line's height in the stack, px. */
-const LINE = 20;
+const LINE = 18;
 
 const reducedMotion = () => {
   try {
@@ -19,7 +19,7 @@ const reducedMotion = () => {
 };
 
 /**
- * The notices (see lib/notices.ts): centred, a third of the way down, the
+ * The notices (see lib/notices.ts): centred, a little under a quarter of the way down, the
  * newest at the bottom with the older ones pushed up above it. Each pops
  * in, holds, then floats up and fades. Mounted once at the root; nothing in
  * it takes the mouse.
@@ -31,7 +31,7 @@ export function Notices() {
       role="status"
       aria-live="polite"
       className="pointer-events-none fixed inset-x-0 z-[400] flex justify-center"
-      style={{ top: "30%" }}
+      style={{ top: "22%" }}
     >
       <div className="relative w-full">
         {notices.map((n, i) => (
@@ -87,7 +87,7 @@ function Line({ notice, up }: { notice: Notice; up: number }) {
     >
       <div
         ref={ref}
-        className="max-w-[80vw] px-2 text-center text-[13px] font-bold leading-5 tracking-wide text-white"
+        className="max-w-[80vw] px-2 text-center text-[12px] font-bold leading-[18px] tracking-wide text-white"
         style={{ textShadow: OUTLINE }}
       >
         {notice.text}

@@ -52,6 +52,7 @@ import { WhatsNewOverlay } from "./components/WhatsNewOverlay";
 import { useOptimisticUnits } from "./hooks/useOptimisticUnits";
 import { useHomeStageOffset } from "./hooks/useStageAlignment";
 import { useTradeRequests } from "./hooks/useTradeRequests";
+import { notify } from "./lib/notices";
 import { stableMerge } from "./lib/stableMerge";
 import { cn } from "./lib/utils";
 import { RELEASE_NOTES } from "./release-notes";
@@ -343,7 +344,12 @@ function App() {
       setHydrated(true);
     });
     const unlistenState = herzies.onStateUpdate(applyState);
-    const unlistenActivity = herzies.onActivity(addLog);
+    // What the backend says happened (a pickup, a friend, a visitor, a level
+    // up): into the log, and over the screen for a moment.
+    const unlistenActivity = herzies.onActivity((message) => {
+      addLog(message);
+      notify(message, { kind: "info" });
+    });
     const unlistenDeepLink = herzies.onDeepLink((payload) => {
       if (payload.startsWith("trade:")) {
         const tradeId = payload.slice("trade:".length);
