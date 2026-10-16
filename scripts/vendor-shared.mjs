@@ -45,6 +45,8 @@ const ENTRIES = [
   join(ROOT, "packages/shared/src/town-net.ts"),
   // Health: the ticket hands out vitals (town-ticket function).
   join(ROOT, "packages/shared/src/vitals.ts"),
+  // The Tower's payouts (town-vitals function).
+  join(ROOT, "packages/shared/src/tower.ts"),
 ];
 
 const BANNED = [

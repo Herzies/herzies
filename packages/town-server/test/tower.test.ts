@@ -173,6 +173,31 @@ describe("TowerEngine", () => {
     expect(e.isCleared).toBe(false);
   });
 
+  it("takes a fallen mob's swing off the ground", () => {
+    const e = engine(1, 99);
+    const at = ARENA.entry;
+    let t = T0;
+    let swing: Extract<TowerEvent, { t: "telegraph" }> | undefined;
+    while (!swing && t < T0 + 20_000) {
+      t += 50;
+      swing = e
+        .update(t, [player(() => at)])
+        .find((x): x is Extract<TowerEvent, { t: "telegraph" }> => x.t === "telegraph");
+    }
+    if (!swing) throw new Error("no swing");
+    const mob = e.wireMobs().find((m) => m.id === swing.telegraph.mob);
+    if (!mob) throw new Error("no mob");
+    // Melee it until it drops, before the swing lands.
+    const ev: TowerEvent[] = [];
+    for (let i = 0; i < 40 && e.wireMobs().some((m) => m.id === mob.id); i++) {
+      e.cast("u", at, aimAt(at, mob), 0, { ...STATS, sonicPower: 1000 }, t, "melee");
+      t += 10;
+      ev.push(...e.update(t, []));
+    }
+    expect(t).toBeLessThan(swing.telegraph.hitAt);
+    expect(ev).toContainEqual({ t: "resolve", id: swing.telegraph.id, hits: [] });
+  });
+
   it("judges a cast against where the mob was a moment ago", () => {
     const e = engine();
     const at = ARENA.entry;

@@ -176,7 +176,9 @@ function RemoteHerzie({
       const height = herzie.height * 0.5;
       const targets = [
         ...liveDummies.map((d) => ({ d, radius: DUMMY.radius })),
-        ...(bossFight.on ? [{ d: null, radius: BOSS_STAND.radius }] : []),
+        ...(bossFight.on && !bossFight.tower
+          ? [{ d: null, radius: BOSS_STAND.radius }]
+          : []),
       ];
       for (const { d, radius } of targets) {
         const at = d ?? BOSS_STAND;

@@ -71,7 +71,7 @@ export const townLive = {
   lastInputAt: 0,
   /** Set to move the herzie straight there next step (the server refused a
    * move); Player clears it. */
-  teleport: null as { x: number; z: number } | null,
+  teleport: null as { x: number; z: number; heading?: number } | null,
   /** The bench seat the herzie is sitting on, if any (see Benches). */
   seat: null as Seat | null,
   /** Stand up from it next step (Player clears it). */

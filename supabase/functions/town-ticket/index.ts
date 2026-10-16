@@ -155,6 +155,25 @@ Deno.serve(async (request) => {
     boss = open as typeof boss;
   }
 
+  // The Tower: only while a Tower event is on, and only on your feet. Each
+  // herzie has a room of their own there, named by their user id.
+  let tower: { event: string; until: number; floor: number } | undefined;
+  if (map === "tower") {
+    if (vitals.down) {
+      return jsonResponse({ error: "Knocked out", reason: "down" }, 403);
+    }
+    const { data: open } = await admin.rpc("open_tower_json", {
+      p_user: user.id,
+    });
+    if (!open) {
+      return jsonResponse(
+        { error: "The Tower is closed", reason: "sealed" },
+        403,
+      );
+    }
+    tower = open as typeof tower;
+  }
+
   const exp = Math.floor(now / 1000) + TOWN_TICKET_TTL_S;
   const ticket = await signTownTicket(
     {
@@ -173,6 +192,8 @@ Deno.serve(async (request) => {
         stats.euphony,
       ],
       boss,
+      tower,
+      lv: herzie.level,
       ...(herzie.class ? { cls: herzie.class as string, sk } : {}),
     },
     TOWN_TICKET_SECRET,
@@ -183,6 +204,7 @@ Deno.serve(async (request) => {
     exp,
     vitals,
     champion: await championOf(admin),
+    ...(tower ? { instance: user.id } : {}),
   });
 });
 

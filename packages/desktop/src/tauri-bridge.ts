@@ -344,6 +344,8 @@ export const herzies = {
       vitals?: Vitals;
       /** Who the Town's statue shows (older servers omit it). */
       champion?: { name: string; look: TownLook } | null;
+      /** For a room of your own (the Tower): which is yours. */
+      instance?: string;
     }>("fetch_town_ticket", { map }),
 
   /** The herzie's health: `"vitals"` reads it, `"respawn"` brings a

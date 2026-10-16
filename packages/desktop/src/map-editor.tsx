@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { EventCard } from "./components/TownScene";
 import { benchFacing } from "./components/town/Benches";
+import { BOARD, boardFacing } from "./components/town/Boards";
 import { localHours } from "./components/town/DayCycle";
 import {
   cellCenter,
@@ -42,7 +43,6 @@ import {
   TOWN_MAPS_LOCAL,
   type TownSpot,
 } from "./components/town/runtime";
-import { BOARD, boardFacing } from "./components/town/Boards";
 import { STAND, standFacing } from "./components/town/Stands";
 import TownCanvas, { PIXEL_SCALE } from "./components/town/TownCanvas";
 

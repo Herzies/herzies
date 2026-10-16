@@ -172,6 +172,7 @@ export function Player({
       b.setNextKinematicTranslation({ x: to.x, y: 0, z: to.z });
       townSave.x = to.x;
       townSave.z = to.z;
+      if (to.heading !== undefined) townSave.heading = m.heading = to.heading;
       rt.playerSpeed = townLive.speed = 0;
       return;
     }

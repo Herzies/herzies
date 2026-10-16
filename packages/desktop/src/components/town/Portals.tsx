@@ -2,10 +2,10 @@ import { useFrame } from "@react-three/fiber";
 import { useLayoutEffect, useMemo } from "react";
 import * as THREE from "three";
 import { ambient } from "./ambient";
-import { useCave } from "./cave";
+import { isMouth, usePortalOpen } from "./gates";
 import type { TownMap } from "./map";
 import { type Portal, portalsOf } from "./portal";
-import { mapById, townSave } from "./runtime";
+import { townSave } from "./runtime";
 import { distortionMaterial, distortionScene } from "./vfx/distortion";
 
 /**
@@ -134,9 +134,8 @@ const TINT = new THREE.Color("#a77cff");
 const MOUTH_TINT = new THREE.Color("#ff5a4a");
 
 /** A portal into a room (the boss's cave) glows the boss's colour. */
-export function isMouth(portal: Portal): boolean {
-  return !!mapById(portal.to).room;
-}
+export { isMouth };
+
 /** How near you have to be for the air round a portal to ripple. */
 const RIPPLE_REACH = 25;
 
@@ -220,12 +219,11 @@ export function Portals({
   map: TownMap;
   live?: boolean;
 }) {
-  // The cave's mouth is there only while the cave is open.
-  const open = useCave().kind === "open";
-  const portals = useMemo(
-    () => portalsOf(map).filter((p) => open || !isMouth(p)),
-    [map, open],
-  );
+  // The cave's mouth is there only while the cave is open, the Tower's
+  // door while it's on, its way on once the floor's clear.
+  const isOpen = usePortalOpen();
+  const all = useMemo(() => portalsOf(map), [map]);
+  const portals = all.filter(isOpen);
   return (
     <>
       {portals.map((p) => (

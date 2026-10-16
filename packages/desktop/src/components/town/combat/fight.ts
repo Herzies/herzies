@@ -1,12 +1,23 @@
 import { getItemIcon, ITEMS, isSkillId } from "@herzies/shared";
+import { MOB } from "@herzies/shared/tower";
 import type {
   BossTelegraph,
   FightState,
   LootDrop,
   ServerMessage,
+  TowerFloor,
+  TowerMob,
 } from "@herzies/shared/town-net";
 import { useSyncExternalStore } from "react";
-import { sfxDown, sfxHurt, sfxImpact, sfxSlam, sfxWarn } from "../sfx";
+import { showToast } from "../cave";
+import {
+  sfxDown,
+  sfxHurt,
+  sfxImpact,
+  sfxPortal,
+  sfxSlam,
+  sfxWarn,
+} from "../sfx";
 import { setHpNow, setRegenFrozen } from "../vitals";
 import { pushDamageNumber } from "./DamageNumbers";
 import { setBossResults } from "./results";
@@ -68,7 +79,11 @@ export const bossFight = {
     at: number;
     /** Tossed down in front of you (the dev drop), not out of the boss. */
     here?: boolean;
+    /** Out of a Tower mob, where it fell. */
+    from?: { x: number; z: number };
   } | null,
+  /** In the Tower: the floor (its mobs are in {@link towerMobs}). */
+  tower: null as Omit<TowerFloor, "mobs"> | null,
   /** When the boss was last hit and when you last were (performance.now()
    * ms), for the bar's flash and the screen's. */
   bossHitAt: Number.NEGATIVE_INFINITY,
@@ -76,6 +91,91 @@ export const bossFight = {
   /** When the boss last slammed the floor, for it to rear and drop. */
   slammedAt: Number.NEGATIVE_INFINITY,
 };
+
+/** One Tower mob as the client holds it: the last few places the server
+ * said it was (for drawing it smoothly, a moment behind), its health, and
+ * when it fell. */
+export type MobView = {
+  id: number;
+  hp: number;
+  maxHp: number;
+  /** Winding up a swing. */
+  windup: boolean;
+  samples: { at: number; x: number; z: number; yaw: number }[];
+  /** performance.now() ms it fell (null: up). */
+  downAt: number | null;
+  /** performance.now() ms it was last hit, for the flash. */
+  hitAt: number;
+};
+
+/** The Tower's mobs, by id. */
+export const towerMobs = new Map<number, MobView>();
+
+/** How many of the floor's mobs are still up. */
+export function mobsLeft(): number {
+  let n = 0;
+  for (const m of towerMobs.values()) if (m.downAt === null) n++;
+  return n;
+}
+
+/** How far behind the newest word mobs are drawn, ms: a snapshot or two. */
+export const MOB_DELAY_MS = 110;
+
+/** Where a mob is at `at` (performance.now() ms), between its samples. */
+export function mobAt(
+  m: MobView,
+  at: number,
+): { x: number; z: number; yaw: number } {
+  const s = m.samples;
+  const last = s[s.length - 1];
+  if (!last) return { x: 0, z: 0, yaw: 0 };
+  for (let i = s.length - 1; i > 0; i--) {
+    const a = s[i - 1];
+    const b = s[i];
+    if (a.at <= at && at <= b.at) {
+      const k = b.at > a.at ? (at - a.at) / (b.at - a.at) : 1;
+      let dy = b.yaw - a.yaw;
+      dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+      return {
+        x: a.x + (b.x - a.x) * k,
+        z: a.z + (b.z - a.z) * k,
+        yaw: a.yaw + dy * k,
+      };
+    }
+  }
+  return at < s[0].at ? s[0] : last;
+}
+
+function syncMobs(mobs: readonly TowerMob[], now: number) {
+  for (const w of mobs) {
+    let m = towerMobs.get(w.id);
+    if (!m) {
+      m = {
+        id: w.id,
+        hp: w.hp,
+        maxHp: w.maxHp,
+        windup: false,
+        samples: [],
+        downAt: null,
+        hitAt: Number.NEGATIVE_INFINITY,
+      };
+      towerMobs.set(w.id, m);
+    }
+    m.hp = w.hp;
+    m.maxHp = w.maxHp;
+    m.windup = w.s === 1;
+    m.samples.push({ at: now, x: w.x, z: w.z, yaw: w.yaw });
+    if (m.samples.length > 6) m.samples.shift();
+  }
+}
+
+function setTower(f: TowerFloor, now: number) {
+  const was = bossFight.tower;
+  if (!was || was.floor !== f.floor) towerMobs.clear();
+  const { mobs, ...floor } = f;
+  bossFight.tower = floor;
+  syncMobs(mobs, now);
+}
 
 let version = 0;
 /** Tells one drop of loot from the next (LootDrops keys on it). */
@@ -115,6 +215,8 @@ export function resetBossFight(): void {
   bossFight.victory = null;
   bossFight.loot = null;
   bossFight.you = null;
+  bossFight.tower = null;
+  towerMobs.clear();
   resetSkills();
   emit();
 }
@@ -190,12 +292,24 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       return;
     }
     case "hit": {
-      const jitter = (Math.random() - 0.5) * 1.6;
-      pushDamageNumber(
-        [BOSS_NUMBER_AT[0] + jitter, BOSS_NUMBER_AT[1], BOSS_NUMBER_AT[2]],
-        m.damage,
-        m.crit,
-      );
+      const mob = m.mob !== undefined ? towerMobs.get(m.mob) : undefined;
+      if (mob) {
+        mob.hitAt = now;
+        const at = mobAt(mob, now - MOB_DELAY_MS);
+        const jitter = () => (Math.random() - 0.5) * 0.6;
+        pushDamageNumber(
+          [at.x + jitter(), MOB.top + 0.3, at.z + jitter()],
+          m.damage,
+          m.crit,
+        );
+      } else {
+        const jitter = (Math.random() - 0.5) * 1.6;
+        pushDamageNumber(
+          [BOSS_NUMBER_AT[0] + jitter, BOSS_NUMBER_AT[1], BOSS_NUMBER_AT[2]],
+          m.damage,
+          m.crit,
+        );
+      }
       combat.hitAt = now;
       combat.hitCrit = m.crit;
       shake(m.crit ? 0.3 : 0.1);
@@ -224,9 +338,41 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       return;
     case "loot":
       if (!m.drops.length) return;
-      bossFight.loot = { id: ++lootSeq, drops: m.drops, at: now };
+      bossFight.loot = {
+        id: ++lootSeq,
+        drops: m.drops,
+        at: now,
+        ...(m.at ? { from: m.at } : {}),
+      };
       emit();
       return;
+    case "mobs": {
+      const before = towerMobs.size;
+      syncMobs(m.mobs, now);
+      if (towerMobs.size !== before) emit();
+      return;
+    }
+    case "mobDown": {
+      const mob = towerMobs.get(m.mob);
+      if (mob) {
+        mob.hp = 0;
+        mob.downAt = now;
+      }
+      emit();
+      return;
+    }
+    case "floor": {
+      const was = bossFight.tower;
+      setTower(m, now);
+      if (m.cleared && !(was?.floor === m.floor && was.cleared)) {
+        showToast(`Floor ${m.floor} cleared! The way on is open.`);
+        sfxPortal();
+      } else if (!m.cleared && was && was.floor !== m.floor) {
+        showToast(`Floor ${m.floor}`, 2_000);
+      }
+      emit();
+      return;
+    }
     case "closing":
       bossFight.closing = { why: m.why, at: clock.toLocal(m.closesAt) };
       emit();
@@ -289,6 +435,8 @@ function applyFight(f: FightState, clock: Clock, you: number) {
   bossFight.closing = null;
   bossFight.victory = null;
   bossFight.loot = null;
+  if (f.tower) setTower(f.tower, performance.now());
+  else bossFight.tower = null;
   skills.buffs.clear();
   for (const b of f.buffs ?? [])
     setBuff(b.id, {

@@ -10,6 +10,7 @@ import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js
 import { swayInWind } from "./ambient";
 
 import { BenchColliders, Benches } from "./Benches";
+import { BoardColliders, Boards } from "./Boards";
 import { BuildingColliders, Buildings, lanternMaterial } from "./Buildings";
 import { Dummies, DummyColliders } from "./combat/Dummies";
 import { trunkMaterial } from "./Islands";
@@ -21,7 +22,6 @@ import {
 } from "./Lamps";
 import { objectAt, objectPlace, type TownMap, waterRuns } from "./map";
 import { Portals } from "./Portals";
-import { BoardColliders, Boards } from "./Boards";
 import { StandColliders, Stands } from "./Stands";
 import { type Champion, StatueColliders, Statues } from "./Statues";
 import {

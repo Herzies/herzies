@@ -87,7 +87,8 @@ export async function eat(
   };
   if (!getItem(itemId)?.consumable) return refuse("not-consumable");
 
-  if (townSave.map === "bossroom") {
+  // Where a fight holds your health (the cave, the Tower), the room eats.
+  if (townSave.map === "bossroom" || townSave.map === "tower") {
     const you = bossFight.you;
     const mine = you === null ? undefined : bossFight.health.get(you);
     if (mine && mine.hp <= 0) return refuse("down");

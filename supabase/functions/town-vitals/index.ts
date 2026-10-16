@@ -17,7 +17,20 @@
  * reports it like a skill's heal).
  */
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { normalizeEquipped } from "../_shared/shared/items.ts";
+import {
+  filterDroppablePool,
+  getHerzieStatsFromUnits,
+  NON_DROPPABLE_ITEM_IDS,
+  normalizeEquipped,
+  normalizeUnits,
+  pickWeightedDrop,
+} from "../_shared/shared/items.ts";
+import {
+  TOWER_DROP_CHANCE,
+  TOWER_DROPS_DAILY_CAP,
+  TOWER_XP_DAILY_CAP,
+  towerXpPerKill,
+} from "../_shared/shared/tower.ts";
 import { verifyVitalsRequest } from "../_shared/shared/town-net.ts";
 import { corsHeaders, jsonResponse } from "../_shared/cors.ts";
 
@@ -66,6 +79,36 @@ async function rpc(
   return data;
 }
 
+/** `count` items picked as listening picks a drop: the droppable pool, by
+ * rarity, leaning on the herzie's Luck. */
+async function rollDrops(
+  db: SupabaseClient,
+  uid: string,
+  count: number,
+): Promise<string[]> {
+  const [{ data: pool }, { data: unitRows }] = await Promise.all([
+    db
+      .from("items")
+      .select("id, rarity")
+      .not(
+        "id",
+        "in",
+        `(${NON_DROPPABLE_ITEM_IDS.map((id) => `"${id}"`).join(",")})`,
+      ),
+    db.rpc("item_units_json", { p_user_id: uid }),
+  ]);
+  const droppable = pool ? filterDroppablePool(pool) : [];
+  const { luck } = getHerzieStatsFromUnits(
+    Array.isArray(unitRows) ? normalizeUnits(unitRows) : [],
+  );
+  const out: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const picked = pickWeightedDrop(droppable, luck);
+    if (picked) out.push(picked.id);
+  }
+  return out;
+}
+
 async function handleRoom(request: Request, body: string): Promise<Response> {
   const ts = Number(request.headers.get("x-vitals-ts"));
   const nonce = request.headers.get("x-vitals-nonce") ?? "";
@@ -92,6 +135,15 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
     };
     /** The fight is over: the cave's end screen, for these herzies. */
     results?: { event: string; uids: string[] };
+    /** The Tower: a herzie's kills since the last batch, and the best
+     * floor cleared in it. */
+    tower?: {
+      event: string;
+      batch: string;
+      uid: string;
+      kills: { floor: number; x: number; z: number }[];
+      cleared?: number;
+    };
     /** action "eat": who ate what. */
     uid?: string;
     item?: string;
@@ -197,11 +249,42 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
         // and the loot waits on everyone's Home ground.
       }
     }
+    // The Tower: pay the kills (a little XP, now and then an item, rolled as
+    // listening rolls one), under the day's caps, once per batch.
+    let tower: { drops: { id: string; item: string }[] } | null = null;
+    let towerFailed = false;
+    const tw = msg.tower;
+    if (
+      tw && UUID.test(tw.event) && UUID.test(tw.uid) &&
+      typeof tw.batch === "string"
+    ) {
+      const kills = (Array.isArray(tw.kills) ? tw.kills : [])
+        .slice(0, MAX_BATCH)
+        .filter((k) => Number.isFinite(k.floor) && k.floor >= 1);
+      const cleared = Number.isFinite(tw.cleared) ? Math.floor(tw.cleared as number) : 0;
+      try {
+        const xp = kills.reduce((n, k) => n + towerXpPerKill(k.floor), 0);
+        const rolls = kills.filter(() => Math.random() < TOWER_DROP_CHANCE).length;
+        const items = rolls > 0 ? await rollDrops(db, tw.uid, rolls) : [];
+        tower = (await rpc(db, "tower_grant", {
+          p_user: tw.uid,
+          p_event: tw.event,
+          p_batch: tw.batch,
+          p_xp: xp,
+          p_cleared: cleared,
+          p_item_ids: items,
+          p_xp_cap: TOWER_XP_DAILY_CAP,
+          p_drop_cap: TOWER_DROPS_DAILY_CAP,
+        })) as typeof tower;
+      } catch {
+        towerFailed = true;
+      }
+    }
     // A failed HP write or boss batch is retried by the Town server, which
     // re-sends the same values (HP is absolute, a batch has an id), so ask
     // for that with an error status. Rest is additive and never retried.
     const failed = h.failed > 0 || (b !== null && !b.ok) ||
-      (s !== null && !s.ok);
+      (s !== null && !s.ok) || towerFailed;
     // The fight is over: who placed where (00110). Only once this report's
     // damage has landed, so the last hits count; and a failed lookup never
     // fails the report (the room would re-send it for nothing).
@@ -231,6 +314,7 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
         // announce) a level-up at once.
         skills: s?.res ?? null,
         results,
+        tower,
       },
       failed ? 502 : 200,
     );

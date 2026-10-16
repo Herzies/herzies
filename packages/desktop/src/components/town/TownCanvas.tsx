@@ -8,21 +8,23 @@ import { benchesOf, type Seat, seatNear } from "./Benches";
 import { type Board, BULLETIN_KEY, boardNear, boardsOf } from "./Boards";
 import { CameraRig } from "./CameraRig";
 import { CaveTimer } from "./CaveTimer";
-import { tryEnterCave, useCave } from "./cave";
+import { tryEnterCave } from "./cave";
 import type { ChatBubbles } from "./chatBubbles";
 import { Boss } from "./combat/Boss";
 import { Combat } from "./combat/Combat";
 import { CombatOverlay } from "./combat/DamageNumbers";
 import { LootDrops } from "./combat/LootDrops";
+import { Mobs } from "./combat/Mobs";
 import { Telegraphs } from "./combat/Telegraphs";
 import type { Hour } from "./DayCycle";
 import { driftClouds } from "./depth";
+import { isMouth, usePortalOpen } from "./gates";
 import { type TownInput, useTownInput } from "./input";
 import { portalCells, type TownMap, worldRadius } from "./map";
 import { markMet } from "./met";
 import type { TownConnection } from "./net/TownConnection";
+import { townNet } from "./net/townNet";
 import { Player } from "./Player";
-import { isMouth } from "./Portals";
 import { Post } from "./Post";
 import {
   arrivalOn,
@@ -195,6 +197,12 @@ export default function TownCanvas(props: TownCanvasProps) {
                 <Telegraphs />
               </>
             )}
+            {map.id === "tower" && (
+              <>
+                <Mobs />
+                <Telegraphs />
+              </>
+            )}
             {/* The bossroom's loot; anywhere, for the dev drop. */}
             <LootDrops />
             {portalsOf(map).some(isMouth) && <CaveTimer map={map} />}
@@ -265,12 +273,11 @@ function Systems({
   const boards = useMemo(() => (map ? boardsOf(map) : []), [map]);
   /** The bulletin board E would read, if any. */
   const board = useRef<Board | null>(null);
-  // A closed cave has no mouth: nothing to see, step into or be prompted by.
-  const caveOpen = useCave().kind === "open";
-  const portals = useMemo(
-    () => (map ? portalsOf(map) : []).filter((p) => caveOpen || !isMouth(p)),
-    [map, caveOpen],
-  );
+  // A shut portal (a sealed cave, the Tower out of season, a floor not
+  // yet cleared): nothing to see, step into or be prompted by.
+  const isOpen = usePortalOpen();
+  const all = useMemo(() => (map ? portalsOf(map) : []), [map]);
+  const portals = all.filter(isOpen);
   /** The portal E would step into, if any. */
   const portal = useRef<Portal | null>(null);
   /** Where the player was last frame, on which island: walking through a
@@ -285,17 +292,22 @@ function Systems({
     if (card?.openKey) {
       markMet(card);
       onOpen(card.openKey);
-    } else if (portal.current) enter(portal.current.to);
+    } else if (portal.current) enter(portal.current);
     else if (townLive.seat) townLive.standUp = true;
     else if (board.current) onOpen(BULLETIN_KEY);
     else if (seat.current) townLive.seat = seat.current;
   };
-  const enter = (to: string) => {
+  const enter = (p: Portal) => {
     if (warp.active) return;
+    const to = p.to;
     // Into a room (the boss's cave): only while it's open, and says why not.
-    if (mapById(to).room && !tryEnterCave()) return;
+    if (isMouth(p) && !tryEnterCave()) return;
     townLive.seat = null;
-    startWarp(to);
+    // The Tower's way on: the same island, its next floor.
+    if (p.next) {
+      startWarp(to, true);
+      townNet().sendNext();
+    } else startWarp(to);
     sfxPortal();
   };
   const live = useTownInput(!paused, surface, interact);
@@ -308,7 +320,15 @@ function Systems({
       if (!warp.swapped && warp.t >= WARP_OUT) {
         warp.swapped = true;
         const from = townSave.map;
-        goToMap(warp.to, arrivalOn(mapById(warp.to), from));
+        const dest = mapById(warp.to);
+        // On to the next floor: back at the island's start, same island.
+        if (warp.sameIsland)
+          townLive.teleport = {
+            x: dest.spawn.at[0],
+            z: dest.spawn.at[1],
+            heading: dest.spawn.heading,
+          };
+        else goToMap(warp.to, arrivalOn(dest, from));
       }
       if (warp.t >= WARP_OUT + WARP_IN) warp.active = false;
     }
@@ -318,7 +338,7 @@ function Systems({
       if (l.map === map.id && !warp.active) {
         for (const p of portals) {
           if (walkedThrough(p, l.x, l.z, townSave.x, townSave.z)) {
-            enter(p.to);
+            enter(p);
             break;
           }
         }

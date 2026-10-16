@@ -36,9 +36,9 @@ export const TOWN_MAPS = {
   arena: { radius: 17, spawn: { x: 0, z: -12 } },
   /** The boss's cave: a small dark room, one shared fight. */
   bossroom: { radius: 13, spawn: { x: 0, z: 10 } },
-  /** The Tower (an event): a lush island fought floor by floor, alone. You
-   * arrive at the west end; each new floor puts you back there. */
-  tower: { radius: 21, spawn: { x: -16.5, z: 0.5 } },
+  /** The Tower (an event): a lush island fought floor by floor, alone. Its
+   * spawn is the meadow's west end; each new floor puts you back there. */
+  tower: { radius: 21, spawn: { x: -12.5, z: 0.5 } },
 } as const;
 export type TownMapId = keyof typeof TOWN_MAPS;
 export function isTownMapId(id: string): id is TownMapId {

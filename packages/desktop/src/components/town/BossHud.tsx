@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { cn } from "../../lib/utils";
 import { clock, useToast } from "./cave";
-import { bossFight, useBossFight } from "./combat/fight";
+import { bossFight, mobsLeft, useBossFight } from "./combat/fight";
 
 /**
  * What the boss room shows over the world: the boss's health (with its
@@ -12,7 +12,7 @@ import { bossFight, useBossFight } from "./combat/fight";
 export function BossHud({ name }: { name: string }) {
   useBossFight();
   const toast = useToast();
-  const { on, hp, maxHp, closing, victory, youHitAt } = bossFight;
+  const { on, hp, maxHp, closing, victory, youHitAt, tower } = bossFight;
   const [now, setNow] = useState(() => performance.now());
   useEffect(() => {
     if (!closing) return;
@@ -24,7 +24,20 @@ export function BossHud({ name }: { name: string }) {
   const closes = closing ? Math.max(0, closing.at - now) : 0;
   return (
     <>
-      {on ? (
+      {on && tower ? (
+        <div
+          role="status"
+          className="pointer-events-none absolute top-2 left-1/2 z-30 -translate-x-1/2 rounded bg-black/45 px-3 py-1 text-center text-ui text-white [text-shadow:0_1px_2px_#000]"
+        >
+          <span className="font-medium">Floor {tower.floor}</span>
+          <span className="text-white/70">
+            {" · "}
+            {tower.cleared
+              ? "cleared — the way on is open"
+              : `${mobsLeft()} left`}
+          </span>
+        </div>
+      ) : on ? (
         <div
           className="pointer-events-none absolute top-2 left-1/2 z-30 w-[min(26rem,80%)] -translate-x-1/2"
           role="progressbar"
@@ -62,7 +75,11 @@ export function BossHud({ name }: { name: string }) {
             "pointer-events-none absolute top-12 left-1/2 z-30 -translate-x-1/2 rounded bg-black/70 px-3 py-1.5 text-center text-ui text-white",
           )}
         >
-          {victory ? "The boss has fallen!" : "The boss is slipping away…"}{" "}
+          {tower
+            ? "The Tower is closing…"
+            : victory
+              ? "The boss has fallen!"
+              : "The boss is slipping away…"}{" "}
           <span className="text-white/60 tabular-nums">
             Back to town in {clock(closes)}
           </span>

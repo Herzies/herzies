@@ -448,7 +448,9 @@ export class TowerEngine {
       // Hit while idle: it notices.
       if (m.state === "idle") m.state = "chase";
       if (m.hp > 0) continue;
-      // Its swing dies with it.
+      // Its swing dies with it: off the ground, landing on no one.
+      for (const t of this.telegraphs)
+        if (t.mob === m.id) events.push({ t: "resolve", id: t.id, hits: [] });
       this.telegraphs = this.telegraphs.filter((t) => t.mob !== m.id);
       events.push({ t: "mobDown", mob: m.id, by: p.uid, x: m.x, z: m.z });
       if (!this.cleared && this.alive().length === 0) {

@@ -543,6 +543,32 @@ export async function processSync(
     }
   }
 
+  // 4a. XP the Tower paid since the last sync (00115). It waits in
+  // herzies.pending_xp rather than going straight onto xp, which this sync
+  // writes whole from what it read; taken (and zeroed) in one step here. A
+  // database without it (before 00115) just has none to give.
+  const { data: towerXp } = await admin.rpc("take_pending_xp", {
+    p_user: userId,
+  });
+  if (typeof towerXp === "number" && towerXp > 0) {
+    const levelBefore = herzie.level;
+    const events = applyXp(herzie, towerXp);
+    if (events.leveledUp) {
+      notifications.push({
+        type: "info",
+        title: "Level Up!",
+        message: `${herzie.name} is now level ${herzie.level}! (+${POINTS_PER_LEVEL * (herzie.level - levelBefore)} stat points)`,
+      });
+    }
+    if (events.evolved && events.newStage) {
+      notifications.push({
+        type: "info",
+        title: "Evolution!",
+        message: `${herzie.name} evolved to stage ${events.newStage}!`,
+      });
+    }
+  }
+
   // (There used to be a "4b" here: listening to a boss's hated genres
   // damaged it. The boss is fought live in its cave now — see
   // packages/town-server — and its damage comes from there.)

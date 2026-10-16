@@ -11,6 +11,9 @@
 // `?map=bossroom` (with `?net=local`) joins the boss's cave on `wrangler dev`
 // with a made-up boss (and `&cave=open` opens the cave's door in town); the
 // HUD is drawn over it. `&boss=<hp>` sets the boss's health, `&hp=<n>` yours.
+// `?map=tower` (with `?net=local`) climbs the Tower on `wrangler dev`, in a
+// room of your own (`&floor=` to start higher, `&level=` your herzie's
+// level); `&tower=open` opens its door in town.
 // `?music=1` plays music, as it were: stand still and the herzie dances.
 // `?class=record_slinger` (or bard, percussionist) hands the player that
 // class's gear, basic attack and skill (Q; `&skill=` its level; the cave's
@@ -43,6 +46,7 @@ import {
 } from "./components/town/combat/results";
 import { setMySkill } from "./components/town/combat/skills";
 import { combat } from "./components/town/combat/state";
+import { setTowerOpen } from "./components/town/gates";
 import { Hotbar } from "./components/town/Hotbar";
 import { assignHotbar } from "./components/town/hotbarSlots";
 import { setTownTicketSource, townNet } from "./components/town/net/townNet";
@@ -231,7 +235,8 @@ async function bench(state: RootState) {
 }
 
 function localNet() {
-  const uid = `sandbox-${Math.random().toString(36).slice(2, 8)}`;
+  // A uuid, as real user ids are: the Tower's rooms are named by it.
+  const uid = crypto.randomUUID();
   const name = params.get("name") ?? uid;
   const maxHp = 300;
   const hp = Number(params.get("hp") ?? maxHp);
@@ -259,6 +264,15 @@ function localNet() {
             Number(params.get("cd") ?? 0),
           ],
           ...(isHerzieClass(cls) ? { cls } : {}),
+          lv: Number(params.get("level") ?? 10),
+          tower:
+            map === "tower"
+              ? {
+                  event: "sandbox",
+                  until: exp + 3_000,
+                  floor: Number(params.get("floor") ?? 1),
+                }
+              : undefined,
           // Only the cave needs a boss; the sandbox makes one up.
           boss:
             map === "bossroom"
@@ -274,6 +288,7 @@ function localNet() {
       ),
       url: params.get("server") ?? "ws://localhost:8787",
       exp,
+      instance: uid,
     };
   });
   const net = townNet();
@@ -282,6 +297,9 @@ function localNet() {
     console.log("[town-sandbox] net", net.status, net.remotes.size),
   );
   return net;
+}
+if (params.get("tower") === "open") {
+  setTowerOpen({ endsAt: Date.now() + 3_600_000 });
 }
 if (params.get("cave") === "open") {
   setCave({ kind: "open", endsAt: Date.now() + 3_600_000 });
@@ -320,7 +338,11 @@ function Sandbox() {
   }, []);
   return (
     <div style={{ position: "relative", height: "100%" }}>
-      <TownVitals inFight={params.get("map") === "bossroom"} />
+      <TownVitals
+        inFight={
+          params.get("map") === "bossroom" || params.get("map") === "tower"
+        }
+      />
       <BossHud name="The boss" />
       <SkillHud />
       <Hotbar

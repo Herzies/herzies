@@ -115,6 +115,8 @@ const DEFAULT_CONFIGS: Record<string, string> = {
     null,
     2,
   ),
+  // Nothing to set up: the floors come from the game's own curves.
+  tower: "{}",
 };
 
 function defaultWindow(): { startsAt: string; endsAt: string } {
@@ -730,6 +732,7 @@ function EventForm({
             <option value="treat_trader">
               treat_trader (Nandor the Treatless, priced in treats)
             </option>
+            <option value="tower">tower (the Tower: floors of mobs)</option>
           </select>
         </div>
         <div>

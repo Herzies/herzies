@@ -82,6 +82,12 @@ export const VISITOR_THEMES: Record<string, VisitorTheme> = {
     dim: "#d7a6d0",
     accent: "#ff8fd0",
   },
+  // The Tower: deep moss, like its island.
+  tower: {
+    background: "linear-gradient(90deg, #06180a 0%, #12381a 55%, #051208 100%)",
+    dim: "#9fcfa4",
+    accent: "#7fe08a",
+  },
 };
 
 /** Legible over any backdrop: a hard one-pixel drop like the pixel art's. */

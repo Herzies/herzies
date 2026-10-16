@@ -40,6 +40,7 @@ import { TabButton } from "./TabButton";
 import type { EventCard } from "./TownScene";
 import { TownWorld } from "./TownWorld";
 import { BULLETIN_KEY } from "./town/Boards";
+import { setTowerOpen } from "./town/gates";
 import { View } from "./View";
 import { VisitorHelp } from "./VisitorHelp";
 import { VISITOR_THEMES } from "./VisitorRowTheme";
@@ -297,6 +298,12 @@ function EventsViewImpl({
   const [events, setEvents] = useState<GameEvent[]>([]);
   const [upcoming, setUpcoming] = useState<GameEvent[]>([]);
   const [week, setWeek] = useState<GameEvent[]>([]);
+  // The Tower's door in Town is open while its event is on.
+  const towerEnds = events.find((e) => e.type === "tower")?.endsAt;
+  useEffect(() => {
+    const at = towerEnds ? new Date(towerEnds).getTime() : Number.NaN;
+    setTowerOpen(Number.isFinite(at) ? { endsAt: at } : null);
+  }, [towerEnds]);
   /** Open card (see EventCard.key); null shows the list. */
   const [selected, setSelected] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);

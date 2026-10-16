@@ -129,12 +129,13 @@ export function TownWorld({
   useEffect(() => {
     if (isTownMapId(map.id)) net.setMap(map.id);
   }, [map.id, net]);
-  // Out of the boss room, the fight is forgotten.
+  // Out of the boss room (or the Tower), the fight is forgotten.
   useEffect(() => {
-    if (map.id !== "bossroom") resetBossFight();
+    if (map.id !== "bossroom" && map.id !== "tower") resetBossFight();
   }, [map.id]);
   // The cave's door and sign follow the boss in the events.
   const bossCard = cards.find((c) => c.type === "boss_fight");
+
   const bossStatus = bossCard?.status;
   const bossAt = bossCard?.at;
   const bossDown = bossCard ? isDown(bossCard) : false;
@@ -368,12 +369,16 @@ export function TownWorld({
               : "bottom-3",
           )}
         >
-          {portalTo.id === "home"
-            ? "Back to "
-            : portalTo.room
-              ? "Enter "
-              : "Enter the "}
-          {portalTo.name} <span className="text-text-dim">[E]</span>
+          {portalTo.id === map.id
+            ? "On to the next floor"
+            : `${
+                portalTo.id === "home"
+                  ? "Back to "
+                  : portalTo.room
+                    ? "Enter "
+                    : "Enter the "
+              }${portalTo.name}`}{" "}
+          <span className="text-text-dim">[E]</span>
         </button>
       ) : bench ? (
         <button

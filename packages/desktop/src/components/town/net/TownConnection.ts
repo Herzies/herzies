@@ -11,6 +11,7 @@ import {
   type ServerMessage,
   TOWN_CLOSE,
   TOWN_FLAG_AFK,
+  TOWN_INSTANCED_MAPS,
   TOWN_MAX_SHARDS,
   TOWN_PING,
   TOWN_PONG,
@@ -24,8 +25,15 @@ import {
   type TownState,
 } from "@herzies/shared";
 
-/** A signed pass from the `town-ticket` edge function. */
-export type TownTicket = { ticket: string; url: string; exp: number };
+/** A signed pass from the `town-ticket` edge function. `instance`: for a
+ * map where every herzie has a room of their own (the Tower), which room
+ * is theirs. */
+export type TownTicket = {
+  ticket: string;
+  url: string;
+  exp: number;
+  instance?: string;
+};
 
 export type TownNetStatus =
   /** Not wanted right now (the Town isn't open). */
@@ -229,7 +237,8 @@ export class TownConnection {
     }
     if (!this.wanted || this.ws) return;
 
-    const url = `${socketBase(ticket.url)}/v1/town/${this.opts.map}?shard=${this.shard}`;
+    const own = TOWN_INSTANCED_MAPS.has(this.opts.map) && ticket.instance;
+    const url = `${socketBase(ticket.url)}/v1/town/${this.opts.map}?shard=${this.shard}${own ? `&i=${encodeURIComponent(own)}` : ""}`;
     let ws: WebSocket;
     try {
       ws = new WebSocket(url);
@@ -291,7 +300,10 @@ export class TownConnection {
         return;
       case TOWN_CLOSE.full:
         // A room that is one shared fight has no next shard: it's full.
-        if (TOWN_SINGLE_SHARD.has(this.opts.map)) {
+        if (
+          TOWN_SINGLE_SHARD.has(this.opts.map) ||
+          TOWN_INSTANCED_MAPS.has(this.opts.map)
+        ) {
           this.setStatus("offline");
           this.opts.onRefused?.("full");
           return;
@@ -426,6 +438,12 @@ export class TownConnection {
   sendSkill(skill: string, seq: number, yaw: number, pitch: number) {
     if (this.status !== "online") return;
     this.sendJson({ t: "skill", skill, seq, yaw, pitch });
+  }
+
+  /** In the Tower, on a cleared floor: on to the next. */
+  sendNext() {
+    if (this.status !== "online") return;
+    this.sendJson({ t: "next" });
   }
 
   /** Eat a consumable in a boss fight, where the room holds HP. `seq`
