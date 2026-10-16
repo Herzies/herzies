@@ -290,3 +290,35 @@ export async function fetchUpcomingEvents(
   }
   return upcoming;
 }
+
+/** How far ahead the bulletin board looks. */
+export const WEEK_AHEAD_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Everything on in the coming week — under way now or starting within
+ * {@link WEEK_AHEAD_MS} — for the Town's bulletin board, soonest first.
+ * Titles and windows only, like {@link fetchUpcomingEvents}.
+ */
+export async function fetchWeekEvents(
+  admin: SupabaseClient,
+  now: Date,
+): Promise<GameEvent[]> {
+  const { data } = await admin
+    .from("events")
+    .select("id, type, title, description, starts_at, ends_at")
+    .eq("active", true)
+    .gt("ends_at", now.toISOString())
+    .lt("starts_at", new Date(now.getTime() + WEEK_AHEAD_MS).toISOString())
+    .order("starts_at", { ascending: true })
+    .limit(100);
+  return (data ?? []).map((e) => ({
+    id: e.id as string,
+    type: e.type as string,
+    title: e.title as string,
+    description: (e.description as string | null) ?? null,
+    active: true,
+    startsAt: e.starts_at as string,
+    endsAt: e.ends_at as string,
+    config: {},
+  }));
+}

@@ -1079,6 +1079,7 @@ async fn fetch_active_events() -> Result<serde_json::Value, String> {
         Some(data) => Ok(serde_json::json!({
             "events": data.events,
             "upcoming": data.upcoming,
+            "week": data.week,
         })),
         None => Ok(serde_json::json!({ "events": [] })),
     }

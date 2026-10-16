@@ -101,7 +101,7 @@ export function TownWorld({
   useEffect(() => onLootLog((message) => onLog?.(message)), [onLog]);
   const [near, setNear] = useState<TownSpot | null>(null);
   const endScreen = useBossResultsShown() !== null;
-  const [bench, setBench] = useState<"sit" | "stand" | null>(null);
+  const [bench, setBench] = useState<"sit" | "stand" | "read" | null>(null);
   const [portalTo, setPortalTo] = useState<TownMap | null>(null);
   const fighting = useCombat();
   const fpsShown = useFpsShown();
@@ -388,7 +388,11 @@ export function TownWorld({
               : "bottom-3",
           )}
         >
-          {bench === "sit" ? "Sit down" : "Stand up"}{" "}
+          {bench === "sit"
+            ? "Sit down"
+            : bench === "read"
+              ? "Read the bulletin board"
+              : "Stand up"}{" "}
           <span className="text-text-dim">[E]</span>
         </button>
       ) : null}

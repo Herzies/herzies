@@ -59,6 +59,7 @@ export const OBJECTS = {
   L: { name: "Lamp post", color: "#ffd98a" },
   _: { name: "Bench", color: "#a8743f" },
   M: { name: "Stand", color: "#e8667f" },
+  N: { name: "Bulletin board", color: "#f2e3b8" },
   H: { name: "Home", color: "#c9a27a" },
   $: { name: "Shop", color: "#6a9ae0" },
   C: { name: "Cave", color: "#8a8070" },

@@ -27,6 +27,7 @@ import { cn } from "../lib/utils";
 import { type ChatMessage, herzies, useWindowFocused } from "../tauri-bridge";
 import { BackButton } from "./BackButton";
 import { BossFightHelp, BossFightPanel, makeDebugBoss } from "./BossFightPanel";
+import { BulletinPanel } from "./BulletinPanel";
 import ItemInspectOverlay, {
   INSPECT_ORIGIN_ATTR,
   inspectOrigin,
@@ -38,6 +39,7 @@ import { OrphiezStage } from "./OrphiezStage";
 import { TabButton } from "./TabButton";
 import type { EventCard } from "./TownScene";
 import { TownWorld } from "./TownWorld";
+import { BULLETIN_KEY } from "./town/Boards";
 import { View } from "./View";
 import { VisitorHelp } from "./VisitorHelp";
 import { VISITOR_THEMES } from "./VisitorRowTheme";
@@ -294,6 +296,7 @@ function EventsViewImpl({
 }) {
   const [events, setEvents] = useState<GameEvent[]>([]);
   const [upcoming, setUpcoming] = useState<GameEvent[]>([]);
+  const [week, setWeek] = useState<GameEvent[]>([]);
   /** Open card (see EventCard.key); null shows the list. */
   const [selected, setSelected] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -410,6 +413,7 @@ function EventsViewImpl({
           if (cancelled) return;
           setEvents(active.events);
           setUpcoming(active.upcoming ?? []);
+          setWeek(active.week ?? []);
           setActiveLoaded(true);
           // A visit started or ended: the previous hunt / next hunt may have
           // moved too. The first load just records the set.
@@ -764,6 +768,19 @@ function EventsViewImpl({
             onLog={onLog}
             paused={!eventsTabVisible || !focused}
           />
+        </View>
+      );
+    }
+
+    if (selected === BULLETIN_KEY) {
+      return (
+        <View
+          title="Bulletin board"
+          colour="cyan"
+          childrenClassName="flex min-h-0 flex-col"
+          backButton={back}
+        >
+          <BulletinPanel week={week} />
         </View>
       );
     }

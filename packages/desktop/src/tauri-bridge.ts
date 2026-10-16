@@ -327,9 +327,12 @@ export const herzies = {
   /** Live events, plus the next scheduled one of each type (`upcoming`,
    * titles and windows only — older servers omit it). */
   fetchActiveEvents: () =>
-    invoke<{ events: GameEvent[]; upcoming?: GameEvent[] }>(
-      "fetch_active_events",
-    ),
+    invoke<{
+      events: GameEvent[];
+      upcoming?: GameEvent[];
+      /** Everything on in the coming week (the bulletin board). */
+      week?: GameEvent[];
+    }>("fetch_active_events"),
 
   /** A signed pass into the multiplayer Town. Rejects with "off" when
    * multiplayer is switched off server-side. */

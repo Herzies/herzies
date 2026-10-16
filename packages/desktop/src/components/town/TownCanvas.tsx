@@ -5,6 +5,7 @@ import { Suspense, useMemo, useRef } from "react";
 import type { Look } from "../TownScene";
 import { ambient } from "./ambient";
 import { benchesOf, type Seat, seatNear } from "./Benches";
+import { type Board, BULLETIN_KEY, boardNear, boardsOf } from "./Boards";
 import { CameraRig } from "./CameraRig";
 import { CaveTimer } from "./CaveTimer";
 import { tryEnterCave, useCave } from "./cave";
@@ -69,9 +70,10 @@ export type TownCanvasProps = {
   onOpenProfile?: (friendCode: string) => void;
   /** Who's close enough to talk to (null: nobody), when that changes. */
   onNearChange: (spot: TownSpot | null) => void;
-  /** What E would do at a bench right now — sit on one nearby, or stand
-   * up off it — when that changes (null: nothing). */
-  onBenchChange?: (prompt: "sit" | "stand" | null) => void;
+  /** What E would do at a bench or board right now — sit on one nearby,
+   * stand up off it, or read the bulletin board — when that changes (null:
+   * nothing). */
+  onBenchChange?: (prompt: "sit" | "stand" | "read" | null) => void;
   /** The island a portal nearby leads to (E steps in), when that changes
    * (null: none near). */
   onPortalChange?: (to: TownMap | null) => void;
@@ -259,7 +261,10 @@ function Systems({
   const benches = useMemo(() => (map ? benchesOf(map) : []), [map]);
   /** The seat E would sit on, if any. */
   const seat = useRef<Seat | null>(null);
-  const prompt = useRef<"sit" | "stand" | null>(null);
+  const prompt = useRef<"sit" | "stand" | "read" | null>(null);
+  const boards = useMemo(() => (map ? boardsOf(map) : []), [map]);
+  /** The bulletin board E would read, if any. */
+  const board = useRef<Board | null>(null);
   // A closed cave has no mouth: nothing to see, step into or be prompted by.
   const caveOpen = useCave().kind === "open";
   const portals = useMemo(
@@ -273,7 +278,8 @@ function Systems({
   const last = useRef({ map: "", x: 0, z: 0 });
 
   /** E (or a click on the prompt): talk to whoever's near; else step into
-   * the portal nearby; else sit on the bench nearby, or stand up off it. */
+   * the portal nearby; else stand up; else read the board nearby; else sit
+   * on the bench nearby. */
   const interact = () => {
     const card = near.current?.card;
     if (card?.openKey) {
@@ -281,6 +287,7 @@ function Systems({
       onOpen(card.openKey);
     } else if (portal.current) enter(portal.current.to);
     else if (townLive.seat) townLive.standUp = true;
+    else if (board.current) onOpen(BULLETIN_KEY);
     else if (seat.current) townLive.seat = seat.current;
   };
   const enter = (to: string) => {
@@ -359,7 +366,17 @@ function Systems({
     // Benches: the free seat nearest, if no one's there to talk to. A seat
     // is taken if another player is sitting on it.
     seat.current = null;
-    if (!closest && !portal.current && !townLive.seat && benches.length > 0) {
+    board.current =
+      !closest && !portal.current && !townLive.seat
+        ? boardNear(boards, townSave.x, townSave.z)
+        : null;
+    if (
+      !closest &&
+      !portal.current &&
+      !townLive.seat &&
+      !board.current &&
+      benches.length > 0
+    ) {
       const sitting: { x: number; z: number }[] = [];
       if (net) {
         const t = net.clock.renderTime(performance.now());
@@ -376,7 +393,13 @@ function Systems({
       townLive.benchPressed = false;
       if (!closest) interact();
     }
-    const next = townLive.seat ? "stand" : seat.current ? "sit" : null;
+    const next = townLive.seat
+      ? "stand"
+      : board.current
+        ? "read"
+        : seat.current
+          ? "sit"
+          : null;
     if (next !== prompt.current) {
       prompt.current = next;
       onBenchChange?.(next);

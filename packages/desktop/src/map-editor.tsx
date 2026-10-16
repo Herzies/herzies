@@ -42,6 +42,7 @@ import {
   TOWN_MAPS_LOCAL,
   type TownSpot,
 } from "./components/town/runtime";
+import { BOARD, boardFacing } from "./components/town/Boards";
 import { STAND, standFacing } from "./components/town/Stands";
 import TownCanvas, { PIXEL_SCALE } from "./components/town/TownCanvas";
 
@@ -69,6 +70,7 @@ const PALETTE: Paint[] = [
       "L",
       "_",
       "M",
+      "N",
       "D",
       "O",
     ] as const
@@ -81,7 +83,8 @@ const PALETTE: Paint[] = [
 ];
 /** Each palette entry's key, in order (clear last): the number row, then
  * K (shop, "kiosk"), C (cave), U (bush), L (lamp post), N (bench), T
- * (market stand), Y (training dummy) and O (portal). Clear of the 3D preview's keys (WASD,
+ * (market stand), I (bulletin board, "info"), Y (training dummy) and O
+ * (portal). Clear of the 3D preview's keys (WASD,
  * arrows, E) and the tools' (B, R, F, P). */
 const KEYS = [
   ..."1234567890-",
@@ -92,6 +95,7 @@ const KEYS = [
   "l",
   "n",
   "t",
+  "i",
   "y",
   "o",
   "x",
@@ -158,9 +162,11 @@ function eighthsAt(map: TownMap, col: number, row: number): number {
       ? benchFacing(map, col, row)
       : o === STAND
         ? standFacing(map, col, row)
-        : o === "@"
-          ? Math.atan2(-x, -z)
-          : objectJitter(map, col, row).yaw);
+        : o === BOARD
+          ? boardFacing(map, col, row)
+          : o === "@"
+            ? Math.atan2(-x, -z)
+            : objectJitter(map, col, row).yaw);
   return Math.round(yaw / EIGHTH);
 }
 

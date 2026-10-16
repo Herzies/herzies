@@ -490,6 +490,10 @@ pub struct ActiveEventsResponse {
     /// Absent from servers older than the event-series change.
     #[serde(default)]
     pub upcoming: Vec<GameEvent>,
+    /// Everything on in the coming week, for the Town's bulletin board.
+    /// Absent from servers older than the board.
+    #[serde(default)]
+    pub week: Vec<GameEvent>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
