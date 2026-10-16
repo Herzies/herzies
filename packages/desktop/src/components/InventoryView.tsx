@@ -2270,7 +2270,7 @@ function InventoryViewImpl({
           y={slotPicker.y}
           slotLabel={slotPicker.label}
           options={slotPickerOptions}
-          onPick={(unitId) => {
+          onPick={({ unitId }) => {
             // Closed before the await, as the sell menu does: the optimistic
             // equip fills the slot on the next render anyway, so leaving the
             // list up would only show a stale row for the item just placed.
