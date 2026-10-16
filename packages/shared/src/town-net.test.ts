@@ -12,9 +12,11 @@ import {
   quantizeState,
   signTownTicket,
   signVitalsRequest,
+  TOWN_CAST_MASK,
   TOWN_FLAG_AFK,
   TOWN_FLAG_COMBAT,
   TOWN_FLAG_DANCING,
+  TOWN_FLAG_JUMP,
   TOWN_FLAG_SITTING,
   TOWN_TICK_MS,
   type TownState,
@@ -210,6 +212,20 @@ describe("cast counts in the flags", () => {
       const back = quantizeState({ x: 0, z: 0, heading: 0, speed: 0, flags });
       expect(back.flags).toBe(flags);
     }
+  });
+
+  it("keeps the jump bit apart from the count and the other flags", () => {
+    const others =
+      TOWN_FLAG_AFK | TOWN_FLAG_SITTING | TOWN_FLAG_DANCING | TOWN_FLAG_COMBAT;
+    expect(TOWN_FLAG_JUMP & (others | TOWN_CAST_MASK)).toBe(0);
+    const flags = withCastSeq(others | TOWN_FLAG_JUMP, 5);
+    const back = quantizeState({ x: 0, z: 0, heading: 0, speed: 0, flags });
+    expect(back.flags & TOWN_FLAG_JUMP).toBe(TOWN_FLAG_JUMP);
+    expect(castSeqOf(back.flags)).toBe(5);
+    const frame = decodeStateFrame(
+      encodeStateFrame(1, { x: 0, z: 0, heading: 0, speed: 0, flags }),
+    );
+    expect(frame?.state.flags).toBe(flags);
   });
 
   it("counts the casts between two counts, round the wrap", () => {

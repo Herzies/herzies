@@ -25,6 +25,7 @@ import { useCombat } from "./town/combat/state";
 import { useFpsShown } from "./town/fps";
 import { Key } from "./town/Key";
 import type { TownMap } from "./town/map";
+import { markMet } from "./town/met";
 import { NAME_SHADOW } from "./town/nameFade";
 import { useTownNet, useTownNetVersion } from "./town/net/townNet";
 import { spotsOf, type TownSpot, townLive, useTownMap } from "./town/runtime";
@@ -313,7 +314,10 @@ export function TownWorld({
       {talkTo && near ? (
         <button
           type="button"
-          onClick={() => onOpen(talkTo)}
+          onClick={() => {
+            markMet(near.card);
+            onOpen(talkTo);
+          }}
           className={cn(
             "absolute left-1/2 z-30 -translate-x-1/2 cursor-pointer whitespace-nowrap rounded border-0 bg-black/35 px-2.5 py-1 text-ui text-white backdrop-blur-md hover:bg-black/50",
             // Above the dock (chat + tab bar) floating over the world.

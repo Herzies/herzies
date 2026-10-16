@@ -111,6 +111,20 @@ const DANCE_FPS = 1000 / 65;
 const DANCE_BLEND_RATE = 6;
 /** How quickly it sits down and stands up (per second). */
 const SIT_BLEND_RATE = 14;
+/** A jump: how high it hops, in world units (a herzie is ~4.5 tall), and
+ * how long it's off the ground — quick, so it reads as a hop. */
+export const JUMP_HEIGHT = 0.85;
+export const JUMP_AIR_SECONDS = 0.36;
+const JUMP_GRAVITY = (8 * JUMP_HEIGHT) / JUMP_AIR_SECONDS ** 2;
+const JUMP_SPEED = (4 * JUMP_HEIGHT) / JUMP_AIR_SECONDS;
+/** A press this soon before landing jumps again on touchdown. */
+const JUMP_BUFFER_SECONDS = 0.12;
+/** The squash it lands with, and how long it takes to spring back. */
+const LAND_SQUASH = 0.14;
+const LAND_SECONDS = 0.16;
+/** How far it stretches at full speed up or down, eased in at takeoff. */
+const AIR_STRETCH = 0.1;
+const TAKEOFF_SECONDS = 0.05;
 /** How long a sonic cast takes, draw to home again, in seconds. The wave
  * leaves the hand CAST.release of the way through. */
 export const CAST_SECONDS = 0.4;
@@ -415,6 +429,14 @@ export class HerzieModel {
   /** Aiming: its class gear in its hands, drawn off its back (see DRAW).
    * Casting draws it too, whatever this says. */
   armed = false;
+  /** How many jumps it has taken off on: a host sends its parity so other
+   * clients can play the same hop (see jump). */
+  jumps = 0;
+  /** Seconds since takeoff while airborne; undefined on the ground. */
+  private airTime: number | undefined;
+  /** Seconds since it landed, while it springs back; else undefined. */
+  private landTime: number | undefined;
+  private jumpBuffer = 0;
   /** Whether anything worn that dangles (the chain, the pearls, the witch
    * hat's tip) swings as it turns — a host can hold it still. */
   dangles = true;
@@ -864,6 +886,7 @@ export class HerzieModel {
       );
     }
     this.stepSit(dt);
+    this.stepJump(dt);
     this.stepDraw(dt);
     this.stepCast(dt);
     this.stepCatch(dt);
@@ -872,6 +895,54 @@ export class HerzieModel {
     this.pose();
     this.animateBody();
     this.follow(dt, speed);
+  }
+
+  /**
+   * Hop: a quick ballistic arc of the body alone — the root (and whatever
+   * moves it) stays on the ground, so it never stops it walking or turning.
+   * Pressed in the air, it jumps again on landing if that's soon. Seated, it
+   * doesn't. Returns whether it took off.
+   */
+  jump(): boolean {
+    if (this.sitting || this.sitWeight > 0.01) return false;
+    if (this.airTime !== undefined) {
+      this.jumpBuffer = JUMP_BUFFER_SECONDS;
+      return false;
+    }
+    this.airTime = 0;
+    this.landTime = undefined;
+    this.jumps += 1;
+    return true;
+  }
+
+  /** Whether it's off the ground, mid-jump. */
+  get airborne(): boolean {
+    return this.airTime !== undefined;
+  }
+
+  /** How high the body is off the ground mid-jump, in world units. */
+  get jumpHeight(): number {
+    const t = this.airTime;
+    return t === undefined
+      ? 0
+      : Math.max(0, JUMP_SPEED * t - 0.5 * JUMP_GRAVITY * t * t);
+  }
+
+  private stepJump(dt: number) {
+    this.jumpBuffer = Math.max(0, this.jumpBuffer - dt);
+    if (this.airTime !== undefined) {
+      this.airTime += dt;
+      if (this.airTime < JUMP_AIR_SECONDS) return;
+      this.airTime = undefined;
+      this.landTime = 0;
+      if (this.jumpBuffer > 0) {
+        this.jumpBuffer = 0;
+        this.jump();
+      }
+    } else if (this.landTime !== undefined) {
+      this.landTime += dt;
+      if (this.landTime >= LAND_SECONDS) this.landTime = undefined;
+    }
   }
 
   /** Whether it has a floating companion of its own (a spirit) to send. */
@@ -1285,13 +1356,24 @@ export class HerzieModel {
         squash = Math.max(squash, (1 - hop) ** 4 * 0.08 * dw);
       }
     }
+    // A jump stretches it with its speed, up and down, and lands it with a
+    // squash that springs back.
+    if (this.airTime !== undefined) {
+      const v = (JUMP_SPEED - JUMP_GRAVITY * this.airTime) / JUMP_SPEED;
+      const takeoff = Math.min(1, this.airTime / TAKEOFF_SECONDS);
+      squash = -AIR_STRETCH * Math.abs(v) * takeoff;
+    } else if (this.landTime !== undefined) {
+      const u = this.landTime / LAND_SECONDS;
+      squash = Math.max(squash, LAND_SQUASH * (1 - u) ** 2);
+    }
+    const hop = this.jumpHeight;
     const wide = MODEL_SCALE * (1 - breath * 0.6 + squash * 0.7);
     const tall = MODEL_SCALE * (1 + breath - squash);
     this.creature.scale.set(wide, tall, wide);
     // Squash toward the feet: they stay on the ground. Seated, it settles
     // onto its bottom instead.
     this.creature.position.y =
-      (this.feetY - this.seatDrop * this.sitWeight) * tall;
+      (this.feetY - this.seatDrop * this.sitWeight) * tall + hop;
     // What stays put doesn't breathe with the body.
     this.anchored?.scale.setScalar(MODEL_SCALE);
     this.anchored?.position.set(0, this.feetY * MODEL_SCALE, 0);
@@ -1301,7 +1383,8 @@ export class HerzieModel {
     const [spanTop, spanBottom] = this.span;
     const k = this.root.getWorldScale(scratchScale).y;
     this.scheme.uTop.value =
-      this.root.getWorldPosition(scratch).y + (this.feetY - spanTop) * tall * k;
+      this.root.getWorldPosition(scratch).y +
+      ((this.feetY - spanTop) * tall + hop) * k;
     this.scheme.uSpan.value = Math.max(1e-6, (spanBottom - spanTop) * tall * k);
   }
 

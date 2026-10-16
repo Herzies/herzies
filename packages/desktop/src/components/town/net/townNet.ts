@@ -2,6 +2,7 @@ import {
   isTownMapId,
   TOWN_FLAG_COMBAT,
   TOWN_FLAG_DANCING,
+  TOWN_FLAG_JUMP,
   TOWN_FLAG_SITTING,
   type TownMapId,
   withCastSeq,
@@ -78,7 +79,8 @@ export function townNet(): TownConnection {
       flags: withCastSeq(
         (townLive.seat ? TOWN_FLAG_SITTING : 0) |
           (townLive.dancing ? TOWN_FLAG_DANCING : 0) |
-          (combat.on ? TOWN_FLAG_COMBAT : 0),
+          (combat.on ? TOWN_FLAG_COMBAT : 0) |
+          (townLive.jumps & 1 ? TOWN_FLAG_JUMP : 0),
         combat.casts,
       ),
     }),

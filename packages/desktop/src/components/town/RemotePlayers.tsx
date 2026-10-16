@@ -3,6 +3,7 @@ import {
   TOWN_FLAG_AFK,
   TOWN_FLAG_COMBAT,
   TOWN_FLAG_DANCING,
+  TOWN_FLAG_JUMP,
   TOWN_FLAG_SITTING,
 } from "@herzies/shared";
 import { BOSS_STAND, meleeReaches } from "@herzies/shared/combat";
@@ -101,6 +102,9 @@ function RemoteHerzie({
   const throwsDiscs = attack === "disc";
   const blow = herzie.holdsGear ? "strike" : "bump";
   const nextHand = useRef<DiscHand>("held-r");
+  /** Their jump bit last frame; null until the first state, so a herzie
+   * doesn't hop just for showing up. */
+  const jumpBit = useRef<number | null>(null);
   useEffect(() => () => void entityAt.delete(remote.id), [remote.id]);
 
   const tag = useRef<HTMLButtonElement>(null);
@@ -127,6 +131,10 @@ function RemoteHerzie({
       discField.isOut(herzie, "held-l") || discField.isOut(herzie, "held-r");
     herzie.armed = (s.flags & TOWN_FLAG_COMBAT) !== 0 || discsOut;
     herzie.heading = s.heading;
+    // They jumped: the bit flips with every hop, played here the same way.
+    const bit = s.flags & TOWN_FLAG_JUMP;
+    if (jumpBit.current !== null && bit !== jumpBit.current) herzie.jump();
+    jumpBit.current = bit;
     // They cast: the same thrust, and a wave from the hand the way they
     // face (only the cast count travels, not where they aimed).
     if (remote.pendingCasts > 0 && !herzie.casting) {

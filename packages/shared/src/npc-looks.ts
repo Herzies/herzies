@@ -1,4 +1,8 @@
-import { GOLD_SCHEME_ID, NANDOR_SCHEME_ID } from "./creature-renderer.js";
+import {
+  BOBOKU_SCHEME_ID,
+  GOLD_SCHEME_ID,
+  NANDOR_SCHEME_ID,
+} from "./creature-renderer.js";
 import type { Equipped } from "./items.js";
 
 // How the Town's visitors look, shared so the desktop and the website draw
@@ -24,4 +28,14 @@ export const NANDOR_SEED = "npc:nandor-the-treatless";
 export const NANDOR_EQUIPPED: Equipped = {
   face: "fangs",
   color: NANDOR_SCHEME_ID,
+};
+
+/** Boboku's look: grown up (stage 3), orange, in a tweed sixpence and ur
+ * mom's favourite bowtie. */
+export const BOBOKU_SEED = "npc:boboku";
+export const BOBOKU_STAGE = 3;
+export const BOBOKU_EQUIPPED: Equipped = {
+  head: "sixpence",
+  body: "bowtie",
+  color: BOBOKU_SCHEME_ID,
 };

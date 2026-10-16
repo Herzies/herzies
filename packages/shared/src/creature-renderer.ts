@@ -10,6 +10,7 @@
  */
 
 import {
+  BOBOKU_RAMP,
   CHAR_ASPECT,
   dot3,
   GOLD_RAMP,
@@ -1702,6 +1703,56 @@ function buildGhostSpheres(
   return placeCompanion(local, petHoverY(spheres), R, cols, side, "pet");
 }
 
+/** Flat cap (a sixpence): a puffy, domed tweed crown pulled down snug and
+ * tipped forward, a short stiff peak poking out over the eyes, and a button
+ * on top. Low on purpose, like the witch hat's squat crown: a grown
+ * herzie's head sits near the top of the frame. No catalog item has it yet —
+ * Boboku wears it (npc-looks.ts). */
+function buildSixpenceSpheres(spheres: Sphere[]): Sphere[] {
+  const head = getHeadBounds(spheres);
+  if (!head) return [];
+  const [hx, hy, hz] = head.center;
+  const hr = head.radius;
+  const tweed = "#6F5D4B";
+  const peakTweed = "#5B4B3C";
+  const result: Sphere[] = [];
+  const push = (center: V3, radius: number, color: string, shape?: Shape) =>
+    result.push({
+      center,
+      radius,
+      zone: "wearable",
+      part: "head",
+      color,
+      shape,
+    });
+  // Creature space is y down: up is −y; the face is toward −z.
+  const tilt = 0.22;
+  const crownHalf = hr * 0.1;
+  const crownY = hy - hr * 0.8;
+  // A thin, wide disc pulled down over the top of the head, puffed up by
+  // its dome and tipped forward: the axis leans toward the face, so the
+  // crown slopes down to the peak.
+  push([hx, crownY, hz - hr * 0.08], hr * 0.95, tweed, {
+    kind: "cylinder",
+    axis: [0, -crownHalf, -crownHalf * tilt],
+    dome: hr * 0.26,
+  });
+  // The peak: a thin disc tucked under the crown's front edge, so a
+  // half-moon of it pokes out over the eyes, angled down a touch more.
+  const peakHalf = hr * 0.025;
+  push([hx, crownY + hr * 0.2, hz - hr * 0.82], hr * 0.5, peakTweed, {
+    kind: "cylinder",
+    axis: [0, -peakHalf, -peakHalf * 0.6],
+  });
+  // The button on top of the dome.
+  push(
+    [hx, crownY - crownHalf - hr * 0.29, hz - hr * 0.02],
+    hr * 0.07,
+    peakTweed,
+  );
+  return result;
+}
+
 /** Pointed witch hat: a flat brim, an orange band, and a cone whose top
  * bends over in a few tapering segments to a point. The bent tip carries
  * dangle weights, so it swings round the hat's axis when the herzie is spun
@@ -2763,6 +2814,9 @@ function appendWearableSpheres(
   if (equipped.head === "rainbow-headband") {
     spheres.push(...buildRainbowHeadbandSpheres(spheres));
   }
+  if (equipped.head === "sixpence") {
+    spheres.push(...buildSixpenceSpheres(spheres));
+  }
   const bodyBuilder = equipped.body && BODY_ITEM_BUILDERS[equipped.body];
   if (bodyBuilder) spheres.push(...bodyBuilder(spheres));
 
@@ -2793,6 +2847,8 @@ export const GOLD_SCHEME_ID = "npc-gold";
 /** Colour-scheme key for Nandor the Treatless, the same arrangement as
  * GOLD_SCHEME_ID. */
 export const NANDOR_SCHEME_ID = "npc-nandor";
+/** Colour-scheme key for Boboku's orange, the same arrangement again. */
+export const BOBOKU_SCHEME_ID = "npc-boboku";
 
 const COLOR_SCHEMES: Record<string, readonly string[]> = {
   prism: RAINBOW_RAMP,
@@ -2807,6 +2863,7 @@ const COLOR_SCHEMES: Record<string, readonly string[]> = {
   // Events emblem (see GOLD_SCHEME_ID). No player can equip it.
   [GOLD_SCHEME_ID]: GOLD_RAMP,
   [NANDOR_SCHEME_ID]: NANDOR_RAMP,
+  [BOBOKU_SCHEME_ID]: BOBOKU_RAMP,
 };
 
 /** True for spheres that a colour scheme is allowed to repaint. */

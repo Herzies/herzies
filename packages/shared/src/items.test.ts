@@ -1361,6 +1361,37 @@ describe("item units", () => {
   });
 });
 
+describe("class instruments", () => {
+  const instruments = ["lute", "compact-discs", "worn-stick", "old-cymbal"];
+
+  it("all carry stats", () => {
+    for (const id of instruments) {
+      expect(Object.keys(getItem(id)?.stats ?? {}).length).toBeGreaterThan(0);
+    }
+  });
+
+  it("count at their own upgrade level when worn", () => {
+    expect(
+      getHerzieStatsFromUnits([unit("a", "compact-discs", 3, "main_hand")]),
+    ).toMatchObject({ sonicPower: 11, critChance: 8, critDamage: 28 });
+    expect(
+      getHerzieStatsFromUnits([
+        unit("s", "worn-stick", 0, "main_hand"),
+        unit("c", "old-cymbal", 2, "off_hand"),
+      ]),
+    ).toMatchObject({ sonicPower: 4, def: 12 });
+  });
+
+  it("take a die", () => {
+    const out = applyItemUpgrade(
+      [unit("d", "power-dice-1"), unit("l", "lute", 0, "main_hand")],
+      "power-dice-1",
+      "l",
+    );
+    expect(out.ok && out.newLevel).toBe(1);
+  });
+});
+
 describe("bossDamagePerMinute", () => {
   it("is the base rate with no sonic power", () => {
     expect(bossDamagePerMinute({ sonicPower: 0 })).toBe(1);

@@ -149,6 +149,20 @@ export const NANDOR_RAMP = [
 ] as const;
 
 /**
+ * Boboku, the instrument seller who's always in Town. Like GOLD_RAMP no item
+ * grants it: one solid tangerine, top to toe (every step the same, so no
+ * bands), unlike the striped Pumpkin Spice skin.
+ */
+export const BOBOKU_RAMP = [
+  "#F5922F",
+  "#F5922F",
+  "#F5922F",
+  "#F5922F",
+  "#F5922F",
+  "#F5922F",
+] as const;
+
+/**
  * Boss ramp — the only ramp that is not built around a CREATURE_PALETTE hue,
  * because a boss is deliberately not a colour a herzie could hatch with.
  *

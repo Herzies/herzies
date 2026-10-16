@@ -3231,6 +3231,7 @@ export const ITEMS: ItemDef[] = [
     equipSlot: "main_hand",
     minStage: 2,
     requiredClass: "bard",
+    stats: { euphony: 12, sonicPower: 3 },
   },
   {
     id: "compact-discs",
@@ -3243,6 +3244,7 @@ export const ITEMS: ItemDef[] = [
     equipSlot: "main_hand",
     minStage: 2,
     requiredClass: "record_slinger",
+    stats: { sonicPower: 8, critChance: 5, critDamage: 25 },
   },
   {
     id: "worn-stick",
@@ -3255,6 +3257,7 @@ export const ITEMS: ItemDef[] = [
     equipSlot: "main_hand",
     minStage: 2,
     requiredClass: "percussionist",
+    stats: { sonicPower: 4 },
   },
   {
     id: "old-cymbal",
@@ -3267,6 +3270,7 @@ export const ITEMS: ItemDef[] = [
     equipSlot: "off_hand",
     minStage: 2,
     requiredClass: "percussionist",
+    stats: { def: 10 },
   },
 ];
 

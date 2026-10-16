@@ -5,6 +5,8 @@ import type {
   ItemUnit,
 } from "@herzies/shared";
 import {
+  BOBOKU_KEY,
+  BOBOKU_NAME,
   getHerzieStats,
   getHerzieStatsFromUnits,
   getItem,
@@ -632,6 +634,16 @@ function EventsViewImpl({
         detail: "On the way to town",
       });
     }
+    // Boboku is always in town: no event, no schedule.
+    cards.push({
+      type: BOBOKU_KEY,
+      title: BOBOKU_NAME,
+      description: null,
+      status: "live",
+      at: null,
+      openKey: BOBOKU_KEY,
+      detail: "Sells the basic instruments",
+    });
     // Nearest in time first: what's on now, then what starts soonest, then
     // types with nothing on the calendar.
     const when = (c: EventCard) =>
@@ -736,6 +748,27 @@ function EventsViewImpl({
             equipped={equipped}
             units={units}
             onBought={() => setReloadKey((k) => k + 1)}
+            onLog={onLog}
+            paused={!eventsTabVisible || !focused}
+          />
+        </View>
+      );
+    }
+
+    if (selected === BOBOKU_KEY) {
+      return (
+        <View
+          title={BOBOKU_NAME}
+          colour="cyan"
+          childrenClassName="flex min-h-0 flex-col"
+          backButton={back}
+        >
+          <MerchantPanel
+            event={BOBOKU_KEY}
+            currency={currency}
+            equipped={equipped}
+            units={units}
+            onBought={() => {}}
             onLog={onLog}
             paused={!eventsTabVisible || !focused}
           />

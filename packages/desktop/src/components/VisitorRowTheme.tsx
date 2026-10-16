@@ -70,6 +70,12 @@ export const VISITOR_THEMES: Record<string, VisitorTheme> = {
     dim: "#c9a3b0",
     accent: "#ff6b81",
   },
+  // Boboku: a warm orange, and no sparkles.
+  boboku: {
+    background: "linear-gradient(90deg, #2a1405 0%, #4d260a 55%, #200f04 100%)",
+    dim: "#e0b48a",
+    accent: "#ffb45c",
+  },
 };
 
 /** Legible over any backdrop: a hard one-pixel drop like the pixel art's. */

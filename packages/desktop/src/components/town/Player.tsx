@@ -56,6 +56,7 @@ const aimingInput: TownInput = {
   sprint: false,
   mouseLeft: false,
   mouseRight: true,
+  jump: false,
 };
 /** The keys as they are, with the mouse read as steering (combat mode). */
 function aiming(input: TownInput): TownInput {
@@ -133,7 +134,13 @@ export function Player({
     spawned.current = respawn;
     const [x, z] = spawn.at;
     townLive.seat = null;
-    Object.assign(townSave, { x, z, heading: spawn.heading });
+    Object.assign(townSave, {
+      x,
+      z,
+      heading: spawn.heading,
+      azimuth: spawn.heading - Math.PI,
+      arrival: townSave.arrival + 1,
+    });
     herzie.heading = spawn.heading;
     mover.current = { vx: 0, vz: 0, heading: spawn.heading };
     body.current?.setTranslation({ x, y: 0, z }, true);
@@ -240,6 +247,14 @@ export function Player({
     townLive.dancing =
       townLive.music && !townLive.seat && stillFor.current >= DANCE_AFTER;
     herzie.dancing = townLive.dancing;
+    // Space: hop, unless it's seated or being carried through a portal. The
+    // body jumps; the walk goes on under it, steered as ever.
+    const raw = rt.input.current;
+    if (raw?.jump) {
+      raw.jump = false;
+      townLive.lastInputAt = performance.now();
+      if (!townLive.seat && !townLive.frozen) herzie.jump();
+    }
     // Aiming: gear off its back and in hand — and kept there while a disc
     // it threw is still on its way back to it.
     herzie.armed =
@@ -247,6 +262,7 @@ export function Player({
       discField.isOut(herzie, "held-l") ||
       discField.isOut(herzie, "held-r");
     herzie.update(dt, rt.playerSpeed);
+    townLive.jumps = herzie.jumps;
     // Through a portal: spun down into the disc, and back up out of the
     // far one.
     const k = warpAmount();

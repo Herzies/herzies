@@ -241,6 +241,13 @@ export const herzies = {
       newCurrency?: number;
       inventory: Inventory;
     }>("buy_from_merchant", { eventId, itemId, quantity }),
+  /** Buys from Boboku, who's always in Town (no event behind him). */
+  buyFromBoboku: (itemId: string, quantity: number) =>
+    invoke<{
+      spent: number;
+      newCurrency: number;
+      inventory: Inventory;
+    }>("buy_from_boboku", { itemId, quantity }),
   /** Manually collects one specific pending world drop by id. Resolves
    * `true` if it was collected, `false` if it no longer existed (e.g.
    * already collected by a racing Spirit Orb auto-collect). */

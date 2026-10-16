@@ -18,6 +18,7 @@ import type { Hour } from "./DayCycle";
 import { driftClouds } from "./depth";
 import { type TownInput, useTownInput } from "./input";
 import { portalCells, type TownMap, worldRadius } from "./map";
+import { markMet } from "./met";
 import type { TownConnection } from "./net/TownConnection";
 import { Player } from "./Player";
 import { isMouth } from "./Portals";
@@ -274,9 +275,11 @@ function Systems({
   /** E (or a click on the prompt): talk to whoever's near; else step into
    * the portal nearby; else sit on the bench nearby, or stand up off it. */
   const interact = () => {
-    const key = near.current?.card.openKey;
-    if (key) onOpen(key);
-    else if (portal.current) enter(portal.current.to);
+    const card = near.current?.card;
+    if (card?.openKey) {
+      markMet(card);
+      onOpen(card.openKey);
+    } else if (portal.current) enter(portal.current.to);
     else if (townLive.seat) townLive.standUp = true;
     else if (seat.current) townLive.seat = seat.current;
   };

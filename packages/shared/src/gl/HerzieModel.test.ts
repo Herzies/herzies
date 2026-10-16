@@ -9,6 +9,8 @@ import {
   DRAW_SECONDS,
   HerzieModel,
   HITSTOP_SECONDS,
+  JUMP_AIR_SECONDS,
+  JUMP_HEIGHT,
   MODEL_SCALE,
   SHEATHE_DELAY,
   SHEATHE_SECONDS,
@@ -671,5 +673,67 @@ describe("discs on threads", () => {
         ).toBeLessThanOrEqual(h.bounds.radius);
       });
     });
+  });
+});
+
+describe("HerzieModel jump", () => {
+  const step = (h: HerzieModel, seconds: number, speed = 0) => {
+    for (let t = 0; t < seconds; t += 1 / 60) h.update(1 / 60, speed);
+  };
+
+  it("hops up to its height and lands within its air time", () => {
+    const h = new HerzieModel(LOOK);
+    h.update(1 / 60, 0);
+    const ground = bounds(h).min.y;
+    expect(h.jump()).toBe(true);
+    let peak = 0;
+    for (let t = 0; t < JUMP_AIR_SECONDS - 1 / 60; t += 1 / 60) {
+      h.update(1 / 60, WALK_SPEED);
+      peak = Math.max(peak, h.jumpHeight);
+      expect(h.airborne).toBe(true);
+    }
+    expect(peak).toBeGreaterThan(JUMP_HEIGHT * 0.95);
+    expect(peak).toBeLessThanOrEqual(JUMP_HEIGHT + 1e-6);
+    step(h, 2 / 60);
+    expect(h.airborne).toBe(false);
+    step(h, 0.5);
+    expect(bounds(h).min.y).toBeCloseTo(ground, 2);
+  });
+
+  it("lifts the body off the ground mid-air", () => {
+    const h = new HerzieModel(LOOK);
+    h.update(1 / 60, 0);
+    const ground = bounds(h).min.y;
+    h.jump();
+    step(h, JUMP_AIR_SECONDS / 2);
+    expect(bounds(h).min.y).toBeGreaterThan(ground + JUMP_HEIGHT * 0.8);
+  });
+
+  it("jumps again on landing when pressed just before", () => {
+    const h = new HerzieModel(LOOK);
+    h.jump();
+    step(h, JUMP_AIR_SECONDS - 0.06);
+    expect(h.jump()).toBe(false);
+    expect(h.jumps).toBe(1);
+    step(h, 0.1);
+    expect(h.jumps).toBe(2);
+    expect(h.airborne).toBe(true);
+  });
+
+  it("forgets a press made long before landing", () => {
+    const h = new HerzieModel(LOOK);
+    h.jump();
+    step(h, 0.05);
+    h.jump();
+    step(h, JUMP_AIR_SECONDS);
+    expect(h.jumps).toBe(1);
+  });
+
+  it("doesn't jump seated", () => {
+    const h = new HerzieModel(LOOK);
+    h.sitting = true;
+    step(h, 0.5);
+    expect(h.jump()).toBe(false);
+    expect(h.airborne).toBe(false);
   });
 });

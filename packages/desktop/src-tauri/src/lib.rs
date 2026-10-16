@@ -752,10 +752,28 @@ async fn buy_from_merchant(
 ) -> Result<serde_json::Value, String> {
     let client = api::http();
     let data = api::api_buy_from_merchant(&client, &event_id, &item_id, quantity).await?;
+    apply_purchase(&data, &app, &state);
+    Ok(data)
+}
 
+#[tauri::command]
+async fn buy_from_boboku(
+    item_id: String,
+    quantity: u32,
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    let client = api::http();
+    let data = api::api_buy_from_boboku(&client, &item_id, quantity).await?;
+    apply_purchase(&data, &app, &state);
+    Ok(data)
+}
+
+/// A purchase's new inventory and balance, saved and announced.
+fn apply_purchase(data: &serde_json::Value, app: &AppHandle, state: &SharedState) {
     let mut s = state.lock().unwrap();
     let mut changed = false;
-    if let Some(snapshot) = snapshot_from_response(&data, &s) {
+    if let Some(snapshot) = snapshot_from_response(data, &s) {
         apply_inventory(&mut s, snapshot, None);
         changed = true;
     }
@@ -768,9 +786,8 @@ async fn buy_from_merchant(
     }
     drop(s);
     if changed {
-        emit_state_update(&app);
+        emit_state_update(app);
     }
-    Ok(data)
 }
 
 #[tauri::command]
@@ -2659,6 +2676,7 @@ pub fn run() {
             sell_item,
             apply_dice_upgrade,
             buy_from_merchant,
+            buy_from_boboku,
             collect_drop,
             spawn_debug_drop,
             equip_item,

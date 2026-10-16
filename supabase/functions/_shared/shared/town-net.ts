@@ -289,6 +289,9 @@ export const TOWN_CAST_SHIFT = 3;
 export const TOWN_CAST_MASK = 0b111 << TOWN_CAST_SHIFT;
 /** In combat mode, on the training grounds. */
 export const TOWN_FLAG_COMBAT = 64;
+/** Flips on every jump: whenever it changes, the herzie hopped. A toggle,
+ * not an "is airborne" bit, so a jump straight after landing still shows. */
+export const TOWN_FLAG_JUMP = 128;
 
 /** The cast count carried in a state's flags. */
 export function castSeqOf(flags: number): number {

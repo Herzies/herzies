@@ -74,7 +74,8 @@ const card = (type: string, title: string): EventCard => ({
   description: null,
   status: "live",
   at: null,
-  openKey: null,
+  // Boboku opens; the rest are scenery.
+  openKey: type === "boboku" ? "boboku" : null,
   eventId: `sandbox-${type}`,
 });
 
@@ -83,6 +84,7 @@ const spots: TownSpot[] = [
   ["treat_trader", "Nandor"],
   ["boss_fight", "The boss"],
   ["song_hunt", "Orphiez"],
+  ["boboku", "Boboku"],
 ]
   // Only those the map has a spot for (the boss lives in its cave now).
   .filter(([type]) => SPOTS[type])

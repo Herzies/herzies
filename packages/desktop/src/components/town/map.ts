@@ -159,6 +159,7 @@ export const SPOT_NAMES: Record<string, string> = {
   merchant: "George",
   song_hunt: "Orphiez",
   treat_trader: "Nandor",
+  boboku: "Boboku",
 };
 
 /** The centre of a cell, in world (x, z). */
