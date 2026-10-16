@@ -50,10 +50,10 @@ export function Boss() {
     return m;
   }, [event]);
   useEffect(() => () => herzie?.dispose(), [herzie]);
-  // The event it fell in, once it's crumbled away (a new fight brings a
-  // new one).
-  const [goneIn, setGoneIn] = useState<string | null>(null);
-  const gone = goneIn !== null && goneIn === event;
+  // The body that fell, once it's crumbled away (a new fight builds a new
+  // one, even under the same event, as local fights all are).
+  const [fallen, setFallen] = useState<HerzieModel | null>(null);
+  const gone = fallen !== null && fallen === herzie;
 
   const stoned = useRef(false);
   useEffect(() => {
@@ -95,7 +95,7 @@ export function Boss() {
       herzie.root.scale.multiplyScalar(Math.max(0.001, k));
       herzie.root.position.y = -u * 1.5;
       if (u >= 1) {
-        setGoneIn(event);
+        setFallen(herzie);
         return;
       }
     }

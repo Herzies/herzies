@@ -13,6 +13,7 @@ import {
   DISC_RANGE,
   MELEE_DAMAGE,
   meleeReaches,
+  WAVE_HAND_HEIGHT,
 } from "@herzies/shared/combat";
 import type { HerzieModel } from "@herzies/shared/gl";
 import { useFrame, useThree } from "@react-three/fiber";
@@ -572,12 +573,7 @@ export function Combat({
           strike: solid ? (onBoss ? "target" : "wall") : null,
           target,
         });
-        if (bossFight.on) {
-          townNet().sendCast(
-            Math.atan2(dir.x, dir.z),
-            Math.asin(Math.max(-1, Math.min(1, dir.y))),
-          );
-        }
+        if (bossFight.on) sendBossCast(herzie, a.point);
         shake(0.04);
       }
       // The hand is out: the wave leaves it (Player's update, last frame).
@@ -596,12 +592,7 @@ export function Combat({
           target,
         });
         // In the boss room, the server does the hitting: tell it the aim.
-        if (bossFight.on) {
-          townNet().sendCast(
-            Math.atan2(dir.x, dir.z),
-            Math.asin(Math.max(-1, Math.min(1, dir.y))),
-          );
-        }
+        if (bossFight.on) sendBossCast(herzie, a.point);
         sfxCast();
         shake(0.05);
       }
@@ -649,6 +640,22 @@ export function Combat({
   }, -2.5);
 
   return null;
+}
+
+const castFrom = new THREE.Vector3();
+
+/**
+ * Tells the server a cast at `point`, aimed as it judges it: from where it
+ * thinks the hand is (over the herzie's middle, at WAVE_HAND_HEIGHT), not
+ * the hand itself. Up close the two differ a lot — a hand can be nearly in
+ * the boss — and the server would see the throw going off sideways.
+ */
+function sendBossCast(herzie: HerzieModel, point: THREE.Vector3) {
+  herzie.root.getWorldPosition(castFrom);
+  const dx = point.x - castFrom.x;
+  const dy = point.y - WAVE_HAND_HEIGHT;
+  const dz = point.z - castFrom.z;
+  townNet().sendCast(Math.atan2(dx, dz), Math.atan2(dy, Math.hypot(dx, dz)));
 }
 
 /** The level way from `from` to `to`, as a unit direction. */
