@@ -154,7 +154,7 @@ export function BossResults() {
   );
 }
 
-/** One of the top three, drawn: its gear in hand, its place under it. */
+/** One of the top three, drawn: its gear in hand, its name under it. */
 function Podium({
   place,
   you,
@@ -192,14 +192,6 @@ function Podium({
           />
         ) : null}
       </div>
-      <span
-        className={cn(
-          "font-bold tabular-nums",
-          first ? "text-lg text-yellow" : "text-base text-text-dim",
-        )}
-      >
-        {place.rank}
-      </span>
       <span
         className={cn(
           "max-w-full truncate text-[10px]",
