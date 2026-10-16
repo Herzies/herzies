@@ -20,6 +20,7 @@ import { setCave } from "./town/cave";
 import { useChatBubbles } from "./town/chatBubbles";
 import { resetBossFight } from "./town/combat/fight";
 import { onLootLog } from "./town/combat/lootFeed";
+import { useBossResultsShown } from "./town/combat/results";
 import { useCombat } from "./town/combat/state";
 import { useFpsShown } from "./town/fps";
 import { Key } from "./town/Key";
@@ -89,6 +90,7 @@ export function TownWorld({
   // The cave's loot writes to the log like any other pickup.
   useEffect(() => onLootLog((message) => onLog?.(message)), [onLog]);
   const [near, setNear] = useState<TownSpot | null>(null);
+  const endScreen = useBossResultsShown() !== null;
   const [bench, setBench] = useState<"sit" | "stand" | null>(null);
   const [portalTo, setPortalTo] = useState<TownMap | null>(null);
   const fighting = useCombat();
@@ -215,6 +217,11 @@ export function TownWorld({
       </div>
     ) : null;
 
+  const hudFade = cn(
+    "transition-opacity duration-300",
+    endScreen && "pointer-events-none opacity-0",
+  );
+
   return (
     <div className="relative min-h-0 flex-1 overflow-hidden">
       {net.status === "outdated" ? (
@@ -222,50 +229,53 @@ export function TownWorld({
           Update Herzies to see other players
         </div>
       ) : null}
-      {profile && !paused ? (
-        <>
-          {/* Centred in a 20px row, like home's (its icon buttons are h-5), so
+      {/* The HUD fades away while the boss's end screen is up, and back. */}
+      <div className={hudFade}>
+        {profile && !paused ? (
+          <>
+            {/* Centred in a 20px row, like home's (its icon buttons are h-5), so
               the name doesn't shift when switching tabs. */}
-          <div className="pointer-events-none absolute top-3 left-3 z-30 flex h-5 max-w-[60%] items-center">
-            <span
-              className="whitespace-nowrap text-ui-lg font-bold text-white"
-              style={{ textShadow: NAME_SHADOW }}
-            >
-              {profile.name}
-              <span className="ml-2 text-[10px] font-normal text-white/70">
-                Lv. {profile.level}
+            <div className="pointer-events-none absolute top-3 left-3 z-30 flex h-5 max-w-[60%] items-center">
+              <span
+                className="whitespace-nowrap text-ui-lg font-bold text-white"
+                style={{ textShadow: NAME_SHADOW }}
+              >
+                {profile.name}
+                <span className="ml-2 text-[10px] font-normal text-white/70">
+                  Lv. {profile.level}
+                </span>
               </span>
-            </span>
-          </div>
-          <div
-            className={cn(
-              "pointer-events-none absolute inset-x-0 z-30 px-3 py-2",
-              chatOverlay ? "bottom-[var(--dock-height,0px)]" : "bottom-0",
-            )}
-          >
-            {combatHint}
-            {!paused ? (
-              <SkillHud
-                usable={!!map.combat}
-                className="bottom-full right-2 mb-1.5"
-              />
-            ) : null}
-            <TownHpBar inFight={!!map.combat} />
-            <ExpBar progress={profile.progress} className="text-white/70" />
-          </div>
-        </>
-      ) : null}
-      {profile ? null : combatHint}
-      {profile || paused ? null : (
-        <SkillHud
-          usable={!!map.combat}
-          className={
-            chatOverlay
-              ? "bottom-[calc(var(--dock-height,0px)+4.5rem)] right-2"
-              : "bottom-3 right-2"
-          }
-        />
-      )}
+            </div>
+            <div
+              className={cn(
+                "pointer-events-none absolute inset-x-0 z-30 px-3 py-2",
+                chatOverlay ? "bottom-[var(--dock-height,0px)]" : "bottom-0",
+              )}
+            >
+              {combatHint}
+              {!paused ? (
+                <SkillHud
+                  usable={!!map.combat}
+                  className="bottom-full right-2 mb-1.5"
+                />
+              ) : null}
+              <TownHpBar inFight={!!map.combat} />
+              <ExpBar progress={profile.progress} className="text-white/70" />
+            </div>
+          </>
+        ) : null}
+        {profile ? null : combatHint}
+        {profile || paused ? null : (
+          <SkillHud
+            usable={!!map.combat}
+            className={
+              chatOverlay
+                ? "bottom-[calc(var(--dock-height,0px)+4.5rem)] right-2"
+                : "bottom-3 right-2"
+            }
+          />
+        )}
+      </div>
       {fpsShown && opened && !paused ? (
         <FrameRate className="pointer-events-none absolute top-2 left-2 z-30 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white/70 tabular-nums" />
       ) : null}
@@ -289,8 +299,10 @@ export function TownWorld({
       )}
       {!paused ? (
         <>
-          <TownVitals inFight={!!map.combat} chatOverlay={chatOverlay} />
-          <BossHud name={bossCard?.title ?? "The boss"} />
+          <div className={hudFade}>
+            <TownVitals inFight={!!map.combat} chatOverlay={chatOverlay} />
+            <BossHud name={bossCard?.title ?? "The boss"} />
+          </div>
           <BossResults />
         </>
       ) : null}

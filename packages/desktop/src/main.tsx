@@ -43,6 +43,7 @@ import { StoreView } from "./components/StoreView";
 import { TabBar, type View } from "./components/TabBar";
 import { TradeView } from "./components/TradeView";
 import { setLootRoom } from "./components/town/combat/lootFeed";
+import { useBossResultsShown } from "./components/town/combat/results";
 import { setMySkill } from "./components/town/combat/skills";
 import { combat } from "./components/town/combat/state";
 import { UpdateAvailableOverlay } from "./components/UpdateAvailableOverlay";
@@ -98,7 +99,21 @@ function observeDock(el: HTMLDivElement | null) {
   if (el) dockObserver.observe(el);
 }
 
+/** ...and the tab bar's alone as `--nav-height`, for what covers the Town
+ * down to the tabs but not over them (the boss's end screen). */
+const navObserver = new ResizeObserver(([entry]) => {
+  document.documentElement.style.setProperty(
+    "--nav-height",
+    `${(entry.target as HTMLElement).offsetHeight}px`,
+  );
+});
+function observeNav(el: HTMLDivElement | null) {
+  navObserver.disconnect();
+  if (el) navObserver.observe(el);
+}
+
 function App() {
+  const endScreenUp = useBossResultsShown() !== null;
   const [rawState, setState] = useState<AppState>({
     herzie: null,
     nowPlaying: null,
@@ -607,6 +622,8 @@ function App() {
   /** The Town's 3D world is on screen: it fills the window, and the chat
    * floats over it. */
   const townWorld = view === "events" && eventsScreen === "world";
+  // The boss's end screen is up over the Town: the chat steps aside.
+  const endScreen = endScreenUp && townWorld;
 
   /** Where the chat is shown (see chatPanel). */
   const chatOnScreen = (view === "home" && !selfProfile) || townWorld;
@@ -1212,29 +1229,40 @@ function App() {
             )}
           />
           <div className="relative">
-            {chatPanel}
+            {/* The boss's end screen covers the Town down to the tabs: the
+                chat fades away under it, and back after. */}
+            <div
+              className={cn(
+                "transition-opacity duration-300",
+                endScreen && "pointer-events-none opacity-0",
+              )}
+            >
+              {chatPanel}
+            </div>
             {herzie && (
-              <TabBar
-                view={view}
-                setView={(v) => {
-                  if (v === "inventory") setInventoryPanel("deck");
-                  switchView(v);
-                }}
-                // Only once the server knows stat points: before that,
-                // every herzie would show its whole back pay unspendable.
-                unspentPoints={
-                  herzie.statPoints
-                    ? statPoints(herzie.level, herzie.statPoints).unspent
-                    : 0
-                }
-                visitorsInTown={
-                  visitorsInTown +
-                  Number(hasActiveEventOverride) +
-                  Number(debugBossOverride) +
-                  Number(debugMerchantOverride) +
-                  Number(debugTreatTraderOverride)
-                }
-              />
+              <div ref={observeNav}>
+                <TabBar
+                  view={view}
+                  setView={(v) => {
+                    if (v === "inventory") setInventoryPanel("deck");
+                    switchView(v);
+                  }}
+                  // Only once the server knows stat points: before that,
+                  // every herzie would show its whole back pay unspendable.
+                  unspentPoints={
+                    herzie.statPoints
+                      ? statPoints(herzie.level, herzie.statPoints).unspent
+                      : 0
+                  }
+                  visitorsInTown={
+                    visitorsInTown +
+                    Number(hasActiveEventOverride) +
+                    Number(debugBossOverride) +
+                    Number(debugMerchantOverride) +
+                    Number(debugTreatTraderOverride)
+                  }
+                />
+              </div>
             )}
           </div>
         </div>

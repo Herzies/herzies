@@ -20,7 +20,10 @@ export type BossResults = {
   showAt: number;
 };
 
+/** Set by the server; shown from `showAt` until closed. */
 let current: BossResults | null = null;
+let shown: BossResults | null = null;
+let showTimer: ReturnType<typeof setTimeout> | undefined;
 const listeners = new Set<() => void>();
 
 function emit() {
@@ -35,23 +38,38 @@ export function setBossResults(
   now = performance.now(),
 ): void {
   const after = fellAt === null ? now : fellAt + SHOW_AFTER_FALL_MS;
-  current = { ...r, showAt: Math.max(now, after) };
+  const r2 = { ...r, showAt: Math.max(now, after) };
+  current = r2;
+  shown = null;
+  clearTimeout(showTimer);
+  const wait = r2.showAt - now;
+  if (wait <= 0) shown = r2;
+  else
+    showTimer = setTimeout(() => {
+      if (current !== r2) return;
+      shown = r2;
+      emit();
+    }, wait);
   emit();
 }
 
 export function clearBossResults(): void {
   if (!current) return;
   current = null;
+  shown = null;
+  clearTimeout(showTimer);
   emit();
 }
 
-export function useBossResults(): BossResults | null {
+/** The end screen, from the moment it's up until it's closed; null
+ * otherwise. The Town's HUD and the chat step aside while it's up. */
+export function useBossResultsShown(): BossResults | null {
   return useSyncExternalStore(
     (l) => {
       listeners.add(l);
       return () => listeners.delete(l);
     },
-    () => current,
+    () => shown,
   );
 }
 

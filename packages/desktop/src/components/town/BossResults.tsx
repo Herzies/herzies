@@ -3,7 +3,7 @@ import { HerzieStage, HerzieView } from "@herzies/shared/gl";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "../../lib/utils";
 import { leaveCombat } from "./combat/Combat";
-import { clearBossResults, useBossResults } from "./combat/results";
+import { clearBossResults, useBossResultsShown } from "./combat/results";
 import { letGoOfTownInput } from "./input";
 
 /**
@@ -15,30 +15,21 @@ import { letGoOfTownInput } from "./input";
  * contribution (damage, plus healing and blocking; see contributionOf).
  *
  * It shows just after the boss falls, before anyone goes for the loot,
- * and goes with Continue or Esc. It fills the Town, its HUD included,
- * from the top margin down to just above the chat (`--dock-height`), the
- * world blurred out behind it, and is only drawn while the Town is the
- * view; nothing in the Town moves while it's up, though the chat still
- * takes typing. It stays up back in town until you go on. Above the HUD,
- * the page's shared
- * herzie stage would be under its background, so its herzies have a stage
- * of their own, inside it.
+ * and goes with Continue or Esc. It fills the Town from the top margin
+ * down to just above the tab bar (`--nav-height`), the world blurred out
+ * behind it, and is only drawn while the Town is the view. While it's up
+ * the HUD and the chat fade away (useBossResultsShown) and nothing in the
+ * Town moves. It stays up back in town until you go on. Above all that,
+ * the page's shared herzie stage would be under its background, so its
+ * herzies have a stage of their own, inside it.
  */
 export function BossResults() {
-  const results = useBossResults();
+  const results = useBossResultsShown();
   // Its herzies' own stage, its canvas inside the overlay.
   const [stage] = useState(() => new HerzieStage());
   const overlay = useRef<HTMLDivElement>(null);
   useEffect(() => () => stage.dispose(), [stage]);
-  // On a kill it waits for the boss to crumble away.
-  const [now, setNow] = useState(() => performance.now());
-  const wait = results ? results.showAt - now : 0;
-  useEffect(() => {
-    if (wait <= 0) return;
-    const t = setTimeout(() => setNow(performance.now()), wait);
-    return () => clearTimeout(t);
-  }, [wait]);
-  const shown = !!results && wait <= 0;
+  const shown = results !== null;
   useEffect(() => {
     if (shown) stage.setHost(overlay.current);
   }, [shown, stage]);
@@ -49,8 +40,11 @@ export function BossResults() {
     if (!shown) return;
     letGoOfTownInput();
     leaveCombat();
+    // The chat steps aside too: nothing typed goes into it unseen.
+    if (document.activeElement instanceof HTMLElement)
+      document.activeElement.blur();
     const onKey = (e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey || typing(e.target)) return;
+      if (e.metaKey || e.ctrlKey) return;
       e.stopImmediatePropagation();
       if (e.key === "Escape") {
         e.preventDefault();
@@ -76,7 +70,7 @@ export function BossResults() {
     <div
       ref={overlay}
       className="absolute inset-x-3 top-3 z-50 flex"
-      style={{ bottom: "calc(var(--dock-height, 0px) + 0.75rem)" }}
+      style={{ bottom: "calc(var(--nav-height, 0px) + 0.75rem)" }}
     >
       {/* The window fills it, the Town blurred out behind; its content
           sits in the middle. */}
@@ -224,17 +218,4 @@ function ordinal(n: number): string {
   const tens = n % 100;
   if (tens >= 11 && tens <= 13) return `${n}th`;
   return `${n}${["th", "st", "nd", "rd"][n % 10] ?? "th"}`;
-}
-
-/** Whether a key is going into a text field (the chat, which stays usable
- * under it). */
-function typing(target: EventTarget | null): boolean {
-  const el = target as HTMLElement | null;
-  return (
-    !!el &&
-    (el.tagName === "INPUT" ||
-      el.tagName === "TEXTAREA" ||
-      el.tagName === "SELECT" ||
-      el.isContentEditable)
-  );
 }
