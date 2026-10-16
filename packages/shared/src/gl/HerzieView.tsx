@@ -23,7 +23,7 @@ import type { Equipped } from "../items.js";
 import { DEFAULT_THREAD_CONFIG, type ThreadConfig } from "../thread-physics.js";
 import { HerzieModel, MODEL_SCALE } from "./HerzieModel.js";
 import { studioLighting } from "./herzieMaterial.js";
-import { herzieStage } from "./stage.js";
+import { type HerzieStage, herzieStage } from "./stage.js";
 
 const DRAG_SENSITIVITY = Math.PI / 200; // ~180° per 200px
 /** Momentum lost per 60fps frame after a flick. */
@@ -113,6 +113,10 @@ export type HerzieViewProps = {
    * otherwise it's slung on its back. Draws and puts away while it
    * animates (not paused). */
   armed?: boolean;
+  /** The stage it's drawn on (default: the page's one). An overlay that
+   * stacks above everything gives its herzies a stage of its own, inside
+   * it, so its background can't cover them. */
+  onStage?: HerzieStage;
 };
 
 /**
@@ -144,6 +148,7 @@ export function HerzieView({
   grey = 0,
   opacity = 1,
   armed = false,
+  onStage = herzieStage,
 }: HerzieViewProps) {
   const box = useRef<HTMLDivElement>(null);
   const width = Math.ceil(cols * size * 0.6);
@@ -230,7 +235,7 @@ export function HerzieView({
     // What was last drawn, to tell when a paused herzie needs drawing again.
     const drawn = { angle: Number.NaN, grey: -1, opacity: -1 };
 
-    const remove = herzieStage.add({
+    const remove = onStage.add({
       element,
       scene,
       camera: cam,
@@ -327,7 +332,7 @@ export function HerzieView({
       remove();
       sun.dispose();
     };
-  }, [model]);
+  }, [model, onStage]);
 
   const [grabbing, setGrabbing] = useState(false);
   const onPointerDown = (e: React.PointerEvent) => {

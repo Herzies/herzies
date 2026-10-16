@@ -1,6 +1,6 @@
 import type { BossPlace } from "@herzies/shared";
-import { HerzieView } from "@herzies/shared/gl";
-import { useEffect, useState } from "react";
+import { HerzieStage, HerzieView } from "@herzies/shared/gl";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "../../lib/utils";
 import { clearBossResults, useBossResults } from "./combat/results";
 
@@ -12,14 +12,18 @@ import { clearBossResults, useBossResults } from "./combat/results";
  * and your own place under a "…" if you're not among them. Ranked by
  * contribution (damage, plus healing and blocking; see contributionOf).
  *
- * It sits below the "Back to town" banner and only Continue takes the
- * mouse, so the loot can still be picked up; it stays up back in town
- * until you go on. It has no z-index of its own: the herzies are drawn on
- * the shared stage (fixed, z-index 1), which has to paint over its
- * background.
+ * It covers the whole Town, chat and HUD included, down to the tab bar
+ * (`--nav-height`), and is only drawn while the Town is the view. It stays
+ * up back in town until you go on. Above all that, the page's shared
+ * herzie stage would be under its background, so its herzies have a stage
+ * of their own, inside it.
  */
 export function BossResults({ name }: { name: string }) {
   const results = useBossResults();
+  // Its herzies' own stage, its canvas inside the overlay.
+  const [stage] = useState(() => new HerzieStage());
+  const overlay = useRef<HTMLDivElement>(null);
+  useEffect(() => () => stage.dispose(), [stage]);
   // On a kill it waits for the boss to crumble away.
   const [now, setNow] = useState(() => performance.now());
   const wait = results ? results.showAt - now : 0;
@@ -28,7 +32,11 @@ export function BossResults({ name }: { name: string }) {
     const t = setTimeout(() => setNow(performance.now()), wait);
     return () => clearTimeout(t);
   }, [wait]);
-  if (!results || wait > 0) return null;
+  const shown = !!results && wait <= 0;
+  useEffect(() => {
+    if (shown) stage.setHost(overlay.current);
+  }, [shown, stage]);
+  if (!results || !shown) return null;
 
   const { outcome, top, you } = results;
   const won = outcome === "victory";
@@ -39,84 +47,94 @@ export function BossResults({ name }: { name: string }) {
   const outside = you !== null && !top.some(mine);
 
   return (
-    <section
-      aria-labelledby="boss-results-title"
-      className="pointer-events-none absolute top-24 left-1/2 w-[min(26rem,92%)] -translate-x-1/2 rounded border border-border bg-bg-panel/95 px-4 pt-3 pb-2.5 text-ui text-text shadow-lg"
+    <div
+      ref={overlay}
+      className="absolute inset-x-0 top-0 z-50 flex items-center justify-center overflow-y-auto bg-black/50 px-3 py-4"
+      style={{ bottom: "var(--nav-height, 0px)" }}
     >
-      <h2
-        id="boss-results-title"
-        className={cn(
-          "text-center text-xl font-bold tracking-[0.2em]",
-          won ? "text-yellow" : "text-red",
-        )}
+      <section
+        aria-labelledby="boss-results-title"
+        className="relative w-full max-w-[26rem] rounded border border-border bg-bg-panel px-4 pt-3 pb-2.5 text-ui text-text shadow-lg"
       >
-        {won ? "VICTORY" : "DEFEAT"}
-      </h2>
-      <p className="mb-1 text-center text-[10px] text-text-dim">
-        {won ? `${name} has fallen.` : `${name} got away.`}
-      </p>
-
-      {top.length ? (
-        <>
-          <div className="mb-2 flex items-end justify-center gap-1">
-            {podium.map((p) => (
-              <Podium key={p.rank} place={p} you={mine(p)} />
-            ))}
-          </div>
-
-          <table className="w-full border-separate border-spacing-y-0.5">
-            <thead>
-              <tr className="text-[10px] text-text-dim">
-                <th className="text-left font-normal" colSpan={2}>
-                  <span className="sr-only">Herzie</span>
-                </th>
-                <th className="w-14 text-right font-normal">Dmg</th>
-                <th
-                  className="w-12 text-right font-normal"
-                  title="Healed + blocked"
-                >
-                  Heal
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {top.map((p) => (
-                <Row key={p.rank} place={p} you={mine(p)} />
-              ))}
-              {outside && you ? (
-                <>
-                  <tr aria-hidden>
-                    <td colSpan={4} className="text-center text-text-dim">
-                      …
-                    </td>
-                  </tr>
-                  <Row place={you} you />
-                </>
-              ) : null}
-            </tbody>
-          </table>
-        </>
-      ) : (
-        <p className="my-2 text-center text-[10px] text-text-dim">
-          Nobody landed a hit.
-        </p>
-      )}
-
-      <div className="mt-2.5 flex justify-center">
-        <button
-          type="button"
-          className="btn pointer-events-auto"
-          onClick={clearBossResults}
+        <h2
+          id="boss-results-title"
+          className={cn(
+            "text-center text-xl font-bold tracking-[0.2em]",
+            won ? "text-yellow" : "text-red",
+          )}
         >
-          Continue
-        </button>
-      </div>
-    </section>
+          {won ? "VICTORY" : "DEFEAT"}
+        </h2>
+        <p className="mb-1 text-center text-[10px] text-text-dim">
+          {won ? `${name} has fallen.` : `${name} got away.`}
+        </p>
+
+        {top.length ? (
+          <>
+            <div className="mb-2 flex items-end justify-center gap-1">
+              {podium.map((p) => (
+                <Podium key={p.rank} place={p} you={mine(p)} stage={stage} />
+              ))}
+            </div>
+
+            <table className="w-full border-separate border-spacing-y-0.5">
+              <thead>
+                <tr className="text-[10px] text-text-dim">
+                  <th className="text-left font-normal" colSpan={2}>
+                    <span className="sr-only">Herzie</span>
+                  </th>
+                  <th className="w-14 text-right font-normal">Dmg</th>
+                  <th
+                    className="w-12 text-right font-normal"
+                    title="Healed + blocked"
+                  >
+                    Heal
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {top.map((p) => (
+                  <Row key={p.rank} place={p} you={mine(p)} />
+                ))}
+                {outside && you ? (
+                  <>
+                    <tr aria-hidden>
+                      <td colSpan={4} className="text-center text-text-dim">
+                        …
+                      </td>
+                    </tr>
+                    <Row place={you} you />
+                  </>
+                ) : null}
+              </tbody>
+            </table>
+          </>
+        ) : (
+          <p className="my-2 text-center text-[10px] text-text-dim">
+            Nobody landed a hit.
+          </p>
+        )}
+
+        <div className="mt-2.5 flex justify-center">
+          <button type="button" className="btn" onClick={clearBossResults}>
+            Continue
+          </button>
+        </div>
+      </section>
+    </div>
   );
 }
 
 /** One of the top three, drawn: its gear in hand, its place under it. */
-function Podium({ place, you }: { place: BossPlace; you: boolean }) {
+function Podium({
+  place,
+  you,
+  stage,
+}: {
+  place: BossPlace;
+  you: boolean;
+  stage: HerzieStage;
+}) {
   const first = place.rank === 1;
   const look = place.look;
   return (
@@ -132,13 +150,14 @@ function Podium({ place, you }: { place: BossPlace; you: boolean }) {
             userId={look.seed}
             stage={look.stage}
             equipped={look.equipped}
-            size={first ? 4 : 3.2}
+            size={first ? 3.4 : 2.7}
             cols={44}
             // Turned toward the side, so the gear in hand shows across
             // its body rather than end-on.
             defaultAngle={-0.9}
             groundInset={2}
             armed
+            onStage={stage}
             animate={false}
             draggable={false}
             ariaLabel={`${place.name}, ${ordinal(place.rank)}`}
