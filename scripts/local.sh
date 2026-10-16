@@ -7,6 +7,7 @@
 #   scripts/local.sh desktop            the desktop app against them (quit the installed beta first)
 #   scripts/local.sh herzie EMAIL LVL   set a local herzie's level (xp and stage to match)
 #   scripts/local.sh boss [HP]          open a boss fight in the cave for an hour
+#   scripts/local.sh tower [HOURS]      open the Tower (its portal in Town) for a few hours
 #   scripts/local.sh reset              wipe the local database (all migrations re-applied)
 #
 # Sign in from the desktop with any email: the web's sign-in page offers a
@@ -124,6 +125,13 @@ cmd_boss() {
   psql_local -c "select public.spawn_boss_fight(array['electronic'], $hp, now() + interval '1 hour', 'Local Boss');"
 }
 
+cmd_tower() {
+  local hours="${1:-3}"
+  psql_local -c "insert into public.events (type, title, active, starts_at, ends_at, config)
+    values ('tower', 'The Tower', true, now() - interval '1 minute', now() + interval '$hours hours', '{}')
+    returning id, ends_at;"
+}
+
 cmd_reset() {
   npx --yes supabase db reset --local
 }
@@ -133,6 +141,7 @@ case "${1:-}" in
   desktop) cmd_desktop ;;
   herzie) shift; cmd_herzie "$@" ;;
   boss) shift; cmd_boss "$@" ;;
+  tower) shift; cmd_tower "$@" ;;
   reset) cmd_reset ;;
-  *) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac
