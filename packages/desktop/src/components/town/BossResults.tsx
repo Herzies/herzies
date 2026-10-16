@@ -194,7 +194,7 @@ function Podium({
       </div>
       <span
         className={cn(
-          "max-w-full truncate text-[10px]",
+          "mt-1.5 max-w-full truncate text-[10px]",
           you ? "text-cyan" : "text-text",
         )}
       >
