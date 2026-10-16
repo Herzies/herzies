@@ -32,6 +32,13 @@ const MOVE_KEYS: Record<string, keyof TownInput> = {
   ShiftRight: "sprint",
 };
 
+/** Whoever holds keys down now lets go of them (the boss's end screen
+ * coming up over the Town: nobody walks on under it). */
+const letGoListeners = new Set<() => void>();
+export function letGoOfTownInput(): void {
+  for (const l of letGoListeners) l();
+}
+
 const idle = (): TownInput => ({
   forward: false,
   back: false,
@@ -123,6 +130,7 @@ export function useTownInput(
     window.addEventListener("keyup", onKeyUp);
     window.addEventListener("pointerup", onPointerUp);
     window.addEventListener("blur", release);
+    letGoListeners.add(release);
     document.addEventListener("visibilitychange", onVisibility);
     surface?.addEventListener("pointerdown", onPointerDown);
     surface?.addEventListener("contextmenu", onContextMenu);
@@ -131,6 +139,7 @@ export function useTownInput(
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("pointerup", onPointerUp);
       window.removeEventListener("blur", release);
+      letGoListeners.delete(release);
       document.removeEventListener("visibilitychange", onVisibility);
       surface?.removeEventListener("pointerdown", onPointerDown);
       surface?.removeEventListener("contextmenu", onContextMenu);

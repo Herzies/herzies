@@ -684,3 +684,6 @@ function leave() {
   exitMouseLook();
   setCombat(false);
 }
+
+/** Out of combat mode, from outside it (the boss's end screen). */
+export const leaveCombat = leave;

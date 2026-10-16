@@ -2,7 +2,9 @@ import type { BossPlace } from "@herzies/shared";
 import { HerzieStage, HerzieView } from "@herzies/shared/gl";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "../../lib/utils";
+import { leaveCombat } from "./combat/Combat";
 import { clearBossResults, useBossResults } from "./combat/results";
+import { letGoOfTownInput } from "./input";
 
 /**
  * The end of a boss fight, for whoever was in the cave: victory or defeat;
@@ -13,8 +15,10 @@ import { clearBossResults, useBossResults } from "./combat/results";
  * contribution (damage, plus healing and blocking; see contributionOf).
  *
  * It shows just after the boss falls, before anyone goes for the loot,
- * and goes with Continue or Esc. It covers the whole Town, chat and HUD included, down to the tab bar
- * (`--nav-height`), and is only drawn while the Town is the view. It stays
+ * and goes with Continue or Esc. It fills the Town, chat and HUD included,
+ * from the top margin down to the tab bar (`--nav-height`), the world
+ * blurred out behind it, and is only drawn while the Town is the view;
+ * nothing in the Town moves while it's up. It stays
  * up back in town until you go on. Above all that, the page's shared
  * herzie stage would be under its background, so its herzies have a stage
  * of their own, inside it.
@@ -37,14 +41,22 @@ export function BossResults({ name }: { name: string }) {
   useEffect(() => {
     if (shown) stage.setHost(overlay.current);
   }, [shown, stage]);
-  // Esc goes on too, before anything else in the Town hears it.
+  // While it's up the Town is still: whatever's held is let go, aiming
+  // ends (the mouse is let go too), and keys reach it first and stop here —
+  // no walking, casting or skills. Esc goes on, like Continue.
   useEffect(() => {
     if (!shown) return;
+    letGoOfTownInput();
+    leaveCombat();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      e.preventDefault();
+      if (e.metaKey || e.ctrlKey) return;
       e.stopImmediatePropagation();
-      clearBossResults();
+      if (e.key === "Escape") {
+        e.preventDefault();
+        clearBossResults();
+      } else if (e.key !== "Enter" && e.key !== " ") {
+        e.preventDefault();
+      }
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
@@ -62,76 +74,80 @@ export function BossResults({ name }: { name: string }) {
   return (
     <div
       ref={overlay}
-      className="absolute inset-x-0 top-0 z-50 flex items-center justify-center overflow-y-auto bg-black/50 px-3 py-4"
-      style={{ bottom: "var(--nav-height, 0px)" }}
+      className="absolute inset-x-3 top-3 z-50 flex"
+      style={{ bottom: "calc(var(--nav-height, 0px) + 0.5rem)" }}
     >
+      {/* The window fills it, the Town blurred out behind; its content
+          sits in the middle. */}
       <section
         aria-labelledby="boss-results-title"
-        className="relative w-full max-w-[26rem] rounded border border-border bg-bg-panel px-4 pt-3 pb-2.5 text-ui text-text shadow-lg"
+        className="relative flex min-h-0 w-full flex-col items-center justify-center overflow-y-auto rounded border border-white/15 bg-black/45 px-4 py-3 text-ui text-text shadow-lg backdrop-blur-md"
       >
-        <h2
-          id="boss-results-title"
-          className={cn(
-            "text-center text-xl font-bold tracking-[0.2em]",
-            won ? "text-yellow" : "text-red",
-          )}
-        >
-          {won ? "VICTORY" : "DEFEAT"}
-        </h2>
-        <p className="mb-1 text-center text-[10px] text-text-dim">
-          {won ? `${name} has fallen.` : `${name} got away.`}
-        </p>
-
-        {top.length ? (
-          <>
-            <div className="mb-2 flex items-end justify-center gap-1">
-              {podium.map((p) => (
-                <Podium key={p.rank} place={p} you={mine(p)} stage={stage} />
-              ))}
-            </div>
-
-            <table className="w-full border-separate border-spacing-y-0.5">
-              <thead>
-                <tr className="text-[10px] text-text-dim">
-                  <th className="text-left font-normal" colSpan={2}>
-                    <span className="sr-only">Herzie</span>
-                  </th>
-                  <th className="w-14 text-right font-normal">Dmg</th>
-                  <th
-                    className="w-12 text-right font-normal"
-                    title="Healed + blocked"
-                  >
-                    Heal
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {top.map((p) => (
-                  <Row key={p.rank} place={p} you={mine(p)} />
-                ))}
-                {outside && you ? (
-                  <>
-                    <tr aria-hidden>
-                      <td colSpan={4} className="text-center text-text-dim">
-                        …
-                      </td>
-                    </tr>
-                    <Row place={you} you />
-                  </>
-                ) : null}
-              </tbody>
-            </table>
-          </>
-        ) : (
-          <p className="my-2 text-center text-[10px] text-text-dim">
-            Nobody landed a hit.
+        <div className="w-full max-w-[26rem]">
+          <h2
+            id="boss-results-title"
+            className={cn(
+              "text-center text-xl font-bold tracking-[0.2em]",
+              won ? "text-yellow" : "text-red",
+            )}
+          >
+            {won ? "VICTORY" : "DEFEAT"}
+          </h2>
+          <p className="mb-1 text-center text-[10px] text-text-dim">
+            {won ? `${name} has fallen.` : `${name} got away.`}
           </p>
-        )}
 
-        <div className="mt-2.5 flex justify-center">
-          <button type="button" className="btn" onClick={clearBossResults}>
-            Continue
-          </button>
+          {top.length ? (
+            <>
+              <div className="mb-2 flex items-end justify-center gap-1">
+                {podium.map((p) => (
+                  <Podium key={p.rank} place={p} you={mine(p)} stage={stage} />
+                ))}
+              </div>
+
+              <table className="w-full border-separate border-spacing-y-0.5">
+                <thead>
+                  <tr className="text-[10px] text-text-dim">
+                    <th className="text-left font-normal" colSpan={2}>
+                      <span className="sr-only">Herzie</span>
+                    </th>
+                    <th className="w-14 text-right font-normal">Dmg</th>
+                    <th
+                      className="w-12 text-right font-normal"
+                      title="Healed + blocked"
+                    >
+                      Heal
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {top.map((p) => (
+                    <Row key={p.rank} place={p} you={mine(p)} />
+                  ))}
+                  {outside && you ? (
+                    <>
+                      <tr aria-hidden>
+                        <td colSpan={4} className="text-center text-text-dim">
+                          …
+                        </td>
+                      </tr>
+                      <Row place={you} you />
+                    </>
+                  ) : null}
+                </tbody>
+              </table>
+            </>
+          ) : (
+            <p className="my-2 text-center text-[10px] text-text-dim">
+              Nobody landed a hit.
+            </p>
+          )}
+
+          <div className="mt-2.5 flex justify-center">
+            <button type="button" className="btn" onClick={clearBossResults}>
+              Continue
+            </button>
+          </div>
         </div>
       </section>
     </div>
