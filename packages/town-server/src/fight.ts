@@ -3,8 +3,12 @@
  * boss, and what to tell whom. `room.ts` feeds it frames and relays what it
  * returns, so everything here is tested without a Durable Object.
  */
-import { type AttackStyle, attackStyle } from "@herzies/shared/classes";
-import type { HitStats } from "@herzies/shared/combat";
+import {
+  type AttackStyle,
+  attackStyle,
+  isHerzieClass,
+} from "@herzies/shared/classes";
+import { type HitStats, meleeDamage } from "@herzies/shared/combat";
 import {
   isSkillId,
   SKILL_COOLDOWN_GRACE_MS,
@@ -59,6 +63,8 @@ export type FightPlayer = {
   ready: Map<SkillId, number>;
   /** Its basic attack, from its class: a wave, or a thrown disc. */
   attack: AttackStyle;
+  /** A melee blow's share of a wave: a stick with a class, else a bump. */
+  melee: number;
 };
 
 /** What became of a skill. "early" is a cooldown refusal inside the grace
@@ -175,6 +181,7 @@ export class FightRuntime {
       present: true,
       skills: skillsOf(ticket),
       attack: attackStyle(ticket.cls),
+      melee: meleeDamage(isHerzieClass(ticket.cls)),
       // A rejoin doesn't reset cooldowns.
       ready: known?.ready ?? new Map(),
     };
@@ -226,7 +233,16 @@ export class FightRuntime {
     if (!p?.present || p.down || !this.open) return "ignored";
     const pos = this.history.at(uid, now);
     if (!pos) return "ignored";
-    return this.engine.cast(uid, pos, yaw, pitch, p.stats, now, p.attack);
+    return this.engine.cast(
+      uid,
+      pos,
+      yaw,
+      pitch,
+      p.stats,
+      now,
+      p.attack,
+      p.melee,
+    );
   }
 
   /**

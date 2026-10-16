@@ -1,4 +1,9 @@
-import { CAST_INTERVAL_MS } from "@herzies/shared/combat";
+import {
+  BUMP_DAMAGE,
+  CAST_INTERVAL_MS,
+  DISC_DAMAGE,
+  STRIKE_DAMAGE,
+} from "@herzies/shared/combat";
 import { TOWN_WALK_SPEED } from "@herzies/shared/town-net";
 import { describe, expect, it } from "vitest";
 import {
@@ -343,5 +348,26 @@ describe("position history", () => {
     expect(h.at("a", 3_000)?.x).toBeGreaterThan(2_000);
     h.forget("a");
     expect(h.at("a", 0)).toBeNull();
+  });
+});
+
+describe("melee damage", () => {
+  // Pressed against its front, facing it.
+  const front = { x: TUNING.boss.x, z: TUNING.boss.z + TUNING.boss.radius + 1 };
+  const dealt = (melee?: number) => {
+    const e = engine(10_000, 10_000);
+    e.cast("a", front, Math.PI, 0, STATS, T0, "melee", melee);
+    e.update(T0 + 1, [still("a", front.x, front.z)]);
+    return 10_000 - e.hp;
+  };
+
+  it("a classless bump hits lighter than a Percussionist's stick", () => {
+    expect(dealt(BUMP_DAMAGE)).toBeLessThan(dealt(STRIKE_DAMAGE));
+    expect(dealt()).toBe(dealt(STRIKE_DAMAGE));
+  });
+
+  it("no blow out-hits the Record Slinger's disc", () => {
+    expect(BUMP_DAMAGE).toBeLessThan(STRIKE_DAMAGE);
+    expect(STRIKE_DAMAGE).toBeLessThan(DISC_DAMAGE);
   });
 });

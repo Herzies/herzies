@@ -24,9 +24,9 @@ import {
   discLandsAfterMs,
   type HitStats,
   hitDamage,
-  MELEE_DAMAGE,
   MELEE_REACH,
   meleeReaches,
+  STRIKE_DAMAGE,
   WAVE_HAND_HEIGHT,
   WAVE_SPEED,
 } from "@herzies/shared/combat";
@@ -299,9 +299,9 @@ export class BossEngine {
    *
    * A Record Slinger's cast is a thrown disc (`attack` "disc"): shorter
    * reach, its own speed, and a little more damage. Only its way out hits.
-   * A melee blow (`attack` "melee": a Percussionist's, or a herzie without
-   * a class) hits harder, but only up close and facing it; the client
-   * sends it as it lands, so it lands now.
+   * A melee blow (`attack` "melee": a Percussionist's stick, or a herzie
+   * without a class bumping into it) hits for `melee` of a wave, only up
+   * close and facing it; the client sends it as it lands, so it lands now.
    */
   cast(
     uid: string,
@@ -311,6 +311,7 @@ export class BossEngine {
     stats: HitStats,
     now: number,
     attack: AttackStyle = "wave",
+    melee: number = STRIKE_DAMAGE,
   ): "cooldown" | "miss" | "hit" | "dead" {
     if (this.killed) return "dead";
     const bucket = this.casts.get(uid) ?? {
@@ -340,7 +341,7 @@ export class BossEngine {
       this.pending.push({
         at: now,
         uid,
-        damage: Math.max(1, Math.round(amount * MELEE_DAMAGE)),
+        damage: Math.max(1, Math.round(amount * melee)),
         crit,
       });
       return "hit";

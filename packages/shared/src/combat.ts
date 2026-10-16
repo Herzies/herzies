@@ -90,8 +90,18 @@ export function discLandsAfterMs(dist: number): number {
 export const MELEE_REACH = 1.6;
 /** How far either way of where it faces a melee hit reaches (radians). */
 export const MELEE_ARC = (60 * Math.PI) / 180;
-/** A melee hit as a share of a wave's: more, for standing in its face. */
-export const MELEE_DAMAGE = 1.3;
+/** A Percussionist's stick as a share of a wave's: the same. The tank
+ * stands in its face to hold it, not to out-hit the Record Slinger. */
+export const STRIKE_DAMAGE = 1;
+/** A herzie without a class bumps into it: the weakest blow there is, so
+ * picking a class at stage 2 is a step up. */
+export const BUMP_DAMAGE = 0.5;
+
+/** A melee hit as a share of a wave's: a stick (with a class) or a bump
+ * (without one). */
+export function meleeDamage(classed: boolean): number {
+  return classed ? STRIKE_DAMAGE : BUMP_DAMAGE;
+}
 
 /** Whether a melee hit from `from`, facing `yaw`, reaches `target` (a
  * circle on the ground): within `reach` of its surface, and within the

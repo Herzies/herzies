@@ -11,7 +11,7 @@ import {
   BOSS_STAND,
   DISC_DAMAGE,
   DISC_RANGE,
-  MELEE_DAMAGE,
+  meleeDamage,
   meleeReaches,
   WAVE_HAND_HEIGHT,
 } from "@herzies/shared/combat";
@@ -514,7 +514,13 @@ export function Combat({
             Math.min(DUMMY.chest, height),
             d.z - toward[2] * DUMMY.radius,
           ];
-          const kind = myHit(d, toward, point, MELEE_DAMAGE, now);
+          const kind = myHit(
+            d,
+            toward,
+            point,
+            meleeDamage(blow === "strike"),
+            now,
+          );
           waveField.burst(point, toward, kind);
           landed = true;
         }
