@@ -574,7 +574,11 @@ mod tests {
         assert_eq!(r.herzie.class.as_deref(), Some("record_slinger"));
         assert_eq!(
             r.herzie.stat_points,
-            Some(StatPoints { stamina: 10, sonic_power: 4, euphony: 0 })
+            Some(StatPoints {
+                stamina: 10,
+                sonic_power: 4,
+                euphony: 0
+            })
         );
         assert_eq!(r.skills.map(|s| s.len()), Some(1));
     }

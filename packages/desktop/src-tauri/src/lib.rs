@@ -727,8 +727,7 @@ async fn allocate_stats(
 ) -> Result<serde_json::Value, String> {
     let client = api::http();
     let result = api::api_allocate_stats(&client, stamina, sonic_power, euphony).await?;
-    let points: Option<StatPoints> =
-        serde_json::from_value(result["statPoints"].clone()).ok();
+    let points: Option<StatPoints> = serde_json::from_value(result["statPoints"].clone()).ok();
     let mut s = state.lock().unwrap();
     if let (Some(points), Some(ref mut herzie)) = (points, s.herzie.as_mut()) {
         herzie.stat_points = Some(points);
