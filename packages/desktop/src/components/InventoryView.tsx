@@ -52,6 +52,7 @@ import {
   useFallbackStageOffset,
   useHomeStageOffset,
 } from "../hooks/useStageAlignment";
+import { notify } from "../lib/notices";
 import { cn, formatAmount } from "../lib/utils";
 import { herzies } from "../tauri-bridge";
 import { Coin } from "./Coin";
@@ -890,14 +891,6 @@ function InventoryViewImpl({
   const bagSpot = (unitId: string) =>
     panel === "bag" ? toBank(unitId) : toTab("bag");
 
-  /** A short message over the herzie — why a place or return was refused. */
-  const [notice, setNotice] = useState<string | null>(null);
-  useEffect(() => {
-    if (!notice) return;
-    const id = setTimeout(() => setNotice(null), 2500);
-    return () => clearTimeout(id);
-  }, [notice]);
-
   // What the grid shows: one tile per unworn copy, a stack folded into one.
   // Held behind `units`, which is identity-stable while its content is, so this
   // isn't rebuilt by an unrelated render.
@@ -1277,7 +1270,7 @@ function InventoryViewImpl({
     if (predicted.ok) {
       const after = bankTiles(predicted.units).length;
       if (after > capacity && after > tiles.length) {
-        setNotice(
+        notify(
           returning
             ? `Inventory full — "${name}" can't be returned`
             : `Inventory full — no room for what "${name}" replaces`,
@@ -1346,7 +1339,7 @@ function InventoryViewImpl({
     }
     // Nothing moved (or it moved back), so there's nothing to fly to.
     for (const f of created) endFlight(f.id);
-    if (!result.sent) setNotice(result.error);
+    if (!result.sent) notify(result.error);
     const verb = result.action === "equip" ? "place" : "return";
     onLog?.(`Failed to ${verb} "${name}": ${result.error}`);
     return false;
@@ -1498,7 +1491,7 @@ function InventoryViewImpl({
     }
     for (const f of created) endFlight(f.id);
     if (!failed.ok) {
-      if (!failed.sent) setNotice(failed.error);
+      if (!failed.sent) notify(failed.error);
       onLog?.(`Failed to move "${name(unit)}": ${failed.error}`);
     }
   };
@@ -1779,18 +1772,7 @@ function InventoryViewImpl({
         {...{ [HERZIE_ZONE_ATTR]: "" }}
         className="absolute inset-x-0"
         style={{ top: stageTop, height: HERZIE_STAGE_HEIGHT }}
-      >
-        {notice && (
-          <div
-            role="status"
-            className="pointer-events-none absolute inset-x-0 top-2 z-20 flex justify-center"
-          >
-            <div className="border border-red/60 bg-bg-panel px-2 py-1 text-ui-sm text-red">
-              {notice}
-            </div>
-          </div>
-        )}
-      </div>
+      ></div>
 
       {/* Whatever the deck and bag don't use. */}
       <div className="min-h-0 flex-1" />
@@ -2158,9 +2140,10 @@ function InventoryViewImpl({
                       {
                         label: "Eat",
                         onClick: () => {
-                          void eat(tile.itemId, (why) =>
-                            onLog?.(`Couldn't eat "${def.name}": ${why}`),
-                          );
+                          void eat(tile.itemId, (why) => {
+                            notify(why);
+                            onLog?.(`Couldn't eat "${def.name}": ${why}`);
+                          });
                           setTileMenu(null);
                         },
                       },

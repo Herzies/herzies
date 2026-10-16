@@ -6,8 +6,8 @@ import {
   type ServerMessage,
 } from "@herzies/shared";
 import { useSyncExternalStore } from "react";
+import { notify } from "../../lib/notices";
 import { herzies } from "../../tauri-bridge";
-import { showToast } from "./cave";
 import { bossFight } from "./combat/fight";
 import { pushLootLog } from "./combat/lootFeed";
 import { townNet } from "./net/townNet";
@@ -77,7 +77,7 @@ function ateLine(itemId: string, heal: number) {
  * default); resolves whether it was eaten. */
 export async function eat(
   itemId: string,
-  onRefused: (message: string) => void = showToast,
+  onRefused: (message: string) => void = notify,
 ): Promise<boolean> {
   const now = performance.now();
   if (now - lastAt < CONSUMABLE_COOLDOWN_MS) return false;

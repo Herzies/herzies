@@ -1,17 +1,16 @@
 import { useEffect, useState } from "react";
 import { cn } from "../../lib/utils";
-import { clock, useToast } from "./cave";
+import { clock } from "./cave";
 import { bossFight, mobsLeft, useBossFight } from "./combat/fight";
 
 /**
  * What the boss room shows over the world: the boss's health (with its
  * phases marked), a flash of red when you're hit, and how long until the
- * room closes once the fight is over. Also the little line of text the
- * door and the room leave behind ("The cave is sealed").
+ * room closes once the fight is over. (The door's and the room's little
+ * messages are notices: lib/notices.ts.)
  */
 export function BossHud({ name }: { name: string }) {
   useBossFight();
-  const toast = useToast();
   const { on, hp, maxHp, closing, victory, youHitAt, tower } = bossFight;
   const [now, setNow] = useState(() => performance.now());
   useEffect(() => {
@@ -92,14 +91,6 @@ export function BossHud({ name }: { name: string }) {
           className="pointer-events-none absolute inset-0 z-20 motion-safe:animate-[hurt_0.45s_ease-out_forwards]"
           style={{ boxShadow: "inset 0 0 90px 20px rgba(220,38,38,0.55)" }}
         />
-      ) : null}
-      {toast ? (
-        <div
-          role="status"
-          className="pointer-events-none absolute bottom-24 left-1/2 z-30 max-w-[80%] -translate-x-1/2 rounded bg-black/75 px-3 py-1.5 text-center text-ui text-white"
-        >
-          {toast}
-        </div>
       ) : null}
     </>
   );

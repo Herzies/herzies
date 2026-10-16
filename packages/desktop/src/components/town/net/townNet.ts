@@ -9,8 +9,8 @@ import {
   withCastSeq,
 } from "@herzies/shared";
 import { useEffect, useSyncExternalStore } from "react";
+import { notify } from "../../../lib/notices";
 import { herzies } from "../../../tauri-bridge";
-import { showToast } from "../cave";
 import { setChampion } from "../champion";
 import { bossFight, handleBossMessage } from "../combat/fight";
 import { combat } from "../combat/state";
@@ -63,7 +63,7 @@ export function townNet(): TownConnection {
       // The cave (or the Tower) won't have us: back to town, with the
       // reason.
       const tower = townSave.map === "tower";
-      showToast(
+      notify(
         why === "down"
           ? "You need some rest first."
           : tower
@@ -75,12 +75,13 @@ export function townNet(): TownConnection {
       goToMap("home");
     },
     onRoomClosed: () => {
-      showToast(
+      notify(
         townSave.map === "tower"
           ? "The Tower closes for now. Back to town."
           : bossFight.victory
             ? "The lair falls quiet. Back to town."
             : "The boss slipped away. Back to town.",
+        { kind: "info" },
       );
       goToMap("home");
     },

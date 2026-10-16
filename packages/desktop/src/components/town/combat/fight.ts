@@ -9,7 +9,7 @@ import type {
   TowerMob,
 } from "@herzies/shared/town-net";
 import { useSyncExternalStore } from "react";
-import { showToast } from "../cave";
+import { notify } from "../../../lib/notices";
 import {
   sfxDown,
   sfxHurt,
@@ -365,10 +365,12 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       const was = bossFight.tower;
       setTower(m, now);
       if (m.cleared && !(was?.floor === m.floor && was.cleared)) {
-        showToast(`Floor ${m.floor} cleared! The way on is open.`);
+        notify(`Floor ${m.floor} cleared! The way on is open.`, {
+          kind: "success",
+        });
         sfxPortal();
       } else if (!m.cleared && was && was.floor !== m.floor) {
-        showToast(`Floor ${m.floor}`, 2_000);
+        notify(`Floor ${m.floor}`, { kind: "info" });
       }
       emit();
       return;

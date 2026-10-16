@@ -31,6 +31,7 @@ import {
 import type { RootState } from "@react-three/fiber";
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { Notices } from "./components/Notices";
 import type { EventCard } from "./components/TownScene";
 import { TownVitals } from "./components/TownVitals";
 import { BossHud } from "./components/town/BossHud";
@@ -344,6 +345,7 @@ function Sandbox() {
         }
       />
       <BossHud name="The boss" />
+      <Notices />
       <SkillHud />
       <Hotbar
         units={hotbarUnits}

@@ -34,6 +34,7 @@ import { IncomingFriendOverlay } from "./components/IncomingFriendOverlay";
 import { IncomingTradeOverlay } from "./components/IncomingTradeOverlay";
 import { HERZIE_ZONE_ATTR, InventoryView } from "./components/InventoryView";
 import { LoadingSplash } from "./components/LoadingSplash";
+import { Notices } from "./components/Notices";
 import { OnboardingScreen } from "./components/OnboardingScreen";
 import { ProfileView } from "./components/ProfileView";
 import { PromptOverlay } from "./components/PromptOverlay";
@@ -1420,6 +1421,9 @@ function App() {
       {ghostMode && (
         <div className="pointer-events-none fixed inset-0 z-200 bg-black/30" />
       )}
+
+      {/* Short messages that matter now (lib/notices.ts). */}
+      <Notices />
     </div>
   );
 }

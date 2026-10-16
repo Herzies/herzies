@@ -1,5 +1,6 @@
 import {
   applyEquip,
+  CLASS_DEFS,
   type Equipped,
   type EquipRejection,
   type GroundSide,
@@ -275,7 +276,9 @@ export function useOptimisticUnits(
           error:
             predicted.reason === "stage-too-low"
               ? `Your herzie needs to reach stage ${item?.minStage} to wear this`
-              : REJECTION_MESSAGES[predicted.reason],
+              : predicted.reason === "class-required" && item?.requiredClass
+                ? `Only a ${CLASS_DEFS[item.requiredClass].name} can wear this`
+                : REJECTION_MESSAGES[predicted.reason],
           sent: false,
         };
       }
