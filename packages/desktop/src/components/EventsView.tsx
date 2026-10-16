@@ -618,6 +618,9 @@ function EventsViewImpl({
     // visitor (Nandor) opens his stall like George does.
     for (const e of liveEvents) {
       if (EVENT_TYPES.some((t) => t.type === e.type)) continue;
+      // The Tower is a place, not a visitor: its portal opens instead
+      // (town/gates.ts), and the bulletin board lists it.
+      if (e.type === "tower") continue;
       const limited = LIMITED_TYPES.includes(e.type);
       cards.push({
         type: e.type,
