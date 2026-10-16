@@ -60,7 +60,7 @@ describe("choosing a class", () => {
     expect(r).toMatchObject({ ok: false, reason: "stage-too-low" });
   });
 
-  it("hands over the gear, worn, and the starter skill", async () => {
+  it("gives the starter skill, and no gear (Boboku sells it, 00116)", async () => {
     const userId = await player({ stage: 2, level: 12 });
     const r = await rpc<Outcome>("choose_class", {
       p_user_id: userId,
@@ -68,15 +68,9 @@ describe("choosing a class", () => {
     });
     expect(r).toMatchObject({ ok: true, already: false });
     const units = await getUnits(userId);
-    const worn = Object.fromEntries(
-      units
-        .filter((u) => u.equipped_slot)
-        .map((u) => [u.equipped_slot, u.item_id]),
-    );
-    expect(worn).toMatchObject({
-      main_hand: "worn-stick",
-      off_hand: "old-cymbal",
-    });
+    expect(
+      units.filter((u) => ["worn-stick", "old-cymbal"].includes(u.item_id)),
+    ).toEqual([]);
     expect(await skills(userId)).toEqual([
       { skill_id: "cymbrella", level: 1, xp: 0 },
     ]);
@@ -97,9 +91,9 @@ describe("choosing a class", () => {
         p_class: "bard",
       }),
     ).toMatchObject({ ok: true, already: true });
-    // Still one lute.
+    // Still no lute: a retry hands nothing over either.
     const lutes = (await getUnits(userId)).filter((u) => u.item_id === "lute");
-    expect(lutes).toHaveLength(1);
+    expect(lutes).toHaveLength(0);
   });
 
   it("refuses an unknown class", async () => {
@@ -136,6 +130,9 @@ describe("class gear", () => {
   it("can't be sold", async () => {
     const userId = await player({ stage: 2, level: 12 });
     await rpc("choose_class", { p_user_id: userId, p_class: "bard" });
+    await admin()
+      .from("item_units")
+      .insert({ user_id: userId, item_id: "lute" });
     const lute = (await getUnits(userId)).find((u) => u.item_id === "lute");
     const r = await rpc<Outcome>("sell_units", {
       p_user_id: userId,
@@ -147,6 +144,9 @@ describe("class gear", () => {
   it("can't be offered in a trade, even unworn", async () => {
     const userId = await player({ stage: 2, level: 12 });
     await rpc("choose_class", { p_user_id: userId, p_class: "bard" });
+    await admin()
+      .from("item_units")
+      .insert({ user_id: userId, item_id: "lute" });
     const lute = (await getUnits(userId)).find((u) => u.item_id === "lute");
     await rpc("equip_unit", {
       p_user_id: userId,
