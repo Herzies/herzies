@@ -75,7 +75,7 @@ export function BossResults({ name }: { name: string }) {
     <div
       ref={overlay}
       className="absolute inset-x-3 top-3 z-50 flex"
-      style={{ bottom: "calc(var(--nav-height, 0px) + 0.5rem)" }}
+      style={{ bottom: "calc(var(--nav-height, 0px) + 0.75rem)" }}
     >
       {/* The window fills it, the Town blurred out behind; its content
           sits in the middle. */}
