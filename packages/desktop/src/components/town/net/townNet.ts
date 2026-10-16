@@ -9,6 +9,7 @@ import {
 import { useEffect, useSyncExternalStore } from "react";
 import { herzies } from "../../../tauri-bridge";
 import { showToast } from "../cave";
+import { setChampion } from "../champion";
 import { bossFight, handleBossMessage } from "../combat/fight";
 import { combat } from "../combat/state";
 import { goToMap, townLive, townSave } from "../runtime";
@@ -25,6 +26,8 @@ let ticketSource: (map: TownMapId) => Promise<TownTicket> = async (map) => {
   const t = await herzies.fetchTownTicket(map === "bossroom" ? map : undefined);
   // Every ticket carries the herzie's health as of now.
   if (t.vitals && !bossFight.on) setVitals(t.vitals);
+  // And who the statue shows.
+  setChampion(t.champion);
   return t;
 };
 

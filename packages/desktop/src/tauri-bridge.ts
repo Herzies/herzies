@@ -16,6 +16,7 @@ import type {
   PremiumItem,
   StatPoints,
   StoreProduct,
+  TownLook,
   Trade,
   TradeState,
   Vitals,
@@ -312,10 +313,14 @@ export const herzies = {
   /** A signed pass into the multiplayer Town. Rejects with "off" when
    * multiplayer is switched off server-side. */
   fetchTownTicket: (map?: string) =>
-    invoke<{ ticket: string; url: string; exp: number; vitals?: Vitals }>(
-      "fetch_town_ticket",
-      { map },
-    ),
+    invoke<{
+      ticket: string;
+      url: string;
+      exp: number;
+      vitals?: Vitals;
+      /** Who the Town's statue shows (older servers omit it). */
+      champion?: { name: string; look: TownLook } | null;
+    }>("fetch_town_ticket", { map }),
 
   /** The herzie's health: `"vitals"` reads it, `"respawn"` brings a
    * knocked-out herzie back with half its health. */

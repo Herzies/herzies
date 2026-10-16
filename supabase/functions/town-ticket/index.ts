@@ -12,7 +12,7 @@
  * Kill switch: TOWN_MULTIPLAYER=off answers 503, and the app falls back to
  * an empty Town.
  */
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
   getHerzieStatsFromUnits,
   normalizeEquipped,
@@ -32,6 +32,8 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const TOWN_TICKET_SECRET = Deno.env.get("TOWN_TICKET_SECRET");
 /** Where the Town server lives, so it can move without an app release. */
 const TOWN_SERVER_URL = Deno.env.get("TOWN_SERVER_URL");
+/** Never put on the statue: the owner's own herzie (music_lover69). */
+const CHAMPION_SKIP = ["920a6cf8-3f1c-4274-b549-39d976ee6ee0"];
 
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") {
@@ -175,5 +177,46 @@ Deno.serve(async (request) => {
     },
     TOWN_TICKET_SECRET,
   );
-  return jsonResponse({ ticket, url: TOWN_SERVER_URL, exp, vitals });
+  return jsonResponse({
+    ticket,
+    url: TOWN_SERVER_URL,
+    exp,
+    vitals,
+    champion: await championOf(admin),
+  });
 });
+
+/**
+ * Who the Town's statue shows: the top damage dealer of the last boss fight
+ * that's over, with their look as others see it out walking (no ground
+ * accessories). Null if there's none yet, or if looking fails: the statue
+ * keeps its stand-in, and the ticket still goes out.
+ */
+async function championOf(
+  admin: SupabaseClient,
+): Promise<{
+  name: string;
+  look: { seed: string; stage: number; equipped: Record<string, unknown> };
+} | null> {
+  let data: unknown;
+  try {
+    const res = await admin.rpc("boss_champion_json", {
+      p_skip: CHAMPION_SKIP,
+    });
+    if (res.error) return null;
+    data = res.data;
+  } catch {
+    return null;
+  }
+  if (!data) return null;
+  const c = data as {
+    name: string;
+    seed: string;
+    stage: number;
+    equipped: unknown;
+  };
+  const { ground_left: _l, ground_right: _r, ...equipped } = normalizeEquipped(
+    c.equipped,
+  );
+  return { name: c.name, look: { seed: c.seed, stage: c.stage, equipped } };
+}

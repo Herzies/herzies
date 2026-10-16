@@ -1,4 +1,5 @@
 import { Clouds } from "./Clouds";
+import { type Champion, useChampion } from "./champion";
 import type { Hour } from "./DayCycle";
 import { DayLight } from "./DayLight";
 import { HAZE_START } from "./depth";
@@ -9,7 +10,6 @@ import { Particles } from "./Particles";
 import { MapColliders, Props } from "./Props";
 import { Room } from "./Room";
 import { HOME_MAP, TOWN_MAPS_LOCAL } from "./runtime";
-import { type Champion, PLACEHOLDER_CHAMPION } from "./Statues";
 
 /** The cave's air: nearly black, a touch of violet. */
 const DARK_ROOM = "#09070e";
@@ -39,7 +39,7 @@ function mapId(map: TownMap): number {
 export function World({
   map = HOME_MAP,
   others,
-  champion = PLACEHOLDER_CHAMPION,
+  champion: given,
   hour,
 }: {
   /** Show the world at this hour of the day (default: the local clock). */
@@ -48,9 +48,12 @@ export function World({
   /** The other islands in the sky (default: every map there is; the map
    * editor passes its own). */
   others?: TownMap[];
-  /** Who the statues show (see Statues). */
+  /** Who the statues show (default: the last boss fight's, as the
+   * server last said; see champion.ts). */
   champion?: Champion;
 }) {
+  const live = useChampion();
+  const champion = given ?? live;
   // Rooms (the boss's cave) aren't islands in anyone's sky.
   const rest = (others ?? [...TOWN_MAPS_LOCAL.values()]).filter(
     (m) => m.id !== map.id && !m.room,
