@@ -31,7 +31,7 @@ export const TOWN_MAX_SHARDS = 16;
  * movement: the walkable radius and where a respawn puts you. Must match the
  * desktop's map files (checked by a desktop test). */
 export const TOWN_MAPS = {
-  home: { radius: 40, spawn: { x: 8.5, z: 9 } },
+  home: { radius: 40, spawn: { x: 13.5, z: 12 } },
   /** The training grounds, through the portal: training dummies. */
   arena: { radius: 17, spawn: { x: 0, z: -12 } },
   /** The boss's cave: a small dark room, one shared fight. */

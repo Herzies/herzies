@@ -4,6 +4,7 @@ import {
   type ServerMessage,
   signTownTicket,
   TOWN_CLOSE,
+  TOWN_MAPS,
   TOWN_PROTOCOL,
   TOWN_SPRINT_SPEED,
   type TownState,
@@ -109,7 +110,8 @@ describe("rules", () => {
     const g = newGuard(30, 0, 0);
     expect(checkMove(g, -30, 0, 100, "home")).toBe(false);
     // Home's spawn, as the map has it.
-    expect(checkMove(g, 8.5, 9, 100, "home")).toBe(true);
+    const { spawn } = TOWN_MAPS.home;
+    expect(checkMove(g, spawn.x, spawn.z, 100, "home")).toBe(true);
   });
 
   it("allows sprinting, and refuses anything faster", () => {
