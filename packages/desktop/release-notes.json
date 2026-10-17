@@ -1,5 +1,18 @@
 [
   {
+    "version": "0.1.0-beta.53",
+    "highlights": [
+      "New: the Tower. Climb floors of mobs on your own, and any kill can drop an item",
+      "Boss fights end with a victory or defeat screen, with the top three on a podium. Healing and blocking now count toward your rank",
+      "The best fighter from the last boss fight stands on the Town's statue",
+      "Meet Boboku, who sells every instrument, and Medea, whose Star Candy heals 100 HP. Picking a class no longer gives you its instrument",
+      "Press Space to jump, and put things like Star Candy on keys 2, 3 and 4",
+      "Instruments have stats now and can be upgraded with dice",
+      "Every level adds a little HP, Sonic Power and Def",
+      "More boss loot for everyone who helps, and a bulletin board in Town shows what's on this week"
+    ]
+  },
+  {
     "version": "0.1.0-beta.52",
     "highlights": [
       "New: classes. At stage 2, pick a Bard, Record Slinger or Percussionist, each with its own gear and skill",
