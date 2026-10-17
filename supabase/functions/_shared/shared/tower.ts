@@ -14,9 +14,9 @@
  * herzie's makes it take less from you and deal you more the further it's
  * above you (the MMO level-gap rule), and the other way round below.
  *
- * Kills pay a little XP and now and then an item, picked exactly as
- * listening picks one; both are tuned to stay behind what the same time
- * listening would bring.
+ * Kills pay a little XP (kept behind what the same time listening brings)
+ * and now and then an item, picked exactly as listening picks one, under a
+ * daily cap.
  */
 
 /** A mob's body, in world units from the ground: an upright capsule a wave
@@ -110,12 +110,13 @@ export function towerXpPerKill(floor: number): number {
 /** At most this much tower XP a day (UTC). */
 export const TOWER_XP_DAILY_CAP = 300;
 
-/** The chance a kill drops an item. Listening drops one per ten minutes;
- * at about three kills a minute this is the same pace. The item is picked
- * as listening picks one (rarity weights and luck). */
-export const TOWER_DROP_CHANCE = 1 / 25;
+/** The chance a kill drops an item: one in eight, so a floor or two of
+ * mobs usually turns something up. That's faster than listening (one per ten
+ * minutes) on purpose; the daily cap is what keeps it in check. The item is
+ * picked as listening picks one (rarity weights and luck). */
+export const TOWER_DROP_CHANCE = 1 / 8;
 /** At most this many tower drops a day (UTC). */
-export const TOWER_DROPS_DAILY_CAP = 12;
+export const TOWER_DROPS_DAILY_CAP = 30;
 
 function clamp(v: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, v));

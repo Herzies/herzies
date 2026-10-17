@@ -69,19 +69,10 @@ export const bossFight = {
   /** The boss fell: who landed the blow (an entity id), and when
    * (performance.now() ms). */
   victory: null as { by: number; at: number } | null,
-  /** What you got for it (item ids), and when the room said so
-   * (performance.now() ms); dropped at your feet by LootDrops. */
-  loot: null as {
-    id: number;
-    /** The pending drops behind it (an empty id: a dev drop, nothing to
-     * collect). */
-    drops: LootDrop[];
-    at: number;
-    /** Tossed down in front of you (the dev drop), not out of the boss. */
-    here?: boolean;
-    /** Out of a Tower mob, where it fell. */
-    from?: { x: number; z: number };
-  } | null,
+  /** What's been dropped for you, a batch per drop (boss loot, each Tower
+   * kill that paid one): every batch stays on the ground until it's picked
+   * up or you leave. Dropped by LootDrops. */
+  loots: [] as LootBatch[],
   /** In the Tower: the floor (its mobs are in {@link towerMobs}). */
   tower: null as Omit<TowerFloor, "mobs"> | null,
   /** When the boss was last hit and when you last were (performance.now()
@@ -90,6 +81,19 @@ export const bossFight = {
   youHitAt: Number.NEGATIVE_INFINITY,
   /** When the boss last slammed the floor, for it to rear and drop. */
   slammedAt: Number.NEGATIVE_INFINITY,
+};
+
+/** One drop of loot: what you got (the pending drops behind it; an empty
+ * id is a dev drop, nothing to collect), and when the room said so
+ * (performance.now() ms). */
+export type LootBatch = {
+  id: number;
+  drops: LootDrop[];
+  at: number;
+  /** Tossed down in front of you (the dev drop), not out of the boss. */
+  here?: boolean;
+  /** Out of a Tower mob, where it fell. */
+  from?: { x: number; z: number };
 };
 
 /** One Tower mob as the client holds it: the last few places the server
@@ -203,7 +207,7 @@ export function resetBossFight(): void {
     !bossFight.on &&
     !bossFight.shapes.length &&
     !bossFight.closing &&
-    !bossFight.loot
+    !bossFight.loots.length
   )
     return;
   bossFight.on = false;
@@ -213,7 +217,7 @@ export function resetBossFight(): void {
   bossFight.health.clear();
   bossFight.closing = null;
   bossFight.victory = null;
-  bossFight.loot = null;
+  bossFight.loots = [];
   bossFight.you = null;
   bossFight.tower = null;
   towerMobs.clear();
@@ -338,12 +342,15 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       return;
     case "loot":
       if (!m.drops.length) return;
-      bossFight.loot = {
-        id: ++lootSeq,
-        drops: m.drops,
-        at: now,
-        ...(m.at ? { from: m.at } : {}),
-      };
+      bossFight.loots = [
+        ...bossFight.loots,
+        {
+          id: ++lootSeq,
+          drops: m.drops,
+          at: now,
+          ...(m.at ? { from: m.at } : {}),
+        },
+      ];
       emit();
       return;
     case "mobs": {
@@ -438,7 +445,7 @@ function applyFight(f: FightState, clock: Clock, you: number) {
   );
   bossFight.closing = null;
   bossFight.victory = null;
-  bossFight.loot = null;
+  bossFight.loots = [];
   if (f.tower) setTower(f.tower, performance.now());
   else bossFight.tower = null;
   skills.buffs.clear();
@@ -474,11 +481,14 @@ export function debugDropLoot(count = 1): void {
   const pick = () => pool[Math.floor(Math.random() * pool.length)].id;
   // Stamped NaN: the Town isn't drawing while Settings is open, so the
   // drop starts on its first frame back.
-  bossFight.loot = {
-    id: ++lootSeq,
-    drops: Array.from({ length: count }, () => ({ id: "", item: pick() })),
-    at: Number.NaN,
-    here: true,
-  };
+  bossFight.loots = [
+    ...bossFight.loots,
+    {
+      id: ++lootSeq,
+      drops: Array.from({ length: count }, () => ({ id: "", item: pick() })),
+      at: Number.NaN,
+      here: true,
+    },
+  ];
   emit();
 }

@@ -26,14 +26,12 @@ export function BossHud({ name }: { name: string }) {
       {on && tower ? (
         <div
           role="status"
-          className="pointer-events-none absolute top-2 left-1/2 z-30 -translate-x-1/2 rounded bg-black/45 px-3 py-1 text-center text-ui text-white [text-shadow:0_1px_2px_#000]"
+          className="pointer-events-none absolute top-2 left-1/2 z-30 -translate-x-1/2 whitespace-nowrap rounded bg-black/35 px-2.5 py-1 text-center text-ui text-white backdrop-blur-md"
         >
           <span className="font-medium">Floor {tower.floor}</span>
-          <span className="text-white/70">
+          <span className="text-text-dim">
             {" · "}
-            {tower.cleared
-              ? "cleared — the way on is open"
-              : `${mobsLeft()} left`}
+            {tower.cleared ? "cleared" : `${mobsLeft()} left`}
           </span>
         </div>
       ) : on ? (

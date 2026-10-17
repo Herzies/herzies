@@ -39,18 +39,12 @@ import { combat, shake } from "./state";
 export function LootDrops() {
   useBossFight();
   const victory = bossFight.victory;
-  const loot = bossFight.loot;
   return (
     <>
       {victory ? <StoneBurst /> : null}
-      {loot ? (
-        <Drops
-          key={loot.id}
-          loot={loot.drops}
-          here={!!loot.here}
-          from={loot.from}
-        />
-      ) : null}
+      {bossFight.loots.map((l) => (
+        <Drops key={l.id} loot={l.drops} here={!!l.here} from={l.from} />
+      ))}
     </>
   );
 }
@@ -68,8 +62,9 @@ function burstAt(now: number): number | null {
   const v = bossFight.victory;
   if (!v) return null;
   if (Number.isNaN(v.at)) v.at = now;
-  const l = bossFight.loot;
-  if (l && Number.isNaN(l.at)) l.at = now;
+  for (const b of bossFight.loots) if (Number.isNaN(b.at)) b.at = now;
+  // The boss's own loot (not a dev drop or a Tower mob's).
+  const l = bossFight.loots.find((b) => !b.here && !b.from);
   if (burst.for !== v) {
     burst.for = v;
     burst.at = null;
@@ -84,6 +79,10 @@ function burstAt(now: number): number | null {
 }
 
 const scratchV = new THREE.Vector3();
+
+/** The drop the spirit is busy with (sent for it, or carrying it back),
+ * across every batch on the ground: it runs one errand at a time. */
+let errand: Drop | null = null;
 
 const reducedMotion = () => {
   try {
@@ -355,16 +354,21 @@ function Drops({
     [],
   );
 
-  // Leaving (or the room closing): stop the hums, call the spirit back.
+  // Leaving (or the room closing): stop the hums, call the spirit back if
+  // it was out for one of these.
   useEffect(
     () => () => {
       for (const d of drops) d.hum?.stop();
-      rt.playerHerzie?.fetch(null);
+      if (errand && drops.includes(errand)) {
+        errand = null;
+        rt.playerHerzie?.fetch(null);
+      }
     },
     [drops, rt],
   );
 
   const collect = (d: Drop, now: number) => {
+    if (errand === d) errand = null;
     d.phase = "done";
     d.since = now;
     d.hum?.stop();
@@ -405,8 +409,10 @@ function Drops({
       ? herzie.companionPosition(scratch.spirit)
       : null;
     // The spirit runs one errand at a time: busy from the moment it's sent
-    // (two pieces landing on the same frame mustn't both be given to it).
-    let errand = drops.find((d) => d.fetch !== null || d.phase === "carried");
+    // (two pieces landing on the same frame, or in two batches, mustn't both
+    // be given to it). A finished errand frees it.
+    if (errand && errand.fetch === null && errand.phase !== "carried")
+      errand = null;
 
     for (const d of drops) {
       const flat = Math.hypot(d.pos.x - player.x, d.pos.z - player.z);
@@ -444,6 +450,7 @@ function Drops({
           // Walk into it: it comes to you (and the spirit can stand down).
           if (flat < LOOT.magnetRadius && now - d.restedAt > 120) {
             if (d.fetch) herzie?.fetch(null);
+            if (errand === d) errand = null;
             d.fetch = null;
             d.phase = "pulled";
             d.since = now;

@@ -4,6 +4,7 @@ import {
   levelGapMods,
   mobsOnFloor,
   TOWER_DROP_CHANCE,
+  TOWER_DROPS_DAILY_CAP,
   towerMob,
   towerXpPerKill,
 } from "./tower.js";
@@ -45,11 +46,12 @@ describe("tower curves", () => {
     expect(gapColour(9)).toBe("red");
   });
 
-  it("pays less than listening", () => {
-    // About three kills a minute against listening's 10 XP and 0.1 drops.
+  it("pays less XP than listening, and drops under a daily cap", () => {
+    // About three kills a minute against listening's 10 XP.
     for (const f of [1, 10, 30]) {
       expect(towerXpPerKill(f) * 3).toBeLessThan(10);
     }
-    expect(TOWER_DROP_CHANCE * 3).toBeLessThanOrEqual(0.12);
+    expect(TOWER_DROP_CHANCE).toBeLessThanOrEqual(1 / 8);
+    expect(TOWER_DROPS_DAILY_CAP).toBeLessThanOrEqual(30);
   });
 });
