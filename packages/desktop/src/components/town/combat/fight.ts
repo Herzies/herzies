@@ -1,4 +1,4 @@
-import { getItemIcon, ITEMS, isSkillId } from "@herzies/shared";
+import { getItemIcon, ITEMS, isSkillId, SKILL_DEFS } from "@herzies/shared";
 import { MOB } from "@herzies/shared/tower";
 import type {
   BossTelegraph,
@@ -414,7 +414,9 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       if (!isSkillId(m.skill)) return;
       if (skills.mine?.id === m.skill)
         skills.mine = { id: m.skill, level: m.level };
-      skills.levelUp = { skill: m.skill, level: m.level, at: now };
+      notify(`Leveled up "${SKILL_DEFS[m.skill].name}" to Lv. ${m.level}`, {
+        kind: "success",
+      });
       emitSkills();
       return;
   }

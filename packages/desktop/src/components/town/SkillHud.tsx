@@ -1,20 +1,17 @@
 import { SKILL_DEFS } from "@herzies/shared";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { cn } from "../../lib/utils";
 import { bossFight } from "./combat/fight";
 import { buffOn, skills, useSkills } from "./combat/skills";
 import { useCombat } from "./combat/state";
 import { Key } from "./Key";
 
-/** How long a level-up stays up, ms. */
-const LEVEL_UP_MS = 3_500;
-
 /**
  * Your class skill, while you're aiming: just its name. Used, the name
  * greys out and fills back to white from the left as it cools down, with
  * the seconds left over it. Dimmed where it can't be used (only where you
- * can fight). A Cymbrella you're under counts down beside it; a level-up is
- * announced over it.
+ * can fight). A Cymbrella you're under counts down beside it. (A level-up
+ * is a notice: lib/notices.ts.)
  */
 export function SkillHud({
   usable = true,
@@ -32,7 +29,6 @@ export function SkillHud({
   /** Seconds left, over the name. */
   const label = useRef<HTMLSpanElement>(null);
   const buffBox = useRef<HTMLDivElement>(null);
-  const [, setTick] = useState(0);
 
   // The fill and the seconds left run off the frame clock, not renders.
   useEffect(() => {
@@ -58,21 +54,8 @@ export function SkillHud({
     return () => cancelAnimationFrame(raf);
   }, []);
 
-  // Clear the level-up after a while.
-  const levelUp = skills.levelUp;
-  useEffect(() => {
-    if (!levelUp) return;
-    const t = setTimeout(
-      () => setTick((n) => n + 1),
-      Math.max(0, levelUp.at + LEVEL_UP_MS - performance.now()),
-    );
-    return () => clearTimeout(t);
-  }, [levelUp]);
-
   if (!mine) return null;
   const def = SKILL_DEFS[mine.id];
-  const showLevelUp =
-    levelUp && performance.now() - levelUp.at < LEVEL_UP_MS ? levelUp : null;
 
   return (
     <div
@@ -81,12 +64,6 @@ export function SkillHud({
         className,
       )}
     >
-      {showLevelUp ? (
-        <div className="rounded bg-black/70 px-2 py-0.5 text-ui text-yellow">
-          Leveled up "{SKILL_DEFS[showLevelUp.skill].name}" to Lv.{" "}
-          {showLevelUp.level}
-        </div>
-      ) : null}
       <div
         ref={buffBox}
         className="rounded bg-black/60 px-1.5 text-[11px] text-yellow"
