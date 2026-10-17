@@ -1,3 +1,4 @@
+import { totalXpForLevel, xpForLevel } from "@herzies/shared";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "../lib/utils";
 import { Tooltip } from "./Tooltip";
@@ -86,21 +87,31 @@ export function SquareBar({
   );
 }
 
-/** Progress to the next level; the tooltip has it as a percentage. */
+/** Progress to the next level; the tooltip has it as "xp / needed exp" and
+ * a percentage (just the percentage without the herzie's XP). */
 export function ExpBar({
   progress,
+  level,
+  xp,
   className,
 }: {
   /** 0..1 through the current level. */
   progress: number;
+  /** The herzie's level and total XP, for the numbers in the tooltip. */
+  level?: number;
+  xp?: number;
   className?: string;
 }) {
   const pct = Math.floor(progress * 100);
+  const tip =
+    level !== undefined && xp !== undefined
+      ? `${Math.max(0, Math.floor(xp - totalXpForLevel(level))).toLocaleString()} / ${xpForLevel(level + 1).toLocaleString()} exp (${pct}%)`
+      : `${pct}%`;
   return (
     <SquareBar
       label="exp:"
       progress={progress}
-      tip={`${pct}%`}
+      tip={tip}
       fill="bg-green"
       ariaLabel="Experience"
       ariaMax={100}

@@ -54,6 +54,21 @@ describe("where it lands", () => {
   });
 });
 
+describe("where a boss's full haul lands", () => {
+  it("a dozen stay apart, in front of the boss, inside the cave", () => {
+    const spots = landingSpots(12, { x: 0, z: 8 }, () => 0.5);
+    for (const s of spots) {
+      expect(s.z).toBeGreaterThan(BOSS_STAND.z - 1);
+      expect(Math.abs(s.x)).toBeLessThan(12);
+    }
+    for (let i = 0; i < spots.length; i++)
+      for (let j = i + 1; j < spots.length; j++)
+        expect(
+          Math.hypot(spots[i].x - spots[j].x, spots[i].z - spots[j].z),
+        ).toBeGreaterThanOrEqual(LOOT.spacing * 0.9);
+  });
+});
+
 describe("its path", () => {
   it("leaves the chest, peaks above it, and lands on the floor", () => {
     const to = { x: 2, z: 0 };

@@ -58,6 +58,8 @@ export const OBJECTS = {
   B: { name: "Bush", color: "#3f7f3a" },
   L: { name: "Lamp post", color: "#ffd98a" },
   _: { name: "Bench", color: "#a8743f" },
+  M: { name: "Stand", color: "#e8667f" },
+  N: { name: "Bulletin board", color: "#f2e3b8" },
   H: { name: "Home", color: "#c9a27a" },
   $: { name: "Shop", color: "#6a9ae0" },
   C: { name: "Cave", color: "#8a8070" },
@@ -73,8 +75,9 @@ export type Point = [x: number, z: number];
 export type MapId = string;
 export const MAP_ID = /^[a-z][a-z0-9-]{1,23}$/;
 
-/** Where a portal leads. */
-export type PortalLink = { to: MapId };
+/** Where a portal leads. `next`: the Tower's way on — it leads to this
+ * same island's next floor, and only opens once the floor is cleared. */
+export type PortalLink = { to: MapId; next?: true };
 
 export type TownMap = {
   version: 2;
@@ -159,6 +162,8 @@ export const SPOT_NAMES: Record<string, string> = {
   merchant: "George",
   song_hunt: "Orphiez",
   treat_trader: "Nandor",
+  boboku: "Boboku",
+  medea: "Medea",
 };
 
 /** The centre of a cell, in world (x, z). */
@@ -366,8 +371,12 @@ export function parseMap(json: unknown): TownMap {
           !MAP_ID.test(link.to)
         ) {
           errors.push(`portals.${k}: expected { to: map id }`);
-        } else if (link.to === m.id) {
+        } else if (link.next !== undefined && link.next !== true) {
+          errors.push(`portals.${k}: next: expected true`);
+        } else if (link.to === m.id && !link.next) {
           errors.push(`portals.${k}: leads back to this island`);
+        } else if (link.next && link.to !== m.id) {
+          errors.push(`portals.${k}: a next floor is on this island`);
         }
       }
     }
@@ -457,7 +466,8 @@ export function serializeMap(map: TownMap): string {
         "portals",
         "{}",
         links.map(
-          ([k, l]) => `${JSON.stringify(k)}: { "to": ${JSON.stringify(l.to)} }`,
+          ([k, l]) =>
+            `${JSON.stringify(k)}: { "to": ${JSON.stringify(l.to)}${l.next ? `, "next": true` : ""} }`,
         ),
       )
     : "";

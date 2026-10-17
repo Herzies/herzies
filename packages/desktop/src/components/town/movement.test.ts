@@ -18,6 +18,7 @@ const idle = (): TownInput => ({
   right: false,
   mouseLeft: false,
   mouseRight: false,
+  jump: false,
   turnLeft: false,
   turnRight: false,
   tiltUp: false,

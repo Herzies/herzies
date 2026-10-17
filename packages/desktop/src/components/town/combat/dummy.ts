@@ -64,7 +64,33 @@ export type DummyState = {
   /** Frozen for a beat on a crit (hit-stop), until this performance.now(). */
   frozenUntil: number;
   meter: Meter;
+  /** A Tower mob standing in for a dummy (the server's id): waves aim at
+   * it and burst on it, but the server says what they did. */
+  mob?: number;
 };
+
+/** A fresh target at (x, z): a dummy, or a mob standing in for one. */
+export function newTarget(
+  key: string,
+  x: number,
+  z: number,
+  yaw: number,
+  mob?: number,
+): DummyState {
+  return {
+    key,
+    x,
+    z,
+    yaw,
+    rock: spring(),
+    bobble: spring(),
+    flash: 0,
+    squash: 0,
+    frozenUntil: 0,
+    meter: emptyMeter(),
+    ...(mob !== undefined ? { mob } : {}),
+  };
+}
 
 /** Every dummy on the map, facing the way it was turned (else the middle of
  * the island). */
@@ -74,18 +100,14 @@ export function dummiesOf(map: TownMap): DummyState[] {
     for (let col = 0; col < map.size; col++) {
       if (objectAt(map, col, row) !== "D") continue;
       const [x, z] = cellCenter(map, col, row);
-      out.push({
-        key: `${col},${row}`,
-        x,
-        z,
-        yaw: facingAt(map, col, row) ?? Math.atan2(-x, -z),
-        rock: spring(),
-        bobble: spring(),
-        flash: 0,
-        squash: 0,
-        frozenUntil: 0,
-        meter: emptyMeter(),
-      });
+      out.push(
+        newTarget(
+          `${col},${row}`,
+          x,
+          z,
+          facingAt(map, col, row) ?? Math.atan2(-x, -z),
+        ),
+      );
     }
   }
   return out;

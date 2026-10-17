@@ -7,6 +7,7 @@ import { cn } from "../../lib/utils";
 import { lookOf } from "../TownScene";
 import { VISITOR_THEMES } from "../VisitorRowTheme";
 import { ambient } from "./ambient";
+import { markMet, RESIDENTS, useMet } from "./met";
 import { NAME_SHADOW, nameOpacity } from "./nameFade";
 import { NOTICE_RANGE, type TownSpot, townSave } from "./runtime";
 
@@ -78,6 +79,15 @@ export function Visitor({
 
   const open = card.openKey;
   const Tag = open ? "button" : "div";
+  // A visitor who's arrived and you haven't talked to yet: a "!" over their
+  // head. The residents live here, so they never arrive.
+  const met = useMet(card);
+  const fresh = !!herzie && live && !!open && !met && !RESIDENTS.has(card.type);
+  const talk = () => {
+    if (!open) return;
+    markMet(card);
+    onOpen(open);
+  };
   return (
     <>
       {herzie && (
@@ -109,9 +119,7 @@ export function Visitor({
         >
           <div ref={name} style={{ opacity: 0 }}>
             <Tag
-              {...(open
-                ? { type: "button" as const, onClick: () => onOpen(open) }
-                : {})}
+              {...(open ? { type: "button" as const, onClick: talk } : {})}
               aria-label={`${card.title}: ${status}`}
               className={cn(
                 "whitespace-nowrap border-none bg-transparent p-0 text-[11px] font-medium leading-tight text-white",
@@ -122,6 +130,22 @@ export function Visitor({
               {card.title}
             </Tag>
           </div>
+        </Html>
+      )}
+      {herzie && fresh && (
+        <Html
+          position={[at.x, herzie.height * size + 1.4, at.z]}
+          center
+          zIndexRange={[20, 0]}
+        >
+          <button
+            type="button"
+            onClick={talk}
+            aria-label={`${card.title} is new in town`}
+            className="town-new-marker cursor-pointer border-none bg-transparent p-0 font-bold leading-none"
+          >
+            !
+          </button>
         </Html>
       )}
     </>

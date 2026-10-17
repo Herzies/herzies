@@ -4,33 +4,13 @@ import { useFrame } from "@react-three/fiber";
 import { CylinderCollider } from "@react-three/rapier";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
-import type { Look } from "../TownScene";
 import { ambient } from "./ambient";
+import type { Champion } from "./champion";
 import { cellCenter, facingAt, objectAt, type TownMap } from "./map";
 import { nameOpacity } from "./nameFade";
 import { townSave } from "./runtime";
 
-/** Who a statue shows: whoever came out on top in the last boss fight. */
-export type Champion = { look: Look; name: string };
-
-/** Until the server says who won, the champion is set here by hand: eddie,
- * top damage on Nohoot Henry (2026-10-09). Their look as the server has it
- * (seeded by friend code), less ground accessories, like a herzie out
- * walking. */
-export const PLACEHOLDER_CHAMPION: Champion = {
-  look: {
-    seed: "HERZ-2CCV",
-    stage: 3,
-    equipped: {
-      body: "gold-chain",
-      head: "headphones",
-      color: "purple-dane",
-      scenery: "stars",
-      modifier: ["first-edition", "good-eye-sniper"],
-    },
-  },
-  name: "eddie",
-};
+export type { Champion } from "./champion";
 
 const PLINTH_HEIGHT = 0.7;
 const STATUE_SCALE = 1.4;

@@ -11,6 +11,7 @@ import {
   buildMerchantConfig,
   buildSongHuntConfig,
   fetchUpcomingEvents,
+  fetchWeekEvents,
 } from "@/lib/events";
 import { createAdminClient } from "@/lib/supabase-admin";
 
@@ -80,7 +81,10 @@ export async function GET(request: Request) {
     }),
   );
 
-  const upcoming = await fetchUpcomingEvents(admin, now);
+  const [upcoming, week] = await Promise.all([
+    fetchUpcomingEvents(admin, now),
+    fetchWeekEvents(admin, now),
+  ]);
 
-  return NextResponse.json({ events, upcoming });
+  return NextResponse.json({ events, upcoming, week });
 }

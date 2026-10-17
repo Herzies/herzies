@@ -5,12 +5,16 @@ import type {
   ItemUnit,
 } from "@herzies/shared";
 import {
+  BOBOKU_KEY,
+  BOBOKU_NAME,
   getHerzieStats,
   getHerzieStatsFromUnits,
   getItem,
   RARITY_COLORS as ITEM_RARITY_COLORS,
   ItemTypeIcon,
   isVisitorType,
+  MEDEA_KEY,
+  MEDEA_NAME,
   MERCHANT_NAME,
   type StatPoints,
   TREAT_TRADER_NAME,
@@ -23,6 +27,7 @@ import { cn } from "../lib/utils";
 import { type ChatMessage, herzies, useWindowFocused } from "../tauri-bridge";
 import { BackButton } from "./BackButton";
 import { BossFightHelp, BossFightPanel, makeDebugBoss } from "./BossFightPanel";
+import { BulletinPanel } from "./BulletinPanel";
 import ItemInspectOverlay, {
   INSPECT_ORIGIN_ATTR,
   inspectOrigin,
@@ -34,6 +39,8 @@ import { OrphiezStage } from "./OrphiezStage";
 import { TabButton } from "./TabButton";
 import type { EventCard } from "./TownScene";
 import { TownWorld } from "./TownWorld";
+import { BULLETIN_KEY } from "./town/Boards";
+import { setTowerOpen } from "./town/gates";
 import { View } from "./View";
 import { VisitorHelp } from "./VisitorHelp";
 import { VISITOR_THEMES } from "./VisitorRowTheme";
@@ -262,6 +269,7 @@ function EventsViewImpl({
     name: string;
     level: number;
     progress: number;
+    xp?: number;
   };
   /** Tab stays mounted but hidden; only poll while user is on Events. */
   eventsTabVisible: boolean;
@@ -290,6 +298,13 @@ function EventsViewImpl({
 }) {
   const [events, setEvents] = useState<GameEvent[]>([]);
   const [upcoming, setUpcoming] = useState<GameEvent[]>([]);
+  const [week, setWeek] = useState<GameEvent[]>([]);
+  // The Tower's door in Town is open while its event is on.
+  const towerEnds = events.find((e) => e.type === "tower")?.endsAt;
+  useEffect(() => {
+    const at = towerEnds ? new Date(towerEnds).getTime() : Number.NaN;
+    setTowerOpen(Number.isFinite(at) ? { endsAt: at } : null);
+  }, [towerEnds]);
   /** Open card (see EventCard.key); null shows the list. */
   const [selected, setSelected] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -406,6 +421,7 @@ function EventsViewImpl({
           if (cancelled) return;
           setEvents(active.events);
           setUpcoming(active.upcoming ?? []);
+          setWeek(active.week ?? []);
           setActiveLoaded(true);
           // A visit started or ended: the previous hunt / next hunt may have
           // moved too. The first load just records the set.
@@ -603,6 +619,9 @@ function EventsViewImpl({
     // visitor (Nandor) opens his stall like George does.
     for (const e of liveEvents) {
       if (EVENT_TYPES.some((t) => t.type === e.type)) continue;
+      // The Tower is a place, not a visitor: its portal opens instead
+      // (town/gates.ts), and the bulletin board lists it.
+      if (e.type === "tower") continue;
       const limited = LIMITED_TYPES.includes(e.type);
       cards.push({
         type: e.type,
@@ -632,6 +651,26 @@ function EventsViewImpl({
         detail: "On the way to town",
       });
     }
+    // Boboku is always in town: no event, no schedule.
+    cards.push({
+      type: BOBOKU_KEY,
+      title: BOBOKU_NAME,
+      description: null,
+      status: "live",
+      at: null,
+      openKey: BOBOKU_KEY,
+      detail: "Sells the basic instruments",
+    });
+    // So is Medea.
+    cards.push({
+      type: MEDEA_KEY,
+      title: MEDEA_NAME,
+      description: null,
+      status: "live",
+      at: null,
+      openKey: MEDEA_KEY,
+      detail: "Sweets and potions",
+    });
     // Nearest in time first: what's on now, then what starts soonest, then
     // types with nothing on the calendar.
     const when = (c: EventCard) =>
@@ -662,12 +701,14 @@ function EventsViewImpl({
           equipped,
         }}
         profile={playerProfile}
+        units={units}
         // Stat points on top: practice damage reads the full Sonic Power.
         stats={withStatPoints(
           units.length > 0
             ? getHerzieStatsFromUnits(units)
             : getHerzieStats(equipped),
           playerStatPoints,
+          playerProfile?.level,
         )}
       />
     );
@@ -736,6 +777,40 @@ function EventsViewImpl({
             equipped={equipped}
             units={units}
             onBought={() => setReloadKey((k) => k + 1)}
+            onLog={onLog}
+            paused={!eventsTabVisible || !focused}
+          />
+        </View>
+      );
+    }
+
+    if (selected === BULLETIN_KEY) {
+      return (
+        <View
+          title="Bulletin board"
+          colour="cyan"
+          childrenClassName="flex min-h-0 flex-col"
+          backButton={back}
+        >
+          <BulletinPanel week={week} />
+        </View>
+      );
+    }
+
+    if (selected === BOBOKU_KEY || selected === MEDEA_KEY) {
+      return (
+        <View
+          title={selected === MEDEA_KEY ? MEDEA_NAME : BOBOKU_NAME}
+          colour="cyan"
+          childrenClassName="flex min-h-0 flex-col"
+          backButton={back}
+        >
+          <MerchantPanel
+            event={selected}
+            currency={currency}
+            equipped={equipped}
+            units={units}
+            onBought={() => {}}
             onLog={onLog}
             paused={!eventsTabVisible || !focused}
           />

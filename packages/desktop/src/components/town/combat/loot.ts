@@ -156,7 +156,9 @@ export type Vec2 = { x: number; z: number };
 
 /**
  * Where `count` pieces land: fanned out in front of the boss, toward the
- * player so they come to you, at least LOOT.spacing apart.
+ * player so they come to you, at least LOOT.spacing apart. A handful make
+ * one arc; a boss's full haul (a dozen) makes two staggered rows on a
+ * wider fan, every other piece in the back row.
  */
 export function landingSpots(
   count: number,
@@ -165,11 +167,14 @@ export function landingSpots(
 ): Vec2[] {
   const toward = Math.atan2(player.x - BOSS_STAND.x, player.z - BOSS_STAND.z);
   const spots: Vec2[] = [];
-  const spread = count > 1 ? 0.55 : 0;
+  const spread =
+    count > 1 ? Math.min(1.45, 0.55 + 0.09 * Math.max(0, count - 3)) : 0;
+  const rows = count > 5 ? 2 : 1;
   for (let i = 0; i < count; i++) {
     const t = count > 1 ? i / (count - 1) - 0.5 : 0;
     const angle = toward + t * 2 * spread + (random() - 0.5) * 0.15;
-    const r = LOOT.landNear + random() * (LOOT.landFar - LOOT.landNear);
+    const back = rows === 2 && i % 2 === 1 ? LOOT.spacing : 0;
+    const r = LOOT.landNear + back + random() * (LOOT.landFar - LOOT.landNear);
     spots.push({
       x: BOSS_STAND.x + Math.sin(angle) * r,
       z: BOSS_STAND.z + Math.cos(angle) * r,

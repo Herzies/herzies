@@ -1,18 +1,17 @@
 import { useEffect, useState } from "react";
 import { cn } from "../../lib/utils";
-import { clock, useToast } from "./cave";
-import { bossFight, useBossFight } from "./combat/fight";
+import { clock } from "./cave";
+import { bossFight, mobsLeft, useBossFight } from "./combat/fight";
 
 /**
  * What the boss room shows over the world: the boss's health (with its
  * phases marked), a flash of red when you're hit, and how long until the
- * room closes once the fight is over. Also the little line of text the
- * door and the room leave behind ("The cave is sealed").
+ * room closes once the fight is over. (The door's and the room's little
+ * messages are notices: lib/notices.ts.)
  */
 export function BossHud({ name }: { name: string }) {
   useBossFight();
-  const toast = useToast();
-  const { on, hp, maxHp, closing, victory, youHitAt } = bossFight;
+  const { on, hp, maxHp, closing, victory, youHitAt, tower } = bossFight;
   const [now, setNow] = useState(() => performance.now());
   useEffect(() => {
     if (!closing) return;
@@ -24,7 +23,18 @@ export function BossHud({ name }: { name: string }) {
   const closes = closing ? Math.max(0, closing.at - now) : 0;
   return (
     <>
-      {on ? (
+      {on && tower ? (
+        <div
+          role="status"
+          className="pointer-events-none absolute top-2 left-1/2 z-30 -translate-x-1/2 whitespace-nowrap rounded bg-black/35 px-2.5 py-1 text-center text-ui text-white backdrop-blur-md"
+        >
+          <span className="font-medium">Floor {tower.floor}</span>
+          <span className="text-text-dim">
+            {" · "}
+            {tower.cleared ? "cleared" : `${mobsLeft()} left`}
+          </span>
+        </div>
+      ) : on ? (
         <div
           className="pointer-events-none absolute top-2 left-1/2 z-30 w-[min(26rem,80%)] -translate-x-1/2"
           role="progressbar"
@@ -62,7 +72,11 @@ export function BossHud({ name }: { name: string }) {
             "pointer-events-none absolute top-12 left-1/2 z-30 -translate-x-1/2 rounded bg-black/70 px-3 py-1.5 text-center text-ui text-white",
           )}
         >
-          {victory ? "The boss has fallen!" : "The boss is slipping away…"}{" "}
+          {tower
+            ? "The Tower is closing…"
+            : victory
+              ? "The boss has fallen!"
+              : "The boss is slipping away…"}{" "}
           <span className="text-white/60 tabular-nums">
             Back to town in {clock(closes)}
           </span>
@@ -75,14 +89,6 @@ export function BossHud({ name }: { name: string }) {
           className="pointer-events-none absolute inset-0 z-20 motion-safe:animate-[hurt_0.45s_ease-out_forwards]"
           style={{ boxShadow: "inset 0 0 90px 20px rgba(220,38,38,0.55)" }}
         />
-      ) : null}
-      {toast ? (
-        <div
-          role="status"
-          className="pointer-events-none absolute bottom-24 left-1/2 z-30 max-w-[80%] -translate-x-1/2 rounded bg-black/75 px-3 py-1.5 text-center text-ui text-white"
-        >
-          {toast}
-        </div>
       ) : null}
     </>
   );

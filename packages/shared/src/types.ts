@@ -306,9 +306,13 @@ export interface BossFightConfig {
  */
 export const BOSS_DAMAGE_PER_MINUTE = 1;
 
+/** A place on a boss's board, ranked by contribution (damage, plus ten
+ * times what was healed or blocked; see contributionOf). */
 export interface BossDamageDealer {
   name: string;
   damage: number;
+  /** HP healed or blocked (older servers omit it). */
+  heal?: number;
   rank: number;
 }
 
@@ -331,6 +335,8 @@ export interface BossFightView {
   topDealers: BossDamageDealer[];
   /** The requesting user's own contribution, so the UI can show "you". */
   yourDamage: number;
+  /** ...and what they healed or blocked (older servers omit it). */
+  yourHeal?: number;
   yourRank: number | null;
 }
 

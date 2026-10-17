@@ -18,6 +18,8 @@ import { cx as cn } from "./cx.js";
 export type TagTooltip = (label: string, tag: ReactElement) => ReactNode;
 
 export const ITEM_TYPE_TEXT_CLASSES: Record<ItemType, string> = {
+  // Green for healing.
+  consumable: "text-green",
   dice: "text-orange",
   // Upgrade materials share a colour: a charm only matters next to a die.
   charm: "text-orange",
@@ -34,6 +36,7 @@ export const ITEM_TYPE_TEXT_CLASSES: Record<ItemType, string> = {
 };
 
 export const ITEM_TYPE_PILL_CLASSES: Record<ItemType, string> = {
+  consumable: "bg-green/15 text-green",
   dice: "bg-orange/15 text-orange",
   charm: "bg-orange/15 text-orange",
   skin: "bg-purple/15 text-purple",
@@ -56,7 +59,12 @@ export function ItemTypeTag({
 }: {
   item: Pick<
     ItemDef,
-    "equipable" | "equipSlot" | "modifier" | "dice" | "protection"
+    | "equipable"
+    | "equipSlot"
+    | "modifier"
+    | "dice"
+    | "protection"
+    | "consumable"
   >;
   className?: string;
   variant?: "pill" | "text";
@@ -116,7 +124,7 @@ export function ItemStatLines({
   dim = false,
   className,
 }: {
-  item: Pick<ItemDef, "stats">;
+  item: Pick<ItemDef, "stats" | "consumable">;
   level?: number;
   /** Dimmed instead of cyan — for the condensed preview, where they're
    * detail under the name rather than the headline. */
@@ -124,7 +132,8 @@ export function ItemStatLines({
   className?: string;
 }) {
   const keys = STAT_KEYS.filter((key) => item.stats?.[key] !== undefined);
-  if (keys.length === 0) return null;
+  const heal = item.consumable?.heal;
+  if (keys.length === 0 && !heal) return null;
   return (
     <div
       className={cn(
@@ -139,6 +148,7 @@ export function ItemStatLines({
           {formatStat(key, (item.stats?.[key] ?? 0) + level)}
         </div>
       ))}
+      {heal ? <div>Heals {heal} HP</div> : null}
     </div>
   );
 }

@@ -77,6 +77,8 @@ export function CameraRig() {
   const time = useRef(0);
   /** 0 walking to 1 in combat, eased. */
   const blend = useRef(0);
+  /** The arrival the view last swung round for (see townSave.arrival). */
+  const arrived = useRef(townSave.arrival);
 
   // Restore where the camera was, and save it again on the way out.
   useEffect(() => {
@@ -100,6 +102,14 @@ export function CameraRig() {
     const body = rt.playerBody;
     if (!c || !body) return;
     time.current += delta;
+
+    // Just arrived (through a portal, into the cave, respawned): behind the
+    // herzie, looking the way it faces — not wherever the view last was.
+    if (arrived.current !== townSave.arrival) {
+      arrived.current = townSave.arrival;
+      c.moveTo(townSave.x, LOOK_HEIGHT, townSave.z, false);
+      c.rotateTo(townSave.azimuth, c.polarAngle, false);
+    }
 
     // Into or out of combat: the mouse aims (the view itself stays put).
     if (combat.on !== fighting.current) {

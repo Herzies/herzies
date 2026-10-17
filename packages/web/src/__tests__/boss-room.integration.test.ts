@@ -120,7 +120,12 @@ describe("boss damage batches", () => {
     await admin()
       .from("events")
       .update({
-        config: { rewardItemId: "cd", topRewardItemId: "headphones", topCount: 1 },
+        // Non-droppable, so the random loot (00114) can't roll them too.
+        config: {
+          rewardItemId: "first-edition",
+          topRewardItemId: "spirit-orb",
+          topCount: 1,
+        },
       })
       .eq("id", event);
     const loot = async () =>
@@ -134,7 +139,7 @@ describe("boss damage batches", () => {
           .from("item_units")
           .select("id", { count: "exact", head: true })
           .eq("user_id", uid)
-          .in("item_id", ["cd", "headphones"])
+          .in("item_id", ["first-edition", "spirit-orb"])
       ).count;
 
     // What a test herzie starts out owning.
@@ -147,10 +152,17 @@ describe("boss damage batches", () => {
     expect(await loot()).toEqual({});
     await admin().rpc("settle_boss_fight", { p_event_id: event });
 
-    // On the ground, not in the bank: base item first.
+    // On the ground, not in the bank: base item first, then the top
+    // reward and ten random things (00114) for the top dealer, the ten for
+    // everyone else.
     const dropped = await loot();
-    expect(dropped[a].map((d) => d.item)).toEqual(["cd", "headphones"]);
-    expect(dropped[b].map((d) => d.item)).toEqual(["cd"]);
+    const items = (uid: string) => dropped[uid].map((d) => d.item);
+    expect(items(a)[0]).toBe("first-edition");
+    expect(items(b)[0]).toBe("first-edition");
+    expect(items(a).filter((i) => i === "spirit-orb")).toHaveLength(1);
+    expect(items(b)).not.toContain("spirit-orb");
+    expect(items(a)).toHaveLength(12);
+    expect(items(b)).toHaveLength(11);
     expect(await units(a)).toBe(before);
     // Held for the cave: it "lands" in the future, so a spirit's sync
     // auto-collect leaves it be for now.
@@ -165,7 +177,7 @@ describe("boss damage batches", () => {
 
     // Settling again (the cron after town-vitals) drops nothing more.
     await admin().rpc("settle_boss_fight", { p_event_id: event });
-    expect((await loot())[a]).toHaveLength(2);
+    expect((await loot())[a]).toHaveLength(12);
 
     // Picking one up is what puts it in the bank, once.
     const first = dropped[a][0].id;
@@ -173,14 +185,16 @@ describe("boss damage batches", () => {
       p_user_id: a,
       p_drop_id: first,
     });
-    expect(got).toBe("cd");
+    expect(got).toBe("first-edition");
     const { data: again } = await admin().rpc("collect_pending_drop", {
       p_user_id: a,
       p_drop_id: first,
     });
     expect(again).toBeNull();
     expect(await units(a)).toBe((before ?? 0) + 1);
-    expect((await loot())[a].map((d) => d.item)).toEqual(["headphones"]);
+    const left = (await loot())[a].map((d) => d.item);
+    expect(left).toHaveLength(11);
+    expect(left).not.toContain("first-edition");
   });
 
   it("one bad row doesn't lose the others", async () => {

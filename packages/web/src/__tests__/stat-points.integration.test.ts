@@ -86,11 +86,11 @@ describe("stat points", () => {
   });
 
   it("Stamina raises max HP, in the vitals too", async () => {
-    const { userId } = await player(10); // 150 max with no points
+    const { userId } = await player(10); // 182 max with no points
     const r = await allocate(userId, 18, 0, 0);
-    expect(r.vitals?.maxHp).toBe(330);
+    expect(r.vitals?.maxHp).toBe(362);
     const v = await rpc<Vitals>("herzie_vitals", { p_user: userId });
-    expect(v).toMatchObject({ hp: 330, maxHp: 330 });
+    expect(v).toMatchObject({ hp: 362, maxHp: 362 });
   });
 
   it("a reset refunds everything and brings HP down to the new max", async () => {
@@ -100,18 +100,18 @@ describe("stat points", () => {
     const r = await allocate(userId, 0, 0, 0);
     expect(r.ok).toBe(true);
     expect(r.statPoints).toEqual({ stamina: 0, sonicPower: 0, euphony: 0 });
-    expect(r.vitals?.maxHp).toBe(150);
-    expect(r.vitals?.stored).toBe(150);
-    expect(r.vitals?.hp).toBeLessThanOrEqual(150);
+    expect(r.vitals?.maxHp).toBe(182);
+    expect(r.vitals?.stored).toBe(182);
+    expect(r.vitals?.hp).toBeLessThanOrEqual(182);
   });
 
   it("respawn and rest read the Stamina max", async () => {
     const { userId } = await player(10);
-    await allocate(userId, 10, 0, 0); // 250 max
+    await allocate(userId, 10, 0, 0); // 282 max
     await rpc("set_herzie_hp", { p_user: userId, p_hp: 0 });
     const v = await rpc<Vitals>("respawn_herzie", { p_user: userId });
-    expect(v.maxHp).toBe(250);
-    expect(v.stored).toBe(125);
+    expect(v.maxHp).toBe(282);
+    expect(v.stored).toBe(141);
   });
 
   it("a level-1 herzie has nothing to spend", async () => {

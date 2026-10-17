@@ -11,8 +11,26 @@
  *
  * Everything lands in the RPCs of 00101, which only ever lower HP (a report)
  * or add a capped bonus (rest) or restore half (respawn from down).
+ *
+ * The room also asks here to use up a consumable a fighter eats (00113's
+ * eat_item, without touching HP: the room heals the fighter itself and
+ * reports it like a skill's heal).
  */
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import {
+  filterDroppablePool,
+  getHerzieStatsFromUnits,
+  NON_DROPPABLE_ITEM_IDS,
+  normalizeEquipped,
+  normalizeUnits,
+  pickWeightedDrop,
+} from "../_shared/shared/items.ts";
+import {
+  TOWER_DROP_CHANCE,
+  TOWER_DROPS_DAILY_CAP,
+  TOWER_XP_DAILY_CAP,
+  towerXpPerKill,
+} from "../_shared/shared/tower.ts";
 import { verifyVitalsRequest } from "../_shared/shared/town-net.ts";
 import { corsHeaders, jsonResponse } from "../_shared/cors.ts";
 
@@ -61,6 +79,36 @@ async function rpc(
   return data;
 }
 
+/** `count` items picked as listening picks a drop: the droppable pool, by
+ * rarity, leaning on the herzie's Luck. */
+async function rollDrops(
+  db: SupabaseClient,
+  uid: string,
+  count: number,
+): Promise<string[]> {
+  const [{ data: pool }, { data: unitRows }] = await Promise.all([
+    db
+      .from("items")
+      .select("id, rarity")
+      .not(
+        "id",
+        "in",
+        `(${NON_DROPPABLE_ITEM_IDS.map((id) => `"${id}"`).join(",")})`,
+      ),
+    db.rpc("item_units_json", { p_user_id: uid }),
+  ]);
+  const droppable = pool ? filterDroppablePool(pool) : [];
+  const { luck } = getHerzieStatsFromUnits(
+    Array.isArray(unitRows) ? normalizeUnits(unitRows) : [],
+  );
+  const out: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const picked = pickWeightedDrop(droppable, luck);
+    if (picked) out.push(picked.id);
+  }
+  return out;
+}
+
 async function handleRoom(request: Request, body: string): Promise<Response> {
   const ts = Number(request.headers.get("x-vitals-ts"));
   const nonce = request.headers.get("x-vitals-nonce") ?? "";
@@ -82,8 +130,23 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
     boss?: {
       event: string;
       batch: string;
-      damage: { uid: string; damage: number }[];
+      /** Damage, and the HP each healed or blocked (00111). */
+      damage: { uid: string; damage: number; healing?: number; blocked?: number }[];
     };
+    /** The fight is over: the cave's end screen, for these herzies. */
+    results?: { event: string; uids: string[] };
+    /** The Tower: a herzie's kills since the last batch, and the best
+     * floor cleared in it. */
+    tower?: {
+      event: string;
+      batch: string;
+      uid: string;
+      kills: { floor: number; x: number; z: number }[];
+      cleared?: number;
+    };
+    /** action "eat": who ate what. */
+    uid?: string;
+    item?: string;
   };
   try {
     msg = JSON.parse(body);
@@ -91,6 +154,26 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
     return jsonResponse({ error: "Bad JSON" }, 400);
   }
   const db = admin();
+  if (msg.action === "eat") {
+    // Use one up; the room heals. Never retried, so it can't eat twice.
+    if (!UUID.test(msg.uid ?? "") || typeof msg.item !== "string") {
+      return jsonResponse({ error: "Bad eat" }, 400);
+    }
+    try {
+      const res = (await rpc(db, "eat_item", {
+        p_user_id: msg.uid,
+        p_item_id: msg.item,
+        p_apply_hp: false,
+      })) as { ok: boolean; heal?: number; reason?: string } | null;
+      return jsonResponse({
+        ok: !!res?.ok,
+        heal: res?.heal ?? 0,
+        reason: res?.reason ?? null,
+      });
+    } catch {
+      return jsonResponse({ ok: false, reason: "failed" }, 500);
+    }
+  }
   if (msg.action === "report") {
     const hp = (msg.hp ?? []).slice(0, MAX_BATCH).filter(
       (r) => UUID.test(r.uid) && Number.isFinite(r.hp),
@@ -102,7 +185,10 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
     const bossDamage =
       boss && UUID.test(boss.event) && typeof boss.batch === "string"
         ? (boss.damage ?? []).slice(0, MAX_BATCH).filter(
-          (d) => UUID.test(d.uid) && Number.isFinite(d.damage) && d.damage > 0,
+          (d) =>
+            UUID.test(d.uid) &&
+            [d.damage, d.healing ?? 0, d.blocked ?? 0].every(Number.isFinite) &&
+            (d.damage > 0 || (d.healing ?? 0) > 0 || (d.blocked ?? 0) > 0),
         )
         : [];
     const skills = msg.skills;
@@ -163,11 +249,62 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
         // and the loot waits on everyone's Home ground.
       }
     }
+    // The Tower: pay the kills (a little XP, now and then an item, rolled as
+    // listening rolls one), under the day's caps, once per batch.
+    let tower: { drops: { id: string; item: string }[] } | null = null;
+    let towerFailed = false;
+    const tw = msg.tower;
+    if (
+      tw && UUID.test(tw.event) && UUID.test(tw.uid) &&
+      typeof tw.batch === "string"
+    ) {
+      const kills = (Array.isArray(tw.kills) ? tw.kills : [])
+        .slice(0, MAX_BATCH)
+        .filter((k) => Number.isFinite(k.floor) && k.floor >= 1);
+      const cleared = Number.isFinite(tw.cleared) ? Math.floor(tw.cleared as number) : 0;
+      try {
+        const xp = kills.reduce((n, k) => n + towerXpPerKill(k.floor), 0);
+        const rolls = kills.filter(() => Math.random() < TOWER_DROP_CHANCE).length;
+        const items = rolls > 0 ? await rollDrops(db, tw.uid, rolls) : [];
+        tower = (await rpc(db, "tower_grant", {
+          p_user: tw.uid,
+          p_event: tw.event,
+          p_batch: tw.batch,
+          p_xp: xp,
+          p_cleared: cleared,
+          p_item_ids: items,
+          p_xp_cap: TOWER_XP_DAILY_CAP,
+          p_drop_cap: TOWER_DROPS_DAILY_CAP,
+        })) as typeof tower;
+      } catch {
+        towerFailed = true;
+      }
+    }
     // A failed HP write or boss batch is retried by the Town server, which
     // re-sends the same values (HP is absolute, a batch has an id), so ask
     // for that with an error status. Rest is additive and never retried.
     const failed = h.failed > 0 || (b !== null && !b.ok) ||
-      (s !== null && !s.ok);
+      (s !== null && !s.ok) || towerFailed;
+    // The fight is over: who placed where (00110). Only once this report's
+    // damage has landed, so the last hits count; and a failed lookup never
+    // fails the report (the room would re-send it for nothing).
+    let results: unknown = null;
+    const want = msg.results;
+    if (!failed && want && UUID.test(want.event)) {
+      const uids = (Array.isArray(want.uids) ? want.uids : [])
+        .slice(0, MAX_BATCH)
+        .filter((u) => typeof u === "string" && UUID.test(u));
+      try {
+        results = podiumLooks(
+          await rpc(db, "boss_results_json", {
+            p_event: want.event,
+            p_uids: uids,
+          }),
+        );
+      } catch {
+        results = null;
+      }
+    }
     return jsonResponse(
       {
         hp: h,
@@ -176,6 +313,8 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
         // Where each reported skill stands now, so the room can use (and
         // announce) a level-up at once.
         skills: s?.res ?? null,
+        results,
+        tower,
       },
       failed ? 502 : 200,
     );
@@ -245,3 +384,22 @@ Deno.serve(async (request) => {
     ? await handleRoom(request, body)
     : await handlePlayer(request, body);
 });
+
+/** The end screen's top three come with their looks, as the database has
+ * them: made into looks as others see them out walking (no ground
+ * accessories), like the statue's in town-ticket. */
+function podiumLooks(table: unknown): unknown {
+  const t = table as { top?: Record<string, unknown>[] } | null;
+  if (!t?.top) return table;
+  return {
+    ...t,
+    top: t.top.map(({ seed, stage, equipped, ...place }) => {
+      const { ground_left: _l, ground_right: _r, ...worn } = normalizeEquipped(
+        equipped,
+      );
+      return typeof seed === "string"
+        ? { ...place, look: { seed, stage: Number(stage) || 1, equipped: worn } }
+        : place;
+    }),
+  };
+}

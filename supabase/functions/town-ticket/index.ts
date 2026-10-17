@@ -12,7 +12,7 @@
  * Kill switch: TOWN_MULTIPLAYER=off answers 503, and the app falls back to
  * an empty Town.
  */
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
   getHerzieStatsFromUnits,
   normalizeEquipped,
@@ -32,6 +32,8 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const TOWN_TICKET_SECRET = Deno.env.get("TOWN_TICKET_SECRET");
 /** Where the Town server lives, so it can move without an app release. */
 const TOWN_SERVER_URL = Deno.env.get("TOWN_SERVER_URL");
+/** Never put on the statue: the owner's own herzie (music_lover69). */
+const CHAMPION_SKIP = ["920a6cf8-3f1c-4274-b549-39d976ee6ee0"];
 
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") {
@@ -103,7 +105,7 @@ Deno.serve(async (request) => {
   const { data: unitRows } = await admin.rpc("item_units_json", {
     p_user_id: user.id,
   });
-  // Items plus stat points, as the sync bills them.
+  // Items, stat points and the level's own, as the sync bills them.
   const stats = withStatPoints(
     getHerzieStatsFromUnits(
       Array.isArray(unitRows) ? normalizeUnits(unitRows) : [],
@@ -113,6 +115,7 @@ Deno.serve(async (request) => {
       sonicPower: herzie.stat_sonic,
       euphony: herzie.stat_euphony,
     },
+    herzie.level,
   );
 
   // Class skills and their levels: the Town server judges a skill's
@@ -153,6 +156,25 @@ Deno.serve(async (request) => {
     boss = open as typeof boss;
   }
 
+  // The Tower: only while a Tower event is on, and only on your feet. Each
+  // herzie has a room of their own there, named by their user id.
+  let tower: { event: string; until: number; floor: number } | undefined;
+  if (map === "tower") {
+    if (vitals.down) {
+      return jsonResponse({ error: "Knocked out", reason: "down" }, 403);
+    }
+    const { data: open } = await admin.rpc("open_tower_json", {
+      p_user: user.id,
+    });
+    if (!open) {
+      return jsonResponse(
+        { error: "The Tower is closed", reason: "sealed" },
+        403,
+      );
+    }
+    tower = open as typeof tower;
+  }
+
   const exp = Math.floor(now / 1000) + TOWN_TICKET_TTL_S;
   const ticket = await signTownTicket(
     {
@@ -171,9 +193,53 @@ Deno.serve(async (request) => {
         stats.euphony,
       ],
       boss,
+      tower,
+      lv: herzie.level,
       ...(herzie.class ? { cls: herzie.class as string, sk } : {}),
     },
     TOWN_TICKET_SECRET,
   );
-  return jsonResponse({ ticket, url: TOWN_SERVER_URL, exp, vitals });
+  return jsonResponse({
+    ticket,
+    url: TOWN_SERVER_URL,
+    exp,
+    vitals,
+    champion: await championOf(admin),
+    ...(tower ? { instance: user.id } : {}),
+  });
 });
+
+/**
+ * Who the Town's statue shows: the top damage dealer of the last boss fight
+ * that's over, with their look as others see it out walking (no ground
+ * accessories). Null if there's none yet, or if looking fails: the statue
+ * keeps its stand-in, and the ticket still goes out.
+ */
+async function championOf(
+  admin: SupabaseClient,
+): Promise<{
+  name: string;
+  look: { seed: string; stage: number; equipped: Record<string, unknown> };
+} | null> {
+  let data: unknown;
+  try {
+    const res = await admin.rpc("boss_champion_json", {
+      p_skip: CHAMPION_SKIP,
+    });
+    if (res.error) return null;
+    data = res.data;
+  } catch {
+    return null;
+  }
+  if (!data) return null;
+  const c = data as {
+    name: string;
+    seed: string;
+    stage: number;
+    equipped: unknown;
+  };
+  const { ground_left: _l, ground_right: _r, ...equipped } = normalizeEquipped(
+    c.equipped,
+  );
+  return { name: c.name, look: { seed: c.seed, stage: c.stage, equipped } };
+}

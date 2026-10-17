@@ -11,6 +11,9 @@
 // `?map=bossroom` (with `?net=local`) joins the boss's cave on `wrangler dev`
 // with a made-up boss (and `&cave=open` opens the cave's door in town); the
 // HUD is drawn over it. `&boss=<hp>` sets the boss's health, `&hp=<n>` yours.
+// `?map=tower` (with `?net=local`) climbs the Tower on `wrangler dev`, in a
+// room of your own (`&floor=` to start higher, `&level=` your herzie's
+// level); `&tower=open` opens its door in town.
 // `?music=1` plays music, as it were: stand still and the herzie dances.
 // `?class=record_slinger` (or bard, percussionist) hands the player that
 // class's gear, basic attack and skill (Q; `&skill=` its level; the cave's
@@ -21,22 +24,32 @@ import "./globals.css";
 import {
   attackStyle,
   CLASS_DEFS,
+  type ItemUnit,
   isHerzieClass,
   signTownTicket,
 } from "@herzies/shared";
 import type { RootState } from "@react-three/fiber";
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { Notices } from "./components/Notices";
 import type { EventCard } from "./components/TownScene";
 import { TownVitals } from "./components/TownVitals";
 import { BossHud } from "./components/town/BossHud";
+import { BossResults } from "./components/town/BossResults";
 import { setCave } from "./components/town/cave";
 import {
   bubbleDuration,
   type ChatBubbles,
 } from "./components/town/chatBubbles";
+import {
+  sampleBossResults,
+  setBossResults,
+} from "./components/town/combat/results";
 import { setMySkill } from "./components/town/combat/skills";
 import { combat } from "./components/town/combat/state";
+import { setTowerOpen } from "./components/town/gates";
+import { Hotbar } from "./components/town/Hotbar";
+import { assignHotbar } from "./components/town/hotbarSlots";
 import { setTownTicketSource, townNet } from "./components/town/net/townNet";
 import {
   goToMap,
@@ -46,6 +59,7 @@ import {
   townLive,
   townSave,
 } from "./components/town/runtime";
+import { SkillHud } from "./components/town/SkillHud";
 import TownCanvas from "./components/town/TownCanvas";
 import { setVitals } from "./components/town/vitals";
 
@@ -68,7 +82,8 @@ const card = (type: string, title: string): EventCard => ({
   description: null,
   status: "live",
   at: null,
-  openKey: null,
+  // The residents open; the rest are scenery.
+  openKey: type === "boboku" || type === "medea" ? type : null,
   eventId: `sandbox-${type}`,
 });
 
@@ -77,6 +92,8 @@ const spots: TownSpot[] = [
   ["treat_trader", "Nandor"],
   ["boss_fight", "The boss"],
   ["song_hunt", "Orphiez"],
+  ["boboku", "Boboku"],
+  ["medea", "Medea"],
 ]
   // Only those the map has a spot for (the boss lives in its cave now).
   .filter(([type]) => SPOTS[type])
@@ -117,6 +134,26 @@ const player = {
     spirit: params.get("spirit") ?? "spirit-orb",
   } as Record<string, string>,
 };
+// `?hotbar=star-candy`: that item on slot 2, with three in a pretend bank.
+const hotbarParam = params.get("hotbar");
+if (hotbarParam) assignHotbar("2", hotbarParam);
+const hotbarUnits: ItemUnit[] = hotbarParam
+  ? [0, 1, 2].map((i) => ({
+      id: `sandbox-${i}`,
+      itemId: hotbarParam,
+      upgradeLevel: 0,
+      equippedSlot: null,
+    }))
+  : [];
+// The end screen with a made-up table: `?results=victory|defeat`, and
+// `&rank=` for your place (past 10 shows under the "…"; 0 for none).
+const resultsParam = params.get("results");
+if (resultsParam === "victory" || resultsParam === "defeat") {
+  setBossResults(
+    sampleBossResults(resultsParam, Number(params.get("rank") ?? 7)),
+    null,
+  );
+}
 const cls = params.get("class");
 if (isHerzieClass(cls)) {
   const [main, off] = CLASS_DEFS[cls].equipment;
@@ -199,7 +236,8 @@ async function bench(state: RootState) {
 }
 
 function localNet() {
-  const uid = `sandbox-${Math.random().toString(36).slice(2, 8)}`;
+  // A uuid, as real user ids are: the Tower's rooms are named by it.
+  const uid = crypto.randomUUID();
   const name = params.get("name") ?? uid;
   const maxHp = 300;
   const hp = Number(params.get("hp") ?? maxHp);
@@ -227,6 +265,15 @@ function localNet() {
             Number(params.get("cd") ?? 0),
           ],
           ...(isHerzieClass(cls) ? { cls } : {}),
+          lv: Number(params.get("level") ?? 10),
+          tower:
+            map === "tower"
+              ? {
+                  event: "sandbox",
+                  until: exp + 3_000,
+                  floor: Number(params.get("floor") ?? 1),
+                }
+              : undefined,
           // Only the cave needs a boss; the sandbox makes one up.
           boss:
             map === "bossroom"
@@ -242,6 +289,7 @@ function localNet() {
       ),
       url: params.get("server") ?? "ws://localhost:8787",
       exp,
+      instance: uid,
     };
   });
   const net = townNet();
@@ -250,6 +298,9 @@ function localNet() {
     console.log("[town-sandbox] net", net.status, net.remotes.size),
   );
   return net;
+}
+if (params.get("tower") === "open") {
+  setTowerOpen({ endsAt: Date.now() + 3_600_000 });
 }
 if (params.get("cave") === "open") {
   setCave({ kind: "open", endsAt: Date.now() + 3_600_000 });
@@ -288,8 +339,18 @@ function Sandbox() {
   }, []);
   return (
     <div style={{ position: "relative", height: "100%" }}>
-      <TownVitals inFight={params.get("map") === "bossroom"} />
+      <TownVitals
+        inFight={
+          params.get("map") === "bossroom" || params.get("map") === "tower"
+        }
+      />
       <BossHud name="The boss" />
+      <Notices />
+      <SkillHud />
+      <Hotbar
+        units={hotbarUnits}
+        className="bottom-3 left-1/2 -translate-x-1/2"
+      />
       <TownCanvas
         spots={spots}
         player={player}
@@ -314,6 +375,9 @@ function Sandbox() {
         onOpen={(key) => console.log("[town-sandbox] open", key)}
         onNearChange={(s) => console.log("[town-sandbox] near", s?.key ?? null)}
       />
+      {/* After the canvas, as in TownWorld: it has no z-index of its own,
+          so the herzie stage can draw over it. */}
+      <BossResults />
     </div>
   );
 }

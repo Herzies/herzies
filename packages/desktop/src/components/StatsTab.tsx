@@ -135,8 +135,8 @@ export function StatsTab({
   const { unspent } = statPoints(level, placing);
   const dirty = POINT_STATS.some((k) => placing[k] !== points[k]);
 
-  const now = withStatPoints(stats, points);
-  const next = withStatPoints(stats, placing);
+  const now = withStatPoints(stats, points, level);
+  const next = withStatPoints(stats, placing, level);
 
   const bump = (key: PointStat, by: 1 | -1) => {
     if (by > 0 && unspent <= 0) return;

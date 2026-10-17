@@ -11,7 +11,7 @@ import {
   BOSS_STAND,
   DISC_DAMAGE,
   DISC_RANGE,
-  MELEE_DAMAGE,
+  meleeDamage,
   meleeReaches,
   WAVE_HAND_HEIGHT,
 } from "@herzies/shared/combat";
@@ -246,6 +246,11 @@ export function Combat({
     scale: number,
     now: number,
   ): "crit" | "hit" => {
+    // A Tower mob: the server rolls it and says (the number, the sound).
+    if (dummy.mob !== undefined) {
+      hitDummy(dummy, dir[0], dir[2], 0, false, now, false);
+      return "hit";
+    }
     const rolled = hitDamage(statsRef.current);
     const amount = Math.max(1, Math.round(rolled.amount * scale));
     const { crit } = rolled;
@@ -369,7 +374,7 @@ export function Combat({
         liveDummies.some((d) =>
           meleeReaches(from, yaw, { ...d, radius: DUMMY.radius }),
         ) ||
-        (bossFight.on && meleeReaches(from, yaw, BOSS_STAND));
+        (inBossRoom() && meleeReaches(from, yaw, BOSS_STAND));
     }
 
     // Where you are, for effects that follow you (a Cymbrella overhead).
@@ -514,7 +519,13 @@ export function Combat({
             Math.min(DUMMY.chest, height),
             d.z - toward[2] * DUMMY.radius,
           ];
-          const kind = myHit(d, toward, point, MELEE_DAMAGE, now);
+          const kind = myHit(
+            d,
+            toward,
+            point,
+            meleeDamage(blow === "strike"),
+            now,
+          );
           waveField.burst(point, toward, kind);
           landed = true;
         }
@@ -523,7 +534,7 @@ export function Combat({
           // sound); the burst is what you see land.
           townNet().sendCast(yaw, 0);
           const boss = { ...BOSS_STAND };
-          if (meleeReaches(from, yaw, boss)) {
+          if (inBossRoom() && meleeReaches(from, yaw, boss)) {
             const toward = flatToward(from, boss);
             waveField.burst(
               [
@@ -562,7 +573,7 @@ export function Combat({
         // turns back: the boss (a hit), or a wall (a clink).
         const solid = a.blocked && !target && toAim < DISC_RANGE;
         const onBoss =
-          bossFight.on &&
+          inBossRoom() &&
           Math.hypot(a.point.x - BOSS_STAND.x, a.point.z - BOSS_STAND.z) <
             BOSS_STAND.radius + 0.8;
         discField.throw(from, toward, {
@@ -644,6 +655,11 @@ export function Combat({
 
 const castFrom = new THREE.Vector3();
 
+/** In the boss's cave (not the Tower, which fights the same way). */
+function inBossRoom(): boolean {
+  return bossFight.on && !bossFight.tower;
+}
+
 /**
  * Tells the server a cast at `point`, aimed as it judges it: from where it
  * thinks the hand is (over the herzie's middle, at WAVE_HAND_HEIGHT), not
@@ -678,3 +694,6 @@ function leave() {
   exitMouseLook();
   setCombat(false);
 }
+
+/** Out of combat mode, from outside it (the boss's end screen). */
+export const leaveCombat = leave;

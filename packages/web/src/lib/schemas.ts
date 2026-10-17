@@ -199,6 +199,20 @@ export const merchantBuySchema = z.object({
   quantity: z.number().int().min(1),
 });
 
+export const bobokuBuySchema = z.object({
+  itemId: z.string().min(1),
+  quantity: z.number().int().min(1).max(10),
+});
+
+export const medeaBuySchema = z.object({
+  itemId: z.string().min(1),
+  quantity: z.number().int().min(1).max(10),
+});
+
+export const eatItemSchema = z.object({
+  itemId: z.string().min(1),
+});
+
 export const adminItemSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),

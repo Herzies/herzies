@@ -884,14 +884,45 @@ pub async fn api_buy_from_merchant(
     quantity: u32,
 ) -> Result<serde_json::Value, String> {
     let body = serde_json::json!({ "eventId": event_id, "itemId": item_id, "quantity": quantity });
-    let resp = api_fetch(
-        client,
-        reqwest::Method::POST,
-        "/events/merchant/buy",
-        Some(body),
-    )
-    .await
-    .ok_or_else(|| "Network error".to_string())?;
+    api_buy(client, "/events/merchant/buy", body).await
+}
+
+/// Buys from Boboku, who's always in Town: no event, his own price list.
+pub async fn api_buy_from_boboku(
+    client: &Client,
+    item_id: &str,
+    quantity: u32,
+) -> Result<serde_json::Value, String> {
+    let body = serde_json::json!({ "itemId": item_id, "quantity": quantity });
+    api_buy(client, "/npc/boboku/buy", body).await
+}
+
+/// Buys from Medea, who's always in Town: sweets and potions.
+pub async fn api_buy_from_medea(
+    client: &Client,
+    item_id: &str,
+    quantity: u32,
+) -> Result<serde_json::Value, String> {
+    let body = serde_json::json!({ "itemId": item_id, "quantity": quantity });
+    api_buy(client, "/npc/medea/buy", body).await
+}
+
+/// Eats one consumable from the bank; the reply carries the new item state
+/// and vitals, or the server's reason it refused (full, knocked out, …).
+pub async fn api_eat_item(client: &Client, item_id: &str) -> Result<serde_json::Value, String> {
+    let body = serde_json::json!({ "itemId": item_id });
+    api_buy(client, "/inventory/eat", body).await
+}
+
+/// POSTs a purchase, with the server's error message on a refusal.
+async fn api_buy(
+    client: &Client,
+    path: &str,
+    body: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let resp = api_fetch(client, reqwest::Method::POST, path, Some(body))
+        .await
+        .ok_or_else(|| "Network error".to_string())?;
     let status = resp.status();
     let text = resp.text().await.map_err(|e| format!("Read error: {e}"))?;
     let data: serde_json::Value =

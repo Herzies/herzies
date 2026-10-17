@@ -11,7 +11,7 @@ import type { Vec3 } from "./waves";
  * (crisp text at any resolution, where the Town itself is pixelated):
  *
  * - Damage numbers popping off each hit: up and to one side, overshooting
- *   as they appear, fading as they go; a crit's bigger, gold, and shakes.
+ *   as they appear, fading as they go; a crit's gold.
  * - A meter over each dummy you're hitting: damage per second, total,
  *   hits and crits, clearing once you stop.
  * - The crosshair in combat mode: it opens on each cast and closes again,
@@ -52,7 +52,7 @@ const STYLE = `
 .town-fx .dmg { position: absolute; left: 0; top: 0; will-change: transform, opacity; white-space: nowrap;
   font-weight: 800; font-size: 15px; color: #e9fbff; letter-spacing: -0.5px;
   text-shadow: 0 0 6px rgba(80, 200, 255, 0.55), 0 2px 0 #0b2233, 1px 0 0 #0b2233, -1px 0 0 #0b2233, 0 -1px 0 #0b2233; }
-.town-fx .dmg.crit { font-size: 24px; color: #ffe08a;
+.town-fx .dmg.crit { color: #ffe08a;
   text-shadow: 0 0 10px rgba(255, 190, 60, 0.75), 0 2px 0 #3a2200, 1px 0 0 #3a2200, -1px 0 0 #3a2200, 0 -1px 0 #3a2200; }
 .town-fx .dmg.crit::after { content: "!"; margin-left: 1px; }
 .town-fx .meter { position: absolute; left: 0; top: 0; will-change: transform, opacity; transition: opacity 0.25s;
@@ -214,8 +214,7 @@ export function CombatOverlay() {
             ? 1 - 0.08 * Math.sin(((f.age - 0.1) / 0.08) * Math.PI)
             : 1;
       const ease = 1 - (1 - t) ** 2;
-      const shakeX = f.crit && f.age < 0.25 ? Math.sin(f.age * 90) * 2.5 : 0;
-      const x = p[0] + f.drift * ease + shakeX;
+      const x = p[0] + f.drift * ease;
       const y = p[1] - f.rise * ease;
       f.el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%) scale(${pop})`;
       f.el.style.opacity = String(t < 0.65 ? 1 : 1 - (t - 0.65) / 0.35);

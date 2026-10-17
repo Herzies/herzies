@@ -16,6 +16,7 @@ import type {
   PremiumItem,
   StatPoints,
   StoreProduct,
+  TownLook,
   Trade,
   TradeState,
   Vitals,
@@ -240,6 +241,27 @@ export const herzies = {
       newCurrency?: number;
       inventory: Inventory;
     }>("buy_from_merchant", { eventId, itemId, quantity }),
+  /** Buys from Boboku, who's always in Town (no event behind him). */
+  buyFromBoboku: (itemId: string, quantity: number) =>
+    invoke<{
+      spent: number;
+      newCurrency: number;
+      inventory: Inventory;
+    }>("buy_from_boboku", { itemId, quantity }),
+  /** Buys from Medea, who's always in Town: sweets and potions. */
+  buyFromMedea: (itemId: string, quantity: number) =>
+    invoke<{
+      spent: number;
+      newCurrency: number;
+      inventory: Inventory;
+    }>("buy_from_medea", { itemId, quantity }),
+  /** Eats one consumable from the bank, outside a boss fight (in one, the
+   * Town server does it: see town/eat.ts). Rejects with the reason it
+   * refused (already full, knocked out, none left). */
+  eatItem: (itemId: string) =>
+    invoke<{ heal: number; vitals: Vitals; inventory: Inventory }>("eat_item", {
+      itemId,
+    }),
   /** Manually collects one specific pending world drop by id. Resolves
    * `true` if it was collected, `false` if it no longer existed (e.g.
    * already collected by a racing Spirit Orb auto-collect). */
@@ -305,17 +327,26 @@ export const herzies = {
   /** Live events, plus the next scheduled one of each type (`upcoming`,
    * titles and windows only — older servers omit it). */
   fetchActiveEvents: () =>
-    invoke<{ events: GameEvent[]; upcoming?: GameEvent[] }>(
-      "fetch_active_events",
-    ),
+    invoke<{
+      events: GameEvent[];
+      upcoming?: GameEvent[];
+      /** Everything on in the coming week (the bulletin board). */
+      week?: GameEvent[];
+    }>("fetch_active_events"),
 
   /** A signed pass into the multiplayer Town. Rejects with "off" when
    * multiplayer is switched off server-side. */
   fetchTownTicket: (map?: string) =>
-    invoke<{ ticket: string; url: string; exp: number; vitals?: Vitals }>(
-      "fetch_town_ticket",
-      { map },
-    ),
+    invoke<{
+      ticket: string;
+      url: string;
+      exp: number;
+      vitals?: Vitals;
+      /** Who the Town's statue shows (older servers omit it). */
+      champion?: { name: string; look: TownLook } | null;
+      /** For a room of your own (the Tower): which is yours. */
+      instance?: string;
+    }>("fetch_town_ticket", { map }),
 
   /** The herzie's health: `"vitals"` reads it, `"respawn"` brings a
    * knocked-out herzie back with half its health. */

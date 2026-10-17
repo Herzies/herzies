@@ -4,6 +4,7 @@ import {
   buffMult,
   defReduction,
   healMult,
+  levelStats,
   normalizeStatPoints,
   statPoints,
   validateAllocation,
@@ -77,9 +78,28 @@ describe("what the stats do", () => {
   });
 
   it("Stamina adds max HP", () => {
-    expect(maxHp(34, 0)).toBe(270);
-    expect(maxHp(34, 34)).toBe(610);
-    expect(maxHp(34, -2)).toBe(270);
+    expect(maxHp(34, 0)).toBe(374);
+    expect(maxHp(34, 34)).toBe(714);
+    expect(maxHp(34, -2)).toBe(374);
+  });
+
+  it("every level adds a little HP, Sonic Power and Def on its own", () => {
+    // The matrix the curve was picked from (level → HP, Def, wave base).
+    const rows: [number, number, number, number][] = [
+      [1, 110, 0, 100],
+      [5, 142, 2.4, 108],
+      [10, 182, 5.4, 118],
+      [20, 262, 11.4, 138],
+      [30, 342, 17.4, 158],
+      [50, 502, 29.4, 198],
+    ];
+    for (const [level, hp, def, atk] of rows) {
+      expect(maxHp(level)).toBe(hp);
+      const s = levelStats(level);
+      expect(s.def).toBeCloseTo(def);
+      expect(waveDamage(s.sonicPower)).toBe(atk);
+    }
+    expect(levelStats(0)).toEqual(levelStats(1));
   });
 });
 

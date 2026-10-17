@@ -70,6 +70,24 @@ export const VISITOR_THEMES: Record<string, VisitorTheme> = {
     dim: "#c9a3b0",
     accent: "#ff6b81",
   },
+  // Boboku: a warm orange, and no sparkles.
+  boboku: {
+    background: "linear-gradient(90deg, #2a1405 0%, #4d260a 55%, #200f04 100%)",
+    dim: "#e0b48a",
+    accent: "#ffb45c",
+  },
+  // Medea: candy pink sinking into plum.
+  medea: {
+    background: "linear-gradient(90deg, #1a0828 0%, #3c1456 55%, #14061f 100%)",
+    dim: "#d7a6d0",
+    accent: "#ff8fd0",
+  },
+  // The Tower: deep moss, like its island.
+  tower: {
+    background: "linear-gradient(90deg, #06180a 0%, #12381a 55%, #051208 100%)",
+    dim: "#9fcfa4",
+    accent: "#7fe08a",
+  },
 };
 
 /** Legible over any backdrop: a hard one-pixel drop like the pixel art's. */

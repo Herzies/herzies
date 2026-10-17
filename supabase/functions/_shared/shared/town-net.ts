@@ -35,11 +35,14 @@ export const TOWN_MAX_SHARDS = 16;
  * movement: the walkable radius and where a respawn puts you. Must match the
  * desktop's map files (checked by a desktop test). */
 export const TOWN_MAPS = {
-  home: { radius: 40, spawn: { x: 8.5, z: 9 } },
+  home: { radius: 40, spawn: { x: 13.5, z: 12 } },
   /** The training grounds, through the portal: training dummies. */
   arena: { radius: 17, spawn: { x: 0, z: -12 } },
   /** The boss's cave: a small dark room, one shared fight. */
   bossroom: { radius: 13, spawn: { x: 0, z: 10 } },
+  /** The Tower (an event): a lush island fought floor by floor, alone. Its
+   * spawn is the meadow's west end; each new floor puts you back there. */
+  tower: { radius: 21, spawn: { x: -12.5, z: 0.5 } },
 } as const;
 export type TownMapId = keyof typeof TOWN_MAPS;
 export function isTownMapId(id: string): id is TownMapId {
@@ -49,8 +52,15 @@ export function isTownMapId(id: string): id is TownMapId {
 /** Maps that are one room however many come: the boss is shared, so there is
  * a single shard (and the room's capacity is the fight's). */
 export const TOWN_SINGLE_SHARD: ReadonlySet<TownMapId> = new Set(["bossroom"]);
-/** Maps that need a ticket carrying a `boss` claim (see TownTicketPayload). */
-export const TOWN_TICKETED_MAPS: ReadonlySet<TownMapId> = new Set(["bossroom"]);
+/** Maps that need a ticket carrying a claim: a `boss` claim for the boss
+ * room, a `tower` claim for the Tower (see TownTicketPayload). */
+export const TOWN_TICKETED_MAPS: ReadonlySet<TownMapId> = new Set([
+  "bossroom",
+  "tower",
+]);
+/** Maps where every herzie gets a room of their own: the client names it
+ * with `?i=<user id>`, and the room only takes that herzie's ticket. */
+export const TOWN_INSTANCED_MAPS: ReadonlySet<TownMapId> = new Set(["tower"]);
 
 /** Top walking speed, world units a second (the desktop's `WALK_SPEED`). */
 export const TOWN_WALK_SPEED = 4.5;
@@ -109,6 +119,12 @@ export type TownTicketPayload = {
    * a fight from it if it has none running). The boss room turns away
    * tickets without it. */
   boss?: { event: string; until: number; hp: number; maxHp: number };
+  /** Set only while a Tower event is on: the event, when it ends (unix
+   * seconds), and the floor this herzie starts on (one past their best).
+   * The Tower turns away tickets without it. */
+  tower?: { event: string; until: number; floor: number };
+  /** The herzie's level, for the Tower's level gap. */
+  lv?: number;
   /** The herzie's class (classes.ts), once chosen. */
   cls?: string;
   /** Its class skills and their levels, `[skillId, level]`, so the server
@@ -289,6 +305,9 @@ export const TOWN_CAST_SHIFT = 3;
 export const TOWN_CAST_MASK = 0b111 << TOWN_CAST_SHIFT;
 /** In combat mode, on the training grounds. */
 export const TOWN_FLAG_COMBAT = 64;
+/** Flips on every jump: whenever it changes, the herzie hopped. A toggle,
+ * not an "is airborne" bit, so a jump straight after landing still shows. */
+export const TOWN_FLAG_JUMP = 128;
 
 /** The cast count carried in a state's flags. */
 export function castSeqOf(flags: number): number {
@@ -485,7 +504,26 @@ export type ClientMessage =
   | { t: "ticket"; ticket: string }
   /** A class skill, aimed (yaw, pitch) like a cast. `seq` echoes back in a
    * refusal, so the client can undo just that prediction. */
-  | { t: "skill"; skill: string; seq: number; yaw: number; pitch: number };
+  | { t: "skill"; skill: string; seq: number; yaw: number; pitch: number }
+  /** Eat a consumable (a Star Candy) in a boss fight, where the room holds
+   * HP. `seq` echoes back in the answer. Elsewhere the client eats through
+   * the API instead. */
+  | { t: "eat"; item: string; seq: number }
+  /** In the Tower, on a cleared floor: on to the next one. The room puts
+   * you back at the map's spawn (the west end). */
+  | { t: "next" };
+
+/** Why the room refused to let you eat: knocked out, already at full HP,
+ * too soon after the last one, none left in the bank, not something you
+ * eat, or not in a fight (eat through the API instead). */
+export type EatRefusal =
+  | "down"
+  | "full"
+  | "cooldown"
+  | "none-left"
+  | "not-consumable"
+  | "not-here"
+  | "failed";
 
 /** A shape the boss is about to hit the floor with. Times are server clock
  * (ms, the same clock as snapshots); a client shows the remaining windup
@@ -528,10 +566,46 @@ export type FightState = {
   buffs?: TownBuff[];
   /** Server clock now (ms), so telegraph times line up at once. */
   now: number;
+  /** In the Tower: the floor, as it stands. */
+  tower?: TowerFloor;
+};
+
+/** A Tower mob as the wire carries it: where it is and which way it faces,
+ * its health, and whether it's winding up a swing (`s` 1). */
+export type TowerMob = {
+  id: number;
+  x: number;
+  z: number;
+  yaw: number;
+  hp: number;
+  maxHp: number;
+  s: 0 | 1;
+};
+
+/** A Tower floor: its number, its mobs' level (and the herzie's, for the
+ * gap), the mobs, and whether it's cleared (the way on is open). */
+export type TowerFloor = {
+  floor: number;
+  level: number;
+  you: number;
+  mobs: TowerMob[];
+  cleared: boolean;
 };
 
 /** One piece of boss loot: a pending drop's id and its item id. */
 export type LootDrop = { id: string; item: string };
+
+/** A place on a boss fight's table: its rank by contribution (1 is the
+ * top; see contributionOf), the herzie's name, the damage they dealt and the
+ * HP they healed or blocked over the whole fight, and — for the top three,
+ * drawn on the end screen — their look. */
+export type BossPlace = {
+  rank: number;
+  name: string;
+  damage: number;
+  heal: number;
+  look?: TownLook;
+};
 
 export type ServerMessage =
   /** Accepted: your entity id and everyone else here. A full snapshot follows. */
@@ -543,8 +617,15 @@ export type ServerMessage =
   | { t: "resolve"; id: number; hits: number[] }
   /** A herzie's health (yours too), after damage. */
   | { t: "hp"; id: number; hp: number; maxHp: number }
-  /** Your cast hit the boss for this much (sent to you alone). */
-  | { t: "hit"; damage: number; crit: boolean }
+  /** Your cast hit the boss — or, in the Tower, mob `mob` — for this much
+   * (sent to you alone). */
+  | { t: "hit"; damage: number; crit: boolean; mob?: number }
+  /** The Tower's mobs, where they are now (every tick while any are up). */
+  | { t: "mobs"; mobs: TowerMob[] }
+  /** A Tower mob fell. */
+  | { t: "mobDown"; mob: number; x: number; z: number }
+  /** A Tower floor began, or was just cleared. */
+  | ({ t: "floor" } & TowerFloor)
   /** You were knocked out. */
   | { t: "down" }
   /** The boss fell: the room closes shortly. */
@@ -552,7 +633,21 @@ export type ServerMessage =
   /** What you got for the boss, dropped in the cave for you to pick up:
    * each a ground drop (its id, for collect-drop) and the item it is.
    * Whatever isn't picked up here waits on your Home ground. */
-  | { t: "loot"; drops: LootDrop[] }
+  | {
+      t: "loot";
+      drops: LootDrop[];
+      /** Where they drop from (a Tower mob); absent: out of the boss. */
+      at?: { x: number; z: number };
+    }
+  /** The fight is over: how it went, its ten top damage dealers, and your
+   * own place (null if you landed nothing). Sent once, to each herzie still
+   * in the cave. */
+  | {
+      t: "results";
+      outcome: "victory" | "defeat";
+      top: BossPlace[];
+      you: BossPlace | null;
+    }
   /** The room closes at `closesAt` (server ms): the boss left or won. */
   | { t: "closing"; why: "victory" | "escaped" | "sealed"; closesAt: number }
   | { t: "join"; player: TownPlayer }
@@ -576,7 +671,17 @@ export type ServerMessage =
    * or 0 when it can't be used here at all. */
   | { t: "skillDenied"; skill: string; seq: number; readyAt: number }
   /** One of your skills levelled up (sent to you alone). */
-  | { t: "skillUp"; skill: string; level: number };
+  | { t: "skillUp"; skill: string; level: number }
+  /** The answer to your `eat` (sent to you alone). The HP itself arrives as
+   * an `hp`, like any heal. */
+  | {
+      t: "ate";
+      seq: number;
+      item: string;
+      ok: boolean;
+      heal?: number;
+      reason?: EatRefusal;
+    };
 
 export function parseServerMessage(text: string): ServerMessage | null {
   try {

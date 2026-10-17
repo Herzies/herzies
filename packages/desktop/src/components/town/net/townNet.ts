@@ -2,15 +2,19 @@ import {
   isTownMapId,
   TOWN_FLAG_COMBAT,
   TOWN_FLAG_DANCING,
+  TOWN_FLAG_JUMP,
   TOWN_FLAG_SITTING,
+  TOWN_TICKETED_MAPS,
   type TownMapId,
   withCastSeq,
 } from "@herzies/shared";
 import { useEffect, useSyncExternalStore } from "react";
+import { notify } from "../../../lib/notices";
 import { herzies } from "../../../tauri-bridge";
-import { showToast } from "../cave";
+import { setChampion } from "../champion";
 import { bossFight, handleBossMessage } from "../combat/fight";
 import { combat } from "../combat/state";
+import { settleEat } from "../eat";
 import { goToMap, townLive, townSave } from "../runtime";
 import { setVitals } from "../vitals";
 import { TownConnection, type TownTicket } from "./TownConnection";
@@ -22,9 +26,13 @@ const LINGER_MS = 90_000;
 const AFK_MS = 2 * 60_000;
 
 let ticketSource: (map: TownMapId) => Promise<TownTicket> = async (map) => {
-  const t = await herzies.fetchTownTicket(map === "bossroom" ? map : undefined);
+  const t = await herzies.fetchTownTicket(
+    TOWN_TICKETED_MAPS.has(map) ? map : undefined,
+  );
   // Every ticket carries the herzie's health as of now.
   if (t.vitals && !bossFight.on) setVitals(t.vitals);
+  // And who the statue shows.
+  setChampion(t.champion);
   return t;
 };
 
@@ -43,27 +51,37 @@ export function townNet(): TownConnection {
   net ??= new TownConnection({
     map: isTownMapId(townSave.map) ? townSave.map : "home",
     getTicket: (map) => ticketSource(map),
-    onMessage: (m) =>
-      handleBossMessage(m, {
-        toLocal: (t) => net?.clock.toLocal(t) ?? t,
-        you: () => net?.you ?? null,
-      }),
+    onMessage: (m) => {
+      if (m.t === "ate") settleEat(m);
+      else
+        handleBossMessage(m, {
+          toLocal: (t) => net?.clock.toLocal(t) ?? t,
+          you: () => net?.you ?? null,
+        });
+    },
     onRefused: (why) => {
-      // The cave won't have us: back to town, with the reason.
-      showToast(
+      // The cave (or the Tower) won't have us: back to town, with the
+      // reason.
+      const tower = townSave.map === "tower";
+      notify(
         why === "down"
           ? "You need some rest first."
-          : why === "full"
-            ? "The lair is full right now. Try again in a moment."
-            : "The lair is sealed right now.",
+          : tower
+            ? "The Tower is closed right now."
+            : why === "full"
+              ? "The lair is full right now. Try again in a moment."
+              : "The lair is sealed right now.",
       );
       goToMap("home");
     },
     onRoomClosed: () => {
-      showToast(
-        bossFight.victory
-          ? "The lair falls quiet. Back to town."
-          : "The boss slipped away. Back to town.",
+      notify(
+        townSave.map === "tower"
+          ? "The Tower closes for now. Back to town."
+          : bossFight.victory
+            ? "The lair falls quiet. Back to town."
+            : "The boss slipped away. Back to town.",
+        { kind: "info" },
       );
       goToMap("home");
     },
@@ -75,7 +93,8 @@ export function townNet(): TownConnection {
       flags: withCastSeq(
         (townLive.seat ? TOWN_FLAG_SITTING : 0) |
           (townLive.dancing ? TOWN_FLAG_DANCING : 0) |
-          (combat.on ? TOWN_FLAG_COMBAT : 0),
+          (combat.on ? TOWN_FLAG_COMBAT : 0) |
+          (townLive.jumps & 1 ? TOWN_FLAG_JUMP : 0),
         combat.casts,
       ),
     }),

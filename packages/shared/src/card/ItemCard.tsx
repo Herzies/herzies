@@ -149,11 +149,7 @@ export function ItemCard({
           </span>
         </div>
 
-        <ItemStatLines
-          item={item}
-          level={level}
-          className="border border-border bg-bg px-1.5 py-1"
-        />
+        <ItemStatLines item={item} level={level} />
 
         <ItemRequirementLine item={item} />
 

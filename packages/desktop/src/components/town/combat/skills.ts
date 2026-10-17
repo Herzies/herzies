@@ -45,8 +45,6 @@ export const skills = {
   buffs: new Map<number, ActiveBuff[]>(),
   /** Skills used lately, newest last (for the effects; pruned by age). */
   casts: [] as SkillCast[],
-  /** A level-up to show: which skill and level, and when. */
-  levelUp: null as { skill: SkillId; level: number; at: number } | null,
 };
 
 /** Where each herzie in the room is, by entity id, for effects that follow

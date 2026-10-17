@@ -1,0 +1,119 @@
+/**
+ * The Tower: an event island fought floor by floor, alone. Every balance
+ * number for it lives here, shared by the Town server (which runs the mobs
+ * and judges every hit), the desktop (which draws them) and `town-vitals`
+ * (which pays out kills).
+ *
+ * How it scales, after the usual practice for endless floors: each floor's
+ * mobs grow by a fixed share over the last (clamped, so a long climb never
+ * reaches silly numbers), and a mob's level — its floor — set against the
+ * herzie's makes it take less from you and deal you more the further it's
+ * above you (the MMO level-gap rule), and the other way round below.
+ *
+ * Kills pay a little XP (kept behind what the same time listening brings)
+ * and now and then an item, picked exactly as listening picks one, under a
+ * daily cap.
+ */
+
+/** A mob's body, in world units from the ground: an upright capsule a wave
+ * is judged against, like a training dummy's. */
+export const MOB = {
+  radius: 0.55,
+  chest: 0.8,
+  top: 1.45,
+  /** Walks this fast toward you: slower than you walk (4.5), so you can
+   * back off and fight. */
+  speed: 3.2,
+  /** Starts its swing once you're this close (centre to centre). */
+  reach: 1.9,
+  /** Mobs keep this far apart from each other. */
+  spacing: 1.3,
+} as const;
+
+/** A swing, start to finish: a shape on the ground first (it stands still
+ * and winds up), then it lands, then a breather before it moves again. The
+ * tell is long and the hit is instant, so a hit is always something you
+ * could have stepped out of. */
+export const MOB_SWING = {
+  windupMs: 800,
+  recoverMs: 900,
+  /** The shape: a circle this big, this far in front of it. */
+  radius: 1.5,
+  ahead: 0.9,
+} as const;
+
+/** After a floor opens, how long before the mobs wake. */
+export const FLOOR_OPENING_MS = 2_000;
+
+/** How many mobs a floor has. */
+export function mobsOnFloor(floor: number): number {
+  return Math.min(10, 3 + Math.floor(Math.max(1, floor) / 2));
+}
+
+const BASE_HP = 300;
+const HP_GROWTH = 1.1;
+const BASE_DAMAGE = 8;
+const DAMAGE_GROWTH = 1.08;
+/** Past this floor the curves stop growing (the level gap still bites). */
+const CURVE_CAP_FLOOR = 80;
+
+/** A floor's mob: its level, health and how hard its swing lands (before
+ * the level gap, Def and the hit cap). */
+export function towerMob(floor: number): {
+  level: number;
+  hp: number;
+  damage: number;
+} {
+  const f = Math.max(1, Math.floor(floor));
+  const k = Math.min(f, CURVE_CAP_FLOOR) - 1;
+  return {
+    level: f,
+    hp: Math.round(BASE_HP * HP_GROWTH ** k),
+    damage: Math.round(BASE_DAMAGE * DAMAGE_GROWTH ** k),
+  };
+}
+
+/**
+ * What the level gap does: `gap` is the mob's level less the herzie's.
+ * `dealt` scales the damage you do it, `taken` what it does you. Each level
+ * above you takes 4% off yours and adds 5% to its; below you, the reverse,
+ * up to a point.
+ */
+export function levelGapMods(gap: number): { dealt: number; taken: number } {
+  const g = Number.isFinite(gap) ? gap : 0;
+  return {
+    dealt: clamp(1 - 0.04 * g, 0.3, 1.2),
+    taken: clamp(1 + 0.05 * g, 0.6, 2),
+  };
+}
+
+/** How a mob's level reads against yours: grey far below, white about
+ * even, orange above, red well above. */
+export function gapColour(gap: number): "grey" | "white" | "orange" | "red" {
+  if (gap <= -5) return "grey";
+  if (gap <= 2) return "white";
+  if (gap <= 6) return "orange";
+  return "red";
+}
+
+/** XP for a kill. Listening pays 10 XP a minute before bonuses; the first
+ * floors go at about three kills a minute, so a third of that. Higher up a
+ * kill pays a little more (to 3) but takes far longer, so it never catches
+ * up. */
+export function towerXpPerKill(floor: number): number {
+  return Math.min(3, 1 + Math.floor(Math.max(1, floor) / 10));
+}
+/** At most this much tower XP a day (UTC). */
+export const TOWER_XP_DAILY_CAP = 300;
+
+/** The chance a kill drops an item: one in eight, so a floor or two of
+ * mobs usually turns something up. That's faster than listening (one per ten
+ * minutes) on purpose; the daily cap is what keeps it in check. The item is
+ * picked as listening picks one (rarity weights and luck). */
+export const TOWER_DROP_CHANCE = 1 / 8;
+/** At most this many tower drops a day (UTC). */
+export const TOWER_DROPS_DAILY_CAP = 30;
+
+function clamp(v: number, lo: number, hi: number): number {
+  return Math.min(hi, Math.max(lo, v));
+}

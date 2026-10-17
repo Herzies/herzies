@@ -62,7 +62,9 @@ export const SKILL_DEFS: Record<SkillId, SkillDef> = {
     name: "Backspin",
     kind: "attack",
     describe: "Flings three spinning discs, each hitting for {v} of a wave.",
-    value: [0.6, 1.2],
+    // Each disc out-hits a plain throw (DISC_DAMAGE 1.15) from level 1: a
+    // burst worth pressing, not a weaker throw.
+    value: [1.5, 2.5],
     cooldownMs: 12_000,
     xpPerUnit: 1 / 40,
   },

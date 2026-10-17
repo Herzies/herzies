@@ -1183,10 +1183,10 @@ export function ChatPanel({
           ref={panelRef}
           style={expanded ? { bottom: dockBottom } : undefined}
           className={cn(
-            // Collapsed, the same bottom padding and border as expanded, so
-            // the input keeps its gap above the tabs either way.
+            // Collapsed, the same padding and borders as expanded, so the
+            // input keeps its place either way, but both drawn clear.
             "flex flex-col border-t border-b border-white/15 pb-1",
-            !expanded && "border-b-transparent pt-px",
+            !expanded && "border-t-transparent border-b-transparent pt-px",
             expanded &&
               "fixed inset-x-0 z-[201] h-[50vh] max-h-[50vh] px-3 pt-[5px] shadow-[0_-8px_32px_rgba(0,0,0,0.45)]",
             expanded &&

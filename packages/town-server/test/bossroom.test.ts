@@ -134,6 +134,22 @@ describe("boss room", () => {
     await a.closed;
   });
 
+  it("won't let a herzie at full health eat, and ignores a malformed eat", async () => {
+    const c = await enter("snacker");
+    await c.next("welcome");
+    c.ws.send(JSON.stringify({ t: "eat", item: 5, seq: "x" }));
+    c.ws.send(JSON.stringify({ t: "eat", item: "star-candy", seq: 1 }));
+    expect(await c.next("ate")).toEqual({
+      t: "ate",
+      seq: 1,
+      item: "star-candy",
+      ok: false,
+      reason: "full",
+    });
+    c.ws.close();
+    await c.closed;
+  });
+
   it("tells the room when a cast hits the boss, and the caster by how much", async () => {
     const a = await enter("caster");
     const wa = await a.next("welcome");

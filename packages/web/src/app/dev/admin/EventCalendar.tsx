@@ -16,6 +16,7 @@ const TYPE_ORDER = [
   "song_hunt",
   "merchant",
   "treat_trader",
+  "tower",
   "secret_track",
 ];
 

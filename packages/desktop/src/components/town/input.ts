@@ -1,4 +1,6 @@
 import { useEffect, useRef } from "react";
+import { eat } from "./eat";
+import { HOTBAR_KEYS, type HotbarKey, hotbarItem } from "./hotbarSlots";
 
 /** What the player is asking for this frame. Read by the game loop; written
  * only by the listeners below. */
@@ -17,6 +19,8 @@ export type TownInput = {
   /** Mouse buttons held over the world. */
   mouseLeft: boolean;
   mouseRight: boolean;
+  /** Space pressed: hop. A press, not a hold — whoever acts on it clears it. */
+  jump: boolean;
 };
 
 const MOVE_KEYS: Record<string, keyof TownInput> = {
@@ -32,6 +36,13 @@ const MOVE_KEYS: Record<string, keyof TownInput> = {
   ShiftRight: "sprint",
 };
 
+/** Whoever holds keys down now lets go of them (the boss's end screen
+ * coming up over the Town: nobody walks on under it). */
+const letGoListeners = new Set<() => void>();
+export function letGoOfTownInput(): void {
+  for (const l of letGoListeners) l();
+}
+
 const idle = (): TownInput => ({
   forward: false,
   back: false,
@@ -44,6 +55,7 @@ const idle = (): TownInput => ({
   sprint: false,
   mouseLeft: false,
   mouseRight: false,
+  jump: false,
 });
 
 /**
@@ -54,7 +66,8 @@ const idle = (): TownInput => ({
  * not walk the herzie, and keys held when the window loses focus must not
  * stay held. Both are handled here. Listens only while `active`.
  *
- * `onInteract` fires on E. `surface` is the element mouse buttons count on
+ * `onInteract` fires on E; Space raises `jump`, for the game loop to clear;
+ * 2, 3 and 4 eat from the hotbar (hotbar.ts). `surface` is the element mouse buttons count on
  * (the canvas); button releases are caught anywhere, since the camera
  * captures the pointer mid-drag.
  */
@@ -92,6 +105,21 @@ export function useTownInput(
         interact.current();
         return;
       }
+      // 2, 3, 4: eat what's on that hotbar slot (1 is the class skill).
+      const slot = e.code.startsWith("Digit") ? e.code.slice(5) : "";
+      if (HOTBAR_KEYS.includes(slot as HotbarKey)) {
+        e.preventDefault();
+        const itemId = hotbarItem(slot as HotbarKey);
+        if (itemId && !e.repeat) void eat(itemId);
+        return;
+      }
+      // Space would click whatever button has focus (or scroll): it's the
+      // jump key here.
+      if (e.code === "Space") {
+        e.preventDefault();
+        if (!e.repeat) input.current.jump = true;
+        return;
+      }
       const action = MOVE_KEYS[e.code];
       if (!action) return;
       e.preventDefault();
@@ -102,12 +130,17 @@ export function useTownInput(
       if (action) input.current[action] = false;
     };
     const onPointerDown = (e: PointerEvent) => {
-      if (e.button === 0) input.current.mouseLeft = true;
-      if (e.button === 2) input.current.mouseRight = true;
+      if (e.button === 0 || e.buttons & 1) input.current.mouseLeft = true;
+      if (e.button === 2 || e.buttons & 2) input.current.mouseRight = true;
     };
-    const onPointerUp = (e: PointerEvent) => {
-      if (e.button === 0) input.current.mouseLeft = false;
-      if (e.button === 2) input.current.mouseRight = false;
+    // A second button pressed (or let go) while another is held fires no
+    // pointerdown/up of its own — only a pointermove with `buttons` changed —
+    // so once a press has started on the surface, follow `buttons` itself.
+    const onPointerChange = (e: PointerEvent) => {
+      const i = input.current;
+      if (!i.mouseLeft && !i.mouseRight) return;
+      i.mouseLeft = (e.buttons & 1) !== 0;
+      i.mouseRight = (e.buttons & 2) !== 0;
     };
     // The right button is the steering button, not a menu.
     const onContextMenu = (e: Event) => e.preventDefault();
@@ -121,16 +154,20 @@ export function useTownInput(
 
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
-    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointerup", onPointerChange);
+    window.addEventListener("pointermove", onPointerChange);
     window.addEventListener("blur", release);
+    letGoListeners.add(release);
     document.addEventListener("visibilitychange", onVisibility);
     surface?.addEventListener("pointerdown", onPointerDown);
     surface?.addEventListener("contextmenu", onContextMenu);
     return () => {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
-      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointerup", onPointerChange);
+      window.removeEventListener("pointermove", onPointerChange);
       window.removeEventListener("blur", release);
+      letGoListeners.delete(release);
       document.removeEventListener("visibilitychange", onVisibility);
       surface?.removeEventListener("pointerdown", onPointerDown);
       surface?.removeEventListener("contextmenu", onContextMenu);

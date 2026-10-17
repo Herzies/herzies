@@ -27,6 +27,7 @@ const WEARABLE_OPTIONS = [
   "bowtie",
   "boombox",
   "witch-hat",
+  "sixpence",
   "fangs",
   "pumpkin-spice",
   "ghost",
@@ -382,7 +383,12 @@ function Sandbox() {
 function toEquipped(ids: string[]): Equipped {
   const out: Equipped = {};
   for (const id of ids) {
-    if (id === "headphones" || id === "rainbow-headband" || id === "witch-hat")
+    if (
+      id === "headphones" ||
+      id === "rainbow-headband" ||
+      id === "witch-hat" ||
+      id === "sixpence"
+    )
       out.head = id;
     else if (id === "clouds" || id === "stars" || id === "blood-moon")
       out.scenery = id;

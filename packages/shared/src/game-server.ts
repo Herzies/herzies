@@ -365,6 +365,7 @@ export async function processSync(
           (row.item_upgrades ?? {}) as Record<string, number>,
         ),
     herzie.statPoints,
+    herzie.level,
   );
   // Copies minted during this sync, so the response can carry them without
   // another query on a path that runs every few seconds per client.
@@ -527,6 +528,34 @@ export async function processSync(
     billedMinutes = minutes;
     recordGenreMinutes(herzie.genreMinutes, classifiedGenres, minutes);
 
+    if (events.leveledUp) {
+      notifications.push({
+        type: "info",
+        title: "Level Up!",
+        message: `${herzie.name} is now level ${herzie.level}! (+${POINTS_PER_LEVEL * (herzie.level - levelBefore)} stat points)`,
+      });
+    }
+    if (events.evolved && events.newStage) {
+      notifications.push({
+        type: "info",
+        title: "Evolution!",
+        message: `${herzie.name} evolved to stage ${events.newStage}!`,
+      });
+    }
+  }
+
+  // 4a. XP the Tower paid since the last sync (00115). It waits in
+  // herzies.pending_xp rather than going straight onto xp, which this sync
+  // writes whole from what it read; taken (and zeroed) in one step here. A
+  // database without it (before 00115) just has none to give.
+  // Only asked when the row read above says there's some (sync is hot).
+  const { data: towerXp } =
+    Number(row.pending_xp ?? 0) > 0
+      ? await admin.rpc("take_pending_xp", { p_user: userId })
+      : { data: 0 };
+  if (typeof towerXp === "number" && towerXp > 0) {
+    const levelBefore = herzie.level;
+    const events = applyXp(herzie, towerXp);
     if (events.leveledUp) {
       notifications.push({
         type: "info",

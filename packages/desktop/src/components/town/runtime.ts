@@ -57,6 +57,9 @@ export const townSave = {
   // Behind the player, looking the way it faces.
   azimuth: HOME_MAP.spawn.heading - Math.PI,
   polar: 1.2,
+  /** Bumped on every arrival (another island, a respawn): the camera then
+   * swings round behind the herzie, looking the way it faces. */
+  arrival: 0,
 };
 
 /** What the player's herzie is doing right now, for the multiplayer Town
@@ -68,7 +71,7 @@ export const townLive = {
   lastInputAt: 0,
   /** Set to move the herzie straight there next step (the server refused a
    * move); Player clears it. */
-  teleport: null as { x: number; z: number } | null,
+  teleport: null as { x: number; z: number; heading?: number } | null,
   /** The bench seat the herzie is sitting on, if any (see Benches). */
   seat: null as Seat | null,
   /** Stand up from it next step (Player clears it). */
@@ -83,6 +86,9 @@ export const townLive = {
   dancing: false,
   /** Going through a portal: the herzie can't be steered. */
   frozen: false,
+  /** Jumps it has taken off on (Player sets it; the parity is sent to
+   * everyone else, who play the same hop). */
+  jumps: 0,
 };
 
 type Spot = { x: number; z: number };
@@ -139,6 +145,7 @@ export function goToMap(
     heading: to.heading,
     // Behind the herzie, looking the way it faces.
     azimuth: to.heading - Math.PI,
+    arrival: townSave.arrival + 1,
   });
   townLive.seat = null;
   townLive.teleport = null;

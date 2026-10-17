@@ -24,6 +24,7 @@ import {
   buildMerchantConfig,
   buildSongHuntConfig,
   fetchUpcomingEvents,
+  fetchWeekEvents,
 } from "../_shared/shared/game-events.ts";
 import { corsHeaders, jsonResponse } from "../_shared/cors.ts";
 
@@ -125,9 +126,12 @@ Deno.serve(async (request) => {
       }),
     );
 
-    const upcoming = await fetchUpcomingEvents(admin, now);
+    const [upcoming, week] = await Promise.all([
+      fetchUpcomingEvents(admin, now),
+      fetchWeekEvents(admin, now),
+    ]);
 
-    return jsonResponse({ events, upcoming });
+    return jsonResponse({ events, upcoming, week });
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "Internal server error";

@@ -149,6 +149,34 @@ export const NANDOR_RAMP = [
 ] as const;
 
 /**
+ * Boboku, the instrument seller who's always in Town. Like GOLD_RAMP no item
+ * grants it: one solid tangerine, top to toe (every step the same, so no
+ * bands), unlike the striped Pumpkin Spice skin.
+ */
+export const BOBOKU_RAMP = [
+  "#F5922F",
+  "#F5922F",
+  "#F5922F",
+  "#F5922F",
+  "#F5922F",
+  "#F5922F",
+] as const;
+
+/**
+ * Medea, who sells sweets and potions and is always in Town. No item grants
+ * it: candy pink at the crown sinking through orchid and violet into a plum
+ * that's nearly black at her feet — sweet on top, darker underneath.
+ */
+export const MEDEA_RAMP = [
+  "#FF8FD0",
+  "#E05AB8",
+  "#A23CA8",
+  "#6A2486",
+  "#3C1456",
+  "#1A0828",
+] as const;
+
+/**
  * Boss ramp — the only ramp that is not built around a CREATURE_PALETTE hue,
  * because a boss is deliberately not a colour a herzie could hatch with.
  *

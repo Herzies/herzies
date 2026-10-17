@@ -7,6 +7,7 @@ import { lookOf } from "../../TownScene";
 import { ambient } from "../ambient";
 import { townSave } from "../runtime";
 import { bossFight, useBossFight } from "./fight";
+import { CRUMBLE, STONE_HOLD } from "./results";
 
 /** The boss looms: drawn this much bigger than it's built, like the one
  * in town. */
@@ -16,10 +17,6 @@ const MAX_TURN_SPEED = 3;
 /** The boss rears this much while an attack fills, and drops on the slam. */
 const REAR = 0.08;
 const SLAM_MS = 260;
-/** Fallen, it stands as stone this long (s), then crumbles into the floor
- * over this long, and is gone. */
-const STONE_HOLD = 1.2;
-const CRUMBLE = 1.1;
 
 /**
  * The boss in its cave: the same body as the one in town, turning to

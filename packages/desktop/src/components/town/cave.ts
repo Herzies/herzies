@@ -1,5 +1,6 @@
 import { LOW_HP_FRACTION, liveHp } from "@herzies/shared";
 import { useSyncExternalStore } from "react";
+import { notify } from "../../lib/notices";
 import { getVitals } from "./vitals";
 
 /**
@@ -74,32 +75,6 @@ export function sealedMessage(c: CaveState, now = Date.now()): string {
   }
 }
 
-// --- A line of text that shows for a moment -------------------------------
-
-let toastText: string | null = null;
-let toastTimer: ReturnType<typeof setTimeout> | null = null;
-
-export function showToast(text: string, ms = 3_500): void {
-  toastText = text;
-  if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => {
-    toastText = null;
-    toastTimer = null;
-    emit();
-  }, ms);
-  emit();
-}
-
-export function useToast(): string | null {
-  return useSyncExternalStore(
-    (cb) => {
-      listeners.add(cb);
-      return () => listeners.delete(cb);
-    },
-    () => toastText,
-  );
-}
-
 // --- The door --------------------------------------------------------------
 
 /** How long a "you're hurt" warning stays good for a second try, ms. */
@@ -113,7 +88,7 @@ let warnedAt = Number.NEGATIVE_INFINITY;
  */
 export function tryEnterCave(now = Date.now()): boolean {
   if (state.kind !== "open") {
-    showToast(sealedMessage(state, now));
+    notify(sealedMessage(state, now));
     return false;
   }
   const v = getVitals();
@@ -121,9 +96,9 @@ export function tryEnterCave(now = Date.now()): boolean {
     const hp = liveHp(v, now);
     if (hp / v.maxHp < LOW_HP_FRACTION && now - warnedAt > WARNING_MS) {
       warnedAt = now;
-      showToast(
+      notify(
         `You're hurt (${Math.ceil(hp)} / ${v.maxHp}). Rest first, or go in again to enter anyway.`,
-        WARNING_MS,
+        { kind: "info" },
       );
       return false;
     }

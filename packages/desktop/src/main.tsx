@@ -34,6 +34,7 @@ import { IncomingFriendOverlay } from "./components/IncomingFriendOverlay";
 import { IncomingTradeOverlay } from "./components/IncomingTradeOverlay";
 import { HERZIE_ZONE_ATTR, InventoryView } from "./components/InventoryView";
 import { LoadingSplash } from "./components/LoadingSplash";
+import { Notices } from "./components/Notices";
 import { OnboardingScreen } from "./components/OnboardingScreen";
 import { ProfileView } from "./components/ProfileView";
 import { PromptOverlay } from "./components/PromptOverlay";
@@ -43,13 +44,16 @@ import { StoreView } from "./components/StoreView";
 import { TabBar, type View } from "./components/TabBar";
 import { TradeView } from "./components/TradeView";
 import { setLootRoom } from "./components/town/combat/lootFeed";
+import { useBossResultsShown } from "./components/town/combat/results";
 import { setMySkill } from "./components/town/combat/skills";
 import { combat } from "./components/town/combat/state";
+import { townNet } from "./components/town/net/townNet";
 import { UpdateAvailableOverlay } from "./components/UpdateAvailableOverlay";
 import { WhatsNewOverlay } from "./components/WhatsNewOverlay";
 import { useOptimisticUnits } from "./hooks/useOptimisticUnits";
 import { useHomeStageOffset } from "./hooks/useStageAlignment";
 import { useTradeRequests } from "./hooks/useTradeRequests";
+import { notify } from "./lib/notices";
 import { stableMerge } from "./lib/stableMerge";
 import { cn } from "./lib/utils";
 import { RELEASE_NOTES } from "./release-notes";
@@ -98,7 +102,21 @@ function observeDock(el: HTMLDivElement | null) {
   if (el) dockObserver.observe(el);
 }
 
+/** ...and the tab bar's alone as `--nav-height`, for what covers the Town
+ * down to the tabs but not over them (the boss's end screen). */
+const navObserver = new ResizeObserver(([entry]) => {
+  document.documentElement.style.setProperty(
+    "--nav-height",
+    `${(entry.target as HTMLElement).offsetHeight}px`,
+  );
+});
+function observeNav(el: HTMLDivElement | null) {
+  navObserver.disconnect();
+  if (el) navObserver.observe(el);
+}
+
 function App() {
+  const endScreenUp = useBossResultsShown() !== null;
   const [rawState, setState] = useState<AppState>({
     herzie: null,
     nowPlaying: null,
@@ -227,6 +245,17 @@ function App() {
   useEffect(() => {
     combat.attack = attackStyle(classOverride ?? rawState.herzie?.class);
   }, [rawState.herzie?.class, classOverride]);
+  // A new class or level: the Town server judges casts from the ticket (a
+  // class's attack; the Tower's level gap), so it gets a fresh one. After a
+  // beat, so the server has the change saved.
+  const ticketKey = `${rawState.herzie?.class ?? ""}|${rawState.herzie?.level ?? 0}`;
+  const firstTicketKey = useRef(ticketKey);
+  useEffect(() => {
+    if (firstTicketKey.current === ticketKey) return;
+    firstTicketKey.current = ticketKey;
+    const t = setTimeout(() => void townNet().refreshLook(), 1_500);
+    return () => clearTimeout(t);
+  }, [ticketKey]);
   /** "Later" on the class choice: asked again next launch. */
   const [classChoiceLater, setClassChoiceLater] = useState(false);
   /** Captured the first time `state.isOnline` is true this session: was this
@@ -327,7 +356,12 @@ function App() {
       setHydrated(true);
     });
     const unlistenState = herzies.onStateUpdate(applyState);
-    const unlistenActivity = herzies.onActivity(addLog);
+    // What the backend says happened (a pickup, a friend, a visitor, a level
+    // up): into the log, and over the screen for a moment.
+    const unlistenActivity = herzies.onActivity((message) => {
+      addLog(message);
+      notify(message, { kind: "info" });
+    });
     const unlistenDeepLink = herzies.onDeepLink((payload) => {
       if (payload.startsWith("trade:")) {
         const tradeId = payload.slice("trade:".length);
@@ -607,6 +641,8 @@ function App() {
   /** The Town's 3D world is on screen: it fills the window, and the chat
    * floats over it. */
   const townWorld = view === "events" && eventsScreen === "world";
+  // The boss's end screen is up over the Town: the chat steps aside.
+  const endScreen = endScreenUp && townWorld;
 
   /** Where the chat is shown (see chatPanel). */
   const chatOnScreen = (view === "home" && !selfProfile) || townWorld;
@@ -1095,6 +1131,7 @@ function App() {
                     name: herzie.name,
                     level: herzie.level,
                     progress: levelProgress(herzie),
+                    xp: herzie.xp,
                   }
                 : undefined
             }
@@ -1212,29 +1249,43 @@ function App() {
             )}
           />
           <div className="relative">
-            {chatPanel}
+            {/* The boss's end screen covers the Town down to the tabs: the
+                chat folds away under it (fading, and its space closing, so
+                the dock's frosting shrinks to the tabs), and back after. */}
+            <div
+              className={cn(
+                "grid grid-rows-[1fr] transition-[grid-template-rows,opacity] duration-300",
+                endScreen && "pointer-events-none grid-rows-[0fr] opacity-0",
+              )}
+            >
+              <div className={cn("min-h-0", endScreen && "overflow-hidden")}>
+                {chatPanel}
+              </div>
+            </div>
             {herzie && (
-              <TabBar
-                view={view}
-                setView={(v) => {
-                  if (v === "inventory") setInventoryPanel("deck");
-                  switchView(v);
-                }}
-                // Only once the server knows stat points: before that,
-                // every herzie would show its whole back pay unspendable.
-                unspentPoints={
-                  herzie.statPoints
-                    ? statPoints(herzie.level, herzie.statPoints).unspent
-                    : 0
-                }
-                visitorsInTown={
-                  visitorsInTown +
-                  Number(hasActiveEventOverride) +
-                  Number(debugBossOverride) +
-                  Number(debugMerchantOverride) +
-                  Number(debugTreatTraderOverride)
-                }
-              />
+              <div ref={observeNav}>
+                <TabBar
+                  view={view}
+                  setView={(v) => {
+                    if (v === "inventory") setInventoryPanel("deck");
+                    switchView(v);
+                  }}
+                  // Only once the server knows stat points: before that,
+                  // every herzie would show its whole back pay unspendable.
+                  unspentPoints={
+                    herzie.statPoints
+                      ? statPoints(herzie.level, herzie.statPoints).unspent
+                      : 0
+                  }
+                  visitorsInTown={
+                    visitorsInTown +
+                    Number(hasActiveEventOverride) +
+                    Number(debugBossOverride) +
+                    Number(debugMerchantOverride) +
+                    Number(debugTreatTraderOverride)
+                  }
+                />
+              </div>
             )}
           </div>
         </div>
@@ -1389,6 +1440,9 @@ function App() {
       {ghostMode && (
         <div className="pointer-events-none fixed inset-0 z-200 bg-black/30" />
       )}
+
+      {/* Short messages that matter now (lib/notices.ts). */}
+      <Notices />
     </div>
   );
 }

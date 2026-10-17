@@ -16,6 +16,7 @@ import { DurableObject } from "cloudflare:workers";
 import {
   decodeCastFrame,
   decodeStateFrame,
+  type EatRefusal,
   encodeSnapshot,
   isTownMapId,
   quantizeState,
@@ -23,6 +24,8 @@ import {
   type SnapshotEntry,
   TOWN_CLOSE,
   TOWN_FLAG_SITTING,
+  TOWN_INSTANCED_MAPS,
+  TOWN_MAPS,
   TOWN_PING,
   TOWN_PONG,
   TOWN_PROTOCOL,
@@ -47,7 +50,7 @@ import {
   RateLimiter,
   startingPoint,
 } from "./rules";
-import { postVitals } from "./vitals";
+import { eatInDb, postVitals } from "./vitals";
 
 export type Env = {
   TOWN_ROOM: DurableObjectNamespace<TownRoom>;
@@ -89,6 +92,8 @@ const REST_MAPS: ReadonlySet<TownMapId> = new Set(["home"]);
 type Attachment = {
   connectedAt: number;
   map: TownMapId;
+  /** An instanced map's room: whose it is (a user id). */
+  instance?: string;
   player?: {
     id: number;
     uid: string;
@@ -183,7 +188,8 @@ export class TownRoom extends DurableObject<Env> {
       return new Response(null, { status: 101, webSocket: client });
     }
     const now = Date.now();
-    const att: Attachment = { connectedAt: now, map };
+    const instance = request.headers.get("x-town-instance") ?? undefined;
+    const att: Attachment = { connectedAt: now, map, instance };
     server.serializeAttachment(att);
     this.session(server, att, now);
     setTimeout(() => {
@@ -219,6 +225,7 @@ export class TownRoom extends DurableObject<Env> {
         seq?: unknown;
         yaw?: unknown;
         pitch?: unknown;
+        item?: unknown;
       };
       try {
         m = JSON.parse(message);
@@ -229,6 +236,8 @@ export class TownRoom extends DurableObject<Env> {
       if (m?.t === "hello" && !s.player) await this.hello(s, m, now);
       else if (m?.t === "ticket" && s.player) await this.renew(s, m.ticket);
       else if (m?.t === "skill" && s.player) this.onSkill(s, m, now);
+      else if (m?.t === "eat" && s.player) await this.onEat(s, m, now);
+      else if (m?.t === "next" && s.player) this.onNext(s, now);
       else this.strike(s);
       return;
     }
@@ -369,7 +378,7 @@ export class TownRoom extends DurableObject<Env> {
       t.name !== p.name || JSON.stringify(t.look) !== JSON.stringify(p.look);
     p.exp = t.exp;
     p.maxHp = t.hp?.maxHp;
-    this.fight?.renew(p.uid, t);
+    for (const o of this.fight?.renew(p.uid, t) ?? []) this.dispatch(o);
     p.name = t.name;
     p.look = t.look;
     this.persist(s);
@@ -520,6 +529,7 @@ export class TownRoom extends DurableObject<Env> {
   /** Whether the boss room lets this ticket in. Starts the fight from the
    * ticket's boss claim if none is running. */
   private admit(s: Session, t: TownTicketPayload, now: number): boolean {
+    if (s.att.map === "tower") return this.admitTower(s, t, now);
     let claim = t.boss;
     if (!claim && this.env.DEV_BOSS) {
       claim = {
@@ -576,6 +586,65 @@ export class TownRoom extends DurableObject<Env> {
     return true;
   }
 
+  /** Whether this Tower room lets the ticket in: it's this herzie's own
+   * room, a Tower event is on, and they're on their feet. Starts their
+   * floor from the ticket's claim if none is running. */
+  private admitTower(s: Session, t: TownTicketPayload, now: number): boolean {
+    if (!TOWN_INSTANCED_MAPS.has(s.att.map) || s.att.instance !== t.uid) {
+      this.drop(s, TOWN_CLOSE.sealed, "not your room");
+      return false;
+    }
+    let claim = t.tower;
+    if (!claim && this.env.DEV_BOSS)
+      claim = { event: DEV_EVENT, until: now / 1000 + 3_600, floor: 1 };
+    if (!claim || claim.until * 1000 <= now) {
+      this.drop(s, TOWN_CLOSE.sealed, "sealed");
+      return false;
+    }
+    const issued = (t.exp - TOWN_TICKET_TTL_S) * 1000;
+    if (now - issued > FRESH_TICKET_MS) {
+      this.drop(s, TOWN_CLOSE.auth, "stale ticket");
+      return false;
+    }
+    if (t.hp?.down || (t.hp && t.hp.hp <= 0)) {
+      this.drop(s, TOWN_CLOSE.sealed, "down");
+      return false;
+    }
+    // Another event's Tower, or one that ended: start over.
+    if (
+      this.fight &&
+      (claim.event !== this.fight.eventId || !this.fight.open)
+    ) {
+      this.fight = null;
+      this.closeScheduled = false;
+    }
+    if (!this.fight) {
+      const { radius, spawn } = TOWN_MAPS.tower;
+      this.fight = FightRuntime.tower(
+        claim,
+        t.uid,
+        t.lv ?? 1,
+        { radius, entry: spawn },
+        now,
+      );
+    }
+    return true;
+  }
+
+  /** On to the next Tower floor (the client walked through the far
+   * portal); the herzie starts it back at the spawn. */
+  private onNext(s: Session, now: number) {
+    const p = s.player;
+    if (!p || !this.fight?.tower) {
+      this.strike(s);
+      return;
+    }
+    // The move back to the start needs nothing here: a jump onto the map's
+    // spawn is always allowed (checkMove), and the frames still on their
+    // way from the far portal must pass too.
+    for (const o of this.fight.next(p.uid, now)) this.dispatch(o);
+  }
+
   private onCast(s: Session, message: ArrayBuffer, now: number) {
     const cast = decodeCastFrame(message);
     const p = s.player;
@@ -623,6 +692,44 @@ export class TownRoom extends DurableObject<Env> {
     if (result === "cooldown" || result === "unknown") this.strike(s);
   }
 
+  /** A consumable eaten in a fight, where this room holds HP: the database
+   * uses up the copy, then the fight heals. Anywhere else the client eats
+   * through the API, so an `eat` here is just told no. */
+  private async onEat(
+    s: Session,
+    m: { item?: unknown; seq?: unknown },
+    now: number,
+  ) {
+    const p = s.player;
+    const seq = Number(m.seq);
+    if (!p || typeof m.item !== "string" || !Number.isInteger(seq)) {
+      this.strike(s);
+      return;
+    }
+    const item = m.item;
+    const refuse = (reason: EatRefusal) =>
+      this.send(s, { t: "ate", seq, item, ok: false, reason });
+    const fight = this.fight;
+    if (!fight) return refuse("not-here");
+    const no = fight.tryEat(p.uid, now);
+    if (no) {
+      if (no === "cooldown") this.strike(s);
+      return refuse(no);
+    }
+    const reply = await eatInDb(this.env, p.uid, item);
+    if (!reply?.ok) {
+      const reason = reply?.reason;
+      return refuse(
+        reason === "none-left" || reason === "not-consumable"
+          ? reason
+          : "failed",
+      );
+    }
+    // The fight (or the herzie in it) may be gone after the await.
+    for (const o of this.fight?.eat(p.uid, reply.heal) ?? []) this.dispatch(o);
+    this.send(s, { t: "ate", seq, item, ok: true, heal: reply.heal });
+  }
+
   /** Step the fight and tell everyone what happened. */
   private runFight(now: number) {
     const fight = this.fight;
@@ -660,7 +767,14 @@ export class TownRoom extends DurableObject<Env> {
     if (!fight || this.reporting) return;
     const report = fight.report(now, force);
     if (!report) return;
-    if (!report.hp.length && !report.boss && !report.skills) return;
+    if (
+      !report.hp.length &&
+      !report.boss &&
+      !report.skills &&
+      !report.results &&
+      !report.tower
+    )
+      return;
     this.reporting = true;
     void postVitals(this.env, { action: "report", ...report })
       .then((reply) => {
@@ -670,6 +784,11 @@ export class TownRoom extends DurableObject<Env> {
         if (loot) for (const o of fight.loot(loot)) this.dispatch(o);
         const levels = reply.skills?.levels;
         if (levels) for (const o of fight.skillUps(levels)) this.dispatch(o);
+        if (report.results && reply.results)
+          for (const o of fight.results(reply.results)) this.dispatch(o);
+        if (report.tower && reply.tower?.drops)
+          for (const o of fight.towerLoot(reply.tower.drops, report.tower))
+            this.dispatch(o);
       })
       .finally(() => {
         this.reporting = false;

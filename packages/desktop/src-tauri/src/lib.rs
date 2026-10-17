@@ -752,10 +752,55 @@ async fn buy_from_merchant(
 ) -> Result<serde_json::Value, String> {
     let client = api::http();
     let data = api::api_buy_from_merchant(&client, &event_id, &item_id, quantity).await?;
+    apply_purchase(&data, &app, &state);
+    Ok(data)
+}
 
+#[tauri::command]
+async fn buy_from_boboku(
+    item_id: String,
+    quantity: u32,
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    let client = api::http();
+    let data = api::api_buy_from_boboku(&client, &item_id, quantity).await?;
+    apply_purchase(&data, &app, &state);
+    Ok(data)
+}
+
+#[tauri::command]
+async fn buy_from_medea(
+    item_id: String,
+    quantity: u32,
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    let client = api::http();
+    let data = api::api_buy_from_medea(&client, &item_id, quantity).await?;
+    apply_purchase(&data, &app, &state);
+    Ok(data)
+}
+
+/// Eats one consumable (outside a boss fight, where the database holds HP).
+/// Applies the item state like a purchase; the caller takes the vitals.
+#[tauri::command]
+async fn eat_item(
+    item_id: String,
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    let client = api::http();
+    let data = api::api_eat_item(&client, &item_id).await?;
+    apply_purchase(&data, &app, &state);
+    Ok(data)
+}
+
+/// A purchase's new inventory and balance, saved and announced.
+fn apply_purchase(data: &serde_json::Value, app: &AppHandle, state: &SharedState) {
     let mut s = state.lock().unwrap();
     let mut changed = false;
-    if let Some(snapshot) = snapshot_from_response(&data, &s) {
+    if let Some(snapshot) = snapshot_from_response(data, &s) {
         apply_inventory(&mut s, snapshot, None);
         changed = true;
     }
@@ -768,9 +813,8 @@ async fn buy_from_merchant(
     }
     drop(s);
     if changed {
-        emit_state_update(&app);
+        emit_state_update(app);
     }
-    Ok(data)
 }
 
 #[tauri::command]
@@ -1035,6 +1079,7 @@ async fn fetch_active_events() -> Result<serde_json::Value, String> {
         Some(data) => Ok(serde_json::json!({
             "events": data.events,
             "upcoming": data.upcoming,
+            "week": data.week,
         })),
         None => Ok(serde_json::json!({ "events": [] })),
     }
@@ -2176,11 +2221,14 @@ async fn events_watch_loop(app: AppHandle) {
             // hunt as Orphiez.
             let title = match event.event_type.as_str() {
                 "song_hunt" => "Orphiez is in town!".to_string(),
+                "tower" => "The Tower is open!".to_string(),
                 _ if event.title.trim().is_empty() => "Someone's in town!".to_string(),
                 _ => format!("{} is in town!", event.title),
             };
             let fallback_body = if event.event_type == "song_hunt" {
                 "He's lost a song. Help him find it."
+            } else if event.event_type == "tower" {
+                "Climb it floor by floor, through the portal in Town."
             } else {
                 "Someone new has arrived in Town."
             };
@@ -2659,6 +2707,9 @@ pub fn run() {
             sell_item,
             apply_dice_upgrade,
             buy_from_merchant,
+            buy_from_boboku,
+            buy_from_medea,
+            eat_item,
             collect_drop,
             spawn_debug_drop,
             equip_item,

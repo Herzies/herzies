@@ -1,4 +1,9 @@
-import { type Equipped, type HerzieStats, isTownMapId } from "@herzies/shared";
+import {
+  type Equipped,
+  type HerzieStats,
+  type ItemUnit,
+  isTownMapId,
+} from "@herzies/shared";
 import {
   lazy,
   Suspense,
@@ -15,14 +20,18 @@ import { ExpBar } from "./SquareBar";
 import { type EventCard, formatIn, isDown } from "./TownScene";
 import { TownHpBar, TownVitals } from "./TownVitals";
 import { BossHud } from "./town/BossHud";
+import { BossResults } from "./town/BossResults";
 import { setCave } from "./town/cave";
 import { useChatBubbles } from "./town/chatBubbles";
 import { resetBossFight } from "./town/combat/fight";
 import { onLootLog } from "./town/combat/lootFeed";
+import { useBossResultsShown } from "./town/combat/results";
 import { useCombat } from "./town/combat/state";
 import { useFpsShown } from "./town/fps";
+import { Hotbar } from "./town/Hotbar";
 import { Key } from "./town/Key";
 import type { TownMap } from "./town/map";
+import { markMet } from "./town/met";
 import { NAME_SHADOW } from "./town/nameFade";
 import { useTownNet, useTownNetVersion } from "./town/net/townNet";
 import { spotsOf, type TownSpot, townLive, useTownMap } from "./town/runtime";
@@ -53,7 +62,10 @@ export function TownWorld({
   onLog,
   stats,
   profile,
+  units = [],
 }: {
+  /** The bank's copies: how many of each hotbar item are left. */
+  units?: readonly ItemUnit[];
   /** The player's herzie's stats: how hard its waves hit. */
   stats?: HerzieStats;
   /** Name, level and progress to the next level, for the card top left. */
@@ -62,6 +74,8 @@ export function TownWorld({
     name: string;
     level: number;
     progress: number;
+    /** Total XP, for the exp bar's tooltip. */
+    xp?: number;
   };
   /** The chat, for lines over the speakers' heads. */
   chatMessages?: ChatMessage[];
@@ -88,7 +102,8 @@ export function TownWorld({
   // The cave's loot writes to the log like any other pickup.
   useEffect(() => onLootLog((message) => onLog?.(message)), [onLog]);
   const [near, setNear] = useState<TownSpot | null>(null);
-  const [bench, setBench] = useState<"sit" | "stand" | null>(null);
+  const endScreen = useBossResultsShown() !== null;
+  const [bench, setBench] = useState<"sit" | "stand" | "read" | null>(null);
   const [portalTo, setPortalTo] = useState<TownMap | null>(null);
   const fighting = useCombat();
   const fpsShown = useFpsShown();
@@ -116,12 +131,13 @@ export function TownWorld({
   useEffect(() => {
     if (isTownMapId(map.id)) net.setMap(map.id);
   }, [map.id, net]);
-  // Out of the boss room, the fight is forgotten.
+  // Out of the boss room (or the Tower), the fight is forgotten.
   useEffect(() => {
-    if (map.id !== "bossroom") resetBossFight();
+    if (map.id !== "bossroom" && map.id !== "tower") resetBossFight();
   }, [map.id]);
   // The cave's door and sign follow the boss in the events.
   const bossCard = cards.find((c) => c.type === "boss_fight");
+
   const bossStatus = bossCard?.status;
   const bossAt = bossCard?.at;
   const bossDown = bossCard ? isDown(bossCard) : false;
@@ -184,7 +200,9 @@ export function TownWorld({
   );
   // A new outfit: a fresh ticket carries it to everyone else (after a beat,
   // so the server has the change saved).
-  const lookKey = `${player.seed}|${player.stage}|${equippedKey}`;
+  // Stats too (stat points, an upgrade): the server rolls casts from them.
+  const statsKey = stats ? JSON.stringify(stats) : "";
+  const lookKey = `${player.seed}|${player.stage}|${equippedKey}|${statsKey}`;
   const firstLook = useRef(lookKey);
   useEffect(() => {
     if (firstLook.current === lookKey) return;
@@ -214,6 +232,11 @@ export function TownWorld({
       </div>
     ) : null;
 
+  const hudFade = cn(
+    "transition-opacity duration-300",
+    endScreen && "pointer-events-none opacity-0",
+  );
+
   return (
     <div className="relative min-h-0 flex-1 overflow-hidden">
       {net.status === "outdated" ? (
@@ -221,50 +244,75 @@ export function TownWorld({
           Update Herzies to see other players
         </div>
       ) : null}
-      {profile && !paused ? (
-        <>
-          {/* Centred in a 20px row, like home's (its icon buttons are h-5), so
+      {/* The HUD fades away while the boss's end screen is up, and back. */}
+      <div className={hudFade}>
+        {profile && !paused ? (
+          <>
+            {/* Centred in a 20px row, like home's (its icon buttons are h-5), so
               the name doesn't shift when switching tabs. */}
-          <div className="pointer-events-none absolute top-3 left-3 z-30 flex h-5 max-w-[60%] items-center">
-            <span
-              className="whitespace-nowrap text-ui-lg font-bold text-white"
-              style={{ textShadow: NAME_SHADOW }}
-            >
-              {profile.name}
-              <span className="ml-2 text-[10px] font-normal text-white/70">
-                Lv. {profile.level}
+            <div className="pointer-events-none absolute top-3 left-3 z-30 flex h-5 max-w-[60%] items-center">
+              <span
+                className="whitespace-nowrap text-ui-lg font-bold text-white"
+                style={{ textShadow: NAME_SHADOW }}
+              >
+                {profile.name}
+                <span className="ml-2 text-[10px] font-normal text-white/70">
+                  Lv. {profile.level}
+                </span>
               </span>
-            </span>
-          </div>
-          <div
-            className={cn(
-              "pointer-events-none absolute inset-x-0 z-30 px-3 py-2",
-              chatOverlay ? "bottom-[var(--dock-height,0px)]" : "bottom-0",
-            )}
-          >
-            {combatHint}
-            {!paused ? (
-              <SkillHud
-                usable={!!map.combat}
-                className="bottom-full right-2 mb-1.5"
+            </div>
+            <div
+              className={cn(
+                "pointer-events-none absolute inset-x-0 z-30 px-3 py-2",
+                chatOverlay ? "bottom-[var(--dock-height,0px)]" : "bottom-0",
+              )}
+            >
+              {combatHint}
+              {!paused ? (
+                <SkillHud
+                  usable={!!map.combat}
+                  className="bottom-full right-2 mb-1.5"
+                />
+              ) : null}
+              {!paused ? (
+                <Hotbar
+                  units={units}
+                  className="bottom-full left-1/2 mb-1.5 -translate-x-1/2"
+                />
+              ) : null}
+              <TownHpBar inFight={!!map.combat} />
+              <ExpBar
+                progress={profile.progress}
+                level={profile.level}
+                xp={profile.xp}
+                className="text-white/70"
               />
-            ) : null}
-            <TownHpBar inFight={!!map.combat} />
-            <ExpBar progress={profile.progress} className="text-white/70" />
-          </div>
-        </>
-      ) : null}
-      {profile ? null : combatHint}
-      {profile || paused ? null : (
-        <SkillHud
-          usable={!!map.combat}
-          className={
-            chatOverlay
-              ? "bottom-[calc(var(--dock-height,0px)+4.5rem)] right-2"
-              : "bottom-3 right-2"
-          }
-        />
-      )}
+            </div>
+          </>
+        ) : null}
+        {profile ? null : combatHint}
+        {profile || paused ? null : (
+          <Hotbar
+            units={units}
+            className={cn(
+              "left-1/2 -translate-x-1/2",
+              chatOverlay
+                ? "bottom-[calc(var(--dock-height,0px)+4.5rem)]"
+                : "bottom-3",
+            )}
+          />
+        )}
+        {profile || paused ? null : (
+          <SkillHud
+            usable={!!map.combat}
+            className={
+              chatOverlay
+                ? "bottom-[calc(var(--dock-height,0px)+4.5rem)] right-2"
+                : "bottom-3 right-2"
+            }
+          />
+        )}
+      </div>
       {fpsShown && opened && !paused ? (
         <FrameRate className="pointer-events-none absolute top-2 left-2 z-30 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white/70 tabular-nums" />
       ) : null}
@@ -288,8 +336,11 @@ export function TownWorld({
       )}
       {!paused ? (
         <>
-          <TownVitals inFight={!!map.combat} chatOverlay={chatOverlay} />
-          <BossHud name={bossCard?.title ?? "The boss"} />
+          <div className={hudFade}>
+            <TownVitals inFight={!!map.combat} chatOverlay={chatOverlay} />
+            <BossHud name={bossCard?.title ?? "The boss"} />
+          </div>
+          <BossResults />
         </>
       ) : null}
       {!paused && (loading || !ready) ? (
@@ -299,7 +350,10 @@ export function TownWorld({
       {talkTo && near ? (
         <button
           type="button"
-          onClick={() => onOpen(talkTo)}
+          onClick={() => {
+            markMet(near.card);
+            onOpen(talkTo);
+          }}
           className={cn(
             "absolute left-1/2 z-30 -translate-x-1/2 cursor-pointer whitespace-nowrap rounded border-0 bg-black/35 px-2.5 py-1 text-ui text-white backdrop-blur-md hover:bg-black/50",
             // Above the dock (chat + tab bar) floating over the world.
@@ -324,12 +378,16 @@ export function TownWorld({
               : "bottom-3",
           )}
         >
-          {portalTo.id === "home"
-            ? "Back to "
-            : portalTo.room
-              ? "Enter "
-              : "Enter the "}
-          {portalTo.name} <span className="text-text-dim">[E]</span>
+          {portalTo.id === map.id
+            ? "On to the next floor"
+            : `${
+                portalTo.id === "home"
+                  ? "Back to "
+                  : portalTo.room
+                    ? "Enter "
+                    : "Enter the "
+              }${portalTo.name}`}{" "}
+          <span className="text-text-dim">[E]</span>
         </button>
       ) : bench ? (
         <button
@@ -344,7 +402,11 @@ export function TownWorld({
               : "bottom-3",
           )}
         >
-          {bench === "sit" ? "Sit down" : "Stand up"}{" "}
+          {bench === "sit"
+            ? "Sit down"
+            : bench === "read"
+              ? "Read the bulletin board"
+              : "Stand up"}{" "}
           <span className="text-text-dim">[E]</span>
         </button>
       ) : null}

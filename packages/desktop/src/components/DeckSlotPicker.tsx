@@ -26,6 +26,9 @@ export interface PickerOption {
   /** The copy this row places. */
   unitId: string;
   upgradeLevel: number;
+  /** How many the player has, shown instead of a level — for pickers whose
+   * rows are a whole stack (the Town hotbar) rather than one copy. */
+  count?: number;
 }
 
 /** Floating list of the items a given deck slot can take, anchored at a
@@ -44,6 +47,7 @@ export function DeckSlotPicker({
   slotLabel,
   options,
   onPick,
+  onClear,
   onClose,
 }: {
   x: number;
@@ -52,7 +56,9 @@ export function DeckSlotPicker({
    * alike, so without this an empty list reads as a bug. */
   slotLabel: string;
   options: PickerOption[];
-  onPick: (unitId: string) => void;
+  onPick: (option: PickerOption) => void;
+  /** Offers an "Empty slot" row first, for a slot that's already filled. */
+  onClear?: () => void;
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -82,8 +88,10 @@ export function DeckSlotPicker({
   }, [onClose]);
 
   const estHeight =
-    Math.min(Math.max(options.length, 1) * ROW_HEIGHT, MAX_LIST_HEIGHT) +
-    CHROME_HEIGHT;
+    Math.min(
+      (Math.max(options.length, 1) + (onClear ? 1 : 0)) * ROW_HEIGHT,
+      MAX_LIST_HEIGHT,
+    ) + CHROME_HEIGHT;
   const fitsRight =
     x + CURSOR_GAP + EST_WIDTH <= window.innerWidth - EDGE_PADDING;
   const fitsBelow =
@@ -103,6 +111,15 @@ export function DeckSlotPicker({
       <div className="truncate px-3 pb-1 text-[10px] text-text-dim">
         {slotLabel}
       </div>
+      {onClear && (
+        <button
+          type="button"
+          className="flex w-full cursor-pointer items-center border-none bg-transparent px-3 py-1 text-left text-text-dim hover:bg-white/5"
+          onClick={onClear}
+        >
+          Empty slot
+        </button>
+      )}
       {options.length === 0 ? (
         <div className="px-3 py-1 text-ui-sm text-text-dim">
           Nothing to place
@@ -116,13 +133,14 @@ export function DeckSlotPicker({
             // is the same move either way), which makes the count say nothing
             // about the click being offered — and these rows are narrow enough
             // that it would truncate the name to show it. A copy at a different
-            // level is a different move, so it carries its "+N" instead.
+            // level is a different move, so it carries its "+N" instead. A
+            // picker whose rows *are* whole stacks (the hotbar) passes `count`.
             return (
               <button
                 key={option.unitId}
                 type="button"
                 className="flex w-full cursor-pointer items-center gap-1.5 border-none bg-transparent px-3 py-1 text-left text-text hover:bg-white/5"
-                onClick={() => onPick(option.unitId)}
+                onClick={() => onPick(option)}
               >
                 {def && (
                   <ItemTypeIcon item={def} className="h-6 w-6 shrink-0" />
@@ -131,6 +149,11 @@ export function DeckSlotPicker({
                   {def?.name ?? option.itemId}
                   {option.upgradeLevel > 0 ? ` +${option.upgradeLevel}` : ""}
                 </span>
+                {option.count !== undefined && (
+                  <span className="shrink-0 text-text-dim tabular-nums">
+                    {option.count}
+                  </span>
+                )}
               </button>
             );
           })}

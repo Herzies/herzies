@@ -34,7 +34,12 @@ import {
   VIOLET_RAMP,
 } from "./ascii3d.js";
 import type { HerzieClass } from "./classes.js";
-import { normalizeStatPoints, STAT_TUNING, type StatPoints } from "./stats.js";
+import {
+  levelStats,
+  normalizeStatPoints,
+  STAT_TUNING,
+  type StatPoints,
+} from "./stats.js";
 import { BOSS_DAMAGE_PER_MINUTE, type Stage } from "./types.js";
 
 export type Rarity = "common" | "uncommon" | "rare" | "legendary" | "mythic";
@@ -909,6 +914,11 @@ export interface ItemDef {
   /** A seasonal item only drops inside this yearly window (UTC, inclusive,
    * may wrap the new year). Copies already owned are unaffected outside it. */
   dropWindow?: DropWindow;
+  /** Eaten from the bank (or a Town hotbar slot): one copy is used up and
+   * heals the herzie by `heal` HP, capped at max. Never worn. eat_item
+   * (00113_medea_star_candy.sql) duplicates the heal amounts by hand;
+   * medea.test.ts checks they agree. */
+  consumable?: { heal: number };
 }
 
 /** [month 1-12, day 1-31]. */
@@ -948,6 +958,7 @@ export function getItemCategory(item: Pick<ItemDef, "category">): ItemCategory {
 
 /** Display classification, derived from the equip fields rather than stored directly. */
 export type ItemType =
+  | "consumable"
   | "dice"
   | "charm"
   | "skin"
@@ -962,9 +973,15 @@ export type ItemType =
 export function getItemType(
   item: Pick<
     ItemDef,
-    "equipable" | "equipSlot" | "modifier" | "dice" | "protection"
+    | "equipable"
+    | "equipSlot"
+    | "modifier"
+    | "dice"
+    | "protection"
+    | "consumable"
   >,
 ): ItemType {
+  if (item.consumable) return "consumable";
   if (item.dice) return "dice";
   if (item.protection) return "charm";
   if (item.equipSlot === "color") return "skin";
@@ -979,6 +996,7 @@ export function getItemType(
 }
 
 export const ITEM_TYPE_LABELS: Record<ItemType, string> = {
+  consumable: "Consumable",
   dice: "Dice",
   charm: "Charm",
   skin: "Skin",
@@ -1167,6 +1185,8 @@ export const NON_DROPPABLE_ITEM_IDS = [
   "compact-discs",
   "worn-stick",
   "old-cymbal",
+  // Consumables are bought from Medea, never dropped.
+  "star-candy",
 ] as const;
 
 /** How many uncollected drops may stand on the ground at once.
@@ -1238,6 +1258,38 @@ export const ITEM_DROP_WEIGHT_OVERRIDES: Partial<Record<string, number>> = {
   "power-dice-3": 3,
   "safety-pick": 8,
 };
+
+/** How many random items each herzie who helped beat a boss gets, on top of
+ * the event's own rewards (its rewardItemId, and topRewardItemId for the
+ * top three): so 12 things for the top three, 11 for everyone else. */
+export const BOSS_BONUS_DROPS = 10;
+
+/** A boss's random loot leans a little better than a listening drop: each
+ * candidate's normal weight (its override, else its rarity's) times this. */
+export const BOSS_LOOT_RARITY_BOOST: Record<Rarity, number> = {
+  common: 1,
+  uncommon: 1.5,
+  rare: 2,
+  legendary: 2,
+  mythic: 2,
+};
+
+/** What a boss's random loot is drawn from, and how likely each is: every
+ * item that drops from listening (not in NON_DROPPABLE_ITEM_IDS, no
+ * seasonal window), weighted per BOSS_LOOT_RARITY_BOOST. settle_boss_fight
+ * rolls from a copy of this list (boss_loot_roll, 00114_boss_bonus_loot.sql);
+ * items.test.ts checks the two agree, so a new droppable item needs adding
+ * there too. */
+export function bossLootWeights(): { itemId: string; weight: number }[] {
+  const never = new Set<string>(NON_DROPPABLE_ITEM_IDS);
+  return ITEMS.filter((i) => !never.has(i.id) && !i.dropWindow).map((i) => ({
+    itemId: i.id,
+    weight: Math.round(
+      (ITEM_DROP_WEIGHT_OVERRIDES[i.id] ?? RARITY_DROP_WEIGHTS[i.rarity]) *
+        BOSS_LOOT_RARITY_BOOST[i.rarity],
+    ),
+  }));
+}
 
 /** How much luck nudges a rarity's drop weight, as a fraction of that
  * rarity's own weight per point of luck — e.g. rare: 0.015 means +10 luck
@@ -2664,6 +2716,43 @@ function renderTrickOrTreatFrame(yAngle: number): string[] {
   );
 }
 
+function starCandyCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  // A five-point star sweet, pink with turquoise swirls, twisted into a
+  // wrapper at either side.
+  const r = Math.hypot(ix, iy);
+  const a = Math.atan2(iy, ix) + Math.PI / 2;
+  // Star outline: radius swings between the inner and outer points.
+  const k = Math.abs(((((a / ((2 * Math.PI) / 5)) % 1) + 1) % 1) - 0.5) * 2;
+  const edge = 0.085 + 0.085 * k ** 1.6;
+  if (r < edge) {
+    // Swirl: bands that wind outward from the middle.
+    const swirl = Math.sin(r * 55 - a * 2) > 0.25;
+    if (r < 0.025) return { bright: 1, color: "#FFFFFF" };
+    return swirl
+      ? { bright: 0.9, color: "#3FE0D0" }
+      : { bright: 0.95, color: "#FF7EC8" };
+  }
+  // The wrapper's twisted ends, poking out left and right.
+  const ax = Math.abs(ix);
+  if (ax > 0.15 && ax < 0.27 && Math.abs(iy) < (ax - 0.15) * 0.9 + 0.015)
+    return {
+      bright: 0.75,
+      color: Math.floor(ax * 60) % 2 === 0 ? "#B57BFF" : "#7D4FC0",
+    };
+  return null;
+}
+
+function renderStarCandyFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#FF7EC8",
+    "#8E4FA8",
+    "#2A1036",
+    starCandyCardIcon,
+  );
+}
+
 function generateFrames(
   renderFn: (angle: number) => string[],
   count = 36,
@@ -2714,6 +2803,7 @@ const pumpkinSpiceFrames = generateFrames(renderPumpkinSpiceFrame);
 const ghostFrames = generateFrames(renderGhostFrame);
 const bloodMoonFrames = generateFrames(renderBloodMoonFrame);
 const trickOrTreatFrames = generateFrames(renderTrickOrTreatFrame);
+const starCandyFrames = generateFrames(renderStarCandyFrame);
 
 // --- Bigger Bag: a drawstring sack, ray-marched rather than built from quads ---
 //
@@ -3214,51 +3304,71 @@ export const ITEMS: ItemDef[] = [
     sellPrice: 500,
   },
   // Class equipment (classes.ts): handed over, worn, when a class is chosen.
-  // Bound to the herzie — no sellPrice, never traded (trade_offer_unit_ids),
-  // never dropped (NON_DROPPABLE_ITEM_IDS).
+  // Sold for a little, like any common item (00109), but never traded
+  // (trade_offer_unit_ids) and never dropped (NON_DROPPABLE_ITEM_IDS).
   {
     id: "lute",
     name: "Lute",
     description: "Every Bard's first love. Slightly out of tune.",
     rarity: "common",
+    sellPrice: 10,
     frames: luteFrames,
     equipable: true,
     equipSlot: "main_hand",
     minStage: 2,
     requiredClass: "bard",
+    stats: { euphony: 12, sonicPower: 3 },
   },
   {
     id: "compact-discs",
     name: "Compact Discs",
     description: "One for each hand. Scratched, but they fly true.",
     rarity: "common",
+    sellPrice: 10,
     frames: discsFrames,
     equipable: true,
     equipSlot: "main_hand",
     minStage: 2,
     requiredClass: "record_slinger",
+    stats: { sonicPower: 8, critChance: 5, critDamage: 25 },
   },
   {
     id: "worn-stick",
     name: "Worn Stick",
     description: "Chipped from a thousand rimshots.",
     rarity: "common",
+    sellPrice: 10,
     frames: stickFrames,
     equipable: true,
     equipSlot: "main_hand",
     minStage: 2,
     requiredClass: "percussionist",
+    stats: { sonicPower: 4 },
   },
   {
     id: "old-cymbal",
     name: "Old Cymbal",
     description: "Dented, green at the edges, still rings.",
     rarity: "common",
+    sellPrice: 10,
     frames: cymbalFrames,
     equipable: true,
     equipSlot: "off_hand",
     minStage: 2,
     requiredClass: "percussionist",
+    stats: { def: 10 },
+  },
+  {
+    id: "star-candy",
+    name: "Star Candy",
+    description:
+      "Pink, turquoise, and faintly humming. Eat one to heal 100 HP.",
+    rarity: "common",
+    frames: starCandyFrames,
+    stackable: true,
+    sellPrice: 5,
+    // Sold by Medea (MEDEA_STOCK) and never dropped (NON_DROPPABLE_ITEM_IDS).
+    consumable: { heal: 100 },
   },
 ];
 
@@ -3319,14 +3429,21 @@ export function getHerzieStatsFromUnits(
 export function withStatPoints(
   items: HerzieStats,
   points: StatPoints | null | undefined,
+  /** The herzie's level: it adds Sonic Power and Def of its own
+   * (levelStats). Left out, none. */
+  level?: number | null,
 ): HerzieStats {
   const p = normalizeStatPoints(points);
+  const fromLevel = level ? levelStats(level) : { sonicPower: 0, def: 0 };
   return {
     ...items,
-    sonicPower: items.sonicPower + p.sonicPower,
+    sonicPower: items.sonicPower + p.sonicPower + fromLevel.sonicPower,
     stamina: items.stamina + p.stamina,
     euphony: items.euphony + p.euphony,
-    def: items.def + STAT_TUNING.defPerStamina * (items.stamina + p.stamina),
+    def:
+      items.def +
+      STAT_TUNING.defPerStamina * (items.stamina + p.stamina) +
+      fromLevel.def,
   };
 }
 

@@ -3,8 +3,18 @@
  * boss, and what to tell whom. `room.ts` feeds it frames and relays what it
  * returns, so everything here is tested without a Durable Object.
  */
-import { type AttackStyle, attackStyle } from "@herzies/shared/classes";
-import type { HitStats } from "@herzies/shared/combat";
+import {
+  type AttackStyle,
+  attackStyle,
+  isHerzieClass,
+} from "@herzies/shared/classes";
+import {
+  type Contribution,
+  contributionOf,
+  type HitStats,
+  meleeDamage,
+} from "@herzies/shared/combat";
+import { CONSUMABLE_COOLDOWN_MS } from "@herzies/shared/medea";
 import {
   isSkillId,
   SKILL_COOLDOWN_GRACE_MS,
@@ -15,10 +25,13 @@ import {
 } from "@herzies/shared/skills";
 import { buffMult, healMult } from "@herzies/shared/stats";
 import type {
+  BossPlace,
   BossTelegraph,
+  EatRefusal,
   FightState,
   LootDrop,
   ServerMessage,
+  TownLook,
   TownTicketPayload,
 } from "@herzies/shared/town-net";
 import {
@@ -29,6 +42,12 @@ import {
   TUNING,
 } from "./boss";
 import { PositionHistory } from "./history";
+import { type TowerArena, TowerEngine, type TowerEvent } from "./tower";
+
+/** The room holds eating to CONSUMABLE_COOLDOWN_MS less this, so a client
+ * keeping to the full cooldown is never refused (or struck) for network
+ * jitter. */
+const EAT_COOLDOWN_GRACE_MS = 250;
 
 /** How often HP and boss damage are reported while nothing urgent happens. */
 export const REPORT_EVERY_MS = 2_000;
@@ -36,7 +55,7 @@ export const REPORT_EVERY_MS = 2_000;
  * and to pick up the loot. */
 export const VICTORY_LINGER_MS = 45_000;
 /** After the event ends with the boss alive, how long until the doors close. */
-export const ESCAPE_LINGER_MS = 5_000;
+export const ESCAPE_LINGER_MS = 15_000;
 
 export type Outbound = {
   /** Everyone in the room, or one player. */
@@ -46,6 +65,9 @@ export type Outbound = {
 
 export type FightPlayer = {
   uid: string;
+  /** The herzie's name and look, from the ticket. */
+  name: string;
+  look: TownLook;
   /** The room's entity id for this socket. */
   id: number;
   hp: number;
@@ -59,6 +81,8 @@ export type FightPlayer = {
   ready: Map<SkillId, number>;
   /** Its basic attack, from its class: a wave, or a thrown disc. */
   attack: AttackStyle;
+  /** A melee blow's share of a wave: a stick with a class, else a bump. */
+  melee: number;
 };
 
 /** What became of a skill. "early" is a cooldown refusal inside the grace
@@ -78,7 +102,7 @@ export type FightReport = {
   boss?: {
     event: string;
     batch: string;
-    damage: { uid: string; damage: number }[];
+    damage: BossRow[];
   };
   /** Skill XP earned since the last report, named by `batch` like the
    * boss damage. */
@@ -86,12 +110,40 @@ export type FightReport = {
     batch: string;
     xp: { uid: string; skill: string; xp: number }[];
   };
+  /** The fight is over: the end screen's table, for these herzies. */
+  results?: { event: string; uids: string[] };
+  /** In the Tower: the kills since the last batch (each may drop an item
+   * and pays a little XP) and the best floor cleared, named by `batch`
+   * like the boss damage. */
+  tower?: TowerBatch;
 };
 
+export type TowerBatch = {
+  event: string;
+  batch: string;
+  uid: string;
+  kills: { floor: number; x: number; z: number }[];
+  /** The highest floor cleared in this batch, if any was. */
+  cleared?: number;
+};
+
+/** What one herzie did for the fight since the last batch: damage dealt,
+ * and HP healed or blocked (support, 00111). Zero parts are left out. */
+export type BossRow = {
+  uid: string;
+  damage: number;
+  healing?: number;
+  blocked?: number;
+};
+
+/** Until the end screen's table comes back, the fight reports this often. */
+const RESULTS_RETRY_MS = 1_000;
+
 type Claim = NonNullable<TownTicketPayload["boss"]>;
+type TowerClaim = NonNullable<TownTicketPayload["tower"]>;
 
 export class FightRuntime {
-  readonly engine: BossEngine;
+  readonly engine: BossEngine | TowerEngine;
   readonly eventId: string;
   /** Unix ms when the boss escapes. */
   readonly until: number;
@@ -103,10 +155,11 @@ export class FightRuntime {
   /** Everyone who has been in this fight, so leaving and rejoining can't
    * refill health. */
   private players = new Map<string, FightPlayer>();
-  private pendingDamage = new Map<string, number>();
+  /** What each herzie did since the last batch: damage, and support. */
+  private pending = new Map<string, Contribution>();
   private inflight: {
     batch: string;
-    damage: { uid: string; damage: number }[];
+    damage: BossRow[];
   } | null = null;
   /** Players who left since their health was last reported. */
   private leftUnreported = new Set<string>();
@@ -121,25 +174,84 @@ export class FightRuntime {
   private batchSeq = 0;
   /** The rewards have been handed out; they only ever drop once. */
   private looted = false;
-  /** HP skills restored, by player, not yet taken by the database. */
+  /** The end screen went out (or there's no one to show it to). */
+  private resultsSent = false;
+  /** The dev boss is never reported: what each herzie did against it,
+   * for its end screen. */
+  private devDealt = new Map<string, Contribution>();
+  /** HP skills (and eaten candy) restored, by player, not yet taken by the
+   * database. */
   private healed = new Map<string, number>();
+  /** When each player last started eating (server ms). */
+  private ate = new Map<string, number>();
   /** Skill XP not yet reported, by `uid|skill` (fractions carry over). */
   private pendingXp = new Map<string, number>();
   private xpInflight: {
     batch: string;
     xp: { uid: string; skill: string; xp: number }[];
   } | null = null;
+  /** The Tower's kills and clears not yet in a batch, and the batch in
+   * flight. */
+  private towerKills: TowerBatch["kills"] = [];
+  private towerCleared = 0;
+  private towerInflight: TowerBatch | null = null;
+  /** The Tower's one herzie (a room of their own). */
+  private towerUid = "";
 
-  constructor(claim: Claim, now: number, seed = now) {
+  constructor(claim: Claim, now: number, seed = now, engine?: TowerEngine) {
     this.eventId = claim.event;
     this.until = claim.until * 1000;
-    this.engine = new BossEngine({
-      hp: claim.hp,
-      maxHp: claim.maxHp,
-      seed,
-      now,
-    });
+    this.engine =
+      engine ??
+      new BossEngine({
+        hp: claim.hp,
+        maxHp: claim.maxHp,
+        seed,
+        now,
+      });
     this.nextReportAt = now + REPORT_EVERY_MS;
+    // The Tower has no end screen.
+    if (engine) this.resultsSent = true;
+  }
+
+  /** A Tower floor for `uid`, from their ticket's claim. */
+  static tower(
+    claim: TowerClaim,
+    uid: string,
+    level: number,
+    arena: TowerArena,
+    now: number,
+    seed = now,
+  ): FightRuntime {
+    const engine = new TowerEngine(
+      { floor: claim.floor, level, seed, now },
+      arena,
+    );
+    const f = new FightRuntime(
+      { event: claim.event, until: claim.until, hp: 1, maxHp: 1 },
+      now,
+      seed,
+      engine,
+    );
+    f.towerUid = uid;
+    return f;
+  }
+
+  /** The Tower's floors, if this is the Tower. */
+  get tower(): TowerEngine | null {
+    return this.engine instanceof TowerEngine ? this.engine : null;
+  }
+
+  /** On to the next floor, if this one's cleared. */
+  next(uid: string, now: number): Outbound[] {
+    const tower = this.tower;
+    const p = this.players.get(uid);
+    if (!tower || !p?.present || p.down || !this.open) return [];
+    if (!tower.next(now)) return [];
+    // A breather on arrival, as on joining.
+    tower.noteSpawn(uid, now);
+    this.history.forget(uid);
+    return [{ to: "all", msg: { t: "floor", ...tower.view() } }];
   }
 
   get open(): boolean {
@@ -167,6 +279,8 @@ export class FightRuntime {
     if (!down) this.downAcked.delete(uid);
     const p: FightPlayer = {
       uid,
+      name: ticket.name,
+      look: ticket.look,
       id,
       hp,
       maxHp,
@@ -175,12 +289,16 @@ export class FightRuntime {
       present: true,
       skills: skillsOf(ticket),
       attack: attackStyle(ticket.cls),
+      melee: meleeDamage(isHerzieClass(ticket.cls)),
       // A rejoin doesn't reset cooldowns.
       ready: known?.ready ?? new Map(),
     };
     this.players.set(uid, p);
     this.history.record(uid, now, at.x, at.z);
     this.engine.noteSpawn(uid, now);
+    // The Tower's room outlives a visit: the level is today's, not the
+    // one it was made with.
+    if (this.tower && ticket.lv) this.tower.level = Math.max(1, ticket.lv);
     return p;
   }
 
@@ -194,17 +312,27 @@ export class FightRuntime {
     this.reportNow = true;
   }
 
-  /** A player's ticket was renewed: only stats may change; health never
-   * comes back up from a ticket mid-fight, and max HP stays as it joined. */
-  renew(uid: string, ticket: TownTicketPayload): void {
+  /** A player's ticket was renewed: stats, class (a class chosen mid-fight
+   * changes how they attack) and, in the Tower, level may change; health
+   * never comes back up from a ticket mid-fight, and max HP stays as it
+   * joined. Returns what to tell whom (the Tower's floor, if the level gap
+   * moved). */
+  renew(uid: string, ticket: TownTicketPayload): Outbound[] {
     const p = this.players.get(uid);
-    if (!p) return;
+    if (!p) return [];
     // Skill levels only go up: a ticket issued before a level-up this fight
     // reported mustn't take it back.
     for (const [skill, level] of skillsOf(ticket))
       p.skills.set(skill, Math.max(level, p.skills.get(skill) ?? 0));
-    if (!ticket.st) return;
-    p.stats = statsOf(ticket.st);
+    p.attack = attackStyle(ticket.cls);
+    p.melee = meleeDamage(isHerzieClass(ticket.cls));
+    if (ticket.st) p.stats = statsOf(ticket.st);
+    const tower = this.tower;
+    if (tower && ticket.lv && ticket.lv !== tower.level) {
+      tower.level = Math.max(1, ticket.lv);
+      return [{ to: "all", msg: { t: "floor", ...tower.view() } }];
+    }
+    return [];
   }
 
   player(uid: string): FightPlayer | undefined {
@@ -226,7 +354,16 @@ export class FightRuntime {
     if (!p?.present || p.down || !this.open) return "ignored";
     const pos = this.history.at(uid, now);
     if (!pos) return "ignored";
-    return this.engine.cast(uid, pos, yaw, pitch, p.stats, now, p.attack);
+    return this.engine.cast(
+      uid,
+      pos,
+      yaw,
+      pitch,
+      p.stats,
+      now,
+      p.attack,
+      p.melee,
+    );
   }
 
   /**
@@ -296,6 +433,7 @@ export class FightRuntime {
       }
       // Overheal earns nothing: only what was really restored.
       this.earn(uid, skillId, skillXpFor(skillId, restored));
+      this.credit(uid, "healing", restored);
       this.engine.addThreat(uid, restored * TUNING.threat.perHeal);
     } else if (skillId === "cymbrella") {
       const buff = this.engine.buff(uid, {
@@ -318,6 +456,39 @@ export class FightRuntime {
       this.engine.backspin(uid, pos, yaw, pitch, p.stats, value, now);
     }
     return { result: "used", readyAt: now + def.cooldownMs, out };
+  }
+
+  /**
+   * Whether `uid` may eat now: present, standing, hurt, and past the
+   * cooldown. Claims the cooldown when it says yes, so a second `eat` sent
+   * while the first is still being used up in the database is refused.
+   */
+  tryEat(uid: string, now: number): EatRefusal | null {
+    const p = this.players.get(uid);
+    if (!p?.present || !this.open) return "not-here";
+    if (p.down) return "down";
+    if (p.hp >= p.maxHp) return "full";
+    const since = now - (this.ate.get(uid) ?? Number.NEGATIVE_INFINITY);
+    if (since < CONSUMABLE_COOLDOWN_MS - EAT_COOLDOWN_GRACE_MS)
+      return "cooldown";
+    this.ate.set(uid, now);
+    return null;
+  }
+
+  /** What `uid` ate heals them, capped at their max; reported to the
+   * database through `healed`, like a skill's heal. Nothing if they were
+   * knocked out or left while it was being used up. */
+  eat(uid: string, amount: number): Outbound[] {
+    const p = this.players.get(uid);
+    if (!p?.present || p.down || amount <= 0) return [];
+    const heal = Math.min(p.maxHp - p.hp, amount);
+    if (heal <= 0) return [];
+    p.hp += heal;
+    this.healed.set(uid, (this.healed.get(uid) ?? 0) + heal);
+    this.reportNow = true;
+    return [
+      { to: "all", msg: { t: "hp", id: p.id, hp: p.hp, maxHp: p.maxHp } },
+    ];
   }
 
   /** Skill XP for `uid`, toward the next report. */
@@ -360,6 +531,7 @@ export class FightRuntime {
       health: [...this.players.values()]
         .filter((p) => p.present)
         .map((p) => ({ id: p.id, hp: p.hp, maxHp: p.maxHp })),
+      ...(this.tower ? { tower: this.tower.view() } : {}),
       buffs: this.engine.activeBuffs(now).flatMap(({ uid, buff }) => {
         const p = this.players.get(uid);
         return p?.present
@@ -386,6 +558,12 @@ export class FightRuntime {
     }
     if (this.open) {
       for (const ev of this.engine.update(now, alive)) this.apply(ev, out, now);
+      const tower = this.tower;
+      if (tower) {
+        this.bossDirty = false;
+        const mobs = tower.wireMobs();
+        if (mobs.length) out.push({ to: "all", msg: { t: "mobs", mobs } });
+      }
       if (this.bossDirty) {
         this.bossDirty = false;
         out.push({
@@ -408,11 +586,31 @@ export class FightRuntime {
         });
       }
     }
+    // The dev boss's end screen comes from the room itself, at once.
+    if (this.closeWhy && this.eventId === DEV_EVENT && !this.resultsSent)
+      out.push(...this.results(this.devTable()));
     return out;
   }
 
-  private apply(ev: BossEvent, out: Outbound[], now: number) {
+  private apply(ev: BossEvent | TowerEvent, out: Outbound[], now: number) {
     switch (ev.t) {
+      case "mobDown":
+        this.towerKills.push({
+          floor: this.tower?.floor ?? 0,
+          x: round(ev.x),
+          z: round(ev.z),
+        });
+        out.push({
+          to: "all",
+          msg: { t: "mobDown", mob: ev.mob, x: round(ev.x), z: round(ev.z) },
+        });
+        break;
+      case "cleared":
+        this.towerCleared = Math.max(this.towerCleared, ev.floor);
+        this.reportNow = true;
+        if (this.tower)
+          out.push({ to: "all", msg: { t: "floor", ...this.tower.view() } });
+        break;
       case "telegraph":
         out.push({
           to: "all",
@@ -426,10 +624,12 @@ export class FightRuntime {
           if (!p || p.down) continue;
           p.hp = Math.max(0, p.hp - h.damage);
           hit.push(p.id);
-          // Cymbrella is the only thing that absorbs today, and it's a self
-          // buff: what it took off pays its wearer.
-          if (h.absorbed > 0 && p.skills.has("cymbrella"))
-            this.earn(p.uid, "cymbrella", skillXpFor("cymbrella", h.absorbed));
+          // The Cymbrella is a self buff: what it took off (on top of Def)
+          // pays its wearer, and counts as their support.
+          if (h.blocked > 0) {
+            this.earn(p.uid, "cymbrella", skillXpFor("cymbrella", h.blocked));
+            this.credit(p.uid, "blocked", h.blocked);
+          }
           out.push({
             to: "all",
             msg: { t: "hp", id: p.id, hp: p.hp, maxHp: p.maxHp },
@@ -447,15 +647,17 @@ export class FightRuntime {
       }
       case "hit": {
         this.bossDirty = true;
-        this.pendingDamage.set(
-          ev.uid,
-          (this.pendingDamage.get(ev.uid) ?? 0) + ev.damage,
-        );
+        this.credit(ev.uid, "damage", ev.damage);
         if (ev.skill && isSkillId(ev.skill))
           this.earn(ev.uid, ev.skill, skillXpFor(ev.skill, ev.damage));
         out.push({
           to: { uid: ev.uid },
-          msg: { t: "hit", damage: ev.damage, crit: ev.crit },
+          msg: {
+            t: "hit",
+            damage: ev.damage,
+            crit: ev.crit,
+            ...(ev.mob !== undefined ? { mob: ev.mob } : {}),
+          },
         });
         break;
       }
@@ -498,15 +700,19 @@ export class FightRuntime {
       if (p && !p.present && p.down && this.downAcked.has(uid))
         this.leftUnreported.delete(uid);
     }
-    if (!this.inflight && this.pendingDamage.size) {
+    if (!this.inflight && this.pending.size) {
       this.inflight = {
         batch: `${this.eventId}:${now}:${++this.batchSeq}:${crypto.randomUUID()}`,
-        damage: [...this.pendingDamage].map(([uid, damage]) => ({
-          uid,
-          damage,
-        })),
+        damage: [...this.pending].map(([uid, c]) => {
+          const row: BossRow = { uid, damage: c.damage };
+          const healing = tenths(c.healing);
+          const blocked = tenths(c.blocked);
+          if (healing > 0) row.healing = healing;
+          if (blocked > 0) row.blocked = blocked;
+          return row;
+        }),
       };
-      this.pendingDamage.clear();
+      this.pending.clear();
     }
     if (!this.xpInflight) {
       const xp: { uid: string; skill: string; xp: number }[] = [];
@@ -524,7 +730,37 @@ export class FightRuntime {
           xp,
         };
     }
+    if (
+      !this.towerInflight &&
+      (this.towerKills.length || this.towerCleared) &&
+      this.eventId !== DEV_EVENT
+    ) {
+      this.towerInflight = {
+        event: this.eventId,
+        batch: `${this.eventId}:tower:${now}:${++this.batchSeq}:${crypto.randomUUID()}`,
+        uid: this.towerUid,
+        kills: this.towerKills,
+        ...(this.towerCleared ? { cleared: this.towerCleared } : {}),
+      };
+      this.towerKills = [];
+      this.towerCleared = 0;
+    }
+    // Over: ask for the end screen's table, but only on a report whose
+    // batch carries every hit there was (one re-sent from before would
+    // leave the last of them out). Until it's back, report again soon.
+    let results: FightReport["results"];
+    if (this.closeWhy && !this.resultsSent && this.eventId !== DEV_EVENT) {
+      if (!this.pending.size)
+        results = {
+          event: this.eventId,
+          uids: [...this.players.values()]
+            .filter((p) => p.present)
+            .map((p) => p.uid),
+        };
+      this.nextReportAt = Math.min(this.nextReportAt, now + RESULTS_RETRY_MS);
+    }
     return {
+      results,
       hp: [...this.players.values()]
         .filter((p) => p.present || this.leftUnreported.has(p.uid))
         .filter((p) => !(p.down && this.downAcked.has(p.uid)))
@@ -542,6 +778,7 @@ export class FightRuntime {
         this.xpInflight && this.eventId !== DEV_EVENT
           ? this.xpInflight
           : undefined,
+      tower: this.towerInflight ?? undefined,
     };
   }
 
@@ -563,6 +800,27 @@ export class FightRuntime {
     if (report.skills && this.xpInflight?.batch === report.skills.batch) {
       this.xpInflight = null;
     }
+    if (report.tower && this.towerInflight?.batch === report.tower.batch) {
+      this.towerInflight = null;
+    }
+  }
+
+  /** What a Tower batch's kills dropped (`town-vitals`' word): to the
+   * herzie, to land where the last of those mobs fell. */
+  towerLoot(drops: LootDrop[], batch: TowerBatch): Outbound[] {
+    const p = this.players.get(batch.uid);
+    if (!drops.length || !p?.present) return [];
+    const last = batch.kills[batch.kills.length - 1];
+    return [
+      {
+        to: { uid: batch.uid },
+        msg: {
+          t: "loot",
+          drops,
+          ...(last ? { at: { x: last.x, z: last.z } } : {}),
+        },
+      },
+    ];
   }
 
   /** The boss fell and its loot is on the ground: tell each herzie still
@@ -581,6 +839,59 @@ export class FightRuntime {
     return out;
   }
 
+  /**
+   * The fight is over and `town-vitals` sent its table: the end screen, once,
+   * to each herzie still here, with the top three and their own place.
+   * Victory if the boss fell, defeat if it got away.
+   */
+  results(table: {
+    top: BossPlace[];
+    you: Record<string, BossPlace>;
+  }): Outbound[] {
+    if (this.resultsSent || !this.closeWhy) return [];
+    this.resultsSent = true;
+    const outcome = this.closeWhy === "victory" ? "victory" : "defeat";
+    const out: Outbound[] = [];
+    for (const p of this.players.values()) {
+      if (!p.present) continue;
+      out.push({
+        to: { uid: p.uid },
+        msg: {
+          t: "results",
+          outcome,
+          top: table.top.slice(0, 3),
+          you: table.you[p.uid] ?? null,
+        },
+      });
+    }
+    return out;
+  }
+
+  /** The dev boss's table, from what the room saw land (it's never
+   * reported). */
+  private devTable(): { top: BossPlace[]; you: Record<string, BossPlace> } {
+    const ranked = [...this.devDealt]
+      .map(([uid, c]) => ({ uid, c, score: contributionOf(c) }))
+      .filter((r) => r.score > 0)
+      .sort((a, b) => b.score - a.score || (a.uid < b.uid ? -1 : 1))
+      .map(({ uid, c }, i) => ({
+        uid,
+        place: {
+          rank: i + 1,
+          name: this.players.get(uid)?.name ?? "?",
+          damage: Math.round(c.damage),
+          heal: Math.round(c.healing + c.blocked),
+        },
+      }));
+    return {
+      top: ranked.slice(0, 3).map((r) => ({
+        ...r.place,
+        look: this.players.get(r.uid)?.look,
+      })),
+      you: Object.fromEntries(ranked.map((r) => [r.uid, r.place])),
+    };
+  }
+
   /** A telegraph as the wire carries it: a buster's target as an entity id. */
   private wire(t: Telegraph): BossTelegraph {
     const target = t.target ? this.players.get(t.target)?.id : undefined;
@@ -597,11 +908,28 @@ export class FightRuntime {
     };
   }
 
+  /** `uid` did `amount` of `kind` for the fight: into the next batch (and
+   * the dev boss's own tally). */
+  private credit(uid: string, kind: keyof Contribution, amount: number) {
+    // The Tower has no boss to tally against.
+    if (!(amount > 0) || this.tower) return;
+    for (const tally of this.eventId === DEV_EVENT
+      ? [this.pending, this.devDealt]
+      : [this.pending]) {
+      const c = tally.get(uid) ?? { damage: 0, healing: 0, blocked: 0 };
+      c[kind] += amount;
+      tally.set(uid, c);
+    }
+  }
+
   /** Whether anything still needs reporting. */
   get unreported(): boolean {
     return (
       this.inflight !== null ||
-      this.pendingDamage.size > 0 ||
+      this.towerInflight !== null ||
+      this.towerKills.length > 0 ||
+      this.towerCleared > 0 ||
+      this.pending.size > 0 ||
       this.leftUnreported.size > 0 ||
       this.xpInflight !== null ||
       this.healed.size > 0
@@ -644,3 +972,8 @@ function skillsOf(ticket: TownTicketPayload): Map<SkillId, number> {
 }
 
 const round = (n: number) => Math.round(n * 100) / 100;
+
+/** To a tenth: healing comes in fractions of an HP. */
+function tenths(n: number): number {
+  return Math.round(n * 10) / 10;
+}

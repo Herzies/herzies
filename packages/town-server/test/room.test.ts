@@ -4,6 +4,7 @@ import {
   type ServerMessage,
   signTownTicket,
   TOWN_CLOSE,
+  TOWN_MAPS,
   TOWN_PROTOCOL,
   TOWN_SPRINT_SPEED,
   type TownState,
@@ -109,7 +110,8 @@ describe("rules", () => {
     const g = newGuard(30, 0, 0);
     expect(checkMove(g, -30, 0, 100, "home")).toBe(false);
     // Home's spawn, as the map has it.
-    expect(checkMove(g, 8.5, 9, 100, "home")).toBe(true);
+    const { spawn } = TOWN_MAPS.home;
+    expect(checkMove(g, spawn.x, spawn.z, 100, "home")).toBe(true);
   });
 
   it("allows sprinting, and refuses anything faster", () => {
@@ -214,6 +216,18 @@ describe("room", () => {
     const a = await join(++shardSeq, "a", at(0, 0));
     a.ws.send(encodeStateFrame(1, at(25, 0, 4.5)));
     expect(await a.next("correct")).toMatchObject({ x: 0, z: 0 });
+  });
+
+  it("tells an eater out of a fight to eat through the app", async () => {
+    const a = await join(++shardSeq, "eater");
+    a.ws.send(JSON.stringify({ t: "eat", item: "star-candy", seq: 7 }));
+    expect(await a.next("ate")).toEqual({
+      t: "ate",
+      seq: 7,
+      item: "star-candy",
+      ok: false,
+      reason: "not-here",
+    });
   });
 
   it("lets a reconnecting herzie keep its place", async () => {

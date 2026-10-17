@@ -5,22 +5,26 @@ import { Suspense, useMemo, useRef } from "react";
 import type { Look } from "../TownScene";
 import { ambient } from "./ambient";
 import { benchesOf, type Seat, seatNear } from "./Benches";
+import { type Board, BULLETIN_KEY, boardNear, boardsOf } from "./Boards";
 import { CameraRig } from "./CameraRig";
 import { CaveTimer } from "./CaveTimer";
-import { tryEnterCave, useCave } from "./cave";
+import { tryEnterCave } from "./cave";
 import type { ChatBubbles } from "./chatBubbles";
 import { Boss } from "./combat/Boss";
 import { Combat } from "./combat/Combat";
 import { CombatOverlay } from "./combat/DamageNumbers";
 import { LootDrops } from "./combat/LootDrops";
+import { Mobs } from "./combat/Mobs";
 import { Telegraphs } from "./combat/Telegraphs";
 import type { Hour } from "./DayCycle";
 import { driftClouds } from "./depth";
+import { isMouth, usePortalOpen } from "./gates";
 import { type TownInput, useTownInput } from "./input";
 import { portalCells, type TownMap, worldRadius } from "./map";
+import { markMet } from "./met";
 import type { TownConnection } from "./net/TownConnection";
+import { townNet } from "./net/townNet";
 import { Player } from "./Player";
-import { isMouth } from "./Portals";
 import { Post } from "./Post";
 import {
   arrivalOn,
@@ -68,9 +72,10 @@ export type TownCanvasProps = {
   onOpenProfile?: (friendCode: string) => void;
   /** Who's close enough to talk to (null: nobody), when that changes. */
   onNearChange: (spot: TownSpot | null) => void;
-  /** What E would do at a bench right now — sit on one nearby, or stand
-   * up off it — when that changes (null: nothing). */
-  onBenchChange?: (prompt: "sit" | "stand" | null) => void;
+  /** What E would do at a bench or board right now — sit on one nearby,
+   * stand up off it, or read the bulletin board — when that changes (null:
+   * nothing). */
+  onBenchChange?: (prompt: "sit" | "stand" | "read" | null) => void;
   /** The island a portal nearby leads to (E steps in), when that changes
    * (null: none near). */
   onPortalChange?: (to: TownMap | null) => void;
@@ -142,7 +147,10 @@ export default function TownCanvas(props: TownCanvasProps) {
       gl={{ antialias: false }}
       // Plain PCF: soft enough, and at these pixels the edge reads clean.
       shadows={props.shadows === false ? false : "percentage"}
-      style={{ imageRendering: "pixelated" }}
+      // Its own stacking context: the name tags (drei's Html, inside this
+      // wrapper) stay under whatever comes after it, the boss's end screen
+      // included, and the herzie stage (fixed, z-index 1) draws over them.
+      style={{ imageRendering: "pixelated", isolation: "isolate" }}
       camera={{ fov: 55, near: 0.1, far: 400 }}
       frameloop={props.paused ? "never" : "always"}
       onCreated={props.onCreated}
@@ -186,6 +194,12 @@ export default function TownCanvas(props: TownCanvasProps) {
             {map.id === "bossroom" && (
               <>
                 <Boss />
+                <Telegraphs />
+              </>
+            )}
+            {map.id === "tower" && (
+              <>
+                <Mobs />
                 <Telegraphs />
               </>
             )}
@@ -255,13 +269,15 @@ function Systems({
   const benches = useMemo(() => (map ? benchesOf(map) : []), [map]);
   /** The seat E would sit on, if any. */
   const seat = useRef<Seat | null>(null);
-  const prompt = useRef<"sit" | "stand" | null>(null);
-  // A closed cave has no mouth: nothing to see, step into or be prompted by.
-  const caveOpen = useCave().kind === "open";
-  const portals = useMemo(
-    () => (map ? portalsOf(map) : []).filter((p) => caveOpen || !isMouth(p)),
-    [map, caveOpen],
-  );
+  const prompt = useRef<"sit" | "stand" | "read" | null>(null);
+  const boards = useMemo(() => (map ? boardsOf(map) : []), [map]);
+  /** The bulletin board E would read, if any. */
+  const board = useRef<Board | null>(null);
+  // A shut portal (a sealed cave, the Tower out of season, a floor not
+  // yet cleared): nothing to see, step into or be prompted by.
+  const isOpen = usePortalOpen();
+  const all = useMemo(() => (map ? portalsOf(map) : []), [map]);
+  const portals = all.filter(isOpen);
   /** The portal E would step into, if any. */
   const portal = useRef<Portal | null>(null);
   /** Where the player was last frame, on which island: walking through a
@@ -269,20 +285,29 @@ function Systems({
   const last = useRef({ map: "", x: 0, z: 0 });
 
   /** E (or a click on the prompt): talk to whoever's near; else step into
-   * the portal nearby; else sit on the bench nearby, or stand up off it. */
+   * the portal nearby; else stand up; else read the board nearby; else sit
+   * on the bench nearby. */
   const interact = () => {
-    const key = near.current?.card.openKey;
-    if (key) onOpen(key);
-    else if (portal.current) enter(portal.current.to);
+    const card = near.current?.card;
+    if (card?.openKey) {
+      markMet(card);
+      onOpen(card.openKey);
+    } else if (portal.current) enter(portal.current);
     else if (townLive.seat) townLive.standUp = true;
+    else if (board.current) onOpen(BULLETIN_KEY);
     else if (seat.current) townLive.seat = seat.current;
   };
-  const enter = (to: string) => {
+  const enter = (p: Portal) => {
     if (warp.active) return;
+    const to = p.to;
     // Into a room (the boss's cave): only while it's open, and says why not.
-    if (mapById(to).room && !tryEnterCave()) return;
+    if (isMouth(p) && !tryEnterCave()) return;
     townLive.seat = null;
-    startWarp(to);
+    // The Tower's way on: the same island, its next floor.
+    if (p.next) {
+      startWarp(to, true);
+      townNet().sendNext();
+    } else startWarp(to);
     sfxPortal();
   };
   const live = useTownInput(!paused, surface, interact);
@@ -295,7 +320,15 @@ function Systems({
       if (!warp.swapped && warp.t >= WARP_OUT) {
         warp.swapped = true;
         const from = townSave.map;
-        goToMap(warp.to, arrivalOn(mapById(warp.to), from));
+        const dest = mapById(warp.to);
+        // On to the next floor: back at the island's start, same island.
+        if (warp.sameIsland)
+          townLive.teleport = {
+            x: dest.spawn.at[0],
+            z: dest.spawn.at[1],
+            heading: dest.spawn.heading,
+          };
+        else goToMap(warp.to, arrivalOn(dest, from));
       }
       if (warp.t >= WARP_OUT + WARP_IN) warp.active = false;
     }
@@ -305,7 +338,7 @@ function Systems({
       if (l.map === map.id && !warp.active) {
         for (const p of portals) {
           if (walkedThrough(p, l.x, l.z, townSave.x, townSave.z)) {
-            enter(p.to);
+            enter(p);
             break;
           }
         }
@@ -353,7 +386,17 @@ function Systems({
     // Benches: the free seat nearest, if no one's there to talk to. A seat
     // is taken if another player is sitting on it.
     seat.current = null;
-    if (!closest && !portal.current && !townLive.seat && benches.length > 0) {
+    board.current =
+      !closest && !portal.current && !townLive.seat
+        ? boardNear(boards, townSave.x, townSave.z)
+        : null;
+    if (
+      !closest &&
+      !portal.current &&
+      !townLive.seat &&
+      !board.current &&
+      benches.length > 0
+    ) {
       const sitting: { x: number; z: number }[] = [];
       if (net) {
         const t = net.clock.renderTime(performance.now());
@@ -370,7 +413,13 @@ function Systems({
       townLive.benchPressed = false;
       if (!closest) interact();
     }
-    const next = townLive.seat ? "stand" : seat.current ? "sit" : null;
+    const next = townLive.seat
+      ? "stand"
+      : board.current
+        ? "read"
+        : seat.current
+          ? "sit"
+          : null;
     if (next !== prompt.current) {
       prompt.current = next;
       onBenchChange?.(next);

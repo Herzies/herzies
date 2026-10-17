@@ -230,6 +230,7 @@ function formatProfile(
         sonicPower: row.stat_sonic,
         euphony: row.stat_euphony,
       },
+      row.level,
     ),
     nowPlaying: canSeeListening ? nowPlaying : null,
     lastPlayed: canSeeListening ? lastPlayed : null,

@@ -43,11 +43,11 @@ describe("herzie health", () => {
   it("starts full, with max HP from the level", async () => {
     const { userId } = await player(10);
     const v = await rpc<Vitals>("herzie_vitals", { p_user: userId });
-    expect(v).toMatchObject({ hp: 150, maxHp: 150, stored: null, down: false });
+    expect(v).toMatchObject({ hp: 182, maxHp: 182, stored: null, down: false });
   });
 
   it("a report lowers HP and stamps it; regen waits out the delay", async () => {
-    const { userId } = await player(59); // 395 max
+    const { userId } = await player(59); // 574 max
     const v = await rpc<Vitals>("set_herzie_hp", { p_user: userId, p_hp: 100 });
     expect(v.hp).toBeCloseTo(100, 0);
     expect(v.stored).toBe(100);
@@ -65,9 +65,9 @@ describe("herzie health", () => {
       .update({ hp: 100, hp_at: new Date(Date.now() - 65_000).toISOString() })
       .eq("user_id", userId);
     const v = await rpc<Vitals>("herzie_vitals", { p_user: userId });
-    // 60 regen-seconds at 395/300 a second ≈ 79.
-    expect(v.hp).toBeGreaterThan(170);
-    expect(v.hp).toBeLessThan(188);
+    // 60 regen-seconds at 574/300 a second ≈ 115.
+    expect(v.hp).toBeGreaterThan(205);
+    expect(v.hp).toBeLessThan(225);
   });
 
   it("a report can never heal", async () => {
@@ -111,7 +111,7 @@ describe("herzie health", () => {
     await rpc("set_herzie_hp", { p_user: userId, p_hp: 0 });
     const v = await rpc<Vitals>("respawn_herzie", { p_user: userId });
     expect(v.down).toBe(false);
-    expect(v.hp).toBe(198); // ceil(395 * 0.5)
+    expect(v.hp).toBe(287); // ceil(574 * 0.5)
   });
 
   it("respawn is a no-op for a herzie that isn't down", async () => {
@@ -131,6 +131,6 @@ describe("herzie health", () => {
       p_user: userId,
       p_bonus: 9999,
     });
-    expect(huge.hp).toBe(395);
+    expect(huge.hp).toBe(574);
   });
 });

@@ -12,6 +12,13 @@
 /** Every balance number for stat points lives here. */
 export const STAT_TUNING = {
   pointsPerLevel: 2,
+  /** Max HP at level 1, and what each level after adds (see `maxHp`). */
+  hpBase: 110,
+  hpPerLevel: 8,
+  /** Sonic Power each level after the first adds on its own: +2% a hit. */
+  sonicPerLevel: 2,
+  /** Def each level after the first adds on its own. */
+  defPerLevel: 0.6,
   /** Max HP a point of Stamina adds (see `maxHp` in vitals.ts). */
   hpPerStamina: 10,
   /** Def a point of Stamina adds. */
@@ -25,6 +32,20 @@ export const STAT_TUNING = {
 } as const;
 
 export const POINTS_PER_LEVEL = STAT_TUNING.pointsPerLevel;
+
+/** What a herzie's level gives on its own, before items and stat points:
+ * a little Sonic Power and Def with every level after the first (max HP
+ * grows with it too; see `maxHp`). */
+export function levelStats(level: number | null | undefined): {
+  sonicPower: number;
+  def: number;
+} {
+  const above = Math.max(1, count(level)) - 1;
+  return {
+    sonicPower: STAT_TUNING.sonicPerLevel * above,
+    def: Math.round(STAT_TUNING.defPerLevel * above * 10) / 10,
+  };
+}
 
 /** The stats points can go into. */
 export const POINT_STATS = ["stamina", "sonicPower", "euphony"] as const;

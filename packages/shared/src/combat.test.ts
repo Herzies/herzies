@@ -4,6 +4,8 @@ import {
   aimDirection,
   BOSS_STAND,
   bossReaches,
+  CONTRIBUTION_SUPPORT_WEIGHT,
+  contributionOf,
   DISC_RANGE,
   MELEE_REACH,
   meleeReaches,
@@ -78,5 +80,17 @@ describe("casting at the boss", () => {
     expect(d).toBeGreaterThan(12 - BOSS_STAND.radius - 0.5);
     expect(d).toBeLessThan(12);
     expect(bossReaches(far, aimDirection(Math.PI, 0), 5)).toBe(null);
+  });
+});
+
+describe("contribution", () => {
+  it("counts healing and blocking ten times over", () => {
+    expect(CONTRIBUTION_SUPPORT_WEIGHT).toBe(10);
+    expect(contributionOf({ damage: 300, healing: 80, blocked: 0 })).toBe(1100);
+    expect(contributionOf({ damage: 0, healing: 0, blocked: 50 })).toBe(500);
+    // A healer can outrank a bigger hitter.
+    expect(
+      contributionOf({ damage: 300, healing: 80, blocked: 0 }),
+    ).toBeGreaterThan(contributionOf({ damage: 1000, healing: 0, blocked: 0 }));
   });
 });

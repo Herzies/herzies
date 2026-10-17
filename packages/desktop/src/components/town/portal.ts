@@ -20,6 +20,8 @@ export type Portal = {
   /** Which way its front faces: forward is (sin, cos). */
   yaw: number;
   to: MapId;
+  /** The Tower's way on to its next floor (on this same island). */
+  next?: boolean;
 };
 
 /** How far you can be from a portal to step into it with E. */
@@ -46,7 +48,8 @@ export function portalsOf(
     for (let col = 0; col < map.size; col++) {
       if (objectAt(map, col, row) !== "O") continue;
       const key = `${col},${row}`;
-      const to = map.portals?.[key]?.to;
+      const link = map.portals?.[key];
+      const to = link?.to;
       if (!to) continue;
       const [cx, cz] = cellCenter(map, col, row);
       const yaw = facingAt(map, col, row) ?? Math.atan2(-cx, -cz);
@@ -57,6 +60,7 @@ export function portalsOf(
         z: cz + Math.cos(yaw) * forward,
         yaw,
         to,
+        ...(link.next ? { next: true } : {}),
       });
     }
   }
@@ -122,6 +126,9 @@ export const warp = {
   to: "" as MapId,
   /** The island has been swapped (half way). */
   swapped: false,
+  /** Staying on this island (the Tower's next floor): back to its start
+   * rather than a swap. */
+  sameIsland: false,
 };
 /** Out (into the portal), then in (out of the far one), in seconds. */
 export const WARP_OUT = 0.5;
@@ -138,8 +145,8 @@ export function warpAmount(): number {
   return (1 - k) ** 2;
 }
 
-/** Into the portal to `to`. */
-export function startWarp(to: MapId): void {
+/** Into the portal to `to` (`sameIsland`: the Tower's next floor). */
+export function startWarp(to: MapId, sameIsland = false): void {
   if (warp.active) return;
-  Object.assign(warp, { active: true, t: 0, to, swapped: false });
+  Object.assign(warp, { active: true, t: 0, to, swapped: false, sameIsland });
 }

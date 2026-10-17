@@ -5,6 +5,7 @@ import type {
   HerzieProfile,
 } from "@herzies/shared";
 import { useEffect, useRef, useState } from "react";
+import { notify } from "../lib/notices";
 import { cn } from "../lib/utils";
 import {
   herzies,
@@ -75,7 +76,6 @@ export function FriendsView({
    * out of an open profile. */
   rootKey?: number;
 }) {
-  const [message, setMessage] = useState("");
   const [selectedFriend, setSelectedFriend] = useState<HerzieProfile | null>(
     null,
   );
@@ -108,9 +108,10 @@ export function FriendsView({
   const friendsRef = useRef(friends);
   friendsRef.current = friends;
 
-  const flash = (text: string) => {
-    setMessage(text);
-    setTimeout(() => setMessage(""), 3000);
+  /** Says what went wrong, for a moment (lib/notices.ts). What went right
+   * the backend announces itself (an "activity", which main.tsx shows). */
+  const flash = (result: { success: boolean; message: string }) => {
+    if (!result.success) notify(result.message);
   };
 
   // Background refresh when codes change and any profile is missing from cache.
@@ -212,7 +213,7 @@ export function FriendsView({
     const normalized = code.trim().toUpperCase();
     if (!normalized) return;
     const result = await herzies.friendAdd(normalized, name);
-    flash(result.message);
+    flash(result);
     // Success is logged by the backend, with their name.
     if (!result.success) onActivity?.(result.message);
     if (result.success) {
@@ -228,22 +229,22 @@ export function FriendsView({
 
   const handleAccept = async (requestId: string) => {
     const result = await herzies.friendRequestAccept(requestId);
-    flash(result.message);
+    flash(result);
   };
 
   const handleDecline = async (requestId: string) => {
     const result = await herzies.friendRequestDecline(requestId);
-    flash(result.message);
+    flash(result);
   };
 
   const handleCancel = async (requestId: string) => {
     const result = await herzies.friendRequestCancel(requestId);
-    flash(result.message);
+    flash(result);
   };
 
   const handleRemove = async (code: string) => {
     const result = await herzies.friendRemove(code);
-    flash(result.message);
+    flash(result);
   };
 
   /** Trade / remove for a right-clicked friend row. Remove is two-step, like
@@ -278,7 +279,7 @@ export function FriendsView({
 
   const copyFriendCode = async () => {
     await navigator.clipboard.writeText(herzie.friendCode);
-    flash(`Copied ${herzie.friendCode}!`);
+    notify(`Copied ${herzie.friendCode}!`, { kind: "success" });
   };
 
   if (selectedFriend) {
@@ -359,17 +360,6 @@ export function FriendsView({
           Leaderboard
         </TabButton>
       </div>
-
-      {message && (
-        <div
-          className={cn(
-            "mb-1.5 text-ui",
-            message.includes("!") ? "text-green" : "text-red",
-          )}
-        >
-          {message}
-        </div>
-      )}
 
       {tab === "friends" && (
         <>

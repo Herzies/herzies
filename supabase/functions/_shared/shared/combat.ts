@@ -94,8 +94,36 @@ export function discLandsAfterMs(dist: number): number {
 export const MELEE_REACH = 1.6;
 /** How far either way of where it faces a melee hit reaches (radians). */
 export const MELEE_ARC = (60 * Math.PI) / 180;
-/** A melee hit as a share of a wave's: more, for standing in its face. */
-export const MELEE_DAMAGE = 1.3;
+/** A Percussionist's stick as a share of a wave's: the same. The tank
+ * stands in its face to hold it, not to out-hit the Record Slinger. */
+export const STRIKE_DAMAGE = 1;
+/** A herzie without a class bumps into it: the weakest blow there is, so
+ * picking a class at stage 2 is a step up. */
+export const BUMP_DAMAGE = 0.5;
+
+// ---------------------------------------------------------------------------
+// Contribution: how much a herzie did for a boss fight, which ranks its end
+// screen, rewards, statue and leaderboard. Damage counts as it is; healing
+// and what a Cymbrella blocked count this many times over, because a heal is
+// worth far more than a hit (a Bard restores ~100 HP in the time a damage
+// dealer hits for ~4,000). Mirrored by boss_contribution in 00111.
+
+/** How many points of damage one HP healed or blocked is worth. */
+export const CONTRIBUTION_SUPPORT_WEIGHT = 10;
+
+/** What a herzie did for a fight: damage dealt, HP healed, HP blocked. */
+export type Contribution = { damage: number; healing: number; blocked: number };
+
+/** A herzie's contribution score. */
+export function contributionOf(c: Contribution): number {
+  return c.damage + CONTRIBUTION_SUPPORT_WEIGHT * (c.healing + c.blocked);
+}
+
+/** A melee hit as a share of a wave's: a stick (with a class) or a bump
+ * (without one). */
+export function meleeDamage(classed: boolean): number {
+  return classed ? STRIKE_DAMAGE : BUMP_DAMAGE;
+}
 
 /** Whether a melee hit from `from`, facing `yaw`, reaches `target` (a
  * circle on the ground): within `reach` of its surface, and within the
@@ -185,7 +213,27 @@ export function bossReaches(
   dir: Readonly<Vec3>,
   range: number = WAVE_RANGE,
 ): number | null {
-  const b = BOSS_STAND;
+  return bodyHitAt(from, dir, BOSS_STAND, range);
+}
+
+/** A standing body a cast can hit: where it stands, its radius, the height
+ * of its middle and of its top. */
+export type Body = {
+  x: number;
+  z: number;
+  radius: number;
+  chest: number;
+  top: number;
+};
+
+/** {@link bossReaches} for any standing body (a Tower mob): at its middle
+ * by the wave rule, or anywhere on it. */
+export function bodyHitAt(
+  from: Readonly<Vec3>,
+  dir: Readonly<Vec3>,
+  b: Body,
+  range: number = WAVE_RANGE,
+): number | null {
   const chest = waveReaches(
     from,
     dir,

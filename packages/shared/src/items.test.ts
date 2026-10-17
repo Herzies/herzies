@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   applyEquip,
@@ -6,11 +7,13 @@ import {
   BANK_EXPANSION_SLOTS,
   BANK_SLOT_COUNT,
   type BankItemLookup,
+  BOSS_BONUS_DROPS,
   bankCapacity,
   bankSlotsUsed,
   bankTiles,
   bestUnitOf,
   bossDamagePerMinute,
+  bossLootWeights,
   DICE_TIERS,
   EQUIP_SLOTS,
   EQUIPPED_SLOTS,
@@ -578,7 +581,7 @@ describe("applyEquip", () => {
     expect(unitsToEquipped(next)).toEqual({ off_hand: "old-cymbal" });
   });
 
-  it("binds class equipment: no sell price, never dropped", () => {
+  it("class equipment sells for a little, and never drops", () => {
     const gear = ITEMS.filter((i) => i.requiredClass);
     expect(gear.map((i) => i.id).sort()).toEqual([
       "compact-discs",
@@ -587,7 +590,7 @@ describe("applyEquip", () => {
       "worn-stick",
     ]);
     for (const item of gear) {
-      expect(item.sellPrice).toBeUndefined();
+      expect(item.sellPrice).toBe(10);
       expect(NON_DROPPABLE_ITEM_IDS).toContain(item.id);
     }
   });
@@ -1361,6 +1364,37 @@ describe("item units", () => {
   });
 });
 
+describe("class instruments", () => {
+  const instruments = ["lute", "compact-discs", "worn-stick", "old-cymbal"];
+
+  it("all carry stats", () => {
+    for (const id of instruments) {
+      expect(Object.keys(getItem(id)?.stats ?? {}).length).toBeGreaterThan(0);
+    }
+  });
+
+  it("count at their own upgrade level when worn", () => {
+    expect(
+      getHerzieStatsFromUnits([unit("a", "compact-discs", 3, "main_hand")]),
+    ).toMatchObject({ sonicPower: 11, critChance: 8, critDamage: 28 });
+    expect(
+      getHerzieStatsFromUnits([
+        unit("s", "worn-stick", 0, "main_hand"),
+        unit("c", "old-cymbal", 2, "off_hand"),
+      ]),
+    ).toMatchObject({ sonicPower: 4, def: 12 });
+  });
+
+  it("take a die", () => {
+    const out = applyItemUpgrade(
+      [unit("d", "power-dice-1"), unit("l", "lute", 0, "main_hand")],
+      "power-dice-1",
+      "l",
+    );
+    expect(out.ok && out.newLevel).toBe(1);
+  });
+});
+
 describe("bossDamagePerMinute", () => {
   it("is the base rate with no sonic power", () => {
     expect(bossDamagePerMinute({ sonicPower: 0 })).toBe(1);
@@ -1451,6 +1485,14 @@ describe("withStatPoints", () => {
   it("is the item totals with no points", () => {
     const items = getHerzieStats({ head: "headphones" });
     expect(withStatPoints(items, null)).toEqual(items);
+  });
+
+  it("adds the level's own on top", () => {
+    const items = getHerzieStats({ head: "headphones" });
+    const at10 = withStatPoints(items, null, 10);
+    expect(at10.sonicPower).toBe(items.sonicPower + 18);
+    expect(at10.def).toBeCloseTo(items.def + 5.4);
+    expect(withStatPoints(items, null, 1)).toEqual(items);
   });
 });
 
@@ -1569,5 +1611,53 @@ describe("choosing copies from an item id", () => {
     unitsPlainestFirst(units, "boombox");
     unitsBestFirst(units, "boombox");
     expect(units).toEqual(snapshot);
+  });
+});
+
+describe("boss loot", () => {
+  const sql = readFileSync(
+    new URL(
+      "../../../supabase/migrations/00114_boss_bonus_loot.sql",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  it("rolls from the same weights as bossLootWeights", () => {
+    const roll = sql.slice(
+      sql.indexOf("FUNCTION public.boss_loot_roll("),
+      sql.indexOf("$$;"),
+    );
+    const rows = [...roll.matchAll(/\('([a-z0-9-]+)', (\d+)\)/g)].map(
+      ([, itemId, weight]) => ({ itemId, weight: Number(weight) }),
+    );
+    expect(rows).toEqual(bossLootWeights());
+  });
+
+  it("drops BOSS_BONUS_DROPS of them per herzie", () => {
+    expect(sql).toContain(`generate_series(1, ${BOSS_BONUS_DROPS})`);
+  });
+
+  it("leans rarer than a listening drop", () => {
+    /** The share of the weight on rare-or-better items. */
+    const rareShare = (
+      weightOf: (itemId: string, rarity: Rarity) => number,
+    ) => {
+      let rare = 0;
+      let total = 0;
+      for (const { itemId } of bossLootWeights()) {
+        const rarity = getItem(itemId)?.rarity ?? "common";
+        const w = weightOf(itemId, rarity);
+        total += w;
+        if (rarity !== "common" && rarity !== "uncommon") rare += w;
+      }
+      return rare / total;
+    };
+    const boss = new Map(bossLootWeights().map((w) => [w.itemId, w.weight]));
+    const listening = rareShare(
+      (id, rarity) =>
+        ITEM_DROP_WEIGHT_OVERRIDES[id] ?? RARITY_DROP_WEIGHTS[rarity],
+    );
+    expect(rareShare((id) => boss.get(id) ?? 0)).toBeGreaterThan(listening);
   });
 });

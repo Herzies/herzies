@@ -24,9 +24,9 @@ import {
   discLandsAfterMs,
   type HitStats,
   hitDamage,
-  MELEE_DAMAGE,
   MELEE_REACH,
   meleeReaches,
+  STRIKE_DAMAGE,
   WAVE_HAND_HEIGHT,
   WAVE_SPEED,
 } from "@herzies/shared/combat";
@@ -113,6 +113,8 @@ export type Telegraph = {
   damage: number;
   /** A buster's target (user id); it lands on them wherever they are. */
   target?: string;
+  /** In the Tower: the mob swinging it. */
+  mob?: number;
 };
 
 /** A player as the engine sees them each update. */
@@ -131,8 +133,14 @@ export type BossEvent =
   | {
       t: "resolve";
       id: number;
-      /** `absorbed`: what buffs took off the hit. */
-      hits: { uid: string; damage: number; absorbed: number }[];
+      /** `absorbed`: what Def and buffs took off the hit; `blocked`: the
+       * Cymbrella's share of that alone. */
+      hits: {
+        uid: string;
+        damage: number;
+        absorbed: number;
+        blocked: number;
+      }[];
     }
   | { t: "phase"; phase: Phase }
   | {
@@ -143,6 +151,8 @@ export type BossEvent =
       hp: number;
       /** Set when a skill threw it, not a plain cast. */
       skill?: string;
+      /** In the Tower: the mob it hit. */
+      mob?: number;
     }
   | { t: "killed"; by: string };
 
@@ -299,9 +309,9 @@ export class BossEngine {
    *
    * A Record Slinger's cast is a thrown disc (`attack` "disc"): shorter
    * reach, its own speed, and a little more damage. Only its way out hits.
-   * A melee blow (`attack` "melee": a Percussionist's, or a herzie without
-   * a class) hits harder, but only up close and facing it; the client
-   * sends it as it lands, so it lands now.
+   * A melee blow (`attack` "melee": a Percussionist's stick, or a herzie
+   * without a class bumping into it) hits for `melee` of a wave, only up
+   * close and facing it; the client sends it as it lands, so it lands now.
    */
   cast(
     uid: string,
@@ -311,6 +321,7 @@ export class BossEngine {
     stats: HitStats,
     now: number,
     attack: AttackStyle = "wave",
+    melee: number = STRIKE_DAMAGE,
   ): "cooldown" | "miss" | "hit" | "dead" {
     if (this.killed) return "dead";
     const bucket = this.casts.get(uid) ?? {
@@ -340,7 +351,7 @@ export class BossEngine {
       this.pending.push({
         at: now,
         uid,
-        damage: Math.max(1, Math.round(amount * MELEE_DAMAGE)),
+        damage: Math.max(1, Math.round(amount * melee)),
         crit,
       });
       return "hit";
@@ -418,7 +429,12 @@ export class BossEngine {
     if (!due.length) return;
     this.telegraphs = this.telegraphs.filter((t) => t.hitAt > now);
     for (const tg of due) {
-      const hits: { uid: string; damage: number; absorbed: number }[] = [];
+      const hits: {
+        uid: string;
+        damage: number;
+        absorbed: number;
+        blocked: number;
+      }[] = [];
       for (const p of players) {
         if (!p.alive) continue;
         if ((this.safeUntil.get(p.uid) ?? 0) > tg.hitAt) continue;
@@ -444,7 +460,14 @@ export class BossEngine {
         ];
         const damage = Math.max(1, Math.round(mitigate(raw, reductions)));
         const absorbed = Math.max(0, Math.round(raw) - damage);
-        hits.push({ uid: p.uid, damage, absorbed });
+        // What the Cymbrella took off on top of Def: Def alone's hit, less
+        // this one.
+        const blocked = Math.max(
+          0,
+          Math.max(1, Math.round(mitigate(raw, reductions.slice(0, 1)))) -
+            damage,
+        );
+        hits.push({ uid: p.uid, damage, absorbed, blocked });
         this.invulnUntil.set(p.uid, tg.hitAt + TUNING.invulnMs);
       }
       events.push({ t: "resolve", id: tg.id, hits });

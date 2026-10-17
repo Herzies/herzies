@@ -1,8 +1,16 @@
 import {
+  BOBOKU_EQUIPPED,
+  BOBOKU_KEY,
+  BOBOKU_SEED,
+  BOBOKU_STAGE,
   BOSS_BODY_TYPE,
   GEORGE_EQUIPPED,
   GEORGE_SEED,
   generateCreatureParams,
+  MEDEA_EQUIPPED,
+  MEDEA_KEY,
+  MEDEA_SEED,
+  MEDEA_STAGE,
   NANDOR_EQUIPPED,
   NANDOR_SEED,
   ORPHIEZ_EQUIPPED,
@@ -52,6 +60,18 @@ export function lookOf(card: EventCard): Look {
       return { seed: GEORGE_SEED, stage: 2, equipped: GEORGE_EQUIPPED };
     case "treat_trader":
       return { seed: NANDOR_SEED, stage: 2, equipped: NANDOR_EQUIPPED };
+    case BOBOKU_KEY:
+      return {
+        seed: BOBOKU_SEED,
+        stage: BOBOKU_STAGE,
+        equipped: BOBOKU_EQUIPPED,
+      };
+    case MEDEA_KEY:
+      return {
+        seed: MEDEA_SEED,
+        stage: MEDEA_STAGE,
+        equipped: MEDEA_EQUIPPED,
+      };
     case "boss_fight": {
       const seed = `boss:${card.eventId ?? ""}`;
       return {

@@ -340,6 +340,119 @@ describe("how it ends", () => {
   });
 });
 
+describe("the end screen", () => {
+  const aim = {
+    yaw: Math.atan2(0, TUNING.boss.z - 8),
+    pitch: Math.atan2(TUNING.boss.chest - 1.2, Math.abs(TUNING.boss.z - 8)),
+  };
+  const place = (rank: number, name: string) => ({
+    rank,
+    name,
+    damage: 100,
+    heal: 0,
+  });
+
+  it("is asked for once the boss falls, never before", () => {
+    const f = new FightRuntime(claim({ hp: 40 }), T0);
+    f.join("a", 1, ticket("a"), { x: 0, z: 8 }, T0 - 5_000);
+    f.join("b", 2, ticket("b"), { x: 2, z: 8 }, T0 - 5_000);
+    f.onState("a", 0, 8, T0);
+    expect(f.report(T0, true)?.results).toBeUndefined();
+    f.cast("a", aim.yaw, aim.pitch, T0);
+    f.step(T0 + 1_000);
+    expect(f.closeWhy).toBe("victory");
+    expect(f.report(T0 + 1_000, true)?.results).toEqual({
+      event: "evt-1",
+      uids: ["a", "b"],
+    });
+  });
+
+  it("waits for a report that carries the last hits", () => {
+    const f = new FightRuntime(claim({ hp: 150 }), T0);
+    f.join("a", 1, ticket("a"), { x: 0, z: 8 }, T0 - 5_000);
+    f.onState("a", 0, 8, T0);
+    f.cast("a", aim.yaw, aim.pitch, T0);
+    f.step(T0 + 1_000);
+    // The first hit's batch goes out, and isn't taken.
+    const first = f.report(T0 + 1_000, true);
+    expect(first?.boss?.damage).toHaveLength(1);
+    f.cast("a", aim.yaw, aim.pitch, T0 + 1_000);
+    f.step(T0 + 2_000);
+    expect(f.closeWhy).toBe("victory");
+    // The old batch is re-sent; the killing blow waits behind it.
+    const resent = f.report(T0 + 2_000, true);
+    expect(resent?.boss?.batch).toBe(first?.boss?.batch);
+    expect(resent?.results).toBeUndefined();
+    if (resent) f.reported(resent);
+    const last = f.report(T0 + 2_100, true);
+    expect(last?.boss?.batch).not.toBe(first?.boss?.batch);
+    expect(last?.results?.uids).toEqual(["a"]);
+  });
+
+  it("goes to each herzie still here, with their own place, once", () => {
+    const f = new FightRuntime(claim({ hp: 40 }), T0);
+    for (const [uid, id] of [["a", 1], ["b", 2], ["c", 3]] as const)
+      f.join(uid, id, ticket(uid), { x: 0, z: 8 }, T0 - 5_000);
+    f.onState("a", 0, 8, T0);
+    f.cast("a", aim.yaw, aim.pitch, T0);
+    f.step(T0 + 1_000);
+    f.leave("c");
+    const top = [place(1, "a"), place(2, "c")];
+    const out = f.results({ top, you: { a: top[0], c: top[1] } });
+    expect(out).toEqual([
+      {
+        to: { uid: "a" },
+        msg: { t: "results", outcome: "victory", top, you: top[0] },
+      },
+      {
+        to: { uid: "b" },
+        msg: { t: "results", outcome: "victory", top, you: null },
+      },
+    ]);
+    expect(f.results({ top, you: {} })).toEqual([]);
+    // And it isn't asked for again.
+    expect(f.report(T0 + 5_000, true)?.results).toBeUndefined();
+  });
+
+  it("an escape is a defeat", () => {
+    const f = new FightRuntime(claim({ until: (T0 + 10_000) / 1000 }), T0);
+    f.join("a", 1, ticket("a"), { x: 0, z: 8 }, T0);
+    run(f, T0, T0 + 11_000);
+    expect(f.report(T0 + 11_000, true)?.results?.uids).toEqual(["a"]);
+    expect(f.results({ top: [], you: {} })).toEqual([
+      {
+        to: { uid: "a" },
+        msg: { t: "results", outcome: "defeat", top: [], you: null },
+      },
+    ]);
+  });
+
+  it("nothing to ask before it's over", () => {
+    const f = new FightRuntime(claim(), T0);
+    f.join("a", 1, ticket("a"), { x: 0, z: 8 }, T0);
+    expect(f.results({ top: [], you: {} })).toEqual([]);
+  });
+
+  it("the local-dev boss's comes from the room itself", () => {
+    const f = new FightRuntime(claim({ event: "dev", hp: 40 }), T0);
+    f.join("a", 1, ticket("a"), { x: 0, z: 8 }, T0 - 5_000);
+    f.join("b", 2, ticket("b"), { x: 2, z: 8 }, T0 - 5_000);
+    f.onState("a", 0, 8, T0);
+    f.cast("a", aim.yaw, aim.pitch, T0);
+    const res = msgs(f.step(T0 + 1_000), "results");
+    expect(res).toHaveLength(2);
+    expect(res[0].msg).toMatchObject({
+      t: "results",
+      outcome: "victory",
+      top: [{ rank: 1, name: "a" }],
+      you: { rank: 1, name: "a" },
+    });
+    expect(res[1].msg).toMatchObject({ you: null });
+    expect(f.report(T0 + 2_000, true)?.results).toBeUndefined();
+    expect(msgs(f.step(T0 + 2_000), "results")).toEqual([]);
+  });
+});
+
 describe("being knocked out and coming back", () => {
   /** Die in the room: stand in the slam until it takes everything. */
   function dieInRoom(f: FightRuntime) {
@@ -390,5 +503,54 @@ describe("being knocked out and coming back", () => {
     expect(f.report(T0 + 8_100, true)?.hp).toEqual([{ uid: "a", hp: 0 }]);
     // No reply: it goes again.
     expect(f.report(T0 + 10_100, true)?.hp).toEqual([{ uid: "a", hp: 0 }]);
+  });
+});
+
+describe("eating", () => {
+  const hurt = (hp: number) => {
+    const f = new FightRuntime(claim(), T0);
+    f.join("a", 1, ticket("a", hp), { x: 0, z: 8 }, T0);
+    return f;
+  };
+
+  it("heals, capped at max, and reports it like a skill's heal", () => {
+    const f = hurt(150);
+    expect(f.tryEat("a", T0)).toBeNull();
+    const out = f.eat("a", 100);
+    expect(f.player("a")?.hp).toBe(200);
+    expect(msgs(out, "hp")[0]?.msg).toEqual({
+      t: "hp",
+      id: 1,
+      hp: 200,
+      maxHp: 200,
+    });
+    const r = f.report(T0 + 10, true);
+    expect(r?.hp).toEqual([{ uid: "a", hp: 200, heal: 50 }]);
+  });
+
+  it("refuses at full health, while down, or before the cooldown", () => {
+    expect(hurt(200).tryEat("a", T0)).toBe("full");
+
+    const f = hurt(50);
+    expect(f.tryEat("a", T0)).toBeNull();
+    // A second while the first is still being used up.
+    expect(f.tryEat("a", T0 + 100)).toBe("cooldown");
+    // A client keeping to the cooldown, its press arriving a little early.
+    expect(f.tryEat("a", T0 + 900)).toBeNull();
+
+    const down = new FightRuntime(claim(), T0);
+    down.join(
+      "a",
+      1,
+      ticket("a", 0, { hp: { hp: 0, maxHp: 200, down: true } }),
+      { x: 0, z: 8 },
+      T0,
+    );
+    expect(down.tryEat("a", T0)).toBe("down");
+    expect(down.eat("a", 100)).toEqual([]);
+  });
+
+  it("isn't for anyone outside the fight", () => {
+    expect(hurt(50).tryEat("b", T0)).toBe("not-here");
   });
 });

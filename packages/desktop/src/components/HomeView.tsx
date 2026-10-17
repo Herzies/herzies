@@ -87,6 +87,7 @@ export function HomeView({
       ? getHerzieStatsFromUnits(units)
       : getHerzieStats(equipped, itemUpgrades),
     herzie?.statPoints,
+    herzie?.level,
   );
   const pinned = useWindowPinned();
   const ghostMode = useGhostMode();
@@ -445,6 +446,8 @@ export function HomeView({
           z-index: 1 and would otherwise swallow the bar's hover tooltip. */}
       <ExpBar
         progress={levelProgress(herzie)}
+        level={herzie.level}
+        xp={herzie.xp}
         className="relative z-10 mb-1.5 text-text-dim"
       />
 

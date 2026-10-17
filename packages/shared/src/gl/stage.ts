@@ -38,7 +38,7 @@ type Entry = { view: StageView; clips: HTMLElement[]; clipAge: number };
  * Drawn at a fraction of the screen's resolution (`pixelScale`) and scaled
  * up without smoothing: the chunky pixels herzies have everywhere.
  */
-class HerzieStage {
+export class HerzieStage {
   /** Drawn pixels per CSS pixel. */
   pixelScale = 1 / 4;
   private renderer: THREE.WebGLRenderer | null = null;
@@ -100,6 +100,19 @@ class HerzieStage {
     (this.host ?? document.body).prepend(c);
     this.renderer = renderer;
     return renderer;
+  }
+
+  /** Done with it for good (a stage of its own, not the page's): its
+   * canvas comes off the page and its WebGL context is freed. */
+  dispose() {
+    this.entries.clear();
+    this.stop();
+    if (this.renderer) {
+      this.renderer.domElement.remove();
+      this.renderer.dispose();
+      this.renderer.forceContextLoss();
+      this.renderer = null;
+    }
   }
 
   private start() {
