@@ -936,7 +936,7 @@ export interface DropWindow {
 /** When the Halloween items drop: the run-up to Halloween through the Day of
  * the Dead. */
 export const HALLOWEEN_DROP_WINDOW: DropWindow = {
-  from: [10, 20],
+  from: [10, 17],
   to: [11, 2],
 };
 
