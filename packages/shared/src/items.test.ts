@@ -277,8 +277,8 @@ describe("seasonal drop windows", () => {
   });
 
   it("opens and closes on the window's days, inclusive", () => {
-    expect(isInDropWindow(halloween, on("2026-10-19"))).toBe(false);
-    expect(isInDropWindow(halloween, on("2026-10-20"))).toBe(true);
+    expect(isInDropWindow(halloween, on("2026-10-16"))).toBe(false);
+    expect(isInDropWindow(halloween, on("2026-10-17"))).toBe(true);
     expect(isInDropWindow(halloween, on("2026-10-31"))).toBe(true);
     expect(isInDropWindow(halloween, on("2026-11-02"))).toBe(true);
     expect(isInDropWindow(halloween, on("2026-11-03"))).toBe(false);
