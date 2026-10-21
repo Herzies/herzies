@@ -79,7 +79,12 @@ export function World({
       {/* The haze (see fog.ts): `far` is its thickness, set by DayLight. */}
       <fog attach="fog" args={[SKY.horizon, HAZE_START, 0]} />
       <Sky />
-      <DayLight hour={hour} />
+      {/* Keyed: the sun's shadow box is fitted to the island once. */}
+      <DayLight
+        key={`${map.id}:${map.size}`}
+        hour={hour}
+        radius={islandRadius(map)}
+      />
       <group position={[-ox, -oy, -oz]}>
         <DistantIslands
           avoid={[map, ...rest].map((m) => ({

@@ -1,6 +1,7 @@
 import {
   cellCenter,
   facingAt,
+  groundY,
   type MapId,
   objectAt,
   type TownMap,
@@ -16,6 +17,8 @@ import { mapById } from "./maps";
 export type Portal = {
   key: string;
   x: number;
+  /** The ground under it. */
+  y: number;
   z: number;
   /** Which way its front faces: forward is (sin, cos). */
   yaw: number;
@@ -54,10 +57,13 @@ export function portalsOf(
       const [cx, cz] = cellCenter(map, col, row);
       const yaw = facingAt(map, col, row) ?? Math.atan2(-cx, -cz);
       const forward = isRoom(to) ? MOUTH_FORWARD : 0;
+      const x = cx + Math.sin(yaw) * forward;
+      const z = cz + Math.cos(yaw) * forward;
       out.push({
         key,
-        x: cx + Math.sin(yaw) * forward,
-        z: cz + Math.cos(yaw) * forward,
+        x,
+        y: groundY(map, x, z),
+        z,
         yaw,
         to,
         ...(link.next ? { next: true } : {}),

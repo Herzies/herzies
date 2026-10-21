@@ -20,7 +20,7 @@ import type { Hour } from "./DayCycle";
 import { driftClouds } from "./depth";
 import { isMouth, usePortalOpen } from "./gates";
 import { type TownInput, useTownInput } from "./input";
-import { portalCells, type TownMap, worldRadius } from "./map";
+import { groundY, portalCells, type TownMap, worldRadius } from "./map";
 import { markMet } from "./met";
 import type { TownConnection } from "./net/TownConnection";
 import { townNet } from "./net/townNet";
@@ -177,6 +177,7 @@ export default function TownCanvas(props: TownCanvasProps) {
               hour={props.hour}
             />
             <Player
+              map={map}
               look={props.player}
               spawn={map.spawn}
               reach={worldRadius(map)}
@@ -184,7 +185,12 @@ export default function TownCanvas(props: TownCanvasProps) {
               bubble={props.bubbles?.get(props.player.seed)}
             />
             {spots.map((s) => (
-              <Visitor key={s.key} spot={s} onOpen={props.onOpen} />
+              <Visitor
+                key={s.key}
+                spot={s}
+                ground={groundY(map, s.at.x, s.at.z)}
+                onOpen={props.onOpen}
+              />
             ))}
             <Combat
               map={map}
@@ -210,12 +216,13 @@ export default function TownCanvas(props: TownCanvasProps) {
         </Suspense>
         {props.net && (
           <RemotePlayers
+            map={map}
             net={props.net}
             bubbles={props.bubbles}
             onOpenProfile={props.onOpenProfile}
           />
         )}
-        <CameraRig />
+        <CameraRig map={map} />
         {map.combat && (
           <>
             <SonicVFX />

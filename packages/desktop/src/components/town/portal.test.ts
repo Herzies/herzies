@@ -10,7 +10,14 @@ import {
   walkedThrough,
 } from "./portal";
 
-const facingSouth: Portal = { key: "0,0", x: 0, z: 0, yaw: 0, to: "home" };
+const facingSouth: Portal = {
+  key: "0,0",
+  x: 0,
+  y: 0,
+  z: 0,
+  yaw: 0,
+  to: "home",
+};
 
 describe("portals", () => {
   it("link home and the training grounds both ways", () => {

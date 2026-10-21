@@ -6,6 +6,7 @@ import { ambient } from "./ambient";
 import {
   BLEND_RADIUS,
   cellCenter,
+  elevation,
   groundBlend,
   inland,
   isOpenWater,
@@ -56,7 +57,7 @@ export function waterGeometry(map: TownMap): THREE.BufferGeometry {
   const step = 1 / SPLIT;
   const HALF = map.size / 2;
   const vertex = (x: number, z: number) => {
-    pos.push(x, SURFACE, z);
+    pos.push(x, elevation(map, x, z) + SURFACE, z);
     shore.push(shoreDistance(map, x, z));
   };
   for (let row = 0; row < map.size; row++) {
@@ -211,7 +212,7 @@ function FishRings({ map }: { map: TownMap }) {
         const [x, z] = spots[Math.floor(rand() * spots.length)];
         mesh.position.set(
           x + (rand() - 0.5) * 0.5,
-          SURFACE + 0.02,
+          elevation(map, x, z) + SURFACE + 0.02,
           z + (rand() - 0.5) * 0.5,
         );
         s.born = t;

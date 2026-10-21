@@ -411,7 +411,7 @@ export function chimneysOf(map: TownMap): [number, number, number][] {
     rand();
     const c = rand() < 0.65 ? chimneyAt(b) : null;
     return c
-      ? [[c.x, c.base + c.h + 0.1, c.z] as [number, number, number]]
+      ? [[c.x, b.y + c.base + c.h + 0.1, c.z] as [number, number, number]]
       : [];
   });
 }
@@ -442,7 +442,7 @@ export function windowLightsOf(map: TownMap): WindowLight[] {
       windowRuns(r, isPart, door, spacingFor(b, door))
         .flat()
         .map((w) => ({
-          at: [w.x, GROUND_FLOOR, w.z] as [number, number, number],
+          at: [w.x, b.y + GROUND_FLOOR, w.z] as [number, number, number],
           out: [Math.sin(w.yaw), Math.cos(w.yaw)] as [number, number],
         })),
     );
@@ -706,7 +706,11 @@ function caveGeometry(b: Building) {
   return { body, glow: [] as THREE.BufferGeometry[] };
 }
 
-/** Every part of a building, by kind, merged. */
+/** The stone a building stands on where the ground falls away under it. */
+const PLINTH = "#8a8278";
+
+/** Every part of a building, by kind, merged, raised to its floor — on a
+ * plinth down to the lowest ground under it, if that's any lower. */
 function buildingGeometry(b: Building) {
   const { body, glow } =
     b.kind === "shop"
@@ -714,6 +718,29 @@ function buildingGeometry(b: Building) {
       : b.kind === "cave"
         ? caveGeometry(b)
         : homeGeometry(b);
+  for (const g of [...body, ...glow]) g.translate(0, b.y, 0);
+  const drop = b.y - b.foot;
+  if (drop > 0.02) {
+    for (const r of b.rects) {
+      const e = bounds(r);
+      // Sunk a little into the ground, and a hair wider than the walls.
+      const h = drop + 0.2;
+      body.push(
+        painted(
+          box(
+            r.w + 0.1,
+            h,
+            r.h + 0.1,
+            (e.x0 + e.x1) / 2,
+            b.y - h / 2,
+            (e.z0 + e.z1) / 2,
+          ),
+          PLINTH,
+          BRICK,
+        ),
+      );
+    }
+  }
   return {
     body: mergeGeometries(body) as THREE.BufferGeometry,
     glow:
@@ -868,16 +895,21 @@ export function Buildings({ map }: { map: TownMap }) {
 
 /** A box collider per building rectangle. */
 export function BuildingColliders({ map }: { map: TownMap }) {
-  const rects = useMemo(() => buildingsOf(map).flatMap((b) => b.rects), [map]);
+  const rects = useMemo(
+    () => buildingsOf(map).flatMap((b) => b.rects.map((r) => ({ ...r, b }))),
+    [map],
+  );
   return (
     <>
       {rects.map((r) => {
         const e = bounds(r);
+        // From the lowest ground under it to the top of its walls.
+        const half = (r.b.y + WALL - r.b.foot) / 2;
         return (
           <CuboidCollider
             key={`h${r.col},${r.row}`}
-            args={[r.w / 2, WALL / 2, r.h / 2]}
-            position={[(e.x0 + e.x1) / 2, WALL / 2, (e.z0 + e.z1) / 2]}
+            args={[r.w / 2, half, r.h / 2]}
+            position={[(e.x0 + e.x1) / 2, r.b.foot + half, (e.z0 + e.z1) / 2]}
           />
         );
       })}

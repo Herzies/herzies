@@ -59,7 +59,7 @@ export function CaveTimer({ map }: { map: TownMap }) {
 
   return (
     <Html
-      position={[mouth.x, SIGN_HEIGHT, mouth.z]}
+      position={[mouth.x, mouth.y + SIGN_HEIGHT, mouth.z]}
       center
       zIndexRange={[19, 0]}
       style={{ pointerEvents: "none" }}

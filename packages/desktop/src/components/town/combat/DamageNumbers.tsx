@@ -276,7 +276,7 @@ export function CombatOverlay() {
         ui.root.append(el);
         ui.meters.set(d.key, el);
       }
-      const p = project(d.x, DUMMY.top + 0.9, d.z);
+      const p = project(d.x, (d.y ?? 0) + DUMMY.top + 0.9, d.z);
       if (!p || idle) {
         el.style.opacity = "0";
         continue;

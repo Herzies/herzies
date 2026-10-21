@@ -5,6 +5,7 @@ import * as THREE from "three";
 import { ambient } from "./ambient";
 import { aimSensitivity } from "./combat/sensitivity";
 import { combat } from "./combat/state";
+import { groundY, type TownMap } from "./map";
 import { townSave, useTownRuntime } from "./runtime";
 
 const { ACTION } = CameraControlsImpl;
@@ -67,12 +68,17 @@ const wave = (t: number, seed: number) =>
  * update at -1 — so the camera never lags a frame behind the player, which
  * is what makes a follow camera jitter.
  */
-export function CameraRig() {
+/** How far above the ground the camera keeps, so a hill behind you never
+ * swallows it. */
+const GROUND_CLEARANCE = 0.8;
+
+export function CameraRig({ map }: { map?: TownMap }) {
   const rt = useTownRuntime();
   const camera = useThree((s) => s.camera);
   const size = useThree((s) => s.size);
   const controls = useRef<CameraControlsImpl>(null);
   const at = useRef(new THREE.Vector3());
+  const eye = useRef(new THREE.Vector3());
   const fighting = useRef(false);
   const time = useRef(0);
   /** 0 walking to 1 in combat, eased. */
@@ -184,6 +190,21 @@ export function CameraRig() {
     const lookHeight =
       LOOK_HEIGHT + (COMBAT.look - LOOK_HEIGHT) * blend.current;
     c.moveTo(at.current.x, at.current.y + lookHeight, at.current.z, false);
+    // Never inside a hill: tip the view up until the camera clears the
+    // ground behind it (its height over what it looks at is
+    // distance · cos(polar)).
+    if (map) {
+      c.getPosition(eye.current);
+      const floor =
+        groundY(map, eye.current.x, eye.current.z) + GROUND_CLEARANCE;
+      if (eye.current.y < floor) {
+        const rise = floor - (at.current.y + lookHeight);
+        const most = Math.acos(
+          THREE.MathUtils.clamp(rise / Math.max(c.distance, 0.01), -1, 1),
+        );
+        if (c.polarAngle > most) c.rotatePolarTo(most, false);
+      }
+    }
     // Where the player is as the camera sees it, for whatever's in the way
     // to turn see-through (see `seeThrough`). The camera last moved a frame
     // ago, which is close enough.

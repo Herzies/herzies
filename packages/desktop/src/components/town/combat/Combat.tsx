@@ -20,9 +20,9 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { useRapier } from "@react-three/rapier";
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
-import type { TownMap } from "../map";
+import { groundY, type TownMap } from "../map";
 import { townNet } from "../net/townNet";
-import { useTownRuntime } from "../runtime";
+import { townSave, useTownRuntime } from "../runtime";
 import {
   sfxCast,
   sfxCharge,
@@ -334,9 +334,11 @@ export function Combat({
         reach = hit.timeOfImpact;
         blocked = true;
       }
-      // The ground has no collider: meet it as a plane.
+      // The ground has no collider: meet it as a plane, level with where
+      // you stand.
       if (dir.y < -1e-4) {
-        const ground = -origin.y / dir.y;
+        const floor = groundY(map, townSave.x, townSave.z);
+        const ground = (floor - origin.y) / dir.y;
         if (ground < reach) {
           reach = ground;
           blocked = true;
@@ -347,7 +349,10 @@ export function Combat({
       let onDummy: DummyState | null = null;
       for (const d of liveDummies) {
         const near = Math.hypot(a.point.x - d.x, a.point.z - d.z);
-        if (near < DUMMY.radius + 0.3 && a.point.y < DUMMY.top + 0.6) {
+        if (
+          near < DUMMY.radius + 0.3 &&
+          a.point.y < (d.y ?? 0) + DUMMY.top + 0.6
+        ) {
           onDummy = d;
           break;
         }

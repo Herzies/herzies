@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { ambient } from "./ambient";
 import type { Champion } from "./champion";
-import { cellCenter, facingAt, objectAt, type TownMap } from "./map";
+import { cellCenter, facingAt, groundY, objectAt, type TownMap } from "./map";
 import { nameOpacity } from "./nameFade";
 import { townSave } from "./runtime";
 
@@ -26,14 +26,20 @@ const capMaterial = new THREE.MeshLambertMaterial({
   flatShading: true,
 });
 
-export function statueSpots(map: TownMap): [number, number, number][] {
-  const spots: [number, number, number][] = [];
+/** Every statue: [x, z, heading, the ground it stands on]. */
+export function statueSpots(map: TownMap): [number, number, number, number][] {
+  const spots: [number, number, number, number][] = [];
   for (let row = 0; row < map.size; row++) {
     for (let col = 0; col < map.size; col++) {
       if (objectAt(map, col, row) !== "@") continue;
       const [x, z] = cellCenter(map, col, row);
       // The way it was turned in the editor, else the middle of town.
-      spots.push([x, z, facingAt(map, col, row) ?? Math.atan2(-x, -z)]);
+      spots.push([
+        x,
+        z,
+        facingAt(map, col, row) ?? Math.atan2(-x, -z),
+        groundY(map, x, z),
+      ]);
     }
   }
   return spots;
@@ -42,10 +48,10 @@ export function statueSpots(map: TownMap): [number, number, number][] {
 /** One statue: the champion in stone on a plinth, facing the middle of
  * town (or the way it was turned), with a plaque. */
 function Statue({
-  at: [x, z, heading],
+  at: [x, z, heading, y],
   champion,
 }: {
-  at: [number, number, number];
+  at: [number, number, number, number];
   champion: Champion;
 }) {
   const lookKey = JSON.stringify(champion.look);
@@ -55,7 +61,7 @@ function Statue({
     h.petrify();
     h.heading = heading;
     return h;
-  }, [lookKey, x, z, heading]);
+  }, [lookKey, x, y, z, heading]);
   useEffect(() => () => herzie.dispose(), [herzie]);
   // Posed once, where it stands (its bands are laid out by world height).
   const posed = useRef<HerzieModel | null>(null);
@@ -73,7 +79,7 @@ function Statue({
   });
 
   return (
-    <group position={[x, 0, z]}>
+    <group position={[x, y, z]}>
       <mesh
         geometry={plinthGeometry}
         material={plinthMaterial}
@@ -133,11 +139,11 @@ export function StatueColliders({ map }: { map: TownMap }) {
   const spots = useMemo(() => statueSpots(map), [map]);
   return (
     <>
-      {spots.map(([x, z]) => (
+      {spots.map(([x, z, , y]) => (
         <CylinderCollider
           key={`s${x},${z}`}
           args={[1, 0.68]}
-          position={[x, 1, z]}
+          position={[x, y + 1, z]}
         />
       ))}
     </>

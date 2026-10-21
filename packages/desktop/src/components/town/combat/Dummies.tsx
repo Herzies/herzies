@@ -160,7 +160,7 @@ const baseMaterial = new THREE.MeshLambertMaterial({
 });
 
 /** One dummy: its own material, so it can flash on its own. */
-function Dummy({ state }: { state: DummyState }) {
+function Dummy({ state, ground }: { state: DummyState; ground: number }) {
   const rock = useRef<THREE.Group>(null);
   const bobble = useRef<THREE.Group>(null);
   const material = useMemo(
@@ -192,7 +192,7 @@ function Dummy({ state }: { state: DummyState }) {
     material.emissiveIntensity = state.flash ** 2 * 0.9;
   });
   return (
-    <group position={[state.x, 0, state.z]} rotation-y={state.yaw}>
+    <group position={[state.x, ground, state.z]} rotation-y={state.yaw}>
       <mesh
         geometry={geometries.base}
         material={baseMaterial}
@@ -242,7 +242,7 @@ export function Dummies({
   return (
     <>
       {dummies.map((d) => (
-        <Dummy key={d.key} state={d} />
+        <Dummy key={d.key} state={d} ground={d.y ?? 0} />
       ))}
     </>
   );
@@ -257,7 +257,7 @@ export function DummyColliders({ map }: { map: TownMap }) {
         <CylinderCollider
           key={`d${d.key}`}
           args={[(DUMMY.top - 0) / 2, DUMMY.radius]}
-          position={[d.x, DUMMY.top / 2, d.z]}
+          position={[d.x, (d.y ?? 0) + DUMMY.top / 2, d.z]}
         />
       ))}
     </>

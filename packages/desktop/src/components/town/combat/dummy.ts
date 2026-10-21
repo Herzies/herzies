@@ -1,4 +1,4 @@
-import { cellCenter, facingAt, objectAt, type TownMap } from "../map";
+import { cellCenter, facingAt, groundY, objectAt, type TownMap } from "../map";
 
 /**
  * Training dummies: what they are to a wave (an upright capsule), how they
@@ -52,6 +52,8 @@ const emptyMeter = (): Meter => ({
 export type DummyState = {
   key: string;
   x: number;
+  /** The ground it stands on (0 if not set). */
+  y?: number;
   z: number;
   /** Which way it faces: forward is (sin, cos). */
   yaw: number;
@@ -100,14 +102,15 @@ export function dummiesOf(map: TownMap): DummyState[] {
     for (let col = 0; col < map.size; col++) {
       if (objectAt(map, col, row) !== "D") continue;
       const [x, z] = cellCenter(map, col, row);
-      out.push(
-        newTarget(
+      out.push({
+        ...newTarget(
           `${col},${row}`,
           x,
           z,
           facingAt(map, col, row) ?? Math.atan2(-x, -z),
         ),
-      );
+        y: groundY(map, x, z),
+      });
     }
   }
   return out;
@@ -210,7 +213,8 @@ export function waveHitsDummy(
   // segment from bottom to top), by the usual segment–segment solution.
   const p1 = a;
   const d1 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
-  const p2 = [d.x, DUMMY.bottom, d.z];
+  const base = d.y ?? 0;
+  const p2 = [d.x, base + DUMMY.bottom, d.z];
   const d2 = [0, DUMMY.top - DUMMY.bottom, 0];
   const r0 = [p1[0] - p2[0], p1[1] - p2[1], p1[2] - p2[2]];
   const dot = (u: number[], v: number[]) =>
@@ -243,7 +247,10 @@ export function waveHitsDummy(
   const hitT = Math.max(0, s - back);
   const at = [p1[0] + d1[0] * hitT, p1[1] + d1[1] * hitT, p1[2] + d1[2] * hitT];
   // Onto the sack's surface, toward where it came from.
-  const axisY = Math.min(DUMMY.top, Math.max(DUMMY.bottom, at[1]));
+  const axisY = Math.min(
+    base + DUMMY.top,
+    Math.max(base + DUMMY.bottom, at[1]),
+  );
   const ox = at[0] - d.x;
   const oz = at[2] - d.z;
   const ol = Math.hypot(ox, oz) || 1;

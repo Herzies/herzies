@@ -6,6 +6,7 @@ import {
   cellCenter,
   EIGHTH,
   facingAt,
+  groundY,
   objectAt,
   type TownMap,
   terrainAt,
@@ -35,11 +36,20 @@ const PATH_REACH = 7;
  * stand back up. */
 export type Seat = {
   x: number;
+  /** The ground under its bench: the seat is SEAT_Y above it. */
+  y: number;
   z: number;
   heading: number;
   stand: { x: number; z: number };
 };
-export type Bench = { x: number; z: number; yaw: number; seats: Seat[] };
+export type Bench = {
+  x: number;
+  /** The ground it stands on. */
+  y: number;
+  z: number;
+  yaw: number;
+  seats: Seat[];
+};
 
 /** Which way a bench faces: the way it was turned in the editor, else
  * toward the nearest path, or the middle of town; squared to the eight
@@ -75,6 +85,7 @@ export function benchesOf(map: TownMap): Bench[] {
       if (objectAt(map, col, row) !== BENCH) continue;
       const [x, z] = cellCenter(map, col, row);
       const yaw = benchFacing(map, col, row);
+      const y = groundY(map, x, z);
       // Forward is (sin, cos); along the bench, at right angles to it.
       const fx = Math.sin(yaw);
       const fz = Math.cos(yaw);
@@ -83,12 +94,13 @@ export function benchesOf(map: TownMap): Bench[] {
         const sz = z - Math.sin(yaw) * SEAT_OFFSET * side + fz * 0.04;
         return {
           x: sx,
+          y,
           z: sz,
           heading: yaw,
           stand: { x: sx + fx * STAND_OFF, z: sz + fz * STAND_OFF },
         };
       });
-      out.push({ x, z, yaw, seats });
+      out.push({ x, y, z, yaw, seats });
     }
   }
   return out;
@@ -193,7 +205,7 @@ export function Benches({ map }: { map: TownMap }) {
     if (benches.length === 0) return null;
     return mergeGeometries(
       benches.map((b) =>
-        BENCH_GEOMETRY.clone().rotateY(b.yaw).translate(b.x, 0, b.z),
+        BENCH_GEOMETRY.clone().rotateY(b.yaw).translate(b.x, b.y, b.z),
       ),
     ) as THREE.BufferGeometry;
   }, [map]);
@@ -218,7 +230,7 @@ export function BenchColliders({ map }: { map: TownMap }) {
         <CuboidCollider
           key={`bench${b.x},${b.z}`}
           args={[LENGTH / 2, 0.5, DEPTH / 2]}
-          position={[b.x, 0.5, b.z]}
+          position={[b.x, b.y + 0.5, b.z]}
           rotation={[0, b.yaw, 0]}
         />
       ))}

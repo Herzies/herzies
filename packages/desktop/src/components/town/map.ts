@@ -19,7 +19,7 @@ export const EDGE_MARGIN = 3;
 export const MAP_SIZE = 86;
 /** Smallest and largest islands the editor makes. */
 export const MIN_MAP_SIZE = 24;
-export const MAX_MAP_SIZE = 120;
+export const MAX_MAP_SIZE = 180;
 
 /** Anything with a grid: a map, or just its size. */
 export type Grid = { size: number };
@@ -101,6 +101,9 @@ export type TownMap = {
   terrain: string[];
   /** Same shape: what stands on each cell ('.' nothing, OFF off-island). */
   objects: string[];
+  /** Same shape: how many levels up each cell's ground is, '0'–'9' (OFF
+   * off-island). The ground rolls smoothly between them. Left out: flat. */
+  heights?: string[];
   /** Where each kind of visitor stands. */
   spots: Record<string, Point>;
   /** Where any other visitor stands, in turn. */
@@ -317,7 +320,7 @@ export function parseMap(json: unknown): TownMap {
   }
   const g = { size };
 
-  const grid = (name: "terrain" | "objects", chars: string) => {
+  const grid = (name: "terrain" | "objects" | "heights", chars: string) => {
     const rows = m[name];
     if (!Array.isArray(rows) || rows.length !== size) {
       errors.push(`${name}: expected ${size} rows`);
@@ -340,6 +343,7 @@ export function parseMap(json: unknown): TownMap {
   };
   grid("terrain", Object.keys(TERRAIN).join(""));
   grid("objects", Object.keys(OBJECTS).join(""));
+  if (m.heights !== undefined) grid("heights", LEVEL_CHARS);
 
   if (errors.length === 0) {
     const map = m as TownMap;
@@ -482,7 +486,9 @@ export function serializeMap(map: TownMap): string {
   "spawn": { "at": ${pt(map.spawn.at)}, "heading": ${map.spawn.heading} },
   "spots": {${spots ? `\n${spots}\n  ` : ""}},${field("spare", "[]", map.spare.map(pt))}${facing}
   "terrain": ${rows(map.terrain)},
-  "objects": ${rows(map.objects)}
+  "objects": ${rows(map.objects)}${
+    hasHills(map) ? `,\n  "heights": ${rows(map.heights as string[])}` : ""
+  }
 }
 `;
 }
@@ -574,10 +580,14 @@ export function objectJitter(
 }
 
 /** A thing's place within its cell (see objectJitter), turned the way it
- * was turned in the editor, if it was. */
+ * was turned in the editor, if it was, and standing on the ground there. */
 export function objectPlace(map: TownMap, col: number, row: number) {
   const place = objectJitter(map, col, row);
-  return { ...place, yaw: facingAt(map, col, row) ?? place.yaw };
+  return {
+    ...place,
+    y: groundY(map, place.x, place.z),
+    yaw: facingAt(map, col, row) ?? place.yaw,
+  };
 }
 
 /** A rectangle of cells. */
@@ -605,6 +615,11 @@ export type Building = {
   seed: number;
   /** Half its island's size: a cell's offset from the world's origin. */
   half: number;
+  /** Where its floor is: the highest ground under it, so no side is
+   * buried in a slope. */
+  y: number;
+  /** The lowest ground under it: a plinth fills in down to there. */
+  foot: number;
 };
 
 /**
@@ -662,12 +677,31 @@ export function buildingsOf(map: TownMap): Building[] {
         rects.push(b);
       }
       const half = size / 2;
+      // The ground at every corner of its cells.
+      let y = Number.NEGATIVE_INFINITY;
+      let foot = Number.POSITIVE_INFINITY;
+      for (const k of cells) {
+        const c = (k % size) - half;
+        const r = Math.floor(k / size) - half;
+        for (const [x, z] of [
+          [c, r],
+          [c + 1, r],
+          [c, r + 1],
+          [c + 1, r + 1],
+        ]) {
+          const e = elevation(map, x, z);
+          y = Math.max(y, e);
+          foot = Math.min(foot, e);
+        }
+      }
       out.push({
         kind: BUILDING_KINDS[ch],
         rects: rects.map((r) => ({ ...r, x0: r.col - half, z0: r.row - half })),
         door: doorOf(map, rects[0], isH),
         seed: key(col, row),
         half,
+        y,
+        foot,
       });
     }
   }
@@ -784,4 +818,116 @@ export function wetAtHeight(level: number): number {
     else hi = mid;
   }
   return (lo + hi) / 2;
+}
+
+/** Elevation: each cell is painted a level, 0 to MAX_LEVEL, and the
+ * ground rolls smoothly between them — a hill, not steps. */
+export const MAX_LEVEL = 9;
+const LEVEL_CHARS = "0123456789";
+/** How high a level raises the ground, in world units. */
+export const LEVEL_HEIGHT = 0.5;
+/** Hills sink back to the island's own height over this far in from its
+ * edge, so the ground meets the rock's rim (and you can't walk to where
+ * it hasn't). */
+export const RIM_FADE = 4;
+
+/** A cell's painted level (0 off the island, or with no heights). */
+export function levelAt(map: TownMap, col: number, row: number): number {
+  const ch = map.heights?.[row]?.[col];
+  if (!ch || ch === OFF) return 0;
+  const n = ch.charCodeAt(0) - 48;
+  return n >= 0 && n <= MAX_LEVEL ? n : 0;
+}
+
+/** Whether any of the map is above level 0. */
+export function hasHills(map: TownMap): boolean {
+  return !!map.heights?.some((row) => /[1-9]/.test(row));
+}
+
+/** The map with a cell set to `level` (making the heights layer if it has
+ * none). Off the island, or already that level: the same map. */
+export function withLevel(
+  map: TownMap,
+  col: number,
+  row: number,
+  level: number,
+): TownMap {
+  if (!onIsland(map, col, row) || levelAt(map, col, row) === level) return map;
+  const heights =
+    map.heights ?? map.terrain.map((r) => r.replace(/[^ ]/g, "0"));
+  const next = heights.slice();
+  const line = next[row];
+  next[row] = line.slice(0, col) + String(level) + line.slice(col + 1);
+  return { ...map, heights: next };
+}
+
+/** Heights at every cell corner, (size + 1)² of them: the average of the
+ * four cells round the corner, eased down near the rim. Between corners
+ * the ground is bilinear — the same as averaging the levels over a square
+ * 2 across round each point, so a step of one level becomes a 2-unit
+ * slope. Cached per map. */
+const cornerCache = new WeakMap<TownMap, Float32Array | null>();
+function cornerHeights(map: TownMap): Float32Array | null {
+  let out = cornerCache.get(map);
+  if (out !== undefined) return out;
+  out = null;
+  if (hasHills(map)) {
+    const n = map.size + 1;
+    const half = map.size / 2;
+    const edge = islandRadius(map);
+    out = new Float32Array(n * n);
+    for (let j = 0; j < n; j++) {
+      for (let i = 0; i < n; i++) {
+        const sum =
+          levelAt(map, i - 1, j - 1) +
+          levelAt(map, i, j - 1) +
+          levelAt(map, i - 1, j) +
+          levelAt(map, i, j);
+        const inFromEdge = edge - Math.hypot(i - half, j - half);
+        const fade = smooth(0, RIM_FADE, inFromEdge);
+        out[j * n + i] = (sum / 4) * LEVEL_HEIGHT * fade;
+      }
+    }
+  }
+  cornerCache.set(map, out);
+  return out;
+}
+
+/** How high the land is at a point, from the painted levels (0 where
+ * it's flat or off the map). */
+export function elevation(map: TownMap, x: number, z: number): number {
+  const h = cornerHeights(map);
+  if (!h) return 0;
+  const n = map.size + 1;
+  const u = Math.min(Math.max(x + map.size / 2, 0), map.size);
+  const v = Math.min(Math.max(z + map.size / 2, 0), map.size);
+  const i = Math.min(Math.floor(u), map.size - 1);
+  const j = Math.min(Math.floor(v), map.size - 1);
+  const fu = u - i;
+  const fv = v - j;
+  const a = h[j * n + i];
+  const b = h[j * n + i + 1];
+  const c = h[(j + 1) * n + i];
+  const d = h[(j + 1) * n + i + 1];
+  return (a * (1 - fu) + b * fu) * (1 - fv) + (c * (1 - fu) + d * fu) * fv;
+}
+
+/** Whether the land is level across a cell (all four corners alike). */
+export function levelCell(map: TownMap, col: number, row: number): boolean {
+  const h = cornerHeights(map);
+  if (!h) return true;
+  const n = map.size + 1;
+  const a = h[row * n + col];
+  return (
+    a === h[row * n + col + 1] &&
+    a === h[(row + 1) * n + col] &&
+    a === h[(row + 1) * n + col + 1]
+  );
+}
+
+/** Where you walk and things stand at a point: the land's height. (Not
+ * the pond beds the ground mesh dips into: nothing stands in water, and a
+ * bridge's deck is at the land's height, over the dip.) */
+export function groundY(map: TownMap, x: number, z: number): number {
+  return elevation(map, x, z);
 }

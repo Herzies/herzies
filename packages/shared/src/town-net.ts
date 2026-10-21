@@ -39,6 +39,8 @@ export const TOWN_MAPS = {
   /** The Tower (an event): a lush island fought floor by floor, alone. Its
    * spawn is the meadow's west end; each new floor puts you back there. */
   tower: { radius: 21, spawn: { x: -12.5, z: 0.5 } },
+  /** The Wilds: a big wild island west of Town, through its portal. */
+  wilds: { radius: 83, spawn: { x: 66.5, z: 0.5 } },
 } as const;
 export type TownMapId = keyof typeof TOWN_MAPS;
 export function isTownMapId(id: string): id is TownMapId {

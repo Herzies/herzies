@@ -27,9 +27,12 @@ const MAX_TURN_SPEED = 5;
  */
 export function Visitor({
   spot,
+  ground = 0,
   onOpen,
 }: {
   spot: TownSpot;
+  /** How high the ground is where they stand. */
+  ground?: number;
   onOpen: (openKey: string) => void;
 }) {
   const { card, at, standing, status } = spot;
@@ -47,10 +50,10 @@ export function Visitor({
       lighting: ambient,
     });
     s.heading = plaza;
-    s.root.position.set(at.x, 0, at.z);
+    s.root.position.set(at.x, ground, at.z);
     s.root.scale.setScalar(size);
     return s;
-  }, [standing, card.type, card.eventId]);
+  }, [standing, card.type, card.eventId, ground]);
   useEffect(() => () => herzie?.dispose(), [herzie]);
 
   // The name fades in as you come near.
@@ -93,13 +96,17 @@ export function Visitor({
       {herzie && (
         <>
           <primitive object={herzie.root} />
-          <RigidBody type="fixed" colliders={false} position={[at.x, 0, at.z]}>
+          <RigidBody
+            type="fixed"
+            colliders={false}
+            position={[at.x, ground, at.z]}
+          >
             <CylinderCollider args={[1, 0.9 * size]} position={[0, 1, 0]} />
           </RigidBody>
         </>
       )}
       {herzie && (
-        <mesh rotation-x={-Math.PI / 2} position={[at.x, 0.03, at.z]}>
+        <mesh rotation-x={-Math.PI / 2} position={[at.x, ground + 0.03, at.z]}>
           <ringGeometry args={[1.05 * size, 1.05 * size + 0.2, 40]} />
           <meshBasicMaterial
             color={theme?.accent ?? "#ffffff"}
@@ -111,7 +118,7 @@ export function Visitor({
       )}
       {herzie && (
         <Html
-          position={[at.x, herzie.height * size + 0.5, at.z]}
+          position={[at.x, ground + herzie.height * size + 0.5, at.z]}
           center
           // Under the app's own overlays (chat, menus), not drei's default
           // of nearly the top of the stack.
@@ -134,7 +141,7 @@ export function Visitor({
       )}
       {herzie && fresh && (
         <Html
-          position={[at.x, herzie.height * size + 1.4, at.z]}
+          position={[at.x, ground + herzie.height * size + 1.4, at.z]}
           center
           zIndexRange={[20, 0]}
         >

@@ -20,7 +20,13 @@ import {
   lanternGlassGeometry,
   NightLights,
 } from "./Lamps";
-import { objectAt, objectPlace, type TownMap, waterRuns } from "./map";
+import {
+  elevation,
+  objectAt,
+  objectPlace,
+  type TownMap,
+  waterRuns,
+} from "./map";
 import { Portals } from "./Portals";
 import { StandColliders, Stands } from "./Stands";
 import { type Champion, StatueColliders, Statues } from "./Statues";
@@ -36,6 +42,8 @@ import {
 
 type Placed = {
   x: number;
+  /** The ground it stands on. */
+  y: number;
   z: number;
   scale: number;
   yaw: number;
@@ -373,7 +381,7 @@ function PartMesh({
         m.compose(
           new THREE.Vector3(
             t.x + (cp.x * cos + cp.z * sin) * t.scale,
-            part.y * s,
+            t.y + part.y * s,
             t.z + (cp.z * cos - cp.x * sin) * t.scale,
           ),
           q,
@@ -471,7 +479,7 @@ export function MapColliders({ map }: { map: TownMap }) {
           <CylinderCollider
             key={`T${t.x},${t.z}`}
             args={[1, TREE_RADIUS[k] * t.scale]}
-            position={[t.x, 1, t.z]}
+            position={[t.x, t.y + 1, t.z]}
           />
         )),
       )}
@@ -482,17 +490,23 @@ export function MapColliders({ map }: { map: TownMap }) {
               <CylinderCollider
                 key={`${k}${t.x},${t.z}`}
                 args={[1, KINDS[k].radius * t.scale]}
-                position={[t.x, 1, t.z]}
+                position={[t.x, t.y + 1, t.z]}
               />
             )),
       )}
-      {runs.map((w) => (
-        <CuboidCollider
-          key={`w${w.x0},${w.z0}`}
-          args={[(w.x1 - w.x0) / 2, 1, (w.z1 - w.z0) / 2]}
-          position={[(w.x0 + w.x1) / 2, 1, (w.z0 + w.z1) / 2]}
-        />
-      ))}
+      {runs.map((w) => {
+        // Tall enough to hold its whole run, if the run is on a slope.
+        const ends = [w.x0, w.x1].map((x) => elevation(map, x, w.z0));
+        const lo = Math.min(...ends);
+        const half = 1 + (Math.max(...ends) - lo) / 2;
+        return (
+          <CuboidCollider
+            key={`w${w.x0},${w.z0}`}
+            args={[(w.x1 - w.x0) / 2, half, (w.z1 - w.z0) / 2]}
+            position={[(w.x0 + w.x1) / 2, lo + half, (w.z0 + w.z1) / 2]}
+          />
+        );
+      })}
       <BuildingColliders map={map} />
       <BenchColliders map={map} />
       <StandColliders map={map} />

@@ -18,7 +18,9 @@ import {
   inland,
   islandRadius,
   isSunk,
+  levelAt,
   MAP_ID,
+  MAX_LEVEL,
   MAX_MAP_SIZE,
   MIN_MAP_SIZE,
   OBJECTS,
@@ -46,8 +48,21 @@ import {
 import { STAND, standFacing } from "./components/town/Stands";
 import TownCanvas, { PIXEL_SCALE } from "./components/town/TownCanvas";
 
-type Layer = "terrain" | "objects";
+type Layer = "terrain" | "objects" | "heights";
 type Paint = { layer: Layer; ch: string; name: string; color: string };
+
+/** Elevation brushes: up or down a level a stroke, to one level, or level
+ * with where the stroke began. On the heights layer a paint's `ch` is "+",
+ * "-", "~" (flatten) or the level's digit. */
+type HeightPaint = Paint & { layer: "heights"; key: string };
+const HEIGHT_PAINTS: HeightPaint[] = [
+  { layer: "heights", ch: "+", name: "Raise", color: "#e8d9a8", key: "h" },
+  { layer: "heights", ch: "-", name: "Lower", color: "#6d6450", key: "j" },
+  { layer: "heights", ch: "=", name: "Set level", color: "#b8a77a", key: "g" },
+  { layer: "heights", ch: "~", name: "Flatten", color: "#8f8a7a", key: "v" },
+];
+const SET_LEVEL = HEIGHT_PAINTS[2];
+const levelChar = (n: number) => String(Math.max(0, Math.min(MAX_LEVEL, n)));
 const PALETTE: Paint[] = [
   ...(["g", ".", "~", "="] as const).map((ch) => ({
     layer: "terrain" as const,
@@ -114,21 +129,38 @@ type MarkerId =
   | { kind: "spare"; i: number }
   | { kind: "spawn" };
 
-/** The grids as rows of chars, to paint into. */
-type Draft = { size: number; terrain: string[][]; objects: string[][] };
+/** The grids as rows of chars, to paint into. `touched`: the cells this
+ * stroke has already raised or lowered (once a stroke each). */
+type Draft = {
+  size: number;
+  terrain: string[][];
+  objects: string[][];
+  heights: string[][];
+  touched: Set<number>;
+};
 const toDraft = (m: TownMap): Draft => ({
   size: m.size,
   terrain: m.terrain.map((r) => [...r]),
   objects: m.objects.map((r) => [...r]),
+  heights: (m.heights ?? m.terrain.map((r) => r.replace(/[^ ]/g, "0"))).map(
+    (r) => [...r],
+  ),
+  touched: new Set(),
 });
-const fromDraft = (m: TownMap, d: Draft): TownMap =>
-  syncPortals(
+const fromDraft = (m: TownMap, d: Draft): TownMap => {
+  const { heights: _, ...rest } = m;
+  const heights = d.heights.map((r) => r.join(""));
+  // No hills: no heights layer at all, so a flat map's file is unchanged.
+  const hills = heights.some((r) => /[1-9]/.test(r));
+  return syncPortals(
     pruneFacing({
-      ...m,
+      ...rest,
       terrain: d.terrain.map((r) => r.join("")),
       objects: d.objects.map((r) => r.join("")),
+      ...(hills ? { heights } : {}),
     }),
   );
+};
 
 /** Links for just the portals there are: a new one leads home (or, from
  * home, to the first other island), a painted-over one is forgotten. */
@@ -174,6 +206,16 @@ function eighthsAt(map: TownMap, col: number, row: number): number {
  * standing in water. */
 function paintCell(d: Draft, col: number, row: number, p: Paint): void {
   if (!onIsland(d, col, row)) return;
+  if (p.layer === "heights") {
+    const now = Number(d.heights[row][col]) || 0;
+    if (p.ch === "+" || p.ch === "-") {
+      const k = row * d.size + col;
+      if (d.touched.has(k)) return;
+      d.touched.add(k);
+      d.heights[row][col] = levelChar(now + (p.ch === "+" ? 1 : -1));
+    } else if (/^[0-9]$/.test(p.ch)) d.heights[row][col] = p.ch;
+    return;
+  }
   if (p.layer === "terrain") {
     if (isSunk(p.ch) && !inland(d, col, row)) return;
     d.terrain[row][col] = p.ch;
@@ -185,9 +227,26 @@ function paintCell(d: Draft, col: number, row: number, p: Paint): void {
 }
 
 function eraser(layer: Layer): Paint {
+  if (layer === "heights")
+    return { layer, ch: "0", name: "Level 0", color: "" };
   return layer === "terrain"
     ? { layer, ch: ".", name: "Grass", color: TERRAIN["."].color }
     : { layer, ch: ".", name: "Clear", color: "" };
+}
+
+/** What a heights brush paints, made concrete for a stroke starting at
+ * (col, row): "Set level" the chosen level, "Flatten" the level there. */
+function strokePaint(
+  p: Paint,
+  d: Draft,
+  col: number,
+  row: number,
+  level: number,
+): Paint {
+  if (p.layer !== "heights") return p;
+  if (p.ch === "=") return { ...p, ch: levelChar(level) };
+  if (p.ch === "~") return { ...p, ch: d.heights[row]?.[col] ?? "0" };
+  return p;
 }
 
 /** Flood-fill the region of same-char cells around (col, row) on the
@@ -257,6 +316,7 @@ function drawMap(
   hover: [number, number] | null,
   brush: number,
   tool: Tool,
+  showLevels: boolean,
 ) {
   const HALF = map.size / 2;
   const size = map.size * zoom;
@@ -362,6 +422,39 @@ function drawMap(
           if (map.objects[r][c + 1] !== o)
             ctx.fillRect((c + 1) * zoom - edge, r * zoom, edge, zoom);
         }
+      }
+    }
+  }
+  // Hills: lighter the higher, a contour where the level changes, and
+  // (painting heights, zoomed in) each cell's level.
+  if (map.heights) {
+    for (let r = 0; r < map.size; r++) {
+      for (let c = 0; c < map.size; c++) {
+        if (map.terrain[r][c] === OFF) continue;
+        const n = levelAt(map, c, r);
+        if (n > 0) {
+          ctx.fillStyle = `rgba(255, 240, 200, ${n * 0.045})`;
+          ctx.fillRect(c * zoom, r * zoom, zoom, zoom);
+        }
+        ctx.fillStyle = "#00000070";
+        const w = Math.max(1, zoom * 0.12);
+        if (c + 1 < map.size && levelAt(map, c + 1, r) !== n)
+          ctx.fillRect((c + 1) * zoom - w / 2, r * zoom, w, zoom);
+        if (r + 1 < map.size && levelAt(map, c, r + 1) !== n)
+          ctx.fillRect(c * zoom, (r + 1) * zoom - w / 2, zoom, w);
+      }
+    }
+  }
+  if (showLevels && zoom >= 12) {
+    ctx.fillStyle = "#ffffffb0";
+    ctx.font = `${Math.floor(zoom * 0.55)}px ui-monospace, monospace`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    for (let r = 0; r < map.size; r++) {
+      for (let c = 0; c < map.size; c++) {
+        if (map.terrain[r][c] === OFF) continue;
+        const n = levelAt(map, c, r);
+        if (n > 0) ctx.fillText(String(n), (c + 0.5) * zoom, (r + 0.5) * zoom);
       }
     }
   }
@@ -531,6 +624,8 @@ function MapEditor() {
   const [paint, setPaint] = useState<Paint>(PALETTE[0]);
   const [tool, setTool] = useState<Tool>("brush");
   const [brush, setBrush] = useState(3);
+  /** The level "Set level" paints. */
+  const [level, setLevel] = useState(1);
   const [zoom, setZoom] = useState(8);
   const [hover, setHover] = useState<[number, number] | null>(null);
   const [rect, setRect] = useState<{
@@ -599,8 +694,18 @@ function MapEditor() {
 
   useEffect(() => {
     const ctx = canvas.current?.getContext("2d");
-    if (ctx) drawMap(ctx, map, zoom, rect, hover, brush, tool);
-  }, [map, zoom, rect, hover, brush, tool]);
+    if (ctx)
+      drawMap(
+        ctx,
+        map,
+        zoom,
+        rect,
+        hover,
+        brush,
+        tool,
+        paint.layer === "heights",
+      );
+  }, [map, zoom, rect, hover, brush, tool, paint]);
 
   // The 3D preview follows the map a beat behind, so painting a stroke
   // doesn't rebuild the world on every cell.
@@ -656,14 +761,20 @@ function MapEditor() {
       stroke.current = { marker: hit.id };
       return;
     }
-    const p = e.button === 2 ? eraser(paint.layer) : paint;
     const cell = cellOf(e);
+    const draft = toDraft(map);
+    const p = strokePaint(
+      e.button === 2 ? eraser(paint.layer) : paint,
+      draft,
+      cell[0],
+      cell[1],
+      level,
+    );
     if (tool === "rect") {
       setRect({ a: cell, b: cell, p });
       return;
     }
     checkpoint();
-    const draft = toDraft(map);
     if (tool === "fill") {
       fill(draft, cell[0], cell[1], p);
       setMap(fromDraft(map, draft));
@@ -826,6 +937,13 @@ function MapEditor() {
         return;
       } else if (KEYS.includes(e.key) && e.key !== "") {
         setPaint(PALETTE[KEYS.indexOf(e.key)]);
+      } else if (HEIGHT_PAINTS.some((h) => h.key === e.key)) {
+        setPaint(HEIGHT_PAINTS.find((h) => h.key === e.key) as HeightPaint);
+      } else if (e.key === "," || e.key === ".") {
+        setLevel((n) =>
+          Math.max(0, Math.min(MAX_LEVEL, n + (e.key === "." ? 1 : -1))),
+        );
+        setPaint(SET_LEVEL);
       } else if (e.key === "[" || e.key === "]") {
         setBrush((b) => {
           const i = BRUSH_SIZES.indexOf(b) + (e.key === "]" ? 1 : -1);
@@ -939,6 +1057,57 @@ function MapEditor() {
               </span>
             </button>
           ))}
+        </div>
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 6,
+            padding: 8,
+            borderBottom: "1px solid #2a2d3a",
+            alignItems: "center",
+          }}
+        >
+          <span style={{ color: "#8b8fa3" }}>elevation</span>
+          {HEIGHT_PAINTS.map((p) => (
+            <button
+              key={p.ch}
+              type="button"
+              style={btn(p === paint)}
+              onClick={() => setPaint(p)}
+            >
+              {p === SET_LEVEL ? `${p.name} ${level}` : p.name}
+              <span style={{ color: "#6b7090", marginLeft: 4 }}>
+                {p.key.toUpperCase()}
+              </span>
+            </button>
+          ))}
+          <span style={{ marginLeft: 6, color: "#8b8fa3" }}>level , .</span>
+          <button
+            type="button"
+            style={btn(false)}
+            onClick={() => {
+              setLevel((n) => Math.max(0, n - 1));
+              setPaint(SET_LEVEL);
+            }}
+          >
+            −
+          </button>
+          <button
+            type="button"
+            style={btn(false)}
+            onClick={() => {
+              setLevel((n) => Math.min(MAX_LEVEL, n + 1));
+              setPaint(SET_LEVEL);
+            }}
+          >
+            +
+          </button>
+          {hover && onIsland(map, hover[0], hover[1]) && (
+            <span style={{ marginLeft: 6, color: "#8b8fa3" }}>
+              here: level {levelAt(map, hover[0], hover[1])}
+            </span>
+          )}
         </div>
         <div
           style={{
