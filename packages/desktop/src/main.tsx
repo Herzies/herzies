@@ -48,6 +48,10 @@ import { useBossResultsShown } from "./components/town/combat/results";
 import { setMySkill } from "./components/town/combat/skills";
 import { combat } from "./components/town/combat/state";
 import { townNet } from "./components/town/net/townNet";
+import {
+  toggleTownExpanded,
+  useTownExpanded,
+} from "./components/town/townWindow";
 import { UpdateAvailableOverlay } from "./components/UpdateAvailableOverlay";
 import { WhatsNewOverlay } from "./components/WhatsNewOverlay";
 import { useOptimisticUnits } from "./hooks/useOptimisticUnits";
@@ -641,6 +645,14 @@ function App() {
   /** The Town's 3D world is on screen: it fills the window, and the chat
    * floats over it. */
   const townWorld = view === "events" && eventsScreen === "world";
+  // The Town's bigger window (its button, or Z): only while the world is on
+  // screen — a visitor's screen or another tab gets the small window back,
+  // and coming back to the world grows it again.
+  const townExpanded = useTownExpanded();
+  const bigWindow = townWorld && townExpanded;
+  useEffect(() => {
+    herzies.setTownExpanded(bigWindow).catch(() => {});
+  }, [bigWindow]);
   // The boss's end screen is up over the Town: the chat steps aside.
   const endScreen = endScreenUp && townWorld;
 
@@ -709,6 +721,10 @@ function App() {
         return;
       }
       const key = event.key.toLowerCase();
+      if (key === "z" && townWorld) {
+        toggleTownExpanded();
+        return;
+      }
       if (key === "c") {
         // Without this the same keydown types a "c" into the freshly focused
         // chat input.
@@ -731,6 +747,7 @@ function App() {
     switchView,
     requestOpenChat,
     chatOnScreen,
+    townWorld,
   ]);
 
   // Where Home's and the Herzie view's stages sit (see useStageAlignment).
@@ -1236,6 +1253,9 @@ function App() {
             townWorld
               ? "absolute inset-x-0 bottom-0 z-40 -mb-1 pb-1"
               : "relative",
+            // In the big window, the dock keeps the small window's width,
+            // bottom left, rather than stretching across the world.
+            bigWindow && "right-auto w-[380px]",
           )}
         >
           {/* The frosting is a layer beside the content, never around it:

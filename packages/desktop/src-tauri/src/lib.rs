@@ -1053,6 +1053,12 @@ fn get_window_pinned() -> bool {
     tray::is_pinned()
 }
 
+/// The Town's bigger window, on or off (see tray::set_town_expanded).
+#[tauri::command]
+fn set_town_expanded(app: tauri::AppHandle, expanded: bool) {
+    tray::set_town_expanded(&app, expanded);
+}
+
 #[tauri::command]
 fn set_ghost_mode(enabled: bool) {
     tray::set_ghost_mode(enabled);
@@ -2728,6 +2734,7 @@ pub fn run() {
             fetch_ongoing_trades,
             set_window_pinned,
             get_window_pinned,
+            set_town_expanded,
             set_ghost_mode,
             get_ghost_mode,
             fetch_active_events,

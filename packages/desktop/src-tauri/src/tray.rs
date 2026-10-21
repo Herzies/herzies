@@ -1,10 +1,10 @@
 use crate::state::SharedState;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 #[cfg(target_os = "macos")]
 use tauri::ActivationPolicy;
 use tauri::{
     tray::{MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager, PhysicalPosition,
+    AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, PhysicalSize,
 };
 
 /// Tracks current connectivity state to avoid redundant updates.
@@ -325,4 +325,71 @@ pub fn on_blur(app: &AppHandle) {
             }
         }
     });
+}
+
+/// The Town's big window, in logical pixels (capped to the screen), and the
+/// app's usual small one.
+const TOWN_SIZE: (f64, f64) = (1024.0, 700.0);
+const SMALL_SIZE: (f64, f64) = (380.0, 520.0);
+/// How far the big window keeps in from the screen's usable edges.
+const SCREEN_MARGIN: f64 = 24.0;
+
+/// Whether the window is at the Town's big size, and where the small one
+/// stood before it grew (to put it back there).
+static TOWN_EXPANDED: AtomicBool = AtomicBool::new(false);
+static SMALL_X: AtomicI64 = AtomicI64::new(0);
+static SMALL_Y: AtomicI64 = AtomicI64::new(0);
+
+/// Grow the window to the Town's big size, or shrink it back. Growing keeps
+/// its top edge, centres it where it was and keeps it all on the screen it's
+/// on; shrinking puts the small window back exactly where it was.
+pub fn set_town_expanded(app: &AppHandle, expanded: bool) {
+    if TOWN_EXPANDED.swap(expanded, Ordering::Relaxed) == expanded {
+        return;
+    }
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    if !expanded {
+        let _ = window.set_size(LogicalSize::new(SMALL_SIZE.0, SMALL_SIZE.1));
+        let _ = window.set_position(PhysicalPosition::new(
+            SMALL_X.load(Ordering::Relaxed) as i32,
+            SMALL_Y.load(Ordering::Relaxed) as i32,
+        ));
+        return;
+    }
+    let (Ok(pos), Ok(size)) = (window.outer_position(), window.outer_size()) else {
+        return;
+    };
+    SMALL_X.store(pos.x as i64, Ordering::Relaxed);
+    SMALL_Y.store(pos.y as i64, Ordering::Relaxed);
+    let scale = window.scale_factor().unwrap_or(1.0);
+    let area = window
+        .current_monitor()
+        .ok()
+        .flatten()
+        .map(|m| *m.work_area());
+    // The big size, in physical pixels, no bigger than the screen allows.
+    let margin = (SCREEN_MARGIN * scale) as i32;
+    let mut w = (TOWN_SIZE.0 * scale) as i32;
+    let mut h = (TOWN_SIZE.1 * scale) as i32;
+    if let Some(a) = &area {
+        w = w
+            .min(a.size.width as i32 - 2 * margin)
+            .max(size.width as i32);
+        h = h
+            .min(a.size.height as i32 - 2 * margin)
+            .max(size.height as i32);
+    }
+    // Same top, same centre, then nudged back onto the screen.
+    let mut x = pos.x + size.width as i32 / 2 - w / 2;
+    let mut y = pos.y;
+    if let Some(a) = &area {
+        let (ax, ay) = (a.position.x, a.position.y);
+        let (aw, ah) = (a.size.width as i32, a.size.height as i32);
+        x = x.clamp(ax + margin, (ax + aw - margin - w).max(ax + margin));
+        y = y.clamp(ay + margin, (ay + ah - margin - h).max(ay + margin));
+    }
+    let _ = window.set_size(PhysicalSize::new(w as u32, h as u32));
+    let _ = window.set_position(PhysicalPosition::new(x, y));
 }

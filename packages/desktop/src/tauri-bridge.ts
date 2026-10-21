@@ -302,6 +302,13 @@ export const herzies = {
   fetchOngoingTrades: () =>
     invoke<{ trades: OngoingTrade[] }>("fetch_ongoing_trades"),
 
+  /** The Town's bigger window, on or off. Nothing outside the app (the
+   * sandboxes run in a plain browser). */
+  setTownExpanded: (expanded: boolean) =>
+    isTauri()
+      ? invoke<void>("set_town_expanded", { expanded })
+      : Promise.resolve(),
+
   /** Keep the window open when it loses focus (not always-on-top). */
   setWindowPinned: (pinned: boolean) => {
     updatePinnedCache(pinned);
