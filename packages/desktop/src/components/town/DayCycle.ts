@@ -36,26 +36,27 @@ type Key = {
 };
 
 /** The day, keyframed by the hour (and wrapping round midnight). Dusk is
- * the look the Town had before it had a clock. By day the sky's fill
+ * the look the Town had before it had a clock. The night is moonlit: a
+ * bright, cool moon, so the world reads after dark, not just the lamps. By day the sky's fill
  * stays well under the sun, cool against its warmth, so the shaded sides
  * of things read as shaded: the shapes, not just the colours. */
 const KEYS: Key[] = [
   {
     hour: 0,
-    sky: ["#02040a", "#0b1226", "#03050b"],
-    hemi: ["#4a5888", "#12152a", 0.3],
-    sun: ["#9fb2ff", 0.55],
-    herzie: "#262c44",
+    sky: ["#060c20", "#1a2a54", "#080e22"],
+    hemi: ["#7d92d0", "#2c3458", 1.0],
+    sun: ["#c4d2ff", 1.6],
+    herzie: "#6a78a8",
     night: 1,
     windows: 1,
     haze: 0,
   },
   {
     hour: 5,
-    sky: ["#040816", "#16223e", "#050914"],
-    hemi: ["#5a6aa0", "#1a1e34", 0.4],
-    sun: ["#a8baff", 0.6],
-    herzie: "#343c5a",
+    sky: ["#0a1228", "#24345e", "#0c1426"],
+    hemi: ["#8494cc", "#30365a", 1.05],
+    sun: ["#c8d4ff", 1.6],
+    herzie: "#707ca8",
     night: 1,
     windows: 0.8,
     haze: 0,
@@ -112,10 +113,10 @@ const KEYS: Key[] = [
   },
   {
     hour: 22,
-    sky: ["#02040a", "#0b1226", "#03050b"],
-    hemi: ["#4a5888", "#12152a", 0.3],
-    sun: ["#9fb2ff", 0.55],
-    herzie: "#262c44",
+    sky: ["#060c20", "#1a2a54", "#080e22"],
+    hemi: ["#7d92d0", "#2c3458", 1.0],
+    sun: ["#c4d2ff", 1.6],
+    herzie: "#6a78a8",
     night: 1,
     windows: 1,
     haze: 0,
