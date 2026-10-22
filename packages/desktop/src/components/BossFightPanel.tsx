@@ -280,7 +280,7 @@ export function BossFightPanel({
                 that makes the board feel like it is about them. */}
             {config.yourRank !== null &&
             !config.topDealers.some((d) => d.rank === config.yourRank) ? (
-              <div className="mt-0.5 flex items-baseline justify-between border-t border-[#333] pt-0.5 text-ui text-cyan">
+              <div className="mt-0.5 flex items-baseline justify-between border-t border-white/15 pt-0.5 text-ui text-cyan">
                 <span>{config.yourRank ? `${config.yourRank}. ` : ""}you</span>
                 <span>
                   {config.yourDamage.toLocaleString()}

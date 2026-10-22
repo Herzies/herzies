@@ -98,7 +98,7 @@ export function Tooltip({
       {pos &&
         createPortal(
           <div
-            className="pointer-events-none fixed z-100 rounded border border-border bg-bg-panel px-1.5 py-0.5 text-left text-ui-sm whitespace-nowrap text-text"
+            className="pointer-events-none fixed z-100 rounded border border-white/15 bg-bg-panel px-1.5 py-0.5 text-left text-ui-sm whitespace-nowrap text-text"
             style={bubbleStyle(pos.x, pos.y)}
           >
             {label}

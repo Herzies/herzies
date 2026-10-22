@@ -248,7 +248,10 @@ function EventsViewImpl({
   onOpenProfile,
   chatOverlay = false,
   chatMessages,
+  windowOpen = false,
 }: {
+  /** An overlay window is open over the Town (see TownWorld). */
+  windowOpen?: boolean;
   /** Music is playing: the player's herzie dances in the Town, standing
    * still. */
   musicPlaying?: boolean;
@@ -349,6 +352,8 @@ function EventsViewImpl({
     ]);
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey || !LEAVE_KEYS.has(e.code)) return;
+      // Escape already closed something on top (lib/escapeStack).
+      if (e.defaultPrevented) return;
       const el = e.target as HTMLElement | null;
       if (
         el &&
@@ -693,6 +698,7 @@ function EventsViewImpl({
         cards={cards}
         musicPlaying={musicPlaying}
         paused={selected !== null || !eventsTabVisible || !focused}
+        windowOpen={windowOpen}
         onOpen={setSelected}
         onOpenProfile={onOpenProfile}
         player={{
@@ -877,7 +883,7 @@ function EventsViewImpl({
             </div>
 
             {previousHunt ? (
-              <div className="mt-4 flex min-h-0 flex-1 flex-col border-t border-border pt-4">
+              <div className="mt-4 flex min-h-0 flex-1 flex-col border-t border-white/15 pt-4">
                 <h2 className="text-ui-lg mb-3 font-bold">
                   Last visit{" "}
                   <span className="text-ui text-text-dim">
@@ -946,7 +952,7 @@ function EventsViewImpl({
                             return (
                               <div
                                 key={`${finder.name}-${finder.claimedAt}`}
-                                className="flex justify-between border-b border-border py-0.5 text-ui last:border-b-0"
+                                className="flex justify-between border-b border-white/15 py-0.5 text-ui last:border-b-0"
                               >
                                 <span className="text-yellow">
                                   {i + 1}. {finder.name}
@@ -1036,7 +1042,7 @@ function EventsViewImpl({
 
         {/* mt-auto sinks the tabs and their list to the bottom, so a short
           list leaves its slack above the tabs instead of under the list. */}
-        <div className="mt-auto flex shrink-0 gap-1 border-b border-border pt-2 text-ui">
+        <div className="mt-auto flex shrink-0 gap-1 border-b border-white/15 pt-2 text-ui">
           <TabButton
             active={huntTab === "clues"}
             onClick={() => setHuntTab("clues")}
@@ -1065,7 +1071,7 @@ function EventsViewImpl({
                   className={cn(
                     "py-1",
                     i < config.hints.length - 1 &&
-                      "mb-1 border-b border-border",
+                      "mb-1 border-b border-white/15",
                   )}
                 >
                   {hint.unlocked ? (
@@ -1110,7 +1116,7 @@ function EventsViewImpl({
                           {hint.text}
                         </span>
                       </div>
-                      <div className="text-ui-sm text-[#444]">
+                      <div className="text-ui-sm text-text-dim">
                         unlocks{" "}
                         {formatCountdown(hint.unlocksAt).replace(" left", "")}
                       </div>
@@ -1129,7 +1135,7 @@ function EventsViewImpl({
                     {config.firstFinders.map((finder, i) => (
                       <div
                         key={`${finder.name}-${finder.claimedAt}`}
-                        className="mb-1 flex justify-between border-b border-border py-1 text-ui last:mb-0 last:border-b-0"
+                        className="mb-1 flex justify-between border-b border-white/15 py-1 text-ui last:mb-0 last:border-b-0"
                       >
                         <span className={i === 0 ? "text-yellow" : "text-text"}>
                           {i + 1}. {finder.name}

@@ -4,7 +4,6 @@ import type {
   EquipSlot,
   GroundSide,
   Herzie,
-  HerzieSkill,
   ItemType,
   ItemUnit,
   ItemUpgradeRejection,
@@ -15,13 +14,11 @@ import {
   applyEquip,
   applyItemUpgrade,
   applySell,
-  BANK_SLOT_COUNT,
   bankCapacity,
   bankTiles,
   bestUnitOf,
   DECK_SLOT_GROUPS,
   DICE_TIERS,
-  getHerzieStatsFromUnits,
   getItem,
   getItemType,
   groundSlot,
@@ -32,26 +29,15 @@ import {
   RARITY_COLORS,
   RARITY_LABELS,
   requiredDiceForLevel,
-  statPoints,
   unitsBestFirst,
 } from "@herzies/shared";
-import {
-  memo,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   pickGroundSide,
   type ToggleEquipResult,
 } from "../hooks/useOptimisticUnits";
-import {
-  useFallbackStageOffset,
-  useHomeStageOffset,
-} from "../hooks/useStageAlignment";
+import { useEscape } from "../lib/escapeStack";
 import { notify } from "../lib/notices";
 import { cn, formatAmount } from "../lib/utils";
 import { herzies } from "../tauri-bridge";
@@ -68,7 +54,6 @@ import {
 } from "./DeckOverlay";
 import { DeckSlotPicker, type PickerOption } from "./DeckSlotPicker";
 import { DiceUpgradeOverlay } from "./DiceUpgradeOverlay";
-import { HERZIE_STAGE_HEIGHT } from "./HerzieWithSky";
 import { type Flight, ItemFlights } from "./ItemFlight";
 import ItemInspectOverlay, { CompactItemPreview } from "./ItemInspectOverlay";
 import { DuplicatesIcon } from "./icons/DuplicatesIcon";
@@ -76,8 +61,6 @@ import { SortIcon } from "./icons/SortIcon";
 import { List } from "./List";
 import { NumberTicker } from "./NumberTicker";
 import { PromptOverlay } from "./PromptOverlay";
-import { SkillsPanel } from "./SkillsPanel";
-import { StatsTab } from "./StatsTab";
 import { TabButton } from "./TabButton";
 import { HoverPreview, Tooltip } from "./Tooltip";
 import { eat } from "./town/eat";
@@ -180,18 +163,14 @@ function SellBox({
     const handlePointerDown = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose();
     };
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
     window.addEventListener("mousedown", handlePointerDown);
-    window.addEventListener("keydown", handleKey);
     window.addEventListener("scroll", onClose, true);
     return () => {
       window.removeEventListener("mousedown", handlePointerDown);
-      window.removeEventListener("keydown", handleKey);
       window.removeEventListener("scroll", onClose, true);
     };
   }, [onClose]);
+  useEscape(onClose);
 
   if (!item) return null;
 
@@ -206,7 +185,7 @@ function SellBox({
   return createPortal(
     <div
       ref={ref}
-      className="fixed z-150 flex w-[180px] flex-col gap-2 border border-border bg-bg-panel p-2 shadow-lg"
+      className="fixed z-150 flex w-[180px] flex-col gap-2 border border-white/15 bg-bg-panel p-2 shadow-lg"
       style={{ left, top }}
     >
       <div className="flex items-center gap-1.5 text-ui-sm text-text">
@@ -412,28 +391,24 @@ const SLOT_INDEX_ATTR = "data-slot-index";
  * returning onto an existing stack finds the stack). */
 const TILE_UNITS_ATTR = "data-tile-units";
 
-/** Wraps the herzie and the deck laid over it: dropping a card anywhere in here
- * places it (see handleDeckDrop). */
-/** Marks where a dropped card equips. main.tsx puts it on the shared herzie
- * too, which sits over this view's stage but outside it in the DOM. */
-export const HERZIE_ZONE_ATTR = "data-herzie-zone";
+/** Marks where a dropped card equips: the deck window's panel (see
+ * handleDeckDrop). */
+const HERZIE_ZONE_ATTR = "data-herzie-zone";
 
 /** Where a flight lands (see ItemFlight): a worn copy's deck box, or the bag
  * tile holding a copy — or, when that panel isn't the one showing, its tab. */
 const toDeck = (unitId: string) => `[${DECK_UNIT_ATTR}="${unitId}"]`;
 const toBank = (unitId: string) => `[${TILE_UNITS_ATTR}~="${unitId}"]`;
 
-/** The Herzie view's panels under the herzie. Stats shows once the server
- * knows stat points, Skills once there's a class. */
-type Panel = "bag" | "deck" | "stats" | "skills";
-const PANEL_LABELS: Record<Panel, string> = {
-  deck: "Deck",
-  bag: "Bag",
-  stats: "Stats",
-  skills: "Skills",
-};
-const PANEL_TAB_ATTR = "data-panel-tab";
-const toTab = (panel: Panel) => `[${PANEL_TAB_ATTR}="${panel}"]`;
+/** The window's two tabs. */
+type Panel = "bag" | "deck";
+const PANEL_LABELS: Record<Panel, string> = { deck: "Deck", bag: "Bag" };
+/** On the menu's Deck and Bag items (TabBar), and on the Menu tab itself
+ * while its tray is shut: where a card flies while the window is shut.
+ * Space-separated, as the Menu tab stands in for both. */
+export const PANEL_TAB_ATTR = "data-panel-tab";
+/** On the window's own Deck and Bag tabs. */
+const WINDOW_TAB_ATTR = "data-window-tab";
 
 /** The middle of an element, for a flight to take off from, and the size of
  * the icon in it (bag and deck icons differ). */
@@ -556,9 +531,9 @@ function ItemGridCell({
           // content size instead of filling the grid cell — which also left
           // the divider line only wrapping that shrunk square instead of
           // the full cell, and the icon sitting off-centre.
-          "relative flex h-full w-full cursor-grab items-center justify-center bg-bg-panel/50 transition-colors hover:bg-white/5 active:cursor-grabbing",
-          !isLastCol && "border-r border-border",
-          !isLastRow && "border-b border-border",
+          "relative flex h-full w-full cursor-grab items-center justify-center transition-colors hover:bg-white/5 active:cursor-grabbing",
+          !isLastCol && "border-r border-white/15",
+          !isLastRow && "border-b border-white/15",
           dragVisualClasses(isDragging, isDragOver),
         )}
       >
@@ -628,9 +603,9 @@ function EmptyGridCell({
     <div
       {...{ [SLOT_INDEX_ATTR]: index }}
       className={cn(
-        "h-full w-full bg-bg-panel/50",
-        !isLastCol && "border-r border-border",
-        !isLastRow && "border-b border-border",
+        "h-full w-full",
+        !isLastCol && "border-r border-white/15",
+        !isLastRow && "border-b border-white/15",
         dragVisualClasses(false, isDragOver),
       )}
     />
@@ -671,10 +646,11 @@ function InventoryViewImpl({
   onToggleEquip,
   onPredictUnits,
   bankExpansions,
-  active = true,
-  rootKey = 0,
-  openPanel = "deck",
-  skills = [],
+  slot,
+  open,
+  panel,
+  onPanelChange,
+  onTabLanded,
 }: {
   herzie: Herzie;
   initialItem?: string | null;
@@ -703,15 +679,15 @@ function InventoryViewImpl({
   ) => void;
   /** Inventory Expansions bought — sets how many slots the grid has. */
   bankExpansions: number;
-  /** False while another tab is shown — pauses the 3D render. */
-  active?: boolean;
-  /** Bumped when the Herzie tab is re-selected while shown: back to
-   * `openPanel`. */
-  rootKey?: number;
-  /** The panel it opens on, and goes back to when re-selected. */
-  openPanel?: Panel;
-  /** The class skills, for the Skills tab. */
-  skills?: readonly HerzieSkill[];
+  /** Where the deck and the bag draw: the inside of their window. */
+  slot: HTMLElement | null;
+  /** The window is open (not just fading out). */
+  open: boolean;
+  /** Its tab showing. */
+  panel: Panel;
+  onPanelChange: (panel: Panel) => void;
+  /** A card landed on the menu's Deck or Bag item (or the Menu tab). */
+  onTabLanded?: (panel: Panel) => void;
 }) {
   const capacity = bankCapacity(bankExpansions);
   const [currency, setCurrency] = useState(cachedCurrency || herzie.currency);
@@ -853,43 +829,36 @@ function InventoryViewImpl({
   const endFlight = (id: number) =>
     setFlights((prev) => prev.filter((f) => f.id !== id));
 
-  /** Which panel shows under the herzie. Cards headed for the other one fly
-   * to its tab, which bumps as they land, so it's clear where they went. */
-  const [panel, setPanel] = useState<Panel>(openPanel);
-  // Opens on `openPanel` (the deck, or the bag by its shortcut), and goes
-  // back to it when the tab is pressed again. Before paint, so coming back
-  // never flashes the other one first.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: rootKey re-opens it
-  useLayoutEffect(() => {
-    if (active) setPanel(openPanel);
-  }, [active, openPanel, rootKey]);
+  /** A flight reaching its spot (ItemFlights' onDone), unlike endFlight,
+   * which also drops refused ones: landing on a tab bumps it. */
+  /** Where a card headed for `tab` flies when that tab isn't showing: the
+   * window's tab, or the menu while the window is shut. */
+  const toTab = (tab: Panel) =>
+    open ? `[${WINDOW_TAB_ATTR}="${tab}"]` : `[${PANEL_TAB_ATTR}~="${tab}"]`;
   const [tabBumps, setTabBumps] = useState<Record<Panel, number>>({
     bag: 0,
     deck: 0,
-    stats: 0,
-    skills: 0,
   });
   /** Tabs mid-bump. Cleared when the animation ends: a class left on would
-   * replay it every time the view is shown again (display:none → flex
-   * restarts CSS animations). */
+   * replay it every time the window is shown again. */
   const [bumping, setBumping] = useState<ReadonlySet<Panel>>(new Set());
-  /** A flight reaching its spot (ItemFlights' onDone), unlike endFlight,
-   * which also drops refused ones: landing on a tab bumps it. */
   const landFlight = (id: number) => {
     const target = flights.find((f) => f.id === id)?.target;
     for (const tab of ["bag", "deck"] as const) {
-      if (target === toTab(tab)) {
+      if (target === `[${WINDOW_TAB_ATTR}="${tab}"]`) {
         setTabBumps((b) => ({ ...b, [tab]: b[tab] + 1 }));
         setBumping((current) => new Set(current).add(tab));
+      } else if (target === `[${PANEL_TAB_ATTR}~="${tab}"]`) {
+        onTabLanded?.(tab);
       }
     }
     endFlight(id);
   };
-  /** Where a copy shows: its spot when that panel is open, else the tab. */
+  /** Where a copy shows: its spot when that window is open, else the menu. */
   const deckSpot = (unitId: string) =>
-    panel === "deck" ? toDeck(unitId) : toTab("deck");
+    open && panel === "deck" ? toDeck(unitId) : toTab("deck");
   const bagSpot = (unitId: string) =>
-    panel === "bag" ? toBank(unitId) : toTab("bag");
+    open && panel === "bag" ? toBank(unitId) : toTab("bag");
 
   // What the grid shows: one tile per unworn copy, a stack folded into one.
   // Held behind `units`, which is identity-stable while its content is, so this
@@ -1644,6 +1613,7 @@ function InventoryViewImpl({
   // were left unplaced, and only a fresh reconcile seats them in the new slots.
   // (The effect that pads the arrangement to the new capacity is declared
   // earlier, so it has already run by the time this one reconciles.)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: capacity re-seats tiles that didn't fit (see above)
   useEffect(() => {
     const keys = tileKeysJoined ? tileKeysJoined.split(",") : [];
     const preferred = preferredSlotRef.current;
@@ -1693,12 +1663,6 @@ function InventoryViewImpl({
   /** A deck card is being carried over the bag, where letting go returns it. */
   const returningOverBag = draggingOutUnitId !== null && !dragVisual?.inZone;
 
-  // Read off the copies, so each worn one counts at its own upgrade level.
-  const stats = getHerzieStatsFromUnits(units);
-  const unspentPoints = herzie?.statPoints
-    ? statPoints(herzie.level, herzie.statPoints).unspent
-    : 0;
-
   // The overlay opens on an item id (a deep link from a notification), so it
   // shows the copy that id most plausibly means: the one worn, else the best.
   const inspected = inspectItem ? getItem(inspectItem) : null;
@@ -1724,287 +1688,238 @@ function InventoryViewImpl({
           : null
       : null;
 
-  // The stage sits where Home's does (see useStageAlignment), or straight
-  // under the header until Home has been measured.
-  const homeStageOffset = useHomeStageOffset();
-  const headerRef = useRef<HTMLDivElement>(null);
-  const [headerBottom, setHeaderBottom] = useState(0);
-  useLayoutEffect(() => {
-    const header = headerRef.current;
-    // + the header's mb-1.
-    if (header) setHeaderBottom(header.offsetTop + header.offsetHeight + 4);
-  }, []);
-  const stageTop = homeStageOffset ?? headerBottom;
-  useFallbackStageOffset(headerBottom, active);
-
   return (
-    <div className="relative flex h-full flex-col">
-      <div
-        ref={headerRef}
-        className="z-50 mb-1 flex min-h-5 items-center justify-between"
-      >
-        {/* The same markup as Home's header (whose name sits in a Tooltip's
-            inline-flex wrapper) in the same 20px row (Home's comes from its
-            h-5 buttons), so the name doesn't shift between the two views.
-            A whole-pixel row also keeps the pixel-art icons below it on
-            whole pixels — a half-pixel offset snaps their rows unevenly. */}
-        <h1 className="text-ui-lg font-bold text-cyan">
-          <span className="inline-flex">
-            <span className="font-bold text-cyan">{herzie.name}</span>
-          </span>
-          <span className="ml-2 text-[10px] font-normal text-text-dim">
-            Lv. {herzie.level}
-          </span>
-        </h1>
-        <Tooltip label={`${formatAmount(currency)} herzie coins`}>
-          <div className="text-ui text-cyan">
-            <Coin amount={currency} animate />
-          </div>
-        </Tooltip>
-      </div>
-
-      {/* The stage: HERZIE_STAGE_HEIGHT at the same offset as Home's, where
-          main.tsx draws the herzie (one renderer shared with Home, zoomed out
-          a little here). Absolute, behind the deck and bag: the bag keeps
-          square cells by taking a fixed height, and the deck may overlap the
-          stage's floor. It and the deck both take a dropped card. */}
-      <div
-        {...{ [HERZIE_ZONE_ATTR]: "" }}
-        className="absolute inset-x-0"
-        style={{ top: stageTop, height: HERZIE_STAGE_HEIGHT }}
-      ></div>
-
-      {/* Whatever the deck and bag don't use. */}
-      <div className="min-h-0 flex-1" />
-
-      {/* The bag and the deck, one at a time, over the stage's floor. */}
-      <div className="z-10 flex shrink-0 flex-col">
-        {/* The bag's two buttons live in one wrapper so they read as a pair,
-            and the wrapper's `ml-auto` pushes them right. */}
-        {/* h-6: a whole-pixel row height, for the same reason as the
-            header's leading-5 — the deck's and bag's icons sit below it. */}
-        <div className="mb-0.5 flex h-6 items-center border-b border-border">
-          {(
-            [
-              "deck",
-              "bag",
-              ...(herzie.statPoints ? (["stats"] as const) : []),
-              ...(herzie.class ? (["skills"] as const) : []),
-            ] as Panel[]
-          ).map((tab) => (
-            <TabButton
-              key={tab}
-              active={panel === tab}
-              onClick={() => setPanel(tab)}
-            >
-              {/* Re-keyed on each bump so the animation restarts. */}
-              <span
-                key={tabBumps[tab]}
-                {...{ [PANEL_TAB_ATTR]: tab }}
+    <>
+      {slot &&
+        createPortal(
+          // The container query: bag rows are sized off the window's width,
+          // so the cells are square on the very first frame.
+          <div className="@container flex h-full min-h-0 flex-col">
+            {/* h-6: a whole-pixel row, so the pixel-art icons below it sit
+                on whole pixels. */}
+            <div className="mb-1 flex h-6 items-center border-b border-white/15">
+              {(["deck", "bag"] as const).map((tab) => (
+                <TabButton
+                  key={tab}
+                  active={panel === tab}
+                  onClick={() => onPanelChange(tab)}
+                >
+                  {/* Re-keyed on each bump so the animation restarts. */}
+                  <span
+                    key={tabBumps[tab]}
+                    {...{ [WINDOW_TAB_ATTR]: tab }}
+                    className={cn(
+                      "inline-block",
+                      bumping.has(tab) && "animate-tab-bump",
+                    )}
+                    onAnimationEnd={() =>
+                      setBumping((current) => {
+                        const next = new Set(current);
+                        next.delete(tab);
+                        return next;
+                      })
+                    }
+                  >
+                    {PANEL_LABELS[tab]}
+                  </span>
+                </TabButton>
+              ))}
+              <div
                 className={cn(
-                  "inline-block",
-                  bumping.has(tab) && "animate-tab-bump",
+                  "ml-auto flex items-center",
+                  panel !== "bag" && "invisible",
                 )}
-                onAnimationEnd={() =>
-                  setBumping((current) => {
-                    const next = new Set(current);
-                    next.delete(tab);
-                    return next;
-                  })
-                }
               >
-                {PANEL_LABELS[tab]}
-              </span>
-              {tab === "stats" && unspentPoints > 0 && (
-                <span className="ml-0.5 align-top text-[8px] leading-none font-bold text-yellow">
-                  +{unspentPoints}
-                </span>
-              )}
-            </TabButton>
-          ))}
-          <div
-            className={cn(
-              "ml-auto flex items-center",
-              panel !== "bag" && "invisible",
-            )}
-          >
-            <Tooltip
-              label={
-                duplicatesCount > 0
-                  ? `Sell ${duplicatesCount} duplicate${duplicatesCount === 1 ? "" : "s"}, keeping the best of each`
-                  : "No duplicates to sell"
-              }
-            >
-              <button
-                type="button"
-                aria-label="Sell duplicates"
-                disabled={duplicatesCount === 0}
-                onClick={() => setSellDupesConfirm(true)}
-                className="flex cursor-pointer items-center border-none bg-transparent px-1.5 py-0.5 text-text-dim hover:text-cyan disabled:cursor-default disabled:opacity-40 disabled:hover:text-text-dim"
-              >
-                <DuplicatesIcon className="h-3.5 w-3.5" />
-              </button>
-            </Tooltip>
-            <Tooltip label="Quick sort">
-              <button
-                type="button"
-                aria-label="Quick sort"
-                onClick={() =>
-                  setSlotOrder(sortSlotsByType(tiles, slotOrder.length))
-                }
-                className="flex cursor-pointer items-center border-none bg-transparent px-1.5 py-0.5 text-text-dim hover:text-cyan"
-              >
-                {/* 14px rather than the item pips' 16px: these are chrome
-                    beside the bar's label, not content, and read better a
-                    little smaller. A 16x16 PixelIcon only lands on whole
-                    device pixels at 16px (or a multiple), so both glyphs are
-                    drawn at 2px stroke weight to survive the fractional
-                    scale — a 1px feature here would go visibly soft. */}
-                <SortIcon className="h-3.5 w-3.5" />
-              </button>
-            </Tooltip>
-          </div>
-        </div>
-
-        {/* One size for both panels — three rows of square bag cells — so
-            switching tabs never moves anything. */}
-        <div
-          className="shrink-0"
-          style={{ aspectRatio: `${GRID_COLS} / ${VISIBLE_ROWS}` }}
-        >
-          {panel === "stats" && herzie.statPoints ? (
-            <div className="h-full overflow-y-auto overscroll-contain">
-              <StatsTab
-                stats={stats}
-                level={herzie.level}
-                points={herzie.statPoints}
-                onLog={onLog}
-              />
-            </div>
-          ) : panel === "skills" && herzie.class ? (
-            <div className="h-full overflow-y-auto overscroll-contain">
-              <SkillsPanel herzieClass={herzie.class} skills={skills} />
-            </div>
-          ) : panel === "deck" ? (
-            // Scrolls when the deck's sections outgrow the panel (the
-            // Instrument row, once there's a class).
-            <div
-              {...{ [HERZIE_ZONE_ATTR]: "" }}
-              className="relative h-full overflow-y-auto overscroll-contain"
-            >
-              <DeckOverlay
-                showInstrument={
-                  !!herzie.class || !!equipped.main_hand || !!equipped.off_hand
-                }
-                equipped={equipped}
-                units={units}
-                flyingUnitIds={flyingUnitIds}
-                drag={deckDrag}
-                draggingUnitId={draggingOutUnitId}
-                onUnequip={(unitId) => {
-                  // Dragged out and dropped straight back on its own box.
-                  if (suppressClickRef.current) {
-                    suppressClickRef.current = false;
-                    return;
+                <Tooltip
+                  label={
+                    duplicatesCount > 0
+                      ? `Sell ${duplicatesCount} duplicate${duplicatesCount === 1 ? "" : "s"}, keeping the best of each`
+                      : "No duplicates to sell"
                   }
-                  handleEquip(unitId);
-                }}
-                onInspectRequest={(unitId) => {
-                  if (suppressClickRef.current) {
-                    suppressClickRef.current = false;
-                    return;
+                >
+                  <button
+                    type="button"
+                    aria-label="Sell duplicates"
+                    disabled={duplicatesCount === 0}
+                    onClick={() => setSellDupesConfirm(true)}
+                    className="flex cursor-pointer items-center border-none bg-transparent px-1.5 py-0.5 text-text-dim hover:text-cyan disabled:cursor-default disabled:opacity-40 disabled:hover:text-text-dim"
+                  >
+                    <DuplicatesIcon className="h-3.5 w-3.5" />
+                  </button>
+                </Tooltip>
+                <Tooltip label="Quick sort">
+                  <button
+                    type="button"
+                    aria-label="Quick sort"
+                    onClick={() =>
+                      setSlotOrder(sortSlotsByType(tiles, slotOrder.length))
+                    }
+                    className="flex cursor-pointer items-center border-none bg-transparent px-1.5 py-0.5 text-text-dim hover:text-cyan"
+                  >
+                    {/* 14px rather than the item pips' 16px: these are chrome
+                        beside the bar's label, not content, and read better a
+                        little smaller. A 16x16 PixelIcon only lands on whole
+                        device pixels at 16px (or a multiple), so both glyphs are
+                        drawn at 2px stroke weight to survive the fractional
+                        scale — a 1px feature here would go visibly soft. */}
+                    <SortIcon className="h-3.5 w-3.5" />
+                  </button>
+                </Tooltip>
+              </div>
+            </div>
+            {/* Both tabs in one grid cell, the hidden one just invisible: the
+                window takes the taller of the two (three bag rows, or the
+                whole deck), so switching tabs never resizes it. */}
+            <div className="grid min-h-0 flex-1">
+              {/* Scrolls only if the window can't fit it. A card dropped
+                  anywhere in here is placed. */}
+              <div
+                {...{ [HERZIE_ZONE_ATTR]: "" }}
+                className={cn(
+                  "relative col-start-1 row-start-1 min-h-0 overflow-y-auto overscroll-contain",
+                  panel !== "deck" && "invisible",
+                )}
+              >
+                <DeckOverlay
+                  showInstrument={
+                    !!herzie.class ||
+                    !!equipped.main_hand ||
+                    !!equipped.off_hand
                   }
-                  window.getSelection()?.removeAllRanges(); // Shift+click extends one
-                  const unit = units.find((u) => u.id === unitId);
-                  if (unit) openInspect(unit.itemId, unit.id);
-                }}
-                onDragStart={handleDeckPointerDown}
-                onMenuRequest={(unitId, x, y) => setDeckMenu({ unitId, x, y })}
-                onPlaceRequest={setSlotPicker}
-              />
-            </div>
-          ) : loading ? (
-            <div className="pt-5 text-center text-ui text-text-dim">
-              Loading...
-            </div>
-          ) : (
-            // Three rows fill the panel; past that (each Inventory Expansion adds
-            // two rows) it scrolls. No fade hints at the edges, and scrollbars
-            // are hidden app-wide.
-            <div
-              ref={gridViewportRef}
-              className={cn(
-                "h-full",
-                returningOverBag && "ring-1 ring-inset ring-cyan/50",
-              )}
-            >
-              {/* Each row is a third of the visible height, in CSS, so the rows
-                are right on the very first frame — no measuring, and nothing to
-                jump when the view is shown. The content is `rows / 3` viewports
-                tall (a percentage of the scroller) and the grid splits that
-                evenly, which is what makes each row a third. */}
-              <List
-                className="h-full"
-                fades={false}
-                contentStyle={{
-                  height: `${(gridRows * 100) / VISIBLE_ROWS}%`,
-                }}
+                  equipped={equipped}
+                  units={units}
+                  flyingUnitIds={flyingUnitIds}
+                  drag={deckDrag}
+                  draggingUnitId={draggingOutUnitId}
+                  onUnequip={(unitId) => {
+                    // Dragged out and dropped straight back on its own box.
+                    if (suppressClickRef.current) {
+                      suppressClickRef.current = false;
+                      return;
+                    }
+                    handleEquip(unitId);
+                  }}
+                  onInspectRequest={(unitId) => {
+                    if (suppressClickRef.current) {
+                      suppressClickRef.current = false;
+                      return;
+                    }
+                    window.getSelection()?.removeAllRanges(); // Shift+click extends one
+                    const unit = units.find((u) => u.id === unitId);
+                    if (unit) openInspect(unit.itemId, unit.id);
+                  }}
+                  onDragStart={handleDeckPointerDown}
+                  onMenuRequest={(unitId, x, y) =>
+                    setDeckMenu({ unitId, x, y })
+                  }
+                  onPlaceRequest={setSlotPicker}
+                />
+              </div>
+              <div
+                className={cn(
+                  "col-start-1 row-start-1 flex min-h-0 flex-col",
+                  panel !== "bag" && "invisible",
+                )}
               >
                 <div
-                  className="grid h-full grid-cols-6"
-                  style={{ gridAutoRows: `${100 / gridRows}%` }}
+                  className="relative min-h-0 flex-1"
+                  style={{
+                    minHeight: `calc(100cqw * ${VISIBLE_ROWS} / ${GRID_COLS})`,
+                  }}
                 >
-                  {slotOrder.map((key, i) => {
-                    const isLastCol = i % GRID_COLS === GRID_COLS - 1;
-                    const isLastRow = i >= slotOrder.length - GRID_COLS;
-                    const tile = key ? tileByKey.get(key) : undefined;
-                    if (!tile) {
-                      return (
-                        <EmptyGridCell
-                          key={`slot-${i}`}
-                          index={i}
-                          isLastCol={isLastCol}
-                          isLastRow={isLastRow}
-                          isDragOver={dragVisual?.overIndex === i}
-                        />
-                      );
-                    }
-                    return (
-                      <ItemGridCell
-                        key={`slot-${i}`}
-                        index={i}
-                        itemId={tile.itemId}
-                        unitIds={tile.unitIds}
-                        level={tile.upgradeLevel}
-                        isLastCol={isLastCol}
-                        isLastRow={isLastRow}
-                        isDragging={
-                          dragSource?.kind === "bag" && dragSource.index === i
-                        }
-                        // A card from the deck can only be dropped on an empty
-                        // slot — dropped on a full one it finds its own.
-                        isDragOver={
-                          dragSource?.kind === "bag" &&
-                          dragVisual?.overIndex === i
-                        }
-                        flying={tile.unitIds.some((id) =>
-                          flyingUnitIds.has(id),
-                        )}
-                        equipped={equipped}
-                        onPlace={(inspect) => handleGridClick(tile, inspect)}
-                        onMenuRequest={(x, y) =>
-                          setTileMenu({ tileKey: tile.key, x, y })
-                        }
-                        onDragPointerDown={handleDragPointerDown}
-                      />
-                    );
-                  })}
+                  {loading ? (
+                    <div className="pt-5 text-center text-ui text-text-dim">
+                      Loading...
+                    </div>
+                  ) : (
+                    // Three rows to begin with; past what fits (each Inventory
+                    // Expansion adds two rows) it scrolls.
+                    <div
+                      ref={gridViewportRef}
+                      className={cn(
+                        "absolute inset-0",
+                        returningOverBag && "ring-1 ring-inset ring-cyan/50",
+                      )}
+                    >
+                      {/* Each row is a sixth of the width (container units), in CSS,
+                    so the cells are square on the very first frame — no
+                    measuring, and nothing to jump when the view is shown. The
+                    grid splits that height evenly between its rows. */}
+                      <List
+                        className="h-full"
+                        contentStyle={{
+                          height: `calc(100cqw * ${gridRows} / ${GRID_COLS})`,
+                        }}
+                      >
+                        <div
+                          className="grid h-full grid-cols-6"
+                          style={{ gridAutoRows: `${100 / gridRows}%` }}
+                        >
+                          {slotOrder.map((key, i) => {
+                            const isLastCol = i % GRID_COLS === GRID_COLS - 1;
+                            const isLastRow = i >= slotOrder.length - GRID_COLS;
+                            const tile = key ? tileByKey.get(key) : undefined;
+                            if (!tile) {
+                              return (
+                                <EmptyGridCell
+                                  key={`slot-${i}`}
+                                  index={i}
+                                  isLastCol={isLastCol}
+                                  isLastRow={isLastRow}
+                                  isDragOver={dragVisual?.overIndex === i}
+                                />
+                              );
+                            }
+                            return (
+                              <ItemGridCell
+                                key={`slot-${i}`}
+                                index={i}
+                                itemId={tile.itemId}
+                                unitIds={tile.unitIds}
+                                level={tile.upgradeLevel}
+                                isLastCol={isLastCol}
+                                isLastRow={isLastRow}
+                                isDragging={
+                                  dragSource?.kind === "bag" &&
+                                  dragSource.index === i
+                                }
+                                // A card from the deck can only be dropped on an empty
+                                // slot — dropped on a full one it finds its own.
+                                isDragOver={
+                                  dragSource?.kind === "bag" &&
+                                  dragVisual?.overIndex === i
+                                }
+                                flying={tile.unitIds.some((id) =>
+                                  flyingUnitIds.has(id),
+                                )}
+                                equipped={equipped}
+                                onPlace={(inspect) =>
+                                  handleGridClick(tile, inspect)
+                                }
+                                onMenuRequest={(x, y) =>
+                                  setTileMenu({ tileKey: tile.key, x, y })
+                                }
+                                onDragPointerDown={handleDragPointerDown}
+                              />
+                            );
+                          })}
+                        </div>
+                      </List>
+                    </div>
+                  )}
                 </div>
-              </List>
+                <div className="mt-2 flex items-center justify-end border-t border-white/15 pt-2">
+                  <Tooltip label={`${formatAmount(currency)} herzie coins`}>
+                    <div className="text-ui text-cyan">
+                      <Coin amount={currency} animate />
+                    </div>
+                  </Tooltip>
+                </div>
+              </div>
             </div>
-          )}
-        </div>
-      </div>
+          </div>,
+          slot,
+        )}
 
       <ItemFlights flights={flights} onDone={landFlight} />
 
@@ -2338,7 +2253,7 @@ function InventoryViewImpl({
             document.body,
           );
         })()}
-    </div>
+    </>
   );
 }
 

@@ -36,11 +36,6 @@ import { NAME_SHADOW } from "./town/nameFade";
 import { useTownNet, useTownNetVersion } from "./town/net/townNet";
 import { spotsOf, type TownSpot, townLive, useTownMap } from "./town/runtime";
 import { SkillHud } from "./town/SkillHud";
-import {
-  canExpandTown,
-  toggleTownExpanded,
-  useTownExpanded,
-} from "./town/townWindow";
 
 // three.js, Rapier's WASM and friends: loaded the first time someone opens
 // the Town, not at app start.
@@ -59,6 +54,7 @@ export function TownWorld({
   chatMessages,
   cards,
   paused,
+  windowOpen = false,
   onOpen,
   onOpenProfile,
   player,
@@ -91,6 +87,10 @@ export function TownWorld({
   chatOverlay?: boolean;
   cards: EventCard[];
   paused: boolean;
+  /** An overlay window (Herzie, Social, ...) is open over the Town. The
+   * world keeps going, walking included; only the boss's end screen stops
+   * taking every key, so typing reaches the window. */
+  windowOpen?: boolean;
   onOpen: (openKey: string) => void;
   /** Another player's name was clicked: open their profile. */
   onOpenProfile?: (friendCode: string) => void;
@@ -244,13 +244,11 @@ export function TownWorld({
 
   return (
     <div className="relative min-h-0 flex-1 overflow-hidden">
-      {!paused && canExpandTown && <ExpandButton />}
       {net.status === "outdated" ? (
         <div
           className={cn(
-            "pointer-events-none absolute top-2 right-2 z-30 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white/70",
-            // Beside the window-size button, not under it.
-            !paused && canExpandTown && "right-10",
+            // Under the nav (main.tsx, top right).
+            "pointer-events-none absolute top-[38px] right-3 z-30 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white/70",
           )}
         >
           Update Herzies to see other players
@@ -352,7 +350,7 @@ export function TownWorld({
             <TownVitals inFight={!!map.combat} chatOverlay={chatOverlay} />
             <BossHud name={bossCard?.title ?? "The boss"} />
           </div>
-          <BossResults />
+          <BossResults interactive={!windowOpen} />
         </>
       ) : null}
       {!paused && (loading || !ready) ? (
@@ -368,7 +366,7 @@ export function TownWorld({
           }}
           className={cn(
             "absolute left-1/2 z-30 -translate-x-1/2 cursor-pointer whitespace-nowrap rounded border-0 bg-black/35 px-2.5 py-1 text-ui text-white backdrop-blur-md hover:bg-black/50",
-            // Above the dock (chat + tab bar) floating over the world.
+            // Above the dock (the chat) floating over the world.
             chatOverlay
               ? "bottom-[calc(var(--dock-height,0px)+4.5rem)]"
               : "bottom-3",
@@ -446,38 +444,4 @@ function FrameRate({ className }: { className?: string }) {
     return () => cancelAnimationFrame(raf);
   }, []);
   return fps === null ? null : <div className={className}>{fps} fps</div>;
-}
-
-/** The Town's window bigger, or back to the app's small one (Z too). */
-function ExpandButton() {
-  const expanded = useTownExpanded();
-  const label = expanded ? "Smaller window (Z)" : "Bigger window (Z)";
-  return (
-    <button
-      type="button"
-      onClick={toggleTownExpanded}
-      title={label}
-      aria-label={label}
-      className="absolute top-2 right-2 z-30 flex size-7 items-center justify-center rounded bg-black/50 text-white/70 hover:bg-black/65 hover:text-white"
-    >
-      <svg
-        viewBox="0 0 16 16"
-        className="size-4"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden="true"
-      >
-        {expanded ? (
-          // Corners pointing in: shrink.
-          <path d="M6 2v4H2M10 2v4h4M6 14v-4H2M10 14v-4h4" />
-        ) : (
-          // Corners pointing out: grow.
-          <path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4" />
-        )}
-      </svg>
-    </button>
-  );
 }

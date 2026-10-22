@@ -264,7 +264,7 @@ function StoreViewImpl({
       </List>
 
       {pendingProductId && (
-        <div className="border-t border-border pt-2 text-center text-[10px] text-text-dim">
+        <div className="border-t border-white/15 pt-2 text-center text-[10px] text-text-dim">
           Complete your purchase in the browser — your balance updates
           automatically.
         </div>

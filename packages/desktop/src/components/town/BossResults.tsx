@@ -15,15 +15,20 @@ import { letGoOfTownInput } from "./input";
  * contribution (damage, plus healing and blocking; see contributionOf).
  *
  * It shows just after the boss falls, before anyone goes for the loot,
- * and goes with Continue or Esc. It fills the Town from the top margin
- * down to just above the tab bar (`--nav-height`), the world blurred out
+ * and goes with Continue or Esc. It fills the Town from under the nav
+ * down to the bottom margin, the world blurred out
  * behind it, and is only drawn while the Town is the view. While it's up
  * the HUD and the chat fade away (useBossResultsShown) and nothing in the
  * Town moves. It stays up back in town until you go on. Above all that,
  * the page's shared herzie stage would be under its background, so its
  * herzies have a stage of their own, inside it.
  */
-export function BossResults() {
+export function BossResults({
+  interactive = true,
+}: {
+  /** False while an overlay window covers it: keys go to the window. */
+  interactive?: boolean;
+} = {}) {
   const results = useBossResultsShown();
   // Its herzies' own stage, its canvas inside the overlay.
   const [stage] = useState(() => new HerzieStage());
@@ -37,7 +42,7 @@ export function BossResults() {
   // ends (the mouse is let go too), and keys reach it first and stop here —
   // no walking, casting or skills. Esc goes on, like Continue.
   useEffect(() => {
-    if (!shown) return;
+    if (!shown || !interactive) return;
     letGoOfTownInput();
     leaveCombat();
     // The chat steps aside too: nothing typed goes into it unseen.
@@ -55,7 +60,7 @@ export function BossResults() {
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [shown]);
+  }, [shown, interactive]);
   if (!results || !shown) return null;
 
   const { outcome, top, you } = results;
@@ -69,8 +74,8 @@ export function BossResults() {
   return (
     <div
       ref={overlay}
-      className="absolute inset-x-3 top-3 z-50 flex"
-      style={{ bottom: "calc(var(--nav-height, 0px) + 0.75rem)" }}
+      className="absolute inset-x-3 top-[38px] z-50 flex"
+      style={{ bottom: "0.75rem" }}
     >
       {/* The window fills it, the Town blurred out behind; its content
           sits in the middle. */}

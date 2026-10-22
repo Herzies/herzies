@@ -3,6 +3,7 @@ import {
   attackStyle,
   bankCapacity,
   CLASS_DEFS,
+  getHerzieStatsFromUnits,
   type HerzieClass,
   type HerzieProfile,
   hasRoomFor,
@@ -32,16 +33,19 @@ import { HERZIE_STAGE_HEIGHT, HerzieWithSky } from "./components/HerzieWithSky";
 import { HomeView } from "./components/HomeView";
 import { IncomingFriendOverlay } from "./components/IncomingFriendOverlay";
 import { IncomingTradeOverlay } from "./components/IncomingTradeOverlay";
-import { HERZIE_ZONE_ATTR, InventoryView } from "./components/InventoryView";
+import { InventoryView } from "./components/InventoryView";
 import { LoadingSplash } from "./components/LoadingSplash";
 import { Notices } from "./components/Notices";
 import { OnboardingScreen } from "./components/OnboardingScreen";
+import { OverlayWindow } from "./components/OverlayWindow";
 import { ProfileView } from "./components/ProfileView";
 import { PromptOverlay } from "./components/PromptOverlay";
 import { SettingsView } from "./components/SettingsView";
+import { SkillsPanel } from "./components/SkillsPanel";
 import { SplashScreen } from "./components/SplashScreen";
+import { StatsTab } from "./components/StatsTab";
 import { StoreView } from "./components/StoreView";
-import { TabBar, type View } from "./components/TabBar";
+import { type MenuLanding, TabBar, type View } from "./components/TabBar";
 import { TradeView } from "./components/TradeView";
 import { setLootRoom } from "./components/town/combat/lootFeed";
 import { useBossResultsShown } from "./components/town/combat/results";
@@ -49,6 +53,7 @@ import { setMySkill } from "./components/town/combat/skills";
 import { combat } from "./components/town/combat/state";
 import { townNet } from "./components/town/net/townNet";
 import {
+  canExpandTown,
   toggleTownExpanded,
   useTownExpanded,
 } from "./components/town/townWindow";
@@ -75,11 +80,12 @@ import {
 const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1h
 
 const WHATS_NEW_SEEN_KEY = "herzies:whats-new-seen-version";
-/** The camera on the Herzie view, relative to Home's: pulled back and raised
- * a little to make room for the deck over the stage's floor. */
-const HERZIE_VIEW_ZOOM = 0.83;
-/** px; negative is up. */
-const HERZIE_VIEW_OFFSET_Y = -46;
+
+/** The screens the app sits on: Home and the Town. Everything else opens as
+ * an overlay window over one of them. */
+type Base = "home" | "events";
+type OverlayId = Exclude<View, Base>;
+const isBase = (v: View): v is Base => v === "home" || v === "events";
 
 type UpdateInstallStatus =
   | { kind: "idle" }
@@ -93,7 +99,7 @@ function hostHerzies(el: HTMLDivElement | null) {
   herzieStage.setHost(el);
 }
 
-/** Publishes the dock's (chat + tab bar) height as `--dock-height`, for
+/** Publishes the dock's (the chat's) height as `--dock-height`, for
  * whatever floats above it over the Town (the "Talk to" prompt). */
 const dockObserver = new ResizeObserver(([entry]) => {
   document.documentElement.style.setProperty(
@@ -106,12 +112,12 @@ function observeDock(el: HTMLDivElement | null) {
   if (el) dockObserver.observe(el);
 }
 
-/** ...and the tab bar's alone as `--nav-height`, for what covers the Town
- * down to the tabs but not over them (the boss's end screen). */
+/** ...and the nav's width as `--nav-width`: Home's header keeps that much
+ * room at its right, where the nav sits over it. */
 const navObserver = new ResizeObserver(([entry]) => {
   document.documentElement.style.setProperty(
-    "--nav-height",
-    `${(entry.target as HTMLElement).offsetHeight}px`,
+    "--nav-width",
+    `${(entry.target as HTMLElement).offsetWidth}px`,
   );
 });
 function observeNav(el: HTMLDivElement | null) {
@@ -187,13 +193,60 @@ function App() {
   // or hidden at some point. See the hook for why the Rust-side fallback poll
   // stays.
   useTradeRequests(rawState.isOnline);
-  const [view, setView] = useState<View>("home");
+  // The Town is where the app opens; Home is the other screen. Herzie,
+  // Social, Premium, Settings and a trade open over either as a window.
+  const [base, setBase] = useState<Base>("events");
+  const [overlay, setOverlay] = useState<OverlayId | null>(null);
+  /** What the nav shows as selected. */
+  const view: View = overlay ?? base;
+  // The window that was just closed (or swapped for another) stays "shown"
+  // until its exit has played: its content keeps still under the fade.
+  const [leavingOverlay, setLeavingOverlay] = useState<OverlayId | null>(null);
+  const [prevOverlay, setPrevOverlay] = useState<OverlayId | null>(overlay);
+  /** Deck and Bag are one window's two tabs: switching between them isn't
+   * leaving it. */
+  const isInventory = (v: View | null) => v === "deck" || v === "bag";
+  if (prevOverlay !== overlay) {
+    setPrevOverlay(overlay);
+    if (prevOverlay && !(isInventory(prevOverlay) && isInventory(overlay))) {
+      setLeavingOverlay(prevOverlay);
+    }
+  }
+  /** The deck-and-bag window's tab: the one asked for last. */
+  const [inventoryPanel, setInventoryPanel] = useState<"deck" | "bag">("deck");
+  if (isInventory(overlay) && overlay !== inventoryPanel) {
+    setInventoryPanel(overlay as "deck" | "bag");
+  }
+  /** A window is on screen: open, or still fading out. */
+  const windowShown = (id: OverlayId) =>
+    overlay === id || leavingOverlay === id;
+  const windowClosed = (id: OverlayId) => () =>
+    setLeavingOverlay((l) => (l === id ? null : l));
+  /** Go straight to `v`: a base closes any window; a window opens over the
+   * current base. (switchView is the guarded, toggling version.) */
+  const setView = useCallback((v: View) => {
+    if (isBase(v)) {
+      setBase(v);
+      setOverlay(null);
+    } else setOverlay(v);
+  }, []);
   // Bumped when the player re-selects the tab they're already on (click or
   // shortcut), so a view that's drilled into a sub-screen — Town → George,
   // Social → a profile — goes back to its top level.
   const [rootKeys, setRootKeys] = useState<Partial<Record<View, number>>>({});
-  /** Which panel the Herzie view opens on: the deck, or the bag ([b]). */
-  const [inventoryPanel, setInventoryPanel] = useState<"deck" | "bag">("deck");
+  /** The Menu tab's tray of windows (TabBar). */
+  const [menuOpen, setMenuOpen] = useState(false);
+  /** A card flew to the menu's Deck or Bag (see InventoryView). */
+  const [menuLanding, setMenuLanding] = useState<MenuLanding | null>(null);
+  const onTabLanded = useCallback(
+    (panel: "deck" | "bag") =>
+      setMenuLanding((l) => ({ panel, n: (l?.n ?? 0) + 1 })),
+    [],
+  );
+  // The deck and bag draw into their window (InventoryView portals them).
+  const [inventorySlot, setInventorySlot] = useState<HTMLDivElement | null>(
+    null,
+  );
   const [tradeTarget, setTradeTarget] = useState<string | null>(null);
   const [incomingTradeId, setIncomingTradeId] = useState<string | null>(null);
   const [activityLog, setActivityLog] = useState<
@@ -315,15 +368,16 @@ function App() {
    * (a further buy/pickup) shows it again instead of staying silenced. */
   const [dismissedInventoryFull, setDismissedInventoryFull] = useState(false);
   /** Where to return when the trade session ends — the view the user was on before entering it. */
-  const tradeReturnViewRef = useRef<View>("home");
-  /** Current view, readable from effect closures (deep-link handler). */
-  const viewRef = useRef(view);
-  viewRef.current = view;
+  const tradeReturnViewRef = useRef<OverlayId | null>(null);
+  /** The open window, readable from effect closures (deep-link handler). */
+  const overlayRef = useRef(overlay);
+  overlayRef.current = overlay;
 
-  /** Snapshot the current view so closing the trade can return to it. */
+  /** Snapshot the open window (Social, say) so closing the trade can return
+   * to it; none, and closing it shows the screen underneath. */
   const rememberTradeReturnView = useCallback(() => {
-    if (viewRef.current !== "trade") {
-      tradeReturnViewRef.current = viewRef.current;
+    if (overlayRef.current !== "trade") {
+      tradeReturnViewRef.current = overlayRef.current;
     }
   }, []);
   const notifiedVersionRef = useRef<string | null>(null);
@@ -381,7 +435,7 @@ function App() {
         setView("events");
       } else {
         setDeepLinkItem(payload);
-        setView("inventory");
+        setView("bag");
       }
     });
     return () => {
@@ -389,7 +443,7 @@ function App() {
       unlistenActivity();
       unlistenDeepLink();
     };
-  }, [addLog, rememberTradeReturnView]);
+  }, [addLog, rememberTradeReturnView, setView]);
 
   useEffect(() => {
     if (!state.pendingTradeRequest) {
@@ -420,12 +474,12 @@ function App() {
   // see, and it also covers the window's corners and any area the root
   // doesn't paint. CSS owns the fade so both directions are symmetric.
   useEffect(() => {
-    const onEvents = view === "events";
+    const onEvents = base === "events";
     const root = document.documentElement.classList;
     root.toggle("boss-mode", onEvents && eventsScreen === "boss");
     root.toggle("merchant-mode", onEvents && eventsScreen === "merchant");
     return () => root.remove("boss-mode", "merchant-mode");
-  }, [view, eventsScreen]);
+  }, [base, eventsScreen]);
 
   // The tab only needs to know whether a song hunt is running right now, which
   // /events-active alone answers — and it's an Edge Function, so it's cheap and
@@ -470,10 +524,10 @@ function App() {
   const prevOnline = useRef(state.isOnline);
   useEffect(() => {
     if (state.isOnline && !prevOnline.current) {
-      setView("home");
+      setView("events");
     }
     prevOnline.current = state.isOnline;
-  }, [state.isOnline]);
+  }, [state.isOnline, setView]);
 
   // Check for updates on launch and every hour. Fires a system notification
   // once per detected version so the user knows even if the window is hidden;
@@ -616,35 +670,41 @@ function App() {
   }, [state.isOnline, state.version, herzie]);
 
   const switchView = useCallback(
-    (v: View): boolean => {
+    (v: View, toggle = false): boolean => {
+      // Its window again, from its tab or shortcut (`toggle`): close it.
+      const closing = toggle && !isBase(v) && v === overlay;
       // Leaving an in-progress trade needs confirmation. The trade itself stays
       // open server-side and can be rejoined from Social → Trades.
-      if (view === "trade" && v !== "trade" && tradeActive) {
-        setPendingLeaveView(v);
+      if (overlay === "trade" && (v !== "trade" || closing) && tradeActive) {
+        setPendingLeaveView(closing ? base : v);
         return false;
       }
-      if (v !== "inventory") setDeepLinkItem(null);
+      setMenuOpen(false);
+      if (v !== "bag") setDeepLinkItem(null);
       if (v !== "trade") {
         setIncomingTradeId(null);
         setTradeTarget(null);
       }
-      setSelfProfile(null);
       // Moving on from the profile: Back no longer goes anywhere special.
       if (v !== "friends") setProfileReturn(null);
-      if (v === view) {
+      if (closing) {
+        setOverlay(null);
+        return true;
+      }
+      if (isBase(v) ? v === base && !overlay : v === overlay) {
         setRootKeys((keys) => ({ ...keys, [v]: (keys[v] ?? 0) + 1 }));
       }
       setView(v);
       return true;
     },
-    [view, tradeActive],
+    [base, overlay, tradeActive, setView],
   );
 
   /** "c" shortcut: go home and focus the chat. Mid-trade this routes through
    * the leave-trade confirmation like every other view switch. */
   /** The Town's 3D world is on screen: it fills the window, and the chat
    * floats over it. */
-  const townWorld = view === "events" && eventsScreen === "world";
+  const townWorld = base === "events" && eventsScreen === "world";
   // The Town's bigger window (its button, or Z): only while the world is on
   // screen — a visitor's screen or another tab gets the small window back,
   // and coming back to the world grows it again.
@@ -657,28 +717,40 @@ function App() {
   const endScreen = endScreenUp && townWorld;
 
   /** Where the chat is shown (see chatPanel). */
-  const chatOnScreen = (view === "home" && !selfProfile) || townWorld;
+  const chatOnScreen = base === "home" || townWorld;
+  /** ...and not under a window: its keys (Enter, c) are the window's. */
+  const chatReachable = chatOnScreen && !overlay;
 
   const requestOpenChat = useCallback(() => {
-    // The Town carries its own chat, so open that one where it is.
+    // The Town carries its own chat, so open that one where it is (closing
+    // any window over it).
     if (townWorld) {
-      setOpenChatRequested(true);
+      if (!overlay || switchView(overlay, true)) setOpenChatRequested(true);
     } else if (switchView("home")) {
       setOpenChatRequested(true);
     } else {
       openChatAfterLeaveRef.current = true;
     }
-  }, [switchView, townWorld]);
+  }, [switchView, townWorld, overlay]);
 
-  // Tab keyboard shortcuts (advertised in the tab bar tooltips). Skipped
+  /** Escape, a click outside, ...: close the open window, the way
+   * re-selecting its tab does (a live trade asks first). */
+  const closeWindow = useCallback(() => {
+    if (overlay) switchView(overlay, true);
+  }, [overlay, switchView]);
+
+  // Keyboard shortcuts (advertised in the nav and menu). Skipped
   // while typing in an input so chat/search fields don't switch views.
   useEffect(() => {
     if (!state.isOnline || !herzie || previewOnboarding) return;
 
     const shortcuts: Record<string, View> = {
       h: "home",
-      i: "inventory",
-      b: "inventory",
+      o: "profile",
+      i: "deck",
+      b: "bag",
+      j: "stats",
+      k: "skills",
       t: "events",
       f: "friends",
       p: "store",
@@ -694,7 +766,7 @@ function App() {
         event.key === ","
       ) {
         event.preventDefault();
-        switchView("settings");
+        switchView("settings", true);
         return;
       }
       if (event.metaKey || event.ctrlKey || event.altKey) return;
@@ -711,7 +783,7 @@ function App() {
       // Enter presses.
       if (
         event.key === "Enter" &&
-        chatOnScreen &&
+        chatReachable &&
         target?.tagName !== "BUTTON" &&
         target?.tagName !== "A" &&
         target?.tagName !== "SELECT"
@@ -732,10 +804,16 @@ function App() {
         requestOpenChat();
         return;
       }
+      if (key === "m") {
+        setMenuOpen((open) => !open);
+        return;
+      }
       const v = shortcuts[key];
       if (!v) return;
-      if (v === "inventory") setInventoryPanel(key === "b" ? "bag" : "deck");
-      switchView(v);
+      // Stats once the server knows stat points, Skills once there's a class.
+      if (v === "stats" && !herzie.statPoints) return;
+      if (v === "skills" && !herzie.class) return;
+      switchView(v, true);
     };
 
     window.addEventListener("keydown", handler);
@@ -746,11 +824,31 @@ function App() {
     previewOnboarding,
     switchView,
     requestOpenChat,
-    chatOnScreen,
+    chatReachable,
     townWorld,
   ]);
 
-  // Where Home's and the Herzie view's stages sit (see useStageAlignment).
+  // The Profile window: show the cached profile at once, then the fresh one.
+  const selfCode = herzie?.friendCode;
+  const cachedSelf = selfCode ? state.friends[selfCode] : undefined;
+  const profileOpen = overlay === "profile";
+  // biome-ignore lint/correctness/useExhaustiveDependencies: fetched each time the window opens, not on every friends push
+  useEffect(() => {
+    if (!profileOpen || !selfCode) return;
+    if (cachedSelf) setSelfProfile(cachedSelf);
+    let live = true;
+    herzies
+      .friendLookup([selfCode])
+      .then((result) => {
+        if (live && result[selfCode]) setSelfProfile(result[selfCode]);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [profileOpen, selfCode]);
+
+  // Where Home's stage sits (see useStageAlignment).
   const herzieStageTop = useHomeStageOffset();
 
   if (!hydrated) {
@@ -789,8 +887,7 @@ function App() {
     setIncomingTradeId(null);
     setTradeViewGeneration((g) => g + 1);
     setTradeActive(false);
-    if (v !== "inventory") setDeepLinkItem(null);
-    setSelfProfile(null);
+    if (v !== "bag") setDeepLinkItem(null);
     setView(v);
     if (openChat && v === "home") setOpenChatRequested(true);
   };
@@ -802,15 +899,6 @@ function App() {
 
   const handleSpawnDebugDrop = (diceOnly = false) => {
     herzies.spawnDebugDrop(diceOnly).catch(() => {});
-  };
-
-  const handleOpenSelfProfile = async () => {
-    const code = herzie?.friendCode;
-    if (!code) return;
-    const cached = state.friends[code];
-    if (cached) setSelfProfile(cached);
-    const result = await herzies.friendLookup([code]);
-    if (result[code]) setSelfProfile(result[code]);
   };
 
   const handleStartTrade = (code: string) => {
@@ -834,7 +922,7 @@ function App() {
     pendingIncoming &&
     pendingIncoming.tradeId !== ignoredIncomingTradeId &&
     !(
-      view === "trade" &&
+      overlay === "trade" &&
       incomingTradeId != null &&
       incomingTradeId === pendingIncoming.tradeId
     );
@@ -868,7 +956,7 @@ function App() {
   const showIncomingFriendOverlay =
     pendingFriend &&
     pendingFriend.requestId !== ignoredFriendRequestId &&
-    !(view === "friends" && friendsTab === "requests");
+    !(overlay === "friends" && friendsTab === "requests");
 
   const handleAcceptFriendRequest = async () => {
     if (!pendingFriend || friendOverlayBusy) return;
@@ -938,7 +1026,7 @@ function App() {
       data-tauri-drag-region
       ref={hostHerzies}
       className={cn(
-        "relative flex h-screen flex-col px-3 pt-3 pb-1",
+        "relative flex h-screen flex-col p-3",
         ghostMode && "grayscale",
       )}
     >
@@ -946,37 +1034,30 @@ function App() {
         className={cn(
           "flex min-h-0 flex-1 flex-col overflow-hidden",
           // The Town's 3D world fills the whole window, out past the app's
-          // padding; the chat and the tab bar float over it (the dock).
-          townWorld && "-mx-3 -mt-3 -mb-1",
+          // padding; the chat floats over it (the dock).
+          townWorld && "-m-3",
           // Home supplies its own bottom breathing room (HomeView's now-playing
           // bar) so its artist-image background can reach the chat's top
-          // border instead of stopping short of an outer margin. The viewer's
-          // own profile shares the home slot but has no such bar, so it takes
-          // the margin like every other view — otherwise it sits tighter to
-          // the chat than the same profile opened from Social.
-          (view !== "home" || !!selfProfile) &&
-            view !== "inventory" &&
-            !townWorld &&
-            "mb-2",
+          // border instead of stopping short of an outer margin.
+          base !== "home" && !townWorld && "mb-2",
         )}
       >
-        {/* The herzie on Home and the Herzie view: one renderer over both
-            views' stages, so switching between them keeps its rotation and
-            animation and just eases the camera out a little on the Herzie
-            view (room for the deck over its floor). Hidden, never unmounted,
-            elsewhere. A zero-height row, so it positions against the views'
+        {/* Home's herzie, over Home's stage (see useStageAlignment). Hidden,
+            never unmounted, elsewhere, so coming back keeps its rotation and
+            animation. A zero-height row, so it positions against the view's
             top edge without being a containing block for anything else. */}
         <div
           className={cn(
             "relative h-0 shrink-0",
-            ((view !== "home" && view !== "inventory") ||
-              (view === "home" && !!selfProfile) ||
+            // Under a window too: blurred through its glass, it's just a blob.
+            (base !== "home" ||
+              !!overlay ||
+              !!leavingOverlay ||
               herzieStageTop === null) &&
               "hidden",
           )}
         >
           <div
-            {...(view === "inventory" ? { [HERZIE_ZONE_ATTR]: "" } : {})}
             className="absolute inset-x-0 flex items-center justify-center"
             style={{ top: herzieStageTop ?? 0, height: HERZIE_STAGE_HEIGHT }}
           >
@@ -989,15 +1070,7 @@ function App() {
                   ? withClassGear(state.equipped, classOverride)
                   : state.equipped
               }
-              paused={
-                (view !== "home" && view !== "inventory") ||
-                (view === "home" && !!selfProfile)
-              }
-              zoom={view === "inventory" ? HERZIE_VIEW_ZOOM : 1}
-              offsetY={view === "inventory" ? HERZIE_VIEW_OFFSET_Y : 0}
-              // Class gear rides on its back, out of sight from the front:
-              // drawn in the inventory, where it's equipped.
-              armed={view === "inventory"}
+              paused={base !== "home" || !!overlay || !!leavingOverlay}
               grounded
             />
           </div>
@@ -1005,123 +1078,26 @@ function App() {
         <div
           className={cn(
             "min-h-0 flex-1 flex-col",
-            view === "home" ? "flex" : "hidden",
+            base === "home" ? "flex" : "hidden",
           )}
         >
-          {selfProfile ? (
-            <ProfileView
-              profile={
-                // The synced profile's nowPlaying.albumArtUrl only ever holds
-                // Last.fm's art (see sync_tick in lib.rs — the local system
-                // artwork data: URL is never synced). Prefer the live local
-                // value here, which does include it, whenever it's still the
-                // same track — avoids a stale mismatch right after a track
-                // change, before the next sync tick catches up.
-                selfProfile.nowPlaying &&
-                state.nowPlaying &&
-                state.nowPlaying.title === selfProfile.nowPlaying.title &&
-                state.nowPlaying.artist === selfProfile.nowPlaying.artist &&
-                state.nowPlaying.albumArtUrl
-                  ? {
-                      ...selfProfile,
-                      nowPlaying: {
-                        ...selfProfile.nowPlaying,
-                        albumArtUrl: state.nowPlaying.albumArtUrl,
-                      },
-                    }
-                  : selfProfile
-              }
-              isSelf
-              isFriend
-              stageOverride={stageOverride}
-              active={view === "home"}
-              onBack={() => setSelfProfile(null)}
-              onTrade={() => {}}
-              onAdd={() => {}}
-              onRemove={() => {}}
-            />
-          ) : (
-            <HomeView
-              state={state}
-              active={view === "home"}
-              onOpenProfile={handleOpenSelfProfile}
-              onOpenSettings={() => switchView("settings")}
-              onActivity={addLog}
-            />
-          )}
+          <HomeView
+            state={state}
+            active={base === "home"}
+            onOpenProfile={() => switchView("profile")}
+            onActivity={addLog}
+          />
         </div>
-
-        {herzie && (
-          <div
-            className={cn(
-              "min-h-0 flex-1 flex-col",
-              view === "friends" ? "flex" : "hidden",
-            )}
-          >
-            <FriendsView
-              herzie={herzie}
-              friends={state.friends}
-              incomingRequests={state.incomingFriendRequests}
-              outgoingRequests={state.outgoingFriendRequests}
-              onStartTrade={handleStartTrade}
-              onResumeTrade={handleResumeTrade}
-              stageOverride={stageOverride}
-              openProfileCode={chatProfileCode}
-              onProfileOpened={() => setChatProfileCode(null)}
-              onProfileBack={() => {
-                if (profileReturn) switchView(profileReturn);
-              }}
-              tab={friendsTab}
-              onTabChange={setFriendsTab}
-              onActivity={addLog}
-              active={view === "friends"}
-              rootKey={rootKeys.friends ?? 0}
-            />
-          </div>
-        )}
-
-        {herzie && (
-          <div
-            className={cn(
-              "min-h-0 flex-1 flex-col",
-              view === "inventory" ? "flex" : "hidden",
-            )}
-          >
-            <InventoryView
-              herzie={herzie}
-              initialItem={deepLinkItem}
-              // An inventory with items but no copies is a cache from before
-              // copies existed: laying out an empty bank from it would show the
-              // player nothing until the first sync (and indefinitely offline),
-              // so it counts as not loaded yet.
-              loaded={
-                state.inventory != null &&
-                (state.units.length > 0 ||
-                  Object.keys(state.inventory).length === 0)
-              }
-              units={state.units}
-              currency={state.inventoryCurrency}
-              equipped={state.equipped}
-              onToggleEquip={toggleEquip}
-              onPredictUnits={predict}
-              bankExpansions={state.bankExpansions}
-              onLog={addLog}
-              active={view === "inventory"}
-              rootKey={rootKeys.inventory ?? 0}
-              openPanel={inventoryPanel}
-              skills={state.skills}
-            />
-          </div>
-        )}
 
         <div
           className={cn(
             "min-h-0 flex-1 flex-col",
-            view === "events" ? "flex" : "hidden",
+            base === "events" ? "flex" : "hidden",
           )}
         >
           <EventsView
-            eventsTabVisible={view === "events"}
+            eventsTabVisible={base === "events"}
+            windowOpen={!!overlay}
             chatOverlay
             chatMessages={state.chatMessages}
             rootKey={rootKeys.events ?? 0}
@@ -1160,156 +1136,325 @@ function App() {
             }}
           />
         </div>
-
-        {herzie && (
-          <div
-            className={cn(
-              "min-h-0 flex-1 flex-col",
-              view === "trade" ? "flex" : "hidden",
-            )}
-          >
-            <TradeView
-              key={tradeViewGeneration}
-              herzie={herzie}
-              initialTarget={tradeTarget}
-              initialTradeId={incomingTradeId}
-              units={state.units}
-              currency={state.inventoryCurrency}
-              onActiveChange={setTradeActive}
-              onClose={() => {
-                setTradeTarget(null);
-                setIncomingTradeId(null);
-                setTradeViewGeneration((g) => g + 1);
-                setTradeActive(false);
-                // Return to wherever the user was before the trade started.
-                setView(tradeReturnViewRef.current);
-              }}
-            />
-          </div>
-        )}
-
-        <div
-          className={cn(
-            "min-h-0 flex-1 flex-col",
-            view === "store" ? "flex" : "hidden",
-          )}
-        >
-          <StoreView
-            inventory={state.inventory}
-            currency={state.inventoryCurrency}
-            equipped={state.equipped}
-            bankExpansions={state.bankExpansions}
-            active={view === "store"}
-          />
-        </div>
-
-        <div
-          className={cn(
-            "min-h-0 flex-1 flex-col",
-            view === "settings" ? "flex" : "hidden",
-          )}
-        >
-          <SettingsView
-            state={state}
-            stageOverride={stageOverride}
-            onStageOverride={setStageOverride}
-            classOverride={classOverride}
-            onClassOverride={setClassOverride}
-            onTestClassChoice={() => setTestClassChoice(true)}
-            onPreviewOnboarding={() => setPreviewOnboarding(true)}
-            onPreviewLoading={() => setPreviewLoading(true)}
-            onTestUpdateAlert={() => setTestUpdateOverlay(true)}
-            onTestWhatsNew={() => setTestWhatsNewOverlay(true)}
-            hasActiveEventOverride={hasActiveEventOverride}
-            onToggleActiveEventOverride={() =>
-              setHasActiveEventOverride((v) => !v)
-            }
-            debugBossOverride={debugBossOverride}
-            onToggleDebugBoss={() => setDebugBossOverride((v) => !v)}
-            debugMerchantOverride={debugMerchantOverride}
-            onToggleDebugMerchant={() => setDebugMerchantOverride((v) => !v)}
-            debugTreatTraderOverride={debugTreatTraderOverride}
-            onToggleDebugTreatTrader={() =>
-              setDebugTreatTraderOverride((v) => !v)
-            }
-            onSpawnDebugDrop={handleSpawnDebugDrop}
-            availableUpdate={availableUpdate}
-            installStatus={updateInstallStatus}
-            onInstallUpdate={handleInstallUpdate}
-          />
-        </div>
       </div>
 
-      {/* The dock: chat and tab bar. Over the Town it floats on the world,
-          frosted; elsewhere it sits under the view on the window's own
-          colour. One structure for both, so switching fades the frosting
-          rather than swapping elements. A zero-height row over the Town:
-          the world keeps its full height underneath. */}
+      {/* The dock: the chat, at the bottom. Over the Town it floats on the
+          world; elsewhere it sits under the view. A zero-height row over the
+          Town: the world keeps its full height underneath. In the big window
+          it keeps the small window's width, bottom left. */}
       <div className={cn("relative -mx-3", townWorld && "h-0")}>
         <div
           ref={observeDock}
           className={cn(
+            // 12px under the chat, as at the sides: over the Town, flush
+            // with the window's bottom (-mb-3 undoes the app's pb-3) and its
+            // own pb-3; elsewhere the app's pb-3.
             "px-3",
             townWorld
-              ? "absolute inset-x-0 bottom-0 z-40 -mb-1 pb-1"
-              : "relative",
-            // In the big window, the dock keeps the small window's width,
-            // bottom left, rather than stretching across the world.
-            bigWindow && "right-auto w-[380px]",
+              ? "absolute inset-x-0 bottom-0 z-40 -mb-3 pb-3"
+              : // Its own layer, over the screens but under the overlay
+                // windows (z-60): the expanded chat stays inside it.
+                "relative z-55",
           )}
         >
-          {/* The frosting is a layer beside the content, never around it:
-              a backdrop-filter on an ancestor would become the containing
-              block for the chat's fixed-position expanded panel. */}
+          {/* The boss's end screen covers the Town: the chat folds away
+              under it (fading, and its space closing), and back after. */}
           <div
-            aria-hidden="true"
             className={cn(
-              "pointer-events-none absolute inset-0 bg-black/45 backdrop-blur-md transition-opacity duration-[450ms] ease-in-out",
-              townWorld ? "opacity-100" : "opacity-0",
+              "grid grid-rows-[1fr] transition-[grid-template-rows,opacity] duration-300",
+              bigWindow && "w-[356px]",
+              endScreen && "pointer-events-none grid-rows-[0fr] opacity-0",
             )}
-          />
-          <div className="relative">
-            {/* The boss's end screen covers the Town down to the tabs: the
-                chat folds away under it (fading, and its space closing, so
-                the dock's frosting shrinks to the tabs), and back after. */}
-            <div
-              className={cn(
-                "grid grid-rows-[1fr] transition-[grid-template-rows,opacity] duration-300",
-                endScreen && "pointer-events-none grid-rows-[0fr] opacity-0",
-              )}
-            >
-              <div className={cn("min-h-0", endScreen && "overflow-hidden")}>
-                {chatPanel}
-              </div>
+          >
+            <div className={cn("min-h-0", endScreen && "overflow-hidden")}>
+              {chatPanel}
             </div>
-            {herzie && (
-              <div ref={observeNav}>
-                <TabBar
-                  view={view}
-                  setView={(v) => {
-                    if (v === "inventory") setInventoryPanel("deck");
-                    switchView(v);
-                  }}
-                  // Only once the server knows stat points: before that,
-                  // every herzie would show its whole back pay unspendable.
-                  unspentPoints={
-                    herzie.statPoints
-                      ? statPoints(herzie.level, herzie.statPoints).unspent
-                      : 0
-                  }
-                  visitorsInTown={
-                    visitorsInTown +
-                    Number(hasActiveEventOverride) +
-                    Number(debugBossOverride) +
-                    Number(debugMerchantOverride) +
-                    Number(debugTreatTraderOverride)
-                  }
-                />
-              </div>
-            )}
           </div>
         </div>
       </div>
+
+      {/* The nav: top right, on Home and in the Town, over the windows
+          (z-60), which start under its row. In the header's 20px row (the
+          app's 12px top margin), level with Home's name and the Town's. */}
+      {herzie && (
+        <div ref={observeNav} className="fixed top-3 right-3 z-65">
+          <TabBar
+            view={view}
+            base={base}
+            setView={(v) => switchView(v, true)}
+            menuOpen={menuOpen}
+            setMenuOpen={setMenuOpen}
+            hasStats={!!herzie.statPoints}
+            hasSkills={!!herzie.class}
+            landing={menuLanding}
+            windowSize={
+              townWorld && canExpandTown
+                ? { expanded: townExpanded, onToggle: toggleTownExpanded }
+                : null
+            }
+            // Only once the server knows stat points: before that,
+            // every herzie would show its whole back pay unspendable.
+            unspentPoints={
+              herzie.statPoints
+                ? statPoints(herzie.level, herzie.statPoints).unspent
+                : 0
+            }
+            visitorsInTown={
+              visitorsInTown +
+              Number(hasActiveEventOverride) +
+              Number(debugBossOverride) +
+              Number(debugMerchantOverride) +
+              Number(debugTreatTraderOverride)
+            }
+          />
+        </div>
+      )}
+
+      {/* The windows over Home or the Town (OverlayWindow). Mounted all
+          along, like the screens, so each keeps its state between visits. */}
+      {herzie && (
+        <OverlayWindow
+          open={overlay === "profile"}
+          onClosed={windowClosed("profile")}
+          onClose={closeWindow}
+          label="Profile"
+          narrow={bigWindow}
+        >
+          {selfProfile ? (
+            <ProfileView
+              profile={
+                // The synced profile's nowPlaying.albumArtUrl only ever holds
+                // Last.fm's art (see sync_tick in lib.rs — the local system
+                // artwork data: URL is never synced). Prefer the live local
+                // value here, which does include it, whenever it's still the
+                // same track — avoids a stale mismatch right after a track
+                // change, before the next sync tick catches up.
+                selfProfile.nowPlaying &&
+                state.nowPlaying &&
+                state.nowPlaying.title === selfProfile.nowPlaying.title &&
+                state.nowPlaying.artist === selfProfile.nowPlaying.artist &&
+                state.nowPlaying.albumArtUrl
+                  ? {
+                      ...selfProfile,
+                      nowPlaying: {
+                        ...selfProfile.nowPlaying,
+                        albumArtUrl: state.nowPlaying.albumArtUrl,
+                      },
+                    }
+                  : selfProfile
+              }
+              isSelf
+              isFriend
+              stageOverride={stageOverride}
+              active={windowShown("profile")}
+              onBack={closeWindow}
+              onTrade={() => {}}
+              onAdd={() => {}}
+              onRemove={() => {}}
+            />
+          ) : (
+            <div className="pt-5 text-center text-ui text-text-dim">
+              Loading...
+            </div>
+          )}
+        </OverlayWindow>
+      )}
+
+      {/* The deck and the bag: one window, a tab each (the menu has an item
+          for each too). InventoryView portals into it. */}
+      {herzie && (
+        <>
+          <OverlayWindow
+            open={isInventory(overlay)}
+            onClosed={() =>
+              setLeavingOverlay((l) => (isInventory(l) ? null : l))
+            }
+            onClose={closeWindow}
+            label="Deck and bag"
+            narrow={bigWindow}
+            fit
+          >
+            <div
+              ref={setInventorySlot}
+              className="flex min-h-0 flex-1 flex-col"
+            />
+          </OverlayWindow>
+          <InventoryView
+            herzie={herzie}
+            initialItem={deepLinkItem}
+            // An inventory with items but no copies is a cache from before
+            // copies existed: laying out an empty bank from it would show the
+            // player nothing until the first sync (and indefinitely offline),
+            // so it counts as not loaded yet.
+            loaded={
+              state.inventory != null &&
+              (state.units.length > 0 ||
+                Object.keys(state.inventory).length === 0)
+            }
+            units={state.units}
+            currency={state.inventoryCurrency}
+            equipped={state.equipped}
+            onToggleEquip={toggleEquip}
+            onPredictUnits={predict}
+            bankExpansions={state.bankExpansions}
+            onLog={addLog}
+            slot={inventorySlot}
+            open={isInventory(overlay)}
+            panel={inventoryPanel}
+            onPanelChange={(p) => switchView(p)}
+            onTabLanded={onTabLanded}
+          />
+        </>
+      )}
+
+      {herzie?.statPoints && (
+        <OverlayWindow
+          open={overlay === "stats"}
+          onClosed={windowClosed("stats")}
+          onClose={closeWindow}
+          label="Stats"
+          narrow={bigWindow}
+        >
+          <h1 className="mb-2 text-ui-lg font-bold text-cyan">Stats</h1>
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+            <StatsTab
+              // Read off the copies, so each worn one counts at its own
+              // upgrade level.
+              stats={getHerzieStatsFromUnits(state.units)}
+              level={herzie.level}
+              points={herzie.statPoints}
+              onLog={addLog}
+            />
+          </div>
+        </OverlayWindow>
+      )}
+
+      {herzie?.class && (
+        <OverlayWindow
+          open={overlay === "skills"}
+          onClosed={windowClosed("skills")}
+          onClose={closeWindow}
+          label="Skills"
+          narrow={bigWindow}
+        >
+          <h1 className="mb-2 text-ui-lg font-bold text-cyan">Skills</h1>
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+            <SkillsPanel herzieClass={herzie.class} skills={state.skills} />
+          </div>
+        </OverlayWindow>
+      )}
+
+      {herzie && (
+        <OverlayWindow
+          open={overlay === "friends"}
+          onClosed={windowClosed("friends")}
+          onClose={closeWindow}
+          label="Social"
+          narrow={bigWindow}
+        >
+          <FriendsView
+            herzie={herzie}
+            friends={state.friends}
+            incomingRequests={state.incomingFriendRequests}
+            outgoingRequests={state.outgoingFriendRequests}
+            onStartTrade={handleStartTrade}
+            onResumeTrade={handleResumeTrade}
+            stageOverride={stageOverride}
+            openProfileCode={chatProfileCode}
+            onProfileOpened={() => setChatProfileCode(null)}
+            onProfileBack={() => {
+              if (profileReturn) switchView(profileReturn);
+            }}
+            tab={friendsTab}
+            onTabChange={setFriendsTab}
+            onActivity={addLog}
+            active={windowShown("friends")}
+            rootKey={rootKeys.friends ?? 0}
+          />
+        </OverlayWindow>
+      )}
+
+      {herzie && (
+        <OverlayWindow
+          open={overlay === "trade"}
+          onClosed={windowClosed("trade")}
+          onClose={closeWindow}
+          label="Trade"
+          narrow={bigWindow}
+        >
+          <TradeView
+            key={tradeViewGeneration}
+            herzie={herzie}
+            initialTarget={tradeTarget}
+            initialTradeId={incomingTradeId}
+            units={state.units}
+            currency={state.inventoryCurrency}
+            onActiveChange={setTradeActive}
+            onClose={() => {
+              setTradeTarget(null);
+              setIncomingTradeId(null);
+              setTradeViewGeneration((g) => g + 1);
+              setTradeActive(false);
+              // Back to the window the trade started from (Social, say), or
+              // to the screen underneath.
+              setOverlay(tradeReturnViewRef.current);
+            }}
+          />
+        </OverlayWindow>
+      )}
+
+      <OverlayWindow
+        open={overlay === "store"}
+        onClosed={windowClosed("store")}
+        onClose={closeWindow}
+        label="Premium"
+        narrow={bigWindow}
+      >
+        <StoreView
+          inventory={state.inventory}
+          currency={state.inventoryCurrency}
+          equipped={state.equipped}
+          bankExpansions={state.bankExpansions}
+          active={windowShown("store")}
+        />
+      </OverlayWindow>
+
+      <OverlayWindow
+        open={overlay === "settings"}
+        onClosed={windowClosed("settings")}
+        onClose={closeWindow}
+        label="Settings"
+        narrow={bigWindow}
+      >
+        <SettingsView
+          state={state}
+          stageOverride={stageOverride}
+          onStageOverride={setStageOverride}
+          classOverride={classOverride}
+          onClassOverride={setClassOverride}
+          onTestClassChoice={() => setTestClassChoice(true)}
+          onPreviewOnboarding={() => setPreviewOnboarding(true)}
+          onPreviewLoading={() => setPreviewLoading(true)}
+          onTestUpdateAlert={() => setTestUpdateOverlay(true)}
+          onTestWhatsNew={() => setTestWhatsNewOverlay(true)}
+          hasActiveEventOverride={hasActiveEventOverride}
+          onToggleActiveEventOverride={() =>
+            setHasActiveEventOverride((v) => !v)
+          }
+          debugBossOverride={debugBossOverride}
+          onToggleDebugBoss={() => setDebugBossOverride((v) => !v)}
+          debugMerchantOverride={debugMerchantOverride}
+          onToggleDebugMerchant={() => setDebugMerchantOverride((v) => !v)}
+          debugTreatTraderOverride={debugTreatTraderOverride}
+          onToggleDebugTreatTrader={() =>
+            setDebugTreatTraderOverride((v) => !v)
+          }
+          onSpawnDebugDrop={handleSpawnDebugDrop}
+          availableUpdate={availableUpdate}
+          installStatus={updateInstallStatus}
+          onInstallUpdate={handleInstallUpdate}
+        />
+      </OverlayWindow>
 
       {pendingLeaveView && (
         <PromptOverlay
@@ -1350,8 +1495,7 @@ function App() {
               colour: "text-purple",
               onClick: () => {
                 setDismissedInventoryFull(true);
-                setInventoryPanel("bag");
-                switchView("inventory");
+                switchView("bag");
               },
             },
           ]}
@@ -1383,7 +1527,7 @@ function App() {
       {herzie &&
         availableUpdate &&
         availableUpdate.version !== dismissedUpdateVersion &&
-        view !== "settings" && (
+        overlay !== "settings" && (
           <UpdateAvailableOverlay
             version={availableUpdate.version}
             onUpdate={handleInstallUpdate}

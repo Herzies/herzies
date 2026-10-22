@@ -325,7 +325,7 @@ export function FriendsView({
       colour="cyan"
       childrenClassName="flex min-h-0 flex-col"
     >
-      <div className="mb-2 flex gap-1 border-b border-border text-ui">
+      <div className="mb-2 flex gap-1 border-b border-white/15 text-ui">
         <TabButton
           active={tab === "friends"}
           onClick={() => onTabChange("friends")}
@@ -387,7 +387,7 @@ export function FriendsView({
                 return (
                   <div
                     key={code}
-                    className="flex items-center justify-between border-b border-border last:border-b-0"
+                    className="flex items-center justify-between border-b border-white/15 last:border-b-0"
                   >
                     <button
                       type="button"
@@ -469,7 +469,7 @@ export function FriendsView({
             incomingRequests.map((req) => (
               <div
                 key={req.requestId}
-                className="flex items-center justify-between gap-2 border-b border-border py-1.5 last:border-b-0"
+                className="flex items-center justify-between gap-2 border-b border-white/15 py-1.5 last:border-b-0"
               >
                 <div className="min-w-0">
                   <div className="truncate text-ui text-text">{req.name}</div>
@@ -523,7 +523,7 @@ export function FriendsView({
                 {outgoingRequests.map((req) => (
                   <div
                     key={req.requestId}
-                    className="flex items-center justify-between gap-2 border-b border-border py-1.5 last:border-b-0"
+                    className="flex items-center justify-between gap-2 border-b border-white/15 py-1.5 last:border-b-0"
                   >
                     <div className="min-w-0">
                       <div className="truncate text-ui text-text">
@@ -569,7 +569,7 @@ export function FriendsView({
             ongoingTrades.map((trade) => (
               <div
                 key={trade.tradeId}
-                className="flex items-center justify-between gap-2 border-b border-border py-1.5 last:border-b-0"
+                className="flex items-center justify-between gap-2 border-b border-white/15 py-1.5 last:border-b-0"
               >
                 <div className="min-w-0">
                   <div className="truncate text-ui text-text">
@@ -629,7 +629,7 @@ export function FriendsView({
                 return (
                   <div
                     key={`${entry.rank}-${entry.name}`}
-                    className="flex items-center gap-2 border-b border-border py-1.5 last:border-b-0"
+                    className="flex items-center gap-2 border-b border-white/15 py-1.5 last:border-b-0"
                   >
                     <span
                       className={cn(
@@ -724,7 +724,7 @@ function SearchResults({
       {results.map((r) => (
         <div
           key={r.friendCode}
-          className="flex items-center justify-between gap-2 border-b border-border py-1.5 last:border-b-0"
+          className="flex items-center justify-between gap-2 border-b border-white/15 py-1.5 last:border-b-0"
         >
           <div className="min-w-0">
             <div className="truncate text-ui text-text">{r.name}</div>

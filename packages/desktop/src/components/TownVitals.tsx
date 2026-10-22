@@ -80,10 +80,10 @@ export function TownVitals({
       ) : null}
       {down ? (
         // As the boss fight's end screen: the window fills the Town down to
-        // just above the tab bar, the world blurred out behind it.
+        // the bottom margin, the world blurred out behind it.
         <div
-          className="absolute inset-x-3 top-3 z-50 flex"
-          style={{ bottom: "calc(var(--nav-height, 0px) + 0.75rem)" }}
+          className="absolute inset-x-3 top-[38px] z-50 flex"
+          style={{ bottom: "0.75rem" }}
         >
           <section
             role="alertdialog"

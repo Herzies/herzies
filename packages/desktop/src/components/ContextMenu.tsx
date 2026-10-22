@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
+import { useEscape } from "../lib/escapeStack";
 
 const EDGE_PADDING = 8;
 const MENU_WIDTH = 120;
@@ -37,18 +38,14 @@ export function ContextMenu({
     const handlePointerDown = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose();
     };
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
     window.addEventListener("mousedown", handlePointerDown);
-    window.addEventListener("keydown", handleKey);
     if (closeOnScroll) window.addEventListener("scroll", onClose, true);
     return () => {
       window.removeEventListener("mousedown", handlePointerDown);
-      window.removeEventListener("keydown", handleKey);
       window.removeEventListener("scroll", onClose, true);
     };
   }, [onClose, closeOnScroll]);
+  useEscape(onClose);
 
   const left = Math.min(x, window.innerWidth - MENU_WIDTH - EDGE_PADDING);
   const top = Math.min(
@@ -61,7 +58,7 @@ export function ContextMenu({
       ref={ref}
       // z-250 clears the expanded chat panel (z-201) and its backdrop, which
       // the menu now opens over when a username is clicked.
-      className="fixed z-250 min-w-[120px] border border-border bg-bg-panel py-1 text-ui shadow-lg"
+      className="fixed z-250 min-w-[120px] border border-white/15 bg-bg-panel py-1 text-ui shadow-lg"
       style={{ left, top }}
     >
       {items.map((item) => (

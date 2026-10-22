@@ -1,6 +1,13 @@
 @import "tailwindcss";
 @import "@herzies/shared/theme.css";
 
+/* The desktop's windows are frosted glass over the Town, often a bright
+   scene: the shared dim grey (#6a6a7a, made for the website's dark page)
+   sank into it. Lighter here only; the website keeps its own. */
+@theme {
+  --color-text-dim: #a2a2b2;
+}
+
 /* Tailwind skips node_modules, so the shared components' classes (the
    collector card) are pointed at explicitly. */
 @source "../../shared/src";
@@ -458,4 +465,84 @@
 :root[data-window-blurred] .loading-splash * {
   /* biome-ignore lint/complexity/noImportantStyles: must beat the blurred pause above */
   animation-play-state: running !important;
+}
+
+/* Overlay windows (OverlayWindow.tsx). The panel moves; its layers fade, each
+   on its own (an opacity < 1 ancestor would cut the glass off from what it
+   blurs). The enter keeps no fill, so the panel ends with no transform: its
+   content's fixed popups stay positioned against the window. */
+/* The panel slides on its margins, not a transform: a transform would make
+   it the containing block for what's fixed inside it (the herzie canvas,
+   popups), which then jump when it starts or ends. */
+@keyframes overlay-panel-in {
+  from {
+    margin-top: 8px;
+    margin-bottom: -8px;
+  }
+}
+@keyframes overlay-panel-out {
+  to {
+    margin-top: 4px;
+    margin-bottom: -4px;
+  }
+}
+@keyframes overlay-layer-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes overlay-layer-out {
+  to {
+    opacity: 0;
+  }
+}
+.overlay-in {
+  animation: overlay-panel-in 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+/* The exit eases at both ends: an accelerating curve ends on a hard cut
+   to display: none. */
+.overlay-out {
+  animation: overlay-panel-out 200ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+.overlay-fade-in {
+  animation: overlay-layer-in 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.overlay-fade-out {
+  animation: overlay-layer-out 200ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+/* Reduced motion: fades only. Still an animation on the panel, so the exit's
+   animationend arrives and the window closes. */
+@keyframes overlay-panel-still {
+  to {
+    margin-top: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .overlay-in,
+  .overlay-out {
+    animation-name: overlay-panel-still;
+  }
+}
+
+/* The Menu button's tray (TabBar): drops a little into place. Its layers
+   fade on their own (overlay-fade-in), as the windows' do. */
+@keyframes menu-tray-rise {
+  from {
+    transform: translateY(-6px) scale(0.98);
+  }
+}
+.menu-tray-in {
+  transform-origin: top right;
+  animation: menu-tray-rise 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .menu-tray-in {
+    animation: none;
+  }
+}
+
+:root {
+  /* The app window's height when not expanded (tauri.conf.json): overlay
+     windows keep it in the Town's big window. */
+  --small-window-height: 520px;
 }

@@ -192,7 +192,7 @@ function DeckGroup({
   );
 }
 
-/** The deck, under the Herzie view's "Deck" tab: its sections in two
+/** The deck, in its own window: its sections in two
  * equal columns. */
 export function DeckOverlay({ showInstrument, ...props }: DeckOverlayProps) {
   return (

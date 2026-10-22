@@ -1,6 +1,7 @@
 import { getItem, ItemTypeIcon } from "@herzies/shared";
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
+import { useEscape } from "../lib/escapeStack";
 import { List } from "./List";
 
 const EDGE_PADDING = 8;
@@ -67,9 +68,6 @@ export function DeckSlotPicker({
     const handlePointerDown = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose();
     };
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
     // Capture-phase, so it also sees a scroll on some ancestor that doesn't
     // bubble — but the box doesn't follow its anchor, and scrolling the
     // list *inside* it must not dismiss it, so its own scroller is exempt.
@@ -78,14 +76,13 @@ export function DeckSlotPicker({
       onClose();
     };
     window.addEventListener("mousedown", handlePointerDown);
-    window.addEventListener("keydown", handleKey);
     window.addEventListener("scroll", handleScroll, true);
     return () => {
       window.removeEventListener("mousedown", handlePointerDown);
-      window.removeEventListener("keydown", handleKey);
       window.removeEventListener("scroll", handleScroll, true);
     };
   }, [onClose]);
+  useEscape(onClose);
 
   const estHeight =
     Math.min(
@@ -101,7 +98,7 @@ export function DeckSlotPicker({
     <div
       ref={ref}
       // z-250 to match ContextMenu — both open over the expanded chat panel.
-      className="fixed z-250 w-[150px] border border-border bg-bg-panel py-1 text-ui shadow-lg"
+      className="fixed z-250 w-[150px] border border-white/15 bg-bg-panel py-1 text-ui shadow-lg"
       style={{
         left: fitsRight ? x + CURSOR_GAP : x - CURSOR_GAP,
         top: fitsBelow ? y + CURSOR_GAP : y - CURSOR_GAP,

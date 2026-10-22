@@ -1,4 +1,5 @@
-import { type ReactNode, useEffect, useRef } from "react";
+import type { ReactNode } from "react";
+import { useEscape } from "../lib/escapeStack";
 import { cn } from "../lib/utils";
 
 export interface PromptAction {
@@ -31,20 +32,11 @@ export function PromptOverlay({
   onEscape?: () => void;
   escapeDisabled?: boolean;
 }) {
-  const onEscapeRef = useRef(onEscape);
-  const escapeDisabledRef = useRef(escapeDisabled);
-  onEscapeRef.current = onEscape;
-  escapeDisabledRef.current = escapeDisabled;
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !escapeDisabledRef.current) {
-        onEscapeRef.current?.();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  // Registered even while disabled: a prompt on top still owns Escape, so it
+  // doesn't fall through to whatever is underneath.
+  useEscape(() => {
+    if (!escapeDisabled) onEscape?.();
+  });
 
   return (
     <div
@@ -54,7 +46,7 @@ export function PromptOverlay({
       <div
         role="dialog"
         aria-labelledby={titleId}
-        className="mx-3 w-full max-w-sm border border-border bg-bg-panel px-4 py-3 shadow-lg"
+        className="mx-3 w-full max-w-sm border border-white/15 bg-bg-panel px-4 py-3 shadow-lg"
       >
         <div id={titleId} className="mb-1 text-ui-lg font-bold text-purple">
           {title}

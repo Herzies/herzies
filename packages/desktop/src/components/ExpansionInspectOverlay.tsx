@@ -1,5 +1,5 @@
 import { BANK_EXPANSION, ItemPreview } from "@herzies/shared";
-import { useEffect } from "react";
+import { useEscape } from "../lib/escapeStack";
 
 /** The Bigger Bag's inspect card. It is not a catalog item, so it has no
  * `ItemPreviewCard` (rarity, sets) — just the spinning bag, title and
@@ -14,13 +14,7 @@ export function ExpansionInspectOverlay({
   meta?: React.ReactNode;
   footer?: React.ReactNode;
 }) {
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
+  useEscape(onClose);
 
   return (
     <div
@@ -29,7 +23,7 @@ export function ExpansionInspectOverlay({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-65 max-w-full border border-border bg-bg-panel p-2 text-center shadow-xl shadow-black/50"
+        className="w-65 max-w-full border border-white/15 bg-bg-panel p-2 text-center shadow-xl shadow-black/50"
       >
         <div className="mb-2 flex justify-center">
           <ItemPreview item={BANK_EXPANSION} box={110} />

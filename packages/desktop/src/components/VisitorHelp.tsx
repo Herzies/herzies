@@ -6,6 +6,7 @@ import {
 } from "@herzies/shared";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useEscape } from "../lib/escapeStack";
 import ItemInspectOverlay, {
   INSPECT_ORIGIN_ATTR,
   inspectOrigin,
@@ -91,19 +92,15 @@ export function VisitorHelp({
       if (buttonRef.current?.contains(target)) return;
       close();
     };
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
-    };
     window.addEventListener("mousedown", handlePointerDown);
-    window.addEventListener("keydown", handleKey);
     // It doesn't follow its anchor, so a scroll anywhere closes it.
     window.addEventListener("scroll", close, true);
     return () => {
       window.removeEventListener("mousedown", handlePointerDown);
-      window.removeEventListener("keydown", handleKey);
       window.removeEventListener("scroll", close, true);
     };
   }, [open, inspecting]);
+  useEscape(() => setAnchor(null), open && !inspecting);
 
   const shown = rewards.flatMap((r) => {
     const item = getItem(r.itemId);
@@ -141,7 +138,7 @@ export function VisitorHelp({
         createPortal(
           <div
             ref={popoverRef}
-            className="fixed z-150 rounded border border-border bg-bg-panel p-2 text-left text-ui text-text-dim shadow-lg"
+            className="fixed z-150 rounded border border-white/15 bg-bg-panel p-2 text-left text-ui text-text-dim shadow-lg"
             style={{
               width: POPOVER_WIDTH,
               top: anchor.bottom + ANCHOR_GAP,
@@ -156,7 +153,7 @@ export function VisitorHelp({
           >
             <div>{text}</div>
             {shown.length > 0 && (
-              <div className="mt-2 flex flex-col gap-1 border-t border-border pt-2">
+              <div className="mt-2 flex flex-col gap-1 border-t border-white/15 pt-2">
                 {shown.map(({ label: what, item, note }) => (
                   <button
                     key={what}

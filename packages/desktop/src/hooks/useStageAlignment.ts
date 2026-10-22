@@ -1,25 +1,16 @@
 import { type RefObject, useLayoutEffect, useSyncExternalStore } from "react";
 
 /**
- * Keeps the herzie's stage at the same height on Home and the Herzie view, so
- * the herzie doesn't jump when switching between them.
+ * Where Home's herzie stage sits, so a profile shown in Home's place (the
+ * player's own) stands its herzie in the same spot.
  *
  * Home positions its stage from the bottom (free space goes above it, so the
- * herzie stands on the level bar), while the Herzie view stacks from the top
- * (stage, deck, then the bag takes the rest). No fixed number lines those up,
- * so Home publishes how far below the top of its view the stage sits, and the
- * Herzie view positions its own stage (absolutely, behind the deck and bag)
- * at the same offset.
+ * herzie stands on the level bar). No fixed number gives that position, so
+ * Home publishes how far below the top of its view the stage sits.
  *
  * Home can only be measured while it's on screen (hidden views are
- * display:none). The app opens on Home, so in practice the offset is known
- * before the Herzie view is first shown; until then the Herzie view puts its
- * stage straight under its header and publishes that instead (Home's own
- * measurement replaces it as soon as Home is shown).
- *
- * The herzie itself isn't in either stage: main.tsx draws one shared
- * renderer at this offset over both views, so switching between them doesn't
- * reset it.
+ * display:none); until then the offset is null and a profile centres its
+ * herzie instead.
  */
 let homeStageOffset: number | null = null;
 const listeners = new Set<() => void>();
@@ -65,18 +56,8 @@ export function useReportHomeStage(
   }, [active, view, stage]);
 }
 
-/** The Herzie view: publish its fallback stage position while Home hasn't
- * been measured, so the shared herzie has somewhere to stand. */
-export function useFallbackStageOffset(offset: number, active: boolean) {
-  useLayoutEffect(() => {
-    if (active && homeStageOffset === null && offset > 0) {
-      setHomeStageOffset(offset);
-    }
-  }, [offset, active]);
-}
-
 /** Where Home's stage sits below the top of its view, or null if Home hasn't
- * been on screen yet. The Herzie view places its own stage there. */
+ * been on screen yet. */
 export function useHomeStageOffset(): number | null {
   return useSyncExternalStore(subscribe, () => homeStageOffset);
 }

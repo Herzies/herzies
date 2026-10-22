@@ -10,6 +10,8 @@ import {
 } from "@herzies/shared";
 import { HerzieView } from "@herzies/shared/gl";
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
+import { useHerzieStage } from "../lib/overlayStage";
 import { useWindowFocused } from "../tauri-bridge";
 
 // Each set's effect is its own overlay below, so they're looked up by id.
@@ -25,6 +27,9 @@ export const HERZIE_STAGE_HEIGHT = 240;
 /** How far above the stage's bottom edge a grounded herzie's feet sit — a
  * little above dropped items, which sit at the stage's `bottom-2`. */
 const STAGE_FLOOR_INSET = 24;
+
+/** The app window's width when not expanded (tauri.conf.json). */
+const SMALL_WINDOW_WIDTH = 380;
 
 interface Props {
   userId: string;
@@ -67,7 +72,7 @@ export function HerzieWithSky({
   creatureParams,
   dangleConfig,
   threadConfig,
-  showSky = true,
+  showSky: showSkyProp = true,
   draggable,
   paused: pausedProp = false,
   grounded = false,
@@ -89,6 +94,20 @@ export function HerzieWithSky({
     return () => window.removeEventListener("resize", onResize);
   }, [size]);
 
+  // Inside an overlay window the herzie draws on the window's stage, and
+  // its sky goes into the window's panel (portalled into its sky slot,
+  // spanning the panel) instead of fixed across the whole app window.
+  const { stage: onStage, inOverlay, skySlot } = useHerzieStage();
+  const showSky = showSkyProp && (!inOverlay || !!skySlot);
+  const panelWidth = skySlot?.clientWidth ?? 0;
+  const skyCols =
+    inOverlay && panelWidth > 0
+      ? Math.floor(panelWidth / (size * 0.6))
+      : windowCols;
+  const skyBox: React.CSSProperties = inOverlay
+    ? { position: "absolute", top: 0, left: 0, width: "100%" }
+    : { position: "fixed", top: 0, left: 0, width: "100vw" };
+
   const focused = useWindowFocused();
   const paused = !focused || pausedProp;
 
@@ -109,17 +128,15 @@ export function HerzieWithSky({
   const prismaticMask =
     "linear-gradient(to bottom, black 0%, black 40%, transparent 85%)";
 
-  return (
+  const sky = (
     <>
       {showSky && prismaticActive && (
         <div
           aria-hidden="true"
-          className="animate-prismatic pointer-events-none fixed"
+          className="animate-prismatic pointer-events-none"
           style={{
-            top: 0,
-            left: 0,
-            width: "100vw",
-            height: "45vh",
+            ...skyBox,
+            height: inOverlay ? "45%" : "45vh",
             background:
               "linear-gradient(120deg, #ff5f6d, #ffc371, #f9f871, #6dffb0, #6dc9ff, #a06dff, #ff6df3)",
             backgroundSize: "220% 220%",
@@ -135,24 +152,34 @@ export function HerzieWithSky({
         <Sky
           userId={userId}
           isPlaying={isPlaying}
-          cols={windowCols}
+          cols={skyCols}
           variant={scenery}
           size={size}
           paused={paused || animate === false}
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            width: "100vw",
-            zIndex: 0,
-          }}
+          style={{ ...skyBox, zIndex: 0 }}
         />
       )}
+    </>
+  );
+
+  return (
+    <>
+      {inOverlay && skySlot ? createPortal(sky, skySlot) : sky}
       <HerzieView
         userId={userId}
         stage={stage}
         size={size}
-        cols={showSky ? windowCols : undefined}
+        // Spanning the app window, matching the sky's columns. The columns
+        // also set how big the herzie is drawn, so inside an overlay window
+        // it's laid out for the app's small window (as Home is), whatever
+        // the window's size; the panel clips the overflow.
+        cols={
+          inOverlay
+            ? Math.floor(SMALL_WINDOW_WIDTH / (size * 0.6))
+            : showSky
+              ? windowCols
+              : undefined
+        }
         animate={animate}
         isPlaying={isPlaying}
         equipped={equipped}
@@ -165,8 +192,9 @@ export function HerzieWithSky({
         zoom={zoom}
         offsetY={offsetY}
         armed={armed}
+        onStage={onStage}
         wrapperStyle={
-          showSky
+          showSky && !inOverlay
             ? {
                 position: "relative",
                 width: "100vw",

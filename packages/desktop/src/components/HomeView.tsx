@@ -14,14 +14,8 @@ import {
 import { useRef, useState } from "react";
 import { useReportHomeStage } from "../hooks/useStageAlignment";
 import { cn } from "../lib/utils";
-import {
-  type AppState,
-  herzies,
-  useGhostMode,
-  useWindowPinned,
-} from "../tauri-bridge";
+import { type AppState, herzies, useGhostMode } from "../tauri-bridge";
 import { HERZIE_STAGE_HEIGHT } from "./HerzieWithSky";
-import { HEADER_ICON_HIT } from "./headerIconHit";
 import { ModifiersButton } from "./ModifiersButton";
 import { ExpBar } from "./SquareBar";
 import { StatsButton } from "./StatsButton";
@@ -47,7 +41,6 @@ const DROP_EXIT_MS = 260;
 export function HomeView({
   state,
   onOpenProfile,
-  onOpenSettings,
   onActivity,
   active = true,
 }: {
@@ -60,7 +53,6 @@ export function HomeView({
   active?: boolean;
   /** Open the viewer's own profile (same layout as other herzies'). */
   onOpenProfile?: () => void;
-  onOpenSettings?: () => void;
   /** Surfaces a line in the activity log (e.g. a refused pickup). */
   onActivity?: (message: string) => void;
 }) {
@@ -89,7 +81,6 @@ export function HomeView({
     herzie?.statPoints,
     herzie?.level,
   );
-  const pinned = useWindowPinned();
   const ghostMode = useGhostMode();
 
   // Real drops have no ground position of their own (the server only tracks
@@ -187,16 +178,6 @@ export function HomeView({
     }, DROP_EXIT_MS);
   };
 
-  const togglePin = () => {
-    // setWindowPinned updates the shared pinned cache synchronously, so the
-    // UI (and animation pausing) reflects the toggle immediately.
-    herzies.setWindowPinned(!pinned).catch(() => {});
-  };
-
-  const toggleGhostMode = () => {
-    herzies.setGhostMode(!ghostMode).catch(() => {});
-  };
-
   // The Herzie view lines its stage up with this one (see useStageAlignment).
   const viewRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -229,108 +210,13 @@ export function HomeView({
           )}
           <StatsButton stats={stats} />
           <ModifiersButton multipliers={multipliers} />
-          <Tooltip label={pinned ? "Unpin window" : "Pin window"}>
-            <button
-              type="button"
-              onClick={togglePin}
-              className={cn(
-                HEADER_ICON_HIT,
-                "flex h-5 w-5 cursor-pointer items-center justify-center rounded-lg border-none p-0",
-                pinned
-                  ? "bg-transparent text-cyan"
-                  : "bg-transparent text-text-dim hover:text-text",
-              )}
-            >
-              <svg
-                width="11"
-                height="11"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-label={pinned ? "Window pinned" : "Pin window"}
-                role="img"
-              >
-                <path d="M12 17v5" />
-                <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
-              </svg>
-            </button>
-          </Tooltip>
-          <Tooltip label={ghostMode ? "Resume tracking" : "Pause tracking"}>
-            <button
-              type="button"
-              onClick={toggleGhostMode}
-              className={cn(
-                HEADER_ICON_HIT,
-                "flex h-5 w-5 cursor-pointer items-center justify-center rounded-lg border-none p-0",
-                ghostMode
-                  ? "bg-transparent text-purple"
-                  : "bg-transparent text-text-dim hover:text-text",
-              )}
-            >
-              <svg
-                width="11"
-                height="11"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-label={ghostMode ? "Ghost mode on" : "Ghost mode"}
-                role="img"
-              >
-                <path d="M9 10h.01" />
-                <path d="M15 10h.01" />
-                <path d="M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8z" />
-              </svg>
-            </button>
-          </Tooltip>
-          <Tooltip label="Settings">
-            <button
-              type="button"
-              onClick={onOpenSettings}
-              className={cn(
-                HEADER_ICON_HIT,
-                "flex h-5 w-5 cursor-pointer items-center justify-center rounded-lg border-none bg-transparent p-0 text-text-dim hover:text-text",
-              )}
-            >
-              <svg
-                width="11"
-                height="11"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-label="Settings"
-                role="img"
-              >
-                <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-              </svg>
-            </button>
-          </Tooltip>
-          {/* A heart rather than the word: whole when connected, broken when
-              not. The tooltip says it in words for anyone who wants it. */}
-          <Tooltip label={isConnected ? "Connected" : "Offline"}>
-            <span
-              role="img"
-              aria-label={isConnected ? "Connected" : "Offline"}
-              className={cn(
-                // `top-px`: a glyph's ink sits about a pixel above its line box's
-                // centre, unlike the icons beside it, which are centred by their
-                // drawn shape.
-                "relative top-px flex h-5 cursor-default items-center px-1 text-[10px] leading-none",
-                isConnected ? "text-green" : "text-text-dim",
-              )}
-            >
-              {isConnected ? "<3" : "</3"}
-            </span>
-          </Tooltip>
+          {/* Room for the nav (Home/World and Menu), which main.tsx puts
+              over this corner, fixed, on every screen. */}
+          <div
+            aria-hidden="true"
+            className="shrink-0"
+            style={{ width: "var(--nav-width, 0px)" }}
+          />
         </div>
       </div>
 
@@ -456,7 +342,7 @@ export function HomeView({
           the track card's own height. */}
       <div className="relative z-10 flex h-16 shrink-0 flex-col">
         {ghostMode ? (
-          <div className="border-t border-border pt-1.5 pb-2">
+          <div className="border-t border-white/15 pt-1.5 pb-2">
             <div className="flex items-center gap-2">
               <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded bg-purple/15 text-purple">
                 <svg
@@ -491,10 +377,10 @@ export function HomeView({
             albumArtUrl={nowPlaying.albumArtUrl}
             artistImageUrl={nowPlaying.artistImageUrl}
             tags={nowPlaying.tags}
-            className="border-t border-border pt-1.5 pb-2"
+            className="border-t border-white/15 pt-1.5 pb-2"
           />
         ) : (
-          <div className="flex flex-1 items-center justify-center border-t border-border">
+          <div className="flex flex-1 items-center justify-center border-t border-white/15">
             <div className="text-center text-[10px] text-text-dim">
               Play some music to start earning XP
             </div>

@@ -7,6 +7,7 @@ import {
 } from "@herzies/shared";
 import { useEffect, useState } from "react";
 import { useHomeStageOffset } from "../hooks/useStageAlignment";
+import { useHerzieStage } from "../lib/overlayStage";
 import { cn } from "../lib/utils";
 import { BackButton } from "./BackButton";
 import { HERZIE_STAGE_HEIGHT, HerzieWithSky } from "./HerzieWithSky";
@@ -92,7 +93,10 @@ export function ProfileView({
   // or a profile cached before the field existed) fall back to summing what is
   // equipped, which is right except for upgrade levels.
   const stats = profile.stats ?? getHerzieStats(profile.equipped);
-  const homeStageOffset = useHomeStageOffset();
+  // Lined up with Home's herzie when shown in Home's place; inside an
+  // overlay window (Social) Home's offset means nothing, so it's centred.
+  const homeOffset = useHomeStageOffset();
+  const homeStageOffset = useHerzieStage().inOverlay ? null : homeOffset;
 
   return (
     <View
@@ -188,7 +192,7 @@ export function ProfileView({
             ) : null}
           </div>
         )}
-        <div className="mb-2 flex gap-1 border-b border-border text-ui">
+        <div className="mb-2 flex gap-1 border-b border-white/15 text-ui">
           <TabButton
             colour="cyan"
             active={tab === "music"}
@@ -224,7 +228,7 @@ export function ProfileView({
               {shownStatKeys(stats).map((key) => (
                 <div
                   key={key}
-                  className="flex justify-between border-b border-[#222] py-0.5 text-ui last:border-b-0"
+                  className="flex justify-between border-b border-white/15 py-0.5 text-ui last:border-b-0"
                 >
                   <span className="text-text-dim">{STAT_LABELS[key]}</span>
                   <span
@@ -237,12 +241,12 @@ export function ProfileView({
             </div>
           ) : !isFriend ? (
             <div>
-              <div className="text-ui-sm text-[#444]">
+              <div className="text-ui-sm text-text-dim">
                 Become friends to share music
               </div>
             </div>
           ) : profile.listeningHidden ? (
-            <div className="text-ui-sm text-[#444]">
+            <div className="text-ui-sm text-text-dim">
               {tab === "music" && isListening(profile)
                 ? `${profile.name} is listening, but keeps what to themselves`
                 : `${profile.name} keeps their listening private`}
@@ -262,14 +266,14 @@ export function ProfileView({
                 meta={formatTimeAgo(profile.lastPlayed.listenedAt)}
               />
             ) : (
-              <div className="text-ui-sm text-[#444]">Nothing played yet</div>
+              <div className="text-ui-sm text-text-dim">Nothing played yet</div>
             )
           ) : topArtists.length > 0 ? (
             <div>
               {topArtists.map((a, i) => (
                 <div
                   key={a.name}
-                  className="flex justify-between border-b border-[#222] py-0.5 text-ui last:border-b-0"
+                  className="flex justify-between border-b border-white/15 py-0.5 text-ui last:border-b-0"
                 >
                   <span className="text-text">
                     {i + 1}. {a.name}
@@ -279,7 +283,7 @@ export function ProfileView({
               ))}
             </div>
           ) : (
-            <div className="text-ui-sm text-[#444]">No top artists yet</div>
+            <div className="text-ui-sm text-text-dim">No top artists yet</div>
           )}
         </div>
       </div>
