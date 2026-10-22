@@ -17,7 +17,12 @@ import {
 import { cn } from "../lib/utils";
 import type { ChatMessage } from "../tauri-bridge";
 import { LoadingSplash } from "./LoadingSplash";
-import { PLAYER_CARD, PLAYER_CARD_TOWN, PlayerBars } from "./PlayerBars";
+import {
+  observePlayerCard,
+  PLAYER_CARD,
+  PLAYER_CARD_TOWN,
+  PlayerBars,
+} from "./PlayerBars";
 import { type EventCard, formatIn, isDown } from "./TownScene";
 import { TownVitals } from "./TownVitals";
 import { BossHud } from "./town/BossHud";
@@ -219,25 +224,28 @@ export function TownWorld({
   }, [lookKey, net]);
 
   const talkTo = near?.card.openKey;
-  // Where combat's allowed, the keys for it: sat right on top of the XP
-  // bar (or in the corner, without one).
-  const combatHint =
-    map.combat && !paused ? (
-      <div
-        className={cn(
-          "pointer-events-none absolute z-30 flex items-center gap-2 rounded bg-black/55 px-1.5 py-1 text-[10px] text-white/80",
-          profile
-            ? "bottom-full left-2 mb-1.5"
-            : chatOverlay
-              ? "bottom-[calc(var(--dock-height,0px)+4.5rem)] left-2"
-              : "bottom-3 left-2",
-        )}
-      >
-        <span>
-          <Key>Tab</Key> {fighting ? "roam" : "aim"}
+  // The key for aim mode (anywhere in the Town): sat right on top of the
+  // bars (or in the corner, without them).
+  const combatHint = !paused ? (
+    <div
+      className={cn(
+        // No box: the key chip, and the word over the world with a shadow.
+        "pointer-events-none absolute z-30 flex items-center gap-2 text-[10px] text-white/80",
+        profile
+          ? "bottom-full left-0"
+          : chatOverlay
+            ? "bottom-[calc(var(--dock-height,0px)+4.5rem)] left-2"
+            : "bottom-3 left-2",
+      )}
+    >
+      <span>
+        <Key>Tab</Key>{" "}
+        <span className="[text-shadow:0_1px_2px_#000]">
+          {fighting ? "roam" : "aim"}
         </span>
-      </div>
-    ) : null;
+      </span>
+    </div>
+  ) : null;
 
   const hudFade = cn(
     "transition-opacity duration-300",
@@ -263,6 +271,7 @@ export function TownWorld({
             {/* Top left, a frosted card: name and level, then health and
                 experience — as on Home, so nothing shifts between the two. */}
             <div
+              ref={observePlayerCard}
               className={cn(
                 "absolute top-3 left-3 z-30",
                 PLAYER_CARD,
@@ -287,21 +296,22 @@ export function TownWorld({
             </div>
             <div
               className={cn(
-                "pointer-events-none absolute inset-x-0 z-30 px-3 py-2",
-                chatOverlay ? "bottom-[var(--dock-height,0px)]" : "bottom-0",
+                // A zero-height line 12px above the chat (or the window's
+                // bottom), 12px in from each side, as the chat is: the aim
+                // hint, the hotbar and the skills stand on it, flush with
+                // its ends and centred.
+                "pointer-events-none absolute inset-x-3 z-30 h-0",
+                chatOverlay
+                  ? "bottom-[calc(var(--dock-height,0px)+12px)]"
+                  : "bottom-3",
               )}
             >
               {combatHint}
-              {!paused ? (
-                <SkillHud
-                  usable={!!map.combat}
-                  className="bottom-full right-2 mb-1.5"
-                />
-              ) : null}
+              {!paused ? <SkillHud className="bottom-full right-0" /> : null}
               {!paused ? (
                 <Hotbar
                   units={units}
-                  className="bottom-full left-1/2 mb-1.5 -translate-x-1/2"
+                  className="bottom-full left-1/2 -translate-x-1/2"
                 />
               ) : null}
             </div>
@@ -321,7 +331,6 @@ export function TownWorld({
         )}
         {profile || paused ? null : (
           <SkillHud
-            usable={!!map.combat}
             className={
               chatOverlay
                 ? "bottom-[calc(var(--dock-height,0px)+4.5rem)] right-2"

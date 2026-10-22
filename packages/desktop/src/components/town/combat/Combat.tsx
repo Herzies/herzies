@@ -50,6 +50,7 @@ import {
   entityAt,
   mySkillReady,
   noteSkillCast,
+  queueMySkill,
   setBuff,
   skills,
   startMyCooldown,
@@ -112,7 +113,9 @@ export function Combat({
   const surface = useThree((s) => s.gl.domElement);
   const statsRef = useRef(stats);
   statsRef.current = stats;
-  const canFight = !!map.combat && active;
+  // Aim mode works anywhere in the Town, not just where there's something
+  // to fight (map.combat).
+  const canFight = active;
 
   // Combat mode's keys and buttons.
   useEffect(() => {
@@ -148,13 +151,11 @@ export function Combat({
         e.preventDefault();
         if (!e.repeat) combat.queuedAt = performance.now();
         combat.fireHeld = true;
-      } else if (
-        (e.code === "KeyQ" || e.code === "Digit1") &&
-        !e.repeat &&
-        skills.mine
-      ) {
+      } else if (e.code === "KeyQ" && !e.repeat && skills.mine) {
+        // Q stays a shortcut for your class skill, wherever it sits on the
+        // hotbar (its number key is the hotbar's: town/input.ts).
         e.preventDefault();
-        skillQueuedAt = performance.now();
+        queueMySkill();
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {
@@ -397,10 +398,10 @@ export function Combat({
     if (
       herzie &&
       mine &&
-      now - skillQueuedAt < CAST_BUFFER_MS &&
+      now - skills.queuedAt < CAST_BUFFER_MS &&
       mySkillReady(now)
     ) {
-      skillQueuedAt = Number.NEGATIVE_INFINITY;
+      skills.queuedAt = Number.NEGATIVE_INFINITY;
       const seq = startMyCooldown(now);
       herzie.root.getWorldPosition(chest);
       chest.y += herzie.height * 0.55;
@@ -689,10 +690,6 @@ function flatToward(
   const n = Math.hypot(dx, dz) || 1;
   return [dx / n, 0, dz / n];
 }
-
-/** When the skill key was last pressed (performance.now() ms): kept for
- * CAST_BUFFER_MS, so a press just before it's ready still goes off. */
-let skillQueuedAt = Number.NEGATIVE_INFINITY;
 
 /** Out of combat mode, letting the mouse go. */
 function leave() {

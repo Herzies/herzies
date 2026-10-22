@@ -24,6 +24,7 @@ export function OverlayWindow({
   label,
   children,
   narrow = false,
+  onHome = false,
   fit = false,
   className,
   onClosed,
@@ -36,6 +37,9 @@ export function OverlayWindow({
   /** Keep to the small window's size, top left (the Town's big window,
    * whose chat keeps that width too). */
   narrow?: boolean;
+  /** Over Home: at the bottom of the window, on clearer glass, so the herzie
+   * stays in view above and through it. */
+  onHome?: boolean;
   /** As tall as its content (up to the full height), from the top, rather
    * than the whole height. */
   fit?: boolean;
@@ -57,7 +61,25 @@ export function OverlayWindow({
     setPhase(open ? "open" : "closing");
   }
 
-  useEscape(onClose, open);
+  const isTop = useEscape(onClose, open);
+  const panel = useRef<HTMLDivElement>(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  // A press anywhere outside closes it — unless something's open over it
+  // (an item inspect, a menu, a prompt: those close first), or it's on the
+  // nav or the drag strip (data-window-safe), which do their own thing.
+  useEffect(() => {
+    if (!open) return;
+    const down = (e: PointerEvent) => {
+      const t = e.target as Element | null;
+      if (!t || panel.current?.contains(t)) return;
+      if (t.closest("[data-window-safe]")) return;
+      if (!isTop()) return;
+      closeRef.current();
+    };
+    window.addEventListener("pointerdown", down, true);
+    return () => window.removeEventListener("pointerdown", down, true);
+  }, [open, isTop]);
 
   // The herzies inside draw on the overlay stage, hosted in whichever
   // window is open (only one is at a time).
@@ -79,28 +101,40 @@ export function OverlayWindow({
   return (
     <div
       className={cn(
-        // From under the nav's row (top-3, 20px: 32px; the panel's inset
-        // puts it 6px below) to the window's bottom. No backdrop: around the
-        // panel, what's underneath (the Town, walking and all) stays as it
-        // is and takes its own clicks.
-        "pointer-events-none fixed inset-x-0 top-8 bottom-0 z-60",
-        // In the Town's big window: the small window's size, top left, in
-        // line with the Town's name and level above it.
-        narrow &&
-          "bottom-auto h-[calc(var(--small-window-height)-32px)] max-h-[calc(100vh-32px)]",
+        // No backdrop: around the panel, what's underneath (the Town,
+        // walking and all; Home's herzie) stays as it is and takes its own
+        // clicks.
+        "pointer-events-none fixed inset-x-0 z-60",
+        narrow
+          ? // In the Town's big window: the small window's size, top left,
+            // 8px under the player card (the panel's inset is the other 6)
+            // and in line with it.
+            "top-[calc(var(--player-card-bottom,32px)+2px)] h-[calc(var(--small-window-height)-var(--player-card-bottom,32px)-2px)] max-h-[calc(100vh-var(--player-card-bottom,32px)-2px)]"
+          : onHome && !fit
+            ? // On Home: the lower part of the window, the herzie above.
+              "top-[40%] bottom-0"
+            : fit
+              ? // From under the nav's row (top-3, 20px: 32px; the panel's
+                // inset puts it 6px below), as tall as it needs.
+                "top-8 bottom-0"
+              : // In the Town: from under the nav, the upper part of the
+                // window, leaving the herzie in view below.
+                "top-8 bottom-[40%]",
         closed && "hidden",
       )}
       data-tauri-drag-region="false"
     >
       <div
+        ref={panel}
         role="dialog"
         aria-label={label}
         className={cn(
           "pointer-events-auto absolute inset-1.5 overflow-hidden rounded-2xl border border-white/12 shadow-[0_18px_50px_-12px_rgba(0,0,0,0.7)]",
           narrow && "left-3 right-auto w-[356px]",
           // A column, so the content shrinks (and scrolls) if it can't fit.
-          // Hangs from under the nav.
-          fit && "bottom-auto flex max-h-[calc(100%-12px)] flex-col",
+          // Hangs from under the nav; on Home, rests on the window's bottom.
+          fit && "flex max-h-[calc(100%-12px)] flex-col",
+          fit && (onHome && !narrow ? "top-auto" : "bottom-auto"),
           closing && "pointer-events-none",
           anim,
         )}
@@ -114,7 +148,11 @@ export function OverlayWindow({
         <div
           aria-hidden="true"
           className={cn(
-            "pointer-events-none absolute inset-0 rounded-2xl bg-bg-panel/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-xl backdrop-saturate-150",
+            "pointer-events-none absolute inset-0 rounded-2xl shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-saturate-150",
+            // On Home, clearer glass: the herzie shows through it.
+            onHome && !narrow
+              ? "bg-bg-panel/30 backdrop-blur-md"
+              : "bg-bg-panel/50 backdrop-blur-xl",
             fade,
           )}
         />
@@ -124,11 +162,34 @@ export function OverlayWindow({
           aria-hidden="true"
           className={cn("pointer-events-none absolute inset-0", fade)}
         />
+        {/* Close. In its own strip along the top (the content starts under
+            it), so it never sits on a view's own header buttons. */}
+        <button
+          type="button"
+          aria-label={`Close ${label}`}
+          onClick={onClose}
+          className={cn(
+            "absolute top-1.5 right-1.5 z-10 flex size-5 cursor-pointer items-center justify-center rounded-full border-none bg-transparent p-0 text-text-dim hover:bg-white/10 hover:text-text",
+            fade,
+          )}
+        >
+          <svg
+            viewBox="0 0 10 10"
+            className="size-2.5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            aria-hidden="true"
+          >
+            <path d="M2 2l6 6M8 2l-6 6" />
+          </svg>
+        </button>
         <HerzieStageContext.Provider value={stageContext}>
           <div ref={host} className="pointer-events-none absolute inset-0" />
           <div
             className={cn(
-              "relative flex min-h-0 flex-col px-2.5 pt-3 pb-2",
+              "relative flex min-h-0 flex-col px-2.5 pt-6 pb-2",
               !fit && "h-full",
               fade,
               className,

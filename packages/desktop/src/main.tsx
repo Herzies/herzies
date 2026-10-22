@@ -1049,12 +1049,9 @@ function App() {
         <div
           className={cn(
             "relative h-0 shrink-0",
-            // Under a window too: blurred through its glass, it's just a blob.
-            (base !== "home" ||
-              !!overlay ||
-              !!leavingOverlay ||
-              herzieStageTop === null) &&
-              "hidden",
+            // Kept under a window: Home's windows sit low on clearer glass,
+            // so the herzie stays in view.
+            (base !== "home" || herzieStageTop === null) && "hidden",
           )}
         >
           <div
@@ -1070,7 +1067,7 @@ function App() {
                   ? withClassGear(state.equipped, classOverride)
                   : state.equipped
               }
-              paused={base !== "home" || !!overlay || !!leavingOverlay}
+              paused={base !== "home"}
               grounded
             />
           </div>
@@ -1182,6 +1179,7 @@ function App() {
           the drag attribute (Tauri only drags from the element that has it). */}
       <div
         data-tauri-drag-region
+        data-window-safe
         className="group fixed inset-x-0 top-0 z-80 flex h-2 cursor-grab justify-center active:cursor-grabbing"
       >
         <div className="pointer-events-none mt-[3px] h-[3px] w-9 rounded-full bg-white/20 transition-colors group-hover:bg-white/45" />
@@ -1191,7 +1189,13 @@ function App() {
           (z-60), which start under its row. In the header's 20px row (the
           app's 12px top margin), level with Home's name and the Town's. */}
       {herzie && (
-        <div ref={observeNav} className="fixed top-3 right-3 z-65">
+        // data-window-safe: a press here isn't "outside" an open window (the
+        // nav switches or closes windows itself).
+        <div
+          ref={observeNav}
+          data-window-safe
+          className="fixed top-3 right-3 z-65"
+        >
           <TabBar
             view={view}
             base={base}
@@ -1233,6 +1237,7 @@ function App() {
           onClose={closeWindow}
           label="Profile"
           narrow={bigWindow}
+          onHome={base === "home"}
         >
           {selfProfile ? (
             <ProfileView
@@ -1286,6 +1291,7 @@ function App() {
             onClose={closeWindow}
             label="Deck and bag"
             narrow={bigWindow}
+            onHome={base === "home"}
             fit
           >
             <div
@@ -1328,6 +1334,7 @@ function App() {
           onClose={closeWindow}
           label="Stats"
           narrow={bigWindow}
+          onHome={base === "home"}
         >
           <h1 className="mb-2 text-ui-lg font-bold text-cyan">Stats</h1>
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
@@ -1350,6 +1357,7 @@ function App() {
           onClose={closeWindow}
           label="Skills"
           narrow={bigWindow}
+          onHome={base === "home"}
         >
           <h1 className="mb-2 text-ui-lg font-bold text-cyan">Skills</h1>
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
@@ -1365,6 +1373,7 @@ function App() {
           onClose={closeWindow}
           label="Social"
           narrow={bigWindow}
+          onHome={base === "home"}
         >
           <FriendsView
             herzie={herzie}
@@ -1395,6 +1404,7 @@ function App() {
           onClose={closeWindow}
           label="Trade"
           narrow={bigWindow}
+          onHome={base === "home"}
         >
           <TradeView
             key={tradeViewGeneration}
@@ -1423,6 +1433,7 @@ function App() {
         onClose={closeWindow}
         label="Premium"
         narrow={bigWindow}
+        onHome={base === "home"}
       >
         <StoreView
           inventory={state.inventory}
@@ -1439,6 +1450,7 @@ function App() {
         onClose={closeWindow}
         label="Settings"
         narrow={bigWindow}
+        onHome={base === "home"}
       >
         <SettingsView
           state={state}

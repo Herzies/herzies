@@ -5,6 +5,20 @@ import { ModifiersButton } from "./ModifiersButton";
 import { ExpBar, HpBar } from "./SquareBar";
 import { refreshVitals, useLiveHp } from "./town/vitals";
 
+/** Publishes the Town's player card's bottom edge (from the window's top)
+ * as `--player-card-bottom`: the Town's big window hangs its windows under
+ * it (OverlayWindow). */
+const cardObserver = new ResizeObserver(([entry]) => {
+  document.documentElement.style.setProperty(
+    "--player-card-bottom",
+    `${(entry.target as HTMLElement).getBoundingClientRect().bottom}px`,
+  );
+});
+export function observePlayerCard(el: HTMLElement | null) {
+  cardObserver.disconnect();
+  if (el) cardObserver.observe(el);
+}
+
 /** The card they sit in with the name and level, top left on Home and in
  * the Town: frosted, rounded, at least a third of the window wide. Its tint
  * matches the chat card's where it is: PLAYER_CARD_HOME / PLAYER_CARD_TOWN. The card

@@ -1,29 +1,42 @@
 import {
   CONSUMABLE_COOLDOWN_MS,
+  describeSkill,
   getItem,
   ItemTypeIcon,
   type ItemUnit,
+  SKILL_DEFS,
+  type SkillId,
 } from "@herzies/shared";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../../lib/utils";
 import { DeckSlotPicker, type PickerOption } from "../DeckSlotPicker";
 import { Tooltip } from "../Tooltip";
+import { queueMySkill, skills, useSkills } from "./combat/skills";
 import { eat, useLastEat } from "./eat";
 import {
   assignHotbar,
   clearHotbar,
   HOTBAR_KEYS,
   type HotbarKey,
+  SKILL_SLOT,
   useHotbar,
 } from "./hotbarSlots";
 
+/** A skill's letters on its hotbar slot. */
+const SKILL_ABBR: Record<SkillId, string> = {
+  backspin: "BS",
+  "soothing-drones": "SD",
+  cymbrella: "CB",
+};
+
 /**
- * The three consumable slots, on keys 2, 3 and 4: each shows its key, the
- * item, and how many are left in the bank. Empty or eaten-out slots are
- * dimmed; hovering one names it. Click a filled slot to eat from it; click
- * an empty one (or right-click any) to pick what goes there — the same
- * list the deck's empty slots open. The bank's right-click menu fills them
- * too.
+ * The four slots, on keys 1-4: each holds a consumable (its icon and how
+ * many are left in the bank) or your class skill (its letters, greyed while
+ * it cools down, with the seconds left). Empty or eaten-out slots are
+ * dimmed; hovering one names it (a skill, with what it does). Click a
+ * filled slot to use it; click an empty one (or right-click any) to pick
+ * what goes there — your skill or a consumable, the list the deck's empty
+ * slots open. The bank's right-click menu fills them too.
  */
 export function Hotbar({
   units,
@@ -34,7 +47,29 @@ export function Hotbar({
   className?: string;
 }) {
   const slots = useHotbar();
+  useSkills();
+  const mine = skills.mine;
   const lastEat = useLastEat();
+  // The skill's cooldown runs off the frame clock, not renders: a shade
+  // over the slot, shrinking from the top, and the seconds left.
+  const skillShade = useRef<HTMLSpanElement>(null);
+  const skillSecs = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    let raf = 0;
+    const step = () => {
+      const id = skills.mine?.id;
+      if (id && skillShade.current && skillSecs.current) {
+        const left = Math.max(0, skills.readyAt - performance.now());
+        const f = Math.min(1, left / SKILL_DEFS[id].cooldownMs);
+        skillShade.current.style.height = `${f * 100}%`;
+        skillSecs.current.textContent =
+          f > 0 ? String(Math.ceil(left / 1000)) : "";
+      }
+      raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, []);
   // Re-render once the cooldown's over, to drop the flash.
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -79,6 +114,68 @@ export function Hotbar({
   return (
     <div className={cn("absolute z-30 flex gap-1", className)}>
       {HOTBAR_KEYS.map((key) => {
+        if (slots[key] === SKILL_SLOT) {
+          const def = mine ? SKILL_DEFS[mine.id] : null;
+          return (
+            <Tooltip
+              key={key}
+              label={
+                mine && def ? (
+                  <div className="w-[180px] whitespace-normal">
+                    <div className="font-bold">
+                      {def.name}{" "}
+                      <span className="font-normal text-text-dim">
+                        Lv. {mine.level}
+                      </span>
+                    </div>
+                    <div className="text-text-dim">
+                      {describeSkill(mine.id, mine.level)}
+                    </div>
+                  </div>
+                ) : (
+                  "Your class skill — pick a class first"
+                )
+              }
+            >
+              <button
+                type="button"
+                aria-label={def ? `${key}: ${def.name}` : `${key}: class skill`}
+                onClick={(e) => {
+                  if (mine) queueMySkill();
+                  else openPicker(key, e);
+                }}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  openPicker(key, e);
+                }}
+                className={cn(
+                  "pointer-events-auto relative flex size-9 cursor-pointer items-center justify-center overflow-hidden rounded border border-white/20 bg-black/55 p-0",
+                  !mine && "opacity-45 hover:opacity-80",
+                )}
+              >
+                {/* Q casts it too, wherever it sits. */}
+                <span className="absolute top-0 left-0.5 text-[9px] leading-none text-white/70">
+                  {key}/Q
+                </span>
+                <span className="text-[11px] font-bold text-white">
+                  {mine ? SKILL_ABBR[mine.id] : "—"}
+                </span>
+                {/* Cooling down: a shade over it, and the seconds left. */}
+                <span
+                  ref={skillShade}
+                  aria-hidden
+                  className="absolute inset-x-0 top-0 bg-black/60"
+                  style={{ height: 0 }}
+                />
+                <span
+                  ref={skillSecs}
+                  // Where an item slot shows its count.
+                  className="absolute right-0.5 bottom-0 text-[9px] leading-none text-white tabular-nums"
+                />
+              </button>
+            </Tooltip>
+          );
+        }
         const itemId = slots[key];
         const item = itemId ? getItem(itemId) : undefined;
         const count = itemId
@@ -136,6 +233,23 @@ export function Hotbar({
           y={picker.y}
           slotLabel={`Hotbar ${picker.key}`}
           options={options}
+          extra={
+            mine && slots[picker.key] !== SKILL_SLOT ? (
+              <button
+                type="button"
+                className="flex w-full cursor-pointer items-center gap-1.5 border-none bg-transparent px-3 py-1 text-left text-text hover:bg-white/5"
+                onClick={() => {
+                  assignHotbar(picker.key, SKILL_SLOT);
+                  setPicker(null);
+                }}
+              >
+                <span className="w-4 shrink-0 text-center text-[9px] font-bold text-cyan">
+                  {SKILL_ABBR[mine.id]}
+                </span>
+                <span className="truncate">{SKILL_DEFS[mine.id].name}</span>
+              </button>
+            ) : undefined
+          }
           onPick={({ itemId }) => {
             assignHotbar(picker.key, itemId);
             setPicker(null);

@@ -41,6 +41,10 @@ export const skills = {
   readyAt: 0,
   /** Ever-rising, echoed back in a refusal. */
   seq: 0,
+  /** When yours was last asked for (its hotbar key, or Q), performance.now()
+   * ms: kept for Combat's CAST_BUFFER_MS, so a press just before it's ready
+   * still goes off. */
+  queuedAt: Number.NEGATIVE_INFINITY,
   /** Buffs by entity id. */
   buffs: new Map<number, ActiveBuff[]>(),
   /** Skills used lately, newest last (for the effects; pruned by age). */
@@ -92,6 +96,12 @@ export function setMySkill(
   if (prev && next && prev.id === next.id && prev.level > next.level) return;
   skills.mine = next;
   emitSkills();
+}
+
+/** Ask to use yours (a key press): Combat casts it on the next frame it's
+ * ready. */
+export function queueMySkill(): void {
+  if (skills.mine) skills.queuedAt = performance.now();
 }
 
 /** Whether yours is ready at `now`. */

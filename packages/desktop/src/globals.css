@@ -474,16 +474,23 @@
 /* The panel slides on its margins, not a transform: a transform would make
    it the containing block for what's fixed inside it (the herzie canvas,
    popups), which then jump when it starts or ends. */
+/* The panel's own shadow and border fade with its layers (it can't take
+   an opacity itself: that would cut its glass off from the blur), so the
+   whole window comes and goes as one. */
 @keyframes overlay-panel-in {
   from {
     margin-top: 8px;
     margin-bottom: -8px;
+    box-shadow: 0 18px 50px -12px rgb(0 0 0 / 0);
+    border-color: rgb(255 255 255 / 0);
   }
 }
 @keyframes overlay-panel-out {
   to {
     margin-top: 4px;
     margin-bottom: -4px;
+    box-shadow: 0 18px 50px -12px rgb(0 0 0 / 0);
+    border-color: rgb(255 255 255 / 0);
   }
 }
 @keyframes overlay-layer-in {
@@ -505,22 +512,31 @@
   animation: overlay-panel-out 200ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 .overlay-fade-in {
-  animation: overlay-layer-in 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  animation: overlay-layer-in 260ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 .overlay-fade-out {
   animation: overlay-layer-out 200ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 /* Reduced motion: fades only. Still an animation on the panel, so the exit's
    animationend arrives and the window closes. */
-@keyframes overlay-panel-still {
+@keyframes overlay-panel-still-in {
+  from {
+    box-shadow: 0 18px 50px -12px rgb(0 0 0 / 0);
+    border-color: rgb(255 255 255 / 0);
+  }
+}
+@keyframes overlay-panel-still-out {
   to {
-    margin-top: 0;
+    box-shadow: 0 18px 50px -12px rgb(0 0 0 / 0);
+    border-color: rgb(255 255 255 / 0);
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .overlay-in,
+  .overlay-in {
+    animation-name: overlay-panel-still-in;
+  }
   .overlay-out {
-    animation-name: overlay-panel-still;
+    animation-name: overlay-panel-still-out;
   }
 }
 
