@@ -1,24 +1,19 @@
 import {
   bankCapacity,
   CARD_SHAPE_CLIP,
-  getHerzieStats,
-  getHerzieStatsFromUnits,
   getItem,
   hasPickupSpiritEquipped,
   hasRoomFor,
   ItemTypeIcon,
   isBankFull,
   levelProgress,
-  withStatPoints,
 } from "@herzies/shared";
 import { useRef, useState } from "react";
 import { useReportHomeStage } from "../hooks/useStageAlignment";
 import { cn } from "../lib/utils";
 import { type AppState, herzies, useGhostMode } from "../tauri-bridge";
 import { HERZIE_STAGE_HEIGHT } from "./HerzieWithSky";
-import { ModifiersButton } from "./ModifiersButton";
-import { ExpBar } from "./SquareBar";
-import { StatsButton } from "./StatsButton";
+import { PLAYER_CARD, PLAYER_CARD_HOME, PlayerBars } from "./PlayerBars";
 import { Tooltip } from "./Tooltip";
 import { TrackCard } from "./TrackCard";
 
@@ -34,6 +29,10 @@ interface GroundDrop {
 /** Keep drops off the very edges of the scene. */
 const DROP_X_MIN = 8;
 const DROP_X_MAX = 92;
+
+/** The now-playing card (a track, ghost mode, or nothing playing). */
+const NOW_PLAYING_CARD =
+  "h-full rounded-xl border border-white/12 bg-white/[0.03] px-2 py-1.5";
 
 /** How long the pick-up fade-and-rise plays before the drop actually leaves. */
 const DROP_EXIT_MS = 260;
@@ -63,24 +62,11 @@ export function HomeView({
     isConnected,
     equipped,
     inventory,
-    itemUpgrades,
-    units,
     pendingDrops,
     bankExpansions,
   } = state;
   const capacity = bankCapacity(bankExpansions);
   const [collectingIds, setCollectingIds] = useState<Set<string>>(new Set());
-  // Read off the copies, so each worn one counts at its OWN upgrade level. A
-  // cache from before copies existed has none yet, and falls back to the
-  // id-keyed levels until the first sync brings them.
-  // Stat points on top, as the server bills them.
-  const stats = withStatPoints(
-    units.length > 0
-      ? getHerzieStatsFromUnits(units)
-      : getHerzieStats(equipped, itemUpgrades),
-    herzie?.statPoints,
-    herzie?.level,
-  );
   const ghostMode = useGhostMode();
 
   // Real drops have no ground position of their own (the server only tracks
@@ -187,29 +173,42 @@ export function HomeView({
 
   return (
     <div ref={viewRef} className="flex h-full flex-col">
-      <div className="mb-1 flex items-center justify-between z-50">
-        <span className="text-ui-lg font-bold text-cyan">
-          <Tooltip label="View your profile">
-            <button
-              type="button"
-              onClick={onOpenProfile}
-              className="cursor-pointer font-bold text-cyan hover:underline"
-            >
-              {herzie.name}
-            </button>
-          </Tooltip>
-          <span className="ml-2 text-[10px] font-normal text-text-dim">
-            Lv. {herzie.level}
-          </span>
-        </span>
-        <div className="flex items-center gap-1.5">
+      {/* Top left, a frosted card: name and level, then health and
+          experience — at least a third of the window wide. z-50: over the
+          herzie canvas (z-index: 1), which would otherwise swallow the
+          bars' tooltips. Top right, room for the nav. */}
+      <div className="relative z-50 flex items-start justify-between gap-1.5">
+        <div className={cn(PLAYER_CARD, PLAYER_CARD_HOME)}>
+          <div className="flex h-5 items-center">
+            <span className="text-ui-lg font-bold whitespace-nowrap text-cyan">
+              <Tooltip label="View your profile">
+                <button
+                  type="button"
+                  onClick={onOpenProfile}
+                  className="cursor-pointer font-bold text-cyan hover:underline"
+                >
+                  {herzie.name}
+                </button>
+              </Tooltip>
+              <span className="ml-2 text-[10px] font-normal text-text-dim">
+                Lv. {herzie.level}
+              </span>
+            </span>
+          </div>
+          <PlayerBars
+            level={herzie.level}
+            progress={levelProgress(herzie)}
+            xp={herzie.xp}
+            multipliers={multipliers}
+            className="mt-1 text-text-dim"
+          />
+        </div>
+        <div className="flex h-5 items-center gap-1.5">
           {!isConnected && (
             <span className="text-[10px] text-red">
               connect to internet to grow
             </span>
           )}
-          <StatsButton stats={stats} />
-          <ModifiersButton multipliers={multipliers} />
           {/* Room for the nav (Home/World and Menu), which main.tsx puts
               over this corner, fixed, on every screen. */}
           <div
@@ -328,21 +327,13 @@ export function HomeView({
         )}
       </div>
 
-      {/* relative z-10, as the row below: the herzie canvas sets its own
-          z-index: 1 and would otherwise swallow the bar's hover tooltip. */}
-      <ExpBar
-        progress={levelProgress(herzie)}
-        level={herzie.level}
-        xp={herzie.xp}
-        className="relative z-10 mb-1.5 text-text-dim"
-      />
-
       {/* A fixed height whatever is in it — a track, ghost mode, or nothing —
           so the herzie above doesn't move when music starts or stops. 64px is
-          the track card's own height. */}
-      <div className="relative z-10 flex h-16 shrink-0 flex-col">
+          the track card's own height. A rounded card, like the chat's under
+          it, 8px apart. */}
+      <div className="relative z-10 mb-2 flex h-16 shrink-0 flex-col">
         {ghostMode ? (
-          <div className="border-t border-white/15 pt-1.5 pb-2">
+          <div className={NOW_PLAYING_CARD}>
             <div className="flex items-center gap-2">
               <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded bg-purple/15 text-purple">
                 <svg
@@ -377,10 +368,12 @@ export function HomeView({
             albumArtUrl={nowPlaying.albumArtUrl}
             artistImageUrl={nowPlaying.artistImageUrl}
             tags={nowPlaying.tags}
-            className="border-t border-white/15 pt-1.5 pb-2"
+            className={NOW_PLAYING_CARD}
           />
         ) : (
-          <div className="flex flex-1 items-center justify-center border-t border-white/15">
+          <div
+            className={cn(NOW_PLAYING_CARD, "flex items-center justify-center")}
+          >
             <div className="text-center text-[10px] text-text-dim">
               Play some music to start earning XP
             </div>

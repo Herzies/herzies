@@ -1,4 +1,5 @@
 import type {
+  ActiveMultiplier,
   BossFightView,
   Equipped,
   GameEvent,
@@ -273,6 +274,7 @@ function EventsViewImpl({
     level: number;
     progress: number;
     xp?: number;
+    multipliers?: ActiveMultiplier[] | null;
   };
   /** Tab stays mounted but hidden; only poll while user is on Events. */
   eventsTabVisible: boolean;

@@ -1125,6 +1125,7 @@ function App() {
                     level: herzie.level,
                     progress: levelProgress(herzie),
                     xp: herzie.xp,
+                    multipliers: state.multipliers,
                   }
                 : undefined
             }
@@ -1157,20 +1158,33 @@ function App() {
                 "relative z-55",
           )}
         >
-          {/* The boss's end screen covers the Town: the chat folds away
-              under it (fading, and its space closing), and back after. */}
-          <div
-            className={cn(
-              "grid grid-rows-[1fr] transition-[grid-template-rows,opacity] duration-300",
-              bigWindow && "w-[356px]",
-              endScreen && "pointer-events-none grid-rows-[0fr] opacity-0",
-            )}
-          >
-            <div className={cn("min-h-0", endScreen && "overflow-hidden")}>
-              {chatPanel}
+          <div className={cn(bigWindow && "w-[356px]")}>
+            {/* The boss's end screen covers the Town: the chat folds away
+                under it (fading, and its space closing), and back after. */}
+            <div
+              className={cn(
+                "grid grid-rows-[1fr] transition-[grid-template-rows,opacity] duration-300",
+                endScreen && "pointer-events-none grid-rows-[0fr] opacity-0",
+              )}
+            >
+              <div className={cn("min-h-0", endScreen && "overflow-hidden")}>
+                {chatPanel}
+              </div>
             </div>
           </div>
         </div>
+      </div>
+
+      {/* A drag strip along the window's top edge, over everything (the
+          Town's canvas included, which otherwise takes every mouse-down), with
+          a small grab handle in the middle to say it's there. The handle
+          ignores the mouse, so the press lands on the strip, which carries
+          the drag attribute (Tauri only drags from the element that has it). */}
+      <div
+        data-tauri-drag-region
+        className="group fixed inset-x-0 top-0 z-80 flex h-2 cursor-grab justify-center active:cursor-grabbing"
+      >
+        <div className="pointer-events-none mt-[3px] h-[3px] w-9 rounded-full bg-white/20 transition-colors group-hover:bg-white/45" />
       </div>
 
       {/* The nav: top right, on Home and in the Town, over the windows

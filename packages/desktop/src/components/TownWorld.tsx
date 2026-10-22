@@ -1,4 +1,5 @@
 import {
+  type ActiveMultiplier,
   type Equipped,
   type HerzieStats,
   type ItemUnit,
@@ -16,9 +17,9 @@ import {
 import { cn } from "../lib/utils";
 import type { ChatMessage } from "../tauri-bridge";
 import { LoadingSplash } from "./LoadingSplash";
-import { ExpBar } from "./SquareBar";
+import { PLAYER_CARD, PLAYER_CARD_TOWN, PlayerBars } from "./PlayerBars";
 import { type EventCard, formatIn, isDown } from "./TownScene";
-import { TownHpBar, TownVitals } from "./TownVitals";
+import { TownVitals } from "./TownVitals";
 import { BossHud } from "./town/BossHud";
 import { BossResults } from "./town/BossResults";
 import { setCave } from "./town/cave";
@@ -32,7 +33,6 @@ import { Hotbar } from "./town/Hotbar";
 import { Key } from "./town/Key";
 import type { TownMap } from "./town/map";
 import { markMet } from "./town/met";
-import { NAME_SHADOW } from "./town/nameFade";
 import { useTownNet, useTownNetVersion } from "./town/net/townNet";
 import { spotsOf, type TownSpot, townLive, useTownMap } from "./town/runtime";
 import { SkillHud } from "./town/SkillHud";
@@ -77,6 +77,8 @@ export function TownWorld({
     progress: number;
     /** Total XP, for the exp bar's tooltip. */
     xp?: number;
+    /** Active XP modifiers, by the exp bar (null: logged out). */
+    multipliers?: ActiveMultiplier[] | null;
   };
   /** The chat, for lines over the speakers' heads. */
   chatMessages?: ChatMessage[];
@@ -258,18 +260,30 @@ export function TownWorld({
       <div className={hudFade}>
         {profile && !paused ? (
           <>
-            {/* Centred in a 20px row, like home's (its icon buttons are h-5), so
-              the name doesn't shift when switching tabs. */}
-            <div className="pointer-events-none absolute top-3 left-3 z-30 flex h-5 max-w-[60%] items-center">
-              <span
-                className="whitespace-nowrap text-ui-lg font-bold text-white"
-                style={{ textShadow: NAME_SHADOW }}
-              >
-                {profile.name}
-                <span className="ml-2 text-[10px] font-normal text-white/70">
-                  Lv. {profile.level}
+            {/* Top left, a frosted card: name and level, then health and
+                experience — as on Home, so nothing shifts between the two. */}
+            <div
+              className={cn(
+                "absolute top-3 left-3 z-30",
+                PLAYER_CARD,
+                PLAYER_CARD_TOWN,
+              )}
+            >
+              <div className="flex h-5 items-center">
+                <span className="whitespace-nowrap text-ui-lg font-bold text-white">
+                  {profile.name}
+                  <span className="ml-2 text-[10px] font-normal text-white/70">
+                    Lv. {profile.level}
+                  </span>
                 </span>
-              </span>
+              </div>
+              <PlayerBars
+                level={profile.level}
+                progress={profile.progress}
+                xp={profile.xp}
+                multipliers={profile.multipliers ?? null}
+                className="mt-1 text-white/70"
+              />
             </div>
             <div
               className={cn(
@@ -290,13 +304,6 @@ export function TownWorld({
                   className="bottom-full left-1/2 mb-1.5 -translate-x-1/2"
                 />
               ) : null}
-              <TownHpBar inFight={!!map.combat} />
-              <ExpBar
-                progress={profile.progress}
-                level={profile.level}
-                xp={profile.xp}
-                className="text-white/70"
-              />
             </div>
           </>
         ) : null}

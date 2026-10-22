@@ -41,7 +41,10 @@ export function TrackCard({
   return (
     <div className={cn("relative overflow-hidden", className)}>
       {artistImageUrl ? (
-        <div className="absolute inset-y-0 right-0 w-1/2 overflow-hidden">
+        // The photo itself fades out toward the left (a mask, not a colour
+        // painted over it), so it melts into whatever's behind the card:
+        // Home's card, a window's glass.
+        <div className="absolute inset-y-0 right-0 w-1/2 overflow-hidden [mask-image:linear-gradient(to_right,transparent,black_85%)]">
           <img
             src={artistImageUrl}
             alt=""
@@ -53,9 +56,6 @@ export function TrackCard({
           />
           {/* Darken so title/artist stay readable over the photo. */}
           <div className="absolute inset-0 bg-black/35" />
-          {/* Fades the photo into the app background toward the left,
-              right at this box's own edge (the bar's 50% mark). */}
-          <div className="absolute inset-0 bg-gradient-to-r from-bg-panel to-transparent" />
         </div>
       ) : null}
       <div className="relative flex gap-2">
