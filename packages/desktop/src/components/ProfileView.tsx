@@ -51,7 +51,9 @@ export function ProfileView({
   active = true,
 }: {
   profile: HerzieProfile;
-  onBack: () => void;
+  /** Left out when there's nowhere to go back to (the window's close
+   * button does the rest). */
+  onBack?: () => void;
   onTrade: () => void;
   onAdd: () => void;
   onRemove: () => void;
@@ -100,8 +102,7 @@ export function ProfileView({
 
   return (
     <View
-      title={profile.name}
-      backButton={<BackButton colour="cyan" onClick={onBack} />}
+      backButton={onBack && <BackButton colour="cyan" onClick={onBack} />}
       action={<ProfileBadges profile={profile} />}
       colour="cyan"
       className="relative"

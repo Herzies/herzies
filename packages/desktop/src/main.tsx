@@ -1185,16 +1185,21 @@ function App() {
         <div className="pointer-events-none mt-[3px] h-[3px] w-9 rounded-full bg-white/20 transition-colors group-hover:bg-white/45" />
       </div>
 
-      {/* The nav: top right, on Home and in the Town, over the windows
-          (z-60), which start under its row. In the header's 20px row (the
-          app's 12px top margin), level with Home's name and the Town's. */}
+      {/* The nav: top right, on Home and in the Town. In the header's 20px
+          row (the app's 12px top margin), level with Home's name and the
+          Town's. The windows (z-60) start at the top too, so while one's open
+          the nav goes under it (its own × closes it); the big window's
+          windows stay under the player card, clear of the nav. */}
       {herzie && (
         // data-window-safe: a press here isn't "outside" an open window (the
         // nav switches or closes windows itself).
         <div
           ref={observeNav}
           data-window-safe
-          className="fixed top-3 right-3 z-65"
+          className={cn(
+            "fixed top-3 right-3",
+            overlay && !bigWindow ? "z-50" : "z-65",
+          )}
         >
           <TabBar
             view={view}
@@ -1235,7 +1240,8 @@ function App() {
           open={overlay === "profile"}
           onClosed={windowClosed("profile")}
           onClose={closeWindow}
-          label="Profile"
+          // The player's own profile is part of Social.
+          title="Social"
           narrow={bigWindow}
           onHome={base === "home"}
         >
@@ -1266,7 +1272,6 @@ function App() {
               isFriend
               stageOverride={stageOverride}
               active={windowShown("profile")}
-              onBack={closeWindow}
               onTrade={() => {}}
               onAdd={() => {}}
               onRemove={() => {}}
@@ -1289,7 +1294,7 @@ function App() {
               setLeavingOverlay((l) => (isInventory(l) ? null : l))
             }
             onClose={closeWindow}
-            label="Deck and bag"
+            title="Herzie"
             narrow={bigWindow}
             onHome={base === "home"}
             fit
@@ -1332,11 +1337,10 @@ function App() {
           open={overlay === "stats"}
           onClosed={windowClosed("stats")}
           onClose={closeWindow}
-          label="Stats"
+          title="Stats"
           narrow={bigWindow}
           onHome={base === "home"}
         >
-          <h1 className="mb-2 text-ui-lg font-bold text-cyan">Stats</h1>
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
             <StatsTab
               // Read off the copies, so each worn one counts at its own
@@ -1355,11 +1359,10 @@ function App() {
           open={overlay === "skills"}
           onClosed={windowClosed("skills")}
           onClose={closeWindow}
-          label="Skills"
+          title="Skills"
           narrow={bigWindow}
           onHome={base === "home"}
         >
-          <h1 className="mb-2 text-ui-lg font-bold text-cyan">Skills</h1>
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
             <SkillsPanel herzieClass={herzie.class} skills={state.skills} />
           </div>
@@ -1371,7 +1374,7 @@ function App() {
           open={overlay === "friends"}
           onClosed={windowClosed("friends")}
           onClose={closeWindow}
-          label="Social"
+          title="Social"
           narrow={bigWindow}
           onHome={base === "home"}
         >
@@ -1388,6 +1391,7 @@ function App() {
             onProfileBack={() => {
               if (profileReturn) switchView(profileReturn);
             }}
+            openedFromTown={profileReturn === "events"}
             tab={friendsTab}
             onTabChange={setFriendsTab}
             onActivity={addLog}
@@ -1402,7 +1406,8 @@ function App() {
           open={overlay === "trade"}
           onClosed={windowClosed("trade")}
           onClose={closeWindow}
-          label="Trade"
+          title="Trade"
+          titleClassName="text-purple"
           narrow={bigWindow}
           onHome={base === "home"}
         >
@@ -1431,7 +1436,8 @@ function App() {
         open={overlay === "store"}
         onClosed={windowClosed("store")}
         onClose={closeWindow}
-        label="Premium"
+        title="Premium"
+        titleClassName="text-yellow"
         narrow={bigWindow}
         onHome={base === "home"}
       >
@@ -1448,7 +1454,7 @@ function App() {
         open={overlay === "settings"}
         onClosed={windowClosed("settings")}
         onClose={closeWindow}
-        label="Settings"
+        title="Settings"
         narrow={bigWindow}
         onHome={base === "home"}
       >

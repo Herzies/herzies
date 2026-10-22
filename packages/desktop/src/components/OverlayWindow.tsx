@@ -5,7 +5,7 @@ import { cn } from "../lib/utils";
 
 /**
  * A frosted window over the app (Herzie, Social, Premium, ...): rounded,
- * bordered glass from under the nav down to the window's bottom. No
+ * bordered glass from the top down to the window's bottom. No
  * backdrop: the rest of the app stays usable around it (the Town keeps
  * walking). Escape or the caller (re-clicking its tab) closes it.
  *
@@ -21,7 +21,8 @@ import { cn } from "../lib/utils";
 export function OverlayWindow({
   open,
   onClose,
-  label,
+  title,
+  titleClassName = "text-cyan",
   children,
   narrow = false,
   onHome = false,
@@ -31,8 +32,11 @@ export function OverlayWindow({
 }: {
   open: boolean;
   onClose: () => void;
-  /** What the window is, for screen readers. */
-  label: string;
+  /** The window's name, on its title row (always shown, whatever the
+   * view inside is doing) and for screen readers. */
+  title: string;
+  /** The title's colour. */
+  titleClassName?: string;
   children: ReactNode;
   /** Keep to the small window's size, top left (the Town's big window,
    * whose chat keeps that width too). */
@@ -104,22 +108,22 @@ export function OverlayWindow({
         // No backdrop: around the panel, what's underneath (the Town,
         // walking and all; Home's herzie) stays as it is and takes its own
         // clicks.
-        "pointer-events-none fixed inset-x-0 z-60",
+        // 12px in from the window's sides, as the app's content is (px-3).
+        "pointer-events-none fixed inset-x-3 z-60",
         narrow
           ? // In the Town's big window: the small window's size, top left,
-            // 8px under the player card (the panel's inset is the other 6)
-            // and in line with it.
-            "top-[calc(var(--player-card-bottom,32px)+2px)] h-[calc(var(--small-window-height)-var(--player-card-bottom,32px)-2px)] max-h-[calc(100vh-var(--player-card-bottom,32px)-2px)]"
+            // 8px under the player card and in line with it.
+            "top-[calc(var(--player-card-bottom,32px)+8px)] h-[calc(var(--small-window-height)-var(--player-card-bottom,32px)-14px)] max-h-[calc(100vh-var(--player-card-bottom,32px)-20px)]"
           : onHome && !fit
             ? // On Home: the lower part of the window, the herzie above.
-              "top-[40%] bottom-0"
+              "top-[calc(40%+6px)] bottom-1.5"
             : fit
-              ? // From under the nav's row (top-3, 20px: 32px; the panel's
-                // inset puts it 6px below), as tall as it needs.
-                "top-8 bottom-0"
-              : // In the Town: from under the nav, the upper part of the
+              ? // From the window's top (12px down, over the player card
+                // and the nav), as tall as it needs.
+                "top-3 bottom-3"
+              : // In the Town: from the window's top, the upper part of the
                 // window, leaving the herzie in view below.
-                "top-8 bottom-[40%]",
+                "top-3 bottom-[calc(40%+6px)]",
         closed && "hidden",
       )}
       data-tauri-drag-region="false"
@@ -127,13 +131,13 @@ export function OverlayWindow({
       <div
         ref={panel}
         role="dialog"
-        aria-label={label}
+        aria-label={title}
         className={cn(
-          "pointer-events-auto absolute inset-1.5 overflow-hidden rounded-2xl border border-white/12 shadow-[0_18px_50px_-12px_rgba(0,0,0,0.7)]",
-          narrow && "left-3 right-auto w-[356px]",
+          "pointer-events-auto absolute inset-0 overflow-hidden rounded-2xl border border-white/12 shadow-[0_18px_50px_-12px_rgba(0,0,0,0.7)]",
+          narrow && "right-auto w-[356px]",
           // A column, so the content shrinks (and scrolls) if it can't fit.
-          // Hangs from under the nav; on Home, rests on the window's bottom.
-          fit && "flex max-h-[calc(100%-12px)] flex-col",
+          // Hangs from the top; on Home, rests on the window's bottom.
+          fit && "flex max-h-full flex-col",
           fit && (onHome && !narrow ? "top-auto" : "bottom-auto"),
           closing && "pointer-events-none",
           anim,
@@ -162,40 +166,51 @@ export function OverlayWindow({
           aria-hidden="true"
           className={cn("pointer-events-none absolute inset-0", fade)}
         />
-        {/* Close. In its own strip along the top (the content starts under
-            it), so it never sits on a view's own header buttons. */}
-        <button
-          type="button"
-          aria-label={`Close ${label}`}
-          onClick={onClose}
-          className={cn(
-            "absolute top-1.5 right-1.5 z-10 flex size-5 cursor-pointer items-center justify-center rounded-full border-none bg-transparent p-0 text-text-dim hover:bg-white/10 hover:text-text",
-            fade,
-          )}
-        >
-          <svg
-            viewBox="0 0 10 10"
-            className="size-2.5"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            aria-hidden="true"
-          >
-            <path d="M2 2l6 6M8 2l-6 6" />
-          </svg>
-        </button>
         <HerzieStageContext.Provider value={stageContext}>
           <div ref={host} className="pointer-events-none absolute inset-0" />
           <div
             className={cn(
-              "relative flex min-h-0 flex-col px-2.5 pt-6 pb-2",
+              "relative flex min-h-0 flex-col",
               !fit && "h-full",
               fade,
-              className,
             )}
           >
-            {children}
+            {/* The title row: the title, then close at the far right. h-8
+                with a size-5 button and pr-1.5: 6px from the top and the
+                right edge alike. */}
+            <div className="flex h-8 shrink-0 items-center justify-between pr-1.5 pl-2.5">
+              <h1
+                className={cn("truncate text-ui-lg font-bold", titleClassName)}
+              >
+                {title}
+              </h1>
+              <button
+                type="button"
+                aria-label={`Close ${title}`}
+                onClick={onClose}
+                className="flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-full border-none bg-transparent p-0 text-text-dim hover:bg-white/10 hover:text-text"
+              >
+                <svg
+                  viewBox="0 0 10 10"
+                  className="size-2.5"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  aria-hidden="true"
+                >
+                  <path d="M2 2l6 6M8 2l-6 6" />
+                </svg>
+              </button>
+            </div>
+            <div
+              className={cn(
+                "flex min-h-0 flex-1 flex-col px-2.5 pb-2",
+                className,
+              )}
+            >
+              {children}
+            </div>
           </div>
         </HerzieStageContext.Provider>
       </div>

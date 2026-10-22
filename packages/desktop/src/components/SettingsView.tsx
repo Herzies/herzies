@@ -128,7 +128,6 @@ export function SettingsView({
 
   return (
     <View
-      title="Settings"
       colour="cyan"
       childrenClassName="flex min-h-0 flex-col overflow-y-auto"
     >

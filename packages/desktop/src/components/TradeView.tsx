@@ -406,7 +406,7 @@ export function TradeView({
   return (
     <div className="flex h-full flex-col">
       <div className="mb-2 flex items-center justify-between">
-        <div className="text-ui-lg font-bold text-purple">
+        <div className="text-ui font-bold text-purple">
           Trading with{" "}
           {trade
             ? trade.initiatorName === herzie.name

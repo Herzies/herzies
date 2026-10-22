@@ -9,7 +9,8 @@ export function View({
   className,
   childrenClassName,
 }: {
-  title: string;
+  /** Left out inside a window, whose own title row names it. */
+  title?: string;
   backButton?: React.ReactNode;
   action?: React.ReactNode;
   colour?: "cyan" | "green" | "yellow" | "red";
@@ -19,24 +20,34 @@ export function View({
 }) {
   return (
     <div className={cn("h-full flex flex-col", className)}>
-      <div className="relative z-50 flex justify-between items-center mb-4">
-        {backButton ? (
-          backButton
-        ) : (
-          <h1
-            className={cn("text-ui-lg font-bold", {
-              "text-cyan": colour === "cyan",
-              "text-green": colour === "green",
-              "text-yellow": colour === "yellow",
-              "text-red": colour === "red",
-            })}
-          >
-            {title}
-          </h1>
-        )}
+      {(backButton || title || action) && (
+        <div
+          className={cn(
+            "relative z-50 flex justify-between items-center",
+            // Under a window's title row, just badges or a back button: less gap.
+            title ? "mb-4" : "mb-2",
+          )}
+        >
+          {backButton ? (
+            backButton
+          ) : !title ? (
+            <span />
+          ) : (
+            <h1
+              className={cn("text-ui-lg font-bold", {
+                "text-cyan": colour === "cyan",
+                "text-green": colour === "green",
+                "text-yellow": colour === "yellow",
+                "text-red": colour === "red",
+              })}
+            >
+              {title}
+            </h1>
+          )}
 
-        {action && <div className="text-ui text-text-dim">{action}</div>}
-      </div>
+          {action && <div className="text-ui text-text-dim">{action}</div>}
+        </div>
+      )}
 
       <div className={cn("flex-1", childrenClassName)}>{children}</div>
     </div>

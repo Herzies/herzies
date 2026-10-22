@@ -46,6 +46,7 @@ export function FriendsView({
   openProfileCode,
   onProfileOpened,
   onProfileBack,
+  openedFromTown = false,
   tab,
   onTabChange,
   onActivity,
@@ -64,6 +65,9 @@ export function FriendsView({
   /** Back was pressed on a profile: lets whoever opened it take the player
    * back to where they came from (the Town, say). */
   onProfileBack?: () => void;
+  /** `openProfileCode` came from a herzie clicked in the Town: that profile
+   * gets no back button, and is gone the next time the window opens. */
+  openedFromTown?: boolean;
   tab: Tab;
   onTabChange: (tab: Tab) => void;
   onActivity?: (message: string) => void;
@@ -134,9 +138,22 @@ export function FriendsView({
     return () => clearInterval(interval);
   }, [active, focused, friendCodesKey]);
 
+  // Whether the open profile came from the Town (see openedFromTown).
+  const [profileBackCloses, setProfileBackCloses] = useState(false);
+  const openedFromTownRef = useRef(openedFromTown);
+  openedFromTownRef.current = openedFromTown;
+  useEffect(() => {
+    if (selectedFriend === null) setProfileBackCloses(false);
+  }, [selectedFriend]);
+  // Closed: a profile from the Town doesn't wait for the next visit.
+  useEffect(() => {
+    if (!active && profileBackCloses) setSelectedFriend(null);
+  }, [active, profileBackCloses]);
+
   // Open profile from chat (or other external navigation).
   useEffect(() => {
     if (!openProfileCode) return;
+    setProfileBackCloses(openedFromTownRef.current);
     const cached = friendsRef.current[openProfileCode];
     if (cached) {
       setSelectedFriend(cached);
@@ -287,10 +304,16 @@ export function FriendsView({
     return (
       <ProfileView
         profile={selectedFriend}
-        onBack={() => {
-          setSelectedFriend(null);
-          onProfileBack?.();
-        }}
+        onBack={
+          // Opened from the Town: back would only close the window, which
+          // its close button already does.
+          profileBackCloses
+            ? undefined
+            : () => {
+                setSelectedFriend(null);
+                onProfileBack?.();
+              }
+        }
         onTrade={() => {
           setSelectedFriend(null);
           onStartTrade(code);
@@ -320,11 +343,7 @@ export function FriendsView({
   );
 
   return (
-    <View
-      title="Social"
-      colour="cyan"
-      childrenClassName="flex min-h-0 flex-col"
-    >
+    <View colour="cyan" childrenClassName="flex min-h-0 flex-col">
       <div className="mb-2 flex gap-1 border-b border-white/15 text-ui">
         <TabButton
           active={tab === "friends"}
