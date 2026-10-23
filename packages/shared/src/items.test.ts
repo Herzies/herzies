@@ -1615,18 +1615,19 @@ describe("choosing copies from an item id", () => {
 });
 
 describe("boss loot", () => {
-  const sql = readFileSync(
-    new URL(
-      "../../../supabase/migrations/00114_boss_bonus_loot.sql",
-      import.meta.url,
-    ),
-    "utf8",
-  );
+  const migration = (name: string) =>
+    readFileSync(
+      new URL(`../../../supabase/migrations/${name}`, import.meta.url),
+      "utf8",
+    );
+  // settle_boss_fight lives in 00114; the roll was last replaced in 00118.
+  const sql = migration("00114_boss_bonus_loot.sql");
+  const rollSql = migration("00118_boss_loot_no_tokens.sql");
 
   it("rolls from the same weights as bossLootWeights", () => {
-    const roll = sql.slice(
-      sql.indexOf("FUNCTION public.boss_loot_roll("),
-      sql.indexOf("$$;"),
+    const roll = rollSql.slice(
+      rollSql.indexOf("FUNCTION public.boss_loot_roll("),
+      rollSql.indexOf("$$;"),
     );
     const rows = [...roll.matchAll(/\('([a-z0-9-]+)', (\d+)\)/g)].map(
       ([, itemId, weight]) => ({ itemId, weight: Number(weight) }),
