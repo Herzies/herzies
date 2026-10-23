@@ -34,6 +34,7 @@ import { HomeView } from "./components/HomeView";
 import { IncomingFriendOverlay } from "./components/IncomingFriendOverlay";
 import { IncomingTradeOverlay } from "./components/IncomingTradeOverlay";
 import { InventoryView } from "./components/InventoryView";
+import { LeaderboardView } from "./components/LeaderboardView";
 import { LoadingSplash } from "./components/LoadingSplash";
 import { Notices } from "./components/Notices";
 import { OnboardingScreen } from "./components/OnboardingScreen";
@@ -355,7 +356,7 @@ function App() {
     "accept" | "decline" | null
   >(null);
   const [friendsTab, setFriendsTab] = useState<
-    "friends" | "requests" | "add" | "trades" | "leaderboard"
+    "friends" | "requests" | "add" | "trades"
   >("friends");
   /** Bumps when a trade session ends or a new one starts so TradeView remounts (clears stale tradeId). */
   const [tradeViewGeneration, setTradeViewGeneration] = useState(0);
@@ -753,6 +754,7 @@ function App() {
       k: "skills",
       t: "events",
       f: "friends",
+      l: "leaderboard",
       p: "store",
     };
 
@@ -1397,6 +1399,22 @@ function App() {
             onActivity={addLog}
             active={windowShown("friends")}
             rootKey={rootKeys.friends ?? 0}
+          />
+        </OverlayWindow>
+      )}
+
+      {herzie && (
+        <OverlayWindow
+          open={overlay === "leaderboard"}
+          onClosed={windowClosed("leaderboard")}
+          onClose={closeWindow}
+          title="Leaderboard"
+          narrow={bigWindow}
+          onHome={base === "home"}
+        >
+          <LeaderboardView
+            herzieName={herzie.name}
+            active={windowShown("leaderboard")}
           />
         </OverlayWindow>
       )}

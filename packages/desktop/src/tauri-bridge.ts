@@ -60,12 +60,22 @@ export interface OngoingTrade {
   expiresAt: string;
 }
 
+/** xp: all-time; xp_month: EXP gained this calendar month (UTC); tower:
+ * highest floor ever cleared. Each "_friends" variant ranks just the player
+ * and their friends. */
+type GlobalBoard = "xp" | "xp_month" | "song_hunt" | "tower";
+export type LeaderboardBoard = GlobalBoard | `${GlobalBoard}_friends`;
+
 export interface LeaderboardEntry {
   rank: number;
   name: string;
   level: number;
   stage: number;
   totalMinutes: number;
+  /** EXP (all-time, or this month's on xp_month). Absent on song_hunt. */
+  xp?: number;
+  /** Present only on the Tower leaderboard. */
+  towerFloor?: number;
   /** Present only on the song-hunt leaderboard (fetchLeaderboard("song_hunt")). */
   songHuntWins?: number;
 }
@@ -371,7 +381,7 @@ export const herzies = {
       hintIndex,
     }),
 
-  fetchLeaderboard: (board?: "xp" | "song_hunt") =>
+  fetchLeaderboard: (board?: LeaderboardBoard) =>
     invoke<{ entries: LeaderboardEntry[] }>("fetch_leaderboard", { board }),
 
   getAuthConfig: () =>

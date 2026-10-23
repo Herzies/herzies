@@ -13,6 +13,7 @@ export type View =
   | "stats"
   | "skills"
   | "friends"
+  | "leaderboard"
   | "trade"
   | "store"
   | "settings";
@@ -75,6 +76,7 @@ export function TabBar({
       ? [{ id: "skills" as const, label: "Skills", key: "k" }]
       : []),
     { id: "friends", label: "Social", key: "f" },
+    { id: "leaderboard", label: "Leaderboard", key: "l" },
     { id: "store", label: "Premium", key: "p", colour: "yellow" },
     { id: "settings", label: "Settings", key: "⌘," },
   ];
