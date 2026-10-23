@@ -26,7 +26,8 @@ export function OverlayWindow({
   children,
   narrow = false,
   onHome = false,
-  fit = false,
+  fit: fitProp = false,
+  half = false,
   className,
   onClosed,
 }: {
@@ -41,12 +42,15 @@ export function OverlayWindow({
   /** Keep to the small window's size, top left (the Town's big window,
    * whose chat keeps that width too). */
   narrow?: boolean;
-  /** Over Home: at the bottom of the window, on clearer glass, so the herzie
-   * stays in view above and through it. */
+  /** Over Home (see `half`): the whole height, like `fit` in the Town. */
   onHome?: boolean;
   /** As tall as its content (up to the full height), from the top, rather
    * than the whole height. */
   fit?: boolean;
+  /** On Home: the bottom half of the window on clearer glass (taking
+   * precedence over `fit` there), the herzie raised above it (the Herzie
+   * window). */
+  half?: boolean;
   className?: string;
   /** The exit has finished playing: it's off screen now. Until then its
    * content should stay as it was (still "active"), or it changes under
@@ -72,8 +76,10 @@ export function OverlayWindow({
   // A press anywhere outside closes it — unless something's open over it
   // (an item inspect, a menu, a prompt: those close first), or it's on the
   // nav or the drag strip (data-window-safe), which do their own thing.
+  // Not in the Town's big window (`narrow`): there the world beside it is
+  // played in, and a click on it shouldn't cost you the window.
   useEffect(() => {
-    if (!open) return;
+    if (!open || narrow) return;
     const down = (e: PointerEvent) => {
       const t = e.target as Element | null;
       if (!t || panel.current?.contains(t)) return;
@@ -83,7 +89,7 @@ export function OverlayWindow({
     };
     window.addEventListener("pointerdown", down, true);
     return () => window.removeEventListener("pointerdown", down, true);
-  }, [open, isTop]);
+  }, [open, narrow, isTop]);
 
   // The herzies inside draw on the overlay stage, hosted in whichever
   // window is open (only one is at a time).
@@ -96,6 +102,9 @@ export function OverlayWindow({
     () => ({ stage: overlayHerzieStage, inOverlay: true, skySlot }),
     [skySlot],
   );
+
+  // Home's half-height window is a fixed size, not as tall as its content.
+  const fit = fitProp && !(half && onHome && !narrow);
 
   const closed = phase === "closed" && !open;
   const closing = phase === "closing";
@@ -114,16 +123,21 @@ export function OverlayWindow({
           ? // In the Town's big window: the small window's size, top left,
             // 8px under the player card and in line with it.
             "top-[calc(var(--player-card-bottom,32px)+8px)] h-[calc(var(--small-window-height)-var(--player-card-bottom,32px)-14px)] max-h-[calc(100vh-var(--player-card-bottom,32px)-20px)]"
-          : onHome && !fit
-            ? // On Home: the lower part of the window, the herzie above.
-              "top-[calc(40%+6px)] bottom-1.5"
-            : fit
-              ? // From the window's top (12px down, over the player card
-                // and the nav), as tall as it needs.
+          : onHome && half
+            ? // On Home, the deck and the bag: the bottom half, 12px off the
+              // window's bottom like the chat.
+              "top-[calc(50%+3px)] bottom-3"
+            : onHome && !fit
+              ? // On Home, the rest: from the top (12px down, over the
+                // player card and the nav) to the bottom, the same 12px in.
                 "top-3 bottom-3"
-              : // In the Town: from the window's top, the upper part of the
-                // window, leaving the herzie in view below.
-                "top-3 bottom-[calc(40%+6px)]",
+              : fit
+                ? // From the window's top (12px down, over the player card
+                  // and the nav), as tall as it needs.
+                  "top-3 bottom-3"
+                : // In the Town: from the window's top, the upper part of the
+                  // window, leaving the herzie in view below.
+                  "top-3 bottom-[calc(40%+6px)]",
         closed && "hidden",
       )}
       data-tauri-drag-region="false"
@@ -136,9 +150,9 @@ export function OverlayWindow({
           "pointer-events-auto absolute inset-0 overflow-hidden rounded-2xl border border-white/12 shadow-[0_18px_50px_-12px_rgba(0,0,0,0.7)]",
           narrow && "right-auto w-[356px]",
           // A column, so the content shrinks (and scrolls) if it can't fit.
-          // Hangs from the top; on Home, rests on the window's bottom.
+          // Hangs from the top.
           fit && "flex max-h-full flex-col",
-          fit && (onHome && !narrow ? "top-auto" : "bottom-auto"),
+          fit && "bottom-auto",
           closing && "pointer-events-none",
           anim,
         )}
@@ -153,8 +167,9 @@ export function OverlayWindow({
           aria-hidden="true"
           className={cn(
             "pointer-events-none absolute inset-0 rounded-2xl shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-saturate-150",
-            // On Home, clearer glass: the herzie shows through it.
-            onHome && !narrow
+            // The Herzie window on Home: clearer glass, the herzie raised
+            // above it.
+            onHome && half && !narrow
               ? "bg-bg-panel/30 backdrop-blur-md"
               : "bg-bg-panel/50 backdrop-blur-xl",
             fade,

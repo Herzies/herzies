@@ -31,7 +31,14 @@ import {
   requiredDiceForLevel,
   unitsBestFirst,
 } from "@herzies/shared";
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  type ReactNode,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import {
   pickGroundSide,
@@ -400,9 +407,15 @@ const HERZIE_ZONE_ATTR = "data-herzie-zone";
 const toDeck = (unitId: string) => `[${DECK_UNIT_ATTR}="${unitId}"]`;
 const toBank = (unitId: string) => `[${TILE_UNITS_ATTR}~="${unitId}"]`;
 
-/** The window's two tabs. */
+/** The window's own two tabs, where cards go. */
 type Panel = "bag" | "deck";
 const PANEL_LABELS: Record<Panel, string> = { deck: "Deck", bag: "Bag" };
+/** A tab the window also holds (Stats, Skills), after the deck and the bag. */
+export interface ExtraTab {
+  id: string;
+  label: string;
+  content: ReactNode;
+}
 /** On the menu's Deck and Bag items (TabBar), and on the Menu tab itself
  * while its tray is shut: where a card flies while the window is shut.
  * Space-separated, as the Menu tab stands in for both. */
@@ -651,6 +664,7 @@ function InventoryViewImpl({
   panel,
   onPanelChange,
   onTabLanded,
+  extraTabs = [],
 }: {
   herzie: Herzie;
   initialItem?: string | null;
@@ -683,11 +697,13 @@ function InventoryViewImpl({
   slot: HTMLElement | null;
   /** The window is open (not just fading out). */
   open: boolean;
-  /** Its tab showing. */
-  panel: Panel;
-  onPanelChange: (panel: Panel) => void;
+  /** Its tab showing: the deck, the bag, or one of `extraTabs`. */
+  panel: string;
+  onPanelChange: (panel: string) => void;
   /** A card landed on the menu's Deck or Bag item (or the Menu tab). */
   onTabLanded?: (panel: Panel) => void;
+  /** More tabs after the deck and the bag. */
+  extraTabs?: ExtraTab[];
 }) {
   const capacity = bankCapacity(bankExpansions);
   const [currency, setCurrency] = useState(cachedCurrency || herzie.currency);
@@ -1724,6 +1740,15 @@ function InventoryViewImpl({
                   </span>
                 </TabButton>
               ))}
+              {extraTabs.map((tab) => (
+                <TabButton
+                  key={tab.id}
+                  active={panel === tab.id}
+                  onClick={() => onPanelChange(tab.id)}
+                >
+                  {tab.label}
+                </TabButton>
+              ))}
               <div
                 className={cn(
                   "ml-auto flex items-center",
@@ -1767,16 +1792,16 @@ function InventoryViewImpl({
                 </Tooltip>
               </div>
             </div>
-            {/* Both tabs in one grid cell, the hidden one just invisible: the
-                window takes the taller of the two (three bag rows, or the
-                whole deck), so switching tabs never resizes it. */}
-            <div className="grid min-h-0 flex-1">
+            {/* The bag sets the height (three rows); the deck and the other
+                tabs fill it, scrolling past it, so switching tabs never
+                resizes the window. */}
+            <div className="relative grid min-h-0 flex-1">
               {/* Scrolls only if the window can't fit it. A card dropped
                   anywhere in here is placed. */}
               <div
                 {...{ [HERZIE_ZONE_ATTR]: "" }}
                 className={cn(
-                  "relative col-start-1 row-start-1 min-h-0 overflow-y-auto overscroll-contain",
+                  "absolute inset-0 overflow-y-auto overscroll-contain",
                   panel !== "deck" && "invisible",
                 )}
               >
@@ -1908,7 +1933,10 @@ function InventoryViewImpl({
                     </div>
                   )}
                 </div>
-                <div className="mt-2 flex items-center justify-end border-t border-white/15 pt-2">
+                {/* No line or gap of its own: the bottom row's line is the
+                    divider (a second one 8px under it read as a sliver of a
+                    fourth row). */}
+                <div className="flex items-center justify-end pt-2">
                   <Tooltip label={`${formatAmount(currency)} herzie coins`}>
                     <div className="text-ui text-cyan">
                       <Coin amount={currency} animate />
@@ -1916,6 +1944,20 @@ function InventoryViewImpl({
                   </Tooltip>
                 </div>
               </div>
+              {/* The other tabs fill what the deck and the bag take, and
+                  scroll past it, so they never resize the window. Hidden,
+                  not unmounted, so they keep their state. */}
+              {extraTabs.map((tab) => (
+                <div
+                  key={tab.id}
+                  className={cn(
+                    "absolute inset-0 overflow-y-auto overscroll-contain",
+                    panel !== tab.id && "hidden",
+                  )}
+                >
+                  {tab.content}
+                </div>
+              ))}
             </div>
           </div>,
           slot,

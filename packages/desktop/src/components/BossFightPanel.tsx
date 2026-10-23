@@ -8,6 +8,7 @@ import {
 } from "@herzies/shared";
 import { HerzieView } from "@herzies/shared/gl";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useHerzieStage } from "../lib/overlayStage";
 import { cn } from "../lib/utils";
 import { SegmentBar } from "./SegmentBar";
 import { VisitorHelp, type VisitorReward } from "./VisitorHelp";
@@ -139,6 +140,8 @@ export function BossFightPanel({
   const escaped = config.escaped || (remaining <= 0 && !dead);
   const chatting = !paused && !dead && !escaped;
   const { line, typed, advance } = useBossChatter(hpFrac, chatting);
+  // Inside a window or the visitor panel, drawn on its canvas.
+  const { stage: onStage } = useHerzieStage();
 
   return (
     // flex-1 so this fills the View's body; without a definite height the
@@ -168,6 +171,7 @@ export function BossFightPanel({
           )}
         >
           <HerzieView
+            onStage={onStage}
             userId={`boss:${event.id}`}
             stage={3}
             // Sized for the face-on pose specifically. Head-on the boss is

@@ -86,6 +86,30 @@ const WHATS_NEW_SEEN_KEY = "herzies:whats-new-seen-version";
  * an overlay window over one of them. */
 type Base = "home" | "events";
 type OverlayId = Exclude<View, Base>;
+/** The camera on Home with the deck or the bag open: pulled back, so the
+ * herzie fits above the window. */
+const HOME_INVENTORY_ZOOM = 0.8;
+/** ...eased there slowly enough to see it, about as long as the raise
+ * (HOME_INVENTORY_RAISE_MS). */
+const HOME_INVENTORY_ZOOM_EASE = 0.1;
+const HOME_INVENTORY_RAISE_MS = 340;
+
+/** The app window's height, kept current. */
+function useWindowHeight() {
+  const [height, setHeight] = useState(() => window.innerHeight);
+  useEffect(() => {
+    const update = () => setHeight(window.innerHeight);
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
+  return height;
+}
+
+/** The Herzie window's tabs. */
+type HerzieTab = "deck" | "bag" | "stats" | "skills";
+/** A class's name, for the player card ("Bard"); none without a class. */
+const classLabelOf = (c: HerzieClass | null | undefined) =>
+  c ? CLASS_DEFS[c].name : undefined;
 const isBase = (v: View): v is Base => v === "home" || v === "events";
 
 type UpdateInstallStatus =
@@ -204,9 +228,10 @@ function App() {
   // until its exit has played: its content keeps still under the fade.
   const [leavingOverlay, setLeavingOverlay] = useState<OverlayId | null>(null);
   const [prevOverlay, setPrevOverlay] = useState<OverlayId | null>(overlay);
-  /** Deck and Bag are one window's two tabs: switching between them isn't
-   * leaving it. */
-  const isInventory = (v: View | null) => v === "deck" || v === "bag";
+  /** Deck, Bag, Stats and Skills are one window's tabs: switching between
+   * them isn't leaving it. */
+  const isInventory = (v: View | null): v is HerzieTab =>
+    v === "deck" || v === "bag" || v === "stats" || v === "skills";
   if (prevOverlay !== overlay) {
     setPrevOverlay(overlay);
     if (prevOverlay && !(isInventory(prevOverlay) && isInventory(overlay))) {
@@ -214,9 +239,9 @@ function App() {
     }
   }
   /** The deck-and-bag window's tab: the one asked for last. */
-  const [inventoryPanel, setInventoryPanel] = useState<"deck" | "bag">("deck");
+  const [inventoryPanel, setInventoryPanel] = useState<HerzieTab>("deck");
   if (isInventory(overlay) && overlay !== inventoryPanel) {
-    setInventoryPanel(overlay as "deck" | "bag");
+    setInventoryPanel(overlay);
   }
   /** A window is on screen: open, or still fading out. */
   const windowShown = (id: OverlayId) =>
@@ -852,6 +877,9 @@ function App() {
 
   // Where Home's stage sits (see useStageAlignment).
   const herzieStageTop = useHomeStageOffset();
+  // The deck or the bag over Home: the herzie steps back and up, above it.
+  const inventoryOnHome = base === "home" && isInventory(overlay);
+  const windowHeight = useWindowHeight();
 
   if (!hydrated) {
     return <LoadingSplash />;
@@ -1056,9 +1084,26 @@ function App() {
             (base !== "home" || herzieStageTop === null) && "hidden",
           )}
         >
+          {/* data-window-safe: grabbing the herzie to spin it leaves the
+              deck or the bag open. */}
           <div
-            className="absolute inset-x-0 flex items-center justify-center"
-            style={{ top: herzieStageTop ?? 0, height: HERZIE_STAGE_HEIGHT }}
+            data-window-safe
+            className="absolute inset-x-0 flex items-center justify-center transition-[top] ease-out"
+            style={{
+              // With the deck or the bag open (the bottom half), raised so
+              // its floor meets the window's top (the view starts 12px
+              // down, under the app's padding), never lowered. Moved by
+              // `top`, not a transform: that would trap the sky's
+              // position: fixed. In plain px, so the change animates.
+              top: inventoryOnHome
+                ? Math.min(
+                    herzieStageTop ?? 0,
+                    Math.round(windowHeight / 2) - 12 - HERZIE_STAGE_HEIGHT,
+                  )
+                : (herzieStageTop ?? 0),
+              height: HERZIE_STAGE_HEIGHT,
+              transitionDuration: `${HOME_INVENTORY_RAISE_MS}ms`,
+            }}
           >
             <HerzieWithSky
               userId={herzie.friendCode}
@@ -1071,6 +1116,8 @@ function App() {
               }
               paused={base !== "home"}
               grounded
+              zoom={inventoryOnHome ? HOME_INVENTORY_ZOOM : 1}
+              zoomEase={HOME_INVENTORY_ZOOM_EASE}
             />
           </div>
         </div>
@@ -1097,6 +1144,7 @@ function App() {
           <EventsView
             eventsTabVisible={base === "events"}
             windowOpen={!!overlay}
+            expanded={townExpanded}
             chatOverlay
             chatMessages={state.chatMessages}
             rootKey={rootKeys.events ?? 0}
@@ -1125,6 +1173,8 @@ function App() {
                     progress: levelProgress(herzie),
                     xp: herzie.xp,
                     multipliers: state.multipliers,
+                    classLabel: classLabelOf(classOverride ?? herzie.class),
+                    nowPlaying: state.nowPlaying,
                   }
                 : undefined
             }
@@ -1299,6 +1349,7 @@ function App() {
             title="Herzie"
             narrow={bigWindow}
             onHome={base === "home"}
+            half
             fit
           >
             <div
@@ -1328,47 +1379,44 @@ function App() {
             slot={inventorySlot}
             open={isInventory(overlay)}
             panel={inventoryPanel}
-            onPanelChange={(p) => switchView(p)}
+            onPanelChange={(p) => switchView(p as HerzieTab)}
             onTabLanded={onTabLanded}
+            extraTabs={[
+              ...(herzie.statPoints
+                ? [
+                    {
+                      id: "stats",
+                      label: "Stats",
+                      content: (
+                        <StatsTab
+                          // Read off the copies, so each worn one counts at
+                          // its own upgrade level.
+                          stats={getHerzieStatsFromUnits(state.units)}
+                          level={herzie.level}
+                          points={herzie.statPoints}
+                          onLog={addLog}
+                        />
+                      ),
+                    },
+                  ]
+                : []),
+              ...(herzie.class
+                ? [
+                    {
+                      id: "skills",
+                      label: "Skills",
+                      content: (
+                        <SkillsPanel
+                          herzieClass={herzie.class}
+                          skills={state.skills}
+                        />
+                      ),
+                    },
+                  ]
+                : []),
+            ]}
           />
         </>
-      )}
-
-      {herzie?.statPoints && (
-        <OverlayWindow
-          open={overlay === "stats"}
-          onClosed={windowClosed("stats")}
-          onClose={closeWindow}
-          title="Stats"
-          narrow={bigWindow}
-          onHome={base === "home"}
-        >
-          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-            <StatsTab
-              // Read off the copies, so each worn one counts at its own
-              // upgrade level.
-              stats={getHerzieStatsFromUnits(state.units)}
-              level={herzie.level}
-              points={herzie.statPoints}
-              onLog={addLog}
-            />
-          </div>
-        </OverlayWindow>
-      )}
-
-      {herzie?.class && (
-        <OverlayWindow
-          open={overlay === "skills"}
-          onClosed={windowClosed("skills")}
-          onClose={closeWindow}
-          title="Skills"
-          narrow={bigWindow}
-          onHome={base === "home"}
-        >
-          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-            <SkillsPanel herzieClass={herzie.class} skills={state.skills} />
-          </div>
-        </OverlayWindow>
       )}
 
       {herzie && (

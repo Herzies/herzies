@@ -246,6 +246,42 @@ fn show_window(app: &AppHandle, window: &tauri::WebviewWindow) {
     let _ = window.set_focus();
 }
 
+/// Give the borderless main window native macOS corners. macOS only rounds
+/// (and shadows) titled windows, so turn the title bar on but make it
+/// invisible: transparent overlay, no title text, no traffic lights. The
+/// corner radius then follows whatever the running macOS version uses.
+#[cfg(target_os = "macos")]
+pub fn use_native_corners(window: &tauri::WebviewWindow) {
+    use objc2_app_kit::{NSWindow, NSWindowButton, NSWindowStyleMask, NSWindowTitleVisibility};
+
+    // Set the style straight on the NSWindow: Tauri's set_decorations /
+    // set_title_bar_style leave the native title bar and buttons showing.
+    let window = window.clone();
+    // AppKit calls must run on the main thread.
+    let _ = window.clone().run_on_main_thread(move || {
+        let Ok(ptr) = window.ns_window() else { return };
+        // SAFETY: Tauri hands back the live NSWindow for this webview window,
+        // and we're on the main thread.
+        let ns_window = unsafe { &*(ptr as *const NSWindow) };
+        ns_window.setStyleMask(
+            ns_window.styleMask()
+                | NSWindowStyleMask::Titled
+                | NSWindowStyleMask::FullSizeContentView,
+        );
+        ns_window.setTitlebarAppearsTransparent(true);
+        ns_window.setTitleVisibility(NSWindowTitleVisibility::Hidden);
+        for kind in [
+            NSWindowButton::CloseButton,
+            NSWindowButton::MiniaturizeButton,
+            NSWindowButton::ZoomButton,
+        ] {
+            if let Some(button) = ns_window.standardWindowButton(kind) {
+                button.setHidden(true);
+            }
+        }
+    });
+}
+
 /// Whether a window placed at `pos` would have its center on a connected
 /// monitor. Fails open if the monitor list can't be read.
 fn is_on_screen(window: &tauri::WebviewWindow, pos: PhysicalPosition<i32>) -> bool {

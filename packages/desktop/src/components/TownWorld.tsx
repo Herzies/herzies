@@ -15,8 +15,9 @@ import {
   useState,
 } from "react";
 import { cn } from "../lib/utils";
-import type { ChatMessage } from "../tauri-bridge";
+import type { AppState, ChatMessage } from "../tauri-bridge";
 import { LoadingSplash } from "./LoadingSplash";
+import { NowPlayingBox } from "./NowPlayingBox";
 import {
   observePlayerCard,
   PLAYER_CARD,
@@ -59,6 +60,7 @@ export function TownWorld({
   chatMessages,
   cards,
   paused,
+  hudHidden = paused,
   windowOpen = false,
   onOpen,
   onOpenProfile,
@@ -84,6 +86,10 @@ export function TownWorld({
     xp?: number;
     /** Active XP modifiers, by the exp bar (null: logged out). */
     multipliers?: ActiveMultiplier[] | null;
+    /** The class's name ("Bard"), after the level. */
+    classLabel?: string;
+    /** What's playing, under the card. */
+    nowPlaying?: AppState["nowPlaying"];
   };
   /** The chat, for lines over the speakers' heads. */
   chatMessages?: ChatMessage[];
@@ -94,6 +100,10 @@ export function TownWorld({
   chatOverlay?: boolean;
   cards: EventCard[];
   paused: boolean;
+  /** The HUD (player card, hotbar, vitals, ...) is hidden. Defaults to
+   * `paused`; the Town passes it apart so a world paused only because the
+   * app lost focus keeps its HUD, as Home does. */
+  hudHidden?: boolean;
   /** An overlay window (Herzie, Social, ...) is open over the Town. The
    * world keeps going, walking included; only the boss's end screen stops
    * taking every key, so typing reaches the window. */
@@ -226,7 +236,7 @@ export function TownWorld({
   const talkTo = near?.card.openKey;
   // The key for aim mode (anywhere in the Town): sat right on top of the
   // bars (or in the corner, without them).
-  const combatHint = !paused ? (
+  const combatHint = !hudHidden ? (
     <div
       className={cn(
         // No box: the key chip, and the word over the world with a shadow.
@@ -266,32 +276,39 @@ export function TownWorld({
       ) : null}
       {/* The HUD fades away while the boss's end screen is up, and back. */}
       <div className={hudFade}>
-        {profile && !paused ? (
+        {profile && !hudHidden ? (
           <>
             {/* Top left, a frosted card: name and level, then health and
-                experience — as on Home, so nothing shifts between the two. */}
+                experience — as on Home, so nothing shifts between the two.
+                Under it, 8px down and as wide, what's playing. The big
+                window hangs its windows under both (observePlayerCard). */}
             <div
               ref={observePlayerCard}
-              className={cn(
-                "absolute top-3 left-3 z-30",
-                PLAYER_CARD,
-                PLAYER_CARD_TOWN,
-              )}
+              className="absolute top-3 left-3 z-30 flex w-[174px] flex-col gap-2"
             >
-              <div className="flex h-5 items-center">
-                <span className="whitespace-nowrap text-ui-lg font-bold text-white">
-                  {profile.name}
-                  <span className="ml-2 text-[10px] font-normal text-white/70">
-                    Lv. {profile.level}
+              <div className={cn(PLAYER_CARD, PLAYER_CARD_TOWN)}>
+                <div className="flex h-5 items-center">
+                  <span className="block min-w-0 truncate text-ui-lg font-bold text-white">
+                    {profile.name}
                   </span>
-                </span>
+                </div>
+                {/* The level (and class) on its own line, as on Home. */}
+                <div className="text-[10px] leading-3 whitespace-nowrap text-white/70">
+                  Lv. {profile.level}
+                  {profile.classLabel && ` · ${profile.classLabel}`}
+                </div>
+                <PlayerBars
+                  level={profile.level}
+                  progress={profile.progress}
+                  xp={profile.xp}
+                  className="mt-1 text-white/70"
+                />
               </div>
-              <PlayerBars
-                level={profile.level}
-                progress={profile.progress}
-                xp={profile.xp}
+              <NowPlayingBox
+                nowPlaying={profile.nowPlaying ?? null}
                 multipliers={profile.multipliers ?? null}
-                className="mt-1 text-white/70"
+                tint={cn(PLAYER_CARD_TOWN, "backdrop-blur-md")}
+                showTags={false}
               />
             </div>
             <div
@@ -307,8 +324,8 @@ export function TownWorld({
               )}
             >
               {combatHint}
-              {!paused ? <SkillHud className="bottom-full right-0" /> : null}
-              {!paused ? (
+              {!hudHidden ? <SkillHud className="bottom-full right-0" /> : null}
+              {!hudHidden ? (
                 <Hotbar
                   units={units}
                   className="bottom-full left-1/2 -translate-x-1/2"
@@ -318,7 +335,7 @@ export function TownWorld({
           </>
         ) : null}
         {profile ? null : combatHint}
-        {profile || paused ? null : (
+        {profile || hudHidden ? null : (
           <Hotbar
             units={units}
             className={cn(
@@ -329,7 +346,7 @@ export function TownWorld({
             )}
           />
         )}
-        {profile || paused ? null : (
+        {profile || hudHidden ? null : (
           <SkillHud
             className={
               chatOverlay
@@ -339,7 +356,7 @@ export function TownWorld({
           />
         )}
       </div>
-      {fpsShown && opened && !paused ? (
+      {fpsShown && opened && !hudHidden ? (
         <FrameRate className="pointer-events-none absolute top-2 left-2 z-30 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white/70 tabular-nums" />
       ) : null}
       {opened && (
@@ -360,7 +377,7 @@ export function TownWorld({
           />
         </Suspense>
       )}
-      {!paused ? (
+      {!hudHidden ? (
         <>
           <div className={hudFade}>
             <TownVitals inFight={!!map.combat} chatOverlay={chatOverlay} />
@@ -369,7 +386,7 @@ export function TownWorld({
           <BossResults interactive={!windowOpen} />
         </>
       ) : null}
-      {!paused && (loading || !ready) ? (
+      {!hudHidden && (loading || !ready) ? (
         <LoadingSplash overlay label="loading town" />
       ) : null}
 

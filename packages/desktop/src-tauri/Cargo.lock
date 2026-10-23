@@ -1606,6 +1606,7 @@ dependencies = [
  "hmac",
  "log",
  "mac-notification-sys",
+ "objc2-app-kit",
  "open",
  "rand 0.8.6",
  "regex-lite",

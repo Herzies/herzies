@@ -2811,6 +2811,11 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
+            #[cfg(target_os = "macos")]
+            if let Some(window) = app.get_webview_window("main") {
+                tray::use_native_corners(&window);
+            }
+
             // Set up tray icon
             tray::setup_tray(app.handle())?;
 

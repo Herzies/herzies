@@ -1,7 +1,5 @@
-import type { ActiveMultiplier } from "@herzies/shared";
 import { useEffect } from "react";
 import { cn } from "../lib/utils";
-import { ModifiersButton } from "./ModifiersButton";
 import { ExpBar, HpBar } from "./SquareBar";
 import { refreshVitals, useLiveHp } from "./town/vitals";
 
@@ -20,25 +18,26 @@ export function observePlayerCard(el: HTMLElement | null) {
 }
 
 /** The card they sit in with the name and level, top left on Home and in
- * the Town: frosted, rounded, at least a third of the window wide. Its tint
+ * the Town: frosted, rounded, the same width for everyone. Its tint
  * matches the chat card's where it is: PLAYER_CARD_HOME / PLAYER_CARD_TOWN. The card
  * is the backing, so nothing in it needs a text shadow (the bars' labels
  * carry one for the open world). */
 export const PLAYER_CARD =
-  "min-w-[calc(100vw/3)] rounded-xl border border-white/12 px-2 pt-1 pb-2 backdrop-blur-md [&_*]:[text-shadow:none]";
+  // One width for everyone: what the longest name (20 characters at 13px
+  // in the 0.6em-wide mono, 156px) needs, plus px-2 and the border. The
+  // level and class line ("Lv. 999 · Record Slinger") is narrower.
+  "w-[174px] rounded-xl border border-white/12 px-2 pt-1 pb-2 backdrop-blur-md [&_*]:[text-shadow:none]";
 export const PLAYER_CARD_HOME = "bg-white/[0.03]";
 export const PLAYER_CARD_TOWN = "bg-black/45";
 
 /**
  * The herzie's health and experience, under its name on Home and in the
- * Town alike. The modifiers icon leads the exp row; the HP row keeps the same
- * room on its left, so both bars start at the same x.
+ * Town alike. (The modifiers star is on the now-playing box.)
  */
 export function PlayerBars({
   level,
   progress,
   xp,
-  multipliers,
   className,
 }: {
   level: number;
@@ -46,8 +45,6 @@ export function PlayerBars({
   progress: number;
   /** Total XP, for the exp bar's tooltip. */
   xp?: number;
-  /** Active XP modifiers (null: logged out). */
-  multipliers: ActiveMultiplier[] | null;
   className?: string;
 }) {
   const live = useLiveHp();
@@ -60,28 +57,13 @@ export function PlayerBars({
   return (
     <div className={cn("flex flex-col gap-1", className)}>
       {live && (
-        <div className="flex items-center gap-1">
-          <div className="w-5 shrink-0" />
-          <HpBar
-            hp={live.down ? 0 : live.hp}
-            maxHp={live.maxHp}
-            className="min-w-0 flex-1"
-          />
-        </div>
-      )}
-      <div className="flex items-center gap-1">
-        {/* Negative margins: the 20px button doesn't make the row taller
-            than the bar. */}
-        <div className="-my-2 flex w-5 shrink-0">
-          <ModifiersButton multipliers={multipliers} />
-        </div>
-        <ExpBar
-          progress={progress}
-          level={level}
-          xp={xp}
-          className="min-w-0 flex-1"
+        <HpBar
+          hp={live.down ? 0 : live.hp}
+          maxHp={live.maxHp}
+          className="min-w-0"
         />
-      </div>
+      )}
+      <ExpBar progress={progress} level={level} xp={xp} className="min-w-0" />
     </div>
   );
 }

@@ -52,6 +52,8 @@ interface Props {
   zoom?: number;
   /** Camera pan in px (negative: up); eases along with `zoom`. Default: 0. */
   offsetY?: number;
+  /** How quickly the camera eases to a new `zoom`/`offsetY` (HerzieView). */
+  zoomEase?: number;
   /** Class gear drawn into its hands instead of slung on its back. */
   armed?: boolean;
 }
@@ -78,6 +80,7 @@ export function HerzieWithSky({
   grounded = false,
   zoom,
   offsetY,
+  zoomEase,
   armed,
 }: Props) {
   // Full-window-width column count, shared by the sky and the creature
@@ -191,6 +194,7 @@ export function HerzieWithSky({
         groundInset={grounded ? groundInsetFor(size) : undefined}
         zoom={zoom}
         offsetY={offsetY}
+        zoomEase={zoomEase}
         armed={armed}
         onStage={onStage}
         wrapperStyle={
