@@ -14,7 +14,8 @@ import { View } from "./View";
 const POLL_MS = 15_000;
 
 type Tab = "level" | "song_hunt" | "tower";
-type LevelRange = "xp" | "xp_month";
+/** All time or this month: the Level and Tower tabs have both. */
+type Range = "all" | "month";
 type Scope = "friends" | "global";
 
 const TABS: { id: Tab; label: string }[] = [
@@ -28,16 +29,26 @@ const SCOPES: { id: Scope; label: string }[] = [
   { id: "global", label: "Global" },
 ];
 
-const RANGES: { id: LevelRange; label: string }[] = [
-  { id: "xp", label: "All time" },
-  { id: "xp_month", label: "This month" },
+const RANGES: { id: Range; label: string }[] = [
+  { id: "all", label: "All time" },
+  { id: "month", label: "This month" },
 ];
 
-const EMPTY: Record<Tab | "xp_month", string> = {
-  level: "No herzies on the leaderboard yet.",
+type Board = "xp" | "xp_month" | "song_hunt" | "tower" | "tower_month";
+
+/** The board a tab shows, over the range where it has one. */
+function boardOf(tab: Tab, range: Range): Board {
+  if (tab === "level") return range === "month" ? "xp_month" : "xp";
+  if (tab === "tower") return range === "month" ? "tower_month" : "tower";
+  return tab;
+}
+
+const EMPTY: Record<Board, string> = {
+  xp: "No herzies on the leaderboard yet.",
   xp_month: "Nobody has earned EXP this month yet.",
   song_hunt: "Nobody has found a song for Orphiez yet.",
   tower: "Nobody has cleared a Tower floor yet.",
+  tower_month: "Nobody has cleared a floor of this month's Tower yet.",
 };
 
 export function LeaderboardView({
@@ -49,9 +60,9 @@ export function LeaderboardView({
   active: boolean;
 }) {
   const [tab, setTab] = useState<Tab>("level");
-  const [range, setRange] = useState<LevelRange>("xp");
+  const [range, setRange] = useState<Range>("all");
   const [scope, setScope] = useState<Scope>("friends");
-  const base = tab === "level" ? range : tab;
+  const base = boardOf(tab, range);
   const board: LeaderboardBoard =
     scope === "friends" ? `${base}_friends` : base;
   const [entries, setEntries] = useState<LeaderboardEntry[] | null>(null);
@@ -101,7 +112,7 @@ export function LeaderboardView({
           </TabButton>
         ))}
       </div>
-      {tab === "level" && (
+      {(tab === "level" || tab === "tower") && (
         <div className="mb-1.5 flex gap-1">
           {RANGES.map((r) => (
             <TabButton
@@ -119,7 +130,7 @@ export function LeaderboardView({
           <div className="pt-5 text-center text-ui text-text-dim">Loading…</div>
         ) : entries.length === 0 ? (
           <div className="pt-5 text-center text-ui text-text-dim">
-            {EMPTY[base === "xp" ? "level" : base]}
+            {EMPTY[base]}
           </div>
         ) : (
           entries.map((entry) => {
@@ -159,9 +170,11 @@ export function LeaderboardView({
   );
 }
 
-function score(board: Tab | LevelRange, entry: LeaderboardEntry): string {
+function score(board: Board, entry: LeaderboardEntry): string {
   if (board === "song_hunt") return `${entry.songHuntWins ?? 0} won`;
-  if (board === "tower") return `Floor ${entry.towerFloor ?? 0}`;
+  if (board === "tower" || board === "tower_month") {
+    return `Floor ${entry.towerFloor ?? 0}`;
+  }
   // A server from before xp was sent: fall back to time listened.
   if (entry.xp == null) return formatMinutes(entry.totalMinutes);
   const lv = `Lv. ${entry.level}`;

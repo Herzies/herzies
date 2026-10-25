@@ -11,6 +11,7 @@ import { useHerzieStage } from "../lib/overlayStage";
 import { cn } from "../lib/utils";
 import { BackButton } from "./BackButton";
 import { HERZIE_STAGE_HEIGHT, HerzieWithSky } from "./HerzieWithSky";
+import { List } from "./List";
 import { ProfileBadges } from "./ProfileBadges";
 import { TabButton } from "./TabButton";
 import { TrackCard } from "./TrackCard";
@@ -219,13 +220,16 @@ export function ProfileView({
 
         {/* Fixed panel height: the herzie above takes the leftover space, so
             a shorter tab's content would otherwise let this whole block sink
-            and the tab row would jump as the viewer switches tabs. Tall
-            enough for the tallest panel — three top artist rows. */}
-        <div className="min-h-16">
+            and the tab row would jump as the viewer switches tabs. Three top
+            artist rows tall: the stats scroll inside it, the artwork fills
+            it. */}
+        <div className="h-16">
           {/* Stats are game data, not listening data, so unlike the other two
               tabs they are not held back from non-friends. */}
           {tab === "stats" ? (
-            <div>
+            // A short scrolling list: a well-geared herzie has a long one,
+            // and it would push the herzie above off the window.
+            <List className="h-full">
               {shownStatKeys(stats).map((key) => (
                 <div
                   key={key}
@@ -239,7 +243,7 @@ export function ProfileView({
                   </span>
                 </div>
               ))}
-            </div>
+            </List>
           ) : !isFriend ? (
             <div>
               <div className="text-ui-sm text-text-dim">
@@ -255,12 +259,14 @@ export function ProfileView({
           ) : tab === "music" ? (
             profile.nowPlaying ? (
               <TrackCard
+                artClassName="h-16 w-16"
                 title={profile.nowPlaying.title}
                 artist={profile.nowPlaying.artist}
                 albumArtUrl={profile.nowPlaying.albumArtUrl}
               />
             ) : profile.lastPlayed ? (
               <TrackCard
+                artClassName="h-16 w-16"
                 title={profile.lastPlayed.title}
                 artist={profile.lastPlayed.artist}
                 albumArtUrl={profile.lastPlayed.albumArtUrl}

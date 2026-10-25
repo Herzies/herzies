@@ -117,6 +117,13 @@ export class HerzieStage {
 
   private start() {
     if (this.raf) return;
+    if (this.renderer) {
+      // Shown again (see stop), empty until the first frame draws.
+      this.renderer.setScissorTest(false);
+      this.renderer.clear();
+      this.renderer.setScissorTest(true);
+      this.renderer.domElement.style.visibility = "";
+    }
     this.last = performance.now();
     const tick = (now: number) => {
       this.raf = requestAnimationFrame(tick);
@@ -130,10 +137,14 @@ export class HerzieStage {
     cancelAnimationFrame(this.raf);
     this.raf = 0;
     if (this.renderer) {
-      // Nothing to draw: leave the canvas empty rather than frozen.
+      // Nothing to draw: leave the canvas empty rather than frozen. Hidden
+      // as well: a clear made while the canvas is off the page (its host
+      // just removed, as a closing panel's is) may never show, and it would
+      // carry its last frame into the next host.
       this.renderer.setScissorTest(false);
       this.renderer.clear();
       this.renderer.setScissorTest(true);
+      this.renderer.domElement.style.visibility = "hidden";
     }
   }
 

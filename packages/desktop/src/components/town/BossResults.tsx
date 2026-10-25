@@ -15,8 +15,8 @@ import { letGoOfTownInput } from "./input";
  * contribution (damage, plus healing and blocking; see contributionOf).
  *
  * It shows just after the boss falls, before anyone goes for the loot,
- * and goes with Continue or Esc. It fills the Town from under the nav
- * down to the bottom margin, the world blurred out
+ * and goes with Continue or Esc. It fills the Town from the top margin
+ * down to the bottom one, the world blurred out
  * behind it, and is only drawn while the Town is the view. While it's up
  * the HUD and the chat fade away (useBossResultsShown) and nothing in the
  * Town moves. It stays up back in town until you go on. Above all that,
@@ -74,7 +74,7 @@ export function BossResults({
   return (
     <div
       ref={overlay}
-      className="absolute inset-x-3 top-[38px] z-50 flex"
+      className="absolute inset-x-3 top-3 z-50 flex"
       style={{ bottom: "0.75rem" }}
     >
       {/* The window fills it, the Town blurred out behind; its content

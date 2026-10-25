@@ -47,7 +47,9 @@ export function ModifiersButton({
         type="button"
         className={cn(
           HEADER_ICON_HIT,
-          "flex h-5 w-5 cursor-default items-center justify-center rounded-lg border-none bg-transparent p-0",
+          // An invisible 17px circle, as the chat's send button is, so the
+          // star can stand exactly where its arrow does (NowPlayingBox).
+          "flex h-[17px] w-[17px] cursor-default items-center justify-center rounded-full border-none bg-transparent p-0",
           hasActive ? "text-yellow" : "text-text-dim hover:text-text",
         )}
       >

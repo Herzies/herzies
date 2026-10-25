@@ -24,7 +24,8 @@ import {
   withStatPoints,
 } from "@herzies/shared";
 import { HerzieStage } from "@herzies/shared/gl";
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useEscape } from "../lib/escapeStack";
 import { HerzieStageContext } from "../lib/overlayStage";
 import { cn } from "../lib/utils";
@@ -249,6 +250,9 @@ function EventsViewImpl({
   currency = 0,
   onLog,
   rootKey = 0,
+  openRequest = null,
+  onSelectedChange,
+  panelHost = null,
   playerSeed,
   playerStage,
   playerStatPoints,
@@ -296,6 +300,14 @@ function EventsViewImpl({
   /** Bumped when the Town tab is re-selected while already on it: back to
    * the visitor list. */
   rootKey?: number;
+  /** Open this screen (the bulletin board, a visitor); `n` counts requests,
+   * so asking again opens it again. */
+  openRequest?: { key: string | null; n: number } | null;
+  /** The open screen's key (the bulletin board, a visitor), or null. */
+  onSelectedChange?: (key: string | null) => void;
+  /** Where the visitor panel goes: outside the Town's view, so a visitor
+   * (or the bulletin board) opens over Home as well. */
+  panelHost?: HTMLElement | null;
   /** Debug: render the previous hunt as if it were live, to preview the active-event UI. */
   debugForceActive?: boolean;
   /** Debug: render a fixture boss, so the panel can be reviewed without a live one. */
@@ -307,7 +319,9 @@ function EventsViewImpl({
   /** Which full-screen event view is open, so the app can recolour the
    * window (a live boss or Nandor blacks it out, George turns it gold) or,
    * for the 3D world, let it fill the window. */
-  onScreenChange?: (screen: "boss" | "merchant" | "world" | null) => void;
+  onScreenChange?: (
+    screen: "boss" | "merchant" | "world" | "visitor" | null,
+  ) => void;
   /** Current deck, used to show set progress in the reward preview. */
   equipped?: Equipped | null;
   /** Every owned copy, for George's "N owned" counts. */
@@ -326,7 +340,32 @@ function EventsViewImpl({
     setTowerOpen(Number.isFinite(at) ? { endsAt: at } : null);
   }, [towerEnds]);
   /** Open card (see EventCard.key); null shows the list. */
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelectedRaw] = useState<string | null>(null);
+  /** Where Back goes from the open visitor: the bulletin board, when they
+   * were opened from it. */
+  const [returnTo, setReturnTo] = useState<string | null>(null);
+  /** Open a screen (or none) outright: nothing to go back to. */
+  const setSelected = useCallback((key: string | null) => {
+    setSelectedRaw(key);
+    setReturnTo(null);
+  }, []);
+  /** Open a visitor from the bulletin board: Back comes back to it. */
+  const openFromBoard = useCallback((key: string) => {
+    setSelectedRaw(key);
+    setReturnTo(BULLETIN_KEY);
+  }, []);
+  /** Back (and Esc): to the board if they came from it, else out. */
+  const goBack = () => {
+    if (returnTo && selected !== returnTo) {
+      setSelectedRaw(returnTo);
+      setReturnTo(null);
+    } else setSelected(null);
+  };
+  useEffect(() => {
+    onSelectedChange?.(selected);
+  }, [selected, onSelectedChange]);
+  /** The Town on screen, or a panel open over Home: load and run. */
+  const active = eventsTabVisible || selected !== null;
   const [reloadKey, setReloadKey] = useState(0);
 
   const [previousEvent, setPreviousEvent] = useState<GameEvent | null>(null);
@@ -346,7 +385,12 @@ function EventsViewImpl({
     rootKeyRef.current = rootKey;
     setSelected(null);
     setInspectOverlay(null);
-  }, [rootKey]);
+  }, [rootKey, setSelected]);
+  useEffect(() => {
+    if (!openRequest) return;
+    setSelected(openRequest.key);
+    setInspectOverlay(null);
+  }, [openRequest, setSelected]);
   const [huntTab, setHuntTab] = useState<"clues" | "finders">("clues");
   const focused = useWindowFocused();
 
@@ -369,8 +413,11 @@ function EventsViewImpl({
     ]);
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey || !LEAVE_KEYS.has(e.code)) return;
-      // Escape already closed something on top (lib/escapeStack).
-      if (e.defaultPrevented) return;
+      // Escape already closed something on top (lib/escapeStack). Only
+      // Escape: the walking keys come here already handled by the Town's
+      // own input (it stops them scrolling), in the big window where it's
+      // still running.
+      if (e.code === "Escape" && e.defaultPrevented) return;
       const el = e.target as HTMLElement | null;
       if (
         el &&
@@ -384,7 +431,7 @@ function EventsViewImpl({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [leaving]);
+  }, [leaving, setSelected]);
 
   // Optimistic override of playsRemaining, keyed by hint index — updated
   // immediately from a play response so the button reflects the new count
@@ -433,7 +480,7 @@ function EventsViewImpl({
   // reloadKey is a trigger, not a value: George's stall bumps it after a buy.
   // biome-ignore lint/correctness/useExhaustiveDependencies: reloadKey re-runs the fetch
   useEffect(() => {
-    if (!eventsTabVisible) return;
+    if (!active) return;
     let cancelled = false;
 
     const refresh = () =>
@@ -463,7 +510,7 @@ function EventsViewImpl({
       cancelled = true;
       if (interval) clearInterval(interval);
     };
-  }, [focused, eventsTabVisible, reloadKey]);
+  }, [focused, active, reloadKey]);
 
   // /events/previous-hunt returns the last ended hunt *or* boss, whichever is
   // newer. While Orphiez is in town his card is live and never shows the last
@@ -480,7 +527,7 @@ function EventsViewImpl({
   // previousKey is a trigger, not a value.
   // biome-ignore lint/correctness/useExhaustiveDependencies: previousKey re-runs the fetch
   useEffect(() => {
-    if (!eventsTabVisible || !activeLoaded) return;
+    if (!active || !activeLoaded) return;
     if (!previousNeeded) {
       setPreviousLoaded(true);
       return;
@@ -500,57 +547,28 @@ function EventsViewImpl({
     return () => {
       cancelled = true;
     };
-  }, [eventsTabVisible, activeLoaded, previousNeeded, previousKey]);
+  }, [active, activeLoaded, previousNeeded, previousKey]);
 
   /** A visitor open in the big window's panel, the world still showing. */
   const inPanel = expanded && selected !== null;
+  /** A visitor opened from the board: Back (not the panel's x) takes you
+   * back to it, in the big window's panel too. */
+  const returning = returnTo !== null && selected !== returnTo;
+  const screenInPanel = inPanel && !returning;
 
-  // Tell the app which full-screen view is open (see onScreenChange). Up here,
-  // above the early returns, so the hook order never changes.
+  // Tell the app what's on screen (see onScreenChange). Up here, above the
+  // early returns, so the hook order never changes. A visitor always opens on
+  // a panel over the world: in the big window the world is still what's
+  // played in ("world": the window stays big, the chat beside it); in the
+  // small one the panel fills the window ("visitor": the chat steps aside,
+  // the world keeps its size behind the glass).
   useEffect(() => {
-    if (!onScreenChange) return;
-    // In the big window's panel the world is still what's on screen: no
-    // blackout or gold, and the window stays big.
-    if (inPanel) {
-      onScreenChange("world");
-      return;
-    }
-    const open =
-      selected === "debug-boss-fight" && debugForceBoss
-        ? "boss_fight"
-        : selected === DEBUG_MERCHANT.id && debugForceMerchant
-          ? "merchant"
-          : selected === DEBUG_TREAT_TRADER.id && debugForceTreatTrader
-            ? "treat_trader"
-            : // The previous event too: an ended boss's results stay blacked out.
-              (
-                events.find((e) => e.id === selected) ??
-                (previousEvent?.id === selected ? previousEvent : undefined)
-              )?.type;
-    // Nandor shares the boss's blackout: a vampire keeps the lights off.
-    onScreenChange(
-      selected === null
-        ? "world"
-        : open === "boss_fight" || open === "treat_trader"
-          ? "boss"
-          : open === "merchant"
-            ? "merchant"
-            : null,
-    );
-  }, [
-    selected,
-    events,
-    previousEvent,
-    debugForceBoss,
-    debugForceMerchant,
-    debugForceTreatTrader,
-    onScreenChange,
-    inPanel,
-  ]);
+    onScreenChange?.(selected === null || inPanel ? "world" : "visitor");
+  }, [selected, inPanel, onScreenChange]);
 
   const loading = !activeLoaded || !previousLoaded;
 
-  const back = <BackButton colour="cyan" onClick={() => setSelected(null)} />;
+  const back = <BackButton colour="cyan" onClick={goBack} />;
 
   const previousHunt =
     previousEvent?.type === "song_hunt" ? previousEvent : null;
@@ -727,6 +745,7 @@ function EventsViewImpl({
         paused={
           (selected !== null && !inPanel) || !eventsTabVisible || !focused
         }
+        backdrop={selected !== null && !inPanel && eventsTabVisible}
         // Losing focus freezes the world but leaves the HUD up.
         hudHidden={(selected !== null && !inPanel) || !eventsTabVisible}
         windowOpen={windowOpen || inPanel}
@@ -764,7 +783,7 @@ function EventsViewImpl({
     if (selectedEvent?.type === "boss_fight") {
       return (
         <ScreenView
-          inPanel={inPanel}
+          inPanel={screenInPanel}
           title="Boss Fight"
           colour="cyan"
           childrenClassName="flex min-h-0 flex-col"
@@ -773,7 +792,7 @@ function EventsViewImpl({
         >
           <BossFightPanel
             event={selectedEvent}
-            paused={!eventsTabVisible || !focused}
+            paused={!active || !focused}
             equipped={equipped}
           />
         </ScreenView>
@@ -788,14 +807,12 @@ function EventsViewImpl({
       const colour = nandor ? "red" : "yellow";
       return (
         <ScreenView
-          inPanel={inPanel}
+          inPanel={screenInPanel}
           ownName
           title={nandor ? TREAT_TRADER_NAME : MERCHANT_NAME}
           colour={colour}
           childrenClassName="flex min-h-0 flex-col"
-          backButton={
-            <BackButton colour={colour} onClick={() => setSelected(null)} />
-          }
+          backButton={<BackButton colour={colour} onClick={goBack} />}
           action={
             nandor ? (
               <span className="flex items-center gap-2">
@@ -818,7 +835,7 @@ function EventsViewImpl({
             units={units}
             onBought={() => setReloadKey((k) => k + 1)}
             onLog={onLog}
-            paused={!eventsTabVisible || !focused}
+            paused={!active || !focused}
           />
         </ScreenView>
       );
@@ -827,13 +844,12 @@ function EventsViewImpl({
     if (selected === BULLETIN_KEY) {
       return (
         <ScreenView
-          inPanel={inPanel}
+          inPanel={screenInPanel}
           title="Bulletin board"
           colour="cyan"
           childrenClassName="flex min-h-0 flex-col"
-          backButton={back}
         >
-          <BulletinPanel week={week} />
+          <BulletinPanel week={week} onOpen={openFromBoard} />
         </ScreenView>
       );
     }
@@ -841,7 +857,7 @@ function EventsViewImpl({
     if (selected === BOBOKU_KEY || selected === MEDEA_KEY) {
       return (
         <ScreenView
-          inPanel={inPanel}
+          inPanel={screenInPanel}
           ownName
           title={selected === MEDEA_KEY ? MEDEA_NAME : BOBOKU_NAME}
           colour="cyan"
@@ -855,7 +871,7 @@ function EventsViewImpl({
             units={units}
             onBought={() => {}}
             onLog={onLog}
-            paused={!eventsTabVisible || !focused}
+            paused={!active || !focused}
           />
         </ScreenView>
       );
@@ -865,7 +881,7 @@ function EventsViewImpl({
       // The opened event ended between polls.
       return (
         <ScreenView
-          inPanel={inPanel}
+          inPanel={screenInPanel}
           title="Town"
           colour="cyan"
           backButton={back}
@@ -896,7 +912,7 @@ function EventsViewImpl({
       const nextStartsAt = nextHunt ? new Date(nextHunt.startsAt) : null;
       return (
         <ScreenView
-          inPanel={inPanel}
+          inPanel={screenInPanel}
           title="Song Hunt"
           colour="cyan"
           childrenClassName="flex min-h-0 flex-col"
@@ -1032,7 +1048,7 @@ function EventsViewImpl({
     if (!hunt) {
       return (
         <ScreenView
-          inPanel={inPanel}
+          inPanel={screenInPanel}
           title="Song Hunt"
           colour="cyan"
           backButton={back}
@@ -1062,7 +1078,7 @@ function EventsViewImpl({
 
     return (
       <ScreenView
-        inPanel={inPanel}
+        inPanel={screenInPanel}
         ownName
         title="Song Hunt"
         colour="cyan"
@@ -1083,7 +1099,7 @@ function EventsViewImpl({
           />
         }
       >
-        <OrphiezStage paused={!eventsTabVisible || !focused} />
+        <OrphiezStage paused={!active || !focused} />
         {hunt.description ? (
           <div className="mt-1 shrink-0 text-center text-ui text-text-dim">
             {hunt.description}
@@ -1220,19 +1236,22 @@ function EventsViewImpl({
 
   return (
     <>
-      <div
-        className={cn(
-          "min-h-0 flex-1 flex-col",
-          selected === null || inPanel ? "flex" : "hidden",
+      {/* The world stays on screen under a visitor, blurred behind the
+          panel's glass (paused, its HUD hidden, in the small window). */}
+      <div className="flex min-h-0 flex-1 flex-col">{world}</div>
+      {screen !== null &&
+        createPortal(
+          <VisitorPanel
+            full={!inPanel}
+            // The board closes with an x (no Back) in the small window too;
+            // a visitor opened from it has Back instead.
+            closeButton={screenInPanel || selected === BULLETIN_KEY}
+            onClose={goBack}
+          >
+            {screen}
+          </VisitorPanel>,
+          panelHost ?? document.body,
         )}
-      >
-        {world}
-      </div>
-      {inPanel ? (
-        <VisitorPanel onClose={() => setSelected(null)}>{screen}</VisitorPanel>
-      ) : (
-        screen
-      )}
     </>
   );
 }
@@ -1273,9 +1292,11 @@ function ScreenView({
 const visitorHerzieStage = new HerzieStage();
 
 /**
- * A visitor in the Town's big window: a frosted panel in the middle of the
- * window, over the world. Its x, Esc or walking (see `leaving` above)
- * leaves the visitor.
+ * A visitor, on a frosted panel over the world. In the big window it's in
+ * the middle, the world beside it still played in; its x, Esc or walking
+ * (see `leaving` above) leaves the visitor. In the small window (`full`) it
+ * fills the window down to the nav's row, the paused world blurred behind,
+ * and the screen's own Back leaves (no x).
  *
  * Built like OverlayWindow: the blur is a sibling layer, not a wrapper, so
  * the screen's own `position: fixed` popups aren't trapped in it; the
@@ -1283,9 +1304,14 @@ const visitorHerzieStage = new HerzieStage();
  * the panel's sky slot.
  */
 function VisitorPanel({
+  full = false,
+  closeButton = !full,
   onClose,
   children,
 }: {
+  full?: boolean;
+  /** Its x, top right. Off by default when full: the screen has Back. */
+  closeButton?: boolean;
   onClose: () => void;
   children: React.ReactNode;
 }) {
@@ -1306,14 +1332,32 @@ function VisitorPanel({
   return (
     // Centred in the window; around the panel, the world takes its own
     // clicks.
-    <div className="pointer-events-none fixed inset-0 z-55 flex items-center justify-center px-3 py-3">
+    <div
+      className={cn(
+        "pointer-events-none fixed z-55 flex items-center justify-center",
+        // Full: 12px in at the top and sides, as the windows are, down to
+        // just over the nav's row (main.tsx).
+        // 2px bigger than the app's content all round, so its edges don't
+        // line up with the cards under the glass (see OverlayWindow).
+        full ? "inset-x-2.5 top-2.5 bottom-[36px]" : "inset-0 px-3 py-3",
+      )}
+    >
       <div
         data-tauri-drag-region="false"
-        className="overlay-in pointer-events-auto relative flex h-[min(480px,100%)] w-[356px] flex-col overflow-hidden rounded-2xl border border-white/12 shadow-[0_18px_50px_-12px_rgba(0,0,0,0.7)]"
+        className={cn(
+          "overlay-in pointer-events-auto relative flex flex-col overflow-hidden rounded-2xl border border-white/12 shadow-[0_18px_50px_-12px_rgba(0,0,0,0.7)]",
+          full ? "size-full" : "h-[min(480px,100%)] w-[356px]",
+        )}
       >
+        {/* The blur reaches past the panel, which clips it (see
+            OverlayWindow): no smeared edges. */}
         <div
           aria-hidden="true"
-          className="overlay-fade-in pointer-events-none absolute inset-0 rounded-2xl bg-bg-panel/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-xl backdrop-saturate-150"
+          className="overlay-fade-in pointer-events-none absolute -inset-6 backdrop-blur-xl backdrop-saturate-150"
+        />
+        <div
+          aria-hidden="true"
+          className="overlay-fade-in pointer-events-none absolute inset-0 rounded-2xl bg-bg-panel/70 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
         />
         {/* A herzie's sky (HerzieWithSky), over the glass, under the herzie. */}
         <div
@@ -1332,24 +1376,26 @@ function VisitorPanel({
           {/* Close, top right: 6px from the top and the right edge, as on
               the windows (OverlayWindow). Over the screen (z-50, as its
               header). */}
-          <button
-            type="button"
-            aria-label="Close"
-            onClick={onClose}
-            className="overlay-fade-in absolute top-1.5 right-1.5 z-50 flex size-5 cursor-pointer items-center justify-center rounded-full border-none bg-transparent p-0 text-text-dim hover:bg-white/10 hover:text-text"
-          >
-            <svg
-              viewBox="0 0 10 10"
-              className="size-2.5"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              aria-hidden="true"
+          {closeButton && (
+            <button
+              type="button"
+              aria-label="Close"
+              onClick={onClose}
+              className="overlay-fade-in absolute top-1.5 right-1.5 z-50 flex size-5 cursor-pointer items-center justify-center rounded-full border-none bg-transparent p-0 text-text-dim hover:bg-white/10 hover:text-text"
             >
-              <path d="M2 2l6 6M8 2l-6 6" />
-            </svg>
-          </button>
+              <svg
+                viewBox="0 0 10 10"
+                className="size-2.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                aria-hidden="true"
+              >
+                <path d="M2 2l6 6M8 2l-6 6" />
+              </svg>
+            </button>
+          )}
         </HerzieStageContext.Provider>
       </div>
     </div>

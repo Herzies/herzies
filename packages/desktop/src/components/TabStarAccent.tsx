@@ -2,14 +2,15 @@ import { STAR_TWINKLE_VARIANTS } from "@herzies/shared";
 import { useEffect, useState } from "react";
 import { useWindowFocused } from "../tauri-bridge";
 
-/** Scattered pixel stars around the tab edges (Sky scene glyphs). */
+/** Pixel stars (Sky scene glyphs) on the button's edges: its corners and
+ * its top and bottom borders, half in and half out, clear of the label. */
 const STAR_SLOTS = [
-  { left: "6%", top: "8%" },
-  { right: "6%", top: "12%" },
-  { left: "10%", bottom: "6%" },
-  { right: "8%", bottom: "10%" },
-  { left: "42%", top: "4%" },
-  { right: "38%", bottom: "4%" },
+  { left: "-1px", top: "-3px" },
+  { right: "-1px", top: "-2px" },
+  { left: "0px", bottom: "-3px" },
+  { right: "-2px", bottom: "-2px" },
+  { left: "40%", top: "-4px" },
+  { right: "35%", bottom: "-4px" },
 ] as const;
 
 export function TabStarAccent() {
@@ -26,12 +27,9 @@ export function TabStarAccent() {
   }, [focused]);
 
   return (
-    // Fixed-size positioning box, centered on the tab and independent of its
-    // rendered width, so the sparkle never changes the tab's own layout size.
-    <span
-      className="pointer-events-none absolute left-1/2 top-0 h-full w-16 -translate-x-1/2"
-      aria-hidden
-    >
+    // Over the whole button (which positions it), out of the layout, so the
+    // sparkle never changes the button's size.
+    <span className="pointer-events-none absolute inset-0" aria-hidden>
       {STAR_SLOTS.map((pos, i) => {
         const idx =
           Math.floor((frame + i * 2) / 3) % STAR_TWINKLE_VARIANTS.length;

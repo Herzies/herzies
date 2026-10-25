@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useEscape } from "../lib/escapeStack";
 import { cn } from "../lib/utils";
 import { PANEL_TAB_ATTR } from "./InventoryView";
+import { TabStarAccent } from "./TabStarAccent";
 
 export type View =
   | "home"
@@ -37,7 +38,9 @@ export function TabBar({
   setView,
   menuOpen,
   setMenuOpen,
-  visitorsInTown = 0,
+  eventsRunning = 0,
+  eventsOpen = false,
+  onEvents,
   unspentPoints = 0,
   hasStats = false,
   hasSkills = false,
@@ -52,8 +55,12 @@ export function TabBar({
   setView: (v: View) => void;
   menuOpen: boolean;
   setMenuOpen: (open: boolean) => void;
-  /** How many visitors are in Town right now; badges the tab when above 0. */
-  visitorsInTown?: number;
+  /** How many events are on right now: Events sparkles and counts them. */
+  eventsRunning?: number;
+  /** Events: the bulletin board, opened or closed. */
+  onEvents: () => void;
+  /** The bulletin board is open. */
+  eventsOpen?: boolean;
   /** Stat points waiting to be spent; badges Menu and Stats when above 0. */
   unspentPoints?: number;
   /** The server knows stat points / the herzie has a class. */
@@ -105,8 +112,8 @@ export function TabBar({
   const onHome = base === "home";
 
   return (
-    // Top right, on Home and in the Town alike (main.tsx places it): the
-    // Home/World toggle, then Menu.
+    // Under the chat, on Home and in the Town alike (main.tsx places it):
+    // the Home/World toggle and Events at the left, Menu at the right.
     <div className="flex items-center gap-1.5">
       {/* One button for the two screens: it names the one you're not on. */}
       {onHome ? (
@@ -116,15 +123,7 @@ export function TabBar({
           title="Go to the World — the Town and who's visiting. Shortcut [t]"
           className={buttonClass(false)}
         >
-          {/* Visitors in town: a count, inline. */}
-          <span>
-            <span>World</span>
-            {visitorsInTown > 0 && (
-              <span className="ml-1 text-[8px] font-bold text-green">
-                {visitorsInTown}
-              </span>
-            )}
-          </span>
+          World
         </button>
       ) : (
         <button
@@ -137,12 +136,29 @@ export function TabBar({
         </button>
       )}
       <button
+        type="button"
+        onClick={onEvents}
+        title="Events — what's on now and coming up this week"
+        className={cn("relative", buttonClass(eventsOpen))}
+      >
+        {/* On the button's edges (the button positions it). */}
+        {eventsRunning > 0 && <TabStarAccent />}
+        <span>
+          <span className="relative z-10">Events</span>
+          {eventsRunning > 0 && (
+            <span className="relative z-10 ml-1 text-[8px] font-bold text-green">
+              {eventsRunning}
+            </span>
+          )}
+        </span>
+      </button>
+      <button
         ref={menuButton}
         type="button"
         onClick={() => setMenuOpen(!menuOpen)}
         title="Menu — your deck, bag, profile and more. Shortcut [m]"
         aria-expanded={menuOpen}
-        className={buttonClass(menuOpen || windowOpen)}
+        className={cn("ml-auto", buttonClass(menuOpen || windowOpen))}
       >
         <span className="relative">
           <span
@@ -226,8 +242,8 @@ export function TabBar({
   );
 }
 
-/** The Menu button's tray: frosted, just under the button, right-aligned
- * with it. On the body, so it sits over the windows. Closes on Escape or a
+/** The Menu button's tray: frosted, just above the button (the nav sits
+ * under the chat), right-aligned with it. On the body, so it sits over the windows. Closes on Escape or a
  * click anywhere else. */
 function MenuTray({
   anchor,
@@ -238,14 +254,16 @@ function MenuTray({
   onClose: () => void;
   children: React.ReactNode;
 }) {
-  const [pos, setPos] = useState<{ right: number; top: number } | null>(null);
+  const [pos, setPos] = useState<{ right: number; bottom: number } | null>(
+    null,
+  );
   useLayoutEffect(() => {
     if (!anchor) return;
     const place = () => {
       const r = anchor.getBoundingClientRect();
       setPos({
         right: Math.max(8, window.innerWidth - r.right),
-        top: r.bottom + 6,
+        bottom: window.innerHeight - r.top + 6,
       });
     };
     place();

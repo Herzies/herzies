@@ -172,7 +172,7 @@ export function HomeView({
       {/* Top left, a frosted card: name and level, then health and
           experience — at least a third of the window wide. z-50: over the
           herzie canvas (z-index: 1), which would otherwise swallow the
-          bars' tooltips. Top right, room for the nav. */}
+          bars' tooltips. */}
       <div className="relative z-50 flex items-start justify-between gap-1.5">
         <div className={cn(PLAYER_CARD, PLAYER_CARD_HOME)}>
           <div className="flex h-5 items-center">
@@ -190,7 +190,7 @@ export function HomeView({
           </div>
           {/* The level (and class) on its own line, so a long name has the
               row to itself. */}
-          <div className="text-[10px] leading-3 whitespace-nowrap text-text-dim">
+          <div className="my-0.5 text-[10px] leading-3 whitespace-nowrap text-text-dim">
             Lv. {herzie.level}
             {herzie.class && ` · ${CLASS_DEFS[herzie.class].name}`}
           </div>
@@ -207,13 +207,6 @@ export function HomeView({
               connect to internet to grow
             </span>
           )}
-          {/* Room for the nav (Home/World and Menu), which main.tsx puts
-              over this corner, fixed, on every screen. */}
-          <div
-            aria-hidden="true"
-            className="shrink-0"
-            style={{ width: "var(--nav-width, 0px)" }}
-          />
         </div>
       </div>
 

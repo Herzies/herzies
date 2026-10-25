@@ -476,16 +476,15 @@ function hitTest(x: number, y: number): DragHit {
  * other slot (empty or filled — filled swaps the two items), or onto the
  * herzie to place it.
  *
- * `border-r`/`border-b` only draw on non-edge cells (see `isLastCol`/
- * `isLastRow`) — the grid should show inner divider lines only, not an
- * outer frame around the whole thing. */
+ * `border-r` only draws between columns (see `isLastCol`), not down the
+ * grid's sides; `border-b` under every row, the last one included, so the
+ * grid has a floor. */
 function ItemGridCell({
   index,
   itemId,
   unitIds,
   level,
   isLastCol,
-  isLastRow,
   isDragging,
   isDragOver,
   flying,
@@ -501,7 +500,6 @@ function ItemGridCell({
   /** This copy's dice-upgrade level (0 for a stack) — see CompactItemPreview. */
   level: number;
   isLastCol: boolean;
-  isLastRow: boolean;
   isDragging: boolean;
   isDragOver: boolean;
   /** A copy is flying back onto this tile: hold its icon until it lands. */
@@ -546,7 +544,7 @@ function ItemGridCell({
           // the full cell, and the icon sitting off-centre.
           "relative flex h-full w-full cursor-grab items-center justify-center transition-colors hover:bg-white/5 active:cursor-grabbing",
           !isLastCol && "border-r border-white/15",
-          !isLastRow && "border-b border-white/15",
+          "border-b border-white/15",
           dragVisualClasses(isDragging, isDragOver),
         )}
       >
@@ -600,16 +598,14 @@ function ItemGridCell({
  * handler of its own: the global pointermove handler finds it via
  * `data-slot-index` + `elementFromPoint`.
  *
- * `border-r`/`border-b` only draw on non-edge cells — see `ItemGridCell`. */
+ * Borders as on `ItemGridCell`. */
 function EmptyGridCell({
   index,
   isLastCol,
-  isLastRow,
   isDragOver,
 }: {
   index: number;
   isLastCol: boolean;
-  isLastRow: boolean;
   isDragOver: boolean;
 }) {
   return (
@@ -618,7 +614,7 @@ function EmptyGridCell({
       className={cn(
         "h-full w-full",
         !isLastCol && "border-r border-white/15",
-        !isLastRow && "border-b border-white/15",
+        "border-b border-white/15",
         dragVisualClasses(false, isDragOver),
       )}
     />
@@ -1795,7 +1791,10 @@ function InventoryViewImpl({
             {/* The bag sets the height (three rows); the deck and the other
                 tabs fill it, scrolling past it, so switching tabs never
                 resizes the window. */}
-            <div className="relative grid min-h-0 flex-1">
+            {/* minmax(0, 1fr): the track may shrink below the bag's three
+                rows when the window has a fixed height (Home's half window),
+                rather than pushing the bag out past the window's bottom. */}
+            <div className="relative grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)]">
               {/* Scrolls only if the window can't fit it. A card dropped
                   anywhere in here is placed. */}
               <div
@@ -1846,10 +1845,13 @@ function InventoryViewImpl({
                   panel !== "bag" && "invisible",
                 )}
               >
+                {/* Three rows tall where the window grows to fit it, but
+                    only as a basis: in a window of fixed height it shrinks,
+                    and the grid scrolls. */}
                 <div
-                  className="relative min-h-0 flex-1"
+                  className="relative min-h-0"
                   style={{
-                    minHeight: `calc(100cqw * ${VISIBLE_ROWS} / ${GRID_COLS})`,
+                    flex: `1 1 calc(100cqw * ${VISIBLE_ROWS} / ${GRID_COLS})`,
                   }}
                 >
                   {loading ? (
@@ -1882,7 +1884,6 @@ function InventoryViewImpl({
                         >
                           {slotOrder.map((key, i) => {
                             const isLastCol = i % GRID_COLS === GRID_COLS - 1;
-                            const isLastRow = i >= slotOrder.length - GRID_COLS;
                             const tile = key ? tileByKey.get(key) : undefined;
                             if (!tile) {
                               return (
@@ -1890,7 +1891,6 @@ function InventoryViewImpl({
                                   key={`slot-${i}`}
                                   index={i}
                                   isLastCol={isLastCol}
-                                  isLastRow={isLastRow}
                                   isDragOver={dragVisual?.overIndex === i}
                                 />
                               );
@@ -1903,7 +1903,6 @@ function InventoryViewImpl({
                                 unitIds={tile.unitIds}
                                 level={tile.upgradeLevel}
                                 isLastCol={isLastCol}
-                                isLastRow={isLastRow}
                                 isDragging={
                                   dragSource?.kind === "bag" &&
                                   dragSource.index === i

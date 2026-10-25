@@ -26,6 +26,7 @@ export function OverlayWindow({
   children,
   narrow = false,
   onHome = false,
+  inTown = false,
   fit: fitProp = false,
   half = false,
   className,
@@ -44,6 +45,8 @@ export function OverlayWindow({
   narrow?: boolean;
   /** Over Home (see `half`): the whole height, like `fit` in the Town. */
   onHome?: boolean;
+  /** Over the Town's world: a press outside doesn't close it. */
+  inTown?: boolean;
   /** As tall as its content (up to the full height), from the top, rather
    * than the whole height. */
   fit?: boolean;
@@ -76,10 +79,10 @@ export function OverlayWindow({
   // A press anywhere outside closes it — unless something's open over it
   // (an item inspect, a menu, a prompt: those close first), or it's on the
   // nav or the drag strip (data-window-safe), which do their own thing.
-  // Not in the Town's big window (`narrow`): there the world beside it is
-  // played in, and a click on it shouldn't cost you the window.
+  // Not in the Town: there the world around it is played in, and a click
+  // on it shouldn't cost you the window.
   useEffect(() => {
-    if (!open || narrow) return;
+    if (!open || inTown) return;
     const down = (e: PointerEvent) => {
       const t = e.target as Element | null;
       if (!t || panel.current?.contains(t)) return;
@@ -89,7 +92,7 @@ export function OverlayWindow({
     };
     window.addEventListener("pointerdown", down, true);
     return () => window.removeEventListener("pointerdown", down, true);
-  }, [open, narrow, isTop]);
+  }, [open, inTown, isTop]);
 
   // The herzies inside draw on the overlay stage, hosted in whichever
   // window is open (only one is at a time).
@@ -117,27 +120,31 @@ export function OverlayWindow({
         // No backdrop: around the panel, what's underneath (the Town,
         // walking and all; Home's herzie) stays as it is and takes its own
         // clicks.
-        // 12px in from the window's sides, as the app's content is (px-3).
-        "pointer-events-none fixed inset-x-3 z-60",
+        // 2px bigger all round than the app's content (10px in, not its
+        // 12px): edges that lined up with the cards underneath (the chat,
+        // the player card) showed through the glass as a doubled edge. The
+        // big window's stay in line with its player card.
+        "pointer-events-none fixed z-60",
+        narrow ? "inset-x-3" : "inset-x-2.5",
         narrow
           ? // In the Town's big window: the small window's size, top left,
             // 8px under the player card and in line with it.
             "top-[calc(var(--player-card-bottom,32px)+8px)] h-[calc(var(--small-window-height)-var(--player-card-bottom,32px)-14px)] max-h-[calc(100vh-var(--player-card-bottom,32px)-20px)]"
           : onHome && half
-            ? // On Home, the deck and the bag: the bottom half, 12px off the
-              // window's bottom like the chat.
-              "top-[calc(50%+3px)] bottom-3"
+            ? // On Home, the deck and the bag: the bottom half, down to
+              // just over the nav's row (main.tsx).
+              "top-[calc(50%+1px)] bottom-[36px]"
             : onHome && !fit
               ? // On Home, the rest: from the top (12px down, over the
-                // player card and the nav) to the bottom, the same 12px in.
-                "top-3 bottom-3"
+                // player card) to just over the nav's row.
+                "top-2.5 bottom-[36px]"
               : fit
-                ? // From the window's top (12px down, over the player card
-                  // and the nav), as tall as it needs.
-                  "top-3 bottom-3"
-                : // In the Town: from the window's top, the upper part of the
-                  // window, leaving the herzie in view below.
-                  "top-3 bottom-[calc(40%+6px)]",
+                ? // From the window's top (12px down, over the player card),
+                  // as tall as it needs, down to the nav's row at most.
+                  "top-2.5 bottom-[36px]"
+                : // In the Town: the whole height, as on Home (the Herzie
+                  // window is `fit`, as tall as it needs).
+                  "top-2.5 bottom-[36px]",
         closed && "hidden",
       )}
       data-tauri-drag-region="false"
@@ -163,15 +170,26 @@ export function OverlayWindow({
           }
         }}
       >
+        {/* The blur reaches 24px past the panel, which clips it: a blur
+            runs out of picture at its own edge and smears whatever's there
+            inward, and the cards underneath (the chat, the player card) sit
+            12px in from the window's sides exactly where the panel's edges
+            are. Out there, the smear is clipped away. */}
         <div
           aria-hidden="true"
           className={cn(
-            "pointer-events-none absolute inset-0 rounded-2xl shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-saturate-150",
+            "pointer-events-none absolute -inset-6 backdrop-saturate-150",
             // The Herzie window on Home: clearer glass, the herzie raised
             // above it.
-            onHome && half && !narrow
-              ? "bg-bg-panel/30 backdrop-blur-md"
-              : "bg-bg-panel/50 backdrop-blur-xl",
+            onHome && half && !narrow ? "backdrop-blur-md" : "backdrop-blur-xl",
+            fade,
+          )}
+        />
+        <div
+          aria-hidden="true"
+          className={cn(
+            "pointer-events-none absolute inset-0 rounded-2xl shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]",
+            onHome && half && !narrow ? "bg-bg-panel/50" : "bg-bg-panel/70",
             fade,
           )}
         />

@@ -48,6 +48,7 @@ import { StatsTab } from "./components/StatsTab";
 import { StoreView } from "./components/StoreView";
 import { type MenuLanding, TabBar, type View } from "./components/TabBar";
 import { TradeView } from "./components/TradeView";
+import { BULLETIN_KEY } from "./components/town/Boards";
 import { setLootRoom } from "./components/town/combat/lootFeed";
 import { useBossResultsShown } from "./components/town/combat/results";
 import { setMySkill } from "./components/town/combat/skills";
@@ -137,19 +138,6 @@ function observeDock(el: HTMLDivElement | null) {
   if (el) dockObserver.observe(el);
 }
 
-/** ...and the nav's width as `--nav-width`: Home's header keeps that much
- * room at its right, where the nav sits over it. */
-const navObserver = new ResizeObserver(([entry]) => {
-  document.documentElement.style.setProperty(
-    "--nav-width",
-    `${(entry.target as HTMLElement).offsetWidth}px`,
-  );
-});
-function observeNav(el: HTMLDivElement | null) {
-  navObserver.disconnect();
-  if (el) navObserver.observe(el);
-}
-
 function App() {
   const endScreenUp = useBossResultsShown() !== null;
   const [rawState, setState] = useState<AppState>({
@@ -218,9 +206,9 @@ function App() {
   // or hidden at some point. See the hook for why the Rust-side fallback poll
   // stays.
   useTradeRequests(rawState.isOnline);
-  // The Town is where the app opens; Home is the other screen. Herzie,
+  // Home is where the app opens; the Town is the other screen. Herzie,
   // Social, Premium, Settings and a trade open over either as a window.
-  const [base, setBase] = useState<Base>("events");
+  const [base, setBase] = useState<Base>("home");
   const [overlay, setOverlay] = useState<OverlayId | null>(null);
   /** What the nav shows as selected. */
   const view: View = overlay ?? base;
@@ -352,9 +340,24 @@ function App() {
   const [openChatRequested, setOpenChatRequested] = useState(false);
   /** "c" pressed mid-trade: open chat after the user confirms leaving the trade. */
   const openChatAfterLeaveRef = useRef(false);
-  /** Visitors in Town right now (live song hunt, boss, George) — the Town
-   * tab's badge. */
-  const [visitorsInTown, setVisitorsInTown] = useState(0);
+  /** Events on right now — the nav's Events button sparkles and counts
+   * them. */
+  const [eventsRunning, setEventsRunning] = useState(0);
+  /** A screen for EventsView to open, or null to close it: see its
+   * openRequest. */
+  const [townOpen, setTownOpen] = useState<{
+    key: string | null;
+    n: number;
+  } | null>(null);
+  const requestScreen = useCallback(
+    (key: string | null) => setTownOpen((r) => ({ key, n: (r?.n ?? 0) + 1 })),
+    [],
+  );
+  /** The screen EventsView has open (the bulletin board, a visitor), over
+   * Home or the Town. */
+  const [eventsPanel, setEventsPanel] = useState<string | null>(null);
+  /** Where that panel goes: in the app's root, outside the Town's view. */
+  const [panelHost, setPanelHost] = useState<HTMLDivElement | null>(null);
   const [hasActiveEventOverride, setHasActiveEventOverride] = useState(false);
   const [debugBossOverride, setDebugBossOverride] = useState(false);
   const [debugMerchantOverride, setDebugMerchantOverride] = useState(false);
@@ -362,7 +365,7 @@ function App() {
     useState(false);
   /** Which full-screen event view the Events tab has open, if any. */
   const [eventsScreen, setEventsScreen] = useState<
-    "boss" | "merchant" | "world" | null
+    "boss" | "merchant" | "world" | "visitor" | null
   >(null);
   const [chatProfileCode, setChatProfileCode] = useState<string | null>(null);
   /** Where Back on an opened profile goes, if not just the Social tab: set
@@ -515,17 +518,12 @@ function App() {
     herzies
       .fetchActiveEvents()
       .then(({ events }) => {
-        setVisitorsInTown(
-          events.filter(
-            (e) =>
-              e.type === "song_hunt" ||
-              e.type === "boss_fight" ||
-              e.type === "merchant",
-          ).length,
-        );
+        // Not the monthly Tower: it's always on, so it would keep the
+        // button sparkling all month.
+        setEventsRunning(events.filter((e) => e.type !== "tower").length);
       })
       .catch(() => {
-        setVisitorsInTown(0);
+        setEventsRunning(0);
       });
   }, []);
 
@@ -550,7 +548,7 @@ function App() {
   const prevOnline = useRef(state.isOnline);
   useEffect(() => {
     if (state.isOnline && !prevOnline.current) {
-      setView("events");
+      setView("home");
     }
     prevOnline.current = state.isOnline;
   }, [state.isOnline, setView]);
@@ -731,6 +729,13 @@ function App() {
   /** The Town's 3D world is on screen: it fills the window, and the chat
    * floats over it. */
   const townWorld = base === "events" && eventsScreen === "world";
+  /** The world fills the window: as it is, or under a visitor's panel in the
+   * small window (the chat hidden). Kept apart from townWorld so opening a
+   * visitor doesn't resize the world — a paused canvas that resizes goes
+   * blank, and it shows through the panel's glass. */
+  const townLayout =
+    base === "events" &&
+    (eventsScreen === "world" || eventsScreen === "visitor");
   // The Town's bigger window (its button, or Z): only while the world is on
   // screen — a visitor's screen or another tab gets the small window back,
   // and coming back to the world grows it again.
@@ -1065,11 +1070,11 @@ function App() {
           "flex min-h-0 flex-1 flex-col overflow-hidden",
           // The Town's 3D world fills the whole window, out past the app's
           // padding; the chat floats over it (the dock).
-          townWorld && "-m-3",
+          townLayout && "-m-3",
           // Home supplies its own bottom breathing room (HomeView's now-playing
           // bar) so its artist-image background can reach the chat's top
           // border instead of stopping short of an outer margin.
-          base !== "home" && !townWorld && "mb-2",
+          base !== "home" && !townLayout && "mb-2",
         )}
       >
         {/* Home's herzie, over Home's stage (see useStageAlignment). Hidden,
@@ -1144,10 +1149,15 @@ function App() {
           <EventsView
             eventsTabVisible={base === "events"}
             windowOpen={!!overlay}
-            expanded={townExpanded}
+            // The big window's panel only in the Town: over Home, a
+            // visitor fills the small window.
+            expanded={townExpanded && base === "events"}
+            onSelectedChange={setEventsPanel}
+            panelHost={panelHost}
             chatOverlay
             chatMessages={state.chatMessages}
             rootKey={rootKeys.events ?? 0}
+            openRequest={townOpen}
             debugForceActive={hasActiveEventOverride}
             debugForceBoss={debugBossOverride}
             debugForceMerchant={debugMerchantOverride}
@@ -1192,19 +1202,20 @@ function App() {
           world; elsewhere it sits under the view. A zero-height row over the
           Town: the world keeps its full height underneath. In the big window
           it keeps the small window's width, bottom left. */}
-      <div className={cn("relative -mx-3", townWorld && "h-0")}>
+      <div className={cn("relative -mx-3", townLayout && "h-0")}>
         <div
           ref={observeDock}
           className={cn(
-            // 12px under the chat, as at the sides: over the Town, flush
-            // with the window's bottom (-mb-3 undoes the app's pb-3) and its
-            // own pb-3; elsewhere the app's pb-3.
+            // Room under the chat for the nav's row (20px, 6px apart; the
+            // nav itself is fixed, below), then 12px as at the sides: over
+            // the Town, flush with the window's bottom (-mb-3 undoes the
+            // app's pb-3) and its own 12px; elsewhere the app's pb-3.
             "px-3",
-            townWorld
-              ? "absolute inset-x-0 bottom-0 z-40 -mb-3 pb-3"
+            townLayout
+              ? "absolute inset-x-0 bottom-0 z-40 -mb-3 pb-[38px]"
               : // Its own layer, over the screens but under the overlay
                 // windows (z-60): the expanded chat stays inside it.
-                "relative z-55",
+                "relative z-55 pb-[26px]",
           )}
         >
           <div className={cn(bigWindow && "w-[356px]")}>
@@ -1237,51 +1248,72 @@ function App() {
         <div className="pointer-events-none mt-[3px] h-[3px] w-9 rounded-full bg-white/20 transition-colors group-hover:bg-white/45" />
       </div>
 
-      {/* The nav: top right, on Home and in the Town. In the header's 20px
-          row (the app's 12px top margin), level with Home's name and the
-          Town's. The windows (z-60) start at the top too, so while one's open
-          the nav goes under it (its own × closes it); the big window's
-          windows stay under the player card, clear of the nav. */}
+      {/* The visitor panel's host (EventsView): fixed, it covers Home or the
+          Town, under the nav and the windows. */}
+      <div ref={setPanelHost} className="contents" />
+
+      {/* The nav, under the chat: Home/World, Events, Menu. Fixed on its own
+          row at the window's bottom (the dock and the windows keep clear of
+          it), over the windows, so it's always in reach. Folds away with the
+          chat under the boss's end screen. data-window-safe: a press here
+          isn't "outside" an open window (the nav switches or closes windows
+          itself). */}
       {herzie && (
-        // data-window-safe: a press here isn't "outside" an open window (the
-        // nav switches or closes windows itself).
         <div
-          ref={observeNav}
-          data-window-safe
           className={cn(
-            "fixed top-3 right-3",
-            overlay && !bigWindow ? "z-50" : "z-65",
+            "pointer-events-none fixed bottom-3 z-65 flex transition-opacity duration-300",
+            bigWindow ? "left-3 w-[356px]" : "inset-x-3",
+            endScreen && "opacity-0",
           )}
         >
-          <TabBar
-            view={view}
-            base={base}
-            setView={(v) => switchView(v, true)}
-            menuOpen={menuOpen}
-            setMenuOpen={setMenuOpen}
-            hasStats={!!herzie.statPoints}
-            hasSkills={!!herzie.class}
-            landing={menuLanding}
-            windowSize={
-              townWorld && canExpandTown
-                ? { expanded: townExpanded, onToggle: toggleTownExpanded }
-                : null
-            }
-            // Only once the server knows stat points: before that,
-            // every herzie would show its whole back pay unspendable.
-            unspentPoints={
-              herzie.statPoints
-                ? statPoints(herzie.level, herzie.statPoints).unspent
-                : 0
-            }
-            visitorsInTown={
-              visitorsInTown +
-              Number(hasActiveEventOverride) +
-              Number(debugBossOverride) +
-              Number(debugMerchantOverride) +
-              Number(debugTreatTraderOverride)
-            }
-          />
+          <div
+            data-window-safe
+            // The chat's width; only the buttons take the mouse, so the gap
+            // between them leaves the Town clickable.
+            className={cn(
+              "w-full",
+              !endScreen && "[&_button]:pointer-events-auto",
+            )}
+          >
+            <TabBar
+              view={view}
+              base={base}
+              setView={(v) => switchView(v, true)}
+              menuOpen={menuOpen}
+              setMenuOpen={setMenuOpen}
+              hasStats={!!herzie.statPoints}
+              hasSkills={!!herzie.class}
+              landing={menuLanding}
+              windowSize={
+                townWorld && canExpandTown
+                  ? { expanded: townExpanded, onToggle: toggleTownExpanded }
+                  : null
+              }
+              // Only once the server knows stat points: before that,
+              // every herzie would show its whole back pay unspendable.
+              unspentPoints={
+                herzie.statPoints
+                  ? statPoints(herzie.level, herzie.statPoints).unspent
+                  : 0
+              }
+              // The bulletin board's panel, over Home or the Town alike
+              // (closing any window over them); again, and it closes.
+              eventsOpen={eventsPanel === BULLETIN_KEY}
+              onEvents={() => {
+                if (eventsPanel === BULLETIN_KEY) requestScreen(null);
+                else if (!overlay || switchView(overlay, true)) {
+                  requestScreen(BULLETIN_KEY);
+                }
+              }}
+              eventsRunning={
+                eventsRunning +
+                Number(hasActiveEventOverride) +
+                Number(debugBossOverride) +
+                Number(debugMerchantOverride) +
+                Number(debugTreatTraderOverride)
+              }
+            />
+          </div>
         </div>
       )}
 
@@ -1296,6 +1328,7 @@ function App() {
           title="Social"
           narrow={bigWindow}
           onHome={base === "home"}
+          inTown={townWorld}
         >
           {selfProfile ? (
             <ProfileView
@@ -1349,6 +1382,7 @@ function App() {
             title="Herzie"
             narrow={bigWindow}
             onHome={base === "home"}
+            inTown={townWorld}
             half
             fit
           >
@@ -1427,6 +1461,7 @@ function App() {
           title="Social"
           narrow={bigWindow}
           onHome={base === "home"}
+          inTown={townWorld}
         >
           <FriendsView
             herzie={herzie}
@@ -1459,6 +1494,7 @@ function App() {
           title="Leaderboard"
           narrow={bigWindow}
           onHome={base === "home"}
+          inTown={townWorld}
         >
           <LeaderboardView
             herzieName={herzie.name}
@@ -1476,6 +1512,7 @@ function App() {
           titleClassName="text-purple"
           narrow={bigWindow}
           onHome={base === "home"}
+          inTown={townWorld}
         >
           <TradeView
             key={tradeViewGeneration}
@@ -1506,6 +1543,7 @@ function App() {
         titleClassName="text-yellow"
         narrow={bigWindow}
         onHome={base === "home"}
+        inTown={townWorld}
       >
         <StoreView
           inventory={state.inventory}
@@ -1523,6 +1561,7 @@ function App() {
         title="Settings"
         narrow={bigWindow}
         onHome={base === "home"}
+        inTown={townWorld}
       >
         <SettingsView
           state={state}

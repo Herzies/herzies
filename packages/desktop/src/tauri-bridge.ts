@@ -61,9 +61,9 @@ export interface OngoingTrade {
 }
 
 /** xp: all-time; xp_month: EXP gained this calendar month (UTC); tower:
- * highest floor ever cleared. Each "_friends" variant ranks just the player
- * and their friends. */
-type GlobalBoard = "xp" | "xp_month" | "song_hunt" | "tower";
+ * highest floor ever cleared; tower_month: highest floor in this month's
+ * Tower. Each "_friends" variant ranks just the player and their friends. */
+type GlobalBoard = "xp" | "xp_month" | "song_hunt" | "tower" | "tower_month";
 export type LeaderboardBoard = GlobalBoard | `${GlobalBoard}_friends`;
 
 export interface LeaderboardEntry {

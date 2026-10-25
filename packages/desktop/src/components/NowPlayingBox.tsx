@@ -81,8 +81,11 @@ export function NowPlayingBox({
           </div>
         </div>
       )}
-      {/* The modifiers star, bottom right, over whatever's in the card. */}
-      <div className="absolute right-1 bottom-1 z-10 flex">
+      {/* The modifiers star, bottom right, over whatever's in the card: its
+          circle 9px in from the card's right and bottom edges, as the chat's
+          send button is from its card's, so the star's centre lines up with
+          the send arrow's (17.5px in) in the card right below. */}
+      <div className="absolute right-[9px] bottom-[9px] z-10 flex">
         <ModifiersButton multipliers={multipliers} />
       </div>
     </div>

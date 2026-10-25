@@ -60,6 +60,7 @@ export function TownWorld({
   chatMessages,
   cards,
   paused,
+  backdrop = false,
   hudHidden = paused,
   windowOpen = false,
   onOpen,
@@ -100,6 +101,10 @@ export function TownWorld({
   chatOverlay?: boolean;
   cards: EventCard[];
   paused: boolean;
+  /** Paused behind a visitor's panel: still load and draw up to the first
+   * frame (opened straight onto a visitor, there'd be nothing behind the
+   * glass), then hold still. */
+  backdrop?: boolean;
   /** The HUD (player card, hotbar, vitals, ...) is hidden. Defaults to
    * `paused`; the Town passes it apart so a world paused only because the
    * app lost focus keeps its HUD, as Home does. */
@@ -136,15 +141,17 @@ export function TownWorld({
   // The Town tab is mounted (hidden) for the app's whole life, so wait for
   // it to be opened before loading the 3D world and starting a WebGL
   // context — then keep them.
-  const [opened, setOpened] = useState(!paused);
+  const [opened, setOpened] = useState(!paused || backdrop);
   useEffect(() => {
-    if (!paused) setOpened(true);
-  }, [paused]);
+    if (!paused || backdrop) setOpened(true);
+  }, [paused, backdrop]);
   // One splash from opening until the world has drawn its first frame —
   // not one per thing that loads (the code, Rapier, the events), which
   // blinked as each handed over to the next.
   const [ready, setReady] = useState(false);
   const onReady = useCallback(() => setReady(true), []);
+  // A backdrop runs until that first frame is up.
+  const canvasPaused = paused && !(backdrop && !ready);
 
   // The visitors stand on islands with spots for them (home), not out on
   // the training grounds.
@@ -267,8 +274,8 @@ export function TownWorld({
       {net.status === "outdated" ? (
         <div
           className={cn(
-            // Under the nav (main.tsx, top right).
-            "pointer-events-none absolute top-[38px] right-3 z-30 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white/70",
+            // Top right.
+            "pointer-events-none absolute top-3 right-3 z-30 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white/70",
           )}
         >
           Update Herzies to see other players
@@ -293,7 +300,7 @@ export function TownWorld({
                   </span>
                 </div>
                 {/* The level (and class) on its own line, as on Home. */}
-                <div className="text-[10px] leading-3 whitespace-nowrap text-white/70">
+                <div className="my-0.5 text-[10px] leading-3 whitespace-nowrap text-white/70">
                   Lv. {profile.level}
                   {profile.classLabel && ` · ${profile.classLabel}`}
                 </div>
@@ -366,7 +373,7 @@ export function TownWorld({
             net={net}
             bubbles={bubbles}
             player={look}
-            paused={paused}
+            paused={canvasPaused}
             onOpen={onOpen}
             onOpenProfile={onOpenProfile}
             onNearChange={setNear}
