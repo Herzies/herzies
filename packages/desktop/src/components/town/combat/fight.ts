@@ -1,5 +1,5 @@
 import { getItemIcon, ITEMS, isSkillId, SKILL_DEFS } from "@herzies/shared";
-import { MOB } from "@herzies/shared/tower";
+import { MOB, towerXpPerKill } from "@herzies/shared/tower";
 import type {
   BossTelegraph,
   FightState,
@@ -9,6 +9,7 @@ import type {
   TowerMob,
 } from "@herzies/shared/town-net";
 import { useSyncExternalStore } from "react";
+import { logActivity } from "../../../lib/activity";
 import { notify } from "../../../lib/notices";
 import {
   sfxDown,
@@ -19,7 +20,7 @@ import {
   sfxWarn,
 } from "../sfx";
 import { setHpNow, setRegenFrozen } from "../vitals";
-import { pushDamageNumber } from "./DamageNumbers";
+import { pushDamageNumber, pushHurtNumber } from "./DamageNumbers";
 import { setBossResults } from "./results";
 import {
   clearBuff,
@@ -301,6 +302,10 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       return;
     }
     case "hp": {
+      // Yours went down: the amount pops off your herzie.
+      const was = bossFight.health.get(m.id)?.hp;
+      if (m.id === clock.you() && was !== undefined && m.hp < was)
+        pushHurtNumber(was - m.hp);
       bossFight.health.set(m.id, { hp: m.hp, maxHp: m.maxHp });
       if (m.id === clock.you()) setHpNow(m.hp);
       emit();
@@ -372,6 +377,10 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
     }
     case "mobDown": {
       const mob = towerMobs.get(m.mob);
+      // The Tower's fought alone: every kill is yours, and pays XP.
+      const tower = bossFight.tower;
+      if (mob && mob.downAt === null && tower)
+        logActivity(`Received +${towerXpPerKill(tower.floor)} XP`);
       if (mob) {
         mob.hp = 0;
         mob.downAt = now;

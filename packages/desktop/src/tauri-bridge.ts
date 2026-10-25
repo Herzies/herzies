@@ -142,6 +142,8 @@ export type TowerGuard = {
     endsAt: number;
     top: TowerGuardPlace[];
     you: { rank: number; floor: number } | null;
+    /** What this month's top climber gets (null: nothing set). */
+    rewardItemId?: string | null;
   } | null;
   last: { event: string; name: string; floor: number } | null;
   reward: { eligible: boolean; itemId: string | null; event: string | null };

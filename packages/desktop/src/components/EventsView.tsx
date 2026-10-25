@@ -908,6 +908,7 @@ function EventsViewImpl({
         >
           <TowerGuardPanel
             guard={towerGuard}
+            equipped={equipped}
             onClaimed={() => setGuardKey((k) => k + 1)}
             onLog={onLog}
             paused={!active || !focused}

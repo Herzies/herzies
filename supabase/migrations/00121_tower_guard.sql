@@ -260,7 +260,8 @@ BEGIN
       'event', v_cur.id,
       'endsAt', extract(epoch FROM v_cur.ends_at)::bigint,
       'top', v_top,
-      'you', v_you));
+      'you', v_you,
+      'rewardItemId', nullif(v_cur.config ->> 'topRewardItemId', '')));
   ELSE
     v_out := v_out || jsonb_build_object('current', NULL::jsonb);
   END IF;

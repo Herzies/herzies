@@ -255,6 +255,18 @@ export function TownWorld({
   }, [lookKey, net]);
 
   const talkTo = near?.card.openKey;
+  // Where the E prompts (talk, portal, bench) sit: as far above the hotbar
+  // as the hotbar is above the chat (6px; the slots are 36px tall), or just
+  // over the chat without the HUD.
+  const promptAt = hudHidden
+    ? chatOverlay
+      ? "bottom-[calc(var(--dock-height,0px)+6px)]"
+      : "bottom-3"
+    : chatOverlay
+      ? profile
+        ? "bottom-[calc(var(--dock-height,0px)+48px)]"
+        : "bottom-[calc(var(--dock-height,0px)+4.5rem+42px)]"
+      : "bottom-[54px]";
   // The key for aim mode (anywhere in the Town): sat right on top of the
   // bars (or in the corner, without them).
   const combatHint = !hudHidden ? (
@@ -421,10 +433,7 @@ export function TownWorld({
           }}
           className={cn(
             "absolute left-1/2 z-30 -translate-x-1/2 cursor-pointer whitespace-nowrap rounded border-0 bg-black/35 px-2.5 py-1 text-ui text-white backdrop-blur-md hover:bg-black/50",
-            // Above the dock (the chat) floating over the world.
-            chatOverlay
-              ? "bottom-[calc(var(--dock-height,0px)+4.5rem)]"
-              : "bottom-3",
+            promptAt,
           )}
         >
           Talk to {near.card.title} <span className="text-text-dim">[E]</span>
@@ -438,9 +447,7 @@ export function TownWorld({
           }}
           className={cn(
             "absolute left-1/2 z-30 -translate-x-1/2 cursor-pointer whitespace-nowrap rounded border-0 bg-black/35 px-2.5 py-1 text-ui text-white backdrop-blur-md hover:bg-black/50",
-            chatOverlay
-              ? "bottom-[calc(var(--dock-height,0px)+4.5rem)]"
-              : "bottom-3",
+            promptAt,
           )}
         >
           {portalTo.id === map.id
@@ -462,9 +469,7 @@ export function TownWorld({
           }}
           className={cn(
             "absolute left-1/2 z-30 -translate-x-1/2 cursor-pointer whitespace-nowrap rounded border-0 bg-black/35 px-2.5 py-1 text-ui text-white backdrop-blur-md hover:bg-black/50",
-            chatOverlay
-              ? "bottom-[calc(var(--dock-height,0px)+4.5rem)]"
-              : "bottom-3",
+            promptAt,
           )}
         >
           {bench === "sit"

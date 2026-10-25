@@ -64,6 +64,7 @@ import { WhatsNewOverlay } from "./components/WhatsNewOverlay";
 import { useOptimisticUnits } from "./hooks/useOptimisticUnits";
 import { useHomeStageOffset } from "./hooks/useStageAlignment";
 import { useTradeRequests } from "./hooks/useTradeRequests";
+import { onLogActivity } from "./lib/activity";
 import { notify } from "./lib/notices";
 import { stableMerge } from "./lib/stableMerge";
 import { cn } from "./lib/utils";
@@ -451,6 +452,7 @@ function App() {
       addLog(message);
       notify(message, { kind: "info" });
     });
+    const unlistenLog = onLogActivity(addLog);
     const unlistenDeepLink = herzies.onDeepLink((payload) => {
       if (payload.startsWith("trade:")) {
         const tradeId = payload.slice("trade:".length);
@@ -472,6 +474,7 @@ function App() {
     return () => {
       unlistenState();
       unlistenActivity();
+      unlistenLog();
       unlistenDeepLink();
     };
   }, [addLog, rememberTradeReturnView, setView]);

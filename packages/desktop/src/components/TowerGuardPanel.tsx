@@ -1,6 +1,9 @@
 import {
   DEFAULT_Y_ANGLE,
+  type Equipped,
   getItem,
+  ItemTypeIcon,
+  RARITY_COLORS,
   SpeechBubble,
   TOWER_GUARD_EQUIPPED,
   TOWER_GUARD_NAME,
@@ -14,6 +17,11 @@ import { notify } from "../lib/notices";
 import { useHerzieStage } from "../lib/overlayStage";
 import { cn } from "../lib/utils";
 import { herzies, type TowerGuard } from "../tauri-bridge";
+import ItemInspectOverlay, {
+  INSPECT_ORIGIN_ATTR,
+  inspectOrigin,
+} from "./ItemInspectOverlay";
+import { List } from "./List";
 
 /** What he says to anyone: nobody lasts up there, least of all you. */
 export const TOWER_GUARD_LINES = [
@@ -41,11 +49,14 @@ const OWED_LINES = [
  */
 export function TowerGuardPanel({
   guard,
+  equipped,
   onClaimed,
   onLog,
   paused,
 }: {
   guard: TowerGuard | null;
+  /** Your deck, for the inspect card's set progress. */
+  equipped?: Equipped | null;
   /** Fetch him again: the reward's gone, the "!" with it. */
   onClaimed: () => void;
   onLog?: (msg: string) => void;
@@ -53,6 +64,7 @@ export function TowerGuardPanel({
 }) {
   const [claiming, setClaiming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [inspecting, setInspecting] = useState(false);
   const owed = !!guard?.reward.eligible;
   const { line, typed, advance } = useChatter(
     owed ? OWED_LINES : TOWER_GUARD_LINES,
@@ -83,6 +95,10 @@ export function TowerGuardPanel({
   const top = current?.top ?? [];
   const you = current?.you ?? null;
   const youShown = !!you && top.some((p) => p.rank === you.rank);
+  // What he owes you, or else what this month's best climber will get.
+  const rewardId =
+    (owed ? guard?.reward.itemId : current?.rewardItemId) ?? null;
+  const rewardItem = rewardId ? getItem(rewardId) : undefined;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
@@ -117,29 +133,7 @@ export function TowerGuardPanel({
         <SpeechBubble line={line} typed={typed} />
       </div>
 
-      {owed && (
-        <div className="flex items-center justify-between gap-2 rounded-lg border border-yellow/40 bg-yellow/10 px-2 py-1.5 text-ui">
-          <span>
-            Top climber's reward:{" "}
-            <span className="text-yellow">
-              {rewardName(guard?.reward.itemId)}
-            </span>
-          </span>
-          <button
-            type="button"
-            className="btn text-yellow"
-            disabled={claiming}
-            onClick={claim}
-          >
-            {claiming ? "Claiming..." : "Claim"}
-          </button>
-        </div>
-      )}
-
-      <div className="min-h-0 shrink-0">
-        <div className="mb-0.5 text-ui text-text-dim">
-          Highest climbers this month:
-        </div>
+      <div className="mt-2 min-h-0 shrink-0">
         {!guard ? (
           <div className="text-[10px] text-text-dim">...</div>
         ) : !current ? (
@@ -151,40 +145,103 @@ export function TowerGuardPanel({
             Nobody's even tried. Can't blame them.
           </div>
         ) : (
-          <div className="flex flex-col gap-0.5">
-            {top.map((p) => (
+          // As the Orphiez finders list: a line under each row but the last.
+          <List>
+            {[
+              ...top.map((p) => ({ ...p, mine: you?.rank === p.rank })),
+              ...(you && !youShown
+                ? [
+                    {
+                      rank: you.rank,
+                      name: "you",
+                      floor: you.floor,
+                      mine: true,
+                    },
+                  ]
+                : []),
+            ].map((p) => (
               <div
                 key={`${p.rank}-${p.name}`}
-                className={cn(
-                  "flex items-baseline justify-between text-ui",
-                  you?.rank === p.rank && "text-cyan",
-                )}
+                className="mb-1 flex justify-between border-b border-white/15 py-1 text-ui last:mb-0 last:border-b-0"
               >
-                <span className={cn(p.rank === 1 && "text-yellow")}>
+                <span
+                  className={
+                    p.mine
+                      ? "text-cyan"
+                      : p.rank === 1
+                        ? "text-yellow"
+                        : "text-text"
+                  }
+                >
                   {p.rank}. {p.name}
                 </span>
                 <span className="text-text-dim">Floor {p.floor}</span>
               </div>
             ))}
-            {you && !youShown ? (
-              <div className="mt-0.5 flex items-baseline justify-between border-t border-white/15 pt-0.5 text-ui text-cyan">
-                <span>{you.rank}. you</span>
-                <span>Floor {you.floor}</span>
-              </div>
-            ) : null}
-          </div>
+          </List>
         )}
-        {guard?.last ? (
-          <div className="mt-1.5 text-[10px] text-text-dim">
-            Last month: <span className="text-yellow">{guard.last.name}</span>,
-            floor {guard.last.floor}.
-          </div>
-        ) : null}
       </div>
+
+      {/* At the bottom: last month's winner, then the reward. */}
+      {guard?.last || rewardItem ? (
+        <div className="mt-auto flex flex-col gap-1.5">
+          {guard?.last ? (
+            <div className="text-[10px] text-text-dim">
+              Last month: <span className="text-yellow">{guard.last.name}</span>
+              , floor {guard.last.floor}.
+            </div>
+          ) : null}
+          {rewardItem ? (
+            <div
+              className={cn(
+                "flex items-center justify-between gap-2 text-ui",
+                guard?.last && "border-t border-white/15 pt-1.5",
+              )}
+            >
+              {/* As reward lists are elsewhere: the card flies out of the icon. */}
+              <button
+                type="button"
+                title="Inspect"
+                onClick={() => setInspecting(true)}
+                {...{ [INSPECT_ORIGIN_ATTR]: "tower-reward" }}
+                className="group flex min-w-0 cursor-pointer items-center gap-1 border-none bg-transparent p-0 text-left text-ui text-text-dim"
+              >
+                <span className="shrink-0">Highest climber's reward:</span>
+                <ItemTypeIcon item={rewardItem} className="h-6 w-6 shrink-0" />
+                <span
+                  className="truncate group-hover:underline"
+                  style={{ color: RARITY_COLORS[rewardItem.rarity] }}
+                >
+                  {rewardItem.name}
+                </span>
+              </button>
+              {owed ? (
+                <button
+                  type="button"
+                  className="btn text-yellow"
+                  disabled={claiming}
+                  onClick={claim}
+                >
+                  {claiming ? "Claiming..." : "Claim"}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       {error && (
         <div className="pt-1 text-center text-[10px] text-red">{error}</div>
       )}
+
+      {inspecting && rewardItem ? (
+        <ItemInspectOverlay
+          itemId={rewardItem.id}
+          origin={inspectOrigin("tower-reward")}
+          onClose={() => setInspecting(false)}
+          equipped={equipped}
+        />
+      ) : null}
     </div>
   );
 }

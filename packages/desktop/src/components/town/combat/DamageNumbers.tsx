@@ -1,6 +1,7 @@
 import { useFrame, useThree } from "@react-three/fiber";
 import { useLayoutEffect, useMemo } from "react";
 import * as THREE from "three";
+import { useTownRuntime } from "../runtime";
 import { liveDummies } from "./Dummies";
 import { DUMMY, meterDps, meterIdle } from "./dummy";
 import { combat } from "./state";
@@ -11,7 +12,8 @@ import type { Vec3 } from "./waves";
  * (crisp text at any resolution, where the Town itself is pixelated):
  *
  * - Damage numbers popping off each hit: up and to one side, overshooting
- *   as they appear, fading as they go; a crit's gold.
+ *   as they appear, fading as they go; a crit's gold. What you take pops
+ *   off your own herzie, in red.
  * - A meter over each dummy you're hitting: damage per second, total,
  *   hits and crits, clearing once you stop.
  * - The crosshair in combat mode: it opens on each cast and closes again,
@@ -35,7 +37,8 @@ type Floater = {
 const FLOATERS = 32;
 const FLOAT_SECONDS = 0.95;
 
-const queue: { at: Vec3; amount: number; crit: boolean }[] = [];
+/** `at` null: over your own herzie (damage you took). */
+const queue: { at: Vec3 | null; amount: number; crit: boolean }[] = [];
 
 /** A damage number, popping off `at`. */
 export function pushDamageNumber(
@@ -47,6 +50,12 @@ export function pushDamageNumber(
     queue.push({ at: [at[0], at[1], at[2]], amount, crit });
 }
 
+/** Damage you took, popping off your herzie's head. */
+export function pushHurtNumber(amount: number): void {
+  if (amount > 0 && queue.length < 16)
+    queue.push({ at: null, amount, crit: false });
+}
+
 const STYLE = `
 .town-fx { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 15; font-family: ui-monospace, monospace; }
 .town-fx .dmg { position: absolute; left: 0; top: 0; will-change: transform, opacity; white-space: nowrap;
@@ -55,6 +64,8 @@ const STYLE = `
 .town-fx .dmg.crit { color: #ffe08a;
   text-shadow: 0 0 10px rgba(255, 190, 60, 0.75), 0 2px 0 #3a2200, 1px 0 0 #3a2200, -1px 0 0 #3a2200, 0 -1px 0 #3a2200; }
 .town-fx .dmg.crit::after { content: "!"; margin-left: 1px; }
+.town-fx .dmg.hurt { color: #ff6b6b;
+  text-shadow: 0 0 8px rgba(255, 60, 60, 0.6), 0 2px 0 #3a0808, 1px 0 0 #3a0808, -1px 0 0 #3a0808, 0 -1px 0 #3a0808; }
 .town-fx .meter { position: absolute; left: 0; top: 0; will-change: transform, opacity; transition: opacity 0.25s;
   background: rgba(6, 10, 20, 0.72); border: 1px solid rgba(159, 232, 255, 0.35); border-radius: 4px;
   padding: 3px 6px; color: #cfe9f5; font-size: 10px; line-height: 1.25; white-space: nowrap; }
@@ -86,6 +97,7 @@ const STYLE = `
 export function CombatOverlay() {
   const gl = useThree((s) => s.gl);
   const camera = useThree((s) => s.camera);
+  const rt = useTownRuntime();
   const ui = useMemo(() => {
     const root = document.createElement("div");
     root.className = "town-fx";
@@ -161,6 +173,7 @@ export function CombatOverlay() {
   }, [gl, ui]);
 
   const v = useMemo(() => new THREE.Vector3(), []);
+  const head = useMemo(() => new THREE.Vector3(), []);
   /** Where a world point lands on the overlay, in CSS px (null: behind). */
   const project = (x: number, y: number, z: number) => {
     v.set(x, y, z).project(camera);
@@ -177,6 +190,13 @@ export function CombatOverlay() {
     // New numbers, stacked off one another when they come close together.
     while (queue.length) {
       const n = queue.shift() as (typeof queue)[number];
+      let at = n.at;
+      if (!at) {
+        const body = rt.playerBody;
+        if (!body) continue;
+        body.getWorldPosition(head);
+        at = [head.x, head.y + (rt.playerHerzie?.height ?? 1.2), head.z];
+      }
       let f = ui.floaters[0];
       for (const x of ui.floaters) {
         if (!x.alive) {
@@ -188,12 +208,13 @@ export function CombatOverlay() {
       const busy = ui.floaters.filter((x) => x.alive && x.age < 0.3).length;
       f.alive = true;
       f.age = 0;
-      f.pos = [n.at[0], n.at[1] + 0.25 + busy * 0.18, n.at[2]];
+      f.pos = [at[0], at[1] + 0.25 + busy * 0.18, at[2]];
       f.drift = (Math.random() * 2 - 1) * 26;
       f.rise = 38 + Math.random() * 14 + (n.crit ? 12 : 0);
       f.crit = n.crit;
-      f.el.textContent = Math.round(n.amount).toLocaleString();
-      f.el.className = n.crit ? "dmg crit" : "dmg";
+      const hurt = !n.at;
+      f.el.textContent = `${hurt ? "-" : ""}${Math.round(n.amount).toLocaleString()}`;
+      f.el.className = hurt ? "dmg hurt" : n.crit ? "dmg crit" : "dmg";
     }
 
     for (const f of ui.floaters) {
