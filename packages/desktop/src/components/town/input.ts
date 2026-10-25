@@ -1,6 +1,12 @@
 import { useEffect, useRef } from "react";
+import { queueMySkill } from "./combat/skills";
 import { eat } from "./eat";
-import { HOTBAR_KEYS, type HotbarKey, hotbarItem } from "./hotbarSlots";
+import {
+  HOTBAR_KEYS,
+  type HotbarKey,
+  hotbarItem,
+  SKILL_SLOT,
+} from "./hotbarSlots";
 
 /** What the player is asking for this frame. Read by the game loop; written
  * only by the listeners below. */
@@ -105,12 +111,15 @@ export function useTownInput(
         interact.current();
         return;
       }
-      // 2, 3, 4: eat what's on that hotbar slot (1 is the class skill).
+      // 1-4: what's on that hotbar slot — your class skill, or a
+      // consumable to eat.
       const slot = e.code.startsWith("Digit") ? e.code.slice(5) : "";
       if (HOTBAR_KEYS.includes(slot as HotbarKey)) {
         e.preventDefault();
-        const itemId = hotbarItem(slot as HotbarKey);
-        if (itemId && !e.repeat) void eat(itemId);
+        const held = hotbarItem(slot as HotbarKey);
+        if (!held || e.repeat) return;
+        if (held === SKILL_SLOT) queueMySkill();
+        else void eat(held);
         return;
       }
       // Space would click whatever button has focus (or scroll): it's the

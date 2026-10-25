@@ -16,9 +16,19 @@ const DAY_WINDOW = new THREE.Color("#9fb3c4");
  * where shadows stop, and nothing shimmers as the player walks. A sphere
  * a bit bigger than the island (for roofs and treetops) fits in it from
  * any angle. */
-const SHADOW_REACH = ISLAND_RADIUS + 4;
-/** How far out the light sits, along its direction. */
+function shadowReach(radius: number): number {
+  return radius + 4;
+}
+/** How far out the light sits, along its direction: far enough that the
+ * whole shadow box is in front of it. */
 const SUN_DISTANCE = 60;
+function sunDistance(reach: number): number {
+  return Math.max(SUN_DISTANCE, reach + 13);
+}
+/** The shadow map's texels per side: as sharp on a big island as on home. */
+function shadowMapSize(reach: number): number {
+  return reach > shadowReach(ISLAND_RADIUS) * 1.4 ? 4096 : 2048;
+}
 /** How soft the sun's shadow edges are, in shadow-map texels (see
  * shadows.ts). */
 const SUN_SHADOW_SOFTNESS = 2;
@@ -67,10 +77,16 @@ const ROOM_AIR = "#09070e";
 export function DayLight({
   hour,
   room = false,
+  radius = ISLAND_RADIUS,
 }: {
   hour?: Hour;
   room?: boolean;
+  /** The island's radius, for the shadow box (default: home's). Fixed for
+   * the light's life: remount it (a `key`) for another island. */
+  radius?: number;
 }) {
+  const reach = shadowReach(radius);
+  const distance = sunDistance(reach);
   const hemi = useRef<THREE.HemisphereLight>(null);
   const sun = useRef<THREE.DirectionalLight>(null);
   const scene = useThree((s) => s.scene);
@@ -120,7 +136,7 @@ export function DayLight({
     if (sun.current) {
       sun.current.color.copy(look.sun);
       sun.current.intensity = look.sunIntensity * lights.strength;
-      sun.current.position.copy(lights.light).multiplyScalar(SUN_DISTANCE);
+      sun.current.position.copy(lights.light).multiplyScalar(distance);
       sun.current.shadow.intensity =
         lights.strength * (1 - look.night * (1 - MOON_SHADOW));
     }
@@ -143,16 +159,16 @@ export function DayLight({
         ref={sun}
         intensity={1.4}
         castShadow
-        shadow-mapSize={[2048, 2048]}
+        shadow-mapSize={[shadowMapSize(reach), shadowMapSize(reach)]}
         shadow-bias={-0.0005}
         shadow-normalBias={0.04}
         shadow-radius={SUN_SHADOW_SOFTNESS}
-        shadow-camera-left={-SHADOW_REACH}
-        shadow-camera-right={SHADOW_REACH}
-        shadow-camera-top={SHADOW_REACH}
-        shadow-camera-bottom={-SHADOW_REACH}
-        shadow-camera-near={SUN_DISTANCE - SHADOW_REACH}
-        shadow-camera-far={SUN_DISTANCE + SHADOW_REACH}
+        shadow-camera-left={-reach}
+        shadow-camera-right={reach}
+        shadow-camera-top={reach}
+        shadow-camera-bottom={-reach}
+        shadow-camera-near={distance - reach}
+        shadow-camera-far={distance + reach}
       />
     </>
   );

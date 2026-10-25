@@ -30,7 +30,7 @@ export function ItemRow({
   const name = nameOverride ?? def?.name ?? itemId;
 
   return (
-    <div className="flex items-center justify-between gap-2 border-b border-[#222] py-1.5">
+    <div className="flex items-center justify-between gap-2 border-b border-white/15 py-1.5">
       <button
         type="button"
         onClick={() => onInspect(itemId)}

@@ -15,8 +15,10 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { closeChannel, openChannel, realtimeClient } from "../lib/realtime";
 import { chatUserColor, cn } from "../lib/utils";
 import { type ChatMessage, herzies, useWindowFocused } from "../tauri-bridge";
+import { BlockCaret, useBlockCaret } from "./BlockCaret";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import ItemInspectOverlay from "./ItemInspectOverlay";
+import { SendIcon } from "./icons/SendIcon";
 
 type UserMenuTarget = {
   username: string;
@@ -238,8 +240,8 @@ export function ChatPanel({
   onOpenProfile: (friendCode: string) => void;
   onStartTrade: (friendCode: string) => void;
   onActivity?: (message: string) => void;
-  /** Over the Town's world: the open chat is frosted glass rather than the
-   * window's colour, like the dock it opens from. */
+  /** Over the Town's world: the chat is frosted glass rather than the
+   * window's colour. */
   frosted?: boolean;
 }) {
   const [input, setInput] = useState("");
@@ -262,8 +264,13 @@ export function ChatPanel({
   const [expanded, setExpanded] = useState(false);
   /** In-flow height of the dock when collapsed; keeps flex layout stable while expanded (fixed) panel is out of flow. */
   const [dockHeight, setDockHeight] = useState(88);
-  /** Gap between the collapsed dock and the window's bottom; the expanded panel is pinned there, so the input doesn't move as it opens. */
+  /** Where the collapsed chat is (its gap to the window's bottom, its left
+   * edge and width): the expanded panel opens from there, so the input
+   * doesn't move as it opens. */
   const [dockBottom, setDockBottom] = useState(40);
+  const [dockX, setDockX] = useState<{ left: number; width: number } | null>(
+    null,
+  );
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomAnchorRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
@@ -506,6 +513,7 @@ export function ChatPanel({
       const rect = panel.getBoundingClientRect();
       setDockHeight(rect.height);
       setDockBottom(window.innerHeight - rect.bottom);
+      setDockX({ left: rect.left, width: rect.width });
     };
     const ro = new ResizeObserver(measure);
     ro.observe(panel);
@@ -645,6 +653,8 @@ export function ChatPanel({
     closeUserMenu();
     inputRef.current?.blur();
   };
+
+  const caret = useBlockCaret(inputRef, input);
 
   const handleInputFocus = () => {
     captureFeedScrollAnchor();
@@ -1181,16 +1191,30 @@ export function ChatPanel({
       >
         <div
           ref={panelRef}
-          style={expanded ? { bottom: dockBottom } : undefined}
+          style={
+            expanded
+              ? {
+                  bottom: dockBottom,
+                  left: dockX?.left ?? 12,
+                  width: dockX?.width ?? "calc(100% - 24px)",
+                }
+              : undefined
+          }
           className={cn(
-            // Collapsed, the same padding and borders as expanded, so the
-            // input keeps its place either way, but both drawn clear.
-            "flex flex-col border-t border-b border-white/15 pb-1",
-            !expanded && "border-t-transparent border-b-transparent pt-px",
+            // A card of its own, apart from the nav. Collapsed and
+            // expanded share padding and border, so the input keeps its
+            // place as it opens.
+            "flex flex-col rounded-xl border border-white/12 px-2 pt-1 pb-1",
+            frosted && "backdrop-blur-md",
+            expanded
+              ? frosted
+                ? "bg-black/55"
+                : "bg-bg-panel"
+              : frosted
+                ? "bg-black/45"
+                : "bg-white/[0.03]",
             expanded &&
-              "fixed inset-x-0 z-[201] h-[50vh] max-h-[50vh] px-3 pt-[5px] shadow-[0_-8px_32px_rgba(0,0,0,0.45)]",
-            expanded &&
-              (frosted ? "bg-black/55 backdrop-blur-md" : "bg-bg-panel"),
+              "fixed z-[201] h-[50vh] max-h-[50vh] shadow-[0_-8px_32px_rgba(0,0,0,0.45)]",
           )}
         >
           <div
@@ -1217,7 +1241,7 @@ export function ChatPanel({
             )}
           >
             {feed.length === 0 && (
-              <div className="py-0.5 text-center text-ui-sm text-[#444]">
+              <div className="py-0.5 text-center text-ui-sm text-text-dim">
                 No messages yet
               </div>
             )}
@@ -1401,14 +1425,20 @@ export function ChatPanel({
                       ))}
                     </div>
                   )}
-                <div className="flex gap-0.5 py-0.5">
+                <div className="relative flex items-center gap-0.5 py-0.5">
+                  {/* No border: the card is its frame. Focused, a blinking
+                      block marks where you're typing. */}
                   <input
                     ref={inputRef}
-                    className="input flex-1 text-[10px]"
+                    className="input min-w-0 flex-1 border-none pr-1 pl-0 text-[10px] caret-transparent"
                     placeholder="Message… # items · @ people · / commands"
                     value={input}
                     onChange={handleInputChange}
-                    onFocus={handleInputFocus}
+                    {...caret.handlers}
+                    onFocus={() => {
+                      caret.handlers.onFocus();
+                      handleInputFocus();
+                    }}
                     aria-autocomplete="list"
                     aria-expanded={
                       showItemAutocomplete ||
@@ -1428,15 +1458,23 @@ export function ChatPanel({
                   />
                   <button
                     type="button"
+                    aria-label="Send"
                     className={cn(
-                      "btn text-ui-sm",
-                      cooldown || !input.trim() ? "opacity-50" : "opacity-100",
+                      // 17px round, so the 9px arrow sits a whole 4px in from every
+                      // side; at the row's bottom, 2px up, it keeps the same
+                      // 8px to the card's bottom edge as to its right edge,
+                      // where the input's text starts from its left.
+                      "mb-0.5 flex h-[17px] w-[17px] shrink-0 cursor-pointer items-center justify-center self-end rounded-full border-none transition-colors",
+                      cooldown || !input.trim()
+                        ? "cursor-default bg-white/10 text-text-dim"
+                        : "bg-cyan text-bg hover:brightness-110",
                     )}
                     disabled={cooldown || !input.trim()}
                     onClick={handleSend}
                   >
-                    Send
+                    <SendIcon className="h-[9px] w-[9px]" />
                   </button>
+                  <BlockCaret x={caret.x} />
                 </div>
               </div>
             )}

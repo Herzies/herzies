@@ -4,10 +4,12 @@ import {
   blendsFlat,
   bridgeAxis,
   cellShade,
+  elevation,
   groundBlend,
   groundHeight,
   islandRadius,
   isOpenWater,
+  levelCell,
   onIsland,
   TERRAIN,
   type TownMap,
@@ -75,7 +77,10 @@ function groundPoint(
   asGrass.copy(GRASS_COLOR).lerp(under, k).offsetHSL(0, 0, shade);
   asGravel.copy(GRAVEL_COLOR).lerp(under, k).offsetHSL(0, 0, shade);
   const dry = grass + gravel;
-  return { y: groundHeight(wet), gravel: dry > 0 ? gravel / dry : 0 };
+  return {
+    y: elevation(map, x, z) + groundHeight(wet),
+    gravel: dry > 0 ? gravel / dry : 0,
+  };
 }
 
 /**
@@ -102,7 +107,10 @@ function groundGeometry(map: TownMap): THREE.BufferGeometry {
   };
 
   const split = (cl: number, row: number) =>
-    onIsland(map, cl, row) && !blendsFlat(map, cl, row) ? SUB : 1;
+    onIsland(map, cl, row) &&
+    (!blendsFlat(map, cl, row) || !levelCell(map, cl, row))
+      ? SUB
+      : 1;
   for (let row = 0; row < map.size; row++) {
     for (let cl = 0; cl < map.size; cl++) {
       if (!onIsland(map, cl, row)) continue;
@@ -202,13 +210,15 @@ function bridgeParts(map: TownMap) {
       if (terrainAt(map, cl, row) !== "=") continue;
       const x = cl - HALF + 0.5;
       const z = row - HALF + 0.5;
+      // The land under the bridge: decks and rails stand on it.
+      const land = elevation(map, x, z);
       // Crossing along z: planks lie across it (along x), and the other way.
       const alongZ = bridgeAxis(map, cl, row) === "z";
       for (let i = 0; i < PLANKS_PER_CELL; i++) {
         const o = (i + 0.5) / PLANKS_PER_CELL - 0.5;
         planks.push({
           x: alongZ ? x : x + o,
-          y: DECK_TOP - 0.04,
+          y: land + DECK_TOP - 0.04,
           z: alongZ ? z + o : z,
           yaw: alongZ ? 0 : Math.PI / 2,
           shade: cellShade(cl * 4 + i, row),
@@ -227,11 +237,17 @@ function bridgeParts(map: TownMap) {
       for (const [nc, nr, ox, oz] of sides) {
         if (!isOpenWater(map, nc, nr)) continue;
         const yaw = alongZ ? 0 : Math.PI / 2;
-        beams.push({ x: x + ox, y: RAIL_HEIGHT, z: z + oz, yaw, shade: 0 });
+        beams.push({
+          x: x + ox,
+          y: land + RAIL_HEIGHT,
+          z: z + oz,
+          yaw,
+          shade: 0,
+        });
         for (const end of [-0.4, 0.4]) {
           posts.push({
             x: x + ox + (alongZ ? 0 : end),
-            y: RAIL_HEIGHT / 2,
+            y: land + RAIL_HEIGHT / 2,
             z: z + oz + (alongZ ? end : 0),
             yaw: 0,
             shade: 0,

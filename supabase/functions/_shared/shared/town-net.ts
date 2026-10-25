@@ -43,6 +43,8 @@ export const TOWN_MAPS = {
   /** The Tower (an event): a lush island fought floor by floor, alone. Its
    * spawn is the meadow's west end; each new floor puts you back there. */
   tower: { radius: 21, spawn: { x: -12.5, z: 0.5 } },
+  /** The Wilds: a big wild island west of Town, through its portal. */
+  wilds: { radius: 83, spawn: { x: 66.5, z: 0.5 } },
 } as const;
 export type TownMapId = keyof typeof TOWN_MAPS;
 export function isTownMapId(id: string): id is TownMapId {
@@ -580,6 +582,10 @@ export type TowerMob = {
   hp: number;
   maxHp: number;
   s: 0 | 1;
+  /** Its kind (a brute when missing: older servers had only those). */
+  k?: "spitter" | "lunger";
+  /** An elite (1) or the Warden (2). */
+  e?: 1 | 2;
 };
 
 /** A Tower floor: its number, its mobs' level (and the herzie's, for the
@@ -590,6 +596,9 @@ export type TowerFloor = {
   you: number;
   mobs: TowerMob[];
   cleared: boolean;
+  /** Ms until the mobs enrage, as of sending (0: they have). Missing from
+   * older servers. */
+  enrageIn?: number;
 };
 
 /** One piece of boss loot: a pending drop's id and its item id. */

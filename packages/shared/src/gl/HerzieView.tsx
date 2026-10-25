@@ -105,6 +105,9 @@ export type HerzieViewProps = {
   zoom?: number;
   /** Draws it this many px lower (negative: higher); eases with `zoom`. */
   offsetY?: number;
+  /** How quickly the camera eases to a new `zoom`/`offsetY`: the fraction
+   * of the way covered per 60fps frame. Default: ZOOM_EASE. */
+  zoomEase?: number;
   /** Greyed out, 0 to 1 (a herzie waiting to hatch). */
   grey?: number;
   /** See-through, 1 (solid) to 0. */
@@ -145,6 +148,7 @@ export function HerzieView({
   groundInset,
   zoom = 1,
   offsetY = 0,
+  zoomEase = ZOOM_EASE,
   grey = 0,
   opacity = 1,
   armed = false,
@@ -180,6 +184,7 @@ export function HerzieView({
     dancing: false,
     zoom,
     offsetY,
+    zoomEase,
     groundInset,
     dangles: false,
     dangleConfig,
@@ -193,6 +198,7 @@ export function HerzieView({
     dancing: animate !== false && isPlaying,
     zoom,
     offsetY,
+    zoomEase,
     groundInset,
     dangles: draggable,
     dangleConfig,
@@ -289,7 +295,7 @@ export function HerzieView({
         }
 
         const c = camera.current;
-        const t = 1 - (1 - ZOOM_EASE) ** (dt * 60);
+        const t = 1 - (1 - l.zoomEase) ** (dt * 60);
         c.zoom += (l.zoom - c.zoom) * t;
         c.offsetY += (l.offsetY - c.offsetY) * t;
         if (Math.abs(l.zoom - c.zoom) < 0.002) c.zoom = l.zoom;

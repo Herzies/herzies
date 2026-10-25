@@ -3,6 +3,7 @@ import {
   GOLD_SCHEME_ID,
   MEDEA_SCHEME_ID,
   NANDOR_SCHEME_ID,
+  TOWER_GUARD_SCHEME_ID,
 } from "./creature-renderer.js";
 import type { Equipped } from "./items.js";
 
@@ -45,3 +46,12 @@ export const BOBOKU_EQUIPPED: Equipped = {
 export const MEDEA_SEED = "npc:medea";
 export const MEDEA_STAGE = 2;
 export const MEDEA_EQUIPPED: Equipped = { color: MEDEA_SCHEME_ID };
+
+/** The Tower Guard's look: grown up (stage 3), in navy, under a steel helm
+ * with a red crest. */
+export const TOWER_GUARD_SEED = "npc:tower-guard";
+export const TOWER_GUARD_STAGE = 3;
+export const TOWER_GUARD_EQUIPPED: Equipped = {
+  head: "guard-helm",
+  color: TOWER_GUARD_SCHEME_ID,
+};

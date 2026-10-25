@@ -28,6 +28,7 @@ import { entityAt } from "./combat/skills";
 import { slashField } from "./combat/slashes";
 import { assistTarget, type Vec3, waveField } from "./combat/waves";
 import { HeadBubble } from "./HeadBubble";
+import { groundY, type TownMap } from "./map";
 import { NAME_SHADOW, nameOpacity } from "./nameFade";
 import type { RemotePlayer, TownConnection } from "./net/TownConnection";
 import { useTownNetVersion } from "./net/townNet";
@@ -35,10 +36,13 @@ import { townSave } from "./runtime";
 
 /** Everyone else in the Town. */
 export function RemotePlayers({
+  map,
   net,
   bubbles,
   onOpenProfile,
 }: {
+  /** The island they're on with you: its ground's ups and downs. */
+  map: TownMap;
   net: TownConnection;
   /** Clicking a name opens that player's profile (by friend code). */
   onOpenProfile?: (friendCode: string) => void;
@@ -51,6 +55,7 @@ export function RemotePlayers({
       {[...net.remotes.values()].map((r) => (
         <RemoteHerzie
           key={r.id}
+          map={map}
           remote={r}
           net={net}
           bubble={bubbles?.get(r.look.seed)}
@@ -69,11 +74,13 @@ export function RemotePlayers({
  * stale positions.
  */
 function RemoteHerzie({
+  map,
   remote,
   net,
   bubble,
   onOpenProfile,
 }: {
+  map: TownMap;
   remote: RemotePlayer;
   net: TownConnection;
   bubble?: ChatBubble;
@@ -122,7 +129,8 @@ function RemoteHerzie({
     if (tag.current) tag.current.style.visibility = "visible";
     // Sitting on a bench: on its seat, not the ground.
     const seated = (s.flags & TOWN_FLAG_SITTING) !== 0;
-    herzie.root.position.set(s.x, seated ? SEAT_Y : 0, s.z);
+    const ground = groundY(map, s.x, s.z);
+    herzie.root.position.set(s.x, ground + (seated ? SEAT_Y : 0), s.z);
     herzie.sitting = seated;
     herzie.dancing = (s.flags & TOWN_FLAG_DANCING) !== 0;
     // Aiming: their gear off their back and in hand (and kept there while
@@ -173,7 +181,7 @@ function RemoteHerzie({
       // Only for show: what's in front of them rocks (the server counts
       // their hits on the boss).
       const from = { x: s.x, z: s.z };
-      const height = herzie.height * 0.5;
+      const height = ground + herzie.height * 0.5;
       const targets = [
         ...liveDummies.map((d) => ({ d, radius: DUMMY.radius })),
         ...(bossFight.on && !bossFight.tower
@@ -210,13 +218,13 @@ function RemoteHerzie({
     herzie.setHeldHidden("held-r", discField.isOut(herzie, "held-r"));
     tagAnchor.current?.position.set(
       s.x,
-      herzie.height + 0.3 + (seated ? SEAT_Y : 0),
+      ground + herzie.height + 0.3 + (seated ? SEAT_Y : 0),
       s.z,
     );
     entityAt.set(remote.id, {
       x: s.x,
       z: s.z,
-      top: herzie.height + (seated ? SEAT_Y : 0),
+      top: ground + herzie.height + (seated ? SEAT_Y : 0),
     });
     // Chat is one room for everyone; the Town only shows what's said near
     // you.

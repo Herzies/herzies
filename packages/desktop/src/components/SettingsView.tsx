@@ -3,7 +3,7 @@ import type { Update } from "@tauri-apps/plugin-updater";
 import { useState } from "react";
 import { cn } from "../lib/utils";
 import type { AppState } from "../tauri-bridge";
-import { herzies } from "../tauri-bridge";
+import { herzies, useGhostMode, useWindowPinned } from "../tauri-bridge";
 import { Checkbox } from "./Checkbox";
 import { TabButton } from "./TabButton";
 import { debugDropLoot } from "./town/combat/fight";
@@ -33,7 +33,7 @@ const TELEPORTS = [
 ] as const;
 
 /** Debug is for dev builds only. */
-const TABS = ["Account", "Controls", "Debug"] as const;
+const TABS = ["Account", "Privacy", "Controls", "Debug"] as const;
 type SettingsTab = (typeof TABS)[number];
 const tabs: readonly SettingsTab[] = import.meta.env.DEV
   ? TABS
@@ -106,26 +106,32 @@ export function SettingsView({
   const pixelSize = useTownPixelSize();
   const [tab, setTab] = useState<SettingsTab>("Account");
   const shareListening = state.herzie?.shareListening ?? true;
+  const pinned = useWindowPinned();
+  const ghostMode = useGhostMode();
 
   const shortcuts: { key: string; label: string }[] = [
     { key: "H", label: "Home" },
+    { key: "T", label: "World" },
+    { key: "M", label: "Menu" },
+    { key: "O", label: "Profile" },
     { key: "I", label: "Deck" },
     { key: "B", label: "Bag" },
-    { key: "T", label: "Town" },
+    { key: "J", label: "Stats" },
+    { key: "K", label: "Skills" },
     { key: "F", label: "Social" },
     { key: "P", label: "Premium shop" },
-    { key: "S", label: "Settings" },
+    { key: "⌘,", label: "Settings" },
     { key: "C", label: "Open chat" },
-    { key: "Esc", label: "Close chat or dialog" },
+    { key: "Z", label: "Bigger Town window" },
+    { key: "Esc", label: "Close chat, window or dialog" },
   ];
 
   return (
     <View
-      title="Settings"
       colour="cyan"
       childrenClassName="flex min-h-0 flex-col overflow-y-auto"
     >
-      <div className="mb-3 flex shrink-0 gap-1 border-b border-border text-ui">
+      <div className="mb-3 flex shrink-0 gap-1 border-b border-white/15 text-ui">
         {tabs.map((t) => (
           <TabButton key={t} active={tab === t} onClick={() => setTab(t)}>
             {t}
@@ -134,40 +140,58 @@ export function SettingsView({
       </div>
 
       {tab === "Account" && (
-        <>
-          <div className="mb-4">
-            <div className="mb-1.5 text-ui text-text-dim">Account</div>
-            {state.isOnline ? (
-              <button
-                type="button"
-                className="btn text-red"
-                onClick={() => herzies.logout()}
-              >
-                Logout
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="btn text-green"
-                disabled={loggingIn}
-                onClick={async () => {
-                  setLoggingIn(true);
-                  try {
-                    await herzies.login();
-                  } catch {
-                    // Failures are surfaced on the splash screen.
-                  } finally {
-                    setLoggingIn(false);
-                  }
-                }}
-              >
-                {loggingIn ? "Logging in..." : "Login"}
-              </button>
-            )}
-          </div>
+        <div className="mb-4">
+          <div className="mb-1.5 text-ui text-text-dim">Account</div>
+          {state.isOnline ? (
+            <button
+              type="button"
+              className="btn text-red"
+              onClick={() => herzies.logout()}
+            >
+              Logout
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn text-green"
+              disabled={loggingIn}
+              onClick={async () => {
+                setLoggingIn(true);
+                try {
+                  await herzies.login();
+                } catch {
+                  // Failures are surfaced on the splash screen.
+                } finally {
+                  setLoggingIn(false);
+                }
+              }}
+            >
+              {loggingIn ? "Logging in..." : "Login"}
+            </button>
+          )}
+        </div>
+      )}
+
+      {tab === "Privacy" && (
+        <div className="mb-4 flex flex-col gap-3">
+          <Checkbox
+            checked={ghostMode}
+            accent="var(--color-purple)"
+            onChange={(on) => {
+              herzies.setGhostMode(on).catch(() => {});
+            }}
+            className="items-start"
+          >
+            <span className="min-w-0">
+              <span className="block text-ui">Ghost mode</span>
+              <span className="block text-ui-sm text-text-dim">
+                Pause tracking what you listen to: no XP, minutes or now playing
+                until you turn it off.
+              </span>
+            </span>
+          </Checkbox>
           {state.herzie && (
-            <div className="mb-4">
-              <div className="mb-1.5 text-ui text-text-dim">Privacy</div>
+            <div>
               <Checkbox
                 checked={shareListening}
                 disabled={!state.isOnline || savingPrivacy}
@@ -202,11 +226,30 @@ export function SettingsView({
               )}
             </div>
           )}
-        </>
+        </div>
       )}
 
       {tab === "Controls" && (
         <>
+          <div className="mb-4">
+            <div className="mb-1.5 text-ui text-text-dim">Window</div>
+            <Checkbox
+              checked={pinned}
+              // setWindowPinned updates the shared cache synchronously, so
+              // this ticks at once.
+              onChange={(pin) => {
+                herzies.setWindowPinned(pin).catch(() => {});
+              }}
+              className="items-start"
+            >
+              <span className="min-w-0">
+                <span className="block text-ui">Pin window</span>
+                <span className="block text-ui-sm text-text-dim">
+                  Keep Herzies open when you click away from it.
+                </span>
+              </span>
+            </Checkbox>
+          </div>
           <div className="mb-4">
             <div className="mb-1.5 text-ui text-text-dim">Aiming</div>
             <label className="flex items-center gap-2 text-ui">
@@ -254,7 +297,7 @@ export function SettingsView({
             <div className="flex flex-col gap-0.5">
               {shortcuts.map((s) => (
                 <div key={s.key} className="flex items-center gap-2 text-ui-sm">
-                  <kbd className="inline-flex min-w-[18px] justify-center rounded border border-border bg-bg-panel px-1 py-px text-ui-sm text-text">
+                  <kbd className="inline-flex min-w-[18px] justify-center rounded border border-white/15 bg-bg-panel px-1 py-px text-ui-sm text-text">
                     {s.key}
                   </kbd>
                   <span className="text-text-dim">{s.label}</span>
@@ -462,7 +505,7 @@ export function SettingsView({
               </button>
             </div>
             {mediaRemoteDebug !== null && (
-              <pre className="mt-2 max-h-40 overflow-auto rounded border border-border bg-[#111] p-2 text-[10px] text-text-dim whitespace-pre-wrap break-all">
+              <pre className="mt-2 max-h-40 overflow-auto rounded border border-white/15 bg-[#111] p-2 text-[10px] text-text-dim whitespace-pre-wrap break-all">
                 {mediaRemoteDebug}
               </pre>
             )}

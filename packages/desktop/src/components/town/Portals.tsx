@@ -189,7 +189,7 @@ function PortalDisc({ portal, live }: { portal: Portal; live: boolean }) {
     if (!ripple.mesh.visible) return;
     const t = clock.elapsedTime;
     const pulse = 1 + Math.sin(t * 2.4) * 0.05;
-    place.p.set(portal.x, DISC_Y, portal.z);
+    place.p.set(portal.x, portal.y + DISC_Y, portal.z);
     place.q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), portal.yaw);
     place.s.setScalar(pulse);
     ripple.mesh.setMatrixAt(0, place.m.compose(place.p, place.q, place.s));
@@ -198,7 +198,7 @@ function PortalDisc({ portal, live }: { portal: Portal; live: boolean }) {
     ripple.fx.needsUpdate = true;
   });
   return (
-    <group position={[portal.x, 0, portal.z]} rotation-y={portal.yaw}>
+    <group position={[portal.x, portal.y, portal.z]} rotation-y={portal.yaw}>
       <mesh geometry={discGeometry} material={disc} position-y={DISC_Y} />
       <points
         geometry={moteGeometry}

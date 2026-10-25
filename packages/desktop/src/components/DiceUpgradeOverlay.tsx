@@ -9,8 +9,9 @@ import {
   STAT_LABELS,
   upgradeSuccessChance,
 } from "@herzies/shared";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { type UpgradeRollFn, useUpgradeRoll } from "../hooks/useUpgradeRoll";
+import { useEscape } from "../lib/escapeStack";
 import { cn } from "../lib/utils";
 import { Checkbox } from "./Checkbox";
 import { ItemPreviewCard } from "./ItemInspectOverlay";
@@ -129,16 +130,11 @@ export function DiceUpgradeOverlay({
   const { phase, start, reset } = useUpgradeRoll(onRoll);
   const rolling = phase.status === "rolling";
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      // Mid-roll the modal is locked; while confirming, Escape belongs to
-      // the confirm prompt.
-      if (e.key !== "Escape" || rolling || confirming) return;
-      onClose();
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onClose, rolling, confirming]);
+  // Mid-roll the modal is locked; while confirming, Escape belongs to the
+  // confirm prompt.
+  useEscape(() => {
+    if (!rolling && !confirming) onClose();
+  });
 
   const dice = getItem(diceItemId);
   if (!dice) return null;
@@ -366,7 +362,7 @@ export function DiceUpgradeOverlay({
       >
         <div
           onClick={(e) => e.stopPropagation()}
-          className="max-h-full w-80 max-w-full overflow-y-auto border border-border bg-bg-panel p-3 shadow-xl shadow-black/50"
+          className="max-h-full w-80 max-w-full overflow-y-auto border border-white/15 bg-bg-panel p-3 shadow-xl shadow-black/50"
         >
           <div className="mb-2 text-center text-sm font-bold">Upgrade</div>
           {body}
@@ -429,10 +425,10 @@ function SafetyPickToggle({
       className={cn(
         "w-full border px-2 py-1.5 transition-colors duration-100",
         none
-          ? "border-dashed border-border opacity-60"
+          ? "border-dashed border-white/15 opacity-60"
           : on
             ? "hover:brightness-110"
-            : "border-border hover:bg-white/5",
+            : "border-white/15 hover:bg-white/5",
       )}
     >
       <span

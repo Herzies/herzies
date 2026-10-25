@@ -37,13 +37,20 @@ type SeriesForm = {
   description: string;
   enabled: boolean;
   anchorAt: string;
+  repeatUnit: "days" | "months";
   intervalDays: string;
+  intervalMonths: string;
+  /** Monthly only: each occurrence runs until the next one starts. */
+  backToBack: boolean;
   durationDays: string;
   durationHours: string;
   until: string;
   songHunt: { rewardItemId: string; maxClaims: string };
   bossFight: BossFightConfigForm;
   merchant: MerchantConfigForm;
+  /** The Tower Guard's reward for the month's best climber, and the
+   * herzies (comma separated names) never ranked for it. */
+  tower: { topRewardItemId: string; excludeHerzies: string };
 };
 
 /** Starting points per type; everything is editable. */
@@ -62,20 +69,34 @@ const PRESETS: Record<
     description: "He's got stuff. Good stuff.",
     days: 2,
   },
+  tower: {
+    title: "Tower",
+    description: "Climb as high as you can before the month is out.",
+    days: 0,
+  },
 };
 
 function newSeriesForm(type: SeriesType = "song_hunt"): SeriesForm {
   const preset = PRESETS[type];
-  // Next local midnight, a sensible default first start.
+  // Next local midnight, a sensible default first start; a Tower starts on
+  // the 1st of next month (UTC), monthly and back to back.
+  const tower = type === "tower";
   const start = new Date();
-  start.setHours(24, 0, 0, 0);
+  if (tower) {
+    start.setTime(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1));
+  } else {
+    start.setHours(24, 0, 0, 0);
+  }
   return {
     type,
     title: preset.title,
     description: preset.description,
     enabled: true,
     anchorAt: toDatetimeLocalValue(start),
+    repeatUnit: tower ? "months" : "days",
     intervalDays: "7",
+    intervalMonths: "1",
+    backToBack: tower,
     durationDays: String(preset.days),
     durationHours: "0",
     until: "",
@@ -88,6 +109,7 @@ function newSeriesForm(type: SeriesType = "song_hunt"): SeriesForm {
       topCount: "3",
     },
     merchant: { stock: [] },
+    tower: { topRewardItemId: "power-dice-3", excludeHerzies: "music_lover69" },
   };
 }
 
@@ -100,9 +122,12 @@ function seriesToForm(s: EventSeries): SeriesForm {
     description: s.description ?? "",
     enabled: s.enabled,
     anchorAt: isoToDatetimeLocal(s.anchor_at),
+    repeatUnit: s.interval_months ? "months" : "days",
     intervalDays: String(s.interval_days),
-    durationDays: String(Math.floor(s.duration_minutes / 1440)),
-    durationHours: String(Math.round((s.duration_minutes % 1440) / 60)),
+    intervalMonths: String(s.interval_months ?? 1),
+    backToBack: s.duration_minutes === null,
+    durationDays: String(Math.floor((s.duration_minutes ?? 0) / 1440)),
+    durationHours: String(Math.round(((s.duration_minutes ?? 0) % 1440) / 60)),
     until: s.until ? isoToDatetimeLocal(s.until) : "",
     songHunt: {
       rewardItemId: typeof t.rewardItemId === "string" ? t.rewardItemId : "",
@@ -114,17 +139,34 @@ function seriesToForm(s: EventSeries): SeriesForm {
         : newSeriesForm("boss_fight").bossFight,
     merchant:
       s.type === "merchant" ? merchantConfigFromRecord(t) : { stock: [] },
+    tower: {
+      topRewardItemId:
+        typeof t.topRewardItemId === "string" && t.topRewardItemId
+          ? t.topRewardItemId
+          : "power-dice-3",
+      excludeHerzies: Array.isArray(t.excludeHerzies)
+        ? t.excludeHerzies.join(", ")
+        : "",
+    },
   };
 }
 
 /** Form → request body, or an error message. */
 function seriesPayload(form: SeriesForm): Record<string, unknown> | string {
+  const monthly = form.repeatUnit === "months";
   const intervalDays = Number.parseInt(form.intervalDays, 10);
-  if (!(intervalDays > 0)) return "Repeat interval must be at least 1 day";
-  const durationMinutes =
-    (Number.parseInt(form.durationDays, 10) || 0) * 1440 +
-    (Number.parseInt(form.durationHours, 10) || 0) * 60;
-  if (durationMinutes <= 0) return "Duration must be positive";
+  const intervalMonths = Number.parseInt(form.intervalMonths, 10);
+  if (monthly ? !(intervalMonths > 0) : !(intervalDays > 0)) {
+    return `Repeat interval must be at least 1 ${monthly ? "month" : "day"}`;
+  }
+  const backToBack = monthly && form.backToBack;
+  const durationMinutes = backToBack
+    ? null
+    : (Number.parseInt(form.durationDays, 10) || 0) * 1440 +
+      (Number.parseInt(form.durationHours, 10) || 0) * 60;
+  if (durationMinutes !== null && durationMinutes <= 0) {
+    return "Duration must be positive";
+  }
   if (Number.isNaN(new Date(form.anchorAt).getTime())) {
     return "First start is required";
   }
@@ -134,6 +176,14 @@ function seriesPayload(form: SeriesForm): Record<string, unknown> | string {
     configTemplate = bossFightFormToConfig(form.bossFight, { template: true });
   } else if (form.type === "merchant") {
     configTemplate = merchantFormToConfig(form.merchant);
+  } else if (form.type === "tower") {
+    configTemplate = {
+      topRewardItemId: form.tower.topRewardItemId || "power-dice-3",
+      excludeHerzies: form.tower.excludeHerzies
+        .split(",")
+        .map((n) => n.trim())
+        .filter(Boolean),
+    };
   } else {
     const maxClaims = Number.parseInt(form.songHunt.maxClaims, 10);
     if (!(maxClaims > 0)) return "Max claims must be positive";
@@ -153,7 +203,8 @@ function seriesPayload(form: SeriesForm): Record<string, unknown> | string {
     description: form.description.trim() || undefined,
     enabled: form.enabled,
     anchorAt: datetimeLocalToIso(form.anchorAt),
-    intervalDays,
+    intervalDays: monthly ? 7 : intervalDays,
+    intervalMonths: monthly ? intervalMonths : null,
     durationMinutes,
     until: form.until ? datetimeLocalToIso(form.until) : null,
     configTemplate,
@@ -162,6 +213,21 @@ function seriesPayload(form: SeriesForm): Record<string, unknown> | string {
 
 function describeCadence(s: EventSeries): string {
   const anchor = new Date(s.anchor_at);
+  const lasts =
+    s.duration_minutes === null
+      ? "until the next"
+      : `lasts ${formatDuration(s.duration_minutes * 60_000)}`;
+  if (s.interval_months) {
+    const every =
+      s.interval_months === 1 ? "monthly" : `every ${s.interval_months} months`;
+    const when = anchor.toLocaleString(undefined, {
+      timeZone: "UTC",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    return `${every} · day ${when} UTC · ${lasts}`;
+  }
   const every =
     s.interval_days === 7
       ? "weekly"
@@ -175,7 +241,7 @@ function describeCadence(s: EventSeries): string {
     hour: "2-digit",
     minute: "2-digit",
   });
-  return `${every} · ${when} · lasts ${formatDuration(s.duration_minutes * 60_000)}`;
+  return `${every} · ${when} · ${lasts}`;
 }
 
 export function EventSeriesPanel({
@@ -404,6 +470,7 @@ function SeriesFormFields({
   const update = (patch: Partial<SeriesForm>) =>
     setForm((f) => (f ? { ...f, ...patch } : f));
   const idp = form.id ?? "new-series";
+  const monthly = form.repeatUnit === "months";
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">
@@ -427,6 +494,7 @@ function SeriesFormFields({
             <option value="song_hunt">Orphiez (song hunt)</option>
             <option value="boss_fight">boss fight</option>
             <option value="merchant">Good ol&apos; George</option>
+            <option value="tower">the Tower</option>
           </select>
         </div>
         <div>
@@ -498,52 +566,97 @@ function SeriesFormFields({
             className="block text-xs text-text-dim mb-1"
             htmlFor={`${idp}-interval`}
           >
-            repeat every (days)
+            repeat every
           </label>
-          <input
-            id={`${idp}-interval`}
-            type="number"
-            min={1}
-            required
-            value={form.intervalDays}
-            onChange={(e) => update({ intervalDays: e.target.value })}
-            className={INPUT}
-          />
+          <div className="flex gap-2">
+            <input
+              id={`${idp}-interval`}
+              type="number"
+              min={1}
+              required
+              value={monthly ? form.intervalMonths : form.intervalDays}
+              onChange={(e) =>
+                update(
+                  monthly
+                    ? { intervalMonths: e.target.value }
+                    : { intervalDays: e.target.value },
+                )
+              }
+              className={INPUT}
+            />
+            <select
+              aria-label="repeat unit"
+              value={form.repeatUnit}
+              onChange={(e) =>
+                update({
+                  repeatUnit: e.target.value as SeriesForm["repeatUnit"],
+                })
+              }
+              className={INPUT}
+            >
+              <option value="days">days</option>
+              <option value="months">months</option>
+            </select>
+          </div>
         </div>
-        <div>
-          <label
-            className="block text-xs text-text-dim mb-1"
-            htmlFor={`${idp}-dur-d`}
-          >
-            lasts (days)
-          </label>
-          <input
-            id={`${idp}-dur-d`}
-            type="number"
-            min={0}
-            value={form.durationDays}
-            onChange={(e) => update({ durationDays: e.target.value })}
-            className={INPUT}
-          />
-        </div>
-        <div>
-          <label
-            className="block text-xs text-text-dim mb-1"
-            htmlFor={`${idp}-dur-h`}
-          >
-            + hours
-          </label>
-          <input
-            id={`${idp}-dur-h`}
-            type="number"
-            min={0}
-            max={23}
-            value={form.durationHours}
-            onChange={(e) => update({ durationHours: e.target.value })}
-            className={INPUT}
-          />
-        </div>
+        {monthly && form.backToBack ? (
+          <p className="col-span-2 self-end text-xs text-text-dim">
+            Each one runs until the next starts.
+          </p>
+        ) : (
+          <>
+            <div>
+              <label
+                className="block text-xs text-text-dim mb-1"
+                htmlFor={`${idp}-dur-d`}
+              >
+                lasts (days)
+              </label>
+              <input
+                id={`${idp}-dur-d`}
+                type="number"
+                min={0}
+                value={form.durationDays}
+                onChange={(e) => update({ durationDays: e.target.value })}
+                className={INPUT}
+              />
+            </div>
+            <div>
+              <label
+                className="block text-xs text-text-dim mb-1"
+                htmlFor={`${idp}-dur-h`}
+              >
+                + hours
+              </label>
+              <input
+                id={`${idp}-dur-h`}
+                type="number"
+                min={0}
+                max={23}
+                value={form.durationHours}
+                onChange={(e) => update({ durationHours: e.target.value })}
+                className={INPUT}
+              />
+            </div>
+          </>
+        )}
       </div>
+      {monthly && (
+        <>
+          <label className="flex items-center gap-2 text-xs cursor-pointer">
+            <input
+              type="checkbox"
+              checked={form.backToBack}
+              onChange={(e) => update({ backToBack: e.target.checked })}
+            />
+            back to back (each runs until the next starts)
+          </label>
+          <p className="text-xs text-text-dim">
+            Monthly: the first start&apos;s day of the month (1–28) and UTC time
+            repeat.
+          </p>
+        </>
+      )}
       <label className="flex items-center gap-2 text-xs cursor-pointer">
         <input
           type="checkbox"
@@ -594,6 +707,49 @@ function SeriesFormFields({
           </div>
           <p className="sm:col-span-2 text-xs text-text-dim">
             Track and hints are set per week on each occurrence.
+          </p>
+        </div>
+      )}
+      {form.type === "tower" && (
+        <div className="grid sm:grid-cols-2 gap-4 border border-border rounded-sm p-4 bg-bg">
+          <div>
+            <label
+              className="block text-xs text-text-dim mb-1"
+              htmlFor={`${idp}-tower-reward`}
+            >
+              top climber reward
+            </label>
+            <CatalogItemSelect
+              id={`${idp}-tower-reward`}
+              value={form.tower.topRewardItemId}
+              onChange={(topRewardItemId) =>
+                update({ tower: { ...form.tower, topRewardItemId } })
+              }
+              catalogItems={catalogItems}
+              emptyLabel="Power Dice 3"
+            />
+          </div>
+          <div>
+            <label
+              className="block text-xs text-text-dim mb-1"
+              htmlFor={`${idp}-tower-exclude`}
+            >
+              never ranked for it (herzie names)
+            </label>
+            <input
+              id={`${idp}-tower-exclude`}
+              value={form.tower.excludeHerzies}
+              onChange={(e) =>
+                update({
+                  tower: { ...form.tower, excludeHerzies: e.target.value },
+                })
+              }
+              className={INPUT}
+            />
+          </div>
+          <p className="sm:col-span-2 text-xs text-text-dim">
+            The Tower Guard gives this to each month&apos;s best climber once
+            the month is out; they claim it by talking to him.
           </p>
         </div>
       )}

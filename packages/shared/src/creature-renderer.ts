@@ -23,6 +23,7 @@ import {
   RAMP_HERZIE,
   rotY,
   TEAL_RAMP,
+  TOWER_GUARD_RAMP,
   type V3,
   VIOLET_RAMP,
   VOID_RAMP,
@@ -1754,6 +1755,65 @@ function buildSixpenceSpheres(spheres: Sphere[]): Sphere[] {
   return result;
 }
 
+/** A guard's helm: a steel cap pulled down over the head, a rim round its
+ * base, a nose guard down the front and a stiff red crest running front to
+ * back over the top. Low, like the sixpence. No catalog item has it — the
+ * Tower Guard wears it (npc-looks.ts). */
+function buildGuardHelmSpheres(spheres: Sphere[]): Sphere[] {
+  const head = getHeadBounds(spheres);
+  if (!head) return [];
+  const [hx, hy, hz] = head.center;
+  const hr = head.radius;
+  const steel = "#B8C0CA";
+  const rimSteel = "#8A94A0";
+  const crest = "#C0392B";
+  const result: Sphere[] = [];
+  const push = (center: V3, radius: number, color: string, shape?: Shape) =>
+    result.push({
+      center,
+      radius,
+      zone: "wearable",
+      part: "head",
+      color,
+      shape,
+    });
+  // Creature space is y down: up is −y; the face is toward −z.
+  const capY = hy - hr * 0.62;
+  const capHalf = hr * 0.16;
+  // The cap: a squat cylinder domed on top, snug over the crown.
+  push([hx, capY, hz], hr * 0.98, steel, {
+    kind: "cylinder",
+    axis: [0, -capHalf, 0],
+    dome: hr * 0.34,
+  });
+  // The rim: a thin, slightly wider disc at the cap's base.
+  const rimHalf = hr * 0.03;
+  push([hx, capY + capHalf, hz], hr * 1.04, rimSteel, {
+    kind: "cylinder",
+    axis: [0, -rimHalf, 0],
+  });
+  // The nose guard: a short bar down the front, between the eyes.
+  for (let i = 0; i < 3; i++) {
+    push(
+      [hx, capY + capHalf + hr * (0.08 + i * 0.1), hz - hr * 0.98],
+      hr * 0.07,
+      rimSteel,
+    );
+  }
+  // The crest: a row of red tufts from front to back over the dome, tallest
+  // in the middle.
+  const top = capY - capHalf - hr * 0.3;
+  for (let i = -3; i <= 3; i++) {
+    const t = i / 3;
+    push(
+      [hx, top - hr * 0.16 * (1 - t * t), hz + t * hr * 0.62],
+      hr * (0.15 - 0.03 * Math.abs(t)),
+      crest,
+    );
+  }
+  return result;
+}
+
 /** Pointed witch hat: a flat brim, an orange band, and a cone whose top
  * bends over in a few tapering segments to a point. The bent tip carries
  * dangle weights, so it swings round the hat's axis when the herzie is spun
@@ -2818,6 +2878,9 @@ function appendWearableSpheres(
   if (equipped.head === "sixpence") {
     spheres.push(...buildSixpenceSpheres(spheres));
   }
+  if (equipped.head === "guard-helm") {
+    spheres.push(...buildGuardHelmSpheres(spheres));
+  }
   const bodyBuilder = equipped.body && BODY_ITEM_BUILDERS[equipped.body];
   if (bodyBuilder) spheres.push(...bodyBuilder(spheres));
 
@@ -2852,6 +2915,8 @@ export const NANDOR_SCHEME_ID = "npc-nandor";
 export const BOBOKU_SCHEME_ID = "npc-boboku";
 /** Colour-scheme key for Medea's pink-to-plum, the same arrangement again. */
 export const MEDEA_SCHEME_ID = "npc-medea";
+/** Colour-scheme key for the Tower Guard's slate, the same arrangement again. */
+export const TOWER_GUARD_SCHEME_ID = "npc-tower-guard";
 
 const COLOR_SCHEMES: Record<string, readonly string[]> = {
   prism: RAINBOW_RAMP,
@@ -2868,6 +2933,7 @@ const COLOR_SCHEMES: Record<string, readonly string[]> = {
   [NANDOR_SCHEME_ID]: NANDOR_RAMP,
   [BOBOKU_SCHEME_ID]: BOBOKU_RAMP,
   [MEDEA_SCHEME_ID]: MEDEA_RAMP,
+  [TOWER_GUARD_SCHEME_ID]: TOWER_GUARD_RAMP,
 };
 
 /** True for spheres that a colour scheme is allowed to repaint. */

@@ -20,7 +20,7 @@ import type { Hour } from "./DayCycle";
 import { driftClouds } from "./depth";
 import { isMouth, usePortalOpen } from "./gates";
 import { type TownInput, useTownInput } from "./input";
-import { portalCells, type TownMap, worldRadius } from "./map";
+import { groundY, type TownMap, worldRadius } from "./map";
 import { markMet } from "./met";
 import type { TownConnection } from "./net/TownConnection";
 import { townNet } from "./net/townNet";
@@ -177,6 +177,7 @@ export default function TownCanvas(props: TownCanvasProps) {
               hour={props.hour}
             />
             <Player
+              map={map}
               look={props.player}
               spawn={map.spawn}
               reach={worldRadius(map)}
@@ -184,7 +185,12 @@ export default function TownCanvas(props: TownCanvasProps) {
               bubble={props.bubbles?.get(props.player.seed)}
             />
             {spots.map((s) => (
-              <Visitor key={s.key} spot={s} onOpen={props.onOpen} />
+              <Visitor
+                key={s.key}
+                spot={s}
+                ground={groundY(map, s.at.x, s.at.z)}
+                onOpen={props.onOpen}
+              />
             ))}
             <Combat
               map={map}
@@ -210,24 +216,21 @@ export default function TownCanvas(props: TownCanvasProps) {
         </Suspense>
         {props.net && (
           <RemotePlayers
+            map={map}
             net={props.net}
             bubbles={props.bubbles}
             onOpenProfile={props.onOpenProfile}
           />
         )}
-        <CameraRig />
-        {map.combat && (
-          <>
-            <SonicVFX />
-            <DiscVFX />
-            <SkillVFX />
-            <SlashVFX />
-            <CombatOverlay />
-          </>
-        )}
-        {(props.ao !== false || distorts(map)) && (
-          <Post ao={props.ao !== false} distort={distorts(map)} />
-        )}
+        <CameraRig map={map} />
+        {/* Aim mode works on every island, so its effects are always here. */}
+        <SonicVFX />
+        <DiscVFX />
+        <SkillVFX />
+        <SlashVFX />
+        <CombatOverlay />
+        {/* Sound waves bend light, and aim mode works on every island. */}
+        <Post ao={props.ao !== false} distort />
       </TownRuntimeContext.Provider>
     </Canvas>
   );
@@ -242,12 +245,6 @@ const NO_STATS: HerzieStats = {
   critChance: 0,
   critDamage: 0,
 };
-
-/** Whether anything on the island bends light: sound waves (where you can
- * fight) or a portal. */
-function distorts(map: TownMap): boolean {
-  return !!map.combat || portalCells(map).length > 0;
-}
 
 /** Per-frame housekeeping: input, and who the player is close enough to
  * talk to. */

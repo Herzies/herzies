@@ -1,6 +1,6 @@
 [package]
 name = "herzies-desktop"
-version = "0.1.0-beta.53"
+version = "0.1.0-beta.54"
 edition = "2021"
 
 [dependencies]
@@ -43,6 +43,7 @@ tauri-plugin-updater = "2.10.1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mac-notification-sys = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSResponder", "NSWindow", "NSView", "NSControl", "NSButton"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = [

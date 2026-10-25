@@ -10,15 +10,10 @@ import {
   ItemStatLines,
   ItemTypeTag,
 } from "@herzies/shared";
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { getCardIllustration } from "../lib/card-art";
+import { useEscape } from "../lib/escapeStack";
 import { cn } from "../lib/utils";
 import { Tooltip } from "./Tooltip";
 
@@ -108,7 +103,7 @@ export function CompactItemPreview({
 
   return (
     // Text only, no icon: the card's own tile is right there under the cursor.
-    <div className="w-[180px] border border-border bg-bg-panel p-2 text-left shadow-xl shadow-black/50">
+    <div className="w-[180px] border border-white/15 bg-bg-panel p-2 text-left shadow-xl shadow-black/50">
       <div className="text-ui font-bold leading-4 text-text">
         {item.name}
         {level > 0 ? <span className="text-cyan"> +{level}</span> : null}
@@ -459,13 +454,7 @@ export default function ItemInspectOverlay({
     });
   }, [closeBlocked, flying, measureFrom, fly, onClose, origin]);
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") requestClose();
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [requestClose]);
+  useEscape(requestClose);
 
   const item = getItem(itemId);
   if (!item) return null;

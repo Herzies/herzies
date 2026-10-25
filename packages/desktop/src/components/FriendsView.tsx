@@ -7,12 +7,7 @@ import type {
 import { useEffect, useRef, useState } from "react";
 import { notify } from "../lib/notices";
 import { cn } from "../lib/utils";
-import {
-  herzies,
-  type LeaderboardEntry,
-  type OngoingTrade,
-  useWindowFocused,
-} from "../tauri-bridge";
+import { herzies, type OngoingTrade, useWindowFocused } from "../tauri-bridge";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { List } from "./List";
 import { isListening, ProfileView } from "./ProfileView";
@@ -23,7 +18,7 @@ const FRIEND_POLL_MS = 15_000;
 const TRADES_POLL_MS = 5_000;
 const SEARCH_DEBOUNCE_MS = 350;
 
-type Tab = "friends" | "requests" | "add" | "trades" | "leaderboard";
+type Tab = "friends" | "requests" | "add" | "trades";
 
 /** Right-click target in the friends list. Keyed by code, not profile — rows
  * render from the code alone while a profile is still loading. */
@@ -46,6 +41,7 @@ export function FriendsView({
   openProfileCode,
   onProfileOpened,
   onProfileBack,
+  openedFromTown = false,
   tab,
   onTabChange,
   onActivity,
@@ -64,6 +60,9 @@ export function FriendsView({
   /** Back was pressed on a profile: lets whoever opened it take the player
    * back to where they came from (the Town, say). */
   onProfileBack?: () => void;
+  /** `openProfileCode` came from a herzie clicked in the Town: that profile
+   * gets no back button, and is gone the next time the window opens. */
+  openedFromTown?: boolean;
   tab: Tab;
   onTabChange: (tab: Tab) => void;
   onActivity?: (message: string) => void;
@@ -82,16 +81,13 @@ export function FriendsView({
   const [search, setSearch] = useState("");
   const [searchResults, setSearchResults] = useState<FriendSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
-  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[] | null>(
-    null,
-  );
-  const [leaderboardBoard, setLeaderboardBoard] = useState<"xp" | "song_hunt">(
-    "xp",
-  );
   const [ongoingTrades, setOngoingTrades] = useState<OngoingTrade[] | null>(
     null,
   );
   const [friendMenu, setFriendMenu] = useState<FriendMenuTarget | null>(null);
+  // The Friends sub-tab last open, for coming back to it from Trades.
+  const lastFriendsTab = useRef<Exclude<Tab, "trades">>("friends");
+  if (tab !== "trades") lastFriendsTab.current = tab;
 
   // Compared against the last key rather than run on mount, so a profile
   // opened from chat on first render isn't closed straight away.
@@ -134,9 +130,22 @@ export function FriendsView({
     return () => clearInterval(interval);
   }, [active, focused, friendCodesKey]);
 
+  // Whether the open profile came from the Town (see openedFromTown).
+  const [profileBackCloses, setProfileBackCloses] = useState(false);
+  const openedFromTownRef = useRef(openedFromTown);
+  openedFromTownRef.current = openedFromTown;
+  useEffect(() => {
+    if (selectedFriend === null) setProfileBackCloses(false);
+  }, [selectedFriend]);
+  // Closed: a profile from the Town doesn't wait for the next visit.
+  useEffect(() => {
+    if (!active && profileBackCloses) setSelectedFriend(null);
+  }, [active, profileBackCloses]);
+
   // Open profile from chat (or other external navigation).
   useEffect(() => {
     if (!openProfileCode) return;
+    setProfileBackCloses(openedFromTownRef.current);
     const cached = friendsRef.current[openProfileCode];
     if (cached) {
       setSelectedFriend(cached);
@@ -166,27 +175,6 @@ export function FriendsView({
     }, SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(handle);
   }, [search]);
-
-  // Fetch the leaderboard when its tab (or sub-board) is opened and refresh
-  // while focused.
-  useEffect(() => {
-    if (!active || tab !== "leaderboard") return;
-    let cancelled = false;
-    setLeaderboard(null);
-    const load = () =>
-      herzies
-        .fetchLeaderboard(leaderboardBoard)
-        .then((res) => {
-          if (!cancelled) setLeaderboard(res.entries);
-        })
-        .catch(() => {});
-    load();
-    const interval = focused ? setInterval(load, FRIEND_POLL_MS) : undefined;
-    return () => {
-      cancelled = true;
-      if (interval) clearInterval(interval);
-    };
-  }, [active, tab, focused, leaderboardBoard]);
 
   // Fetch ongoing trades when the tab is opened and refresh while focused.
   useEffect(() => {
@@ -287,10 +275,16 @@ export function FriendsView({
     return (
       <ProfileView
         profile={selectedFriend}
-        onBack={() => {
-          setSelectedFriend(null);
-          onProfileBack?.();
-        }}
+        onBack={
+          // Opened from the Town: back would only close the window, which
+          // its close button already does.
+          profileBackCloses
+            ? undefined
+            : () => {
+                setSelectedFriend(null);
+                onProfileBack?.();
+              }
+        }
         onTrade={() => {
           setSelectedFriend(null);
           onStartTrade(code);
@@ -320,29 +314,16 @@ export function FriendsView({
   );
 
   return (
-    <View
-      title="Social"
-      colour="cyan"
-      childrenClassName="flex min-h-0 flex-col"
-    >
-      <div className="mb-2 flex gap-1 border-b border-border text-ui">
+    <View colour="cyan" childrenClassName="flex min-h-0 flex-col">
+      <div className="mb-2 flex gap-1 border-b border-white/15 text-ui">
         <TabButton
-          active={tab === "friends"}
-          onClick={() => onTabChange("friends")}
+          active={tab !== "trades"}
+          onClick={() => onTabChange(lastFriendsTab.current)}
         >
           Friends
-        </TabButton>
-        <TabButton
-          active={tab === "requests"}
-          onClick={() => onTabChange("requests")}
-        >
-          Requests
           {incomingRequests.length > 0 && (
             <span className="ml-1 text-green">({incomingRequests.length})</span>
           )}
-        </TabButton>
-        <TabButton active={tab === "add"} onClick={() => onTabChange("add")}>
-          Add friend
         </TabButton>
         <TabButton
           active={tab === "trades"}
@@ -353,13 +334,31 @@ export function FriendsView({
             <span className="ml-1 text-purple">({ongoingTrades.length})</span>
           )}
         </TabButton>
-        <TabButton
-          active={tab === "leaderboard"}
-          onClick={() => onTabChange("leaderboard")}
-        >
-          Leaderboard
-        </TabButton>
       </div>
+      {tab !== "trades" && (
+        <div className="mb-1.5 flex gap-1">
+          <TabButton
+            active={tab === "friends"}
+            onClick={() => onTabChange("friends")}
+          >
+            All friends
+          </TabButton>
+          <TabButton
+            active={tab === "requests"}
+            onClick={() => onTabChange("requests")}
+          >
+            Requests
+            {incomingRequests.length > 0 && (
+              <span className="ml-1 text-green">
+                ({incomingRequests.length})
+              </span>
+            )}
+          </TabButton>
+          <TabButton active={tab === "add"} onClick={() => onTabChange("add")}>
+            Add friend
+          </TabButton>
+        </div>
+      )}
 
       {tab === "friends" && (
         <>
@@ -387,7 +386,7 @@ export function FriendsView({
                 return (
                   <div
                     key={code}
-                    className="flex items-center justify-between border-b border-border last:border-b-0"
+                    className="flex items-center justify-between border-b border-white/15 last:border-b-0"
                   >
                     <button
                       type="button"
@@ -469,7 +468,7 @@ export function FriendsView({
             incomingRequests.map((req) => (
               <div
                 key={req.requestId}
-                className="flex items-center justify-between gap-2 border-b border-border py-1.5 last:border-b-0"
+                className="flex items-center justify-between gap-2 border-b border-white/15 py-1.5 last:border-b-0"
               >
                 <div className="min-w-0">
                   <div className="truncate text-ui text-text">{req.name}</div>
@@ -523,7 +522,7 @@ export function FriendsView({
                 {outgoingRequests.map((req) => (
                   <div
                     key={req.requestId}
-                    className="flex items-center justify-between gap-2 border-b border-border py-1.5 last:border-b-0"
+                    className="flex items-center justify-between gap-2 border-b border-white/15 py-1.5 last:border-b-0"
                   >
                     <div className="min-w-0">
                       <div className="truncate text-ui text-text">
@@ -569,7 +568,7 @@ export function FriendsView({
             ongoingTrades.map((trade) => (
               <div
                 key={trade.tradeId}
-                className="flex items-center justify-between gap-2 border-b border-border py-1.5 last:border-b-0"
+                className="flex items-center justify-between gap-2 border-b border-white/15 py-1.5 last:border-b-0"
               >
                 <div className="min-w-0">
                   <div className="truncate text-ui text-text">
@@ -596,74 +595,6 @@ export function FriendsView({
         </List>
       )}
 
-      {tab === "leaderboard" && (
-        <>
-          <div className="mb-1.5 flex gap-1">
-            <TabButton
-              active={leaderboardBoard === "xp"}
-              onClick={() => setLeaderboardBoard("xp")}
-            >
-              EXP/Level
-            </TabButton>
-            <TabButton
-              active={leaderboardBoard === "song_hunt"}
-              onClick={() => setLeaderboardBoard("song_hunt")}
-            >
-              Song Hunt
-            </TabButton>
-          </div>
-          <List className="min-h-0 flex-1">
-            {leaderboard === null ? (
-              <div className="pt-5 text-center text-ui text-text-dim">
-                Loading…
-              </div>
-            ) : leaderboard.length === 0 ? (
-              <div className="pt-5 text-center text-ui text-text-dim">
-                {leaderboardBoard === "song_hunt"
-                  ? "Nobody has found a song for Orphiez yet."
-                  : "No herzies on the leaderboard yet."}
-              </div>
-            ) : (
-              leaderboard.map((entry) => {
-                const isMe = entry.name === herzie.name;
-                return (
-                  <div
-                    key={`${entry.rank}-${entry.name}`}
-                    className="flex items-center gap-2 border-b border-border py-1.5 last:border-b-0"
-                  >
-                    <span
-                      className={cn(
-                        "w-6 shrink-0 text-right text-ui font-bold",
-                        entry.rank === 1 ? "text-yellow" : "text-text-dim",
-                      )}
-                    >
-                      {entry.rank}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div
-                        className={cn(
-                          "truncate text-ui",
-                          isMe ? "font-bold text-cyan" : "text-text",
-                        )}
-                      >
-                        {entry.name}
-                        <span className="ml-1 text-[10px] text-text-dim">
-                          Lv.{entry.level} · Stage {entry.stage}
-                        </span>
-                      </div>
-                    </div>
-                    <span className="shrink-0 text-[10px] text-green">
-                      {leaderboardBoard === "song_hunt"
-                        ? `${entry.songHuntWins ?? 0} won`
-                        : formatMinutes(entry.totalMinutes)}
-                    </span>
-                  </div>
-                );
-              })
-            )}
-          </List>
-        </>
-      )}
       {friendMenu && (
         <ContextMenu
           x={friendMenu.x}
@@ -693,13 +624,6 @@ function formatExpiry(expiresAt: string): string {
   return `expires in ${mins}m`;
 }
 
-function formatMinutes(mins: number): string {
-  if (mins < 60) return `${mins}m`;
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  return m > 0 ? `${h}h ${m}m` : `${h}h`;
-}
-
 function SearchResults({
   results,
   searching,
@@ -724,7 +648,7 @@ function SearchResults({
       {results.map((r) => (
         <div
           key={r.friendCode}
-          className="flex items-center justify-between gap-2 border-b border-border py-1.5 last:border-b-0"
+          className="flex items-center justify-between gap-2 border-b border-white/15 py-1.5 last:border-b-0"
         >
           <div className="min-w-0">
             <div className="truncate text-ui text-text">{r.name}</div>

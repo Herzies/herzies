@@ -5,7 +5,7 @@ import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { ambient } from "./ambient";
 import { windowLightsOf } from "./Buildings";
-import { objectAt, objectJitter, type TownMap } from "./map";
+import { groundY, objectAt, objectJitter, type TownMap } from "./map";
 
 // Old-school lamp posts — an iron pole, a lantern on top — and the light
 // the town gives off at night: from the lamps, and from lit windows.
@@ -91,6 +91,8 @@ type Glow = {
   at: [number, number, number];
   /** A window's: which way it looks out (a lamp shines every way). */
   out?: [number, number];
+  /** How high the ground is where a window's cone lands. */
+  floor?: number;
   intensity: number;
   reach: number;
   onHerzies: number;
@@ -124,7 +126,7 @@ export function glowsOf(map: TownMap): Glow[] {
       if (objectAt(map, col, row) !== "L") continue;
       const { x, z, scale } = objectJitter(map, col, row);
       lamps.push({
-        at: [x, LANTERN_Y * scale, z],
+        at: [x, groundY(map, x, z) + LANTERN_Y * scale, z],
         intensity: LAMP_INTENSITY,
         reach: LAMP_POST_REACH,
         onHerzies: LAMP_ON_HERZIES,
@@ -138,6 +140,11 @@ export function glowsOf(map: TownMap): Glow[] {
         // Just off the glass, so the wall behind it is out of the cone.
         at: [w.at[0] + w.out[0] * 0.15, w.at[1], w.at[2] + w.out[1] * 0.15],
         out: w.out,
+        floor: groundY(
+          map,
+          w.at[0] + w.out[0] * WINDOW_AIM,
+          w.at[2] + w.out[1] * WINDOW_AIM,
+        ),
         intensity: WINDOW_INTENSITY,
         reach: LAMP_REACH,
         onHerzies: WINDOW_ON_HERZIES,
@@ -161,7 +168,11 @@ const herzieLightAt = (g: Glow): [number, number, number] =>
 function aimOf(g: Glow): THREE.Object3D {
   const target = new THREE.Object3D();
   const [ox, oz] = g.out ?? [0, 0];
-  target.position.set(g.at[0] + ox * WINDOW_AIM, 0, g.at[2] + oz * WINDOW_AIM);
+  target.position.set(
+    g.at[0] + ox * WINDOW_AIM,
+    g.floor ?? 0,
+    g.at[2] + oz * WINDOW_AIM,
+  );
   target.updateMatrixWorld();
   return target;
 }

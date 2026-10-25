@@ -2,21 +2,8 @@ import { LOW_HP_FRACTION } from "@herzies/shared";
 import { useEffect, useState } from "react";
 import { cn } from "../lib/utils";
 import { herzies } from "../tauri-bridge";
-import { HpBar } from "./SquareBar";
 import { goToMap } from "./town/runtime";
 import { refreshVitals, setVitals, useLiveHp } from "./town/vitals";
-
-/**
- * The herzie's health in the Town card, above its exp. Out of the way while
- * health is full outside of a fight, or once it has run out.
- */
-export function TownHpBar({ inFight }: { inFight: boolean }) {
-  const live = useLiveHp();
-  if (!live || live.down) return null;
-  const { hp, maxHp } = live;
-  if (!inFight && hp >= maxHp) return null;
-  return <HpBar hp={hp} maxHp={maxHp} className="mb-px text-white/70" />;
-}
 
 /**
  * The red edge as health runs low, and the screen that comes up when it runs
@@ -80,10 +67,10 @@ export function TownVitals({
       ) : null}
       {down ? (
         // As the boss fight's end screen: the window fills the Town down to
-        // just above the tab bar, the world blurred out behind it.
+        // the bottom margin, the world blurred out behind it.
         <div
-          className="absolute inset-x-3 top-3 z-50 flex"
-          style={{ bottom: "calc(var(--nav-height, 0px) + 0.75rem)" }}
+          className="absolute inset-x-3 top-[38px] z-50 flex"
+          style={{ bottom: "0.75rem" }}
         >
           <section
             role="alertdialog"

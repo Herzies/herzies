@@ -32,6 +32,7 @@ import {
 } from "@herzies/shared";
 import { HerzieView } from "@herzies/shared/gl";
 import { type ReactNode, useEffect, useState } from "react";
+import { useHerzieStage } from "../lib/overlayStage";
 import { herzies } from "../tauri-bridge";
 import { Coin } from "./Coin";
 import { FloatingCoins } from "./FloatingCoins";
@@ -308,6 +309,8 @@ export function MerchantPanel({
 
   const inspected = stock.find((l) => l.itemId === inspectItemId);
   const { line, typed, advance } = useChatter(persona.lines, !paused);
+  // Inside a window or the visitor panel, drawn on its canvas.
+  const { stage: onStage } = useHerzieStage();
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
@@ -329,6 +332,7 @@ export function MerchantPanel({
       <div className="relative flex h-[190px] shrink-0 flex-col">
         <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden">
           <HerzieView
+            onStage={onStage}
             userId={persona.seed}
             stage={persona.stage ?? 2}
             zoom={persona.zoom}

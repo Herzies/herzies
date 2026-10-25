@@ -1,4 +1,4 @@
-import { gapColour, MOB } from "@herzies/shared/tower";
+import { ELITE, gapColour, MOB, WARDEN } from "@herzies/shared/tower";
 import { Html } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
@@ -18,8 +18,10 @@ import {
 
 /**
  * The Tower's mobs: Thornlings, little bramble balls with glowing eyes,
- * drawn where the server says they are (a moment behind, smoothly). Each
- * crouches and reddens as it winds up a swing, flashes when hit, and
+ * drawn where the server says they are (a moment behind, smoothly). Green
+ * brutes, purple spitters (a snout to lob from) and long-spined red
+ * lungers; an elite is bigger and gilded, the Warden huge and dark. Each
+ * crouches and reddens as it winds up an attack, flashes when hit, and
  * shrinks into the grass when it falls. A tag over it gives its level,
  * coloured by how far above you it is, and its health.
  *
@@ -43,10 +45,54 @@ export function Mobs() {
 const FALL_MS = 450;
 const FLASH_MS = 120;
 
-const BODY = "#3f7f3a";
-const BRAMBLE = ["#2f6a2c", "#4f9a46", "#5fae4f"];
-const EYE = "#ffe36b";
-const FOOT = "#5a3e26";
+/** A Thornling's colours and spines. */
+type Breed = {
+  body: string;
+  bramble: readonly string[];
+  leaf: string;
+  eye: string;
+  foot: string;
+  /** Spine length. */
+  spine: number;
+  /** A snout to spit from. */
+  snout?: string;
+};
+
+const BREEDS = {
+  brute: {
+    body: "#3f7f3a",
+    bramble: ["#2f6a2c", "#4f9a46", "#5fae4f"],
+    leaf: "#7fc96b",
+    eye: "#ffe36b",
+    foot: "#5a3e26",
+    spine: 0.32,
+  },
+  spitter: {
+    body: "#6a4a9a",
+    bramble: ["#4f3478", "#7c5bb0", "#9670c8"],
+    leaf: "#c39be8",
+    eye: "#b8ff6b",
+    foot: "#3e2f52",
+    spine: 0.22,
+    snout: "#9fe05c",
+  },
+  lunger: {
+    body: "#8e3a2a",
+    bramble: ["#6e2a1e", "#b0503a", "#c8664a"],
+    leaf: "#e08a5a",
+    eye: "#fff3d6",
+    foot: "#4a2a1e",
+    spine: 0.48,
+  },
+  warden: {
+    body: "#2c3a2a",
+    bramble: ["#1e2a1c", "#3c4e38", "#d4af37"],
+    leaf: "#d4af37",
+    eye: "#ff5a3c",
+    foot: "#2a1e14",
+    spine: 0.4,
+  },
+} as const satisfies Record<string, Breed>;
 
 function part(g: THREE.BufferGeometry, color: string): THREE.BufferGeometry {
   const out = g.index ? g.toNonIndexed() : g;
@@ -66,12 +112,12 @@ function part(g: THREE.BufferGeometry, color: string): THREE.BufferGeometry {
 }
 
 /** A Thornling, facing +z, standing on the ground at the origin. */
-function thornling(): THREE.BufferGeometry {
+function thornling(b: Breed): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
   const r = MOB.radius;
   const cy = MOB.chest;
   parts.push(
-    part(new THREE.IcosahedronGeometry(r, 1).translate(0, cy, 0), BODY),
+    part(new THREE.IcosahedronGeometry(r, 1).translate(0, cy, 0), b.body),
   );
   // Spikes all over it, leaning out from the middle.
   const spikes = 18;
@@ -82,15 +128,15 @@ function thornling(): THREE.BufferGeometry {
     const dir = new THREE.Vector3(Math.cos(a) * ring, y, Math.sin(a) * ring);
     // None straight down (it stands there), none over the face.
     if (dir.y < -0.6 || (dir.z > 0.55 && Math.abs(dir.y) < 0.45)) continue;
-    const cone = new THREE.ConeGeometry(0.09, 0.32, 4);
-    cone.translate(0, 0.16, 0);
+    const cone = new THREE.ConeGeometry(0.09, b.spine, 4);
+    cone.translate(0, b.spine / 2, 0);
     const q = new THREE.Quaternion().setFromUnitVectors(
       new THREE.Vector3(0, 1, 0),
       dir,
     );
     cone.applyQuaternion(q);
     cone.translate(dir.x * r * 0.9, cy + dir.y * r * 0.9, dir.z * r * 0.9);
-    parts.push(part(cone, BRAMBLE[i % BRAMBLE.length]));
+    parts.push(part(cone, b.bramble[i % b.bramble.length]));
   }
   // A leaf on top.
   parts.push(
@@ -98,7 +144,7 @@ function thornling(): THREE.BufferGeometry {
       new THREE.ConeGeometry(0.16, 0.36, 3)
         .rotateZ(0.5)
         .translate(0.1, cy + r + 0.12, 0),
-      "#7fc96b",
+      b.leaf,
     ),
   );
   // Eyes, glowing.
@@ -108,7 +154,17 @@ function thornling(): THREE.BufferGeometry {
         new THREE.SphereGeometry(0.075, 6, 4)
           .scale(1, 1.4, 0.6)
           .translate(sx * 0.17, cy + 0.08, r * 0.93),
-        EYE,
+        b.eye,
+      ),
+    );
+  // A spitter's snout, under the eyes.
+  if (b.snout)
+    parts.push(
+      part(
+        new THREE.CylinderGeometry(0.08, 0.13, 0.26, 6)
+          .rotateX(Math.PI / 2)
+          .translate(0, cy - 0.12, r * 0.98),
+        b.snout,
       ),
     );
   // Stubby feet.
@@ -118,12 +174,21 @@ function thornling(): THREE.BufferGeometry {
         new THREE.SphereGeometry(0.13, 6, 4)
           .scale(1, 0.6, 1.3)
           .translate(sx * 0.2, 0.08, 0.05),
-        FOOT,
+        b.foot,
       ),
     );
   return mergeGeometries(parts) as THREE.BufferGeometry;
 }
-const GEOMETRY = thornling();
+const GEOMETRY = {
+  brute: thornling(BREEDS.brute),
+  spitter: thornling(BREEDS.spitter),
+  lunger: thornling(BREEDS.lunger),
+  warden: thornling(BREEDS.warden),
+};
+
+/** How much bigger than a plain mob it's drawn. */
+const scaleOf = (m: MobView) =>
+  m.rank === 2 ? WARDEN.scale : m.rank === 1 ? ELITE.scale : 1;
 
 const TAG_W = 128;
 const TAG_H = 40;
@@ -196,6 +261,7 @@ function Mob({ id }: { id: number }) {
     if (!m) return;
     const at = mobAt(m, performance.now() - MOB_DELAY_MS);
     const t = newTarget(`mob${id}`, at.x, at.z, at.yaw, id);
+    t.size = scaleOf(m);
     target.current = t;
     liveDummies.push(t);
     return () => {
@@ -205,6 +271,10 @@ function Mob({ id }: { id: number }) {
   }, [id]);
 
   const tower = bossFight.tower;
+  const view = towerMobs.get(id);
+  const kind = view?.kind ?? "brute";
+  const rank = view?.rank ?? 0;
+  const size = view ? scaleOf(view) : 1;
   const drawn = useRef({ hp: -1 });
   const label = useRef<HTMLDivElement>(null);
   const crouch = useRef(0);
@@ -245,11 +315,23 @@ function Mob({ id }: { id: number }) {
     const c = crouch.current;
     const bob = Math.sin(now / 180 + id) * 0.03 * (1 - c);
     if (body.current) {
-      body.current.scale.set(1 + c * 0.15, 1 - c * 0.22 + bob, 1 + c * 0.15);
+      const k = scaleOf(m);
+      body.current.scale.set(
+        k * (1 + c * 0.15),
+        k * (1 - c * 0.22 + bob),
+        k * (1 + c * 0.15),
+      );
     }
     const flash = Math.max(0, 1 - (now - m.hitAt) / FLASH_MS);
-    material.emissive.setRGB(1, 1 - c * 0.85, 1 - c * 0.85);
-    material.emissiveIntensity = Math.max(flash ** 2 * 0.9, c * 0.45);
+    // An elite smoulders gold between swings.
+    const glow = m.rank === 1 ? 0.12 + 0.06 * Math.sin(now / 240 + id) : 0;
+    if (c > 0.02 || flash > 0 || !glow) {
+      material.emissive.setRGB(1, 1 - c * 0.85, 1 - c * 0.85);
+      material.emissiveIntensity = Math.max(flash ** 2 * 0.9, c * 0.45);
+    } else {
+      material.emissive.setRGB(1, 0.8, 0.3);
+      material.emissiveIntensity = glow;
+    }
 
     const tower = bossFight.tower;
     if (tower && tag.current) {
@@ -267,7 +349,7 @@ function Mob({ id }: { id: number }) {
     <group ref={group}>
       <mesh
         ref={body}
-        geometry={GEOMETRY}
+        geometry={GEOMETRY[rank === 2 ? "warden" : kind]}
         material={material}
         castShadow
         receiveShadow
@@ -275,13 +357,17 @@ function Mob({ id }: { id: number }) {
       <sprite
         ref={tag}
         material={tagMaterial}
-        position-y={MOB.top + 0.45}
+        position-y={MOB.top * size + 0.45}
         scale={[1.3, (1.3 * TAG_H) / TAG_W, 1]}
         renderOrder={10}
       />
       {tower ? (
         // Just over the bar, as a name tag is: crisp at any pixel size.
-        <Html position={[0, MOB.top + 0.56, 0]} center zIndexRange={[19, 0]}>
+        <Html
+          position={[0, MOB.top * size + 0.56, 0]}
+          center
+          zIndexRange={[19, 0]}
+        >
           <div
             ref={label}
             className="pointer-events-none whitespace-nowrap text-[11px] font-bold leading-none"
@@ -291,6 +377,7 @@ function Mob({ id }: { id: number }) {
             }}
           >
             Lv {tower.level}
+            {rank === 2 ? " Warden" : rank === 1 ? " Elite" : ""}
           </div>
         </Html>
       ) : null}

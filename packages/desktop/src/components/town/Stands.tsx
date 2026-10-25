@@ -2,7 +2,14 @@ import { CuboidCollider } from "@react-three/rapier";
 import { useLayoutEffect, useMemo } from "react";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import { cellCenter, EIGHTH, facingAt, objectAt, type TownMap } from "./map";
+import {
+  cellCenter,
+  EIGHTH,
+  facingAt,
+  groundY,
+  objectAt,
+  type TownMap,
+} from "./map";
 
 // Market stands: a wooden counter under a striped awning on four posts,
 // with a few wares out on top. Scenery to dress the town (nobody minds
@@ -18,7 +25,13 @@ const COUNTER_HEIGHT = 0.95;
 const POST_HEIGHT = 2.3;
 
 /** A stand: where it stands and which way its counter faces. */
-export type Stand = { x: number; z: number; yaw: number };
+export type Stand = {
+  x: number;
+  /** The ground it stands on. */
+  y: number;
+  z: number;
+  yaw: number;
+};
 
 /** Which way a stand faces: as turned in the editor, else toward the middle
  * of town, squared to the eight compass points. */
@@ -36,7 +49,12 @@ export function standsOf(map: TownMap): Stand[] {
     for (let col = 0; col < map.size; col++) {
       if (objectAt(map, col, row) !== STAND) continue;
       const [x, z] = cellCenter(map, col, row);
-      out.push({ x, z, yaw: standFacing(map, col, row) });
+      out.push({
+        x,
+        y: groundY(map, x, z),
+        z,
+        yaw: standFacing(map, col, row),
+      });
     }
   return out;
 }
@@ -169,7 +187,7 @@ export function Stands({ map }: { map: TownMap }) {
     if (stands.length === 0) return null;
     return mergeGeometries(
       stands.map((s) =>
-        STAND_GEOMETRY.clone().rotateY(s.yaw).translate(s.x, 0, s.z),
+        STAND_GEOMETRY.clone().rotateY(s.yaw).translate(s.x, s.y, s.z),
       ),
     ) as THREE.BufferGeometry;
   }, [map]);
@@ -194,7 +212,7 @@ export function StandColliders({ map }: { map: TownMap }) {
         <CuboidCollider
           key={`stand${s.x},${s.z}`}
           args={[WIDTH / 2, 1, DEPTH / 2]}
-          position={[s.x, 1, s.z]}
+          position={[s.x, s.y + 1, s.z]}
           rotation={[0, s.yaw, 0]}
         />
       ))}

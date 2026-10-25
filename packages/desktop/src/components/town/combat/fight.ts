@@ -1,5 +1,5 @@
 import { getItemIcon, ITEMS, isSkillId, SKILL_DEFS } from "@herzies/shared";
-import { MOB } from "@herzies/shared/tower";
+import { MOB, towerXpPerKill } from "@herzies/shared/tower";
 import type {
   BossTelegraph,
   FightState,
@@ -9,6 +9,7 @@ import type {
   TowerMob,
 } from "@herzies/shared/town-net";
 import { useSyncExternalStore } from "react";
+import { logActivity } from "../../../lib/activity";
 import { notify } from "../../../lib/notices";
 import {
   sfxDown,
@@ -19,7 +20,7 @@ import {
   sfxWarn,
 } from "../sfx";
 import { setHpNow, setRegenFrozen } from "../vitals";
-import { pushDamageNumber } from "./DamageNumbers";
+import { pushDamageNumber, pushHurtNumber } from "./DamageNumbers";
 import { setBossResults } from "./results";
 import {
   clearBuff,
@@ -73,8 +74,11 @@ export const bossFight = {
    * kill that paid one): every batch stays on the ground until it's picked
    * up or you leave. Dropped by LootDrops. */
   loots: [] as LootBatch[],
-  /** In the Tower: the floor (its mobs are in {@link towerMobs}). */
-  tower: null as Omit<TowerFloor, "mobs"> | null,
+  /** In the Tower: the floor (its mobs are in {@link towerMobs}), and when
+   * its mobs enrage (performance.now() ms; null from an older server). */
+  tower: null as
+    | (Omit<TowerFloor, "mobs" | "enrageIn"> & { enrageAt: number | null })
+    | null,
   /** When the boss was last hit and when you last were (performance.now()
    * ms), for the bar's flash and the screen's. */
   bossHitAt: Number.NEGATIVE_INFINITY,
@@ -101,6 +105,9 @@ export type LootBatch = {
  * when it fell. */
 export type MobView = {
   id: number;
+  /** Its kind (MOB_KINDS), and whether it's an elite (1) or the Warden. */
+  kind: "brute" | "spitter" | "lunger";
+  rank: 0 | 1 | 2;
   hp: number;
   maxHp: number;
   /** Winding up a swing. */
@@ -156,6 +163,8 @@ function syncMobs(mobs: readonly TowerMob[], now: number) {
     if (!m) {
       m = {
         id: w.id,
+        kind: w.k ?? "brute",
+        rank: w.e ?? 0,
         hp: w.hp,
         maxHp: w.maxHp,
         windup: false,
@@ -176,8 +185,11 @@ function syncMobs(mobs: readonly TowerMob[], now: number) {
 function setTower(f: TowerFloor, now: number) {
   const was = bossFight.tower;
   if (!was || was.floor !== f.floor) towerMobs.clear();
-  const { mobs, ...floor } = f;
-  bossFight.tower = floor;
+  const { mobs, enrageIn, ...floor } = f;
+  bossFight.tower = {
+    ...floor,
+    enrageAt: enrageIn === undefined ? null : now + enrageIn,
+  };
   syncMobs(mobs, now);
 }
 
@@ -290,6 +302,10 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       return;
     }
     case "hp": {
+      // Yours went down: the amount pops off your herzie.
+      const was = bossFight.health.get(m.id)?.hp;
+      if (m.id === clock.you() && was !== undefined && m.hp < was)
+        pushHurtNumber(was - m.hp);
       bossFight.health.set(m.id, { hp: m.hp, maxHp: m.maxHp });
       if (m.id === clock.you()) setHpNow(m.hp);
       emit();
@@ -361,6 +377,10 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
     }
     case "mobDown": {
       const mob = towerMobs.get(m.mob);
+      // The Tower's fought alone: every kill is yours, and pays XP.
+      const tower = bossFight.tower;
+      if (mob && mob.downAt === null && tower)
+        logActivity(`Received +${towerXpPerKill(tower.floor)} XP`);
       if (mob) {
         mob.hp = 0;
         mob.downAt = now;

@@ -1,8 +1,10 @@
 import {
+  type ActiveMultiplier,
   type Equipped,
   type HerzieStats,
   type ItemUnit,
   isTownMapId,
+  TOWER_GUARD_KEY,
 } from "@herzies/shared";
 import {
   lazy,
@@ -14,11 +16,17 @@ import {
   useState,
 } from "react";
 import { cn } from "../lib/utils";
-import type { ChatMessage } from "../tauri-bridge";
+import type { AppState, ChatMessage } from "../tauri-bridge";
 import { LoadingSplash } from "./LoadingSplash";
-import { ExpBar } from "./SquareBar";
+import { NowPlayingBox } from "./NowPlayingBox";
+import {
+  observePlayerCard,
+  PLAYER_CARD,
+  PLAYER_CARD_TOWN,
+  PlayerBars,
+} from "./PlayerBars";
 import { type EventCard, formatIn, isDown } from "./TownScene";
-import { TownHpBar, TownVitals } from "./TownVitals";
+import { TownVitals } from "./TownVitals";
 import { BossHud } from "./town/BossHud";
 import { BossResults } from "./town/BossResults";
 import { setCave } from "./town/cave";
@@ -32,7 +40,6 @@ import { Hotbar } from "./town/Hotbar";
 import { Key } from "./town/Key";
 import type { TownMap } from "./town/map";
 import { markMet } from "./town/met";
-import { NAME_SHADOW } from "./town/nameFade";
 import { useTownNet, useTownNetVersion } from "./town/net/townNet";
 import { spotsOf, type TownSpot, townLive, useTownMap } from "./town/runtime";
 import { SkillHud } from "./town/SkillHud";
@@ -54,6 +61,9 @@ export function TownWorld({
   chatMessages,
   cards,
   paused,
+  backdrop = false,
+  hudHidden = paused,
+  windowOpen = false,
   onOpen,
   onOpenProfile,
   player,
@@ -76,6 +86,12 @@ export function TownWorld({
     progress: number;
     /** Total XP, for the exp bar's tooltip. */
     xp?: number;
+    /** Active XP modifiers, by the exp bar (null: logged out). */
+    multipliers?: ActiveMultiplier[] | null;
+    /** The class's name ("Bard"), after the level. */
+    classLabel?: string;
+    /** What's playing, under the card. */
+    nowPlaying?: AppState["nowPlaying"];
   };
   /** The chat, for lines over the speakers' heads. */
   chatMessages?: ChatMessage[];
@@ -86,6 +102,18 @@ export function TownWorld({
   chatOverlay?: boolean;
   cards: EventCard[];
   paused: boolean;
+  /** Paused behind a visitor's panel: still load and draw up to the first
+   * frame (opened straight onto a visitor, there'd be nothing behind the
+   * glass), then hold still. */
+  backdrop?: boolean;
+  /** The HUD (player card, hotbar, vitals, ...) is hidden. Defaults to
+   * `paused`; the Town passes it apart so a world paused only because the
+   * app lost focus keeps its HUD, as Home does. */
+  hudHidden?: boolean;
+  /** An overlay window (Herzie, Social, ...) is open over the Town. The
+   * world keeps going, walking included; only the boss's end screen stops
+   * taking every key, so typing reaches the window. */
+  windowOpen?: boolean;
   onOpen: (openKey: string) => void;
   /** Another player's name was clicked: open their profile. */
   onOpenProfile?: (friendCode: string) => void;
@@ -114,15 +142,17 @@ export function TownWorld({
   // The Town tab is mounted (hidden) for the app's whole life, so wait for
   // it to be opened before loading the 3D world and starting a WebGL
   // context — then keep them.
-  const [opened, setOpened] = useState(!paused);
+  const [opened, setOpened] = useState(!paused || backdrop);
   useEffect(() => {
-    if (!paused) setOpened(true);
-  }, [paused]);
+    if (!paused || backdrop) setOpened(true);
+  }, [paused, backdrop]);
   // One splash from opening until the world has drawn its first frame —
   // not one per thing that loads (the code, Rapier, the events), which
   // blinked as each handed over to the next.
   const [ready, setReady] = useState(false);
   const onReady = useCallback(() => setReady(true), []);
+  // A backdrop runs until that first frame is up.
+  const canvasPaused = paused && !(backdrop && !ready);
 
   // The visitors stand on islands with spots for them (home), not out on
   // the training grounds.
@@ -153,12 +183,25 @@ export function TownWorld({
   const spots = useMemo<TownSpot[]>(() => {
     if (Object.keys(map.spots).length === 0) return [];
     const { spots: SPOTS, spare: SPARE_SPOTS } = spotsOf(map);
+    // A map with visitors on it has a spot for one of them; the Tower
+    // Guard's alone (the Tower's door, say) brings only him.
+    const visitorMap = Object.keys(map.spots).some(
+      (k) => k !== TOWER_GUARD_KEY,
+    );
     let spare = 0;
     return (
       cards
         // The boss isn't in town: it's in its cave (see CaveTimer).
         .filter((c) => c.type !== "boss_fight")
         .filter((c) => c.type !== "treat_trader" || c.status !== "idle")
+        // The Tower Guard stands only where a map gives him a spot (the
+        // map editor): never on a spare one. Everyone else only on a
+        // visitor map, and only with somewhere to stand.
+        .filter((c) =>
+          c.type === TOWER_GUARD_KEY
+            ? !!SPOTS[c.type]
+            : visitorMap && (!!SPOTS[c.type] || SPARE_SPOTS.length > 0),
+        )
         .map((card) => {
           const live = card.status === "live";
           return {
@@ -212,25 +255,40 @@ export function TownWorld({
   }, [lookKey, net]);
 
   const talkTo = near?.card.openKey;
-  // Where combat's allowed, the keys for it: sat right on top of the XP
-  // bar (or in the corner, without one).
-  const combatHint =
-    map.combat && !paused ? (
-      <div
-        className={cn(
-          "pointer-events-none absolute z-30 flex items-center gap-2 rounded bg-black/55 px-1.5 py-1 text-[10px] text-white/80",
-          profile
-            ? "bottom-full left-2 mb-1.5"
-            : chatOverlay
-              ? "bottom-[calc(var(--dock-height,0px)+4.5rem)] left-2"
-              : "bottom-3 left-2",
-        )}
-      >
-        <span>
-          <Key>Tab</Key> {fighting ? "roam" : "aim"}
+  // Where the E prompts (talk, portal, bench) sit: as far above the hotbar
+  // as the hotbar is above the chat (6px; the slots are 36px tall), or just
+  // over the chat without the HUD.
+  const promptAt = hudHidden
+    ? chatOverlay
+      ? "bottom-[calc(var(--dock-height,0px)+6px)]"
+      : "bottom-3"
+    : chatOverlay
+      ? profile
+        ? "bottom-[calc(var(--dock-height,0px)+48px)]"
+        : "bottom-[calc(var(--dock-height,0px)+4.5rem+42px)]"
+      : "bottom-[54px]";
+  // The key for aim mode (anywhere in the Town): sat right on top of the
+  // bars (or in the corner, without them).
+  const combatHint = !hudHidden ? (
+    <div
+      className={cn(
+        // No box: the key chip, and the word over the world with a shadow.
+        "pointer-events-none absolute z-30 flex items-center gap-2 text-[10px] text-white/80",
+        profile
+          ? "bottom-full left-0"
+          : chatOverlay
+            ? "bottom-[calc(var(--dock-height,0px)+4.5rem)] left-2"
+            : "bottom-3 left-2",
+      )}
+    >
+      <span>
+        <Key>Tab</Key>{" "}
+        <span className="[text-shadow:0_1px_2px_#000]">
+          {fighting ? "roam" : "aim"}
         </span>
-      </div>
-    ) : null;
+      </span>
+    </div>
+  ) : null;
 
   const hudFade = cn(
     "transition-opacity duration-300",
@@ -240,58 +298,78 @@ export function TownWorld({
   return (
     <div className="relative min-h-0 flex-1 overflow-hidden">
       {net.status === "outdated" ? (
-        <div className="pointer-events-none absolute top-2 right-2 z-30 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white/70">
+        <div
+          className={cn(
+            // Top right.
+            "pointer-events-none absolute top-3 right-3 z-30 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white/70",
+          )}
+        >
           Update Herzies to see other players
         </div>
       ) : null}
       {/* The HUD fades away while the boss's end screen is up, and back. */}
       <div className={hudFade}>
-        {profile && !paused ? (
+        {profile && !hudHidden ? (
           <>
-            {/* Centred in a 20px row, like home's (its icon buttons are h-5), so
-              the name doesn't shift when switching tabs. */}
-            <div className="pointer-events-none absolute top-3 left-3 z-30 flex h-5 max-w-[60%] items-center">
-              <span
-                className="whitespace-nowrap text-ui-lg font-bold text-white"
-                style={{ textShadow: NAME_SHADOW }}
-              >
-                {profile.name}
-                <span className="ml-2 text-[10px] font-normal text-white/70">
+            {/* Top left, a frosted card: name and level, then health and
+                experience — as on Home, so nothing shifts between the two.
+                Under it, 8px down and as wide, what's playing. The big
+                window hangs its windows under both (observePlayerCard). */}
+            <div
+              ref={observePlayerCard}
+              className="absolute top-3 left-3 z-30 flex w-[174px] flex-col gap-2"
+            >
+              <div className={cn(PLAYER_CARD, PLAYER_CARD_TOWN)}>
+                <div className="flex h-5 items-center">
+                  <span className="block min-w-0 truncate text-ui-lg font-bold text-white">
+                    {profile.name}
+                  </span>
+                </div>
+                {/* The level (and class) on its own line, as on Home. */}
+                <div className="my-0.5 text-[10px] leading-3 whitespace-nowrap text-white/70">
                   Lv. {profile.level}
-                </span>
-              </span>
+                  {profile.classLabel && ` · ${profile.classLabel}`}
+                </div>
+                <PlayerBars
+                  level={profile.level}
+                  progress={profile.progress}
+                  xp={profile.xp}
+                  className="mt-1.5 text-white/70"
+                />
+              </div>
+              <NowPlayingBox
+                nowPlaying={profile.nowPlaying ?? null}
+                multipliers={profile.multipliers ?? null}
+                tint={cn(PLAYER_CARD_TOWN, "backdrop-blur-md")}
+                showTags={false}
+              />
             </div>
             <div
               className={cn(
-                "pointer-events-none absolute inset-x-0 z-30 px-3 py-2",
-                chatOverlay ? "bottom-[var(--dock-height,0px)]" : "bottom-0",
+                // A zero-height line 6px above the chat (as far as the chat
+                // is from the nav), or 12px above the window's bottom, 12px
+                // in from each side, as the chat is: the aim
+                // hint, the hotbar and the skills stand on it, flush with
+                // its ends and centred.
+                "pointer-events-none absolute inset-x-3 z-30 h-0",
+                chatOverlay
+                  ? "bottom-[calc(var(--dock-height,0px)+6px)]"
+                  : "bottom-3",
               )}
             >
               {combatHint}
-              {!paused ? (
-                <SkillHud
-                  usable={!!map.combat}
-                  className="bottom-full right-2 mb-1.5"
-                />
-              ) : null}
-              {!paused ? (
+              {!hudHidden ? <SkillHud className="bottom-full right-0" /> : null}
+              {!hudHidden ? (
                 <Hotbar
                   units={units}
-                  className="bottom-full left-1/2 mb-1.5 -translate-x-1/2"
+                  className="bottom-full left-1/2 -translate-x-1/2"
                 />
               ) : null}
-              <TownHpBar inFight={!!map.combat} />
-              <ExpBar
-                progress={profile.progress}
-                level={profile.level}
-                xp={profile.xp}
-                className="text-white/70"
-              />
             </div>
           </>
         ) : null}
         {profile ? null : combatHint}
-        {profile || paused ? null : (
+        {profile || hudHidden ? null : (
           <Hotbar
             units={units}
             className={cn(
@@ -302,9 +380,8 @@ export function TownWorld({
             )}
           />
         )}
-        {profile || paused ? null : (
+        {profile || hudHidden ? null : (
           <SkillHud
-            usable={!!map.combat}
             className={
               chatOverlay
                 ? "bottom-[calc(var(--dock-height,0px)+4.5rem)] right-2"
@@ -313,7 +390,7 @@ export function TownWorld({
           />
         )}
       </div>
-      {fpsShown && opened && !paused ? (
+      {fpsShown && opened && !hudHidden ? (
         <FrameRate className="pointer-events-none absolute top-2 left-2 z-30 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white/70 tabular-nums" />
       ) : null}
       {opened && (
@@ -323,7 +400,7 @@ export function TownWorld({
             net={net}
             bubbles={bubbles}
             player={look}
-            paused={paused}
+            paused={canvasPaused}
             onOpen={onOpen}
             onOpenProfile={onOpenProfile}
             onNearChange={setNear}
@@ -334,16 +411,16 @@ export function TownWorld({
           />
         </Suspense>
       )}
-      {!paused ? (
+      {!hudHidden ? (
         <>
           <div className={hudFade}>
             <TownVitals inFight={!!map.combat} chatOverlay={chatOverlay} />
             <BossHud name={bossCard?.title ?? "The boss"} />
           </div>
-          <BossResults />
+          <BossResults interactive={!windowOpen} />
         </>
       ) : null}
-      {!paused && (loading || !ready) ? (
+      {!hudHidden && (loading || !ready) ? (
         <LoadingSplash overlay label="loading town" />
       ) : null}
 
@@ -356,10 +433,7 @@ export function TownWorld({
           }}
           className={cn(
             "absolute left-1/2 z-30 -translate-x-1/2 cursor-pointer whitespace-nowrap rounded border-0 bg-black/35 px-2.5 py-1 text-ui text-white backdrop-blur-md hover:bg-black/50",
-            // Above the dock (chat + tab bar) floating over the world.
-            chatOverlay
-              ? "bottom-[calc(var(--dock-height,0px)+4.5rem)]"
-              : "bottom-3",
+            promptAt,
           )}
         >
           Talk to {near.card.title} <span className="text-text-dim">[E]</span>
@@ -373,9 +447,7 @@ export function TownWorld({
           }}
           className={cn(
             "absolute left-1/2 z-30 -translate-x-1/2 cursor-pointer whitespace-nowrap rounded border-0 bg-black/35 px-2.5 py-1 text-ui text-white backdrop-blur-md hover:bg-black/50",
-            chatOverlay
-              ? "bottom-[calc(var(--dock-height,0px)+4.5rem)]"
-              : "bottom-3",
+            promptAt,
           )}
         >
           {portalTo.id === map.id
@@ -397,9 +469,7 @@ export function TownWorld({
           }}
           className={cn(
             "absolute left-1/2 z-30 -translate-x-1/2 cursor-pointer whitespace-nowrap rounded border-0 bg-black/35 px-2.5 py-1 text-ui text-white backdrop-blur-md hover:bg-black/50",
-            chatOverlay
-              ? "bottom-[calc(var(--dock-height,0px)+4.5rem)]"
-              : "bottom-3",
+            promptAt,
           )}
         >
           {bench === "sit"

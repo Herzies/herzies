@@ -1278,14 +1278,21 @@ export const BOSS_LOOT_RARITY_BOOST: Record<Rarity, number> = {
   mythic: 2,
 };
 
+/** Items that drop from listening but never from a boss's random loot
+ * (00118: no Nostalgic Tokens). */
+export const BOSS_LOOT_EXCLUDED_ITEM_IDS = ["cd"];
+
 /** What a boss's random loot is drawn from, and how likely each is: every
  * item that drops from listening (not in NON_DROPPABLE_ITEM_IDS, no
- * seasonal window), weighted per BOSS_LOOT_RARITY_BOOST. settle_boss_fight
- * rolls from a copy of this list (boss_loot_roll, 00114_boss_bonus_loot.sql);
+ * seasonal window, not in BOSS_LOOT_EXCLUDED_ITEM_IDS), weighted per BOSS_LOOT_RARITY_BOOST. settle_boss_fight
+ * rolls from a copy of this list (boss_loot_roll, 00118_boss_loot_no_tokens.sql);
  * items.test.ts checks the two agree, so a new droppable item needs adding
  * there too. */
 export function bossLootWeights(): { itemId: string; weight: number }[] {
-  const never = new Set<string>(NON_DROPPABLE_ITEM_IDS);
+  const never = new Set<string>([
+    ...NON_DROPPABLE_ITEM_IDS,
+    ...BOSS_LOOT_EXCLUDED_ITEM_IDS,
+  ]);
   return ITEMS.filter((i) => !never.has(i.id) && !i.dropWindow).map((i) => ({
     itemId: i.id,
     weight: Math.round(

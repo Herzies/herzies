@@ -1,60 +1,23 @@
-import { useEffect, useRef, useState } from "react";
 import { cn } from "../lib/utils";
 
 /**
- * Scrollable list container with a fade-to-background hint at whichever
- * edge (top/bottom) has more content to reveal. Caller owns sizing via
- * `className` (e.g. `min-h-0 flex-1` or `max-h-28`) — this only owns
- * scrolling and the fade.
+ * Scrollable list container. Caller owns sizing via `className` (e.g.
+ * `min-h-0 flex-1` or `max-h-28`) — this only owns scrolling. No fade at the
+ * edges: lists sit on the overlay windows' glass, where a fade to the app's
+ * background colour reads as a dark band.
  */
 export function List({
   children,
   className,
   contentStyle,
-  fades = true,
 }: {
   children: React.ReactNode;
   className?: string;
-  /** Style for the wrapper around `children`. Give it a percentage `height` to
-   * make the content a multiple of the visible area, so something inside can
-   * size itself in percentages of that — the wrapper has to be the content's
-   * real height, or the bottom fade (which sits after it) lands mid-list. */
+  /** Style for the wrapper around `children`. Give it a `height` to make the
+   * content taller than the visible area, so something inside can size
+   * itself in percentages of that. */
   contentStyle?: React.CSSProperties;
-  /** The top/bottom fade hints. Off for a list that wants none (the Herzie
-   * view's bag). */
-  fades?: boolean;
 }) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
-  const [atTop, setAtTop] = useState(true);
-  const [atBottom, setAtBottom] = useState(true);
-
-  useEffect(() => {
-    const scrollEl = scrollRef.current;
-    const contentEl = contentRef.current;
-    if (!scrollEl || !contentEl) return;
-
-    const measure = () => {
-      setAtTop(scrollEl.scrollTop <= 0);
-      setAtBottom(
-        scrollEl.scrollTop + scrollEl.clientHeight >= scrollEl.scrollHeight - 1,
-      );
-    };
-
-    measure();
-    scrollEl.addEventListener("scroll", measure);
-    // Watches both the scroller's own box (e.g. window resize) and its
-    // content (items added/removed) — content growth alone doesn't change
-    // the scroller's box size, so scrollEl-only wouldn't catch it.
-    const observer = new ResizeObserver(measure);
-    observer.observe(scrollEl);
-    observer.observe(contentEl);
-    return () => {
-      scrollEl.removeEventListener("scroll", measure);
-      observer.disconnect();
-    };
-  }, []);
-
   // className carries the caller's sizing (`min-h-0 flex-1` or `max-h-*`),
   // so it has to land on the actual scrolling element rather than a wrapper
   // — a wrapper with no in-flow content (the scroller pulled out via
@@ -63,29 +26,8 @@ export function List({
   return (
     // cursor-default: a list's plain text rows aren't for selecting, so no
     // I-beam over them; rows that do something set their own pointer.
-    <div
-      ref={scrollRef}
-      className={cn("cursor-default overflow-y-auto", className)}
-    >
-      {fades && (
-        <div
-          className={cn(
-            "pointer-events-none sticky top-0 -mb-4 h-4 bg-gradient-to-b from-bg-panel to-transparent transition-opacity",
-            atTop ? "opacity-0" : "opacity-100",
-          )}
-        />
-      )}
-      <div ref={contentRef} style={contentStyle}>
-        {children}
-      </div>
-      {fades && (
-        <div
-          className={cn(
-            "pointer-events-none sticky bottom-0 -mt-4 h-4 bg-gradient-to-t from-bg-panel to-transparent transition-opacity",
-            atBottom ? "opacity-0" : "opacity-100",
-          )}
-        />
-      )}
+    <div className={cn("cursor-default overflow-y-auto", className)}>
+      <div style={contentStyle}>{children}</div>
     </div>
   );
 }

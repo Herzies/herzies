@@ -18,7 +18,7 @@ import { discField } from "./combat/discs";
 import { combat } from "./combat/state";
 import { HeadBubble } from "./HeadBubble";
 import type { TownInput } from "./input";
-import type { TownMap } from "./map";
+import { groundY, type TownMap } from "./map";
 import { type Mover, stepMover, walkAzimuth } from "./movement";
 import { warpAmount } from "./portal";
 import { townLive, townSave, useTownRuntime } from "./runtime";
@@ -67,12 +67,15 @@ function aiming(input: TownInput): TownInput {
 }
 
 export function Player({
+  map,
   look,
   spawn,
   respawn = 0,
   reach,
   bubble,
 }: {
+  /** The island it walks on: its ground's ups and downs. */
+  map: TownMap;
   /** How far from the island's middle it can walk. */
   reach: number;
   /** What the player just said in chat, over their head. */
@@ -143,8 +146,9 @@ export function Player({
     });
     herzie.heading = spawn.heading;
     mover.current = { vx: 0, vz: 0, heading: spawn.heading };
-    body.current?.setTranslation({ x, y: 0, z }, true);
-    body.current?.setNextKinematicTranslation({ x, y: 0, z });
+    const y = groundY(map, x, z);
+    body.current?.setTranslation({ x, y, z }, true);
+    body.current?.setNextKinematicTranslation({ x, y, z });
   }, [respawn]);
 
   useBeforePhysicsStep((w) => {
@@ -168,8 +172,9 @@ export function Player({
       townLive.teleport = null;
       townLive.seat = null;
       m.vx = m.vz = 0;
-      b.setTranslation({ x: to.x, y: 0, z: to.z }, true);
-      b.setNextKinematicTranslation({ x: to.x, y: 0, z: to.z });
+      const y = groundY(map, to.x, to.z);
+      b.setTranslation({ x: to.x, y, z: to.z }, true);
+      b.setNextKinematicTranslation({ x: to.x, y, z: to.z });
       townSave.x = to.x;
       townSave.z = to.z;
       if (to.heading !== undefined) townSave.heading = m.heading = to.heading;
@@ -199,7 +204,9 @@ export function Player({
       const { x, z } = standing ? seat.stand : seat;
       m.vx = m.vz = 0;
       herzie.heading = m.heading = seat.heading;
-      b.setNextKinematicTranslation({ x, y: 0, z });
+      // On the seat: its bench's ground; stood up: the ground there.
+      const y = standing ? groundY(map, x, z) : seat.y;
+      b.setNextKinematicTranslation({ x, y, z });
       townSave.x = x;
       townSave.z = z;
       townSave.heading = seat.heading;
@@ -230,7 +237,8 @@ export function Player({
     // tree stops the feet too.
     rt.playerSpeed = Math.hypot(x - p.x, z - p.z) / dt;
     townLive.speed = rt.playerSpeed;
-    b.setNextKinematicTranslation({ x, y: p.y, z });
+    // Over hill and dale: the body is always on the ground under it.
+    b.setNextKinematicTranslation({ x, y: groundY(map, x, z), z });
     townSave.x = x;
     townSave.z = z;
     townSave.heading = herzie.heading;
@@ -279,7 +287,7 @@ export function Player({
       }}
       type="kinematicPosition"
       colliders={false}
-      position={[townSave.x, 0, townSave.z]}
+      position={[townSave.x, groundY(map, townSave.x, townSave.z), townSave.z]}
       enabledRotations={[false, false, false]}
     >
       <CapsuleCollider

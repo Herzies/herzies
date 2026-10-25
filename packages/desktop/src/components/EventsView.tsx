@@ -1,4 +1,5 @@
 import type {
+  ActiveMultiplier,
   BossFightView,
   Equipped,
   GameEvent,
@@ -17,14 +18,26 @@ import {
   MEDEA_NAME,
   MERCHANT_NAME,
   type StatPoints,
+  TOWER_GUARD_KEY,
+  TOWER_GUARD_NAME,
   TREAT_TRADER_NAME,
   VISITORS,
   visitorName,
   withStatPoints,
 } from "@herzies/shared";
-import { memo, useEffect, useRef, useState } from "react";
+import { HerzieStage } from "@herzies/shared/gl";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { useEscape } from "../lib/escapeStack";
+import { HerzieStageContext } from "../lib/overlayStage";
 import { cn } from "../lib/utils";
-import { type ChatMessage, herzies, useWindowFocused } from "../tauri-bridge";
+import {
+  type AppState,
+  type ChatMessage,
+  herzies,
+  type TowerGuard,
+  useWindowFocused,
+} from "../tauri-bridge";
 import { BackButton } from "./BackButton";
 import { BossFightHelp, BossFightPanel, makeDebugBoss } from "./BossFightPanel";
 import { BulletinPanel } from "./BulletinPanel";
@@ -37,6 +50,7 @@ import { LoadingSplash } from "./LoadingSplash";
 import { MerchantPanel } from "./MerchantPanel";
 import { OrphiezStage } from "./OrphiezStage";
 import { TabButton } from "./TabButton";
+import { TowerGuardPanel } from "./TowerGuardPanel";
 import type { EventCard } from "./TownScene";
 import { TownWorld } from "./TownWorld";
 import { BULLETIN_KEY } from "./town/Boards";
@@ -240,6 +254,9 @@ function EventsViewImpl({
   currency = 0,
   onLog,
   rootKey = 0,
+  openRequest = null,
+  onSelectedChange,
+  panelHost = null,
   playerSeed,
   playerStage,
   playerStatPoints,
@@ -248,7 +265,15 @@ function EventsViewImpl({
   onOpenProfile,
   chatOverlay = false,
   chatMessages,
+  windowOpen = false,
+  expanded = false,
 }: {
+  /** An overlay window is open over the Town (see TownWorld). */
+  windowOpen?: boolean;
+  /** The Town's big window: a visitor opens in a panel top left, over the
+   * world (still on screen and running), rather than in its place, so the
+   * window stays big. */
+  expanded?: boolean;
   /** Music is playing: the player's herzie dances in the Town, standing
    * still. */
   musicPlaying?: boolean;
@@ -270,12 +295,23 @@ function EventsViewImpl({
     level: number;
     progress: number;
     xp?: number;
+    multipliers?: ActiveMultiplier[] | null;
+    classLabel?: string;
+    nowPlaying?: AppState["nowPlaying"];
   };
   /** Tab stays mounted but hidden; only poll while user is on Events. */
   eventsTabVisible: boolean;
   /** Bumped when the Town tab is re-selected while already on it: back to
    * the visitor list. */
   rootKey?: number;
+  /** Open this screen (the bulletin board, a visitor); `n` counts requests,
+   * so asking again opens it again. */
+  openRequest?: { key: string | null; n: number } | null;
+  /** The open screen's key (the bulletin board, a visitor), or null. */
+  onSelectedChange?: (key: string | null) => void;
+  /** Where the visitor panel goes: outside the Town's view, so a visitor
+   * (or the bulletin board) opens over Home as well. */
+  panelHost?: HTMLElement | null;
   /** Debug: render the previous hunt as if it were live, to preview the active-event UI. */
   debugForceActive?: boolean;
   /** Debug: render a fixture boss, so the panel can be reviewed without a live one. */
@@ -287,7 +323,9 @@ function EventsViewImpl({
   /** Which full-screen event view is open, so the app can recolour the
    * window (a live boss or Nandor blacks it out, George turns it gold) or,
    * for the 3D world, let it fill the window. */
-  onScreenChange?: (screen: "boss" | "merchant" | "world" | null) => void;
+  onScreenChange?: (
+    screen: "boss" | "merchant" | "world" | "visitor" | null,
+  ) => void;
   /** Current deck, used to show set progress in the reward preview. */
   equipped?: Equipped | null;
   /** Every owned copy, for George's "N owned" counts. */
@@ -306,7 +344,32 @@ function EventsViewImpl({
     setTowerOpen(Number.isFinite(at) ? { endsAt: at } : null);
   }, [towerEnds]);
   /** Open card (see EventCard.key); null shows the list. */
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelectedRaw] = useState<string | null>(null);
+  /** Where Back goes from the open visitor: the bulletin board, when they
+   * were opened from it. */
+  const [returnTo, setReturnTo] = useState<string | null>(null);
+  /** Open a screen (or none) outright: nothing to go back to. */
+  const setSelected = useCallback((key: string | null) => {
+    setSelectedRaw(key);
+    setReturnTo(null);
+  }, []);
+  /** Open a visitor from the bulletin board: Back comes back to it. */
+  const openFromBoard = useCallback((key: string) => {
+    setSelectedRaw(key);
+    setReturnTo(BULLETIN_KEY);
+  }, []);
+  /** Back (and Esc): to the board if they came from it, else out. */
+  const goBack = () => {
+    if (returnTo && selected !== returnTo) {
+      setSelectedRaw(returnTo);
+      setReturnTo(null);
+    } else setSelected(null);
+  };
+  useEffect(() => {
+    onSelectedChange?.(selected);
+  }, [selected, onSelectedChange]);
+  /** The Town on screen, or a panel open over Home: load and run. */
+  const active = eventsTabVisible || selected !== null;
   const [reloadKey, setReloadKey] = useState(0);
 
   const [previousEvent, setPreviousEvent] = useState<GameEvent | null>(null);
@@ -326,7 +389,12 @@ function EventsViewImpl({
     rootKeyRef.current = rootKey;
     setSelected(null);
     setInspectOverlay(null);
-  }, [rootKey]);
+  }, [rootKey, setSelected]);
+  useEffect(() => {
+    if (!openRequest) return;
+    setSelected(openRequest.key);
+    setInspectOverlay(null);
+  }, [openRequest, setSelected]);
   const [huntTab, setHuntTab] = useState<"clues" | "finders">("clues");
   const focused = useWindowFocused();
 
@@ -349,6 +417,11 @@ function EventsViewImpl({
     ]);
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey || !LEAVE_KEYS.has(e.code)) return;
+      // Escape already closed something on top (lib/escapeStack). Only
+      // Escape: the walking keys come here already handled by the Town's
+      // own input (it stops them scrolling), in the big window where it's
+      // still running.
+      if (e.code === "Escape" && e.defaultPrevented) return;
       const el = e.target as HTMLElement | null;
       if (
         el &&
@@ -362,7 +435,7 @@ function EventsViewImpl({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [leaving]);
+  }, [leaving, setSelected]);
 
   // Optimistic override of playsRemaining, keyed by hint index — updated
   // immediately from a play response so the button reflects the new count
@@ -411,7 +484,7 @@ function EventsViewImpl({
   // reloadKey is a trigger, not a value: George's stall bumps it after a buy.
   // biome-ignore lint/correctness/useExhaustiveDependencies: reloadKey re-runs the fetch
   useEffect(() => {
-    if (!eventsTabVisible) return;
+    if (!active) return;
     let cancelled = false;
 
     const refresh = () =>
@@ -441,7 +514,7 @@ function EventsViewImpl({
       cancelled = true;
       if (interval) clearInterval(interval);
     };
-  }, [focused, eventsTabVisible, reloadKey]);
+  }, [focused, active, reloadKey]);
 
   // /events/previous-hunt returns the last ended hunt *or* boss, whichever is
   // newer. While Orphiez is in town his card is live and never shows the last
@@ -458,7 +531,7 @@ function EventsViewImpl({
   // previousKey is a trigger, not a value.
   // biome-ignore lint/correctness/useExhaustiveDependencies: previousKey re-runs the fetch
   useEffect(() => {
-    if (!eventsTabVisible || !activeLoaded) return;
+    if (!active || !activeLoaded) return;
     if (!previousNeeded) {
       setPreviousLoaded(true);
       return;
@@ -478,47 +551,48 @@ function EventsViewImpl({
     return () => {
       cancelled = true;
     };
-  }, [eventsTabVisible, activeLoaded, previousNeeded, previousKey]);
+  }, [active, activeLoaded, previousNeeded, previousKey]);
 
-  // Tell the app which full-screen view is open (see onScreenChange). Up here,
-  // above the early returns, so the hook order never changes.
+  // The Tower Guard: who's climbing, and whether he owes you (his "!").
+  // Fetched with the Town and again whenever his panel opens.
+  const [towerGuard, setTowerGuard] = useState<TowerGuard | null>(null);
+  const [guardKey, setGuardKey] = useState(0);
+  const guardOpen = selected === TOWER_GUARD_KEY;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: guardKey and guardOpen re-run the fetch
   useEffect(() => {
-    if (!onScreenChange) return;
-    const open =
-      selected === "debug-boss-fight" && debugForceBoss
-        ? "boss_fight"
-        : selected === DEBUG_MERCHANT.id && debugForceMerchant
-          ? "merchant"
-          : selected === DEBUG_TREAT_TRADER.id && debugForceTreatTrader
-            ? "treat_trader"
-            : // The previous event too: an ended boss's results stay blacked out.
-              (
-                events.find((e) => e.id === selected) ??
-                (previousEvent?.id === selected ? previousEvent : undefined)
-              )?.type;
-    // Nandor shares the boss's blackout: a vampire keeps the lights off.
-    onScreenChange(
-      selected === null
-        ? "world"
-        : open === "boss_fight" || open === "treat_trader"
-          ? "boss"
-          : open === "merchant"
-            ? "merchant"
-            : null,
-    );
-  }, [
-    selected,
-    events,
-    previousEvent,
-    debugForceBoss,
-    debugForceMerchant,
-    debugForceTreatTrader,
-    onScreenChange,
-  ]);
+    if (!active) return;
+    let cancelled = false;
+    herzies
+      .fetchTowerGuard()
+      .then((g) => {
+        if (!cancelled) setTowerGuard(g);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [active, guardKey, guardOpen]);
+
+  /** A visitor open in the big window's panel, the world still showing. */
+  const inPanel = expanded && selected !== null;
+  /** A visitor opened from the board: Back (not the panel's x) takes you
+   * back to it, in the big window's panel too. */
+  const returning = returnTo !== null && selected !== returnTo;
+  const screenInPanel = inPanel && !returning;
+
+  // Tell the app what's on screen (see onScreenChange). Up here, above the
+  // early returns, so the hook order never changes. A visitor always opens on
+  // a panel over the world: in the big window the world is still what's
+  // played in ("world": the window stays big, the chat beside it); in the
+  // small one the panel fills the window ("visitor": the chat steps aside,
+  // the world keeps its size behind the glass).
+  useEffect(() => {
+    onScreenChange?.(selected === null || inPanel ? "world" : "visitor");
+  }, [selected, inPanel, onScreenChange]);
 
   const loading = !activeLoaded || !previousLoaded;
 
-  const back = <BackButton colour="cyan" onClick={() => setSelected(null)} />;
+  const back = <BackButton colour="cyan" onClick={goBack} />;
 
   const previousHunt =
     previousEvent?.type === "song_hunt" ? previousEvent : null;
@@ -671,6 +745,17 @@ function EventsViewImpl({
       openKey: MEDEA_KEY,
       detail: "Sweets and potions",
     });
+    // And the Tower Guard, wherever a map gives him a spot.
+    cards.push({
+      type: TOWER_GUARD_KEY,
+      title: TOWER_GUARD_NAME,
+      description: null,
+      status: "live",
+      at: null,
+      openKey: TOWER_GUARD_KEY,
+      detail: "Doubts you",
+      notice: !!towerGuard?.reward.eligible,
+    });
     // Nearest in time first: what's on now, then what starts soonest, then
     // types with nothing on the calendar.
     const when = (c: EventCard) =>
@@ -692,7 +777,13 @@ function EventsViewImpl({
         chatOverlay={chatOverlay}
         cards={cards}
         musicPlaying={musicPlaying}
-        paused={selected !== null || !eventsTabVisible || !focused}
+        paused={
+          (selected !== null && !inPanel) || !eventsTabVisible || !focused
+        }
+        backdrop={selected !== null && !inPanel && eventsTabVisible}
+        // Losing focus freezes the world but leaves the HUD up.
+        hudHidden={(selected !== null && !inPanel) || !eventsTabVisible}
+        windowOpen={windowOpen || inPanel}
         onOpen={setSelected}
         onOpenProfile={onOpenProfile}
         player={{
@@ -716,9 +807,29 @@ function EventsViewImpl({
 
   const screen = (() => {
     if (selected === null) return null;
+    // The board only needs the week: no waiting on the previous hunt.
+    if (selected === BULLETIN_KEY && activeLoaded) {
+      return (
+        <ScreenView
+          inPanel={screenInPanel}
+          title="Bulletin board"
+          colour="cyan"
+          childrenClassName="flex min-h-0 flex-col"
+        >
+          <BulletinPanel week={week} onOpen={openFromBoard} />
+        </ScreenView>
+      );
+    }
     // The Town draws its own splash while it loads (the world and the events
-    // together, so there's one splash rather than one per stage).
-    if (loading) return <LoadingSplash overlay label="loading town" />;
+    // together, so there's one splash rather than one per stage). Over Home
+    // there's no Town to load, only the events.
+    if (loading)
+      return (
+        <LoadingSplash
+          overlay
+          label={eventsTabVisible ? "loading town" : "loading events"}
+        />
+      );
 
     const selectedEvent =
       liveEvents.find((e) => e.id === selected) ??
@@ -726,7 +837,8 @@ function EventsViewImpl({
 
     if (selectedEvent?.type === "boss_fight") {
       return (
-        <View
+        <ScreenView
+          inPanel={screenInPanel}
           title="Boss Fight"
           colour="cyan"
           childrenClassName="flex min-h-0 flex-col"
@@ -735,10 +847,10 @@ function EventsViewImpl({
         >
           <BossFightPanel
             event={selectedEvent}
-            paused={!eventsTabVisible || !focused}
+            paused={!active || !focused}
             equipped={equipped}
           />
-        </View>
+        </ScreenView>
       );
     }
 
@@ -749,13 +861,13 @@ function EventsViewImpl({
       const nandor = selectedEvent.type === "treat_trader";
       const colour = nandor ? "red" : "yellow";
       return (
-        <View
+        <ScreenView
+          inPanel={screenInPanel}
+          ownName
           title={nandor ? TREAT_TRADER_NAME : MERCHANT_NAME}
           colour={colour}
           childrenClassName="flex min-h-0 flex-col"
-          backButton={
-            <BackButton colour={colour} onClick={() => setSelected(null)} />
-          }
+          backButton={<BackButton colour={colour} onClick={goBack} />}
           action={
             nandor ? (
               <span className="flex items-center gap-2">
@@ -778,28 +890,38 @@ function EventsViewImpl({
             units={units}
             onBought={() => setReloadKey((k) => k + 1)}
             onLog={onLog}
-            paused={!eventsTabVisible || !focused}
+            paused={!active || !focused}
           />
-        </View>
+        </ScreenView>
       );
     }
 
-    if (selected === BULLETIN_KEY) {
+    if (selected === TOWER_GUARD_KEY) {
       return (
-        <View
-          title="Bulletin board"
+        <ScreenView
+          inPanel={screenInPanel}
+          ownName
+          title={TOWER_GUARD_NAME}
           colour="cyan"
           childrenClassName="flex min-h-0 flex-col"
           backButton={back}
         >
-          <BulletinPanel week={week} />
-        </View>
+          <TowerGuardPanel
+            guard={towerGuard}
+            equipped={equipped}
+            onClaimed={() => setGuardKey((k) => k + 1)}
+            onLog={onLog}
+            paused={!active || !focused}
+          />
+        </ScreenView>
       );
     }
 
     if (selected === BOBOKU_KEY || selected === MEDEA_KEY) {
       return (
-        <View
+        <ScreenView
+          inPanel={screenInPanel}
+          ownName
           title={selected === MEDEA_KEY ? MEDEA_NAME : BOBOKU_NAME}
           colour="cyan"
           childrenClassName="flex min-h-0 flex-col"
@@ -812,20 +934,25 @@ function EventsViewImpl({
             units={units}
             onBought={() => {}}
             onLog={onLog}
-            paused={!eventsTabVisible || !focused}
+            paused={!active || !focused}
           />
-        </View>
+        </ScreenView>
       );
     }
 
     if (selected !== "song_hunt") {
       // The opened event ended between polls.
       return (
-        <View title="Town" colour="cyan" backButton={back}>
+        <ScreenView
+          inPanel={screenInPanel}
+          title="Town"
+          colour="cyan"
+          backButton={back}
+        >
           <div className="flex h-full items-center justify-center text-center text-xs text-text-dim">
             They've left town.
           </div>
-        </View>
+        </ScreenView>
       );
     }
 
@@ -847,7 +974,8 @@ function EventsViewImpl({
     if (!hunt && (previousHunt || nextHunt)) {
       const nextStartsAt = nextHunt ? new Date(nextHunt.startsAt) : null;
       return (
-        <View
+        <ScreenView
+          inPanel={screenInPanel}
           title="Song Hunt"
           colour="cyan"
           childrenClassName="flex min-h-0 flex-col"
@@ -877,7 +1005,7 @@ function EventsViewImpl({
             </div>
 
             {previousHunt ? (
-              <div className="mt-4 flex min-h-0 flex-1 flex-col border-t border-border pt-4">
+              <div className="mt-4 flex min-h-0 flex-1 flex-col border-t border-white/15 pt-4">
                 <h2 className="text-ui-lg mb-3 font-bold">
                   Last visit{" "}
                   <span className="text-ui text-text-dim">
@@ -946,7 +1074,7 @@ function EventsViewImpl({
                             return (
                               <div
                                 key={`${finder.name}-${finder.claimedAt}`}
-                                className="flex justify-between border-b border-border py-0.5 text-ui last:border-b-0"
+                                className="flex justify-between border-b border-white/15 py-0.5 text-ui last:border-b-0"
                               >
                                 <span className="text-yellow">
                                   {i + 1}. {finder.name}
@@ -976,17 +1104,22 @@ function EventsViewImpl({
               equipped={equipped}
             />
           )}
-        </View>
+        </ScreenView>
       );
     }
 
     if (!hunt) {
       return (
-        <View title="Song Hunt" colour="cyan" backButton={back}>
+        <ScreenView
+          inPanel={screenInPanel}
+          title="Song Hunt"
+          colour="cyan"
+          backButton={back}
+        >
           <div className="flex h-full items-center justify-center text-center text-xs text-text-dim">
             {VISITORS.song_hunt.name} isn't in town. Check back later!
           </div>
-        </View>
+        </ScreenView>
       );
     }
 
@@ -1007,7 +1140,9 @@ function EventsViewImpl({
     };
 
     return (
-      <View
+      <ScreenView
+        inPanel={screenInPanel}
+        ownName
         title="Song Hunt"
         colour="cyan"
         childrenClassName="flex flex-col h-full"
@@ -1027,7 +1162,7 @@ function EventsViewImpl({
           />
         }
       >
-        <OrphiezStage paused={!eventsTabVisible || !focused} />
+        <OrphiezStage paused={!active || !focused} />
         {hunt.description ? (
           <div className="mt-1 shrink-0 text-center text-ui text-text-dim">
             {hunt.description}
@@ -1036,7 +1171,7 @@ function EventsViewImpl({
 
         {/* mt-auto sinks the tabs and their list to the bottom, so a short
           list leaves its slack above the tabs instead of under the list. */}
-        <div className="mt-auto flex shrink-0 gap-1 border-b border-border pt-2 text-ui">
+        <div className="mt-auto flex shrink-0 gap-1 border-b border-white/15 pt-2 text-ui">
           <TabButton
             active={huntTab === "clues"}
             onClick={() => setHuntTab("clues")}
@@ -1065,7 +1200,7 @@ function EventsViewImpl({
                   className={cn(
                     "py-1",
                     i < config.hints.length - 1 &&
-                      "mb-1 border-b border-border",
+                      "mb-1 border-b border-white/15",
                   )}
                 >
                   {hint.unlocked ? (
@@ -1110,7 +1245,7 @@ function EventsViewImpl({
                           {hint.text}
                         </span>
                       </div>
-                      <div className="text-ui-sm text-[#444]">
+                      <div className="text-ui-sm text-text-dim">
                         unlocks{" "}
                         {formatCountdown(hint.unlocksAt).replace(" left", "")}
                       </div>
@@ -1129,7 +1264,7 @@ function EventsViewImpl({
                     {config.firstFinders.map((finder, i) => (
                       <div
                         key={`${finder.name}-${finder.claimedAt}`}
-                        className="mb-1 flex justify-between border-b border-border py-1 text-ui last:mb-0 last:border-b-0"
+                        className="mb-1 flex justify-between border-b border-white/15 py-1 text-ui last:mb-0 last:border-b-0"
                       >
                         <span className={i === 0 ? "text-yellow" : "text-text"}>
                           {i + 1}. {finder.name}
@@ -1158,22 +1293,175 @@ function EventsViewImpl({
           onPause={() => setActiveAudioHint(null)}
           onError={() => setActiveAudioHint(null)}
         />
-      </View>
+      </ScreenView>
     );
   })();
 
   return (
     <>
+      {/* The world stays on screen under a visitor, blurred behind the
+          panel's glass (paused, its HUD hidden, in the small window). */}
+      <div className="flex min-h-0 flex-1 flex-col">{world}</div>
+      {screen !== null &&
+        createPortal(
+          <VisitorPanel
+            full={!inPanel}
+            // The board closes with an x (no Back) in the small window too;
+            // a visitor opened from it has Back instead.
+            closeButton={screenInPanel || selected === BULLETIN_KEY}
+            onClose={goBack}
+          >
+            {screen}
+          </VisitorPanel>,
+          panelHost ?? document.body,
+        )}
+    </>
+  );
+}
+
+/**
+ * A visitor's screen. In the big window's panel it has no Back (the panel's
+ * x closes it), and no title where the visitor shows their own name; its
+ * action keeps clear of the x.
+ */
+function ScreenView({
+  inPanel,
+  ownName = false,
+  title,
+  backButton,
+  action,
+  ...props
+}: React.ComponentProps<typeof View> & {
+  inPanel: boolean;
+  /** The screen names the visitor itself (George, Boboku, Orphiez). */
+  ownName?: boolean;
+}) {
+  if (!inPanel)
+    return (
+      <View {...props} title={title} backButton={backButton} action={action} />
+    );
+  return (
+    <View
+      {...props}
+      title={ownName ? undefined : title}
+      action={action ? <div className="mr-6">{action}</div> : undefined}
+    />
+  );
+}
+
+/** The visitor panel's own herzie canvas. The page's canvas sits under the
+ * panel's glass, and the overlay windows' one follows whichever window is
+ * open, which can be one opened over this panel. */
+const visitorHerzieStage = new HerzieStage();
+
+/**
+ * A visitor, on a frosted panel over the world. In the big window it's in
+ * the middle, the world beside it still played in; its x, Esc or walking
+ * (see `leaving` above) leaves the visitor. In the small window (`full`) it
+ * fills the window down to the nav's row, the paused world blurred behind,
+ * and the screen's own Back leaves (no x).
+ *
+ * Built like OverlayWindow: the blur is a sibling layer, not a wrapper, so
+ * the screen's own `position: fixed` popups aren't trapped in it; the
+ * visitor's herzie draws on a canvas hosted inside the panel, its sky in
+ * the panel's sky slot.
+ */
+function VisitorPanel({
+  full = false,
+  closeButton = !full,
+  onClose,
+  children,
+}: {
+  full?: boolean;
+  /** Its x, top right. Off by default when full: the screen has Back. */
+  closeButton?: boolean;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  // Esc closes it. A click outside doesn't: in the big window the world
+  // beside it is played in (as with the windows there).
+  useEscape(onClose);
+
+  const host = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    visitorHerzieStage.setHost(host.current);
+  }, []);
+  const [skySlot, setSkySlot] = useState<HTMLDivElement | null>(null);
+  const stageContext = useMemo(
+    () => ({ stage: visitorHerzieStage, inOverlay: true, skySlot }),
+    [skySlot],
+  );
+
+  return (
+    // Centred in the window; around the panel, the world takes its own
+    // clicks.
+    <div
+      className={cn(
+        "pointer-events-none fixed z-55 flex items-center justify-center",
+        // Full: 12px in at the top and sides, as the windows are, down to
+        // just over the nav's row (main.tsx).
+        // 2px bigger than the app's content all round, so its edges don't
+        // line up with the cards under the glass (see OverlayWindow).
+        full ? "inset-x-2.5 top-2.5 bottom-[36px]" : "inset-0 px-3 py-3",
+      )}
+    >
       <div
+        data-tauri-drag-region="false"
         className={cn(
-          "min-h-0 flex-1 flex-col",
-          selected === null ? "flex" : "hidden",
+          "overlay-in pointer-events-auto relative flex flex-col overflow-hidden rounded-2xl border border-white/12 shadow-[0_18px_50px_-12px_rgba(0,0,0,0.7)]",
+          full ? "size-full" : "h-[min(480px,100%)] w-[356px]",
         )}
       >
-        {world}
+        {/* The blur reaches past the panel, which clips it (see
+            OverlayWindow): no smeared edges. */}
+        <div
+          aria-hidden="true"
+          className="overlay-fade-in pointer-events-none absolute -inset-6 backdrop-blur-xl backdrop-saturate-150"
+        />
+        <div
+          aria-hidden="true"
+          className="overlay-fade-in pointer-events-none absolute inset-0 rounded-2xl bg-bg-panel/70 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
+        />
+        {/* A herzie's sky (HerzieWithSky), over the glass, under the herzie. */}
+        <div
+          ref={setSkySlot}
+          aria-hidden="true"
+          className="overlay-fade-in pointer-events-none absolute inset-0"
+        />
+        <HerzieStageContext.Provider value={stageContext}>
+          <div ref={host} className="pointer-events-none absolute inset-0" />
+          {/* z-[2]: its own layer over the herzie canvas (z-index 1) at all
+              times. The fade makes it one anyway while it plays, and without
+              this the canvas would cover the speech bubble until it ends. */}
+          <div className="overlay-fade-in relative z-[2] flex min-h-0 flex-1 flex-col px-2.5 pt-2 pb-2">
+            {children}
+          </div>
+          {/* Close, top right: 6px from the top and the right edge, as on
+              the windows (OverlayWindow). Over the screen (z-50, as its
+              header). */}
+          {closeButton && (
+            <button
+              type="button"
+              aria-label="Close"
+              onClick={onClose}
+              className="overlay-fade-in absolute top-1.5 right-1.5 z-50 flex size-5 cursor-pointer items-center justify-center rounded-full border-none bg-transparent p-0 text-text-dim hover:bg-white/10 hover:text-text"
+            >
+              <svg
+                viewBox="0 0 10 10"
+                className="size-2.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                aria-hidden="true"
+              >
+                <path d="M2 2l6 6M8 2l-6 6" />
+              </svg>
+            </button>
+          )}
+        </HerzieStageContext.Provider>
       </div>
-      {screen}
-    </>
+    </div>
   );
 }
 

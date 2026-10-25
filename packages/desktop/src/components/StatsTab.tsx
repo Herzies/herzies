@@ -111,7 +111,7 @@ function LineRow({ line }: { line: Line }) {
 }
 
 /**
- * The Herzie view's Stats tab: where stat points are spent. The stats they
+ * The Stats window: where stat points are spent. The stats they
  * go into on the left, `+`/`−` on each, and what follows from them on the
  * right, showing what Save would make of them. Reset refunds every point
  * (Save still makes it so; Cancel takes it back).
@@ -218,7 +218,7 @@ export function StatsTab({
             </div>
           ))}
         </div>
-        <div className="flex flex-col gap-1 border-l border-border pl-3">
+        <div className="flex flex-col gap-1 border-l border-white/15 pl-3">
           {secondaryLines(
             level,
             now,
@@ -248,7 +248,7 @@ function StepButton({
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className="cursor-pointer border border-border bg-transparent px-1 leading-none text-text-dim hover:text-cyan disabled:cursor-default disabled:opacity-30 disabled:hover:text-text-dim"
+      className="cursor-pointer border border-white/15 bg-transparent px-1 leading-none text-text-dim hover:text-cyan disabled:cursor-default disabled:opacity-30 disabled:hover:text-text-dim"
     >
       {children}
     </button>

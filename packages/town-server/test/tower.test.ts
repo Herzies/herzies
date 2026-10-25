@@ -1,6 +1,7 @@
 import {
   FLOOR_OPENING_MS,
   levelGapMods,
+  MOB_KINDS,
   MOB_SWING,
   mobsOnFloor,
   towerMob,
@@ -56,7 +57,9 @@ describe("TowerEngine", () => {
     const mobs = e.wireMobs();
     expect(mobs).toHaveLength(mobsOnFloor(4));
     for (const m of mobs) {
-      expect(m.hp).toBe(towerMob(4).hp);
+      expect(m.hp).toBe(
+        Math.round(towerMob(4).hp * MOB_KINDS[m.k ?? "brute"].hp),
+      );
       const fromEntry = Math.hypot(m.x - ARENA.entry.x, m.z - ARENA.entry.z);
       expect(fromEntry).toBeGreaterThan(8);
       expect(Math.hypot(m.x, m.z)).toBeLessThan(ARENA.radius);
@@ -120,17 +123,24 @@ describe("TowerEngine", () => {
 
   it("hits harder on higher floors, and harder still above your level", () => {
     const low = towerMob(1).damage;
-    const high = towerMob(20).damage;
-    expect(high).toBeGreaterThan(low);
+    expect(towerMob(20).damage).toBeGreaterThan(low);
+    // Floor 21: no elite, no Warden. A brute's swing, which is the floor's
+    // plain damage.
+    const high = towerMob(21).damage;
     const take = (level: number) => {
-      const e = engine(20, level);
+      const e = engine(21, level);
+      const brutes = new Set(
+        e.wireMobs().filter((m) => !m.k && !m.e).map((m) => m.id),
+      );
       const ev = run(e, T0, T0 + 20_000, [player(() => ARENA.entry, 10_000)]);
-      const tg = ev.find((x) => x.t === "telegraph");
+      const tg = ev.find(
+        (x) => x.t === "telegraph" && brutes.has(x.telegraph.mob ?? -1),
+      );
       if (tg?.t !== "telegraph") throw new Error("no swing");
       return tg.telegraph.damage;
     };
     expect(take(1)).toBeGreaterThan(take(40));
-    expect(take(1)).toBe(Math.round(high * levelGapMods(19).taken));
+    expect(take(1)).toBe(Math.round(high * levelGapMods(20).taken));
   });
 
   it("takes less from you the higher it is above you", () => {

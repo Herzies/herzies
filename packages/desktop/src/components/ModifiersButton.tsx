@@ -25,7 +25,7 @@ export function ModifiersButton({
 
   const card = (
     <div className="text-[10px]" style={{ minWidth: CARD_WIDTH }}>
-      <div className="mb-0.5 text-ui-sm font-bold text-text">Modifiers</div>
+      <div className="mb-0.5 text-ui-sm font-bold text-text">Exp boosts</div>
       {!multipliers ? (
         <div className="text-text-dim">Log in to get bonuses</div>
       ) : multipliers.length === 0 ? (
@@ -47,7 +47,9 @@ export function ModifiersButton({
         type="button"
         className={cn(
           HEADER_ICON_HIT,
-          "flex h-5 w-5 cursor-default items-center justify-center rounded-lg border-none bg-transparent p-0",
+          // An invisible 17px circle, as the chat's send button is, so the
+          // star can stand exactly where its arrow does (NowPlayingBox).
+          "flex h-[17px] w-[17px] cursor-default items-center justify-center rounded-full border-none bg-transparent p-0",
           hasActive ? "text-yellow" : "text-text-dim hover:text-text",
         )}
       >
@@ -60,7 +62,7 @@ export function ModifiersButton({
           strokeWidth="2"
           strokeLinecap="round"
           strokeLinejoin="round"
-          aria-label="Modifiers"
+          aria-label="Exp boosts"
           role="img"
         >
           <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />

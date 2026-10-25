@@ -20,9 +20,9 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { useRapier } from "@react-three/rapier";
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
-import type { TownMap } from "../map";
+import { groundY, type TownMap } from "../map";
 import { townNet } from "../net/townNet";
-import { useTownRuntime } from "../runtime";
+import { townSave, useTownRuntime } from "../runtime";
 import {
   sfxCast,
   sfxCharge,
@@ -34,6 +34,7 @@ import {
   sfxMeleeHit,
   sfxSwing,
 } from "../sfx";
+import { getVitals, useVitals } from "../vitals";
 import { pushDamageNumber } from "./DamageNumbers";
 import { liveDummies } from "./Dummies";
 import {
@@ -50,6 +51,7 @@ import {
   entityAt,
   mySkillReady,
   noteSkillCast,
+  queueMySkill,
   setBuff,
   skills,
   startMyCooldown,
@@ -112,7 +114,15 @@ export function Combat({
   const surface = useThree((s) => s.gl.domElement);
   const statsRef = useRef(stats);
   statsRef.current = stats;
-  const canFight = !!map.combat && active;
+  // Aim mode works anywhere in the Town, not just where there's something
+  // to fight (map.combat).
+  const canFight = active;
+
+  // Knocked out: back to roaming, the mouse let go.
+  const down = !!useVitals()?.down;
+  useEffect(() => {
+    if (down) leave();
+  }, [down]);
 
   // Combat mode's keys and buttons.
   useEffect(() => {
@@ -141,20 +151,19 @@ export function Combat({
         e.preventDefault();
         if (e.repeat) return;
         if (combat.on) leave();
-        else void enter();
+        // Knocked out: nothing to aim with until you're back up.
+        else if (!getVitals()?.down) void enter();
       } else if (e.code === "Escape" && combat.on) {
         leave();
       } else if (e.code === "KeyF" && combat.on) {
         e.preventDefault();
         if (!e.repeat) combat.queuedAt = performance.now();
         combat.fireHeld = true;
-      } else if (
-        (e.code === "KeyQ" || e.code === "Digit1") &&
-        !e.repeat &&
-        skills.mine
-      ) {
+      } else if (e.code === "KeyQ" && !e.repeat && skills.mine) {
+        // Q stays a shortcut for your class skill, wherever it sits on the
+        // hotbar (its number key is the hotbar's: town/input.ts).
         e.preventDefault();
-        skillQueuedAt = performance.now();
+        queueMySkill();
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {
@@ -334,9 +343,11 @@ export function Combat({
         reach = hit.timeOfImpact;
         blocked = true;
       }
-      // The ground has no collider: meet it as a plane.
+      // The ground has no collider: meet it as a plane, level with where
+      // you stand.
       if (dir.y < -1e-4) {
-        const ground = -origin.y / dir.y;
+        const floor = groundY(map, townSave.x, townSave.z);
+        const ground = (floor - origin.y) / dir.y;
         if (ground < reach) {
           reach = ground;
           blocked = true;
@@ -347,7 +358,10 @@ export function Combat({
       let onDummy: DummyState | null = null;
       for (const d of liveDummies) {
         const near = Math.hypot(a.point.x - d.x, a.point.z - d.z);
-        if (near < DUMMY.radius + 0.3 && a.point.y < DUMMY.top + 0.6) {
+        if (
+          near < DUMMY.radius + 0.3 &&
+          a.point.y < (d.y ?? 0) + DUMMY.top + 0.6
+        ) {
           onDummy = d;
           break;
         }
@@ -372,7 +386,10 @@ export function Combat({
       const from = { x: chest.x, z: chest.z };
       combat.inReach =
         liveDummies.some((d) =>
-          meleeReaches(from, yaw, { ...d, radius: DUMMY.radius }),
+          meleeReaches(from, yaw, {
+            ...d,
+            radius: DUMMY.radius * (d.size ?? 1),
+          }),
         ) ||
         (inBossRoom() && meleeReaches(from, yaw, BOSS_STAND));
     }
@@ -392,10 +409,10 @@ export function Combat({
     if (
       herzie &&
       mine &&
-      now - skillQueuedAt < CAST_BUFFER_MS &&
+      now - skills.queuedAt < CAST_BUFFER_MS &&
       mySkillReady(now)
     ) {
-      skillQueuedAt = Number.NEGATIVE_INFINITY;
+      skills.queuedAt = Number.NEGATIVE_INFINITY;
       const seq = startMyCooldown(now);
       herzie.root.getWorldPosition(chest);
       chest.y += herzie.height * 0.55;
@@ -511,7 +528,12 @@ export function Combat({
         const height = herzie.height * (blow === "strike" ? 0.6 : 0.4);
         let landed = false;
         for (const d of liveDummies) {
-          if (!meleeReaches(from, yaw, { ...d, radius: DUMMY.radius }))
+          if (
+            !meleeReaches(from, yaw, {
+              ...d,
+              radius: DUMMY.radius * (d.size ?? 1),
+            })
+          )
             continue;
           const toward = flatToward(from, d);
           const point: Vec3 = [
@@ -684,10 +706,6 @@ function flatToward(
   const n = Math.hypot(dx, dz) || 1;
   return [dx / n, 0, dz / n];
 }
-
-/** When the skill key was last pressed (performance.now() ms): kept for
- * CAST_BUFFER_MS, so a press just before it's ready still goes off. */
-let skillQueuedAt = Number.NEGATIVE_INFINITY;
 
 /** Out of combat mode, letting the mouse go. */
 function leave() {

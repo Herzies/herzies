@@ -60,12 +60,22 @@ export interface OngoingTrade {
   expiresAt: string;
 }
 
+/** xp: all-time; xp_month: EXP gained this calendar month (UTC); tower:
+ * highest floor ever cleared; tower_month: highest floor in this month's
+ * Tower. Each "_friends" variant ranks just the player and their friends. */
+type GlobalBoard = "xp" | "xp_month" | "song_hunt" | "tower" | "tower_month";
+export type LeaderboardBoard = GlobalBoard | `${GlobalBoard}_friends`;
+
 export interface LeaderboardEntry {
   rank: number;
   name: string;
   level: number;
   stage: number;
   totalMinutes: number;
+  /** EXP (all-time, or this month's on xp_month). Absent on song_hunt. */
+  xp?: number;
+  /** Present only on the Tower leaderboard. */
+  towerFloor?: number;
   /** Present only on the song-hunt leaderboard (fetchLeaderboard("song_hunt")). */
   songHuntWins?: number;
 }
@@ -115,6 +125,29 @@ export interface AppState {
   /** A login was accepted and its herzie and items are still loading. */
   loggingIn: boolean;
 }
+
+/** A climber on the Tower Guard's list. */
+export type TowerGuardPlace = {
+  rank: number;
+  name: string;
+  level: number;
+  stage: number;
+  floor: number;
+};
+
+/** What the Tower Guard shows (tower_guard_json, 00121). */
+export type TowerGuard = {
+  current: {
+    event: string;
+    endsAt: number;
+    top: TowerGuardPlace[];
+    you: { rank: number; floor: number } | null;
+    /** What this month's top climber gets (null: nothing set). */
+    rewardItemId?: string | null;
+  } | null;
+  last: { event: string; name: string; floor: number } | null;
+  reward: { eligible: boolean; itemId: string | null; event: string | null };
+};
 
 export const herzies = {
   getState: () => invoke<AppState>("get_state"),
@@ -248,6 +281,12 @@ export const herzies = {
       newCurrency: number;
       inventory: Inventory;
     }>("buy_from_boboku", { itemId, quantity }),
+  /** The Tower Guard: this month's top climbers, your place, last month's
+   * winner and whether he owes you a reward. */
+  fetchTowerGuard: () => invoke<TowerGuard>("fetch_tower_guard"),
+  /** Takes the month's best climber's reward from the Tower Guard. */
+  claimTowerReward: () =>
+    invoke<{ itemId: string; inventory: Inventory }>("claim_tower_reward"),
   /** Buys from Medea, who's always in Town: sweets and potions. */
   buyFromMedea: (itemId: string, quantity: number) =>
     invoke<{
@@ -301,6 +340,13 @@ export const herzies = {
     invoke<Trade | null>("trade_poll", { tradeId }),
   fetchOngoingTrades: () =>
     invoke<{ trades: OngoingTrade[] }>("fetch_ongoing_trades"),
+
+  /** The Town's bigger window, on or off. Nothing outside the app (the
+   * sandboxes run in a plain browser). */
+  setTownExpanded: (expanded: boolean) =>
+    isTauri()
+      ? invoke<void>("set_town_expanded", { expanded })
+      : Promise.resolve(),
 
   /** Keep the window open when it loses focus (not always-on-top). */
   setWindowPinned: (pinned: boolean) => {
@@ -364,7 +410,7 @@ export const herzies = {
       hintIndex,
     }),
 
-  fetchLeaderboard: (board?: "xp" | "song_hunt") =>
+  fetchLeaderboard: (board?: LeaderboardBoard) =>
     invoke<{ entries: LeaderboardEntry[] }>("fetch_leaderboard", { board }),
 
   getAuthConfig: () =>

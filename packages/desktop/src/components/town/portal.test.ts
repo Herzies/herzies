@@ -10,14 +10,25 @@ import {
   walkedThrough,
 } from "./portal";
 
-const facingSouth: Portal = { key: "0,0", x: 0, z: 0, yaw: 0, to: "home" };
+const facingSouth: Portal = {
+  key: "0,0",
+  x: 0,
+  y: 0,
+  z: 0,
+  yaw: 0,
+  to: "home",
+};
 
 describe("portals", () => {
-  it("link home and the training grounds both ways", () => {
+  it("lead from home to islands that lead back home", () => {
+    // Which islands home opens onto is the map's call (the Training
+    // Grounds and the Wilds come and go); every one must have a way back.
     const home = portalsOf(mapById("home"));
-    const arena = portalsOf(mapById("arena"));
-    expect(home.map((p) => p.to)).toContain("arena");
-    expect(arena.map((p) => p.to)).toContain("home");
+    expect(home.length).toBeGreaterThan(0);
+    for (const p of home) {
+      const back = portalsOf(mapById(p.to)).map((q) => q.to);
+      expect(back, p.to).toContain("home");
+    }
   });
 
   it("know which side of the disc you're on", () => {

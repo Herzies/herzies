@@ -6,6 +6,7 @@ import {
   VISITORS,
 } from "@herzies/shared";
 import { HerzieView } from "@herzies/shared/gl";
+import { useHerzieStage } from "../lib/overlayStage";
 
 /** What Orphiez mutters while players hunt. Flavour only — never a clue:
  * the clues are the hunt's own, and deliberately hard. */
@@ -29,6 +30,8 @@ export const ORPHIEZ_LINES = [
  */
 export function OrphiezStage({ paused }: { paused: boolean }) {
   const { line, typed, advance } = useChatter(ORPHIEZ_LINES, !paused);
+  // Inside a window or the visitor panel, drawn on its canvas.
+  const { stage: onStage } = useHerzieStage();
   const orphiez = VISITORS.song_hunt;
   return (
     <div className="flex shrink-0 flex-col gap-1">
@@ -38,6 +41,7 @@ export function OrphiezStage({ paused }: { paused: boolean }) {
       <div className="relative flex h-[150px] shrink-0 flex-col">
         <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden">
           <HerzieView
+            onStage={onStage}
             userId={orphiez.seed ?? "npc:orphiez"}
             stage={2}
             size={5}

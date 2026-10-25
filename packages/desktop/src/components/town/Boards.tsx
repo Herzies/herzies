@@ -2,7 +2,14 @@ import { CuboidCollider } from "@react-three/rapier";
 import { useLayoutEffect, useMemo } from "react";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import { cellCenter, EIGHTH, facingAt, objectAt, type TownMap } from "./map";
+import {
+  cellCenter,
+  EIGHTH,
+  facingAt,
+  groundY,
+  objectAt,
+  type TownMap,
+} from "./map";
 
 // Bulletin boards: a plank board on two posts under a little roof, papers
 // pinned all over it. Walk up and press E to read what's on this week.
@@ -20,7 +27,13 @@ const BOARD_BOTTOM = 0.85;
 const BOARD_TOP = 2.0;
 
 /** A board: where it stands and which way its face looks. */
-export type Board = { x: number; z: number; yaw: number };
+export type Board = {
+  x: number;
+  /** The ground it stands on. */
+  y: number;
+  z: number;
+  yaw: number;
+};
 
 /** Which way a board faces: as turned in the editor, else toward the middle
  * of the island, squared to the eight compass points. */
@@ -38,7 +51,12 @@ export function boardsOf(map: TownMap): Board[] {
     for (let col = 0; col < map.size; col++) {
       if (objectAt(map, col, row) !== BOARD) continue;
       const [x, z] = cellCenter(map, col, row);
-      out.push({ x, z, yaw: boardFacing(map, col, row) });
+      out.push({
+        x,
+        y: groundY(map, x, z),
+        z,
+        yaw: boardFacing(map, col, row),
+      });
     }
   return out;
 }
@@ -194,7 +212,7 @@ export function Boards({ map }: { map: TownMap }) {
     if (boards.length === 0) return null;
     return mergeGeometries(
       boards.map((b) =>
-        BOARD_GEOMETRY.clone().rotateY(b.yaw).translate(b.x, 0, b.z),
+        BOARD_GEOMETRY.clone().rotateY(b.yaw).translate(b.x, b.y, b.z),
       ),
     ) as THREE.BufferGeometry;
   }, [map]);
@@ -219,7 +237,7 @@ export function BoardColliders({ map }: { map: TownMap }) {
         <CuboidCollider
           key={`board${b.x},${b.z}`}
           args={[WIDTH / 2 + 0.08, 1, 0.15]}
-          position={[b.x, 1, b.z]}
+          position={[b.x, b.y + 1, b.z]}
           rotation={[0, b.yaw, 0]}
         />
       ))}

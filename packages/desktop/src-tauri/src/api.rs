@@ -897,6 +897,28 @@ pub async fn api_buy_from_boboku(
     api_buy(client, "/npc/boboku/buy", body).await
 }
 
+/// What the Tower Guard shows: this month's top climbers and your place,
+/// last month's winner, and whether he owes you a reward.
+pub async fn api_fetch_tower_guard(client: &Client) -> Result<serde_json::Value, String> {
+    let resp = api_fetch(client, reqwest::Method::GET, "/npc/tower-guard", None)
+        .await
+        .ok_or_else(|| "Network error".to_string())?;
+    let status = resp.status();
+    let text = resp.text().await.map_err(|e| format!("Read error: {e}"))?;
+    let data: serde_json::Value =
+        serde_json::from_str(&text).map_err(|_| format!("Server returned {status}"))?;
+    if !status.is_success() {
+        let msg = data["error"].as_str().unwrap_or("Unknown error");
+        return Err(msg.to_string());
+    }
+    Ok(data)
+}
+
+/// Claims the month's best climber's reward from the Tower Guard.
+pub async fn api_claim_tower_reward(client: &Client) -> Result<serde_json::Value, String> {
+    api_buy(client, "/npc/tower-guard/claim", serde_json::json!({})).await
+}
+
 /// Buys from Medea, who's always in Town: sweets and potions.
 pub async fn api_buy_from_medea(
     client: &Client,

@@ -13,11 +13,14 @@ export function BossHud({ name }: { name: string }) {
   useBossFight();
   const { on, hp, maxHp, closing, victory, youHitAt, tower } = bossFight;
   const [now, setNow] = useState(() => performance.now());
+  // Ticks while something counts down: the room closing, or a Tower
+  // floor's enrage.
+  const counting = !!closing || (!!tower?.enrageAt && !tower.cleared);
   useEffect(() => {
-    if (!closing) return;
+    if (!counting) return;
     const t = setInterval(() => setNow(performance.now()), 500);
     return () => clearInterval(t);
-  }, [closing]);
+  }, [counting]);
 
   const frac = maxHp > 0 ? Math.max(0, Math.min(1, hp / maxHp)) : 0;
   const closes = closing ? Math.max(0, closing.at - now) : 0;
@@ -33,6 +36,7 @@ export function BossHud({ name }: { name: string }) {
             {" · "}
             {tower.cleared ? "cleared" : `${mobsLeft()} left`}
           </span>
+          <EnrageTag tower={tower} now={now} />
         </div>
       ) : on ? (
         <div
@@ -91,5 +95,25 @@ export function BossHud({ name }: { name: string }) {
         />
       ) : null}
     </>
+  );
+}
+
+/** How long until a Tower floor's mobs enrage, once it's close (the last
+ * 20 seconds), then that they have. */
+function EnrageTag({
+  tower,
+  now,
+}: {
+  tower: { enrageAt: number | null; cleared: boolean };
+  now: number;
+}) {
+  if (tower.cleared || tower.enrageAt === null) return null;
+  const left = Math.max(0, tower.enrageAt - now);
+  if (left > 20_000) return null;
+  return (
+    <span className={cn("font-medium", left > 0 ? "text-orange" : "text-red")}>
+      {" · "}
+      {left > 0 ? `enrage in ${Math.ceil(left / 1000)}s` : "enraged!"}
+    </span>
   );
 }

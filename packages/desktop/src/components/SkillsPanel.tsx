@@ -14,7 +14,7 @@ import {
 import { SquareBar } from "./SquareBar";
 
 /**
- * The Herzie view's Skills tab: the class, and each skill it knows — its
+ * The Skills window: the class, and each skill it knows — its
  * level, what it does now, its cooldown, and how far to the next level.
  * Skills level by being used in boss fights, so there's nothing to do here
  * but look.
@@ -53,7 +53,7 @@ function SkillRow({ skill }: { skill: HerzieSkill }) {
   );
   const need = skillXpForLevel(skill.level);
   return (
-    <div className="border border-border px-2 py-1.5">
+    <div className="border border-white/15 px-2 py-1.5">
       <div className="flex items-baseline justify-between text-ui">
         <span className="font-bold text-purple">{def.name}</span>
         <span className="text-text-dim">

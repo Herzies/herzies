@@ -8,6 +8,7 @@ import {
 } from "@herzies/shared";
 import { HerzieView } from "@herzies/shared/gl";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useHerzieStage } from "../lib/overlayStage";
 import { cn } from "../lib/utils";
 import { SegmentBar } from "./SegmentBar";
 import { VisitorHelp, type VisitorReward } from "./VisitorHelp";
@@ -139,6 +140,8 @@ export function BossFightPanel({
   const escaped = config.escaped || (remaining <= 0 && !dead);
   const chatting = !paused && !dead && !escaped;
   const { line, typed, advance } = useBossChatter(hpFrac, chatting);
+  // Inside a window or the visitor panel, drawn on its canvas.
+  const { stage: onStage } = useHerzieStage();
 
   return (
     // flex-1 so this fills the View's body; without a definite height the
@@ -168,6 +171,7 @@ export function BossFightPanel({
           )}
         >
           <HerzieView
+            onStage={onStage}
             userId={`boss:${event.id}`}
             stage={3}
             // Sized for the face-on pose specifically. Head-on the boss is
@@ -280,7 +284,7 @@ export function BossFightPanel({
                 that makes the board feel like it is about them. */}
             {config.yourRank !== null &&
             !config.topDealers.some((d) => d.rank === config.yourRank) ? (
-              <div className="mt-0.5 flex items-baseline justify-between border-t border-[#333] pt-0.5 text-ui text-cyan">
+              <div className="mt-0.5 flex items-baseline justify-between border-t border-white/15 pt-0.5 text-ui text-cyan">
                 <span>{config.yourRank ? `${config.yourRank}. ` : ""}you</span>
                 <span>
                   {config.yourDamage.toLocaleString()}

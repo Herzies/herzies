@@ -62,7 +62,7 @@ export function SquareBar({
         </span>
       ) : null}
       {/* pointer-events-auto: the Town card around it ignores the mouse. */}
-      <Tooltip label={tip} className="pointer-events-auto flex-1">
+      <Tooltip label={tip} className="pointer-events-auto min-w-0 flex-1">
         <div
           ref={barRef}
           role="progressbar"
@@ -70,7 +70,11 @@ export function SquareBar({
           aria-valuemin={0}
           aria-valuemax={ariaMax}
           aria-valuenow={ariaNow}
-          className="flex h-[5px] w-full gap-px"
+          // contain: inline-size — the squares (as many as fit) don't count
+          // toward the bar's own width, or a bar that has grown could never
+          // shrink again: they would hold it at its old width, and it only
+          // re-counts them when it resizes.
+          className="flex h-[5px] w-full gap-px overflow-hidden [contain:inline-size]"
         >
           {Array.from({ length: count }, (_, i) => (
             <div

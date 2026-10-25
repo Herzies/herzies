@@ -5,7 +5,8 @@ import {
   type Equipped,
   type HerzieClass,
 } from "@herzies/shared";
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useEscape } from "../lib/escapeStack";
 import { cn } from "../lib/utils";
 
 /** The class gear as it will be worn: what's worn now, plus the class's
@@ -45,15 +46,11 @@ export function ClassChoiceOverlay({
 
   const def = CLASS_DEFS[selected];
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || busy) return;
-      if (confirming) setConfirming(false);
-      else onLater();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [busy, confirming, onLater]);
+  useEscape(() => {
+    if (busy) return;
+    if (confirming) setConfirming(false);
+    else onLater();
+  });
 
   const choose = async () => {
     setBusy(true);
@@ -74,7 +71,7 @@ export function ClassChoiceOverlay({
       <div
         role="dialog"
         aria-labelledby="class-choice-title"
-        className="mx-3 w-full max-w-sm border border-border bg-bg-panel px-4 py-3 shadow-lg"
+        className="mx-3 w-full max-w-sm border border-white/15 bg-bg-panel px-4 py-3 shadow-lg"
       >
         <div
           id="class-choice-title"

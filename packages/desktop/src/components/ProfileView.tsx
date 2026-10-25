@@ -7,9 +7,11 @@ import {
 } from "@herzies/shared";
 import { useEffect, useState } from "react";
 import { useHomeStageOffset } from "../hooks/useStageAlignment";
+import { useHerzieStage } from "../lib/overlayStage";
 import { cn } from "../lib/utils";
 import { BackButton } from "./BackButton";
 import { HERZIE_STAGE_HEIGHT, HerzieWithSky } from "./HerzieWithSky";
+import { List } from "./List";
 import { ProfileBadges } from "./ProfileBadges";
 import { TabButton } from "./TabButton";
 import { TrackCard } from "./TrackCard";
@@ -50,7 +52,9 @@ export function ProfileView({
   active = true,
 }: {
   profile: HerzieProfile;
-  onBack: () => void;
+  /** Left out when there's nowhere to go back to (the window's close
+   * button does the rest). */
+  onBack?: () => void;
   onTrade: () => void;
   onAdd: () => void;
   onRemove: () => void;
@@ -92,12 +96,14 @@ export function ProfileView({
   // or a profile cached before the field existed) fall back to summing what is
   // equipped, which is right except for upgrade levels.
   const stats = profile.stats ?? getHerzieStats(profile.equipped);
-  const homeStageOffset = useHomeStageOffset();
+  // Lined up with Home's herzie when shown in Home's place; inside an
+  // overlay window (Social) Home's offset means nothing, so it's centred.
+  const homeOffset = useHomeStageOffset();
+  const homeStageOffset = useHerzieStage().inOverlay ? null : homeOffset;
 
   return (
     <View
-      title={profile.name}
-      backButton={<BackButton colour="cyan" onClick={onBack} />}
+      backButton={onBack && <BackButton colour="cyan" onClick={onBack} />}
       action={<ProfileBadges profile={profile} />}
       colour="cyan"
       className="relative"
@@ -188,7 +194,7 @@ export function ProfileView({
             ) : null}
           </div>
         )}
-        <div className="mb-2 flex gap-1 border-b border-border text-ui">
+        <div className="mb-2 flex gap-1 border-b border-white/15 text-ui">
           <TabButton
             colour="cyan"
             active={tab === "music"}
@@ -214,17 +220,20 @@ export function ProfileView({
 
         {/* Fixed panel height: the herzie above takes the leftover space, so
             a shorter tab's content would otherwise let this whole block sink
-            and the tab row would jump as the viewer switches tabs. Tall
-            enough for the tallest panel — three top artist rows. */}
-        <div className="min-h-16">
+            and the tab row would jump as the viewer switches tabs. Three top
+            artist rows tall: the stats scroll inside it, the artwork fills
+            it. */}
+        <div className="h-16">
           {/* Stats are game data, not listening data, so unlike the other two
               tabs they are not held back from non-friends. */}
           {tab === "stats" ? (
-            <div>
+            // A short scrolling list: a well-geared herzie has a long one,
+            // and it would push the herzie above off the window.
+            <List className="h-full">
               {shownStatKeys(stats).map((key) => (
                 <div
                   key={key}
-                  className="flex justify-between border-b border-[#222] py-0.5 text-ui last:border-b-0"
+                  className="flex justify-between border-b border-white/15 py-0.5 text-ui last:border-b-0"
                 >
                   <span className="text-text-dim">{STAT_LABELS[key]}</span>
                   <span
@@ -234,15 +243,15 @@ export function ProfileView({
                   </span>
                 </div>
               ))}
-            </div>
+            </List>
           ) : !isFriend ? (
             <div>
-              <div className="text-ui-sm text-[#444]">
+              <div className="text-ui-sm text-text-dim">
                 Become friends to share music
               </div>
             </div>
           ) : profile.listeningHidden ? (
-            <div className="text-ui-sm text-[#444]">
+            <div className="text-ui-sm text-text-dim">
               {tab === "music" && isListening(profile)
                 ? `${profile.name} is listening, but keeps what to themselves`
                 : `${profile.name} keeps their listening private`}
@@ -250,26 +259,28 @@ export function ProfileView({
           ) : tab === "music" ? (
             profile.nowPlaying ? (
               <TrackCard
+                artClassName="h-16 w-16"
                 title={profile.nowPlaying.title}
                 artist={profile.nowPlaying.artist}
                 albumArtUrl={profile.nowPlaying.albumArtUrl}
               />
             ) : profile.lastPlayed ? (
               <TrackCard
+                artClassName="h-16 w-16"
                 title={profile.lastPlayed.title}
                 artist={profile.lastPlayed.artist}
                 albumArtUrl={profile.lastPlayed.albumArtUrl}
                 meta={formatTimeAgo(profile.lastPlayed.listenedAt)}
               />
             ) : (
-              <div className="text-ui-sm text-[#444]">Nothing played yet</div>
+              <div className="text-ui-sm text-text-dim">Nothing played yet</div>
             )
           ) : topArtists.length > 0 ? (
             <div>
               {topArtists.map((a, i) => (
                 <div
                   key={a.name}
-                  className="flex justify-between border-b border-[#222] py-0.5 text-ui last:border-b-0"
+                  className="flex justify-between border-b border-white/15 py-0.5 text-ui last:border-b-0"
                 >
                   <span className="text-text">
                     {i + 1}. {a.name}
@@ -279,7 +290,7 @@ export function ProfileView({
               ))}
             </div>
           ) : (
-            <div className="text-ui-sm text-[#444]">No top artists yet</div>
+            <div className="text-ui-sm text-text-dim">No top artists yet</div>
           )}
         </div>
       </div>

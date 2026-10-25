@@ -7,6 +7,7 @@ import { chimneysOf } from "./Buildings";
 import {
   cellAt,
   cellCenter,
+  groundY,
   isSunk,
   objectAt,
   objectJitter,
@@ -177,7 +178,7 @@ function Fireflies({ map }: { map: TownMap }) {
       return {
         x,
         z,
-        y: 0.5 + rand() * 1.4,
+        y: groundY(map, x, z) + 0.5 + rand() * 1.4,
         phase: rand() * 100,
         speed: 0.3 + rand() * 0.4,
         blink: 1.2 + rand() * 2,
@@ -281,6 +282,7 @@ function Dust({ map }: { map: TownMap }) {
   const pool = useRef(
     Array.from({ length: DUST }, () => ({
       x: 0,
+      y: 0,
       z: 0,
       born: -10,
       dx: 0,
@@ -319,6 +321,7 @@ function Dust({ map }: { map: TownMap }) {
           next.current = (i + 1) % DUST;
           pool.current[i] = {
             x: fx + (rand() - 0.5) * 0.08,
+            y: feet.y,
             z: fz + (rand() - 0.5) * 0.08,
             born: t,
             dx: (rand() - 0.5) * 0.3,
@@ -337,7 +340,7 @@ function Dust({ map }: { map: TownMap }) {
       pts.set(
         i,
         p.x + p.dx * age,
-        0.06 + age * 0.18,
+        p.y + 0.06 + age * 0.18,
         p.z + p.dz * age,
         0.1 + age * 0.12,
         0.35 * (1 - age),
@@ -388,6 +391,7 @@ function Butterflies({ map }: { map: TownMap }) {
       const [x, z] = cellCenter(map, ...beds[Math.floor(rand() * beds.length)]);
       return {
         x,
+        y: groundY(map, x, z),
         z,
         phase: rand() * 100,
         flap: 12 + rand() * 6,
@@ -419,7 +423,10 @@ function Butterflies({ map }: { map: TownMap }) {
       const p = f.phase + t * 0.6;
       pos.set(
         f.x + Math.sin(p) * 0.8 + Math.sin(p * 2.3) * 0.25,
-        0.55 + Math.sin(p * 1.7) * 0.25 + Math.abs(Math.sin(t * f.flap)) * 0.05,
+        f.y +
+          0.55 +
+          Math.sin(p * 1.7) * 0.25 +
+          Math.abs(Math.sin(t * f.flap)) * 0.05,
         f.z + Math.cos(p * 0.8) * 0.8,
       );
       // Facing where it's heading (the derivative of the path, roughly).
@@ -456,9 +463,10 @@ const LEAF_COLORS = ["#4f8a3e", "#6a9a3a", "#c8a03a", "#b8702e"];
 function FallingLeaves({ map }: { map: TownMap }) {
   const trees = useMemo(
     () =>
-      cellsWhere(map, (c, r) => objectAt(map, c, r) === "T").map(([c, r]) =>
-        objectJitter(map, c, r),
-      ),
+      cellsWhere(map, (c, r) => objectAt(map, c, r) === "T").map(([c, r]) => {
+        const at = objectJitter(map, c, r);
+        return { ...at, ground: groundY(map, at.x, at.z) };
+      }),
     [map],
   );
   const rand = useMemo(() => mulberry32(5150), []);
@@ -469,6 +477,7 @@ function FallingLeaves({ map }: { map: TownMap }) {
       x: 0,
       y: 0,
       z: 0,
+      ground: 0,
       born: Number.NEGATIVE_INFINITY,
       spin: 0,
     })),
@@ -504,6 +513,7 @@ function FallingLeaves({ map }: { map: TownMap }) {
         l.x = tree.x + Math.cos(a) * 1.2 * tree.scale;
         l.z = tree.z + Math.sin(a) * 1.2 * tree.scale;
         l.y = (4 + rand() * 3) * tree.scale;
+        l.ground = tree.ground;
         // Let go a while from now, so they don't all fall at once.
         l.born = t + rand() * LEAF_FALL;
         l.spin = rand() * 10;
@@ -513,7 +523,7 @@ function FallingLeaves({ map }: { map: TownMap }) {
       const sway = Math.sin(t * 2.2 + l.spin) * 0.5;
       pos.set(
         l.x + wind.x * k * 3 + sway * 0.4,
-        Math.max(0.03, l.y * (1 - k)),
+        l.ground + Math.max(0.03, l.y * (1 - k)),
         l.z + wind.y * k * 3 + Math.cos(t * 1.7 + l.spin) * 0.3,
       );
       e.set(sway + t * 1.5, l.spin + t, sway);
