@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.1.0-beta.54",
+    "highlights": [
+      "The Town comes first now, with frosted windows over it and the menu under the chat",
+      "New Leaderboard window: level (all time or this month), Song Hunt and the Tower",
+      "The Tower resets every month with its own board. Meet the Tower Guard, who pays the month's highest climber",
+      "A harder Tower: brutes, lungers and spitters, elites every 5th floor, a Warden every 10th, and mobs enrage if you take too long",
+      "Your class skill sits on the hotbar, and you can aim anywhere in the Town",
+      "See the damage you take pop off your herzie, and the XP each kill gives in the chat",
+      "Brighter moonlit nights, and press Z for a bigger app window"
+    ]
+  },
+  {
     "version": "0.1.0-beta.53",
     "highlights": [
       "New: the Tower. Climb floors of mobs on your own, and any kill can drop an item",
