@@ -120,6 +120,53 @@ afterAll(async () => {
 });
 
 describe("materializing", () => {
+  it("runs a monthly Tower back to back, from the 1st (UTC)", async () => {
+    const now = new Date();
+    const first = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
+    );
+    const id = await saveSeries({
+      type: "tower",
+      title: "Tower",
+      anchorAt: first.toISOString(),
+      intervalDays: 7,
+      intervalMonths: 1,
+      durationMinutes: null,
+    });
+    const rows = await occurrences(id);
+    // This month's, plus next month's once it's inside the 28-day horizon.
+    expect(rows.length).toBeGreaterThanOrEqual(1);
+    expect(rows[0].starts_at).toBe(rows[0].occurrence_at);
+    expect(new Date(rows[0].starts_at).getTime()).toBe(first.getTime());
+    expect(new Date(rows[0].ends_at).getTime()).toBe(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1),
+    );
+    expect(rows.every((r) => r.active && r.type === "tower")).toBe(true);
+    for (let i = 1; i < rows.length; i++) {
+      expect(rows[i].starts_at).toBe(rows[i - 1].ends_at);
+    }
+    expect(await materialize(id)).toBe(0);
+  });
+
+  it("refuses back to back without months, and days past the 28th", async () => {
+    const tower = {
+      type: "tower",
+      title: "Tower",
+      intervalDays: 7,
+      durationMinutes: null,
+    };
+    await expect(
+      saveSeries({ ...tower, anchorAt: "2026-11-01T00:00:00Z" }),
+    ).rejects.toThrow(/monthly/);
+    await expect(
+      saveSeries({
+        ...tower,
+        intervalMonths: 1,
+        anchorAt: "2026-10-31T00:00:00Z",
+      }),
+    ).rejects.toThrow(/day 1-28/);
+  });
+
   it("writes four weeks of occurrences, once", async () => {
     const id = await saveSeries(huntSeries());
     const first = await occurrences(id);

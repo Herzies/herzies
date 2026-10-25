@@ -54,6 +54,15 @@ export async function POST(request: Request) {
   if (body.until && new Date(body.until) <= new Date(body.anchorAt)) {
     return badRequest("The series must end after its first start");
   }
+  const intervalMonths = body.intervalMonths ?? null;
+  if (body.durationMinutes === null && !intervalMonths) {
+    return badRequest("Only a monthly series can run back to back");
+  }
+  // Day 29-31 doesn't exist every month: Postgres would clamp those slots
+  // to the month's last day.
+  if (intervalMonths && new Date(body.anchorAt).getUTCDate() > 28) {
+    return badRequest("A monthly series must start on day 1-28 (UTC)");
+  }
 
   const template = await validateTemplate(admin, body);
   if ("error" in template) return badRequest(template.error);
@@ -65,6 +74,7 @@ export async function POST(request: Request) {
     enabled: body.enabled ?? true,
     anchor_at: body.anchorAt,
     interval_days: body.intervalDays,
+    interval_months: intervalMonths,
     duration_minutes: body.durationMinutes,
     until: body.until ?? null,
     config_template: template.config,
@@ -191,6 +201,8 @@ async function validateTemplate(
   if (body.type === "merchant") {
     return validateMerchantConfig(admin, config);
   }
+  // A Tower needs nothing: every occurrence is a fresh climb.
+  if (body.type === "tower") return { config: {} };
   // Song hunts: the reward carries over to every week; the track and hints
   // are curated per occurrence.
   const maxClaims = Number(config.maxClaims ?? 50);

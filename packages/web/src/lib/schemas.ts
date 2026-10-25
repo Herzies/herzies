@@ -160,13 +160,16 @@ export const adminEventSchema = z.object({
 
 export const adminEventSeriesSchema = z.object({
   id: z.string().optional(),
-  type: z.enum(["song_hunt", "boss_fight", "merchant"]),
+  type: z.enum(["song_hunt", "boss_fight", "merchant", "tower"]),
   title: z.string().min(1),
   description: z.string().optional(),
   enabled: z.boolean().optional(),
   anchorAt: z.string().min(1),
   intervalDays: z.number().int().positive(),
-  durationMinutes: z.number().int().positive(),
+  /** Every N calendar months instead of intervalDays (00120). */
+  intervalMonths: z.number().int().positive().nullable().optional(),
+  /** Null: back to back, each until the next starts (monthly only). */
+  durationMinutes: z.number().int().positive().nullable(),
   until: z.string().nullable().optional(),
   configTemplate: z.record(z.string(), z.unknown()).optional(),
 });

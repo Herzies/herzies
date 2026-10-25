@@ -40,13 +40,17 @@ export type AdminEvent = {
 
 export type EventSeries = {
   id: string;
-  type: "song_hunt" | "boss_fight" | "merchant";
+  type: "song_hunt" | "boss_fight" | "merchant" | "tower";
   title: string;
   description: string | null;
   enabled: boolean;
   anchor_at: string;
   interval_days: number;
-  duration_minutes: number;
+  /** Repeats every N calendar months instead (00120); interval_days is
+   * then ignored. */
+  interval_months: number | null;
+  /** Null: each occurrence runs until the next one starts (monthly only). */
+  duration_minutes: number | null;
   until: string | null;
   config_template: Record<string, unknown>;
 };

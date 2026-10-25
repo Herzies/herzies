@@ -6,14 +6,18 @@ const LEADERBOARD_LIMIT = 100;
 
 /**
  * Top herzies by XP (all-time), by XP gained this calendar month (UTC,
- * ?board=xp_month), by song hunts won (?board=song_hunt), or by the highest
- * Tower floor ever cleared, across every Tower event (?board=tower). Returns only
- * aggregate, non-private stats — never now-playing or listening history.
+ * ?board=xp_month), by song hunts won (?board=song_hunt), by the highest
+ * Tower floor ever cleared, across every Tower event (?board=tower), or by
+ * the highest floor in this month's Towers (?board=tower_month: Tower events
+ * starting this calendar month, UTC — the monthly Tower resets on the 1st).
+ * Returns only aggregate, non-private stats — never now-playing or listening
+ * history.
  *
  * GET /api/leaderboard
  * GET /api/leaderboard?board=xp_month
  * GET /api/leaderboard?board=song_hunt
  * GET /api/leaderboard?board=tower
+ * GET /api/leaderboard?board=tower_month
  *
  * Each board also comes as "<board>_friends" (xp_friends, tower_friends, ...):
  * ranked among the caller and their friends only.
@@ -77,13 +81,21 @@ export async function GET(request: Request) {
     return NextResponse.json({ entries });
   }
 
-  if (board === "tower") {
+  if (board === "tower" || board === "tower_month") {
     // Best floor per herzie per event (00115): keep each herzie's highest,
     // the earlier one winning a tie.
-    let towerQuery = admin
-      .from("tower_progress")
-      .select("user_id, best_floor, updated_at")
-      .gt("best_floor", 0);
+    let towerQuery =
+      board === "tower_month"
+        ? admin
+            .from("tower_progress")
+            .select("user_id, best_floor, updated_at, events!inner(starts_at)")
+            .gte("events.starts_at", monthStart(0))
+            .lt("events.starts_at", monthStart(1))
+            .gt("best_floor", 0)
+        : admin
+            .from("tower_progress")
+            .select("user_id, best_floor, updated_at")
+            .gt("best_floor", 0);
     if (userIds) towerQuery = towerQuery.in("user_id", userIds);
     const { data: rows, error: rowsError } = await towerQuery
       .order("best_floor", { ascending: false })
@@ -196,6 +208,14 @@ export async function GET(request: Request) {
   }));
 
   return NextResponse.json({ entries });
+}
+
+/** The first of this month (offset 0) or a later one, UTC, as ISO. */
+function monthStart(offset: number): string {
+  const now = new Date();
+  return new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + offset, 1),
+  ).toISOString();
 }
 
 /** The caller and their friends, as user ids. Empty without a herzie. */
