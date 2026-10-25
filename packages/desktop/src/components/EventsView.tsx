@@ -18,6 +18,8 @@ import {
   MEDEA_NAME,
   MERCHANT_NAME,
   type StatPoints,
+  TOWER_GUARD_KEY,
+  TOWER_GUARD_NAME,
   TREAT_TRADER_NAME,
   VISITORS,
   visitorName,
@@ -33,6 +35,7 @@ import {
   type AppState,
   type ChatMessage,
   herzies,
+  type TowerGuard,
   useWindowFocused,
 } from "../tauri-bridge";
 import { BackButton } from "./BackButton";
@@ -47,6 +50,7 @@ import { LoadingSplash } from "./LoadingSplash";
 import { MerchantPanel } from "./MerchantPanel";
 import { OrphiezStage } from "./OrphiezStage";
 import { TabButton } from "./TabButton";
+import { TowerGuardPanel } from "./TowerGuardPanel";
 import type { EventCard } from "./TownScene";
 import { TownWorld } from "./TownWorld";
 import { BULLETIN_KEY } from "./town/Boards";
@@ -549,6 +553,26 @@ function EventsViewImpl({
     };
   }, [active, activeLoaded, previousNeeded, previousKey]);
 
+  // The Tower Guard: who's climbing, and whether he owes you (his "!").
+  // Fetched with the Town and again whenever his panel opens.
+  const [towerGuard, setTowerGuard] = useState<TowerGuard | null>(null);
+  const [guardKey, setGuardKey] = useState(0);
+  const guardOpen = selected === TOWER_GUARD_KEY;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: guardKey and guardOpen re-run the fetch
+  useEffect(() => {
+    if (!active) return;
+    let cancelled = false;
+    herzies
+      .fetchTowerGuard()
+      .then((g) => {
+        if (!cancelled) setTowerGuard(g);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [active, guardKey, guardOpen]);
+
   /** A visitor open in the big window's panel, the world still showing. */
   const inPanel = expanded && selected !== null;
   /** A visitor opened from the board: Back (not the panel's x) takes you
@@ -721,6 +745,17 @@ function EventsViewImpl({
       openKey: MEDEA_KEY,
       detail: "Sweets and potions",
     });
+    // And the Tower Guard, wherever a map gives him a spot.
+    cards.push({
+      type: TOWER_GUARD_KEY,
+      title: TOWER_GUARD_NAME,
+      description: null,
+      status: "live",
+      at: null,
+      openKey: TOWER_GUARD_KEY,
+      detail: "Doubts you",
+      notice: !!towerGuard?.reward.eligible,
+    });
     // Nearest in time first: what's on now, then what starts soonest, then
     // types with nothing on the calendar.
     const when = (c: EventCard) =>
@@ -772,9 +807,29 @@ function EventsViewImpl({
 
   const screen = (() => {
     if (selected === null) return null;
+    // The board only needs the week: no waiting on the previous hunt.
+    if (selected === BULLETIN_KEY && activeLoaded) {
+      return (
+        <ScreenView
+          inPanel={screenInPanel}
+          title="Bulletin board"
+          colour="cyan"
+          childrenClassName="flex min-h-0 flex-col"
+        >
+          <BulletinPanel week={week} onOpen={openFromBoard} />
+        </ScreenView>
+      );
+    }
     // The Town draws its own splash while it loads (the world and the events
-    // together, so there's one splash rather than one per stage).
-    if (loading) return <LoadingSplash overlay label="loading town" />;
+    // together, so there's one splash rather than one per stage). Over Home
+    // there's no Town to load, only the events.
+    if (loading)
+      return (
+        <LoadingSplash
+          overlay
+          label={eventsTabVisible ? "loading town" : "loading events"}
+        />
+      );
 
     const selectedEvent =
       liveEvents.find((e) => e.id === selected) ??
@@ -841,15 +896,22 @@ function EventsViewImpl({
       );
     }
 
-    if (selected === BULLETIN_KEY) {
+    if (selected === TOWER_GUARD_KEY) {
       return (
         <ScreenView
           inPanel={screenInPanel}
-          title="Bulletin board"
+          ownName
+          title={TOWER_GUARD_NAME}
           colour="cyan"
           childrenClassName="flex min-h-0 flex-col"
+          backButton={back}
         >
-          <BulletinPanel week={week} onOpen={openFromBoard} />
+          <TowerGuardPanel
+            guard={towerGuard}
+            onClaimed={() => setGuardKey((k) => k + 1)}
+            onLog={onLog}
+            paused={!active || !focused}
+          />
         </ScreenView>
       );
     }

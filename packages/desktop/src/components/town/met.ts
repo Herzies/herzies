@@ -1,4 +1,4 @@
-import { BOBOKU_KEY, MEDEA_KEY } from "@herzies/shared";
+import { BOBOKU_KEY, MEDEA_KEY, TOWER_GUARD_KEY } from "@herzies/shared";
 import { useSyncExternalStore } from "react";
 import type { EventCard } from "../TownScene";
 
@@ -11,7 +11,11 @@ const STORAGE_KEY = "herzies.town.met";
 
 /** Who lives in Town rather than visiting: they never arrive, so never wear
  * a "!". */
-export const RESIDENTS: ReadonlySet<string> = new Set([BOBOKU_KEY, MEDEA_KEY]);
+export const RESIDENTS: ReadonlySet<string> = new Set([
+  BOBOKU_KEY,
+  MEDEA_KEY,
+  TOWER_GUARD_KEY,
+]);
 /** Enough for every visit in a long while; the oldest are forgotten. */
 const MAX_KEPT = 200;
 

@@ -5,6 +5,7 @@ import {
   type ConfigResult,
   validateBossConfig,
   validateMerchantConfig,
+  validateTowerConfig,
 } from "@/lib/event-config";
 import { adminEventSeriesSchema, isParseError, parseBody } from "@/lib/schemas";
 import { createAdminClient } from "@/lib/supabase-admin";
@@ -201,8 +202,9 @@ async function validateTemplate(
   if (body.type === "merchant") {
     return validateMerchantConfig(admin, config);
   }
-  // A Tower needs nothing: every occurrence is a fresh climb.
-  if (body.type === "tower") return { config: {} };
+  // A Tower: only the Tower Guard's reward (every occurrence is a fresh
+  // climb).
+  if (body.type === "tower") return validateTowerConfig(admin, config);
   // Song hunts: the reward carries over to every week; the track and hints
   // are curated per occurrence.
   const maxClaims = Number(config.maxClaims ?? 50);

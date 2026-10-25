@@ -69,6 +69,8 @@ export type DummyState = {
   /** A Tower mob standing in for a dummy (the server's id): waves aim at
    * it and burst on it, but the server says what they did. */
   mob?: number;
+  /** How much wider than a dummy it is (an elite or the Warden). */
+  size?: number;
 };
 
 /** A fresh target at (x, z): a dummy, or a mob standing in for one. */
@@ -222,7 +224,8 @@ export function waveHitsDummy(
   const aa = dot(d1, d1);
   const ee = dot(d2, d2);
   const ff = dot(d2, r0);
-  const reach = DUMMY.radius + r;
+  const radius = DUMMY.radius * (d.size ?? 1);
+  const reach = radius + r;
   if (aa < 1e-12) return null;
   const cc = dot(d1, r0);
   const bb = dot(d1, d2);
@@ -256,11 +259,7 @@ export function waveHitsDummy(
   const ol = Math.hypot(ox, oz) || 1;
   return {
     t: hitT,
-    point: [
-      d.x + (ox / ol) * DUMMY.radius,
-      axisY,
-      d.z + (oz / ol) * DUMMY.radius,
-    ],
+    point: [d.x + (ox / ol) * radius, axisY, d.z + (oz / ol) * radius],
   };
 }
 

@@ -4,6 +4,7 @@ import {
   type HerzieStats,
   type ItemUnit,
   isTownMapId,
+  TOWER_GUARD_KEY,
 } from "@herzies/shared";
 import {
   lazy,
@@ -182,12 +183,25 @@ export function TownWorld({
   const spots = useMemo<TownSpot[]>(() => {
     if (Object.keys(map.spots).length === 0) return [];
     const { spots: SPOTS, spare: SPARE_SPOTS } = spotsOf(map);
+    // A map with visitors on it has a spot for one of them; the Tower
+    // Guard's alone (the Tower's door, say) brings only him.
+    const visitorMap = Object.keys(map.spots).some(
+      (k) => k !== TOWER_GUARD_KEY,
+    );
     let spare = 0;
     return (
       cards
         // The boss isn't in town: it's in its cave (see CaveTimer).
         .filter((c) => c.type !== "boss_fight")
         .filter((c) => c.type !== "treat_trader" || c.status !== "idle")
+        // The Tower Guard stands only where a map gives him a spot (the
+        // map editor): never on a spare one. Everyone else only on a
+        // visitor map, and only with somewhere to stand.
+        .filter((c) =>
+          c.type === TOWER_GUARD_KEY
+            ? !!SPOTS[c.type]
+            : visitorMap && (!!SPOTS[c.type] || SPARE_SPOTS.length > 0),
+        )
         .map((card) => {
           const live = card.status === "live";
           return {
@@ -308,7 +322,7 @@ export function TownWorld({
                   level={profile.level}
                   progress={profile.progress}
                   xp={profile.xp}
-                  className="mt-1 text-white/70"
+                  className="mt-1.5 text-white/70"
                 />
               </div>
               <NowPlayingBox
@@ -320,13 +334,14 @@ export function TownWorld({
             </div>
             <div
               className={cn(
-                // A zero-height line 12px above the chat (or the window's
-                // bottom), 12px in from each side, as the chat is: the aim
+                // A zero-height line 6px above the chat (as far as the chat
+                // is from the nav), or 12px above the window's bottom, 12px
+                // in from each side, as the chat is: the aim
                 // hint, the hotbar and the skills stand on it, flush with
                 // its ends and centred.
                 "pointer-events-none absolute inset-x-3 z-30 h-0",
                 chatOverlay
-                  ? "bottom-[calc(var(--dock-height,0px)+12px)]"
+                  ? "bottom-[calc(var(--dock-height,0px)+6px)]"
                   : "bottom-3",
               )}
             >

@@ -48,6 +48,9 @@ type SeriesForm = {
   songHunt: { rewardItemId: string; maxClaims: string };
   bossFight: BossFightConfigForm;
   merchant: MerchantConfigForm;
+  /** The Tower Guard's reward for the month's best climber, and the
+   * herzies (comma separated names) never ranked for it. */
+  tower: { topRewardItemId: string; excludeHerzies: string };
 };
 
 /** Starting points per type; everything is editable. */
@@ -106,6 +109,7 @@ function newSeriesForm(type: SeriesType = "song_hunt"): SeriesForm {
       topCount: "3",
     },
     merchant: { stock: [] },
+    tower: { topRewardItemId: "power-dice-3", excludeHerzies: "music_lover69" },
   };
 }
 
@@ -135,6 +139,15 @@ function seriesToForm(s: EventSeries): SeriesForm {
         : newSeriesForm("boss_fight").bossFight,
     merchant:
       s.type === "merchant" ? merchantConfigFromRecord(t) : { stock: [] },
+    tower: {
+      topRewardItemId:
+        typeof t.topRewardItemId === "string" && t.topRewardItemId
+          ? t.topRewardItemId
+          : "power-dice-3",
+      excludeHerzies: Array.isArray(t.excludeHerzies)
+        ? t.excludeHerzies.join(", ")
+        : "",
+    },
   };
 }
 
@@ -164,7 +177,13 @@ function seriesPayload(form: SeriesForm): Record<string, unknown> | string {
   } else if (form.type === "merchant") {
     configTemplate = merchantFormToConfig(form.merchant);
   } else if (form.type === "tower") {
-    configTemplate = {};
+    configTemplate = {
+      topRewardItemId: form.tower.topRewardItemId || "power-dice-3",
+      excludeHerzies: form.tower.excludeHerzies
+        .split(",")
+        .map((n) => n.trim())
+        .filter(Boolean),
+    };
   } else {
     const maxClaims = Number.parseInt(form.songHunt.maxClaims, 10);
     if (!(maxClaims > 0)) return "Max claims must be positive";
@@ -688,6 +707,49 @@ function SeriesFormFields({
           </div>
           <p className="sm:col-span-2 text-xs text-text-dim">
             Track and hints are set per week on each occurrence.
+          </p>
+        </div>
+      )}
+      {form.type === "tower" && (
+        <div className="grid sm:grid-cols-2 gap-4 border border-border rounded-sm p-4 bg-bg">
+          <div>
+            <label
+              className="block text-xs text-text-dim mb-1"
+              htmlFor={`${idp}-tower-reward`}
+            >
+              top climber reward
+            </label>
+            <CatalogItemSelect
+              id={`${idp}-tower-reward`}
+              value={form.tower.topRewardItemId}
+              onChange={(topRewardItemId) =>
+                update({ tower: { ...form.tower, topRewardItemId } })
+              }
+              catalogItems={catalogItems}
+              emptyLabel="Power Dice 3"
+            />
+          </div>
+          <div>
+            <label
+              className="block text-xs text-text-dim mb-1"
+              htmlFor={`${idp}-tower-exclude`}
+            >
+              never ranked for it (herzie names)
+            </label>
+            <input
+              id={`${idp}-tower-exclude`}
+              value={form.tower.excludeHerzies}
+              onChange={(e) =>
+                update({
+                  tower: { ...form.tower, excludeHerzies: e.target.value },
+                })
+              }
+              className={INPUT}
+            />
+          </div>
+          <p className="sm:col-span-2 text-xs text-text-dim">
+            The Tower Guard gives this to each month&apos;s best climber once
+            the month is out; they claim it by talking to him.
           </p>
         </div>
       )}

@@ -210,8 +210,10 @@ export function OverlayWindow({
           >
             {/* The title row: the title, then close at the far right. h-8
                 with a size-5 button and pr-1.5: 6px from the top and the
-                right edge alike. */}
-            <div className="flex h-8 shrink-0 items-center justify-between pr-1.5 pl-2.5">
+                right edge alike. Its own layer (z-50, as View's header):
+                a herzie inside paints at z-index 1 and would take the
+                close button's clicks. */}
+            <div className="relative z-50 flex h-8 shrink-0 items-center justify-between pr-1.5 pl-2.5">
               <h1
                 className={cn("truncate text-ui-lg font-bold", titleClassName)}
               >

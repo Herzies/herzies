@@ -73,8 +73,11 @@ export const bossFight = {
    * kill that paid one): every batch stays on the ground until it's picked
    * up or you leave. Dropped by LootDrops. */
   loots: [] as LootBatch[],
-  /** In the Tower: the floor (its mobs are in {@link towerMobs}). */
-  tower: null as Omit<TowerFloor, "mobs"> | null,
+  /** In the Tower: the floor (its mobs are in {@link towerMobs}), and when
+   * its mobs enrage (performance.now() ms; null from an older server). */
+  tower: null as
+    | (Omit<TowerFloor, "mobs" | "enrageIn"> & { enrageAt: number | null })
+    | null,
   /** When the boss was last hit and when you last were (performance.now()
    * ms), for the bar's flash and the screen's. */
   bossHitAt: Number.NEGATIVE_INFINITY,
@@ -101,6 +104,9 @@ export type LootBatch = {
  * when it fell. */
 export type MobView = {
   id: number;
+  /** Its kind (MOB_KINDS), and whether it's an elite (1) or the Warden. */
+  kind: "brute" | "spitter" | "lunger";
+  rank: 0 | 1 | 2;
   hp: number;
   maxHp: number;
   /** Winding up a swing. */
@@ -156,6 +162,8 @@ function syncMobs(mobs: readonly TowerMob[], now: number) {
     if (!m) {
       m = {
         id: w.id,
+        kind: w.k ?? "brute",
+        rank: w.e ?? 0,
         hp: w.hp,
         maxHp: w.maxHp,
         windup: false,
@@ -176,8 +184,11 @@ function syncMobs(mobs: readonly TowerMob[], now: number) {
 function setTower(f: TowerFloor, now: number) {
   const was = bossFight.tower;
   if (!was || was.floor !== f.floor) towerMobs.clear();
-  const { mobs, ...floor } = f;
-  bossFight.tower = floor;
+  const { mobs, enrageIn, ...floor } = f;
+  bossFight.tower = {
+    ...floor,
+    enrageAt: enrageIn === undefined ? null : now + enrageIn,
+  };
   syncMobs(mobs, now);
 }
 

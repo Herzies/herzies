@@ -582,6 +582,10 @@ export type TowerMob = {
   hp: number;
   maxHp: number;
   s: 0 | 1;
+  /** Its kind (a brute when missing: older servers had only those). */
+  k?: "spitter" | "lunger";
+  /** An elite (1) or the Warden (2). */
+  e?: 1 | 2;
 };
 
 /** A Tower floor: its number, its mobs' level (and the herzie's, for the
@@ -592,6 +596,9 @@ export type TowerFloor = {
   you: number;
   mobs: TowerMob[];
   cleared: boolean;
+  /** Ms until the mobs enrage, as of sending (0: they have). Missing from
+   * older servers. */
+  enrageIn?: number;
 };
 
 /** One piece of boss loot: a pending drop's id and its item id. */

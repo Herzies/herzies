@@ -299,12 +299,18 @@ function markers(m: TownMap): { id: MarkerId; label: string; at: Point }[] {
   ];
 }
 
+/** The Tower Guard's spot: placed by hand on whichever island he should
+ * stand on (the button "Place Tower Guard"), never filled in. */
+const GUARD_SPOT = "tower_guard";
+
 /** The map, every visitor kind given a spot (new ones start mid-plaza) —
- * on islands visitors stand on at all (home, not the training grounds). */
+ * on islands visitors stand on at all (home, not the training grounds).
+ * The Tower Guard isn't a visitor: he's placed by hand. */
 function withAllSpots(m: TownMap): TownMap {
-  if (Object.keys(m.spots).length === 0) return m;
+  if (!Object.keys(m.spots).some((k) => k !== GUARD_SPOT)) return m;
   const spots = { ...m.spots };
-  for (const key of Object.keys(SPOT_NAMES)) spots[key] ??= [0, 0];
+  for (const key of Object.keys(SPOT_NAMES))
+    if (key !== GUARD_SPOT) spots[key] ??= [0, 0];
   return { ...m, spots };
 }
 
@@ -1192,6 +1198,33 @@ function MapEditor() {
             title="Put the preview's player at the spawn (P)"
           >
             Respawn <span style={{ color: "#6b7090" }}>P</span>
+          </button>
+          <button
+            type="button"
+            style={btn(!!map.spots[GUARD_SPOT])}
+            title="The Tower Guard stands only on islands with his spot"
+            onClick={() => {
+              const { [GUARD_SPOT]: had, ...rest } = map.spots;
+              edit({
+                spots: had
+                  ? rest
+                  : {
+                      ...map.spots,
+                      // A few steps in front of the spawn, clear of its
+                      // marker: drag him from there.
+                      [GUARD_SPOT]: [
+                        Math.round(
+                          map.spawn.at[0] + Math.sin(map.spawn.heading) * 3,
+                        ),
+                        Math.round(
+                          map.spawn.at[1] + Math.cos(map.spawn.heading) * 3,
+                        ),
+                      ],
+                    },
+              });
+            }}
+          >
+            {map.spots[GUARD_SPOT] ? "Remove" : "Place"} Tower Guard
           </button>
           <button
             type="button"

@@ -126,6 +126,27 @@ export interface AppState {
   loggingIn: boolean;
 }
 
+/** A climber on the Tower Guard's list. */
+export type TowerGuardPlace = {
+  rank: number;
+  name: string;
+  level: number;
+  stage: number;
+  floor: number;
+};
+
+/** What the Tower Guard shows (tower_guard_json, 00121). */
+export type TowerGuard = {
+  current: {
+    event: string;
+    endsAt: number;
+    top: TowerGuardPlace[];
+    you: { rank: number; floor: number } | null;
+  } | null;
+  last: { event: string; name: string; floor: number } | null;
+  reward: { eligible: boolean; itemId: string | null; event: string | null };
+};
+
 export const herzies = {
   getState: () => invoke<AppState>("get_state"),
 
@@ -258,6 +279,12 @@ export const herzies = {
       newCurrency: number;
       inventory: Inventory;
     }>("buy_from_boboku", { itemId, quantity }),
+  /** The Tower Guard: this month's top climbers, your place, last month's
+   * winner and whether he owes you a reward. */
+  fetchTowerGuard: () => invoke<TowerGuard>("fetch_tower_guard"),
+  /** Takes the month's best climber's reward from the Tower Guard. */
+  claimTowerReward: () =>
+    invoke<{ itemId: string; inventory: Inventory }>("claim_tower_reward"),
   /** Buys from Medea, who's always in Town: sweets and potions. */
   buyFromMedea: (itemId: string, quantity: number) =>
     invoke<{

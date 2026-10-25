@@ -36,6 +36,35 @@ async function missingItems(admin: Admin, ids: string[]): Promise<string[]> {
   return ids.filter((i) => !data?.some((row) => row.id === i));
 }
 
+/** The Tower's default reward for a month's best climber (00121). */
+export const TOWER_DEFAULT_REWARD = "power-dice-3";
+
+/**
+ * Validate a Tower config: what the month's best climber gets from the
+ * Tower Guard (`topRewardItemId`, Power Dice 3 unless set) and the herzie
+ * names never ranked for it (`excludeHerzies`).
+ */
+export async function validateTowerConfig(
+  admin: Admin,
+  config: Config,
+): Promise<ConfigResult> {
+  const reward =
+    typeof config.topRewardItemId === "string" && config.topRewardItemId
+      ? config.topRewardItemId
+      : TOWER_DEFAULT_REWARD;
+  if ((await missingItems(admin, [reward])).length > 0) {
+    return { error: `Unknown item: ${reward}` };
+  }
+  const raw = config.excludeHerzies ?? [];
+  if (!Array.isArray(raw) || raw.some((n) => typeof n !== "string")) {
+    return { error: "excludeHerzies must be a list of herzie names" };
+  }
+  const excludeHerzies = [
+    ...new Set((raw as string[]).map((n) => n.trim()).filter(Boolean)),
+  ];
+  return { config: { topRewardItemId: reward, excludeHerzies } };
+}
+
 const isPositiveInt = (v: unknown): v is number =>
   typeof v === "number" && Number.isInteger(v) && v > 0;
 

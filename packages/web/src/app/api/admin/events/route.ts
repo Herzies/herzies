@@ -5,6 +5,7 @@ import {
   isEventConfigComplete,
   validateBossConfig,
   validateMerchantConfig,
+  validateTowerConfig,
 } from "@/lib/event-config";
 import { adminEventSchema, isParseError, parseBody } from "@/lib/schemas";
 import { createAdminClient } from "@/lib/supabase-admin";
@@ -114,6 +115,12 @@ export async function POST(request: Request) {
 
   if (type === "merchant" || type === "treat_trader") {
     const result = await validateMerchantConfig(admin, config);
+    if ("error" in result) return badRequest(result.error);
+    config = result.config;
+  }
+
+  if (type === "tower") {
+    const result = await validateTowerConfig(admin, config);
     if ("error" in result) return badRequest(result.error);
     config = result.config;
   }

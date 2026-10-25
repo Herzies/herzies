@@ -167,6 +167,20 @@ export const BOBOKU_RAMP = [
 ] as const;
 
 /**
+ * The Tower Guard, who stands by the Tower and doubts you. No item grants
+ * it: a navy uniform, darkening toward the boots, so his steel helm stands
+ * out against it.
+ */
+export const TOWER_GUARD_RAMP = [
+  "#4A6191",
+  "#455B8A",
+  "#3F5482",
+  "#3A4D78",
+  "#34456C",
+  "#2E3D60",
+] as const;
+
+/**
  * Medea, who sells sweets and potions and is always in Town. No item grants
  * it: candy pink at the crown sinking through orchid and violet into a plum
  * that's nearly black at her feet — sweet on top, darker underneath.

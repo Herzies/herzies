@@ -83,9 +83,14 @@ export function Visitor({
   const open = card.openKey;
   const Tag = open ? "button" : "div";
   // A visitor who's arrived and you haven't talked to yet: a "!" over their
-  // head. The residents live here, so they never arrive.
+  // head. The residents live here, so they never arrive — unless they have
+  // something for you (card.notice: the Tower Guard owes you a reward).
   const met = useMet(card);
-  const fresh = !!herzie && live && !!open && !met && !RESIDENTS.has(card.type);
+  const fresh =
+    !!herzie &&
+    live &&
+    !!open &&
+    (card.notice ?? (!met && !RESIDENTS.has(card.type)));
   const talk = () => {
     if (!open) return;
     markMet(card);
@@ -148,7 +153,11 @@ export function Visitor({
           <button
             type="button"
             onClick={talk}
-            aria-label={`${card.title} is new in town`}
+            aria-label={
+              card.notice
+                ? `${card.title} has something for you`
+                : `${card.title} is new in town`
+            }
             className="town-new-marker cursor-pointer border-none bg-transparent p-0 font-bold leading-none"
           >
             !

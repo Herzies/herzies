@@ -24,6 +24,7 @@ export * from "./skills.js";
 export * from "./stats.js";
 export * from "./thread-physics.js";
 export * from "./tower.js";
+export * from "./tower-guard.js";
 export * from "./town-interpolation.js";
 export * from "./town-net.js";
 export * from "./types.js";

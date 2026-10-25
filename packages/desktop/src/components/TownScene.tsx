@@ -14,6 +14,10 @@ import {
   NANDOR_EQUIPPED,
   NANDOR_SEED,
   ORPHIEZ_EQUIPPED,
+  TOWER_GUARD_EQUIPPED,
+  TOWER_GUARD_KEY,
+  TOWER_GUARD_SEED,
+  TOWER_GUARD_STAGE,
   VISITORS,
 } from "@herzies/shared";
 import type { HerzieLook } from "@herzies/shared/gl";
@@ -31,6 +35,9 @@ export type EventCard = {
   openKey: string | null;
   /** For a stable React key. */
   eventId?: string;
+  /** Wears a "!" for a reason of its own (the Tower Guard owes you), in
+   * place of the usual "you haven't talked to them yet". */
+  notice?: boolean;
 };
 
 export function formatIn(at: string): string {
@@ -71,6 +78,12 @@ export function lookOf(card: EventCard): Look {
         seed: MEDEA_SEED,
         stage: MEDEA_STAGE,
         equipped: MEDEA_EQUIPPED,
+      };
+    case TOWER_GUARD_KEY:
+      return {
+        seed: TOWER_GUARD_SEED,
+        stage: TOWER_GUARD_STAGE,
+        equipped: TOWER_GUARD_EQUIPPED,
       };
     case "boss_fight": {
       const seed = `boss:${card.eventId ?? ""}`;

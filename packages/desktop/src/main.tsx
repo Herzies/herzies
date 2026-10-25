@@ -135,7 +135,9 @@ const dockObserver = new ResizeObserver(([entry]) => {
 });
 function observeDock(el: HTMLDivElement | null) {
   dockObserver.disconnect();
-  if (el) dockObserver.observe(el);
+  // The border box: going into the Town only changes the dock's padding,
+  // which the default (content box) wouldn't notice.
+  if (el) dockObserver.observe(el, { box: "border-box" });
 }
 
 function App() {

@@ -55,7 +55,7 @@ export function PlayerBars({
   }, []);
 
   return (
-    <div className={cn("flex flex-col gap-1", className)}>
+    <div className={cn("flex flex-col gap-[3px]", className)}>
       {live && (
         <HpBar
           hp={live.down ? 0 : live.hp}

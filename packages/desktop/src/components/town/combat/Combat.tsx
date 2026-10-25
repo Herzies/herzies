@@ -34,6 +34,7 @@ import {
   sfxMeleeHit,
   sfxSwing,
 } from "../sfx";
+import { getVitals, useVitals } from "../vitals";
 import { pushDamageNumber } from "./DamageNumbers";
 import { liveDummies } from "./Dummies";
 import {
@@ -117,6 +118,12 @@ export function Combat({
   // to fight (map.combat).
   const canFight = active;
 
+  // Knocked out: back to roaming, the mouse let go.
+  const down = !!useVitals()?.down;
+  useEffect(() => {
+    if (down) leave();
+  }, [down]);
+
   // Combat mode's keys and buttons.
   useEffect(() => {
     if (!canFight) {
@@ -144,7 +151,8 @@ export function Combat({
         e.preventDefault();
         if (e.repeat) return;
         if (combat.on) leave();
-        else void enter();
+        // Knocked out: nothing to aim with until you're back up.
+        else if (!getVitals()?.down) void enter();
       } else if (e.code === "Escape" && combat.on) {
         leave();
       } else if (e.code === "KeyF" && combat.on) {
@@ -378,7 +386,10 @@ export function Combat({
       const from = { x: chest.x, z: chest.z };
       combat.inReach =
         liveDummies.some((d) =>
-          meleeReaches(from, yaw, { ...d, radius: DUMMY.radius }),
+          meleeReaches(from, yaw, {
+            ...d,
+            radius: DUMMY.radius * (d.size ?? 1),
+          }),
         ) ||
         (inBossRoom() && meleeReaches(from, yaw, BOSS_STAND));
     }
@@ -517,7 +528,12 @@ export function Combat({
         const height = herzie.height * (blow === "strike" ? 0.6 : 0.4);
         let landed = false;
         for (const d of liveDummies) {
-          if (!meleeReaches(from, yaw, { ...d, radius: DUMMY.radius }))
+          if (
+            !meleeReaches(from, yaw, {
+              ...d,
+              radius: DUMMY.radius * (d.size ?? 1),
+            })
+          )
             continue;
           const toward = flatToward(from, d);
           const point: Vec3 = [

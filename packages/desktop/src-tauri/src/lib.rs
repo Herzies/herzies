@@ -770,6 +770,24 @@ async fn buy_from_boboku(
 }
 
 #[tauri::command]
+async fn fetch_tower_guard() -> Result<serde_json::Value, String> {
+    let client = api::http();
+    api::api_fetch_tower_guard(&client).await
+}
+
+/// The Tower Guard's reward: the item lands in the bank like a purchase.
+#[tauri::command]
+async fn claim_tower_reward(
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    let client = api::http();
+    let data = api::api_claim_tower_reward(&client).await?;
+    apply_purchase(&data, &app, &state);
+    Ok(data)
+}
+
+#[tauri::command]
 async fn buy_from_medea(
     item_id: String,
     quantity: u32,
@@ -2714,6 +2732,8 @@ pub fn run() {
             apply_dice_upgrade,
             buy_from_merchant,
             buy_from_boboku,
+            fetch_tower_guard,
+            claim_tower_reward,
             buy_from_medea,
             eat_item,
             collect_drop,

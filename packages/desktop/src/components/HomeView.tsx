@@ -198,7 +198,7 @@ export function HomeView({
             level={herzie.level}
             progress={levelProgress(herzie)}
             xp={herzie.xp}
-            className="mt-1 text-text-dim"
+            className="mt-1.5 text-text-dim"
           />
         </div>
         <div className="flex h-5 items-center gap-1.5">

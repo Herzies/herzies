@@ -43,6 +43,8 @@ describe("town map", () => {
     const map = parseMap(homeMap);
     // It's painted by hand, so only check what the game relies on.
     for (const kind of Object.keys(SPOT_NAMES)) {
+      // The Tower Guard stands wherever a map is given his spot, if any.
+      if (kind === "tower_guard") continue;
       expect(map.spots[kind]).toHaveLength(2);
     }
     expect(map.spare.length).toBeGreaterThan(0);
