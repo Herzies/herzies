@@ -1,7 +1,7 @@
 /**
  * The Tower boards: all time (best floor in any Tower) and this month (best
- * floor in Towers that started this calendar month, UTC — the monthly Tower,
- * 00120).
+ * floor in the running Tower — the monthly one, 00120 — as the Tower Guard
+ * ranks it).
  *
  * Requires: `npx supabase start`
  */
@@ -71,6 +71,12 @@ describe("tower boards", () => {
       new Date(Date.UTC(y, m, 1)),
       new Date(Date.UTC(y, m + 1, 1)),
     );
+    // A one-off Tower that started this month and is already over: all time
+    // only, like the Tower Guard.
+    const oneOff = await tower(
+      new Date(Date.UTC(y, m, 1)),
+      new Date(now.getTime() - 1000),
+    );
 
     const a = await createTestUser();
     const b = await createTestUser();
@@ -81,6 +87,7 @@ describe("tower boards", () => {
     await climbed(a.userId, lastMonth, 10);
     await climbed(a.userId, thisMonth, 3);
     await climbed(b.userId, thisMonth, 5);
+    await climbed(b.userId, oneOff, 20);
 
     const ours = (entries: Entry[]) =>
       entries
@@ -88,8 +95,8 @@ describe("tower boards", () => {
         .map((e) => [e.name, e.towerFloor]);
 
     expect(ours(await board(a.accessToken, "tower"))).toEqual([
+      [herzieB.name, 20],
       [herzieA.name, 10],
-      [herzieB.name, 5],
     ]);
     expect(ours(await board(a.accessToken, "tower_month"))).toEqual([
       [herzieB.name, 5],
