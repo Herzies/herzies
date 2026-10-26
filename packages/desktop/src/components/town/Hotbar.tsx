@@ -37,6 +37,7 @@ const SKILL_ABBR: Record<SkillId, string> = {
   cymbrella: "CB",
   resurrect: "RZ",
   taunt: "TA",
+  haste: "HS",
 };
 
 /**
@@ -108,8 +109,10 @@ function SkillSlot({
           </div>
         ) : n === 1 ? (
           "Your class skill — pick a class first"
-        ) : (
+        ) : n === 2 ? (
           "Your class's second skill (Bards and Percussionists have one)"
+        ) : (
+          "Your class's third skill (Bards learn Haste at level 15)"
         )
       }
     >

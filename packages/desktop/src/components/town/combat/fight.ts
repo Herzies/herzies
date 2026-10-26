@@ -768,7 +768,7 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       skills.sent.delete(m.seq);
       setReadyAt(id as SkillId, m.readyAt > 0 ? clock.toLocal(m.readyAt) : now);
       // Nor is the buff you put on yourself.
-      if (id === "cymbrella" || id === "taunt")
+      if (id === "cymbrella" || id === "taunt" || id === "haste")
         clearBuff(clock.you() ?? -1, id);
       if (m.reason) notify(REFUSALS[m.reason], { kind: "info" });
       emitSkills();

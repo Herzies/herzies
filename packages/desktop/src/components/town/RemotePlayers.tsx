@@ -24,7 +24,7 @@ import {
 } from "./combat/discs";
 import { DUMMY, hitDummy } from "./combat/dummy";
 import { bossFight, bossNow } from "./combat/fight";
-import { entityAt, setEntityAt } from "./combat/skills";
+import { attackSpeedOf, entityAt, setEntityAt } from "./combat/skills";
 import { slashField } from "./combat/slashes";
 import { assistTarget, type Vec3, waveField } from "./combat/waves";
 import { applyDowned, entityDown } from "./downed";
@@ -179,6 +179,7 @@ function RemoteHerzie({
         herzie.cast(0);
       }
     }
+    herzie.castRate = attackSpeedOf(remote.id, performance.now());
     herzie.update(dt, s.speed);
     if (herzie.released && throwsDiscs) {
       // Never waiting on our idea of their catch: a disc of theirs still
@@ -192,6 +193,7 @@ function RemoteHerzie({
         owner: herzie,
         hand: h,
         target: assistTarget(from, dir, liveDummies),
+        quick: attackSpeedOf(remote.id, performance.now()),
       });
     } else if (herzie.released && attack === "melee") {
       // Only for show: what's in front of them rocks (the server counts

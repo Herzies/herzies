@@ -470,6 +470,9 @@ export class HerzieModel {
   private readonly surgeToward: number;
   /** Seconds into a sonic cast; undefined when it isn't casting. */
   private castTime: number | undefined;
+  /** How fast its casts play: 1, or quicker while hasted (so the motion
+   * keeps up with the faster pace instead of being cut short). */
+  castRate = 1;
   private castPitch = 0;
   /** The arm this cast is with, and how it moves (a disc is thrown). */
   private castArmPart: string = CAST_ARM;
@@ -1150,7 +1153,7 @@ export class HerzieModel {
       if (dt <= 0) return;
     }
     const before = this.castTime;
-    this.castTime += dt;
+    this.castTime += dt * this.castRate;
     if (
       before < CAST_RELEASE_SECONDS &&
       this.castTime >= CAST_RELEASE_SECONDS

@@ -20,6 +20,7 @@ export const SKILL_IDS = [
   "cymbrella",
   "resurrect",
   "taunt",
+  "haste",
 ] as const;
 export type SkillId = (typeof SKILL_IDS)[number];
 
@@ -45,6 +46,9 @@ export interface SkillDef {
   /** A channel: the caster stands still this long before it takes effect
    * (moving or going down cancels it, and costs nothing). */
   channelMs?: number;
+  /** A skill a class learns later: the herzie level it's learned at (the
+   * database grants it then; see 00122_boss_revamp.sql). */
+  minLevel?: number;
   /** Skill XP per unit of effect (per HP healed, per damage absorbed, per
    * damage dealt). Meant to make each class level at a similar pace over
    * the same number of fights — first guesses, not yet calibrated against
@@ -116,7 +120,31 @@ export const SKILL_DEFS: Record<SkillId, SkillDef> = {
     // a taunt is for.
     xpPerUnit: 0.25,
   },
+  haste: {
+    id: "haste",
+    name: "Haste",
+    kind: "buff",
+    describe:
+      "A quickening tune: every herzie nearby (you too) attacks {v} faster for 12 s.",
+    // Raid-wide attack speed, as Bloodlust/Heroism (30%) or a Bard's
+    // songs: strong, so on a long cooldown, to be called at the right time.
+    value: [0.25, 0.4],
+    cooldownMs: 60_000,
+    durationMs: 12_000,
+    radius: 10,
+    minLevel: 15,
+    // Per point of extra damage the hasted dealt because of it (the share
+    // of their hits that haste added): the Backspin scale, a little lower
+    // since it comes from many hands at once.
+    xpPerUnit: 1 / 150,
+  },
 };
+
+/** The skills a class has learned by herzie level `level` (a skill with no
+ * minLevel from the start). */
+export function skillLearned(id: SkillId, level: number): boolean {
+  return level >= (SKILL_DEFS[id].minLevel ?? 0);
+}
 
 /** Backspin's fan: three discs, this far apart (radians). */
 export const BACKSPIN_SPREAD = (8 * Math.PI) / 180;
@@ -207,8 +235,9 @@ export function skillXpFor(id: SkillId, units: number): number {
 
 /** `cymbrella`: less damage. `taunt`: the boss's eye (shown on whoever
  * holds it; no stat). `in_tune`: listening to what the boss hates, a class
- * bonus whose `kind` says what it does. */
-export type BuffId = "cymbrella" | "taunt" | "in_tune" | "rattled";
+ * bonus whose `kind` says what it does. `haste`: attacks this much faster
+ * (0.3 = 30% more often). */
+export type BuffId = "cymbrella" | "taunt" | "in_tune" | "rattled" | "haste";
 
 /** What an in-tune bonus does: less damage taken, stronger heals, harder
  * hits. */
@@ -221,6 +250,9 @@ export interface Buff {
   /** Epoch ms. */
   until: number;
   kind?: BuffKind;
+  /** Who put it there (a user id), when someone else's work: a Haste's
+   * Bard is paid for what it adds. */
+  by?: string;
 }
 
 /** Every damage reduction a buff list gives at `now`: a Cymbrella, and an
@@ -258,8 +290,20 @@ export function applyBuff(buffs: readonly Buff[], next: Buff): Buff[] {
       value: Math.max(prev.value, next.value),
       until: Math.max(prev.until, next.until),
       ...(next.kind ? { kind: next.kind } : {}),
+      // The one that's stronger (or, as strong, the newer) is whose.
+      ...((next.value >= prev.value ? next.by : prev.by)
+        ? { by: next.value >= prev.value ? next.by : prev.by }
+        : {}),
     },
   ];
+}
+
+/** How much faster a buff list attacks at `now`: 1, or 1 + its Haste. */
+export function attackSpeed(buffs: readonly Buff[], now: number): number {
+  let haste = 0;
+  for (const b of activeBuffs(buffs, now))
+    if (b.id === "haste") haste = Math.max(haste, b.value);
+  return 1 + haste;
 }
 
 export function activeBuffs(buffs: readonly Buff[], now: number): Buff[] {

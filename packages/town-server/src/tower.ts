@@ -32,6 +32,7 @@ import type { TowerFloor, TowerMob } from "@herzies/shared/town-net";
 import {
   type BossEvent,
   type BossPlayer,
+  castSpeed,
   type Phase,
   rng,
   type Telegraph,
@@ -280,7 +281,9 @@ export class TowerEngine {
     };
     bucket.tokens = Math.min(
       TUNING.castBurst,
-      bucket.tokens + Math.max(0, now - bucket.at) / TUNING.castEveryMs,
+      bucket.tokens +
+        (Math.max(0, now - bucket.at) / TUNING.castEveryMs) *
+          castSpeed(this.buffs.get(uid) ?? [], now),
     );
     bucket.at = now;
     this.casts.set(uid, bucket);

@@ -34,7 +34,7 @@ const STARTS = T0 + 1_000;
 const LEVEL = 30;
 /** Print each fight's numbers, for tuning: flip on while tuning (the
  * Workers test runtime has no environment to switch it from). */
-const LOG = true;
+const LOG = false;
 
 type Role = "bard" | "percussionist" | "record_slinger" | "none";
 

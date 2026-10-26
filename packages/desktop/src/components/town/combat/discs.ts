@@ -93,6 +93,8 @@ export type Disc = {
   /** Back: from where, and how long it takes. */
   backFrom: Vec3;
   backTime: number;
+  /** How much quicker it comes home: a hasted thrower's (1 + Haste). */
+  quick: number;
 };
 
 /** A little flash: as it leaves the hand, as it turns, as it clinks off a
@@ -146,6 +148,7 @@ export class DiscField {
     turnTime: 0,
     backFrom: vec(),
     backTime: 0,
+    quick: 1,
   }));
   readonly sparks = pool<Spark>(24, () => ({
     alive: false,
@@ -180,6 +183,9 @@ export class DiscField {
       reach?: number;
       strike?: Disc["strike"];
       target?: DummyState | null;
+      /** Hasted: it comes home this much quicker (the way out is the
+       * server's timing, so it stays as it is). */
+      quick?: number;
     },
   ): Disc {
     for (const d of this.discs) {
@@ -203,6 +209,7 @@ export class DiscField {
     d.reach = Math.min(DISC.range, opts.reach ?? DISC.range);
     d.strike = opts.strike ?? null;
     d.target = opts.target ?? null;
+    d.quick = Math.max(1, opts.quick ?? 1);
     d.age = 0;
     d.t = 0;
     this.spark(from, "throw");
@@ -301,13 +308,14 @@ export class DiscField {
     // How long the way back takes is fixed as it starts, from how far the
     // hand is then: the hand can move on, and it still arrives on time.
     if (d.backTime === 0) {
-      d.backTime = backTime(
-        Math.hypot(
-          hand[0] - d.backFrom[0],
-          hand[1] - d.backFrom[1],
-          hand[2] - d.backFrom[2],
-        ),
-      );
+      d.backTime =
+        backTime(
+          Math.hypot(
+            hand[0] - d.backFrom[0],
+            hand[1] - d.backFrom[1],
+            hand[2] - d.backFrom[2],
+          ),
+        ) / d.quick;
     }
     const u = Math.min(1, d.t / d.backTime);
     // Slow off the turn, fast into the hand.

@@ -1,4 +1,4 @@
-import { WAVE_HAND_HEIGHT } from "@herzies/shared/combat";
+import { CAST_INTERVAL_MS, WAVE_HAND_HEIGHT } from "@herzies/shared/combat";
 import {
   SKILL_COOLDOWN_GRACE_MS,
   SKILL_DEFS,
@@ -7,7 +7,7 @@ import {
 import type { ServerMessage, TownTicketPayload } from "@herzies/shared/town-net";
 import { armed } from "./arms";
 import { describe, expect, it } from "vitest";
-import { BossEngine, type BossPlayer, TUNING } from "../src/boss";
+import { BossEngine, type BossPlayer, castSpeed, TUNING } from "../src/boss";
 import { FightRuntime, type Outbound, statsOf } from "../src/fight";
 
 const T0 = 5_000_000;
@@ -381,5 +381,77 @@ describe("the class's instrument", () => {
     f.renew("bard", ticket("bard", [["soothing-drones", 1]]));
     expect(f.player("bard")).toMatchObject({ attack: "wave", armed: true });
     expect(f.player("bard")?.look.equipped?.main_hand).toBe("lute");
+  });
+});
+
+describe("Haste", () => {
+  const hasted = () => {
+    const f = new FightRuntime(claim(), T0);
+    f.join("bard", 1, ticket("bard", [["haste", 1]]), { x: 0, z: 8 }, T0 - 5_000);
+    f.join("near", 2, ticket("near", [["backspin", 1]]), { x: 5, z: 8 }, T0 - 5_000);
+    f.join("far", 3, ticket("far", [["backspin", 1]]), { x: 0, z: -12 }, T0 - 5_000);
+    for (const [u, x, z] of [["bard", 0, 8], ["near", 5, 8], ["far", 0, -12]] as const)
+      f.onState(u, x, z, T0);
+    return f;
+  };
+
+  it("quickens everyone near, the Bard too, and tells the room", () => {
+    const f = hasted();
+    const { result, out } = f.skill("bard", "haste", 0, 0, T0);
+    expect(result).toBe("used");
+    const buffs = msgs(out, "buff").map((o) => o.msg);
+    expect(buffs.map((m) => m.t === "buff" && m.id).sort()).toEqual([1, 2]);
+    const v = skillValue("haste", 1);
+    expect(f.engine.buffsOf("near", T0)).toEqual([
+      expect.objectContaining({ id: "haste", value: v, by: "bard" }),
+    ]);
+    expect(f.engine.buffsOf("far", T0)).toEqual([]);
+    expect(f.player("bard")?.ready.get("haste")).toBe(
+      T0 + SKILL_DEFS.haste.cooldownMs,
+    );
+  });
+
+  it("lets the hasted cast faster, and the unhasted not", () => {
+    const pace = (haste: number) => {
+      const e = new BossEngine({ hp: 1e9, maxHp: 1e9, seed: 1, now: T0 });
+      if (haste) e.buff("a", { id: "haste", value: haste, until: T0 + 60_000 });
+      const every = CAST_INTERVAL_MS / (1 + haste);
+      let refused = 0;
+      for (let i = 0; i < 40; i++) {
+        const r = e.cast("a", { x: 0, z: 8 }, Math.PI, 0, statsOf(undefined), T0 + 1_000 + i * every);
+        if (r === "cooldown") refused++;
+      }
+      return refused;
+    };
+    expect(pace(0)).toBe(0);
+    expect(pace(0.4)).toBe(0);
+    // Hasted pace without the haste: refused.
+    const e = new BossEngine({ hp: 1e9, maxHp: 1e9, seed: 1, now: T0 });
+    let refused = 0;
+    for (let i = 0; i < 40; i++)
+      if (e.cast("a", { x: 0, z: 8 }, Math.PI, 0, statsOf(undefined), T0 + 1_000 + i * (CAST_INTERVAL_MS / 1.4)) === "cooldown")
+        refused++;
+    expect(refused).toBeGreaterThan(5);
+  });
+
+  it("holds a moment past its end, for a client a frame behind", () => {
+    const buffs = [{ id: "haste" as const, value: 0.4, until: T0 + 5_000 }];
+    expect(castSpeed(buffs, T0 + 5_100)).toBeCloseTo(1.4);
+    expect(castSpeed(buffs, T0 + 6_000)).toBe(1);
+  });
+
+  it("pays its Bard for the share of the damage it added", () => {
+    const f = hasted();
+    f.skill("bard", "haste", 0, 0, T0);
+    const { yaw, pitch } = aim(5, 8);
+    // A fraction of an XP a hit: a dozen hasted hits make a point or two.
+    for (let i = 0; i < 24; i++) {
+      f.onState("near", 5, 8, T0 + 100 + i * 400);
+      expect(f.cast("near", yaw, pitch, T0 + 100 + i * 400)).toBe("hit");
+      f.step(T0 + 100 + i * 400);
+    }
+    f.step(T0 + 12_000);
+    const xp = f.report(T0 + 12_001, true)?.skills?.xp ?? [];
+    expect(xp.find((x) => x.uid === "bard" && x.skill === "haste")?.xp).toBeGreaterThan(0);
   });
 });

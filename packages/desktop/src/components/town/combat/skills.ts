@@ -6,6 +6,8 @@ import {
   skillValue,
 } from "@herzies/shared";
 import { useSyncExternalStore } from "react";
+import { notify } from "../../../lib/notices";
+import { offerSkillSlot } from "../hotbarSlots";
 
 /**
  * Class skills as the client holds them: yours (which, their levels, when
@@ -146,6 +148,14 @@ export function setMySkills(
       (s, i) => s.id === skills.list[i].id && s.level === skills.list[i].level,
     );
   if (same) return;
+  // Learned just now (not the list arriving at launch): say so, and put it
+  // on the hotbar if there's room.
+  if (skills.list.length) {
+    for (const s of next)
+      if (!skills.list.some((p) => p.id === s.id))
+        notify(`Learned "${SKILL_DEFS[s.id].name}"`, { kind: "info" });
+  }
+  for (let i = 1; i <= next.length; i++) offerSkillSlot(i);
   skills.list = next;
   emitSkills();
 }
@@ -223,6 +233,11 @@ export function buffOn(
 ): ActiveBuff | undefined {
   if (id === null) return undefined;
   return skills.buffs.get(id)?.find((b) => b.buff === buff && b.until > now);
+}
+
+/** How much faster entity `id` attacks at `now`: 1, or 1 + its Haste. */
+export function attackSpeedOf(id: number | null, now: number): number {
+  return 1 + (buffOn(id, "haste", now)?.value ?? 0);
 }
 
 /** A resurrect began (or, with `target` null, stopped). */

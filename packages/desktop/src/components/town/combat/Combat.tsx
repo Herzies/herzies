@@ -31,6 +31,7 @@ import {
   sfxDiscClink,
   sfxDiscThrow,
   sfxDiscTurn,
+  sfxHaste,
   sfxImpact,
   sfxMeleeHit,
   sfxSwing,
@@ -50,6 +51,7 @@ import { DUMMY, type DummyState, hitDummy, meterDps } from "./dummy";
 import { bossFight, bossNow } from "./fight";
 import { enterMouseLook, exitMouseLook } from "./mouseLook";
 import {
+  attackSpeedOf,
   entityAt,
   instrumentNeeded,
   noteSkillCast,
@@ -472,7 +474,11 @@ export function Combat({
       // A Cymbrella's on you at once, for as long as it lasts: in a fight
       // the server's word replaces this (or a refusal takes it off); in
       // practice there's no server to say so.
-      if (mine.id === "cymbrella" || mine.id === "taunt") {
+      if (
+        mine.id === "cymbrella" ||
+        mine.id === "taunt" ||
+        mine.id === "haste"
+      ) {
         setBuff(bossFight.you ?? -1, {
           buff: mine.id,
           value: mine.id === "taunt" ? 1 : skillValue(mine.id, mine.level),
@@ -500,6 +506,7 @@ export function Combat({
         }
       }
       if (mine.id === "taunt") sfxTaunt();
+      else if (mine.id === "haste") sfxHaste();
       else sfxCast();
       shake(0.15);
     }
@@ -511,11 +518,15 @@ export function Combat({
     const discs = combat.attack === "disc";
     const melee = combat.attack === "melee";
     const blow = combat.blow;
+    // Hasted: the pace and the motion quicken together.
+    const speed = attackSpeedOf(bossFight.you ?? -1, now);
+    if (herzie) herzie.castRate = speed;
     if (herzie) {
       const queued = now - combat.queuedAt < CAST_BUFFER_MS;
       const free = discs ? nextHand(discField, herzie) : null;
       const ready =
-        (now - a.castAt) / 1000 >= CAST_INTERVAL && (!discs || free !== null);
+        ((now - a.castAt) / 1000) * speed >= CAST_INTERVAL &&
+        (!discs || free !== null);
       if (combat.on && (queued || combat.fireHeld) && ready && discs && free) {
         a.castAt = now;
         a.throwing = free;
@@ -641,6 +652,7 @@ export function Combat({
           reach: solid ? toAim : DISC_RANGE,
           strike: solid ? (onBoss ? "target" : "wall") : null,
           target,
+          quick: speed,
         });
         if (bossFight.on) sendBossCast(herzie, a.point);
         shake(0.04);

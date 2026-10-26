@@ -48,7 +48,7 @@ export const CLASS_DEFS: Record<HerzieClass, ClassDef> = {
     role: "support",
     equipment: ["lute"],
     starterSkill: "soothing-drones",
-    skills: ["soothing-drones", "resurrect"],
+    skills: ["soothing-drones", "resurrect", "haste"],
     attack: "wave",
   },
   record_slinger: {

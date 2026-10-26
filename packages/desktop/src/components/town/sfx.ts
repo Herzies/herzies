@@ -365,6 +365,32 @@ export function sfxTaunt(): void {
   noiseBurst(a, "bandpass", 1200, 500, 2.5, 0.18, 0.4);
 }
 
+/** Haste: a quick run of rising ticks, a metronome speeding up, and a
+ * bright strum on top. */
+export function sfxHaste(): void {
+  const a = audio();
+  if (!a) return;
+  const k = wobble(0.02);
+  // Ticks closing in on each other: tick... tick.. tick. tick tick.
+  let at = 0;
+  for (let i = 0; i < 6; i++) {
+    tone(a, "square", 1400 * k, 1300 * k, 0.05, 0.001, 0.03, at);
+    at += 0.12 * 0.72 ** i;
+  }
+  const chord = [523, 659, 784, 1047];
+  for (let i = 0; i < chord.length; i++)
+    tone(
+      a,
+      "triangle",
+      chord[i] * k,
+      chord[i] * k,
+      0.09,
+      0.005,
+      0.45,
+      at + i * 0.02,
+    );
+}
+
 /** A resurrect being played: a soft rising chime. */
 export function sfxChannel(): void {
   const a = audio();

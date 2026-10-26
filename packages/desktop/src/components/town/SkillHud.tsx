@@ -6,7 +6,8 @@ import { buffOn, skills } from "./combat/skills";
 /**
  * What your buffs are doing right now, beside the hotbar: a Cymbrella
  * you're under (how much less damage, the seconds left) and Rattled from
- * the boss's busters (stacks, seconds left: time to hand the boss over).
+ * the boss's busters (stacks, seconds left: time to hand the boss over),
+ * and a Haste (how much faster, the seconds left).
  * Your skills sit on the hotbar (Hotbar.tsx) with their cooldowns; a skill
  * being played, or a Bard playing you back up, is the cast bar over its
  * middle (CastBar). (A level-up is a notice: lib/notices.ts.)
@@ -19,6 +20,7 @@ export function SkillHud({
 }) {
   const buffBox = useRef<HTMLDivElement>(null);
   const rattledBox = useRef<HTMLDivElement>(null);
+  const hasteBox = useRef<HTMLDivElement>(null);
 
   // Runs off the frame clock, not renders.
   useEffect(() => {
@@ -33,6 +35,15 @@ export function SkillHud({
           : "";
         if (b && buffBox.current.textContent !== text)
           buffBox.current.textContent = text;
+      }
+      if (hasteBox.current) {
+        const h = buffOn(bossFight.you, "haste", now);
+        hasteBox.current.style.display = h ? "" : "none";
+        const text = h
+          ? `⏩ Haste +${Math.round(h.value * 100)}% · ${Math.ceil((h.until - now) / 1000)}s`
+          : "";
+        if (h && hasteBox.current.textContent !== text)
+          hasteBox.current.textContent = text;
       }
       if (rattledBox.current) {
         const r = buffOn(bossFight.you, "rattled", now);
@@ -59,6 +70,11 @@ export function SkillHud({
       <div
         ref={rattledBox}
         className="rounded bg-black/60 px-1.5 text-[11px] text-[#ff8a7a]"
+        style={{ display: "none" }}
+      />
+      <div
+        ref={hasteBox}
+        className="rounded bg-black/60 px-1.5 text-[11px] text-[#5ef0ff]"
         style={{ display: "none" }}
       />
       <div

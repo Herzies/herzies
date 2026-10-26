@@ -763,6 +763,25 @@ export class FightRuntime {
       });
       this.engine.addThreat(uid, TUNING.threat.cymbrella);
       out.push(this.buffMsg(p.id, buff));
+    } else if (skillId === "haste") {
+      // Everyone standing near (the Bard too), for its length. Euphony
+      // strengthens it like any buff, to a ceiling.
+      const strength = Math.min(HASTE_MAX, value * buffMult(p.stats.euphony));
+      const until = now + (def.durationMs ?? 0);
+      for (const o of this.players.values()) {
+        if (!o.present || o.down) continue;
+        const at = this.history.at(o.uid, now);
+        if (!at) continue;
+        if (Math.hypot(at.x - pos.x, at.z - pos.z) > (def.radius ?? 0))
+          continue;
+        const buff = this.engine.buff(o.uid, {
+          id: "haste",
+          value: strength,
+          until,
+          by: uid,
+        });
+        out.push(this.buffMsg(o.id, buff));
+      }
     } else if (skillId === "backspin") {
       this.engine.backspin(uid, pos, yaw, pitch, p.stats, value, now);
     } else if (skillId === "taunt" && boss) {
@@ -1575,6 +1594,22 @@ export class FightRuntime {
         );
         if (ev.skill && isSkillId(ev.skill))
           this.earn(ev.uid, ev.skill, skillXpFor(ev.skill, ev.damage));
+        // A hasted hit: the Bard who hasted them earns for the share of
+        // their damage the haste added.
+        {
+          const haste = this.engine
+            .buffsOf(ev.uid, now)
+            .find((b) => b.id === "haste");
+          if (haste?.by && ev.damage > 0)
+            this.earn(
+              haste.by,
+              "haste",
+              skillXpFor(
+                "haste",
+                (ev.damage * haste.value) / (1 + haste.value),
+              ),
+            );
+        }
         out.push({
           to: { uid: ev.uid },
           msg: {
@@ -1991,6 +2026,10 @@ export type FightStats = HitStats & { def: number; euphony: number };
 
 /** Stats from a ticket's `st`; a ticket from before stat points has no Def
  * or Euphony, and one from before stats has nothing. */
+/** The most attack speed a Haste can give, however much Euphony is behind
+ * it (+50%). */
+const HASTE_MAX = 0.5;
+
 /** How a ticket's herzie fights: its basic attack, a blow's strength, and
  * whether it holds its class's instrument. */
 function armsOf(

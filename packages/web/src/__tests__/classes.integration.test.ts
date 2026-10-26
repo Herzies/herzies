@@ -99,6 +99,32 @@ describe("choosing a class", () => {
     expect(lutes).toHaveLength(0);
   });
 
+  it("a Bard learns Haste at level 15: on choosing, or on reaching it", async () => {
+    const young = await player({ stage: 2, level: 14 });
+    await rpc("choose_class", { p_user_id: young, p_class: "bard" });
+    expect((await skills(young)).map((s) => s.skill_id)).toEqual([
+      "resurrect",
+      "soothing-drones",
+    ]);
+    // Level 15: learned (by the trigger), once.
+    await admin().from("herzies").update({ level: 15 }).eq("user_id", young);
+    await admin().from("herzies").update({ level: 16 }).eq("user_id", young);
+    expect((await skills(young)).map((s) => s.skill_id)).toEqual([
+      "haste",
+      "resurrect",
+      "soothing-drones",
+    ]);
+    // Choosing at 15 or above: straight away.
+    const grown = await player({ stage: 3, level: 20 });
+    await rpc("choose_class", { p_user_id: grown, p_class: "bard" });
+    expect((await skills(grown)).map((s) => s.skill_id)).toContain("haste");
+    // Other classes never do.
+    const tank = await player({ stage: 3, level: 20 });
+    await rpc("choose_class", { p_user_id: tank, p_class: "percussionist" });
+    await admin().from("herzies").update({ level: 21 }).eq("user_id", tank);
+    expect((await skills(tank)).map((s) => s.skill_id)).not.toContain("haste");
+  });
+
   it("refuses an unknown class", async () => {
     const userId = await player({ stage: 2, level: 12 });
     expect(

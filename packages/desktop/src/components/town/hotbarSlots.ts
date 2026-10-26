@@ -27,8 +27,8 @@ export function skillOfSlot(value: string | null): number | null {
 
 /** How the one class skill was saved before classes had two. */
 const LEGACY_SKILL_SLOT = "skill";
-/** How many skills a class may have. */
-export const MAX_CLASS_SKILLS = 2;
+/** How many skills a class may have (a Bard's third, Haste, at level 15). */
+export const MAX_CLASS_SKILLS = 3;
 
 const STORAGE_KEY = "herzies.town.hotbar";
 /** The first skill starts on 1, where it always was; the second beside it. */
@@ -67,9 +67,34 @@ function load(): Hotbar {
 
 let slots = load();
 
+/** Skills already put on the bar once on being learned (see
+ * offerSkillSlot), so one moved off it isn't put back. */
+let offered = (() => {
+  try {
+    const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null");
+    return new Set<number>(Array.isArray(raw?.offered) ? raw.offered : []);
+  } catch {
+    return new Set<number>();
+  }
+})();
+
+/** A skill just learned (your class's `n`th, past the first two): onto the
+ * first empty slot, once. */
+export function offerSkillSlot(n: number): void {
+  if (n <= 2 || offered.has(n)) return;
+  offered = new Set([...offered, n]);
+  const free = HOTBAR_KEYS.find((k) => slots[k] === null);
+  if (free && !HOTBAR_KEYS.some((k) => slots[k] === skillSlot(n)))
+    slots = { ...slots, [free]: skillSlot(n) };
+  save();
+}
+
 function save() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...slots, v2: true }));
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ ...slots, v2: true, offered: [...offered] }),
+    );
   } catch {
     // Private mode or full: the slots last until the app closes.
   }

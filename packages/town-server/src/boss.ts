@@ -52,6 +52,7 @@ import {
 import {
   activeBuffs,
   applyBuff,
+  attackSpeed,
   BACKSPIN_DISCS,
   BACKSPIN_SPREAD,
   type Buff,
@@ -93,6 +94,9 @@ export const TUNING = {
    * the server has a player is a moment behind where they see themselves. */
   meleeSlack: 0.75,
   castBurst: 2,
+  /** A Haste is honoured this long past its end (and its start): a client
+   * a frame or a trip behind mustn't have a hasted cast called too soon. */
+  hasteGraceMs: 300,
   /** Pause before the first attack of a fight, and after resuming. */
   openingMs: 3_000,
   /** A herzie's radius, for how close the boss walks up. */
@@ -724,7 +728,9 @@ export class BossEngine {
     };
     bucket.tokens = Math.min(
       TUNING.castBurst,
-      bucket.tokens + Math.max(0, now - bucket.at) / TUNING.castEveryMs,
+      bucket.tokens +
+        (Math.max(0, now - bucket.at) / TUNING.castEveryMs) *
+          castSpeed(this.buffs.get(uid) ?? [], now),
     );
     bucket.at = now;
     this.casts.set(uid, bucket);
@@ -1449,6 +1455,18 @@ export function mitigatedHit(
     blocked,
     ...(tg.aimedAt === p.uid ? { aimed: true } : {}),
   };
+}
+
+/** How much faster a hasted herzie may cast at `now`: its Haste, honoured
+ * {@link TUNING.hasteGraceMs} either side, so a client a little ahead or
+ * behind the server's clock is never refused a cast it was allowed. */
+export function castSpeed(buffs: readonly Buff[], now: number): number {
+  const g = TUNING.hasteGraceMs;
+  return Math.max(
+    attackSpeed(buffs, now),
+    attackSpeed(buffs, now - g),
+    attackSpeed(buffs, now + g),
+  );
 }
 
 /** Whether a telegraph covers a point. A buster covers its target, not a

@@ -15,7 +15,8 @@
 --
 -- Mirrors: bossMaxHp (packages/shared/src/boss-fight.ts) in
 -- lock_boss_fight, BOSS_LOBBY_MS in open_boss_json, CLASS_DEFS[].skills
--- (classes.ts) in choose_class.
+-- (classes.ts) in choose_class, SKILL_DEFS[].minLevel (skills.ts) in
+-- choose_class and grant_level_skills.
 
 -- ---------------------------------------------------------------------------
 -- Tables
@@ -762,10 +763,11 @@ set search_path = ''
 as $$
 declare
   v_stage  int;
+  v_level  int;
   v_class  text;
   v_skills text[];
 begin
-  select stage, class into v_stage, v_class
+  select stage, level, class into v_stage, v_level, v_class
     from public.herzies where user_id = p_user_id for update;
   if not found then
     return jsonb_build_object('ok', false, 'reason', 'not-found');
@@ -792,6 +794,10 @@ begin
     when 'record_slinger' then array['backspin']
     when 'percussionist' then array['cymbrella', 'taunt']
   end;
+  -- Haste is learned at level 15 (grant_level_skills gives it then).
+  if p_class = 'bard' and v_level >= 15 then
+    v_skills := v_skills || array['haste'];
+  end if;
 
   update public.herzies set class = p_class where user_id = p_user_id;
 
@@ -809,6 +815,41 @@ insert into public.herzie_skills (user_id, skill_id)
 select h.user_id, case h.class when 'bard' then 'resurrect' else 'taunt' end
   from public.herzies h
  where h.class in ('bard', 'percussionist')
+on conflict do nothing;
+
+-- Skills learned on reaching a level (SKILL_DEFS[].minLevel): a Bard learns
+-- Haste at 15. On every level or class change; the client re-tickets on a
+-- level-up, so the Town server sees it at once.
+create or replace function public.grant_level_skills()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if new.class = 'bard' and new.level >= 15 then
+    insert into public.herzie_skills (user_id, skill_id)
+    values (new.user_id, 'haste')
+    on conflict do nothing;
+  end if;
+  return new;
+end;
+$$;
+
+revoke execute on function public.grant_level_skills() from public, anon, authenticated;
+
+drop trigger if exists herzies_grant_level_skills on public.herzies;
+create trigger herzies_grant_level_skills
+  after update of level, class on public.herzies
+  for each row
+  when (new.class = 'bard' and new.level >= 15)
+  execute function public.grant_level_skills();
+
+-- Bards already at 15 or above learn it now.
+insert into public.herzie_skills (user_id, skill_id)
+select h.user_id, 'haste'
+  from public.herzies h
+ where h.class = 'bard' and h.level >= 15
 on conflict do nothing;
 
 -- ---------------------------------------------------------------------------
