@@ -742,6 +742,9 @@ export type ServerMessage =
     }
   /** Where the boss stands and faces, while it walks (every tick it
    * moves). */
+  /** Your own contribution to the fight so far, and where it ranks of
+   * `of` (the roster), every couple of seconds. */
+  | { t: "tally"; score: number; rank: number; of: number }
   /** Where the boss stands, at server time `at`. */
   | { t: "bossAt"; at?: number; x: number; z: number; yaw: number }
   /** The boss says something, shown over its head until `until`. */

@@ -2177,8 +2177,6 @@ fn has_landed_drop(drops: &[PendingDrop], now_secs: i64) -> bool {
         .any(|d| parse_rfc3339_secs(&d.dropped_at).is_none_or(|t| t <= now_secs))
 }
 
-/// How long `events_watch_loop` should sleep: the regular interval, or less if
-/// an upcoming event starts sooner than that.
 /// How long a boss's cave is open before its fight: the lobby
 /// (`BOSS_LOBBY_MS` in @herzies/shared).
 const BOSS_LOBBY_SECS: i64 = 15 * 60;
@@ -2204,6 +2202,8 @@ fn boss_lobbies(upcoming: &[GameEvent], now_secs: i64) -> impl Iterator<Item = &
     })
 }
 
+/// How long `events_watch_loop` should sleep: the regular interval, or less if
+/// an upcoming event starts sooner than that.
 fn next_events_wake(upcoming: &[GameEvent], now_secs: i64) -> Duration {
     let soonest = upcoming
         .iter()

@@ -113,6 +113,10 @@ export function enrageFactor(sinceLockMs: number): number {
 
 /** At these shares of its health, the boss calls a pack. */
 export const MINION_THRESHOLDS = [0.5, 0.25] as const;
+
+/** Where the boss changes gear: phase 2 below the first share of its
+ * health, phase 3 below the second. The HUD marks them on its bar. */
+export const BOSS_PHASE_AT = [0.66, 0.33] as const;
 /** The pack: about one per two herzies, two at least, eight at most. */
 export function minionPackSize(roster: number, rand: () => number): number {
   return Math.min(8, Math.max(2, weightedRound(roster / 2, rand)));

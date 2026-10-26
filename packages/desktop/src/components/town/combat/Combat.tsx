@@ -34,6 +34,7 @@ import {
   sfxImpact,
   sfxMeleeHit,
   sfxSwing,
+  sfxTaunt,
 } from "../sfx";
 import { getVitals, useVitals } from "../vitals";
 import { pushDamageNumber } from "./DamageNumbers";
@@ -493,7 +494,8 @@ export function Combat({
           });
         }
       }
-      sfxCast();
+      if (mine.id === "taunt") sfxTaunt();
+      else sfxCast();
       shake(0.15);
     }
 

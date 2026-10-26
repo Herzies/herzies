@@ -246,13 +246,24 @@ export function BossFightPanel({
             <SegmentBar progress={hpFrac} colour="bg-red" />
           </div>
 
-          <div>
-            <div className="mb-0.5 flex items-baseline justify-between text-ui text-text-dim">
-              <span>Time left</span>
-              <span className="text-ui-sm">{formatRemaining(remaining)}</span>
+          {now < startsAt ? (
+            // Before the fight: when it starts (the lair opens 15 min
+            // before), not the event's whole window.
+            <div className="flex items-baseline justify-between text-ui text-text-dim">
+              <span>Fight in</span>
+              <span className="text-ui-sm text-text">
+                {formatRemaining(startsAt - now)}
+              </span>
             </div>
-            <SegmentBar progress={timeFrac} colour="bg-cyan" />
-          </div>
+          ) : (
+            <div>
+              <div className="mb-0.5 flex items-baseline justify-between text-ui text-text-dim">
+                <span>Time left</span>
+                <span className="text-ui-sm">{formatRemaining(remaining)}</span>
+              </div>
+              <SegmentBar progress={timeFrac} colour="bg-cyan" />
+            </div>
+          )}
         </>
       ) : null}
 
@@ -379,9 +390,10 @@ export function BossFightHelp({ event }: { event: GameEvent }) {
           The lair opens 15 minutes before the fight. Whoever is inside when the
           boss wakes is in; then the door shuts. Dodge the glowing floor and
           bring it down together. Knocked out, you wait for a Bard to play you
-          back up (the raid has only so many revives), or leave without a
-          reward. It hates music: keep some playing for a class bonus. Everyone still in when it falls gets the reward; the top
-          contributor gets a statue in town.
+          back up, or leave without a reward. Percussionists take turns holding
+          it with Taunt. It hates music: keep some playing for a class bonus.
+          Everyone still in when it falls gets the reward; the top contributor
+          gets a statue in town.
         </>
       }
       rewards={rewards}

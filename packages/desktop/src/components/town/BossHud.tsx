@@ -1,4 +1,4 @@
-import { IN_TUNE } from "@herzies/shared";
+import { BOSS_PHASE_AT, IN_TUNE, MINION_THRESHOLDS } from "@herzies/shared";
 import { useEffect, useState } from "react";
 import { cn } from "../../lib/utils";
 import { clock } from "./cave";
@@ -9,6 +9,7 @@ import {
   useBossFight,
   useBossHp,
 } from "./combat/fight";
+import { type Banner, useBanner } from "./combat/moments";
 import { buffOn, useSkills } from "./combat/skills";
 
 /** The boss's card: top right, clear of your own (top left), as wide as
@@ -19,8 +20,10 @@ const BOSS_CARD =
 /**
  * What the boss room shows over the world. The boss has a card of its own,
  * top right: its name, and in the lobby how long until it wakes; in the
- * fight its health (with its phases marked), how many still stand, the
- * raid's revives, the taunt, the enrage; once it's over, what happened and
+ * fight its health (its phases and minion calls marked, a chip of what was
+ * just lost), the phase, how many still stand, the taunt, the enrage; the
+ * raid's big moments across the screen (RaidBanner); once it's over, what
+ * happened and
  * how long until the room closes. A flash of red when you're hit. In the
  * Tower: the floor, at the top. (Your music's bonus sits under your own
  * now-playing box: MusicBonus. The door's and the room's little messages
@@ -65,10 +68,14 @@ export function BossHud({ name }: { name: string }) {
             </span>
           </div>
           {raid?.stage === "lobby" ? (
-            <div role="status" className="text-[11px] text-white/80">
+            <div className="text-[11px] text-white/80">
               Wakes in{" "}
               <span className="tabular-nums font-medium text-white">
                 {clock(Math.max(0, raid.startsAt - now))}
+              </span>
+              <span className="text-white/60">
+                {" · "}
+                {raid.roster} {raid.roster === 1 ? "herzie" : "herzies"} here
               </span>
             </div>
           ) : (
@@ -82,21 +89,41 @@ export function BossHud({ name }: { name: string }) {
                 aria-valuenow={Math.round(hp)}
               >
                 <div className="relative h-2 overflow-hidden rounded-sm bg-black/60 ring-1 ring-white/25">
+                  {/* The chip: what was just lost, in white, catching up
+                      a moment later so each burst of damage reads. */}
                   <div
-                    className="h-full bg-red-500 transition-[width] duration-200"
+                    className="absolute inset-y-0 left-0 bg-white/70 transition-[width] duration-500 ease-out motion-reduce:transition-none"
+                    style={{
+                      width: `${frac * 100}%`,
+                      transitionDelay: "350ms",
+                    }}
+                  />
+                  <div
+                    className="relative h-full bg-red-500 transition-[width] duration-100"
                     style={{ width: `${frac * 100}%` }}
                   />
-                  {/* Where it changes gear. */}
-                  {[0.66, 0.33].map((p) => (
+                  {/* Where it changes gear (solid), and where it calls
+                      its minions (dotted). */}
+                  {BOSS_PHASE_AT.map((p) => (
                     <span
-                      key={p}
-                      className="absolute top-0 h-full w-px bg-white/50"
+                      key={`p${p}`}
+                      className="absolute top-0 h-full w-px bg-white/60"
+                      style={{ left: `${p * 100}%` }}
+                    />
+                  ))}
+                  {MINION_THRESHOLDS.map((p) => (
+                    <span
+                      key={`m${p}`}
+                      className="absolute top-0 h-full w-px border-l border-dotted border-[#9be36b]/80"
                       style={{ left: `${p * 100}%` }}
                     />
                   ))}
                 </div>
-                <div className="mt-0.5 text-[10px] leading-3 tabular-nums text-white/60">
-                  {Math.ceil(hp).toLocaleString()} / {maxHp.toLocaleString()}
+                <div className="mt-0.5 flex text-[10px] leading-3 tabular-nums text-white/60">
+                  <span>
+                    {Math.ceil(hp).toLocaleString()} / {maxHp.toLocaleString()}
+                  </span>
+                  <span className="ml-auto">Phase {bossFight.phase}</span>
                 </div>
               </div>
               {closing ? (
@@ -130,6 +157,7 @@ export function BossHud({ name }: { name: string }) {
           </span>
         </div>
       ) : null}
+      {on && !tower ? <RaidBanner /> : null}
       {on && performance.now() - youHitAt < 450 ? (
         <div
           key={youHitAt}
@@ -139,6 +167,54 @@ export function BossHud({ name }: { name: string }) {
         />
       ) : null}
     </>
+  );
+}
+
+const BANNER_TONE: Record<Banner["tone"], string> = {
+  count: "text-white text-6xl",
+  fight: "text-[#ffd84a] text-5xl",
+  phase: "text-[#ff9a6a] text-4xl",
+  enrage: "text-red-400 text-4xl",
+  wipe: "text-white/80 text-4xl",
+};
+
+/** The raid's big moments in words across the screen (moments.ts): the
+ * countdown, FIGHT!, a new phase, the enrage, a wipe. Pops in, fades. */
+function RaidBanner() {
+  const b = useBanner();
+  const [, setTick] = useState(0);
+  // Drop it once its time is up.
+  useEffect(() => {
+    if (!b) return;
+    const t = setTimeout(
+      () => setTick((n) => n + 1),
+      Math.max(0, b.at + b.ms - performance.now()) + 20,
+    );
+    return () => clearTimeout(t);
+  }, [b]);
+  if (!b || performance.now() > b.at + b.ms) return null;
+  return (
+    <div
+      key={b.at}
+      aria-live="assertive"
+      className="pointer-events-none absolute inset-x-0 top-[22%] z-30 flex flex-col items-center text-center"
+      style={{ animation: `raid-banner ${b.ms}ms ease-out forwards` }}
+    >
+      <style>{`@keyframes raid-banner{0%{opacity:0;transform:scale(1.6)}8%{opacity:1;transform:scale(0.96)}14%{transform:scale(1)}75%{opacity:1}100%{opacity:0;transform:scale(1)}}@media (prefers-reduced-motion: reduce){@keyframes raid-banner{0%{opacity:0}8%{opacity:1}75%{opacity:1}100%{opacity:0}}}`}</style>
+      <div
+        className={cn(
+          "font-black tracking-wide [text-shadow:0_2px_0_#000,0_0_18px_rgba(0,0,0,0.85)]",
+          BANNER_TONE[b.tone],
+        )}
+      >
+        {b.text}
+      </div>
+      {b.sub ? (
+        <div className="mt-1 text-ui font-medium text-white/90 [text-shadow:0_1px_2px_#000,0_0_8px_#000]">
+          {b.sub}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -192,6 +268,15 @@ function RaidLine({ raid, now }: { raid: RaidView; now: number }) {
       ) : null}
       {rage ? (
         <span className={cn("font-medium", rage.tone)}>{rage.text}</span>
+      ) : null}
+      {bossFight.tally && raid.you === "in" ? (
+        <span
+          className="tabular-nums text-white/70"
+          title="Your damage, plus healing and blocking (×10), so far"
+        >
+          You: {bossFight.tally.score.toLocaleString()} · #
+          {bossFight.tally.rank}
+        </span>
       ) : null}
       {raid.you !== "in" ? (
         <span className="text-white/60">

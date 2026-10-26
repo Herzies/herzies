@@ -88,5 +88,20 @@ export function useCombat(): boolean {
 
 /** Shake the camera: `amount` of trauma on top of what's there (capped). */
 export function shake(amount: number): void {
+  // Asked for less motion: no shaking (the sound and the flash still say
+  // what happened).
+  if (reducedMotion()) return;
   combat.trauma = Math.min(1, combat.trauma + amount);
+}
+
+let motionQuery: MediaQueryList | null | undefined;
+/** Whether the system asks for reduced motion (looked up once, then
+ * followed as it changes). */
+export function reducedMotion(): boolean {
+  if (motionQuery === undefined)
+    motionQuery =
+      typeof matchMedia === "function"
+        ? matchMedia("(prefers-reduced-motion: reduce)")
+        : null;
+  return !!motionQuery?.matches;
 }

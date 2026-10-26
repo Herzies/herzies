@@ -100,6 +100,8 @@ const SAY_GAP_MS = 6_000;
 export const SAY_READ_MS = 2_500;
 /** An in-tune buff is open-ended; it's taken off with `buffOff`. */
 const OPEN_ENDED_MS = 6 * 3_600_000;
+/** How often each fighter hears their own contribution and rank. */
+const TALLY_EVERY_MS = 2_000;
 /** How long a roster member who dropped stays "standing" for the wipe
  * check: long enough to ride out a reconnect, short enough that a raid
  * that's all down isn't kept waiting on someone who's gone. */
@@ -148,7 +150,7 @@ export type FightPlayer = {
 
 /** What became of a skill. "early" is a cooldown refusal inside the grace
  * window: refused, but not held against the socket. "refused": the skill
- * can't do anything right now (no one to revive, no revives left, not yet
+ * can't do anything right now (no one to revive, not yet
  * in a fight): no cooldown spent, no strike. */
 export type SkillResult =
   | "used"
@@ -317,6 +319,9 @@ export class FightRuntime {
   /** The dev boss is never reported: what each herzie did against it,
    * for its end screen. */
   private devDealt = new Map<string, Contribution>();
+  /** Everyone's contribution this fight, for their own live line. */
+  private dealt = new Map<string, Contribution>();
+  private nextTallyAt = 0;
   /** HP skills (and eaten candy) restored, by player, not yet taken by the
    * database. */
   private healed = new Map<string, number>();
@@ -1156,9 +1161,32 @@ export class FightRuntime {
       if (boss.taunter(now)) this.log.tauntMs += now - this.log.lastAt;
     }
     this.stepTunes(now, out);
+    if (this.stage === "fight" && now >= this.nextTallyAt) {
+      this.nextTallyAt = now + TALLY_EVERY_MS;
+      out.push(...this.tallies());
+    }
     if (this.stage === "fight" && now - this.lastSayAt >= SAY_EVERY_MS)
       this.speak("remind", now, out);
     this.log.lastAt = now;
+  }
+
+  /** Each fighter's own contribution and where it ranks, to them alone. */
+  private tallies(): Outbound[] {
+    const scores = [...this.dealt].map(
+      ([uid, c]) => [uid, contributionOf(c)] as const,
+    );
+    if (!scores.length) return [];
+    scores.sort((a, b) => b[1] - a[1]);
+    const of = this.roster?.size ?? scores.length;
+    const out: Outbound[] = [];
+    scores.forEach(([uid, score], i) => {
+      if (!this.players.get(uid)?.present) return;
+      out.push({
+        to: { uid },
+        msg: { t: "tally", score: Math.round(score), rank: i + 1, of },
+      });
+    });
+    return out;
   }
 
   /** The lobby locks: whoever stands in the room is in, the boss wakes at a
@@ -1875,8 +1903,8 @@ export class FightRuntime {
     // The Tower has no boss to tally against.
     if (!(amount > 0) || this.tower) return;
     for (const tally of this.eventId === DEV_EVENT
-      ? [this.pending, this.devDealt]
-      : [this.pending]) {
+      ? [this.pending, this.devDealt, this.dealt]
+      : [this.pending, this.dealt]) {
       const c = tally.get(uid) ?? {
         damage: 0,
         healing: 0,

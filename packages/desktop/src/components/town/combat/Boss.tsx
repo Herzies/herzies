@@ -14,8 +14,10 @@ import { ambient } from "../ambient";
 import { HeadBubble } from "../HeadBubble";
 import { townSave } from "../runtime";
 import { bossFight, bossNow, useBossFight } from "./fight";
+import { beats, resetMoments, stepMoments } from "./moments";
 import { CRUMBLE, STONE_HOLD } from "./results";
 import { entityAt } from "./skills";
+import { combat } from "./state";
 
 /** The boss looms: drawn this much bigger than it's built, like the one
  * in town. */
@@ -25,6 +27,8 @@ const MAX_TURN_SPEED = 3;
 /** The boss rears this much while an attack fills, and drops on the slam. */
 const REAR = 0.08;
 const SLAM_MS = 260;
+/** How long it takes to wake (rise and roar), ms. */
+const WAKE_MS = 1_100;
 /** Over its head, for what it says. */
 const SAY_HEIGHT = BOSS_STAND.top * 1.25;
 // The body's props, made once: rapier rebuilds a collider whenever its
@@ -83,12 +87,15 @@ export function Boss() {
   useEffect(() => {
     if (herzie) stoned.current = false;
   }, [herzie]);
+  // Out of the room: the raid's beats start over next time.
+  useEffect(() => resetMoments, []);
   useFrame((_, dt) => {
+    const now = performance.now();
+    stepMoments(now);
     if (!herzie || gone) {
       tether.hide();
       return;
     }
-    const now = performance.now();
     const at = bossNow();
     herzie.root.position.x = at.x;
     herzie.root.position.z = at.z;
@@ -114,18 +121,45 @@ export function Boss() {
     if (focus && !bossFight.victory)
       tether.show(at, focus, !!raid?.taunted, now);
     else tether.hide();
-    const coming = bossFight.shapes.some(
-      (s) => s.resolvedAt === null && s.mob === undefined,
-    );
-    // Rear while one fills, drop as it lands.
+    // Rear as its own attack fills (the fullest one), drop as it lands:
+    // the body tells the attack as well as the floor does.
+    let fill = 0;
+    for (const sh of bossFight.shapes) {
+      if (sh.resolvedAt !== null || sh.mob !== undefined) continue;
+      const span = Math.max(1, sh.lands - sh.from);
+      fill = Math.max(fill, Math.min(1, (now - sh.from) / span));
+    }
     const slam = Math.max(0, 1 - (now - bossFight.slammedAt) / SLAM_MS);
-    const rear = coming ? REAR : 0;
-    // Asleep in the lobby: it breathes slowly, sunk a little.
+    const rear = REAR * fill * fill * (3 - 2 * fill);
+    // Asleep in the lobby: it breathes slowly, sunk a little. Waking, it
+    // rises out of that and swells for a moment (a roar).
     const asleep = raid?.stage === "lobby";
-    const breath = asleep ? 0.03 * Math.sin(now / 900) - 0.04 : 0;
-    const y = 1 + rear - slam * 0.1 + breath;
-    const xz = 1 - rear * 0.4 + slam * 0.06 - breath * 0.3;
+    const woke = Math.min(1, Math.max(0, (now - beats.wokeAt) / WAKE_MS));
+    const sunk = asleep ? 1 : 1 - woke;
+    const breath = sunk * (0.03 * Math.sin(now / 900) - 0.04);
+    const roar = woke < 1 ? 0.14 * Math.sin(Math.PI * woke) : 0;
+    const y = 1 + rear - slam * 0.1 + breath + roar;
+    const xz = 1 - rear * 0.4 + slam * 0.06 - breath * 0.3 + roar * 0.5;
     herzie.root.scale.set(SCALE * xz, SCALE * y, SCALE * xz);
+    // Its skin: white on a hit (more on yours), a bright flash on a new
+    // phase, a red glow once it's enraged.
+    if (!bossFight.victory) {
+      const hit = Math.max(
+        0.1 * (1 - (now - bossFight.bossHitAt) / 110),
+        0.3 * (1 - (now - combat.hitAt) / 140),
+        0.75 * (1 - (now - beats.phaseAt) / 450),
+        0,
+      );
+      const hard = raid?.hardAt != null && now >= raid.hardAt;
+      const enraged = raid?.enrageAt != null && now >= raid.enrageAt;
+      const red = hard
+        ? 0.32 + 0.14 * Math.sin(now / 90)
+        : enraged
+          ? 0.16 + 0.08 * Math.sin(now / 160)
+          : 0;
+      if (hit >= red) herzie.setFlash(1, 1, 1, hit);
+      else herzie.setFlash(1, 0.12, 0.06, red);
+    } else herzie.setFlash(1, 1, 1, 0);
     if (bossFight.victory) {
       if (!stoned.current) {
         stoned.current = true;

@@ -22,6 +22,7 @@
 
 import {
   BOSS_ENRAGE,
+  BOSS_PHASE_AT,
   BOSS_WANDER,
   clampToWander,
   enrageFactor,
@@ -95,8 +96,8 @@ export const TUNING = {
   playerRadius: 0.5,
   phases: {
     1: { fromHp: 1, everyMs: 3_200, slams: 2, ringChance: 0 },
-    2: { fromHp: 0.66, everyMs: 2_700, slams: 3, ringChance: 0.35 },
-    3: { fromHp: 0.33, everyMs: 2_000, slams: 4, ringChance: 0.4 },
+    2: { fromHp: BOSS_PHASE_AT[0], everyMs: 2_700, slams: 3, ringChance: 0.35 },
+    3: { fromHp: BOSS_PHASE_AT[1], everyMs: 2_000, slams: 4, ringChance: 0.4 },
   },
   /** Damage is flat, before Def and buffs, and within the fairness budget
    * (a level-20 herzie without Stamina loses at most MAX_HIT_FRACTION of

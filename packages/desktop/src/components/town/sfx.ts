@@ -288,6 +288,91 @@ export function sfxDown(): void {
   tone(a, "triangle", 440, 55, 0.3, 0.01, 0.9);
 }
 
+// --- The raid's moments -----------------------------------------------------
+
+/** The boss roars: waking, or a new phase. A low growl under a rush. */
+export function sfxRoar(big = false): void {
+  const a = audio();
+  if (!a) return;
+  const k = wobble(0.04);
+  const len = big ? 1.3 : 0.9;
+  tone(a, "sawtooth", 92 * k, 46 * k, big ? 0.32 : 0.24, 0.08, len);
+  tone(a, "square", 61 * k, 38 * k, 0.12, 0.1, len);
+  noiseBurst(a, "lowpass", 900, 160, 0.9, big ? 0.4 : 0.28, len);
+}
+
+/** The lobby's last seconds: a tick, brighter on the last. */
+export function sfxCountdown(last: boolean): void {
+  const a = audio();
+  if (!a) return;
+  tone(a, "triangle", last ? 1320 : 880, last ? 1320 : 860, 0.16, 0.004, 0.12);
+}
+
+/** The fight is on: the roar, and a crash over it. */
+export function sfxFight(): void {
+  const a = audio();
+  if (!a) return;
+  sfxRoar(true);
+  noiseBurst(a, "highpass", 5000, 2500, 0.7, 0.22, 0.9);
+}
+
+/** It calls its minions: an eerie rising call. */
+export function sfxSummon(): void {
+  const a = audio();
+  if (!a) return;
+  tone(a, "triangle", 220, 660, 0.12, 0.05, 0.7);
+  tone(a, "triangle", 233, 698, 0.08, 0.05, 0.7, 0.04);
+  noiseBurst(a, "bandpass", 400, 1800, 3, 0.12, 0.6);
+}
+
+/** The enrage: a two-note alarm, twice. */
+export function sfxEnrage(hard = false): void {
+  const a = audio();
+  if (!a) return;
+  const lo = hard ? 196 : 247;
+  for (let i = 0; i < 2; i++) {
+    tone(a, "square", lo * 2, lo * 2, 0.08, 0.01, 0.16, i * 0.4);
+    tone(a, "square", lo * 1.5, lo * 1.5, 0.08, 0.01, 0.16, i * 0.4 + 0.2);
+  }
+  if (hard) sfxRoar(true);
+}
+
+/** Everyone's down: a slow falling minor pair. */
+export function sfxWipe(): void {
+  const a = audio();
+  if (!a) return;
+  tone(a, "triangle", 330, 110, 0.2, 0.05, 1.8);
+  tone(a, "sine", 196, 65, 0.2, 0.05, 2.0, 0.15);
+}
+
+/** A taunt: a struck gong. */
+export function sfxTaunt(): void {
+  const a = audio();
+  if (!a) return;
+  const k = wobble(0.03);
+  tone(a, "sine", 150 * k, 140 * k, 0.4, 0.004, 1.4);
+  tone(a, "sine", 377 * k, 360 * k, 0.12, 0.004, 0.9);
+  noiseBurst(a, "bandpass", 1200, 500, 2.5, 0.18, 0.4);
+}
+
+/** A resurrect being played: a soft rising chime. */
+export function sfxChannel(): void {
+  const a = audio();
+  if (!a) return;
+  const notes = [523, 659, 784];
+  for (let i = 0; i < notes.length; i++)
+    tone(a, "sine", notes[i], notes[i], 0.08, 0.05, 0.6, i * 0.25);
+}
+
+/** Back on its feet: a bright chord. */
+export function sfxRevive(): void {
+  const a = audio();
+  if (!a) return;
+  const notes = [784, 988, 1175, 1568];
+  for (let i = 0; i < notes.length; i++)
+    tone(a, "triangle", notes[i], notes[i], 0.1, 0.01, 0.5, i * 0.05);
+}
+
 // --- Loot ------------------------------------------------------------------
 
 /** How grand a drop sounds, 0 (common) to 4 (mythic). */

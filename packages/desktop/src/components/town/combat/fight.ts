@@ -22,11 +22,14 @@ import { useSyncExternalStore } from "react";
 import { logActivity } from "../../../lib/activity";
 import { notify } from "../../../lib/notices";
 import {
+  sfxChannel,
   sfxDown,
   sfxHurt,
   sfxImpact,
   sfxPortal,
+  sfxRevive,
   sfxSlam,
+  sfxTaunt,
   sfxWarn,
 } from "../sfx";
 import { setHpNow, setRegenFrozen } from "../vitals";
@@ -48,6 +51,7 @@ import {
   skills,
 } from "./skills";
 import { combat, shake } from "./state";
+import { waveField } from "./waves";
 
 /**
  * The boss fight as the client holds it: what the Town server last said,
@@ -105,6 +109,8 @@ export const bossFight = {
   /** In the cave: the raid (its times on this machine's clock), or null
    * (the Tower, or an older server without a lobby). */
   raid: null as RaidView | null,
+  /** Your contribution so far, and its rank of the roster. */
+  tally: null as { score: number; rank: number; of: number } | null,
   /** Where the boss has been, newest last (drawn a moment behind, like a
    * mob: see {@link bossNow}). */
   bossPath: [] as { at: number; x: number; z: number; yaw: number }[],
@@ -305,6 +311,8 @@ function setTower(f: TowerFloor, now: number) {
 
 /** Tells one drop of loot from the next (LootDrops keys on it). */
 let lootSeq = 0;
+/** A crit's hit-stop, ms: the world holds still a beat. */
+const CRIT_STOP_MS = 60;
 /** When the boss's warning last sounded (performance.now() ms). */
 let lastWarnAt = Number.NEGATIVE_INFINITY;
 
@@ -378,6 +386,7 @@ export function resetBossFight(): void {
   bossFight.you = null;
   bossFight.tower = null;
   bossFight.raid = null;
+  bossFight.tally = null;
   bossFight.bossPath = [];
   bossFight.say = null;
   towerMobs.clear();
@@ -514,7 +523,11 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       }
       combat.hitAt = now;
       combat.hitCrit = m.crit;
-      shake(m.crit ? 0.3 : 0.1);
+      // Your own hits: a nudge, a jolt on a crit, but never enough to keep
+      // the camera rattling through a long fight. A crit holds the world
+      // still for a beat.
+      if (combat.trauma < 0.3) shake(m.crit ? 0.22 : 0.05);
+      if (m.crit) combat.slowUntil = now + CRIT_STOP_MS;
       sfxImpact(m.crit ? "crit" : "hit");
       return;
     }
@@ -592,6 +605,10 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       }
       emit();
       return;
+    case "tally":
+      bossFight.tally = { score: m.score, rank: m.rank, of: m.of };
+      emitHp();
+      return;
     case "bossAt":
       pushBossAt(
         m.x,
@@ -624,15 +641,24 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       return;
     case "channel": {
       if (m.target === null) {
+        const was = skills.channels.get(m.by);
         setChannel(m.by, null);
         // Yours stopped short: nothing spent, ready again.
-        if (m.by === clock.you()) setReadyAt("resurrect", now);
+        if (m.by === clock.you()) {
+          setReadyAt("resurrect", now);
+          if (was && now < was.until - 200)
+            notify("Resurrect stopped: hold still while you play.", {
+              kind: "info",
+              holdMs: 2_500,
+            });
+        }
       } else {
         setChannel(m.by, {
           target: m.target,
           from: now,
           until: clock.toLocal(m.until),
         });
+        if (m.by === clock.you() || m.target === clock.you()) sfxChannel();
       }
       return;
     }
@@ -644,6 +670,12 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       if (m.id === clock.you()) {
         notify("A Bard played you back to your feet!", { kind: "success" });
         logActivity("Resurrected by a Bard");
+      }
+      // A burst of light where they stand back up, for everyone.
+      {
+        const at = entityAt.get(m.id);
+        if (at) waveField.burst([at.x, at.top * 0.6, at.z], [0, 1, 0], "crit");
+        if (at || m.id === clock.you() || m.by === clock.you()) sfxRevive();
       }
       // Outside a fight nobody's health is tracked: the hp that follows
       // counts up from nothing, for its heal number.
@@ -659,6 +691,7 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
     case "skill": {
       // Yours played the moment you pressed it.
       if (m.by === clock.you() || !isSkillId(m.skill)) return;
+      if (m.skill === "taunt") sfxTaunt();
       noteSkillCast({
         by: m.by,
         skill: m.skill,
