@@ -112,14 +112,14 @@ export const TUNING = {
    * sting a level-30 herzie, and a ring you're caught by should hurt. The
    * ring's windup lets someone at the far wall reach its middle wherever
    * the boss has walked to. */
-  slam: { radius: 3, windupMs: 1_600, damage: 45 },
-  ring: { inner: 6.5, windupMs: 4_200, damage: 58 },
+  slam: { radius: 3, windupMs: 1_600, damage: 58 },
+  ring: { inner: 6.5, windupMs: 4_200, damage: 60 },
   /** The tank-buster: aimed at whoever the boss is focused on, and it
    * follows them — it can't be dodged, only taken. Sized so that a herzie
    * who isn't tanking it is badly hurt, and a Percussionist (Def, a
    * Cymbrella, in tune) is comfortable. Without a taunt, only once there's
    * a party to hold its attention. */
-  buster: { everyMs: 10_000, windupMs: 2_000, damage: 70, minPlayers: 2 },
+  buster: { everyMs: 10_000, windupMs: 2_000, damage: 85, minPlayers: 2 },
   /** What the boss hates: damage dealt, healing done, and the Cymbrella's
    * clang. Fades by `decayPerSec` a second, so it keeps moving. */
   threat: { perDamage: 1, perHeal: 0.5, cymbrella: 500, decayPerSec: 0.1 },
@@ -144,7 +144,7 @@ export const TUNING = {
     width: 2.6,
     overshoot: 2,
     speed: 14,
-    damage: 50,
+    damage: 60,
   },
   /** In reach of whoever it's on, it doesn't stand still: every so often
    * it shifts round them by `angle` (radians either way), at `speed` of
@@ -696,6 +696,27 @@ export class BossEngine {
     return boss === null ? null : { dist: boss };
   }
 
+  /** A cast's token from `uid`'s bucket (a heal bolt spends one too):
+   * one per `castEveryMs`, quicker hasted, up to a short burst. False if
+   * it's empty: too fast. */
+  spendCast(uid: string, now: number): boolean {
+    const bucket = this.casts.get(uid) ?? {
+      tokens: TUNING.castBurst,
+      at: now,
+    };
+    bucket.tokens = Math.min(
+      TUNING.castBurst,
+      bucket.tokens +
+        (Math.max(0, now - bucket.at) / TUNING.castEveryMs) *
+          castSpeed(this.buffs.get(uid) ?? [], now),
+    );
+    bucket.at = now;
+    this.casts.set(uid, bucket);
+    if (bucket.tokens < 1) return false;
+    bucket.tokens -= 1;
+    return true;
+  }
+
   /**
    * A cast from `uid`, standing at (x, z), aiming (yaw, pitch). Accepted
    * casts that line up with the boss (with the same aim assist the client
@@ -722,20 +743,7 @@ export class BossEngine {
     melee: number = STRIKE_DAMAGE,
   ): "cooldown" | "miss" | "hit" | "dead" {
     if (this.killed) return "dead";
-    const bucket = this.casts.get(uid) ?? {
-      tokens: TUNING.castBurst,
-      at: now,
-    };
-    bucket.tokens = Math.min(
-      TUNING.castBurst,
-      bucket.tokens +
-        (Math.max(0, now - bucket.at) / TUNING.castEveryMs) *
-          castSpeed(this.buffs.get(uid) ?? [], now),
-    );
-    bucket.at = now;
-    this.casts.set(uid, bucket);
-    if (bucket.tokens < 1) return "cooldown";
-    bucket.tokens -= 1;
+    if (!this.spendCast(uid, now)) return "cooldown";
     if (this.sleeping) return "miss";
     const boost = this.damageMult(uid, now);
     if (attack === "melee") {

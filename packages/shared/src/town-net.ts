@@ -537,6 +537,9 @@ export type ClientMessage =
   /** In the boss room: whether you're playing music (the boss hates it,
    * any of it). Sent when it changes. */
   | { t: "tune"; on: boolean }
+  /** A Bard's lute: its basic attack heals the ally it's aimed at (true)
+   * or hurts (false). Sent on every switch and every arrival. */
+  | { t: "stance"; heal: boolean }
   /** Knocked out in a raid, and giving up: out of the fight for good (no
    * reward). The app then respawns you in town. */
   | { t: "forfeit" };
@@ -641,6 +644,8 @@ export type FightState = {
   bossAt?: { x: number; z: number; yaw: number };
   say?: { text: string; until: number };
   channels?: { by: number; target: number; until: number }[];
+  /** Bards in their heal stance (entity ids): their bolts are drawn green. */
+  healers?: number[];
   /** The boss's minions standing, if it has called any. */
   mobs?: TowerMob[];
 };
@@ -753,6 +758,8 @@ export type ServerMessage =
   | ({ t: "raid" } & RaidState)
   /** A buff came off a herzie before its time. */
   | { t: "buffOff"; id: number; buff: string }
+  /** A Bard switched its lute's stance: heal bolts, or attacks. */
+  | { t: "stance"; id: number; heal: boolean }
   /** A Bard began a resurrect on `target` (done at `until`), or it stopped
    * (`target` null). */
   | { t: "channel"; by: number; target: number | null; until: number }

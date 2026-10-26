@@ -51,6 +51,7 @@ import {
   setReadyAt,
   skills,
 } from "./skills";
+import { resetHealers, setHealer } from "./stance";
 import { combat, shake } from "./state";
 import { waveField } from "./waves";
 
@@ -393,6 +394,7 @@ export function resetBossFight(): void {
   bossFight.say = null;
   towerMobs.clear();
   resetSkills();
+  resetHealers();
   emit();
   emitHp();
 }
@@ -681,6 +683,9 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
     case "buffOff":
       clearBuff(m.id, m.buff);
       return;
+    case "stance":
+      setHealer(m.id, m.heal);
+      return;
     case "channel": {
       if (m.target === null) {
         const was = skills.channels.get(m.by);
@@ -830,6 +835,8 @@ function applyFight(f: FightState, clock: Clock, you: number) {
       from: now,
       until: clock.toLocal(c.until),
     });
+  resetHealers();
+  for (const id of f.healers ?? []) setHealer(id, true);
 }
 
 /** Drop shapes that landed a while ago. Called by the frame loop. */

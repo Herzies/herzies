@@ -141,6 +141,8 @@ type Session = {
   strikes: number;
   /** When this socket last said what it's listening to (server ms). */
   tunedAt?: number;
+  /** When it last switched its lute's stance (Date.now() ms). */
+  stanceAt?: number;
 };
 
 export class TownRoom extends DurableObject<Env> {
@@ -258,6 +260,7 @@ export class TownRoom extends DurableObject<Env> {
         pitch?: unknown;
         item?: unknown;
         on?: unknown;
+        heal?: unknown;
       };
       try {
         m = JSON.parse(message);
@@ -271,6 +274,7 @@ export class TownRoom extends DurableObject<Env> {
       else if (m?.t === "eat" && s.player) await this.onEat(s, m, now);
       else if (m?.t === "next" && s.player) this.onNext(s, now);
       else if (m?.t === "tune" && s.player) this.onTune(s, m.on, now);
+      else if (m?.t === "stance" && s.player) this.onStance(s, m.heal);
       else if (m?.t === "forfeit" && s.player) this.onForfeit(s, now);
       else this.strike(s);
       return;
@@ -911,6 +915,22 @@ export class TownRoom extends DurableObject<Env> {
     }
     s.tunedAt = now;
     this.fight.tune(p.uid, playing, now);
+  }
+
+  /** A Bard's lute stance: heal bolts or attacks. Only a fight cares;
+   * elsewhere (the Town's practice) it's the client's own. */
+  private onStance(s: Session, heal: unknown) {
+    const p = s.player;
+    if (!p || !this.fight) return;
+    if (typeof heal !== "boolean") {
+      this.strike(s);
+      return;
+    }
+    // Faster than a key is pressed: dropped (it goes out to everyone).
+    const now = Date.now();
+    if (s.stanceAt !== undefined && now - s.stanceAt < 100) return;
+    s.stanceAt = now;
+    for (const o of this.fight.stance(p.uid, heal)) this.dispatch(o);
   }
 
   /** Knocked out in a raid, and giving up. */

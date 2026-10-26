@@ -172,6 +172,56 @@ export function aimDirection(yaw: number, pitch: number): Vec3 {
   return [c * Math.sin(yaw), Math.sin(pitch), c * Math.cos(yaw)];
 }
 
+// ---------------------------------------------------------------------------
+// Heal bolts: a Bard's lute in its heal stance. The same pace as its waves
+// (no cooldown), but each one heals the herzie it's aimed at instead of
+// hurting anything. Soft-locked, as healers' aim is in action games (Ana,
+// Mercy, Guild Wars 2): the ally nearest the line of aim within a cone.
+
+/** What a heal bolt restores: this share of its target's max health, before
+ * Euphony and an in-tune boost. Two a second from one Bard is about a
+ * slam's worth every few seconds: a healer matters, without one Bard
+ * outhealing the whole boss. */
+export const HEAL_BOLT = 0.018;
+/** How far either way of the aim a bolt finds its ally (radians): the
+ * client's lock, and a little more on the server (its picture of where the
+ * ally stood is a moment off). */
+export const HEAL_LOCK_ANGLE = (8 * Math.PI) / 180;
+export const HEAL_LOCK_SLACK = (3 * Math.PI) / 180;
+/** Where a bolt aims on a herzie: its chest, above its feet. */
+export const HEAL_TARGET_HEIGHT = 1;
+
+/**
+ * The ally a heal bolt from `from` along `dir` (unit) goes to: the one
+ * nearest the line of aim, within `angle` (plus a little for a near ally's
+ * width) and the wave's range. Null if nobody is.
+ */
+export function healTarget<T extends { x: number; z: number }>(
+  from: Readonly<Vec3>,
+  dir: Readonly<Vec3>,
+  allies: Iterable<T>,
+  angle: number = HEAL_LOCK_ANGLE,
+): { ally: T; dist: number } | null {
+  let best: { ally: T; dist: number } | null = null;
+  let bestOff = Number.POSITIVE_INFINITY;
+  for (const a of allies) {
+    const vx = a.x - from[0];
+    const vy = HEAL_TARGET_HEIGHT - from[1];
+    const vz = a.z - from[2];
+    const dist = Math.hypot(vx, vy, vz);
+    if (dist < 0.3 || dist > WAVE_RANGE) continue;
+    const cos = (vx * dir[0] + vy * dir[1] + vz * dir[2]) / dist;
+    const off = Math.acos(Math.max(-1, Math.min(1, cos)));
+    // A near ally is wide: its body counts, as much as 0.6 either side.
+    const allow = angle + Math.atan(0.6 / dist);
+    if (off <= allow && off < bestOff) {
+      bestOff = off;
+      best = { ally: a, dist };
+    }
+  }
+  return best;
+}
+
 /** The yaw and pitch of a unit direction (the inverse of aimDirection). */
 export function aimAngles(dir: Readonly<Vec3>): { yaw: number; pitch: number } {
   return {

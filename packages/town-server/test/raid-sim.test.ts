@@ -13,10 +13,11 @@ import { BOSS_WANDER, bossMaxHp } from "@herzies/shared/boss-fight";
 import {
   CAST_INTERVAL_MS,
   DISC_RANGE,
+  HEAL_TARGET_HEIGHT,
   MELEE_REACH,
   WAVE_HAND_HEIGHT,
 } from "@herzies/shared/combat";
-import { SKILL_DEFS } from "@herzies/shared/skills";
+import { attackSpeed, SKILL_DEFS } from "@herzies/shared/skills";
 import { MOB } from "@herzies/shared/tower";
 import { STAT_TUNING } from "@herzies/shared/stats";
 import type { BossClaim, TownTicketPayload } from "@herzies/shared/town-net";
@@ -53,6 +54,8 @@ type Bot = {
   channelUntil: number;
   /** Whether it has told the room its music is on. */
   tunedTo: boolean;
+  /** A Bard: heals with its lute (its heal stance) when someone's hurt. */
+  heals: boolean;
 };
 
 /** A level-30 herzie's stats for its class: gear (an instrument), 58 stat
@@ -83,7 +86,8 @@ function statsFor(role: Role): {
 }
 
 function skillsFor(role: Role): [string, number][] {
-  if (role === "bard") return [["soothing-drones", 5], ["resurrect", 5]];
+  if (role === "bard")
+    return [["soothing-drones", 5], ["resurrect", 5], ["haste", 5]];
   if (role === "percussionist") return [["cymbrella", 5], ["taunt", 5]];
   if (role === "record_slinger") return [["backspin", 5]];
   return [];
@@ -106,7 +110,12 @@ function ticketFor(b: Bot): TownTicketPayload {
 
 function party(
   roles: Role[],
-  opts: { dodges?: boolean; tuned?: boolean; reaction?: number } = {},
+  opts: {
+    dodges?: boolean;
+    tuned?: boolean;
+    reaction?: number;
+    heals?: boolean;
+  } = {},
 ): Bot[] {
   return roles.map((role, i) => {
     const angle = (i / Math.max(1, roles.length)) * Math.PI * 2;
@@ -122,6 +131,7 @@ function party(
       nextCast: 0,
       channelUntil: 0,
       tunedTo: false,
+      heals: opts.heals ?? true,
     };
   });
 }
@@ -282,6 +292,13 @@ function raid(bots: Bot[], seed: number, limitMs = 17 * 60_000): Result {
           );
         });
         if (hurt && !channeling) f.skill(b.uid, "soothing-drones", 0, 0, t);
+        // Haste whenever it's up and a few are near (bots aren't subtle).
+        const near = bots.filter(
+          (o) =>
+            !f.player(o.uid)?.down &&
+            Math.hypot(o.x - b.x, o.z - b.z) <= (SKILL_DEFS.haste.radius ?? 0),
+        ).length;
+        if (!channeling && near >= Math.min(3, bots.length)) f.skill(b.uid, "haste", 0, 0, t);
       } else if (b.role === "percussionist") {
         f.skill(b.uid, "taunt", 0, 0, t);
         const aimedAtMe = boss.active.some((tg) => tg.target === b.uid || tg.aimedAt === b.uid);
@@ -289,7 +306,33 @@ function raid(bots: Bot[], seed: number, limitMs = 17 * 60_000): Result {
       }
       if (channeling) continue;
       if (t >= b.nextCast) {
-        b.nextCast = t + CAST_INTERVAL_MS;
+        b.nextCast = t + CAST_INTERVAL_MS / attackSpeed(f.engine.buffsOf(b.uid, t), t);
+        // A Bard heals with its lute whoever's hurt most (under 75%),
+        // else attacks.
+        if (b.role === "bard" && b.heals) {
+          let low: Bot | null = null;
+          let lowest = 0.75;
+          for (const o of bots) {
+            const p = f.player(o.uid);
+            if (o === b || !p || p.down) continue;
+            if (p.hp / p.maxHp < lowest) {
+              lowest = p.hp / p.maxHp;
+              low = o;
+            }
+          }
+          f.stance(b.uid, !!low);
+          if (low) {
+            const dx = low.x - b.x;
+            const dz = low.z - b.z;
+            f.cast(
+              b.uid,
+              Math.atan2(dx, dz),
+              Math.atan2(HEAL_TARGET_HEIGHT - WAVE_HAND_HEIGHT, Math.hypot(dx, dz)),
+              t,
+            );
+            continue;
+          }
+        }
         // Adds first, for everyone but the tank: the nearest Thornling.
         let aim: { x: number; z: number; chest: number } = {
           x: at.x,
@@ -398,12 +441,21 @@ describe("the raid, simulated", () => {
     expect(tuned.ms).toBeLessThan(deaf.ms);
   });
 
-  it("a slow-to-react party takes hits, and its Bards bring the fallen back", () => {
-    // Slower than a roaming boss gives (it rarely parks long enough to
-    // catch the sluggish at 1.25 s); retuned with heal mode in the sim.
-    const r = raid(party(TRIO, { reaction: 1_600 }), 8);
-    expect(r.downs).toBeGreaterThan(0);
-    expect(r.revives).toBeGreaterThan(0);
+  it("a slow-to-react party takes hits; Bards bring the fallen back, and healing keeps them up", () => {
+    // Without heal bolts, the sluggish go down and are played back up.
+    const bare = [8, 9].map((sd) =>
+      raid(party(TRIO, { reaction: 1_250, heals: false }), sd),
+    );
+    expect(bare.some((r) => r.downs > 0)).toBe(true);
+    expect(bare.some((r) => r.revives > 0)).toBe(true);
+    // With its Bard healing, the same party stays up: what a healer is for.
+    const healed = [8, 9].map((sd) =>
+      raid(party(TRIO, { reaction: 1_250 }), sd),
+    );
+    expect(healed.every((r) => r.outcome === "victory")).toBe(true);
+    expect(healed.reduce((n, r) => n + r.downs, 0)).toBeLessThan(
+      bare.reduce((n, r) => n + r.downs, 0),
+    );
   });
 
   it("a party that never moves is beaten: dodging matters", () => {

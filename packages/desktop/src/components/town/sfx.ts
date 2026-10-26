@@ -391,6 +391,31 @@ export function sfxHaste(): void {
     );
 }
 
+/** The lute switching stance: a soft pluck, up to heal, down to attack. */
+export function sfxStance(heal: boolean): void {
+  const a = audio();
+  if (!a) return;
+  const k = wobble(0.02);
+  const [from, to] = heal ? [440, 660] : [660, 440];
+  tone(a, "triangle", from * k, to * k, 0.09, 0.004, 0.18);
+}
+
+/** A heal bolt sent: a warm, quick chime (a wave's charge is harsher). */
+export function sfxHealBolt(): void {
+  const a = audio();
+  if (!a) return;
+  const k = wobble(0.03);
+  tone(a, "sine", 880 * k, 1175 * k, 0.07, 0.004, 0.16);
+  tone(a, "triangle", 1320 * k, 1320 * k, 0.03, 0.01, 0.12, 0.03);
+}
+
+/** A heal bolt with nobody to go to: a dull, short "no". */
+export function sfxNoTarget(): void {
+  const a = audio();
+  if (!a) return;
+  tone(a, "square", 220, 180, 0.05, 0.002, 0.08);
+}
+
 /** A resurrect being played: a soft rising chime. */
 export function sfxChannel(): void {
   const a = audio();

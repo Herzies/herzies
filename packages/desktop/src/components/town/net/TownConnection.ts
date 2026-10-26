@@ -456,6 +456,12 @@ export class TownConnection {
     this.sendJson({ t: "tune", on });
   }
 
+  /** In a fight: whether your lute heals (true) or attacks. */
+  sendStance(heal: boolean) {
+    if (this.status !== "online") return;
+    this.sendJson({ t: "stance", heal });
+  }
+
   /** Knocked out in a raid, and giving up (no reward). */
   sendForfeit() {
     if (this.status !== "online") return;

@@ -7,10 +7,12 @@ import {
   CONTRIBUTION_SUPPORT_WEIGHT,
   contributionOf,
   DISC_RANGE,
+  healTarget,
   MELEE_REACH,
   meleeReaches,
   type Vec3,
   WAVE_HAND_HEIGHT,
+  WAVE_RANGE,
 } from "./combat.js";
 
 describe("melee", () => {
@@ -63,6 +65,28 @@ describe("melee", () => {
     expect(instrumentOf(null)).toBeNull();
     expect(hasInstrument("record_slinger", "compact-discs")).toBe(true);
     expect(hasInstrument("bard", null)).toBe(false);
+  });
+});
+
+describe("heal bolts", () => {
+  const from: Vec3 = [0, WAVE_HAND_HEIGHT, 0];
+  const ahead = aimDirection(0, 0);
+  it("lock onto the ally nearest the aim, within the cone and range", () => {
+    const allies = [
+      { id: "wide", x: 4, z: 6 },
+      { id: "on", x: 0.3, z: 10 },
+      { id: "behind", x: 0, z: -5 },
+    ];
+    expect(healTarget(from, ahead, allies)?.ally.id).toBe("on");
+    expect(healTarget(from, ahead, [allies[0], allies[2]])).toBeNull();
+    expect(
+      healTarget(from, ahead, [{ id: "far", x: 0, z: WAVE_RANGE + 2 }]),
+    ).toBeNull();
+  });
+  it("forgive more for an ally up close (it's wide)", () => {
+    // The same angle off the aim: near, locked; far, not.
+    expect(healTarget(from, ahead, [{ x: 0.9, z: 3 }])).not.toBeNull();
+    expect(healTarget(from, ahead, [{ x: 3.6, z: 12 }])).toBeNull();
   });
 });
 

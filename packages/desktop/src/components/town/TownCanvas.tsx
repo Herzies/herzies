@@ -56,6 +56,7 @@ import type { Champion } from "./Statues";
 import { Visitor } from "./Visitor";
 import { DiscVFX } from "./vfx/DiscVFX";
 import { HasteVFX } from "./vfx/HasteVFX";
+import { HealVFX } from "./vfx/HealVFX";
 import { SkillVFX } from "./vfx/SkillVFX";
 import { SlashVFX } from "./vfx/SlashVFX";
 import { SonicVFX } from "./vfx/SonicVFX";
@@ -231,6 +232,7 @@ export default function TownCanvas(props: TownCanvasProps) {
         <DiscVFX />
         <SkillVFX />
         <HasteVFX />
+        <HealVFX />
         <SlashVFX />
         <CombatOverlay />
         {/* Sound waves bend light, and aim mode works on every island. */}

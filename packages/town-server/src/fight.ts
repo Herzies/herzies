@@ -36,10 +36,17 @@ import {
   isHerzieClass,
 } from "@herzies/shared/classes";
 import {
+  aimDirection,
   type Contribution,
   contributionOf,
+  HEAL_BOLT,
+  HEAL_LOCK_ANGLE,
+  HEAL_LOCK_SLACK,
   type HitStats,
+  healTarget,
   meleeDamage,
+  WAVE_HAND_HEIGHT,
+  WAVE_SPEED,
 } from "@herzies/shared/combat";
 import { CONSUMABLE_COOLDOWN_MS } from "@herzies/shared/medea";
 import {
@@ -366,6 +373,10 @@ export class FightRuntime {
   private readonly minionFloor: number | null;
   /** Resurrects being played, by their Bard. */
   private channels = new Map<string, Channel>();
+  /** Bards whose lute is in its heal stance (user ids). */
+  private healers = new Set<string>();
+  /** Heal bolts in flight: who sent each, at whom, and when it lands. */
+  private bolts: { by: string; target: string; at: number }[] = [];
   private tunes = new Map<string, TuneState>();
   /** Report queues for the raid, re-sent until taken. */
   private lockReq: FightReport["lock"] | null = null;
@@ -590,6 +601,8 @@ export class FightRuntime {
     // the music over.
     this.engine.forget(uid);
     this.tunes.delete(uid);
+    // The stance goes too: it's sent again on the way back in.
+    this.healers.delete(uid);
     this.leftUnreported.add(uid);
     this.absentSince.set(uid, now);
     this.reportNow = true;
@@ -611,15 +624,21 @@ export class FightRuntime {
     // Gear may have changed too (an instrument put on or taken off).
     p.look = ticket.look;
     Object.assign(p, armsOf(ticket));
+    // Its lute put away: no more heal stance.
+    const unhealed: Outbound[] = [];
+    if (this.healers.has(uid) && !(p.armed && p.attack === "wave")) {
+      this.healers.delete(uid);
+      unhealed.push({ to: "all", msg: { t: "stance", id: p.id, heal: false } });
+    }
     p.cls = isHerzieClass(ticket.cls) ? ticket.cls : null;
     if (ticket.lv) p.level = Math.max(1, Math.floor(ticket.lv));
     if (ticket.st) p.stats = statsOf(ticket.st);
     const tower = this.tower;
     if (tower && ticket.lv && ticket.lv !== tower.level) {
       tower.level = Math.max(1, ticket.lv);
-      return [{ to: "all", msg: { t: "floor", ...tower.view() } }];
+      return [...unhealed, { to: "all", msg: { t: "floor", ...tower.view() } }];
     }
-    return [];
+    return unhealed;
   }
 
   player(uid: string): FightPlayer | undefined {
@@ -653,6 +672,8 @@ export class FightRuntime {
       return "ignored";
     const pos = this.history.at(uid, now);
     if (!pos) return "ignored";
+    if (this.healers.has(uid) && p.attack === "wave")
+      return this.healBolt(p, pos, yaw, pitch, now);
     return this.engine.cast(
       uid,
       pos,
@@ -663,6 +684,85 @@ export class FightRuntime {
       p.attack,
       p.melee,
     );
+  }
+
+  /**
+   * A Bard switched its lute's stance. Only a Bard with its lute can heal;
+   * anyone else asking is just told they attack. Returns the word for the
+   * room (no word if nothing changed).
+   */
+  stance(uid: string, heal: boolean): Outbound[] {
+    const p = this.players.get(uid);
+    if (!p) return [];
+    const can = heal && p.cls === "bard" && p.armed && p.attack === "wave";
+    if (can === this.healers.has(uid)) return [];
+    if (can) this.healers.add(uid);
+    else this.healers.delete(uid);
+    return [{ to: "all", msg: { t: "stance", id: p.id, heal: can } }];
+  }
+
+  /** A heal bolt: at the ally nearest the aim (never yourself, never the
+   * knocked out, who need a Resurrect), as the room saw them a moment ago.
+   * It spends a cast like a wave does, and lands after a wave's flight. */
+  private healBolt(
+    p: FightPlayer,
+    pos: { x: number; z: number },
+    yaw: number,
+    pitch: number,
+    now: number,
+  ): "hit" | "miss" | "cooldown" {
+    if (!this.engine.spendCast(p.uid, now)) return "cooldown";
+    const allies: { uid: string; x: number; z: number }[] = [];
+    for (const o of this.players.values()) {
+      if (o === p || !o.present || o.down || !this.fighting(o.uid)) continue;
+      const at =
+        this.history.at(o.uid, now - TUNING.seenLagMs) ??
+        this.history.at(o.uid, now);
+      if (at) allies.push({ uid: o.uid, x: at.x, z: at.z });
+    }
+    const hit = healTarget(
+      [pos.x, WAVE_HAND_HEIGHT, pos.z],
+      aimDirection(yaw, pitch),
+      allies,
+      HEAL_LOCK_ANGLE + HEAL_LOCK_SLACK,
+    );
+    if (!hit) return "miss";
+    this.bolts.push({
+      by: p.uid,
+      target: hit.ally.uid,
+      at: now + (hit.dist / WAVE_SPEED) * 1000,
+    });
+    return "hit";
+  }
+
+  /** Heal bolts that have arrived: what each restores, up to full. */
+  private landBolts(now: number, out: Outbound[]) {
+    if (!this.bolts.length) return;
+    const due = this.bolts.filter((b) => b.at <= now);
+    if (!due.length) return;
+    this.bolts = this.bolts.filter((b) => b.at > now);
+    for (const b of due) {
+      const bard = this.players.get(b.by);
+      const o = this.players.get(b.target);
+      if (!bard || !o?.present || o.down) continue;
+      const heal = Math.min(
+        o.maxHp - o.hp,
+        HEAL_BOLT *
+          healMult(bard.stats.euphony) *
+          this.healBoost(b.by, now) *
+          o.maxHp,
+      );
+      if (!(heal > 0)) continue;
+      o.hp += heal;
+      this.healed.set(o.uid, (this.healed.get(o.uid) ?? 0) + heal);
+      out.push({
+        to: "all",
+        msg: { t: "hp", id: o.id, hp: o.hp, maxHp: o.maxHp },
+      });
+      this.credit(b.by, "healing", heal);
+      this.engine.addThreat(b.by, heal * TUNING.threat.perHeal);
+      this.reportNow = true;
+    }
   }
 
   /**
@@ -1071,6 +1171,14 @@ export class FightRuntime {
           }
         : {}),
       ...(this.say && this.say.until > now ? { say: this.say } : {}),
+      ...(this.healers.size
+        ? {
+            healers: [...this.healers].flatMap((u) => {
+              const h = this.players.get(u);
+              return h?.present ? [h.id] : [];
+            }),
+          }
+        : {}),
       ...(boss?.minionsUp ? { mobs: boss.wireMobs() } : {}),
       ...(this.channels.size
         ? {
@@ -1104,6 +1212,7 @@ export class FightRuntime {
     }
     if (this.open) {
       for (const ev of this.engine.update(now, alive)) this.apply(ev, out, now);
+      this.landBolts(now, out);
       const tower = this.tower;
       if (tower) {
         this.bossDirty = false;

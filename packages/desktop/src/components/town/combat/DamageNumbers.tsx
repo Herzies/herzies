@@ -5,6 +5,7 @@ import { useTownRuntime } from "../runtime";
 import { liveDummies } from "./Dummies";
 import { DUMMY, meterDps, meterIdle } from "./dummy";
 import { entityAt } from "./skills";
+import { healing, stance } from "./stance";
 import { combat } from "./state";
 import type { Vec3 } from "./waves";
 
@@ -103,6 +104,9 @@ const STYLE = `
   border: 2px solid #ffd36b; box-shadow: 0 0 0 1px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(0,0,0,0.35), 0 0 8px rgba(255, 190, 60, 0.6);
   background: none; opacity: 0; transform: scale(1.6); transition: opacity 0.12s, transform 0.16s cubic-bezier(0.2, 1.6, 0.4, 1); }
 .town-fx .cross.reach i.ring { opacity: 1; transform: scale(1); }
+.town-fx .cross.heal i { background: #7ee2a8; }
+.town-fx .cross.heal i.ring { border-color: #7ee2a8; box-shadow: 0 0 0 1px rgba(0,0,0,0.5), 0 0 8px rgba(80, 230, 140, 0.6); }
+.town-fx .cross.heal.lock i.ring { opacity: 1; transform: scale(1); }
 .town-fx .cross .dot { width: 2px; height: 2px; left: -1px; top: -1px; }
 .town-fx .cross .t { width: 2px; height: 7px; left: -1px; }
 .town-fx .cross .l { width: 7px; height: 2px; top: -1px; }
@@ -305,6 +309,10 @@ export function CombatOverlay() {
     if (on) {
       ui.cross.classList.toggle("target", combat.onTarget);
       ui.cross.classList.toggle("reach", combat.inReach);
+      // A Bard healing: green, and ringed while it's locked on someone.
+      const heals = healing();
+      ui.cross.classList.toggle("heal", heals);
+      ui.cross.classList.toggle("lock", heals && stance.lock !== null);
       const gap = 5 + combat.spread * 7;
       const [top, bottom, left, right] = ui.arms;
       top.style.top = `${-gap - 7}px`;

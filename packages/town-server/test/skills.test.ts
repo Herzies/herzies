@@ -1,4 +1,4 @@
-import { CAST_INTERVAL_MS, WAVE_HAND_HEIGHT } from "@herzies/shared/combat";
+import { CAST_INTERVAL_MS, HEAL_BOLT, WAVE_HAND_HEIGHT } from "@herzies/shared/combat";
 import {
   SKILL_COOLDOWN_GRACE_MS,
   SKILL_DEFS,
@@ -453,5 +453,105 @@ describe("Haste", () => {
     f.step(T0 + 12_000);
     const xp = f.report(T0 + 12_001, true)?.skills?.xp ?? [];
     expect(xp.find((x) => x.uid === "bard" && x.skill === "haste")?.xp).toBeGreaterThan(0);
+  });
+});
+
+describe("the lute's heal stance", () => {
+  /** A Bard at (0, 8) and an ally at (0, 2), both hurt to 100 of 200. */
+  const setup = () => {
+    const f = new FightRuntime(claim(), T0);
+    f.join("bard", 1, ticket("bard", [["soothing-drones", 1]], 100), { x: 0, z: 8 }, T0 - 5_000);
+    f.join("ally", 2, ticket("ally", [["backspin", 1]], 100), { x: 0, z: 2 }, T0 - 5_000);
+    for (let t = T0 - 1_000; t <= T0; t += 100) {
+      f.onState("bard", 0, 8, t);
+      f.onState("ally", 0, 2, t);
+    }
+    return f;
+  };
+  // Straight at the ally: from (0, 8) toward -z, level.
+  const atAlly = { yaw: Math.PI, pitch: -0.03 };
+
+  it("is a Bard's with its lute, and the room is told", () => {
+    const f = setup();
+    expect(f.stance("bard", true)).toEqual([
+      { to: "all", msg: { t: "stance", id: 1, heal: true } },
+    ]);
+    // Again: nothing new to say.
+    expect(f.stance("bard", true)).toEqual([]);
+    expect(f.state(T0).healers).toEqual([1]);
+    // Not a Bard: no stance to take.
+    expect(f.stance("ally", true)).toEqual([]);
+  });
+
+  it("heals the ally aimed at once the bolt arrives, and hurts nothing", () => {
+    const f = setup();
+    f.stance("bard", true);
+    const bossHp = f.engine.hp;
+    expect(f.cast("bard", atAlly.yaw, atAlly.pitch, T0)).toBe("hit");
+    expect(f.player("ally")?.hp).toBe(100);
+    const out = f.step(T0 + 1_000);
+    const heal = HEAL_BOLT * 200;
+    expect(f.player("ally")?.hp).toBeCloseTo(100 + heal);
+    expect(f.player("bard")?.hp).toBe(100);
+    expect(f.engine.hp).toBe(bossHp);
+    expect(msgs(out, "hp").map((o) => o.msg)).toContainEqual(
+      expect.objectContaining({ t: "hp", id: 2 }),
+    );
+    expect(msgs(out, "hit")).toHaveLength(0);
+    // It counts as the Bard's healing.
+    const row = f.report(T0 + 1_001, true)?.boss?.damage.find((d) => d.uid === "bard");
+    expect(row?.healing).toBeGreaterThan(0);
+  });
+
+  it("misses with nobody in the cone, and never heals its Bard", () => {
+    const f = setup();
+    f.stance("bard", true);
+    expect(f.cast("bard", 0, 0, T0)).toBe("miss");
+    f.step(T0 + 1_000);
+    expect(f.player("bard")?.hp).toBe(100);
+  });
+
+  it("never heals past full", () => {
+    const f = setup();
+    f.stance("bard", true);
+    const ally = f.player("ally");
+    if (ally) ally.hp = 199;
+    f.cast("bard", atAlly.yaw, atAlly.pitch, T0);
+    f.step(T0 + 1_000);
+    expect(f.player("ally")?.hp).toBe(200);
+  });
+
+  it("keeps to the pace of a wave", () => {
+    const f = setup();
+    f.stance("bard", true);
+    let refused = 0;
+    for (let i = 0; i < 40; i++) {
+      const t = T0 + i * CAST_INTERVAL_MS;
+      f.onState("bard", 0, 8, t);
+      f.onState("ally", 0, 2, t);
+      if (f.cast("bard", atAlly.yaw, atAlly.pitch, t) === "cooldown") refused++;
+      f.step(t);
+    }
+    expect(refused).toBe(0);
+    // Faster than that: refused, as a wave would be.
+    const g = setup();
+    g.stance("bard", true);
+    let fast = 0;
+    for (let i = 0; i < 10; i++)
+      if (g.cast("bard", atAlly.yaw, atAlly.pitch, T0 + i * 100) === "cooldown")
+        fast++;
+    expect(fast).toBeGreaterThan(5);
+  });
+
+  it("goes back to attacking when it says so, or puts its lute away", () => {
+    const f = setup();
+    f.stance("bard", true);
+    expect(f.stance("bard", false)).toEqual([
+      { to: "all", msg: { t: "stance", id: 1, heal: false } },
+    ]);
+    f.stance("bard", true);
+    const out = f.renew("bard", { ...ticket("bard", [["soothing-drones", 1]]), look: { seed: "s", stage: 2, equipped: {} } });
+    expect(out).toContainEqual({ to: "all", msg: { t: "stance", id: 1, heal: false } });
+    expect(f.state(T0).healers).toBeUndefined();
   });
 });

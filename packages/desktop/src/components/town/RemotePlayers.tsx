@@ -6,7 +6,12 @@ import {
   TOWN_FLAG_JUMP,
   TOWN_FLAG_SITTING,
 } from "@herzies/shared";
-import { BOSS_STAND, meleeReaches } from "@herzies/shared/combat";
+import {
+  BOSS_STAND,
+  HEAL_LOCK_ANGLE,
+  healTarget,
+  meleeReaches,
+} from "@herzies/shared/combat";
 import { HerzieModel } from "@herzies/shared/gl";
 import { Html } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
@@ -26,6 +31,7 @@ import { DUMMY, hitDummy } from "./combat/dummy";
 import { bossFight, bossNow } from "./combat/fight";
 import { attackSpeedOf, entityAt, setEntityAt } from "./combat/skills";
 import { slashField } from "./combat/slashes";
+import { stance } from "./combat/stance";
 import { assistTarget, type Vec3, waveField } from "./combat/waves";
 import { applyDowned, entityDown } from "./downed";
 import { HeadBubble } from "./HeadBubble";
@@ -227,10 +233,24 @@ function RemoteHerzie({
       herzie.handWorldPosition(hand);
       const from: Vec3 = [hand.x, hand.y, hand.z];
       const dir: Vec3 = [Math.sin(s.heading), 0, Math.cos(s.heading)];
-      waveField.cast(from, dir, {
-        mine: false,
-        target: assistTarget(from, dir, liveDummies),
-      });
+      if (stance.healers.has(remote.id)) {
+        // A Bard healing: a green bolt, to whoever it most likely aimed at
+        // (only its heading travels), homing on them.
+        const allies: { id: number; x: number; z: number }[] = [];
+        for (const [id, at] of entityAt)
+          if (id !== remote.id && !entityDown(id))
+            allies.push({ id, x: at.x, z: at.z });
+        const to = healTarget(from, dir, allies, HEAL_LOCK_ANGLE * 2);
+        waveField.cast(from, dir, {
+          mine: false,
+          heal: true,
+          ally: to?.ally.id ?? null,
+        });
+      } else
+        waveField.cast(from, dir, {
+          mine: false,
+          target: assistTarget(from, dir, liveDummies),
+        });
     }
     // Knocked out (in the cave, or anywhere outside a fight): lying where
     // it fell, with a mark a Bard can spot from across the room.

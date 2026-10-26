@@ -67,7 +67,9 @@ export const SKILL_DEFS: Record<SkillId, SkillDef> = {
     kind: "heal",
     describe: "Heals every herzie nearby by {v} of their health.",
     value: [0.2, 0.5],
-    cooldownMs: 20_000,
+    // The Bard's burst heal; its lute's heal bolts carry the steady work
+    // between, so this one comes round often.
+    cooldownMs: 12_000,
     radius: 8,
     xpPerUnit: 1 / 6,
   },

@@ -18,6 +18,7 @@ import {
   skills,
   useSkills,
 } from "./combat/skills";
+import { canHeal, toggleStance, useStance } from "./combat/stance";
 import { eat, useLastEat } from "./eat";
 import {
   assignHotbar,
@@ -39,6 +40,62 @@ const SKILL_ABBR: Record<SkillId, string> = {
   taunt: "TA",
   haste: "HS",
 };
+
+/**
+ * A Bard's lute stance, left of the hotbar: attacking (⚔) or healing (✚),
+ * R or a click to switch. Only for a Bard with a lute.
+ */
+function StanceSlot() {
+  useSkills();
+  const heal = useStance();
+  if (skills.instrument !== "lute") return null;
+  const armed = canHeal();
+  return (
+    <Tooltip
+      label={
+        <div className="w-[190px] whitespace-normal">
+          <div className="font-bold">
+            Lute: {heal ? "healing" : "attacking"}
+          </div>
+          <div className="text-text-dim">
+            {heal
+              ? "Your attack heals the ally under your crosshair. R to attack."
+              : "R to heal: your attack heals the ally under your crosshair instead."}
+          </div>
+          {!armed && (
+            <div className="mt-1 text-red-300">Equip "Lute" to heal.</div>
+          )}
+        </div>
+      }
+    >
+      <button
+        type="button"
+        aria-label={
+          heal ? "Lute stance: healing (R)" : "Lute stance: attacking (R)"
+        }
+        aria-pressed={heal}
+        onClick={() => toggleStance()}
+        className={cn(
+          "pointer-events-auto relative flex size-9 cursor-pointer items-center justify-center rounded border bg-black/55 p-0",
+          heal ? "border-[#7ee2a8]/80" : "border-white/20",
+          !armed && "opacity-45 grayscale",
+        )}
+      >
+        <span className="absolute top-0 left-0.5 text-[9px] leading-none text-white/70">
+          R
+        </span>
+        <span
+          className={cn(
+            "text-[15px] font-bold leading-none",
+            heal ? "text-[#7ee2a8]" : "text-white",
+          )}
+        >
+          {heal ? "✚" : "⚔"}
+        </span>
+      </button>
+    </Tooltip>
+  );
+}
 
 /**
  * One of your class skills on the hotbar: its letters, greyed from the top
@@ -217,6 +274,7 @@ export function Hotbar({
 
   return (
     <div className={cn("absolute z-30 flex gap-1", className)}>
+      <StanceSlot />
       {HOTBAR_KEYS.map((key) => {
         const n = skillOfSlot(slots[key]);
         if (n !== null)

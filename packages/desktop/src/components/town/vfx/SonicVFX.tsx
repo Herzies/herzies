@@ -35,6 +35,8 @@ import { distortionMaterial, distortionScene } from "./distortion";
 /** The wave's colour, where it glows. */
 export const GLOW = new THREE.Color("#9fe8ff");
 const GLOW_CRIT = new THREE.Color("#ffd36b");
+/** A Bard's heal bolt. */
+export const HEAL_GLOW = new THREE.Color("#7ee2a8");
 
 /** How far round a dome reaches from its front (radians). */
 const CAP = 1.05;
@@ -453,13 +455,14 @@ export function SonicVFX() {
       if (!w.alive) continue;
       const r = waveRadius(w);
       const strength = waveStrength(w);
+      const tint = w.heal ? HEAL_GLOW : GLOW;
       SHELLS.forEach((s, k) => {
         const pulse = 1 + Math.sin(time * 34 - k * 1.7) * 0.07;
         const back = s.back * r * 1.6;
         _at[0] = w.pos[0] - w.dir[0] * back;
         _at[1] = w.pos[1] - w.dir[1] * back;
         _at[2] = w.pos[2] - w.dir[2] * back;
-        shells.add(_at, w.dir, r * s.size * pulse, strength * s.strength, GLOW);
+        shells.add(_at, w.dir, r * s.size * pulse, strength * s.strength, tint);
       });
       // A trail of sparks, and now and then a note.
       if (Math.random() < dt * 55) {
@@ -475,7 +478,7 @@ export function SonicVFX() {
             life: 0.45,
             size: 0.14 + Math.random() * 0.1,
             kind: SPARK,
-            color: GLOW,
+            color: tint,
             drag: 3,
           },
         );
@@ -489,7 +492,7 @@ export function SonicVFX() {
             life: 0.9,
             size: 0.38,
             kind: Math.random() < 0.5 ? NOTE : NOTES,
-            color: GLOW,
+            color: tint,
             drag: 1.5,
           },
         );
@@ -504,7 +507,7 @@ export function SonicVFX() {
         k.dir,
         k.radius * (1 + easeOut(t) * 1.4),
         (1 - t) ** 2 * 0.55,
-        GLOW,
+        k.heal ? HEAL_GLOW : GLOW,
       );
     }
 
@@ -539,7 +542,7 @@ export function SonicVFX() {
       const crit = b.kind === "crit";
       const fizzle = b.kind === "fizzle";
       const reach = crit ? 2.9 : fizzle ? 1.1 : 1.9;
-      const color = crit ? GLOW_CRIT : GLOW;
+      const color = crit ? GLOW_CRIT : b.kind === "heal" ? HEAL_GLOW : GLOW;
       bursts.add(
         b.pos,
         b.dir,

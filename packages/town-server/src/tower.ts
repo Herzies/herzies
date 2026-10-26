@@ -216,7 +216,7 @@ export class TowerEngine {
     attack: AttackStyle = "wave",
     melee: number = STRIKE_DAMAGE,
   ): "cooldown" | "miss" | "hit" | "dead" {
-    if (!this.takeCast(uid, now)) return "cooldown";
+    if (!this.spendCast(uid, now)) return "cooldown";
     const seen = now - SEEN_LAG_MS;
     if (attack === "melee") {
       const struck = this.pack.inReach(from, yaw, seen);
@@ -274,7 +274,8 @@ export class TowerEngine {
     return landed;
   }
 
-  private takeCast(uid: string, now: number): boolean {
+  /** A cast's token (a heal bolt spends one too); see BossEngine's. */
+  spendCast(uid: string, now: number): boolean {
     const bucket = this.casts.get(uid) ?? {
       tokens: TUNING.castBurst,
       at: now,
