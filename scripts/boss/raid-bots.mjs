@@ -236,7 +236,7 @@ function connect(b, at) {
           break;
         case "revived":
           if (m.id === v.you) v.down = false;
-          if (b === bots[0]) log(`${v.names.get(m.by) ?? m.by} brought ${v.names.get(m.id) ?? m.id} back`);
+          if (b === bots[0]) log(m.by < 0 ? `${v.names.get(m.id) ?? m.id} is back up (the boss fell)` : `${v.names.get(m.by) ?? m.by} brought ${v.names.get(m.id) ?? m.id} back`);
           break;
         case "skillDenied":
           // Not ready after all: try again a little later.
