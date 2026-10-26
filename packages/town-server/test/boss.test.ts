@@ -239,9 +239,16 @@ describe("attacks", () => {
     let max = 0;
     for (let t = T0; t < T0 + 30_000; t += 50) {
       e.update(t, players);
-      max = Math.max(max, e.active.length);
+      // Busters don't count against the cap (they always land).
+      max = Math.max(
+        max,
+        e.active.filter((t) => t.kind !== "buster").length,
+      );
     }
-    expect(max).toBeLessThanOrEqual(MAX_TELEGRAPHS);
+    // A few more in a bigger raid: 12 here.
+    expect(max).toBeLessThanOrEqual(
+      MAX_TELEGRAPHS + Math.floor(12 / TUNING.scale.perPlayers),
+    );
   });
 
   it("is deterministic for a seed", () => {
@@ -375,5 +382,97 @@ describe("melee damage", () => {
   it("no blow out-hits the Record Slinger's disc", () => {
     expect(BUMP_DAMAGE).toBeLessThan(STRIKE_DAMAGE);
     expect(STRIKE_DAMAGE).toBeLessThan(DISC_DAMAGE);
+  });
+});
+
+describe("production pass: fairness and the raid's size", () => {
+  it("its minions never wind up faster than the boss's own minimum", () => {
+    const e = engine(10_000, 10_000);
+    const players = [still("a", 0, 6), still("b", 3, 6)];
+    e.update(T0, players);
+    e.summon(T0, 6, 30, 10, []);
+    const windups: number[] = [];
+    for (let t = T0; t < T0 + 30_000; t += 50) {
+      for (const ev of e.update(t, players))
+        if (ev.t === "telegraph" && ev.telegraph.mob !== undefined)
+          windups.push(ev.telegraph.hitAt - ev.telegraph.at);
+    }
+    expect(windups.length).toBeGreaterThan(0);
+    expect(Math.min(...windups)).toBeGreaterThanOrEqual(TUNING.minWindupMs);
+  });
+
+  it("a bigger raid gets more slams in a volley", () => {
+    const volley = (n: number) => {
+      const e = engine(300, 1000);
+      const players = Array.from({ length: n }, (_, i) =>
+        still(`p${i}`, ((i % 8) - 4) * 2.5, Math.floor(i / 8) * 2.5 + 2),
+      );
+      let most = 0;
+      for (let t = T0; t < T0 + 20_000; t += 50)
+        most = Math.max(
+          most,
+          e.update(t, players).filter(
+            (ev) => ev.t === "telegraph" && ev.telegraph.kind === "circle",
+          ).length,
+        );
+      return most;
+    };
+    expect(volley(36)).toBeGreaterThan(volley(8));
+  });
+
+  it("a buster leaves its target Rattled, and the next one hits harder", () => {
+    const e = engine(1000, 1000);
+    const tank: BossPlayer = { ...still("tank", 0, 5, 1_000) };
+    const other = still("dps", 6, 9, 1_000);
+    e.setTaunt("tank", T0 + 60_000, T0);
+    const hits: number[] = [];
+    let stacks = 0;
+    for (let t = T0; t < T0 + 40_000; t += 50) {
+      for (const ev of e.update(t, [tank, other])) {
+        if (ev.t === "rattled") stacks = ev.stacks;
+        if (ev.t === "resolve")
+          for (const h of ev.hits)
+            if (h.uid === "tank" && h.aimed) hits.push(h.damage + h.absorbed);
+      }
+    }
+    expect(stacks).toBeGreaterThanOrEqual(2);
+    // Busters only (slams on the focus are aimed too): the biggest grow.
+    const sorted = [...hits].sort((a, b) => a - b);
+    expect(sorted[sorted.length - 1]).toBeGreaterThan(TUNING.buster.damage);
+  });
+
+  it("doesn't flip its focus between two who hate it about the same", () => {
+    const e = engine(100_000, 100_000);
+    const a = still("a", -2, 4);
+    const b = still("b", 2, 4);
+    e.update(T0, [a, b]);
+    e.addThreat("a", 1_000);
+    e.update(T0 + 50, [a, b]);
+    expect(e.focus).toBe("a");
+    // b pulls a little ahead, but not 30% ahead: it stays on a.
+    e.addThreat("b", 1_100);
+    e.update(T0 + 100, [a, b]);
+    expect(e.focus).toBe("a");
+    e.addThreat("b", 500);
+    e.update(T0 + 150, [a, b]);
+    expect(e.focus).toBe("b");
+  });
+
+  it("in a big raid, scatter marks go off on whoever stands close to the marked", () => {
+    const e = engine(1_000_000, 1_000_000, 3);
+    // Twenty in pairs: whoever's marked takes their partner with them.
+    const players = Array.from({ length: 20 }, (_, i) =>
+      still(`p${i}`, (Math.floor(i / 2) - 5) * 2.4, 6 + (i % 2) * 0.5),
+    );
+    let marks = 0;
+    let shared = 0;
+    for (let t = T0; t < T0 + 40_000; t += 50) {
+      for (const ev of e.update(t, players)) {
+        if (ev.t === "telegraph" && ev.telegraph.kind === "scatter") marks++;
+        if (ev.t === "resolve" && ev.hits.length > 1) shared++;
+      }
+    }
+    expect(marks).toBeGreaterThanOrEqual(Math.ceil(20 / TUNING.scatter.perMarks));
+    expect(shared).toBeGreaterThan(0);
   });
 });

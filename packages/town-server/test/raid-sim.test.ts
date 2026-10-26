@@ -227,7 +227,18 @@ function raid(bots: Bot[], seed: number, limitMs = 17 * 60_000): Result {
         if (!b.seen.has(tg.id)) b.seen.set(tg.id, t);
         return t - (b.seen.get(tg.id) as number) >= b.reaction;
       });
-      const escape = b.dodges && !channeling ? safeSpot(noticed, b.x, b.z) : null;
+      // A scatter mark, as a bot reads it: the marked herzie moves clear of
+      // everyone; everyone else moves clear of the marked.
+      const shapesSeen = noticed.flatMap((tg): Telegraph[] => {
+        if (tg.kind !== "scatter") return [tg];
+        if (tg.target === b.uid)
+          return bots
+            .filter((o) => o !== b && !f.player(o.uid)?.down)
+            .map((o) => ({ ...tg, kind: "circle", x: o.x, z: o.z }));
+        const marked = bots.find((o) => o.uid === tg.target);
+        return marked ? [{ ...tg, kind: "circle", x: marked.x, z: marked.z }] : [];
+      });
+      const escape = b.dodges && !channeling ? safeSpot(shapesSeen, b.x, b.z) : null;
       const toBoss = Math.hypot(at.x - b.x, at.z - b.z);
       if (escape) stepToward(b, escape);
       else if (!channeling && b.dodges) {
@@ -357,6 +368,18 @@ describe("the raid, simulated", () => {
     expect(twelve.ms).toBeLessThan(six.ms * 1.15);
   });
 
+  it("twenty and forty win too, with more on the floor and the scatter marks", () => {
+    const big = (n: number) =>
+      party(Array.from({ length: n }, (_, i) => TRIO[i % 3]));
+    const twenty = raid(big(20), 4);
+    const forty = raid(big(40), 5);
+    for (const r of [twenty, forty]) {
+      expect(r.outcome, `after ${min(r.ms)} min`).toBe("victory");
+      expect(r.ms).toBeGreaterThan(3.5 * 60_000);
+      expect(r.ms).toBeLessThan(10 * 60_000);
+    }
+  }, 60_000);
+
   it("a lone Record Slinger can win, before the enrage ends it", () => {
     const r = raid(party(["record_slinger"]), 4);
     expect(r.outcome, `after ${min(r.ms)} min`).toBe("victory");
@@ -410,3 +433,4 @@ describe("the raid, simulated", () => {
     }
   });;
 });
+

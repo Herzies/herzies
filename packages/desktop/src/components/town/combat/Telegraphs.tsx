@@ -20,7 +20,9 @@ import { entityAt } from "./skills";
  * A buster is the boss's mark on one herzie: the circle follows them, with
  * a "!" overhead, because it lands on them wherever they go. A minion's
  * swing is the same shape in a sicklier green; the enrage's pulse, which
- * can't be escaped, is a deep violet over the whole room.
+ * can't be escaped, is a deep violet over the whole room. A scatter mark
+ * follows its herzie too, in ice blue with a "!" of its own: it goes off on
+ * anyone near them, so the marked step away from the rest.
  */
 export function Telegraphs() {
   useBossFight();
@@ -52,7 +54,13 @@ const Shape = memo(function Shape({ shape }: { shape: FloorShape }) {
           uTime: { value: 0 },
           uMotion: { value: reduced() ? 0 : 1 },
           uTone: {
-            value: shape.lethal ? 2 : shape.mob !== undefined ? 1 : 0,
+            value: shape.lethal
+              ? 2
+              : shape.kind === "scatter"
+                ? 3
+                : shape.mob !== undefined
+                  ? 1
+                  : 0,
           },
         },
         vertexShader: /* glsl */ `
@@ -90,9 +98,11 @@ const Shape = memo(function Shape({ shape }: { shape: FloorShape }) {
               + uRing * smoothstep(0.14, 0.02, abs(d - uInner)) * dash;
             float pulse = mix(1.0, 0.8 + 0.2 * sin(uTime * 12.0), uMotion);
             // The boss's: red to gold. A minion's: green. The pulse: violet.
-            vec3 warm = uTone > 1.5 ? vec3(0.55, 0.18, 0.95)
+            vec3 warm = uTone > 2.5 ? vec3(0.25, 0.72, 1.0)
+              : uTone > 1.5 ? vec3(0.55, 0.18, 0.95)
               : uTone > 0.5 ? vec3(0.45, 0.9, 0.25) : vec3(1.0, 0.32, 0.2);
-            vec3 hot = uTone > 1.5 ? vec3(0.95, 0.75, 1.0)
+            vec3 hot = uTone > 2.5 ? vec3(0.8, 0.95, 1.0)
+              : uTone > 1.5 ? vec3(0.95, 0.75, 1.0)
               : uTone > 0.5 ? vec3(0.85, 1.0, 0.55) : vec3(1.0, 0.82, 0.55);
             vec3 col = mix(warm, hot, filled * 0.7);
             float a = inside * (0.1 + 0.1 * hatch) + filled * (0.3 + 0.14 * hatch) + line * 0.95 * pulse;
@@ -125,10 +135,14 @@ const Shape = memo(function Shape({ shape }: { shape: FloorShape }) {
   useEffect(() => () => mesh.geometry.dispose(), [mesh]);
 
   // A buster's "!" over its target's head.
+  const follows = shape.kind === "buster" || shape.kind === "scatter";
   const mark = useMemo(() => {
-    if (shape.kind !== "buster") return null;
+    if (shape.kind !== "buster" && shape.kind !== "scatter") return null;
     const g = new THREE.Group();
-    const red = new THREE.MeshBasicMaterial({ color: 0xff3b30, fog: false });
+    const red = new THREE.MeshBasicMaterial({
+      color: shape.kind === "scatter" ? 0x5ec8ff : 0xff3b30,
+      fog: false,
+    });
     const bar = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.42, 0.12), red);
     bar.position.y = 0.32;
     const dot = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.12), red);
@@ -149,7 +163,7 @@ const Shape = memo(function Shape({ shape }: { shape: FloorShape }) {
 
   useFrame(({ clock }) => {
     const now = performance.now();
-    if (shape.kind === "buster" && shape.target !== undefined) {
+    if (follows && shape.target !== undefined) {
       const at = entityAt.get(shape.target);
       if (at) {
         mesh.position.set(at.x, 0.05, at.z);

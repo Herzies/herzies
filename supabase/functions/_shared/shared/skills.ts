@@ -95,10 +95,10 @@ export const SKILL_DEFS: Record<SkillId, SkillDef> = {
     name: "Resurrect",
     kind: "revive",
     describe:
-      "Plays a downed herzie back to its feet with {v} of its health. Uses one of the raid's revives.",
+      "Plays a downed herzie back to its feet with {v} of its health. 3 s to play; moving stops it.",
     value: [0.3, 0.5],
-    // The raid's shared pool is the real limit; this keeps one Bard from
-    // chaining several in a row.
+    // Revives are unlimited: this keeps one Bard from chaining several in
+    // a row.
     cooldownMs: 30_000,
     channelMs: 3_000,
     radius: 4,
@@ -110,10 +110,12 @@ export const SKILL_DEFS: Record<SkillId, SkillDef> = {
     name: "Taunt",
     kind: "taunt",
     describe:
-      "A crash that turns the boss on you: it fights only you for a minute. The last taunt wins.",
+      "A crash that turns the boss on you for 10 s, its busters too. Each buster leaves you Rattled (the next hits harder): trade the boss with another Percussionist.",
     value: [0, 0],
-    cooldownMs: 60_000,
-    durationMs: 60_000,
+    // Short, with a gap: one Percussionist can't hold it forever, and two
+    // trading it is the job.
+    cooldownMs: 20_000,
+    durationMs: 10_000,
     // Per point of boss damage it drew onto you (aimed, before Def): what
     // a taunt is for.
     xpPerUnit: 0.25,
@@ -210,7 +212,7 @@ export function skillXpFor(id: SkillId, units: number): number {
 /** `cymbrella`: less damage. `taunt`: the boss's eye (shown on whoever
  * holds it; no stat). `in_tune`: listening to what the boss hates, a class
  * bonus whose `kind` says what it does. */
-export type BuffId = "cymbrella" | "taunt" | "in_tune";
+export type BuffId = "cymbrella" | "taunt" | "in_tune" | "rattled";
 
 /** What an in-tune bonus does: less damage taken, stronger heals, harder
  * hits. */

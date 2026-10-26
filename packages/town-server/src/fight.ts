@@ -756,7 +756,9 @@ export class FightRuntime {
       const before = boss.setTaunt(uid, until, now);
       if (before) out.push(...this.untaunt(before));
       const buff = boss.buff(uid, { id: "taunt", value: 1, until });
-      boss.addThreat(uid, TUNING.threat.cymbrella);
+      // Top of its list when the taunt runs out, so it doesn't snap back
+      // at once to whoever it hated before.
+      boss.tauntThreat(uid);
       out.push(this.buffMsg(p.id, buff));
       this.raidDirty = true;
     }
@@ -1533,6 +1535,18 @@ export class FightRuntime {
       case "untaunt":
         out.push(...this.untaunt(ev.uid));
         break;
+      case "rattled": {
+        const p = this.players.get(ev.uid);
+        if (p)
+          out.push(
+            this.buffMsg(p.id, {
+              id: "rattled",
+              value: ev.stacks,
+              until: ev.until,
+            }),
+          );
+        break;
+      }
       case "minions":
         this.summon(now, out);
         break;

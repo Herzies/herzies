@@ -105,7 +105,7 @@ export const TUNING = {
    * ring's windup lets someone at the far wall reach its middle wherever
    * the boss has walked to. */
   slam: { radius: 3, windupMs: 1_600, damage: 45 },
-  ring: { inner: 6.5, windupMs: 3_600, damage: 58 },
+  ring: { inner: 6.5, windupMs: 4_000, damage: 58 },
   /** The tank-buster: aimed at whoever the boss is focused on, and it
    * follows them — it can't be dodged, only taken. Sized so that a herzie
    * who isn't tanking it is badly hurt, and a Percussionist (Def, a
@@ -115,6 +115,29 @@ export const TUNING = {
   /** What the boss hates: damage dealt, healing done, and the Cymbrella's
    * clang. Fades by `decayPerSec` a second, so it keeps moving. */
   threat: { perDamage: 1, perHeal: 0.5, cymbrella: 500, decayPerSec: 0.1 },
+  /** It changes its mind only for someone it hates clearly more than its
+   * focus (WoW's 110% in melee, 130% from range), so it doesn't twitch
+   * between two close damage dealers. */
+  focusSwitch: { melee: 1.1, ranged: 1.3, meleeReach: 3 },
+  /** Each buster leaves its target Rattled: the next one hits harder, per
+   * stack, past the usual one-hit cap (to a ceiling). Fades unhit; a
+   * second tank taking a turn is how it's cleared. */
+  rattled: { perStack: 0.25, maxStacks: 4, ms: 20_000, maxHitFraction: 0.6 },
+  /** Its minions' share of the floor's shapes. */
+  minionShapes: 2,
+  /** A bigger raid gets more at once: one more shape and slam per this
+   * many herzies, up to the most. */
+  scale: { perPlayers: 6, maxShapes: 10, maxSlams: 10 },
+  /** In a big raid, it marks a few herzies at once: each mark goes off
+   * where its herzie stands, on everyone in it. Spread out. */
+  scatter: {
+    minPlayers: 20,
+    everyMs: 25_000,
+    windupMs: 2_500,
+    radius: 2.5,
+    damage: 40,
+    perMarks: 6,
+  },
 } as const;
 
 /** How far an off-centre ring reaches: from anywhere the boss can walk, to
@@ -136,7 +159,7 @@ export const MAX_TELEGRAPHS = TUNING.maxTelegraphs;
 const PATH_MS = 1_000;
 
 export type Phase = 1 | 2 | 3;
-export type TelegraphKind = "circle" | "ring" | "buster";
+export type TelegraphKind = "circle" | "ring" | "buster" | "scatter";
 
 export type Telegraph = {
   id: number;
@@ -152,7 +175,8 @@ export type Telegraph = {
   hitAt: number;
   /** Damage it deals, before the cap, Def and buffs. */
   damage: number;
-  /** A buster's target (user id); it lands on them wherever they are. */
+  /** A buster's or a scatter mark's target (user id): a buster lands on
+   * them wherever they are, a mark goes off around them. */
   target?: string;
   /** Whom it was aimed at (a buster, or a slam on the boss's focus): a
    * taunt is paid for what it draws. */
@@ -187,6 +211,8 @@ export type BossHit = {
 
 export type BossEvent =
   | { t: "telegraph"; telegraph: Telegraph }
+  /** A buster left `uid` Rattled: `stacks` of it, until `until`. */
+  | { t: "rattled"; uid: string; stacks: number; until: number }
   | { t: "resolve"; id: number; hits: BossHit[] }
   | { t: "phase"; phase: Phase }
   | {
@@ -296,6 +322,12 @@ export class BossEngine {
   private nextPulseAt = 0;
   /** Its minions, once it has called any. */
   private mobs: MobPack | null = null;
+  /** The last update's time, and how many herzies were in it. */
+  private clock = 0;
+  private raidSize = 0;
+  /** Rattled by busters: stacks and until when (server ms), by user id. */
+  private rattled = new Map<string, { stacks: number; until: number }>();
+  private nextScatterAt = 0;
   /** Minion thresholds not yet crossed. */
   private thresholds: number[] = [...MINION_THRESHOLDS];
   /** How a minion's hit on a herzie is judged: by the boss's own breathers
@@ -383,6 +415,10 @@ export class BossEngine {
         { radius: TUNING.roomRadius, entry: { x: 0, z: 10 } },
         () => ({ x: this.at.x, z: this.at.z, r: TUNING.boss.radius }),
       );
+      // The cave's fairness rules hold for its minions too.
+      this.mobs.minWindupMs = TUNING.minWindupMs;
+      this.mobs.maxShapes = TUNING.minionShapes;
+      this.mobs.taunter = () => this.taunter(this.clock);
     }
     this.mobs.floor = Math.max(1, Math.floor(floor));
     this.mobs.level = Math.max(1, Math.floor(level));
@@ -480,6 +516,18 @@ export class BossEngine {
   addThreat(uid: string, amount: number): void {
     if (!(amount > 0)) return;
     this.threat.set(uid, (this.threat.get(uid) ?? 0) + amount);
+  }
+
+  /** A taunt's threat: a clear lead over whoever it hates most. */
+  tauntThreat(uid: string): void {
+    let top = 0;
+    for (const [other, v] of this.threat)
+      if (other !== uid) top = Math.max(top, v);
+    const mine = this.threatOf(uid);
+    this.threat.set(
+      uid,
+      Math.max(mine + TUNING.threat.cymbrella, top * TUNING.focusSwitch.ranged),
+    );
   }
 
   threatOf(uid: string): number {
@@ -695,6 +743,8 @@ export class BossEngine {
    * new ones. Events come out in order. */
   update(now: number, players: readonly BossPlayer[]): BossEvent[] {
     const events: BossEvent[] = [];
+    this.clock = now;
+    this.raidSize = players.length;
     this.decayThreat(now);
     if (this.sleeping) {
       this.pending = [];
@@ -748,6 +798,19 @@ export class BossEngine {
           best = t;
           focus = p;
         }
+      }
+      // Keep the one it's on unless someone's clearly ahead.
+      const current = alive.find((p) => p.uid === this.focusUid);
+      if (focus && current && focus !== current) {
+        const held = this.threatOf(current.uid);
+        const at = focus.posAt(now) as { x: number; z: number };
+        const reach =
+          Math.hypot(at.x - this.at.x, at.z - this.at.z) - TUNING.boss.radius;
+        const need =
+          reach <= TUNING.focusSwitch.meleeReach
+            ? TUNING.focusSwitch.melee
+            : TUNING.focusSwitch.ranged;
+        if (held > 0 && best < held * need) focus = current;
       }
     }
     if (!focus) {
@@ -868,6 +931,13 @@ export class BossEngine {
   ) {
     const due = this.telegraphs.filter((t) => t.hitAt <= now);
     if (!due.length) return;
+    // Where each scatter mark goes off: on its herzie, as they stand.
+    const centres = new Map<number, { x: number; z: number }>();
+    for (const tg of due)
+      if (tg.kind === "scatter" && tg.target) {
+        const pos = players.find((p) => p.uid === tg.target)?.posAt(tg.hitAt);
+        if (pos) centres.set(tg.id, pos);
+      }
     this.telegraphs = this.telegraphs.filter((t) => t.hitAt > now);
     for (const tg of due) {
       const hits: BossHit[] = [];
@@ -879,10 +949,22 @@ export class BossEngine {
           continue;
         }
         if ((this.safeUntil.get(p.uid) ?? 0) > tg.hitAt) continue;
-        if ((this.invulnUntil.get(p.uid) ?? 0) > tg.hitAt) continue;
+        // A buster always lands (a slam a moment before doesn't spare its
+        // target): it's the tank's to take.
+        if (
+          tg.kind !== "buster" &&
+          (this.invulnUntil.get(p.uid) ?? 0) > tg.hitAt
+        )
+          continue;
         if (tg.kind === "buster") {
           // It follows its target: no dodging, and no one else is hit.
           if (p.uid !== tg.target) continue;
+        } else if (tg.kind === "scatter") {
+          // A mark goes off where its herzie stands now.
+          const c = centres.get(tg.id);
+          const pos = p.posAt(tg.hitAt);
+          if (!c || !pos || Math.hypot(pos.x - c.x, pos.z - c.z) > tg.r)
+            continue;
         } else {
           // Defender's benefit: in the zone now AND a moment before.
           const inside = [tg.hitAt, tg.hitAt - TUNING.rewindMs].every((t) => {
@@ -891,11 +973,29 @@ export class BossEngine {
           });
           if (!inside) continue;
         }
-        hits.push(mitigatedHit(p, tg, this.buffs.get(p.uid) ?? []));
+        if (tg.kind === "buster") {
+          const r = this.rattledOf(p.uid, tg.hitAt);
+          hits.push(
+            mitigatedHit(p, tg, this.buffs.get(p.uid) ?? [], {
+              mult: 1 + TUNING.rattled.perStack * r,
+              cap: r > 0 ? TUNING.rattled.maxHitFraction : MAX_HIT_FRACTION,
+            }),
+          );
+          const stacks = Math.min(TUNING.rattled.maxStacks, r + 1);
+          const until = tg.hitAt + TUNING.rattled.ms;
+          this.rattled.set(p.uid, { stacks, until });
+          events.push({ t: "rattled", uid: p.uid, stacks, until });
+        } else hits.push(mitigatedHit(p, tg, this.buffs.get(p.uid) ?? []));
         this.invulnUntil.set(p.uid, tg.hitAt + TUNING.invulnMs);
       }
       events.push({ t: "resolve", id: tg.id, hits });
     }
+  }
+
+  /** How many stacks of Rattled `uid` carries at `t`. */
+  rattledOf(uid: string, t: number): number {
+    const r = this.rattled.get(uid);
+    return r && r.until > t ? r.stacks : 0;
   }
 
   /** The soft enrage (once, a heads-up), and the hard one: a lethal pulse
@@ -933,10 +1033,20 @@ export class BossEngine {
     events.push({ t: "telegraph", telegraph });
   }
 
-  private room(): boolean {
-    return (
-      this.telegraphs.length + (this.mobs?.active.length ?? 0) < MAX_TELEGRAPHS
+  /** Most of its own shapes on the floor at once: more in a big raid. Its
+   * minions have their own share; busters and the pulse don't count. */
+  private get maxShapes(): number {
+    const s = TUNING.scale;
+    return Math.min(
+      s.maxShapes,
+      MAX_TELEGRAPHS + Math.floor(this.raidSize / s.perPlayers),
     );
+  }
+
+  private room(): boolean {
+    let n = 0;
+    for (const t of this.telegraphs) if (t.kind !== "buster" && !t.lethal) n++;
+    return n < this.maxShapes;
   }
 
   private startAttacks(
@@ -950,6 +1060,7 @@ export class BossEngine {
     );
     const fury = enrageFactor(now - this.lockedAt);
     this.startBuster(now, players, targets, events, fury);
+    this.startScatter(now, targets, events, fury);
     if (now < this.nextAttackAt) return;
     const cfg = TUNING.phases[this.phase];
     if (!targets.length) {
@@ -979,7 +1090,11 @@ export class BossEngine {
     // Slams: about one per two herzies, up to the phase's count, one fewer
     // while its minions are up. The first lands on whoever it's after, the
     // rest on random others.
-    const expected = Math.min(cfg.slams, targets.length / 2);
+    const most = Math.min(
+      TUNING.scale.maxSlams,
+      cfg.slams + Math.floor(this.raidSize / TUNING.scale.perPlayers),
+    );
+    const expected = Math.min(most, targets.length / 2);
     let n = Math.max(1, weightedRound(expected, this.rand));
     if (this.minionsUp > 0) n = Math.max(1, n - 1);
     const pool = [...targets];
@@ -1029,7 +1144,7 @@ export class BossEngine {
       if (here >= cfg.minPlayers && hated && this.threatOf(hated.uid) > 0)
         target = hated;
     }
-    if (!target || !this.room()) {
+    if (!target) {
       this.nextBusterAt = now + 500;
       return;
     }
@@ -1052,6 +1167,45 @@ export class BossEngine {
     events.push({ t: "telegraph", telegraph });
   }
 
+  /** In a big raid: a few herzies marked at once, each mark going off
+   * around them. Never on the one tanking, nor on anyone just up. */
+  private startScatter(
+    now: number,
+    targets: readonly BossPlayer[],
+    events: BossEvent[],
+    fury: number,
+  ) {
+    const cfg = TUNING.scatter;
+    if (this.raidSize < cfg.minPlayers) return;
+    if (!this.nextScatterAt) this.nextScatterAt = now + cfg.everyMs;
+    if (now < this.nextScatterAt) return;
+    this.nextScatterAt = now + Math.round(cfg.everyMs / fury);
+    const pool = targets.filter((p) => p.uid !== this.focusUid);
+    const marks = Math.min(
+      pool.length,
+      Math.ceil(this.raidSize / cfg.perMarks),
+    );
+    for (let i = 0; i < marks; i++) {
+      const p = pool.splice(Math.floor(this.rand() * pool.length), 1)[0];
+      const pos = p.posAt(now);
+      if (!pos) continue;
+      const telegraph: Telegraph = {
+        id: this.nextId(),
+        kind: "scatter",
+        x: pos.x,
+        z: pos.z,
+        r: cfg.radius,
+        inner: 0,
+        at: now,
+        hitAt: now + cfg.windupMs,
+        damage: Math.round(cfg.damage * fury),
+        target: p.uid,
+      };
+      this.telegraphs.push(telegraph);
+      events.push({ t: "telegraph", telegraph });
+    }
+  }
+
   private decayThreat(now: number) {
     const dt = Math.max(0, now - this.threatAt) / 1000;
     this.threatAt = now;
@@ -1072,8 +1226,13 @@ export function mitigatedHit(
   p: BossPlayer,
   tg: Telegraph,
   buffs: readonly Buff[],
+  /** Rattled: a multiplier on the hit, and the cap it may reach. */
+  opts: { mult?: number; cap?: number } = {},
 ): BossHit {
-  const raw = Math.min(tg.damage, MAX_HIT_FRACTION * p.maxHp);
+  const raw = Math.min(
+    tg.damage * (opts.mult ?? 1),
+    (opts.cap ?? MAX_HIT_FRACTION) * p.maxHp,
+  );
   const fromBuffs = buffReductions(buffs, tg.hitAt);
   const reductions = [defReduction(p.def ?? 0), ...fromBuffs];
   const damage = Math.max(1, Math.round(mitigate(raw, reductions)));
@@ -1110,7 +1269,7 @@ export function mitigatedHit(
 /** Whether a telegraph covers a point. A buster covers its target, not a
  * place: never by position. */
 export function covers(tg: Telegraph, x: number, z: number): boolean {
-  if (tg.kind === "buster") return false;
+  if (tg.kind === "buster" || tg.kind === "scatter") return false;
   const d = Math.hypot(x - tg.x, z - tg.z);
   return d <= tg.r && d >= tg.inner;
 }

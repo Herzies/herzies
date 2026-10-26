@@ -563,8 +563,9 @@ export type EatRefusal =
 export type BossTelegraph = {
   id: number;
   /** A buster is aimed at one herzie, `target`, and lands on it wherever it
-   * goes: what a tank is for. */
-  kind: "circle" | "ring" | "buster";
+   * goes: what a tank is for. A scatter mark follows `target` too and goes
+   * off around them, on anyone close: spread out. */
+  kind: "circle" | "ring" | "buster" | "scatter";
   /** The enrage's pulse: lands on everyone, whatever their Def (1). */
   lethal?: 1;
   /** A minion's (or a Tower mob's) swing, not the boss's: its id. */

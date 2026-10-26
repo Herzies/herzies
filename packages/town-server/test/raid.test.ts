@@ -405,9 +405,11 @@ describe("Taunt", () => {
 
   it("aims the buster at the taunter, even alone", () => {
     const { f } = locked([tank("t1", 0)]);
-    const t = STARTS + 100;
+    // The first buster comes after the opening and its own clock (13 s):
+    // a taunt cast a few seconds in draws it.
+    const t = STARTS + 4_000;
     f.skill("t1", "taunt", 0, 0, t);
-    const out = run(f, t, t + 20_000, { t1: { x: 0, z: 9 } });
+    const out = run(f, t, t + 10_000, { t1: { x: 0, z: 9 } });
     const busters = of(out, "telegraph").filter(
       (m) => (m as { kind: string }).kind === "buster",
     );

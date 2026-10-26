@@ -39,6 +39,7 @@ import { setBossResults } from "./results";
 import {
   clearBuff,
   emitSkills,
+  entityAt,
   noteSkillCast,
   resetSkills,
   setBuff,
@@ -304,6 +305,8 @@ function setTower(f: TowerFloor, now: number) {
 
 /** Tells one drop of loot from the next (LootDrops keys on it). */
 let lootSeq = 0;
+/** When the boss's warning last sounded (performance.now() ms). */
+let lastWarnAt = Number.NEGATIVE_INFINITY;
 
 /** A tiny store that tells its listeners at most once a frame: a burst of
  * messages in one frame (each is its own task, so React can't batch them)
@@ -435,22 +438,42 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       if (!bossFight.on) return;
       const { t: _t, ...t } = m;
       bossFight.shapes.push(shape(t, clock));
-      sfxWarn(Math.max(0.4, (clock.toLocal(m.hitAt) - now) / 1000));
+      if (m.mob === undefined) {
+        // The boss's own: one warning a volley, not one per shape.
+        if (now - lastWarnAt > 250) {
+          lastWarnAt = now;
+          sfxWarn(Math.max(0.4, (clock.toLocal(m.hitAt) - now) / 1000));
+        }
+        if (m.kind === "scatter" && m.target === clock.you())
+          notify("You're marked: step away from everyone!", {
+            kind: "info",
+            holdMs: 2_500,
+          });
+      }
       emit();
       return;
     }
     case "resolve": {
       const s = bossFight.shapes.find((x) => x.id === m.id);
       if (s) s.resolvedAt = now;
-      bossFight.slammedAt = now;
-      sfxSlam();
       const you = clock.you();
-      if (you !== null && m.hits.includes(you)) {
+      const hitYou = you !== null && m.hits.includes(you);
+      // A minion's swing is its own, smaller thing: the boss doesn't slam
+      // for it, and far ones are barely felt.
+      const minion = s?.mob !== undefined;
+      if (!minion) {
+        bossFight.slammedAt = now;
+        sfxSlam();
+      }
+      if (hitYou) {
         bossFight.youHitAt = now;
-        shake(0.45);
+        shake(minion ? 0.3 : 0.45);
         sfxHurt();
-      } else {
-        shake(0.12);
+      } else if (!minion) {
+        // Felt more the nearer it lands.
+        const me = you !== null ? entityAt.get(you) : undefined;
+        const d = s && me ? Math.hypot(s.x - me.x, s.z - me.z) : 8;
+        shake(0.12 * Math.max(0.25, 1 - d / 16));
       }
       emit();
       return;

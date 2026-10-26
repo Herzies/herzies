@@ -117,6 +117,8 @@ export type Mob = {
   orbit: number;
   /** Where it was, newest last, for judging casts in the past. */
   trail: { t: number; x: number; z: number }[];
+  /** Not before this (server ms): a minion just called stands a beat. */
+  wakeAt?: number;
 };
 
 type PendingHit = {
@@ -201,6 +203,12 @@ export class MobPack {
   get active(): readonly Telegraph[] {
     return this.telegraphs;
   }
+
+  /** The boss's rules, for its minions: no tell shorter than its own, a
+   * share of the floor's shapes, and its taunt pulls them too. */
+  minWindupMs: number = MIN_WINDUP_MS;
+  maxShapes = Number.POSITIVE_INFINITY;
+  taunter: (() => string | null) | null = null;
 
   /** When the last update ran (server ms). */
   get now(): number {
@@ -335,22 +343,35 @@ export class MobPack {
     const away = Math.atan2(-boss.x, -boss.z);
     const r = this.arena.radius - 1.5;
     const ids: number[] = [];
-    this.wakeAt = Math.max(this.wakeAt, now + FLOOR_OPENING_MS / 2);
+    // Each new one stands a beat; those already up carry on.
+    const wake = now + FLOOR_OPENING_MS / 2;
     for (const kind of order) {
       let x = 0;
       let z = 0;
+      // The first clear spot; failing that, the one furthest from anyone
+      // (never on top of a herzie).
+      let bestRoom = Number.NEGATIVE_INFINITY;
       for (let tries = 0; tries < 30; tries++) {
-        const a = away + (this.rand() * 2 - 1) * 1.6;
-        x = Math.sin(a) * r;
-        z = Math.cos(a) * r;
-        const clear =
-          herzies.every((h) => Math.hypot(h.x - x, h.z - z) > 3) &&
-          this.mobs.every(
-            (m) => m.hp <= 0 || Math.hypot(m.x - x, m.z - z) > 1.8,
-          );
-        if (clear) break;
+        const a = away + (this.rand() * 2 - 1) * (tries < 20 ? 1.6 : Math.PI);
+        const cx = Math.sin(a) * r;
+        const cz = Math.cos(a) * r;
+        let room = Number.POSITIVE_INFINITY;
+        for (const h of herzies)
+          room = Math.min(room, Math.hypot(h.x - cx, h.z - cz) - 3);
+        for (const m of this.mobs)
+          if (m.hp > 0)
+            room = Math.min(room, Math.hypot(m.x - cx, m.z - cz) - 1.8);
+        if (room > bestRoom) {
+          bestRoom = room;
+          x = cx;
+          z = cz;
+        }
+        if (room > 0) break;
       }
-      ids.push(this.add(kind, 0, x, z, Math.atan2(-x, -z), base, now));
+      const id = this.add(kind, 0, x, z, Math.atan2(-x, -z), base, now);
+      const mob = this.mobs.find((m) => m.id === id);
+      if (mob) mob.wakeAt = wake;
+      ids.push(id);
     }
     return ids;
   }
@@ -540,18 +561,27 @@ export class MobPack {
       (m) => m.state === "windup" || (m.state === "recover" && now < m.until),
     ).length;
     const wanting: { m: Mob; near: Target; d: number }[] = [];
+    const taunter = this.taunter?.() ?? null;
+    const taunted = taunter
+      ? targets.find((t) => t.p.uid === taunter)
+      : undefined;
     for (const m of alive) {
       if (m.state === "windup" || (m.state === "recover" && now < m.until))
         continue;
+      if (m.wakeAt !== undefined && now < m.wakeAt) continue;
       let near: Target | null = null;
       let best = Number.POSITIVE_INFINITY;
-      for (const t of targets) {
-        const d = Math.hypot(t.at.x - m.x, t.at.z - m.z);
-        if (d < best) {
-          best = d;
-          near = t;
+      if (taunted) {
+        near = taunted;
+        best = Math.hypot(taunted.at.x - m.x, taunted.at.z - m.z);
+      } else
+        for (const t of targets) {
+          const d = Math.hypot(t.at.x - m.x, t.at.z - m.z);
+          if (d < best) {
+            best = d;
+            near = t;
+          }
         }
-      }
       if (!near) {
         m.state = "idle";
         m.waitSince = null;
@@ -572,8 +602,11 @@ export class MobPack {
     // circle you.
     wanting.sort((a, b) => (a.m.waitSince ?? 0) - (b.m.waitSince ?? 0));
     const tokens = attackTokens(this.floor);
+    let shapes = 0;
+    for (const t of this.telegraphs) if (t.hitAt > now) shapes++;
     for (const w of wanting) {
-      if (busy < tokens) {
+      if (busy < tokens && shapes < this.maxShapes) {
+        shapes++;
         busy++;
         w.m.waitSince = null;
         this.attack(w.m, w.near, now, enraged, events);
@@ -602,7 +635,9 @@ export class MobPack {
   private windupOf(m: Mob, enraged: boolean): number {
     const base = m.rank === 2 ? WARDEN.windupMs : MOB_KINDS[m.kind].windupMs;
     const ms = base * windupScale(this.floor) * (enraged ? ENRAGE.windup : 1);
-    return Math.round(Math.max(m.rank === 2 ? 750 : MIN_WINDUP_MS, ms));
+    return Math.round(
+      Math.max(m.rank === 2 ? 750 : MIN_WINDUP_MS, this.minWindupMs, ms),
+    );
   }
 
   private recoverOf(m: Mob, enraged: boolean): number {

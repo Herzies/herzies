@@ -7,7 +7,9 @@ import { buffOn, skills } from "./combat/skills";
  * What your skills are doing right now: a Cymbrella you're under, counting
  * down (how much less damage, the seconds left), and a Resurrect you're
  * playing, as a bar that fills until the fallen are back up (move, and it
- * stops). Your skills themselves sit on the hotbar (Hotbar.tsx), with
+ * stops). Rattled from the boss's busters (stacks, seconds left: time to
+ * hand the boss over), and, while you're knocked out, a Bard bringing you
+ * back. Your skills themselves sit on the hotbar (Hotbar.tsx), with
  * their cooldowns. (A level-up is a notice: lib/notices.ts.)
  */
 export function SkillHud({
@@ -17,6 +19,9 @@ export function SkillHud({
   className?: string;
 }) {
   const buffBox = useRef<HTMLDivElement>(null);
+  const rattledBox = useRef<HTMLDivElement>(null);
+  const savedBox = useRef<HTMLDivElement>(null);
+  const savedFill = useRef<HTMLDivElement>(null);
   const channelBox = useRef<HTMLDivElement>(null);
   const channelFill = useRef<HTMLDivElement>(null);
 
@@ -33,6 +38,25 @@ export function SkillHud({
           : "";
         if (b && buffBox.current.textContent !== text)
           buffBox.current.textContent = text;
+      }
+      if (rattledBox.current) {
+        const r = buffOn(bossFight.you, "rattled", now);
+        rattledBox.current.style.display = r ? "" : "none";
+        const text = r
+          ? `Rattled ×${r.value} · ${Math.ceil((r.until - now) / 1000)}s${r.value >= 2 ? " — hand the boss over" : ""}`
+          : "";
+        if (r && rattledBox.current.textContent !== text)
+          rattledBox.current.textContent = text;
+      }
+      if (savedBox.current && savedFill.current) {
+        // A Bard playing you back up.
+        let ch: { from: number; until: number } | undefined;
+        if (bossFight.you !== null)
+          for (const c of skills.channels.values())
+            if (c.target === bossFight.you && now < c.until) ch = c;
+        savedBox.current.style.display = ch ? "" : "none";
+        if (ch)
+          savedFill.current.style.width = `${Math.min(1, (now - ch.from) / Math.max(1, ch.until - ch.from)) * 100}%`;
       }
       if (channelBox.current && channelFill.current) {
         const ch =
@@ -68,6 +92,22 @@ export function SkillHud({
           <div ref={channelFill} className="h-full bg-[#ffd84a]" />
         </div>
       </div>
+      <div
+        ref={savedBox}
+        role="status"
+        className="w-44 rounded bg-black/60 px-1.5 py-1 text-center text-[11px] text-[#7ee2a8]"
+        style={{ display: "none" }}
+      >
+        A Bard is bringing you back…
+        <div className="mt-0.5 h-1 overflow-hidden rounded-sm bg-white/15">
+          <div ref={savedFill} className="h-full bg-[#7ee2a8]" />
+        </div>
+      </div>
+      <div
+        ref={rattledBox}
+        className="rounded bg-black/60 px-1.5 text-[11px] text-[#ff8a7a]"
+        style={{ display: "none" }}
+      />
       <div
         ref={buffBox}
         className="rounded bg-black/60 px-1.5 text-[11px] text-yellow"
