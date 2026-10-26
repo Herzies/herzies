@@ -262,8 +262,10 @@ begin
              down = false
        where user_id = v_uid;
       update public.boss_state set revives = revives + 1 where event_id = p_event;
-    exception when invalid_text_representation or numeric_value_out_of_range then
-      -- A malformed row; anything else fails the batch, to be sent again.
+    exception when others then
+      -- One bad row never sinks the batch (a retry would fail the same
+      -- way, and hold up the whole raid's report): it's skipped, loudly.
+      raise warning 'apply_boss_revive_batch: skipped % (%)', v_item, sqlerrm;
       continue;
     end;
   end loop;

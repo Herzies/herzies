@@ -128,7 +128,11 @@ async function applyRaid(
   db: SupabaseClient,
   msg: RaidMessage,
 ): Promise<{
+  /** Something failed: the report is retried. */
   failed: boolean;
+  /** The lock or an out failed: damage, settle and a wipe must wait for
+   * them (a herzie out before the killing blow isn't paid). */
+  blocking: boolean;
   reply: {
     lock?: unknown;
     refused?: string[];
@@ -138,8 +142,9 @@ async function applyRaid(
   const event = [msg.lock, msg.out, msg.revived, msg.wipe, msg.boss]
     .map((m) => m?.event)
     .find((e): e is string => typeof e === "string" && UUID.test(e));
-  if (!event) return { failed: false, reply: null };
+  if (!event) return { failed: false, blocking: false, reply: null };
   let failed = false;
+  let blocking = false;
   const reply: { lock?: unknown; refused?: string[]; out?: string[] } = {};
   const uids = (list: unknown) =>
     (Array.isArray(list) ? list : [])
@@ -157,6 +162,7 @@ async function applyRaid(
       });
     } catch {
       failed = true;
+      blocking = true;
     }
   }
   if (msg.out && msg.out.event === event) {
@@ -164,6 +170,7 @@ async function applyRaid(
       await rpc(db, "mark_boss_out", { p_event: event, p_uids: uids(msg.out.uids) });
     } catch {
       failed = true;
+      blocking = true;
     }
   }
   const rez = msg.revived;
@@ -190,7 +197,7 @@ async function applyRaid(
   } catch {
     // Only news: the room learns it on the next report.
   }
-  return { failed, reply };
+  return { failed, blocking, reply };
 }
 
 async function handleRoom(request: Request, body: string): Promise<Response> {
@@ -344,10 +351,11 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
         rest,
         (r) => rpc(db, "rest_herzie", { p_user: r.uid, p_bonus: r.bonus }),
       ),
-      // A failed lock, out or revive holds the damage back: the room sends
-      // it all again, and a herzie who left before the killing blow must
-      // be marked out before that blow settles the fight.
-      boss && bossDamage.length && !raid.failed
+      // A failed lock or out holds the damage back: the room sends it all
+      // again, and a herzie who left before the killing blow must be
+      // marked out before that blow settles the fight. (A failed revive
+      // is only retried: it never stops the fight's damage.)
+      boss && bossDamage.length && !raid.blocking
         ? rpc(db, "apply_boss_damage_batch", {
           p_batch: boss.batch,
           p_event: boss.event,
@@ -412,7 +420,7 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
     // for that with an error status. Rest is additive and never retried.
     // A wipe after the damage: the last hits still count on the board.
     let wipeFailed = false;
-    if (!raid.failed && msg.wipe && UUID.test(msg.wipe.event)) {
+    if (!raid.blocking && msg.wipe && UUID.test(msg.wipe.event)) {
       try {
         await rpc(db, "wipe_boss_fight", { p_event: msg.wipe.event });
       } catch {
