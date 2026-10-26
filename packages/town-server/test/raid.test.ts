@@ -15,6 +15,7 @@ import type {
   ServerMessage,
   TownTicketPayload,
 } from "@herzies/shared/town-net";
+import { armed } from "./arms";
 import { describe, expect, it } from "vitest";
 import { BossEngine, type BossPlayer, mitigatedHit, TUNING } from "../src/boss";
 import {
@@ -45,17 +46,18 @@ const ticket = (
   cls: string | undefined,
   sk: [string, number][] = [],
   over: Partial<TownTicketPayload> = {},
-): TownTicketPayload => ({
-  uid,
-  name: uid,
-  look: { seed: "s", stage: 2 },
-  exp: 9e9,
-  hp: { hp: 200, maxHp: 200, down: false },
-  st: [0, 0, 0, 0],
-  ...(cls ? { cls } : {}),
-  sk,
-  ...over,
-});
+): TownTicketPayload =>
+  armed({
+    uid,
+    name: uid,
+    look: { seed: "s", stage: 2 },
+    exp: 9e9,
+    hp: { hp: 200, maxHp: 200, down: false },
+    st: [0, 0, 0, 0],
+    cls,
+    sk,
+    ...over,
+  });
 
 const of = (out: Outbound[], t: ServerMessage["t"]) =>
   out.filter((o) => o.msg.t === t).map((o) => o.msg);

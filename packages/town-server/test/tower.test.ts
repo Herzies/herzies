@@ -11,6 +11,7 @@ import {
   TOWN_MAPS,
   type TownTicketPayload,
 } from "@herzies/shared/town-net";
+import { armed } from "./arms";
 import { describe, expect, it } from "vitest";
 import type { BossPlayer } from "../src/boss";
 import { FightRuntime, type Outbound } from "../src/fight";
@@ -224,17 +225,18 @@ describe("TowerEngine", () => {
   });
 });
 
-const ticket = (over: Partial<TownTicketPayload> = {}): TownTicketPayload => ({
-  uid: "u",
-  name: "u",
-  look: { seed: "s", stage: 2 },
-  cls: "bard",
-  exp: 9e9,
-  hp: { hp: 500, maxHp: 500, down: false },
-  st: [0, 0, 0, 0],
-  lv: 5,
-  ...over,
-});
+const ticket = (over: Partial<TownTicketPayload> = {}): TownTicketPayload =>
+  armed({
+    uid: "u",
+    name: "u",
+    look: { seed: "s", stage: 2 },
+    cls: "bard",
+    exp: 9e9,
+    hp: { hp: 500, maxHp: 500, down: false },
+    st: [0, 0, 0, 0],
+    lv: 5,
+    ...over,
+  });
 
 const said = (out: Outbound[], t: ServerMessage["t"]) =>
   out.filter((o) => o.msg.t === t);

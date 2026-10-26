@@ -24,7 +24,7 @@
 // with the default prism skin is the full Prismatic set).
 import "./globals.css";
 import {
-  attackStyle,
+  basicAttack,
   CLASS_DEFS,
   type ItemUnit,
   isHerzieClass,
@@ -47,7 +47,7 @@ import {
   sampleBossResults,
   setBossResults,
 } from "./components/town/combat/results";
-import { setMySkills } from "./components/town/combat/skills";
+import { setArmed, setMySkills } from "./components/town/combat/skills";
 import { combat } from "./components/town/combat/state";
 import { setTowerOpen } from "./components/town/gates";
 import { Hotbar } from "./components/town/Hotbar";
@@ -158,10 +158,21 @@ if (resultsParam === "victory" || resultsParam === "defeat") {
 }
 const cls = params.get("class");
 if (isHerzieClass(cls)) {
+  // `?gear=none`: the class without its instrument (a punch or body slam).
+  const bare = params.get("gear") === "none";
   const [main, off] = CLASS_DEFS[cls].equipment;
-  player.equipped.main_hand = main;
-  if (off) player.equipped.off_hand = off;
-  combat.attack = attackStyle(cls);
+  if (!bare) {
+    player.equipped.main_hand = main;
+    if (off) player.equipped.off_hand = off;
+  }
+  const a = basicAttack({
+    cls,
+    stage: player.stage,
+    mainHand: player.equipped.main_hand,
+  });
+  combat.attack = a.style;
+  combat.blow = a.blow;
+  setArmed(!bare, main);
   // And its skills (Q and the hotbar), at `?skill=` level.
   setMySkills(
     CLASS_DEFS[cls].skills.map((skillId) => ({
@@ -170,6 +181,11 @@ if (isHerzieClass(cls)) {
     })),
     CLASS_DEFS[cls].skills,
   );
+} else {
+  // No class: a punch from stage 3, a body slam before.
+  const a = basicAttack({ cls: null, stage: player.stage, mainHand: null });
+  combat.attack = a.style;
+  combat.blow = a.blow;
 }
 
 /**

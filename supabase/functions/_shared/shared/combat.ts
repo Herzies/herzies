@@ -85,7 +85,7 @@ export function discLandsAfterMs(dist: number): number {
 }
 
 // ---------------------------------------------------------------------------
-// Melee: a Percussionist's stick, or a classless herzie's body bump. Up
+// Melee: a Percussionist's stick, or an unarmed herzie's punch or body slam. Up
 // close, ahead of it, and only at the moment of contact: the client tells
 // the server when it lands, so there's no flight time.
 
@@ -97,9 +97,12 @@ export const MELEE_ARC = (60 * Math.PI) / 180;
 /** A Percussionist's stick as a share of a wave's: the same. The tank
  * stands in its face to hold it, not to out-hit the Record Slinger. */
 export const STRIKE_DAMAGE = 1;
-/** A herzie without a class bumps into it: the weakest blow there is, so
- * picking a class at stage 2 is a step up. */
+/** A herzie without its instrument (or a class) slams its body into it:
+ * the weakest blow there is, so a class and its instrument are a step up. */
 export const BUMP_DAMAGE = 0.5;
+/** A stage 3+ herzie without its instrument punches: a little better than a
+ * body slam, well short of an instrument. */
+export const PUNCH_DAMAGE = 0.6;
 
 // ---------------------------------------------------------------------------
 // Contribution: how much a herzie did for a boss fight, which ranks its end
@@ -130,10 +133,13 @@ export function contributionOf(c: Contribution): number {
   );
 }
 
-/** A melee hit as a share of a wave's: a stick (with a class) or a bump
- * (without one). */
-export function meleeDamage(classed: boolean): number {
-  return classed ? STRIKE_DAMAGE : BUMP_DAMAGE;
+/** A melee hit as a share of a wave's, by blow (classes.ts MeleeBlow). */
+export function meleeDamage(blow: "strike" | "punch" | "bump"): number {
+  return blow === "strike"
+    ? STRIKE_DAMAGE
+    : blow === "punch"
+      ? PUNCH_DAMAGE
+      : BUMP_DAMAGE;
 }
 
 /** Whether a melee hit from `from`, facing `yaw`, reaches `target` (a

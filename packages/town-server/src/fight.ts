@@ -31,7 +31,8 @@ import {
 } from "@herzies/shared/boss-lines";
 import {
   type AttackStyle,
-  attackStyle,
+  basicAttack,
+  hasInstrument,
   isHerzieClass,
 } from "@herzies/shared/classes";
 import {
@@ -137,10 +138,13 @@ export type FightPlayer = {
   skills: Map<SkillId, number>;
   /** When each skill is ready again (server ms). */
   ready: Map<SkillId, number>;
-  /** Its basic attack, from its class: a wave, or a thrown disc. */
+  /** Its basic attack, from its class and the instrument in its hand: a
+   * wave, a thrown disc, or a blow (classes.ts basicAttack). */
   attack: AttackStyle;
-  /** A melee blow's share of a wave: a stick with a class, else a bump. */
+  /** A melee blow's share of a wave: a stick, a punch or a body slam. */
   melee: number;
+  /** Whether it holds its class's instrument: its class skills need it. */
+  armed: boolean;
   /** Its class, for the in-tune bonus. */
   cls: string | null;
   /** Its level, for the minions' level gap. */
@@ -550,8 +554,7 @@ export class FightRuntime {
       stats: statsOf(ticket.st),
       present: true,
       skills: skillsOf(ticket),
-      attack: attackStyle(ticket.cls),
-      melee: meleeDamage(isHerzieClass(ticket.cls)),
+      ...armsOf(ticket),
       cls: isHerzieClass(ticket.cls) ? ticket.cls : null,
       level: Math.max(1, Math.floor(ticket.lv ?? 1)),
       // A rejoin doesn't reset cooldowns.
@@ -605,8 +608,9 @@ export class FightRuntime {
     // reported mustn't take it back.
     for (const [skill, level] of skillsOf(ticket))
       p.skills.set(skill, Math.max(level, p.skills.get(skill) ?? 0));
-    p.attack = attackStyle(ticket.cls);
-    p.melee = meleeDamage(isHerzieClass(ticket.cls));
+    // Gear may have changed too (an instrument put on or taken off).
+    p.look = ticket.look;
+    Object.assign(p, armsOf(ticket));
     p.cls = isHerzieClass(ticket.cls) ? ticket.cls : null;
     if (ticket.lv) p.level = Math.max(1, Math.floor(ticket.lv));
     if (ticket.st) p.stats = statsOf(ticket.st);
@@ -684,6 +688,9 @@ export class FightRuntime {
       return { result: "ignored", readyAt: 0, out };
     if (!isSkillId(skillId) || !p.skills.has(skillId))
       return { result: "unknown", readyAt: 0, out };
+    // A class skill is played on the class's instrument.
+    if (!p.armed)
+      return { result: "refused", readyAt: 0, reason: "instrument", out };
     const pos = this.history.at(uid, now);
     if (!pos) return { result: "ignored", readyAt: 0, out };
     const readyAt = p.ready.get(skillId) ?? 0;
@@ -1981,6 +1988,21 @@ export type FightStats = HitStats & { def: number; euphony: number };
 
 /** Stats from a ticket's `st`; a ticket from before stat points has no Def
  * or Euphony, and one from before stats has nothing. */
+/** How a ticket's herzie fights: its basic attack, a blow's strength, and
+ * whether it holds its class's instrument. */
+function armsOf(
+  ticket: TownTicketPayload,
+): Pick<FightPlayer, "attack" | "melee" | "armed"> {
+  const cls = isHerzieClass(ticket.cls) ? ticket.cls : null;
+  const mainHand = ticket.look.equipped?.main_hand ?? null;
+  const a = basicAttack({ cls, stage: ticket.look.stage, mainHand });
+  return {
+    attack: a.style,
+    melee: meleeDamage(a.blow),
+    armed: hasInstrument(cls, mainHand),
+  };
+}
+
 export function statsOf(st: TownTicketPayload["st"]): FightStats {
   const n = (v: number | undefined) =>
     typeof v === "number" && Number.isFinite(v) ? v : 0;

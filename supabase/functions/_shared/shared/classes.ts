@@ -16,8 +16,8 @@ export type HerzieClass = (typeof CLASS_IDS)[number];
 
 export type ClassRole = "support" | "dps" | "tank";
 
-/** A class's basic attack: a sonic wave from the hand, a disc thrown that
- * comes back, or a blow up close (a classless herzie's, too). */
+/** A basic attack: a sonic wave from the hand, a disc thrown that comes
+ * back, or a blow up close (see MeleeBlow). */
 export type AttackStyle = "wave" | "disc" | "melee";
 
 export interface ClassDef {
@@ -25,14 +25,15 @@ export interface ClassDef {
   name: string;
   emoji: string;
   role: ClassRole;
-  /** Item ids handed over, already worn, when the class is chosen. */
+  /** The class's gear; the first is its instrument (main hand), which its
+   * basic attack and skills need. */
   equipment: string[];
   /** The skill every herzie of this class starts with. */
   starterSkill: SkillId;
   /** Every skill the class has, the starter first (hotbar order). Mirrored
    * by choose_class (00122_boss_revamp.sql). */
   skills: readonly SkillId[];
-  /** Its basic attack. */
+  /** Its basic attack, with its instrument in hand. */
   attack: AttackStyle;
 }
 
@@ -85,21 +86,57 @@ export function isHerzieClass(value: unknown): value is HerzieClass {
   );
 }
 
-/** The basic attack of a herzie of class `cls`: without one, it bumps
- * into things (melee). */
-export function attackStyle(cls: string | null | undefined): AttackStyle {
-  return isHerzieClass(cls) ? CLASS_DEFS[cls].attack : "melee";
+/** A blow up close: a Percussionist's stick, a stage 3+ herzie's fist
+ * (legs to stand on, arms free), or anyone else's body slam. */
+export type MeleeBlow = "strike" | "punch" | "bump";
+
+/** What a herzie's basic attack is: its style, and for melee, which blow. */
+export type BasicAttack = { style: AttackStyle; blow: MeleeBlow };
+
+/** The instrument a class plays its basic attack and skills with: the
+ * first of its equipment, worn in the main hand. */
+export function instrumentOf(cls: string | null | undefined): string | null {
+  return isHerzieClass(cls) ? (CLASS_DEFS[cls].equipment[0] ?? null) : null;
 }
 
-/** The basic attack that goes with the gear in a herzie's main hand: what
- * someone else's herzie is seen to do, where its class isn't known. */
-export function attackStyleOfGear(
+/** Whether a herzie of class `cls` holds its class's instrument. Without
+ * it, it can't use its class's basic attack or skills. */
+export function hasInstrument(
+  cls: string | null | undefined,
   mainHand: string | null | undefined,
-): AttackStyle {
-  if (!mainHand) return "melee";
+): boolean {
+  const inst = instrumentOf(cls);
+  return !!inst && mainHand === inst;
+}
+
+/** The class an instrument belongs to (class items are class-bound). */
+function classOfInstrument(mainHand: string | null | undefined) {
+  if (!mainHand) return null;
   for (const def of Object.values(CLASS_DEFS))
-    if (def.equipment[0] === mainHand) return def.attack;
-  return "wave";
+    if (def.equipment[0] === mainHand) return def.id;
+  return null;
+}
+
+/**
+ * A herzie's basic attack. Its class's own (a wave, a disc, a stick) only
+ * with that class's instrument in its main hand; otherwise a blow: a punch
+ * from stage 3 (it has a body to swing from), a body slam before that.
+ *
+ * `cls` undefined means "not known" (someone else's herzie): the
+ * instrument in its hand speaks for its class, since class gear is bound
+ * to the class. `null` means "has no class".
+ */
+export function basicAttack(h: {
+  cls: string | null | undefined;
+  stage: number;
+  mainHand: string | null | undefined;
+}): BasicAttack {
+  const of = classOfInstrument(h.mainHand);
+  if (of && (h.cls === undefined || h.cls === of)) {
+    const style = CLASS_DEFS[of].attack;
+    return { style, blow: style === "melee" ? "strike" : "bump" };
+  }
+  return { style: "melee", blow: h.stage >= 3 ? "punch" : "bump" };
 }
 
 /** Whether a herzie should be asked to pick a class now. */

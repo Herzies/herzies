@@ -13,6 +13,7 @@ import {
   type TownTicketPayload,
 } from "@herzies/shared/town-net";
 import { exports } from "cloudflare:workers";
+import { armed } from "./arms";
 import { describe, expect, it } from "vitest";
 import { TUNING } from "../src/boss";
 
@@ -53,7 +54,7 @@ async function connect() {
 
 function ticket(uid: string, over: Partial<TownTicketPayload> = {}) {
   return signTownTicket(
-    {
+    armed({
       uid,
       name: uid,
       look: { seed: `HERZ-${uid}`, stage: 2 },
@@ -69,7 +70,7 @@ function ticket(uid: string, over: Partial<TownTicketPayload> = {}) {
         maxHp: 50_000,
       },
       ...over,
-    },
+    }),
     SECRET,
   );
 }

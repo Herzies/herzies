@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attackStyle, attackStyleOfGear } from "./classes.js";
+import { basicAttack, hasInstrument, instrumentOf } from "./classes.js";
 import {
   aimDirection,
   BOSS_STAND,
@@ -32,14 +32,37 @@ describe("melee", () => {
     expect(meleeReaches(from, 0.8, target)).toBe(true);
   });
 
-  it("is the attack of a Percussionist, and of a herzie without a class", () => {
-    expect(attackStyle("percussionist")).toBe("melee");
-    expect(attackStyle(null)).toBe("melee");
-    expect(attackStyle("bard")).toBe("wave");
-    expect(attackStyle("record_slinger")).toBe("disc");
-    expect(attackStyleOfGear(undefined)).toBe("melee");
-    expect(attackStyleOfGear("worn-stick")).toBe("melee");
-    expect(attackStyleOfGear("lute")).toBe("wave");
+  it("needs the class's instrument for the class's attack", () => {
+    const at = (cls: string | null | undefined, stage: number, hand?: string) =>
+      basicAttack({ cls, stage, mainHand: hand });
+    expect(at("bard", 2, "lute")).toEqual({ style: "wave", blow: "bump" });
+    expect(at("record_slinger", 2, "compact-discs").style).toBe("disc");
+    expect(at("percussionist", 3, "worn-stick")).toEqual({
+      style: "melee",
+      blow: "strike",
+    });
+    // Without it: a body slam at stage 2, a punch from stage 3.
+    expect(at("bard", 2)).toEqual({ style: "melee", blow: "bump" });
+    expect(at("bard", 3)).toEqual({ style: "melee", blow: "punch" });
+    expect(at("percussionist", 3, "lute")).toEqual({
+      style: "melee",
+      blow: "punch",
+    });
+    expect(at(null, 1)).toEqual({ style: "melee", blow: "bump" });
+    // Someone else's herzie (class unknown): the instrument tells.
+    expect(at(undefined, 2, "lute").style).toBe("wave");
+    expect(at(undefined, 3, "old-cymbal")).toEqual({
+      style: "melee",
+      blow: "punch",
+    });
+  });
+
+  it("knows each class's instrument", () => {
+    expect(instrumentOf("bard")).toBe("lute");
+    expect(instrumentOf("percussionist")).toBe("worn-stick");
+    expect(instrumentOf(null)).toBeNull();
+    expect(hasInstrument("record_slinger", "compact-discs")).toBe(true);
+    expect(hasInstrument("bard", null)).toBe(false);
   });
 });
 

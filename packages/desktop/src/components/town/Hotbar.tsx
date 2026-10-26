@@ -11,7 +11,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../../lib/utils";
 import { DeckSlotPicker, type PickerOption } from "../DeckSlotPicker";
 import { Tooltip } from "../Tooltip";
-import { mySkillAt, queueSkill, skills, useSkills } from "./combat/skills";
+import {
+  instrumentNeeded,
+  mySkillAt,
+  queueSkill,
+  skills,
+  useSkills,
+} from "./combat/skills";
 import { eat, useLastEat } from "./eat";
 import {
   assignHotbar,
@@ -94,6 +100,11 @@ function SkillSlot({
             <div className="text-text-dim">
               {describeSkill(mine.id, mine.level)}
             </div>
+            {!skills.armed && (
+              <div className="mt-1 text-red-300">
+                {instrumentNeeded(mine.id)}
+              </div>
+            )}
           </div>
         ) : n === 1 ? (
           "Your class skill — pick a class first"
@@ -116,6 +127,7 @@ function SkillSlot({
         className={cn(
           "pointer-events-auto relative flex size-9 cursor-pointer items-center justify-center overflow-hidden rounded border border-white/20 bg-black/55 p-0",
           !mine && "opacity-45 hover:opacity-80",
+          mine && !skills.armed && "opacity-45 grayscale",
         )}
       >
         <span className="absolute top-0 left-0.5 text-[9px] leading-none text-white/70">

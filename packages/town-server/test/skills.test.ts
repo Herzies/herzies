@@ -5,6 +5,7 @@ import {
   skillValue,
 } from "@herzies/shared/skills";
 import type { ServerMessage, TownTicketPayload } from "@herzies/shared/town-net";
+import { armed } from "./arms";
 import { describe, expect, it } from "vitest";
 import { BossEngine, type BossPlayer, TUNING } from "../src/boss";
 import { FightRuntime, type Outbound, statsOf } from "../src/fight";
@@ -22,15 +23,16 @@ const ticket = (
   uid: string,
   sk: [string, number][] = [],
   hp = 200,
-): TownTicketPayload => ({
-  uid,
-  name: uid,
-  look: { seed: "s", stage: 2 },
-  exp: 9e9,
-  hp: { hp, maxHp: 200, down: false },
-  st: [0, 0, 0, 0],
-  sk,
-});
+): TownTicketPayload =>
+  armed({
+    uid,
+    name: uid,
+    look: { seed: "s", stage: 2 },
+    exp: 9e9,
+    hp: { hp, maxHp: 200, down: false },
+    st: [0, 0, 0, 0],
+    sk,
+  });
 
 const msgs = (out: Outbound[], t: ServerMessage["t"]) =>
   out.filter((o) => o.msg.t === t);
@@ -343,5 +345,41 @@ describe("the boss's side", () => {
       }
     }
     expect(hits?.map((h) => h.uid)).toEqual(["tank"]);
+  });
+});
+
+describe("the class's instrument", () => {
+  const bare = (uid: string, stage: number, sk: [string, number][] = []) =>
+    armed({
+      ...ticket(uid, sk),
+      cls: "bard",
+      look: { seed: "s", stage, equipped: {} },
+    });
+
+  it("without it, no class skills: refused, no cooldown spent, no strike", () => {
+    const f = new FightRuntime(claim(), T0);
+    f.join("bard", 1, bare("bard", 2, [["soothing-drones", 1]]), { x: 0, z: 8 }, T0 - 5_000);
+    f.onState("bard", 0, 8, T0);
+    const r = f.skill("bard", "soothing-drones", 0, 0, T0);
+    expect(r).toMatchObject({ result: "refused", reason: "instrument" });
+    expect(f.player("bard")?.ready.get("soothing-drones")).toBeUndefined();
+  });
+
+  it("without it, a body slam at stage 2 and a punch from stage 3", () => {
+    const f = new FightRuntime(claim(), T0);
+    f.join("two", 1, bare("two", 2), { x: 0, z: 8 }, T0 - 5_000);
+    f.join("three", 2, bare("three", 3), { x: 1, z: 8 }, T0 - 5_000);
+    f.join("lute", 3, ticket("lute", [["soothing-drones", 1]]), { x: 2, z: 8 }, T0 - 5_000);
+    expect(f.player("two")).toMatchObject({ attack: "melee", melee: 0.5, armed: false });
+    expect(f.player("three")).toMatchObject({ attack: "melee", melee: 0.6, armed: false });
+    expect(f.player("lute")).toMatchObject({ attack: "wave", armed: true });
+  });
+
+  it("putting it on mid-fight takes with the next ticket", () => {
+    const f = new FightRuntime(claim(), T0);
+    f.join("bard", 1, bare("bard", 2, [["soothing-drones", 1]]), { x: 0, z: 8 }, T0 - 5_000);
+    f.renew("bard", ticket("bard", [["soothing-drones", 1]]));
+    expect(f.player("bard")).toMatchObject({ attack: "wave", armed: true });
+    expect(f.player("bard")?.look.equipped?.main_hand).toBe("lute");
   });
 });

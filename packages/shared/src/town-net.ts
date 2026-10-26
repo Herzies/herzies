@@ -543,7 +543,7 @@ export type ClientMessage =
 
 /** Why a skill was refused, when the player can do something about it:
  * nobody downed near enough, no revives left, or not until the fight. */
-export type SkillRefusal = "no-target" | "not-yet";
+export type SkillRefusal = "no-target" | "not-yet" | "instrument";
 
 /** Why the room refused to let you eat: knocked out, already at full HP,
  * too soon after the last one, none left in the bank, not something you

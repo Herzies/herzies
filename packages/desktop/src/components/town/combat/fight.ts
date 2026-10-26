@@ -247,6 +247,7 @@ function raidView(r: RaidState, clock: Clock, you?: RaidView["you"]): RaidView {
 const REFUSALS: Record<SkillRefusal, string> = {
   "no-target": "No one knocked out near enough to bring back.",
   "not-yet": "That only works once the fight is on.",
+  instrument: "Your class's skills need its instrument in your main hand.",
 };
 
 /** Where a mob is at `at` (performance.now() ms), between its samples. */

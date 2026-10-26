@@ -14,6 +14,7 @@
 
 import { DurableObject } from "cloudflare:workers";
 import { parseTune, TUNE_MIN_INTERVAL_MS } from "@herzies/shared/boss-fight";
+import { hasInstrument } from "@herzies/shared/classes";
 import { SKILL_DEFS, skillValue } from "@herzies/shared/skills";
 import { healMult } from "@herzies/shared/stats";
 import {
@@ -780,6 +781,17 @@ export class TownRoom extends DurableObject<Env> {
     const p = s.player;
     if (!p || skill !== "resurrect" || !p.rez) return;
     if (this.townChannels.has(p.uid)) return;
+    // Resurrect is a Bard's, played on the lute.
+    if (!hasInstrument("bard", p.look.equipped?.main_hand)) {
+      this.send(s, {
+        t: "skillDenied",
+        skill,
+        seq,
+        readyAt: 0,
+        reason: "instrument",
+      });
+      return;
+    }
     const def = SKILL_DEFS.resurrect;
     const ready = this.rezReady.get(p.uid) ?? 0;
     if (now < ready) {

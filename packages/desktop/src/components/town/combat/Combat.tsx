@@ -51,6 +51,7 @@ import { bossFight, bossNow } from "./fight";
 import { enterMouseLook, exitMouseLook } from "./mouseLook";
 import {
   entityAt,
+  instrumentNeeded,
   noteSkillCast,
   queueSkill,
   setBuff,
@@ -423,7 +424,11 @@ export function Combat({
       !!mine &&
       ((mine.id === "taunt" && !raidOn) ||
         (mine.id === "resurrect" && bossFight.on && !raidOn));
-    if (queued && mine && raidOnly) {
+    const unarmed = !!mine && !skills.armed;
+    if (queued && mine && unarmed) {
+      skills.queued = null;
+      notify(instrumentNeeded(mine.id), { kind: "info" });
+    } else if (queued && mine && raidOnly) {
       skills.queued = null;
       notify(
         mine.id === "taunt"
@@ -501,10 +506,11 @@ export function Combat({
 
     // --- Casting: a wave from the hand; a Record Slinger's disc thrown
     // from whichever hand has one; or a blow up close — a Percussionist's
-    // stick, or (without a class) the herzie itself, bumped into it.
+    // stick, or (without its instrument) a punch from stage 3, a body slam
+    // before that.
     const discs = combat.attack === "disc";
     const melee = combat.attack === "melee";
-    const blow = herzie?.holdsGear ? "strike" : "bump";
+    const blow = combat.blow;
     if (herzie) {
       const queued = now - combat.queuedAt < CAST_BUFFER_MS;
       const free = discs ? nextHand(discField, herzie) : null;
@@ -538,7 +544,13 @@ export function Combat({
         // Face the aim, and raise the hand to it.
         if (flat > 0.5) herzie.heading = Math.atan2(dx, dz);
         if (melee) {
-          herzie.cast(0, { style: blow });
+          // Punches alternate fists, a jab-cross rhythm.
+          herzie.cast(0, {
+            style: blow,
+            ...(blow === "punch"
+              ? { arm: combat.casts & 1 ? "arm-r" : "arm-l" }
+              : {}),
+          });
           if (blow === "strike") slashField.strike(herzie, true);
           combat.spread = 0.4;
           sfxSwing(blow);
@@ -570,13 +582,7 @@ export function Combat({
             Math.min(DUMMY.chest, height),
             d.z - toward[2] * DUMMY.radius,
           ];
-          const kind = myHit(
-            d,
-            toward,
-            point,
-            meleeDamage(blow === "strike"),
-            now,
-          );
+          const kind = myHit(d, toward, point, meleeDamage(blow), now);
           waveField.burst(point, toward, kind);
           landed = true;
         }

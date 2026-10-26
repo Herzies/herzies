@@ -1,5 +1,5 @@
 import {
-  attackStyleOfGear,
+  basicAttack,
   TOWN_FLAG_AFK,
   TOWN_FLAG_COMBAT,
   TOWN_FLAG_DANCING,
@@ -104,12 +104,18 @@ function RemoteHerzie({
   }, [herzie]);
   // A Record Slinger throws its discs, a hand at a time; the server only
   // says how many casts, so which hand is guessed (as Combat picks). A
-  // Percussionist strikes with its stick, and a herzie without a class
-  // bumps into things.
-  const attack = attackStyleOfGear(look.equipped?.main_hand);
+  // Percussionist strikes with its stick; without its instrument a herzie
+  // punches (stage 3+) or slams into things. Their class isn't known here:
+  // the instrument in hand tells.
+  const { style: attack, blow } = basicAttack({
+    cls: undefined,
+    stage: look.stage,
+    mainHand: look.equipped?.main_hand,
+  });
   const throwsDiscs = attack === "disc";
-  const blow = herzie.holdsGear ? "strike" : "bump";
   const nextHand = useRef<DiscHand>("held-r");
+  /** Their punches so far: they alternate fists. */
+  const punches = useRef(0);
   /** Their jump bit last frame; null until the first state, so a herzie
    * doesn't hop just for showing up. */
   const jumpBit = useRef<number | null>(null);
@@ -161,7 +167,13 @@ function RemoteHerzie({
           (last === "held-l" ? "held-r" : "held-l");
         herzie.cast(0, { arm: DISC_ARM[nextHand.current], style: "throw" });
       } else if (attack === "melee") {
-        herzie.cast(0, { style: blow });
+        punches.current++;
+        herzie.cast(0, {
+          style: blow,
+          ...(blow === "punch"
+            ? { arm: punches.current & 1 ? "arm-r" : "arm-l" }
+            : {}),
+        });
         if (blow === "strike") slashField.strike(herzie, false);
       } else {
         herzie.cast(0);

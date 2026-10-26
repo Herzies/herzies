@@ -1,4 +1,4 @@
-import type { AttackStyle } from "@herzies/shared/classes";
+import type { AttackStyle, MeleeBlow } from "@herzies/shared/classes";
 import { useSyncExternalStore } from "react";
 
 /**
@@ -43,9 +43,11 @@ export const combat = {
   hitCrit: false,
   /** Your best damage per second on any dummy, this session. */
   bestDps: 0,
-  /** Your class's basic attack: a wave, a disc thrown from each hand, or a
-   * blow up close (without a class, too). */
+  /** Your basic attack: a wave, a disc thrown from each hand, or a blow up
+   * close (classes.ts basicAttack: a class's, with its instrument). */
   attack: "melee" as AttackStyle,
+  /** Which blow a melee attack is: a stick, a punch or a body slam. */
+  blow: "bump" as MeleeBlow,
   /** Throwing discs: which are in hand (the crosshair shows them), and
    * when each was last caught (performance.now ms). */
   discs: {

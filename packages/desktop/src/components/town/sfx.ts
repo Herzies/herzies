@@ -211,7 +211,7 @@ export function sfxDiscCatch(main: boolean): void {
 
 /** A melee swing on its way: a stick's swish through the air, or a body
  * bump's soft "hup" as it hops. */
-export function sfxSwing(style: "strike" | "bump"): void {
+export function sfxSwing(style: "strike" | "punch" | "bump"): void {
   const a = audio();
   if (!a) return;
   const k = wobble();
@@ -219,19 +219,29 @@ export function sfxSwing(style: "strike" | "bump"): void {
     noiseBurst(a, "bandpass", 3200 * k, 900 * k, 2.4, 0.2, 0.1);
     return;
   }
+  if (style === "punch") {
+    // A quick jab's whoosh: shorter and higher than a stick's.
+    noiseBurst(a, "bandpass", 2400 * k, 1100 * k, 1.8, 0.12, 0.06);
+    return;
+  }
   tone(a, "sine", 180 * k, 260 * k, 0.18, 0.01, 0.08);
   noiseBurst(a, "lowpass", 700 * k, 300, 0.8, 0.08, 0.08);
 }
 
 /** A melee blow landing, under sfxImpact's thud: the stick's woody tock,
- * or a body bump's squashy bonk. */
-export function sfxMeleeHit(style: "strike" | "bump"): void {
+ * a punch's soft thwack, or a body bump's squashy bonk. */
+export function sfxMeleeHit(style: "strike" | "punch" | "bump"): void {
   const a = audio();
   if (!a) return;
   const k = wobble(0.04);
   if (style === "strike") {
     tone(a, "triangle", 740 * k, 520 * k, 0.16, 0.002, 0.07);
     noiseBurst(a, "bandpass", 2000 * k, 1200 * k, 3, 0.18, 0.04);
+    return;
+  }
+  if (style === "punch") {
+    tone(a, "sine", 340 * k, 140 * k, 0.28, 0.002, 0.07);
+    noiseBurst(a, "lowpass", 1400 * k, 500, 1.2, 0.14, 0.04);
     return;
   }
   tone(a, "sine", 260 * k, 90 * k, 0.35, 0.003, 0.12);

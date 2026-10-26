@@ -22,6 +22,7 @@ import { STAT_TUNING } from "@herzies/shared/stats";
 import type { BossClaim, TownTicketPayload } from "@herzies/shared/town-net";
 import { TOWN_WALK_SPEED } from "@herzies/shared/town-net";
 import { maxHp as maxHpOf } from "@herzies/shared/vitals";
+import { armed } from "./arms";
 import { describe, expect, it } from "vitest";
 import { type BossEngine, covers, type Telegraph, TUNING } from "../src/boss";
 import { FightRuntime } from "../src/fight";
@@ -91,7 +92,7 @@ function skillsFor(role: Role): [string, number][] {
 function ticketFor(b: Bot): TownTicketPayload {
   const { st, stamina } = statsFor(b.role);
   const max = maxHpOf(LEVEL, stamina);
-  return {
+  return armed({
     uid: b.uid,
     name: b.uid,
     look: { seed: b.uid, stage: 3 },
@@ -100,7 +101,7 @@ function ticketFor(b: Bot): TownTicketPayload {
     st,
     lv: LEVEL,
     ...(b.role !== "none" ? { cls: b.role, sk: skillsFor(b.role) } : {}),
-  };
+  });
 }
 
 function party(

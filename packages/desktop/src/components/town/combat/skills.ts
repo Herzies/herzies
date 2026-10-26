@@ -1,4 +1,5 @@
 import {
+  getItem,
   isSkillId,
   SKILL_DEFS,
   type SkillId,
@@ -59,7 +60,25 @@ export const skills = {
   casts: [] as SkillCast[],
   /** Resurrects being played, by their Bard's entity id. */
   channels: new Map<number, Channel>(),
+  /** Whether you hold your class's instrument (its item id in `instrument`):
+   * without it, class skills can't be played. */
+  armed: true,
+  instrument: null as string | null,
 };
+
+/** Why skill `id` can't be played: the instrument it needs. */
+export function instrumentNeeded(id: SkillId): string {
+  const name = getItem(skills.instrument ?? "")?.name ?? "your instrument";
+  return `Equip "${name}" to use "${SKILL_DEFS[id].name}".`;
+}
+
+/** From the app state: whether you hold your class's instrument. */
+export function setArmed(armed: boolean, instrument: string | null): void {
+  if (skills.armed === armed && skills.instrument === instrument) return;
+  skills.armed = armed;
+  skills.instrument = instrument;
+  emitSkills();
+}
 
 /** Where each herzie in the room is, by entity id, for effects that follow
  * them (a Cymbrella overhead, a buster's mark). Written by whoever draws
