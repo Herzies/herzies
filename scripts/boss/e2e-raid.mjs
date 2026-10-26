@@ -6,7 +6,7 @@
 // C (1 HP: knocked out, then forfeits: out, unpaid).
 import { createRequire } from "node:module";
 
-const ROOT = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
+const ROOT = new globalThis.URL("../..", import.meta.url).pathname.replace(/\/$/, "");
 const require = createRequire(`${ROOT}/packages/web/package.json`);
 const { createClient } = require("@supabase/supabase-js");
 const net = await import(`${ROOT}/packages/shared/dist/town-net.js`);

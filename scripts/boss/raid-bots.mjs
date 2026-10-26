@@ -5,10 +5,13 @@
 // Cymbrella on a buster, Backspin, resurrecting whoever's down (you too),
 // and listening to what the boss hates.
 //
-//   ANON_KEY=… SERVICE_ROLE_KEY=… node raid-bots.mjs [LOBBY_SECONDS] [HP_PER_HERZIE]
+//   ANON_KEY=… SERVICE_ROLE_KEY=… node raid-bots.mjs [LOBBY_SECONDS] [HP_PER_HERZIE] [CAST]
+//
+// CAST: "mixed" (the six above, the default) or "nobards": ten with no
+// healer at all, levels 1 to 30, the stage-1 ones classless (they bump).
 import { createRequire } from "node:module";
 
-const ROOT = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
+const ROOT = new globalThis.URL("../..", import.meta.url).pathname.replace(/\/$/, "");
 const require = createRequire(`${ROOT}/packages/web/package.json`);
 const { createClient } = require("@supabase/supabase-js");
 const net = await import(`${ROOT}/packages/shared/dist/town-net.js`);
@@ -18,6 +21,7 @@ const { MOB } = await import(`${ROOT}/packages/shared/dist/tower.js`);
 
 const LOBBY_S = Number(process.argv[2] ?? 20);
 const HP_PER = Number(process.argv[3] ?? 20000);
+const CAST_NAME = process.argv[4] ?? "mixed";
 const URL = "http://127.0.0.1:54321";
 const ANON = process.env.ANON_KEY;
 const SERVICE = process.env.SERVICE_ROLE_KEY;
@@ -41,7 +45,9 @@ const { BOSS_STAND, CAST_INTERVAL_MS, DISC_RANGE, MELEE_REACH, WAVE_HAND_HEIGHT 
 // Percussionist never taunts.
 const STRONG = { reaction: 350, dodge: 1, taunts: true };
 const WEAK = { reaction: 900, dodge: 0.45, taunts: false };
-const CAST = [
+// Barely playing: slow to see anything, and mostly standing in it.
+const FEEBLE = { reaction: 1300, dodge: 0.2, taunts: false };
+const MIXED = [
   { role: "bard", name: "Lutey", level: 30, look: [1, 2, 1, 0, 1, 2, 1], stats: { stat_euphony: 30, stat_sonic: 28 }, ...STRONG },
   { role: "percussionist", name: "Thumpy", level: 30, look: [3, 1, 2, 1, 2, 0, 2], stats: { stat_stamina: 40, stat_sonic: 18 }, ...STRONG },
   { role: "record_slinger", name: "Spinny", level: 30, look: [2, 0, 3, 2, 0, 1, 0], stats: { stat_sonic: 58 }, ...STRONG },
@@ -49,6 +55,19 @@ const CAST = [
   { role: "percussionist", name: "Clanky", level: 12, look: [4, 2, 1, 2, 1, 3, 1], stats: { stat_stamina: 16, stat_sonic: 6 }, ...WEAK },
   { role: "record_slinger", name: "Scratchy", level: 9, look: [1, 4, 2, 0, 2, 2, 2], stats: { stat_sonic: 16 }, ...WEAK },
 ];
+const NO_BARDS = [
+  { role: "percussionist", name: "Thumpy", level: 30, look: [3, 1, 2, 1, 2, 0, 2], stats: { stat_stamina: 40, stat_sonic: 18 }, ...STRONG },
+  { role: "record_slinger", name: "Spinny", level: 30, look: [2, 0, 3, 2, 0, 1, 0], stats: { stat_sonic: 58 }, ...STRONG },
+  { role: "percussionist", name: "Boomer", level: 22, look: [0, 1, 1, 3, 0, 2, 1], stats: { stat_stamina: 30, stat_sonic: 12 }, ...STRONG },
+  { role: "record_slinger", name: "Diskette", level: 18, look: [4, 0, 2, 1, 1, 0, 3], stats: { stat_sonic: 34 }, ...WEAK },
+  { role: "percussionist", name: "Clanky", level: 12, look: [4, 2, 1, 2, 1, 3, 1], stats: { stat_stamina: 16, stat_sonic: 6 }, ...WEAK },
+  { role: "record_slinger", name: "Scratchy", level: 9, look: [1, 4, 2, 0, 2, 2, 2], stats: { stat_sonic: 16 }, ...WEAK },
+  { role: "none", name: "Pebble", level: 5, look: [2, 2, 0, 0, 3, 1, 0], stats: { stat_sonic: 8 }, ...FEEBLE },
+  { role: "none", name: "Mote", level: 3, look: [3, 3, 3, 1, 0, 0, 1], stats: { stat_stamina: 4 }, ...FEEBLE },
+  { role: "none", name: "Twig", level: 2, look: [1, 1, 4, 2, 2, 3, 2], stats: {}, ...FEEBLE },
+  { role: "none", name: "Smol", level: 1, look: [0, 4, 1, 0, 1, 1, 3], stats: {}, ...FEEBLE },
+];
+const CAST = CAST_NAME === "nobards" ? NO_BARDS : MIXED;
 /** Cumulative XP for a level (totalXpForLevel), as scripts/local.sh does. */
 const xpFor = (level) => {
   let xp = 0;
@@ -98,7 +117,9 @@ async function herzie(c) {
   } else {
     must(await admin.from("herzies").update(row).eq("user_id", uid), "herzie");
   }
-  if (!had?.class) must(await admin.rpc("choose_class", { p_user_id: uid, p_class: c.role }), "class");
+  // Classless (stage 1): it bumps.
+  if (!had?.class && c.role !== "none")
+    must(await admin.rpc("choose_class", { p_user_id: uid, p_class: c.role }), "class");
   return { ...c, uid, token: s.session.access_token };
 }
 const bots = await Promise.all(CAST.map(herzie));
@@ -358,7 +379,8 @@ function think(b) {
             : { x: 0, z: 6 };
           moved = stepToward(b, { x: c.x * 0.5, z: Math.max(c.z, boss.z + 8) }, 2.5);
         }
-      } else if (b.role === "percussionist") {
+      } else if (b.role === "percussionist" || b.role === "none") {
+        // Melee: a stick, or a classless herzie's bump.
         moved = stepToward(b, boss, BOSS_STAND.radius + MELEE_REACH * 0.6);
       } else {
         if (toBoss > DISC_RANGE - 8) moved = stepToward(b, boss, DISC_RANGE - 10);
