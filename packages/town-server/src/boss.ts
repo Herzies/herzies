@@ -314,6 +314,9 @@ export class BossEngine {
     let id = 1;
     this.nextId = opts.nextId ?? (() => id++);
     this.phase = phaseFor(this.hp, this.maxHp);
+    // A room picked up mid-fight has already called the packs above its
+    // health (it would call them all at once on the first hit).
+    this.thresholds = this.thresholds.filter((t) => this.hp / this.maxHp > t);
     this.nextAttackAt = opts.now + TUNING.openingMs;
     this.nextBusterAt = opts.now + TUNING.openingMs + TUNING.buster.everyMs;
     this.threatAt = opts.now;

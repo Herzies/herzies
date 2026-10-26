@@ -77,6 +77,11 @@ const HELLO_TIMEOUT_MS = 5_000;
 const IDLE_TIMEOUT_MS = 45_000;
 /** How often the room looks for dead sockets and expired tickets. */
 const SWEEP_MS = 30_000;
+/** Urgent fight reports no more often than this. */
+const REPORT_FLOOR_MS = 500;
+/** A closing room waits this long between tries for its last report. */
+const CLOSE_RETRY_MS = 2_000;
+const CLOSE_TRIES = 5;
 /** Grace past a ticket's expiry for a renewal still in flight. */
 const TICKET_GRACE_S = 30;
 /** Ticks with nobody moving before the timer stops. */
@@ -151,7 +156,12 @@ export class TownRoom extends DurableObject<Env> {
    * by user id. */
   private rezReady = new Map<string, number>();
   private reporting = false;
+  /** A report was asked for (or forced) while one was in flight. */
+  private reportAgain = false;
+  /** When the last report went out, so urgent ones don't pile up. */
+  private reportedAt = 0;
   private closeScheduled = false;
+  private closeTries = 0;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -336,7 +346,10 @@ export class TownRoom extends DurableObject<Env> {
     const replacing = id !== undefined;
     id ??= this.freeId();
 
-    const at = startingPoint(s.att.map, m.at?.x, m.at?.z);
+    // A knocked-out herzie lies where it fell: a reconnect can't carry its
+    // body over to a Bard.
+    const fell = this.fight?.rejoinAt(t.uid) ?? null;
+    const at = fell ?? startingPoint(s.att.map, m.at?.x, m.at?.z);
     const state = quantizeState({
       x: at.x,
       z: at.z,
@@ -373,6 +386,7 @@ export class TownRoom extends DurableObject<Env> {
       // Everyone else sees the newcomer's health bar.
       this.broadcast({ t: "hp", id, hp: fp.hp, maxHp: fp.maxHp }, s);
       if (fp.down) this.send(s, { t: "down" });
+      if (fell) this.send(s, { t: "correct", x: state.x, z: state.z });
     }
     if (others.length) {
       s.ws.send(
@@ -456,7 +470,7 @@ export class TownRoom extends DurableObject<Env> {
       this.closeRoom(now);
       return;
     }
-    if (this.ctx.getWebSockets().length) {
+    if (this.ctx.getWebSockets().length || this.fight?.running) {
       const next =
         closes && closes > now
           ? Math.min(now + SWEEP_MS, closes)
@@ -531,7 +545,13 @@ export class TownRoom extends DurableObject<Env> {
       if (this.fight) {
         this.fight.leave(s.player.uid, Date.now());
         this.maybeReport(Date.now(), true);
-        if (![...this.sessions.values()].some((o) => o.player) && this.ticker) {
+        // An empty room keeps ticking while a fight is on: the grace, the
+        // wipe and the reports run without anyone watching.
+        if (
+          !this.fight.running &&
+          ![...this.sessions.values()].some((o) => o.player) &&
+          this.ticker
+        ) {
           clearInterval(this.ticker);
           this.ticker = null;
         }
@@ -961,7 +981,14 @@ export class TownRoom extends DurableObject<Env> {
    * at a time; a failed one is retried by the next report unchanged. */
   private maybeReport(now: number, force = false) {
     const fight = this.fight;
-    if (!fight || this.reporting) return;
+    if (!fight) return;
+    if (this.reporting) {
+      if (force) this.reportAgain = true;
+      return;
+    }
+    // Urgent reports (a hit) at most twice a second; a forced one (a leave,
+    // the close, a down or a wipe) goes at once.
+    if (!force && now - this.reportedAt < REPORT_FLOOR_MS) return;
     const report = fight.report(now, force);
     if (!report) return;
     if (
@@ -977,6 +1004,7 @@ export class TownRoom extends DurableObject<Env> {
     )
       return;
     this.reporting = true;
+    this.reportedAt = now;
     void postVitals(this.env, { action: "report", ...report })
       .then((reply) => {
         if (!reply) return;
@@ -993,11 +1021,34 @@ export class TownRoom extends DurableObject<Env> {
       })
       .finally(() => {
         this.reporting = false;
+        if (this.reportAgain) {
+          this.reportAgain = false;
+          this.maybeReport(Date.now(), true);
+        }
       });
   }
 
   /** Shut the room: the fight ended. Everyone goes back to town. */
   private closeRoom(now: number) {
+    // Its last report must land (the last hits, the wipe, the log): keep
+    // the fight until it has, retrying from the alarm a few times.
+    const fight = this.fight;
+    if (
+      fight?.unreported &&
+      fight.reportable &&
+      this.env.TOWN_VITALS_URL &&
+      this.closeTries < CLOSE_TRIES
+    ) {
+      this.closeTries++;
+      this.maybeReport(now, true);
+      void this.ctx.storage.setAlarm(now + CLOSE_RETRY_MS);
+      for (const s of [...this.sessions.values()]) {
+        this.leave(s, "room closed");
+        this.close(s.ws, TOWN_CLOSE.closed, "closed");
+      }
+      return;
+    }
+    this.closeTries = 0;
     this.maybeReport(now, true);
     for (const s of [...this.sessions.values()]) {
       this.leave(s, "room closed");

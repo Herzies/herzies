@@ -18,8 +18,10 @@ import type {
 import { describe, expect, it } from "vitest";
 import { BossEngine, type BossPlayer, mitigatedHit, TUNING } from "../src/boss";
 import {
+  ABSENT_STANDING_MS,
   CHANNEL_SLACK,
   FightRuntime,
+  LOCK_GRACE_MS,
   type Outbound,
   SAY_READ_MS,
   WIPE_LINGER_MS,
@@ -630,5 +632,80 @@ describe("the end", () => {
     const report = f.report(t + 10, true);
     expect(report?.results).toBeTruthy();
     expect(report?.log).toMatchObject({ outcome: "victory", roster: 1 });
+  });
+});
+
+describe("production pass: restarts, absences and the lock", () => {
+  it("a room picked up below a minion threshold doesn't call that pack again", () => {
+    const t = STARTS + 60_000;
+    const f = new FightRuntime(
+      claim({
+        hp: 12_000,
+        maxHp: 30_000,
+        locked: { at: STARTS / 1000, roster: ["a"], revives: 0 },
+      }),
+      t,
+    );
+    f.join("a", 1, ticket("a", "bard"), { x: 0, z: 9 }, t);
+    const boss = f.engine as BossEngine;
+    // 40% → 39%: past 50% long ago, not yet at 25%.
+    boss.setHealth(11_700, 30_000);
+    f.step(t + 100);
+    expect(boss.minionsUp).toBe(0);
+  });
+
+  it("a raid that's all down doesn't wait two minutes on someone who dropped", () => {
+    const { f } = locked([{ uid: "a" }, { uid: "b" }]);
+    (f.player("a") as { down: boolean }).down = true;
+    f.leave("b", STARTS + 100);
+    f.step(STARTS + 100 + ABSENT_STANDING_MS - 100);
+    expect(f.closeWhy).toBeNull();
+    f.step(STARTS + 100 + ABSENT_STANDING_MS + 100);
+    expect(f.closeWhy).toBe("wiped");
+  });
+
+  it("the grace runs out even if the room never ticked", () => {
+    const { f } = locked([{ uid: "a" }, { uid: "b" }]);
+    f.leave("b", STARTS + 1_000);
+    expect(f.mayJoin("b", false, STARTS + 1_000 + BOSS_OUT_GRACE_MS + 1)).toBe(
+      "locked",
+    );
+  });
+
+  it("a lobby member who dropped just before the start is on the roster", () => {
+    const f = new FightRuntime(claim(), T0);
+    f.join("a", 1, ticket("a", "bard"), { x: 0, z: 9 }, T0);
+    f.join("b", 2, ticket("b", "bard"), { x: 2, z: 9 }, T0);
+    f.join("c", 3, ticket("c", "bard"), { x: 4, z: 9 }, T0);
+    f.leave("b", STARTS - LOCK_GRACE_MS / 2);
+    f.leave("c", STARTS - LOCK_GRACE_MS * 2);
+    f.step(STARTS);
+    expect(f.mayJoin("a", false, STARTS + 10)).toBe("ok");
+    expect(f.mayJoin("b", false, STARTS + 10)).toBe("ok");
+    expect(f.mayJoin("c", false, STARTS + 10)).toBe("locked");
+  });
+
+  it("a member only the database knew of gets the grace, then is out", () => {
+    const { f } = locked([{ uid: "a" }]);
+    const report = f.report(STARTS, true);
+    if (!report) throw new Error("no report");
+    f.reported(report, {
+      lock: { hp: 30_000, maxHp: 30_000, roster: ["a", "ghost"], at: STARTS },
+      out: [],
+    }, STARTS);
+    const t = STARTS + BOSS_OUT_GRACE_MS + 500;
+    f.step(t);
+    expect(f.report(t + 50, true)?.out?.uids).toEqual(["ghost"]);
+  });
+
+  it("a downed herzie that reconnects comes back where it fell", () => {
+    const { f } = locked([{ uid: "a", x: 3, z: 4 }, { uid: "b" }]);
+    f.onState("a", 3, 4, STARTS + 50);
+    (f.player("a") as { down: boolean }).down = true;
+    f.leave("a", STARTS + 100);
+    const at = f.rejoinAt("a");
+    expect(at?.x).toBeCloseTo(3, 0);
+    expect(at?.z).toBeCloseTo(4, 0);
+    expect(f.rejoinAt("b")).toBeNull();
   });
 });

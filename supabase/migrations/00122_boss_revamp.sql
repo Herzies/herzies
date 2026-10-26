@@ -74,7 +74,7 @@ declare
   v_config jsonb;
   v_per    real;
   v_n      int;
-  v_max    real;
+  v_max    double precision;
   v_at     timestamptz := now();
 begin
   select bs.* into v_state
@@ -99,9 +99,11 @@ begin
     end if;
 
     insert into public.boss_participants (event_id, user_id, locked_at)
-    select p_event, u, v_at
-      from unnest(coalesce(p_uids, '{}')) as u
-     where exists (select 1 from public.herzies h where h.user_id = u)
+    select p_event, r.u, v_at
+      from (select distinct u
+              from unnest(coalesce(p_uids, '{}')) as u
+             limit 40) r
+     where exists (select 1 from public.herzies h where h.user_id = r.u)
     on conflict do nothing;
     get diagnostics v_n = row_count;
 
@@ -117,8 +119,8 @@ begin
         nullif(v_config ->> 'hpPerPlayer', '')::real,
         p_per_player,
         130000), 100), 10000000);
-      -- bossMaxHp: per player × n^0.9.
-      v_max := round(v_per * power(v_n, 0.9));
+      -- bossMaxHp: per player × n^0.9, rounded as Math.round does.
+      v_max := floor(v_per::double precision * power(v_n, 0.9) + 0.5);
       update public.boss_state
          set hp = v_max, max_hp = v_max, locked_at = v_at
        where event_id = p_event
@@ -163,6 +165,9 @@ as $$
 declare
   v_n int;
 begin
+  -- Wait out a killing blow that's committing now, so the update below
+  -- (a new snapshot) sees it and leaves everyone in.
+  perform 1 from public.boss_state where event_id = p_event for share;
   update public.boss_participants bp
      set status = 'out', out_at = now()
     from public.boss_state bs
@@ -245,7 +250,8 @@ begin
         continue;
       end if;
       select * into v_h from public.herzies where user_id = v_uid for update;
-      if not found then
+      if not found or not v_h.down then
+        -- Already up (a stale revive): leave its health alone.
         continue;
       end if;
       update public.herzies
@@ -256,7 +262,8 @@ begin
              down = false
        where user_id = v_uid;
       update public.boss_state set revives = revives + 1 where event_id = p_event;
-    exception when others then
+    exception when invalid_text_representation or numeric_value_out_of_range then
+      -- A malformed row; anything else fails the batch, to be sent again.
       continue;
     end;
   end loop;
@@ -276,6 +283,14 @@ as $$
 declare
   h public.herzies%rowtype;
 begin
+  -- The raids it's in, locked first (settle takes the boss, then herzies),
+  -- so a killing blow committing now is seen and it stays in.
+  perform 1
+     from public.boss_state bs
+     join public.boss_participants bp on bp.event_id = bs.event_id
+    where bp.user_id = p_user and bp.status = 'in'
+      and not bs.killed and not bs.escaped
+      for share of bs;
   select * into h from public.herzies where user_id = p_user for update;
   if not found then
     return null;
@@ -560,6 +575,10 @@ as $$
       join public.herzies h on h.user_id = bd.user_id
      where bd.event_id = p_event
        and public.boss_contribution(bd.damage + bd.adds, bd.healing, bd.blocked) > 0
+       -- Who gave up isn't on the podium (nor on the statue).
+       and not exists (select 1 from public.boss_participants bp
+                        where bp.event_id = p_event and bp.user_id = bd.user_id
+                          and bp.status = 'out')
   )
   select jsonb_build_object(
     'top', coalesce((
@@ -604,6 +623,7 @@ as $$
            public.boss_contribution(d.damage + d.adds, d.healing, d.blocked) as score
       from fallen f
       join public.boss_damage d on d.event_id = f.id
+      join public.herzies hz on hz.user_id = d.user_id
      where public.boss_contribution(d.damage + d.adds, d.healing, d.blocked) > 0
        and not (d.user_id = any (coalesce(p_skip, '{}')))
        and (not f.rostered or exists (
@@ -839,3 +859,105 @@ end;
 $$;
 
 revoke execute on function public.revive_herzie(uuid, real) from public, anon, authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Production pass
+
+-- Respawning looks up a herzie's raids by user.
+create index if not exists boss_participants_user_in
+  on public.boss_participants (user_id) where status = 'in';
+
+-- As in 00076, but a locked fight's health was sized for its roster and the
+-- room holds it: it can't be changed from the admin page any more.
+create or replace function public.admin_set_boss_hp(
+  p_event_id uuid,
+  p_max_hp   real
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_state public.boss_state%rowtype;
+  v_dealt real;
+begin
+  if p_max_hp is null or p_max_hp <= 0 then
+    raise exception 'Boss HP must be positive';
+  end if;
+
+  select * into v_state
+    from public.boss_state
+   where event_id = p_event_id
+     for update;
+
+  if not found then
+    insert into public.boss_state (event_id, hp, max_hp)
+    values (p_event_id, p_max_hp, p_max_hp);
+    return;
+  end if;
+
+  if v_state.max_hp = p_max_hp then
+    return;
+  end if;
+
+  if v_state.killed then
+    raise exception 'Boss is already dead; its HP can no longer change';
+  end if;
+  if v_state.locked_at is not null then
+    raise exception 'The fight has started; its HP is set by the roster';
+  end if;
+
+  v_dealt := v_state.max_hp - v_state.hp;
+  if p_max_hp <= v_dealt then
+    raise exception 'Players have already dealt % damage; HP must be higher', round(v_dealt);
+  end if;
+
+  update public.boss_state
+     set max_hp = p_max_hp,
+         hp     = p_max_hp - v_dealt
+   where event_id = p_event_id;
+end;
+$$;
+revoke execute on function public.admin_set_boss_hp(uuid, real)
+  from public, anon, authenticated;
+
+-- As in 00073, and a fight nobody locked is over two minutes past its start
+-- (the cave sealed then; open_boss_json stops listing it), so the events tab
+-- stops showing it.
+create or replace function public.resolve_boss_fight()
+returns int
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_count int;
+begin
+  with expired as (
+    update public.boss_state bs
+       set escaped = true
+      from public.events e
+     where e.id = bs.event_id
+       and e.type = 'boss_fight'
+       and not bs.killed
+       and not bs.escaped
+       and (e.ends_at <= now()
+            or (bs.locked_at is null
+                and e.starts_at + interval '2 minutes' <= now()))
+    returning bs.event_id
+  )
+  select count(*) into v_count from expired;
+
+  update public.events e
+     set active = false
+    from public.boss_state bs
+   where bs.event_id = e.id
+     and e.type = 'boss_fight'
+     and bs.escaped
+     and e.active;
+
+  return v_count;
+end;
+$$;
+revoke execute on function public.resolve_boss_fight() from public, anon, authenticated;

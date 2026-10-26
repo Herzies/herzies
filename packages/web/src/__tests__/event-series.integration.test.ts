@@ -359,7 +359,9 @@ describe("boss series", () => {
     expect(new Set(picks).size).toBeGreaterThan(1);
   });
 
-  it("uses the template's HP and genres when set", async () => {
+  // Genres no longer matter (the boss hates all music, 00122): the admin
+  // form drops them, so only the HP is the template's.
+  it("uses the template's HP when set", async () => {
     const id = await saveSeries(
       bossSeries({
         configTemplate: {
@@ -371,7 +373,7 @@ describe("boss series", () => {
       }),
     );
     const [first] = await occurrences(id);
-    expect(first.config).toMatchObject({ maxHp: 1234, hatedGenres: ["jazz"] });
+    expect(first.config).toMatchObject({ maxHp: 1234 });
   });
 
   it("does not create a slot overlapping a hand-made boss", async () => {

@@ -391,3 +391,77 @@ describe("the cave raid", () => {
     });
   });
 });
+
+describe("the cave raid: production pass", () => {
+  beforeEach(clearBosses);
+  afterAll(async () => {
+    await clearBosses();
+    await cleanupTestData();
+  });
+
+  it("a stale revive leaves a standing herzie's health alone", async () => {
+    const event = await spawnBoss();
+    const a = await player({ hp: 150, down: false });
+    await lock(event, [a]);
+    await rpc("apply_boss_revive_batch", {
+      p_batch: `rez:${crypto.randomUUID()}`,
+      p_event: event,
+      p_rows: [{ uid: a, hp: 10 }],
+    });
+    expect(await herzie(a)).toEqual({ hp: 150, down: false });
+    expect((await state(event)).revives).toBe(0);
+  });
+
+  it("a locked fight's health can't be changed from the admin page", async () => {
+    const event = await spawnBoss();
+    const a = await player();
+    await lock(event, [a]);
+    const { error } = await admin().rpc("admin_set_boss_hp", {
+      p_event_id: event,
+      p_max_hp: 999_999,
+    });
+    expect(error?.message).toMatch(/fight has started/);
+  });
+
+  it("a fight nobody locked is over two minutes past its start", async () => {
+    const event = await spawnBoss(-3 * 60_000);
+    await rpc("resolve_boss_fight", {});
+    expect((await state(event)).escaped).toBe(true);
+    const { data } = await admin()
+      .from("events")
+      .select("active")
+      .eq("id", event)
+      .single();
+    expect(data?.active).toBe(false);
+  });
+
+  it("who gave up isn't on the end screen's podium", async () => {
+    const event = await spawnBoss();
+    const a = await player();
+    const b = await player({ hp: 0, down: true });
+    await lock(event, [a, b]);
+    await rpc("apply_boss_damage_batch", {
+      p_batch: `dmg:${crypto.randomUUID()}`,
+      p_event: event,
+      p_damage: [
+        { uid: a, damage: 10 },
+        { uid: b, damage: 500 },
+      ],
+    });
+    await rpc("mark_boss_out", { p_event: event, p_uids: [b] });
+    const r = await rpc<{ top: { name: string; rank: number }[] }>(
+      "boss_results_json",
+      { p_event: event, p_uids: [a, b] },
+    );
+    expect(r.top).toHaveLength(1);
+    expect(r.top[0].rank).toBe(1);
+  });
+
+  it("the lock caps the roster at forty", async () => {
+    const event = await spawnBoss();
+    const uids = await Promise.all(Array.from({ length: 42 }, () => player()));
+    const l = await lock(event, uids);
+    expect(l.roster).toHaveLength(40);
+    expect(l.maxHp).toBe(bossMaxHp(40, 10_000));
+  });
+});

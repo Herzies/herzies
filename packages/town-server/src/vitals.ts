@@ -97,6 +97,10 @@ export async function reviveInDb(
 
 /** POST `payload` to `town-vitals`, signed. The reply's JSON, or null on
  * any failure (logged). */
+/** How long a `town-vitals` call may take before it's given up on (and
+ * retried by the next report). */
+const VITALS_TIMEOUT_MS = 5_000;
+
 async function signedPost(
   env: Pick<Env, "TOWN_TICKET_SECRET" | "TOWN_VITALS_URL">,
   payload: unknown,
@@ -120,6 +124,8 @@ async function signedPost(
         ),
       },
       body,
+      // A hung request would hold up every report after it.
+      signal: AbortSignal.timeout(VITALS_TIMEOUT_MS),
     });
     if (!res.ok) {
       console.log(

@@ -105,11 +105,11 @@ describe("admin-created bosses", () => {
     expect(res.status).toBe(400);
   });
 
-  it("refuses genres the classifier never emits", async () => {
+  it("ignores hated genres: the boss hates all music (00122)", async () => {
     const res = await adminPost(
       bossBody({ config: { ...bossBody().config, hatedGenres: ["techno"] } }),
     );
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(201);
   });
 });
 

@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { cn } from "../lib/utils";
 import { herzies } from "../tauri-bridge";
 import { bossFight, useBossFight } from "./town/combat/fight";
+import { useBossResultsShown } from "./town/combat/results";
 import { townNet } from "./town/net/townNet";
 import { goToMap } from "./town/runtime";
 import { refreshVitals, setVitals, useLiveHp } from "./town/vitals";
@@ -33,6 +34,10 @@ export function TownVitals({
   useEffect(() => {
     refreshVitals();
   }, [inFight]);
+
+  // The fight's end screen comes first; the rest dialog after it (and
+  // after the room has closed, back in town).
+  const results = useBossResultsShown();
 
   if (!live) return null;
   const { hp, maxHp, down } = live;
@@ -100,7 +105,7 @@ export function TownVitals({
             </p>
           ) : null}
         </div>
-      ) : down ? (
+      ) : down && !results && !bossFight.closing ? (
         // As the boss fight's end screen: the window fills the Town down to
         // the bottom margin, the world blurred out behind it.
         <div
@@ -116,8 +121,8 @@ export function TownVitals({
               Oh no! You need some rest
             </h2>
             <p className="text-[10px] text-text-dim">
-              Your herzie ran out of health. A Bard can play it back up where
-              it fell — or rest to get up on your own.
+              Your herzie ran out of health. A Bard can play it back up where it
+              fell — or rest to get up on your own.
             </p>
             <div className="mt-1.5 flex justify-center">
               <button

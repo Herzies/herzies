@@ -100,6 +100,16 @@ const SAY_GAP_MS = 6_000;
 export const SAY_READ_MS = 2_500;
 /** An in-tune buff is open-ended; it's taken off with `buffOff`. */
 const OPEN_ENDED_MS = 6 * 3_600_000;
+/** How long a roster member who dropped stays "standing" for the wipe
+ * check: long enough to ride out a reconnect, short enough that a raid
+ * that's all down isn't kept waiting on someone who's gone. */
+export const ABSENT_STANDING_MS = 15_000;
+/** After a restart (or a roster from the database), how long a member
+ * nobody has seen yet counts as standing: their app has to reconnect. */
+export const UNSEEN_STANDING_MS = 60_000;
+/** A lobby member whose connection dropped just before the start is still
+ * on the roster if they were gone less than this. */
+export const LOCK_GRACE_MS = 30_000;
 
 export type Outbound = {
   /** Everyone in the room, or one player. */
@@ -131,6 +141,9 @@ export type FightPlayer = {
   cls: string | null;
   /** Its level, for the minions' level gap. */
   level: number;
+  /** Where it was when it left, so a downed herzie comes back where it
+   * fell rather than wherever its app says. */
+  leftAt?: { x: number; z: number };
 };
 
 /** What became of a skill. "early" is a cooldown refusal inside the grace
@@ -461,6 +474,12 @@ export class FightRuntime {
     return this.closesAt === null;
   }
 
+  /** A raid that's under way (locked, not over): the room keeps time for
+   * it even with nobody connected. */
+  get running(): boolean {
+    return !!this.boss && this.stage === "fight" && this.open;
+  }
+
   /** Whether `uid` may come in now: anyone on their feet in the lobby;
    * after the lock, only the roster (a downed member too, to wait for a
    * Bard); nobody once it's over. */
@@ -474,6 +493,9 @@ export class FightRuntime {
       return down ? "down" : "ok";
     }
     if (!this.roster) return down ? "down" : "ok";
+    const since = this.absentSince.get(uid);
+    if (since !== undefined && now - since >= BOSS_OUT_GRACE_MS)
+      return "locked";
     return this.roster.get(uid) === "in" ? "ok" : "locked";
   }
 
@@ -539,13 +561,25 @@ export class FightRuntime {
     return p;
   }
 
+  /** Where a downed roster member who left comes back: where it fell. */
+  rejoinAt(uid: string): { x: number; z: number } | null {
+    const p = this.players.get(uid);
+    if (!p || p.present || !p.down || !this.fighting(uid)) return null;
+    return p.leftAt ?? null;
+  }
+
   /** Someone left (or lost their connection). Their health stays on record;
    * a roster member who stays gone too long is out. */
   leave(uid: string, now: number = Date.now()): void {
     const p = this.players.get(uid);
     if (!p) return;
     p.present = false;
+    p.leftAt = this.history.at(uid, now) ?? p.leftAt;
     this.history.forget(uid);
+    // Its threat, buffs (in tune too) and taunt go with it; a rejoin starts
+    // the music over.
+    this.engine.forget(uid);
+    this.tunes.delete(uid);
     this.leftUnreported.add(uid);
     this.absentSince.set(uid, now);
     this.reportNow = true;
@@ -1098,10 +1132,16 @@ export class FightRuntime {
       // Everyone in is down or gone for good: the boss won. Someone away
       // (inside the grace, or not back since a restart) still counts as
       // standing unless they went down.
+      const hard = now >= boss.hardAt;
       const standing = [...this.roster].some(([uid, s]) => {
         if (s !== "in") return false;
         const p = this.players.get(uid);
-        return !p?.down;
+        if (p?.present) return !p.down;
+        // Away: standing for a little while, never through the hard enrage
+        // (it would be the one way to dodge its pulse).
+        if (hard || p?.down) return false;
+        const since = this.absentSince.get(uid) ?? now;
+        return now - since < (p ? ABSENT_STANDING_MS : UNSEEN_STANDING_MS);
       });
       if (!standing) {
         this.close("wiped", now, now + WIPE_LINGER_MS, out);
@@ -1120,7 +1160,12 @@ export class FightRuntime {
   private lock(now: number, out: Outbound[]) {
     const boss = this.boss as BossEngine;
     const uids = [...this.players.values()]
-      .filter((p) => p.present && !p.down)
+      .filter(
+        (p) =>
+          !p.down &&
+          (p.present ||
+            now - (this.absentSince.get(p.uid) ?? -Infinity) < LOCK_GRACE_MS),
+      )
       .map((p) => p.uid);
     this.lockedAt = now;
     this.roster = new Map(uids.map((uid) => [uid, "in" as const]));
@@ -1621,7 +1666,11 @@ export class FightRuntime {
   }
 
   /** `town-vitals` took the report: what it carried needn't be re-sent. */
-  reported(report: FightReport, raid?: RaidReply | null): Outbound[] {
+  reported(
+    report: FightReport,
+    raid?: RaidReply | null,
+    now: number = Date.now(),
+  ): Outbound[] {
     const out: Outbound[] = [];
     // Revives first: a revived herzie's 0 must not count as "told".
     if (report.revived && this.revivedInflight?.batch === report.revived.batch)
@@ -1650,7 +1699,7 @@ export class FightRuntime {
       for (const uid of report.out.uids) this.outQueue.delete(uid);
     if (report.wipe) this.wipePending = false;
     if (report.log) this.logPending = null;
-    if (raid) out.push(...this.adoptRaid(raid, Date.now()));
+    if (raid) out.push(...this.adoptRaid(raid, now));
     return out;
   }
 
@@ -1673,6 +1722,11 @@ export class FightRuntime {
         for (const p of this.players.values())
           if (p.present && !this.roster.has(p.uid))
             out.push({ to: { uid: p.uid }, msg: { t: "out" } });
+        // Members only the database knew of get the grace to show up, like
+        // anyone away: otherwise one who never comes stands forever.
+        for (const uid of this.roster.keys())
+          if (!prev.has(uid) && !this.players.get(uid)?.present)
+            this.absentSince.set(uid, this.absentSince.get(uid) ?? now);
         this.raidDirty = true;
       }
       if (
@@ -1817,6 +1871,12 @@ export class FightRuntime {
   }
 
   /** Whether anything still needs reporting. */
+  /** Whether this fight reports to the database at all (the local-dev
+   * boss doesn't). */
+  get reportable(): boolean {
+    return this.eventId !== DEV_EVENT;
+  }
+
   get unreported(): boolean {
     return (
       this.inflight !== null ||

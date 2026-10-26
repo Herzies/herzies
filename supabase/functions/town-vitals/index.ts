@@ -167,7 +167,10 @@ async function applyRaid(
     }
   }
   const rez = msg.revived;
-  if (rez && rez.event === event && typeof rez.batch === "string") {
+  if (
+    rez && rez.event === event && typeof rez.batch === "string" &&
+    rez.batch.length <= 200
+  ) {
     const rows = (Array.isArray(rez.rows) ? rez.rows : [])
       .slice(0, MAX_BATCH)
       .filter((r) => UUID.test(r?.uid ?? "") && Number.isFinite(r.hp) && r.hp > 0);
@@ -341,7 +344,10 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
         rest,
         (r) => rpc(db, "rest_herzie", { p_user: r.uid, p_bonus: r.bonus }),
       ),
-      boss && bossDamage.length
+      // A failed lock, out or revive holds the damage back: the room sends
+      // it all again, and a herzie who left before the killing blow must
+      // be marked out before that blow settles the fight.
+      boss && bossDamage.length && !raid.failed
         ? rpc(db, "apply_boss_damage_batch", {
           p_batch: boss.batch,
           p_event: boss.event,
@@ -406,7 +412,7 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
     // for that with an error status. Rest is additive and never retried.
     // A wipe after the damage: the last hits still count on the board.
     let wipeFailed = false;
-    if (msg.wipe && UUID.test(msg.wipe.event)) {
+    if (!raid.failed && msg.wipe && UUID.test(msg.wipe.event)) {
       try {
         await rpc(db, "wipe_boss_fight", { p_event: msg.wipe.event });
       } catch {
