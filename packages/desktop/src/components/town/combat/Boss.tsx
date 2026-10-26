@@ -7,7 +7,7 @@ import {
   type RapierRigidBody,
   RigidBody,
 } from "@react-three/rapier";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { lookOf } from "../../TownScene";
 import { ambient } from "../ambient";
@@ -27,6 +27,16 @@ const REAR = 0.08;
 const SLAM_MS = 260;
 /** Over its head, for what it says. */
 const SAY_HEIGHT = BOSS_STAND.top * 1.25;
+// The body's props, made once: rapier rebuilds a collider whenever its
+// `args` array is a new one, which a fresh literal every render would be.
+const BODY_AT: [number, number, number] = [BOSS_STAND.x, 0, BOSS_STAND.z];
+const COLLIDER_ARGS: [number, number] = [2.4, BOSS_STAND.radius * 0.92];
+const COLLIDER_AT: [number, number, number] = [0, 2.4, 0];
+const SAY_AT: [number, number, number] = [
+  BOSS_STAND.x,
+  SAY_HEIGHT,
+  BOSS_STAND.z,
+];
 
 /**
  * The boss in its cave: the same body as the one in town. Asleep in the
@@ -104,12 +114,12 @@ export function Boss() {
     if (focus && !bossFight.victory)
       tether.show(at, focus, !!raid?.taunted, now);
     else tether.hide();
-    const coming = bossFight.shapes.filter(
+    const coming = bossFight.shapes.some(
       (s) => s.resolvedAt === null && s.mob === undefined,
     );
     // Rear while one fills, drop as it lands.
     const slam = Math.max(0, 1 - (now - bossFight.slammedAt) / SLAM_MS);
-    const rear = coming.length ? REAR : 0;
+    const rear = coming ? REAR : 0;
     // Asleep in the lobby: it breathes slowly, sunk a little.
     const asleep = raid?.stage === "lobby";
     const breath = asleep ? 0.03 * Math.sin(now / 900) - 0.04 : 0;
@@ -144,17 +154,11 @@ export function Boss() {
         ref={body}
         type="kinematicPosition"
         colliders={false}
-        position={[BOSS_STAND.x, 0, BOSS_STAND.z]}
+        position={BODY_AT}
       >
-        <CylinderCollider
-          args={[2.4, BOSS_STAND.radius * 0.92]}
-          position={[0, 2.4, 0]}
-        />
+        <CylinderCollider args={COLLIDER_ARGS} position={COLLIDER_AT} />
       </RigidBody>
-      <group
-        ref={sayAnchor}
-        position={[BOSS_STAND.x, SAY_HEIGHT, BOSS_STAND.z]}
-      >
+      <group ref={sayAnchor} position={SAY_AT}>
         <BossSay />
       </group>
     </>
@@ -180,8 +184,21 @@ function BossSay() {
     return () => clearTimeout(t);
   }, [say]);
   const line = say && performance.now() < say.until ? say : null;
+  return <SayBubble line={line} />;
+}
+
+const SAY_STYLE = { pointerEvents: "none" } as const;
+const SAY_Z: [number, number] = [20, 0];
+
+/** The overlay itself, re-rendered only when the line changes: drei's
+ * `<Html>` renders a second React root on every render of its own. */
+const SayBubble = memo(function SayBubble({
+  line,
+}: {
+  line: { text: string; until: number } | null;
+}) {
   return (
-    <Html zIndexRange={[20, 0]} style={{ pointerEvents: "none" }}>
+    <Html zIndexRange={SAY_Z} style={SAY_STYLE}>
       <div
         role="status"
         aria-live="polite"
@@ -193,7 +210,7 @@ function BossSay() {
       </div>
     </Html>
   );
-}
+});
 
 /**
  * The boss's eye on someone: a line on the floor from it to them, and a

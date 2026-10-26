@@ -69,6 +69,17 @@ export const entityAt = new Map<
   { x: number; z: number; top: number }
 >();
 
+/** Where entity `id` is drawn now: its entry updated in place (this runs
+ * every frame for every herzie). */
+export function setEntityAt(id: number, x: number, z: number, top: number) {
+  const e = entityAt.get(id);
+  if (e) {
+    e.x = x;
+    e.z = z;
+    e.top = top;
+  } else entityAt.set(id, { x, z, top });
+}
+
 /** How long a skill's effect plays, ms. */
 export const SKILL_FX_MS = 1_400;
 

@@ -28,8 +28,11 @@ export function SkillHud({
       if (buffBox.current) {
         const b = buffOn(bossFight.you, "cymbrella", now);
         buffBox.current.style.display = b ? "" : "none";
-        if (b)
-          buffBox.current.textContent = `🛡 ${Math.round(b.value * 100)}% · ${Math.ceil((b.until - now) / 1000)}s`;
+        const text = b
+          ? `🛡 ${Math.round(b.value * 100)}% · ${Math.ceil((b.until - now) / 1000)}s`
+          : "";
+        if (b && buffBox.current.textContent !== text)
+          buffBox.current.textContent = text;
       }
       if (channelBox.current && channelFill.current) {
         const ch =

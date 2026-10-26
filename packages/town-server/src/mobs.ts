@@ -211,6 +211,22 @@ export class MobPack {
     return now >= this.enrageAt;
   }
 
+  /** What each mob last looked like on the wire, by id. */
+  private sent = new Map<number, string>();
+
+  /** Only the mobs that changed since the last call (moved, turned, hurt,
+   * winding up): a pack standing still sends nothing. */
+  wireChanged(): TowerMob[] {
+    const out: TowerMob[] = [];
+    for (const w of this.wire()) {
+      const key = `${w.x},${w.z},${w.yaw},${w.hp},${w.s}`;
+      if (this.sent.get(w.id) === key) continue;
+      this.sent.set(w.id, key);
+      out.push(w);
+    }
+    return out;
+  }
+
   wire(): TowerMob[] {
     return this.alive.map((m) => ({
       id: m.id,
@@ -773,8 +789,8 @@ export class MobPack {
     dx /= d;
     dz /= d;
     // Make room for each other.
-    for (const o of this.alive) {
-      if (o === m) continue;
+    for (const o of this.mobs) {
+      if (o === m || o.hp <= 0) continue;
       const ox = m.x - o.x;
       const oz = m.z - o.z;
       const od = Math.hypot(ox, oz);

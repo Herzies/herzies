@@ -198,17 +198,24 @@ export function CombatOverlay() {
   const v = useMemo(() => new THREE.Vector3(), []);
   const head = useMemo(() => new THREE.Vector3(), []);
   /** Where a world point lands on the overlay, in CSS px (null: behind). */
+  // The overlay's size, read once a frame (reading it per number, right
+  // after writing their styles, forced a layout each time).
+  const view = useMemo(() => ({ w: 0, h: 0 }), []);
+  const out = useMemo(() => [0, 0] as [number, number], []);
   const project = (x: number, y: number, z: number) => {
     v.set(x, y, z).project(camera);
     if (v.z > 1) return null;
-    const w = ui.root.clientWidth;
-    const h = ui.root.clientHeight;
-    return [(v.x * 0.5 + 0.5) * w, (-v.y * 0.5 + 0.5) * h] as const;
+    out[0] = (v.x * 0.5 + 0.5) * view.w;
+    out[1] = (-v.y * 0.5 + 0.5) * view.h;
+    return out;
   };
   const lastMeter = useMemo(() => ({ at: 0 }), []);
+  const seen = useMemo(() => new Set<string>(), []);
 
   useFrame((_, dt) => {
     const now = performance.now();
+    view.w = ui.root.clientWidth;
+    view.h = ui.root.clientHeight;
 
     // New numbers, stacked off one another when they come close together.
     while (queue.length) {
@@ -232,10 +239,13 @@ export function CombatOverlay() {
         }
         if (x.age > f.age) f = x;
       }
-      const busy = ui.floaters.filter((x) => x.alive && x.age < 0.3).length;
+      let busy = 0;
+      for (const x of ui.floaters) if (x.alive && x.age < 0.3) busy++;
       f.alive = true;
       f.age = 0;
-      f.pos = [at[0], at[1] + 0.25 + busy * 0.18, at[2]];
+      f.pos[0] = at[0];
+      f.pos[1] = at[1] + 0.25 + busy * 0.18;
+      f.pos[2] = at[2];
       f.drift = (Math.random() * 2 - 1) * 26;
       f.rise = 38 + Math.random() * 14 + (n.crit ? 12 : 0);
       f.crit = n.crit;
@@ -255,7 +265,7 @@ export function CombatOverlay() {
       if (!f.alive) continue;
       f.age += dt;
       const t = f.age / FLOAT_SECONDS;
-      const p = t < 1 ? project(...f.pos) : null;
+      const p = t < 1 ? project(f.pos[0], f.pos[1], f.pos[2]) : null;
       if (!p) {
         f.alive = false;
         f.el.style.opacity = "0";
@@ -271,7 +281,9 @@ export function CombatOverlay() {
       const ease = 1 - (1 - t) ** 2;
       const x = p[0] + f.drift * ease;
       const y = p[1] - f.rise * ease;
-      f.el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%) scale(${pop})`;
+      // A crit lands bigger.
+      const size = f.crit ? pop * 1.4 : pop;
+      f.el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%) scale(${size})`;
       f.el.style.opacity = String(t < 0.65 ? 1 : 1 - (t - 0.65) / 0.35);
     }
 
@@ -318,7 +330,7 @@ export function CombatOverlay() {
     // position every frame.
     const refresh = now - lastMeter.at > 120;
     if (refresh) lastMeter.at = now;
-    const seen = new Set<string>();
+    seen.clear();
     for (const d of liveDummies) {
       seen.add(d.key);
       let el = ui.meters.get(d.key);

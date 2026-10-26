@@ -24,7 +24,7 @@ import {
 } from "./combat/discs";
 import { DUMMY, hitDummy } from "./combat/dummy";
 import { bossFight, bossNow } from "./combat/fight";
-import { entityAt } from "./combat/skills";
+import { entityAt, setEntityAt } from "./combat/skills";
 import { slashField } from "./combat/slashes";
 import { assistTarget, type Vec3, waveField } from "./combat/waves";
 import { applyDowned, entityDown } from "./downed";
@@ -121,6 +121,7 @@ function RemoteHerzie({
   const bubbleBox = useRef<HTMLDivElement>(null);
   const hpBox = useRef<HTMLDivElement>(null);
   const hpFill = useRef<HTMLDivElement>(null);
+  const hpShown = useRef(-1);
   const downMark = useRef<HTMLDivElement>(null);
   const downed = useRef(0);
   const hand = useMemo(() => new Vector3(), []);
@@ -230,11 +231,12 @@ function RemoteHerzie({
       ground + herzie.height + 0.3 + (seated ? SEAT_Y : 0),
       s.z,
     );
-    entityAt.set(remote.id, {
-      x: s.x,
-      z: s.z,
-      top: ground + herzie.height + (seated ? SEAT_Y : 0),
-    });
+    setEntityAt(
+      remote.id,
+      s.x,
+      s.z,
+      ground + herzie.height + (seated ? SEAT_Y : 0),
+    );
     // Chat is one room for everyone; the Town only shows what's said near
     // you.
     if (bubbleBox.current) {
@@ -247,9 +249,15 @@ function RemoteHerzie({
       const h = bossFight.on ? bossFight.health.get(remote.id) : undefined;
       hpBox.current.style.display = h ? "" : "none";
       if (h) {
-        const f = Math.max(0, Math.min(1, h.hp / h.maxHp));
-        hpFill.current.style.width = `${f * 100}%`;
-        hpFill.current.style.background = f < 0.5 ? "#f87171" : "#34d399";
+        // Written only when it moved a whole percent.
+        const pct = Math.round(Math.max(0, Math.min(1, h.hp / h.maxHp)) * 100);
+        if (pct !== hpShown.current) {
+          hpShown.current = pct;
+          hpFill.current.style.width = `${pct}%`;
+          hpFill.current.style.background = pct < 50 ? "#f87171" : "#34d399";
+          // Low isn't told by colour alone: the bar blinks too.
+          hpBox.current.dataset.low = pct < 25 ? "1" : "";
+        }
       }
     }
     // Names (and health bars) fade in as you come near; away dims them.
@@ -298,7 +306,7 @@ function RemoteHerzie({
             </button>
             <div
               ref={hpBox}
-              className="pointer-events-none mt-px h-[3px] w-10 overflow-hidden rounded-sm bg-black/60"
+              className="pointer-events-none mt-px h-[3px] w-10 overflow-hidden rounded-sm bg-black/60 data-[low=1]:animate-pulse data-[low=1]:outline data-[low=1]:outline-1 data-[low=1]:outline-red-400/70 motion-reduce:animate-none"
               style={{ display: "none" }}
             >
               <div ref={hpFill} className="h-full" />

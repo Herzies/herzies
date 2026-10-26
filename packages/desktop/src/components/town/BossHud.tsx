@@ -7,6 +7,7 @@ import {
   mobsLeft,
   type RaidView,
   useBossFight,
+  useBossHp,
 } from "./combat/fight";
 import { buffOn, useSkills } from "./combat/skills";
 
@@ -27,6 +28,7 @@ const BOSS_CARD =
  */
 export function BossHud({ name }: { name: string }) {
   useBossFight();
+  useBossHp();
   const { on, hp, maxHp, closing, victory, youHitAt, tower } = bossFight;
   const [now, setNow] = useState(() => performance.now());
   // Ticks while something counts down: the room closing, the lobby or the

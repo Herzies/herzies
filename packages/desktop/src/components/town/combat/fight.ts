@@ -17,6 +17,7 @@ import type {
   TowerFloor,
   TowerMob,
 } from "@herzies/shared/town-net";
+import { TOWN_TICK_MS } from "@herzies/shared/town-net";
 import { useSyncExternalStore } from "react";
 import { logActivity } from "../../../lib/activity";
 import { notify } from "../../../lib/notices";
@@ -165,8 +166,14 @@ export function mobsLeft(): number {
   return n;
 }
 
-/** How far behind the newest word mobs are drawn, ms: a snapshot or two. */
-export const MOB_DELAY_MS = 110;
+/** How far behind the newest word mobs and the boss are drawn, ms: a bit
+ * over two server ticks, so one late packet never leaves them standing.
+ * Samples are stamped with the server's time, not when they arrived, so
+ * the spacing stays even through network jitter. */
+export const MOB_DELAY_MS = 150;
+/** A gap in samples longer than this was the thing standing still: pin
+ * its old spot just before the new one rather than glide across the gap. */
+const QUIET_GAP_MS = TOWN_TICK_MS * 2.5;
 
 /** Where the boss stands at `at` (performance.now() ms; drawn a moment
  * behind the newest word, like a mob), and which way it faces. Its home
@@ -196,10 +203,26 @@ export function bossNow(at: number = performance.now() - MOB_DELAY_MS): {
   return at < s[0].at ? s[0] : last;
 }
 
-function pushBossAt(x: number, z: number, yaw: number, at: number) {
-  const s = bossFight.bossPath;
+/** Add a sample to a path, in order, pinning the old spot after a quiet
+ * spell, and keep the last `keep`. */
+function pushSample(
+  s: { at: number; x: number; z: number; yaw: number }[],
+  at: number,
+  x: number,
+  z: number,
+  yaw: number,
+  keep: number,
+) {
+  const last = s[s.length - 1];
+  if (last && at <= last.at) return;
+  if (last && at - last.at > QUIET_GAP_MS)
+    s.push({ at: at - TOWN_TICK_MS, x: last.x, z: last.z, yaw: last.yaw });
   s.push({ at, x, z, yaw });
-  if (s.length > 8) s.shift();
+  while (s.length > keep) s.shift();
+}
+
+function pushBossAt(x: number, z: number, yaw: number, at: number) {
+  pushSample(bossFight.bossPath, at, x, z, yaw, 8);
 }
 
 function raidView(r: RaidState, clock: Clock, you?: RaidView["you"]): RaidView {
@@ -264,8 +287,7 @@ function syncMobs(mobs: readonly TowerMob[], now: number) {
     m.hp = w.hp;
     m.maxHp = w.maxHp;
     m.windup = w.s === 1;
-    m.samples.push({ at: now, x: w.x, z: w.z, yaw: w.yaw });
-    if (m.samples.length > 6) m.samples.shift();
+    pushSample(m.samples, now, w.x, w.z, w.yaw, 6);
   }
 }
 
@@ -280,24 +302,57 @@ function setTower(f: TowerFloor, now: number) {
   syncMobs(mobs, now);
 }
 
-let version = 0;
 /** Tells one drop of loot from the next (LootDrops keys on it). */
 let lootSeq = 0;
-const listeners = new Set<() => void>();
-const emit = () => {
-  version++;
-  for (const l of listeners) l();
-};
 
-/** Re-render when the fight changes shape (not every frame). */
-export function useBossFight(): number {
-  return useSyncExternalStore(
-    (cb) => {
-      listeners.add(cb);
-      return () => listeners.delete(cb);
+/** A tiny store that tells its listeners at most once a frame: a burst of
+ * messages in one frame (each is its own task, so React can't batch them)
+ * re-renders once. */
+function frameStore() {
+  let version = 0;
+  let queued = false;
+  const listeners = new Set<() => void>();
+  const flush = () => {
+    queued = false;
+    version++;
+    for (const l of listeners) l();
+  };
+  const subscribe = (cb: () => void) => {
+    listeners.add(cb);
+    return () => {
+      listeners.delete(cb);
+    };
+  };
+  const get = () => version;
+  return {
+    emit() {
+      if (queued) return;
+      queued = true;
+      if (typeof requestAnimationFrame === "function")
+        requestAnimationFrame(flush);
+      else queueMicrotask(flush);
     },
-    () => version,
-  );
+    use: () => useSyncExternalStore(subscribe, get),
+  };
+}
+
+/** The fight's shape: stages, floor shapes, minions, lines, the end. */
+const shapeStore = frameStore();
+/** Health only (the boss's and everyone's): it changes on nearly every
+ * tick of a fight, and only the HUD shows it. */
+const hpStore = frameStore();
+const emit = shapeStore.emit;
+const emitHp = hpStore.emit;
+
+/** Re-render when the fight changes shape (not every frame, nor on every
+ * hit: see {@link useBossHp}). */
+export function useBossFight(): number {
+  return shapeStore.use();
+}
+
+/** Re-render when anyone's health (the boss's too) changes. */
+export function useBossHp(): number {
+  return hpStore.use();
 }
 
 /** Out of the boss room: forget the fight. */
@@ -325,6 +380,7 @@ export function resetBossFight(): void {
   towerMobs.clear();
   resetSkills();
   emit();
+  emitHp();
 }
 
 /** How long a landed shape lingers (its flash) before it's gone, ms. */
@@ -363,14 +419,17 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       }
       applyFight(m.fight, clock, m.you);
       emit();
+      emitHp();
       return;
     }
     case "boss":
       bossFight.hp = m.hp;
       bossFight.maxHp = m.maxHp;
+      // A new phase changes the fight's shape; a hit is only health.
+      if (m.phase !== bossFight.phase) emit();
       bossFight.phase = m.phase;
       bossFight.bossHitAt = now;
-      emit();
+      emitHp();
       return;
     case "telegraph": {
       if (!bossFight.on) return;
@@ -407,7 +466,7 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
         pushHealNumber(mine ? null : m.id, m.hp - was);
       bossFight.health.set(m.id, { hp: m.hp, maxHp: m.maxHp });
       if (m.id === clock.you()) setHpNow(m.hp);
-      emit();
+      emitHp();
       return;
     }
     case "hit": {
@@ -471,7 +530,7 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       return;
     case "mobs": {
       const before = towerMobs.size;
-      syncMobs(m.mobs, now);
+      syncMobs(m.mobs, m.at !== undefined ? clock.toLocal(m.at) : now);
       if (towerMobs.size !== before) emit();
       return;
     }
@@ -511,7 +570,12 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       emit();
       return;
     case "bossAt":
-      pushBossAt(m.x, m.z, m.yaw, now);
+      pushBossAt(
+        m.x,
+        m.z,
+        m.yaw,
+        m.at !== undefined ? clock.toLocal(m.at) : now,
+      );
       return;
     case "say":
       bossFight.say = { text: m.text, until: clock.toLocal(m.until) };

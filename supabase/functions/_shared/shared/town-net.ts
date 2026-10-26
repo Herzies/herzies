@@ -703,7 +703,9 @@ export type ServerMessage =
   | { t: "hit"; damage: number; crit: boolean; mob?: number }
   /** The Tower's mobs (or the boss's minions), where they are now (every
    * tick while any are up). */
-  | { t: "mobs"; mobs: TowerMob[] }
+  /** Mobs that changed since the last (all of them in `welcome`/`floor`);
+   * `at`: the server time they stood there. */
+  | { t: "mobs"; mobs: TowerMob[]; at?: number }
   /** A Tower mob (or a minion) fell. */
   | { t: "mobDown"; mob: number; x: number; z: number }
   /** A Tower floor began, or was just cleared. */
@@ -739,7 +741,8 @@ export type ServerMessage =
     }
   /** Where the boss stands and faces, while it walks (every tick it
    * moves). */
-  | { t: "bossAt"; x: number; z: number; yaw: number }
+  /** Where the boss stands, at server time `at`. */
+  | { t: "bossAt"; at?: number; x: number; z: number; yaw: number }
   /** The boss says something, shown over its head until `until`. */
   | { t: "say"; text: string; until: number }
   /** The raid changed: its stage, roster, revives, the boss's focus. */

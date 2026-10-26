@@ -1,5 +1,5 @@
 import { useFrame } from "@react-three/fiber";
-import { useEffect, useMemo } from "react";
+import { memo, useEffect, useMemo } from "react";
 import * as THREE from "three";
 import {
   bossFight,
@@ -38,7 +38,8 @@ const reduced = () =>
   typeof matchMedia === "function" &&
   matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-function Shape({ shape }: { shape: FloorShape }) {
+/** Re-rendered only when its own props change, not on every fight update. */
+const Shape = memo(function Shape({ shape }: { shape: FloorShape }) {
   const material = useMemo(
     () =>
       new THREE.ShaderMaterial({
@@ -175,4 +176,4 @@ function Shape({ shape }: { shape: FloorShape }) {
       {mark ? <primitive object={mark} /> : null}
     </>
   );
-}
+});

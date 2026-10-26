@@ -141,6 +141,11 @@ export class TowerEngine {
     return this.pack.wire();
   }
 
+  /** Only the mobs that changed since the last call. */
+  wireMobsChanged(): TowerMob[] {
+    return this.pack.wireChanged();
+  }
+
   noteSpawn(uid: string, now: number): void {
     this.safeUntil.set(uid, now + TUNING.spawnSafeMs);
   }

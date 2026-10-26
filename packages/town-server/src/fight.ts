@@ -1072,11 +1072,14 @@ export class FightRuntime {
       const tower = this.tower;
       if (tower) {
         this.bossDirty = false;
-        const mobs = tower.wireMobs();
-        if (mobs.length) out.push({ to: "all", msg: { t: "mobs", mobs } });
+        const mobs = tower.wireMobsChanged();
+        if (mobs.length)
+          out.push({ to: "all", msg: { t: "mobs", mobs, at: now } });
       }
       if (boss?.minionsUp) {
-        out.push({ to: "all", msg: { t: "mobs", mobs: boss.wireMobs() } });
+        const mobs = boss.wireMobsChanged();
+        if (mobs.length)
+          out.push({ to: "all", msg: { t: "mobs", mobs, at: now } });
       }
       if (this.bossDirty) {
         this.bossDirty = false;
@@ -1096,6 +1099,7 @@ export class FightRuntime {
           to: "all",
           msg: {
             t: "bossAt",
+            at: now,
             x: round(at.x),
             z: round(at.z),
             yaw: round(at.yaw),

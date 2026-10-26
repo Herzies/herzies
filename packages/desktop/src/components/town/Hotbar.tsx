@@ -61,7 +61,7 @@ function SkillSlot({
       if (shade.current && secs.current) {
         if (!s) {
           shade.current.style.height = "0";
-          secs.current.textContent = "";
+          if (secs.current.textContent) secs.current.textContent = "";
         } else {
           const left = Math.max(
             0,
@@ -69,8 +69,10 @@ function SkillSlot({
           );
           const f = Math.min(1, left / SKILL_DEFS[s.id].cooldownMs);
           shade.current.style.height = `${f * 100}%`;
-          secs.current.textContent =
-            f > 0 ? String(Math.ceil(left / 1000)) : "";
+          // Text only when it changes (a write replaces the node).
+          const text = f > 0 ? String(Math.ceil(left / 1000)) : "";
+          if (secs.current.textContent !== text)
+            secs.current.textContent = text;
         }
       }
       raf = requestAnimationFrame(step);

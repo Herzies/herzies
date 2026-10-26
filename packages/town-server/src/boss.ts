@@ -354,6 +354,11 @@ export class BossEngine {
     return this.mobs?.wire() ?? [];
   }
 
+  /** Only the minions that changed since the last call. */
+  wireMobsChanged(): TowerMob[] {
+    return this.mobs?.wireChanged() ?? [];
+  }
+
   /** How many of its minions stand. */
   get minionsUp(): number {
     return this.mobs?.alive.length ?? 0;
