@@ -599,10 +599,9 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
     }
     case "closing":
       bossFight.closing = { why: m.why, at: clock.toLocal(m.closesAt) };
-      if (m.why === "wiped") {
-        notify("Everyone's down. The boss won this time.", { kind: "error" });
+      // The wipe has its own banner (moments.ts); the log keeps it.
+      if (m.why === "wiped")
         logActivity("The boss won: everyone in the raid was knocked out");
-      }
       emit();
       return;
     case "tally":
@@ -625,14 +624,13 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       const was = bossFight.raid;
       const { t: _t, ...r } = m;
       bossFight.raid = raidView(r, clock);
-      if (was?.stage === "lobby" && r.stage === "fight") {
-        notify(
-          bossFight.raid.you === "in"
-            ? "The cave is sealed. The fight is on!"
-            : "The fight began without you.",
-          { kind: bossFight.raid.you === "in" ? "success" : "info" },
-        );
-      }
+      // In the fight, its start is the FIGHT! banner (moments.ts).
+      if (
+        was?.stage === "lobby" &&
+        r.stage === "fight" &&
+        bossFight.raid.you !== "in"
+      )
+        notify("The fight began without you.", { kind: "info" });
       emit();
       return;
     }
