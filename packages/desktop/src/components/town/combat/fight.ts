@@ -666,8 +666,15 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
         logActivity("Brought a fallen herzie back to its feet");
       }
       if (m.id === clock.you()) {
-        notify("A Bard played you back to your feet!", { kind: "success" });
-        logActivity("Resurrected by a Bard");
+        if (m.by < 0) {
+          // The boss fell: up again, to get to the loot.
+          notify("The boss fell! You're back on your feet: grab your loot.", {
+            kind: "success",
+          });
+        } else {
+          notify("A Bard played you back to your feet!", { kind: "success" });
+          logActivity("Resurrected by a Bard");
+        }
       }
       // A burst of light where they stand back up, for everyone.
       {

@@ -711,3 +711,33 @@ describe("production pass: restarts, absences and the lock", () => {
     expect(f.rejoinAt("b")).toBeNull();
   });
 });
+
+describe("when the boss falls", () => {
+  it("everyone still in and down gets up, to reach their loot", () => {
+    const { f } = locked([{ uid: "a" }, { uid: "b" }, { uid: "c" }]);
+    for (const uid of ["b", "c"]) {
+      const p = f.player(uid) as { down: boolean; hp: number };
+      p.down = true;
+      p.hp = 0;
+    }
+    // c gave up: out, and stays down.
+    f.forfeit("c", STARTS + 50);
+    const boss = f.engine as BossEngine;
+    boss.setHealth(1, boss.maxHp);
+    f.onState("a", 0, TUNING.boss.z + TUNING.boss.radius + 1, STARTS + 100);
+    const out = [];
+    for (let i = 0; i < 10 && !f.closeWhy; i++) {
+      f.cast("a", Math.PI, 0, STARTS + 100 + i * 600);
+      out.push(...f.step(STARTS + 100 + i * 600));
+    }
+    expect(f.closeWhy).toBe("victory");
+    expect(f.player("b")?.down).toBe(false);
+    expect(f.player("b")?.hp).toBeGreaterThan(0);
+    expect(f.player("c")?.down).toBe(true);
+    expect(of(out, "revived")).toMatchObject([{ id: 2, by: -1 }]);
+    // Told to the database like a resurrect.
+    expect(f.report(STARTS + 7_000, true)?.revived?.rows).toMatchObject([
+      { uid: "b" },
+    ]);
+  });
+});

@@ -85,6 +85,8 @@ export const REPORT_EVERY_MS = 2_000;
 /** After the boss falls, how long the room stays open for a victory lap
  * and to pick up the loot. */
 export const VICTORY_LINGER_MS = 45_000;
+/** The share of their health the downed get back when the boss falls. */
+export const VICTORY_RISE_SHARE = 0.3;
 /** After the event ends with the boss alive, how long until the doors close. */
 export const ESCAPE_LINGER_MS = 15_000;
 /** After a wipe, how long until the doors close. */
@@ -1251,6 +1253,31 @@ export class FightRuntime {
     }
   }
 
+  /** Everyone in the fight who's down stands up with a share of their
+   * health, told to the database like a resurrect. `by` -1: nobody's
+   * doing (the boss fell). */
+  private riseAll(now: number): Outbound[] {
+    const out: Outbound[] = [];
+    for (const p of this.players.values()) {
+      if (!p.down || !this.fighting(p.uid)) continue;
+      const hp = Math.max(1, Math.round(p.maxHp * VICTORY_RISE_SHARE));
+      p.down = false;
+      p.hp = hp;
+      this.downAcked.delete(p.uid);
+      this.healed.delete(p.uid);
+      this.revivedQueue = [
+        ...this.revivedQueue.filter((r) => r.uid !== p.uid),
+        { uid: p.uid, hp },
+      ];
+      out.push(
+        { to: "all", msg: { t: "revived", id: p.id, by: -1 } },
+        { to: "all", msg: { t: "hp", id: p.id, hp, maxHp: p.maxHp } },
+      );
+    }
+    if (out.length) this.reportNow = true;
+    return out;
+  }
+
   /** `bard` brings `target` back to its feet. */
   private revive(
     bard: FightPlayer,
@@ -1425,6 +1452,9 @@ export class FightRuntime {
         this.wipePending = this.eventId !== DEV_EVENT;
         this.speak("wipe", now, out, true);
       }
+      // It fell: whoever's still in and down gets up, to walk to their
+      // loot (nobody can be played back up once the fight's over).
+      if (why === "victory") out.push(...this.riseAll(now));
       if (this.lockedAt !== null && this.roster && this.eventId !== DEV_EVENT)
         this.logPending = {
           event: this.eventId,

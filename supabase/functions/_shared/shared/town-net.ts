@@ -757,6 +757,7 @@ export type ServerMessage =
    * (`target` null). */
   | { t: "channel"; by: number; target: number | null; until: number }
   /** A downed herzie is back on its feet, played up by `by`. */
+  /** `by`: the Bard's entity id, or -1 when the boss's fall did it. */
   | { t: "revived"; id: number; by: number }
   /** You're out of the fight: you left it, or were gone too long. */
   | { t: "out" }
