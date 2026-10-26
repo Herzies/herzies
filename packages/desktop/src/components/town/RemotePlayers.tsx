@@ -23,10 +23,11 @@ import {
   nextHand as nextFreeHand,
 } from "./combat/discs";
 import { DUMMY, hitDummy } from "./combat/dummy";
-import { bossFight } from "./combat/fight";
+import { bossFight, bossNow } from "./combat/fight";
 import { entityAt } from "./combat/skills";
 import { slashField } from "./combat/slashes";
 import { assistTarget, type Vec3, waveField } from "./combat/waves";
+import { applyDowned, entityDown } from "./downed";
 import { HeadBubble } from "./HeadBubble";
 import { groundY, type TownMap } from "./map";
 import { NAME_SHADOW, nameOpacity } from "./nameFade";
@@ -120,6 +121,8 @@ function RemoteHerzie({
   const bubbleBox = useRef<HTMLDivElement>(null);
   const hpBox = useRef<HTMLDivElement>(null);
   const hpFill = useRef<HTMLDivElement>(null);
+  const downMark = useRef<HTMLDivElement>(null);
+  const downed = useRef(0);
   const hand = useMemo(() => new Vector3(), []);
 
   useFrame((_, dt) => {
@@ -188,8 +191,9 @@ function RemoteHerzie({
           ? [{ d: null, radius: BOSS_STAND.radius }]
           : []),
       ];
+      const boss = bossNow();
       for (const { d, radius } of targets) {
-        const at = d ?? BOSS_STAND;
+        const at = d ?? boss;
         if (!meleeReaches(from, s.heading, { x: at.x, z: at.z, radius }))
           continue;
         const dx = at.x - s.x;
@@ -213,6 +217,11 @@ function RemoteHerzie({
         target: assistTarget(from, dir, liveDummies),
       });
     }
+    // Knocked out (in the cave, or anywhere outside a fight): lying where
+    // it fell, with a mark a Bard can spot from across the room.
+    const down = entityDown(remote.id) || remote.down;
+    downed.current = applyDowned(herzie, down, downed.current, dt);
+    if (downMark.current) downMark.current.style.display = down ? "" : "none";
     // A thrown disc isn't in the hand.
     herzie.setHeldHidden("held-l", discField.isOut(herzie, "held-l"));
     herzie.setHeldHidden("held-r", discField.isOut(herzie, "held-r"));
@@ -265,6 +274,15 @@ function RemoteHerzie({
         <Html zIndexRange={[19, 0]}>
           {/* Stacked up from the anchor: the bubble over the name. */}
           <div className="flex -translate-x-1/2 -translate-y-full flex-col items-center">
+            <div
+              ref={downMark}
+              role="img"
+              aria-label="Knocked out"
+              className="mb-0.5 rounded-full bg-black/55 px-1 text-[13px] leading-none text-[#ffd84a]"
+              style={{ display: "none", textShadow: NAME_SHADOW }}
+            >
+              ✚
+            </div>
             <div ref={bubbleBox}>
               {bubble ? <HeadBubble key={bubble.key} bubble={bubble} /> : null}
             </div>

@@ -27,7 +27,7 @@ import {
 } from "./PlayerBars";
 import { type EventCard, formatIn, isDown } from "./TownScene";
 import { TownVitals } from "./TownVitals";
-import { BossHud } from "./town/BossHud";
+import { BossHud, MusicBonus } from "./town/BossHud";
 import { BossResults } from "./town/BossResults";
 import { setCave } from "./town/cave";
 import { useChatBubbles } from "./town/chatBubbles";
@@ -43,6 +43,7 @@ import { markMet } from "./town/met";
 import { useTownNet, useTownNetVersion } from "./town/net/townNet";
 import { spotsOf, type TownSpot, townLive, useTownMap } from "./town/runtime";
 import { SkillHud } from "./town/SkillHud";
+import { useTuneSender } from "./town/tune";
 
 // three.js, Rapier's WASM and friends: loaded the first time someone opens
 // the Town, not at app start.
@@ -127,6 +128,8 @@ export function TownWorld({
   useEffect(() => {
     townLive.music = musicPlaying;
   }, [musicPlaying]);
+  // In the cave, music is a weapon: tell the room whether it's playing.
+  useTuneSender(!!musicPlaying);
   // The cave's loot writes to the log like any other pickup.
   useEffect(() => onLootLog((message) => onLog?.(message)), [onLog]);
   const [near, setNear] = useState<TownSpot | null>(null);
@@ -343,6 +346,7 @@ export function TownWorld({
                 tint={cn(PLAYER_CARD_TOWN, "backdrop-blur-md")}
                 showTags={false}
               />
+              <MusicBonus />
             </div>
             <div
               className={cn(

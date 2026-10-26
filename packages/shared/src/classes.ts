@@ -2,8 +2,8 @@
  * Classes: the audio holy trinity a herzie picks, once, on reaching stage 2.
  *
  * Mirrored in SQL by 00106_classes.sql — the class check on herzies.class
- * and items.required_class, and choose_class's starter skill per class. A
- * new class needs both.
+ * and items.required_class — and by choose_class's skills per class
+ * (00122_boss_revamp.sql). A new class needs both.
  */
 import type { SkillId } from "./skills.js";
 
@@ -25,6 +25,9 @@ export interface ClassDef {
   equipment: string[];
   /** The skill every herzie of this class starts with. */
   starterSkill: SkillId;
+  /** Every skill the class has, the starter first (hotbar order). Mirrored
+   * by choose_class (00122_boss_revamp.sql). */
+  skills: readonly SkillId[];
   /** Its basic attack. */
   attack: AttackStyle;
 }
@@ -40,6 +43,7 @@ export const CLASS_DEFS: Record<HerzieClass, ClassDef> = {
     role: "support",
     equipment: ["lute"],
     starterSkill: "soothing-drones",
+    skills: ["soothing-drones", "resurrect"],
     attack: "wave",
   },
   record_slinger: {
@@ -49,6 +53,7 @@ export const CLASS_DEFS: Record<HerzieClass, ClassDef> = {
     role: "dps",
     equipment: ["compact-discs"],
     starterSkill: "backspin",
+    skills: ["backspin"],
     attack: "disc",
   },
   percussionist: {
@@ -58,6 +63,7 @@ export const CLASS_DEFS: Record<HerzieClass, ClassDef> = {
     role: "tank",
     equipment: ["worn-stick", "old-cymbal"],
     starterSkill: "cymbrella",
+    skills: ["cymbrella", "taunt"],
     attack: "melee",
   },
 };

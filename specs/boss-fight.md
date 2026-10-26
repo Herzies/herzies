@@ -1,6 +1,70 @@
 # Boss Fight
 
-> **Update — the boss is fought live, in a cave (migrations 00101 and 00102).**
+> **Update — the raid (migration 00122, branch feat/boss-revamp).** The cave fight
+> is now a short, locked raid. This block is the current design; the cave-era notes
+> below it, and the shared-HP history below those, are kept for context.
+>
+> **Stages.**
+> - *Lobby:* the cave opens `BOSS_LOBBY_MS` (15 min) before the event's start.
+>   The boss sleeps: it can't be hurt, doesn't attack and says nothing. Anyone
+>   on their feet may come in; once the start passes, nobody new does.
+> - *Lock:* at the start, the room locks the roster to whoever stands in it
+>   (`lock_boss_fight`, idempotent). The boss's health becomes
+>   `hpPerPlayer × n^0.9` (`bossMaxHp`, default 130k per herzie; it grows a little
+>   slower than the roster, as in WoW's flex raids). With nobody there, no fight.
+>   After the lock only roster members get tickets. The way out of the cave
+>   disappears for them.
+> - *Fight:* knocked out, you lie where you fell. A Bard's Resurrect (a 3 s
+>   channel, cancelled by moving) brings you back with a share of your health. It
+>   spends one of the raid's revives: `ceil(n/4)` at the lock, plus one every
+>   3 min, shown on the HUD (WoW's combat-res pool). Or you leave the fight
+>   (respawn in town): you're out for good, with no reward. Being gone for more
+>   than 2 min also puts you out. When no one in the roster stands, it's a wipe:
+>   the boss wins and nobody is paid.
+> - *Over:* a kill pays everyone still in (standing or down) alike: the reward
+>   plus ten loot rolls. The statue goes to the top contributor of a fight that
+>   was won, among those still in. An escape or a wipe pays nothing.
+>
+> **The boss.**
+> - It walks (1.5 m/s) toward its focus inside a 4.5 m circle around (0, −2),
+>   never to the walls or the spawn. It stops to swing. Its position travels on
+>   the wire and the client interpolates it.
+> - Its focus is a taunter if there is one, else whoever it hates most, else the
+>   nearest herzie. Its buster (70, can't be dodged) and the first slam of each
+>   volley go at the focus.
+> - Slam counts use weighted rounding: no breakpoints.
+> - At 50% and 25% health it calls Thornlings (the Tower's mobs, `MobPack`), about
+>   one per two herzies, at 75% of the raid's level. Damage to them counts toward
+>   contribution (`boss_damage.adds`) and never touches the boss's health. While
+>   they're up, it swings a little less.
+> - Soft enrage at 10 min: pace and damage +10% every 30 s. Hard enrage at
+>   15 min: an unavoidable pulse that ends it.
+>
+> **Music.**
+> - The boss hates music, any genre, and keeps saying so in a speech bubble.
+> - The desktop sends `tune` (`on`: whether music is playing), debounced.
+> - After 3 s of music a classed herzie is in tune; the bonus lingers 8 s after
+>   it stops. Percussionists take 15% less damage (under the 75%
+>   clamp), Bards heal ×1.3, Record Slingers hit ×1.25.
+> - In tune shows as a gold aura on the beat, rising notes, and a lit HUD chip.
+>
+> **Classes.**
+> - Bards: Resurrect.
+> - Percussionists: Taunt. It lasts 60 s with a 60 s cooldown, and the last taunt
+>   wins. It ends if its holder falls or leaves. A red tether shows who the boss
+>   is after.
+> - Every class's skills are on the hotbar (`skill:1`, `skill:2`).
+>
+> **Code.**
+> - Rules: `shared/src/boss-fight.ts`, `boss-lines.ts`.
+> - Server: `town-server/src/{boss,fight,mobs,room}.ts`.
+> - Tests: `raid.test.ts`, and `raid-sim.test.ts` (class bots; perfect play wins in
+>   about 5.5 min).
+> - Edge functions: `town-vitals` (lock → outs → revives → damage → wipe → log),
+>   `town-ticket` (lobby and roster).
+> - Fight numbers for tuning: `boss_fight_log`.
+
+> **Earlier update — the boss is fought live, in a cave (migrations 00101 and 00102).**
 > Everything below describes the first version: a passive fight where listening to
 > the boss's hated genres drained a shared HP pool. That damage source is gone.
 > What is *still* true below: the shared HP row and its locked RPC
@@ -24,8 +88,8 @@
 >   at least a second before it lands (circles on players, a ring with a safe
 >   middle), capped in number and damage so it can be read and dodged; hits are
 >   judged against where the player stood a moment ago as well as now.
-> - `hatedGenres` is no longer used by anything that plays; it remains in event
->   configs. `sync_context.active_boss` is no longer read.
+> - `hatedGenres` is no longer used by anything (the admin form no longer asks
+>   for it); it remains in older event configs. `sync_context.active_boss` is no longer read.
 >
 > The rest of this document is kept for the history of the shared-HP design.
 

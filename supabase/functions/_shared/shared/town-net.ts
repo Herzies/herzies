@@ -21,7 +21,7 @@ import type { Equipped } from "./items.ts";
 /** Bumped on any incompatible change; the server turns away other versions
  * with {@link TOWN_CLOSE.outdated} so old desktop betas say "update" instead of
  * misreading frames. */
-export const TOWN_PROTOCOL = 2;
+export const TOWN_PROTOCOL = 3;
 
 /** Server snapshot rate. */
 export const TOWN_TICK_HZ = 15;
@@ -120,7 +120,7 @@ export type TownTicketPayload = {
    * (unix seconds), and the boss's health as of the ticket (the room starts
    * a fight from it if it has none running). The boss room turns away
    * tickets without it. */
-  boss?: { event: string; until: number; hp: number; maxHp: number };
+  boss?: BossClaim;
   /** Set only while a Tower event is on: the event, when it ends (unix
    * seconds), and the floor this herzie starts on (one past their best).
    * The Tower turns away tickets without it. */
@@ -132,6 +132,27 @@ export type TownTicketPayload = {
   /** Its class skills and their levels, `[skillId, level]`, so the server
    * can judge a skill's strength without a database. */
   sk?: [string, number][];
+};
+
+/** The boss room's half of a ticket. */
+export type BossClaim = {
+  event: string;
+  /** When the event ends (unix seconds): the boss escapes. */
+  until: number;
+  /** The boss's health in the database as of the ticket. Before the lock
+   * it's a placeholder; the lock sets it from the roster. */
+  hp: number;
+  maxHp: number;
+  /** When the lobby locks into a fight (unix seconds). Absent from older
+   * ticket servers: no lobby, the fight is on. */
+  starts?: number;
+  /** Once locked: when, the herzies still in, and the revives spent, so a
+   * room that restarted mid-fight picks it up where it was. */
+  locked?: { at: number; roster: string[]; revives: number };
+  /** Health per herzie in the roster; default BOSS_HP_PER_PLAYER. */
+  hpPerPlayer?: number;
+  /** Its minions' strength, as a Tower floor; default MINION_FLOOR. */
+  minionFloor?: number;
 };
 
 /** How long a ticket lasts; the client renews well before this. */
@@ -497,6 +518,9 @@ export type TownPlayer = {
   id: number;
   name: string;
   look: TownLook;
+  /** Knocked out, outside a fight (in a fight its health says so): a Bard
+   * can play it back up. */
+  down?: true;
 };
 
 export type ClientMessage =
@@ -513,7 +537,17 @@ export type ClientMessage =
   | { t: "eat"; item: string; seq: number }
   /** In the Tower, on a cleared floor: on to the next one. The room puts
    * you back at the map's spawn (the west end). */
-  | { t: "next" };
+  | { t: "next" }
+  /** In the boss room: whether you're playing music (the boss hates it,
+   * any of it). Sent when it changes. */
+  | { t: "tune"; on: boolean }
+  /** Knocked out in a raid, and giving up: out of the fight for good (no
+   * reward). The app then respawns you in town. */
+  | { t: "forfeit" };
+
+/** Why a skill was refused, when the player can do something about it:
+ * nobody downed near enough, no revives left, or not until the fight. */
+export type SkillRefusal = "no-target" | "not-yet";
 
 /** Why the room refused to let you eat: knocked out, already at full HP,
  * too soon after the last one, none left in the bank, not something you
@@ -535,6 +569,10 @@ export type BossTelegraph = {
   /** A buster is aimed at one herzie, `target`, and lands on it wherever it
    * goes: what a tank is for. */
   kind: "circle" | "ring" | "buster";
+  /** The enrage's pulse: lands on everyone, whatever their Def (1). */
+  lethal?: 1;
+  /** A minion's (or a Tower mob's) swing, not the boss's: its id. */
+  mob?: number;
   x: number;
   z: number;
   r: number;
@@ -552,6 +590,32 @@ export type TownBuff = {
   buff: string;
   value: number;
   until: number;
+  /** An in-tune bonus: what it does ("def", "heal" or "damage"). */
+  kind?: string;
+};
+
+/** Where the raid stands, as the boss room tells everyone. Times are
+ * server clock (ms). */
+export type RaidState = {
+  stage: "lobby" | "fight" | "over";
+  /** When the lobby locks into a fight. */
+  startsAt: number;
+  /** When it locked (in a fight). */
+  lockedAt?: number;
+  /** Herzies in the fight (standing or down), and how many stand. In the
+   * lobby: how many are waiting. */
+  roster: number;
+  standing: number;
+  /** Who the boss is after (an entity id), if anyone. */
+  focus: number | null;
+  /** Whether that's because of a taunt. */
+  taunted: boolean;
+  /** When it starts to quicken, and when it ends the fight. */
+  enrageAt?: number;
+  hardAt?: number;
+  /** Whether you're in the fight (sent per player): false once you're out,
+   * or if you came after the lock. */
+  you?: "in" | "out" | "watching";
 };
 
 /** What a newcomer to the boss room is told on arrival. */
@@ -570,6 +634,14 @@ export type FightState = {
   now: number;
   /** In the Tower: the floor, as it stands. */
   tower?: TowerFloor;
+  /** In the boss room: the raid, where the boss stands, what it's saying,
+   * and any resurrect being played. */
+  raid?: RaidState;
+  bossAt?: { x: number; z: number; yaw: number };
+  say?: { text: string; until: number };
+  channels?: { by: number; target: number; until: number }[];
+  /** The boss's minions standing, if it has called any. */
+  mobs?: TowerMob[];
 };
 
 /** A Tower mob as the wire carries it: where it is and which way it faces,
@@ -629,9 +701,10 @@ export type ServerMessage =
   /** Your cast hit the boss — or, in the Tower, mob `mob` — for this much
    * (sent to you alone). */
   | { t: "hit"; damage: number; crit: boolean; mob?: number }
-  /** The Tower's mobs, where they are now (every tick while any are up). */
+  /** The Tower's mobs (or the boss's minions), where they are now (every
+   * tick while any are up). */
   | { t: "mobs"; mobs: TowerMob[] }
-  /** A Tower mob fell. */
+  /** A Tower mob (or a minion) fell. */
   | { t: "mobDown"; mob: number; x: number; z: number }
   /** A Tower floor began, or was just cleared. */
   | ({ t: "floor" } & TowerFloor)
@@ -657,8 +730,29 @@ export type ServerMessage =
       top: BossPlace[];
       you: BossPlace | null;
     }
-  /** The room closes at `closesAt` (server ms): the boss left or won. */
-  | { t: "closing"; why: "victory" | "escaped" | "sealed"; closesAt: number }
+  /** The room closes at `closesAt` (server ms): the boss fell, got away,
+   * or beat everyone (a wipe). */
+  | {
+      t: "closing";
+      why: "victory" | "escaped" | "sealed" | "wiped";
+      closesAt: number;
+    }
+  /** Where the boss stands and faces, while it walks (every tick it
+   * moves). */
+  | { t: "bossAt"; x: number; z: number; yaw: number }
+  /** The boss says something, shown over its head until `until`. */
+  | { t: "say"; text: string; until: number }
+  /** The raid changed: its stage, roster, revives, the boss's focus. */
+  | ({ t: "raid" } & RaidState)
+  /** A buff came off a herzie before its time. */
+  | { t: "buffOff"; id: number; buff: string }
+  /** A Bard began a resurrect on `target` (done at `until`), or it stopped
+   * (`target` null). */
+  | { t: "channel"; by: number; target: number | null; until: number }
+  /** A downed herzie is back on its feet, played up by `by`. */
+  | { t: "revived"; id: number; by: number }
+  /** You're out of the fight: you left it, or were gone too long. */
+  | { t: "out" }
   | { t: "join"; player: TownPlayer }
   | { t: "leave"; id: number }
   | { t: "look"; player: TownPlayer }
@@ -677,8 +771,15 @@ export type ServerMessage =
   /** A buff went on a herzie (or was refreshed). */
   | ({ t: "buff" } & TownBuff)
   /** Your skill was refused: it's ready again at `readyAt` (server clock),
-   * or 0 when it can't be used here at all. */
-  | { t: "skillDenied"; skill: string; seq: number; readyAt: number }
+   * or 0 when it can't be used here at all. `reason` says why, when it's
+   * something the player can act on. */
+  | {
+      t: "skillDenied";
+      skill: string;
+      seq: number;
+      readyAt: number;
+      reason?: SkillRefusal;
+    }
   /** One of your skills levelled up (sent to you alone). */
   | { t: "skillUp"; skill: string; level: number }
   /** The answer to your `eat` (sent to you alone). The HP itself arrives as

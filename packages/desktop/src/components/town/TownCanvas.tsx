@@ -200,6 +200,8 @@ export default function TownCanvas(props: TownCanvasProps) {
             {map.id === "bossroom" && (
               <>
                 <Boss />
+                {/* Its minions, once it calls them. */}
+                <Mobs />
                 <Telegraphs />
               </>
             )}

@@ -1,11 +1,11 @@
 import { useEffect, useRef } from "react";
-import { queueMySkill } from "./combat/skills";
+import { queueSkill } from "./combat/skills";
 import { eat } from "./eat";
 import {
   HOTBAR_KEYS,
   type HotbarKey,
   hotbarItem,
-  SKILL_SLOT,
+  skillOfSlot,
 } from "./hotbarSlots";
 
 /** What the player is asking for this frame. Read by the game loop; written
@@ -111,14 +111,15 @@ export function useTownInput(
         interact.current();
         return;
       }
-      // 1-4: what's on that hotbar slot — your class skill, or a
+      // 1-4: what's on that hotbar slot — one of your class skills, or a
       // consumable to eat.
       const slot = e.code.startsWith("Digit") ? e.code.slice(5) : "";
       if (HOTBAR_KEYS.includes(slot as HotbarKey)) {
         e.preventDefault();
         const held = hotbarItem(slot as HotbarKey);
         if (!held || e.repeat) return;
-        if (held === SKILL_SLOT) queueMySkill();
+        const skill = skillOfSlot(held);
+        if (skill !== null) queueSkill(skill);
         else void eat(held);
         return;
       }

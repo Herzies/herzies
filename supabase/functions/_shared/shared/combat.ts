@@ -111,12 +111,23 @@ export const BUMP_DAMAGE = 0.5;
 /** How many points of damage one HP healed or blocked is worth. */
 export const CONTRIBUTION_SUPPORT_WEIGHT = 10;
 
-/** What a herzie did for a fight: damage dealt, HP healed, HP blocked. */
-export type Contribution = { damage: number; healing: number; blocked: number };
+/** What a herzie did for a fight: damage dealt to the boss, HP healed, HP
+ * blocked, and damage dealt to its minions (`adds`: counted like boss damage
+ * for the ranking, but never taken off the boss's health). */
+export type Contribution = {
+  damage: number;
+  healing: number;
+  blocked: number;
+  adds?: number;
+};
 
 /** A herzie's contribution score. */
 export function contributionOf(c: Contribution): number {
-  return c.damage + CONTRIBUTION_SUPPORT_WEIGHT * (c.healing + c.blocked);
+  return (
+    c.damage +
+    (c.adds ?? 0) +
+    CONTRIBUTION_SUPPORT_WEIGHT * (c.healing + c.blocked)
+  );
 }
 
 /** A melee hit as a share of a wave's: a stick (with a class) or a bump
@@ -188,8 +199,10 @@ export function waveReaches(
   return angle <= WAVE_ASSIST_ANGLE ? dist : null;
 }
 
-/** The boss in its cave: where it stands and how big it is, for the Town
- * server's hit test and the desktop's drawing and collider alike. */
+/** The boss in its cave: where it rests (and stands in the lobby) and how
+ * big it is, for the Town server's hit test and the desktop's drawing and
+ * collider alike. In a fight it walks (see BOSS_WANDER in boss-fight.ts), so
+ * where it is comes from the server; these are its home and its size. */
 export const BOSS_STAND = {
   x: 0,
   z: -4,
@@ -201,7 +214,8 @@ export const BOSS_STAND = {
 } as const;
 
 /**
- * How far along `dir` from `from` a cast reaches the boss, if it does: at
+ * How far along `dir` from `from` a cast reaches the boss standing at `at`
+ * (its home by default), if it does: at
  * its chest by the wave rule (aim assist and all), or anywhere on its body,
  * a standing cylinder as tall as it is. Up close the crosshair sits on the
  * near side of a big body, low or off to one side, well off the line to its
@@ -212,8 +226,9 @@ export function bossReaches(
   from: Readonly<Vec3>,
   dir: Readonly<Vec3>,
   range: number = WAVE_RANGE,
+  at: { x: number; z: number } = BOSS_STAND,
 ): number | null {
-  return bodyHitAt(from, dir, BOSS_STAND, range);
+  return bodyHitAt(from, dir, { ...BOSS_STAND, x: at.x, z: at.z }, range);
 }
 
 /** A standing body a cast can hit: where it stands, its radius, the height

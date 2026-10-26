@@ -298,16 +298,15 @@ describe("settling", () => {
     });
     expect(paid).toBe(4);
 
-    // Everyone: the base reward and ten random things; the top three the
-    // top reward too. All on the ground, from this fight.
+    // Everyone alike (00122: no top tier): the base reward and ten random
+    // things. All on the ground, from this fight.
     const pool = new Set(bossLootWeights().map((w) => w.itemId));
     const rolled = new Set<string>();
-    for (const [i, p] of players.entries()) {
+    for (const p of players) {
       const drops = await dropsOf(boss, p.userId);
-      const top = i < 3;
-      expect(total(drops)).toBe(top ? 12 : 11);
+      expect(total(drops)).toBe(11);
       expect(drops[BASE_REWARD]).toBe(1);
-      expect(drops[TOP_REWARD] ?? 0).toBe(top ? 1 : 0);
+      expect(drops[TOP_REWARD] ?? 0).toBe(0);
       const random = Object.entries(drops).filter(
         ([id]) => id !== BASE_REWARD && id !== TOP_REWARD,
       );
@@ -328,7 +327,7 @@ describe("settling", () => {
       p_event_id: boss,
     });
     expect(again).toBe(0);
-    expect(total(await dropsOf(boss, players[0].userId))).toBe(12);
+    expect(total(await dropsOf(boss, players[0].userId))).toBe(11);
     expect((await bossState(boss)).settled).toBe(true);
   });
 
@@ -372,11 +371,11 @@ describe("settling", () => {
     });
     expect(paid).toBe(2);
 
-    // The two who missed out are now paid, at their correct rank.
-    expect(total(await dropsOf(boss, players[0].userId))).toBe(12);
-    expect((await dropsOf(boss, players[1].userId))[TOP_REWARD]).toBe(1);
+    // The two who missed out are now paid (everyone alike since 00122).
+    expect(total(await dropsOf(boss, players[0].userId))).toBe(11);
+    expect(total(await dropsOf(boss, players[1].userId))).toBe(11);
     // And the two already paid were not paid a second time.
-    expect(total(await dropsOf(boss, players[2].userId))).toBe(12);
+    expect(total(await dropsOf(boss, players[2].userId))).toBe(11);
     expect(total(await dropsOf(boss, players[3].userId))).toBe(11);
   });
 

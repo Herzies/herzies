@@ -15,6 +15,11 @@
  * The room also asks here to use up a consumable a fighter eats (00113's
  * eat_item, without touching HP: the room heals the fighter itself and
  * reports it like a skill's heal).
+ *
+ * A raid (00122) reports its lock, the herzies a Bard brought back, who's
+ * out, and a wipe. Those land first, in that order, so the boss's health is
+ * sized before the first damage and a revive lands before the health that
+ * follows it; every one is idempotent, so a retried report is safe.
  */
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
@@ -109,6 +114,82 @@ async function rollDrops(
   return out;
 }
 
+type RaidMessage = {
+  lock?: { event: string; uids: string[]; at: number; hpPerPlayer: number };
+  revived?: { event: string; batch: string; rows: { uid: string; hp: number }[] };
+  out?: { event: string; uids: string[] };
+  wipe?: { event: string };
+  boss?: { event: string };
+};
+
+/** The raid's lock, outs and revives (00122), in that order, and the
+ * database's word back: its lock, refused revives, everyone out. */
+async function applyRaid(
+  db: SupabaseClient,
+  msg: RaidMessage,
+): Promise<{
+  failed: boolean;
+  reply: {
+    lock?: unknown;
+    refused?: string[];
+    out?: string[];
+  } | null;
+}> {
+  const event = [msg.lock, msg.out, msg.revived, msg.wipe, msg.boss]
+    .map((m) => m?.event)
+    .find((e): e is string => typeof e === "string" && UUID.test(e));
+  if (!event) return { failed: false, reply: null };
+  let failed = false;
+  const reply: { lock?: unknown; refused?: string[]; out?: string[] } = {};
+  const uids = (list: unknown) =>
+    (Array.isArray(list) ? list : [])
+      .slice(0, MAX_BATCH)
+      .filter((u): u is string => typeof u === "string" && UUID.test(u));
+  if (msg.lock && msg.lock.event === event) {
+    try {
+      reply.lock = await rpc(db, "lock_boss_fight", {
+        p_event: event,
+        p_uids: uids(msg.lock.uids),
+        p_per_player: Number.isFinite(msg.lock.hpPerPlayer)
+          ? msg.lock.hpPerPlayer
+          : null,
+        p_at: Number.isFinite(msg.lock.at) ? Math.round(msg.lock.at) : null,
+      });
+    } catch {
+      failed = true;
+    }
+  }
+  if (msg.out && msg.out.event === event) {
+    try {
+      await rpc(db, "mark_boss_out", { p_event: event, p_uids: uids(msg.out.uids) });
+    } catch {
+      failed = true;
+    }
+  }
+  const rez = msg.revived;
+  if (rez && rez.event === event && typeof rez.batch === "string") {
+    const rows = (Array.isArray(rez.rows) ? rez.rows : [])
+      .slice(0, MAX_BATCH)
+      .filter((r) => UUID.test(r?.uid ?? "") && Number.isFinite(r.hp) && r.hp > 0);
+    try {
+      const res = (await rpc(db, "apply_boss_revive_batch", {
+        p_batch: rez.batch,
+        p_event: event,
+        p_rows: rows,
+      })) as { refused?: string[] } | null;
+      reply.refused = uids(res?.refused);
+    } catch {
+      failed = true;
+    }
+  }
+  try {
+    reply.out = uids(await rpc(db, "boss_out_json", { p_event: event }));
+  } catch {
+    // Only news: the room learns it on the next report.
+  }
+  return { failed, reply };
+}
+
 async function handleRoom(request: Request, body: string): Promise<Response> {
   const ts = Number(request.headers.get("x-vitals-ts"));
   const nonce = request.headers.get("x-vitals-nonce") ?? "";
@@ -130,9 +211,22 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
     boss?: {
       event: string;
       batch: string;
-      /** Damage, and the HP each healed or blocked (00111). */
-      damage: { uid: string; damage: number; healing?: number; blocked?: number }[];
+      /** Damage, the HP each healed or blocked (00111), and minion
+       * damage (00122). */
+      damage: {
+        uid: string;
+        damage: number;
+        healing?: number;
+        blocked?: number;
+        adds?: number;
+      }[];
     };
+    /** The raid (00122): the lock, revives, who's out, a wipe, the log. */
+    lock?: { event: string; uids: string[]; at: number; hpPerPlayer: number };
+    revived?: { event: string; batch: string; rows: { uid: string; hp: number }[] };
+    out?: { event: string; uids: string[] };
+    wipe?: { event: string };
+    log?: Record<string, unknown> & { event?: string };
     /** The fight is over: the cave's end screen, for these herzies. */
     results?: { event: string; uids: string[] };
     /** The Tower: a herzie's kills since the last batch, and the best
@@ -147,6 +241,9 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
     /** action "eat": who ate what. */
     uid?: string;
     item?: string;
+    /** action "revive": the health a Bard's resurrect brings `uid` back
+     * with (outside a raid). */
+    health?: unknown;
   };
   try {
     msg = JSON.parse(body);
@@ -174,6 +271,23 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
       return jsonResponse({ ok: false, reason: "failed" }, 500);
     }
   }
+  if (msg.action === "revive") {
+    // A Bard's resurrect outside a raid: only a herzie that's down comes
+    // back (null otherwise).
+    const health = Number(msg.health);
+    if (!UUID.test(msg.uid ?? "") || !Number.isFinite(health)) {
+      return jsonResponse({ error: "Bad revive" }, 400);
+    }
+    try {
+      const vitals = await rpc(db, "revive_herzie", {
+        p_user: msg.uid,
+        p_hp: health,
+      });
+      return jsonResponse({ ok: !!vitals, vitals: vitals ?? null });
+    } catch {
+      return jsonResponse({ ok: false }, 500);
+    }
+  }
   if (msg.action === "report") {
     const hp = (msg.hp ?? []).slice(0, MAX_BATCH).filter(
       (r) => UUID.test(r.uid) && Number.isFinite(r.hp),
@@ -187,10 +301,17 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
         ? (boss.damage ?? []).slice(0, MAX_BATCH).filter(
           (d) =>
             UUID.test(d.uid) &&
-            [d.damage, d.healing ?? 0, d.blocked ?? 0].every(Number.isFinite) &&
-            (d.damage > 0 || (d.healing ?? 0) > 0 || (d.blocked ?? 0) > 0),
+            [d.damage, d.healing ?? 0, d.blocked ?? 0, d.adds ?? 0].every(
+              Number.isFinite,
+            ) &&
+            (d.damage > 0 || (d.healing ?? 0) > 0 || (d.blocked ?? 0) > 0 ||
+              (d.adds ?? 0) > 0),
         )
         : [];
+    // The raid first: the lock (so the boss's health is sized before any
+    // damage), who's out (before damage, so a herzie out before the kill
+    // isn't paid), and revives (before the health that follows them).
+    const raid = await applyRaid(db, msg);
     const skills = msg.skills;
     const skillXp =
       skills && typeof skills.batch === "string"
@@ -283,11 +404,31 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
     // A failed HP write or boss batch is retried by the Town server, which
     // re-sends the same values (HP is absolute, a batch has an id), so ask
     // for that with an error status. Rest is additive and never retried.
+    // A wipe after the damage: the last hits still count on the board.
+    let wipeFailed = false;
+    if (msg.wipe && UUID.test(msg.wipe.event)) {
+      try {
+        await rpc(db, "wipe_boss_fight", { p_event: msg.wipe.event });
+      } catch {
+        wipeFailed = true;
+      }
+    }
     const failed = h.failed > 0 || (b !== null && !b.ok) ||
-      (s !== null && !s.ok) || towerFailed;
+      (s !== null && !s.ok) || towerFailed || raid.failed || wipeFailed;
     // The fight is over: who placed where (00110). Only once this report's
     // damage has landed, so the last hits count; and a failed lookup never
     // fails the report (the room would re-send it for nothing).
+    // How the fight went, once (a retry finds it there and adds nothing).
+    if (!failed && msg.log && UUID.test(String(msg.log.event ?? ""))) {
+      try {
+        await rpc(db, "log_boss_fight", {
+          p_event: msg.log.event,
+          p_log: msg.log,
+        });
+      } catch {
+        // Only for tuning: never worth failing a report over.
+      }
+    }
     let results: unknown = null;
     const want = msg.results;
     if (!failed && want && UUID.test(want.event)) {
@@ -315,6 +456,7 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
         skills: s?.res ?? null,
         results,
         tower,
+        raid: raid.reply,
       },
       failed ? 502 : 200,
     );

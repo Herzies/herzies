@@ -6,7 +6,8 @@
 #   scripts/local.sh up                 functions + web (:3101) + Town (:8797), Ctrl-C stops all
 #   scripts/local.sh desktop            the desktop app against them (quit the installed beta first)
 #   scripts/local.sh herzie EMAIL LVL   set a local herzie's level (xp and stage to match)
-#   scripts/local.sh boss [HP]          open a boss fight in the cave for an hour
+#   scripts/local.sh boss [HP] [LOBBY]  open the cave's lobby now; the fight locks in LOBBY
+#                                       minutes (default 3) with HP per herzie (default 20000)
 #   scripts/local.sh tower [HOURS]      open the Tower (its portal in Town) for a few hours
 #   scripts/local.sh reset              wipe the local database (all migrations re-applied)
 #
@@ -121,8 +122,17 @@ SQL
 }
 
 cmd_boss() {
-  local hp="${1:-20000}"
-  psql_local -c "select public.spawn_boss_fight(array['electronic'], $hp, now() + interval '1 hour', 'Local Boss');"
+  local hp="${1:-20000}" lobby="${2:-3}"
+  # The lobby is open from now; the roster locks at starts_at. Any earlier
+  # local boss is cleared first (only one may run at a time).
+  psql_local <<SQL
+delete from public.events where type = 'boss_fight';
+select public.create_boss_event(
+  'Local Boss', 'Listen to what it hates.',
+  now() + interval '$lobby minutes', now() + interval '$lobby minutes' + interval '1 hour',
+  jsonb_build_object('hpPerPlayer', $hp, 'rewardItemId', 'cd')
+) as event, now() + interval '$lobby minutes' as locks_at;
+SQL
 }
 
 cmd_tower() {

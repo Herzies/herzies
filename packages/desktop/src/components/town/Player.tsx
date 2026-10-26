@@ -16,6 +16,7 @@ import { SEAT_Y } from "./Benches";
 import type { ChatBubble } from "./chatBubbles";
 import { discField } from "./combat/discs";
 import { combat } from "./combat/state";
+import { applyDowned, downInRaid } from "./downed";
 import { HeadBubble } from "./HeadBubble";
 import type { TownInput } from "./input";
 import { groundY, type TownMap } from "./map";
@@ -181,8 +182,9 @@ export function Player({
       rt.playerSpeed = townLive.speed = 0;
       return;
     }
-    // Going through a portal: carried, not walking.
-    if (townLive.frozen) {
+    // Going through a portal: carried, not walking. Knocked out in a raid:
+    // lying where it fell, for a Bard to find.
+    if (townLive.frozen || downInRaid()) {
       m.vx = m.vz = 0;
       rt.playerSpeed = townLive.speed = 0;
       return;
@@ -245,6 +247,7 @@ export function Player({
   });
 
   const stillFor = useRef(0);
+  const downed = useRef(0);
   // Herzies grow legs at stage 3 (see HerzieModel).
   rt.playerLegs = look.stage >= 3;
   useFrame((_, dt) => {
@@ -271,6 +274,7 @@ export function Player({
       discField.isOut(herzie, "held-l") ||
       discField.isOut(herzie, "held-r");
     herzie.update(dt, rt.playerSpeed);
+    downed.current = applyDowned(herzie, downInRaid(), downed.current, dt);
     townLive.jumps = herzie.jumps;
     // Through a portal: spun down into the disc, and back up out of the
     // far one.

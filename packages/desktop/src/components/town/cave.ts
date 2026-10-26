@@ -1,4 +1,4 @@
-import { LOW_HP_FRACTION, liveHp } from "@herzies/shared";
+import { BOSS_LOBBY_MS, LOW_HP_FRACTION, liveHp } from "@herzies/shared";
 import { useSyncExternalStore } from "react";
 import { notify } from "../../lib/notices";
 import { getVitals } from "./vitals";
@@ -12,7 +12,8 @@ import { getVitals } from "./vitals";
 export type CaveState =
   /** The boss is up until `endsAt` (ms since the epoch). */
   | { kind: "open"; endsAt: number }
-  /** The boss arrives at `startsAt`. */
+  /** The fight locks at `startsAt`; the cave opens as a lobby
+   * BOSS_LOBBY_MS before that (see {@link caveOpen}). */
   | { kind: "soon"; startsAt: number }
   /** The boss has fallen. */
   | { kind: "defeated" }
@@ -41,6 +42,22 @@ export function getCave(): CaveState {
   return state;
 }
 
+/** Whether the cave lets you in at `now`: while the boss is up, and for
+ * its lobby before the fight. */
+export function caveOpen(now = Date.now()): boolean {
+  return (
+    state.kind === "open" ||
+    (state.kind === "soon" && now >= state.startsAt - BOSS_LOBBY_MS)
+  );
+}
+
+/** Whether the cave is a lobby at `now` (open, the fight not yet on). */
+export function caveLobby(c: CaveState = state, now = Date.now()): boolean {
+  return (
+    c.kind === "soon" && now >= c.startsAt - BOSS_LOBBY_MS && now < c.startsAt
+  );
+}
+
 export function useCave(): CaveState {
   return useSyncExternalStore(
     (cb) => {
@@ -65,7 +82,7 @@ export function clock(ms: number): string {
 export function sealedMessage(c: CaveState, now = Date.now()): string {
   switch (c.kind) {
     case "soon":
-      return `The lair is sealed. Something stirs in ${clock(c.startsAt - now)}.`;
+      return `The lair is sealed. It opens in ${clock(c.startsAt - BOSS_LOBBY_MS - now)}.`;
     case "defeated":
       return "The lair is quiet. The boss has fallen.";
     case "sealed":
@@ -87,7 +104,7 @@ let warnedAt = Number.NEGATIVE_INFINITY;
  * and a second within a few seconds goes in.
  */
 export function tryEnterCave(now = Date.now()): boolean {
-  if (state.kind !== "open") {
+  if (!caveOpen(now)) {
     notify(sealedMessage(state, now));
     return false;
   }

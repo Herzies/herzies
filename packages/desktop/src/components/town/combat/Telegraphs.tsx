@@ -18,7 +18,9 @@ import { entityAt } from "./skills";
  * outward for a ring). It flashes white as it lands, then goes.
  *
  * A buster is the boss's mark on one herzie: the circle follows them, with
- * a "!" overhead, because it lands on them wherever they go.
+ * a "!" overhead, because it lands on them wherever they go. A minion's
+ * swing is the same shape in a sicklier green; the enrage's pulse, which
+ * can't be escaped, is a deep violet over the whole room.
  */
 export function Telegraphs() {
   useBossFight();
@@ -48,6 +50,9 @@ function Shape({ shape }: { shape: FloorShape }) {
           uFlash: { value: 0 },
           uTime: { value: 0 },
           uMotion: { value: reduced() ? 0 : 1 },
+          uTone: {
+            value: shape.lethal ? 2 : shape.mob !== undefined ? 1 : 0,
+          },
         },
         vertexShader: /* glsl */ `
           varying vec2 vUv;
@@ -64,6 +69,7 @@ function Shape({ shape }: { shape: FloorShape }) {
           uniform float uFlash;
           uniform float uTime;
           uniform float uMotion;
+          uniform float uTone;
           varying vec2 vUv;
           void main() {
             vec2 p = (vUv - 0.5) * 2.0 * uR;
@@ -82,8 +88,11 @@ function Shape({ shape }: { shape: FloorShape }) {
             float line = smoothstep(0.14, 0.02, abs(d - uR)) * dash
               + uRing * smoothstep(0.14, 0.02, abs(d - uInner)) * dash;
             float pulse = mix(1.0, 0.8 + 0.2 * sin(uTime * 12.0), uMotion);
-            vec3 warm = vec3(1.0, 0.32, 0.2);
-            vec3 hot = vec3(1.0, 0.82, 0.55);
+            // The boss's: red to gold. A minion's: green. The pulse: violet.
+            vec3 warm = uTone > 1.5 ? vec3(0.55, 0.18, 0.95)
+              : uTone > 0.5 ? vec3(0.45, 0.9, 0.25) : vec3(1.0, 0.32, 0.2);
+            vec3 hot = uTone > 1.5 ? vec3(0.95, 0.75, 1.0)
+              : uTone > 0.5 ? vec3(0.85, 1.0, 0.55) : vec3(1.0, 0.82, 0.55);
             vec3 col = mix(warm, hot, filled * 0.7);
             float a = inside * (0.1 + 0.1 * hatch) + filled * (0.3 + 0.14 * hatch) + line * 0.95 * pulse;
             col = mix(col, vec3(1.0), uFlash);
@@ -98,7 +107,7 @@ function Shape({ shape }: { shape: FloorShape }) {
         polygonOffsetFactor: -2,
         polygonOffsetUnits: -2,
       }),
-    [shape.r, shape.inner, shape.kind],
+    [shape.r, shape.inner, shape.kind, shape.lethal, shape.mob],
   );
   useEffect(() => () => material.dispose(), [material]);
 

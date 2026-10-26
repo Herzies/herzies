@@ -5,6 +5,7 @@ import {
   STRIKE_DAMAGE,
 } from "@herzies/shared/combat";
 import { TOWN_WALK_SPEED } from "@herzies/shared/town-net";
+import { BOSS_WANDER } from "@herzies/shared/boss-fight";
 import { describe, expect, it } from "vitest";
 import {
   BossEngine,
@@ -70,9 +71,12 @@ describe("tuning invariants", () => {
 
   it("the ring's safe middle can be reached from the far wall in its windup", () => {
     const REACTION_MS = 600;
-    const { x, z } = TUNING.boss;
-    // The farthest a herzie can stand from the boss inside the room.
-    const farthest = Math.hypot(x, z) + TUNING.roomRadius;
+    // The farthest a herzie can stand from the boss inside the room,
+    // wherever in its circle the boss has walked.
+    const farthest =
+      Math.hypot(BOSS_WANDER.x, BOSS_WANDER.z) +
+      BOSS_WANDER.radius +
+      TUNING.roomRadius;
     const walk = ((farthest - TUNING.ring.inner) / TOWN_WALK_SPEED) * 1000;
     expect(walk + REACTION_MS).toBeLessThanOrEqual(TUNING.ring.windupMs);
   });
@@ -139,7 +143,8 @@ describe("attacks", () => {
     expect(resolve).toBeTruthy();
     if (resolve?.t !== "resolve") return;
     expect(resolve.hits).toEqual([
-      { uid: "a", damage: TUNING.slam.damage, absorbed: 0, blocked: 0 },
+      // Alone, it's the one the boss is after: the slam is aimed at it.
+      { uid: "a", damage: TUNING.slam.damage, absorbed: 0, blocked: 0, aimed: true },
     ]);
   });
 
@@ -163,7 +168,7 @@ describe("attacks", () => {
     const damage = Math.round(TUNING.slam.damage / 2);
     // Def isn't a Cymbrella: nothing blocked.
     expect(resolve.hits).toEqual([
-      { uid: "a", damage, absorbed: TUNING.slam.damage - damage, blocked: 0 },
+      { uid: "a", damage, absorbed: TUNING.slam.damage - damage, blocked: 0, aimed: true },
     ]);
   });
 

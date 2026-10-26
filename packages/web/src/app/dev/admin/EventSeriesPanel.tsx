@@ -102,11 +102,10 @@ function newSeriesForm(type: SeriesType = "song_hunt"): SeriesForm {
     until: "",
     songHunt: { rewardItemId: "", maxClaims: "50" },
     bossFight: {
-      hatedGenres: [],
       maxHp: "",
+      hpPerPlayer: "",
+      minionFloor: "",
       rewardItemId: "cd",
-      topRewardItemId: "cd",
-      topCount: "3",
     },
     merchant: { stock: [] },
     tower: { topRewardItemId: "power-dice-3", excludeHerzies: "music_lover69" },

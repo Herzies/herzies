@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@react-three/drei@10.7.9':
+    hash: 0e55d5d4b9d0e7e5277e682c01bd074fb8fc1625abaecf91d805402a3f24898f
+    path: patches/@react-three__drei@10.7.9.patch
+
 importers:
 
   .:
@@ -31,7 +36,7 @@ importers:
         version: 1.2.16(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
       '@react-three/drei':
         specifier: ^10.7.9
-        version: 10.7.9(@react-three/fiber@9.8.1(@types/react@19.2.14)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(three@0.186.1))(@types/react@19.2.14)(@types/three@0.186.0)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(three@0.186.1)
+        version: 10.7.9(patch_hash=0e55d5d4b9d0e7e5277e682c01bd074fb8fc1625abaecf91d805402a3f24898f)(@react-three/fiber@9.8.1(@types/react@19.2.14)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(three@0.186.1))(@types/react@19.2.14)(@types/three@0.186.0)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(three@0.186.1)
       '@react-three/fiber':
         specifier: ^9.8.1
         version: 9.8.1(@types/react@19.2.14)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(three@0.186.1)
@@ -3679,7 +3684,7 @@ snapshots:
 
   '@radix-ui/rect@1.1.3': {}
 
-  '@react-three/drei@10.7.9(@react-three/fiber@9.8.1(@types/react@19.2.14)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(three@0.186.1))(@types/react@19.2.14)(@types/three@0.186.0)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(three@0.186.1)':
+  '@react-three/drei@10.7.9(patch_hash=0e55d5d4b9d0e7e5277e682c01bd074fb8fc1625abaecf91d805402a3f24898f)(@react-three/fiber@9.8.1(@types/react@19.2.14)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(three@0.186.1))(@types/react@19.2.14)(@types/three@0.186.0)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(three@0.186.1)':
     dependencies:
       '@babel/runtime': 7.29.10
       '@mediapipe/tasks-vision': 0.10.17

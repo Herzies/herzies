@@ -51,7 +51,7 @@ import { TradeView } from "./components/TradeView";
 import { BULLETIN_KEY } from "./components/town/Boards";
 import { setLootRoom } from "./components/town/combat/lootFeed";
 import { useBossResultsShown } from "./components/town/combat/results";
-import { setMySkill } from "./components/town/combat/skills";
+import { setMySkills } from "./components/town/combat/skills";
 import { combat } from "./components/town/combat/state";
 import { townNet } from "./components/town/net/townNet";
 import {
@@ -297,23 +297,21 @@ function App() {
   const [classOverride, setClassOverride] = useState<HerzieClass | null>(null);
   /** Dev-only: opens the class choice whatever the herzie's state. */
   const [testClassChoice, setTestClassChoice] = useState(false);
-  // The Town's skill bar follows the class skill the app knows about — or,
-  // under a Class Preview, that class's starter skill at Lv. 1 (practice on
-  // the training grounds works; the cave's server refuses it).
-  useEffect(
-    () =>
-      setMySkill(
-        classOverride
-          ? [
-              {
-                skillId: CLASS_DEFS[classOverride].starterSkill,
-                level: 1,
-              },
-            ]
-          : rawState.skills,
-      ),
-    [rawState.skills, classOverride],
-  );
+  // The Town's skill bar follows the class skills the app knows about —
+  // or, under a Class Preview, that class's skills at Lv. 1 (practice on
+  // the training grounds works; the cave's server refuses them).
+  useEffect(() => {
+    const cls = classOverride ?? rawState.herzie?.class;
+    setMySkills(
+      classOverride
+        ? CLASS_DEFS[classOverride].skills.map((skillId) => ({
+            skillId,
+            level: 1,
+          }))
+        : rawState.skills,
+      cls ? CLASS_DEFS[cls].skills : [],
+    );
+  }, [rawState.skills, rawState.herzie?.class, classOverride]);
   // How the Town's basic attack goes: by class (a Record Slinger throws its
   // discs), the Class Preview's while one's on.
   useEffect(() => {

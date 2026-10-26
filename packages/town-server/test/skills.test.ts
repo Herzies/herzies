@@ -276,6 +276,7 @@ describe("the boss's side", () => {
       damage: Math.round(raw * 0.6),
       absorbed: taken,
       blocked: taken,
+      aimed: true,
     });
   });
 

@@ -2,12 +2,16 @@ import { LOW_HP_FRACTION } from "@herzies/shared";
 import { useEffect, useState } from "react";
 import { cn } from "../lib/utils";
 import { herzies } from "../tauri-bridge";
+import { bossFight, useBossFight } from "./town/combat/fight";
+import { townNet } from "./town/net/townNet";
 import { goToMap } from "./town/runtime";
 import { refreshVitals, setVitals, useLiveHp } from "./town/vitals";
 
 /**
- * The red edge as health runs low, and the screen that comes up when it runs
- * out.
+ * The red edge as health runs low, and what comes up when it runs out: in a
+ * raid you're in, a banner (you lie where you fell; a Bard can play you
+ * back up, or you can leave the fight and its reward); anywhere else, the
+ * screen that sends you home to rest.
  */
 export function TownVitals({
   inFight,
@@ -18,6 +22,7 @@ export function TownVitals({
   chatOverlay?: boolean;
 }) {
   const live = useLiveHp();
+  useBossFight();
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
 
@@ -34,10 +39,17 @@ export function TownVitals({
   const frac = Math.max(0, Math.min(1, hp / maxHp));
   const low = frac < LOW_HP_FRACTION;
 
+  const raid = bossFight.raid;
+  const waiting =
+    down && raid?.stage === "fight" && raid.you === "in" && !bossFight.closing;
+
   const respawn = async () => {
     if (busy) return;
     setBusy(true);
     setFailed(false);
+    // Out of the raid first, so the room stops waiting for you (respawning
+    // takes you out in the database too).
+    if (waiting) townNet().sendForfeit();
     try {
       const r = await herzies.townVitals("respawn");
       setVitals(r.vitals);
@@ -65,7 +77,30 @@ export function TownVitals({
           }}
         />
       ) : null}
-      {down ? (
+      {waiting ? (
+        <div
+          role="alert"
+          className="pointer-events-auto absolute bottom-24 left-1/2 z-40 w-[min(24rem,90%)] -translate-x-1/2 rounded border border-white/15 bg-black/60 px-3 py-2 text-center text-ui text-text shadow-lg backdrop-blur-md"
+        >
+          <div className="font-bold">You're knocked out</div>
+          <p className="text-[11px] text-text-dim">
+            A Bard can play you back up. Stay put — they'll come to you.
+          </p>
+          <button
+            type="button"
+            className="btn mt-1.5 text-[11px]"
+            onClick={respawn}
+            disabled={busy}
+          >
+            {busy ? "Leaving…" : "Leave the fight (no reward)"}
+          </button>
+          {failed ? (
+            <p className="text-[10px] text-text-dim">
+              Couldn't reach the server. Try again.
+            </p>
+          ) : null}
+        </div>
+      ) : down ? (
         // As the boss fight's end screen: the window fills the Town down to
         // the bottom margin, the world blurred out behind it.
         <div
@@ -81,7 +116,8 @@ export function TownVitals({
               Oh no! You need some rest
             </h2>
             <p className="text-[10px] text-text-dim">
-              Your herzie ran out of health.
+              Your herzie ran out of health. A Bard can play it back up where
+              it fell — or rest to get up on your own.
             </p>
             <div className="mt-1.5 flex justify-center">
               <button

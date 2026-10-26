@@ -18,12 +18,18 @@
  * apply_skill_xp_batch (00107_skill_effects.sql).
  */
 
-export const SKILL_IDS = ["soothing-drones", "backspin", "cymbrella"] as const;
+export const SKILL_IDS = [
+  "soothing-drones",
+  "backspin",
+  "cymbrella",
+  "resurrect",
+  "taunt",
+] as const;
 export type SkillId = (typeof SKILL_IDS)[number];
 
 export const SKILL_MAX_LEVEL = 10;
 
-export type SkillKind = "heal" | "buff" | "attack";
+export type SkillKind = "heal" | "buff" | "attack" | "revive" | "taunt";
 
 export interface SkillDef {
   id: SkillId;
@@ -37,8 +43,12 @@ export interface SkillDef {
   cooldownMs: number;
   /** Buffs only: how long the buff lasts. */
   durationMs?: number;
-  /** Heals: who is in reach, metres from the caster. */
+  /** Heals: who is in reach, metres from the caster. A revive: how close
+   * the downed herzie must be. */
   radius?: number;
+  /** A channel: the caster stands still this long before it takes effect
+   * (moving or going down cancels it, and costs nothing). */
+  channelMs?: number;
   /** Skill XP per unit of effect (per HP healed, per damage absorbed, per
    * damage dealt). Meant to make each class level at a similar pace over
    * the same number of fights — first guesses, not yet calibrated against
@@ -80,6 +90,34 @@ export const SKILL_DEFS: Record<SkillId, SkillDef> = {
     // buster), so each one pays more. Uncalibrated, like the others.
     xpPerUnit: 4,
   },
+  resurrect: {
+    id: "resurrect",
+    name: "Resurrect",
+    kind: "revive",
+    describe:
+      "Plays a downed herzie back to its feet with {v} of its health. Uses one of the raid's revives.",
+    value: [0.3, 0.5],
+    // The raid's shared pool is the real limit; this keeps one Bard from
+    // chaining several in a row.
+    cooldownMs: 30_000,
+    channelMs: 3_000,
+    radius: 4,
+    // Per HP brought back, as a heal pays.
+    xpPerUnit: 1 / 6,
+  },
+  taunt: {
+    id: "taunt",
+    name: "Taunt",
+    kind: "taunt",
+    describe:
+      "A crash that turns the boss on you: it fights only you for a minute. The last taunt wins.",
+    value: [0, 0],
+    cooldownMs: 60_000,
+    durationMs: 60_000,
+    // Per point of boss damage it drew onto you (aimed, before Def): what
+    // a taunt is for.
+    xpPerUnit: 0.25,
+  },
 };
 
 /** Backspin's fan: three discs, this far apart (radians). */
@@ -111,6 +149,7 @@ export function skillValue(id: SkillId, level: number): number {
 
 export function describeSkill(id: SkillId, level: number): string {
   const pct = `${Math.round(skillValue(id, level) * 100)}%`;
+  // A skill without a value (Taunt) has no {v} to fill.
   return SKILL_DEFS[id].describe.replace("{v}", pct);
 }
 
@@ -168,14 +207,44 @@ export function skillXpFor(id: SkillId, units: number): number {
 
 // --- Buffs and mitigation ---------------------------------------------------
 
-export type BuffId = "cymbrella";
+/** `cymbrella`: less damage. `taunt`: the boss's eye (shown on whoever
+ * holds it; no stat). `in_tune`: listening to what the boss hates, a class
+ * bonus whose `kind` says what it does. */
+export type BuffId = "cymbrella" | "taunt" | "in_tune";
+
+/** What an in-tune bonus does: less damage taken, stronger heals, harder
+ * hits. */
+export type BuffKind = "def" | "heal" | "damage";
 
 export interface Buff {
   id: BuffId;
-  /** Strength, e.g. 0.25 = 25% less damage. */
+  /** Strength, e.g. 0.25 = 25% less damage, 1.25 = hits 25% harder. */
   value: number;
   /** Epoch ms. */
   until: number;
+  kind?: BuffKind;
+}
+
+/** Every damage reduction a buff list gives at `now`: a Cymbrella, and an
+ * in-tune Percussionist's. */
+export function buffReductions(buffs: readonly Buff[], now: number): number[] {
+  return activeBuffs(buffs, now)
+    .filter(
+      (b) => b.id === "cymbrella" || (b.id === "in_tune" && b.kind === "def"),
+    )
+    .map((b) => b.value);
+}
+
+/** A multiplier a buff list gives at `now` for `kind` (1 if none). */
+export function buffMultiplier(
+  buffs: readonly Buff[],
+  kind: "heal" | "damage",
+  now: number,
+): number {
+  let m = 1;
+  for (const b of activeBuffs(buffs, now))
+    if (b.id === "in_tune" && b.kind === kind) m *= b.value;
+  return m;
 }
 
 /** Adds a buff under the no-stacking rule: one of each kind; the stronger
@@ -190,6 +259,7 @@ export function applyBuff(buffs: readonly Buff[], next: Buff): Buff[] {
       id: next.id,
       value: Math.max(prev.value, next.value),
       until: Math.max(prev.until, next.until),
+      ...(next.kind ? { kind: next.kind } : {}),
     },
   ];
 }

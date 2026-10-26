@@ -99,7 +99,7 @@ describe("admin-created bosses", () => {
   it("refuses reward items that are not in the catalog", async () => {
     const res = await adminPost(
       bossBody({
-        config: { ...bossBody().config, topRewardItemId: "no-such-item" },
+        config: { ...bossBody().config, rewardItemId: "no-such-item" },
       }),
     );
     expect(res.status).toBe(400);

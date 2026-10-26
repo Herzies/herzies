@@ -280,22 +280,25 @@ export interface SongHuntFinder {
   claimedAt: string;
 }
 
-/**
- * Boss fight config as stored in `events.config`.
- *
- * `hatedGenres` holds values from GENRES, not raw listener tags. "techno" is
- * not a Genre — classifyGenre maps techno/house/edm/dubstep onto "electronic",
- * so a techno boss is stored as `["electronic"]` and is also hurt by the rest
- * of that family. The spawner never rolls "pop", which is the fallback for
- * every unmatched tag and would make the boss take damage from everything.
- */
+/** Boss fight config as stored in `events.config`. */
 export interface BossFightConfig {
-  hatedGenres: Genre[];
+  /** No longer used: the boss hates all music (it was one genre per phase).
+   * Older events and the series templates still carry it. */
+  hatedGenres?: Genre[];
+  /** What everyone still in the fight when the boss falls gets. */
   rewardItemId: string;
+  /** No longer paid (00122: everyone still in is paid alike); kept so old
+   * events still read. */
   topRewardItemId?: string;
-  /** How many top dealers also get the rarer reward. */
-  topCount: number;
+  topCount?: number;
+  /** The boss's health before the roster locks (a placeholder since 00122:
+   * the lock sets it from the roster). */
   maxHp: number;
+  /** Health per herzie in the roster (see bossMaxHp); default
+   * BOSS_HP_PER_PLAYER. */
+  hpPerPlayer?: number;
+  /** How strong its minions are, as a Tower floor; default MINION_FLOOR. */
+  minionFloor?: number;
 }
 
 /**

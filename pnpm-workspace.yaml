@@ -23,3 +23,6 @@ onlyBuiltDependencies:
   - s
   - t
   - u
+
+patchedDependencies:
+  '@react-three/drei@10.7.9': patches/@react-three__drei@10.7.9.patch

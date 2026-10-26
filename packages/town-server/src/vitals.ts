@@ -9,47 +9,17 @@ import {
   type LootDrop,
   signVitalsRequest,
 } from "@herzies/shared/town-net";
+import type { FightReport, RaidReply } from "./fight";
 import type { Env } from "./room";
 
+/** A report: a fight's (see FightReport: HP, boss damage, skill XP, the
+ * end screen, the Tower, and the raid's lock, revives, outs and wipe) and/or
+ * bench rest. */
 export type VitalsReport = {
   action: "report";
-  /** Absolute HP for players in a fight; `heal` is how far skills may have
-   * raised it since the last report taken (set_herzie_hp otherwise only
-   * lowers). */
-  hp?: { uid: string; hp: number; heal?: number }[];
   /** Extra HP earned resting on a bench. */
   rest?: { uid: string; bonus: number }[];
-  /** Damage dealt to the boss, named by `batch` so a retry isn't counted
-   * twice. */
-  boss?: {
-    event: string;
-    batch: string;
-    /** Each herzie's damage, and the HP they healed or blocked (00111). */
-    damage: {
-      uid: string;
-      damage: number;
-      healing?: number;
-      blocked?: number;
-    }[];
-  };
-  /** Skill XP earned, named by `batch` like the boss damage. */
-  skills?: {
-    batch: string;
-    xp: { uid: string; skill: string; xp: number }[];
-  };
-  /** The fight is over: ask for the end screen's table, with the places of
-   * these herzies (00110). */
-  results?: { event: string; uids: string[] };
-  /** The Tower: kills since the last batch (each may drop an item and pays
-   * a little XP) and the best floor cleared, named by `batch`. */
-  tower?: {
-    event: string;
-    batch: string;
-    uid: string;
-    kills: { floor: number; x: number; z: number }[];
-    cleared?: number;
-  };
-};
+} & Partial<FightReport>;
 
 /** What `town-vitals` answers. Only the boss part is read: `loot` is set
  * on the report that found the boss dead (see 00105). */
@@ -69,6 +39,9 @@ export type VitalsReply = {
   /** What the Tower batch's kills dropped (empty on a replay: they were
    * handed out the first time). */
   tower?: { drops: LootDrop[] } | null;
+  /** The raid as the database holds it: its lock, refused revives, and
+   * who's out (00122). */
+  raid?: RaidReply | null;
 };
 
 /** Send a report. Resolves with the reply if `town-vitals` took it, else
@@ -104,6 +77,22 @@ export async function eatInDb(
     heal: Number(reply.heal) || 0,
     reason: reply.reason ?? null,
   };
+}
+
+/** A Bard's resurrect outside a raid: bring `uid` back with `health`. True
+ * if the database did (they were down); false or null otherwise. Never
+ * retried: a resurrect that didn't land is played again. */
+export async function reviveInDb(
+  env: Pick<Env, "TOWN_TICKET_SECRET" | "TOWN_VITALS_URL">,
+  uid: string,
+  health: number,
+): Promise<boolean> {
+  const reply = (await signedPost(env, {
+    action: "revive",
+    uid,
+    health,
+  })) as { ok?: boolean } | null;
+  return !!reply?.ok;
 }
 
 /** POST `payload` to `town-vitals`, signed. The reply's JSON, or null on

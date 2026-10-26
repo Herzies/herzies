@@ -1,6 +1,10 @@
 "use client";
 
-import { MERCHANT_NAME, TREAT_TRADER_NAME } from "@herzies/shared";
+import {
+  BOSS_HP_PER_PLAYER,
+  MERCHANT_NAME,
+  TREAT_TRADER_NAME,
+} from "@herzies/shared";
 import { useState } from "react";
 import { isEventConfigComplete } from "@/lib/event-config";
 import {
@@ -242,9 +246,6 @@ function BossPreview({
   item: ItemLookup;
 }) {
   const c = event.config;
-  const genres = (
-    Array.isArray(c.hatedGenres) ? c.hatedGenres : []
-  ) as string[];
   const maxHp = Number(c.maxHp);
   return (
     <>
@@ -260,38 +261,21 @@ function BossPreview({
         <div className="h-full bg-red rounded-sm w-full" />
       </div>
       <div className="text-[10px] text-text-dim text-center mt-1">
-        HP{" "}
-        {Number.isFinite(maxHp) && maxHp > 0
-          ? `${maxHp} / ${maxHp}`
-          : "rolled at spawn"}
+        HP set at the lock:{" "}
+        {Number(c.hpPerPlayer) > 0
+          ? Number(c.hpPerPlayer).toLocaleString()
+          : BOSS_HP_PER_PLAYER.toLocaleString()}{" "}
+        per herzie × roster^0.9
+        {Number.isFinite(maxHp) && maxHp > 0 ? ` (placeholder ${maxHp})` : ""}
       </div>
-      <div className="mt-3 flex flex-wrap gap-1 justify-center">
-        {genres.length > 0 ? (
-          genres.map((g) => (
-            <span
-              key={g}
-              className="text-[10px] border border-red text-red rounded-full px-2"
-            >
-              {g}
-            </span>
-          ))
-        ) : (
-          <span className="text-[10px] text-text-dim">
-            hated genres rolled at spawn
-          </span>
-        )}
+      <div className="mt-3 text-center text-[10px] text-red">
+        hates music: any playing gives a class bonus
       </div>
       <div className="mt-3 text-[10px] text-text-dim space-y-0.5">
         <div>
-          Hidden until defeated — reward:{" "}
-          <ItemName item={item(c.rewardItemId)} />
+          Lobby opens 15 min before the start. Everyone still in when it falls
+          gets: <ItemName item={item(c.rewardItemId)} />
         </div>
-        {present(c.topRewardItemId) && (
-          <div>
-            top {String(c.topCount ?? 3)} also get:{" "}
-            <ItemName item={item(c.topRewardItemId)} />
-          </div>
-        )}
       </div>
     </>
   );

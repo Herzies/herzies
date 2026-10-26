@@ -333,8 +333,8 @@ function Mob({ id }: { id: number }) {
       material.emissiveIntensity = glow;
     }
 
-    const tower = bossFight.tower;
-    if (tower && tag.current) {
+    // The health bar, in the Tower and the cave alike.
+    if (tag.current) {
       const d = drawn.current;
       if (d.hp !== m.hp) {
         const ctx = canvas.getContext("2d");

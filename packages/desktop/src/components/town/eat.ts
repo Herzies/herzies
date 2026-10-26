@@ -8,6 +8,7 @@ import {
 import { useSyncExternalStore } from "react";
 import { notify } from "../../lib/notices";
 import { herzies } from "../../tauri-bridge";
+import { pushHealNumber } from "./combat/DamageNumbers";
 import { bossFight } from "./combat/fight";
 import { pushLootLog } from "./combat/lootFeed";
 import { townNet } from "./net/townNet";
@@ -125,6 +126,8 @@ export async function eat(
   try {
     const res = await herzies.eatItem(itemId);
     setVitals(res.vitals);
+    // In a room the HP update pops this; here nothing else would.
+    pushHealNumber(null, res.heal);
     ateLine(itemId, res.heal);
     return true;
   } catch (e) {

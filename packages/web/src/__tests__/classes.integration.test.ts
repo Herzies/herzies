@@ -44,7 +44,8 @@ async function skills(userId: string) {
   const { data } = await admin()
     .from("herzie_skills")
     .select("skill_id, level, xp")
-    .eq("user_id", userId);
+    .eq("user_id", userId)
+    .order("skill_id");
   return data ?? [];
 }
 
@@ -60,7 +61,7 @@ describe("choosing a class", () => {
     expect(r).toMatchObject({ ok: false, reason: "stage-too-low" });
   });
 
-  it("gives the starter skill, and no gear (Boboku sells it, 00116)", async () => {
+  it("gives the class's skills, and no gear (Boboku sells it, 00116)", async () => {
     const userId = await player({ stage: 2, level: 12 });
     const r = await rpc<Outcome>("choose_class", {
       p_user_id: userId,
@@ -71,8 +72,10 @@ describe("choosing a class", () => {
     expect(
       units.filter((u) => ["worn-stick", "old-cymbal"].includes(u.item_id)),
     ).toEqual([]);
+    // Both of a Percussionist's skills (00122): Cymbrella and Taunt.
     expect(await skills(userId)).toEqual([
       { skill_id: "cymbrella", level: 1, xp: 0 },
+      { skill_id: "taunt", level: 1, xp: 0 },
     ]);
   });
 
@@ -237,6 +240,7 @@ describe("skill XP", () => {
     expect(again.applied).toBe(false);
     expect(again.levels).toEqual(first.levels);
     expect(await skills(userId)).toEqual([
+      { skill_id: "resurrect", level: 1, xp: 0 },
       { skill_id: "soothing-drones", level: 3, xp },
     ]);
   });
@@ -258,7 +262,9 @@ describe("skill XP", () => {
       p_batch: `test:${crypto.randomUUID()}`,
       p_xp: [{ uid: userId, skill: "cymbrella", xp: 99_999 }],
     });
-    expect((await skills(userId))[0].level).toBe(10);
+    expect(
+      (await skills(userId)).find((s) => s.skill_id === "cymbrella")?.level,
+    ).toBe(10);
   });
 });
 
@@ -280,7 +286,12 @@ describe("sync", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.herzie.class).toBe("bard");
-    expect(body.skills).toEqual([
+    expect(
+      [...body.skills].sort((a: { skillId: string }, b: { skillId: string }) =>
+        a.skillId.localeCompare(b.skillId),
+      ),
+    ).toEqual([
+      { skillId: "resurrect", level: 1, xp: 0 },
       { skillId: "soothing-drones", level: 1, xp: 0 },
     ]);
     const { data } = await admin()

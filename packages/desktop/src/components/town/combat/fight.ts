@@ -1,10 +1,19 @@
-import { getItemIcon, ITEMS, isSkillId, SKILL_DEFS } from "@herzies/shared";
+import {
+  getItemIcon,
+  ITEMS,
+  isSkillId,
+  SKILL_DEFS,
+  type SkillId,
+} from "@herzies/shared";
+import { BOSS_STAND } from "@herzies/shared/combat";
 import { MOB, towerXpPerKill } from "@herzies/shared/tower";
 import type {
   BossTelegraph,
   FightState,
   LootDrop,
+  RaidState,
   ServerMessage,
+  SkillRefusal,
   TowerFloor,
   TowerMob,
 } from "@herzies/shared/town-net";
@@ -20,7 +29,11 @@ import {
   sfxWarn,
 } from "../sfx";
 import { setHpNow, setRegenFrozen } from "../vitals";
-import { pushDamageNumber, pushHurtNumber } from "./DamageNumbers";
+import {
+  pushDamageNumber,
+  pushHealNumber,
+  pushHurtNumber,
+} from "./DamageNumbers";
 import { setBossResults } from "./results";
 import {
   clearBuff,
@@ -28,6 +41,8 @@ import {
   noteSkillCast,
   resetSkills,
   setBuff,
+  setChannel,
+  setReadyAt,
   skills,
 } from "./skills";
 import { combat, shake } from "./state";
@@ -50,7 +65,7 @@ export type FloorShape = BossTelegraph & {
 };
 
 export type Closing = {
-  why: "victory" | "escaped" | "sealed";
+  why: "victory" | "escaped" | "sealed" | "wiped";
   /** performance.now() ms the room shuts. */
   at: number;
 };
@@ -85,6 +100,27 @@ export const bossFight = {
   youHitAt: Number.NEGATIVE_INFINITY,
   /** When the boss last slammed the floor, for it to rear and drop. */
   slammedAt: Number.NEGATIVE_INFINITY,
+  /** In the cave: the raid (its times on this machine's clock), or null
+   * (the Tower, or an older server without a lobby). */
+  raid: null as RaidView | null,
+  /** Where the boss has been, newest last (drawn a moment behind, like a
+   * mob: see {@link bossNow}). */
+  bossPath: [] as { at: number; x: number; z: number; yaw: number }[],
+  /** What the boss is saying, until when (performance.now() ms). */
+  say: null as { text: string; until: number } | null,
+};
+
+/** The raid as the client holds it: RaidState with its times local
+ * (performance.now() ms), and whether you're in the fight. */
+export type RaidView = Omit<
+  RaidState,
+  "startsAt" | "lockedAt" | "enrageAt" | "hardAt" | "you"
+> & {
+  startsAt: number;
+  lockedAt: number | null;
+  enrageAt: number | null;
+  hardAt: number | null;
+  you: "in" | "out" | "watching";
 };
 
 /** One drop of loot: what you got (the pending drops behind it; an empty
@@ -131,6 +167,57 @@ export function mobsLeft(): number {
 
 /** How far behind the newest word mobs are drawn, ms: a snapshot or two. */
 export const MOB_DELAY_MS = 110;
+
+/** Where the boss stands at `at` (performance.now() ms; drawn a moment
+ * behind the newest word, like a mob), and which way it faces. Its home
+ * until the server says otherwise. */
+export function bossNow(at: number = performance.now() - MOB_DELAY_MS): {
+  x: number;
+  z: number;
+  yaw: number;
+} {
+  const s = bossFight.bossPath;
+  if (!s.length) return { x: BOSS_STAND.x, z: BOSS_STAND.z, yaw: Math.PI };
+  for (let i = s.length - 1; i > 0; i--) {
+    const a = s[i - 1];
+    const b = s[i];
+    if (a.at <= at && at <= b.at) {
+      const k = b.at > a.at ? (at - a.at) / (b.at - a.at) : 1;
+      let dy = b.yaw - a.yaw;
+      dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+      return {
+        x: a.x + (b.x - a.x) * k,
+        z: a.z + (b.z - a.z) * k,
+        yaw: a.yaw + dy * k,
+      };
+    }
+  }
+  const last = s[s.length - 1];
+  return at < s[0].at ? s[0] : last;
+}
+
+function pushBossAt(x: number, z: number, yaw: number, at: number) {
+  const s = bossFight.bossPath;
+  s.push({ at, x, z, yaw });
+  if (s.length > 8) s.shift();
+}
+
+function raidView(r: RaidState, clock: Clock, you?: RaidView["you"]): RaidView {
+  return {
+    ...r,
+    startsAt: clock.toLocal(r.startsAt),
+    lockedAt: r.lockedAt !== undefined ? clock.toLocal(r.lockedAt) : null,
+    enrageAt: r.enrageAt !== undefined ? clock.toLocal(r.enrageAt) : null,
+    hardAt: r.hardAt !== undefined ? clock.toLocal(r.hardAt) : null,
+    you: you ?? r.you ?? bossFight.raid?.you ?? "in",
+  };
+}
+
+/** What a refused skill says, when the player can do something about it. */
+const REFUSALS: Record<SkillRefusal, string> = {
+  "no-target": "No one knocked out near enough to bring back.",
+  "not-yet": "That only works once the fight is on.",
+};
 
 /** Where a mob is at `at` (performance.now() ms), between its samples. */
 export function mobAt(
@@ -232,6 +319,9 @@ export function resetBossFight(): void {
   bossFight.loots = [];
   bossFight.you = null;
   bossFight.tower = null;
+  bossFight.raid = null;
+  bossFight.bossPath = [];
+  bossFight.say = null;
   towerMobs.clear();
   resetSkills();
   emit();
@@ -246,8 +336,8 @@ export type Clock = {
   you: () => number | null;
 };
 
-/** Where the boss's chest is, for a damage number over it. */
-const BOSS_NUMBER_AT = [0, 3.4, -4] as const;
+/** How high over the boss's feet a damage number pops. */
+const BOSS_NUMBER_Y = 3.4;
 
 function shape(t: BossTelegraph, clock: Clock): FloorShape {
   return {
@@ -264,9 +354,14 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
   const now = performance.now();
   switch (m.t) {
     case "welcome": {
-      if (!m.fight) return;
-      applyFight(m.fight, clock, m.you);
+      // Who you are in the room, fight or not (a resurrect in town is
+      // drawn by entity).
       bossFight.you = m.you;
+      if (!m.fight) {
+        emit();
+        return;
+      }
+      applyFight(m.fight, clock, m.you);
       emit();
       return;
     }
@@ -302,10 +397,14 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       return;
     }
     case "hp": {
-      // Yours went down: the amount pops off your herzie.
+      // Yours went down: the amount pops off your herzie. Anyone's went up
+      // (a heal, a bite to eat, a revive): in green, over them. In a room
+      // HP only rises from those.
       const was = bossFight.health.get(m.id)?.hp;
-      if (m.id === clock.you() && was !== undefined && m.hp < was)
-        pushHurtNumber(was - m.hp);
+      const mine = m.id === clock.you();
+      if (mine && was !== undefined && m.hp < was) pushHurtNumber(was - m.hp);
+      if (was !== undefined && m.hp > was)
+        pushHealNumber(mine ? null : m.id, m.hp - was);
       bossFight.health.set(m.id, { hp: m.hp, maxHp: m.maxHp });
       if (m.id === clock.you()) setHpNow(m.hp);
       emit();
@@ -324,8 +423,9 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
         );
       } else {
         const jitter = (Math.random() - 0.5) * 1.6;
+        const at = bossNow();
         pushDamageNumber(
-          [BOSS_NUMBER_AT[0] + jitter, BOSS_NUMBER_AT[1], BOSS_NUMBER_AT[2]],
+          [at.x + jitter, BOSS_NUMBER_Y, at.z],
           m.damage,
           m.crit,
         );
@@ -404,6 +504,69 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
     }
     case "closing":
       bossFight.closing = { why: m.why, at: clock.toLocal(m.closesAt) };
+      if (m.why === "wiped") {
+        notify("Everyone's down. The boss won this time.", { kind: "error" });
+        logActivity("The boss won: everyone in the raid was knocked out");
+      }
+      emit();
+      return;
+    case "bossAt":
+      pushBossAt(m.x, m.z, m.yaw, now);
+      return;
+    case "say":
+      bossFight.say = { text: m.text, until: clock.toLocal(m.until) };
+      emit();
+      return;
+    case "raid": {
+      const was = bossFight.raid;
+      const { t: _t, ...r } = m;
+      bossFight.raid = raidView(r, clock);
+      if (was?.stage === "lobby" && r.stage === "fight") {
+        notify(
+          bossFight.raid.you === "in"
+            ? "The cave is sealed. The fight is on!"
+            : "The fight began without you.",
+          { kind: bossFight.raid.you === "in" ? "success" : "info" },
+        );
+      }
+      emit();
+      return;
+    }
+    case "buffOff":
+      clearBuff(m.id, m.buff);
+      return;
+    case "channel": {
+      if (m.target === null) {
+        setChannel(m.by, null);
+        // Yours stopped short: nothing spent, ready again.
+        if (m.by === clock.you()) setReadyAt("resurrect", now);
+      } else {
+        setChannel(m.by, {
+          target: m.target,
+          from: now,
+          until: clock.toLocal(m.until),
+        });
+      }
+      return;
+    }
+    case "revived": {
+      if (m.by === clock.you()) {
+        setReadyAt("resurrect", now + SKILL_DEFS.resurrect.cooldownMs);
+        logActivity("Brought a fallen herzie back to its feet");
+      }
+      if (m.id === clock.you()) {
+        notify("A Bard played you back to your feet!", { kind: "success" });
+        logActivity("Resurrected by a Bard");
+      }
+      // Outside a fight nobody's health is tracked: the hp that follows
+      // counts up from nothing, for its heal number.
+      if (!bossFight.health.has(m.id))
+        bossFight.health.set(m.id, { hp: 0, maxHp: 0 });
+      emit();
+      return;
+    }
+    case "out":
+      if (bossFight.raid) bossFight.raid = { ...bossFight.raid, you: "out" };
       emit();
       return;
     case "skill": {
@@ -425,22 +588,28 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
         buff: m.buff,
         value: m.value,
         until: clock.toLocal(m.until),
+        ...(m.kind ? { kind: m.kind } : {}),
       });
       return;
-    case "skillDenied":
+    case "skillDenied": {
       // The prediction was wrong: the server's word on when it's ready.
-      if (m.seq === skills.seq) {
-        skills.readyAt = m.readyAt > 0 ? clock.toLocal(m.readyAt) : now;
-        // Nor is the Cymbrella you put on.
-        if (skills.mine?.id === "cymbrella")
-          clearBuff(clock.you() ?? -1, "cymbrella");
-        emitSkills();
-      }
+      const id =
+        skills.sent.get(m.seq) ?? (isSkillId(m.skill) ? m.skill : null);
+      if (!id) return;
+      skills.sent.delete(m.seq);
+      setReadyAt(id as SkillId, m.readyAt > 0 ? clock.toLocal(m.readyAt) : now);
+      // Nor is the buff you put on yourself.
+      if (id === "cymbrella" || id === "taunt")
+        clearBuff(clock.you() ?? -1, id);
+      if (m.reason) notify(REFUSALS[m.reason], { kind: "info" });
+      emitSkills();
       return;
+    }
     case "skillUp":
       if (!isSkillId(m.skill)) return;
-      if (skills.mine?.id === m.skill)
-        skills.mine = { id: m.skill, level: m.level };
+      skills.list = skills.list.map((s) =>
+        s.id === m.skill ? { id: m.skill, level: m.level } : s,
+      );
       notify(`Leveled up "${SKILL_DEFS[m.skill].name}" to Lv. ${m.level}`, {
         kind: "success",
       });
@@ -468,12 +637,29 @@ function applyFight(f: FightState, clock: Clock, you: number) {
   bossFight.loots = [];
   if (f.tower) setTower(f.tower, performance.now());
   else bossFight.tower = null;
+  const now = performance.now();
+  bossFight.raid = f.raid ? raidView(f.raid, clock, f.raid.you) : null;
+  bossFight.bossPath = [];
+  if (f.bossAt) pushBossAt(f.bossAt.x, f.bossAt.z, f.bossAt.yaw, now);
+  bossFight.say = f.say
+    ? { text: f.say.text, until: clock.toLocal(f.say.until) }
+    : null;
+  if (!f.tower) towerMobs.clear();
+  if (f.mobs) syncMobs(f.mobs, now);
   skills.buffs.clear();
   for (const b of f.buffs ?? [])
     setBuff(b.id, {
       buff: b.buff,
       value: b.value,
       until: clock.toLocal(b.until),
+      ...(b.kind ? { kind: b.kind } : {}),
+    });
+  skills.channels.clear();
+  for (const c of f.channels ?? [])
+    setChannel(c.by, {
+      target: c.target,
+      from: now,
+      until: clock.toLocal(c.until),
     });
 }
 
