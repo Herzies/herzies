@@ -122,6 +122,97 @@ describe("covers", () => {
     expect(covers(ring, 3, 0)).toBe(false);
     expect(covers(ring, 8, 0)).toBe(true);
   });
+  it("a lane covers its strip, a herzie's width either side", () => {
+    // From the origin heading +z (yaw 0), 10 long, 1.3 either side.
+    const lane = { ...circle, kind: "lane" as const, r: 1.3, yaw: 0, len: 10 };
+    expect(covers(lane, 0, 5)).toBe(true);
+    expect(covers(lane, 1.6, 9)).toBe(true);
+    expect(covers(lane, 2.2, 5)).toBe(false);
+    expect(covers(lane, 0, 11)).toBe(false);
+    // Turned a quarter: heading +x.
+    const east = { ...lane, yaw: Math.PI / 2 };
+    expect(covers(east, 5, 0)).toBe(true);
+    expect(covers(east, 0, 5)).toBe(false);
+  });
+});
+
+describe("the boss roams", () => {
+  const dist = (a: { x: number; z: number }, b: { x: number; z: number }) =>
+    Math.hypot(a.x - b.x, a.z - b.z);
+
+  it("keeps walking after its focus through its own slams", () => {
+    const e = engine();
+    const far = still("a", 6, 6);
+    const ev = run(e, T0, T0 + 3_100, [far]);
+    const slam = telegraphs(ev).find((t) => t.kind === "circle");
+    expect(slam).toBeDefined();
+    const before = e.position;
+    run(e, T0 + 3_150, T0 + 3_500, [far]);
+    expect(dist(e.position, before)).toBeGreaterThan(0.3);
+  });
+
+  it("stands still while its ring winds up", () => {
+    const e = engine(200, 1000, 3);
+    const p = still("a", 3, 6);
+    let ring: Telegraph | undefined;
+    for (let t = T0; t < T0 + 60_000 && !ring; t += 50) {
+      ring = telegraphs(e.update(t, [p])).find((x) => x.kind === "ring");
+      if (ring) {
+        const at = e.position;
+        run(e, t + 50, ring.hitAt - 50, [p]);
+        expect(dist(e.position, at)).toBeLessThan(1e-6);
+      }
+    }
+    expect(ring).toBeDefined();
+  });
+
+  it("closes to within a blow's reach, then shifts round whoever it's on", () => {
+    const e = engine();
+    const p = still("a", 0, 2);
+    run(e, T0, T0 + 4_000, [p]);
+    const reach = dist(e.position, { x: 0, z: 2 }) - TUNING.boss.radius - TUNING.playerRadius;
+    expect(reach).toBeLessThan(1.6);
+    const spots: { x: number; z: number }[] = [];
+    for (let t = T0 + 4_000; t < T0 + 20_000; t += 50) {
+      e.update(t, [p]);
+      spots.push(e.position);
+    }
+    const moved = Math.max(...spots.map((s) => dist(s, spots[0])));
+    expect(moved).toBeGreaterThan(1);
+  });
+
+  it("from phase 2, charges whoever keeps far off, down a lane it draws first", () => {
+    const e = engine(600, 1000, 2);
+    // Its focus up close (the nearest), and someone at the back.
+    const tank = still("tank", 0, -1);
+    const back = still("back", 3, 6);
+    let lane: Telegraph | undefined;
+    let t = T0;
+    for (; t < T0 + 60_000 && !lane; t += 50)
+      lane = telegraphs(e.update(t, [tank, back])).find((x) => x.kind === "lane");
+    expect(lane).toBeDefined();
+    if (!lane) return;
+    expect(lane.at).toBeGreaterThanOrEqual(T0 + 3_000 + TUNING.charge.everyMs);
+    expect(lane.hitAt - lane.at).toBe(TUNING.charge.windupMs);
+    expect(covers(lane, 3, 6)).toBe(true);
+    // It hits whoever's in the lane as it goes, and ends up down the lane.
+    const after = run(e, t, lane.hitAt + 2_000, [tank, back]);
+    const hit = after.find((x) => x.t === "resolve" && x.id === lane.id);
+    expect(hit?.t === "resolve" && hit.hits.map((h) => h.uid)).toContain("back");
+    expect(dist(e.position, { x: 3, z: 6 })).toBeLessThan(dist({ x: lane.x, z: lane.z }, { x: 3, z: 6 }));
+    expect(
+      Math.hypot(e.position.x - BOSS_WANDER.x, e.position.z - BOSS_WANDER.z),
+    ).toBeLessThanOrEqual(BOSS_WANDER.radius + 1e-6);
+  });
+
+  it("doesn't charge in phase 1, or when everyone's close", () => {
+    const calm = engine();
+    const ev = run(calm, T0, T0 + 40_000, [still("a", 0, -1), still("b", 5, 9)]);
+    expect(telegraphs(ev).some((t) => t.kind === "lane")).toBe(false);
+    const close = engine(600, 1000, 2);
+    const ev2 = run(close, T0, T0 + 40_000, [still("a", 0, -1), still("b", 1, 0)]);
+    expect(telegraphs(ev2).some((t) => t.kind === "lane")).toBe(false);
+  });
 });
 
 describe("attacks", () => {

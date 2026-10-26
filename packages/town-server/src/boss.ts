@@ -15,9 +15,11 @@
  * exception is the enrage's pulse, which ends a fight that ran too long.
  *
  * Before the lock the boss is dormant: it stands at home, can't be hurt and
- * doesn't attack. In the fight it walks after whoever it's focused on (a
- * taunter, else whoever it hates most), inside a circle around the middle
- * of the room, and stops to swing.
+ * doesn't attack. In the fight it roams after whoever it's focused on (a
+ * taunter, else whoever it hates most) across most of the room, keeps
+ * moving through its slams, shifts its stance around whoever it's on, and
+ * from phase 2 charges at whoever keeps furthest away, down a lane drawn on
+ * the floor first.
  */
 
 import {
@@ -27,6 +29,7 @@ import {
   clampToWander,
   enrageFactor,
   MINION_THRESHOLDS,
+  wanderReach,
   weightedRound,
 } from "@herzies/shared/boss-fight";
 import type { AttackStyle } from "@herzies/shared/classes";
@@ -106,7 +109,7 @@ export const TUNING = {
    * ring's windup lets someone at the far wall reach its middle wherever
    * the boss has walked to. */
   slam: { radius: 3, windupMs: 1_600, damage: 45 },
-  ring: { inner: 6.5, windupMs: 4_000, damage: 58 },
+  ring: { inner: 6.5, windupMs: 4_200, damage: 58 },
   /** The tank-buster: aimed at whoever the boss is focused on, and it
    * follows them — it can't be dodged, only taken. Sized so that a herzie
    * who isn't tanking it is badly hurt, and a Percussionist (Def, a
@@ -124,6 +127,26 @@ export const TUNING = {
    * stack, past the usual one-hit cap (to a ceiling). Fades unhit; a
    * second tank taking a turn is how it's cleared. */
   rattled: { perStack: 0.25, maxStacks: 4, ms: 20_000, maxHitFraction: 0.6 },
+  /** From phase 2, now and then it charges whoever keeps furthest off (at
+   * least `minDist` away): it faces them for `windupMs` as a lane `width`
+   * wide fills on the floor, then barrels down it at `speed`, on through
+   * them by `overshoot` (within its walk). Everyone in the lane as it goes
+   * is hit. Ranged herzies can't stand still at the back forever. */
+  charge: {
+    fromPhase: 2,
+    everyMs: 18_000,
+    windupMs: 1_800,
+    minDist: 7,
+    width: 2.6,
+    overshoot: 2,
+    speed: 14,
+    damage: 50,
+  },
+  /** In reach of whoever it's on, it doesn't stand still: every so often
+   * it shifts round them by `angle` (radians either way), at `speed` of
+   * its walk. Through its own slams it walks at `slamSpeed` of its walk. */
+  stride: { everyMs: [4_000, 7_000], angle: [0.5, 1.1], speed: 0.6 },
+  slamSpeed: 0.6,
   /** Its minions' share of the floor's shapes. */
   minionShapes: 2,
   /** A bigger raid gets more at once: one more shape and slam per this
@@ -160,15 +183,18 @@ export const MAX_TELEGRAPHS = TUNING.maxTelegraphs;
 const PATH_MS = 1_000;
 
 export type Phase = 1 | 2 | 3;
-export type TelegraphKind = "circle" | "ring" | "buster" | "scatter";
+export type TelegraphKind = "circle" | "ring" | "buster" | "scatter" | "lane";
 
 export type Telegraph = {
   id: number;
   kind: TelegraphKind;
   x: number;
   z: number;
-  /** Outer radius. */
+  /** Outer radius (a lane's: how far either side of its line). */
   r: number;
+  /** A lane: heading from (x, z), and how long. */
+  yaw?: number;
+  len?: number;
   /** Inner (safe) radius of a ring; 0 for a circle. */
   inner: number;
   /** When it appeared and when it lands (server ms). */
@@ -318,6 +344,19 @@ export class BossEngine {
   private focusUid: string | null = null;
   /** The last taunt: whoever cast it holds the boss until `until`. */
   private taunt: { uid: string; until: number } | null = null;
+  /** A charge under way: down `yaw` from `from`, `len` long; it sets off
+   * at `goAt` and gets there at `endAt` (server ms). */
+  private charging: {
+    from: { x: number; z: number };
+    yaw: number;
+    len: number;
+    goAt: number;
+    endAt: number;
+  } | null = null;
+  private nextChargeAt: number;
+  /** Where it's shifting to round its focus, and when it next shifts. */
+  private strideTo: { x: number; z: number } | null = null;
+  private nextStrideAt = 0;
   private enraged = false;
   private pulsing = false;
   private nextPulseAt = 0;
@@ -352,6 +391,7 @@ export class BossEngine {
     this.thresholds = this.thresholds.filter((t) => this.hp / this.maxHp > t);
     this.nextAttackAt = opts.now + TUNING.openingMs;
     this.nextBusterAt = opts.now + TUNING.openingMs + TUNING.buster.everyMs;
+    this.nextChargeAt = opts.now + TUNING.openingMs + TUNING.charge.everyMs;
     this.threatAt = opts.now;
     this.killed = this.hp <= 0;
     this.sleeping = !!opts.dormant;
@@ -484,6 +524,7 @@ export class BossEngine {
     this.lockedAt = now;
     this.nextAttackAt = now + TUNING.openingMs;
     this.nextBusterAt = now + TUNING.openingMs + TUNING.buster.everyMs;
+    this.nextChargeAt = now + TUNING.openingMs + TUNING.charge.everyMs;
     this.lastMoveAt = now;
   }
 
@@ -828,11 +869,18 @@ export class BossEngine {
     this.focusUid = focus?.uid ?? null;
   }
 
-  /** Walk toward the focus (within the wander circle) and face it; stand
-   * still while its own slam or ring winds up. */
+  /** Roam after the focus (within the wander circle) and face it. It
+   * stands still only while its own ring (or the enrage's pulse) winds up
+   * and while it lines up a charge; through a slam it walks slower. In
+   * reach, it shifts its stance round its focus now and then. */
   private walk(now: number, players: readonly BossPlayer[]) {
     const dt = Math.max(0, Math.min(250, now - this.lastMoveAt)) / 1000;
     this.lastMoveAt = now;
+    if (this.charging) {
+      this.stepCharge(now, dt);
+      this.record(now);
+      return;
+    }
     const target = this.focusUid
       ? players.find((p) => p.uid === this.focusUid)?.posAt(now)
       : null;
@@ -842,8 +890,64 @@ export class BossEngine {
     }
     const dx = target.x - this.at.x;
     const dz = target.z - this.at.z;
-    // Turn toward it, at its turn rate.
-    const want = Math.atan2(dx, dz);
+    this.turnToward(Math.atan2(dx, dz), dt);
+    let ringing = false;
+    let slamming = false;
+    for (const t of this.telegraphs) {
+      if (t.mob !== undefined || t.hitAt <= now) continue;
+      if (t.kind === "ring") ringing = true;
+      else if (t.kind === "circle" || t.kind === "scatter") slamming = true;
+    }
+    if (this.pinned || ringing) {
+      this.record(now);
+      return;
+    }
+    const pace = BOSS_WANDER.speed * (slamming ? TUNING.slamSpeed : 1);
+    const d = Math.hypot(dx, dz);
+    const gap = d - TUNING.boss.radius - TUNING.playerRadius;
+    // A little slack before it gives chase again, so having just stopped
+    // at its distance it doesn't keep "chasing" by a hair.
+    if (gap > BOSS_WANDER.keep + 0.15) {
+      // After it.
+      this.strideTo = null;
+      this.stepToward(
+        dx / d,
+        dz / d,
+        Math.min(pace * dt, gap - BOSS_WANDER.keep),
+      );
+    } else {
+      // In reach: now and then, round them a little.
+      if (!this.strideTo && now >= this.nextStrideAt) {
+        const [lo, hi] = TUNING.stride.angle;
+        const turn =
+          (lo + (hi - lo) * this.rand()) * (this.rand() < 0.5 ? -1 : 1);
+        const away = Math.atan2(-dx, -dz) + turn;
+        const r = TUNING.boss.radius + TUNING.playerRadius + BOSS_WANDER.keep;
+        this.strideTo = clampToWander({
+          x: target.x + Math.sin(away) * r,
+          z: target.z + Math.cos(away) * r,
+        });
+        const [a, b] = TUNING.stride.everyMs;
+        this.nextStrideAt = now + a + (b - a) * this.rand();
+      }
+      const to = this.strideTo;
+      if (to) {
+        const sx = to.x - this.at.x;
+        const sz = to.z - this.at.z;
+        const sd = Math.hypot(sx, sz);
+        if (sd < 0.05) this.strideTo = null;
+        else
+          this.stepToward(
+            sx / sd,
+            sz / sd,
+            Math.min(pace * TUNING.stride.speed * dt, sd),
+          );
+      }
+    }
+    this.record(now);
+  }
+
+  private turnToward(want: number, dt: number) {
     let turn = Math.atan2(
       Math.sin(want - this.facing),
       Math.cos(want - this.facing),
@@ -854,26 +958,39 @@ export class BossEngine {
       this.facing += turn;
       this.moved = true;
     }
-    const swinging = this.telegraphs.some(
-      (t) => t.mob === undefined && t.kind !== "buster" && t.hitAt > now,
-    );
-    const gap = Math.hypot(dx, dz) - TUNING.boss.radius - TUNING.playerRadius;
-    if (!this.pinned && !swinging && gap > BOSS_WANDER.keep) {
-      const step = Math.min(BOSS_WANDER.speed * dt, gap - BOSS_WANDER.keep);
-      const d = Math.hypot(dx, dz);
-      const next = clampToWander({
-        x: this.at.x + (dx / d) * step,
-        z: this.at.z + (dz / d) * step,
-      });
-      if (
-        Math.abs(next.x - this.at.x) > 1e-4 ||
-        Math.abs(next.z - this.at.z) > 1e-4
-      ) {
-        this.at = next;
-        this.moved = true;
-      }
+  }
+
+  private stepToward(ux: number, uz: number, step: number) {
+    if (!(step > 0)) return;
+    const next = clampToWander({
+      x: this.at.x + ux * step,
+      z: this.at.z + uz * step,
+    });
+    if (
+      Math.abs(next.x - this.at.x) > 1e-4 ||
+      Math.abs(next.z - this.at.z) > 1e-4
+    ) {
+      this.at = next;
+      this.moved = true;
     }
-    this.record(now);
+  }
+
+  /** A charge: lining up (turning to its lane), then down it. */
+  private stepCharge(now: number, dt: number) {
+    const c = this.charging;
+    if (!c) return;
+    if (now < c.goAt) {
+      this.turnToward(c.yaw, dt * 3);
+      return;
+    }
+    this.facing = c.yaw;
+    const k = Math.min(1, (now - c.goAt) / Math.max(1, c.endAt - c.goAt));
+    this.at = clampToWander({
+      x: c.from.x + Math.sin(c.yaw) * c.len * k,
+      z: c.from.z + Math.cos(c.yaw) * c.len * k,
+    });
+    this.moved = true;
+    if (k >= 1) this.charging = null;
   }
 
   private record(now: number) {
@@ -1062,6 +1179,7 @@ export class BossEngine {
     const fury = enrageFactor(now - this.lockedAt);
     this.startBuster(now, players, targets, events, fury);
     this.startScatter(now, targets, events, fury);
+    this.startCharge(now, targets, events, fury);
     if (now < this.nextAttackAt) return;
     const cfg = TUNING.phases[this.phase];
     if (!targets.length) {
@@ -1076,7 +1194,8 @@ export class BossEngine {
       this.telegraphs.push(telegraph);
       events.push({ t: "telegraph", telegraph });
     };
-    if (this.rand() < cfg.ringChance) {
+    // No ring while it charges: it's not where the ring would be.
+    if (!this.charging && this.rand() < cfg.ringChance) {
       add({
         kind: "ring",
         x: this.at.x,
@@ -1119,6 +1238,71 @@ export class BossEngine {
         ...(p.uid === this.focusUid ? { aimedAt: p.uid } : {}),
       });
     }
+  }
+
+  /** A charge, on its own clock from phase 2: at whoever keeps furthest
+   * off, if anyone's far enough. Not while its own ring winds up. */
+  private startCharge(
+    now: number,
+    targets: readonly BossPlayer[],
+    events: BossEvent[],
+    fury: number,
+  ) {
+    const cfg = TUNING.charge;
+    if (this.phase < cfg.fromPhase || this.charging || now < this.nextChargeAt)
+      return;
+    const ringing = this.telegraphs.some(
+      (t) => t.mob === undefined && t.kind === "ring" && t.hitAt > now,
+    );
+    let far: { x: number; z: number } | null = null;
+    let best: number = cfg.minDist;
+    for (const p of targets) {
+      const at = p.posAt(now);
+      if (!at) continue;
+      const d = Math.hypot(at.x - this.at.x, at.z - this.at.z);
+      if (d >= best) {
+        best = d;
+        far = at;
+      }
+    }
+    if (ringing || !far || !this.room()) {
+      this.nextChargeAt = now + 1_000;
+      return;
+    }
+    const yaw = Math.atan2(far.x - this.at.x, far.z - this.at.z);
+    // How far its middle goes; the lane runs on by its body, which sweeps
+    // ahead of it.
+    const len = Math.min(best + cfg.overshoot, wanderReach(this.at, yaw));
+    if (len < cfg.minDist * 0.6) {
+      // Its circle won't let it get near them from here: try again soon.
+      this.nextChargeAt = now + 1_000;
+      return;
+    }
+    this.nextChargeAt = now + Math.round(cfg.everyMs / fury);
+    const goAt = now + cfg.windupMs;
+    this.charging = {
+      from: { ...this.at },
+      yaw,
+      len,
+      goAt,
+      endAt: goAt + (len / cfg.speed) * 1000,
+    };
+    this.strideTo = null;
+    const telegraph: Telegraph = {
+      id: this.nextId(),
+      kind: "lane",
+      x: this.at.x,
+      z: this.at.z,
+      yaw,
+      len: len + TUNING.boss.radius,
+      r: cfg.width / 2,
+      inner: 0,
+      at: now,
+      hitAt: goAt,
+      damage: Math.round(cfg.damage * fury),
+    };
+    this.telegraphs.push(telegraph);
+    events.push({ t: "telegraph", telegraph });
   }
 
   /** The tank-buster, on its own clock: at its focus. A taunt always
@@ -1271,6 +1455,20 @@ export function mitigatedHit(
  * place: never by position. */
 export function covers(tg: Telegraph, x: number, z: number): boolean {
   if (tg.kind === "buster" || tg.kind === "scatter") return false;
+  if (tg.kind === "lane") {
+    // Along its line, and within its width either side (a herzie's own
+    // radius counts: brushed by it is hit).
+    const yaw = tg.yaw ?? 0;
+    const dx = x - tg.x;
+    const dz = z - tg.z;
+    const along = dx * Math.sin(yaw) + dz * Math.cos(yaw);
+    const across = Math.abs(dx * Math.cos(yaw) - dz * Math.sin(yaw));
+    return (
+      along >= -TUNING.boss.radius &&
+      along <= (tg.len ?? 0) + TUNING.playerRadius &&
+      across <= tg.r + TUNING.playerRadius
+    );
+  }
   const d = Math.hypot(x - tg.x, z - tg.z);
   return d <= tg.r && d >= tg.inner;
 }

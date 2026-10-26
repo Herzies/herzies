@@ -21,6 +21,7 @@ import { TOWN_TICK_MS } from "@herzies/shared/town-net";
 import { useSyncExternalStore } from "react";
 import { logActivity } from "../../../lib/activity";
 import { notify } from "../../../lib/notices";
+import { townSave } from "../runtime";
 import {
   sfxChannel,
   sfxDown,
@@ -408,6 +409,39 @@ export type Clock = {
 /** How high over the boss's feet a damage number pops. */
 const BOSS_NUMBER_Y = 3.4;
 
+/** How far from the boss's middle a herzie's middle is kept: its body and
+ * a herzie's (Player's capsule). */
+const SHOVE_RADIUS = BOSS_STAND.radius * 0.92 + 0.55;
+
+/**
+ * (x, z) pushed out of the boss's body, if it's in it: a roaming or
+ * charging boss shoves herzies aside rather than swallowing them (its
+ * collider is kinematic, and a character controller won't step out of one
+ * that moved onto it). Unchanged outside the cave, or with no boss up.
+ */
+export function shoveFromBoss(x: number, z: number): { x: number; z: number } {
+  if (!bossFight.on || bossFight.tower || bossFight.victory) return { x, z };
+  if (bossFight.raid?.stage === "lobby") return { x, z };
+  const b = bossNow();
+  const dx = x - b.x;
+  const dz = z - b.z;
+  const d = Math.hypot(dx, dz);
+  if (d >= SHOVE_RADIUS) return { x, z };
+  // Dead centre: out the way it's facing's side.
+  if (d < 1e-3) return { x: b.x + SHOVE_RADIUS, z: b.z };
+  return { x: b.x + (dx / d) * SHOVE_RADIUS, z: b.z + (dz / d) * SHOVE_RADIUS };
+}
+
+/** Whether (x, z) is in a charge's lane (with a herzie's width of slack). */
+function inLane(t: BossTelegraph, x: number, z: number): boolean {
+  const yaw = t.yaw ?? 0;
+  const dx = x - t.x;
+  const dz = z - t.z;
+  const along = dx * Math.sin(yaw) + dz * Math.cos(yaw);
+  const across = Math.abs(dx * Math.cos(yaw) - dz * Math.sin(yaw));
+  return along >= 0 && along <= (t.len ?? 0) + 0.5 && across <= t.r + 0.5;
+}
+
 function shape(t: BossTelegraph, clock: Clock): FloorShape {
   return {
     ...t,
@@ -458,6 +492,11 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
           notify("You're marked: step away from everyone!", {
             kind: "info",
             holdMs: 2_500,
+          });
+        if (m.kind === "lane" && inLane(m, townSave.x, townSave.z))
+          notify("It's charging at you: get out of its path!", {
+            kind: "info",
+            holdMs: 2_000,
           });
       }
       emit();

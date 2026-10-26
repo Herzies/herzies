@@ -15,6 +15,7 @@ import { ambient } from "./ambient";
 import { SEAT_Y } from "./Benches";
 import type { ChatBubble } from "./chatBubbles";
 import { discField } from "./combat/discs";
+import { shoveFromBoss } from "./combat/fight";
 import { combat } from "./combat/state";
 import { applyDowned, downInRaid } from "./downed";
 import { HeadBubble } from "./HeadBubble";
@@ -230,6 +231,8 @@ export function Player({
     const p = b.translation();
     let x = p.x + move.x;
     let z = p.z + move.z;
+    // A roaming boss shoves you aside.
+    ({ x, z } = shoveFromBoss(x, z));
     const r = Math.hypot(x, z);
     if (r > reach) {
       x = (x / r) * reach;

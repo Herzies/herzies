@@ -86,6 +86,12 @@ export function Boss() {
   const tether = useMemo(() => new Tether(), []);
   useEffect(() => () => tether.dispose(), [tether]);
 
+  /** Where it stood last frame, and how fast it's going (smoothed). */
+  const lastAt = useRef<{ x: number; z: number }>({
+    x: BOSS_STAND.x,
+    z: BOSS_STAND.z,
+  });
+  const walkSpeed = useRef(0);
   const stoned = useRef(false);
   /** Its entrance's burst went off. */
   const burst = useRef(false);
@@ -125,15 +131,30 @@ export function Boss() {
         ? entityAt.get(raid.focus)
         : undefined;
     const look = focus ?? (bossFight.bossPath.length ? null : townSave);
-    herzie.heading = look
+    // Lining up a charge: it faces down its lane, not at its focus.
+    const lane = bossFight.shapes.find(
+      (sh) =>
+        sh.kind === "lane" &&
+        sh.mob === undefined &&
+        (sh.resolvedAt === null || now - sh.resolvedAt < 900),
+    );
+    herzie.heading = lane
       ? turnToward(
           herzie.heading,
-          Math.atan2(look.x - at.x, look.z - at.z),
-          TURN_RATE,
-          MAX_TURN_SPEED,
+          lane.yaw ?? 0,
+          TURN_RATE * 2,
+          MAX_TURN_SPEED * 2,
           dt,
         )
-      : turnToward(herzie.heading, at.yaw, TURN_RATE, MAX_TURN_SPEED, dt);
+      : look
+        ? turnToward(
+            herzie.heading,
+            Math.atan2(look.x - at.x, look.z - at.z),
+            TURN_RATE,
+            MAX_TURN_SPEED,
+            dt,
+          )
+        : turnToward(herzie.heading, at.yaw, TURN_RATE, MAX_TURN_SPEED, dt);
     if (focus && !bossFight.victory)
       tether.show(at, focus, !!raid?.taunted, now);
     else tether.hide();
@@ -210,7 +231,12 @@ export function Boss() {
         return;
       }
     }
-    herzie.update(dt, 0);
+    // Its feet go with how fast it's really going (it roams, and charges).
+    const moved = Math.hypot(at.x - lastAt.current.x, at.z - lastAt.current.z);
+    lastAt.current = { x: at.x, z: at.z };
+    const speed = dt > 0 ? Math.min(moved / dt, 20) : 0;
+    walkSpeed.current += (speed - walkSpeed.current) * Math.min(1, dt * 8);
+    herzie.update(dt, walkSpeed.current / SCALE);
   });
 
   if (!herzie || gone) return null;

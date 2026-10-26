@@ -9,6 +9,7 @@ import {
   inTuneBonus,
   minionPackSize,
   parseTune,
+  wanderReach,
   weightedRound,
 } from "./boss-fight.js";
 import { BOSS_LINES, bossLine, bossLineMs } from "./boss-lines.js";
@@ -57,6 +58,15 @@ describe("the boss's walk", () => {
       Math.hypot(far.x - BOSS_WANDER.x, far.z - BOSS_WANDER.z),
     ).toBeCloseTo(BOSS_WANDER.radius);
     expect(clampToWander({ x: 0, z: -2 })).toEqual({ x: 0, z: -2 });
+  });
+
+  it("knows how far it can charge in a straight line", () => {
+    // From the middle, any way: the radius.
+    expect(wanderReach({ x: 0, z: -2 }, 1.2)).toBeCloseTo(BOSS_WANDER.radius);
+    // From the edge, outward: nowhere; inward: the whole diameter.
+    const edge = { x: BOSS_WANDER.radius, z: -2 };
+    expect(wanderReach(edge, Math.PI / 2)).toBeCloseTo(0);
+    expect(wanderReach(edge, -Math.PI / 2)).toBeCloseTo(2 * BOSS_WANDER.radius);
   });
 
   it("never reaches the spawn", () => {

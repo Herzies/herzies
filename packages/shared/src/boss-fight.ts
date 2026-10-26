@@ -55,19 +55,40 @@ export function weightedRound(expected: number, rand: () => number): number {
 // ---------------------------------------------------------------------------
 // The boss's walk
 
-/** The boss walks inside this circle, never to the room's edge (where it
- * could be pinned and cheesed) and never near the spawn at (0, 10). */
+/** The boss roams inside this circle: most of the room, but never right
+ * up against the wall (where it could be pinned and cheesed) and never
+ * onto the spawn at (0, 10). */
 export const BOSS_WANDER = {
   x: 0,
   z: -2,
-  radius: 4.5,
-  /** Metres a second: slower than a walking herzie (4.5). */
-  speed: 1.5,
+  radius: 7,
+  /** Metres a second: still slower than a walking herzie (4.5), so it can
+   * be kited, but quick enough that it does get around. */
+  speed: 2.4,
   /** Radians a second it can turn. */
-  turn: 3,
-  /** It stops this far (between surfaces) from whoever it's after. */
-  keep: 2.5,
+  turn: 3.5,
+  /** It stops this far (between surfaces) from whoever it's after: inside
+   * a melee blow's reach (1.6), so a tank can stand and trade. */
+  keep: 0.6,
 } as const;
+
+/** How far along a ray from `from` (inside the circle) heading `yaw` the
+ * boss can go before leaving its wander circle. */
+export function wanderReach(
+  from: { x: number; z: number },
+  yaw: number,
+): number {
+  const dx = Math.sin(yaw);
+  const dz = Math.cos(yaw);
+  const ox = from.x - BOSS_WANDER.x;
+  const oz = from.z - BOSS_WANDER.z;
+  // |o + d t| = R, solved for the positive t.
+  const b = ox * dx + oz * dz;
+  const c = ox * ox + oz * oz - BOSS_WANDER.radius ** 2;
+  const disc = b * b - c;
+  if (disc <= 0) return 0;
+  return Math.max(0, -b + Math.sqrt(disc));
+}
 
 /** `p` pulled back inside the wander circle. */
 export function clampToWander(p: { x: number; z: number }): {

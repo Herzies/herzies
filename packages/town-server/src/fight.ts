@@ -1931,6 +1931,9 @@ export class FightRuntime {
       ...(target !== undefined ? { target } : {}),
       ...(t.lethal ? { lethal: 1 as const } : {}),
       ...(t.mob !== undefined ? { mob: t.mob } : {}),
+      ...(t.kind === "lane"
+        ? { yaw: round(t.yaw ?? 0), len: round(t.len ?? 0) }
+        : {}),
     };
   }
 

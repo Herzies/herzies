@@ -34,7 +34,7 @@ const STARTS = T0 + 1_000;
 const LEVEL = 30;
 /** Print each fight's numbers, for tuning: flip on while tuning (the
  * Workers test runtime has no environment to switch it from). */
-const LOG = false;
+const LOG = true;
 
 type Role = "bard" | "percussionist" | "record_slinger" | "none";
 
@@ -204,6 +204,7 @@ function raid(bots: Bot[], seed: number, limitMs = 17 * 60_000): Result {
   let minionsDown = 0;
   let minHp = 1;
   let shapes = 0;
+  let lanes = 0;
   let t = T0;
   while (t - STARTS < limitMs && !f.closeWhy) {
     t += STEP;
@@ -323,14 +324,17 @@ function raid(bots: Bot[], seed: number, limitMs = 17 * 60_000): Result {
     for (const o of f.step(t)) {
       if (o.msg.t === "resolve") hitsTaken += o.msg.hits.length;
       if (o.msg.t === "mobDown") minionsDown++;
-      if (o.msg.t === "telegraph") shapes++;
+      if (o.msg.t === "telegraph") {
+        shapes++;
+        if (o.msg.kind === "lane") lanes++;
+      }
       if (o.msg.t === "down") downs++;
       if (o.msg.t === "revived") revives++;
     }
   }
   if (LOG)
     console.log(
-    `SIM ${bots.map((b) => b.role[0]).join("")} seed=${seed} -> ${f.closeWhy} in ${min(t - STARTS)} min, maxHp=${f.engine.maxHp}, hp left=${Math.round(f.engine.hp)}, downs=${downs}, revives=${revives}, minions=${minionsDown}, hits=${hitsTaken}, shapes=${shapes}, minHp=${Math.round(minHp * 100)}%`,
+    `SIM ${bots.map((b) => b.role[0]).join("")} seed=${seed} -> ${f.closeWhy} in ${min(t - STARTS)} min, maxHp=${f.engine.maxHp}, hp left=${Math.round(f.engine.hp)}, downs=${downs}, revives=${revives}, minions=${minionsDown}, hits=${hitsTaken}, shapes=${shapes}, charges=${lanes}, minHp=${Math.round(minHp * 100)}%`,
   );
   return {
     outcome: f.closeWhy,
@@ -395,7 +399,9 @@ describe("the raid, simulated", () => {
   });
 
   it("a slow-to-react party takes hits, and its Bards bring the fallen back", () => {
-    const r = raid(party(TRIO, { reaction: 1_250 }), 8);
+    // Slower than a roaming boss gives (it rarely parks long enough to
+    // catch the sluggish at 1.25 s); retuned with heal mode in the sim.
+    const r = raid(party(TRIO, { reaction: 1_600 }), 8);
     expect(r.downs).toBeGreaterThan(0);
     expect(r.revives).toBeGreaterThan(0);
   });

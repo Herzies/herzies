@@ -585,6 +585,8 @@ describe("minions", () => {
   it("their damage counts as adds, and never touches the boss", () => {
     const { f } = locked([{ uid: "a" }]);
     const boss = f.engine as BossEngine;
+    // Held where it is, so blows at the minions can't reach it.
+    (boss as unknown as { pinned: boolean }).pinned = true;
     boss.summon(STARTS, 2, 10, 10, []);
     const hpBefore = boss.hp;
     // Wait for them to wake and walk in.
