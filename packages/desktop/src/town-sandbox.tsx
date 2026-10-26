@@ -61,7 +61,7 @@ import {
   townLive,
   townSave,
 } from "./components/town/runtime";
-import { SkillHud } from "./components/town/SkillHud";
+import { CastBar, SkillHud } from "./components/town/SkillHud";
 import TownCanvas from "./components/town/TownCanvas";
 import { setVitals } from "./components/town/vitals";
 
@@ -378,6 +378,7 @@ function Sandbox() {
         units={hotbarUnits}
         className="bottom-3 left-1/2 -translate-x-1/2"
       />
+      <CastBar className="bottom-[3.75rem] left-1/2 -translate-x-1/2" />
       <TownCanvas
         spots={spots}
         player={player}

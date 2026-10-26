@@ -42,7 +42,7 @@ import type { TownMap } from "./town/map";
 import { markMet } from "./town/met";
 import { useTownNet, useTownNetVersion } from "./town/net/townNet";
 import { spotsOf, type TownSpot, townLive, useTownMap } from "./town/runtime";
-import { SkillHud } from "./town/SkillHud";
+import { CastBar, SkillHud } from "./town/SkillHud";
 import { useTuneSender } from "./town/tune";
 
 // three.js, Rapier's WASM and friends: loaded the first time someone opens
@@ -369,6 +369,11 @@ export function TownWorld({
                   className="bottom-full left-1/2 -translate-x-1/2"
                 />
               ) : null}
+              {/* A skill being played: over the hotbar's middle, a gap
+                  above it (the hotbar is 36px tall). */}
+              {!hudHidden ? (
+                <CastBar className="bottom-full left-1/2 mb-12 -translate-x-1/2" />
+              ) : null}
             </div>
           </>
         ) : null}
@@ -381,6 +386,16 @@ export function TownWorld({
               chatOverlay
                 ? "bottom-[calc(var(--dock-height,0px)+4.5rem)]"
                 : "bottom-3",
+            )}
+          />
+        )}
+        {profile || hudHidden ? null : (
+          <CastBar
+            className={cn(
+              "left-1/2 -translate-x-1/2",
+              chatOverlay
+                ? "bottom-[calc(var(--dock-height,0px)+7.5rem)]"
+                : "bottom-[3.75rem]",
             )}
           />
         )}

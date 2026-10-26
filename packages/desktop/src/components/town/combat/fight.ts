@@ -537,6 +537,8 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       emit();
       return;
     case "victory":
+      // Whatever it was winding up dies with it: off the floor.
+      bossFight.shapes = [];
       bossFight.victory = { by: m.by, at: now };
       bossFight.closing = {
         why: "victory",
@@ -599,6 +601,8 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
     }
     case "closing":
       bossFight.closing = { why: m.why, at: clock.toLocal(m.closesAt) };
+      // The fight's over: nothing more lands, so nothing stays drawn.
+      bossFight.shapes = [];
       // The wipe has its own banner (moments.ts); the log keeps it.
       if (m.why === "wiped")
         logActivity("The boss won: everyone in the raid was knocked out");

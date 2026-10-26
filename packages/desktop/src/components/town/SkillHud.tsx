@@ -4,13 +4,12 @@ import { bossFight } from "./combat/fight";
 import { buffOn, skills } from "./combat/skills";
 
 /**
- * What your skills are doing right now: a Cymbrella you're under, counting
- * down (how much less damage, the seconds left), and a Resurrect you're
- * playing, as a bar that fills until the fallen are back up (move, and it
- * stops). Rattled from the boss's busters (stacks, seconds left: time to
- * hand the boss over), and, while you're knocked out, a Bard bringing you
- * back. Your skills themselves sit on the hotbar (Hotbar.tsx), with
- * their cooldowns. (A level-up is a notice: lib/notices.ts.)
+ * What your buffs are doing right now, beside the hotbar: a Cymbrella
+ * you're under (how much less damage, the seconds left) and Rattled from
+ * the boss's busters (stacks, seconds left: time to hand the boss over).
+ * Your skills sit on the hotbar (Hotbar.tsx) with their cooldowns; a skill
+ * being played, or a Bard playing you back up, is the cast bar over its
+ * middle (CastBar). (A level-up is a notice: lib/notices.ts.)
  */
 export function SkillHud({
   className = "bottom-3 right-2",
@@ -20,10 +19,6 @@ export function SkillHud({
 }) {
   const buffBox = useRef<HTMLDivElement>(null);
   const rattledBox = useRef<HTMLDivElement>(null);
-  const savedBox = useRef<HTMLDivElement>(null);
-  const savedFill = useRef<HTMLDivElement>(null);
-  const channelBox = useRef<HTMLDivElement>(null);
-  const channelFill = useRef<HTMLDivElement>(null);
 
   // Runs off the frame clock, not renders.
   useEffect(() => {
@@ -48,26 +43,6 @@ export function SkillHud({
         if (r && rattledBox.current.textContent !== text)
           rattledBox.current.textContent = text;
       }
-      if (savedBox.current && savedFill.current) {
-        // A Bard playing you back up.
-        let ch: { from: number; until: number } | undefined;
-        if (bossFight.you !== null)
-          for (const c of skills.channels.values())
-            if (c.target === bossFight.you && now < c.until) ch = c;
-        savedBox.current.style.display = ch ? "" : "none";
-        if (ch)
-          savedFill.current.style.width = `${Math.min(1, (now - ch.from) / Math.max(1, ch.until - ch.from)) * 100}%`;
-      }
-      if (channelBox.current && channelFill.current) {
-        const ch =
-          bossFight.you !== null
-            ? skills.channels.get(bossFight.you)
-            : undefined;
-        const on = !!ch && now < ch.until;
-        channelBox.current.style.display = on ? "" : "none";
-        if (ch && on)
-          channelFill.current.style.width = `${Math.min(1, (now - ch.from) / Math.max(1, ch.until - ch.from)) * 100}%`;
-      }
       raf = requestAnimationFrame(step);
     };
     raf = requestAnimationFrame(step);
@@ -82,28 +57,6 @@ export function SkillHud({
       )}
     >
       <div
-        ref={channelBox}
-        role="status"
-        className="w-40 rounded bg-black/60 px-1.5 py-1 text-center text-[11px] text-[#ffd84a]"
-        style={{ display: "none" }}
-      >
-        Resurrecting… hold still
-        <div className="mt-0.5 h-1 overflow-hidden rounded-sm bg-white/15">
-          <div ref={channelFill} className="h-full bg-[#ffd84a]" />
-        </div>
-      </div>
-      <div
-        ref={savedBox}
-        role="status"
-        className="w-44 rounded bg-black/60 px-1.5 py-1 text-center text-[11px] text-[#7ee2a8]"
-        style={{ display: "none" }}
-      >
-        A Bard is bringing you back…
-        <div className="mt-0.5 h-1 overflow-hidden rounded-sm bg-white/15">
-          <div ref={savedFill} className="h-full bg-[#7ee2a8]" />
-        </div>
-      </div>
-      <div
         ref={rattledBox}
         className="rounded bg-black/60 px-1.5 text-[11px] text-[#ff8a7a]"
         style={{ display: "none" }}
@@ -113,6 +66,79 @@ export function SkillHud({
         className="rounded bg-black/60 px-1.5 text-[11px] text-yellow"
         style={{ display: "none" }}
       />
+    </div>
+  );
+}
+
+/** How far a channel has got, 0 to 1. */
+const progress = (c: { from: number; until: number }, now: number) =>
+  Math.min(1, (now - c.from) / Math.max(1, c.until - c.from));
+
+/**
+ * The cast bar: a skill with a cast time being played (Resurrect: hold
+ * still), or a Bard playing you back up while you're down. Centred over the
+ * hotbar, in the gap between it and your herzie, where the eye already is.
+ * Shows nothing (and takes no room) the rest of the time.
+ */
+export function CastBar({ className }: { className?: string }) {
+  const box = useRef<HTMLDivElement>(null);
+  const label = useRef<HTMLDivElement>(null);
+  const fill = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let raf = 0;
+    let shown = "";
+    const step = () => {
+      const now = performance.now();
+      const you = bossFight.you;
+      // Yours first; else a Bard playing you back up.
+      const mine = you !== null ? skills.channels.get(you) : undefined;
+      let saving: { from: number; until: number } | undefined;
+      if (you !== null && !(mine && now < mine.until))
+        for (const c of skills.channels.values())
+          if (c.target === you && now < c.until) saving = c;
+      const ch = mine && now < mine.until ? mine : saving;
+      const kind = ch === mine && ch ? "mine" : ch ? "saving" : "";
+      if (box.current && label.current && fill.current) {
+        box.current.style.display = ch ? "" : "none";
+        if (kind !== shown) {
+          shown = kind;
+          label.current.textContent =
+            kind === "mine"
+              ? "Resurrect · hold still"
+              : kind === "saving"
+                ? "A Bard is bringing you back…"
+                : "";
+          box.current.dataset.kind = kind;
+        }
+        if (ch) fill.current.style.width = `${progress(ch, now) * 100}%`;
+      }
+      raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  return (
+    <div
+      ref={box}
+      role="status"
+      className={cn(
+        "group pointer-events-none absolute z-30 w-48 rounded-md border border-white/15 bg-black/65 px-2 py-1 text-center text-[11px] backdrop-blur-sm",
+        className,
+      )}
+      style={{ display: "none" }}
+    >
+      <div
+        ref={label}
+        className="leading-4 text-[#ffd84a] group-data-[kind=saving]:text-[#7ee2a8]"
+      />
+      <div className="mt-0.5 h-1.5 overflow-hidden rounded-sm bg-white/15">
+        <div
+          ref={fill}
+          className="h-full bg-[#ffd84a] group-data-[kind=saving]:bg-[#7ee2a8]"
+        />
+      </div>
     </div>
   );
 }

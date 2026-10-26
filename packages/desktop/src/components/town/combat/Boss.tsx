@@ -18,6 +18,7 @@ import { beats, resetMoments, stepMoments } from "./moments";
 import { CRUMBLE, STONE_HOLD } from "./results";
 import { entityAt } from "./skills";
 import { combat } from "./state";
+import { waveField } from "./waves";
 
 /** The boss looms: drawn this much bigger than it's built, like the one
  * in town. */
@@ -27,8 +28,10 @@ const MAX_TURN_SPEED = 3;
 /** The boss rears this much while an attack fills, and drops on the slam. */
 const REAR = 0.08;
 const SLAM_MS = 260;
-/** How long it takes to wake (rise and roar), ms. */
-const WAKE_MS = 1_100;
+/** How long it takes to wake (rise out of the floor and roar), ms. */
+const WAKE_MS = 1_300;
+/** How far below the floor it starts its entrance. */
+const ENTRANCE_DEPTH = 3;
 /** Over its head, for what it says. */
 const SAY_HEIGHT = BOSS_STAND.top * 1.25;
 // The body's props, made once: rapier rebuilds a collider whenever its
@@ -84,8 +87,13 @@ export function Boss() {
   useEffect(() => () => tether.dispose(), [tether]);
 
   const stoned = useRef(false);
+  /** Its entrance's burst went off. */
+  const burst = useRef(false);
   useEffect(() => {
-    if (herzie) stoned.current = false;
+    if (herzie) {
+      stoned.current = false;
+      burst.current = false;
+    }
   }, [herzie]);
   // Out of the room: the raid's beats start over next time.
   useEffect(() => resetMoments, []);
@@ -97,6 +105,14 @@ export function Boss() {
       return;
     }
     const at = bossNow();
+    // Not there at all in the lobby: it comes when the fight does.
+    const raidNow = bossFight.raid;
+    const hidden = raidNow?.stage === "lobby";
+    herzie.root.visible = !hidden;
+    if (hidden) {
+      tether.hide();
+      return;
+    }
     herzie.root.position.x = at.x;
     herzie.root.position.z = at.z;
     body.current?.setNextKinematicTranslation({ x: at.x, y: 0, z: at.z });
@@ -141,6 +157,24 @@ export function Boss() {
     const y = 1 + rear - slam * 0.1 + breath + roar;
     const xz = 1 - rear * 0.4 + slam * 0.06 - breath * 0.3 + roar * 0.5;
     herzie.root.scale.set(SCALE * xz, SCALE * y, SCALE * xz);
+    // Its entrance: up out of the floor, growing as it comes, with a burst
+    // of dust where it breaks through.
+    if (woke < 1 && !bossFight.victory) {
+      const e = 1 - (1 - woke) ** 3;
+      herzie.root.position.y = -ENTRANCE_DEPTH * (1 - e);
+      herzie.root.scale.multiplyScalar(0.45 + 0.55 * e);
+      if (!burst.current) {
+        burst.current = true;
+        for (let i = 0; i < 10; i++) {
+          const a = (i / 10) * Math.PI * 2;
+          waveField.burst(
+            [at.x + Math.sin(a) * 2.2, 0.3, at.z + Math.cos(a) * 2.2],
+            [Math.sin(a) * 0.4, 1, Math.cos(a) * 0.4],
+            i % 2 ? "hit" : "crit",
+          );
+        }
+      }
+    } else if (!bossFight.victory) herzie.root.position.y = 0;
     // Its skin: white on a hit (more on yours), a bright flash on a new
     // phase, a red glow once it's enraged.
     if (!bossFight.victory) {
@@ -180,18 +214,22 @@ export function Boss() {
   });
 
   if (!herzie || gone) return null;
+  // Nothing to bump into before it's there.
+  const lobby = bossFight.raid?.stage === "lobby";
   return (
     <>
       <primitive object={herzie.root} />
       <primitive object={tether.object} />
-      <RigidBody
-        ref={body}
-        type="kinematicPosition"
-        colliders={false}
-        position={BODY_AT}
-      >
-        <CylinderCollider args={COLLIDER_ARGS} position={COLLIDER_AT} />
-      </RigidBody>
+      {lobby ? null : (
+        <RigidBody
+          ref={body}
+          type="kinematicPosition"
+          colliders={false}
+          position={BODY_AT}
+        >
+          <CylinderCollider args={COLLIDER_ARGS} position={COLLIDER_AT} />
+        </RigidBody>
+      )}
       <group ref={sayAnchor} position={SAY_AT}>
         <BossSay />
       </group>

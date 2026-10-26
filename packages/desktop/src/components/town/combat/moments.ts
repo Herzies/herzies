@@ -133,6 +133,9 @@ export function stepMoments(now: number): void {
   }
   s.stage = raid.stage;
 
+  // Once it's fallen (a last blow can cross a phase too), no more beats
+  // but the end's own.
+  if (bossFight.victory || bossFight.closing) s.phase = bossFight.phase;
   if (bossFight.phase > s.phase) {
     s.phase = bossFight.phase;
     beats.phaseAt = now;
