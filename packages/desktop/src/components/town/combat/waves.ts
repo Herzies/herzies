@@ -246,7 +246,7 @@ export class WaveField {
         w.alive = false;
         // Short of its full range, it struck something (the ground, a tree).
         if (w.reach < WAVE.range || w.pos[1] < 0) {
-          this.burst(w.pos, w.dir, "fizzle");
+          this.burst(w.pos, w.dir, w.heal ? "heal" : "fizzle");
         }
       }
     }

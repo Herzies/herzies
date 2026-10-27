@@ -38,7 +38,6 @@ import {
   sfxHealBolt,
   sfxImpact,
   sfxMeleeHit,
-  sfxNoTarget,
   sfxSwing,
   sfxTaunt,
 } from "../sfx";
@@ -257,6 +256,9 @@ export function Combat({
     dummy: null as DummyState | null,
     /** The ally the heal bolt under way goes to (an entity id). */
     bolt: null as number | null,
+    /** A heal bolt under way with nobody locked: it flies down the aim,
+     * for show (it heals no one). */
+    freeHeal: false,
   });
   const ray = useRef(
     new rapier.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: -1 }),
@@ -580,20 +582,10 @@ export function Combat({
         combat.casts = (combat.casts + 1) & 0xffff;
         combat.spread = 0.6;
         sfxDiscThrow(free === "held-l");
-      } else if (
-        combat.on &&
-        (queued || combat.fireHeld) &&
-        ready &&
-        heals &&
-        stance.lock === null
-      ) {
-        // Nobody to heal under the crosshair: a dull "no", and no bolt.
-        a.castAt = now;
-        combat.queuedAt = Number.NEGATIVE_INFINITY;
-        sfxNoTarget();
       } else if (combat.on && (queued || combat.fireHeld) && ready) {
         a.castAt = now;
         a.bolt = heals ? stance.lock : null;
+        a.freeHeal = heals && stance.lock === null;
         combat.queuedAt = Number.NEGATIVE_INFINITY;
         herzie.root.getWorldPosition(chest);
         chest.y += herzie.height * 0.55;
@@ -616,7 +608,7 @@ export function Combat({
         } else {
           herzie.cast(Math.atan2(a.point.y - chest.y, Math.max(flat, 0.5)));
           combat.spread = 1;
-          if (a.bolt === null) sfxCharge();
+          if (!heals) sfxCharge();
         }
         combat.casts = (combat.casts + 1) & 0xffff;
       }
@@ -726,9 +718,24 @@ export function Combat({
         a.bolt = null;
         sfxHealBolt();
         shake(0.02);
-      } else if (herzie.released && a.bolt !== null) {
-        // Its ally left before it went: no bolt.
+      } else if (herzie.released && (a.freeHeal || a.bolt !== null)) {
+        // A heal bolt with nobody to go to (none under the crosshair, or
+        // its ally left before it went): it still flies, down the aim, but
+        // heals no one, so the server isn't told.
         a.bolt = null;
+        a.freeHeal = false;
+        herzie.handWorldPosition(hand);
+        dir.copy(a.point).sub(hand);
+        const toAim = dir.length();
+        dir.normalize();
+        waveField.cast([hand.x, hand.y, hand.z], [dir.x, dir.y, dir.z], {
+          mine: true,
+          heal: true,
+          ally: null,
+          reach: a.blocked ? toAim + 0.2 : WAVE.range,
+        });
+        sfxHealBolt();
+        shake(0.02);
       } else if (herzie.released && combat.on && combat.attack === "wave") {
         herzie.handWorldPosition(hand);
         dir.copy(a.point).sub(hand);
