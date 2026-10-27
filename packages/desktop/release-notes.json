@@ -1,5 +1,18 @@
 [
   {
+    "version": "0.1.0-beta.55",
+    "highlights": [
+      "The boss raid is rebuilt: the cave opens 15 minutes early, and whoever is inside when the fight starts is the raid",
+      "Knocked out? Wait for a Bard's Resurrect, or give up and sit the rest out. Everyone still standing when the boss falls is paid the same",
+      "The boss walks the cave and charges, calls in minions as it weakens, and gets angrier the longer the fight takes",
+      "The boss hates music: play some while you fight for a bonus that suits your class",
+      "Bards can heal with their lute (press R), learn Haste at level 15, and every Bard gets Resurrect. Percussionists get Taunt",
+      "Your class attack and skills need your class instrument in hand",
+      "Buy several Star Candy at once, and benches heal you properly again",
+      "The Town opens in the big window and remembers your choice"
+    ]
+  },
+  {
     "version": "0.1.0-beta.54",
     "highlights": [
       "The Town comes first now, with frosted windows over it and the menu under the chat",
