@@ -13,6 +13,7 @@ import {
   type TownTicketPayload,
 } from "@herzies/shared/town-net";
 import { exports } from "cloudflare:workers";
+import { armed } from "./arms";
 import { describe, expect, it } from "vitest";
 import { TUNING } from "../src/boss";
 
@@ -53,7 +54,7 @@ async function connect() {
 
 function ticket(uid: string, over: Partial<TownTicketPayload> = {}) {
   return signTownTicket(
-    {
+    armed({
       uid,
       name: uid,
       look: { seed: `HERZ-${uid}`, stage: 2 },
@@ -69,7 +70,7 @@ function ticket(uid: string, over: Partial<TownTicketPayload> = {}) {
         maxHp: 50_000,
       },
       ...over,
-    },
+    }),
     SECRET,
   );
 }
@@ -217,5 +218,48 @@ describe("boss room", () => {
     expect(w.fight).toMatchObject({ event: "the-next-boss", hp: 777, maxHp: 1000 });
     c.ws.close();
     await c.closed;
+  });
+
+  describe("a locked raid", () => {
+    const raidClaim = () => ({
+      event: "evt-raid-room",
+      until: Date.now() / 1000 + 600,
+      hp: 20_000,
+      maxHp: 20_000,
+      starts: Date.now() / 1000 - 60,
+      locked: {
+        at: Date.now() / 1000 - 60,
+        roster: ["r-standing", "r-down"],
+        revives: 0,
+      },
+    });
+
+    it("lets a roster member in, and turns away anyone else", async () => {
+      await new Promise((r) => setTimeout(r, 100));
+      const a = await enter("r-standing", { boss: raidClaim() });
+      const w = await a.next("welcome");
+      expect(w.fight?.raid).toMatchObject({ stage: "fight", you: "in" });
+      const c = await enter("r-outsider", { boss: raidClaim() });
+      expect(await c.closed).toBe(TOWN_CLOSE.sealed);
+      a.ws.close();
+      await a.closed;
+    });
+
+    it("lets a downed roster member back in to wait for a Bard, and give up", async () => {
+      const keeper = await enter("r-standing", { boss: raidClaim() });
+      await keeper.next("welcome");
+      const d = await enter("r-down", {
+        boss: raidClaim(),
+        hp: { hp: 0, maxHp: 200, down: true },
+      });
+      await d.next("welcome");
+      await d.next("down");
+      d.ws.send(JSON.stringify({ t: "forfeit" }));
+      await d.next("out");
+      d.ws.close();
+      await d.closed;
+      keeper.ws.close();
+      await keeper.closed;
+    });
   });
 });

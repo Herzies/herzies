@@ -5,6 +5,7 @@ import {
   STRIKE_DAMAGE,
 } from "@herzies/shared/combat";
 import { TOWN_WALK_SPEED } from "@herzies/shared/town-net";
+import { BOSS_WANDER } from "@herzies/shared/boss-fight";
 import { describe, expect, it } from "vitest";
 import {
   BossEngine,
@@ -70,9 +71,12 @@ describe("tuning invariants", () => {
 
   it("the ring's safe middle can be reached from the far wall in its windup", () => {
     const REACTION_MS = 600;
-    const { x, z } = TUNING.boss;
-    // The farthest a herzie can stand from the boss inside the room.
-    const farthest = Math.hypot(x, z) + TUNING.roomRadius;
+    // The farthest a herzie can stand from the boss inside the room,
+    // wherever in its circle the boss has walked.
+    const farthest =
+      Math.hypot(BOSS_WANDER.x, BOSS_WANDER.z) +
+      BOSS_WANDER.radius +
+      TUNING.roomRadius;
     const walk = ((farthest - TUNING.ring.inner) / TOWN_WALK_SPEED) * 1000;
     expect(walk + REACTION_MS).toBeLessThanOrEqual(TUNING.ring.windupMs);
   });
@@ -118,6 +122,97 @@ describe("covers", () => {
     expect(covers(ring, 3, 0)).toBe(false);
     expect(covers(ring, 8, 0)).toBe(true);
   });
+  it("a lane covers its strip, a herzie's width either side", () => {
+    // From the origin heading +z (yaw 0), 10 long, 1.3 either side.
+    const lane = { ...circle, kind: "lane" as const, r: 1.3, yaw: 0, len: 10 };
+    expect(covers(lane, 0, 5)).toBe(true);
+    expect(covers(lane, 1.6, 9)).toBe(true);
+    expect(covers(lane, 2.2, 5)).toBe(false);
+    expect(covers(lane, 0, 11)).toBe(false);
+    // Turned a quarter: heading +x.
+    const east = { ...lane, yaw: Math.PI / 2 };
+    expect(covers(east, 5, 0)).toBe(true);
+    expect(covers(east, 0, 5)).toBe(false);
+  });
+});
+
+describe("the boss roams", () => {
+  const dist = (a: { x: number; z: number }, b: { x: number; z: number }) =>
+    Math.hypot(a.x - b.x, a.z - b.z);
+
+  it("keeps walking after its focus through its own slams", () => {
+    const e = engine();
+    const far = still("a", 6, 6);
+    const ev = run(e, T0, T0 + 3_100, [far]);
+    const slam = telegraphs(ev).find((t) => t.kind === "circle");
+    expect(slam).toBeDefined();
+    const before = e.position;
+    run(e, T0 + 3_150, T0 + 3_500, [far]);
+    expect(dist(e.position, before)).toBeGreaterThan(0.3);
+  });
+
+  it("stands still while its ring winds up", () => {
+    const e = engine(200, 1000, 3);
+    const p = still("a", 3, 6);
+    let ring: Telegraph | undefined;
+    for (let t = T0; t < T0 + 60_000 && !ring; t += 50) {
+      ring = telegraphs(e.update(t, [p])).find((x) => x.kind === "ring");
+      if (ring) {
+        const at = e.position;
+        run(e, t + 50, ring.hitAt - 50, [p]);
+        expect(dist(e.position, at)).toBeLessThan(1e-6);
+      }
+    }
+    expect(ring).toBeDefined();
+  });
+
+  it("closes to within a blow's reach, then shifts round whoever it's on", () => {
+    const e = engine();
+    const p = still("a", 0, 2);
+    run(e, T0, T0 + 4_000, [p]);
+    const reach = dist(e.position, { x: 0, z: 2 }) - TUNING.boss.radius - TUNING.playerRadius;
+    expect(reach).toBeLessThan(1.6);
+    const spots: { x: number; z: number }[] = [];
+    for (let t = T0 + 4_000; t < T0 + 20_000; t += 50) {
+      e.update(t, [p]);
+      spots.push(e.position);
+    }
+    const moved = Math.max(...spots.map((s) => dist(s, spots[0])));
+    expect(moved).toBeGreaterThan(1);
+  });
+
+  it("from phase 2, charges whoever keeps far off, down a lane it draws first", () => {
+    const e = engine(600, 1000, 2);
+    // Its focus up close (the nearest), and someone at the back.
+    const tank = still("tank", 0, -1);
+    const back = still("back", 3, 6);
+    let lane: Telegraph | undefined;
+    let t = T0;
+    for (; t < T0 + 60_000 && !lane; t += 50)
+      lane = telegraphs(e.update(t, [tank, back])).find((x) => x.kind === "lane");
+    expect(lane).toBeDefined();
+    if (!lane) return;
+    expect(lane.at).toBeGreaterThanOrEqual(T0 + 3_000 + TUNING.charge.everyMs);
+    expect(lane.hitAt - lane.at).toBe(TUNING.charge.windupMs);
+    expect(covers(lane, 3, 6)).toBe(true);
+    // It hits whoever's in the lane as it goes, and ends up down the lane.
+    const after = run(e, t, lane.hitAt + 2_000, [tank, back]);
+    const hit = after.find((x) => x.t === "resolve" && x.id === lane.id);
+    expect(hit?.t === "resolve" && hit.hits.map((h) => h.uid)).toContain("back");
+    expect(dist(e.position, { x: 3, z: 6 })).toBeLessThan(dist({ x: lane.x, z: lane.z }, { x: 3, z: 6 }));
+    expect(
+      Math.hypot(e.position.x - BOSS_WANDER.x, e.position.z - BOSS_WANDER.z),
+    ).toBeLessThanOrEqual(BOSS_WANDER.radius + 1e-6);
+  });
+
+  it("doesn't charge in phase 1, or when everyone's close", () => {
+    const calm = engine();
+    const ev = run(calm, T0, T0 + 40_000, [still("a", 0, -1), still("b", 5, 9)]);
+    expect(telegraphs(ev).some((t) => t.kind === "lane")).toBe(false);
+    const close = engine(600, 1000, 2);
+    const ev2 = run(close, T0, T0 + 40_000, [still("a", 0, -1), still("b", 1, 0)]);
+    expect(telegraphs(ev2).some((t) => t.kind === "lane")).toBe(false);
+  });
 });
 
 describe("attacks", () => {
@@ -139,7 +234,8 @@ describe("attacks", () => {
     expect(resolve).toBeTruthy();
     if (resolve?.t !== "resolve") return;
     expect(resolve.hits).toEqual([
-      { uid: "a", damage: TUNING.slam.damage, absorbed: 0, blocked: 0 },
+      // Alone, it's the one the boss is after: the slam is aimed at it.
+      { uid: "a", damage: TUNING.slam.damage, absorbed: 0, blocked: 0, aimed: true },
     ]);
   });
 
@@ -163,7 +259,7 @@ describe("attacks", () => {
     const damage = Math.round(TUNING.slam.damage / 2);
     // Def isn't a Cymbrella: nothing blocked.
     expect(resolve.hits).toEqual([
-      { uid: "a", damage, absorbed: TUNING.slam.damage - damage, blocked: 0 },
+      { uid: "a", damage, absorbed: TUNING.slam.damage - damage, blocked: 0, aimed: true },
     ]);
   });
 
@@ -234,9 +330,16 @@ describe("attacks", () => {
     let max = 0;
     for (let t = T0; t < T0 + 30_000; t += 50) {
       e.update(t, players);
-      max = Math.max(max, e.active.length);
+      // Busters don't count against the cap (they always land).
+      max = Math.max(
+        max,
+        e.active.filter((t) => t.kind !== "buster").length,
+      );
     }
-    expect(max).toBeLessThanOrEqual(MAX_TELEGRAPHS);
+    // A few more in a bigger raid: 12 here.
+    expect(max).toBeLessThanOrEqual(
+      MAX_TELEGRAPHS + Math.floor(12 / TUNING.scale.perPlayers),
+    );
   });
 
   it("is deterministic for a seed", () => {
@@ -370,5 +473,97 @@ describe("melee damage", () => {
   it("no blow out-hits the Record Slinger's disc", () => {
     expect(BUMP_DAMAGE).toBeLessThan(STRIKE_DAMAGE);
     expect(STRIKE_DAMAGE).toBeLessThan(DISC_DAMAGE);
+  });
+});
+
+describe("production pass: fairness and the raid's size", () => {
+  it("its minions never wind up faster than the boss's own minimum", () => {
+    const e = engine(10_000, 10_000);
+    const players = [still("a", 0, 6), still("b", 3, 6)];
+    e.update(T0, players);
+    e.summon(T0, 6, 30, 10, []);
+    const windups: number[] = [];
+    for (let t = T0; t < T0 + 30_000; t += 50) {
+      for (const ev of e.update(t, players))
+        if (ev.t === "telegraph" && ev.telegraph.mob !== undefined)
+          windups.push(ev.telegraph.hitAt - ev.telegraph.at);
+    }
+    expect(windups.length).toBeGreaterThan(0);
+    expect(Math.min(...windups)).toBeGreaterThanOrEqual(TUNING.minWindupMs);
+  });
+
+  it("a bigger raid gets more slams in a volley", () => {
+    const volley = (n: number) => {
+      const e = engine(300, 1000);
+      const players = Array.from({ length: n }, (_, i) =>
+        still(`p${i}`, ((i % 8) - 4) * 2.5, Math.floor(i / 8) * 2.5 + 2),
+      );
+      let most = 0;
+      for (let t = T0; t < T0 + 20_000; t += 50)
+        most = Math.max(
+          most,
+          e.update(t, players).filter(
+            (ev) => ev.t === "telegraph" && ev.telegraph.kind === "circle",
+          ).length,
+        );
+      return most;
+    };
+    expect(volley(36)).toBeGreaterThan(volley(8));
+  });
+
+  it("a buster leaves its target Rattled, and the next one hits harder", () => {
+    const e = engine(1000, 1000);
+    const tank: BossPlayer = { ...still("tank", 0, 5, 1_000) };
+    const other = still("dps", 6, 9, 1_000);
+    e.setTaunt("tank", T0 + 60_000, T0);
+    const hits: number[] = [];
+    let stacks = 0;
+    for (let t = T0; t < T0 + 40_000; t += 50) {
+      for (const ev of e.update(t, [tank, other])) {
+        if (ev.t === "rattled") stacks = ev.stacks;
+        if (ev.t === "resolve")
+          for (const h of ev.hits)
+            if (h.uid === "tank" && h.aimed) hits.push(h.damage + h.absorbed);
+      }
+    }
+    expect(stacks).toBeGreaterThanOrEqual(2);
+    // Busters only (slams on the focus are aimed too): the biggest grow.
+    const sorted = [...hits].sort((a, b) => a - b);
+    expect(sorted[sorted.length - 1]).toBeGreaterThan(TUNING.buster.damage);
+  });
+
+  it("doesn't flip its focus between two who hate it about the same", () => {
+    const e = engine(100_000, 100_000);
+    const a = still("a", -2, 4);
+    const b = still("b", 2, 4);
+    e.update(T0, [a, b]);
+    e.addThreat("a", 1_000);
+    e.update(T0 + 50, [a, b]);
+    expect(e.focus).toBe("a");
+    // b pulls a little ahead, but not 30% ahead: it stays on a.
+    e.addThreat("b", 1_100);
+    e.update(T0 + 100, [a, b]);
+    expect(e.focus).toBe("a");
+    e.addThreat("b", 500);
+    e.update(T0 + 150, [a, b]);
+    expect(e.focus).toBe("b");
+  });
+
+  it("in a big raid, scatter marks go off on whoever stands close to the marked", () => {
+    const e = engine(1_000_000, 1_000_000, 3);
+    // Twenty in pairs: whoever's marked takes their partner with them.
+    const players = Array.from({ length: 20 }, (_, i) =>
+      still(`p${i}`, (Math.floor(i / 2) - 5) * 2.4, 6 + (i % 2) * 0.5),
+    );
+    let marks = 0;
+    let shared = 0;
+    for (let t = T0; t < T0 + 40_000; t += 50) {
+      for (const ev of e.update(t, players)) {
+        if (ev.t === "telegraph" && ev.telegraph.kind === "scatter") marks++;
+        if (ev.t === "resolve" && ev.hits.length > 1) shared++;
+      }
+    }
+    expect(marks).toBeGreaterThanOrEqual(Math.ceil(20 / TUNING.scatter.perMarks));
+    expect(shared).toBeGreaterThan(0);
   });
 });

@@ -11,6 +11,8 @@ import {
   BOSS_STAND,
   DISC_DAMAGE,
   DISC_RANGE,
+  HEAL_TARGET_HEIGHT,
+  healTarget,
   meleeDamage,
   meleeReaches,
   WAVE_HAND_HEIGHT,
@@ -20,6 +22,8 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { useRapier } from "@react-three/rapier";
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
+import { notify } from "../../../lib/notices";
+import { entityDown } from "../downed";
 import { groundY, type TownMap } from "../map";
 import { townNet } from "../net/townNet";
 import { townSave, useTownRuntime } from "../runtime";
@@ -30,9 +34,12 @@ import {
   sfxDiscClink,
   sfxDiscThrow,
   sfxDiscTurn,
+  sfxHaste,
+  sfxHealBolt,
   sfxImpact,
   sfxMeleeHit,
   sfxSwing,
+  sfxTaunt,
 } from "../sfx";
 import { getVitals, useVitals } from "../vitals";
 import { pushDamageNumber } from "./DamageNumbers";
@@ -45,18 +52,22 @@ import {
   nextHand,
 } from "./discs";
 import { DUMMY, type DummyState, hitDummy, meterDps } from "./dummy";
-import { bossFight } from "./fight";
+import { bossFight, bossNow } from "./fight";
 import { enterMouseLook, exitMouseLook } from "./mouseLook";
 import {
+  attackSpeedOf,
   entityAt,
-  mySkillReady,
+  instrumentNeeded,
   noteSkillCast,
-  queueMySkill,
+  queueSkill,
   setBuff,
+  setEntityAt,
+  skillReady,
   skills,
-  startMyCooldown,
+  startCooldown,
 } from "./skills";
 import { slashField } from "./slashes";
+import { healing, stance, toggleStance, useStanceSender } from "./stance";
 import { CAST_BUFFER_MS, combat, setCombat, shake } from "./state";
 import { assistTarget, type Vec3, WAVE, waveField } from "./waves";
 
@@ -109,6 +120,7 @@ export function Combat({
   active: boolean;
 }) {
   const rt = useTownRuntime();
+  useStanceSender();
   const { world, rapier } = useRapier();
   const camera = useThree((s) => s.camera);
   const surface = useThree((s) => s.gl.domElement);
@@ -159,11 +171,19 @@ export function Combat({
         e.preventDefault();
         if (!e.repeat) combat.queuedAt = performance.now();
         combat.fireHeld = true;
-      } else if (e.code === "KeyQ" && !e.repeat && skills.mine) {
-        // Q stays a shortcut for your class skill, wherever it sits on the
-        // hotbar (its number key is the hotbar's: town/input.ts).
+      } else if (
+        e.code === "KeyR" &&
+        !e.repeat &&
+        skills.instrument === "lute"
+      ) {
+        // A Bard's lute: attack ⇄ heal.
         e.preventDefault();
-        queueMySkill();
+        toggleStance();
+      } else if (e.code === "KeyQ" && !e.repeat && skills.list.length) {
+        // Q stays a shortcut for your first class skill, wherever it sits
+        // on the hotbar (its number key is the hotbar's: town/input.ts).
+        e.preventDefault();
+        queueSkill(1);
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {
@@ -234,6 +254,11 @@ export function Combat({
     throwing: "held-l" as DiscHand,
     /** The dummy the crosshair's on, if any. */
     dummy: null as DummyState | null,
+    /** The ally the heal bolt under way goes to (an entity id). */
+    bolt: null as number | null,
+    /** A heal bolt under way with nobody locked: it flies down the aim,
+     * for show (it heals no one). */
+    freeHeal: false,
   });
   const ray = useRef(
     new rapier.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: -1 }),
@@ -391,29 +416,58 @@ export function Combat({
             radius: DUMMY.radius * (d.size ?? 1),
           }),
         ) ||
-        (inBossRoom() && meleeReaches(from, yaw, BOSS_STAND));
+        (inBossRoom() &&
+          meleeReaches(from, yaw, { ...bossNow(), radius: BOSS_STAND.radius }));
     }
 
     // Where you are, for effects that follow you (a Cymbrella overhead).
     if (herzie) {
       herzie.root.getWorldPosition(chest);
-      entityAt.set(bossFight.you ?? -1, {
-        x: chest.x,
-        z: chest.z,
-        top: chest.y + herzie.height,
-      });
+      setEntityAt(
+        bossFight.you ?? -1,
+        chest.x,
+        chest.z,
+        chest.y + herzie.height,
+      );
     }
 
-    // --- Your class skill: pressed (or pressed just before it was ready).
-    const mine = skills.mine;
-    if (
+    // --- A class skill: pressed (or pressed just before it was ready).
+    const queued = skills.queued;
+    const mine = queued
+      ? skills.list.find((s) => s.id === queued.id)
+      : undefined;
+    if (queued && now - queued.at >= CAST_BUFFER_MS) skills.queued = null;
+    // A taunt does nothing outside a fight, nor a resurrect in a fight
+    // that isn't on (the lobby, the Tower): say so rather than spend the
+    // press. Outside a fight, a resurrect brings back anyone knocked out.
+    const raidOn = inBossRoom() && bossFight.raid?.stage === "fight";
+    const raidOnly =
+      !!mine &&
+      ((mine.id === "taunt" && !raidOn) ||
+        (mine.id === "resurrect" && bossFight.on && !raidOn));
+    const unarmed = !!mine && !skills.armed;
+    if (queued && mine && unarmed) {
+      skills.queued = null;
+      notify(instrumentNeeded(mine.id), { kind: "info" });
+    } else if (queued && mine && raidOnly) {
+      skills.queued = null;
+      notify(
+        mine.id === "taunt"
+          ? `"${SKILL_DEFS[mine.id].name}" only works in a boss fight.`
+          : `"${SKILL_DEFS[mine.id].name}" only works once the fight is on.`,
+        {
+          kind: "info",
+        },
+      );
+    } else if (
       herzie &&
+      queued &&
       mine &&
-      now - skills.queuedAt < CAST_BUFFER_MS &&
-      mySkillReady(now)
+      now - queued.at < CAST_BUFFER_MS &&
+      skillReady(mine.id, now)
     ) {
-      skills.queuedAt = Number.NEGATIVE_INFINITY;
-      const seq = startMyCooldown(now);
+      skills.queued = null;
+      const seq = startCooldown(mine.id, now);
       herzie.root.getWorldPosition(chest);
       chest.y += herzie.height * 0.55;
       // Aimed like a cast in combat mode; otherwise the way you face.
@@ -439,14 +493,18 @@ export function Combat({
       // A Cymbrella's on you at once, for as long as it lasts: in a fight
       // the server's word replaces this (or a refusal takes it off); in
       // practice there's no server to say so.
-      if (mine.id === "cymbrella") {
+      if (
+        mine.id === "cymbrella" ||
+        mine.id === "taunt" ||
+        mine.id === "haste"
+      ) {
         setBuff(bossFight.you ?? -1, {
           buff: mine.id,
-          value: skillValue(mine.id, mine.level),
+          value: mine.id === "taunt" ? 1 : skillValue(mine.id, mine.level),
           until: now + (SKILL_DEFS[mine.id].durationMs ?? 0),
         });
       }
-      if (bossFight.on) {
+      if (bossFight.on || mine.id === "resurrect") {
         townNet().sendSkill(mine.id, seq, yaw, pitch);
       } else if (mine.id === "backspin") {
         // Practice: the discs hit the dummies, for their share of a wave.
@@ -466,21 +524,47 @@ export function Combat({
           });
         }
       }
-      sfxCast();
+      if (mine.id === "taunt") sfxTaunt();
+      else if (mine.id === "haste") sfxHaste();
+      else sfxCast();
       shake(0.15);
     }
 
     // --- Casting: a wave from the hand; a Record Slinger's disc thrown
     // from whichever hand has one; or a blow up close — a Percussionist's
-    // stick, or (without a class) the herzie itself, bumped into it.
+    // stick, or (without its instrument) a punch from stage 3, a body slam
+    // before that.
     const discs = combat.attack === "disc";
     const melee = combat.attack === "melee";
-    const blow = herzie?.holdsGear ? "strike" : "bump";
+    const blow = combat.blow;
+    // A Bard's lute in its heal stance: locked onto the ally nearest the
+    // aim (never yourself, never the knocked out: they need a Resurrect).
+    const heals = combat.on && combat.attack === "wave" && healing();
+    stance.lock = null;
+    if (herzie && heals) {
+      herzie.root.getWorldPosition(chest);
+      chest.y += herzie.height * 0.55;
+      dir.copy(a.point).sub(chest).normalize();
+      const me = bossFight.you ?? -1;
+      const allies: { id: number; x: number; z: number }[] = [];
+      for (const [id, at] of entityAt) {
+        if (id === me || id === -1) continue;
+        if (entityDown(id)) continue;
+        allies.push({ id, x: at.x, z: at.z });
+      }
+      stance.lock =
+        healTarget([chest.x, chest.y, chest.z], [dir.x, dir.y, dir.z], allies)
+          ?.ally.id ?? null;
+    }
+    // Hasted: the pace and the motion quicken together.
+    const speed = attackSpeedOf(bossFight.you ?? -1, now);
+    if (herzie) herzie.castRate = speed;
     if (herzie) {
       const queued = now - combat.queuedAt < CAST_BUFFER_MS;
       const free = discs ? nextHand(discField, herzie) : null;
       const ready =
-        (now - a.castAt) / 1000 >= CAST_INTERVAL && (!discs || free !== null);
+        ((now - a.castAt) / 1000) * speed >= CAST_INTERVAL &&
+        (!discs || free !== null);
       if (combat.on && (queued || combat.fireHeld) && ready && discs && free) {
         a.castAt = now;
         a.throwing = free;
@@ -500,6 +584,8 @@ export function Combat({
         sfxDiscThrow(free === "held-l");
       } else if (combat.on && (queued || combat.fireHeld) && ready) {
         a.castAt = now;
+        a.bolt = heals ? stance.lock : null;
+        a.freeHeal = heals && stance.lock === null;
         combat.queuedAt = Number.NEGATIVE_INFINITY;
         herzie.root.getWorldPosition(chest);
         chest.y += herzie.height * 0.55;
@@ -509,14 +595,20 @@ export function Combat({
         // Face the aim, and raise the hand to it.
         if (flat > 0.5) herzie.heading = Math.atan2(dx, dz);
         if (melee) {
-          herzie.cast(0, { style: blow });
+          // Punches alternate fists, a jab-cross rhythm.
+          herzie.cast(0, {
+            style: blow,
+            ...(blow === "punch"
+              ? { arm: combat.casts & 1 ? "arm-r" : "arm-l" }
+              : {}),
+          });
           if (blow === "strike") slashField.strike(herzie, true);
           combat.spread = 0.4;
           sfxSwing(blow);
         } else {
           herzie.cast(Math.atan2(a.point.y - chest.y, Math.max(flat, 0.5)));
           combat.spread = 1;
-          sfxCharge();
+          if (!heals) sfxCharge();
         }
         combat.casts = (combat.casts + 1) & 0xffff;
       }
@@ -541,13 +633,7 @@ export function Combat({
             Math.min(DUMMY.chest, height),
             d.z - toward[2] * DUMMY.radius,
           ];
-          const kind = myHit(
-            d,
-            toward,
-            point,
-            meleeDamage(blow === "strike"),
-            now,
-          );
+          const kind = myHit(d, toward, point, meleeDamage(blow), now);
           waveField.burst(point, toward, kind);
           landed = true;
         }
@@ -555,7 +641,7 @@ export function Combat({
           // The server judges it, and says what it did (the number, the
           // sound); the burst is what you see land.
           townNet().sendCast(yaw, 0);
-          const boss = { ...BOSS_STAND };
+          const boss = { ...BOSS_STAND, ...bossNow() };
           if (inBossRoom() && meleeReaches(from, yaw, boss)) {
             const toward = flatToward(from, boss);
             waveField.burst(
@@ -594,9 +680,10 @@ export function Combat({
         // Short of a dummy and in reach, what the aim's on is where it
         // turns back: the boss (a hit), or a wall (a clink).
         const solid = a.blocked && !target && toAim < DISC_RANGE;
+        const bossAt = bossNow();
         const onBoss =
           inBossRoom() &&
-          Math.hypot(a.point.x - BOSS_STAND.x, a.point.z - BOSS_STAND.z) <
+          Math.hypot(a.point.x - bossAt.x, a.point.z - bossAt.z) <
             BOSS_STAND.radius + 0.8;
         discField.throw(from, toward, {
           mine: true,
@@ -605,12 +692,51 @@ export function Combat({
           reach: solid ? toAim : DISC_RANGE,
           strike: solid ? (onBoss ? "target" : "wall") : null,
           target,
+          quick: speed,
         });
         if (bossFight.on) sendBossCast(herzie, a.point);
         shake(0.04);
       }
       // The hand is out: the wave leaves it (Player's update, last frame).
-      if (herzie.released && combat.on && combat.attack === "wave") {
+      const ally = a.bolt === null ? undefined : entityAt.get(a.bolt);
+      if (herzie.released && combat.on && combat.attack === "wave" && ally) {
+        // A heal bolt: off to the ally it locked onto, homing on them.
+        herzie.handWorldPosition(hand);
+        dir
+          .set(ally.x, ally.top * 0.55, ally.z)
+          .sub(hand)
+          .normalize();
+        waveField.cast([hand.x, hand.y, hand.z], [dir.x, dir.y, dir.z], {
+          mine: true,
+          heal: true,
+          ally: a.bolt,
+        });
+        // The server finds the same ally down the same line: aimed from
+        // where it thinks the hand is at their chest.
+        if (bossFight.on)
+          sendBossCast(herzie, boltAim.set(ally.x, HEAL_TARGET_HEIGHT, ally.z));
+        a.bolt = null;
+        sfxHealBolt();
+        shake(0.02);
+      } else if (herzie.released && (a.freeHeal || a.bolt !== null)) {
+        // A heal bolt with nobody to go to (none under the crosshair, or
+        // its ally left before it went): it still flies, down the aim, but
+        // heals no one, so the server isn't told.
+        a.bolt = null;
+        a.freeHeal = false;
+        herzie.handWorldPosition(hand);
+        dir.copy(a.point).sub(hand);
+        const toAim = dir.length();
+        dir.normalize();
+        waveField.cast([hand.x, hand.y, hand.z], [dir.x, dir.y, dir.z], {
+          mine: true,
+          heal: true,
+          ally: null,
+          reach: a.blocked ? toAim + 0.2 : WAVE.range,
+        });
+        sfxHealBolt();
+        shake(0.02);
+      } else if (herzie.released && combat.on && combat.attack === "wave") {
         herzie.handWorldPosition(hand);
         dir.copy(a.point).sub(hand);
         const toAim = dir.length();
@@ -676,6 +802,7 @@ export function Combat({
 }
 
 const castFrom = new THREE.Vector3();
+const boltAim = new THREE.Vector3();
 
 /** In the boss's cave (not the Tower, which fights the same way). */
 function inBossRoom(): boolean {

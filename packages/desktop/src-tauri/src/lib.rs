@@ -2177,12 +2177,37 @@ fn has_landed_drop(drops: &[PendingDrop], now_secs: i64) -> bool {
         .any(|d| parse_rfc3339_secs(&d.dropped_at).is_none_or(|t| t <= now_secs))
 }
 
+/// How long a boss's cave is open before its fight: the lobby
+/// (`BOSS_LOBBY_MS` in @herzies/shared).
+const BOSS_LOBBY_SECS: i64 = 15 * 60;
+
+/// When `event` arrives in Town (UNIX seconds): a boss as its cave opens
+/// for the lobby, ahead of the fight; anything else as it starts.
+fn arrives_at(event: &GameEvent) -> Option<i64> {
+    let starts = parse_rfc3339_secs(&event.starts_at)?;
+    Some(if event.event_type == "boss_fight" {
+        starts - BOSS_LOBBY_SECS
+    } else {
+        starts
+    })
+}
+
+/// Bosses whose cave is open but whose fight hasn't started: in Town
+/// already, though not live yet (`upcoming`, not `events`).
+fn boss_lobbies(upcoming: &[GameEvent], now_secs: i64) -> impl Iterator<Item = &GameEvent> {
+    upcoming.iter().filter(move |e| {
+        e.event_type == "boss_fight"
+            && arrives_at(e).is_some_and(|t| t <= now_secs)
+            && parse_rfc3339_secs(&e.starts_at).is_some_and(|t| t > now_secs)
+    })
+}
+
 /// How long `events_watch_loop` should sleep: the regular interval, or less if
 /// an upcoming event starts sooner than that.
 fn next_events_wake(upcoming: &[GameEvent], now_secs: i64) -> Duration {
     let soonest = upcoming
         .iter()
-        .filter_map(|e| parse_rfc3339_secs(&e.starts_at))
+        .filter_map(arrives_at)
         .filter(|&t| t > now_secs)
         .min();
     let until = soonest.map_or(EVENTS_WATCH_SECS, |t| {
@@ -2224,7 +2249,16 @@ async fn events_watch_loop(app: AppHandle) {
             .duration_since(UNIX_EPOCH)
             .map_or(0, |d| d.as_secs() as i64);
         wake = next_events_wake(&data.upcoming, now_secs);
-        let events = data.events;
+        // Everything in Town now: what's live, and bosses waiting in their
+        // open caves (announced then, not again when the fight starts).
+        let lobbies: Vec<GameEvent> = boss_lobbies(&data.upcoming, now_secs).cloned().collect();
+        let lobby_ids: HashSet<String> = lobbies.iter().map(|e| e.id.clone()).collect();
+        let events: Vec<GameEvent> = data
+            .events
+            .into_iter()
+            .filter(|e| !lobby_ids.contains(&e.id))
+            .chain(lobbies)
+            .collect();
 
         let active_now: HashSet<String> = events.iter().map(|e| e.id.clone()).collect();
 
@@ -2249,6 +2283,21 @@ async fn events_watch_loop(app: AppHandle) {
                 _ if event.title.trim().is_empty() => "Someone's in town!".to_string(),
                 _ => format!("{} is in town!", event.title),
             };
+            let fight_in = parse_rfc3339_secs(&event.starts_at)
+                .filter(|_| event.event_type == "boss_fight")
+                .map(|t| t - now_secs)
+                .filter(|&left| left > 0);
+            if let Some(left) = fight_in {
+                let mins = ((left + 59) / 60).max(1);
+                let body = format!(
+                    "Its cave is open. The fight starts in {} {}: be inside to join.",
+                    mins,
+                    if mins == 1 { "minute" } else { "minutes" }
+                );
+                send_notification(&app, &title, &body, Some("events"));
+                let _ = app.emit("activity", format!("{}: {}", title, body));
+                continue;
+            }
             let fallback_body = if event.event_type == "song_hunt" {
                 "He's lost a song. Help him find it."
             } else if event.event_type == "tower" {
@@ -3034,6 +3083,30 @@ mod events_watch_tests {
         let now = 1_791_223_200 - 40;
         let wake = next_events_wake(&[upcoming_at("2026-10-05T18:00:00+00:00")], now);
         assert_eq!(wake, Duration::from_secs(40 + EVENTS_START_GRACE_SECS));
+    }
+
+    #[test]
+    fn wakes_for_a_boss_as_its_cave_opens_not_its_fight() {
+        let now = 1_791_223_200 - BOSS_LOBBY_SECS - 30;
+        let mut boss = upcoming_at("2026-10-05T18:00:00+00:00");
+        boss.event_type = "boss_fight".into();
+        let wake = next_events_wake(&[boss], now);
+        assert_eq!(wake, Duration::from_secs(30 + EVENTS_START_GRACE_SECS));
+    }
+
+    #[test]
+    fn a_boss_is_in_town_while_its_lobby_is_open() {
+        let starts = 1_791_223_200;
+        let mut boss = upcoming_at("2026-10-05T18:00:00+00:00");
+        boss.event_type = "boss_fight".into();
+        let hunt = upcoming_at("2026-10-05T18:00:00+00:00");
+        let list = [boss, hunt];
+        let ids = |now| boss_lobbies(&list, now).count();
+        assert_eq!(ids(starts - BOSS_LOBBY_SECS - 1), 0);
+        assert_eq!(ids(starts - BOSS_LOBBY_SECS), 1);
+        assert_eq!(ids(starts - 1), 1);
+        // Started: it's live (in `events`) from here.
+        assert_eq!(ids(starts), 0);
     }
 
     #[test]

@@ -20,10 +20,12 @@ import {
   withStatPoints,
 } from "../_shared/shared/items.ts";
 import {
+  type BossClaim,
   signTownTicket,
   TOWN_TICKET_TTL_S,
 } from "../_shared/shared/town-net.ts";
 import { vitalsOf } from "../_shared/shared/vitals.ts";
+import { CLASS_DEFS, isHerzieClass } from "../_shared/shared/classes.ts";
 import { corsHeaders, jsonResponse } from "../_shared/cors.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -126,20 +128,28 @@ Deno.serve(async (request) => {
       .from("herzie_skills")
       .select("skill_id, level")
       .eq("user_id", user.id);
-    sk = (skillRows ?? []).map(
-      (r: { skill_id: string; level: number }) =>
-        [r.skill_id, r.level] as [string, number],
-    );
+    // In the class's own order, the starter first: older apps keep only
+    // the first skill a ticket names.
+    const order: readonly string[] = isHerzieClass(herzie.class)
+      ? CLASS_DEFS[herzie.class].skills
+      : [];
+    const rank = (id: string) => {
+      const i = order.indexOf(id);
+      return i < 0 ? order.length : i;
+    };
+    sk = (skillRows ?? [])
+      .map(
+        (r: { skill_id: string; level: number }) =>
+          [r.skill_id, r.level] as [string, number],
+      )
+      .sort((a, b) => rank(a[0]) - rank(b[0]));
   }
 
-  // The boss room: only while the cave is open, and only on your feet.
-  let boss:
-    | { event: string; until: number; hp: number; maxHp: number }
-    | undefined;
+  // The boss room: from the lobby's opening (00122) until the fight is
+  // over. Before the lock anyone on their feet comes in; after it, only the
+  // roster — a downed member too, to wait for a Bard.
+  let boss: BossClaim | undefined;
   if (map === "bossroom") {
-    if (vitals.down) {
-      return jsonResponse({ error: "Knocked out", reason: "down" }, 403);
-    }
     if (Deno.env.get("BOSS_ROOM") === "off") {
       return jsonResponse(
         { error: "The cave is sealed", reason: "sealed" },
@@ -153,7 +163,25 @@ Deno.serve(async (request) => {
         403,
       );
     }
-    boss = open as typeof boss;
+    const claim = open as BossClaim;
+    if (claim.locked) {
+      if (!claim.locked.roster.includes(user.id)) {
+        return jsonResponse(
+          { error: "The fight has started", reason: "locked" },
+          403,
+        );
+      }
+    } else if (claim.starts && now >= claim.starts * 1000) {
+      // Past its start but not locked yet (the room locks on its next
+      // tick): the roster is whoever was already inside.
+      return jsonResponse(
+        { error: "The fight has started", reason: "locked" },
+        403,
+      );
+    } else if (vitals.down) {
+      return jsonResponse({ error: "Knocked out", reason: "down" }, 403);
+    }
+    boss = claim;
   }
 
   // The Tower: only while a Tower event is on, and only on your feet. Each

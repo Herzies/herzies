@@ -31,6 +31,16 @@
       "import": "./dist/combat.js",
       "require": "./dist/combat.js"
     },
+    "./boss-fight": {
+      "types": "./dist/boss-fight.d.ts",
+      "import": "./dist/boss-fight.js",
+      "require": "./dist/boss-fight.js"
+    },
+    "./boss-lines": {
+      "types": "./dist/boss-lines.d.ts",
+      "import": "./dist/boss-lines.js",
+      "require": "./dist/boss-lines.js"
+    },
     "./vitals": {
       "types": "./dist/vitals.d.ts",
       "import": "./dist/vitals.js",

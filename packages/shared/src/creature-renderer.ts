@@ -3557,10 +3557,11 @@ export const CAST_ARM = "arm-l";
 /** Which way is outward for the casting arm, along creature x. */
 const CAST_SIDE = -1;
 
-/** How the hand moves: a sonic wave's palm thrust, a disc's throw, or a
- * stick's strike. A "bump" moves no hand: the whole herzie lunges into
- * what's in front of it (see BUMP). */
-export type CastStyle = "cast" | "throw" | "strike" | "bump";
+/** How the hand moves: a sonic wave's palm thrust, a disc's throw, a
+ * stick's strike, or a bare-handed jab ("punch", see PUNCH). A "bump"
+ * moves no hand: the whole herzie lunges into what's in front of it (see
+ * BUMP). */
+export type CastStyle = "cast" | "throw" | "strike" | "punch" | "bump";
 
 /**
  * A disc thrown backhand, like a frisbee, on CAST's timeline (so it leaves
@@ -3593,9 +3594,67 @@ export function castHand(
       ? throwHandOutward(phase, pitch)
       : style === "strike"
         ? strikeHandOutward(phase, pitch)
-        : castHandOutward(phase, pitch);
+        : style === "punch"
+          ? punchHandOutward(phase, pitch)
+          : castHandOutward(phase, pitch);
   hand.dir[0] *= LIMB_SIDE[arm] ?? CAST_SIDE;
   return hand;
+}
+
+/**
+ * A bare-handed jab, on CAST's timeline (it lands at CAST.release): the
+ * fist chambers back by its own side, shoots straight out toward the
+ * middle of the chest's front (a straight punch, not a palm off to the
+ * side), snaps back a touch and comes home. The body turns into it with a
+ * deeper lean than a cast's (see castDeltas).
+ */
+export const PUNCH = {
+  /** How far the fist pulls in at the chamber, and reaches at the blow
+   * (arm lengths). */
+  chamber: 0.75,
+  reach: 1.65,
+  /** The snap back off the blow. */
+  snap: 0.18,
+  /** The body's lean into it (fractions of the body scale). */
+  lean: 0.16,
+} as const;
+
+/** castHand's punch, for an arm on the +x side. */
+function punchHandOutward(
+  phase: number,
+  pitch: number,
+): { dir: V3; reach: number } {
+  const mix = (a: V3, b: V3, t: number): V3 =>
+    norm(add(scale(a, 1 - t), scale(b, t)));
+  const rest: V3 = [1, 0, 0];
+  // Chambered: by its side, elbow back.
+  const chambered: V3 = norm([0.55, 0.1, 0.75]);
+  // The blow: straight ahead, a little in toward the middle.
+  const front: V3 = norm([0.1, -Math.sin(pitch) - 0.05, -Math.cos(pitch)]);
+  if (phase < CAST.drawn) {
+    const t = easeOut(phase / CAST.drawn);
+    return {
+      dir: mix(rest, chambered, t),
+      reach: 1 + (PUNCH.chamber - 1) * t,
+    };
+  }
+  if (phase < CAST.release) {
+    const t = easeIn((phase - CAST.drawn) / (CAST.release - CAST.drawn));
+    return {
+      dir: mix(chambered, front, t),
+      reach: PUNCH.chamber + (PUNCH.reach - PUNCH.chamber) * t,
+    };
+  }
+  if (phase < CAST.held) {
+    const t = (phase - CAST.release) / (CAST.held - CAST.release);
+    const snap = Math.sin(Math.min(1, t * 2) * Math.PI) * PUNCH.snap;
+    return { dir: front, reach: PUNCH.reach - snap };
+  }
+  const t = ease(CAST.held, 1, phase);
+  return {
+    dir: mix(front, rest, t),
+    reach: PUNCH.reach + (1 - PUNCH.reach) * t,
+  };
 }
 
 /** castHand's throw, for an arm on the +x side. */
@@ -3871,13 +3930,15 @@ function castDeltas(
           : [0, -up * s, -forward * s],
     );
   }
-  // Back on the draw, into the thrust, settling after.
+  // Back on the draw, into the thrust, settling after (deeper for a
+  // punch: the body goes with the fist).
+  const into = style === "punch" ? PUNCH.lean : CAST.lean;
   const lean =
     phase < CAST.release
       ? -CAST.rock * ease(0, CAST.drawn, phase) +
-        (CAST.rock + CAST.lean) *
+        (CAST.rock + into) *
           easeIn(Math.max(0, phase - CAST.drawn) / (CAST.release - CAST.drawn))
-      : CAST.lean * (1 - ease(CAST.release, 1, phase));
+      : into * (1 - ease(CAST.release, 1, phase));
   const shoulder = rig.shoulders[arm];
   const hand = castHand(phase, pitch, arm, style);
   return spheres.map((sp): V3 => {

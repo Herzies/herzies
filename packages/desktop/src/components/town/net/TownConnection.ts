@@ -60,6 +60,8 @@ export type RemotePlayer = {
    * the drawn (interpolated) one, so no cast between two draws is lost. */
   castSeq: number | null;
   pendingCasts: number;
+  /** Knocked out outside a fight (a Bard can play it back up). */
+  down: boolean;
 };
 
 /** More casts than this queued for one player are dropped: catching up
@@ -76,7 +78,7 @@ export type TownConnectionOptions = {
   onMessage?: (m: ServerMessage) => void;
   /** The server won't have us in this room: the cave is sealed, or we're
    * knocked out. */
-  onRefused?: (why: "sealed" | "down" | "full") => void;
+  onRefused?: (why: "sealed" | "down" | "full" | "locked") => void;
   /** The room shut behind us (the fight ended). */
   onRoomClosed?: () => void;
   /** Where the player's herzie is now. */
@@ -219,7 +221,7 @@ export class TownConnection {
       ticket = await this.freshTicket();
     } catch (e) {
       if (!this.wanted) return;
-      const refusal = (["sealed", "down"] as const).find((r) =>
+      const refusal = (["locked", "sealed", "down"] as const).find((r) =>
         String(e).includes(r),
       );
       if (refusal) {
@@ -267,7 +269,7 @@ export class TownConnection {
     };
     ws.onclose = (e) => {
       if (this.ws !== ws) return;
-      this.onClosed(e.code);
+      this.onClosed(e.code, e.reason);
     };
   }
 
@@ -287,7 +289,7 @@ export class TownConnection {
     return this.ticket;
   }
 
-  private onClosed(code: number) {
+  private onClosed(code: number, reason = "") {
     const wasOnline = this.status === "online";
     this.teardown();
     if (!this.wanted) return;
@@ -319,7 +321,13 @@ export class TownConnection {
       case TOWN_CLOSE.sealed:
         this.ticket = null;
         this.setStatus("offline");
-        this.opts.onRefused?.("sealed");
+        this.opts.onRefused?.(
+          reason === "locked"
+            ? "locked"
+            : reason === "down"
+              ? "down"
+              : "sealed",
+        );
         return;
       case TOWN_CLOSE.closed:
         this.ticket = null;
@@ -409,6 +417,7 @@ export class TownConnection {
         if (r) {
           r.name = m.player.name;
           r.look = m.player.look;
+          r.down = !!m.player.down;
         } else if (m.player.id !== this.you) this.addRemote(m.player);
         this.emit();
         return;
@@ -441,6 +450,24 @@ export class TownConnection {
     this.sendJson({ t: "skill", skill, seq, yaw, pitch });
   }
 
+  /** In the boss room: whether you're playing music. */
+  sendTune(on: boolean) {
+    if (this.status !== "online") return;
+    this.sendJson({ t: "tune", on });
+  }
+
+  /** In a fight: whether your lute heals (true) or attacks. */
+  sendStance(heal: boolean) {
+    if (this.status !== "online") return;
+    this.sendJson({ t: "stance", heal });
+  }
+
+  /** Knocked out in a raid, and giving up (no reward). */
+  sendForfeit() {
+    if (this.status !== "online") return;
+    this.sendJson({ t: "forfeit" });
+  }
+
   /** In the Tower, on a cleared floor: on to the next. */
   sendNext() {
     if (this.status !== "online") return;
@@ -465,6 +492,7 @@ export class TownConnection {
       buffer: existing?.buffer ?? new EntityBuffer(),
       castSeq: existing?.castSeq ?? null,
       pendingCasts: existing?.pendingCasts ?? 0,
+      down: !!p.down,
     });
   }
 

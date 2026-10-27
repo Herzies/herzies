@@ -1,6 +1,7 @@
 /**
- * The whole fight, headless: scripted herzies against the boss, so tuning
- * that makes it unwinnable or trivial fails here rather than in a playtest.
+ * The boss engine alone, headless: scripted herzies against it, for what
+ * standing still and Stamina do. The whole raid (classes, skills, the
+ * roster's health, the enrage) is simulated in raid-sim.test.ts.
  */
 import { CAST_INTERVAL_MS, WAVE_HAND_HEIGHT } from "@herzies/shared/combat";
 import { STAT_TUNING } from "@herzies/shared/stats";
@@ -128,8 +129,10 @@ function fight(bots: Bot[], seed: number, limitMs = 30 * 60_000) {
       history.record(b.uid, t, b.x, b.z);
       if (t >= b.nextCast) {
         b.nextCast = t + CAST_EVERY_MS;
-        const dx = TUNING.boss.x - b.x;
-        const dz = TUNING.boss.z - b.z;
+        // Aim where the boss stands now: it walks.
+        const at = boss.position;
+        const dx = at.x - b.x;
+        const dz = at.z - b.z;
         boss.cast(
           b.uid,
           { x: b.x, z: b.z },
@@ -167,40 +170,10 @@ function fight(bots: Bot[], seed: number, limitMs = 30 * 60_000) {
 }
 
 describe("a full fight, simulated", () => {
-  it("five attentive players win, with little damage taken", () => {
-    const bots = Array.from({ length: 5 }, (_, i) => bot(i, true));
-    const { killedAt } = fight(bots, 1);
-    expect(killedAt).not.toBeNull();
-    // A few minutes: long enough to be a fight, short enough to be fun.
-    expect(killedAt as number).toBeGreaterThan(60_000);
-    expect(killedAt as number).toBeLessThan(6 * 60_000);
-    expect(bots.every((b) => b.alive)).toBe(true);
-    for (const b of bots) expect(b.hp / b.max).toBeGreaterThan(0.4);
-  });
-
-  it("a lone attentive player can win, but it takes a while", () => {
-    const bots = [bot(0, true)];
-    const { killedAt } = fight(bots, 2);
-    expect(killedAt).not.toBeNull();
-    expect(bots[0].alive).toBe(true);
-    expect(killedAt as number).toBeGreaterThan(5 * 60_000);
-  });
-
   it("someone who never moves is knocked out: dodging matters", () => {
     const bots = [bot(0, false)];
     fight(bots, 3, 10 * 60_000);
     expect(bots[0].alive).toBe(false);
-  });
-
-  it("a mixed group still wins; the idle ones pay for it", () => {
-    const bots = [
-      ...[0, 1, 2].map((i) => bot(i, true)),
-      ...[3, 4].map((i) => bot(i, false)),
-    ];
-    const { killedAt } = fight(bots, 4);
-    expect(killedAt).not.toBeNull();
-    expect(bots.filter((b) => b.dodges).every((b) => b.alive)).toBe(true);
-    expect(bots.filter((b) => !b.dodges).some((b) => b.hitsTaken > 0)).toBe(true);
   });
 
   it("Stamina lets someone who stands in it last much longer", () => {
@@ -220,12 +193,4 @@ describe("a full fight, simulated", () => {
     );
   });
 
-  it("is winnable across seeds", () => {
-    for (let seed = 10; seed < 20; seed++) {
-      const bots = Array.from({ length: 4 }, (_, i) => bot(i, true));
-      const { killedAt } = fight(bots, seed);
-      expect(killedAt, `seed ${seed}`).not.toBeNull();
-      expect(bots.filter((b) => !b.alive), `seed ${seed}`).toHaveLength(0);
-    }
-  });
 });

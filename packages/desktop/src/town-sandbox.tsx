@@ -9,6 +9,8 @@
 // packages/town-server, with TOWN_TICKET_SECRET=dev-town-secret in .dev.vars);
 // `&name=` and `&server=ws://…` to taste. Open it twice to see each other.
 // `?map=bossroom` (with `?net=local`) joins the boss's cave on `wrangler dev`
+// (`&lobby=20` makes it a raid that locks 20 s after loading; `&per=` sets
+// its health per herzie)
 // with a made-up boss (and `&cave=open` opens the cave's door in town); the
 // HUD is drawn over it. `&boss=<hp>` sets the boss's health, `&hp=<n>` yours.
 // `?map=tower` (with `?net=local`) climbs the Tower on `wrangler dev`, in a
@@ -22,7 +24,7 @@
 // with the default prism skin is the full Prismatic set).
 import "./globals.css";
 import {
-  attackStyle,
+  basicAttack,
   CLASS_DEFS,
   type ItemUnit,
   isHerzieClass,
@@ -45,7 +47,7 @@ import {
   sampleBossResults,
   setBossResults,
 } from "./components/town/combat/results";
-import { setMySkill } from "./components/town/combat/skills";
+import { setArmed, setMySkills } from "./components/town/combat/skills";
 import { combat } from "./components/town/combat/state";
 import { setTowerOpen } from "./components/town/gates";
 import { Hotbar } from "./components/town/Hotbar";
@@ -59,7 +61,7 @@ import {
   townLive,
   townSave,
 } from "./components/town/runtime";
-import { SkillHud } from "./components/town/SkillHud";
+import { CastBar, SkillHud } from "./components/town/SkillHud";
 import TownCanvas from "./components/town/TownCanvas";
 import { setVitals } from "./components/town/vitals";
 
@@ -156,17 +158,34 @@ if (resultsParam === "victory" || resultsParam === "defeat") {
 }
 const cls = params.get("class");
 if (isHerzieClass(cls)) {
+  // `?gear=none`: the class without its instrument (a punch or body slam).
+  const bare = params.get("gear") === "none";
   const [main, off] = CLASS_DEFS[cls].equipment;
-  player.equipped.main_hand = main;
-  if (off) player.equipped.off_hand = off;
-  combat.attack = attackStyle(cls);
-  // And its skill (Q), at `?skill=` level.
-  setMySkill([
-    {
-      skillId: CLASS_DEFS[cls].starterSkill,
+  if (!bare) {
+    player.equipped.main_hand = main;
+    if (off) player.equipped.off_hand = off;
+  }
+  const a = basicAttack({
+    cls,
+    stage: player.stage,
+    mainHand: player.equipped.main_hand,
+  });
+  combat.attack = a.style;
+  combat.blow = a.blow;
+  setArmed(!bare, main);
+  // And its skills (Q and the hotbar), at `?skill=` level.
+  setMySkills(
+    CLASS_DEFS[cls].skills.map((skillId) => ({
+      skillId,
       level: Number(params.get("skill") ?? 1),
-    },
-  ]);
+    })),
+    CLASS_DEFS[cls].skills,
+  );
+} else {
+  // No class: a punch from stage 3, a body slam before.
+  const a = basicAttack({ cls: null, stage: player.stage, mainHand: null });
+  combat.attack = a.style;
+  combat.blow = a.blow;
 }
 
 /**
@@ -238,6 +257,16 @@ async function bench(state: RootState) {
 function localNet() {
   // A uuid, as real user ids are: the Tower's rooms are named by it.
   const uid = crypto.randomUUID();
+  // `?lobby=<s>`: the cave is a raid whose lobby locks this many seconds
+  // after the page loads (without it, the fight is on at once).
+  const lobby = params.get("lobby");
+  const starts =
+    lobby !== null ? Math.floor(Date.now() / 1000) + Number(lobby) : undefined;
+  // `?until=<s>`: the boss gets away this many seconds after loading (the
+  // room then closes, for testing the way back to town).
+  const until = params.get("until");
+  const escapesAt =
+    until !== null ? Math.floor(Date.now() / 1000) + Number(until) : undefined;
   const name = params.get("name") ?? uid;
   const maxHp = 300;
   const hp = Number(params.get("hp") ?? maxHp);
@@ -264,7 +293,15 @@ function localNet() {
             Number(params.get("cc") ?? 0),
             Number(params.get("cd") ?? 0),
           ],
-          ...(isHerzieClass(cls) ? { cls } : {}),
+          ...(isHerzieClass(cls)
+            ? {
+                cls,
+                sk: CLASS_DEFS[cls].skills.map(
+                  (id) =>
+                    [id, Number(params.get("skill") ?? 1)] as [string, number],
+                ),
+              }
+            : {}),
           lv: Number(params.get("level") ?? 10),
           tower:
             map === "tower"
@@ -279,9 +316,15 @@ function localNet() {
             map === "bossroom"
               ? {
                   event: "sandbox",
-                  until: exp + 3_000,
+                  until: escapesAt ?? exp + 3_000,
                   hp: bossHp,
                   maxHp: bossHp,
+                  ...(starts
+                    ? {
+                        starts,
+                        hpPerPlayer: Number(params.get("per") ?? 20_000),
+                      }
+                    : {}),
                 }
               : undefined,
         },
@@ -351,6 +394,7 @@ function Sandbox() {
         units={hotbarUnits}
         className="bottom-3 left-1/2 -translate-x-1/2"
       />
+      <CastBar className="bottom-[3.75rem] left-1/2 -translate-x-1/2" />
       <TownCanvas
         spots={spots}
         player={player}

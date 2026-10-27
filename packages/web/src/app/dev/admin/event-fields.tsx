@@ -1,6 +1,6 @@
 "use client";
 
-import { GENRES, type Genre } from "@herzies/shared";
+import { BOSS_HP_PER_PLAYER } from "@herzies/shared";
 import { type CatalogItem, INPUT } from "./admin-shared";
 
 /** Item picker limited to the catalog — boss rewards are never auto-created. */
@@ -51,21 +51,22 @@ export function CatalogItemSelect({
 // ---------------------------------------------------------------------------
 
 export type BossFightConfigForm = {
-  hatedGenres: Genre[];
-  /** Empty = scale with active players (series templates only). */
+  /** Health before the roster locks (a placeholder: the lock sets it from
+   * the roster). Empty = the default (series templates only). */
   maxHp: string;
+  /** Health per herzie in the roster; empty = the tuned default. */
+  hpPerPlayer: string;
+  /** Minions' strength as a Tower floor; empty = from the raid's level. */
+  minionFloor: string;
   rewardItemId: string;
-  topRewardItemId: string;
-  topCount: string;
 };
 
 export function defaultBossFightConfig(): BossFightConfigForm {
   return {
-    hatedGenres: [],
-    maxHp: "900",
+    maxHp: String(BOSS_HP_PER_PLAYER),
+    hpPerPlayer: "",
+    minionFloor: "",
     rewardItemId: "cd",
-    topRewardItemId: "cd",
-    topCount: "3",
   };
 }
 
@@ -76,49 +77,46 @@ export function bossFightConfigFromRecord(
   const maxHp =
     liveMaxHp ?? (typeof config.maxHp === "number" ? config.maxHp : undefined);
   return {
-    hatedGenres: Array.isArray(config.hatedGenres)
-      ? (config.hatedGenres.filter((g) =>
-          (GENRES as readonly unknown[]).includes(g),
-        ) as Genre[])
-      : [],
     maxHp: maxHp != null ? String(maxHp) : "",
+    hpPerPlayer:
+      typeof config.hpPerPlayer === "number" ? String(config.hpPerPlayer) : "",
+    minionFloor:
+      typeof config.minionFloor === "number" ? String(config.minionFloor) : "",
     rewardItemId:
       typeof config.rewardItemId === "string" ? config.rewardItemId : "",
-    topRewardItemId:
-      typeof config.topRewardItemId === "string" ? config.topRewardItemId : "",
-    topCount:
-      typeof config.topCount === "number" ? String(config.topCount) : "3",
   };
 }
 
 /**
- * Form → config, or an error message. A template may leave genres and HP
- * empty: each occurrence then rolls its own genres and scales HP with the
- * player count when it is generated.
+ * Form → config, or an error message. A template may leave HP empty: each
+ * occurrence then scales it with the player count when it is generated.
+ * (No genres: the boss hates all music.)
  */
 export function bossFightFormToConfig(
   boss: BossFightConfigForm,
   { template = false }: { template?: boolean } = {},
 ): Record<string, unknown> | string {
-  if (boss.hatedGenres.length === 0 && !template) {
-    return "Pick at least one hated genre";
-  }
   const hasHp = boss.maxHp.trim() !== "";
   const maxHp = Number(boss.maxHp);
   if ((!hasHp && !template) || (hasHp && !(maxHp > 0))) {
     return "Boss HP must be a positive number";
   }
   if (!boss.rewardItemId) return "Reward item is required";
-  const topCount = Number.parseInt(boss.topCount, 10);
-  if (!Number.isFinite(topCount) || topCount < 0) {
-    return "Top count must be zero or more";
+  const hasPer = boss.hpPerPlayer.trim() !== "";
+  const hpPerPlayer = Number(boss.hpPerPlayer);
+  if (hasPer && !(hpPerPlayer >= 100)) {
+    return "HP per herzie must be at least 100";
+  }
+  const hasFloor = boss.minionFloor.trim() !== "";
+  const minionFloor = Number(boss.minionFloor);
+  if (hasFloor && !(Number.isInteger(minionFloor) && minionFloor >= 1)) {
+    return "Minion floor must be a whole number from 1";
   }
   return {
-    ...(boss.hatedGenres.length > 0 ? { hatedGenres: boss.hatedGenres } : {}),
     ...(hasHp ? { maxHp } : {}),
+    ...(hasPer ? { hpPerPlayer } : {}),
+    ...(hasFloor ? { minionFloor } : {}),
     rewardItemId: boss.rewardItemId,
-    ...(boss.topRewardItemId ? { topRewardItemId: boss.topRewardItemId } : {}),
-    topCount,
   };
 }
 
@@ -135,54 +133,19 @@ export function BossFightConfigFields({
   catalogItems: CatalogItem[];
   fieldIdPrefix: string;
   live?: { hp: number; maxHp: number; killed: boolean; escaped: boolean };
-  /** Series template: genres and HP may be left empty for "roll / auto". */
+  /** Series template: HP may be left empty for "auto". */
   template?: boolean;
 }) {
-  const toggleGenre = (genre: Genre) => {
-    update({
-      hatedGenres: boss.hatedGenres.includes(genre)
-        ? boss.hatedGenres.filter((g) => g !== genre)
-        : [...boss.hatedGenres, genre],
-    });
-  };
-
   return (
     <div className="space-y-4 border border-border rounded-sm p-4 bg-bg">
       <p className="text-xs text-cyan">boss fight config</p>
-      <fieldset>
-        <legend className="block text-xs text-text-dim mb-2">
-          hated genres (listening to these deals damage)
-          {template && " — leave empty to roll 3 at random each week"}
-        </legend>
-        <div className="flex flex-wrap gap-x-4 gap-y-2">
-          {GENRES.map((genre) => (
-            <label
-              key={genre}
-              className="flex items-center gap-1.5 text-xs cursor-pointer"
-            >
-              <input
-                type="checkbox"
-                checked={boss.hatedGenres.includes(genre)}
-                onChange={() => toggleGenre(genre)}
-              />
-              {genre}
-            </label>
-          ))}
-        </div>
-        {boss.hatedGenres.includes("pop") && (
-          <p className="text-yellow text-xs mt-2">
-            Pop is the fallback genre for unmatched tags — nearly every listen
-            will hit this boss.
-          </p>
-        )}
-      </fieldset>
       <div className="grid sm:grid-cols-2 gap-4">
         <div>
           <label
             className="block text-xs text-text-dim mb-1"
             htmlFor={`${fieldIdPrefix}-boss-hp`}
           >
-            max hp
+            hp before the lock (placeholder)
           </label>
           <input
             id={`${fieldIdPrefix}-boss-hp`}
@@ -197,27 +160,48 @@ export function BossFightConfigFields({
           <p className="text-xs text-text-dim mt-1">
             {live
               ? `current: ${Math.round(live.hp)} / ${Math.round(live.maxHp)}${live.killed ? " (killed)" : live.escaped ? " (escaped)" : ""} — damage already dealt is kept`
-              : template
-                ? "empty = 35 per active player (900–50000), sized when each boss is scheduled"
-                : null}
+              : "at the lock the boss gets hp per herzie × roster^0.9"}
           </p>
         </div>
         <div>
           <label
             className="block text-xs text-text-dim mb-1"
-            htmlFor={`${fieldIdPrefix}-boss-top-count`}
+            htmlFor={`${fieldIdPrefix}-boss-hp-per`}
           >
-            top dealers who get the top reward
+            hp per herzie in the roster
           </label>
           <input
-            id={`${fieldIdPrefix}-boss-top-count`}
+            id={`${fieldIdPrefix}-boss-hp-per`}
             type="number"
-            min={0}
-            required
-            value={boss.topCount}
-            onChange={(e) => update({ topCount: e.target.value })}
+            min={100}
+            placeholder={String(BOSS_HP_PER_PLAYER)}
+            value={boss.hpPerPlayer}
+            onChange={(e) => update({ hpPerPlayer: e.target.value })}
             className={INPUT}
           />
+          <p className="text-xs text-text-dim mt-1">
+            empty = {BOSS_HP_PER_PLAYER.toLocaleString()} (about 6–8 minutes)
+          </p>
+        </div>
+        <div>
+          <label
+            className="block text-xs text-text-dim mb-1"
+            htmlFor={`${fieldIdPrefix}-boss-minion-floor`}
+          >
+            minion strength (tower floor)
+          </label>
+          <input
+            id={`${fieldIdPrefix}-boss-minion-floor`}
+            type="number"
+            min={1}
+            placeholder="auto"
+            value={boss.minionFloor}
+            onChange={(e) => update({ minionFloor: e.target.value })}
+            className={INPUT}
+          />
+          <p className="text-xs text-text-dim mt-1">
+            empty = 75% of the raid's average level
+          </p>
         </div>
       </div>
       <div className="grid sm:grid-cols-2 gap-4">
@@ -226,7 +210,7 @@ export function BossFightConfigFields({
             className="block text-xs text-text-dim mb-1"
             htmlFor={`${fieldIdPrefix}-boss-reward`}
           >
-            reward item (everyone who dealt damage)
+            reward item (everyone still in when it falls)
           </label>
           <CatalogItemSelect
             id={`${fieldIdPrefix}-boss-reward`}
@@ -234,21 +218,6 @@ export function BossFightConfigFields({
             onChange={(rewardItemId) => update({ rewardItemId })}
             catalogItems={catalogItems}
             required
-          />
-        </div>
-        <div>
-          <label
-            className="block text-xs text-text-dim mb-1"
-            htmlFor={`${fieldIdPrefix}-boss-top-reward`}
-          >
-            top reward item (optional, on top of the reward)
-          </label>
-          <CatalogItemSelect
-            id={`${fieldIdPrefix}-boss-top-reward`}
-            value={boss.topRewardItemId}
-            onChange={(topRewardItemId) => update({ topRewardItemId })}
-            catalogItems={catalogItems}
-            emptyLabel="none"
           />
         </div>
       </div>

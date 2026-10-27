@@ -7,6 +7,7 @@ import {
   isSkillId,
   SKILL_DEFS,
   SKILL_MAX_LEVEL,
+  type SkillId,
   skillLevelProgress,
   skillTotalXpForLevel,
   skillXpForLevel,
@@ -39,6 +40,28 @@ export function SkillsPanel({
       ) : (
         known.map((s) => <SkillRow key={s.skillId} skill={s} />)
       )}
+      {def.skills
+        .filter(
+          (id) =>
+            SKILL_DEFS[id].minLevel && !known.some((s) => s.skillId === id),
+        )
+        .map((id) => (
+          <LockedRow key={id} id={id} />
+        ))}
+    </div>
+  );
+}
+
+/** A skill the class learns later: what it'll do, and when. */
+function LockedRow({ id }: { id: SkillId }) {
+  const def = SKILL_DEFS[id];
+  return (
+    <div className="border border-white/10 px-2 py-1.5 opacity-60">
+      <div className="flex items-baseline justify-between text-ui">
+        <span className="font-bold text-text-dim">{def.name}</span>
+        <span className="text-text-dim">Learned at level {def.minLevel}</span>
+      </div>
+      <div className="text-ui text-text-dim">{describeSkill(id, 1)}</div>
     </div>
   );
 }

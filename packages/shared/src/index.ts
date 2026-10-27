@@ -1,5 +1,7 @@
 export * from "./ascii3d.js";
 export * from "./boboku.js";
+export * from "./boss-fight.js";
+export * from "./boss-lines.js";
 export * from "./card/index.js";
 export * from "./chat.js";
 export * from "./chat-mentions.js";

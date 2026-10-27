@@ -66,11 +66,13 @@ export function townNet(): TownConnection {
       notify(
         why === "down"
           ? "You need some rest first."
-          : tower
-            ? "The Tower is closed right now."
-            : why === "full"
-              ? "The lair is full right now. Try again in a moment."
-              : "The lair is sealed right now.",
+          : why === "locked"
+            ? "The fight has already started: the cave is sealed until it's over."
+            : tower
+              ? "The Tower is closed right now."
+              : why === "full"
+                ? "The lair is full right now. Try again in a moment."
+                : "The lair is sealed right now.",
       );
       goToMap("home");
     },
@@ -80,7 +82,9 @@ export function townNet(): TownConnection {
           ? "The Tower closes for now. Back to town."
           : bossFight.victory
             ? "The lair falls quiet. Back to town."
-            : "The boss slipped away. Back to town.",
+            : bossFight.closing?.why === "wiped"
+              ? "The boss won this time. Back to town."
+              : "The boss slipped away. Back to town.",
         { kind: "info" },
       );
       goToMap("home");

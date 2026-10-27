@@ -44,7 +44,8 @@ async function skills(userId: string) {
   const { data } = await admin()
     .from("herzie_skills")
     .select("skill_id, level, xp")
-    .eq("user_id", userId);
+    .eq("user_id", userId)
+    .order("skill_id");
   return data ?? [];
 }
 
@@ -60,7 +61,7 @@ describe("choosing a class", () => {
     expect(r).toMatchObject({ ok: false, reason: "stage-too-low" });
   });
 
-  it("gives the starter skill, and no gear (Boboku sells it, 00116)", async () => {
+  it("gives the class's skills, and no gear (Boboku sells it, 00116)", async () => {
     const userId = await player({ stage: 2, level: 12 });
     const r = await rpc<Outcome>("choose_class", {
       p_user_id: userId,
@@ -71,8 +72,10 @@ describe("choosing a class", () => {
     expect(
       units.filter((u) => ["worn-stick", "old-cymbal"].includes(u.item_id)),
     ).toEqual([]);
+    // Both of a Percussionist's skills (00122): Cymbrella and Taunt.
     expect(await skills(userId)).toEqual([
       { skill_id: "cymbrella", level: 1, xp: 0 },
+      { skill_id: "taunt", level: 1, xp: 0 },
     ]);
   });
 
@@ -94,6 +97,32 @@ describe("choosing a class", () => {
     // Still no lute: a retry hands nothing over either.
     const lutes = (await getUnits(userId)).filter((u) => u.item_id === "lute");
     expect(lutes).toHaveLength(0);
+  });
+
+  it("a Bard learns Haste at level 15: on choosing, or on reaching it", async () => {
+    const young = await player({ stage: 2, level: 14 });
+    await rpc("choose_class", { p_user_id: young, p_class: "bard" });
+    expect((await skills(young)).map((s) => s.skill_id)).toEqual([
+      "resurrect",
+      "soothing-drones",
+    ]);
+    // Level 15: learned (by the trigger), once.
+    await admin().from("herzies").update({ level: 15 }).eq("user_id", young);
+    await admin().from("herzies").update({ level: 16 }).eq("user_id", young);
+    expect((await skills(young)).map((s) => s.skill_id)).toEqual([
+      "haste",
+      "resurrect",
+      "soothing-drones",
+    ]);
+    // Choosing at 15 or above: straight away.
+    const grown = await player({ stage: 3, level: 20 });
+    await rpc("choose_class", { p_user_id: grown, p_class: "bard" });
+    expect((await skills(grown)).map((s) => s.skill_id)).toContain("haste");
+    // Other classes never do.
+    const tank = await player({ stage: 3, level: 20 });
+    await rpc("choose_class", { p_user_id: tank, p_class: "percussionist" });
+    await admin().from("herzies").update({ level: 21 }).eq("user_id", tank);
+    expect((await skills(tank)).map((s) => s.skill_id)).not.toContain("haste");
   });
 
   it("refuses an unknown class", async () => {
@@ -237,6 +266,7 @@ describe("skill XP", () => {
     expect(again.applied).toBe(false);
     expect(again.levels).toEqual(first.levels);
     expect(await skills(userId)).toEqual([
+      { skill_id: "resurrect", level: 1, xp: 0 },
       { skill_id: "soothing-drones", level: 3, xp },
     ]);
   });
@@ -258,7 +288,9 @@ describe("skill XP", () => {
       p_batch: `test:${crypto.randomUUID()}`,
       p_xp: [{ uid: userId, skill: "cymbrella", xp: 99_999 }],
     });
-    expect((await skills(userId))[0].level).toBe(10);
+    expect(
+      (await skills(userId)).find((s) => s.skill_id === "cymbrella")?.level,
+    ).toBe(10);
   });
 });
 
@@ -280,7 +312,12 @@ describe("sync", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.herzie.class).toBe("bard");
-    expect(body.skills).toEqual([
+    expect(
+      [...body.skills].sort((a: { skillId: string }, b: { skillId: string }) =>
+        a.skillId.localeCompare(b.skillId),
+      ),
+    ).toEqual([
+      { skillId: "resurrect", level: 1, xp: 0 },
       { skillId: "soothing-drones", level: 1, xp: 0 },
     ]);
     const { data } = await admin()

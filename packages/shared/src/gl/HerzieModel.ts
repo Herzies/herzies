@@ -470,6 +470,9 @@ export class HerzieModel {
   private readonly surgeToward: number;
   /** Seconds into a sonic cast; undefined when it isn't casting. */
   private castTime: number | undefined;
+  /** How fast its casts play: 1, or quicker while hasted (so the motion
+   * keeps up with the faster pace instead of being cut short). */
+  castRate = 1;
   private castPitch = 0;
   /** The arm this cast is with, and how it moves (a disc is thrown). */
   private castArmPart: string = CAST_ARM;
@@ -544,6 +547,7 @@ export class HerzieModel {
     uSpan: { value: 1 },
     uGrey: { value: 0 },
     uOpacity: { value: 1 },
+    uFlash: { value: new THREE.Vector4(1, 1, 1, 0) },
   };
 
   constructor(look: HerzieLook, options: HerzieModelOptions = {}) {
@@ -1149,7 +1153,7 @@ export class HerzieModel {
       if (dt <= 0) return;
     }
     const before = this.castTime;
-    this.castTime += dt;
+    this.castTime += dt * this.castRate;
     if (
       before < CAST_RELEASE_SECONDS &&
       this.castTime >= CAST_RELEASE_SECONDS
@@ -1390,6 +1394,12 @@ export class HerzieModel {
 
   /** Grey it out (0 to 1) and make it see-through (opacity 1 to 0): a herzie
    * that isn't there yet, waiting to hatch. */
+  /** Wash the whole herzie in a colour, `amount` 0 (none) to 1: a hit's
+   * flash, an enrage's red. */
+  setFlash(r: number, g: number, b: number, amount: number): void {
+    this.scheme.uFlash.value.set(r, g, b, Math.max(0, Math.min(1, amount)));
+  }
+
   setTint(grey: number, opacity: number): void {
     this.scheme.uGrey.value = grey;
     this.scheme.uOpacity.value = opacity;

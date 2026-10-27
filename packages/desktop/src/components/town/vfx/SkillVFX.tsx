@@ -10,12 +10,47 @@ const DRONE_RING_GAP_MS = 220;
 const DISC_SPEED = 22;
 /** Cymbals drawn at once at most (one per buffed herzie). */
 const MAX_CYMBALS = 8;
+/** In-tune auras, and the notes over each. */
+const MAX_AURAS = 12;
+const NOTES = 3;
+/** The aura's pulse: about a beat at 120 bpm. */
+const BEAT_MS = 500;
+/** Resurrect beams at once. */
+const MAX_BEAMS = 4;
+/** How far a Taunt's shout spreads. */
+const TAUNT_REACH = 6;
+
+const PINK = new THREE.Color(0xff7eb6);
+const RED = new THREE.Color(0xff3b30);
+const GOLD = new THREE.Color(0xffd84a);
+
+/** A note glyph, drawn once, for the in-tune sprites. */
+function noteTexture(): THREE.CanvasTexture {
+  const c = document.createElement("canvas");
+  c.width = c.height = 64;
+  const ctx = c.getContext("2d");
+  if (ctx) {
+    ctx.font = "bold 52px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.shadowColor = "rgba(0,0,0,0.6)";
+    ctx.shadowBlur = 6;
+    ctx.fillStyle = "#ffe27a";
+    ctx.fillText("♪", 32, 34);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
 
 /**
  * Class skills as they happen, for everyone in the room: Soothing Drones
  * pulses out over the ground as far as it reaches, Backspin's discs spin
- * away along the aim, and a giant cymbal hangs over whoever is under a
- * Cymbrella. Pooled meshes, moved each frame; nothing is created while
+ * away along the aim, a giant cymbal hangs over whoever is under a
+ * Cymbrella, a Taunt's shout spreads red from its caster, a Resurrect is a
+ * gold beam from its Bard to the fallen while it plays, and whoever is in
+ * tune with what the boss hates glows gold on the beat with notes rising
+ * over them. Pooled meshes, moved each frame; nothing is created while
  * fighting.
  */
 export function SkillVFX() {
@@ -68,16 +103,75 @@ export function SkillVFX() {
       return m;
     });
 
+    const auraGeo = new THREE.CircleGeometry(0.95, 40);
+    auraGeo.rotateX(-Math.PI / 2);
+    const auras = Array.from({ length: MAX_AURAS }, () => {
+      const m = new THREE.Mesh(
+        auraGeo,
+        new THREE.MeshBasicMaterial({
+          color: GOLD,
+          transparent: true,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+          fog: false,
+        }),
+      );
+      m.visible = false;
+      m.renderOrder = 5;
+      group.add(m);
+      return m;
+    });
+    const noteTex = noteTexture();
+    const noteMat = new THREE.SpriteMaterial({
+      map: noteTex,
+      transparent: true,
+      depthWrite: false,
+      fog: false,
+    });
+    const notes = Array.from({ length: MAX_AURAS * NOTES }, () => {
+      const m = new THREE.Sprite(noteMat.clone());
+      m.scale.setScalar(0.42);
+      m.visible = false;
+      m.renderOrder = 7;
+      group.add(m);
+      return m;
+    });
+
+    const beamGeo = new THREE.CylinderGeometry(0.07, 0.07, 1, 8, 1, true);
+    beamGeo.rotateX(Math.PI / 2);
+    const beamMat = new THREE.MeshBasicMaterial({
+      color: GOLD,
+      transparent: true,
+      opacity: 0.75,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      fog: false,
+    });
+    const beams = Array.from({ length: MAX_BEAMS }, () => {
+      const m = new THREE.Mesh(beamGeo, beamMat);
+      m.visible = false;
+      group.add(m);
+      return m;
+    });
+
     return {
       group,
       rings,
       discs,
       cymbals,
+      auras,
+      notes,
+      beams,
       ringGeo,
       discGeo,
       cymbalGeo,
+      auraGeo,
+      beamGeo,
       discMat,
       cymbalMat,
+      noteTex,
+      noteMat,
+      beamMat,
     };
   }, []);
 
@@ -88,7 +182,14 @@ export function SkillVFX() {
       fx.cymbalGeo.dispose();
       fx.discMat.dispose();
       fx.cymbalMat.dispose();
+      fx.auraGeo.dispose();
+      fx.beamGeo.dispose();
+      fx.noteTex.dispose();
+      fx.noteMat.dispose();
+      fx.beamMat.dispose();
       for (const r of fx.rings) (r.material as THREE.Material).dispose();
+      for (const a of fx.auras) (a.material as THREE.Material).dispose();
+      for (const n of fx.notes) (n.material as THREE.Material).dispose();
     },
     [fx],
   );
@@ -111,7 +212,24 @@ export function SkillVFX() {
           m.visible = true;
           m.position.set(c.x, 0.08 + i * 0.01, c.z);
           m.scale.setScalar(Math.max(0.05, reach * t));
-          (m.material as THREE.MeshBasicMaterial).opacity = 0.85 * (1 - t);
+          const mat = m.material as THREE.MeshBasicMaterial;
+          mat.color.copy(PINK);
+          mat.opacity = 0.85 * (1 - t);
+        }
+      } else if (c.skill === "taunt" || c.skill === "resurrect") {
+        // A Taunt's shout: one fast red ring. A Resurrect's first note: a
+        // small gold one at the Bard's feet.
+        const t = age / (SKILL_FX_MS * (c.skill === "taunt" ? 0.45 : 0.7));
+        if (t >= 0 && t <= 1 && ring < fx.rings.length) {
+          const m = fx.rings[ring++];
+          m.visible = true;
+          m.position.set(c.x, 0.09, c.z);
+          m.scale.setScalar(
+            Math.max(0.05, (c.skill === "taunt" ? TAUNT_REACH : 2) * t),
+          );
+          const mat = m.material as THREE.MeshBasicMaterial;
+          mat.color.copy(c.skill === "taunt" ? RED : GOLD);
+          mat.opacity = 0.9 * (1 - t);
         }
       } else if (c.skill === "backspin") {
         const half = (BACKSPIN_DISCS - 1) / 2;
@@ -145,6 +263,70 @@ export function SkillVFX() {
       m.rotation.set(Math.sin(now / 500) * 0.06, now / 900, 0);
     }
     for (; cym < fx.cymbals.length; cym++) fx.cymbals[cym].visible = false;
+
+    // In tune: a gold glow underfoot on the beat, and notes rising.
+    let aura = 0;
+    const beat =
+      0.5 + 0.5 * Math.cos(((now % BEAT_MS) / BEAT_MS) * Math.PI * 2);
+    for (const [id, at] of entityAt) {
+      if (aura >= fx.auras.length) break;
+      if (!buffOn(id, "in_tune", now)) continue;
+      const i = aura++;
+      const m = fx.auras[i];
+      m.visible = true;
+      m.position.set(at.x, 0.07, at.z);
+      m.scale.setScalar(0.9 + 0.25 * beat);
+      (m.material as THREE.MeshBasicMaterial).opacity = 0.18 + 0.22 * beat;
+      for (let n = 0; n < NOTES; n++) {
+        const note = fx.notes[i * NOTES + n];
+        const u = (((now / 1600 + n / NOTES + id * 0.37) % 1) + 1) % 1;
+        const a = id * 1.7 + n * 2.1 + u * 1.5;
+        note.visible = true;
+        note.position.set(
+          at.x + Math.sin(a) * 0.55,
+          at.top * 0.6 + u * 1.4,
+          at.z + Math.cos(a) * 0.55,
+        );
+        (note.material as THREE.SpriteMaterial).opacity = Math.sin(u * Math.PI);
+      }
+    }
+    for (let i = aura; i < fx.auras.length; i++) {
+      fx.auras[i].visible = false;
+      for (let n = 0; n < NOTES; n++) fx.notes[i * NOTES + n].visible = false;
+    }
+
+    // A Resurrect being played: a beam from the Bard to the fallen, pulsing
+    // brighter as it nears the end.
+    let beam = 0;
+    for (const [by, ch] of skills.channels) {
+      if (beam >= fx.beams.length) break;
+      const from = entityAt.get(by);
+      const to = entityAt.get(ch.target);
+      if (!from || !to || now > ch.until) continue;
+      const m = fx.beams[beam++];
+      const ax = from.x;
+      const ay = from.top * 0.7;
+      const az = from.z;
+      const bx = to.x;
+      const by_ = 0.5;
+      const bz = to.z;
+      const len = Math.hypot(bx - ax, by_ - ay, bz - az);
+      m.visible = len > 0.05;
+      m.position.set((ax + bx) / 2, (ay + by_) / 2, (az + bz) / 2);
+      m.lookAt(bx, by_, bz);
+      m.scale.set(1, 1, len);
+    }
+    const k = (() => {
+      let best = 0;
+      for (const ch of skills.channels.values())
+        best = Math.max(
+          best,
+          (now - ch.from) / Math.max(1, ch.until - ch.from),
+        );
+      return Math.min(1, best);
+    })();
+    fx.beamMat.opacity = 0.35 + 0.5 * k * (0.75 + 0.25 * Math.sin(now / 60));
+    for (; beam < fx.beams.length; beam++) fx.beams[beam].visible = false;
   });
 
   return <primitive object={fx.group} />;

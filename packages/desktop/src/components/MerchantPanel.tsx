@@ -39,6 +39,7 @@ import { FloatingCoins } from "./FloatingCoins";
 import ItemInspectOverlay, { inspectOrigin } from "./ItemInspectOverlay";
 import { ItemRow } from "./ItemRow";
 import { List } from "./List";
+import { NumberTicker } from "./NumberTicker";
 import type { TabColour } from "./TabButton";
 import { Tooltip } from "./Tooltip";
 
@@ -201,6 +202,23 @@ const residentStall = (
 const BOBOKU_STALL = residentStall(BOBOKU_STOCK);
 const MEDEA_STALL = residentStall(MEDEA_STOCK);
 
+/** The most of one line bought at once (Boboku's and Medea's routes take
+ * no more than this). */
+const MAX_PER_BUY = 10;
+
+/** How many of a line can be bought in one go: up to MAX_PER_BUY, what's
+ * left, your remaining share, and what you can afford. At least 1, so a
+ * blocked line still shows a sensible number. */
+function maxQuantity(line: MerchantStockView, balance: number) {
+  let max = MAX_PER_BUY;
+  if (line.remaining != null) max = Math.min(max, line.remaining);
+  if (line.perPlayerLimit != null) {
+    max = Math.min(max, line.perPlayerLimit - line.yourBought);
+  }
+  if (line.price > 0) max = Math.min(max, Math.floor(balance / line.price));
+  return Math.max(1, max);
+}
+
 /** Why a line can't be bought right now, or null if it can. */
 function blockedReason(
   line: MerchantStockView,
@@ -249,6 +267,8 @@ export function MerchantPanel({
   const medea = event === MEDEA_KEY;
   const config = boboku || medea ? null : event.config;
   const [pendingItemId, setPendingItemId] = useState<string | null>(null);
+  // How many of each stackable line to buy (1 unless picked).
+  const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [inspectItemId, setInspectItemId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Optimistic "bought" bumps until the next poll brings real counts.
@@ -288,16 +308,29 @@ export function MerchantPanel({
     };
   });
 
-  const buy = async (itemId: string) => {
+  /** The quantity picker shows only for stackable items (sweets, treats):
+   * a stack of copies is one bank slot, and buying several is the point. */
+  const stackable = (itemId: string) => !!getItem(itemId)?.stackable;
+  const quantityOf = (line: MerchantStockView) =>
+    stackable(line.itemId)
+      ? Math.min(quantities[line.itemId] ?? 1, maxQuantity(line, balance))
+      : 1;
+
+  const buy = async (itemId: string, quantity: number) => {
     setError(null);
     setPendingItemId(itemId);
     try {
-      if (boboku) await herzies.buyFromBoboku(itemId, 1);
-      else if (medea) await herzies.buyFromMedea(itemId, 1);
-      else await herzies.buyFromMerchant(event.id, itemId, 1);
-      setBoughtNow((b) => ({ ...b, [itemId]: (b[itemId] ?? 0) + 1 }));
+      if (boboku) await herzies.buyFromBoboku(itemId, quantity);
+      else if (medea) await herzies.buyFromMedea(itemId, quantity);
+      else await herzies.buyFromMerchant(event.id, itemId, quantity);
+      setBoughtNow((b) => ({ ...b, [itemId]: (b[itemId] ?? 0) + quantity }));
+      // Back to 1, so the next click doesn't buy a stack by surprise.
+      setQuantities((q) => ({ ...q, [itemId]: 1 }));
+      const name = getItem(itemId)?.name ?? itemId;
       onLog?.(
-        `Bought "${getItem(itemId)?.name ?? itemId}" from ${persona.name}`,
+        quantity > 1
+          ? `Bought ${quantity} "${name}" from ${persona.name}`
+          : `Bought "${name}" from ${persona.name}`,
       );
       onBought();
     } catch (e: unknown) {
@@ -305,6 +338,43 @@ export function MerchantPanel({
     } finally {
       setPendingItemId(null);
     }
+  };
+
+  /** A line's Buy button, with the quantity picker beside it for
+   * stackable items. */
+  const buyControls = (line: MerchantStockView) => {
+    const reason = blockedReason(line, balance, persona);
+    const quantity = quantityOf(line);
+    const button = (
+      <button
+        type="button"
+        className="btn"
+        disabled={!!reason || pendingItemId !== null}
+        onClick={() => buy(line.itemId, quantity)}
+      >
+        {pendingItemId === line.itemId ? (
+          "Buying..."
+        ) : quantity > 1 ? (
+          <>Buy ({persona.price(line.price * quantity)})</>
+        ) : (
+          "Buy"
+        )}
+      </button>
+    );
+    return (
+      <div className="flex items-center gap-1">
+        {stackable(line.itemId) && !reason && (
+          <NumberTicker
+            value={quantity}
+            min={1}
+            max={maxQuantity(line, balance)}
+            size="small"
+            onChange={(v) => setQuantities((q) => ({ ...q, [line.itemId]: v }))}
+          />
+        )}
+        {reason ? <Tooltip label={reason}>{button}</Tooltip> : button}
+      </div>
+    );
   };
 
   const inspected = stock.find((l) => l.itemId === inspectItemId);
@@ -364,18 +434,6 @@ export function MerchantPanel({
           <div className="text-ui text-text-dim">{persona.soldOut}</div>
         ) : (
           stock.map((line) => {
-            const reason = blockedReason(line, balance, persona);
-            const pending = pendingItemId === line.itemId;
-            const button = (
-              <button
-                type="button"
-                className="btn"
-                disabled={!!reason || pendingItemId !== null}
-                onClick={() => buy(line.itemId)}
-              >
-                {pending ? "Buying..." : "Buy"}
-              </button>
-            );
             const details = [
               line.remaining != null ? `${line.remaining} left` : null,
               owned(line.itemId) > 0 ? `${owned(line.itemId)} owned` : null,
@@ -393,9 +451,7 @@ export function MerchantPanel({
                     {details.length > 0 && ` · ${details.join(" · ")}`}
                   </>
                 }
-                action={
-                  reason ? <Tooltip label={reason}>{button}</Tooltip> : button
-                }
+                action={buyControls(line)}
               />
             );
           })
@@ -413,19 +469,7 @@ export function MerchantPanel({
           onClose={() => setInspectItemId(null)}
           equipped={equipped}
           meta={persona.price(inspected.price)}
-          footer={
-            <button
-              type="button"
-              className="btn"
-              disabled={
-                !!blockedReason(inspected, balance, persona) ||
-                pendingItemId !== null
-              }
-              onClick={() => buy(inspected.itemId)}
-            >
-              {pendingItemId === inspected.itemId ? "Buying..." : "Buy"}
-            </button>
-          }
+          footer={buyControls(inspected)}
         />
       )}
     </div>

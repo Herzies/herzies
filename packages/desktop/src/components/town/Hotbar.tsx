@@ -11,14 +11,23 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../../lib/utils";
 import { DeckSlotPicker, type PickerOption } from "../DeckSlotPicker";
 import { Tooltip } from "../Tooltip";
-import { queueMySkill, skills, useSkills } from "./combat/skills";
+import {
+  instrumentNeeded,
+  mySkillAt,
+  queueSkill,
+  skills,
+  useSkills,
+} from "./combat/skills";
+import { canHeal, toggleStance, useStance } from "./combat/stance";
 import { eat, useLastEat } from "./eat";
 import {
   assignHotbar,
   clearHotbar,
   HOTBAR_KEYS,
   type HotbarKey,
-  SKILL_SLOT,
+  MAX_CLASS_SKILLS,
+  skillOfSlot,
+  skillSlot,
   useHotbar,
 } from "./hotbarSlots";
 
@@ -27,7 +36,180 @@ const SKILL_ABBR: Record<SkillId, string> = {
   backspin: "BS",
   "soothing-drones": "SD",
   cymbrella: "CB",
+  resurrect: "RZ",
+  taunt: "TA",
+  haste: "HS",
 };
+
+/**
+ * A Bard's lute stance, left of the hotbar: attacking (⚔) or healing (✚),
+ * R or a click to switch. Only for a Bard with a lute.
+ */
+function StanceSlot() {
+  useSkills();
+  const heal = useStance();
+  if (skills.instrument !== "lute") return null;
+  const armed = canHeal();
+  return (
+    <Tooltip
+      label={
+        <div className="w-[190px] whitespace-normal">
+          <div className="font-bold">
+            Lute: {heal ? "healing" : "attacking"}
+          </div>
+          <div className="text-text-dim">
+            {heal
+              ? "Your attack heals the ally under your crosshair. R to attack."
+              : "R to heal: your attack heals the ally under your crosshair instead."}
+          </div>
+          {!armed && (
+            <div className="mt-1 text-red-300">Equip "Lute" to heal.</div>
+          )}
+        </div>
+      }
+    >
+      <button
+        type="button"
+        aria-label={
+          heal ? "Lute stance: healing (R)" : "Lute stance: attacking (R)"
+        }
+        aria-pressed={heal}
+        onClick={() => toggleStance()}
+        className={cn(
+          "pointer-events-auto relative flex size-9 cursor-pointer items-center justify-center rounded border bg-black/55 p-0",
+          heal ? "border-[#7ee2a8]/80" : "border-white/20",
+          !armed && "opacity-45 grayscale",
+        )}
+      >
+        <span className="absolute top-0 left-0.5 text-[9px] leading-none text-white/70">
+          R
+        </span>
+        <span
+          className={cn(
+            "text-[15px] font-bold leading-none",
+            heal ? "text-[#7ee2a8]" : "text-white",
+          )}
+        >
+          {heal ? "✚" : "⚔"}
+        </span>
+      </button>
+    </Tooltip>
+  );
+}
+
+/**
+ * One of your class skills on the hotbar: its letters, greyed from the top
+ * while it cools down with the seconds left, and a hint of what it does.
+ * The first is on Q too, wherever it sits.
+ */
+function SkillSlot({
+  hotkey,
+  n,
+  onPick,
+}: {
+  hotkey: HotbarKey;
+  /** Which of your skills (1-based, the class's order). */
+  n: number;
+  onPick: (e: React.MouseEvent) => void;
+}) {
+  useSkills();
+  const mine = mySkillAt(n);
+  const def = mine ? SKILL_DEFS[mine.id] : null;
+  // The cooldown runs off the frame clock, not renders.
+  const shade = useRef<HTMLSpanElement>(null);
+  const secs = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    let raf = 0;
+    const step = () => {
+      const s = mySkillAt(n);
+      if (shade.current && secs.current) {
+        if (!s) {
+          shade.current.style.height = "0";
+          if (secs.current.textContent) secs.current.textContent = "";
+        } else {
+          const left = Math.max(
+            0,
+            (skills.readyAt.get(s.id) ?? 0) - performance.now(),
+          );
+          const f = Math.min(1, left / SKILL_DEFS[s.id].cooldownMs);
+          shade.current.style.height = `${f * 100}%`;
+          // Text only when it changes (a write replaces the node).
+          const text = f > 0 ? String(Math.ceil(left / 1000)) : "";
+          if (secs.current.textContent !== text)
+            secs.current.textContent = text;
+        }
+      }
+      raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [n]);
+  return (
+    <Tooltip
+      label={
+        mine && def ? (
+          <div className="w-[180px] whitespace-normal">
+            <div className="font-bold">
+              {def.name}{" "}
+              <span className="font-normal text-text-dim">
+                Lv. {mine.level}
+              </span>
+            </div>
+            <div className="text-text-dim">
+              {describeSkill(mine.id, mine.level)}
+            </div>
+            {!skills.armed && (
+              <div className="mt-1 text-red-300">
+                {instrumentNeeded(mine.id)}
+              </div>
+            )}
+          </div>
+        ) : n === 1 ? (
+          "Your class skill — pick a class first"
+        ) : n === 2 ? (
+          "Your class's second skill (Bards and Percussionists have one)"
+        ) : (
+          "Your class's third skill (Bards learn Haste at level 15)"
+        )
+      }
+    >
+      <button
+        type="button"
+        aria-label={def ? `${hotkey}: ${def.name}` : `${hotkey}: class skill`}
+        onClick={(e) => {
+          if (mine) queueSkill(n);
+          else onPick(e);
+        }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          onPick(e);
+        }}
+        className={cn(
+          "pointer-events-auto relative flex size-9 cursor-pointer items-center justify-center overflow-hidden rounded border border-white/20 bg-black/55 p-0",
+          !mine && "opacity-45 hover:opacity-80",
+          mine && !skills.armed && "opacity-45 grayscale",
+        )}
+      >
+        <span className="absolute top-0 left-0.5 text-[9px] leading-none text-white/70">
+          {n === 1 ? `${hotkey}/Q` : hotkey}
+        </span>
+        <span className="text-[11px] font-bold text-white">
+          {mine ? SKILL_ABBR[mine.id] : "—"}
+        </span>
+        <span
+          ref={shade}
+          aria-hidden
+          className="absolute inset-x-0 top-0 bg-black/60"
+          style={{ height: 0 }}
+        />
+        <span
+          ref={secs}
+          className="absolute right-0.5 bottom-0 text-[9px] leading-none text-white tabular-nums"
+        />
+      </button>
+    </Tooltip>
+  );
+}
 
 /**
  * The four slots, on keys 1-4: each holds a consumable (its icon and how
@@ -48,28 +230,7 @@ export function Hotbar({
 }) {
   const slots = useHotbar();
   useSkills();
-  const mine = skills.mine;
   const lastEat = useLastEat();
-  // The skill's cooldown runs off the frame clock, not renders: a shade
-  // over the slot, shrinking from the top, and the seconds left.
-  const skillShade = useRef<HTMLSpanElement>(null);
-  const skillSecs = useRef<HTMLSpanElement>(null);
-  useEffect(() => {
-    let raf = 0;
-    const step = () => {
-      const id = skills.mine?.id;
-      if (id && skillShade.current && skillSecs.current) {
-        const left = Math.max(0, skills.readyAt - performance.now());
-        const f = Math.min(1, left / SKILL_DEFS[id].cooldownMs);
-        skillShade.current.style.height = `${f * 100}%`;
-        skillSecs.current.textContent =
-          f > 0 ? String(Math.ceil(left / 1000)) : "";
-      }
-      raf = requestAnimationFrame(step);
-    };
-    raf = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(raf);
-  }, []);
   // Re-render once the cooldown's over, to drop the flash.
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -113,69 +274,18 @@ export function Hotbar({
 
   return (
     <div className={cn("absolute z-30 flex gap-1", className)}>
+      <StanceSlot />
       {HOTBAR_KEYS.map((key) => {
-        if (slots[key] === SKILL_SLOT) {
-          const def = mine ? SKILL_DEFS[mine.id] : null;
+        const n = skillOfSlot(slots[key]);
+        if (n !== null)
           return (
-            <Tooltip
+            <SkillSlot
               key={key}
-              label={
-                mine && def ? (
-                  <div className="w-[180px] whitespace-normal">
-                    <div className="font-bold">
-                      {def.name}{" "}
-                      <span className="font-normal text-text-dim">
-                        Lv. {mine.level}
-                      </span>
-                    </div>
-                    <div className="text-text-dim">
-                      {describeSkill(mine.id, mine.level)}
-                    </div>
-                  </div>
-                ) : (
-                  "Your class skill — pick a class first"
-                )
-              }
-            >
-              <button
-                type="button"
-                aria-label={def ? `${key}: ${def.name}` : `${key}: class skill`}
-                onClick={(e) => {
-                  if (mine) queueMySkill();
-                  else openPicker(key, e);
-                }}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  openPicker(key, e);
-                }}
-                className={cn(
-                  "pointer-events-auto relative flex size-9 cursor-pointer items-center justify-center overflow-hidden rounded border border-white/20 bg-black/55 p-0",
-                  !mine && "opacity-45 hover:opacity-80",
-                )}
-              >
-                {/* Q casts it too, wherever it sits. */}
-                <span className="absolute top-0 left-0.5 text-[9px] leading-none text-white/70">
-                  {key}/Q
-                </span>
-                <span className="text-[11px] font-bold text-white">
-                  {mine ? SKILL_ABBR[mine.id] : "—"}
-                </span>
-                {/* Cooling down: a shade over it, and the seconds left. */}
-                <span
-                  ref={skillShade}
-                  aria-hidden
-                  className="absolute inset-x-0 top-0 bg-black/60"
-                  style={{ height: 0 }}
-                />
-                <span
-                  ref={skillSecs}
-                  // Where an item slot shows its count.
-                  className="absolute right-0.5 bottom-0 text-[9px] leading-none text-white tabular-nums"
-                />
-              </button>
-            </Tooltip>
+              hotkey={key}
+              n={n}
+              onPick={(e) => openPicker(key, e)}
+            />
           );
-        }
         const itemId = slots[key];
         const item = itemId ? getItem(itemId) : undefined;
         const count = itemId
@@ -234,20 +344,27 @@ export function Hotbar({
           slotLabel={`Hotbar ${picker.key}`}
           options={options}
           extra={
-            mine && slots[picker.key] !== SKILL_SLOT ? (
-              <button
-                type="button"
-                className="flex w-full cursor-pointer items-center gap-1.5 border-none bg-transparent px-3 py-1 text-left text-text hover:bg-white/5"
-                onClick={() => {
-                  assignHotbar(picker.key, SKILL_SLOT);
-                  setPicker(null);
-                }}
-              >
-                <span className="w-4 shrink-0 text-center text-[9px] font-bold text-cyan">
-                  {SKILL_ABBR[mine.id]}
-                </span>
-                <span className="truncate">{SKILL_DEFS[mine.id].name}</span>
-              </button>
+            skills.list.length ? (
+              <div>
+                {skills.list.slice(0, MAX_CLASS_SKILLS).map((s, i) =>
+                  slots[picker.key] === skillSlot(i + 1) ? null : (
+                    <button
+                      key={s.id}
+                      type="button"
+                      className="flex w-full cursor-pointer items-center gap-1.5 border-none bg-transparent px-3 py-1 text-left text-text hover:bg-white/5"
+                      onClick={() => {
+                        assignHotbar(picker.key, skillSlot(i + 1));
+                        setPicker(null);
+                      }}
+                    >
+                      <span className="w-4 shrink-0 text-center text-[9px] font-bold text-cyan">
+                        {SKILL_ABBR[s.id]}
+                      </span>
+                      <span className="truncate">{SKILL_DEFS[s.id].name}</span>
+                    </button>
+                  ),
+                )}
+              </div>
             ) : undefined
           }
           onPick={({ itemId }) => {

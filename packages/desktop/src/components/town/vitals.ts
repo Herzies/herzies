@@ -1,7 +1,8 @@
 import { benchBonusHp, liveHp, type Vitals } from "@herzies/shared";
+import { TOWN_REST_MAPS, type TownMapId } from "@herzies/shared/town-net";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { herzies } from "../../tauri-bridge";
-import { townLive } from "./runtime";
+import { townLive, townSave } from "./runtime";
 
 /** The player's health as the server last told us: handed out with every
  * ticket and by `town-vitals`, and rewritten from a fight's `hp` messages.
@@ -86,7 +87,10 @@ export function useLiveHp(): {
     let stood: ReturnType<typeof setTimeout> | null = null;
     const t = setInterval(() => {
       const seated = !!townLive.seat;
-      if (seated && v) benchExtra += benchBonusHp(v.maxHp, 1);
+      // Only where the Town server credits it, or the bar overshoots and
+      // drops back when the server's word comes in.
+      if (seated && v && TOWN_REST_MAPS.has(townSave.map as TownMapId))
+        benchExtra += benchBonusHp(v.maxHp, 1);
       // Stood up: the server has the bench's earnings by now; take its word.
       if (wasSeated && !seated) {
         stood = setTimeout(refreshVitals, STOOD_UP_REFRESH_MS);

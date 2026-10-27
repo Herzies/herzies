@@ -1,7 +1,7 @@
 import { ELITE, gapColour, MOB, WARDEN } from "@herzies/shared/tower";
 import { Html } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
-import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { NAME_SHADOW } from "../nameFade";
@@ -211,7 +211,8 @@ function drawTag(ctx: CanvasRenderingContext2D, hp: number, maxHp: number) {
   ctx.fillRect(x, 28, w * Math.max(0, Math.min(1, hp / maxHp)), 6);
 }
 
-function Mob({ id }: { id: number }) {
+/** Re-rendered only when its own props change, not on every fight update. */
+const Mob = memo(function Mob({ id }: { id: number }) {
   const group = useRef<THREE.Group>(null);
   const body = useRef<THREE.Mesh>(null);
   const tag = useRef<THREE.Sprite>(null);
@@ -333,8 +334,8 @@ function Mob({ id }: { id: number }) {
       material.emissiveIntensity = glow;
     }
 
-    const tower = bossFight.tower;
-    if (tower && tag.current) {
+    // The health bar, in the Tower and the cave alike.
+    if (tag.current) {
       const d = drawn.current;
       if (d.hp !== m.hp) {
         const ctx = canvas.getContext("2d");
@@ -383,4 +384,4 @@ function Mob({ id }: { id: number }) {
       ) : null}
     </group>
   );
-}
+});

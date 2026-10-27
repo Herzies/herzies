@@ -13,7 +13,12 @@
  */
 
 import { DurableObject } from "cloudflare:workers";
+import { parseTune, TUNE_MIN_INTERVAL_MS } from "@herzies/shared/boss-fight";
+import { hasInstrument } from "@herzies/shared/classes";
+import { SKILL_DEFS, skillValue } from "@herzies/shared/skills";
+import { healMult } from "@herzies/shared/stats";
 import {
+  type BossClaim,
   decodeCastFrame,
   decodeStateFrame,
   type EatRefusal,
@@ -29,6 +34,7 @@ import {
   TOWN_PING,
   TOWN_PONG,
   TOWN_PROTOCOL,
+  TOWN_REST_MAPS,
   TOWN_ROOM_CAPACITY,
   TOWN_TICK_MS,
   TOWN_TICKET_TTL_S,
@@ -41,7 +47,7 @@ import {
   verifyTownTicket,
 } from "@herzies/shared/town-net";
 import { benchBonusHp } from "@herzies/shared/vitals";
-import { DEV_EVENT, FightRuntime, type Outbound } from "./fight";
+import { CHANNEL_SLACK, DEV_EVENT, FightRuntime, type Outbound } from "./fight";
 import { RestMeter } from "./rest";
 import {
   checkMove,
@@ -50,7 +56,7 @@ import {
   RateLimiter,
   startingPoint,
 } from "./rules";
-import { eatInDb, postVitals } from "./vitals";
+import { eatInDb, postVitals, reviveInDb } from "./vitals";
 
 export type Env = {
   TOWN_ROOM: DurableObjectNamespace<TownRoom>;
@@ -62,6 +68,9 @@ export type Env = {
   /** Local dev only: let the boss room open without an event, with a
    * throwaway boss that is never reported. */
   DEV_BOSS?: string;
+  /** Local dev only: how long the dev boss's lobby lasts, in seconds
+   * (default 20). */
+  DEV_BOSS_LOBBY_S?: string;
 };
 
 /** A socket must say hello this soon after connecting. */
@@ -70,6 +79,11 @@ const HELLO_TIMEOUT_MS = 5_000;
 const IDLE_TIMEOUT_MS = 45_000;
 /** How often the room looks for dead sockets and expired tickets. */
 const SWEEP_MS = 30_000;
+/** Urgent fight reports no more often than this. */
+const REPORT_FLOOR_MS = 500;
+/** A closing room waits this long between tries for its last report. */
+const CLOSE_RETRY_MS = 2_000;
+const CLOSE_TRIES = 5;
 /** Grace past a ticket's expiry for a renewal still in flight. */
 const TICKET_GRACE_S = 30;
 /** Ticks with nobody moving before the timer stops. */
@@ -85,8 +99,6 @@ const CAST_OP = 3;
 
 /** How old a boss-room ticket may be. Its health is as of issue. */
 const FRESH_TICKET_MS = 2 * 60_000;
-/** Maps where sitting on a bench earns extra health: peaceful ones. */
-const REST_MAPS: ReadonlySet<TownMapId> = new Set(["home"]);
 
 /** Survives hibernation on the socket itself. */
 type Attachment = {
@@ -102,6 +114,15 @@ type Attachment = {
     exp: number;
     state: TownState;
     maxHp?: number;
+    /** Knocked out, outside a fight (from the ticket). */
+    down?: boolean;
+    /** Its Resurrect's level (0: it has none), and how much stronger its
+     * heals are (its Euphony), for a resurrect outside a fight. */
+    rez?: number;
+    healMult?: number;
+    /** Sitting on a bench since (ms), counted toward rest but not yet
+     * reported: kept here because a room that hibernates forgets the rest. */
+    restSince?: number | null;
   };
 };
 
@@ -120,6 +141,10 @@ type Session = {
   };
   limiter: RateLimiter;
   strikes: number;
+  /** When this socket last said what it's listening to (server ms). */
+  tunedAt?: number;
+  /** When it last switched its lute's stance (Date.now() ms). */
+  stanceAt?: number;
 };
 
 export class TownRoom extends DurableObject<Env> {
@@ -130,8 +155,18 @@ export class TownRoom extends DurableObject<Env> {
   private quietTicks = 0;
   /** The boss room's fight, once someone has arrived with a boss ticket. */
   private fight: FightRuntime | null = null;
+  /** Resurrects being played outside a fight, by their Bard's user id. */
+  private townChannels = new Map<string, TownChannel>();
+  /** When each Bard's Resurrect is ready again outside a fight (server ms),
+   * by user id. */
+  private rezReady = new Map<string, number>();
   private reporting = false;
+  /** A report was asked for (or forced) while one was in flight. */
+  private reportAgain = false;
+  /** When the last report went out, so urgent ones don't pile up. */
+  private reportedAt = 0;
   private closeScheduled = false;
+  private closeTries = 0;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -157,7 +192,7 @@ export class TownRoom extends DurableObject<Env> {
           ...att.player,
           guard: newGuard(att.player.state.x, att.player.state.z, now),
           receivedAt: now,
-          rest: new RestMeter(),
+          rest: new RestMeter(att.player.restSince ?? null),
         };
       }
     }
@@ -226,6 +261,8 @@ export class TownRoom extends DurableObject<Env> {
         yaw?: unknown;
         pitch?: unknown;
         item?: unknown;
+        on?: unknown;
+        heal?: unknown;
       };
       try {
         m = JSON.parse(message);
@@ -238,6 +275,9 @@ export class TownRoom extends DurableObject<Env> {
       else if (m?.t === "skill" && s.player) this.onSkill(s, m, now);
       else if (m?.t === "eat" && s.player) await this.onEat(s, m, now);
       else if (m?.t === "next" && s.player) this.onNext(s, now);
+      else if (m?.t === "tune" && s.player) this.onTune(s, m.on, now);
+      else if (m?.t === "stance" && s.player) this.onStance(s, m.heal);
+      else if (m?.t === "forfeit" && s.player) this.onForfeit(s, now);
       else this.strike(s);
       return;
     }
@@ -255,6 +295,9 @@ export class TownRoom extends DurableObject<Env> {
       return;
     }
     const p = s.player;
+    // Knocked out in the cave: the body stays put (frames still on their
+    // way from before the fall aren't held against the socket).
+    if (this.fight?.frozen(p.uid)) return;
     const next = quantizeState(frame.state);
     if (!checkMove(p.guard, next.x, next.z, now, s.att.map)) {
       this.strike(s);
@@ -310,7 +353,10 @@ export class TownRoom extends DurableObject<Env> {
     const replacing = id !== undefined;
     id ??= this.freeId();
 
-    const at = startingPoint(s.att.map, m.at?.x, m.at?.z);
+    // A knocked-out herzie lies where it fell: a reconnect can't carry its
+    // body over to a Bard.
+    const fell = this.fight?.rejoinAt(t.uid) ?? null;
+    const at = fell ?? startingPoint(s.att.map, m.at?.x, m.at?.z);
     const state = quantizeState({
       x: at.x,
       z: at.z,
@@ -329,6 +375,7 @@ export class TownRoom extends DurableObject<Env> {
       receivedAt: now,
       maxHp: t.hp?.maxHp,
       rest: new RestMeter(),
+      ...townVitalsOf(t, !!this.fight),
     };
     this.persist(s);
     const fp = this.fight?.join(t.uid, id, t, state, now);
@@ -340,12 +387,13 @@ export class TownRoom extends DurableObject<Env> {
       t: "welcome",
       you: id,
       players: others.map(playerOf),
-      fight: this.fight?.state(now),
+      fight: this.fight?.state(now, t.uid),
     });
     if (fp) {
       // Everyone else sees the newcomer's health bar.
       this.broadcast({ t: "hp", id, hp: fp.hp, maxHp: fp.maxHp }, s);
       if (fp.down) this.send(s, { t: "down" });
+      if (fell) this.send(s, { t: "correct", x: state.x, z: state.z });
     }
     if (others.length) {
       s.ws.send(
@@ -378,11 +426,15 @@ export class TownRoom extends DurableObject<Env> {
       t.name !== p.name || JSON.stringify(t.look) !== JSON.stringify(p.look);
     p.exp = t.exp;
     p.maxHp = t.hp?.maxHp;
+    const wasDown = !!p.down;
+    Object.assign(p, townVitalsOf(t, !!this.fight));
+    const downChanged = wasDown !== !!p.down;
     for (const o of this.fight?.renew(p.uid, t) ?? []) this.dispatch(o);
     p.name = t.name;
     p.look = t.look;
     this.persist(s);
-    if (changed) this.broadcast({ t: "look", player: playerOf(p) });
+    if (changed || downChanged)
+      this.broadcast({ t: "look", player: playerOf(p) });
   }
 
   private verify(ticket: unknown): Promise<TownTicketPayload | null> {
@@ -425,7 +477,7 @@ export class TownRoom extends DurableObject<Env> {
       this.closeRoom(now);
       return;
     }
-    if (this.ctx.getWebSockets().length) {
+    if (this.ctx.getWebSockets().length || this.fight?.running) {
       const next =
         closes && closes > now
           ? Math.min(now + SWEEP_MS, closes)
@@ -444,7 +496,10 @@ export class TownRoom extends DurableObject<Env> {
       if (!p) continue;
       p.rest.tick((p.state.flags & TOWN_FLAG_SITTING) !== 0, now);
       const seconds = p.rest.take();
-      if (!p.maxHp || !REST_MAPS.has(s.att.map)) continue;
+      // Still seated: its stretch now starts here. Saved, so a room that
+      // hibernates before the next flush neither loses nor repeats it.
+      if (p.rest.since !== null) this.persist(s);
+      if (!p.maxHp || !TOWN_REST_MAPS.has(s.att.map)) continue;
       const bonus = benchBonusHp(p.maxHp, seconds);
       if (bonus >= 0.5) rest.push({ uid: p.uid, bonus });
     }
@@ -463,7 +518,8 @@ export class TownRoom extends DurableObject<Env> {
 
   private tick() {
     if (this.fight) this.runFight(Date.now());
-    if (this.dirty.size === 0 && !this.fight) {
+    if (this.townChannels.size) this.stepTownChannels(Date.now());
+    if (this.dirty.size === 0 && !this.fight && !this.townChannels.size) {
       if (++this.quietTicks >= IDLE_TICKS && this.ticker) {
         clearInterval(this.ticker);
         this.ticker = null;
@@ -497,9 +553,15 @@ export class TownRoom extends DurableObject<Env> {
     if (s.player) {
       this.flushRest(Date.now(), s);
       if (this.fight) {
-        this.fight.leave(s.player.uid);
+        this.fight.leave(s.player.uid, Date.now());
         this.maybeReport(Date.now(), true);
-        if (![...this.sessions.values()].some((o) => o.player) && this.ticker) {
+        // An empty room keeps ticking while a fight is on: the grace, the
+        // wipe and the reports run without anyone watching.
+        if (
+          !this.fight.running &&
+          ![...this.sessions.values()].some((o) => o.player) &&
+          this.ticker
+        ) {
           clearInterval(this.ticker);
           this.ticker = null;
         }
@@ -527,16 +589,20 @@ export class TownRoom extends DurableObject<Env> {
   }
 
   /** Whether the boss room lets this ticket in. Starts the fight from the
-   * ticket's boss claim if none is running. */
+   * ticket's boss claim if none is running. In the lobby anyone on their
+   * feet comes in; once the roster locks, only those in it (down or not). */
   private admit(s: Session, t: TownTicketPayload, now: number): boolean {
     if (s.att.map === "tower") return this.admitTower(s, t, now);
-    let claim = t.boss;
+    let claim: BossClaim | undefined = t.boss;
     if (!claim && this.env.DEV_BOSS) {
+      const lobby = Number(this.env.DEV_BOSS_LOBBY_S ?? 20);
       claim = {
         event: DEV_EVENT,
         until: now / 1000 + 3_600,
         hp: 20_000,
         maxHp: 20_000,
+        starts: now / 1000 + (Number.isFinite(lobby) ? lobby : 20),
+        hpPerPlayer: 10_000,
       };
     }
     if (!claim || claim.until * 1000 <= now) {
@@ -550,10 +616,7 @@ export class TownRoom extends DurableObject<Env> {
       this.drop(s, TOWN_CLOSE.auth, "stale ticket");
       return false;
     }
-    if (t.hp?.down || (t.hp && t.hp.hp <= 0)) {
-      this.drop(s, TOWN_CLOSE.sealed, "down");
-      return false;
-    }
+    const down = !!t.hp?.down || (!!t.hp && t.hp.hp <= 0);
     // A new boss after the last one's fight is over (or abandoned): start
     // fresh rather than turn it away.
     const old = this.fight;
@@ -566,6 +629,12 @@ export class TownRoom extends DurableObject<Env> {
       this.closeScheduled = false;
     }
     if (!this.fight) {
+      // A downed herzie may only start the room back up for a locked fight
+      // it's in (a room that restarted while it waited for a Bard).
+      if (down && !claim.locked?.roster.includes(t.uid)) {
+        this.drop(s, TOWN_CLOSE.sealed, "down");
+        return false;
+      }
       this.fight = new FightRuntime(claim, now);
       if (!this.env.TOWN_VITALS_URL && claim.event !== DEV_EVENT) {
         // The fight will look fine and save nothing: say so, loudly.
@@ -578,12 +647,16 @@ export class TownRoom extends DurableObject<Env> {
         );
       }
     }
-    if (!this.fight.open || claim.event !== this.fight.eventId) {
-      // This fight is over, or it's another boss's: this room is done.
+    if (claim.event !== this.fight.eventId) {
+      // Another boss's: this room is done.
       this.drop(s, TOWN_CLOSE.closed, "closed");
       return false;
     }
-    return true;
+    const verdict = this.fight.mayJoin(t.uid, down, now);
+    if (verdict === "ok") return true;
+    if (verdict === "closed") this.drop(s, TOWN_CLOSE.closed, "closed");
+    else this.drop(s, TOWN_CLOSE.sealed, verdict);
+    return false;
   }
 
   /** Whether this Tower room lets the ticket in: it's this herzie's own
@@ -665,7 +738,7 @@ export class TownRoom extends DurableObject<Env> {
     now: number,
   ) {
     const p = s.player;
-    if (!p || !this.fight) return;
+    if (!p) return;
     const yaw = Number(m.yaw);
     const pitch = Number(m.pitch);
     const seq = Number(m.seq);
@@ -678,7 +751,11 @@ export class TownRoom extends DurableObject<Env> {
       this.strike(s);
       return;
     }
-    const { result, readyAt, out } = this.fight.skill(
+    if (!this.fight) {
+      this.townSkill(s, m.skill, seq, yaw, now);
+      return;
+    }
+    const { result, readyAt, reason, out } = this.fight.skill(
       p.uid,
       m.skill,
       yaw,
@@ -687,9 +764,186 @@ export class TownRoom extends DurableObject<Env> {
     );
     for (const o of out) this.dispatch(o);
     if (result === "used" || result === "ignored") return;
-    // Refused: say when it's ready, so the client puts its cooldown right.
-    this.send(s, { t: "skillDenied", skill: m.skill, seq, readyAt });
+    // Refused: say when it's ready (and why, if it's something the player
+    // can act on), so the client puts its cooldown right.
+    this.send(s, {
+      t: "skillDenied",
+      skill: m.skill,
+      seq,
+      readyAt,
+      ...(reason ? { reason } : {}),
+    });
     if (result === "cooldown" || result === "unknown") this.strike(s);
+  }
+
+  /** A skill outside a fight: only a Bard's Resurrect does anything here
+   * (the rest need a fight to act on), on the nearest herzie that's down
+   * within its reach. It's played for its channel, then the database brings
+   * the herzie back; moving away cancels it, and costs no cooldown. */
+  private townSkill(
+    s: Session,
+    skill: string,
+    seq: number,
+    yaw: number,
+    now: number,
+  ) {
+    const p = s.player;
+    if (!p || skill !== "resurrect" || !p.rez) return;
+    if (this.townChannels.has(p.uid)) return;
+    // Resurrect is a Bard's, played on the lute.
+    if (!hasInstrument("bard", p.look.equipped?.main_hand)) {
+      this.send(s, {
+        t: "skillDenied",
+        skill,
+        seq,
+        readyAt: 0,
+        reason: "instrument",
+      });
+      return;
+    }
+    const def = SKILL_DEFS.resurrect;
+    const ready = this.rezReady.get(p.uid) ?? 0;
+    if (now < ready) {
+      this.send(s, { t: "skillDenied", skill, seq, readyAt: ready });
+      return;
+    }
+    let target: Session | null = null;
+    let best = def.radius ?? 0;
+    for (const o of this.sessions.values()) {
+      if (o === s || !o.player?.down) continue;
+      const d = Math.hypot(
+        o.player.state.x - p.state.x,
+        o.player.state.z - p.state.z,
+      );
+      if (d <= best) {
+        best = d;
+        target = o;
+      }
+    }
+    if (!target?.player) {
+      this.send(s, {
+        t: "skillDenied",
+        skill,
+        seq,
+        readyAt: 0,
+        reason: "no-target",
+      });
+      return;
+    }
+    const until = now + (def.channelMs ?? 0);
+    this.townChannels.set(p.uid, {
+      by: s.ws,
+      target: target.ws,
+      until,
+      x: p.state.x,
+      z: p.state.z,
+      level: p.rez,
+    });
+    this.broadcast({
+      t: "skill",
+      by: p.id,
+      skill,
+      level: p.rez,
+      x: p.state.x,
+      z: p.state.z,
+      yaw,
+    });
+    this.broadcast({ t: "channel", by: p.id, target: target.player.id, until });
+    this.startTicking();
+  }
+
+  /** Resurrects outside a fight: cancelled if the Bard moved or either of
+   * them left (or the herzie got up by itself); landed once played. */
+  private stepTownChannels(now: number) {
+    for (const [uid, c] of this.townChannels) {
+      const bard = this.sessions.get(c.by)?.player;
+      const target = this.sessions.get(c.target)?.player;
+      const ok =
+        !!bard &&
+        !!target?.down &&
+        Math.hypot(bard.state.x - c.x, bard.state.z - c.z) <= CHANNEL_SLACK;
+      if (!ok) {
+        this.townChannels.delete(uid);
+        if (bard)
+          this.broadcast({ t: "channel", by: bard.id, target: null, until: 0 });
+        continue;
+      }
+      if (now < c.until) continue;
+      this.townChannels.delete(uid);
+      void this.townRevive(c, bard, target, now);
+    }
+  }
+
+  /** A resurrect outside a fight landed: the database brings the herzie
+   * back (it alone knows its health here), then everyone sees it stand. */
+  private async townRevive(
+    c: TownChannel,
+    bard: NonNullable<Session["player"]>,
+    target: NonNullable<Session["player"]>,
+    now: number,
+  ) {
+    const maxHp = target.maxHp ?? 0;
+    const share = skillValue("resurrect", c.level) * (bard.healMult ?? 1);
+    const hp = Math.max(1, Math.min(maxHp, Math.round(maxHp * share)));
+    const ok = await reviveInDb(this.env, target.uid, hp);
+    if (!ok || !this.sessions.has(c.target)) {
+      if (this.sessions.has(c.by))
+        this.broadcast({ t: "channel", by: bard.id, target: null, until: 0 });
+      return;
+    }
+    this.rezReady.set(bard.uid, now + SKILL_DEFS.resurrect.cooldownMs);
+    target.down = false;
+    const ts = this.sessions.get(c.target);
+    if (ts) {
+      this.persist(ts);
+      this.log("revive", ts, bard.uid);
+    }
+    this.broadcast({ t: "revived", id: target.id, by: bard.id });
+    this.broadcast({ t: "hp", id: target.id, hp, maxHp });
+    this.broadcast({ t: "look", player: playerOf(target) });
+  }
+
+  /** Whether a fighter is playing music, for the in-tune bonus. Only the
+   * boss room cares; elsewhere it's dropped. Faster than a person presses
+   * play and pause is a strike. */
+  private onTune(s: Session, on: unknown, now: number) {
+    const p = s.player;
+    if (!p || !this.fight?.boss) return;
+    const playing = parseTune(on);
+    if (playing === null) {
+      this.strike(s);
+      return;
+    }
+    if (s.tunedAt !== undefined && now - s.tunedAt < TUNE_MIN_INTERVAL_MS) {
+      this.strike(s);
+      return;
+    }
+    s.tunedAt = now;
+    this.fight.tune(p.uid, playing, now);
+  }
+
+  /** A Bard's lute stance: heal bolts or attacks. Only a fight cares;
+   * elsewhere (the Town's practice) it's the client's own. */
+  private onStance(s: Session, heal: unknown) {
+    const p = s.player;
+    if (!p || !this.fight) return;
+    if (typeof heal !== "boolean") {
+      this.strike(s);
+      return;
+    }
+    // Faster than a key is pressed: dropped (it goes out to everyone).
+    const now = Date.now();
+    if (s.stanceAt !== undefined && now - s.stanceAt < 100) return;
+    s.stanceAt = now;
+    for (const o of this.fight.stance(p.uid, heal)) this.dispatch(o);
+  }
+
+  /** Knocked out in a raid, and giving up. */
+  private onForfeit(s: Session, now: number) {
+    const p = s.player;
+    if (!p || !this.fight?.boss) return;
+    for (const o of this.fight.forfeit(p.uid, now)) this.dispatch(o);
+    this.maybeReport(now, true);
   }
 
   /** A consumable eaten in a fight, where this room holds HP: the database
@@ -764,7 +1018,14 @@ export class TownRoom extends DurableObject<Env> {
    * at a time; a failed one is retried by the next report unchanged. */
   private maybeReport(now: number, force = false) {
     const fight = this.fight;
-    if (!fight || this.reporting) return;
+    if (!fight) return;
+    if (this.reporting) {
+      if (force) this.reportAgain = true;
+      return;
+    }
+    // Urgent reports (a hit) at most twice a second; a forced one (a leave,
+    // the close, a down or a wipe) goes at once.
+    if (!force && now - this.reportedAt < REPORT_FLOOR_MS) return;
     const report = fight.report(now, force);
     if (!report) return;
     if (
@@ -772,14 +1033,19 @@ export class TownRoom extends DurableObject<Env> {
       !report.boss &&
       !report.skills &&
       !report.results &&
-      !report.tower
+      !report.tower &&
+      !report.lock &&
+      !report.revived &&
+      !report.out &&
+      !report.wipe
     )
       return;
     this.reporting = true;
+    this.reportedAt = now;
     void postVitals(this.env, { action: "report", ...report })
       .then((reply) => {
         if (!reply) return;
-        fight.reported(report);
+        for (const o of fight.reported(report, reply.raid)) this.dispatch(o);
         const loot = reply.boss?.loot;
         if (loot) for (const o of fight.loot(loot)) this.dispatch(o);
         const levels = reply.skills?.levels;
@@ -792,11 +1058,34 @@ export class TownRoom extends DurableObject<Env> {
       })
       .finally(() => {
         this.reporting = false;
+        if (this.reportAgain) {
+          this.reportAgain = false;
+          this.maybeReport(Date.now(), true);
+        }
       });
   }
 
   /** Shut the room: the fight ended. Everyone goes back to town. */
   private closeRoom(now: number) {
+    // Its last report must land (the last hits, the wipe, the log): keep
+    // the fight until it has, retrying from the alarm a few times.
+    const fight = this.fight;
+    if (
+      fight?.unreported &&
+      fight.reportable &&
+      this.env.TOWN_VITALS_URL &&
+      this.closeTries < CLOSE_TRIES
+    ) {
+      this.closeTries++;
+      this.maybeReport(now, true);
+      void this.ctx.storage.setAlarm(now + CLOSE_RETRY_MS);
+      for (const s of [...this.sessions.values()]) {
+        this.leave(s, "room closed");
+        this.close(s.ws, TOWN_CLOSE.closed, "closed");
+      }
+      return;
+    }
+    this.closeTries = 0;
     this.maybeReport(now, true);
     for (const s of [...this.sessions.values()]) {
       this.leave(s, "room closed");
@@ -823,6 +1112,12 @@ export class TownRoom extends DurableObject<Env> {
         exp: p.exp,
         state: p.state,
         maxHp: p.maxHp,
+        // Knocked out, and what a resurrect of theirs can do: lost to a
+        // hibernation otherwise, so nobody could revive them (or be).
+        down: p.down,
+        rez: p.rez,
+        healMult: p.healMult,
+        restSince: p.rest.since,
       };
     }
     try {
@@ -872,6 +1167,43 @@ export class TownRoom extends DurableObject<Env> {
   }
 }
 
-function playerOf(p: { id: number; name: string; look: TownLook }): TownPlayer {
-  return { id: p.id, name: p.name, look: p.look };
+function playerOf(p: {
+  id: number;
+  name: string;
+  look: TownLook;
+  down?: boolean;
+}): TownPlayer {
+  return {
+    id: p.id,
+    name: p.name,
+    look: p.look,
+    ...(p.down ? { down: true as const } : {}),
+  };
+}
+
+/** A resurrect being played outside a fight. */
+type TownChannel = {
+  /** The Bard's socket and the herzie it's bringing back. */
+  by: WebSocket;
+  target: WebSocket;
+  until: number;
+  /** Where the Bard stood when it began (moving away cancels it). */
+  x: number;
+  z: number;
+  level: number;
+};
+
+/** What a ticket says matters for a resurrect outside a fight: whether the
+ * herzie is down (in a fight, the fight keeps that), its Resurrect's
+ * level and its heals' strength. */
+function townVitalsOf(
+  t: TownTicketPayload,
+  inFight: boolean,
+): { down: boolean; rez: number; healMult: number } {
+  const rez = t.sk?.find(([id]) => id === "resurrect")?.[1] ?? 0;
+  return {
+    down: !inFight && !!t.hp?.down,
+    rez: Number.isFinite(rez) ? Math.max(0, rez) : 0,
+    healMult: healMult(t.st?.[6] ?? 0),
+  };
 }

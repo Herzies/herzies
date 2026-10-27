@@ -4,6 +4,8 @@ import * as THREE from "three";
 import { useTownRuntime } from "../runtime";
 import { liveDummies } from "./Dummies";
 import { DUMMY, meterDps, meterIdle } from "./dummy";
+import { entityAt } from "./skills";
+import { healing, stance } from "./stance";
 import { combat } from "./state";
 import type { Vec3 } from "./waves";
 
@@ -13,7 +15,7 @@ import type { Vec3 } from "./waves";
  *
  * - Damage numbers popping off each hit: up and to one side, overshooting
  *   as they appear, fading as they go; a crit's gold. What you take pops
- *   off your own herzie, in red.
+ *   off your own herzie, in red; a heal, off whoever got it, in green.
  * - A meter over each dummy you're hitting: damage per second, total,
  *   hits and crits, clearing once you stop.
  * - The crosshair in combat mode: it opens on each cast and closes again,
@@ -37,8 +39,15 @@ type Floater = {
 const FLOATERS = 32;
 const FLOAT_SECONDS = 0.95;
 
-/** `at` null: over your own herzie (damage you took). */
-const queue: { at: Vec3 | null; amount: number; crit: boolean }[] = [];
+/** `at` null: over your own herzie. `entity`: over that herzie in the
+ * room (where it stands when the number pops). */
+const queue: {
+  at: Vec3 | null;
+  entity?: number;
+  amount: number;
+  crit: boolean;
+  kind: "hit" | "hurt" | "heal";
+}[] = [];
 
 /** A damage number, popping off `at`. */
 export function pushDamageNumber(
@@ -47,13 +56,26 @@ export function pushDamageNumber(
   crit: boolean,
 ): void {
   if (queue.length < 16)
-    queue.push({ at: [at[0], at[1], at[2]], amount, crit });
+    queue.push({ at: [at[0], at[1], at[2]], amount, crit, kind: "hit" });
 }
 
 /** Damage you took, popping off your herzie's head. */
 export function pushHurtNumber(amount: number): void {
   if (amount > 0 && queue.length < 16)
-    queue.push({ at: null, amount, crit: false });
+    queue.push({ at: null, amount, crit: false, kind: "hurt" });
+}
+
+/** HP healed, in green over whoever got it: `entity` (an entity id in the
+ * room), or null for your own herzie. Too small to read is skipped. */
+export function pushHealNumber(entity: number | null, amount: number): void {
+  if (amount < 0.5 || queue.length >= 16) return;
+  queue.push({
+    at: null,
+    ...(entity === null ? {} : { entity }),
+    amount,
+    crit: false,
+    kind: "heal",
+  });
 }
 
 const STYLE = `
@@ -66,6 +88,8 @@ const STYLE = `
 .town-fx .dmg.crit::after { content: "!"; margin-left: 1px; }
 .town-fx .dmg.hurt { color: #ff6b6b;
   text-shadow: 0 0 8px rgba(255, 60, 60, 0.6), 0 2px 0 #3a0808, 1px 0 0 #3a0808, -1px 0 0 #3a0808, 0 -1px 0 #3a0808; }
+.town-fx .dmg.heal { color: #7dff8a;
+  text-shadow: 0 0 8px rgba(60, 230, 90, 0.6), 0 2px 0 #06300c, 1px 0 0 #06300c, -1px 0 0 #06300c, 0 -1px 0 #06300c; }
 .town-fx .meter { position: absolute; left: 0; top: 0; will-change: transform, opacity; transition: opacity 0.25s;
   background: rgba(6, 10, 20, 0.72); border: 1px solid rgba(159, 232, 255, 0.35); border-radius: 4px;
   padding: 3px 6px; color: #cfe9f5; font-size: 10px; line-height: 1.25; white-space: nowrap; }
@@ -80,6 +104,9 @@ const STYLE = `
   border: 2px solid #ffd36b; box-shadow: 0 0 0 1px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(0,0,0,0.35), 0 0 8px rgba(255, 190, 60, 0.6);
   background: none; opacity: 0; transform: scale(1.6); transition: opacity 0.12s, transform 0.16s cubic-bezier(0.2, 1.6, 0.4, 1); }
 .town-fx .cross.reach i.ring { opacity: 1; transform: scale(1); }
+.town-fx .cross.heal i { background: #7ee2a8; }
+.town-fx .cross.heal i.ring { border-color: #7ee2a8; box-shadow: 0 0 0 1px rgba(0,0,0,0.5), 0 0 8px rgba(80, 230, 140, 0.6); }
+.town-fx .cross.heal.lock i.ring { opacity: 1; transform: scale(1); }
 .town-fx .cross .dot { width: 2px; height: 2px; left: -1px; top: -1px; }
 .town-fx .cross .t { width: 2px; height: 7px; left: -1px; }
 .town-fx .cross .l { width: 7px; height: 2px; top: -1px; }
@@ -175,23 +202,34 @@ export function CombatOverlay() {
   const v = useMemo(() => new THREE.Vector3(), []);
   const head = useMemo(() => new THREE.Vector3(), []);
   /** Where a world point lands on the overlay, in CSS px (null: behind). */
+  // The overlay's size, read once a frame (reading it per number, right
+  // after writing their styles, forced a layout each time).
+  const view = useMemo(() => ({ w: 0, h: 0 }), []);
+  const out = useMemo(() => [0, 0] as [number, number], []);
   const project = (x: number, y: number, z: number) => {
     v.set(x, y, z).project(camera);
     if (v.z > 1) return null;
-    const w = ui.root.clientWidth;
-    const h = ui.root.clientHeight;
-    return [(v.x * 0.5 + 0.5) * w, (-v.y * 0.5 + 0.5) * h] as const;
+    out[0] = (v.x * 0.5 + 0.5) * view.w;
+    out[1] = (-v.y * 0.5 + 0.5) * view.h;
+    return out;
   };
   const lastMeter = useMemo(() => ({ at: 0 }), []);
+  const seen = useMemo(() => new Set<string>(), []);
 
   useFrame((_, dt) => {
     const now = performance.now();
+    view.w = ui.root.clientWidth;
+    view.h = ui.root.clientHeight;
 
     // New numbers, stacked off one another when they come close together.
     while (queue.length) {
       const n = queue.shift() as (typeof queue)[number];
       let at = n.at;
-      if (!at) {
+      if (!at && n.entity !== undefined) {
+        const e = entityAt.get(n.entity);
+        if (!e) continue;
+        at = [e.x, e.top, e.z];
+      } else if (!at) {
         const body = rt.playerBody;
         if (!body) continue;
         body.getWorldPosition(head);
@@ -205,23 +243,33 @@ export function CombatOverlay() {
         }
         if (x.age > f.age) f = x;
       }
-      const busy = ui.floaters.filter((x) => x.alive && x.age < 0.3).length;
+      let busy = 0;
+      for (const x of ui.floaters) if (x.alive && x.age < 0.3) busy++;
       f.alive = true;
       f.age = 0;
-      f.pos = [at[0], at[1] + 0.25 + busy * 0.18, at[2]];
+      f.pos[0] = at[0];
+      f.pos[1] = at[1] + 0.25 + busy * 0.18;
+      f.pos[2] = at[2];
       f.drift = (Math.random() * 2 - 1) * 26;
       f.rise = 38 + Math.random() * 14 + (n.crit ? 12 : 0);
       f.crit = n.crit;
-      const hurt = !n.at;
-      f.el.textContent = `${hurt ? "-" : ""}${Math.round(n.amount).toLocaleString()}`;
-      f.el.className = hurt ? "dmg hurt" : n.crit ? "dmg crit" : "dmg";
+      const sign = n.kind === "hurt" ? "-" : n.kind === "heal" ? "+" : "";
+      f.el.textContent = `${sign}${Math.round(n.amount).toLocaleString()}`;
+      f.el.className =
+        n.kind === "hurt"
+          ? "dmg hurt"
+          : n.kind === "heal"
+            ? "dmg heal"
+            : n.crit
+              ? "dmg crit"
+              : "dmg";
     }
 
     for (const f of ui.floaters) {
       if (!f.alive) continue;
       f.age += dt;
       const t = f.age / FLOAT_SECONDS;
-      const p = t < 1 ? project(...f.pos) : null;
+      const p = t < 1 ? project(f.pos[0], f.pos[1], f.pos[2]) : null;
       if (!p) {
         f.alive = false;
         f.el.style.opacity = "0";
@@ -237,7 +285,9 @@ export function CombatOverlay() {
       const ease = 1 - (1 - t) ** 2;
       const x = p[0] + f.drift * ease;
       const y = p[1] - f.rise * ease;
-      f.el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%) scale(${pop})`;
+      // A crit lands bigger.
+      const size = f.crit ? pop * 1.4 : pop;
+      f.el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%) scale(${size})`;
       f.el.style.opacity = String(t < 0.65 ? 1 : 1 - (t - 0.65) / 0.35);
     }
 
@@ -259,6 +309,10 @@ export function CombatOverlay() {
     if (on) {
       ui.cross.classList.toggle("target", combat.onTarget);
       ui.cross.classList.toggle("reach", combat.inReach);
+      // A Bard healing: green, and ringed while it's locked on someone.
+      const heals = healing();
+      ui.cross.classList.toggle("heal", heals);
+      ui.cross.classList.toggle("lock", heals && stance.lock !== null);
       const gap = 5 + combat.spread * 7;
       const [top, bottom, left, right] = ui.arms;
       top.style.top = `${-gap - 7}px`;
@@ -284,7 +338,7 @@ export function CombatOverlay() {
     // position every frame.
     const refresh = now - lastMeter.at > 120;
     if (refresh) lastMeter.at = now;
-    const seen = new Set<string>();
+    seen.clear();
     for (const d of liveDummies) {
       seen.add(d.key);
       let el = ui.meters.get(d.key);

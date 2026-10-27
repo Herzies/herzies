@@ -116,7 +116,7 @@ describe("boss damage batches", () => {
   it("puts the loot on the ground, held for the cave (00105)", async () => {
     const event = await spawnBoss(1000);
     const [a, b] = [await player(), await player()];
-    // Only the top dealer gets the rarer item on top.
+    // Everyone in gets the same (00122): the top reward isn't paid any more.
     await admin()
       .from("events")
       .update({
@@ -152,16 +152,14 @@ describe("boss damage batches", () => {
     expect(await loot()).toEqual({});
     await admin().rpc("settle_boss_fight", { p_event_id: event });
 
-    // On the ground, not in the bank: base item first, then the top
-    // reward and ten random things (00114) for the top dealer, the ten for
-    // everyone else.
+    // On the ground, not in the bank: base item first, then ten random
+    // things (00114), the same for everyone.
     const dropped = await loot();
     const items = (uid: string) => dropped[uid].map((d) => d.item);
     expect(items(a)[0]).toBe("first-edition");
     expect(items(b)[0]).toBe("first-edition");
-    expect(items(a).filter((i) => i === "spirit-orb")).toHaveLength(1);
-    expect(items(b)).not.toContain("spirit-orb");
-    expect(items(a)).toHaveLength(12);
+    expect(items(a)).not.toContain("spirit-orb");
+    expect(items(a)).toHaveLength(11);
     expect(items(b)).toHaveLength(11);
     expect(await units(a)).toBe(before);
     // Held for the cave: it "lands" in the future, so a spirit's sync
@@ -177,7 +175,7 @@ describe("boss damage batches", () => {
 
     // Settling again (the cron after town-vitals) drops nothing more.
     await admin().rpc("settle_boss_fight", { p_event_id: event });
-    expect((await loot())[a]).toHaveLength(12);
+    expect((await loot())[a]).toHaveLength(11);
 
     // Picking one up is what puts it in the bank, once.
     const first = dropped[a][0].id;
@@ -193,7 +191,7 @@ describe("boss damage batches", () => {
     expect(again).toBeNull();
     expect(await units(a)).toBe((before ?? 0) + 1);
     const left = (await loot())[a].map((d) => d.item);
-    expect(left).toHaveLength(11);
+    expect(left).toHaveLength(10);
     expect(left).not.toContain("first-edition");
   });
 

@@ -1,4 +1,5 @@
 import type { ServerMessage, TownTicketPayload } from "@herzies/shared/town-net";
+import { armed } from "./arms";
 import { describe, expect, it } from "vitest";
 import {
   aimDirection,
@@ -31,17 +32,18 @@ const ticket = (
   uid: string,
   hp = 200,
   over: Partial<TownTicketPayload> = {},
-): TownTicketPayload => ({
-  uid,
-  name: uid,
-  look: { seed: "s", stage: 2 },
-  // A wave caster, unless a test says otherwise: most cast from afar.
-  cls: "bard",
-  exp: 9e9,
-  hp: { hp, maxHp: 200, down: false },
-  st: [0, 0, 0, 0],
-  ...over,
-});
+): TownTicketPayload =>
+  armed({
+    uid,
+    name: uid,
+    look: { seed: "s", stage: 2 },
+    // A wave caster, unless a test says otherwise: most cast from afar.
+    cls: "bard",
+    exp: 9e9,
+    hp: { hp, maxHp: 200, down: false },
+    st: [0, 0, 0, 0],
+    ...over,
+  });
 
 const msgs = (out: Outbound[], t: ServerMessage["t"]) =>
   out.filter((o) => o.msg.t === t);

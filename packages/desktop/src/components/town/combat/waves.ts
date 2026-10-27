@@ -5,6 +5,7 @@ import {
   WAVE_SPEED,
 } from "@herzies/shared/combat";
 import { DUMMY, type DummyState, waveHitsDummy } from "./dummy";
+import { entityAt } from "./skills";
 
 /**
  * Sonic waves in flight, and what they leave behind: a pool, stepped by
@@ -57,6 +58,10 @@ export type Wave = {
   target: DummyState | null;
   /** Its damage as a share of a plain cast's (a Backspin disc's is less). */
   scale: number;
+  /** A Bard's heal bolt: green, through dummies, home on `ally` (an entity
+   * id) and gone into it. */
+  heal: boolean;
+  ally: number | null;
   /** Seconds since it left the hand; and until the next wake ring. */
   age: number;
   wake: number;
@@ -69,8 +74,9 @@ export type Impact = {
   /** Which way it came from (the normal it splashes along). */
   dir: Vec3;
   age: number;
-  /** A crit (bigger), a hit, or a wave fizzling out against the world. */
-  kind: "crit" | "hit" | "fizzle";
+  /** A crit (bigger), a hit, a wave fizzling out against the world, or a
+   * heal bolt landing on its ally. */
+  kind: "crit" | "hit" | "fizzle" | "heal";
   /** Not yet seen by whatever throws sparks off it. */
   fresh: boolean;
 };
@@ -82,6 +88,8 @@ export type Wake = {
   dir: Vec3;
   age: number;
   radius: number;
+  /** Left by a heal bolt (drawn green). */
+  heal: boolean;
 };
 
 /** A flash at the hand as the wave leaves it. */
@@ -113,6 +121,8 @@ export class WaveField {
     reach: 0,
     target: null,
     scale: 1,
+    heal: false,
+    ally: null,
     age: 0,
     wake: 0,
   }));
@@ -130,6 +140,7 @@ export class WaveField {
     dir: vec(),
     age: 0,
     radius: 0,
+    heal: false,
   }));
   readonly muzzles = pool<Muzzle>(8, () => ({
     alive: false,
@@ -150,6 +161,8 @@ export class WaveField {
       reach?: number;
       target?: DummyState | null;
       scale?: number;
+      heal?: boolean;
+      ally?: number | null;
     },
   ): Wave {
     const w = take(this.waves, (a, b) => a.age > b.age);
@@ -165,6 +178,9 @@ export class WaveField {
     w.reach = Math.min(WAVE.range, opts.reach ?? WAVE.range);
     w.target = opts.target ?? null;
     w.scale = opts.scale ?? 1;
+    w.heal = !!opts.heal;
+    w.ally = opts.ally ?? null;
+    if (w.heal) w.target = null;
     w.age = 0;
     w.wake = WAVE.wakeEvery * 0.5;
     const m = take(this.muzzles, (a, b) => a.age > b.age);
@@ -189,16 +205,22 @@ export class WaveField {
     for (const w of this.waves) {
       if (!w.alive) continue;
       w.age += dt;
-      steer(w, dt);
+      if (w.heal) {
+        if (stepHeal(w, dt)) {
+          this.burst(w.pos, w.dir, "heal");
+          continue;
+        }
+      } else steer(w, dt);
       set(w.prev, w.pos);
       const go = Math.min(WAVE.speed * dt, w.reach - w.travelled);
       w.pos[0] += w.dir[0] * go;
       w.pos[1] += w.dir[1] * go;
       w.pos[2] += w.dir[2] * go;
       w.travelled += go;
-      // The nearest dummy it passed into this step.
+      // The nearest dummy it passed into this step (a heal bolt passes
+      // through them).
       let best: { t: number; point: Vec3; dummy: DummyState } | null = null;
-      for (const d of dummies) {
+      for (const d of w.heal ? [] : dummies) {
         const hit = waveHitsDummy(d, w.prev, w.pos, WAVE.hitRadius);
         if (hit && (!best || hit.t < best.t)) best = { ...hit, dummy: d };
       }
@@ -218,12 +240,13 @@ export class WaveField {
         set(k.dir, w.dir);
         k.age = 0;
         k.radius = waveRadius(w) * 0.8;
+        k.heal = w.heal;
       }
       if (w.travelled >= w.reach - 1e-6 || w.pos[1] < 0) {
         w.alive = false;
         // Short of its full range, it struck something (the ground, a tree).
         if (w.reach < WAVE.range || w.pos[1] < 0) {
-          this.burst(w.pos, w.dir, "fizzle");
+          this.burst(w.pos, w.dir, w.heal ? "heal" : "fizzle");
         }
       }
     }
@@ -287,6 +310,38 @@ export function assistTarget(
 
 /** Turns a wave (or a disc on its way out) toward its target, a little
  * each step, at most `homing` radians a second. */
+/** How hard a heal bolt turns toward its ally (radians a second): it
+ * follows them, as a lock-on heal does. */
+const HEAL_HOMING = 9;
+/** Where on its ally a bolt goes in, as a share of its height. */
+const HEAL_AT = 0.55;
+
+/** A heal bolt's turn toward its ally; true once it's reached them (and
+ * is spent). */
+function stepHeal(w: Wave, dt: number): boolean {
+  const a = w.ally === null ? undefined : entityAt.get(w.ally);
+  if (!a) return false;
+  const tx = a.x - w.pos[0];
+  const ty = a.top * HEAL_AT - w.pos[1];
+  const tz = a.z - w.pos[2];
+  const len = Math.hypot(tx, ty, tz);
+  if (len < 0.6) {
+    w.alive = false;
+    return true;
+  }
+  const k = Math.min(1, HEAL_HOMING * dt);
+  w.dir[0] += (tx / len - w.dir[0]) * k;
+  w.dir[1] += (ty / len - w.dir[1]) * k;
+  w.dir[2] += (tz / len - w.dir[2]) * k;
+  const l = Math.hypot(w.dir[0], w.dir[1], w.dir[2]) || 1;
+  w.dir[0] /= l;
+  w.dir[1] /= l;
+  w.dir[2] /= l;
+  // It never runs out on the way to someone it's locked on.
+  w.reach = Math.max(w.reach, w.travelled + len + 1);
+  return false;
+}
+
 export function steer(
   w: { pos: Vec3; dir: Vec3; target: DummyState | null },
   dt: number,

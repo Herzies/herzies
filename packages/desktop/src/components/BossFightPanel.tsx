@@ -246,13 +246,24 @@ export function BossFightPanel({
             <SegmentBar progress={hpFrac} colour="bg-red" />
           </div>
 
-          <div>
-            <div className="mb-0.5 flex items-baseline justify-between text-ui text-text-dim">
-              <span>Time left</span>
-              <span className="text-ui-sm">{formatRemaining(remaining)}</span>
+          {now < startsAt ? (
+            // Before the fight: when it starts (the lair opens 15 min
+            // before), not the event's whole window.
+            <div className="flex items-baseline justify-between text-ui text-text-dim">
+              <span>Fight in</span>
+              <span className="text-ui-sm text-text">
+                {formatRemaining(startsAt - now)}
+              </span>
             </div>
-            <SegmentBar progress={timeFrac} colour="bg-cyan" />
-          </div>
+          ) : (
+            <div>
+              <div className="mb-0.5 flex items-baseline justify-between text-ui text-text-dim">
+                <span>Time left</span>
+                <span className="text-ui-sm">{formatRemaining(remaining)}</span>
+              </div>
+              <SegmentBar progress={timeFrac} colour="bg-cyan" />
+            </div>
+          )}
         </>
       ) : null}
 
@@ -271,7 +282,14 @@ export function BossFightPanel({
                 key={`${d.rank}-${d.name}`}
                 className="flex items-baseline justify-between text-ui"
               >
-                <span className={cn(d.rank <= config.topCount && "text-gold")}>
+                <span
+                  className={cn(d.rank === 1 && "text-gold")}
+                  title={
+                    d.rank === 1
+                      ? "Top contributor: their statue goes up in town"
+                      : undefined
+                  }
+                >
                   {d.rank}. {d.name}
                 </span>
                 <span className="text-text-dim">
@@ -353,21 +371,15 @@ export function makeDebugBoss(): GameEvent {
 }
 
 /**
- * The "?" that sits in the boss's header: what the fight is, and what it
- * pays — the reward for everyone who joins in, and the bonus for the top
- * damage dealers.
+ * The "?" that sits in the boss's header: what the raid is, and what it
+ * pays — the same reward for everyone still in the fight when it falls
+ * (the top contributor gets their statue in town, not more loot).
  */
 export function BossFightHelp({ event }: { event: GameEvent }) {
   const config = event.config as unknown as BossFightView;
   const rewards: VisitorReward[] = [];
   if (config.rewardItemId) {
-    rewards.push({ label: "Reward", itemId: config.rewardItemId });
-  }
-  if (config.topRewardItemId) {
-    rewards.push({
-      label: `Top ${config.topCount} bonus`,
-      itemId: config.topRewardItemId,
-    });
+    rewards.push({ label: "Everyone still in", itemId: config.rewardItemId });
   }
   return (
     <VisitorHelp
@@ -375,9 +387,13 @@ export function BossFightHelp({ event }: { event: GameEvent }) {
       colour={VISITOR_THEMES.boss_fight.accent}
       text={
         <>
-          Defeat the boss and receive rewards. Fight it in its lair while it is
-          open: dodge the glowing floor, cast sonic waves at it, and rest to
-          heal. You&apos;ll have to work together to make it in time!
+          The lair opens 15 minutes before the fight. Whoever is inside when the
+          boss wakes is in; then the door shuts. Dodge the glowing floor and
+          bring it down together. Knocked out, you wait for a Bard to play you
+          back up, or leave without a reward. Percussionists take turns holding
+          it with Taunt. It hates music: keep some playing for a class bonus.
+          Everyone still in when it falls gets the reward; the top contributor
+          gets a statue in town.
         </>
       }
       rewards={rewards}

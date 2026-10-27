@@ -1,12 +1,17 @@
 import {
-  attackStyleOfGear,
+  basicAttack,
   TOWN_FLAG_AFK,
   TOWN_FLAG_COMBAT,
   TOWN_FLAG_DANCING,
   TOWN_FLAG_JUMP,
   TOWN_FLAG_SITTING,
 } from "@herzies/shared";
-import { BOSS_STAND, meleeReaches } from "@herzies/shared/combat";
+import {
+  BOSS_STAND,
+  HEAL_LOCK_ANGLE,
+  healTarget,
+  meleeReaches,
+} from "@herzies/shared/combat";
 import { HerzieModel } from "@herzies/shared/gl";
 import { Html } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
@@ -23,10 +28,12 @@ import {
   nextHand as nextFreeHand,
 } from "./combat/discs";
 import { DUMMY, hitDummy } from "./combat/dummy";
-import { bossFight } from "./combat/fight";
-import { entityAt } from "./combat/skills";
+import { bossFight, bossNow } from "./combat/fight";
+import { attackSpeedOf, entityAt, setEntityAt } from "./combat/skills";
 import { slashField } from "./combat/slashes";
+import { stance } from "./combat/stance";
 import { assistTarget, type Vec3, waveField } from "./combat/waves";
+import { applyDowned, entityDown } from "./downed";
 import { HeadBubble } from "./HeadBubble";
 import { groundY, type TownMap } from "./map";
 import { NAME_SHADOW, nameOpacity } from "./nameFade";
@@ -103,12 +110,18 @@ function RemoteHerzie({
   }, [herzie]);
   // A Record Slinger throws its discs, a hand at a time; the server only
   // says how many casts, so which hand is guessed (as Combat picks). A
-  // Percussionist strikes with its stick, and a herzie without a class
-  // bumps into things.
-  const attack = attackStyleOfGear(look.equipped?.main_hand);
+  // Percussionist strikes with its stick; without its instrument a herzie
+  // punches (stage 3+) or slams into things. Their class isn't known here:
+  // the instrument in hand tells.
+  const { style: attack, blow } = basicAttack({
+    cls: undefined,
+    stage: look.stage,
+    mainHand: look.equipped?.main_hand,
+  });
   const throwsDiscs = attack === "disc";
-  const blow = herzie.holdsGear ? "strike" : "bump";
   const nextHand = useRef<DiscHand>("held-r");
+  /** Their punches so far: they alternate fists. */
+  const punches = useRef(0);
   /** Their jump bit last frame; null until the first state, so a herzie
    * doesn't hop just for showing up. */
   const jumpBit = useRef<number | null>(null);
@@ -120,6 +133,9 @@ function RemoteHerzie({
   const bubbleBox = useRef<HTMLDivElement>(null);
   const hpBox = useRef<HTMLDivElement>(null);
   const hpFill = useRef<HTMLDivElement>(null);
+  const hpShown = useRef(-1);
+  const downMark = useRef<HTMLDivElement>(null);
+  const downed = useRef(0);
   const hand = useMemo(() => new Vector3(), []);
 
   useFrame((_, dt) => {
@@ -157,12 +173,19 @@ function RemoteHerzie({
           (last === "held-l" ? "held-r" : "held-l");
         herzie.cast(0, { arm: DISC_ARM[nextHand.current], style: "throw" });
       } else if (attack === "melee") {
-        herzie.cast(0, { style: blow });
+        punches.current++;
+        herzie.cast(0, {
+          style: blow,
+          ...(blow === "punch"
+            ? { arm: punches.current & 1 ? "arm-r" : "arm-l" }
+            : {}),
+        });
         if (blow === "strike") slashField.strike(herzie, false);
       } else {
         herzie.cast(0);
       }
     }
+    herzie.castRate = attackSpeedOf(remote.id, performance.now());
     herzie.update(dt, s.speed);
     if (herzie.released && throwsDiscs) {
       // Never waiting on our idea of their catch: a disc of theirs still
@@ -176,6 +199,7 @@ function RemoteHerzie({
         owner: herzie,
         hand: h,
         target: assistTarget(from, dir, liveDummies),
+        quick: attackSpeedOf(remote.id, performance.now()),
       });
     } else if (herzie.released && attack === "melee") {
       // Only for show: what's in front of them rocks (the server counts
@@ -188,8 +212,9 @@ function RemoteHerzie({
           ? [{ d: null, radius: BOSS_STAND.radius }]
           : []),
       ];
+      const boss = bossNow();
       for (const { d, radius } of targets) {
-        const at = d ?? BOSS_STAND;
+        const at = d ?? boss;
         if (!meleeReaches(from, s.heading, { x: at.x, z: at.z, radius }))
           continue;
         const dx = at.x - s.x;
@@ -208,11 +233,30 @@ function RemoteHerzie({
       herzie.handWorldPosition(hand);
       const from: Vec3 = [hand.x, hand.y, hand.z];
       const dir: Vec3 = [Math.sin(s.heading), 0, Math.cos(s.heading)];
-      waveField.cast(from, dir, {
-        mine: false,
-        target: assistTarget(from, dir, liveDummies),
-      });
+      if (stance.healers.has(remote.id)) {
+        // A Bard healing: a green bolt, to whoever it most likely aimed at
+        // (only its heading travels), homing on them.
+        const allies: { id: number; x: number; z: number }[] = [];
+        for (const [id, at] of entityAt)
+          if (id !== remote.id && !entityDown(id))
+            allies.push({ id, x: at.x, z: at.z });
+        const to = healTarget(from, dir, allies, HEAL_LOCK_ANGLE * 2);
+        waveField.cast(from, dir, {
+          mine: false,
+          heal: true,
+          ally: to?.ally.id ?? null,
+        });
+      } else
+        waveField.cast(from, dir, {
+          mine: false,
+          target: assistTarget(from, dir, liveDummies),
+        });
     }
+    // Knocked out (in the cave, or anywhere outside a fight): lying where
+    // it fell, with a mark a Bard can spot from across the room.
+    const down = entityDown(remote.id) || remote.down;
+    downed.current = applyDowned(herzie, down, downed.current, dt);
+    if (downMark.current) downMark.current.style.display = down ? "" : "none";
     // A thrown disc isn't in the hand.
     herzie.setHeldHidden("held-l", discField.isOut(herzie, "held-l"));
     herzie.setHeldHidden("held-r", discField.isOut(herzie, "held-r"));
@@ -221,11 +265,12 @@ function RemoteHerzie({
       ground + herzie.height + 0.3 + (seated ? SEAT_Y : 0),
       s.z,
     );
-    entityAt.set(remote.id, {
-      x: s.x,
-      z: s.z,
-      top: ground + herzie.height + (seated ? SEAT_Y : 0),
-    });
+    setEntityAt(
+      remote.id,
+      s.x,
+      s.z,
+      ground + herzie.height + (seated ? SEAT_Y : 0),
+    );
     // Chat is one room for everyone; the Town only shows what's said near
     // you.
     if (bubbleBox.current) {
@@ -238,9 +283,15 @@ function RemoteHerzie({
       const h = bossFight.on ? bossFight.health.get(remote.id) : undefined;
       hpBox.current.style.display = h ? "" : "none";
       if (h) {
-        const f = Math.max(0, Math.min(1, h.hp / h.maxHp));
-        hpFill.current.style.width = `${f * 100}%`;
-        hpFill.current.style.background = f < 0.5 ? "#f87171" : "#34d399";
+        // Written only when it moved a whole percent.
+        const pct = Math.round(Math.max(0, Math.min(1, h.hp / h.maxHp)) * 100);
+        if (pct !== hpShown.current) {
+          hpShown.current = pct;
+          hpFill.current.style.width = `${pct}%`;
+          hpFill.current.style.background = pct < 50 ? "#f87171" : "#34d399";
+          // Low isn't told by colour alone: the bar blinks too.
+          hpBox.current.dataset.low = pct < 25 ? "1" : "";
+        }
       }
     }
     // Names (and health bars) fade in as you come near; away dims them.
@@ -265,6 +316,15 @@ function RemoteHerzie({
         <Html zIndexRange={[19, 0]}>
           {/* Stacked up from the anchor: the bubble over the name. */}
           <div className="flex -translate-x-1/2 -translate-y-full flex-col items-center">
+            <div
+              ref={downMark}
+              role="img"
+              aria-label="Knocked out"
+              className="mb-0.5 rounded-full bg-black/55 px-1 text-[13px] leading-none text-[#ffd84a]"
+              style={{ display: "none", textShadow: NAME_SHADOW }}
+            >
+              ✚
+            </div>
             <div ref={bubbleBox}>
               {bubble ? <HeadBubble key={bubble.key} bubble={bubble} /> : null}
             </div>
@@ -280,7 +340,7 @@ function RemoteHerzie({
             </button>
             <div
               ref={hpBox}
-              className="pointer-events-none mt-px h-[3px] w-10 overflow-hidden rounded-sm bg-black/60"
+              className="pointer-events-none mt-px h-[3px] w-10 overflow-hidden rounded-sm bg-black/60 data-[low=1]:animate-pulse data-[low=1]:outline data-[low=1]:outline-1 data-[low=1]:outline-red-400/70 motion-reduce:animate-none"
               style={{ display: "none" }}
             >
               <div ref={hpFill} className="h-full" />

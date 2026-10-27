@@ -1,6 +1,92 @@
 # Boss Fight
 
-> **Update — the boss is fought live, in a cave (migrations 00101 and 00102).**
+> **Update — the raid (migration 00122, branch feat/boss-revamp).** The cave fight
+> is now a short, locked raid. This block is the current design; the cave-era notes
+> below it, and the shared-HP history below those, are kept for context.
+>
+> **Stages.**
+> - *Lobby:* the cave opens `BOSS_LOBBY_MS` (15 min) before the event's start.
+>   The boss sleeps: it can't be hurt, doesn't attack and says nothing. Anyone
+>   on their feet may come in; once the start passes, nobody new does.
+> - *Lock:* at the start, the room locks the roster to whoever stands in it
+>   (`lock_boss_fight`, idempotent). The boss's health becomes
+>   `hpPerPlayer × n^0.9` (`bossMaxHp`, default 130k per herzie; it grows a little
+>   slower than the roster, as in WoW's flex raids). With nobody there, no fight.
+>   After the lock only roster members get tickets. The way out of the cave
+>   disappears for them.
+> - *Lock grace:* a lobby member whose connection dropped under 30 s before
+>   the start is still on the roster.
+> - *Fight:* knocked out, you lie where you fell (a reconnect puts you back
+>   there). A Bard's Resurrect (a 3 s channel, cancelled by moving) brings you
+>   back with a share of your health. Revives are unlimited; each Bard waits
+>   30 s between them. Or you leave the fight (respawn in town): you're out for
+>   good, with no reward. Being gone for more than 2 min also puts you out.
+>   When no one in the roster stands, it's a wipe: the boss wins and nobody is
+>   paid. Someone who dropped counts as standing for 15 s (60 s after a room
+>   restart), never through the hard enrage.
+> - *Over:* a kill pays everyone still in (standing or down) alike: the reward
+>   plus ten loot rolls. The statue goes to the top contributor of a fight that
+>   was won, among those still in. An escape or a wipe pays nothing.
+>
+> **The boss.**
+> - It walks (1.5 m/s) toward its focus inside a 4.5 m circle around (0, −2),
+>   never to the walls or the spawn. It stops to swing. Its position travels on
+>   the wire and the client interpolates it.
+> - Its focus is a taunter if there is one, else whoever it hates most, else the
+>   nearest herzie. It switches only for someone it hates clearly more (110% in
+>   melee, 130% from range). Its buster (70, can't be dodged, always lands,
+>   exempt from the shape cap) and the first slam of each volley go at the focus.
+> - **Rattled:** each buster leaves its target Rattled for 20 s: the next buster
+>   hits +25% per stack (to 4), past the usual 30% one-hit cap (to 60%). Two
+>   Percussionists trading the boss is how it's cleared.
+> - **Raid size:** one more shape and slam per 6 herzies (to 10). From 20,
+>   **Scatter** every 25 s: ⌈n/6⌉ herzies (never the focus) are marked for
+>   2.5 s, and each mark goes off around its herzie (r 2.5, 40) on anyone close.
+>   Spread out.
+> - Slam counts use weighted rounding: no breakpoints.
+> - At 50% and 25% health it calls Thornlings (the Tower's mobs, `MobPack`), about
+>   one per two herzies, at 75% of the raid's level. Damage to them counts toward
+>   contribution (`boss_damage.adds`) and never touches the boss's health. While
+>   they're up, it swings a little less. They keep its rules: no tell under 1 s,
+>   at most two of their shapes on the floor, and a taunt pulls them too.
+> - Soft enrage at 10 min: pace and damage +10% every 30 s. Hard enrage at
+>   15 min: an unavoidable pulse that ends it.
+>
+> **Music.**
+> - The boss hates music, any genre, and keeps saying so in a speech bubble.
+> - The desktop sends `tune` (`on`: whether music is playing), debounced.
+> - After 3 s of music a classed herzie is in tune; the bonus lingers 8 s after
+>   it stops. Percussionists take 15% less damage (under the 75%
+>   clamp), Bards heal ×1.3, Record Slingers hit ×1.25.
+> - In tune shows as a gold aura on the beat, rising notes, and a lit HUD chip.
+>
+> **Classes.**
+> - Bards: Resurrect.
+> - Percussionists: Taunt. It lasts 10 s with a 20 s cooldown, and puts its
+>   caster 30% above the boss's top threat; the last taunt wins. It ends if its
+>   holder falls or leaves. A red tether shows who the boss is after.
+> - Every class's skills are on the hotbar (`skill:1`, `skill:2`).
+>
+> **Feel.** Each big beat gets a sound, the camera and a word across the
+> screen (`combat/moments.ts`): the lobby's last 10 s counted down, FIGHT! (it
+> rises and roars), each phase (a roar and a white flash on its body), its
+> minions (a call and a puff each), the enrage (it glows red), a wipe. Its body
+> rears as its own attack fills. Hits flash it; a crit holds the world still
+> for 60 ms. The HP bar has a delayed white chip, phase and minion marks, and
+> the phase. You see your own contribution and rank (`tally`, every 2 s), your
+> Rattled stacks, and a Bard bringing you back. Camera shake is off under
+> reduced motion.
+>
+> **Code.**
+> - Rules: `shared/src/boss-fight.ts`, `boss-lines.ts`.
+> - Server: `town-server/src/{boss,fight,mobs,room}.ts`.
+> - Tests: `raid.test.ts`, and `raid-sim.test.ts` (class bots; perfect play wins in
+>   about 5.5 min).
+> - Edge functions: `town-vitals` (lock → outs → revives → damage → wipe → log),
+>   `town-ticket` (lobby and roster).
+> - Fight numbers for tuning: `boss_fight_log`.
+
+> **Earlier update — the boss is fought live, in a cave (migrations 00101 and 00102).**
 > Everything below describes the first version: a passive fight where listening to
 > the boss's hated genres drained a shared HP pool. That damage source is gone.
 > What is *still* true below: the shared HP row and its locked RPC
@@ -24,8 +110,8 @@
 >   at least a second before it lands (circles on players, a ring with a safe
 >   middle), capped in number and damage so it can be read and dodged; hits are
 >   judged against where the player stood a moment ago as well as now.
-> - `hatedGenres` is no longer used by anything that plays; it remains in event
->   configs. `sync_context.active_boss` is no longer read.
+> - `hatedGenres` is no longer used by anything (the admin form no longer asks
+>   for it); it remains in older event configs. `sync_context.active_boss` is no longer read.
 >
 > The rest of this document is kept for the history of the shared-HP design.
 

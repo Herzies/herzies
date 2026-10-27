@@ -1,7 +1,8 @@
+import { BOSS_LOBBY_MS } from "@herzies/shared";
 import { Html } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { clock, useCave } from "./cave";
+import { caveLobby, clock, useCave } from "./cave";
 import type { TownMap } from "./map";
 import { nameOpacity } from "./nameFade";
 import { isMouth } from "./Portals";
@@ -12,8 +13,8 @@ import { townSave } from "./runtime";
 const SIGN_HEIGHT = 3.6;
 
 /**
- * A sign over the cave's mouth: when the boss comes, how long it stays,
- * or that it has fallen. Counts down live, from the same events that put
+ * A sign over the cave's mouth: when the lobby opens, how long until the
+ * fight locks, how long it can run, or that the boss has fallen. Counts down live, from the same events that put
  * the boss in town.
  */
 export function CaveTimer({ map }: { map: TownMap }) {
@@ -42,14 +43,19 @@ export function CaveTimer({ map }: { map: TownMap }) {
     switch (cave.kind) {
       case "open":
         return {
-          text: `Open · ${clock(cave.endsAt - now)} left`,
+          text: `Fight on · ${clock(cave.endsAt - now)} left`,
           tone: "#ff7a66",
         };
       case "soon":
-        return {
-          text: `Opens in ${clock(cave.startsAt - now)}`,
-          tone: "#ffd98a",
-        };
+        return caveLobby(cave, now)
+          ? {
+              text: `Open · fight in ${clock(cave.startsAt - now)}`,
+              tone: "#ff9a66",
+            }
+          : {
+              text: `Opens in ${clock(cave.startsAt - BOSS_LOBBY_MS - now)}`,
+              tone: "#ffd98a",
+            };
       case "defeated":
         return { text: "Defeated", tone: "#9fe8b0" };
       default:

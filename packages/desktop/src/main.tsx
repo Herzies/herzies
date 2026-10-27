@@ -1,12 +1,14 @@
 import "./globals.css";
 import {
-  attackStyle,
   bankCapacity,
+  basicAttack,
   CLASS_DEFS,
   getHerzieStatsFromUnits,
   type HerzieClass,
   type HerzieProfile,
+  hasInstrument,
   hasRoomFor,
+  instrumentOf,
   isBankFull,
   levelProgress,
   needsClassChoice,
@@ -51,7 +53,7 @@ import { TradeView } from "./components/TradeView";
 import { BULLETIN_KEY } from "./components/town/Boards";
 import { setLootRoom } from "./components/town/combat/lootFeed";
 import { useBossResultsShown } from "./components/town/combat/results";
-import { setMySkill } from "./components/town/combat/skills";
+import { setArmed, setMySkills } from "./components/town/combat/skills";
 import { combat } from "./components/town/combat/state";
 import { townNet } from "./components/town/net/townNet";
 import {
@@ -297,32 +299,40 @@ function App() {
   const [classOverride, setClassOverride] = useState<HerzieClass | null>(null);
   /** Dev-only: opens the class choice whatever the herzie's state. */
   const [testClassChoice, setTestClassChoice] = useState(false);
-  // The Town's skill bar follows the class skill the app knows about — or,
-  // under a Class Preview, that class's starter skill at Lv. 1 (practice on
-  // the training grounds works; the cave's server refuses it).
-  useEffect(
-    () =>
-      setMySkill(
-        classOverride
-          ? [
-              {
-                skillId: CLASS_DEFS[classOverride].starterSkill,
-                level: 1,
-              },
-            ]
-          : rawState.skills,
-      ),
-    [rawState.skills, classOverride],
-  );
-  // How the Town's basic attack goes: by class (a Record Slinger throws its
-  // discs), the Class Preview's while one's on.
+  // The Town's skill bar follows the class skills the app knows about —
+  // or, under a Class Preview, that class's skills at Lv. 1 (practice on
+  // the training grounds works; the cave's server refuses them).
   useEffect(() => {
-    combat.attack = attackStyle(classOverride ?? rawState.herzie?.class);
-  }, [rawState.herzie?.class, classOverride]);
-  // A new class or level: the Town server judges casts from the ticket (a
-  // class's attack; the Tower's level gap), so it gets a fresh one. After a
-  // beat, so the server has the change saved.
-  const ticketKey = `${rawState.herzie?.class ?? ""}|${rawState.herzie?.level ?? 0}`;
+    const cls = classOverride ?? rawState.herzie?.class;
+    setMySkills(
+      classOverride
+        ? CLASS_DEFS[classOverride].skills.map((skillId) => ({
+            skillId,
+            level: 1,
+          }))
+        : rawState.skills,
+      cls ? CLASS_DEFS[cls].skills : [],
+    );
+  }, [rawState.skills, rawState.herzie?.class, classOverride]);
+  // How the Town's basic attack goes: by class and the instrument in hand
+  // (a Record Slinger throws its discs; without them, a punch or a body
+  // slam). A Class Preview draws its class's gear, so it plays it.
+  const mainHand = classOverride
+    ? instrumentOf(classOverride)
+    : (effectiveEquipped.main_hand ?? null);
+  const attackCls = classOverride ?? rawState.herzie?.class ?? null;
+  const attackStage = stageOverride ?? rawState.herzie?.stage ?? 1;
+  useEffect(() => {
+    const a = basicAttack({ cls: attackCls, stage: attackStage, mainHand });
+    combat.attack = a.style;
+    combat.blow = a.blow;
+    setArmed(hasInstrument(attackCls, mainHand), instrumentOf(attackCls));
+  }, [attackCls, attackStage, mainHand]);
+  // A new class, level or instrument: the Town server judges casts from the
+  // ticket (a class's attack, the instrument it needs; the Tower's level
+  // gap), so it gets a fresh one. After a beat, so the server has the
+  // change saved.
+  const ticketKey = `${rawState.herzie?.class ?? ""}|${rawState.herzie?.level ?? 0}|${rawState.equipped.main_hand ?? ""}`;
   const firstTicketKey = useRef(ticketKey);
   useEffect(() => {
     if (firstTicketKey.current === ticketKey) return;

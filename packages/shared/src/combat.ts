@@ -81,7 +81,7 @@ export function discLandsAfterMs(dist: number): number {
 }
 
 // ---------------------------------------------------------------------------
-// Melee: a Percussionist's stick, or a classless herzie's body bump. Up
+// Melee: a Percussionist's stick, or an unarmed herzie's punch or body slam. Up
 // close, ahead of it, and only at the moment of contact: the client tells
 // the server when it lands, so there's no flight time.
 
@@ -93,9 +93,12 @@ export const MELEE_ARC = (60 * Math.PI) / 180;
 /** A Percussionist's stick as a share of a wave's: the same. The tank
  * stands in its face to hold it, not to out-hit the Record Slinger. */
 export const STRIKE_DAMAGE = 1;
-/** A herzie without a class bumps into it: the weakest blow there is, so
- * picking a class at stage 2 is a step up. */
+/** A herzie without its instrument (or a class) slams its body into it:
+ * the weakest blow there is, so a class and its instrument are a step up. */
 export const BUMP_DAMAGE = 0.5;
+/** A stage 3+ herzie without its instrument punches: a little better than a
+ * body slam, well short of an instrument. */
+export const PUNCH_DAMAGE = 0.6;
 
 // ---------------------------------------------------------------------------
 // Contribution: how much a herzie did for a boss fight, which ranks its end
@@ -107,18 +110,32 @@ export const BUMP_DAMAGE = 0.5;
 /** How many points of damage one HP healed or blocked is worth. */
 export const CONTRIBUTION_SUPPORT_WEIGHT = 10;
 
-/** What a herzie did for a fight: damage dealt, HP healed, HP blocked. */
-export type Contribution = { damage: number; healing: number; blocked: number };
+/** What a herzie did for a fight: damage dealt to the boss, HP healed, HP
+ * blocked, and damage dealt to its minions (`adds`: counted like boss damage
+ * for the ranking, but never taken off the boss's health). */
+export type Contribution = {
+  damage: number;
+  healing: number;
+  blocked: number;
+  adds?: number;
+};
 
 /** A herzie's contribution score. */
 export function contributionOf(c: Contribution): number {
-  return c.damage + CONTRIBUTION_SUPPORT_WEIGHT * (c.healing + c.blocked);
+  return (
+    c.damage +
+    (c.adds ?? 0) +
+    CONTRIBUTION_SUPPORT_WEIGHT * (c.healing + c.blocked)
+  );
 }
 
-/** A melee hit as a share of a wave's: a stick (with a class) or a bump
- * (without one). */
-export function meleeDamage(classed: boolean): number {
-  return classed ? STRIKE_DAMAGE : BUMP_DAMAGE;
+/** A melee hit as a share of a wave's, by blow (classes.ts MeleeBlow). */
+export function meleeDamage(blow: "strike" | "punch" | "bump"): number {
+  return blow === "strike"
+    ? STRIKE_DAMAGE
+    : blow === "punch"
+      ? PUNCH_DAMAGE
+      : BUMP_DAMAGE;
 }
 
 /** Whether a melee hit from `from`, facing `yaw`, reaches `target` (a
@@ -149,6 +166,56 @@ export type Vec3 = [number, number, number];
 export function aimDirection(yaw: number, pitch: number): Vec3 {
   const c = Math.cos(pitch);
   return [c * Math.sin(yaw), Math.sin(pitch), c * Math.cos(yaw)];
+}
+
+// ---------------------------------------------------------------------------
+// Heal bolts: a Bard's lute in its heal stance. The same pace as its waves
+// (no cooldown), but each one heals the herzie it's aimed at instead of
+// hurting anything. Soft-locked, as healers' aim is in action games (Ana,
+// Mercy, Guild Wars 2): the ally nearest the line of aim within a cone.
+
+/** What a heal bolt restores: this share of its target's max health, before
+ * Euphony and an in-tune boost. Two a second from one Bard is about a
+ * slam's worth every few seconds: a healer matters, without one Bard
+ * outhealing the whole boss. */
+export const HEAL_BOLT = 0.018;
+/** How far either way of the aim a bolt finds its ally (radians): the
+ * client's lock, and a little more on the server (its picture of where the
+ * ally stood is a moment off). */
+export const HEAL_LOCK_ANGLE = (8 * Math.PI) / 180;
+export const HEAL_LOCK_SLACK = (3 * Math.PI) / 180;
+/** Where a bolt aims on a herzie: its chest, above its feet. */
+export const HEAL_TARGET_HEIGHT = 1;
+
+/**
+ * The ally a heal bolt from `from` along `dir` (unit) goes to: the one
+ * nearest the line of aim, within `angle` (plus a little for a near ally's
+ * width) and the wave's range. Null if nobody is.
+ */
+export function healTarget<T extends { x: number; z: number }>(
+  from: Readonly<Vec3>,
+  dir: Readonly<Vec3>,
+  allies: Iterable<T>,
+  angle: number = HEAL_LOCK_ANGLE,
+): { ally: T; dist: number } | null {
+  let best: { ally: T; dist: number } | null = null;
+  let bestOff = Number.POSITIVE_INFINITY;
+  for (const a of allies) {
+    const vx = a.x - from[0];
+    const vy = HEAL_TARGET_HEIGHT - from[1];
+    const vz = a.z - from[2];
+    const dist = Math.hypot(vx, vy, vz);
+    if (dist < 0.3 || dist > WAVE_RANGE) continue;
+    const cos = (vx * dir[0] + vy * dir[1] + vz * dir[2]) / dist;
+    const off = Math.acos(Math.max(-1, Math.min(1, cos)));
+    // A near ally is wide: its body counts, as much as 0.6 either side.
+    const allow = angle + Math.atan(0.6 / dist);
+    if (off <= allow && off < bestOff) {
+      bestOff = off;
+      best = { ally: a, dist };
+    }
+  }
+  return best;
 }
 
 /** The yaw and pitch of a unit direction (the inverse of aimDirection). */
@@ -184,8 +251,10 @@ export function waveReaches(
   return angle <= WAVE_ASSIST_ANGLE ? dist : null;
 }
 
-/** The boss in its cave: where it stands and how big it is, for the Town
- * server's hit test and the desktop's drawing and collider alike. */
+/** The boss in its cave: where it rests (and stands in the lobby) and how
+ * big it is, for the Town server's hit test and the desktop's drawing and
+ * collider alike. In a fight it walks (see BOSS_WANDER in boss-fight.ts), so
+ * where it is comes from the server; these are its home and its size. */
 export const BOSS_STAND = {
   x: 0,
   z: -4,
@@ -197,7 +266,8 @@ export const BOSS_STAND = {
 } as const;
 
 /**
- * How far along `dir` from `from` a cast reaches the boss, if it does: at
+ * How far along `dir` from `from` a cast reaches the boss standing at `at`
+ * (its home by default), if it does: at
  * its chest by the wave rule (aim assist and all), or anywhere on its body,
  * a standing cylinder as tall as it is. Up close the crosshair sits on the
  * near side of a big body, low or off to one side, well off the line to its
@@ -208,8 +278,9 @@ export function bossReaches(
   from: Readonly<Vec3>,
   dir: Readonly<Vec3>,
   range: number = WAVE_RANGE,
+  at: { x: number; z: number } = BOSS_STAND,
 ): number | null {
-  return bodyHitAt(from, dir, BOSS_STAND, range);
+  return bodyHitAt(from, dir, { ...BOSS_STAND, x: at.x, z: at.z }, range);
 }
 
 /** A standing body a cast can hit: where it stands, its radius, the height

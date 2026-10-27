@@ -43,6 +43,9 @@ export type SchemeUniforms = {
   /** 0 in colour to 1 fully grey. */
   uGrey: THREE.IUniform<number>;
   uOpacity: THREE.IUniform<number>;
+  /** A wash of colour over the whole herzie (rgb, and how much in w): a
+   * hit's flash, an enrage's red. */
+  uFlash: THREE.IUniform<THREE.Vector4>;
 };
 
 /** How much a lamp's light counts toward a part's bands, against the
@@ -112,6 +115,7 @@ uniform float uTop;
 uniform float uSpan;
 uniform float uGrey;
 uniform float uOpacity;
+uniform vec4 uFlash;
 uniform vec4 uLamps[${MAX_LAMPS}];
 uniform vec3 uLampColor;
 varying vec3 vWorldNormal;
@@ -258,6 +262,7 @@ void main() {
   #endif
   color *= uLight + uLampColor * lamps;
   color = mix(color, vec3(dot(color, vec3(0.2126, 0.7152, 0.0722))), uGrey);
+  color = mix(color, uFlash.rgb, uFlash.w);
   gl_FragColor = vec4(color, uOpacity);
   #include <colorspace_fragment>
   #include <fog_fragment>
@@ -320,6 +325,7 @@ export function herzieMaterial(
       uSpan: scheme.uSpan,
       uGrey: scheme.uGrey,
       uOpacity: scheme.uOpacity,
+      uFlash: scheme.uFlash,
       uRadius: { value: metalRadius },
     },
   });

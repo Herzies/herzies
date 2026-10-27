@@ -1,4 +1,4 @@
-import { GENRES, TREAT_ITEM_ID } from "@herzies/shared";
+import { TREAT_ITEM_ID } from "@herzies/shared";
 import type { createAdminClient } from "@/lib/supabase-admin";
 
 type Admin = ReturnType<typeof createAdminClient>;
@@ -80,46 +80,41 @@ export async function validateBossConfig(
   config: Config,
   { template = false }: { template?: boolean } = {},
 ): Promise<ConfigResult> {
-  const hatedGenres = config.hatedGenres;
-  const hasGenres = Array.isArray(hatedGenres) && hatedGenres.length > 0;
-  if (!hasGenres && !template) {
-    return { error: "hatedGenres must be a non-empty subset of GENRES" };
-  }
-  if (
-    hasGenres &&
-    !hatedGenres.every((g) => (GENRES as readonly unknown[]).includes(g))
-  ) {
-    return { error: "hatedGenres must be a non-empty subset of GENRES" };
-  }
-
+  // No genres: the boss hates all music (a hatedGenres sent anyway is
+  // dropped).
   const hasHp = config.maxHp != null && config.maxHp !== "";
   const maxHp = Number(config.maxHp);
   if ((!hasHp && !template) || (hasHp && !(maxHp > 0))) {
     return { error: "maxHp must be a positive number" };
   }
 
+  // The raid (00122): health per herzie in the roster, and how strong its
+  // minions are (a Tower floor). Both optional: the defaults are tuned.
+  const hasPer = config.hpPerPlayer != null && config.hpPerPlayer !== "";
+  const hpPerPlayer = Number(config.hpPerPlayer);
+  if (hasPer && !(hpPerPlayer >= 100 && hpPerPlayer <= 10_000_000)) {
+    return { error: "hpPerPlayer must be between 100 and 10,000,000" };
+  }
+  const hasFloor = config.minionFloor != null && config.minionFloor !== "";
+  const minionFloor = Number(config.minionFloor);
+  if (hasFloor && !isPositiveInt(minionFloor)) {
+    return { error: "minionFloor must be a whole number from 1" };
+  }
+
   if (typeof config.rewardItemId !== "string" || !config.rewardItemId) {
     return { error: "rewardItemId is required" };
   }
-  const topRewardItemId =
-    typeof config.topRewardItemId === "string" && config.topRewardItemId
-      ? config.topRewardItemId
-      : undefined;
-  const missing = await missingItems(
-    admin,
-    [config.rewardItemId, topRewardItemId].filter((v): v is string => !!v),
-  );
+  const missing = await missingItems(admin, [config.rewardItemId]);
   if (missing.length > 0) {
     return { error: `Unknown item: ${missing.join(", ")}` };
   }
 
   return {
     config: {
-      ...(hasGenres ? { hatedGenres } : {}),
       rewardItemId: config.rewardItemId,
-      ...(topRewardItemId ? { topRewardItemId } : {}),
-      topCount: Number.isInteger(config.topCount) ? config.topCount : 3,
       ...(hasHp ? { maxHp } : {}),
+      ...(hasPer ? { hpPerPlayer } : {}),
+      ...(hasFloor ? { minionFloor } : {}),
     },
   };
 }
