@@ -47,6 +47,13 @@ export function isTownMapId(id: string): id is TownMapId {
   return Object.hasOwn(TOWN_MAPS, id);
 }
 
+/** Maps where sitting on a bench earns extra health: the peaceful ones
+ * with benches. The app counts it as you sit; the Town server credits it. */
+export const TOWN_REST_MAPS: ReadonlySet<TownMapId> = new Set([
+  "home",
+  "wilds",
+]);
+
 /** Maps that are one room however many come: the boss is shared, so there is
  * a single shard (and the room's capacity is the fight's). */
 export const TOWN_SINGLE_SHARD: ReadonlySet<TownMapId> = new Set(["bossroom"]);

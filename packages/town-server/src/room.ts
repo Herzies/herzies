@@ -34,6 +34,7 @@ import {
   TOWN_PING,
   TOWN_PONG,
   TOWN_PROTOCOL,
+  TOWN_REST_MAPS,
   TOWN_ROOM_CAPACITY,
   TOWN_TICK_MS,
   TOWN_TICKET_TTL_S,
@@ -98,8 +99,6 @@ const CAST_OP = 3;
 
 /** How old a boss-room ticket may be. Its health is as of issue. */
 const FRESH_TICKET_MS = 2 * 60_000;
-/** Maps where sitting on a bench earns extra health: peaceful ones. */
-const REST_MAPS: ReadonlySet<TownMapId> = new Set(["home"]);
 
 /** Survives hibernation on the socket itself. */
 type Attachment = {
@@ -121,6 +120,9 @@ type Attachment = {
      * heals are (its Euphony), for a resurrect outside a fight. */
     rez?: number;
     healMult?: number;
+    /** Sitting on a bench since (ms), counted toward rest but not yet
+     * reported: kept here because a room that hibernates forgets the rest. */
+    restSince?: number | null;
   };
 };
 
@@ -190,7 +192,7 @@ export class TownRoom extends DurableObject<Env> {
           ...att.player,
           guard: newGuard(att.player.state.x, att.player.state.z, now),
           receivedAt: now,
-          rest: new RestMeter(),
+          rest: new RestMeter(att.player.restSince ?? null),
         };
       }
     }
@@ -494,7 +496,10 @@ export class TownRoom extends DurableObject<Env> {
       if (!p) continue;
       p.rest.tick((p.state.flags & TOWN_FLAG_SITTING) !== 0, now);
       const seconds = p.rest.take();
-      if (!p.maxHp || !REST_MAPS.has(s.att.map)) continue;
+      // Still seated: its stretch now starts here. Saved, so a room that
+      // hibernates before the next flush neither loses nor repeats it.
+      if (p.rest.since !== null) this.persist(s);
+      if (!p.maxHp || !TOWN_REST_MAPS.has(s.att.map)) continue;
       const bonus = benchBonusHp(p.maxHp, seconds);
       if (bonus >= 0.5) rest.push({ uid: p.uid, bonus });
     }
@@ -1107,6 +1112,12 @@ export class TownRoom extends DurableObject<Env> {
         exp: p.exp,
         state: p.state,
         maxHp: p.maxHp,
+        // Knocked out, and what a resurrect of theirs can do: lost to a
+        // hibernation otherwise, so nobody could revive them (or be).
+        down: p.down,
+        rez: p.rez,
+        healMult: p.healMult,
+        restSince: p.rest.since,
       };
     }
     try {
