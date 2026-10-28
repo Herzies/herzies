@@ -31,6 +31,10 @@ export function stepMover(
   input: TownInput,
   azimuth: number,
   dt: number,
+  /** Its gear's move speed, as a multiplier (1 + moveSpeed%): the Tailwind
+   * Cloak's +8%. Capped by MAX_MOVE_SPEED, which stays inside the server's
+   * slack (see items.test.ts), so the server needn't know. */
+  speedScale = 1,
 ): void {
   // Camera-relative directions on the ground: forward is away from it.
   const fx = -Math.sin(azimuth);
@@ -50,7 +54,7 @@ export function stepMover(
 
   const rate = len > 0 ? ACCELERATION : DECELERATION;
   // Holding Shift runs. (The server allows up to TOWN_SPRINT_SPEED.)
-  const top = input.sprint ? TOWN_SPRINT_SPEED : WALK_SPEED;
+  const top = (input.sprint ? TOWN_SPRINT_SPEED : WALK_SPEED) * speedScale;
   m.vx = MathUtils.damp(m.vx, mx * top, rate, dt);
   m.vz = MathUtils.damp(m.vz, mz * top, rate, dt);
 

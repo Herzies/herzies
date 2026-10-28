@@ -1181,6 +1181,7 @@ function InventoryViewImpl({
         "dice-not-owned": "You don't have that dice",
         "target-not-owned": "You don't own that card",
         "not-statted": `"${targetName}" has no stats to upgrade`,
+        "not-upgradable": `"${targetName}" can't be upgraded`,
         "max-level": `"${targetName}" is already fully upgraded`,
         "wrong-dice": `"${targetName}" needs ${needed ?? "a different dice"}`,
         "protection-not-owned": "You don't have a Safety Pick",

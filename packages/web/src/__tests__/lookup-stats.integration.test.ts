@@ -61,6 +61,7 @@ describe("lookup stats", () => {
       def: 0,
       critChance: 0,
       critDamage: 0,
+      moveSpeed: 0,
     });
     // Listening data stays private to non-friends; stats do not.
     expect(profile.topArtists).toEqual([]);
@@ -84,6 +85,7 @@ describe("lookup stats", () => {
       def: 0,
       critChance: 0,
       critDamage: 0,
+      moveSpeed: 0,
     });
   });
   it("adds stat points on top of items", async () => {

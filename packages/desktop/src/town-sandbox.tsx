@@ -21,7 +21,8 @@
 // class's gear, basic attack and skill (Q; `&skill=` its level; the cave's
 // server hears of the class too).
 // `?color=`, `?head=` and `?spirit=` dress the player (`?head=rainbow-headband`
-// with the default prism skin is the full Prismatic set).
+// with the default prism skin is the full Prismatic set), and `?back=` gives
+// it a cloak (troubadour-mantle, groove-cape, drumhide-cloak, tailwind-cloak).
 import "./globals.css";
 import {
   basicAttack,
@@ -134,6 +135,7 @@ const player = {
     color: params.get("color") ?? "prism",
     head: params.get("head") ?? "headphones",
     spirit: params.get("spirit") ?? "spirit-orb",
+    ...(params.get("back") && { back: params.get("back") as string }),
   } as Record<string, string>,
 };
 // `?hotbar=star-candy`: that item on slot 2, with three in a pretend bank.
@@ -415,6 +417,7 @@ function Sandbox() {
           luck: 0,
           critChance: Number(params.get("cc") ?? 0),
           critDamage: Number(params.get("cd") ?? 0),
+          moveSpeed: 0,
         }}
         onOpen={(key) => console.log("[town-sandbox] open", key)}
         onNearChange={(s) => console.log("[town-sandbox] near", s?.key ?? null)}

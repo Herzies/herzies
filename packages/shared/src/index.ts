@@ -6,6 +6,12 @@ export * from "./card/index.js";
 export * from "./chat.js";
 export * from "./chat-mentions.js";
 export * from "./classes.js";
+export {
+  type CloakConfig,
+  type CloakShape,
+  DEFAULT_CLOAK_CONFIG,
+} from "./cloak-physics.js";
+export * from "./cloaks.js";
 export * from "./craving.js";
 export * from "./creature-renderer.js";
 export * from "./dangle-physics.js";

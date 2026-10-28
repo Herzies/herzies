@@ -68,7 +68,13 @@ varying vec3 vAround;
 varying vec3 vAxis;
 varying float vRho;
 #endif
+#ifdef CLOTH
+varying vec2 vUv;
+#endif
 void main() {
+  #ifdef CLOTH
+  vUv = uv;
+  #endif
   #ifdef METAL
   // Round its axis (the geometry's y), the way a lathe turned it: its
   // grooves run this way.
@@ -127,6 +133,87 @@ uniform float uRadius;
 varying vec3 vAround;
 varying vec3 vAxis;
 varying float vRho;
+#endif
+#ifdef CLOTH
+// A cloak: the outside's bands (uShades), the lining's on the inside, the
+// trim's at the collar and hem; and what it's made of (CLOTH_FINISH).
+uniform vec3 uLining[3];
+uniform vec3 uTrim[3];
+uniform int uFinish;
+uniform float uHemTrim;
+uniform float uCollarTrim;
+varying vec2 vUv;
+
+vec3 band3(vec3 shades[3], int shade) {
+  return shade == 2 ? shades[2] : shade == 1 ? shades[1] : shades[0];
+}
+
+float hash21(vec2 p) {
+  p = fract(p * vec2(123.34, 456.21));
+  p += dot(p, p + 45.32);
+  return fract(p.x * p.y);
+}
+
+// Smooth value noise, for a hide's mottling.
+float noise2(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(hash21(i), hash21(i + vec2(1.0, 0.0)), f.x),
+    mix(hash21(i + vec2(0.0, 1.0)), hash21(i + vec2(1.0, 1.0)), f.x),
+    f.y
+  );
+}
+
+// What its stuff does to the light, on top of its bands: \`n\` faces the
+// viewer's side of the cloth, \`outside\` whether that's its outside.
+vec3 clothFinish(vec3 color, vec3 n, float shadow, bool outside, bool trim) {
+  vec3 v = normalize(cameraPosition - vWorldPos);
+  vec3 h = normalize(uSun + v);
+  float nv = max(dot(n, v), 0.0);
+  float nh = max(dot(n, h), 0.0);
+  float sunLit = max(dot(n, uSun), 0.0) * shadow;
+  if (trim) {
+    // Metal thread: a hard glint.
+    float glint = pow(nh, 40.0) * sunLit;
+    color = mix(color, vec3(1.0, 0.97, 0.88), smoothstep(0.35, 0.6, glint) * 0.7);
+    if (uFinish == 3) {
+      // Brass studs along the hem.
+      float stud = length(vec2(fract(vUv.x * 18.0) - 0.5, (vUv.y - (1.0 - uHemTrim * 0.5)) / uHemTrim * 0.9));
+      color = mix(color, uTrim[2] * 1.25 + 0.1, smoothstep(0.32, 0.22, stud));
+    }
+    return color;
+  }
+  if (uFinish == 1) {
+    // Velvet: the pile catches light where it turns away (a soft glow at
+    // the edges of every fold), and soaks it up face on.
+    float rim = pow(1.0 - nv, 2.5);
+    vec3 pile = outside ? uShades[2] : uLining[2];
+    color = color * (0.88 + 0.12 * (1.0 - nv)) + pile * rim * 0.55;
+  } else if (uFinish == 2) {
+    // Vinyl: glossy, a bright cel highlight broken up by its grooves, which
+    // run across it — gone where they'd be finer than a pixel.
+    float spec = pow(nh, 60.0) * sunLit;
+    float phase = vUv.y * 90.0;
+    float grooves = 0.55 + 0.45 * sin(phase * 6.2832)
+      * clamp(1.5 - fwidth(phase) * 2.0, 0.0, 1.0);
+    float bar = spec * (outside ? grooves : 0.3);
+    color = mix(color, vec3(0.92, 0.92, 1.0), smoothstep(0.2, 0.45, bar) * 0.8);
+    // And the faint sheen of the grooves everywhere else.
+    if (outside) color += vec3(0.05) * grooves * (1.0 - nv);
+  } else if (uFinish == 3) {
+    // Hide: mottled, matte, a little scuffed.
+    float m = noise2(vUv * vec2(9.0, 14.0)) * 0.6 + noise2(vUv * vec2(31.0, 47.0)) * 0.4;
+    color *= outside ? 0.84 + 0.3 * m : 0.94 + 0.1 * m;
+  } else if (uFinish == 4) {
+    // Silk: sky at the collar to teal at the hem, and a broad, soft sheen.
+    if (outside) color *= mix(vec3(1.06, 1.04, 1.0), vec3(0.62, 0.95, 0.92), vUv.y);
+    float sheen = pow(nh, 9.0) * sunLit;
+    color += vec3(0.85, 0.97, 1.0) * smoothstep(0.25, 0.75, sheen) * 0.28;
+  }
+  return color;
+}
 #endif
 
 // The sun's (or moon's) shadow, and only its: three's own shadow mask
@@ -238,6 +325,12 @@ vec3 polished(vec3 paint, vec3 n, float shadow) {
 
 void main() {
   vec3 n = normalize(vWorldNormal);
+  #ifdef CLOTH
+  // One sheet, both sides drawn: seen from inside, it's the lining.
+  bool outside = gl_FrontFacing;
+  if (!outside) n = -n;
+  bool trim = vUv.y > 1.0 - uHemTrim || vUv.y < uCollarTrim;
+  #endif
   float lampFacing;
   float lamps = lampLight(n, lampFacing);
   // In the shade of something, a part drops to its darker bands — unless
@@ -257,6 +350,10 @@ void main() {
   } else {
     color = uShades[shade];
   }
+  #ifdef CLOTH
+  color = trim ? band3(uTrim, shade) : outside ? color : band3(uLining, shade);
+  color = clothFinish(color, n, shadow, outside, trim);
+  #endif
   #ifdef METAL
   color = polished(color, n, shadow);
   #endif
@@ -283,6 +380,9 @@ export function herzieMaterial(
   lighting: HerzieLighting = studioLighting,
   /** Metal only: how far its grooves run from its axis (its radius). */
   metalRadius = 1,
+  /** A cloak's cloth (see ClothShading): drawn both sides, its lining
+   * inside. */
+  cloth?: ClothShading,
 ): THREE.ShaderMaterial {
   const painted = shading.schemePainted && !!ramp;
   const rampColors = Array.from(
@@ -294,10 +394,16 @@ export function herzieMaterial(
       for (let j = 0; j < 3; j++) rampColors[i * 3 + j].set(band[j]);
     });
   }
-  return new THREE.ShaderMaterial({
+  const defines: Record<string, string> = {};
+  if (shading.metal) defines.METAL = "";
+  if (cloth) defines.CLOTH = "";
+  const material = new THREE.ShaderMaterial({
     vertexShader,
     fragmentShader,
-    defines: shading.metal ? { METAL: "" } : {},
+    defines,
+    side: cloth ? THREE.DoubleSide : THREE.FrontSide,
+    // Drawn from the side facing the light too: the cloth's thin.
+    shadowSide: cloth ? THREE.DoubleSide : null,
     fog: true,
     // Only for the sun's shadow map: the colour is the bands' own.
     lights: true,
@@ -327,6 +433,25 @@ export function herzieMaterial(
       uOpacity: scheme.uOpacity,
       uFlash: scheme.uFlash,
       uRadius: { value: metalRadius },
+      ...(cloth && {
+        uLining: { value: cloth.lining.map((hex) => new THREE.Color(hex)) },
+        uTrim: { value: cloth.trim.map((hex) => new THREE.Color(hex)) },
+        uFinish: { value: cloth.finish },
+        uHemTrim: { value: cloth.hemTrim },
+        uCollarTrim: { value: cloth.collarTrim },
+      }),
     },
   });
+  return material;
 }
+
+/** A cloak's cloth, besides its outside's bands: its lining's and trim's
+ * bands (dim, base, bright), its finish (CLOTH_FINISH), and how deep its
+ * trim runs at the hem and the collar (fractions of its length). */
+export type ClothShading = {
+  lining: [string, string, string];
+  trim: [string, string, string];
+  finish: number;
+  hemTrim: number;
+  collarTrim: number;
+};

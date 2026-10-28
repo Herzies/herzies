@@ -61,6 +61,7 @@ export const EQUIP_SLOTS = [
   "modifier",
   "main_hand",
   "off_hand",
+  "back",
 ] as const;
 export type EquipSlot = (typeof EQUIP_SLOTS)[number];
 
@@ -78,6 +79,7 @@ export const EQUIPPED_SLOTS = [
   "color",
   "main_hand",
   "off_hand",
+  "back",
 ] as const;
 export type EquippedSlot = (typeof EQUIPPED_SLOTS)[number];
 
@@ -707,7 +709,8 @@ export type ItemUpgradeRejection =
   | "not-statted"
   | "max-level"
   | "wrong-dice"
-  | "protection-not-owned";
+  | "protection-not-owned"
+  | "not-upgradable";
 
 export type ItemUpgradeOutcome =
   | {
@@ -764,6 +767,9 @@ export function applyItemUpgrade(
   if (!targetStats || Object.keys(targetStats).length === 0) {
     return { ok: false, reason: "not-statted" };
   }
+  if (getItem(target.itemId)?.noUpgrade) {
+    return { ok: false, reason: "not-upgradable" };
+  }
 
   if (target.upgradeLevel >= MAX_ITEM_UPGRADE_LEVEL) {
     return { ok: false, reason: "max-level" };
@@ -819,6 +825,7 @@ export const STAT_KEYS = [
   "luck",
   "critChance",
   "critDamage",
+  "moveSpeed",
 ] as const;
 export type StatKey = (typeof STAT_KEYS)[number];
 
@@ -839,10 +846,21 @@ export const STAT_LABELS: Record<StatKey, string> = {
   luck: "Luck",
   critChance: "Crit chance",
   critDamage: "Crit damage",
+  moveSpeed: "Move speed",
 };
 
+/** The most a herzie's gear can add to its walking and running speed, in
+ * percent. The Town server lets a mover go up to TOWN_SPRINT_SPEED × 1.5
+ * before it corrects them (town-server rules.ts); a test keeps this cap's
+ * sprint under that, so a faster cloak never needs the server to know. */
+export const MAX_MOVE_SPEED = 15;
+
 /** Stats counted in percent (a 5 reads "5%"). */
-const PERCENT_STATS = new Set<StatKey>(["critChance", "critDamage"]);
+const PERCENT_STATS = new Set<StatKey>([
+  "critChance",
+  "critDamage",
+  "moveSpeed",
+]);
 /** Stats every herzie lists, even at 0. The rest only show once something
  * gives them: a list of zeroes for things no item grants yet says nothing. */
 const ALWAYS_SHOWN = new Set<StatKey>([
@@ -919,6 +937,9 @@ export interface ItemDef {
    * (00113_medea_star_candy.sql) duplicates the heal amounts by hand;
    * medea.test.ts checks they agree. */
   consumable?: { heal: number };
+  /** Never takes a die, though it has stats: bought for money (the Tailwind
+   * Cloak), so a failed risky roll mustn't be able to destroy it. */
+  noUpgrade?: boolean;
 }
 
 /** [month 1-12, day 1-31]. */
@@ -967,6 +988,7 @@ export type ItemType =
   | "accessory"
   | "spirit"
   | "instrument"
+  | "cloak"
   | "modifier"
   | "artefact";
 
@@ -991,6 +1013,7 @@ export function getItemType(
   if (item.equipSlot === "spirit") return "spirit";
   if (item.equipSlot === "main_hand" || item.equipSlot === "off_hand")
     return "instrument";
+  if (item.equipSlot === "back") return "cloak";
   if (item.equipable) return "equipable";
   return "artefact";
 }
@@ -1005,6 +1028,7 @@ export const ITEM_TYPE_LABELS: Record<ItemType, string> = {
   accessory: "Accessory",
   spirit: "Spirit",
   instrument: "Instrument",
+  cloak: "Cloak",
   modifier: "Modifier",
   artefact: "Artefact",
 };
@@ -1024,6 +1048,7 @@ export const EQUIP_SLOT_LABELS: Record<EquipSlot, string> = {
   modifier: "Modifier",
   main_hand: "Main hand",
   off_hand: "Off hand",
+  back: "Back",
 };
 
 /** A set is a named group of items whose `effect` describes what equipping
@@ -1111,6 +1136,7 @@ export const DECK_SLOT_GROUPS: DeckSlotGroup[] = [
     slots: ["main_hand", "off_hand"],
     count: 2,
   },
+  { label: "Back", itemType: "cloak", slots: ["back"], count: 1 },
   { label: "Scenery", itemType: "sceneryCard", slots: ["scenery"], count: 1 },
   {
     label: "Modifiers",
@@ -1121,7 +1147,7 @@ export const DECK_SLOT_GROUPS: DeckSlotGroup[] = [
   { label: "Skin", itemType: "skin", slots: ["color"], count: 1 },
 ];
 
-/** Total fixed slot capacity across all groups (3+2+1+2+1+6+1 = 16). */
+/** Total fixed slot capacity across all groups (3+2+1+2+1+1+6+1 = 17). */
 export const DECK_TOTAL_SLOTS = DECK_SLOT_GROUPS.reduce(
   (sum, g) => sum + g.count,
   0,
@@ -1187,6 +1213,21 @@ export const NON_DROPPABLE_ITEM_IDS = [
   "old-cymbal",
   // Consumables are bought from Medea, never dropped.
   "star-candy",
+  // The class cloaks come only from a boss's loot (BOSS_ONLY_ITEM_IDS)…
+  "troubadour-mantle",
+  "groove-cape",
+  "drumhide-cloak",
+  // …and the Tailwind Cloak only for money.
+  "tailwind-cloak",
+] as const;
+
+/** Never a listening drop (they're in NON_DROPPABLE_ITEM_IDS, so George and
+ * every other pool leave them out too), but in a boss's random loot: the
+ * class cloaks, legendary, earned by beating one. */
+export const BOSS_ONLY_ITEM_IDS = [
+  "troubadour-mantle",
+  "groove-cape",
+  "drumhide-cloak",
 ] as const;
 
 /** How many uncollected drops may stand on the ground at once.
@@ -1289,7 +1330,10 @@ export function bossLootWeights(): { itemId: string; weight: number }[] {
     ...NON_DROPPABLE_ITEM_IDS,
     ...BOSS_LOOT_EXCLUDED_ITEM_IDS,
   ]);
-  return ITEMS.filter((i) => !never.has(i.id) && !i.dropWindow).map((i) => ({
+  const bossOnly = new Set<string>(BOSS_ONLY_ITEM_IDS);
+  return ITEMS.filter(
+    (i) => bossOnly.has(i.id) || (!never.has(i.id) && !i.dropWindow),
+  ).map((i) => ({
     itemId: i.id,
     weight: Math.round(
       (ITEM_DROP_WEIGHT_OVERRIDES[i.id] ?? RARITY_DROP_WEIGHTS[i.rarity]) *
@@ -2280,6 +2324,125 @@ function renderCymbalFrame(yAngle: number): string[] {
   );
 }
 
+// --- Cloak cards ---
+/** How a cloak card draws its cloak: seen from behind, collar up top,
+ * flaring to the hem, folds down its length and the lining showing at the
+ * edges. */
+interface CloakIconStyle {
+  outer: string;
+  fold: string;
+  lining: string;
+  trim: string;
+  hem: "round" | "dagged" | "straight" | "swallowtail";
+}
+
+function cloakCardIcon(style: CloakIconStyle) {
+  return (u: number, v: number): TexSample | null => {
+    const [ix, iy] = iconUV(u, v);
+    const top = -0.23;
+    const t = (iy - top) / 0.48;
+    if (t < 0) {
+      // The clasp, at the collar's middle.
+      return Math.hypot(ix, iy - top) < 0.035
+        ? { bright: 0.95, color: style.trim }
+        : null;
+    }
+    const half = 0.07 + 0.17 * Math.sqrt(Math.min(1, t));
+    const ax = Math.abs(ix);
+    if (ax > half) return null;
+    const across = ix / half;
+    let bottom = 1;
+    if (style.hem === "round") bottom = 1 - 0.12 * across * across;
+    else if (style.hem === "dagged")
+      bottom = 0.9 + 0.1 * Math.abs(((across * 2.5 + 10.5) % 1) * 2 - 1);
+    else if (style.hem === "swallowtail")
+      bottom = 0.84 + 0.16 * Math.abs(across);
+    if (t > bottom) return null;
+    if (ax > half - 0.025) return { bright: 0.6, color: style.lining };
+    if (t > bottom - 0.07) {
+      const stud =
+        style.hem === "straight" &&
+        Math.sin(across * 14) > 0.75 &&
+        t > bottom - 0.045;
+      return { bright: stud ? 1 : 0.85, color: style.trim };
+    }
+    const fold = Math.sin(across * 9 + t * 1.5);
+    return {
+      bright: 0.62 + 0.25 * fold,
+      color: fold < -0.35 ? style.fold : style.outer,
+    };
+  };
+}
+
+const TROUBADOUR_ICON: CloakIconStyle = {
+  outer: "#7b3fb8",
+  fold: "#4c2273",
+  lining: "#e8c35a",
+  trim: "#f2cf5b",
+  hem: "round",
+};
+const GROOVE_ICON: CloakIconStyle = {
+  outer: "#2a2a33",
+  fold: "#121218",
+  lining: "#d8373f",
+  trim: "#b8b8c8",
+  hem: "dagged",
+};
+const DRUMHIDE_ICON: CloakIconStyle = {
+  outer: "#7a2e24",
+  fold: "#4e1a14",
+  lining: "#c9a27a",
+  trim: "#c9a03e",
+  hem: "straight",
+};
+const TAILWIND_ICON: CloakIconStyle = {
+  outer: "#5cc8e8",
+  fold: "#2f8fb0",
+  lining: "#e9fbff",
+  trim: "#ffffff",
+  hem: "swallowtail",
+};
+
+function renderTroubadourMantleFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#c79cf0",
+    "#6f4a99",
+    "#3a2257",
+    cloakCardIcon(TROUBADOUR_ICON),
+  );
+}
+
+function renderGrooveCapeFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#c8c8d8",
+    "#5a5a6e",
+    "#24242e",
+    cloakCardIcon(GROOVE_ICON),
+  );
+}
+
+function renderDrumhideCloakFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#e0b48a",
+    "#8a4a32",
+    "#4a2016",
+    cloakCardIcon(DRUMHIDE_ICON),
+  );
+}
+
+function renderTailwindCloakFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#bdf0ff",
+    "#4aa6c4",
+    "#1d5a70",
+    cloakCardIcon(TAILWIND_ICON),
+  );
+}
+
 // --- Headphones card ---
 function headbandArcIcon(
   u: number,
@@ -2802,6 +2965,10 @@ const thanksForAllTheFishFrames = generateFrames(
 const spiritOrbFrames = generateFrames(renderSpiritOrbFrame);
 const luteFrames = generateFrames(renderLuteFrame);
 const discsFrames = generateFrames(renderDiscsFrame);
+const troubadourMantleFrames = generateFrames(renderTroubadourMantleFrame);
+const grooveCapeFrames = generateFrames(renderGrooveCapeFrame);
+const drumhideCloakFrames = generateFrames(renderDrumhideCloakFrame);
+const tailwindCloakFrames = generateFrames(renderTailwindCloakFrame);
 const stickFrames = generateFrames(renderStickFrame);
 const cymbalFrames = generateFrames(renderCymbalFrame);
 const witchHatFrames = generateFrames(renderWitchHatFrame);
@@ -3365,6 +3532,63 @@ export const ITEMS: ItemDef[] = [
     requiredClass: "percussionist",
     stats: { def: 10 },
   },
+  // Cloaks (the back slot): simulated cloth in the 3D view (cloak-physics.ts,
+  // CLOAK_STYLES in creature-renderer.ts). Stage 3, where a herzie has a back
+  // to hang one from. The three class cloaks suit a class but any herzie can
+  // wear them; they come only from a boss's loot (BOSS_ONLY_ITEM_IDS).
+  {
+    id: "troubadour-mantle",
+    name: "Troubadour's Mantle",
+    description: "Velvet for the long road. Billows on the high notes.",
+    rarity: "legendary",
+    frames: troubadourMantleFrames,
+    equipable: true,
+    equipSlot: "back",
+    minStage: 3,
+    sellPrice: 500,
+    stats: { euphony: 18, stamina: 6 },
+  },
+  {
+    id: "groove-cape",
+    name: "Groove Cape",
+    description: "Pressed from a master copy. Every fold a B-side.",
+    rarity: "legendary",
+    frames: grooveCapeFrames,
+    equipable: true,
+    equipSlot: "back",
+    minStage: 3,
+    sellPrice: 500,
+    stats: { sonicPower: 8, critChance: 6, critDamage: 20 },
+  },
+  {
+    id: "drumhide-cloak",
+    name: "Drumhide Cloak",
+    description: "Cut from a kick drum that never gave in.",
+    rarity: "legendary",
+    frames: drumhideCloakFrames,
+    equipable: true,
+    equipSlot: "back",
+    minStage: 3,
+    sellPrice: 500,
+    stats: { def: 15, stamina: 10 },
+  },
+  {
+    id: "tailwind-cloak",
+    name: "Tailwind Cloak",
+    description: "Silk that would rather be somewhere else. Takes you with it.",
+    rarity: "legendary",
+    frames: tailwindCloakFrames,
+    equipable: true,
+    equipSlot: "back",
+    minStage: 3,
+    // Sold for money only, as a Stripe product whose metadata.item_id is
+    // "tailwind-cloak" (see /api/store/premium), like Herman: never dropped
+    // (NON_DROPPABLE_ITEM_IDS), never in George's stock, and never risked on a
+    // die (noUpgrade).
+    sellPrice: 500,
+    noUpgrade: true,
+    stats: { moveSpeed: 8 },
+  },
   {
     id: "star-candy",
     name: "Star Candy",
@@ -3405,6 +3629,7 @@ export function getHerzieStats(
       totals[key] += stats[key] + level;
     }
   }
+  totals.moveSpeed = Math.min(MAX_MOVE_SPEED, totals.moveSpeed);
   return totals;
 }
 
@@ -3427,6 +3652,7 @@ export function getHerzieStatsFromUnits(
       totals[key] += stats[key] + unit.upgradeLevel;
     }
   }
+  totals.moveSpeed = Math.min(MAX_MOVE_SPEED, totals.moveSpeed);
   return totals;
 }
 

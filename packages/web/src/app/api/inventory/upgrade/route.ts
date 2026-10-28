@@ -76,6 +76,13 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
+  // Bought for money (the Tailwind Cloak): a failed roll mustn't destroy it.
+  if (targetDef.noUpgrade) {
+    return NextResponse.json(
+      { error: "That card can't be upgraded" },
+      { status: 400 },
+    );
+  }
 
   // Raises ONE copy's level and consumes one die, atomically. Its twin — a
   // second copy of the same card — is untouched; that is the point.
