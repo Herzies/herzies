@@ -189,6 +189,8 @@ const TOUCHES = new Set([
 ]);
 
 const ARMS = new Set(["arm-l", "arm-r"]);
+/** The arms to the simulated cloth, as a share of their radius. */
+const ARM_SLIM = 0.82;
 
 /** The torso and head a cloak hangs from (the biggest of each), or null
  * without them — a herzie before stage 3, the boss. */
@@ -249,6 +251,9 @@ export function cloakColliders(
   bodyAt: number,
   centerOf: (i: number) => V3,
   out?: CloakColliders,
+  /** How much slimmer the arms are to the cloth (ARM_SLIM for the sim;
+   * 1, as drawn, for what's seen — see HerzieModel.drawCloak). */
+  armScale = ARM_SLIM,
 ): CloakColliders {
   const size = (parts.length + 1) * COLLIDER_STRIDE;
   const cols = out && out.length === size ? out : new Float32Array(size);
@@ -264,7 +269,8 @@ export function cloakColliders(
     // Arms a little slimmer to the cloth: a cloak drapes over the shoulder
     // where the arm sinks into the torso, and a raised arm mustn't lever
     // its edge up past the collar it's sewn to.
-    cols[o + 6] = spheres[i].radius * (ARMS.has(spheres[i].part) ? 0.82 : 1);
+    cols[o + 6] =
+      spheres[i].radius * (ARMS.has(spheres[i].part) ? armScale : 1);
   });
   const h = centerOf(headAt);
   const b = centerOf(bodyAt);

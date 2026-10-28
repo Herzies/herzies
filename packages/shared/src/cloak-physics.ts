@@ -187,8 +187,12 @@ export interface CloakSim {
   /** The colliders at the end of the last step, to sweep from. */
   colliders: Float32Array;
   /** Each particle's strap weight, 0 to 1 (set by the host from where its
-   * gear is slung; zeros by default). */
+   * gear is slung; zeros by default)… */
   strap: Float32Array;
+  /** …and how far from the torso's middle a strap lets it get: no further
+   * than it hangs at rest — the gear keeps it from billowing out from under
+   * it, without pulling it anywhere it wouldn't lie. */
+  strapReach: Float32Array;
   /** Turn rate at the last substep (eased, as thread-physics'). */
   turnRate: number;
   /** The torso's offset last step, and how fast it was moving. */
@@ -443,12 +447,28 @@ export function hemProfile(
   }
 }
 
+function strapReachOf(rig: CloakRig): Float32Array {
+  const out = new Float32Array(rig.n);
+  const [bx, by, bz] = rig.bodyCenter;
+  for (let i = 0; i < rig.n; i++) {
+    const dx = rig.rest[i * 3] - bx;
+    const dy = rig.rest[i * 3 + 1] - by;
+    const dz = rig.rest[i * 3 + 2] - bz;
+    out[i] = Math.max(
+      rig.strapRadius,
+      Math.sqrt(dx * dx + dy * dy + dz * dz) + 0.01,
+    );
+  }
+  return out;
+}
+
 export function createCloakSim(rig: CloakRig): CloakSim {
   return {
     pos: rig.rest.slice(),
     prev: rig.rest.slice(),
     colliders: new Float32Array(0),
     strap: new Float32Array(rig.n),
+    strapReach: strapReachOf(rig),
     turnRate: 0,
     offset: [0, 0, 0],
     bobVelocity: [0, 0, 0],
@@ -588,7 +608,6 @@ export function stepCloak(
   const swept = sim.swept;
 
   const strapAt = input.strap ?? 0;
-  const strapR = rig.strapRadius;
   const strapCx = center[0] + off[0];
   const strapCy = center[1] + off[1];
   const strapCz = center[2] + off[2];
@@ -746,8 +765,9 @@ export function stepCloak(
         const dy = pos[i * 3 + 1] - strapCy;
         const dz = pos[i * 3 + 2] - strapCz;
         const l = Math.sqrt(dx * dx + dy * dy + dz * dz);
-        if (l <= strapR || l < 1e-9) continue;
-        const k = 1 - (sw * (l - strapR)) / l;
+        const reach = sim.strapReach[i];
+        if (l <= reach || l < 1e-9) continue;
+        const k = 1 - (sw * (l - reach)) / l;
         pos[i * 3] = strapCx + dx * k;
         pos[i * 3 + 1] = strapCy + dy * k;
         pos[i * 3 + 2] = strapCz + dz * k;

@@ -41,6 +41,8 @@ function setup(
   feet: number;
   posed: (motion: CreatureMotion) => {
     colliders: CloakColliders;
+    /** At the arms' full, drawn size. */
+    drawn: CloakColliders;
     offset: V3;
   };
 } {
@@ -71,6 +73,15 @@ function setup(
     ];
     return {
       colliders: cloakColliders(spheres, parts, body.headAt, body.bodyAt, at),
+      drawn: cloakColliders(
+        spheres,
+        parts,
+        body.headAt,
+        body.bodyAt,
+        at,
+        undefined,
+        1,
+      ),
       offset: d[body.bodyAt] as V3,
     };
   };
@@ -359,7 +370,7 @@ describe("cloak physics", () => {
         const dt = (0.5 + rand()) / 60;
         t += dt;
         if (motion.cast >= 0) motion.cast = Math.min(1, motion.cast + dt / 0.4);
-        const { colliders, offset } = posed({
+        const { colliders, drawn, offset } = posed({
           idleFrame: t * 8,
           walkPhase: (t * motion.speed) / 2.4,
           walkWeight: motion.walk,
@@ -396,8 +407,9 @@ describe("cloak physics", () => {
         );
         // …and the drawn surface, pushed out once more, never shows inside.
         cloakSurface(sim.pos, rig.cols, rig.rows, sub, surface, scratch);
-        pushOutOfColliders(surface, colliders, 0.02);
-        expect(deepest(surface, colliders)).toBeLessThan(1e-4);
+        // (against the body as drawn: arms at their full size).
+        pushOutOfColliders(surface, drawn, 0.02);
+        expect(deepest(surface, drawn)).toBeLessThan(1e-4);
       }
     }
   });

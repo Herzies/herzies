@@ -354,6 +354,9 @@ type CloakRun = {
   headAt: number;
   bodyAt: number;
   colliders: CloakColliders;
+  /** The same at the arms' full size, as they're drawn: what the drawn
+   * cloth is kept out of. */
+  drawnColliders: CloakColliders;
   mesh: THREE.Mesh;
   geometry: THREE.BufferGeometry;
   /** The drawn surface (the geometry's positions), the smoothing's scratch,
@@ -705,8 +708,7 @@ export class HerzieModel {
     this.centerHeight = feet * MODEL_SCALE;
     this.span = schemeSpan(spheres);
     // A cloak, on a herzie with a back to hang it from.
-    const cloakStyle =
-      this.hasLegs && !look.params ? cloakStyleFor(look.equipped) : null;
+    const cloakStyle = look.stage >= 3 ? cloakStyleFor(look.equipped) : null;
     const cloakRig = cloakStyle ? cutCloak(cloakStyle, spheres, feet) : null;
     // Class gear rests on its back, but swings out and reaches further
     // drawn: bound it all the way through the draw.
@@ -1376,6 +1378,7 @@ export class HerzieModel {
       headAt: cut.headAt,
       bodyAt: cut.bodyAt,
       colliders: new Float32Array(0),
+      drawnColliders: new Float32Array(0),
       mesh,
       geometry,
       surface,
@@ -1492,11 +1495,23 @@ export class HerzieModel {
       run.surface,
       run.scratch,
     );
-    pushOutOfColliders(
-      run.surface,
-      this.cloakCollidersNow(run),
-      CLOAK_DRAWN_MARGIN,
+    run.drawnColliders = cloakColliders(
+      this.model.spheres,
+      run.parts,
+      run.headAt,
+      run.bodyAt,
+      (i) => {
+        const p = this.meshes[i].position;
+        return [p.x, p.y, p.z];
+      },
+      run.drawnColliders,
+      1,
     );
+    // Frozen (far off, or stone), it hangs where it settled, clear of the
+    // body already: not worth the push.
+    if (this.clothDetail !== "frozen") {
+      pushOutOfColliders(run.surface, run.drawnColliders, CLOAK_DRAWN_MARGIN);
+    }
     cloakNormals(run.surface, run.width, run.height, rig.outward, run.normals);
     const { position, normal } = run.geometry.attributes;
     position.needsUpdate = true;

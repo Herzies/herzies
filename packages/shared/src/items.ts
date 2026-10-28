@@ -1322,7 +1322,7 @@ export const BOSS_LOOT_EXCLUDED_ITEM_IDS = ["cd"];
 /** What a boss's random loot is drawn from, and how likely each is: every
  * item that drops from listening (not in NON_DROPPABLE_ITEM_IDS, no
  * seasonal window, not in BOSS_LOOT_EXCLUDED_ITEM_IDS), weighted per BOSS_LOOT_RARITY_BOOST. settle_boss_fight
- * rolls from a copy of this list (boss_loot_roll, 00118_boss_loot_no_tokens.sql);
+ * rolls from a copy of this list (boss_loot_roll, 00124_cloak_loot.sql);
  * items.test.ts checks the two agree, so a new droppable item needs adding
  * there too. */
 export function bossLootWeights(): { itemId: string; weight: number }[] {
