@@ -88,21 +88,26 @@ export interface CloakConfig {
   turbulence: number;
   /** Friction against the body (0 slides freely, 1 sticks). */
   friction: number;
+  /** How hard its side edges are held in, in gravities: once out past a
+   * line just off the herzie's flanks (HUG_REACH), they're drawn back to
+   * it, so they lie flat down its sides, neither flared nor curled in. */
+  hug: number;
 }
 
 export const DEFAULT_CLOAK_CONFIG: CloakConfig = {
-  gravity: 55,
-  damping: 1.6,
-  drag: 1.1,
-  airFriction: 0.12,
+  gravity: 21,
+  damping: 6,
+  drag: 1.95,
+  airFriction: 0.88,
   linearResponse: 0.8,
   angularResponse: 0.7,
   stretch: 0,
-  shear: 6e-4,
-  bend: 4e-4,
-  compress: 1.5e-3,
-  turbulence: 0.22,
-  friction: 0.35,
+  shear: 4e-3,
+  bend: 4.5e-4,
+  compress: 1.7e-3,
+  turbulence: 0.02,
+  friction: 0.47,
+  hug: 5,
 };
 
 /** The body it hangs on, at rest. */
@@ -154,6 +159,12 @@ export interface CloakRig {
   /** Which way the pattern's face looks: +1 if (across × down) points out,
    * away from the body, else −1 (see cloakSurface). */
   outward: 1 | -1;
+  /** How much each particle is drawn round toward the body (see
+   * CloakConfig.hug): its side edges, 0 elsewhere. */
+  hug: Float32Array;
+  /** How far out each particle hangs from the torso's axis at rest, level:
+   * the hug only draws cloth back to here, never further in. */
+  hugReach: Float32Array;
 }
 
 /** What the cloth touches: capsules, 7 floats each — one end (x, y, z),
@@ -216,8 +227,13 @@ export const CLOAK_SUBSTEP = 1 / 240;
 const MAX_SUBSTEPS = 24;
 /** The most acceleration and turn the cloth feels (see thread-physics). */
 const MAX_ACCEL = 30;
-/** Up and down: a jump's fall (≈59 creature units/s²) and a little more. */
-const MAX_LIFT = 70;
+/** Falling, the cloth floats: at most this many of its own gravities are
+ * taken off it — a little past weightless, so it drifts up through a hop
+ * but never flips over the head, however light it's tuned. */
+const MAX_FLOAT = 1.5;
+/** Pressed down (taking off, landing): up to this, so a landing's jolt
+ * flops it back down. */
+const MAX_PRESS = 220;
 const MAX_TURN = 9;
 const TURN_EASE = 0.1;
 const MAX_SPEED = 14;
@@ -243,6 +259,15 @@ const STRAIN = 0.015;
 const STRAIN_ROUNDS = 2;
 /** Columns to a pleat (see buildCloakRig). */
 const PLEAT_COLUMNS = 4;
+/** The side edges' hug reaches this far in from the middle (|across| 0..1):
+ * the outer two columns or so. */
+const HUG_FROM = 0.75;
+/** How far past its rest line an edge goes before the hug pulls at full
+ * strength (creature units). */
+const HUG_SOFT = 0.06;
+/** Where the hug draws the side edges in to, as a share of the torso's
+ * radius (with the cloth's margin): just off the herzie's flanks. */
+const HUG_REACH = 1.15;
 /** Friction against the ground (see slow). */
 const GROUND_FRICTION = 1.2;
 
@@ -305,6 +330,10 @@ export function buildCloakRig(
   const slope = (hemArc - collarArc) / (2 * half * length);
   const down = Math.sqrt(Math.max(0.05, 1 - slope * slope));
   const pleat = Math.sqrt(Math.max(0, shape.gather - 1)) / Math.PI;
+  // The pleats' phase: each side edge in a fold's valley, on the cone —
+  // never out on a crest, where it would flare away from the body.
+  const mid = (cols - 1) / 2;
+  const phase = Math.PI - (2 * Math.PI * mid) / PLEAT_COLUMNS;
   const rest = new Float32Array(n * 3);
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
@@ -318,7 +347,9 @@ export function buildCloakRig(
       const rho =
         ring +
         slope * y +
-        depth * (0.5 + 0.5 * Math.cos((2 * Math.PI * c) / PLEAT_COLUMNS));
+        depth *
+          (0.5 +
+            0.5 * Math.cos((2 * Math.PI * c) / PLEAT_COLUMNS + phase));
       const phi = across(c) * half;
       rest[i * 3] = B[0] + rho * Math.sin(phi);
       rest[i * 3 + 1] = collarY + y * down;
@@ -328,6 +359,22 @@ export function buildCloakRig(
 
   const invMass = new Float32Array(n).fill(1);
   for (let c = 0; c < cols; c++) invMass[c] = 0;
+  // The side edges' hug: the outermost columns, more the further down.
+  const hug = new Float32Array(n);
+  for (let r = 1; r < rows; r++) {
+    const t = rows === 1 ? 0 : r / (rows - 1);
+    for (let c = 0; c < cols; c++) {
+      const edge = Math.max(0, (Math.abs(across(c)) - HUG_FROM) / (1 - HUG_FROM));
+      hug[r * cols + c] = edge * Math.min(1, t * 2.5);
+    }
+  }
+  const hugReach = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    hugReach[i] = Math.min(
+      Math.hypot(rest[i * 3] - B[0], rest[i * 3 + 2] - B[2]),
+      R * HUG_REACH,
+    );
+  }
 
   const pairs: number[] = [];
   const kinds: number[] = [];
@@ -422,6 +469,8 @@ export function buildCloakRig(
     margin,
     strapRadius: body.body.radius + margin * 1.6,
     outward,
+    hug,
+    hugReach,
   };
 }
 
@@ -554,6 +603,20 @@ export function stepCloak(
     prev[i * 3 + 1] += cy;
     prev[i * 3 + 2] += cz;
   }
+  // And what it touched last step, likewise: swept from there below, the
+  // body would otherwise sweep in from where the torso was — through cloth
+  // already carried past it — and fling it (a lunge moves the torso a
+  // quarter of its girth a frame). Only what moves against the torso (an
+  // arm swinging, a leg striding) sweeps.
+  const last = sim.colliders;
+  for (let o = 0; o + COLLIDER_STRIDE <= last.length; o += COLLIDER_STRIDE) {
+    last[o] += cx;
+    last[o + 1] += cy;
+    last[o + 2] += cz;
+    last[o + 3] += cx;
+    last[o + 4] += cy;
+    last[o + 5] += cz;
+  }
 
   // What it feels of the herzie's moves.
   // Along the ground, a share of it (linearResponse). Up and down, all of
@@ -568,8 +631,8 @@ export function stepCloak(
   ax *= config.linearResponse;
   az *= config.linearResponse;
   const ay = Math.max(
-    -MAX_LIFT,
-    Math.min(MAX_LIFT, input.accel[1] + bay * 0.5),
+    -MAX_PRESS,
+    Math.min(config.gravity * MAX_FLOAT, input.accel[1] + bay * 0.5),
   );
   // The air it goes through, in its own frame: the other way to its going.
   let wx = -input.velocity[0];
@@ -599,6 +662,7 @@ export function stepCloak(
   );
   const keep = Math.exp(-(config.damping + settling) * h);
   const maxAir = MAX_AIR * config.gravity;
+  const hugPull = (config.hug ?? 0) * config.gravity;
 
   // Colliders: swept from where they were to where they are.
   const now = input.colliders;
@@ -686,6 +750,19 @@ export function stepCloak(
       fx += airx;
       fy += airy;
       fz += airz;
+      // Its side edges kept from flaring: drawn back (level, toward the
+      // axis) once out past where they hang at rest, never curled further
+      // in, so they lie flat down the herzie's sides.
+      const hw = rig.hug[i];
+      if (hw > 0) {
+        const rl = Math.sqrt(rx * rx + rz * rz);
+        const out = rl - rig.hugReach[i];
+        if (out > 0) {
+          const pull = (hugPull * hw * Math.min(1, out / HUG_SOFT)) / rl;
+          fx -= rx * pull;
+          fz -= rz * pull;
+        }
+      }
       const h2 = h * h;
       prev[i * 3] = x;
       prev[i * 3 + 1] = y;

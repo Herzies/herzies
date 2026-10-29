@@ -172,6 +172,13 @@ export const SHEATHE_DELAY = 0.25;
 const THREAD_JUMP_SPEED = 60;
 /** Time constant (s) its velocity is smoothed over for the threads. */
 const THREAD_SMOOTHING = 0.12;
+/** Time constant (s) of the cloak's sense of its rise and fall: short, so
+ * it floats through a hop and flops on landing (see stepCloak). */
+const CLOAK_LIFT_SMOOTHING = 0.04;
+/** How long (s) a cloaked herzie's arms take to tuck away from the cloth
+ * as a hand reaches back for its gear, and to come back out (reachingOver). */
+const ARM_TUCK_IN = 0.05;
+const ARM_TUCK_OUT = 0.6;
 /** How many drawn points a cloak's particle span is smoothed into
  * (cloakSurface). */
 const CLOAK_SMOOTHING = 3;
@@ -367,6 +374,14 @@ type CloakRun = {
   width: number;
   height: number;
   clasps: THREE.Mesh[];
+  /** Which of the body's parts are its legs and arms (see
+   * cloakCollidersNow, reachingOver). */
+  legs: ReadonlySet<number>;
+  arms: ReadonlySet<number>;
+  /** How far the arms are tucked away from the cloth, 0 to 1 (see
+   * reachingOver): in quickly as a hand reaches back, out slowly after —
+   * the cloth has hung into where they were, and is eased back aside. */
+  tuck: number;
   /** Its body in the world last frame, and how fast it was going. */
   lastWorld: THREE.Vector3 | null;
   worldVelocity: THREE.Vector3;
@@ -1387,6 +1402,13 @@ export class HerzieModel {
       width: w,
       height: h,
       clasps,
+      legs: new Set(
+        cut.parts.filter((i) => spheres[i].part.startsWith("leg")),
+      ),
+      arms: new Set(
+        cut.parts.filter((i) => spheres[i].part.startsWith("arm")),
+      ),
+      tuck: 0,
       lastWorld: null,
       worldVelocity: new THREE.Vector3(),
     };
@@ -1401,11 +1423,34 @@ export class HerzieModel {
       run.bodyAt,
       (i) => {
         const p = this.meshes[i].position;
-        return [p.x, p.y, p.z];
+        // The legs, to the cloth, keep under the torso as it leans and
+        // lunges (a bump throws it most of a leg's length ahead of them):
+        // left behind, they'd shove the hem it carries up its back. Drawn,
+        // the cloth still keeps out of them where they are (drawCloak).
+        if (run.legs.has(i)) {
+          const o = this.torsoOffsetOf(run);
+          return [p.x + o[0], p.y, p.z + o[2]];
+        }
+        return this.reachingOver(run, i, p);
       },
       run.colliders,
     );
     return run.colliders;
+  }
+
+  /** Where arm `i` is to the cloth: where it is, but tucked into the torso
+   * while it reaches over its shoulder for the gear on its back (drawing
+   * or putting it away). The gear's slung over the cloak, so the hand goes
+   * over the cloth, not under it to lift it. */
+  private reachingOver(run: CloakRun, i: number, p: THREE.Vector3): CloakV3 {
+    const k = run.tuck;
+    if (!run.arms.has(i) || k <= 0) return [p.x, p.y, p.z];
+    const b = this.meshes[run.bodyAt].position;
+    return [
+      p.x + (b.x - p.x) * k,
+      p.y + (b.y - p.y) * k,
+      p.z + (b.z - p.z) * k,
+    ];
   }
 
   /** Swings its cloak with how it moved this frame: across the world (from
@@ -1425,11 +1470,23 @@ export class HerzieModel {
         jumped = true;
       } else {
         const before = run.worldVelocity.clone();
-        run.worldVelocity.lerp(velocity, 1 - Math.exp(-dt / THREAD_SMOOTHING));
-        accel = run.worldVelocity.clone().sub(before).divideScalar(dt);
+        const v = run.worldVelocity;
+        // Across the ground, smoothed as the threads are. Up and down,
+        // barely: a hop is over in a third of a second, and smoothed like
+        // that the cloth would feel its fall only once it had landed.
+        const across = 1 - Math.exp(-dt / THREAD_SMOOTHING);
+        const up = 1 - Math.exp(-dt / CLOAK_LIFT_SMOOTHING);
+        v.x += (velocity.x - v.x) * across;
+        v.y += (velocity.y - v.y) * up;
+        v.z += (velocity.z - v.z) * across;
+        accel = v.clone().sub(before).divideScalar(dt);
       }
     }
     run.lastWorld = now;
+    const reaching = this.drawPhase > 0 && this.drawPhase < 1;
+    run.tuck = reaching
+      ? Math.min(1, run.tuck + dt / ARM_TUCK_IN)
+      : Math.max(0, run.tuck - dt / ARM_TUCK_OUT);
     const offset = this.torsoOffsetOf(run);
     if (jumped) {
       // A portal, a respawn: it arrives hanging still.
@@ -1500,10 +1557,7 @@ export class HerzieModel {
       run.parts,
       run.headAt,
       run.bodyAt,
-      (i) => {
-        const p = this.meshes[i].position;
-        return [p.x, p.y, p.z];
-      },
+      (i) => this.reachingOver(run, i, this.meshes[i].position),
       run.drawnColliders,
       1,
     );

@@ -383,6 +383,7 @@ function Sandbox() {
                 ["gather (softness)", "compress", 0, 0.01, 0.0001],
                 ["gusts", "turbulence", 0, 1, 0.01],
                 ["friction", "friction", 0, 1, 0.01],
+                ["edge hug", "hug", 0, 8, 0.1],
               ] as const
             ).map(([label, key, min, max, step]) => (
               <SliderField

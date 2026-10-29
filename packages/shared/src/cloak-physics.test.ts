@@ -169,6 +169,43 @@ describe("cloak physics", () => {
     expect(deepest(rig.rest, colliders)).toBeLessThan(0.005);
   });
 
+  it("lays its side edges flat down the body's sides, both alike: not flared out, not curled round behind", () => {
+    for (const seed of ["HERZ-CLOAK", "HERZ-2", "edge-test", "b0b0"]) {
+      for (const id of Object.keys(CLOAK_STYLES)) {
+        const { rig } = setup(id, seed);
+        const B = rig.bodyCenter;
+        const R = rig.bodyRadius + rig.margin;
+        // Level, from the torso's axis: how far out, and how far round from
+        // straight behind (radians).
+        const edge = (c: number) => {
+          let reach = 0;
+          let round = Number.POSITIVE_INFINITY;
+          for (let r = rig.rows - 6; r < rig.rows; r++) {
+            const i = (r * rig.cols + c) * 3;
+            const x = rig.rest[i] - B[0];
+            const z = rig.rest[i + 2] - B[2];
+            reach = Math.max(reach, Math.hypot(x, z));
+            round = Math.min(round, Math.abs(Math.atan2(x, z)));
+          }
+          const cx = rig.rest[c * 3] - B[0];
+          const cz = rig.rest[c * 3 + 2] - B[2];
+          return { reach: reach / R, round: round / Math.abs(Math.atan2(cx, cz)) };
+        };
+        const left = edge(0);
+        const right = edge(rig.cols - 1);
+        for (const [side, e] of [["left", left], ["right", right]] as const) {
+          // Just off the body, not winged out (with no hug: 1.3–1.6)…
+          expect(e.reach, `${seed} ${id} ${side} reach`).toBeLessThan(1.22);
+          // …and running forward down its side, not tucked in behind it
+          // (drawn in to its axis, as it was: 0.8).
+          expect(e.round, `${seed} ${id} ${side} round`).toBeGreaterThan(0.95);
+        }
+        expect(Math.abs(left.reach - right.reach)).toBeLessThan(0.05);
+        expect(Math.abs(left.round - right.round)).toBeLessThan(0.05);
+      }
+    }
+  });
+
   it("settles still, and goes to sleep so a still view can stop drawing", () => {
     const { rig, sim, posed, style, feet } = setup();
     const { colliders } = posed(STILL);
@@ -219,10 +256,13 @@ describe("cloak physics", () => {
       }
       return { lift, settledAt };
     };
+    const stroll = run(1.5);
     const walk = run(5);
     const sprint = run(6.7);
-    expect(walk.lift).toBeGreaterThan(0.15);
-    expect(sprint.lift).toBeGreaterThan(walk.lift);
+    expect(stroll.lift).toBeGreaterThan(0.1);
+    expect(walk.lift).toBeGreaterThan(stroll.lift);
+    // At a walk it already streams out about level: running, about as far.
+    expect(sprint.lift).toBeGreaterThan(walk.lift * 0.95);
     expect(walk.settledAt).toBeLessThan(4);
   });
 

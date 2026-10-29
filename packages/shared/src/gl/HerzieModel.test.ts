@@ -798,6 +798,84 @@ describe("cloaks", () => {
     expect(hem(h).z - h.root.position.z).toBeLessThan(still.z - 0.1);
   });
 
+  it("floats up through a hop and flops back down on landing", () => {
+    const h = new HerzieModel(CLOAKED);
+    for (let t = 0; t < 1; t += 1 / 60) h.update(1 / 60, 0);
+    // Its hem's height in the body's own frame (creature space: y down),
+    // which hops and stretches with it.
+    const lift = () => {
+      const mesh = cloakMesh(h) as THREE.Mesh;
+      return -(mesh.parent as THREE.Object3D).worldToLocal(hem(h)).y;
+    };
+    const rest = lift();
+    h.jump();
+    // Already floating by the top of the hop, not only once it's landed.
+    for (let t = 0; t < JUMP_AIR_SECONDS * 0.6; t += 1 / 60) h.update(1 / 60, 0);
+    expect(lift() - rest).toBeGreaterThan(0.025);
+    let peak = 0;
+    while (h.airborne) {
+      h.update(1 / 60, 0);
+      peak = Math.max(peak, lift() - rest);
+    }
+    for (let t = 0; t < 1.5; t += 1 / 60) h.update(1 / 60, 0);
+    expect(Math.abs(lift() - rest)).toBeLessThan(peak * 0.4);
+  });
+
+  it("isn't flung up by its own attacks", () => {
+    for (const style of ["cast", "bump"] as const) {
+      const h = new HerzieModel({
+        ...CLOAKED,
+        equipped: { ...CLOAKED.equipped, main_hand: "lute" },
+      });
+      for (let t = 0; t < 1; t += 1 / 60) h.update(1 / 60, 0);
+      // Its hem, in the body's own frame (y down).
+      const lift = () => {
+        const mesh = cloakMesh(h) as THREE.Mesh;
+        return -(mesh.parent as THREE.Object3D).worldToLocal(hem(h)).y;
+      };
+      const rest = lift();
+      h.cast(0, { style });
+      let most = 0;
+      for (let t = 0; t < 1.5; t += 1 / 60) {
+        h.update(1 / 60, 0);
+        most = Math.max(most, lift() - rest);
+      }
+      // A bump once threw it up over its shoulders (1.9).
+      expect(most, style).toBeLessThan(0.3);
+    }
+  });
+
+  it("isn't lifted at its sides by the hand reaching over for its gear", () => {
+    const h = new HerzieModel({
+      ...CLOAKED,
+      equipped: { ...CLOAKED.equipped, main_hand: "worn-stick" },
+    });
+    for (let t = 0; t < 1; t += 1 / 60) h.update(1 / 60, 0);
+    // How high its side edges' lower halves are, highest, in the body's
+    // own frame (y down).
+    const sides = () => {
+      const mesh = cloakMesh(h) as THREE.Mesh;
+      const pos = mesh.geometry.attributes.position;
+      const uv = mesh.geometry.attributes.uv;
+      let top = Number.POSITIVE_INFINITY;
+      for (let i = 0; i < uv.count; i++) {
+        const u = uv.getX(i);
+        if (uv.getY(i) > 0.5 && (u < 0.02 || u > 0.98))
+          top = Math.min(top, pos.getY(i));
+      }
+      return -top;
+    };
+    const rest = sides();
+    // Drawn for a cast, and put away again after.
+    h.cast(0);
+    let most = 0;
+    for (let t = 0; t < 2; t += 1 / 60) {
+      h.update(1 / 60, 0);
+      most = Math.max(most, sides() - rest);
+    }
+    expect(most).toBeLessThan(0.15);
+  });
+
   it("settles, so a still view can stop drawing", () => {
     const h = new HerzieModel(CLOAKED);
     // As a paused view steps it: the rest held still, the swing let run.
