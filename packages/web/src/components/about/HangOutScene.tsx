@@ -1,12 +1,7 @@
 "use client";
 
 import { SH, SpeechBubble } from "@herzies/shared";
-import {
-  HerzieModel,
-  herzieStage,
-  islandScenery,
-  turnToward,
-} from "@herzies/shared/gl";
+import { HerzieModel, islandScenery, turnToward } from "@herzies/shared/gl";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import {
@@ -16,6 +11,7 @@ import {
   islandBox,
   islandSun,
 } from "./island";
+import { useSceneStage } from "./sceneStage";
 
 // The beat sheet, in ms: a stage 2 herzie stands listening to music (in its
 // headphones, dancing). A stage 1 herzie walks in, stops, and they say hi,
@@ -87,7 +83,7 @@ export function HangOutScene({
   size: number;
   active: boolean;
 }) {
-  const box = useRef<HTMLDivElement>(null);
+  const [stage, box] = useSceneStage();
   const bubbles = useRef<Record<"visitor" | "listener", HTMLDivElement | null>>(
     {
       visitor: null,
@@ -151,7 +147,7 @@ export function HangOutScene({
       el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -100%)`;
     };
 
-    const remove = herzieStage.add({
+    const remove = stage.add({
       element,
       scene,
       camera: cam,
@@ -227,7 +223,7 @@ export function HangOutScene({
       listener.dispose();
       visitor.dispose();
     };
-  }, [listenerSeed, visitorSeed]);
+  }, [listenerSeed, visitorSeed, stage, box]);
 
   return (
     <div

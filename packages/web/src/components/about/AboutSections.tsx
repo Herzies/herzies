@@ -21,6 +21,7 @@ import {
   ISLAND_ZOOM,
   islandBox,
 } from "./island";
+import { useSceneStage } from "./sceneStage";
 
 /** The herzie both sections draw, so it's the same one grown up. */
 const SEED = "landing-listen";
@@ -63,23 +64,35 @@ function IslandHerzie({
   ...props
 }: Omit<
   React.ComponentProps<typeof HerzieView>,
-  "userId" | "cols" | "zoom" | "groundInset" | "scenery" | "distance" | "tilt"
+  | "userId"
+  | "cols"
+  | "zoom"
+  | "groundInset"
+  | "scenery"
+  | "distance"
+  | "tilt"
+  | "onStage"
 > & { size: number; label: string }) {
   const scenery = useMemo(() => islandScenery(), []);
+  const [stage, host] = useSceneStage();
   const { height } = islandBox(size);
   return (
-    <HerzieView
-      userId={SEED}
-      size={size}
-      cols={ISLAND_COLS}
-      zoom={ISLAND_ZOOM}
-      distance={ISLAND_DISTANCE}
-      tilt={ISLAND_TILT}
-      groundInset={height * ISLAND_GROUND}
-      scenery={scenery}
-      ariaLabel={label}
-      {...props}
-    />
+    // The scene's own canvas fills this box (see useSceneStage).
+    <div ref={host} className="relative">
+      <HerzieView
+        userId={SEED}
+        size={size}
+        cols={ISLAND_COLS}
+        zoom={ISLAND_ZOOM}
+        distance={ISLAND_DISTANCE}
+        tilt={ISLAND_TILT}
+        groundInset={height * ISLAND_GROUND}
+        scenery={scenery}
+        ariaLabel={label}
+        onStage={stage}
+        {...props}
+      />
+    </div>
   );
 }
 

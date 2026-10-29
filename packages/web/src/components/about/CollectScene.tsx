@@ -9,7 +9,6 @@ import {
 } from "@herzies/shared";
 import {
   HerzieModel,
-  herzieStage,
   islandScenery,
   itemVoxelMeshes,
   lootPillarMaterial,
@@ -23,6 +22,7 @@ import {
   islandBox,
   islandSun,
 } from "./island";
+import { useSceneStage } from "./sceneStage";
 
 // The beat sheet, in ms from the start of a loop: the island stands empty,
 // items pop up on it one by one (as the Town drops them: voxel cards in
@@ -176,7 +176,7 @@ export function CollectScene({
   size: number;
   active: boolean;
 }) {
-  const box = useRef<HTMLDivElement>(null);
+  const [stage, box] = useSceneStage();
   const { width, height } = islandBox(size);
   const live = useRef({ active, groundInset: height * ISLAND_GROUND });
   live.current.active = active;
@@ -222,7 +222,7 @@ export function CollectScene({
     const runMs = ((RUN_TO - RUN_FROM) / RUN_SPEED) * 1000;
     const loopMs = runAt + runMs + LOOP_GAP_MS;
 
-    const remove = herzieStage.add({
+    const remove = stage.add({
       element,
       scene,
       camera: cam,
@@ -292,7 +292,7 @@ export function CollectScene({
       for (const d of drops) d.dispose();
       herzie.dispose();
     };
-  }, [seed]);
+  }, [seed, stage, box]);
 
   return (
     <div
