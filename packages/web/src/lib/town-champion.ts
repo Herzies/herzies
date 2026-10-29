@@ -19,7 +19,10 @@ export type ShowcaseChampion = {
  */
 export async function showcaseChampion(): Promise<ShowcaseChampion | null> {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!key) return null;
+  if (!key) {
+    console.error("showcaseChampion: no SUPABASE_SERVICE_ROLE_KEY");
+    return null;
+  }
   try {
     const { data, error } = await createAdminClient().rpc(
       "boss_champion_json",
@@ -27,7 +30,11 @@ export async function showcaseChampion(): Promise<ShowcaseChampion | null> {
         p_skip: CHAMPION_SKIP,
       },
     );
-    if (error || !data) return null;
+    if (error) {
+      console.error("showcaseChampion: rpc failed", error.message);
+      return null;
+    }
+    if (!data) return null;
     const c = data as { seed: string; stage: number; equipped: unknown };
     // Ground accessories stay home, as for a herzie out walking.
     const {
@@ -37,7 +44,8 @@ export async function showcaseChampion(): Promise<ShowcaseChampion | null> {
     } = normalizeEquipped(c.equipped);
     const seed = `W-${createHmac("sha256", key).update(`statue:${c.seed}`).digest("hex").slice(0, 16)}`;
     return { look: { seed, stage: c.stage, equipped }, name: "" };
-  } catch {
+  } catch (e) {
+    console.error("showcaseChampion: threw", e);
     return null;
   }
 }

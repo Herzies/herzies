@@ -232,6 +232,77 @@ body:has([data-town]) > nav .chrome a span {
   }
 }
 
+/* The front page's loading screen (TownBackdrop), over everything until
+   the Town has drawn: the page's edge colours top to bottom, so Safari's
+   bars match it too. Its colour is a child's: a fixed element's own
+   background would be what Safari tints its bars from. */
+.town-loading {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 600ms ease;
+}
+
+.town-loading-done {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.town-loading-sky {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to bottom,
+    var(--color-sky),
+    #6f8fb3 55%,
+    var(--color-ground)
+  );
+}
+
+.town-loading-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.town-loading-dots i {
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.35);
+  animation: town-loading-hop 1.1s ease-in-out infinite;
+}
+
+.town-loading-dots i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.town-loading-dots i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes town-loading-hop {
+  0%,
+  60%,
+  100% {
+    translate: 0 0;
+    opacity: 0.6;
+  }
+  30% {
+    translate: 0 -7px;
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .town-loading-dots i {
+    animation: none;
+  }
+}
+
 /* The front page's download button: white glass over the Town (as the
    header's and footer's boxes), with a light that sweeps across it now and
    then and a small hop with a halo, on two clocks that don't line up, so it
