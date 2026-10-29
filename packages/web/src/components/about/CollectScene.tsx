@@ -136,6 +136,8 @@ function makeDrop(item: ItemDef, i: number): Drop {
   group.add(pillar, model);
   const spot = SPOTS[i];
   group.position.set(spot.x, 0, spot.z);
+  // Popped up by the frame loop when its time comes.
+  group.visible = false;
   return {
     group,
     model,
@@ -197,6 +199,8 @@ export function CollectScene({
       { layoutCols: ISLAND_COLS, layoutRows: SH, anchorScenery: 0 },
     );
     herzie.heading = RUN_HEADING;
+    // Out of sight until it sets off (see the frame loop).
+    herzie.root.visible = false;
     scene.add(herzie.root);
 
     const cam = new THREE.PerspectiveCamera(50, 1, 0.05, 100);
@@ -224,6 +228,9 @@ export function CollectScene({
       camera: cam,
       idle: () => !live.current.active,
       update(dt, w, h) {
+        // Framed even while it holds still: the stage can draw it just off
+        // screen (scrolling with the page, it draws a margin).
+        frameIslandCamera(cam, w, h, live.current.groundInset);
         if (!live.current.active) return;
         if (restart.current) {
           restart.current = false;
@@ -278,8 +285,6 @@ export function CollectScene({
           d.pillar.visible = glow > 0.001;
           d.pillarMaterial.uniforms.uOpacity.value = glow;
         }
-
-        frameIslandCamera(cam, w, h, live.current.groundInset);
       },
     });
     return () => {

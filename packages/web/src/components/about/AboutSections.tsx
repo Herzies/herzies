@@ -7,7 +7,7 @@ import {
   type Equipped,
   type EquippedSlot,
 } from "@herzies/shared";
-import { HerzieView, herzieStage, islandScenery } from "@herzies/shared/gl";
+import { HerzieView, islandScenery } from "@herzies/shared/gl";
 import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { useWide } from "@/components/landing/useWide";
 import { cn } from "@/lib/utils";
@@ -214,19 +214,8 @@ function Wardrobe({ active, size }: { active: boolean; size: number }) {
   );
 }
 
-/** Drawn pixels per CSS pixel here: finer than the stage's usual (1/4), so the
- * islands show finer detail. */
-const PIXEL_SCALE = 1 / 3.5;
-
 export function AboutSections() {
   const wide = useWide();
-  useEffect(() => {
-    const before = herzieStage.pixelScale;
-    herzieStage.pixelScale = PIXEL_SCALE;
-    return () => {
-      herzieStage.pixelScale = before;
-    };
-  }, []);
   const size = wide ? 5.4 : 3.9;
   return (
     <div className="flex flex-col gap-24 md:gap-32">

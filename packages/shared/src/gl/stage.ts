@@ -20,6 +20,10 @@ export type StageView = {
 const MAX_DT = 0.1;
 /** How often (in frames) to look again for the elements that clip a view. */
 const CLIP_REFRESH_FRAMES = 60;
+/** Scrolling with the page (see setHost), the canvas reaches this share of
+ * the screen beyond its top and bottom edges, so what scrolls into view
+ * before the next frame is already drawn. */
+const SCROLL_MARGIN = 0.5;
 
 type Entry = { view: StageView; clips: HTMLElement[]; clipAge: number };
 
@@ -43,6 +47,8 @@ export class HerzieStage {
   pixelScale = 1 / 4;
   private renderer: THREE.WebGLRenderer | null = null;
   private host: HTMLElement | null = null;
+  /** The canvas scrolls with the page, inside `host` (see setHost). */
+  private scrolls = false;
   private entries = new Set<Entry>();
   private raf = 0;
   private last = 0;
@@ -56,11 +62,37 @@ export class HerzieStage {
    * the herzies then sit inside its stacking order, under its overlays, and
    * take its filters.
    */
-  setHost(host: HTMLElement | null) {
+  setHost(host: HTMLElement | null, { scrolls = false } = {}) {
     this.host = host;
+    this.scrolls = !!host && scrolls;
     const c = this.renderer?.domElement;
-    if (c) (host ?? document.body).prepend(c);
+    if (c) {
+      this.place(c);
+      (host ?? document.body).prepend(c);
+    }
     this.lastLayout = "";
+  }
+
+  /**
+   * Fixed over the window; or, with `scrolls` (a page that scrolls the
+   * window, its host a positioned box that clips, covering the page), in
+   * the host, moved over the screen each frame. Fixed, a phone's scrolling
+   * (which runs ahead of the page's script) leaves the herzies a frame
+   * behind the page; in the page, they move with it.
+   */
+  private place(c: HTMLCanvasElement) {
+    Object.assign(
+      c.style,
+      this.scrolls
+        ? { position: "absolute", inset: "auto", left: "0", top: "0" }
+        : {
+            position: "fixed",
+            inset: "0",
+            width: "100vw",
+            height: "100vh",
+            transform: "",
+          },
+    );
   }
 
   /** Draw `view` from now on; returns the function that stops it. */
@@ -86,11 +118,8 @@ export class HerzieStage {
     renderer.shadowMap.type = THREE.PCFShadowMap;
     const c = renderer.domElement;
     c.setAttribute("aria-hidden", "true");
+    this.place(c);
     Object.assign(c.style, {
-      position: "fixed",
-      inset: "0",
-      width: "100vw",
-      height: "100vh",
       pointerEvents: "none",
       // Above the page's own backdrops (a sky), like the herzie canvases it
       // replaces, but under anything stacked up after it.
@@ -152,6 +181,15 @@ export class HerzieStage {
     const renderer = this.ensureRenderer();
     const width = window.innerWidth;
     const height = window.innerHeight;
+    // Scrolling with the page: drawn a margin beyond the screen's top and
+    // bottom, the canvas put over the screen (and its margins) inside the
+    // host.
+    const margin = this.scrolls ? Math.round(height * SCROLL_MARGIN) : 0;
+    const canvasHeight = height + margin * 2;
+    if (this.scrolls && this.host) {
+      const h = this.host.getBoundingClientRect();
+      renderer.domElement.style.transform = `translate(${-h.left}px, ${-h.top - margin}px)`;
+    }
 
     // Where each view lands this frame, and whether it shows at all.
     const drawn: {
@@ -174,9 +212,9 @@ export class HerzieStage {
         entry.clips = clippingAncestors(el);
       }
       let left = Math.max(0, rect.left);
-      let top = Math.max(0, rect.top);
+      let top = Math.max(-margin, rect.top);
       let right = Math.min(width, rect.right);
-      let bottom = Math.min(height, rect.bottom);
+      let bottom = Math.min(height + margin, rect.bottom);
       for (const clip of entry.clips) {
         const c = clip.getBoundingClientRect();
         left = Math.max(left, c.left);
@@ -200,8 +238,15 @@ export class HerzieStage {
     if (renderer.getPixelRatio() !== this.pixelScale)
       renderer.setPixelRatio(this.pixelScale);
     const size = renderer.getSize(new THREE.Vector2());
-    if (size.x !== width || size.y !== height)
-      renderer.setSize(width, height, false);
+    if (size.x !== width || size.y !== canvasHeight)
+      renderer.setSize(width, canvasHeight, false);
+    if (this.scrolls) {
+      const style = renderer.domElement.style;
+      const w = `${width}px`;
+      const h = `${canvasHeight}px`;
+      if (style.width !== w) style.width = w;
+      if (style.height !== h) style.height = h;
+    }
     renderer.setScissorTest(false);
     renderer.clear();
     renderer.setScissorTest(true);
@@ -211,11 +256,16 @@ export class HerzieStage {
       // GL's origin is the bottom left.
       renderer.setViewport(
         rect.left,
-        height - rect.bottom,
+        canvasHeight - margin - rect.bottom,
         rect.width,
         rect.height,
       );
-      renderer.setScissor(left, height - bottom, right - left, bottom - top);
+      renderer.setScissor(
+        left,
+        canvasHeight - margin - bottom,
+        right - left,
+        bottom - top,
+      );
       renderer.render(view.scene, view.camera);
     }
   }

@@ -124,6 +124,8 @@ export function HangOutScene({
       { seed: visitorSeed, stage: 1 },
       { ...look, seed: 2 },
     );
+    // Out of sight until it walks in (see the frame loop).
+    visitor.root.visible = false;
     scene.add(listener.root, visitor.root);
 
     const cam = new THREE.PerspectiveCamera(50, 1, 0.05, 100);
@@ -155,6 +157,9 @@ export function HangOutScene({
       camera: cam,
       idle: () => !live.current.active,
       update(dt, w, h) {
+        // Framed even while it holds still: the stage can draw it just off
+        // screen (scrolling with the page, it draws a margin).
+        frameIslandCamera(cam, w, h, live.current.groundInset);
         if (!live.current.active) return;
         if (restart.current) {
           restart.current = false;
@@ -199,8 +204,6 @@ export function HangOutScene({
         }
         visitor.update(dt, speed);
         listener.update(dt, 0);
-
-        frameIslandCamera(cam, w, h, live.current.groundInset);
 
         // The bubbles: React shows the words; placed here, every frame.
         const now = linesAt(clock);
