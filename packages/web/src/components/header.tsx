@@ -15,6 +15,9 @@ export default async function Header() {
           </div>
 
           <div className="flex gap-4 items-center">
+            <a href="/about" className="text-[13px] text-cyan">
+              about
+            </a>
             <a href="/leaderboard" className="text-[13px] text-yellow">
               leaderboard
             </a>

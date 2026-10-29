@@ -136,6 +136,7 @@ body:has([data-town]) > nav .chrome,
 body:has([data-town]) > footer .chrome {
   --color-purple: #fff;
   --color-yellow: #fff;
+  --color-cyan: #fff;
   border: none;
   background: none;
   backdrop-filter: none;
@@ -350,5 +351,41 @@ body:has([data-town]) > nav .chrome a span {
 @media (max-width: 480px) {
   .leaderboard-herzie {
     display: none;
+  }
+}
+
+/* A page under an open sky (the about page, data-sky): sky blue behind
+   everything, pixel clouds drifting across it (SkyClouds), and the theme's
+   colours darkened so text stays readable on it. */
+html:has([data-sky]) {
+  background: var(--color-sky);
+}
+
+body:has([data-sky]) {
+  background: transparent;
+  --color-text: #1c1c28;
+  --color-text-dim: #4a5a70;
+  --color-purple: #7a2fc0;
+  --color-yellow: #8a5d00;
+  --color-cyan: #1a6584;
+  color: var(--color-text);
+}
+
+@keyframes sky-cloud-drift {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100vw);
+  }
+}
+
+.sky-cloud {
+  animation: sky-cloud-drift linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sky-cloud {
+    animation-play-state: paused;
   }
 }
