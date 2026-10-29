@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Town showcase</title>
+    <style>html, body, #root { margin: 0; height: 100%; background: #000; }</style>
+  </head>
+  <body>
+    <!-- Dev only: the website's live Town. `?server=ws://localhost:8797`
+         watches a local Town server (scripts/local.sh up). -->
+    <div id="root"></div>
+    <script type="module">
+      import { mountTownShowcase } from "./showcase/index.ts";
+
+      const server = new URLSearchParams(location.search).get("server") ?? undefined;
+      mountTownShowcase(document.getElementById("root"), {
+        server,
+        onReady: () => console.log("[showcase] ready"),
+      });
+    </script>
+  </body>
+</html>
