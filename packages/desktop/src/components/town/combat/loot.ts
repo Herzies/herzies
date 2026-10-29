@@ -1,8 +1,4 @@
-import {
-  getItem,
-  type ItemDef,
-  type Rarity,
-} from "@herzies/shared";
+import { getItem, type ItemDef, type Rarity } from "@herzies/shared";
 import { BOSS_STAND } from "@herzies/shared/combat";
 import { ITEM_VOXEL } from "@herzies/shared/gl";
 import type { LootTier } from "../sfx";
