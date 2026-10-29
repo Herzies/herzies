@@ -8,13 +8,17 @@ import {
   BANK_SLOT_COUNT,
   type BankItemLookup,
   BOSS_BONUS_DROPS,
+  BOSS_ONLY_ITEM_IDS,
   bankCapacity,
   bankSlotsUsed,
   bankTiles,
   bestUnitOf,
   bossDamagePerMinute,
   bossLootWeights,
+  DECK_SLOT_GROUPS,
+  DECK_TOTAL_SLOTS,
   DICE_TIERS,
+  EQUIP_SLOT_LABELS,
   EQUIP_SLOTS,
   EQUIPPED_SLOTS,
   equippedItemIds,
@@ -40,6 +44,7 @@ import {
   isModifierEquipped,
   MAX_ITEM_UPGRADE_LEVEL,
   MAX_MODIFIERS,
+  MAX_MOVE_SPEED,
   NON_DROPPABLE_ITEM_IDS,
   normalizeEquipped,
   normalizeUnits,
@@ -59,6 +64,7 @@ import {
   upgradeSuccessChance,
   withStatPoints,
 } from "./items.js";
+import { TOWN_SPRINT_SPEED } from "./town-net.js";
 
 /** A unit with sensible defaults, so a test only states what it cares about. */
 const unit = (
@@ -962,6 +968,7 @@ describe("herzie stats", () => {
       luck: 0,
       critChance: 0,
       critDamage: 0,
+      moveSpeed: 0,
     });
     expect(getHerzieStats(null)).toEqual({
       sonicPower: 0,
@@ -971,6 +978,7 @@ describe("herzie stats", () => {
       luck: 0,
       critChance: 0,
       critDamage: 0,
+      moveSpeed: 0,
     });
   });
 
@@ -1034,6 +1042,7 @@ describe("herzie stats", () => {
       luck: 0,
       critChance: 0,
       critDamage: 0,
+      moveSpeed: 0,
     });
   });
 });
@@ -1351,6 +1360,7 @@ describe("item units", () => {
       luck: 0,
       critChance: 0,
       critDamage: 0,
+      moveSpeed: 0,
     });
     expect(getHerzieStatsFromUnits([unit("a", "boombox", 3)])).toEqual({
       sonicPower: 0,
@@ -1360,6 +1370,7 @@ describe("item units", () => {
       luck: 0,
       critChance: 0,
       critDamage: 0,
+      moveSpeed: 0,
     });
   });
 });
@@ -1620,9 +1631,9 @@ describe("boss loot", () => {
       new URL(`../../../supabase/migrations/${name}`, import.meta.url),
       "utf8",
     );
-  // settle_boss_fight lives in 00114; the roll was last replaced in 00118.
+  // settle_boss_fight lives in 00114; the roll was last replaced in 00124.
   const sql = migration("00114_boss_bonus_loot.sql");
-  const rollSql = migration("00118_boss_loot_no_tokens.sql");
+  const rollSql = migration("00124_cloak_loot.sql");
 
   it("rolls from the same weights as bossLootWeights", () => {
     const roll = rollSql.slice(
@@ -1660,5 +1671,86 @@ describe("boss loot", () => {
         ITEM_DROP_WEIGHT_OVERRIDES[id] ?? RARITY_DROP_WEIGHTS[rarity],
     );
     expect(rareShare((id) => boss.get(id) ?? 0)).toBeGreaterThan(listening);
+  });
+});
+
+describe("cloaks", () => {
+  const CLOAKS = [
+    "troubadour-mantle",
+    "groove-cape",
+    "drumhide-cloak",
+    "tailwind-cloak",
+  ];
+
+  it("has a back slot, single-valued like the spirit", () => {
+    expect(EQUIP_SLOTS).toContain("back");
+    expect(EQUIPPED_SLOTS).toContain("back");
+    expect(EQUIP_SLOT_LABELS.back).toBe("Back");
+    expect(findEquippedSlot({ back: "groove-cape" }, "groove-cape")).toBe(
+      "back",
+    );
+    expect(normalizeEquipped({ back: "groove-cape" }).back).toBe("groove-cape");
+  });
+
+  it("are stage-3 back items, typed as cloaks, with a deck box of their own", () => {
+    for (const id of CLOAKS) {
+      const item = getItem(id);
+      expect(item?.equipSlot).toBe("back");
+      expect(item?.minStage).toBe(3);
+      expect(item?.requiredClass).toBeUndefined();
+      expect(item?.rarity).toBe("legendary");
+      expect(item && getItemType(item)).toBe("cloak");
+    }
+    const group = DECK_SLOT_GROUPS.find((g) => g.label === "Back");
+    expect(group?.slots).toEqual(["back"]);
+    expect(DECK_TOTAL_SLOTS).toBe(17);
+  });
+
+  it("class cloaks come only from bosses; the Tailwind Cloak never drops", () => {
+    const boss = new Set(bossLootWeights().map((w) => w.itemId));
+    for (const id of BOSS_ONLY_ITEM_IDS) {
+      expect(NON_DROPPABLE_ITEM_IDS).toContain(id);
+      expect(boss.has(id)).toBe(true);
+    }
+    expect(NON_DROPPABLE_ITEM_IDS).toContain("tailwind-cloak");
+    expect(boss.has("tailwind-cloak")).toBe(false);
+  });
+
+  it("the Tailwind Cloak adds move speed and can't take a die", () => {
+    const worn: ItemUnit[] = [
+      {
+        id: "c",
+        itemId: "tailwind-cloak",
+        equippedSlot: "back",
+        upgradeLevel: 0,
+      } as ItemUnit,
+      {
+        id: "d",
+        itemId: "power-dice-1",
+        equippedSlot: null,
+        upgradeLevel: 0,
+      } as ItemUnit,
+    ];
+    expect(getHerzieStatsFromUnits(worn).moveSpeed).toBe(8);
+    expect(applyItemUpgrade(worn, "power-dice-1", "c")).toEqual({
+      ok: false,
+      reason: "not-upgradable",
+    });
+    const grooveUnits = worn.map((u) =>
+      u.id === "c" ? { ...u, itemId: "groove-cape" } : u,
+    );
+    expect(applyItemUpgrade(grooveUnits, "power-dice-1", "c").ok).toBe(true);
+  });
+
+  it("caps move speed so a sprint stays inside the Town server's slack", () => {
+    expect(
+      getHerzieStats({ back: "tailwind-cloak" }, { "tailwind-cloak": 50 })
+        .moveSpeed,
+    ).toBe(MAX_MOVE_SPEED);
+    // town-server rules.ts lets a mover cover TOWN_SPRINT_SPEED × 1.5 a
+    // second before it corrects them; the fastest gear must stay under it.
+    expect(TOWN_SPRINT_SPEED * (1 + MAX_MOVE_SPEED / 100)).toBeLessThan(
+      TOWN_SPRINT_SPEED * 1.5,
+    );
   });
 });

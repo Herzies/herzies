@@ -1,4 +1,5 @@
 import {
+  type CloakConfig,
   type CreatureParams,
   type DangleConfig,
   type Equipped,
@@ -41,6 +42,8 @@ interface Props {
   creatureParams?: CreatureParams;
   dangleConfig?: DangleConfig;
   threadConfig?: ThreadConfig;
+  /** How a cloak's cloth moves (sandbox tuning). */
+  cloakConfig?: CloakConfig;
   showSky?: boolean;
   draggable?: boolean;
   /** Pause animation regardless of window visibility (e.g. tab hidden). */
@@ -74,6 +77,7 @@ export function HerzieWithSky({
   creatureParams,
   dangleConfig,
   threadConfig,
+  cloakConfig,
   showSky: showSkyProp = true,
   draggable,
   paused: pausedProp = false,
@@ -189,6 +193,7 @@ export function HerzieWithSky({
         creatureParams={creatureParams}
         dangleConfig={dangleConfig}
         threadConfig={threadConfig}
+        cloakConfig={cloakConfig}
         draggable={draggable}
         paused={paused}
         groundInset={grounded ? groundInsetFor(size) : undefined}

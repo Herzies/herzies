@@ -48,6 +48,16 @@ describe("sprinting", () => {
     expect(speed(sprint)).toBeGreaterThan(speed(walk) * 1.2);
   });
 
+  it("goes faster in gear that gives move speed (the Tailwind Cloak)", () => {
+    const fast = mover();
+    for (let t = 0; t < 2; t += DT)
+      stepMover(fast, { ...idle(), forward: true, sprint: true }, 0, DT, 1.08);
+    expect(Math.hypot(fast.vx, fast.vz)).toBeCloseTo(
+      TOWN_SPRINT_SPEED * 1.08,
+      1,
+    );
+  });
+
   it("Shift alone goes nowhere, and diagonals aren't faster", () => {
     const still = mover();
     run(still, { sprint: true }, 0, 1);

@@ -20,6 +20,7 @@ import { type Group, Vector3 } from "three";
 import { ambient } from "./ambient";
 import { SEAT_Y } from "./Benches";
 import { BUBBLE_RANGE, type ChatBubble, type ChatBubbles } from "./chatBubbles";
+import { clothDetailAt } from "./clothDetail";
 import { liveDummies } from "./combat/Dummies";
 import {
   DISC_ARM,
@@ -138,7 +139,7 @@ function RemoteHerzie({
   const downed = useRef(0);
   const hand = useMemo(() => new Vector3(), []);
 
-  useFrame((_, dt) => {
+  useFrame(({ camera }, dt) => {
     const s = remote.buffer.sample(net.clock.renderTime(performance.now()));
     if (!s) return;
     herzie.root.visible = true;
@@ -186,6 +187,9 @@ function RemoteHerzie({
       }
     }
     herzie.castRate = attackSpeedOf(remote.id, performance.now());
+    herzie.clothDetail = clothDetailAt(
+      camera.position.distanceTo(herzie.root.position),
+    );
     herzie.update(dt, s.speed);
     if (herzie.released && throwsDiscs) {
       // Never waiting on our idea of their catch: a disc of theirs still

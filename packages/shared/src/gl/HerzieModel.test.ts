@@ -737,3 +737,197 @@ describe("HerzieModel jump", () => {
     expect(h.airborne).toBe(false);
   });
 });
+
+describe("cloaks", () => {
+  const CLOAKED = {
+    seed: "model-test",
+    stage: 3,
+    equipped: { back: "troubadour-mantle" },
+  };
+  /** The cloak's mesh (the one drawn both sides). */
+  const cloakMesh = (h: HerzieModel) => {
+    let found: THREE.Mesh | null = null;
+    h.root.traverse((o) => {
+      if (
+        o instanceof THREE.Mesh &&
+        o.material instanceof THREE.ShaderMaterial &&
+        o.material.side === THREE.DoubleSide
+      )
+        found = o;
+    });
+    return found as THREE.Mesh | null;
+  };
+  /** The middle of its hem, in the world. */
+  const hem = (h: HerzieModel) => {
+    const mesh = cloakMesh(h);
+    if (!mesh) throw new Error("no cloak");
+    const pos = mesh.geometry.attributes.position;
+    const uv = mesh.geometry.attributes.uv;
+    let at = 0;
+    let best = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < uv.count; i++) {
+      const d = Math.abs(uv.getX(i) - 0.5) + Math.abs(uv.getY(i) - 1);
+      if (d < best) {
+        best = d;
+        at = i;
+      }
+    }
+    h.root.updateMatrixWorld(true);
+    return mesh.localToWorld(
+      new THREE.Vector3(pos.getX(at), pos.getY(at), pos.getZ(at)),
+    );
+  };
+
+  it("is worn only at stage 3, with a cloak on its back", () => {
+    expect(cloakMesh(new HerzieModel(CLOAKED))).not.toBeNull();
+    expect(new HerzieModel(CLOAKED).hasCloak).toBe(true);
+    expect(new HerzieModel({ ...CLOAKED, stage: 2 }).hasCloak).toBe(false);
+    expect(new HerzieModel(LOOK).hasCloak).toBe(false);
+  });
+
+  it("hangs down its back, and trails behind as it walks", () => {
+    const h = new HerzieModel(CLOAKED);
+    const still = hem(h);
+    // Behind it (heading 0 faces +z), below the head.
+    expect(still.z).toBeLessThan(0);
+    expect(still.y).toBeLessThan(h.height * 0.6);
+    for (let t = 0; t < 1.5; t += 1 / 60) {
+      h.root.position.z += WALK_SPEED / 60;
+      h.update(1 / 60, WALK_SPEED);
+    }
+    expect(hem(h).z - h.root.position.z).toBeLessThan(still.z - 0.1);
+  });
+
+  it("floats up through a hop and flops back down on landing", () => {
+    const h = new HerzieModel(CLOAKED);
+    for (let t = 0; t < 1; t += 1 / 60) h.update(1 / 60, 0);
+    // Its hem's height in the body's own frame (creature space: y down),
+    // which hops and stretches with it.
+    const lift = () => {
+      const mesh = cloakMesh(h) as THREE.Mesh;
+      return -(mesh.parent as THREE.Object3D).worldToLocal(hem(h)).y;
+    };
+    const rest = lift();
+    h.jump();
+    // Already floating by the top of the hop, not only once it's landed.
+    for (let t = 0; t < JUMP_AIR_SECONDS * 0.6; t += 1 / 60) h.update(1 / 60, 0);
+    expect(lift() - rest).toBeGreaterThan(0.025);
+    let peak = 0;
+    while (h.airborne) {
+      h.update(1 / 60, 0);
+      peak = Math.max(peak, lift() - rest);
+    }
+    for (let t = 0; t < 1.5; t += 1 / 60) h.update(1 / 60, 0);
+    expect(Math.abs(lift() - rest)).toBeLessThan(peak * 0.4);
+  });
+
+  it("isn't flung up by its own attacks", () => {
+    for (const style of ["cast", "bump"] as const) {
+      const h = new HerzieModel({
+        ...CLOAKED,
+        equipped: { ...CLOAKED.equipped, main_hand: "lute" },
+      });
+      for (let t = 0; t < 1; t += 1 / 60) h.update(1 / 60, 0);
+      // Its hem, in the body's own frame (y down).
+      const lift = () => {
+        const mesh = cloakMesh(h) as THREE.Mesh;
+        return -(mesh.parent as THREE.Object3D).worldToLocal(hem(h)).y;
+      };
+      const rest = lift();
+      h.cast(0, { style });
+      let most = 0;
+      for (let t = 0; t < 1.5; t += 1 / 60) {
+        h.update(1 / 60, 0);
+        most = Math.max(most, lift() - rest);
+      }
+      // A bump once threw it up over its shoulders (1.9).
+      expect(most, style).toBeLessThan(0.3);
+    }
+  });
+
+  it("isn't lifted at its sides by the hand reaching over for its gear", () => {
+    const h = new HerzieModel({
+      ...CLOAKED,
+      equipped: { ...CLOAKED.equipped, main_hand: "worn-stick" },
+    });
+    for (let t = 0; t < 1; t += 1 / 60) h.update(1 / 60, 0);
+    // How high its side edges' lower halves are, highest, in the body's
+    // own frame (y down).
+    const sides = () => {
+      const mesh = cloakMesh(h) as THREE.Mesh;
+      const pos = mesh.geometry.attributes.position;
+      const uv = mesh.geometry.attributes.uv;
+      let top = Number.POSITIVE_INFINITY;
+      for (let i = 0; i < uv.count; i++) {
+        const u = uv.getX(i);
+        if (uv.getY(i) > 0.5 && (u < 0.02 || u > 0.98))
+          top = Math.min(top, pos.getY(i));
+      }
+      return -top;
+    };
+    const rest = sides();
+    // Drawn for a cast, and put away again after.
+    h.cast(0);
+    let most = 0;
+    for (let t = 0; t < 2; t += 1 / 60) {
+      h.update(1 / 60, 0);
+      most = Math.max(most, sides() - rest);
+    }
+    expect(most).toBeLessThan(0.15);
+  });
+
+  it("settles, so a still view can stop drawing", () => {
+    const h = new HerzieModel(CLOAKED);
+    // As a paused view steps it: the rest held still, the swing let run.
+    const paused = () => {
+      h.swing(1 / 60);
+      h.update(0, 0);
+    };
+    for (let t = 0; t < 2; t += 1 / 60) paused();
+    expect(h.dangleSettled).toBe(true);
+    h.heading += 1;
+    h.swing(1 / 60);
+    expect(h.dangleSettled).toBe(false);
+  });
+
+  it("slings class gear on top of it", () => {
+    const gear = { main_hand: "lute" };
+    const lute = (equipped: Record<string, string>) => {
+      const { spheres } = buildCreatureModel("model-test", 3, equipped);
+      const body = spheres.find((s) => s.part === "body") as Sphere;
+      const held = spheres.filter((s) => s.held);
+      return Math.max(
+        ...held.map((s) =>
+          Math.hypot(...s.center.map((v, k) => v - body.center[k])),
+        ),
+      );
+    };
+    expect(lute({ ...gear, back: "groove-cape" })).toBeGreaterThan(
+      lute(gear) + 0.05,
+    );
+  });
+
+  it("is bounded where it can swing, and freed with the model", () => {
+    const h = new HerzieModel(CLOAKED);
+    const plain = new HerzieModel(LOOK);
+    expect(h.bounds.radius).toBeGreaterThan(plain.bounds.radius);
+    const mesh = cloakMesh(h);
+    let disposed = false;
+    mesh?.geometry.addEventListener("dispose", () => {
+      disposed = true;
+    });
+    h.dispose();
+    expect(disposed).toBe(true);
+  });
+
+  it("is greyed and petrified with the rest of it", () => {
+    const h = new HerzieModel(CLOAKED);
+    const material = cloakMesh(h)?.material as THREE.ShaderMaterial;
+    const before = (
+      material.uniforms.uLining.value as THREE.Color[]
+    )[1].clone();
+    h.petrify();
+    const after = (material.uniforms.uLining.value as THREE.Color[])[1];
+    expect(after.equals(before)).toBe(false);
+  });
+});

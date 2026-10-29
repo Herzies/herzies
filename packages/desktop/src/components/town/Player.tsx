@@ -1,3 +1,4 @@
+import { getHerzieStats } from "@herzies/shared";
 import { HerzieModel } from "@herzies/shared/gl";
 import { Html } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
@@ -111,6 +112,13 @@ export function Player({
   const walkAz = useRef<number | null>(null);
 
   const equippedKey = JSON.stringify(look.equipped ?? null);
+  // Its gear's move speed (the Tailwind Cloak): no die can raise it
+  // (noUpgrade), so the catalog's number off `equipped` is the whole of it.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the look's content
+  const speedScale = useMemo(
+    () => 1 + getHerzieStats(look.equipped).moveSpeed / 100,
+    [equippedKey],
+  );
   // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the look's content
   const herzie = useMemo(
     () => new HerzieModel(look, { lighting: ambient }),
@@ -219,7 +227,7 @@ export function Player({
     townLive.standUp = false;
     walkAz.current = walkAzimuth(walkAz.current, rt.cameraAzimuth, input);
     m.heading = herzie.heading;
-    stepMover(m, input, walkAz.current, dt);
+    stepMover(m, input, walkAz.current, dt, speedScale);
     herzie.heading = m.heading;
 
     kcc.computeColliderMovement(col, {

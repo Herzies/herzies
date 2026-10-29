@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import * as THREE from "three";
+import type { CloakConfig } from "../cloak-physics.js";
 import {
   type CreatureParams,
   DEFAULT_CAMERA_DISTANCE,
@@ -86,6 +87,8 @@ export type HerzieViewProps = {
   dangleConfig?: DangleConfig;
   /** How gear hung on threads (the discs) swings. */
   threadConfig?: ThreadConfig;
+  /** How its cloak's cloth moves, instead of its cloak's own (sandbox). */
+  cloakConfig?: CloakConfig;
   /** Drag to turn it, with momentum. Default: true. */
   draggable?: boolean;
   /** Turns on its own this fast (radians a second), while not paused or
@@ -150,6 +153,7 @@ export function HerzieView({
   creatureParams,
   dangleConfig = DEFAULT_DANGLE_CONFIG,
   threadConfig = DEFAULT_THREAD_CONFIG,
+  cloakConfig,
   draggable = true,
   spin: spinSpeed = 0,
   paused = false,
@@ -204,6 +208,7 @@ export function HerzieView({
     dangles: false,
     dangleConfig,
     threadConfig,
+    cloakConfig,
     grey,
     opacity,
     armed,
@@ -221,6 +226,7 @@ export function HerzieView({
     dangles: draggable,
     dangleConfig,
     threadConfig,
+    cloakConfig,
     grey,
     opacity,
     armed,
@@ -312,6 +318,7 @@ export function HerzieView({
         model.dangles = l.dangles;
         model.dangleConfig = l.dangleConfig;
         model.threadConfig = l.threadConfig;
+        model.cloakConfig = l.cloakConfig ?? null;
         if (!l.paused) model.update(dt, 0);
         else {
           model.swing(dt);

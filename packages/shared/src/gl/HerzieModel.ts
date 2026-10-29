@@ -1,5 +1,31 @@
 import * as THREE from "three";
 import {
+  buildCloakRig,
+  CLOAK_SUBSTEP,
+  type CloakColliders,
+  type CloakConfig,
+  type CloakRig,
+  type CloakSim,
+  type V3 as CloakV3,
+  carryCloak,
+  cloakNormals,
+  cloakSurface,
+  createCloakSim,
+  isCloakSettled,
+  pushOutOfColliders,
+  resetCloak,
+  settleCloak,
+  stepCloak,
+} from "../cloak-physics.js";
+import {
+  CLOTH_FINISH,
+  type CloakStyle,
+  cloakBodyOf,
+  cloakColliderParts,
+  cloakColliders,
+  cloakStyleFor,
+} from "../cloaks.js";
+import {
   buildCreatureModel,
   CAST,
   CAST_ARM,
@@ -146,6 +172,29 @@ export const SHEATHE_DELAY = 0.25;
 const THREAD_JUMP_SPEED = 60;
 /** Time constant (s) its velocity is smoothed over for the threads. */
 const THREAD_SMOOTHING = 0.12;
+/** Time constant (s) of the cloak's sense of its rise and fall: short, so
+ * it floats through a hop and flops on landing (see stepCloak). */
+const CLOAK_LIFT_SMOOTHING = 0.04;
+/** How long (s) a cloaked herzie's arms take to tuck away from the cloth
+ * as a hand reaches back for its gear, and to come back out (reachingOver). */
+const ARM_TUCK_IN = 0.05;
+const ARM_TUCK_OUT = 0.6;
+/** How many drawn points a cloak's particle span is smoothed into
+ * (cloakSurface). */
+const CLOAK_SMOOTHING = 3;
+/** How far the drawn cloth keeps off the body (creature units): under the
+ * particles' own margin, so the push only catches what falls between. */
+const CLOAK_DRAWN_MARGIN = 0.02;
+/** A cloak's settled drape, by body and cloak: every herzie of a shape
+ * shares one, so the Town can build a crowd without settling each. */
+const settledCloaks = new Map<
+  string,
+  { rest: Float32Array; drape: Float32Array }
+>();
+
+/** How much a cloak is simulated (see HerzieModel.clothDetail). */
+export type ClothDetail = "full" | "half" | "frozen";
+
 /** A herzie with no arms (stage 1) grows a little hand to cast with: this
  * big, as a fraction of its head. */
 const POP_HAND = 0.3;
@@ -302,6 +351,86 @@ function domedCylinder(r: number, h: number, dome: number) {
   return new THREE.LatheGeometry(profile, 24);
 }
 
+/** A worn cloak: its cloth and what draws it. */
+type CloakRun = {
+  style: CloakStyle;
+  rig: CloakRig;
+  sim: CloakSim;
+  /** The parts its cloth touches, and its head and torso, by index. */
+  parts: number[];
+  headAt: number;
+  bodyAt: number;
+  colliders: CloakColliders;
+  /** The same at the arms' full size, as they're drawn: what the drawn
+   * cloth is kept out of. */
+  drawnColliders: CloakColliders;
+  mesh: THREE.Mesh;
+  geometry: THREE.BufferGeometry;
+  /** The drawn surface (the geometry's positions), the smoothing's scratch,
+   * and its normals; `width` × `height` points. */
+  surface: Float32Array;
+  scratch: Float32Array;
+  normals: Float32Array;
+  width: number;
+  height: number;
+  clasps: THREE.Mesh[];
+  /** Which of the body's parts are its legs and arms (see
+   * cloakCollidersNow, reachingOver). */
+  legs: ReadonlySet<number>;
+  arms: ReadonlySet<number>;
+  /** How far the arms are tucked away from the cloth, 0 to 1 (see
+   * reachingOver): in quickly as a hand reaches back, out slowly after —
+   * the cloth has hung into where they were, and is eased back aside. */
+  tuck: number;
+  /** Its body in the world last frame, and how fast it was going. */
+  lastWorld: THREE.Vector3 | null;
+  worldVelocity: THREE.Vector3;
+};
+
+/** Cuts `style`'s cloak for this body and hangs it where it settles (one
+ * settling per body and cloak, shared). Null without a torso and head. */
+function cutCloak(style: CloakStyle, spheres: Sphere[], feetY: number) {
+  const found = cloakBodyOf(spheres, feetY);
+  if (!found) return null;
+  const { cloakBody, headAt, bodyAt } = found;
+  const parts = cloakColliderParts(spheres);
+  const rig = buildCloakRig(style.shape, cloakBody);
+  // Keyed on the body's shape, measured from its torso: herzies differ by
+  // where the frame centres them far more often than by shape.
+  const origin = spheres[bodyAt].center;
+  const k = (n: number) => n.toFixed(3);
+  const key = [
+    JSON.stringify(style.shape),
+    JSON.stringify(style.config),
+    k(feetY - origin[1]),
+    ...parts.map((i) => {
+      const s = spheres[i];
+      const at = s.center.map((v, j) => k(v - origin[j])).join(",");
+      return `${s.part}:${at}:${k(s.radius)}`;
+    }),
+  ].join("|");
+  let settled = settledCloaks.get(key);
+  if (!settled) {
+    const atRest = cloakColliders(
+      spheres,
+      parts,
+      headAt,
+      bodyAt,
+      (i) => spheres[i].center as CloakV3,
+    );
+    settleCloak(rig, atRest, feetY, style.config);
+    const rest = rig.rest.slice();
+    for (let i = 0; i < rest.length; i++) rest[i] -= origin[i % 3];
+    settled = { rest, drape: rig.drape.slice() };
+    settledCloaks.set(key, settled);
+  }
+  for (let i = 0; i < rig.rest.length; i++) {
+    rig.rest[i] = settled.rest[i] + origin[i % 3];
+  }
+  rig.drape.set(settled.drape);
+  return { rig, parts, headAt, bodyAt };
+}
+
 /**
  * Moves a floating companion (a spirit, a pet) to hover beside the herzie,
  * clear of its body. The renderer places one in front of the herzie at the
@@ -443,6 +572,13 @@ export class HerzieModel {
   dangleConfig: DangleConfig = DEFAULT_DANGLE_CONFIG;
   /** How gear hung on threads (the discs) swings. */
   threadConfig: ThreadConfig = DEFAULT_THREAD_CONFIG;
+  /** How much its cloak is simulated: "full"; "half" the substeps (far
+   * off); or "frozen", carried on its drape (out of sight, a statue). The
+   * Town sets it by distance. */
+  clothDetail: ClothDetail = "full";
+  /** How its cloak's cloth moves, instead of the cloak's own (a tuning
+   * sandbox); null for the cloak's. */
+  cloakConfig: CloakConfig | null = null;
   /** How far it's swung (see dangle-physics); undefined at rest. */
   private dangle: DangleState | undefined;
   private dangleSim: DangleSim | null = null;
@@ -505,6 +641,8 @@ export class HerzieModel {
    * (smoothed): what accelerating it swings the threads by. */
   private lastWorld: THREE.Vector3 | null = null;
   private worldVelocity = new THREE.Vector3();
+  /** Its cloak, simulated (see cloak-physics.ts); null without one. */
+  private readonly cloak: CloakRun | null = null;
   /** For a herzie with no arms: the hand it grows to cast with, beside its
    * head, and where on the head it grows from. */
   private readonly popHand: {
@@ -584,6 +722,9 @@ export class HerzieModel {
     this.height = (feet - top) * MODEL_SCALE;
     this.centerHeight = feet * MODEL_SCALE;
     this.span = schemeSpan(spheres);
+    // A cloak, on a herzie with a back to hang it from.
+    const cloakStyle = look.stage >= 3 ? cloakStyleFor(look.equipped) : null;
+    const cloakRig = cloakStyle ? cutCloak(cloakStyle, spheres, feet) : null;
     // Class gear rests on its back, but swings out and reaches further
     // drawn: bound it all the way through the draw.
     const drawing: Sphere[] = [];
@@ -615,6 +756,28 @@ export class HerzieModel {
         shape: undefined,
         center: thread.rig.knot,
         radius: run + s.radius + across,
+      });
+    }
+    // A cloak can swing anywhere its length lets it, round its collar.
+    if (cloakRig) {
+      const { rig } = cloakRig;
+      const mid = (rig.cols >> 1) * 3;
+      let reachOut = 0;
+      for (let i = 0; i < rig.n; i++) {
+        reachOut = Math.max(
+          reachOut,
+          Math.hypot(
+            rig.rest[i * 3] - rig.rest[mid],
+            rig.rest[i * 3 + 1] - rig.rest[mid + 1],
+            rig.rest[i * 3 + 2] - rig.rest[mid + 2],
+          ),
+        );
+      }
+      drawing.push({
+        center: [rig.rest[mid], rig.rest[mid + 1], rig.rest[mid + 2]],
+        radius: reachOut,
+        zone: "wearable",
+        part: "cloak",
       });
     }
     this.bounds = turnBounds([...spheres, ...drawing], feet);
@@ -740,6 +903,11 @@ export class HerzieModel {
       this.creature.add(mesh);
       this.popHand = { mesh, head, radius: head.radius * POP_HAND };
     }
+    if (cloakStyle && cloakRig) {
+      this.cloak = this.dressCloak(cloakStyle, cloakRig, options.lighting);
+      this.creature.add(this.cloak.mesh);
+      for (const clasp of this.cloak.clasps) this.creature.add(clasp);
+    }
     this.creature.rotation.x = Math.PI;
     this.turn.add(this.creature);
     this.root.add(this.turn);
@@ -752,6 +920,7 @@ export class HerzieModel {
     }
     this.pose();
     this.animateBody();
+    this.drawCloak();
   }
 
   /** Cast a sonic wave from its hand, aimed `pitch` radians above level:
@@ -898,6 +1067,7 @@ export class HerzieModel {
     this.turn.rotation.y = this.heading;
     this.pose();
     this.animateBody();
+    this.drawCloak();
     this.follow(dt, speed);
   }
 
@@ -1026,6 +1196,7 @@ export class HerzieModel {
     this.lastHeading = this.heading;
     this.bodyAngle -= turned;
     this.stepThreads(dt, turned);
+    this.stepCloak(dt, turned);
     if (!this.dangles || !this.canDangle) {
       this.dangleSim = null;
       this.dangle = undefined;
@@ -1104,8 +1275,309 @@ export class HerzieModel {
   get dangleSettled(): boolean {
     return (
       this.dangleSim === null &&
-      (!this.threads || isThreadSettled(this.threads.sim))
+      (!this.threads || isThreadSettled(this.threads.sim)) &&
+      (!this.cloak ||
+        this.clothDetail === "frozen" ||
+        isCloakSettled(this.cloak.sim))
     );
+  }
+
+  /** Whether it wears a cloak. */
+  get hasCloak(): boolean {
+    return this.cloak !== null;
+  }
+
+  /** Builds its cloak's cloth, mesh and brooches. */
+  private dressCloak(
+    style: CloakStyle,
+    cut: { rig: CloakRig; parts: number[]; headAt: number; bodyAt: number },
+    lighting: HerzieLighting | undefined,
+  ): CloakRun {
+    const { rig } = cut;
+    const { spheres, colors } = this.model;
+    const sim = createCloakSim(rig);
+    // Where gear is slung on its back, the cloak is strapped down under it.
+    for (const s of spheres) {
+      if (!s.held) continue;
+      const reachOf = s.radius + (s.shape ? Math.hypot(...s.shape.axis) : 0);
+      for (let i = rig.cols; i < rig.n; i++) {
+        const d =
+          Math.hypot(
+            rig.rest[i * 3] - s.center[0],
+            rig.rest[i * 3 + 1] - s.center[1],
+            rig.rest[i * 3 + 2] - s.center[2],
+          ) - reachOf;
+        const w = Math.max(0, Math.min(1, 1 - (d - 0.05) / 0.3));
+        sim.strap[i] = Math.max(sim.strap[i], w);
+      }
+    }
+    const sub = CLOAK_SMOOTHING;
+    const w = (rig.cols - 1) * sub + 1;
+    const h = (rig.rows - 1) * sub + 1;
+    const surface = new Float32Array(w * h * 3);
+    const normals = new Float32Array(w * h * 3);
+    const uvs = new Float32Array(w * h * 2);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        uvs[(y * w + x) * 2] = x / (w - 1);
+        uvs[(y * w + x) * 2 + 1] = y / (h - 1);
+      }
+    }
+    // Two triangles a cell, wound so their front is the cloak's outside.
+    const index: number[] = [];
+    for (let y = 0; y < h - 1; y++) {
+      for (let x = 0; x < w - 1; x++) {
+        const a = y * w + x;
+        const b = a + 1;
+        const c = a + w;
+        const d = c + 1;
+        if (rig.outward > 0) index.push(a, b, c, b, d, c);
+        else index.push(a, c, b, b, c, d);
+      }
+    }
+    const geometry = new THREE.BufferGeometry();
+    const position = new THREE.BufferAttribute(surface, 3);
+    position.setUsage(THREE.DynamicDrawUsage);
+    const normal = new THREE.BufferAttribute(normals, 3);
+    normal.setUsage(THREE.DynamicDrawUsage);
+    geometry.setAttribute("position", position);
+    geometry.setAttribute("normal", normal);
+    geometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+    geometry.setIndex(index);
+    const shadesOf = (hex: string) =>
+      primitiveShading({ zone: "wearable", color: hex }, colors).shades;
+    const material = herzieMaterial(
+      primitiveShading({ zone: "wearable", color: style.outer }, colors),
+      0,
+      null,
+      this.scheme,
+      lighting,
+      1,
+      {
+        lining: shadesOf(style.lining),
+        trim: shadesOf(style.trim),
+        finish: CLOTH_FINISH[style.finish],
+        hemTrim: style.hemTrim,
+        collarTrim: style.collarTrim,
+      },
+    );
+    this.materials.push(material);
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    // It swings out of any box worked out once: drawn whatever.
+    mesh.frustumCulled = false;
+    const claspMaterial = herzieMaterial(
+      primitiveShading(
+        { zone: "wearable", color: style.clasp, finish: "metal" },
+        colors,
+      ),
+      0,
+      null,
+      this.scheme,
+      lighting,
+      0.07,
+    );
+    this.materials.push(claspMaterial);
+    const clasps = [0, rig.cols - 1].map(() => {
+      const m = new THREE.Mesh(UNIT_SPHERE, claspMaterial);
+      m.scale.setScalar(0.075);
+      m.castShadow = true;
+      return m;
+    });
+    return {
+      style,
+      rig,
+      sim,
+      parts: cut.parts,
+      headAt: cut.headAt,
+      bodyAt: cut.bodyAt,
+      colliders: new Float32Array(0),
+      drawnColliders: new Float32Array(0),
+      mesh,
+      geometry,
+      surface,
+      scratch: new Float32Array(rig.rows * w * 3),
+      normals,
+      width: w,
+      height: h,
+      clasps,
+      legs: new Set(
+        cut.parts.filter((i) => spheres[i].part.startsWith("leg")),
+      ),
+      arms: new Set(
+        cut.parts.filter((i) => spheres[i].part.startsWith("arm")),
+      ),
+      tuck: 0,
+      lastWorld: null,
+      worldVelocity: new THREE.Vector3(),
+    };
+  }
+
+  /** The body's colliders as it's posed now (its meshes' places). */
+  private cloakCollidersNow(run: CloakRun): CloakColliders {
+    run.colliders = cloakColliders(
+      this.model.spheres,
+      run.parts,
+      run.headAt,
+      run.bodyAt,
+      (i) => {
+        const p = this.meshes[i].position;
+        // The legs, to the cloth, keep under the torso as it leans and
+        // lunges (a bump throws it most of a leg's length ahead of them):
+        // left behind, they'd shove the hem it carries up its back. Drawn,
+        // the cloth still keeps out of them where they are (drawCloak).
+        if (run.legs.has(i)) {
+          const o = this.torsoOffsetOf(run);
+          return [p.x + o[0], p.y, p.z + o[2]];
+        }
+        return this.reachingOver(run, i, p);
+      },
+      run.colliders,
+    );
+    return run.colliders;
+  }
+
+  /** Where arm `i` is to the cloth: where it is, but tucked into the torso
+   * while it reaches over its shoulder for the gear on its back (drawing
+   * or putting it away). The gear's slung over the cloak, so the hand goes
+   * over the cloth, not under it to lift it. */
+  private reachingOver(run: CloakRun, i: number, p: THREE.Vector3): CloakV3 {
+    const k = run.tuck;
+    if (!run.arms.has(i) || k <= 0) return [p.x, p.y, p.z];
+    const b = this.meshes[run.bodyAt].position;
+    return [
+      p.x + (b.x - p.x) * k,
+      p.y + (b.y - p.y) * k,
+      p.z + (b.z - p.z) * k,
+    ];
+  }
+
+  /** Swings its cloak with how it moved this frame: across the world (from
+   * where its body is — so a jump counts) and round (`turned`). */
+  private stepCloak(dt: number, turned: number) {
+    const run = this.cloak;
+    if (!run || !(dt > 0)) return;
+    this.creature.updateWorldMatrix(true, false);
+    const now = this.creature.getWorldPosition(new THREE.Vector3());
+    const scale = this.root.getWorldScale(scratchScale).y * MODEL_SCALE;
+    let accel = new THREE.Vector3();
+    let jumped = false;
+    if (run.lastWorld) {
+      const velocity = now.clone().sub(run.lastWorld).divideScalar(dt);
+      if (velocity.length() > THREAD_JUMP_SPEED) {
+        run.worldVelocity.set(0, 0, 0);
+        jumped = true;
+      } else {
+        const before = run.worldVelocity.clone();
+        const v = run.worldVelocity;
+        // Across the ground, smoothed as the threads are. Up and down,
+        // barely: a hop is over in a third of a second, and smoothed like
+        // that the cloth would feel its fall only once it had landed.
+        const across = 1 - Math.exp(-dt / THREAD_SMOOTHING);
+        const up = 1 - Math.exp(-dt / CLOAK_LIFT_SMOOTHING);
+        v.x += (velocity.x - v.x) * across;
+        v.y += (velocity.y - v.y) * up;
+        v.z += (velocity.z - v.z) * across;
+        accel = v.clone().sub(before).divideScalar(dt);
+      }
+    }
+    run.lastWorld = now;
+    const reaching = this.drawPhase > 0 && this.drawPhase < 1;
+    run.tuck = reaching
+      ? Math.min(1, run.tuck + dt / ARM_TUCK_IN)
+      : Math.max(0, run.tuck - dt / ARM_TUCK_OUT);
+    const offset = this.torsoOffsetOf(run);
+    if (jumped) {
+      // A portal, a respawn: it arrives hanging still.
+      resetCloak(run.sim, run.rig, offset);
+      return;
+    }
+    if (this.clothDetail === "frozen") {
+      carryCloak(run.sim, run.rig, offset);
+      return;
+    }
+    const c = Math.cos(this.heading);
+    const sn = Math.sin(this.heading);
+    const toCreature = (v: THREE.Vector3): CloakV3 => [
+      (c * v.x - sn * v.z) / scale,
+      -v.y / scale,
+      -(sn * v.x + c * v.z) / scale,
+    ];
+    stepCloak(
+      run.sim,
+      run.rig,
+      dt,
+      {
+        offset,
+        accel: toCreature(accel),
+        velocity: toCreature(run.worldVelocity),
+        turnRate: -turned / dt,
+        colliders: this.cloakCollidersNow(run),
+        ground: this.cloakGround(),
+        // Gear on its back holds the cloak down, till it's drawn.
+        strap: 1 - this.drawPhase,
+      },
+      this.cloakConfig ?? run.style.config,
+      this.clothDetail === "half" ? CLOAK_SUBSTEP * 2 : CLOAK_SUBSTEP,
+    );
+  }
+
+  /** How far the pose has moved its torso from rest. */
+  private torsoOffsetOf(run: CloakRun): CloakV3 {
+    const p = this.meshes[run.bodyAt].position;
+    const c = this.model.spheres[run.bodyAt].center;
+    return [p.x - c[0], p.y - c[1], p.z - c[2]];
+  }
+
+  /** The ground under it, in creature space: nearer seated, further off
+   * mid-jump. */
+  private cloakGround(): number {
+    const tall = this.creature.scale.y || MODEL_SCALE;
+    return this.feetY - this.seatDrop * this.sitWeight + this.jumpHeight / tall;
+  }
+
+  /** Draws its cloak where its cloth is: smoothed, then pushed out of the
+   * body as it's posed now, so nothing between the particles shows
+   * through. */
+  private drawCloak() {
+    const run = this.cloak;
+    if (!run) return;
+    const { rig, sim } = run;
+    cloakSurface(
+      sim.pos,
+      rig.cols,
+      rig.rows,
+      CLOAK_SMOOTHING,
+      run.surface,
+      run.scratch,
+    );
+    run.drawnColliders = cloakColliders(
+      this.model.spheres,
+      run.parts,
+      run.headAt,
+      run.bodyAt,
+      (i) => this.reachingOver(run, i, this.meshes[i].position),
+      run.drawnColliders,
+      1,
+    );
+    // Frozen (far off, or stone), it hangs where it settled, clear of the
+    // body already: not worth the push.
+    if (this.clothDetail !== "frozen") {
+      pushOutOfColliders(run.surface, run.drawnColliders, CLOAK_DRAWN_MARGIN);
+    }
+    cloakNormals(run.surface, run.width, run.height, rig.outward, run.normals);
+    const { position, normal } = run.geometry.attributes;
+    position.needsUpdate = true;
+    normal.needsUpdate = true;
+    // The brooches, at the collar's ends.
+    [0, rig.cols - 1].forEach((c, k) => {
+      run.clasps[k].position.set(
+        sim.pos[c * 3],
+        sim.pos[c * 3 + 1],
+        sim.pos[c * 3 + 2],
+      );
+    });
   }
 
   private stepDance(dt: number) {
@@ -1420,7 +1892,8 @@ export class HerzieModel {
   petrify(): void {
     const stone = new THREE.Color("#b6b1a7");
     for (const m of this.materials) {
-      for (const name of ["uShades", "uRamp"] as const) {
+      for (const name of ["uShades", "uRamp", "uLining", "uTrim"] as const) {
+        if (!m.uniforms[name]) continue;
         for (const c of m.uniforms[name].value as THREE.Color[]) {
           const l = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
           c.copy(stone).multiplyScalar(0.4 + 0.75 * Math.sqrt(l));
@@ -1431,5 +1904,7 @@ export class HerzieModel {
 
   dispose() {
     for (const m of this.materials) m.dispose();
+    // Its own, unlike the shared part geometries.
+    this.cloak?.geometry.dispose();
   }
 }

@@ -60,6 +60,8 @@ function Statue({
     const h = new HerzieModel(champion.look, { lighting: ambient });
     h.petrify();
     h.heading = heading;
+    // Stone: its cloak hangs as it settled, for good.
+    h.clothDetail = "frozen";
     return h;
   }, [lookKey, x, y, z, heading]);
   useEffect(() => () => herzie.dispose(), [herzie]);

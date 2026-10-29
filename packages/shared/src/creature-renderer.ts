@@ -28,6 +28,7 @@ import {
   VIOLET_RAMP,
   VOID_RAMP,
 } from "./ascii3d.js";
+import { CLOAK_CLEARANCE, cloakStyleFor } from "./cloaks.js";
 import {
   type DangleState,
   DEFAULT_DANGLE_CONFIG,
@@ -2121,17 +2122,24 @@ interface Hand {
   /** The arm's radius: props are sized by it, so they fit any stage. */
   r: number;
   /** What the arm hangs off (the body, or the head before it): the prop is
-   * slung on its back. */
+   * slung on its back. Its radius takes in a cloak worn over it. */
   torso: { center: V3; radius: number };
+  /** How much of that radius is the cloak (see handOf). */
+  over: number;
 }
 
-function handOf(spheres: Sphere[], arm: string): Hand | null {
+/** `over`: how much further out than the torso's surface gear slings on
+ * its back — a cloak's thickness when one's worn under it (see
+ * CLOAK_CLEARANCE), so the gear rides on the cloak. */
+function handOf(spheres: Sphere[], arm: string, over = 0): Hand | null {
   const sp = spheres.find((s) => s.part === arm);
   if (!sp) return null;
   const rig = buildRig(spheres);
   const shoulder = rig.shoulders[arm];
   const parent = rig.body ?? rig.head;
   if (!shoulder || !parent) return null;
+  // Only a torso wears a cloak.
+  const lift = rig.body ? over : 0;
   const v = sub(sp.center, shoulder);
   const len = Math.max(1e-9, Math.hypot(...v));
   const dir = scale(v, 1 / len);
@@ -2141,7 +2149,8 @@ function handOf(spheres: Sphere[], arm: string): Hand | null {
     side: LIMB_SIDE[arm] ?? 1,
     shoulder,
     r: sp.radius,
-    torso: { center: parent.center, radius: parent.radius },
+    torso: { center: parent.center, radius: parent.radius + lift },
+    over: lift,
   };
 }
 
@@ -2454,7 +2463,7 @@ const DISC_LIFT: Record<string, number> = {
  */
 const buildCompactDiscs: HeldBuilder = (spheres, part, hand) => {
   const otherPart = part === MAIN_HELD ? OFF_HELD : MAIN_HELD;
-  const other = handOf(spheres, HELD_ARM[otherPart]);
+  const other = handOf(spheres, HELD_ARM[otherPart], hand.over);
   const hung = [
     { part, hand },
     ...(other ? [{ part: otherPart, hand: other }] : []),
@@ -2551,13 +2560,14 @@ const HELD_ITEM_BUILDERS: Record<string, HeldBuilder> = {
 
 function buildHeldSpheres(spheres: Sphere[], equipped: Equipped): Sphere[] {
   const out: Sphere[] = [];
+  const over = cloakStyleFor(equipped) ? CLOAK_CLEARANCE : 0;
   for (const [slot, part] of [
     ["main_hand", MAIN_HELD],
     ["off_hand", OFF_HELD],
   ] as const) {
     const id = equipped[slot];
     const build = id && HELD_ITEM_BUILDERS[id];
-    const hand = build ? handOf(spheres, HELD_ARM[part]) : null;
+    const hand = build ? handOf(spheres, HELD_ARM[part], over) : null;
     if (build && hand) out.push(...build(spheres, part, hand));
   }
   return out;

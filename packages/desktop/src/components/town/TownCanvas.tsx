@@ -250,6 +250,7 @@ const NO_STATS: HerzieStats = {
   luck: 0,
   critChance: 0,
   critDamage: 0,
+  moveSpeed: 0,
 };
 
 /** Per-frame housekeeping: input, and who the player is close enough to

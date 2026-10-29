@@ -215,6 +215,20 @@ export const TYPE_ICON_GRIDS: Record<ItemType, string[]> = {
     ],
     8,
   ),
+  // A cloak from behind: collar, clasp, flaring to the hem.
+  cloak: cardIcon(
+    [
+      "...####...",
+      "..#.##.#..",
+      "..######..",
+      ".########.",
+      ".########.",
+      "##########",
+      "##########",
+      "#.#.##.#.#",
+    ],
+    8,
+  ),
   // Up-arrow — a stat-changing effect.
   modifier: cardIcon(
     [

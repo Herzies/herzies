@@ -1,5 +1,7 @@
 import "./globals.css";
 import {
+  CLOAK_STYLES,
+  type CloakConfig,
   CREATURE_BODY_TYPES,
   CREATURE_PALETTE,
   CREATURE_PARAM_BOUNDS,
@@ -37,6 +39,11 @@ const WEARABLE_OPTIONS = [
   "compact-discs",
   "worn-stick",
   "old-cymbal",
+  // Cloaks (stage 3: worn on the back, under any slung gear).
+  "troubadour-mantle",
+  "groove-cape",
+  "drumhide-cloak",
+  "tailwind-cloak",
 ];
 
 const DEFAULT_USER = "sandbox-user";
@@ -56,6 +63,22 @@ function Sandbox() {
   const [wearables, setWearables] = useState<string[]>([]);
   const [dangle, setDangle] = useState<DangleConfig>(DEFAULT_DANGLE_CONFIG);
   const [thread, setThread] = useState<ThreadConfig>(DEFAULT_THREAD_CONFIG);
+  // The worn cloak's cloth, to tune: its own until a slider moves.
+  const cloakId = wearables.find((id) => id in CLOAK_STYLES);
+  const [cloakTuning, setCloakTuning] = useState<{
+    id: string;
+    config: CloakConfig;
+  } | null>(null);
+  const cloak =
+    cloakId && cloakTuning?.id === cloakId
+      ? cloakTuning.config
+      : cloakId
+        ? CLOAK_STYLES[cloakId].config
+        : undefined;
+  const tuneCloak = (patch: Partial<CloakConfig>) => {
+    if (!cloakId || !cloak) return;
+    setCloakTuning({ id: cloakId, config: { ...cloak, ...patch } });
+  };
   const swings =
     wearables.includes("gold-chain") || wearables.includes("pearl-necklace");
   const [jsonOpen, setJsonOpen] = useState(false);
@@ -345,6 +368,38 @@ function Sandbox() {
           </Section>
         )}
 
+        {cloakId && cloak && (
+          <Section title="cloak cloth">
+            {(
+              [
+                ["gravity", "gravity", 10, 100, 1],
+                ["damping", "damping", 0, 8, 0.1],
+                ["air drag", "drag", 0, 4, 0.05],
+                ["air friction", "airFriction", 0, 1, 0.01],
+                ["response (moving)", "linearResponse", 0, 1, 0.05],
+                ["response (turning)", "angularResponse", 0, 1, 0.05],
+                ["bend (softness)", "bend", 0, 0.004, 0.00005],
+                ["shear (softness)", "shear", 0, 0.004, 0.00005],
+                ["gather (softness)", "compress", 0, 0.01, 0.0001],
+                ["gusts", "turbulence", 0, 1, 0.01],
+                ["friction", "friction", 0, 1, 0.01],
+                ["edge hug", "hug", 0, 8, 0.1],
+              ] as const
+            ).map(([label, key, min, max, step]) => (
+              <SliderField
+                key={key}
+                label={label}
+                value={cloak[key]}
+                bounds={{ min, max, step }}
+                onChange={(v) => tuneCloak({ [key]: v })}
+              />
+            ))}
+            <div className="mt-1.5">
+              <Btn onClick={() => setCloakTuning(null)}>reset cloak</Btn>
+            </div>
+          </Section>
+        )}
+
         <div className="mt-3 flex flex-wrap gap-1.5">
           <Btn onClick={() => setJsonOpen((v) => !v)}>
             {jsonOpen ? "hide json" : "show json"}
@@ -371,6 +426,7 @@ function Sandbox() {
           creatureParams={params}
           dangleConfig={dangle}
           threadConfig={thread}
+          cloakConfig={cloak}
           showSky={showSky}
           draggable={draggable}
         />
@@ -398,6 +454,12 @@ function toEquipped(ids: string[]): Equipped {
     else if (id === "pumpkin-spice") out.color = id;
     else if (id === "ghost" || id === "spirit-orb") out.spirit = id;
     else if (id === "old-cymbal") out.off_hand = id;
+    else if (
+      id.endsWith("-cloak") ||
+      id === "troubadour-mantle" ||
+      id === "groove-cape"
+    )
+      out.back = id;
     else if (id === "lute" || id === "compact-discs" || id === "worn-stick")
       out.main_hand = id;
     else if (id === "boombox") {
