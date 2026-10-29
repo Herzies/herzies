@@ -4,9 +4,9 @@
 -- a slot other than 'ground' is used as-is, as with 'spirit' in 00099 and
 -- the hand slots in 00106, so it needs no change):
 --   - three legendary class cloaks, suited to a class but wearable by any
---     herzie, that come only from a boss's random loot (00124, applied
---     with the desktop release; never a listening drop:
---     NON_DROPPABLE_ITEM_IDS in the catalog);
+--     herzie, that come only from a boss fight's reward pools (00124,
+--     set per fight in the admin; never a listening drop nor a random
+--     roll: NON_DROPPABLE_ITEM_IDS in the catalog);
 --   - the Tailwind Cloak (+8% move speed), sold for money only as a Stripe
 --     product whose metadata.item_id is 'tailwind-cloak'. It's never
 --     dropped, and the upgrade route refuses it a die (noUpgrade), so a
