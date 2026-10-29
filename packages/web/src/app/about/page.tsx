@@ -13,7 +13,7 @@ export default function AboutPage() {
         <p className="text-xs text-text-dim">// what is this thing</p>
       </section>
 
-      <div className="bg-bg-panel border border-border rounded-md p-4 flex flex-col gap-3">
+      <div className="bg-bg-panel border border-border rounded-2xl p-4 flex flex-col gap-3">
         <p className="text-[13px]">
           Herzies is your digital pet that grows by listening to music. Hatch
           your herzie, play your favourite tracks, and watch it evolve through
@@ -30,7 +30,7 @@ export default function AboutPage() {
         <p className="text-xs text-text-dim">// under the hood</p>
       </section>
 
-      <div className="bg-bg-panel border border-border rounded-md p-4 flex flex-col gap-3">
+      <div className="bg-bg-panel border border-border rounded-2xl p-4 flex flex-col gap-3">
         <p className="text-[13px]">
           The app detects what you're listening to and sends observations to the
           herzies game server. The server is the authority for XP, leveling,

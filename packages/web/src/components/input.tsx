@@ -19,7 +19,7 @@ export function Input({
     <input
       type={type}
       className={cn(
-        "w-full p-2 rounded-md border border-border bg-bg-panel text-text text-sm focus:outline-none focus:ring-1 focus:ring-purple",
+        "w-full p-2 rounded border border-border bg-bg-panel text-text text-sm focus:outline-none focus:ring-1 focus:ring-purple",
         className,
       )}
       placeholder={placeholder}

@@ -51,7 +51,7 @@ export function DesktopSignIn({
 
       {isLocalSupabase() && callbackPath && <LocalDevSignIn state={state} />}
 
-      <div className="bg-bg-panel border border-border rounded-md p-5 flex flex-col gap-4">
+      <div className="bg-bg-panel border border-border rounded-2xl p-5 flex flex-col gap-4">
         {!callbackPath && (
           <p className="text-red text-xs">
             This sign-in link is invalid. Start the login from the herzies app

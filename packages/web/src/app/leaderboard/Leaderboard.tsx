@@ -60,7 +60,7 @@ export function Leaderboard() {
 
   if (loading) {
     return (
-      <div className="bg-bg-panel border border-border rounded-md p-8 text-center text-text-dim text-[13px]">
+      <div className="bg-bg-panel border border-border rounded-2xl p-8 text-center text-text-dim text-[13px]">
         loading...
       </div>
     );
@@ -68,7 +68,7 @@ export function Leaderboard() {
 
   if (rows.length === 0) {
     return (
-      <div className="bg-bg-panel border border-border rounded-md p-8 text-center text-text-dim text-[13px]">
+      <div className="bg-bg-panel border border-border rounded-2xl p-8 text-center text-text-dim text-[13px]">
         no herzies found yet. be the first!
       </div>
     );

@@ -41,7 +41,7 @@ export function LocalDevSignIn({ state }: { state: string | null }) {
   return (
     <form
       onSubmit={signIn}
-      className="bg-bg-panel border border-yellow/40 rounded-md p-4 flex flex-col gap-2"
+      className="bg-bg-panel border border-yellow/40 rounded-2xl p-4 flex flex-col gap-2"
     >
       <p className="text-[11px] text-yellow">
         local stack: sign in with any email

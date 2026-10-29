@@ -6,6 +6,13 @@
    collector card) are pointed at explicitly. */
 @source "../../../shared/src";
 
+@theme {
+  /* The front page's edges: sky blue above (what iOS paints behind its
+     status bar, the page's themeColor) and black below. */
+  --color-sky: #a9cbe8;
+  --color-ground: #000000;
+}
+
 @layer base {
   *,
   *::before,
@@ -28,21 +35,6 @@
   ::selection {
     background: var(--color-purple);
     color: var(--color-bg);
-  }
-
-  body::after {
-    content: "";
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    background: repeating-linear-gradient(
-      0deg,
-      transparent,
-      transparent 2px,
-      rgba(0, 0, 0, 0.08) 2px,
-      rgba(0, 0, 0, 0.08) 4px
-    );
-    z-index: 9999;
   }
 
   a {
@@ -70,6 +62,285 @@ body:has([data-overlay-header]) > nav {
 body:has([data-overlay-header]) > main {
   display: flex;
   flex-direction: column;
+}
+
+/* The front page's live Town (TownBackdrop, data-town) shows through the
+   page: the body lets it, and the header and footer float over it in
+   frosted glass, as the app's windows are (OverlayWindow), but white: the
+   theme's colours are darkened inside so text stays readable. */
+body:has([data-town]) {
+  background: transparent;
+}
+
+/* Behind the front page: sky blue, the colour iOS Safari paints its
+   status bar in (it takes the page's background, not theme-color), so the
+   top fade runs on into it. The bottom is the Town's own black fade, which
+   reaches under the toolbar (.town-backdrop). */
+html:has([data-town]) {
+  background: var(--color-sky);
+}
+
+/* The page runs under the notch and the home bar (viewportFit cover):
+   the header and footer keep clear of them. */
+body:has([data-town]) > nav {
+  padding-top: calc(env(safe-area-inset-top) + 1rem);
+}
+
+body:has([data-town]) > footer {
+  padding-bottom: calc(env(safe-area-inset-bottom) + 1.5rem);
+}
+
+/* Exactly one screen tall, and nothing to scroll (the Town is the page). */
+html:has([data-town]),
+body:has([data-town]) {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+body:has([data-town]) > footer {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  z-index: 10;
+  margin-top: 0;
+}
+
+body:has([data-town]) .chrome {
+  border-radius: 1rem;
+  --color-text: #1c1c28;
+  --color-text-dim: #5a5a6c;
+  --color-purple: #8b3fd1;
+  --color-yellow: #9a6b00;
+  --color-cyan: #1f7a9c;
+  color: var(--color-text);
+  border: 1px solid rgb(255 255 255 / 0.6);
+  background: rgb(255 255 255 / 0.7);
+  backdrop-filter: blur(24px) saturate(1.5);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  padding: 0.5rem 1rem;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.8),
+    0 18px 50px -12px rgb(0 0 0 / 0.35);
+}
+
+/* Over the Town the header and footer are bare: no box, just their text
+   and links, white, with a little shadow to stand out against the world. */
+body:has([data-town]) > footer .chrome {
+  --color-text-dim: rgb(255 255 255 / 0.8);
+  color: var(--color-text-dim);
+}
+
+body:has([data-town]) > nav .chrome,
+body:has([data-town]) > footer .chrome {
+  --color-purple: #fff;
+  --color-yellow: #fff;
+  border: none;
+  background: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
+  text-shadow: 0 1px 3px rgb(0 0 0 / 0.45);
+}
+
+/* The icons get the same shadow (text-shadow doesn't reach them), and the
+   "[open beta]" tag is as white as the logo. */
+body:has([data-town]) > footer .chrome svg {
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.45));
+}
+
+body:has([data-town]) > nav .chrome a span {
+  opacity: 1;
+  font-size: 11px;
+  font-weight: 700;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 0.6);
+}
+
+/* The Town behind the front page (TownBackdrop): as tall as the screen
+   gets (the large viewport, under Safari's toolbars too), so nothing but
+   the fade meets them. The fades run on an eased curve: a straight ramp
+   shows a line where it turns. */
+.town-backdrop {
+  height: 100lvh;
+}
+
+.town-fade-top {
+  height: calc(env(safe-area-inset-top) + 7rem);
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--color-sky) 100%, transparent) 0%,
+    color-mix(in srgb, var(--color-sky) 98.7%, transparent) 8%,
+    color-mix(in srgb, var(--color-sky) 95.1%, transparent) 16%,
+    color-mix(in srgb, var(--color-sky) 89.6%, transparent) 24%,
+    color-mix(in srgb, var(--color-sky) 82.5%, transparent) 32%,
+    color-mix(in srgb, var(--color-sky) 74.1%, transparent) 40%,
+    color-mix(in srgb, var(--color-sky) 64.8%, transparent) 48%,
+    color-mix(in srgb, var(--color-sky) 55.0%, transparent) 56%,
+    color-mix(in srgb, var(--color-sky) 45.0%, transparent) 64%,
+    color-mix(in srgb, var(--color-sky) 35.2%, transparent) 72%,
+    color-mix(in srgb, var(--color-sky) 25.9%, transparent) 80%,
+    color-mix(in srgb, var(--color-sky) 17.5%, transparent) 88%,
+    color-mix(in srgb, var(--color-sky) 10.4%, transparent) 94%,
+    color-mix(in srgb, var(--color-sky) 0%, transparent) 100%
+  );
+}
+
+.town-fade-bottom {
+  height: calc(env(safe-area-inset-bottom) + 34dvh);
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--color-ground) 100%, transparent) 0%,
+    color-mix(in srgb, var(--color-ground) 98.7%, transparent) 8%,
+    color-mix(in srgb, var(--color-ground) 95.1%, transparent) 16%,
+    color-mix(in srgb, var(--color-ground) 89.6%, transparent) 24%,
+    color-mix(in srgb, var(--color-ground) 82.5%, transparent) 32%,
+    color-mix(in srgb, var(--color-ground) 74.1%, transparent) 40%,
+    color-mix(in srgb, var(--color-ground) 64.8%, transparent) 48%,
+    color-mix(in srgb, var(--color-ground) 55.0%, transparent) 56%,
+    color-mix(in srgb, var(--color-ground) 45.0%, transparent) 64%,
+    color-mix(in srgb, var(--color-ground) 35.2%, transparent) 72%,
+    color-mix(in srgb, var(--color-ground) 25.9%, transparent) 80%,
+    color-mix(in srgb, var(--color-ground) 17.5%, transparent) 88%,
+    color-mix(in srgb, var(--color-ground) 10.4%, transparent) 94%,
+    color-mix(in srgb, var(--color-ground) 0%, transparent) 100%
+  );
+}
+
+/* A black strip at the page's bottom edge, mostly below it: iOS Safari
+   (26+) tints the area behind its toolbar from a fixed element there with
+   a background colour (within a few px of the edge, 80%+ wide, about 12px
+   tall, and not inside another fixed element), so the bottom matches the
+   Town's black fade. The top takes the page's sky background instead. */
+.town-ground-edge {
+  position: fixed;
+  left: 0;
+  bottom: -8px;
+  width: 100%;
+  height: 12px;
+  background-color: var(--color-ground);
+  pointer-events: none;
+}
+
+/* On bigger screens there are no browser bars to blend into: the Town
+   runs to the window's edges. */
+@media (min-width: 768px) {
+  .town-fade-top,
+  .town-fade-bottom,
+  .town-ground-edge {
+    display: none;
+  }
+}
+
+/* The front page's download button: white glass over the Town (as the
+   header's and footer's boxes), with a light that sweeps across it now and
+   then and a small hop with a halo, on two clocks that don't line up, so it
+   never settles into a beat you stop seeing. */
+.cta {
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  overflow: hidden;
+  padding: 0.7rem 1.35rem;
+  border-radius: 0.75rem;
+  border: 1px solid rgb(255 255 255 / 0.85);
+  background: rgb(255 255 255 / 0.72);
+  backdrop-filter: blur(16px) saturate(1.6);
+  -webkit-backdrop-filter: blur(16px) saturate(1.6);
+  color: #1c1c28;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-shadow: none;
+  text-decoration: none;
+  box-shadow:
+    inset 0 1px 0 #fff,
+    0 12px 32px -12px rgb(0 0 0 / 0.55);
+  animation: cta-hop 8.7s cubic-bezier(0.3, 0.7, 0.4, 1) 2.2s infinite;
+  transition:
+    background-color 160ms ease,
+    box-shadow 160ms ease,
+    translate 160ms ease;
+}
+
+.cta:hover {
+  text-decoration: none;
+  background: rgb(255 255 255 / 0.9);
+  translate: 0 -1px;
+  box-shadow:
+    inset 0 1px 0 #fff,
+    0 0 0 4px rgb(255 255 255 / 0.25),
+    0 16px 36px -12px rgb(0 0 0 / 0.6);
+}
+
+.cta:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 3px;
+}
+
+/* The sweep of light. */
+.cta::before {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  z-index: -1;
+  background: linear-gradient(
+    105deg,
+    transparent 30%,
+    rgb(255 255 255 / 0.95) 48%,
+    rgb(214 188 255 / 0.7) 52%,
+    transparent 70%
+  );
+  translate: -130% 0;
+  animation: cta-shine 5.3s ease-in-out 1.2s infinite;
+}
+
+.cta .cta-arrow {
+  transition: translate 200ms ease;
+}
+
+.cta:hover .cta-arrow {
+  translate: 0 2px;
+}
+
+@keyframes cta-shine {
+  0% {
+    translate: -130% 0;
+  }
+  18%,
+  100% {
+    translate: 130% 0;
+  }
+}
+
+@keyframes cta-hop {
+  0%,
+  86%,
+  100% {
+    scale: 1;
+    rotate: 0deg;
+  }
+  89% {
+    scale: 1.06;
+    rotate: -1.5deg;
+  }
+  92% {
+    scale: 0.98;
+    rotate: 1deg;
+  }
+  95% {
+    scale: 1.02;
+    rotate: 0deg;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cta,
+  .cta::before {
+    animation: none;
+  }
 }
 
 @utility banner {
