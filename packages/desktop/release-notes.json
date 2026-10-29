@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.1.0-beta.56",
+    "highlights": [
+      "New: cloaks, worn in the new Back slot. Real cloth that sways as you walk, run and jump",
+      "Three class cloaks come from boss fights: the Troubadour's Mantle, the Groove Cape and the Drumhide Cloak",
+      "The boss's \"?\" shows every reward a fight pays, and your odds of each",
+      "Skill effects read in plain words"
+    ]
+  },
+  {
     "version": "0.1.0-beta.55",
     "highlights": [
       "The boss raid is rebuilt: the cave opens 15 minutes early, and whoever is inside when the fight starts is the raid",
