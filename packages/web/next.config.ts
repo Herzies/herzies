@@ -8,6 +8,18 @@ const nextConfig: NextConfig = {
 	transpilePackages: ["@herzies/shared"],
 	async headers() {
 		return [
+			// The front page's live Town (public/town, see TownBackdrop): its
+			// chunks are named by their content, so they keep. The entry keeps
+			// one name, so it's checked each time (a 304 when unchanged).
+			{
+				source: "/town/:file((?!showcase\\.js$).*)",
+				headers: [
+					{
+						key: "Cache-Control",
+						value: "public, max-age=31536000, immutable",
+					},
+				],
+			},
 			{
 				source: "/(.*)",
 				headers: [

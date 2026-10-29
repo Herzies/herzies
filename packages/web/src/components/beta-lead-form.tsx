@@ -54,7 +54,7 @@ export default function BetaLeadForm() {
 
   return (
     <>
-      <div className="rounded-lg overflow-hidden border border-border w-full p-4 md:p-6 lg:p-12 lg:py-24">
+      <div className="rounded-2xl overflow-hidden border border-border w-full p-4 md:p-6 lg:p-12 lg:py-24">
         <div className="flex flex-col items-center text-center">
           <p className="text-sm text-text-dim mb-2 uppercase tracking-widest">
             Stay in the loop

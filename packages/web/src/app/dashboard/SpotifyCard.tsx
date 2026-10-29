@@ -10,7 +10,7 @@ export function SpotifyCard({
   const [disconnecting, setDisconnecting] = useState(false);
 
   return (
-    <div className="bg-bg-panel border border-border rounded-md p-5">
+    <div className="bg-bg-panel border border-border rounded-2xl p-5">
       <div className="flex items-center gap-2 mb-3">
         <svg
           width="20"

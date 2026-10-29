@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "check": "tsc --noEmit",
-    "build": "next build",
+    "build": "pnpm showcase && next build",
+    "showcase": "pnpm --filter herzies-desktop build:showcase",
     "start": "next start",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts"

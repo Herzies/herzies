@@ -93,7 +93,7 @@ export function DesktopHandoff({
             <h1 className="text-lg text-purple mb-1">logging in</h1>
             <p className="text-xs text-text-dim">hang tight...</p>
           </div>
-          <div className="bg-bg-panel border border-border rounded-md p-5 max-w-[400px]">
+          <div className="bg-bg-panel border border-border rounded-2xl p-5 max-w-[400px]">
             <p className="text-[13px] text-text-dim">...</p>
           </div>
         </>
@@ -105,7 +105,7 @@ export function DesktopHandoff({
             <h1 className="text-lg text-red mb-1">something went wrong</h1>
             <p className="text-xs text-text-dim">login failed</p>
           </div>
-          <div className="bg-bg-panel border border-red rounded-md p-5 max-w-[400px]">
+          <div className="bg-bg-panel border border-red rounded-2xl p-5 max-w-[400px]">
             <p className="text-[13px] text-red">{error}</p>
           </div>
         </>

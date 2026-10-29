@@ -18,7 +18,7 @@ export default function TermsPage() {
       <section>
         <h2 className="text-base text-cyan mb-1">data &amp; privacy</h2>
         <p className="text-xs text-text-dim">// what we collect</p>
-        <div className="bg-bg-panel border border-border rounded-md p-4 flex flex-col gap-3 mt-3">
+        <div className="bg-bg-panel border border-border rounded-2xl p-4 flex flex-col gap-3 mt-3">
           <p className="text-[13px]">
             Herzies collects only what it needs to work. When you register and
             sync, the following is stored:
@@ -58,7 +58,7 @@ export default function TermsPage() {
       <section>
         <h2 className="text-base text-red mb-1">delete your data</h2>
         <p className="text-xs text-text-dim">// the nuclear option</p>
-        <div className="bg-bg-panel border border-border rounded-md p-4 flex flex-col gap-3 mt-3">
+        <div className="bg-bg-panel border border-border rounded-2xl p-4 flex flex-col gap-3 mt-3">
           <p className="text-[13px]">
             You can permanently delete your herzie and all associated data from
             our servers. This removes your account, herzie stats, listening
@@ -76,7 +76,7 @@ export default function TermsPage() {
       <section>
         <h2 className="text-base text-text mb-1">usage</h2>
         <p className="text-xs text-text-dim">// the basics</p>
-        <div className="bg-bg-panel border border-border rounded-md p-4 flex flex-col gap-3 mt-3">
+        <div className="bg-bg-panel border border-border rounded-2xl p-4 flex flex-col gap-3 mt-3">
           <p className="text-[13px]">
             Herzies is provided as-is. We reserve the right to remove accounts
             that abuse the service. By signing in, you agree to these terms.

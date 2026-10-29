@@ -59,7 +59,7 @@ export function LeaderboardEntry({
 
   return (
     <div
-      className={`bg-bg-panel border ${borderClass} rounded-md px-4 py-3 flex items-center gap-4 text-inherit`}
+      className={`bg-bg-panel border ${borderClass} rounded-xl px-4 py-3 flex items-center gap-4 text-inherit`}
     >
       {/* Rank */}
       <span

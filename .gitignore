@@ -38,3 +38,6 @@ pnpm-debug.log*
 # Cloudflare Workers
 .dev.vars
 .wrangler
+
+# The website's live Town, built from the desktop app (pnpm showcase)
+packages/web/public/town/

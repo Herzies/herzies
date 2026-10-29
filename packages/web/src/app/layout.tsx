@@ -1,8 +1,16 @@
 import { Analytics } from "@vercel/analytics/next";
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import Footer from "@/components/footer";
 import Header from "@/components/header";
+
+/** The site's colour (theme.css's --color-bg): what iOS Safari draws behind
+ * its status bar and toolbar, so they melt into the page. */
+export const viewport: Viewport = {
+  themeColor: "#0c0c14",
+  colorScheme: "dark",
+  viewportFit: "cover",
+};
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://www.herzies.app"),

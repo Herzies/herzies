@@ -61,6 +61,16 @@ export const TOWN_REST_MAPS: ReadonlySet<TownMapId> = new Set([
 /** Maps that are one room however many come: the boss is shared, so there is
  * a single shard (and the room's capacity is the fight's). */
 export const TOWN_SINGLE_SHARD: ReadonlySet<TownMapId> = new Set(["bossroom"]);
+
+/** Maps the website may watch (`?watch=1`): read-only sockets that see
+ * herzies walk about, but no names, and bodies the server makes up (a
+ * herzie's real one is its friend code's). They never take a player's
+ * place. */
+export const TOWN_WATCH_MAPS: ReadonlySet<TownMapId> = new Set(["home"]);
+/** Watchers per room before more are turned away with `full`. */
+export const TOWN_WATCH_CAPACITY = 100;
+/** The `you` a watcher's welcome carries: it has no herzie. */
+export const TOWN_WATCHER_ID = 0;
 /** Maps that need a ticket carrying a claim: a `boss` claim for the boss
  * room, a `tower` claim for the Tower (see TownTicketPayload). */
 export const TOWN_TICKETED_MAPS: ReadonlySet<TownMapId> = new Set([

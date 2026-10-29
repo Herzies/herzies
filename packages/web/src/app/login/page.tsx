@@ -36,7 +36,7 @@ export default function LoginPage() {
           </p>
         </div>
 
-        <div className="bg-bg-panel border border-border rounded-md p-6 flex flex-col gap-4">
+        <div className="bg-bg-panel border border-border rounded-2xl p-6 flex flex-col gap-4">
           {error && <p className="text-red text-xs">{error}</p>}
 
           <button
