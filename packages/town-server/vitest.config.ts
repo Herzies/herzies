@@ -6,7 +6,7 @@ export default defineConfig({
     cloudflareTest({
       wrangler: { configPath: "./wrangler.jsonc" },
       miniflare: {
-        bindings: { TOWN_TICKET_SECRET: "test-secret", ROOM_CAPACITY: "3" },
+        bindings: { TOWN_TICKET_SECRET: "test-secret", ROOM_CAPACITY: "3", WATCH_CAPACITY: "2" },
       },
     }),
   ],

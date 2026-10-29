@@ -8,6 +8,7 @@ import {
   TOWN_INSTANCED_MAPS,
   TOWN_MAX_SHARDS,
   TOWN_SINGLE_SHARD,
+  TOWN_WATCH_MAPS,
 } from "@herzies/shared/town-net";
 import type { Env } from "./room";
 
@@ -29,6 +30,10 @@ export default {
       return new Response("bad shard", { status: 400 });
 
     const map = match[1];
+    // The website watching: only where it's allowed.
+    const watch = url.searchParams.get("watch") === "1";
+    if (watch && !TOWN_WATCH_MAPS.has(map as never))
+      return new Response("not watchable", { status: 400 });
     // One shared fight: everyone goes to the same room.
     if (TOWN_SINGLE_SHARD.has(map as never) && shard !== 0)
       return new Response("bad shard", { status: 400 });
@@ -46,6 +51,8 @@ export default {
     headers.set("x-town-map", map);
     if (instance) headers.set("x-town-instance", instance);
     else headers.delete("x-town-instance");
+    if (watch) headers.set("x-town-watch", "1");
+    else headers.delete("x-town-watch");
     return room.fetch(new Request(request, { headers }));
   },
 } satisfies ExportedHandler<Env>;

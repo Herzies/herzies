@@ -39,6 +39,9 @@ import {
   TOWN_TICK_MS,
   TOWN_TICKET_TTL_S,
   TOWN_TICKETED_MAPS,
+  TOWN_WATCH_CAPACITY,
+  TOWN_WATCH_MAPS,
+  TOWN_WATCHER_ID,
   type TownLook,
   type TownMapId,
   type TownPlayer,
@@ -56,6 +59,7 @@ import {
   RateLimiter,
   startingPoint,
 } from "./rules";
+import { standInSeed } from "./standin";
 import { eatInDb, postVitals, reviveInDb } from "./vitals";
 
 export type Env = {
@@ -63,6 +67,8 @@ export type Env = {
   TOWN_TICKET_SECRET: string;
   /** Overrides {@link TOWN_ROOM_CAPACITY} (tests). */
   ROOM_CAPACITY?: string;
+  /** Overrides {@link TOWN_WATCH_CAPACITY} (tests). */
+  WATCH_CAPACITY?: string;
   /** The `town-vitals` edge function. Unset: the room reports no health. */
   TOWN_VITALS_URL?: string;
   /** Local dev only: let the boss room open without an event, with a
@@ -99,11 +105,15 @@ const CAST_OP = 3;
 
 /** How old a boss-room ticket may be. Its health is as of issue. */
 const FRESH_TICKET_MS = 2 * 60_000;
+/** The hibernation tag a watcher's socket is accepted with. */
+const WATCH_TAG = "watch";
 
 /** Survives hibernation on the socket itself. */
 type Attachment = {
   connectedAt: number;
   map: TownMapId;
+  /** The website watching: no herzie, sends nothing but pings. */
+  watch?: true;
   /** An instanced map's room: whose it is (a user id). */
   instance?: string;
   player?: {
@@ -123,6 +133,8 @@ type Attachment = {
     /** Sitting on a bench since (ms), counted toward rest but not yet
      * reported: kept here because a room that hibernates forgets the rest. */
     restSince?: number | null;
+    /** The made-up body watchers see it with (see standInSeed). */
+    standIn?: string;
   };
 };
 
@@ -149,6 +161,9 @@ type Session = {
 
 export class TownRoom extends DurableObject<Env> {
   private sessions = new Map<WebSocket, Session>();
+  /** The website's sockets, kept apart from players' (see TOWN_WATCH_MAPS):
+   * each one's attachment, for when it connected. */
+  private watchers = new Map<WebSocket, Attachment>();
   /** Players who moved since the last tick. */
   private dirty = new Set<Session>();
   private ticker: ReturnType<typeof setInterval> | null = null;
@@ -178,6 +193,10 @@ export class TownRoom extends DurableObject<Env> {
       const att = ws.deserializeAttachment() as Attachment | null;
       if (!att) {
         ws.close(TOWN_CLOSE.auth, "no session");
+        continue;
+      }
+      if (att.watch) {
+        this.watchers.set(ws, att);
         continue;
       }
       // A boss room that woke from eviction has lost its fight; its
@@ -213,12 +232,65 @@ export class TownRoom extends DurableObject<Env> {
     return Number(this.env.ROOM_CAPACITY) || TOWN_ROOM_CAPACITY;
   }
 
+  /** The website comes to watch: everyone here as watchers see them, then
+   * where they stand. From here it gets the snapshots, joins, looks and
+   * leaves, and nothing else. */
+  private async watch(ws: WebSocket, map: TownMapId) {
+    this.ctx.acceptWebSocket(ws, [WATCH_TAG]);
+    const cap = Number(this.env.WATCH_CAPACITY) || TOWN_WATCH_CAPACITY;
+    if (this.ctx.getWebSockets(WATCH_TAG).length > cap) {
+      this.close(ws, TOWN_CLOSE.full, "full");
+      return;
+    }
+    const att: Attachment = { connectedAt: Date.now(), map, watch: true };
+    ws.serializeAttachment(att);
+    this.watchers.set(ws, att);
+    await this.ensureSweep();
+    // Players from before stand-ins existed get theirs now.
+    const here = [...this.sessions.values()].filter((s) => s.player);
+    for (const s of here) {
+      const p = s.player;
+      if (p && !p.standIn) {
+        p.standIn = await standInSeed(p.uid, this.env.TOWN_TICKET_SECRET);
+        this.persist(s);
+      }
+    }
+    if (!this.watchers.has(ws)) return; // left while we were busy
+    const players = here.flatMap((s) => (s.player ? [s.player] : []));
+    this.trySend(
+      ws,
+      JSON.stringify({
+        t: "welcome",
+        you: TOWN_WATCHER_ID,
+        players: players.flatMap((p) => watchedOf(p) ?? []),
+      } satisfies ServerMessage),
+    );
+    if (players.length) {
+      this.trySend(
+        ws,
+        encodeSnapshot(
+          Date.now(),
+          players.map((p) => ({ id: p.id, age: 0, state: p.state })),
+        ),
+      );
+    }
+  }
+
   async fetch(request: Request): Promise<Response> {
     const map = request.headers.get("x-town-map") ?? "";
     if (!isTownMapId(map)) return new Response("unknown map", { status: 404 });
     const { 0: client, 1: server } = new WebSocketPair();
+    if (request.headers.get("x-town-watch") === "1") {
+      if (!TOWN_WATCH_MAPS.has(map))
+        return new Response("not watchable", { status: 400 });
+      await this.watch(server, map);
+      return new Response(null, { status: 101, webSocket: client });
+    }
     this.ctx.acceptWebSocket(server);
-    if (this.ctx.getWebSockets().length > this.capacity) {
+    const players =
+      this.ctx.getWebSockets().length -
+      this.ctx.getWebSockets(WATCH_TAG).length;
+    if (players > this.capacity) {
       server.close(TOWN_CLOSE.full, "full");
       return new Response(null, { status: 101, webSocket: client });
     }
@@ -236,6 +308,12 @@ export class TownRoom extends DurableObject<Env> {
   }
 
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
+    // A watcher only pings, and the runtime answers those without us.
+    if (this.watchers.has(ws)) {
+      this.watchers.delete(ws);
+      this.close(ws, TOWN_CLOSE.kicked, "watchers don't talk");
+      return;
+    }
     const s = this.sessions.get(ws);
     if (!s) {
       ws.close(TOWN_CLOSE.auth, "no session");
@@ -331,6 +409,9 @@ export class TownRoom extends DurableObject<Env> {
       this.drop(s, TOWN_CLOSE.auth, "bad ticket");
       return;
     }
+    const standIn = TOWN_WATCH_MAPS.has(s.att.map)
+      ? await standInSeed(t.uid, this.env.TOWN_TICKET_SECRET)
+      : undefined;
     if (!this.sessions.has(s.ws)) return; // closed while verifying
 
     // The boss room only takes tickets issued while the cave is open and
@@ -375,6 +456,7 @@ export class TownRoom extends DurableObject<Env> {
       receivedAt: now,
       maxHp: t.hp?.maxHp,
       rest: new RestMeter(),
+      standIn,
       ...townVitalsOf(t, !!this.fight),
     };
     this.persist(s);
@@ -443,12 +525,14 @@ export class TownRoom extends DurableObject<Env> {
   }
 
   async webSocketClose(ws: WebSocket, code: number) {
+    this.watchers.delete(ws);
     const s = this.sessions.get(ws);
     if (s) this.leave(s, `closed ${code}`);
     this.close(ws, 1000, "bye");
   }
 
   async webSocketError(ws: WebSocket) {
+    this.watchers.delete(ws);
     const s = this.sessions.get(ws);
     if (s) this.leave(s, "error");
   }
@@ -457,6 +541,14 @@ export class TownRoom extends DurableObject<Env> {
    * ticket lapse; and forgives old strikes. */
   async alarm() {
     const now = Date.now();
+    for (const [ws, att] of [...this.watchers]) {
+      const pinged =
+        this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() ?? 0;
+      if (now - Math.max(pinged, att.connectedAt) > IDLE_TIMEOUT_MS) {
+        this.watchers.delete(ws);
+        this.close(ws, TOWN_CLOSE.idle, "idle");
+      }
+    }
     for (const s of [...this.sessions.values()]) {
       s.strikes = 0;
       if (!s.player) {
@@ -545,6 +637,7 @@ export class TownRoom extends DurableObject<Env> {
     for (const s of this.sessions.values()) {
       if (s.player) this.trySend(s.ws, frame);
     }
+    for (const ws of this.watchers.keys()) this.trySend(ws, frame);
   }
 
   private leave(s: Session, why: string) {
@@ -1118,6 +1211,7 @@ export class TownRoom extends DurableObject<Env> {
         rez: p.rez,
         healMult: p.healMult,
         restSince: p.rest.since,
+        standIn: p.standIn,
       };
     }
     try {
@@ -1135,6 +1229,25 @@ export class TownRoom extends DurableObject<Env> {
     const text = JSON.stringify(m);
     for (const s of this.sessions.values())
       if (s !== except && s.player) this.trySend(s.ws, text);
+    if (this.watchers.size) this.tellWatchers(m);
+  }
+
+  /** Who comes, goes and changes clothes, as watchers see them: without
+   * names, in stand-in bodies. Nothing else a room says reaches them. */
+  private tellWatchers(m: ServerMessage) {
+    let out: ServerMessage | null = null;
+    if (m.t === "leave") out = m;
+    else if (m.t === "join" || m.t === "look") {
+      const id = m.player.id;
+      const p = [...this.sessions.values()].find(
+        (s) => s.player?.id === id,
+      )?.player;
+      const player = p && watchedOf({ ...p, down: m.player.down });
+      if (player) out = { t: m.t, player };
+    }
+    if (!out) return;
+    const text = JSON.stringify(out);
+    for (const ws of this.watchers.keys()) this.trySend(ws, text);
   }
 
   private trySend(ws: WebSocket, data: string | ArrayBuffer) {
@@ -1177,6 +1290,23 @@ function playerOf(p: {
     id: p.id,
     name: p.name,
     look: p.look,
+    ...(p.down ? { down: true as const } : {}),
+  };
+}
+
+/** A player as watchers see it: no name, and a stand-in body wearing its
+ * gear. Null until it has a stand-in. */
+function watchedOf(p: {
+  id: number;
+  look: TownLook;
+  standIn?: string;
+  down?: boolean;
+}): TownPlayer | null {
+  if (!p.standIn) return null;
+  return {
+    id: p.id,
+    name: "",
+    look: { seed: p.standIn, stage: p.look.stage, equipped: p.look.equipped },
     ...(p.down ? { down: true as const } : {}),
   };
 }

@@ -32,9 +32,9 @@ type Client = {
   next: (t: ServerMessage["t"]) => Promise<ServerMessage>;
 };
 
-async function connect(shard: number): Promise<Client> {
+async function connect(shard: number, query = ""): Promise<Client> {
   const res = await exports.default.fetch(
-    `https://town.test/v1/town/home?shard=${shard}`,
+    `https://town.test/v1/town/home?shard=${shard}${query}`,
     { headers: { upgrade: "websocket" } },
   );
   const ws = res.webSocket;
@@ -272,6 +272,75 @@ describe("room", () => {
     const a = await join(++shardSeq, "a");
     for (let i = 0; i < 400; i++) a.ws.send("{}");
     expect(await a.closed).toBe(TOWN_CLOSE.kicked);
+  });
+});
+
+describe("watchers", () => {
+  type Watched = { id: number; name: string; look: { seed: string; equipped?: unknown } };
+  const watch = (shard: number) => connect(shard, "&watch=1");
+
+  it("sees herzies come, walk and go, without names or real bodies", async () => {
+    const shard = ++shardSeq;
+    const a = await join(shard, "a", at(1, 2));
+    const w = await watch(shard);
+    const welcome = (await w.next("welcome")) as { you: number; players: Watched[] };
+    expect(welcome.you).toBe(0);
+    expect(welcome.players).toHaveLength(1);
+    expect(welcome.players[0].name).toBe("");
+    expect(welcome.players[0].look.seed).not.toBe("HERZ-a");
+    expect(welcome.players[0].look.seed).toMatch(/^W-[0-9a-f]{16}$/);
+    await sleep(50);
+    expect(w.snapshots[0]?.entries[0]).toMatchObject({ id: a.id, state: { x: 1, z: 2 } });
+
+    const b = await join(shard, "b");
+    const joined = (await w.next("join")) as { player: Watched };
+    expect(joined.player).toMatchObject({ id: b.id, name: "" });
+    expect(joined.player.look.seed).not.toBe("HERZ-b");
+    // The same herzie keeps the same stand-in.
+    b.ws.send(JSON.stringify({ t: "ticket", ticket: await ticket("b", "renamed") }));
+    const look = (await w.next("look")) as { player: Watched };
+    expect(look.player.name).toBe("");
+    expect(look.player.look.seed).toBe(joined.player.look.seed);
+
+    a.ws.send(encodeStateFrame(1, at(1.2, 2, 4.5)));
+    await sleep(200);
+    const seen = w.snapshots.flatMap((s) => s.entries).filter((e) => e.id === a.id);
+    expect(seen.at(-1)?.state).toMatchObject({ x: 1.2, z: 2 });
+
+    a.ws.close(1000);
+    expect(((await w.next("leave")) as { id: number }).id).toBe(a.id);
+    // Players' business stays with players.
+    expect(w.messages.every((m) => ["welcome", "join", "look", "leave"].includes(m.t))).toBe(true);
+  });
+
+  it("never takes a player's place, and has its own limit", async () => {
+    const shard = ++shardSeq;
+    await watch(shard);
+    await watch(shard);
+    const third = await watch(shard);
+    expect(await third.closed).toBe(TOWN_CLOSE.full);
+    // A full house of watchers still lets all three players in.
+    await join(shard, "1");
+    await join(shard, "2");
+    const p3 = await join(shard, "3");
+    expect(p3.id).toBeGreaterThan(0);
+  });
+
+  it("isn't asked to say hello, and is shown out if it talks", async () => {
+    const shard = ++shardSeq;
+    const w = await watch(shard);
+    await w.next("welcome");
+    await sleep(5_500);
+    expect(w.ws.readyState).toBe(WebSocket.OPEN);
+    w.ws.send(JSON.stringify({ t: "hello", v: TOWN_PROTOCOL, ticket: await ticket("x") }));
+    expect(await w.closed).toBe(TOWN_CLOSE.kicked);
+  }, 10_000);
+
+  it("may only watch the home island", async () => {
+    const f = (path: string) =>
+      exports.default.fetch(`https://town.test${path}`, { headers: { upgrade: "websocket" } });
+    expect((await f("/v1/town/wilds?shard=0&watch=1")).status).toBe(400);
+    expect((await f("/v1/town/bossroom?shard=0&watch=1")).status).toBe(400);
   });
 });
 
