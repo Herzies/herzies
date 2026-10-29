@@ -3,6 +3,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import Footer from "@/components/footer";
 import Header from "@/components/header";
+import { PageLoader } from "@/components/page-loader/PageLoader";
 
 /** The site's colour (theme.css's --color-bg): what iOS Safari draws behind
  * its status bar and toolbar, so they melt into the page. */
@@ -63,6 +64,10 @@ export default async function RootLayout({
   return (
     <html lang="en">
       <body className="min-h-dvh flex flex-col justify-between items-start">
+        <PageLoader />
+        <noscript>
+          <style>{"[data-page-loader]{display:none!important}"}</style>
+        </noscript>
         <Header />
 
         <main className="w-full flex-1 overflow-clip">{children}</main>

@@ -1,7 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { useState } from "react";
+import Link from "@/components/page-loader/Link";
 import Button from "./button";
 import { Input } from "./input";
 

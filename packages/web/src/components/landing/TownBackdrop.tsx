@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { hold, isCovering } from "@/components/page-loader/store";
+import { afterPaint } from "@/components/page-loader/useLoaderHold";
 import type { ShowcaseChampion } from "@/lib/town-champion";
 
 /** Built by `pnpm showcase` (the desktop app's Town, see
@@ -34,37 +36,44 @@ export function TownBackdrop({
 }) {
   const host = useRef<HTMLDivElement>(null);
   const [ready, setReady] = useState(false);
+  // Drawn while the page loader still covered the page: no fade of its
+  // own, it's simply there when the loader lifts.
+  const [instant, setInstant] = useState(false);
 
   useEffect(() => {
     const el = host.current;
     if (!el || !hasWebGL2()) return;
     let unmount: (() => void) | null = null;
     let cancelled = false;
-    // After the page has settled: the Town is the biggest thing on it.
-    const start = () => {
-      import(/* webpackIgnore: true */ SHOWCASE_URL)
-        .then((m: ShowcaseModule) =>
-          m.mountTownShowcase(el, {
-            server,
-            champion: champion ?? undefined,
-            onReady: () => !cancelled && setReady(true),
-          }),
-        )
-        .then((u) => {
-          if (cancelled) u();
-          else unmount = u;
-        })
-        .catch(() => {
-          // Not built (local dev) or failed to load: the still stays.
-        });
-    };
-    const idle = window.requestIdleCallback
-      ? window.requestIdleCallback(start, { timeout: 1500 })
-      : window.setTimeout(start, 200);
+    // The page loader stays up until the Town has drawn (or gives up
+    // waiting, and the still shows meanwhile).
+    const release = hold();
+    let cancelPaint = () => {};
+    import(/* webpackIgnore: true */ SHOWCASE_URL)
+      .then((m: ShowcaseModule) =>
+        m.mountTownShowcase(el, {
+          server,
+          champion: champion ?? undefined,
+          onReady: () => {
+            if (cancelled) return;
+            setInstant(isCovering());
+            setReady(true);
+            cancelPaint = afterPaint(release);
+          },
+        }),
+      )
+      .then((u) => {
+        if (cancelled) u();
+        else unmount = u;
+      })
+      .catch(() => {
+        // Not built (local dev) or failed to load: the still stays.
+        release();
+      });
     return () => {
       cancelled = true;
-      if (window.cancelIdleCallback) window.cancelIdleCallback(idle);
-      else window.clearTimeout(idle);
+      cancelPaint();
+      release();
       unmount?.();
     };
   }, [server, champion]);
@@ -86,7 +95,7 @@ export function TownBackdrop({
         />
         <div
           ref={host}
-          className={`absolute inset-0 transition-opacity duration-1000 ${ready ? "opacity-100" : "opacity-0"}`}
+          className={`absolute inset-0 ${instant ? "" : "transition-opacity duration-1000"} ${ready ? "opacity-100" : "opacity-0"}`}
         />
         {/* The world fades into sky blue at the top and black at the
             bottom, the colours Safari paints behind its bars here. */}

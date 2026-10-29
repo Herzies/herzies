@@ -10,6 +10,7 @@ import {
 import { HerzieView, islandScenery } from "@herzies/shared/gl";
 import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { useWide } from "@/components/landing/useWide";
+import Link from "@/components/page-loader/Link";
 import { cn } from "@/lib/utils";
 import { CollectScene } from "./CollectScene";
 import { HangOutScene } from "./HangOutScene";
@@ -270,9 +271,9 @@ export function AboutSections() {
           <>
             Join boss raids and song hunts to receive rewards and compete
             against other herzies. See how you're doing in the{" "}
-            <a href="/leaderboard" className="text-yellow">
+            <Link href="/leaderboard" className="text-yellow">
               leaderboard
-            </a>
+            </Link>
             .
           </>
         }

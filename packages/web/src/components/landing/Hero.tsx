@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/page-loader/Link";
 
 /** The first screen, over the live Town (see TownBackdrop): the one-line
  * pitch and the download button, just under the statue the camera

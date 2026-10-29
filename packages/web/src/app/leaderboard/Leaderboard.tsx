@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useLoaderHold } from "@/components/page-loader/useLoaderHold";
 import { createSupabaseClient } from "@/lib/supabase";
 import { LeaderboardEntry } from "./LeaderboardEntry";
 
@@ -57,6 +58,9 @@ export function Leaderboard() {
     const interval = setInterval(fetchLeaderboard, POLL_INTERVAL);
     return () => clearInterval(interval);
   }, [fetchLeaderboard]);
+
+  // The page loader stays up until the first rows are in.
+  useLoaderHold(loading);
 
   if (loading) {
     return (

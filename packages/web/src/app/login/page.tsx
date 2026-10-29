@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "@/components/page-loader/Link";
 import { createSupabaseClient } from "@/lib/supabase";
 
 export default function LoginPage() {
@@ -92,9 +93,9 @@ export default function LoginPage() {
 
           <p className="text-[11px] text-text-dim">
             by signing in, you agree to the{" "}
-            <a href="/terms" className="text-cyan">
+            <Link href="/terms" className="text-cyan">
               terms of service
-            </a>
+            </Link>
           </p>
         </div>
       </div>

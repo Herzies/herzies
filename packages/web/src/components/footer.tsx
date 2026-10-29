@@ -1,3 +1,4 @@
+import Link from "@/components/page-loader/Link";
 import Container from "./container";
 
 export default function Footer() {
@@ -7,9 +8,9 @@ export default function Footer() {
         <div className="chrome flex justify-between items-center text-xs text-text-dim">
           <span>&copy; {new Date().getFullYear()} Herzies</span>
           <div className="flex gap-4 items-center">
-            <a href="/terms" className="text-xs text-text-dim">
+            <Link href="/terms" className="text-xs text-text-dim">
               terms of service
-            </a>
+            </Link>
             <a
               href="https://github.com/Herzies/herzies"
               target="_blank"

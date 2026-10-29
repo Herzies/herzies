@@ -1,3 +1,4 @@
+import Link from "@/components/page-loader/Link";
 import Container from "./container";
 
 export default async function Header() {
@@ -6,21 +7,24 @@ export default async function Header() {
       <Container>
         <div className="chrome flex flex-wrap justify-between items-end gap-x-8 gap-y-4">
           <div className="flex items-center gap-3">
-            <a href="/" className="text-xl font-bold text-purple no-underline">
+            <Link
+              href="/"
+              className="text-xl font-bold text-purple no-underline"
+            >
               herzies
               <span className="text-[10px] font-medium opacity-60 ml-1">
                 [open beta]
               </span>
-            </a>
+            </Link>
           </div>
 
           <div className="flex gap-4 items-center">
-            <a href="/about" className="text-[13px] text-cyan">
+            <Link href="/about" className="text-[13px] text-cyan">
               about
-            </a>
-            <a href="/leaderboard" className="text-[13px] text-yellow">
+            </Link>
+            <Link href="/leaderboard" className="text-[13px] text-yellow">
               leaderboard
-            </a>
+            </Link>
           </div>
         </div>
       </Container>
