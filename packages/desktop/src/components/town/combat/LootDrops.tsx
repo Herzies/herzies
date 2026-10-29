@@ -1,5 +1,6 @@
 import { type ItemDef, RARITY_COLORS } from "@herzies/shared";
 import { BOSS_STAND } from "@herzies/shared/combat";
+import { itemVoxelMeshes, lootPillarMaterial } from "@herzies/shared/gl";
 import type { LootDrop } from "@herzies/shared/town-net";
 import { Html } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
@@ -25,7 +26,6 @@ import {
   restAt,
   tierOf,
   type Vec2,
-  voxelsOf,
 } from "./loot";
 import { hasLootRoom, pushLootLog } from "./lootFeed";
 import { combat, shake } from "./state";
@@ -646,66 +646,10 @@ function draw(d: Drop, now: number, dt: number, flat: number) {
   d.hum?.level(Math.max(0, 1 - flat / 14));
 }
 
-const PILLAR_VERTEX = /* glsl */ `
-  varying float vY;
-  void main() {
-    vY = position.y + 0.5;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-  }
-`;
-const PILLAR_FRAGMENT = /* glsl */ `
-  uniform vec3 uColor;
-  uniform float uOpacity;
-  varying float vY;
-  void main() {
-    // Bright at the floor, fading out up the beam.
-    float a = pow(1.0 - clamp(vY, 0.0, 1.0), 1.6) * uOpacity;
-    gl_FragColor = vec4(uColor, a);
-  }
-`;
-
-const VOXEL_GEOMETRY = new THREE.BoxGeometry(
-  LOOT.voxel,
-  LOOT.voxel,
-  LOOT.voxel,
-);
-
 /** One drop's model, beam, floor glow and name. */
 function DropView({ drop }: { drop: Drop }) {
   const color = useMemo(() => new THREE.Color(drop.color), [drop.color]);
-  const voxels = useMemo(() => voxelsOf(drop.item), [drop.item]);
-  const [plain, glow] = useMemo(() => {
-    const make = (list: typeof voxels, material: THREE.Material) => {
-      const mesh = new THREE.InstancedMesh(
-        VOXEL_GEOMETRY,
-        material,
-        Math.max(1, list.length),
-      );
-      const m = new THREE.Matrix4();
-      const c = new THREE.Color();
-      list.forEach((vx, i) => {
-        m.makeTranslation(
-          (vx.x - 11.5) * LOOT.voxel,
-          (vx.y - 11.5) * LOOT.voxel,
-          (vx.z - 1) * LOOT.voxel,
-        );
-        mesh.setMatrixAt(i, m);
-        mesh.setColorAt(i, c.set(vx.color));
-      });
-      mesh.count = list.length;
-      return mesh;
-    };
-    return [
-      make(
-        voxels.filter((v) => !v.glow),
-        new THREE.MeshLambertMaterial({ emissive: "#202020" }),
-      ),
-      make(
-        voxels.filter((v) => v.glow),
-        new THREE.MeshBasicMaterial({ toneMapped: false }),
-      ),
-    ];
-  }, [voxels]);
+  const [plain, glow] = useMemo(() => itemVoxelMeshes(drop.item), [drop.item]);
   useEffect(
     () => () => {
       for (const m of [plain, glow]) {
@@ -715,19 +659,7 @@ function DropView({ drop }: { drop: Drop }) {
     },
     [plain, glow],
   );
-  const pillarMaterial = useMemo(
-    () =>
-      new THREE.ShaderMaterial({
-        uniforms: { uColor: { value: color }, uOpacity: { value: 0 } },
-        vertexShader: PILLAR_VERTEX,
-        fragmentShader: PILLAR_FRAGMENT,
-        transparent: true,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-        blending: THREE.AdditiveBlending,
-      }),
-    [color],
-  );
+  const pillarMaterial = useMemo(() => lootPillarMaterial(color), [color]);
   const sparkles = useMemo(() => {
     if (drop.tier < 2) return null;
     const n = 6 + drop.tier * 3;

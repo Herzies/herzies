@@ -8,4 +8,6 @@ export * from "./companion.js";
 export * from "./HerzieModel.js";
 export * from "./HerzieView.js";
 export * from "./herzieMaterial.js";
+export * from "./loot.js";
+export * from "./scenery.js";
 export * from "./stage.js";

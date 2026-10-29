@@ -1,4 +1,5 @@
 import { mulberry32 } from "@herzies/shared";
+import { bushGeometry, rockGeometry, tuftGeometry } from "@herzies/shared/gl";
 import {
   CuboidCollider,
   CylinderCollider,
@@ -6,7 +7,6 @@ import {
 } from "@react-three/rapier";
 import { useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
-import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { swayInWind } from "./ambient";
 
 import { BenchColliders, Benches } from "./Benches";
@@ -69,7 +69,6 @@ type Part = {
   palette?: string[];
 };
 
-const rockGeometry = new THREE.DodecahedronGeometry(0.55, 0);
 /** Rocks and stumps aren't see-through like the trees: low on the
  * ground, they never hide the player, and dithered they only speckle. */
 const rockMaterial = new THREE.MeshLambertMaterial({
@@ -82,37 +81,6 @@ const stumpTopMaterial = new THREE.MeshLambertMaterial({
   color: "#b08a5a",
   flatShading: true,
 });
-
-/** A tuft of tall grass: blades leaning out every which way, dark at the
- * root and light at the tip. */
-function tuftGeometry(): THREE.BufferGeometry {
-  const rand = mulberry32(4711);
-  const base = new THREE.Color("#2c5a2c");
-  const tip = new THREE.Color("#9cc76a");
-  const blades = Array.from({ length: 11 }, () => {
-    const h = 0.55 + rand() * 0.45;
-    const g = new THREE.ConeGeometry(0.06, h, 3).toNonIndexed();
-    g.translate(0, h / 2, 0);
-    g.rotateZ((rand() - 0.5) * 0.7);
-    g.rotateY(rand() * Math.PI * 2);
-    const a = rand() * Math.PI * 2;
-    const r = Math.sqrt(rand()) * 0.4;
-    g.translate(Math.cos(a) * r, 0, Math.sin(a) * r);
-    const pos = g.attributes.position;
-    const colors: number[] = [];
-    const c = new THREE.Color();
-    for (let i = 0; i < pos.count; i++) {
-      c.lerpColors(base, tip, Math.min(1, pos.getY(i) / h));
-      colors.push(c.r, c.g, c.b);
-    }
-    g.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
-    g.deleteAttribute("uv");
-    return g;
-  });
-  const tuft = mergeGeometries(blades) as THREE.BufferGeometry;
-  tuft.computeVertexNormals();
-  return tuft;
-}
 
 /** Spots for a few small things scattered in a cell. */
 function scatter(seed: number, n: number, spread: number, min = 0.7): Copy[] {
@@ -161,36 +129,6 @@ const capGeometry = new THREE.SphereGeometry(
   Math.PI / 2,
 );
 
-/** A bush: a few leafy lumps huddled together, dark underneath and lit
- * on top. */
-function bushGeometry(): THREE.BufferGeometry {
-  const dark = new THREE.Color("#2c5a2c");
-  const light = new THREE.Color("#5c9a48");
-  const lumps = (
-    [
-      [0, 0.55, 0, 0.6],
-      [0.36, 0.4, 0.2, 0.45],
-      [-0.32, 0.42, -0.14, 0.48],
-      [0.04, 0.38, -0.4, 0.4],
-      [-0.12, 0.36, 0.4, 0.38],
-    ] as const
-  ).map(([x, y, z, r]) => {
-    const g = new THREE.IcosahedronGeometry(r, 1);
-    g.scale(1, 0.85, 1);
-    g.translate(x, y, z);
-    const pos = g.attributes.position;
-    const colors: number[] = [];
-    const c = new THREE.Color();
-    for (let i = 0; i < pos.count; i++) {
-      c.lerpColors(dark, light, Math.min(1, Math.max(0, pos.getY(i) / 1.05)));
-      colors.push(c.r, c.g, c.b);
-    }
-    g.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
-    g.deleteAttribute("uv");
-    return g;
-  });
-  return mergeGeometries(lumps) as THREE.BufferGeometry;
-}
 /** Bushes sway a little (they're solid, so they don't part round you). */
 const bushMaterial = swayInWind(
   new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }),

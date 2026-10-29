@@ -35,7 +35,6 @@ const ZOOM_EASE = 0.18;
 /** The old renderer's frame, at the herzie's centre, in world units. */
 const FRAME_HEIGHT = 4.5;
 const CAMERA_DISTANCE = DEFAULT_CAMERA_DISTANCE * MODEL_SCALE;
-const TILT = (DEFAULT_CAMERA_TILT_DEG * Math.PI) / 180;
 /** The studio sun's shadow map, a side. A herzie is drawn ~100 px tall (the
  * stage draws at a quarter of the screen's resolution), and a page can hold
  * many: small is plenty. */
@@ -89,6 +88,9 @@ export type HerzieViewProps = {
   threadConfig?: ThreadConfig;
   /** Drag to turn it, with momentum. Default: true. */
   draggable?: boolean;
+  /** Turns on its own this fast (radians a second), while not paused or
+   * dragged. Default: 0. */
+  spin?: number;
   /** Freeze it (the host is hidden or unfocused). */
   paused?: boolean;
   wrapperStyle?: CSSProperties;
@@ -120,6 +122,15 @@ export type HerzieViewProps = {
    * stacks above everything gives its herzies a stage of its own, inside
    * it, so its background can't cover them. */
   onStage?: HerzieStage;
+  /** Things to stand it among (see islandScenery), added to its scene as
+   * they are: one object per view, since an object has one parent. */
+  scenery?: THREE.Object3D;
+  /** The camera this many times further back than usual, the framing kept
+   * (less perspective: things in front don't loom). Default 1. */
+  distance?: number;
+  /** How far the camera looks down, in degrees. Default: the usual slight
+   * tilt (DEFAULT_CAMERA_TILT_DEG). */
+  tilt?: number;
 };
 
 /**
@@ -140,6 +151,7 @@ export function HerzieView({
   dangleConfig = DEFAULT_DANGLE_CONFIG,
   threadConfig = DEFAULT_THREAD_CONFIG,
   draggable = true,
+  spin: spinSpeed = 0,
   paused = false,
   wrapperStyle,
   wrapperClassName,
@@ -153,6 +165,9 @@ export function HerzieView({
   opacity = 1,
   armed = false,
   onStage = herzieStage,
+  scenery,
+  distance = 1,
+  tilt = DEFAULT_CAMERA_TILT_DEG,
 }: HerzieViewProps) {
   const box = useRef<HTMLDivElement>(null);
   const width = Math.ceil(cols * size * 0.6);
@@ -192,6 +207,9 @@ export function HerzieView({
     grey,
     opacity,
     armed,
+    spinSpeed,
+    distance,
+    tilt,
   });
   live.current = {
     paused,
@@ -206,6 +224,9 @@ export function HerzieView({
     grey,
     opacity,
     armed,
+    spinSpeed,
+    distance,
+    tilt,
   };
 
   /** The turn, in the old renderer's units (added to DEFAULT_Y_ANGLE). */
@@ -235,6 +256,7 @@ export function HerzieView({
     scene.add(model.root);
     const sun = studioSun(model);
     scene.add(sun, sun.target);
+    if (scenery) scene.add(scenery);
     const cam = new THREE.PerspectiveCamera(50, 1, 0.05, 100);
     /** Scratch: the feet, projected to find where they land. */
     const feet = new THREE.Vector3();
@@ -275,6 +297,8 @@ export function HerzieView({
           if (Math.abs(s.velocity) < MIN_VELOCITY) s.velocity = 0;
           s.angle += s.velocity * dt * 60;
         }
+        if (!l.paused && !s.dragging && s.velocity === 0)
+          s.angle += l.spinSpeed * dt;
 
         // The old renderer turned the creature by +yAngle in its own space
         // (y down, front −z): seen in the world (y up), that's the other
@@ -307,15 +331,15 @@ export function HerzieView({
         // centre, whatever its height: aiming at a fixed point instead put
         // the camera above a small herzie's eyes, looking down on it.
         const frame = FRAME_HEIGHT / c.zoom;
-        cam.fov = THREE.MathUtils.radToDeg(
-          2 * Math.atan(frame / 2 / CAMERA_DISTANCE),
-        );
+        const dist = CAMERA_DISTANCE * l.distance;
+        const tiltRad = THREE.MathUtils.degToRad(l.tilt);
+        cam.fov = THREE.MathUtils.radToDeg(2 * Math.atan(frame / 2 / dist));
         cam.aspect = w / h;
         const targetY = model.centerHeight;
         cam.position.set(
           0,
-          targetY + CAMERA_DISTANCE * Math.sin(TILT),
-          CAMERA_DISTANCE * Math.cos(TILT),
+          targetY + dist * Math.sin(tiltRad),
+          dist * Math.cos(tiltRad),
         );
         cam.lookAt(0, targetY, 0);
         // Standing on a floor, the picture pans so the feet land
@@ -338,7 +362,7 @@ export function HerzieView({
       remove();
       sun.dispose();
     };
-  }, [model, onStage]);
+  }, [model, onStage, scenery]);
 
   const [grabbing, setGrabbing] = useState(false);
   const onPointerDown = (e: React.PointerEvent) => {

@@ -1,12 +1,10 @@
 import {
   getItem,
-  getItemIcon,
-  hasCardFrame,
   type ItemDef,
-  RARITY_COLORS,
   type Rarity,
 } from "@herzies/shared";
 import { BOSS_STAND } from "@herzies/shared/combat";
+import { ITEM_VOXEL } from "@herzies/shared/gl";
 import type { LootTier } from "../sfx";
 
 /**
@@ -62,7 +60,7 @@ export const LOOT = {
   bobHz: 0.8,
   spinPerSecond: (Math.PI * 2) / 3,
   /** The voxel model's size: world units per pixel of a 24px icon. */
-  voxel: 0.045,
+  voxel: ITEM_VOXEL,
   /** Walk within this and it's pulled to you, taking this long. */
   magnetRadius: 1.7,
   magnetMs: 260,
@@ -93,62 +91,8 @@ export function tierOf(rarity: Rarity): LootTier {
 
 // --- The voxel model --------------------------------------------------------
 
-export type Voxel = {
-  /** Grid position: x right, y up (from the bottom row), z out of the card. */
-  x: number;
-  y: number;
-  z: number;
-  color: string;
-  /** Glows a little (the rarity frame). */
-  glow: boolean;
-};
-
-/**
- * The item's 24px icon as voxels, two deep. A card icon (most items) keeps
- * its card shape: the frame is painted in the rarity's colour and glows,
- * and the picture stands a voxel proud of the card's face, so it reads in
- * the round. Anything else (dice, the Safety Pick) is simply extruded.
- */
-export function voxelsOf(item: ItemDef): Voxel[] {
-  const { grid, palette } = getItemIcon(item);
-  const card = hasCardFrame(grid);
-  const h = grid.length;
-  const frameColor = RARITY_COLORS[item.rarity];
-  // The card's face colour: the commonest one inside the frame.
-  let face: string | null = null;
-  if (card) {
-    const counts = new Map<string, number>();
-    for (let y = 2; y < 22; y++)
-      for (let x = 5; x < 19; x++) {
-        const c = grid[y][x];
-        if (c !== ".") counts.set(c, (counts.get(c) ?? 0) + 1);
-      }
-    face = [...counts].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
-  }
-  const colorOf = (c: string) => {
-    if (c === "#" || !palette) return "#d8d8e0";
-    const i = Number.parseInt(c, 36);
-    return palette[i] ?? "#d8d8e0";
-  };
-  const out: Voxel[] = [];
-  for (let gy = 0; gy < h; gy++) {
-    const row = grid[gy];
-    for (let gx = 0; gx < row.length; gx++) {
-      const c = row[gx];
-      if (c === ".") continue;
-      const y = h - 1 - gy;
-      const frame = card && (gx === 4 || gx === 19 || gy === 1 || gy === 22);
-      const color = frame ? frameColor : colorOf(c);
-      // Card back and face, and the picture on the face one proud of it.
-      out.push({ x: gx, y, z: 0, color, glow: frame });
-      out.push({ x: gx, y, z: 1, color, glow: frame });
-      if (card && !frame && c !== face)
-        out.push({ x: gx, y, z: 2, color, glow: false });
-      if (frame) out.push({ x: gx, y, z: 2, color, glow: true });
-    }
-  }
-  return out;
-}
+// Shared with the website's about page: see @herzies/shared/gl (loot.ts).
+export { type Voxel, voxelsOf } from "@herzies/shared/gl";
 
 // --- Where it goes ----------------------------------------------------------
 
