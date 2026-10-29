@@ -21,7 +21,9 @@ import type { Equipped } from "./items.ts";
 /** Bumped on any incompatible change; the server turns away other versions
  * with {@link TOWN_CLOSE.outdated} so old desktop betas say "update" instead of
  * misreading frames. */
-export const TOWN_PROTOCOL = 3;
+export const TOWN_PROTOCOL = 4;
+// 4: cloaks (the Back slot). A boss pays everyone in the cave, and an app
+// from before the cloaks doesn't know them, so it's kept out until updated.
 
 /** Server snapshot rate. */
 export const TOWN_TICK_HZ = 15;

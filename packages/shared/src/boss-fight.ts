@@ -7,6 +7,8 @@
  * The shape of the fight, and the industry practice behind each number, is
  * in specs/boss-fight.md.
  */
+import type { BossRewardPool } from "./types.js";
+
 // ---------------------------------------------------------------------------
 // Lobby, lock, and who's in
 
@@ -193,3 +195,52 @@ export function parseTune(on: unknown): boolean | null {
 
 /** The fewest ms between two tune messages the room accepts. */
 export const TUNE_MIN_INTERVAL_MS = 1_500;
+
+/** The most items one reward pool may hold. */
+export const MAX_REWARD_POOL_ITEMS = 20;
+
+/**
+ * Checks and tidies a boss fight's `rewardPools` as typed into the admin:
+ * known items only (`isItem`), no repeats within a pool, a known mode, and a
+ * chance in (0, 100] for "chance" pools. Empty pools are dropped. Returns
+ * the cleaned pools, or what's wrong with them.
+ */
+export function parseBossRewardPools(
+  value: unknown,
+  isItem: (itemId: string) => boolean,
+): { pools: BossRewardPool[] } | { error: string } {
+  if (value === undefined || value === null) return { pools: [] };
+  if (!Array.isArray(value)) return { error: "Reward pools must be a list" };
+  const pools: BossRewardPool[] = [];
+  for (const [i, raw] of value.entries()) {
+    const label = `Reward pool ${i + 1}`;
+    if (!raw || typeof raw !== "object")
+      return { error: `${label} is invalid` };
+    const { itemIds, mode, chance } = raw as Record<string, unknown>;
+    if (!Array.isArray(itemIds) || itemIds.some((id) => typeof id !== "string"))
+      return { error: `${label}: items must be item ids` };
+    const ids = [...new Set(itemIds as string[])].filter((id) => id !== "");
+    if (ids.length === 0) continue;
+    if (ids.length > MAX_REWARD_POOL_ITEMS)
+      return { error: `${label}: at most ${MAX_REWARD_POOL_ITEMS} items` };
+    const unknown = ids.find((id) => !isItem(id));
+    if (unknown) return { error: `${label}: unknown item "${unknown}"` };
+    if (mode === "all") {
+      pools.push({ itemIds: ids, mode });
+    } else if (mode === "chance") {
+      if (typeof chance !== "number" || !(chance > 0 && chance <= 100))
+        return { error: `${label}: chance must be above 0 and at most 100` };
+      pools.push({ itemIds: ids, mode, chance });
+    } else {
+      return { error: `${label}: mode must be "all" or "chance"` };
+    }
+  }
+  return { pools };
+}
+
+/** Each item's own chance in a pool, in percent: 100 for "all", else the
+ * pool's chance split evenly between its items. */
+export function rewardPoolItemChance(pool: BossRewardPool): number {
+  if (pool.mode === "all") return 100;
+  return (pool.chance ?? 0) / Math.max(1, pool.itemIds.length);
+}

@@ -1,4 +1,4 @@
-import { TREAT_ITEM_ID } from "@herzies/shared";
+import { getItem, parseBossRewardPools, TREAT_ITEM_ID } from "@herzies/shared";
 import type { createAdminClient } from "@/lib/supabase-admin";
 
 type Admin = ReturnType<typeof createAdminClient>;
@@ -104,7 +104,19 @@ export async function validateBossConfig(
   if (typeof config.rewardItemId !== "string" || !config.rewardItemId) {
     return { error: "rewardItemId is required" };
   }
-  const missing = await missingItems(admin, [config.rewardItemId]);
+  // Pools (00124_boss_reward_pools.sql): catalog items only, checked
+  // against the items table too, since that's what the payout reads.
+  const parsed = parseBossRewardPools(
+    config.rewardPools,
+    (id) => !!getItem(id),
+  );
+  if ("error" in parsed) return parsed;
+  const rewardPools = parsed.pools;
+
+  const missing = await missingItems(admin, [
+    config.rewardItemId,
+    ...rewardPools.flatMap((p) => p.itemIds),
+  ]);
   if (missing.length > 0) {
     return { error: `Unknown item: ${missing.join(", ")}` };
   }
@@ -115,6 +127,7 @@ export async function validateBossConfig(
       ...(hasHp ? { maxHp } : {}),
       ...(hasPer ? { hpPerPlayer } : {}),
       ...(hasFloor ? { minionFloor } : {}),
+      ...(rewardPools.length > 0 ? { rewardPools } : {}),
     },
   };
 }

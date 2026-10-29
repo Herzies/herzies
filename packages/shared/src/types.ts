@@ -280,6 +280,20 @@ export interface SongHuntFinder {
   claimedAt: string;
 }
 
+/**
+ * A pool of items a boss fight pays out, on top of its rewardItemId and the
+ * random rolls (settle_boss_fight, 00124_boss_reward_pools.sql):
+ * - "all": everyone still in when the boss falls gets every item;
+ * - "chance": everyone still in has `chance`% of getting one of them,
+ *   picked evenly (30% over three items is 10% each), never more.
+ */
+export interface BossRewardPool {
+  itemIds: string[];
+  mode: "all" | "chance";
+  /** Percent, 0–100 ("chance" only). */
+  chance?: number;
+}
+
 /** Boss fight config as stored in `events.config`. */
 export interface BossFightConfig {
   /** No longer used: the boss hates all music (it was one genre per phase).
@@ -287,6 +301,8 @@ export interface BossFightConfig {
   hatedGenres?: Genre[];
   /** What everyone still in the fight when the boss falls gets. */
   rewardItemId: string;
+  /** More rewards, each pool paid as its mode says. */
+  rewardPools?: BossRewardPool[];
   /** No longer paid (00122: everyone still in is paid alike); kept so old
    * events still read. */
   topRewardItemId?: string;
@@ -329,6 +345,8 @@ export interface BossFightView {
   /** What everyone who dealt damage gets — shown from the start. Optional
    * only for an event whose config has none. */
   rewardItemId?: string;
+  /** The event's reward pools (older servers omit them). */
+  rewardPools?: BossRewardPool[];
   topRewardItemId?: string;
   topCount: number;
   hp: number;

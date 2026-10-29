@@ -1631,9 +1631,9 @@ describe("boss loot", () => {
       new URL(`../../../supabase/migrations/${name}`, import.meta.url),
       "utf8",
     );
-  // settle_boss_fight lives in 00114; the roll was last replaced in 00124.
+  // settle_boss_fight lives in 00114; the roll was last replaced in 00118.
   const sql = migration("00114_boss_bonus_loot.sql");
-  const rollSql = migration("00124_cloak_loot.sql");
+  const rollSql = migration("00118_boss_loot_no_tokens.sql");
 
   it("rolls from the same weights as bossLootWeights", () => {
     const roll = rollSql.slice(
@@ -1706,11 +1706,11 @@ describe("cloaks", () => {
     expect(DECK_TOTAL_SLOTS).toBe(17);
   });
 
-  it("class cloaks come only from bosses; the Tailwind Cloak never drops", () => {
+  it("class cloaks come only from reward pools; the Tailwind Cloak never drops", () => {
     const boss = new Set(bossLootWeights().map((w) => w.itemId));
     for (const id of BOSS_ONLY_ITEM_IDS) {
       expect(NON_DROPPABLE_ITEM_IDS).toContain(id);
-      expect(boss.has(id)).toBe(true);
+      expect(boss.has(id)).toBe(false);
     }
     expect(NON_DROPPABLE_ITEM_IDS).toContain("tailwind-cloak");
     expect(boss.has("tailwind-cloak")).toBe(false);

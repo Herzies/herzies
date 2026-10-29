@@ -1217,7 +1217,8 @@ export const NON_DROPPABLE_ITEM_IDS = [
   "old-cymbal",
   // Consumables are bought from Medea, never dropped.
   "star-candy",
-  // The class cloaks come only from a boss's loot (BOSS_ONLY_ITEM_IDS)…
+  // The class cloaks come only from a boss's reward pools
+  // (BOSS_ONLY_ITEM_IDS)…
   "troubadour-mantle",
   "groove-cape",
   "drumhide-cloak",
@@ -1225,9 +1226,10 @@ export const NON_DROPPABLE_ITEM_IDS = [
   "tailwind-cloak",
 ] as const;
 
-/** Never a listening drop (they're in NON_DROPPABLE_ITEM_IDS, so George and
- * every other pool leave them out too), but in a boss's random loot: the
- * class cloaks, legendary, earned by beating one. */
+/** Never a listening drop, nor in a boss's random loot (they're in
+ * NON_DROPPABLE_ITEM_IDS, so George and every other pool leave them out
+ * too): the class cloaks, legendary, earned only from a boss fight's reward
+ * pools (BossFightConfig.rewardPools), which the admin sets per fight. */
 export const BOSS_ONLY_ITEM_IDS = [
   "troubadour-mantle",
   "groove-cape",
@@ -1326,7 +1328,7 @@ export const BOSS_LOOT_EXCLUDED_ITEM_IDS = ["cd"];
 /** What a boss's random loot is drawn from, and how likely each is: every
  * item that drops from listening (not in NON_DROPPABLE_ITEM_IDS, no
  * seasonal window, not in BOSS_LOOT_EXCLUDED_ITEM_IDS), weighted per BOSS_LOOT_RARITY_BOOST. settle_boss_fight
- * rolls from a copy of this list (boss_loot_roll, 00124_cloak_loot.sql);
+ * rolls from a copy of this list (boss_loot_roll, 00118_boss_loot_no_tokens.sql);
  * items.test.ts checks the two agree, so a new droppable item needs adding
  * there too. */
 export function bossLootWeights(): { itemId: string; weight: number }[] {
@@ -1334,10 +1336,7 @@ export function bossLootWeights(): { itemId: string; weight: number }[] {
     ...NON_DROPPABLE_ITEM_IDS,
     ...BOSS_LOOT_EXCLUDED_ITEM_IDS,
   ]);
-  const bossOnly = new Set<string>(BOSS_ONLY_ITEM_IDS);
-  return ITEMS.filter(
-    (i) => bossOnly.has(i.id) || (!never.has(i.id) && !i.dropWindow),
-  ).map((i) => ({
+  return ITEMS.filter((i) => !never.has(i.id) && !i.dropWindow).map((i) => ({
     itemId: i.id,
     weight: Math.round(
       (ITEM_DROP_WEIGHT_OVERRIDES[i.id] ?? RARITY_DROP_WEIGHTS[i.rarity]) *
@@ -3539,7 +3538,7 @@ export const ITEMS: ItemDef[] = [
   // Cloaks (the back slot): simulated cloth in the 3D view (cloak-physics.ts,
   // CLOAK_STYLES in creature-renderer.ts). Stage 3, where a herzie has a back
   // to hang one from. The three class cloaks suit a class but any herzie can
-  // wear them; they come only from a boss's loot (BOSS_ONLY_ITEM_IDS).
+  // wear them; they come only from a boss's reward pools (BOSS_ONLY_ITEM_IDS).
   {
     id: "troubadour-mantle",
     name: "Troubadour's Mantle",

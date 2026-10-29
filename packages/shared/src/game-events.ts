@@ -188,6 +188,8 @@ export async function buildBossFightConfig(
     // Shown from the start, so players know what they're fighting for (the
     // boss's "?" lists them). It used to be withheld until the boss was down.
     rewardItemId: config.rewardItemId,
+    // ...and the pools, with their odds (BossRewardPool).
+    rewardPools: config.rewardPools ?? [],
     topRewardItemId: config.topRewardItemId,
     topCount: config.topCount ?? 3,
     hp: state?.hp ?? 0,

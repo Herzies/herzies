@@ -3,6 +3,7 @@ import {
   BOSS_BODY_TYPE,
   DEFAULT_Y_ANGLE,
   generateCreatureParams,
+  rewardPoolItemChance,
   SpeechBubble,
   useChatter,
 } from "@herzies/shared";
@@ -380,6 +381,20 @@ export function BossFightHelp({ event }: { event: GameEvent }) {
   const rewards: VisitorReward[] = [];
   if (config.rewardItemId) {
     rewards.push({ label: "Everyone still in", itemId: config.rewardItemId });
+  }
+  for (const pool of config.rewardPools ?? []) {
+    const each = rewardPoolItemChance(pool);
+    for (const itemId of pool.itemIds) {
+      rewards.push(
+        pool.mode === "all"
+          ? { label: "Everyone still in", itemId }
+          : {
+              label: `${pool.chance}% chance of one`,
+              itemId,
+              note: `${Number(each.toFixed(2))}%`,
+            },
+      );
+    }
   }
   return (
     <VisitorHelp

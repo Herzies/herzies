@@ -83,17 +83,18 @@ describe("cloaks", () => {
     expect(units.find((u) => u.id === second)?.equipped_slot).toBe("back");
   });
 
-  it("the class cloaks are in a boss's loot; the Tailwind Cloak isn't", async () => {
+  it("no cloak is in a boss's random loot (they come from reward pools)", async () => {
     const seen = new Set<string>();
     for (let i = 0; i < 1500; i++) {
       seen.add(await rpc<string>("boss_loot_roll", {}));
     }
-    expect(seen.has("tailwind-cloak")).toBe(false);
-    // Each is ~0.27% of a roll: 1500 rolls all but surely show at least one.
-    expect(
-      ["troubadour-mantle", "groove-cape", "drumhide-cloak"].some((id) =>
-        seen.has(id),
-      ),
-    ).toBe(true);
+    for (const id of [
+      "troubadour-mantle",
+      "groove-cape",
+      "drumhide-cloak",
+      "tailwind-cloak",
+    ]) {
+      expect(seen.has(id)).toBe(false);
+    }
   }, 120_000);
 });

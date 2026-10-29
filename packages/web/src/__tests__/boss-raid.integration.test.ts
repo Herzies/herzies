@@ -362,6 +362,85 @@ describe("the cave raid", () => {
     });
   });
 
+  describe("reward pools (00124)", () => {
+    const CLOAKS = ["troubadour-mantle", "groove-cape", "drumhide-cloak"];
+
+    /** A fight with these pools, two herzies in, killed and settled: what
+     * each of them got, minus the reward item and the ten random rolls. */
+    async function payout(rewardPools: unknown[]) {
+      const event = await spawnBoss(0, 100);
+      await admin()
+        .from("events")
+        .update({
+          config: {
+            rewardItemId: "first-edition",
+            maxHp: 100,
+            rewardPools,
+          },
+        })
+        .eq("id", event);
+      const [a, b] = [await player(), await player()];
+      await lock(event, [a, b], 100);
+      await rpc("apply_boss_damage_batch", {
+        p_batch: `dmg:${crypto.randomUUID()}`,
+        p_event: event,
+        p_damage: [{ uid: a, damage: 1_000 }],
+      });
+      expect(await rpc("settle_boss_fight", { p_event_id: event })).toBe(2);
+      const { data } = await admin()
+        .from("pending_drops")
+        .select("user_id, item_id")
+        .eq("source_event", event);
+      const loot = await rpc<Record<string, { item: string }[]>>(
+        "boss_loot_json",
+        { p_event: event },
+      );
+      return [a, b].map((uid) => ({
+        all: (data ?? [])
+          .filter((d) => d.user_id === uid)
+          .map((d) => d.item_id),
+        order: (loot[uid] ?? []).map((d) => d.item),
+      }));
+    }
+
+    it("a chance pool at 100% pays exactly one of its items", async () => {
+      for (const got of await payout([
+        { itemIds: CLOAKS, mode: "chance", chance: 100 },
+      ])) {
+        expect(got.all).toHaveLength(12);
+        const cloaks = got.all.filter((id) => CLOAKS.includes(id));
+        expect(cloaks).toHaveLength(1);
+        // The cave drops the reward first, then the pool's item.
+        expect(got.order.slice(0, 2)).toEqual(["first-edition", cloaks[0]]);
+      }
+    });
+
+    it("a chance pool that misses pays nothing extra", async () => {
+      for (const got of await payout([
+        { itemIds: CLOAKS, mode: "chance", chance: 0.0000001 },
+      ])) {
+        expect(got.all).toHaveLength(11);
+      }
+    });
+
+    it("an all pool pays every item", async () => {
+      for (const got of await payout([{ itemIds: CLOAKS, mode: "all" }])) {
+        expect(got.all).toHaveLength(14);
+        for (const id of CLOAKS) expect(got.all).toContain(id);
+      }
+    });
+
+    it("an unknown item is skipped, the rest still paid", async () => {
+      for (const got of await payout([
+        { itemIds: ["no-such-item", "groove-cape"], mode: "all" },
+      ])) {
+        expect(got.all).toHaveLength(12);
+        expect(got.all).toContain("groove-cape");
+        expect(got.all).not.toContain("no-such-item");
+      }
+    });
+  });
+
   it("logs a fight once", async () => {
     const event = await spawnBoss();
     const log = {

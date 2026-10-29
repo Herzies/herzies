@@ -8,7 +8,9 @@ import {
   enrageFactor,
   inTuneBonus,
   minionPackSize,
+  parseBossRewardPools,
   parseTune,
+  rewardPoolItemChance,
   wanderReach,
   weightedRound,
 } from "./boss-fight.js";
@@ -118,5 +120,55 @@ describe("the boss's lines", () => {
   it("stay up long enough to read, not forever", () => {
     expect(bossLineMs("Hi")).toBeGreaterThan(2_000);
     expect(bossLineMs("x".repeat(500))).toBeLessThanOrEqual(7_000);
+  });
+});
+
+describe("parseBossRewardPools", () => {
+  const known = new Set(["a", "b", "c"]);
+  const isItem = (id: string) => known.has(id);
+
+  it("keeps good pools, drops empty ones and repeats", () => {
+    expect(
+      parseBossRewardPools(
+        [
+          { itemIds: ["a", "b", "a"], mode: "chance", chance: 30 },
+          { itemIds: [], mode: "all" },
+          { itemIds: ["c"], mode: "all" },
+        ],
+        isItem,
+      ),
+    ).toEqual({
+      pools: [
+        { itemIds: ["a", "b"], mode: "chance", chance: 30 },
+        { itemIds: ["c"], mode: "all" },
+      ],
+    });
+    expect(parseBossRewardPools(undefined, isItem)).toEqual({ pools: [] });
+  });
+
+  it("refuses unknown items, modes and chances out of range", () => {
+    const bad = [
+      [{ itemIds: ["zzz"], mode: "all" }],
+      [{ itemIds: ["a"], mode: "some" }],
+      [{ itemIds: ["a"], mode: "chance", chance: 0 }],
+      [{ itemIds: ["a"], mode: "chance", chance: 101 }],
+      [{ itemIds: ["a"], mode: "chance" }],
+      "a",
+    ];
+    for (const value of bad)
+      expect(parseBossRewardPools(value, isItem)).toHaveProperty("error");
+  });
+
+  it("splits a chance pool evenly", () => {
+    expect(
+      rewardPoolItemChance({
+        itemIds: ["a", "b", "c"],
+        mode: "chance",
+        chance: 30,
+      }),
+    ).toBeCloseTo(10);
+    expect(rewardPoolItemChance({ itemIds: ["a", "b"], mode: "all" })).toBe(
+      100,
+    );
   });
 });
