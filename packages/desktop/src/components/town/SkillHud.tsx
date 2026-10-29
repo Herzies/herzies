@@ -31,7 +31,7 @@ export function SkillHud({
         const b = buffOn(bossFight.you, "cymbrella", now);
         buffBox.current.style.display = b ? "" : "none";
         const text = b
-          ? `🛡 ${Math.round(b.value * 100)}% · ${Math.ceil((b.until - now) / 1000)}s`
+          ? `Cymbrella −${Math.round(b.value * 100)}% · ${Math.ceil((b.until - now) / 1000)}s`
           : "";
         if (b && buffBox.current.textContent !== text)
           buffBox.current.textContent = text;
@@ -40,7 +40,7 @@ export function SkillHud({
         const h = buffOn(bossFight.you, "haste", now);
         hasteBox.current.style.display = h ? "" : "none";
         const text = h
-          ? `⏩ Haste +${Math.round(h.value * 100)}% · ${Math.ceil((h.until - now) / 1000)}s`
+          ? `Haste +${Math.round(h.value * 100)}% · ${Math.ceil((h.until - now) / 1000)}s`
           : "";
         if (h && hasteBox.current.textContent !== text)
           hasteBox.current.textContent = text;
