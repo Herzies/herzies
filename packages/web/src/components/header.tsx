@@ -9,7 +9,7 @@ export default async function Header() {
           <div className="flex items-center gap-3">
             <Link
               href="/"
-              className="text-xl font-bold text-purple no-underline"
+              className="text-xl font-bold text-white no-underline"
             >
               herzies
               <span className="text-[10px] font-medium opacity-60 ml-1">
@@ -19,10 +19,10 @@ export default async function Header() {
           </div>
 
           <div className="flex gap-4 items-center">
-            <Link href="/about" className="text-[13px] text-cyan">
+            <Link href="/about" className="text-[13px] text-white">
               about
             </Link>
-            <Link href="/leaderboard" className="text-[13px] text-yellow">
+            <Link href="/leaderboard" className="text-[13px] text-white">
               leaderboard
             </Link>
           </div>

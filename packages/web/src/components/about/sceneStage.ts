@@ -6,6 +6,10 @@ import { type RefObject, useLayoutEffect, useRef, useState } from "react";
 /** Drawn pixels per CSS pixel: finer than the stage's usual (1/4), so the
  * islands show finer detail. */
 const PIXEL_SCALE = 1 / 3.5;
+/** Finer still on phones (below Tailwind's `md`): their scenes are fewer
+ * CSS pixels across, so at the desktop scale they'd turn out chunky. */
+const PHONE_PIXEL_SCALE = 1 / 2.5;
+const PHONE = "(max-width: 767px)";
 
 /**
  * A scene's own herzie stage: one canvas, laid in the scene's box (the
@@ -20,13 +24,22 @@ export function useSceneStage(): [
 ] {
   const [stage] = useState(() => {
     const s = new HerzieStage();
-    s.pixelScale = PIXEL_SCALE;
+    s.pixelScale = PIXEL_SCALE; // until the layout effect checks the screen
     return s;
   });
   const host = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
+    const phone = window.matchMedia(PHONE);
+    const update = () => {
+      stage.pixelScale = phone.matches ? PHONE_PIXEL_SCALE : PIXEL_SCALE;
+    };
+    update();
+    phone.addEventListener("change", update);
     stage.setHost(host.current, { fill: true });
-    return () => stage.dispose();
+    return () => {
+      phone.removeEventListener("change", update);
+      stage.dispose();
+    };
   }, [stage]);
   return [stage, host];
 }

@@ -371,6 +371,12 @@ body:has([data-sky]) {
   color: var(--color-text);
 }
 
+/* The header's white links, readable against the light sky: the same
+   soft shadow they have over the Town. */
+body:has([data-sky]) > nav .chrome a.text-white {
+  text-shadow: 0 1px 3px rgb(0 0 0 / 0.45);
+}
+
 @keyframes sky-cloud-drift {
   from {
     transform: translateX(-100%);
