@@ -348,8 +348,7 @@ export function buildCloakRig(
         ring +
         slope * y +
         depth *
-          (0.5 +
-            0.5 * Math.cos((2 * Math.PI * c) / PLEAT_COLUMNS + phase));
+          (0.5 + 0.5 * Math.cos((2 * Math.PI * c) / PLEAT_COLUMNS + phase));
       const phi = across(c) * half;
       rest[i * 3] = B[0] + rho * Math.sin(phi);
       rest[i * 3 + 1] = collarY + y * down;
@@ -364,7 +363,10 @@ export function buildCloakRig(
   for (let r = 1; r < rows; r++) {
     const t = rows === 1 ? 0 : r / (rows - 1);
     for (let c = 0; c < cols; c++) {
-      const edge = Math.max(0, (Math.abs(across(c)) - HUG_FROM) / (1 - HUG_FROM));
+      const edge = Math.max(
+        0,
+        (Math.abs(across(c)) - HUG_FROM) / (1 - HUG_FROM),
+      );
       hug[r * cols + c] = edge * Math.min(1, t * 2.5);
     }
   }

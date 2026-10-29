@@ -189,11 +189,17 @@ describe("cloak physics", () => {
           }
           const cx = rig.rest[c * 3] - B[0];
           const cz = rig.rest[c * 3 + 2] - B[2];
-          return { reach: reach / R, round: round / Math.abs(Math.atan2(cx, cz)) };
+          return {
+            reach: reach / R,
+            round: round / Math.abs(Math.atan2(cx, cz)),
+          };
         };
         const left = edge(0);
         const right = edge(rig.cols - 1);
-        for (const [side, e] of [["left", left], ["right", right]] as const) {
+        for (const [side, e] of [
+          ["left", left],
+          ["right", right],
+        ] as const) {
           // Just off the body, not winged out (with no hug: 1.3–1.6)…
           expect(e.reach, `${seed} ${id} ${side} reach`).toBeLessThan(1.22);
           // …and running forward down its side, not tucked in behind it

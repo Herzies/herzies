@@ -810,7 +810,8 @@ describe("cloaks", () => {
     const rest = lift();
     h.jump();
     // Already floating by the top of the hop, not only once it's landed.
-    for (let t = 0; t < JUMP_AIR_SECONDS * 0.6; t += 1 / 60) h.update(1 / 60, 0);
+    for (let t = 0; t < JUMP_AIR_SECONDS * 0.6; t += 1 / 60)
+      h.update(1 / 60, 0);
     expect(lift() - rest).toBeGreaterThan(0.025);
     let peak = 0;
     while (h.airborne) {

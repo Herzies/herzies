@@ -1402,12 +1402,8 @@ export class HerzieModel {
       width: w,
       height: h,
       clasps,
-      legs: new Set(
-        cut.parts.filter((i) => spheres[i].part.startsWith("leg")),
-      ),
-      arms: new Set(
-        cut.parts.filter((i) => spheres[i].part.startsWith("arm")),
-      ),
+      legs: new Set(cut.parts.filter((i) => spheres[i].part.startsWith("leg"))),
+      arms: new Set(cut.parts.filter((i) => spheres[i].part.startsWith("arm"))),
       tuck: 0,
       lastWorld: null,
       worldVelocity: new THREE.Vector3(),
