@@ -27,6 +27,11 @@ export type ShowcaseProps = {
   onReady?: () => void;
 };
 
+/** A phone's screen is small: drawn at the app's scale its pixels come out
+ * too coarse to make the herzies out, so it gets twice the resolution
+ * (cheap there: no ambient occlusion). */
+const PHONE_PIXEL_SCALE = 0.8;
+
 /** One lap around the statue, in seconds. */
 const LAP_S = 120;
 /** How far out the camera circles, how high, and how far above the statue's
@@ -62,7 +67,7 @@ export function Showcase({
   const hidden = usePageHidden();
   return (
     <Canvas
-      dpr={PIXEL_SCALE}
+      dpr={lite ? PHONE_PIXEL_SCALE : PIXEL_SCALE}
       gl={{ antialias: false, powerPreference: "low-power" }}
       shadows="percentage"
       style={{ imageRendering: "pixelated" }}
