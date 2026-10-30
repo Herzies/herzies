@@ -43,7 +43,7 @@ import {
 import { RemotePlayers } from "./RemotePlayers";
 import { sfxPortal } from "./sfx";
 import "./shadows";
-import { PIXEL_SCALE, useTownPixelSize } from "./pixelSize";
+import { HOME_PIXEL_FACTOR, PIXEL_SCALE, useTownPixelSize } from "./pixelSize";
 import {
   goToMap,
   mapById,
@@ -150,9 +150,11 @@ export default function TownCanvas(props: TownCanvasProps) {
     <Canvas
       // Chunky pixels, to sit with the ASCII herzies: drawn at a fraction of
       // the screen's resolution and scaled up without smoothing.
+      // Chunkier still at Home, where the herzie's drawn close up.
       dpr={
-        props.pixelScale ??
-        (pixelSize ? window.devicePixelRatio / pixelSize : PIXEL_SCALE)
+        (props.pixelScale ??
+          (pixelSize ? window.devicePixelRatio / pixelSize : PIXEL_SCALE)) /
+        (home ? HOME_PIXEL_FACTOR : 1)
       }
       gl={{ antialias: false }}
       // Plain PCF: soft enough, and at these pixels the edge reads clean.

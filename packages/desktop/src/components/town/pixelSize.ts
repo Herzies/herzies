@@ -13,6 +13,11 @@ const KEY = "town.debug.pixelSize";
  * Retina screen, so the pixels all come out the same size). */
 export const PIXEL_SCALE = 0.4;
 
+/** At Home the camera's in close, so the herzie fills the window: its
+ * pixels are drawn this many times bigger, to stay chunky. A whole number,
+ * so a Town pixel still covers whole screen pixels. */
+export const HOME_PIXEL_FACTOR = 2;
+
 /** The default, as screen pixels per Town pixel (to the nearest). */
 export function defaultPixelSize(): number {
   return Math.round(window.devicePixelRatio / PIXEL_SCALE);

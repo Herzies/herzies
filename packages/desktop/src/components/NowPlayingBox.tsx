@@ -77,7 +77,7 @@ export function NowPlayingBox({
       ) : (
         <div className={cn(card, "flex items-center justify-center")}>
           <div className="px-5 text-center text-[10px] text-text-dim">
-            Play some music to start earning XP
+            Play music to earn XP and items
           </div>
         </div>
       )}
