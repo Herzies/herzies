@@ -7,6 +7,7 @@ import { cn } from "../../lib/utils";
 import { lookOf } from "../TownScene";
 import { VISITOR_THEMES } from "../VisitorRowTheme";
 import { ambient } from "./ambient";
+import { homeMode } from "./homeMode";
 import { markMet, RESIDENTS, useMet } from "./met";
 import { NAME_SHADOW, nameOpacity } from "./nameFade";
 import { NOTICE_RANGE, type TownSpot, townSave } from "./runtime";
@@ -58,6 +59,8 @@ export function Visitor({
 
   // The name fades in as you come near.
   const name = useRef<HTMLDivElement>(null);
+  // The "!" goes with the world on the way Home, as names do.
+  const marker = useRef<HTMLButtonElement>(null);
   useFrame((_, dt) => {
     if (!herzie) return;
     const dx = townSave.x - at.x;
@@ -67,6 +70,11 @@ export function Visitor({
       name.current.style.opacity = String(o);
       // Not there, so not clickable either.
       name.current.style.pointerEvents = o < 0.1 ? "none" : "";
+    }
+    if (marker.current) {
+      const o = 1 - homeMode.worldFade;
+      marker.current.style.opacity = String(o);
+      marker.current.style.pointerEvents = o < 0.1 ? "none" : "";
     }
     const target =
       Math.hypot(dx, dz) < NOTICE_RANGE ? Math.atan2(dx, dz) : plaza;
@@ -151,6 +159,7 @@ export function Visitor({
           zIndexRange={[20, 0]}
         >
           <button
+            ref={marker}
             type="button"
             onClick={talk}
             aria-label={

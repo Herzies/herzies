@@ -11,7 +11,7 @@ import { CaveTimer } from "./CaveTimer";
 import { tryEnterCave } from "./cave";
 import type { ChatBubbles } from "./chatBubbles";
 import { Boss } from "./combat/Boss";
-import { Combat } from "./combat/Combat";
+import { Combat, leaveCombat } from "./combat/Combat";
 import { CombatOverlay } from "./combat/DamageNumbers";
 import { LootDrops } from "./combat/LootDrops";
 import { Mobs } from "./combat/Mobs";
@@ -308,6 +308,8 @@ function Systems({
   const interact = () => {
     const card = near.current?.card;
     if (card?.openKey) {
+      // Talking's done roaming, not aiming: the mouse let go for the card.
+      leaveCombat();
       markMet(card);
       onOpen(card.openKey);
     } else if (portal.current) enter(portal.current);

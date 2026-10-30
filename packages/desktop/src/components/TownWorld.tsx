@@ -34,6 +34,7 @@ import { BossHud, MusicBonus } from "./town/BossHud";
 import { BossResults } from "./town/BossResults";
 import { setCave } from "./town/cave";
 import { useChatBubbles } from "./town/chatBubbles";
+import { leaveCombat } from "./town/combat/Combat";
 import { resetBossFight } from "./town/combat/fight";
 import { onLootLog } from "./town/combat/lootFeed";
 import { useBossResultsShown } from "./town/combat/results";
@@ -470,6 +471,7 @@ export function TownWorld({
         <button
           type="button"
           onClick={() => {
+            leaveCombat();
             markMet(near.card);
             onOpen(talkTo);
           }}
