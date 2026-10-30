@@ -908,6 +908,50 @@ describe("cloaks", () => {
     );
   });
 
+  it("keeps its cloth under the gear slung over it", () => {
+    // How far a point is inside a held solid (positive: inside).
+    const inside = (p: THREE.Vector3, s: Sphere, mesh: THREE.Object3D) => {
+      const d = p.clone().sub(mesh.position);
+      if (!s.shape) return s.radius - d.length();
+      const half = Math.hypot(...s.shape.axis);
+      const u = new THREE.Vector3(0, 1, 0).applyQuaternion(mesh.quaternion);
+      const t = d.dot(u);
+      if (s.shape.kind === "capsule") {
+        const tt = Math.max(-half, Math.min(half, t));
+        return s.radius - d.sub(u.multiplyScalar(tt)).length();
+      }
+      const radial = d.clone().sub(u.clone().multiplyScalar(t)).length();
+      const dome =
+        (s.shape.dome ?? 0) * Math.max(0, 1 - (radial / s.radius) ** 2);
+      return Math.min(s.radius - radial, half + dome - Math.abs(t));
+    };
+    for (const back of ["groove-cape", "troubadour-mantle"]) {
+      const h = new HerzieModel({
+        seed: "model-test",
+        stage: 3,
+        equipped: { back, main_hand: "lute" },
+      });
+      for (let t = 0; t < 2; t += 1 / 60) h.update(1 / 60, 0);
+      // biome-ignore lint/suspicious/noExplicitAny: reading the drawn cloth
+      const m = h as any;
+      const surface: Float32Array = m.cloak.surface;
+      const spheres: Sphere[] = m.model.spheres;
+      let worst = 0;
+      spheres.forEach((s, i) => {
+        if (!s.held) return;
+        for (let p = 0; p < surface.length; p += 3) {
+          const at = new THREE.Vector3(
+            surface[p],
+            surface[p + 1],
+            surface[p + 2],
+          );
+          worst = Math.max(worst, inside(at, s, m.meshes[i]));
+        }
+      });
+      expect(worst).toBe(0);
+    }
+  });
+
   it("is bounded where it can swing, and freed with the model", () => {
     const h = new HerzieModel(CLOAKED);
     const plain = new HerzieModel(LOOK);

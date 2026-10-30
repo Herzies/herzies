@@ -1257,3 +1257,100 @@ function crossV(a: V3, b: V3): V3 {
     a[0] * b[1] - a[1] * b[0],
   ];
 }
+
+/** A solid of gear slung over the cloak, as posed now: a sphere (no
+ * `axis`), or a capsule or a cylinder along `axis` (centre to end). */
+export interface CloakGear {
+  center: V3;
+  radius: number;
+  kind: "sphere" | "capsule" | "cylinder";
+  axis: V3;
+  /** Cylinders: how far each end bulges past the rim (see Shape.dome). */
+  dome: number;
+}
+
+/** How far `p` is inside `g` (negative: outside). Cylinders' ends count
+ * their dome; a cone is passed as the cylinder round it. */
+function gearDepth(g: CloakGear, px: number, py: number, pz: number): number {
+  const dx = px - g.center[0];
+  const dy = py - g.center[1];
+  const dz = pz - g.center[2];
+  if (g.kind === "sphere") {
+    return g.radius - Math.sqrt(dx * dx + dy * dy + dz * dz);
+  }
+  const [ax, ay, az] = g.axis;
+  const half = Math.sqrt(ax * ax + ay * ay + az * az);
+  if (half < 1e-9) return g.radius - Math.sqrt(dx * dx + dy * dy + dz * dz);
+  const t = (dx * ax + dy * ay + dz * az) / half;
+  const ux = ax / half;
+  const uy = ay / half;
+  const uz = az / half;
+  if (g.kind === "capsule") {
+    const tt = Math.max(-half, Math.min(half, t));
+    const qx = dx - ux * tt;
+    const qy = dy - uy * tt;
+    const qz = dz - uz * tt;
+    return g.radius - Math.sqrt(qx * qx + qy * qy + qz * qz);
+  }
+  const rx = dx - ux * t;
+  const ry = dy - uy * t;
+  const rz = dz - uz * t;
+  const radial = Math.sqrt(rx * rx + ry * ry + rz * rz);
+  const end =
+    half + g.dome * Math.max(0, 1 - (radial / Math.max(1e-9, g.radius)) ** 2);
+  return Math.min(g.radius - radial, end - Math.abs(t));
+}
+
+/** Tucks each point of `points` (x, y, z, …) that's inside slung `gear`
+ * under it: in toward `toward` (the torso's middle) till it's `margin`
+ * clear. The gear rides on the cloak, so the cloth must stay beneath it —
+ * pushed out of it the way the body pushes, it'd be drawn over the gear. */
+export function tuckUnderGear(
+  points: Float32Array,
+  gear: readonly CloakGear[],
+  toward: V3,
+  margin: number,
+): void {
+  if (gear.length === 0) return;
+  const [tx, ty, tz] = toward;
+  for (let p = 0; p < points.length; p += 3) {
+    const px = points[p];
+    const py = points[p + 1];
+    const pz = points[p + 2];
+    let inside = false;
+    for (const g of gear) {
+      if (gearDepth(g, px, py, pz) > -margin) {
+        inside = true;
+        break;
+      }
+    }
+    if (!inside) continue;
+    let dx = tx - px;
+    let dy = ty - py;
+    let dz = tz - pz;
+    const reach = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    if (reach < 1e-9) continue;
+    dx /= reach;
+    dy /= reach;
+    dz /= reach;
+    // Bisect along the way in for where it's clear of every piece.
+    const clear = (s: number) => {
+      const x = px + dx * s;
+      const y = py + dy * s;
+      const z = pz + dz * s;
+      for (const g of gear) if (gearDepth(g, x, y, z) > -margin) return false;
+      return true;
+    };
+    if (!clear(reach)) continue;
+    let lo = 0;
+    let hi = reach;
+    for (let k = 0; k < 12; k++) {
+      const mid = (lo + hi) / 2;
+      if (clear(mid)) hi = mid;
+      else lo = mid;
+    }
+    points[p] = px + dx * hi;
+    points[p + 1] = py + dy * hi;
+    points[p + 2] = pz + dz * hi;
+  }
+}

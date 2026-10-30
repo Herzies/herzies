@@ -1193,9 +1193,12 @@ interface Neck {
   body: Sphere;
 }
 
+/** The creature's own biggest sphere of a part. Worn items are skipped: the
+ * witch hat's brim is tagged "head" and is wider than the head itself. */
 function largestPart(spheres: Sphere[], part: string): Sphere | undefined {
   let best: Sphere | undefined;
   for (const s of spheres) {
+    if (s.zone === "wearable") continue;
     if (s.part === part && (!best || s.radius > best.radius)) best = s;
   }
   return best;
@@ -2568,9 +2571,67 @@ function buildHeldSpheres(spheres: Sphere[], equipped: Equipped): Sphere[] {
     const id = equipped[slot];
     const build = id && HELD_ITEM_BUILDERS[id];
     const hand = build ? handOf(spheres, HELD_ARM[part], over) : null;
-    if (build && hand) out.push(...build(spheres, part, hand));
+    if (build && hand) {
+      const prop = build(spheres, part, hand);
+      out.push(...(hand.over > 0 ? liftOverCloak(prop, hand) : prop));
+    }
   }
   return out;
+}
+
+/** How near a solid comes to `p`: its rims and faces (a cylinder's
+ * domed middles), its capsule's ends, sampled. */
+function nearestTo(s: Sphere, p: V3): number {
+  if (!s.shape) return Math.hypot(...sub(s.center, p)) - s.radius;
+  const { axis, dome = 0, kind } = s.shape;
+  const ends = [add(s.center, axis), sub(s.center, axis)];
+  if (kind === "capsule") {
+    return Math.min(...ends.map((e) => Math.hypot(...sub(e, p)))) - s.radius;
+  }
+  const half = Math.max(1e-9, Math.hypot(...axis));
+  const u = scale(axis, 1 / half);
+  const a = norm(cross(u, Math.abs(u[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0]));
+  const b = cross(u, a);
+  let best = Number.POSITIVE_INFINITY;
+  ends.forEach((e, k) => {
+    const r = k === 0 ? (s.shape?.tipRadius ?? s.radius) : s.radius;
+    const bulge = scale(u, (k === 0 ? 1 : -1) * Math.max(0, dome));
+    best = Math.min(best, Math.hypot(...sub(add(e, bulge), p)));
+    for (let i = 0; i < 16; i++) {
+      const t = (i / 16) * Math.PI * 2;
+      const rim = add(
+        e,
+        add(scale(a, Math.cos(t) * r), scale(b, Math.sin(t) * r)),
+      );
+      best = Math.min(best, Math.hypot(...sub(rim, p)));
+    }
+  });
+  return best;
+}
+
+/** A prop slung over a cloak, moved straight out from the back till no part
+ * of it sinks below the cloth: it rides on the cloak, and the cloak's drawn
+ * tucked under it (see tuckUnderGear). Thread-hung props swing on their own
+ * rig, and are left where they're hung. */
+function liftOverCloak(prop: Sphere[], hand: Hand): Sphere[] {
+  const socket = prop[0]?.held;
+  if (!socket || socket.thread) return prop;
+  const { center, radius } = hand.torso;
+  let sum: V3 = [0, 0, 0];
+  for (const s of prop) sum = add(sum, s.center);
+  const out = norm(sub(scale(sum, 1 / prop.length), center));
+  // Under the cloth: anywhere nearer the torso's middle than its surface
+  // plus the cloak (hand.torso.radius takes that in already).
+  let lift = 0;
+  for (const s of prop) lift = Math.max(lift, radius - nearestTo(s, center));
+  if (lift <= 0) return prop;
+  const by = scale(out, lift);
+  const moved: HeldSocket = {
+    ...socket,
+    back: add(socket.back, by),
+    handle: add(socket.handle, by),
+  };
+  return prop.map((s) => ({ ...s, center: add(s.center, by), held: moved }));
 }
 
 /**

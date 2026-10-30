@@ -4,6 +4,7 @@ import {
   CLOAK_SUBSTEP,
   type CloakColliders,
   type CloakConfig,
+  type CloakGear,
   type CloakRig,
   type CloakSim,
   type V3 as CloakV3,
@@ -16,6 +17,7 @@ import {
   resetCloak,
   settleCloak,
   stepCloak,
+  tuckUnderGear,
 } from "../cloak-physics.js";
 import {
   CLOTH_FINISH,
@@ -191,6 +193,7 @@ const CLOAK_SMOOTHING = 3;
 /** How far the drawn cloth keeps off the body (creature units): under the
  * particles' own margin, so the push only catches what falls between. */
 const CLOAK_DRAWN_MARGIN = 0.02;
+const GEAR_AXIS = new THREE.Vector3();
 /** A cloak's settled drape, by body and cloak: every herzie of a shape
  * shares one, so the Town can build a crowd without settling each. */
 const settledCloaks = new Map<
@@ -388,6 +391,9 @@ type CloakRun = {
    * reachingOver): in quickly as a hand reaches back, out slowly after —
    * the cloth has hung into where they were, and is eased back aside. */
   tuck: number;
+  /** Gear slung on its back (class gear), by part index, with its solid as
+   * posed this frame: the drawn cloth is tucked under it. */
+  gear: { at: number; solid: CloakGear }[];
   /** Its body in the world last frame, and how fast it was going. */
   lastWorld: THREE.Vector3 | null;
   worldVelocity: THREE.Vector3;
@@ -1475,9 +1481,60 @@ export class HerzieModel {
       legs: new Set(cut.parts.filter((i) => spheres[i].part.startsWith("leg"))),
       arms: new Set(cut.parts.filter((i) => spheres[i].part.startsWith("arm"))),
       tuck: 0,
+      gear: spheres.flatMap((s, at) =>
+        s.held
+          ? [
+              {
+                at,
+                solid: {
+                  center: [0, 0, 0] as CloakV3,
+                  radius: s.radius,
+                  kind:
+                    s.shape?.kind === "capsule"
+                      ? "capsule"
+                      : s.shape
+                        ? "cylinder"
+                        : "sphere",
+                  axis: [0, 0, 0] as CloakV3,
+                  dome: s.shape?.dome ?? 0,
+                } satisfies CloakGear,
+              },
+            ]
+          : [],
+      ),
       lastWorld: null,
       worldVelocity: new THREE.Vector3(),
     };
+  }
+
+  /** Tucks the drawn cloth under the gear slung over it, where it's posed
+   * now: the gear rides on the cloak, never in it. */
+  private tuckCloak(run: CloakRun) {
+    if (run.gear.length === 0) return;
+    const { spheres } = this.model;
+    for (const { at, solid } of run.gear) {
+      const mesh = this.meshes[at];
+      const shape = spheres[at].shape;
+      const p = mesh.position;
+      solid.center[0] = p.x;
+      solid.center[1] = p.y;
+      solid.center[2] = p.z;
+      if (shape) {
+        // A held solid's mesh is turned so its up is the axis (see pose).
+        const half = Math.hypot(...shape.axis);
+        GEAR_AXIS.set(0, 1, 0).applyQuaternion(mesh.quaternion);
+        solid.axis[0] = GEAR_AXIS.x * half;
+        solid.axis[1] = GEAR_AXIS.y * half;
+        solid.axis[2] = GEAR_AXIS.z * half;
+      }
+    }
+    const torso = this.meshes[run.bodyAt].position;
+    tuckUnderGear(
+      run.surface,
+      run.gear.map((g) => g.solid),
+      [torso.x, torso.y, torso.z],
+      CLOAK_DRAWN_MARGIN,
+    );
   }
 
   /** The body's colliders as it's posed now (its meshes' places). */
@@ -1631,6 +1688,7 @@ export class HerzieModel {
     // body already: not worth the push.
     if (this.clothDetail !== "frozen") {
       pushOutOfColliders(run.surface, run.drawnColliders, CLOAK_DRAWN_MARGIN);
+      this.tuckCloak(run);
     }
     cloakNormals(run.surface, run.width, run.height, rig.outward, run.normals);
     const { position, normal } = run.geometry.attributes;
