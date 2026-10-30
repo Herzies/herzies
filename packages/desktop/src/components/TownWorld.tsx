@@ -7,7 +7,10 @@ import {
   TOWER_GUARD_KEY,
 } from "@herzies/shared";
 import {
+  Component,
+  type ErrorInfo,
   lazy,
+  type ReactNode,
   Suspense,
   useCallback,
   useEffect,
@@ -37,6 +40,7 @@ import { useBossResultsShown } from "./town/combat/results";
 import { useCombat } from "./town/combat/state";
 import { useFpsShown } from "./town/fps";
 import { Hotbar } from "./town/Hotbar";
+import { homeMode } from "./town/homeMode";
 import { Key } from "./town/Key";
 import type { TownMap } from "./town/map";
 import { markMet } from "./town/met";
@@ -74,7 +78,11 @@ export function TownWorld({
   stats,
   profile,
   units = [],
+  home = false,
 }: {
+  /** At Home: the world's seen from in front of your herzie, faded away
+   * round it (see town/homeMode); its labels go with it. */
+  home?: boolean;
   /** The bank's copies: how many of each hotbar item are left. */
   units?: readonly ItemUnit[];
   /** The player's herzie's stats: how hard its waves hit. */
@@ -153,7 +161,11 @@ export function TownWorld({
   // not one per thing that loads (the code, Rapier, the events), which
   // blinked as each handed over to the next.
   const [ready, setReady] = useState(false);
-  const onReady = useCallback(() => setReady(true), []);
+  const onReady = useCallback(() => {
+    setReady(true);
+    // Home can now be shown in the world, rather than the app's stand-in.
+    homeMode.setReady(true);
+  }, []);
   // A backdrop runs until that first frame is up.
   const canvasPaused = paused && !(backdrop && !ready);
 
@@ -168,6 +180,10 @@ export function TownWorld({
   useEffect(() => {
     if (map.id !== "bossroom" && map.id !== "tower") resetBossFight();
   }, [map.id]);
+  // No Home on an island you fight on.
+  useEffect(() => {
+    homeMode.setCombatMap(!!map.combat);
+  }, [map.combat]);
   // The cave's door and sign follow the boss in the events.
   const bossCard = cards.find((c) => c.type === "boss_fight");
 
@@ -227,20 +243,16 @@ export function TownWorld({
   }, [cards, map]);
 
   const equippedKey = JSON.stringify(player.equipped ?? null);
+  // Ground accessories (the boombox) belong to the herzie's Home, not to a
+  // herzie out walking: they're in its model, but only shown at Home (see
+  // HerzieModel.setAccessories). Everyone else sees it as the town ticket
+  // has it, without them.
   // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the look's content
   const look = useMemo(
     () => ({
       seed: player.seed,
       stage: player.stage,
-      // Ground accessories (the boombox) belong to the herzie's home, not
-      // to a herzie out walking.
-      equipped: player.equipped
-        ? {
-            ...player.equipped,
-            ground_left: undefined,
-            ground_right: undefined,
-          }
-        : undefined,
+      equipped: player.equipped ?? undefined,
     }),
     [player.seed, player.stage, equippedKey],
   );
@@ -299,7 +311,14 @@ export function TownWorld({
   );
 
   return (
-    <div className="relative min-h-0 flex-1 overflow-hidden">
+    <div
+      className={cn(
+        "town-world relative min-h-0 flex-1 overflow-hidden",
+        // At Home the world's labels (names, chat over heads) fade with it;
+        // only what's dropped around you keeps its name (globals.css).
+        home && "town-home",
+      )}
+    >
       {net.status === "outdated" ? (
         <div
           className={cn(
@@ -413,22 +432,25 @@ export function TownWorld({
         <FrameRate className="pointer-events-none absolute top-2 left-2 z-30 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white/70 tabular-nums" />
       ) : null}
       {opened && (
-        <Suspense fallback={null}>
-          <TownCanvas
-            spots={spots}
-            net={net}
-            bubbles={bubbles}
-            player={look}
-            paused={canvasPaused}
-            onOpen={onOpen}
-            onOpenProfile={onOpenProfile}
-            onNearChange={setNear}
-            onBenchChange={setBench}
-            onPortalChange={setPortalTo}
-            onReady={onReady}
-            stats={stats}
-          />
-        </Suspense>
+        <TownBoundary>
+          <Suspense fallback={null}>
+            <TownCanvas
+              spots={spots}
+              net={net}
+              bubbles={bubbles}
+              player={look}
+              paused={canvasPaused}
+              onOpen={onOpen}
+              onOpenProfile={onOpenProfile}
+              onNearChange={setNear}
+              onBenchChange={setBench}
+              onPortalChange={setPortalTo}
+              onReady={onReady}
+              stats={stats}
+              homeDrops
+            />
+          </Suspense>
+        </TownBoundary>
       )}
       {!hudHidden ? (
         <>
@@ -443,7 +465,8 @@ export function TownWorld({
         <LoadingSplash overlay label="loading town" />
       ) : null}
 
-      {talkTo && near ? (
+      {/* At Home nothing's in reach: the world's faded away round you. */}
+      {home ? null : talkTo && near ? (
         <button
           type="button"
           onClick={() => {
@@ -501,6 +524,38 @@ export function TownWorld({
       ) : null}
     </div>
   );
+}
+
+/**
+ * The 3D world failing (no WebGL, Rapier's WASM not loading) takes only
+ * itself down: Home keeps its own stand-in herzie (homeMode never turns
+ * ready), and the Town says it couldn't load.
+ */
+class TownBoundary extends Component<
+  { children: ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  componentDidCatch(error: unknown, info: ErrorInfo) {
+    console.error(
+      "[town] the world failed to load",
+      error,
+      info.componentStack,
+    );
+    homeMode.setReady(false);
+  }
+  render() {
+    if (this.state.failed)
+      return (
+        <div className="absolute inset-0 flex items-center justify-center p-6 text-center text-ui text-text-dim">
+          The Town couldn't load on this machine.
+        </div>
+      );
+    return this.props.children;
+  }
 }
 
 /** A key, as the hints show it. */

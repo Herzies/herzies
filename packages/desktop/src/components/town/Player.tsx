@@ -1,7 +1,7 @@
-import { getHerzieStats } from "@herzies/shared";
+import { getHerzieStats, SH } from "@herzies/shared";
 import { HerzieModel } from "@herzies/shared/gl";
 import { Html } from "@react-three/drei";
-import { useFrame } from "@react-three/fiber";
+import { useFrame, useThree } from "@react-three/fiber";
 import {
   CapsuleCollider,
   type RapierCollider,
@@ -11,6 +11,7 @@ import {
   useRapier,
 } from "@react-three/rapier";
 import { useEffect, useMemo, useRef } from "react";
+import * as THREE from "three";
 import type { Look } from "../TownScene";
 import { ambient } from "./ambient";
 import { SEAT_Y } from "./Benches";
@@ -20,6 +21,9 @@ import { shoveFromBoss } from "./combat/fight";
 import { combat } from "./combat/state";
 import { applyDowned, downInRaid } from "./downed";
 import { HeadBubble } from "./HeadBubble";
+import { keepAtHome } from "./HomeLayer";
+import { HomeShadow } from "./HomeShadow";
+import { homeMode } from "./homeMode";
 import type { TownInput } from "./input";
 import { groundY, type TownMap } from "./map";
 import { type Mover, stepMover, walkAzimuth } from "./movement";
@@ -61,6 +65,24 @@ const aimingInput: TownInput = {
   mouseRight: true,
   jump: false,
 };
+/** Nothing held: at Home the herzie stands, whatever's down (a key held
+ * since before it came Home walks it once it's out). */
+const stillInput: TownInput = {
+  ...aimingInput,
+  mouseRight: false,
+};
+
+/** The columns Home lays a herzie's props out against (HerzieWithSky: the
+ * small window's width in its 3px cells), so its ground accessories stand
+ * where Home stood them. */
+const HOME_LAYOUT_COLS = Math.floor(380 / 3);
+
+/** Spinning the herzie at Home with a drag, as Home always could: radians
+ * per px dragged, and how much of a flick's speed is kept each 60fps
+ * frame (as HerzieView). */
+const SPIN_PER_PX = Math.PI / 200;
+const SPIN_FRICTION = 0.92;
+
 /** The keys as they are, with the mouse read as steering (combat mode). */
 function aiming(input: TownInput): TownInput {
   return Object.assign(aimingInput, input, {
@@ -114,18 +136,41 @@ export function Player({
   const equippedKey = JSON.stringify(look.equipped ?? null);
   // Its gear's move speed (the Tailwind Cloak): no die can raise it
   // (noUpgrade), so the catalog's number off `equipped` is the whole of it.
+  // Not its ground accessories': they stay Home (and the town server, which
+  // checks the speed, never sees them).
   // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the look's content
   const speedScale = useMemo(
-    () => 1 + getHerzieStats(look.equipped).moveSpeed / 100,
+    () =>
+      1 +
+      getHerzieStats(
+        look.equipped && {
+          ...look.equipped,
+          ground_left: undefined,
+          ground_right: undefined,
+        },
+      ).moveSpeed /
+        100,
     [equippedKey],
   );
   // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the look's content
   const herzie = useMemo(
-    () => new HerzieModel(look, { lighting: ambient }),
+    () =>
+      new HerzieModel(look, {
+        lighting: ambient,
+        // Its ground accessories (the boombox) set down as Home always set
+        // them: in the corner of the small window's frame, standing still
+        // while a drag spins the herzie (see setAccessoryHeading below).
+        layoutCols: HOME_LAYOUT_COLS,
+        layoutRows: SH,
+        anchorGround: true,
+      }),
     [look.seed, look.stage, equippedKey],
   );
   useEffect(() => {
     herzie.heading = townSave.heading;
+    // Drawn at Home too, over the fading world (see HomeLayer).
+    keepAtHome(herzie.root);
+    herzie.setAccessories(homeMode.accessories);
     rt.playerHerzie = herzie;
     return () => {
       if (rt.playerHerzie === herzie) rt.playerHerzie = null;
@@ -170,7 +215,11 @@ export function Player({
     // In combat the herzie faces where the camera looks and strafes, as
     // with the right button held; the left button casts rather than looks.
     const raw = rt.input.current;
-    const input = combat.on && raw ? aiming(raw) : raw;
+    const input = homeMode.on
+      ? stillInput
+      : combat.on && raw
+        ? aiming(raw)
+        : raw;
     const m = mover.current;
     if (input && Object.values(input).some(Boolean))
       townLive.lastInputAt = performance.now();
@@ -259,6 +308,78 @@ export function Player({
 
   const stillFor = useRef(0);
   const downed = useRef(0);
+
+  // At Home, a drag spins the herzie where it stands (the view stays put),
+  // with a flick's spin running on and slowing.
+  const surface = useThree((s) => s.gl.domElement);
+  const camera = useThree((s) => s.camera);
+  const spin = useRef({ dragging: false, x: 0, velocity: 0, over: false });
+  useEffect(() => {
+    const sp = spin.current;
+    const ray = new THREE.Raycaster();
+    const ndc = new THREE.Vector2();
+    const sphere = new THREE.Sphere();
+    /** Whether the pointer's over the herzie (it's what a drag spins, as on
+     * Home): a grab cursor, and a press there isn't "outside" a window
+     * open over Home (data-window-safe), which would close it. */
+    const hover = (e: PointerEvent) => {
+      let over = false;
+      if (homeMode.on && homeMode.blend === 1) {
+        const r = surface.getBoundingClientRect();
+        ndc.set(
+          ((e.clientX - r.left) / r.width) * 2 - 1,
+          -((e.clientY - r.top) / r.height) * 2 + 1,
+        );
+        ray.setFromCamera(ndc, camera);
+        herzie.root.getWorldPosition(sphere.center);
+        sphere.center.add(herzie.bounds.center);
+        sphere.radius = herzie.bounds.radius * 0.8;
+        over = ray.ray.intersectsSphere(sphere);
+      }
+      if (over === sp.over) return;
+      sp.over = over;
+      if (over) surface.dataset.windowSafe = "";
+      else delete surface.dataset.windowSafe;
+      if (!sp.dragging) surface.style.cursor = over ? "grab" : "";
+    };
+    const onDown = (e: PointerEvent) => {
+      if (!homeMode.on || e.button !== 0 || !sp.over) return;
+      sp.dragging = true;
+      sp.x = e.clientX;
+      sp.velocity = 0;
+      surface.setPointerCapture(e.pointerId);
+      surface.style.cursor = "grabbing";
+    };
+    const onMove = (e: PointerEvent) => {
+      if (!sp.dragging) {
+        hover(e);
+        return;
+      }
+      const dx = e.clientX - sp.x;
+      sp.x = e.clientX;
+      herzie.heading += dx * SPIN_PER_PX;
+      sp.velocity = dx * SPIN_PER_PX;
+    };
+    const onUp = (e: PointerEvent) => {
+      if (!sp.dragging) return;
+      sp.dragging = false;
+      if (surface.hasPointerCapture(e.pointerId))
+        surface.releasePointerCapture(e.pointerId);
+      surface.style.cursor = sp.over ? "grab" : "";
+    };
+    surface.addEventListener("pointerdown", onDown);
+    surface.addEventListener("pointermove", onMove);
+    surface.addEventListener("pointerup", onUp);
+    surface.addEventListener("pointercancel", onUp);
+    return () => {
+      surface.removeEventListener("pointerdown", onDown);
+      surface.removeEventListener("pointermove", onMove);
+      surface.removeEventListener("pointerup", onUp);
+      surface.removeEventListener("pointercancel", onUp);
+      delete surface.dataset.windowSafe;
+      surface.style.cursor = "";
+    };
+  }, [surface, herzie, camera]);
   // Herzies grow legs at stage 3 (see HerzieModel).
   rt.playerLegs = look.stage >= 3;
   useFrame((_, dt) => {
@@ -284,6 +405,24 @@ export function Player({
       combat.on ||
       discField.isOut(herzie, "held-l") ||
       discField.isOut(herzie, "held-r");
+    // A flick, spinning on at Home.
+    const sp = spin.current;
+    if (sp.over && !homeMode.on) {
+      sp.over = false;
+      delete surface.dataset.windowSafe;
+      surface.style.cursor = "";
+    }
+    if (!sp.dragging && sp.velocity !== 0) {
+      if (!homeMode.on) sp.velocity = 0;
+      herzie.heading += sp.velocity * dt * 60;
+      sp.velocity *= SPIN_FRICTION ** (dt * 60);
+      if (Math.abs(sp.velocity) < 0.0005) sp.velocity = 0;
+    }
+    // Its ground accessories (the boombox) are Home's: there, and gone as
+    // it walks off.
+    herzie.setAccessories(homeMode.accessories);
+    // Set down facing Home's camera, as Home's own view faced them.
+    herzie.setAccessoryHeading(homeMode.azimuth ?? herzie.heading);
     herzie.update(dt, rt.playerSpeed);
     downed.current = applyDowned(herzie, downInRaid(), downed.current, dt);
     townLive.jumps = herzie.jumps;
@@ -316,6 +455,7 @@ export function Player({
         }}
       >
         <primitive object={herzie.root} />
+        <HomeShadow radius={Math.max(0.5, herzie.height * 0.42)} />
       </group>
       {bubble ? (
         <Html position={[0, herzie.height + 0.3, 0]} zIndexRange={[19, 0]}>

@@ -6,7 +6,9 @@ import { Html } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
+import { notify } from "../../../lib/notices";
 import { herzies } from "../../../tauri-bridge";
+import { homeMode } from "../homeMode";
 import { townSave, useTownRuntime } from "../runtime";
 import {
   type LootTier,
@@ -212,16 +214,19 @@ function StoneBurst() {
 
 // --- The drops ---------------------------------------------------------------
 
-type Phase =
+export type Phase =
   | "waiting"
   | "flying"
   | "resting"
   | "pulled"
   | "fetching"
   | "carried"
+  /** Taken back where it came from (picked up somewhere else, or by the
+   * server for a spirit): drawn up and away (see HomeDrops). */
+  | "vanishing"
   | "done";
 
-type Drop = {
+export type Drop = {
   key: string;
   item: ItemDef;
   tier: LootTier;
@@ -254,6 +259,18 @@ type Drop = {
   fetchAt: number;
   spin: number;
   hum: ReturnType<typeof sfxLootHum>;
+  /** Something that dropped while you listened (see HomeDrops), rather
+   * than a fight's loot: it's only taken if the bag has room for it, and
+   * is otherwise left lying there. */
+  home?: boolean;
+  /** Being picked up (collect-drop is on its way). */
+  collecting?: boolean;
+  /** When the bag-full notice was last given for it, so walking about
+   * near it doesn't repeat it every frame. */
+  fullNoticeAt?: number;
+  /** Vanishing: where it's drawn up to, and how long it takes. */
+  vanishTo?: THREE.Vector3;
+  vanishMs?: number;
   view: {
     group: THREE.Group | null;
     model: THREE.Group | null;
@@ -347,6 +364,51 @@ function Drops({
     }));
   }, [loot, here, from, rt]);
 
+  useDropLoop(() => drops);
+
+  // Leaving (or the room closing): stop the hums, call the spirit back if
+  // it was out for one of these.
+  useEffect(() => () => releaseDrops(drops, rt.playerHerzie), [drops, rt]);
+
+  return (
+    <>
+      {drops.map((d) => (
+        <DropView key={d.key} drop={d} />
+      ))}
+    </>
+  );
+}
+
+/** How long a drop's name shows at Home after it lands. */
+const HOME_LABEL_MS = 2_600;
+
+/** How often the bag-full notice may repeat for one drop. */
+const FULL_NOTICE_MS = 4_000;
+
+/** Stops a batch's hums, and calls the spirit back if it was out for one of
+ * them (leaving, or the room closing). */
+export function releaseDrops(
+  drops: readonly Drop[],
+  herzie: { fetch(at: THREE.Vector3 | null): void } | null,
+): void {
+  for (const d of drops) {
+    d.hum?.stop();
+    d.hum = null;
+  }
+  if (errand && drops.includes(errand)) {
+    errand = null;
+    herzie?.fetch(null);
+  }
+}
+
+/**
+ * Runs drops on the ground, every frame: out of the air, landing, lying in
+ * their light; pulled to you as you walk up, or fetched by your spirit
+ * (one errand at a time, across every batch); picked up. `source` hands
+ * over the drops this frame.
+ */
+export function useDropLoop(source: () => readonly Drop[]): void {
+  const rt = useTownRuntime();
   // Pickups in a row climb a scale.
   const step = useRef(0);
   const scratch = useMemo(
@@ -354,23 +416,11 @@ function Drops({
     [],
   );
 
-  // Leaving (or the room closing): stop the hums, call the spirit back if
-  // it was out for one of these.
-  useEffect(
-    () => () => {
-      for (const d of drops) d.hum?.stop();
-      if (errand && drops.includes(errand)) {
-        errand = null;
-        rt.playerHerzie?.fetch(null);
-      }
-    },
-    [drops, rt],
-  );
-
   const collect = (d: Drop, now: number) => {
     if (errand === d) errand = null;
     d.phase = "done";
     d.since = now;
+    d.collecting = true;
     d.hum?.stop();
     d.hum = null;
     sfxLootPickup(step.current++, d.tier);
@@ -383,7 +433,9 @@ function Drops({
     // Refused like Home refuses it: an over-capacity item would have no slot
     // to show in. It isn't lost; it's one more drop on the Home ground. Not
     // retried here, so a full bank can't send the spirit round in circles.
-    const waiting = `"${name}" is waiting on your Home ground`;
+    const waiting = d.home
+      ? `"${name}" is still lying there`
+      : `"${name}" is waiting on your Home ground`;
     if (!hasLootRoom(d.item.id)) {
       pushLootLog(`Inventory full — ${waiting}`);
       return;
@@ -414,8 +466,13 @@ function Drops({
     if (errand && errand.fetch === null && errand.phase !== "carried")
       errand = null;
 
+    const drops = source();
     for (const d of drops) {
       const flat = Math.hypot(d.pos.x - player.x, d.pos.z - player.z);
+      // Something that dropped while you listened is only taken with room
+      // in the bag for it; otherwise it stays lying there, and says why
+      // when you walk up to it.
+      const room = !d.home || hasLootRoom(d.item.id);
       switch (d.phase) {
         case "waiting": {
           const at = d.here ? now : burstAt(now);
@@ -447,8 +504,16 @@ function Drops({
             const r = restAt(now - d.since);
             d.pos.set(d.spot.x, r.y + d.ground, d.spot.z);
           }
+          if (
+            !room &&
+            flat < LOOT.magnetRadius &&
+            now - (d.fullNoticeAt ?? 0) > FULL_NOTICE_MS
+          ) {
+            d.fullNoticeAt = now;
+            notify(`Inventory full — no room for "${d.item.name}"`);
+          }
           // Walk into it: it comes to you (and the spirit can stand down).
-          if (flat < LOOT.magnetRadius && now - d.restedAt > 120) {
+          if (room && flat < LOOT.magnetRadius && now - d.restedAt > 120) {
             if (d.fetch) herzie?.fetch(null);
             if (errand === d) errand = null;
             d.fetch = null;
@@ -460,13 +525,18 @@ function Drops({
           // The spirit spots it: one errand at a time, the grandest last.
           if (
             d.phase === "resting" &&
+            room &&
             spirit &&
             !errand &&
             now - d.restedAt > LOOT.spiritDelayMs &&
             flat < LOOT.spiritRadius &&
             d ===
               drops
-                .filter((x) => x.phase === "resting")
+                .filter(
+                  (x) =>
+                    x.phase === "resting" &&
+                    (!x.home || hasLootRoom(x.item.id)),
+                )
                 .sort((a, b) => a.tier - b.tier)[0]
           ) {
             d.phase = "fetching";
@@ -538,20 +608,24 @@ function Drops({
           )
             collect(d, now);
           break;
+        case "vanishing": {
+          const t = Math.max(
+            0,
+            Math.min(1, (now - d.since) / (d.vanishMs ?? 400)),
+          );
+          if (d.vanishTo) d.pos.lerpVectors(d.from, d.vanishTo, t * t);
+          if (t >= 1) {
+            d.phase = "done";
+            d.since = now;
+          }
+          break;
+        }
         case "done":
           break;
       }
       draw(d, now, dt, flat);
     }
   });
-
-  return (
-    <>
-      {drops.map((d) => (
-        <DropView key={d.key} drop={d} />
-      ))}
-    </>
-  );
 }
 
 /** Puts one drop's parts where its state says, this frame. */
@@ -586,6 +660,11 @@ function draw(d: Drop, now: number, dt: number, flat: number) {
     scale = 1 - t;
     v.model.rotation.y += t * 8;
   }
+  if (d.phase === "vanishing") {
+    const t = Math.max(0, Math.min(1, (now - d.since) / (d.vanishMs ?? 400)));
+    scale = 1 - t * t;
+    v.model.rotation.y += t * t * 10;
+  }
   v.model.scale.set(scale * squashX, scale * squashY, scale * squashX);
 
   // The pillar and the glow on the floor: in once it lands, pulsing for the
@@ -603,7 +682,7 @@ function draw(d: Drop, now: number, dt: number, flat: number) {
   if (landed) {
     pillar = Math.min(1, (now - d.restedAt) / 300) * pulse;
     if (d.phase === "pulled") pillar *= 1 - Math.min(1, since / LOOT.magnetMs);
-  } else if (d.phase === "done") {
+  } else if (d.phase === "done" || d.phase === "vanishing") {
     const t = Math.min(1, since / 350);
     pillar = (1 - t) * 0.8;
     pillarH = 1 + t * 0.6;
@@ -635,19 +714,23 @@ function draw(d: Drop, now: number, dt: number, flat: number) {
       pillar;
   }
 
-  // Its name, close up.
+  // Its name, close up. At Home, where everything's close and the names
+  // would pile up, only as it lands: what came, said once.
   if (v.label) {
     const near = landed && d.phase !== "pulled";
-    const o = near
-      ? Math.max(0, Math.min(1, (LOOT.labelRadius - flat) / 2))
-      : 0;
+    let o = near ? Math.max(0, Math.min(1, (LOOT.labelRadius - flat) / 2)) : 0;
+    if (d.home && homeMode.on)
+      o *= Math.max(
+        0,
+        Math.min(1, 1 - (now - d.restedAt - HOME_LABEL_MS) / 500),
+      );
     v.label.style.opacity = String(o);
   }
   d.hum?.level(Math.max(0, 1 - flat / 14));
 }
 
 /** One drop's model, beam, floor glow and name. */
-function DropView({ drop }: { drop: Drop }) {
+export function DropView({ drop }: { drop: Drop }) {
   const color = useMemo(() => new THREE.Color(drop.color), [drop.color]);
   const [plain, glow] = useMemo(() => itemVoxelMeshes(drop.item), [drop.item]);
   useEffect(
@@ -701,6 +784,9 @@ function DropView({ drop }: { drop: Drop }) {
             ref={(el) => {
               v.label = el;
             }}
+            // Its name stays up at Home, where the rest of the Town's
+            // labels go (see TownWorld).
+            data-home-keep={drop.home ? "" : undefined}
             className="whitespace-nowrap text-[11px] font-bold [text-shadow:0_1px_2px_#000,0_0_6px_#000] transition-opacity duration-200"
             style={{ color: drop.color, opacity: 0 }}
           >

@@ -36,6 +36,12 @@ const ZOOM_EASE = 0.18;
 /** The old renderer's frame, at the herzie's centre, in world units. */
 const FRAME_HEIGHT = 4.5;
 const CAMERA_DISTANCE = DEFAULT_CAMERA_DISTANCE * MODEL_SCALE;
+
+/** How a HerzieView frames its herzie (zoom 1): its box is this tall, in
+ * world units at the herzie's centre, seen from this far away. The Town
+ * frames Home the same way, so the herzie stands just as big there. */
+export const VIEW_FRAME_HEIGHT = FRAME_HEIGHT;
+export const VIEW_CAMERA_DISTANCE = CAMERA_DISTANCE;
 /** The studio sun's shadow map, a side. A herzie is drawn ~100 px tall (the
  * stage draws at a quarter of the screen's resolution), and a page can hold
  * many: small is plenty. */

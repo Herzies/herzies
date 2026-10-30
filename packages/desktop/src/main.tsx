@@ -12,6 +12,7 @@ import {
   isBankFull,
   levelProgress,
   needsClassChoice,
+  SH,
   statPoints,
 } from "@herzies/shared";
 import { herzieStage } from "@herzies/shared/gl";
@@ -31,7 +32,12 @@ import {
 } from "./components/ClassChoiceOverlay";
 import { EventsView } from "./components/EventsView";
 import { FriendsView } from "./components/FriendsView";
-import { HERZIE_STAGE_HEIGHT, HerzieWithSky } from "./components/HerzieWithSky";
+import {
+  HERZIE_STAGE_HEIGHT,
+  HerzieWithSky,
+  HomeSky,
+  STAGE_FLOOR_INSET,
+} from "./components/HerzieWithSky";
 import { HomeView } from "./components/HomeView";
 import { IncomingFriendOverlay } from "./components/IncomingFriendOverlay";
 import { IncomingTradeOverlay } from "./components/IncomingTradeOverlay";
@@ -55,6 +61,8 @@ import { setLootRoom } from "./components/town/combat/lootFeed";
 import { useBossResultsShown } from "./components/town/combat/results";
 import { setArmed, setMySkills } from "./components/town/combat/skills";
 import { combat } from "./components/town/combat/state";
+import { homeDropFeed } from "./components/town/dropSpots";
+import { homeMode, useHomeMode } from "./components/town/homeMode";
 import { townNet } from "./components/town/net/townNet";
 import {
   canExpandTown,
@@ -97,6 +105,35 @@ const HOME_INVENTORY_ZOOM = 0.8;
  * (HOME_INVENTORY_RAISE_MS). */
 const HOME_INVENTORY_ZOOM_EASE = 0.1;
 const HOME_INVENTORY_RAISE_MS = 340;
+/** How tall Home's own herzie view is drawn (HerzieView's box at size 5):
+ * the Town frames Home's herzie the same size (see town/homeCamera). */
+const HOME_VIEW_HEIGHT = Math.ceil(SH * 5 * 1.35);
+/** The small window's height (tauri.conf.json): Home's herzie is drawn as
+ * big for a bigger window as it is for this one. */
+const SMALL_WINDOW_HEIGHT = 520;
+/** In the big window: where the herzie's feet stand (a fraction of the
+ * window's height down), and the most it's drawn bigger. */
+const HOME_BIG_FEET = 0.72;
+const HOME_BIG_MAX_ZOOM = 1.6;
+/** How long Home's stand-in herzie takes to give way to the world's. */
+const HOME_STAND_IN_FADE_MS = 450;
+/** How long Home's sky stays after leaving, under the world fading back
+ * in over it. */
+const HOME_SKY_LINGER_MS = 900;
+
+/** `on`, held on for `ms` after it goes off. */
+function useLinger(on: boolean, ms: number): boolean {
+  const [held, setHeld] = useState(on);
+  useEffect(() => {
+    if (on) {
+      setHeld(true);
+      return;
+    }
+    const t = setTimeout(() => setHeld(false), ms);
+    return () => clearTimeout(t);
+  }, [on, ms]);
+  return on || held;
+}
 
 /** The app window's height, kept current. */
 function useWindowHeight() {
@@ -217,6 +254,33 @@ function App() {
   const [overlay, setOverlay] = useState<OverlayId | null>(null);
   /** What the nav shows as selected. */
   const view: View = overlay ?? base;
+  // Home is a way of looking at the Town (town/homeMode): the world, once
+  // it's up, is what Home shows; until then (or without it) Home's own
+  // stand-in does.
+  const { ready: homeInWorld, combatMap } = useHomeMode();
+  useEffect(() => {
+    homeMode.set(base === "home");
+  }, [base]);
+  // A window over Home has the keys: nobody walks off.
+  useEffect(() => {
+    homeMode.setLocked(overlay !== null);
+  }, [overlay]);
+  /** Home in the big window (see setView): only once Home's in the world. */
+  const [homeBigWanted, setHomeBig] = useState(false);
+  const homeBig = base === "home" && homeInWorld && homeBigWanted;
+  /** Whether the window's big right now, for setView (set where it's
+   * worked out, below). */
+  const bigWindowRef = useRef(false);
+  /** No Home to go to from an island you fight on. */
+  const homeBlocked = base === "events" && combatMap;
+  /** Home's own herzie, standing in until the world's is up (and fading
+   * out from under it after). */
+  const standInShown = useLinger(!homeInWorld, HOME_STAND_IN_FADE_MS);
+  /** Home's sky, once Home's in the world: at Home, and a moment after. */
+  const homeSkyShown = useLinger(
+    homeInWorld && base === "home",
+    HOME_SKY_LINGER_MS,
+  );
   // The window that was just closed (or swapped for another) stays "shown"
   // until its exit has played: its content keeps still under the fade.
   const [leavingOverlay, setLeavingOverlay] = useState<OverlayId | null>(null);
@@ -245,6 +309,9 @@ function App() {
    * current base. (switchView is the guarded, toggling version.) */
   const setView = useCallback((v: View) => {
     if (isBase(v)) {
+      // Home from the Town's big window stays big (Home's shown in the same
+      // world); otherwise Home's the small window it always was.
+      if (v === "home") setHomeBig(bigWindowRef.current);
       setBase(v);
       setOverlay(null);
     } else setOverlay(v);
@@ -441,6 +508,11 @@ function App() {
       hasRoomFor(state.inventory, state.equipped, itemId, capacity),
     );
   }, [state.inventory, state.equipped, state.bankExpansions]);
+  // What's lying on the ground, for the world to put round your herzie
+  // (town/HomeDrops).
+  useEffect(() => {
+    homeDropFeed.set(state.pendingDrops ?? []);
+  }, [state.pendingDrops]);
 
   const addLog = useCallback((message: string) => {
     const time = new Date().toISOString();
@@ -739,6 +811,12 @@ function App() {
     [base, overlay, tradeActive, setView],
   );
 
+  // Walking off at Home: out into the Town.
+  useEffect(
+    () => homeMode.onExitRequest(() => switchView("events")),
+    [switchView],
+  );
+
   /** "c" shortcut: go home and focus the chat. Mid-trade this routes through
    * the leave-trade confirmation like every other view switch. */
   /** The Town's 3D world is on screen: it fills the window, and the chat
@@ -755,7 +833,18 @@ function App() {
   // screen — a visitor's screen or another tab gets the small window back,
   // and coming back to the world grows it again.
   const townExpanded = useTownExpanded();
-  const bigWindow = townWorld && townExpanded;
+  // Home has its own say (homeBig): it's big if it came from the big
+  // Town, or was made big there.
+  const bigWindow = (townWorld && townExpanded) || homeBig;
+  bigWindowRef.current = bigWindow;
+  /** The window button (or Z): the Town's choice in the Town (remembered),
+   * Home's own at Home. */
+  const toggleWindow = useCallback(() => {
+    if (base === "home") setHomeBig((b) => !b);
+    else toggleTownExpanded();
+  }, [base]);
+  const canToggleWindow =
+    canExpandTown && (townWorld || (base === "home" && homeInWorld));
   useEffect(() => {
     herzies.setTownExpanded(bigWindow).catch(() => {});
   }, [bigWindow]);
@@ -840,8 +929,8 @@ function App() {
         return;
       }
       const key = event.key.toLowerCase();
-      if (key === "z" && townWorld) {
-        toggleTownExpanded();
+      if (key === "z" && canToggleWindow) {
+        toggleWindow();
         return;
       }
       if (key === "c") {
@@ -857,6 +946,7 @@ function App() {
       }
       const v = shortcuts[key];
       if (!v) return;
+      if (v === "home" && homeBlocked) return;
       // Stats once the server knows stat points, Skills once there's a class.
       if (v === "stats" && !herzie.statPoints) return;
       if (v === "skills" && !herzie.class) return;
@@ -872,7 +962,9 @@ function App() {
     switchView,
     requestOpenChat,
     chatReachable,
-    townWorld,
+    homeBlocked,
+    canToggleWindow,
+    toggleWindow,
   ]);
 
   // The Profile window: show the cached profile at once, then the fresh one.
@@ -898,8 +990,47 @@ function App() {
   // Where Home's stage sits (see useStageAlignment).
   const herzieStageTop = useHomeStageOffset();
   // The deck or the bag over Home: the herzie steps back and up, above it.
-  const inventoryOnHome = base === "home" && isInventory(overlay);
+  // (In the big window the windows hang in their own column, clear of it.)
+  const inventoryOnHome = base === "home" && !homeBig && isInventory(overlay);
   const windowHeight = useWindowHeight();
+  /** The stage's top as drawn: raised over the deck or the bag. */
+  const homeStageTop =
+    herzieStageTop === null
+      ? null
+      : inventoryOnHome
+        ? Math.min(
+            herzieStageTop,
+            Math.round(windowHeight / 2) - 12 - HERZIE_STAGE_HEIGHT,
+          )
+        : herzieStageTop;
+  // Home's framing, for the world's camera when Home's shown in it: the
+  // feet where the stand-in's stand (the view starts 12px down, under the
+  // app's padding), as big, as far back.
+  // In the big window Home's cards hang top left, as the Town's do there:
+  // the herzie stands in the middle of the window, as big for the window
+  // as it is in the small one.
+  useEffect(() => {
+    homeMode.setFrame(
+      homeBig
+        ? {
+            feetY: Math.round(windowHeight * HOME_BIG_FEET),
+            viewHeight: HOME_VIEW_HEIGHT,
+            zoom: Math.min(
+              HOME_BIG_MAX_ZOOM,
+              Math.max(1, windowHeight / SMALL_WINDOW_HEIGHT),
+            ),
+            big: true,
+          }
+        : homeStageTop === null
+          ? null
+          : {
+              feetY:
+                12 + homeStageTop + HERZIE_STAGE_HEIGHT - STAGE_FLOOR_INSET,
+              viewHeight: HOME_VIEW_HEIGHT,
+              zoom: inventoryOnHome ? HOME_INVENTORY_ZOOM : 1,
+            },
+    );
+  }, [homeStageTop, inventoryOnHome, homeBig, windowHeight]);
 
   if (!hydrated) {
     return <LoadingSplash />;
@@ -1092,81 +1223,32 @@ function App() {
           base !== "home" && !townLayout && "mb-2",
         )}
       >
-        {/* Home's herzie, over Home's stage (see useStageAlignment). Hidden,
-            never unmounted, elsewhere, so coming back keeps its rotation and
-            animation. A zero-height row, so it positions against the view's
-            top edge without being a containing block for anything else. */}
-        <div
-          className={cn(
-            "relative h-0 shrink-0",
-            // Kept under a window: Home's windows sit low on clearer glass,
-            // so the herzie stays in view.
-            (base !== "home" || herzieStageTop === null) && "hidden",
-          )}
-        >
-          {/* data-window-safe: grabbing the herzie to spin it leaves the
-              deck or the bag open. */}
-          <div
-            data-window-safe
-            className="absolute inset-x-0 flex items-center justify-center transition-[top] ease-out"
-            style={{
-              // With the deck or the bag open (the bottom half), raised so
-              // its floor meets the window's top (the view starts 12px
-              // down, under the app's padding), never lowered. Moved by
-              // `top`, not a transform: that would trap the sky's
-              // position: fixed. In plain px, so the change animates.
-              top: inventoryOnHome
-                ? Math.min(
-                    herzieStageTop ?? 0,
-                    Math.round(windowHeight / 2) - 12 - HERZIE_STAGE_HEIGHT,
-                  )
-                : (herzieStageTop ?? 0),
-              height: HERZIE_STAGE_HEIGHT,
-              transitionDuration: `${HOME_INVENTORY_RAISE_MS}ms`,
-            }}
-          >
-            <HerzieWithSky
-              userId={herzie.friendCode}
-              stage={stageOverride ?? herzie.stage}
-              isPlaying={!!state.nowPlaying}
-              equipped={
-                classOverride
-                  ? withClassGear(state.equipped, classOverride)
-                  : state.equipped
-              }
-              paused={base !== "home"}
-              grounded
-              zoom={inventoryOnHome ? HOME_INVENTORY_ZOOM : 1}
-              zoomEase={HOME_INVENTORY_ZOOM_EASE}
-            />
-          </div>
-        </div>
-        <div
-          className={cn(
-            "min-h-0 flex-1 flex-col",
-            base === "home" ? "flex" : "hidden",
-          )}
-        >
-          <HomeView
-            state={state}
-            active={base === "home"}
-            onOpenProfile={() => switchView("profile")}
-            onActivity={addLog}
+        {/* Home's sky (an equipped scenery item's), under the world: it
+            shows as the world fades away round the herzie at Home. */}
+        {homeSkyShown && herzie ? (
+          <HomeSky
+            userId={herzie.friendCode}
+            isPlaying={!!state.nowPlaying}
+            equipped={state.equipped}
+            paused={base !== "home"}
           />
-        </div>
-
+        ) : null}
         <div
           className={cn(
             "min-h-0 flex-1 flex-col",
-            base === "events" ? "flex" : "hidden",
+            // Under Home too: Home is the world, seen from in front of your
+            // herzie (town/homeMode), filling the window behind Home's own
+            // cards.
+            base === "events" ? "flex" : "fixed inset-0 z-0 flex",
           )}
         >
           <EventsView
             eventsTabVisible={base === "events"}
+            homeShown={base === "home"}
             windowOpen={!!overlay}
             // The big window's panel only in the Town: over Home, a
             // visitor fills the small window.
-            expanded={townExpanded && base === "events"}
+            expanded={(townExpanded && base === "events") || homeBig}
             onSelectedChange={setEventsPanel}
             panelHost={panelHost}
             chatOverlay
@@ -1209,6 +1291,76 @@ function App() {
               setChatProfileCode(code);
               if (switchView("friends")) setProfileReturn("events");
             }}
+          />
+        </div>
+        {/* Home's herzie, over Home's stage (see useStageAlignment). Hidden,
+            never unmounted, elsewhere, so coming back keeps its rotation and
+            animation. A zero-height row, so it positions against the view's
+            top edge without being a containing block for anything else. */}
+        <div
+          className={cn(
+            "relative h-0 shrink-0 transition-opacity ease-out",
+            // Kept under a window: Home's windows sit low on clearer glass,
+            // so the herzie stays in view.
+            (base !== "home" || herzieStageTop === null || !standInShown) &&
+              "hidden",
+            // The world's herzie has taken over: this one fades out from
+            // under it, standing in the same spot.
+            homeInWorld && "pointer-events-none opacity-0",
+          )}
+          style={{ transitionDuration: `${HOME_STAND_IN_FADE_MS}ms` }}
+        >
+          {/* data-window-safe: grabbing the herzie to spin it leaves the
+              deck or the bag open. */}
+          <div
+            data-window-safe
+            className="absolute inset-x-0 flex items-center justify-center transition-[top] ease-out"
+            style={{
+              // With the deck or the bag open (the bottom half), raised so
+              // its floor meets the window's top (the view starts 12px
+              // down, under the app's padding), never lowered. Moved by
+              // `top`, not a transform: that would trap the sky's
+              // position: fixed. In plain px, so the change animates.
+              top: homeStageTop ?? 0,
+              height: HERZIE_STAGE_HEIGHT,
+              transitionDuration: `${HOME_INVENTORY_RAISE_MS}ms`,
+            }}
+          >
+            <HerzieWithSky
+              userId={herzie.friendCode}
+              stage={stageOverride ?? herzie.stage}
+              isPlaying={!!state.nowPlaying}
+              equipped={
+                classOverride
+                  ? withClassGear(state.equipped, classOverride)
+                  : state.equipped
+              }
+              paused={base !== "home" || homeInWorld}
+              // Once Home's in the world, its sky is HomeSky's.
+              showSky={!homeInWorld}
+              grounded
+              zoom={inventoryOnHome ? HOME_INVENTORY_ZOOM : 1}
+              zoomEase={HOME_INVENTORY_ZOOM_EASE}
+            />
+          </div>
+        </div>
+        <div
+          className={cn(
+            // Over the world, which lies under it at Home (positioned, after
+            // it: no z-index, so the player card's own z-50 still lifts it
+            // over the herzie canvas).
+            "relative min-h-0 flex-1 flex-col",
+            base === "home" ? "flex" : "hidden",
+            homeInWorld && "pointer-events-none",
+          )}
+        >
+          <HomeView
+            state={state}
+            active={base === "home"}
+            inWorld={homeInWorld}
+            big={homeBig}
+            onOpenProfile={() => switchView("profile")}
+            onActivity={addLog}
           />
         </div>
       </div>
@@ -1293,6 +1445,7 @@ function App() {
             <TabBar
               view={view}
               base={base}
+              homeBlocked={homeBlocked}
               setView={(v) => switchView(v, true)}
               menuOpen={menuOpen}
               setMenuOpen={setMenuOpen}
@@ -1300,8 +1453,8 @@ function App() {
               hasSkills={!!herzie.class}
               landing={menuLanding}
               windowSize={
-                townWorld && canExpandTown
-                  ? { expanded: townExpanded, onToggle: toggleTownExpanded }
+                canToggleWindow
+                  ? { expanded: bigWindow, onToggle: toggleWindow }
                   : null
               }
               // Only once the server knows stat points: before that,

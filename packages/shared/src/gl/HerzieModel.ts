@@ -129,6 +129,12 @@ export type HerzieModelOptions = {
   /** Starts with its class gear already drawn (and `armed`), rather than
    * drawing it off its back on the first frames. */
   armed?: boolean;
+  /** Its ground props (the boombox) stand still where they were put rather
+   * than turning and breathing with the herzie: set down round it, facing
+   * the way `setAccessoryHeading` says, while the herzie turns on its own
+   * (the Town's Home, where a drag spins the herzie). Everything else goes
+   * with the herzie as ever. */
+  anchorGround?: boolean;
 };
 
 /** The old renderer's dance loop: 65ms a frame. */
@@ -687,6 +693,21 @@ export class HerzieModel {
     uOpacity: { value: 1 },
     uFlash: { value: new THREE.Vector4(1, 1, 1, 0) },
   };
+  /** The ground props' (the boombox's) own opacity: the herzie's own
+   * (setTint) times how far they're shown (setAccessories). */
+  private readonly accessoryOpacity = { value: 1 };
+  /** Their own materials, so they fade apart from the herzie. */
+  private readonly accessoryMaterials: THREE.ShaderMaterial[] = [];
+  /** Scales the ground props about where they stand (null: it has none). */
+  private readonly accessoryPivot: THREE.Group | null = null;
+  /** How far the ground props are shown, 0..1 (setAccessories). */
+  private accessoryAmount = 1;
+  /** With `anchorGround`: the ground props' own copy of creature space
+   * (still, not breathing), and what turns it (setAccessoryHeading). */
+  private readonly groundSpace: THREE.Group | null = null;
+  private readonly groundFacing: THREE.Group | null = null;
+  /** The herzie's own opacity, last set (setTint). */
+  private tintOpacity = 1;
 
   constructor(look: HerzieLook, options: HerzieModelOptions = {}) {
     this.look = look;
@@ -822,23 +843,70 @@ export class HerzieModel {
     }
 
     const ramp = scheme ? schemeShades(scheme) : null;
+    // The ground props (the boombox) go in a group of their own that can be
+    // scaled about where they stand: shown or hidden apart from the herzie
+    // (see setAccessories). Two groups, so the parts keep their places in
+    // creature space as they're posed every frame.
+    let groundParent: THREE.Group | null = null;
+    const ground = spheres.filter((s) => s.part === "ground");
+    if (ground.length > 0) {
+      let x = 0;
+      let z = 0;
+      let y = Number.NEGATIVE_INFINITY;
+      for (const s of ground) {
+        x += s.center[0] / ground.length;
+        z += s.center[2] / ground.length;
+        // Creature space is y down: the lowest point is the largest y.
+        y = Math.max(y, s.center[1] + s.radius);
+      }
+      const pivot = new THREE.Group();
+      pivot.position.set(x, y, z);
+      groundParent = new THREE.Group();
+      groundParent.position.set(-x, -y, -z);
+      pivot.add(groundParent);
+      if (!this.anchored && options.anchorGround) {
+        // Upright and to scale, standing on the herzie's ground, and never
+        // breathing (see animateBody's `anchored`).
+        const space = new THREE.Group();
+        space.rotation.x = Math.PI;
+        space.scale.setScalar(MODEL_SCALE);
+        space.position.set(0, feet * MODEL_SCALE, 0);
+        const facing = new THREE.Group();
+        facing.add(space);
+        this.root.add(facing);
+        this.groundSpace = space;
+        this.groundFacing = facing;
+      }
+      (this.groundSpace ?? this.anchored ?? this.creature).add(pivot);
+      this.accessoryPivot = pivot;
+    }
+    const accessoryScheme: SchemeUniforms = {
+      ...this.scheme,
+      uOpacity: this.accessoryOpacity,
+    };
     const byShading = new Map<string, THREE.ShaderMaterial>();
     for (const s of spheres) {
       const shading = primitiveShading(s, colors, scheme);
-      // Metal's grooves are laid out by its radius: one material each.
-      const key = JSON.stringify(shading) + (shading.metal ? s.radius : "");
+      const isGround = s.part === "ground";
+      // Metal's grooves are laid out by its radius: one material each. The
+      // ground props never share one with the herzie (they fade apart).
+      const key =
+        (isGround ? "ground|" : "") +
+        JSON.stringify(shading) +
+        (shading.metal ? s.radius : "");
       let material = byShading.get(key);
       if (!material) {
         material = herzieMaterial(
           shading,
           textureType,
           ramp,
-          this.scheme,
+          isGround ? accessoryScheme : this.scheme,
           options.lighting,
           s.radius,
         );
         byShading.set(key, material);
         this.materials.push(material);
+        if (isGround) this.accessoryMaterials.push(material);
       }
       const mesh = new THREE.Mesh(geometryFor(s), material);
       mesh.castShadow = true;
@@ -853,9 +921,11 @@ export class HerzieModel {
       const parent =
         companionParts && floats(s)
           ? companionParts
-          : this.anchored && sceneFixed(s)
-            ? this.anchored
-            : this.creature;
+          : groundParent && s.part === "ground"
+            ? groundParent
+            : this.anchored && sceneFixed(s)
+              ? this.anchored
+              : this.creature;
       parent.add(mesh);
     }
     this.armAt = {
@@ -1871,8 +1941,69 @@ export class HerzieModel {
   setTint(grey: number, opacity: number): void {
     this.scheme.uGrey.value = grey;
     this.scheme.uOpacity.value = opacity;
+    this.tintOpacity = opacity;
     const transparent = opacity < 1;
     for (const m of this.materials) {
+      if (this.accessoryMaterials.includes(m)) continue;
+      if (m.transparent !== transparent) {
+        m.transparent = transparent;
+        m.needsUpdate = true;
+      }
+    }
+    this.applyAccessories();
+  }
+
+  /**
+   * How far its ground props (the boombox) are shown, 0 (gone) to 1: they
+   * belong at its Home, not out walking with it. They fade, and grow from a
+   * little smaller with a slight overshoot as they come, settling where
+   * they stand. Nothing to do for a herzie without any.
+   */
+  setAccessories(amount: number): void {
+    const a = Math.max(0, Math.min(1, amount));
+    if (a === this.accessoryAmount) return;
+    this.accessoryAmount = a;
+    this.applyAccessories();
+  }
+
+  /** Where its ground props stand in the world (their middle, on the
+   * ground), or null when it has none or they're not shown. */
+  accessoryWorldPosition(out: THREE.Vector3): THREE.Vector3 | null {
+    const pivot = this.accessoryPivot;
+    if (!pivot || !pivot.visible) return null;
+    pivot.updateWorldMatrix(true, false);
+    return pivot.getWorldPosition(out);
+  }
+
+  /** The box its ground props fill in the world, or null when it has none
+   * or they're not shown. */
+  accessoryWorldBox(out: THREE.Box3): THREE.Box3 | null {
+    const pivot = this.accessoryPivot;
+    if (!pivot || !pivot.visible) return null;
+    pivot.updateWorldMatrix(true, true);
+    return out.setFromObject(pivot);
+  }
+
+  /** Which way its anchored ground props face (see `anchorGround`): the
+   * heading the herzie had when they were set down. */
+  setAccessoryHeading(heading: number): void {
+    if (this.groundFacing) this.groundFacing.rotation.y = heading;
+  }
+
+  private applyAccessories(): void {
+    const pivot = this.accessoryPivot;
+    if (!pivot) return;
+    const a = this.accessoryAmount;
+    pivot.visible = a > 0.001;
+    // easeOutBack: up past full size a touch, and back.
+    const c = 1.70158;
+    const t = a - 1;
+    const back = 1 + (c + 1) * t * t * t + c * t * t;
+    pivot.scale.setScalar(0.85 + 0.15 * back);
+    const opacity = this.tintOpacity * Math.min(1, a * 1.6);
+    this.accessoryOpacity.value = opacity;
+    const transparent = opacity < 1;
+    for (const m of this.accessoryMaterials) {
       if (m.transparent !== transparent) {
         m.transparent = transparent;
         m.needsUpdate = true;

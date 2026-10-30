@@ -42,6 +42,7 @@ export function TabBar({
   eventsOpen = false,
   onEvents,
   unspentPoints = 0,
+  homeBlocked = false,
   hasStats = false,
   hasSkills = false,
   landing = null,
@@ -63,6 +64,9 @@ export function TabBar({
   eventsOpen?: boolean;
   /** Stat points waiting to be spent; badges Menu and Stats when above 0. */
   unspentPoints?: number;
+  /** Home can't be gone to from here (an island you fight on): the button
+   * stays, greyed. */
+  homeBlocked?: boolean;
   /** The server knows stat points / the herzie has a class. */
   hasStats?: boolean;
   hasSkills?: boolean;
@@ -129,8 +133,17 @@ export function TabBar({
         <button
           type="button"
           onClick={() => setView("home")}
-          title="Go Home — your herzie. Shortcut [h]"
-          className={buttonClass(false)}
+          disabled={homeBlocked}
+          title={
+            homeBlocked
+              ? "No Home here — head back out first"
+              : "Go Home — your herzie. Shortcut [h]"
+          }
+          className={cn(
+            buttonClass(false),
+            homeBlocked &&
+              "cursor-default opacity-45 hover:bg-black/40 hover:text-text",
+          )}
         >
           Home
         </button>

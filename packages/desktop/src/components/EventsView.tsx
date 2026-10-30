@@ -111,6 +111,10 @@ type SongHuntConfig = {
 };
 
 const EVENTS_POLL_MS = 10_000;
+/** ...and at Home, where the world's faded away and nobody's seen: just
+ * often enough that the visitors are where they should be when you walk
+ * out. */
+const HOME_EVENTS_POLL_MS = 60_000;
 
 /** Fixture George for the Settings debug toggle. Not a real event, so any
  * buy is refused server-side — this is for looking, not shopping. */
@@ -244,6 +248,7 @@ const typeRank = (type: string) => {
 
 function EventsViewImpl({
   eventsTabVisible,
+  homeShown = false,
   debugForceActive = false,
   debugForceBoss = false,
   debugForceMerchant = false,
@@ -301,6 +306,9 @@ function EventsViewImpl({
   };
   /** Tab stays mounted but hidden; only poll while user is on Events. */
   eventsTabVisible: boolean;
+  /** Home is on screen, shown in the Town's world (see town/homeMode): the
+   * world runs under it, its HUD hidden. */
+  homeShown?: boolean;
   /** Bumped when the Town tab is re-selected while already on it: back to
    * the visitor list. */
   rootKey?: number;
@@ -368,8 +376,9 @@ function EventsViewImpl({
   useEffect(() => {
     onSelectedChange?.(selected);
   }, [selected, onSelectedChange]);
-  /** The Town on screen, or a panel open over Home: load and run. */
-  const active = eventsTabVisible || selected !== null;
+  /** The Town on screen (as itself, or as Home), or a panel open over
+   * Home: load and run. */
+  const active = eventsTabVisible || homeShown || selected !== null;
   const [reloadKey, setReloadKey] = useState(0);
 
   const [previousEvent, setPreviousEvent] = useState<GameEvent | null>(null);
@@ -481,6 +490,8 @@ function EventsViewImpl({
   // fetched once on mount — meaning every launch paid for these whether or
   // not the player ever opened Events, and opening the tab then immediately
   // re-fetched the same endpoints.
+  /** The Town or a visitor on screen: kept fresh (not just Home). */
+  const fastPoll = eventsTabVisible || selected !== null;
   // reloadKey is a trigger, not a value: George's stall bumps it after a buy.
   // biome-ignore lint/correctness/useExhaustiveDependencies: reloadKey re-runs the fetch
   useEffect(() => {
@@ -509,12 +520,13 @@ function EventsViewImpl({
         });
 
     refresh();
-    const interval = focused ? setInterval(refresh, EVENTS_POLL_MS) : undefined;
+    const every = fastPoll ? EVENTS_POLL_MS : HOME_EVENTS_POLL_MS;
+    const interval = focused ? setInterval(refresh, every) : undefined;
     return () => {
       cancelled = true;
       if (interval) clearInterval(interval);
     };
-  }, [focused, active, reloadKey]);
+  }, [focused, active, reloadKey, fastPoll]);
 
   // /events/previous-hunt returns the last ended hunt *or* boss, whichever is
   // newer. While Orphiez is in town his card is live and never shows the last
@@ -778,8 +790,11 @@ function EventsViewImpl({
         cards={cards}
         musicPlaying={musicPlaying}
         paused={
-          (selected !== null && !inPanel) || !eventsTabVisible || !focused
+          (selected !== null && !inPanel) ||
+          (!eventsTabVisible && !homeShown) ||
+          !focused
         }
+        home={homeShown}
         backdrop={selected !== null && !inPanel && eventsTabVisible}
         // Losing focus freezes the world but leaves the HUD up.
         hudHidden={(selected !== null && !inPanel) || !eventsTabVisible}

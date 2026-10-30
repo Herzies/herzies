@@ -19,6 +19,9 @@ import { Telegraphs } from "./combat/Telegraphs";
 import type { Hour } from "./DayCycle";
 import { driftClouds } from "./depth";
 import { isMouth, usePortalOpen } from "./gates";
+import { HomeDrops } from "./HomeDrops";
+import { HomeLayer } from "./HomeLayer";
+import { useHomeMode } from "./homeMode";
 import { type TownInput, useTownInput } from "./input";
 import { groundY, type TownMap, worldRadius } from "./map";
 import { markMet } from "./met";
@@ -109,6 +112,9 @@ export type TownCanvasProps = {
   stats?: HerzieStats;
   /** Called once the renderer is up (the sandbox's benchmark uses it). */
   onCreated?: (state: RootState) => void;
+  /** Show what drops while you listen on the ground around you (the app's
+   * own Town; not the map editor's). */
+  homeDrops?: boolean;
 };
 
 /**
@@ -137,6 +143,8 @@ export default function TownCanvas(props: TownCanvasProps) {
   const pixelSize = useTownPixelSize();
   // Visitors stand on islands with spots for them.
   const spots = Object.keys(map.spots).length > 0 ? props.spots : [];
+  // At Home nothing's aimed or cast (and aim mode ends on the way in).
+  const { home } = useHomeMode();
 
   return (
     <Canvas
@@ -197,7 +205,7 @@ export default function TownCanvas(props: TownCanvasProps) {
             <Combat
               map={map}
               stats={props.stats ?? NO_STATS}
-              active={!props.paused}
+              active={!props.paused && !home}
             />
             {map.id === "bossroom" && (
               <>
@@ -215,6 +223,8 @@ export default function TownCanvas(props: TownCanvasProps) {
             )}
             {/* The bossroom's loot; anywhere, for the dev drop. */}
             <LootDrops />
+            {/* What drops while you listen, around you (see HomeDrops). */}
+            {props.homeDrops && !map.combat && <HomeDrops map={map} />}
             {portalsOf(map).some(isMouth) && <CaveTimer map={map} />}
           </Physics>
         </Suspense>
@@ -237,6 +247,8 @@ export default function TownCanvas(props: TownCanvasProps) {
         <CombatOverlay />
         {/* Sound waves bend light, and aim mode works on every island. */}
         <Post ao={props.ao !== false} distort />
+        {/* Home's things, over the world fading on the way Home. */}
+        <HomeLayer />
       </TownRuntimeContext.Provider>
     </Canvas>
   );

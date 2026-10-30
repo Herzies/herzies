@@ -541,3 +541,87 @@ export function sfxSpiritNotice(): void {
   tone(a, "sine", 880, 1760, 0.08, 0.005, 0.12);
   tone(a, "sine", 1320, 2200, 0.05, 0.005, 0.1, 0.07);
 }
+
+// --- Home's drops: a hole opening in the air -----------------------------------
+// Soft, all of them: there's music playing, and these come every few
+// minutes while it does.
+
+/** The hole opening: a low, soft "whomp" of air pulled in. */
+export function sfxRiftOpen(): void {
+  const a = audio();
+  if (!a) return;
+  tone(a, "sine", 140, 52, 0.22, 0.03, 0.45);
+  noiseBurst(a, "lowpass", 260, 900, 0.7, 0.07, 0.4);
+}
+
+/**
+ * The hole at work, "deciding": a hum that rises and quickens for
+ * `seconds`, a little brighter for the rarer things. Returns a stop, for a
+ * hole that closes early.
+ */
+export function sfxRiftWork(
+  seconds: number,
+  tier: LootTier,
+): { stop: () => void } | null {
+  const a = audio();
+  if (!a) return null;
+  const { ctx: c, out } = a;
+  const t = c.currentTime;
+  const g = c.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.05 + tier * 0.01, t + seconds * 0.8);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + seconds + 0.08);
+  // A wobble that quickens, as if it's working something out.
+  const trem = c.createGain();
+  trem.gain.value = 0.6;
+  const lfo = c.createOscillator();
+  lfo.frequency.setValueAtTime(5, t);
+  lfo.frequency.exponentialRampToValueAtTime(15, t + seconds);
+  const depth = c.createGain();
+  depth.gain.value = 0.4;
+  lfo.connect(depth).connect(trem.gain);
+  g.connect(trem).connect(out);
+  const base = 110 * wobble(0.03);
+  const oscs = [base, base * 1.5 * 1.003].map((f, i) => {
+    const o = c.createOscillator();
+    o.type = i === 0 ? "sine" : "triangle";
+    o.frequency.setValueAtTime(f, t);
+    o.frequency.exponentialRampToValueAtTime(
+      f * (2 + tier * 0.12),
+      t + seconds,
+    );
+    o.connect(g);
+    o.start(t);
+    o.stop(t + seconds + 0.15);
+    return o;
+  });
+  lfo.start(t);
+  lfo.stop(t + seconds + 0.15);
+  return {
+    stop: () => {
+      const now = c.currentTime;
+      g.gain.cancelScheduledValues(now);
+      g.gain.setTargetAtTime(0.0001, now, 0.04);
+      for (const o of [...oscs, lfo]) o.stop(now + 0.2);
+    },
+  };
+}
+
+/** The hole letting go of what it found: a soft pop. */
+export function sfxRiftEject(tier: LootTier): void {
+  const a = audio();
+  if (!a) return;
+  const k = wobble(0.04);
+  tone(a, "sine", 420 * k, 900 * k, 0.12, 0.004, 0.12);
+  noiseBurst(a, "bandpass", 2400, 900, 1.2, 0.05, 0.08);
+  if (tier >= 3)
+    tone(a, "triangle", 1320 * k, 1320 * k, 0.05, 0.004, 0.4, 0.05);
+}
+
+/** The hole closing up into a point: a quick indrawn breath. */
+export function sfxRiftClose(): void {
+  const a = audio();
+  if (!a) return;
+  noiseBurst(a, "bandpass", 1400, 220, 1.4, 0.06, 0.22);
+  tone(a, "sine", 320, 90, 0.07, 0.01, 0.2);
+}

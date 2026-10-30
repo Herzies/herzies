@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { queueSkill } from "./combat/skills";
 import { eat } from "./eat";
+import { homeMode } from "./homeMode";
 import {
   HOTBAR_KEYS,
   type HotbarKey,
@@ -28,6 +29,10 @@ export type TownInput = {
   /** Space pressed: hop. A press, not a hold — whoever acts on it clears it. */
   jump: boolean;
 };
+
+/** The keys that walk the herzie (and hop it): at Home, pressing one takes
+ * you out (see homeMode). The arrows only turn the view, so they don't. */
+const WALK_KEYS = new Set(["KeyW", "KeyA", "KeyS", "KeyD", "Space"]);
 
 const MOVE_KEYS: Record<string, keyof TownInput> = {
   KeyW: "forward",
@@ -107,6 +112,15 @@ export function useTownInput(
       // a text field it still moves between fields.
       if (e.code === "Tab" && !typing(e.target)) e.preventDefault();
       if (e.metaKey || e.ctrlKey || e.altKey || typing(e.target)) return;
+      // At Home only walking does anything, and it takes you out: a fresh
+      // press, not a key held since before you came (that one stays held,
+      // and walks once you're out). The key's still taken below, so the
+      // herzie sets off as the camera swings back. A window open over Home
+      // has the keys to itself.
+      if (homeMode.on) {
+        if (homeMode.locked || !WALK_KEYS.has(e.code)) return;
+        if (!e.repeat) homeMode.requestExit("move");
+      }
       if (e.code === "KeyE" && !e.repeat) {
         interact.current();
         return;
@@ -140,6 +154,8 @@ export function useTownInput(
       if (action) input.current[action] = false;
     };
     const onPointerDown = (e: PointerEvent) => {
+      // At Home a drag spins the herzie (HomeSpin), not the walk.
+      if (homeMode.on) return;
       if (e.button === 0 || e.buttons & 1) input.current.mouseLeft = true;
       if (e.button === 2 || e.buttons & 2) input.current.mouseRight = true;
     };

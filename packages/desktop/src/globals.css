@@ -562,3 +562,14 @@
      windows keep it in the Town's big window. */
   --small-window-height: 520px;
 }
+
+/* The Town's labels over the world (drei's Html: name tags, chat over
+   heads, a visitor's sign) sit beside its canvas. At Home they fade with
+   the world, all but what's dropped round you (data-home-keep). */
+.town-world canvas ~ div {
+  transition: opacity 300ms ease-out;
+}
+.town-world.town-home canvas ~ div:not(:has([data-home-keep])) {
+  opacity: 0;
+  pointer-events: none;
+}

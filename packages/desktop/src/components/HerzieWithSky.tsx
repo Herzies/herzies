@@ -27,7 +27,7 @@ export const HERZIE_STAGE_HEIGHT = 240;
 
 /** How far above the stage's bottom edge a grounded herzie's feet sit — a
  * little above dropped items, which sit at the stage's `bottom-2`. */
-const STAGE_FLOOR_INSET = 24;
+export const STAGE_FLOOR_INSET = 24;
 
 /** The app window's width when not expanded (tauri.conf.json). */
 const SMALL_WINDOW_WIDTH = 380;
@@ -118,56 +118,18 @@ export function HerzieWithSky({
   const focused = useWindowFocused();
   const paused = !focused || pausedProp;
 
-  const ids = equipped ? equippedItemIds(equipped) : [];
-  const scenery = ids.includes("blood-moon")
-    ? "blood-moon"
-    : ids.includes("stars")
-      ? "stars"
-      : ids.includes("clouds")
-        ? "clouds"
-        : null;
-  const prismaticActive =
-    !!PRISMATIC_SET && PRISMATIC_SET.itemIds.every((id) => ids.includes(id));
-
-  // Fades the bottom of the prismatic layer into transparency (revealing
-  // the app's own background underneath, whatever that is, rather than
-  // painting a specific colour over it) instead of cutting off hard.
-  const prismaticMask =
-    "linear-gradient(to bottom, black 0%, black 40%, transparent 85%)";
-
-  const sky = (
-    <>
-      {showSky && prismaticActive && (
-        <div
-          aria-hidden="true"
-          className="animate-prismatic pointer-events-none"
-          style={{
-            ...skyBox,
-            height: inOverlay ? "45%" : "45vh",
-            background:
-              "linear-gradient(120deg, #ff5f6d, #ffc371, #f9f871, #6dffb0, #6dc9ff, #a06dff, #ff6df3)",
-            backgroundSize: "220% 220%",
-            opacity: 0.1,
-            mixBlendMode: "screen",
-            WebkitMaskImage: prismaticMask,
-            maskImage: prismaticMask,
-            zIndex: 0,
-          }}
-        />
-      )}
-      {showSky && (
-        <Sky
-          userId={userId}
-          isPlaying={isPlaying}
-          cols={skyCols}
-          variant={scenery}
-          size={size}
-          paused={paused || animate === false}
-          style={{ ...skyBox, zIndex: 0 }}
-        />
-      )}
-    </>
-  );
+  const sky = showSky ? (
+    <SkyLayers
+      userId={userId}
+      isPlaying={isPlaying}
+      equipped={equipped}
+      cols={skyCols}
+      size={size}
+      paused={paused || animate === false}
+      box={skyBox}
+      tall={inOverlay ? "45%" : "45vh"}
+    />
+  ) : null;
 
   return (
     <>
@@ -223,4 +185,119 @@ export function HerzieWithSky({
 function groundInsetFor(size: number): number {
   const canvasH = Math.ceil(SH * size * 1.35);
   return (canvasH - HERZIE_STAGE_HEIGHT) / 2 + STAGE_FLOOR_INSET;
+}
+
+/** The scenery an equipped item paints behind the herzie (stars, clouds, a
+ * blood moon), and the prismatic set's shimmer: the sky. */
+function SkyLayers({
+  userId,
+  isPlaying,
+  equipped,
+  cols,
+  size,
+  paused,
+  box,
+  tall,
+}: {
+  userId: string;
+  isPlaying: boolean;
+  equipped?: Equipped;
+  cols: number;
+  size: number;
+  paused: boolean;
+  /** Where it's laid (position, top, width). */
+  box: React.CSSProperties;
+  /** How far down the prismatic shimmer reaches. */
+  tall: string;
+}) {
+  const ids = equipped ? equippedItemIds(equipped) : [];
+  const scenery = ids.includes("blood-moon")
+    ? "blood-moon"
+    : ids.includes("stars")
+      ? "stars"
+      : ids.includes("clouds")
+        ? "clouds"
+        : null;
+  const prismaticActive =
+    !!PRISMATIC_SET && PRISMATIC_SET.itemIds.every((id) => ids.includes(id));
+
+  // Fades the bottom of the prismatic layer into transparency (revealing
+  // the app's own background underneath, whatever that is, rather than
+  // painting a specific colour over it) instead of cutting off hard.
+  const prismaticMask =
+    "linear-gradient(to bottom, black 0%, black 40%, transparent 85%)";
+
+  return (
+    <>
+      {prismaticActive && (
+        <div
+          aria-hidden="true"
+          className="animate-prismatic pointer-events-none"
+          style={{
+            ...box,
+            height: tall,
+            background:
+              "linear-gradient(120deg, #ff5f6d, #ffc371, #f9f871, #6dffb0, #6dc9ff, #a06dff, #ff6df3)",
+            backgroundSize: "220% 220%",
+            opacity: 0.1,
+            mixBlendMode: "screen",
+            WebkitMaskImage: prismaticMask,
+            maskImage: prismaticMask,
+            zIndex: 0,
+          }}
+        />
+      )}
+      <Sky
+        userId={userId}
+        isPlaying={isPlaying}
+        cols={cols}
+        variant={scenery}
+        size={size}
+        paused={paused}
+        style={{ ...box, zIndex: 0 }}
+      />
+    </>
+  );
+}
+
+/**
+ * Home's sky on its own, across the whole window: what Home shows behind
+ * the herzie when Home is seen in the Town's world (see town/homeMode),
+ * laid under the world's canvas so it shows as the world fades away.
+ */
+export function HomeSky({
+  userId,
+  isPlaying = false,
+  equipped,
+  paused = false,
+  size = 5,
+}: {
+  userId: string;
+  isPlaying?: boolean;
+  equipped?: Equipped;
+  paused?: boolean;
+  size?: number;
+}) {
+  const [cols, setCols] = useState(() =>
+    Math.floor(window.innerWidth / (size * 0.6)),
+  );
+  useEffect(() => {
+    const onResize = () =>
+      setCols(Math.floor(window.innerWidth / (size * 0.6)));
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [size]);
+  const focused = useWindowFocused();
+  return (
+    <SkyLayers
+      userId={userId}
+      isPlaying={isPlaying}
+      equipped={equipped}
+      cols={cols}
+      size={size}
+      paused={paused || !focused}
+      box={{ position: "fixed", top: 0, left: 0, width: "100vw" }}
+      tall="45vh"
+    />
+  );
 }

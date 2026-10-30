@@ -23,12 +23,18 @@
 // `?color=`, `?head=` and `?spirit=` dress the player (`?head=rainbow-headband`
 // with the default prism skin is the full Prismatic set), and `?back=` gives
 // it a cloak (troubadour-mantle, groove-cape, drumhide-cloak, tailwind-cloak).
+// `?home=1` starts at Home (town/homeMode); H goes Home and back, walking
+// leaves it. `drop()` drops something round you as listening does
+// (`drop("ghost")` that item; `drop(5)` five), `take()` has the server take
+// the oldest back (a spirit's sweep), and `?ground=boombox` gives the
+// herzie a ground accessory to fade in at Home.
 import "./globals.css";
 import {
   basicAttack,
   CLASS_DEFS,
   type ItemUnit,
   isHerzieClass,
+  SH,
   signTownTicket,
 } from "@herzies/shared";
 import type { RootState } from "@react-three/fiber";
@@ -50,8 +56,10 @@ import {
 } from "./components/town/combat/results";
 import { setArmed, setMySkills } from "./components/town/combat/skills";
 import { combat } from "./components/town/combat/state";
+import { homeDropFeed } from "./components/town/dropSpots";
 import { setTowerOpen } from "./components/town/gates";
 import { Hotbar } from "./components/town/Hotbar";
+import { homeMode } from "./components/town/homeMode";
 import { assignHotbar } from "./components/town/hotbarSlots";
 import { setTownTicketSource, townNet } from "./components/town/net/townNet";
 import {
@@ -65,6 +73,7 @@ import {
 import { CastBar, SkillHud } from "./components/town/SkillHud";
 import TownCanvas from "./components/town/TownCanvas";
 import { setVitals } from "./components/town/vitals";
+import { herzies } from "./tauri-bridge";
 
 const params = new URLSearchParams(location.search);
 const { spots: SPOTS, spare: SPARE_SPOTS } = spotsOf(HOME_MAP);
@@ -135,6 +144,9 @@ const player = {
     color: params.get("color") ?? "prism",
     head: params.get("head") ?? "headphones",
     spirit: params.get("spirit") ?? "spirit-orb",
+    ...(params.get("ground") && {
+      ground_left: params.get("ground") as string,
+    }),
     ...(params.get("back") && { back: params.get("back") as string }),
   } as Record<string, string>,
 };
@@ -356,6 +368,67 @@ const net = params.get("net") === "local" ? localNet() : null;
 // For poking at from the console and browser tests.
 Object.assign(window, { townNet: net });
 
+// --- Home ----------------------------------------------------------------------
+// Framed as the app's small window frames Home: the feet about where Home's
+// stage stands them.
+// `?big=1`: as in the big window (main.tsx).
+homeMode.setFrame(
+  params.get("big") === "1"
+    ? {
+        feetY: Math.round(window.innerHeight * 0.72),
+        viewHeight: Math.ceil(SH * 5 * 1.35),
+        zoom: Math.min(1.6, Math.max(1, window.innerHeight / 520)),
+        big: true,
+      }
+    : {
+        feetY: Math.round(window.innerHeight - 150),
+        viewHeight: Math.ceil(SH * 5 * 1.35),
+        zoom: 1,
+      },
+);
+homeMode.set(params.get("home") === "1");
+homeMode.onExitRequest(() => homeMode.set(false));
+window.addEventListener("keydown", (e) => {
+  if (e.code === "KeyH" && !e.repeat && !combat.on) homeMode.set(!homeMode.on);
+});
+// What drops: pretend pending drops, picked up as if the server agreed.
+const SANDBOX_DROPS = [
+  "headphones",
+  "ghost",
+  "clouds",
+  "stars",
+  "blood-moon",
+  "spirit-orb",
+  "rainbow-headband",
+];
+let dropSeq = 0;
+Object.assign(window, {
+  drop(what?: string | number) {
+    const n = typeof what === "number" ? what : 1;
+    const next = [...homeDropFeed.drops];
+    for (let i = 0; i < n; i++) {
+      const itemId =
+        typeof what === "string"
+          ? what
+          : SANDBOX_DROPS[Math.floor(Math.random() * SANDBOX_DROPS.length)];
+      next.push({
+        id: `sandbox-drop-${Date.now()}-${dropSeq++}`,
+        itemId,
+        droppedAt: new Date().toISOString(),
+      });
+    }
+    homeDropFeed.set(next);
+  },
+  take() {
+    homeDropFeed.set(homeDropFeed.drops.slice(1));
+  },
+  homeMode,
+});
+herzies.collectDrop = async (dropId: string) => {
+  homeDropFeed.set(homeDropFeed.drops.filter((d) => d.id !== dropId));
+  return true;
+};
+
 /**
  * The sandbox's Town, with chat bubbles driven from the console:
  * `say("bot-seed-3", "hello")` (a friend code, or a bot's seed; the player's
@@ -407,6 +480,8 @@ function Sandbox() {
         shadows={params.get("shadows") !== "0"}
         ao={params.get("ao") !== "0"}
         onCreated={params.has("bench") ? bench : undefined}
+        onReady={() => homeMode.setReady(true)}
+        homeDrops
         // ?sp=&cc=&cd= : sonic power, crit chance and crit damage, to try
         // the dummies with.
         stats={{

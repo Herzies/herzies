@@ -5,6 +5,8 @@ import * as THREE from "three";
 import { ambient } from "./ambient";
 import { aimSensitivity } from "./combat/sensitivity";
 import { combat } from "./combat/state";
+import { blendPose, type HomePose, homeAzimuth, homePose } from "./homeCamera";
+import { type HomeFrame, homeMode } from "./homeMode";
 import { groundY, type TownMap } from "./map";
 import { townSave, useTownRuntime } from "./runtime";
 
@@ -72,6 +74,22 @@ const wave = (t: number, seed: number) =>
  * swallows it. */
 const GROUND_CLEARANCE = 0.8;
 
+/** How quickly Home's framing follows a change to it (the deck opening over
+ * Home pulls the camera back): the fraction of the way per 60fps frame, as
+ * Home's own view eases it. */
+const HOME_FRAME_EASE = 0.1;
+/** Home's framing before the app has laid Home out: about where it stands
+ * the herzie in the small window. */
+const FALLBACK_FRAME = (height: number): HomeFrame => ({
+  feetY: Math.round(height * 0.62),
+  viewHeight: 304,
+  zoom: 1,
+});
+/** At Home the camera drifts round the herzie a touch, slowly, so the
+ * picture breathes instead of freezing: this far (radians) either way, over
+ * this long (seconds). */
+const HOME_DRIFT = { angle: 0.02, period: 14 } as const;
+
 export function CameraRig({ map }: { map?: TownMap }) {
   const rt = useTownRuntime();
   const camera = useThree((s) => s.camera);
@@ -85,6 +103,35 @@ export function CameraRig({ map }: { map?: TownMap }) {
   const blend = useRef(0);
   /** The arrival the view last swung round for (see townSave.arrival). */
   const arrived = useRef(townSave.arrival);
+  /** Home's side of the camera (see homeMode). */
+  const home = useRef({
+    /** The visit the azimuth below was taken for. */
+    visit: -1,
+    /** Where the camera stands round the herzie at Home: fixed for the
+     * visit, so spinning the herzie turns it, not the view. */
+    azimuth: 0,
+    /** Home's framing, eased toward what the app asks for. */
+    frame: null as HomeFrame | null,
+    /** At Home (or on the way) last frame. */
+    on: false,
+    /** The lens it had before Home changed it. */
+    fov: 0,
+    /** The view's been changed for Home and must be put back. */
+    touched: false,
+    pose: {
+      position: new THREE.Vector3(),
+      target: new THREE.Vector3(),
+      fov: 0,
+      pan: 0,
+    } as HomePose,
+    center: new THREE.Vector3(),
+    feet: new THREE.Vector3(),
+    follow: new THREE.Vector3(),
+    followTarget: new THREE.Vector3(),
+    forward: new THREE.Vector3(),
+    position: new THREE.Vector3(),
+    target: new THREE.Vector3(),
+  });
 
   // Restore where the camera was, and save it again on the way out.
   useEffect(() => {
@@ -108,6 +155,16 @@ export function CameraRig({ map }: { map?: TownMap }) {
     const body = rt.playerBody;
     if (!c || !body) return;
     time.current += delta;
+    homeMode.step(delta);
+    // Leaving Home: the camera it swings back to is behind the herzie,
+    // looking the way it faces (it'll walk off that way).
+    const h = home.current;
+    if (h.on && !homeMode.on && rt.playerHerzie) {
+      c.rotateTo(rt.playerHerzie.heading - Math.PI, c.polarAngle, false);
+    }
+    h.on = homeMode.on;
+    // At Home a drag spins the herzie (see HomeSpin), not the view.
+    c.enabled = !combat.on && !homeMode.on;
 
     // Just arrived (through a portal, into the cave, respawned): behind the
     // herzie, looking the way it faces — not wherever the view last was.
@@ -126,7 +183,7 @@ export function CameraRig({ map }: { map?: TownMap }) {
       c.mouseButtons.right = look;
       // Drags must not also turn the view (the aim already does): off
       // altogether while fighting, so a held cast can't double the turn.
-      c.enabled = !on;
+      c.enabled = !on && !homeMode.on;
       // Aiming wants the view right under the mouse: barely smoothed.
       c.smoothTime = on ? 0.04 : 0.12;
       c.draggingSmoothTime = 0.04;
@@ -214,6 +271,90 @@ export function CameraRig({ map }: { map?: TownMap }) {
       .applyMatrix4(camera.matrixWorldInverse);
     rt.cameraAzimuth = c.azimuthAngle;
   }, -2);
+
+  // Home: once the controls have placed the camera behind the herzie (at
+  // -1), carried from there toward Home's pose by the blend — before
+  // anything reads the camera (name tags, the frame itself).
+  useFrame((_, delta) => {
+    const h = home.current;
+    const b = homeMode.blend;
+    const herzie = rt.playerHerzie;
+    const body = rt.playerBody;
+    const cam = camera as THREE.PerspectiveCamera;
+    if (!h.touched) h.fov = cam.fov;
+    if (b <= 0 || !herzie || !body) {
+      if (h.touched) {
+        h.touched = false;
+        cam.fov = h.fov;
+        cam.clearViewOffset();
+        cam.updateProjectionMatrix();
+      }
+      return;
+    }
+    if (h.visit !== homeMode.visit) {
+      h.visit = homeMode.visit;
+      h.azimuth = homeAzimuth(herzie.heading);
+      homeMode.setAzimuth(h.azimuth);
+    }
+    // Home's framing, eased toward the app's (see HOME_FRAME_EASE).
+    const want = homeMode.frame ?? FALLBACK_FRAME(size.height);
+    if (!h.frame || b < 1e-3) h.frame = { ...want };
+    else {
+      const k = 1 - (1 - HOME_FRAME_EASE) ** (delta * 60);
+      h.frame.feetY += (want.feetY - h.frame.feetY) * k;
+      h.frame.viewHeight = want.viewHeight;
+      h.frame.zoom += (want.zoom - h.frame.zoom) * k;
+    }
+    body.getWorldPosition(h.feet);
+    h.center.copy(h.feet).setY(h.feet.y + herzie.centerHeight);
+    const drift =
+      Math.sin((time.current / HOME_DRIFT.period) * Math.PI * 2) *
+      HOME_DRIFT.angle *
+      b;
+    homePose(
+      h.center,
+      h.feet,
+      h.azimuth + drift,
+      h.frame,
+      size.width,
+      size.height,
+      h.pose,
+    );
+    // Where the controls put it, and what it looks at (as far ahead as the
+    // herzie is).
+    h.follow.copy(cam.position);
+    cam.getWorldDirection(h.forward);
+    h.followTarget
+      .copy(h.follow)
+      .addScaledVector(h.forward, h.follow.distanceTo(h.center));
+    blendPose(
+      h.center,
+      h.follow,
+      h.followTarget,
+      h.pose,
+      b,
+      h.position,
+      h.target,
+    );
+    cam.position.copy(h.position);
+    cam.up.set(0, 1, 0);
+    cam.lookAt(h.target);
+    cam.fov = THREE.MathUtils.lerp(h.fov, h.pose.fov, b);
+    const pan = h.pose.pan * b;
+    if (Math.abs(pan) > 0.01)
+      cam.setViewOffset(
+        size.width,
+        size.height,
+        0,
+        pan,
+        size.width,
+        size.height,
+      );
+    else cam.clearViewOffset();
+    cam.updateProjectionMatrix();
+    cam.updateMatrixWorld();
+    h.touched = true;
+  }, -0.5);
 
   return (
     <CameraControls

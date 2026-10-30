@@ -9,13 +9,18 @@ import {
   isBankFull,
   levelProgress,
 } from "@herzies/shared";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useReportHomeStage } from "../hooks/useStageAlignment";
 import { cn } from "../lib/utils";
 import { type AppState, herzies } from "../tauri-bridge";
 import { HERZIE_STAGE_HEIGHT } from "./HerzieWithSky";
 import { NowPlayingBox } from "./NowPlayingBox";
-import { PLAYER_CARD, PLAYER_CARD_HOME, PlayerBars } from "./PlayerBars";
+import {
+  observePlayerCard,
+  PLAYER_CARD,
+  PLAYER_CARD_HOME,
+  PlayerBars,
+} from "./PlayerBars";
 import { Tooltip } from "./Tooltip";
 
 /** A pending world drop plus the ground x-position it was assigned on first
@@ -39,8 +44,18 @@ export function HomeView({
   onOpenProfile,
   onActivity,
   active = true,
+  inWorld = false,
+  big = false,
 }: {
+  /** In the big window: the player card with what's playing under it, top
+   * left (as the Town lays them out there), and nothing else — the herzie
+   * stands in the middle of the window, in the world. */
+  big?: boolean;
   state: AppState;
+  /** Home is shown in the Town's world (see town/homeMode): the herzie and
+   * what's dropped round it are the world's, and a press anywhere but this
+   * view's own cards goes through to it (a drag spins the herzie). */
+  inWorld?: boolean;
   /**
    * Home is the visible view. Views are only hidden with a CSS class, so
    * without this the creature and its sky keep animating inside a
@@ -163,44 +178,80 @@ export function HomeView({
   // The Herzie view lines its stage up with this one (see useStageAlignment).
   const viewRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
-  useReportHomeStage(viewRef, stageRef, active);
+  // Measured where there's a stage (not in the big window).
+  useReportHomeStage(viewRef, stageRef, active && !big);
+  // The windows over Home hang under the card in the big window (see
+  // OverlayWindow's `narrow`), as under the Town's.
+  const column = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (big && active) observePlayerCard(column.current);
+  }, [big, active]);
 
   if (!herzie) return null;
 
+  const card = (
+    <div className={cn(PLAYER_CARD, PLAYER_CARD_HOME)}>
+      <div className="flex h-5 items-center">
+        <span className="block min-w-0 truncate text-ui-lg font-bold text-cyan">
+          <Tooltip label="View your profile">
+            <button
+              type="button"
+              onClick={onOpenProfile}
+              className="cursor-pointer font-bold text-cyan hover:underline"
+            >
+              {herzie.name}
+            </button>
+          </Tooltip>
+        </span>
+      </div>
+      {/* The level (and class) on its own line, so a long name has the
+              row to itself. */}
+      <div className="my-0.5 text-[10px] leading-3 whitespace-nowrap text-text-dim">
+        Lv. {herzie.level}
+        {herzie.class && ` · ${CLASS_DEFS[herzie.class].name}`}
+      </div>
+      <PlayerBars
+        level={herzie.level}
+        progress={levelProgress(herzie)}
+        xp={herzie.xp}
+        className="mt-1.5 text-text-dim"
+      />
+    </div>
+  );
+
+  if (big)
+    return (
+      <div ref={viewRef} className="pointer-events-none flex h-full flex-col">
+        <div
+          ref={column}
+          className="pointer-events-auto relative z-50 flex w-[174px] flex-col gap-2"
+        >
+          {card}
+          <NowPlayingBox
+            nowPlaying={nowPlaying}
+            multipliers={multipliers}
+            tint={cn(PLAYER_CARD_HOME, "backdrop-blur-md")}
+          />
+          {!isConnected && (
+            <span className="text-[10px] text-red">
+              connect to internet to grow
+            </span>
+          )}
+        </div>
+      </div>
+    );
+
   return (
-    <div ref={viewRef} className="flex h-full flex-col">
+    <div
+      ref={viewRef}
+      className={cn("flex h-full flex-col", inWorld && "pointer-events-none")}
+    >
       {/* Top left, a frosted card: name and level, then health and
           experience — at least a third of the window wide. z-50: over the
           herzie canvas (z-index: 1), which would otherwise swallow the
           bars' tooltips. */}
-      <div className="relative z-50 flex items-start justify-between gap-1.5">
-        <div className={cn(PLAYER_CARD, PLAYER_CARD_HOME)}>
-          <div className="flex h-5 items-center">
-            <span className="block min-w-0 truncate text-ui-lg font-bold text-cyan">
-              <Tooltip label="View your profile">
-                <button
-                  type="button"
-                  onClick={onOpenProfile}
-                  className="cursor-pointer font-bold text-cyan hover:underline"
-                >
-                  {herzie.name}
-                </button>
-              </Tooltip>
-            </span>
-          </div>
-          {/* The level (and class) on its own line, so a long name has the
-              row to itself. */}
-          <div className="my-0.5 text-[10px] leading-3 whitespace-nowrap text-text-dim">
-            Lv. {herzie.level}
-            {herzie.class && ` · ${CLASS_DEFS[herzie.class].name}`}
-          </div>
-          <PlayerBars
-            level={herzie.level}
-            progress={levelProgress(herzie)}
-            xp={herzie.xp}
-            className="mt-1.5 text-text-dim"
-          />
-        </div>
+      <div className="relative z-50 flex items-start justify-between gap-1.5 [&>*]:pointer-events-auto">
+        {card}
         <div className="flex h-5 items-center gap-1.5">
           {!isConnected && (
             <span className="text-[10px] text-red">
@@ -223,7 +274,7 @@ export function HomeView({
         className="relative flex shrink-0 items-center justify-center"
         style={{ height: HERZIE_STAGE_HEIGHT }}
       >
-        {dropItems.length > 0 && (!hasSpirit || bankFull) && (
+        {!inWorld && dropItems.length > 0 && (!hasSpirit || bankFull) && (
           // pointer-events-none on the wrapper keeps the gaps between items
           // from blocking herzie drag; each item re-enables pointer events
           // on itself. z-10: the herzie canvas sets its own z-index: 1 (see
@@ -324,7 +375,7 @@ export function HomeView({
         nowPlaying={nowPlaying}
         multipliers={multipliers}
         tint="bg-white/[0.03]"
-        className="z-10 mb-2"
+        className="pointer-events-auto z-10 mb-2"
       />
     </div>
   );
