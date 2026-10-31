@@ -71,7 +71,23 @@ describe("buying from Boboku", () => {
     expect(await getUnits(p.userId)).toEqual([]);
   });
 
-  it("only sells instruments", async () => {
+  it("sells his spare cap, which a herzie can wear", async () => {
+    const p = await player(500);
+    const res = await buy(p.accessToken, "sixpence");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ spent: 300, newCurrency: 200 });
+    expect((await getUnits(p.userId)).map((u) => u.item_id)).toEqual([
+      "sixpence",
+    ]);
+    const { data: row } = await admin()
+      .from("items")
+      .select("equipable, equip_slot")
+      .eq("id", "sixpence")
+      .single();
+    expect(row).toEqual({ equipable: true, equip_slot: "head" });
+  });
+
+  it("only sells what's on his list", async () => {
     const p = await player(1000);
     const res = await buy(p.accessToken, "cd");
     expect(res.status).toBe(400);

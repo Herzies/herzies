@@ -1712,8 +1712,8 @@ function buildGhostSpheres(
 /** Flat cap (a sixpence): a puffy, domed tweed crown pulled down snug and
  * tipped forward, a short stiff peak poking out over the eyes, and a button
  * on top. Low on purpose, like the witch hat's squat crown: a grown
- * herzie's head sits near the top of the frame. No catalog item has it yet —
- * Boboku wears it (npc-looks.ts). */
+ * herzie's head sits near the top of the frame. Boboku wears it
+ * (npc-looks.ts) and sells a spare: the Vagrant Cap. */
 function buildSixpenceSpheres(spheres: Sphere[]): Sphere[] {
   const head = getHeadBounds(spheres);
   if (!head) return [];

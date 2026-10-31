@@ -1217,6 +1217,8 @@ export const NON_DROPPABLE_ITEM_IDS = [
   "old-cymbal",
   // Consumables are bought from Medea, never dropped.
   "star-candy",
+  // Boboku's spare cap: he sells it (BOBOKU_STOCK), it never drops.
+  "sixpence",
   // The class cloaks come only from a boss's reward pools
   // (BOSS_ONLY_ITEM_IDS)…
   "troubadour-mantle",
@@ -2798,6 +2800,32 @@ function witchHatCardIcon(u: number, v: number): TexSample | null {
   return null;
 }
 
+function sixpenceCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  // The button on top.
+  if (ix ** 2 + (iy + 0.25) ** 2 < 0.05 ** 2)
+    return { bright: 0.6, color: "#5B4B3C" };
+  // The peak: a flat half-moon poking out under the front, to the left.
+  if (((ix + 0.14) / 0.24) ** 2 + ((iy - 0.14) / 0.09) ** 2 < 1 && iy > 0.1)
+    return { bright: 0.55, color: "#5B4B3C" };
+  // The crown: a puffy dome, flat underneath, in tweed flecks.
+  if ((ix / 0.3) ** 2 + ((iy - 0.12) / 0.36) ** 2 < 1 && iy < 0.13) {
+    const fleck = (Math.floor((ix + 1) * 30) + Math.floor((iy + 1) * 30)) % 3;
+    return { bright: fleck === 0 ? 0.7 : 0.82, color: "#6F5D4B" };
+  }
+  return null;
+}
+
+function renderSixpenceFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#A88B6A",
+    "#6F5D4B",
+    "#33281E",
+    sixpenceCardIcon,
+  );
+}
+
 function renderWitchHatFrame(yAngle: number): string[] {
   return renderIconCard(
     yAngle,
@@ -2975,6 +3003,7 @@ const tailwindCloakFrames = generateFrames(renderTailwindCloakFrame);
 const stickFrames = generateFrames(renderStickFrame);
 const cymbalFrames = generateFrames(renderCymbalFrame);
 const witchHatFrames = generateFrames(renderWitchHatFrame);
+const sixpenceFrames = generateFrames(renderSixpenceFrame);
 const fangsFrames = generateFrames(renderFangsFrame);
 const pumpkinSpiceFrames = generateFrames(renderPumpkinSpiceFrame);
 const ghostFrames = generateFrames(renderGhostFrame);
@@ -3259,6 +3288,19 @@ export const ITEMS: ItemDef[] = [
     equipSlot: "head",
     sellPrice: 100,
     stats: { sonicPower: 5 },
+  },
+  {
+    // Boboku's own flat cap; he keeps a spare on his stall (BOBOKU_STOCK).
+    id: "sixpence",
+    name: "Vagrant Cap",
+    description:
+      "Boboku's spare tweed flat cap. A little worn, a lot of character.",
+    rarity: "uncommon",
+    frames: sixpenceFrames,
+    equipable: true,
+    equipSlot: "head",
+    sellPrice: 100,
+    stats: { luck: 5 },
   },
   {
     id: "rainbow-headband",
