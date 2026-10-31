@@ -11,11 +11,13 @@ import { benchFacing } from "./components/town/Benches";
 import { BOARD, boardFacing } from "./components/town/Boards";
 import { localHours } from "./components/town/DayCycle";
 import {
+  buildingsOf,
   cellCenter,
   EIGHTH,
   emptyMap,
   facingAt,
   inland,
+  isBuildingChar,
   islandRadius,
   isSunk,
   levelAt,
@@ -23,19 +25,24 @@ import {
   MAX_LEVEL,
   MAX_MAP_SIZE,
   MIN_MAP_SIZE,
+  moveObjects,
   OBJECTS,
   OFF,
   objectAt,
+  objectGroup,
   objectJitter,
   onIsland,
   type Point,
   parseMap,
   portalCells,
   pruneFacing,
+  pruneTurns,
   SPOT_NAMES,
   TERRAIN,
   type TownMap,
+  turned,
   withFacing,
+  withTurn,
   worldRadius,
 } from "./components/town/map";
 import { checkLinks } from "./components/town/maps";
@@ -101,7 +108,7 @@ const PALETTE: Paint[] = [
  * K (shop, "kiosk"), C (cave), H (auction house, "hall"), U (bush), L (lamp post), N (bench), T
  * (market stand), I (bulletin board, "info"), Y (training dummy) and O
  * (portal). Clear of the 3D preview's keys (WASD,
- * arrows, E) and the tools' (B, R, F, P). */
+ * arrows, E) and the tools' (B, R, F, M, P). */
 const KEYS = [
   ..."1234567890-",
   "k",
@@ -117,12 +124,16 @@ const KEYS = [
   "o",
   "x",
 ];
-type Tool = "brush" | "rect" | "fill";
+type Tool = "brush" | "rect" | "fill" | "move";
 const TOOLS: { tool: Tool; key: string; name: string }[] = [
   { tool: "brush", key: "b", name: "Brush" },
   { tool: "rect", key: "r", name: "Rectangle" },
   { tool: "fill", key: "f", name: "Fill" },
+  { tool: "move", key: "m", name: "Move" },
 ];
+/** How far Q turns a building: finer than an object's eighth, since a
+ * building only ever wants to lean a little. */
+const BUILDING_TURN_STEP = 5;
 const BRUSH_SIZES = [1, 3, 5, 9];
 
 /** A marker you can drag: a visitor's spot, a spare spot, or the spawn. */
@@ -155,12 +166,14 @@ const fromDraft = (m: TownMap, d: Draft): TownMap => {
   // No hills: no heights layer at all, so a flat map's file is unchanged.
   const hills = heights.some((r) => /[1-9]/.test(r));
   return syncPortals(
-    pruneFacing({
-      ...rest,
-      terrain: d.terrain.map((r) => r.join("")),
-      objects: d.objects.map((r) => r.join("")),
-      ...(hills ? { heights } : {}),
-    }),
+    pruneTurns(
+      pruneFacing({
+        ...rest,
+        terrain: d.terrain.map((r) => r.join("")),
+        objects: d.objects.map((r) => r.join("")),
+        ...(hills ? { heights } : {}),
+      }),
+    ),
   );
 };
 
@@ -543,6 +556,28 @@ function drawMap(
   }
   ctx.lineWidth = 1;
 
+  // Turned buildings: their outline as they stand, dashed.
+  ctx.strokeStyle = "#ffffffb0";
+  ctx.setLineDash([Math.max(2, zoom / 2), Math.max(2, zoom / 3)]);
+  for (const b of buildingsOf(map)) {
+    if (b.turn === 0) continue;
+    for (const r of b.rects) {
+      const corners = [
+        [r.x0, r.z0],
+        [r.x0 + r.w, r.z0],
+        [r.x0 + r.w, r.z0 + r.h],
+        [r.x0, r.z0 + r.h],
+      ].map(([x, z]) => turned(b, x, z));
+      ctx.beginPath();
+      for (const [x, z] of corners) {
+        ctx.lineTo((x + HALF) * zoom, (z + HALF) * zoom);
+      }
+      ctx.closePath();
+      ctx.stroke();
+    }
+  }
+  ctx.setLineDash([]);
+
   // Markers.
   ctx.font = `bold ${Math.max(10, zoom * 1.2)}px ui-monospace, monospace`;
   ctx.textAlign = "center";
@@ -686,10 +721,14 @@ function MapEditor() {
     };
   }, [timeMode]);
   const canvas = useRef<HTMLCanvasElement>(null);
-  /** The stroke under way: its draft and what it paints, or a marker
-   * being dragged. */
+  /** The stroke under way: its draft and what it paints, a marker being
+   * dragged, or something being moved (from the map before the drag, and
+   * the cell it was picked up by). */
   const stroke = useRef<
-    { draft: Draft; p: Paint } | { marker: MarkerId } | null
+    | { draft: Draft; p: Paint }
+    | { marker: MarkerId }
+    | { move: { base: TownMap; from: [number, number]; started: boolean } }
+    | null
   >(null);
   const mapRef = useRef(map);
   // The cell under the pointer, for the keyboard (Q turns what's there).
@@ -775,6 +814,13 @@ function MapEditor() {
       return;
     }
     const cell = cellOf(e);
+    if (tool === "move") {
+      // Pick up what's under the pointer; nothing there, nothing to do.
+      if (e.button === 0 && objectGroup(map, cell[0], cell[1]).length > 0) {
+        stroke.current = { move: { base: map, from: cell, started: false } };
+      }
+      return;
+    }
     const draft = toDraft(map);
     const p = strokePaint(
       e.button === 2 ? eraser(paint.layer) : paint,
@@ -806,6 +852,24 @@ function MapEditor() {
       setRect({ ...rect, b: cell });
     } else if (s && "marker" in s) {
       setMap((m) => withMarker(m, s.marker, clampToWorld(m, worldOf(e))));
+    } else if (s && "move" in s) {
+      // Follows the pointer wherever it fits; where it doesn't, it stays at
+      // the last place that did.
+      const { base, from } = s.move;
+      const next = moveObjects(
+        base,
+        from[0],
+        from[1],
+        cell[0] - from[0],
+        cell[1] - from[1],
+      );
+      if (next && next !== mapRef.current) {
+        if (!s.move.started) {
+          checkpoint();
+          s.move.started = true;
+        }
+        setMap(next);
+      }
     } else if (s) {
       brushAt(s.draft, cell, s.p);
       setMap((m) => fromDraft(m, s.draft));
@@ -976,6 +1040,23 @@ function MapEditor() {
         )
           return;
         checkpoint();
+        if (isBuildingChar(objectAt(m, at[0], at[1]))) {
+          // A building turns a few degrees round its middle.
+          const group = new Set(
+            objectGroup(m, at[0], at[1]).map(([c, r]) => `${c},${r}`),
+          );
+          const b = buildingsOf(m).find((b) => group.has(b.anchor.join(",")));
+          if (!b) return;
+          const now = Math.round((b.turn * 180) / Math.PI);
+          const next = now + (e.shiftKey ? 1 : -1) * BUILDING_TURN_STEP;
+          setMap(withTurn(m, b.anchor[0], b.anchor[1], next));
+          setStatus(
+            next === 0
+              ? "Square to the grid"
+              : `Turned ${Math.abs(next)}° ${next < 0 ? "clockwise" : "anticlockwise"}`,
+          );
+          return;
+        }
         const step = e.shiftKey ? 1 : -1;
         setMap(withFacing(m, at[0], at[1], eighthsAt(m, at[0], at[1]) + step));
       } else {
@@ -1144,7 +1225,7 @@ function MapEditor() {
             </button>
           ))}
           <span style={{ marginLeft: 6, color: "#8b8fa3" }}>
-            Q turn (shift: back)
+            Q turn (shift: back; buildings by 5°)
           </span>
           <span style={{ marginLeft: 6, color: "#8b8fa3" }}>size [ ]</span>
           {BRUSH_SIZES.map((b) => (

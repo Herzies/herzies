@@ -737,7 +737,7 @@ const COLUMN_RADIUS = 0.22;
 function porticoOf(b: Building, door: Door) {
   const r = b.rects[b.door?.rect ?? 0];
   const sideLength = b.door?.side === "n" || b.door?.side === "s" ? r.w : r.h;
-  // Room left at the ends for the banners.
+  // A strip of wall left showing at either end.
   const half = Math.min(3.4, sideLength / 2 - 1.0);
   const inner = DOOR_RADIUS + 0.45;
   const outer = half - 0.15;
@@ -967,13 +967,6 @@ function auctionGeometry(b: Building) {
     glow.push(
       onWall(disc(0.22, 0.04).translate(0, oculus, d + 0.04), x, 0, z, yaw, 0),
     );
-
-    // Wine banners hanging down the wall either side of the portico.
-    for (const u of [-(half + 0.6), half + 0.6]) {
-      at(box(0.62, 1.7, 0.05, u, 3.3, 0.05), WINE);
-      at(box(0.66, 0.1, 0.06, u, 4.18, 0.07), GOLD);
-      at(box(0.62, 0.08, 0.06, u, 2.75, 0.08), GOLD);
-    }
   }
   return { body, glow };
 }

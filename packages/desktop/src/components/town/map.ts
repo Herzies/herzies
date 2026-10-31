@@ -115,6 +115,11 @@ export type TownMap = {
    * (0–7, 0 facing +z). Anything not listed faces its own way (a bench
    * the nearest path, a rock wherever it fell). */
   facing?: Record<string, number>;
+  /** Buildings turned by hand in the editor: their anchor cell (the
+   * first of their cells, top row first) → degrees of yaw, as `turn` (so
+   * negative turns clockwise, seen from above). A building not listed is
+   * square to the grid, or, the auction house, leans toward town. */
+  turns?: Record<string, number>;
 };
 
 /** An eighth of a turn: the steps objects are turned in. */
@@ -143,6 +148,112 @@ export function withFacing(
   if (n === undefined) delete facing[`${col},${row}`];
   else facing[`${col},${row}`] = ((Math.round(n) % 8) + 8) % 8;
   return { ...map, facing };
+}
+
+/** The map with the building anchored at (col, row) turned to `degrees`
+ * (undefined: back to its own way). */
+export function withTurn(
+  map: TownMap,
+  col: number,
+  row: number,
+  degrees: number | undefined,
+): TownMap {
+  const turns = { ...map.turns };
+  if (degrees === undefined) delete turns[`${col},${row}`];
+  else {
+    // Kept in (−180, 180], and whole: the file stays readable.
+    const d = ((((Math.round(degrees) + 180) % 360) + 360) % 360) - 180;
+    turns[`${col},${row}`] = d === -180 ? 180 : d;
+  }
+  return { ...map, turns };
+}
+
+/** Turns only for buildings still anchored where they were: painting a
+ * building away (or over its first cell) forgets its turn. */
+export function pruneTurns(map: TownMap): TownMap {
+  if (!map.turns) return map;
+  const anchors = new Set(buildingsOf(map).map((b) => b.anchor.join(",")));
+  const turns = Object.fromEntries(
+    Object.entries(map.turns).filter(([k]) => anchors.has(k)),
+  );
+  return Object.keys(turns).length === Object.keys(map.turns).length
+    ? map
+    : { ...map, turns };
+}
+
+/** The cells that move together with the one at (col, row): all of a
+ * building, or just the one object. */
+export function objectGroup(
+  map: TownMap,
+  col: number,
+  row: number,
+): [number, number][] {
+  const ch = objectAt(map, col, row);
+  if (ch === "." || ch === OFF) return [];
+  if (!isBuildingChar(ch)) return [[col, row]];
+  const seen = new Set<string>();
+  const out: [number, number][] = [];
+  const stack: [number, number][] = [[col, row]];
+  while (stack.length > 0) {
+    const [c, r] = stack.pop() as [number, number];
+    const k = `${c},${r}`;
+    if (seen.has(k) || objectAt(map, c, r) !== ch) continue;
+    seen.add(k);
+    out.push([c, r]);
+    stack.push([c + 1, r], [c - 1, r], [c, r + 1], [c, r - 1]);
+  }
+  return out;
+}
+
+/**
+ * The map with what's at (col, row) — a whole building, or one object —
+ * moved `dc` columns and `dr` rows, along with which way it's turned and
+ * where a portal leads. Null when it won't fit there: off the island, in
+ * water, or on top of something else.
+ */
+export function moveObjects(
+  map: TownMap,
+  col: number,
+  row: number,
+  dc: number,
+  dr: number,
+): TownMap | null {
+  const group = objectGroup(map, col, row);
+  if (group.length === 0) return null;
+  if (dc === 0 && dr === 0) return map;
+  const objects = map.objects.map((r) => [...r]);
+  const chars = group.map(([c, r]) => objects[r][c]);
+  for (const [c, r] of group) objects[r][c] = ".";
+  for (const [i, [c, r]] of group.entries()) {
+    const [nc, nr] = [c + dc, r + dr];
+    if (
+      !onIsland(map, nc, nr) ||
+      isSunk(map.terrain[nr][nc]) ||
+      objects[nr][nc] !== "."
+    ) {
+      return null;
+    }
+    objects[nr][nc] = chars[i];
+  }
+  const moved = new Set(group.map(([c, r]) => `${c},${r}`));
+  /** A "col,row" table with the moved cells' entries moved too. */
+  const shift = <T>(table: Record<string, T> | undefined) =>
+    table &&
+    Object.fromEntries(
+      Object.entries(table).map(([k, v]) => {
+        if (!moved.has(k)) return [k, v];
+        const [c, r] = k.split(",").map(Number);
+        return [`${c + dc},${r + dr}`, v];
+      }),
+    );
+  const out: TownMap = {
+    ...map,
+    objects: objects.map((r) => r.join("")),
+  };
+  if (map.facing) out.facing = shift(map.facing);
+  if (map.turns) out.turns = shift(map.turns);
+  if (map.portals) out.portals = shift(map.portals);
+  return out;
 }
 
 /** Turns only on cells that still have something on them: painting an
@@ -424,6 +535,23 @@ export function parseMap(json: unknown): TownMap {
   if (!m.spawn || typeof m.spawn.heading !== "number") {
     errors.push("spawn: expected { at, heading }");
   } else where("spawn.at", m.spawn.at);
+  // Last, once the grids are known good: buildingsOf reads them.
+  if (m.turns !== undefined && errors.length === 0) {
+    if (!m.turns || typeof m.turns !== "object") {
+      errors.push('turns: expected { "col,row": degrees }');
+    } else {
+      const anchors = new Set(
+        buildingsOf(m as TownMap).map((b) => b.anchor.join(",")),
+      );
+      for (const [k, d] of Object.entries(m.turns)) {
+        if (!anchors.has(k)) {
+          errors.push(`turns.${k}: not the first cell of a building`);
+        } else if (typeof d !== "number" || !(d > -180 && d <= 180)) {
+          errors.push(`turns.${k}: expected degrees, −180 to 180`);
+        }
+      }
+    }
+  }
 
   if (errors.length > 0) {
     const shown = errors.slice(0, 8).join("; ");
@@ -462,6 +590,18 @@ export function serializeMap(map: TownMap): string {
         turned.map(([k, n]) => `${JSON.stringify(k)}: ${n}`),
       )
     : "";
+  const buildingTurns = Object.entries(map.turns ?? {}).sort(([a], [b]) => {
+    const [ac, ar] = a.split(",").map(Number);
+    const [bc, br] = b.split(",").map(Number);
+    return ar - br || ac - bc;
+  });
+  const turns = buildingTurns.length
+    ? field(
+        "turns",
+        "{}",
+        buildingTurns.map(([k, d]) => `${JSON.stringify(k)}: ${d}`),
+      )
+    : "";
   const spots = Object.entries(map.spots)
     .map(([k, p]) => `    ${JSON.stringify(k)}: ${pt(p)}`)
     .join(",\n");
@@ -487,7 +627,7 @@ export function serializeMap(map: TownMap): string {
   "size": ${map.size},
   "origin": [${map.origin.join(", ")}],${combat}${room}${portals}
   "spawn": { "at": ${pt(map.spawn.at)}, "heading": ${map.spawn.heading} },
-  "spots": {${spots ? `\n${spots}\n  ` : ""}},${field("spare", "[]", map.spare.map(pt))}${facing}
+  "spots": {${spots ? `\n${spots}\n  ` : ""}},${field("spare", "[]", map.spare.map(pt))}${facing}${turns}
   "terrain": ${rows(map.terrain)},
   "objects": ${rows(map.objects)}${
     hasHills(map) ? `,\n  "heights": ${rows(map.heights as string[])}` : ""
@@ -629,10 +769,13 @@ export type Building = {
   /** The lowest ground under it: a plinth fills in down to there. */
   foot: number;
   /** How far it's turned off the grid (a yaw, added to every part's), and
-   * the point it turns round: the middle of its rects. 0 for all but the
-   * auction house (see turnOf). */
+   * the point it turns round: the middle of its rects. As turned in the
+   * editor (TownMap.turns), else 0 for all but the auction house (see
+   * turnOf). */
   turn: number;
   pivot: [x: number, z: number];
+  /** Its first cell, top row first: what TownMap.turns keys it by. */
+  anchor: [col: number, row: number];
 };
 
 /** The most the auction house turns off the grid toward the middle of
@@ -754,8 +897,12 @@ export function buildingsOf(map: TownMap): Building[] {
         half,
         y,
         foot,
-        turn: turnOf(kind, door, pivot),
+        turn:
+          map.turns?.[`${col},${row}`] !== undefined
+            ? (map.turns[`${col},${row}`] * Math.PI) / 180
+            : turnOf(kind, door, pivot),
         pivot,
+        anchor: [col, row],
       });
     }
   }
