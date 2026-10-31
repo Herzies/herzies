@@ -1759,6 +1759,70 @@ function buildSixpenceSpheres(spheres: Sphere[]): Sphere[] {
   return result;
 }
 
+/** Plutus' Crown: a gold band sat on top of the head round a domed red
+ * velvet cap, a ring of points with a pearl on each, and gems set round the
+ * band, a big "diamond" at the front. A full ring like the guard's helm, so it
+ * reads from every side as the herzie turns. */
+function buildPlutusCrownSpheres(spheres: Sphere[]): Sphere[] {
+  const head = getHeadBounds(spheres);
+  if (!head) return [];
+  const [hx, hy, hz] = head.center;
+  const hr = head.radius;
+  const gold = "#E8B83A";
+  const result: Sphere[] = [];
+  const push = (center: V3, radius: number, color: string, shape?: Shape) =>
+    result.push({
+      center,
+      radius,
+      zone: "wearable",
+      part: "head",
+      color,
+      shape,
+    });
+  // Creature space is y down: up is −y; the face is toward −z.
+  const bandY = hy - hr * 0.82;
+  const bandHalf = hr * 0.13;
+  const bandR = hr * 0.72;
+  push([hx, bandY, hz], bandR, gold, {
+    kind: "cylinder",
+    axis: [0, -bandHalf, 0],
+  });
+  // The velvet showing inside the ring, domed up past the band.
+  push([hx, bandY - bandHalf, hz], bandR * 0.86, "#8E1F2F", {
+    kind: "cylinder",
+    axis: [0, -hr * 0.02, 0],
+    dome: hr * 0.22,
+  });
+  // The points, tapering up from the band's top edge, each tipped with a
+  // pearl; the one at the front stands tallest.
+  const top = bandY - bandHalf;
+  const points = 8;
+  for (let i = 0; i < points; i++) {
+    const a = (i / points) * Math.PI * 2;
+    const x = hx + Math.sin(a) * bandR * 0.9;
+    const z = hz - Math.cos(a) * bandR * 0.9;
+    const half = hr * (i === 0 ? 0.2 : 0.15);
+    push([x, top - half, z], hr * 0.13, gold, {
+      kind: "cone",
+      axis: [0, -half, 0],
+      tipRadius: 0,
+    });
+    push([x, top - half * 2 - hr * 0.03, z], hr * 0.06, "#FFF3D6");
+  }
+  // The gems round the band: the "diamond" at the front, rubies and emeralds
+  // round the sides and back.
+  const gems = ["#DDF4FF", "#D0283C", "#2FA36B", "#D0283C"];
+  for (let i = 0; i < gems.length * 2; i++) {
+    const a = (i / (gems.length * 2)) * Math.PI * 2;
+    push(
+      [hx + Math.sin(a) * bandR * 0.98, bandY, hz - Math.cos(a) * bandR * 0.98],
+      hr * (i === 0 ? 0.11 : 0.07),
+      gems[i % gems.length],
+    );
+  }
+  return result;
+}
+
 /** A guard's helm: a steel cap pulled down over the head, a rim round its
  * base, a nose guard down the front and a stiff red crest running front to
  * back over the top. Low, like the sixpence. No catalog item has it — the
@@ -2948,6 +3012,9 @@ function appendWearableSpheres(
   }
   if (equipped.head === "sixpence") {
     spheres.push(...buildSixpenceSpheres(spheres));
+  }
+  if (equipped.head === "plutus-crown") {
+    spheres.push(...buildPlutusCrownSpheres(spheres));
   }
   if (equipped.head === "guard-helm") {
     spheres.push(...buildGuardHelmSpheres(spheres));

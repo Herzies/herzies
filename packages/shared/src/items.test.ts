@@ -1631,9 +1631,9 @@ describe("boss loot", () => {
       new URL(`../../../supabase/migrations/${name}`, import.meta.url),
       "utf8",
     );
-  // settle_boss_fight lives in 00114; the roll was last replaced in 00118.
+  // settle_boss_fight lives in 00114; the roll was last replaced in 00128.
   const sql = migration("00114_boss_bonus_loot.sql");
-  const rollSql = migration("00118_boss_loot_no_tokens.sql");
+  const rollSql = migration("00128_plutus_crown.sql");
 
   it("rolls from the same weights as bossLootWeights", () => {
     const roll = rollSql.slice(

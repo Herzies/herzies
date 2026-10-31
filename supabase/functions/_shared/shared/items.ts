@@ -1330,7 +1330,7 @@ export const BOSS_LOOT_EXCLUDED_ITEM_IDS = ["cd"];
 /** What a boss's random loot is drawn from, and how likely each is: every
  * item that drops from listening (not in NON_DROPPABLE_ITEM_IDS, no
  * seasonal window, not in BOSS_LOOT_EXCLUDED_ITEM_IDS), weighted per BOSS_LOOT_RARITY_BOOST. settle_boss_fight
- * rolls from a copy of this list (boss_loot_roll, 00118_boss_loot_no_tokens.sql);
+ * rolls from a copy of this list (boss_loot_roll, last in 00128_plutus_crown.sql);
  * items.test.ts checks the two agree, so a new droppable item needs adding
  * there too. */
 export function bossLootWeights(): { itemId: string; weight: number }[] {
@@ -2826,6 +2826,42 @@ function renderSixpenceFrame(yAngle: number): string[] {
   );
 }
 
+function plutusCrownCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  // Three diamonds set in the band.
+  for (const dx of [-0.15, 0, 0.15]) {
+    if (Math.abs(ix - dx) + Math.abs(iy - 0.1) < 0.045)
+      return { bright: 1, color: "#DDF4FF" };
+  }
+  // The band.
+  if (Math.abs(ix) < 0.26 && iy > 0.03 && iy < 0.17)
+    return { bright: 0.85, color: "#E8B83A" };
+  // Five points above it, the middle one tallest, each with a pearl.
+  if (Math.abs(ix) < 0.26 && iy <= 0.03) {
+    const k = Math.round(ix / 0.125);
+    const tall = k === 0 ? 0.3 : Math.abs(k) === 1 ? 0.24 : 0.2;
+    const top = 0.03 - tall;
+    const dx = ix - k * 0.125;
+    if (dx ** 2 + (iy - top + 0.02) ** 2 < 0.03 ** 2)
+      return { bright: 1, color: "#FFF3D6" };
+    // Each point narrows from the band to its pearl.
+    const up = (0.03 - iy) / tall; // 0 at the band, 1 at the pearl
+    if (up < 1 && Math.abs(dx) < 0.06 * (1 - up) + 0.012)
+      return { bright: 0.8, color: "#E8B83A" };
+  }
+  return null;
+}
+
+function renderPlutusCrownFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#E8B83A",
+    "#8A6A1E",
+    "#2E2410",
+    plutusCrownCardIcon,
+  );
+}
+
 function renderWitchHatFrame(yAngle: number): string[] {
   return renderIconCard(
     yAngle,
@@ -3004,6 +3040,7 @@ const stickFrames = generateFrames(renderStickFrame);
 const cymbalFrames = generateFrames(renderCymbalFrame);
 const witchHatFrames = generateFrames(renderWitchHatFrame);
 const sixpenceFrames = generateFrames(renderSixpenceFrame);
+const plutusCrownFrames = generateFrames(renderPlutusCrownFrame);
 const fangsFrames = generateFrames(renderFangsFrame);
 const pumpkinSpiceFrames = generateFrames(renderPumpkinSpiceFrame);
 const ghostFrames = generateFrames(renderGhostFrame);
@@ -3297,6 +3334,17 @@ export const ITEMS: ItemDef[] = [
       "Boboku's spare tweed flat cap. A little worn, a lot of character.",
     rarity: "uncommon",
     frames: sixpenceFrames,
+    equipable: true,
+    equipSlot: "head",
+    sellPrice: 100,
+    stats: { luck: 5 },
+  },
+  {
+    id: "plutus-crown",
+    name: "Plutus' Crown",
+    description: "Not sure how real these diamonds are.",
+    rarity: "uncommon",
+    frames: plutusCrownFrames,
     equipable: true,
     equipSlot: "head",
     sellPrice: 100,
