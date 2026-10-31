@@ -1,13 +1,21 @@
 import { mulberry32 } from "@herzies/shared";
 import { bushGeometry, rockGeometry, tuftGeometry } from "@herzies/shared/gl";
+import { useFrame } from "@react-three/fiber";
 import {
   CuboidCollider,
   CylinderCollider,
   RigidBody,
 } from "@react-three/rapier";
-import { useLayoutEffect, useMemo, useRef } from "react";
+import {
+  type ReactNode,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import * as THREE from "three";
-import { swayInWind } from "./ambient";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { ambient, inSeason, seasonNow, swayInWind } from "./ambient";
 
 import { BenchColliders, Benches } from "./Benches";
 import { BoardColliders, Boards } from "./Boards";
@@ -21,13 +29,17 @@ import {
   NightLights,
 } from "./Lamps";
 import {
+  cellAt,
   elevation,
+  isOpenWater,
   objectAt,
   objectPlace,
   type TownMap,
+  terrainAt,
   waterRuns,
 } from "./map";
 import { Portals } from "./Portals";
+import type { SeasonLook } from "./Seasons";
 import { StandColliders, Stands } from "./Stands";
 import { type Champion, StatueColliders, Statues } from "./Statues";
 import {
@@ -35,6 +47,7 @@ import {
   type Species,
   TREE_MATERIALS,
   TREE_RADIUS,
+  TREE_SHADOWS,
   TREE_VARIANTS,
   treeLook,
   treeSpecies,
@@ -67,20 +80,26 @@ type Part = {
   copies?: Copy[];
   /** Tint each copy with one of these, picked steadily per copy. */
   palette?: string[];
+  /** What its shadow is drawn with, if not the usual. */
+  shadow?: THREE.Material;
 };
 
 /** Rocks and stumps aren't see-through like the trees: low on the
  * ground, they never hide the player, and dithered they only speckle. */
-const rockMaterial = new THREE.MeshLambertMaterial({
-  color: "#7d7a80",
-  flatShading: true,
-});
+const rockMaterial = inSeason(
+  new THREE.MeshLambertMaterial({
+    color: "#7d7a80",
+    flatShading: true,
+  }),
+);
 const stumpGeometry = new THREE.CylinderGeometry(0.34, 0.42, 0.45, 7);
 const stumpTopGeometry = new THREE.CylinderGeometry(0.3, 0.3, 0.02, 7);
-const stumpTopMaterial = new THREE.MeshLambertMaterial({
-  color: "#b08a5a",
-  flatShading: true,
-});
+const stumpTopMaterial = inSeason(
+  new THREE.MeshLambertMaterial({
+    color: "#b08a5a",
+    flatShading: true,
+  }),
+);
 
 /** Spots for a few small things scattered in a cell. */
 function scatter(seed: number, n: number, spread: number, min = 0.7): Copy[] {
@@ -97,18 +116,25 @@ function scatter(seed: number, n: number, spread: number, min = 0.7): Copy[] {
 }
 
 // Plants sway in the wind (see ambient.ts); the low ones part around you.
-const vertexColored = swayInWind(
-  new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }),
-  { amount: 0.3, from: 0, bend: 1 },
+const vertexColored = inSeason(
+  swayInWind(
+    new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }),
+    { amount: 0.3, from: 0, bend: 1 },
+  ),
+  "leaf",
 );
 const tintable = new THREE.MeshLambertMaterial({ flatShading: true });
 const blossomMaterial = swayInWind(
   new THREE.MeshLambertMaterial({ flatShading: true }),
   { amount: 0.4, from: 0, bend: 1 },
 );
-const stemMaterial = swayInWind(
-  new THREE.MeshLambertMaterial({ color: "#3f7a3a" }),
-  { amount: 0.4, from: 0, bend: 1 },
+const stemMaterial = inSeason(
+  swayInWind(new THREE.MeshLambertMaterial({ color: "#3f7a3a" }), {
+    amount: 0.4,
+    from: 0,
+    bend: 1,
+  }),
+  "leaf",
 );
 const FLOWERS = scatter(99, 6, 0.4);
 const stemGeometry = new THREE.CylinderGeometry(0.02, 0.02, 0.3, 3);
@@ -130,9 +156,12 @@ const capGeometry = new THREE.SphereGeometry(
 );
 
 /** Bushes sway a little (they're solid, so they don't part round you). */
-const bushMaterial = swayInWind(
-  new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }),
-  { amount: 0.12, from: 0.2 },
+const bushMaterial = inSeason(
+  swayInWind(
+    new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }),
+    { amount: 0.12, from: 0.2 },
+  ),
+  "leaf",
 );
 const berryMaterial = swayInWind(
   new THREE.MeshLambertMaterial({ flatShading: true }),
@@ -249,9 +278,216 @@ const TREE_BUCKETS = SPECIES.flatMap((species) =>
   TREE_VARIANTS[species].map((geometry, variant) => ({
     key: `${species}${variant}`,
     species,
-    part: { geometry, material: TREE_MATERIALS[species], y: 0 } satisfies Part,
+    part: {
+      geometry,
+      material: TREE_MATERIALS[species],
+      shadow: TREE_SHADOWS[species],
+      y: 0,
+    } satisfies Part,
   })),
 );
+
+// --- What comes and goes with the seasons --------------------------------------
+
+/** A shape coloured all over one colour, ready to merge. */
+function painted(g: THREE.BufferGeometry, hex: string): THREE.BufferGeometry {
+  const out = g.index ? g.toNonIndexed() : g;
+  out.deleteAttribute("uv");
+  const c = new THREE.Color(hex);
+  const colors = new Float32Array(out.attributes.position.count * 3);
+  for (let i = 0; i < colors.length; i += 3) c.toArray(colors, i);
+  out.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  return out;
+}
+
+/** A pumpkin: squat, ribbed (a low-poly sphere's facets), with a stalk. */
+function pumpkinGeometry(): THREE.BufferGeometry {
+  return mergeGeometries([
+    painted(
+      new THREE.SphereGeometry(0.3, 8, 5)
+        .scale(1, 0.72, 1)
+        .translate(0, 0.2, 0),
+      "#e0782a",
+    ),
+    painted(
+      new THREE.CylinderGeometry(0.035, 0.05, 0.14, 5).translate(0, 0.46, 0),
+      "#5a6a2a",
+    ),
+  ]) as THREE.BufferGeometry;
+}
+
+/** A snowman: three balls of snow, coal eyes and buttons, a carrot nose
+ * and a twig arm each side. Faces +z. */
+function snowmanGeometry(): THREE.BufferGeometry {
+  const snow = "#e8eef6";
+  const coal = "#22232a";
+  const twig = "#5a4030";
+  const parts = [
+    painted(new THREE.IcosahedronGeometry(0.46, 1).translate(0, 0.4, 0), snow),
+    painted(new THREE.IcosahedronGeometry(0.33, 1).translate(0, 1.0, 0), snow),
+    painted(new THREE.IcosahedronGeometry(0.24, 1).translate(0, 1.44, 0), snow),
+    painted(
+      new THREE.ConeGeometry(0.045, 0.24, 5)
+        .rotateX(Math.PI / 2)
+        .translate(0, 1.44, 0.32),
+      "#e8782a",
+    ),
+    ...[-0.08, 0.08].map((x) =>
+      painted(
+        new THREE.BoxGeometry(0.05, 0.05, 0.03).translate(x, 1.52, 0.22),
+        coal,
+      ),
+    ),
+    ...[1.12, 0.98, 0.84].map((y) =>
+      painted(
+        new THREE.BoxGeometry(0.05, 0.05, 0.03).translate(
+          0,
+          y,
+          0.32 - (1.12 - y) * 0.1,
+        ),
+        coal,
+      ),
+    ),
+    ...[-1, 1].map((side) =>
+      painted(
+        new THREE.CylinderGeometry(0.02, 0.025, 0.55, 4)
+          .rotateZ(side * -1.1)
+          .translate(side * 0.52, 1.12, 0),
+        twig,
+      ),
+    ),
+  ];
+  return mergeGeometries(parts) as THREE.BufferGeometry;
+}
+
+/** A heap of fallen leaves, a few colours. */
+function leafPileGeometry(): THREE.BufferGeometry {
+  const rand = mulberry32(1031);
+  const colors = ["#c8432a", "#e0782a", "#d9a032", "#a8502a"];
+  return mergeGeometries(
+    Array.from({ length: 6 }, (_, i) => {
+      const a = rand() * Math.PI * 2;
+      const r = rand() * 0.35;
+      return painted(
+        new THREE.IcosahedronGeometry(0.3 + rand() * 0.15, 0)
+          .scale(1, 0.28, 1)
+          .translate(Math.cos(a) * r, 0.03, Math.sin(a) * r),
+        colors[i % colors.length],
+      );
+    }),
+  ) as THREE.BufferGeometry;
+}
+
+/** Seasonal things aren't see-through or swaying: low, and solid. */
+const seasonalMaterial = inSeason(
+  new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }),
+);
+const PUMPKIN: Part = {
+  geometry: pumpkinGeometry(),
+  material: seasonalMaterial,
+  y: 0,
+};
+const SNOWMAN: Part = {
+  geometry: snowmanGeometry(),
+  material: inSeason(
+    new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }),
+  ),
+  y: 0,
+};
+const LEAF_PILE: Part = {
+  geometry: leafPileGeometry(),
+  material: seasonalMaterial,
+  y: 0,
+};
+/** At most this many snowmen on an island. */
+const SNOWMEN = 3;
+
+/** Where the seasonal things go, the same every year: pumpkins on open
+ * grass beside the paths, snowmen a little further out, and a heap of
+ * leaves at the foot of some of the oaks. */
+export function placeSeasonal(map: TownMap, oaks: Placed[]) {
+  const pumpkins: Placed[] = [];
+  const snowmen: Placed[] = [];
+  const isPath = (c: number, r: number) => terrainAt(map, c, r) === "g";
+  for (let row = 0; row < map.size; row++) {
+    for (let col = 0; col < map.size; col++) {
+      if (terrainAt(map, col, row) !== "." || objectAt(map, col, row) !== ".")
+        continue;
+      const byPath = [
+        [1, 0],
+        [-1, 0],
+        [0, 1],
+        [0, -1],
+      ].some(([dc, dr]) => isPath(col + dc, row + dr));
+      const pick = mulberry32(col * 7349 + row * 15661 + 31)();
+      const at = objectPlace(map, col, row);
+      if (byPath && pick < 0.05)
+        pumpkins.push({ ...at, scale: 0.8 + pick * 4 });
+      else if (byPath && pick > 0.985 && snowmen.length < SNOWMEN)
+        snowmen.push({ ...at, scale: 1 });
+    }
+  }
+  const leafPiles = oaks
+    .filter((_, i) => i % 2 === 0)
+    .map((t, i) => {
+      const a = mulberry32(i + 77)() * Math.PI * 2;
+      return {
+        ...t,
+        x: t.x + Math.cos(a) * 1.1 * t.scale,
+        z: t.z + Math.sin(a) * 1.1 * t.scale,
+        tall: 1,
+        tilt: undefined,
+        tint: undefined,
+      };
+    });
+  return { pumpkins, snowmen, leafPiles };
+}
+
+/** Its things, there for as much of the year as `weight` says: they rise
+ * out of the ground as their season comes and sink back as it goes (the
+ * ground hides them), and aren't drawn at all out of season. */
+function InSeason({
+  weight,
+  depth,
+  children,
+}: {
+  weight: (look: SeasonLook) => number;
+  /** How far down they sink: as tall as they are. */
+  depth: number;
+  children: ReactNode;
+}) {
+  const ref = useRef<THREE.Group>(null);
+  useFrame(() => {
+    const group = ref.current;
+    if (!group) return;
+    const w = THREE.MathUtils.clamp(weight(seasonNow.look), 0, 1);
+    group.visible = w > 0.01;
+    group.position.y = -(1 - w) * depth;
+  });
+  return <group ref={ref}>{children}</group>;
+}
+
+const inFall = (l: SeasonLook) => l.fall * (1 - l.snow) * 1.5 - 0.25;
+const inSnow = (l: SeasonLook) => l.snow * 1.4 - 0.4;
+const noSnow = (l: SeasonLook) => 1 - l.snow * 1.5;
+
+function SeasonalProps({ map, oaks }: { map: TownMap; oaks: Placed[] }) {
+  const { pumpkins, snowmen, leafPiles } = useMemo(
+    () => placeSeasonal(map, oaks),
+    [map, oaks],
+  );
+  return (
+    <>
+      <InSeason weight={inFall} depth={0.7}>
+        <PartMesh part={PUMPKIN} things={pumpkins} cast />
+        <PartMesh part={LEAF_PILE} things={leafPiles} cast={false} />
+      </InSeason>
+      <InSeason weight={inSnow} depth={1.8}>
+        <PartMesh part={SNOWMAN} things={snowmen} cast />
+      </InSeason>
+    </>
+  );
+}
 
 function placeAll(map: TownMap) {
   const placed = Object.fromEntries(
@@ -346,6 +582,7 @@ function PartMesh({
       key={count}
       ref={ref}
       args={[part.geometry, part.material, count]}
+      customDepthMaterial={part.shadow}
       castShadow={cast}
       receiveShadow
     />
@@ -370,7 +607,7 @@ export function Props({
    * no statues (their plaques would float over it). */
   backdrop?: boolean;
 }) {
-  const { placed, trees } = useMemo(() => placeAll(map), [map]);
+  const { placed, trees, species } = useMemo(() => placeAll(map), [map]);
   return (
     <>
       {TREE_BUCKETS.map((b) => (
@@ -380,16 +617,28 @@ export function Props({
         // Across the sky, the little things can't be made out.
         backdrop && TOO_SMALL_TO_SEE.has(k)
           ? []
-          : KINDS[k].parts.map((part, i) => (
-              <PartMesh
+          : KINDS[k].parts.map((part, i) => {
+              const mesh = (
+                <PartMesh
+                  // biome-ignore lint/suspicious/noArrayIndexKey: fixed parts list
+                  key={`${k}${i}`}
+                  part={part}
+                  things={placed[k]}
+                  cast={CASTS.has(k)}
+                />
+              );
+              // Flowers are gone under the snow.
+              return k === "*" ? (
                 // biome-ignore lint/suspicious/noArrayIndexKey: fixed parts list
-                key={`${k}${i}`}
-                part={part}
-                things={placed[k]}
-                cast={CASTS.has(k)}
-              />
-            )),
+                <InSeason key={`${k}${i}`} weight={noSnow} depth={0.5}>
+                  {mesh}
+                </InSeason>
+              ) : (
+                mesh
+              );
+            }),
       )}
+      {!backdrop && <SeasonalProps map={map} oaks={species.oak} />}
       <Buildings map={map} />
       {!backdrop && <NightLights map={map} />}
       <Benches map={map} />
@@ -402,36 +651,29 @@ export function Props({
   );
 }
 
-/**
- * Everything on the map you can't walk through, as one fixed body: a
- * cylinder per tree, rock, stump and statue, a box per building block, and a box
- * per run of open water (bridges have none, so you can cross them).
- */
-export function MapColliders({ map }: { map: TownMap }) {
-  const { placed, species } = useMemo(() => placeAll(map), [map]);
+/** Whether the ponds are frozen hard enough to walk on (see Seasons.ts):
+ * re-rendering only when that changes. A thaw waits for you to be off
+ * the ice, so the water's colliders don't come back with you inside. */
+function useFrozen(map: TownMap): boolean {
+  const [frozen, setFrozen] = useState(() => seasonNow.look.ice > 0.5);
+  useFrame(() => {
+    const now = seasonNow.look.ice > 0.5;
+    if (now === frozen) return;
+    const { x, z } = ambient.uPlayer.value;
+    if (!now && isOpenWater(map, ...cellAt(map, x, z))) return;
+    setFrozen(now);
+  });
+  return frozen;
+}
+
+/** A box per run of open water (bridges have none, so you can cross
+ * them) — none while it's frozen over, when you can walk out on the ice. */
+function WaterColliders({ map }: { map: TownMap }) {
   const runs = useMemo(() => waterRuns(map), [map]);
+  const frozen = useFrozen(map);
+  if (frozen || runs.length === 0) return null;
   return (
     <RigidBody type="fixed" colliders={false}>
-      {SPECIES.flatMap((k) =>
-        species[k].map((t) => (
-          <CylinderCollider
-            key={`T${t.x},${t.z}`}
-            args={[1, TREE_RADIUS[k] * t.scale]}
-            position={[t.x, t.y + 1, t.z]}
-          />
-        )),
-      )}
-      {(Object.keys(KINDS) as Kind[]).flatMap((k) =>
-        KINDS[k].radius === 0
-          ? []
-          : placed[k].map((t) => (
-              <CylinderCollider
-                key={`${k}${t.x},${t.z}`}
-                args={[1, KINDS[k].radius * t.scale]}
-                position={[t.x, t.y + 1, t.z]}
-              />
-            )),
-      )}
       {runs.map((w) => {
         // Tall enough to hold its whole run, if the run is on a slope.
         const ends = [w.x0, w.x1].map((x) => elevation(map, x, w.z0));
@@ -445,12 +687,48 @@ export function MapColliders({ map }: { map: TownMap }) {
           />
         );
       })}
-      <BuildingColliders map={map} />
-      <BenchColliders map={map} />
-      <StandColliders map={map} />
-      <BoardColliders map={map} />
-      <StatueColliders map={map} />
-      <DummyColliders map={map} />
     </RigidBody>
+  );
+}
+
+/**
+ * Everything on the map you can't walk through, as fixed bodies: a
+ * cylinder per tree, rock, stump and statue, a box per building block, and
+ * the water (see WaterColliders).
+ */
+export function MapColliders({ map }: { map: TownMap }) {
+  const { placed, species } = useMemo(() => placeAll(map), [map]);
+  return (
+    <>
+      <WaterColliders map={map} />
+      <RigidBody type="fixed" colliders={false}>
+        {SPECIES.flatMap((k) =>
+          species[k].map((t) => (
+            <CylinderCollider
+              key={`T${t.x},${t.z}`}
+              args={[1, TREE_RADIUS[k] * t.scale]}
+              position={[t.x, t.y + 1, t.z]}
+            />
+          )),
+        )}
+        {(Object.keys(KINDS) as Kind[]).flatMap((k) =>
+          KINDS[k].radius === 0
+            ? []
+            : placed[k].map((t) => (
+                <CylinderCollider
+                  key={`${k}${t.x},${t.z}`}
+                  args={[1, KINDS[k].radius * t.scale]}
+                  position={[t.x, t.y + 1, t.z]}
+                />
+              )),
+        )}
+        <BuildingColliders map={map} />
+        <BenchColliders map={map} />
+        <StandColliders map={map} />
+        <BoardColliders map={map} />
+        <StatueColliders map={map} />
+        <DummyColliders map={map} />
+      </RigidBody>
+    </>
   );
 }

@@ -1,5 +1,5 @@
-import { getHerzieStats, SH } from "@herzies/shared";
-import { HerzieModel } from "@herzies/shared/gl";
+import { getHerzieStats, SH, TOWN_SPRINT_SPEED } from "@herzies/shared";
+import { HerzieModel, WALK_SPEED } from "@herzies/shared/gl";
 import { Html } from "@react-three/drei";
 import { useFrame, useThree } from "@react-three/fiber";
 import {
@@ -13,7 +13,7 @@ import {
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import type { Look } from "../TownScene";
-import { ambient } from "./ambient";
+import { ambient, seasonNow } from "./ambient";
 import { SEAT_Y } from "./Benches";
 import type { ChatBubble } from "./chatBubbles";
 import { discField } from "./combat/discs";
@@ -26,7 +26,13 @@ import { HomeShadow } from "./HomeShadow";
 import { homeMode } from "./homeMode";
 import type { TownInput } from "./input";
 import { groundY, type TownMap } from "./map";
-import { type Mover, stepMover, walkAzimuth } from "./movement";
+import {
+  ICE_GRIP,
+  type Mover,
+  onIce,
+  stepMover,
+  walkAzimuth,
+} from "./movement";
 import { warpAmount } from "./portal";
 import { townLive, townSave, useTownRuntime } from "./runtime";
 
@@ -115,6 +121,9 @@ export function Player({
   const body = useRef<RapierRigidBody>(null);
   const collider = useRef<RapierCollider>(null);
   const mover = useRef<Mover>({ vx: 0, vz: 0, heading: townSave.heading });
+  /** Whether it's on ice, and if it's pushing off, how fast its legs go:
+   * as fast as they would on the ground (see movement.ts). */
+  const ice = useRef({ on: false, pushing: false, stride: 0 });
 
   // Created and freed in the same effect: a WASM object, so a memo whose
   // cleanup ran early (StrictMode, a remount) would leave a freed one.
@@ -276,7 +285,20 @@ export function Player({
     townLive.standUp = false;
     walkAz.current = walkAzimuth(walkAz.current, rt.cameraAzimuth, input);
     m.heading = herzie.heading;
-    stepMover(m, input, walkAz.current, dt, speedScale);
+    // On ice: slippery — its legs go as fast as ever as it pushes off,
+    // but it gets less far for them, and glides when it stops.
+    const here = b.translation();
+    const iced = onIce(map, here.x, here.z, seasonNow.look.ice);
+    ice.current.on = iced;
+    ice.current.pushing =
+      input.forward ||
+      input.back ||
+      input.left ||
+      input.right ||
+      (input.mouseLeft && input.mouseRight);
+    ice.current.stride =
+      (input.sprint ? TOWN_SPRINT_SPEED : WALK_SPEED) * speedScale;
+    stepMover(m, input, walkAz.current, dt, speedScale, iced ? ICE_GRIP : 1);
     herzie.heading = m.heading;
 
     kcc.computeColliderMovement(col, {
@@ -382,6 +404,7 @@ export function Player({
   }, [surface, herzie, camera]);
   // Herzies grow legs at stage 3 (see HerzieModel).
   rt.playerLegs = look.stage >= 3;
+  rt.playerFootSpread = herzie.footSpread;
   useFrame((_, dt) => {
     // Sitting: on the seat, not the ground.
     herzie.root.position.y = townLive.seat ? SEAT_Y : 0;
@@ -423,7 +446,14 @@ export function Player({
     herzie.setAccessories(homeMode.accessories);
     // Set down facing Home's camera, as Home's own view faced them.
     herzie.setAccessoryHeading(homeMode.azimuth ?? herzie.heading);
-    herzie.update(dt, rt.playerSpeed);
+    herzie.update(
+      dt,
+      ice.current.on
+        ? ice.current.pushing
+          ? ice.current.stride
+          : 0
+        : rt.playerSpeed,
+    );
     downed.current = applyDowned(herzie, downInRaid(), downed.current, dt);
     townLive.jumps = herzie.jumps;
     // Through a portal: spun down into the disc, and back up out of the

@@ -58,6 +58,7 @@ export function Showcase({
       playerBody: null,
       playerSpeed: 0,
       playerLegs: false,
+      playerFootSpread: 0,
       playerHerzie: null,
       playerRigidBody: null,
       cameraAzimuth: 0,

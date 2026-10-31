@@ -1,5 +1,6 @@
 import { useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
+import { inSeason } from "./ambient";
 import {
   blendsFlat,
   bridgeAxis,
@@ -297,6 +298,7 @@ diffuseColor.rgb = mix( diffuseColor.rgb, vGravelColor, smoothstep( 0.5 - aa, 0.
     );
 };
 groundMaterial.customProgramCacheKey = () => "town-ground";
+inSeason(groundMaterial, "grass", true);
 const plankGeometry = new THREE.BoxGeometry(
   1,
   0.08,
@@ -305,11 +307,15 @@ const plankGeometry = new THREE.BoxGeometry(
 const beamGeometry = new THREE.BoxGeometry(0.08, 0.08, 1);
 const postGeometry = new THREE.BoxGeometry(0.08, RAIL_HEIGHT, 0.08);
 const PLANK_COLOR = new THREE.Color(TERRAIN["="].color);
-const plankMaterial = new THREE.MeshLambertMaterial({ flatShading: true });
-const railMaterial = new THREE.MeshLambertMaterial({
-  color: "#5a4030",
-  flatShading: true,
-});
+const plankMaterial = inSeason(
+  new THREE.MeshLambertMaterial({ flatShading: true }),
+);
+const railMaterial = inSeason(
+  new THREE.MeshLambertMaterial({
+    color: "#5a4030",
+    flatShading: true,
+  }),
+);
 
 /** An instanced set of boards, placed (and tinted) once per change. */
 function Boards({

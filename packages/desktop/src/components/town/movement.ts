@@ -2,12 +2,28 @@ import { TOWN_SPRINT_SPEED } from "@herzies/shared";
 import { turnToward, WALK_SPEED } from "@herzies/shared/gl";
 import { MathUtils } from "three";
 import type { TownInput } from "./input";
+import { cellAt, type TownMap, terrainAt } from "./map";
 
 /** Speeding up and slowing down (per second, MathUtils.damp rates):
  * quick to start, quicker to stop, so it feels responsive but not
  * weightless. */
 const ACCELERATION = 10;
 const DECELERATION = 14;
+/** How much grip the ice gives, times the ground's: slow to get going,
+ * and gliding on a good while after you let go. */
+export const ICE_GRIP = 0.15;
+/** On ice its legs go as fast as ever as it pushes off, but its feet
+ * slip: it gets this much of the way for them, at most. */
+export const ICE_SPEED = 0.6;
+/** Letting go on ice: it slows this much more gently again than its
+ * grip alone would have it — a long glide. */
+const ICE_GLIDE = 0.55;
+
+/** Whether a point is on ice: water, frozen over (`ice`, 0–1, past
+ * half; see Seasons.ts). Bridges aren't. */
+export function onIce(map: TownMap, x: number, z: number, ice: number) {
+  return ice > 0.5 && terrainAt(map, ...cellAt(map, x, z)) === "~";
+}
 /** Turning to face where it walks: eased, but never faster than this. */
 const TURN_RATE = 14;
 const MAX_TURN_SPEED = 12;
@@ -35,6 +51,8 @@ export function stepMover(
    * Cloak's +8%. Capped by MAX_MOVE_SPEED, which stays inside the server's
    * slack (see items.test.ts), so the server needn't know. */
   speedScale = 1,
+  /** How well its feet hold the ground: 1, or ICE_GRIP on ice. */
+  grip = 1,
 ): void {
   // Camera-relative directions on the ground: forward is away from it.
   const fx = -Math.sin(azimuth);
@@ -52,9 +70,15 @@ export function stepMover(
     mz /= len;
   }
 
-  const rate = len > 0 ? ACCELERATION : DECELERATION;
+  // On ice it's slow to get going, and slower still to stop: it glides.
+  const rate =
+    len > 0
+      ? ACCELERATION * grip
+      : DECELERATION * (grip < 1 ? grip * ICE_GLIDE : 1);
   // Holding Shift runs. (The server allows up to TOWN_SPRINT_SPEED.)
-  const top = (input.sprint ? TOWN_SPRINT_SPEED : WALK_SPEED) * speedScale;
+  const stride = (input.sprint ? TOWN_SPRINT_SPEED : WALK_SPEED) * speedScale;
+  // On ice (less grip), the feet slip: less way made for the same steps.
+  const top = grip < 1 ? stride * ICE_SPEED : stride;
   m.vx = MathUtils.damp(m.vx, mx * top, rate, dt);
   m.vz = MathUtils.damp(m.vz, mz * top, rate, dt);
 

@@ -10,6 +10,7 @@ import { Particles } from "./Particles";
 import { MapColliders, Props } from "./Props";
 import { Room } from "./Room";
 import { HOME_MAP, TOWN_MAPS_LOCAL } from "./runtime";
+import type { Season } from "./Seasons";
 
 /** The cave's air: nearly black, a touch of violet. */
 const DARK_ROOM = "#09070e";
@@ -41,9 +42,12 @@ export function World({
   others,
   champion: given,
   hour,
+  season,
 }: {
   /** Show the world at this hour of the day (default: the local clock). */
   hour?: Hour;
+  /** Show the world at this time of year (default: the calendar). */
+  season?: Season;
   map?: TownMap;
   /** The other islands in the sky (default: every map there is; the map
    * editor passes its own). */
@@ -64,7 +68,7 @@ export function World({
       <>
         <color attach="background" args={[DARK_ROOM]} />
         <fog attach="fog" args={[DARK_ROOM, HAZE_START, 0]} />
-        <DayLight hour={hour} room />
+        <DayLight hour={hour} season={season} room />
         <Room map={map} />
         <Ground map={map} />
         <Props map={map} champion={champion} />
@@ -83,6 +87,7 @@ export function World({
       <DayLight
         key={`${map.id}:${map.size}`}
         hour={hour}
+        season={season}
         radius={islandRadius(map)}
       />
       <group position={[-ox, -oy, -oz]}>

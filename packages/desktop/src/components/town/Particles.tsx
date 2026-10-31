@@ -2,8 +2,9 @@ import { mulberry32 } from "@herzies/shared";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
-import { ambient } from "./ambient";
+import { ambient, seasonNow } from "./ambient";
 import { chimneysOf } from "./Buildings";
+import { FOOTPRINT_LIFE, footprints, Trail } from "./footprints";
 import {
   cellAt,
   cellCenter,
@@ -18,8 +19,9 @@ import { useTownRuntime } from "./runtime";
 
 /**
  * Little things that move: fireflies at night, smoke from chimneys,
- * butterflies over flowers by day, leaves now and then falling from the
- * trees, and dust kicked up at your feet. Each is one draw call: point
+ * butterflies over flowers by day, leaves falling from the trees (or
+ * blossom, in spring), snow in winter, and dust kicked up at your feet.
+ * How many of each comes and goes with the seasons (see Seasons.ts). Each is one draw call: point
  * sprites (crisp squares, like the rest of the pixelated Town) or a small
  * instanced mesh, moved on the CPU — there are only ever a few hundred.
  */
@@ -30,6 +32,8 @@ export function Particles({ map }: { map: TownMap }) {
       <Smoke map={map} />
       <Butterflies map={map} />
       <FallingLeaves map={map} />
+      <Snowfall />
+      <SnowPrints map={map} />
       <Dust map={map} />
     </>
   );
@@ -201,7 +205,7 @@ function Fireflies({ map }: { map: TownMap }) {
         f.y + Math.sin(p * 1.3) * 0.4,
         f.z + Math.cos(p * 0.9) * 1.2,
         0.13,
-        glow * night,
+        glow * night * seasonNow.look.fireflies,
       );
     });
     pts.flush();
@@ -244,7 +248,7 @@ function Smoke({ map }: { map: TownMap }) {
           y + age * 3.2,
           z + wind.y * drift,
           0.35 + age * 0.9,
-          0.55 * (1 - age) * Math.min(1, age * 8),
+          0.55 * (1 - age) * Math.min(1, age * 8) * seasonNow.look.smoke,
         );
       }
     });
@@ -418,7 +422,9 @@ function Butterflies({ map }: { map: TownMap }) {
     if (!mesh) return;
     const t = clock.elapsedTime;
     // Gone by night: tucked away (scaled to nothing).
-    const day = 1 - THREE.MathUtils.smoothstep(ambient.uNight.value, 0.3, 0.6);
+    const day =
+      (1 - THREE.MathUtils.smoothstep(ambient.uNight.value, 0.3, 0.6)) *
+      seasonNow.look.butterflies;
     flies.forEach((f, i) => {
       const p = f.phase + t * 0.6;
       pos.set(
@@ -453,13 +459,27 @@ function Butterflies({ map }: { map: TownMap }) {
 
 // --- Falling leaves --------------------------------------------------------------
 
-const LEAVES = 14;
+/** As many as fall at the height of fall; a summer's trickle is a
+ * quarter of them (see Seasons.ts). */
+const LEAVES = 56;
 const LEAF_FALL = 7;
 const leafGeometry = new THREE.PlaneGeometry(0.16, 0.1);
 const leafMaterial = new THREE.MeshLambertMaterial({ side: THREE.DoubleSide });
 const LEAF_COLORS = ["#4f8a3e", "#6a9a3a", "#c8a03a", "#b8702e"];
+const FALL_COLORS = ["#c8432a", "#e0782a", "#d9a032", "#a8502a", "#e8b84a"];
+const PETAL_COLORS = ["#f4b8c8", "#f8e8ec", "#eea0b8"];
 
-/** Now and then a leaf lets go of a tree and tumbles down on the wind. */
+/** What a leaf letting go now is: blossom in spring, red and gold in
+ * fall, mostly green in summer. */
+function leafColor(rand: () => number): string {
+  const { petals, leaves, fall } = seasonNow.look;
+  const from =
+    petals > leaves ? PETAL_COLORS : rand() < fall ? FALL_COLORS : LEAF_COLORS;
+  return from[Math.floor(rand() * from.length)];
+}
+
+/** Leaves let go of the trees and tumble down on the wind: now and then
+ * in summer, in drifts in fall, none in winter — and in spring, petals. */
 function FallingLeaves({ map }: { map: TownMap }) {
   const trees = useMemo(
     () =>
@@ -492,6 +512,7 @@ function FallingLeaves({ map }: { map: TownMap }) {
     }
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
   }, []);
+  const color = useMemo(() => new THREE.Color(), []);
   const m = useMemo(() => new THREE.Matrix4(), []);
   const q = useMemo(() => new THREE.Quaternion(), []);
   const e = useMemo(() => new THREE.Euler(), []);
@@ -504,9 +525,20 @@ function FallingLeaves({ map }: { map: TownMap }) {
     if (!mesh || trees.length === 0) return;
     const t = clock.elapsedTime;
     const wind = ambient.uWindDir.value;
+    const { leaves: many, petals } = seasonNow.look;
+    const falling = Math.round(LEAVES * Math.max(many, petals));
+    let recolored = false;
     leaves.current.forEach((l, i) => {
       let age = (t - l.born) / LEAF_FALL;
+      // Out of season: lands, and stays down (out of sight).
+      if (age > 1 && i >= falling) {
+        m.compose(pos, q, zero);
+        mesh.setMatrixAt(i, m);
+        return;
+      }
       if (age > 1) {
+        mesh.setColorAt(i, color.set(leafColor(rand)));
+        recolored = true;
         // Off another tree, from somewhere in its canopy.
         const tree = trees[Math.floor(rand() * trees.length)];
         const a = rand() * Math.PI * 2;
@@ -533,12 +565,193 @@ function FallingLeaves({ map }: { map: TownMap }) {
       mesh.setMatrixAt(i, m);
     });
     mesh.instanceMatrix.needsUpdate = true;
+    if (recolored && mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
   });
   if (trees.length === 0) return null;
   return (
     <instancedMesh
       ref={ref}
       args={[leafGeometry, leafMaterial, LEAVES]}
+      frustumCulled={false}
+    />
+  );
+}
+
+// --- Snow ----------------------------------------------------------------------
+
+const FLAKES = 500;
+const FLAKE = new THREE.Color("#f2f6ff");
+/** The box of snow kept round the player, and how fast it falls. */
+const SNOW_REACH = 16;
+const SNOW_HEIGHT = 12;
+const SNOW_FALL = 1.1;
+
+/** Snow falling in winter (see Seasons.ts): a box of flakes round the
+ * player, each drifting down on the wind and wobbling, wrapped round
+ * the box so it never runs out. */
+function Snowfall() {
+  const pts = usePoints(FLAKES, THREE.NormalBlending);
+  const flakes = useMemo(() => {
+    const rand = mulberry32(1225);
+    return Array.from({ length: FLAKES }, () => ({
+      x: rand() * SNOW_REACH * 2,
+      y: rand() * SNOW_HEIGHT,
+      z: rand() * SNOW_REACH * 2,
+      speed: 0.7 + rand() * 0.6,
+      phase: rand() * 100,
+      size: 0.03 + rand() * 0.035,
+    }));
+  }, []);
+  useLayoutEffect(() => {
+    for (let i = 0; i < FLAKES; i++) pts.color(i, FLAKE);
+  }, [pts]);
+  const shown = useRef(false);
+
+  useFrame(({ clock }) => {
+    const heavy = seasonNow.look.snowfall;
+    const falling = Math.round(FLAKES * heavy);
+    if (falling === 0 && !shown.current) return;
+    shown.current = falling > 0;
+    const t = clock.elapsedTime;
+    const wind = ambient.uWindDir.value;
+    const { x: px, y: py, z: pz } = ambient.uPlayer.value;
+    const wrap = (v: number, n: number) => ((v % n) + n) % n;
+    const span = SNOW_REACH * 2;
+    flakes.forEach((f, i) => {
+      const down = t * SNOW_FALL * f.speed;
+      const wobble = Math.sin(t * 1.3 + f.phase) * 0.4;
+      pts.set(
+        i,
+        px - SNOW_REACH + wrap(f.x + wind.x * down * 0.6 + wobble - px, span),
+        py - 2 + wrap(f.y - down, SNOW_HEIGHT),
+        pz - SNOW_REACH + wrap(f.z + wind.y * down * 0.6 - pz, span),
+        f.size,
+        i < falling ? 0.9 : 0,
+      );
+    });
+    pts.flush();
+  });
+  return (
+    <points
+      geometry={pts.geometry}
+      material={pts.material}
+      frustumCulled={false}
+    />
+  );
+}
+
+// --- Prints in the snow ----------------------------------------------------------
+
+const printGeometry = (() => {
+  const g = new THREE.CircleGeometry(0.14, 7).rotateX(-Math.PI / 2);
+  // Longer than wide, along the way it points.
+  g.scale(1, 1, 1.45);
+  return g;
+})();
+/** Pressed-in snow: its own shadow, as bright as the scene is lit (so
+ * prints don't glow at night), fading out over the second half of their
+ * life. */
+const printMaterial = new THREE.ShaderMaterial({
+  transparent: true,
+  depthWrite: false,
+  polygonOffset: true,
+  polygonOffsetFactor: -2,
+  uniforms: { uTime: ambient.uTime, uLight: ambient.uLight },
+  vertexShader: /* glsl */ `
+    attribute float born;
+    attribute float depth;
+    uniform float uTime;
+    varying float vAlpha;
+    void main() {
+      float age = uTime - born;
+      vAlpha = depth * 0.8 * ( 1.0 - smoothstep( ${(FOOTPRINT_LIFE * 0.4).toFixed(2)}, ${FOOTPRINT_LIFE.toFixed(2)}, age ) ) * step( 0.0, age );
+      gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4( position, 1.0 );
+    }
+  `,
+  fragmentShader: /* glsl */ `
+    uniform vec3 uLight;
+    varying float vAlpha;
+    void main() {
+      if ( vAlpha <= 0.0 ) discard;
+      gl_FragColor = vec4( vec3( 0.3, 0.35, 0.48 ) * uLight, vAlpha );
+      #include <colorspace_fragment>
+    }
+  `,
+});
+
+/**
+ * Prints in the snow (see footprints.ts): the player's own trail stamped
+ * here, every herzie's prints (theirs stamped by RemotePlayers) drawn as
+ * one instanced mesh, placed again only when a print is added.
+ */
+function SnowPrints({ map }: { map: TownMap }) {
+  const rt = useTownRuntime();
+  const trail = useMemo(() => new Trail(0), []);
+  const ref = useRef<THREE.InstancedMesh>(null);
+  const shown = useRef(-1);
+  const feet = useMemo(() => new THREE.Vector3(), []);
+  const attrs = useMemo(
+    () => ({
+      born: new THREE.InstancedBufferAttribute(
+        new Float32Array(footprints.capacity).fill(-1e6),
+        1,
+      ),
+      depth: new THREE.InstancedBufferAttribute(
+        new Float32Array(footprints.capacity),
+        1,
+      ),
+    }),
+    [],
+  );
+  const geometry = useMemo(() => {
+    const g = printGeometry.clone();
+    g.setAttribute("born", attrs.born);
+    g.setAttribute("depth", attrs.depth);
+    return g;
+  }, [attrs]);
+  useLayoutEffect(() => () => geometry.dispose(), [geometry]);
+  const m = useMemo(() => new THREE.Matrix4(), []);
+  const q = useMemo(() => new THREE.Quaternion(), []);
+  const up = useMemo(() => new THREE.Vector3(0, 1, 0), []);
+  const pos = useMemo(() => new THREE.Vector3(), []);
+  const scale = useMemo(() => new THREE.Vector3(), []);
+
+  useFrame(() => {
+    const t = ambient.uTime.value;
+    const body = rt.playerBody;
+    if (body) {
+      body.getWorldPosition(feet);
+      trail.spread = rt.playerFootSpread;
+      trail.step(
+        map,
+        footprints,
+        feet.x,
+        groundY(map, feet.x, feet.z),
+        feet.z,
+        seasonNow.look.snow,
+        t,
+      );
+    }
+    const mesh = ref.current;
+    if (!mesh || shown.current === footprints.version) return;
+    shown.current = footprints.version;
+    footprints.prints.forEach((p, i) => {
+      q.setFromAxisAngle(up, p.yaw);
+      m.compose(pos.set(p.x, p.y + 0.02, p.z), q, scale.setScalar(p.size));
+      mesh.setMatrixAt(i, m);
+      attrs.born.setX(i, p.born);
+      attrs.depth.setX(i, p.depth);
+    });
+    mesh.count = footprints.prints.length;
+    mesh.instanceMatrix.needsUpdate = true;
+    attrs.born.needsUpdate = true;
+    attrs.depth.needsUpdate = true;
+  });
+  return (
+    <instancedMesh
+      ref={ref}
+      args={[geometry, printMaterial, footprints.capacity]}
+      count={0}
       frustumCulled={false}
     />
   );

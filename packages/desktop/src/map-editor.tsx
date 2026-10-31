@@ -52,6 +52,7 @@ import {
   TOWN_MAPS_LOCAL,
   type TownSpot,
 } from "./components/town/runtime";
+import { dayOfYear } from "./components/town/Seasons";
 import { STAND, standFacing } from "./components/town/Stands";
 import TownCanvas, { PIXEL_SCALE } from "./components/town/TownCanvas";
 
@@ -654,6 +655,13 @@ const TIME_MODES: { mode: TimeMode; label: string; title: string }[] = [
 const clockText = (h: number) =>
   `${Math.floor(h)}:${String(Math.floor((h % 1) * 60)).padStart(2, "0")}`;
 
+/** A day of the year as a date: "31 Oct". */
+const dateText = (d: number) =>
+  new Date(2025, 0, 1 + Math.floor(d)).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+  });
+
 /** Every island as last saved (or made, this session), by id. */
 type Islands = Record<string, TownMap>;
 
@@ -720,6 +728,12 @@ function MapEditor() {
       clearInterval(label);
     };
   }, [timeMode]);
+  // The preview's time of year: the calendar, or a day you set (`?day=20`
+  // starts on one).
+  const [day, setDay] = useState<number | null>(() => {
+    const given = new URLSearchParams(location.search).get("day");
+    return given === null ? null : Number(given);
+  });
   const canvas = useRef<HTMLCanvasElement>(null);
   /** The stroke under way: its draft and what it paints, a marker being
    * dragged, or something being moved (from the map before the drag, and
@@ -1385,6 +1399,7 @@ function MapEditor() {
           paused={false}
           respawn={respawn}
           hour={timeMode === "clock" ? null : readHour}
+          season={day}
           pixelScale={pixelScale}
           onOpen={() => {}}
           onNearChange={() => {}}
@@ -1442,6 +1457,25 @@ function MapEditor() {
           />
           <span style={{ width: 40, textAlign: "right" }}>
             {timeMode === "clock" ? "now" : clockText(shownHour)}
+          </span>
+          <button
+            type="button"
+            title="The time of year: today's, or drag to pick a day"
+            style={{ ...btn(day === null), padding: "2px 6px", marginLeft: 8 }}
+            onClick={() => setDay(null)}
+          >
+            Today
+          </button>
+          <input
+            type="range"
+            min={0}
+            max={365}
+            step={1}
+            value={day ?? Math.floor(dayOfYear())}
+            onChange={(e) => setDay(Number(e.target.value))}
+          />
+          <span style={{ width: 48, textAlign: "right" }}>
+            {day === null ? "today" : dateText(day)}
           </span>
         </div>
         <div

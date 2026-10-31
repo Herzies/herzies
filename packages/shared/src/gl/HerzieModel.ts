@@ -676,6 +676,9 @@ export class HerzieModel {
   private readonly look: HerzieLook;
   private readonly model: CreatureModel;
   private readonly hasLegs: boolean;
+  /** How far either side of its middle its feet come down, in world units
+   * at its own scale (0: no legs, it hops). */
+  readonly footSpread: number;
   /** Holds the parts in creature space (y down, front −z), turned upright
    * and scaled into the world: a half turn about x, so nothing mirrors. */
   private readonly creature = new THREE.Group();
@@ -746,6 +749,21 @@ export class HerzieModel {
       feet = Math.max(feet, s.center[1] + s.radius);
     }
     this.feetY = feet;
+    // Each leg's lowest part: where its foot is.
+    const foot: Record<string, Sphere> = {};
+    for (const s of spheres) {
+      if (s.part !== "leg-l" && s.part !== "leg-r") continue;
+      const was = foot[s.part];
+      if (!was || s.center[1] + s.radius > was.center[1] + was.radius)
+        foot[s.part] = s;
+    }
+    const soles = Object.values(foot);
+    this.footSpread =
+      this.hasLegs && soles.length > 0
+        ? (soles.reduce((sum, s) => sum + Math.abs(s.center[0]), 0) /
+            soles.length) *
+          MODEL_SCALE
+        : 0;
     this.height = (feet - top) * MODEL_SCALE;
     this.centerHeight = feet * MODEL_SCALE;
     this.span = schemeSpan(spheres);

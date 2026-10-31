@@ -1,5 +1,6 @@
 import { noLamps } from "@herzies/shared/gl";
 import * as THREE from "three";
+import { dayOfYear, type SeasonLook, seasonLook } from "./Seasons";
 
 /**
  * What the world's moving parts share, as shader uniforms: the time, where
@@ -26,6 +27,23 @@ export const ambient = {
    * their colour (see NightLights). */
   uLamps: { value: noLamps() },
   uLampColor: { value: new THREE.Color("#ffc47a") },
+  /** The time of year (see Seasons.ts, set by DayLight): the greens'
+   * tints, how far the oaks have turned and dropped their leaves, the
+   * blossom, and the snow lying on what faces up. */
+  uGrassTint: { value: new THREE.Color(1, 1, 1) },
+  uLeafTint: { value: new THREE.Color(1, 1, 1) },
+  uNeedleTint: { value: new THREE.Color(1, 1, 1) },
+  uFall: { value: 0 },
+  uBare: { value: 0 },
+  uBlossom: { value: 0 },
+  uSnow: { value: 0 },
+  uIce: { value: 0 },
+};
+
+/** The time of year as it's shown, for what moves on the CPU (the
+ * particles): set by DayLight alongside the uniforms above. */
+export const seasonNow: { look: SeasonLook } = {
+  look: seasonLook(dayOfYear()),
 };
 
 /** How a material moves in the wind. */
@@ -172,5 +190,171 @@ varying vec3 vSeeView;`,
       );
   };
   material.customProgramCacheKey = () => `${key()}:seeThrough`;
+  return material;
+}
+
+/**
+ * Light a (Lambert) material in steps: the sun's light comes in two or
+ * three flat bands — shadow, lit, full sun — rather than a smooth ramp,
+ * so a rounded crown reads as a few bold shapes at the Town's big pixels.
+ */
+export function banded<M extends THREE.Material>(material: M): M {
+  const before = material.onBeforeCompile.bind(material);
+  const key = material.customProgramCacheKey.bind(material);
+  material.onBeforeCompile = (shader, renderer) => {
+    before(shader, renderer);
+    shader.fragmentShader = shader.fragmentShader.replace(
+      "#include <lights_lambert_pars_fragment>",
+      THREE.ShaderChunk.lights_lambert_pars_fragment.replace(
+        "float dotNL = saturate( dot( geometryNormal, directLight.direction ) );",
+        /* glsl */ `float dotNL = saturate( dot( geometryNormal, directLight.direction ) );
+dotNL = 0.12 + 0.5 * smoothstep( 0.08, 0.14, dotNL ) + 0.38 * smoothstep( 0.55, 0.61, dotNL );`,
+      ),
+    );
+  };
+  material.customProgramCacheKey = () => `${key()}:banded`;
+  return material;
+}
+
+/** Which tint a material's greens take with the seasons: the ground's
+ * grass, the leaves that turn (bushes, tall grass), the pines' needles,
+ * or an oak's crown (which also turns, drops its leaves and blossoms). */
+export type Foliage = "grass" | "leaf" | "needles" | "oak";
+
+/**
+ * Let the seasons show on a material: its greens tinted for the time of
+ * year — told apart from the rest of its colours by being green, so bark,
+ * stone and gravel stay as they are — and snow lying on whatever faces
+ * up. An oak's crown goes red and gold tree by tree in fall, thins to bare
+ * branches in winter and blossoms in spring. Chained onto whatever the
+ * material already patches (swaying, see-through), like `seeThrough`.
+ */
+export function inSeason<M extends THREE.Material>(
+  material: M,
+  foliage?: Foliage,
+  /** The ground: what isn't grass (the paths) is trodden, only dusted. */
+  trodden = false,
+): M {
+  const before = material.onBeforeCompile.bind(material);
+  const key = material.customProgramCacheKey.bind(material);
+  const tint = {
+    grass: "uGrassTint",
+    leaf: "uLeafTint",
+    needles: "uNeedleTint",
+    oak: "uLeafTint",
+  } as const;
+  material.onBeforeCompile = (shader, renderer) => {
+    before(shader, renderer);
+    Object.assign(shader.uniforms, {
+      uGrassTint: ambient.uGrassTint,
+      uLeafTint: ambient.uLeafTint,
+      uNeedleTint: ambient.uNeedleTint,
+      uFall: ambient.uFall,
+      uBare: ambient.uBare,
+      uBlossom: ambient.uBlossom,
+      uSnow: ambient.uSnow,
+    });
+    // Its world position, once the vertex is placed (after any swaying),
+    // and for an instanced oak, which tree it is.
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        "#include <common>",
+        /* glsl */ `#include <common>
+varying vec3 vSeasonWorld;
+varying float vSeasonTree;
+varying float vSeasonLump;
+${foliage === "oak" ? "attribute float lump;" : ""}`,
+      )
+      .replace(
+        "#include <fog_vertex>",
+        /* glsl */ `#include <fog_vertex>
+vSeasonWorld = ( vec4( mvPosition.xyz, 0.0 ) * viewMatrix ).xyz + cameraPosition;
+vSeasonLump = ${foliage === "oak" ? "lump" : "0.5"};
+#ifdef USE_INSTANCING
+  vSeasonTree = fract( sin( dot( instanceMatrix[3].xz, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 );
+#else
+  vSeasonTree = 0.5;
+#endif`,
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        "#include <common>",
+        /* glsl */ `#include <common>
+uniform vec3 uGrassTint;
+uniform vec3 uLeafTint;
+uniform vec3 uNeedleTint;
+uniform float uFall;
+uniform float uBare;
+uniform float uBlossom;
+uniform float uSnow;
+varying vec3 vSeasonWorld;
+varying float vSeasonTree;
+varying float vSeasonLump;
+float seasonHash( vec3 p ) {
+  return fract( sin( dot( p, vec3( 12.9898, 78.233, 37.719 ) ) ) * 43758.5453 );
+}
+// Smooth value noise over the ground, 0–1: where snow drifts and thins.
+float seasonNoise( vec2 p ) {
+  vec2 i = floor( p );
+  vec2 f = fract( p );
+  vec2 u = f * f * ( 3.0 - 2.0 * f );
+  float a = seasonHash( vec3( i, 0.0 ) );
+  float b = seasonHash( vec3( i + vec2( 1.0, 0.0 ), 0.0 ) );
+  float c = seasonHash( vec3( i + vec2( 0.0, 1.0 ), 0.0 ) );
+  float d = seasonHash( vec3( i + vec2( 1.0, 1.0 ), 0.0 ) );
+  return mix( mix( a, b, u.x ), mix( c, d, u.x ), u.y );
+}`,
+      )
+      .replace(
+        "#include <alphamap_fragment>",
+        /* glsl */ `{
+  vec3 c = diffuseColor.rgb;
+  // How green this is: the plants, not their bark or the stone.
+  float green = smoothstep( 0.005, 0.04, c.g - max( c.r, c.b ) );
+  vec3 tinted = c * ${foliage ? tint[foliage] : "vec3( 1.0 )"};
+${
+  foliage === "oak"
+    ? /* glsl */ `  // Each tree in its turn (the same turn every year, see oakShadow):
+  // bare in winter, its whole crown gone at once, leaving the branches;
+  // and in spring back in leaf the same day it flowers.
+  float turn = vSeasonTree * 0.98 + 0.01;
+  if ( green > 0.5 && 1.0 - turn < uBare ) discard;
+  // Fall: each tree its own red, orange or gold, as bright as its green.
+  float shade = clamp( c.g * 2.6, 0.22, 1.1 );
+  vec3 red = vec3( 0.6, 0.04, 0.01 );
+  vec3 orange = vec3( 0.95, 0.24, 0.01 );
+  vec3 gold = vec3( 0.92, 0.55, 0.01 );
+  float pick = fract( vSeasonTree + vSeasonLump * 0.3 );
+  vec3 turned = pick < 0.5 ? mix( red, orange, pick * 2.0 ) : mix( orange, gold, pick * 2.0 - 1.0 );
+  tinted = mix( tinted, turned * shade, uFall * smoothstep( 0.15, 0.6, vSeasonTree + uFall * 0.6 ) );
+  // Spring: a cherry in full blossom, all of it — no green — shaded
+  // dark pink underneath to pale on top. Each tree comes into leaf on its
+  // own day as the blossom's season ends, all at once, not bit by bit.
+  float inFlower = step( turn, uBlossom );
+  vec3 petal = mix( vec3( 0.42, 0.13, 0.24 ), vec3( 0.98, 0.7, 0.8 ), smoothstep( 0.25, 1.05, shade ) );
+  // A clump here and there paler, nearly white.
+  petal = mix( petal, petal * 0.35 + vec3( 0.62, 0.55, 0.58 ), step( 0.75, fract( vSeasonLump * 7.3 + vSeasonTree * 3.1 ) ) * 0.6 );
+  tinted = mix( tinted, petal, inFlower );`
+    : ""
+}
+  diffuseColor.rgb = mix( c, tinted, green );
+  // Snow on what faces up: the face's own normal, from the slope of its
+  // world position across the screen, turned to face the camera.
+  vec3 n = normalize( cross( dFdx( vSeasonWorld ), dFdy( vSeasonWorld ) ) );
+  if ( dot( n, cameraPosition - vSeasonWorld ) < 0.0 ) n = -n;
+  float lies = smoothstep( 0.45, 0.8, n.y );
+  // Patchy as it comes and goes: drifts and thin spots, crisp-edged.
+  vec2 xz = vSeasonWorld.xz;
+  float drift = seasonNoise( xz * 0.8 ) * 0.65 + seasonNoise( xz * 2.6 ) * 0.35;
+  float grain = seasonHash( floor( vSeasonWorld * 5.0 ) );
+  float depth = uSnow * lies * ${trodden ? "mix( 0.55, 1.15, green )" : "1.15"};
+  float cover = step( 1.0 - depth, drift );
+  diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.7, 0.75, 0.84 ) * ( 0.94 + grain * 0.06 ), cover );
+}
+#include <alphamap_fragment>`,
+      );
+  };
+  material.customProgramCacheKey = () =>
+    `${key()}:season:${foliage ?? "none"}:${trodden}`;
   return material;
 }

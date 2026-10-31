@@ -41,6 +41,7 @@ import {
   warp,
 } from "./portal";
 import { RemotePlayers } from "./RemotePlayers";
+import type { Season } from "./Seasons";
 import { sfxPortal } from "./sfx";
 import "./shadows";
 import { HOME_PIXEL_FACTOR, PIXEL_SCALE, useTownPixelSize } from "./pixelSize";
@@ -95,6 +96,8 @@ export type TownCanvasProps = {
   champion?: Champion;
   /** Show the world at this hour (default: the local clock). */
   hour?: Hour;
+  /** Show the world at this time of year (default: the calendar). */
+  season?: Season;
   /** Drawn at this fraction of the screen's resolution (default:
    * PIXEL_SCALE; the map editor tries others). */
   pixelScale?: number;
@@ -131,6 +134,7 @@ export default function TownCanvas(props: TownCanvasProps) {
       playerBody: null,
       playerSpeed: 0,
       playerLegs: false,
+      playerFootSpread: 0,
       playerHerzie: null,
       playerRigidBody: null,
       cameraAzimuth: 0,
@@ -187,6 +191,7 @@ export default function TownCanvas(props: TownCanvasProps) {
               others={props.others}
               champion={props.champion}
               hour={props.hour}
+              season={props.season}
             />
             <Player
               map={map}

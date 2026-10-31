@@ -2,6 +2,7 @@ import { CuboidCollider } from "@react-three/rapier";
 import { useLayoutEffect, useMemo } from "react";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { inSeason } from "./ambient";
 import {
   cellCenter,
   EIGHTH,
@@ -193,10 +194,12 @@ function benchGeometry(): THREE.BufferGeometry {
 const BENCH_GEOMETRY = benchGeometry();
 
 /** Not see-through like the trees: low, a bench never hides the player. */
-const benchMaterial = new THREE.MeshLambertMaterial({
-  vertexColors: true,
-  flatShading: true,
-});
+const benchMaterial = inSeason(
+  new THREE.MeshLambertMaterial({
+    vertexColors: true,
+    flatShading: true,
+  }),
+);
 
 /** Every bench on the map, as one mesh. */
 export function Benches({ map }: { map: TownMap }) {

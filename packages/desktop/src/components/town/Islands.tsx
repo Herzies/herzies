@@ -2,6 +2,7 @@ import { mulberry32 } from "@herzies/shared";
 import { useFrame } from "@react-three/fiber";
 import { useMemo, useRef } from "react";
 import * as THREE from "three";
+import { inSeason } from "./ambient";
 
 /** The sky, top to bottom: the fog fades everything far off into the
  * horizon colour, so distant islands melt into it. */
@@ -115,10 +116,13 @@ export function islandGeometry(
   return geometry;
 }
 
-const islandMaterial = new THREE.MeshLambertMaterial({
-  vertexColors: true,
-  flatShading: true,
-});
+const islandMaterial = inSeason(
+  new THREE.MeshLambertMaterial({
+    vertexColors: true,
+    flatShading: true,
+  }),
+  "grass",
+);
 
 /** Our island, the one the town stands on: just its rock — the map's
  * ground (see Ground) is its top. Finely segmented, so the rim meets the
@@ -245,13 +249,18 @@ function scatterIslands(): Distant[] {
 
 export const leafGeometry = new THREE.ConeGeometry(1.3, 3.2, 6);
 export const trunkGeometry = new THREE.CylinderGeometry(0.2, 0.25, 1, 5);
-export const leafMaterial = new THREE.MeshLambertMaterial({
-  color: "#2d6b3a",
-  flatShading: true,
-});
-export const trunkMaterial = new THREE.MeshLambertMaterial({
-  color: "#5a4030",
-});
+export const leafMaterial = inSeason(
+  new THREE.MeshLambertMaterial({
+    color: "#2d6b3a",
+    flatShading: true,
+  }),
+  "needles",
+);
+export const trunkMaterial = inSeason(
+  new THREE.MeshLambertMaterial({
+    color: "#5a4030",
+  }),
+);
 
 function DistantIsland({ island }: { island: Distant }) {
   const group = useRef<THREE.Group>(null);

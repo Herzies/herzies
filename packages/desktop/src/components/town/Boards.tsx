@@ -2,6 +2,7 @@ import { CuboidCollider } from "@react-three/rapier";
 import { useLayoutEffect, useMemo } from "react";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { inSeason } from "./ambient";
 import {
   cellCenter,
   EIGHTH,
@@ -200,10 +201,12 @@ function boardGeometry(): THREE.BufferGeometry {
 }
 const BOARD_GEOMETRY = boardGeometry();
 
-const boardMaterial = new THREE.MeshLambertMaterial({
-  vertexColors: true,
-  flatShading: true,
-});
+const boardMaterial = inSeason(
+  new THREE.MeshLambertMaterial({
+    vertexColors: true,
+    flatShading: true,
+  }),
+);
 
 /** Every board on the map, as one mesh. */
 export function Boards({ map }: { map: TownMap }) {

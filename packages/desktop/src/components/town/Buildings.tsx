@@ -3,7 +3,7 @@ import { CuboidCollider } from "@react-three/rapier";
 import { useLayoutEffect, useMemo } from "react";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import { seeThrough } from "./ambient";
+import { inSeason, seeThrough } from "./ambient";
 import {
   type Building,
   type BuildingRect,
@@ -1108,12 +1108,14 @@ if ( vSurface > 0.5 && abs( vWallNormal.y ) < 0.5 ) {
 }
 
 const bodyMaterial = seeThrough(
-  patterned(
-    new THREE.MeshLambertMaterial({
-      vertexColors: true,
-      flatShading: true,
-      side: THREE.DoubleSide,
-    }),
+  inSeason(
+    patterned(
+      new THREE.MeshLambertMaterial({
+        vertexColors: true,
+        flatShading: true,
+        side: THREE.DoubleSide,
+      }),
+    ),
   ),
 );
 /** Unlit, so the windows glow against the evening sky; the day cycle

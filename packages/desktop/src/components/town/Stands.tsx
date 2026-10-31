@@ -2,6 +2,7 @@ import { CuboidCollider } from "@react-three/rapier";
 import { useLayoutEffect, useMemo } from "react";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { inSeason } from "./ambient";
 import {
   cellCenter,
   EIGHTH,
@@ -175,10 +176,12 @@ function standGeometry(): THREE.BufferGeometry {
 }
 const STAND_GEOMETRY = standGeometry();
 
-const standMaterial = new THREE.MeshLambertMaterial({
-  vertexColors: true,
-  flatShading: true,
-});
+const standMaterial = inSeason(
+  new THREE.MeshLambertMaterial({
+    vertexColors: true,
+    flatShading: true,
+  }),
+);
 
 /** Every stand on the map, as one mesh. */
 export function Stands({ map }: { map: TownMap }) {

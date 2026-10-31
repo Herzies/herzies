@@ -1,7 +1,14 @@
 import { mulberry32 } from "@herzies/shared";
 import { oakGeometry, pineGeometry } from "@herzies/shared/gl";
 import * as THREE from "three";
-import { seeThrough, swayInWind } from "./ambient";
+import {
+  ambient,
+  banded,
+  type Foliage,
+  inSeason,
+  seeThrough,
+  swayInWind,
+} from "./ambient";
 import { isBuildingChar, objectAt, type TownMap, terrainAt } from "./map";
 
 // The town's trees: pines and oaks, a few shapes of each, every
@@ -16,22 +23,57 @@ export const TREE_VARIANTS: Record<Species, THREE.BufferGeometry[]> = {
   pine: [11, 23, 37].map(pineGeometry),
   oak: [3, 19].map(oakGeometry),
 };
-for (const variants of Object.values(TREE_VARIANTS)) {
-  for (const g of variants) g.computeVertexNormals();
-}
 
 /** The crowns sway above the trunk (see ambient.ts), and go see-through
- * when between the camera and the player; the oaks' leaves flutter too. */
-const swaying = (flutter: number) =>
+ * when between the camera and the player; the oaks' leaves flutter too.
+ * Smooth, and lit in steps (see `banded`): the shapes carry normals that
+ * shade each crown as one mass. */
+const swaying = (flutter: number, foliage: Foliage) =>
   seeThrough(
-    swayInWind(
-      new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }),
-      { amount: 0.035, from: 2.8, flutter },
+    inSeason(
+      swayInWind(
+        banded(new THREE.MeshLambertMaterial({ vertexColors: true })),
+        { amount: 0.035, from: 2.8, flutter },
+      ),
+      foliage,
     ),
   );
+/** An oak's shadow, without its crown when it's bare (see `inSeason`,
+ * whose turn per tree this matches): only its branches'. The wood's
+ * `lump` is 1. */
+const oakShadow = new THREE.MeshDepthMaterial({
+  depthPacking: THREE.RGBADepthPacking,
+});
+oakShadow.onBeforeCompile = (shader) => {
+  shader.uniforms.uBare = ambient.uBare;
+  shader.vertexShader = shader.vertexShader
+    .replace(
+      "#include <common>",
+      "#include <common>\nattribute float lump;\nvarying float vLump;\nvarying float vTurn;",
+    )
+    .replace(
+      "#include <begin_vertex>",
+      "#include <begin_vertex>\nvLump = lump;\nvTurn = fract( sin( dot( instanceMatrix[3].xz, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 ) * 0.98 + 0.01;",
+    );
+  shader.fragmentShader = shader.fragmentShader
+    .replace(
+      "#include <common>",
+      "#include <common>\nuniform float uBare;\nvarying float vLump;\nvarying float vTurn;",
+    )
+    .replace(
+      "#include <clipping_planes_fragment>",
+      "#include <clipping_planes_fragment>\nif ( vLump < 0.99 && 1.0 - vTurn < uBare ) discard;",
+    );
+};
+oakShadow.customProgramCacheKey = () => "oak-shadow";
+/** What a kind of tree's shadow is drawn with, if not the usual. */
+export const TREE_SHADOWS: Partial<Record<Species, THREE.Material>> = {
+  oak: oakShadow,
+};
+
 export const TREE_MATERIALS: Record<Species, THREE.Material> = {
-  pine: swaying(0),
-  oak: swaying(0.05),
+  pine: swaying(0, "needles"),
+  oak: swaying(0.05, "oak"),
 };
 
 /** How wide a tree of each kind blocks the way (times its scale). */

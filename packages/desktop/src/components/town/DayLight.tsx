@@ -1,13 +1,14 @@
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
-import { ambient } from "./ambient";
+import { ambient, seasonNow } from "./ambient";
 import { windowMaterial } from "./Buildings";
 import { dayLook, type Hour, localHours, skyLights } from "./DayCycle";
 import { CLOUD_SHADE, townLook } from "./depth";
 import { skyUniforms } from "./Islands";
 import { nightLights } from "./Lamps";
 import { ISLAND_RADIUS } from "./runtime";
+import { dayOfYear, type Season, seasonLook } from "./Seasons";
 
 const LIT_WINDOW = new THREE.Color("#ffd98a");
 const DAY_WINDOW = new THREE.Color("#9fb3c4");
@@ -68,6 +69,20 @@ function applyRoomLook(
 
 const ROOM_AIR = "#09070e";
 
+/** The time of year, onto the shared uniforms (see `inSeason`) and for
+ * the particles. */
+function applySeason(year: ReturnType<typeof seasonLook>) {
+  seasonNow.look = year;
+  ambient.uGrassTint.value.copy(year.grass);
+  ambient.uLeafTint.value.copy(year.leaf);
+  ambient.uNeedleTint.value.copy(year.needles);
+  ambient.uFall.value = year.fall;
+  ambient.uBare.value = year.bare;
+  ambient.uBlossom.value = year.blossom;
+  ambient.uSnow.value = year.snow;
+  ambient.uIce.value = year.ice;
+}
+
 /**
  * The time of day, applied: the sky, the fog and background, the haze
  * and cloud shadows, the lights, the windows and the herzies' tint, from
@@ -76,10 +91,13 @@ const ROOM_AIR = "#09070e";
  */
 export function DayLight({
   hour,
+  season,
   room = false,
   radius = ISLAND_RADIUS,
 }: {
   hour?: Hour;
+  /** The time of year to show (default: the local calendar). */
+  season?: Season;
   room?: boolean;
   /** The island's radius, for the shadow box (default: home's). Fixed for
    * the light's life: remount it (a `key`) for another island. */
@@ -90,7 +108,7 @@ export function DayLight({
   const hemi = useRef<THREE.HemisphereLight>(null);
   const sun = useRef<THREE.DirectionalLight>(null);
   const scene = useThree((s) => s.scene);
-  const last = useRef({ at: -1, hour: Number.NaN });
+  const last = useRef({ at: -1, hour: Number.NaN, day: Number.NaN });
   // The cloud shadows are shared with every lit material: none once the
   // Town is gone.
   useEffect(
@@ -108,9 +126,19 @@ export function DayLight({
       : typeof hour === "function"
         ? hour()
         : (hour ?? localHours());
-    if (t - last.current.at < 0.25 && h === last.current.hour) return;
-    last.current = { at: t, hour: h };
+    const d = typeof season === "function" ? season() : (season ?? dayOfYear());
+    if (
+      t - last.current.at < 0.25 &&
+      h === last.current.hour &&
+      d === last.current.day
+    )
+      return;
+    last.current = { at: t, hour: h, day: d };
     const look = dayLook(h);
+    const year = seasonLook(d);
+    applySeason(year);
+    look.sun.multiply(year.light);
+    look.hemiSky.multiply(year.light);
     const lights = skyLights(h);
 
     skyUniforms.uTop.value.copy(look.skyTop);

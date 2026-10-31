@@ -101,6 +101,8 @@ function waterMaterial(): THREE.MeshLambertMaterial {
         "#include <common>",
         /* glsl */ `#include <common>
 uniform float uTime;
+uniform float uIce;
+const float ICE_RISE = ${(-SURFACE - 0.02).toFixed(3)};
 attribute float shore;
 varying float vShore;
 varying vec2 vWorldXZ;`,
@@ -112,7 +114,9 @@ vec4 wp = modelMatrix * vec4( transformed, 1.0 );
 vWorldXZ = wp.xz;
 vShore = shore;
 // Small, slow ripples — flat at the bank, so the water meets it.
-float calm = smoothstep( 0.0, 0.6, shore );
+float calm = smoothstep( 0.0, 0.6, shore ) * ( 1.0 - uIce );
+// Frozen: the ice rises level with the banks, where you walk on it.
+transformed.y += uIce * ICE_RISE;
 transformed.y += calm * 0.035 * (
   sin( wp.x * 1.7 + uTime * 1.3 ) + sin( wp.z * 2.1 - uTime * 1.1 )
 );`,
@@ -123,6 +127,7 @@ transformed.y += calm * 0.035 * (
         /* glsl */ `#include <common>
 uniform float uTime;
 uniform float uFoam;
+uniform float uIce;
 // Smooth value noise: random heights on a grid, eased between.
 float hash21( vec2 p ) {
   p = fract( p * vec2( 123.34, 456.21 ) );
@@ -158,7 +163,17 @@ diffuseColor.rgb += glint * 0.28;
 float lap = uFoam * ( 0.75 + 0.25 * sin( uTime * 1.8 + vWorldXZ.x * 2.3 + vWorldXZ.y * 1.7 ) );
 float foam = 1.0 - smoothstep( lap * 0.6, lap, vShore );
 diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.86, 0.93, 0.98 ), foam * 0.8 );
-diffuseColor.a = mix( diffuseColor.a, 0.95, foam );`,
+diffuseColor.a = mix( diffuseColor.a, 0.95, foam );
+// Frozen over (see Seasons.ts): pale and still, with a few cracks, and
+// frosted white towards the bank.
+if ( uIce > 0.0 ) {
+  float crack = 1.0 - smoothstep( 0.0, 0.035, abs( noise2( p * 0.9 ) - 0.5 ) );
+  float frost = 1.0 - smoothstep( 0.0, 0.5, vShore );
+  vec3 ice = mix( vec3( 0.5, 0.64, 0.76 ), vec3( 0.78, 0.84, 0.9 ), frost );
+  ice = mix( ice, vec3( 0.86, 0.9, 0.95 ), crack * 0.7 );
+  diffuseColor.rgb = mix( diffuseColor.rgb, ice, uIce );
+  diffuseColor.a = mix( diffuseColor.a, 0.97, uIce );
+}`,
       );
   };
   m.customProgramCacheKey = () => "town-water";
@@ -220,7 +235,8 @@ function FishRings({ map }: { map: TownMap }) {
         return;
       }
       const k = Math.min(1, age / RING_LIFE);
-      mesh.visible = k < 1;
+      // No fish under the ice.
+      mesh.visible = k < 1 && ambient.uIce.value < 0.5;
       mesh.scale.setScalar(0.1 + k * 0.6);
       materials[i].opacity = (1 - k) * 0.7;
     });

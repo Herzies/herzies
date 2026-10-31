@@ -8,7 +8,15 @@ import {
 } from "@herzies/shared/gl";
 import { describe, expect, it } from "vitest";
 import type { TownInput } from "./input";
-import { type Mover, stepMover, walkAzimuth } from "./movement";
+import { emptyMap, MAP_SIZE } from "./map";
+import {
+  ICE_GRIP,
+  ICE_SPEED,
+  type Mover,
+  onIce,
+  stepMover,
+  walkAzimuth,
+} from "./movement";
 
 const DT = 1 / 60;
 const idle = (): TownInput => ({
@@ -172,5 +180,58 @@ describe("animation clocks", () => {
     expect(s.walkWeight).toBeGreaterThan(0.99);
     for (let i = 0; i < 60; i++) stepAnimation(s, DT, 0);
     expect(s.walkWeight).toBe(0);
+  });
+});
+
+describe("on ice", () => {
+  it("is on the water when it's frozen, and not on land or bridges", () => {
+    const map = emptyMap();
+    const row = MAP_SIZE / 2;
+    map.terrain[row] = `${"~".repeat(MAP_SIZE / 2)}${"=".repeat(MAP_SIZE / 2)}`;
+    expect(onIce(map, -3, 0.5, 1)).toBe(true);
+    expect(onIce(map, -3, 0.5, 0.2)).toBe(false);
+    expect(onIce(map, 3, 0.5, 1)).toBe(false);
+    expect(onIce(map, -3, 4.5, 1)).toBe(false);
+  });
+
+  const slide = (input: Partial<TownInput>, m: Mover, secs: number) => {
+    for (let t = 0; t < secs; t += DT)
+      stepMover(m, { ...idle(), ...input }, 0, DT, 1, ICE_GRIP);
+  };
+
+  it("glides on after you let go, where on grass you'd have stopped", () => {
+    const grass = mover();
+    const ice = mover();
+    run(grass, { forward: true }, 0, 2);
+    slide({ forward: true }, ice, 4);
+    run(grass, {}, 0, 0.5);
+    slide({}, ice, 0.5);
+    expect(Math.hypot(grass.vx, grass.vz)).toBeLessThan(0.05);
+    expect(Math.hypot(ice.vx, ice.vz)).toBeGreaterThan(WALK_SPEED * 0.3);
+  });
+
+  it("still comes to a stop in a couple of seconds", () => {
+    const ice = mover();
+    slide({ forward: true }, ice, 4);
+    slide({}, ice, 4);
+    expect(Math.hypot(ice.vx, ice.vz)).toBeLessThan(0.1);
+  });
+
+  it("is slow to get going", () => {
+    const grass = mover();
+    const ice = mover();
+    run(grass, { forward: true }, 0, 0.3);
+    slide({ forward: true }, ice, 0.3);
+    expect(Math.hypot(ice.vx, ice.vz)).toBeLessThan(
+      Math.hypot(grass.vx, grass.vz) * 0.6,
+    );
+  });
+
+  it("gets less far for its steps than on grass", () => {
+    const ice = mover();
+    slide({ forward: true }, ice, 10);
+    const top = Math.hypot(ice.vx, ice.vz);
+    expect(top).toBeCloseTo(WALK_SPEED * ICE_SPEED, 1);
+    expect(top).toBeLessThan(WALK_SPEED * 0.75);
   });
 });

@@ -17,7 +17,7 @@ import { Html } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import { type Group, Vector3 } from "three";
-import { ambient } from "./ambient";
+import { ambient, seasonNow } from "./ambient";
 import { SEAT_Y } from "./Benches";
 import { BUBBLE_RANGE, type ChatBubble, type ChatBubbles } from "./chatBubbles";
 import { clothDetailAt } from "./clothDetail";
@@ -35,8 +35,10 @@ import { slashField } from "./combat/slashes";
 import { stance } from "./combat/stance";
 import { assistTarget, type Vec3, waveField } from "./combat/waves";
 import { applyDowned, entityDown } from "./downed";
+import { footprints, Trail } from "./footprints";
 import { HeadBubble } from "./HeadBubble";
 import { groundY, type TownMap } from "./map";
+import { ICE_SPEED, onIce } from "./movement";
 import { NAME_SHADOW, nameOpacity } from "./nameFade";
 import type { RemotePlayer, TownConnection } from "./net/TownConnection";
 import { useTownNetVersion } from "./net/townNet";
@@ -138,6 +140,7 @@ function RemoteHerzie({
   const downMark = useRef<HTMLDivElement>(null);
   const downed = useRef(0);
   const hand = useMemo(() => new Vector3(), []);
+  const trail = useMemo(() => new Trail(herzie.footSpread), [herzie]);
 
   useFrame(({ camera }, dt) => {
     const s = remote.buffer.sample(net.clock.renderTime(performance.now()));
@@ -148,6 +151,18 @@ function RemoteHerzie({
     const seated = (s.flags & TOWN_FLAG_SITTING) !== 0;
     const ground = groundY(map, s.x, s.z);
     herzie.root.position.set(s.x, ground + (seated ? SEAT_Y : 0), s.z);
+    // Their prints in the snow, as ours (see footprints.ts).
+    if (!seated) {
+      trail.step(
+        map,
+        footprints,
+        s.x,
+        ground,
+        s.z,
+        seasonNow.look.snow,
+        ambient.uTime.value,
+      );
+    }
     herzie.sitting = seated;
     herzie.dancing = (s.flags & TOWN_FLAG_DANCING) !== 0;
     // Aiming: their gear off their back and in hand (and kept there while
@@ -190,7 +205,13 @@ function RemoteHerzie({
     herzie.clothDetail = clothDetailAt(
       camera.position.distanceTo(herzie.root.position),
     );
-    herzie.update(dt, s.speed);
+    // On ice their legs go as fast as their steps would take them on the
+    // ground (see movement.ts). Whether they're pushing isn't sent, so a
+    // glide still steps.
+    herzie.update(
+      dt,
+      onIce(map, s.x, s.z, seasonNow.look.ice) ? s.speed / ICE_SPEED : s.speed,
+    );
     if (herzie.released && throwsDiscs) {
       // Never waiting on our idea of their catch: a disc of theirs still
       // out from that hand is let go (see DiscField.throw).
