@@ -63,6 +63,7 @@ export const OBJECTS = {
   H: { name: "Home", color: "#c9a27a" },
   $: { name: "Shop", color: "#6a9ae0" },
   C: { name: "Cave", color: "#8a8070" },
+  A: { name: "Auction house", color: "#e9dfc9" },
   "@": { name: "Statue", color: "#d8d4cc" },
   D: { name: "Training dummy", color: "#d9b26a" },
   O: { name: "Portal", color: "#b07aff" },
@@ -167,6 +168,7 @@ export const SPOT_NAMES: Record<string, string> = {
   treat_trader: "Nandor",
   boboku: "Boboku",
   medea: "Medea",
+  market: "Plutus",
   tower_guard: "Tower Guard",
 };
 
@@ -598,7 +600,12 @@ export type CellRect = { col: number; row: number; w: number; h: number };
  * it's built from (each gets its own walls and gabled roof), and the side
  * its door is on. */
 /** What each building char builds. */
-export const BUILDING_KINDS = { H: "home", $: "shop", C: "cave" } as const;
+export const BUILDING_KINDS = {
+  H: "home",
+  $: "shop",
+  C: "cave",
+  A: "auction",
+} as const;
 export type BuildingKind = (typeof BUILDING_KINDS)[keyof typeof BUILDING_KINDS];
 export const isBuildingChar = (ch: string): ch is keyof typeof BUILDING_KINDS =>
   ch in BUILDING_KINDS;
@@ -621,10 +628,47 @@ export type Building = {
   y: number;
   /** The lowest ground under it: a plinth fills in down to there. */
   foot: number;
+  /** How far it's turned off the grid (a yaw, added to every part's), and
+   * the point it turns round: the middle of its rects. 0 for all but the
+   * auction house (see turnOf). */
+  turn: number;
+  pivot: [x: number, z: number];
 };
 
+/** The most the auction house turns off the grid toward the middle of
+ * town: enough to look like it's facing the square, not so much that its
+ * corners leave its cells far behind. */
+export const AUCTION_MAX_TURN = (20 * Math.PI) / 180;
+
+const DOOR_YAW = { n: Math.PI, s: 0, w: -Math.PI / 2, e: Math.PI / 2 };
+
+/** The auction house turns its door toward the middle of town (the world's
+ * origin), by up to AUCTION_MAX_TURN. Everything else is square to the
+ * grid. */
+function turnOf(
+  kind: BuildingKind,
+  door: Building["door"],
+  [px, pz]: [number, number],
+): number {
+  if (kind !== "auction" || !door) return 0;
+  const toward = Math.atan2(-px, -pz);
+  let delta = toward - DOOR_YAW[door.side];
+  delta = Math.atan2(Math.sin(delta), Math.cos(delta));
+  return Math.max(-AUCTION_MAX_TURN, Math.min(AUCTION_MAX_TURN, delta));
+}
+
+/** A point of a building, turned as the building is. */
+export function turned(b: Building, x: number, z: number): [number, number] {
+  if (b.turn === 0) return [x, z];
+  const [px, pz] = b.pivot;
+  const [dx, dz] = [x - px, z - pz];
+  const [c, s] = [Math.cos(b.turn), Math.sin(b.turn)];
+  // As three's rotateY: a yaw of `turn` added to every direction.
+  return [px + dx * c + dz * s, pz - dx * s + dz * c];
+}
+
 /**
- * Every building on the map — homes, shops and caves. Painted cells of
+ * Every building on the map — homes, shops, caves and the auction house. Painted cells of
  * the same kind that touch are one building; an L or T shape is split into rectangles, largest first.
  * The door goes in the middle of the biggest rectangle's side that faces
  * the middle of town (or the next best side that's an outside wall).
@@ -695,14 +739,23 @@ export function buildingsOf(map: TownMap): Building[] {
           foot = Math.min(foot, e);
         }
       }
+      const kind = BUILDING_KINDS[ch];
+      const door = doorOf(map, rects[0], isH);
+      const c0 = Math.min(...rects.map((r) => r.col)) - half;
+      const c1 = Math.max(...rects.map((r) => r.col + r.w)) - half;
+      const r0 = Math.min(...rects.map((r) => r.row)) - half;
+      const r1 = Math.max(...rects.map((r) => r.row + r.h)) - half;
+      const pivot: [number, number] = [(c0 + c1) / 2, (r0 + r1) / 2];
       out.push({
-        kind: BUILDING_KINDS[ch],
+        kind,
         rects: rects.map((r) => ({ ...r, x0: r.col - half, z0: r.row - half })),
-        door: doorOf(map, rects[0], isH),
+        door,
         seed: key(col, row),
         half,
         y,
         foot,
+        turn: turnOf(kind, door, pivot),
+        pivot,
       });
     }
   }

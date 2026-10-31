@@ -900,7 +900,12 @@ pub async fn api_buy_from_boboku(
 /// What the Tower Guard shows: this month's top climbers and your place,
 /// last month's winner, and whether he owes you a reward.
 pub async fn api_fetch_tower_guard(client: &Client) -> Result<serde_json::Value, String> {
-    let resp = api_fetch(client, reqwest::Method::GET, "/npc/tower-guard", None)
+    api_get(client, "/npc/tower-guard").await
+}
+
+/// GETs a JSON reply, with the server's error message on a refusal.
+async fn api_get(client: &Client, path: &str) -> Result<serde_json::Value, String> {
+    let resp = api_fetch(client, reqwest::Method::GET, path, None)
         .await
         .ok_or_else(|| "Network error".to_string())?;
     let status = resp.status();
@@ -927,6 +932,60 @@ pub async fn api_buy_from_medea(
 ) -> Result<serde_json::Value, String> {
     let body = serde_json::json!({ "itemId": item_id, "quantity": quantity });
     api_buy(client, "/npc/medea/buy", body).await
+}
+
+/// Puts one copy up on Plutus's market board at a fixed price. The copy
+/// leaves the bank: the reply carries the new item state.
+pub async fn api_market_list(
+    client: &Client,
+    unit_id: &str,
+    price: u32,
+) -> Result<serde_json::Value, String> {
+    let body = serde_json::json!({ "unitId": unit_id, "price": price });
+    api_buy(client, "/market/list", body).await
+}
+
+/// Takes a listing off the board. The copy waits there to be collected.
+pub async fn api_market_cancel(
+    client: &Client,
+    listing_id: &str,
+) -> Result<serde_json::Value, String> {
+    let body = serde_json::json!({ "listingId": listing_id });
+    api_buy(client, "/market/cancel", body).await
+}
+
+/// Buys a listing off the board, paying its price now.
+pub async fn api_market_buy(
+    client: &Client,
+    listing_id: &str,
+) -> Result<serde_json::Value, String> {
+    let body = serde_json::json!({ "listingId": listing_id });
+    api_buy(client, "/market/buy", body).await
+}
+
+/// Collects everything waiting at the board: coins from sales, and copies
+/// that didn't sell (unless the bank is full: `itemsLeft` says how many).
+pub async fn api_market_collect(client: &Client) -> Result<serde_json::Value, String> {
+    api_buy(client, "/market/collect", serde_json::json!({})).await
+}
+
+/// What's for sale on the board, cheapest first, a page at a time; one
+/// item's listings only when `item_id` is given.
+pub async fn api_market_browse(
+    client: &Client,
+    item_id: Option<&str>,
+    offset: u32,
+) -> Result<serde_json::Value, String> {
+    let mut path = format!("/market/browse?offset={offset}");
+    if let Some(item_id) = item_id {
+        path.push_str(&format!("&itemId={}", urlencoding::encode(item_id)));
+    }
+    api_get(client, &path).await
+}
+
+/// The player's own side of the board: what's up, and what's waiting.
+pub async fn api_market_mine(client: &Client) -> Result<serde_json::Value, String> {
+    api_get(client, "/market/mine").await
 }
 
 /// Eats one consumable from the bank; the reply carries the new item state

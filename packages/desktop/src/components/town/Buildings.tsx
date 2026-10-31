@@ -9,6 +9,7 @@ import {
   type BuildingRect,
   buildingsOf,
   type TownMap,
+  turned,
 } from "./map";
 
 // Houses after the early Pokémon towns: short plank walls on a dark
@@ -410,9 +411,9 @@ export function chimneysOf(map: TownMap): [number, number, number][] {
     rand();
     rand();
     const c = rand() < 0.65 ? chimneyAt(b) : null;
-    return c
-      ? [[c.x, b.y + c.base + c.h + 0.1, c.z] as [number, number, number]]
-      : [];
+    if (!c) return [];
+    const [x, z] = turned(b, c.x, c.z);
+    return [[x, b.y + c.base + c.h + 0.1, z] as [number, number, number]];
   });
 }
 
@@ -439,12 +440,17 @@ export function windowLightsOf(map: TownMap): WindowLight[] {
     const isPart = partOf(b);
     const door = doorAt(b);
     return b.rects.flatMap((r) =>
-      windowRuns(r, isPart, door, spacingFor(b, door))
-        .flat()
-        .map((w) => ({
-          at: [w.x, b.y + GROUND_FLOOR, w.z] as [number, number, number],
-          out: [Math.sin(w.yaw), Math.cos(w.yaw)] as [number, number],
-        })),
+      (b.kind === "auction"
+        ? auctionWindows(b, r, isPart, door)
+        : windowRuns(r, isPart, door, spacingFor(b, door)).flat()
+      ).map((w) => {
+        const [x, z] = turned(b, w.x, w.z);
+        const yaw = w.yaw + b.turn;
+        return {
+          at: [x, b.y + GROUND_FLOOR, z] as [number, number, number],
+          out: [Math.sin(yaw), Math.cos(yaw)] as [number, number],
+        };
+      }),
     );
   });
 }
@@ -706,6 +712,272 @@ function caveGeometry(b: Building) {
   return { body, glow: [] as THREE.BufferGeometry[] };
 }
 
+/** The auction house: a civic hall in pale ashlar, two storeys, a columned
+ * portico with a pediment round its door, a slate roof behind a gilded
+ * cornice and a copper dome gone green, with a gold finial — the grandest
+ * thing in Town, where Plutus keeps the board. */
+const HALL_WALL_HEIGHT = 5.6;
+const HALL_STONE = "#e9dfc9";
+const HALL_COLUMN = "#f6f1e4";
+const HALL_SLATE = "#5a5f6e";
+const GOLD = "#d9b04a";
+const WINE = "#7a2338";
+const PATINA = "#4f9a8a";
+const PATINA_DARK = "#3b7a6c";
+/** The portico: how far it stands out from the wall, and how high its
+ * columns reach (the entablature sits on them, the pediment on that). */
+const PORTICO_DEPTH = 1.25;
+const COLUMN_TOP = 4.5;
+const COLUMN_RADIUS = 0.22;
+
+/** How far along the door's wall the portico reaches either side of the
+ * door, and where its columns stand (offsets from the door, along the
+ * wall): a pair flanking the door, and another pair at the ends when the
+ * wall is long enough. */
+function porticoOf(b: Building, door: Door) {
+  const r = b.rects[b.door?.rect ?? 0];
+  const sideLength = b.door?.side === "n" || b.door?.side === "s" ? r.w : r.h;
+  // Room left at the ends for the banners.
+  const half = Math.min(3.4, sideLength / 2 - 1.0);
+  const inner = DOOR_RADIUS + 0.45;
+  const outer = half - 0.15;
+  const columns =
+    outer - inner >= 0.6 ? [-outer, -inner, inner, outer] : [-inner, inner];
+  return { door, half, columns };
+}
+
+/** The auction house's windows: like a home's, but none behind the
+ * portico, where the columns would stand in front of them. Shared with the
+ * night lights, so they light the same windows. */
+function auctionWindows(
+  b: Building,
+  r: BuildingRect,
+  isPart: (c: number, row: number) => boolean,
+  door: Door | null,
+): Spot[] {
+  const portico = door ? porticoOf(b, door) : null;
+  return windowRuns(r, isPart, door, () => WINDOW_SPACING)
+    .flat()
+    .filter((w) => {
+      if (!portico || Math.abs(w.yaw - portico.door.yaw) > 1e-6) return true;
+      const along = Math.abs(w.yaw) < 1e-6 || Math.abs(w.yaw - Math.PI) < 1e-6;
+      const sameWall = along
+        ? Math.abs(w.z - portico.door.z) < 0.01
+        : Math.abs(w.x - portico.door.x) < 0.01;
+      const offset = along ? w.x - portico.door.x : w.z - portico.door.z;
+      return !sameWall || Math.abs(offset) > portico.half + 0.5;
+    });
+}
+
+function auctionGeometry(b: Building) {
+  const isPart = partOf(b);
+  const H = HALL_WALL_HEIGHT;
+  const body: THREE.BufferGeometry[] = [];
+  const glow: THREE.BufferGeometry[] = [];
+  const door = doorAt(b);
+
+  for (const r of b.rects) {
+    const e = bounds(r);
+    const cx = (e.x0 + e.x1) / 2;
+    const cz = (e.z0 + e.z1) / 2;
+    body.push(
+      // Ashlar: the brick pattern, in pale stone, reads as dressed blocks.
+      painted(box(r.w, H, r.h, cx, H / 2, cz), HALL_STONE, BRICK),
+      painted(
+        box(r.w + 0.12, FOOTING + 0.1, r.h + 0.12, cx, (FOOTING + 0.1) / 2, cz),
+        FOOTING_COLOR,
+      ),
+      // A string course between the storeys, and a gilded cornice.
+      painted(
+        box(r.w + 0.06, 0.12, r.h + 0.06, cx, FLOOR_BAND + 0.3, cz),
+        HALL_COLUMN,
+      ),
+      painted(box(r.w + 0.5, 0.16, r.h + 0.5, cx, H + 0.02, cz), GOLD),
+      painted(box(r.w + 0.3, 0.3, r.h + 0.3, cx, H + 0.25, cz), HALL_STONE),
+      painted(
+        box(
+          Math.max(0.3, r.w - 0.2),
+          0.16,
+          Math.max(0.3, r.h - 0.2),
+          cx,
+          H + 0.46,
+          cz,
+        ),
+        HALL_SLATE,
+      ),
+    );
+    // Tall windows on both storeys.
+    for (const w of auctionWindows(b, r, isPart, door)) {
+      framedWindow(w, body, glow);
+      framedWindow(w, body, glow, UPSTAIRS + 0.4);
+    }
+  }
+
+  // The dome, on a drum over the middle of the main hall, with a gold
+  // finial on top.
+  {
+    const e = bounds(b.rects[0]);
+    const cx = (e.x0 + e.x1) / 2;
+    const cz = (e.z0 + e.z1) / 2;
+    const radius = Math.min(
+      2.2,
+      (Math.min(b.rects[0].w, b.rects[0].h) / 2) * 0.72,
+    );
+    const base = H + 0.54;
+    const drum = 0.7;
+    body.push(
+      painted(
+        new THREE.CylinderGeometry(
+          radius + 0.12,
+          radius + 0.12,
+          drum,
+          16,
+        ).translate(cx, base + drum / 2, cz),
+        HALL_STONE,
+      ),
+      painted(
+        new THREE.CylinderGeometry(
+          radius + 0.2,
+          radius + 0.2,
+          0.1,
+          16,
+        ).translate(cx, base + drum, cz),
+        GOLD,
+      ),
+    );
+    // Copper ribs and panels: alternating shades of patina round the dome.
+    const segments = 12;
+    for (let i = 0; i < segments; i++) {
+      const panel = new THREE.SphereGeometry(
+        radius,
+        2,
+        5,
+        (i / segments) * Math.PI * 2,
+        (Math.PI * 2) / segments,
+        0,
+        Math.PI / 2,
+      ).translate(cx, base + drum + 0.05, cz);
+      body.push(painted(panel, i % 2 === 0 ? PATINA : PATINA_DARK));
+    }
+    const top = base + drum + 0.05 + radius;
+    body.push(
+      painted(
+        new THREE.CylinderGeometry(0.06, 0.1, 0.35, 8).translate(
+          cx,
+          top + 0.15,
+          cz,
+        ),
+        GOLD,
+      ),
+      painted(
+        new THREE.SphereGeometry(0.17, 8, 6).translate(cx, top + 0.45, cz),
+        GOLD,
+      ),
+      painted(
+        new THREE.ConeGeometry(0.07, 0.4, 8).translate(cx, top + 0.78, cz),
+        GOLD,
+      ),
+    );
+  }
+
+  if (door) {
+    const { x, z, yaw } = door;
+    const { half, columns } = porticoOf(b, door);
+    // Built facing out of the wall (+z), along it in x, then turned and
+    // moved onto the door.
+    const at = (g: THREE.BufferGeometry, color: string, surface?: Surface) =>
+      body.push(painted(onWall(g, x, 0, z, yaw, 0), color, surface));
+    const D = PORTICO_DEPTH;
+    const width = half * 2;
+
+    // Steps up to the portico, the lower one wider.
+    at(box(width + 0.9, 0.16, D + 0.75, 0, 0.08, (D + 0.75) / 2), STEP);
+    at(box(width + 0.4, 0.16, D + 0.3, 0, 0.24, (D + 0.3) / 2), STEP);
+
+    // A round door like every door here, in wine red, in a gold frame.
+    at(disc(DOOR_RADIUS + 0.16, 0.08).translate(0, DOOR_Y + 0.2, 0.03), GOLD);
+    at(disc(DOOR_RADIUS, 0.08).translate(0, DOOR_Y + 0.2, 0.07), WINE);
+    at(disc(0.11, 0.08).translate(0, DOOR_Y + 0.2, 0.14), GOLD);
+    // The sign over it: a gold board with a wine band.
+    at(box(2.6, 0.55, 0.1, 0, SIGN_Y + 0.35, 0.06), GOLD);
+    at(box(2.2, 0.16, 0.06, 0, SIGN_Y + 0.35, 0.13), WINE);
+
+    // The columns: base, shaft, capital.
+    const foot = 0.32;
+    const shaft = COLUMN_TOP - foot - 0.3;
+    for (const u of columns) {
+      const out = D - 0.35;
+      at(box(0.56, 0.14, 0.56, u, foot + 0.07, out), HALL_COLUMN);
+      at(
+        new THREE.CylinderGeometry(
+          COLUMN_RADIUS * 0.88,
+          COLUMN_RADIUS,
+          shaft,
+          10,
+        ).translate(u, foot + 0.14 + shaft / 2, out),
+        HALL_COLUMN,
+      );
+      at(box(0.56, 0.16, 0.56, u, COLUMN_TOP - 0.08, out), HALL_COLUMN);
+    }
+
+    // The entablature over them: a gold band along its face.
+    const ent = 0.45;
+    at(
+      box(width + 0.3, ent, D + 0.1, 0, COLUMN_TOP + ent / 2, (D + 0.1) / 2),
+      HALL_STONE,
+    );
+    at(box(width + 0.32, 0.1, 0.04, 0, COLUMN_TOP + ent / 2, D + 0.12), GOLD);
+
+    // The pediment: a low gable over the portico, its face and its two
+    // slopes, with a lit round window in the tympanum.
+    const y0 = COLUMN_TOP + ent;
+    const y1 = y0 + Math.min(1.3, width * 0.2);
+    const hw = half + 0.2;
+    const d = D + 0.1;
+    at(
+      tris(
+        [-hw, y0, d],
+        [hw, y0, d],
+        [0, y1, d],
+        [-hw, y0, 0],
+        [0, y1, 0],
+        [hw, y0, 0],
+      ),
+      HALL_STONE,
+    );
+    at(
+      tris(
+        [-hw - 0.15, y0, d + 0.12],
+        [0, y1 + 0.12, d + 0.12],
+        [0, y1 + 0.12, -0.05],
+        [-hw - 0.15, y0, d + 0.12],
+        [0, y1 + 0.12, -0.05],
+        [-hw - 0.15, y0, -0.05],
+        [hw + 0.15, y0, d + 0.12],
+        [hw + 0.15, y0, -0.05],
+        [0, y1 + 0.12, -0.05],
+        [hw + 0.15, y0, d + 0.12],
+        [0, y1 + 0.12, -0.05],
+        [0, y1 + 0.12, d + 0.12],
+      ),
+      HALL_SLATE,
+    );
+    const oculus = (y0 + y1) / 2 - 0.05;
+    at(disc(0.3, 0.06).translate(0, oculus, d + 0.01), GOLD);
+    glow.push(
+      onWall(disc(0.22, 0.04).translate(0, oculus, d + 0.04), x, 0, z, yaw, 0),
+    );
+
+    // Wine banners hanging down the wall either side of the portico.
+    for (const u of [-(half + 0.6), half + 0.6]) {
+      at(box(0.62, 1.7, 0.05, u, 3.3, 0.05), WINE);
+      at(box(0.66, 0.1, 0.06, u, 4.18, 0.07), GOLD);
+      at(box(0.62, 0.08, 0.06, u, 2.75, 0.08), GOLD);
+    }
+  }
+  return { body, glow };
+}
+
 /** The stone a building stands on where the ground falls away under it. */
 const PLINTH = "#8a8278";
 
@@ -717,7 +989,9 @@ function buildingGeometry(b: Building) {
       ? shopGeometry(b)
       : b.kind === "cave"
         ? caveGeometry(b)
-        : homeGeometry(b);
+        : b.kind === "auction"
+          ? auctionGeometry(b)
+          : homeGeometry(b);
   for (const g of [...body, ...glow]) g.translate(0, b.y, 0);
   const drop = b.y - b.foot;
   if (drop > 0.02) {
@@ -739,6 +1013,12 @@ function buildingGeometry(b: Building) {
           BRICK,
         ),
       );
+    }
+  }
+  if (b.turn !== 0) {
+    const [px, pz] = b.pivot;
+    for (const g of [...body, ...glow]) {
+      g.translate(-px, 0, -pz).rotateY(b.turn).translate(px, 0, pz);
     }
   }
   return {
@@ -855,7 +1135,7 @@ export const lanternMaterial = new THREE.MeshBasicMaterial();
 lanternMaterial.color = windowMaterial.color;
 
 /**
- * The buildings — homes, shops and caves — each patch of cells as one,
+ * The buildings — homes, shops, caves and the auction house — each patch of cells as one,
  * its door toward the middle of town. All of them merged into one mesh
  * (plus one for the lit windows).
  */
@@ -905,11 +1185,14 @@ export function BuildingColliders({ map }: { map: TownMap }) {
         const e = bounds(r);
         // From the lowest ground under it to the top of its walls.
         const half = (r.b.y + WALL - r.b.foot) / 2;
+        // Turned with the building (the auction house), round its pivot.
+        const [x, z] = turned(r.b, (e.x0 + e.x1) / 2, (e.z0 + e.z1) / 2);
         return (
           <CuboidCollider
             key={`h${r.col},${r.row}`}
             args={[r.w / 2, half, r.h / 2]}
-            position={[(e.x0 + e.x1) / 2, r.b.foot + half, (e.z0 + e.z1) / 2]}
+            position={[x, r.b.foot + half, z]}
+            rotation={[0, r.b.turn, 0]}
           />
         );
       })}

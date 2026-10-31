@@ -164,7 +164,17 @@ describe("town map", () => {
 
   it("parses the new things", () => {
     const map = emptyMap();
-    for (const [i, ch] of ["v", "*", "m", "H", "$", "C", "@", "B"].entries()) {
+    for (const [i, ch] of [
+      "v",
+      "*",
+      "m",
+      "H",
+      "$",
+      "C",
+      "A",
+      "@",
+      "B",
+    ].entries()) {
       paint(map, "objects", MID + i * 2, MID, ch);
     }
     expect(() => parseMap(map)).not.toThrow();

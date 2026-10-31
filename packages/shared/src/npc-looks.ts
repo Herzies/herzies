@@ -55,3 +55,14 @@ export const TOWER_GUARD_EQUIPPED: Equipped = {
   head: "guard-helm",
   color: TOWER_GUARD_SCHEME_ID,
 };
+
+/** Plutus's look: grown up (stage 3), in violet, with pearls at his throat
+ * and a troubadour's mantle: he's seen every instrument in Town change
+ * hands. */
+export const MARKET_SEED = "npc:plutus";
+export const MARKET_STAGE = 3;
+export const MARKET_EQUIPPED: Equipped = {
+  body: "pearl-necklace",
+  back: "troubadour-mantle",
+  color: "purple-dane",
+};

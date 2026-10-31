@@ -800,6 +800,66 @@ async fn buy_from_medea(
     Ok(data)
 }
 
+/// Lists one copy on Plutus's market board: it leaves the bank like a sale.
+#[tauri::command]
+async fn market_list(
+    unit_id: String,
+    price: u32,
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    let client = api::http();
+    let data = api::api_market_list(&client, &unit_id, price).await?;
+    apply_purchase(&data, &app, &state);
+    Ok(data)
+}
+
+/// Takes a listing down. Nothing to apply: the copy waits at the board.
+#[tauri::command]
+async fn market_cancel(listing_id: String) -> Result<serde_json::Value, String> {
+    let client = api::http();
+    api::api_market_cancel(&client, &listing_id).await
+}
+
+#[tauri::command]
+async fn market_buy(
+    listing_id: String,
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    let client = api::http();
+    let data = api::api_market_buy(&client, &listing_id).await?;
+    apply_purchase(&data, &app, &state);
+    Ok(data)
+}
+
+/// Coins and unsold copies from the board land like a purchase.
+#[tauri::command]
+async fn market_collect(
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    let client = api::http();
+    let data = api::api_market_collect(&client).await?;
+    apply_purchase(&data, &app, &state);
+    Ok(data)
+}
+
+#[tauri::command]
+async fn market_browse(
+    item_id: Option<String>,
+    offset: Option<u32>,
+) -> Result<serde_json::Value, String> {
+    let client = api::http();
+    api::api_market_browse(&client, item_id.as_deref(), offset.unwrap_or(0)).await
+}
+
+#[tauri::command]
+async fn market_mine() -> Result<serde_json::Value, String> {
+    let client = api::http();
+    api::api_market_mine(&client).await
+}
+
 /// Eats one consumable (outside a boss fight, where the database holds HP).
 /// Applies the item state like a purchase; the caller takes the vitals.
 #[tauri::command]
@@ -2784,6 +2844,12 @@ pub fn run() {
             fetch_tower_guard,
             claim_tower_reward,
             buy_from_medea,
+            market_list,
+            market_cancel,
+            market_buy,
+            market_collect,
+            market_browse,
+            market_mine,
             eat_item,
             collect_drop,
             spawn_debug_drop,

@@ -301,3 +301,12 @@ export async function parseBody<T>(
 export function isParseError<T>(value: T | Response): value is Response {
   return value instanceof Response;
 }
+
+export const marketListSchema = z.object({
+  unitId,
+  price: z.number().int().min(1),
+});
+
+export const marketListingSchema = z.object({
+  listingId: z.guid(),
+});

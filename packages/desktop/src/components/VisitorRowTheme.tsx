@@ -82,6 +82,12 @@ export const VISITOR_THEMES: Record<string, VisitorTheme> = {
     dim: "#d7a6d0",
     accent: "#ff8fd0",
   },
+  // Plutus: dusk violet, like his coat.
+  market: {
+    background: "linear-gradient(90deg, #120b26 0%, #2a1c52 55%, #0d081c 100%)",
+    dim: "#b8aee0",
+    accent: "#b49cff",
+  },
   // The Tower: deep moss, like its island.
   tower: {
     background: "linear-gradient(90deg, #06180a 0%, #12381a 55%, #051208 100%)",

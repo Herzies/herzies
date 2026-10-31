@@ -14,6 +14,9 @@ import {
   RARITY_COLORS as ITEM_RARITY_COLORS,
   ItemTypeIcon,
   isVisitorType,
+  MARKET_KEY,
+  MARKET_NAME,
+  type MarketStall,
   MEDEA_KEY,
   MEDEA_NAME,
   MERCHANT_NAME,
@@ -47,6 +50,7 @@ import ItemInspectOverlay, {
 } from "./ItemInspectOverlay";
 import { List } from "./List";
 import { LoadingSplash } from "./LoadingSplash";
+import { MarketPanel } from "./MarketPanel";
 import { MerchantPanel } from "./MerchantPanel";
 import { OrphiezStage } from "./OrphiezStage";
 import { TabButton } from "./TabButton";
@@ -115,6 +119,10 @@ const EVENTS_POLL_MS = 10_000;
  * often enough that the visitors are where they should be when you walk
  * out. */
 const HOME_EVENTS_POLL_MS = 60_000;
+
+/** How often Plutus's board is checked for sales while the Town's up: a sale
+ * only lights his "!", so there's no hurry. */
+const MARKET_POLL_MS = 5 * 60_000;
 
 /** Fixture George for the Settings debug toggle. Not a real event, so any
  * buy is refused server-side — this is for looking, not shopping. */
@@ -585,6 +593,31 @@ function EventsViewImpl({
     };
   }, [active, guardKey, guardOpen]);
 
+  // Plutus's board: your listings, and what's waiting there (his "!").
+  // Fetched with the Town, every few minutes while it's up, and whenever his
+  // panel opens or closes.
+  const [stall, setStall] = useState<MarketStall | null>(null);
+  const [stallKey, setStallKey] = useState(0);
+  const marketOpen = selected === MARKET_KEY;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: stallKey and marketOpen re-run the fetch
+  useEffect(() => {
+    if (!active) return;
+    let cancelled = false;
+    const refresh = () =>
+      herzies
+        .marketMine()
+        .then((m) => {
+          if (!cancelled) setStall(m);
+        })
+        .catch(() => {});
+    refresh();
+    const interval = focused ? setInterval(refresh, MARKET_POLL_MS) : undefined;
+    return () => {
+      cancelled = true;
+      if (interval) clearInterval(interval);
+    };
+  }, [active, focused, stallKey, marketOpen]);
+
   /** A visitor open in the big window's panel, the world still showing. */
   const inPanel = expanded && selected !== null;
   /** A visitor opened from the board: Back (not the panel's x) takes you
@@ -757,6 +790,21 @@ function EventsViewImpl({
       openKey: MEDEA_KEY,
       detail: "Sweets and potions",
     });
+    // And Plutus, with his board. His "!" is for something to collect;
+    // otherwise he wears the newcomer's one until you've talked to him.
+    cards.push({
+      type: MARKET_KEY,
+      title: MARKET_NAME,
+      description: null,
+      status: "live",
+      at: null,
+      openKey: MARKET_KEY,
+      detail: "Sells what players leave with her",
+      notice:
+        stall && (stall.coinsWaiting > 0 || stall.itemsWaiting > 0)
+          ? true
+          : undefined,
+    });
     // And the Tower Guard, wherever a map gives him a spot.
     cards.push({
       type: TOWER_GUARD_KEY,
@@ -925,6 +973,29 @@ function EventsViewImpl({
             guard={towerGuard}
             equipped={equipped}
             onClaimed={() => setGuardKey((k) => k + 1)}
+            onLog={onLog}
+            paused={!active || !focused}
+          />
+        </ScreenView>
+      );
+    }
+
+    if (selected === MARKET_KEY) {
+      return (
+        <ScreenView
+          inPanel={screenInPanel}
+          ownName
+          title={MARKET_NAME}
+          colour="cyan"
+          childrenClassName="flex min-h-0 flex-col"
+          backButton={back}
+        >
+          <MarketPanel
+            stall={stall}
+            currency={currency}
+            equipped={equipped}
+            units={units}
+            onChanged={() => setStallKey((k) => k + 1)}
             onLog={onLog}
             paused={!active || !focused}
           />

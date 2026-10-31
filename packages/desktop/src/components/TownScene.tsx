@@ -7,6 +7,10 @@ import {
   GEORGE_EQUIPPED,
   GEORGE_SEED,
   generateCreatureParams,
+  MARKET_EQUIPPED,
+  MARKET_KEY,
+  MARKET_SEED,
+  MARKET_STAGE,
   MEDEA_EQUIPPED,
   MEDEA_KEY,
   MEDEA_SEED,
@@ -78,6 +82,12 @@ export function lookOf(card: EventCard): Look {
         seed: MEDEA_SEED,
         stage: MEDEA_STAGE,
         equipped: MEDEA_EQUIPPED,
+      };
+    case MARKET_KEY:
+      return {
+        seed: MARKET_SEED,
+        stage: MARKET_STAGE,
+        equipped: MARKET_EQUIPPED,
       };
     case TOWER_GUARD_KEY:
       return {

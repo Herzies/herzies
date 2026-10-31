@@ -10,7 +10,9 @@ import type { EventCard } from "../TownScene";
 const STORAGE_KEY = "herzies.town.met";
 
 /** Who lives in Town rather than visiting: they never arrive, so never wear
- * a "!". */
+ * a "!". Plutus (MARKET_KEY) lives there too but isn't listed: he's new, so
+ * he wears the newcomer's "!" once, and after that only his own (something
+ * to collect, card.notice). */
 export const RESIDENTS: ReadonlySet<string> = new Set([
   BOBOKU_KEY,
   MEDEA_KEY,

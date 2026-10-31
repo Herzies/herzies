@@ -11,6 +11,8 @@ import type {
   Inventory,
   ItemUnit,
   ItemUpgradeResult,
+  MarketListing,
+  MarketStall,
   PendingDrop,
   PendingFriendRequest,
   PremiumItem,
@@ -294,6 +296,43 @@ export const herzies = {
       newCurrency: number;
       inventory: Inventory;
     }>("buy_from_medea", { itemId, quantity }),
+  /** Puts one copy up on Plutus's market board. It leaves the bank; throws
+   * with the server's reason (worn, class gear, price too low, stall full). */
+  marketList: (unitId: string, price: number) =>
+    invoke<{
+      listing: Omit<MarketListing, "sellerName">;
+      inventory: Inventory;
+    }>("market_list", { unitId, price }),
+  /** Takes a listing down; the copy waits at the board to be collected. */
+  marketCancel: (listingId: string) =>
+    invoke<{ listing: Omit<MarketListing, "sellerName"> }>("market_cancel", {
+      listingId,
+    }),
+  /** Buys a listing off the board. Throws when it's gone, it's yours, or
+   * there's no coin or bank room for it. */
+  marketBuy: (listingId: string) =>
+    invoke<{
+      spent: number;
+      newCurrency: number;
+      listing: Omit<MarketListing, "sellerName">;
+      inventory: Inventory;
+    }>("market_buy", { listingId }),
+  /** Collects what's waiting at the board. `itemsLeft`: copies that stayed
+   * there because the bank was full (the coins come regardless). */
+  marketCollect: () =>
+    invoke<{
+      coins: number;
+      items: number;
+      itemsLeft: number;
+      newCurrency: number;
+      inventory: Inventory;
+    }>("market_collect"),
+  /** What's for sale, cheapest first, 50 at a time; one item's only when
+   * `itemId` is given. */
+  marketBrowse: (itemId: string | null = null, offset = 0) =>
+    invoke<{ listings: MarketListing[] }>("market_browse", { itemId, offset }),
+  /** The player's own listings, and what's waiting to be collected. */
+  marketMine: () => invoke<MarketStall>("market_mine"),
   /** Eats one consumable from the bank, outside a boss fight (in one, the
    * Town server does it: see town/eat.ts). Rejects with the reason it
    * refused (already full, knocked out, none left). */

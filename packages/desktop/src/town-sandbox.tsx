@@ -95,7 +95,8 @@ const card = (type: string, title: string): EventCard => ({
   status: "live",
   at: null,
   // The residents open; the rest are scenery.
-  openKey: type === "boboku" || type === "medea" ? type : null,
+  openKey:
+    type === "boboku" || type === "medea" || type === "market" ? type : null,
   eventId: `sandbox-${type}`,
 });
 
@@ -106,6 +107,7 @@ const spots: TownSpot[] = [
   ["song_hunt", "Orphiez"],
   ["boboku", "Boboku"],
   ["medea", "Medea"],
+  ["market", "Plutus"],
 ]
   // Only those the map has a spot for (the boss lives in its cave now).
   .filter(([type]) => SPOTS[type])

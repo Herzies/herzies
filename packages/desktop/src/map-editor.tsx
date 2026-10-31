@@ -80,6 +80,7 @@ const PALETTE: Paint[] = [
       "H",
       "$",
       "C",
+      "A",
       "@",
       "B",
       "L",
@@ -97,7 +98,7 @@ const PALETTE: Paint[] = [
   { layer: "objects", ch: ".", name: "Clear", color: "#000000" },
 ];
 /** Each palette entry's key, in order (clear last): the number row, then
- * K (shop, "kiosk"), C (cave), U (bush), L (lamp post), N (bench), T
+ * K (shop, "kiosk"), C (cave), H (auction house, "hall"), U (bush), L (lamp post), N (bench), T
  * (market stand), I (bulletin board, "info"), Y (training dummy) and O
  * (portal). Clear of the 3D preview's keys (WASD,
  * arrows, E) and the tools' (B, R, F, P). */
@@ -105,6 +106,7 @@ const KEYS = [
   ..."1234567890-",
   "k",
   "c",
+  "h",
   "=",
   "u",
   "l",
@@ -354,7 +356,7 @@ function drawMap(
             zoom * 0.66,
             zoom * 0.56,
           );
-        else if (o === "H" || o === "$" || o === "C") {
+        else if (o === "H" || o === "$" || o === "C" || o === "A") {
           // Whole cells, so a patch reads as one building.
           ctx.rect(c * zoom, r * zoom, zoom, zoom);
         } else if (o === "v") {
@@ -415,9 +417,14 @@ function drawMap(
           ctx.arc(cx, cy, zoom * 0.25, 0, Math.PI * 2);
         } else ctx.arc(cx, cy, zoom * 0.26, 0, Math.PI * 2);
         ctx.fill();
-        if (o === "H" || o === "$" || o === "C") {
+        if (o === "H" || o === "$" || o === "C" || o === "A") {
           // A darker edge where the building meets open ground.
-          ctx.fillStyle = { H: "#8a3b2e", $: "#2c559f", C: "#4e463c" }[o];
+          ctx.fillStyle = {
+            H: "#8a3b2e",
+            $: "#2c559f",
+            C: "#4e463c",
+            A: "#8a7a5a",
+          }[o];
           const edge = Math.max(1, zoom * 0.15);
           if (map.objects[r - 1]?.[c] !== o)
             ctx.fillRect(c * zoom, r * zoom, zoom, edge);
