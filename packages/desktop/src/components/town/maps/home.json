@@ -7,7 +7,7 @@
   "portals": { "12,57": { "to": "bossroom" }, "56,5": { "to": "tower" } },
   "spawn": { "at": [13.5, 12], "heading": 3.927 },
   "spots": {
-    "merchant": [-11.5, -6.5],
+    "merchant": [2.5, 14],
     "song_hunt": [-2, -11.5],
     "treat_trader": [26.5, -7.5],
     "boboku": [-10, 1.5],
