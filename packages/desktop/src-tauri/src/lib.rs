@@ -800,16 +800,18 @@ async fn buy_from_medea(
     Ok(data)
 }
 
-/// Lists one copy on Plutus's market board: it leaves the bank like a sale.
+/// Lists one copy (or a stack) on Plutus's market board: it leaves the bank
+/// like a sale.
 #[tauri::command]
 async fn market_list(
     unit_id: String,
     price: u32,
+    quantity: u32,
     app: AppHandle,
     state: tauri::State<'_, SharedState>,
 ) -> Result<serde_json::Value, String> {
     let client = api::http();
-    let data = api::api_market_list(&client, &unit_id, price).await?;
+    let data = api::api_market_list(&client, &unit_id, price, quantity).await?;
     apply_purchase(&data, &app, &state);
     Ok(data)
 }
@@ -847,11 +849,11 @@ async fn market_collect(
 
 #[tauri::command]
 async fn market_browse(
-    item_id: Option<String>,
+    item_ids: Option<Vec<String>>,
     offset: Option<u32>,
 ) -> Result<serde_json::Value, String> {
     let client = api::http();
-    api::api_market_browse(&client, item_id.as_deref(), offset.unwrap_or(0)).await
+    api::api_market_browse(&client, item_ids.as_deref(), offset.unwrap_or(0)).await
 }
 
 #[tauri::command]

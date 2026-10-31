@@ -25,6 +25,9 @@ const REASONS: Record<string, { status: number; error: string }> = {
   gone: { status: 409, error: "That listing is no longer for sale" },
   "own-listing": { status: 400, error: "That's your own listing" },
   "insufficient-funds": { status: 400, error: "Not enough currency" },
+  "bad-quantity": { status: 400, error: "Invalid quantity" },
+  "not-enough": { status: 400, error: "You don't have that many" },
+  "not-stackable": { status: 400, error: "That one's listed a copy at a time" },
 };
 
 /** The response for an RPC's `{ok: false, reason}`. */
@@ -38,13 +41,14 @@ export function refusal(reason: string | undefined, fallback: string) {
 
 /** What the board selects for a listing, with the seller's name. */
 export const LISTING_COLUMNS =
-  "id, seller_id, item_id, upgrade_level, price, fee, status, created_at, expires_at, sold_at, seller:herzies!market_listings_seller_id_fkey(name)";
+  "id, seller_id, item_id, upgrade_level, quantity, price, fee, status, created_at, expires_at, sold_at, seller:herzies!market_listings_seller_id_fkey(name)";
 
 interface ListingRow {
   id: string;
   seller_id: string;
   item_id: string;
   upgrade_level: number;
+  quantity: number;
   price: number;
   fee: number;
   status: MarketListing["status"];
@@ -65,6 +69,7 @@ export function toListing(row: ListingRow, now = Date.now()): MarketListing {
     sellerName: seller?.name ?? null,
     itemId: row.item_id,
     upgradeLevel: row.upgrade_level,
+    quantity: row.quantity,
     price: row.price,
     fee: row.fee,
     status: expired ? "expired" : row.status,
@@ -94,7 +99,9 @@ export async function loadStall(
     coinsWaiting: uncollected
       .filter((l) => l.status === "sold")
       .reduce((sum, l) => sum + (l.price - l.fee), 0),
-    itemsWaiting: uncollected.filter((l) => l.status !== "sold").length,
+    itemsWaiting: uncollected
+      .filter((l) => l.status !== "sold")
+      .reduce((sum, l) => sum + l.quantity, 0),
   };
 }
 

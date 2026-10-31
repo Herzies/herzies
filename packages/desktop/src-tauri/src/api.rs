@@ -934,14 +934,20 @@ pub async fn api_buy_from_medea(
     api_buy(client, "/npc/medea/buy", body).await
 }
 
-/// Puts one copy up on Plutus's market board at a fixed price. The copy
-/// leaves the bank: the reply carries the new item state.
+/// Puts one copy (or a stack of a stackable item) up on Plutus's market
+/// board at a fixed price for the lot. The copies leave the bank: the reply
+/// carries the new item state.
 pub async fn api_market_list(
     client: &Client,
     unit_id: &str,
     price: u32,
+    quantity: u32,
 ) -> Result<serde_json::Value, String> {
-    let body = serde_json::json!({ "unitId": unit_id, "price": price });
+    let body = serde_json::json!({
+        "unitId": unit_id,
+        "price": price,
+        "quantity": quantity,
+    });
     api_buy(client, "/market/list", body).await
 }
 
@@ -969,16 +975,19 @@ pub async fn api_market_collect(client: &Client) -> Result<serde_json::Value, St
     api_buy(client, "/market/collect", serde_json::json!({})).await
 }
 
-/// What's for sale on the board, cheapest first, a page at a time; one
-/// item's listings only when `item_id` is given.
+/// What's for sale on the board, cheapest first, a page at a time; only
+/// those items' listings when `item_ids` is given (one item, or a search).
 pub async fn api_market_browse(
     client: &Client,
-    item_id: Option<&str>,
+    item_ids: Option<&[String]>,
     offset: u32,
 ) -> Result<serde_json::Value, String> {
     let mut path = format!("/market/browse?offset={offset}");
-    if let Some(item_id) = item_id {
-        path.push_str(&format!("&itemId={}", urlencoding::encode(item_id)));
+    if let Some(item_ids) = item_ids.filter(|ids| !ids.is_empty()) {
+        path.push_str(&format!(
+            "&itemIds={}",
+            urlencoding::encode(&item_ids.join(","))
+        ));
     }
     api_get(client, &path).await
 }

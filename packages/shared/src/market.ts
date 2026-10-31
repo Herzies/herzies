@@ -4,7 +4,7 @@
 // until you come back and collect them.
 //
 // The rules live twice: here, and as constants in the market RPCs
-// (00126_market_board.sql). market.test.ts checks the two agree.
+// (last in 00129_market_stacks.sql). market.test.ts checks the two agree.
 
 /** His name, in Town and on his board. */
 export const MARKET_NAME = "Plutus";
@@ -36,10 +36,17 @@ export function marketPayout(price: number): number {
   return price - marketFee(price);
 }
 
-/** The lowest price a copy can be listed at: one coin above what the game
- * pays for it, since anything less is better sold to the game. */
-export function marketMinPrice(sellPrice: number | undefined): number {
-  return (sellPrice ?? 0) + 1;
+/** The most copies of a stackable item one listing can hold. */
+export const MARKET_MAX_STACK = 999;
+
+/** The lowest price `quantity` copies can be listed at: one coin above what
+ * the game pays for them all, since anything less is better sold to the
+ * game. */
+export function marketMinPrice(
+  sellPrice: number | undefined,
+  quantity = 1,
+): number {
+  return (sellPrice ?? 0) * quantity + 1;
 }
 
 /** A listing as the board shows it. */
@@ -49,6 +56,9 @@ export interface MarketListing {
   sellerName: string | null;
   itemId: string;
   upgradeLevel: number;
+  /** Copies in the listing: more than 1 only for a stackable item. */
+  quantity: number;
+  /** For the whole listing, every copy. */
   price: number;
   fee: number;
   status: "active" | "sold" | "cancelled" | "expired";
@@ -65,6 +75,6 @@ export interface MarketStall {
   uncollected: MarketListing[];
   /** Coins waiting: the sold listings' price less the market's cut. */
   coinsWaiting: number;
-  /** Copies waiting to come back: the unsold listings. */
+  /** Copies waiting to come back: every copy in the unsold listings. */
   itemsWaiting: number;
 }

@@ -19,7 +19,7 @@ export async function POST(request: Request) {
   const returning: Record<string, number> = {};
   for (const l of stall.uncollected) {
     if (l.status === "sold") continue;
-    returning[l.itemId] = (returning[l.itemId] ?? 0) + 1;
+    returning[l.itemId] = (returning[l.itemId] ?? 0) + l.quantity;
   }
   const fits = await fitsInBank(admin, auth.userId, returning);
   if (fits === null) return refusal("not-found", "Failed to collect");

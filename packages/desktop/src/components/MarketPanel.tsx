@@ -7,6 +7,7 @@ import {
   MARKET_LISTING_HOURS,
   MARKET_MAX_LISTINGS,
   MARKET_MAX_PRICE,
+  MARKET_MAX_STACK,
   MARKET_NAME,
   MARKET_SEED,
   MARKET_STAGE,
@@ -24,6 +25,7 @@ import {
   collectLabel,
   type ListableCopies,
   listableCopies,
+  matchMarketItems,
 } from "../lib/market";
 import { notify } from "../lib/notices";
 import { useHerzieStage } from "../lib/overlayStage";
@@ -32,6 +34,7 @@ import { Coin } from "./Coin";
 import ItemInspectOverlay, { inspectOrigin } from "./ItemInspectOverlay";
 import { ItemRow } from "./ItemRow";
 import { List } from "./List";
+import { QuantityModal } from "./QuantityModal";
 import { TabButton } from "./TabButton";
 import { Tooltip } from "./Tooltip";
 import { formatIn } from "./TownScene";
@@ -50,6 +53,8 @@ export const MARKET_LINES = [
 
 /** One page of the board, as /market/browse returns it. */
 const PAGE_SIZE = 50;
+/** How long typing must pause before the board is searched. */
+const SEARCH_DEBOUNCE_MS = 250;
 
 type Tab = "browse" | "sell" | "stall";
 
@@ -59,9 +64,15 @@ function Level({ level }: { level: number }) {
 }
 
 /** A listing's line under its name on the Browse tab. */
+/** "x3 · " for a stack, nothing for a single copy. */
+function stackOf(l: MarketListing) {
+  return l.quantity > 1 ? `x${l.quantity} · ` : "";
+}
+
 function listingSubtitle(l: MarketListing) {
   return (
     <>
+      {stackOf(l)}
       <Coin amount={l.price} />
       <Level level={l.upgradeLevel} /> · {l.sellerName ?? "someone"}
     </>
@@ -74,6 +85,7 @@ function stallSubtitle(l: MarketListing) {
     case "active":
       return (
         <>
+          {stackOf(l)}
           <Coin amount={l.price} />
           <Level level={l.upgradeLevel} /> · {formatIn(l.expiresAt)} left
         </>
@@ -81,13 +93,13 @@ function stallSubtitle(l: MarketListing) {
     case "sold":
       return (
         <>
-          Sold · you get <Coin amount={l.price - l.fee} />
+          {stackOf(l)}Sold · you get <Coin amount={l.price - l.fee} />
         </>
       );
     case "cancelled":
-      return "Taken down · waiting for you";
+      return `${stackOf(l)}Taken down · waiting for you`;
     case "expired":
-      return "Didn't sell · waiting for you";
+      return `${stackOf(l)}Didn't sell · waiting for you`;
   }
 }
 
@@ -129,17 +141,26 @@ export function MarketPanel({
    * "more"). */
   const [pending, setPending] = useState<string | null>(null);
 
-  // Browse: one item's listings, or everyone's.
+  // Browse: one item's listings ("More like this"), what a search matched,
+  // or everyone's.
   const [filter, setFilter] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  /** The query once typing pauses: what the board is searched for. */
+  const [search, setSearch] = useState("");
   const [listings, setListings] = useState<MarketListing[] | null>(null);
   const [more, setMore] = useState(false);
   const [browseKey, setBrowseKey] = useState(0);
   const [inspecting, setInspecting] = useState<MarketListing | null>(null);
 
-  // Sell: the copies picked, and the price asked for one of them.
+  // Sell: the copies picked, how many of them go up, and the price asked for
+  // the lot.
   const [selling, setSelling] = useState<ListableCopies | null>(null);
+  const [sellCount, setSellCount] = useState(1);
+  /** A stack whose "how many?" is open, before it's priced. */
+  const [counting, setCounting] = useState<ListableCopies | null>(null);
   const [priceText, setPriceText] = useState("");
-  /** The cheapest of the picked item already on the board, as a guide. */
+  /** The cheapest copy of the picked item already on the board (a stack's
+   * price split across its copies), as a guide. */
   const [cheapest, setCheapest] = useState<number | null>(null);
 
   /** Copies left waiting at the last collect, for want of bank room. */
@@ -148,13 +169,31 @@ export function MarketPanel({
   const { line, typed, advance } = useChatter(MARKET_LINES, !paused);
   const { stage: onStage } = useHerzieStage();
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: browseKey re-runs the fetch
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(query.trim()), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [query]);
+
+  /** The items the board is narrowed to, or null for everything. Joined, so
+   * the fetch below re-runs only when they change. */
+  const narrowedTo =
+    filter ?? (search ? matchMarketItems(search).join(",") : null);
+  const itemIds =
+    narrowedTo === null ? null : narrowedTo.split(",").filter(Boolean);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: browseKey re-runs the fetch; narrowedTo stands for itemIds
   useEffect(() => {
     if (tab !== "browse") return;
+    // A search that names no item has nothing to show: no need to ask.
+    if (itemIds?.length === 0) {
+      setListings([]);
+      setMore(false);
+      return;
+    }
     let cancelled = false;
     setListings(null);
     herzies
-      .marketBrowse(filter, 0)
+      .marketBrowse(itemIds, 0)
       .then(({ listings }) => {
         if (cancelled) return;
         setListings(listings);
@@ -168,13 +207,13 @@ export function MarketPanel({
     return () => {
       cancelled = true;
     };
-  }, [tab, filter, browseKey]);
+  }, [tab, narrowedTo, browseKey]);
 
   const loadMore = async () => {
     if (!listings || pending !== null) return;
     setPending("more");
     try {
-      const next = await herzies.marketBrowse(filter, listings.length);
+      const next = await herzies.marketBrowse(itemIds, listings.length);
       setListings([...listings, ...next.listings]);
       setMore(next.listings.length === PAGE_SIZE);
     } catch (e: unknown) {
@@ -190,9 +229,11 @@ export function MarketPanel({
     let cancelled = false;
     setCheapest(null);
     herzies
-      .marketBrowse(selling.itemId, 0)
+      .marketBrowse([selling.itemId], 0)
       .then(({ listings }) => {
-        if (!cancelled) setCheapest(listings[0]?.price ?? null);
+        if (cancelled) return;
+        const each = listings.map((l) => Math.ceil(l.price / l.quantity));
+        setCheapest(each.length > 0 ? Math.min(...each) : null);
       })
       .catch(() => {});
     return () => {
@@ -257,6 +298,15 @@ export function MarketPanel({
 
   const browse = (
     <>
+      <input
+        className="input mb-1"
+        placeholder="Search by name, rarity or slot"
+        value={query}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setFilter(null);
+        }}
+      />
       {filter && (
         <div className="flex items-center justify-between gap-2 pb-1 text-[10px] text-text-dim">
           <span className="truncate">Only "{name(filter)}"</span>
@@ -276,7 +326,9 @@ export function MarketPanel({
           <div className="text-ui text-text-dim">
             {filter
               ? "Nobody's selling one right now."
-              : "The board's empty. Be the first to leave something."}
+              : search
+                ? "Nothing on the board matches that."
+                : "The board's empty. Be the first to leave something."}
           </div>
         ) : (
           <>
@@ -309,24 +361,34 @@ export function MarketPanel({
 
   const copies = listableCopies(units);
   const sellDef = selling ? getItem(selling.itemId) : undefined;
-  const minPrice = marketMinPrice(sellDef?.sellPrice);
+  const minPrice = marketMinPrice(sellDef?.sellPrice, sellCount);
   const price = Number(priceText);
   const priceOk =
     Number.isInteger(price) && price >= minPrice && price <= MARKET_MAX_PRICE;
 
-  const pick = (row: ListableCopies) => {
+  const priceStack = (row: ListableCopies, count: number) => {
     setError(null);
+    setCounting(null);
+    setSellCount(count);
     setSelling(row);
-    setPriceText(String(marketMinPrice(getItem(row.itemId)?.sellPrice)));
+    setPriceText(String(marketMinPrice(getItem(row.itemId)?.sellPrice, count)));
+  };
+  /** Several copies of something stackable ask how many go up first. */
+  const pick = (row: ListableCopies) => {
+    if (getItem(row.itemId)?.stackable && row.unitIds.length > 1) {
+      setCounting(row);
+    } else priceStack(row, 1);
   };
 
   const list = () =>
     run("list", async () => {
       if (!selling) return;
-      await herzies.marketList(selling.unitIds[0], price);
-      onLog?.(
-        `Left "${name(selling.itemId)}" with ${MARKET_NAME} for ${price}`,
-      );
+      await herzies.marketList(selling.unitIds[0], price, sellCount);
+      const what =
+        sellCount > 1
+          ? `${sellCount} "${name(selling.itemId)}"`
+          : `"${name(selling.itemId)}"`;
+      onLog?.(`Left ${what} with ${MARKET_NAME} for ${price}`);
       setSelling(null);
       onChanged();
     });
@@ -556,6 +618,8 @@ export function MarketPanel({
                       className="btn"
                       onClick={() => {
                         setFilter(inspecting.itemId);
+                        setQuery("");
+                        setSearch("");
                         setInspecting(null);
                       }}
                     >
@@ -578,9 +642,16 @@ export function MarketPanel({
           equipped={equipped}
           level={selling.upgradeLevel}
           meta={
-            cheapest !== null ? (
+            sellCount > 1 || cheapest !== null ? (
               <>
-                Cheapest on the board: <Coin amount={cheapest} />
+                {sellCount > 1 && `Selling ${sellCount} for one price`}
+                {sellCount > 1 && cheapest !== null && " · "}
+                {cheapest !== null && (
+                  <>
+                    Cheapest on the board: <Coin amount={cheapest} />
+                    {sellDef?.stackable && " each"}
+                  </>
+                )}
               </>
             ) : undefined
           }
@@ -613,6 +684,17 @@ export function MarketPanel({
               {error && <div className="text-[10px] text-red">{error}</div>}
             </div>
           }
+        />
+      )}
+
+      {counting && (
+        <QuantityModal
+          max={Math.min(counting.unitIds.length, MARKET_MAX_STACK)}
+          initial={counting.unitIds.length}
+          confirmLabel="Next"
+          total={(n) => `${n} of ${counting.unitIds.length} owned`}
+          onConfirm={(n) => priceStack(counting, n)}
+          onCancel={() => setCounting(null)}
         />
       )}
     </div>

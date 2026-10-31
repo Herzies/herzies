@@ -20,14 +20,16 @@ export async function POST(request: Request) {
 
   const { data: listing } = await admin
     .from("market_listings")
-    .select("item_id")
+    .select("item_id, quantity")
     .eq("id", body.listingId)
     .maybeSingle();
   if (!listing) return refusal("gone", "Failed to buy");
 
   // Same bank-space rule as the NPC shops: a copy past the bank's capacity
   // would be paid for and never render.
-  const fits = await fitsInBank(admin, auth.userId, { [listing.item_id]: 1 });
+  const fits = await fitsInBank(admin, auth.userId, {
+    [listing.item_id]: listing.quantity,
+  });
   if (fits === null) return refusal("not-found", "Failed to buy");
   if (!fits) {
     return NextResponse.json(

@@ -1,11 +1,20 @@
 import type { Herzie, ItemUnit, Trade, TradeOffer } from "@herzies/shared";
-import { getItem } from "@herzies/shared";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { getItem, ItemTypeIcon } from "@herzies/shared";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { cn, formatAmount } from "../lib/utils";
 import { herzies, useWindowFocused } from "../tauri-bridge";
 import { Coin } from "./Coin";
+import { ItemRow } from "./ItemRow";
+import { List } from "./List";
 import { NumberTicker } from "./NumberTicker";
 import { PromptOverlay } from "./PromptOverlay";
+import { QuantityModal } from "./QuantityModal";
 
 /** How often we poll `/trade/status` while both sides are in the trade and
  * the window is focused (ms) — tight, so a partner's lock/accept lands fast. */
@@ -55,14 +64,17 @@ function offerGroups(units: readonly ItemUnit[]): OfferGroup[] {
 /** An offer as words: "Box of Boom +3 x1". Reads the per-copy snapshot the
  * server stores (which carries each copy's level), falling back to the plain
  * count-by-item an offer made before copies existed has. */
-function describeOffer(
-  offer: TradeOffer | null,
-): { key: string; name: string; level: number; qty: number }[] {
+interface OfferRow {
+  key: string;
+  itemId: string;
+  name: string;
+  level: number;
+  qty: number;
+}
+
+function describeOffer(offer: TradeOffer | null): OfferRow[] {
   if (!offer) return [];
-  const rows = new Map<
-    string,
-    { key: string; name: string; level: number; qty: number }
-  >();
+  const rows = new Map<string, OfferRow>();
   if (offer.units && offer.units.length > 0) {
     for (const u of offer.units) {
       const key = `${u.itemId}:${u.upgradeLevel}`;
@@ -71,6 +83,7 @@ function describeOffer(
       else
         rows.set(key, {
           key,
+          itemId: u.itemId,
           name: getItem(u.itemId)?.name ?? u.itemId,
           level: u.upgradeLevel,
           qty: 1,
@@ -79,10 +92,33 @@ function describeOffer(
   } else {
     for (const [id, qty] of Object.entries(offer.items ?? {})) {
       if (qty > 0)
-        rows.set(id, { key: id, name: getItem(id)?.name ?? id, level: 0, qty });
+        rows.set(id, {
+          key: id,
+          itemId: id,
+          name: getItem(id)?.name ?? id,
+          level: 0,
+          qty,
+        });
     }
   }
   return [...rows.values()];
+}
+
+/** One line of an offer: the item's icon, name and count, with an optional
+ * button (taking it back off your own offer). */
+function OfferLine({ row, action }: { row: OfferRow; action?: ReactNode }) {
+  const def = getItem(row.itemId);
+  return (
+    <div className="flex items-center gap-1 py-0.5 text-ui text-text">
+      {def && <ItemTypeIcon item={def} className="h-4 w-4 shrink-0" />}
+      <span className="min-w-0 flex-1 truncate">
+        {row.name}
+        {row.level > 0 ? ` +${row.level}` : ""}
+      </span>
+      <span className="shrink-0 text-text-dim">x{row.qty}</span>
+      {action}
+    </div>
+  );
 }
 
 export function TradeView({
@@ -114,6 +150,8 @@ export function TradeView({
   /** How many copies of each group are on offer. */
   const [offerCounts, setOfferCounts] = useState<Record<string, number>>({});
   const [offerCurrency, setOfferCurrency] = useState(0);
+  /** The bank row whose "how many?" is open. */
+  const [asking, setAsking] = useState<OfferGroup | null>(null);
   const currency = cachedCurrency || herzie.currency;
   const lastSentOfferRef = useRef<string | null>(null);
   const closeScheduledRef = useRef(false);
@@ -403,6 +441,20 @@ export function TradeView({
   const tradeOver =
     trade?.state === "completed" || trade?.state === "cancelled";
 
+  const groups = offerGroups(units);
+  const countOf = (g: OfferGroup) =>
+    Math.min(offerCounts[g.key] ?? 0, g.unitIds.length);
+  const setOfferCount = (key: string, n: number) =>
+    setOfferCounts((prev) => ({ ...prev, [key]: n }));
+  const myGroups = groups
+    .map((group) => ({ group, count: countOf(group) }))
+    .filter(({ count }) => count > 0);
+  /** A single copy goes straight on; several ask how many. */
+  const offer = (group: OfferGroup) => {
+    if (group.unitIds.length === 1) setOfferCount(group.key, 1);
+    else setAsking(group);
+  };
+
   return (
     <div className="flex h-full flex-col">
       <div className="mb-2 flex items-center justify-between">
@@ -445,81 +497,73 @@ export function TradeView({
         </div>
       ) : (
         <>
-          {/* Each side scrolls on its own when its list outgrows the panel;
-              the headings, and your coin row, stay put. */}
-          <div className="grid min-h-0 flex-1 grid-cols-2 grid-rows-1 gap-2">
+          {/* The two offers side by side, each scrolling on its own; your
+              bank (while you can still change your offer) fills the rest. */}
+          <div
+            className={cn(
+              "grid min-h-0 grid-cols-2 grid-rows-1 gap-2",
+              myLocked ? "flex-1" : "max-h-[40%] shrink-0",
+            )}
+          >
             <div className="flex min-h-0 flex-col">
               <div className="mb-1 text-ui text-text-dim">
                 Your offer {myLocked ? "🔒" : ""}
               </div>
-              {myLocked ? (
-                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-                  {describeOffer(myOffer).map((row) => (
-                    <div key={row.key} className="text-ui text-text">
-                      {row.name}
-                      {row.level > 0 ? ` +${row.level}` : ""} x{row.qty}
-                    </div>
-                  ))}
-                  {myOffer && myOffer.currency > 0 && (
-                    <div className="text-ui text-yellow">
-                      <Coin amount={myOffer.currency} />
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <>
-                  <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-                    {offerGroups(units).map((group) => {
-                      const item = getItem(group.itemId);
-                      if (!item) return null;
-                      const qty = group.unitIds.length;
-                      return (
-                        <div
-                          key={group.key}
-                          className="mb-0.5 flex items-center gap-1"
-                        >
-                          <span className="flex-1 text-[10px] text-text">
-                            {item.name}
-                            {group.level > 0 ? ` +${group.level}` : ""} ({qty})
-                          </span>
-                          <NumberTicker
-                            value={Math.min(offerCounts[group.key] ?? 0, qty)}
-                            max={qty}
-                            size="small"
-                            onChange={(v) =>
-                              setOfferCounts((prev) => ({
-                                ...prev,
-                                [group.key]: v,
-                              }))
-                            }
-                          />
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <div className="mt-1 flex items-center gap-1">
-                    <span className="flex-1 text-[10px] text-yellow">
-                      <span className="italic">H</span> (
-                      {formatAmount(currency)})
-                    </span>
-                    <NumberTicker
-                      value={offerCurrency}
-                      max={currency}
-                      size="small"
-                      onChange={setOfferCurrency}
-                    />
-                  </div>
-                </>
-              )}
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+                {myLocked ? (
+                  <>
+                    {describeOffer(myOffer).map((row) => (
+                      <OfferLine key={row.key} row={row} />
+                    ))}
+                    {myOffer && myOffer.currency > 0 && (
+                      <div className="text-ui text-yellow">
+                        <Coin amount={myOffer.currency} />
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {myGroups.map(({ group, count }) => (
+                      <OfferLine
+                        key={group.key}
+                        row={{
+                          key: group.key,
+                          itemId: group.itemId,
+                          name: getItem(group.itemId)?.name ?? group.itemId,
+                          level: group.level,
+                          qty: count,
+                        }}
+                        action={
+                          <button
+                            type="button"
+                            className="btn px-[5px] py-px text-ui-sm text-red"
+                            title="Take it back"
+                            onClick={() => setOfferCount(group.key, 0)}
+                          >
+                            ×
+                          </button>
+                        }
+                      />
+                    ))}
+                    {offerCurrency > 0 && (
+                      <div className="text-ui text-yellow">
+                        <Coin amount={offerCurrency} />
+                      </div>
+                    )}
+                    {myGroups.length === 0 && offerCurrency === 0 && (
+                      <div className="text-[10px] text-text-dim">
+                        Pick from your bank below
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
             <div className="flex min-h-0 flex-col">
               <div className="mb-1 text-ui text-text-dim">Their offer</div>
               <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
                 {describeOffer(theirOffer).map((row) => (
-                  <div key={row.key} className="text-ui text-text">
-                    {row.name}
-                    {row.level > 0 ? ` +${row.level}` : ""} x{row.qty}
-                  </div>
+                  <OfferLine key={row.key} row={row} />
                 ))}
                 {theirOffer && theirOffer.currency > 0 && (
                   <div className="text-ui text-yellow">
@@ -534,6 +578,60 @@ export function TradeView({
               </div>
             </div>
           </div>
+
+          {!myLocked && (
+            <>
+              <div className="mt-2 mb-1 text-ui text-text-dim">Your bank</div>
+              <List className="min-h-0 flex-1">
+                {groups.length === 0 ? (
+                  <div className="text-ui text-text-dim">
+                    Nothing to offer. Worn items stay with you.
+                  </div>
+                ) : (
+                  groups.map((group) => {
+                    const owned = group.unitIds.length;
+                    const count = countOf(group);
+                    return (
+                      <ItemRow
+                        key={group.key}
+                        itemId={group.itemId}
+                        onInspect={() => offer(group)}
+                        inspectTitle="Offer it"
+                        subtitle={[
+                          group.level > 0 ? `+${group.level}` : null,
+                          `${owned} owned`,
+                          count > 0 ? `${count} on offer` : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                        action={
+                          <button
+                            type="button"
+                            className="btn"
+                            disabled={owned === 1 && count === 1}
+                            onClick={() => offer(group)}
+                          >
+                            Offer
+                          </button>
+                        }
+                      />
+                    );
+                  })
+                )}
+              </List>
+              <div className="mt-1 flex items-center gap-1">
+                <span className="flex-1 text-[10px] text-yellow">
+                  <span className="italic">H</span> ({formatAmount(currency)})
+                </span>
+                <NumberTicker
+                  value={offerCurrency}
+                  max={currency}
+                  size="small"
+                  onChange={setOfferCurrency}
+                />
+              </div>
+            </>
+          )}
 
           <div className="mt-2 flex flex-col gap-1">
             <div className="flex flex-wrap gap-1">
@@ -568,6 +666,20 @@ export function TradeView({
 
       {message && !tradeOver && (
         <div className="mt-2 text-ui text-green">{message}</div>
+      )}
+
+      {asking && (
+        <QuantityModal
+          max={asking.unitIds.length}
+          initial={countOf(asking) || 1}
+          confirmLabel="Offer"
+          total={(n) => `${n} of ${asking.unitIds.length} owned`}
+          onConfirm={(n) => {
+            setOfferCount(asking.key, n);
+            setAsking(null);
+          }}
+          onCancel={() => setAsking(null)}
+        />
       )}
 
       {confirmCancel && (

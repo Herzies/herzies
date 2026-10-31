@@ -296,13 +296,14 @@ export const herzies = {
       newCurrency: number;
       inventory: Inventory;
     }>("buy_from_medea", { itemId, quantity }),
-  /** Puts one copy up on Plutus's market board. It leaves the bank; throws
-   * with the server's reason (worn, class gear, price too low, stall full). */
-  marketList: (unitId: string, price: number) =>
+  /** Puts one copy, or `quantity` of a stackable item, up on Plutus's
+   * market board at `price` for the lot. They leave the bank; throws with the
+   * server's reason (worn, class gear, price too low, stall full). */
+  marketList: (unitId: string, price: number, quantity = 1) =>
     invoke<{
       listing: Omit<MarketListing, "sellerName">;
       inventory: Inventory;
-    }>("market_list", { unitId, price }),
+    }>("market_list", { unitId, price, quantity }),
   /** Takes a listing down; the copy waits at the board to be collected. */
   marketCancel: (listingId: string) =>
     invoke<{ listing: Omit<MarketListing, "sellerName"> }>("market_cancel", {
@@ -329,8 +330,10 @@ export const herzies = {
     }>("market_collect"),
   /** What's for sale, cheapest first, 50 at a time; one item's only when
    * `itemId` is given. */
-  marketBrowse: (itemId: string | null = null, offset = 0) =>
-    invoke<{ listings: MarketListing[] }>("market_browse", { itemId, offset }),
+  /** Everyone's listings, or only those of `itemIds` (one item, or what a
+   * search matched). */
+  marketBrowse: (itemIds: string[] | null = null, offset = 0) =>
+    invoke<{ listings: MarketListing[] }>("market_browse", { itemIds, offset }),
   /** The player's own listings, and what's waiting to be collected. */
   marketMine: () => invoke<MarketStall>("market_mine"),
   /** Eats one consumable from the bank, outside a boss fight (in one, the

@@ -4,17 +4,26 @@ import { LISTING_COLUMNS, toListing } from "@/lib/market";
 import { createAdminClient } from "@/lib/supabase-admin";
 
 const PAGE_SIZE = 50;
+/** The most items one search can ask for: about the whole catalog. */
+const MAX_ITEM_IDS = 100;
 
 /**
  * What's for sale on the market board, cheapest first. `?itemId=` narrows it
- * to one item; `?offset=` pages.
+ * to one item, `?itemIds=a,b,c` to several (a search, matched to items on the
+ * client); `?offset=` pages.
  */
 export async function GET(request: Request) {
   const auth = await authenticateRequest(request);
   if (isAuthError(auth)) return auth;
 
   const params = new URL(request.url).searchParams;
-  const itemId = params.get("itemId");
+  const itemIds = [
+    params.get("itemId"),
+    ...(params.get("itemIds")?.split(",") ?? []),
+  ]
+    .map((id) => id?.trim())
+    .filter((id): id is string => !!id)
+    .slice(0, MAX_ITEM_IDS);
   const offset = Math.max(0, Number(params.get("offset")) || 0);
 
   let query = createAdminClient()
@@ -25,7 +34,7 @@ export async function GET(request: Request) {
     .order("price")
     .order("created_at")
     .range(offset, offset + PAGE_SIZE - 1);
-  if (itemId) query = query.eq("item_id", itemId);
+  if (itemIds.length > 0) query = query.in("item_id", itemIds);
 
   const { data, error } = await query;
   if (error) {

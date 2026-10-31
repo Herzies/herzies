@@ -5,6 +5,7 @@ import {
   MARKET_LISTING_HOURS,
   MARKET_MAX_LISTINGS,
   MARKET_MAX_PRICE,
+  MARKET_MAX_STACK,
   marketFee,
   marketMinPrice,
   marketPayout,
@@ -32,13 +33,17 @@ describe("listing prices", () => {
     expect(marketMinPrice(250)).toBe(251);
     expect(marketMinPrice(undefined)).toBe(1);
   });
+
+  it("scale with the stack", () => {
+    expect(marketMinPrice(5, 3)).toBe(16);
+  });
 });
 
 describe("the SQL side", () => {
   it("uses the same rules as market.ts", () => {
     const sql = readFileSync(
       new URL(
-        "../../../supabase/migrations/00126_market_board.sql",
+        "../../../supabase/migrations/00129_market_stacks.sql",
         import.meta.url,
       ),
       "utf8",
@@ -49,5 +54,6 @@ describe("the SQL side", () => {
     expect(constant("c_listing_hours")).toBe(MARKET_LISTING_HOURS);
     expect(constant("c_max_price")).toBe(MARKET_MAX_PRICE);
     expect(constant("c_fee_percent")).toBe(MARKET_FEE_PERCENT);
+    expect(constant("c_max_stack")).toBe(MARKET_MAX_STACK);
   });
 });

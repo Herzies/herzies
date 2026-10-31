@@ -84,6 +84,17 @@ describe("buying from Medea", () => {
     expect(await candies(p.userId)).toBe(3);
   });
 
+  it("sells up to 999 at once, and no more", async () => {
+    const p = await player({ currency: 20 * 1000 });
+    const res = await buy(p.accessToken, "star-candy", 999);
+    expect(res.status).toBe(200);
+    expect(await candies(p.userId)).toBe(999);
+
+    const over = await buy(p.accessToken, "star-candy", 1000);
+    expect(over.status).toBe(400);
+    expect(await candies(p.userId)).toBe(999);
+  });
+
   it("refuses without the coins, taking nothing", async () => {
     const p = await player({ currency: 19 });
     const res = await buy(p.accessToken, "star-candy");

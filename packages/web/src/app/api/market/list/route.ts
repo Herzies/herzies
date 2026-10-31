@@ -6,7 +6,8 @@ import { isParseError, marketListSchema, parseBody } from "@/lib/schemas";
 import { createAdminClient } from "@/lib/supabase-admin";
 
 /**
- * Put one copy up on the market board at a fixed price. The copy leaves the
+ * Put one copy (or a stack of a stackable item) up on the market board at a
+ * fixed price for the lot. The copy leaves the
  * bank (market_list, 00126) and waits on the board until someone buys it, the
  * seller cancels, or its 48 hours run out.
  */
@@ -21,6 +22,7 @@ export async function POST(request: Request) {
     p_user_id: auth.userId,
     p_unit_id: body.unitId,
     p_price: body.price,
+    p_quantity: body.quantity,
   });
 
   const result = data as {

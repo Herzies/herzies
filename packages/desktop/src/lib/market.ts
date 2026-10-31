@@ -1,4 +1,4 @@
-import { getItem, type ItemUnit } from "@herzies/shared";
+import { getItem, ITEMS, type ItemUnit, type Rarity } from "@herzies/shared";
 
 /** Copies of one item at one upgrade level: one row on the Sell tab. */
 export interface ListableCopies {
@@ -40,4 +40,32 @@ export function collectLabel(coins: number, items: number): string | null {
     items > 0 ? `${items} ${items === 1 ? "item" : "items"}` : null,
   ].filter(Boolean);
   return parts.length > 0 ? `Collect ${parts.join(" / ")}` : null;
+}
+
+const RARITIES = new Set<string>([
+  "common",
+  "uncommon",
+  "rare",
+  "legendary",
+  "mythic",
+] satisfies Rarity[]);
+
+/** The items a search on the Browse tab means, for the board to narrow to.
+ * Every word must fit: a rarity ("rare") picks that rarity; any other word
+ * matches the name, the id, or the slot it's worn in ("head", "back"). Class
+ * gear is left out, since it can't be listed. Nothing typed matches nothing. */
+export function matchMarketItems(query: string): string[] {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [];
+  return ITEMS.filter(
+    (item) =>
+      !item.requiredClass &&
+      words.every((w) =>
+        RARITIES.has(w)
+          ? item.rarity === w
+          : item.name.toLowerCase().includes(w) ||
+            item.id.includes(w) ||
+            (item.equipSlot?.split("_").includes(w) ?? false),
+      ),
+  ).map((item) => item.id);
 }

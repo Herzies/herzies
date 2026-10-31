@@ -38,9 +38,9 @@ async function player(
   return user;
 }
 
-function list(token: string, unitId: string, price: number) {
+function list(token: string, unitId: string, price: number, quantity?: number) {
   return listRoute(
-    authenticatedRequest("/market/list", token, { unitId, price }),
+    authenticatedRequest("/market/list", token, { unitId, price, quantity }),
   );
 }
 
@@ -183,6 +183,112 @@ describe("listing", () => {
     const res = await list(seller.accessToken, units[6].id, 50);
     expect(res.status).toBe(409);
     expect((await res.json()).reason).toBe("too-many-listings");
+  });
+});
+
+describe("browsing", () => {
+  it("narrows to the items asked for, cheapest first", async () => {
+    const seller = await player({ boombox: 1, headphones: 1, cd: 1 });
+    const buyer = await player();
+    const boombox = await listFirst(seller, "boombox", 900);
+    const headphones = await listFirst(seller, "headphones", 400);
+    await listFirst(seller, "cd", 50);
+
+    const board = await (
+      await browse(buyer.accessToken, "?itemIds=boombox,headphones,")
+    ).json();
+    expect(board.listings.map((l: { id: string }) => l.id)).toEqual([
+      headphones,
+      boombox,
+    ]);
+  });
+
+  it("still takes one item", async () => {
+    const seller = await player({ boombox: 1, cd: 1 });
+    const buyer = await player();
+    const boombox = await listFirst(seller, "boombox", 900);
+    await listFirst(seller, "cd", 50);
+
+    const board = await (
+      await browse(buyer.accessToken, "?itemId=boombox")
+    ).json();
+    expect(board.listings.map((l: { id: string }) => l.id)).toEqual([boombox]);
+  });
+});
+
+describe("stacks", () => {
+  // Star Candy: stackable, the game pays 5 a copy.
+  it("lists several copies of a stackable item as one listing", async () => {
+    const seller = await player({ "star-candy": 5 });
+    const [unit] = await getUnits(seller.userId);
+
+    const res = await list(seller.accessToken, unit.id, 100, 3);
+    expect(res.status).toBe(200);
+    expect((await res.json()).listing).toMatchObject({
+      itemId: "star-candy",
+      quantity: 3,
+      price: 100,
+      fee: 5,
+    });
+    expect(await getUnits(seller.userId)).toHaveLength(2);
+  });
+
+  it("sells the whole stack to one buyer", async () => {
+    const seller = await player({ "star-candy": 3 }, 0);
+    const buyer = await player({}, 1000);
+    const [unit] = await getUnits(seller.userId);
+    const listing = await (
+      await list(seller.accessToken, unit.id, 100, 3)
+    ).json();
+
+    const res = await buy(buyer.accessToken, listing.listing.id);
+    expect(res.status).toBe(200);
+    expect(await currencyOf(buyer.userId)).toBe(900);
+    expect(await getUnits(buyer.userId)).toHaveLength(3);
+
+    const paid = await (await collect(seller.accessToken)).json();
+    expect(paid).toMatchObject({ coins: 95, items: 0 });
+  });
+
+  it("gives the whole stack back when it doesn't sell", async () => {
+    const seller = await player({ "star-candy": 4 });
+    const [unit] = await getUnits(seller.userId);
+    const listing = await (
+      await list(seller.accessToken, unit.id, 100, 4)
+    ).json();
+    await cancel(seller.accessToken, listing.listing.id);
+
+    const stall = await (await mine(seller.accessToken)).json();
+    expect(stall.itemsWaiting).toBe(4);
+    const res = await (await collect(seller.accessToken)).json();
+    expect(res).toMatchObject({ items: 4 });
+    expect(await getUnits(seller.userId)).toHaveLength(4);
+  });
+
+  it("prices the stack above what the game pays for all of it", async () => {
+    const seller = await player({ "star-candy": 3 });
+    const [unit] = await getUnits(seller.userId);
+    const res = await list(seller.accessToken, unit.id, 15, 3);
+    expect(res.status).toBe(400);
+    expect((await res.json()).reason).toBe("price-too-low");
+    expect(await getUnits(seller.userId)).toHaveLength(3);
+  });
+
+  it("refuses more copies than you have", async () => {
+    const seller = await player({ "star-candy": 2 });
+    const [unit] = await getUnits(seller.userId);
+    const res = await list(seller.accessToken, unit.id, 100, 3);
+    expect(res.status).toBe(400);
+    expect((await res.json()).reason).toBe("not-enough");
+    expect(await getUnits(seller.userId)).toHaveLength(2);
+  });
+
+  it("lists only one copy of something that doesn't stack", async () => {
+    const seller = await player({ boombox: 2 });
+    const [unit] = await getUnits(seller.userId);
+    const res = await list(seller.accessToken, unit.id, 400, 2);
+    expect(res.status).toBe(400);
+    expect((await res.json()).reason).toBe("not-stackable");
   });
 });
 

@@ -1,6 +1,6 @@
 import type { ItemUnit } from "@herzies/shared";
 import { describe, expect, it } from "vitest";
-import { collectLabel, listableCopies } from "./market";
+import { collectLabel, listableCopies, matchMarketItems } from "./market";
 
 const unit = (
   id: string,
@@ -51,5 +51,35 @@ describe("collectLabel", () => {
 
   it("is null with nothing waiting", () => {
     expect(collectLabel(0, 0)).toBeNull();
+  });
+});
+
+describe("matchMarketItems", () => {
+  it("matches names and ids, ignoring case", () => {
+    expect(matchMarketItems("vagrant")).toEqual(["sixpence"]);
+    expect(matchMarketItems("SIXPENCE")).toEqual(["sixpence"]);
+    expect(matchMarketItems("power dice")).toEqual(
+      expect.arrayContaining(["power-dice-1", "power-dice-2", "power-dice-3"]),
+    );
+  });
+
+  it("understands rarities and slots, every word narrowing", () => {
+    const heads = matchMarketItems("head");
+    expect(heads).toContain("sixpence");
+    expect(heads).toContain("witch-hat");
+    expect(heads).not.toContain("boombox");
+
+    const rareHeads = matchMarketItems("rare head");
+    expect(rareHeads.every((id) => heads.includes(id))).toBe(true);
+    expect(rareHeads).not.toContain("sixpence");
+  });
+
+  it("leaves out class gear, which can't be listed", () => {
+    expect(matchMarketItems("lute")).toEqual([]);
+  });
+
+  it("matches nothing for nothing", () => {
+    expect(matchMarketItems("  ")).toEqual([]);
+    expect(matchMarketItems("zzzz")).toEqual([]);
   });
 });

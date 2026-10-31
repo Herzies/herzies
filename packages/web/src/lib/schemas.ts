@@ -202,14 +202,18 @@ export const merchantBuySchema = z.object({
   quantity: z.number().int().min(1),
 });
 
+/** The most of one line a resident NPC sells at once (MAX_PER_BUY in the
+ * desktop's MerchantPanel). */
+const MAX_PER_BUY = 999;
+
 export const bobokuBuySchema = z.object({
   itemId: z.string().min(1),
-  quantity: z.number().int().min(1).max(10),
+  quantity: z.number().int().min(1).max(MAX_PER_BUY),
 });
 
 export const medeaBuySchema = z.object({
   itemId: z.string().min(1),
-  quantity: z.number().int().min(1).max(10),
+  quantity: z.number().int().min(1).max(MAX_PER_BUY),
 });
 
 export const eatItemSchema = z.object({
@@ -305,6 +309,8 @@ export function isParseError<T>(value: T | Response): value is Response {
 export const marketListSchema = z.object({
   unitId,
   price: z.number().int().min(1),
+  /** Copies of a stackable item to list together (MARKET_MAX_STACK). */
+  quantity: z.number().int().min(1).max(999).default(1),
 });
 
 export const marketListingSchema = z.object({
