@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.1.0-beta.60",
+    "highlights": [
+      "New: Pip, a little herzie wandering the Town, hands out a daily quest. Listen to an artist you have never heard before, then bring it back to him for 500 coins",
+      "Your quests have their own window: press U",
+      "New: emotes. Hold Alt (Option on a Mac) to see yours, and press Alt+1 to wave. Bigger herzies hop or stand on one leg while they wave. Find the Wave in Premium",
+      "New rare hats: Fabulous Fabian and Fylling's Fedora, +10 luck each, from listening and boss loot",
+      "ur mom's favourite now gives +5 luck",
+      "Items and classes say the level they need, not the stage",
+      "In the big window, Profile, Social and Leaderboard open on the right"
+    ]
+  },
+  {
     "version": "0.1.0-beta.59",
     "highlights": [
       "New: Plutus runs a market board from his auction house. List an item at your own price, and anyone can buy it from him while you are away",
