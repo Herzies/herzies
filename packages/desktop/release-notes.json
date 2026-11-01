@@ -1,5 +1,18 @@
 [
   {
+    "version": "0.1.0-beta.59",
+    "highlights": [
+      "New: Plutus runs a market board from his auction house. List an item at your own price, and anyone can buy it from him while you are away",
+      "Collect your coins, less a 5% cut, or anything unsold after 48 hours, from the board. A \"!\" over Plutus means something is waiting",
+      "Search the board by name, rarity or slot, and sell stackable items as one stack at one price",
+      "Buy several of a stackable item at once from any shop, and offer several copies in a trade",
+      "New hats: Plutus' Crown drops from listening and boss loot, and Boboku sells his Vagrant Cap at his stall",
+      "The Town follows the seasons: blossom in spring, red and orange oaks in fall, then snow, snowmen and frozen ponds you can slide on",
+      "Herzies leave footprints in the snow, and the trees are redrawn",
+      "The lute gets card artwork, and talking to someone drops you out of aim mode"
+    ]
+  },
+  {
     "version": "0.1.0-beta.58",
     "highlights": [
       "Home now lives in the Town: the camera swings round to your herzie, and the world fades away around it",
