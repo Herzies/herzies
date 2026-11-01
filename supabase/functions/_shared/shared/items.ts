@@ -3460,6 +3460,7 @@ export const ITEMS: ItemDef[] = [
     equipSlot: "body",
     minStage: 3,
     sellPrice: 100,
+    stats: { luck: 5 },
   },
   {
     id: "boombox",

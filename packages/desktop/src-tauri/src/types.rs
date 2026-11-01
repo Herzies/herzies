@@ -207,6 +207,10 @@ pub struct SyncResponse {
     /// case the local count is left alone.
     #[serde(default)]
     pub bank_expansions: Option<u32>,
+    /// Emotes owned. `None` from a server older than this field: the local
+    /// list is left alone.
+    #[serde(default)]
+    pub emotes: Option<Vec<String>>,
     /// The class skills, once a class is chosen. `None` before then, from a
     /// server older than classes, or when the read failed: the local list is
     /// left alone.

@@ -2596,6 +2596,9 @@ async fn sync_tick_with(
         if let Some(expansions) = sync_resp.bank_expansions {
             s.bank_expansions = expansions;
         }
+        if let Some(emotes) = sync_resp.emotes.clone() {
+            s.emotes = emotes;
+        }
 
         // Guarded on its own epoch rather than drop_epoch/equip_epoch: buying
         // changes inventory without touching either of those, so overloading

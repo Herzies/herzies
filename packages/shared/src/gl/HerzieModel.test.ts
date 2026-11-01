@@ -14,6 +14,7 @@ import {
   MODEL_SCALE,
   SHEATHE_DELAY,
   SHEATHE_SECONDS,
+  waveHop,
 } from "./HerzieModel.js";
 
 const LOOK = { seed: "model-test", stage: 3, equipped: { head: "headphones" } };
@@ -974,5 +975,52 @@ describe("cloaks", () => {
     h.petrify();
     const after = (material.uniforms.uLining.value as THREE.Color[])[1];
     expect(after.equals(before)).toBe(false);
+  });
+});
+
+describe("the stage 2 wave hop", () => {
+  it("leaves and lands on the ground, with no jumps in height or shape", () => {
+    expect(waveHop(0)).toEqual({ lift: 0, squash: 0 });
+    expect(waveHop(2)).toEqual({ lift: 0, squash: 0 });
+    let prev = waveHop(0);
+    let top = 0;
+    for (let t = 0.001; t < 1; t += 0.001) {
+      const h = waveHop(t);
+      expect(Math.abs(h.lift - prev.lift)).toBeLessThan(0.01);
+      expect(Math.abs(h.squash - prev.squash)).toBeLessThan(0.01);
+      top = Math.max(top, h.lift);
+      prev = h;
+    }
+    expect(top).toBeGreaterThan(0.3);
+    expect(top).toBeLessThan(JUMP_HEIGHT);
+  });
+});
+
+describe("waving again mid-wave", () => {
+  const run = (m: HerzieModel, seconds: number) => {
+    const step = 1 / 120;
+    for (let t = 0; t < seconds; t += step) m.update(step, 0);
+  };
+
+  it("carries the wave on past where one would end", () => {
+    const m = new HerzieModel(LOOK);
+    expect(m.emote("wave")).toBe(true);
+    run(m, 0.5);
+    expect(m.emote("wave")).toBe(true);
+    run(m, 1.3); // 1.8s in: one wave alone would be over
+    expect(m.emoting).toBe(true);
+    run(m, 2);
+    expect(m.emoting).toBe(false);
+  });
+
+  it("waved again as the arm comes down, plays another after", () => {
+    const m = new HerzieModel(LOOK);
+    m.emote("wave");
+    run(m, 1.45);
+    m.emote("wave");
+    run(m, 0.3); // 1.75s in
+    expect(m.emoting).toBe(true);
+    run(m, 1.7);
+    expect(m.emoting).toBe(false);
   });
 });

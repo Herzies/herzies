@@ -1,3 +1,4 @@
+import { CLASS_STAGE, levelForStage } from "@herzies/shared";
 import { NextResponse } from "next/server";
 import { authenticateRequest, isAuthError } from "@/lib/auth";
 import { type ItemState, itemResponse } from "@/lib/item-units";
@@ -8,7 +9,7 @@ const REASONS: Record<string, string> = {
   "not-found": "Herzie not found",
   "bad-class": "Unknown class",
   "already-chosen": "Your herzie already has a class",
-  "stage-too-low": "Your herzie picks a class at stage 2",
+  "stage-too-low": `Your herzie picks a class at level ${levelForStage(CLASS_STAGE)}`,
 };
 
 /** Picks the herzie's class. Permanent: choose_class refuses a second,

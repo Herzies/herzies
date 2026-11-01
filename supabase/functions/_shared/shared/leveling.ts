@@ -34,6 +34,14 @@ export function stageForLevel(level: number): Stage {
   return 1;
 }
 
+/** The level a herzie reaches `stage` at. Requirements are shown to players
+ * as a level ("Level 25+"), never as a stage. */
+export function levelForStage(stage: number): number {
+  if (stage >= 3) return 25;
+  if (stage >= 2) return 10;
+  return 1;
+}
+
 const BASE_XP_PER_MINUTE = 10;
 
 /**

@@ -53,6 +53,8 @@ import {
   schemeShades,
   schemeSpan,
   WAVE_ARM,
+  WAVE_HOLD,
+  WAVE_SWING_PHASE,
 } from "../creature-renderer.js";
 import {
   createDangleSim,
@@ -165,6 +167,58 @@ const TAKEOFF_SECONDS = 0.05;
  * than a jump so the spin reads. */
 const SPIN_HOP_HEIGHT = 1.05;
 const SPIN_HOP_SECONDS = 0.62;
+/** The little hop a herzie with arms but no legs (stage 2) waves with, in
+ * seconds into the wave: it crouches as the arm goes up, springs up as the
+ * hand reaches the top, and lands with a soft squash. */
+const WAVE_HOP = {
+  crouchFrom: 0.05,
+  takeoff: 0.2,
+  air: 0.3,
+  height: 0.4,
+  crouch: 0.085,
+  stretch: 0.075,
+  land: 0.1,
+  landSeconds: 0.22,
+} as const;
+
+/** How long the wave hop takes, crouch to settled. */
+const WAVE_HOP_SECONDS = WAVE_HOP.takeoff + WAVE_HOP.air + WAVE_HOP.landSeconds;
+
+const smooth = (a: number, b: number, v: number) => {
+  const t = Math.min(1, Math.max(0, (v - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
+
+/** The wave hop `t` seconds into a wave: how high it is (world units) and
+ * how squashed (positive) or stretched (negative). */
+export function waveHop(t: number): { lift: number; squash: number } {
+  const { crouchFrom, takeoff, air } = WAVE_HOP;
+  const land = takeoff + air;
+  if (t < takeoff) {
+    // The crouch, let go just before it leaves the ground.
+    const c =
+      smooth(crouchFrom, takeoff - 0.04, t) *
+      (1 - smooth(takeoff - 0.05, takeoff, t));
+    return { lift: 0, squash: WAVE_HOP.crouch * c };
+  }
+  if (t < land) {
+    const u = (t - takeoff) / air;
+    // Stretched with its speed, fastest at either end; eased in at takeoff
+    // and out before landing, so the shape never snaps.
+    const stretch =
+      WAVE_HOP.stretch *
+      Math.abs(1 - 2 * u) *
+      smooth(0, 0.12, u) *
+      (1 - smooth(0.82, 1, u));
+    return { lift: WAVE_HOP.height * 4 * u * (1 - u), squash: -stretch };
+  }
+  const u = (t - land) / WAVE_HOP.landSeconds;
+  if (u >= 1) return { lift: 0, squash: 0 };
+  return {
+    lift: 0,
+    squash: WAVE_HOP.land * smooth(0, 0.18, u) * (1 - smooth(0.18, 1, u)),
+  };
+}
 /** How long a sonic cast takes, draw to home again, in seconds. The wave
  * leaves the hand CAST.release of the way through. */
 export const CAST_SECONDS = 0.4;
@@ -636,6 +690,12 @@ export class HerzieModel {
   private emoteTime: number | undefined;
   private emoteMove: "wave" | "spin" = "wave";
   private waveArmPart: string = WAVE_ARM;
+  /** Waved again mid-wave: carry it on (see stepEmote). */
+  private waveAgain = false;
+  /** Seconds into the stage 2 wave's hop (see waveHop); undefined when it
+   * isn't hopping. Its own clock, since carrying a wave on rewinds the
+   * wave's. */
+  private waveHopTime: number | undefined;
   /** Seconds into a catch's jolt, and the arm that caught. */
   private catchTime: number | undefined;
   private catchArm: string = CAST_ARM;
@@ -1202,11 +1262,18 @@ export class HerzieModel {
    * Plays an emote (emotes.ts). A wave raises an arm and waves it; a herzie
    * without arms (stage 1) does a little spin hop instead — the body only,
    * like a jump, so it never stops it walking, and it doesn't count as a
-   * jump (other clients get the emote, not a jump flag). Returns whether it
-   * started: not for an unknown emote, nor a spin while seated.
+   * jump (other clients get the emote, not a jump flag). Waving again while
+   * a wave plays carries it on, with another hop at stage 2. Returns
+   * whether it played: not for an unknown emote, nor a spin while seated or
+   * already spinning.
    */
   emote(id: string): boolean {
     if (id !== "wave") return false;
+    if (this.emoteTime !== undefined) {
+      if (this.emoteMove === "spin") return false;
+      this.waveAgain = true;
+      return true;
+    }
     const arm =
       this.armAt[WAVE_ARM] >= 0
         ? WAVE_ARM
@@ -1221,6 +1288,8 @@ export class HerzieModel {
       this.emoteMove = "spin";
     }
     this.emoteTime = 0;
+    this.waveAgain = false;
+    this.waveHopTime = arm && !this.hasLegs ? 0 : undefined;
     return true;
   }
 
@@ -1230,10 +1299,33 @@ export class HerzieModel {
   }
 
   private stepEmote(dt: number) {
+    if (this.waveHopTime !== undefined) {
+      this.waveHopTime += dt;
+      if (this.waveHopTime >= WAVE_HOP_SECONDS) this.waveHopTime = undefined;
+    }
     if (this.emoteTime === undefined) return;
     this.emoteTime += dt;
     const spin = this.emoteMove === "spin";
+    if (!spin && this.waveAgain) {
+      // Waved again. With the arm up, go back whole swings, which looks
+      // the same: the hand just keeps waving. Too early for that, it
+      // waits; once the arm's on its way down, a new wave follows this one.
+      const phase = this.emoteTime / EMOTE_SECONDS;
+      const back = Math.floor((phase - WAVE_HOLD.from) / WAVE_SWING_PHASE);
+      if (back >= 1 && phase <= WAVE_HOLD.to) {
+        this.emoteTime -= back * WAVE_SWING_PHASE * EMOTE_SECONDS;
+        this.waveAgain = false;
+        if (!this.hasLegs && this.waveHopTime === undefined)
+          this.waveHopTime = 0;
+      }
+    }
     if (this.emoteTime < (spin ? SPIN_HOP_SECONDS : EMOTE_SECONDS)) return;
+    if (!spin && this.waveAgain) {
+      this.waveAgain = false;
+      this.emoteTime = 0;
+      if (!this.hasLegs && this.waveHopTime === undefined) this.waveHopTime = 0;
+      return;
+    }
     this.emoteTime = undefined;
     // Down from the spin hop: the jump's landing squash.
     if (spin && this.airTime === undefined) this.landTime = 0;
@@ -2058,10 +2150,22 @@ export class HerzieModel {
       squash = Math.max(squash, LAND_SQUASH * (1 - u) ** 2);
     }
     const su = this.spinPhase;
-    const hop = Math.max(
+    let hop = Math.max(
       this.jumpHeight,
       su === undefined ? 0 : SPIN_HOP_HEIGHT * 4 * su * (1 - su),
     );
+    // Waving without legs (stage 2): a little hop. Not mid-jump, walking
+    // (it hops already) or seated.
+    if (
+      this.waveHopTime !== undefined &&
+      this.airTime === undefined &&
+      this.landTime === undefined
+    ) {
+      const k = (1 - w) * (1 - this.sitWeight);
+      const h = waveHop(this.waveHopTime);
+      hop = Math.max(hop, h.lift * k);
+      squash += h.squash * k;
+    }
     const wide = MODEL_SCALE * (1 - breath * 0.6 + squash * 0.7);
     const tall = MODEL_SCALE * (1 + breath - squash);
     this.creature.scale.set(wide, tall, wide);

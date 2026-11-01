@@ -125,6 +125,8 @@ Deno.serve(async (request) => {
       // Drives the inventory grid's size (bankCapacity). Bought through the
       // Stripe webhook, so this is the only way it reaches the app.
       bankExpansions: result.bankExpansions,
+      // Emotes owned, for the Town's Alt bar.
+      emotes: result.emotes,
       // The class skills, once a class is chosen.
       skills: result.skills,
     });

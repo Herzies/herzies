@@ -55,9 +55,9 @@ export function OverlayWindow({
    * precedence over `fit` there), the herzie raised above it (the Herzie
    * window). */
   half?: boolean;
-  /** With `narrow` (the big window): stand on the right instead, the whole
-   * height (under the boss's card in a fight), where nothing else is; the
-   * chat and the player card keep the left. */
+  /** With `narrow` (the big window): stand on the right instead (under the
+   * boss's card in a fight), as tall as in the small window, where nothing
+   * else is; the chat and the player card keep the left. */
   side?: "right";
   className?: string;
   /** The exit has finished playing: it's off screen now. Until then its
@@ -134,8 +134,10 @@ export function OverlayWindow({
         narrow ? "inset-x-3" : "inset-x-2.5",
         right
           ? // In the big window, on the right: from the top (under the
-            // boss's card, if there is one) down to just over the skills.
-            "top-[calc(var(--boss-card-bottom,0px)+10px)] bottom-[56px]"
+            // boss's card, if there is one), as tall as it is in the small
+            // window (10px from its top, 36px from its bottom), and never
+            // down past the skills.
+            "top-[calc(var(--boss-card-bottom,0px)+10px)] h-[calc(var(--small-window-height)-46px)] max-h-[calc(100vh-var(--boss-card-bottom,0px)-66px)]"
           : narrow
             ? // In the Town's big window: the small window's size, top left,
               // 8px under the player card and in line with it.

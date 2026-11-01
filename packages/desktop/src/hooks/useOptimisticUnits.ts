@@ -7,6 +7,7 @@ import {
   getItem,
   type HerzieClass,
   type ItemUnit,
+  levelForStage,
   normalizeEquipped,
   normalizeUnits,
   unitsToEquipped,
@@ -275,7 +276,7 @@ export function useOptimisticUnits(
           action,
           error:
             predicted.reason === "stage-too-low"
-              ? `Your herzie needs to reach stage ${item?.minStage} to wear this`
+              ? `Your herzie needs to reach level ${levelForStage(item?.minStage ?? 1)} to wear this`
               : predicted.reason === "class-required" && item?.requiredClass
                 ? `Only a ${CLASS_DEFS[item.requiredClass].name} can wear this`
                 : REJECTION_MESSAGES[predicted.reason],

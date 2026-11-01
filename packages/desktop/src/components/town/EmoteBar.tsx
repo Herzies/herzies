@@ -1,17 +1,25 @@
 import { getEmote } from "@herzies/shared";
 import { cn } from "../../lib/utils";
 import { Tooltip } from "../Tooltip";
+import { useCombat } from "./combat/state";
 import { playEmote, useAltHeld, useOwnedEmotes } from "./emotes";
 
 /**
  * The Alt bar: shown while Alt is held, just over the hotbar. One slot per
  * emote you own, in catalog order, on Alt+1, Alt+2… (input.ts); a click
- * plays one too. With none it says where to get them.
+ * plays one too. With none it says where to get them, and while aiming
+ * (combat mode, where emotes don't play) it says that instead.
  */
 export function EmoteBar({ className }: { className?: string }) {
   const held = useAltHeld();
   const owned = useOwnedEmotes();
+  const aiming = useCombat();
   if (!held) return null;
+  const note = aiming
+    ? "Can't emote while aiming"
+    : owned.length === 0
+      ? "No emotes yet. Find them in Premium."
+      : null;
   return (
     <div
       className={cn(
@@ -19,9 +27,9 @@ export function EmoteBar({ className }: { className?: string }) {
         className,
       )}
     >
-      {owned.length === 0 ? (
+      {note ? (
         <div className="whitespace-nowrap rounded border border-white/20 bg-black/55 px-2 py-1 text-[11px] text-white/80">
-          No emotes yet. Find them in Premium.
+          {note}
         </div>
       ) : (
         owned.map((id, i) => {

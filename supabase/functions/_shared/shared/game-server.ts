@@ -355,6 +355,8 @@ export async function processSync(
   itemUpgrades: Record<string, number>;
   /** Inventory Expansions owned — see `bankCapacity`. */
   bankExpansions: number;
+  /** Emotes owned (see emotes.ts). */
+  emotes: string[];
 }> {
   const source = options.source ?? "cli";
   // 1. Fetch everything this sync reads, in one round trip.
@@ -946,7 +948,7 @@ export async function processSync(
     .from("herzies")
     .update(updateData)
     .eq("user_id", userId)
-    .select("inventory_v2, equipped, item_upgrades, bank_expansions")
+    .select("inventory_v2, equipped, item_upgrades, bank_expansions, emotes")
     .single();
 
   // 8. Pending trade request — resolved with the initiator's name in
@@ -1043,6 +1045,9 @@ export async function processSync(
     bankExpansions: (syncedRow?.bank_expansions ??
       row.bank_expansions ??
       0) as number,
+    // Bought through the Stripe webhook too, and this is how the app learns
+    // about them at launch (it no longer fetches /inventory then).
+    emotes: (syncedRow?.emotes ?? row.emotes ?? []) as string[],
   };
 }
 

@@ -361,7 +361,7 @@ describe("seasonal drop windows", () => {
     expect(getHerzieStats({ face: "fangs" }).luck).toBe(5);
     expect(getHerzieStats({ body: "gold-chain" }).luck).toBe(10);
     expect(getHerzieStats({ body: "pearl-necklace" }).luck).toBe(5);
-    expect(getHerzieStats({ body: "bowtie" }).luck).toBe(0);
+    expect(getHerzieStats({ body: "bowtie" }).luck).toBe(5);
     for (const id of ["fabulous-fabian", "fyllings-fedora"]) {
       const item = getItem(id);
       expect(item?.rarity).toBe("rare");

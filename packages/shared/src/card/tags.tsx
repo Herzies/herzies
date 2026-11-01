@@ -10,6 +10,7 @@ import {
   STAT_KEYS,
   STAT_LABELS,
 } from "../items.js";
+import { levelForStage } from "../leveling.js";
 import { cx as cn } from "./cx.js";
 
 /** Wraps a tag in the host app's hover tooltip. The shared tags carry no
@@ -181,7 +182,7 @@ export function ModifierEffectTag({
 }
 
 /** Who can wear an item: its class and the stage it needs, e.g.
- * "Percussionist · Stage 2+". Nothing for an item anyone can wear. */
+ * "Percussionist · Level 10+". Nothing for an item anyone can wear. */
 export function ItemRequirementLine({
   item,
   className,
@@ -196,7 +197,9 @@ export function ItemRequirementLine({
     <div className={cn("text-ui-sm leading-snug", className)}>
       {cls && <span className="text-pink">{cls.name}</span>}
       {cls && stage ? <span className="text-text-dim"> · </span> : null}
-      {stage && <span className="text-text-dim">Stage {stage}+</span>}
+      {stage && (
+        <span className="text-text-dim">Level {levelForStage(stage)}+</span>
+      )}
     </div>
   );
 }

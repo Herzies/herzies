@@ -24,6 +24,7 @@ import {
   groundSlot,
   hasRarityFrame,
   ItemTypeIcon,
+  levelForStage,
   MAX_MODIFIERS,
   meetsMinStage,
   RARITY_COLORS,
@@ -1997,7 +1998,7 @@ function InventoryViewImpl({
                   if (inspectedStageLocked) {
                     return (
                       <Tooltip
-                        label={`Your herzie needs to reach stage ${inspected.minStage} to wear this`}
+                        label={`Your herzie needs to reach level ${levelForStage(inspected.minStage ?? 1)} to wear this`}
                       >
                         {button}
                       </Tooltip>

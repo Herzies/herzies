@@ -1318,3 +1318,34 @@ describe("renderCreaturePose", () => {
     expect(ms).toBeLessThan(50);
   });
 });
+
+describe("waving on one leg (stage 3)", () => {
+  const { spheres } = buildCreatureModel(USER, 3);
+  const pose = (wavePhase: number, walkWeight = 0) =>
+    creaturePoseOffsets(spheres, 3, {
+      idleFrame: 0,
+      walkPhase: 0,
+      walkWeight,
+      wavePhase,
+    });
+  const sole = (offsets: number[][], part: string) =>
+    Math.max(
+      ...spheres
+        .map((sp, i) => [sp, i] as const)
+        .filter(([sp]) => sp.part === part)
+        .map(([sp, i]) => sp.center[1] + offsets[i][1] + sp.radius),
+    );
+
+  it("lifts the foot on the waving side and stands on the other", () => {
+    const rest = pose(0);
+    const mid = pose(0.5);
+    // y is down: the right (waving) foot is higher, the left stays put.
+    expect(sole(mid, "leg-r")).toBeLessThan(sole(rest, "leg-r") - 0.01);
+    expect(sole(mid, "leg-l")).toBeCloseTo(sole(rest, "leg-l"), 5);
+  });
+
+  it("is back on both feet when the wave ends", () => {
+    const end = pose(1);
+    expect(sole(end, "leg-r")).toBeCloseTo(sole(end, "leg-l"), 5);
+  });
+});

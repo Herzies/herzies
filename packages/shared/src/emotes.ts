@@ -46,6 +46,7 @@ export function ownedEmotes(
 }
 
 /** How long an emote plays (seconds), and the least time between two from
- * one herzie (the town-server enforces it too). */
+ * one herzie (the town-server enforces it too). Shorter than an emote: one
+ * played again while it's still going carries it on (see HerzieModel.emote). */
 export const EMOTE_SECONDS = 1.6;
-export const EMOTE_COOLDOWN_MS = 2000;
+export const EMOTE_COOLDOWN_MS = 800;

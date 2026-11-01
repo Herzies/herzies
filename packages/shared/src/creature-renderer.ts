@@ -4269,8 +4269,27 @@ function castDeltas(
 export const WAVE_ARM = "arm-r";
 /** How far the waving hand reaches from its shoulder (arm lengths). */
 const WAVE_REACH = 1.9;
-/** How many times the hand swings to and fro in a wave. */
+/** How many times the hand swings to and fro in a wave, over which part of
+ * it (phase 0..1). */
 const WAVE_SWINGS = 3;
+const WAVE_SWING_FROM = 0.12;
+const WAVE_SWING_SPAN = 0.74;
+/** One swing of the hand, in wave phase. */
+export const WAVE_SWING_PHASE = WAVE_SWING_SPAN / WAVE_SWINGS;
+/** Where in a wave (phase) the arm is all the way up and the weight all
+ * shifted, before it comes down: anywhere in here, going back a whole
+ * swing looks the same, which is how a wave is carried on. */
+export const WAVE_HOLD = { from: 0.22, to: 0.8 } as const;
+
+/** The hand's to-and-fro at `phase` through a wave, −1..1. */
+function waveSwing(phase: number): number {
+  return Math.sin(
+    (Math.max(0, phase - WAVE_SWING_FROM) / WAVE_SWING_SPAN) *
+      WAVE_SWINGS *
+      Math.PI *
+      2,
+  );
+}
 
 /** How much a wave takes over its arm at `phase` (0..1): up quickly, held
  * through the swings, down at the end. */
@@ -4286,9 +4305,7 @@ function waveDeltas(spheres: Sphere[], phase: number, arm: string): V3[] {
   const shoulder = rig.shoulders[arm];
   const side = LIMB_SIDE[arm] ?? 1;
   // In time with the weight: swinging only once it's up.
-  const swing = Math.sin(
-    Math.max(0, (phase - 0.12) / 0.74) * WAVE_SWINGS * Math.PI * 2,
-  );
+  const swing = waveSwing(phase);
   // Creature space: y down, front −z. Up and out, a little forward, and
   // stretched past its rest length so the hand clears a big head.
   const dir = norm([side * (0.5 + 0.4 * swing), -1, -0.2]);
@@ -4297,6 +4314,71 @@ function waveDeltas(spheres: Sphere[], phase: number, arm: string): V3[] {
     const length = Math.hypot(...sub(sp.center, shoulder));
     const at = add(shoulder, scale(dir, length * WAVE_REACH));
     return sub(at, sp.center);
+  });
+}
+
+/** A herzie with legs waves standing on one: it leans over the leg
+ * opposite the waving arm and lifts the other off the ground. */
+const WAVE_TILT = {
+  /** How far it leans over the planted foot (radians)… */
+  lean: 0.21,
+  /** …rocking a little more and less in time with the hand. */
+  sway: 0.035,
+  /** How far the free leg swings out about its hip, and back (radians). */
+  kick: 0.36,
+  kickBack: 0.12,
+} as const;
+
+/** How much of the lean is on at `phase` (0..1 through a wave): it shifts
+ * its weight as the arm goes up, and back down just after the arm. */
+function waveTiltWeight(phase: number): number {
+  return (
+    ease(0.03, WAVE_HOLD.from, phase) * (1 - ease(WAVE_HOLD.to, 0.98, phase))
+  );
+}
+
+/**
+ * `offsets` (a waving herzie's pose) leaned onto one leg: the whole herzie
+ * turned about the sole of the leg opposite `arm`, the top toward that
+ * side, so the other foot lifts as the herzie tips — and that leg swings
+ * out a little. Scaled by `weight` (0: standing on both feet, walking or
+ * seated). Only herzies with legs.
+ */
+function waveTilt(
+  spheres: Sphere[],
+  offsets: V3[],
+  phase: number,
+  arm: string,
+  weight: number,
+): V3[] {
+  const k = waveTiltWeight(phase) * weight;
+  if (k <= 0) return offsets;
+  const rig = buildRig(spheres);
+  if (!rig.legs) return offsets;
+  const side = LIMB_SIDE[arm] ?? 1;
+  const planted = side > 0 ? "leg-l" : "leg-r";
+  const free = side > 0 ? "leg-r" : "leg-l";
+  const foot = spheres.find((sp) => sp.part === planted);
+  const hip = rig.hips[free];
+  if (!foot || !hip) return offsets;
+  const sole: V3 = [
+    foot.center[0],
+    foot.center[1] + foot.radius,
+    foot.center[2],
+  ];
+  // In time with the wave's swings, so the body rocks with the hand.
+  const swing = waveSwing(phase);
+  // Positive roll tips the top toward +x: lean away from the waving side.
+  const roll = -side * (WAVE_TILT.lean + WAVE_TILT.sway * swing) * k;
+  // A hanging leg swings toward −x on a positive roll: out is −side·kick.
+  const kick = -side * WAVE_TILT.kick * (1 + 0.15 * swing) * k;
+  const kickBack = WAVE_TILT.kickBack * k;
+  return offsets.map((d, i): V3 => {
+    const sp = spheres[i];
+    if (isSceneFixed(sp.part)) return d;
+    let at = add(sp.center, d);
+    if (sp.part === free) at = turnAbout(at, add(hip, d), kick, kickBack);
+    return sub(turnAbout(at, sole, roll), sp.center);
   });
 }
 
@@ -5596,11 +5678,26 @@ export function creaturePoseOffsets(
       z + b[2] - s.center[2],
     ];
   });
-  return grounded(
+  const posed = holdProps(
     spheres,
-    holdProps(spheres, offsets, drawPhase, pose.heldSway, heldSwing(pose)),
-    1 - sw,
+    offsets,
+    drawPhase,
+    pose.heldSway,
+    heldSwing(pose),
   );
+  // With legs, it waves standing on one — not while walking, dancing or
+  // seated.
+  const tilted =
+    pose.wavePhase !== undefined && stage >= 3
+      ? waveTilt(
+          spheres,
+          posed,
+          pose.wavePhase,
+          waveArm,
+          (1 - w) * (1 - dw) * (1 - sw),
+        )
+      : posed;
+  return grounded(spheres, tilted, 1 - sw);
 }
 
 /**
