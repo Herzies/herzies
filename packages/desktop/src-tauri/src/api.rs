@@ -912,7 +912,12 @@ pub async fn api_fetch_quests(client: &Client) -> Result<serde_json::Value, Stri
 
 /// Takes today's quest from a giver (an NPC key).
 pub async fn api_accept_quest(client: &Client, giver: &str) -> Result<serde_json::Value, String> {
-    api_buy(client, "/quests/accept", serde_json::json!({ "giver": giver })).await
+    api_buy(
+        client,
+        "/quests/accept",
+        serde_json::json!({ "giver": giver }),
+    )
+    .await
 }
 
 /// Turns a finished quest in to its giver for the reward.
