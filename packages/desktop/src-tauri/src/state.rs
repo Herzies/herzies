@@ -52,6 +52,10 @@ pub struct ManagedState {
     /// the browser and is credited by the Stripe webhook, so no response the app
     /// makes carries it. Cached so the grid opens at its real size.
     pub bank_expansions: u32,
+    /// Emotes owned, from the last `/inventory` (which the Premium window
+    /// refetches on coming back from checkout). Not cached: it's an empty
+    /// Alt bar for the moment before that first fetch.
+    pub emotes: Vec<String>,
     /// The class skills, from the last sync that carried them.
     pub skills: Vec<HerzieSkill>,
     /// Friend profiles keyed by friend code (persisted when codes match).
@@ -153,6 +157,7 @@ impl ManagedState {
             item_upgrades,
             units,
             bank_expansions,
+            emotes: Vec::new(),
             skills: Vec::new(),
             friends: crate::storage::load_friends_cache(&friend_codes),
             pending_trade_request: None,
@@ -204,6 +209,7 @@ impl ManagedState {
         self.item_upgrades.clear();
         self.units.clear();
         self.bank_expansions = 0;
+        self.emotes.clear();
         self.friends.clear();
         self.pending_trade_request = None;
         self.pending_friend_request = None;
@@ -263,6 +269,7 @@ impl ManagedState {
             item_upgrades: self.item_upgrades.clone(),
             units: self.units.clone(),
             bank_expansions: self.bank_expansions,
+            emotes: self.emotes.clone(),
             skills: self.skills.clone(),
             friends: self.friends.clone(),
             pending_trade_request: self.pending_trade_request.clone(),
@@ -380,6 +387,7 @@ mod tests {
             item_upgrades: ItemUpgrades::new(),
             units: Vec::new(),
             bank_expansions: 0,
+            emotes: Vec::new(),
             skills: Vec::new(),
             friends: HashMap::new(),
             pending_trade_request: None,

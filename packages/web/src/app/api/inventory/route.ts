@@ -11,7 +11,9 @@ export async function GET(request: Request) {
   const admin = createAdminClient();
   const { data, error } = await admin
     .from("herzies")
-    .select("inventory_v2, currency, equipped, item_upgrades, bank_expansions")
+    .select(
+      "inventory_v2, currency, equipped, item_upgrades, bank_expansions, emotes",
+    )
     .eq("user_id", auth.userId)
     .single();
 
@@ -40,5 +42,7 @@ export async function GET(request: Request) {
     // Capacity has to arrive with the contents: the desktop judges "inventory
     // full" from both, and loads this one before any /sync has run.
     bankExpansions: data.bank_expansions ?? 0,
+    // Emotes owned (EMOTES ids): unlocked for good, played from the Alt bar.
+    emotes: (data.emotes ?? []) as string[],
   });
 }

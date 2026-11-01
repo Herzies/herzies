@@ -3,6 +3,7 @@ import {
   bankCapacity,
   getItem,
   hasRoomFor,
+  isEmoteId,
   MAX_BANK_EXPANSIONS,
   normalizeEquipped,
 } from "@herzies/shared";
@@ -12,14 +13,15 @@ import { checkoutSchema, isParseError, parseBody } from "@/lib/schemas";
 import { getStripe } from "@/lib/stripe";
 import { createAdminClient } from "@/lib/supabase-admin";
 
-/** What a premium purchase grants: a catalog item, or one Inventory Expansion
- * (which is not an item — see BANK_EXPANSION). */
-type PremiumKind = "item" | "bank-expansion";
+/** What a premium purchase grants: a catalog item, one Inventory Expansion
+ * (which is not an item — see BANK_EXPANSION), or an emote (EMOTES). */
+type PremiumKind = "item" | "bank-expansion" | "emote";
 
 /**
  * Resolves a premium good for sale, by the same rule the /store/premium
  * listing uses: an active Stripe product whose `metadata.item_id` names a
- * real catalog item, or whose `metadata.perk_id` is the Inventory Expansion.
+ * real catalog item, whose `metadata.perk_id` is the Inventory Expansion, or
+ * whose `metadata.emote_id` names an emote.
  * Returns the price to charge and what to grant.
  *
  * The good and the price are both read from Stripe here rather than taken
@@ -33,7 +35,9 @@ async function findPremiumItem(
     ? "item"
     : id === BANK_EXPANSION.id
       ? "bank-expansion"
-      : null;
+      : isEmoteId(id)
+        ? "emote"
+        : null;
   if (!kind) return null;
 
   const stripe = getStripe();
@@ -45,7 +49,11 @@ async function findPremiumItem(
 
   for (const product of products.data) {
     const listedAs =
-      kind === "item" ? product.metadata?.item_id : product.metadata?.perk_id;
+      kind === "item"
+        ? product.metadata?.item_id
+        : kind === "emote"
+          ? product.metadata?.emote_id
+          : product.metadata?.perk_id;
     if (listedAs !== id) continue;
     const price = product.default_price;
     if (!price || typeof price === "string") continue;
@@ -87,11 +95,19 @@ export async function POST(request: Request) {
 
     const { data: herzie } = await admin
       .from("herzies")
-      .select("inventory_v2, equipped, bank_expansions")
+      .select("inventory_v2, equipped, bank_expansions, emotes")
       .eq("user_id", auth.userId)
       .single();
 
-    if (premium.kind === "bank-expansion") {
+    if (premium.kind === "emote") {
+      // Unlocked for good, so a second copy would be money for nothing.
+      if (((herzie?.emotes ?? []) as string[]).includes(productId)) {
+        return NextResponse.json(
+          { error: "You already have this emote" },
+          { status: 409 },
+        );
+      }
+    } else if (premium.kind === "bank-expansion") {
       // Nothing is placed in the bank, so a full bank is no reason to refuse —
       // it is exactly when someone wants this. The only limit is the cap, and
       // it is checked here, before money is taken, never at fulfilment (where
@@ -144,10 +160,11 @@ export async function POST(request: Request) {
       user_id: auth.userId,
       product_id: productId,
       stripe_checkout_session_id: sessionId,
-      // currency_amount is NOT NULL; an item or expansion credits no coins.
+      // currency_amount is NOT NULL; an item, expansion or emote credits no coins.
       currency_amount: premium ? 0 : (product?.currency_amount ?? 0),
       grant_item_id: premium?.kind === "item" ? productId : null,
       grant_bank_expansions: premium?.kind === "bank-expansion" ? 1 : null,
+      grant_emote_id: premium?.kind === "emote" ? productId : null,
     });
 
     if (insertError) {
@@ -208,6 +225,7 @@ export async function POST(request: Request) {
     currency_amount: premium ? 0 : (product?.currency_amount ?? 0),
     grant_item_id: premium?.kind === "item" ? productId : null,
     grant_bank_expansions: premium?.kind === "bank-expansion" ? 1 : null,
+    grant_emote_id: premium?.kind === "emote" ? productId : null,
   });
 
   if (insertError) {

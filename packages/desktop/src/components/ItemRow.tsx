@@ -15,7 +15,8 @@ export function ItemRow({
   icon,
 }: {
   itemId: string;
-  onInspect: (itemId: string) => void;
+  /** Absent: the row isn't a button (an emote: nothing to inspect). */
+  onInspect?: (itemId: string) => void;
   inspectTitle?: string;
   colour?: TabColour;
   subtitle: React.ReactNode;
@@ -28,33 +29,45 @@ export function ItemRow({
 }) {
   const def = getItem(itemId);
   const name = nameOverride ?? def?.name ?? itemId;
-
-  return (
-    <div className="flex items-center justify-between gap-2 border-b border-white/15 py-1.5">
-      <button
-        type="button"
-        onClick={() => onInspect(itemId)}
-        // Inspect grows the card out of this row's icon.
-        {...{ [INSPECT_ORIGIN_ATTR]: itemId }}
-        className="group flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
-        title={inspectTitle}
-      >
-        {icon ??
-          (def && <ItemTypeIcon item={def} className="h-6 w-6 shrink-0" />)}
-        <div className="min-w-0 flex-1">
-          <div
-            className={cn("truncate text-ui text-text", {
+  const body = (
+    <>
+      {icon ??
+        (def && <ItemTypeIcon item={def} className="h-6 w-6 shrink-0" />)}
+      <div className="min-w-0 flex-1">
+        <div
+          className={cn(
+            "truncate text-ui text-text",
+            onInspect && {
               "group-hover:text-cyan": colour === "cyan",
               "group-hover:text-green": colour === "green",
               "group-hover:text-yellow": colour === "yellow",
               "group-hover:text-red": colour === "red",
-            })}
-          >
-            {name}
-          </div>
-          <div className="text-[10px] text-text-dim">{subtitle}</div>
+            },
+          )}
+        >
+          {name}
         </div>
-      </button>
+        <div className="text-[10px] text-text-dim">{subtitle}</div>
+      </div>
+    </>
+  );
+
+  return (
+    <div className="flex items-center justify-between gap-2 border-b border-white/15 py-1.5">
+      {onInspect ? (
+        <button
+          type="button"
+          onClick={() => onInspect(itemId)}
+          // Inspect grows the card out of this row's icon.
+          {...{ [INSPECT_ORIGIN_ATTR]: itemId }}
+          className="group flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
+          title={inspectTitle}
+        >
+          {body}
+        </button>
+      ) : (
+        <div className="flex min-w-0 flex-1 items-center gap-2">{body}</div>
+      )}
       {action && <div className="shrink-0">{action}</div>}
     </div>
   );

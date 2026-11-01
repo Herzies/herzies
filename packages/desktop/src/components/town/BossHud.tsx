@@ -12,6 +12,22 @@ import {
 import { type Banner, useBanner } from "./combat/moments";
 import { buffOn, useSkills } from "./combat/skills";
 
+/** Publishes the boss card's bottom edge as `--boss-card-bottom` while it's
+ * shown (unset otherwise): windows on the right of the big window hang
+ * under it (OverlayWindow `side="right"`). */
+const bossCardObserver = new ResizeObserver(([entry]) => {
+  if (!entry) return;
+  document.documentElement.style.setProperty(
+    "--boss-card-bottom",
+    `${(entry.target as HTMLElement).getBoundingClientRect().bottom}px`,
+  );
+});
+function observeBossCard(el: HTMLElement | null) {
+  bossCardObserver.disconnect();
+  if (el) bossCardObserver.observe(el);
+  else document.documentElement.style.removeProperty("--boss-card-bottom");
+}
+
 /** The boss's card: top right, clear of your own (top left), as wide as
  * the space beside it allows. */
 const BOSS_CARD =
@@ -61,7 +77,7 @@ export function BossHud({ name }: { name: string }) {
           <EnrageTag tower={tower} now={now} />
         </div>
       ) : on ? (
-        <section className={BOSS_CARD} aria-label={name}>
+        <section ref={observeBossCard} className={BOSS_CARD} aria-label={name}>
           <div className="flex h-5 items-center">
             <span className="block min-w-0 truncate text-ui-lg font-bold">
               {name}

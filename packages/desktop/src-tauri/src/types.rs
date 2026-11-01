@@ -347,6 +347,8 @@ pub struct ItemSnapshot {
     /// Inventory Expansions owned. `None` when the response doesn't carry it
     /// (mutation responses, older servers), leaving the local count alone.
     pub bank_expansions: Option<u32>,
+    /// Emotes owned (EMOTES ids in @herzies/shared). `None` as above.
+    pub emotes: Option<Vec<String>>,
 }
 
 /// One owned copy of an item — the unit of ownership. It is what a bank tile
@@ -430,6 +432,10 @@ pub struct AppState {
     /// `bankCapacity(bankExpansions)` in @herzies/shared.
     #[serde(default)]
     pub bank_expansions: u32,
+    /// Emotes owned (EMOTES ids in @herzies/shared): unlocked for good by a
+    /// purchase, played from the Town's Alt bar.
+    #[serde(default)]
+    pub emotes: Vec<String>,
     /// The class skills — see `HerzieSkill`.
     #[serde(default)]
     pub skills: Vec<HerzieSkill>,

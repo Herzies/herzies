@@ -30,6 +30,9 @@ const WEARABLE_OPTIONS = [
   "boombox",
   "witch-hat",
   "sixpence",
+  "plutus-crown",
+  "fabulous-fabian",
+  "fyllings-fedora",
   "fangs",
   "pumpkin-spice",
   "ghost",
@@ -443,7 +446,10 @@ function toEquipped(ids: string[]): Equipped {
       id === "headphones" ||
       id === "rainbow-headband" ||
       id === "witch-hat" ||
-      id === "sixpence"
+      id === "sixpence" ||
+      id === "plutus-crown" ||
+      id === "fabulous-fabian" ||
+      id === "fyllings-fedora"
     )
       out.head = id;
     else if (id === "clouds" || id === "stars" || id === "blood-moon")

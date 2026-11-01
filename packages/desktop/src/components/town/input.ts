@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { queueSkill } from "./combat/skills";
 import { eat } from "./eat";
+import { emoteInSlot, playEmote, setAltHeld } from "./emotes";
 import { homeMode } from "./homeMode";
 import {
   HOTBAR_KEYS,
@@ -78,7 +79,8 @@ const idle = (): TownInput => ({
  * stay held. Both are handled here. Listens only while `active`.
  *
  * `onInteract` fires on E; Space raises `jump`, for the game loop to clear;
- * 2, 3 and 4 eat from the hotbar (hotbar.ts). `surface` is the element mouse buttons count on
+ * 2, 3 and 4 eat from the hotbar (hotbar.ts). Holding Alt shows the Alt
+ * bar, and Alt+1, Alt+2… play the emotes on it (emotes.ts). `surface` is the element mouse buttons count on
  * (the canvas); button releases are caught anywhere, since the camera
  * captures the pointer mid-drag.
  */
@@ -111,6 +113,19 @@ export function useTownInput(
       // browser's: don't let it walk focus along the buttons and links. In
       // a text field it still moves between fields.
       if (e.code === "Tab" && !typing(e.target)) e.preventDefault();
+      // Alt: the emote bar. By the key's code: on a Mac, Option+1 types
+      // "¡", so its `key` says nothing about the digit.
+      if (!e.metaKey && !e.ctrlKey && !typing(e.target) && !homeMode.on) {
+        if (e.key === "Alt") setAltHeld(true);
+        if (e.altKey && e.code.startsWith("Digit")) {
+          e.preventDefault();
+          const id = e.repeat
+            ? undefined
+            : emoteInSlot(Number(e.code.slice(5)));
+          if (id) playEmote(id);
+          return;
+        }
+      }
       if (e.metaKey || e.ctrlKey || e.altKey || typing(e.target)) return;
       // At Home only walking does anything, and it takes you out: a fresh
       // press, not a key held since before you came (that one stays held,
@@ -150,6 +165,7 @@ export function useTownInput(
       input.current[action] = true;
     };
     const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === "Alt" || !e.altKey) setAltHeld(false);
       const action = MOVE_KEYS[e.code];
       if (action) input.current[action] = false;
     };
@@ -173,6 +189,7 @@ export function useTownInput(
     // Mutated in place: the game loop holds on to this object.
     const release = () => {
       Object.assign(input.current, idle());
+      setAltHeld(false);
     };
     const onVisibility = () => {
       if (document.hidden) release();

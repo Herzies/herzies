@@ -175,6 +175,11 @@ function RemoteHerzie({
     const bit = s.flags & TOWN_FLAG_JUMP;
     if (jumpBit.current !== null && bit !== jumpBit.current) herzie.jump();
     jumpBit.current = bit;
+    // They played an emote (the Alt bar).
+    if (remote.pendingEmote) {
+      herzie.emote(remote.pendingEmote);
+      remote.pendingEmote = null;
+    }
     // They cast: the same thrust, and a wave from the hand the way they
     // face (only the cast count travels, not where they aimed).
     if (remote.pendingCasts > 0 && !herzie.casting) {

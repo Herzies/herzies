@@ -1760,6 +1760,171 @@ function buildSixpenceSpheres(spheres: Sphere[]): Sphere[] {
   return result;
 }
 
+/** A capsule between two points, as a Sphere (center + half-axis). */
+function capsuleBetween(a: V3, b: V3, radius: number, color: string): Sphere {
+  return {
+    center: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2],
+    radius,
+    zone: "wearable",
+    part: "head",
+    color,
+    shape: {
+      kind: "capsule",
+      axis: [(b[0] - a[0]) / 2, (b[1] - a[1]) / 2, (b[2] - a[2]) / 2],
+    },
+  };
+}
+
+/** Fabulous Fabian: a black baseball cap, a pink F on its front panel: a
+ * round crown, a wide short bill, and a button on top. */
+function buildFabianCapSpheres(spheres: Sphere[]): Sphere[] {
+  const head = getHeadBounds(spheres);
+  if (!head) return [];
+  const [hx, hy, hz] = head.center;
+  const hr = head.radius;
+  const black = "#2A2A32";
+  const pink = "#FF5FA8";
+  const result: Sphere[] = [];
+  const push = (center: V3, radius: number, color: string, shape?: Shape) =>
+    result.push({
+      center,
+      radius,
+      zone: "wearable",
+      part: "head",
+      color,
+      shape,
+    });
+  // Creature space is y down: up is −y; the face is toward −z.
+  // The cap sits with its bottom edge above the eyes: on a head whose eyes
+  // are high (stage 1), the whole cap rides up rather than cutting them.
+  const eyes = spheres.filter((s) => s.part === "eye");
+  const eyeTop = Math.min(...eyes.map((e) => e.center[1] - e.radius));
+  const billY = Math.min(hy - hr * 0.54, eyeTop - hr * 0.05);
+  // The crown: a ball, its middle just below the bill, so what shows over
+  // the bill is round all the way up, and not too tall. Below the bill the rest of the ball
+  // is narrower than the head there, so it stays inside it.
+  const crownR = hr * 0.86;
+  const crownY = billY + hr * 0.08;
+  push([hx, crownY, hz], crownR, black);
+  // The bill: wide but short, so it reads from above without covering the
+  // face — three thin discs side by side under the crown's bottom front
+  // edge, the middle one reaching furthest, held level.
+  const billHalf = hr * 0.025;
+  for (const [dx, dz, r] of [
+    [0, 1.0, 0.5],
+    [-0.34, 0.9, 0.44],
+    [0.34, 0.9, 0.44],
+  ] as const) {
+    push([hx + hr * dx, billY, hz - hr * dz], hr * r, "#1E1E24", {
+      kind: "cylinder",
+      axis: [0, -billHalf, 0],
+    });
+  }
+  // The button on top.
+  push([hx, crownY - crownR - hr * 0.01, hz], hr * 0.07, black);
+  // The F, in thin pink capsules just proud of the front of the crown,
+  // following its curve.
+  const r = hr * 0.04;
+  const surfaceZ = (x: number, y: number) =>
+    hz -
+    Math.sqrt(Math.max(0, crownR ** 2 - x ** 2 - (y - crownY) ** 2)) -
+    r * 0.4;
+  const bottom = billY - hr * 0.07;
+  const top = bottom - hr * 0.34;
+  const mid = (top + bottom) / 2;
+  const left = hx - hr * 0.08;
+  const at = (x: number, y: number): V3 => [x, y, surfaceZ(x - hx, y)];
+  // In short steps, so the stroke follows the curve.
+  const stroke = (a: [number, number], b: [number, number]) => {
+    const steps = 3;
+    for (let k = 0; k < steps; k++) {
+      const p = (t: number): V3 =>
+        at(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t);
+      result.push(capsuleBetween(p(k / steps), p((k + 1) / steps), r, pink));
+    }
+  };
+  stroke([left, top], [left, bottom]);
+  stroke([left, top], [hx + hr * 0.13, top]);
+  stroke([left, mid], [hx + hr * 0.08, mid]);
+  return result;
+}
+
+/** Fylling's Fedora: a felt crown, tapered and creased along the top, a dark
+ * band and a wide brim. */
+function buildFedoraSpheres(spheres: Sphere[]): Sphere[] {
+  const head = getHeadBounds(spheres);
+  if (!head) return [];
+  const [hx, hy, hz] = head.center;
+  const hr = head.radius;
+  const felt = "#8C7558";
+  const result: Sphere[] = [];
+  const push = (center: V3, radius: number, color: string, shape?: Shape) =>
+    result.push({
+      center,
+      radius,
+      zone: "wearable",
+      part: "head",
+      color,
+      shape,
+    });
+  // Creature space is y down: up is −y; the face is toward −z.
+  const brimY = hy - hr * 0.62;
+  push([hx, brimY, hz], hr * 1.12, "#7A6650", {
+    kind: "cylinder",
+    axis: [0, -hr * 0.025, 0],
+  });
+  // How far the head reaches out from the hat's axis at height `y`: the
+  // crown must be wider than that or the head pokes through above the brim.
+  const heads = spheres.filter(
+    (s) => s.part === "head" && s.zone !== "wearable",
+  );
+  const headWidthAt = (y: number) =>
+    Math.max(
+      0,
+      ...heads.map((s) => {
+        const dy = y - s.center[1];
+        if (Math.abs(dy) >= s.radius) return 0;
+        return (
+          Math.sqrt(s.radius ** 2 - dy ** 2) +
+          Math.hypot(s.center[0] - hx, s.center[2] - hz)
+        );
+      }),
+    );
+  // The crown narrows as it rises (a cone's −axis end is its base).
+  const crownHalf = hr * 0.34;
+  const crownTop = brimY - crownHalf * 2;
+  const baseR = Math.max(hr * 0.66, headWidthAt(brimY) + hr * 0.04);
+  const tipR = Math.max(baseR * 0.8, headWidthAt(crownTop) + hr * 0.04);
+  push([hx, brimY - crownHalf, hz], baseR, felt, {
+    kind: "cone",
+    axis: [0, -crownHalf, 0],
+    tipRadius: tipR,
+  });
+  push([hx, crownTop, hz], tipR, felt, {
+    kind: "cylinder",
+    axis: [0, -hr * 0.01, 0],
+    dome: hr * 0.05,
+  });
+  // The crease down the middle of the top, front to back.
+  result.push(
+    capsuleBetween(
+      [hx, crownTop - hr * 0.04, hz - tipR * 0.65],
+      [hx, crownTop - hr * 0.04, hz + tipR * 0.65],
+      hr * 0.05,
+      "#6E5A44",
+    ),
+  );
+  // The band round the base of the crown, standing clear of it (the crown's
+  // radius where the band is, plus a little).
+  const bandY = brimY - hr * 0.2;
+  const crownAtBand = baseR + (tipR - baseR) * (0.2 / ((crownHalf * 2) / hr));
+  push([hx, bandY, hz], crownAtBand + hr * 0.035, "#2B2420", {
+    kind: "cylinder",
+    axis: [0, -hr * 0.09, 0],
+  });
+  return result;
+}
+
 /** Plutus' Crown: a gold band sat on top of the head round a domed red
  * velvet cap, a ring of points with a pearl on each, and gems set round the
  * band, a big "diamond" at the front. A full ring like the guard's helm, so it
@@ -3017,6 +3182,12 @@ function appendWearableSpheres(
   if (equipped.head === "plutus-crown") {
     spheres.push(...buildPlutusCrownSpheres(spheres));
   }
+  if (equipped.head === "fabulous-fabian") {
+    spheres.push(...buildFabianCapSpheres(spheres));
+  }
+  if (equipped.head === "fyllings-fedora") {
+    spheres.push(...buildFedoraSpheres(spheres));
+  }
   if (equipped.head === "guard-helm") {
     spheres.push(...buildGuardHelmSpheres(spheres));
   }
@@ -4090,6 +4261,42 @@ function castDeltas(
     const length = Math.hypot(...sub(sp.center, shoulder));
     const at = add(shoulder, scale(hand.dir, length * hand.reach));
     return add(sub(at, sp.center), leaning);
+  });
+}
+
+/** The arm a herzie waves with: the one it doesn't cast with, so a wave
+ * and a cast can share a moment. */
+export const WAVE_ARM = "arm-r";
+/** How far the waving hand reaches from its shoulder (arm lengths). */
+const WAVE_REACH = 1.9;
+/** How many times the hand swings to and fro in a wave. */
+const WAVE_SWINGS = 3;
+
+/** How much a wave takes over its arm at `phase` (0..1): up quickly, held
+ * through the swings, down at the end. */
+export function waveWeight(phase: number): number {
+  return ease(0, 0.16, phase) * (1 - ease(0.82, 1, phase));
+}
+
+/** The waving arm's offsets at `phase` through a wave, as deltas from
+ * rest: raised up and out from its shoulder, the hand swinging side to
+ * side over its head. Every other part stays put (zero). */
+function waveDeltas(spheres: Sphere[], phase: number, arm: string): V3[] {
+  const rig = buildRig(spheres);
+  const shoulder = rig.shoulders[arm];
+  const side = LIMB_SIDE[arm] ?? 1;
+  // In time with the weight: swinging only once it's up.
+  const swing = Math.sin(
+    Math.max(0, (phase - 0.12) / 0.74) * WAVE_SWINGS * Math.PI * 2,
+  );
+  // Creature space: y down, front −z. Up and out, a little forward, and
+  // stretched past its rest length so the hand clears a big head.
+  const dir = norm([side * (0.5 + 0.4 * swing), -1, -0.2]);
+  return spheres.map((sp): V3 => {
+    if (sp.part !== arm || !shoulder) return [0, 0, 0];
+    const length = Math.hypot(...sub(sp.center, shoulder));
+    const at = add(shoulder, scale(dir, length * WAVE_REACH));
+    return sub(at, sp.center);
   });
 }
 
@@ -5270,6 +5477,10 @@ export type CreatureMotion = Pick<
    * CATCH_SECONDS); undefined when it isn't catching. */
   catchPhase?: number;
   catchArm?: string;
+  /** How far through a wave (the emote) it is, 0..1; undefined when it
+   * isn't waving. `waveArm` is the arm (WAVE_ARM unless given). */
+  wavePhase?: number;
+  waveArm?: string;
   /** How far its class gear is drawn: 0 slung on its back to 1 in its
    * hands (see DRAW). */
   drawPhase?: number;
@@ -5320,6 +5531,12 @@ export function creaturePoseOffsets(
   const cw = pose.castPhase !== undefined ? castWeight(pose.castPhase) : 0;
   const drawPhase = Math.min(1, Math.max(0, pose.drawPhase ?? 0));
   const draw = drawPhase > 0 ? drawArmDeltas(base, drawPhase) : null;
+  const waveArm = pose.waveArm ?? WAVE_ARM;
+  const wave =
+    pose.wavePhase !== undefined
+      ? waveDeltas(base, pose.wavePhase, waveArm)
+      : null;
+  const wavew = pose.wavePhase !== undefined ? waveWeight(pose.wavePhase) : 0;
   const offsets = spheres.map((s, i): V3 => {
     const b = base[i].center;
     // Scene-anchored parts (a floating pet) keep their own idle bob even
@@ -5349,6 +5566,13 @@ export function creaturePoseOffsets(
       x = x * keep + g[0] * held;
       y = y * keep + g[1] * held;
       z = z * keep + g[2] * held;
+    }
+    // A wave takes its arm over (a cast with that arm, after, wins).
+    if (wave && s.part === waveArm && wavew > 0) {
+      const g = wave[i];
+      x = x * (1 - wavew) + g[0] * wavew;
+      y = y * (1 - wavew) + g[1] * wavew;
+      z = z * (1 - wavew) + g[2] * wavew;
     }
     // A cast takes the casting arm over; the lean adds to whatever else.
     const c = cast?.[i];

@@ -57,6 +57,7 @@ import {
 import { setArmed, setMySkills } from "./components/town/combat/skills";
 import { combat } from "./components/town/combat/state";
 import { homeDropFeed } from "./components/town/dropSpots";
+import { setOwnedEmotes } from "./components/town/emotes";
 import { setTowerOpen } from "./components/town/gates";
 import { Hotbar } from "./components/town/Hotbar";
 import { homeMode } from "./components/town/homeMode";
@@ -270,6 +271,11 @@ async function bench(state: RootState) {
   state.setFrameloop("always");
 }
 
+// `?emotes=wave`: the emotes owned (comma-separated), on the Alt bar and in
+// the ticket.
+const sandboxEmotes = (params.get("emotes") ?? "").split(",").filter(Boolean);
+setOwnedEmotes(sandboxEmotes);
+
 function localNet() {
   // A uuid, as real user ids are: the Tower's rooms are named by it.
   const uid = crypto.randomUUID();
@@ -319,6 +325,7 @@ function localNet() {
               }
             : {}),
           lv: Number(params.get("level") ?? 10),
+          ...(sandboxEmotes.length ? { em: sandboxEmotes } : {}),
           tower:
             map === "tower"
               ? {

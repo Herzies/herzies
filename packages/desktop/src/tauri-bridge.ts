@@ -116,6 +116,9 @@ export interface AppState {
   units: ItemUnit[];
   /** Inventory Expansions bought; the grid's size is `bankCapacity` of this. */
   bankExpansions: number;
+  /** Emotes owned (EMOTES ids): unlocked for good, played from the Town's
+   * Alt bar. */
+  emotes: string[];
   /** The class skills, once a class is chosen (from the last sync). */
   skills: HerzieSkill[];
   friends: Record<string, HerzieProfile>;

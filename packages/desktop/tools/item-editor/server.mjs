@@ -231,6 +231,13 @@ const EXTRA_ICONS = [
     autoColor: "#facc15",
     gradient: null,
   },
+  // Emotes' Premium icons (EmoteIcon): "emote-" and the emote's id.
+  {
+    id: "emote-wave",
+    name: "Wave (emote)",
+    autoColor: "#f6c99c",
+    gradient: null,
+  },
   // Hand-tweaked Town portraits (VisitorIcon). Without an entry the portrait
   // is drawn from the visitor's 3D look instead; the seeded entries started
   // as a snapshot of exactly that.

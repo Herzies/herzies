@@ -15,6 +15,7 @@ export * from "./cloaks.js";
 export * from "./craving.js";
 export * from "./creature-renderer.js";
 export * from "./dangle-physics.js";
+export * from "./emotes.js";
 export * from "./genres.js";
 export * from "./ItemDisplay.js";
 export * from "./ItemPreview.js";

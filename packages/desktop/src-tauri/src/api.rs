@@ -746,6 +746,7 @@ pub async fn api_fetch_inventory(client: &Client) -> Option<ItemSnapshot> {
         serde_json::from_value(data["itemUpgrades"].clone()).unwrap_or_default();
     let units = serde_json::from_value::<Vec<ItemUnit>>(data["units"].clone()).ok();
     let bank_expansions = data["bankExpansions"].as_u64().map(|n| n as u32);
+    let emotes = serde_json::from_value::<Vec<String>>(data["emotes"].clone()).ok();
     Some(ItemSnapshot {
         inventory,
         currency,
@@ -753,6 +754,7 @@ pub async fn api_fetch_inventory(client: &Client) -> Option<ItemSnapshot> {
         item_upgrades,
         units,
         bank_expansions,
+        emotes,
     })
 }
 

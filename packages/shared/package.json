@@ -56,6 +56,11 @@
       "import": "./dist/skills.js",
       "require": "./dist/skills.js"
     },
+    "./emotes": {
+      "types": "./dist/emotes.d.ts",
+      "import": "./dist/emotes.js",
+      "require": "./dist/emotes.js"
+    },
     "./tower": {
       "types": "./dist/tower.d.ts",
       "import": "./dist/tower.js",

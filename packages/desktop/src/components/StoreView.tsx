@@ -2,8 +2,10 @@ import type { Equipped, Inventory, PremiumItem } from "@herzies/shared";
 import {
   BANK_EXPANSION,
   bankCapacity,
+  getEmote,
   getItem,
   hasRoomFor,
+  type ItemDef,
   MAX_BANK_EXPANSIONS,
 } from "@herzies/shared";
 import { memo, useEffect, useRef, useState } from "react";
@@ -14,11 +16,26 @@ import { ExpansionInspectOverlay } from "./ExpansionInspectOverlay";
 import ItemInspectOverlay, { inspectOrigin } from "./ItemInspectOverlay";
 import { ItemRow } from "./ItemRow";
 import { BankExpansionIcon } from "./icons/BankExpansionIcon";
+import { EmoteIcon } from "./icons/EmoteIcon";
 import { List } from "./List";
+import { TabButton } from "./TabButton";
 import { Tooltip } from "./Tooltip";
 
+/** The window's shelves: the Bigger Bag (and anything not on another
+ * shelf), cloaks (the back slot), spirits, and emotes. */
+const TABS = ["Bag", "Cloaks", "Spirits", "Emotes"] as const;
+type StoreTab = (typeof TABS)[number];
+
+/** Which shelf a premium catalog item goes on. */
+function shelfOf(item: ItemDef): StoreTab {
+  if (item.equipSlot === "back") return "Cloaks";
+  if (item.equipSlot === "spirit") return "Spirits";
+  return "Bag";
+}
+
 /**
- * The Premium tab: Inventory Expansions and whatever Stripe lists. It sells
+ * The Premium window: Inventory Expansions, emotes and whatever else Stripe
+ * lists, on tabs. It sells
  * nothing for coins — coins are spent with Good ol' George during his visits,
  * which is what keeps his stock worth turning up for. The balance still shows
  * here so the header reads the same on every tab.
@@ -29,6 +46,7 @@ function StoreViewImpl({
   currency,
   equipped,
   bankExpansions,
+  emotes,
   active = true,
 }: {
   inventory: Inventory | null;
@@ -37,6 +55,8 @@ function StoreViewImpl({
   equipped: Equipped;
   /** Inventory Expansions already bought — sets the bank's capacity. */
   bankExpansions: number;
+  /** Emotes owned (EMOTES ids): one can't be bought twice. */
+  emotes: readonly string[];
   /** False while another tab is shown. */
   active?: boolean;
 }) {
@@ -45,6 +65,7 @@ function StoreViewImpl({
   const [pendingProductId, setPendingProductId] = useState<string | null>(null);
   const [inspectItem, setInspectItem] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [tab, setTab] = useState<StoreTab>("Bag");
   const focused = useWindowFocused();
   const prevFocusedRef = useRef(focused);
 
@@ -101,8 +122,18 @@ function StoreViewImpl({
   const expansionPending = pendingProductId === BANK_EXPANSION.id;
   const premiumItems = (premium ?? []).flatMap((p) => {
     const def = getItem(p.itemId);
-    return def ? [def] : [];
+    return def && shelfOf(def) === tab ? [def] : [];
   });
+  /** Emotes on sale, with their listing. */
+  const premiumEmotes = (premium ?? []).flatMap((p) => {
+    const def = getEmote(p.itemId);
+    return def ? [{ def, paid: p }] : [];
+  });
+  const showExpansion = tab === "Bag" && !!expansionListing;
+  const shelfEmpty =
+    tab === "Emotes"
+      ? premiumEmotes.length === 0
+      : premiumItems.length === 0 && !showExpansion;
 
   const inspected = inspectItem ? getItem(inspectItem) : null;
   const inspectedIsExpansion = inspectItem === BANK_EXPANSION.id;
@@ -152,18 +183,30 @@ function StoreViewImpl({
         Herzies is a one-person passion project. Buying here supports its
         development.
       </p>
+      <div className="mb-2 flex shrink-0 gap-1 border-b border-white/15 text-ui">
+        {TABS.map((t) => (
+          <TabButton
+            key={t}
+            colour="yellow"
+            active={tab === t}
+            onClick={() => setTab(t)}
+          >
+            {t}
+          </TabButton>
+        ))}
+      </div>
       <List className="min-h-0 flex-1">
         {premium === null ? (
           <div className="pt-5 text-center text-ui text-text-dim">
             Loading...
           </div>
-        ) : premiumItems.length === 0 && !expansionListing ? (
+        ) : shelfEmpty ? (
           <div className="pt-5 text-center text-ui text-text-dim">
             Nothing here right now.
           </div>
         ) : (
           <>
-            {expansionListing && (
+            {showExpansion && expansionListing && (
               <ItemRow
                 itemId={BANK_EXPANSION.id}
                 name={BANK_EXPANSION.name}
@@ -203,6 +246,45 @@ function StoreViewImpl({
                 }
               />
             )}
+            {tab === "Emotes" &&
+              premiumEmotes.map(({ def, paid }) => {
+                const owned = emotes.includes(def.id);
+                const pending = pendingProductId === def.id;
+                return (
+                  <ItemRow
+                    key={def.id}
+                    itemId={def.id}
+                    name={def.name}
+                    icon={
+                      <EmoteIcon
+                        emoteId={def.id}
+                        className="h-6 w-6 shrink-0"
+                      />
+                    }
+                    colour="yellow"
+                    subtitle={
+                      owned ? (
+                        <>Owned · Alt bar in the Town (hold Alt)</>
+                      ) : (
+                        <>
+                          {formatPrice(paid.amount, paid.currency)} ·{" "}
+                          {def.description}
+                        </>
+                      )
+                    }
+                    action={
+                      <button
+                        type="button"
+                        className="btn"
+                        disabled={owned || pending}
+                        onClick={() => handleBuyCurrency(def.id)}
+                      >
+                        {owned ? "Owned" : pending ? "Buying..." : "Buy"}
+                      </button>
+                    }
+                  />
+                );
+              })}
             {premiumItems.map((item) => {
               const paid = premiumByItem.get(item.id);
               if (!paid) return null;

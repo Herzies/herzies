@@ -33,7 +33,14 @@ const FRIEND_SEED = "about-friend";
  * empty). Wearables, skins and instruments only: no accessories or
  * spirits. */
 const WARDROBE: Partial<Record<EquippedSlot, (string | undefined)[]>> = {
-  head: ["headphones", "rainbow-headband", "witch-hat", undefined],
+  head: [
+    "headphones",
+    "rainbow-headband",
+    "witch-hat",
+    "fabulous-fabian",
+    "fyllings-fedora",
+    undefined,
+  ],
   face: ["fangs", undefined],
   body: ["gold-chain", "pearl-necklace", "bowtie", undefined],
   color: [

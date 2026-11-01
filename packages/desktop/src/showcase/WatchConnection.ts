@@ -15,6 +15,8 @@ export type Watched = {
   id: number;
   look: TownLook;
   buffer: EntityBuffer;
+  /** An emote it played, not yet shown (null: none). */
+  pendingEmote: string | null;
 };
 
 /** Clients ping every 10 s; the room drops a watcher silent for 45. */
@@ -151,6 +153,7 @@ export class WatchConnection {
       id: p.id,
       look: p.look,
       buffer: existing?.buffer ?? new EntityBuffer(),
+      pendingEmote: existing?.pendingEmote ?? null,
     });
   }
 
@@ -173,6 +176,11 @@ export class WatchConnection {
       case "leave":
         if (this.herzies.delete(m.id)) this.emit();
         return;
+      case "emote": {
+        const h = this.herzies.get(m.id);
+        if (h) h.pendingEmote = m.e;
+        return;
+      }
     }
   }
 

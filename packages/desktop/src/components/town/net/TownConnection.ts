@@ -62,6 +62,8 @@ export type RemotePlayer = {
   pendingCasts: number;
   /** Knocked out outside a fight (a Bard can play it back up). */
   down: boolean;
+  /** An emote they played, not yet shown (null: none). */
+  pendingEmote: string | null;
 };
 
 /** More casts than this queued for one player are dropped: catching up
@@ -429,6 +431,11 @@ export class TownConnection {
         this.lastSent = null;
         this.opts.onCorrect?.(m.x, m.z);
         return;
+      case "emote": {
+        const r = this.remotes.get(m.id);
+        if (r) r.pendingEmote = m.e;
+        return;
+      }
       default:
         // The boss room's fight.
         this.opts.onMessage?.(m);
@@ -462,6 +469,12 @@ export class TownConnection {
     this.sendJson({ t: "stance", heal });
   }
 
+  /** An emote you played (emotes.ts), for the room to see. */
+  sendEmote(e: string) {
+    if (this.status !== "online") return;
+    this.sendJson({ t: "emote", e });
+  }
+
   /** Knocked out in a raid, and giving up (no reward). */
   sendForfeit() {
     if (this.status !== "online") return;
@@ -493,6 +506,7 @@ export class TownConnection {
       castSeq: existing?.castSeq ?? null,
       pendingCasts: existing?.pendingCasts ?? 0,
       down: !!p.down,
+      pendingEmote: existing?.pendingEmote ?? null,
     });
   }
 

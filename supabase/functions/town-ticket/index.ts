@@ -76,7 +76,7 @@ Deno.serve(async (request) => {
   });
   const { data: herzie, error } = await admin
     .from("herzies")
-    .select("name, friend_code, stage, equipped, level, hp, hp_at, down, class, stat_stamina, stat_sonic, stat_euphony")
+    .select("name, friend_code, stage, equipped, level, hp, hp_at, down, class, stat_stamina, stat_sonic, stat_euphony, emotes")
     .eq("user_id", user.id)
     .maybeSingle();
   if (error) {
@@ -224,6 +224,10 @@ Deno.serve(async (request) => {
       tower,
       lv: herzie.level,
       ...(herzie.class ? { cls: herzie.class as string, sk } : {}),
+      // Owned emotes (00132), so the town-server can refuse one you don't.
+      ...((herzie.emotes as string[] | null)?.length
+        ? { em: herzie.emotes as string[] }
+        : {}),
     },
     TOWN_TICKET_SECRET,
   );

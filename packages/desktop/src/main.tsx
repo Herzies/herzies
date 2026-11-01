@@ -63,6 +63,7 @@ import { useBossResultsShown } from "./components/town/combat/results";
 import { setArmed, setMySkills } from "./components/town/combat/skills";
 import { combat } from "./components/town/combat/state";
 import { homeDropFeed } from "./components/town/dropSpots";
+import { setOwnedEmotes } from "./components/town/emotes";
 import { homeMode, useHomeMode } from "./components/town/homeMode";
 import { townNet } from "./components/town/net/townNet";
 import {
@@ -197,6 +198,7 @@ function App() {
     itemUpgrades: {},
     units: [],
     bankExpansions: 0,
+    emotes: [],
     skills: [],
     friends: {},
     pendingTradeRequest: null,
@@ -382,6 +384,11 @@ function App() {
       cls ? CLASS_DEFS[cls].skills : [],
     );
   }, [rawState.skills, rawState.herzie?.class, classOverride]);
+  // The Town's Alt bar follows the emotes owned, and a new one goes into a
+  // fresh ticket at once: the room only plays the emotes its ticket lists.
+  useEffect(() => {
+    if (setOwnedEmotes(rawState.emotes)) void townNet().refreshLook();
+  }, [rawState.emotes]);
   // How the Town's basic attack goes: by class and the instrument in hand
   // (a Record Slinger throws its discs; without them, a punch or a body
   // slam). A Class Preview draws its class's gear, so it plays it.
@@ -1497,6 +1504,7 @@ function App() {
           // The player's own profile is part of Social.
           title="Social"
           narrow={bigWindow}
+          side="right"
           onHome={base === "home"}
           inTown={townWorld}
         >
@@ -1630,6 +1638,7 @@ function App() {
           onClose={closeWindow}
           title="Social"
           narrow={bigWindow}
+          side="right"
           onHome={base === "home"}
           inTown={townWorld}
         >
@@ -1677,6 +1686,7 @@ function App() {
           onClose={closeWindow}
           title="Leaderboard"
           narrow={bigWindow}
+          side="right"
           onHome={base === "home"}
           inTown={townWorld}
         >
@@ -1734,6 +1744,7 @@ function App() {
           currency={state.inventoryCurrency}
           equipped={state.equipped}
           bankExpansions={state.bankExpansions}
+          emotes={state.emotes}
           active={windowShown("store")}
         />
       </OverlayWindow>

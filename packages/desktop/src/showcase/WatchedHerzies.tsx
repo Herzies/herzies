@@ -68,6 +68,10 @@ function WatchedHerzie({
     const bit = s.flags & TOWN_FLAG_JUMP;
     if (jumpBit.current !== null && bit !== jumpBit.current) herzie.jump();
     jumpBit.current = bit;
+    if (who.pendingEmote) {
+      herzie.emote(who.pendingEmote);
+      who.pendingEmote = null;
+    }
     herzie.update(dt, s.speed);
   });
 

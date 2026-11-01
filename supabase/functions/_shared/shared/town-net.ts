@@ -151,6 +151,9 @@ export type TownTicketPayload = {
   /** Its class skills and their levels, `[skillId, level]`, so the server
    * can judge a skill's strength without a database. */
   sk?: [string, number][];
+  /** The emotes it owns (emotes.ts), so the server can refuse one it
+   * doesn't. Absent: none. */
+  em?: string[];
 };
 
 /** The boss room's half of a ticket. */
@@ -563,6 +566,10 @@ export type ClientMessage =
   /** A Bard's lute: its basic attack heals the ally it's aimed at (true)
    * or hurts (false). Sent on every switch and every arrival. */
   | { t: "stance"; heal: boolean }
+  /** Play an emote (emotes.ts) for everyone in the room. Any room; refused
+   * unless the ticket says you own it, and at most one per
+   * EMOTE_COOLDOWN_MS. */
+  | { t: "emote"; e: string }
   /** Knocked out in a raid, and giving up: out of the fight for good (no
    * reward). The app then respawns you in town. */
   | { t: "forfeit" };
@@ -783,6 +790,8 @@ export type ServerMessage =
   | { t: "buffOff"; id: number; buff: string }
   /** A Bard switched its lute's stance: heal bolts, or attacks. */
   | { t: "stance"; id: number; heal: boolean }
+  /** Someone in the room played an emote. Older apps ignore it. */
+  | { t: "emote"; id: number; e: string }
   /** A Bard began a resurrect on `target` (done at `until`), or it stopped
    * (`target` null). */
   | { t: "channel"; by: number; target: number | null; until: number }

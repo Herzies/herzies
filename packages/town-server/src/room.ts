@@ -15,6 +15,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { parseTune, TUNE_MIN_INTERVAL_MS } from "@herzies/shared/boss-fight";
 import { hasInstrument } from "@herzies/shared/classes";
+import { EMOTE_COOLDOWN_MS, isEmoteId } from "@herzies/shared/emotes";
 import { SKILL_DEFS, skillValue } from "@herzies/shared/skills";
 import { healMult } from "@herzies/shared/stats";
 import {
@@ -126,6 +127,8 @@ type Attachment = {
     maxHp?: number;
     /** Knocked out, outside a fight (from the ticket). */
     down?: boolean;
+    /** The emotes it owns (from the ticket). */
+    emotes?: string[];
     /** Its Resurrect's level (0: it has none), and how much stronger its
      * heals are (its Euphony), for a resurrect outside a fight. */
     rez?: number;
@@ -157,6 +160,8 @@ type Session = {
   tunedAt?: number;
   /** When it last switched its lute's stance (Date.now() ms). */
   stanceAt?: number;
+  /** When it last played an emote (Date.now() ms). */
+  emoteAt?: number;
 };
 
 export class TownRoom extends DurableObject<Env> {
@@ -341,6 +346,7 @@ export class TownRoom extends DurableObject<Env> {
         item?: unknown;
         on?: unknown;
         heal?: unknown;
+        e?: unknown;
       };
       try {
         m = JSON.parse(message);
@@ -356,6 +362,7 @@ export class TownRoom extends DurableObject<Env> {
       else if (m?.t === "tune" && s.player) this.onTune(s, m.on, now);
       else if (m?.t === "stance" && s.player) this.onStance(s, m.heal);
       else if (m?.t === "forfeit" && s.player) this.onForfeit(s, now);
+      else if (m?.t === "emote" && s.player) this.onEmote(s, m.e, now);
       else this.strike(s);
       return;
     }
@@ -457,6 +464,7 @@ export class TownRoom extends DurableObject<Env> {
       maxHp: t.hp?.maxHp,
       rest: new RestMeter(),
       standIn,
+      emotes: t.em,
       ...townVitalsOf(t, !!this.fight),
     };
     this.persist(s);
@@ -514,6 +522,7 @@ export class TownRoom extends DurableObject<Env> {
     for (const o of this.fight?.renew(p.uid, t) ?? []) this.dispatch(o);
     p.name = t.name;
     p.look = t.look;
+    p.emotes = t.em;
     this.persist(s);
     if (changed || downChanged)
       this.broadcast({ t: "look", player: playerOf(p) });
@@ -1031,6 +1040,23 @@ export class TownRoom extends DurableObject<Env> {
     for (const o of this.fight.stance(p.uid, heal)) this.dispatch(o);
   }
 
+  /** An emote, for everyone in the room (and the website's watchers) to
+   * see. Only one the ticket says it owns; one a click's spam would send
+   * faster than EMOTE_COOLDOWN_MS is dropped. */
+  private onEmote(s: Session, e: unknown, now: number) {
+    const p = s.player;
+    if (!p) return;
+    if (!isEmoteId(e)) {
+      this.strike(s);
+      return;
+    }
+    if (!p.emotes?.includes(e)) return;
+    if (s.emoteAt !== undefined && now - s.emoteAt < EMOTE_COOLDOWN_MS - 250)
+      return;
+    s.emoteAt = now;
+    this.broadcast({ t: "emote", id: p.id, e }, s);
+  }
+
   /** Knocked out in a raid, and giving up. */
   private onForfeit(s: Session, now: number) {
     const p = s.player;
@@ -1236,7 +1262,7 @@ export class TownRoom extends DurableObject<Env> {
    * names, in stand-in bodies. Nothing else a room says reaches them. */
   private tellWatchers(m: ServerMessage) {
     let out: ServerMessage | null = null;
-    if (m.t === "leave") out = m;
+    if (m.t === "leave" || m.t === "emote") out = m;
     else if (m.t === "join" || m.t === "look") {
       const id = m.player.id;
       const p = [...this.sessions.values()].find(

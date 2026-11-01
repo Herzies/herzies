@@ -14,9 +14,17 @@ const KEY = "town.debug.pixelSize";
 export const PIXEL_SCALE = 0.4;
 
 /** At Home the camera's in close, so the herzie fills the window: its
- * pixels are drawn this many times bigger, to stay chunky. A whole number,
- * so a Town pixel still covers whole screen pixels. */
-export const HOME_PIXEL_FACTOR = 2;
+ * pixels are drawn this many times bigger, to stay chunky (rounded to whole
+ * screen pixels by homeDpr, so they all come out the same size). */
+export const HOME_PIXEL_FACTOR = 1.4;
+
+/** The canvas resolution at Home, given the Town's (`dpr`): each pixel
+ * HOME_PIXEL_FACTOR times bigger, to the nearest whole screen pixel. */
+export function homeDpr(dpr: number): number {
+  const device = window.devicePixelRatio;
+  const pixel = Math.max(1, Math.round((device / dpr) * HOME_PIXEL_FACTOR));
+  return device / pixel;
+}
 
 /** The default, as screen pixels per Town pixel (to the nearest). */
 export function defaultPixelSize(): number {

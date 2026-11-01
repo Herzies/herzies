@@ -1,4 +1,4 @@
-import { BANK_EXPANSION, getItem } from "@herzies/shared";
+import { BANK_EXPANSION, getItem, isEmoteId } from "@herzies/shared";
 import { NextResponse } from "next/server";
 import { authenticateRequest, isAuthError } from "@/lib/auth";
 import { getStripe } from "@/lib/stripe";
@@ -15,8 +15,10 @@ import { getStripe } from "@/lib/stripe";
  *
  * The Inventory Expansion is listed the same way but joined on
  * `metadata.perk_id` instead, since it is not a catalog item; it comes back in
- * `items` under `itemId: BANK_EXPANSION.id`. The client tells the two apart by
- * whether that id is in its catalog.
+ * `items` under `itemId: BANK_EXPANSION.id`. Emotes likewise, joined on
+ * `metadata.emote_id` and listed under the emote's id (EMOTES). The client
+ * tells them apart by which of its catalogs knows the id (emotes.test.ts
+ * keeps the three from sharing one).
  *
  * Deliberately returns no name, art or description. The client already has
  * all of that in its own catalog under the same id, and echoing it here would
@@ -58,12 +60,15 @@ export async function GET(request: Request) {
     // list something the client cannot render, and — worse — sell it. Same
     // posture as filterDroppablePool takes with the items table.
     const rawItemId = product.metadata?.item_id;
+    const rawEmoteId = product.metadata?.emote_id;
     const itemId =
       rawItemId && getItem(rawItemId)
         ? rawItemId
         : product.metadata?.perk_id === BANK_EXPANSION.id
           ? BANK_EXPANSION.id
-          : null;
+          : isEmoteId(rawEmoteId)
+            ? rawEmoteId
+            : null;
     if (!itemId) return [];
 
     const price = product.default_price;

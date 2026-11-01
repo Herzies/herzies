@@ -20,6 +20,7 @@ import { discField } from "./combat/discs";
 import { shoveFromBoss } from "./combat/fight";
 import { combat } from "./combat/state";
 import { applyDowned, downInRaid } from "./downed";
+import { emotePlayed, emoteRequest } from "./emotes";
 import { HeadBubble } from "./HeadBubble";
 import { keepAtHome } from "./HomeLayer";
 import { HomeShadow } from "./HomeShadow";
@@ -33,6 +34,7 @@ import {
   stepMover,
   walkAzimuth,
 } from "./movement";
+import { townNet } from "./net/townNet";
 import { warpAmount } from "./portal";
 import { townLive, townSave, useTownRuntime } from "./runtime";
 
@@ -421,6 +423,17 @@ export function Player({
       raw.jump = false;
       townLive.lastInputAt = performance.now();
       if (!townLive.seat && !townLive.frozen) herzie.jump();
+    }
+    // An emote from the Alt bar: played here and sent to the room. Not
+    // mid-fight (combat mode), carried through a portal or knocked out.
+    const emote = emoteRequest.id;
+    if (emote) {
+      emoteRequest.id = null;
+      townLive.lastInputAt = performance.now();
+      if (!combat.on && !townLive.frozen && herzie.emote(emote)) {
+        emotePlayed();
+        townNet().sendEmote(emote);
+      }
     }
     // Aiming: gear off its back and in hand — and kept there while a disc
     // it threw is still on its way back to it.

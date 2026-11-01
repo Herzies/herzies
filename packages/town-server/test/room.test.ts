@@ -70,17 +70,27 @@ async function connect(shard: number, query = ""): Promise<Client> {
   return { ws, messages, snapshots, closed, next };
 }
 
-async function ticket(uid: string, name = uid, exp = Date.now() / 1000 + 600) {
+async function ticket(
+  uid: string,
+  name = uid,
+  exp = Date.now() / 1000 + 600,
+  em?: string[],
+) {
   return signTownTicket(
-    { uid, name, look: { seed: `HERZ-${uid}`, stage: 1 }, exp },
+    { uid, name, look: { seed: `HERZ-${uid}`, stage: 1 }, exp, ...(em ? { em } : {}) },
     SECRET,
   );
 }
 
-async function join(shard: number, uid: string, pos = at(0, 0)) {
+async function join(shard: number, uid: string, pos = at(0, 0), em?: string[]) {
   const c = await connect(shard);
   c.ws.send(
-    JSON.stringify({ t: "hello", v: TOWN_PROTOCOL, ticket: await ticket(uid), at: pos }),
+    JSON.stringify({
+      t: "hello",
+      v: TOWN_PROTOCOL,
+      ticket: await ticket(uid, uid, undefined, em),
+      at: pos,
+    }),
   );
   const welcome = await c.next("welcome");
   return { ...c, id: (welcome as { you: number }).you, welcome };
@@ -260,6 +270,22 @@ describe("room", () => {
     b.ws.send(JSON.stringify({ t: "ticket", ticket: await ticket("b", "renamed") }));
     const look = (await a.next("look")) as { player: { name: string } };
     expect(look.player.name).toBe("renamed");
+  });
+
+  it("relays an owned emote, once per cooldown, and drops one not owned", async () => {
+    const shard = ++shardSeq;
+    const a = await join(shard, "a", at(0, 0), ["wave"]);
+    const b = await join(shard, "b");
+    await a.next("join");
+    a.ws.send(JSON.stringify({ t: "emote", e: "wave" }));
+    expect(await b.next("emote")).toEqual({ t: "emote", id: a.id, e: "wave" });
+    // Too soon after: dropped.
+    a.ws.send(JSON.stringify({ t: "emote", e: "wave" }));
+    // Not owned: dropped too.
+    b.ws.send(JSON.stringify({ t: "emote", e: "wave" }));
+    await sleep(200);
+    expect(b.messages.some((m) => m.t === "emote")).toBe(false);
+    expect(a.messages.some((m) => m.t === "emote")).toBe(false);
   });
 
   it("refuses someone else's ticket as a renewal", async () => {

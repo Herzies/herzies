@@ -1429,6 +1429,7 @@ fn apply_inventory(s: &mut ManagedState, snapshot: ItemSnapshot, equip_epoch_bef
         item_upgrades,
         units,
         bank_expansions,
+        emotes,
     } = snapshot;
     s.inventory = Some(inventory.clone());
     // Only ever grows (see sync_tick), and the "inventory full" check needs it
@@ -1436,6 +1437,9 @@ fn apply_inventory(s: &mut ManagedState, snapshot: ItemSnapshot, equip_epoch_bef
     // reads as overflowing.
     if let Some(expansions) = bank_expansions {
         s.bank_expansions = expansions;
+    }
+    if let Some(emotes) = emotes {
+        s.emotes = emotes;
     }
     s.inventory_currency = currency;
     s.item_upgrades = item_upgrades.clone();
@@ -1488,6 +1492,7 @@ fn snapshot_from_response(data: &serde_json::Value, s: &ManagedState) -> Option<
         item_upgrades,
         units,
         bank_expansions: None,
+        emotes: None,
     })
 }
 

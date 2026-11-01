@@ -29,6 +29,7 @@ export function OverlayWindow({
   inTown = false,
   fit: fitProp = false,
   half = false,
+  side,
   className,
   onClosed,
 }: {
@@ -54,6 +55,10 @@ export function OverlayWindow({
    * precedence over `fit` there), the herzie raised above it (the Herzie
    * window). */
   half?: boolean;
+  /** With `narrow` (the big window): stand on the right instead, the whole
+   * height (under the boss's card in a fight), where nothing else is; the
+   * chat and the player card keep the left. */
+  side?: "right";
   className?: string;
   /** The exit has finished playing: it's off screen now. Until then its
    * content should stay as it was (still "active"), or it changes under
@@ -108,6 +113,7 @@ export function OverlayWindow({
 
   // Home's half-height window is a fixed size, not as tall as its content.
   const fit = fitProp && !(half && onHome && !narrow);
+  const right = narrow && side === "right";
 
   const closed = phase === "closed" && !open;
   const closing = phase === "closing";
@@ -126,25 +132,29 @@ export function OverlayWindow({
         // big window's stay in line with its player card.
         "pointer-events-none fixed z-60",
         narrow ? "inset-x-3" : "inset-x-2.5",
-        narrow
-          ? // In the Town's big window: the small window's size, top left,
-            // 8px under the player card and in line with it.
-            "top-[calc(var(--player-card-bottom,32px)+8px)] h-[calc(var(--small-window-height)-var(--player-card-bottom,32px)-14px)] max-h-[calc(100vh-var(--player-card-bottom,32px)-20px)]"
-          : onHome && half
-            ? // On Home, the deck and the bag: the bottom half, down to
-              // just over the nav's row (main.tsx).
-              "top-[calc(50%+1px)] bottom-[36px]"
-            : onHome && !fit
-              ? // On Home, the rest: from the top (12px down, over the
-                // player card) to just over the nav's row.
-                "top-2.5 bottom-[36px]"
-              : fit
-                ? // From the window's top (12px down, over the player card),
-                  // as tall as it needs, down to the nav's row at most.
+        right
+          ? // In the big window, on the right: from the top (under the
+            // boss's card, if there is one) down to just over the skills.
+            "top-[calc(var(--boss-card-bottom,0px)+10px)] bottom-[56px]"
+          : narrow
+            ? // In the Town's big window: the small window's size, top left,
+              // 8px under the player card and in line with it.
+              "top-[calc(var(--player-card-bottom,32px)+8px)] h-[calc(var(--small-window-height)-var(--player-card-bottom,32px)-14px)] max-h-[calc(100vh-var(--player-card-bottom,32px)-20px)]"
+            : onHome && half
+              ? // On Home, the deck and the bag: the bottom half, down to
+                // just over the nav's row (main.tsx).
+                "top-[calc(50%+1px)] bottom-[36px]"
+              : onHome && !fit
+                ? // On Home, the rest: from the top (12px down, over the
+                  // player card) to just over the nav's row.
                   "top-2.5 bottom-[36px]"
-                : // In the Town: the whole height, as on Home (the Herzie
-                  // window is `fit`, as tall as it needs).
-                  "top-2.5 bottom-[36px]",
+                : fit
+                  ? // From the window's top (12px down, over the player card),
+                    // as tall as it needs, down to the nav's row at most.
+                    "top-2.5 bottom-[36px]"
+                  : // In the Town: the whole height, as on Home (the Herzie
+                    // window is `fit`, as tall as it needs).
+                    "top-2.5 bottom-[36px]",
         closed && "hidden",
       )}
       data-tauri-drag-region="false"
@@ -155,7 +165,7 @@ export function OverlayWindow({
         aria-label={title}
         className={cn(
           "pointer-events-auto absolute inset-0 overflow-hidden rounded-2xl border border-white/12 shadow-[0_18px_50px_-12px_rgba(0,0,0,0.7)]",
-          narrow && "right-auto w-[356px]",
+          narrow && (right ? "left-auto w-[356px]" : "right-auto w-[356px]"),
           // A column, so the content shrinks (and scrolls) if it can't fit.
           // Hangs from the top.
           fit && "flex max-h-full flex-col",

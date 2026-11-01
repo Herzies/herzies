@@ -1326,7 +1326,7 @@ export const BOSS_LOOT_EXCLUDED_ITEM_IDS = ["cd"];
 /** What a boss's random loot is drawn from, and how likely each is: every
  * item that drops from listening (not in NON_DROPPABLE_ITEM_IDS, no
  * seasonal window, not in BOSS_LOOT_EXCLUDED_ITEM_IDS), weighted per BOSS_LOOT_RARITY_BOOST. settle_boss_fight
- * rolls from a copy of this list (boss_loot_roll, last in 00128_plutus_crown.sql);
+ * rolls from a copy of this list (boss_loot_roll, last in 00131_luck_wearables.sql);
  * items.test.ts checks the two agree, so a new droppable item needs adding
  * there too. */
 export function bossLootWeights(): { itemId: string; weight: number }[] {
@@ -2858,6 +2858,68 @@ function renderPlutusCrownFrame(yAngle: number): string[] {
   );
 }
 
+function fabianCapCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  // The pink F on the front panel: a stem, a top bar and a shorter middle bar.
+  const fx = ix + 0.02;
+  const inStem = fx > -0.07 && fx < -0.025 && iy > -0.15 && iy < 0.07;
+  const inTop = fx > -0.07 && fx < 0.07 && iy > -0.15 && iy < -0.105;
+  const inMid = fx > -0.07 && fx < 0.04 && iy > -0.055 && iy < -0.015;
+  if (inStem || inTop || inMid) return { bright: 1, color: "#FF5FA8" };
+  // The button on top.
+  if (ix ** 2 + (iy + 0.27) ** 2 < 0.035 ** 2)
+    return { bright: 0.6, color: "#3A3A44" };
+  // The bill: a flat half-moon poking out to the right.
+  if (((ix - 0.18) / 0.22) ** 2 + ((iy - 0.12) / 0.07) ** 2 < 1 && iy > 0.1)
+    return { bright: 0.5, color: "#2A2A32" };
+  // The crown: a black dome, flat underneath, with panel seams.
+  if ((ix / 0.27) ** 2 + ((iy - 0.12) / 0.38) ** 2 < 1 && iy < 0.13) {
+    const seam = Math.abs(ix + 0.15) < 0.01 || Math.abs(ix - 0.15) < 0.01;
+    return { bright: seam ? 0.55 : 0.68, color: "#3A3A44" };
+  }
+  return null;
+}
+
+function renderFabianCapFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#FF5FA8",
+    "#3A3A44",
+    "#16161C",
+    fabianCapCardIcon,
+  );
+}
+
+function fedoraCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  // The brim: a wide flat ellipse, curling up a touch at either end.
+  const curl = 0.03 * (ix / 0.36) ** 2;
+  if ((ix / 0.36) ** 2 + ((iy - 0.15 + curl) / 0.055) ** 2 < 1)
+    return { bright: 0.75, color: "#7A6650" };
+  // The dark band.
+  if (Math.abs(ix) < 0.2 && iy > 0.04 && iy < 0.11)
+    return { bright: 0.55, color: "#2B2420" };
+  // The crown: tapered, with a pinch down the middle of its top.
+  if (iy <= 0.04 && iy > -0.22) {
+    const t = (0.04 - iy) / 0.26; // 0 at the band, 1 at the top
+    const half = 0.2 - 0.05 * t;
+    const pinch = iy < -0.17 && Math.abs(ix) < 0.03;
+    if (Math.abs(ix) < half && !pinch)
+      return { bright: 0.8 - 0.1 * t, color: "#8C7558" };
+  }
+  return null;
+}
+
+function renderFedoraFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#B49A78",
+    "#6E5A44",
+    "#2A221A",
+    fedoraCardIcon,
+  );
+}
+
 function renderWitchHatFrame(yAngle: number): string[] {
   return renderIconCard(
     yAngle,
@@ -3037,6 +3099,8 @@ const cymbalFrames = generateFrames(renderCymbalFrame);
 const witchHatFrames = generateFrames(renderWitchHatFrame);
 const sixpenceFrames = generateFrames(renderSixpenceFrame);
 const plutusCrownFrames = generateFrames(renderPlutusCrownFrame);
+const fabianCapFrames = generateFrames(renderFabianCapFrame);
+const fedoraFrames = generateFrames(renderFedoraFrame);
 const fangsFrames = generateFrames(renderFangsFrame);
 const pumpkinSpiceFrames = generateFrames(renderPumpkinSpiceFrame);
 const ghostFrames = generateFrames(renderGhostFrame);
@@ -3689,6 +3753,30 @@ export const ITEMS: ItemDef[] = [
     sellPrice: 5,
     // Sold by Medea (MEDEA_STOCK) and never dropped (NON_DROPPABLE_ITEM_IDS).
     consumable: { heal: 100 },
+  },
+  // Appended rather than filed beside the other hats: a card's number is its
+  // place in this list (ItemCard), so inserting mid-list renumbers others.
+  {
+    id: "fabulous-fabian",
+    name: "Fabulous Fabian",
+    description: "Increases your chances of getting into a cool club.",
+    rarity: "rare",
+    frames: fabianCapFrames,
+    equipable: true,
+    equipSlot: "head",
+    sellPrice: 250,
+    stats: { luck: 10 },
+  },
+  {
+    id: "fyllings-fedora",
+    name: "Fylling's Fedora",
+    description: "Decreases your chances of getting into a cool club.",
+    rarity: "rare",
+    frames: fedoraFrames,
+    equipable: true,
+    equipSlot: "head",
+    sellPrice: 250,
+    stats: { luck: 10 },
   },
 ];
 

@@ -52,6 +52,7 @@ import {
   type Sphere,
   schemeShades,
   schemeSpan,
+  WAVE_ARM,
 } from "../creature-renderer.js";
 import {
   createDangleSim,
@@ -63,6 +64,7 @@ import {
   isDangleSettled,
   stepDangle,
 } from "../dangle-physics.js";
+import { EMOTE_SECONDS } from "../emotes.js";
 import type { Equipped } from "../items.js";
 import {
   createThreadSim,
@@ -159,6 +161,10 @@ const LAND_SECONDS = 0.16;
 /** How far it stretches at full speed up or down, eased in at takeoff. */
 const AIR_STRETCH = 0.1;
 const TAKEOFF_SECONDS = 0.05;
+/** The armless wave: a hop with a full turn in the air, higher and longer
+ * than a jump so the spin reads. */
+const SPIN_HOP_HEIGHT = 1.05;
+const SPIN_HOP_SECONDS = 0.62;
 /** How long a sonic cast takes, draw to home again, in seconds. The wave
  * leaves the hand CAST.release of the way through. */
 export const CAST_SECONDS = 0.4;
@@ -625,6 +631,11 @@ export class HerzieModel {
   /** The arm this cast is with, and how it moves (a disc is thrown). */
   private castArmPart: string = CAST_ARM;
   private castStyle: CastStyle = "cast";
+  /** Seconds into an emote; undefined when none is playing. How it plays:
+   * a wave of `waveArmPart`, or, with no arms, a spin hop. */
+  private emoteTime: number | undefined;
+  private emoteMove: "wave" | "spin" = "wave";
+  private waveArmPart: string = WAVE_ARM;
   /** Seconds into a catch's jolt, and the arm that caught. */
   private catchTime: number | undefined;
   private catchArm: string = CAST_ARM;
@@ -1157,8 +1168,12 @@ export class HerzieModel {
     this.stepDraw(dt);
     this.stepCast(dt);
     this.stepCatch(dt);
+    this.stepEmote(dt);
     this.swing(dt);
-    this.turn.rotation.y = this.heading;
+    // A spin hop turns it once round, eased in and out.
+    const u = this.spinPhase;
+    this.turn.rotation.y =
+      this.heading + (u === undefined ? 0 : u * u * (3 - 2 * u) * Math.PI * 2);
     this.pose();
     this.animateBody();
     this.drawCloak();
@@ -1181,6 +1196,54 @@ export class HerzieModel {
     this.landTime = undefined;
     this.jumps += 1;
     return true;
+  }
+
+  /**
+   * Plays an emote (emotes.ts). A wave raises an arm and waves it; a herzie
+   * without arms (stage 1) does a little spin hop instead — the body only,
+   * like a jump, so it never stops it walking, and it doesn't count as a
+   * jump (other clients get the emote, not a jump flag). Returns whether it
+   * started: not for an unknown emote, nor a spin while seated.
+   */
+  emote(id: string): boolean {
+    if (id !== "wave") return false;
+    const arm =
+      this.armAt[WAVE_ARM] >= 0
+        ? WAVE_ARM
+        : this.armAt[CAST_ARM] >= 0
+          ? CAST_ARM
+          : null;
+    if (arm) {
+      this.emoteMove = "wave";
+      this.waveArmPart = arm;
+    } else {
+      if (this.sitting || this.sitWeight > 0.01) return false;
+      this.emoteMove = "spin";
+    }
+    this.emoteTime = 0;
+    return true;
+  }
+
+  /** Whether an emote is playing. */
+  get emoting(): boolean {
+    return this.emoteTime !== undefined;
+  }
+
+  private stepEmote(dt: number) {
+    if (this.emoteTime === undefined) return;
+    this.emoteTime += dt;
+    const spin = this.emoteMove === "spin";
+    if (this.emoteTime < (spin ? SPIN_HOP_SECONDS : EMOTE_SECONDS)) return;
+    this.emoteTime = undefined;
+    // Down from the spin hop: the jump's landing squash.
+    if (spin && this.airTime === undefined) this.landTime = 0;
+  }
+
+  /** 0..1 through the spin hop; undefined when not spinning. */
+  private get spinPhase(): number | undefined {
+    return this.emoteMove === "spin" && this.emoteTime !== undefined
+      ? Math.min(1, this.emoteTime / SPIN_HOP_SECONDS)
+      : undefined;
   }
 
   /** Whether it's off the ground, mid-jump. */
@@ -1871,6 +1934,11 @@ export class HerzieModel {
           ? undefined
           : this.catchTime / CATCH_SECONDS,
       catchArm: this.catchArm,
+      wavePhase:
+        this.emoteMove === "wave" && this.emoteTime !== undefined
+          ? this.emoteTime / EMOTE_SECONDS
+          : undefined,
+      waveArm: this.waveArmPart,
       drawPhase: this.drawPhase,
       heldSway: this.heldSway,
     };
@@ -1980,11 +2048,20 @@ export class HerzieModel {
       const v = (JUMP_SPEED - JUMP_GRAVITY * this.airTime) / JUMP_SPEED;
       const takeoff = Math.min(1, this.airTime / TAKEOFF_SECONDS);
       squash = -AIR_STRETCH * Math.abs(v) * takeoff;
+    } else if (this.spinPhase !== undefined) {
+      // The spin hop stretches like a jump, fastest at either end.
+      const u = this.spinPhase;
+      const takeoff = Math.min(1, (u * SPIN_HOP_SECONDS) / TAKEOFF_SECONDS);
+      squash = -AIR_STRETCH * Math.abs(1 - 2 * u) * takeoff;
     } else if (this.landTime !== undefined) {
       const u = this.landTime / LAND_SECONDS;
       squash = Math.max(squash, LAND_SQUASH * (1 - u) ** 2);
     }
-    const hop = this.jumpHeight;
+    const su = this.spinPhase;
+    const hop = Math.max(
+      this.jumpHeight,
+      su === undefined ? 0 : SPIN_HOP_HEIGHT * 4 * su * (1 - su),
+    );
     const wide = MODEL_SCALE * (1 - breath * 0.6 + squash * 0.7);
     const tall = MODEL_SCALE * (1 + breath - squash);
     this.creature.scale.set(wide, tall, wide);

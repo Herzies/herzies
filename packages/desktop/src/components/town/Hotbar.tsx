@@ -19,6 +19,7 @@ import {
   useSkills,
 } from "./combat/skills";
 import { canHeal, toggleStance, useStance } from "./combat/stance";
+import { EmoteBar } from "./EmoteBar";
 import { eat, useLastEat } from "./eat";
 import {
   assignHotbar,
@@ -274,6 +275,8 @@ export function Hotbar({
 
   return (
     <div className={cn("absolute z-30 flex gap-1", className)}>
+      {/* Held Alt: the emotes, just over the slots. */}
+      <EmoteBar className="bottom-full inset-x-0 mb-1.5" />
       <StanceSlot />
       {HOTBAR_KEYS.map((key) => {
         const n = skillOfSlot(slots[key]);

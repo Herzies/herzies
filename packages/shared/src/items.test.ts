@@ -362,6 +362,15 @@ describe("seasonal drop windows", () => {
     expect(getHerzieStats({ body: "gold-chain" }).luck).toBe(10);
     expect(getHerzieStats({ body: "pearl-necklace" }).luck).toBe(5);
     expect(getHerzieStats({ body: "bowtie" }).luck).toBe(0);
+    for (const id of ["fabulous-fabian", "fyllings-fedora"]) {
+      const item = getItem(id);
+      expect(item?.rarity).toBe("rare");
+      expect(item?.stats?.luck).toBe(10);
+      // Drop-only: in the listening pool and boss loot, never in a shop.
+      expect(NON_DROPPABLE_ITEM_IDS).not.toContain(id);
+      expect(bossLootWeights().map((w) => w.itemId)).toContain(id);
+    }
+    expect(getHerzieStats({ head: "fyllings-fedora" }).luck).toBe(10);
   });
 });
 
@@ -1631,9 +1640,9 @@ describe("boss loot", () => {
       new URL(`../../../supabase/migrations/${name}`, import.meta.url),
       "utf8",
     );
-  // settle_boss_fight lives in 00114; the roll was last replaced in 00128.
+  // settle_boss_fight lives in 00114; the roll was last replaced in 00131.
   const sql = migration("00114_boss_bonus_loot.sql");
-  const rollSql = migration("00128_plutus_crown.sql");
+  const rollSql = migration("00131_luck_wearables.sql");
 
   it("rolls from the same weights as bossLootWeights", () => {
     const roll = rollSql.slice(
