@@ -177,6 +177,19 @@ export const TOWER_GUARD_RAMP = [
 ] as const;
 
 /**
+ * Pip, a stage 1 herzie who's just getting into music. No item grants it:
+ * a fresh mint green fading to a deep pine, young and a little green.
+ */
+export const PIP_RAMP = [
+  "#9CF2C0",
+  "#74E0A4",
+  "#4FC487",
+  "#36A06C",
+  "#247A52",
+  "#15523A",
+] as const;
+
+/**
  * Medea, who sells sweets and potions and is always in Town. No item grants
  * it: candy pink at the crown sinking through orchid and violet into a plum
  * that's nearly black at her feet — sweet on top, darker underneath.

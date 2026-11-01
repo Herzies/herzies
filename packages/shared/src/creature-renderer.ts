@@ -18,6 +18,7 @@ import {
   MEDEA_RAMP,
   NANDOR_RAMP,
   OCEAN_RAMP,
+  PIP_RAMP,
   PUMPKIN_RAMP,
   RAINBOW_RAMP,
   RAMP_HERZIE,
@@ -3055,6 +3056,8 @@ export const BOBOKU_SCHEME_ID = "npc-boboku";
 export const MEDEA_SCHEME_ID = "npc-medea";
 /** Colour-scheme key for the Tower Guard's slate, the same arrangement again. */
 export const TOWER_GUARD_SCHEME_ID = "npc-tower-guard";
+/** Colour-scheme key for Pip's mint green, the same arrangement again. */
+export const PIP_SCHEME_ID = "npc-pip";
 
 const COLOR_SCHEMES: Record<string, readonly string[]> = {
   prism: RAINBOW_RAMP,
@@ -3072,6 +3075,7 @@ const COLOR_SCHEMES: Record<string, readonly string[]> = {
   [BOBOKU_SCHEME_ID]: BOBOKU_RAMP,
   [MEDEA_SCHEME_ID]: MEDEA_RAMP,
   [TOWER_GUARD_SCHEME_ID]: TOWER_GUARD_RAMP,
+  [PIP_SCHEME_ID]: PIP_RAMP,
 };
 
 /** True for spheres that a colour scheme is allowed to repaint. */

@@ -281,6 +281,7 @@ export const SPOT_NAMES: Record<string, string> = {
   medea: "Medea",
   market: "Plutus",
   tower_guard: "Tower Guard",
+  pip: "Pip",
 };
 
 /** The centre of a cell, in world (x, z). */

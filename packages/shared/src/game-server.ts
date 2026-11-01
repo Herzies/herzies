@@ -58,6 +58,7 @@ import {
   withStatPoints,
   xpBonusConfig,
 } from "./game-rules.js";
+import { QUEST_GIVERS } from "./quests.js";
 
 /** Minimum gap between two *billable* syncs, measured from `last_billed_at`.
  *
@@ -121,6 +122,35 @@ function leadArtist(s: string): string {
   return normalizeTrack(s)
     .split(/\s*(?:&|,|\bfeat\.|\bft\.|\bfeaturing\b|\bwith\b)\s*/)[0]
     .trim();
+}
+
+/**
+ * A new track started: move the user's new-artist quests along (00130).
+ * Call it before the track goes into listen_log. Returns the quests it
+ * finished. A database without quests (before 00130) just finishes none.
+ */
+export async function noteQuestArtist(
+  admin: SupabaseClient,
+  userId: string,
+  artist: string,
+): Promise<{ id: string; giver: string; giverName: string; title: string }[]> {
+  try {
+    const { data, error } = await admin.rpc("quest_note_artist", {
+      p_user: userId,
+      p_artist: artist,
+    });
+    if (error || !data) return [];
+    const done = (data as { completed?: unknown }).completed;
+    if (!Array.isArray(done)) return [];
+    return done.map((q: { id: string; giver: string; title: string }) => ({
+      id: q.id,
+      giver: q.giver,
+      giverName: QUEST_GIVERS[q.giver] ?? q.giver,
+      title: q.title,
+    }));
+  } catch {
+    return [];
+  }
 }
 
 /** Check if a now_playing matches a secret track event config */
@@ -380,6 +410,19 @@ export async function processSync(
       prev.title !== nowPlaying.title ||
       prev.artist !== nowPlaying.artist;
     if (trackChanged) {
+      // Quests move before the play is logged: "never heard them before"
+      // means no row for the artist yet.
+      for (const done of await noteQuestArtist(
+        admin,
+        userId,
+        nowPlaying.artist,
+      )) {
+        notifications.push({
+          type: "info",
+          title: "Quest complete",
+          message: `Finished "${done.title}" — go see ${done.giverName}`,
+        });
+      }
       const classifiedGenre =
         genres.length > 0 ? classifyGenre(genres)[0] : undefined;
       await admin.from("listen_log").insert({

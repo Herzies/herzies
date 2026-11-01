@@ -49,6 +49,7 @@ import { OnboardingScreen } from "./components/OnboardingScreen";
 import { OverlayWindow } from "./components/OverlayWindow";
 import { ProfileView } from "./components/ProfileView";
 import { PromptOverlay } from "./components/PromptOverlay";
+import { QuestsView } from "./components/QuestsView";
 import { SettingsView } from "./components/SettingsView";
 import { SkillsPanel } from "./components/SkillsPanel";
 import { SplashScreen } from "./components/SplashScreen";
@@ -889,6 +890,7 @@ function App() {
       t: "events",
       f: "friends",
       l: "leaderboard",
+      u: "quests",
       p: "store",
     };
 
@@ -1651,6 +1653,20 @@ function App() {
             active={windowShown("friends")}
             rootKey={rootKeys.friends ?? 0}
           />
+        </OverlayWindow>
+      )}
+
+      {herzie && (
+        <OverlayWindow
+          open={overlay === "quests"}
+          onClosed={windowClosed("quests")}
+          onClose={closeWindow}
+          title="Quests"
+          narrow={bigWindow}
+          onHome={base === "home"}
+          inTown={townWorld}
+        >
+          <QuestsView active={windowShown("quests")} />
         </OverlayWindow>
       )}
 

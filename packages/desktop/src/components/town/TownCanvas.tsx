@@ -206,6 +206,7 @@ export default function TownCanvas(props: TownCanvasProps) {
                 key={s.key}
                 spot={s}
                 ground={groundY(map, s.at.x, s.at.z)}
+                map={map}
                 onOpen={props.onOpen}
               />
             ))}

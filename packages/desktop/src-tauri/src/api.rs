@@ -903,6 +903,21 @@ pub async fn api_fetch_tower_guard(client: &Client) -> Result<serde_json::Value,
     api_get(client, "/npc/tower-guard").await
 }
 
+/// Your quests and what each quest giver offers today.
+pub async fn api_fetch_quests(client: &Client) -> Result<serde_json::Value, String> {
+    api_get(client, "/quests").await
+}
+
+/// Takes today's quest from a giver (an NPC key).
+pub async fn api_accept_quest(client: &Client, giver: &str) -> Result<serde_json::Value, String> {
+    api_buy(client, "/quests/accept", serde_json::json!({ "giver": giver })).await
+}
+
+/// Turns a finished quest in to its giver for the reward.
+pub async fn api_claim_quest(client: &Client, id: &str) -> Result<serde_json::Value, String> {
+    api_buy(client, "/quests/claim", serde_json::json!({ "id": id })).await
+}
+
 /// GETs a JSON reply, with the server's error message on a refusal.
 async fn api_get(client: &Client, path: &str) -> Result<serde_json::Value, String> {
     let resp = api_fetch(client, reqwest::Method::GET, path, None)

@@ -18,6 +18,10 @@ import {
   NANDOR_EQUIPPED,
   NANDOR_SEED,
   ORPHIEZ_EQUIPPED,
+  PIP_EQUIPPED,
+  PIP_KEY,
+  PIP_SEED,
+  PIP_STAGE,
   TOWER_GUARD_EQUIPPED,
   TOWER_GUARD_KEY,
   TOWER_GUARD_SEED,
@@ -89,6 +93,8 @@ export function lookOf(card: EventCard): Look {
         stage: MARKET_STAGE,
         equipped: MARKET_EQUIPPED,
       };
+    case PIP_KEY:
+      return { seed: PIP_SEED, stage: PIP_STAGE, equipped: PIP_EQUIPPED };
     case TOWER_GUARD_KEY:
       return {
         seed: TOWER_GUARD_SEED,

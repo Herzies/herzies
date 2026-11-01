@@ -20,6 +20,8 @@ import {
   MEDEA_KEY,
   MEDEA_NAME,
   MERCHANT_NAME,
+  PIP_KEY,
+  PIP_NAME,
   type StatPoints,
   TOWER_GUARD_KEY,
   TOWER_GUARD_NAME,
@@ -33,6 +35,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useEscape } from "../lib/escapeStack";
 import { HerzieStageContext } from "../lib/overlayStage";
+import { useQuestBoard } from "../lib/quests";
 import { cn } from "../lib/utils";
 import {
   type AppState,
@@ -53,6 +56,7 @@ import { LoadingSplash } from "./LoadingSplash";
 import { MarketPanel } from "./MarketPanel";
 import { MerchantPanel } from "./MerchantPanel";
 import { OrphiezStage } from "./OrphiezStage";
+import { PIP, QuestGiverPanel } from "./QuestGiverPanel";
 import { TabButton } from "./TabButton";
 import { TowerGuardPanel } from "./TowerGuardPanel";
 import type { EventCard } from "./TownScene";
@@ -593,6 +597,15 @@ function EventsViewImpl({
     };
   }, [active, guardKey, guardOpen]);
 
+  // Pip's quests (and anyone else who gives them): one board, shared with
+  // the Quests window. His "!" is a quest to take or one to turn in.
+  const questBoard = useQuestBoard(active);
+  const pipNotice =
+    !!questBoard?.offers[PIP_KEY] ||
+    !!questBoard?.quests.some(
+      (q) => q.giver === PIP_KEY && q.status === "complete",
+    );
+
   // Plutus's board: your listings, and what's waiting there (his "!").
   // Fetched with the Town, every few minutes while it's up, and whenever his
   // panel opens or closes.
@@ -816,6 +829,17 @@ function EventsViewImpl({
       detail: "Doubts you",
       notice: !!towerGuard?.reward.eligible,
     });
+    // And Pip, who hands out small daily quests.
+    cards.push({
+      type: PIP_KEY,
+      title: PIP_NAME,
+      description: null,
+      status: "live",
+      at: null,
+      openKey: PIP_KEY,
+      detail: "Wants to learn about music",
+      notice: pipNotice || undefined,
+    });
     // Nearest in time first: what's on now, then what starts soonest, then
     // types with nothing on the calendar.
     const when = (c: EventCard) =>
@@ -973,6 +997,26 @@ function EventsViewImpl({
             guard={towerGuard}
             equipped={equipped}
             onClaimed={() => setGuardKey((k) => k + 1)}
+            onLog={onLog}
+            paused={!active || !focused}
+          />
+        </ScreenView>
+      );
+    }
+
+    if (selected === PIP_KEY) {
+      return (
+        <ScreenView
+          inPanel={screenInPanel}
+          ownName
+          title={PIP_NAME}
+          colour="cyan"
+          childrenClassName="flex min-h-0 flex-col"
+          backButton={back}
+        >
+          <QuestGiverPanel
+            giver={PIP}
+            board={questBoard}
             onLog={onLog}
             paused={!active || !focused}
           />

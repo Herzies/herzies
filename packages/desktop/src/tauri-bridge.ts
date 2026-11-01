@@ -151,6 +151,38 @@ export type TowerGuard = {
   reward: { eligible: boolean; itemId: string | null; event: string | null };
 };
 
+/** A quest's definition, as a giver offers it (shared quests.ts). */
+export type QuestOffer = {
+  id: string;
+  giver: string;
+  title: string;
+  description: string;
+  kind: string;
+  target: number;
+  reward: { xp: number; coins: number };
+};
+
+/** A quest you hold (user_quests, 00130). */
+export type Quest = {
+  id: string;
+  questId: string;
+  giver: string;
+  giverName: string;
+  title: string;
+  description: string;
+  progress: number;
+  target: number;
+  status: "active" | "complete" | "claimed";
+  day: string;
+  reward: { xp: number; coins: number } | null;
+};
+
+/** Your quests, and per giver today's quest if you can take it. */
+export type QuestBoard = {
+  quests: Quest[];
+  offers: Record<string, QuestOffer | null>;
+};
+
 export const herzies = {
   getState: () => invoke<AppState>("get_state"),
 
@@ -289,6 +321,20 @@ export const herzies = {
   /** Takes the month's best climber's reward from the Tower Guard. */
   claimTowerReward: () =>
     invoke<{ itemId: string; inventory: Inventory }>("claim_tower_reward"),
+  /** Your quests and what each quest giver offers today. */
+  fetchQuests: () => invoke<QuestBoard>("fetch_quests"),
+  /** Takes today's quest from a giver (an NPC key). */
+  acceptQuest: (giver: string) =>
+    invoke<{ quest: QuestOffer; board: QuestBoard | null }>("accept_quest", {
+      giver,
+    }),
+  /** Turns a finished quest in: coins now, XP on the next sync. */
+  claimQuest: (id: string) =>
+    invoke<{
+      reward: { xp: number; coins: number };
+      newCurrency: number;
+      board: QuestBoard | null;
+    }>("claim_quest", { id }),
   /** Buys from Medea, who's always in Town: sweets and potions. */
   buyFromMedea: (itemId: string, quantity: number) =>
     invoke<{

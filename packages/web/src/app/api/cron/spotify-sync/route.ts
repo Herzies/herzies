@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { verifySecret } from "@/lib/admin-auth";
-import { processSync } from "@/lib/game-server";
+import { noteQuestArtist, processSync } from "@/lib/game-server";
 import type { SpotifyConnection } from "@/lib/spotify";
 import { getRecentlyPlayed, getValidAccessToken } from "@/lib/spotify";
 import { createAdminClient } from "@/lib/supabase-admin";
@@ -117,6 +117,9 @@ async function syncUser(
       if (track.playedAt > latestPlayedAt) {
         latestPlayedAt = track.playedAt;
       }
+
+      // Quests move first: "never heard them before" means no row yet.
+      await noteQuestArtist(admin, connection.user_id, track.artistName);
 
       // Log to listen_log for stats
       await admin.from("listen_log").insert({

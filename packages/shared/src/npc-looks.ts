@@ -3,6 +3,7 @@ import {
   GOLD_SCHEME_ID,
   MEDEA_SCHEME_ID,
   NANDOR_SCHEME_ID,
+  PIP_SCHEME_ID,
   TOWER_GUARD_SCHEME_ID,
 } from "./creature-renderer.js";
 import type { Equipped } from "./items.js";
@@ -66,4 +67,13 @@ export const MARKET_EQUIPPED: Equipped = {
   body: "pearl-necklace",
   back: "troubadour-mantle",
   color: "purple-dane",
+};
+
+/** Pip's look: a hatchling (stage 1) in mint green, with headphones on that
+ * are a little too big for him — he's still learning. */
+export const PIP_SEED = "npc:pip";
+export const PIP_STAGE = 1;
+export const PIP_EQUIPPED: Equipped = {
+  head: "headphones",
+  color: PIP_SCHEME_ID,
 };

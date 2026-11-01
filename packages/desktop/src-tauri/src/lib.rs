@@ -788,6 +788,31 @@ async fn claim_tower_reward(
 }
 
 #[tauri::command]
+async fn fetch_quests() -> Result<serde_json::Value, String> {
+    let client = api::http();
+    api::api_fetch_quests(&client).await
+}
+
+#[tauri::command]
+async fn accept_quest(giver: String) -> Result<serde_json::Value, String> {
+    let client = api::http();
+    api::api_accept_quest(&client, &giver).await
+}
+
+/// Turning a quest in pays coins now (XP on the next sync).
+#[tauri::command]
+async fn claim_quest(
+    id: String,
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    let client = api::http();
+    let data = api::api_claim_quest(&client, &id).await?;
+    apply_purchase(&data, &app, &state);
+    Ok(data)
+}
+
+#[tauri::command]
 async fn buy_from_medea(
     item_id: String,
     quantity: u32,
@@ -2845,6 +2870,9 @@ pub fn run() {
             buy_from_boboku,
             fetch_tower_guard,
             claim_tower_reward,
+            fetch_quests,
+            accept_quest,
+            claim_quest,
             buy_from_medea,
             market_list,
             market_cancel,
