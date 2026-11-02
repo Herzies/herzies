@@ -25,8 +25,6 @@ export type TownRuntime = {
   /** Ground speed the player actually moved at last step (after
    * collisions), for its walk cycle. */
   playerSpeed: number;
-  /** The player's herzie walks on two feet (stage 3) rather than hopping. */
-  playerLegs: boolean;
   /** How far either side of its middle the player's feet come down (0:
    * it hops; see HerzieModel's footSpread). */
   playerFootSpread: number;

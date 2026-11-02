@@ -57,7 +57,6 @@ export function Showcase({
       input: { current: null } as unknown as TownRuntime["input"],
       playerBody: null,
       playerSpeed: 0,
-      playerLegs: false,
       playerFootSpread: 0,
       playerHerzie: null,
       playerRigidBody: null,

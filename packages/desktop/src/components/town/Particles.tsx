@@ -6,7 +6,6 @@ import { ambient, seasonNow } from "./ambient";
 import { chimneysOf } from "./Buildings";
 import { FOOTPRINT_LIFE, footprints, Trail } from "./footprints";
 import {
-  cellAt,
   cellCenter,
   groundY,
   isSunk,
@@ -20,7 +19,7 @@ import { useTownRuntime } from "./runtime";
 /**
  * Little things that move: fireflies at night, smoke from chimneys,
  * butterflies over flowers by day, leaves falling from the trees (or
- * blossom, in spring), snow in winter, and dust kicked up at your feet.
+ * blossom, in spring), and snow in winter.
  * How many of each comes and goes with the seasons (see Seasons.ts). Each is one draw call: point
  * sprites (crisp squares, like the rest of the pixelated Town) or a small
  * instanced mesh, moved on the CPU — there are only ever a few hundred.
@@ -34,7 +33,6 @@ export function Particles({ map }: { map: TownMap }) {
       <FallingLeaves map={map} />
       <Snowfall />
       <SnowPrints map={map} />
-      <Dust map={map} />
     </>
   );
 }
@@ -255,103 +253,6 @@ function Smoke({ map }: { map: TownMap }) {
     pts.flush();
   });
   if (chimneys.length === 0) return null;
-  return (
-    <points
-      geometry={pts.geometry}
-      material={pts.material}
-      frustumCulled={false}
-    />
-  );
-}
-
-// --- Footstep dust -------------------------------------------------------------
-
-const DUST = 24;
-const DUST_LIFE = 0.45;
-/** Ground covered between puffs, in world units. */
-const DUST_EVERY = 0.4;
-/** How far either side of its path a foot comes down (two-legged). */
-const DUST_FOOT = 0.22;
-
-/** Small, faint puffs at the player's feet while they run, the colour of
- * what they're running on — none on bridges or in water. Dropped where the
- * herzie is drawn (its interpolated body, not the physics step ahead of
- * it), every so far walked rather than every so often, so they stay
- * evenly spaced at its feet through a slow frame. A hopping herzie leaves
- * one line; one on legs leaves two, left foot, right foot (one line dead
- * centre behind it read as something else entirely). */
-function Dust({ map }: { map: TownMap }) {
-  const rt = useTownRuntime();
-  const pts = usePoints(DUST, THREE.NormalBlending);
-  const pool = useRef(
-    Array.from({ length: DUST }, () => ({
-      x: 0,
-      y: 0,
-      z: 0,
-      born: -10,
-      dx: 0,
-      dz: 0,
-    })),
-  );
-  const next = useRef(0);
-  /** Where the last puff dropped, or null when not running. */
-  const lastPuff = useRef<{ x: number; z: number } | null>(null);
-  /** Which foot is next: 1 or −1. */
-  const foot = useRef(1);
-  const feet = useMemo(() => new THREE.Vector3(), []);
-  const rand = useMemo(() => mulberry32(99), []);
-  const gravel = useMemo(() => new THREE.Color("#a89c8c"), []);
-  const grass = useMemo(() => new THREE.Color("#7a9a6a"), []);
-
-  useFrame(({ clock }) => {
-    const t = clock.elapsedTime;
-    const body = rt.playerBody;
-    if (body && rt.playerSpeed > 2.5) {
-      body.getWorldPosition(feet);
-      const last = lastPuff.current;
-      if (!last) lastPuff.current = { x: feet.x, z: feet.z };
-      else if (Math.hypot(feet.x - last.x, feet.z - last.z) >= DUST_EVERY) {
-        // Off to the side of the way it's going, a foot at a time.
-        const moved = Math.hypot(feet.x - last.x, feet.z - last.z);
-        foot.current = -foot.current;
-        const side = rt.playerLegs ? foot.current * DUST_FOOT : 0;
-        const fx = feet.x + (-(feet.z - last.z) / moved) * side;
-        const fz = feet.z + ((feet.x - last.x) / moved) * side;
-        lastPuff.current = { x: feet.x, z: feet.z };
-        const [c, r] = cellAt(map, fx, fz);
-        const ground = terrainAt(map, c, r);
-        if (ground === "g" || ground === ".") {
-          const i = next.current;
-          next.current = (i + 1) % DUST;
-          pool.current[i] = {
-            x: fx + (rand() - 0.5) * 0.08,
-            y: feet.y,
-            z: fz + (rand() - 0.5) * 0.08,
-            born: t,
-            dx: (rand() - 0.5) * 0.3,
-            dz: (rand() - 0.5) * 0.3,
-          };
-          pts.color(i, ground === "g" ? gravel : grass);
-        }
-      }
-    } else lastPuff.current = null;
-    pool.current.forEach((p, i) => {
-      const age = (t - p.born) / DUST_LIFE;
-      if (age > 1) {
-        pts.set(i, 0, -10, 0, 0, 0);
-        return;
-      }
-      pts.set(
-        i,
-        p.x + p.dx * age,
-        p.y + 0.06 + age * 0.18,
-        p.z + p.dz * age,
-        0.1 + age * 0.12,
-        0.35 * (1 - age),
-      );
-    });
-    pts.flush();
-  });
   return (
     <points
       geometry={pts.geometry}

@@ -61,7 +61,6 @@ const useRuntime = () => {
     input: { current: null },
     playerBody: null,
     playerSpeed: 0,
-    playerLegs: false,
     playerFootSpread: 0,
     playerHerzie: null,
     playerRigidBody: null,

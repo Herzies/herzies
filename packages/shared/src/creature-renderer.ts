@@ -311,6 +311,9 @@ export interface Sphere {
   /** Polished metal (the cymbal): it mirrors the sky, and its lathe grooves
    * catch the sun in a bright bar across it. See herzieMaterial. */
   finish?: "metal";
+  /** Where the Evasive Pair's sparkles come from: a wing tip (the trail)
+   * or a foot (footfalls). See gl/shoeSparkles.ts. */
+  sparkle?: "wing" | "foot";
 }
 
 export interface Shape {
@@ -3169,8 +3172,22 @@ function buildEvasivePairSpheres(spheres: Sphere[]): Sphere[] {
     const [lx, ly, lz] = leg.center;
     const r = leg.radius;
     const side = LIMB_SIDE[part];
-    const push = (center: V3, radius: number, color: string, shape?: Shape) =>
-      result.push({ center, radius, zone: "wearable", part, color, shape });
+    const push = (
+      center: V3,
+      radius: number,
+      color: string,
+      shape?: Shape,
+      sparkle?: Sphere["sparkle"],
+    ) =>
+      result.push({
+        center,
+        radius,
+        zone: "wearable",
+        part,
+        color,
+        shape,
+        ...(sparkle && { sparkle }),
+      });
     // Creature space is y down: up is −y; the face (and the toe) is −z.
     // A low shoe: it covers the bottom of the foot and leaves the rest of
     // the leg showing above it. Built from rings of small spheres round the
@@ -3199,31 +3216,60 @@ function buildEvasivePairSpheres(spheres: Sphere[]): Sphere[] {
     ring(14, ly + r * 0.5, r * 0.6, r * 0.8, r * 0.5, (front) =>
       front ? "#D6E6F7" : "#3F82D0",
     );
-    push([lx, ly + r * 0.5, zc], r * 0.5, "#3F82D0");
+    push([lx, ly + r * 0.5, zc], r * 0.5, "#3F82D0", undefined, "foot");
     // The sole: a thin white line round the bottom, just proud of the upper.
     ring(16, ly + r * 0.82, r * 0.86, r * 1.05, r * 0.18, () => "#F4F8FC");
+    // The underside: heel-to-toe capsules close side by side, so the bottom
+    // of the leg can't poke through between the rings. Their bottoms are
+    // the leg's.
+    // Short pieces, three to a row: like the wing, a long one would come
+    // away from the foot as the leg swings.
+    for (let k = -3; k <= 3; k++) {
+      for (const dz of [-0.4, 0, 0.4]) {
+        push(
+          [lx + k * r * 0.2, ly + r * 0.8, zc + dz * r],
+          r * 0.2,
+          "#F4F8FC",
+          { kind: "capsule", axis: [0, 0, r * 0.2] },
+        );
+      }
+    }
     // Laces: two dark blue dots over the instep.
     push([lx, ly + r * 0.2, zc - r * 0.75], r * 0.12, "#1A4580");
     push([lx, ly + r * 0.35, zc - r * 0.95], r * 0.12, "#1A4580");
-    // The wing: three feathers sweeping back from the heel, a little up and
-    // a little away from the herzie, longest on top.
-    const root: V3 = [lx + side * r * 0.45, ly + r * 0.35, zc + r * 1.0];
+    // The wing: three feathers on the outer side of the shoe, sweeping back,
+    // a little up and a little away from the herzie, longest on top.
+    const root: V3 = [lx + side * r * 1.0, ly + r * 0.35, zc + r * 0.1];
     const feathers = [
       [1.5, 0.55, 0.19, "#F4F9FE"],
       [1.25, 0.28, 0.17, "#DDEBF8"],
       [1.0, 0.05, 0.15, "#C3DAF2"],
     ] as const;
-    for (const [length, rise, thick, color] of feathers) {
+    // Each feather is a chain of small spheres, not one long capsule: the
+    // walk swings a leg by moving its pieces' centers, never turning their
+    // axes, so a long capsule's root would come away from the shoe.
+    feathers.forEach(([length, rise, thick, color], f) => {
       const dir: V3 = [side * 0.3, -rise, 1];
       const n = Math.hypot(...dir);
-      const half = (length * r) / 2;
-      const axis: V3 = [
-        (dir[0] / n) * half,
-        (dir[1] / n) * half,
-        (dir[2] / n) * half,
-      ];
-      push(add(root, axis), r * thick, color, { kind: "capsule", axis });
-    }
+      const count = Math.ceil(length / (thick * 0.8));
+      for (let k = 0; k <= count; k++) {
+        const t = k / count;
+        const along = t * length * r;
+        push(
+          add(root, [
+            (dir[0] / n) * along,
+            (dir[1] / n) * along,
+            (dir[2] / n) * along,
+          ]),
+          // Tapering a little toward the tip.
+          r * thick * (1 - 0.35 * t),
+          color,
+          undefined,
+          // The two upper feathers' tips shed the trail.
+          k === count && f < 2 ? "wing" : undefined,
+        );
+      }
+    });
   }
   return result;
 }
@@ -5787,7 +5833,9 @@ function grounded(spheres: Sphere[], offsets: V3[], weight: number): V3[] {
   let rest = Number.NEGATIVE_INFINITY;
   let lowest = Number.NEGATIVE_INFINITY;
   spheres.forEach((sp, i) => {
-    if (!isLeg(sp.part)) return;
+    // The foot itself, not what's worn on it: a shoe's wing reaches back
+    // from the heel, dips as the leg swings, and would bob the herzie.
+    if (!isLeg(sp.part) || sp.zone === "wearable") return;
     rest = Math.max(rest, sp.center[1] + sp.radius);
     lowest = Math.max(lowest, sp.center[1] + offsets[i][1] + sp.radius);
   });

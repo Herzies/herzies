@@ -133,7 +133,6 @@ export default function TownCanvas(props: TownCanvasProps) {
       input,
       playerBody: null,
       playerSpeed: 0,
-      playerLegs: false,
       playerFootSpread: 0,
       playerHerzie: null,
       playerRigidBody: null,

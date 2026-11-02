@@ -404,8 +404,6 @@ export function Player({
       surface.style.cursor = "";
     };
   }, [surface, herzie, camera]);
-  // Herzies grow legs at stage 3 (see HerzieModel).
-  rt.playerLegs = look.stage >= 3;
   rt.playerFootSpread = herzie.footSpread;
   useFrame((_, dt) => {
     // Sitting: on the seat, not the ground.

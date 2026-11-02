@@ -96,6 +96,7 @@ import {
   herzieMaterial,
   type SchemeUniforms,
 } from "./herzieMaterial.js";
+import { ShoeSparkles } from "./shoeSparkles.js";
 import {
   GHOST_SURGE,
   newSurgeState,
@@ -758,6 +759,8 @@ export class HerzieModel {
   private readonly anchored: THREE.Group | null;
   /** Turns with the heading. */
   private readonly turn = new THREE.Group();
+  /** The Evasive Pair's sparkles (shoeSparkles.ts); null without them. */
+  private readonly sparkles: ShoeSparkles | null = null;
   /** The floating companion, flying after the herzie; null when it has none,
    * or its scenery is anchored (then the companion stays put with it). */
   private readonly follower: Follower | null;
@@ -824,6 +827,8 @@ export class HerzieModel {
     const foot: Record<string, Sphere> = {};
     for (const s of spheres) {
       if (s.part !== "leg-l" && s.part !== "leg-r") continue;
+      // The leg itself, not a shoe's pieces on it.
+      if (s.zone === "wearable") continue;
       const was = foot[s.part];
       if (!was || s.center[1] + s.radius > was.center[1] + was.radius)
         foot[s.part] = s;
@@ -1076,6 +1081,18 @@ export class HerzieModel {
     this.creature.rotation.x = Math.PI;
     this.turn.add(this.creature);
     this.root.add(this.turn);
+    const wings = this.meshes.filter((_, i) => spheres[i].sparkle === "wing");
+    if (wings.length > 0) {
+      this.sparkles = new ShoeSparkles(
+        this.root,
+        {
+          wings,
+          feet: this.meshes.filter((_, i) => spheres[i].sparkle === "foot"),
+        },
+        this.height,
+      );
+      this.root.add(this.sparkles.points);
+    }
     if (this.anchored) {
       this.anchored.rotation.x = Math.PI;
       const facing = new THREE.Group();
@@ -1238,6 +1255,7 @@ export class HerzieModel {
     this.animateBody();
     this.drawCloak();
     this.follow(dt, speed);
+    this.sparkles?.update(dt);
   }
 
   /**
@@ -2287,6 +2305,7 @@ export class HerzieModel {
   }
 
   dispose() {
+    this.sparkles?.dispose();
     for (const m of this.materials) m.dispose();
     // Its own, unlike the shared part geometries.
     this.cloak?.geometry.dispose();
