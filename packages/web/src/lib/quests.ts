@@ -1,8 +1,10 @@
 import {
-  dailyQuestFor,
   getQuest,
   QUEST_GIVERS,
   type QuestDef,
+  type QuestOffer,
+  type QuestParams,
+  questOfferFor,
 } from "@herzies/shared";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -24,7 +26,7 @@ export interface QuestRow {
 export interface QuestBoard {
   quests: QuestRow[];
   /** Per giver: today's quest if you can take it, else null. */
-  offers: Record<string, QuestDef | null>;
+  offers: Record<string, QuestOffer | null>;
 }
 
 interface DbQuest {
@@ -32,6 +34,9 @@ interface DbQuest {
   questId: string;
   giver: string;
   title: string;
+  description: string | null;
+  kind: string;
+  params: QuestParams | null;
   day: string;
   progress: number;
   target: number;
@@ -63,7 +68,7 @@ export async function loadQuestBoard(
       giver: r.giver,
       giverName: QUEST_GIVERS[r.giver] ?? r.giver,
       title: r.title,
-      description: def?.description ?? "",
+      description: r.description ?? def?.description ?? "",
       progress: r.progress,
       target: r.target,
       status: r.status,
@@ -72,12 +77,35 @@ export async function loadQuestBoard(
     };
   });
 
-  const offers: Record<string, QuestDef | null> = {};
+  const offers: Record<string, QuestOffer | null> = {};
+  const open = Object.keys(QUEST_GIVERS).filter(
+    (giver) =>
+      !rows.some(
+        (r) =>
+          r.giver === giver && (r.day === today || r.status === "complete"),
+      ),
+  );
+  const found = open.length > 0 ? await foundGenres(admin, userId) : [];
   for (const giver of Object.keys(QUEST_GIVERS)) {
-    const held = rows.some(
-      (r) => r.giver === giver && (r.day === today || r.status === "complete"),
-    );
-    offers[giver] = held ? null : (dailyQuestFor(giver, today) ?? null);
+    offers[giver] = open.includes(giver)
+      ? (questOfferFor(giver, userId, today, found) ?? null)
+      : null;
   }
   return { quests, offers };
+}
+
+/** Genres Pip has already asked this player for: every genre quest they
+ * took, finished or not. He comes up with a new one each time. */
+export async function foundGenres(
+  admin: SupabaseClient,
+  userId: string,
+): Promise<string[]> {
+  const { data } = await admin
+    .from("user_quests")
+    .select("params")
+    .eq("user_id", userId)
+    .eq("kind", "genre");
+  return (data ?? [])
+    .map((r) => (r.params as QuestParams | null)?.genre)
+    .filter((g): g is string => typeof g === "string");
 }

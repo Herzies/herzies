@@ -1,14 +1,28 @@
 import { PIP_KEY, PIP_NAME } from "./pip.js";
+import { getPipGenre, PIP_GENRES } from "./pip-genres.js";
 
 // Quests: small tasks handed out by Town NPCs. Each giver offers one quest a
 // day (UTC), picked from their pool; you accept it from them, it completes on
 // its own as you listen, and you turn it in to them for the reward. The rows
 // live in user_quests (00130); progress is made server side, per kind.
 
-/** How a quest's progress is made. Each kind has its own hook on the server.
+/** How a quest's progress is made. All of them move on a track change
+ * (noteQuestTrack in game-server.ts, from sync and the Spotify cron).
  * - `new_artist`: play an artist with no earlier row in your listen history
- *   (quest_note_artist, called from sync on a track change). */
-export type QuestKind = "new_artist";
+ *   (quest_note_artist).
+ * - `genre`: play a song tagged with the genre in params.genre (Last.fm
+ *   tags: the track's, its artist's, and what the app sent).
+ * - `oldie`: play a song first released before params.before (MusicBrainz). */
+export type QuestKind = "new_artist" | "genre" | "oldie";
+
+/** What one copy of a quest is about, picked when it's offered and stored
+ * on the row (user_quests.params). */
+export interface QuestParams {
+  /** `genre`: a PipGenre key. */
+  genre?: string;
+  /** `oldie`: the song's first release year has to be below this. */
+  before?: number;
+}
 
 export interface QuestDef {
   /** Stable id, stored on the row (user_quests.quest_id). */
@@ -20,9 +34,22 @@ export interface QuestDef {
   kind: QuestKind;
   /** How much progress completes it. */
   target: number;
-  /** Paid on turn-in: coins (quests don't give XP; that's listening's). */
-  reward: { coins: number };
+  /** Paid on turn-in: coins and items (quests don't give XP; that's
+   * listening's). */
+  reward: QuestReward;
 }
+
+export interface QuestReward {
+  coins: number;
+  /** Copies handed over with the coins (quest_claim, 00136). */
+  items?: { itemId: string; quantity: number }[];
+}
+
+/** What every one of Pip's quests pays. */
+const PIP_REWARD: QuestReward = {
+  coins: 500,
+  items: [{ itemId: "star-candy", quantity: 10 }],
+};
 
 export const QUESTS: readonly QuestDef[] = [
   {
@@ -32,7 +59,25 @@ export const QUESTS: readonly QuestDef[] = [
     description: "Listen to an artist you've never listened to before.",
     kind: "new_artist",
     target: 1,
-    reward: { coins: 500 },
+    reward: PIP_REWARD,
+  },
+  {
+    id: "pip_genre",
+    giver: PIP_KEY,
+    title: "Never Heard of It",
+    description: "Listen to a song from a genre Pip hasn't found yet.",
+    kind: "genre",
+    target: 1,
+    reward: PIP_REWARD,
+  },
+  {
+    id: "pip_oldie",
+    giver: PIP_KEY,
+    title: "Golden Oldie",
+    description: "Listen to a song from long before Pip was born.",
+    kind: "oldie",
+    target: 1,
+    reward: PIP_REWARD,
   },
 ];
 
@@ -53,7 +98,69 @@ export function dailyQuestFor(
 ): QuestDef | undefined {
   const pool = QUESTS.filter((q) => q.giver === giver);
   if (pool.length === 0) return undefined;
+  return pool[hash(`${giver}:${day}`) % pool.length];
+}
+
+function hash(s: string): number {
   let h = 0;
-  for (const c of `${giver}:${day}`) h = (h * 31 + c.charCodeAt(0)) | 0;
-  return pool[Math.abs(h) % pool.length];
+  for (const c of s) h = (h * 31 + c.charCodeAt(0)) | 0;
+  return Math.abs(h);
+}
+
+/** A quest as one player is offered it: the definition, with what this copy
+ * is about filled into its title and description. */
+export interface QuestOffer extends QuestDef {
+  params: QuestParams;
+}
+
+/** The years an oldie quest can ask for songs from before: 1940 (so, the
+ * 1930s and earlier) up to 2000, in steps of five. */
+export const OLDIE_YEARS: readonly number[] = Array.from(
+  { length: 13 },
+  (_, i) => 1940 + i * 5,
+);
+
+/**
+ * What a giver offers one player on a day: today's quest (dailyQuestFor),
+ * and for the kinds that need one, its genre or year. Seeded by player and
+ * day, so the offer reads the same until it's taken, and the server picks
+ * the same one when it is. `foundGenres`: genre keys Pip has already asked this
+ * player for, never offered again (while any are left).
+ */
+export function questOfferFor(
+  giver: string,
+  userId: string,
+  day: string,
+  foundGenres: readonly string[] = [],
+): QuestOffer | undefined {
+  const def = dailyQuestFor(giver, day);
+  if (!def) return undefined;
+  const seed = hash(`${userId}:${giver}:${day}`);
+  if (def.kind === "genre") {
+    const found = new Set(foundGenres);
+    const fresh = PIP_GENRES.filter((g) => !found.has(g.key));
+    const pool = fresh.length > 0 ? fresh : PIP_GENRES;
+    const genre = pool[seed % pool.length];
+    return {
+      ...def,
+      title: `Never Heard of ${genre.name}`,
+      description: `Listen to a ${genre.name} song. Pip's never found one.`,
+      params: { genre: genre.key },
+    };
+  }
+  if (def.kind === "oldie") {
+    const before = OLDIE_YEARS[seed % OLDIE_YEARS.length];
+    return {
+      ...def,
+      title: `Before ${before}`,
+      description: `Listen to a song first released before ${before}.`,
+      params: { before },
+    };
+  }
+  return { ...def, params: {} };
+}
+
+/** The genre a genre quest's params name, if it's one Pip knows. */
+export function questGenre(params: QuestParams | null | undefined) {
+  return params?.genre ? getPipGenre(params.genre) : undefined;
 }

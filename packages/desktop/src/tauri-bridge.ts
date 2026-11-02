@@ -164,7 +164,13 @@ export type QuestOffer = {
   description: string;
   kind: string;
   target: number;
-  reward: { xp: number; coins: number };
+  reward: QuestReward;
+};
+
+/** What turning a quest in pays (shared QuestReward). */
+export type QuestReward = {
+  coins: number;
+  items?: { itemId: string; quantity: number }[];
 };
 
 /** A quest you hold (user_quests, 00130). */
@@ -179,7 +185,7 @@ export type Quest = {
   target: number;
   status: "active" | "complete" | "claimed";
   day: string;
-  reward: { xp: number; coins: number } | null;
+  reward: QuestReward | null;
 };
 
 /** Your quests, and per giver today's quest if you can take it. */
@@ -337,7 +343,7 @@ export const herzies = {
   /** Turns a finished quest in: coins now, XP on the next sync. */
   claimQuest: (id: string) =>
     invoke<{
-      reward: { xp: number; coins: number };
+      reward: QuestReward;
       newCurrency: number;
       board: QuestBoard | null;
     }>("claim_quest", { id }),

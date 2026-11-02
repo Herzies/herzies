@@ -2,11 +2,12 @@
  * Integration tests for quests (00130): Pip's daily "Something New" is
  * taken once a day, finishes on an artist with no earlier listen_log row
  * (credits "feat." and such don't make a known artist new), and pays
- * coins (no XP) once when turned in.
+ * coins (no XP) once when turned in. Pip's genre quest (00136) finishes on
+ * a song tagged with its genre.
  *
  * Requires: `npx supabase start`
  */
-import { PIP_KEY } from "@herzies/shared";
+import { dailyQuestFor, PIP_KEY } from "@herzies/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { POST as acceptRoute } from "@/app/api/quests/accept/route";
 import { POST as claimRoute } from "@/app/api/quests/claim/route";
@@ -50,6 +51,29 @@ async function accept() {
   );
 }
 
+const today = () => new Date().toISOString().slice(0, 10);
+
+/** Today's quest from Pip, as a given kind: what he offers rotates by day,
+ * so the tests that need one kind put it in place themselves. */
+async function take(
+  kind: "new_artist" | "genre",
+  params: Record<string, unknown> = {},
+) {
+  const { error } = await admin()
+    .from("user_quests")
+    .insert({
+      user_id: user.userId,
+      giver: PIP_KEY,
+      quest_id: kind === "genre" ? "pip_genre" : "pip_new_artist",
+      title: kind === "genre" ? "Never Heard of Zeuhl" : "Something New",
+      kind,
+      params,
+      day: today(),
+      target: 1,
+    });
+  if (error) throw new Error(error.message);
+}
+
 async function heard(artist: string, track = "Old Song") {
   const { error } = await admin()
     .from("listen_log")
@@ -57,7 +81,7 @@ async function heard(artist: string, track = "Old Song") {
   if (error) throw new Error(error.message);
 }
 
-async function play(title: string, artist: string) {
+async function play(title: string, artist: string, genres: string[] = []) {
   // Past the billing cooldown, so every call is a real sync.
   await admin()
     .from("herzies")
@@ -69,7 +93,7 @@ async function play(title: string, artist: string) {
     authenticatedRequest("/sync", user.accessToken, {
       nowPlaying: { title, artist },
       minutesListened: 1,
-      genres: [],
+      genres,
     }),
   );
   expect(res.status).toBe(200);
@@ -84,7 +108,8 @@ const pipQuest = async () =>
 describe("Quests", () => {
   it("offers Pip's quest, and takes it once a day", async () => {
     const before = await board();
-    expect(before.offers[PIP_KEY]?.id).toBe("pip_new_artist");
+    const offer = before.offers[PIP_KEY];
+    expect(offer?.id).toBe(dailyQuestFor(PIP_KEY, today())?.id);
     expect(before.quests).toEqual([]);
 
     const res = await accept();
@@ -95,7 +120,9 @@ describe("Quests", () => {
     expect(after.quests[0]).toMatchObject({
       giver: PIP_KEY,
       giverName: "Pip",
-      title: "Something New",
+      // Taken as offered, genre or year and all.
+      title: offer.title,
+      description: offer.description,
       progress: 0,
       target: 1,
       status: "active",
@@ -107,7 +134,7 @@ describe("Quests", () => {
 
   it("doesn't count an artist you've heard, even credited differently", async () => {
     await heard("Daft Punk feat. Pharrell Williams");
-    await accept();
+    await take("new_artist");
 
     const res = await play("One More Time (Remastered)", "Daft Punk");
     expect(res.notifications.some((n) => n.title === "Quest complete")).toBe(
@@ -118,7 +145,7 @@ describe("Quests", () => {
 
   it("finishes on a new artist, and pays once on turn-in", async () => {
     await heard("Queen");
-    await accept();
+    await take("new_artist");
 
     const res = await play("Windowlicker", "Aphex Twin");
     const done = res.notifications.find((n) => n.title === "Quest complete");
@@ -143,7 +170,14 @@ describe("Quests", () => {
     );
     expect(claim.status).toBe(200);
     const body = await claim.json();
-    expect(body.reward).toEqual({ coins: 500 });
+    expect(body.reward).toEqual({
+      coins: 500,
+      items: [{ itemId: "star-candy", quantity: 10 }],
+    });
+    // The candies come with the answer, so the bank updates at once.
+    expect(
+      body.units.filter((u: { itemId: string }) => u.itemId === "star-candy"),
+    ).toHaveLength(10);
     expect(body.newCurrency).toBe((before?.currency ?? 0) + 500);
 
     const { data: after } = await admin()
@@ -193,7 +227,7 @@ describe("Quests", () => {
     // move it.
     let b = await board();
     expect(b.quests).toEqual([]);
-    expect(b.offers[PIP_KEY]?.id).toBe("pip_new_artist");
+    expect(b.offers[PIP_KEY]?.id).toBe(dailyQuestFor(PIP_KEY, today())?.id);
     await play("Teardrop", "Massive Attack");
     const { data: row } = await admin()
       .from("user_quests")
@@ -215,5 +249,42 @@ describe("Quests", () => {
     expect(b.quests[0].status).toBe("complete");
     expect(b.offers[PIP_KEY]).toBeNull();
     expect((await accept()).status).toBe(409);
+  });
+
+  it("finishes a genre quest on a song tagged with it, not another", async () => {
+    await take("genre", { genre: "zeuhl" });
+
+    let res = await play("Nobody Knows", "Testband Unknown", ["rock"]);
+    expect(res.notifications.some((n) => n.title === "Quest complete")).toBe(
+      false,
+    );
+    expect((await pipQuest()).progress).toBe(0);
+
+    res = await play("Somebody Knows", "Testband Unknown", ["Zeuhl"]);
+    const done = res.notifications.find((n) => n.title === "Quest complete");
+    expect(done?.message).toContain('"Never Heard of Zeuhl"');
+    expect(await pipQuest()).toMatchObject({ progress: 1, status: "complete" });
+  });
+
+  it("never asks for a genre he asked this player for before", async () => {
+    const yesterday = new Date(Date.now() - 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+    const offered = (await board()).offers[PIP_KEY];
+    if (offered?.kind !== "genre") return; // not a genre day
+    await admin()
+      .from("user_quests")
+      .insert({
+        user_id: user.userId,
+        giver: PIP_KEY,
+        quest_id: "pip_genre",
+        title: "old",
+        kind: "genre",
+        params: { genre: offered.params.genre },
+        day: yesterday,
+        target: 1,
+      });
+    const next = (await board()).offers[PIP_KEY];
+    expect(next?.params.genre).not.toBe(offered.params.genre);
   });
 });

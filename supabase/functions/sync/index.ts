@@ -101,6 +101,8 @@ Deno.serve(async (request) => {
         // every 10 listened minutes. Must never be set on the deployed
         // function — only via `supabase functions serve --env-file`.
         dropTestMode: Deno.env.get("HERZIES_DROP_TEST_MODE") === "1",
+        // Genre quests look the track up on Last.fm (noteQuestTrack).
+        lastfmApiKey: Deno.env.get("LASTFM_API_KEY"),
       },
     );
 

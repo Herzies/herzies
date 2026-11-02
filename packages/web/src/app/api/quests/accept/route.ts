@@ -1,7 +1,7 @@
-import { dailyQuestFor, QUEST_GIVERS } from "@herzies/shared";
+import { QUEST_GIVERS, questOfferFor } from "@herzies/shared";
 import { NextResponse } from "next/server";
 import { authenticateRequest, isAuthError } from "@/lib/auth";
-import { loadQuestBoard, questDay } from "@/lib/quests";
+import { foundGenres, loadQuestBoard, questDay } from "@/lib/quests";
 import { createAdminClient } from "@/lib/supabase-admin";
 
 const REASONS: Record<string, { status: number; error: string }> = {
@@ -12,8 +12,9 @@ const REASONS: Record<string, { status: number; error: string }> = {
   },
 };
 
-/** Take today's quest from a giver. The giver picks it (dailyQuestFor): the
- * client only says who it's talking to. Answers with the fresh board. */
+/** Take today's quest from a giver. The giver picks it, and its genre or
+ * year (questOfferFor, the same as the board offered): the client only says
+ * who it's talking to. Answers with the fresh board. */
 export async function POST(request: Request) {
   const auth = await authenticateRequest(request);
   if (isAuthError(auth)) return auth;
@@ -25,12 +26,17 @@ export async function POST(request: Request) {
   if (!QUEST_GIVERS[giver]) {
     return NextResponse.json({ error: "Unknown quest giver" }, { status: 400 });
   }
-  const quest = dailyQuestFor(giver, questDay());
+  const admin = createAdminClient();
+  const quest = questOfferFor(
+    giver,
+    auth.userId,
+    questDay(),
+    await foundGenres(admin, auth.userId),
+  );
   if (!quest) {
     return NextResponse.json({ error: "No quest today" }, { status: 404 });
   }
 
-  const admin = createAdminClient();
   const { data, error } = await admin.rpc("quest_accept", {
     p_user: auth.userId,
     p_giver: giver,
@@ -38,6 +44,8 @@ export async function POST(request: Request) {
     p_title: quest.title,
     p_kind: quest.kind,
     p_target: quest.target,
+    p_params: quest.params,
+    p_description: quest.description,
   });
   if (error) {
     return NextResponse.json({ error: "Failed to accept" }, { status: 500 });

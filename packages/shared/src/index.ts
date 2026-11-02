@@ -28,6 +28,7 @@ export * from "./medea.js";
 export * from "./name.js";
 export * from "./npc-looks.js";
 export * from "./pip.js";
+export * from "./pip-genres.js";
 export * from "./quests.js";
 export * from "./Sky.js";
 export * from "./SpeechBubble.js";

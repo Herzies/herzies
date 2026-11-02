@@ -1,6 +1,12 @@
-import { getQuest } from "@herzies/shared";
+import {
+  bankCapacity,
+  bankSlotsUsed,
+  getQuest,
+  normalizeEquipped,
+} from "@herzies/shared";
 import { NextResponse } from "next/server";
 import { authenticateRequest, isAuthError } from "@/lib/auth";
+import { type ItemState, itemResponse } from "@/lib/item-units";
 import { loadQuestBoard } from "@/lib/quests";
 import { createAdminClient } from "@/lib/supabase-admin";
 
@@ -12,7 +18,8 @@ const REASONS: Record<string, { status: number; error: string }> = {
 
 /** Turn a finished quest in to its giver. The reward comes from the quest's
  * definition, never the client: XP lands on the next sync (pending_xp),
- * coins straight away. Answers with the new coin total and the fresh board. */
+ * coins and items straight away. Answers with the new coin total, the item
+ * state when items came, and the fresh board. */
 export async function POST(request: Request) {
   const auth = await authenticateRequest(request);
   if (isAuthError(auth)) return auth;
@@ -36,12 +43,37 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Quest not found" }, { status: 404 });
   }
   const reward = getQuest(row.quest_id as string)?.reward ?? { coins: 0 };
+  const items = reward.items ?? [];
+
+  // Same bank-space rule as Medea: copies past the bank's capacity would
+  // never render. The quest stays finished, to turn in once there's room.
+  if (items.length > 0) {
+    const { data: herzie } = await admin
+      .from("herzies")
+      .select("inventory_v2, equipped, bank_expansions")
+      .eq("user_id", auth.userId)
+      .single();
+    const inv = { ...((herzie?.inventory_v2 ?? {}) as Record<string, number>) };
+    for (const it of items)
+      inv[it.itemId] = (inv[it.itemId] ?? 0) + it.quantity;
+    if (
+      herzie &&
+      bankSlotsUsed(inv, normalizeEquipped(herzie.equipped)) >
+        bankCapacity(herzie.bank_expansions)
+    ) {
+      return NextResponse.json(
+        { error: "Your bank is full — make some room first", reason: "full" },
+        { status: 409 },
+      );
+    }
+  }
 
   const { data, error } = await admin.rpc("quest_claim", {
     p_user: auth.userId,
     p_id: id,
     p_xp: 0,
     p_coins: reward.coins,
+    p_items: items,
   });
   if (error) {
     return NextResponse.json({ error: "Failed to turn in" }, { status: 500 });
@@ -50,6 +82,7 @@ export async function POST(request: Request) {
     ok: boolean;
     reason?: string;
     newCurrency?: number;
+    state?: ItemState;
   } | null;
   if (!result?.ok) {
     const known = REASONS[result?.reason ?? ""];
@@ -64,6 +97,7 @@ export async function POST(request: Request) {
     ok: true,
     reward,
     newCurrency: result.newCurrency,
+    ...(result.state ? itemResponse(result.state) : {}),
     board,
   });
 }

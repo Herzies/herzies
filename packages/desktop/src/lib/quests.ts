@@ -40,7 +40,7 @@ function subscribe(cb: () => void) {
   };
 }
 
-/** Sync's line when a quest finishes (game-server.ts, noteQuestArtist). */
+/** Sync's line when a quest finishes (game-server.ts, noteQuestTrack). */
 export const QUEST_COMPLETE_TITLE = "Quest complete";
 
 /** How often the board is fetched while something shows it and the window

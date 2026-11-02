@@ -40,5 +40,6 @@ export const processSync: typeof processSyncShared = (
 ) =>
   processSyncShared(admin, userId, nowPlaying, minutesListened, genres, {
     dropTestMode: dropTestModeFromEnv(),
+    lastfmApiKey: process.env.LASTFM_API_KEY,
     ...options,
   });

@@ -58,7 +58,8 @@ import {
   withStatPoints,
   xpBonusConfig,
 } from "./game-rules.js";
-import { QUEST_GIVERS } from "./quests.js";
+import { genreInTags } from "./pip-genres.js";
+import { QUEST_GIVERS, type QuestParams, questGenre } from "./quests.js";
 
 /** Minimum gap between two *billable* syncs, measured from `last_billed_at`.
  *
@@ -124,30 +125,202 @@ function leadArtist(s: string): string {
     .trim();
 }
 
+/** A quest a track change finished, for sync's "Quest complete" line. */
+export interface FinishedQuest {
+  id: string;
+  giver: string;
+  giverName: string;
+  title: string;
+}
+
+/** How long a quest lookup (Last.fm, MusicBrainz) may hold up a sync. */
+const QUEST_LOOKUP_MS = 3000;
+
+async function fetchJson(
+  url: string,
+  headers: Record<string, string> = {},
+): Promise<unknown> {
+  try {
+    const res = await fetch(url, {
+      headers,
+      signal: AbortSignal.timeout(QUEST_LOOKUP_MS),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+/** Last.fm tags for a track: its own top tags, and its artist's that carry
+ * some weight (count is 0–100 there). Empty without a key or on failure. */
+async function lastfmTags(
+  apiKey: string | undefined,
+  title: string,
+  artist: string,
+): Promise<string[]> {
+  if (!apiKey) return [];
+  const base = `https://ws.audioscrobbler.com/2.0/?format=json&autocorrect=1&api_key=${encodeURIComponent(apiKey)}`;
+  const a = encodeURIComponent(artist);
+  const [track, top] = (await Promise.all([
+    fetchJson(
+      `${base}&method=track.getInfo&artist=${a}&track=${encodeURIComponent(title)}`,
+    ),
+    fetchJson(`${base}&method=artist.getTopTags&artist=${a}`),
+  ])) as [
+    { track?: { toptags?: { tag?: unknown } } } | null,
+    { toptags?: { tag?: unknown } } | null,
+  ];
+  const list = (v: unknown) =>
+    (Array.isArray(v) ? v : v ? [v] : []) as {
+      name?: string;
+      count?: number | string;
+    }[];
+  const tags: string[] = [];
+  for (const t of list(track?.track?.toptags?.tag)) {
+    if (t.name) tags.push(t.name);
+  }
+  for (const t of list(top?.toptags?.tag)) {
+    if (t.name && Number(t.count ?? 0) >= 5) tags.push(t.name);
+  }
+  return tags;
+}
+
+/** MusicBrainz wants a real client name on every request. */
+const MUSICBRAINZ_UA = "Herzies/1.0 ( https://www.herzies.app )";
+
+/** Whether a song first came out before `before` (MusicBrainz): any
+ * recording with this title by this lead artist first released by the end
+ * of the year before. Asked as a date range because old songs sit on
+ * dozens of later compilations, each its own recording: the original is
+ * rarely among the top search hits otherwise. */
+async function releasedBefore(
+  title: string,
+  artist: string,
+  before: number,
+): Promise<boolean> {
+  const t = normalizeTrack(title);
+  const a = leadArtist(artist);
+  if (!t || !a) return false;
+  const q = (s: string) => `"${s.replace(/[\\"]/g, "\\$&")}"`;
+  const url = `https://musicbrainz.org/ws/2/recording?fmt=json&limit=10&query=${encodeURIComponent(
+    `recording:${q(t)} AND artist:${q(a)} AND firstreleasedate:[* TO ${before - 1}-12-31]`,
+  )}`;
+  const headers = { "User-Agent": MUSICBRAINZ_UA, Accept: "application/json" };
+  let data = (await fetchJson(url, headers)) as {
+    recordings?: {
+      title?: string;
+      "first-release-date"?: string;
+      "artist-credit"?: { name?: string; artist?: { name?: string } }[];
+    }[];
+  } | null;
+  if (!data) {
+    // Usually its one-request-a-second limit: one more try after it.
+    await new Promise((r) => setTimeout(r, 1100));
+    data = (await fetchJson(url, headers)) as typeof data;
+  }
+  // "Billie Holiday and Her Orchestra" is still Billie Holiday.
+  const isArtist = (name = "") => {
+    const n = leadArtist(name);
+    return n === a || n.startsWith(`${a} `);
+  };
+  return (data?.recordings ?? []).some((rec) => {
+    const y = Number.parseInt((rec["first-release-date"] ?? "").slice(0, 4));
+    return (
+      normalizeTrack(rec.title ?? "") === t &&
+      Number.isFinite(y) &&
+      y < before &&
+      (rec["artist-credit"] ?? []).some(
+        (c) => isArtist(c.name) || isArtist(c.artist?.name),
+      )
+    );
+  });
+}
+
 /**
- * A new track started: move the user's new-artist quests along (00130).
- * Call it before the track goes into listen_log. Returns the quests it
- * finished. A database without quests (before 00130) just finishes none.
+ * A new track started: move the user's quests along (00130, 00136). Call it
+ * before the track goes into listen_log ("never heard them before" means no
+ * row for the artist yet). Looks nothing up unless a quest needs it, and a
+ * failed lookup just means this song didn't count. `tags`: what the app
+ * already knows about the track (sync's genres). Returns the quests it
+ * finished; a database without quests just finishes none.
  */
-export async function noteQuestArtist(
+export async function noteQuestTrack(
   admin: SupabaseClient,
   userId: string,
-  artist: string,
-): Promise<{ id: string; giver: string; giverName: string; title: string }[]> {
+  track: { title: string; artist: string; tags?: readonly string[] },
+  options: { lastfmApiKey?: string } = {},
+): Promise<FinishedQuest[]> {
   try {
-    const { data, error } = await admin.rpc("quest_note_artist", {
-      p_user: userId,
-      p_artist: artist,
-    });
-    if (error || !data) return [];
-    const done = (data as { completed?: unknown }).completed;
-    if (!Array.isArray(done)) return [];
-    return done.map((q: { id: string; giver: string; title: string }) => ({
+    const today = new Date().toISOString().slice(0, 10);
+    const { data: active, error } = await admin
+      .from("user_quests")
+      .select("id, kind, params")
+      .eq("user_id", userId)
+      .eq("status", "active")
+      .eq("day", today);
+    if (error || !active || active.length === 0) return [];
+    const finished: FinishedQuest[] = [];
+    const named = (q: { id: string; giver: string; title: string }) => ({
       id: q.id,
       giver: q.giver,
       giverName: QUEST_GIVERS[q.giver] ?? q.giver,
       title: q.title,
-    }));
+    });
+
+    if (active.some((q) => q.kind === "new_artist")) {
+      const { data } = await admin.rpc("quest_note_artist", {
+        p_user: userId,
+        p_artist: track.artist,
+      });
+      const done = (data as { completed?: unknown } | null)?.completed;
+      if (Array.isArray(done)) finished.push(...done.map(named));
+    }
+
+    const genreQuests = active.filter((q) => q.kind === "genre");
+    const tags =
+      genreQuests.length > 0
+        ? [
+            ...(track.tags ?? []),
+            ...(await lastfmTags(
+              options.lastfmApiKey,
+              track.title,
+              track.artist,
+            )),
+          ]
+        : [];
+    const hits = genreQuests.filter((q) => {
+      const genre = questGenre(q.params as QuestParams);
+      return genre ? genreInTags(genre, tags) : false;
+    });
+    // Oldest ask first: a song old enough for it settles the rest, so most
+    // tracks cost one MusicBrainz request.
+    const oldies = active
+      .filter((q) => q.kind === "oldie")
+      .map((q) => ({ q, before: Number((q.params as QuestParams)?.before) }))
+      .filter((o) => o.before > 0)
+      .sort((x, y) => x.before - y.before);
+    for (const [i, o] of oldies.entries()) {
+      if (await releasedBefore(track.title, track.artist, o.before)) {
+        hits.push(...oldies.slice(i).map((later) => later.q));
+        break;
+      }
+    }
+
+    for (const q of hits) {
+      const { data } = await admin.rpc("quest_advance", {
+        p_user: userId,
+        p_id: q.id,
+      });
+      const r = data as {
+        completed?: boolean;
+        id: string;
+        giver: string;
+        title: string;
+      } | null;
+      if (r?.completed) finished.push(named(r));
+    }
+    return finished;
   } catch {
     return [];
   }
@@ -259,6 +432,10 @@ export interface SyncOptions {
    * every single sync.
    */
   dropTestMode?: boolean;
+  /** Last.fm API key, for genre quests (noteQuestTrack). Supplied by the
+   * caller from its env, like dropTestMode. Without it those quests count
+   * only the tags the app sent. */
+  lastfmApiKey?: string;
 }
 
 /**
@@ -415,10 +592,11 @@ export async function processSync(
     if (trackChanged) {
       // Quests move before the play is logged: "never heard them before"
       // means no row for the artist yet.
-      for (const done of await noteQuestArtist(
+      for (const done of await noteQuestTrack(
         admin,
         userId,
-        nowPlaying.artist,
+        { title: nowPlaying.title, artist: nowPlaying.artist, tags: genres },
+        { lastfmApiKey: options.lastfmApiKey },
       )) {
         notifications.push({
           type: "info",

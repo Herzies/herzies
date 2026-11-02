@@ -1,6 +1,7 @@
 import {
   DEFAULT_Y_ANGLE,
   type Equipped,
+  getItem,
   PIP_EQUIPPED,
   PIP_KEY,
   PIP_NAME,
@@ -14,7 +15,7 @@ import { useState } from "react";
 import { notify } from "../lib/notices";
 import { useHerzieStage } from "../lib/overlayStage";
 import { refreshQuests, setQuestBoard } from "../lib/quests";
-import { herzies, type QuestBoard } from "../tauri-bridge";
+import { herzies, type QuestBoard, type QuestReward } from "../tauri-bridge";
 import { Coin } from "./Coin";
 import { SegmentBar } from "./SegmentBar";
 
@@ -51,6 +52,8 @@ export const PIP: QuestGiver = {
       "I've got a challenge for you. I'm doing it too, so no cheating.",
       "Bet you can't find something new today. I can. Probably.",
       "My headphones are a bit big. I'll grow into them.",
+      "Did you know there's a genre called zeuhl? There are so many!",
+      "Grandpa says songs were better in the old days. Is that true?",
     ],
     active: [
       "Did you find one yet? I'm still looking...",
@@ -72,6 +75,13 @@ export const PIP: QuestGiver = {
 };
 
 const fmt = (n: number) => n.toLocaleString();
+
+/** A reward's items in words: "10 Star Candy". */
+function rewardItems(reward: QuestReward | null | undefined): string[] {
+  return (reward?.items ?? []).map(
+    (it) => `${fmt(it.quantity)} ${getItem(it.itemId)?.name ?? it.itemId}`,
+  );
+}
 
 /**
  * A quest giver in Town: today's quest from them to accept, the one you're
@@ -137,7 +147,10 @@ export function QuestGiverPanel({
       if (!next) refreshQuests();
       notify(`Turned in "${held.title}"`, { kind: "success" });
       onLog?.(
-        `Turned in "${held.title}" to ${giver.name}: ${fmt(reward.coins)} coins`,
+        `Turned in "${held.title}" to ${giver.name}: ${[
+          `${fmt(reward.coins)} coins`,
+          ...rewardItems(reward),
+        ].join(", ")}`,
       );
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
@@ -218,6 +231,9 @@ export function QuestGiverPanel({
                 {reward ? (
                   <>
                     Reward: <Coin amount={reward.coins} />
+                    {rewardItems(reward).map((label) => (
+                      <span key={label}>, {label}</span>
+                    ))}
                   </>
                 ) : null}
               </span>
