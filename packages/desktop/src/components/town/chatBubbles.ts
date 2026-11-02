@@ -22,14 +22,21 @@ export function bubbleDuration(text: string): number {
   return Math.min(10_000, 4_000 + text.length * 60);
 }
 
+const LASTFM_URL = /https:\/\/(?:www\.)?last\.fm\/\S+/g;
+/** A song share (/current_song): its "♪ title — artist" line, then the
+ * Last.fm link on the next. */
+const SONG_SHARE = /(♪[^\n]*)\n\s*https:\/\/(?:www\.)?last\.fm\/\S+/g;
+
 /** A chat message as plain text for a bubble: item references by their
- * names, and cut short if long. */
+ * names, Last.fm links as the chat shows them (a song share by its song
+ * line alone, any other link as "Last.fm"), and cut short if long. */
 export function bubbleText(msg: Pick<ChatMessage, "content" | "itemRefs">) {
   let text = msg.content;
   for (const ref of msg.itemRefs ?? []) {
     const name = getItem(ref)?.name ?? ref;
     text = text.split(`#${ref}`).join(name).split(`@${ref}`).join(name);
   }
+  text = text.replace(SONG_SHARE, "$1").replace(LASTFM_URL, "Last.fm");
   text = text.replace(/\s+/g, " ").trim();
   return text.length > MAX_CHARS ? `${text.slice(0, MAX_CHARS - 1)}…` : text;
 }
