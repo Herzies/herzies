@@ -3156,6 +3156,78 @@ function holdProps(
   });
 }
 
+/** Eivind's Evasive Pair: a blue high-top on each foot, with a pale wing
+ * sweeping up and back off its outer side. Only herzies with legs (stage 3)
+ * wear them visibly. Every piece takes its leg's part, so the walk, the
+ * dance and the stance carry it along. Nothing reaches below the leg's own
+ * bottom, so the herzie stands exactly as tall. */
+function buildEvasivePairSpheres(spheres: Sphere[]): Sphere[] {
+  const result: Sphere[] = [];
+  for (const part of ["leg-l", "leg-r"] as const) {
+    const leg = spheres.find((s) => s.part === part && s.zone !== "wearable");
+    if (!leg) continue;
+    const [lx, ly, lz] = leg.center;
+    const r = leg.radius;
+    const side = LIMB_SIDE[part];
+    const push = (center: V3, radius: number, color: string, shape?: Shape) =>
+      result.push({ center, radius, zone: "wearable", part, color, shape });
+    // Creature space is y down: up is −y; the face (and the toe) is −z.
+    // A low shoe: it covers the bottom of the foot and leaves the rest of
+    // the leg showing above it. Built from rings of small spheres round the
+    // foot, not one big shell, so its top can sit low while its bottom is
+    // still the leg's (where the feet are is read off center + radius).
+    const zc = lz - r * 0.15;
+    const ring = (
+      count: number,
+      y: number,
+      rx: number,
+      rz: number,
+      radius: number,
+      color: (front: boolean) => string,
+    ) => {
+      for (let k = 0; k < count; k++) {
+        const a = (k / count) * Math.PI * 2;
+        const dz = -Math.cos(a) * rz;
+        push(
+          [lx + Math.sin(a) * rx, y, zc + dz],
+          radius,
+          color(dz < -rz * 0.7),
+        );
+      }
+    };
+    // The upper: blue, with a pale toe box at the front.
+    ring(14, ly + r * 0.5, r * 0.6, r * 0.8, r * 0.5, (front) =>
+      front ? "#D6E6F7" : "#3F82D0",
+    );
+    push([lx, ly + r * 0.5, zc], r * 0.5, "#3F82D0");
+    // The sole: a thin white line round the bottom, just proud of the upper.
+    ring(16, ly + r * 0.82, r * 0.86, r * 1.05, r * 0.18, () => "#F4F8FC");
+    // Laces: two dark blue dots over the instep.
+    push([lx, ly + r * 0.2, zc - r * 0.75], r * 0.12, "#1A4580");
+    push([lx, ly + r * 0.35, zc - r * 0.95], r * 0.12, "#1A4580");
+    // The wing: three feathers sweeping back from the heel, a little up and
+    // a little away from the herzie, longest on top.
+    const root: V3 = [lx + side * r * 0.45, ly + r * 0.35, zc + r * 1.0];
+    const feathers = [
+      [1.5, 0.55, 0.19, "#F4F9FE"],
+      [1.25, 0.28, 0.17, "#DDEBF8"],
+      [1.0, 0.05, 0.15, "#C3DAF2"],
+    ] as const;
+    for (const [length, rise, thick, color] of feathers) {
+      const dir: V3 = [side * 0.3, -rise, 1];
+      const n = Math.hypot(...dir);
+      const half = (length * r) / 2;
+      const axis: V3 = [
+        (dir[0] / n) * half,
+        (dir[1] / n) * half,
+        (dir[2] / n) * half,
+      ];
+      push(add(root, axis), r * thick, color, { kind: "capsule", axis });
+    }
+  }
+  return result;
+}
+
 function appendWearableSpheres(
   spheres: Sphere[],
   equipped: Equipped | undefined,
@@ -3190,6 +3262,9 @@ function appendWearableSpheres(
   }
   if (equipped.head === "guard-helm") {
     spheres.push(...buildGuardHelmSpheres(spheres));
+  }
+  if (equipped.feet === "eivinds-evasive-pair") {
+    spheres.push(...buildEvasivePairSpheres(spheres));
   }
   const bodyBuilder = equipped.body && BODY_ITEM_BUILDERS[equipped.body];
   if (bodyBuilder) spheres.push(...bodyBuilder(spheres));

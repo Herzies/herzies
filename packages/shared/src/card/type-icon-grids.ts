@@ -229,6 +229,20 @@ export const TYPE_ICON_GRIDS: Record<ItemType, string[]> = {
     ],
     8,
   ),
+  // A high-top sneaker in profile, toe to the right.
+  shoes: cardIcon(
+    [
+      "..###.....",
+      "..####....",
+      "..####....",
+      "..#####...",
+      "..#######.",
+      ".#########",
+      "##########",
+      "..........",
+    ],
+    8,
+  ),
   // Up-arrow — a stat-changing effect.
   modifier: cardIcon(
     [

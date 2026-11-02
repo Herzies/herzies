@@ -34,6 +34,8 @@ export const ITEM_TYPE_TEXT_CLASSES: Record<ItemType, string> = {
   instrument: "text-pink",
   // The back slot.
   cloak: "text-blue",
+  // The feet slot: worn like the other gear, so it shares its cyan.
+  shoes: "text-cyan",
   modifier: "text-yellow",
   artefact: "text-text-dim",
 };
@@ -49,6 +51,7 @@ export const ITEM_TYPE_PILL_CLASSES: Record<ItemType, string> = {
   spirit: "bg-purple/15 text-purple",
   instrument: "bg-pink/15 text-pink",
   cloak: "bg-blue/15 text-blue",
+  shoes: "bg-cyan/15 text-cyan",
   modifier: "bg-yellow/15 text-yellow",
   artefact: "bg-text-dim/15 text-text-dim",
 };

@@ -151,6 +151,7 @@ const player = {
       ground_left: params.get("ground") as string,
     }),
     ...(params.get("back") && { back: params.get("back") as string }),
+    ...(params.get("feet") && { feet: params.get("feet") as string }),
   } as Record<string, string>,
 };
 // `?hotbar=star-candy`: that item on slot 2, with three in a pretend bank.

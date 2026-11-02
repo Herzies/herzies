@@ -372,6 +372,27 @@ describe("seasonal drop windows", () => {
     }
     expect(getHerzieStats({ head: "fyllings-fedora" }).luck).toBe(10);
   });
+
+  it("puts Eivind's Evasive Pair on the feet, +20% move speed", () => {
+    const item = getItem("eivinds-evasive-pair");
+    expect(item?.rarity).toBe("mythic");
+    expect(item?.equipSlot).toBe("feet");
+    expect(item && getItemType(item)).toBe("shoes");
+    expect(DECK_SLOT_GROUPS.find((g) => g.label === "Feet")?.slots).toEqual([
+      "feet",
+    ]);
+    expect(getHerzieStats({ feet: "eivinds-evasive-pair" }).moveSpeed).toBe(20);
+    // With the Tailwind Cloak it runs into the cap.
+    expect(
+      getHerzieStats({ feet: "eivinds-evasive-pair", back: "tailwind-cloak" })
+        .moveSpeed,
+    ).toBe(MAX_MOVE_SPEED);
+    // Drop-only: in the listening pool and boss loot, never in a shop.
+    expect(NON_DROPPABLE_ITEM_IDS).not.toContain("eivinds-evasive-pair");
+    expect(bossLootWeights().map((w) => w.itemId)).toContain(
+      "eivinds-evasive-pair",
+    );
+  });
 });
 
 describe("pickWeightedDrop", () => {
@@ -1640,9 +1661,9 @@ describe("boss loot", () => {
       new URL(`../../../supabase/migrations/${name}`, import.meta.url),
       "utf8",
     );
-  // settle_boss_fight lives in 00114; the roll was last replaced in 00131.
+  // settle_boss_fight lives in 00114; the roll was last replaced in 00134.
   const sql = migration("00114_boss_bonus_loot.sql");
-  const rollSql = migration("00131_luck_wearables.sql");
+  const rollSql = migration("00134_feet_slot_evasive_pair.sql");
 
   it("rolls from the same weights as bossLootWeights", () => {
     const roll = rollSql.slice(
@@ -1712,7 +1733,8 @@ describe("cloaks", () => {
     }
     const group = DECK_SLOT_GROUPS.find((g) => g.label === "Back");
     expect(group?.slots).toEqual(["back"]);
-    expect(DECK_TOTAL_SLOTS).toBe(17);
+    // Back and Feet both added one: 16 before them.
+    expect(DECK_TOTAL_SLOTS).toBe(18);
   });
 
   it("class cloaks come only from reward pools; the Tailwind Cloak never drops", () => {

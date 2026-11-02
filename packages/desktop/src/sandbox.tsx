@@ -47,6 +47,8 @@ const WEARABLE_OPTIONS = [
   "groove-cape",
   "drumhide-cloak",
   "tailwind-cloak",
+  // Shoes (drawn on stage 3, the one with legs).
+  "eivinds-evasive-pair",
 ];
 
 const DEFAULT_USER = "sandbox-user";
@@ -466,6 +468,7 @@ function toEquipped(ids: string[]): Equipped {
       id === "groove-cape"
     )
       out.back = id;
+    else if (id === "eivinds-evasive-pair") out.feet = id;
     else if (id === "lute" || id === "compact-discs" || id === "worn-stick")
       out.main_hand = id;
     else if (id === "boombox") {

@@ -66,6 +66,7 @@ export const EQUIP_SLOTS = [
   "main_hand",
   "off_hand",
   "back",
+  "feet",
 ] as const;
 export type EquipSlot = (typeof EQUIP_SLOTS)[number];
 
@@ -84,6 +85,7 @@ export const EQUIPPED_SLOTS = [
   "main_hand",
   "off_hand",
   "back",
+  "feet",
 ] as const;
 export type EquippedSlot = (typeof EQUIPPED_SLOTS)[number];
 
@@ -854,10 +856,11 @@ export const STAT_LABELS: Record<StatKey, string> = {
 };
 
 /** The most a herzie's gear can add to its walking and running speed, in
- * percent. The Town server lets a mover go up to TOWN_SPRINT_SPEED × 1.5
- * before it corrects them (town-server rules.ts); a test keeps this cap's
- * sprint under that, so a faster cloak never needs the server to know. */
-export const MAX_MOVE_SPEED = 15;
+ * percent: room for Eivind's Evasive Pair (+20%) and a little more. The Town
+ * server lets a mover go up to TOWN_SPRINT_SPEED × 1.5 before it corrects
+ * them (town-server rules.ts); a test keeps this cap's sprint under that, so
+ * faster gear never needs the server to know. */
+export const MAX_MOVE_SPEED = 25;
 
 /** Stats counted in percent (a 5 reads "5%"). */
 const PERCENT_STATS = new Set<StatKey>([
@@ -993,6 +996,7 @@ export type ItemType =
   | "spirit"
   | "instrument"
   | "cloak"
+  | "shoes"
   | "modifier"
   | "artefact";
 
@@ -1018,6 +1022,7 @@ export function getItemType(
   if (item.equipSlot === "main_hand" || item.equipSlot === "off_hand")
     return "instrument";
   if (item.equipSlot === "back") return "cloak";
+  if (item.equipSlot === "feet") return "shoes";
   if (item.equipable) return "equipable";
   return "artefact";
 }
@@ -1033,6 +1038,7 @@ export const ITEM_TYPE_LABELS: Record<ItemType, string> = {
   spirit: "Spirit",
   instrument: "Instrument",
   cloak: "Cloak",
+  shoes: "Shoes",
   modifier: "Modifier",
   artefact: "Artefact",
 };
@@ -1053,6 +1059,7 @@ export const EQUIP_SLOT_LABELS: Record<EquipSlot, string> = {
   main_hand: "Main hand",
   off_hand: "Off hand",
   back: "Back",
+  feet: "Feet",
 };
 
 /** A set is a named group of items whose `effect` describes what equipping
@@ -1141,6 +1148,7 @@ export const DECK_SLOT_GROUPS: DeckSlotGroup[] = [
     count: 2,
   },
   { label: "Back", itemType: "cloak", slots: ["back"], count: 1 },
+  { label: "Feet", itemType: "shoes", slots: ["feet"], count: 1 },
   { label: "Scenery", itemType: "sceneryCard", slots: ["scenery"], count: 1 },
   {
     label: "Modifiers",
@@ -1330,7 +1338,7 @@ export const BOSS_LOOT_EXCLUDED_ITEM_IDS = ["cd"];
 /** What a boss's random loot is drawn from, and how likely each is: every
  * item that drops from listening (not in NON_DROPPABLE_ITEM_IDS, no
  * seasonal window, not in BOSS_LOOT_EXCLUDED_ITEM_IDS), weighted per BOSS_LOOT_RARITY_BOOST. settle_boss_fight
- * rolls from a copy of this list (boss_loot_roll, last in 00131_luck_wearables.sql);
+ * rolls from a copy of this list (boss_loot_roll, last in 00134_feet_slot_evasive_pair.sql);
  * items.test.ts checks the two agree, so a new droppable item needs adding
  * there too. */
 export function bossLootWeights(): { itemId: string; weight: number }[] {
@@ -2924,6 +2932,64 @@ function renderFedoraFrame(yAngle: number): string[] {
   );
 }
 
+/** A blue-and-white high-top in profile, toe to the right, with a pale wing
+ * sweeping up and back off its heel. */
+function evasivePairCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  // The wing: three feathers fanning up and back from the heel collar.
+  for (const [ax, ay, bx, by, w] of [
+    [-0.12, -0.04, -0.34, -0.26, 0.05],
+    [-0.12, -0.0, -0.36, -0.15, 0.045],
+    [-0.12, 0.04, -0.33, -0.05, 0.04],
+  ] as const) {
+    const dx = bx - ax;
+    const dy = by - ay;
+    const t = Math.max(
+      0,
+      Math.min(1, ((ix - ax) * dx + (iy - ay) * dy) / (dx * dx + dy * dy)),
+    );
+    const d = Math.hypot(ix - (ax + dx * t), iy - (ay + dy * t));
+    if (d < w * (1 - 0.5 * t))
+      return {
+        bright: 0.95 - 0.15 * t,
+        color: t > 0.6 ? "#CFE3F7" : "#EEF5FC",
+      };
+  }
+  // The sole: white, a long flat strip under the whole shoe.
+  if (iy > 0.12 && iy < 0.18 && ix > -0.2 && ix < 0.32)
+    return { bright: 0.9, color: "#F4F8FC" };
+  // The blue outline under the sole.
+  if (iy >= 0.18 && iy < 0.2 && ix > -0.18 && ix < 0.3)
+    return { bright: 0.6, color: "#2F6DB5" };
+  // The toe box: a rounded front reaching right.
+  if (iy > 0.0 && iy <= 0.12 && ix > 0.05) {
+    const inToe = ((ix - 0.05) / 0.27) ** 2 + ((iy - 0.12) / 0.12) ** 2 < 1;
+    if (inToe)
+      return ix > 0.2
+        ? { bright: 0.85, color: "#D6E6F7" }
+        : { bright: 0.75, color: "#3F82D0" };
+  }
+  // The high-top upper: a tall block over the heel, with a pale swoosh.
+  if (ix > -0.2 && ix <= 0.08 && iy > -0.18 && iy <= 0.12) {
+    const swoosh = Math.abs(iy - (0.06 - 0.5 * (ix + 0.2))) < 0.025;
+    if (swoosh) return { bright: 0.9, color: "#E4EEF9" };
+    const laces = ix > 0.0 && Math.round((iy + 0.2) / 0.05) % 2 === 0;
+    if (laces) return { bright: 0.55, color: "#1F4F8A" };
+    return { bright: 0.75, color: "#3F82D0" };
+  }
+  return null;
+}
+
+function renderEvasivePairFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#7FB3E8",
+    "#3F6FA8",
+    "#1A2E48",
+    evasivePairCardIcon,
+  );
+}
+
 function renderWitchHatFrame(yAngle: number): string[] {
   return renderIconCard(
     yAngle,
@@ -3105,6 +3171,7 @@ const sixpenceFrames = generateFrames(renderSixpenceFrame);
 const plutusCrownFrames = generateFrames(renderPlutusCrownFrame);
 const fabianCapFrames = generateFrames(renderFabianCapFrame);
 const fedoraFrames = generateFrames(renderFedoraFrame);
+const evasivePairFrames = generateFrames(renderEvasivePairFrame);
 const fangsFrames = generateFrames(renderFangsFrame);
 const pumpkinSpiceFrames = generateFrames(renderPumpkinSpiceFrame);
 const ghostFrames = generateFrames(renderGhostFrame);
@@ -3782,6 +3849,18 @@ export const ITEMS: ItemDef[] = [
     equipSlot: "head",
     sellPrice: 250,
     stats: { luck: 10 },
+  },
+  {
+    id: "eivinds-evasive-pair",
+    name: "Eivind's Evasive Pair",
+    description:
+      "A pair of incredibly evasive shoes. Careful, or you'll end up in a different dimension",
+    rarity: "mythic",
+    frames: evasivePairFrames,
+    equipable: true,
+    equipSlot: "feet",
+    sellPrice: 1500,
+    stats: { moveSpeed: 20 },
   },
 ];
 
