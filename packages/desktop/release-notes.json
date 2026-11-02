@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.1.0-beta.61",
+    "highlights": [
+      "Game masters now have a GM mark by their name, in Town and in chat"
+    ]
+  },
+  {
     "version": "0.1.0-beta.60",
     "highlights": [
       "New: Pip, a little herzie wandering the Town, hands out a daily quest. Listen to an artist you have never heard before, then bring it back to him for 500 coins",
