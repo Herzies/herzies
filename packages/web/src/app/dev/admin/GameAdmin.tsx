@@ -118,7 +118,7 @@ const DEFAULT_CONFIGS: Record<string, string> = {
   // The floors come from the game's own curves; only the Tower Guard's
   // reward for the month's best climber is set here.
   tower: JSON.stringify(
-    { topRewardItemId: "power-dice-3", excludeHerzies: ["music_lover69"] },
+    { topRewardItemId: "power-dice-3", excludeHerzies: ["slowtaxi"] },
     null,
     2,
   ),

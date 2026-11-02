@@ -34,7 +34,7 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const TOWN_TICKET_SECRET = Deno.env.get("TOWN_TICKET_SECRET");
 /** Where the Town server lives, so it can move without an app release. */
 const TOWN_SERVER_URL = Deno.env.get("TOWN_SERVER_URL");
-/** Never put on the statue: the owner's own herzie (music_lover69). */
+/** Never put on the statue: the owner's own herzie (slowtaxi). */
 const CHAMPION_SKIP = ["920a6cf8-3f1c-4274-b549-39d976ee6ee0"];
 
 Deno.serve(async (request) => {

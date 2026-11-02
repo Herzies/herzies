@@ -109,7 +109,7 @@ function newSeriesForm(type: SeriesType = "song_hunt"): SeriesForm {
       rewardPools: [],
     },
     merchant: { stock: [] },
-    tower: { topRewardItemId: "power-dice-3", excludeHerzies: "music_lover69" },
+    tower: { topRewardItemId: "power-dice-3", excludeHerzies: "slowtaxi" },
   };
 }
 

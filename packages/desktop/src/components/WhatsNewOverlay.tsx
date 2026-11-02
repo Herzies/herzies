@@ -26,7 +26,7 @@ export function WhatsNewOverlay({
       <p className="mt-3 text-text-dim">
         Happy listening,
         <br />
-        music_lover69
+        slowtaxi
       </p>
     </PromptOverlay>
   );
