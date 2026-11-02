@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.1.0-beta.62",
+    "highlights": [
+      "New mythic shoes: Eivind's Evasive Pair, +20% move speed, worn in a new Feet slot. Winged, and a little sparkly",
+      "New stat: Timing. Each point makes you attack faster and crit more often",
+      "Every herzie now crits for +50% damage",
+      "Hover a stat to see what it does. Healing is now Heals given and Buffs given",
+      "Profiles show what a herzie is wearing right now",
+      "Running no longer kicks up dust"
+    ]
+  },
+  {
     "version": "0.1.0-beta.61",
     "highlights": [
       "Game masters now have a GM mark by their name, in Town and in chat"
