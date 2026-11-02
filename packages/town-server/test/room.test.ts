@@ -236,7 +236,7 @@ describe("room", () => {
     expect(left.id).toBe(a.id);
   });
 
-  it("marks a game master to everyone, and no one else", async () => {
+  it("marks a game master to everyone, and follows a renewed ticket", async () => {
     const shard = ++shardSeq;
     const gm = await join(shard, "gm", at(1, 2), undefined, true);
     const b = await join(shard, "b", at(3, 4));
@@ -246,6 +246,11 @@ describe("room", () => {
     const joined = (await gm.next("join")) as { player: Seen };
     expect(joined.player.id).toBe(b.id);
     expect(joined.player.gm).toBeUndefined();
+    // Losing the role takes the mark off without a reconnect.
+    gm.ws.send(JSON.stringify({ t: "ticket", ticket: await ticket("gm") }));
+    const look = (await b.next("look")) as { player: Seen };
+    expect(look.player.id).toBe(gm.id);
+    expect(look.player.gm).toBeUndefined();
   });
 
   it("corrects an impossible move", async () => {

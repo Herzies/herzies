@@ -516,7 +516,9 @@ export class TownRoom extends DurableObject<Env> {
       return;
     }
     const changed =
-      t.name !== p.name || JSON.stringify(t.look) !== JSON.stringify(p.look);
+      t.name !== p.name ||
+      JSON.stringify(t.look) !== JSON.stringify(p.look) ||
+      !!t.gm !== !!p.gm;
     p.exp = t.exp;
     p.maxHp = t.hp?.maxHp;
     const wasDown = !!p.down;
@@ -526,6 +528,7 @@ export class TownRoom extends DurableObject<Env> {
     p.name = t.name;
     p.look = t.look;
     p.emotes = t.em;
+    p.gm = !!t.gm;
     this.persist(s);
     if (changed || downChanged)
       this.broadcast({ t: "look", player: playerOf(p) });
@@ -1241,6 +1244,9 @@ export class TownRoom extends DurableObject<Env> {
         healMult: p.healMult,
         restSince: p.rest.since,
         standIn: p.standIn,
+        // From the ticket, and forgotten in a hibernation otherwise.
+        emotes: p.emotes,
+        ...(p.gm ? { gm: true } : {}),
       };
     }
     try {
