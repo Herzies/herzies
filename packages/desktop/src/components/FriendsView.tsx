@@ -75,9 +75,25 @@ export function FriendsView({
    * out of an open profile. */
   rootKey?: number;
 }) {
-  const [selectedFriend, setSelectedFriend] = useState<HerzieProfile | null>(
-    null,
-  );
+  // The open profile. Shown from the latest lookup of its code (`friends`,
+  // which every lookup updates), not from the copy it was opened with: that
+  // copy can be days old (the friends cache on disk) and never changed, so
+  // the herzie showed what it used to wear.
+  const [opened, setSelectedFriend] = useState<HerzieProfile | null>(null);
+  const selectedFriend = opened ? (friends[opened.friendCode] ?? opened) : null;
+  const selectedCode = selectedFriend?.friendCode ?? null;
+  // Fresh on every open, friend or not: the friends poll only covers
+  // friends, and only every so often. Not when it was just looked up to
+  // open it.
+  const justFetched = useRef<string | null>(null);
+  useEffect(() => {
+    if (!selectedCode) return;
+    if (justFetched.current === selectedCode) {
+      justFetched.current = null;
+      return;
+    }
+    herzies.friendLookup([selectedCode]);
+  }, [selectedCode]);
   const [search, setSearch] = useState("");
   const [searchResults, setSearchResults] = useState<FriendSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -154,7 +170,10 @@ export function FriendsView({
     }
     herzies.friendLookup([openProfileCode]).then((result) => {
       const profile = result[openProfileCode];
-      if (profile) setSelectedFriend(profile);
+      if (profile) {
+        justFetched.current = openProfileCode;
+        setSelectedFriend(profile);
+      }
       onProfileOpened?.();
     });
   }, [openProfileCode, onProfileOpened]);
