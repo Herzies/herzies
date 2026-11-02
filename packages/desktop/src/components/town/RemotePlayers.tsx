@@ -17,6 +17,7 @@ import { Html } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import { type Group, Vector3 } from "three";
+import { GmMark } from "../GmMark";
 import { ambient, seasonNow } from "./ambient";
 import { SEAT_Y } from "./Benches";
 import { BUBBLE_RANGE, type ChatBubble, type ChatBubbles } from "./chatBubbles";
@@ -366,6 +367,7 @@ function RemoteHerzie({
               // Hidden until the first state arrives, rather than at the origin.
               style={{ textShadow: NAME_SHADOW, visibility: "hidden" }}
             >
+              {remote.gm ? <GmMark className="[text-shadow:none]" /> : null}
               {remote.name}
             </button>
             <div

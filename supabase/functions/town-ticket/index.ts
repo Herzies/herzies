@@ -76,7 +76,7 @@ Deno.serve(async (request) => {
   });
   const { data: herzie, error } = await admin
     .from("herzies")
-    .select("name, friend_code, stage, equipped, level, hp, hp_at, down, class, stat_stamina, stat_sonic, stat_euphony, emotes")
+    .select("name, friend_code, stage, equipped, level, hp, hp_at, down, class, stat_stamina, stat_sonic, stat_euphony, emotes, gm")
     .eq("user_id", user.id)
     .maybeSingle();
   if (error) {
@@ -228,6 +228,8 @@ Deno.serve(async (request) => {
       ...((herzie.emotes as string[] | null)?.length
         ? { em: herzie.emotes as string[] }
         : {}),
+      // A game master (00133): other players see a "GM" mark on its name.
+      ...(herzie.gm ? { gm: true as const } : {}),
     },
     TOWN_TICKET_SECRET,
   );

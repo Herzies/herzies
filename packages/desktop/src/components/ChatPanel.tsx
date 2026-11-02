@@ -17,6 +17,7 @@ import { chatUserColor, cn } from "../lib/utils";
 import { type ChatMessage, herzies, useWindowFocused } from "../tauri-bridge";
 import { BlockCaret, useBlockCaret } from "./BlockCaret";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
+import { GmMark } from "./GmMark";
 import ItemInspectOverlay from "./ItemInspectOverlay";
 import { SendIcon } from "./icons/SendIcon";
 
@@ -1268,6 +1269,7 @@ export function ChatPanel({
                   className="break-words text-ui-sm leading-[14px]"
                 >
                   <span className="text-text-dim">{time}</span>{" "}
+                  {msg.gm ? <GmMark /> : null}
                   <button
                     type="button"
                     className={cn(

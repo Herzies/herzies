@@ -55,6 +55,7 @@ function formatMessage(
   msg: ChatRow,
   username: string,
   friendCode: string | null,
+  gm = false,
 ) {
   return {
     id: msg.id,
@@ -65,6 +66,8 @@ function formatMessage(
     itemRefs: msg.item_refs ?? [],
     userRefs: msg.user_refs ?? [],
     createdAt: msg.created_at,
+    // A game master's message (00133): the app marks the name.
+    ...(gm ? { gm: true } : {}),
   };
 }
 
@@ -100,19 +103,28 @@ async function handleGet(
   const userIds = [...new Set(messages.map((m) => m.user_id))];
   const { data: herzies } = await admin
     .from("herzies")
-    .select("user_id, name, friend_code")
+    .select("user_id, name, friend_code, gm")
     .in("user_id", userIds);
 
   const herzieMap = new Map(
     (herzies ?? []).map((h) => [
       h.user_id,
-      { name: h.name as string, friendCode: h.friend_code as string },
+      {
+        name: h.name as string,
+        friendCode: h.friend_code as string,
+        gm: h.gm === true,
+      },
     ]),
   );
 
   const chronological = (messages as ChatRow[]).reverse().map((msg) => {
     const h = herzieMap.get(msg.user_id);
-    return formatMessage(msg, h?.name ?? "Unknown", h?.friendCode ?? null);
+    return formatMessage(
+      msg,
+      h?.name ?? "Unknown",
+      h?.friendCode ?? null,
+      h?.gm,
+    );
   });
 
   return jsonResponse({ messages: chronological });
@@ -232,7 +244,7 @@ async function handlePost(
 
   const { data: herzie } = await admin
     .from("herzies")
-    .select("name, friend_code")
+    .select("name, friend_code, gm")
     .eq("user_id", userId)
     .single();
 
@@ -241,6 +253,7 @@ async function handlePost(
       msg as ChatRow,
       herzie?.name ?? "Unknown",
       herzie?.friend_code ?? null,
+      herzie?.gm === true,
     ),
   });
 }

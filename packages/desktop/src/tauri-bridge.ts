@@ -44,6 +44,8 @@ export interface ChatMessage {
   /** Friend codes @-mentioned in the message body. */
   userRefs?: string[];
   createdAt: string;
+  /** Sent by a game master: a "GM" mark goes left of the name. */
+  gm?: boolean;
 }
 
 export interface PendingTradeRequest {

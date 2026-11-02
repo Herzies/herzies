@@ -75,20 +75,34 @@ async function ticket(
   name = uid,
   exp = Date.now() / 1000 + 600,
   em?: string[],
+  gm?: true,
 ) {
   return signTownTicket(
-    { uid, name, look: { seed: `HERZ-${uid}`, stage: 1 }, exp, ...(em ? { em } : {}) },
+    {
+      uid,
+      name,
+      look: { seed: `HERZ-${uid}`, stage: 1 },
+      exp,
+      ...(em ? { em } : {}),
+      ...(gm ? { gm } : {}),
+    },
     SECRET,
   );
 }
 
-async function join(shard: number, uid: string, pos = at(0, 0), em?: string[]) {
+async function join(
+  shard: number,
+  uid: string,
+  pos = at(0, 0),
+  em?: string[],
+  gm?: true,
+) {
   const c = await connect(shard);
   c.ws.send(
     JSON.stringify({
       t: "hello",
       v: TOWN_PROTOCOL,
-      ticket: await ticket(uid, uid, undefined, em),
+      ticket: await ticket(uid, uid, undefined, em, gm),
       at: pos,
     }),
   );
@@ -220,6 +234,18 @@ describe("room", () => {
     a.ws.close(1000);
     const left = (await b.next("leave")) as { id: number };
     expect(left.id).toBe(a.id);
+  });
+
+  it("marks a game master to everyone, and no one else", async () => {
+    const shard = ++shardSeq;
+    const gm = await join(shard, "gm", at(1, 2), undefined, true);
+    const b = await join(shard, "b", at(3, 4));
+    type Seen = { id: number; gm?: true };
+    const [seen] = (b.welcome as { players: Seen[] }).players;
+    expect(seen).toMatchObject({ id: gm.id, gm: true });
+    const joined = (await gm.next("join")) as { player: Seen };
+    expect(joined.player.id).toBe(b.id);
+    expect(joined.player.gm).toBeUndefined();
   });
 
   it("corrects an impossible move", async () => {

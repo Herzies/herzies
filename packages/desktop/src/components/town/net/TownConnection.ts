@@ -62,6 +62,8 @@ export type RemotePlayer = {
   pendingCasts: number;
   /** Knocked out outside a fight (a Bard can play it back up). */
   down: boolean;
+  /** A game master: a "GM" mark goes left of the name. */
+  gm: boolean;
   /** An emote they played, not yet shown (null: none). */
   pendingEmote: string | null;
 };
@@ -420,6 +422,7 @@ export class TownConnection {
           r.name = m.player.name;
           r.look = m.player.look;
           r.down = !!m.player.down;
+          r.gm = !!m.player.gm;
         } else if (m.player.id !== this.you) this.addRemote(m.player);
         this.emit();
         return;
@@ -506,6 +509,7 @@ export class TownConnection {
       castSeq: existing?.castSeq ?? null,
       pendingCasts: existing?.pendingCasts ?? 0,
       down: !!p.down,
+      gm: !!p.gm,
       pendingEmote: existing?.pendingEmote ?? null,
     });
   }

@@ -150,6 +150,8 @@ export type TownTicketPayload = {
   /** The emotes it owns (emotes.ts), so the server can refuse one it
    * doesn't. Absent: none. */
   em?: string[];
+  /** A game master (00133): its name carries a "GM" mark. */
+  gm?: true;
 };
 
 /** The boss room's half of a ticket. */
@@ -539,6 +541,8 @@ export type TownPlayer = {
   /** Knocked out, outside a fight (in a fight its health says so): a Bard
    * can play it back up. */
   down?: true;
+  /** A game master: its name carries a "GM" mark. */
+  gm?: true;
 };
 
 export type ClientMessage =

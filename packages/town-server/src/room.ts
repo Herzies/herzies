@@ -129,6 +129,8 @@ type Attachment = {
     down?: boolean;
     /** The emotes it owns (from the ticket). */
     emotes?: string[];
+    /** A game master (from the ticket). */
+    gm?: boolean;
     /** Its Resurrect's level (0: it has none), and how much stronger its
      * heals are (its Euphony), for a resurrect outside a fight. */
     rez?: number;
@@ -465,6 +467,7 @@ export class TownRoom extends DurableObject<Env> {
       rest: new RestMeter(),
       standIn,
       emotes: t.em,
+      ...(t.gm ? { gm: true } : {}),
       ...townVitalsOf(t, !!this.fight),
     };
     this.persist(s);
@@ -1311,12 +1314,14 @@ function playerOf(p: {
   name: string;
   look: TownLook;
   down?: boolean;
+  gm?: boolean;
 }): TownPlayer {
   return {
     id: p.id,
     name: p.name,
     look: p.look,
     ...(p.down ? { down: true as const } : {}),
+    ...(p.gm ? { gm: true as const } : {}),
   };
 }
 

@@ -520,6 +520,9 @@ pub struct ChatMessage {
     #[serde(default)]
     pub user_refs: Vec<String>,
     pub created_at: String,
+    /// Sent by a game master (00133): the app marks the name.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub gm: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
