@@ -61,7 +61,7 @@ import {
   buffReductions,
   mitigate,
 } from "@herzies/shared/skills";
-import { defReduction } from "@herzies/shared/stats";
+import { defReduction, timingAttackSpeed } from "@herzies/shared/stats";
 import type { TowerMob } from "@herzies/shared/town-net";
 import { type Mob, type MobJudge, MobPack, SEEN_LAG_MS } from "./mobs";
 
@@ -697,9 +697,9 @@ export class BossEngine {
   }
 
   /** A cast's token from `uid`'s bucket (a heal bolt spends one too):
-   * one per `castEveryMs`, quicker hasted, up to a short burst. False if
-   * it's empty: too fast. */
-  spendCast(uid: string, now: number): boolean {
+   * one per `castEveryMs`, quicker hasted and with Timing, up to a short
+   * burst. False if it's empty: too fast. */
+  spendCast(uid: string, now: number, timing = 0): boolean {
     const bucket = this.casts.get(uid) ?? {
       tokens: TUNING.castBurst,
       at: now,
@@ -708,7 +708,8 @@ export class BossEngine {
       TUNING.castBurst,
       bucket.tokens +
         (Math.max(0, now - bucket.at) / TUNING.castEveryMs) *
-          castSpeed(this.buffs.get(uid) ?? [], now),
+          castSpeed(this.buffs.get(uid) ?? [], now) *
+          (1 + timingAttackSpeed(timing)),
     );
     bucket.at = now;
     this.casts.set(uid, bucket);
@@ -743,7 +744,7 @@ export class BossEngine {
     melee: number = STRIKE_DAMAGE,
   ): "cooldown" | "miss" | "hit" | "dead" {
     if (this.killed) return "dead";
-    if (!this.spendCast(uid, now)) return "cooldown";
+    if (!this.spendCast(uid, now, stats.timing)) return "cooldown";
     if (this.sleeping) return "miss";
     const boost = this.damageMult(uid, now);
     if (attack === "melee") {

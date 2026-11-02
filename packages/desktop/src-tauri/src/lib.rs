@@ -722,11 +722,12 @@ async fn allocate_stats(
     stamina: u32,
     sonic_power: u32,
     euphony: u32,
+    timing: u32,
     app: AppHandle,
     state: tauri::State<'_, SharedState>,
 ) -> Result<serde_json::Value, String> {
     let client = api::http();
-    let result = api::api_allocate_stats(&client, stamina, sonic_power, euphony).await?;
+    let result = api::api_allocate_stats(&client, stamina, sonic_power, euphony, timing).await?;
     let points: Option<StatPoints> = serde_json::from_value(result["statPoints"].clone()).ok();
     let mut s = state.lock().unwrap();
     if let (Some(points), Some(ref mut herzie)) = (points, s.herzie.as_mut()) {

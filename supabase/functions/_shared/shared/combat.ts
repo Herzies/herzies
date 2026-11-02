@@ -14,6 +14,9 @@ export type HitStats = {
   sonicPower: number;
   critChance: number;
   critDamage: number;
+  /** Quickens attacks (see timingAttackSpeed); its crit chance is already
+   * in critChance. Absent, none. */
+  timing?: number;
 };
 
 /** What one sonic wave deals before sonic power: the training dummies'

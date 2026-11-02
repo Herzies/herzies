@@ -25,12 +25,18 @@ export async function POST(request: Request) {
     p_stamina: body.stamina,
     p_sonic: body.sonicPower,
     p_euphony: body.euphony,
+    p_timing: body.timing,
   });
 
   const result = data as {
     ok: boolean;
     reason?: string;
-    statPoints?: { stamina: number; sonicPower: number; euphony: number };
+    statPoints?: {
+      stamina: number;
+      sonicPower: number;
+      euphony: number;
+      timing: number;
+    };
     vitals?: Record<string, unknown>;
   } | null;
 

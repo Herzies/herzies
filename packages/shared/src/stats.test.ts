@@ -7,6 +7,8 @@ import {
   levelStats,
   normalizeStatPoints,
   statPoints,
+  timingAttackSpeed,
+  timingCritChance,
   validateAllocation,
 } from "./stats.js";
 import { maxHp } from "./vitals.js";
@@ -15,7 +17,9 @@ describe("statPoints", () => {
   it("earns two a level after the first and counts what's left", () => {
     expect(statPoints(1, null)).toEqual({ total: 0, spent: 0, unspent: 0 });
     expect(statPoints(34, null)).toEqual({ total: 66, spent: 0, unspent: 66 });
-    expect(statPoints(10, { stamina: 5, sonicPower: 3, euphony: 2 })).toEqual({
+    expect(
+      statPoints(10, { stamina: 5, sonicPower: 3, euphony: 2, timing: 0 }),
+    ).toEqual({
       total: 18,
       spent: 10,
       unspent: 8,
@@ -24,7 +28,8 @@ describe("statPoints", () => {
 
   it("never reports less than nothing left", () => {
     expect(
-      statPoints(1, { stamina: 9, sonicPower: 0, euphony: 0 }).unspent,
+      statPoints(1, { stamina: 9, sonicPower: 0, euphony: 0, timing: 0 })
+        .unspent,
     ).toBe(0);
   });
 
@@ -33,32 +38,93 @@ describe("statPoints", () => {
       stamina: 0,
       sonicPower: 0,
       euphony: 0,
+      timing: 0,
     });
+  });
+});
+
+describe("Timing", () => {
+  it("quickens attacks and adds crit chance, less with each point", () => {
+    expect(timingAttackSpeed(0)).toBe(0);
+    expect(timingCritChance(0)).toBe(0);
+    // About +0.5% speed and +0.25% crit a point at first…
+    expect(timingAttackSpeed(10)).toBeCloseTo(0.045, 3);
+    expect(timingCritChance(10)).toBe(2.3);
+    // …half the most at timingHalf, and never past it.
+    expect(timingAttackSpeed(100)).toBeCloseTo(0.25, 5);
+    expect(timingCritChance(100)).toBe(12.5);
+    expect(timingAttackSpeed(1e9)).toBeLessThan(0.5);
+    expect(timingCritChance(1e9)).toBeLessThanOrEqual(25);
+  });
+
+  it("counts toward the points spent", () => {
+    expect(
+      statPoints(10, { stamina: 0, sonicPower: 0, euphony: 0, timing: 7 })
+        .spent,
+    ).toBe(7);
+    expect(
+      validateAllocation(10, {
+        stamina: 12,
+        sonicPower: 0,
+        euphony: 0,
+        timing: 7,
+      }),
+    ).not.toBeNull();
   });
 });
 
 describe("validateAllocation", () => {
   it("takes up to the level's points, and a reset", () => {
     expect(
-      validateAllocation(10, { stamina: 18, sonicPower: 0, euphony: 0 }),
+      validateAllocation(10, {
+        stamina: 18,
+        sonicPower: 0,
+        euphony: 0,
+        timing: 0,
+      }),
     ).toBeNull();
     expect(
-      validateAllocation(10, { stamina: 0, sonicPower: 0, euphony: 0 }),
+      validateAllocation(10, {
+        stamina: 0,
+        sonicPower: 0,
+        euphony: 0,
+        timing: 0,
+      }),
     ).toBeNull();
   });
 
   it("refuses too many, negatives and fractions", () => {
     expect(
-      validateAllocation(10, { stamina: 15, sonicPower: 4, euphony: 0 }),
+      validateAllocation(10, {
+        stamina: 15,
+        sonicPower: 4,
+        euphony: 0,
+        timing: 0,
+      }),
     ).not.toBeNull();
     expect(
-      validateAllocation(1, { stamina: 1, sonicPower: 0, euphony: 0 }),
+      validateAllocation(1, {
+        stamina: 1,
+        sonicPower: 0,
+        euphony: 0,
+        timing: 0,
+      }),
     ).not.toBeNull();
     expect(
-      validateAllocation(10, { stamina: -1, sonicPower: 0, euphony: 0 }),
+      validateAllocation(10, {
+        stamina: -1,
+        sonicPower: 0,
+        euphony: 0,
+        timing: 0,
+      }),
     ).not.toBeNull();
     expect(
-      validateAllocation(10, { stamina: 1.5, sonicPower: 0, euphony: 0 }),
+      validateAllocation(10, {
+        stamina: 1.5,
+        sonicPower: 0,
+        euphony: 0,
+        timing: 0,
+      }),
     ).not.toBeNull();
   });
 });

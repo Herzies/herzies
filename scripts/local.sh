@@ -117,7 +117,7 @@ update public.herzies h
   from auth.users u
  where u.id = h.user_id and u.email = '$email'
 returning h.name, h.level, h.stage, h.class,
-          h.stat_stamina, h.stat_sonic, h.stat_euphony;
+          h.stat_stamina, h.stat_sonic, h.stat_euphony, h.stat_timing;
 SQL
 }
 

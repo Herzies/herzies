@@ -183,6 +183,7 @@ export function rowToHerzie(row: Record<string, unknown>): Herzie {
       stamina: row.stat_stamina,
       sonicPower: row.stat_sonic,
       euphony: row.stat_euphony,
+      timing: row.stat_timing,
     }),
     totalMinutesListened: row.total_minutes_listened as number,
     genreMinutes: (row.genre_minutes ?? {}) as Record<string, number>,

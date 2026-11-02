@@ -711,7 +711,7 @@ export class FightRuntime {
     pitch: number,
     now: number,
   ): "hit" | "miss" | "cooldown" {
-    if (!this.engine.spendCast(p.uid, now)) return "cooldown";
+    if (!this.engine.spendCast(p.uid, now, p.stats.timing)) return "cooldown";
     const allies: { uid: string; x: number; z: number }[] = [];
     for (const o of this.players.values()) {
       if (o === p || !o.present || o.down || !this.fighting(o.uid)) continue;
@@ -2157,13 +2157,15 @@ function armsOf(
 export function statsOf(st: TownTicketPayload["st"]): FightStats {
   const n = (v: number | undefined) =>
     typeof v === "number" && Number.isFinite(v) ? v : 0;
-  const [sonicPower, , critChance, critDamage, , def, euphony] = st ?? [];
+  const [sonicPower, , critChance, critDamage, , def, euphony, timing] =
+    st ?? [];
   return {
     sonicPower: n(sonicPower),
     critChance: n(critChance),
     critDamage: n(critDamage),
     def: n(def),
     euphony: n(euphony),
+    timing: n(timing),
   };
 }
 

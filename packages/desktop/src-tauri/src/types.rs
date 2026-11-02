@@ -60,6 +60,8 @@ pub struct StatPoints {
     pub sonic_power: u32,
     #[serde(default)]
     pub euphony: u32,
+    #[serde(default)]
+    pub timing: u32,
 }
 
 /// One class skill the herzie knows. Mirrors `HerzieSkill` in @herzies/shared.
@@ -594,7 +596,9 @@ mod tests {
             Some(StatPoints {
                 stamina: 10,
                 sonic_power: 4,
-                euphony: 0
+                euphony: 0,
+                // Absent from the reply (an older server): none.
+                timing: 0
             })
         );
         assert_eq!(r.skills.map(|s| s.len()), Some(1));

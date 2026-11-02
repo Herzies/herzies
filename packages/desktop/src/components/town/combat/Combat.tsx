@@ -6,6 +6,7 @@ import {
   hitDamage,
   SKILL_DEFS,
   skillValue,
+  timingAttackSpeed,
 } from "@herzies/shared";
 import {
   BOSS_STAND,
@@ -556,8 +557,11 @@ export function Combat({
         healTarget([chest.x, chest.y, chest.z], [dir.x, dir.y, dir.z], allies)
           ?.ally.id ?? null;
     }
-    // Hasted: the pace and the motion quicken together.
-    const speed = attackSpeedOf(bossFight.you ?? -1, now);
+    // Hasted, or with Timing: the pace and the motion quicken together. The
+    // two multiply, as the server's cast budget does.
+    const speed =
+      attackSpeedOf(bossFight.you ?? -1, now) *
+      (1 + timingAttackSpeed(statsRef.current.timing));
     if (herzie) herzie.castRate = speed;
     if (herzie) {
       const queued = now - combat.queuedAt < CAST_BUFFER_MS;

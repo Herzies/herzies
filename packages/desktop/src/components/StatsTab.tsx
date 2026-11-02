@@ -12,6 +12,7 @@ import {
   STAT_LABELS,
   type StatPoints,
   statPoints,
+  timingAttackSpeed,
   waveDamage,
   withStatPoints,
 } from "@herzies/shared";
@@ -25,6 +26,14 @@ import { refreshVitals } from "./town/vitals";
 const PRIMARY = STAT_KEYS.filter((k): k is PointStat =>
   (POINT_STATS as readonly string[]).includes(k),
 );
+/** What each primary stat does, shown on hover. */
+const PRIMARY_HINTS: Record<PointStat, string> = {
+  stamina: "Max HP and Def",
+  sonicPower: "Damage",
+  euphony: "Heals and buffs",
+  timing: "Attack speed and crit chance",
+};
+
 /** Everything else a herzie has: from its cards, or following from the
  * primary stats. */
 const SECONDARY = STAT_KEYS.filter(
@@ -42,9 +51,9 @@ type Line = {
   hint?: string;
 };
 
-/** The secondary stats: Max HP, Damage and Healing (which follow from the
- * level, Stamina, Sonic Power and Euphony), then the rest in catalog
- * order. */
+/** The secondary stats: Max HP, Damage, Attack speed, Heals given and
+ * Buffs given (which follow from the level, Stamina, Sonic Power, Timing and
+ * Euphony), then the rest in catalog order. */
 function secondaryLines(
   level: number | undefined,
   now: HerzieStats,
@@ -70,12 +79,30 @@ function secondaryLines(
     hint: "What one sonic wave deals, before crits",
   });
   lines.push({
-    key: "healing",
-    label: "Healing",
+    key: "attackSpeed",
+    label: "Attack speed",
+    now: Math.round(timingAttackSpeed(now.timing) * 100),
+    next: Math.round(timingAttackSpeed(next.timing) * 100),
+    text: (v) => `+${v}%`,
+    hint: "How much faster it attacks, from Timing",
+  });
+  // "Given": Euphony strengthens what the herzie does for others, never
+  // the healing it gets itself — read as that, "Healing" misled.
+  lines.push({
+    key: "healsGiven",
+    label: "Heals given",
     now: Math.round((healMult(now.euphony) - 1) * 100),
     next: Math.round((healMult(next.euphony) - 1) * 100),
     text: (v) => `+${v}%`,
-    hint: `Heals +${Math.round((healMult(next.euphony) - 1) * 100)}%, buffs +${Math.round((buffMult(next.euphony) - 1) * 100)}%, from Euphony`,
+    hint: "Heals you give, not ones you get",
+  });
+  lines.push({
+    key: "buffsGiven",
+    label: "Buffs given",
+    now: Math.round((buffMult(now.euphony) - 1) * 100),
+    next: Math.round((buffMult(next.euphony) - 1) * 100),
+    text: (v) => `+${v}%`,
+    hint: "Buffs you give, not ones you get",
   });
   for (const key of SECONDARY)
     lines.push({
@@ -159,7 +186,9 @@ export function StatsTab({
   };
 
   return (
-    <div className="flex flex-col gap-2 pt-1.5 text-ui">
+    // The arrow over the stats, not a text cursor: they're read and hovered
+    // for what they do, not selected. Buttons keep their own pointer.
+    <div className="flex cursor-default flex-col gap-2 pt-1.5 text-ui">
       {/* The buttons share the heading's line, so the tab fits without
           scrolling. */}
       <div className="flex items-baseline justify-between">
@@ -190,7 +219,7 @@ export function StatsTab({
         <div className="flex flex-col gap-1">
           {PRIMARY.map((key) => (
             <div key={key} className="flex items-center justify-between gap-1">
-              <Tooltip label={`Cards ${stats[key]} · Points ${placing[key]}`}>
+              <Tooltip label={PRIMARY_HINTS[key]}>
                 <span className="text-text-dim">{STAT_LABELS[key]}</span>
               </Tooltip>
               <span className="flex items-center gap-1">

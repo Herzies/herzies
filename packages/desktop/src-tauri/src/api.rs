@@ -814,11 +814,13 @@ pub async fn api_allocate_stats(
     stamina: u32,
     sonic_power: u32,
     euphony: u32,
+    timing: u32,
 ) -> Result<serde_json::Value, String> {
     let body = serde_json::json!({
         "stamina": stamina,
         "sonicPower": sonic_power,
         "euphony": euphony,
+        "timing": timing,
     });
     let resp = api_fetch(client, reqwest::Method::POST, "/stats/allocate", Some(body))
         .await

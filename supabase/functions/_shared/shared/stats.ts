@@ -4,7 +4,7 @@
 
 /**
  * Stat points: what a herzie earns by levelling and spends on Stamina, Sonic
- * Power and Euphony. Pure and free of the item catalog, so the Town server
+ * Power, Euphony and Timing. Pure and free of the item catalog, so the Town server
  * and the edge functions read it without pulling in every item.
  *
  * Only the spent points are stored (`herzies.stat_*`); what's left to spend
@@ -33,6 +33,16 @@ export const STAT_TUNING = {
   healEuphony: 100,
   /** Euphony at which a buff is doubled. */
   buffEuphony: 200,
+  /** The most Timing can add to attack speed, and to crit chance (both in
+   * percent), and the Timing at which it's given half of each: diminishing,
+   * like Def, so piling it on never runs away. About +0.5% attack speed and
+   * +0.25% crit chance a point at first. */
+  timingSpeedMax: 50,
+  timingCritMax: 25,
+  timingHalf: 100,
+  /** Crit damage every herzie has before its cards (percent), so a crit
+   * always lands harder, gear or not. */
+  baseCritDamage: 50,
 } as const;
 
 export const POINTS_PER_LEVEL = STAT_TUNING.pointsPerLevel;
@@ -52,7 +62,12 @@ export function levelStats(level: number | null | undefined): {
 }
 
 /** The stats points can go into. */
-export const POINT_STATS = ["stamina", "sonicPower", "euphony"] as const;
+export const POINT_STATS = [
+  "stamina",
+  "sonicPower",
+  "euphony",
+  "timing",
+] as const;
 export type PointStat = (typeof POINT_STATS)[number];
 
 /** Points spent on each stat. */
@@ -62,6 +77,7 @@ export const NO_STAT_POINTS: StatPoints = {
   stamina: 0,
   sonicPower: 0,
   euphony: 0,
+  timing: 0,
 };
 
 function count(n: unknown): number {
@@ -77,6 +93,7 @@ export function normalizeStatPoints(raw: unknown): StatPoints {
     stamina: count(r.stamina),
     sonicPower: count(r.sonicPower),
     euphony: count(r.euphony),
+    timing: count(r.timing),
   };
 }
 
@@ -93,7 +110,7 @@ export function statPoints(
 ): { total: number; spent: number; unspent: number } {
   const p = normalizeStatPoints(points);
   const total = pointsForLevel(level);
-  const spent = p.stamina + p.sonicPower + p.euphony;
+  const spent = spentPoints(p);
   return { total, spent, unspent: Math.max(0, total - spent) };
 }
 
@@ -107,8 +124,8 @@ export function validateAllocation(
     const n = points[key];
     if (!Number.isInteger(n) || n < 0) return "Points must be whole numbers";
   }
-  const spent = points.stamina + points.sonicPower + points.euphony;
-  if (spent > pointsForLevel(level)) return "Not enough stat points";
+  if (spentPoints(points) > pointsForLevel(level))
+    return "Not enough stat points";
   return null;
 }
 
@@ -122,6 +139,28 @@ export function defReduction(def: number): number {
 /** What Euphony does to a heal. */
 export function healMult(euphony: number): number {
   return 1 + Math.max(0, euphony || 0) / STAT_TUNING.healEuphony;
+}
+
+/** Every point spent, across the stats. */
+function spentPoints(p: StatPoints): number {
+  return POINT_STATS.reduce((sum, key) => sum + p[key], 0);
+}
+
+/** The share of Timing's most it gives at this much Timing. */
+function timingShare(timing: number): number {
+  const t = Math.max(0, Number.isFinite(timing) ? timing : 0);
+  return t / (t + STAT_TUNING.timingHalf);
+}
+
+/** What Timing adds to attack speed, as a fraction (0.1 is 10% faster).
+ * It quickens attacks alongside a Haste: the two multiply. */
+export function timingAttackSpeed(timing: number): number {
+  return (STAT_TUNING.timingSpeedMax / 100) * timingShare(timing);
+}
+
+/** What Timing adds to crit chance, in percent, to one decimal. */
+export function timingCritChance(timing: number): number {
+  return Math.round(STAT_TUNING.timingCritMax * timingShare(timing) * 10) / 10;
 }
 
 /** What Euphony does to a buff. */

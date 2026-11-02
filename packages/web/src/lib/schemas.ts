@@ -83,6 +83,8 @@ export const allocateStatsSchema = z.object({
   stamina: statPoint,
   sonicPower: statPoint,
   euphony: statPoint,
+  // Absent from apps that predate Timing: none.
+  timing: statPoint.default(0),
 });
 
 /** Upgrade one named copy. `{targetItemId}` is the older client's spelling. */

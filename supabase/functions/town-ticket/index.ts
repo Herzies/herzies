@@ -76,7 +76,7 @@ Deno.serve(async (request) => {
   });
   const { data: herzie, error } = await admin
     .from("herzies")
-    .select("name, friend_code, stage, equipped, level, hp, hp_at, down, class, stat_stamina, stat_sonic, stat_euphony, emotes, gm")
+    .select("name, friend_code, stage, equipped, level, hp, hp_at, down, class, stat_stamina, stat_sonic, stat_euphony, stat_timing, emotes, gm")
     .eq("user_id", user.id)
     .maybeSingle();
   if (error) {
@@ -116,6 +116,7 @@ Deno.serve(async (request) => {
       stamina: herzie.stat_stamina,
       sonicPower: herzie.stat_sonic,
       euphony: herzie.stat_euphony,
+      timing: herzie.stat_timing,
     },
     herzie.level,
   );
@@ -219,6 +220,7 @@ Deno.serve(async (request) => {
         stats.stamina,
         stats.def,
         stats.euphony,
+        stats.timing,
       ],
       boss,
       tower,

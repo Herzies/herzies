@@ -59,7 +59,7 @@ export async function GET(request: Request) {
     const { data, error } = await admin
       .from("herzies")
       .select(
-        "user_id, name, friend_code, stage, level, currency, appearance, equipped, item_upgrades, now_playing, share_listening, stat_stamina, stat_sonic, stat_euphony",
+        "user_id, name, friend_code, stage, level, currency, appearance, equipped, item_upgrades, now_playing, share_listening, stat_stamina, stat_sonic, stat_euphony, stat_timing",
       )
       .eq("friend_code", singleCode.toUpperCase().trim())
       .single();
@@ -110,7 +110,7 @@ export async function GET(request: Request) {
   const { data, error } = await admin
     .from("herzies")
     .select(
-      "user_id, name, friend_code, stage, level, currency, appearance, equipped, item_upgrades, now_playing, share_listening, stat_stamina, stat_sonic, stat_euphony",
+      "user_id, name, friend_code, stage, level, currency, appearance, equipped, item_upgrades, now_playing, share_listening, stat_stamina, stat_sonic, stat_euphony, stat_timing",
     )
     .in("friend_code", codes);
 
@@ -176,6 +176,7 @@ type HerzieRow = {
   stat_stamina: number;
   stat_sonic: number;
   stat_euphony: number;
+  stat_timing: number;
 };
 
 /**
@@ -229,6 +230,7 @@ function formatProfile(
         stamina: row.stat_stamina,
         sonicPower: row.stat_sonic,
         euphony: row.stat_euphony,
+        timing: row.stat_timing,
       },
       row.level,
     ),

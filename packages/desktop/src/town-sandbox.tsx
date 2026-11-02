@@ -492,12 +492,13 @@ function Sandbox() {
         onCreated={params.has("bench") ? bench : undefined}
         onReady={() => homeMode.setReady(true)}
         homeDrops
-        // ?sp=&cc=&cd= : sonic power, crit chance and crit damage, to try
-        // the dummies with.
+        // ?sp=&cc=&cd=&tm= : sonic power, crit chance, crit damage and
+        // Timing, to try the dummies with.
         stats={{
           sonicPower: Number(params.get("sp") ?? 0),
           stamina: 0,
           euphony: 0,
+          timing: Number(params.get("tm") ?? 0),
           def: 0,
           luck: 0,
           critChance: Number(params.get("cc") ?? 0),

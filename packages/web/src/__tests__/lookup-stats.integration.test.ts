@@ -58,9 +58,11 @@ describe("lookup stats", () => {
       luck: 10,
       stamina: 0,
       euphony: 0,
+      timing: 0,
       def: 0,
       critChance: 0,
-      critDamage: 0,
+      // Everyone's base crit damage (STAT_TUNING.baseCritDamage).
+      critDamage: 50,
       moveSpeed: 0,
     });
     // Listening data stays private to non-friends; stats do not.
@@ -82,9 +84,11 @@ describe("lookup stats", () => {
       luck: 0,
       stamina: 0,
       euphony: 0,
+      timing: 0,
       def: 0,
       critChance: 0,
-      critDamage: 0,
+      // Everyone's base crit damage (STAT_TUNING.baseCritDamage).
+      critDamage: 50,
       moveSpeed: 0,
     });
   });

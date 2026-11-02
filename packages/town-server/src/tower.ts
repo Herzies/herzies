@@ -27,6 +27,7 @@ import {
   BACKSPIN_SPREAD,
   type Buff,
 } from "@herzies/shared/skills";
+import { timingAttackSpeed } from "@herzies/shared/stats";
 import { towerMob } from "@herzies/shared/tower";
 import type { TowerFloor, TowerMob } from "@herzies/shared/town-net";
 import {
@@ -216,7 +217,7 @@ export class TowerEngine {
     attack: AttackStyle = "wave",
     melee: number = STRIKE_DAMAGE,
   ): "cooldown" | "miss" | "hit" | "dead" {
-    if (!this.spendCast(uid, now)) return "cooldown";
+    if (!this.spendCast(uid, now, stats.timing)) return "cooldown";
     const seen = now - SEEN_LAG_MS;
     if (attack === "melee") {
       const struck = this.pack.inReach(from, yaw, seen);
@@ -275,7 +276,7 @@ export class TowerEngine {
   }
 
   /** A cast's token (a heal bolt spends one too); see BossEngine's. */
-  spendCast(uid: string, now: number): boolean {
+  spendCast(uid: string, now: number, timing = 0): boolean {
     const bucket = this.casts.get(uid) ?? {
       tokens: TUNING.castBurst,
       at: now,
@@ -284,7 +285,8 @@ export class TowerEngine {
       TUNING.castBurst,
       bucket.tokens +
         (Math.max(0, now - bucket.at) / TUNING.castEveryMs) *
-          castSpeed(this.buffs.get(uid) ?? [], now),
+          castSpeed(this.buffs.get(uid) ?? [], now) *
+          (1 + timingAttackSpeed(timing)),
     );
     bucket.at = now;
     this.casts.set(uid, bucket);

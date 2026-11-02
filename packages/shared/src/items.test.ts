@@ -64,6 +64,7 @@ import {
   upgradeSuccessChance,
   withStatPoints,
 } from "./items.js";
+import { STAT_TUNING, timingCritChance } from "./stats.js";
 import { TOWN_SPRINT_SPEED } from "./town-net.js";
 
 /** A unit with sensible defaults, so a test only states what it cares about. */
@@ -994,6 +995,7 @@ describe("herzie stats", () => {
       sonicPower: 0,
       stamina: 0,
       euphony: 0,
+      timing: 0,
       def: 0,
       luck: 0,
       critChance: 0,
@@ -1004,6 +1006,7 @@ describe("herzie stats", () => {
       sonicPower: 0,
       stamina: 0,
       euphony: 0,
+      timing: 0,
       def: 0,
       luck: 0,
       critChance: 0,
@@ -1068,6 +1071,7 @@ describe("herzie stats", () => {
       sonicPower: 0,
       stamina: 0,
       euphony: 0,
+      timing: 0,
       def: 0,
       luck: 0,
       critChance: 0,
@@ -1386,6 +1390,7 @@ describe("item units", () => {
       sonicPower: 0,
       stamina: 0,
       euphony: 0,
+      timing: 0,
       def: 0,
       luck: 0,
       critChance: 0,
@@ -1396,6 +1401,7 @@ describe("item units", () => {
       sonicPower: 0,
       stamina: 0,
       euphony: 0,
+      timing: 0,
       def: 0,
       luck: 0,
       critChance: 0,
@@ -1494,12 +1500,14 @@ describe("stats", () => {
       "sonicPower",
       "stamina",
       "euphony",
+      "timing",
       "luck",
     ]);
     expect(shownStatKeys(base, { ...base, critDamage: 5 })).toEqual([
       "sonicPower",
       "stamina",
       "euphony",
+      "timing",
       "luck",
       "critDamage",
     ]);
@@ -1515,17 +1523,27 @@ describe("withStatPoints", () => {
       stamina: 6,
       sonicPower: 4,
       euphony: 2,
+      timing: 10,
     });
     expect(total.sonicPower).toBe(items.sonicPower + 4);
     expect(total.stamina).toBe(6);
     expect(total.def).toBe(6);
     expect(total.euphony).toBe(2);
     expect(total.luck).toBe(items.luck);
+    // Timing brings crit chance; everyone has the base crit damage.
+    expect(total.timing).toBe(10);
+    expect(total.critChance).toBe(items.critChance + timingCritChance(10));
+    expect(total.critDamage).toBe(
+      items.critDamage + STAT_TUNING.baseCritDamage,
+    );
   });
 
-  it("is the item totals with no points", () => {
+  it("is the item totals with no points, plus the base crit damage", () => {
     const items = getHerzieStats({ head: "headphones" });
-    expect(withStatPoints(items, null)).toEqual(items);
+    expect(withStatPoints(items, null)).toEqual({
+      ...items,
+      critDamage: items.critDamage + STAT_TUNING.baseCritDamage,
+    });
   });
 
   it("adds the level's own on top", () => {
@@ -1533,7 +1551,10 @@ describe("withStatPoints", () => {
     const at10 = withStatPoints(items, null, 10);
     expect(at10.sonicPower).toBe(items.sonicPower + 18);
     expect(at10.def).toBeCloseTo(items.def + 5.4);
-    expect(withStatPoints(items, null, 1)).toEqual(items);
+    expect(withStatPoints(items, null, 1)).toEqual({
+      ...items,
+      critDamage: items.critDamage + STAT_TUNING.baseCritDamage,
+    });
   });
 });
 

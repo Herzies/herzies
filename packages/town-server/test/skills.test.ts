@@ -4,6 +4,7 @@ import {
   SKILL_DEFS,
   skillValue,
 } from "@herzies/shared/skills";
+import { timingAttackSpeed } from "@herzies/shared/stats";
 import type { ServerMessage, TownTicketPayload } from "@herzies/shared/town-net";
 import { armed } from "./arms";
 import { describe, expect, it } from "vitest";
@@ -211,14 +212,17 @@ describe("Euphony", () => {
 });
 
 describe("ticket stats", () => {
-  it("reads Def and Euphony when the ticket has them", () => {
-    expect(statsOf([12, 5, 3, 50, 20, 20, 8])).toEqual({
+  it("reads Def, Euphony and Timing when the ticket has them", () => {
+    expect(statsOf([12, 5, 3, 50, 20, 20, 8, 30])).toEqual({
       sonicPower: 12,
       critChance: 3,
       critDamage: 50,
       def: 20,
       euphony: 8,
+      timing: 30,
     });
+    // From before Timing: none.
+    expect(statsOf([12, 5, 3, 50, 20, 20, 8]).timing).toBe(0);
   });
 
   it("reads them as 0 on a ticket from before stat points, or no stats", () => {
@@ -228,6 +232,7 @@ describe("ticket stats", () => {
       critDamage: 50,
       def: 0,
       euphony: 0,
+      timing: 0,
     });
     expect(statsOf(undefined).def).toBe(0);
   });
@@ -432,6 +437,22 @@ describe("Haste", () => {
       if (e.cast("a", { x: 0, z: 8 }, Math.PI, 0, statsOf(undefined), T0 + 1_000 + i * (CAST_INTERVAL_MS / 1.4)) === "cooldown")
         refused++;
     expect(refused).toBeGreaterThan(5);
+  });
+
+  it("lets a herzie with Timing cast faster, and one without not", () => {
+    // Well past the slack the server already gives (castEveryMs).
+    const timing = 300;
+    const every = CAST_INTERVAL_MS / (1 + timingAttackSpeed(timing));
+    const refused = (stats: ReturnType<typeof statsOf>) => {
+      const e = new BossEngine({ hp: 1e9, maxHp: 1e9, seed: 1, now: T0 });
+      let n = 0;
+      for (let i = 0; i < 40; i++)
+        if (e.cast("a", { x: 0, z: 8 }, Math.PI, 0, stats, T0 + 1_000 + i * every) === "cooldown")
+          n++;
+      return n;
+    };
+    expect(refused(statsOf([0, 0, 0, 0, 0, 0, 0, timing]))).toBe(0);
+    expect(refused(statsOf(undefined))).toBeGreaterThan(3);
   });
 
   it("holds a moment past its end, for a client a frame behind", () => {

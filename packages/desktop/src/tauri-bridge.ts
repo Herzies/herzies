@@ -279,6 +279,7 @@ export const herzies = {
       stamina: points.stamina,
       sonicPower: points.sonicPower,
       euphony: points.euphony,
+      timing: points.timing,
     }),
   /** Rolls a dice item onto ONE named card. The server rolls, never the
    * client: `result` says whether it went up, a failed roll was absorbed by

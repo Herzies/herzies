@@ -43,6 +43,7 @@ import {
   normalizeStatPoints,
   STAT_TUNING,
   type StatPoints,
+  timingCritChance,
 } from "./stats.ts";
 import { BOSS_DAMAGE_PER_MINUTE, type Stage } from "./types.ts";
 
@@ -827,6 +828,7 @@ export const STAT_KEYS = [
   "sonicPower",
   "stamina",
   "euphony",
+  "timing",
   "def",
   "luck",
   "critChance",
@@ -848,6 +850,7 @@ export const STAT_LABELS: Record<StatKey, string> = {
   sonicPower: "Sonic power",
   stamina: "Stamina",
   euphony: "Euphony",
+  timing: "Timing",
   def: "Def",
   luck: "Luck",
   critChance: "Crit chance",
@@ -874,6 +877,7 @@ const ALWAYS_SHOWN = new Set<StatKey>([
   "sonicPower",
   "stamina",
   "euphony",
+  "timing",
   "luck",
 ]);
 
@@ -3918,7 +3922,9 @@ export function getHerzieStatsFromUnits(
 }
 
 /** Item totals with the herzie's stat points on top: a point is one of its
- * stat, and Stamina brings its Def along. What every fight and every bill
+ * stat, Stamina brings its Def along, and Timing its crit chance (its
+ * attack speed is `timingAttackSpeed`'s). Crit damage starts from
+ * STAT_TUNING.baseCritDamage. What every fight and every bill
  * reads; the item-only totals are for comparing gear. */
 export function withStatPoints(
   items: HerzieStats,
@@ -3934,6 +3940,9 @@ export function withStatPoints(
     sonicPower: items.sonicPower + p.sonicPower + fromLevel.sonicPower,
     stamina: items.stamina + p.stamina,
     euphony: items.euphony + p.euphony,
+    timing: items.timing + p.timing,
+    critChance: items.critChance + timingCritChance(items.timing + p.timing),
+    critDamage: items.critDamage + STAT_TUNING.baseCritDamage,
     def:
       items.def +
       STAT_TUNING.defPerStamina * (items.stamina + p.stamina) +

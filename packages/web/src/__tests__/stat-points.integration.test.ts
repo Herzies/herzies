@@ -40,7 +40,12 @@ type Vitals = { hp: number; maxHp: number; stored: number | null };
 type Allocated = {
   ok: boolean;
   reason?: string;
-  statPoints?: { stamina: number; sonicPower: number; euphony: number };
+  statPoints?: {
+    stamina: number;
+    sonicPower: number;
+    euphony: number;
+    timing: number;
+  };
   vitals?: Vitals;
 };
 
@@ -49,12 +54,15 @@ const allocate = (
   stamina: number,
   sonic: number,
   euphony: number,
+  timing?: number,
 ) =>
   rpc<Allocated>("allocate_stats", {
     p_user: userId,
     p_stamina: stamina,
     p_sonic: sonic,
     p_euphony: euphony,
+    // Left out, as an app from before Timing sends it: none.
+    ...(timing !== undefined && { p_timing: timing }),
   });
 
 describe("stat points", () => {
@@ -64,13 +72,37 @@ describe("stat points", () => {
     const { userId } = await player(10);
     const r = await allocate(userId, 10, 5, 3);
     expect(r.ok).toBe(true);
-    expect(r.statPoints).toEqual({ stamina: 10, sonicPower: 5, euphony: 3 });
+    expect(r.statPoints).toEqual({
+      stamina: 10,
+      sonicPower: 5,
+      euphony: 3,
+      timing: 0,
+    });
     const { data } = await admin()
       .from("herzies")
       .select("stat_stamina, stat_sonic, stat_euphony")
       .eq("user_id", userId)
       .single();
     expect(data).toEqual({ stat_stamina: 10, stat_sonic: 5, stat_euphony: 3 });
+  });
+
+  it("spends on Timing, within the same total", async () => {
+    const { userId } = await player(10);
+    const r = await allocate(userId, 4, 0, 0, 14);
+    expect(r.statPoints).toEqual({
+      stamina: 4,
+      sonicPower: 0,
+      euphony: 0,
+      timing: 14,
+    });
+    expect(await allocate(userId, 5, 0, 0, 14)).toMatchObject({
+      ok: false,
+      reason: "too-many",
+    });
+    expect(await allocate(userId, 0, 0, 0, -1)).toMatchObject({
+      ok: false,
+      reason: "bad-points",
+    });
   });
 
   it("refuses more than the level allows, and negatives", async () => {
@@ -99,7 +131,12 @@ describe("stat points", () => {
     await rpc("set_herzie_hp", { p_user: userId, p_hp: 300 });
     const r = await allocate(userId, 0, 0, 0);
     expect(r.ok).toBe(true);
-    expect(r.statPoints).toEqual({ stamina: 0, sonicPower: 0, euphony: 0 });
+    expect(r.statPoints).toEqual({
+      stamina: 0,
+      sonicPower: 0,
+      euphony: 0,
+      timing: 0,
+    });
     expect(r.vitals?.maxHp).toBe(182);
     expect(r.vitals?.stored).toBe(182);
     expect(r.vitals?.hp).toBeLessThanOrEqual(182);
@@ -138,6 +175,7 @@ describe("stat points", () => {
       stamina: 2,
       sonicPower: 4,
       euphony: 1,
+      timing: 0,
     });
     const { data } = await admin()
       .from("herzies")
