@@ -30,7 +30,7 @@ import {
 import { notify } from "../lib/notices";
 import { useHerzieStage } from "../lib/overlayStage";
 import { herzies } from "../tauri-bridge";
-import { Coin } from "./Coin";
+import { Coin, CoinBalance } from "./Coin";
 import ItemInspectOverlay, { inspectOrigin } from "./ItemInspectOverlay";
 import { ItemRow } from "./ItemRow";
 import { List } from "./List";
@@ -276,6 +276,7 @@ export function MarketPanel({
       });
       setListings((ls) => ls?.filter((x) => x.id !== l.id) ?? null);
       setInspecting(null);
+      notify(`Bought "${name(l.itemId)}"`, { kind: "success" });
       onLog?.(
         `Bought "${name(l.itemId)}" from ${l.sellerName ?? "someone"} at ${MARKET_NAME}'s board`,
       );
@@ -598,6 +599,8 @@ export function MarketPanel({
       {error && (
         <div className="pt-1 text-center text-[10px] text-red">{error}</div>
       )}
+
+      <CoinBalance amount={currency} />
 
       {inspecting && (
         <ItemInspectOverlay

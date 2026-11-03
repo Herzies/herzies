@@ -49,7 +49,7 @@ import { useEscape } from "../lib/escapeStack";
 import { notify } from "../lib/notices";
 import { cn, formatAmount } from "../lib/utils";
 import { herzies } from "../tauri-bridge";
-import { Coin } from "./Coin";
+import { Coin, CoinBalance } from "./Coin";
 import { ContextMenu } from "./ContextMenu";
 import {
   DECK_SIDE_ATTR,
@@ -1937,13 +1937,7 @@ function InventoryViewImpl({
                 {/* No line or gap of its own: the bottom row's line is the
                     divider (a second one 8px under it read as a sliver of a
                     fourth row). */}
-                <div className="flex items-center justify-end pt-2">
-                  <Tooltip label={`${formatAmount(currency)} herzie coins`}>
-                    <div className="text-ui text-cyan">
-                      <Coin amount={currency} animate />
-                    </div>
-                  </Tooltip>
-                </div>
+                <CoinBalance amount={currency} />
               </div>
               {/* The other tabs fill what the deck and the bag take, and
                   scroll past it, so they never resize the window. Hidden,
