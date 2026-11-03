@@ -1,7 +1,7 @@
 import type { ReactElement, ReactNode } from "react";
 import { CLASS_DEFS } from "../classes.js";
 import {
-  formatStat,
+  formatStatBonus,
   getItemSet,
   getItemType,
   ITEM_TYPE_LABELS,
@@ -151,8 +151,8 @@ export function ItemStatLines({
     >
       {keys.map((key) => (
         <div key={key}>
-          {STAT_LABELS[key]}: +
-          {formatStat(key, (item.stats?.[key] ?? 0) + level)}
+          {STAT_LABELS[key]}:{" "}
+          {formatStatBonus(key, (item.stats?.[key] ?? 0) + level)}
         </div>
       ))}
       {heal ? <div>Heals {heal} HP</div> : null}
