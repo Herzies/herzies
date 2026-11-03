@@ -25,13 +25,13 @@ TOWN_PORT="${HERZIES_LOCAL_TOWN_PORT:-8797}"
 FUNCTIONS_ENV="$ROOT/supabase/functions/.env.local"
 DB_CONTAINER=supabase_db_herzies
 
-supa() { npx --yes supabase "$@" 2>/dev/null; }
+supa() { npx --yes supabase@2 "$@" 2>/dev/null; }
 
 # API_URL, ANON_KEY, SERVICE_ROLE_KEY of the running local stack.
 load_stack() {
   if ! supa status -o env >/dev/null; then
     echo "Starting the local Supabase stack (Docker)…"
-    npx --yes supabase start
+    npx --yes supabase@2 start
   fi
   eval "$(supa status -o env | grep -E '^(API_URL|ANON_KEY|SERVICE_ROLE_KEY)=')"
   export API_URL ANON_KEY SERVICE_ROLE_KEY
@@ -66,7 +66,7 @@ EOF
   echo
 
   trap 'kill 0' EXIT INT TERM
-  npx --yes supabase functions serve --env-file "$FUNCTIONS_ENV" 2>&1 | sed 's/^/[functions] /' &
+  npx --yes supabase@2 functions serve --env-file "$FUNCTIONS_ENV" 2>&1 | sed 's/^/[functions] /' &
   (
     cd packages/web
     # Process env beats .env.local, which points at prod.
@@ -143,7 +143,7 @@ cmd_tower() {
 }
 
 cmd_reset() {
-  npx --yes supabase db reset --local
+  npx --yes supabase@2 db reset --local
 }
 
 case "${1:-}" in
