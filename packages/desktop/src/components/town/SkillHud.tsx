@@ -7,7 +7,8 @@ import { buffOn, skills } from "./combat/skills";
  * What your buffs are doing right now, beside the hotbar: a Cymbrella
  * you're under (how much less damage, the seconds left) and Rattled from
  * the boss's busters (stacks, seconds left: time to hand the boss over),
- * and a Haste (how much faster, the seconds left).
+ * a Haste (how much faster, the seconds left), and a Shuffle (how many
+ * bounces, the seconds left).
  * Your skills sit on the hotbar (Hotbar.tsx) with their cooldowns; a skill
  * being played, or a Bard playing you back up, is the cast bar over its
  * middle (CastBar). (A level-up is a notice: lib/notices.ts.)
@@ -21,6 +22,7 @@ export function SkillHud({
   const buffBox = useRef<HTMLDivElement>(null);
   const rattledBox = useRef<HTMLDivElement>(null);
   const hasteBox = useRef<HTMLDivElement>(null);
+  const shuffleBox = useRef<HTMLDivElement>(null);
 
   // Runs off the frame clock, not renders.
   useEffect(() => {
@@ -44,6 +46,16 @@ export function SkillHud({
           : "";
         if (h && hasteBox.current.textContent !== text)
           hasteBox.current.textContent = text;
+      }
+      if (shuffleBox.current) {
+        const s = buffOn(bossFight.you, "shuffle", now);
+        shuffleBox.current.style.display = s ? "" : "none";
+        const n = s ? Math.round(s.value) : 0;
+        const text = s
+          ? `Shuffle ${n} ${n === 1 ? "bounce" : "bounces"} · ${Math.ceil((s.until - now) / 1000)}s`
+          : "";
+        if (s && shuffleBox.current.textContent !== text)
+          shuffleBox.current.textContent = text;
       }
       if (rattledBox.current) {
         const r = buffOn(bossFight.you, "rattled", now);
@@ -75,6 +87,11 @@ export function SkillHud({
       <div
         ref={hasteBox}
         className="rounded bg-black/60 px-1.5 text-[11px] text-[#5ef0ff]"
+        style={{ display: "none" }}
+      />
+      <div
+        ref={shuffleBox}
+        className="rounded bg-black/60 px-1.5 text-[11px] text-[#c9a7ff]"
         style={{ display: "none" }}
       />
       <div

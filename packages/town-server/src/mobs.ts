@@ -21,13 +21,15 @@
 import {
   type Body,
   bodyHitAt,
+  discChain,
+  discLandsAfterMs,
   type HitStats,
   hitDamage,
   MELEE_REACH,
   meleeReaches,
   WAVE_HAND_HEIGHT,
 } from "@herzies/shared/combat";
-import type { Buff } from "@herzies/shared/skills";
+import { type Buff, SHUFFLE_REACH, shuffleScale } from "@herzies/shared/skills";
 import {
   attackTokens,
   CONTACT,
@@ -490,6 +492,46 @@ export class MobPack {
       crit,
       ...(skill ? { skill } : {}),
     });
+  }
+
+  /**
+   * Shuffle: a disc that hit `from` (a mob, or a spot such as the boss)
+   * goes on, as the mobs stood at `seen`, to up to `bounces` more, each the
+   * nearest not yet struck. Each lands a leg's flight after the last (the
+   * first leaves at `at`), at `mult` of a cast, weaker each bounce. Paid
+   * to Shuffle. Returns how many it bounced to.
+   */
+  bounceOn(
+    uid: string,
+    from: Mob | { x: number; z: number },
+    at: number,
+    seen: number,
+    bounces: number,
+    stats: HitStats,
+    mult: number,
+  ): number {
+    if (bounces <= 0) return 0;
+    const first = "id" in from ? from : null;
+    const start = first ? this.seenAt(first, seen) : from;
+    const bodies = this.alive.map((m) => {
+      const p = this.seenAt(m, seen);
+      return { ref: m, x: p.x, z: p.z, radius: MOB.radius * m.scale };
+    });
+    let t = at;
+    let n = 0;
+    for (const leg of discChain(first, start, bodies, bounces, SHUFFLE_REACH)) {
+      n++;
+      t += discLandsAfterMs(leg.dist);
+      this.queue(
+        uid,
+        leg.body.ref,
+        t,
+        stats,
+        mult * shuffleScale(n),
+        "shuffle",
+      );
+    }
+    return n;
   }
 
   // --- Time passing.

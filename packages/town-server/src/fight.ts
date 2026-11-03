@@ -55,6 +55,7 @@ import {
   SKILL_COOLDOWN_GRACE_MS,
   SKILL_DEFS,
   type SkillId,
+  shuffleBounces,
   skillValue,
   skillXpFor,
 } from "@herzies/shared/skills";
@@ -885,6 +886,15 @@ export class FightRuntime {
       }
     } else if (skillId === "backspin") {
       this.engine.backspin(uid, pos, yaw, pitch, p.stats, value, now);
+    } else if (skillId === "shuffle") {
+      // Its discs bounce on for a while: the casts do the work (and earn
+      // it its XP, per bounce's damage).
+      const buff = this.engine.buff(uid, {
+        id: "shuffle",
+        value: shuffleBounces(level),
+        until: now + (def.durationMs ?? 0),
+      });
+      out.push(this.buffMsg(p.id, buff));
     } else if (skillId === "taunt" && boss) {
       const until = now + (def.durationMs ?? 0);
       const before = boss.setTaunt(uid, until, now);

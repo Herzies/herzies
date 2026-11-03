@@ -360,6 +360,37 @@ describe("casts", () => {
     ),
   });
 
+  it("under a Shuffle, a disc at the lone boss hits it once, as ever", () => {
+    const hits = (shuffle: boolean) => {
+      const e = engine(10_000, 10_000);
+      if (shuffle) e.buff("a", { id: "shuffle", value: 5, until: T0 + 10_000 });
+      const { yaw, pitch } = aim(0, 8);
+      e.cast("a", { x: 0, z: 8 }, yaw, pitch, STATS, T0, "disc");
+      return run(e, T0, T0 + 3_000, []).filter((x) => x.t === "hit");
+    };
+    expect(hits(true)).toHaveLength(1);
+    expect(hits(false)).toHaveLength(1);
+  });
+
+  it("under a Shuffle, a disc bounces through the minions, never on to the boss", () => {
+    const e = engine(10_000, 10_000);
+    e.update(T0, []);
+    e.summon(T0, 6, 5, 10, []);
+    e.buff("a", { id: "shuffle", value: 5, until: T0 + 10_000 });
+    const mob = e.wireMobs()[0];
+    const from = { x: mob.x, z: mob.z - 1 };
+    const yaw = Math.atan2(mob.x - from.x, mob.z - from.z);
+    expect(e.cast("a", from, yaw, 0, STATS, T0, "disc")).toBe("hit");
+    const hits = run(e, T0, T0 + 3_000, []).filter(
+      (x): x is Extract<BossEvent, { t: "hit" }> => x.t === "hit",
+    );
+    expect(hits.length).toBeGreaterThan(1);
+    expect(hits[0].mob).toBe(mob.id);
+    for (const h of hits) expect(h.mob).toBeDefined();
+    expect(new Set(hits.map((h) => h.mob)).size).toBe(hits.length);
+    expect(hits.slice(1).every((h) => h.skill === "shuffle")).toBe(true);
+  });
+
   it("lands a cast on the boss after the wave's flight", () => {
     const e = engine();
     const { yaw, pitch } = aim(0, 8);

@@ -235,6 +235,12 @@ export function buffOn(
   return skills.buffs.get(id)?.find((b) => b.buff === buff && b.until > now);
 }
 
+/** How many times entity `id`'s thrown discs bounce on at `now` (its
+ * Shuffle's), or 0. */
+export function shuffleOf(id: number | null, now: number): number {
+  return Math.round(buffOn(id, "shuffle", now)?.value ?? 0);
+}
+
 /** How much faster entity `id` attacks at `now`: 1, or 1 + its Haste. */
 export function attackSpeedOf(id: number | null, now: number): number {
   return 1 + (buffOn(id, "haste", now)?.value ?? 0);

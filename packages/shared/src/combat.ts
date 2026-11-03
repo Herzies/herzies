@@ -83,6 +83,60 @@ export function discLandsAfterMs(dist: number): number {
   return (dist / DISC_SPEED) * 1000;
 }
 
+/** Something a bouncing disc may go on to: where it stands, and how wide
+ * it is (the leg ends at its surface). */
+export type ChainBody<T> = { ref: T; x: number; z: number; radius: number };
+
+/**
+ * Where a disc under a Shuffle goes on to from `from`: the nearest body not
+ * yet in `struck` (by ref) within `reach` of it, centre to centre on the
+ * ground; and how far it flies to get there, to the body's surface. Null if
+ * nothing is in reach. The server and the client both pick this way, so
+ * the bounce drawn is the bounce judged.
+ */
+export function nextInChain<T>(
+  from: { x: number; z: number },
+  bodies: readonly ChainBody<T>[],
+  struck: readonly T[],
+  reach: number,
+): { body: ChainBody<T>; dist: number } | null {
+  let best: { body: ChainBody<T>; dist: number; centre: number } | null = null;
+  for (const b of bodies) {
+    if (struck.includes(b.ref)) continue;
+    const centre = Math.hypot(b.x - from.x, b.z - from.z);
+    if (centre > reach) continue;
+    if (!best || centre < best.centre)
+      best = { body: b, dist: Math.max(0, centre - b.radius), centre };
+  }
+  return best && { body: best.body, dist: best.dist };
+}
+
+/**
+ * A disc's whole chain, as the server judges it at the throw: from what it
+ * hit first (`first`, at `from`), up to `bounces` more bodies, each the
+ * nearest not yet struck to the last. Each leg's flight distance; the
+ * chain stops early when nothing's in reach.
+ */
+export function discChain<T>(
+  first: T | null,
+  from: { x: number; z: number },
+  bodies: readonly ChainBody<T>[],
+  bounces: number,
+  reach: number,
+): { body: ChainBody<T>; dist: number }[] {
+  const out: { body: ChainBody<T>; dist: number }[] = [];
+  const struck: T[] = first === null ? [] : [first];
+  let at = from;
+  for (let i = 0; i < bounces; i++) {
+    const next = nextInChain(at, bodies, struck, reach);
+    if (!next) break;
+    out.push(next);
+    struck.push(next.body.ref);
+    at = next.body;
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Melee: a Percussionist's stick, or an unarmed herzie's punch or body slam. Up
 // close, ahead of it, and only at the moment of contact: the client tells

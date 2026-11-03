@@ -5,6 +5,8 @@ import {
   type HerzieStats,
   hitDamage,
   SKILL_DEFS,
+  shuffleBounces,
+  shuffleScale,
   skillValue,
   timingAttackSpeed,
 } from "@herzies/shared";
@@ -63,6 +65,7 @@ import {
   queueSkill,
   setBuff,
   setEntityAt,
+  shuffleOf,
   skillReady,
   skills,
   startCooldown,
@@ -313,7 +316,7 @@ export function Combat({
       out[2] = p.z;
       return out;
     },
-    onHit: ({ disc, dummy, point }) => {
+    onHit: ({ disc, dummy, point, bounce }) => {
       const now = performance.now();
       if (!disc.mine) {
         hitDummy(dummy, disc.dir[0], disc.dir[2], 100, false, now, false);
@@ -321,7 +324,10 @@ export function Combat({
         sfxImpact("hit");
         return "hit";
       }
-      const kind = myHit(dummy, disc.dir, point, DISC_DAMAGE, now);
+      // A Shuffle's bounces hit for less each time (in a fight the server
+      // rolls them; this is practice, and the show).
+      const scale = DISC_DAMAGE * shuffleScale(bounce);
+      const kind = myHit(dummy, disc.dir, point, scale, now);
       waveField.burst(point, disc.dir, kind);
       return kind;
     },
@@ -497,11 +503,17 @@ export function Combat({
       if (
         mine.id === "cymbrella" ||
         mine.id === "taunt" ||
-        mine.id === "haste"
+        mine.id === "haste" ||
+        mine.id === "shuffle"
       ) {
         setBuff(bossFight.you ?? -1, {
           buff: mine.id,
-          value: mine.id === "taunt" ? 1 : skillValue(mine.id, mine.level),
+          value:
+            mine.id === "taunt"
+              ? 1
+              : mine.id === "shuffle"
+                ? shuffleBounces(mine.level)
+                : skillValue(mine.id, mine.level),
           until: now + (SKILL_DEFS[mine.id].durationMs ?? 0),
         });
       }
@@ -697,6 +709,7 @@ export function Combat({
           strike: solid ? (onBoss ? "target" : "wall") : null,
           target,
           quick: speed,
+          bounces: shuffleOf(bossFight.you ?? -1, now),
         });
         if (bossFight.on) sendBossCast(herzie, a.point);
         shake(0.04);

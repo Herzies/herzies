@@ -7,9 +7,11 @@ import {
   CONTRIBUTION_SUPPORT_WEIGHT,
   contributionOf,
   DISC_RANGE,
+  discChain,
   healTarget,
   MELEE_REACH,
   meleeReaches,
+  nextInChain,
   type Vec3,
   WAVE_HAND_HEIGHT,
   WAVE_RANGE,
@@ -139,5 +141,35 @@ describe("contribution", () => {
     expect(
       contributionOf({ damage: 300, healing: 80, blocked: 0 }),
     ).toBeGreaterThan(contributionOf({ damage: 1000, healing: 0, blocked: 0 }));
+  });
+});
+
+describe("disc chains (Shuffle)", () => {
+  const body = (ref: string, x: number, z = 0) => ({ ref, x, z, radius: 0.5 });
+  const row = [body("a", 0), body("b", 3), body("c", 6), body("d", 20)];
+
+  it("goes on to the nearest not yet struck, to its surface", () => {
+    const next = nextInChain({ x: 0, z: 0 }, row, ["a"], 8);
+    expect(next?.body.ref).toBe("b");
+    expect(next?.dist).toBeCloseTo(2.5);
+  });
+
+  it("chains in order, never back, and stops out of reach", () => {
+    const chain = discChain("a", { x: 0, z: 0 }, row, 5, 8);
+    expect(chain.map((c) => c.body.ref)).toEqual(["b", "c"]);
+  });
+
+  it("bounces no more than it may", () => {
+    expect(discChain("a", { x: 0, z: 0 }, row, 1, 8)).toHaveLength(1);
+    expect(discChain("a", { x: 0, z: 0 }, row, 0, 8)).toHaveLength(0);
+  });
+
+  it("with nothing else near, a lone target is all it hits", () => {
+    expect(discChain("a", { x: 0, z: 0 }, [body("a", 0)], 5, 8)).toEqual([]);
+  });
+
+  it("from something not in the list (the boss), every body may follow", () => {
+    const chain = discChain(null, { x: -2, z: 0 }, row, 5, 8);
+    expect(chain.map((c) => c.body.ref)).toEqual(["a", "b", "c"]);
   });
 });

@@ -1,3 +1,5 @@
+import { discChain } from "@herzies/shared/combat";
+import { SHUFFLE_REACH, shuffleBounces } from "@herzies/shared/skills";
 import {
   CONTACT,
   FLOOR_OPENING_MS,
@@ -210,6 +212,40 @@ describe("TowerEngine", () => {
     expect(ev).toContainEqual({ t: "resolve", id: swing.telegraph.id, hits: [] });
   });
 
+  it("under a Shuffle, a disc bounces on through the pack, weaker each time", () => {
+    const e = engine(6);
+    const mobs = e.wireMobs();
+    const mob = mobs[0];
+    const from = { x: mob.x, z: mob.z - 1 };
+    e.buff("u", { id: "shuffle", value: 5, until: T0 + 10_000 });
+    expect(e.cast("u", from, aimAt(from, mob), 0, STATS, T0, "disc")).toBe("hit");
+    const hits = run(e, T0, T0 + 3_000, []).filter(
+      (x): x is Extract<TowerEvent, { t: "hit" }> => x.t === "hit",
+    );
+    const bodies = mobs.map((m) => ({ ref: m.id, x: m.x, z: m.z, radius: 0 }));
+    const chain = discChain(mob.id, mob, bodies, 5, SHUFFLE_REACH);
+    expect(chain.length).toBeGreaterThan(0);
+    expect(hits.map((h) => h.mob)).toEqual([mob.id, ...chain.map((c) => c.body.ref)]);
+    expect(hits[0].skill).toBeUndefined();
+    for (let i = 1; i < hits.length; i++) {
+      expect(hits[i].skill).toBe("shuffle");
+      expect(hits[i].damage).toBeLessThan(hits[i - 1].damage);
+    }
+  });
+
+  it("without a Shuffle, or with a wave, a cast hits one mob", () => {
+    const once = (attack: "disc" | "wave", shuffle: boolean) => {
+      const e = engine(6);
+      const mob = e.wireMobs()[0];
+      const from = { x: mob.x, z: mob.z - 1 };
+      if (shuffle) e.buff("u", { id: "shuffle", value: 5, until: T0 + 10_000 });
+      e.cast("u", from, aimAt(from, mob), 0, STATS, T0, attack);
+      return run(e, T0, T0 + 3_000, []).filter((x) => x.t === "hit").length;
+    };
+    expect(once("disc", false)).toBe(1);
+    expect(once("wave", true)).toBe(1);
+  });
+
   it("judges a cast against where the mob was a moment ago", () => {
     const e = engine();
     const at = ARENA.entry;
@@ -364,6 +400,42 @@ describe("FightRuntime in the Tower", () => {
     const next = f.next("u", t);
     expect(said(next, "floor")).toHaveLength(1);
     expect(tw.floor).toBe(2);
+  });
+
+  it("plays a Shuffle: the disc bounces through the pack, and only the bounces pay it", () => {
+    const f = FightRuntime.tower({ ...claim, floor: 6 }, "u", 20, ARENA, T0, 3);
+    const sk: [string, number][] = [
+      ["backspin", 1],
+      ["shuffle", 10],
+    ];
+    f.join("u", 1, ticket({ cls: "record_slinger", lv: 20, sk }), ARENA.entry, T0);
+    const tw = f.tower;
+    if (!tw) throw new Error("not a tower");
+    const mobs = tw.wireMobs();
+    const mob = mobs[0];
+    const from = { x: mob.x, z: mob.z - 1 };
+    for (let t = T0; t <= T0 + 200; t += 50) f.onState("u", from.x, from.z, t);
+    const used = f.skill("u", "shuffle", 0, 0, T0 + 200);
+    expect(used.result).toBe("used");
+    expect(said(used.out, "buff")[0]?.msg).toMatchObject({
+      buff: "shuffle",
+      value: shuffleBounces(10),
+    });
+    const yaw = Math.atan2(mob.x - from.x, mob.z - from.z);
+    expect(f.cast("u", yaw, 0, T0 + 300)).toBe("hit");
+    const out: Outbound[] = [];
+    for (let t = T0 + 300; t <= T0 + 3_000; t += 50) {
+      f.onState("u", from.x, from.z, t);
+      out.push(...f.step(t));
+    }
+    const bodies = mobs.map((m) => ({ ref: m.id, x: m.x, z: m.z, radius: 0 }));
+    const chain = discChain(mob.id, mob, bodies, 5, SHUFFLE_REACH);
+    expect(chain.length).toBeGreaterThan(0);
+    const hits = said(out, "hit").map((o) => o.msg);
+    expect(hits).toHaveLength(1 + chain.length);
+    const xp = f.report(T0 + 3_001, true)?.skills?.xp ?? [];
+    expect(xp.find((x) => x.skill === "shuffle")?.xp).toBeGreaterThan(0);
+    expect(xp.find((x) => x.skill === "backspin")).toBeUndefined();
   });
 
   it("takes a class and a level from a renewed ticket", () => {

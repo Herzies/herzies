@@ -27,6 +27,7 @@ import {
   BACKSPIN_DISCS,
   BACKSPIN_SPREAD,
   type Buff,
+  shuffleOn,
 } from "@herzies/shared/skills";
 import { timingAttackSpeed } from "@herzies/shared/stats";
 import { towerMob } from "@herzies/shared/tower";
@@ -234,13 +235,19 @@ export class TowerEngine {
     const flight = disc
       ? discLandsAfterMs(target.dist)
       : (target.dist / WAVE_SPEED) * 1000;
-    this.pack.queue(
-      uid,
-      target.mob,
-      now + flight,
-      stats,
-      disc ? DISC_DAMAGE : 1,
-    );
+    const mult = disc ? DISC_DAMAGE : 1;
+    this.pack.queue(uid, target.mob, now + flight, stats, mult);
+    // Under a Shuffle, it bounces on through the pack.
+    if (disc)
+      this.pack.bounceOn(
+        uid,
+        target.mob,
+        now + flight,
+        seen,
+        shuffleOn(this.buffs.get(uid) ?? [], now),
+        stats,
+        mult,
+      );
     return "hit";
   }
 

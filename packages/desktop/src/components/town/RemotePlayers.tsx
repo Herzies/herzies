@@ -31,7 +31,12 @@ import {
 } from "./combat/discs";
 import { DUMMY, hitDummy } from "./combat/dummy";
 import { bossFight, bossNow } from "./combat/fight";
-import { attackSpeedOf, entityAt, setEntityAt } from "./combat/skills";
+import {
+  attackSpeedOf,
+  entityAt,
+  setEntityAt,
+  shuffleOf,
+} from "./combat/skills";
 import { slashField } from "./combat/slashes";
 import { stance } from "./combat/stance";
 import { assistTarget, type Vec3, waveField } from "./combat/waves";
@@ -231,6 +236,7 @@ function RemoteHerzie({
         hand: h,
         target: assistTarget(from, dir, liveDummies),
         quick: attackSpeedOf(remote.id, performance.now()),
+        bounces: shuffleOf(remote.id, performance.now()),
       });
     } else if (herzie.released && attack === "melee") {
       // Only for show: what's in front of them rocks (the server counts

@@ -21,6 +21,7 @@ export const SKILL_IDS = [
   "resurrect",
   "taunt",
   "haste",
+  "shuffle",
 ] as const;
 export type SkillId = (typeof SKILL_IDS)[number];
 
@@ -35,8 +36,12 @@ export interface SkillDef {
   /** Short description; `{v}` is replaced with the level's value. */
   describe: string;
   /** Effect value at level 1 and level 10; linear in between. A fraction:
-   * 0.2 is 20% (of max HP healed, of damage reduced, of a normal hit). */
+   * 0.2 is 20% (of max HP healed, of damage reduced, of a normal hit),
+   * unless `count`. */
   value: readonly [number, number];
+  /** The value is a whole number of things (Shuffle's bounces), rounded,
+   * not a share: what one and several of them are called. */
+  count?: readonly [string, string];
   cooldownMs: number;
   /** Buffs only: how long the buff lasts. */
   durationMs?: number;
@@ -47,7 +52,7 @@ export interface SkillDef {
    * (moving or going down cancels it, and costs nothing). */
   channelMs?: number;
   /** A skill a class learns later: the herzie level it's learned at (the
-   * database grants it then; see 00122_boss_revamp.sql). */
+   * database grants it then; see 00137_shuffle.sql). */
   minLevel?: number;
   /** Skill XP per unit of effect (per HP healed, per damage absorbed, per
    * damage dealt). Meant to make each class level at a similar pace over
@@ -140,12 +145,46 @@ export const SKILL_DEFS: Record<SkillId, SkillDef> = {
     // since it comes from many hands at once.
     xpPerUnit: 1 / 150,
   },
+  shuffle: {
+    id: "shuffle",
+    name: "Shuffle",
+    kind: "buff",
+    describe:
+      "For 10 s, each disc you throw bounces on to {v} nearby, each bounce 30% weaker than the last.",
+    // Bounces: 1 at level 1, one more every two levels, 5 at the cap.
+    value: [1, 5],
+    count: ["more enemy", "more enemies"],
+    // Only for a pack: a lone target is hit as ever, so it adds nothing
+    // to a boss with no minions up.
+    cooldownMs: 30_000,
+    durationMs: 10_000,
+    minLevel: 15,
+    // Per point of damage the bounces dealt (the first hit is a plain
+    // throw's): Backspin's scale.
+    xpPerUnit: 1 / 40,
+  },
 };
 
 /** The skills a class has learned by herzie level `level` (a skill with no
  * minLevel from the start). */
 export function skillLearned(id: SkillId, level: number): boolean {
   return level >= (SKILL_DEFS[id].minLevel ?? 0);
+}
+
+/** Shuffle: how far a disc bounces on from what it hit, centre to centre
+ * on the ground (the training grounds' dummies stand 8.5 apart), and how
+ * much weaker each bounce is than the one before. */
+export const SHUFFLE_REACH = 9;
+export const SHUFFLE_FALLOFF = 0.7;
+
+/** How many times a disc bounces on under a Shuffle at `level`. */
+export function shuffleBounces(level: number): number {
+  return Math.round(skillValue("shuffle", level));
+}
+
+/** A disc's `n`th bounce (1 the first) hits for this share of a throw. */
+export function shuffleScale(n: number): number {
+  return SHUFFLE_FALLOFF ** Math.max(0, n);
 }
 
 /** Backspin's fan: three discs, this far apart (radians). */
@@ -176,9 +215,14 @@ export function skillValue(id: SkillId, level: number): number {
 }
 
 export function describeSkill(id: SkillId, level: number): string {
-  const pct = `${Math.round(skillValue(id, level) * 100)}%`;
+  const v = skillValue(id, level);
+  const count = SKILL_DEFS[id].count;
+  const n = Math.round(v);
+  const shown = count
+    ? `${n} ${n === 1 ? count[0] : count[1]}`
+    : `${Math.round(v * 100)}%`;
   // A skill without a value (Taunt) has no {v} to fill.
-  return SKILL_DEFS[id].describe.replace("{v}", pct);
+  return SKILL_DEFS[id].describe.replace("{v}", shown);
 }
 
 // --- Skill XP ---------------------------------------------------------------
@@ -238,8 +282,15 @@ export function skillXpFor(id: SkillId, units: number): number {
 /** `cymbrella`: less damage. `taunt`: the boss's eye (shown on whoever
  * holds it; no stat). `in_tune`: listening to what the boss hates, a class
  * bonus whose `kind` says what it does. `haste`: attacks this much faster
- * (0.3 = 30% more often). */
-export type BuffId = "cymbrella" | "taunt" | "in_tune" | "rattled" | "haste";
+ * (0.3 = 30% more often). `shuffle`: thrown discs bounce on this many
+ * times. */
+export type BuffId =
+  | "cymbrella"
+  | "taunt"
+  | "in_tune"
+  | "rattled"
+  | "haste"
+  | "shuffle";
 
 /** What an in-tune bonus does: less damage taken, stronger heals, harder
  * hits. */
@@ -306,6 +357,14 @@ export function attackSpeed(buffs: readonly Buff[], now: number): number {
   for (const b of activeBuffs(buffs, now))
     if (b.id === "haste") haste = Math.max(haste, b.value);
   return 1 + haste;
+}
+
+/** How many times a thrown disc bounces on at `now`: its Shuffle's, or 0. */
+export function shuffleOn(buffs: readonly Buff[], now: number): number {
+  let n = 0;
+  for (const b of activeBuffs(buffs, now))
+    if (b.id === "shuffle") n = Math.max(n, Math.round(b.value));
+  return n;
 }
 
 export function activeBuffs(buffs: readonly Buff[], now: number): Buff[] {

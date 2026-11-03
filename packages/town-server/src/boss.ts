@@ -60,6 +60,7 @@ import {
   buffMultiplier,
   buffReductions,
   mitigate,
+  shuffleOn,
 } from "@herzies/shared/skills";
 import { defReduction, timingAttackSpeed } from "@herzies/shared/stats";
 import type { TowerMob } from "@herzies/shared/town-net";
@@ -784,8 +785,20 @@ export class BossEngine {
       now +
       (disc ? discLandsAfterMs(hit.dist) : (hit.dist / WAVE_SPEED) * 1000);
     const mult = (disc ? DISC_DAMAGE : 1) * boost;
+    // Under a Shuffle, a disc bounces on to the minions near what it hit
+    // (never on to the boss: a lone boss is hit as ever).
+    const bounces = disc ? shuffleOn(this.buffs.get(uid) ?? [], now) : 0;
     if (hit.mob) {
       this.mobs?.queue(uid, hit.mob, at, stats, mult);
+      this.mobs?.bounceOn(
+        uid,
+        hit.mob,
+        at,
+        now - SEEN_LAG_MS,
+        bounces,
+        stats,
+        mult,
+      );
       return "hit";
     }
     const { amount, crit } = hitDamage(stats, this.rand);
@@ -795,6 +808,16 @@ export class BossEngine {
       damage: Math.max(1, Math.round(amount * mult)),
       crit,
     });
+    if (bounces)
+      this.mobs?.bounceOn(
+        uid,
+        this.seenAt(now),
+        at,
+        now - SEEN_LAG_MS,
+        bounces,
+        stats,
+        mult,
+      );
     return "hit";
   }
 
