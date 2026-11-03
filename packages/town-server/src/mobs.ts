@@ -8,10 +8,10 @@
  * spitters hang back and lob at where you're heading. Only so many attack
  * at once (attackTokens); the rest circle you, waiting their turn. Every
  * attack's shape is on the ground before it lands, judged like the boss's
- * slams (in the shape now *and* a moment ago, a breather after a hit, never
- * more than a share of your health) by the host's {@link MobJudge}, so a
- * herzie hit by the boss is safe from a Thornling for the same breather,
- * and its Def and buffs count the same. Its damage follows the floor, the
+ * slams (in the shape now *and* a moment ago, never more than a share of
+ * your health) by the host's {@link MobJudge}: in the cave a breather
+ * after a hit, so a herzie hit by the boss is safe from a Thornling for
+ * the same breather; the Tower has none. Its Def and buffs count the same. Its damage follows the floor, the
  * kind and the level gap.
  *
  * The client draws mobs a little behind where they are here, so a cast is
@@ -148,6 +148,8 @@ export class MobPack {
   private mobs: Mob[] = [];
   private telegraphs: Telegraph[] = [];
   private pending: PendingHit[] = [];
+  /** When each mob last bumped each herzie (`mob:uid`), for CONTACT. */
+  private bumpedAt = new Map<string, number>();
   private nextMobId = 1;
   /** When the mobs wake, and when they enrage (server ms). */
   wakeAt = 0;
@@ -662,11 +664,11 @@ export class MobPack {
   }
 
   /**
-   * Walking into a mob hurts (CONTACT). Judged like a swing, to the
+   * Walking into a mob hurts (CONTACT): a share of your health, every
+   * `everyMs` from each mob you're in. Judged like a swing, to the
    * defender's benefit: the bodies overlap now, and a moment ago too, with
-   * the mob where the herzie saw it. The same breathers apply, so standing
-   * in one hurts once a breather, and a herzie is bumped by one mob at a
-   * time.
+   * the mob where the herzie saw it. A host's breathers (the cave's) apply
+   * as to a swing.
    */
   private contact(
     now: number,
@@ -683,6 +685,8 @@ export class MobPack {
       if (!a || !b) continue;
       for (const m of this.mobs) {
         if (m.hp <= 0) continue;
+        const key = `${m.id}:${p.uid}`;
+        if (now < (this.bumpedAt.get(key) ?? 0) + CONTACT.everyMs) continue;
         const reach =
           (MOB.radius * m.scale + TUNING.playerRadius) * CONTACT.overlap;
         if (Math.hypot(a.x - m.x, a.z - m.z) > reach) continue;
@@ -697,7 +701,7 @@ export class MobPack {
           inner: 0,
           at: now,
           hitAt: now,
-          damage: Math.max(1, Math.round(this.damageOf(m) * CONTACT.damage)),
+          damage: Math.max(1, Math.round(p.maxHp * CONTACT.hp)),
           mob: m.id,
         };
         const { aimed: _aimed, ...hit } = mitigatedHit(
@@ -706,8 +710,10 @@ export class MobPack {
           judge.buffs(p.uid),
         );
         judge.hitAt(p.uid, now);
+        this.bumpedAt.set(key, now);
         events.push({ t: "contact", mob: m.id, hit });
-        break;
+        // In a breather now (the cave's): no more bumps this tick.
+        if (judge.invuln(p.uid, now)) break;
       }
     }
   }
@@ -848,10 +854,13 @@ export class MobPack {
       this.walk(m, you, dt, speed, MOB.reach * 0.8 * m.scale);
       return;
     }
-    // Waiting its turn: hold a step outside your reach, working round you.
+    // Waiting its turn: work round you a step outside your reach. Closer
+    // than that it holds its ground, circling where it is, rather than back
+    // off: walking at it walks into it.
+    const flank = FLANK_RANGE * Math.max(1, m.scale * 0.9);
     this.walk(
       m,
-      this.orbitPoint(m, you, FLANK_RANGE * Math.max(1, m.scale * 0.9)),
+      this.orbitPoint(m, you, Math.min(d, flank)),
       dt,
       speed * 0.6,
       0,
@@ -948,10 +957,15 @@ export class MobPack {
     const due = this.telegraphs.filter((t) => t.hitAt <= now);
     if (!due.length) return;
     this.telegraphs = this.telegraphs.filter((t) => t.hitAt > now);
+    // A mob's attack hits a herzie once, however many of its shapes (a
+    // lunger's lane) they stand in.
+    const struck = new Set<string>();
     for (const tg of due) {
       const hits: BossHit[] = [];
       for (const p of players) {
         if (!p.alive) continue;
+        const once = `${tg.mob}:${tg.hitAt}:${p.uid}`;
+        if (struck.has(once)) continue;
         if (judge.safe(p.uid, tg.hitAt)) continue;
         if (judge.invuln(p.uid, tg.hitAt)) continue;
         const inside = [tg.hitAt, tg.hitAt - TUNING.rewindMs].every((t) => {
@@ -965,6 +979,7 @@ export class MobPack {
           judge.buffs(p.uid),
         );
         hits.push(hit);
+        struck.add(once);
         judge.hitAt(p.uid, tg.hitAt);
       }
       events.push({ t: "resolve", id: tg.id, hits });

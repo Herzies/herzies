@@ -1,4 +1,5 @@
 import {
+  CONTACT,
   FLOOR_OPENING_MS,
   levelGapMods,
   MOB_KINDS,
@@ -224,7 +225,7 @@ describe("TowerEngine", () => {
     expect(e.cast("u", from, yaw + 1.2, 0, STATS, now + 1_000)).toBe("miss");
   });
 
-  it("hurts a herzie who walks into a mob, once a breather", () => {
+  it("hurts a herzie who walks into a mob, a share of their health each beat", () => {
     const e = engine(1);
     const mob = e.wireMobs()[0];
     // Stood right on it: it holds still, so the herzie stays inside it.
@@ -237,7 +238,32 @@ describe("TowerEngine", () => {
     for (const b of bumps) {
       expect(b.mob).toBe(mob.id);
       expect(b.hit.uid).toBe("u");
-      expect(b.hit.damage).toBeGreaterThan(0);
+      expect(b.hit.damage).toBe(Math.round(500 * CONTACT.hp));
+    }
+  });
+
+  it("hits a herzie once per attack, with no breather between attacks", () => {
+    // Stood still on floors with lungers, whose lane is several shapes.
+    for (const floor of [3, 6, 9, 12]) {
+      const e = engine(floor, 10, 5);
+      const still = player(() => ({ x: 0, z: 0 }), 1e6);
+      const evs = run(e, T0, T0 + FLOOR_OPENING_MS + 20_000, [still]);
+      const shapes = new Map<number, string>();
+      const landed = new Map<string, number>();
+      for (const ev of evs) {
+        if (ev.t === "telegraph")
+          shapes.set(
+            ev.telegraph.id,
+            `${ev.telegraph.mob}:${ev.telegraph.hitAt}`,
+          );
+        if (ev.t === "resolve")
+          for (const h of ev.hits) {
+            const k = `${shapes.get(ev.id)}:${h.uid}`;
+            landed.set(k, (landed.get(k) ?? 0) + 1);
+          }
+      }
+      expect(landed.size).toBeGreaterThan(0);
+      for (const n of landed.values()) expect(n).toBe(1);
     }
   });
 

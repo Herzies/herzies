@@ -6,7 +6,8 @@
  *
  * Each floor is a {@link MobPack} of Thornlings (see mobs.ts for what they
  * do); this file is the floors themselves: one pack after another, the
- * herzie's casts and breathers, and "cleared" once the last mob falls.
+ * herzie's casts, and "cleared" once the last mob falls. No breather
+ * after a hit here: every attack that lands, lands.
  * Linger past a floor's par time and its mobs enrage.
  */
 
@@ -53,13 +54,12 @@ export class TowerEngine {
   private readonly pack: MobPack;
   private cleared = false;
   private casts = new Map<string, { tokens: number; at: number }>();
-  private invulnUntil = new Map<string, number>();
   private safeUntil = new Map<string, number>();
   private buffs = new Map<string, Buff[]>();
   private readonly judge: MobJudge = {
     safe: (uid, t) => (this.safeUntil.get(uid) ?? 0) > t,
-    invuln: (uid, t) => (this.invulnUntil.get(uid) ?? 0) > t,
-    hitAt: (uid, t) => this.invulnUntil.set(uid, t + TUNING.invulnMs),
+    invuln: () => false,
+    hitAt: () => {},
     buffs: (uid) => this.buffs.get(uid) ?? [],
   };
 
@@ -154,7 +154,6 @@ export class TowerEngine {
 
   forget(uid: string): void {
     this.casts.delete(uid);
-    this.invulnUntil.delete(uid);
     this.safeUntil.delete(uid);
     this.buffs.delete(uid);
   }

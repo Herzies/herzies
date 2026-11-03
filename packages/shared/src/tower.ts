@@ -43,11 +43,11 @@ export const MOB = {
   spacing: 1.3,
 } as const;
 
-/** Walking into a mob hurts: `damage` of its attack's hit, once bodies
- * overlap past `overlap` of their two radii summed. No more often than the
- * breather after any hit. Mobs stop well short of you, so only walking
- * into one does it. */
-export const CONTACT = { damage: 0.5, overlap: 0.85 } as const;
+/** Walking into a mob hurts: `hp` of your max health (before Def and
+ * buffs) once bodies overlap past `overlap` of their two radii summed, and
+ * again every `everyMs` while they do, from each mob. Mobs stop well short
+ * of you, so only walking into one does it. */
+export const CONTACT = { hp: 0.04, everyMs: 400, overlap: 0.85 } as const;
 
 /** The kinds of mob. On the wire as `k` (a brute when missing). */
 export type MobKind = "brute" | "spitter" | "lunger";
