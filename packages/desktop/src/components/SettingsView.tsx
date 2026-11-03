@@ -273,6 +273,21 @@ export function SettingsView({
             </label>
           </div>
           <div className="mb-4">
+            <div className="mb-1.5 text-ui text-text-dim">Display</div>
+            <Checkbox
+              checked={fpsShown}
+              onChange={setFpsShown}
+              className="items-start"
+            >
+              <span className="min-w-0">
+                <span className="block text-ui">Show FPS</span>
+                <span className="block text-ui-sm text-text-dim">
+                  Frames per second, top right in Town.
+                </span>
+              </span>
+            </Checkbox>
+          </div>
+          <div className="mb-4">
             <div className="mb-1.5 text-ui text-text-dim">Sound</div>
             <button
               type="button"
@@ -367,18 +382,6 @@ export function SettingsView({
                 onClick={() => herzies.testNotification()}
               >
                 Test Notification
-              </button>
-              <button
-                type="button"
-                className={cn(
-                  "btn",
-                  fpsShown
-                    ? "border-cyan text-cyan"
-                    : "border-[#555] text-text-dim",
-                )}
-                onClick={() => setFpsShown(!fpsShown)}
-              >
-                {fpsShown ? "Town FPS: On" : "Town FPS"}
               </button>
               <button
                 type="button"
