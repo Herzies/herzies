@@ -75,6 +75,7 @@ import type {
 import {
   BossEngine,
   type BossEvent,
+  type BossHit,
   type BossPlayer,
   rng,
   type Telegraph,
@@ -1622,6 +1623,50 @@ export class FightRuntime {
     if (raid) out.push({ to: "all", msg: { t: "raid", ...raid } });
   }
 
+  /** Land `hits` on their herzies: health, what the Cymbrella and a taunt
+   * earn, and knocked out at none. The entity ids hit. */
+  private takeHits(hits: BossHit[], out: Outbound[], now: number): number[] {
+    const hit: number[] = [];
+    const taunter = this.boss?.taunter(now);
+    for (const h of hits) {
+      const p = this.players.get(h.uid);
+      if (!p || p.down) continue;
+      p.hp = Math.max(0, p.hp - h.damage);
+      hit.push(p.id);
+      // The Cymbrella is a self buff: what it took off (on top of Def)
+      // pays its wearer, and counts as their support.
+      if (h.blocked > 0) {
+        this.earn(p.uid, "cymbrella", skillXpFor("cymbrella", h.blocked));
+        this.credit(p.uid, "blocked", h.blocked);
+      }
+      // A taunt pays for the hits it drew.
+      if (h.aimed && taunter === p.uid && p.skills.has("taunt"))
+        this.earn(p.uid, "taunt", skillXpFor("taunt", h.damage + h.absorbed));
+      out.push({
+        to: "all",
+        msg: { t: "hp", id: p.id, hp: p.hp, maxHp: p.maxHp },
+      });
+      if (p.hp <= 0) {
+        p.down = true;
+        this.log.downs++;
+        // Knocked out: nothing left to raise the stored health toward.
+        this.healed.delete(p.uid);
+        out.push(...this.stopChannels(p.uid));
+        out.push({ to: { uid: p.uid }, msg: { t: "down" } });
+        // Where it fell is where it lies: put the client there.
+        const at = this.history.at(p.uid, now);
+        if (at && this.boss)
+          out.push({
+            to: { uid: p.uid },
+            msg: { t: "correct", x: round(at.x), z: round(at.z) },
+          });
+        this.raidDirty = true;
+      }
+      this.reportNow = true;
+    }
+    return hit;
+  }
+
   private apply(ev: BossEvent | TowerEvent, out: Outbound[], now: number) {
     switch (ev.t) {
       case "mobDown":
@@ -1649,49 +1694,17 @@ export class FightRuntime {
         });
         break;
       case "resolve": {
-        const hit: number[] = [];
-        const taunter = this.boss?.taunter(now);
-        for (const h of ev.hits) {
-          const p = this.players.get(h.uid);
-          if (!p || p.down) continue;
-          p.hp = Math.max(0, p.hp - h.damage);
-          hit.push(p.id);
-          // The Cymbrella is a self buff: what it took off (on top of Def)
-          // pays its wearer, and counts as their support.
-          if (h.blocked > 0) {
-            this.earn(p.uid, "cymbrella", skillXpFor("cymbrella", h.blocked));
-            this.credit(p.uid, "blocked", h.blocked);
-          }
-          // A taunt pays for the hits it drew.
-          if (h.aimed && taunter === p.uid && p.skills.has("taunt"))
-            this.earn(
-              p.uid,
-              "taunt",
-              skillXpFor("taunt", h.damage + h.absorbed),
-            );
-          out.push({
-            to: "all",
-            msg: { t: "hp", id: p.id, hp: p.hp, maxHp: p.maxHp },
-          });
-          if (p.hp <= 0) {
-            p.down = true;
-            this.log.downs++;
-            // Knocked out: nothing left to raise the stored health toward.
-            this.healed.delete(p.uid);
-            out.push(...this.stopChannels(p.uid));
-            out.push({ to: { uid: p.uid }, msg: { t: "down" } });
-            // Where it fell is where it lies: put the client there.
-            const at = this.history.at(p.uid, now);
-            if (at && this.boss)
-              out.push({
-                to: { uid: p.uid },
-                msg: { t: "correct", x: round(at.x), z: round(at.z) },
-              });
-            this.raidDirty = true;
-          }
-          this.reportNow = true;
-        }
+        const hit = this.takeHits(ev.hits, out, now);
         out.push({ to: "all", msg: { t: "resolve", id: ev.id, hits: hit } });
+        break;
+      }
+      case "contact": {
+        // Walked into a mob: hurt like a swing, felt by the one it hit.
+        if (this.takeHits([ev.hit], out, now).length)
+          out.push({
+            to: { uid: ev.hit.uid },
+            msg: { t: "bump", mob: ev.mob },
+          });
         break;
       }
       case "hit": {

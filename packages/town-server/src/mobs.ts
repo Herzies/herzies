@@ -30,6 +30,7 @@ import {
 import type { Buff } from "@herzies/shared/skills";
 import {
   attackTokens,
+  CONTACT,
   ELITE,
   type EliteAffix,
   ENRAGE,
@@ -501,7 +502,10 @@ export class MobPack {
     this.lastAt = now;
     this.land(now, events);
     this.resolveDue(now, players, judge, events);
-    if (now >= this.wakeAt) this.act(now, dt, players, judge, events);
+    if (now >= this.wakeAt) {
+      this.act(now, dt, players, judge, events);
+      this.contact(now, players, judge, events);
+    }
     for (const m of this.mobs) {
       if (m.hp <= 0) continue;
       m.trail.push({ t: now, x: m.x, z: m.z });
@@ -647,6 +651,67 @@ export class MobPack {
     );
   }
 
+  /** What `m`'s attack hits for, before the cap, Def and buffs: the floor,
+   * its kind and rank, and the level gap. */
+  private damageOf(m: Mob): number {
+    const { taken } = levelGapMods(towerMob(this.floor).level - this.level);
+    const mult =
+      (m.rank === 2 ? WARDEN.damage : m.rank === 1 ? ELITE.damage : 1) *
+      MOB_KINDS[m.kind].damage;
+    return Math.round(towerMob(this.floor).damage * mult * taken);
+  }
+
+  /**
+   * Walking into a mob hurts (CONTACT). Judged like a swing, to the
+   * defender's benefit: the bodies overlap now, and a moment ago too, with
+   * the mob where the herzie saw it. The same breathers apply, so standing
+   * in one hurts once a breather, and a herzie is bumped by one mob at a
+   * time.
+   */
+  private contact(
+    now: number,
+    players: readonly BossPlayer[],
+    judge: MobJudge,
+    events: MobEvent[],
+  ) {
+    const back = now - TUNING.rewindMs;
+    for (const p of players) {
+      if (!p.alive || judge.safe(p.uid, now) || judge.invuln(p.uid, now))
+        continue;
+      const a = p.posAt(now);
+      const b = p.posAt(back);
+      if (!a || !b) continue;
+      for (const m of this.mobs) {
+        if (m.hp <= 0) continue;
+        const reach =
+          (MOB.radius * m.scale + TUNING.playerRadius) * CONTACT.overlap;
+        if (Math.hypot(a.x - m.x, a.z - m.z) > reach) continue;
+        const seen = this.seenAt(m, back);
+        if (Math.hypot(b.x - seen.x, b.z - seen.z) > reach) continue;
+        const bump: Telegraph = {
+          id: -1,
+          kind: "circle",
+          x: m.x,
+          z: m.z,
+          r: reach,
+          inner: 0,
+          at: now,
+          hitAt: now,
+          damage: Math.max(1, Math.round(this.damageOf(m) * CONTACT.damage)),
+          mob: m.id,
+        };
+        const { aimed: _aimed, ...hit } = mitigatedHit(
+          p,
+          bump,
+          judge.buffs(p.uid),
+        );
+        judge.hitAt(p.uid, now);
+        events.push({ t: "contact", mob: m.id, hit });
+        break;
+      }
+    }
+  }
+
   /** Wind up an attack on `near`: its shapes go down now and land after
    * the windup. */
   private attack(
@@ -658,11 +723,7 @@ export class MobPack {
   ) {
     const windup = this.windupOf(m, enraged);
     const hitAt = now + windup;
-    const { taken } = levelGapMods(towerMob(this.floor).level - this.level);
-    const mult =
-      (m.rank === 2 ? WARDEN.damage : m.rank === 1 ? ELITE.damage : 1) *
-      MOB_KINDS[m.kind].damage;
-    const damage = Math.round(towerMob(this.floor).damage * mult * taken);
+    const damage = this.damageOf(m);
     m.state = "windup";
     m.until = hitAt;
     const you = near.at;

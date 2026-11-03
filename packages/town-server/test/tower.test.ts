@@ -223,6 +223,32 @@ describe("TowerEngine", () => {
     // Aimed well away: a miss.
     expect(e.cast("u", from, yaw + 1.2, 0, STATS, now + 1_000)).toBe("miss");
   });
+
+  it("hurts a herzie who walks into a mob, once a breather", () => {
+    const e = engine(1);
+    const mob = e.wireMobs()[0];
+    // Stood right on it: it holds still, so the herzie stays inside it.
+    const on = player(() => ({ x: mob.x, z: mob.z }));
+    const evs = run(e, T0, T0 + FLOOR_OPENING_MS + 3_000, [on]);
+    const bumps = evs.filter(
+      (ev): ev is Extract<TowerEvent, { t: "contact" }> => ev.t === "contact",
+    );
+    expect(bumps.length).toBeGreaterThan(0);
+    for (const b of bumps) {
+      expect(b.mob).toBe(mob.id);
+      expect(b.hit.uid).toBe("u");
+      expect(b.hit.damage).toBeGreaterThan(0);
+    }
+  });
+
+  it("leaves a herzie alone who only stands near a mob", () => {
+    const e = engine(1);
+    const mob = e.wireMobs()[0];
+    // Out of the mob's body, though inside its swing.
+    const near = player(() => ({ x: mob.x + 1.4, z: mob.z }));
+    const evs = run(e, T0, T0 + FLOOR_OPENING_MS + 3_000, [near]);
+    expect(evs.some((ev) => ev.t === "contact")).toBe(false);
+  });
 });
 
 const ticket = (over: Partial<TownTicketPayload> = {}): TownTicketPayload =>

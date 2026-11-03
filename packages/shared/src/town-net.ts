@@ -733,6 +733,9 @@ export type ServerMessage =
   | ({ t: "telegraph" } & BossTelegraph)
   /** An attack landed (or was dodged): remove its shape. */
   | { t: "resolve"; id: number; hits: number[] }
+  /** You walked into mob `mob` and got hurt (your `hp` follows). Older
+   * apps ignore it. */
+  | { t: "bump"; mob: number }
   /** A herzie's health (yours too), after damage. */
   | { t: "hp"; id: number; hp: number; maxHp: number }
   /** Your cast hit the boss — or, in the Tower, mob `mob` — for this much

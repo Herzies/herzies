@@ -529,6 +529,14 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       emit();
       return;
     }
+    case "bump":
+      // Walked into a mob: felt like a minion's swing (the hurt number
+      // comes with the `hp` that follows).
+      bossFight.youHitAt = now;
+      shake(0.3);
+      sfxHurt();
+      emit();
+      return;
     case "hp": {
       // Yours went down: the amount pops off your herzie. Anyone's went up
       // (a heal, a bite to eat, a revive): in green, over them. In a room

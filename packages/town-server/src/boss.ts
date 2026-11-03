@@ -268,7 +268,9 @@ export type BossEvent =
    * fight decides how many). */
   | { t: "minions"; share: number }
   /** One of its minions fell (or crumbled with it: `by` empty). */
-  | { t: "mobDown"; mob: number; by: string; x: number; z: number };
+  | { t: "mobDown"; mob: number; by: string; x: number; z: number }
+  /** A herzie walked into mob `mob` and got hurt. */
+  | { t: "contact"; mob: number; hit: BossHit };
 
 /** Where a seeded sequence starts: mulberry32. */
 export function rng(seed: number): () => number {
