@@ -158,7 +158,11 @@ vec2 warp = vec2( noise2( p * 0.6 + uTime * 0.11 ), noise2( p * 0.6 - uTime * 0.
 float n1 = noise2( p * 1.9 + warp * 1.6 + vec2( uTime * 0.21, uTime * 0.07 ) );
 float n2 = noise2( p * 3.1 - warp + vec2( -uTime * 0.05, uTime * 0.26 ) + 19.1 );
 float glint = smoothstep( 0.66, 0.85, n1 * n2 * 1.25 );
-diffuseColor.rgb += glint * 0.28;
+// Far off, a glint's smaller than a pixel and only flickers: those fade
+// to a faint even sheen instead.
+vec2 gpx = fwidth( p );
+float glintFar = smoothstep( 0.12, 0.35, max( gpx.x, gpx.y ) );
+diffuseColor.rgb += mix( glint, 0.05, glintFar * 0.8 ) * 0.28;
 // Foam at the bank, its edge lapping in and out.
 float lap = uFoam * ( 0.75 + 0.25 * sin( uTime * 1.8 + vWorldXZ.x * 2.3 + vWorldXZ.y * 1.7 ) );
 float foam = 1.0 - smoothstep( lap * 0.6, lap, vShore );

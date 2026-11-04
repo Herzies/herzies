@@ -5,7 +5,7 @@ import { ambient } from "../components/town/ambient";
 import type { Champion } from "../components/town/champion";
 import { driftClouds } from "../components/town/depth";
 import { Post } from "../components/town/Post";
-import { PIXEL_SCALE } from "../components/town/pixelSize";
+import { SUPERSAMPLE, wholePixelDpr } from "../components/town/pixelSize";
 import {
   HOME_MAP,
   type TownRuntime,
@@ -65,9 +65,16 @@ export function Showcase({
     [],
   );
   const hidden = usePageHidden();
+  // Supersampled (see pixelSize.ts): the orbiting camera never stops, so
+  // distant things would flicker the whole time. Not on a phone, already
+  // drawn at twice the resolution.
+  const supersample = !lite;
   return (
     <Canvas
-      dpr={lite ? PHONE_PIXEL_SCALE : PIXEL_SCALE}
+      dpr={
+        wholePixelDpr(lite ? PHONE_PIXEL_SCALE : undefined) *
+        (supersample ? SUPERSAMPLE : 1)
+      }
       gl={{ antialias: false, powerPreference: "low-power" }}
       shadows="percentage"
       style={{ imageRendering: "pixelated" }}
@@ -86,7 +93,7 @@ export function Showcase({
         <Orbit still={still} />
         <Uniforms />
         {onReady && <FirstFrame onReady={onReady} />}
-        <Post ao={!lite} distort={false} />
+        <Post ao={!lite} distort={false} supersample={supersample} />
       </TownRuntimeContext.Provider>
     </Canvas>
   );

@@ -40,8 +40,9 @@ export function Particles({ map }: { map: TownMap }) {
 // --- Point sprites ---------------------------------------------------------
 
 /** A pool of square point sprites, each with its own size (world units),
- * colour and opacity, written on the CPU every frame. */
-function usePoints(count: number, blending: THREE.Blending) {
+ * colour and opacity, written on the CPU every frame. `round`: each one
+ * clipped to a circle (still hard-edged, in the Town's pixels). */
+function usePoints(count: number, blending: THREE.Blending, round = false) {
   const gl = useThree((s) => s.gl);
   const camera = useThree((s) => s.camera);
   const points = useMemo(() => {
@@ -66,6 +67,7 @@ function usePoints(count: number, blending: THREE.Blending) {
       transparent: true,
       depthWrite: false,
       blending,
+      defines: round ? { ROUND: "" } : {},
       uniforms: { uPixels: { value: 1 } },
       vertexShader: /* glsl */ `
         uniform float uPixels;
@@ -87,13 +89,16 @@ function usePoints(count: number, blending: THREE.Blending) {
         varying vec3 vColor;
         void main() {
           if (vAlpha <= 0.0) discard;
+          #ifdef ROUND
+          if (length(gl_PointCoord - 0.5) > 0.5) discard;
+          #endif
           gl_FragColor = vec4(vColor, vAlpha);
           #include <colorspace_fragment>
         }
       `,
     });
     return { geometry, material };
-  }, [count, blending]);
+  }, [count, blending, round]);
   useLayoutEffect(
     () => () => {
       points.geometry.dispose();
@@ -228,7 +233,8 @@ const SMOKE = new THREE.Color("#d9d6d0");
 function Smoke({ map }: { map: TownMap }) {
   const chimneys = useMemo(() => chimneysOf(map), [map]);
   const count = Math.max(1, chimneys.length * PUFFS);
-  const pts = usePoints(count, THREE.NormalBlending);
+  // Round puffs, not boxes.
+  const pts = usePoints(count, THREE.NormalBlending, true);
   useLayoutEffect(() => {
     for (let i = 0; i < count; i++) pts.color(i, SMOKE);
   }, [pts, count]);

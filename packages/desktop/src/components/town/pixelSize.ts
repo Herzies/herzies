@@ -26,6 +26,15 @@ export function homeDpr(dpr: number): number {
   return device / pixel;
 }
 
+/** The canvas resolution for a fraction of the screen's (`scale`), nudged
+ * so each drawn pixel covers a whole number of device pixels: 0.4 on a
+ * plain (1×) screen would be 2.5 device pixels a pixel, alternately 2 and 3
+ * wide, and things wobble as they move across them. */
+export function wholePixelDpr(scale: number = PIXEL_SCALE): number {
+  const device = window.devicePixelRatio;
+  return device / Math.max(1, Math.round(device / scale));
+}
+
 /** The default, as screen pixels per Town pixel (to the nearest). */
 export function defaultPixelSize(): number {
   return Math.round(window.devicePixelRatio / PIXEL_SCALE);
@@ -67,5 +76,54 @@ export function useTownPixelSize(): number | null {
       return () => listeners.delete(cb);
     },
     () => size,
+  );
+}
+
+/** Drawn this many times the resolution each way when supersampling. */
+export const SUPERSAMPLE = 2;
+
+/**
+ * Supersampling (Settings > Graphics, off by default): each big pixel the
+ * average of what it covers — drawn at SUPERSAMPLE times the resolution and
+ * each block averaged down (see vfx/blockAverage.ts) — rather than one
+ * point of it, so thin and distant things stop flickering as the camera
+ * moves. About four times the drawing. In dev builds `?supersample=1` on
+ * the page turns it on. (The website's showcase always supersamples.)
+ */
+const SUPERSAMPLE_KEY = "town.graphics.supersample";
+
+let supersample: boolean = (() => {
+  try {
+    if (
+      import.meta.env.DEV &&
+      new URLSearchParams(location.search).get("supersample") === "1"
+    )
+      return true;
+    return localStorage.getItem(SUPERSAMPLE_KEY) === "1";
+  } catch {
+    return false;
+  }
+})();
+
+const supersampleListeners = new Set<() => void>();
+
+export function setTownSupersample(on: boolean): void {
+  supersample = on;
+  try {
+    if (on) localStorage.setItem(SUPERSAMPLE_KEY, "1");
+    else localStorage.removeItem(SUPERSAMPLE_KEY);
+  } catch {
+    // Not remembered, then.
+  }
+  for (const l of supersampleListeners) l();
+}
+
+export function useTownSupersample(): boolean {
+  return useSyncExternalStore(
+    (cb) => {
+      supersampleListeners.add(cb);
+      return () => supersampleListeners.delete(cb);
+    },
+    () => supersample,
   );
 }

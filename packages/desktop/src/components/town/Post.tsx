@@ -11,7 +11,9 @@ import * as THREE from "three";
 import { ambient } from "./ambient";
 import { townLook } from "./depth";
 import { homeMode } from "./homeMode";
+import { SUPERSAMPLE } from "./pixelSize";
 import { warpAmount } from "./portal";
+import { BlockAverageEffect } from "./vfx/blockAverage";
 import { DistortionBuffer, SonicDistortionEffect } from "./vfx/distortion";
 import { HomeFadeEffect } from "./vfx/homeFade";
 
@@ -48,20 +50,32 @@ type AOPass = NonNullable<
  * out; the materials do it themselves meanwhile (see depth.ts), so the
  * fog and sky come out exactly as they do without it.
  */
-export function Post({ ao, distort }: { ao: boolean; distort: boolean }) {
+export function Post({
+  ao,
+  distort,
+  supersample = false,
+}: {
+  ao: boolean;
+  distort: boolean;
+  /** The canvas is drawn at SUPERSAMPLE times its resolution: average each
+   * block back down to one big pixel (see pixelSize.ts). */
+  supersample?: boolean;
+}) {
   const aoPass = useRef<AOPass>(null);
   const gl = useThree((s) => s.gl);
   const camera = useThree((s) => s.camera);
   const buffer = useMemo(() => new DistortionBuffer(), []);
   const effect = useMemo(() => new SonicDistortionEffect(buffer), [buffer]);
   const fade = useMemo(() => new HomeFadeEffect(), []);
+  const average = useMemo(() => new BlockAverageEffect(SUPERSAMPLE), []);
   useEffect(
     () => () => {
       effect.dispose();
       buffer.dispose();
       fade.dispose();
+      average.dispose();
     },
-    [effect, buffer, fade],
+    [effect, buffer, fade, average],
   );
   const scene = useThree((s) => s.scene);
   // Settled at Home: nothing of the world left to draw.
@@ -163,6 +177,7 @@ export function Post({ ao, distort }: { ao: boolean; distort: boolean }) {
       )}
       {distort && <primitive object={effect} dispose={null} />}
       <primitive object={fade} dispose={null} />
+      {supersample && <primitive object={average} dispose={null} />}
     </EffectComposer>
   );
 }

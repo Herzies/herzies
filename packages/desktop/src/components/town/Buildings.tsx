@@ -1084,7 +1084,12 @@ if ( vSurface > 0.5 && abs( vWallNormal.y ) < 0.5 ) {
     float edge = min( min( f.x, L - f.x ), min( f.y, H - f.y ) );
     float mortar = 1.0 - smoothstep( 0.02, 0.02 + px, edge );
     float tone = 0.8 + 0.32 * wallHash( vec2( col, row ) );
-    diffuseColor.rgb = mix( diffuseColor.rgb * tone, vec3( 0.8, 0.76, 0.7 ), mortar );
+    vec3 brick = mix( diffuseColor.rgb * tone, vec3( 0.8, 0.76, 0.7 ), mortar );
+    // Far off, a brick's smaller than a pixel: the pattern would only
+    // alias into stripes that swim as the camera moves, so it gives way to
+    // its average (the mean tone, a fifth of it mortar).
+    vec3 average = mix( diffuseColor.rgb * 0.96, vec3( 0.8, 0.76, 0.7 ), 0.2 );
+    diffuseColor.rgb = mix( brick, average, smoothstep( 0.3 * H, 0.7 * H, px ) );
   } else {
     const float H = ${PLANK_HEIGHT.toFixed(3)};
     float row = floor( v / H );
@@ -1098,7 +1103,9 @@ if ( vSurface > 0.5 && abs( vWallNormal.y ) < 0.5 ) {
     float seam = 1.0 - smoothstep( 0.0, px * 1.5 / H, min( f, 1.0 - f ) );
     float butt = 1.0 - smoothstep( 0.0, px * 1.5, fract( along ) * 2.3 );
     float grain = 1.0 + 0.05 * sin( u * 7.0 + sin( u * 1.3 + row ) * 2.5 + row * 13.0 );
-    diffuseColor.rgb *= tone * lap * grain * ( 1.0 - 0.45 * max( seam, butt ) );
+    float shade = tone * lap * grain * ( 1.0 - 0.45 * max( seam, butt ) );
+    // Far off, the boards give way to their average (as the bricks do).
+    diffuseColor.rgb *= mix( shade, 0.82, smoothstep( 0.3 * H, 0.7 * H, px ) );
   }
 }`,
       );

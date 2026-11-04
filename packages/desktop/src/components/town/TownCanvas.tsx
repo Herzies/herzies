@@ -44,7 +44,13 @@ import { RemotePlayers } from "./RemotePlayers";
 import type { Season } from "./Seasons";
 import { sfxPortal } from "./sfx";
 import "./shadows";
-import { homeDpr, PIXEL_SCALE, useTownPixelSize } from "./pixelSize";
+import {
+  homeDpr,
+  SUPERSAMPLE,
+  useTownPixelSize,
+  useTownSupersample,
+  wholePixelDpr,
+} from "./pixelSize";
 import {
   goToMap,
   mapById,
@@ -148,6 +154,9 @@ export default function TownCanvas(props: TownCanvasProps) {
   const spots = Object.keys(map.spots).length > 0 ? props.spots : [];
   // At Home nothing's aimed or cast (and aim mode ends on the way in).
   const { home } = useHomeMode();
+  // Supersampled out in the world; at Home (its own, chunkier pixels) the
+  // block average would only blur them, so not there.
+  const supersample = useTownSupersample() && !home;
 
   return (
     <Canvas
@@ -157,8 +166,9 @@ export default function TownCanvas(props: TownCanvasProps) {
       dpr={(() => {
         const dpr =
           props.pixelScale ??
-          (pixelSize ? window.devicePixelRatio / pixelSize : PIXEL_SCALE);
-        return home ? homeDpr(dpr) : dpr;
+          (pixelSize ? window.devicePixelRatio / pixelSize : wholePixelDpr());
+        if (home) return homeDpr(dpr);
+        return supersample ? dpr * SUPERSAMPLE : dpr;
       })()}
       gl={{ antialias: false }}
       // Plain PCF: soft enough, and at these pixels the edge reads clean.
@@ -254,7 +264,7 @@ export default function TownCanvas(props: TownCanvasProps) {
         <SlashVFX />
         <CombatOverlay />
         {/* Sound waves bend light, and aim mode works on every island. */}
-        <Post ao={props.ao !== false} distort />
+        <Post ao={props.ao !== false} distort supersample={supersample} />
         {/* Home's things, over the world fading on the way Home. */}
         <HomeLayer />
       </TownRuntimeContext.Provider>

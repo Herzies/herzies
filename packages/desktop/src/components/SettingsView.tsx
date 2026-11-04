@@ -20,7 +20,9 @@ import {
   PIXEL_SIZE_MAX,
   PIXEL_SIZE_MIN,
   setTownPixelSize,
+  setTownSupersample,
   useTownPixelSize,
+  useTownSupersample,
 } from "./town/pixelSize";
 import { goToMap, useTownMap } from "./town/runtime";
 import { setSfxMuted, sfxMuted } from "./town/sfx";
@@ -33,7 +35,7 @@ const TELEPORTS = [
 ] as const;
 
 /** Debug is for dev builds only. */
-const TABS = ["Account", "Privacy", "Controls", "Debug"] as const;
+const TABS = ["Account", "Privacy", "Controls", "Graphics", "Debug"] as const;
 type SettingsTab = (typeof TABS)[number];
 const tabs: readonly SettingsTab[] = import.meta.env.DEV
   ? TABS
@@ -104,6 +106,7 @@ export function SettingsView({
   const [townSounds, setTownSounds] = useState(() => !sfxMuted());
   const fpsShown = useFpsShown();
   const pixelSize = useTownPixelSize();
+  const supersample = useTownSupersample();
   const [tab, setTab] = useState<SettingsTab>("Account");
   const shareListening = state.herzie?.shareListening ?? true;
   const pinned = useWindowPinned();
@@ -306,6 +309,25 @@ export function SettingsView({
             </div>
           </div>
         </>
+      )}
+
+      {tab === "Graphics" && (
+        <div className="mb-4 flex flex-col gap-3">
+          <Checkbox
+            checked={supersample}
+            onChange={setTownSupersample}
+            className="items-start"
+          >
+            <span className="min-w-0">
+              <span className="block text-ui">Supersampling</span>
+              <span className="block text-ui-sm text-text-dim">
+                Smooths the Town's pixels so distant things don't flicker as the
+                camera moves. Takes more from your graphics card: turn it off if
+                the Town stutters.
+              </span>
+            </span>
+          </Checkbox>
+        </div>
       )}
 
       {tab === "Debug" && (
