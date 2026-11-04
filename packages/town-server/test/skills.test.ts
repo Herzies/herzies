@@ -1,4 +1,4 @@
-import { CAST_INTERVAL_MS, HEAL_BOLT, WAVE_HAND_HEIGHT } from "@herzies/shared/combat";
+import { CAST_INTERVAL_MS, DOME, HEAL_BOLT, WAVE_HAND_HEIGHT } from "@herzies/shared/combat";
 import {
   SKILL_COOLDOWN_GRACE_MS,
   SKILL_DEFS,
@@ -168,17 +168,19 @@ describe("cooldowns and ownership", () => {
 });
 
 describe("Cymbrella", () => {
-  it("puts the buff on its caster for everyone to see", () => {
+  it("puts up a dome where its caster stands, and says so", () => {
     const f = new FightRuntime(claim(), T0);
     f.join("tank", 1, ticket("tank", [["cymbrella", 10]]), { x: 0, z: 8 }, T0 - 5_000);
     f.onState("tank", 0, 8, T0);
     const { out } = f.skill("tank", "cymbrella", 0, 0, T0);
+    const ms = skillValue("cymbrella", 10) * 1000;
+    // An older app reads the buff as its cymbal: all damage off.
     expect(msgs(out, "buff")[0].msg).toEqual({
       t: "buff",
       id: 1,
       buff: "cymbrella",
-      value: skillValue("cymbrella", 10),
-      until: T0 + (SKILL_DEFS.cymbrella.durationMs ?? 0),
+      value: 1,
+      until: T0 + ms,
     });
     expect(f.state(T0 + 10).buffs).toHaveLength(1);
   });
@@ -195,19 +197,6 @@ describe("Euphony", () => {
     // 50 Euphony: half again.
     const heal = skillValue("soothing-drones", 1) * 1.5 * 200;
     expect(f.player("bard")?.hp).toBeCloseTo(50 + heal);
-  });
-
-  it("strengthens a Cymbrella, by less", () => {
-    const f = new FightRuntime(claim(), T0);
-    const tank = ticket("tank", [["cymbrella", 1]]);
-    tank.st = [0, 0, 0, 0, 0, 0, 50];
-    f.join("tank", 1, tank, { x: 0, z: 8 }, T0 - 5_000);
-    f.onState("tank", 0, 8, T0);
-    const { out } = f.skill("tank", "cymbrella", 0, 0, T0);
-    const buff = msgs(out, "buff")[0].msg;
-    if (buff.t !== "buff") throw new Error("no buff");
-    // 50 Euphony: a quarter again.
-    expect(buff.value).toBeCloseTo(skillValue("cymbrella", 1) * 1.25);
   });
 });
 
@@ -260,49 +249,85 @@ describe("the boss's side", () => {
     posAt: () => at,
   });
 
-  it("a Cymbrella takes its share off a slam, and the same buff doesn't stack", () => {
+  /** The first resolve with hits on it, running from T0. */
+  const firstHits = (boss: BossEngine, players: BossPlayer[], until = 10_000) => {
+    for (let t = T0; t < T0 + until; t += 50)
+      for (const ev of boss.update(t, players))
+        if (ev.t === "resolve" && ev.hits.length) return ev.hits;
+    return [];
+  };
+
+  it("under a dome a slam lands nothing, and all of it is the dome's", () => {
     const boss = new BossEngine({ hp: 1e6, maxHp: 1e6, seed: 1, now: T0 });
-    boss.buff("a", { id: "cymbrella", value: 0.4, until: T0 + 60_000 });
-    boss.buff("a", { id: "cymbrella", value: 0.4, until: T0 + 60_000 });
-    const a = player("a", { x: 0, z: 8 });
-    let hits: {
-      uid: string;
-      damage: number;
-      absorbed: number;
-      blocked: number;
-    }[] = [];
-    for (let t = T0; t < T0 + 10_000 && !hits.length; t += 50) {
-      for (const ev of boss.update(t, [a])) if (ev.t === "resolve") hits = ev.hits;
-    }
-    const raw = TUNING.slam.damage;
-    // 40% off once: two Cymbrellas are still one. Without Def, all of what
-    // came off is the Cymbrella's.
-    const taken = Math.round(raw) - Math.round(raw * 0.6);
-    expect(hits[0]).toEqual({
+    boss.addDome("tank", 0, 8, T0, 60_000);
+    const a = player("a", { x: 1, z: 8 });
+    const [hit] = firstHits(boss, [a]);
+    expect(hit).toMatchObject({
       uid: "a",
-      damage: Math.round(raw * 0.6),
-      absorbed: taken,
-      blocked: taken,
-      aimed: true,
+      damage: 0,
+      blocked: TUNING.slam.damage,
+      shelteredBy: "tank",
     });
   });
 
-  it("with Def too, only the Cymbrella's own share counts as blocked", () => {
+  it("just outside a dome, a slam lands as ever", () => {
     const boss = new BossEngine({ hp: 1e6, maxHp: 1e6, seed: 1, now: T0 });
-    boss.buff("a", { id: "cymbrella", value: 0.4, until: T0 + 60_000 });
-    const a = { ...player("a", { x: 0, z: 8 }), def: 100 };
-    let hit: { damage: number; absorbed: number; blocked: number } | undefined;
-    for (let t = T0; t < T0 + 10_000 && !hit; t += 50) {
-      for (const ev of boss.update(t, [a]))
-        if (ev.t === "resolve") hit = ev.hits[0];
+    boss.addDome("tank", 0, 8 + DOME.radius + 1.5, T0, 60_000);
+    const a = player("a", { x: 0, z: 8 });
+    const [hit] = firstHits(boss, [a]);
+    expect(hit.damage).toBe(TUNING.slam.damage);
+    expect(hit.shelteredBy).toBeUndefined();
+  });
+
+  it("in a fight, what the dome keeps off others pays its Percussionist", () => {
+    const f = new FightRuntime(claim(), T0);
+    f.join("tank", 1, ticket("tank", [["cymbrella", 10]]), { x: 0, z: 8 }, T0 - 5_000);
+    f.join("dps", 2, ticket("dps", [["backspin", 1]]), { x: 1, z: 8 }, T0 - 5_000);
+    // Past the boss's opening, when its slams start coming.
+    const at = T0 + TUNING.openingMs;
+    for (let t = T0 - 1_000; t <= at; t += 50) {
+      f.onState("tank", 0, 8, t);
+      f.onState("dps", 1, 8, t);
+      f.step(t);
     }
-    if (!hit) throw new Error("no hit");
-    const raw = TUNING.slam.damage;
-    // Def alone halves it; the Cymbrella takes 40% of what's left.
-    const defOnly = Math.round(raw / 2);
-    expect(hit.blocked).toBe(defOnly - hit.damage);
-    expect(hit.blocked).toBeLessThan(hit.absorbed);
-    expect(hit.blocked).toBeGreaterThan(0);
+    expect(f.skill("tank", "cymbrella", 0, 0, at).result).toBe("used");
+    const dps = f.player("dps");
+    const before = dps?.hp;
+    let sheltered = false;
+    for (let t = at; t < at + 4_500; t += 50) {
+      f.onState("tank", 0, 8, t);
+      f.onState("dps", 1, 8, t);
+      for (const o of f.step(t))
+        if (o.msg.t === "resolve" && o.msg.sheltered?.length) sheltered = true;
+    }
+    expect(sheltered).toBe(true);
+    expect(dps?.hp).toBe(before);
+    const xp = f.report(at + 4_501, true)?.skills?.xp ?? [];
+    expect(xp.find((x) => x.uid === "tank" && x.skill === "cymbrella")?.xp).toBeGreaterThan(0);
+  });
+
+  it("keeps the boss out: it walks up to the edge, no further", () => {
+    const boss = new BossEngine({ hp: 1e6, maxHp: 1e6, seed: 1, now: T0 });
+    boss.addDome("tank", 0, 8, T0, 60_000);
+    const a = player("a", { x: 0, z: 8 });
+    for (let t = T0; t < T0 + 8_000; t += 50) {
+      boss.update(t, [a]);
+      const at = boss.position;
+      expect(Math.hypot(at.x, at.z - 8)).toBeGreaterThanOrEqual(
+        DOME.radius + TUNING.boss.radius - 0.01,
+      );
+    }
+  });
+
+  it("a dome put up on top of the boss shoves it out as it grows", () => {
+    const boss = new BossEngine({ hp: 1e6, maxHp: 1e6, seed: 1, now: T0, pinned: true });
+    const at = boss.position;
+    boss.addDome("tank", at.x + 1, at.z, T0, 60_000);
+    boss.update(T0 + 1_000, []);
+    const now = boss.position;
+    expect(Math.hypot(now.x - (at.x + 1), now.z - at.z)).toBeGreaterThanOrEqual(
+      DOME.radius + TUNING.boss.radius - 0.01,
+    );
   });
 
   it("aims a buster at whoever it hates most, once there's a party", () => {

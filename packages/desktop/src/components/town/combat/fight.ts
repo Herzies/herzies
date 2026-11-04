@@ -24,12 +24,15 @@ import { notify } from "../../../lib/notices";
 import { townSave } from "../runtime";
 import {
   sfxChannel,
+  sfxDomeBlock,
+  sfxDomeUp,
   sfxDown,
   sfxHurt,
   sfxImpact,
   sfxPortal,
   sfxRevive,
   sfxSlam,
+  sfxStun,
   sfxTaunt,
   sfxWarn,
 } from "../sfx";
@@ -38,7 +41,9 @@ import {
   pushDamageNumber,
   pushHealNumber,
   pushHurtNumber,
+  pushStunLabel,
 } from "./DamageNumbers";
+import { noteDomeHit, removeDome } from "./domes";
 import { setBossResults } from "./results";
 import {
   clearBuff,
@@ -51,8 +56,10 @@ import {
   setReadyAt,
   skills,
 } from "./skills";
+import { beginSlam, cancelSlam } from "./slams";
 import { resetHealers, setHealer } from "./stance";
 import { combat, shake } from "./state";
+import { stuns } from "./stuns";
 import { waveField } from "./waves";
 
 /**
@@ -277,7 +284,25 @@ export function mobAt(
   return at < s[0].at ? s[0] : last;
 }
 
-function syncMobs(mobs: readonly TowerMob[], now: number) {
+/** A stun the server just told of, ending at `until` (local ms), on
+ * something at (x, y, z): the word over it, and its sound. Only once per
+ * stun (`was` is the end already known). */
+function announceStun(
+  until: number,
+  was: number,
+  now: number,
+  at: readonly [number, number, number],
+) {
+  if (until <= now || until <= was + 50) return;
+  pushStunLabel(at);
+  sfxStun();
+}
+
+function syncMobs(
+  mobs: readonly TowerMob[],
+  now: number,
+  toLocal?: (serverTime: number) => number,
+) {
   for (const w of mobs) {
     let m = towerMobs.get(w.id);
     if (!m) {
@@ -298,6 +323,12 @@ function syncMobs(mobs: readonly TowerMob[], now: number) {
     m.maxHp = w.maxHp;
     m.windup = w.s === 1;
     pushSample(m.samples, now, w.x, w.z, w.yaw, 6);
+    if (w.st !== undefined && toLocal) {
+      const until = toLocal(w.st);
+      const was = stuns.mobs.get(w.id) ?? 0;
+      stuns.mobs.set(w.id, until);
+      announceStun(until, was, now, [w.x, MOB.top + 0.5, w.z]);
+    }
   }
 }
 
@@ -509,6 +540,15 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       if (s) s.resolvedAt = now;
       const you = clock.you();
       const hitYou = you !== null && m.hits.includes(you);
+      // A dome turned it away from these: a ripple where it struck, and
+      // the clang of it.
+      if (m.sheltered?.length) {
+        for (const id of m.sheltered) {
+          const e = entityAt.get(id);
+          if (e) noteDomeHit(e.x, e.z, s?.x ?? e.x, s?.z ?? e.z, now);
+        }
+        sfxDomeBlock();
+      }
       // A minion's swing is its own, smaller thing: the boss doesn't slam
       // for it, and far ones are barely felt.
       const minion = s?.mob !== undefined;
@@ -618,7 +658,9 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       return;
     case "mobs": {
       const before = towerMobs.size;
-      syncMobs(m.mobs, m.at !== undefined ? clock.toLocal(m.at) : now);
+      syncMobs(m.mobs, m.at !== undefined ? clock.toLocal(m.at) : now, (t) =>
+        clock.toLocal(t),
+      );
       if (towerMobs.size !== before) emit();
       return;
     }
@@ -669,6 +711,12 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
         m.yaw,
         m.at !== undefined ? clock.toLocal(m.at) : now,
       );
+      if (m.st !== undefined) {
+        const until = clock.toLocal(m.st);
+        const was = stuns.boss;
+        stuns.boss = until;
+        announceStun(until, was, now, [m.x, BOSS_STAND.top + 0.6, m.z]);
+      }
       return;
     case "say":
       bossFight.say = { text: m.text, until: clock.toLocal(m.until) };
@@ -695,6 +743,9 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       setHealer(m.id, m.heal);
       return;
     case "channel": {
+      // A Rimshot's wind-up cut short (its Percussionist knocked out): not a
+      // Resurrect at all.
+      if (m.target === null && cancelSlam(m.by)) return;
       if (m.target === null) {
         const was = skills.channels.get(m.by);
         setChannel(m.by, null);
@@ -754,6 +805,11 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       // Yours played the moment you pressed it.
       if (m.by === clock.you() || !isSkillId(m.skill)) return;
       if (m.skill === "taunt") sfxTaunt();
+      // A teammate's dome going up: the call to run in.
+      else if (m.skill === "cymbrella") sfxDomeUp();
+      // A teammate's Rimshot winding up (their herzie plays it: see
+      // RemotePlayers).
+      else if (m.skill === "rimshot") beginSlam(m.by, m.x, m.z, now);
       noteSkillCast({
         by: m.by,
         skill: m.skill,
@@ -788,6 +844,8 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
         id === "shuffle"
       )
         clearBuff(clock.you() ?? -1, id);
+      // Nor the dome you put up: nobody may run into one that isn't there.
+      if (id === "cymbrella") removeDome(clock.you() ?? -1);
       if (m.reason) notify(REFUSALS[m.reason], { kind: "info" });
       emitSkills();
       return;

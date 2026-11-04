@@ -8,6 +8,9 @@ import {
 import { useSyncExternalStore } from "react";
 import { notify } from "../../../lib/notices";
 import { offerSkillSlot } from "../hotbarSlots";
+import { addDome, clearDomes } from "./domes";
+import { clearSlams } from "./slams";
+import { clearStuns } from "./stuns";
 
 /**
  * Class skills as the client holds them: yours (which, their levels, when
@@ -204,6 +207,7 @@ export function setReadyAt(id: SkillId, at: number): void {
 export function noteSkillCast(cast: SkillCast): void {
   skills.casts.push(cast);
   if (skills.casts.length > 24) skills.casts.shift();
+  if (cast.skill === "cymbrella") addDome(cast);
 }
 
 /** A buff on `id`, until `until` (performance.now() ms). */
@@ -260,6 +264,9 @@ export function resetSkills(): void {
   skills.channels.clear();
   skills.queued = null;
   entityAt.clear();
+  clearDomes();
+  clearSlams();
+  clearStuns();
   emitSkills();
 }
 

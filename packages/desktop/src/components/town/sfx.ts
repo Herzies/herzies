@@ -355,6 +355,137 @@ export function sfxWipe(): void {
   tone(a, "sine", 196, 65, 0.2, 0.05, 2.0, 0.15);
 }
 
+/** A Cymbrella going up: a deep cymbal swell, a shimmer rising over it as
+ * the dome grows, and a low hum that holds. */
+export function sfxDomeUp(): void {
+  const a = audio();
+  if (!a) return;
+  const k = wobble(0.02);
+  tone(a, "sine", 98 * k, 110 * k, 0.32, 0.02, 1.1);
+  tone(a, "triangle", 196 * k, 220 * k, 0.12, 0.03, 0.8);
+  // The shimmer: bright noise swelling and rising with the growth.
+  noiseBurst(a, "bandpass", 2600 * k, 7800 * k, 4, 0.16, 0.45);
+  for (const [f, at] of [
+    [880, 0.04],
+    [1320, 0.12],
+    [1760, 0.22],
+  ] as const)
+    tone(a, "sine", f * k, f * k * 1.01, 0.05, 0.01, 0.5, at);
+}
+
+/** A hit turned away by a dome: a bright metallic clang with a ring. */
+export function sfxDomeBlock(): void {
+  const a = audio();
+  if (!a) return;
+  const k = wobble(0.05);
+  noiseBurst(a, "highpass", 5200 * k, 2400 * k, 1.5, 0.2, 0.08);
+  tone(a, "square", 1180 * k, 1120 * k, 0.05, 0.002, 0.25);
+  tone(a, "sine", 2370 * k, 2330 * k, 0.08, 0.002, 0.5);
+}
+
+/** A Rimshot landing: the stick cracking off a drum's rim, sharp and dry,
+ * with the drum's body thumping under it. */
+export function sfxRimshot(): void {
+  const a = audio();
+  if (!a) return;
+  const k = wobble(0.04);
+  noiseBurst(a, "highpass", 6200 * k, 2600 * k, 0.9, 0.38, 0.05);
+  tone(a, "triangle", 1650 * k, 1100 * k, 0.22, 0.001, 0.05);
+  tone(a, "sine", 210 * k, 110 * k, 0.4, 0.002, 0.14);
+}
+
+/** A Rimshot's wind-up: a snare roll that speeds up and swells over
+ * `seconds`, with a low tension rising under it, timed to land on the
+ * slam. Stop it (the wind-up cut short) and it falls silent at once. */
+export function sfxRimshotWindup(seconds: number): { stop(): void } {
+  const a = audio();
+  if (!a) return { stop() {} };
+  const { ctx: c } = a;
+  // Its own bus, so it can be cut.
+  const bus = c.createGain();
+  bus.gain.value = 1;
+  bus.connect(a.out);
+  const sub = { ...a, out: bus as AudioNode as GainNode };
+  const k = wobble(0.02);
+  // Strokes closing in on each other, louder as they go.
+  let at = 0;
+  let gap = 0.11;
+  while (at < seconds - 0.03) {
+    const u = at / seconds;
+    const src = c.createBufferSource();
+    src.buffer = a.noise;
+    const f = c.createBiquadFilter();
+    f.type = "bandpass";
+    f.frequency.value = (2600 + 1400 * u) * k;
+    f.Q.value = 1.4;
+    const g = c.createGain();
+    const t = c.currentTime + at;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.05 + 0.2 * u * u, t + 0.003);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+    src.connect(f).connect(g).connect(bus);
+    src.start(t, Math.random() * 0.5);
+    src.stop(t + 0.07);
+    at += gap;
+    gap = Math.max(0.028, gap * 0.86);
+  }
+  // The tension: a low tone climbing to the slam.
+  tone(sub, "triangle", 70 * k, 130 * k, 0.12, seconds * 0.6, seconds * 0.4);
+  return {
+    stop() {
+      const t = c.currentTime;
+      bus.gain.cancelScheduledValues(t);
+      bus.gain.setValueAtTime(bus.gain.value, t);
+      bus.gain.exponentialRampToValueAtTime(0.0001, t + 0.04);
+      setTimeout(() => bus.disconnect(), 120);
+    },
+  };
+}
+
+/** A Rimshot's slam: a sub boom you feel more than hear, the rim's crack
+ * on top, and the rattle of the ground breaking up. */
+export function sfxRimshotSlam(): void {
+  const a = audio();
+  if (!a) return;
+  const k = wobble(0.04);
+  tone(a, "sine", 110 * k, 38, 0.75, 0.004, 0.55);
+  tone(a, "triangle", 220 * k, 70, 0.22, 0.003, 0.25);
+  noiseBurst(a, "highpass", 6400 * k, 2800 * k, 0.9, 0.42, 0.05);
+  tone(a, "triangle", 1700 * k, 1150 * k, 0.2, 0.001, 0.06);
+  noiseBurst(a, "lowpass", 1800 * k, 300, 0.7, 0.32, 0.35);
+  // Debris: a scatter of small ticks.
+  for (let i = 0; i < 7; i++)
+    tone(
+      a,
+      "square",
+      (900 + Math.random() * 900) * k,
+      500,
+      0.025,
+      0.001,
+      0.03,
+      0.06 + i * 0.035 + Math.random() * 0.02,
+    );
+}
+
+/** A stun taking: a dizzy wobble of little bells, round and round. */
+export function sfxStun(): void {
+  const a = audio();
+  if (!a) return;
+  const k = wobble(0.03);
+  const notes = [1568, 1319, 1568, 1319, 1175];
+  for (let i = 0; i < notes.length; i++)
+    tone(
+      a,
+      "sine",
+      notes[i] * k,
+      notes[i] * k * 0.98,
+      0.07,
+      0.004,
+      0.16,
+      i * 0.07,
+    );
+}
+
 /** A taunt: a struck gong. */
 export function sfxTaunt(): void {
   const a = audio();

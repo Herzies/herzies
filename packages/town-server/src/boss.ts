@@ -40,12 +40,16 @@ import {
   CAST_INTERVAL_MS,
   DISC_DAMAGE,
   DISC_RANGE,
+  type Dome,
   discLandsAfterMs,
   type HitStats,
   hitDamage,
+  insideDome,
   MELEE_REACH,
   meleeReaches,
+  pushOutOfDomes,
   STRIKE_DAMAGE,
+  stunMs,
   WAVE_HAND_HEIGHT,
   WAVE_SPEED,
 } from "@herzies/shared/combat";
@@ -60,6 +64,7 @@ import {
   buffMultiplier,
   buffReductions,
   mitigate,
+  RIMSHOT,
   shuffleOn,
 } from "@herzies/shared/skills";
 import { defReduction, timingAttackSpeed } from "@herzies/shared/stats";
@@ -235,11 +240,47 @@ export type BossHit = {
   damage: number;
   /** What Def and buffs took off the hit. */
   absorbed: number;
-  /** The Cymbrella's share of that alone. */
+  /** What a Cymbrella's dome kept off them: the whole hit they'd have
+   * taken (`damage` is then 0). */
   blocked: number;
+  /** Whose dome that was (it pays them). */
+  shelteredBy?: string;
   /** The hit was aimed at them (a taunt draws these). */
   aimed?: boolean;
 };
+
+/** A Cymbrella's dome, and whose it is. */
+export type ShelterDome = Dome & { by: string };
+
+/** The dome sheltering `p` from a hit landing at `t`, if any. In the
+ * defender's favour, the other way round from being hit: inside it now
+ * *or* a moment ago is enough. */
+export function shelterOf(
+  domes: readonly ShelterDome[],
+  p: BossPlayer,
+  t: number,
+): ShelterDome | null {
+  if (!domes.length) return null;
+  for (const at of [t, t - TUNING.rewindMs]) {
+    const pos = p.posAt(at);
+    if (!pos) continue;
+    const d = insideDome(domes, pos.x, pos.z, t);
+    if (d) return d;
+  }
+  return null;
+}
+
+/** `hit` as a dome takes it: none of it lands, all of it is blocked. */
+export function shelteredHit(hit: BossHit, by: string): BossHit {
+  return {
+    uid: hit.uid,
+    damage: 0,
+    absorbed: 0,
+    blocked: hit.damage,
+    shelteredBy: by,
+    ...(hit.aimed ? { aimed: true } : {}),
+  };
+}
 
 export type BossEvent =
   | { t: "telegraph"; telegraph: Telegraph }
@@ -374,6 +415,14 @@ export class BossEngine {
   private raidSize = 0;
   /** Rattled by busters: stacks and until when (server ms), by user id. */
   private rattled = new Map<string, { stacks: number; until: number }>();
+  /** Cymbrella domes standing (or about to), oldest first. */
+  private domes: ShelterDome[] = [];
+  /** Stunned until (server ms), and when its recent stuns began (for the
+   * diminishing returns). */
+  private stunnedUntil = 0;
+  private stuns: number[] = [];
+  /** Its own shapes a stun took off the floor, to say so next update. */
+  private cancelled: number[] = [];
   private nextScatterAt = 0;
   /** Minion thresholds not yet crossed. */
   private thresholds: number[] = [...MINION_THRESHOLDS];
@@ -467,6 +516,7 @@ export class BossEngine {
       this.mobs.minWindupMs = TUNING.minWindupMs;
       this.mobs.maxShapes = TUNING.minionShapes;
       this.mobs.taunter = () => this.taunter(this.clock);
+      this.mobs.domes = () => this.domes;
     }
     this.mobs.floor = Math.max(1, Math.floor(floor));
     this.mobs.level = Math.max(1, Math.floor(level));
@@ -627,6 +677,111 @@ export class BossEngine {
     for (const [uid, list] of this.buffs)
       for (const buff of activeBuffs(list, now)) out.push({ uid, buff });
     return out;
+  }
+
+  /** A Cymbrella: a dome of `by`'s at (x, z) from `now`, for `ms`. It
+   * shelters its minions' targets too. */
+  addDome(by: string, x: number, z: number, now: number, ms: number): void {
+    this.domes.push({ x, z, from: now, until: now + ms, by });
+  }
+
+  /** The domes standing at `now` (for the room's welcome). */
+  domesAt(now: number): ShelterDome[] {
+    return this.domes.filter((d) => d.from <= now && d.until > now);
+  }
+
+  /** Until when it's stunned (server ms; in the past if it isn't). */
+  get stunEnd(): number {
+    return this.stunnedUntil;
+  }
+
+  /**
+   * Stunned by a Rimshot, for `base` (a mob's) scaled down for a boss and
+   * halved for each stun in the last {@link RIMSHOT.drWindowMs}. Not while
+   * it already is. It stops where it stands, and every shape of its own on
+   * the floor comes off (a buster too: the interrupt); its next buster
+   * waits the stun out. Returns how long, or 0.
+   */
+  stun(now: number, base: number): number {
+    if (this.killed || this.sleeping || now < this.stunnedUntil) return 0;
+    this.stuns = this.stuns.filter((t) => t > now - RIMSHOT.drWindowMs);
+    const ms = stunMs(base * RIMSHOT.bossStunScale, this.stuns.length);
+    this.stuns.push(now);
+    this.stunnedUntil = now + ms;
+    for (const t of this.telegraphs)
+      if (t.mob === undefined && !t.lethal) this.cancelled.push(t.id);
+    this.telegraphs = this.telegraphs.filter(
+      (t) => t.mob !== undefined || t.lethal,
+    );
+    this.charging = null;
+    this.strideTo = null;
+    this.nextBusterAt = Math.max(this.nextBusterAt, now) + ms;
+    this.nextAttackAt = Math.max(this.nextAttackAt, now + ms);
+    // Said with its position (bossAt), so everyone sees it reel.
+    this.moved = true;
+    return ms;
+  }
+
+  /**
+   * Rimshot lands: a ground slam at `at` (where its Percussionist stood to
+   * wind it up). The boss, if its body is within RIMSHOT.radius, and every
+   * minion there take `RIMSHOT.damage` of a strike, now; each rolls its own
+   * stun at `chance`. How many it hit, and how many it stunned.
+   */
+  rimshot(
+    uid: string,
+    at: { x: number; z: number },
+    stats: HitStats,
+    chance: number,
+    now: number,
+  ): { hit: number; stunned: number } {
+    if (this.killed || this.sleeping) return { hit: 0, stunned: 0 };
+    const mult = RIMSHOT.damage * STRIKE_DAMAGE * this.damageMult(uid, now);
+    let hit = 0;
+    let stunned = 0;
+    for (const m of this.mobs?.within(at, RIMSHOT.radius, now - SEEN_LAG_MS) ??
+      []) {
+      this.mobs?.queue(uid, m, now, stats, mult, "rimshot");
+      hit++;
+      if (this.rand() < chance && this.mobs?.stun(m, now, RIMSHOT.stunMs))
+        stunned++;
+    }
+    const boss = this.seenAt(now);
+    if (
+      Math.hypot(boss.x - at.x, boss.z - at.z) <=
+      RIMSHOT.radius + TUNING.boss.radius
+    ) {
+      const { amount, crit } = hitDamage(stats, this.rand);
+      this.pending.push({
+        at: now,
+        uid,
+        damage: Math.max(1, Math.round(amount * mult)),
+        crit,
+        skill: "rimshot",
+      });
+      hit++;
+      if (this.rand() < chance && this.stun(now, RIMSHOT.stunMs)) stunned++;
+    }
+    return { hit, stunned };
+  }
+
+  /** Out of every dome: pushed by one growing, never standing in one. A
+   * charge that meets one stops at its edge. */
+  private keepOut(now: number) {
+    if (!this.domes.length) return;
+    const p = pushOutOfDomes(
+      this.domes,
+      this.at.x,
+      this.at.z,
+      TUNING.boss.radius,
+      now,
+      clampToWander,
+    );
+    if (Math.abs(p.x - this.at.x) < 1e-4 && Math.abs(p.z - this.at.z) < 1e-4)
+      return;
+    this.at = p;
+    this.moved = true;
+    this.charging = null;
   }
 
   /** How much harder `uid` hits right now (an in-tune Record Slinger). */
@@ -841,13 +996,22 @@ export class BossEngine {
         events.push({ t: "mobDown", mob: m.id, by: "", x: m.x, z: m.z });
       return events;
     }
+    this.domes = this.domes.filter((d) => d.until > now);
+    for (const id of this.cancelled)
+      events.push({ t: "resolve", id, hits: [] });
+    this.cancelled = [];
     if (this.mobs) events.push(...this.mobs.update(now, players, this.judge));
     this.checkTaunt(now, players, events);
     this.resolveDue(now, players, events);
     this.pickFocus(now, players);
-    this.walk(now, players);
+    // Stunned: it neither walks nor starts an attack (the enrage's clock
+    // runs on regardless).
+    const stunned = now < this.stunnedUntil;
+    if (!stunned) this.walk(now, players);
+    else this.lastMoveAt = now;
+    this.keepOut(now);
     this.startEnrage(now, players, events);
-    this.startAttacks(now, players, events);
+    if (!stunned) this.startAttacks(now, players, events);
     return events;
   }
 
@@ -1002,10 +1166,19 @@ export class BossEngine {
 
   private stepToward(ux: number, uz: number, step: number) {
     if (!(step > 0)) return;
-    const next = clampToWander({
+    const step1 = clampToWander({
       x: this.at.x + ux * step,
       z: this.at.z + uz * step,
     });
+    // Never into a dome: it walks up to the edge and no further.
+    const next = pushOutOfDomes(
+      this.domes,
+      step1.x,
+      step1.z,
+      TUNING.boss.radius,
+      this.clock,
+      clampToWander,
+    );
     if (
       Math.abs(next.x - this.at.x) > 1e-4 ||
       Math.abs(next.z - this.at.z) > 1e-4
@@ -1130,6 +1303,17 @@ export class BossEngine {
             return !!pos && covers(tg, pos.x, pos.z);
           });
           if (!inside) continue;
+        }
+        // Under a dome: none of it lands (a buster neither, nor Rattles).
+        const dome = shelterOf(this.domes, p, tg.hitAt);
+        if (dome) {
+          const r = tg.kind === "buster" ? this.rattledOf(p.uid, tg.hitAt) : 0;
+          const would = mitigatedHit(p, tg, this.buffs.get(p.uid) ?? [], {
+            mult: 1 + TUNING.rattled.perStack * r,
+            cap: r > 0 ? TUNING.rattled.maxHitFraction : MAX_HIT_FRACTION,
+          });
+          hits.push(shelteredHit(would, dome.by));
+          continue;
         }
         if (tg.kind === "buster") {
           const r = this.rattledOf(p.uid, tg.hitAt);
@@ -1462,31 +1646,12 @@ export function mitigatedHit(
   const reductions = [defReduction(p.def ?? 0), ...fromBuffs];
   const damage = Math.max(1, Math.round(mitigate(raw, reductions)));
   const absorbed = Math.max(0, Math.round(raw) - damage);
-  // What the Cymbrella took off on top of Def and the other buffs: their
-  // hit without it, less this one.
-  const cymbrella = activeBuffs(buffs, tg.hitAt).some(
-    (b) => b.id === "cymbrella",
-  );
-  const withoutCymbrella = cymbrella
-    ? Math.max(
-        1,
-        Math.round(
-          mitigate(raw, [
-            defReduction(p.def ?? 0),
-            ...buffReductions(
-              buffs.filter((b) => b.id !== "cymbrella"),
-              tg.hitAt,
-            ),
-          ]),
-        ),
-      )
-    : damage;
-  const blocked = Math.max(0, withoutCymbrella - damage);
   return {
     uid: p.uid,
     damage,
     absorbed,
-    blocked,
+    // Only a dome blocks (see shelteredHit).
+    blocked: 0,
     ...(tg.aimedAt === p.uid ? { aimed: true } : {}),
   };
 }

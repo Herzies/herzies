@@ -5,7 +5,8 @@ import {
   STRIKE_DAMAGE,
 } from "@herzies/shared/combat";
 import { TOWN_WALK_SPEED } from "@herzies/shared/town-net";
-import { BOSS_WANDER } from "@herzies/shared/boss-fight";
+import { BOSS_ENRAGE, BOSS_WANDER } from "@herzies/shared/boss-fight";
+import { RIMSHOT } from "@herzies/shared/skills";
 import { describe, expect, it } from "vitest";
 import {
   BossEngine,
@@ -389,6 +390,52 @@ describe("casts", () => {
     for (const h of hits) expect(h.mob).toBeDefined();
     expect(new Set(hits.map((h) => h.mob)).size).toBe(hits.length);
     expect(hits.slice(1).every((h) => h.skill === "shuffle")).toBe(true);
+  });
+
+  it("a Rimshot stun stops the boss, takes its shapes off the floor, and delays its buster", () => {
+    const e = engine(1e6, 1e6);
+    const players = [still("tank", 0, 6), still("dps", 3, 6)];
+    let t = T0;
+    let shape: Telegraph | undefined;
+    while (!shape && t < T0 + 20_000) {
+      t += 50;
+      shape = telegraphs(e.update(t, players)).find((x) => x.mob === undefined);
+    }
+    if (!shape) throw new Error("no shape");
+    const at = e.position;
+    const from = { x: at.x, z: at.z + TUNING.boss.radius + 0.8 };
+    const r = e.rimshot("tank", from, STATS, 1, t);
+    expect(r).toEqual({ hit: 1, stunned: 1 });
+    const stun = RIMSHOT.stunMs * RIMSHOT.bossStunScale;
+    expect(e.stunEnd).toBe(t + stun);
+    const ev = e.update(t + 50, players);
+    expect(ev).toContainEqual({ t: "resolve", id: shape.id, hits: [] });
+    // Stands, and starts nothing, while stunned.
+    const held = e.position;
+    for (let u = t + 100; u < t + stun - 50; u += 50)
+      expect(telegraphs(e.update(u, players))).toEqual([]);
+    expect(e.position.x).toBeCloseTo(held.x);
+    expect(e.position.z).toBeCloseTo(held.z);
+    // Again soon after: halved; while stunned: nothing.
+    expect(e.rimshot("tank", from, STATS, 1, t + 200).stunned).toBe(0);
+    const later = t + stun + 100;
+    expect(e.rimshot("tank", from, STATS, 1, later).stunned).toBe(1);
+    expect(e.stunEnd).toBe(later + stun / 2);
+  });
+
+  it("a Rimshot out of the boss's reach misses it", () => {
+    const e = engine(1e6, 1e6);
+    const at = e.position;
+    const far = { x: at.x, z: at.z + TUNING.boss.radius + RIMSHOT.radius + 0.5 };
+    expect(e.rimshot("tank", far, STATS, 1, T0)).toEqual({ hit: 0, stunned: 0 });
+  });
+
+  it("the enrage's pulse goes through a dome", () => {
+    const e = new BossEngine({ hp: 1e6, maxHp: 1e6, seed: 1, now: T0, lockedAt: T0 - BOSS_ENRAGE.hardMs });
+    e.addDome("tank", 0, 6, T0, 600_000);
+    const p = still("a", 0, 6);
+    const hits = run(e, T0, T0 + 20_000, [p]).flatMap((x) => (x.t === "resolve" ? x.hits : []));
+    expect(hits.some((h) => h.damage >= p.maxHp)).toBe(true);
   });
 
   it("lands a cast on the boss after the wave's flight", () => {

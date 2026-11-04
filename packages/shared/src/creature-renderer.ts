@@ -3125,7 +3125,7 @@ export function heldPoses(
           ay,
           -ax * Math.sin(a) + az * Math.cos(a),
         ],
-        [0, -STRIKE.wrist, 0],
+        swing.bend ?? [0, -STRIKE.wrist, 0],
       );
       const wrist = quatSlerp(
         [0, 0, 0, 1],
@@ -3994,8 +3994,9 @@ const CAST_SIDE = -1;
 /** How the hand moves: a sonic wave's palm thrust, a disc's throw, a
  * stick's strike, or a bare-handed jab ("punch", see PUNCH). A "bump"
  * moves no hand: the whole herzie lunges into what's in front of it (see
- * BUMP). */
-export type CastStyle = "cast" | "throw" | "strike" | "punch" | "bump";
+ * BUMP). A "slam" brings its stick down on the ground from overhead, on a
+ * timeline of its own (see SLAM): a Percussionist's Rimshot. */
+export type CastStyle = "cast" | "throw" | "strike" | "punch" | "bump" | "slam";
 
 /**
  * A disc thrown backhand, like a frisbee, on CAST's timeline (so it leaves
@@ -4030,7 +4031,9 @@ export function castHand(
         ? strikeHandOutward(phase, pitch)
         : style === "punch"
           ? punchHandOutward(phase, pitch)
-          : castHandOutward(phase, pitch);
+          : style === "slam"
+            ? slamHandOutward(phase)
+            : castHandOutward(phase, pitch);
   hand.dir[0] *= LIMB_SIDE[arm] ?? CAST_SIDE;
   return hand;
 }
@@ -4247,18 +4250,157 @@ export interface HeldSwing {
   weight: number;
   /** How far the wrist turns the stick across the body (see strikeWrist). */
   wrist: number;
+  /** Which way the stick is tipped off the arm's line (creature space: y
+   * down, front −z); a strike's is raised a little (STRIKE.wrist), a
+   * slam's goes from back over the head to down at the ground. */
+  bend?: V3;
 }
 
 /** The strike in `pose`, if one's under way. */
 export function heldSwing(
   pose: Pick<CreatureMotion, "castPhase" | "castStyle" | "castArm">,
 ): HeldSwing | undefined {
-  if (pose.castPhase === undefined || pose.castStyle !== "strike") return;
+  if (pose.castPhase === undefined) return;
+  if (pose.castStyle === "slam")
+    return {
+      arm: pose.castArm ?? CAST_ARM,
+      weight: castWeight(pose.castPhase, "slam"),
+      wrist: 0,
+      bend: slamBend(pose.castPhase),
+    };
+  if (pose.castStyle !== "strike") return;
   return {
     arm: pose.castArm ?? CAST_ARM,
     weight: castWeight(pose.castPhase),
     wrist: strikeWrist(pose.castPhase),
   };
+}
+
+/**
+ * A ground slam (Rimshot), as fractions of its own timeline (SLAM_SECONDS;
+ * it lands at `release`): the classic anticipation, action and follow-
+ * through. It crouches as the stick goes up over its head and back
+ * (`raised`), holds it there trembling with the charge (`hold`), springs a
+ * little up on its toes (`hop`), then whips it down at the ground in front
+ * of it, fast (`release`: contact), stays planted on it through the
+ * impact (`planted`) and comes back up.
+ */
+export const SLAM = {
+  raised: 0.42,
+  hold: 0.57,
+  hop: 0.655,
+  /** Contact: 0.8 s into a 1.15 s slam. */
+  release: 0.8 / 1.15,
+  planted: 0.8,
+  /** Where the hand is, about the shoulder (creature space, an arm on the
+   * +x side): high over the head and a little back, then down at the
+   * ground ahead. How far it reaches at each (arm lengths). */
+  // Up and out to its side, past its head: a herzie's head is most of
+  // it, so straight up would hide the stick behind it from the camera.
+  overhead: [0.62, -0.82, 0.18] as V3,
+  ground: [0.38, 0.72, -0.58] as V3,
+  overReach: 2.3,
+  groundReach: 2.1,
+  /** The stick off the arm's line: back over the head on the wind-up,
+   * down at the ground at the blow. */
+  bendBack: [0, -0.7, 0.35] as V3,
+  bendDown: [0, 0.45, -0.35] as V3,
+  /** The tremble while it's held up (fractions of a hand direction). */
+  tremble: 0.035,
+  /** The body: rocked back on the wind-up, thrown forward into the blow
+   * (fractions of the body scale). */
+  rock: 0.09,
+  lunge: 0.24,
+} as const;
+
+/** castHand's slam, for an arm on the +x side. */
+function slamHandOutward(phase: number): { dir: V3; reach: number } {
+  const rest: V3 = [1, 0, 0];
+  const over = norm(SLAM.overhead);
+  const ground = norm(SLAM.ground);
+  const mix = (a: V3, b: V3, t: number): V3 =>
+    norm(add(scale(a, 1 - t), scale(b, t)));
+  if (phase < SLAM.raised) {
+    const t = easeOut(phase / SLAM.raised);
+    return { dir: mix(rest, over, t), reach: 1 + (SLAM.overReach - 1) * t };
+  }
+  if (phase < SLAM.hop) {
+    // Held up, trembling with the charge, and climbing a touch higher as
+    // it rises on its toes.
+    const u = (phase - SLAM.raised) / (SLAM.hop - SLAM.raised);
+    const shake = Math.sin(phase * 260) * SLAM.tremble * ease(0, 0.4, u);
+    return {
+      dir: norm(add(over, [shake, -0.08 * u, 0.06 * u])),
+      reach: SLAM.overReach + 0.05 * u,
+    };
+  }
+  if (phase < SLAM.release) {
+    const t = easeIn((phase - SLAM.hop) / (SLAM.release - SLAM.hop));
+    return {
+      dir: mix(over, ground, t),
+      reach: SLAM.overReach + (SLAM.groundReach - SLAM.overReach) * t,
+    };
+  }
+  if (phase < SLAM.planted) return { dir: ground, reach: SLAM.groundReach };
+  const t = ease(SLAM.planted, 1, phase);
+  return {
+    dir: mix(ground, rest, t),
+    reach: SLAM.groundReach + (1 - SLAM.groundReach) * t,
+  };
+}
+
+/** The slam's stick, tipped off its arm's line at `phase` (see SLAM). */
+export function slamBend(phase: number): V3 {
+  const mix = (a: V3, b: V3, t: number): V3 =>
+    add(scale(a, 1 - t), scale(b, t));
+  const lifted: V3 = [0, -STRIKE.wrist, 0];
+  if (phase < SLAM.raised)
+    return mix(lifted, SLAM.bendBack, easeOut(phase / SLAM.raised));
+  if (phase < SLAM.hop) return SLAM.bendBack;
+  if (phase < SLAM.release)
+    return mix(
+      SLAM.bendBack,
+      SLAM.bendDown,
+      easeIn((phase - SLAM.hop) / (SLAM.release - SLAM.hop)),
+    );
+  if (phase < SLAM.planted) return SLAM.bendDown;
+  return mix(SLAM.bendDown, lifted, ease(SLAM.planted, 1, phase));
+}
+
+/** How far the whole body leans at `phase` through a slam, forward
+ * positive (fractions of the body scale): back on the wind-up, thrown
+ * forward into the blow, easing back after. */
+export function slamLean(phase: number): number {
+  if (phase < SLAM.hop) return -SLAM.rock * ease(0, SLAM.raised, phase);
+  if (phase < SLAM.release) {
+    const t = easeIn((phase - SLAM.hop) / (SLAM.release - SLAM.hop));
+    return -SLAM.rock + (SLAM.rock + SLAM.lunge) * t;
+  }
+  if (phase < SLAM.planted) return SLAM.lunge;
+  return SLAM.lunge * (1 - ease(SLAM.planted, 1, phase));
+}
+
+/**
+ * The whole body through a slam, for the host to apply (HerzieModel's
+ * body layer): how high it hops (world units) and how squashed (positive)
+ * or stretched (negative). It sinks into a crouch as the stick goes up,
+ * stretches up onto its toes, and lands the blow with a deep squash that
+ * springs back.
+ */
+export function slamBody(phase: number): { lift: number; squash: number } {
+  if (phase < SLAM.hold)
+    return { lift: 0, squash: 0.09 * ease(0.05, SLAM.raised, phase) };
+  if (phase < SLAM.release) {
+    const u = (phase - SLAM.hold) / (SLAM.release - SLAM.hold);
+    // Up off the crouch, highest just as the stick starts down, and back
+    // to the ground on the blow.
+    const lift = 0.22 * Math.sin(Math.min(1, u * 1.15) * Math.PI);
+    return { lift: Math.max(0, lift), squash: 0.09 * (1 - u * 3) };
+  }
+  // The blow: a deep squash, springing back with a little wobble.
+  const u = (phase - SLAM.release) / (1 - SLAM.release);
+  const k = Math.exp(-u * 5);
+  return { lift: 0, squash: 0.2 * k * Math.cos(u * 9) };
 }
 
 /** A body bump, on CAST's timeline: it rears back on the wind-up, hops
@@ -4338,7 +4480,10 @@ function castHandOutward(
 
 /** How much a cast takes over the pose at `phase`: in quickly, out as the
  * hand comes home, so it blends with the walk either side. */
-export function castWeight(phase: number): number {
+export function castWeight(phase: number, style?: CastStyle): number {
+  // A slam stays planted through its impact before letting go.
+  if (style === "slam")
+    return ease(0, 0.05, phase) * (1 - ease(0.86, 1, phase));
   return ease(0, 0.06, phase) * (1 - ease(0.75, 1, phase));
 }
 
@@ -4365,24 +4510,59 @@ function castDeltas(
     );
   }
   // Back on the draw, into the thrust, settling after (deeper for a
-  // punch: the body goes with the fist).
+  // punch: the body goes with the fist; a slam's has its own timing).
   const into = style === "punch" ? PUNCH.lean : CAST.lean;
   const lean =
-    phase < CAST.release
-      ? -CAST.rock * ease(0, CAST.drawn, phase) +
-        (CAST.rock + into) *
-          easeIn(Math.max(0, phase - CAST.drawn) / (CAST.release - CAST.drawn))
-      : into * (1 - ease(CAST.release, 1, phase));
+    style === "slam"
+      ? slamLean(phase)
+      : phase < CAST.release
+        ? -CAST.rock * ease(0, CAST.drawn, phase) +
+          (CAST.rock + into) *
+            easeIn(
+              Math.max(0, phase - CAST.drawn) / (CAST.release - CAST.drawn),
+            )
+        : into * (1 - ease(CAST.release, 1, phase));
   const shoulder = rig.shoulders[arm];
   const hand = castHand(phase, pitch, arm, style);
+  // A slam's other arm goes up too, for balance, and flings out on the
+  // blow.
+  const other = style === "slam" ? otherArm(arm) : null;
+  const otherShoulder = other ? rig.shoulders[other] : undefined;
   return spheres.map((sp): V3 => {
     if (isSceneFixed(sp.part) || isLeg(sp.part)) return [0, 0, 0];
     const leaning: V3 = [0, 0, -lean * s];
+    if (other && sp.part === other && otherShoulder) {
+      const length = Math.hypot(...sub(sp.center, otherShoulder));
+      const d = slamFreeArm(phase);
+      d[0] *= LIMB_SIDE[other] ?? -CAST_SIDE;
+      const at = add(otherShoulder, scale(d, length));
+      return add(sub(at, sp.center), leaning);
+    }
     if (sp.part !== arm || !shoulder) return leaning;
     const length = Math.hypot(...sub(sp.center, shoulder));
     const at = add(shoulder, scale(hand.dir, length * hand.reach));
     return add(sub(at, sp.center), leaning);
   });
+}
+
+/** The arm on the other side from `arm`. */
+function otherArm(arm: string): string {
+  return arm === "arm-l" ? "arm-r" : "arm-l";
+}
+
+/** A slam's free arm (for an arm on the +x side): out and up for balance
+ * on the wind-up, flung out and back on the blow, home after. */
+function slamFreeArm(phase: number): V3 {
+  const rest: V3 = [1, 0, 0];
+  const up = norm([0.75, -0.65, 0.1]);
+  const flung = norm([0.85, -0.2, 0.5]);
+  const mix = (a: V3, b: V3, t: number): V3 =>
+    norm(add(scale(a, 1 - t), scale(b, t)));
+  if (phase < SLAM.hop)
+    return mix(rest, up, easeOut(Math.min(1, phase / SLAM.raised)));
+  if (phase < SLAM.planted)
+    return mix(up, flung, ease(SLAM.hop, SLAM.release, phase));
+  return mix(flung, rest, ease(SLAM.planted, 1, phase));
 }
 
 /** The arm a herzie waves with: the one it doesn't cast with, so a wave
@@ -5731,7 +5911,10 @@ export function creaturePoseOffsets(
         )
       : null;
   const castArm = pose.castArm ?? CAST_ARM;
-  const cw = pose.castPhase !== undefined ? castWeight(pose.castPhase) : 0;
+  const cw =
+    pose.castPhase !== undefined
+      ? castWeight(pose.castPhase, pose.castStyle)
+      : 0;
   const drawPhase = Math.min(1, Math.max(0, pose.drawPhase ?? 0));
   const draw = drawPhase > 0 ? drawArmDeltas(base, drawPhase) : null;
   const waveArm = pose.waveArm ?? WAVE_ARM;
@@ -5780,7 +5963,11 @@ export function creaturePoseOffsets(
     // A cast takes the casting arm over; the lean adds to whatever else.
     const c = cast?.[i];
     if (c) {
-      const own = s.part === castArm && pose.castStyle !== "bump" ? cw : 0;
+      // The casting arm (and a slam's other one) is the cast's alone.
+      const owned =
+        (s.part === castArm && pose.castStyle !== "bump") ||
+        (pose.castStyle === "slam" && s.part === otherArm(castArm));
+      const own = owned ? cw : 0;
       x = x * (1 - own) + c[0] * cw;
       y = y * (1 - own) + c[1] * cw;
       z = z * (1 - own) + c[2] * cw;

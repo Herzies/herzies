@@ -64,7 +64,7 @@ export const CLASS_DEFS: Record<HerzieClass, ClassDef> = {
     role: "tank",
     equipment: ["worn-stick", "old-cymbal"],
     starterSkill: "cymbrella",
-    skills: ["cymbrella", "taunt"],
+    skills: ["cymbrella", "taunt", "rimshot"],
     attack: "melee",
   },
 };

@@ -146,6 +146,25 @@ describe("choosing a class", () => {
     );
   });
 
+  it("a Percussionist learns Rimshot at level 15: on choosing, or on reaching it", async () => {
+    const young = await player({ stage: 2, level: 14 });
+    await rpc("choose_class", { p_user_id: young, p_class: "percussionist" });
+    expect((await skills(young)).map((s) => s.skill_id)).not.toContain(
+      "rimshot",
+    );
+    await admin().from("herzies").update({ level: 15 }).eq("user_id", young);
+    expect((await skills(young)).map((s) => s.skill_id)).toContain("rimshot");
+    const grown = await player({ stage: 3, level: 20 });
+    await rpc("choose_class", { p_user_id: grown, p_class: "percussionist" });
+    expect((await skills(grown)).map((s) => s.skill_id)).toContain("rimshot");
+    // The others still learn theirs.
+    const dj = await player({ stage: 3, level: 20 });
+    await rpc("choose_class", { p_user_id: dj, p_class: "record_slinger" });
+    const djSkills = (await skills(dj)).map((s) => s.skill_id);
+    expect(djSkills).toContain("shuffle");
+    expect(djSkills).not.toContain("rimshot");
+  });
+
   it("refuses an unknown class", async () => {
     const userId = await player({ stage: 2, level: 12 });
     expect(

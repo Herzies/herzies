@@ -695,6 +695,9 @@ export type TowerMob = {
   k?: "spitter" | "lunger";
   /** An elite (1) or the Warden (2). */
   e?: 1 | 2;
+  /** Stunned until (server ms): it stands there. Older servers never
+   * send it, older apps ignore it. */
+  st?: number;
 };
 
 /** A Tower floor: its number, its mobs' level (and the herzie's, for the
@@ -732,7 +735,13 @@ export type ServerMessage =
   | { t: "boss"; hp: number; maxHp: number; phase: 1 | 2 | 3 }
   | ({ t: "telegraph" } & BossTelegraph)
   /** An attack landed (or was dodged): remove its shape. */
-  | { t: "resolve"; id: number; hits: number[] }
+  | {
+      t: "resolve";
+      id: number;
+      hits: number[];
+      /** Who a Cymbrella's dome sheltered from it (they took nothing). */
+      sheltered?: number[];
+    }
   /** You walked into mob `mob` and got hurt (your `hp` follows). Older
    * apps ignore it. */
   | { t: "bump"; mob: number }
@@ -785,7 +794,15 @@ export type ServerMessage =
    * `of` (the roster), every couple of seconds. */
   | { t: "tally"; score: number; rank: number; of: number }
   /** Where the boss stands, at server time `at`. */
-  | { t: "bossAt"; at?: number; x: number; z: number; yaw: number }
+  | {
+      t: "bossAt";
+      at?: number;
+      x: number;
+      z: number;
+      yaw: number;
+      /** Stunned until (server ms). Older apps ignore it. */
+      st?: number;
+    }
   /** The boss says something, shown over its head until `until`. */
   | { t: "say"; text: string; until: number }
   /** The raid changed: its stage, roster, revives, the boss's focus. */

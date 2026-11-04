@@ -1,6 +1,13 @@
 import * as THREE from "three";
 import { describe, expect, it } from "vitest";
-import { buildCreatureModel, type Sphere } from "../creature-renderer.js";
+import {
+  buildCreatureModel,
+  castHand,
+  SLAM,
+  type Sphere,
+  slamBody,
+} from "../creature-renderer.js";
+import { SKILL_DEFS } from "../skills.js";
 import { DEFAULT_THREAD_CONFIG } from "../thread-physics.js";
 import { WALK_SPEED } from "./animation.js";
 import {
@@ -14,6 +21,8 @@ import {
   MODEL_SCALE,
   SHEATHE_DELAY,
   SHEATHE_SECONDS,
+  SLAM_RELEASE_SECONDS,
+  SLAM_SECONDS,
   waveHop,
 } from "./HerzieModel.js";
 
@@ -1022,5 +1031,75 @@ describe("waving again mid-wave", () => {
     expect(m.emoting).toBe(true);
     run(m, 1.7);
     expect(m.emoting).toBe(false);
+  });
+});
+
+describe("a slam (Rimshot)", () => {
+  const DRUMMER = {
+    seed: "model-test",
+    stage: 3,
+    equipped: { main_hand: "worn-stick", off_hand: "old-cymbal" },
+  };
+
+  it("lands once, at the end of Rimshot's wind-up, and takes its own time", () => {
+    const h = new HerzieModel(DRUMMER);
+    h.cast(0, { style: "slam" });
+    let landed = 0;
+    let at = -1;
+    let t = 0;
+    for (; t < SLAM_SECONDS + 0.2; t += 1 / 120) {
+      h.update(1 / 120, 0);
+      if (h.released) {
+        landed++;
+        at = t;
+      }
+      if (!h.casting) break;
+    }
+    expect(landed).toBe(1);
+    expect(at).toBeCloseTo(SLAM_RELEASE_SECONDS, 1);
+    expect(SLAM_RELEASE_SECONDS * 1000).toBeCloseTo(
+      SKILL_DEFS.rimshot.castMs ?? 0,
+    );
+    expect(t).toBeGreaterThan(SLAM_SECONDS - 0.02);
+  });
+
+  it("leaves the other moves' timing alone", () => {
+    const h = new HerzieModel(DRUMMER);
+    h.cast(0, { style: "slam" });
+    h.update(0.1, 0);
+    h.cast(0, { style: "strike" });
+    let released = -1;
+    for (let t = 0; t < CAST_SECONDS + 0.1; t += 1 / 120) {
+      h.update(1 / 120, 0);
+      if (h.released) released = t;
+    }
+    expect(released).toBeCloseTo(CAST_RELEASE_SECONDS, 1);
+    expect(h.casting).toBe(false);
+  });
+
+  it("raises the stick overhead, then drives it down in front", () => {
+    // Creature space: y down, front −z.
+    const up = castHand(SLAM.hold - 0.01, 0, "arm-l", "slam").dir;
+    expect(up[1]).toBeLessThan(-0.6);
+    const down = castHand(SLAM.release + 0.01, 0, "arm-l", "slam").dir;
+    expect(down[1]).toBeGreaterThan(0.5);
+    expect(down[2]).toBeLessThan(-0.4);
+  });
+
+  it("crouches, rises on its toes, and lands the blow with a squash", () => {
+    expect(slamBody(SLAM.raised).squash).toBeGreaterThan(0.05);
+    expect(slamBody((SLAM.hold + SLAM.hop) / 2).lift).toBeGreaterThan(0.1);
+    expect(slamBody(SLAM.release + 0.005).squash).toBeGreaterThan(0.15);
+    expect(Math.abs(slamBody(0.999).squash)).toBeLessThan(0.03);
+  });
+
+  it("can be cut short", () => {
+    const h = new HerzieModel(DRUMMER);
+    h.cast(0, { style: "slam" });
+    h.update(0.3, 0);
+    h.cancelCast();
+    expect(h.casting).toBe(false);
+    h.update(0.6, 0);
+    expect(h.released).toBe(false);
   });
 });

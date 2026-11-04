@@ -1,11 +1,14 @@
 import { useEffect, useRef } from "react";
 import { cn } from "../../lib/utils";
+import { domeOver } from "./combat/domes";
 import { bossFight } from "./combat/fight";
 import { buffOn, skills } from "./combat/skills";
+import { pendingSlam } from "./combat/slams";
+import { townSave } from "./runtime";
 
 /**
- * What your buffs are doing right now, beside the hotbar: a Cymbrella
- * you're under (how much less damage, the seconds left) and Rattled from
+ * What your buffs are doing right now, beside the hotbar: a Cymbrella's
+ * dome you stand in (nothing gets through; the seconds left) and Rattled from
  * the boss's busters (stacks, seconds left: time to hand the boss over),
  * a Haste (how much faster, the seconds left), and a Shuffle (how many
  * bounces, the seconds left).
@@ -30,12 +33,12 @@ export function SkillHud({
     const step = () => {
       const now = performance.now();
       if (buffBox.current) {
-        const b = buffOn(bossFight.you, "cymbrella", now);
-        buffBox.current.style.display = b ? "" : "none";
-        const text = b
-          ? `Cymbrella −${Math.round(b.value * 100)}% · ${Math.ceil((b.until - now) / 1000)}s`
-          : "";
-        if (b && buffBox.current.textContent !== text)
+        // Standing in a Cymbrella's dome (anyone's): untouchable, for so
+        // long.
+        const d = domeOver(townSave.x, townSave.z, now);
+        buffBox.current.style.display = d ? "" : "none";
+        const text = d ? `Dome · ${Math.ceil((d.until - now) / 1000)}s` : "";
+        if (d && buffBox.current.textContent !== text)
           buffBox.current.textContent = text;
       }
       if (hasteBox.current) {
@@ -130,18 +133,32 @@ export function CastBar({ className }: { className?: string }) {
       if (you !== null && !(mine && now < mine.until))
         for (const c of skills.channels.values())
           if (c.target === you && now < c.until) saving = c;
-      const ch = mine && now < mine.until ? mine : saving;
-      const kind = ch === mine && ch ? "mine" : ch ? "saving" : "";
+      // Your Rimshot winding up comes before either.
+      const slam = pendingSlam(you ?? -1);
+      const wind =
+        slam && now < slam.dueAt
+          ? { from: slam.castAt, until: slam.dueAt }
+          : undefined;
+      const ch = wind ?? (mine && now < mine.until ? mine : saving);
+      const kind = wind
+        ? "slam"
+        : ch === mine && ch
+          ? "mine"
+          : ch
+            ? "saving"
+            : "";
       if (box.current && label.current && fill.current) {
         box.current.style.display = ch ? "" : "none";
         if (kind !== shown) {
           shown = kind;
           label.current.textContent =
-            kind === "mine"
-              ? "Resurrect · hold still"
-              : kind === "saving"
-                ? "A Bard is bringing you back…"
-                : "";
+            kind === "slam"
+              ? "Rimshot"
+              : kind === "mine"
+                ? "Resurrect · hold still"
+                : kind === "saving"
+                  ? "A Bard is bringing you back…"
+                  : "";
           box.current.dataset.kind = kind;
         }
         if (ch) fill.current.style.width = `${progress(ch, now) * 100}%`;

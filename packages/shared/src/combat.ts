@@ -138,6 +138,136 @@ export function discChain<T>(
 }
 
 // ---------------------------------------------------------------------------
+// The Cymbrella's dome: a shelter that stays where it's cast. It grows from
+// around its caster to its full size, shoving every enemy out before it;
+// while it stands, no enemy may enter, and nobody inside is hurt. The
+// server judges it; the client draws it from the same numbers.
+
+export const DOME = {
+  /** Its full radius on the ground, world units. */
+  radius: 4,
+  /** How big it starts (round the caster), and how long it takes to grow. */
+  startRadius: 0.8,
+  growMs: 400,
+} as const;
+
+/** A dome standing at (x, z) from `from` to `until` (server ms). */
+export type Dome = { x: number; z: number; from: number; until: number };
+
+/** How far a dome reaches at `t`: easing out from its start to its full
+ * size (quick at first, settling in), and 0 before or after it stands. */
+export function domeRadiusAt(d: Dome, t: number): number {
+  if (t < d.from || t >= d.until) return 0;
+  const u = Math.min(1, (t - d.from) / DOME.growMs);
+  const e = 1 - (1 - u) ** 3;
+  return DOME.startRadius + (DOME.radius - DOME.startRadius) * e;
+}
+
+/** The dome that shelters (x, z) at `t`, if any. */
+export function insideDome<D extends Dome>(
+  domes: readonly D[],
+  x: number,
+  z: number,
+  t: number,
+): D | null {
+  for (const d of domes) {
+    const r = domeRadiusAt(d, t);
+    if (r > 0 && Math.hypot(x - d.x, z - d.z) <= r) return d;
+  }
+  return null;
+}
+
+/**
+ * Where a body `radius` wide at (x, z) must stand at `t` to be outside
+ * every dome: straight out from the dome it's in, to just past its edge
+ * (one dead on the centre goes out along +z). `bound`, if given, keeps it
+ * where it may stand (the arena, the boss's wander circle). Where that
+ * can't be had straight out (against a wall, or between two domes), it's
+ * the nearest spot round the domes' edges that's both; and if there's none
+ * at all, staying out of the dome wins, so the two never fight over it.
+ */
+export function pushOutOfDomes(
+  domes: readonly Dome[],
+  x: number,
+  z: number,
+  radius: number,
+  t: number,
+  bound?: (p: { x: number; z: number }) => { x: number; z: number },
+): { x: number; z: number } {
+  const live = domes.filter((d) => domeRadiusAt(d, t) > 0);
+  const reachOf = (d: Dome) => domeRadiusAt(d, t) + radius;
+  const clear = (p: { x: number; z: number }) =>
+    live.every((d) => Math.hypot(p.x - d.x, p.z - d.z) >= reachOf(d) - 1e-6);
+  const kept = (p: { x: number; z: number }) => {
+    if (!bound) return true;
+    const b = bound(p);
+    return Math.hypot(b.x - p.x, b.z - p.z) < 1e-6;
+  };
+  const here = { x, z };
+  if (clear(here)) return here;
+  // Straight out of the dome it's deepest in.
+  let worst = live[0];
+  let depth = Number.NEGATIVE_INFINITY;
+  for (const d of live) {
+    const k = reachOf(d) - Math.hypot(x - d.x, z - d.z);
+    if (k > depth) {
+      depth = k;
+      worst = d;
+    }
+  }
+  const out = edgePoint(worst, reachOf(worst), x, z);
+  if (clear(out) && kept(out)) return out;
+  // Else the nearest spot round any dome's edge that's clear of them all
+  // and in bounds; failing bounds, clear of them all.
+  let best: { x: number; z: number } | null = null;
+  let bestD = Number.POSITIVE_INFINITY;
+  let loose: { x: number; z: number } | null = null;
+  let looseD = Number.POSITIVE_INFINITY;
+  for (const d of live) {
+    const reach = reachOf(d);
+    for (let i = 0; i < 48; i++) {
+      const a = (i / 48) * Math.PI * 2;
+      const p = {
+        x: d.x + Math.sin(a) * (reach + 1e-3),
+        z: d.z + Math.cos(a) * (reach + 1e-3),
+      };
+      if (!clear(p)) continue;
+      const dist = Math.hypot(p.x - x, p.z - z);
+      if (dist < looseD) {
+        looseD = dist;
+        loose = p;
+      }
+      if (dist < bestD && kept(p)) {
+        bestD = dist;
+        best = p;
+      }
+    }
+  }
+  return best ?? loose ?? out;
+}
+
+/** Just past `d`'s edge (`reach` out), straight out through (x, z). */
+function edgePoint(
+  d: { x: number; z: number },
+  reach: number,
+  x: number,
+  z: number,
+): { x: number; z: number } {
+  const dx = x - d.x;
+  const dz = z - d.z;
+  const dist = Math.hypot(dx, dz);
+  const ux = dist > 1e-6 ? dx / dist : 0;
+  const uz = dist > 1e-6 ? dz / dist : 1;
+  return { x: d.x + ux * (reach + 1e-3), z: d.z + uz * (reach + 1e-3) };
+}
+
+/** A stun's length on a target stunned `recent` times in the
+ * diminishing-returns window: halved each time. */
+export function stunMs(base: number, recent: number): number {
+  return base / 2 ** Math.max(0, recent);
+}
+
+// ---------------------------------------------------------------------------
 // Melee: a Percussionist's stick, or an unarmed herzie's punch or body slam. Up
 // close, ahead of it, and only at the moment of contact: the client tells
 // the server when it lands, so there's no flight time.

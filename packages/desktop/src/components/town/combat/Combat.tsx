@@ -4,6 +4,7 @@ import {
   CAST_INTERVAL_MS,
   type HerzieStats,
   hitDamage,
+  RIMSHOT,
   SKILL_DEFS,
   shuffleBounces,
   shuffleScale,
@@ -18,6 +19,7 @@ import {
   healTarget,
   meleeDamage,
   meleeReaches,
+  STRIKE_DAMAGE,
   WAVE_HAND_HEIGHT,
 } from "@herzies/shared/combat";
 import type { HerzieModel } from "@herzies/shared/gl";
@@ -37,15 +39,19 @@ import {
   sfxDiscClink,
   sfxDiscThrow,
   sfxDiscTurn,
+  sfxDomeUp,
   sfxHaste,
   sfxHealBolt,
   sfxImpact,
   sfxMeleeHit,
+  sfxRimshotSlam,
+  sfxRimshotWindup,
+  sfxStun,
   sfxSwing,
   sfxTaunt,
 } from "../sfx";
 import { getVitals, useVitals } from "../vitals";
-import { pushDamageNumber } from "./DamageNumbers";
+import { pushDamageNumber, pushStunLabel } from "./DamageNumbers";
 import { liveDummies } from "./Dummies";
 import {
   DISC_ARM,
@@ -70,9 +76,17 @@ import {
   skills,
   startCooldown,
 } from "./skills";
+import {
+  beginSlam,
+  cancelSlam,
+  inSlamReach,
+  landSlam,
+  pendingSlam,
+} from "./slams";
 import { slashField } from "./slashes";
 import { healing, stance, toggleStance, useStanceSender } from "./stance";
-import { CAST_BUFFER_MS, combat, setCombat, shake } from "./state";
+import { CAST_BUFFER_MS, combat, kick, setCombat, shake } from "./state";
+import { stuns } from "./stuns";
 import { assistTarget, type Vec3, WAVE, waveField } from "./waves";
 
 /** How soon after one cast the next may start, in seconds: the hand is
@@ -84,6 +98,12 @@ const AIM_RANGE = 60;
 const HIT_STOP_SCALE = 0.12;
 const HIT_STOP_MS = 65;
 const HANDS: readonly DiscHand[] = ["held-l", "held-r"];
+/** A Rimshot's hold on the slam (a plain strike holds 70 ms): the
+ * heaviest blow there is, so it holds the longest. */
+const SLAM_HITSTOP_S = 0.12;
+/** How long a Rimshot pressed mid-swing is kept for, waiting out that
+ * swing (any other press: CAST_BUFFER_MS). */
+const RIMSHOT_QUEUE_MS = 1_000;
 
 const typing = (t: EventTarget | null) => {
   const el = t as HTMLElement | null;
@@ -260,6 +280,13 @@ export function Combat({
     dummy: null as DummyState | null,
     /** The ally the heal bolt under way goes to (an entity id). */
     bolt: null as number | null,
+    /** A Rimshot winding up: its stun chance, when it was pressed, and its
+     * snare roll (cut if the wind-up is). */
+    rimshot: null as null | {
+      chance: number;
+      at: number;
+      roll: { stop(): void };
+    },
     /** A heal bolt under way with nobody locked: it flies down the aim,
      * for show (it heals no one). */
     freeHeal: false,
@@ -304,6 +331,49 @@ export function Combat({
     if (crit) combat.slowUntil = now + HIT_STOP_MS;
     sfxImpact(crit ? "crit" : "hit");
     return crit ? "crit" : "hit";
+  };
+
+  /**
+   * A Rimshot's slam, as the stick strikes the ground: the shockwave and the
+   * rest of the show (SlamVFX), a heavy hold on the contact, the camera's
+   * jolt and the boom. On the training grounds every dummy within reach
+   * takes twice a strike, rocked back from the middle, and rolls its own
+   * stun; in a fight the server judges it all (the room hears of hits and
+   * stuns with its next word).
+   */
+  const slamLands = (herzie: HerzieModel, chance: number, now: number) => {
+    const { chest, held } = v.current;
+    herzie.root.getWorldPosition(chest);
+    const centre = { x: chest.x, z: chest.z };
+    const hand = herzie.handWorldPosition(held);
+    landSlam(bossFight.you ?? -1, [hand.x, hand.y, hand.z], now);
+    let stunned = false;
+    let struck = false;
+    for (const d of liveDummies) {
+      const radius = DUMMY.radius * (d.size ?? 1);
+      if (!inSlamReach(centre, d.x, d.z, radius)) continue;
+      struck = true;
+      const toward = flatToward(centre, d);
+      const point: Vec3 = [
+        d.x - toward[0] * radius,
+        Math.min(DUMMY.chest, 0.6),
+        d.z - toward[2] * radius,
+      ];
+      myHit(d, toward, point, RIMSHOT.damage * STRIKE_DAMAGE, now);
+      waveField.burst(point, toward, "hit");
+      // Practice: each rolls its own stun. A mob's is the server's.
+      if (d.mob === undefined && !bossFight.on && Math.random() < chance) {
+        stuns.dummies.set(d.key, now + RIMSHOT.stunMs);
+        d.frozenUntil = Math.max(d.frozenUntil, now + 120);
+        pushStunLabel([d.x, (d.y ?? 0) + DUMMY.chest + 0.2, d.z]);
+        stunned = true;
+      }
+    }
+    if (stunned) sfxStun();
+    sfxRimshotSlam();
+    herzie.hitstop(SLAM_HITSTOP_S);
+    kick(stunned || struck ? 0.34 : 0.26);
+    shake(stunned ? 0.32 : 0.22);
   };
 
   /** What the discs in flight do, whoever threw them. */
@@ -443,7 +513,10 @@ export function Combat({
     const mine = queued
       ? skills.list.find((s) => s.id === queued.id)
       : undefined;
-    if (queued && now - queued.at >= CAST_BUFFER_MS) skills.queued = null;
+    // A Rimshot's press is kept a while, so one pressed mid-swing can wait
+    // that swing out; any other press only a moment.
+    const keptFor = mine?.id === "rimshot" ? RIMSHOT_QUEUE_MS : CAST_BUFFER_MS;
+    if (queued && now - queued.at >= keptFor) skills.queued = null;
     // A taunt does nothing outside a fight, nor a resurrect in a fight
     // that isn't on (the lobby, the Tower): say so rather than spend the
     // press. Outside a fight, a resurrect brings back anyone knocked out.
@@ -470,8 +543,11 @@ export function Combat({
       herzie &&
       queued &&
       mine &&
-      now - queued.at < CAST_BUFFER_MS &&
-      skillReady(mine.id, now)
+      now - queued.at < keptFor &&
+      skillReady(mine.id, now) &&
+      // A Rimshot waits out a swing already going: its stick's landing
+      // must be its own, not that swing's.
+      !(mine.id === "rimshot" && herzie.casting)
     ) {
       skills.queued = null;
       const seq = startCooldown(mine.id, now);
@@ -509,15 +585,41 @@ export function Combat({
         setBuff(bossFight.you ?? -1, {
           buff: mine.id,
           value:
-            mine.id === "taunt"
+            mine.id === "taunt" || mine.id === "cymbrella"
               ? 1
               : mine.id === "shuffle"
                 ? shuffleBounces(mine.level)
                 : skillValue(mine.id, mine.level),
-          until: now + (SKILL_DEFS[mine.id].durationMs ?? 0),
+          // A Cymbrella's dome stands for its value in seconds.
+          until:
+            now +
+            (mine.id === "cymbrella"
+              ? skillValue("cymbrella", mine.level) * 1000
+              : (SKILL_DEFS[mine.id].durationMs ?? 0)),
         });
       }
-      if (bossFight.on || mine.id === "resurrect") {
+      if (mine.id === "rimshot") {
+        // The wind-up: planted, the stick going up, the snare rolling. It
+        // lands when the stick strikes the ground (below), on the server's
+        // clock as on ours: sent now, landed there at the wind-up's end.
+        const castMs = SKILL_DEFS.rimshot.castMs ?? 0;
+        a.rimshot = {
+          chance: skillValue("rimshot", mine.level),
+          at: now,
+          roll: sfxRimshotWindup(castMs / 1000),
+        };
+        a.castAt = now;
+        combat.rootedUntil = now + castMs;
+        herzie.cast(0, { style: "slam" });
+        beginSlam(bossFight.you ?? -1, chest.x, chest.z, now, (out) => {
+          const p = herzie.handWorldPosition(v.current.held);
+          out[0] = p.x;
+          out[1] = p.y;
+          out[2] = p.z;
+          return out;
+        });
+        if (bossFight.on) townNet().sendSkill(mine.id, seq, yaw, pitch);
+      } else if (bossFight.on || mine.id === "resurrect") {
         townNet().sendSkill(mine.id, seq, yaw, pitch);
       } else if (mine.id === "backspin") {
         // Practice: the discs hit the dummies, for their share of a wave.
@@ -539,8 +641,9 @@ export function Combat({
       }
       if (mine.id === "taunt") sfxTaunt();
       else if (mine.id === "haste") sfxHaste();
-      else sfxCast();
-      shake(0.15);
+      else if (mine.id === "cymbrella") sfxDomeUp();
+      else if (mine.id !== "rimshot") sfxCast();
+      if (mine.id !== "rimshot") shake(mine.id === "cymbrella" ? 0.22 : 0.15);
     }
 
     // --- Casting: a wave from the hand; a Record Slinger's disc thrown
@@ -578,7 +681,10 @@ export function Combat({
     if (herzie) {
       const queued = now - combat.queuedAt < CAST_BUFFER_MS;
       const free = discs ? nextHand(discField, herzie) : null;
+      // Nothing else starts while a Rimshot winds up and lands.
+      const slamming = herzie.casting && herzie.castMotion === "slam";
       const ready =
+        !slamming &&
         ((now - a.castAt) / 1000) * speed >= CAST_INTERVAL &&
         (!discs || free !== null);
       if (combat.on && (queued || combat.fireHeld) && ready && discs && free) {
@@ -628,8 +734,30 @@ export function Combat({
         }
         combat.casts = (combat.casts + 1) & 0xffff;
       }
+      // A Rimshot: the stick strikes the ground and it lands; or the server
+      // cut the wind-up short (knocked out), and it never does.
+      const r = a.rimshot;
+      if (r && herzie.released && herzie.castMotion === "slam") {
+        slamLands(herzie, r.chance, now);
+        a.rimshot = null;
+      } else if (
+        r &&
+        (!pendingSlam(bossFight.you ?? -1) ||
+          now - r.at > (SKILL_DEFS.rimshot.castMs ?? 0) + 800)
+      ) {
+        herzie.cancelCast();
+        combat.rootedUntil = Number.NEGATIVE_INFINITY;
+        r.roll.stop();
+        cancelSlam(bossFight.you ?? -1);
+        a.rimshot = null;
+      }
       // The blow lands: whatever's in front of it, in reach, is hit.
-      if (herzie.released && combat.on && melee) {
+      else if (
+        herzie.released &&
+        combat.on &&
+        melee &&
+        herzie.castMotion !== "slam"
+      ) {
         herzie.root.getWorldPosition(chest);
         const yaw = herzie.heading;
         const from = { x: chest.x, z: chest.z };

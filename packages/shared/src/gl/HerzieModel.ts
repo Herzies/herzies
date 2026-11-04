@@ -49,9 +49,11 @@ import {
   heldPoses,
   heldSwing,
   primitiveShading,
+  SLAM,
   type Sphere,
   schemeShades,
   schemeSpan,
+  slamBody,
   WAVE_ARM,
   WAVE_HOLD,
   WAVE_SWING_PHASE,
@@ -225,6 +227,10 @@ export function waveHop(t: number): { lift: number; squash: number } {
 export const CAST_SECONDS = 0.4;
 /** How soon after cast() the wave leaves the hand, in seconds. */
 export const CAST_RELEASE_SECONDS = CAST_SECONDS * CAST.release;
+/** A slam (Rimshot) takes longer: a wind-up the length of its cast, the
+ * blow at SLAM.release, and the herzie back up after. */
+export const SLAM_SECONDS = 1.15;
+export const SLAM_RELEASE_SECONDS = SLAM_SECONDS * SLAM.release;
 /** How long a blow that lands holds still (see hitstop), in seconds: long
  * enough for the eye to catch the contact, short enough not to drag. */
 export const HITSTOP_SECONDS = 0.07;
@@ -686,6 +692,10 @@ export class HerzieModel {
   /** The arm this cast is with, and how it moves (a disc is thrown). */
   private castArmPart: string = CAST_ARM;
   private castStyle: CastStyle = "cast";
+  /** How long the cast under way takes, and when it lets go (seconds):
+   * its style's (a slam's are its own). */
+  private castLength = CAST_SECONDS;
+  private castRelease = CAST_RELEASE_SECONDS;
   /** Seconds into an emote; undefined when none is playing. How it plays:
    * a wave of `waveArmPart`, or, with no arms, a spin hop. */
   private emoteTime: number | undefined;
@@ -1122,6 +1132,9 @@ export class HerzieModel {
     this.castArmPart =
       opts.arm && this.armAt[opts.arm] >= 0 ? opts.arm : CAST_ARM;
     this.castStyle = opts.style ?? "cast";
+    const slam = this.castStyle === "slam";
+    this.castLength = slam ? SLAM_SECONDS : CAST_SECONDS;
+    this.castRelease = slam ? SLAM_RELEASE_SECONDS : CAST_RELEASE_SECONDS;
     this.released = false;
     this.stopFor = 0;
     // Casting with its gear still on its back: it's drawn on the way, in
@@ -1129,7 +1142,7 @@ export class HerzieModel {
     if (this.holdsProps && this.drawPhase < 1) {
       this.drawRate = Math.max(
         1 / DRAW_SECONDS,
-        (1 - this.drawPhase) / CAST_RELEASE_SECONDS,
+        (1 - this.drawPhase) / this.castRelease,
       );
     }
   }
@@ -1139,6 +1152,14 @@ export class HerzieModel {
   hitstop(seconds = HITSTOP_SECONDS): void {
     if (this.castTime !== undefined)
       this.stopFor = Math.max(this.stopFor, seconds);
+  }
+
+  /** Stops the cast under way where it is (a slam cut short): back to
+   * rest, nothing let go. */
+  cancelCast(): void {
+    this.castTime = undefined;
+    this.released = false;
+    this.stopFor = 0;
   }
 
   /** Held still on a blow that landed (see hitstop). */
@@ -1151,7 +1172,7 @@ export class HerzieModel {
   get castPhase(): number | undefined {
     return this.castTime === undefined
       ? undefined
-      : this.castTime / CAST_SECONDS;
+      : this.castTime / this.castLength;
   }
 
   /** How the cast under way (or the last one) moves. */
@@ -1941,13 +1962,10 @@ export class HerzieModel {
     }
     const before = this.castTime;
     this.castTime += dt * this.castRate;
-    if (
-      before < CAST_RELEASE_SECONDS &&
-      this.castTime >= CAST_RELEASE_SECONDS
-    ) {
+    if (before < this.castRelease && this.castTime >= this.castRelease) {
       this.released = true;
     }
-    if (this.castTime >= CAST_SECONDS) this.castTime = undefined;
+    if (this.castTime >= this.castLength) this.castTime = undefined;
   }
 
   /**
@@ -1960,7 +1978,7 @@ export class HerzieModel {
     which: "arm-l" | "arm-r" = this.castArmPart as "arm-l" | "arm-r",
   ): THREE.Vector3 {
     const casting = this.castTime !== undefined && which === this.castArmPart;
-    const phase = casting ? (this.castTime as number) / CAST_SECONDS : 1;
+    const phase = casting ? (this.castTime as number) / this.castLength : 1;
     const { dir } = castHand(
       phase,
       this.castPitch,
@@ -1997,7 +2015,7 @@ export class HerzieModel {
   private posePopHand(phase: number | undefined) {
     const pop = this.popHand;
     if (!pop) return;
-    const w = phase === undefined ? 0 : castWeight(phase);
+    const w = phase === undefined ? 0 : castWeight(phase, this.castStyle);
     pop.mesh.visible = w > 0.01;
     if (!pop.mesh.visible || phase === undefined) return;
     const { head, radius } = pop;
@@ -2035,7 +2053,9 @@ export class HerzieModel {
       dangle: this.dangle,
       sitWeight: this.sitWeight,
       castPhase:
-        this.castTime === undefined ? undefined : this.castTime / CAST_SECONDS,
+        this.castTime === undefined
+          ? undefined
+          : this.castTime / this.castLength,
       castPitch: this.castPitch,
       castArm: this.castArmPart,
       castStyle: this.castStyle,
@@ -2057,7 +2077,7 @@ export class HerzieModel {
     this.posePopHand(
       this.castTime === undefined || this.castStyle === "bump"
         ? undefined
-        : this.castTime / CAST_SECONDS,
+        : this.castTime / this.castLength,
     );
     // Held props (class gear) turn as they're drawn and with their arm; a
     // solid's axis with them.
@@ -2172,6 +2192,12 @@ export class HerzieModel {
       this.jumpHeight,
       su === undefined ? 0 : SPIN_HOP_HEIGHT * 4 * su * (1 - su),
     );
+    // A slam: down into a crouch, up on its toes, and the blow's squash.
+    if (this.castTime !== undefined && this.castStyle === "slam") {
+      const h = slamBody(this.castTime / this.castLength);
+      hop = Math.max(hop, h.lift * (1 - this.sitWeight));
+      squash += h.squash;
+    }
     // Waving without legs (stage 2): a little hop. Not mid-jump, walking
     // (it hops already) or seated.
     if (

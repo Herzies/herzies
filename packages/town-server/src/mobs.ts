@@ -27,9 +27,16 @@ import {
   hitDamage,
   MELEE_REACH,
   meleeReaches,
+  pushOutOfDomes,
+  stunMs,
   WAVE_HAND_HEIGHT,
 } from "@herzies/shared/combat";
-import { type Buff, SHUFFLE_REACH, shuffleScale } from "@herzies/shared/skills";
+import {
+  type Buff,
+  RIMSHOT,
+  SHUFFLE_REACH,
+  shuffleScale,
+} from "@herzies/shared/skills";
 import {
   attackTokens,
   CONTACT,
@@ -58,6 +65,9 @@ import {
   type BossPlayer,
   covers,
   mitigatedHit,
+  type ShelterDome,
+  shelteredHit,
+  shelterOf,
   type Telegraph,
   TUNING,
 } from "./boss";
@@ -122,6 +132,9 @@ export type Mob = {
   trail: { t: number; x: number; z: number }[];
   /** Not before this (server ms): a minion just called stands a beat. */
   wakeAt?: number;
+  /** Stunned until (server ms), and when its recent stuns began. */
+  stunUntil?: number;
+  stuns?: number[];
 };
 
 type PendingHit = {
@@ -214,6 +227,11 @@ export class MobPack {
   minWindupMs: number = MIN_WINDUP_MS;
   maxShapes = Number.POSITIVE_INFINITY;
   taunter: (() => string | null) | null = null;
+  /** The Cymbrella domes standing (the host's): no mob enters one, and
+   * no swing of theirs lands on anyone inside. */
+  domes: () => readonly ShelterDome[] = () => [];
+  /** Shapes a stun took off the floor, to say so next update. */
+  private cancelled: number[] = [];
 
   /** When the last update ran (server ms). */
   get now(): number {
@@ -232,7 +250,7 @@ export class MobPack {
   wireChanged(): TowerMob[] {
     const out: TowerMob[] = [];
     for (const w of this.wire()) {
-      const key = `${w.x},${w.z},${w.yaw},${w.hp},${w.s}`;
+      const key = `${w.x},${w.z},${w.yaw},${w.hp},${w.s},${w.st ?? 0}`;
       if (this.sent.get(w.id) === key) continue;
       this.sent.set(w.id, key);
       out.push(w);
@@ -251,6 +269,7 @@ export class MobPack {
       s: m.state === "windup" ? 1 : 0,
       ...(m.kind !== "brute" ? { k: m.kind } : {}),
       ...(m.rank ? { e: m.rank } : {}),
+      ...((m.stunUntil ?? 0) > this.lastAt ? { st: m.stunUntil } : {}),
     }));
   }
 
@@ -472,6 +491,39 @@ export class MobPack {
     });
   }
 
+  /** Every mob a ground slam at `at` reaches: its body within `radius`
+   * of it, as they stood at `seen`. */
+  within(at: { x: number; z: number }, radius: number, seen: number): Mob[] {
+    return this.alive.filter((m) => {
+      const p = this.seenAt(m, seen);
+      return (
+        Math.hypot(p.x - at.x, p.z - at.z) <=
+        radius + MOB.radius * m.scale + HIT_SLACK
+      );
+    });
+  }
+
+  /**
+   * Stuns `m` for `base`, halved for each stun of it in the last
+   * {@link RIMSHOT.drWindowMs}; not while it already is. It stands where
+   * it is, and the swing it was winding up comes off the floor (the
+   * interrupt). Returns how long, or 0.
+   */
+  stun(m: Mob, now: number, base: number): number {
+    if (m.hp <= 0 || (m.stunUntil ?? 0) > now) return 0;
+    const recent = (m.stuns ?? []).filter((t) => t > now - RIMSHOT.drWindowMs);
+    const ms = stunMs(base, recent.length);
+    m.stuns = [...recent, now];
+    m.stunUntil = now + ms;
+    for (const t of this.telegraphs)
+      if (t.mob === m.id) this.cancelled.push(t.id);
+    this.telegraphs = this.telegraphs.filter((t) => t.mob !== m.id);
+    m.state = "idle";
+    m.waitSince = null;
+    m.dashTo = null;
+    return ms;
+  }
+
   /** A hit on `mob` from `uid`, landing at `at`: a cast's damage times
    * `mult`, and the level gap. */
   queue(
@@ -544,11 +596,21 @@ export class MobPack {
     const events: MobEvent[] = [];
     const dt = Math.min(0.25, Math.max(0, now - this.lastAt) / 1000);
     this.lastAt = now;
+    for (const id of this.cancelled)
+      events.push({ t: "resolve", id, hits: [] });
+    this.cancelled = [];
     this.land(now, events);
     this.resolveDue(now, players, judge, events);
     if (now >= this.wakeAt) {
       this.act(now, dt, players, judge, events);
       this.contact(now, players, judge, events);
+    }
+    // A dome growing shoves them out before it.
+    for (const m of this.mobs) {
+      if (m.hp <= 0) continue;
+      const out = this.keepOut(m, m);
+      m.x = out.x;
+      m.z = out.z;
     }
     for (const m of this.mobs) {
       if (m.hp <= 0) continue;
@@ -617,6 +679,8 @@ export class MobPack {
       if (m.state === "windup" || (m.state === "recover" && now < m.until))
         continue;
       if (m.wakeAt !== undefined && now < m.wakeAt) continue;
+      // Stunned: it stands there.
+      if ((m.stunUntil ?? 0) > now) continue;
       let near: Target | null = null;
       let best = Number.POSITIVE_INFINITY;
       if (taunted) {
@@ -725,6 +789,8 @@ export class MobPack {
       const a = p.posAt(now);
       const b = p.posAt(back);
       if (!a || !b) continue;
+      // Under a dome nothing touches you.
+      if (shelterOf(this.domes(), p, now)) continue;
       for (const m of this.mobs) {
         if (m.hp <= 0) continue;
         const key = `${m.id}:${p.uid}`;
@@ -975,8 +1041,28 @@ export class MobPack {
       if (od < room && od > 0)
         p = { x: big.x + (ox / od) * room, z: big.z + (oz / od) * room };
     }
+    // Never into a dome: up to its edge and no further.
+    p = this.keepOut(m, p);
     m.x = p.x;
     m.z = p.z;
+  }
+
+  /** `p`, or the nearest spot outside every dome for `m`, in the arena
+   * (staying out of the dome wins). */
+  private keepOut(
+    m: Mob,
+    p: { x: number; z: number },
+  ): { x: number; z: number } {
+    const domes = this.domes();
+    if (!domes.length) return { x: p.x, z: p.z };
+    return pushOutOfDomes(
+      domes,
+      p.x,
+      p.z,
+      MOB.radius * m.scale,
+      this.lastAt,
+      (q) => this.clampToArena(q.x, q.z, 1),
+    );
   }
 
   /** (x, z) pulled back inside the arena, `margin` from its edge. */
@@ -1020,8 +1106,14 @@ export class MobPack {
           tg,
           judge.buffs(p.uid),
         );
-        hits.push(hit);
         struck.add(once);
+        // Under a dome: none of it lands, and no breather starts.
+        const dome = shelterOf(this.domes(), p, tg.hitAt);
+        if (dome) {
+          hits.push(shelteredHit(hit, dome.by));
+          continue;
+        }
+        hits.push(hit);
         judge.hitAt(p.uid, tg.hitAt);
       }
       events.push({ t: "resolve", id: tg.id, hits });
@@ -1031,8 +1123,9 @@ export class MobPack {
         m.until = now + this.recoverOf(m, this.enragedAt(now));
         // A lunger's dash: it's at the far end of its lane now.
         if (m.dashTo) {
-          m.x = m.dashTo.x;
-          m.z = m.dashTo.z;
+          const end = this.keepOut(m, m.dashTo);
+          m.x = end.x;
+          m.z = end.z;
           m.dashTo = null;
         }
       }

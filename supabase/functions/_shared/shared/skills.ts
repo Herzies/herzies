@@ -26,6 +26,7 @@ export const SKILL_IDS = [
   "taunt",
   "haste",
   "shuffle",
+  "rimshot",
 ] as const;
 export type SkillId = (typeof SKILL_IDS)[number];
 
@@ -55,6 +56,9 @@ export interface SkillDef {
   /** A channel: the caster stands still this long before it takes effect
    * (moving or going down cancels it, and costs nothing). */
   channelMs?: number;
+  /** A wind-up: the caster is held where they stand this long, then it
+   * lands (only going down cancels it). Its cooldown runs from the press. */
+  castMs?: number;
   /** A skill a class learns later: the herzie level it's learned at (the
    * database grants it then; see 00137_shuffle.sql). */
   minLevel?: number;
@@ -93,13 +97,16 @@ export const SKILL_DEFS: Record<SkillId, SkillDef> = {
     id: "cymbrella",
     name: "Cymbrella",
     kind: "buff",
-    describe: "A giant cymbal overhead: {v} less damage, and the boss's eye.",
-    value: [0.1, 0.4],
-    cooldownMs: 20_000,
-    durationMs: 6_000,
-    // A Cymbrella only absorbs a few HP a hit (10-40% of a slam or a
-    // buster), so each one pays more. Uncalibrated, like the others.
-    xpPerUnit: 4,
+    describe:
+      "A golden dome for {v}: no one inside it is hurt, no enemy gets in, and the boss turns on you.",
+    // How long the dome stands (seconds): see DOME in combat.ts for its
+    // size. Short against a long cooldown: a save timed for the big hit,
+    // not a shelter that's always up.
+    value: [3, 5],
+    count: ["second", "seconds"],
+    cooldownMs: 30_000,
+    // Per HP it kept off anyone inside (as a heal pays per HP restored).
+    xpPerUnit: 1 / 6,
   },
   resurrect: {
     id: "resurrect",
@@ -167,7 +174,36 @@ export const SKILL_DEFS: Record<SkillId, SkillDef> = {
     // throw's): Backspin's scale.
     xpPerUnit: 1 / 40,
   },
+  rimshot: {
+    id: "rimshot",
+    name: "Rimshot",
+    kind: "attack",
+    describe:
+      "Winds up for 0.8 s, then slams the ground: every enemy within 3.5 m takes twice a strike, each with a {v} chance to be stunned for 2 s (the boss 1 s), cutting short whatever it was winding up.",
+    // The chance to stun each enemy hit (see RIMSHOT).
+    value: [0.25, 0.5],
+    cooldownMs: 10_000,
+    castMs: 800,
+    minLevel: 15,
+    // Per point of damage it dealt.
+    xpPerUnit: 1 / 40,
+  },
 };
+
+/** Rimshot, a ground slam: how far round its caster it reaches, its blow
+ * on each enemy there as a share of a strike's, and its stun: how long on
+ * a mob, how much shorter on the boss, and the window in which another
+ * stun on the same target is halved again (WoW-style diminishing
+ * returns, so two Percussionists can't keep the boss locked). Its wind-up
+ * is SKILL_DEFS.rimshot.castMs; the herzie's slam lands at its end
+ * (gl/HerzieModel SLAM_RELEASE_SECONDS). */
+export const RIMSHOT = {
+  radius: 3.5,
+  damage: 2,
+  stunMs: 2_000,
+  bossStunScale: 0.5,
+  drWindowMs: 16_000,
+} as const;
 
 /** The skills a class has learned by herzie level `level` (a skill with no
  * minLevel from the start). */
@@ -283,7 +319,8 @@ export function skillXpFor(id: SkillId, units: number): number {
 
 // --- Buffs and mitigation ---------------------------------------------------
 
-/** `cymbrella`: less damage. `taunt`: the boss's eye (shown on whoever
+/** `cymbrella`: a dome of yours is up (on its caster, for the HUD; the
+ * dome itself is judged by where it stands). `taunt`: the boss's eye (shown on whoever
  * holds it; no stat). `in_tune`: listening to what the boss hates, a class
  * bonus whose `kind` says what it does. `haste`: attacks this much faster
  * (0.3 = 30% more often). `shuffle`: thrown discs bounce on this many
@@ -312,13 +349,12 @@ export interface Buff {
   by?: string;
 }
 
-/** Every damage reduction a buff list gives at `now`: a Cymbrella, and an
- * in-tune Percussionist's. */
+/** Every damage reduction a buff list gives at `now`: an in-tune
+ * Percussionist's. (A Cymbrella is a dome now: whoever stands in it takes
+ * nothing; see DOME in combat.ts.) */
 export function buffReductions(buffs: readonly Buff[], now: number): number[] {
   return activeBuffs(buffs, now)
-    .filter(
-      (b) => b.id === "cymbrella" || (b.id === "in_tune" && b.kind === "def"),
-    )
+    .filter((b) => b.id === "in_tune" && b.kind === "def")
     .map((b) => b.value);
 }
 

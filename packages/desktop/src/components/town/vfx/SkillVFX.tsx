@@ -8,8 +8,6 @@ import { buffOn, entityAt, SKILL_FX_MS, skills } from "../combat/skills";
 const DRONE_RINGS = 3;
 const DRONE_RING_GAP_MS = 220;
 const DISC_SPEED = 22;
-/** Cymbals drawn at once at most (one per buffed herzie). */
-const MAX_CYMBALS = 8;
 /** In-tune auras, and the notes over each. */
 const MAX_AURAS = 12;
 const NOTES = 3;
@@ -46,8 +44,7 @@ function noteTexture(): THREE.CanvasTexture {
 /**
  * Class skills as they happen, for everyone in the room: Soothing Drones
  * pulses out over the ground as far as it reaches, Backspin's discs spin
- * away along the aim, a giant cymbal hangs over whoever is under a
- * Cymbrella, a Taunt's shout spreads red from its caster, a Resurrect is a
+ * away along the aim, a Taunt's shout spreads red from its caster, a Resurrect is a
  * gold beam from its Bard to the fallen while it plays, and whoever is in
  * tune with what the boss hates glows gold on the beat with notes rising
  * over them. Pooled meshes, moved each frame; nothing is created while
@@ -84,21 +81,6 @@ export function SkillVFX() {
     const discs = Array.from({ length: 12 }, () => {
       const m = new THREE.Mesh(discGeo, discMat);
       m.visible = false;
-      group.add(m);
-      return m;
-    });
-
-    const cymbalGeo = new THREE.CylinderGeometry(1.1, 1.1, 0.05, 32);
-    const cymbalMat = new THREE.MeshStandardMaterial({
-      color: 0xe8c860,
-      metalness: 0.9,
-      roughness: 0.3,
-      emissive: 0x5a4410,
-    });
-    const cymbals = Array.from({ length: MAX_CYMBALS }, () => {
-      const m = new THREE.Mesh(cymbalGeo, cymbalMat);
-      m.visible = false;
-      m.castShadow = true;
       group.add(m);
       return m;
     });
@@ -158,17 +140,14 @@ export function SkillVFX() {
       group,
       rings,
       discs,
-      cymbals,
       auras,
       notes,
       beams,
       ringGeo,
       discGeo,
-      cymbalGeo,
       auraGeo,
       beamGeo,
       discMat,
-      cymbalMat,
       noteTex,
       noteMat,
       beamMat,
@@ -179,9 +158,7 @@ export function SkillVFX() {
     () => () => {
       fx.ringGeo.dispose();
       fx.discGeo.dispose();
-      fx.cymbalGeo.dispose();
       fx.discMat.dispose();
-      fx.cymbalMat.dispose();
       fx.auraGeo.dispose();
       fx.beamGeo.dispose();
       fx.noteTex.dispose();
@@ -251,18 +228,7 @@ export function SkillVFX() {
     for (; ring < fx.rings.length; ring++) fx.rings[ring].visible = false;
     for (; disc < fx.discs.length; disc++) fx.discs[disc].visible = false;
 
-    // A cymbal over everyone under a Cymbrella, for as long as it lasts
-    // (yours from the moment you press it; see Combat).
-    let cym = 0;
-    for (const [id, at] of entityAt) {
-      if (cym >= fx.cymbals.length) break;
-      if (!buffOn(id, "cymbrella", now)) continue;
-      const m = fx.cymbals[cym++];
-      m.visible = true;
-      m.position.set(at.x, at.top + 0.9 + Math.sin(now / 300) * 0.05, at.z);
-      m.rotation.set(Math.sin(now / 500) * 0.06, now / 900, 0);
-    }
-    for (; cym < fx.cymbals.length; cym++) fx.cymbals[cym].visible = false;
+    // A Cymbrella's dome is its own effect: vfx/DomeVFX.
 
     // In tune: a gold glow underfoot on the beat, and notes rising.
     let aura = 0;

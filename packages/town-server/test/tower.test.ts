@@ -1,5 +1,10 @@
-import { discChain } from "@herzies/shared/combat";
-import { SHUFFLE_REACH, shuffleBounces } from "@herzies/shared/skills";
+import { DOME, discChain } from "@herzies/shared/combat";
+import {
+  RIMSHOT,
+  SHUFFLE_REACH,
+  SKILL_DEFS,
+  shuffleBounces,
+} from "@herzies/shared/skills";
 import {
   CONTACT,
   FLOOR_OPENING_MS,
@@ -328,6 +333,148 @@ const ticket = (over: Partial<TownTicketPayload> = {}): TownTicketPayload =>
 
 const said = (out: Outbound[], t: ServerMessage["t"]) =>
   out.filter((o) => o.msg.t === t);
+
+describe("the Percussionist in the Tower", () => {
+  it("a dome shoves the pack out, keeps it out, and shelters whoever's inside", () => {
+    const e = engine(6, 1);
+    const at = ARENA.entry;
+    const p = player(() => at, 10_000);
+    // Let them come close first.
+    let t = T0;
+    for (; t < T0 + FLOOR_OPENING_MS + 6_000; t += 50) e.update(t, [p]);
+    const close = e
+      .wireMobs()
+      .filter((m) => Math.hypot(m.x - at.x, m.z - at.z) < DOME.radius);
+    expect(close.length).toBeGreaterThan(0);
+    e.addDome("tank", at.x, at.z, t, 4_000);
+    const events: TowerEvent[] = [];
+    const end = t + 4_000;
+    for (t += 50; t < end - 50; t += 50) {
+      events.push(...e.update(t, [p]));
+      if (t < end - 4_000 + DOME.growMs + 100) continue;
+      for (const m of e.wireMobs())
+        expect(Math.hypot(m.x - at.x, m.z - at.z)).toBeGreaterThan(DOME.radius);
+    }
+    // Nothing they did in there landed on the herzie.
+    for (const ev of events)
+      if (ev.t === "resolve")
+        for (const h of ev.hits) {
+          expect(h.damage).toBe(0);
+          expect(h.shelteredBy).toBe("tank");
+        }
+    expect(events.some((ev) => ev.t === "contact")).toBe(false);
+  });
+
+  it("a Rimshot hits every mob round it, and a stun stops a mob and its swing", () => {
+    const e = engine(1, 1);
+    const at = ARENA.entry;
+    const p = player(() => at, 100_000);
+    // Wait for a mob winding up on the herzie.
+    let t = T0;
+    let swing: Extract<TowerEvent, { t: "telegraph" }> | undefined;
+    while (!swing && t < T0 + 30_000) {
+      t += 50;
+      swing = e
+        .update(t, [p])
+        .find((x): x is Extract<TowerEvent, { t: "telegraph" }> => x.t === "telegraph");
+    }
+    if (!swing) throw new Error("no swing");
+    const mob = e.wireMobs().find((m) => m.id === swing.telegraph.mob);
+    if (!mob) throw new Error("no mob");
+    const from = { x: mob.x, z: mob.z - 1.2 };
+    const inReach = e
+      .wireMobs()
+      .filter((m) => Math.hypot(m.x - from.x, m.z - from.z) <= RIMSHOT.radius);
+    const r = e.rimshot("u", from, STATS, 1, t);
+    expect(r.hit).toBeGreaterThanOrEqual(inReach.length);
+    expect(r.stunned).toBe(r.hit);
+    expect(e.wireMobs().find((m) => m.id === mob.id)?.st).toBe(t + RIMSHOT.stunMs);
+    const next = e.update(t + 50, [p]);
+    // Its swing came off the floor, landing on nobody.
+    expect(next).toContainEqual({ t: "resolve", id: swing.telegraph.id, hits: [] });
+    const hits = next.filter((x) => x.t === "hit");
+    expect(hits).toHaveLength(r.hit);
+    expect(hits.every((h) => h.t === "hit" && h.skill === "rimshot")).toBe(true);
+    // It stands there while stunned.
+    const still = e.wireMobs().find((m) => m.id === mob.id);
+    for (let u = t + 100; u < t + RIMSHOT.stunMs - 100; u += 50) e.update(u, [p]);
+    const after = e.wireMobs().find((m) => m.id === mob.id);
+    expect(after?.x).toBeCloseTo(still?.x ?? Number.NaN, 1);
+    expect(after?.z).toBeCloseTo(still?.z ?? Number.NaN, 1);
+  });
+
+  it("a Rimshot misses a mob past its reach", () => {
+    const e = engine(1, 1);
+    // Where herzies arrive: mobs start well away from it.
+    const far = ARENA.entry;
+    const near = e.wireMobs().filter(
+      (m) => Math.hypot(m.x - far.x, m.z - far.z) <= RIMSHOT.radius + 1.2,
+    );
+    expect(near).toHaveLength(0);
+    expect(e.rimshot("u", far, STATS, 1, T0)).toEqual({ hit: 0, stunned: 0 });
+  });
+
+  it("a stun again soon after is shorter, and none lands while it's stunned", () => {
+    // High up, so three slams don't fell it.
+    const e = engine(40, 1);
+    const mob = e.wireMobs()[0];
+    const from = { x: mob.x, z: mob.z - 1.2 };
+    const st = () => e.wireMobs().find((m) => m.id === mob.id)?.st;
+    e.rimshot("u", from, STATS, 1, T0);
+    expect(st()).toBe(T0 + RIMSHOT.stunMs);
+    e.rimshot("u", from, STATS, 1, T0 + 500);
+    expect(st()).toBe(T0 + RIMSHOT.stunMs);
+    const later = T0 + RIMSHOT.stunMs + 100;
+    e.update(later, []);
+    e.rimshot("u", from, STATS, 1, later);
+    expect(st()).toBe(later + RIMSHOT.stunMs / 2);
+  });
+
+  it("without the luck, a Rimshot stuns nothing", () => {
+    const e = engine(1, 1);
+    const mob = e.wireMobs()[0];
+    const from = { x: mob.x, z: mob.z - 1.2 };
+    const r = e.rimshot("u", from, STATS, 0, T0);
+    expect(r.hit).toBeGreaterThan(0);
+    expect(r.stunned).toBe(0);
+  });
+
+  it("in a fight, a Rimshot winds up first, lands at the end of it, and a fall cancels it", () => {
+    const towerClaim = { event: "tower-1", until: (T0 + 3_600_000) / 1000, floor: 6 };
+    const f = FightRuntime.tower(towerClaim, "u", 20, ARENA, T0, 3);
+    f.join("u", 1, ticket({ cls: "percussionist", lv: 20, sk: [["rimshot", 10]] }), ARENA.entry, T0);
+    const tw = f.tower;
+    if (!tw) throw new Error("not a tower");
+    const mob = tw.wireMobs()[0];
+    const from = { x: mob.x, z: mob.z - 1.2 };
+    for (let t = T0; t <= T0 + 200; t += 50) f.onState("u", from.x, from.z, t);
+    expect(f.skill("u", "rimshot", 0, 0, T0 + 200).result).toBe("used");
+    const cast = SKILL_DEFS.rimshot.castMs ?? 0;
+    const hitsBy = (until: number, start: number) => {
+      const out: Outbound[] = [];
+      for (let t = start; t <= until; t += 50) {
+        f.onState("u", from.x, from.z, t);
+        out.push(...f.step(t));
+      }
+      return said(out, "hit").length;
+    };
+    expect(hitsBy(T0 + 200 + cast - 60, T0 + 250)).toBe(0);
+    expect(hitsBy(T0 + 200 + cast + 100, T0 + 200 + cast - 10)).toBeGreaterThan(0);
+    // Knocked out mid-wind-up: it never lands.
+    const later = T0 + 200 + SKILL_DEFS.rimshot.cooldownMs + 100;
+    for (let t = T0 + 200 + cast + 150; t <= later; t += 50) {
+      f.onState("u", from.x, from.z, t);
+      f.step(t);
+    }
+    expect(f.skill("u", "rimshot", 0, 0, later).result).toBe("used");
+    const me = f.player("u");
+    if (!me) throw new Error("no player");
+    me.down = true;
+    const out = f.step(later + 100);
+    expect(said(out, "channel")[0]?.msg).toMatchObject({ target: null });
+    expect(hitsBy(later + cast + 200, later + 150)).toBe(0);
+  });
+});
 
 describe("FightRuntime in the Tower", () => {
   const claim = { event: "tower-1", until: (T0 + 3_600_000) / 1000, floor: 3 };
