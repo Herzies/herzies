@@ -97,6 +97,8 @@ const PALETTE: Paint[] = [
       "N",
       "D",
       "O",
+      "b",
+      "p",
     ] as const
   ).map((ch) => ({
     layer: "objects" as const,
@@ -107,8 +109,8 @@ const PALETTE: Paint[] = [
 ];
 /** Each palette entry's key, in order (clear last): the number row, then
  * K (shop, "kiosk"), C (cave), H (auction house, "hall"), U (bush), L (lamp post), N (bench), T
- * (market stand), I (bulletin board, "info"), Y (training dummy) and O
- * (portal). Clear of the 3D preview's keys (WASD,
+ * (market stand), I (bulletin board, "info"), Y (training dummy), O
+ * (portal), Z (barrel) and / (pots). Clear of the 3D preview's keys (WASD,
  * arrows, E) and the tools' (B, R, F, M, P). */
 const KEYS = [
   ..."1234567890-",
@@ -123,6 +125,8 @@ const KEYS = [
   "i",
   "y",
   "o",
+  "z",
+  "/",
   "x",
 ];
 type Tool = "brush" | "rect" | "fill" | "move";

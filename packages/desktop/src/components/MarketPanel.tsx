@@ -69,12 +69,13 @@ function stackOf(l: MarketListing) {
   return l.quantity > 1 ? `x${l.quantity} · ` : "";
 }
 
-function listingSubtitle(l: MarketListing) {
+function listingSubtitle(l: MarketListing, owned: number) {
   return (
     <>
       {stackOf(l)}
       <Coin amount={l.price} />
       <Level level={l.upgradeLevel} /> · {l.sellerName ?? "someone"}
+      {owned > 0 && ` · ${owned} owned`}
     </>
   );
 }
@@ -137,6 +138,10 @@ export function MarketPanel({
   const waiting = !!stall && (stall.coinsWaiting > 0 || stall.itemsWaiting > 0);
   const [tab, setTab] = useState<Tab>(waiting ? "stall" : "browse");
   const [error, setError] = useState<string | null>(null);
+  /** How many copies of each item you have, worn or not: each Browse row's
+   * "N owned" (as at George's). */
+  const owned = new Map<string, number>();
+  for (const u of units) owned.set(u.itemId, (owned.get(u.itemId) ?? 0) + 1);
   /** The button busy with a request (a listing id, "list", "collect" or
    * "more"). */
   const [pending, setPending] = useState<string | null>(null);
@@ -338,7 +343,7 @@ export function MarketPanel({
                 itemId={l.itemId}
                 onInspect={() => setInspecting(l)}
                 inspectTitle="Inspect card"
-                subtitle={listingSubtitle(l)}
+                subtitle={listingSubtitle(l, owned.get(l.itemId) ?? 0)}
                 action={buyButton(l)}
               />
             ))}

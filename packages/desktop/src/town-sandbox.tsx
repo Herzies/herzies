@@ -4,7 +4,8 @@
 // the ambient occlusion, and `?bench=1` times the renderer (`?bench=frame`
 // whole frames, composer included; see bench).
 // `?time=` sets the hour, and `&speed=` runs the clock on from there,
-// that many hours a second (to watch the light and shadows move).
+// that many hours a second (to watch the light and shadows move);
+// `?day=` the day of the year (0–365). The sliders top right set both.
 // `?net=local` joins the multiplayer Town on `wrangler dev` (in
 // packages/town-server, with TOWN_TICKET_SECRET=dev-town-secret in .dev.vars);
 // `&name=` and `&server=ws://…` to taste. Open it twice to see each other.
@@ -56,6 +57,7 @@ import {
 } from "./components/town/combat/results";
 import { setArmed, setMySkills } from "./components/town/combat/skills";
 import { combat } from "./components/town/combat/state";
+import { localHours } from "./components/town/DayCycle";
 import { homeDropFeed } from "./components/town/dropSpots";
 import { setOwnedEmotes } from "./components/town/emotes";
 import { setTowerOpen } from "./components/town/gates";
@@ -71,6 +73,7 @@ import {
   townLive,
   townSave,
 } from "./components/town/runtime";
+import { dayOfYear } from "./components/town/Seasons";
 import { CastBar, SkillHud } from "./components/town/SkillHud";
 import TownCanvas from "./components/town/TownCanvas";
 import { setVitals } from "./components/town/vitals";
@@ -83,11 +86,94 @@ if (params.has("map")) goToMap(params.get("map") as string);
 
 const startHour = params.has("time") ? Number(params.get("time")) : null;
 const speed = Number(params.get("speed") ?? 0);
-const startedAt = performance.now();
-const sandboxHour =
-  startHour !== null && speed > 0
-    ? () => (startHour + ((performance.now() - startedAt) / 1000) * speed) % 24
-    : startHour;
+/** The time of day and year shown, as the sliders (see SkyControls) last
+ * set them: null for the local clock and calendar. With `&speed=`, the
+ * clock runs on from the hour last set. */
+const sky = {
+  hour: startHour,
+  setAt: performance.now(),
+  day: params.has("day") ? Number(params.get("day")) : null,
+};
+const sandboxHour = () => {
+  if (sky.hour === null) return localHours();
+  if (speed <= 0) return sky.hour;
+  return (sky.hour + ((performance.now() - sky.setAt) / 1000) * speed) % 24;
+};
+const sandboxSeason = () => sky.day ?? dayOfYear();
+
+/** "18:30". */
+const clockText = (h: number) =>
+  `${Math.floor(h)}:${String(Math.floor((h % 1) * 60)).padStart(2, "0")}`;
+/** A day of the year as a date: "31 Oct". */
+const dateText = (d: number) =>
+  new Date(2025, 0, 1 + Math.floor(d)).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+  });
+
+/** Sliders for the time of day and of year, top right: "Now" and
+ * "Today" go back to the clock and calendar. */
+function SkyControls() {
+  const [hour, setHour] = useState(sky.hour);
+  const [day, setDay] = useState(sky.day);
+  // With the clock running (`&speed=`), keep the slider up with it.
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (speed <= 0 && hour !== null) return;
+    const id = setInterval(() => tick((n) => n + 1), 250);
+    return () => clearInterval(id);
+  }, [hour]);
+  const shown = sandboxHour();
+  const pickHour = (h: number | null) => {
+    sky.hour = h;
+    sky.setAt = performance.now();
+    setHour(h);
+  };
+  const pickDay = (d: number | null) => {
+    sky.day = d;
+    setDay(d);
+  };
+  const button = (on: boolean) =>
+    `rounded px-1.5 py-0.5 ${on ? "bg-white/30" : "bg-white/10"}`;
+  return (
+    <div className="pointer-events-auto absolute top-3 right-3 z-10 flex items-center gap-2 rounded bg-black/50 px-2 py-1 text-[11px] text-white/80">
+      <button
+        type="button"
+        className={button(hour === null)}
+        onClick={() => pickHour(null)}
+      >
+        Now
+      </button>
+      <input
+        type="range"
+        min={0}
+        max={24}
+        step={0.05}
+        value={shown}
+        onChange={(e) => pickHour(Number(e.target.value))}
+      />
+      <span className="w-10 text-right">{clockText(shown)}</span>
+      <button
+        type="button"
+        className={`${button(day === null)} ml-2`}
+        onClick={() => pickDay(null)}
+      >
+        Today
+      </button>
+      <input
+        type="range"
+        min={0}
+        max={365}
+        step={1}
+        value={day ?? Math.floor(dayOfYear())}
+        onChange={(e) => pickDay(Number(e.target.value))}
+      />
+      <span className="w-12 text-right">
+        {day === null ? "today" : dateText(day)}
+      </span>
+    </div>
+  );
+}
 
 const card = (type: string, title: string): EventCard => ({
   type,
@@ -489,6 +575,7 @@ function Sandbox() {
         bubbles={bubbles}
         paused={false}
         hour={sandboxHour}
+        season={sandboxSeason}
         shadows={params.get("shadows") !== "0"}
         ao={params.get("ao") !== "0"}
         onCreated={params.has("bench") ? bench : undefined}
@@ -513,6 +600,7 @@ function Sandbox() {
       {/* After the canvas, as in TownWorld: it has no z-index of its own,
           so the herzie stage can draw over it. */}
       <BossResults />
+      <SkyControls />
     </div>
   );
 }

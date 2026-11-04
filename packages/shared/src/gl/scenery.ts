@@ -45,7 +45,7 @@ function branch(
   return g.translate(...from);
 }
 
-type Palette = { deep: string; mid: string; lit: string };
+export type Palette = { deep: string; mid: string; lit: string };
 
 /** A colour along a palette, 0 (deep) to 1 (lit). */
 function along(p: Palette, t: number, out: THREE.Color): THREE.Color {
@@ -80,7 +80,7 @@ const SUN = new THREE.Vector3(-0.4, 0.8, 0.45).normalize();
  * (`from`), so a few clumps shade as one soft mass, dark underneath and
  * lit on top, rather than each its own facets.
  */
-function clump(
+export function clump(
   centre: THREE.Vector3,
   radii: THREE.Vector3,
   palette: Palette,
@@ -286,11 +286,12 @@ export function tuftGeometry(): THREE.BufferGeometry {
   return tuft;
 }
 
-/** A bush: a few leafy lumps huddled together, dark underneath and lit
- * on top. */
+/** A bush: a few rounded leafy lumps huddled together — the same soft
+ * clumps as an oak's crown, shaded as one mass, dark underneath and lit on
+ * top. */
 export function bushGeometry(): THREE.BufferGeometry {
-  const dark = new THREE.Color("#2c5a2c");
-  const light = new THREE.Color("#5c9a48");
+  const palette = { deep: "#20421f", mid: "#3c7434", lit: "#74a84e" };
+  const middle = new THREE.Vector3(0, 0.3, 0);
   const lumps = (
     [
       [0, 0.55, 0, 0.6],
@@ -299,21 +300,15 @@ export function bushGeometry(): THREE.BufferGeometry {
       [0.04, 0.38, -0.4, 0.4],
       [-0.12, 0.36, 0.4, 0.38],
     ] as const
-  ).map(([x, y, z, r]) => {
-    const g = new THREE.IcosahedronGeometry(r, 1);
-    g.scale(1, 0.85, 1);
-    g.translate(x, y, z);
-    const pos = g.attributes.position;
-    const colors: number[] = [];
-    const c = new THREE.Color();
-    for (let i = 0; i < pos.count; i++) {
-      c.lerpColors(dark, light, Math.min(1, Math.max(0, pos.getY(i) / 1.05)));
-      colors.push(c.r, c.g, c.b);
-    }
-    g.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
-    g.deleteAttribute("uv");
-    return g;
-  });
+  ).map(([x, y, z, r], i) =>
+    clump(
+      new THREE.Vector3(x, y, z),
+      new THREE.Vector3(r, r * 0.85, r),
+      palette,
+      middle,
+      i + 5,
+    ),
+  );
   return mergeGeometries(lumps) as THREE.BufferGeometry;
 }
 
@@ -339,6 +334,8 @@ const plantMaterial = new THREE.MeshLambertMaterial({
   vertexColors: true,
   flatShading: true,
 });
+/** Smooth: the bush's lumps carry their own normals (see `clump`). */
+const leafMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
 
 let shapes: {
   oak: THREE.BufferGeometry;
@@ -352,7 +349,6 @@ function islandShapes() {
   if (shapes) return shapes;
   const oak = oakGeometry(3);
   const bush = bushGeometry();
-  bush.computeVertexNormals();
   shapes = {
     oak,
     bush,
@@ -397,7 +393,7 @@ export function islandScenery(): THREE.Group {
   mesh(s.top, grassMaterial, [0, 0, 0]);
   mesh(s.under, earthMaterial, [0, 0, 0]);
   mesh(s.oak, plantMaterial, [-1.5, 0, -1.6], 0.42, 0.6);
-  mesh(s.bush, plantMaterial, [1.7, 0, -1.2], 0.75, 1.2);
+  mesh(s.bush, leafMaterial, [1.7, 0, -1.2], 0.75, 1.2);
   mesh(rockGeometry, rockMaterial, [1.9, 0.1, 0.4], [0.6, 0.4, 0.5], 0.4);
   mesh(rockGeometry, rockMaterial, [2.3, 0.06, -0.3], [0.35, 0.25, 0.3], 1.7);
   mesh(rockGeometry, rockMaterial, [-1.9, 0.07, 0.6], [0.4, 0.28, 0.35], 2.3);

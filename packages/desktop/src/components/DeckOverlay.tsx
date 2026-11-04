@@ -106,27 +106,36 @@ export const OVERLAY_PANEL = "pointer-events-auto py-1.5";
 
 /** One section of the deck: a title naming it and how many of its slots are
  * filled, above its row of boxes (each empty box also names its slot on
- * hover). While a card that belongs here is dragged, the row is tinted, and
- * the one box it would land in lights up. */
+ * hover). A section can hold several groups' boxes (Body: the Equipment,
+ * Back and Feet). While a card that belongs here is dragged, the row is
+ * tinted, and the one box it would land in lights up. */
 function DeckGroup({
-  group,
+  label,
+  groups,
   className,
   ...handlers
 }: SlotHandlers & {
-  group: DeckSlotGroup;
+  label: string;
+  groups: DeckSlotGroup[];
   className?: string;
 }) {
   const { equipped, drag } = handlers;
-  const target = drag !== null && groupAccepts(group, drag.equipSlot);
-  const filled =
-    group.slots === "modifier"
-      ? (equipped.modifier?.length ?? 0)
-      : group.slots.filter((slot) => equipped[slot]).length;
+  const target =
+    drag !== null && groups.some((g) => groupAccepts(g, drag.equipSlot));
+  const filled = groups.reduce(
+    (n, group) =>
+      n +
+      (group.slots === "modifier"
+        ? (equipped.modifier?.length ?? 0)
+        : group.slots.filter((slot) => equipped[slot]).length),
+    0,
+  );
+  const count = groups.reduce((n, g) => n + g.count, 0);
 
   return (
     <div className={className}>
       <div className="mb-1 text-[10px] text-text-dim">
-        {group.label} ({filled}/{group.count})
+        {label} ({filled}/{count})
       </div>
       {/* No `gap`: the spacing between boxes is baked into each slot's own hit
         area (see SLOT_HIT), so the pointer is always over some slot while it
@@ -138,55 +147,60 @@ function DeckGroup({
           target && (drag.inZone ? "bg-cyan/15" : "bg-cyan/5"),
         )}
       >
-        {Array.from({ length: group.count }, (_, i) => {
-          const storedSlot =
-            group.slots === "modifier" ? undefined : group.slots[i];
-          const itemId = storedSlot
-            ? equipped[storedSlot]
-            : equipped.modifier?.[i];
-          // Modifiers have no per-box identity: `applyEquip` appends to the
-          // list, so an item picked from *any* empty modifier box lands at
-          // the first free position rather than at the box that was clicked.
-          const equipSlot = storedSlot ? equipSlotFor(storedSlot) : "modifier";
-          const side = storedSlot ? groundSideOf(storedSlot) : undefined;
-          // How many boxes in this group take the *same* equip slot, which is
-          // what decides whether a box needs a "#N" to be identifiable.
-          const alike =
-            group.slots === "modifier"
-              ? group.count
-              : group.slots.filter((s) => equipSlotFor(s) === equipSlot).length;
-          // Exactly one box lights up: where the card would land. Modifier
-          // boxes have no identity of their own, so that's the next free one.
-          const landing = drag?.inZone ? drag.landing : null;
-          const hovered =
-            landing !== null &&
-            landing.equipSlot === equipSlot &&
-            (equipSlot === "modifier"
-              ? i === (equipped.modifier?.length ?? 0)
-              : landing.side === side);
-          return (
-            <DeckSlot
-              key={i}
-              itemId={itemId}
-              fallbackType={group.itemType}
-              equipSlot={equipSlot}
-              side={side}
-              slotNumber={i + 1}
-              slotCount={alike}
-              hovered={hovered}
-              {...handlers}
-              onPlaceRequest={(x, y) =>
-                handlers.onPlaceRequest({
-                  equipSlot,
-                  side,
-                  label: EQUIP_SLOT_LABELS[equipSlot],
-                  x,
-                  y,
-                })
-              }
-            />
-          );
-        })}
+        {groups.flatMap((group) =>
+          Array.from({ length: group.count }, (_, i) => {
+            const storedSlot =
+              group.slots === "modifier" ? undefined : group.slots[i];
+            const itemId = storedSlot
+              ? equipped[storedSlot]
+              : equipped.modifier?.[i];
+            // Modifiers have no per-box identity: `applyEquip` appends to the
+            // list, so an item picked from *any* empty modifier box lands at
+            // the first free position rather than at the box that was clicked.
+            const equipSlot = storedSlot
+              ? equipSlotFor(storedSlot)
+              : "modifier";
+            const side = storedSlot ? groundSideOf(storedSlot) : undefined;
+            // How many boxes in this group take the *same* equip slot, which
+            // is what decides whether a box needs a "#N" to be identifiable.
+            const alike =
+              group.slots === "modifier"
+                ? group.count
+                : group.slots.filter((s) => equipSlotFor(s) === equipSlot)
+                    .length;
+            // Exactly one box lights up: where the card would land. Modifier
+            // boxes have no identity of their own, so that's the next free one.
+            const landing = drag?.inZone ? drag.landing : null;
+            const hovered =
+              landing !== null &&
+              landing.equipSlot === equipSlot &&
+              (equipSlot === "modifier"
+                ? i === (equipped.modifier?.length ?? 0)
+                : landing.side === side);
+            return (
+              <DeckSlot
+                key={`${group.label}${i}`}
+                itemId={itemId}
+                fallbackType={group.itemType}
+                equipSlot={equipSlot}
+                side={side}
+                slotNumber={i + 1}
+                slotCount={alike}
+                hovered={hovered}
+                {...handlers}
+                onPlaceRequest={(x, y) =>
+                  handlers.onPlaceRequest({
+                    equipSlot,
+                    side,
+                    label: EQUIP_SLOT_LABELS[equipSlot],
+                    x,
+                    y,
+                  })
+                }
+              />
+            );
+          }),
+        )}
       </div>
     </div>
   );
@@ -197,30 +211,34 @@ function DeckGroup({
 export function DeckOverlay({ showInstrument, ...props }: DeckOverlayProps) {
   return (
     <div className="pointer-events-auto grid w-full grid-cols-2 gap-x-4 gap-y-1.5 pt-1.5 pb-4">
-      {DECK_SLOT_ORDER.filter(
-        (label) => label !== "Instrument" || showInstrument,
-      ).map((label) => (
-        <DeckGroup key={label} group={groupByLabel(label)} {...props} />
+      {DECK_SECTIONS.filter(
+        ([label]) => label !== "Instrument" || showInstrument,
+      ).map(([label, groups]) => (
+        <DeckGroup
+          key={label}
+          label={label}
+          groups={groups.map(groupByLabel)}
+          {...props}
+        />
       ))}
     </div>
   );
 }
 
-/** Reading order, two to a row: what's worn on the body first, the class's
- * Instrument (shown once there's a class) beside the Equipment, then the
- * herzie's look, then the Spirit, the Back (its cloak), the Feet (its shoes)
- * and the Modifiers. */
-const DECK_SLOT_ORDER = [
-  "Equipment",
-  "Instrument",
-  "Accessories",
-  "Skin",
-  "Scenery",
-  "Spirit",
-  "Back",
-  "Feet",
-  "Modifiers",
-] as const;
+/** Reading order, two to a row: what's worn on the body first (the
+ * Equipment, the Back's cloak and the Feet's shoes, as one row), the
+ * class's Instrument (shown once there's a class) beside it, then the
+ * herzie's look, then the Spirit and the Modifiers. Each section: its
+ * title, and the groups whose boxes it shows. */
+const DECK_SECTIONS: [label: string, groups: string[]][] = [
+  ["Body", ["Equipment", "Back", "Feet"]],
+  ["Instrument", ["Instrument"]],
+  ["Accessories", ["Accessories"]],
+  ["Skin", ["Skin"]],
+  ["Scenery", ["Scenery"]],
+  ["Spirit", ["Spirit"]],
+  ["Modifiers", ["Modifiers"]],
+];
 
 function DeckSlot({
   itemId,

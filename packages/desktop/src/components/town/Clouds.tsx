@@ -1,4 +1,5 @@
 import { mulberry32 } from "@herzies/shared";
+import { clump } from "@herzies/shared/gl";
 import { useFrame } from "@react-three/fiber";
 import { useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
@@ -8,17 +9,30 @@ import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js
 const COUNT = 16;
 const DRIFT = 0.006;
 
-/** One low-poly cloud: a few flat-shaded puffs, flattened, side by side. */
+/** A cloud's colours: shaded blue-grey underneath, white on top. */
+const CLOUD = { deep: "#c3cde0", mid: "#e4e9f3", lit: "#ffffff" };
+
+/** One cloud: a few soft round puffs (the same rounded clumps as an oak's
+ * crown, shaded as one mass), flattened, side by side. */
 function puffGeometry(rand: () => number): THREE.BufferGeometry {
   const n = 3 + Math.floor(rand() * 4);
+  const middle = new THREE.Vector3(0, 0, 0);
   const puffs = Array.from({ length: n }, (_, i) => {
     const r = 2.5 + rand() * 3;
-    const g = new THREE.IcosahedronGeometry(r, 0);
-    g.scale(1, 0.6, 0.85);
     // Strung out along x, the middle ones biggest and highest.
-    const middle = 1 - Math.abs(i - (n - 1) / 2) / n;
-    g.translate((i - (n - 1) / 2) * 3.6, middle * 1.6, (rand() - 0.5) * 3);
-    return g;
+    const high = 1 - Math.abs(i - (n - 1) / 2) / n;
+    const at = new THREE.Vector3(
+      (i - (n - 1) / 2) * 3.6,
+      high * 1.6,
+      (rand() - 0.5) * 3,
+    );
+    return clump(
+      at,
+      new THREE.Vector3(r, r * 0.6, r * 0.85),
+      CLOUD,
+      middle,
+      Math.floor(rand() * 1000),
+    );
   });
   return mergeGeometries(puffs) as THREE.BufferGeometry;
 }
@@ -32,9 +46,10 @@ type Cloud = {
   bob: number;
 };
 
+/** Smooth, and shaded softly: lit in steps like the trees (see
+ * `banded`), a puff this big shows hard lines across it. */
 const cloudMaterial = new THREE.MeshLambertMaterial({
-  color: "#f4f6fb",
-  flatShading: true,
+  vertexColors: true,
   transparent: true,
   opacity: 0.92,
 });
