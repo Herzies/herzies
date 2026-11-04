@@ -2,6 +2,7 @@ import {
   BOBOKU_SCHEME_ID,
   GOLD_SCHEME_ID,
   MEDEA_SCHEME_ID,
+  NAKATA_SCHEME_ID,
   NANDOR_SCHEME_ID,
   PIP_SCHEME_ID,
   TOWER_GUARD_SCHEME_ID,
@@ -67,6 +68,15 @@ export const MARKET_EQUIPPED: Equipped = {
   body: "pearl-necklace",
   back: "troubadour-mantle",
   color: "purple-dane",
+};
+
+/** Nakata's look: grown up (stage 3), in quiet greys, under an old
+ * fedora: an old man who talks to cats. */
+export const NAKATA_SEED = "npc:nakata";
+export const NAKATA_STAGE = 3;
+export const NAKATA_EQUIPPED: Equipped = {
+  head: "fyllings-fedora",
+  color: NAKATA_SCHEME_ID,
 };
 
 /** Pip's look: a hatchling (stage 1) in mint green, with headphones on that

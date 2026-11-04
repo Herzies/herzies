@@ -1024,3 +1024,40 @@ describe("waving again mid-wave", () => {
     expect(m.emoting).toBe(false);
   });
 });
+
+describe("HerzieModel with Sleptwell, the cat", () => {
+  const CAT = { seed: "cat-test", stage: 3, equipped: { spirit: "sleptwell" } };
+
+  it("walks a cat after it, not a floating spirit", () => {
+    const h = new HerzieModel(CAT);
+    expect(h.hasCompanion).toBe(true);
+    expect(h.companionKind).toBe("walker");
+    let skinned = 0;
+    h.root.traverse((o) => {
+      if (o instanceof THREE.SkinnedMesh) skinned++;
+    });
+    expect(skinned).toBe(1);
+  });
+
+  it("keeps up with it, on the ground", () => {
+    const h = new HerzieModel(CAT);
+    for (let i = 0; i < 300; i++) {
+      h.root.position.z += WALK_SPEED / 60;
+      h.update(1 / 60, WALK_SPEED);
+    }
+    const mouth = h.companionPosition(new THREE.Vector3());
+    expect(mouth).not.toBeNull();
+    const m = mouth as THREE.Vector3;
+    expect(Math.hypot(m.x, m.z - h.root.position.z)).toBeLessThan(4);
+    // Its mouth is at a cat's head height, not up in the air.
+    expect(m.y).toBeGreaterThan(0.2);
+    expect(m.y).toBeLessThan(1.2);
+  });
+
+  it("sits beside a herzie on its own stage, and isn't sent fetching", () => {
+    const h = new HerzieModel(CAT, { anchorScenery: 0 });
+    expect(h.hasCompanion).toBe(false);
+    for (let i = 0; i < 120; i++) h.update(1 / 60, 0);
+    expect(h.companionPosition(new THREE.Vector3())).toBeNull();
+  });
+});

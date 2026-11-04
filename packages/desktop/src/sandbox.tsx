@@ -36,6 +36,7 @@ const WEARABLE_OPTIONS = [
   "fangs",
   "pumpkin-spice",
   "ghost",
+  "sleptwell",
   "blood-moon",
   // Class gear (stage 2 and up: it's held in the hands).
   "lute",
@@ -460,7 +461,8 @@ function toEquipped(ids: string[]): Equipped {
       out.body = id;
     else if (id === "fangs") out.face = id;
     else if (id === "pumpkin-spice") out.color = id;
-    else if (id === "ghost" || id === "spirit-orb") out.spirit = id;
+    else if (id === "ghost" || id === "spirit-orb" || id === "sleptwell")
+      out.spirit = id;
     else if (id === "old-cymbal") out.off_hand = id;
     else if (
       id.endsWith("-cloak") ||

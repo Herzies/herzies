@@ -194,6 +194,19 @@ export const PIP_RAMP = [
 ] as const;
 
 /**
+ * Nakata, an old man who talks to cats. No item grants it: soft greys with
+ * a little warmth in them, pale at the crown, darker at his feet.
+ */
+export const NAKATA_RAMP = [
+  "#D9D4CC",
+  "#BFB9AF",
+  "#A39D93",
+  "#878279",
+  "#6B6660",
+  "#4F4B46",
+] as const;
+
+/**
  * Medea, who sells sweets and potions and is always in Town. No item grants
  * it: candy pink at the crown sinking through orchid and violet into a plum
  * that's nearly black at her feet — sweet on top, darker underneath.

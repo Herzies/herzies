@@ -20,6 +20,8 @@ import {
   MEDEA_KEY,
   MEDEA_NAME,
   MERCHANT_NAME,
+  NAKATA_KEY,
+  NAKATA_NAME,
   PIP_KEY,
   PIP_NAME,
   type StatPoints,
@@ -55,6 +57,7 @@ import { List } from "./List";
 import { LoadingSplash } from "./LoadingSplash";
 import { MarketPanel } from "./MarketPanel";
 import { MerchantPanel } from "./MerchantPanel";
+import { NakataPanel } from "./NakataPanel";
 import { OrphiezStage } from "./OrphiezStage";
 import { PIP, QuestGiverPanel } from "./QuestGiverPanel";
 import { TabButton } from "./TabButton";
@@ -840,6 +843,16 @@ function EventsViewImpl({
       detail: "Wants to learn about music",
       notice: pipNotice || undefined,
     });
+    // And Nakata, by the river, who talks to cats.
+    cards.push({
+      type: NAKATA_KEY,
+      title: NAKATA_NAME,
+      description: null,
+      status: "live",
+      at: null,
+      openKey: NAKATA_KEY,
+      detail: "Talks to cats",
+    });
     // Nearest in time first: what's on now, then what starts soonest, then
     // types with nothing on the calendar.
     const when = (c: EventCard) =>
@@ -1000,6 +1013,21 @@ function EventsViewImpl({
             onLog={onLog}
             paused={!active || !focused}
           />
+        </ScreenView>
+      );
+    }
+
+    if (selected === NAKATA_KEY) {
+      return (
+        <ScreenView
+          inPanel={screenInPanel}
+          ownName
+          title={NAKATA_NAME}
+          colour="cyan"
+          childrenClassName="flex min-h-0 flex-col"
+          backButton={back}
+        >
+          <NakataPanel equipped={equipped} paused={!active || !focused} />
         </ScreenView>
       );
     }

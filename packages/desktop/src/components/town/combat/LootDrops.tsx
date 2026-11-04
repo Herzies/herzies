@@ -257,6 +257,13 @@ export type Drop = {
   /** The spirit's errand: on its way, hovering over it, taking it in. */
   fetch: "going" | "hover" | "absorb" | null;
   fetchAt: number;
+  /** Fetched by a spirit on foot (the cat): it's picked up in its mouth
+   * and carried back small, rather than taken into a floating spirit. */
+  mouth?: boolean;
+  /** When a cat sent for it gives up (it can't get there: water). */
+  fetchBy?: number;
+  /** A cat couldn't reach it: it's left for you to walk to. */
+  unreachable?: boolean;
   spin: number;
   hum: ReturnType<typeof sfxLootHum>;
   /** Something that dropped while you listened (see HomeDrops), rather
@@ -528,6 +535,7 @@ export function useDropLoop(source: () => readonly Drop[]): void {
             room &&
             spirit &&
             !errand &&
+            !d.unreachable &&
             now - d.restedAt > LOOT.spiritDelayMs &&
             flat < LOOT.spiritRadius &&
             d ===
@@ -535,6 +543,7 @@ export function useDropLoop(source: () => readonly Drop[]): void {
                 .filter(
                   (x) =>
                     x.phase === "resting" &&
+                    !x.unreachable &&
                     (!x.home || hasLootRoom(x.item.id)),
                 )
                 .sort((a, b) => a.tier - b.tier)[0]
@@ -544,13 +553,51 @@ export function useDropLoop(source: () => readonly Drop[]): void {
             errand = d;
             d.fetchAt = now;
             sfxSpiritNotice();
+            d.mouth = herzie?.companionKind === "walker";
+            if (d.mouth) {
+              // On foot: there at a run, with time to spare (or it can't
+              // get there, and gives up).
+              const far = Math.hypot(d.spot.x - spirit.x, d.spot.z - spirit.z);
+              d.fetchBy = now + LOOT.catPatienceMs + far * LOOT.catMsPerUnit;
+            }
             herzie?.fetch(
               new THREE.Vector3(
                 d.spot.x,
-                d.ground + LOOT.hover + 0.55,
+                d.mouth ? d.ground : d.ground + LOOT.hover + 0.55,
                 d.spot.z,
               ),
             );
+          }
+          if (d.phase === "fetching" && spirit && d.mouth) {
+            const r = restAt(now - d.since);
+            if (d.fetch !== "absorb")
+              d.pos.set(d.spot.x, r.y + d.ground, d.spot.z);
+            if (d.fetch === "going" && herzie?.companionCaught) {
+              // Pounced on: picked up in its mouth.
+              d.fetch = "absorb";
+              d.fetchAt = now;
+              d.from.copy(d.pos);
+            } else if (d.fetch === "going" && now > (d.fetchBy ?? 0)) {
+              // It can't get there: left for you.
+              d.fetch = null;
+              d.phase = "resting";
+              d.unreachable = true;
+              d.mouth = false;
+              errand = null;
+              herzie?.fetch(null);
+            } else if (d.fetch === "absorb") {
+              const t = Math.min(1, (now - d.fetchAt) / LOOT.catPickupMs);
+              d.pos.lerpVectors(d.from, spirit, t * t);
+              if (t >= 1) {
+                d.fetch = null;
+                d.phase = "carried";
+                d.since = now;
+                d.hum?.stop();
+                d.hum = null;
+                herzie?.fetch(null);
+              }
+            }
+            break;
           }
           if (d.phase === "fetching" && spirit) {
             const r = restAt(now - d.since);
@@ -599,12 +646,14 @@ export function useDropLoop(source: () => readonly Drop[]): void {
           break;
         }
         case "carried":
+          // In the cat's mouth, all the way back.
+          if (d.mouth && spirit) d.pos.copy(spirit);
           // Brought home: the payoff is when it reaches you.
           if (
             !spirit ||
             Math.hypot(spirit.x - player.x, spirit.z - player.z) <
-              LOOT.deliverRadius ||
-            now - d.since > 4_000
+              (d.mouth ? LOOT.catDeliverRadius : LOOT.deliverRadius) ||
+            now - d.since > (d.mouth ? 8_000 : 4_000)
           )
             collect(d, now);
           break;
@@ -632,7 +681,8 @@ export function useDropLoop(source: () => readonly Drop[]): void {
 function draw(d: Drop, now: number, dt: number, flat: number) {
   const v = d.view;
   if (!v.group || !v.model || !v.pillar || !v.ring || !v.dust) return;
-  const show = d.phase !== "waiting" && d.phase !== "carried";
+  const show =
+    d.phase !== "waiting" && (d.phase !== "carried" || d.mouth === true);
   v.model.visible = show && d.phase !== "done";
   v.model.position.copy(d.pos);
 
@@ -655,10 +705,18 @@ function draw(d: Drop, now: number, dt: number, flat: number) {
   if (d.phase === "pulled") {
     scale = 1 - 0.8 * Math.min(1, (now - d.since) / LOOT.magnetMs);
   }
-  if (d.fetch === "absorb") {
+  if (d.fetch === "absorb" && d.mouth) {
+    // Picked up: down to a mouthful.
+    const t = Math.min(1, (now - d.fetchAt) / LOOT.catPickupMs);
+    scale = 1 - (1 - LOOT.catCarryScale) * t;
+  } else if (d.fetch === "absorb") {
     const t = Math.min(1, (now - d.fetchAt) / LOOT.spiritAbsorbMs);
     scale = 1 - t;
     v.model.rotation.y += t * 8;
+  }
+  if (d.phase === "carried" && d.mouth) {
+    scale = LOOT.catCarryScale;
+    v.model.rotation.set(0, d.spin * 0.25, 0);
   }
   if (d.phase === "vanishing") {
     const t = Math.max(0, Math.min(1, (now - d.since) / (d.vanishMs ?? 400)));

@@ -109,6 +109,7 @@ const spots: TownSpot[] = [
   ["boboku", "Boboku"],
   ["medea", "Medea"],
   ["market", "Plutus"],
+  ["nakata", "Nakata"],
 ]
   // Only those the map has a spot for (the boss lives in its cave now).
   .filter(([type]) => SPOTS[type])
@@ -409,6 +410,7 @@ const SANDBOX_DROPS = [
   "stars",
   "blood-moon",
   "spirit-orb",
+  "sleptwell",
   "rainbow-headband",
 ];
 let dropSeq = 0;

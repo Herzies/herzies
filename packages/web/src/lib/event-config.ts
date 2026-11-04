@@ -134,7 +134,12 @@ export async function validateBossConfig(
 
 /** Never sold by a visitor: the spirits are money-only (Stripe products),
  * and the Treat is the treat_trader's currency. */
-const UNSELLABLE_ITEM_IDS = new Set(["ghost", "spirit-orb", TREAT_ITEM_ID]);
+const UNSELLABLE_ITEM_IDS = new Set([
+  "ghost",
+  "spirit-orb",
+  "sleptwell",
+  TREAT_ITEM_ID,
+]);
 
 /**
  * Validate a merchant's stock: George's (coins) or Nandor's (treats), which

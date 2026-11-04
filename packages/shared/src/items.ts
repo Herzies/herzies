@@ -1211,6 +1211,7 @@ export const NON_DROPPABLE_ITEM_IDS = [
   "first-edition",
   "spirit-orb",
   "ghost",
+  "sleptwell",
   // The Halloween set is sold by Nandor for Treats, and the Treat drops from
   // its own roll (SEASONAL_BONUS_DROPS) rather than the weighted pool.
   "witch-hat",
@@ -3033,6 +3034,39 @@ function renderGhostFrame(yAngle: number): string[] {
   return renderIconCard(yAngle, "#D8D8E6", "#8a8a9a", "#3a3a4a", ghostCardIcon);
 }
 
+/** Sleptwell's card: a white cat's face, orange ears and cap. */
+function sleptwellCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  const head = (ix / 0.2) ** 2 + ((iy - 0.03) / 0.17) ** 2 < 1;
+  // Ears: triangles up from the head's top corners.
+  const ear = (side: number) => {
+    const x = ix * side - 0.11;
+    const y = iy + 0.12;
+    return y < 0 && y > -0.13 && Math.abs(x) < (y + 0.13) * 0.55;
+  };
+  const inEar = ear(1) || ear(-1);
+  if (!head && !inEar) return null;
+  const eye = (cx: number) => (ix - cx) ** 2 + (iy - 0.02) ** 2 < 0.03 ** 2;
+  if (head && (eye(-0.075) || eye(0.075)))
+    return { bright: 0.35, color: "#2A1E1A" };
+  if (head && Math.abs(ix) < 0.025 && Math.abs(iy - 0.09) < 0.015)
+    return { bright: 0.7, color: "#E89A9A" };
+  // Orange ears and a cap over the brow, a white muzzle below.
+  if (inEar || (iy < -0.04 && Math.abs(ix) > 0.03))
+    return { bright: 0.85, color: "#F0913A" };
+  return { bright: 0.95, color: "#FFF8F0" };
+}
+
+function renderSleptwellFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#F0913A",
+    "#B0601E",
+    "#4A2A12",
+    sleptwellCardIcon,
+  );
+}
+
 function bloodMoonCardIcon(u: number, v: number): TexSample | null {
   const [ix, iy] = iconUV(u, v);
   const bat = Math.abs(iy + 0.2) < 0.025 && Math.abs(ix + 0.14) < 0.07;
@@ -3175,6 +3209,7 @@ const evasivePairFrames = generateFrames(renderEvasivePairFrame);
 const fangsFrames = generateFrames(renderFangsFrame);
 const pumpkinSpiceFrames = generateFrames(renderPumpkinSpiceFrame);
 const ghostFrames = generateFrames(renderGhostFrame);
+const sleptwellFrames = generateFrames(renderSleptwellFrame);
 const bloodMoonFrames = generateFrames(renderBloodMoonFrame);
 const trickOrTreatFrames = generateFrames(renderTrickOrTreatFrame);
 const starCandyFrames = generateFrames(renderStarCandyFrame);
@@ -3687,6 +3722,21 @@ export const ITEMS: ItemDef[] = [
     equipable: true,
     equipSlot: "color",
     sellPrice: 100,
+  },
+  {
+    id: "sleptwell",
+    name: "Sleptwell",
+    // Placeholder: the user is writing the real description.
+    description: "Fetches what you drop. Naps where you stop.",
+    rarity: "legendary",
+    frames: sleptwellFrames,
+    equipable: true,
+    equipSlot: "spirit",
+    // A cat that walks after its herzie (gl/cat.ts) instead of floating.
+    // Sold for money only, as a Stripe product whose metadata.item_id is
+    // "sleptwell", and given as a song hunt reward (rewardItemId). Kept out
+    // of the drop pool by NON_DROPPABLE_ITEM_IDS, and out of George's stock.
+    sellPrice: 500,
   },
   {
     id: "spirit-orb",

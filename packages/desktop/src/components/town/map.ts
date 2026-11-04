@@ -282,6 +282,7 @@ export const SPOT_NAMES: Record<string, string> = {
   market: "Plutus",
   tower_guard: "Tower Guard",
   pip: "Pip",
+  nakata: "Nakata",
 };
 
 /** The centre of a cell, in world (x, z). */
@@ -635,6 +636,33 @@ export function serializeMap(map: TownMap): string {
   }
 }
 `;
+}
+
+/** Where a pet on foot (the cat spirit) may walk: within `reach` of the
+ * island's middle, and not on open water. Cached per map and reach. */
+const petWalkCache = new WeakMap<
+  TownMap,
+  Map<number, (x: number, z: number) => boolean>
+>();
+export function petWalkable(
+  map: TownMap,
+  reach: number,
+): (x: number, z: number) => boolean {
+  let byReach = petWalkCache.get(map);
+  if (!byReach) {
+    byReach = new Map();
+    petWalkCache.set(map, byReach);
+  }
+  let fn = byReach.get(reach);
+  if (!fn) {
+    fn = (x, z) => {
+      if (Math.hypot(x, z) > reach) return false;
+      const [col, row] = cellAt(map, x, z);
+      return !isOpenWater(map, col, row);
+    };
+    byReach.set(reach, fn);
+  }
+  return fn;
 }
 
 /** Whether a cell blocks walking: open water (a bridge doesn't). */

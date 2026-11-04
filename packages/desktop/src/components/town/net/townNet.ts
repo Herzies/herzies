@@ -23,7 +23,7 @@ import { TownConnection, type TownTicket } from "./TownConnection";
  * so popping out for a moment doesn't look like leaving to everyone else. */
 const LINGER_MS = 90_000;
 /** No input for this long shows the herzie as away. */
-const AFK_MS = 2 * 60_000;
+export const AFK_MS = 2 * 60_000;
 
 let ticketSource: (map: TownMapId) => Promise<TownTicket> = async (map) => {
   const t = await herzies.fetchTownTicket(

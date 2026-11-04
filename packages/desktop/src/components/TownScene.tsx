@@ -15,6 +15,10 @@ import {
   MEDEA_KEY,
   MEDEA_SEED,
   MEDEA_STAGE,
+  NAKATA_EQUIPPED,
+  NAKATA_KEY,
+  NAKATA_SEED,
+  NAKATA_STAGE,
   NANDOR_EQUIPPED,
   NANDOR_SEED,
   ORPHIEZ_EQUIPPED,
@@ -95,6 +99,12 @@ export function lookOf(card: EventCard): Look {
       };
     case PIP_KEY:
       return { seed: PIP_SEED, stage: PIP_STAGE, equipped: PIP_EQUIPPED };
+    case NAKATA_KEY:
+      return {
+        seed: NAKATA_SEED,
+        stage: NAKATA_STAGE,
+        equipped: NAKATA_EQUIPPED,
+      };
     case TOWER_GUARD_KEY:
       return {
         seed: TOWER_GUARD_SEED,

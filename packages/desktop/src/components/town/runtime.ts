@@ -35,6 +35,10 @@ export type TownRuntime = {
   /** The camera's azimuth (camera-controls' convention: 0 puts the camera
    * on the target's +z side). Movement is relative to it. */
   cameraAzimuth: number;
+  /** Whether a pet on foot (the cat spirit) can walk straight from one
+   * point to another in the Town: nothing solid in the way, no water. Set by
+   * the player (it has the physics world); remote players' cats ask it too. */
+  petClear?: (ax: number, az: number, bx: number, bz: number) => boolean;
 };
 
 export const TownRuntimeContext = createContext<TownRuntime | null>(null);

@@ -85,6 +85,15 @@ import {
   stepAnimation,
 } from "./animation.js";
 import {
+  type CatHost,
+  type CatState,
+  catHasCaught,
+  newCatState,
+  REST_SIT,
+  stepCat,
+} from "./cat.js";
+import { CatModel, poseCat } from "./catModel.js";
+import {
   type CompanionHost,
   type CompanionState,
   newCompanionState,
@@ -268,6 +277,9 @@ export type ClothDetail = "full" | "half" | "frozen";
 /** A herzie with no arms (stage 1) grows a little hand to cast with: this
  * big, as a fraction of its head. */
 const POP_HAND = 0.3;
+/** The cat spirit's item id: it walks (cat.ts) rather than floats. */
+export const SLEPTWELL_ID = "sleptwell";
+
 /** World units per creature unit: the renderer's whole frame (at the
  * herzie's centre) is 4.5 world units tall, the size the sprites were. */
 export const MODEL_SCALE = 4.5 / CREATURE_FRAME_HEIGHT;
@@ -764,6 +776,27 @@ export class HerzieModel {
   /** The floating companion, flying after the herzie; null when it has none,
    * or its scenery is anchored (then the companion stays put with it). */
   private readonly follower: Follower | null;
+  /** Sleptwell, the cat spirit, walking after it (cat.ts); null without.
+   * `pinned`: sat still beside it (a herzie on its own stage). */
+  private readonly cat: {
+    model: CatModel;
+    state: CatState;
+    host: CatHost;
+    pinned: boolean;
+  } | null = null;
+  /** Something nearby for its cat to look at (Nakata), or null. */
+  catGlanceAt: THREE.Vector3 | null = null;
+  /** Away from the keyboard: its cat curls up asleep. */
+  afk = false;
+  /** The land under its cat: its height, and whether it can walk there
+   * (the Town sets these from its map; flat and everywhere without). */
+  groundAt: ((x: number, z: number) => number) | null = null;
+  walkable: ((x: number, z: number) => boolean) | null = null;
+  /** Whether its cat can walk straight from one point to another: nothing
+   * in the way, no water (the Town asks its physics). Water only without. */
+  pathClear:
+    | ((ax: number, az: number, bx: number, bz: number) => boolean)
+    | null = null;
   private readonly meshes: THREE.Mesh[] = [];
   private readonly materials: THREE.ShaderMaterial[] = [];
   /** Creature-space y of the feet, and of the scheme's painted span. */
@@ -907,6 +940,49 @@ export class HerzieModel {
     this.follower = anchoring
       ? null
       : makeFollower(spheres, feet, companionSeed);
+    if (look.equipped?.spirit === SLEPTWELL_ID) {
+      let reachOut = 0;
+      for (const s of spheres) {
+        if (floats(s) || s.part === "ground") continue;
+        reachOut = Math.max(
+          reachOut,
+          Math.hypot(s.center[0], s.center[2]) + s.radius,
+        );
+      }
+      const clearance = reachOut * MODEL_SCALE;
+      const model = new CatModel(this.scheme, options.lighting);
+      for (const m of model.materials)
+        if (m instanceof THREE.ShaderMaterial) this.materials.push(m);
+      const state = newCatState(companionSeed);
+      if (anchoring) {
+        // Sat beside it, toward the viewer (the stage's camera is at +z):
+        // its spot is laid out from a herzie facing away, so it lands there,
+        // then turned to face out and a little in.
+        const host: CatHost = {
+          position: new THREE.Vector3(),
+          heading: Math.PI,
+          scale: 1,
+          clearance: Math.max(0.6, clearance - 0.25),
+        };
+        stepCat(state, host, 0, 0);
+        state.heading = -0.5;
+        state.rest = REST_SIT;
+        state.still = 5;
+        this.cat = { model, state, host, pinned: true };
+      } else {
+        this.cat = {
+          model,
+          state,
+          host: {
+            position: new THREE.Vector3(),
+            heading: 0,
+            scale: 1,
+            clearance: clearance + 0.1,
+          },
+          pinned: false,
+        };
+      }
+    }
     this.surgeCore = -1;
     for (let i = 0; i < spheres.length; i++) {
       const s = spheres[i];
@@ -1100,6 +1176,13 @@ export class HerzieModel {
       facing.add(this.anchored);
       this.root.add(facing);
     }
+    if (this.cat) {
+      this.root.add(this.cat.model.group);
+      // Walking: unseen until the first step puts it by the herzie, where
+      // the host has put it by then.
+      if (this.cat.pinned) poseCat(this.cat.model, this.cat.state, 1);
+      else this.cat.model.group.visible = false;
+    }
     this.pose();
     this.animateBody();
     this.drawCloak();
@@ -1255,7 +1338,40 @@ export class HerzieModel {
     this.animateBody();
     this.drawCloak();
     this.follow(dt, speed);
+    this.stepCatAlong(dt, speed);
     this.sparkles?.update(dt);
+  }
+
+  /** Walks its cat on after it (or keeps it sat, pinned), and poses it. */
+  private stepCatAlong(dt: number, speed: number) {
+    const cat = this.cat;
+    if (!cat) return;
+    const { host, state, model } = cat;
+    if (cat.pinned) {
+      host.dancing = this.danceWeight > 0.5;
+      stepCat(state, host, 0, dt);
+      // Pinned in its own stage's space: no root to move it through.
+      poseCat(model, state, 1);
+      return;
+    }
+    this.root.updateWorldMatrix(true, false);
+    this.root.getWorldPosition(host.position);
+    host.scale = this.root.getWorldScale(scratchScale).y;
+    host.heading = this.heading;
+    host.dancing = this.danceWeight > 0.5;
+    host.sitting = this.sitting;
+    host.afk = this.afk;
+    host.groundAt = this.groundAt ?? undefined;
+    host.walkable = this.walkable ?? undefined;
+    host.clear = this.pathClear ?? undefined;
+    state.glanceAt = this.catGlanceAt;
+    if (dt <= 0 && !state.started) return;
+    stepCat(state, host, speed, dt);
+    model.group.visible = true;
+    // Posed in world terms, then brought into the root's space (which
+    // carries the herzie's scale already).
+    poseCat(model, state, 1);
+    this.root.worldToLocal(model.group.position);
   }
 
   /**
@@ -1388,12 +1504,33 @@ export class HerzieModel {
 
   /** Whether it has a floating companion of its own (a spirit) to send. */
   get hasCompanion(): boolean {
-    return this.follower !== null;
+    return this.follower !== null || (this.cat !== null && !this.cat.pinned);
+  }
+
+  /** How its companion gets about: flying (a spirit) or on foot (the
+   * cat); null with none. */
+  get companionKind(): "flyer" | "walker" | null {
+    if (this.cat && !this.cat.pinned) return "walker";
+    return this.follower ? "flyer" : null;
+  }
+
+  /** On foot, sent to fetch: whether it has pounced on it yet. */
+  get companionCaught(): boolean {
+    return this.cat !== null && catHasCaught(this.cat.state);
   }
 
   /** Sends the companion to `point` (world space) and keeps it there until
    * called again with null, when it flies back to its herzie. */
   fetch(point: THREE.Vector3 | null): void {
+    const cat = this.cat;
+    if (cat && !cat.pinned) {
+      if (!point) cat.state.target = null;
+      else {
+        cat.state.target ??= new THREE.Vector3();
+        cat.state.target.copy(point);
+      }
+      return;
+    }
     const f = this.follower;
     if (!f) return;
     if (!point) {
@@ -1406,6 +1543,8 @@ export class HerzieModel {
 
   /** Where the companion is (world space, its core); null with none. */
   companionPosition(out: THREE.Vector3): THREE.Vector3 | null {
+    // The cat carries in its mouth.
+    if (this.cat && !this.cat.pinned) return this.cat.model.mouthPosition(out);
     return this.follower ? out.copy(this.follower.state.position) : null;
   }
 
@@ -2294,7 +2433,13 @@ export class HerzieModel {
   petrify(): void {
     const stone = new THREE.Color("#b6b1a7");
     for (const m of this.materials) {
-      for (const name of ["uShades", "uRamp", "uLining", "uTrim"] as const) {
+      for (const name of [
+        "uShades",
+        "uRamp",
+        "uLining",
+        "uTrim",
+        "uPatch",
+      ] as const) {
         if (!m.uniforms[name]) continue;
         for (const c of m.uniforms[name].value as THREE.Color[]) {
           const l = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
@@ -2306,6 +2451,8 @@ export class HerzieModel {
 
   dispose() {
     this.sparkles?.dispose();
+    // Its cat's own (not its shaded ones, already in materials).
+    this.cat?.model.dispose();
     for (const m of this.materials) m.dispose();
     // Its own, unlike the shared part geometries.
     this.cloak?.geometry.dispose();

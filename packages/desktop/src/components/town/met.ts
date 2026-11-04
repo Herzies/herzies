@@ -1,6 +1,7 @@
 import {
   BOBOKU_KEY,
   MEDEA_KEY,
+  NAKATA_KEY,
   PIP_KEY,
   TOWER_GUARD_KEY,
 } from "@herzies/shared";
@@ -21,6 +22,7 @@ const STORAGE_KEY = "herzies.town.met";
 export const RESIDENTS: ReadonlySet<string> = new Set([
   BOBOKU_KEY,
   MEDEA_KEY,
+  NAKATA_KEY,
   PIP_KEY,
   TOWER_GUARD_KEY,
 ]);

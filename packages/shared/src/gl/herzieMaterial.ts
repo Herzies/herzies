@@ -59,6 +59,11 @@ const vertexShader = /* glsl */ `
 #include <common>
 #include <fog_pars_vertex>
 #include <shadowmap_pars_vertex>
+#include <skinning_pars_vertex>
+#ifdef PATCH
+attribute float coat;
+varying float vPatch;
+#endif
 varying vec3 vWorldNormal;
 varying vec3 vLocalNormal;
 varying float vWorldY;
@@ -75,6 +80,15 @@ void main() {
   #ifdef CLOTH
   vUv = uv;
   #endif
+  #ifdef PATCH
+  vPatch = coat;
+  #endif
+  // Bent by its bones on a skinned mesh (the cat); as is otherwise.
+  vec3 objectNormal = normal;
+  vec3 transformed = position;
+  #include <skinbase_vertex>
+  #include <skinnormal_vertex>
+  #include <skinning_vertex>
   #ifdef METAL
   // Round its axis (the geometry's y), the way a lathe turned it: its
   // grooves run this way.
@@ -84,15 +98,15 @@ void main() {
   #endif
   // The geometry's own normal is in creature space (y down), the space the
   // ray caster's textures are laid out in.
-  vLocalNormal = normal;
-  vWorldNormal = normalize(mat3(modelMatrix) * normal);
-  vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+  vLocalNormal = objectNormal;
+  vWorldNormal = normalize(mat3(modelMatrix) * objectNormal);
+  vec4 worldPosition = modelMatrix * vec4(transformed, 1.0);
   vWorldY = worldPosition.y;
   vWorldPos = worldPosition.xyz;
   vec4 mvPosition = viewMatrix * worldPosition;
   gl_Position = projectionMatrix * mvPosition;
   // What three's shadow chunk reads, by these names.
-  vec3 transformedNormal = normalMatrix * normal;
+  vec3 transformedNormal = normalMatrix * objectNormal;
   #include <shadowmap_vertex>
   #include <fog_vertex>
 }
@@ -124,6 +138,11 @@ uniform float uOpacity;
 uniform vec4 uFlash;
 uniform vec4 uLamps[${MAX_LAMPS}];
 uniform vec3 uLampColor;
+#ifdef PATCH
+// A second coat (the cat's orange), where the geometry's patch says.
+uniform vec3 uPatch[3];
+varying float vPatch;
+#endif
 varying vec3 vWorldNormal;
 varying vec3 vLocalNormal;
 varying float vWorldY;
@@ -350,6 +369,10 @@ void main() {
   } else {
     color = uShades[shade];
   }
+  #ifdef PATCH
+  vec3 coatShade = shade == 2 ? uPatch[2] : shade == 1 ? uPatch[1] : uPatch[0];
+  color = mix(color, coatShade, smoothstep(0.4, 0.6, vPatch));
+  #endif
   #ifdef CLOTH
   color = trim ? band3(uTrim, shade) : outside ? color : band3(uLining, shade);
   color = clothFinish(color, n, shadow, outside, trim);
@@ -383,6 +406,9 @@ export function herzieMaterial(
   /** A cloak's cloth (see ClothShading): drawn both sides, its lining
    * inside. */
   cloth?: ClothShading,
+  /** A second coat's bands (dim, base, bright), painted where the
+   * geometry's `coat` attribute is over a half (the cat's markings). */
+  patch?: [string, string, string],
 ): THREE.ShaderMaterial {
   const painted = shading.schemePainted && !!ramp;
   const rampColors = Array.from(
@@ -397,6 +423,7 @@ export function herzieMaterial(
   const defines: Record<string, string> = {};
   if (shading.metal) defines.METAL = "";
   if (cloth) defines.CLOTH = "";
+  if (patch) defines.PATCH = "";
   const material = new THREE.ShaderMaterial({
     vertexShader,
     fragmentShader,
@@ -433,6 +460,9 @@ export function herzieMaterial(
       uOpacity: scheme.uOpacity,
       uFlash: scheme.uFlash,
       uRadius: { value: metalRadius },
+      ...(patch && {
+        uPatch: { value: patch.map((hex) => new THREE.Color(hex)) },
+      }),
       ...(cloth && {
         uLining: { value: cloth.lining.map((hex) => new THREE.Color(hex)) },
         uTrim: { value: cloth.trim.map((hex) => new THREE.Color(hex)) },

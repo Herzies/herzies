@@ -16,6 +16,7 @@ import {
   GOLD_RAMP,
   LIGHT,
   MEDEA_RAMP,
+  NAKATA_RAMP,
   NANDOR_RAMP,
   OCEAN_RAMP,
   PIP_RAMP,
@@ -3350,6 +3351,8 @@ export const MEDEA_SCHEME_ID = "npc-medea";
 export const TOWER_GUARD_SCHEME_ID = "npc-tower-guard";
 /** Colour-scheme key for Pip's mint green, the same arrangement again. */
 export const PIP_SCHEME_ID = "npc-pip";
+/** Colour-scheme key for Nakata's greys, the same arrangement again. */
+export const NAKATA_SCHEME_ID = "npc-nakata";
 
 const COLOR_SCHEMES: Record<string, readonly string[]> = {
   prism: RAINBOW_RAMP,
@@ -3368,6 +3371,7 @@ const COLOR_SCHEMES: Record<string, readonly string[]> = {
   [MEDEA_SCHEME_ID]: MEDEA_RAMP,
   [TOWER_GUARD_SCHEME_ID]: TOWER_GUARD_RAMP,
   [PIP_SCHEME_ID]: PIP_RAMP,
+  [NAKATA_SCHEME_ID]: NAKATA_RAMP,
 };
 
 /** True for spheres that a colour scheme is allowed to repaint. */

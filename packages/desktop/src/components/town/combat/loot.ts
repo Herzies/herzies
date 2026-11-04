@@ -71,6 +71,15 @@ export const LOOT = {
    * far of you. */
   spiritAbsorbMs: 320,
   deliverRadius: 1.8,
+  /** A cat (a spirit on foot) fetching: it gives up after this long, plus
+   * this much per unit it had to go (it can't get there: water). Picks it
+   * up in this long, carries it this big, and has brought it once it's
+   * within catDeliverRadius (it keeps a step off to the side). */
+  catPatienceMs: 2_500,
+  catMsPerUnit: 280,
+  catPickupMs: 180,
+  catCarryScale: 0.4,
+  catDeliverRadius: 2.8,
   /** The name shows within this far. */
   labelRadius: 8,
   /** Pillars by tier (common..mythic): height and brightness. */

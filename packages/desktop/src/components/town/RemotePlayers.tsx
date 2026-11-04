@@ -38,12 +38,12 @@ import { assistTarget, type Vec3, waveField } from "./combat/waves";
 import { applyDowned, entityDown } from "./downed";
 import { footprints, Trail } from "./footprints";
 import { HeadBubble } from "./HeadBubble";
-import { groundY, type TownMap } from "./map";
+import { groundY, petWalkable, type TownMap, worldRadius } from "./map";
 import { ICE_SPEED, onIce } from "./movement";
 import { NAME_SHADOW, nameOpacity } from "./nameFade";
 import type { RemotePlayer, TownConnection } from "./net/TownConnection";
 import { useTownNetVersion } from "./net/townNet";
-import { townSave } from "./runtime";
+import { townSave, useTownRuntime } from "./runtime";
 
 /** Everyone else in the Town. */
 export function RemotePlayers({
@@ -99,11 +99,17 @@ function RemoteHerzie({
 }) {
   const { look } = remote;
   const lookKey = JSON.stringify(look);
+  const rt = useTownRuntime();
   // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the look's content
   const herzie = useMemo(
     () => new HerzieModel(look, { seed: remote.id * 7, lighting: ambient }),
     [lookKey, remote.id],
   );
+  useEffect(() => {
+    // Its cat spirit (if it has one) walks the same ground, round water.
+    herzie.groundAt = (x, z) => groundY(map, x, z);
+    herzie.walkable = petWalkable(map, worldRadius(map));
+  }, [herzie, map]);
   useEffect(() => {
     herzie.root.visible = false;
     return () => {
@@ -214,6 +220,10 @@ function RemoteHerzie({
     // On ice their legs go as fast as their steps would take them on the
     // ground (see movement.ts). Whether they're pushing isn't sent, so a
     // glide still steps.
+    // Its cat spirit (if it has one) sees walls as ours does, and sleeps
+    // while they're away.
+    herzie.pathClear = rt.petClear ?? null;
+    herzie.afk = (s.flags & TOWN_FLAG_AFK) !== 0;
     herzie.update(
       dt,
       onIce(map, s.x, s.z, seasonNow.look.ice) ? s.speed / ICE_SPEED : s.speed,

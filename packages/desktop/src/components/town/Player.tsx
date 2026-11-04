@@ -1,4 +1,9 @@
-import { getHerzieStats, SH, TOWN_SPRINT_SPEED } from "@herzies/shared";
+import {
+  getHerzieStats,
+  NAKATA_KEY,
+  SH,
+  TOWN_SPRINT_SPEED,
+} from "@herzies/shared";
 import { HerzieModel, WALK_SPEED } from "@herzies/shared/gl";
 import { Html } from "@react-three/drei";
 import { useFrame, useThree } from "@react-three/fiber";
@@ -26,7 +31,7 @@ import { keepAtHome } from "./HomeLayer";
 import { HomeShadow } from "./HomeShadow";
 import { homeMode } from "./homeMode";
 import type { TownInput } from "./input";
-import { groundY, type TownMap } from "./map";
+import { groundY, petWalkable, type TownMap } from "./map";
 import {
   ICE_GRIP,
   type Mover,
@@ -34,7 +39,7 @@ import {
   stepMover,
   walkAzimuth,
 } from "./movement";
-import { townNet } from "./net/townNet";
+import { AFK_MS, townNet } from "./net/townNet";
 import { warpAmount } from "./portal";
 import { townLive, townSave, useTownRuntime } from "./runtime";
 
@@ -119,7 +124,12 @@ export function Player({
   respawn?: number;
 }) {
   const rt = useTownRuntime();
-  const { world } = useRapier();
+  const { world, rapier } = useRapier();
+  /** The cat spirit's look ahead: is the way clear? (see petClear) */
+  const petRay = useMemo(
+    () => new rapier.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1 }),
+    [rapier],
+  );
   const body = useRef<RapierRigidBody>(null);
   const collider = useRef<RapierCollider>(null);
   const mover = useRef<Mover>({ vx: 0, vz: 0, heading: townSave.heading });
@@ -177,6 +187,54 @@ export function Player({
       }),
     [look.seed, look.stage, equippedKey],
   );
+  useEffect(() => {
+    // Its cat spirit (if it has one) walks the same ground, round water.
+    herzie.groundAt = (x, z) => groundY(map, x, z);
+    const walkable = petWalkable(map, reach);
+    herzie.walkable = walkable;
+    // Whether it can walk straight there: dry all the way, and nothing
+    // solid (a wall, a tree, a stall) at a cat's height.
+    const clear = (ax: number, az: number, bx: number, bz: number) => {
+      const dx = bx - ax;
+      const dz = bz - az;
+      const d = Math.hypot(dx, dz);
+      const n = Math.max(1, Math.ceil(d / 0.3));
+      for (let i = 1; i <= n; i++) {
+        if (!walkable(ax + (dx * i) / n, az + (dz * i) / n)) return false;
+      }
+      if (d < 1e-4) return true;
+      petRay.origin.x = ax;
+      petRay.origin.y = groundY(map, ax, az) + 0.3;
+      petRay.origin.z = az;
+      petRay.dir.x = dx / d;
+      petRay.dir.y = 0;
+      petRay.dir.z = dz / d;
+      return !world.castRay(
+        petRay,
+        d,
+        true,
+        rapier.QueryFilterFlags.EXCLUDE_SENSORS,
+        undefined,
+        undefined,
+        body.current ?? undefined,
+      );
+    };
+    herzie.pathClear = clear;
+    rt.petClear = clear;
+    // And looks over at Nakata, who talks to cats, when it's near him.
+    const nakata = map.spots[NAKATA_KEY];
+    herzie.catGlanceAt = nakata
+      ? new THREE.Vector3(
+          nakata[0],
+          groundY(map, nakata[0], nakata[1]) + 1.6,
+          nakata[1],
+        )
+      : null;
+    return () => {
+      herzie.pathClear = null;
+      if (rt.petClear === clear) rt.petClear = undefined;
+    };
+  }, [herzie, map, reach, world, rapier, petRay, rt]);
   useEffect(() => {
     herzie.heading = townSave.heading;
     // Drawn at Home too, over the fading world (see HomeLayer).
@@ -457,6 +515,8 @@ export function Player({
     herzie.setAccessories(homeMode.accessories);
     // Set down facing Home's camera, as Home's own view faced them.
     herzie.setAccessoryHeading(homeMode.azimuth ?? herzie.heading);
+    // Its cat spirit (if it has one) curls up when the player's away.
+    herzie.afk = performance.now() - townLive.lastInputAt > AFK_MS;
     herzie.update(
       dt,
       ice.current.on

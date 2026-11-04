@@ -25,6 +25,7 @@ export * from "./lastfm-link.js";
 export * from "./leveling.js";
 export * from "./market.js";
 export * from "./medea.js";
+export * from "./nakata.js";
 export * from "./name.js";
 export * from "./npc-looks.js";
 export * from "./pip.js";
