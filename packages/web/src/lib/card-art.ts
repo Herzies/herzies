@@ -2,6 +2,7 @@ import type { CardIllustration } from "@herzies/shared";
 import rawCardArt from "@herzies/shared/card-art/card-art.json";
 import clouds from "@herzies/shared/card-art/clouds.webp";
 import poseidonsGift from "@herzies/shared/card-art/poseidons-gift.webp";
+import sleptwell from "@herzies/shared/card-art/sleptwell.webp";
 import stars from "@herzies/shared/card-art/stars.webp";
 
 /** Commissioned card illustrations, keyed by item id (the desktop's item
@@ -15,6 +16,7 @@ const CARD_ART: Partial<Record<string, { file?: string; artist?: string }>> =
 const CARD_ART_URLS: Record<string, string> = {
   "clouds.webp": clouds.src,
   "poseidons-gift.webp": poseidonsGift.src,
+  "sleptwell.webp": sleptwell.src,
   "stars.webp": stars.src,
 };
 
