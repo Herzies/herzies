@@ -2659,8 +2659,14 @@ async fn sync_tick_with(
         if let Some(emotes) = sync_resp.emotes.clone() {
             s.emotes = emotes;
         }
+        // Whether this sync filled the resonance (see crystal_became_full);
+        // announced below, once the state's out.
+        let mut crystal_filled = false;
         if let Some(ref crystal) = sync_resp.crystal {
-            s.accept_crystal(crystal);
+            let before = s.crystal.clone();
+            if s.accept_crystal(crystal) {
+                crystal_filled = state::crystal_became_full(before.as_ref(), crystal);
+            }
         }
 
         // Guarded on its own epoch rather than drop_epoch/equip_epoch: buying
@@ -2776,6 +2782,13 @@ async fn sync_tick_with(
             } else {
                 *last = false;
             }
+        }
+
+        if crystal_filled {
+            let title = "Your resonance is full";
+            let body = "Attune at the Crystal in Town to collect it. Past full, it only charges at a quarter speed.";
+            send_notification(app, title, body, None);
+            let _ = app.emit("activity", format!("{}: {}", title, body));
         }
 
         // Show server-sent notifications (item drops, etc.)

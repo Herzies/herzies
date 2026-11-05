@@ -335,9 +335,71 @@ pub fn compute_is_connected(
     is_logged_in && (last_sync_ok || ms_since_reachable < crate::api::REACHABLE_GRACE_MS)
 }
 
+/// The Crystal is on and its resonance holds all it can (or more).
+pub fn crystal_full(crystal: &serde_json::Value) -> bool {
+    let capacity = crystal["capacity"].as_f64().unwrap_or(0.0);
+    crystal["enabled"].as_bool().unwrap_or(false)
+        && capacity > 0.0
+        && crystal["fill"].as_f64().unwrap_or(0.0) >= capacity
+}
+
+/// The resonance filled up between two pictures of the Crystal: worth a
+/// notification. Only a change seen this session counts: with no picture
+/// before (just launched), a Crystal that's already full says nothing, so
+/// every launch doesn't announce it again.
+pub fn crystal_became_full(before: Option<&serde_json::Value>, after: &serde_json::Value) -> bool {
+    before.is_some_and(|b| !crystal_full(b)) && crystal_full(after)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn crystal(enabled: bool, fill: f64, capacity: f64) -> serde_json::Value {
+        serde_json::json!({ "enabled": enabled, "fill": fill, "capacity": capacity })
+    }
+
+    #[test]
+    fn crystal_filling_up_is_announced_once() {
+        assert!(crystal_became_full(
+            Some(&crystal(true, 179.0, 180.0)),
+            &crystal(true, 180.0, 180.0)
+        ));
+        // Overcharging on from full: already said.
+        assert!(!crystal_became_full(
+            Some(&crystal(true, 180.0, 180.0)),
+            &crystal(true, 190.0, 180.0)
+        ));
+        // Still charging.
+        assert!(!crystal_became_full(
+            Some(&crystal(true, 10.0, 180.0)),
+            &crystal(true, 20.0, 180.0)
+        ));
+    }
+
+    #[test]
+    fn crystal_full_at_launch_or_switched_off_is_quiet() {
+        assert!(!crystal_became_full(None, &crystal(true, 180.0, 180.0)));
+        assert!(!crystal_became_full(
+            Some(&crystal(false, 0.0, 180.0)),
+            &crystal(false, 180.0, 180.0)
+        ));
+        assert!(!crystal_became_full(
+            Some(&crystal(true, 0.0, 0.0)),
+            &crystal(true, 0.0, 0.0)
+        ));
+    }
+
+    #[test]
+    fn crystal_grown_past_its_fill_can_fill_again() {
+        // An upgrade raised the capacity: no longer full, so the next fill
+        // is news again.
+        assert!(!crystal_full(&crystal(true, 180.0, 240.0)));
+        assert!(crystal_became_full(
+            Some(&crystal(true, 180.0, 240.0)),
+            &crystal(true, 240.0, 240.0)
+        ));
+    }
 
     #[test]
     fn logged_out_is_never_connected() {
