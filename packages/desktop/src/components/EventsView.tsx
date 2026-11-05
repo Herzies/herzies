@@ -1044,7 +1044,7 @@ function EventsViewImpl({
           childrenClassName="flex min-h-0 flex-col"
           backButton={back}
         >
-          <CrystalPanel />
+          <CrystalPanel paused={!active || !focused} />
         </ScreenView>
       );
     }

@@ -574,29 +574,81 @@
   pointer-events: none;
 }
 
-/* The Crystal's window (components/CrystalPanel.tsx). */
-@keyframes crystal-float {
+/* The Crystal's window (components/CrystalPanel.tsx): the size ladder. */
+/* The size it's at, breathing. Whole sprite pixels (4px): no blur. */
+@keyframes crystal-bob {
   0%,
   100% {
     transform: translateY(0);
   }
   50% {
-    transform: translateY(-6px);
+    transform: translateY(-4px);
   }
 }
-/* A glint drifting up through an unlocked size block, twinkling out. */
-@keyframes crystal-spark {
-  0% {
-    opacity: 0;
-    transform: translateY(0) scale(0.5);
+/* The next size, waiting: its outline glows in and out. */
+@keyframes crystal-next {
+  0%,
+  100% {
+    opacity: 0.55;
   }
-  25% {
+  50% {
     opacity: 1;
-    transform: translateY(-6px) scale(1);
+  }
+}
+/* A size lighting up: squashed small, springs past full and settles,
+   flashing white as it lands. */
+@keyframes crystal-pop {
+  0% {
+    transform: scale(0.4, 0.2);
+    filter: brightness(3);
+  }
+  35% {
+    transform: scale(1.3, 1.4);
+    filter: brightness(2.2);
+  }
+  60% {
+    transform: scale(0.92, 0.9);
+    filter: brightness(1.3);
+  }
+  80% {
+    transform: scale(1.04, 1.05);
+  }
+  100% {
+    transform: scale(1);
+    filter: brightness(1);
+  }
+}
+/* Its sparks, thrown out to --dx/--dy and winking out. */
+@keyframes crystal-burst {
+  0% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.5);
+  }
+  65% {
+    opacity: 1;
   }
   100% {
     opacity: 0;
-    transform: translateY(-22px) scale(0.4);
+    transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy)))
+      scale(0.5);
+  }
+}
+@keyframes crystal-text-pop {
+  0% {
+    transform: scale(1.25);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+/* Grow, when you can afford it: a soft cyan pulse round the button. */
+@keyframes crystal-ready {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(127, 232, 255, 0);
+  }
+  50% {
+    box-shadow: 0 0 10px 0 rgba(127, 232, 255, 0.45);
   }
 }
 @media (prefers-reduced-motion: reduce) {

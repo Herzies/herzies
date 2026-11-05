@@ -2,8 +2,23 @@ import { useFrame } from "@react-three/fiber";
 import { CylinderCollider } from "@react-three/rapier";
 import { useLayoutEffect, useMemo } from "react";
 import * as THREE from "three";
-import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { ambient, inSeason } from "./ambient";
+import {
+  CRYSTAL_GEOMETRY,
+  type CrystalUniforms,
+  crystalMaterial,
+  FLOAT_Y,
+  HALO_GEOMETRY,
+  haloMaterial,
+  MOTE_GEOMETRY,
+  motesMaterial,
+  PLINTH_GEOMETRY,
+  PLINTH_R,
+  RING_GEOMETRY,
+  ringMaterial,
+  SHARD_GEOMETRY,
+  SHARD_SPOTS,
+} from "./crystalModel";
 import { crystalAlwaysShown, crystalLive, useCrystal } from "./crystalState";
 import { cellCenter, groundY, objectAt, type TownMap } from "./map";
 import { townSave } from "./runtime";
@@ -54,274 +69,12 @@ export function crystalNear(
 
 const uCharge = { value: 0 };
 const uBurst = { value: 0 };
-
-/** Where the crystal floats, over the plinth's top. */
-const FLOAT_Y = 1.75;
-const PLINTH_R = 0.85;
-
-/** Paint a part one colour, for merging. */
-function part(g: THREE.BufferGeometry, color: string): THREE.BufferGeometry {
-  const out = g.index ? g.toNonIndexed() : g;
-  out.deleteAttribute("uv");
-  const c = new THREE.Color(color);
-  out.setAttribute(
-    "color",
-    new THREE.Float32BufferAttribute(
-      Array.from(
-        { length: out.attributes.position.count * 3 },
-        (_, i) => [c.r, c.g, c.b][i % 3],
-      ),
-      3,
-    ),
-  );
-  return out;
-}
-
-/** The plinth: two stepped hexagons of stone with a few rocks at the foot. */
-function plinthGeometry(): THREE.BufferGeometry {
-  const parts: THREE.BufferGeometry[] = [
-    part(
-      new THREE.CylinderGeometry(PLINTH_R, PLINTH_R * 1.1, 0.3, 6).translate(
-        0,
-        0.15,
-        0,
-      ),
-      "#8f8a94",
-    ),
-    part(
-      new THREE.CylinderGeometry(PLINTH_R * 0.7, PLINTH_R * 0.8, 0.5, 6)
-        .rotateY(Math.PI / 6)
-        .translate(0, 0.55, 0),
-      "#a39fab",
-    ),
-    part(
-      new THREE.CylinderGeometry(PLINTH_R * 0.5, PLINTH_R * 0.62, 0.12, 6)
-        .rotateY(Math.PI / 6)
-        .translate(0, 0.86, 0),
-      "#7d7887",
-    ),
-  ];
-  // Rocks round the foot, and a few small shards grown out of them.
-  for (let i = 0; i < 5; i++) {
-    const a = (i / 5) * Math.PI * 2 + 0.4;
-    const r = PLINTH_R * 1.15;
-    parts.push(
-      part(
-        new THREE.DodecahedronGeometry(0.14 + (i % 2) * 0.06)
-          .scale(1, 0.7, 1)
-          .translate(Math.cos(a) * r, 0.06, Math.sin(a) * r),
-        i % 2 ? "#8a8592" : "#9c97a3",
-      ),
-    );
-  }
-  return mergeGeometries(parts) as THREE.BufferGeometry;
-}
-const PLINTH_GEOMETRY = plinthGeometry();
+/** The Town's Crystals share one set: they show the same resonance. */
+const uniforms: CrystalUniforms = { uTime: ambient.uTime, uCharge, uBurst };
 
 const plinthMaterial = inSeason(
   new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }),
 );
-
-/** The crystal: a long octahedron, flat-faceted. */
-const CRYSTAL_GEOMETRY = (() => {
-  const g = new THREE.OctahedronGeometry(0.42, 0).scale(1, 1.9, 1);
-  return g.toNonIndexed();
-})();
-/** Small shards that orbit it. */
-const SHARD_GEOMETRY = new THREE.OctahedronGeometry(0.11, 0)
-  .scale(1, 1.8, 1)
-  .toNonIndexed();
-
-const DIM = new THREE.Color("#3a5f8a");
-const LIT = new THREE.Color("#7fe8ff");
-const HOT = new THREE.Color("#f2fbff");
-
-/** Facets lit by the charge: deep blue when empty, glassy aqua as it fills,
- * near white and shimmering once overcharged. A rim light keeps the shape
- * readable at night. */
-function crystalMaterial(): THREE.ShaderMaterial {
-  return new THREE.ShaderMaterial({
-    uniforms: {
-      ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog),
-      uTime: ambient.uTime,
-      uCharge,
-      uBurst,
-      uDim: { value: DIM },
-      uLit: { value: LIT },
-      uHot: { value: HOT },
-    },
-    vertexShader: /* glsl */ `
-      #include <common>
-      #include <fog_pars_vertex>
-      varying vec3 vNormal;
-      varying vec3 vView;
-      varying float vH;
-      void main() {
-        vNormal = normalize(normalMatrix * normal);
-        vH = position.y;
-        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-        vView = normalize(-mvPosition.xyz);
-        gl_Position = projectionMatrix * mvPosition;
-        #include <fog_vertex>
-      }
-    `,
-    fragmentShader: /* glsl */ `
-      #include <common>
-      #include <fog_pars_fragment>
-      uniform float uTime;
-      uniform float uCharge;
-      uniform float uBurst;
-      uniform vec3 uDim;
-      uniform vec3 uLit;
-      uniform vec3 uHot;
-      varying vec3 vNormal;
-      varying vec3 vView;
-      varying float vH;
-      void main() {
-        float fill = clamp(uCharge, 0.0, 1.0);
-        float over = clamp(uCharge - 1.0, 0.0, 1.0);
-        // Faster pulse the fuller it is.
-        float pulse = 0.5 + 0.5 * sin(uTime * mix(1.2, 3.6, fill));
-        vec3 base = mix(uDim, uLit, fill);
-        // Facet shading: a fixed key light so the facets read.
-        float facet = 0.55 + 0.45 * max(0.0, dot(vNormal, normalize(vec3(0.4, 0.8, 0.5))));
-        vec3 col = base * facet;
-        // Light rising through it, stronger with the charge.
-        float band = smoothstep(-0.8, 0.8, vH) * (0.25 + 0.75 * fill);
-        col += uLit * band * (0.25 + 0.35 * pulse) * fill;
-        // Overcharged: a slow white shimmer.
-        col = mix(col, uHot, over * (0.25 + 0.25 * sin(uTime * 5.0 + vH * 6.0)));
-        // Rim.
-        float rim = pow(1.0 - max(0.0, dot(vNormal, vView)), 2.0);
-        col += uLit * rim * (0.35 + 0.65 * fill);
-        // The attune flash.
-        col = mix(col, uHot, uBurst);
-        gl_FragColor = vec4(col, 1.0);
-        #include <colorspace_fragment>
-        #include <fog_fragment>
-      }
-    `,
-    fog: true,
-  });
-}
-
-/** A soft glow behind it, always facing the camera. */
-function haloMaterial(): THREE.ShaderMaterial {
-  return new THREE.ShaderMaterial({
-    uniforms: { uTime: ambient.uTime, uCharge, uBurst, uLit: { value: LIT } },
-    vertexShader: /* glsl */ `
-      varying vec2 vUv;
-      void main() {
-        vUv = uv;
-        // Billboard: keep the quad square to the camera.
-        vec4 mv = modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0);
-        mv.xy += position.xy;
-        gl_Position = projectionMatrix * mv;
-      }
-    `,
-    fragmentShader: /* glsl */ `
-      uniform float uTime;
-      uniform float uCharge;
-      uniform float uBurst;
-      uniform vec3 uLit;
-      varying vec2 vUv;
-      void main() {
-        float r = length(vUv - 0.5) * 2.0;
-        float fill = clamp(uCharge, 0.0, 1.3);
-        float pulse = 0.85 + 0.15 * sin(uTime * mix(1.2, 3.6, min(fill, 1.0)));
-        float a = (1.0 - smoothstep(0.0, 1.0, r));
-        a = a * a * (0.08 + 0.5 * fill * pulse) + uBurst * (1.0 - r);
-        gl_FragColor = vec4(uLit * max(a, 0.0), 1.0);
-        #include <colorspace_fragment>
-      }
-    `,
-    transparent: true,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-  });
-}
-const HALO_GEOMETRY = new THREE.PlaneGeometry(3.2, 3.2);
-
-/** Motes drifting up and round it. More of them, and quicker, the fuller it
- * is: a mote only shows if its seed is under the charge. */
-function motesMaterial(): THREE.ShaderMaterial {
-  return new THREE.ShaderMaterial({
-    uniforms: { uTime: ambient.uTime, uCharge, uLit: { value: LIT } },
-    vertexShader: /* glsl */ `
-      uniform float uTime;
-      uniform float uCharge;
-      attribute float aSeed;
-      varying float vAlpha;
-      void main() {
-        float fill = clamp(uCharge, 0.0, 1.5);
-        float speed = mix(0.12, 0.4, min(fill, 1.0)) + max(0.0, fill - 1.0) * 0.4;
-        float t = fract(uTime * speed + aSeed * 13.0);
-        float a = aSeed * 60.0 + t * 3.0;
-        float r = mix(0.95, 0.35, t) + 0.15 * sin(aSeed * 91.0);
-        vec3 p = vec3(cos(a) * r, -1.4 + t * 2.6, sin(a) * r);
-        float shown = step(aSeed, 0.08 + fill * 0.92);
-        vAlpha = shown * smoothstep(0.0, 0.2, t) * (1.0 - smoothstep(0.7, 1.0, t));
-        vec4 mv = modelViewMatrix * vec4(p, 1.0);
-        gl_PointSize = max(1.0, 0.06 * 200.0 / -mv.z);
-        gl_Position = projectionMatrix * mv;
-      }
-    `,
-    fragmentShader: /* glsl */ `
-      uniform vec3 uLit;
-      varying float vAlpha;
-      void main() {
-        vec2 c = gl_PointCoord - 0.5;
-        float a = (1.0 - smoothstep(0.15, 0.5, length(c))) * vAlpha;
-        gl_FragColor = vec4(mix(uLit, vec3(1.0), 0.5) * a, 1.0);
-        #include <colorspace_fragment>
-      }
-    `,
-    transparent: true,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-  });
-}
-const MOTES = 64;
-const MOTE_GEOMETRY = (() => {
-  const g = new THREE.BufferGeometry();
-  g.setAttribute(
-    "position",
-    new THREE.BufferAttribute(new Float32Array(MOTES * 3), 3),
-  );
-  const seeds = new Float32Array(MOTES);
-  for (let i = 0; i < MOTES; i++) seeds[i] = (i + 0.5) / MOTES;
-  g.setAttribute("aSeed", new THREE.BufferAttribute(seeds, 1));
-  return g;
-})();
-
-/** The ring that rolls out along the ground when you attune. */
-function ringMaterial(): THREE.ShaderMaterial {
-  return new THREE.ShaderMaterial({
-    uniforms: { uBurst, uLit: { value: LIT } },
-    vertexShader: /* glsl */ `
-      varying vec2 vUv;
-      void main() {
-        vUv = uv;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      }
-    `,
-    fragmentShader: /* glsl */ `
-      uniform float uBurst;
-      uniform vec3 uLit;
-      varying vec2 vUv;
-      void main() {
-        float r = length(vUv - 0.5) * 2.0;
-        float band = smoothstep(0.75, 0.95, r) * (1.0 - smoothstep(0.95, 1.0, r));
-        gl_FragColor = vec4(uLit * band * uBurst, 1.0);
-        #include <colorspace_fragment>
-      }
-    `,
-    transparent: true,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-  });
-}
-const RING_GEOMETRY = new THREE.PlaneGeometry(2, 2).rotateX(-Math.PI / 2);
 
 /** How long the attune flash lasts, seconds. */
 const BURST_SECONDS = 1.4;
@@ -331,10 +84,10 @@ const ANIMATE_REACH = 60;
 function OneCrystal({ spot }: { spot: CrystalSpot }) {
   const materials = useMemo(
     () => ({
-      crystal: crystalMaterial(),
-      halo: haloMaterial(),
-      motes: motesMaterial(),
-      ring: ringMaterial(),
+      crystal: crystalMaterial(uniforms),
+      halo: haloMaterial(uniforms),
+      motes: motesMaterial(uniforms),
+      ring: ringMaterial(uniforms),
     }),
     [],
   );
@@ -405,22 +158,16 @@ function OneCrystal({ spot }: { spot: CrystalSpot }) {
         }}
         position-y={FLOAT_Y}
       >
-        {[0, 1, 2].map((i) => {
-          const a = (i / 3) * Math.PI * 2;
-          return (
-            <mesh
-              key={i}
-              geometry={SHARD_GEOMETRY}
-              material={materials.crystal}
-              position={[
-                Math.cos(a) * 0.75,
-                (i - 1) * 0.18,
-                Math.sin(a) * 0.75,
-              ]}
-              rotation-z={0.3 * (i - 1)}
-            />
-          );
-        })}
+        {SHARD_SPOTS.map((s, i) => (
+          <mesh
+            // biome-ignore lint/suspicious/noArrayIndexKey: fixed shards
+            key={i}
+            geometry={SHARD_GEOMETRY}
+            material={materials.crystal}
+            position={s.position}
+            rotation-z={s.tilt}
+          />
+        ))}
       </group>
       <mesh
         geometry={HALO_GEOMETRY}

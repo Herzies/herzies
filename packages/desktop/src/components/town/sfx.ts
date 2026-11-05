@@ -788,6 +788,15 @@ export function sfxCrystalLevel(): void {
   tone(a, "sine", 3136, 3136, 0.03, 0.004, 0.5, 0.12);
 }
 
+/** The Crystal poked in its window: a small glassy plink. */
+export function sfxCrystalBoop(): void {
+  const a = audio();
+  if (!a) return;
+  const f = 1320 + Math.random() * 220;
+  tone(a, "triangle", f, f * 1.5, 0.06, 0.003, 0.18);
+  tone(a, "sine", f * 2, f * 2, 0.025, 0.003, 0.3, 0.05);
+}
+
 /** The XP counting up: a faint tick, pitched up as it goes (0..1). */
 export function sfxCrystalTick(progress: number): void {
   const a = audio();

@@ -26,7 +26,8 @@
 // it a cloak (troubadour-mantle, groove-cape, drumhide-cloak, tailwind-cloak).
 // `?home=1` starts at Home (town/homeMode); H goes Home and back, walking
 // leaves it. `?crystal=0.6` puts a Crystal by the spawn, 60% charged (`2`
-// for overcharged); E on it plays a made-up payout (`&finds=` how many,
+// for overcharged; `&tier=` its size, `&crystalOpen=1` opens its window);
+// E on it plays a made-up payout (`&finds=` how many,
 // `&xp=` how much). `drop()` drops something round you as listening does
 // (`drop("ghost")` that item; `drop(5)` five), `take()` has the server take
 // the oldest back (a spirit's sweep), and `?ground=boombox` gives the
@@ -37,6 +38,8 @@ import {
   CLASS_DEFS,
   CRYSTAL_KEY,
   type CrystalState,
+  crystalCapacity,
+  crystalUpgradeCost,
   getItem,
   type ItemUnit,
   isHerzieClass,
@@ -45,7 +48,7 @@ import {
   totalXpForLevel,
 } from "@herzies/shared";
 import type { RootState } from "@react-three/fiber";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { CrystalPanel } from "./components/CrystalPanel";
 import { Notices } from "./components/Notices";
@@ -88,6 +91,7 @@ import { dayOfYear } from "./components/town/Seasons";
 import { CastBar, SkillHud } from "./components/town/SkillHud";
 import TownCanvas from "./components/town/TownCanvas";
 import { setVitals } from "./components/town/vitals";
+import { HerzieStageContext, overlayHerzieStage } from "./lib/overlayStage";
 import { herzies } from "./tauri-bridge";
 
 const params = new URLSearchParams(location.search);
@@ -562,13 +566,14 @@ if (crystalParam !== null) {
       }
   const xp = Number(params.get("xp") ?? 3400);
   const finds = Number(params.get("finds") ?? 7);
+  const tier = Number(params.get("tier") ?? 0);
   const crystal: CrystalState = {
     enabled: true,
-    fill: charge * 180,
-    capacity: 180,
+    fill: charge * crystalCapacity(tier),
+    capacity: crystalCapacity(tier),
     xp,
     dropsWaiting: finds,
-    tier: 0,
+    tier,
     attunes: 0,
     shards: Number(params.get("shards") ?? 4),
   };
@@ -623,14 +628,34 @@ if (crystalParam !== null) {
   };
   herzies.upgradeCrystal = async () => {
     const now = getCrystal() ?? crystal;
+    const cost = crystalUpgradeCost(now.tier) ?? 0;
+    await new Promise((r) => setTimeout(r, 350));
     const next = {
       ...now,
       tier: now.tier + 1,
-      capacity: now.capacity + 60,
-      shards: now.shards - 3,
+      capacity: crystalCapacity(now.tier + 1),
+      shards: now.shards - cost,
     };
-    return { ok: true as const, cost: 3, crystal: next };
+    return { ok: true as const, cost, crystal: next };
   };
+}
+
+/** The herzie stage hosted inside a window, as OverlayWindow does. */
+function SandboxOverlayStage({ children }: { children: React.ReactNode }) {
+  const host = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    overlayHerzieStage.setHost(host.current);
+  }, []);
+  const value = useMemo(
+    () => ({ stage: overlayHerzieStage, inOverlay: true, skySlot: null }),
+    [],
+  );
+  return (
+    <HerzieStageContext.Provider value={value}>
+      <div ref={host} className="pointer-events-none absolute inset-0" />
+      <div className="relative z-[2] flex flex-col">{children}</div>
+    </HerzieStageContext.Provider>
+  );
 }
 
 /**
@@ -640,7 +665,9 @@ if (crystalParam !== null) {
  */
 function Sandbox() {
   const [bubbles, setBubbles] = useState<ChatBubbles>(new Map());
-  const [crystalOpen, setCrystalOpen] = useState(false);
+  const [crystalOpen, setCrystalOpen] = useState(
+    params.get("crystalOpen") === "1",
+  );
   useEffect(() => {
     let n = 0;
     Object.assign(window, {
@@ -711,8 +738,14 @@ function Sandbox() {
           so the herzie stage can draw over it. */}
       <BossResults />
       {crystalOpen ? (
-        <div className="absolute top-12 right-3 z-40 flex w-[300px] flex-col rounded-xl border border-white/15 bg-black/70 p-3 backdrop-blur-md">
-          <CrystalPanel />
+        <div className="absolute top-12 right-3 z-40 flex w-[300px] flex-col rounded-xl border border-white/15 p-3">
+          {/* The glass on a layer of its own: a blur on the window itself
+              would make the stage's fixed canvas sit relative to it. */}
+          <div className="pointer-events-none absolute inset-0 rounded-xl bg-black/70 backdrop-blur-md" />
+          {/* Its own stage, as the app's windows give theirs. */}
+          <SandboxOverlayStage>
+            <CrystalPanel />
+          </SandboxOverlayStage>
           <button
             type="button"
             className="btn mt-2"
