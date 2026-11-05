@@ -28,6 +28,8 @@
 // Daily craving selection and matching.
 export * from "./classes.js";
 export * from "./craving.js";
+// The Crystal: listening XP + drops you cash in by attuning.
+export * from "./crystal.js";
 // Genre vocabulary and classification of raw provider tags.
 export * from "./genres.js";
 // Item catalog, rarity and drop weighting, equip slots, bank capacity.

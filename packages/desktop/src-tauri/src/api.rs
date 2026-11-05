@@ -435,6 +435,48 @@ pub async fn api_collect_drop(
     }))
 }
 
+/// POSTs to an Edge Function and returns its JSON, with the server's error
+/// message on a refusal.
+async fn api_function(
+    client: &Client,
+    name: &str,
+    body: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let url = format!("{}/{}", functions_base(), name);
+    let anon = supabase_anon_key();
+    let resp = api_fetch_full(client, reqwest::Method::POST, &url, Some(body), Some(&anon))
+        .await
+        .ok_or_else(|| "Network error".to_string())?;
+    let status = resp.status();
+    let text = resp.text().await.map_err(|e| format!("Read error: {e}"))?;
+    let data: serde_json::Value =
+        serde_json::from_str(&text).map_err(|_| format!("Server returned {status}"))?;
+    if !status.is_success() {
+        let msg = data["error"].as_str().unwrap_or("Unknown error");
+        return Err(msg.to_string());
+    }
+    Ok(data)
+}
+
+/// Cashes in the Crystal (supabase/functions/attune-crystal). `attunes` is
+/// the count the client last saw; a stale one pays nothing.
+pub async fn api_attune_crystal(
+    client: &Client,
+    attunes: u32,
+) -> Result<serde_json::Value, String> {
+    api_function(
+        client,
+        "attune-crystal",
+        serde_json::json!({ "attunes": attunes }),
+    )
+    .await
+}
+
+/// Grows the Crystal a tier for shards (supabase/functions/upgrade-crystal).
+pub async fn api_upgrade_crystal(client: &Client) -> Result<serde_json::Value, String> {
+    api_function(client, "upgrade-crystal", serde_json::json!({})).await
+}
+
 /// Dev-only: spawns a real, pickup-able world drop for the "Spawn Item
 /// Drop"/"Spawn Dice Drop" debug buttons in Settings (see
 /// supabase/functions/debug-spawn-drop — that endpoint is further restricted

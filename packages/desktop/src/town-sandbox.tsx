@@ -25,7 +25,9 @@
 // with the default prism skin is the full Prismatic set), and `?back=` gives
 // it a cloak (troubadour-mantle, groove-cape, drumhide-cloak, tailwind-cloak).
 // `?home=1` starts at Home (town/homeMode); H goes Home and back, walking
-// leaves it. `drop()` drops something round you as listening does
+// leaves it. `?crystal=0.6` puts a Crystal by the spawn, 60% charged (`2`
+// for overcharged); E on it plays a made-up payout (`&finds=` how many,
+// `&xp=` how much). `drop()` drops something round you as listening does
 // (`drop("ghost")` that item; `drop(5)` five), `take()` has the server take
 // the oldest back (a spirit's sweep), and `?ground=boombox` gives the
 // herzie a ground accessory to fade in at Home.
@@ -33,19 +35,26 @@ import "./globals.css";
 import {
   basicAttack,
   CLASS_DEFS,
+  CRYSTAL_KEY,
+  type CrystalState,
+  getItem,
   type ItemUnit,
   isHerzieClass,
   SH,
   signTownTicket,
+  totalXpForLevel,
 } from "@herzies/shared";
 import type { RootState } from "@react-three/fiber";
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { CrystalPanel } from "./components/CrystalPanel";
 import { Notices } from "./components/Notices";
+import { PlayerBars } from "./components/PlayerBars";
 import type { EventCard } from "./components/TownScene";
 import { TownVitals } from "./components/TownVitals";
 import { BossHud } from "./components/town/BossHud";
 import { BossResults } from "./components/town/BossResults";
+import { CRYSTAL, crystalsOf } from "./components/town/Crystal";
 import { setCave } from "./components/town/cave";
 import {
   bubbleDuration,
@@ -57,6 +66,7 @@ import {
 } from "./components/town/combat/results";
 import { setArmed, setMySkills } from "./components/town/combat/skills";
 import { combat } from "./components/town/combat/state";
+import { getCrystal, setCrystal } from "./components/town/crystalState";
 import { localHours } from "./components/town/DayCycle";
 import { homeDropFeed } from "./components/town/dropSpots";
 import { setOwnedEmotes } from "./components/town/emotes";
@@ -64,6 +74,7 @@ import { setTowerOpen } from "./components/town/gates";
 import { Hotbar } from "./components/town/Hotbar";
 import { homeMode } from "./components/town/homeMode";
 import { assignHotbar } from "./components/town/hotbarSlots";
+import { cellAt, objectAt } from "./components/town/map";
 import { setTownTicketSource, townNet } from "./components/town/net/townNet";
 import {
   goToMap,
@@ -527,6 +538,101 @@ herzies.collectDrop = async (dropId: string) => {
   return true;
 };
 
+// ?crystal=<charge>: a Crystal by the spawn, and a made-up payout.
+const crystalParam = params.get("crystal");
+if (crystalParam !== null) {
+  const charge = Number(crystalParam) || 0;
+  const [sc, sr] = cellAt(HOME_MAP, ...HOME_MAP.spawn.at);
+  const placed = crystalsOf(HOME_MAP).length > 0;
+  // The nearest clear grass cell 3–5 cells off the spawn.
+  outer: for (let r = placed ? 6 : 3; r <= 5; r++)
+    for (let dc = -r; dc <= r; dc++)
+      for (const dr of [-r, r]) {
+        const col = sc + dc;
+        const row = sr + dr;
+        if (
+          objectAt(HOME_MAP, col, row) !== "." ||
+          HOME_MAP.terrain[row]?.[col] !== "g"
+        )
+          continue;
+        const line = HOME_MAP.objects[row];
+        HOME_MAP.objects[row] =
+          `${line.slice(0, col)}${CRYSTAL}${line.slice(col + 1)}`;
+        break outer;
+      }
+  const xp = Number(params.get("xp") ?? 3400);
+  const finds = Number(params.get("finds") ?? 7);
+  const crystal: CrystalState = {
+    enabled: true,
+    fill: charge * 180,
+    capacity: 180,
+    xp,
+    dropsWaiting: finds,
+    tier: 0,
+    attunes: 0,
+    shards: Number(params.get("shards") ?? 4),
+  };
+  setCrystal(crystal);
+  const pool = [
+    "stars",
+    "clouds",
+    "headphones",
+    "ghost",
+    "blood-moon",
+    "rainbow-headband",
+    "sleptwell",
+  ];
+  herzies.attuneCrystal = async (attunes: number) => {
+    const items = Array.from({ length: finds }, (_, i) => {
+      const id = pool[(i * 3 + attunes) % pool.length];
+      const def = getItem(id);
+      return {
+        itemId: id,
+        name: def?.name ?? id,
+        rarity: def?.rarity ?? "common",
+      };
+    });
+    const after = {
+      ...crystal,
+      fill: 0,
+      xp: 0,
+      dropsWaiting: 0,
+      attunes: attunes + 1,
+    };
+    // Out onto the ground, as the app does with the server's list.
+    const pendingDrops = [
+      ...homeDropFeed.drops,
+      ...items.map((it) => ({
+        id: `sandbox-crystal-${Date.now()}-${dropSeq++}`,
+        itemId: it.itemId,
+        droppedAt: new Date().toISOString(),
+      })),
+    ];
+    homeDropFeed.set(pendingDrops);
+    return {
+      ok: true as const,
+      xp,
+      levelBefore: 7,
+      levelAfter: 9,
+      items,
+      dropsLeft: 0,
+      groundFull: false,
+      crystal: after,
+      pendingDrops,
+    };
+  };
+  herzies.upgradeCrystal = async () => {
+    const now = getCrystal() ?? crystal;
+    const next = {
+      ...now,
+      tier: now.tier + 1,
+      capacity: now.capacity + 60,
+      shards: now.shards - 3,
+    };
+    return { ok: true as const, cost: 3, crystal: next };
+  };
+}
+
 /**
  * The sandbox's Town, with chat bubbles driven from the console:
  * `say("bot-seed-3", "hello")` (a friend code, or a bot's seed; the player's
@@ -534,6 +640,7 @@ herzies.collectDrop = async (dropId: string) => {
  */
 function Sandbox() {
   const [bubbles, setBubbles] = useState<ChatBubbles>(new Map());
+  const [crystalOpen, setCrystalOpen] = useState(false);
   useEffect(() => {
     let n = 0;
     Object.assign(window, {
@@ -594,12 +701,33 @@ function Sandbox() {
           critDamage: Number(params.get("cd") ?? 0),
           moveSpeed: 0,
         }}
-        onOpen={(key) => console.log("[town-sandbox] open", key)}
+        onOpen={(key) => {
+          console.log("[town-sandbox] open", key);
+          if (key === CRYSTAL_KEY) setCrystalOpen(true);
+        }}
         onNearChange={(s) => console.log("[town-sandbox] near", s?.key ?? null)}
       />
       {/* After the canvas, as in TownWorld: it has no z-index of its own,
           so the herzie stage can draw over it. */}
       <BossResults />
+      {crystalOpen ? (
+        <div className="absolute top-12 right-3 z-40 flex w-[300px] flex-col rounded-xl border border-white/15 bg-black/70 p-3 backdrop-blur-md">
+          <CrystalPanel />
+          <button
+            type="button"
+            className="btn mt-2"
+            onClick={() => setCrystalOpen(false)}
+          >
+            Close
+          </button>
+        </div>
+      ) : null}
+      <PlayerBars
+        level={7}
+        progress={0.3}
+        xp={totalXpForLevel(7) + 400}
+        className="absolute top-3 left-3 z-30 w-[160px]"
+      />
       <SkyControls />
     </div>
   );

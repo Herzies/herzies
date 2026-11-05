@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { cn } from "../../lib/utils";
+import { crystalCast } from "./attune";
 import { domeOver } from "./combat/domes";
 import { bossFight } from "./combat/fight";
 import { buffOn, skills } from "./combat/skills";
@@ -139,26 +140,33 @@ export function CastBar({ className }: { className?: string }) {
         slam && now < slam.dueAt
           ? { from: slam.castAt, until: slam.dueAt }
           : undefined;
-      const ch = wind ?? (mine && now < mine.until ? mine : saving);
-      const kind = wind
-        ? "slam"
-        : ch === mine && ch
-          ? "mine"
-          : ch
-            ? "saving"
-            : "";
+      // Attuning to the Crystal (town/attune) — out of a fight, so it never
+      // meets the others.
+      const attune = crystalCast.active ? crystalCast : undefined;
+      const ch = attune ?? wind ?? (mine && now < mine.until ? mine : saving);
+      const kind = attune
+        ? "crystal"
+        : wind
+          ? "slam"
+          : ch === mine && ch
+            ? "mine"
+            : ch
+              ? "saving"
+              : "";
       if (box.current && label.current && fill.current) {
         box.current.style.display = ch ? "" : "none";
         if (kind !== shown) {
           shown = kind;
           label.current.textContent =
-            kind === "slam"
-              ? "Rimshot"
-              : kind === "mine"
-                ? "Resurrect · hold still"
-                : kind === "saving"
-                  ? "A Bard is bringing you back…"
-                  : "";
+            kind === "crystal"
+              ? "Attuning"
+              : kind === "slam"
+                ? "Rimshot"
+                : kind === "mine"
+                  ? "Resurrect · hold still"
+                  : kind === "saving"
+                    ? "A Bard is bringing you back…"
+                    : "";
           box.current.dataset.kind = kind;
         }
         if (ch) fill.current.style.width = `${progress(ch, now) * 100}%`;
@@ -174,19 +182,20 @@ export function CastBar({ className }: { className?: string }) {
       ref={box}
       role="status"
       className={cn(
-        "group pointer-events-none absolute z-30 w-48 rounded-md border border-white/15 bg-black/65 px-2 py-1 text-center text-[11px] backdrop-blur-sm",
+        // Frosted like the player card (PLAYER_CARD_TOWN), even padding.
+        "group pointer-events-none absolute z-30 w-48 rounded-xl border border-white/12 bg-black/45 p-2 text-center text-[11px] backdrop-blur-md",
         className,
       )}
       style={{ display: "none" }}
     >
       <div
         ref={label}
-        className="leading-4 text-[#ffd84a] group-data-[kind=saving]:text-[#7ee2a8]"
+        className="leading-4 text-[#ffd84a] group-data-[kind=crystal]:text-[#7fe8ff] group-data-[kind=saving]:text-[#7ee2a8]"
       />
-      <div className="mt-0.5 h-1.5 overflow-hidden rounded-sm bg-white/15">
+      <div className="mt-1 h-1.5 overflow-hidden rounded-sm bg-white/15">
         <div
           ref={fill}
-          className="h-full bg-[#ffd84a] group-data-[kind=saving]:bg-[#7ee2a8]"
+          className="h-full bg-[#ffd84a] group-data-[kind=crystal]:bg-[#7fe8ff] group-data-[kind=saving]:bg-[#7ee2a8]"
         />
       </div>
     </div>

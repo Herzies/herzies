@@ -1,4 +1,5 @@
 import type { HerzieClass } from "./classes.js";
+import type { CrystalState } from "./crystal.js";
 import type { Equipped, HerzieStats, ItemUnit } from "./items.js";
 import type { SkillId } from "./skills.js";
 import type { StatPoints } from "./stats.js";
@@ -164,6 +165,8 @@ export interface SyncResponse {
   /** The herzie's class skills, once it has a class. Absent from an older
    * server, or before a class is chosen. */
   skills?: HerzieSkill[];
+  /** The Crystal (00140). Absent from an older server. */
+  crystal?: CrystalState;
 }
 
 /** One skill a herzie knows (public.herzie_skills). */

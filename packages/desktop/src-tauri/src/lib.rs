@@ -813,6 +813,65 @@ async fn claim_quest(
     Ok(data)
 }
 
+/// Attunes to the Crystal: rolls its drops onto the ground and hands its XP
+/// to the next sync. `attunes` is the count the UI last saw, so a double
+/// press pays once. The finds are put in `pending_drops` at once, so they
+/// come out of their black holes now rather than at the next sync; XP (and
+/// the Level Up notices) lands with that sync, seconds later.
+#[tauri::command]
+async fn attune_crystal(
+    attunes: u32,
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    let client = api::http();
+    let data = api::api_attune_crystal(&client, attunes).await?;
+    let changed = {
+        let mut s = state.lock().unwrap();
+        let mut changed = s.accept_crystal(&data["crystal"]);
+        // Show the XP now; the sync that lands it is seconds away.
+        let paid = data["xp"].as_f64().unwrap_or(0.0);
+        if data["ok"].as_bool() == Some(true) && paid > 0.0 {
+            let shown = s
+                .xp_floor
+                .filter(|(_, at)| at.elapsed().as_secs() < 60)
+                .map(|(xp, _)| xp);
+            let base = s.herzie.as_ref().map(|h| h.xp).unwrap_or(0.0);
+            let base = shown.map_or(base, |f| f.max(base));
+            s.xp_floor = Some((base + paid, std::time::Instant::now()));
+            changed = true;
+        }
+        if let Ok(drops) = serde_json::from_value::<Vec<PendingDrop>>(data["pendingDrops"].clone())
+        {
+            // The whole ground as the server has it now; a sync already in
+            // flight predates it and mustn't put the old list back.
+            s.pending_drops = drops;
+            s.bump_drop_epoch();
+            changed = true;
+        }
+        changed
+    };
+    if changed {
+        emit_state_update(&app);
+    }
+    Ok(data)
+}
+
+/// Spends Crystal Shards to grow the Crystal a tier.
+#[tauri::command]
+async fn upgrade_crystal(
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    let client = api::http();
+    let data = api::api_upgrade_crystal(&client).await?;
+    let changed = state.lock().unwrap().accept_crystal(&data["crystal"]);
+    if changed {
+        emit_state_update(&app);
+    }
+    Ok(data)
+}
+
 #[tauri::command]
 async fn buy_from_medea(
     item_id: String,
@@ -2600,6 +2659,9 @@ async fn sync_tick_with(
         if let Some(emotes) = sync_resp.emotes.clone() {
             s.emotes = emotes;
         }
+        if let Some(ref crystal) = sync_resp.crystal {
+            s.accept_crystal(crystal);
+        }
 
         // Guarded on its own epoch rather than drop_epoch/equip_epoch: buying
         // changes inventory without touching either of those, so overloading
@@ -2882,6 +2944,8 @@ pub fn run() {
             fetch_quests,
             accept_quest,
             claim_quest,
+            attune_crystal,
+            upgrade_crystal,
             buy_from_medea,
             market_list,
             market_cancel,

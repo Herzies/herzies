@@ -444,6 +444,18 @@ verify_jwt = true
 import_map = "./functions/deno.json"
 entrypoint = "./functions/collect-drop/index.ts"
 
+[functions.attune-crystal]
+enabled = true
+verify_jwt = true
+import_map = "./functions/deno.json"
+entrypoint = "./functions/attune-crystal/index.ts"
+
+[functions.upgrade-crystal]
+enabled = true
+verify_jwt = true
+import_map = "./functions/deno.json"
+entrypoint = "./functions/upgrade-crystal/index.ts"
+
 [analytics]
 enabled = true
 port = 54327

@@ -56,6 +56,15 @@ pub struct ManagedState {
     /// refetches on coming back from checkout). Not cached: it's an empty
     /// Alt bar for the moment before that first fetch.
     pub emotes: Vec<String>,
+    /// The Crystal (CrystalState in @herzies/shared), from the last sync or
+    /// attune that carried it. Passed through as-is; see `accept_crystal`.
+    pub crystal: Option<serde_json::Value>,
+    /// What the herzie's XP comes to once an attune's payout lands, and
+    /// when it was paid. The XP goes through `pending_xp`, so the server
+    /// only adds it on the next sync; until then (or a minute) the UI shows
+    /// at least this much, so the exp bar fills the moment you attune and
+    /// a sync that left before the attune can't drag it back.
+    pub xp_floor: Option<(f64, std::time::Instant)>,
     /// The class skills, from the last sync that carried them.
     pub skills: Vec<HerzieSkill>,
     /// Friend profiles keyed by friend code (persisted when codes match).
@@ -158,6 +167,8 @@ impl ManagedState {
             units,
             bank_expansions,
             emotes: Vec::new(),
+            crystal: None,
+            xp_floor: None,
             skills: Vec::new(),
             friends: crate::storage::load_friends_cache(&friend_codes),
             pending_trade_request: None,
@@ -229,20 +240,44 @@ impl ManagedState {
     /// writer for those fields and nothing for a later sync to clobber.
     fn display_herzie(&self) -> Option<Herzie> {
         let herzie = self.herzie.as_ref()?;
+        // An attune's XP, shown before the sync that lands it.
+        let floor = self
+            .xp_floor
+            .filter(|(xp, at)| *xp > herzie.xp && at.elapsed().as_secs() < 60)
+            .map(|(xp, _)| xp);
+        if let Some(floor) = floor {
+            let (xp, level, stage) =
+                crate::game::project_xp(herzie.xp, herzie.level, herzie.stage, floor - herzie.xp);
+            let mut paid = herzie.clone();
+            paid.xp = xp;
+            paid.level = level;
+            paid.stage = stage;
+            paid.total_minutes_listened += self.pending_minutes.max(0.0);
+            return Some(paid);
+        }
         if self.pending_minutes <= 0.01 {
             return Some(herzie.clone());
         }
 
-        // Same no-multiplier estimate the old local-application path used —
-        // a display approximation only; the server remains authoritative.
-        let xp_gain = crate::game::calculate_xp_gain(self.pending_minutes, &[]);
-        let (xp, level, stage) =
-            crate::game::project_xp(herzie.xp, herzie.level, herzie.stage, xp_gain);
-
         let mut projected = herzie.clone();
-        projected.xp = xp;
-        projected.level = level;
-        projected.stage = stage;
+        // With the Crystal on, listening XP waits in the Crystal rather than
+        // landing on the herzie: projecting it here would tick the exp bar
+        // up only for the next sync to put it back.
+        let crystal_on = self
+            .crystal
+            .as_ref()
+            .and_then(|c| c["enabled"].as_bool())
+            .unwrap_or(false);
+        if !crystal_on {
+            // Same no-multiplier estimate the old local-application path used —
+            // a display approximation only; the server remains authoritative.
+            let xp_gain = crate::game::calculate_xp_gain(self.pending_minutes, &[]);
+            let (xp, level, stage) =
+                crate::game::project_xp(herzie.xp, herzie.level, herzie.stage, xp_gain);
+            projected.xp = xp;
+            projected.level = level;
+            projected.stage = stage;
+        }
         projected.total_minutes_listened += self.pending_minutes;
         Some(projected)
     }
@@ -270,6 +305,7 @@ impl ManagedState {
             units: self.units.clone(),
             bank_expansions: self.bank_expansions,
             emotes: self.emotes.clone(),
+            crystal: self.crystal.clone(),
             skills: self.skills.clone(),
             friends: self.friends.clone(),
             pending_trade_request: self.pending_trade_request.clone(),
@@ -388,6 +424,8 @@ mod tests {
             units: Vec::new(),
             bank_expansions: 0,
             emotes: Vec::new(),
+            crystal: None,
+            xp_floor: None,
             skills: Vec::new(),
             friends: HashMap::new(),
             pending_trade_request: None,
@@ -441,5 +479,27 @@ mod tests {
     fn display_herzie_none_when_no_herzie() {
         let state = test_state(None, 5.0);
         assert!(state.display_herzie().is_none());
+    }
+}
+
+impl ManagedState {
+    /// Take a Crystal state from the server unless it's older than the one we
+    /// hold: a sync that left before an attune comes back with the Crystal as
+    /// it was, and must not refill the one that was just emptied. Every attune
+    /// bumps `attunes`, so a lower count is always the older picture.
+    pub fn accept_crystal(&mut self, next: &serde_json::Value) -> bool {
+        if !next.is_object() {
+            return false;
+        }
+        let held = self
+            .crystal
+            .as_ref()
+            .and_then(|c| c["attunes"].as_u64())
+            .unwrap_or(0);
+        if next["attunes"].as_u64().unwrap_or(0) < held {
+            return false;
+        }
+        self.crystal = Some(next.clone());
+        true
     }
 }

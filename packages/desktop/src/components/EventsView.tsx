@@ -8,6 +8,7 @@ import type {
 import {
   BOBOKU_KEY,
   BOBOKU_NAME,
+  CRYSTAL_KEY,
   getHerzieStats,
   getHerzieStatsFromUnits,
   getItem,
@@ -49,6 +50,7 @@ import {
 import { BackButton } from "./BackButton";
 import { BossFightHelp, BossFightPanel, makeDebugBoss } from "./BossFightPanel";
 import { BulletinPanel } from "./BulletinPanel";
+import { CrystalPanel } from "./CrystalPanel";
 import ItemInspectOverlay, {
   INSPECT_ORIGIN_ATTR,
   inspectOrigin,
@@ -1028,6 +1030,21 @@ function EventsViewImpl({
           backButton={back}
         >
           <NakataPanel equipped={equipped} paused={!active || !focused} />
+        </ScreenView>
+      );
+    }
+
+    if (selected === CRYSTAL_KEY) {
+      return (
+        <ScreenView
+          inPanel={screenInPanel}
+          ownName
+          title="The Crystal"
+          colour="cyan"
+          childrenClassName="flex min-h-0 flex-col"
+          backButton={back}
+        >
+          <CrystalPanel />
         </ScreenView>
       );
     }

@@ -263,3 +263,13 @@ describe("committed maps", () => {
     expect(Object.keys(files).length).toBeGreaterThan(1);
   });
 });
+
+describe("the Crystal", () => {
+  // Listening XP and drops wait in it (see @herzies/shared crystal.ts), so
+  // the Town without one strands them. "Q" is CRYSTAL in Crystal.tsx.
+  it("stands in the Town exactly once", () => {
+    const map = parseMap(homeMap);
+    const count = map.objects.join("").split("Q").length - 1;
+    expect(count).toBe(1);
+  });
+});

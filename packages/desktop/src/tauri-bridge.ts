@@ -1,5 +1,7 @@
 import type {
   ActiveMultiplier,
+  CrystalPayoutItem,
+  CrystalState,
   Equipped,
   FriendRequestSummary,
   FriendSearchResult,
@@ -91,6 +93,25 @@ export type {
   PendingFriendRequest,
 };
 
+/** What the attune-crystal function replies (AttuneCrystalResult). */
+export type AttuneCrystalReply =
+  | {
+      ok: true;
+      xp: number;
+      levelBefore: number;
+      levelAfter: number;
+      newStage?: number;
+      items: CrystalPayoutItem[];
+      dropsLeft: number;
+      /** Too much already on the ground for everything to come out. */
+      groundFull: boolean;
+      crystal: CrystalState;
+      /** The ground as it now is, the new finds included (already applied
+       * to the app's state by the time this returns). */
+      pendingDrops: PendingDrop[];
+    }
+  | { ok: false; reason: "stale" | "not-found"; crystal?: CrystalState };
+
 export interface AppState {
   herzie: Herzie | null;
   nowPlaying: {
@@ -123,6 +144,9 @@ export interface AppState {
   emotes: string[];
   /** The class skills, once a class is chosen (from the last sync). */
   skills: HerzieSkill[];
+  /** The Crystal: what listening has stored up to attune for. Null until a
+   * server that knows about it has answered. */
+  crystal?: CrystalState | null;
   friends: Record<string, HerzieProfile>;
   pendingTradeRequest?: PendingTradeRequest | null;
   pendingFriendRequest?: PendingFriendRequest | null;
@@ -171,6 +195,8 @@ export type QuestOffer = {
 export type QuestReward = {
   coins: number;
   items?: { itemId: string; quantity: number }[];
+  /** Crystal Shards, spent to grow the Crystal. */
+  shards?: number;
 };
 
 /** A quest you hold (user_quests, 00130). */
@@ -405,6 +431,21 @@ export const herzies = {
    * `true` if it was collected, `false` if it no longer existed (e.g.
    * already collected by a racing Spirit Orb auto-collect). */
   collectDrop: (dropId: string) => invoke<boolean>("collect_drop", { dropId }),
+  /** Cash in the Crystal. `attunes` is the count the UI last saw, so a double
+   * press pays out once. Items are in the bag on return; XP lands with the
+   * next sync. */
+  attuneCrystal: (attunes: number) =>
+    invoke<AttuneCrystalReply>("attune_crystal", { attunes }),
+  /** Spend shards to grow the Crystal a tier. */
+  upgradeCrystal: () =>
+    invoke<
+      | { ok: true; cost: number; crystal: CrystalState }
+      | {
+          ok: false;
+          reason: "max-tier" | "not-enough-shards";
+          crystal: CrystalState;
+        }
+    >("upgrade_crystal"),
   /** Dev-only: spawns a real, pickup-able world drop (Settings → Debug).
    * `diceOnly` narrows the pool to dice-type items — without it, a dice
    * item is realistic-odds (rare) but impractical to hit on demand. */

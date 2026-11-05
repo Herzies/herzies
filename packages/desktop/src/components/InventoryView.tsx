@@ -71,6 +71,7 @@ import { NumberTicker } from "./NumberTicker";
 import { PromptOverlay } from "./PromptOverlay";
 import { TabButton } from "./TabButton";
 import { HoverPreview, Tooltip } from "./Tooltip";
+import { useCrystal } from "./town/crystalState";
 import { eat } from "./town/eat";
 import { assignHotbar, HOTBAR_KEYS } from "./town/hotbarSlots";
 
@@ -703,6 +704,8 @@ function InventoryViewImpl({
   extraTabs?: ExtraTab[];
 }) {
   const capacity = bankCapacity(bankExpansions);
+  // Crystal Shards, beside the coins in the footer.
+  const crystal = useCrystal();
   const [currency, setCurrency] = useState(cachedCurrency || herzie.currency);
   /** Unsettled sells. While non-zero, an incoming snapshot is behind us. */
   const [sellsInFlight, setSellsInFlight] = useState(0);
@@ -1937,7 +1940,10 @@ function InventoryViewImpl({
                 {/* No line or gap of its own: the bottom row's line is the
                     divider (a second one 8px under it read as a sliver of a
                     fourth row). */}
-                <CoinBalance amount={currency} />
+                <CoinBalance
+                  amount={currency}
+                  shards={crystal?.enabled ? crystal.shards : undefined}
+                />
               </div>
               {/* The other tabs fill what the deck and the bag take, and
                   scroll past it, so they never resize the window. Hidden,

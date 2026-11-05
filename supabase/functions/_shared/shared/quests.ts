@@ -47,12 +47,15 @@ export interface QuestReward {
   coins: number;
   /** Copies handed over with the coins (quest_claim, 00136). */
   items?: { itemId: string; quantity: number }[];
+  /** Crystal Shards, spent to grow the Crystal (quest_claim, 00140). */
+  shards?: number;
 }
 
 /** What every one of Pip's quests pays. */
 const PIP_REWARD: QuestReward = {
   coins: 500,
   items: [{ itemId: "star-candy", quantity: 10 }],
+  shards: 1,
 };
 
 export const QUESTS: readonly QuestDef[] = [

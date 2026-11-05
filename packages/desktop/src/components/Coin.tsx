@@ -76,9 +76,23 @@ export function Coin({
 
 /** The player's coin balance, right-aligned under a panel: the inventory's
  * footer, and every stall that sells for coins. */
-export function CoinBalance({ amount }: { amount: number }) {
+export function CoinBalance({
+  amount,
+  shards,
+}: {
+  amount: number;
+  /** Crystal Shards, shown to the left of the coins (the bag's footer). */
+  shards?: number;
+}) {
   return (
-    <div className="flex items-center justify-end pt-2">
+    <div className="flex items-center justify-end gap-3 pt-2">
+      {shards !== undefined ? (
+        <Tooltip
+          label={`${formatAmount(shards)} Crystal Shard${shards === 1 ? "" : "s"}`}
+        >
+          <div className="text-ui text-cyan">◆ {formatAmount(shards)}</div>
+        </Tooltip>
+      ) : null}
       <Tooltip label={`${formatAmount(amount)} herzie coins`}>
         <div className="text-ui text-cyan">
           <Coin amount={amount} animate />

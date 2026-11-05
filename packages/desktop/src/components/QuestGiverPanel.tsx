@@ -78,9 +78,14 @@ const fmt = (n: number) => n.toLocaleString();
 
 /** A reward's items in words: "10 Star Candy". */
 function rewardItems(reward: QuestReward | null | undefined): string[] {
-  return (reward?.items ?? []).map(
+  const items = (reward?.items ?? []).map(
     (it) => `${fmt(it.quantity)} ${getItem(it.itemId)?.name ?? it.itemId}`,
   );
+  const shards = reward?.shards ?? 0;
+  if (shards > 0) {
+    items.push(`${fmt(shards)} Crystal Shard${shards === 1 ? "" : "s"}`);
+  }
+  return items;
 }
 
 /**

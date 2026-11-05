@@ -62,6 +62,7 @@ import { setLootRoom } from "./components/town/combat/lootFeed";
 import { useBossResultsShown } from "./components/town/combat/results";
 import { setArmed, setMySkills } from "./components/town/combat/skills";
 import { combat } from "./components/town/combat/state";
+import { setCrystal } from "./components/town/crystalState";
 import { homeDropFeed } from "./components/town/dropSpots";
 import { setOwnedEmotes } from "./components/town/emotes";
 import { homeMode, useHomeMode } from "./components/town/homeMode";
@@ -521,6 +522,10 @@ function App() {
   useEffect(() => {
     homeDropFeed.set(state.pendingDrops ?? []);
   }, [state.pendingDrops]);
+  // The Crystal, for the Town's HUD and the 3D Crystal's glow.
+  useEffect(() => {
+    setCrystal(state.crystal);
+  }, [state.crystal]);
 
   const addLog = useCallback((message: string) => {
     const time = new Date().toISOString();

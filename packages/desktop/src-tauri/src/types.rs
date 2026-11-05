@@ -213,6 +213,9 @@ pub struct SyncResponse {
     /// list is left alone.
     #[serde(default)]
     pub emotes: Option<Vec<String>>,
+    /// The Crystal (00140). `None` from a server older than it.
+    #[serde(default)]
+    pub crystal: Option<serde_json::Value>,
     /// The class skills, once a class is chosen. `None` before then, from a
     /// server older than classes, or when the read failed: the local list is
     /// left alone.
@@ -445,6 +448,10 @@ pub struct AppState {
     /// The class skills — see `HerzieSkill`.
     #[serde(default)]
     pub skills: Vec<HerzieSkill>,
+    /// The Crystal — CrystalState in @herzies/shared. `None` until a server
+    /// that knows about it has answered.
+    #[serde(default)]
+    pub crystal: Option<serde_json::Value>,
     pub friends: HashMap<String, HerzieProfile>,
     /// Present while the server reports an incoming trade you have not joined yet.
     pub pending_trade_request: Option<PendingTradeRequest>,

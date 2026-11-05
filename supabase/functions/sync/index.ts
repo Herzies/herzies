@@ -131,6 +131,8 @@ Deno.serve(async (request) => {
       emotes: result.emotes,
       // The class skills, once a class is chosen.
       skills: result.skills,
+      // The Crystal: what listening has stored up to attune for (00140).
+      crystal: result.crystal,
     });
   } catch (err) {
     const message =

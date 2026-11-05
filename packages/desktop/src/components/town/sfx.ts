@@ -756,3 +756,42 @@ export function sfxRiftClose(): void {
   noiseBurst(a, "bandpass", 1400, 220, 1.4, 0.06, 0.22);
   tone(a, "sine", 320, 90, 0.07, 0.01, 0.2);
 }
+
+// --- The Crystal -------------------------------------------------------------
+
+/** Attuning: light gathering in the crystal, a soft glassy rise. */
+export function sfxCrystalCharge(): void {
+  const a = audio();
+  if (!a) return;
+  tone(a, "sine", 330, 990, 0.08, 0.15, 0.7);
+  tone(a, "triangle", 660, 1980, 0.03, 0.2, 0.65, 0.05);
+  noiseBurst(a, "bandpass", 1200, 5200, 4, 0.05, 0.7);
+}
+
+/** The Crystal giving up what it held: a bright glassy chord over a soft
+ * swell. */
+export function sfxCrystalBurst(): void {
+  const a = audio();
+  if (!a) return;
+  tone(a, "sine", 110, 55, 0.22, 0.01, 0.6);
+  noiseBurst(a, "highpass", 7000, 2500, 0.8, 0.12, 0.35);
+  for (const [i, f] of [784, 988, 1175, 1568, 1976].entries())
+    tone(a, "triangle", f, f, 0.07, 0.005, 1.4, 0.03 * i);
+}
+
+/** A level gained during the payout: two quick rising notes. */
+export function sfxCrystalLevel(): void {
+  const a = audio();
+  if (!a) return;
+  tone(a, "triangle", 1047, 1047, 0.1, 0.004, 0.25);
+  tone(a, "triangle", 1568, 1568, 0.1, 0.004, 0.4, 0.09);
+  tone(a, "sine", 3136, 3136, 0.03, 0.004, 0.5, 0.12);
+}
+
+/** The XP counting up: a faint tick, pitched up as it goes (0..1). */
+export function sfxCrystalTick(progress: number): void {
+  const a = audio();
+  if (!a) return;
+  const f = 1200 + progress * 1400;
+  tone(a, "sine", f, f, 0.025, 0.002, 0.05);
+}

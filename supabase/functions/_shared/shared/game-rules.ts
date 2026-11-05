@@ -32,6 +32,8 @@
 // Daily craving selection and matching.
 export * from "./classes.ts";
 export * from "./craving.ts";
+// The Crystal: listening XP + drops you cash in by attuning.
+export * from "./crystal.ts";
 // Genre vocabulary and classification of raw provider tags.
 export * from "./genres.ts";
 // Item catalog, rarity and drop weighting, equip slots, bank capacity.

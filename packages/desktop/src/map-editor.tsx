@@ -9,6 +9,7 @@ import { createRoot } from "react-dom/client";
 import type { EventCard } from "./components/TownScene";
 import { benchFacing } from "./components/town/Benches";
 import { BOARD, boardFacing } from "./components/town/Boards";
+import { showCrystalAlways } from "./components/town/crystalState";
 import { localHours } from "./components/town/DayCycle";
 import {
   buildingsOf,
@@ -56,6 +57,9 @@ import { dayOfYear } from "./components/town/Seasons";
 import { STAND, standFacing } from "./components/town/Stands";
 import TownCanvas, { PIXEL_SCALE } from "./components/town/TownCanvas";
 
+// The Crystal is drawn here even while the server has it off.
+showCrystalAlways();
+
 type Layer = "terrain" | "objects" | "heights";
 type Paint = { layer: Layer; ch: string; name: string; color: string };
 
@@ -97,6 +101,7 @@ const PALETTE: Paint[] = [
       "N",
       "D",
       "O",
+      "Q",
       "b",
       "p",
     ] as const
@@ -110,7 +115,7 @@ const PALETTE: Paint[] = [
 /** Each palette entry's key, in order (clear last): the number row, then
  * K (shop, "kiosk"), C (cave), H (auction house, "hall"), U (bush), L (lamp post), N (bench), T
  * (market stand), I (bulletin board, "info"), Y (training dummy), O
- * (portal), Z (barrel) and / (pots). Clear of the 3D preview's keys (WASD,
+ * (portal), Q (Crystal), Z (barrel) and / (pots). Clear of the 3D preview's keys (WASD,
  * arrows, E) and the tools' (B, R, F, M, P). */
 const KEYS = [
   ..."1234567890-",
@@ -125,6 +130,7 @@ const KEYS = [
   "i",
   "y",
   "o",
+  "q",
   "z",
   "/",
   "x",

@@ -74,6 +74,7 @@ export async function POST(request: Request) {
     p_xp: 0,
     p_coins: reward.coins,
     p_items: items,
+    p_shards: reward.shards ?? 0,
   });
   if (error) {
     return NextResponse.json({ error: "Failed to turn in" }, { status: 500 });

@@ -3,6 +3,7 @@
 // Run `pnpm vendor:shared` after changing the original.
 
 import type { HerzieClass } from "./classes.ts";
+import type { CrystalState } from "./crystal.ts";
 import type { Equipped, HerzieStats, ItemUnit } from "./items.ts";
 import type { SkillId } from "./skills.ts";
 import type { StatPoints } from "./stats.ts";
@@ -168,6 +169,8 @@ export interface SyncResponse {
   /** The herzie's class skills, once it has a class. Absent from an older
    * server, or before a class is chosen. */
   skills?: HerzieSkill[];
+  /** The Crystal (00140). Absent from an older server. */
+  crystal?: CrystalState;
 }
 
 /** One skill a herzie knows (public.herzie_skills). */

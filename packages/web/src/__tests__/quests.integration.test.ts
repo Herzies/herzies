@@ -159,7 +159,7 @@ describe("Quests", () => {
 
     const { data: before } = await admin()
       .from("herzies")
-      .select("currency, pending_xp")
+      .select("currency, pending_xp, crystal_shards")
       .eq("user_id", user.userId)
       .single();
 
@@ -173,6 +173,7 @@ describe("Quests", () => {
     expect(body.reward).toEqual({
       coins: 500,
       items: [{ itemId: "star-candy", quantity: 10 }],
+      shards: 1,
     });
     // The candies come with the answer, so the bank updates at once.
     expect(
@@ -182,10 +183,12 @@ describe("Quests", () => {
 
     const { data: after } = await admin()
       .from("herzies")
-      .select("currency, pending_xp")
+      .select("currency, pending_xp, crystal_shards")
       .eq("user_id", user.userId)
       .single();
     expect(after?.currency).toBe((before?.currency ?? 0) + 500);
+    // And a Crystal Shard (00140).
+    expect(after?.crystal_shards).toBe((before?.crystal_shards ?? 0) + 1);
     // Quests pay coins only.
     expect(Number(after?.pending_xp)).toBe(Number(before?.pending_xp));
 

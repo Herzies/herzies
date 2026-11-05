@@ -1,13 +1,19 @@
-import { type HerzieStats, TOWN_FLAG_SITTING } from "@herzies/shared";
+import {
+  CRYSTAL_KEY,
+  type HerzieStats,
+  TOWN_FLAG_SITTING,
+} from "@herzies/shared";
 import { Canvas, type RootState, useFrame, useThree } from "@react-three/fiber";
 import { Physics } from "@react-three/rapier";
 import { Suspense, useMemo, useRef } from "react";
 import type { Look } from "../TownScene";
 import { ambient } from "./ambient";
+import { crystalHasSomething, isAttuning, startAttune } from "./attune";
 import { benchesOf, type Seat, seatNear } from "./Benches";
 import { type Board, BULLETIN_KEY, boardNear, boardsOf } from "./Boards";
 import { CameraRig } from "./CameraRig";
 import { CaveTimer } from "./CaveTimer";
+import { type CrystalSpot, crystalNear, crystalsOf } from "./Crystal";
 import { tryEnterCave } from "./cave";
 import type { ChatBubbles } from "./chatBubbles";
 import { Boss } from "./combat/Boss";
@@ -16,6 +22,7 @@ import { CombatOverlay } from "./combat/DamageNumbers";
 import { LootDrops } from "./combat/LootDrops";
 import { Mobs } from "./combat/Mobs";
 import { Telegraphs } from "./combat/Telegraphs";
+import { getCrystal } from "./crystalState";
 import type { Hour } from "./DayCycle";
 import { driftClouds } from "./depth";
 import { isMouth, usePortalOpen } from "./gates";
@@ -91,7 +98,9 @@ export type TownCanvasProps = {
   /** What E would do at a bench or board right now — sit on one nearby,
    * stand up off it, or read the bulletin board — when that changes (null:
    * nothing). */
-  onBenchChange?: (prompt: "sit" | "stand" | "read" | null) => void;
+  onBenchChange?: (
+    prompt: "sit" | "stand" | "read" | "attune" | "upgrade" | null,
+  ) => void;
   /** The island a portal nearby leads to (E steps in), when that changes
    * (null: none near). */
   onPortalChange?: (to: TownMap | null) => void;
@@ -312,10 +321,15 @@ function Systems({
   const benches = useMemo(() => (map ? benchesOf(map) : []), [map]);
   /** The seat E would sit on, if any. */
   const seat = useRef<Seat | null>(null);
-  const prompt = useRef<"sit" | "stand" | "read" | null>(null);
+  const prompt = useRef<"sit" | "stand" | "read" | "attune" | "upgrade" | null>(
+    null,
+  );
   const boards = useMemo(() => (map ? boardsOf(map) : []), [map]);
   /** The bulletin board E would read, if any. */
   const board = useRef<Board | null>(null);
+  const crystals = useMemo(() => (map ? crystalsOf(map) : []), [map]);
+  /** The Crystal E would attune to, if any. */
+  const crystal = useRef<CrystalSpot | null>(null);
   // A shut portal (a sealed cave, the Tower out of season, a floor not
   // yet cleared): nothing to see, step into or be prompted by.
   const isOpen = usePortalOpen();
@@ -339,7 +353,11 @@ function Systems({
       onOpen(card.openKey);
     } else if (portal.current) enter(portal.current);
     else if (townLive.seat) townLive.standUp = true;
-    else if (board.current) onOpen(BULLETIN_KEY);
+    else if (crystal.current) {
+      // Something in it: attune (a cast). Nothing: its upgrade window.
+      if (crystalHasSomething()) startAttune();
+      else if (!isAttuning()) onOpen(CRYSTAL_KEY);
+    } else if (board.current) onOpen(BULLETIN_KEY);
     else if (seat.current) townLive.seat = seat.current;
   };
   const enter = (p: Portal) => {
@@ -431,14 +449,20 @@ function Systems({
     // Benches: the free seat nearest, if no one's there to talk to. A seat
     // is taken if another player is sitting on it.
     seat.current = null;
+    // Only while the server has the Crystal on (it isn't drawn otherwise).
+    crystal.current =
+      !closest && !portal.current && !townLive.seat && getCrystal()?.enabled
+        ? crystalNear(crystals, townSave.x, townSave.z)
+        : null;
     board.current =
-      !closest && !portal.current && !townLive.seat
+      !closest && !portal.current && !townLive.seat && !crystal.current
         ? boardNear(boards, townSave.x, townSave.z)
         : null;
     if (
       !closest &&
       !portal.current &&
       !townLive.seat &&
+      !crystal.current &&
       !board.current &&
       benches.length > 0
     ) {
@@ -460,11 +484,17 @@ function Systems({
     }
     const next = townLive.seat
       ? "stand"
-      : board.current
-        ? "read"
-        : seat.current
-          ? "sit"
-          : null;
+      : crystal.current
+        ? isAttuning()
+          ? null
+          : crystalHasSomething()
+            ? "attune"
+            : "upgrade"
+        : board.current
+          ? "read"
+          : seat.current
+            ? "sit"
+            : null;
     if (next !== prompt.current) {
       prompt.current = next;
       onBenchChange?.(next);

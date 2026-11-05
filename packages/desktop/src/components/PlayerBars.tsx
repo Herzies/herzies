@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { cn } from "../lib/utils";
-import { ExpBar, HpBar } from "./SquareBar";
+import { CrystalBar, ExpBar, HpBar } from "./SquareBar";
+import { useCrystal } from "./town/crystalState";
 import { refreshVitals, useLiveHp } from "./town/vitals";
 
 /** Publishes the Town's player card's bottom edge (from the window's top)
@@ -48,6 +49,8 @@ export function PlayerBars({
   className?: string;
 }) {
   const live = useLiveHp();
+  const crystal = useCrystal();
+  const crystalOn = crystal?.enabled === true;
   // Health is fetched when the Town opens; on Home first, ask for it here.
   // biome-ignore lint/correctness/useExhaustiveDependencies: once, if nothing's known yet
   useEffect(() => {
@@ -63,7 +66,22 @@ export function PlayerBars({
           className="min-w-0"
         />
       )}
-      <ExpBar progress={progress} level={level} xp={xp} className="min-w-0" />
+      <ExpBar
+        progress={progress}
+        level={level}
+        xp={xp}
+        waiting={crystalOn ? crystal.xp : 0}
+        className="min-w-0"
+      />
+      {crystalOn && (
+        <CrystalBar
+          fill={crystal.fill}
+          capacity={crystal.capacity}
+          xp={crystal.xp}
+          drops={crystal.dropsWaiting}
+          className="min-w-0"
+        />
+      )}
     </div>
   );
 }

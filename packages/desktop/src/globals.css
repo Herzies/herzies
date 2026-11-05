@@ -573,3 +573,34 @@
   opacity: 0;
   pointer-events: none;
 }
+
+/* The Crystal's window (components/CrystalPanel.tsx). */
+@keyframes crystal-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+/* A glint drifting up through an unlocked size block, twinkling out. */
+@keyframes crystal-spark {
+  0% {
+    opacity: 0;
+    transform: translateY(0) scale(0.5);
+  }
+  25% {
+    opacity: 1;
+    transform: translateY(-6px) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-22px) scale(0.4);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  [class*="animate-[crystal-"] {
+    animation: none !important;
+  }
+}

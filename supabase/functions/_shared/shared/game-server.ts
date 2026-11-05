@@ -23,6 +23,15 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
+  CRYSTAL_GROUND_CAP,
+  type CrystalPayoutItem,
+  type CrystalState,
+  crystalDropsWaiting,
+  crystalStateFromRow,
+  crystalThresholdsCrossed,
+  MAX_CRYSTAL_ROLLS_PER_ATTUNE,
+} from "./crystal.ts";
+import {
   type ActiveMultiplier,
   applyXp,
   bankCapacity,
@@ -464,6 +473,9 @@ interface SyncContext {
     cap: number | null;
   }[];
   pending_drops: { id: string; item_id: string; dropped_at: string }[];
+  /** Server feature switches (game_flags, 00140). Absent on an older
+   * database, which reads as every flag off. */
+  flags?: Record<string, boolean>;
   /**
    * The player's owned copies (item_units, 00079). Absent on a database that
    * predates that migration, which reads as "unknown" rather than "owns
@@ -535,6 +547,8 @@ export async function processSync(
   bankExpansions: number;
   /** Emotes owned (see emotes.ts). */
   emotes: string[];
+  /** The Crystal (00140): what listening has stored up to attune for. */
+  crystal: CrystalState;
 }> {
   const source = options.source ?? "cli";
   // 1. Fetch everything this sync reads, in one round trip.
@@ -713,6 +727,10 @@ export async function processSync(
   // moving the billing clock on a throttled, zero-minute sync is precisely the
   // bug BILL_COOLDOWN_MS documents.
   let billedMinutes = 0;
+  // The Crystal (00140): with the flag on, listening XP and drops are stored
+  // for the player to attune for in Town instead of landing on every sync.
+  const crystalOn = ctx.flags?.crystal === true;
+  let crystalXp = 0;
   if (minutesListened > 0) {
     const classifiedGenres =
       genres.length > 0 ? classifyGenre(genres) : classifyGenre(["pop"]);
@@ -750,25 +768,30 @@ export async function processSync(
 
     const xp = calculateXpGain(minutes, allMultipliers);
 
-    const levelBefore = herzie.level;
-    const events = applyXp(herzie, xp);
     herzie.totalMinutesListened += minutes;
     billedMinutes = minutes;
     recordGenreMinutes(herzie.genreMinutes, classifiedGenres, minutes);
 
-    if (events.leveledUp) {
-      notifications.push({
-        type: "info",
-        title: "Level Up!",
-        message: `${herzie.name} is now level ${herzie.level}! (+${POINTS_PER_LEVEL * (herzie.level - levelBefore)} stat points)`,
-      });
-    }
-    if (events.evolved && events.newStage) {
-      notifications.push({
-        type: "info",
-        title: "Evolution!",
-        message: `${herzie.name} evolved to stage ${events.newStage}!`,
-      });
+    if (crystalOn) {
+      // The Crystal stores it (step 4c) instead of it landing now.
+      crystalXp = xp;
+    } else {
+      const levelBefore = herzie.level;
+      const events = applyXp(herzie, xp);
+      if (events.leveledUp) {
+        notifications.push({
+          type: "info",
+          title: "Level Up!",
+          message: `${herzie.name} is now level ${herzie.level}! (+${POINTS_PER_LEVEL * (herzie.level - levelBefore)} stat points)`,
+        });
+      }
+      if (events.evolved && events.newStage) {
+        notifications.push({
+          type: "info",
+          title: "Evolution!",
+          message: `${herzie.name} evolved to stage ${events.newStage}!`,
+        });
+      }
     }
   }
 
@@ -797,6 +820,73 @@ export async function processSync(
         title: "Evolution!",
         message: `${herzie.name} evolved to stage ${events.newStage}!`,
       });
+    }
+  }
+
+  // 4c. Charge the Crystal. Only through charge_crystal, which adds under a
+  // row lock: this sync writes the herzies row whole from what it read, and
+  // an attune racing it must never have its payout put back. herzieToRow
+  // doesn't know the crystal_* columns, so the final update can't touch them.
+  //
+  // Drops: one roll per DROP_TICK_MINUTES *charged* (post-overflow) minutes,
+  // stored in crystal_drop_minutes. drop_rolls_done keeps tracking
+  // total_minutes_listened so the old path resumes cleanly if the flag goes
+  // off; rolls it still owed from before the flag went on (the cutover) are
+  // handed to the Crystal at full value, once.
+  let crystalRow: Record<string, unknown> = row;
+  let crystalDropRollsDone: number | null = null;
+  if (crystalOn) {
+    const rollsDoneBefore = Number(row.drop_rolls_done ?? 0);
+    const backlogRolls = Math.max(
+      0,
+      Math.floor(Number(row.total_minutes_listened ?? 0) / DROP_TICK_MINUTES) -
+        rollsDoneBefore,
+    );
+    if (billedMinutes > 0 || backlogRolls > 0) {
+      const { data: charged, error: chargeError } = await admin.rpc(
+        "charge_crystal",
+        {
+          p_user: userId,
+          p_minutes: billedMinutes,
+          p_xp: crystalXp,
+          p_backlog_drop_minutes: backlogRolls * DROP_TICK_MINUTES,
+        },
+      );
+      if (chargeError || !charged) {
+        // Fail the sync rather than drop the minutes: the client keeps its
+        // unbilled balance and sends it again.
+        throw new Error(
+          `charge_crystal failed: ${chargeError?.message ?? "no result"}`,
+        );
+      }
+      const c = charged as {
+        fillBefore: number;
+        herzie: Record<string, unknown>;
+      };
+      crystalRow = c.herzie;
+      const crossed = crystalThresholdsCrossed(
+        Number(c.fillBefore),
+        Number(c.herzie.crystal_fill),
+        Number(c.herzie.crystal_tier),
+      );
+      if (crossed.full) {
+        notifications.push({
+          type: "info",
+          title: "Your resonance is full",
+          message:
+            "Hand it to the Crystal in Town to collect what it's holding.",
+        });
+      } else if (crossed.nearlyFull) {
+        notifications.push({
+          type: "info",
+          title: "Your resonance is nearly full",
+          message:
+            "Hand it to the Crystal in Town to collect what it's holding.",
+        });
+      }
+      crystalDropRollsDone = Math.floor(
+        herzie.totalMinutesListened / DROP_TICK_MINUTES,
+      );
     }
   }
 
@@ -836,12 +926,14 @@ export async function processSync(
   // Rolls this sync owes. Anything above the per-sync ceiling stays owed and is
   // paid on the next call — drop_rolls_done advances by the rolls actually
   // *taken* below, so only the ones this sync never got to are carried.
-  const rollsOwed = dropTestMode
-    ? 1
-    : Math.min(
-        Math.max(0, totalDropRollsEligible - dropRollsDone),
-        MAX_DROP_ROLLS_PER_SYNC,
-      );
+  const rollsOwed = crystalOn
+    ? 0 // stored in the Crystal instead (step 4c)
+    : dropTestMode
+      ? 1
+      : Math.min(
+          Math.max(0, totalDropRollsEligible - dropRollsDone),
+          MAX_DROP_ROLLS_PER_SYNC,
+        );
   // How many drops this sync actually put on the ground. Non-zero is the only
   // case where sync_context's pending_drops snapshot is stale. Note this is no
   // longer the same as the number of rolls taken: the ground is capped at
@@ -1105,6 +1197,9 @@ export async function processSync(
   if (!dropTestMode && rollsConsumed > 0) {
     updateData.drop_rolls_done = dropRollsDone + rollsConsumed;
   }
+  if (crystalDropRollsDone !== null) {
+    updateData.drop_rolls_done = crystalDropRollsDone;
+  }
   // The billing clock BILL_COOLDOWN_MS and the wall-clock cap measure from.
   // Deliberately *not* part of herzieToRow: last_synced_at in there is a
   // liveness heartbeat every sync must move (the Spotify cron reads it to skip
@@ -1227,6 +1322,7 @@ export async function processSync(
     // Bought through the Stripe webhook too, and this is how the app learns
     // about them at launch (it no longer fetches /inventory then).
     emotes: (syncedRow?.emotes ?? row.emotes ?? []) as string[],
+    crystal: crystalStateFromRow(crystalRow, crystalOn),
   };
 }
 
@@ -1426,4 +1522,219 @@ async function checkSecretTrackEvents(
   }
 
   return notifications;
+}
+
+// ---------------------------------------------------------------------------
+// The Crystal (00140): attune and upgrade.
+// ---------------------------------------------------------------------------
+
+export type AttuneCrystalResult =
+  | {
+      ok: true;
+      xp: number;
+      levelBefore: number;
+      levelAfter: number;
+      /** Set when the payout crosses a stage threshold. */
+      newStage?: Stage;
+      /** In the order they were rolled. */
+      items: CrystalPayoutItem[];
+      /** Drops still waiting in the Crystal: the ground was full (or the
+       * per-attune cap was hit). */
+      dropsLeft: number;
+      /** Too much already lying on the ground for everything to come out. */
+      groundFull: boolean;
+      crystal: CrystalState;
+      /** Everything now on the ground, the new finds included: the client
+       * hands it straight to the black holes rather than wait for a sync. */
+      pendingDrops: PendingDrop[];
+    }
+  | {
+      ok: false;
+      reason: "stale" | "not-found";
+      crystal?: CrystalState;
+    };
+
+/**
+ * Pay the Crystal out: roll its stored drops, then grant items and hand the
+ * XP to pending_xp in one locked transaction (crystal_attune).
+ *
+ * XP deliberately isn't applied here. Sync writes the herzies row whole from
+ * what it read, so writing xp from this path would race it; pending_xp is
+ * the handoff the Tower and quests already use, and the next sync (seconds
+ * away) applies it and sends the usual Level Up notices. The level numbers in
+ * the result are what that will come to, for the payout animation.
+ *
+ * Rolls happen before the animation, on the server: what the player watches
+ * being revealed is exactly what they got.
+ */
+export async function attuneCrystal(
+  admin: SupabaseClient,
+  userId: string,
+  expectedAttunes: number,
+  options: { crystalEnabled?: boolean } = {},
+): Promise<AttuneCrystalResult> {
+  const enabled = options.crystalEnabled ?? true;
+  const [
+    { data: row },
+    { data: unitsRaw },
+    { data: itemRows },
+    { count: onGround },
+  ] = await Promise.all([
+    admin.from("herzies").select("*").eq("user_id", userId).maybeSingle(),
+    admin.rpc("item_units_json", { p_user_id: userId }),
+    admin.from("items").select("id, name, rarity"),
+    admin
+      .from("pending_drops")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId),
+  ]);
+  if (!row) return { ok: false, reason: "not-found" };
+  if (Number(row.crystal_attunes ?? 0) !== expectedAttunes) {
+    return {
+      ok: false,
+      reason: "stale",
+      crystal: crystalStateFromRow(row, enabled),
+    };
+  }
+
+  const herzie = rowToHerzie(row);
+  const units = Array.isArray(unitsRaw) ? normalizeUnits(unitsRaw) : null;
+  const luck = withStatPoints(
+    units
+      ? getHerzieStatsFromUnits(units)
+      : getHerzieStats(
+          normalizeEquipped(row.equipped),
+          (row.item_upgrades ?? {}) as Record<string, number>,
+        ),
+    herzie.statPoints,
+    herzie.level,
+  ).luck;
+
+  // Roll in order and stop at the first roll whose items wouldn't fit on
+  // the ground (CRYSTAL_GROUND_CAP), so what doesn't fit stays in the
+  // Crystal as whole rolls rather than vanishing. The bag isn't asked: the
+  // finds land round the player, and picking one up is what checks for room.
+  const all = (itemRows ?? []) as {
+    id: string;
+    name: string;
+    rarity: string;
+  }[];
+  const byId = new Map(all.map((r) => [r.id, r]));
+  const nonDroppable = new Set<string>(NON_DROPPABLE_ITEM_IDS);
+  const droppable = filterDroppablePool(
+    all.filter((r) => !nonDroppable.has(r.id)),
+  );
+  const groundRoom = Math.max(0, CRYSTAL_GROUND_CAP - (onGround ?? 0));
+  const rollsAvailable = Math.min(
+    crystalDropsWaiting(Number(row.crystal_drop_minutes ?? 0)),
+    MAX_CRYSTAL_ROLLS_PER_ATTUNE,
+  );
+  const now = new Date();
+  const picked: string[] = [];
+  let rollsUsed = 0;
+  let groundFull = false;
+  if (droppable.length > 0) {
+    for (let i = 0; i < rollsAvailable; i++) {
+      const ids: string[] = [];
+      const main = pickWeightedDrop(droppable, luck);
+      if (main) ids.push(main.id);
+      ids.push(...rollSeasonalBonusDrops(now));
+      if (picked.length + ids.length > groundRoom) {
+        groundFull = true;
+        break;
+      }
+      picked.push(...ids);
+      rollsUsed++;
+    }
+  }
+
+  const { data: paid, error } = await admin.rpc("crystal_attune", {
+    p_user: userId,
+    p_expected_attunes: expectedAttunes,
+    p_rolls: rollsUsed,
+    p_items: picked,
+  });
+  if (error) throw new Error(`crystal_attune failed: ${error.message}`);
+  const res = paid as {
+    ok: boolean;
+    xp?: number;
+    herzie: Record<string, unknown>;
+    pendingDrops?: PendingDrop[];
+  };
+  if (!res.ok) {
+    return {
+      ok: false,
+      reason: "stale",
+      crystal: crystalStateFromRow(res.herzie, enabled),
+    };
+  }
+
+  const xp = Number(res.xp ?? 0);
+  // What the next sync's pending_xp step will come to (it also holds any
+  // Tower/quest XP already waiting, which lands at the same moment).
+  const preview = rowToHerzie(row);
+  const levelBefore = preview.level;
+  const events = applyXp(
+    preview,
+    xp + Math.max(0, Number(row.pending_xp ?? 0)),
+  );
+  const crystal = crystalStateFromRow(res.herzie, enabled);
+  return {
+    ok: true,
+    xp,
+    levelBefore,
+    levelAfter: preview.level,
+    newStage: events.evolved ? events.newStage : undefined,
+    items: picked.map((id) => ({
+      itemId: id,
+      name: getItem(id)?.name ?? byId.get(id)?.name ?? id,
+      rarity: getItem(id)?.rarity ?? byId.get(id)?.rarity ?? "common",
+    })),
+    dropsLeft: crystal.dropsWaiting,
+    groundFull,
+    crystal,
+    pendingDrops: res.pendingDrops ?? [],
+  };
+}
+
+export type UpgradeCrystalResult =
+  | { ok: true; cost: number; crystal: CrystalState }
+  | {
+      ok: false;
+      reason: "max-tier" | "not-enough-shards";
+      crystal: CrystalState;
+    };
+
+/** Spend shards to grow the Crystal a tier (upgrade_crystal, 00140). */
+export async function upgradeCrystal(
+  admin: SupabaseClient,
+  userId: string,
+  options: { crystalEnabled?: boolean } = {},
+): Promise<UpgradeCrystalResult> {
+  const enabled = options.crystalEnabled ?? true;
+  const { data, error } = await admin.rpc("upgrade_crystal", {
+    p_user: userId,
+  });
+  if (error) throw new Error(`upgrade_crystal failed: ${error.message}`);
+  const res = data as {
+    ok: boolean;
+    reason?: "max-tier" | "not-enough-shards";
+    cost?: number;
+    herzie: Record<string, unknown>;
+  };
+  const crystal = crystalStateFromRow(res.herzie, enabled);
+  return res.ok
+    ? { ok: true, cost: Number(res.cost), crystal }
+    : { ok: false, reason: res.reason ?? "max-tier", crystal };
+}
+
+/** Whether the Crystal flag is on (game_flags, 00140). Off on a database
+ * that predates it. */
+export async function crystalEnabled(admin: SupabaseClient): Promise<boolean> {
+  const { data } = await admin
+    .from("game_flags")
+    .select("enabled")
+    .eq("id", "crystal")
+    .maybeSingle();
+  return data?.enabled === true;
 }

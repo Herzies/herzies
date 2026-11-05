@@ -41,6 +41,8 @@ export async function POST(request: Request) {
       bankExpansions: result.bankExpansions,
       // The class skills, once a class is chosen.
       skills: result.skills,
+      // The Crystal: what listening has stored up to attune for.
+      crystal: result.crystal,
     };
 
     return NextResponse.json(response);

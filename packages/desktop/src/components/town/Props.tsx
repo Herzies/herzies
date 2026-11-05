@@ -14,6 +14,7 @@ import { ambient, banded, inSeason, seasonNow, swayInWind } from "./ambient";
 import { BenchColliders, Benches } from "./Benches";
 import { BoardColliders, Boards } from "./Boards";
 import { BuildingColliders, Buildings, lanternMaterial } from "./Buildings";
+import { CrystalColliders, Crystals } from "./Crystal";
 import { barrelGeometry, potsGeometry } from "./clutter";
 import { Dummies, DummyColliders } from "./combat/Dummies";
 import { trunkMaterial } from "./Islands";
@@ -541,6 +542,7 @@ export function Props({
       <Benches map={map} />
       <Stands map={map} />
       <Boards map={map} />
+      {!backdrop && <Crystals map={map} />}
       {!backdrop && <Statues map={map} champion={champion} />}
       <Dummies map={map} live={!backdrop} />
       <Portals map={map} live={!backdrop} />
@@ -623,6 +625,7 @@ export function MapColliders({ map }: { map: TownMap }) {
         <BenchColliders map={map} />
         <StandColliders map={map} />
         <BoardColliders map={map} />
+        <CrystalColliders map={map} />
         <StatueColliders map={map} />
         <DummyColliders map={map} />
       </RigidBody>

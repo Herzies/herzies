@@ -69,6 +69,7 @@ export const OBJECTS = {
   "@": { name: "Statue", color: "#d8d4cc" },
   D: { name: "Training dummy", color: "#d9b26a" },
   O: { name: "Portal", color: "#b07aff" },
+  Q: { name: "Crystal", color: "#7fe8ff" },
 } as const;
 export type ObjectChar = keyof typeof OBJECTS;
 
