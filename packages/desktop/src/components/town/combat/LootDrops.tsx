@@ -272,6 +272,9 @@ export type Drop = {
   home?: boolean;
   /** Being picked up (collect-drop is on its way). */
   collecting?: boolean;
+  /** Brought back by the spirit: its light went out when it was taken, so
+   * it doesn't flash back up where it lay once it's handed over. */
+  delivered?: boolean;
   /** When the bag-full notice was last given for it, so walking about
    * near it doesn't repeat it every frame. */
   fullNoticeAt?: number;
@@ -425,6 +428,7 @@ export function useDropLoop(source: () => readonly Drop[]): void {
 
   const collect = (d: Drop, now: number) => {
     if (errand === d) errand = null;
+    d.delivered = d.phase === "carried";
     d.phase = "done";
     d.since = now;
     d.collecting = true;
@@ -740,7 +744,7 @@ function draw(d: Drop, now: number, dt: number, flat: number) {
   if (landed) {
     pillar = Math.min(1, (now - d.restedAt) / 300) * pulse;
     if (d.phase === "pulled") pillar *= 1 - Math.min(1, since / LOOT.magnetMs);
-  } else if (d.phase === "done" || d.phase === "vanishing") {
+  } else if ((d.phase === "done" && !d.delivered) || d.phase === "vanishing") {
     const t = Math.min(1, since / 350);
     pillar = (1 - t) * 0.8;
     pillarH = 1 + t * 0.6;
