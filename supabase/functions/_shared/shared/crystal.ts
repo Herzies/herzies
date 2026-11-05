@@ -44,8 +44,9 @@ const UPGRADE_COSTS = [3, 5, 8, 12, 20] as const;
 export const CRYSTAL_GROUND_CAP = 30;
 
 /** Listened minutes your resonance needs before it can be handed over —
- * one find's worth. Below it, E at the Crystal opens its window instead. */
-export const CRYSTAL_ATTUNE_MIN_MINUTES = DROP_TICK_MINUTES;
+ * a minute, so the Crystal's window stays reachable right after you've
+ * attuned. Below it, E at the Crystal opens its window instead. */
+export const CRYSTAL_ATTUNE_MIN_MINUTES = 1;
 
 /** Whether there's enough to hand over (see CRYSTAL_ATTUNE_MIN_MINUTES). */
 export function canAttune(c: CrystalState | null | undefined): boolean {

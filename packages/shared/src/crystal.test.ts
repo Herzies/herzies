@@ -120,11 +120,9 @@ describe("crystalDropsWaiting / crystalStateFromRow", () => {
 
 describe("canAttune", () => {
   const base = crystalStateFromRow({}, true);
-  it("needs one find's worth of listening", () => {
-    expect(canAttune({ ...base, fill: 9, xp: 90 })).toBe(false);
-    expect(canAttune({ ...base, fill: 10, xp: 100, dropsWaiting: 1 })).toBe(
-      true,
-    );
+  it("needs a minute of listening", () => {
+    expect(canAttune({ ...base, fill: 0.5, xp: 5 })).toBe(false);
+    expect(canAttune({ ...base, fill: 1, xp: 10 })).toBe(true);
   });
   it("finds left over from a full ground still count", () => {
     expect(canAttune({ ...base, fill: 0, dropsWaiting: 2 })).toBe(true);
