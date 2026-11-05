@@ -30,6 +30,8 @@ export type Notice = {
   holdMs: number;
   /** Bumped when the same text comes again: the line restarts. */
   bump: number;
+  /** Lines with a key are one line that changes (a run of pickups). */
+  key?: string;
 };
 
 /** Most lines on screen at once. */
@@ -76,20 +78,37 @@ function expire(id: number, after: number) {
  * for later. */
 export function notify(
   text: string,
-  opts: { kind?: NoticeKind; holdMs?: number } = {},
+  opts: {
+    kind?: NoticeKind;
+    holdMs?: number;
+    /** Say it on the line with this key, if it's still up, instead of a new
+     * one: the line takes the new text and restarts. */
+    key?: string;
+  } = {},
 ): void {
   const trimmed = text.trim();
   if (!trimmed) return;
   const kind = opts.kind ?? "error";
   const holdMs = opts.holdMs ?? holdFor(trimmed);
-  const same = notices.find((n) => n.text === trimmed && n.kind === kind);
+  const same = notices.find((n) =>
+    opts.key !== undefined
+      ? n.key === opts.key
+      : n.key === undefined && n.text === trimmed && n.kind === kind,
+  );
   if (same) {
     // Again: the same line starts over (newest, so to the bottom).
-    const again = { ...same, holdMs, bump: same.bump + 1 };
+    const again = { ...same, text: trimmed, holdMs, bump: same.bump + 1 };
     notices = [...notices.filter((n) => n.id !== same.id), again];
     expire(same.id, holdMs + NOTICE_FADE_MS);
   } else {
-    const n: Notice = { id: nextId++, text: trimmed, kind, holdMs, bump: 0 };
+    const n: Notice = {
+      id: nextId++,
+      text: trimmed,
+      kind,
+      holdMs,
+      bump: 0,
+      key: opts.key,
+    };
     notices = [...notices, n];
     expire(n.id, holdMs + NOTICE_FADE_MS);
     // Too many: the oldest goes now.
@@ -100,6 +119,24 @@ export function notify(
       timers.delete(oldest.id);
       notices = notices.slice(1);
     }
+  }
+  emit();
+}
+
+/** Changes the line with `key`, if it's still up, without restarting it;
+ * `null` takes it down. A line that's already gone stays gone. */
+export function revise(key: string, text: string | null): void {
+  const line = notices.find((n) => n.key === key);
+  if (!line) return;
+  if (text === null || !text.trim()) {
+    const t = timers.get(line.id);
+    if (t) clearTimeout(t);
+    timers.delete(line.id);
+    notices = notices.filter((n) => n.id !== line.id);
+  } else {
+    notices = notices.map((n) =>
+      n.id === line.id ? { ...n, text: text.trim() } : n,
+    );
   }
   emit();
 }

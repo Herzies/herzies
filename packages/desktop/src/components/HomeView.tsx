@@ -11,6 +11,8 @@ import {
 } from "@herzies/shared";
 import { useEffect, useRef, useState } from "react";
 import { useReportHomeStage } from "../hooks/useStageAlignment";
+import { notify } from "../lib/notices";
+import { announcePickup } from "../lib/pickups";
 import { cn } from "../lib/utils";
 import { type AppState, herzies } from "../tauri-bridge";
 import { HERZIE_STAGE_HEIGHT } from "./HerzieWithSky";
@@ -126,17 +128,32 @@ export function HomeView({
     // bank shares its slot and still fits at capacity.
     if (!hasRoomFor(inventory, equipped, drop.itemId, capacity)) {
       const name = getItem(drop.itemId)?.name ?? drop.itemId;
-      onActivity?.(`Inventory full — couldn't pick up "${name}"`);
+      onActivity?.(`Bag full — couldn't pick up "${name}"`);
       return false;
     }
     setCollectingIds((prev) => new Set(prev).add(drop.id));
+    // In the bag now, and said now (the app adds it before the server's
+    // answer); a refusal says so after.
+    const name = getItem(drop.itemId)?.name ?? drop.itemId;
+    const pickup = announcePickup(name);
     try {
-      return await herzies.collectDrop(drop.id);
+      const outcome = await herzies.collectDrop(drop.id);
+      if (outcome === "bag-full") {
+        // The server's the authority on room (the gate above is the fast
+        // path): it stays on the ground.
+        pickup.refuse();
+        notify("Bag full");
+        return false;
+      }
+      // "gone": not on the ground any more (most likely the server's spirit
+      // took it into the bag); nothing to say.
+      if (outcome === "collected") pickup.confirm();
+      else pickup.refuse();
+      return true;
     } catch (e: unknown) {
-      // The server refuses an over-capacity collect too (the gate above is the
-      // fast path, not the authority). Surface why instead of just letting the
-      // item animate away and reappear, which reads as an unexplained glitch.
       const msg = e instanceof Error ? e.message : String(e);
+      pickup.refuse();
+      notify(`Couldn't pick up "${name}"`);
       onActivity?.(`Couldn't pick that up: ${msg}`);
       return false;
     } finally {

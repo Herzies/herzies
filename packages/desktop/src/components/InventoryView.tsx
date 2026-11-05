@@ -1258,11 +1258,11 @@ function InventoryViewImpl({
       if (after > capacity && after > tiles.length) {
         notify(
           returning
-            ? `Inventory full — "${name}" can't be returned`
-            : `Inventory full — no room for what "${name}" replaces`,
+            ? `Bag full — "${name}" can't be returned`
+            : `Bag full — no room for what "${name}" replaces`,
         );
         onLog?.(
-          `Couldn't ${returning ? "return" : "place"} "${name}": inventory full`,
+          `Couldn't ${returning ? "return" : "place"} "${name}": bag full`,
         );
         return false;
       }

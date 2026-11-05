@@ -29,7 +29,8 @@
 // for overcharged; `&tier=` its size, `&crystalOpen=1` opens its window);
 // E on it plays a made-up payout (`&finds=` how many,
 // `&xp=` how much). `drop()` drops something round you as listening does
-// (`drop("ghost")` that item; `drop(5)` five), `take()` has the server take
+// (`drop("ghost")` that item; `drop(5)` five), `loot(3)` tosses test loot
+// (Settings > Debug), `take()` has the server take
 // the oldest back (a spirit's sweep), and `?ground=boombox` gives the
 // herzie a ground accessory to fade in at Home.
 import "./globals.css";
@@ -63,6 +64,8 @@ import {
   bubbleDuration,
   type ChatBubbles,
 } from "./components/town/chatBubbles";
+import { debugDropLoot } from "./components/town/combat/fight";
+import { setLootRoom } from "./components/town/combat/lootFeed";
 import {
   sampleBossResults,
   setBossResults,
@@ -532,14 +535,47 @@ Object.assign(window, {
     }
     homeDropFeed.set(next);
   },
+  /** Settings > Debug > "Drop Test Loot": `loot(3)` tosses three. */
+  loot(n = 1) {
+    debugDropLoot(n);
+  },
   take() {
     homeDropFeed.set(homeDropFeed.drops.slice(1));
   },
   homeMode,
 });
+// `?room=2`: the bag has room for two more things (each pickup takes one).
+let bagRoom = Number(params.get("room") ?? Number.POSITIVE_INFINITY);
+// Set again whenever the bag changes, as the app does.
+const setBagRoom = () =>
+  setLootRoom((_, alsoTaking) => alsoTaking.length + 1 <= bagRoom, bagRoom);
+setBagRoom();
+// `?lag=400`: the server takes this long to answer a pickup.
+const lagMs = Number(params.get("lag") ?? 0);
+// `?refuse=full` (or `gone`): the server turns every pickup down, whatever
+// the app thought of the room — the app's idea of the bag was wrong.
+const refuseAs = params.get("refuse");
 herzies.collectDrop = async (dropId: string) => {
+  // Off the ground at once, as the app does (optimistically), then the
+  // server's answer.
+  if (bagRoom < 1 && !refuseAs) return "bag-full";
+  // Into the bag and off the ground (the app's state update lands a moment
+  // later), then the server's answer.
+  const was = homeDropFeed.drops.find((d) => d.id === dropId);
   homeDropFeed.set(homeDropFeed.drops.filter((d) => d.id !== dropId));
-  return true;
+  bagRoom -= 1;
+  setTimeout(setBagRoom, 30);
+  if (lagMs > 0) await new Promise((r) => setTimeout(r, lagMs));
+  console.log(`[town-sandbox] pickup ${dropId}: ${refuseAs ?? "collected"}`);
+  if (refuseAs === "full") {
+    // Back out of the bag and on the ground, as the app puts it.
+    bagRoom += 1;
+    setTimeout(setBagRoom, 30);
+    if (was) homeDropFeed.set([...homeDropFeed.drops, was]);
+    return "bag-full";
+  }
+  if (refuseAs === "gone") return "gone";
+  return "collected";
 };
 
 // ?crystal=<charge>: a Crystal by the spawn, and a made-up payout.

@@ -4,10 +4,12 @@ import { itemVoxelMeshes, lootPillarMaterial } from "@herzies/shared/gl";
 import type { LootDrop } from "@herzies/shared/town-net";
 import { Html } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { notify } from "../../../lib/notices";
+import { announcePickup } from "../../../lib/pickups";
 import { herzies } from "../../../tauri-bridge";
+import { keepAtHome } from "../HomeLayer";
 import { homeMode } from "../homeMode";
 import { townSave, useTownRuntime } from "../runtime";
 import {
@@ -29,7 +31,13 @@ import {
   tierOf,
   type Vec2,
 } from "./loot";
-import { hasLootRoom, pushLootLog } from "./lootFeed";
+import {
+  bagFree,
+  bagOpen,
+  hasLootRoom,
+  pushLootLog,
+  roomVersion,
+} from "./lootFeed";
 import { combat, shake } from "./state";
 
 /**
@@ -82,9 +90,79 @@ function burstAt(now: number): number | null {
 
 const scratchV = new THREE.Vector3();
 
-/** The drop the spirit is busy with (sent for it, or carrying it back),
- * across every batch on the ground: it runs one errand at a time. */
+/** The drop the spirit is on its way to or taking in, across every batch on
+ * the ground: one at a time. */
 let errand: Drop | null = null;
+/** What it's been sent for and not got yet (on its way, taking it in):
+ * counted against the bag before it goes for more, so it never goes for
+ * what there's no room for. */
+const claimed = new Set<Drop>();
+/** What it put in the bag that the bag doesn't show yet (the app's update
+ * is on its way): counted too, until the bag next changes (`roomVersion`
+ * then), or for a few seconds at most. */
+const justIn = new Map<Drop, { version: number; at: number }>();
+const JUST_IN_MS = 3_000;
+/** Sent off after something (vs following its herzie as usual). */
+let out = false;
+
+/** Drops the server turned down, by drop id (HomeDrops makes a new Drop when
+ * one goes back on the ground, so not on the Drop). Neither the spirit nor
+ * walking up tries one again by itself until the bag has more room than it
+ * had then, or a while has passed: our idea of the bag was wrong once, and
+ * going round again would just be refused again. */
+const refusals = new Map<
+  string,
+  { free: number; until: number; tries: number; settleUntil: number }
+>();
+/** Turned down for room: tried again after this, if nothing's freed up. */
+const REFUSED_FULL_MS = 60_000;
+/** The call failed: tried again after this, doubling, up to a minute. */
+const RETRY_MS = 4_000;
+/** Right after a refusal the bag's count is still settling: the pickup's
+ * undo, then the server's own count, land as updates of their own. Room
+ * that turns up meanwhile is that, not a slot freed. */
+const SETTLE_MS = 2_500;
+
+function refused(dropId: string, now: number): boolean {
+  const r = refusals.get(dropId);
+  if (!r) return false;
+  if (now < r.settleUntil) {
+    r.free = Math.max(r.free, bagFree());
+    return now < r.until;
+  }
+  if (now >= r.until || bagFree() > r.free) {
+    // Left in the map for the backoff's count; it's small.
+    r.until = 0;
+    return false;
+  }
+  return true;
+}
+
+function refuse(dropId: string, now: number, bagFull: boolean): void {
+  const tries = (refusals.get(dropId)?.tries ?? 0) + 1;
+  const wait = bagFull
+    ? REFUSED_FULL_MS
+    : Math.min(REFUSED_FULL_MS, RETRY_MS * 2 ** (tries - 1));
+  refusals.set(dropId, {
+    free: bagFree(),
+    until: now + wait,
+    tries,
+    settleUntil: now + SETTLE_MS,
+  });
+}
+
+/** The items counted against the bag on top of what it holds, but for
+ * `except`. (What the server already took is in the bag already.) */
+function alsoTaking(now: number, except?: Drop): string[] {
+  const ids: string[] = [];
+  for (const c of claimed) if (c !== except && !c.taken) ids.push(c.item.id);
+  for (const [c, j] of justIn) {
+    if (j.version !== roomVersion() || now - j.at > JUST_IN_MS)
+      justIn.delete(c);
+    else if (c !== except) ids.push(c.item.id);
+  }
+  return ids;
+}
 
 const reducedMotion = () => {
   try {
@@ -220,7 +298,6 @@ export type Phase =
   | "resting"
   | "pulled"
   | "fetching"
-  | "carried"
   /** Taken back where it came from (picked up somewhere else, or by the
    * server for a spirit): drawn up and away (see HomeDrops). */
   | "vanishing"
@@ -254,12 +331,12 @@ export type Drop = {
   pos: THREE.Vector3;
   /** Where a pull started from. */
   from: THREE.Vector3;
-  /** The spirit's errand: on its way, hovering over it, taking it in. */
-  fetch: "going" | "hover" | "absorb" | null;
+  /** The spirit's errand: on its way to it, or taking it in. */
+  fetch: "going" | "absorb" | null;
   fetchAt: number;
-  /** Fetched by a spirit on foot (the cat): it's picked up in its mouth
-   * and carried back small, rather than taken into a floating spirit. */
-  mouth?: boolean;
+  /** Fetched by a spirit on foot (the cat): it walks there and pounces,
+   * rather than flying over and hovering. */
+  onFoot?: boolean;
   /** When a cat sent for it gives up (it can't get there: water). */
   fetchBy?: number;
   /** A cat couldn't reach it: it's left for you to walk to. */
@@ -272,8 +349,12 @@ export type Drop = {
   home?: boolean;
   /** Being picked up (collect-drop is on its way). */
   collecting?: boolean;
-  /** Brought back by the spirit: its light went out when it was taken, so
-   * it doesn't flash back up where it lay once it's handed over. */
+  /** Already in the bag: the server's spirit sweep took it while it was
+   * being fetched or pulled to you. It plays out as it was; only
+   * nothing more is collected. */
+  taken?: boolean;
+  /** Taken by the spirit: its light went out as it was taken in, so it
+   * doesn't flash back up where it lay. */
   delivered?: boolean;
   /** When the bag-full notice was last given for it, so walking about
    * near it doesn't repeat it every frame. */
@@ -324,12 +405,25 @@ function Drops({
           const r = known.length > 1 ? 1.1 : 0.6;
           return { x: from.x + Math.sin(a) * r, z: from.z + Math.cos(a) * r };
         })
-      : here
-        ? known.map((_, i) => ({
-            x: townSave.x + fx * 2.4 + fz * (i - (known.length - 1) / 2) * 1.6,
-            z: townSave.z + fz * 2.4 - fx * (i - (known.length - 1) / 2) * 1.6,
-          }))
-        : landingSpots(known.length, { x: townSave.x, z: townSave.z });
+      : here && homeMode.on && homeMode.azimuth !== null
+        ? // At Home the camera's in front of you: round the far side of
+          // you instead, where it can see them.
+          known.map((_, i) => {
+            const t = known.length > 1 ? i / (known.length - 1) - 0.5 : 0;
+            const a = (homeMode.azimuth ?? 0) + Math.PI + t * 2.4;
+            return {
+              x: townSave.x + Math.sin(a) * 2.2,
+              z: townSave.z + Math.cos(a) * 2.2,
+            };
+          })
+        : here
+          ? known.map((_, i) => ({
+              x:
+                townSave.x + fx * 2.4 + fz * (i - (known.length - 1) / 2) * 1.6,
+              z:
+                townSave.z + fz * 2.4 - fx * (i - (known.length - 1) / 2) * 1.6,
+            }))
+          : landingSpots(known.length, { x: townSave.x, z: townSave.z });
     const origin = from
       ? { x: from.x, y: 0.8, z: from.z }
       : here
@@ -380,12 +474,19 @@ function Drops({
   // it was out for one of these.
   useEffect(() => () => releaseDrops(drops, rt.playerHerzie), [drops, rt]);
 
+  // Drawn at Home too (the test drop, pressed from Home), not only in the
+  // world, which Home fades out.
+  const group = useRef<THREE.Group>(null);
+  useLayoutEffect(() => {
+    if (group.current) keepAtHome(group.current);
+  }, []);
+
   return (
-    <>
+    <group ref={group}>
       {drops.map((d) => (
         <DropView key={d.key} drop={d} />
       ))}
-    </>
+    </group>
   );
 }
 
@@ -404,9 +505,11 @@ export function releaseDrops(
   for (const d of drops) {
     d.hum?.stop();
     d.hum = null;
+    claimed.delete(d);
   }
   if (errand && drops.includes(errand)) {
     errand = null;
+    out = false;
     herzie?.fetch(null);
   }
 }
@@ -417,7 +520,12 @@ export function releaseDrops(
  * (one errand at a time, across every batch); picked up. `source` hands
  * over the drops this frame.
  */
-export function useDropLoop(source: () => readonly Drop[]): void {
+export function useDropLoop(
+  source: () => readonly Drop[],
+  /** While true, nothing's picked up: they lie where they are, and the
+   * spirit stays by you (Home, where they aren't shown). */
+  hold: () => boolean = () => false,
+): void {
   const rt = useTownRuntime();
   // Pickups in a row climb a scale.
   const step = useRef(0);
@@ -426,19 +534,48 @@ export function useDropLoop(source: () => readonly Drop[]): void {
     [],
   );
 
+  /** Into the bag, now: walked into, or the moment the spirit takes it in
+   * (it doesn't have to bring it back first). */
   const collect = (d: Drop, now: number) => {
+    const bySpirit = d.phase === "fetching";
     if (errand === d) errand = null;
-    d.delivered = d.phase === "carried";
+    claimed.delete(d);
+    const name = d.item.name;
+    // No room after all (the bag filled meanwhile): the spirit leaves it
+    // lying where it was, until there is.
+    if (
+      bySpirit &&
+      !d.taken &&
+      d.dropId !== "" &&
+      !hasLootRoom(d.item.id, alsoTaking(now, d))
+    ) {
+      d.fetch = null;
+      d.phase = "resting";
+      d.since = now;
+      d.restedAt = now;
+      d.pos.set(d.spot.x, d.ground, d.spot.z);
+      if (!bagOpen() && now - (d.fullNoticeAt ?? 0) > FULL_NOTICE_MS) {
+        d.fullNoticeAt = now;
+        notify("Bag full");
+      }
+      return;
+    }
+    d.delivered = bySpirit;
+    d.fetch = null;
     d.phase = "done";
     d.since = now;
     d.collecting = true;
     d.hum?.stop();
     d.hum = null;
     sfxLootPickup(step.current++, d.tier);
-    const name = d.item.name;
+    // Already in the bag: the server's spirit sweep took it while this one
+    // was on its way, and said so then.
+    if (d.taken) return;
     // A dev drop: nothing behind it to collect.
     if (!d.dropId) {
-      pushLootLog(`Picked up "${name}" (test, nothing granted)`);
+      announcePickup(name, {
+        log: `Picked up "${name}" (test, nothing granted)`,
+      }).confirm();
       return;
     }
     // Refused like Home refuses it: an over-capacity item would have no slot
@@ -448,17 +585,39 @@ export function useDropLoop(source: () => readonly Drop[]): void {
       ? `"${name}" is still lying there`
       : `"${name}" is waiting on your Home ground`;
     if (!hasLootRoom(d.item.id)) {
-      pushLootLog(`Inventory full — ${waiting}`);
+      pushLootLog(`Bag full — ${waiting}`);
       return;
     }
-    // Collected as on Home: the bag updates at once, and the app logs
-    // `Picked up "<name>"` itself.
+    // In the bag now, and said now: the app adds it before the server's
+    // answer (and takes it back out if the server says no).
+    justIn.set(d, { version: roomVersion(), at: now });
+    const pickup = announcePickup(name);
+    const dropId = d.dropId;
     herzies
-      .collectDrop(d.dropId)
-      .then((ok) => {
-        if (!ok) pushLootLog(`Couldn't pick that up — ${waiting}`);
+      .collectDrop(dropId)
+      .then((outcome) => {
+        if (outcome === "collected") {
+          refusals.delete(dropId);
+          pickup.confirm();
+          return;
+        }
+        // Not ours to say: "gone" is most likely the server's spirit having
+        // taken it (it says so itself); "bag-full" stays on the ground.
+        pickup.refuse();
+        justIn.delete(d);
+        if (outcome === "bag-full") {
+          refuse(dropId, performance.now(), true);
+          if (!bagOpen()) notify("Bag full");
+          pushLootLog(`Bag full — ${waiting}`);
+        }
       })
-      .catch(() => pushLootLog(`Couldn't pick that up — ${waiting}`));
+      .catch(() => {
+        pickup.refuse();
+        justIn.delete(d);
+        refuse(dropId, performance.now(), false);
+        notify(`Couldn't pick up "${name}"`);
+        pushLootLog(`Couldn't pick that up — ${waiting}`);
+      });
   };
 
   useFrame((_, frameDt) => {
@@ -474,16 +633,23 @@ export function useDropLoop(source: () => readonly Drop[]): void {
     // The spirit runs one errand at a time: busy from the moment it's sent
     // (two pieces landing on the same frame, or in two batches, mustn't both
     // be given to it). A finished errand frees it.
-    if (errand && errand.fetch === null && errand.phase !== "carried")
-      errand = null;
+    if (errand && errand.fetch === null) errand = null;
+    // Anything taken off it some other way (a batch closed, the ground
+    // changed under it) is no longer its business, or it would hold up the
+    // hand-over and count against the bag for good.
+    for (const d of claimed) if (d.phase !== "fetching") claimed.delete(d);
+    const onFoot = herzie?.companionKind === "walker";
 
     const drops = source();
+    const held = hold();
     for (const d of drops) {
       const flat = Math.hypot(d.pos.x - player.x, d.pos.z - player.z);
       // Something that dropped while you listened is only taken with room
       // in the bag for it; otherwise it stays lying there, and says why
       // when you walk up to it.
       const room = !d.home || hasLootRoom(d.item.id);
+      // Turned down by the server a moment ago: left be (see refusals).
+      const refusedHere = d.dropId !== "" && refused(d.dropId, now);
       switch (d.phase) {
         case "waiting": {
           const at = d.here ? now : burstAt(now);
@@ -515,17 +681,32 @@ export function useDropLoop(source: () => readonly Drop[]): void {
             const r = restAt(now - d.since);
             d.pos.set(d.spot.x, r.y + d.ground, d.spot.z);
           }
+          // Held: one the spirit was going for stays where it lies.
+          if (held && d.phase === "fetching" && d.fetch === "going") {
+            d.fetch = null;
+            d.phase = "resting";
+            d.restedAt = now;
+            claimed.delete(d);
+            if (errand === d) errand = null;
+          }
           if (
+            !held &&
             !room &&
+            !bagOpen() &&
             flat < LOOT.magnetRadius &&
             now - (d.fullNoticeAt ?? 0) > FULL_NOTICE_MS
           ) {
             d.fullNoticeAt = now;
-            notify(`Inventory full — no room for "${d.item.name}"`);
+            notify("Bag full");
           }
           // Walk into it: it comes to you (and the spirit can stand down).
-          if (room && flat < LOOT.magnetRadius && now - d.restedAt > 120) {
-            if (d.fetch) herzie?.fetch(null);
+          if (
+            !held &&
+            !refusedHere &&
+            room &&
+            flat < LOOT.magnetRadius &&
+            now - d.restedAt > 120
+          ) {
             if (errand === d) errand = null;
             d.fetch = null;
             d.phase = "pulled";
@@ -533,107 +714,43 @@ export function useDropLoop(source: () => readonly Drop[]): void {
             d.from.copy(d.pos);
             break;
           }
-          // The spirit spots it: one errand at a time, the grandest last.
-          if (
-            d.phase === "resting" &&
-            room &&
-            spirit &&
-            !errand &&
-            !d.unreachable &&
-            now - d.restedAt > LOOT.spiritDelayMs &&
-            flat < LOOT.spiritRadius &&
-            d ===
-              drops
-                .filter(
-                  (x) =>
-                    x.phase === "resting" &&
-                    !x.unreachable &&
-                    (!x.home || hasLootRoom(x.item.id)),
-                )
-                .sort((a, b) => a.tier - b.tier)[0]
-          ) {
-            d.phase = "fetching";
-            d.fetch = "going";
-            errand = d;
-            d.fetchAt = now;
-            sfxSpiritNotice();
-            d.mouth = herzie?.companionKind === "walker";
-            if (d.mouth) {
-              // On foot: there at a run, with time to spare (or it can't
-              // get there, and gives up).
-              const far = Math.hypot(d.spot.x - spirit.x, d.spot.z - spirit.z);
-              d.fetchBy = now + LOOT.catPatienceMs + far * LOOT.catMsPerUnit;
-            }
-            herzie?.fetch(
-              new THREE.Vector3(
-                d.spot.x,
-                d.mouth ? d.ground : d.ground + LOOT.hover + 0.55,
-                d.spot.z,
-              ),
-            );
-          }
-          if (d.phase === "fetching" && spirit && d.mouth) {
-            const r = restAt(now - d.since);
-            if (d.fetch !== "absorb")
-              d.pos.set(d.spot.x, r.y + d.ground, d.spot.z);
-            if (d.fetch === "going" && herzie?.companionCaught) {
-              // Pounced on: picked up in its mouth.
-              d.fetch = "absorb";
-              d.fetchAt = now;
-              d.from.copy(d.pos);
-            } else if (d.fetch === "going" && now > (d.fetchBy ?? 0)) {
-              // It can't get there: left for you.
-              d.fetch = null;
-              d.phase = "resting";
-              d.unreachable = true;
-              d.mouth = false;
-              errand = null;
-              herzie?.fetch(null);
-            } else if (d.fetch === "absorb") {
-              const t = Math.min(1, (now - d.fetchAt) / LOOT.catPickupMs);
-              d.pos.lerpVectors(d.from, spirit, t * t);
-              if (t >= 1) {
-                d.fetch = null;
-                d.phase = "carried";
-                d.since = now;
-                d.hum?.stop();
-                d.hum = null;
-                herzie?.fetch(null);
-              }
-            }
-            break;
-          }
           if (d.phase === "fetching" && spirit) {
             const r = restAt(now - d.since);
             if (d.fetch !== "absorb")
               d.pos.set(d.spot.x, r.y + d.ground, d.spot.z);
-            const reach = spirit.distanceTo(d.pos);
-            // There, or (never stuck on a spot it can't quite reach) long
-            // enough on its way.
+            // Taken the moment it passes over it, without stopping: the
+            // spirit's free for the next one at once, while this one zips
+            // into it. (Or a cat pounced on it; or a spirit never quite got
+            // there, but long enough on its way.)
+            const over =
+              Math.hypot(spirit.x - d.spot.x, spirit.z - d.spot.z) <
+              (d.onFoot ? LOOT.catTouchRadius : LOOT.spiritTouchRadius);
             if (
               d.fetch === "going" &&
-              (reach < 0.75 || now - d.fetchAt > 2_500)
-            ) {
-              d.fetch = "hover";
-              d.fetchAt = now;
-            } else if (
-              d.fetch === "hover" &&
-              now - d.fetchAt > LOOT.spiritHoverMs
+              (over ||
+                (d.onFoot && herzie?.companionCaught) ||
+                (!d.onFoot && now - d.fetchAt > 2_500))
             ) {
               d.fetch = "absorb";
               d.fetchAt = now;
               d.from.copy(d.pos);
+              if (errand === d) errand = null;
+            } else if (
+              d.fetch === "going" &&
+              d.onFoot &&
+              now > (d.fetchBy ?? 0)
+            ) {
+              // It can't get there: left for you.
+              d.fetch = null;
+              d.phase = "resting";
+              d.unreachable = true;
+              d.onFoot = false;
+              errand = null;
+              claimed.delete(d);
             } else if (d.fetch === "absorb") {
               const t = Math.min(1, (now - d.fetchAt) / LOOT.spiritAbsorbMs);
               d.pos.lerpVectors(d.from, spirit, t * t);
-              if (t >= 1) {
-                d.fetch = null;
-                d.phase = "carried";
-                d.since = now;
-                d.hum?.stop();
-                d.hum = null;
-                herzie?.fetch(null);
-              }
+              if (t >= 1) collect(d, now);
             }
           }
           break;
@@ -649,18 +766,6 @@ export function useDropLoop(source: () => readonly Drop[]): void {
           if (t >= 1) collect(d, now);
           break;
         }
-        case "carried":
-          // In the cat's mouth, all the way back.
-          if (d.mouth && spirit) d.pos.copy(spirit);
-          // Brought home: the payoff is when it reaches you.
-          if (
-            !spirit ||
-            Math.hypot(spirit.x - player.x, spirit.z - player.z) <
-              (d.mouth ? LOOT.catDeliverRadius : LOOT.deliverRadius) ||
-            now - d.since > (d.mouth ? 8_000 : 4_000)
-          )
-            collect(d, now);
-          break;
         case "vanishing": {
           const t = Math.max(
             0,
@@ -678,15 +783,93 @@ export function useDropLoop(source: () => readonly Drop[]): void {
       }
       draw(d, now, dt, flat);
     }
+
+    // Free: off after the next thing in reach (the nearest, once it's on a
+    // run), or home.
+    if (!errand && spirit && herzie) {
+      const next = held ? null : nextErrand(drops, player, spirit, now);
+      if (next) send(next, spirit, now, onFoot, herzie);
+      else if (out) {
+        out = false;
+        herzie.fetch(null);
+      }
+    }
   });
+}
+
+/** What the spirit goes for next, if anything: what's lying in reach of
+ * you, and fits in the bag on top of what it's just put there or is
+ * getting. Setting out, the humblest first; on a run, whatever's nearest
+ * where it is. */
+function nextErrand(
+  drops: readonly Drop[],
+  player: THREE.Vector3,
+  spirit: THREE.Vector3,
+  now: number,
+): Drop | null {
+  let best: Drop | null = null;
+  let bestScore = Number.POSITIVE_INFINITY;
+  const onRun = out;
+  const taking = alsoTaking(now);
+  for (const x of drops) {
+    if (
+      x.phase !== "resting" ||
+      x.unreachable ||
+      (x.dropId !== "" && refused(x.dropId, now)) ||
+      // No room for it on top of what it's already got: left lying there
+      // until there is. (A test drop grants nothing, so always fits.)
+      (x.dropId !== "" && !hasLootRoom(x.item.id, taking)) ||
+      now - x.restedAt <= LOOT.spiritDelayMs ||
+      Math.hypot(x.pos.x - player.x, x.pos.z - player.z) >= LOOT.spiritRadius
+    )
+      continue;
+    const near = Math.hypot(x.spot.x - spirit.x, x.spot.z - spirit.z);
+    const score = onRun ? near : x.tier * 1e4 + near;
+    if (score < bestScore) {
+      bestScore = score;
+      best = x;
+    }
+  }
+  return best;
+}
+
+/** Sends the spirit for `d`. */
+function send(
+  d: Drop,
+  spirit: THREE.Vector3,
+  now: number,
+  onFoot: boolean,
+  herzie: { fetch(at: THREE.Vector3 | null): void },
+) {
+  d.phase = "fetching";
+  d.fetch = "going";
+  d.fetchAt = now;
+  errand = d;
+  claimed.add(d);
+  // Only the first of a run is announced.
+  if (!out) sfxSpiritNotice();
+  out = true;
+  d.onFoot = onFoot;
+  if (onFoot) {
+    // On foot: there at a run, with time to spare (or it can't get there,
+    // and gives up).
+    const far = Math.hypot(d.spot.x - spirit.x, d.spot.z - spirit.z);
+    d.fetchBy = now + LOOT.catPatienceMs + far * LOOT.catMsPerUnit;
+  }
+  herzie.fetch(
+    new THREE.Vector3(
+      d.spot.x,
+      onFoot ? d.ground : d.ground + LOOT.hover + 0.55,
+      d.spot.z,
+    ),
+  );
 }
 
 /** Puts one drop's parts where its state says, this frame. */
 function draw(d: Drop, now: number, dt: number, flat: number) {
   const v = d.view;
   if (!v.group || !v.model || !v.pillar || !v.ring || !v.dust) return;
-  const show =
-    d.phase !== "waiting" && (d.phase !== "carried" || d.mouth === true);
+  const show = d.phase !== "waiting";
   v.model.visible = show && d.phase !== "done";
   v.model.position.copy(d.pos);
 
@@ -709,18 +892,10 @@ function draw(d: Drop, now: number, dt: number, flat: number) {
   if (d.phase === "pulled") {
     scale = 1 - 0.8 * Math.min(1, (now - d.since) / LOOT.magnetMs);
   }
-  if (d.fetch === "absorb" && d.mouth) {
-    // Picked up: down to a mouthful.
-    const t = Math.min(1, (now - d.fetchAt) / LOOT.catPickupMs);
-    scale = 1 - (1 - LOOT.catCarryScale) * t;
-  } else if (d.fetch === "absorb") {
+  if (d.fetch === "absorb") {
     const t = Math.min(1, (now - d.fetchAt) / LOOT.spiritAbsorbMs);
     scale = 1 - t;
     v.model.rotation.y += t * 8;
-  }
-  if (d.phase === "carried" && d.mouth) {
-    scale = LOOT.catCarryScale;
-    v.model.rotation.set(0, d.spin * 0.25, 0);
   }
   if (d.phase === "vanishing") {
     const t = Math.max(0, Math.min(1, (now - d.since) / (d.vanishMs ?? 400)));
@@ -834,8 +1009,10 @@ export function DropView({ drop }: { drop: Drop }) {
         }}
         visible={false}
       >
-        <primitive object={plain} />
-        <primitive object={glow} />
+        <group scale={LOOT.modelScale}>
+          <primitive object={plain} />
+          <primitive object={glow} />
+        </group>
         <Html
           center
           position={[0, 0.95, 0]}

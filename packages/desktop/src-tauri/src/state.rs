@@ -81,17 +81,19 @@ pub struct ManagedState {
     /// once (replaced wholesale with the server's list on every sync, e.g.
     /// emptied after a Spirit Orb auto-collects them all).
     pub pending_drops: Vec<PendingDrop>,
+    /// Drops being picked up, by drop id, until the server's state shows them
+    /// (see collects.rs).
+    pub collects: HashMap<String, crate::collects::PendingCollect>,
     /// Bumped on every local `friend_codes` mutation (add/accept/remove). A
     /// `sync_tick` captures this before its network call; if it changes while
     /// the request is in flight, the (now-stale) server `friend_codes` is not
     /// applied so it can't clobber a just-accepted friend.
     pub friend_epoch: u64,
-    /// Bumped on every local `pending_drops` mutation (manual collect,
-    /// debug spawn). Same purpose as `friend_epoch`: a `sync_tick` captures
+    /// Bumped on every local `pending_drops` replacement (debug spawn, an
+    /// attune's drops). Same purpose as `friend_epoch`: a `sync_tick` captures
     /// this before its network call, and skips applying the (now-stale)
-    /// server `pendingDrops` if it changed while the request was in flight —
-    /// otherwise a collect that completes mid-sync gets its drop reinstated
-    /// by a response that was fetched before the collect happened.
+    /// server `pendingDrops` if it changed while the request was in flight.
+    /// Pickups don't bump it: `collects` covers them, over any snapshot.
     pub drop_epoch: u64,
     /// Bumped on every local `equipped` mutation (equip/unequip). Same purpose
     /// as `friend_epoch`: an `/inventory` fetch captures this before its
@@ -101,8 +103,8 @@ pub struct ManagedState {
     /// issued before it happened, which the desktop UI sees as the item
     /// popping back off.
     pub equip_epoch: u64,
-    /// Bumped on every local `inventory` mutation (sell, buy, drop collect and
-    /// its revert). Same purpose as `friend_epoch`: `sync_tick` captures this
+    /// Bumped on every local `inventory` mutation (sell, buy; not pickups,
+    /// which `collects` re-applies over any snapshot). Same purpose as `friend_epoch`: `sync_tick` captures this
     /// before its network call and skips the response's `inventory` if it
     /// moved, so a sync issued before the mutation can't reinstate the old
     /// contents. Distinct from `equip_epoch`/`drop_epoch` because buying
@@ -176,6 +178,7 @@ impl ManagedState {
             incoming_friend_requests: Vec::new(),
             outgoing_friend_requests: Vec::new(),
             pending_drops: Vec::new(),
+            collects: HashMap::new(),
             friend_epoch: 0,
             drop_epoch: 0,
             equip_epoch: 0,
@@ -227,6 +230,7 @@ impl ManagedState {
         self.incoming_friend_requests.clear();
         self.outgoing_friend_requests.clear();
         self.pending_drops.clear();
+        self.collects.clear();
         crate::storage::clear_equipped();
         crate::storage::clear_inventory_cache();
         crate::storage::clear_friends_cache();
@@ -495,6 +499,7 @@ mod tests {
             incoming_friend_requests: Vec::new(),
             outgoing_friend_requests: Vec::new(),
             pending_drops: Vec::new(),
+            collects: HashMap::new(),
             friend_epoch: 0,
             drop_epoch: 0,
             equip_epoch: 0,

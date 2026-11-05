@@ -1,5 +1,6 @@
 mod api;
 mod auth;
+mod collects;
 mod game;
 mod hatch;
 mod lastfm;
@@ -846,6 +847,13 @@ async fn attune_crystal(
             // The whole ground as the server has it now; a sync already in
             // flight predates it and mustn't put the old list back.
             s.pending_drops = drops;
+            s.rebase_collects(
+                collects::Replaced {
+                    pending_drops: true,
+                    ..Default::default()
+                },
+                None,
+            );
             s.bump_drop_epoch();
             changed = true;
         }
@@ -987,97 +995,43 @@ async fn collect_drop(
     app: AppHandle,
     state: tauri::State<'_, SharedState>,
     drop_id: String,
-) -> Result<bool, String> {
+) -> Result<&'static str, String> {
+    use collects::CollectOutcome;
     let client = api::http();
 
-    // Optimistic: remove the drop and credit the item to inventory locally
-    // right away, before the round trip even starts, so the card
-    // disappears and the count bumps instantly instead of after a couple
-    // hundred ms of network latency. Reverted below if the server says
-    // otherwise — already gone (e.g. a racing Spirit Orb auto-collect) or
-    // a request failure.
-    let removed_drop = {
-        let mut s = state.lock().unwrap();
-        let removed = s
-            .pending_drops
-            .iter()
-            .position(|d| d.id == drop_id)
-            .map(|i| s.pending_drops.remove(i));
-        if let Some(ref drop) = removed {
-            if let Some(inv) = s.inventory.as_mut() {
-                *inv.entry(drop.item_id.clone()).or_insert(0) += 1;
-            }
-            // The server mints the copy under the drop's own id
-            // (collect_pending_drop), so this placeholder IS the real copy —
-            // there's no temporary id to reconcile once the call confirms.
-            s.units.push(ItemUnit {
-                id: drop.id.clone(),
-                item_id: drop.item_id.clone(),
-                upgrade_level: 0,
-                equipped_slot: None,
-            });
-            s.bump_drop_epoch();
-            s.bump_inventory_epoch();
-        }
-        removed
-    };
-    if removed_drop.is_some() {
+    // Optimistic: off the ground and into the bag now, before the round trip
+    // starts. Kept in a ledger rather than patched in once, so a sync landing
+    // before the answer can't undo it, and the answer can't undo it twice
+    // (see collects.rs).
+    let began = state.lock().unwrap().begin_collect(&drop_id);
+    if began {
         emit_state_update(&app);
     }
 
     let result = api::api_collect_drop(&client, &drop_id).await;
 
-    match result {
-        Ok(Some((_item_id, name))) => {
-            // Log as soon as the collect is confirmed. This used to sit behind
-            // the reconcile below, so the pickup line waited on two
-            // sequential round trips — the second to Vercel `/api/inventory` —
-            // and lagged visibly behind the item vanishing from the ground.
-            //
-            // Same `Picked up "<name>"` wording as a spirit's
-            // server-side auto-collect (see game-server.ts) — this path has
-            // no SyncResponse to ride along on, so log it directly.
-            let _ = app.emit("activity", format!("Picked up \"{name}\""));
-
-            // No /inventory re-fetch here. `collect_pending_drop` does exactly
-            // one thing — delete the drop row and mint a copy under its id —
-            // which the optimistic update above already mirrors exactly, so a
-            // refresh could only confirm what we know. Picking up several drops
-            // in quick succession used to fire one slow Vercel request each.
-            // /sync carries the authoritative inventory within a few seconds
-            // regardless, which covers any genuine drift.
-            Ok(true)
+    let outcome = {
+        let mut s = state.lock().unwrap();
+        match &result {
+            Ok(CollectOutcome::Collected) => s.confirm_collect(&drop_id),
+            Ok(CollectOutcome::Gone) => s.undo_collect(&drop_id, false),
+            Ok(CollectOutcome::BagFull) | Err(_) => s.undo_collect(&drop_id, true),
         }
-        Ok(None) => {
-            if let Some(drop) = removed_drop {
-                revert_optimistic_collect(&state, drop);
-                emit_state_update(&app);
-            }
-            Ok(false)
-        }
-        Err(e) => {
-            if let Some(drop) = removed_drop {
-                revert_optimistic_collect(&state, drop);
-                emit_state_update(&app);
-            }
-            Err(e)
-        }
+        result
+    };
+    if began && !matches!(outcome, Ok(CollectOutcome::Collected)) {
+        emit_state_update(&app);
     }
-}
-
-/// Undoes the optimistic local removal/inventory-credit in `collect_drop`
-/// once the server reports the collect didn't actually happen.
-fn revert_optimistic_collect(state: &tauri::State<'_, SharedState>, drop: PendingDrop) {
-    let mut s = state.lock().unwrap();
-    if let Some(inv) = s.inventory.as_mut() {
-        if let Some(qty) = inv.get_mut(&drop.item_id) {
-            *qty = qty.saturating_sub(1);
-        }
+    if matches!(outcome, Ok(CollectOutcome::BagFull)) {
+        // We thought there was room and the server didn't: our copy of the
+        // bag is off. Take the server's, now, rather than at the next sync.
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let state = app.state::<SharedState>();
+            let _ = fetch_inventory(app.clone(), state).await;
+        });
     }
-    s.units.retain(|u| u.id != drop.id);
-    s.pending_drops.push(drop);
-    s.bump_drop_epoch();
-    s.bump_inventory_epoch();
+    outcome.map(CollectOutcome::as_str)
 }
 
 /// Dev-only: powers the "Spawn Item Drop"/"Spawn Dice Drop" debug buttons in
@@ -1507,6 +1461,7 @@ fn apply_inventory(s: &mut ManagedState, snapshot: ItemSnapshot, equip_epoch_bef
     // old contents — see `inventory_epoch` and sync_tick.
     s.bump_inventory_epoch();
     let equipped_is_current = equip_epoch_before.is_none_or(|before| s.equip_epoch == before);
+    let mut units_replaced = false;
     if equipped_is_current {
         s.equipped = equipped;
         storage::save_equipped(&s.equipped);
@@ -1514,10 +1469,20 @@ fn apply_inventory(s: &mut ManagedState, snapshot: ItemSnapshot, equip_epoch_bef
         // `equipped` when an equip raced this snapshot. Left alone in that case
         // (a `None` from a server that predates copies leaves them alone too);
         // the next sync reconciles.
-        if let Some(units) = units {
-            s.units = units;
+        if let Some(ref units) = units {
+            s.units = units.clone();
+            units_replaced = true;
         }
     }
+    // Pickups still on their way to the server, over the top.
+    s.rebase_collects(
+        collects::Replaced {
+            inventory: true,
+            units: units_replaced,
+            pending_drops: false,
+        },
+        units.as_deref(),
+    );
     storage::save_inventory_cache(
         &inventory,
         currency,
@@ -2622,12 +2587,16 @@ async fn sync_tick_with(
         if !trade_state_stale {
             s.pending_trade_request = sync_resp.pending_trade_request.clone();
         }
-        // A drop was collected (or a debug drop spawned) locally while this
-        // /sync was in flight, so its server snapshot of pending_drops is
-        // stale — applying it would reinstate a drop the user just picked
-        // up (or drop one they just got). Skip it; the next sync reconciles.
+        // What this sync overwrites, for the pickups still on their way to
+        // the server to go back on top of (see collects.rs).
+        let mut replaced = collects::Replaced::default();
+        // The ground changed locally while this /sync was in flight (a debug
+        // drop, an attune's drops), so its snapshot of pending_drops is stale.
+        // Skip it; the next sync reconciles. Pickups don't count: the ledger
+        // covers them.
         if s.drop_epoch == drop_epoch_before {
             s.pending_drops = sync_resp.pending_drops.clone();
+            replaced.pending_drops = true;
         }
 
         // /sync now carries the authoritative inventory and equip state, which
@@ -2676,6 +2645,7 @@ async fn sync_tick_with(
         if s.inventory_epoch == inventory_epoch_before {
             if let Some(ref inventory) = sync_resp.inventory {
                 s.inventory = Some(inventory.clone());
+                replaced.inventory = true;
                 if let Some(ref item_upgrades) = sync_resp.item_upgrades {
                     s.item_upgrades = item_upgrades.clone();
                 }
@@ -2685,6 +2655,7 @@ async fn sync_tick_with(
                 if s.equip_epoch == equip_epoch_before {
                     if let Some(ref units) = sync_resp.units {
                         s.units = units.clone();
+                        replaced.units = true;
                     }
                 }
                 storage::save_inventory_cache(
@@ -2701,6 +2672,7 @@ async fn sync_tick_with(
             s.incoming_friend_requests = sync_resp.incoming_friend_requests.clone();
             s.outgoing_friend_requests = sync_resp.outgoing_friend_requests.clone();
         }
+        s.rebase_collects(replaced, sync_resp.units.as_deref());
 
         let app_state = s.to_app_state(env!("CARGO_PKG_VERSION"));
         drop(s);
@@ -2763,8 +2735,8 @@ async fn sync_tick_with(
         });
         if let Ok(mut last) = app.state::<LastInventoryFullNotified>().0.lock() {
             if pickup_blocked {
-                // While the window is open, the in-app "Inventory full" prompt
-                // (HomeView) already covers this — a system notification would
+                // While the window is open, the in-app "Bag full" notice
+                // (main.tsx) already covers this — a system notification would
                 // just be noise on top of it. Deliberately leave `last` unset
                 // in that case rather than marking it notified, so the alert
                 // still fires the moment the user hides the window with the
@@ -2773,7 +2745,7 @@ async fn sync_tick_with(
                 if !*last && !tray::is_window_visible() {
                     send_notification(
                         app,
-                        "Inventory full",
+                        "Bag full",
                         "Your spirit found something but there's no room for it. Free up a slot to keep collecting.",
                         None,
                     );

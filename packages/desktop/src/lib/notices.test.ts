@@ -35,6 +35,16 @@ describe("notices", () => {
     expect(read()).toEqual([]);
   });
 
+  it("says it on a keyed line, changing its text, instead of a new one", () => {
+    notify("one", { key: "k" });
+    notify("other");
+    notify("two", { key: "k" });
+    expect(read().map((n) => [n.text, n.bump])).toEqual([
+      ["other", 0],
+      ["two", 1],
+    ]);
+  });
+
   it("restarts the same line rather than stacking it", () => {
     notify("Not ready yet");
     vi.advanceTimersByTime(1_000);

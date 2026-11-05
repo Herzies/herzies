@@ -36,6 +36,9 @@ import {
 } from "@tauri-apps/plugin-updater";
 import { useEffect, useState } from "react";
 
+/** What the server made of a pickup (see `collectDrop`). */
+export type CollectOutcome = "collected" | "gone" | "bag-full";
+
 export interface ChatMessage {
   id: string;
   userId: string;
@@ -430,7 +433,12 @@ export const herzies = {
   /** Manually collects one specific pending world drop by id. Resolves
    * `true` if it was collected, `false` if it no longer existed (e.g.
    * already collected by a racing Spirit Orb auto-collect). */
-  collectDrop: (dropId: string) => invoke<boolean>("collect_drop", { dropId }),
+  /** Picks a ground drop up: in the bag at once (optimistically), then what
+   * the server made of it. "gone": it wasn't there any more (most likely the
+   * server's spirit took it, so it's in the bag); "bag-full": no room, it
+   * stays on the ground. Rejects on a failed call (it stays on the ground). */
+  collectDrop: (dropId: string) =>
+    invoke<CollectOutcome>("collect_drop", { dropId }),
   /** Cash in the Crystal. `attunes` is the count the UI last saw, so a double
    * press pays out once. Items are in the bag on return; XP lands with the
    * next sync. */

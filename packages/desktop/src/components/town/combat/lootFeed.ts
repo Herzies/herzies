@@ -17,14 +17,49 @@ export function onLootLog(listener: Listener): () => void {
   return () => listeners.delete(listener);
 }
 
-let roomFor: (itemId: string) => boolean = () => true;
+type RoomFor = (itemId: string, alsoTaking: readonly string[]) => boolean;
 
-/** main.tsx keeps this current with the bank (see HomeView's pickups). */
-export function setLootRoom(fn: (itemId: string) => boolean): void {
+let roomFor: RoomFor = () => true;
+let free = Number.POSITIVE_INFINITY;
+let version = 0;
+
+/** main.tsx keeps this current with the bank (see HomeView's pickups):
+ * whether there's room for an item, and how many slots are free. */
+export function setLootRoom(
+  fn: RoomFor,
+  freeSlots = Number.POSITIVE_INFINITY,
+): void {
   roomFor = fn;
+  free = freeSlots;
+  version += 1;
 }
 
-/** Whether the bank can take one more of `itemId`. */
-export function hasLootRoom(itemId: string): boolean {
-  return roomFor(itemId);
+/** How many of the bank's slots are free. */
+export function bagFree(): number {
+  return free;
+}
+
+let bagShown = false;
+
+/** main.tsx says when the bag is open: you can see it's full, so no warning. */
+export function setBagOpen(open: boolean): void {
+  bagShown = open;
+}
+
+export function bagOpen(): boolean {
+  return bagShown;
+}
+
+/** Goes up every time the bank changes (a new `setLootRoom`). */
+export function roomVersion(): number {
+  return version;
+}
+
+/** Whether the bank can take one more of `itemId`, on top of `alsoTaking`
+ * (what the spirit has already taken in and not handed over yet). */
+export function hasLootRoom(
+  itemId: string,
+  alsoTaking: readonly string[] = [],
+): boolean {
+  return roomFor(itemId, alsoTaking);
 }

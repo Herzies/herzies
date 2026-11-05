@@ -2,7 +2,7 @@ import { RARITY_COLORS } from "@herzies/shared";
 import type { HerzieModel } from "@herzies/shared/gl";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useRapier } from "@react-three/rapier";
-import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
+import { useCallback, useEffect, useReducer, useRef } from "react";
 import * as THREE from "three";
 import {
   type Drop,
@@ -20,9 +20,6 @@ import {
   saveSpots,
   type Vec2,
 } from "./dropSpots";
-import { HOME_LAYER } from "./HomeLayer";
-import { HomeShadow } from "./HomeShadow";
-import { homeAzimuth } from "./homeCamera";
 import { homeMode } from "./homeMode";
 import {
   cellAt,
@@ -42,18 +39,9 @@ import { RIFT, type Rift, RiftView, riftEndsAt, riftWorkMs } from "./vfx/Rifts";
  * in: in from the sides, below the player card, above what's playing. */
 const VIEW = { x: 0.78, top: 0.42, bottom: -0.62 } as const;
 const scratchNdc = new THREE.Vector3();
-/** In the big window, where Home's cards are (NDC): drops keep left of
- * neither's corner (see HomeView's `big`). */
-const BIG_CARD = { x: -0.55, y: 0.1 } as const;
-const BIG_CHAT = { x: -0.2, y: -0.4 } as const;
 const scratchProp = new THREE.Vector3();
 const scratchEdge = new THREE.Vector3();
-const scratchScreen = new THREE.Vector2();
-const scratchHit = new THREE.Vector3();
-const scratchNear = new THREE.Vector3();
 const scratchBox = new THREE.Box3();
-/** The ground under the herzie, flat (its constant set to the feet). */
-const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const scratchRight = new THREE.Vector3();
 
 /** Where the herzie and its boombox are on screen (NDC boxes: middle and
@@ -130,9 +118,13 @@ const OPEN_GROUND = new Set([".", "v", "*", "m"]);
  * It lands far enough off that standing still doesn't pick it up: walk
  * over to it, or wear a spirit to fetch it (the same pickups as the boss's
  * loot: LootDrops). Each is remembered where it lies (dropSpots), so it's
- * still there next time; one left on another island, or far off, is
- * brought to you again when you go Home. One taken some other way (the
- * server's spirit, while the app was hidden) is drawn back into a hole.
+ * still there next time; one left on another island is brought to you
+ * again on this one. One taken some other way (the server's spirit, while
+ * the app was hidden) is drawn back into a hole.
+ *
+ * Not at Home: they're the world's, and fade away with it on the way there
+ * (nothing's picked up meanwhile). One that drops while you're at Home
+ * comes out of its hole once you're back out.
  *
  * Only on islands you don't fight on: the cave's and the Tower's loot is
  * their own (LootDrops), and listening drops wait until you're out.
@@ -152,10 +144,6 @@ export function HomeDrops({ map }: { map: TownMap }) {
     queued: new Set<string>(),
     spots: loadSpots(),
     seenVersion: -1,
-    /** The visit, and the ground as it was, when what's out of Home's
-     * picture was last brought into it. */
-    passVisit: -1,
-    passVersion: -1,
     /** Every drop seen on the ground this session: a spot is only forgotten
      * once its drop was seen and is gone (the app starts with an empty
      * ground until its first sync, which mustn't wipe them all). */
@@ -164,16 +152,16 @@ export function HomeDrops({ map }: { map: TownMap }) {
     spotsDirty: false,
     lastReconcile: 0,
     nextSummonAt: 0,
-    /** Drawn on Home's layer alone (the world fading under it), or the
-     * world's: what the groups below were last put on. */
-    overlay: null as boolean | null,
-    groups: new Set<THREE.Object3D>(),
     /** The work hums still going, by rift. */
     hums: new Map<string, { stop: () => void }>(),
     keySeq: 0,
   });
 
-  useDropLoop(() => s.current.list);
+  // At Home they aren't shown, so nothing's picked up.
+  useDropLoop(
+    () => s.current.list,
+    () => homeMode.on,
+  );
 
   // Leaving the island (a new physics world): stop the hums, call the
   // spirit back.
@@ -241,26 +229,6 @@ export function HomeDrops({ map }: { map: TownMap }) {
         for (const c of clear)
           if (Math.abs(p.x - c.x) < c.w && Math.abs(p.y - c.y) < c.h)
             return false;
-        // At Home, a little behind the herzie: up close or level with
-        // it, they'd loom (the lens is wide at the edges).
-        if (homeMode.on) {
-          const herzie = rt.playerHerzie;
-          if (herzie) {
-            const there = herzie.root.getWorldPosition(scratchEdge);
-            const toHerzie = camera.position.distanceTo(there);
-            if (
-              camera.position.distanceTo(scratchNear.set(x, y + h, z)) <
-              toHerzie * 1.15
-            )
-              return false;
-          }
-        }
-        // The big window's column of cards: the player card up top, the
-        // chat at the bottom, both at the left.
-        if (homeMode.on && homeMode.frame?.big) {
-          if (p.x < BIG_CARD.x && p.y > BIG_CARD.y) return false;
-          if (p.x < BIG_CHAT.x && p.y < BIG_CHAT.y) return false;
-        }
       }
       // Apart on screen too, not just on the ground (one far behind
       // another would hide it).
@@ -279,32 +247,10 @@ export function HomeDrops({ map }: { map: TownMap }) {
     [groundOk, map, camera, rt],
   );
 
-  // Where the next one lands. At Home, settled, the picture is narrow and
-  // mostly herzie: a spot's picked on screen — anywhere there's open
-  // ground to see, out to the sides and back — and found on the ground
-  // under it, so they spread across what's in view. Out walking, round the
-  // herzie beyond it from the camera (placeDrop).
-  const raycaster = useMemo(() => new THREE.Raycaster(), []);
+  // Where the next one lands: round the herzie, beyond it from the camera
+  // (placeDrop).
   const place = useCallback(
     (player: Vec2, away: number): Vec2 | null => {
-      if (homeMode.on && homeMode.blend === 1) {
-        const feet = rt.playerHerzie?.root.getWorldPosition(scratchProp).y ?? 0;
-        plane.constant = -feet;
-        for (let i = 0; i < 96; i++) {
-          scratchScreen.set(
-            (Math.random() * 2 - 1) * VIEW.x,
-            VIEW.bottom + Math.random() * (VIEW.top - VIEW.bottom),
-          );
-          raycaster.setFromCamera(scratchScreen, camera);
-          const hit = raycaster.ray.intersectPlane(plane, scratchHit);
-          if (!hit) continue;
-          const d = Math.hypot(hit.x - player.x, hit.z - player.z);
-          if (d < HOME_DROPS.near || d > HOME_DROPS.widest) continue;
-          // A slope makes the ground there higher or lower than the plane.
-          if (Math.abs(groundY(map, hit.x, hit.z) - feet) > 0.6) continue;
-          if (spotOk(hit.x, hit.z)) return { x: hit.x, z: hit.z };
-        }
-      }
       const taken = [...s.current.live.values()].map((d) => d.spot);
       return (
         placeDrop({ player, away, taken, ok: spotOk }) ??
@@ -314,18 +260,7 @@ export function HomeDrops({ map }: { map: TownMap }) {
         placeDrop({ player, away, taken, ok: groundOk })
       );
     },
-    [camera, raycaster, map, rt, spotOk, groundOk],
-  );
-
-  /** Whether a drop's in the picture (loosely: anywhere on screen). */
-  const inPicture = useCallback(
-    (d: Drop): boolean => {
-      const p = scratchNdc
-        .set(d.spot.x, d.ground + LOOT.hover, d.spot.z)
-        .project(camera);
-      return p.z <= 1 && Math.abs(p.x) <= 0.95 && Math.abs(p.y) <= 0.95;
-    },
-    [camera],
+    [spotOk, groundOk],
   );
 
   useFrame(() => {
@@ -334,11 +269,8 @@ export function HomeDrops({ map }: { map: TownMap }) {
     const herzie = rt.playerHerzie;
     if (!herzie) return;
     const player: Vec2 = { x: townSave.x, z: townSave.z };
-    // Seen from where: Home's camera at Home (in front of the herzie),
-    // else the one behind it. Drops land beyond the herzie from it.
-    const away = homeMode.on
-      ? (homeMode.azimuth ?? homeAzimuth(herzie.heading)) + Math.PI
-      : rt.cameraAzimuth + Math.PI;
+    // Drops land beyond the herzie from the camera.
+    const away = rt.cameraAzimuth + Math.PI;
     let changed = false;
 
     const pending = homeDropFeed.drops;
@@ -369,7 +301,7 @@ export function HomeDrops({ map }: { map: TownMap }) {
         else if (spot.map === map.id) {
           restDrop(st, p.id, p.itemId, spot, map, now);
           changed = true;
-        } else if (homeMode.on) enqueue(st, p.id, p.itemId);
+        } else enqueue(st, p.id, p.itemId);
       }
       // Gone from the ground some other way: drawn back into a hole. One
       // we picked up ourselves just goes.
@@ -383,6 +315,13 @@ export function HomeDrops({ map }: { map: TownMap }) {
           continue;
         }
         if (d.phase === "vanishing") continue;
+        // Already on its way to you (fetched, pulled): the server took it
+        // meanwhile, so it's in the bag. Not snatched back into a hole out
+        // of the spirit; it plays out, and nothing more is asked.
+        if (d.phase === "fetching" || d.phase === "pulled") {
+          d.taken = true;
+          continue;
+        }
         if (d.phase === "waiting" || d.phase === "flying") {
           // Still on its way out: the hole takes it back unseen.
           dropDrop(st, id);
@@ -408,39 +347,14 @@ export function HomeDrops({ map }: { map: TownMap }) {
       }
     }
 
-    // At Home, settled: whatever's lying out of the picture (on another
-    // island, back where you were, off to a side) is brought into it —
-    // gone from where nobody can see it, and summoned again near you. Once
-    // a visit, and again whenever the ground changes.
-    if (
-      homeMode.on &&
-      homeMode.blend === 1 &&
-      (st.passVisit !== homeMode.visit ||
-        st.passVersion !== homeDropFeed.version)
-    ) {
-      st.passVisit = homeMode.visit;
-      st.passVersion = homeDropFeed.version;
-      for (const [id, d] of st.live) {
-        if (d.phase !== "resting" || inPicture(d)) continue;
-        dropDrop(st, id);
-        enqueue(st, id, d.item.id);
-        changed = true;
-      }
-      for (const p of pending) {
-        const spot = st.spots.get(p.id);
-        if (spot && spot.map !== map.id && !st.live.has(p.id))
-          enqueue(st, p.id, p.itemId);
-      }
-    }
-
     if (st.spotsDirty) {
       st.spotsDirty = false;
       saveSpots(st.spots);
     }
 
-    // One at a time, a beat apart — and never while the camera's swinging
-    // to or from Home (they'd land out of the picture it ends on).
-    const settled = homeMode.blend === 0 || homeMode.blend === 1;
+    // One at a time, a beat apart, and only out in the Town: at Home (or
+    // on the way back) they wait.
+    const settled = !homeMode.on && homeMode.blend === 0;
     if (st.queue.length > 0 && settled && now >= st.nextSummonAt) {
       const next = st.queue[0];
       if (
@@ -479,14 +393,6 @@ export function HomeDrops({ map }: { map: TownMap }) {
       }
     }
 
-    // Over the fading world on the way Home, everything here is drawn on
-    // Home's layer alone (drawing its glows twice would double them).
-    const overlay = homeMode.overlay;
-    if (overlay !== st.overlay) {
-      st.overlay = overlay;
-      for (const g of st.groups) putOnLayer(g, overlay);
-    }
-
     if (changed) {
       st.list = [...st.live.values()];
       rerender();
@@ -494,25 +400,13 @@ export function HomeDrops({ map }: { map: TownMap }) {
   });
 
   const st = s.current;
-  const track = useCallback(
-    (g: THREE.Object3D | null, was?: THREE.Object3D | null) => {
-      const groups = s.current.groups;
-      if (was) groups.delete(was);
-      if (g) {
-        groups.add(g);
-        putOnLayer(g, s.current.overlay ?? homeMode.overlay);
-      }
-    },
-    [],
-  );
-
   return (
     <>
       {st.list.map((d) => (
-        <HomeDropView key={d.key} drop={d} track={track} />
+        <DropView key={d.key} drop={d} />
       ))}
       {st.rifts.map((r) => (
-        <TrackedRift key={r.key} rift={r} track={track} />
+        <RiftView key={r.key} rift={r} />
       ))}
     </>
   );
@@ -688,63 +582,4 @@ function vanish(st: State, d: Drop, now: number) {
   d.vanishTo = at.clone();
   d.vanishMs = RIFT.vanishPullMs;
   sfxRiftOpen();
-}
-
-/** Puts an object on Home's layer alone (`home`), or the world's. */
-function putOnLayer(object: THREE.Object3D, home: boolean) {
-  object.traverse((o) => {
-    if (home) o.layers.set(HOME_LAYER);
-    else o.layers.set(0);
-  });
-}
-
-/** One drop, with its shadow at Home. */
-function HomeDropView({
-  drop,
-  track,
-}: {
-  drop: Drop;
-  track: (g: THREE.Object3D | null, was?: THREE.Object3D | null) => void;
-}) {
-  const group = useRef<THREE.Group>(null);
-  useEffect(() => {
-    const g = group.current;
-    track(g);
-    return () => track(null, g);
-  }, [track]);
-  return (
-    <>
-      <group ref={group}>
-        <DropView drop={drop} />
-      </group>
-      <group position={[drop.spot.x, drop.ground, drop.spot.z]}>
-        <HomeShadow
-          radius={0.42}
-          strength={() =>
-            drop.phase === "resting" || drop.phase === "fetching"
-              ? Math.min(1, (performance.now() - drop.restedAt) / 300)
-              : 0
-          }
-        />
-      </group>
-    </>
-  );
-}
-
-function TrackedRift({
-  rift,
-  track,
-}: {
-  rift: Rift;
-  track: (g: THREE.Object3D | null, was?: THREE.Object3D | null) => void;
-}) {
-  const last = useRef<THREE.Object3D | null>(null);
-  const onGroup = useCallback(
-    (g: THREE.Group | null) => {
-      track(g, last.current);
-      last.current = g;
-    },
-    [track],
-  );
-  return <RiftView rift={rift} onGroup={onGroup} />;
 }

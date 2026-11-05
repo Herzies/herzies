@@ -1,6 +1,7 @@
 import "./globals.css";
 import {
   bankCapacity,
+  bankSlotsUsed,
   basicAttack,
   CLASS_DEFS,
   getHerzieStatsFromUnits,
@@ -58,7 +59,7 @@ import { StoreView } from "./components/StoreView";
 import { type MenuLanding, TabBar, type View } from "./components/TabBar";
 import { TradeView } from "./components/TradeView";
 import { BULLETIN_KEY } from "./components/town/Boards";
-import { setLootRoom } from "./components/town/combat/lootFeed";
+import { setBagOpen, setLootRoom } from "./components/town/combat/lootFeed";
 import { useBossResultsShown } from "./components/town/combat/results";
 import { setArmed, setMySkills } from "./components/town/combat/skills";
 import { combat } from "./components/town/combat/state";
@@ -79,6 +80,7 @@ import { useHomeStageOffset } from "./hooks/useStageAlignment";
 import { useTradeRequests } from "./hooks/useTradeRequests";
 import { onLogActivity } from "./lib/activity";
 import { notify } from "./lib/notices";
+import { announcePickup } from "./lib/pickups";
 import { stableMerge } from "./lib/stableMerge";
 import { cn } from "./lib/utils";
 import { RELEASE_NOTES } from "./release-notes";
@@ -481,10 +483,6 @@ function App() {
   const [tradeActive, setTradeActive] = useState(false);
   /** Set when the user tries to navigate away mid-trade; holds the destination until confirmed. */
   const [pendingLeaveView, setPendingLeaveView] = useState<View | null>(null);
-  /** True once the "inventory full" alert has been dismissed for the current
-   * overflow — reset the moment a slot frees up, so filling back up again
-   * (a further buy/pickup) shows it again instead of staying silenced. */
-  const [dismissedInventoryFull, setDismissedInventoryFull] = useState(false);
   /** Where to return when the trade session ends — the view the user was on before entering it. */
   const tradeReturnViewRef = useRef<OverlayId | null>(null);
   /** The open window, readable from effect closures (deep-link handler). */
@@ -513,10 +511,18 @@ function App() {
   // The cave's loot asks the bank before picking up, as Home's drops do.
   useEffect(() => {
     const capacity = bankCapacity(state.bankExpansions);
-    setLootRoom((itemId) =>
-      hasRoomFor(state.inventory, state.equipped, itemId, capacity),
-    );
+    setLootRoom((itemId, alsoTaking) => {
+      let inventory = state.inventory;
+      if (alsoTaking.length > 0) {
+        const next: Record<string, number> = { ...(inventory ?? {}) };
+        for (const id of alsoTaking) next[id] = (next[id] ?? 0) + 1;
+        inventory = next;
+      }
+      return hasRoomFor(inventory, state.equipped, itemId, capacity);
+    }, capacity - bankSlotsUsed(state.inventory, state.equipped));
   }, [state.inventory, state.equipped, state.bankExpansions]);
+  // With the bag open you can see it's full: no "Bag full" warnings then.
+  useEffect(() => setBagOpen(overlay === "bag"), [overlay]);
   // What's lying on the ground, for the world to put round your herzie
   // (town/HomeDrops).
   useEffect(() => {
@@ -544,6 +550,13 @@ function App() {
     // What the backend says happened (a pickup, a friend, a visitor, a level
     // up): into the log, and over the screen for a moment.
     const unlistenActivity = herzies.onActivity((message) => {
+      // A spirit's server-side sweep: on the one pickup line with the rest
+      // (it logs it too), not a line per find.
+      const picked = /^Picked up "(.+)"$/.exec(message);
+      if (picked) {
+        announcePickup(picked[1]).confirm();
+        return;
+      }
       addLog(message);
       notify(message, { kind: "info" });
     });
@@ -593,8 +606,13 @@ function App() {
     state.equipped,
     bankCapacity(state.bankExpansions),
   );
+  // Said once as it fills up (a line, not a prompt), unless the bag's open
+  // and you can see it. Freeing a slot lets it say so again next time.
+  const bagShown = overlay === "bag";
+  const bagShownRef = useRef(bagShown);
+  bagShownRef.current = bagShown;
   useEffect(() => {
-    if (!inventoryFull) setDismissedInventoryFull(false);
+    if (inventoryFull && !bagShownRef.current) notify("Bag full");
   }, [inventoryFull]);
 
   // Recolour the window while a live boss (blackout) or George (deep gold) is
@@ -1813,32 +1831,6 @@ function App() {
         >
           Are you sure you want to leave? The trade stays open — you can rejoin
           it from Social → Trades.
-        </PromptOverlay>
-      )}
-
-      {herzie && inventoryFull && !dismissedInventoryFull && (
-        <PromptOverlay
-          title="Inventory full"
-          titleId="inventory-full-title"
-          onEscape={() => setDismissedInventoryFull(true)}
-          actions={[
-            {
-              label: "Later",
-              colour: "text-text-dim",
-              onClick: () => setDismissedInventoryFull(true),
-            },
-            {
-              label: "Open bag",
-              colour: "text-purple",
-              onClick: () => {
-                setDismissedInventoryFull(true);
-                switchView("bag");
-              },
-            },
-          ]}
-        >
-          Your inventory is full. Sell something from your bag to free up a slot
-          before you pick up or buy anything else.
         </PromptOverlay>
       )}
 

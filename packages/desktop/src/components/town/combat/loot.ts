@@ -57,29 +57,27 @@ export const LOOT = {
   spinPerSecond: (Math.PI * 2) / 3,
   /** The voxel model's size: world units per pixel of a 24px icon. */
   voxel: ITEM_VOXEL,
+  /** The item itself, lying there: a touch under its size elsewhere. */
+  modelScale: 0.8,
   /** Walk within this and it's pulled to you, taking this long. */
   magnetRadius: 1.7,
   magnetMs: 260,
   /** The spirit spots loot that has rested this long, within this far:
    * the whole lair (bosses are fought from range, and only you see your
    * loot, so nobody's is being taken). */
-  spiritDelayMs: 800,
+  spiritDelayMs: 450,
   spiritRadius: 40,
-  /** At the loot, it hovers this long before taking it in. */
-  spiritHoverMs: 250,
-  /** Taken in (spiralling into the spirit), and brought back within this
-   * far of you. */
-  spiritAbsorbMs: 320,
-  deliverRadius: 1.8,
+  /** It takes loot it passes within this far of (across the ground): a
+   * floating spirit, or a cat on foot. */
+  spiritTouchRadius: 0.8,
+  catTouchRadius: 0.9,
+  /** Taken in (zipping into the spirit, which carries on): in the bag
+   * when it's done. */
+  spiritAbsorbMs: 160,
   /** A cat (a spirit on foot) fetching: it gives up after this long, plus
-   * this much per unit it had to go (it can't get there: water). Picks it
-   * up in this long, carries it this big, and has brought it once it's
-   * within catDeliverRadius (it keeps a step off to the side). */
+   * this much per unit it had to go (it can't get there: water). */
   catPatienceMs: 2_500,
   catMsPerUnit: 280,
-  catPickupMs: 180,
-  catCarryScale: 0.4,
-  catDeliverRadius: 2.8,
   /** The name shows within this far. */
   labelRadius: 8,
   /** Pillars by tier (common..mythic): height and brightness. */

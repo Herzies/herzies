@@ -409,7 +409,8 @@ pub async fn api_sync(
 pub async fn api_collect_drop(
     client: &Client,
     drop_id: &str,
-) -> Result<Option<(String, String)>, String> {
+) -> Result<crate::collects::CollectOutcome, String> {
+    use crate::collects::CollectOutcome;
     // New functionality, not a port — lives only as an Edge Function (see
     // supabase/functions/collect-drop), same functions_base()/anon-key
     // pattern as api_sync.
@@ -424,15 +425,18 @@ pub async fn api_collect_drop(
     let data: serde_json::Value =
         serde_json::from_str(&text).map_err(|_| format!("Server returned {status}"))?;
     if !status.is_success() {
+        // No room is an answer, not a failure: the drop stays on the ground.
+        if data["reason"].as_str() == Some("inventory-full") {
+            return Ok(CollectOutcome::BagFull);
+        }
         let msg = data["error"].as_str().unwrap_or("Unknown error");
         return Err(msg.to_string());
     }
-    let item_id = data["collected"]["itemId"].as_str().map(|s| s.to_string());
-    let name = data["collected"]["name"].as_str().map(|s| s.to_string());
-    Ok(item_id.map(|id| {
-        let name = name.unwrap_or_else(|| id.clone());
-        (id, name)
-    }))
+    Ok(if data["collected"].is_object() {
+        CollectOutcome::Collected
+    } else {
+        CollectOutcome::Gone
+    })
 }
 
 /// POSTs to an Edge Function and returns its JSON, with the server's error
