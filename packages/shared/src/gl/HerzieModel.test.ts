@@ -131,6 +131,44 @@ describe("HerzieModel", () => {
     }
   });
 
+  it("has its cat hop up on the boombox at Home, whichever way it faces", () => {
+    // As the Town's Home sets it up: the boombox in the corner of Home's
+    // frame, fading in once there; the herzie standing still.
+    type Cat = {
+      state: { perched: boolean; position: THREE.Vector3; heading: number };
+    };
+    for (const heading of [0, 0.6, -0.6, 2, Math.PI]) {
+      const h = new HerzieModel(
+        {
+          seed: "heybob",
+          stage: 3,
+          equipped: { ground_left: "boombox", spirit: "sleptwell" },
+        },
+        { anchorGround: true, layoutCols: 126, layoutRows: 40 },
+      );
+      h.heading = heading;
+      const { cat } = h as unknown as { cat: Cat };
+      let up = -1;
+      for (let f = 0; f < 60 * 10; f++) {
+        const t = f / 60;
+        h.setAccessories(Math.min(1, Math.max(0, t - 1)));
+        h.setAccessoryHeading(heading);
+        h.update(1 / 60, 0);
+        if (cat.state.perched && up < 0) up = t;
+      }
+      expect(cat.state.perched).toBe(true);
+      expect(up).toBeLessThan(6);
+      // On it: over the boombox's middle.
+      const box = h.accessoryWorldBox(new THREE.Box3()) as THREE.Box3;
+      const mid = box.getCenter(new THREE.Vector3());
+      expect(
+        Math.hypot(cat.state.position.x - mid.x, cat.state.position.z - mid.z),
+      ).toBeLessThan(0.2);
+      // Facing the camera, as the herzie does at Home.
+      expect(Math.cos(cat.state.heading - heading)).toBeGreaterThan(0.95);
+    }
+  });
+
   it("keeps a ground prop in the same spot on either side, mirrored", () => {
     // As HerzieView builds it: props placed in the window's grid, held
     // still while the herzie turns.

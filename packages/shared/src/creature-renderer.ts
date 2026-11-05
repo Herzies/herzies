@@ -315,6 +315,24 @@ export interface Sphere {
   /** Where the Evasive Pair's sparkles come from: a wing tip (the trail)
    * or a foot (footfalls). See gl/shoeSparkles.ts. */
   sparkle?: "wing" | "foot";
+  /** Part of a prop the 3D renderer draws as a model of its own (see
+   * gl/props.ts) rather than as these spheres, which only the ray caster
+   * draws. Every sphere of the prop shares the one object. */
+  prop?: PropModel;
+}
+
+/** A prop drawn as a model in 3D (see Sphere.prop). */
+export interface PropModel {
+  kind: "boombox";
+  /** The middle of its body, in creature space (y down). */
+  center: V3;
+  /** Its turn about the vertical, as rotY's. */
+  yaw: number;
+  /** Its body's width, height and depth (the handle and antenna stand
+   * above). */
+  size: V3;
+  /** Drawn mirrored left to right (on the herzie's other side). */
+  mirrored: boolean;
 }
 
 export interface Shape {
@@ -1544,6 +1562,22 @@ function buildBoomboxSpheres(
   const yawDeg = side === "left" ? config.yawDeg : -config.yawDeg;
   const yaw = (yawDeg * Math.PI) / 180;
 
+  // In 3D it's a model (gl/props.ts), about the size these spheres fill,
+  // standing where they stand.
+  const size: V3 = [
+    boomW + bodyR * 1.8,
+    boomH + bodyR * 1.5,
+    boomD + bodyR * 1.1,
+  ];
+  const bottom = by + boomH * 0.5 + bodyR;
+  const prop: PropModel = {
+    kind: "boombox",
+    center: [bx, bottom - size[1] * 0.5, bz],
+    yaw,
+    size,
+    mirrored: side === "right",
+  };
+
   return local.map((ls) => {
     const r = rotY(ls.c, yaw);
     return {
@@ -1552,6 +1586,7 @@ function buildBoomboxSpheres(
       zone: "wearable" as const,
       part: "ground",
       color: ls.color,
+      prop,
     };
   });
 }

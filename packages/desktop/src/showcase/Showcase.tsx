@@ -11,6 +11,7 @@ import {
   type TownRuntime,
   TownRuntimeContext,
 } from "../components/town/runtime";
+import { Supersample } from "../components/town/Supersample";
 import "../components/town/shadows";
 import { statueSpots } from "../components/town/Statues";
 import { World } from "../components/town/World";
@@ -93,7 +94,8 @@ export function Showcase({
         <Orbit still={still} />
         <Uniforms />
         {onReady && <FirstFrame onReady={onReady} />}
-        <Post ao={!lite} distort={false} supersample={supersample} />
+        <Post ao={!lite} distort={false} />
+        {supersample && <Supersample />}
       </TownRuntimeContext.Provider>
     </Canvas>
   );

@@ -86,8 +86,11 @@ import {
 } from "./animation.js";
 import {
   type CatHost,
+  type CatProp,
   type CatState,
   catHasCaught,
+  catOnProp,
+  catToHome,
   newCatState,
   REST_SIT,
   stepCat,
@@ -104,7 +107,9 @@ import {
   type HerzieLighting,
   herzieMaterial,
   type SchemeUniforms,
+  setRestPlace,
 } from "./herzieMaterial.js";
+import { buildPropModel, foldHandle, propBodyBox } from "./props.js";
 import { ShoeSparkles } from "./shoeSparkles.js";
 import {
   GHOST_SURGE,
@@ -290,6 +295,10 @@ const floats = (s: Sphere) => s.part === "spirit" || s.part === "pet";
 /** What the old renderer kept still while the herzie turned. */
 const sceneFixed = (s: Sphere) => floats(s) || s.part === "ground";
 
+/** For a prop's spheres (see Sphere.prop): placed and posed like the rest,
+ * but its model is drawn in their place. */
+const UNDRAWN = new THREE.MeshBasicMaterial({ visible: false });
+
 /** Air between a floating companion and the herzie, in creature units. */
 const COMPANION_GAP = 0.15;
 /** A surging companion stretches up as it rises and squashes as it sinks
@@ -309,6 +318,7 @@ const geometries = new Map<string, THREE.BufferGeometry>();
 const UP = new THREE.Vector3(0, 1, 0);
 const scratch = new THREE.Vector3();
 const scratchScale = new THREE.Vector3();
+const scratchBox = new THREE.Box3();
 
 /** A string's hash, to seed something by it. */
 function hashSeed(text: string): number {
@@ -786,6 +796,9 @@ export class HerzieModel {
   } | null = null;
   /** Something nearby for its cat to look at (Nakata), or null. */
   catGlanceAt: THREE.Vector3 | null = null;
+  /** At Home: the way to its camera (a heading), for its cat to come in
+   * from behind and face (see catToHome); null away from Home. */
+  homeFacing: number | null = null;
   /** Away from the keyboard: its cat curls up asleep. */
   afk = false;
   /** The land under its cat: its height, and whether it can walk there
@@ -798,6 +811,18 @@ export class HerzieModel {
     | ((ax: number, az: number, bx: number, bz: number) => boolean)
     | null = null;
   private readonly meshes: THREE.Mesh[] = [];
+  /** Props drawn as models (see Sphere.prop): each follows the sphere at
+   * `at` (it hops with it), `offset` from it. */
+  private readonly props: {
+    at: number;
+    group: THREE.Group;
+    offset: THREE.Vector3;
+    /** Its handle folded down (0..1), eased: its cat's sat on it. */
+    fold: number;
+    ground: boolean;
+  }[] = [];
+  /** What its cat walks round and sits on (see CatHost.prop). */
+  private readonly catProp: CatProp = { x: 0, z: 0, r: 0, top: 0 };
   private readonly materials: THREE.ShaderMaterial[] = [];
   /** Creature-space y of the feet, and of the scheme's painted span. */
   private readonly feetY: number;
@@ -876,6 +901,9 @@ export class HerzieModel {
     this.height = (feet - top) * MODEL_SCALE;
     this.centerHeight = feet * MODEL_SCALE;
     this.span = schemeSpan(spheres);
+    // The scheme's bands, painted on at rest (see setRestPlace).
+    this.scheme.uTop.value = this.span[0];
+    this.scheme.uSpan.value = Math.max(1e-6, this.span[1] - this.span[0]);
     // A cloak, on a herzie with a back to hang it from.
     const cloakStyle = look.stage >= 3 ? cloakStyleFor(look.equipped) : null;
     const cloakRig = cloakStyle ? cutCloak(cloakStyle, spheres, feet) : null;
@@ -1061,7 +1089,68 @@ export class HerzieModel {
       uOpacity: this.accessoryOpacity,
     };
     const byShading = new Map<string, THREE.ShaderMaterial>();
-    for (const s of spheres) {
+    const propGroups = new Map<object, THREE.Group>();
+    for (const [i, s] of spheres.entries()) {
+      if (s.prop) {
+        // Its model, drawn instead of its spheres (which stay, unseen, to be
+        // posed and measured as ever).
+        const parent =
+          groundParent && s.part === "ground"
+            ? groundParent
+            : this.anchored && sceneFixed(s)
+              ? this.anchored
+              : this.creature;
+        const mesh = new THREE.Mesh(geometryFor(s), UNDRAWN);
+        if (!s.shape) mesh.scale.setScalar(s.radius);
+        mesh.position.set(...s.center);
+        this.meshes.push(mesh);
+        parent.add(mesh);
+        if (!propGroups.has(s.prop)) {
+          const isGround = s.part === "ground";
+          const group = buildPropModel(s.prop, (color, matte) => {
+            const shading = primitiveShading(
+              { zone: "wearable", color },
+              colors,
+            );
+            if (matte) {
+              // Lit, only a touch lighter than it is.
+              const [dim, base, bright] = shading.shades;
+              const c = new THREE.Color(base).lerp(
+                new THREE.Color(bright),
+                0.2,
+              );
+              shading.shades = [dim, base, `#${c.getHexString()}`];
+            }
+            const key = `${isGround ? "ground|" : ""}${JSON.stringify(shading)}`;
+            let material = byShading.get(key);
+            if (!material) {
+              material = herzieMaterial(
+                shading,
+                textureType,
+                ramp,
+                isGround ? accessoryScheme : this.scheme,
+                options.lighting,
+              );
+              byShading.set(key, material);
+              this.materials.push(material);
+              if (isGround) this.accessoryMaterials.push(material);
+            }
+            return material;
+          });
+          group.rotation.y = s.prop.yaw;
+          group.position.set(...s.prop.center);
+          parent.add(group);
+          propGroups.set(s.prop, group);
+          this.props.push({
+            at: i,
+            group,
+            offset: new THREE.Vector3(...s.prop.center).sub(mesh.position),
+            fold: 0,
+            ground: isGround,
+          });
+        }
+        continue;
+      }
       const shading = primitiveShading(s, colors, scheme);
       const isGround = s.part === "ground";
       // Metal's grooves are laid out by its radius: one material each. The
@@ -1093,6 +1182,7 @@ export class HerzieModel {
         mesh.quaternion.setFromUnitVectors(UP, axis);
       }
       mesh.position.set(...s.center);
+      if (material.uniforms.uScheme.value) setRestPlace(mesh);
       this.meshes.push(mesh);
       const parent =
         companionParts && floats(s)
@@ -1364,14 +1454,46 @@ export class HerzieModel {
     host.groundAt = this.groundAt ?? undefined;
     host.walkable = this.walkable ?? undefined;
     host.clear = this.pathClear ?? undefined;
+    host.prop = this.propForCat();
+    host.facing = this.homeFacing;
     state.glanceAt = this.catGlanceAt;
     if (dt <= 0 && !state.started) return;
     stepCat(state, host, speed, dt);
+    // Its handle folds down flat while the cat's up there.
+    const on = catOnProp(state);
+    for (const p of this.props) {
+      if (!p.ground) continue;
+      p.fold = THREE.MathUtils.damp(p.fold, on ? 1 : 0, 10, dt);
+      foldHandle(p.group, p.fold);
+    }
     model.group.visible = true;
     // Posed in world terms, then brought into the root's space (which
     // carries the herzie's scale already).
     poseCat(model, state, 1);
     this.root.worldToLocal(model.group.position);
+  }
+
+  /** Its boombox, as its cat sees it (round its middle, and its top), in
+   * the world; null when it has none or it isn't fully shown. */
+  private propForCat(): CatProp | null {
+    if (this.accessoryAmount < 0.99) return null;
+    const p = this.props.find((q) => q.ground);
+    if (!p?.group.parent) return null;
+    const box = propBodyBox(p.group, scratchBox);
+    if (!box) return null;
+    const out = this.catProp;
+    out.x = (box.min.x + box.max.x) / 2;
+    out.z = (box.min.z + box.max.z) / 2;
+    out.r = Math.max(box.max.x - box.min.x, box.max.z - box.min.z) / 2;
+    out.top = box.max.y;
+    // Set down facing Home's camera (see setAccessoryHeading): its frame's
+    // front (−z in creature space, before the prop's own turn) points there.
+    const parent = p.group.parent;
+    if (parent) {
+      scratch.set(0, 0, -1).transformDirection(parent.matrixWorld);
+      out.facing = Math.atan2(scratch.x, scratch.z);
+    } else out.facing = undefined;
+    return out;
   }
 
   /**
@@ -2226,6 +2348,8 @@ export class HerzieModel {
         mesh.quaternion.setFromUnitVectors(UP, scratch);
       }
     }
+    for (const p of this.props)
+      p.group.position.copy(this.meshes[p.at].position).add(p.offset);
     if (this.torsoAt >= 0) {
       const [x, y, z] = offsets[this.torsoAt];
       this.torsoOffset = [x, y, z];
@@ -2333,15 +2457,6 @@ export class HerzieModel {
     // What stays put doesn't breathe with the body.
     this.anchored?.scale.setScalar(MODEL_SCALE);
     this.anchored?.position.set(0, this.feetY * MODEL_SCALE, 0);
-
-    // The scheme's bands, in world height above the feet — and scaled with
-    // the herzie, if it's drawn bigger (the boss, a statue).
-    const [spanTop, spanBottom] = this.span;
-    const k = this.root.getWorldScale(scratchScale).y;
-    this.scheme.uTop.value =
-      this.root.getWorldPosition(scratch).y +
-      ((this.feetY - spanTop) * tall + hop) * k;
-    this.scheme.uSpan.value = Math.max(1e-6, (spanBottom - spanTop) * tall * k);
   }
 
   /** Grey it out (0 to 1) and make it see-through (opacity 1 to 0): a herzie
@@ -2402,6 +2517,20 @@ export class HerzieModel {
    * heading the herzie had when they were set down. */
   setAccessoryHeading(heading: number): void {
     if (this.groundFacing) this.groundFacing.rotation.y = heading;
+  }
+
+  /**
+   * It's gone Home: its cat (if it walks after it) runs round to its back,
+   * then gets up on its boombox, or lies down beside it without one. Set
+   * `homeFacing` first.
+   */
+  catToHome(): void {
+    const cat = this.cat;
+    if (!cat || cat.pinned) return;
+    catToHome(
+      cat.state,
+      this.props.some((p) => p.ground),
+    );
   }
 
   private applyAccessories(): void {

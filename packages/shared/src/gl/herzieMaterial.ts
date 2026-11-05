@@ -35,8 +35,9 @@ export const studioLighting: HerzieLighting = {
 };
 
 /** Uniforms every part of one herzie shares, so the herzie sets them all at
- * once: the world height where its colour scheme's top band starts and how
- * tall the painted span is, and how greyed out and see-through it is. */
+ * once: where its colour scheme's top band starts and how tall the painted
+ * span is (creature space, y down, at rest: see `uRestY`), and how greyed
+ * out and see-through it is. */
 export type SchemeUniforms = {
   uTop: THREE.IUniform<number>;
   uSpan: THREE.IUniform<number>;
@@ -66,8 +67,11 @@ varying float vPatch;
 #endif
 varying vec3 vWorldNormal;
 varying vec3 vLocalNormal;
-varying float vWorldY;
+varying float vRestY;
 varying vec3 vWorldPos;
+// The part's row of its resting place in creature space (see
+// setRestPlace): a point's height there, at rest.
+uniform vec4 uRestY;
 #ifdef METAL
 varying vec3 vAround;
 varying vec3 vAxis;
@@ -101,7 +105,9 @@ void main() {
   vLocalNormal = objectNormal;
   vWorldNormal = normalize(mat3(modelMatrix) * objectNormal);
   vec4 worldPosition = modelMatrix * vec4(transformed, 1.0);
-  vWorldY = worldPosition.y;
+  // Where its scheme's bands fall: painted on, by where it sits at rest,
+  // so they move with the arm swinging or the body leaning through them.
+  vRestY = dot(uRestY, vec4(position, 1.0));
   vWorldPos = worldPosition.xyz;
   vec4 mvPosition = viewMatrix * worldPosition;
   gl_Position = projectionMatrix * mvPosition;
@@ -145,7 +151,7 @@ varying float vPatch;
 #endif
 varying vec3 vWorldNormal;
 varying vec3 vLocalNormal;
-varying float vWorldY;
+varying float vRestY;
 varying vec3 vWorldPos;
 #ifdef METAL
 uniform float uRadius;
@@ -363,7 +369,7 @@ void main() {
   int shade = lit > uHi ? 2 : lit > uLo ? 1 : 0;
   vec3 color;
   if (uScheme) {
-    float t = clamp((uTop - vWorldY) / uSpan, 0.0, 0.9999);
+    float t = clamp((vRestY - uTop) / uSpan, 0.0, 0.9999);
     int band = int(floor(t * float(uBands)));
     color = uRamp[band * 3 + shade];
   } else {
@@ -456,6 +462,7 @@ export function herzieMaterial(
       // Shared by reference: the herzie updates them once for all its parts.
       uTop: scheme.uTop,
       uSpan: scheme.uSpan,
+      uRestY: { value: new THREE.Vector4(0, 1, 0, 0) },
       uGrey: scheme.uGrey,
       uOpacity: scheme.uOpacity,
       uFlash: scheme.uFlash,
@@ -485,3 +492,21 @@ export type ClothShading = {
   hemTrim: number;
   collarTrim: number;
 };
+
+/**
+ * Where a part sits at rest in creature space, for its scheme's bands (see
+ * `uRestY`): taken from its matrix now, as built, and set on its material
+ * just before it's drawn (the parts share materials).
+ */
+export function setRestPlace(mesh: THREE.Mesh): void {
+  mesh.updateMatrix();
+  const e = mesh.matrix.elements;
+  const row = new THREE.Vector4(e[1], e[5], e[9], e[13]);
+  mesh.onBeforeRender = (_r, _s, _c, _g, material) => {
+    const m = material as THREE.ShaderMaterial;
+    const u = m.uniforms?.uRestY;
+    if (!u) return;
+    (u.value as THREE.Vector4).copy(row);
+    m.uniformsNeedUpdate = true;
+  };
+}

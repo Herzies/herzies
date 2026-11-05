@@ -143,6 +143,11 @@ const YAWN_SECONDS = 1.3;
 // --- Little life ------------------------------------------------------------
 
 const BLINK_SECONDS = 0.16;
+/** Looking at the herzie: how long when it sets off, and now and then of
+ * its own accord (how long, and how far apart). */
+const WATCH_SETTING_OFF = 1.6;
+const WATCH_SECONDS = [1.5, 4] as const;
+const WATCH_EVERY = [6, 16] as const;
 const GROOM_SECONDS = 2.6;
 const FLICK_SECONDS = 0.45;
 const TWITCH_SECONDS = 0.25;
@@ -163,6 +168,28 @@ const RETURNED_RADIUS = 1.4;
 
 /** Segments in its tail (the model has as many bones). */
 export const TAIL_SEGMENTS = 6;
+
+/** Its herzie's prop (see CatHost.prop): how near the herzie it has to be
+ * to go to it. It goes up on it (beside it only if it can't get up). */
+const PROP_REACH = 3.5;
+/** How many spots round it it tries, and how many times it tries again
+ * when it can't get to one. */
+const PROP_SPOTS = 16;
+const PROP_RETRIES = 3;
+/** How far its body reaches out to the side (what it keeps off the prop),
+ * and how close it settles against it, alongside (its side this far off
+ * the edge). */
+const BODY_RADIUS = 0.2;
+const PROP_SNUG = 0.04;
+/** Where it walks up to, nose first, to settle beside it or jump up on
+ * it: this far off its edge (its nose clear). */
+const PROP_BESIDE = 0.7;
+const PROP_TAKEOFF = 0.75;
+/** How fast it shuffles in against it as it settles (at size 1). */
+const SNUG_PACE = 0.5;
+/** How long a hop up or down takes (on the pounce's timeline: crouch,
+ * leap, land). */
+const HOP_SECONDS = 0.75;
 
 export type CatFetch = "none" | "going" | "pounce" | "holding" | "returning";
 
@@ -211,6 +238,12 @@ export type CatState = {
   headPitchVelocity: number;
   earYaw: number;
   earYawVelocity: number;
+  /** Looking at the herzie: for how much longer, and until it next does
+   * of its own accord; and whether the herzie was walking last step (it
+   * looks round when it sets off). */
+  watchFor: number;
+  watchIn: number;
+  hostWasMoving: boolean;
   /** Looking somewhere of its own accord (a glance), and for how long. */
   glanceYaw: number;
   glanceFor: number;
@@ -261,6 +294,30 @@ export type CatState = {
   sideOn: boolean;
   sideTried: boolean;
   sideGoal: Vector3;
+  /** Its herzie's prop (see CatHost.prop): what it's off to do there
+   * (settle beside it, or get up on it, or first round the herzie to get
+   * to it), and whether it's up on it now. */
+  propPlan: "none" | "beside" | "on" | "around";
+  perched: boolean;
+  /** Spots by the prop it's tried this stop, whether it's given up on it
+   * till the herzie next moves, and until it next looks for a way. */
+  propTries: number;
+  propGaveUp: boolean;
+  propIn: number;
+  /** Home (see catToHome): hurrying there (up on the prop, or down beside
+   * the herzie); just gone there (it picks where next step); whether the
+   * herzie has a prop to get up on (else it lies down beside it); and
+   * `lieDown`: off to, or lying beside the herzie, Home's way. */
+  homeRush: boolean;
+  homeStart: boolean;
+  homeProp: boolean;
+  lieDown: boolean;
+  /** Seconds into a hop up onto the prop or down off it (−1: not
+   * hopping); where from and to, heights and all; and which way. */
+  hop: number;
+  hopFrom: Vector3;
+  hopTo: Vector3;
+  hopUp: boolean;
   /** Getting nowhere: for how long, and the closest it's got. */
   stuckFor: number;
   stuckBest: number;
@@ -290,6 +347,25 @@ export type CatHost = {
    * the way (a wall, a tree) and no water. Without it, only water counts
    * (sampled with `walkable`). */
   clear?: (ax: number, az: number, bx: number, bz: number) => boolean;
+  /** Something of the herzie's standing on the ground (its boombox): it
+   * walks round it, not through it, and when the herzie stops it sometimes
+   * settles beside it and sometimes hops up and sits on it. */
+  prop?: CatProp | null;
+  /** At Home: the way to the camera (a heading). It comes in from behind
+   * the herzie, away from it, and lies facing it. */
+  facing?: number | null;
+};
+
+/** A prop on the ground (see CatHost.prop): a circle round its middle, and
+ * the height of its top, world space; and, if it's set out to be seen
+ * (Home's boombox), the way to the camera (a heading): up on it, it faces
+ * that way, and it goes round the back to get up there, out of the way. */
+export type CatProp = {
+  x: number;
+  z: number;
+  r: number;
+  top: number;
+  facing?: number;
 };
 
 export function newCatState(seed = 0): CatState {
@@ -322,6 +398,9 @@ export function newCatState(seed = 0): CatState {
     headPitchVelocity: 0,
     earYaw: 0,
     earYawVelocity: 0,
+    watchFor: 0,
+    watchIn: 3 + random() * 6,
+    hostWasMoving: false,
     glanceYaw: 0,
     glanceFor: 0,
     glanceIn: 2 + random() * 4,
@@ -354,6 +433,19 @@ export function newCatState(seed = 0): CatState {
     sideOn: false,
     sideTried: false,
     sideGoal: new Vector3(),
+    propPlan: "none",
+    perched: false,
+    propTries: 0,
+    propGaveUp: false,
+    propIn: 0,
+    homeRush: false,
+    homeStart: false,
+    homeProp: false,
+    lieDown: false,
+    hop: -1,
+    hopFrom: new Vector3(),
+    hopTo: new Vector3(),
+    hopUp: false,
     stuckFor: 0,
     stuckBest: Number.POSITIVE_INFINITY,
     started: false,
@@ -430,7 +522,67 @@ function groundAt(host: CatHost, x: number, z: number): number {
 }
 
 function walkable(host: CatHost, x: number, z: number): boolean {
+  if (onProp(host, x, z)) return false;
   return host.walkable ? host.walkable(x, z) : true;
+}
+
+/** Whether a cat standing at (x, z) would be in its herzie's prop. */
+function onProp(host: CatHost, x: number, z: number): boolean {
+  const p = host.prop;
+  if (!p) return false;
+  return Math.hypot(x - p.x, z - p.z) < p.r + BODY_RADIUS * host.scale;
+}
+
+/** How far its body runs fore and aft of where it stands (at size 1). */
+const BODY_HALF = CAT_LENGTH * 0.42;
+
+/** Pushes it out of the prop, its whole body (nose to rump, BODY_RADIUS
+ * thick) clear of it. */
+function keepOffProp(state: CatState, host: CatHost) {
+  const p = host.prop;
+  if (!p) return;
+  const k = host.scale;
+  const fs = Math.sin(state.heading);
+  const fc = Math.cos(state.heading);
+  const half = BODY_HALF * k;
+  // The nearest point of its spine to the prop's middle.
+  const t = MathUtils.clamp(
+    (p.x - state.position.x) * fs + (p.z - state.position.z) * fc,
+    -half,
+    half,
+  );
+  const cx = state.position.x + fs * t;
+  const cz = state.position.z + fc * t;
+  const ox = cx - p.x;
+  const oz = cz - p.z;
+  const d = Math.hypot(ox, oz);
+  const clear = p.r + BODY_RADIUS * k;
+  if (d >= clear) return;
+  // Straight out from the prop; dead on its middle, out sideways.
+  const ux = d > 1e-6 ? ox / d : -fc;
+  const uz = d > 1e-6 ? oz / d : fs;
+  state.position.x += ux * (clear - d);
+  state.position.z += uz * (clear - d);
+}
+
+/** Whether walking straight from a to b goes through the prop. */
+function throughProp(
+  host: CatHost,
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+): boolean {
+  const p = host.prop;
+  if (!p) return false;
+  const dx = bx - ax;
+  const dz = bz - az;
+  const len2 = dx * dx + dz * dz;
+  const t =
+    len2 > 1e-9
+      ? MathUtils.clamp(((p.x - ax) * dx + (p.z - az) * dz) / len2, 0, 1)
+      : 0;
+  return onProp(host, ax + dx * t, az + dz * t);
 }
 
 /** Whether it can walk straight from a to b (see CatHost.clear). */
@@ -441,6 +593,7 @@ function pathClear(
   bx: number,
   bz: number,
 ): boolean {
+  if (throughProp(host, ax, az, bx, bz)) return false;
   if (host.clear) return host.clear(ax, az, bx, bz);
   if (!host.walkable) return true;
   const d = Math.hypot(bx - ax, bz - az);
@@ -479,6 +632,182 @@ function pickSide(state: CatState, host: CatHost): boolean {
     }
   }
   return false;
+}
+
+/**
+ * Off to the herzie's prop, if it's near the herzie: to hop up on it, else
+ * (no way to a run-up) to settle beside it. Looks for a spot all round it,
+ * nearest the cat first: one it can walk straight to, with room — not
+ * crowding the herzie, nor past it to get there. `avoid`: not near there
+ * (the spot it just couldn't get to). False if there's no prop or no spot.
+ */
+function pickProp(
+  state: CatState,
+  host: CatHost,
+  avoid: Vector3 | null = null,
+  /** In a hurry (Home): the nearest way up, not round the back. */
+  hurry = false,
+): boolean {
+  const p = host.prop;
+  if (!p) return false;
+  const k = host.scale;
+  if (Math.hypot(p.x - host.position.x, p.z - host.position.z) > PROP_REACH * k)
+    return false;
+  // Round from its back (away from the camera), else from the cat's side.
+  const start =
+    p.facing !== undefined && !hurry
+      ? p.facing + Math.PI
+      : Math.atan2(state.position.x - p.x, state.position.z - p.z);
+  const room = (host.clearance + BODY_RADIUS + 0.15) * k;
+  const passBy = host.clearance * k;
+  /** A spot `out` off its edge at `a` it can walk straight to: goes. */
+  const tryAt = (a: number, out: number, plan: "on" | "beside") => {
+    const x = p.x + Math.sin(a) * out;
+    const z = p.z + Math.cos(a) * out;
+    if (Math.hypot(x - host.position.x, z - host.position.z) < room)
+      return false;
+    if (avoid && Math.hypot(x - avoid.x, z - avoid.z) < 0.4 * k) return false;
+    if (
+      segmentNear(
+        host.position.x,
+        host.position.z,
+        state.position.x,
+        state.position.z,
+        x,
+        z,
+      ) < passBy
+    )
+      return false;
+    if (
+      !walkable(host, x, z) ||
+      !pathClear(host, state.position.x, state.position.z, x, z)
+    )
+      return false;
+    state.sideGoal.set(x, host.position.y, z);
+    state.propPlan = plan;
+    return true;
+  };
+  // 0, +1, −1, +2, −2, … steps round from `start`: the back half first.
+  const angle = (i: number) =>
+    start + (Math.ceil(i / 2) * (i % 2 ? 1 : -1) * Math.PI * 2) / PROP_SPOTS;
+  const half = PROP_SPOTS / 2;
+  const up = p.r + PROP_TAKEOFF * k;
+  for (let i = 0; i <= half; i++) if (tryAt(angle(i), up, "on")) return true;
+  // Set out to be seen: round the back of the herzie rather than up from
+  // the front (unless it's there already).
+  if (p.facing !== undefined && !hurry && aroundHerzie(state, host, p))
+    return true;
+  for (let i = half + 1; i < PROP_SPOTS; i++)
+    if (tryAt(angle(i), up, "on")) return true;
+  const beside = p.r + PROP_BESIDE * k;
+  for (let i = 0; i < PROP_SPOTS; i++)
+    if (tryAt(angle(i), beside, "beside")) return true;
+  return aroundHerzie(state, host, p);
+}
+
+/**
+ * No straight way to the prop (the herzie's in the way): first round the
+ * herzie, to a spot off its side, across the line from cat to prop —
+ * the side nearer the cat first. From there it looks again.
+ */
+function aroundHerzie(state: CatState, host: CatHost, p: CatProp): boolean {
+  const k = host.scale;
+  const hx = host.position.x;
+  const hz = host.position.z;
+  // Across the line from the herzie to the prop.
+  const a = Math.atan2(p.x - hx, p.z - hz);
+  const out = (host.clearance + BODY_HALF + BODY_RADIUS) * k;
+  const passBy = host.clearance * k;
+  // Round the back of the herzie (away from the camera), else the side
+  // nearer the cat.
+  const prefer =
+    p.facing !== undefined
+      ? p.facing + Math.PI
+      : Math.atan2(state.position.x - hx, state.position.z - hz);
+  const sides = [a + Math.PI / 2, a - Math.PI / 2].sort(
+    (u, v) => Math.abs(angleDelta(prefer, u)) - Math.abs(angleDelta(prefer, v)),
+  );
+  for (const b of sides) {
+    const x = hx + Math.sin(b) * out;
+    const z = hz + Math.cos(b) * out;
+    // There already: no further round that way.
+    if (Math.hypot(x - state.position.x, z - state.position.z) < 0.35 * k)
+      continue;
+    if (segmentNear(hx, hz, state.position.x, state.position.z, x, z) < passBy)
+      continue;
+    if (
+      walkable(host, x, z) &&
+      pathClear(host, state.position.x, state.position.z, x, z)
+    ) {
+      state.sideGoal.set(x, host.position.y, z);
+      state.propPlan = "around";
+      return true;
+    }
+  }
+  return false;
+}
+
+/** How far (cx, cz) is from the segment a–b. */
+function segmentNear(
+  cx: number,
+  cz: number,
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+): number {
+  const dx = bx - ax;
+  const dz = bz - az;
+  const len2 = dx * dx + dz * dz;
+  const t =
+    len2 > 1e-9
+      ? MathUtils.clamp(((cx - ax) * dx + (cz - az) * dz) / len2, 0, 1)
+      : 0;
+  return Math.hypot(ax + dx * t - cx, az + dz * t - cz);
+}
+
+/** Off the prop and done with it (put somewhere else entirely). */
+function leaveProp(state: CatState) {
+  state.perched = false;
+  state.hop = -1;
+  state.propPlan = "none";
+}
+
+/** Sat up on the prop already (back from a long gap: it'd have got up
+ * there meanwhile). */
+function perchOn(state: CatState, host: CatHost) {
+  const p = host.prop;
+  if (!p) return;
+  if (
+    Math.hypot(p.x - host.position.x, p.z - host.position.z) >
+    PROP_REACH * host.scale
+  )
+    return;
+  state.position.set(p.x, p.top, p.z);
+  state.perched = true;
+  state.hop = -1;
+  state.propPlan = "on";
+  state.sideOn = true;
+  state.sideTried = true;
+  state.sideGoal.set(p.x, host.position.y, p.z);
+  state.following = false;
+}
+
+/** Starts a hop: up onto the prop's top, or down off it to `x`, `z`. */
+function startHop(
+  state: CatState,
+  host: CatHost,
+  up: boolean,
+  x: number,
+  z: number,
+) {
+  state.hop = 0;
+  state.hopUp = up;
+  state.hopFrom.copy(state.position);
+  state.hopTo.set(x, up && host.prop ? host.prop.top : groundAt(host, x, z), z);
+  state.heading = Math.atan2(x - state.position.x, z - state.position.z);
+  state.speed = state.speedVelocity = 0;
+  state.perched = false;
 }
 
 /** Footstep `i` (counted from 0, still in the ring). */
@@ -617,6 +946,10 @@ function snapToSlot(state: CatState, host: CatHost) {
   state.started = true;
   state.sideOn = false;
   state.sideTried = true;
+  leaveProp(state);
+  state.lieDown = false;
+  state.homeStart = false;
+  state.homeRush = false;
   resetTrail(state, host);
 }
 
@@ -631,6 +964,7 @@ function respawn(state: CatState, host: CatHost) {
   state.react = -1;
   state.groundVelocity = 0;
   state.sideOn = false;
+  leaveProp(state);
   state.stuckFor = 0;
   state.stuckBest = Number.POSITIVE_INFINITY;
   if (respawnOnTrail(state, host)) return;
@@ -671,6 +1005,8 @@ function respawn(state: CatState, host: CatHost) {
 /** What it should be doing at rest, given how long the herzie's been still. */
 function restFor(state: CatState, host: CatHost): number {
   if (state.fetch !== "none") return REST_STAND;
+  // Lying beside the herzie, Home's way (asleep, if its player's away).
+  if (state.lieDown) return host.afk ? REST_SLEEP : REST_LIE;
   if (host.dancing) return REST_SIT;
   if (host.afk || state.still > SLEEP_AFTER) return REST_SLEEP;
   if (host.sitting && state.still > BENCH_LIE_AFTER) return REST_LIE;
@@ -703,6 +1039,49 @@ function dryHeading(
 const goal = new Vector3();
 
 /**
+ * The herzie's gone Home: the cat's up at once and hurries the quickest
+ * way up on its prop (`prop`: it has one, if only just setting out) or,
+ * without one, down beside it. The same every time, wherever it was.
+ */
+export function catToHome(state: CatState, prop: boolean): void {
+  if (!state.started) return;
+  state.homeStart = true;
+  state.homeProp = prop;
+}
+
+/** Off to the herzie's side (Home, no prop), to lie down there facing the
+ * camera: on a side with room. */
+function lieBeside(state: CatState, host: CatHost): boolean {
+  const k = host.scale;
+  const f = host.facing ?? host.heading;
+  const hx = host.position.x;
+  const hz = host.position.z;
+  const out = (host.clearance + BODY_RADIUS + 0.2) * k;
+  // The cat's side first.
+  const toCat = Math.atan2(state.position.x - hx, state.position.z - hz);
+  const sides = [f + Math.PI / 2, f - Math.PI / 2].sort(
+    (u, v) => Math.abs(angleDelta(toCat, u)) - Math.abs(angleDelta(toCat, v)),
+  );
+  for (const a of sides) {
+    const x = hx + Math.sin(a) * out;
+    const z = hz + Math.cos(a) * out;
+    if (
+      walkable(host, x, z) &&
+      pathClear(host, state.position.x, state.position.z, x, z) &&
+      segmentNear(hx, hz, state.position.x, state.position.z, x, z) >=
+        host.clearance * k
+    ) {
+      state.sideGoal.set(x, host.position.y, z);
+      state.sideOn = true;
+      state.lieDown = true;
+      state.following = true;
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Moves the cat on by `dt` seconds after its herzie, whose ground speed is
  * `speed`. A first step, or a long frame, puts it on its spot; a step of 0
  * leaves it be.
@@ -713,13 +1092,45 @@ export function stepCat(
   speed: number,
   dt: number,
 ): void {
+  if (
+    state.started &&
+    dt > MAX_DT &&
+    Math.hypot(
+      host.position.x - state.hostLast.x,
+      host.position.z - state.hostLast.z,
+    ) <
+      0.5 * host.scale
+  ) {
+    // A long gap (the window shut, a stall) with the herzie where it was:
+    // nothing's changed meanwhile. Carries on from here.
+    return;
+  }
   if (!state.started || dt > MAX_DT) {
     snapToSlot(state, host);
+    // Its herzie standing at its prop: up on it, as it would be by now.
+    if (host.prop && speed <= 0.3) perchOn(state, host);
     return;
   }
   if (dt <= 0) return;
   const k = host.scale;
   state.clock += dt;
+
+  // Gone Home: up at once, and off.
+  if (state.homeStart) {
+    state.homeStart = false;
+    state.homeRush = true;
+    leaveProp(state);
+    state.lieDown = false;
+    state.propTries = 0;
+    state.propGaveUp = false;
+    state.propIn = 0;
+    state.sideTried = true;
+    state.stretch = state.yawn = state.groom = -1;
+    state.react = -1;
+    state.stuckFor = 0;
+    state.stuckBest = Number.POSITIVE_INFINITY;
+    if (!state.homeProp && !lieBeside(state, host)) state.homeRush = false;
+  }
 
   // The herzie's velocity, from where it's been (a teleport resets it).
   {
@@ -738,16 +1149,18 @@ export function stepCat(
   }
   const hostMoving = speed > 0.3;
   state.still = hostMoving ? 0 : state.still + dt;
+  // The herzie setting off: that gets its attention.
+  if (hostMoving && !state.hostWasMoving) state.watchFor = WATCH_SETTING_OFF;
+  state.hostWasMoving = hostMoving;
   // How much of a hurry it's in: none for a stroll, all of it for a sprint.
   const hostPace = Math.max(
     speed,
     Math.hypot(state.hostVelocity.x, state.hostVelocity.z),
   );
-  const urgency = MathUtils.smoothstep(
-    hostPace / k,
-    WALK_SPEED * 0.5,
-    SPRINT_SPEED,
-  );
+  // Hurrying Home: all of it.
+  const urgency = state.homeRush
+    ? 1
+    : MathUtils.smoothstep(hostPace / k, WALK_SPEED * 0.5, SPRINT_SPEED);
   stepTrail(state, host);
 
   // Far away (a teleport, a portal): back in from out of sight.
@@ -803,6 +1216,11 @@ export function stepCat(
     }
     state.sideOn = false;
     state.sideTried = false;
+    state.propPlan = "none";
+    state.propTries = 0;
+    state.propGaveUp = false;
+    state.lieDown = false;
+    state.homeRush = false;
   }
   if (state.fetch === "returning") state.trailNext = state.trailHead;
   if (
@@ -814,8 +1232,45 @@ export function stepCat(
     state.rest < 0.5
   ) {
     state.sideTried = true;
-    state.sideOn = pickSide(state, host);
+    state.propPlan = "none";
+    state.propTries = 0;
+    state.sideOn = pickProp(state, host) || pickSide(state, host);
     if (state.sideOn) state.following = true;
+  }
+  // Down beside the herzie (Home, no prop): there; no more hurry.
+  if (state.homeRush && state.lieDown && !state.following)
+    state.homeRush = false;
+  // The herzie stopped by its prop (Home's boombox): that's where it
+  // wants to be. Looks for a way up now and then till it's there (or it's
+  // tried enough this stop) — the prop may only just have set out, or the
+  // cat been on its way somewhere else.
+  if (
+    host.prop &&
+    !hostMoving &&
+    state.fetch === "none" &&
+    state.hop < 0 &&
+    !state.perched &&
+    (state.propPlan === "none" ||
+      // Round the herzie: from there, on to the prop.
+      (state.propPlan === "around" && !state.following)) &&
+    !state.propGaveUp
+  ) {
+    if (state.propPlan === "around") {
+      state.propPlan = "none";
+      state.propIn = 0;
+    }
+    state.propIn -= dt;
+    if (state.propIn <= 0) {
+      state.propIn = state.homeRush ? 0.25 : 1;
+      if (pickProp(state, host, null, state.homeRush)) {
+        state.sideOn = true;
+        state.sideTried = true;
+        state.following = true;
+      } else if (++state.propTries > PROP_RETRIES) {
+        state.propGaveUp = true;
+        state.homeRush = false;
+      }
+    }
   }
   let away: number;
   let stopAt: number;
@@ -903,9 +1358,19 @@ export function stepCat(
     if (state.stuckFor > STUCK_SECONDS) {
       state.stuckFor = 0;
       state.stuckBest = Number.POSITIVE_INFINITY;
-      if (state.sideOn) {
+      if (
+        state.sideOn &&
+        state.propPlan !== "none" &&
+        state.propTries < PROP_RETRIES &&
+        pickProp(state, host, goal)
+      ) {
+        // Somewhere else round it.
+        state.propTries++;
+      } else if (state.sideOn) {
+        if (state.propPlan !== "none") state.propGaveUp = true;
         state.sideOn = false;
         state.following = false;
+        state.propPlan = "none";
       } else if (away > stopAt + 2 * k) respawn(state, host);
     }
   } else state.stuckFor = 0;
@@ -954,14 +1419,18 @@ export function stepCat(
       state.sideOn || fetching
         ? 0
         : Math.hypot(state.hostVelocity.x, state.hostVelocity.z);
+    // Hurrying Home: off at a dash, all the way.
+    const homeRun = state.homeRush;
     const top = Math.max(
-      (away - stopAt > LEASH * k || fetching ? DASH_PACE : TROT_PACE) * k,
+      (away - stopAt > LEASH * k || fetching || homeRun
+        ? DASH_PACE
+        : TROT_PACE) * k,
       // Never left behind by a sprint.
       along * OUTPACE,
     );
     desired = MathUtils.clamp(along + ARRIVE_GAIN * gap, 0, top);
     // An easy amble when it's only a little way off.
-    if (!hostMoving && !fetching && gap < START_RADIUS * 1.2 * k)
+    if (!hostMoving && !fetching && !homeRun && gap < START_RADIUS * 1.2 * k)
       desired = Math.min(desired, WALK_PACE * k);
     // Slow into a turn; turn on the spot when it's well off and slow.
     desired *= MathUtils.clamp(Math.cos(off) * 0.75 + 0.35, 0, 1);
@@ -983,8 +1452,37 @@ export function stepCat(
   // Turning: arcs at speed, pivots when still.
   const before = state.heading;
   let face = state.heading;
-  if (state.following && up && state.fetch !== "holding") face = want;
-  else if (state.rest < 0.5 && state.fetch === "none") {
+  if (state.perched && host.prop?.facing !== undefined && state.hop < 0)
+    // Up on it: facing the camera.
+    face = host.prop.facing;
+  else if (
+    state.lieDown &&
+    !state.following &&
+    host.facing !== undefined &&
+    host.facing !== null
+  )
+    // Lying beside the herzie at Home: facing the camera too.
+    face = host.facing;
+  else if (state.following && up && state.fetch !== "holding") face = want;
+  else if (
+    state.propPlan === "beside" &&
+    host.prop &&
+    !state.following &&
+    state.fetch === "none"
+  ) {
+    // Settling beside the prop: alongside it, not backed into it.
+    const toProp = Math.atan2(
+      host.prop.x - state.position.x,
+      host.prop.z - state.position.z,
+    );
+    const a = toProp + Math.PI / 2;
+    const b = toProp - Math.PI / 2;
+    face =
+      Math.abs(angleDelta(state.heading, a)) <
+      Math.abs(angleDelta(state.heading, b))
+        ? a
+        : b;
+  } else if (state.rest < 0.5 && state.fetch === "none") {
     // Standing about: turn to keep the herzie in view if it's well behind.
     const toHost = Math.atan2(
       host.position.x - state.position.x,
@@ -1001,10 +1499,58 @@ export function stepCat(
   const turned = angleDelta(before, state.heading);
   state.turnRate = MathUtils.damp(state.turnRate, turned / dt, 10, dt);
 
+  // Up on the prop: down again once it's up to go (or at once, the prop
+  // gone); at the spot it meant to jump from, up.
+  if (state.perched && state.hop < 0) {
+    const p = host.prop;
+    if (!p) state.perched = false;
+    else if (state.following && up) {
+      const dx = host.position.x - p.x;
+      const dz = host.position.z - p.z;
+      const d = Math.max(1e-6, Math.hypot(dx, dz));
+      const out = p.r + PROP_TAKEOFF * k;
+      startHop(state, host, false, p.x + (dx / d) * out, p.z + (dz / d) * out);
+      state.propPlan = "none";
+      state.sideOn = false;
+    }
+  } else if (
+    state.hop < 0 &&
+    state.propPlan === "on" &&
+    state.sideOn &&
+    host.prop &&
+    !state.following &&
+    state.fetch === "none"
+  ) {
+    startHop(state, host, true, host.prop.x, host.prop.z);
+    state.sideGoal.set(host.prop.x, host.position.y, host.prop.z);
+  }
+
   // Moving: forward along its heading, round water, and never through the
   // herzie.
   let moved = 0;
-  if (state.fetch === "pounce") {
+  if (state.hop >= 0) {
+    // Hopping: a crouch, then up (or down) in an arc, then a landing.
+    state.hop += dt;
+    const t = state.hop / HOP_SECONDS;
+    const u = MathUtils.smoothstep(t, POUNCE_LEAP, POUNCE_LAND);
+    const nx = MathUtils.lerp(state.hopFrom.x, state.hopTo.x, u);
+    const nz = MathUtils.lerp(state.hopFrom.z, state.hopTo.z, u);
+    moved = Math.hypot(nx - state.position.x, nz - state.position.z);
+    state.position.set(
+      nx,
+      MathUtils.lerp(state.hopFrom.y, state.hopTo.y, u),
+      nz,
+    );
+    if (t >= 1) {
+      state.hop = -1;
+      state.perched = state.hopUp && !!host.prop;
+      state.propTries = 0;
+      if (state.perched) state.homeRush = false;
+    }
+  } else if (state.perched) {
+    // Sat on it: going nowhere.
+    state.speed = state.speedVelocity = 0;
+  } else if (state.fetch === "pounce") {
     state.pounce += dt;
     const t = state.pounce / POUNCE_SECONDS;
     if (t >= POUNCE_LEAP) {
@@ -1058,6 +1604,37 @@ export function stepCat(
       state.position.z = host.position.z + uz * clear;
     }
   }
+  // Beside the prop and turned alongside it: shuffles in against it as it
+  // settles.
+  if (
+    state.propPlan === "beside" &&
+    host.prop &&
+    !state.following &&
+    state.fetch === "none" &&
+    state.hop < 0 &&
+    state.rest < 1.2
+  ) {
+    const p = host.prop;
+    const ox = state.position.x - p.x;
+    const oz = state.position.z - p.z;
+    const d = Math.hypot(ox, oz);
+    const snug = p.r + (BODY_RADIUS + PROP_SNUG) * k;
+    const radial = Math.atan2(-ox, -oz);
+    const alongside =
+      Math.abs(Math.abs(angleDelta(state.heading, radial)) - Math.PI / 2) <
+      0.35;
+    if (alongside && d > snug + 1e-3) {
+      const step = Math.min(d - snug, SNUG_PACE * k * dt);
+      state.position.x -= (ox / d) * step;
+      state.position.z -= (oz / d) * step;
+    }
+  }
+
+  // Nor through the prop (it may have just appeared where it stands) —
+  // any of it, nose to rump.
+  if (host.prop && !state.perched && state.hop < 0) {
+    keepOffProp(state, host);
+  }
 
   // Close enough to pounce.
   if (state.fetch === "going" && state.target && state.rest < 0.35) {
@@ -1083,8 +1660,14 @@ export function stepCat(
     }
   }
 
-  // Standing on the ground, tilted to it.
-  {
+  // Hopping, it's where the hop has it; up on the prop, on its flat top.
+  if (state.hop >= 0 || (state.perched && host.prop)) {
+    if (state.perched && host.prop) state.position.y = host.prop.top;
+    state.groundVelocity = 0;
+    state.slopePitch = MathUtils.damp(state.slopePitch, 0, 8, dt);
+    state.slopeRoll = MathUtils.damp(state.slopeRoll, 0, 8, dt);
+  } else {
+    // Standing on the ground, tilted to it.
     const { x, z } = state.position;
     const h = groundAt(host, x, z);
     state.position.y = springTo(
@@ -1173,7 +1756,10 @@ function stepLife(state: CatState, host: CatHost, dt: number) {
     if (state.twitchIn <= 0) {
       state.twitch = 0;
       state.twitchEar = r() < 0.5 ? -1 : 1;
-      state.twitchIn = 2.5 + r() * 7;
+      // At the boombox with the music on: twitching along to it.
+      const listening =
+        host.dancing && (state.perched || state.propPlan !== "none");
+      state.twitchIn = listening ? 0.35 + r() * 0.9 : 2.5 + r() * 7;
     }
   }
   // A flick of the tail's tip.
@@ -1203,6 +1789,16 @@ function stepLife(state: CatState, host: CatHost, dt: number) {
   // A yawn, settled down, now and then.
   if (state.yawn < 0 && state.rest > 0.9 && state.rest < 2.5 && !host.dancing) {
     if (r() < dt / 35) state.yawn = 0;
+  }
+  // Now and then it looks over at the herzie, for a while.
+  if (state.watchFor > 0) state.watchFor -= dt;
+  else {
+    state.watchIn -= dt;
+    if (state.watchIn <= 0) {
+      state.watchFor =
+        WATCH_SECONDS[0] + r() * (WATCH_SECONDS[1] - WATCH_SECONDS[0]);
+      state.watchIn = WATCH_EVERY[0] + r() * (WATCH_EVERY[1] - WATCH_EVERY[0]);
+    }
   }
   // Glances about while it isn't going anywhere.
   if (state.glanceFor > 0) state.glanceFor -= dt;
@@ -1246,16 +1842,30 @@ function stepHead(state: CatState, host: CatHost, dt: number) {
         state.glanceAt.z - state.position.z,
       ) <
         6 * k;
+    const prop =
+      state.propPlan === "beside" && !state.following ? host.prop : null;
+    // Something nearby to look at; else the herzie, when it's watching it;
+    // else the prop it's settled against; else about it, of its own accord.
+    const watching = state.watchFor > 0;
+    let at = true;
     if (near && state.glanceAt) look.copy(state.glanceAt);
-    else look.set(host.position.x, host.position.y + 1.6 * k, host.position.z);
-    const dx = look.x - state.position.x;
-    const dz = look.z - state.position.z;
-    yaw = angleDelta(state.heading, Math.atan2(dx, dz));
-    pitch = Math.atan2(
-      look.y - (state.position.y + 0.5 * k),
-      Math.hypot(dx, dz),
-    );
-    if (state.glanceFor > 0 && !near) yaw = state.glanceYaw;
+    else if (watching)
+      look.set(host.position.x, host.position.y + 1.6 * k, host.position.z);
+    else if (prop) look.set(prop.x, prop.top, prop.z);
+    else at = false;
+    if (at) {
+      const dx = look.x - state.position.x;
+      const dz = look.z - state.position.z;
+      yaw = angleDelta(state.heading, Math.atan2(dx, dz));
+      pitch = Math.atan2(
+        look.y - (state.position.y + 0.5 * k),
+        Math.hypot(dx, dz),
+      );
+    } else {
+      // Straight ahead, glancing about now and then.
+      yaw = state.glanceFor > 0 ? state.glanceYaw : 0;
+      pitch = 0;
+    }
     if (host.dancing) yaw += Math.sin(state.clock * Math.PI * 2 * 0.9) * 0.3;
   }
   yaw = MathUtils.clamp(yaw, -1.3, 1.3);
@@ -1354,7 +1964,13 @@ export function catHasCaught(state: CatState): boolean {
 
 /** How far into its pounce it is (0..1), or −1 when it isn't pouncing. */
 export function catPounce(state: CatState): number {
+  if (state.hop >= 0) return Math.min(1, state.hop / HOP_SECONDS);
   return state.fetch === "pounce" ? state.pounce / POUNCE_SECONDS : -1;
+}
+
+/** Whether it's up on its herzie's prop, or on its way up. */
+export function catOnProp(state: CatState): boolean {
+  return state.perched || (state.hop >= 0 && state.hopUp);
 }
 
 /** The pounce's hop (world units at size 1) at `t` through it. */

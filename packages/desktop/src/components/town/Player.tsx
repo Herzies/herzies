@@ -131,6 +131,8 @@ export function Player({
     [rapier],
   );
   const body = useRef<RapierRigidBody>(null);
+  /** The Home visit its cat last came in for (see catToHome). */
+  const catVisit = useRef(homeMode.visit);
   const collider = useRef<RapierCollider>(null);
   const mover = useRef<Mover>({ vx: 0, vz: 0, heading: townSave.heading });
   /** Whether it's on ice, and if it's pushing off, how fast its legs go:
@@ -517,6 +519,15 @@ export function Player({
     herzie.setAccessoryHeading(homeMode.azimuth ?? herzie.heading);
     // Its cat spirit (if it has one) curls up when the player's away.
     herzie.afk = performance.now() - townLive.lastInputAt > AFK_MS;
+    // And at Home it comes in the same way each time: out, back in behind
+    // the herzie (away from the camera), up on the boombox or down beside.
+    herzie.homeFacing = homeMode.on
+      ? (homeMode.azimuth ?? herzie.heading)
+      : null;
+    if (homeMode.visit !== catVisit.current) {
+      catVisit.current = homeMode.visit;
+      if (homeMode.on) herzie.catToHome();
+    }
     herzie.update(
       dt,
       ice.current.on

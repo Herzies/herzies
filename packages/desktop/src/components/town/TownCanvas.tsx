@@ -63,6 +63,7 @@ import {
   useTownMap,
 } from "./runtime";
 import type { Champion } from "./Statues";
+import { Supersample } from "./Supersample";
 import { Visitor } from "./Visitor";
 import { DiscVFX } from "./vfx/DiscVFX";
 import { HasteVFX } from "./vfx/HasteVFX";
@@ -154,9 +155,10 @@ export default function TownCanvas(props: TownCanvasProps) {
   const spots = Object.keys(map.spots).length > 0 ? props.spots : [];
   // At Home nothing's aimed or cast (and aim mode ends on the way in).
   const { home } = useHomeMode();
-  // Supersampled out in the world; at Home (its own, chunkier pixels) the
-  // block average would only blur them, so not there.
-  const supersample = useTownSupersample() && !home;
+  // Supersampled (Settings > Graphics): drawn at twice the resolution and
+  // averaged back down to the same big pixels (see Supersample), at Home
+  // too.
+  const supersample = useTownSupersample();
 
   return (
     <Canvas
@@ -167,8 +169,7 @@ export default function TownCanvas(props: TownCanvasProps) {
         const dpr =
           props.pixelScale ??
           (pixelSize ? window.devicePixelRatio / pixelSize : wholePixelDpr());
-        if (home) return homeDpr(dpr);
-        return supersample ? dpr * SUPERSAMPLE : dpr;
+        return (home ? homeDpr(dpr) : dpr) * (supersample ? SUPERSAMPLE : 1);
       })()}
       gl={{ antialias: false }}
       // Plain PCF: soft enough, and at these pixels the edge reads clean.
@@ -264,9 +265,10 @@ export default function TownCanvas(props: TownCanvasProps) {
         <SlashVFX />
         <CombatOverlay />
         {/* Sound waves bend light, and aim mode works on every island. */}
-        <Post ao={props.ao !== false} distort supersample={supersample} />
+        <Post ao={props.ao !== false} distort />
         {/* Home's things, over the world fading on the way Home. */}
         <HomeLayer />
+        {supersample && <Supersample />}
       </TownRuntimeContext.Provider>
     </Canvas>
   );

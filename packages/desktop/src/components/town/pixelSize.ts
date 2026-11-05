@@ -83,25 +83,26 @@ export function useTownPixelSize(): number | null {
 export const SUPERSAMPLE = 2;
 
 /**
- * Supersampling (Settings > Graphics, off by default): each big pixel the
+ * Supersampling (Settings > Graphics, on by default): each big pixel the
  * average of what it covers — drawn at SUPERSAMPLE times the resolution and
- * each block averaged down (see vfx/blockAverage.ts) — rather than one
+ * each block averaged down (see Supersample.tsx) — rather than one
  * point of it, so thin and distant things stop flickering as the camera
- * moves. About four times the drawing. In dev builds `?supersample=1` on
- * the page turns it on. (The website's showcase always supersamples.)
+ * moves. About four times the drawing. In dev builds `?supersample=0` or
+ * `=1` on the page overrides it. (The website's showcase always
+ * supersamples.)
  */
 const SUPERSAMPLE_KEY = "town.graphics.supersample";
 
 let supersample: boolean = (() => {
   try {
-    if (
-      import.meta.env.DEV &&
-      new URLSearchParams(location.search).get("supersample") === "1"
-    )
-      return true;
-    return localStorage.getItem(SUPERSAMPLE_KEY) === "1";
+    if (import.meta.env.DEV) {
+      const param = new URLSearchParams(location.search).get("supersample");
+      if (param === "1" || param === "0") return param === "1";
+    }
+    // On unless turned off.
+    return localStorage.getItem(SUPERSAMPLE_KEY) !== "0";
   } catch {
-    return false;
+    return true;
   }
 })();
 
@@ -110,8 +111,8 @@ const supersampleListeners = new Set<() => void>();
 export function setTownSupersample(on: boolean): void {
   supersample = on;
   try {
-    if (on) localStorage.setItem(SUPERSAMPLE_KEY, "1");
-    else localStorage.removeItem(SUPERSAMPLE_KEY);
+    if (on) localStorage.removeItem(SUPERSAMPLE_KEY);
+    else localStorage.setItem(SUPERSAMPLE_KEY, "0");
   } catch {
     // Not remembered, then.
   }
