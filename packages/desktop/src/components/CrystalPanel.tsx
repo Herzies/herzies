@@ -11,7 +11,6 @@ import { cn, formatAmount } from "../lib/utils";
 import { herzies } from "../tauri-bridge";
 import { CrystalView } from "./CrystalView";
 import { PIXEL, PixelCrystal, type PixelCrystalLook } from "./PixelCrystal";
-import { SegmentBar } from "./SegmentBar";
 import { Tooltip } from "./Tooltip";
 import { setCrystal, useCrystal } from "./town/crystalState";
 import { sfxCrystalBoop, sfxCrystalCharge, sfxCrystalLevel } from "./town/sfx";
@@ -86,7 +85,6 @@ export function CrystalPanel({ paused = false }: { paused?: boolean }) {
     return <div className="text-[10px] text-text-dim">...</div>;
   }
 
-  const fill = Math.min(1, charge);
   const cost = crystalUpgradeCost(crystal.tier);
   const canGrow = cost !== null && crystal.shards >= cost;
 
@@ -183,11 +181,7 @@ export function CrystalPanel({ paused = false }: { paused?: boolean }) {
               <Tooltip
                 // biome-ignore lint/suspicious/noArrayIndexKey: fixed tiers
                 key={i}
-                label={
-                  i <= crystal.tier
-                    ? `Size ${i + 1}: holds ${hours(crystalCapacity(i))}`
-                    : `Size ${i + 1}: would hold ${hours(crystalCapacity(i))}`
-                }
+                label={`Holds ${formatHours(crystalCapacity(i) / 60)}`}
               >
                 <div className="flex flex-col items-center gap-1">
                   <div className="relative">
@@ -254,12 +248,7 @@ export function CrystalPanel({ paused = false }: { paused?: boolean }) {
           })}
         </div>
 
-        <div className="mt-1 flex items-center justify-between gap-2 border-t border-white/15 pt-1.5 text-ui">
-          <Tooltip
-            label={`${formatAmount(crystal.shards)} Crystal Shard${crystal.shards === 1 ? "" : "s"}`}
-          >
-            <span className="text-cyan">◆ {formatAmount(crystal.shards)}</span>
-          </Tooltip>
+        <div className="mt-1 flex items-center justify-end gap-2 border-t border-white/15 pt-1.5 text-ui">
           {cost !== null ? (
             <button
               type="button"
@@ -288,19 +277,17 @@ export function CrystalPanel({ paused = false }: { paused?: boolean }) {
             give them.
           </div>
         ) : null}
+      </div>
 
-        <div className="mt-2 border-t border-white/15 pt-1.5 text-[10px] uppercase tracking-wider text-text-dim">
-          Your resonance{charge >= 1 ? " · full" : ""}
-        </div>
-        <div className="flex items-center gap-2">
-          <SegmentBar className="flex-1" progress={fill} colour="bg-cyan" />
-          <span className="shrink-0 text-ui-sm text-text-dim">
-            {clock(crystal.fill)} / {clock(crystal.capacity)}
-          </span>
-        </div>
-        <div className="text-ui-sm text-text-dim">
-          Listen to music to charge your resonance.
-        </div>
+      {/* Your Crystal Shards, bottom right, as a stall shows your coins. */}
+      <div className="mt-auto flex justify-end pt-2">
+        <Tooltip
+          label={`${formatAmount(crystal.shards)} Crystal Shard${crystal.shards === 1 ? "" : "s"}`}
+        >
+          <div className="text-ui text-cyan">
+            ◆ {formatAmount(crystal.shards)}
+          </div>
+        </Tooltip>
       </div>
     </div>
   );
@@ -336,10 +323,4 @@ function formatHours(h: number): string {
 
 function hours(minutes: number): string {
   return `${formatHours(minutes / 60)} of listening`;
-}
-
-/** 2h 05m. */
-function clock(minutes: number): string {
-  const m = Math.max(0, Math.floor(minutes));
-  return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
 }

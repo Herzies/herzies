@@ -77,8 +77,6 @@ export function PlayerBars({
         <CrystalBar
           fill={crystal.fill}
           capacity={crystal.capacity}
-          xp={crystal.xp}
-          drops={crystal.dropsWaiting}
           className="min-w-0"
         />
       )}

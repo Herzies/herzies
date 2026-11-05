@@ -171,9 +171,8 @@ export function ExpBar({
     level !== undefined && xp !== undefined
       ? `${Math.max(0, Math.floor(xp - totalXpForLevel(level))).toLocaleString()} / ${xpForLevel(level + 1).toLocaleString()} exp (${pct}%)`
       : `${pct}%`;
-  // Where attuning now would take it: the faint squares, and the tooltip.
+  // Where attuning now would take it: the faint squares.
   let ghost: number | undefined;
-  let tip = base;
   if (waiting > 0 && level !== undefined && xp !== undefined) {
     let reach = level;
     while (xp + waiting >= totalXpForLevel(reach + 1)) reach++;
@@ -181,9 +180,6 @@ export function ExpBar({
       reach > level
         ? 1
         : (xp + waiting - totalXpForLevel(level)) / xpForLevel(level + 1);
-    tip = `${base} · +${Math.floor(waiting).toLocaleString()} exp in your resonance${
-      reach > level ? `: enough for level ${reach}` : ""
-    }`;
   }
   const shown = useFillGlide(progress, level);
   return (
@@ -192,7 +188,7 @@ export function ExpBar({
       progress={shown}
       ghost={ghost}
       ghostFill="bg-green/35"
-      tip={tip}
+      tip={base}
       fill="bg-green"
       ariaLabel="Experience"
       ariaMax={100}
@@ -232,29 +228,18 @@ export function HpBar({
 export function CrystalBar({
   fill,
   capacity,
-  xp,
-  drops,
   className,
 }: {
   /** Listened minutes since the last attune. */
   fill: number;
   capacity: number;
-  /** XP and finds waiting, for the tooltip. */
-  xp: number;
-  drops: number;
   className?: string;
 }) {
   const progress = capacity > 0 ? fill / capacity : 0;
   const over = progress >= 1;
-  const waiting = [
-    xp > 0 ? `${Math.floor(xp).toLocaleString()} exp` : null,
-    drops > 0 ? `${drops} find${drops === 1 ? "" : "s"}` : null,
-  ].filter(Boolean);
   const tip = over
-    ? `Your resonance is ${progress >= 1.25 ? "overcharged" : "full"}. Hand it to the Crystal in Town for ${waiting.join(" and ") || "what it holds"}.`
-    : `Resonance: ${Math.floor(fill / 60)}h ${Math.floor(fill % 60)}m of ${Math.round(capacity / 60)}h${
-        waiting.length > 0 ? ` · ${waiting.join(" and ")} waiting` : ""
-      }`;
+    ? `Resonance ${progress >= 1.25 ? "overcharged" : "full"}`
+    : `Resonance: ${Math.floor(fill / 60)}h ${Math.floor(fill % 60)}m of ${Math.round(capacity / 60)}h`;
   return (
     <SquareBar
       label="◆"
