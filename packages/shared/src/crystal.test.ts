@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CRYSTAL_MAX_TIER,
+  canAttune,
   chargeCrystal,
   crystalCapacity,
   crystalDropsWaiting,
@@ -114,5 +115,21 @@ describe("crystalDropsWaiting / crystalStateFromRow", () => {
       shards: 7,
       enabled: true,
     });
+  });
+});
+
+describe("canAttune", () => {
+  const base = crystalStateFromRow({}, true);
+  it("needs one find's worth of listening", () => {
+    expect(canAttune({ ...base, fill: 9, xp: 90 })).toBe(false);
+    expect(canAttune({ ...base, fill: 10, xp: 100, dropsWaiting: 1 })).toBe(
+      true,
+    );
+  });
+  it("finds left over from a full ground still count", () => {
+    expect(canAttune({ ...base, fill: 0, dropsWaiting: 2 })).toBe(true);
+  });
+  it("never while the Crystal is off", () => {
+    expect(canAttune({ ...base, enabled: false, fill: 100 })).toBe(false);
   });
 });

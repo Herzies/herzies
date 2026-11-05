@@ -1,3 +1,4 @@
+import { canAttune } from "@herzies/shared";
 import { notify } from "../../lib/notices";
 import { herzies } from "../../tauri-bridge";
 import { burstCrystal, getCrystal, setCrystal } from "./crystalState";
@@ -29,10 +30,10 @@ export const crystalCast = {
   z: 0,
 };
 
-/** Whether the Crystal has anything to give (else E offers the upgrade). */
+/** Whether there's enough resonance to hand over (else E opens the
+ * Crystal's window). */
 export function crystalHasSomething(): boolean {
-  const c = getCrystal();
-  return !!c?.enabled && (c.xp > 0 || c.dropsWaiting > 0);
+  return canAttune(getCrystal());
 }
 
 export function isAttuning(): boolean {
