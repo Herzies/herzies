@@ -8,10 +8,10 @@
  * spitters hang back and lob at where you're heading. Only so many attack
  * at once (attackTokens); the rest circle you, waiting their turn. Every
  * attack's shape is on the ground before it lands, judged like the boss's
- * slams (in the shape now *and* a moment ago, a breather after a hit, never
- * more than a share of your health) by the host's {@link MobJudge}, so a
- * herzie hit by the boss is safe from a Thornling for the same breather,
- * and its Def and buffs count the same. Its damage follows the floor, the
+ * slams (in the shape now *and* a moment ago, never more than a share of
+ * your health) by the host's {@link MobJudge}: in the cave a breather
+ * after a hit, so a herzie hit by the boss is safe from a Thornling for
+ * the same breather; the Tower has none. Its Def and buffs count the same. Its damage follows the floor, the
  * kind and the level gap.
  *
  * The client draws mobs a little behind where they are here, so a cast is
@@ -21,15 +21,25 @@
 import {
   type Body,
   bodyHitAt,
+  discChain,
+  discLandsAfterMs,
   type HitStats,
   hitDamage,
   MELEE_REACH,
   meleeReaches,
+  pushOutOfDomes,
+  stunMs,
   WAVE_HAND_HEIGHT,
 } from "@herzies/shared/combat";
-import type { Buff } from "@herzies/shared/skills";
+import {
+  type Buff,
+  RIMSHOT,
+  SHUFFLE_REACH,
+  shuffleScale,
+} from "@herzies/shared/skills";
 import {
   attackTokens,
+  CONTACT,
   ELITE,
   type EliteAffix,
   ENRAGE,
@@ -55,6 +65,9 @@ import {
   type BossPlayer,
   covers,
   mitigatedHit,
+  type ShelterDome,
+  shelteredHit,
+  shelterOf,
   type Telegraph,
   TUNING,
 } from "./boss";
@@ -119,6 +132,9 @@ export type Mob = {
   trail: { t: number; x: number; z: number }[];
   /** Not before this (server ms): a minion just called stands a beat. */
   wakeAt?: number;
+  /** Stunned until (server ms), and when its recent stuns began. */
+  stunUntil?: number;
+  stuns?: number[];
 };
 
 type PendingHit = {
@@ -147,6 +163,8 @@ export class MobPack {
   private mobs: Mob[] = [];
   private telegraphs: Telegraph[] = [];
   private pending: PendingHit[] = [];
+  /** When each mob last bumped each herzie (`mob:uid`), for CONTACT. */
+  private bumpedAt = new Map<string, number>();
   private nextMobId = 1;
   /** When the mobs wake, and when they enrage (server ms). */
   wakeAt = 0;
@@ -209,6 +227,11 @@ export class MobPack {
   minWindupMs: number = MIN_WINDUP_MS;
   maxShapes = Number.POSITIVE_INFINITY;
   taunter: (() => string | null) | null = null;
+  /** The Cymbrella domes standing (the host's): no mob enters one, and
+   * no swing of theirs lands on anyone inside. */
+  domes: () => readonly ShelterDome[] = () => [];
+  /** Shapes a stun took off the floor, to say so next update. */
+  private cancelled: number[] = [];
 
   /** When the last update ran (server ms). */
   get now(): number {
@@ -227,7 +250,7 @@ export class MobPack {
   wireChanged(): TowerMob[] {
     const out: TowerMob[] = [];
     for (const w of this.wire()) {
-      const key = `${w.x},${w.z},${w.yaw},${w.hp},${w.s}`;
+      const key = `${w.x},${w.z},${w.yaw},${w.hp},${w.s},${w.st ?? 0}`;
       if (this.sent.get(w.id) === key) continue;
       this.sent.set(w.id, key);
       out.push(w);
@@ -246,6 +269,7 @@ export class MobPack {
       s: m.state === "windup" ? 1 : 0,
       ...(m.kind !== "brute" ? { k: m.kind } : {}),
       ...(m.rank ? { e: m.rank } : {}),
+      ...((m.stunUntil ?? 0) > this.lastAt ? { st: m.stunUntil } : {}),
     }));
   }
 
@@ -467,6 +491,39 @@ export class MobPack {
     });
   }
 
+  /** Every mob a ground slam at `at` reaches: its body within `radius`
+   * of it, as they stood at `seen`. */
+  within(at: { x: number; z: number }, radius: number, seen: number): Mob[] {
+    return this.alive.filter((m) => {
+      const p = this.seenAt(m, seen);
+      return (
+        Math.hypot(p.x - at.x, p.z - at.z) <=
+        radius + MOB.radius * m.scale + HIT_SLACK
+      );
+    });
+  }
+
+  /**
+   * Stuns `m` for `base`, halved for each stun of it in the last
+   * {@link RIMSHOT.drWindowMs}; not while it already is. It stands where
+   * it is, and the swing it was winding up comes off the floor (the
+   * interrupt). Returns how long, or 0.
+   */
+  stun(m: Mob, now: number, base: number): number {
+    if (m.hp <= 0 || (m.stunUntil ?? 0) > now) return 0;
+    const recent = (m.stuns ?? []).filter((t) => t > now - RIMSHOT.drWindowMs);
+    const ms = stunMs(base, recent.length);
+    m.stuns = [...recent, now];
+    m.stunUntil = now + ms;
+    for (const t of this.telegraphs)
+      if (t.mob === m.id) this.cancelled.push(t.id);
+    this.telegraphs = this.telegraphs.filter((t) => t.mob !== m.id);
+    m.state = "idle";
+    m.waitSince = null;
+    m.dashTo = null;
+    return ms;
+  }
+
   /** A hit on `mob` from `uid`, landing at `at`: a cast's damage times
    * `mult`, and the level gap. */
   queue(
@@ -489,6 +546,46 @@ export class MobPack {
     });
   }
 
+  /**
+   * Shuffle: a disc that hit `from` (a mob, or a spot such as the boss)
+   * goes on, as the mobs stood at `seen`, to up to `bounces` more, each the
+   * nearest not yet struck. Each lands a leg's flight after the last (the
+   * first leaves at `at`), at `mult` of a cast, weaker each bounce. Paid
+   * to Shuffle. Returns how many it bounced to.
+   */
+  bounceOn(
+    uid: string,
+    from: Mob | { x: number; z: number },
+    at: number,
+    seen: number,
+    bounces: number,
+    stats: HitStats,
+    mult: number,
+  ): number {
+    if (bounces <= 0) return 0;
+    const first = "id" in from ? from : null;
+    const start = first ? this.seenAt(first, seen) : from;
+    const bodies = this.alive.map((m) => {
+      const p = this.seenAt(m, seen);
+      return { ref: m, x: p.x, z: p.z, radius: MOB.radius * m.scale };
+    });
+    let t = at;
+    let n = 0;
+    for (const leg of discChain(first, start, bodies, bounces, SHUFFLE_REACH)) {
+      n++;
+      t += discLandsAfterMs(leg.dist);
+      this.queue(
+        uid,
+        leg.body.ref,
+        t,
+        stats,
+        mult * shuffleScale(n),
+        "shuffle",
+      );
+    }
+    return n;
+  }
+
   // --- Time passing.
 
   update(
@@ -499,9 +596,22 @@ export class MobPack {
     const events: MobEvent[] = [];
     const dt = Math.min(0.25, Math.max(0, now - this.lastAt) / 1000);
     this.lastAt = now;
+    for (const id of this.cancelled)
+      events.push({ t: "resolve", id, hits: [] });
+    this.cancelled = [];
     this.land(now, events);
     this.resolveDue(now, players, judge, events);
-    if (now >= this.wakeAt) this.act(now, dt, players, judge, events);
+    if (now >= this.wakeAt) {
+      this.act(now, dt, players, judge, events);
+      this.contact(now, players, judge, events);
+    }
+    // A dome growing shoves them out before it.
+    for (const m of this.mobs) {
+      if (m.hp <= 0) continue;
+      const out = this.keepOut(m, m);
+      m.x = out.x;
+      m.z = out.z;
+    }
     for (const m of this.mobs) {
       if (m.hp <= 0) continue;
       m.trail.push({ t: now, x: m.x, z: m.z });
@@ -569,6 +679,8 @@ export class MobPack {
       if (m.state === "windup" || (m.state === "recover" && now < m.until))
         continue;
       if (m.wakeAt !== undefined && now < m.wakeAt) continue;
+      // Stunned: it stands there.
+      if ((m.stunUntil ?? 0) > now) continue;
       let near: Target | null = null;
       let best = Number.POSITIVE_INFINITY;
       if (taunted) {
@@ -647,6 +759,73 @@ export class MobPack {
     );
   }
 
+  /** What `m`'s attack hits for, before the cap, Def and buffs: the floor,
+   * its kind and rank, and the level gap. */
+  private damageOf(m: Mob): number {
+    const { taken } = levelGapMods(towerMob(this.floor).level - this.level);
+    const mult =
+      (m.rank === 2 ? WARDEN.damage : m.rank === 1 ? ELITE.damage : 1) *
+      MOB_KINDS[m.kind].damage;
+    return Math.round(towerMob(this.floor).damage * mult * taken);
+  }
+
+  /**
+   * Walking into a mob hurts (CONTACT): a share of your health, every
+   * `everyMs` from each mob you're in. Judged like a swing, to the
+   * defender's benefit: the bodies overlap now, and a moment ago too, with
+   * the mob where the herzie saw it. A host's breathers (the cave's) apply
+   * as to a swing.
+   */
+  private contact(
+    now: number,
+    players: readonly BossPlayer[],
+    judge: MobJudge,
+    events: MobEvent[],
+  ) {
+    const back = now - TUNING.rewindMs;
+    for (const p of players) {
+      if (!p.alive || judge.safe(p.uid, now) || judge.invuln(p.uid, now))
+        continue;
+      const a = p.posAt(now);
+      const b = p.posAt(back);
+      if (!a || !b) continue;
+      // Under a dome nothing touches you.
+      if (shelterOf(this.domes(), p, now)) continue;
+      for (const m of this.mobs) {
+        if (m.hp <= 0) continue;
+        const key = `${m.id}:${p.uid}`;
+        if (now < (this.bumpedAt.get(key) ?? 0) + CONTACT.everyMs) continue;
+        const reach =
+          (MOB.radius * m.scale + TUNING.playerRadius) * CONTACT.overlap;
+        if (Math.hypot(a.x - m.x, a.z - m.z) > reach) continue;
+        const seen = this.seenAt(m, back);
+        if (Math.hypot(b.x - seen.x, b.z - seen.z) > reach) continue;
+        const bump: Telegraph = {
+          id: -1,
+          kind: "circle",
+          x: m.x,
+          z: m.z,
+          r: reach,
+          inner: 0,
+          at: now,
+          hitAt: now,
+          damage: Math.max(1, Math.round(p.maxHp * CONTACT.hp)),
+          mob: m.id,
+        };
+        const { aimed: _aimed, ...hit } = mitigatedHit(
+          p,
+          bump,
+          judge.buffs(p.uid),
+        );
+        judge.hitAt(p.uid, now);
+        this.bumpedAt.set(key, now);
+        events.push({ t: "contact", mob: m.id, hit });
+        // In a breather now (the cave's): no more bumps this tick.
+        if (judge.invuln(p.uid, now)) break;
+      }
+    }
+  }
+
   /** Wind up an attack on `near`: its shapes go down now and land after
    * the windup. */
   private attack(
@@ -658,11 +837,7 @@ export class MobPack {
   ) {
     const windup = this.windupOf(m, enraged);
     const hitAt = now + windup;
-    const { taken } = levelGapMods(towerMob(this.floor).level - this.level);
-    const mult =
-      (m.rank === 2 ? WARDEN.damage : m.rank === 1 ? ELITE.damage : 1) *
-      MOB_KINDS[m.kind].damage;
-    const damage = Math.round(towerMob(this.floor).damage * mult * taken);
+    const damage = this.damageOf(m);
     m.state = "windup";
     m.until = hitAt;
     const you = near.at;
@@ -787,10 +962,13 @@ export class MobPack {
       this.walk(m, you, dt, speed, MOB.reach * 0.8 * m.scale);
       return;
     }
-    // Waiting its turn: hold a step outside your reach, working round you.
+    // Waiting its turn: work round you a step outside your reach. Closer
+    // than that it holds its ground, circling where it is, rather than back
+    // off: walking at it walks into it.
+    const flank = FLANK_RANGE * Math.max(1, m.scale * 0.9);
     this.walk(
       m,
-      this.orbitPoint(m, you, FLANK_RANGE * Math.max(1, m.scale * 0.9)),
+      this.orbitPoint(m, you, Math.min(d, flank)),
       dt,
       speed * 0.6,
       0,
@@ -863,8 +1041,28 @@ export class MobPack {
       if (od < room && od > 0)
         p = { x: big.x + (ox / od) * room, z: big.z + (oz / od) * room };
     }
+    // Never into a dome: up to its edge and no further.
+    p = this.keepOut(m, p);
     m.x = p.x;
     m.z = p.z;
+  }
+
+  /** `p`, or the nearest spot outside every dome for `m`, in the arena
+   * (staying out of the dome wins). */
+  private keepOut(
+    m: Mob,
+    p: { x: number; z: number },
+  ): { x: number; z: number } {
+    const domes = this.domes();
+    if (!domes.length) return { x: p.x, z: p.z };
+    return pushOutOfDomes(
+      domes,
+      p.x,
+      p.z,
+      MOB.radius * m.scale,
+      this.lastAt,
+      (q) => this.clampToArena(q.x, q.z, 1),
+    );
   }
 
   /** (x, z) pulled back inside the arena, `margin` from its edge. */
@@ -887,10 +1085,15 @@ export class MobPack {
     const due = this.telegraphs.filter((t) => t.hitAt <= now);
     if (!due.length) return;
     this.telegraphs = this.telegraphs.filter((t) => t.hitAt > now);
+    // A mob's attack hits a herzie once, however many of its shapes (a
+    // lunger's lane) they stand in.
+    const struck = new Set<string>();
     for (const tg of due) {
       const hits: BossHit[] = [];
       for (const p of players) {
         if (!p.alive) continue;
+        const once = `${tg.mob}:${tg.hitAt}:${p.uid}`;
+        if (struck.has(once)) continue;
         if (judge.safe(p.uid, tg.hitAt)) continue;
         if (judge.invuln(p.uid, tg.hitAt)) continue;
         const inside = [tg.hitAt, tg.hitAt - TUNING.rewindMs].every((t) => {
@@ -903,6 +1106,13 @@ export class MobPack {
           tg,
           judge.buffs(p.uid),
         );
+        struck.add(once);
+        // Under a dome: none of it lands, and no breather starts.
+        const dome = shelterOf(this.domes(), p, tg.hitAt);
+        if (dome) {
+          hits.push(shelteredHit(hit, dome.by));
+          continue;
+        }
         hits.push(hit);
         judge.hitAt(p.uid, tg.hitAt);
       }
@@ -913,8 +1123,9 @@ export class MobPack {
         m.until = now + this.recoverOf(m, this.enragedAt(now));
         // A lunger's dash: it's at the far end of its lane now.
         if (m.dashTo) {
-          m.x = m.dashTo.x;
-          m.z = m.dashTo.z;
+          const end = this.keepOut(m, m.dashTo);
+          m.x = end.x;
+          m.z = end.z;
           m.dashTo = null;
         }
       }

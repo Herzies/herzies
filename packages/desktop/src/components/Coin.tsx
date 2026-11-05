@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { cn, formatAmount } from "../lib/utils";
+import { Tooltip } from "./Tooltip";
 
 const COUNT_MS = 550;
 
@@ -70,5 +71,19 @@ export function Coin({
     >
       <span className="italic">H</span> {formatAmount(displayed)}
     </span>
+  );
+}
+
+/** The player's coin balance, right-aligned under a panel: the inventory's
+ * footer, and every stall that sells for coins. */
+export function CoinBalance({ amount }: { amount: number }) {
+  return (
+    <div className="flex items-center justify-end pt-2">
+      <Tooltip label={`${formatAmount(amount)} herzie coins`}>
+        <div className="text-ui text-cyan">
+          <Coin amount={amount} animate />
+        </div>
+      </Tooltip>
+    </div>
   );
 }

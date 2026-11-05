@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { emptyMap, type TownMap } from "../map";
-import { DISC, type Disc, DiscField, type DiscHooks, nextHand } from "./discs";
+import {
+  DISC,
+  type Disc,
+  DiscField,
+  type DiscHit,
+  type DiscHooks,
+  nextHand,
+} from "./discs";
 import { DUMMY, type DummyState, dummiesOf } from "./dummy";
 import type { Vec3 } from "./waves";
 
@@ -239,5 +246,78 @@ describe("throwing with both hands", () => {
     expect(f.isOut(OWNER, "held-l")).toBe(false);
     expect(f.isOut(OWNER, "held-r")).toBe(false);
     expect(f.isOut(them, "held-l")).toBe(true);
+  });
+});
+
+/** Dummies at each (x, z), on one map. */
+function dummiesAt(points: [number, number][]): DummyState[] {
+  const map: TownMap = emptyMap(60, "test", "Test");
+  for (const [x, z] of points) {
+    const col = 30 + Math.floor(x);
+    const row = 30 + Math.floor(z);
+    const r = map.objects[row];
+    map.objects[row] = `${r.slice(0, col)}D${r.slice(col + 1)}`;
+  }
+  return dummiesOf(map);
+}
+
+describe("a disc under a Shuffle", () => {
+  const throwAt = (bounces: number) => {
+    const dummies = dummiesAt([
+      [0, 6],
+      [3, 6],
+      [6, 6],
+      [24, 6],
+    ]);
+    // Thrown straight at the one nearest (0, 6).
+    const near = (d: DummyState) => Math.hypot(d.x, d.z - 6);
+    const start = dummies.reduce((a, b) => (near(a) <= near(b) ? a : b));
+    const from: Vec3 = [start.x, 1.2, start.z - 6];
+    const f = new DiscField();
+    f.throw(from, [0, 0, 1], {
+      mine: true,
+      owner: OWNER,
+      hand: "held-l",
+      target: start,
+      bounces,
+    });
+    const hits: DiscHit[] = [];
+    let caught = 0;
+    for (let t = 0; t < 6 && f.discs.some((d) => d.alive); t += DT)
+      f.step(DT, dummies, {
+        handAt: (_d, out) => {
+          out[0] = from[0];
+          out[1] = from[1];
+          out[2] = from[2];
+          return out;
+        },
+        onHit: (h) => {
+          hits.push({ ...h });
+          return "hit";
+        },
+        onCatch: () => {
+          caught++;
+        },
+      });
+    return { hits, caught, dummies, start };
+  };
+
+  it("bounces on to the nearest it hasn't struck, then comes home", () => {
+    const { hits, caught, start } = throwAt(5);
+    // The far one is out of reach: three in all.
+    expect(hits.map((h) => h.bounce)).toEqual([0, 1, 2]);
+    expect(hits[0].dummy).toBe(start);
+    expect(new Set(hits.map((h) => h.dummy)).size).toBe(3);
+    expect(caught).toBe(1);
+  });
+
+  it("bounces no more than it may", () => {
+    expect(throwAt(1).hits.map((h) => h.bounce)).toEqual([0, 1]);
+  });
+
+  it("without one, hits once and comes back", () => {
+    const { hits, caught } = throwAt(0);
+    expect(hits).toHaveLength(1);
+    expect(caught).toBe(1);
   });
 });

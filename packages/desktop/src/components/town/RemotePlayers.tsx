@@ -31,9 +31,16 @@ import {
 } from "./combat/discs";
 import { DUMMY, hitDummy } from "./combat/dummy";
 import { bossFight, bossNow } from "./combat/fight";
-import { attackSpeedOf, entityAt, setEntityAt } from "./combat/skills";
+import {
+  attackSpeedOf,
+  entityAt,
+  setEntityAt,
+  shuffleOf,
+} from "./combat/skills";
+import { landSlam, pendingSlam } from "./combat/slams";
 import { slashField } from "./combat/slashes";
 import { stance } from "./combat/stance";
+import { shake } from "./combat/state";
 import { assistTarget, type Vec3, waveField } from "./combat/waves";
 import { applyDowned, entityDown } from "./downed";
 import { footprints, Trail } from "./footprints";
@@ -44,6 +51,7 @@ import { NAME_SHADOW, nameOpacity } from "./nameFade";
 import type { RemotePlayer, TownConnection } from "./net/TownConnection";
 import { useTownNetVersion } from "./net/townNet";
 import { townSave, useTownRuntime } from "./runtime";
+import { sfxRimshotSlam } from "./sfx";
 
 /** Everyone else in the Town. */
 export function RemotePlayers({
@@ -132,6 +140,10 @@ function RemoteHerzie({
   const nextHand = useRef<DiscHand>("held-r");
   /** Their punches so far: they alternate fists. */
   const punches = useRef(0);
+  /** When their last Rimshot began (performance.now() ms), and whether
+   * the one under way has landed (its wind-up's off the list then). */
+  const rimshotAt = useRef(performance.now());
+  const slammed = useRef(false);
   /** Their jump bit last frame; null until the first state, so a herzie
    * doesn't hop just for showing up. */
   const jumpBit = useRef<number | null>(null);
@@ -187,6 +199,34 @@ function RemoteHerzie({
       herzie.emote(remote.pendingEmote);
       remote.pendingEmote = null;
     }
+    // Their Rimshot: the wind-up as the server's word comes, the slam when
+    // their stick strikes the ground (as ours: SlamVFX draws both), or cut
+    // short if the server says so.
+    const slam = pendingSlam(remote.id);
+    if (slam && slam.castAt > rimshotAt.current) {
+      rimshotAt.current = slam.castAt;
+      herzie.cast(0, { style: "slam" });
+      slam.tip = (out) => {
+        const p = herzie.handWorldPosition(hand);
+        out[0] = p.x;
+        out[1] = p.y;
+        out[2] = p.z;
+        return out;
+      };
+    } else if (!slam && herzie.casting && herzie.castMotion === "slam") {
+      if (!slammed.current) herzie.cancelCast();
+    }
+    if (herzie.released && herzie.castMotion === "slam" && slam) {
+      const p = herzie.handWorldPosition(hand);
+      landSlam(remote.id, [p.x, p.y, p.z], performance.now());
+      slammed.current = true;
+      herzie.hitstop(0.12);
+      // Felt by everyone near it.
+      const d = Math.hypot(townSave.x - s.x, townSave.z - s.z);
+      sfxRimshotSlam();
+      shake(0.2 * Math.max(0, 1 - d / 14));
+    }
+    if (!herzie.casting) slammed.current = false;
     // They cast: the same thrust, and a wave from the hand the way they
     // face (only the cast count travels, not where they aimed).
     if (remote.pendingCasts > 0 && !herzie.casting) {
@@ -241,6 +281,7 @@ function RemoteHerzie({
         hand: h,
         target: assistTarget(from, dir, liveDummies),
         quick: attackSpeedOf(remote.id, performance.now()),
+        bounces: shuffleOf(remote.id, performance.now()),
       });
     } else if (herzie.released && attack === "melee") {
       // Only for show: what's in front of them rocks (the server counts

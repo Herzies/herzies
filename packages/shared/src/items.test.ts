@@ -25,6 +25,7 @@ import {
   filterDroppablePool,
   findEquippedSlot,
   formatStat,
+  formatStatBonus,
   getHerzieStats,
   getHerzieStatsFromUnits,
   getItem,
@@ -1512,6 +1513,9 @@ describe("stats", () => {
       "critDamage",
     ]);
     expect(formatStat("critChance", 5)).toBe("5%");
+    expect(formatStat("critDamage", 50)).toBe("+50%");
+    expect(formatStatBonus("critDamage", 10)).toBe("+10%");
+    expect(formatStatBonus("sonicPower", 5)).toBe("+5");
     expect(formatStat("sonicPower", 5)).toBe("5");
   });
 });

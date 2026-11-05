@@ -7,9 +7,16 @@ import {
   CONTRIBUTION_SUPPORT_WEIGHT,
   contributionOf,
   DISC_RANGE,
+  DOME,
+  discChain,
+  domeRadiusAt,
   healTarget,
+  insideDome,
   MELEE_REACH,
   meleeReaches,
+  nextInChain,
+  pushOutOfDomes,
+  stunMs,
   type Vec3,
   WAVE_HAND_HEIGHT,
   WAVE_RANGE,
@@ -139,5 +146,104 @@ describe("contribution", () => {
     expect(
       contributionOf({ damage: 300, healing: 80, blocked: 0 }),
     ).toBeGreaterThan(contributionOf({ damage: 1000, healing: 0, blocked: 0 }));
+  });
+});
+
+describe("disc chains (Shuffle)", () => {
+  const body = (ref: string, x: number, z = 0) => ({ ref, x, z, radius: 0.5 });
+  const row = [body("a", 0), body("b", 3), body("c", 6), body("d", 20)];
+
+  it("goes on to the nearest not yet struck, to its surface", () => {
+    const next = nextInChain({ x: 0, z: 0 }, row, ["a"], 8);
+    expect(next?.body.ref).toBe("b");
+    expect(next?.dist).toBeCloseTo(2.5);
+  });
+
+  it("chains in order, never back, and stops out of reach", () => {
+    const chain = discChain("a", { x: 0, z: 0 }, row, 5, 8);
+    expect(chain.map((c) => c.body.ref)).toEqual(["b", "c"]);
+  });
+
+  it("bounces no more than it may", () => {
+    expect(discChain("a", { x: 0, z: 0 }, row, 1, 8)).toHaveLength(1);
+    expect(discChain("a", { x: 0, z: 0 }, row, 0, 8)).toHaveLength(0);
+  });
+
+  it("with nothing else near, a lone target is all it hits", () => {
+    expect(discChain("a", { x: 0, z: 0 }, [body("a", 0)], 5, 8)).toEqual([]);
+  });
+
+  it("from something not in the list (the boss), every body may follow", () => {
+    const chain = discChain(null, { x: -2, z: 0 }, row, 5, 8);
+    expect(chain.map((c) => c.body.ref)).toEqual(["a", "b", "c"]);
+  });
+});
+
+describe("the Cymbrella's dome", () => {
+  const dome = { x: 0, z: 0, from: 1_000, until: 5_000 };
+
+  it("grows from round its caster to its full size, then stands", () => {
+    expect(domeRadiusAt(dome, 999)).toBe(0);
+    expect(domeRadiusAt(dome, 1_000)).toBeCloseTo(DOME.startRadius);
+    const mid = domeRadiusAt(dome, 1_000 + DOME.growMs / 2);
+    expect(mid).toBeGreaterThan(DOME.startRadius);
+    expect(mid).toBeLessThan(DOME.radius);
+    expect(domeRadiusAt(dome, 1_000 + DOME.growMs)).toBeCloseTo(DOME.radius);
+    expect(domeRadiusAt(dome, 4_999)).toBeCloseTo(DOME.radius);
+    expect(domeRadiusAt(dome, 5_000)).toBe(0);
+  });
+
+  it("shelters what's inside it while it stands", () => {
+    const t = 2_000;
+    expect(insideDome([dome], 3, 0, t)).toBe(dome);
+    expect(insideDome([dome], DOME.radius + 0.1, 0, t)).toBeNull();
+    expect(insideDome([dome], 3, 0, 6_000)).toBeNull();
+  });
+
+  it("pushes a body out past its edge, straight from the centre", () => {
+    const p = pushOutOfDomes([dome], 1, 0, 0.5, 2_000);
+    expect(p.z).toBeCloseTo(0);
+    expect(p.x).toBeGreaterThanOrEqual(DOME.radius + 0.5);
+    // Already outside: left alone.
+    expect(pushOutOfDomes([dome], 9, 0, 0.5, 2_000)).toEqual({ x: 9, z: 0 });
+  });
+
+  it("pushes out of overlapping domes, out of both", () => {
+    const other = { ...dome, x: 6 };
+    const p = pushOutOfDomes([dome, other], 3, 0, 0.5, 2_000);
+    for (const d of [dome, other])
+      expect(Math.hypot(p.x - d.x, p.z - d.z)).toBeGreaterThanOrEqual(
+        DOME.radius + 0.5 - 1e-6,
+      );
+  });
+
+  it("at a wall, the dome wins: round its edge to a spot in bounds", () => {
+    // A wall at x = 5: nothing may stand past it.
+    const wall = (q: { x: number; z: number }) => ({
+      x: Math.min(q.x, 5),
+      z: q.z,
+    });
+    const p = pushOutOfDomes([{ ...dome, x: 3 }], 4.5, 0, 0.5, 2_000, wall);
+    expect(p.x).toBeLessThanOrEqual(5 + 1e-6);
+    expect(Math.hypot(p.x - 3, p.z)).toBeGreaterThanOrEqual(DOME.radius + 0.5);
+    // Settles there: pushed again, it stays.
+    const again = pushOutOfDomes(
+      [{ ...dome, x: 3 }],
+      p.x,
+      p.z,
+      0.5,
+      2_000,
+      wall,
+    );
+    expect(again.x).toBeCloseTo(p.x);
+    expect(again.z).toBeCloseTo(p.z);
+  });
+});
+
+describe("stuns", () => {
+  it("halve each time within the window", () => {
+    expect(stunMs(2_000, 0)).toBe(2_000);
+    expect(stunMs(2_000, 1)).toBe(1_000);
+    expect(stunMs(2_000, 2)).toBe(500);
   });
 });

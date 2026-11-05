@@ -35,7 +35,7 @@ import { BossResults } from "./town/BossResults";
 import { setCave } from "./town/cave";
 import { useChatBubbles } from "./town/chatBubbles";
 import { leaveCombat } from "./town/combat/Combat";
-import { resetBossFight } from "./town/combat/fight";
+import { bossFight, resetBossFight, useBossFight } from "./town/combat/fight";
 import { onLootLog } from "./town/combat/lootFeed";
 import { useBossResultsShown } from "./town/combat/results";
 import { useCombat } from "./town/combat/state";
@@ -430,7 +430,7 @@ export function TownWorld({
         )}
       </div>
       {fpsShown && opened && !hudHidden ? (
-        <FrameRate className="pointer-events-none absolute top-2 left-2 z-30 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white/70 tabular-nums" />
+        <FrameRate className="pointer-events-none absolute top-3 z-30 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white/70 tabular-nums" />
       ) : null}
       {opened && (
         <TownBoundary>
@@ -562,8 +562,12 @@ class TownBoundary extends Component<
 
 /** A key, as the hints show it. */
 /** Frames drawn per second, counted over each half second: the Town's,
- * since it draws every frame the browser does. Shown from Settings → Debug. */
+ * since it draws every frame the browser does. Shown from Settings →
+ * Controls. Top right; in a raid the boss's card has that corner, so it
+ * sits just left of it (the card's width, BossHud's BOSS_CARD). */
 function FrameRate({ className }: { className?: string }) {
+  useBossFight();
+  const bossCard = bossFight.on && !bossFight.tower;
   const [fps, setFps] = useState<number | null>(null);
   useEffect(() => {
     let frames = 0;
@@ -579,5 +583,16 @@ function FrameRate({ className }: { className?: string }) {
     });
     return () => cancelAnimationFrame(raf);
   }, []);
-  return fps === null ? null : <div className={className}>{fps} fps</div>;
+  return fps === null ? null : (
+    <div
+      className={cn(
+        className,
+        bossCard
+          ? "right-[calc(1.25rem+min(15rem,100%-174px-2.25rem))]"
+          : "right-3",
+      )}
+    >
+      {fps} fps
+    </div>
+  );
 }

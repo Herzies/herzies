@@ -40,6 +40,8 @@ const SKILL_ABBR: Record<SkillId, string> = {
   resurrect: "RZ",
   taunt: "TA",
   haste: "HS",
+  shuffle: "SH",
+  rimshot: "RS",
 };
 
 /**

@@ -166,8 +166,8 @@ export function minionFloorFor(level: number): number {
 export const IN_TUNE = {
   settleMs: 3_000,
   lingerMs: 8_000,
-  /** Percussionist: this much less damage (with Def and a Cymbrella, under
-   * the 75% clamp). */
+  /** Percussionist: this much less damage (with Def, under the 75%
+   * clamp). */
   def: 0.15,
   /** Bard: heals (Drones, Resurrect) this many times stronger. */
   heal: 1.3,

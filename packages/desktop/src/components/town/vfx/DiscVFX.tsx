@@ -51,6 +51,9 @@ const BANK_BACK = 0.45;
 const NOSE = 0.08;
 
 const SHEEN = new THREE.Color("#c9f3ff");
+/** A disc under a Shuffle glows violet (as its HUD line), so the state
+ * shows on every throw. */
+const SHUFFLE_GLOW = new THREE.Color("#c9a7ff");
 
 const _pos = new THREE.Vector3();
 const _q = new THREE.Quaternion();
@@ -204,7 +207,8 @@ export function DiscVFX() {
       _normal[2] = _up.z;
       const pulse = 1 + Math.sin(time * 26 + d.age * 3) * 0.06;
       const fadeIn = Math.min(1, d.age / 0.06);
-      halo.add(d.pos, _normal, r * 1.4 * pulse, 0.22 * fadeIn, GLOW);
+      const glow = d.bounces > 0 ? SHUFFLE_GLOW : GLOW;
+      halo.add(d.pos, _normal, r * 1.4 * pulse, 0.22 * fadeIn, glow);
 
       // A thin streak of sparks behind it, evenly spaced however fast.
       const dx = d.pos[0] - d.prev[0];
@@ -222,7 +226,7 @@ export function DiscVFX() {
           life: 0.16,
           size: r * 0.75,
           kind: SPARK,
-          color: GLOW,
+          color: glow,
           drag: 4,
         });
       }
@@ -236,7 +240,7 @@ export function DiscVFX() {
             life: 0.8,
             size: 0.3,
             kind: Math.random() < 0.5 ? NOTE : NOTES,
-            color: GLOW,
+            color: glow,
             drag: 1.5,
           },
         );

@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { ambient } from "./ambient";
 import { aimSensitivity } from "./combat/sensitivity";
-import { combat } from "./combat/state";
+import { combat, kickOffset } from "./combat/state";
 import { blendPose, type HomePose, homeAzimuth, homePose } from "./homeCamera";
 import { type HomeFrame, homeMode } from "./homeMode";
 import { groundY, type TownMap } from "./map";
@@ -225,7 +225,8 @@ export function CameraRig({ map }: { map?: TownMap }) {
       COMBAT.shoulder * b + wave(t, 1) * SHAKE.offset * k,
       -FRAMING_LIFT +
         (FRAMING_LIFT - COMBAT.lift) * b +
-        wave(t, 7) * SHAKE.offset * k,
+        wave(t, 7) * SHAKE.offset * k +
+        kickOffset(performance.now()),
       0,
       false,
     );

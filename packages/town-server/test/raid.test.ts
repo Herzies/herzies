@@ -536,9 +536,9 @@ describe("the music it hates", () => {
       { id: "in_tune", kind: "def", value: IN_TUNE.def, until: 1e9 },
     ]);
     expect(tuned.damage).toBeLessThan(plain.damage);
-    const stacked = mitigatedHit(p, tg, [
+    // With a great deal of Def on top, the clamp holds it.
+    const stacked = mitigatedHit({ ...p, def: 100_000 }, tg, [
       { id: "in_tune", kind: "def", value: IN_TUNE.def, until: 1e9 },
-      { id: "cymbrella", value: 0.9, until: 1e9 },
     ]);
     expect(stacked.damage).toBe(Math.round(100 * (1 - MAX_DAMAGE_REDUCTION)));
   });

@@ -6,7 +6,8 @@
  *
  * Each floor is a {@link MobPack} of Thornlings (see mobs.ts for what they
  * do); this file is the floors themselves: one pack after another, the
- * herzie's casts and breathers, and "cleared" once the last mob falls.
+ * herzie's casts, and "cleared" once the last mob falls. No breather
+ * after a hit here: every attack that lands, lands.
  * Linger past a floor's par time and its mobs enrage.
  */
 
@@ -26,6 +27,8 @@ import {
   BACKSPIN_DISCS,
   BACKSPIN_SPREAD,
   type Buff,
+  RIMSHOT,
+  shuffleOn,
 } from "@herzies/shared/skills";
 import { timingAttackSpeed } from "@herzies/shared/stats";
 import { towerMob } from "@herzies/shared/tower";
@@ -36,6 +39,7 @@ import {
   castSpeed,
   type Phase,
   rng,
+  type ShelterDome,
   type Telegraph,
   TUNING,
 } from "./boss";
@@ -53,13 +57,16 @@ export class TowerEngine {
   private readonly pack: MobPack;
   private cleared = false;
   private casts = new Map<string, { tokens: number; at: number }>();
-  private invulnUntil = new Map<string, number>();
   private safeUntil = new Map<string, number>();
   private buffs = new Map<string, Buff[]>();
+  /** Cymbrella domes standing (or about to). */
+  private domes: ShelterDome[] = [];
+  /** For a Rimshot's stun (apart from the pack's own rolls). */
+  private readonly rand: () => number;
   private readonly judge: MobJudge = {
     safe: (uid, t) => (this.safeUntil.get(uid) ?? 0) > t,
-    invuln: (uid, t) => (this.invulnUntil.get(uid) ?? 0) > t,
-    hitAt: (uid, t) => this.invulnUntil.set(uid, t + TUNING.invulnMs),
+    invuln: () => false,
+    hitAt: () => {},
     buffs: (uid) => this.buffs.get(uid) ?? [],
   };
 
@@ -83,6 +90,8 @@ export class TowerEngine {
       },
       arena,
     );
+    this.pack.domes = () => this.domes;
+    this.rand = rng(opts.seed + 7_919);
     this.pack.spawnFloor(opts.now);
   }
 
@@ -154,7 +163,6 @@ export class TowerEngine {
 
   forget(uid: string): void {
     this.casts.delete(uid);
-    this.invulnUntil.delete(uid);
     this.safeUntil.delete(uid);
     this.buffs.delete(uid);
   }
@@ -235,14 +243,57 @@ export class TowerEngine {
     const flight = disc
       ? discLandsAfterMs(target.dist)
       : (target.dist / WAVE_SPEED) * 1000;
-    this.pack.queue(
-      uid,
-      target.mob,
-      now + flight,
-      stats,
-      disc ? DISC_DAMAGE : 1,
-    );
+    const mult = disc ? DISC_DAMAGE : 1;
+    this.pack.queue(uid, target.mob, now + flight, stats, mult);
+    // Under a Shuffle, it bounces on through the pack.
+    if (disc)
+      this.pack.bounceOn(
+        uid,
+        target.mob,
+        now + flight,
+        seen,
+        shuffleOn(this.buffs.get(uid) ?? [], now),
+        stats,
+        mult,
+      );
     return "hit";
+  }
+
+  /** A Cymbrella: a dome of `by`'s at (x, z) from `now`, for `ms`. */
+  addDome(by: string, x: number, z: number, now: number, ms: number): void {
+    this.domes.push({ x, z, from: now, until: now + ms, by });
+  }
+
+  /** The domes standing at `now`. */
+  domesAt(now: number): ShelterDome[] {
+    return this.domes.filter((d) => d.from <= now && d.until > now);
+  }
+
+  /** Rimshot lands, like {@link BossEngine.rimshot}: every mob within
+   * RIMSHOT.radius of `at`, each rolling its own stun. */
+  rimshot(
+    uid: string,
+    at: { x: number; z: number },
+    stats: HitStats,
+    chance: number,
+    now: number,
+  ): { hit: number; stunned: number } {
+    let hit = 0;
+    let stunned = 0;
+    for (const m of this.pack.within(at, RIMSHOT.radius, now - SEEN_LAG_MS)) {
+      this.pack.queue(
+        uid,
+        m,
+        now,
+        stats,
+        RIMSHOT.damage * STRIKE_DAMAGE,
+        "rimshot",
+      );
+      hit++;
+      if (this.rand() < chance && this.pack.stun(m, now, RIMSHOT.stunMs))
+        stunned++;
+    }
+    return { hit, stunned };
   }
 
   /** Backspin: three discs fanned about the aim, each at `mult` of a
@@ -298,6 +349,7 @@ export class TowerEngine {
   // --- Time passing.
 
   update(now: number, players: readonly BossPlayer[]): TowerEvent[] {
+    this.domes = this.domes.filter((d) => d.until > now);
     const events: TowerEvent[] = this.pack.update(now, players, this.judge);
     if (!this.cleared && this.pack.size > 0 && !this.pack.alive.length) {
       this.cleared = true;

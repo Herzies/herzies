@@ -32,9 +32,10 @@ import {
 } from "@herzies/shared";
 import { HerzieView } from "@herzies/shared/gl";
 import { type ReactNode, useEffect, useState } from "react";
+import { notify } from "../lib/notices";
 import { useHerzieStage } from "../lib/overlayStage";
 import { herzies } from "../tauri-bridge";
-import { Coin } from "./Coin";
+import { Coin, CoinBalance } from "./Coin";
 import { FloatingCoins } from "./FloatingCoins";
 import ItemInspectOverlay, { inspectOrigin } from "./ItemInspectOverlay";
 import { ItemRow } from "./ItemRow";
@@ -327,6 +328,12 @@ export function MerchantPanel({
           : `Bought "${name}" from ${persona.name}`,
       );
       onBought();
+      notify(
+        quantity > 1 ? `Bought ${quantity} "${name}"` : `Bought "${name}"`,
+        { kind: "success" },
+      );
+      // Bought from an inspected card: that's done with too.
+      setInspectItemId(null);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -367,11 +374,6 @@ export function MerchantPanel({
       >
         {persona.name}
       </div>
-      {persona === NANDOR && (
-        <div className="-mt-2 text-center text-[10px] text-text-dim">
-          You have <Treats amount={balance} />
-        </div>
-      )}
 
       {/* Same staging as BossFightPanel: George square-on, not spinning, with
           his patter in a bubble at his feet. A fixed height rather than
@@ -437,6 +439,16 @@ export function MerchantPanel({
 
       {error && (
         <div className="pt-1 text-center text-[10px] text-red">{error}</div>
+      )}
+
+      {/* What the player has to spend, bottom right as in the inventory.
+          Nandor takes treats, so his shows those. */}
+      {persona === NANDOR ? (
+        <div className="flex items-center justify-end pt-2 text-ui text-cyan">
+          <Treats amount={balance} />
+        </div>
+      ) : (
+        <CoinBalance amount={currency} />
       )}
 
       {inspected && (

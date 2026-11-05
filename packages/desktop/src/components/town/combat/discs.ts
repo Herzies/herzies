@@ -1,5 +1,11 @@
-import { DISC_RANGE, DISC_SPEED } from "@herzies/shared/combat";
-import { type DummyState, waveHitsDummy } from "./dummy";
+import {
+  type ChainBody,
+  DISC_RANGE,
+  DISC_SPEED,
+  nextInChain,
+} from "@herzies/shared/combat";
+import { SHUFFLE_REACH } from "@herzies/shared/skills";
+import { DUMMY, type DummyState, waveHitsDummy } from "./dummy";
 import { steer, type Vec3 } from "./waves";
 
 /**
@@ -7,8 +13,11 @@ import { steer, type Vec3 } from "./waves";
  * and fast along the aim, a beat's hang where they turn, and back along a
  * curve to the hand — wherever the hand is by then — to be caught. Only the
  * way out hits; a hit sends a disc straight back, so up close they come
- * round quicker. A pool, stepped by Combat, drawn by vfx/DiscVFX. Pure, so
- * it's tested without a scene; nothing here allocates once it's made.
+ * round quicker. Under a Shuffle a hit sends it on instead, straight at the
+ * nearest target it hasn't struck (as the server picks: nextInChain), so
+ * many times; then home. A pool, stepped by Combat, drawn by vfx/DiscVFX.
+ * Pure, so it's tested without a scene; nothing here allocates once it's
+ * made, but for a Shuffle's bounce now and then.
  */
 
 export const DISC = {
@@ -38,6 +47,10 @@ export const DISC = {
   lift: 0.35,
   /** Within this of the hand, it's caught. */
   catchRadius: 0.35,
+  /** Bouncing on (Shuffle): its speed, as the server times it, and the
+   * longest it chases one target before giving up and coming home. */
+  hopSpeed: DISC_SPEED,
+  hopMax: 1,
 } as const;
 
 /** How long a disc's sparks last. */
@@ -66,9 +79,9 @@ export type Disc = {
   /** Whose it is (their herzie, or anything standing for them). */
   owner: object | null;
   hand: DiscHand;
-  /** "out" along `dir`; "turn" slowing to a stop (or bouncing off a hit);
-   * "back" to the hand. */
-  phase: "out" | "turn" | "back";
+  /** "out" along `dir`; "hop" on to the next target (Shuffle); "turn"
+   * slowing to a stop (or bouncing off a hit); "back" to the hand. */
+  phase: "out" | "hop" | "turn" | "back";
   pos: Vec3;
   /** Where it was last step. */
   prev: Vec3;
@@ -95,6 +108,12 @@ export type Disc = {
   backTime: number;
   /** How much quicker it comes home: a hasted thrower's (1 + Haste). */
   quick: number;
+  /** How many times it may bounce on (a Shuffle's), how many it has, what
+   * it has struck (never twice), and what it's bouncing on to. */
+  bounces: number;
+  hops: number;
+  struck: DummyState[];
+  hopTo: DummyState | null;
 };
 
 /** A little flash: as it leaves the hand, as it turns, as it clinks off a
@@ -109,7 +128,13 @@ export type Spark = {
   heard: boolean;
 };
 
-export type DiscHit = { disc: Disc; dummy: DummyState; point: Vec3 };
+/** A hit: `bounce` is 0 on the way out, then 1, 2… as it bounces on. */
+export type DiscHit = {
+  disc: Disc;
+  dummy: DummyState;
+  point: Vec3;
+  bounce: number;
+};
 
 export type DiscHooks = {
   /** Where `disc`'s hand is now (world space), into `out`. */
@@ -149,6 +174,10 @@ export class DiscField {
     backFrom: vec(),
     backTime: 0,
     quick: 1,
+    bounces: 0,
+    hops: 0,
+    struck: [],
+    hopTo: null,
   }));
   readonly sparks = pool<Spark>(24, () => ({
     alive: false,
@@ -186,6 +215,8 @@ export class DiscField {
       /** Hasted: it comes home this much quicker (the way out is the
        * server's timing, so it stays as it is). */
       quick?: number;
+      /** Under a Shuffle: how many times it bounces on from a hit. */
+      bounces?: number;
     },
   ): Disc {
     for (const d of this.discs) {
@@ -210,6 +241,10 @@ export class DiscField {
     d.strike = opts.strike ?? null;
     d.target = opts.target ?? null;
     d.quick = Math.max(1, opts.quick ?? 1);
+    d.bounces = Math.max(0, Math.floor(opts.bounces ?? 0));
+    d.hops = 0;
+    d.struck.length = 0;
+    d.hopTo = null;
     d.age = 0;
     d.t = 0;
     this.spark(from, "throw");
@@ -241,6 +276,7 @@ export class DiscField {
       d.t += dt;
       set(d.prev, d.pos);
       if (d.phase === "out") this.stepOut(d, dt, dummies, hooks);
+      else if (d.phase === "hop") this.stepHop(d, dt, dummies, hooks);
       else if (d.phase === "turn") stepTurn(d);
       else this.stepBack(d, hooks);
     }
@@ -266,9 +302,10 @@ export class DiscField {
       if (hit && (!best || hit.t < best.t)) best = { ...hit, dummy: dm };
     }
     if (best) {
-      hooks.onHit({ disc: d, dummy: best.dummy, point: best.point });
+      hooks.onHit({ disc: d, dummy: best.dummy, point: best.point, bounce: 0 });
       set(d.pos, best.point);
-      bounce(d);
+      d.struck.push(best.dummy);
+      if (!this.hopOn(d, best.dummy, dummies)) bounce(d);
       return;
     }
     if (d.pos[1] < 0.05) {
@@ -279,8 +316,9 @@ export class DiscField {
     }
     if (d.travelled < d.reach - 1e-6) return;
     if (d.strike === "target") {
+      // The boss: never bounced on to, but it may bounce on from it.
       hooks.onStrike?.(d);
-      bounce(d);
+      if (!this.hopOn(d, d.pos, dummies)) bounce(d);
     } else if (d.strike === "wall") {
       this.spark(d.pos, "clink");
       bounce(d);
@@ -301,6 +339,65 @@ export class DiscField {
         "turn",
       );
     }
+  }
+
+  /** Under a Shuffle with bounces left: on from `from` (a dummy, or a
+   * point) to the nearest target not yet struck, if one is in reach. */
+  private hopOn(
+    d: Disc,
+    from: DummyState | Readonly<Vec3>,
+    dummies: readonly DummyState[],
+  ): boolean {
+    if (d.hops >= d.bounces) return false;
+    const at = "key" in from ? from : { x: from[0], z: from[2] };
+    const next = nextInChain(at, chainBodies(dummies), d.struck, SHUFFLE_REACH);
+    if (!next) return false;
+    d.phase = "hop";
+    d.t = 0;
+    d.hopTo = next.body.ref;
+    // A glint (and its sound) where it turns on.
+    this.spark(d.pos, "turn");
+    return true;
+  }
+
+  private stepHop(
+    d: Disc,
+    dt: number,
+    dummies: readonly DummyState[],
+    hooks: DiscHooks,
+  ) {
+    const dm = d.hopTo;
+    // Gone (fallen, left) or out of reach for too long: home.
+    if (!dm || !dummies.includes(dm) || d.t > DISC.hopMax) {
+      d.hopTo = null;
+      bounce(d);
+      return;
+    }
+    const radius = DUMMY.radius * (dm.size ?? 1);
+    const tx = dm.x - d.pos[0];
+    const ty = (dm.y ?? 0) + DUMMY.chest - d.pos[1];
+    const tz = dm.z - d.pos[2];
+    const dist = Math.hypot(tx, ty, tz) || 1;
+    d.dir[0] = tx / dist;
+    d.dir[1] = ty / dist;
+    d.dir[2] = tz / dist;
+    const go = DISC.hopSpeed * dt;
+    if (go < dist - radius) {
+      d.pos[0] += d.dir[0] * go;
+      d.pos[1] += d.dir[1] * go;
+      d.pos[2] += d.dir[2] * go;
+      return;
+    }
+    // There: onto its surface, struck, and on again (or home).
+    const k = Math.max(0, dist - radius);
+    d.pos[0] += d.dir[0] * k;
+    d.pos[1] += d.dir[1] * k;
+    d.pos[2] += d.dir[2] * k;
+    d.hops++;
+    d.struck.push(dm);
+    d.hopTo = null;
+    hooks.onHit({ disc: d, dummy: dm, point: [...d.pos], bounce: d.hops });
+    if (!this.hopOn(d, dm, dummies)) bounce(d);
   }
 
   private stepBack(d: Disc, hooks: DiscHooks) {
@@ -350,6 +447,16 @@ export class DiscField {
       for (const x of list) x.alive = false;
     }
   }
+}
+
+/** What a disc may bounce on to: every target, as the chain picks them. */
+function chainBodies(dummies: readonly DummyState[]): ChainBody<DummyState>[] {
+  return dummies.map((dm) => ({
+    ref: dm,
+    x: dm.x,
+    z: dm.z,
+    radius: DUMMY.radius * (dm.size ?? 1),
+  }));
 }
 
 /** Off a hit (or a wall): a quick bounce back the way it came. */

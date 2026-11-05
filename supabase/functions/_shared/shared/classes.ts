@@ -7,7 +7,7 @@
  *
  * Mirrored in SQL by 00106_classes.sql — the class check on herzies.class
  * and items.required_class — and by choose_class's skills per class
- * (00122_boss_revamp.sql). A new class needs both.
+ * (00137_shuffle.sql). A new class needs both.
  */
 import type { SkillId } from "./skills.ts";
 
@@ -31,7 +31,7 @@ export interface ClassDef {
   /** The skill every herzie of this class starts with. */
   starterSkill: SkillId;
   /** Every skill the class has, the starter first (hotbar order). Mirrored
-   * by choose_class (00122_boss_revamp.sql). */
+   * by choose_class (00137_shuffle.sql). */
   skills: readonly SkillId[];
   /** Its basic attack, with its instrument in hand. */
   attack: AttackStyle;
@@ -58,7 +58,7 @@ export const CLASS_DEFS: Record<HerzieClass, ClassDef> = {
     role: "dps",
     equipment: ["compact-discs"],
     starterSkill: "backspin",
-    skills: ["backspin"],
+    skills: ["backspin", "shuffle"],
     attack: "disc",
   },
   percussionist: {
@@ -68,7 +68,7 @@ export const CLASS_DEFS: Record<HerzieClass, ClassDef> = {
     role: "tank",
     equipment: ["worn-stick", "old-cymbal"],
     starterSkill: "cymbrella",
-    skills: ["cymbrella", "taunt"],
+    skills: ["cymbrella", "taunt", "rimshot"],
     attack: "melee",
   },
 };

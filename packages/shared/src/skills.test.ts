@@ -4,10 +4,15 @@ import { getItem } from "./items.js";
 import {
   applyBuff,
   applySkillXp,
+  buffReductions,
+  describeSkill,
   MAX_DAMAGE_REDUCTION,
   mitigate,
+  SHUFFLE_FALLOFF,
   SKILL_IDS,
   SKILL_MAX_LEVEL,
+  shuffleBounces,
+  shuffleScale,
   skillLevelForXp,
   skillLevelProgress,
   skillTotalXpForLevel,
@@ -18,9 +23,10 @@ describe("skillValue", () => {
   it("runs linearly from the level 1 value to the level 10 value", () => {
     expect(skillValue("soothing-drones", 1)).toBeCloseTo(0.2);
     expect(skillValue("soothing-drones", 10)).toBeCloseTo(0.5);
-    expect(skillValue("cymbrella", 1)).toBeCloseTo(0.1);
-    expect(skillValue("cymbrella", 10)).toBeCloseTo(0.4);
-    expect(skillValue("cymbrella", 4)).toBeCloseTo(0.2);
+    expect(skillValue("rimshot", 1)).toBeCloseTo(0.25);
+    expect(skillValue("rimshot", 10)).toBeCloseTo(0.5);
+    expect(skillValue("cymbrella", 1)).toBeCloseTo(3);
+    expect(skillValue("cymbrella", 10)).toBeCloseTo(5);
   });
 
   it("clamps out-of-range levels", () => {
@@ -107,5 +113,37 @@ describe("classes", () => {
     expect(needsClassChoice({ stage: 2, class: null })).toBe(true);
     expect(needsClassChoice({ stage: 3 })).toBe(true);
     expect(needsClassChoice({ stage: 3, class: "bard" })).toBe(false);
+  });
+});
+
+describe("Shuffle", () => {
+  it("bounces once at level 1, one more every two levels, 5 at the cap", () => {
+    const by = Array.from({ length: 10 }, (_, i) => shuffleBounces(i + 1));
+    expect(by).toEqual([1, 1, 2, 2, 3, 3, 4, 4, 5, 5]);
+  });
+
+  it("each bounce is weaker than the last", () => {
+    expect(shuffleScale(0)).toBe(1);
+    expect(shuffleScale(1)).toBeCloseTo(SHUFFLE_FALLOFF);
+    expect(shuffleScale(2)).toBeCloseTo(SHUFFLE_FALLOFF ** 2);
+  });
+
+  it("says how many it bounces to, in words", () => {
+    expect(describeSkill("shuffle", 1)).toContain("1 more enemy nearby");
+    expect(describeSkill("shuffle", 10)).toContain("5 more enemies nearby");
+  });
+});
+
+describe("the Percussionist's kit", () => {
+  it("says how long the dome stands, and Rimshot's chance", () => {
+    expect(describeSkill("cymbrella", 1)).toContain("for 3 seconds");
+    expect(describeSkill("cymbrella", 10)).toContain("for 5 seconds");
+    expect(describeSkill("rimshot", 1)).toContain("25% chance");
+  });
+
+  it("a Cymbrella no longer cuts damage as a buff (the dome does it)", () => {
+    expect(
+      buffReductions([{ id: "cymbrella", value: 1, until: 1_000 }], 0),
+    ).toEqual([]);
   });
 });

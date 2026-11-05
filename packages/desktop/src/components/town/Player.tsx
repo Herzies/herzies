@@ -313,7 +313,12 @@ export function Player({
     }
     // Going through a portal: carried, not walking. Knocked out in a raid:
     // lying where it fell, for a Bard to find.
-    if (townLive.frozen || downInRaid()) {
+    // Winding up a Rimshot: planted where it stands.
+    if (
+      townLive.frozen ||
+      downInRaid() ||
+      performance.now() < combat.rootedUntil
+    ) {
       m.vx = m.vz = 0;
       rt.playerSpeed = townLive.speed = 0;
       return;
@@ -480,7 +485,12 @@ export function Player({
     if (raw?.jump) {
       raw.jump = false;
       townLive.lastInputAt = performance.now();
-      if (!townLive.seat && !townLive.frozen) herzie.jump();
+      if (
+        !townLive.seat &&
+        !townLive.frozen &&
+        performance.now() >= combat.rootedUntil
+      )
+        herzie.jump();
     }
     // An emote from the Alt bar: played here and sent to the room. Not
     // mid-fight (combat mode), carried through a portal or knocked out.

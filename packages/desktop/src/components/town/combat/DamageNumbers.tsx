@@ -46,7 +46,9 @@ const queue: {
   entity?: number;
   amount: number;
   crit: boolean;
-  kind: "hit" | "hurt" | "heal";
+  kind: "hit" | "hurt" | "heal" | "stun";
+  /** A word instead of a number ("Stunned"). */
+  text?: string;
 }[] = [];
 
 /** A damage number, popping off `at`. */
@@ -57,6 +59,18 @@ export function pushDamageNumber(
 ): void {
   if (queue.length < 16)
     queue.push({ at: [at[0], at[1], at[2]], amount, crit, kind: "hit" });
+}
+
+/** A word popping off `at` (over a stunned mob, the boss, a dummy). */
+export function pushStunLabel(at: Readonly<Vec3>): void {
+  if (queue.length < 16)
+    queue.push({
+      at: [at[0], at[1], at[2]],
+      amount: 0,
+      crit: false,
+      kind: "stun",
+      text: "Stunned",
+    });
 }
 
 /** Damage you took, popping off your herzie's head. */
@@ -88,6 +102,8 @@ const STYLE = `
 .town-fx .dmg.crit::after { content: "!"; margin-left: 1px; }
 .town-fx .dmg.hurt { color: #ff6b6b;
   text-shadow: 0 0 8px rgba(255, 60, 60, 0.6), 0 2px 0 #3a0808, 1px 0 0 #3a0808, -1px 0 0 #3a0808, 0 -1px 0 #3a0808; }
+.town-fx .dmg.stun { color: #ffd36b; font-size: 12px; letter-spacing: 0.5px; text-transform: uppercase;
+  text-shadow: 0 0 8px rgba(255, 190, 60, 0.65), 0 2px 0 #3a2200, 1px 0 0 #3a2200, -1px 0 0 #3a2200, 0 -1px 0 #3a2200; }
 .town-fx .dmg.heal { color: #7dff8a;
   text-shadow: 0 0 8px rgba(60, 230, 90, 0.6), 0 2px 0 #06300c, 1px 0 0 #06300c, -1px 0 0 #06300c, 0 -1px 0 #06300c; }
 .town-fx .meter { position: absolute; left: 0; top: 0; will-change: transform, opacity; transition: opacity 0.25s;
@@ -254,15 +270,18 @@ export function CombatOverlay() {
       f.rise = 38 + Math.random() * 14 + (n.crit ? 12 : 0);
       f.crit = n.crit;
       const sign = n.kind === "hurt" ? "-" : n.kind === "heal" ? "+" : "";
-      f.el.textContent = `${sign}${Math.round(n.amount).toLocaleString()}`;
+      f.el.textContent =
+        n.text ?? `${sign}${Math.round(n.amount).toLocaleString()}`;
       f.el.className =
         n.kind === "hurt"
           ? "dmg hurt"
           : n.kind === "heal"
             ? "dmg heal"
-            : n.crit
-              ? "dmg crit"
-              : "dmg";
+            : n.kind === "stun"
+              ? "dmg stun"
+              : n.crit
+                ? "dmg crit"
+                : "dmg";
     }
 
     for (const f of ui.floaters) {

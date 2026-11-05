@@ -66,11 +66,14 @@ import type { Champion } from "./Statues";
 import { Supersample } from "./Supersample";
 import { Visitor } from "./Visitor";
 import { DiscVFX } from "./vfx/DiscVFX";
+import { DomeVFX } from "./vfx/DomeVFX";
 import { HasteVFX } from "./vfx/HasteVFX";
 import { HealVFX } from "./vfx/HealVFX";
 import { SkillVFX } from "./vfx/SkillVFX";
+import { SlamVFX } from "./vfx/SlamVFX";
 import { SlashVFX } from "./vfx/SlashVFX";
 import { SonicVFX } from "./vfx/SonicVFX";
+import { StunVFX } from "./vfx/StunVFX";
 import { World } from "./World";
 
 export { PIXEL_SCALE } from "./pixelSize";
@@ -260,6 +263,9 @@ export default function TownCanvas(props: TownCanvasProps) {
         <SonicVFX />
         <DiscVFX />
         <SkillVFX />
+        <DomeVFX map={map} />
+        <StunVFX />
+        <SlamVFX map={map} />
         <HasteVFX />
         <HealVFX />
         <SlashVFX />

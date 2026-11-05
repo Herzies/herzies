@@ -879,7 +879,15 @@ const ALWAYS_SHOWN = new Set<StatKey>([
 
 /** A stat's value as it reads: "12", or "5%". */
 export function formatStat(key: StatKey, value: number): string {
+  // Crit damage is what a crit adds on top of a hit: "+50%".
+  if (key === "critDamage") return `+${value}%`;
   return PERCENT_STATS.has(key) ? `${value}%` : String(value);
+}
+
+/** What an item adds to a stat, as its card reads: "+12", "+5%". */
+export function formatStatBonus(key: StatKey, value: number): string {
+  const s = formatStat(key, value);
+  return s.startsWith("+") ? s : `+${s}`;
 }
 
 /** Which stats to list for these totals (and, say, the totals a held card

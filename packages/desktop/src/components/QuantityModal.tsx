@@ -1,4 +1,5 @@
 import { type ReactNode, useState } from "react";
+import { createPortal } from "react-dom";
 import { useEscape } from "../lib/escapeStack";
 import { NumberTicker } from "./NumberTicker";
 
@@ -34,9 +35,11 @@ export function QuantityModal({
     if (!busy) onCancel();
   });
 
-  return (
+  // At the document's top level, one above the item inspect overlay (also
+  // portalled, z-1000), so buying from an inspected card puts this on top.
+  return createPortal(
     <div
-      className="pointer-events-auto fixed inset-0 z-1000 flex items-center justify-center bg-black/30"
+      className="pointer-events-auto fixed inset-0 z-1001 flex items-center justify-center bg-black/30"
       data-tauri-drag-region="false"
     >
       <div
@@ -86,6 +89,7 @@ export function QuantityModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

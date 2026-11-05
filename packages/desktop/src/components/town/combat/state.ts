@@ -23,6 +23,14 @@ export const combat = {
   /** How shaken the camera is, 0–1; it shakes by the square of this and
    * settles on its own (see CameraRig). */
   trauma: 0,
+  /** A heavy blow's jolt (a Rimshot's slam): the camera dips by `kick` (world
+   * units) at `kickAt` (performance.now() ms) and springs back. Directional,
+   * on top of the trauma's shake. */
+  kick: 0,
+  kickAt: Number.NEGATIVE_INFINITY,
+  /** Held where it stands until then (performance.now() ms): a Rimshot's
+   * wind-up roots its Percussionist. */
+  rootedUntil: Number.NEGATIVE_INFINITY,
   /** The crosshair's spread, 0 tight to 1 wide: kicks on each cast. */
   spread: 0,
   /** Whether the crosshair is over a dummy. */
@@ -94,6 +102,22 @@ export function shake(amount: number): void {
   // what happened).
   if (reducedMotion()) return;
   combat.trauma = Math.min(1, combat.trauma + amount);
+}
+
+/** A heavy blow's jolt: the camera dips `amount` (world units) and springs
+ * back (see combat.kick). Not under reduced motion. */
+export function kick(amount: number): void {
+  if (reducedMotion()) return;
+  combat.kick = amount;
+  combat.kickAt = performance.now();
+}
+
+/** How far the camera is dipped by a kick at `now`: down at once, back up
+ * past level a touch, settled in about a third of a second. */
+export function kickOffset(now: number): number {
+  const t = (now - combat.kickAt) / 1000;
+  if (t < 0 || t > 0.5) return 0;
+  return -combat.kick * Math.exp(-t / 0.09) * Math.cos(t * 2 * Math.PI * 3.2);
 }
 
 let motionQuery: MediaQueryList | null | undefined;

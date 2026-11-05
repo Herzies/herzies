@@ -55,6 +55,7 @@ import {
   SKILL_COOLDOWN_GRACE_MS,
   SKILL_DEFS,
   type SkillId,
+  shuffleBounces,
   skillValue,
   skillXpFor,
 } from "@herzies/shared/skills";
@@ -75,6 +76,7 @@ import type {
 import {
   BossEngine,
   type BossEvent,
+  type BossHit,
   type BossPlayer,
   rng,
   type Telegraph,
@@ -373,6 +375,12 @@ export class FightRuntime {
   private readonly minionFloor: number | null;
   /** Resurrects being played, by their Bard. */
   private channels = new Map<string, Channel>();
+  /** Rimshots winding up: where each Percussionist stands (held there),
+   * when it lands, and at what level. */
+  private slams = new Map<
+    string,
+    { until: number; x: number; z: number; level: number }
+  >();
   /** Bards whose lute is in its heal stance (user ids). */
   private healers = new Set<string>();
   /** Heal bolts in flight: who sent each, at whom, and when it lands. */
@@ -856,12 +864,18 @@ export class FightRuntime {
       this.credit(uid, "healing", restored);
       this.engine.addThreat(uid, restored * TUNING.threat.perHeal);
     } else if (skillId === "cymbrella") {
+      // A dome where they stand, for its seconds: no one in it is hurt,
+      // no enemy gets in (see DOME). Its clang draws the boss's eye.
+      const ms = Math.round(value * 1000);
+      this.engine.addDome(uid, pos.x, pos.z, now, ms);
+      this.engine.addThreat(uid, TUNING.threat.cymbrella);
+      // On its caster for as long, for the HUD: an older app reads it as
+      // its overhead cymbal, "100% less damage".
       const buff = this.engine.buff(uid, {
         id: "cymbrella",
-        value: value * buffMult(p.stats.euphony),
-        until: now + (def.durationMs ?? 0),
+        value: 1,
+        until: now + ms,
       });
-      this.engine.addThreat(uid, TUNING.threat.cymbrella);
       out.push(this.buffMsg(p.id, buff));
     } else if (skillId === "haste") {
       // Everyone standing near (the Bard too), for its length. Euphony
@@ -884,6 +898,24 @@ export class FightRuntime {
       }
     } else if (skillId === "backspin") {
       this.engine.backspin(uid, pos, yaw, pitch, p.stats, value, now);
+    } else if (skillId === "rimshot") {
+      // The wind-up: it lands where they stand, when it's done (see
+      // stepSlams). The room saw it start with the skill's word.
+      this.slams.set(uid, {
+        until: now + (def.castMs ?? 0),
+        x: pos.x,
+        z: pos.z,
+        level,
+      });
+    } else if (skillId === "shuffle") {
+      // Its discs bounce on for a while: the casts do the work (and earn
+      // it its XP, per bounce's damage).
+      const buff = this.engine.buff(uid, {
+        id: "shuffle",
+        value: shuffleBounces(level),
+        until: now + (def.durationMs ?? 0),
+      });
+      out.push(this.buffMsg(p.id, buff));
     } else if (skillId === "taunt" && boss) {
       const until = now + (def.durationMs ?? 0);
       const before = boss.setTaunt(uid, until, now);
@@ -1211,6 +1243,9 @@ export class FightRuntime {
       });
     }
     if (this.open) {
+      // Rimshots land before the engine steps, so their hits land this
+      // update.
+      this.stepSlams(now, out);
       for (const ev of this.engine.update(now, alive)) this.apply(ev, out, now);
       this.landBolts(now, out);
       const tower = this.tower;
@@ -1247,6 +1282,7 @@ export class FightRuntime {
             x: round(at.x),
             z: round(at.z),
             yaw: round(at.yaw),
+            ...(boss.stunEnd > now ? { st: boss.stunEnd } : {}),
           },
         });
       }
@@ -1385,6 +1421,34 @@ export class FightRuntime {
       if (now < c.until) continue;
       this.channels.delete(by);
       this.revive(bard, target, c.level, now, out);
+    }
+  }
+
+  /** Rimshots whose wind-up is done land: a ground slam where each
+   * Percussionist stood (its damage pays it: hits tagged "rimshot"). One
+   * knocked out, or gone, before it lands loses it; the room is told as
+   * for a stopped channel. */
+  private stepSlams(now: number, out: Outbound[]) {
+    for (const [uid, s] of [...this.slams]) {
+      const p = this.players.get(uid);
+      if (!p?.present || p.down) {
+        this.slams.delete(uid);
+        if (p)
+          out.push({
+            to: "all",
+            msg: { t: "channel", by: p.id, target: null, until: 0 },
+          });
+        continue;
+      }
+      if (now < s.until) continue;
+      this.slams.delete(uid);
+      this.engine.rimshot(
+        uid,
+        { x: s.x, z: s.z },
+        p.stats,
+        skillValue("rimshot", s.level),
+        now,
+      );
     }
   }
 
@@ -1622,6 +1686,63 @@ export class FightRuntime {
     if (raid) out.push({ to: "all", msg: { t: "raid", ...raid } });
   }
 
+  /** Land `hits` on their herzies: health, what the Cymbrella and a taunt
+   * earn, and knocked out at none. The entity ids hit. */
+  private takeHits(
+    hits: BossHit[],
+    out: Outbound[],
+    now: number,
+    sheltered: number[] = [],
+  ): number[] {
+    const hit: number[] = [];
+    const taunter = this.boss?.taunter(now);
+    for (const h of hits) {
+      const p = this.players.get(h.uid);
+      if (!p || p.down) continue;
+      // Under a dome: nothing lands. All of what would have pays the
+      // dome's Percussionist, and counts as their support.
+      if (h.shelteredBy) {
+        sheltered.push(p.id);
+        if (h.blocked > 0) {
+          this.earn(
+            h.shelteredBy,
+            "cymbrella",
+            skillXpFor("cymbrella", h.blocked),
+          );
+          this.credit(h.shelteredBy, "blocked", h.blocked);
+        }
+        continue;
+      }
+      p.hp = Math.max(0, p.hp - h.damage);
+      hit.push(p.id);
+      // A taunt pays for the hits it drew.
+      if (h.aimed && taunter === p.uid && p.skills.has("taunt"))
+        this.earn(p.uid, "taunt", skillXpFor("taunt", h.damage + h.absorbed));
+      out.push({
+        to: "all",
+        msg: { t: "hp", id: p.id, hp: p.hp, maxHp: p.maxHp },
+      });
+      if (p.hp <= 0) {
+        p.down = true;
+        this.log.downs++;
+        // Knocked out: nothing left to raise the stored health toward.
+        this.healed.delete(p.uid);
+        out.push(...this.stopChannels(p.uid));
+        out.push({ to: { uid: p.uid }, msg: { t: "down" } });
+        // Where it fell is where it lies: put the client there.
+        const at = this.history.at(p.uid, now);
+        if (at && this.boss)
+          out.push({
+            to: { uid: p.uid },
+            msg: { t: "correct", x: round(at.x), z: round(at.z) },
+          });
+        this.raidDirty = true;
+      }
+      this.reportNow = true;
+    }
+    return hit;
+  }
+
   private apply(ev: BossEvent | TowerEvent, out: Outbound[], now: number) {
     switch (ev.t) {
       case "mobDown":
@@ -1649,49 +1770,26 @@ export class FightRuntime {
         });
         break;
       case "resolve": {
-        const hit: number[] = [];
-        const taunter = this.boss?.taunter(now);
-        for (const h of ev.hits) {
-          const p = this.players.get(h.uid);
-          if (!p || p.down) continue;
-          p.hp = Math.max(0, p.hp - h.damage);
-          hit.push(p.id);
-          // The Cymbrella is a self buff: what it took off (on top of Def)
-          // pays its wearer, and counts as their support.
-          if (h.blocked > 0) {
-            this.earn(p.uid, "cymbrella", skillXpFor("cymbrella", h.blocked));
-            this.credit(p.uid, "blocked", h.blocked);
-          }
-          // A taunt pays for the hits it drew.
-          if (h.aimed && taunter === p.uid && p.skills.has("taunt"))
-            this.earn(
-              p.uid,
-              "taunt",
-              skillXpFor("taunt", h.damage + h.absorbed),
-            );
+        const sheltered: number[] = [];
+        const hit = this.takeHits(ev.hits, out, now, sheltered);
+        out.push({
+          to: "all",
+          msg: {
+            t: "resolve",
+            id: ev.id,
+            hits: hit,
+            ...(sheltered.length ? { sheltered } : {}),
+          },
+        });
+        break;
+      }
+      case "contact": {
+        // Walked into a mob: hurt like a swing, felt by the one it hit.
+        if (this.takeHits([ev.hit], out, now).length)
           out.push({
-            to: "all",
-            msg: { t: "hp", id: p.id, hp: p.hp, maxHp: p.maxHp },
+            to: { uid: ev.hit.uid },
+            msg: { t: "bump", mob: ev.mob },
           });
-          if (p.hp <= 0) {
-            p.down = true;
-            this.log.downs++;
-            // Knocked out: nothing left to raise the stored health toward.
-            this.healed.delete(p.uid);
-            out.push(...this.stopChannels(p.uid));
-            out.push({ to: { uid: p.uid }, msg: { t: "down" } });
-            // Where it fell is where it lies: put the client there.
-            const at = this.history.at(p.uid, now);
-            if (at && this.boss)
-              out.push({
-                to: { uid: p.uid },
-                msg: { t: "correct", x: round(at.x), z: round(at.z) },
-              });
-            this.raidDirty = true;
-          }
-          this.reportNow = true;
-        }
-        out.push({ to: "all", msg: { t: "resolve", id: ev.id, hits: hit } });
         break;
       }
       case "hit": {
