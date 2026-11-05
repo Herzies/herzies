@@ -1092,13 +1092,37 @@ describe("HerzieModel with Sleptwell, the cat", () => {
       h.root.position.z += WALK_SPEED / 60;
       h.update(1 / 60, WALK_SPEED);
     }
-    const mouth = h.companionPosition(new THREE.Vector3());
-    expect(mouth).not.toBeNull();
-    const m = mouth as THREE.Vector3;
+    const at = h.companionPosition(new THREE.Vector3());
+    expect(at).not.toBeNull();
+    const m = at as THREE.Vector3;
     expect(Math.hypot(m.x, m.z - h.root.position.z)).toBeLessThan(4);
-    // Its mouth is at a cat's head height, not up in the air.
+    // It's at a cat's height, not up in the air.
     expect(m.y).toBeGreaterThan(0.2);
     expect(m.y).toBeLessThan(1.2);
+  });
+
+  it("stays where it was when other gear goes on (rebuilt, carried over)", () => {
+    const h = new HerzieModel(CAT);
+    for (let i = 0; i < 200; i++) {
+      h.root.position.z += WALK_SPEED / 60;
+      h.heading = 0.4;
+      h.update(1 / 60, WALK_SPEED);
+    }
+    const cat = h.companionPosition(new THREE.Vector3()) as THREE.Vector3;
+    const hatted = new HerzieModel({
+      ...CAT,
+      equipped: { ...CAT.equipped, head: "headphones" },
+    });
+    hatted.carryOver(h);
+    h.dispose();
+    hatted.update(1 / 60, WALK_SPEED);
+    const after = hatted.companionPosition(
+      new THREE.Vector3(),
+    ) as THREE.Vector3;
+    expect(after.distanceTo(cat)).toBeLessThan(0.2);
+    expect(hatted.root.position.z).toBeCloseTo(h.root.position.z);
+    expect(hatted.heading).toBe(0.4);
+    expect(hatted.anim.walkWeight).toBeGreaterThan(0.9);
   });
 
   it("sits beside a herzie on its own stage, and isn't sent fetching", () => {

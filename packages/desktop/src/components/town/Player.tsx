@@ -175,20 +175,25 @@ export function Player({
         100,
     [equippedKey],
   );
+  // Rebuilt when its gear changes; the new one carries on from the last
+  // (see carryOver), so putting a hat on doesn't reset it or its cat.
+  const lastHerzie = useRef<HerzieModel | null>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the look's content
-  const herzie = useMemo(
-    () =>
-      new HerzieModel(look, {
-        lighting: ambient,
-        // Its ground accessories (the boombox) set down as Home always set
-        // them: in the corner of the small window's frame, standing still
-        // while a drag spins the herzie (see setAccessoryHeading below).
-        layoutCols: HOME_LAYOUT_COLS,
-        layoutRows: SH,
-        anchorGround: true,
-      }),
-    [look.seed, look.stage, equippedKey],
-  );
+  const herzie = useMemo(() => {
+    const next = new HerzieModel(look, {
+      lighting: ambient,
+      // Its ground accessories (the boombox) set down as Home always set
+      // them: in the corner of the small window's frame, standing still
+      // while a drag spins the herzie (see setAccessoryHeading below).
+      layoutCols: HOME_LAYOUT_COLS,
+      layoutRows: SH,
+      anchorGround: true,
+    });
+    const last = lastHerzie.current;
+    if (last) next.carryOver(last);
+    lastHerzie.current = next;
+    return next;
+  }, [look.seed, look.stage, equippedKey]);
   useEffect(() => {
     // Its cat spirit (if it has one) walks the same ground, round water.
     herzie.groundAt = (x, z) => groundY(map, x, z);

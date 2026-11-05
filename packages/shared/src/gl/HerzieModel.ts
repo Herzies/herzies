@@ -1645,6 +1645,45 @@ export class HerzieModel {
     }
   }
 
+  /**
+   * Picks up where `from` left off: the same herzie rebuilt (other gear put
+   * on) carries on as it was — where it stands and faces, mid-step, mid-
+   * dance, mid-jump — and its spirit or cat stays where it was, doing what
+   * it was doing, rather than starting over somewhere new. Call it on the
+   * new one before `from` is disposed.
+   */
+  carryOver(from: HerzieModel): void {
+    this.root.position.copy(from.root.position);
+    this.root.quaternion.copy(from.root.quaternion);
+    this.heading = from.heading;
+    this.bodyAngle = from.bodyAngle;
+    this.lastHeading = from.lastHeading;
+    Object.assign(this.anim, from.anim);
+    this.dancing = from.dancing;
+    this.danceWeight = from.danceWeight;
+    this.danceTime = from.danceTime;
+    this.danceClock = from.danceClock;
+    this.sitting = from.sitting;
+    this.sitWeight = from.sitWeight;
+    this.jumps = from.jumps;
+    this.airTime = from.airTime;
+    this.landTime = from.landTime;
+    this.jumpBuffer = from.jumpBuffer;
+    this.afk = from.afk;
+    this.homeFacing = from.homeFacing;
+    if (from.lastWorld) this.lastWorld = from.lastWorld.clone();
+    this.worldVelocity.copy(from.worldVelocity);
+    // Its companion, if it's the same kind: the new one takes over the old
+    // one's state (where it is, its errand, its pose), keeping its own
+    // build (its slot and clearance follow the new gear).
+    if (this.follower && from.follower) {
+      this.follower.state = from.follower.state;
+    }
+    if (this.cat && from.cat && !this.cat.pinned && !from.cat.pinned) {
+      this.cat.state = from.cat.state;
+    }
+  }
+
   /** Whether it has a floating companion of its own (a spirit) to send. */
   get hasCompanion(): boolean {
     return this.follower !== null || (this.cat !== null && !this.cat.pinned);
@@ -1686,8 +1725,15 @@ export class HerzieModel {
 
   /** Where the companion is (world space, its core); null with none. */
   companionPosition(out: THREE.Vector3): THREE.Vector3 | null {
-    // The cat carries in its mouth.
-    if (this.cat && !this.cat.pinned) return this.cat.model.mouthPosition(out);
+    // The cat: the middle of it, halfway down from its head to the ground
+    // under it (what it fetches goes into it, as into a floating spirit).
+    const cat = this.cat;
+    if (cat && !cat.pinned) {
+      cat.model.mouthPosition(out);
+      const feet = cat.state.position;
+      out.set((out.x + feet.x) / 2, (out.y + feet.y) / 2, (out.z + feet.z) / 2);
+      return out;
+    }
     return this.follower ? out.copy(this.follower.state.position) : null;
   }
 
