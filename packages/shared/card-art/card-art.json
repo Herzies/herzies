@@ -25,6 +25,20 @@
       "detail": 25
     }
   },
+  "sleptwell": {
+    "file": "sleptwell.webp",
+    "source": "sleptwell.jpg",
+    "crop": {
+      "zoom": 1,
+      "x": 50,
+      "y": 50
+    },
+    "filter": {
+      "type": "lofi",
+      "detail": 25
+    },
+    "artist": "jundy ardy"
+  },
   "stars": {
     "file": "stars.webp",
     "source": "stars.png",
