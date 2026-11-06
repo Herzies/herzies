@@ -437,6 +437,9 @@ export class TownRoom extends DurableObject<Env> {
         id = other.player.id;
         this.sessions.delete(other.ws);
         this.dirty.delete(other);
+        // The fight hears it leave like any other, so the copy coming in
+        // is judged a rejoin (no healing back from its ticket, no breather).
+        this.fight?.leave(t.uid, now);
         this.close(other.ws, TOWN_CLOSE.replaced, "replaced");
       }
     }
@@ -445,8 +448,9 @@ export class TownRoom extends DurableObject<Env> {
 
     // A knocked-out herzie lies where it fell: a reconnect can't carry its
     // body over to a Bard.
-    const fell = this.fight?.rejoinAt(t.uid) ?? null;
-    const at = fell ?? startingPoint(s.att.map, m.at?.x, m.at?.z);
+    const asked = startingPoint(s.att.map, m.at?.x, m.at?.z);
+    const kept = this.fight?.rejoinAt(t.uid, asked, now) ?? null;
+    const at = kept ?? asked;
     const state = quantizeState({
       x: at.x,
       z: at.z,
@@ -486,7 +490,8 @@ export class TownRoom extends DurableObject<Env> {
       // Everyone else sees the newcomer's health bar.
       this.broadcast({ t: "hp", id, hp: fp.hp, maxHp: fp.maxHp }, s);
       if (fp.down) this.send(s, { t: "down" });
-      if (fell) this.send(s, { t: "correct", x: state.x, z: state.z });
+      // Put back where the fight has it (where it fell, or where it was).
+      if (kept) this.send(s, { t: "correct", x: state.x, z: state.z });
     }
     if (others.length) {
       s.ws.send(
@@ -1170,7 +1175,11 @@ export class TownRoom extends DurableObject<Env> {
     void postVitals(this.env, { action: "report", ...report })
       .then((reply) => {
         if (!reply) return;
-        for (const o of fight.reported(report, reply.raid)) this.dispatch(o);
+        const outs = fight.reported(report, reply.raid);
+        // The room may have moved on to another fight (the Tower's next
+        // event) while this was out: this one's news isn't for its players.
+        if (this.fight !== fight) return;
+        for (const o of outs) this.dispatch(o);
         const loot = reply.boss?.loot;
         if (loot) for (const o of fight.loot(loot)) this.dispatch(o);
         const levels = reply.skills?.levels;

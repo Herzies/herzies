@@ -721,10 +721,10 @@ describe("production pass: restarts, absences and the lock", () => {
     f.onState("a", 3, 4, STARTS + 50);
     (f.player("a") as { down: boolean }).down = true;
     f.leave("a", STARTS + 100);
-    const at = f.rejoinAt("a");
+    const at = f.rejoinAt("a", { x: 0, z: 0 }, STARTS + 200);
     expect(at?.x).toBeCloseTo(3, 0);
     expect(at?.z).toBeCloseTo(4, 0);
-    expect(f.rejoinAt("b")).toBeNull();
+    expect(f.rejoinAt("b", { x: 0, z: 0 }, STARTS + 200)).toBeNull();
   });
 });
 

@@ -600,6 +600,11 @@ export class BossEngine {
     this.safeUntil.set(uid, now + TUNING.spawnSafeMs);
   }
 
+  /** Whether `uid` is in its spawn breather at `t`. */
+  spawnSafe(uid: string, t: number): boolean {
+    return this.judge.safe(uid, t);
+  }
+
   forget(uid: string): void {
     this.casts.delete(uid);
     this.invulnUntil.delete(uid);

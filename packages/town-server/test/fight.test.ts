@@ -556,3 +556,111 @@ describe("eating", () => {
     expect(hurt(50).tryEat("b", T0)).toBe("not-here");
   });
 });
+
+describe("reconnecting", () => {
+  const issuedAt = (ms: number) => ms / 1000 + 600; // exp for a ticket signed at ms
+
+  it("a fresh copy of the app with an old ticket can't heal you", () => {
+    const f = new FightRuntime(claim(), T0, 7);
+    f.join("a", 1, ticket("a", 200), { x: 0, z: 8 }, T0);
+    const p = f.player("a");
+    if (!p) throw new Error("no a");
+    p.hp = 60; // the boss got them
+    (f as unknown as { touch(uid: string): void }).touch("a");
+    // The room calls leave for the copy it replaces, then join.
+    f.leave("a", T0 + 1_000);
+    const back = f.join(
+      "a",
+      1,
+      ticket("a", 200, { exp: issuedAt(T0 - 30_000) }),
+      { x: 0, z: 8 },
+      T0 + 1_100,
+    );
+    expect(back.hp).toBe(60);
+  });
+
+  it("a stale ticket can't stand a knocked-out herzie back up", () => {
+    const f = new FightRuntime(claim(), T0, 7);
+    f.join("a", 1, ticket("a", 200), { x: 0, z: 8 }, T0);
+    const p = f.player("a");
+    if (!p) throw new Error("no a");
+    p.hp = 0;
+    p.down = true;
+    (f as unknown as { touch(uid: string): void }).touch("a");
+    f.leave("a", T0 + 1_000);
+    const back = f.join(
+      "a",
+      1,
+      ticket("a", 200, { exp: issuedAt(T0 - 5_000) }),
+      { x: 0, z: 8 },
+      T0 + 1_100,
+    );
+    expect(back.down).toBe(true);
+    expect(back.hp).toBe(0);
+  });
+
+  it("a ticket signed after the database took the fight's word wins (revived in Town)", () => {
+    const f = new FightRuntime(claim(), T0, 7);
+    f.join("a", 1, ticket("a", 200), { x: 0, z: 8 }, T0);
+    const p = f.player("a");
+    if (!p) throw new Error("no a");
+    p.hp = 0;
+    p.down = true;
+    (f as unknown as { touch(uid: string): void }).touch("a");
+    f.leave("a", T0 + 1_000);
+    const report = f.report(T0 + 1_010, true);
+    if (!report) throw new Error("no report");
+    f.reported(report, null, T0 + 1_200);
+    const back = f.join(
+      "a",
+      1,
+      ticket("a", 90, { exp: issuedAt(T0 + 40_000) }),
+      { x: 0, z: 8 },
+      T0 + 41_000,
+    );
+    expect(back.down).toBe(false);
+    expect(back.hp).toBe(90);
+  });
+
+  it("a ticket signed before that report landed is still behind", () => {
+    const f = new FightRuntime(claim(), T0, 7);
+    f.join("a", 1, ticket("a", 200), { x: 0, z: 8 }, T0);
+    const p = f.player("a");
+    if (!p) throw new Error("no a");
+    p.hp = 50;
+    (f as unknown as { touch(uid: string): void }).touch("a");
+    f.leave("a", T0 + 1_000);
+    const report = f.report(T0 + 1_010, true);
+    if (!report) throw new Error("no report");
+    f.reported(report, null, T0 + 1_500);
+    const back = f.join(
+      "a",
+      1,
+      ticket("a", 200, { exp: issuedAt(T0 + 1_100) }),
+      { x: 0, z: 8 },
+      T0 + 2_000,
+    );
+    expect(back.hp).toBe(50);
+  });
+
+  it("gives no spawn breather to a reconnect, only to an arrival", () => {
+    const f = new FightRuntime(claim(), T0, 7);
+    const engine = f.engine as unknown as { spawnSafe(uid: string, t: number): boolean };
+    f.join("a", 1, ticket("a"), { x: 0, z: 8 }, T0);
+    expect(engine.spawnSafe("a", T0 + 500)).toBe(true);
+    f.leave("a", T0 + 5_000);
+    f.join("a", 1, ticket("a"), { x: 0, z: 8 }, T0 + 5_500);
+    expect(engine.spawnSafe("a", T0 + 5_600)).toBe(false);
+  });
+
+  it("a reconnect comes back where it was, not anywhere it likes", () => {
+    const f = new FightRuntime(claim(), T0, 7);
+    f.join("a", 1, ticket("a"), { x: 0, z: 8 }, T0);
+    f.onState("a", 2, 8, T0 + 100);
+    f.leave("a", T0 + 1_000);
+    const far = f.rejoinAt("a", { x: -9, z: -2 }, T0 + 1_500);
+    expect(far?.x).toBeCloseTo(2, 0);
+    expect(far?.z).toBeCloseTo(8, 0);
+    expect(f.rejoinAt("a", { x: 2.5, z: 8 }, T0 + 1_500)).toBeNull();
+  });
+});
