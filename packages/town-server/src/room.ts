@@ -765,6 +765,9 @@ export class TownRoom extends DurableObject<Env> {
       this.drop(s, TOWN_CLOSE.closed, "closed");
       return false;
     }
+    // An empty lobby stopped ticking before its start: lock it now, with
+    // whoever was in it, so those coming back are let in as its roster.
+    if (this.fight.lockDue(now)) this.runFight(now);
     const verdict = this.fight.mayJoin(t.uid, down, now);
     if (verdict === "ok") return true;
     if (verdict === "closed") this.drop(s, TOWN_CLOSE.closed, "closed");

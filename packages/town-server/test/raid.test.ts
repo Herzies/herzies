@@ -115,6 +115,22 @@ describe("the lobby", () => {
     expect(f.mayJoin("late", false, STARTS + 18_000)).toBe("locked");
   });
 
+  it("a lobby that emptied just before its start locks late with them in", () => {
+    // Everyone's connection dropped (a deploy) 10 s before the start; the
+    // room stopped ticking, so nothing locked it on time.
+    const f = new FightRuntime(claim(), T0);
+    f.join("a", 1, ticket("a", "bard"), { x: 0, z: 9 }, T0);
+    f.join("b", 2, ticket("b", "bard"), { x: 2, z: 9 }, T0);
+    f.leave("a", STARTS - 10_000);
+    f.leave("b", STARTS - 10_000);
+    const late = STARTS + 40_000;
+    expect(f.lockDue(late)).toBe(true);
+    f.step(late);
+    expect(f.stage).toBe("fight");
+    expect(f.mayJoin("a", false, late + 10)).toBe("ok");
+    expect(f.mayJoin("stranger", false, late + 10)).toBe("locked");
+  });
+
   it("the boss sleeps: it can't be hurt and doesn't attack", () => {
     const f = new FightRuntime(claim(), T0);
     f.join("a", 1, ticket("a", "bard"), { x: 0, z: 9 }, T0);

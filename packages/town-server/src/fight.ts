@@ -531,6 +531,12 @@ export class FightRuntime {
     return !!this.boss && this.stage === "fight" && this.open;
   }
 
+  /** A lobby past its start that hasn't locked yet (an empty room stops
+   * ticking): the room steps it before letting anyone in. */
+  lockDue(now: number): boolean {
+    return !!this.boss && this.stage === "lobby" && now >= this.startsAt;
+  }
+
   /** Whether `uid` may come in now: anyone on their feet in the lobby;
    * after the lock, only the roster (a downed member too, to wait for a
    * Bard); nobody once it's over. */
@@ -1426,16 +1432,24 @@ export class FightRuntime {
    * health sized to them, and the door shuts. Nobody here: no fight. */
   private lock(now: number, out: Outbound[]) {
     const boss = this.boss as BossEngine;
+    // Who was in at the start: a lock that runs late (an empty room that
+    // stopped ticking) still judges the grace from then.
+    const at = Math.min(now, this.startsAt);
     const uids = [...this.players.values()]
       .filter(
         (p) =>
           !p.down &&
           (p.present ||
-            now - (this.absentSince.get(p.uid) ?? -Infinity) < LOCK_GRACE_MS),
+            at - (this.absentSince.get(p.uid) ?? -Infinity) < LOCK_GRACE_MS),
       )
       .map((p) => p.uid);
     this.lockedAt = now;
     this.roster = new Map(uids.map((uid) => [uid, "in" as const]));
+    // Locked late: those away get the grace to reconnect from now, as
+    // after a restart, not from when the room went quiet.
+    if (now > this.startsAt)
+      for (const uid of uids)
+        if (this.absentSince.has(uid)) this.absentSince.set(uid, now);
     this.lockReq = {
       event: this.eventId,
       uids,
