@@ -334,8 +334,9 @@ export const PUNCH_DAMAGE = 0.6;
 // Contribution: how much a herzie did for a boss fight, which ranks its end
 // screen, rewards, statue and leaderboard. Damage counts as it is; healing
 // and what a Cymbrella blocked count this many times over, because a heal is
-// worth far more than a hit (a Bard restores ~100 HP in the time a damage
-// dealer hits for ~4,000). Holding the boss with a Taunt counts too, per
+// worth far more than a hit (a level-30 Bard restores a few dozen HP a
+// second, Drones and heal bolts together, while a Record Slinger deals some
+// 800). Holding the boss with a Taunt counts too, per
 // second held (see tauntPointsPerSecond). Mirrored by boss_contribution in
 // 00111 and 00142.
 

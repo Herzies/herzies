@@ -53,6 +53,7 @@ import {
 import { CONSUMABLE_COOLDOWN_MS } from "@herzies/shared/medea";
 import {
   buffMultiplier,
+  HASTE_MAX,
   isSkillId,
   SKILL_COOLDOWN_GRACE_MS,
   SKILL_DEFS,
@@ -2369,12 +2370,6 @@ export const DEV_EVENT = "dev";
  * what Euphony does to their skills. */
 export type FightStats = HitStats & { def: number; euphony: number };
 
-/** Stats from a ticket's `st`; a ticket from before stat points has no Def
- * or Euphony, and one from before stats has nothing. */
-/** The most attack speed a Haste can give, however much Euphony is behind
- * it (+50%). */
-const HASTE_MAX = 0.5;
-
 /** How a ticket's herzie fights: its basic attack, a blow's strength, and
  * whether it holds its class's instrument. */
 function armsOf(
@@ -2390,6 +2385,8 @@ function armsOf(
   };
 }
 
+/** Stats from a ticket's `st`; a ticket from before stat points has no Def
+ * or Euphony, and one from before stats has nothing. */
 export function statsOf(st: TownTicketPayload["st"]): FightStats {
   const n = (v: number | undefined) =>
     typeof v === "number" && Number.isFinite(v) ? v : 0;

@@ -3,6 +3,7 @@ import {
   classDef,
   defReduction,
   formatStat,
+  HASTE_MAX,
   type HerzieStats,
   healMult,
   maxHp as maxHpFor,
@@ -90,23 +91,27 @@ function secondaryLines(
     hint: "How much faster it attacks, from Timing",
   });
   // "Given": Euphony strengthens what the herzie does for others, never
-  // the healing it gets itself — read as that, "Healing" misled.
-  lines.push({
-    key: "healsGiven",
-    label: "Heals given",
-    now: Math.round((healMult(now.euphony) - 1) * 100),
-    next: Math.round((healMult(next.euphony) - 1) * 100),
-    text: (v) => `+${v}%`,
-    hint: "Heals you give, not ones you get",
-  });
-  lines.push({
-    key: "buffsGiven",
-    label: "Buffs given",
-    now: Math.round((buffMult(now.euphony) - 1) * 100),
-    next: Math.round((buffMult(next.euphony) - 1) * 100),
-    text: (v) => `+${v}%`,
-    hint: "Buffs you give, not ones you get",
-  });
+  // the healing it gets itself — read as that, "Healing" misled. Only a
+  // Bard heals or buffs, so only a Bard (or a herzie yet to choose) is
+  // shown them: to a Slinger or a tank, Euphony does nothing.
+  if (!cls || cls === "bard") {
+    lines.push({
+      key: "healsGiven",
+      label: "Heals given",
+      now: Math.round((healMult(now.euphony) - 1) * 100),
+      next: Math.round((healMult(next.euphony) - 1) * 100),
+      text: (v) => `+${v}%`,
+      hint: "Heals you give, not ones you get",
+    });
+    lines.push({
+      key: "buffsGiven",
+      label: "Buffs given",
+      now: Math.round((buffMult(now.euphony) - 1) * 100),
+      next: Math.round((buffMult(next.euphony) - 1) * 100),
+      text: (v) => `+${v}%`,
+      hint: `Buffs you give, not ones you get (a Haste, up to +${Math.round(HASTE_MAX * 100)}% attack speed)`,
+    });
+  }
   for (const key of SECONDARY) {
     // A Percussionist's Def counts more in a fight (classDef): show that.
     const def = key === "def";

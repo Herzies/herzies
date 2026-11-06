@@ -162,7 +162,8 @@ export const SKILL_DEFS: Record<SkillId, SkillDef> = {
     kind: "buff",
     describe:
       "For 10 s, each disc you throw bounces on to {v} nearby, each bounce 30% weaker than the last.",
-    // Bounces: 1 at level 1, one more every two levels, 5 at the cap.
+    // Bounces: 1 at level 1, about one more every two levels (rounded),
+    // 5 from level 9.
     value: [1, 5],
     count: ["more enemy", "more enemies"],
     // Only for a pack: a lone target is hit as ever, so it adds nothing
@@ -179,7 +180,7 @@ export const SKILL_DEFS: Record<SkillId, SkillDef> = {
     name: "Rimshot",
     kind: "attack",
     describe:
-      "Winds up for 0.8 s, then slams the ground: every enemy within 3.5 m takes twice a strike, each with a {v} chance to be stunned for 2 s (the boss 1 s), cutting short whatever it was winding up.",
+      "Winds up for 0.8 s, then slams the ground: every enemy within 3.5 m takes twice a strike, each with a {v} chance to be stunned for 2 s (the boss 1 s, half that again for each stun in the last 16 s), cutting short whatever it was winding up.",
     // The chance to stun each enemy hit (see RIMSHOT).
     value: [0.25, 0.5],
     cooldownMs: 10_000,
@@ -214,6 +215,10 @@ export function skillLearned(id: SkillId, level: number): boolean {
 /** Shuffle: how far a disc bounces on from what it hit, centre to centre
  * on the ground (the training grounds' dummies stand 8.5 apart), and how
  * much weaker each bounce is than the one before. */
+/** The most attack speed a Haste can give, however much Euphony is behind
+ * it (+50%). */
+export const HASTE_MAX = 0.5;
+
 export const SHUFFLE_REACH = 9;
 export const SHUFFLE_FALLOFF = 0.7;
 
