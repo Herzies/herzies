@@ -366,23 +366,30 @@ export function buffMultiplier(
   return m;
 }
 
-/** Adds a buff under the no-stacking rule: one of each kind; the stronger
- * value and the later expiry win. */
-export function applyBuff(buffs: readonly Buff[], next: Buff): Buff[] {
-  const prev = buffs.find((b) => b.id === next.id);
-  const rest = buffs.filter((b) => b.id !== next.id);
-  if (!prev) return [...rest, next];
+/** Adds a buff under the no-stacking rule: one of each kind. A stronger
+ * one takes over with its own length; as strong, the later expiry wins
+ * (a refresh, credited to the newer); a weaker one leaves the stronger be,
+ * so recasting a lesser Haste can't stretch a greater one. Buffs that ran
+ * out by `now` are dropped first, so one that ended lends nothing. */
+export function applyBuff(
+  buffs: readonly Buff[],
+  next: Buff,
+  now: number = Number.NEGATIVE_INFINITY,
+): Buff[] {
+  const live = buffs.filter((b) => b.until > now);
+  const prev = live.find((b) => b.id === next.id);
+  const rest = live.filter((b) => b.id !== next.id);
+  if (!prev || next.value > prev.value) return [...rest, next];
+  if (next.value < prev.value) return [...rest, prev];
+  const by = next.by ?? prev.by;
   return [
     ...rest,
     {
       id: next.id,
-      value: Math.max(prev.value, next.value),
+      value: next.value,
       until: Math.max(prev.until, next.until),
       ...(next.kind ? { kind: next.kind } : {}),
-      // The one that's stronger (or, as strong, the newer) is whose.
-      ...((next.value >= prev.value ? next.by : prev.by)
-        ? { by: next.value >= prev.value ? next.by : prev.by }
-        : {}),
+      ...(by ? { by } : {}),
     },
   ];
 }

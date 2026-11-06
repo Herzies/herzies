@@ -940,11 +940,15 @@ export class FightRuntime {
       this.engine.addThreat(uid, TUNING.threat.cymbrella);
       // On its caster for as long, for the HUD: an older app reads it as
       // its overhead cymbal, "100% less damage".
-      const buff = this.engine.buff(uid, {
-        id: "cymbrella",
-        value: 1,
-        until: now + ms,
-      });
+      const buff = this.engine.buff(
+        uid,
+        {
+          id: "cymbrella",
+          value: 1,
+          until: now + ms,
+        },
+        now,
+      );
       out.push(this.buffMsg(p.id, buff));
     } else if (skillId === "haste") {
       // Everyone standing near (the Bard too), for its length. Euphony
@@ -957,12 +961,16 @@ export class FightRuntime {
         if (!at) continue;
         if (Math.hypot(at.x - pos.x, at.z - pos.z) > (def.radius ?? 0))
           continue;
-        const buff = this.engine.buff(o.uid, {
-          id: "haste",
-          value: strength,
-          until,
-          by: uid,
-        });
+        const buff = this.engine.buff(
+          o.uid,
+          {
+            id: "haste",
+            value: strength,
+            until,
+            by: uid,
+          },
+          now,
+        );
         out.push(this.buffMsg(o.id, buff));
       }
     } else if (skillId === "backspin") {
@@ -979,17 +987,21 @@ export class FightRuntime {
     } else if (skillId === "shuffle") {
       // Its discs bounce on for a while: the casts do the work (and earn
       // it its XP, per bounce's damage).
-      const buff = this.engine.buff(uid, {
-        id: "shuffle",
-        value: shuffleBounces(level),
-        until: now + (def.durationMs ?? 0),
-      });
+      const buff = this.engine.buff(
+        uid,
+        {
+          id: "shuffle",
+          value: shuffleBounces(level),
+          until: now + (def.durationMs ?? 0),
+        },
+        now,
+      );
       out.push(this.buffMsg(p.id, buff));
     } else if (skillId === "taunt" && boss) {
       const until = now + (def.durationMs ?? 0);
       const before = boss.setTaunt(uid, until, now);
       if (before) out.push(...this.untaunt(before));
-      const buff = boss.buff(uid, { id: "taunt", value: 1, until });
+      const buff = boss.buff(uid, { id: "taunt", value: 1, until }, now);
       // Top of its list when the taunt runs out, so it doesn't snap back
       // at once to whoever it hated before.
       boss.tauntThreat(uid);
@@ -1642,12 +1654,16 @@ export class FightRuntime {
     t.onSince = now;
     const bonus = inTuneBonus(p.cls);
     if (!bonus) return [];
-    const buff = this.engine.buff(uid, {
-      id: "in_tune",
-      kind: bonus.kind,
-      value: bonus.value,
-      until: now + OPEN_ENDED_MS,
-    });
+    const buff = this.engine.buff(
+      uid,
+      {
+        id: "in_tune",
+        kind: bonus.kind,
+        value: bonus.value,
+        until: now + OPEN_ENDED_MS,
+      },
+      now,
+    );
     return [this.buffMsg(p.id, buff)];
   }
 

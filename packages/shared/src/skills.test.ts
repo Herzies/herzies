@@ -73,10 +73,28 @@ describe("skill XP", () => {
 });
 
 describe("buffs", () => {
-  it("doesn't stack the same buff: stronger value, later expiry", () => {
-    let buffs = applyBuff([], { id: "cymbrella", value: 0.4, until: 1000 });
-    buffs = applyBuff(buffs, { id: "cymbrella", value: 0.1, until: 5000 });
-    expect(buffs).toEqual([{ id: "cymbrella", value: 0.4, until: 5000 }]);
+  it("doesn't stack the same buff: a weaker recast leaves the stronger be", () => {
+    let buffs = applyBuff([], { id: "haste", value: 0.4, until: 1000 }, 0);
+    buffs = applyBuff(buffs, { id: "haste", value: 0.1, until: 5000 }, 500);
+    expect(buffs).toEqual([{ id: "haste", value: 0.4, until: 1000 }]);
+  });
+
+  it("a stronger one takes over with its own length", () => {
+    let buffs = applyBuff([], { id: "haste", value: 0.1, until: 5000, by: "a" }, 0);
+    buffs = applyBuff(buffs, { id: "haste", value: 0.4, until: 1500, by: "b" }, 500);
+    expect(buffs).toEqual([{ id: "haste", value: 0.4, until: 1500, by: "b" }]);
+  });
+
+  it("as strong, it refreshes to the later end, credited to the newer", () => {
+    let buffs = applyBuff([], { id: "haste", value: 0.3, until: 1000, by: "a" }, 0);
+    buffs = applyBuff(buffs, { id: "haste", value: 0.3, until: 3000, by: "b" }, 500);
+    expect(buffs).toEqual([{ id: "haste", value: 0.3, until: 3000, by: "b" }]);
+  });
+
+  it("one that ran out lends nothing to the next", () => {
+    let buffs = applyBuff([], { id: "haste", value: 0.4, until: 1000 }, 0);
+    buffs = applyBuff(buffs, { id: "haste", value: 0.1, until: 5000 }, 2000);
+    expect(buffs).toEqual([{ id: "haste", value: 0.1, until: 5000 }]);
   });
 });
 

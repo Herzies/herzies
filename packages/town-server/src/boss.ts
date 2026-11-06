@@ -652,8 +652,8 @@ export class BossEngine {
   }
 
   /** A buff on `uid`; the same kind doesn't stack (the stronger wins). */
-  buff(uid: string, next: Buff): Buff {
-    const list = applyBuff(this.buffs.get(uid) ?? [], next);
+  buff(uid: string, next: Buff, now?: number): Buff {
+    const list = applyBuff(this.buffs.get(uid) ?? [], next, now);
     this.buffs.set(uid, list);
     return list.find((b) => b.id === next.id) as Buff;
   }
