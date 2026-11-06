@@ -83,6 +83,49 @@ export function discLandsAfterMs(dist: number): number {
   return (dist / DISC_SPEED) * 1000;
 }
 
+/** A disc's way back to the hand: a snap, quick however far it went (a
+ * base and a little a metre, at most a ceiling), so a Slinger keeps its
+ * pace out to most of its reach and only eases off at the far end of it
+ * (about 85% at full reach), rather than falling off a cliff. In seconds,
+ * before attack speed (which shortens it). */
+export const DISC_BACK = { base: 0.16, perMetre: 0.006, max: 1.2 } as const;
+/** Off a hit, how long its bounce takes before it turns for home (s). */
+export const DISC_BOUNCE_S = 0.08;
+/** Past its reach with nothing hit: how far it carries on and how long
+ * it hangs there turning (world units, s). */
+export const DISC_OVERSHOOT = 0.8;
+export const DISC_HANG_S = 0.11;
+
+/** How long a disc takes back from `dist` away, in seconds, at attack
+ * speed `quick` (1: unhasted). */
+export function discBackS(dist: number, quick = 1): number {
+  return (
+    Math.min(
+      DISC_BACK.max,
+      DISC_BACK.base + Math.max(0, dist) * DISC_BACK.perMetre,
+    ) / Math.max(1e-3, quick)
+  );
+}
+
+/**
+ * How long a thrown disc is out of the hand, in ms: out to what it hits
+ * at `hitDist` (null: nothing, so to its full reach, a carry and a hang),
+ * the bounce, and back. A hand can throw again once it's back, so with two
+ * hands this sets how fast a Slinger may throw at a range. The server
+ * holds a Slinger to it, with slack; the client flies its discs by the
+ * same numbers.
+ */
+export function discCycleMs(hitDist: number | null, quick = 1): number {
+  const s =
+    hitDist === null
+      ? DISC_RANGE / DISC_SPEED +
+        DISC_OVERSHOOT / DISC_SPEED +
+        DISC_HANG_S +
+        discBackS(DISC_RANGE + DISC_OVERSHOOT, quick)
+      : hitDist / DISC_SPEED + DISC_BOUNCE_S + discBackS(hitDist, quick);
+  return s * 1000;
+}
+
 /** Something a bouncing disc may go on to: where it stands, and how wide
  * it is (the leg ends at its surface). */
 export type ChainBody<T> = { ref: T; x: number; z: number; radius: number };

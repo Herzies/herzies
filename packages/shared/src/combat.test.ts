@@ -3,12 +3,14 @@ import { basicAttack, hasInstrument, instrumentOf } from "./classes.js";
 import {
   aimDirection,
   BOSS_STAND,
+  CAST_INTERVAL_MS,
   bossReaches,
   CONTRIBUTION_SUPPORT_WEIGHT,
   contributionOf,
   DISC_RANGE,
   DOME,
   discChain,
+  discCycleMs,
   domeRadiusAt,
   healTarget,
   insideDome,
@@ -270,5 +272,28 @@ describe("stuns", () => {
     expect(stunMs(2_000, 0)).toBe(2_000);
     expect(stunMs(2_000, 1)).toBe(1_000);
     expect(stunMs(2_000, 2)).toBe(500);
+  });
+});
+
+describe("a disc's time out of the hand", () => {
+  // Two hands at the cast pace: a hand must be back within two casts.
+  const full = 2 * CAST_INTERVAL_MS;
+  const pace = (d: number) => Math.min(1, full / discCycleMs(d));
+
+  it("keeps a Slinger's full pace out to most of its reach", () => {
+    for (const d of [2, 8, 14, 18]) expect(pace(d)).toBe(1);
+  });
+
+  it("eases off at the far end, without a cliff", () => {
+    expect(pace(24)).toBeGreaterThan(0.8);
+    expect(pace(24)).toBeLessThan(0.9);
+    // Smooth: no step bigger than a few percent a metre.
+    for (let d = 14; d < 24; d++)
+      expect(pace(d) - pace(d + 1)).toBeLessThan(0.04);
+  });
+
+  it("comes back quicker when hasted, and a miss is out longest", () => {
+    expect(discCycleMs(20, 1.4)).toBeLessThan(discCycleMs(20));
+    expect(discCycleMs(null)).toBeGreaterThan(discCycleMs(DISC_RANGE));
   });
 });
