@@ -231,6 +231,15 @@ export function Combat({
     const onPointerUp = (e: PointerEvent) => {
       if (e.button === 0) combat.fireHeld = false;
     };
+    // Let go outside the window (or the system took the pointer): no
+    // pointerup ever comes, so the next move or a cancel says it's up.
+    const onPointerMove = (e: PointerEvent) => {
+      if (combat.fireHeld && e.pointerType === "mouse" && !(e.buttons & 1))
+        combat.fireHeld = false;
+    };
+    const onPointerCancel = () => {
+      combat.fireHeld = false;
+    };
     // Typing in the chat, or the app going to the background, ends it.
     const onFocusIn = (e: FocusEvent) => {
       if (combat.on && typing(e.target)) leave();
@@ -241,6 +250,8 @@ export function Combat({
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
     window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointercancel", onPointerCancel);
     window.addEventListener("blur", leave);
     document.addEventListener("focusin", onFocusIn);
     document.addEventListener("visibilitychange", onHidden);
@@ -250,6 +261,8 @@ export function Combat({
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointercancel", onPointerCancel);
       window.removeEventListener("blur", leave);
       document.removeEventListener("focusin", onFocusIn);
       document.removeEventListener("visibilitychange", onHidden);
@@ -274,6 +287,10 @@ export function Combat({
     /** The aim stopped on something solid that isn't a dummy. */
     blocked: false,
     castAt: Number.NEGATIVE_INFINITY,
+    /** A cast under way that began in combat: it releases (and the server
+     * hears of it) even if combat is left mid-swing, as others already
+     * saw it start. */
+    live: false,
     /** The hand the disc under way is thrown from (a Record Slinger). */
     throwing: "held-l" as DiscHand,
     /** The dummy the crosshair's on, if any. */
@@ -684,6 +701,7 @@ export function Combat({
         (!discs || free !== null);
       if (combat.on && (queued || combat.fireHeld) && ready && discs && free) {
         a.castAt = now;
+        a.live = true;
         a.throwing = free;
         combat.queuedAt = Number.NEGATIVE_INFINITY;
         herzie.root.getWorldPosition(chest);
@@ -701,6 +719,7 @@ export function Combat({
         sfxDiscThrow(free === "held-l");
       } else if (combat.on && (queued || combat.fireHeld) && ready) {
         a.castAt = now;
+        a.live = true;
         a.bolt = heals ? stance.lock : null;
         a.freeHeal = heals && stance.lock === null;
         combat.queuedAt = Number.NEGATIVE_INFINITY;
@@ -749,7 +768,7 @@ export function Combat({
       // The blow lands: whatever's in front of it, in reach, is hit.
       else if (
         herzie.released &&
-        combat.on &&
+        a.live &&
         melee &&
         herzie.castMotion !== "slam"
       ) {
@@ -803,7 +822,7 @@ export function Combat({
         shake(landed ? 0.1 : 0.03);
       }
       // The hand is out: the disc leaves it.
-      if (herzie.released && combat.on && discs) {
+      if (herzie.released && a.live && discs) {
         const h = a.throwing;
         herzie.heldWorldPosition(h, hand);
         // With the crosshair on a dummy, at its middle: the aim may be on
@@ -839,7 +858,7 @@ export function Combat({
       }
       // The hand is out: the wave leaves it (Player's update, last frame).
       const ally = a.bolt === null ? undefined : entityAt.get(a.bolt);
-      if (herzie.released && combat.on && combat.attack === "wave" && ally) {
+      if (herzie.released && a.live && combat.attack === "wave" && ally) {
         // A heal bolt: off to the ally it locked onto, homing on them.
         herzie.handWorldPosition(hand);
         dir
@@ -876,7 +895,7 @@ export function Combat({
         });
         sfxHealBolt();
         shake(0.02);
-      } else if (herzie.released && combat.on && combat.attack === "wave") {
+      } else if (herzie.released && a.live && combat.attack === "wave") {
         herzie.handWorldPosition(hand);
         dir.copy(a.point).sub(hand);
         const toAim = dir.length();
@@ -895,6 +914,8 @@ export function Combat({
         sfxCast();
         shake(0.05);
       }
+      // Let go (or cut short, a Rimshot's or a knock-out's): done.
+      if (herzie.released || !herzie.casting) a.live = false;
     }
 
     // --- Waves in flight, and what they hit. A crit's hit-stop holds them
