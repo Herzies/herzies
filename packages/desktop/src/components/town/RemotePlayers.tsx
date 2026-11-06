@@ -162,7 +162,8 @@ function RemoteHerzie({
   const trail = useMemo(() => new Trail(herzie.footSpread), [herzie]);
 
   useFrame(({ camera }, dt) => {
-    const s = remote.buffer.sample(net.clock.renderTime(performance.now()));
+    const drawnAt = net.clock.renderTime(performance.now());
+    const s = remote.buffer.sample(drawnAt);
     if (!s) return;
     herzie.root.visible = true;
     if (tag.current) tag.current.style.visibility = "visible";
@@ -229,8 +230,14 @@ function RemoteHerzie({
     if (!herzie.casting) slammed.current = false;
     // They cast: the same thrust, and a wave from the hand the way they
     // face (only the cast count travels, not where they aimed).
-    if (remote.pendingCasts > 0 && !herzie.casting) {
+    // Once the body is drawn where it was when it cast.
+    if (
+      remote.pendingCasts > 0 &&
+      !herzie.casting &&
+      (remote.castTimes[0] ?? Number.NEGATIVE_INFINITY) <= drawnAt
+    ) {
       remote.pendingCasts--;
+      remote.castTimes.shift();
       if (throwsDiscs) {
         // The hand they'd throw from by the same rule as ours (the main
         // hand if its disc is back), by our idea of their catches; with

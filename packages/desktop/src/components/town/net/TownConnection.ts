@@ -60,6 +60,10 @@ export type RemotePlayer = {
    * the drawn (interpolated) one, so no cast between two draws is lost. */
   castSeq: number | null;
   pendingCasts: number;
+  /** When (server time) each pending cast was made, oldest first: shown
+   * as the drawn clock reaches it, so the swing starts where the body is
+   * drawn, not a delay ahead of it. */
+  castTimes: number[];
   /** Knocked out outside a fight (a Bard can play it back up). */
   down: boolean;
   /** A game master: a "GM" mark goes left of the name. */
@@ -508,6 +512,7 @@ export class TownConnection {
       buffer: existing?.buffer ?? new EntityBuffer(),
       castSeq: existing?.castSeq ?? null,
       pendingCasts: existing?.pendingCasts ?? 0,
+      castTimes: existing?.castTimes ?? [],
       down: !!p.down,
       gm: !!p.gm,
       pendingEmote: existing?.pendingEmote ?? null,
@@ -523,13 +528,15 @@ export class TownConnection {
       if (e.id === this.you) continue;
       const r = this.remotes.get(e.id);
       if (!r) continue;
-      r.buffer.push(snap.serverTime - e.age, e.state);
+      const at = snap.serverTime - e.age;
+      r.buffer.push(at, e.state);
       const seq = castSeqOf(e.state.flags);
       if (r.castSeq !== null) {
-        r.pendingCasts = Math.min(
-          MAX_PENDING_CASTS,
-          r.pendingCasts + castsBetween(r.castSeq, seq),
-        );
+        const added = castsBetween(r.castSeq, seq);
+        r.pendingCasts = Math.min(MAX_PENDING_CASTS, r.pendingCasts + added);
+        for (let i = 0; i < added; i++) r.castTimes.push(at);
+        if (r.castTimes.length > r.pendingCasts)
+          r.castTimes.splice(0, r.castTimes.length - r.pendingCasts);
       }
       r.castSeq = seq;
     }
