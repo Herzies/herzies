@@ -1902,8 +1902,9 @@ export class FightRuntime {
         if (ev.skill && isSkillId(ev.skill))
           this.earn(ev.uid, ev.skill, skillXpFor(ev.skill, ev.damage));
         // A hasted hit: the Bard who hasted them earns for the share of
-        // their damage the haste added.
-        {
+        // their damage the haste added. Only casts are quickened (a
+        // Shuffle's bounces are a cast's), not a skill's own hits.
+        if (!ev.skill || ev.skill === "shuffle") {
           const haste = this.engine
             .buffsOf(ev.uid, now)
             .find((b) => b.id === "haste");

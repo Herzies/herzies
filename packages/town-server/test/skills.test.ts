@@ -547,6 +547,26 @@ describe("Haste", () => {
   });
 });
 
+describe("Haste's pay", () => {
+  it("is for hasted casts only, not a skill's own hits", () => {
+    const f = new FightRuntime(claim(), T0);
+    f.join("bard", 1, ticket("bard", [["haste", 1]]), { x: 0, z: 8 }, T0 - 5_000);
+    // Hits hard enough that one Backspin would pay whole points.
+    f.join("near", 2, ticket("near", [["backspin", 10]]), { x: 5, z: 8 }, T0 - 5_000);
+    const near = f.player("near");
+    if (!near) throw new Error("no near");
+    near.stats.sonicPower = 5_000;
+    f.onState("bard", 0, 8, T0);
+    f.onState("near", 5, 8, T0);
+    f.skill("bard", "haste", 0, 0, T0);
+    const { yaw, pitch } = aim(5, 8);
+    expect(f.skill("near", "backspin", yaw, pitch, T0 + 100).result).toBe("used");
+    f.step(T0 + 3_000);
+    const xp = f.report(T0 + 3_001, true)?.skills?.xp ?? [];
+    expect(xp.find((x) => x.uid === "bard" && x.skill === "haste")).toBeUndefined();
+  });
+});
+
 describe("the lute's heal stance", () => {
   /** A Bard at (0, 8) and an ally at (0, 2), both hurt to 100 of 200. */
   const setup = () => {
