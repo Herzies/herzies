@@ -828,7 +828,9 @@ export async function processSync(
   // stored in crystal_drop_minutes. drop_rolls_done keeps tracking
   // total_minutes_listened so the old path resumes cleanly if the flag goes
   // off; rolls it still owed from before the flag went on (the cutover) are
-  // handed to the Crystal at full value, once.
+  // handed to the Crystal at full value, once. The luck worn while listening
+  // goes with them (crystal_luck, a minute-weighted average): attuning rolls
+  // with that, not with whatever is worn at the Crystal.
   let crystalRow: Record<string, unknown> = row;
   let crystalDropRollsDone: number | null = null;
   if (crystalOn) {
@@ -846,6 +848,7 @@ export async function processSync(
           p_minutes: billedMinutes,
           p_xp: crystalXp,
           p_backlog_drop_minutes: backlogRolls * DROP_TICK_MINUTES,
+          p_luck: herzieStats.luck,
         },
       );
       if (chargeError || !charged) {
@@ -1595,7 +1598,10 @@ export async function attuneCrystal(
 
   const herzie = rowToHerzie(row);
   const units = Array.isArray(unitsRaw) ? normalizeUnits(unitsRaw) : null;
-  const luck = withStatPoints(
+  // The luck worn while the drops were listened for (charge_crystal keeps
+  // its average). Only drops charged before that was kept fall back to the
+  // luck worn now.
+  const wornNow = withStatPoints(
     units
       ? getHerzieStatsFromUnits(units)
       : getHerzieStats(
@@ -1605,6 +1611,8 @@ export async function attuneCrystal(
     herzie.statPoints,
     herzie.level,
   ).luck;
+  const luck =
+    row.crystal_luck == null ? wornNow : Number(row.crystal_luck) || 0;
 
   // Roll in order and stop at the first roll whose items wouldn't fit on
   // the ground (CRYSTAL_GROUND_CAP), so what doesn't fit stays in the
