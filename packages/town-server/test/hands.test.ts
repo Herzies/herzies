@@ -37,3 +37,28 @@ describe("a Slinger's two discs", () => {
     expect(h.take("a", 10, null, 1)).toBe(true);
   });
 });
+
+describe("the server's disc pace, with Timing", () => {
+  it("lets a Slinger with Timing throw as fast as its app flies the discs", async () => {
+    const { BossEngine } = await import("../src/boss");
+    const { timingAttackSpeed } = await import("@herzies/shared/stats");
+    const T0 = 5_000_000;
+    const e = new BossEngine({ hp: 1e9, maxHp: 1e9, seed: 1, now: T0 });
+    const timing = 200;
+    const quick = 1 + timingAttackSpeed(timing);
+    const stats = { sonicPower: 0, critChance: 0, critDamage: 0, timing };
+    // From 20 m off the boss's near side, straight at it.
+    const from = { x: 0, z: -4 + 2.2 + 20 };
+    const back: [number, number] = [0, 0];
+    let t = T0 + 1_000;
+    let refused = 0;
+    for (let i = 0; i < 30; i++) {
+      const k = back[0] <= back[1] ? 0 : 1;
+      t = Math.max(t + CAST_INTERVAL_MS / quick, back[k]);
+      const r = e.cast("a", from, Math.PI, 0, stats, t, "disc");
+      if (r !== "hit") refused++;
+      back[k] = t + discCycleMs(20, quick);
+    }
+    expect(refused).toBe(0);
+  });
+});

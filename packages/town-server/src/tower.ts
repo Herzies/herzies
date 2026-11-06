@@ -253,7 +253,9 @@ export class TowerEngine {
         uid,
         now,
         target?.dist ?? null,
-        castSpeed(this.buffs.get(uid) ?? [], now),
+        // As quick as the app flies it: Haste and Timing both.
+        castSpeed(this.buffs.get(uid) ?? [], now) *
+          (1 + timingAttackSpeed(stats.timing ?? 0)),
       )
     )
       return "miss";
