@@ -3,8 +3,8 @@ import { basicAttack, hasInstrument, instrumentOf } from "./classes.js";
 import {
   aimDirection,
   BOSS_STAND,
-  CAST_INTERVAL_MS,
   bossReaches,
+  CAST_INTERVAL_MS,
   CONTRIBUTION_SUPPORT_WEIGHT,
   contributionOf,
   DISC_RANGE,

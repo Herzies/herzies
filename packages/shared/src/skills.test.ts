@@ -80,14 +80,30 @@ describe("buffs", () => {
   });
 
   it("a stronger one takes over with its own length", () => {
-    let buffs = applyBuff([], { id: "haste", value: 0.1, until: 5000, by: "a" }, 0);
-    buffs = applyBuff(buffs, { id: "haste", value: 0.4, until: 1500, by: "b" }, 500);
+    let buffs = applyBuff(
+      [],
+      { id: "haste", value: 0.1, until: 5000, by: "a" },
+      0,
+    );
+    buffs = applyBuff(
+      buffs,
+      { id: "haste", value: 0.4, until: 1500, by: "b" },
+      500,
+    );
     expect(buffs).toEqual([{ id: "haste", value: 0.4, until: 1500, by: "b" }]);
   });
 
   it("as strong, it refreshes to the later end, credited to the newer", () => {
-    let buffs = applyBuff([], { id: "haste", value: 0.3, until: 1000, by: "a" }, 0);
-    buffs = applyBuff(buffs, { id: "haste", value: 0.3, until: 3000, by: "b" }, 500);
+    let buffs = applyBuff(
+      [],
+      { id: "haste", value: 0.3, until: 1000, by: "a" },
+      0,
+    );
+    buffs = applyBuff(
+      buffs,
+      { id: "haste", value: 0.3, until: 3000, by: "b" },
+      500,
+    );
     expect(buffs).toEqual([{ id: "haste", value: 0.3, until: 3000, by: "b" }]);
   });
 
