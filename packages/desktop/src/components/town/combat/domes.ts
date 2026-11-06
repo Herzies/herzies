@@ -5,6 +5,7 @@ import {
   domeRadiusAt,
   insideDome,
 } from "@herzies/shared/combat";
+import { drawDelayMs } from "./drawDelay";
 
 /**
  * Cymbrella domes as this client shows them: where each stands, whose it
@@ -22,10 +23,10 @@ export type ShownDome = Dome & {
   hits: { x: number; z: number; at: number }[];
 };
 
-/** How long after a cast a dome starts to grow here: about how far behind
- * the server mobs are drawn (fight.ts MOB_DELAY_MS), so its edge reaches
- * each mob just as that mob's shove is drawn. Until then it's a small
- * shell round its caster, so the press is felt at once. */
+/** How long after a cast a dome starts to grow here, at the least: about
+ * how far behind the server mobs are drawn (drawDelayMs), so its edge
+ * reaches each mob just as that mob's shove is drawn. Until then it's a
+ * small shell round its caster, so the press is felt at once. */
 export const DOME_SHOW_DELAY_MS = 150;
 /** How long a dome takes to fade once it's down. */
 export const DOME_FADE_MS = 220;
@@ -40,7 +41,7 @@ export function addDome(cast: {
   level: number;
   at: number;
 }): void {
-  const from = cast.at + DOME_SHOW_DELAY_MS;
+  const from = cast.at + Math.max(DOME_SHOW_DELAY_MS, drawDelayMs());
   const ms = Math.round(skillValue("cymbrella", cast.level) * 1000);
   // One per caster: a new one replaces theirs.
   for (let i = domes.length - 1; i >= 0; i--)

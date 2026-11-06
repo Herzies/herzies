@@ -44,6 +44,7 @@ import {
   pushStunLabel,
 } from "./DamageNumbers";
 import { noteDomeHit, removeDome } from "./domes";
+import { drawDelayMs } from "./drawDelay";
 import { setBossResults } from "./results";
 import {
   clearBuff,
@@ -182,11 +183,6 @@ export function mobsLeft(): number {
   return n;
 }
 
-/** How far behind the newest word mobs and the boss are drawn, ms: a bit
- * over two server ticks, so one late packet never leaves them standing.
- * Samples are stamped with the server's time, not when they arrived, so
- * the spacing stays even through network jitter. */
-export const MOB_DELAY_MS = 150;
 /** A gap in samples longer than this was the thing standing still: pin
  * its old spot just before the new one rather than glide across the gap. */
 const QUIET_GAP_MS = TOWN_TICK_MS * 2.5;
@@ -194,7 +190,7 @@ const QUIET_GAP_MS = TOWN_TICK_MS * 2.5;
 /** Where the boss stands at `at` (performance.now() ms; drawn a moment
  * behind the newest word, like a mob), and which way it faces. Its home
  * until the server says otherwise. */
-export function bossNow(at: number = performance.now() - MOB_DELAY_MS): {
+export function bossNow(at: number = performance.now() - drawDelayMs()): {
   x: number;
   z: number;
   yaw: number;
@@ -618,7 +614,7 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       const mob = m.mob !== undefined ? towerMobs.get(m.mob) : undefined;
       if (mob) {
         mob.hitAt = now;
-        const at = mobAt(mob, now - MOB_DELAY_MS);
+        const at = mobAt(mob, now - drawDelayMs());
         const jitter = () => (Math.random() - 0.5) * 0.6;
         pushDamageNumber(
           [at.x + jitter(), MOB.top + 0.3, at.z + jitter()],
