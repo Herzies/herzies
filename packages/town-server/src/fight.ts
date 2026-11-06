@@ -102,6 +102,9 @@ export const VICTORY_RISE_SHARE = 0.3;
 export const ESCAPE_LINGER_MS = 15_000;
 /** After a wipe, how long until the doors close. */
 export const WIPE_LINGER_MS = 15_000;
+/** A Tower herzie on its feet back within this long of leaving comes
+ * back where it left (rejoinAt). */
+export const REJOIN_PIN_MS = 10_000;
 /** A resurrect is cancelled if its Bard moves further than this. */
 export const CHANNEL_SLACK = 0.5;
 /** The boss says something at least this often (a reminder of what it
@@ -597,11 +600,26 @@ export class FightRuntime {
     return p;
   }
 
-  /** Where a downed roster member who left comes back: where it fell. */
-  rejoinAt(uid: string): { x: number; z: number } | null {
+  /**
+   * Where a roster member who left comes back: a downed one where it fell,
+   * and in the Tower, one on its feet that's back within REJOIN_PIN_MS
+   * where it left. Otherwise a reconnect would be a way across the island
+   * mid-floor: the hello names any starting point (rules.ts), so dropping
+   * the socket and coming back elsewhere would do what a jump onto the
+   * spawn did. A herzie gone longer starts where its client says.
+   */
+  rejoinAt(
+    uid: string,
+    now: number = Date.now(),
+  ): { x: number; z: number } | null {
     const p = this.players.get(uid);
-    if (!p || p.present || !p.down || !this.fighting(uid)) return null;
-    return p.leftAt ?? null;
+    if (!p || p.present || !this.fighting(uid)) return null;
+    if (p.down) return p.leftAt ?? null;
+    if (!this.tower) return null;
+    const since = this.absentSince.get(uid);
+    return since !== undefined && now - since < REJOIN_PIN_MS
+      ? (p.leftAt ?? null)
+      : null;
   }
 
   /** Someone left (or lost their connection). Their health stays on record;
@@ -609,9 +627,14 @@ export class FightRuntime {
   leave(uid: string, now: number = Date.now()): void {
     const p = this.players.get(uid);
     if (!p) return;
-    // What fair play saw of the floor left unfinished.
-    this.fair?.report(uid, this.fairContext(p, p.down ? "down" : "left"));
-    this.fair?.forget(uid);
+    // What fair play saw of the floor so far, kept for a rejoin: a quick
+    // reconnect mustn't start its counts over.
+    this.fair?.left(uid, now);
+    this.fair?.report(
+      uid,
+      this.fairContext(p, p.down ? "down" : "left"),
+      false,
+    );
     p.present = false;
     p.leftAt = this.history.at(uid, now) ?? p.leftAt;
     this.history.forget(uid);
@@ -1831,7 +1854,7 @@ export class FightRuntime {
         }
         break;
       case "resolve": {
-        this.fair?.resolved(ev.id, new Set(ev.hits.map((h) => h.uid)));
+        this.fair?.resolved(ev.id, new Set(ev.hits.map((h) => h.uid)), now);
         const sheltered: number[] = [];
         const hit = this.takeHits(ev.hits, out, now, sheltered);
         out.push({

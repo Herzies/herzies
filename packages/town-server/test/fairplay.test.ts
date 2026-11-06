@@ -14,7 +14,7 @@ import {
   quantile,
   SHORT_WARNING_MS,
 } from "../src/fairplay";
-import { FightRuntime } from "../src/fight";
+import { FightRuntime, REJOIN_PIN_MS } from "../src/fight";
 import { armed } from "./arms";
 
 const T0 = 5_000_000;
@@ -63,7 +63,7 @@ function dodge(
     if (t - at > react) x += 6 * (FRAME / 1000);
     f.frame("u", t, x, 0);
   }
-  f.resolved(id, new Set(x > tg.r ? [] : ["u"]));
+  f.resolved(id, new Set(x > tg.r ? [] : ["u"]), tg.hitAt);
   // Walk back to the middle for the next one, in honest steps.
   while (x > 0) {
     t += FRAME;
@@ -146,11 +146,11 @@ describe("fair play", () => {
       let t = T0;
       // A program: moving on the first frame a 600 ms warning arrives (its
       // time here is the network's: ~40-80 ms, give or take).
-      for (let i = 0; i < 25; i++)
+      for (let i = 0; i < 70; i++)
         t = dodge(f, i, t + 500, 40 + r() * 40, 600);
       const s = f.summary("u");
-      expect(s.dodge.short_stood_in).toBe(25);
-      expect(s.dodge.short_escape_rate).toBe(1);
+      expect(s.dodge.run.short_stood_in).toBe(70);
+      expect(s.dodge.run.short_escape_rate).toBe(1);
       // The walk out from the middle takes 1.7 / FASTEST: what's left is
       // its reaction (and the frames' spacing).
       expect(s.dodge.react_ms.p50 ?? 0).toBeLessThan(150);
@@ -163,11 +163,13 @@ describe("fair play", () => {
       let t = T0;
       // Reactions of 200-500 ms to a 600 ms warning: most get out, the
       // slow ones are hit.
-      for (let i = 0; i < 25; i++)
+      for (let i = 0; i < 70; i++)
         t = dodge(f, i, t + 500, 200 + r() * 300, 600);
       const s = f.summary("u");
-      expect(s.dodge.short_stood_in).toBe(25);
-      expect(s.dodge.short_escape_rate ?? 1).toBeLessThan(FLAGS.dodgeEscape);
+      expect(s.dodge.run.short_stood_in).toBe(70);
+      expect(s.dodge.run.short_escape_rate ?? 1).toBeLessThan(
+        FLAGS.dodgeEscape,
+      );
       expect(s.dodge.react_ms.p50 ?? 0).toBeGreaterThan(200);
       expect(s.flags).not.toContain("dodges");
     });
@@ -180,6 +182,71 @@ describe("fair play", () => {
       // Long warnings don't count towards it.
       for (let i = 0; i < 10; i++) t = dodge(f, 100 + i, t + 500, 40, 1_200);
       expect(f.summary("u").flags).not.toContain("dodges");
+    });
+
+    it("counts a lane of circles as one dodge, struck if any circle struck", () => {
+      const f = new FairPlay(() => {});
+      f.frame("u", T0, 0, 0);
+      // Three circles of one lunger's dash, landing together; the herzie
+      // stands in the second only.
+      const lane = [-2, 0, 2].map((x, i) => ({
+        ...circle(10 + i, T0, 600),
+        x,
+        r: 1.15,
+        mob: 7,
+      }));
+      for (const tg of lane) f.telegraph(tg, [{ uid: "u", x: 0, z: 0 }]);
+      f.frame("u", T0 + 300, 0, 0);
+      f.resolved(10, new Set(), T0 + 600);
+      expect(f.summary("u").dodge.stood_in).toBe(0);
+      f.resolved(11, new Set(["u"]), T0 + 600);
+      f.resolved(12, new Set(), T0 + 600);
+      const s = f.summary("u");
+      expect(s.dodge.stood_in).toBe(1);
+      expect(s.dodge.escaped).toBe(0);
+    });
+
+    it("doesn't count an attack called off before it lands", () => {
+      const f = new FairPlay(() => {});
+      f.frame("u", T0, 0, 0);
+      f.telegraph(circle(1, T0, 600), [{ uid: "u", x: 0, z: 0 }]);
+      // Its mob stunned (a Rimshot) or down: resolved early, on nobody.
+      f.resolved(1, new Set(), T0 + 200);
+      expect(f.summary("u").dodge.stood_in).toBe(0);
+    });
+
+    it("keeps the run's dodges across floors, and each floor's apart", () => {
+      const f = new FairPlay(() => {});
+      let t = dodge(f, 1, T0, 40, 600);
+      f.report("u", { floor: 1 });
+      t = dodge(f, 2, t + 500, 40, 600);
+      const s = f.summary("u");
+      expect(s.dodge.short_stood_in).toBe(1);
+      expect(s.dodge.run.short_stood_in).toBe(2);
+    });
+
+    it("counts leaving just before a blow as no dodge, and flags doing it again", () => {
+      const f = new FairPlay(() => {});
+      for (let i = 0; i < FLAGS.leaves; i++) {
+        const at = T0 + i * 5_000;
+        f.frame("u", at, 0, 0);
+        f.telegraph(circle(i, at, 600), [{ uid: "u", x: 0, z: 0 }]);
+        // Gone 200 ms before it lands; it resolves on nobody.
+        f.left("u", at + 400);
+        f.resolved(i, new Set(), at + 600);
+      }
+      const s = f.summary("u");
+      expect(s.dodge.stood_in).toBe(0);
+      expect(s.dodge.run.left_mid_attack).toBe(FLAGS.leaves);
+      expect(s.flags).toContain("leaves");
+    });
+
+    it("doesn't count leaving with nothing about to land", () => {
+      const f = new FairPlay(() => {});
+      f.frame("u", T0, 0, 0);
+      f.telegraph(circle(1, T0, 3_000), [{ uid: "u", x: 0, z: 0 }]);
+      f.left("u", T0 + 100);
+      expect(f.summary("u").dodge.left_mid_attack).toBe(0);
     });
 
     it("counts short warnings apart", () => {
@@ -202,8 +269,8 @@ describe("fair play", () => {
       f.telegraph({ ...circle(2, T0, 900), kind: "buster", target: "u" }, [
         { uid: "u", x: 0, z: 0 },
       ]);
-      f.resolved(1, new Set());
-      f.resolved(2, new Set(["u"]));
+      f.resolved(1, new Set(), T0 + 900);
+      f.resolved(2, new Set(["u"]), T0 + 900);
       expect(f.summary("u").dodge.stood_in).toBe(0);
       expect(f.summary("v").dodge.stood_in).toBe(1);
     });
@@ -336,6 +403,34 @@ describe("fair play in the Tower", () => {
     // It stood in them and never moved: none got out.
     expect(line.dodge.stood_in).toBeGreaterThan(0);
     expect(line.dodge.escaped).toBe(0);
+  });
+
+  it("brings a herzie back quickly where it left, not where its client says", () => {
+    const f = FightRuntime.tower(claim, "u", 5, ARENA, T0, 3);
+    f.fair = new FairPlay(() => {});
+    f.join("u", 1, ticket(), ARENA.entry, T0);
+    const there = { x: 6, z: -4 };
+    f.onState("u", there.x, there.z, T0 + 100);
+    f.leave("u", T0 + 200);
+    expect(f.rejoinAt("u", T0 + 5_000)).toEqual(there);
+    // Gone a while: it starts where its client says, as ever.
+    expect(f.rejoinAt("u", T0 + 200 + REJOIN_PIN_MS + 1)).toBeNull();
+  });
+
+  it("keeps the floor's counts over a reconnect", () => {
+    const lines: string[] = [];
+    const f = FightRuntime.tower(claim, "u", 5, ARENA, T0, 3);
+    f.fair = new FairPlay((l) => lines.push(l));
+    f.join("u", 1, ticket(), ARENA.entry, T0);
+    for (let t = T0; t < T0 + 1_000; t += 50)
+      f.onState("u", ARENA.entry.x, ARENA.entry.z, t);
+    f.leave("u", T0 + 1_000);
+    f.join("u", 1, ticket(), ARENA.entry, T0 + 1_500);
+    for (let t = T0 + 1_500; t < T0 + 2_500; t += 50)
+      f.onState("u", ARENA.entry.x, ARENA.entry.z, t);
+    f.leave("u", T0 + 2_500);
+    expect(lines).toHaveLength(2);
+    expect(JSON.parse(lines[1]).frames).toBe(JSON.parse(lines[0]).frames * 2);
   });
 
   it("measures aim on a cast that finds its mob", () => {

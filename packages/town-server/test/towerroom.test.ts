@@ -18,6 +18,8 @@ import { armed } from "./arms";
 const SECRET = "test-secret";
 const FRAME_MS = 1000 / 15;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** A Tower room is named by its herzie's user id. */
+const UID = "0000aaaa-0000-4000-8000-00000000beef";
 
 async function enter(uid: string) {
   const res = await exports.default.fetch(
@@ -66,7 +68,7 @@ async function enter(uid: string) {
 
 describe("the Tower's room", () => {
   it("won't let a herzie mid-floor step onto the spawn from across the island", async () => {
-    const c = await enter("0000aaaa-0000-4000-8000-00000000beef");
+    const c = await enter(UID);
     for (let i = 0; i < 40 && !c.messages.some((m) => m.t === "welcome"); i++)
       await sleep(50);
     expect(c.messages.some((m) => m.t === "welcome")).toBe(true);
@@ -89,6 +91,23 @@ describe("the Tower's room", () => {
     expect(corrected).toHaveLength(1);
     const back = corrected[0] as Extract<ServerMessage, { t: "correct" }>;
     expect(back.x).toBeCloseTo(to, 0);
+
+    // Nor by dropping the socket and saying hello again at the spawn: back
+    // within moments, it's put where it left.
     c.ws.close();
-  }, 15_000);
+    await sleep(300);
+    const again = await enter(UID);
+    for (let i = 0; i < 40 && !again.messages.some((m) => m.t === "welcome"); i++)
+      await sleep(50);
+    await sleep(200);
+    const put = again.messages.filter((m) => m.t === "correct");
+    expect(put).toHaveLength(1);
+    expect((put[0] as Extract<ServerMessage, { t: "correct" }>).x).toBeCloseTo(
+      to,
+      0,
+    );
+    again.ws.close();
+    // Leaving logs a fair-play line: let it out before the test ends.
+    await sleep(300);
+  }, 20_000);
 });

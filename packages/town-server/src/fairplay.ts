@@ -43,8 +43,12 @@
  * - Skills: how long after its cooldown ended each was used again. Weak on
  *   its own: the client keeps a press for 180 ms, so mashing the key also
  *   fires it the moment it's ready.
+ * - Leaving mid-attack: the server only judges herzies that are there, so
+ *   dropping the connection just before a blow lands dodges it. Counted
+ *   when it happens with an attack stood in and due within a second.
  *
- * Memory is bounded (MAX_SAMPLES a list) and reset with each report.
+ * Memory is bounded (MAX_SAMPLES a list, and attacks drop out as they
+ * land) and reset with each floor's report.
  */
 import { TOWN_SPRINT_SPEED } from "@herzies/shared/town-net";
 import { covers, type Telegraph, TUNING } from "./boss";
@@ -61,21 +65,27 @@ export const SHORT_WARNING_MS = 700;
 /** The fastest a herzie runs: a sprint with the most gear can add
  * (MAX_MOVE_SPEED, 25%; a test keeps the two in step). */
 export const FASTEST = TOWN_SPRINT_SPEED * 1.25;
+/** Leaving this long or less before an attack the herzie stands in lands
+ * is leaving mid-attack. */
+export const LEFT_MID_ATTACK_MS = 1_000;
+/** A warning resolved this long before it was due was called off. */
+const CALLED_OFF_MS = 50;
 /** A skill used more than this long after it was ready isn't timing. */
 const SKILL_TIMING_MS = 3_000;
 /** Each list keeps at most this many samples between reports. */
 const MAX_SAMPLES = 2_000;
 
 /**
- * When a report raises a flag. Provisional: set from one bot and what is
- * known of people in general, not from people playing the Tower — read them
- * as "worth a look", never as proof.
+ * When a report raises a flag. Provisional: set from one bot and a model of
+ * a person, not from people playing the Tower. Read them as "worth a look",
+ * never as proof.
  */
 export const FLAGS = {
   /** Any blink. */
   blinks: 1,
-  /** From this many short warnings stood in... */
-  dodgeMin: 20,
+  /** From this many short attacks stood in since entering (the run, not
+   * the floor: a floor has too few to tell a quick person from a bot)... */
+  dodgeMin: 60,
   /** ...getting out of at least this share of them (the fastest
    * person-like model reached 0.94; the bot 0.99-1). */
   dodgeEscape: 0.97,
@@ -87,11 +97,9 @@ export const FLAGS = {
   skillMin: 8,
   /** ...nine in ten within this many ms of it. */
   skillP90Ms: 80,
+  /** Left mid-attack this often since coming in. */
+  leaves: 2,
 };
-
-/** A warning stood in: when the herzie was out of it, and the least time
- * (ms) the walk out takes at the fastest a herzie runs. */
-type Watch = { tg: Telegraph; outAt: number | null; needMs: number };
 
 /** How far (x, z) is from the way out of `tg`, inside it. */
 export function edgeDistance(tg: Telegraph, x: number, z: number): number {
@@ -115,18 +123,46 @@ export function edgeDistance(tg: Telegraph, x: number, z: number): number {
   return Math.max(0, tg.inner > 0 ? Math.min(out, d - tg.inner) : out);
 }
 
+/** Which attack a warning is part of: a lunger's lane is several circles
+ * from one mob, landing together, and one dodge. */
+function attackOf(tg: Telegraph): string {
+  return tg.mob !== undefined ? `m${tg.mob}@${tg.hitAt}` : `t${tg.id}`;
+}
+
+/** An attack the herzie stood in when it appeared: its warnings (those
+ * over the herzie, and every one of the attack's, to know if any struck),
+ * when the herzie was out of all of those it stood in, and the least time
+ * (ms) that walk out takes at the fastest a herzie runs. */
+type Watch = {
+  over: Telegraph[];
+  pending: Set<number>;
+  struck: boolean;
+  short: boolean;
+  outAt: number | null;
+  at: number;
+  needMs: number;
+};
+
+/** Dodges counted since the herzie came in (not reset by a report). */
+type Totals = {
+  stoodIn: number;
+  escaped: number;
+  shortStoodIn: number;
+  shortEscaped: number;
+  /** Times it left (or lost its connection) just before one landed. */
+  leftMidAttack: number;
+};
+
 type Track = {
   last: { t: number; x: number; z: number } | null;
   frames: number;
   blinks: number;
   maxStep: number;
-  /** Warnings that appeared over the herzie, until they land. */
-  watching: Map<number, Watch>;
-  stoodIn: number;
-  escaped: number;
-  shortStoodIn: number;
-  shortEscaped: number;
-  /** ms from a warning appearing to the herzie being out of it, less the
+  /** Attacks stood in, by attackOf, until all their warnings land. */
+  watching: Map<string, Watch>;
+  floor: Totals;
+  run: Totals;
+  /** ms from an attack appearing to the herzie being out of it, less the
    * least the walk out takes: its reaction, plus the round trip. */
   reacts: number[];
   /** Each cast's distance off its target's middle, as a share. */
@@ -137,6 +173,14 @@ type Track = {
   readyAt: Map<string, number>;
 };
 
+const totals = (): Totals => ({
+  stoodIn: 0,
+  escaped: 0,
+  shortStoodIn: 0,
+  shortEscaped: 0,
+  leftMidAttack: 0,
+});
+
 function track(): Track {
   return {
     last: null,
@@ -144,10 +188,8 @@ function track(): Track {
     blinks: 0,
     maxStep: 0,
     watching: new Map(),
-    stoodIn: 0,
-    escaped: 0,
-    shortStoodIn: 0,
-    shortEscaped: 0,
+    floor: totals(),
+    run: totals(),
     reacts: [],
     aim: [],
     skillLate: [],
@@ -172,18 +214,35 @@ export function quantile(xs: readonly number[], q: number): number | null {
 const r2 = (n: number | null) =>
   n === null ? null : Math.round(n * 100) / 100;
 const r0 = (n: number | null) => (n === null ? null : Math.round(n));
+const rate = (n: number, of: number) => (of ? n / of : null);
+
+export type DodgeCounts = {
+  stood_in: number;
+  escaped: number;
+  short_stood_in: number;
+  short_escaped: number;
+  short_escape_rate: number | null;
+  left_mid_attack: number;
+};
+
+function counts(t: Totals): DodgeCounts {
+  return {
+    stood_in: t.stoodIn,
+    escaped: t.escaped,
+    short_stood_in: t.shortStoodIn,
+    short_escaped: t.shortEscaped,
+    short_escape_rate: r2(rate(t.shortEscaped, t.shortStoodIn)),
+    left_mid_attack: t.leftMidAttack,
+  };
+}
 
 export type FairPlayReport = {
   frames: number;
   blinks: number;
   max_step: number;
-  dodge: {
-    stood_in: number;
-    escaped: number;
-    escape_rate: number | null;
-    short_stood_in: number;
-    short_escaped: number;
-    short_escape_rate: number | null;
+  /** Attacks stood in this floor, and (`run`) since coming in. */
+  dodge: DodgeCounts & {
+    run: DodgeCounts;
     react_ms: {
       p25: number | null;
       p50: number | null;
@@ -200,6 +259,11 @@ export type FairPlaySink = (line: string) => void;
 
 export class FairPlay {
   private tracks = new Map<string, Track>();
+  /** Each attack's warnings so far, by attackOf, until they land: a lane's
+   * circles come one after another, and the herzie may stand in a later
+   * one only. */
+  private attacks = new Map<string, number[]>();
+  private attackOfId = new Map<number, string>();
 
   constructor(private sink: FairPlaySink = (line) => console.log(line)) {}
 
@@ -225,7 +289,8 @@ export class FairPlay {
     }
     k.last = { t, x, z };
     for (const w of k.watching.values())
-      if (w.outAt === null && !covers(w.tg, x, z)) w.outAt = t;
+      if (w.outAt === null && !w.over.some((tg) => covers(tg, x, z)))
+        w.outAt = t;
   }
 
   /** The herzie was put somewhere by the game (the next floor's start):
@@ -236,36 +301,96 @@ export class FairPlay {
   }
 
   /** A warning appeared; `at` is where each herzie in the fight stood then
-   * (as the server has it). Those it covers are watched until it lands. */
+   * (as the server has it). An attack with a warning over a herzie is
+   * watched for it until all the attack's warnings land. */
   telegraph(
     tg: Telegraph,
     at: readonly { uid: string; x: number; z: number }[],
   ): void {
     if (tg.kind === "buster" || tg.kind === "scatter") return;
-    for (const p of at)
-      if (covers(tg, p.x, p.z))
-        this.of(p.uid).watching.set(tg.id, {
-          tg,
-          outAt: null,
-          needMs: (edgeDistance(tg, p.x, p.z) / FASTEST) * 1000,
-        });
+    const key = attackOf(tg);
+    const ids = this.attacks.get(key) ?? [];
+    ids.push(tg.id);
+    this.attacks.set(key, ids);
+    this.attackOfId.set(tg.id, key);
+    for (const p of at) {
+      const k = this.of(p.uid);
+      const w = k.watching.get(key);
+      // A later warning of an attack already watched: it can strike too.
+      if (w) w.pending.add(tg.id);
+      if (!covers(tg, p.x, p.z)) continue;
+      const need = (edgeDistance(tg, p.x, p.z) / FASTEST) * 1000;
+      if (w) {
+        w.over.push(tg);
+        w.needMs = Math.max(w.needMs, need);
+        continue;
+      }
+      k.watching.set(key, {
+        over: [tg],
+        pending: new Set(ids),
+        struck: false,
+        short: tg.hitAt - tg.at < SHORT_WARNING_MS,
+        outAt: null,
+        at: tg.at,
+        needMs: need,
+      });
+    }
   }
 
-  /** A warning landed on `hit` (whoever it struck; a dome's shelter
-   * counts as struck: they didn't get out). */
-  resolved(id: number, hit: ReadonlySet<string>): void {
+  /**
+   * A warning landed at `now` on `hit` (whoever it struck; a dome's
+   * shelter counts as struck: they didn't get out). An attack watched is
+   * counted once its last warning lands: got out if none of them struck.
+   * One called off before it was due (its mob stunned or down) isn't a
+   * dodge at all, and isn't counted.
+   */
+  resolved(id: number, hit: ReadonlySet<string>, now: number): void {
+    const key = this.attackOfId.get(id);
+    if (key === undefined) return;
+    this.attackOfId.delete(id);
+    const left = (this.attacks.get(key) ?? []).filter((i) => i !== id);
+    if (left.length) this.attacks.set(key, left);
+    else this.attacks.delete(key);
     for (const [uid, k] of this.tracks) {
-      const w = k.watching.get(id);
-      if (!w) continue;
-      k.watching.delete(id);
-      const short = w.tg.hitAt - w.tg.at < SHORT_WARNING_MS;
-      k.stoodIn++;
-      if (short) k.shortStoodIn++;
-      if (hit.has(uid)) continue;
-      k.escaped++;
-      if (short) k.shortEscaped++;
-      if (w.outAt !== null) push(k.reacts, w.outAt - w.tg.at - w.needMs);
+      const w = k.watching.get(key);
+      if (!w?.pending.delete(id)) continue;
+      if (now < (w.over[0]?.hitAt ?? 0) - CALLED_OFF_MS) {
+        k.watching.delete(key);
+        continue;
+      }
+      if (hit.has(uid)) w.struck = true;
+      if (w.pending.size) continue;
+      k.watching.delete(key);
+      for (const t of [k.floor, k.run]) {
+        t.stoodIn++;
+        if (w.short) t.shortStoodIn++;
+        if (w.struck) continue;
+        t.escaped++;
+        if (w.short) t.shortEscaped++;
+      }
+      if (!w.struck && w.outAt !== null)
+        push(k.reacts, w.outAt - w.at - w.needMs);
     }
+  }
+
+  /**
+   * The herzie left (or lost its connection) at `now`. The server stops
+   * judging a herzie that isn't there, so the attacks it stood in can't
+   * land on it: they're no dodge, and are dropped. Each due within
+   * LEFT_MID_ATTACK_MS is counted as leaving mid-attack instead: a herzie
+   * that keeps doing that is dodging by disconnecting.
+   */
+  left(uid: string, now: number): void {
+    const k = this.tracks.get(uid);
+    if (!k) return;
+    for (const w of k.watching.values()) {
+      const lands = w.over[0]?.hitAt ?? 0;
+      if (lands >= now && lands - now <= LEFT_MID_ATTACK_MS) {
+        k.floor.leftMidAttack++;
+        k.run.leftMidAttack++;
+      }
+    }
+    k.watching.clear();
   }
 
   /** A cast that found a target, `off` radians to the side of the target's
@@ -284,24 +409,25 @@ export class FairPlay {
     k.readyAt.set(skill, readyAt);
   }
 
-  /** What `uid` did since the last report, with any flags raised. */
+  /** What `uid` did since the last report (dodges also since coming in),
+   * with any flags raised. */
   summary(uid: string): FairPlayReport {
     const k = this.of(uid);
     const p25 = quantile(k.reacts, 0.25);
     const p75 = quantile(k.reacts, 0.75);
     const spread = p25 !== null && p75 !== null ? p75 - p25 : null;
-    const escapeRate = k.stoodIn ? k.escaped / k.stoodIn : null;
-    const shortRate = k.shortStoodIn ? k.shortEscaped / k.shortStoodIn : null;
+    const runShort = rate(k.run.shortEscaped, k.run.shortStoodIn);
     const aimP90 = quantile(k.aim, 0.9);
     const skillP90 = quantile(k.skillLate, 0.9);
     const flags: string[] = [];
     if (k.blinks >= FLAGS.blinks) flags.push("blinks");
     if (
-      k.shortStoodIn >= FLAGS.dodgeMin &&
-      shortRate !== null &&
-      shortRate >= FLAGS.dodgeEscape
+      k.run.shortStoodIn >= FLAGS.dodgeMin &&
+      runShort !== null &&
+      runShort >= FLAGS.dodgeEscape
     )
       flags.push("dodges");
+    if (k.run.leftMidAttack >= FLAGS.leaves) flags.push("leaves");
     if (
       k.aim.length >= FLAGS.aimMin &&
       aimP90 !== null &&
@@ -319,12 +445,8 @@ export class FairPlay {
       blinks: k.blinks,
       max_step: r2(k.maxStep) ?? 0,
       dodge: {
-        stood_in: k.stoodIn,
-        escaped: k.escaped,
-        escape_rate: r2(escapeRate),
-        short_stood_in: k.shortStoodIn,
-        short_escaped: k.shortEscaped,
-        short_escape_rate: r2(shortRate),
+        ...counts(k.floor),
+        run: counts(k.run),
         react_ms: {
           p25: r0(p25),
           p50: r0(quantile(k.reacts, 0.5)),
@@ -347,25 +469,33 @@ export class FairPlay {
   }
 
   /**
-   * Logs what `uid` did since the last report (one JSON line, `fairplay`
-   * set so it can be picked out of the Worker's logs) and starts over,
-   * keeping only where it stands and when its skills are ready. Nothing is
-   * logged for a herzie that sent no frames.
+   * Logs what `uid` did (one JSON line, `fairplay` set so it can be picked
+   * out of the Worker's logs). With `reset` (a floor done) the next report
+   * starts afresh, keeping where it stands, its cooldowns, the attacks
+   * still coming and the run's dodge totals. Nothing is logged for a
+   * herzie that sent no frames.
    */
-  report(uid: string, context: Record<string, unknown>): FairPlayReport | null {
+  report(
+    uid: string,
+    context: Record<string, unknown>,
+    reset = true,
+  ): FairPlayReport | null {
     const k = this.tracks.get(uid);
     if (!k || k.frames === 0) return null;
     const summary = this.summary(uid);
     this.sink(JSON.stringify({ fairplay: 1, uid, ...context, ...summary }));
-    const next = track();
-    next.last = k.last;
-    next.readyAt = k.readyAt;
-    next.watching = k.watching;
-    this.tracks.set(uid, next);
+    if (reset) {
+      const next = track();
+      next.last = k.last;
+      next.readyAt = k.readyAt;
+      next.watching = k.watching;
+      next.run = k.run;
+      this.tracks.set(uid, next);
+    }
     return summary;
   }
 
-  /** `uid` is gone: drop what's kept of it. */
+  /** `uid` is gone for good: drop what's kept of it. */
   forget(uid: string): void {
     this.tracks.delete(uid);
   }

@@ -446,7 +446,8 @@ export class TownRoom extends DurableObject<Env> {
 
     // A knocked-out herzie lies where it fell: a reconnect can't carry its
     // body over to a Bard.
-    const fell = this.fight?.rejoinAt(t.uid) ?? null;
+    // ...nor, back quickly in the Tower, carry it anywhere else.
+    const fell = this.fight?.rejoinAt(t.uid, now) ?? null;
     const at = fell ?? startingPoint(s.att.map, m.at?.x, m.at?.z);
     const state = quantizeState({
       x: at.x,
