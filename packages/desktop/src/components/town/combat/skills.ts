@@ -52,6 +52,10 @@ export const skills = {
   /** When each of yours is ready again (performance.now() ms): predicted on
    * use, put right by the server. */
   readyAt: new Map<SkillId, number>(),
+  /** How long the wait that ends at readyAt is in all (ms): the hotbar's
+   * shade is the share of it left. A Resurrect's channel, its cooldown, or
+   * the server's word on one already under way. */
+  spanMs: new Map<SkillId, number>(),
   /** Ever-rising, echoed back in a refusal; and which skill each was. */
   seq: 0,
   sent: new Map<number, SkillId>(),
@@ -198,7 +202,9 @@ export function skillReady(id: SkillId, now: number): boolean {
  * all it blocks until it lands). Returns the seq to send. */
 export function startCooldown(id: SkillId, now: number): number {
   const def = SKILL_DEFS[id];
-  skills.readyAt.set(id, now + (def.channelMs ?? def.cooldownMs));
+  const span = def.channelMs ?? def.cooldownMs;
+  skills.readyAt.set(id, now + span);
+  skills.spanMs.set(id, span);
   skills.seq++;
   skills.sent.set(skills.seq, id);
   if (skills.sent.size > 16) {
@@ -212,6 +218,12 @@ export function startCooldown(id: SkillId, now: number): number {
 /** The server's word on when `id` is ready (performance.now() ms). */
 export function setReadyAt(id: SkillId, at: number): void {
   skills.readyAt.set(id, at);
+  // A cooldown already under way: its whole length, so the shade shows
+  // what's left of it, not a fresh full bar.
+  skills.spanMs.set(
+    id,
+    Math.max(at - performance.now(), SKILL_DEFS[id].cooldownMs),
+  );
   emitSkills();
 }
 
