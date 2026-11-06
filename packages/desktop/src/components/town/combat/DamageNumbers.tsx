@@ -34,16 +34,27 @@ type Floater = {
   drift: number;
   rise: number;
   crit: boolean;
+  /** What it's over (a mob, the boss), for merging hits on it; and the
+   * total it shows. */
+  key?: string;
+  amount: number;
 };
 
 const FLOATERS = 32;
 const FLOAT_SECONDS = 0.95;
+/** Hits on the same thing this close together are one number, adding up
+ * (a Shuffle's bounces, a Backspin's discs, a cleave): readable, and
+ * nothing dropped. */
+const MERGE_SECONDS = 0.08;
+/** The most numbers waiting for the next frame. */
+const QUEUE_MAX = 64;
 
 /** `at` null: over your own herzie. `entity`: over that herzie in the
  * room (where it stands when the number pops). */
 const queue: {
   at: Vec3 | null;
   entity?: number;
+  key?: string;
   amount: number;
   crit: boolean;
   kind: "hit" | "hurt" | "heal" | "stun";
@@ -56,14 +67,30 @@ export function pushDamageNumber(
   at: Readonly<Vec3>,
   amount: number,
   crit: boolean,
+  /** What it hit (`mob3`, `boss`): hits on it close together merge. */
+  key?: string,
 ): void {
-  if (queue.length < 16)
-    queue.push({ at: [at[0], at[1], at[2]], amount, crit, kind: "hit" });
+  if (key) {
+    const same = queue.find((q) => q.kind === "hit" && q.key === key);
+    if (same) {
+      same.amount += amount;
+      same.crit ||= crit;
+      return;
+    }
+  }
+  if (queue.length < QUEUE_MAX)
+    queue.push({
+      at: [at[0], at[1], at[2]],
+      amount,
+      crit,
+      kind: "hit",
+      ...(key ? { key } : {}),
+    });
 }
 
 /** A word popping off `at` (over a stunned mob, the boss, a dummy). */
 export function pushStunLabel(at: Readonly<Vec3>): void {
-  if (queue.length < 16)
+  if (queue.length < QUEUE_MAX)
     queue.push({
       at: [at[0], at[1], at[2]],
       amount: 0,
@@ -75,14 +102,14 @@ export function pushStunLabel(at: Readonly<Vec3>): void {
 
 /** Damage you took, popping off your herzie's head. */
 export function pushHurtNumber(amount: number): void {
-  if (amount > 0 && queue.length < 16)
+  if (amount > 0 && queue.length < QUEUE_MAX)
     queue.push({ at: null, amount, crit: false, kind: "hurt" });
 }
 
 /** HP healed, in green over whoever got it: `entity` (an entity id in the
  * room), or null for your own herzie. Too small to read is skipped. */
 export function pushHealNumber(entity: number | null, amount: number): void {
-  if (amount < 0.5 || queue.length >= 16) return;
+  if (amount < 0.5 || queue.length >= QUEUE_MAX) return;
   queue.push({
     at: null,
     ...(entity === null ? {} : { entity }),
@@ -161,6 +188,7 @@ export function CombatOverlay() {
         drift: 0,
         rise: 0,
         crit: false,
+        amount: 0,
       };
     });
 
@@ -206,21 +234,29 @@ export function CombatOverlay() {
     return { root, floaters, cross, arms, discs, pips, hit, ticks, meters };
   }, []);
 
+  // The overlay's size, kept by a ResizeObserver: reading it in the frame,
+  // right after the last frame's style writes, forced a layout every frame.
+  const view = useMemo(() => ({ w: 0, h: 0 }), []);
   useLayoutEffect(() => {
     const parent = gl.domElement.parentElement;
     parent?.append(ui.root);
+    view.w = ui.root.clientWidth;
+    view.h = ui.root.clientHeight;
+    const watch = new ResizeObserver(([e]) => {
+      view.w = e.contentRect.width;
+      view.h = e.contentRect.height;
+    });
+    watch.observe(ui.root);
     return () => {
+      watch.disconnect();
       ui.root.remove();
       queue.length = 0;
     };
-  }, [gl, ui]);
+  }, [gl, ui, view]);
 
   const v = useMemo(() => new THREE.Vector3(), []);
   const head = useMemo(() => new THREE.Vector3(), []);
   /** Where a world point lands on the overlay, in CSS px (null: behind). */
-  // The overlay's size, read once a frame (reading it per number, right
-  // after writing their styles, forced a layout each time).
-  const view = useMemo(() => ({ w: 0, h: 0 }), []);
   const out = useMemo(() => [0, 0] as [number, number], []);
   const project = (x: number, y: number, z: number) => {
     v.set(x, y, z).project(camera);
@@ -234,8 +270,6 @@ export function CombatOverlay() {
 
   useFrame((_, dt) => {
     const now = performance.now();
-    view.w = ui.root.clientWidth;
-    view.h = ui.root.clientHeight;
 
     // New numbers, stacked off one another when they come close together.
     while (queue.length) {
@@ -250,6 +284,21 @@ export function CombatOverlay() {
         if (!body) continue;
         body.getWorldPosition(head);
         at = [head.x, head.y + (rt.playerHerzie?.height ?? 1.2), head.z];
+      }
+      // A hit on what one just popped off: the same number, adding up,
+      // popping again.
+      if (n.key) {
+        const same = ui.floaters.find(
+          (x) => x.alive && x.key === n.key && x.age < MERGE_SECONDS,
+        );
+        if (same) {
+          same.amount += n.amount;
+          same.crit ||= n.crit;
+          same.age = 0;
+          same.el.textContent = Math.round(same.amount).toLocaleString();
+          same.el.className = same.crit ? "dmg crit" : "dmg";
+          continue;
+        }
       }
       let f = ui.floaters[0];
       for (const x of ui.floaters) {
@@ -269,6 +318,8 @@ export function CombatOverlay() {
       f.drift = (Math.random() * 2 - 1) * 26;
       f.rise = 38 + Math.random() * 14 + (n.crit ? 12 : 0);
       f.crit = n.crit;
+      f.amount = n.amount;
+      f.key = n.key;
       const sign = n.kind === "hurt" ? "-" : n.kind === "heal" ? "+" : "";
       f.el.textContent =
         n.text ?? `${sign}${Math.round(n.amount).toLocaleString()}`;

@@ -620,6 +620,7 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
           [at.x + jitter(), MOB.top + 0.3, at.z + jitter()],
           m.damage,
           m.crit,
+          `mob${m.mob}`,
         );
       } else {
         combat.bossHitAt = now;
@@ -629,6 +630,7 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
           [at.x + jitter, BOSS_NUMBER_Y, at.z],
           m.damage,
           m.crit,
+          "boss",
         );
       }
       combat.hitAt = now;
