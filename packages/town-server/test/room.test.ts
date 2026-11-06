@@ -11,7 +11,14 @@ import {
 } from "@herzies/shared/town-net";
 import { exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
-import { checkMove, newGuard, RateLimiter, startingPoint } from "../src/rules";
+import {
+  allowSpawnJump,
+  checkMove,
+  newGuard,
+  RateLimiter,
+  SPAWN_JUMP_GRACE_MS,
+  startingPoint,
+} from "../src/rules";
 
 const SECRET = "test-secret";
 let shardSeq = 0;
@@ -136,6 +143,49 @@ describe("rules", () => {
     // Home's spawn, as the map has it.
     const { spawn } = TOWN_MAPS.home;
     expect(checkMove(g, spawn.x, spawn.z, 100, "home")).toBe(true);
+  });
+
+  it("in a fight, allows the jump to the spawn only once the server sends you there", () => {
+    const { spawn } = TOWN_MAPS.tower;
+    // Across the island from it (the spawn is off to one side).
+    const far = { x: -spawn.x, z: -spawn.z };
+    const g = newGuard(far.x, far.z, 0);
+    // Mid-floor: stepping onto the spawn from across the island is a
+    // teleport out of whatever was about to land.
+    expect(checkMove(g, spawn.x, spawn.z, 100, "tower")).toBe(false);
+    // On to the next floor: a frame still on its way from the far portal,
+    // then the jump the client makes at the white-out.
+    allowSpawnJump(g, 1_000);
+    expect(checkMove(g, far.x, far.z - 0.3, 1_100, "tower")).toBe(true);
+    expect(checkMove(g, spawn.x, spawn.z, 1_500, "tower")).toBe(true);
+    // Once: back out across the island, the jump is gone.
+    expect(g.spawnUntil).toBeUndefined();
+    Object.assign(g, { x: far.x, z: far.z, at: 2_000, budget: 0 });
+    expect(checkMove(g, spawn.x, spawn.z, 2_100, "tower")).toBe(false);
+  });
+
+  it("in a fight, lets the allowance lapse", () => {
+    const { spawn } = TOWN_MAPS.bossroom;
+    const g = newGuard(-spawn.x, -spawn.z, 0);
+    allowSpawnJump(g, 0);
+    expect(
+      checkMove(g, spawn.x, spawn.z, SPAWN_JUMP_GRACE_MS + 1, "bossroom"),
+    ).toBe(false);
+    // Inside the grace, the same jump passes.
+    const h = newGuard(-spawn.x, -spawn.z, 0);
+    allowSpawnJump(h, 0);
+    expect(
+      checkMove(h, spawn.x, spawn.z, SPAWN_JUMP_GRACE_MS - 1, "bossroom"),
+    ).toBe(true);
+  });
+
+  it("in a fight, still lets you walk about the spawn as anywhere else", () => {
+    const { spawn } = TOWN_MAPS.tower;
+    const g = newGuard(spawn.x + 1, spawn.z, 0);
+    for (let t = 66; t < 1000; t += 66)
+      expect(checkMove(g, spawn.x + 1 - t / 2000, spawn.z, t, "tower")).toBe(
+        true,
+      );
   });
 
   it("allows sprinting, and refuses anything faster", () => {

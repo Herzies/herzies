@@ -8,6 +8,7 @@
 import {
   TOWN_MAPS,
   TOWN_SPRINT_SPEED,
+  TOWN_TICKETED_MAPS,
   type TownMapId,
 } from "@herzies/shared/town-net";
 
@@ -16,8 +17,14 @@ import {
 const SPEED_SLACK = 1.5;
 /** Distance a herzie may build up while its packets are delayed. */
 const MAX_BUDGET = TOWN_SPRINT_SPEED * SPEED_SLACK * 2;
-/** A jump onto the spawn point is a respawn, which is allowed. */
+/** A jump onto the spawn point is a respawn, which is allowed (in a fight,
+ * only when the server sent the herzie there: allowSpawnJump). */
 const SPAWN_TOLERANCE = 1.5;
+/** How long after the server sends a herzie back to the start (the
+ * Tower's next floor) the jump there may arrive: the client makes it half
+ * a second after asking, at the portal's white-out, and the frames on the
+ * way still have to land. */
+export const SPAWN_JUMP_GRACE_MS = 5_000;
 /** Leeway past the walkable edge, for rounding on the wire. */
 const EDGE_TOLERANCE = 0.5;
 
@@ -28,13 +35,23 @@ export type MoveGuard = {
   at: number;
   /** Distance the herzie may still cover right now. */
   budget: number;
+  /** In a fight, until when (ms) one jump onto the spawn is allowed. */
+  spawnUntil?: number;
 };
 
 export function newGuard(x: number, z: number, now: number): MoveGuard {
   return { x, z, at: now, budget: MAX_BUDGET };
 }
 
-/** Whether a move to (x, z) at `now` is possible; updates the guard if so. */
+/**
+ * Whether a move to (x, z) at `now` is possible; updates the guard if so.
+ *
+ * A jump onto the map's spawn is a respawn, and passes however far it is.
+ * In the fight rooms (the Tower, the boss's cave) only the game puts a
+ * herzie back at the start, so there it passes only once the server has
+ * said so (allowSpawnJump), and only once: otherwise a modified client
+ * could leave any attack, from anywhere, by stepping onto the spawn.
+ */
 export function checkMove(
   g: MoveGuard,
   x: number,
@@ -51,13 +68,24 @@ export function checkMove(
     g.budget + elapsed * TOWN_SPRINT_SPEED * SPEED_SLACK,
   );
   const distance = Math.hypot(x - g.x, z - g.z);
-  const respawn = Math.hypot(x - spawn.x, z - spawn.z) <= SPAWN_TOLERANCE;
+  const respawn =
+    Math.hypot(x - spawn.x, z - spawn.z) <= SPAWN_TOLERANCE &&
+    (!TOWN_TICKETED_MAPS.has(map) ||
+      now <= (g.spawnUntil ?? Number.NEGATIVE_INFINITY));
   if (distance > budget && !respawn) return false;
+  const jumped = respawn && distance > budget;
   g.x = x;
   g.z = z;
   g.at = now;
-  g.budget = respawn && distance > budget ? MAX_BUDGET : budget - distance;
+  g.budget = jumped ? MAX_BUDGET : budget - distance;
+  if (jumped) g.spawnUntil = undefined;
   return true;
+}
+
+/** The server is sending this herzie back to the map's spawn (the Tower's
+ * next floor): one jump there may follow, for a moment. */
+export function allowSpawnJump(g: MoveGuard, now: number): void {
+  g.spawnUntil = now + SPAWN_JUMP_GRACE_MS;
 }
 
 /** Where a newcomer may start: where they say, if it's on the island. */

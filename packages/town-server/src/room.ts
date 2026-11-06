@@ -54,6 +54,7 @@ import { benchBonusHp } from "@herzies/shared/vitals";
 import { CHANNEL_SLACK, DEV_EVENT, FightRuntime, type Outbound } from "./fight";
 import { RestMeter } from "./rest";
 import {
+  allowSpawnJump,
   checkMove,
   type MoveGuard,
   newGuard,
@@ -445,7 +446,8 @@ export class TownRoom extends DurableObject<Env> {
 
     // A knocked-out herzie lies where it fell: a reconnect can't carry its
     // body over to a Bard.
-    const fell = this.fight?.rejoinAt(t.uid) ?? null;
+    // ...nor, back quickly in the Tower, carry it anywhere else.
+    const fell = this.fight?.rejoinAt(t.uid, now) ?? null;
     const at = fell ?? startingPoint(s.att.map, m.at?.x, m.at?.z);
     const state = quantizeState({
       x: at.x,
@@ -820,10 +822,13 @@ export class TownRoom extends DurableObject<Env> {
       this.strike(s);
       return;
     }
-    // The move back to the start needs nothing here: a jump onto the map's
-    // spawn is always allowed (checkMove), and the frames still on their
-    // way from the far portal must pass too.
-    for (const o of this.fight.next(p.uid, now)) this.dispatch(o);
+    // On to the next floor: the client jumps back to the start at the
+    // portal's white-out, and in a fight room that jump only passes once
+    // the server has allowed it (checkMove). The frames still on their way
+    // from the far portal pass as ever.
+    const out = this.fight.next(p.uid, now);
+    if (out.length) allowSpawnJump(p.guard, now);
+    for (const o of out) this.dispatch(o);
   }
 
   private onCast(s: Session, message: ArrayBuffer, now: number) {
