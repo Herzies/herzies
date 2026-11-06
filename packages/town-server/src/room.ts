@@ -100,6 +100,8 @@ const RATE = 30;
 const BURST = 45;
 /** Dropped or refused messages per sweep before a socket is kicked. */
 const MAX_STRIKES = 90;
+/** How often a walking herzie's position is saved to its socket. */
+const MOVE_SAVE_MS = 1_000;
 const MAX_TEXT = 8_192;
 /** First byte of a cast frame (see `encodeCastFrame`). */
 const CAST_OP = 3;
@@ -158,6 +160,11 @@ type Session = {
   };
   limiter: RateLimiter;
   strikes: number;
+  /** When its attachment was last saved for its moves (server ms), and
+   * whether a move since is unsaved: a walk is saved once a second, not
+   * every tick (its whole attachment, look and all, each time). */
+  movedSavedAt?: number;
+  moveUnsaved?: boolean;
   /** When this socket last said what it's listening to (server ms). */
   tunedAt?: number;
   /** When it last switched its lute's stance (Date.now() ms). */
@@ -561,6 +568,7 @@ export class TownRoom extends DurableObject<Env> {
    * ticket lapse; and forgives old strikes. */
   async alarm() {
     const now = Date.now();
+    this.saveMoves();
     for (const [ws, att] of [...this.watchers]) {
       const pinged =
         this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() ?? 0;
@@ -635,6 +643,8 @@ export class TownRoom extends DurableObject<Env> {
       if (++this.quietTicks >= IDLE_TICKS && this.ticker) {
         clearInterval(this.ticker);
         this.ticker = null;
+        // Going quiet (and maybe to sleep): where everyone stopped is saved.
+        this.saveMoves();
       }
       return;
     }
@@ -649,7 +659,11 @@ export class TownRoom extends DurableObject<Env> {
         age: now - s.player.receivedAt,
         state: s.player.state,
       });
-      this.persist(s);
+      if (now - (s.movedSavedAt ?? Number.NEGATIVE_INFINITY) >= MOVE_SAVE_MS) {
+        s.movedSavedAt = now;
+        s.moveUnsaved = false;
+        this.persist(s);
+      } else s.moveUnsaved = true;
     }
     this.dirty.clear();
     if (!entries.length) return;
@@ -1239,6 +1253,16 @@ export class TownRoom extends DurableObject<Env> {
     // gets a fresh room.
     this.fight = null;
     this.closeScheduled = false;
+  }
+
+  /** Save every move not yet saved (see Session.movedSavedAt). */
+  private saveMoves() {
+    for (const s of this.sessions.values()) {
+      if (!s.moveUnsaved) continue;
+      s.moveUnsaved = false;
+      s.movedSavedAt = Date.now();
+      this.persist(s);
+    }
   }
 
   private persist(s: Session) {
