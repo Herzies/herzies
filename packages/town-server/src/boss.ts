@@ -400,6 +400,13 @@ export class BossEngine {
     endAt: number;
   } | null = null;
   private nextChargeAt: number;
+  /** A charge's lane once it sets off: who its body has run into so far
+   * (each is hit once, as it reaches them, not all at the set-off). */
+  private sweep: {
+    tg: Telegraph;
+    from: { x: number; z: number };
+    struck: Set<string>;
+  } | null = null;
   /** Where it's shifting to round its focus, and when it next shifts. */
   private strideTo: { x: number; z: number } | null = null;
   private nextStrideAt = 0;
@@ -1013,6 +1020,7 @@ export class BossEngine {
     if (!stunned) this.walk(now, players);
     else this.lastMoveAt = now;
     this.keepOut(now);
+    this.sweepCharge(now, players, events);
     this.startEnrage(now, players, events);
     if (!stunned) this.startAttacks(now, players, events);
     return events;
@@ -1191,6 +1199,59 @@ export class BossEngine {
     }
   }
 
+  /**
+   * A charge on its way down its lane: whoever its body reaches, in the
+   * lane now and a moment before (the defender's benefit, as for any
+   * telegraph), is hit, once. It ends where the charge does (its run out,
+   * a dome, a stun), after a last look where it stopped.
+   */
+  private sweepCharge(
+    now: number,
+    players: readonly BossPlayer[],
+    events: BossEvent[],
+  ) {
+    const sw = this.sweep;
+    if (!sw) return;
+    const tg = sw.tg;
+    const yaw = tg.yaw ?? 0;
+    const ux = Math.sin(yaw);
+    const uz = Math.cos(yaw);
+    // How far down the lane its middle is.
+    const along = (this.at.x - sw.from.x) * ux + (this.at.z - sw.from.z) * uz;
+    const reach = TUNING.boss.radius + TUNING.playerRadius;
+    const hits: BossHit[] = [];
+    for (const p of players) {
+      if (!p.alive || sw.struck.has(p.uid)) continue;
+      if ((this.safeUntil.get(p.uid) ?? 0) > now) continue;
+      if ((this.invulnUntil.get(p.uid) ?? 0) > now) continue;
+      const pos = p.posAt(now);
+      if (!pos) continue;
+      const theirs = (pos.x - sw.from.x) * ux + (pos.z - sw.from.z) * uz;
+      if (Math.abs(theirs - along) > reach) continue;
+      const inside = [now, now - TUNING.rewindMs].every((t) => {
+        const at = p.posAt(t);
+        return !!at && covers(tg, at.x, at.z);
+      });
+      if (!inside) continue;
+      sw.struck.add(p.uid);
+      const hitTg = { ...tg, hitAt: now };
+      const dome = shelterOf(this.domes, p, now);
+      if (dome) {
+        hits.push(
+          shelteredHit(
+            mitigatedHit(p, hitTg, this.buffs.get(p.uid) ?? []),
+            dome.by,
+          ),
+        );
+        continue;
+      }
+      hits.push(mitigatedHit(p, hitTg, this.buffs.get(p.uid) ?? []));
+      this.invulnUntil.set(p.uid, now + TUNING.invulnMs);
+    }
+    if (hits.length) events.push({ t: "resolve", id: tg.id, hits });
+    if (!this.charging) this.sweep = null;
+  }
+
   /** A charge: lining up (turning to its lane), then down it. */
   private stepCharge(now: number, dt: number) {
     const c = this.charging;
@@ -1275,6 +1336,13 @@ export class BossEngine {
     this.telegraphs = this.telegraphs.filter((t) => t.hitAt > now);
     for (const tg of due) {
       const hits: BossHit[] = [];
+      // Its charge's lane: the boom as it sets off; its body hits each
+      // herzie as it gets to them (see sweepCharge).
+      if (tg.kind === "lane" && tg.mob === undefined && this.charging) {
+        this.sweep = { tg, from: { ...this.charging.from }, struck: new Set() };
+        events.push({ t: "resolve", id: tg.id, hits });
+        continue;
+      }
       for (const p of players) {
         if (!p.alive) continue;
         if (tg.lethal) {

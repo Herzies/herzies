@@ -197,9 +197,18 @@ describe("the boss roams", () => {
     expect(lane.hitAt - lane.at).toBe(TUNING.charge.windupMs);
     expect(covers(lane, 3, 6)).toBe(true);
     // It hits whoever's in the lane as it goes, and ends up down the lane.
-    const after = run(e, t, lane.hitAt + 2_000, [tank, back]);
-    const hit = after.find((x) => x.t === "resolve" && x.id === lane.id);
-    expect(hit?.t === "resolve" && hit.hits.map((h) => h.uid)).toContain("back");
+    // Step by step, to see when.
+    const hitAt = new Map<string, number>();
+    for (let s = t; s <= lane.hitAt + 2_000; s += 50)
+      for (const ev of e.update(s, [tank, back]))
+        if (ev.t === "resolve" && ev.id === lane.id)
+          for (const h of ev.hits) hitAt.set(h.uid, s);
+    expect(hitAt.has("back")).toBe(true);
+    // Not as it sets off: when its body gets to them, down the lane.
+    const run_ = dist({ x: lane.x, z: lane.z }, { x: 3, z: 6 }) - TUNING.boss.radius - TUNING.playerRadius;
+    const expected = lane.hitAt + (Math.max(0, run_) / TUNING.charge.speed) * 1000;
+    expect(hitAt.get("back")).toBeGreaterThan(lane.hitAt + 100);
+    expect(Math.abs((hitAt.get("back") ?? 0) - expected)).toBeLessThan(200);
     expect(dist(e.position, { x: 3, z: 6 })).toBeLessThan(dist({ x: lane.x, z: lane.z }, { x: 3, z: 6 }));
     expect(
       Math.hypot(e.position.x - BOSS_WANDER.x, e.position.z - BOSS_WANDER.z),
