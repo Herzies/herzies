@@ -45,6 +45,7 @@ import {
   type HitStats,
   hitDamage,
   insideDome,
+  MELEE_CLEAVE,
   MELEE_REACH,
   meleeReaches,
   pushOutOfDomes,
@@ -930,8 +931,18 @@ export class BossEngine {
       );
       const onMobs = this.mobs?.inReach(from, yaw, now - SEEN_LAG_MS) ?? [];
       if (!onBoss && !onMobs.length) return "miss";
-      for (const m of onMobs)
-        this.mobs?.queue(uid, m, now, stats, melee * boost);
+      // The boss takes the blow in full; its minions (or, without it in
+      // reach, all but the nearest) only the cleave's share.
+      onMobs.forEach((m, i) => {
+        const full = !onBoss && i === 0;
+        this.mobs?.queue(
+          uid,
+          m,
+          now,
+          stats,
+          melee * boost * (full ? 1 : MELEE_CLEAVE),
+        );
+      });
       if (onBoss) {
         const { amount, crit } = hitDamage(stats, this.rand);
         this.pending.push({

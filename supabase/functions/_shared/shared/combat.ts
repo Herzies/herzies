@@ -329,6 +329,11 @@ export const MELEE_ARC = (60 * Math.PI) / 180;
  * (about 60% of its damage in raid-sim, with its discs, in-tune bonus and
  * skills). */
 export const STRIKE_DAMAGE = 1.5;
+/** A melee blow cleaves through everything in its arc, but only the first
+ * thing it meets (the nearest, or the boss) takes it in full; the rest take
+ * this share. A tank's cleave spreads its hold over a pack, not damage
+ * enough to out-clear the damage class. */
+export const MELEE_CLEAVE = 0.5;
 /** A herzie without its instrument (or a class) slams its body into it:
  * the weakest blow there is, so a class and its instrument are a step up. */
 export const BUMP_DAMAGE = 0.5;

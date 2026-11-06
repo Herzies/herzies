@@ -18,6 +18,7 @@ import {
   DISC_RANGE,
   discLandsAfterMs,
   type HitStats,
+  MELEE_CLEAVE,
   STRIKE_DAMAGE,
   WAVE_SPEED,
 } from "@herzies/shared/combat";
@@ -235,8 +236,15 @@ export class TowerEngine {
     if (attack === "melee") {
       const struck = this.pack.inReach(from, yaw, seen);
       const boost = this.damageMult(uid, now);
-      for (const m of struck)
-        this.pack.queue(uid, m, now, stats, melee * boost);
+      // The nearest in full, the rest of the cleave a share (MELEE_CLEAVE).
+      for (const [i, m] of struck.entries())
+        this.pack.queue(
+          uid,
+          m,
+          now,
+          stats,
+          melee * boost * (i === 0 ? 1 : MELEE_CLEAVE),
+        );
       return struck.length ? "hit" : "miss";
     }
     const disc = attack === "disc";

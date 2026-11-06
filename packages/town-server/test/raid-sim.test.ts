@@ -22,17 +22,16 @@ import {
   MELEE_REACH,
   WAVE_HAND_HEIGHT,
 } from "@herzies/shared/combat";
-import { getHerzieStats, withStatPoints } from "@herzies/shared/items";
 import { attackSpeed, RIMSHOT, SKILL_DEFS } from "@herzies/shared/skills";
 import { MOB } from "@herzies/shared/tower";
-import { type StatPoints, timingAttackSpeed } from "@herzies/shared/stats";
+import { timingAttackSpeed } from "@herzies/shared/stats";
 import type { BossClaim, TownTicketPayload } from "@herzies/shared/town-net";
 import { TOWN_WALK_SPEED } from "@herzies/shared/town-net";
-import { maxHp as maxHpOf } from "@herzies/shared/vitals";
 import { armed } from "./arms";
 import { describe, expect, it } from "vitest";
 import { type BossEngine, covers, type Telegraph, TUNING } from "../src/boss";
 import { FightRuntime } from "../src/fight";
+import { type Role, realTicket, statsFor } from "./herzies";
 
 const STEP = 50;
 const REACTION_MS = 450;
@@ -43,7 +42,6 @@ const LEVEL = 30;
  * Workers test runtime has no environment to switch it from). */
 const LOG = false;
 
-type Role = "bard" | "percussionist" | "record_slinger" | "none";
 
 type Bot = {
   uid: string;
@@ -66,64 +64,12 @@ type Bot = {
   hands: [number, number];
 };
 
-/** What each class wears into the fight (its instruments). */
-const GEAR: Record<Role, Record<string, string>> = {
-  record_slinger: { main_hand: "compact-discs" },
-  bard: { main_hand: "lute" },
-  percussionist: { main_hand: "worn-stick", off_hand: "old-cymbal" },
-  none: {},
-};
-
-/** Where each class puts its 58 points at level 30: a Slinger all in
- * Sonic Power, a Bard half in Euphony, a tank mostly in Stamina. */
-const POINTS: Record<Role, StatPoints> = {
-  record_slinger: { stamina: 0, sonicPower: 58, euphony: 0, timing: 0 },
-  bard: { stamina: 0, sonicPower: 28, euphony: 30, timing: 0 },
-  percussionist: { stamina: 40, sonicPower: 18, euphony: 0, timing: 0 },
-  none: { stamina: 0, sonicPower: 58, euphony: 0, timing: 0 },
-};
-
-/** A level-30 herzie's stats for its class, as town-ticket builds them. */
-function statsFor(role: Role): {
-  st: [number, number, number, number, number, number, number, number];
-  stamina: number;
-  timing: number;
-} {
-  const s = withStatPoints(
-    getHerzieStats(GEAR[role] as Parameters<typeof getHerzieStats>[0]),
-    POINTS[role],
-    LEVEL,
-  );
-  return {
-    st: [s.sonicPower, s.luck, s.critChance, s.critDamage, s.stamina, s.def, s.euphony, s.timing],
-    stamina: s.stamina,
-    timing: s.timing,
-  };
-}
-
-function skillsFor(role: Role): [string, number][] {
-  if (role === "bard")
-    return [["soothing-drones", 5], ["resurrect", 5], ["haste", 5]];
-  if (role === "percussionist")
-    return [["cymbrella", 5], ["taunt", 5], ["rimshot", 5]];
-  if (role === "record_slinger") return [["backspin", 5], ["shuffle", 5]];
-  return [];
-}
-
 function ticketFor(b: Bot): TownTicketPayload {
-  const { st, stamina } = statsFor(b.role);
-  const max = maxHpOf(LEVEL, stamina);
-  return {
-    uid: b.uid,
-    name: b.uid,
-    look: { seed: b.uid, stage: 3, equipped: GEAR[b.role] },
-    exp: 9e9,
-    hp: { hp: max, maxHp: max, down: false },
-    st,
-    lv: LEVEL,
-    ...(b.role !== "none" ? { cls: b.role, sk: skillsFor(b.role) } : {}),
-  } as TownTicketPayload;
+  return realTicket(b.uid, b.role, LEVEL);
 }
+
+/** Its stats (for the bots' own pacing). */
+const statsOf = (role: Role) => statsFor(role, LEVEL);
 
 function party(
   roles: Role[],
@@ -339,7 +285,7 @@ function raid(bots: Bot[], seed: number, limitMs = 17 * 60_000): Result {
       }
       if (channeling) continue;
       const quick =
-        attackSpeed(f.engine.buffsOf(b.uid, t), t) * (1 + timingAttackSpeed(statsFor(b.role).timing));
+        attackSpeed(f.engine.buffsOf(b.uid, t), t) * (1 + timingAttackSpeed(statsOf(b.role).timing));
       // A Slinger throws only with a disc in hand.
       const hand: 0 | 1 | null =
         b.role === "record_slinger" ? (b.hands[0] <= b.hands[1] ? 0 : 1) : null;

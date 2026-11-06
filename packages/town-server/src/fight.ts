@@ -1332,9 +1332,9 @@ export class FightRuntime {
         uid: p.uid,
         alive: !p.down,
         maxHp: p.maxHp,
-        // The tank's toughness is for the boss (the Tower's ranked runs
-        // are judged on Def as it is).
-        def: boss ? classDef(p.cls, p.stats.def) : p.stats.def,
+        // A Percussionist is the tank wherever it fights: its Def counts
+        // more in the Tower too (classDef).
+        def: classDef(p.cls, p.stats.def),
         posAt: (t) => this.history.at(p.uid, t),
       });
     }

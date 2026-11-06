@@ -18,6 +18,7 @@ import {
   DISC_RANGE,
   HEAL_TARGET_HEIGHT,
   healTarget,
+  MELEE_CLEAVE,
   meleeDamage,
   meleeReaches,
   STRIKE_DAMAGE,
@@ -794,21 +795,34 @@ export function Combat({
         const from = { x: chest.x, z: chest.z };
         const height = herzie.height * (blow === "strike" ? 0.6 : 0.4);
         let landed = false;
-        for (const d of liveDummies) {
-          if (
-            !meleeReaches(from, yaw, {
+        // Nearest first: it takes the blow in full, the rest the cleave's
+        // share, as the server judges a blow through a pack.
+        const struck = liveDummies
+          .filter((d) =>
+            meleeReaches(from, yaw, {
               ...d,
               radius: DUMMY.radius * (d.size ?? 1),
-            })
+            }),
           )
-            continue;
+          .sort(
+            (p, q) =>
+              Math.hypot(p.x - from.x, p.z - from.z) -
+              Math.hypot(q.x - from.x, q.z - from.z),
+          );
+        for (const [i, d] of struck.entries()) {
           const toward = flatToward(from, d);
           const point: Vec3 = [
             d.x - toward[0] * DUMMY.radius,
             Math.min(DUMMY.chest, height),
             d.z - toward[2] * DUMMY.radius,
           ];
-          const kind = myHit(d, toward, point, meleeDamage(blow), now);
+          const kind = myHit(
+            d,
+            toward,
+            point,
+            meleeDamage(blow) * (i === 0 ? 1 : MELEE_CLEAVE),
+            now,
+          );
           waveField.burst(point, toward, kind);
           landed = true;
         }
