@@ -221,14 +221,15 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
     boss?: {
       event: string;
       batch: string;
-      /** Damage, the HP each healed or blocked (00111), and minion
-       * damage (00122). */
+      /** Damage, the HP each healed or blocked (00111), minion damage
+       * (00122), and the points a Taunt's hold earned (00142). */
       damage: {
         uid: string;
         damage: number;
         healing?: number;
         blocked?: number;
         adds?: number;
+        taunt?: number;
       }[];
     };
     /** The raid (00122): the lock, revives, who's out, a wipe, the log. */
@@ -311,11 +312,15 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
         ? (boss.damage ?? []).slice(0, MAX_BATCH).filter(
           (d) =>
             UUID.test(d.uid) &&
-            [d.damage, d.healing ?? 0, d.blocked ?? 0, d.adds ?? 0].every(
-              Number.isFinite,
-            ) &&
+            [
+              d.damage,
+              d.healing ?? 0,
+              d.blocked ?? 0,
+              d.adds ?? 0,
+              d.taunt ?? 0,
+            ].every(Number.isFinite) &&
             (d.damage > 0 || (d.healing ?? 0) > 0 || (d.blocked ?? 0) > 0 ||
-              (d.adds ?? 0) > 0),
+              (d.adds ?? 0) > 0 || (d.taunt ?? 0) > 0),
         )
         : [];
     // The raid first: the lock (so the boss's health is sized before any

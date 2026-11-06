@@ -35,7 +35,7 @@ async function player() {
 async function batch(
   id: string,
   event: string,
-  damage: { uid: string; damage: number }[],
+  damage: { uid: string; damage: number; taunt?: number }[],
 ) {
   const { data, error } = await admin().rpc("apply_boss_damage_batch", {
     p_batch: id,
@@ -193,6 +193,31 @@ describe("boss damage batches", () => {
     const left = (await loot())[a].map((d) => d.item);
     expect(left).toHaveLength(10);
     expect(left).not.toContain("first-edition");
+  });
+
+  it("keeps a Taunt's points, which rank without touching the boss (00142)", async () => {
+    const event = await spawnBoss(1000);
+    const [tank, dps] = [await player(), await player()];
+    const r = await batch("bt", event, [
+      { uid: tank, damage: 0, taunt: 300 },
+      { uid: dps, damage: 200 },
+    ]);
+    expect(r.hp).toBe(800);
+    await batch("bt2", event, [{ uid: tank, damage: 0, taunt: 50 }]);
+    const { data: rows } = await admin()
+      .from("boss_damage")
+      .select("user_id, taunt")
+      .eq("event_id", event)
+      .eq("user_id", tank);
+    expect(rows?.[0]?.taunt).toBe(350);
+    const { data: board, error } = await admin().rpc("boss_leaderboard", {
+      p_event_id: event,
+      p_limit: 5,
+    });
+    if (error) throw new Error(error.message);
+    const ranked = board as { user_id: string; contribution: number }[];
+    expect(ranked.map((x) => x.user_id)).toEqual([tank, dps]);
+    expect(ranked[0].contribution).toBe(350);
   });
 
   it("one bad row doesn't lose the others", async () => {

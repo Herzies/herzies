@@ -1244,7 +1244,9 @@ export class FightRuntime {
         uid: p.uid,
         alive: !p.down,
         maxHp: p.maxHp,
-        def: classDef(p.cls, p.stats.def),
+        // The tank's toughness is for the boss (the Tower's ranked runs
+        // are judged on Def as it is).
+        def: boss ? classDef(p.cls, p.stats.def) : p.stats.def,
         posAt: (t) => this.history.at(p.uid, t),
       });
     }
@@ -2196,6 +2198,8 @@ export class FightRuntime {
     this.tauntAt = now;
     const taunter = boss.taunter(now);
     if (!taunter || since === null || now <= since) return;
+    const p = this.players.get(taunter);
+    if (!p?.present || p.down || !this.fighting(taunter)) return;
     const roster = this.roster?.size ?? this.players.size;
     this.credit(
       taunter,
