@@ -216,7 +216,7 @@ export class TownRoom extends DurableObject<Env> {
       if (att.player) {
         session.player = {
           ...att.player,
-          guard: newGuard(att.player.state.x, att.player.state.z, now),
+          guard: newGuard(att.player.state.x, att.player.state.z, now, att.map),
           receivedAt: now,
           rest: new RestMeter(att.player.restSince ?? null),
         };
@@ -465,7 +465,7 @@ export class TownRoom extends DurableObject<Env> {
       look: t.look,
       exp: t.exp,
       state,
-      guard: newGuard(state.x, state.z, now),
+      guard: newGuard(state.x, state.z, now, s.att.map),
       receivedAt: now,
       maxHp: t.hp?.maxHp,
       rest: new RestMeter(),
@@ -825,10 +825,12 @@ export class TownRoom extends DurableObject<Env> {
       this.strike(s);
       return;
     }
-    // The move back to the start needs nothing here: a jump onto the map's
-    // spawn is always allowed (checkMove), and the frames still on their
-    // way from the far portal must pass too.
-    for (const o of this.fight.next(p.uid, now)) this.dispatch(o);
+    // The move back to the start: the one jump onto the spawn a fight
+    // allows (checkMove). Frames still on their way from the far portal
+    // pass as ordinary walking.
+    const moved = this.fight.next(p.uid, now);
+    if (moved.length) p.guard.respawn = true;
+    for (const o of moved) this.dispatch(o);
   }
 
   private onCast(s: Session, message: ArrayBuffer, now: number) {
