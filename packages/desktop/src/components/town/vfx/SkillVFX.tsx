@@ -1,4 +1,5 @@
 import { BACKSPIN_DISCS, BACKSPIN_SPREAD, SKILL_DEFS } from "@herzies/shared";
+import { DISC_RANGE, DISC_SPEED } from "@herzies/shared/combat";
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo } from "react";
 import * as THREE from "three";
@@ -7,7 +8,6 @@ import { buffOn, entityAt, SKILL_FX_MS, skills } from "../combat/skills";
 /** Rings a Soothing Drones sends out, one after another. */
 const DRONE_RINGS = 3;
 const DRONE_RING_GAP_MS = 220;
-const DISC_SPEED = 22;
 /** In-tune auras, and the notes over each. */
 const MAX_AURAS = 12;
 const NOTES = 3;
@@ -214,7 +214,8 @@ export function SkillVFX() {
         for (let i = 0; i < BACKSPIN_DISCS && disc < fx.discs.length; i++) {
           const yaw = c.yaw + (i - half) * BACKSPIN_SPREAD;
           const m = fx.discs[disc++];
-          m.visible = travelled < 30;
+          // Out to a disc's reach, where the server stops looking.
+          m.visible = travelled < DISC_RANGE;
           m.position.set(
             c.x + Math.sin(yaw) * (0.6 + travelled),
             1.2,

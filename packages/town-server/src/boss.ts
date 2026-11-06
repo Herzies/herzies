@@ -829,9 +829,10 @@ export class BossEngine {
     const boost = this.damageMult(uid, now);
     for (let i = 0; i < BACKSPIN_DISCS; i++) {
       const dir = aimDirection(yaw + (i - half) * BACKSPIN_SPREAD, pitch);
-      const hit = this.nearest(from, dir, now);
+      // Discs: a disc's reach and flight, as they're drawn.
+      const hit = this.nearest(from, dir, now, DISC_RANGE);
       if (!hit) continue;
-      const at = now + (hit.dist / WAVE_SPEED) * 1000;
+      const at = now + discLandsAfterMs(hit.dist);
       if (hit.mob) {
         this.mobs?.queue(uid, hit.mob, at, stats, mult * boost, "backspin");
       } else {

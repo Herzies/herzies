@@ -27,6 +27,7 @@ import {
   BACKSPIN_DISCS,
   BACKSPIN_SPREAD,
   type Buff,
+  buffMultiplier,
   RIMSHOT,
   shuffleOn,
 } from "@herzies/shared/skills";
@@ -233,7 +234,9 @@ export class TowerEngine {
     const seen = now - SEEN_LAG_MS;
     if (attack === "melee") {
       const struck = this.pack.inReach(from, yaw, seen);
-      for (const m of struck) this.pack.queue(uid, m, now, stats, melee);
+      const boost = this.damageMult(uid, now);
+      for (const m of struck)
+        this.pack.queue(uid, m, now, stats, melee * boost);
       return struck.length ? "hit" : "miss";
     }
     const disc = attack === "disc";
@@ -258,7 +261,7 @@ export class TowerEngine {
     const flight = disc
       ? discLandsAfterMs(target.dist)
       : (target.dist / WAVE_SPEED) * 1000;
-    const mult = disc ? DISC_DAMAGE : 1;
+    const mult = (disc ? DISC_DAMAGE : 1) * this.damageMult(uid, now);
     this.pack.queue(uid, target.mob, now + flight, stats, mult);
     // Under a Shuffle, it bounces on through the pack.
     if (disc)
@@ -301,7 +304,7 @@ export class TowerEngine {
         m,
         now,
         stats,
-        RIMSHOT.damage * STRIKE_DAMAGE,
+        RIMSHOT.damage * STRIKE_DAMAGE * this.damageMult(uid, now),
         "rimshot",
       );
       hit++;
@@ -326,19 +329,26 @@ export class TowerEngine {
     const half = (BACKSPIN_DISCS - 1) / 2;
     for (let i = 0; i < BACKSPIN_DISCS; i++) {
       const dir = aimDirection(yaw + (i - half) * BACKSPIN_SPREAD, pitch);
-      const target = this.pack.along(from, dir, now - SEEN_LAG_MS);
+      // Discs: a disc's reach and flight, as they're drawn.
+      const target = this.pack.along(from, dir, now - SEEN_LAG_MS, DISC_RANGE);
       if (!target) continue;
       this.pack.queue(
         uid,
         target.mob,
-        now + (target.dist / WAVE_SPEED) * 1000,
+        now + discLandsAfterMs(target.dist),
         stats,
-        mult,
+        mult * this.damageMult(uid, now),
         "backspin",
       );
       landed++;
     }
     return landed;
+  }
+
+  /** How much harder `uid` hits right now (an in-tune Record Slinger), as
+   * in the boss's cave: in tune means the same everywhere. */
+  private damageMult(uid: string, now: number): number {
+    return buffMultiplier(this.buffs.get(uid) ?? [], "damage", now);
   }
 
   /** A cast's token (a heal bolt spends one too); see BossEngine's. */
