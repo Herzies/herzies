@@ -54,6 +54,7 @@ import { benchBonusHp } from "@herzies/shared/vitals";
 import { CHANNEL_SLACK, DEV_EVENT, FightRuntime, type Outbound } from "./fight";
 import { RestMeter } from "./rest";
 import {
+  allowSpawnJump,
   checkMove,
   type MoveGuard,
   newGuard,
@@ -820,10 +821,13 @@ export class TownRoom extends DurableObject<Env> {
       this.strike(s);
       return;
     }
-    // The move back to the start needs nothing here: a jump onto the map's
-    // spawn is always allowed (checkMove), and the frames still on their
-    // way from the far portal must pass too.
-    for (const o of this.fight.next(p.uid, now)) this.dispatch(o);
+    // On to the next floor: the client jumps back to the start at the
+    // portal's white-out, and in a fight room that jump only passes once
+    // the server has allowed it (checkMove). The frames still on their way
+    // from the far portal pass as ever.
+    const out = this.fight.next(p.uid, now);
+    if (out.length) allowSpawnJump(p.guard, now);
+    for (const o of out) this.dispatch(o);
   }
 
   private onCast(s: Session, message: ArrayBuffer, now: number) {
