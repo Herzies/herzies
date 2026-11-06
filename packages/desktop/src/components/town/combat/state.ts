@@ -49,6 +49,16 @@ export const combat = {
    * crit. */
   hitAt: Number.NEGATIVE_INFINITY,
   hitCrit: false,
+  /** When one of your hits last landed on the boss itself (its flash;
+   * a minion's hit doesn't light it). */
+  bossHitAt: Number.NEGATIVE_INFINITY,
+  /** When your last melee blow was felt to land here (the thud, the
+   * hold): the server's word on it that follows adds the number, not a
+   * second thud (performance.now ms). */
+  meleeFeltAt: Number.NEGATIVE_INFINITY,
+  /** When the last impact sound played: a blow that strikes the boss and
+   * a pack at once is one sound, not a pile of them. */
+  impactAt: Number.NEGATIVE_INFINITY,
   /** Your best damage per second on any dummy, this session. */
   bestDps: 0,
   /** Your basic attack: a wave, a disc thrown from each hand, or a blow up

@@ -818,6 +818,7 @@ export function Combat({
           sfxMeleeHit(blow);
           // Held still on the contact, a beat, so it lands.
           herzie.hitstop();
+          combat.meleeFeltAt = now;
         }
         shake(landed ? 0.1 : 0.03);
       }
@@ -921,17 +922,22 @@ export function Combat({
     // --- Waves in flight, and what they hit. A crit's hit-stop holds them
     // near-still for a beat.
     const slow = now < combat.slowUntil ? HIT_STOP_SCALE : 1;
-    waveField.step(dt * slow, liveDummies, ({ wave, dummy, point }) => {
-      if (!wave.mine) {
-        hitDummy(dummy, wave.dir[0], wave.dir[2], 100, false, now, false);
-        sfxImpact("hit");
-        return "hit";
-      }
-      return myHit(dummy, wave.dir, point, wave.scale, now);
-    });
+    waveField.step(
+      dt,
+      liveDummies,
+      ({ wave, dummy, point }) => {
+        if (!wave.mine) {
+          hitDummy(dummy, wave.dir[0], wave.dir[2], 100, false, now, false);
+          sfxImpact("hit");
+          return "hit";
+        }
+        return myHit(dummy, wave.dir, point, wave.scale, now);
+      },
+      slow,
+    );
     // Discs in flight, anyone's; and the sounds of yours turning and
     // glancing off walls.
-    discField.step(dt * slow, liveDummies, discHooks.current);
+    discField.step(dt, liveDummies, discHooks.current, slow);
     for (const sp of discField.sparks) {
       if (!sp.alive || sp.heard) continue;
       sp.heard = true;

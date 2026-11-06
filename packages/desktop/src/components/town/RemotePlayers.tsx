@@ -283,7 +283,12 @@ function RemoteHerzie({
         quick: attackSpeedOf(remote.id, performance.now()),
         bounces: shuffleOf(remote.id, performance.now()),
       });
-    } else if (herzie.released && attack === "melee") {
+    } else if (
+      herzie.released &&
+      attack === "melee" &&
+      // A Rimshot's slam is its own thing (vfx/SlamVFX), not a swing.
+      herzie.castMotion !== "slam"
+    ) {
       // Only for show: what's in front of them rocks (the server counts
       // their hits on the boss).
       const from = { x: s.x, z: s.z };

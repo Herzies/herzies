@@ -201,7 +201,7 @@ export function Boss() {
     if (!bossFight.victory) {
       const hit = Math.max(
         0.1 * (1 - (now - bossFight.bossHitAt) / 110),
-        0.3 * (1 - (now - combat.hitAt) / 140),
+        0.3 * (1 - (now - combat.bossHitAt) / 140),
         0.75 * (1 - (now - beats.phaseAt) / 450),
         0,
       );

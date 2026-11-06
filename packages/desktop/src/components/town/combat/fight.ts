@@ -347,6 +347,11 @@ function setTower(f: TowerFloor, now: number) {
 let lootSeq = 0;
 /** A crit's hit-stop, ms: the world holds still a beat. */
 const CRIT_STOP_MS = 60;
+/** How long after a blow felt to land here the server's word on it may
+ * take (a round trip, and some): within it, the word adds no second thud. */
+const MELEE_FELT_MS = 500;
+/** The least time between two impact sounds from hits landing at once. */
+const IMPACT_GAP_MS = 45;
 /** When the boss's warning last sounded (performance.now() ms). */
 let lastWarnAt = Number.NEGATIVE_INFINITY;
 
@@ -621,6 +626,7 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
           m.crit,
         );
       } else {
+        combat.bossHitAt = now;
         const jitter = (Math.random() - 0.5) * 1.6;
         const at = bossNow();
         pushDamageNumber(
@@ -631,12 +637,21 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       }
       combat.hitAt = now;
       combat.hitCrit = m.crit;
+      // A blow you already felt land (its thud, its hold, its shake): the
+      // server's word on it is the number, and a crit's sting. One feel
+      // per blow, not two.
+      const felt = now - combat.meleeFeltAt < MELEE_FELT_MS;
+      if (felt && !m.crit) return;
       // Your own hits: a nudge, a jolt on a crit, but never enough to keep
       // the camera rattling through a long fight. A crit holds the world
       // still for a beat.
-      if (combat.trauma < 0.3) shake(m.crit ? 0.22 : 0.05);
+      if (combat.trauma < 0.3) shake(m.crit ? 0.22 : felt ? 0 : 0.05);
       if (m.crit) combat.slowUntil = now + CRIT_STOP_MS;
-      sfxImpact(m.crit ? "crit" : "hit");
+      // One sound for a blow that strikes several at once.
+      if (m.crit || now - combat.impactAt > IMPACT_GAP_MS) {
+        combat.impactAt = now;
+        sfxImpact(m.crit ? "crit" : "hit");
+      }
       return;
     }
     case "down":

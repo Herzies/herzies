@@ -268,9 +268,16 @@ export class DiscField {
   }
 
   /** Moves everything on by `dt` seconds. */
-  step(dt: number, dummies: readonly DummyState[], hooks: DiscHooks): void {
+  step(
+    frameDt: number,
+    dummies: readonly DummyState[],
+    hooks: DiscHooks,
+    /** Your own discs' pace through a crit's hit-stop (see WaveField). */
+    mineScale = 1,
+  ): void {
     for (const d of this.discs) {
       if (!d.alive) continue;
+      const dt = d.mine ? frameDt * mineScale : frameDt;
       d.age += dt;
       d.t += dt;
       set(d.prev, d.pos);
@@ -279,7 +286,7 @@ export class DiscField {
       else if (d.phase === "turn") stepTurn(d);
       else this.stepBack(d, hooks);
     }
-    age(this.sparks, dt, SPARK_SECONDS);
+    age(this.sparks, frameDt, SPARK_SECONDS);
   }
 
   private stepOut(
