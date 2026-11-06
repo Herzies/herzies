@@ -190,13 +190,22 @@ const QUIET_GAP_MS = TOWN_TICK_MS * 2.5;
 /** Where the boss stands at `at` (performance.now() ms; drawn a moment
  * behind the newest word, like a mob), and which way it faces. Its home
  * until the server says otherwise. */
-export function bossNow(at: number = performance.now() - drawDelayMs()): {
+export function bossNow(
+  at: number = performance.now() - drawDelayMs(),
+  /** Written into and returned, for a caller that asks every frame. */
+  out: { x: number; z: number; yaw: number } = { x: 0, z: 0, yaw: 0 },
+): {
   x: number;
   z: number;
   yaw: number;
 } {
   const s = bossFight.bossPath;
-  if (!s.length) return { x: BOSS_STAND.x, z: BOSS_STAND.z, yaw: Math.PI };
+  if (!s.length) {
+    out.x = BOSS_STAND.x;
+    out.z = BOSS_STAND.z;
+    out.yaw = Math.PI;
+    return out;
+  }
   for (let i = s.length - 1; i > 0; i--) {
     const a = s[i - 1];
     const b = s[i];
@@ -204,15 +213,17 @@ export function bossNow(at: number = performance.now() - drawDelayMs()): {
       const k = b.at > a.at ? (at - a.at) / (b.at - a.at) : 1;
       let dy = b.yaw - a.yaw;
       dy = Math.atan2(Math.sin(dy), Math.cos(dy));
-      return {
-        x: a.x + (b.x - a.x) * k,
-        z: a.z + (b.z - a.z) * k,
-        yaw: a.yaw + dy * k,
-      };
+      out.x = a.x + (b.x - a.x) * k;
+      out.z = a.z + (b.z - a.z) * k;
+      out.yaw = a.yaw + dy * k;
+      return out;
     }
   }
-  const last = s[s.length - 1];
-  return at < s[0].at ? s[0] : last;
+  const p = at < s[0].at ? s[0] : s[s.length - 1];
+  out.x = p.x;
+  out.z = p.z;
+  out.yaw = p.yaw;
+  return out;
 }
 
 /** Add a sample to a path, in order, pinning the old spot after a quiet

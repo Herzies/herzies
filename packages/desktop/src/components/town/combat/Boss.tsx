@@ -87,6 +87,8 @@ export function Boss() {
   useEffect(() => () => tether.dispose(), [tether]);
 
   /** Where it stood last frame, and how fast it's going (smoothed). */
+  /** Where it's drawn this frame (written into, not made anew). */
+  const here = useMemo(() => ({ x: 0, z: 0, yaw: 0 }), []);
   const lastAt = useRef<{ x: number; z: number }>({
     x: BOSS_STAND.x,
     z: BOSS_STAND.z,
@@ -110,7 +112,7 @@ export function Boss() {
       tether.hide();
       return;
     }
-    const at = bossNow();
+    const at = bossNow(undefined, here);
     // Not there at all in the lobby: it comes when the fight does.
     const raidNow = bossFight.raid;
     const hidden = raidNow?.stage === "lobby";
@@ -233,7 +235,8 @@ export function Boss() {
     }
     // Its feet go with how fast it's really going (it roams, and charges).
     const moved = Math.hypot(at.x - lastAt.current.x, at.z - lastAt.current.z);
-    lastAt.current = { x: at.x, z: at.z };
+    lastAt.current.x = at.x;
+    lastAt.current.z = at.z;
     const speed = dt > 0 ? Math.min(moved / dt, 20) : 0;
     walkSpeed.current += (speed - walkSpeed.current) * Math.min(1, dt * 8);
     herzie.update(dt, walkSpeed.current / SCALE);

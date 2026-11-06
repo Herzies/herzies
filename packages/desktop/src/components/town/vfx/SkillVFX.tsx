@@ -174,7 +174,11 @@ export function SkillVFX() {
   useFrame(() => {
     const now = performance.now();
     // Forget effects that have played out.
-    skills.casts = skills.casts.filter((c) => now - c.at < SKILL_FX_MS);
+    // (In place: no new array a frame.)
+    const casts = skills.casts;
+    let kept = 0;
+    for (const c of casts) if (now - c.at < SKILL_FX_MS) casts[kept++] = c;
+    casts.length = kept;
 
     let ring = 0;
     let disc = 0;

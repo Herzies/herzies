@@ -97,6 +97,10 @@ const CAST_INTERVAL = CAST_INTERVAL_MS / 1000;
 const AIM_RANGE = 60;
 /** How slow waves and dummies go during a crit's hit-stop. */
 const HIT_STOP_SCALE = 0.12;
+/** Scratch for the frame's reach check: nothing allocated each frame. */
+const reachFrom = { x: 0, z: 0 };
+const reachBody = { x: 0, z: 0, radius: 0 };
+const bossScratch = { x: 0, z: 0, yaw: 0 };
 const HIT_STOP_MS = 65;
 const HANDS: readonly DiscHand[] = ["held-l", "held-r"];
 /** A Rimshot's hold on the slam (a plain strike holds 70 ms): the
@@ -503,16 +507,28 @@ export function Combat({
       const dz = a.point.z - chest.z;
       const yaw =
         Math.hypot(dx, dz) > 0.5 ? Math.atan2(dx, dz) : herzie.heading;
-      const from = { x: chest.x, z: chest.z };
-      combat.inReach =
-        liveDummies.some((d) =>
-          meleeReaches(from, yaw, {
-            ...d,
-            radius: DUMMY.radius * (d.size ?? 1),
-          }),
-        ) ||
-        (inBossRoom() &&
-          meleeReaches(from, yaw, { ...bossNow(), radius: BOSS_STAND.radius }));
+      const from = reachFrom;
+      from.x = chest.x;
+      from.z = chest.z;
+      const body = reachBody;
+      let reach = false;
+      for (const d of liveDummies) {
+        body.x = d.x;
+        body.z = d.z;
+        body.radius = DUMMY.radius * (d.size ?? 1);
+        if (meleeReaches(from, yaw, body)) {
+          reach = true;
+          break;
+        }
+      }
+      if (!reach && inBossRoom()) {
+        bossNow(undefined, bossScratch);
+        body.x = bossScratch.x;
+        body.z = bossScratch.z;
+        body.radius = BOSS_STAND.radius;
+        reach = meleeReaches(from, yaw, body);
+      }
+      combat.inReach = reach;
     }
 
     // Where you are, for effects that follow you (a Cymbrella overhead).

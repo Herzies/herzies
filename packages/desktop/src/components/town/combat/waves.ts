@@ -347,6 +347,9 @@ function stepHeal(w: Wave, dt: number): boolean {
   return false;
 }
 
+/** steer's scratch: it runs for every homing wave and disc, every step. */
+const steerWant: Vec3 = [0, 0, 0];
+
 export function steer(
   w: { pos: Vec3; dir: Vec3; target: DummyState | null },
   dt: number,
@@ -359,7 +362,10 @@ export function steer(
   const tz = d.z - w.pos[2];
   const len = Math.hypot(tx, ty, tz);
   if (len < 0.5) return;
-  const want: Vec3 = [tx / len, ty / len, tz / len];
+  const want = steerWant;
+  want[0] = tx / len;
+  want[1] = ty / len;
+  want[2] = tz / len;
   const cos = Math.min(
     1,
     want[0] * w.dir[0] + want[1] * w.dir[1] + want[2] * w.dir[2],
