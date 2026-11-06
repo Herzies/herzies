@@ -130,12 +130,28 @@ describe("fair play", () => {
       expect(s.flags).toContain("blinks");
     });
 
-    it("doesn't count the game's own jump back to the start", () => {
+    it("doesn't count the game's own jump back to the start, once", () => {
       const f = new FairPlay(() => {});
       f.frame("u", T0, 10, 0);
-      f.moved("u");
-      f.frame("u", T0 + FRAME, 0, -10);
+      // On to the next floor; frames from the far portal still arrive...
+      f.moved("u", T0 + 10, 5_000);
+      f.frame("u", T0 + FRAME, 10.3, 0);
+      f.frame("u", T0 + 2 * FRAME, 10.6, 0);
+      // ...then the jump to the start, ~30 m in a frame (as live).
+      f.frame("u", T0 + 3 * FRAME, -12.5, 0.5);
       expect(f.summary("u").blinks).toBe(0);
+      // A second one isn't the game's.
+      f.frame("u", T0 + 4 * FRAME, -9, 0.5);
+      expect(f.summary("u").blinks).toBe(1);
+    });
+
+    it("counts a jump long after the game's allowance lapsed", () => {
+      const f = new FairPlay(() => {});
+      f.frame("u", T0, 10, 0);
+      f.moved("u", T0, 5_000);
+      f.frame("u", T0 + 6_000, 10, 0);
+      f.frame("u", T0 + 6_000 + FRAME, 0, 0);
+      expect(f.summary("u").blinks).toBe(1);
     });
   });
 
@@ -277,20 +293,31 @@ describe("fair play", () => {
   });
 
   describe("aim", () => {
-    it("flags casts that all land in the middle", () => {
+    it("flags casts that land in the middle, over the floors of a run", () => {
       const f = new FairPlay(() => {});
       const r = rand(3);
-      for (let i = 0; i < 40; i++) f.aimed("u", r() * 0.01, 0.1);
-      expect(f.summary("u").flags).toContain("aim");
+      // ~25 a floor, as the autopilot cast them live: none flags alone.
+      for (let floor = 0; floor < 3; floor++) {
+        f.frame("u", T0 + floor * 60_000, 0, 0);
+        for (let i = 0; i < 25; i++) f.aimed("u", r() * 0.012, 0.1);
+        const s = f.summary("u");
+        expect(s.aim.casts).toBe(25);
+        if (floor < 2) expect(s.flags).not.toContain("aim");
+        else {
+          expect(s.aim.run.casts).toBe(75);
+          expect(s.flags).toContain("aim");
+        }
+        f.report("u", { floor });
+      }
     });
 
     it("doesn't flag aim spread over the body", () => {
       const f = new FairPlay(() => {});
       const r = rand(4);
-      for (let i = 0; i < 40; i++) f.aimed("u", (r() - 0.5) * 0.2, 0.1);
+      for (let i = 0; i < 80; i++) f.aimed("u", (r() - 0.5) * 0.2, 0.1);
       const s = f.summary("u");
-      expect(s.aim.casts).toBe(40);
-      expect(s.aim.p90 ?? 0).toBeGreaterThan(FLAGS.aimP90);
+      expect(s.aim.run.casts).toBe(80);
+      expect(s.aim.run.p50 ?? 0).toBeGreaterThan(FLAGS.aimP50);
       expect(s.flags).not.toContain("aim");
     });
 

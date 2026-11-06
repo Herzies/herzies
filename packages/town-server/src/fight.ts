@@ -84,6 +84,7 @@ import {
 } from "./boss";
 import { FairPlay } from "./fairplay";
 import { PositionHistory } from "./history";
+import { SPAWN_JUMP_GRACE_MS } from "./rules";
 import { type TowerArena, TowerEngine, type TowerEvent } from "./tower";
 
 /** The room holds eating to CONSUMABLE_COOLDOWN_MS less this, so a client
@@ -506,7 +507,7 @@ export class FightRuntime {
     tower.noteSpawn(uid, now);
     this.history.forget(uid);
     // Back to the start is the game's jump, not the herzie's.
-    this.fair?.moved(uid);
+    this.fair?.moved(uid, now, SPAWN_JUMP_GRACE_MS);
     return [{ to: "all", msg: { t: "floor", ...tower.view() } }];
   }
 

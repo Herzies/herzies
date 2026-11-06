@@ -89,11 +89,13 @@ export const FLAGS = {
   /** ...getting out of at least this share of them (the fastest
    * person-like model reached 0.94; the bot 0.99-1). */
   dodgeEscape: 0.97,
-  /** From this many casts on a target... */
-  aimMin: 30,
-  /** ...nine in ten this close to its middle (share of its half-width). */
-  aimP90: 0.3,
-  /** From this many skills used again soon after ready... */
+  /** From this many casts on a target since coming in... */
+  aimMin: 60,
+  /** ...half of them this close to its middle (share of its half-width).
+   * The autopilot, played against a local server: 0.06-0.08 a floor. The
+   * median, as the far end swung from 0.16 to 0.82 floor to floor. */
+  aimP50: 0.15,
+  /** From this many skills used again soon after ready since coming in... */
   skillMin: 8,
   /** ...nine in ten within this many ms of it. */
   skillP90Ms: 80,
@@ -165,10 +167,17 @@ type Track = {
   /** ms from an attack appearing to the herzie being out of it, less the
    * least the walk out takes: its reaction, plus the round trip. */
   reacts: number[];
-  /** Each cast's distance off its target's middle, as a share. */
+  /** Each cast's distance off its target's middle, as a share: this floor,
+   * and since coming in. */
   aim: number[];
-  /** ms after each skill was ready that it was used again. */
+  runAim: number[];
+  /** ms after each skill was ready that it was used again: this floor, and
+   * since coming in. */
   skillLate: number[];
+  runSkillLate: number[];
+  /** Until when (ms) one long step is the game's (the jump back to the
+   * start of the next floor, see moved). */
+  jumpUntil: number;
   /** When each skill is next ready. */
   readyAt: Map<string, number>;
 };
@@ -192,7 +201,10 @@ function track(): Track {
     run: totals(),
     reacts: [],
     aim: [],
+    runAim: [],
     skillLate: [],
+    runSkillLate: [],
+    jumpUntil: Number.NEGATIVE_INFINITY,
     readyAt: new Map(),
   };
 }
@@ -250,10 +262,33 @@ export type FairPlayReport = {
       spread: number | null;
     };
   };
-  aim: { casts: number; p50: number | null; p90: number | null };
-  skills: { used: number; p50_ms: number | null; p90_ms: number | null };
+  /** This floor's casts, and (`run`) since coming in. */
+  aim: AimStats & { run: AimStats };
+  skills: SkillStats & { run: SkillStats };
   flags: string[];
 };
+
+export type AimStats = {
+  casts: number;
+  p50: number | null;
+  p90: number | null;
+};
+export type SkillStats = {
+  used: number;
+  p50_ms: number | null;
+  p90_ms: number | null;
+};
+
+const aimStats = (xs: readonly number[]): AimStats => ({
+  casts: xs.length,
+  p50: r2(quantile(xs, 0.5)),
+  p90: r2(quantile(xs, 0.9)),
+});
+const skillStats = (xs: readonly number[]): SkillStats => ({
+  used: xs.length,
+  p50_ms: r0(quantile(xs, 0.5)),
+  p90_ms: r0(quantile(xs, 0.9)),
+});
 
 export type FairPlaySink = (line: string) => void;
 
@@ -285,7 +320,11 @@ export class FairPlay {
       const step = Math.hypot(x - last.x, z - last.z);
       k.maxStep = Math.max(k.maxStep, step);
       const gap = Math.max(t - last.t, 1000 / 15) / 1000;
-      if (step > BLINK_STEP && step / gap > BLINK_SPEED) k.blinks++;
+      if (step > BLINK_STEP && step / gap > BLINK_SPEED) {
+        // The game's own jump to the next floor's start: once, excused.
+        if (t <= k.jumpUntil) k.jumpUntil = Number.NEGATIVE_INFINITY;
+        else k.blinks++;
+      }
     }
     k.last = { t, x, z };
     for (const w of k.watching.values())
@@ -293,11 +332,16 @@ export class FairPlay {
         w.outAt = t;
   }
 
-  /** The herzie was put somewhere by the game (the next floor's start):
-   * no step to measure from there. */
-  moved(uid: string): void {
+  /**
+   * The game is putting the herzie somewhere (the next floor's start): one
+   * long step within `graceMs` of `now` is that jump, not a blink. Frames
+   * from before it are still on their way (the client walked into the far
+   * portal), so the jump comes a few frames after this, from where they
+   * left off: as the move guard allows it (rules.ts allowSpawnJump).
+   */
+  moved(uid: string, now: number, graceMs: number): void {
     const k = this.tracks.get(uid);
-    if (k) k.last = null;
+    if (k) k.jumpUntil = now + graceMs;
   }
 
   /** A warning appeared; `at` is where each herzie in the fight stood then
@@ -397,15 +441,19 @@ export class FairPlay {
    * middle, which looks `half` radians wide either side from there. */
   aimed(uid: string, off: number, half: number): void {
     if (!(half > 0)) return;
-    push(this.of(uid).aim, Math.abs(off) / half);
+    const k = this.of(uid);
+    push(k.aim, Math.abs(off) / half);
+    push(k.runAim, Math.abs(off) / half);
   }
 
   /** A skill used at `now`, next ready at `readyAt`. */
   skill(uid: string, skill: string, now: number, readyAt: number): void {
     const k = this.of(uid);
     const was = k.readyAt.get(skill);
-    if (was !== undefined && now >= was && now - was <= SKILL_TIMING_MS)
+    if (was !== undefined && now >= was && now - was <= SKILL_TIMING_MS) {
       push(k.skillLate, now - was);
+      push(k.runSkillLate, now - was);
+    }
     k.readyAt.set(skill, readyAt);
   }
 
@@ -417,8 +465,8 @@ export class FairPlay {
     const p75 = quantile(k.reacts, 0.75);
     const spread = p25 !== null && p75 !== null ? p75 - p25 : null;
     const runShort = rate(k.run.shortEscaped, k.run.shortStoodIn);
-    const aimP90 = quantile(k.aim, 0.9);
-    const skillP90 = quantile(k.skillLate, 0.9);
+    const runAimP50 = quantile(k.runAim, 0.5);
+    const runSkillP90 = quantile(k.runSkillLate, 0.9);
     const flags: string[] = [];
     if (k.blinks >= FLAGS.blinks) flags.push("blinks");
     if (
@@ -429,15 +477,15 @@ export class FairPlay {
       flags.push("dodges");
     if (k.run.leftMidAttack >= FLAGS.leaves) flags.push("leaves");
     if (
-      k.aim.length >= FLAGS.aimMin &&
-      aimP90 !== null &&
-      aimP90 < FLAGS.aimP90
+      k.runAim.length >= FLAGS.aimMin &&
+      runAimP50 !== null &&
+      runAimP50 < FLAGS.aimP50
     )
       flags.push("aim");
     if (
-      k.skillLate.length >= FLAGS.skillMin &&
-      skillP90 !== null &&
-      skillP90 < FLAGS.skillP90Ms
+      k.runSkillLate.length >= FLAGS.skillMin &&
+      runSkillP90 !== null &&
+      runSkillP90 < FLAGS.skillP90Ms
     )
       flags.push("skills");
     return {
@@ -454,16 +502,8 @@ export class FairPlay {
           spread: r0(spread),
         },
       },
-      aim: {
-        casts: k.aim.length,
-        p50: r2(quantile(k.aim, 0.5)),
-        p90: r2(aimP90),
-      },
-      skills: {
-        used: k.skillLate.length,
-        p50_ms: r0(quantile(k.skillLate, 0.5)),
-        p90_ms: r0(skillP90),
-      },
+      aim: { ...aimStats(k.aim), run: aimStats(k.runAim) },
+      skills: { ...skillStats(k.skillLate), run: skillStats(k.runSkillLate) },
       flags,
     };
   }
@@ -472,7 +512,7 @@ export class FairPlay {
    * Logs what `uid` did (one JSON line, `fairplay` set so it can be picked
    * out of the Worker's logs). With `reset` (a floor done) the next report
    * starts afresh, keeping where it stands, its cooldowns, the attacks
-   * still coming and the run's dodge totals. Nothing is logged for a
+   * still coming and the run's totals. Nothing is logged for a
    * herzie that sent no frames.
    */
   report(
@@ -490,6 +530,9 @@ export class FairPlay {
       next.readyAt = k.readyAt;
       next.watching = k.watching;
       next.run = k.run;
+      next.runAim = k.runAim;
+      next.runSkillLate = k.runSkillLate;
+      next.jumpUntil = k.jumpUntil;
       this.tracks.set(uid, next);
     }
     return summary;
