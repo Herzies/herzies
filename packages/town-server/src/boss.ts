@@ -69,6 +69,7 @@ import {
 } from "@herzies/shared/skills";
 import { defReduction, timingAttackSpeed } from "@herzies/shared/stats";
 import type { TowerMob } from "@herzies/shared/town-net";
+import { DiscHands } from "./hands";
 import { type Mob, type MobJudge, MobPack, SEEN_LAG_MS } from "./mobs";
 
 // ---------------------------------------------------------------------------
@@ -366,6 +367,8 @@ export class BossEngine {
   private pending: PendingHit[] = [];
   /** Cast tokens per player: refill one per `castEveryMs`, up to the burst. */
   private casts = new Map<string, { tokens: number; at: number }>();
+  /** A Slinger's discs: a hand throws once its disc is back. */
+  private hands = new DiscHands();
   private invulnUntil = new Map<string, number>();
   private safeUntil = new Map<string, number>();
   private killed = false;
@@ -614,6 +617,7 @@ export class BossEngine {
 
   forget(uid: string): void {
     this.casts.delete(uid);
+    this.hands.forget(uid);
     this.invulnUntil.delete(uid);
     this.safeUntil.delete(uid);
     this.threat.delete(uid);
@@ -945,6 +949,18 @@ export class BossEngine {
       now,
       disc ? DISC_RANGE : undefined,
     );
+    // Both discs still out: nothing to throw (counted as a miss, never a
+    // strike: the app holds the same pace, so it's lag, not a cheat).
+    if (
+      disc &&
+      !this.hands.take(
+        uid,
+        now,
+        hit?.dist ?? null,
+        castSpeed(this.buffs.get(uid) ?? [], now),
+      )
+    )
+      return "miss";
     if (!hit) return "miss";
     const at =
       now +

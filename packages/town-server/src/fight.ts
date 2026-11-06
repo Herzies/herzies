@@ -747,6 +747,8 @@ export class FightRuntime {
       return "ignored";
     const pos = this.history.at(uid, now);
     if (!pos) return "ignored";
+    // Winding up a Rimshot: its hands are busy (the app swings none).
+    if (this.slams.has(uid)) return "ignored";
     if (this.healers.has(uid) && p.attack === "wave")
       return this.healBolt(p, pos, yaw, pitch, now);
     return this.engine.cast(

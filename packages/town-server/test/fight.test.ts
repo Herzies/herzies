@@ -664,3 +664,23 @@ describe("reconnecting", () => {
     expect(f.rejoinAt("a", { x: 2.5, z: 8 }, T0 + 1_500)).toBeNull();
   });
 });
+
+describe("a Rimshot's wind-up", () => {
+  it("swings nothing else until it lands", () => {
+    const f = new FightRuntime(claim(), T0, 7);
+    f.join(
+      "tank",
+      1,
+      ticket("tank", 200, { cls: "percussionist", sk: [["rimshot", 1]], lv: 20 }),
+      { x: 0, z: TUNING.boss.z + TUNING.boss.radius + 1 },
+      T0 - 5_000,
+    );
+    const at = { x: 0, z: TUNING.boss.z + TUNING.boss.radius + 1 };
+    f.onState("tank", at.x, at.z, T0);
+    expect(f.skill("tank", "rimshot", Math.PI, 0, T0).result).toBe("used");
+    expect(f.cast("tank", Math.PI, 0, T0 + 200)).toBe("ignored");
+    f.step(T0 + 900);
+    f.onState("tank", at.x, at.z, T0 + 1_000);
+    expect(f.cast("tank", Math.PI, 0, T0 + 1_000)).not.toBe("ignored");
+  });
+});

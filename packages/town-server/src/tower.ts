@@ -43,6 +43,7 @@ import {
   type Telegraph,
   TUNING,
 } from "./boss";
+import { DiscHands } from "./hands";
 import { type MobJudge, MobPack, SEEN_LAG_MS, type TowerArena } from "./mobs";
 
 export { predict, SEEN_LAG_MS, type TowerArena } from "./mobs";
@@ -57,6 +58,8 @@ export class TowerEngine {
   private readonly pack: MobPack;
   private cleared = false;
   private casts = new Map<string, { tokens: number; at: number }>();
+  /** A Slinger's discs: a hand throws once its disc is back. */
+  private hands = new DiscHands();
   private safeUntil = new Map<string, number>();
   private buffs = new Map<string, Buff[]>();
   /** Cymbrella domes standing (or about to). */
@@ -163,6 +166,7 @@ export class TowerEngine {
 
   forget(uid: string): void {
     this.casts.delete(uid);
+    this.hands.forget(uid);
     this.safeUntil.delete(uid);
     this.buffs.delete(uid);
   }
@@ -239,6 +243,17 @@ export class TowerEngine {
       seen,
       disc ? DISC_RANGE : undefined,
     );
+    // Both discs out: see BossEngine.cast.
+    if (
+      disc &&
+      !this.hands.take(
+        uid,
+        now,
+        target?.dist ?? null,
+        castSpeed(this.buffs.get(uid) ?? [], now),
+      )
+    )
+      return "miss";
     if (!target) return "miss";
     const flight = disc
       ? discLandsAfterMs(target.dist)
