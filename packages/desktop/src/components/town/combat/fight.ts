@@ -407,8 +407,12 @@ export function resetBossFight(): void {
     !bossFight.shapes.length &&
     !bossFight.closing &&
     !bossFight.loots.length
-  )
+  ) {
+    // No fight to forget, but a practice's buffs, domes and slams (and
+    // where everyone stood) don't come along to the next island.
+    resetSkills();
     return;
+  }
   bossFight.on = false;
   setRegenFrozen(false);
   bossFight.event = "";
@@ -494,6 +498,20 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       // drawn by entity).
       bossFight.you = m.you;
       if (!m.fight) {
+        // Back into a room with no fight on (it ended while we were away,
+        // or the room started over): what we had is over. The end screen
+        // and any loot stay, as for a fight that closed.
+        if (bossFight.on) {
+          bossFight.on = false;
+          bossFight.shapes = [];
+          bossFight.raid = null;
+          bossFight.tally = null;
+          bossFight.say = null;
+          bossFight.bossPath = [];
+          towerMobs.clear();
+          setRegenFrozen(false);
+          emitHp();
+        }
         emit();
         return;
       }
@@ -846,6 +864,9 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
         clearBuff(clock.you() ?? -1, id);
       // Nor the dome you put up: nobody may run into one that isn't there.
       if (id === "cymbrella") removeDome(clock.you() ?? -1);
+      // Nor the Rimshot you wound up: it never lands (Combat sees the slam
+      // gone and stops the swing, the root and the drum roll).
+      if (id === "rimshot") cancelSlam(clock.you() ?? -1);
       if (m.reason) notify(REFUSALS[m.reason], { kind: "info" });
       emitSkills();
       return;

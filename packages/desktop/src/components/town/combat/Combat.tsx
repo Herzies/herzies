@@ -70,7 +70,7 @@ import {
   noteSkillCast,
   queueSkill,
   setBuff,
-  setEntityAt,
+  setSelfAt,
   shuffleOf,
   skillReady,
   skills,
@@ -500,12 +500,7 @@ export function Combat({
     // Where you are, for effects that follow you (a Cymbrella overhead).
     if (herzie) {
       herzie.root.getWorldPosition(chest);
-      setEntityAt(
-        bossFight.you ?? -1,
-        chest.x,
-        chest.z,
-        chest.y + herzie.height,
-      );
+      setSelfAt(bossFight.you ?? -1, chest.x, chest.z, chest.y + herzie.height);
     }
 
     // --- A class skill: pressed (or pressed just before it was ready).

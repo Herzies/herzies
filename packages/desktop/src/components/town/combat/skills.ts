@@ -95,6 +95,18 @@ export const entityAt = new Map<
 
 /** Where entity `id` is drawn now: its entry updated in place (this runs
  * every frame for every herzie). */
+/** The id you were last set under (see setSelfAt). */
+let selfId: number | null = null;
+
+/** Where you stand, under your id now (-1 before the room gives you one).
+ * A new id (the first welcome, a reconnect) drops the old entry, so no
+ * frozen copy of you is left behind to be locked onto as an ally. */
+export function setSelfAt(id: number, x: number, z: number, top: number) {
+  if (selfId !== null && selfId !== id) entityAt.delete(selfId);
+  selfId = id;
+  setEntityAt(id, x, z, top);
+}
+
 export function setEntityAt(id: number, x: number, z: number, top: number) {
   const e = entityAt.get(id);
   if (e) {
@@ -264,6 +276,7 @@ export function resetSkills(): void {
   skills.channels.clear();
   skills.queued = null;
   entityAt.clear();
+  selfId = null;
   clearDomes();
   clearSlams();
   clearStuns();
