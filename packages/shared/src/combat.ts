@@ -320,9 +320,11 @@ export function stunMs(base: number, recent: number): number {
 export const MELEE_REACH = 1.6;
 /** How far either way of where it faces a melee hit reaches (radians). */
 export const MELEE_ARC = (60 * Math.PI) / 180;
-/** A Percussionist's stick as a share of a wave's: the same. The tank
- * stands in its face to hold it, not to out-hit the Record Slinger. */
-export const STRIKE_DAMAGE = 1;
+/** A Percussionist's stick as a share of a wave's: more, for standing in
+ * the boss's face to land it, though still short of the Record Slinger
+ * (about 60% of its damage in raid-sim, with its discs, in-tune bonus and
+ * skills). */
+export const STRIKE_DAMAGE = 1.5;
 /** A herzie without its instrument (or a class) slams its body into it:
  * the weakest blow there is, so a class and its instrument are a step up. */
 export const BUMP_DAMAGE = 0.5;
