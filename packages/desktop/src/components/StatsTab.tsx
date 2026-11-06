@@ -1,11 +1,13 @@
 import {
   buffMult,
+  classDef,
   defReduction,
   formatStat,
   type HerzieStats,
   healMult,
   maxHp as maxHpFor,
   NO_STAT_POINTS,
+  PERCUSSIONIST_DEF_MULT,
   POINT_STATS,
   type PointStat,
   STAT_KEYS,
@@ -60,6 +62,7 @@ function secondaryLines(
   nowStamina: number,
   next: HerzieStats,
   nextStamina: number,
+  cls?: string | null,
 ): Line[] {
   const lines: Line[] = [];
   if (level)
@@ -104,18 +107,24 @@ function secondaryLines(
     text: (v) => `+${v}%`,
     hint: "Buffs you give, not ones you get",
   });
-  for (const key of SECONDARY)
+  for (const key of SECONDARY) {
+    // A Percussionist's Def counts more in a fight (classDef): show that.
+    const def = key === "def";
     lines.push({
       key,
       label: STAT_LABELS[key],
-      now: now[key],
-      next: next[key],
+      now: def ? classDef(cls, now.def) : now[key],
+      next: def ? classDef(cls, next.def) : next[key],
       text: (v) => formatStat(key, v),
-      hint:
-        key === "def"
-          ? `Takes ${Math.round(defReduction(next.def) * 100)}% off every hit`
-          : undefined,
+      hint: def
+        ? `Takes ${Math.round(defReduction(classDef(cls, next.def)) * 100)}% off every hit${
+            cls === "percussionist"
+              ? ` (a Percussionist's Def counts ${PERCUSSIONIST_DEF_MULT}×)`
+              : ""
+          }`
+        : undefined,
     });
+  }
   return lines;
 }
 
@@ -147,12 +156,15 @@ export function StatsTab({
   stats,
   level,
   points,
+  cls,
   onLog,
 }: {
   /** What the herzie's cards give. */
   stats: HerzieStats;
   level: number;
   points: StatPoints;
+  /** Its class: a Percussionist's Def counts more. */
+  cls?: string | null;
   onLog?: (msg: string) => void;
 }) {
   /** The allocation being placed; equal to `points` when nothing's moved. */
@@ -254,6 +266,7 @@ export function StatsTab({
             points.stamina,
             next,
             placing.stamina,
+            cls,
           ).map((line) => (
             <LineRow key={line.key} line={line} />
           ))}

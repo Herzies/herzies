@@ -12,6 +12,8 @@
 import { BOSS_WANDER, bossMaxHp } from "@herzies/shared/boss-fight";
 import {
   CAST_INTERVAL_MS,
+  type Contribution,
+  contributionOf,
   DISC_RANGE,
   HEAL_TARGET_HEIGHT,
   MELEE_REACH,
@@ -194,6 +196,10 @@ type Result = {
   wander: number;
   /** Its minions that fell. */
   minions: number;
+  /** Health each herzie lost (as shares of its own max, summed), by uid. */
+  lost: Map<string, number>;
+  /** Each herzie's contribution score at the end, by uid. */
+  scores: Map<string, number>;
 };
 
 function raid(bots: Bot[], seed: number, limitMs = 17 * 60_000): Result {
@@ -215,6 +221,8 @@ function raid(bots: Bot[], seed: number, limitMs = 17 * 60_000): Result {
   let minHp = 1;
   let shapes = 0;
   let lanes = 0;
+  const lost = new Map<string, number>();
+  const hpWas = new Map<string, number>();
   let t = T0;
   while (t - STARTS < limitMs && !f.closeWhy) {
     t += STEP;
@@ -374,7 +382,19 @@ function raid(bots: Bot[], seed: number, limitMs = 17 * 60_000): Result {
       if (o.msg.t === "down") downs++;
       if (o.msg.t === "revived") revives++;
     }
+    for (const b of bots) {
+      const p = f.player(b.uid);
+      if (!p) continue;
+      const was = hpWas.get(b.uid) ?? p.hp;
+      if (p.hp < was)
+        lost.set(b.uid, (lost.get(b.uid) ?? 0) + (was - p.hp) / p.maxHp);
+      hpWas.set(b.uid, p.hp);
+    }
   }
+  const dealt = (f as unknown as { dealt: Map<string, Contribution> }).dealt;
+  const scores = new Map(
+    [...dealt].map(([uid, c]) => [uid, contributionOf(c)] as const),
+  );
   if (LOG)
     console.log(
     `SIM ${bots.map((b) => b.role[0]).join("")} seed=${seed} -> ${f.closeWhy} in ${min(t - STARTS)} min, maxHp=${f.engine.maxHp}, hp left=${Math.round(f.engine.hp)}, downs=${downs}, revives=${revives}, minions=${minionsDown}, hits=${hitsTaken}, shapes=${shapes}, charges=${lanes}, minHp=${Math.round(minHp * 100)}%`,
@@ -387,6 +407,8 @@ function raid(bots: Bot[], seed: number, limitMs = 17 * 60_000): Result {
     revives,
     wander,
     minions: minionsDown,
+    lost,
+    scores,
   };
 }
 
@@ -427,6 +449,36 @@ describe("the raid, simulated", () => {
       expect(r.ms).toBeLessThan(10 * 60_000);
     }
   }, 60_000);
+
+  it("a party without a Percussionist takes a beating the trio doesn't", () => {
+    const seeds = [1, 2, 3, 4];
+    const trio = seeds.map((sd) => raid(party(TRIO), sd));
+    const bare = seeds.map((sd) =>
+      raid(party(["bard", "record_slinger", "record_slinger"]), sd),
+    );
+    const downs = (rs: Result[]) => rs.reduce((n, r) => n + r.downs, 0);
+    // Nobody holds the busters: they land on the damage dealers.
+    expect(downs(bare)).toBeGreaterThan(downs(trio));
+    const slingerLost = (rs: Result[]) =>
+      rs.reduce(
+        (n, r) =>
+          n +
+          [...r.lost]
+            .filter(([uid]) => uid.startsWith("record_slinger"))
+            .reduce((m, [, v]) => m + v, 0),
+        0,
+      );
+    expect(slingerLost(bare)).toBeGreaterThan(slingerLost(trio));
+  });
+
+  it("the trio's Percussionist ranks with its Record Slinger, not far below", () => {
+    for (const sd of [1, 2]) {
+      const r = raid(party(TRIO), sd);
+      const tank = r.scores.get("percussionist-1") ?? 0;
+      const slinger = r.scores.get("record_slinger-2") ?? 0;
+      expect(tank, `seed ${sd}`).toBeGreaterThan(slinger * 0.75);
+    }
+  });
 
   it("a lone Record Slinger can win, before the enrage ends it", () => {
     const r = raid(party(["record_slinger"]), 4);

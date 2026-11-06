@@ -1,4 +1,10 @@
-import { CAST_INTERVAL_MS, DOME, HEAL_BOLT, WAVE_HAND_HEIGHT } from "@herzies/shared/combat";
+import {
+  CAST_INTERVAL_MS,
+  DOME,
+  HEAL_BOLT,
+  tauntPointsPerSecond,
+  WAVE_HAND_HEIGHT,
+} from "@herzies/shared/combat";
 import {
   SKILL_COOLDOWN_GRACE_MS,
   SKILL_DEFS,
@@ -8,7 +14,13 @@ import { timingAttackSpeed } from "@herzies/shared/stats";
 import type { ServerMessage, TownTicketPayload } from "@herzies/shared/town-net";
 import { armed } from "./arms";
 import { describe, expect, it } from "vitest";
-import { BossEngine, type BossPlayer, castSpeed, TUNING } from "../src/boss";
+import {
+  BossEngine,
+  type BossPlayer,
+  castSpeed,
+  MAX_HIT_FRACTION,
+  TUNING,
+} from "../src/boss";
 import { FightRuntime, type Outbound, statsOf } from "../src/fight";
 
 const T0 = 5_000_000;
@@ -265,7 +277,7 @@ describe("the boss's side", () => {
     expect(hit).toMatchObject({
       uid: "a",
       damage: 0,
-      blocked: TUNING.slam.damage,
+      blocked: Math.min(TUNING.slam.damage, MAX_HIT_FRACTION * 200),
       shelteredBy: "tank",
     });
   });
@@ -275,7 +287,7 @@ describe("the boss's side", () => {
     boss.addDome("tank", 0, 8 + DOME.radius + 1.5, T0, 60_000);
     const a = player("a", { x: 0, z: 8 });
     const [hit] = firstHits(boss, [a]);
-    expect(hit.damage).toBe(TUNING.slam.damage);
+    expect(hit.damage).toBe(Math.min(TUNING.slam.damage, MAX_HIT_FRACTION * 200));
     expect(hit.shelteredBy).toBeUndefined();
   });
 
@@ -304,6 +316,32 @@ describe("the boss's side", () => {
     expect(dps?.hp).toBe(before);
     const xp = f.report(at + 4_501, true)?.skills?.xp ?? [];
     expect(xp.find((x) => x.uid === "tank" && x.skill === "cymbrella")?.xp).toBeGreaterThan(0);
+  });
+
+  it("in a fight, holding the boss with a Taunt pays its Percussionist, per second held", () => {
+    const f = new FightRuntime(claim(), T0);
+    f.join("tank", 1, ticket("tank", [["taunt", 1]]), { x: 0, z: 8 }, T0 - 5_000);
+    f.join("dps", 2, ticket("dps", [["backspin", 1]]), { x: 4, z: 8 }, T0 - 5_000);
+    const at = T0 + TUNING.openingMs;
+    for (let t = T0 - 1_000; t <= at; t += 50) {
+      f.onState("tank", 0, 8, t);
+      f.onState("dps", 4, 8, t);
+      f.step(t);
+    }
+    expect(f.skill("tank", "taunt", 0, 0, at).result).toBe("used");
+    // Past the taunt's end: it pays for the time it held, and no longer.
+    for (let t = at; t < at + SKILL_DEFS.taunt.durationMs! + 2_000; t += 50) {
+      f.onState("tank", 0, 8, t);
+      f.onState("dps", 4, 8, t);
+      f.step(t);
+    }
+    const rows = f.report(at + 20_000, true)?.boss?.damage ?? [];
+    const held = SKILL_DEFS.taunt.durationMs! / 1000;
+    const want = held * tauntPointsPerSecond(100_000, 2);
+    const taunt = rows.find((r) => r.uid === "tank")?.taunt ?? 0;
+    expect(taunt).toBeGreaterThan(want * 0.95);
+    expect(taunt).toBeLessThan(want * 1.05);
+    expect(rows.find((r) => r.uid === "dps")?.taunt).toBeUndefined();
   });
 
   it("keeps the boss out: it walks up to the edge, no further", () => {

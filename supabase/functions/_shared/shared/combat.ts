@@ -296,19 +296,42 @@ export const PUNCH_DAMAGE = 0.6;
 // screen, rewards, statue and leaderboard. Damage counts as it is; healing
 // and what a Cymbrella blocked count this many times over, because a heal is
 // worth far more than a hit (a Bard restores ~100 HP in the time a damage
-// dealer hits for ~4,000). Mirrored by boss_contribution in 00111.
+// dealer hits for ~4,000). Holding the boss with a Taunt counts too, per
+// second held (see tauntPointsPerSecond). Mirrored by boss_contribution in
+// 00111 and 00142.
 
 /** How many points of damage one HP healed or blocked is worth. */
 export const CONTRIBUTION_SUPPORT_WEIGHT = 10;
 
+/** A second of holding the boss with a Taunt is worth this many times what
+ * an average herzie deals in a second of a fight that runs to
+ * {@link TAUNT_FIGHT_SECONDS}: a Percussionist who holds it most of the
+ * fight (two trading it) ranks with the damage dealers, not below them. */
+export const TAUNT_CONTRIBUTION_WEIGHT = 1.5;
+/** The fight length a taunt's worth is sized from (the raid's target). */
+export const TAUNT_FIGHT_SECONDS = 390;
+
+/** Points a second held with a Taunt is worth, for a boss of `maxHp` and a
+ * roster of `roster`: from the boss's health, so a bigger boss pays more. */
+export function tauntPointsPerSecond(maxHp: number, roster: number): number {
+  if (!(maxHp > 0)) return 0;
+  return (
+    (TAUNT_CONTRIBUTION_WEIGHT * maxHp) /
+    Math.max(1, Math.floor(roster) || 1) /
+    TAUNT_FIGHT_SECONDS
+  );
+}
+
 /** What a herzie did for a fight: damage dealt to the boss, HP healed, HP
- * blocked, and damage dealt to its minions (`adds`: counted like boss damage
- * for the ranking, but never taken off the boss's health). */
+ * blocked, damage dealt to its minions (`adds`: counted like boss damage
+ * for the ranking, but never taken off the boss's health), and the points
+ * holding the boss with a Taunt earned (`taunt`, already in points). */
 export type Contribution = {
   damage: number;
   healing: number;
   blocked: number;
   adds?: number;
+  taunt?: number;
 };
 
 /** A herzie's contribution score. */
@@ -316,6 +339,7 @@ export function contributionOf(c: Contribution): number {
   return (
     c.damage +
     (c.adds ?? 0) +
+    (c.taunt ?? 0) +
     CONTRIBUTION_SUPPORT_WEIGHT * (c.healing + c.blocked)
   );
 }

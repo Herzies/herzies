@@ -175,6 +175,16 @@ export const IN_TUNE = {
   damage: 1.25,
 } as const;
 
+/** A Percussionist's Def counts this many times over in a fight: the
+ * tank's own toughness, which no other class can buy with Stamina. */
+export const PERCUSSIONIST_DEF_MULT = 1.5;
+
+/** The Def a herzie of class `cls` fights with. */
+export function classDef(cls: string | null | undefined, def: number): number {
+  const d = Math.max(0, Number.isFinite(def) ? def : 0);
+  return cls === "percussionist" ? d * PERCUSSIONIST_DEF_MULT : d;
+}
+
 /** What an in-tune herzie of class `cls` gets: the kind of bonus and its
  * value, or null for a classless herzie (or an unknown class). */
 export function inTuneBonus(

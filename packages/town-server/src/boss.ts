@@ -117,15 +117,24 @@ export const TUNING = {
    * its health to one). Raised for the raid: a slam you stand in should
    * sting a level-30 herzie, and a ring you're caught by should hurt. The
    * ring's windup lets someone at the far wall reach its middle wherever
-   * the boss has walked to. */
-  slam: { radius: 3, windupMs: 1_600, damage: 58 },
-  ring: { inner: 6.5, windupMs: 4_200, damage: 60 },
+   * the boss has walked to. Raised again (Nov 2026): a raid of five took
+   * 1.6k damage in all, so its Bard had nothing to do. */
+  slam: { radius: 3, windupMs: 1_600, damage: 75 },
+  ring: { inner: 6.5, windupMs: 4_200, damage: 78 },
   /** The tank-buster: aimed at whoever the boss is focused on, and it
    * follows them — it can't be dodged, only taken. Sized so that a herzie
    * who isn't tanking it is badly hurt, and a Percussionist (Def, a
    * Cymbrella, in tune) is comfortable. Without a taunt, only once there's
-   * a party to hold its attention. */
-  buster: { everyMs: 10_000, windupMs: 2_000, damage: 85, minPlayers: 2 },
+   * a party to hold its attention. It may take up to `maxHitFraction` of
+   * a herzie's health, past the usual one-hit cap: under that cap anyone
+   * could take one, and a tank had nothing to hold. */
+  buster: {
+    everyMs: 10_000,
+    windupMs: 2_000,
+    damage: 500,
+    minPlayers: 2,
+    maxHitFraction: 0.8,
+  },
   /** What the boss hates: damage dealt, healing done, and the Cymbrella's
    * clang. Fades by `decayPerSec` a second, so it keeps moving. */
   threat: { perDamage: 1, perHeal: 0.5, cymbrella: 500, decayPerSec: 0.1 },
@@ -136,7 +145,7 @@ export const TUNING = {
   /** Each buster leaves its target Rattled: the next one hits harder, per
    * stack, past the usual one-hit cap (to a ceiling). Fades unhit; a
    * second tank taking a turn is how it's cleared. */
-  rattled: { perStack: 0.25, maxStacks: 4, ms: 20_000, maxHitFraction: 0.6 },
+  rattled: { perStack: 0.25, maxStacks: 4, ms: 20_000 },
   /** From phase 2, now and then it charges whoever keeps furthest off (at
    * least `minDist` away): it faces them for `windupMs` as a lane `width`
    * wide fills on the floor, then barrels down it at `speed`, on through
@@ -150,7 +159,7 @@ export const TUNING = {
     width: 2.6,
     overshoot: 2,
     speed: 14,
-    damage: 60,
+    damage: 78,
   },
   /** In reach of whoever it's on, it doesn't stand still: every so often
    * it shifts round them by `angle` (radians either way), at `speed` of
@@ -169,7 +178,7 @@ export const TUNING = {
     everyMs: 25_000,
     windupMs: 2_500,
     radius: 2.5,
-    damage: 40,
+    damage: 55,
     perMarks: 6,
   },
 } as const;
@@ -1310,7 +1319,10 @@ export class BossEngine {
           const r = tg.kind === "buster" ? this.rattledOf(p.uid, tg.hitAt) : 0;
           const would = mitigatedHit(p, tg, this.buffs.get(p.uid) ?? [], {
             mult: 1 + TUNING.rattled.perStack * r,
-            cap: r > 0 ? TUNING.rattled.maxHitFraction : MAX_HIT_FRACTION,
+            cap:
+              tg.kind === "buster"
+                ? TUNING.buster.maxHitFraction
+                : MAX_HIT_FRACTION,
           });
           hits.push(shelteredHit(would, dome.by));
           continue;
@@ -1320,7 +1332,7 @@ export class BossEngine {
           hits.push(
             mitigatedHit(p, tg, this.buffs.get(p.uid) ?? [], {
               mult: 1 + TUNING.rattled.perStack * r,
-              cap: r > 0 ? TUNING.rattled.maxHitFraction : MAX_HIT_FRACTION,
+              cap: TUNING.buster.maxHitFraction,
             }),
           );
           const stacks = Math.min(TUNING.rattled.maxStacks, r + 1);

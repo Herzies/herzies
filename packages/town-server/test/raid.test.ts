@@ -348,8 +348,10 @@ describe("Resurrect", () => {
       if (!tank || !bard) throw new Error("missing");
       tank.down = true;
       tank.hp = 0;
-      // The boss is still swinging: keep the Bard standing for the test.
+      // The boss is still swinging (a buster and a slam can knock out a
+      // 200 HP Bard mid-channel): keep the Bard standing for the test.
       bard.down = false;
+      bard.maxHp = 5_000;
       bard.hp = bard.maxHp;
       expect(f.skill("bard", "resurrect", 0, 0, t).result).toBe("used");
       const out = run(f, t, t + 3_200, at);

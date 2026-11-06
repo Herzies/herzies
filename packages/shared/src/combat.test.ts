@@ -17,6 +17,9 @@ import {
   nextInChain,
   pushOutOfDomes,
   stunMs,
+  TAUNT_CONTRIBUTION_WEIGHT,
+  TAUNT_FIGHT_SECONDS,
+  tauntPointsPerSecond,
   type Vec3,
   WAVE_HAND_HEIGHT,
   WAVE_RANGE,
@@ -146,6 +149,28 @@ describe("contribution", () => {
     expect(
       contributionOf({ damage: 300, healing: 80, blocked: 0 }),
     ).toBeGreaterThan(contributionOf({ damage: 1000, healing: 0, blocked: 0 }));
+  });
+
+  it("counts a taunt's points as they are", () => {
+    expect(
+      contributionOf({ damage: 100, healing: 0, blocked: 0, taunt: 250 }),
+    ).toBe(350);
+  });
+
+  it("pays a taunt second as a share of an average herzie's damage a second", () => {
+    // Five herzies against 553k: one fight-length's worth each, over the
+    // target fight, times the weight.
+    expect(tauntPointsPerSecond(553_371, 5)).toBeCloseTo(
+      (TAUNT_CONTRIBUTION_WEIGHT * 553_371) / 5 / TAUNT_FIGHT_SECONDS,
+    );
+    // A bigger boss pays more; nothing for no boss or a junk roster.
+    expect(tauntPointsPerSecond(1_000_000, 5)).toBeGreaterThan(
+      tauntPointsPerSecond(500_000, 5),
+    );
+    expect(tauntPointsPerSecond(0, 5)).toBe(0);
+    expect(tauntPointsPerSecond(100_000, 0)).toBe(
+      tauntPointsPerSecond(100_000, 1),
+    );
   });
 });
 

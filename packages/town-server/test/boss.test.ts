@@ -7,6 +7,7 @@ import {
 import { TOWN_WALK_SPEED } from "@herzies/shared/town-net";
 import { BOSS_ENRAGE, BOSS_WANDER } from "@herzies/shared/boss-fight";
 import { RIMSHOT } from "@herzies/shared/skills";
+import { maxHp as maxHpOf } from "@herzies/shared/vitals";
 import { describe, expect, it } from "vitest";
 import {
   BossEngine,
@@ -59,7 +60,7 @@ describe("tuning invariants", () => {
   });
 
   it("a level-20 herzie with no Stamina takes hits within the budget", () => {
-    const max = 200;
+    const max = maxHpOf(20);
     expect(TUNING.slam.damage).toBeLessThanOrEqual(MAX_HIT_FRACTION * max);
     expect(TUNING.ring.damage).toBeLessThanOrEqual(MAX_HIT_FRACTION * max);
   });
@@ -608,6 +609,25 @@ describe("production pass: fairness and the raid's size", () => {
     // Busters only (slams on the focus are aimed too): the biggest grow.
     const sorted = [...hits].sort((a, b) => a - b);
     expect(sorted[sorted.length - 1]).toBeGreaterThan(TUNING.buster.damage);
+  });
+
+  it("a buster may take past the usual one-hit cap, to its own", () => {
+    const e = engine(1000, 1000);
+    // 300 HP, no Def: the usual cap is 90; a buster takes up to 240.
+    const tank = still("tank", 0, 5, 300);
+    const other = still("dps", 6, 9, 300);
+    e.setTaunt("tank", T0 + 60_000, T0);
+    let first: number | null = null;
+    for (let t = T0; t < T0 + 20_000 && first === null; t += 50) {
+      const busters = new Set(
+        e.active.filter((tg) => tg.kind === "buster").map((tg) => tg.id),
+      );
+      for (const ev of e.update(t, [tank, other]))
+        if (ev.t === "resolve" && busters.has(ev.id))
+          for (const h of ev.hits) if (h.uid === "tank") first = h.damage;
+    }
+    expect(first).toBe(Math.round(TUNING.buster.maxHitFraction * 300));
+    expect(first).toBeGreaterThan(MAX_HIT_FRACTION * 300);
   });
 
   it("doesn't flip its focus between two who hate it about the same", () => {

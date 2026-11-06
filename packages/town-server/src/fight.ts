@@ -17,6 +17,7 @@ import {
   BOSS_HP_PER_PLAYER,
   BOSS_OUT_GRACE_MS,
   bossMaxHp,
+  classDef,
   IN_TUNE,
   inTuneBonus,
   MINION_FLOOR,
@@ -45,6 +46,7 @@ import {
   type HitStats,
   healTarget,
   meleeDamage,
+  tauntPointsPerSecond,
   WAVE_HAND_HEIGHT,
   WAVE_SPEED,
 } from "@herzies/shared/combat";
@@ -270,6 +272,8 @@ export type BossRow = {
   healing?: number;
   blocked?: number;
   adds?: number;
+  /** Points held with a Taunt (00142). */
+  taunt?: number;
 };
 
 /** Until the end screen's table comes back, the fight reports this often. */
@@ -375,6 +379,8 @@ export class FightRuntime {
   private readonly minionFloor: number | null;
   /** Resurrects being played, by their Bard. */
   private channels = new Map<string, Channel>();
+  /** The last step a Taunt's hold was paid up to (see creditTaunt). */
+  private tauntAt: number | null = null;
   /** Rimshots winding up: where each Percussionist stands (held there),
    * when it lands, and at what level. */
   private slams = new Map<
@@ -1238,7 +1244,7 @@ export class FightRuntime {
         uid: p.uid,
         alive: !p.down,
         maxHp: p.maxHp,
-        def: p.stats.def,
+        def: classDef(p.cls, p.stats.def),
         posAt: (t) => this.history.at(p.uid, t),
       });
     }
@@ -1247,6 +1253,7 @@ export class FightRuntime {
       // update.
       this.stepSlams(now, out);
       for (const ev of this.engine.update(now, alive)) this.apply(ev, out, now);
+      if (boss) this.creditTaunt(boss, now);
       this.landBolts(now, out);
       const tower = this.tower;
       if (tower) {
@@ -1901,9 +1908,11 @@ export class FightRuntime {
           const healing = tenths(c.healing);
           const blocked = tenths(c.blocked);
           const adds = Math.round(c.adds ?? 0);
+          const taunt = Math.round(c.taunt ?? 0);
           if (healing > 0) row.healing = healing;
           if (blocked > 0) row.blocked = blocked;
           if (adds > 0) row.adds = adds;
+          if (taunt > 0) row.taunt = taunt;
           return row;
         }),
       };
@@ -2177,6 +2186,23 @@ export class FightRuntime {
         ? { yaw: round(t.yaw ?? 0), len: round(t.len ?? 0) }
         : {}),
     };
+  }
+
+  /** Holding the boss is the tank's work: whoever holds a Taunt earns
+   * for the time since the last step (a second at most, so a stall can't
+   * pay a lump). */
+  private creditTaunt(boss: BossEngine, now: number) {
+    const since = this.tauntAt;
+    this.tauntAt = now;
+    const taunter = boss.taunter(now);
+    if (!taunter || since === null || now <= since) return;
+    const roster = this.roster?.size ?? this.players.size;
+    this.credit(
+      taunter,
+      "taunt",
+      (Math.min(now - since, 1_000) / 1000) *
+        tauntPointsPerSecond(this.engine.maxHp, roster),
+    );
   }
 
   /** `uid` did `amount` of `kind` for the fight: into the next batch (and

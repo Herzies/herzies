@@ -1629,6 +1629,7 @@ function App() {
                           stats={getHerzieStatsFromUnits(state.units)}
                           level={herzie.level}
                           points={herzie.statPoints}
+                          cls={herzie.class}
                           onLog={addLog}
                         />
                       ),
