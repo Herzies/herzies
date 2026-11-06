@@ -13,6 +13,7 @@ import {
 } from "@herzies/shared";
 import {
   BOSS_STAND,
+  bossReaches,
   DISC_DAMAGE,
   DISC_RANGE,
   HEAL_TARGET_HEIGHT,
@@ -844,12 +845,40 @@ export function Combat({
           inBossRoom() &&
           Math.hypot(a.point.x - bossAt.x, a.point.z - bossAt.z) <
             BOSS_STAND.radius + 0.8;
+        // The boss by the server's own rule (aim assist and its whole body,
+        // from where sendBossCast aims): a throw that grazes it hits it
+        // here too, rather than flying past while the number comes in.
+        let assisted: number | null = null;
+        if (inBossRoom() && !target && !(solid && onBoss)) {
+          herzie.root.getWorldPosition(chest);
+          const ox = chest.x;
+          const oz = chest.z;
+          const ax = a.point.x - ox;
+          const ay = a.point.y - WAVE_HAND_HEIGHT;
+          const az = a.point.z - oz;
+          const len = Math.hypot(ax, ay, az) || 1;
+          assisted = bossReaches(
+            [ox, WAVE_HAND_HEIGHT, oz],
+            [ax / len, ay / len, az / len],
+            DISC_RANGE,
+            bossAt,
+          );
+          // A wall nearer than it is still where it turns.
+          if (assisted !== null && solid && toAim < assisted) assisted = null;
+        }
         discField.throw(from, toward, {
           mine: true,
           owner: herzie,
           hand: h,
-          reach: solid ? toAim : DISC_RANGE,
-          strike: solid ? (onBoss ? "target" : "wall") : null,
+          reach: assisted ?? (solid ? toAim : DISC_RANGE),
+          strike:
+            assisted !== null
+              ? "target"
+              : solid
+                ? onBoss
+                  ? "target"
+                  : "wall"
+                : null,
           target,
           quick: speed,
           bounces: shuffleOf(bossFight.you ?? -1, now),
