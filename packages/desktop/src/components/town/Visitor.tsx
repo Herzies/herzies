@@ -40,13 +40,15 @@ const MAX_TURN_SPEED = 5;
  * you as you come near, and solid enough to bump into, with their name
  * over their head (which opens them). Away, there's nothing. A few
  * residents (ROAMERS) wander round their spot and dance now and then, the
- * ring and name going with them.
+ * ring and name going with them. `bare` (the website's Town) leaves out
+ * the ring, the name and the "!".
  */
 export function Visitor({
   spot,
   ground = 0,
   map,
   onOpen,
+  bare,
 }: {
   spot: TownSpot;
   /** How high the ground is where they stand. */
@@ -54,6 +56,8 @@ export function Visitor({
   /** The island they're on: what a roamer walks over. */
   map?: TownMap;
   onOpen: (openKey: string) => void;
+  /** Just the herzie: no ring, name or "!" (the website's Town). */
+  bare?: boolean;
 }) {
   const { card, at, standing, status } = spot;
   const live = card.status === "live";
@@ -182,7 +186,7 @@ export function Visitor({
         </>
       )}
       <group ref={follow} position={[at.x, ground, at.z]}>
-        {herzie && (
+        {herzie && !bare && (
           <mesh rotation-x={-Math.PI / 2} position={[0, 0.03, 0]}>
             <ringGeometry args={[1.05 * size, 1.05 * size + 0.2, 40]} />
             <meshBasicMaterial
@@ -193,7 +197,7 @@ export function Visitor({
             />
           </mesh>
         )}
-        {herzie && (
+        {herzie && !bare && (
           <Html
             position={[0, herzie.height * size + 0.5, 0]}
             center
@@ -216,7 +220,7 @@ export function Visitor({
             </div>
           </Html>
         )}
-        {herzie && fresh && (
+        {herzie && fresh && !bare && (
           <Html
             position={[0, herzie.height * size + 1.4, 0]}
             center

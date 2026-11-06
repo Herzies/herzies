@@ -1,19 +1,31 @@
+import {
+  BOBOKU_KEY,
+  MARKET_KEY,
+  MEDEA_KEY,
+  NAKATA_KEY,
+  PIP_KEY,
+  TOWER_GUARD_KEY,
+} from "@herzies/shared";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { Physics } from "@react-three/rapier";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { ambient } from "../components/town/ambient";
 import type { Champion } from "../components/town/champion";
 import { driftClouds } from "../components/town/depth";
+import { groundY, SPOT_NAMES, type TownMap } from "../components/town/map";
 import { Post } from "../components/town/Post";
 import { SUPERSAMPLE, wholePixelDpr } from "../components/town/pixelSize";
 import {
   HOME_MAP,
+  spotsOf,
   type TownRuntime,
   TownRuntimeContext,
+  type TownSpot,
 } from "../components/town/runtime";
 import { Supersample } from "../components/town/Supersample";
 import "../components/town/shadows";
 import { statueSpots } from "../components/town/Statues";
+import { Visitor } from "../components/town/Visitor";
 import { World } from "../components/town/World";
 import type { WatchConnection } from "./WatchConnection";
 import { WatchedHerzies } from "./WatchedHerzies";
@@ -88,6 +100,16 @@ export function Showcase({
         <Suspense fallback={null}>
           <Physics paused>
             <World map={HOME_MAP} champion={champion} />
+            {residentSpots(HOME_MAP).map((s) => (
+              <Visitor
+                key={s.key}
+                spot={s}
+                ground={groundY(HOME_MAP, s.at.x, s.at.z)}
+                map={HOME_MAP}
+                onOpen={noop}
+                bare
+              />
+            ))}
           </Physics>
         </Suspense>
         {net && <WatchedHerzies map={HOME_MAP} net={net} />}
@@ -99,6 +121,46 @@ export function Showcase({
       </TownRuntimeContext.Provider>
     </Canvas>
   );
+}
+
+/** The townsfolk who are always in Town (visitors come with events the site
+ * doesn't know about). */
+const RESIDENTS = [
+  BOBOKU_KEY,
+  MEDEA_KEY,
+  MARKET_KEY,
+  PIP_KEY,
+  NAKATA_KEY,
+  TOWER_GUARD_KEY,
+];
+
+const noop = () => {};
+
+/** The residents, each at their spot on the map (any without one stays
+ * away). */
+function residentSpots(map: TownMap): TownSpot[] {
+  const { spots } = spotsOf(map);
+  return RESIDENTS.flatMap((type) => {
+    const at = spots[type];
+    if (!at) return [];
+    return [
+      {
+        key: type,
+        card: {
+          type,
+          title: SPOT_NAMES[type] ?? type,
+          description: null,
+          status: "live",
+          at: null,
+          openKey: null,
+          eventId: `showcase-${type}`,
+        },
+        at,
+        standing: true,
+        status: "in town",
+      },
+    ];
+  });
 }
 
 /** The middle of the orbit: the statue (the middle of town if there's
