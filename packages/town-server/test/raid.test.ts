@@ -588,6 +588,41 @@ describe("the music it hates", () => {
   });
 });
 
+describe("out of the fight", () => {
+  it("a herzie out of the roster isn't healed, credited or fed", () => {
+    const { f } = locked([
+      { uid: "bard", cls: "bard", sk: [["soothing-drones", 1]], x: 0, z: 9 },
+      { uid: "gone", x: 1, z: 9 },
+    ]);
+    // Gone past the grace: out. Then its app comes back (a watcher).
+    f.leave("gone", STARTS + 100);
+    const t = STARTS + BOSS_OUT_GRACE_MS + 500;
+    f.step(t);
+    f.join("gone", 2, ticket("gone", undefined, [], { hp: { hp: 10, maxHp: 200, down: false } }), { x: 1, z: 9 }, t);
+    const gone = f.player("gone");
+    if (!gone) throw new Error("no gone");
+    gone.hp = 10;
+    f.onState("bard", 0, 9, t + 50);
+    f.onState("gone", 1, 9, t + 50);
+    expect(f.skill("bard", "soothing-drones", 0, 0, t + 100).result).toBe("used");
+    expect(gone.hp).toBe(10);
+    expect(f.tryEat("gone", t + 200)).toBe("not-here");
+  });
+
+  it("leaving takes a herzie's buffs off for everyone", () => {
+    const { f } = locked([
+      { uid: "tank", cls: "percussionist", sk: [["taunt", 1]], x: 0, z: 9 },
+      { uid: "b" },
+    ]);
+    const t = STARTS + 200;
+    f.onState("tank", 0, 9, t);
+    expect(f.skill("tank", "taunt", 0, 0, t).result).toBe("used");
+    const out = f.leave("tank", t + 500);
+    const offs = of(out, "buffOff") as { buff: string }[];
+    expect(offs.map((m) => m.buff)).toContain("taunt");
+  });
+});
+
 describe("minions", () => {
   it("at half health the boss calls a pack, sized to the roster", () => {
     const { f } = locked([{ uid: "a" }, { uid: "b" }, { uid: "c" }, { uid: "d" }]);

@@ -659,9 +659,15 @@ export class FightRuntime {
 
   /** Someone left (or lost their connection). Their health stays on record;
    * a roster member who stays gone too long is out. */
-  leave(uid: string, now: number = Date.now()): void {
+  leave(uid: string, now: number = Date.now()): Outbound[] {
     const p = this.players.get(uid);
-    if (!p) return;
+    if (!p) return [];
+    // What it wore goes with it: say so, or a copy that takes its place
+    // (same id) would show buffs the fight no longer counts.
+    // Out of tune first, so its time in tune is logged.
+    const out = this.setInTune(uid, false, now);
+    for (const b of this.engine.buffsOf(uid, now))
+      out.push({ to: "all", msg: { t: "buffOff", id: p.id, buff: b.id } });
     p.present = false;
     p.leftAt = this.history.at(uid, now) ?? p.leftAt;
     this.history.forget(uid);
@@ -675,6 +681,7 @@ export class FightRuntime {
     this.absentSince.set(uid, now);
     this.reportNow = true;
     this.raidDirty = true;
+    return out;
   }
 
   /** A player's ticket was renewed: stats, class (a class chosen mid-fight
@@ -904,7 +911,7 @@ export class FightRuntime {
       let restored = 0;
       const mult = healMult(p.stats.euphony) * this.healBoost(uid, now);
       for (const o of this.players.values()) {
-        if (!o.present || o.down) continue;
+        if (!o.present || o.down || !this.fighting(o.uid)) continue;
         const at = this.history.at(o.uid, now);
         if (!at) continue;
         if (Math.hypot(at.x - pos.x, at.z - pos.z) > (def.radius ?? 0))
@@ -945,7 +952,7 @@ export class FightRuntime {
       const strength = Math.min(HASTE_MAX, value * buffMult(p.stats.euphony));
       const until = now + (def.durationMs ?? 0);
       for (const o of this.players.values()) {
-        if (!o.present || o.down) continue;
+        if (!o.present || o.down || !this.fighting(o.uid)) continue;
         const at = this.history.at(o.uid, now);
         if (!at) continue;
         if (Math.hypot(at.x - pos.x, at.z - pos.z) > (def.radius ?? 0))
@@ -1131,7 +1138,7 @@ export class FightRuntime {
    */
   tryEat(uid: string, now: number): EatRefusal | null {
     const p = this.players.get(uid);
-    if (!p?.present || !this.open) return "not-here";
+    if (!p?.present || !this.open || !this.fighting(uid)) return "not-here";
     if (p.down) return "down";
     if (p.hp >= p.maxHp) return "full";
     const since = now - (this.ate.get(uid) ?? Number.NEGATIVE_INFINITY);
@@ -1146,7 +1153,7 @@ export class FightRuntime {
    * knocked out or left while it was being used up. */
   eat(uid: string, amount: number): Outbound[] {
     const p = this.players.get(uid);
-    if (!p?.present || p.down || amount <= 0) return [];
+    if (!p?.present || p.down || amount <= 0 || !this.fighting(uid)) return [];
     const heal = Math.min(p.maxHp - p.hp, amount);
     if (heal <= 0) return [];
     p.hp += heal;

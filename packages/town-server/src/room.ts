@@ -439,7 +439,7 @@ export class TownRoom extends DurableObject<Env> {
         this.dirty.delete(other);
         // The fight hears it leave like any other, so the copy coming in
         // is judged a rejoin (no healing back from its ticket, no breather).
-        this.fight?.leave(t.uid, now);
+        for (const o of this.fight?.leave(t.uid, now) ?? []) this.dispatch(o);
         this.close(other.ws, TOWN_CLOSE.replaced, "replaced");
       }
     }
@@ -666,7 +666,8 @@ export class TownRoom extends DurableObject<Env> {
     if (s.player) {
       this.flushRest(Date.now(), s);
       if (this.fight) {
-        this.fight.leave(s.player.uid, Date.now());
+        for (const o of this.fight.leave(s.player.uid, Date.now()))
+          this.dispatch(o);
         this.maybeReport(Date.now(), true);
         // An empty room keeps ticking while a fight is on: the grace, the
         // wipe and the reports run without anyone watching.
