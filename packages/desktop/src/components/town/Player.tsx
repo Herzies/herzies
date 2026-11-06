@@ -49,6 +49,15 @@ const RADIUS = 0.55;
 const HALF_HEIGHT = 0.35;
 /** Gap the controller keeps from whatever it slides along. */
 const SKIN = 0.02;
+/** The body's props, made once: a new array each render would have rapier
+ * rebuild the collider (and set the body back where it started). */
+const CAPSULE_ARGS: [number, number] = [HALF_HEIGHT, RADIUS];
+const CAPSULE_AT: [number, number, number] = [
+  0,
+  HALF_HEIGHT + RADIUS + SKIN,
+  0,
+];
+const NO_ROTATION: [boolean, boolean, boolean] = [false, false, false];
 /** How long it stands still, music playing, before it starts dancing (s):
  * a pause mid-walk isn't a dance. */
 const DANCE_AFTER = 0.4;
@@ -124,6 +133,13 @@ export function Player({
   respawn?: number;
 }) {
   const rt = useTownRuntime();
+  // Where the body starts: where the save has it when it mounts (it moves
+  // itself from then on; a respawn or a teleport puts it elsewhere).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: once, on mount
+  const startAt = useMemo<[number, number, number]>(
+    () => [townSave.x, groundY(map, townSave.x, townSave.z), townSave.z],
+    [],
+  );
   const { world, rapier } = useRapier();
   /** The cat spirit's look ahead: is the way clear? (see petClear) */
   const petRay = useMemo(
@@ -568,13 +584,13 @@ export function Player({
       }}
       type="kinematicPosition"
       colliders={false}
-      position={[townSave.x, groundY(map, townSave.x, townSave.z), townSave.z]}
-      enabledRotations={[false, false, false]}
+      position={startAt}
+      enabledRotations={NO_ROTATION}
     >
       <CapsuleCollider
         ref={collider}
-        args={[HALF_HEIGHT, RADIUS]}
-        position={[0, HALF_HEIGHT + RADIUS + SKIN, 0]}
+        args={CAPSULE_ARGS}
+        position={CAPSULE_AT}
       />
       <group
         ref={(g) => {
