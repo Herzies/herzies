@@ -1893,7 +1893,8 @@ export class FightRuntime {
         break;
       }
       case "hit": {
-        this.bossDirty = true;
+        // A minion's hit leaves the boss's health as it was.
+        if (ev.mob === undefined) this.bossDirty = true;
         this.credit(
           ev.uid,
           ev.mob !== undefined && !this.tower ? "adds" : "damage",

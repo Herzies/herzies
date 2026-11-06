@@ -296,6 +296,9 @@ export class MobPack {
   spawnFloor(now: number): void {
     const base = towerMob(this.floor).hp;
     this.mobs = [];
+    // A new floor's mobs: nothing of the last one's to remember.
+    this.sent.clear();
+    this.bumpedAt.clear();
     this.telegraphs = [];
     this.pending = [];
     this.wakeAt = now + FLOOR_OPENING_MS;
@@ -356,6 +359,7 @@ export class MobPack {
     boss: { x: number; z: number },
     herzies: readonly { x: number; z: number }[],
   ): number[] {
+    this.forgetFallen();
     const base = towerMob(this.floor).hp;
     const kinds: MobKind[] = [];
     const spitters = count >= 3 ? Math.floor(count / 4) || 1 : 0;
@@ -398,6 +402,19 @@ export class MobPack {
       ids.push(id);
     }
     return ids;
+  }
+
+  /** The fallen are only in the way of the living: off the list, and out
+   * of what's remembered of them (a hit still in flight lands on nothing). */
+  private forgetFallen(): void {
+    const gone = new Set<number>();
+    for (const m of this.mobs) if (m.hp <= 0) gone.add(m.id);
+    if (!gone.size) return;
+    this.mobs = this.mobs.filter((m) => !gone.has(m.id));
+    for (const id of gone) this.sent.delete(id);
+    for (const key of this.bumpedAt.keys())
+      if (gone.has(Number(key.slice(0, key.indexOf(":")))))
+        this.bumpedAt.delete(key);
   }
 
   private add(
