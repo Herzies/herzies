@@ -684,3 +684,27 @@ describe("a Rimshot's wind-up", () => {
     expect(f.cast("tank", Math.PI, 0, T0 + 1_000)).not.toBe("ignored");
   });
 });
+
+describe("reconnecting while knocked out", () => {
+  it("a herzie revived in Town since comes back up", () => {
+    const exp = (ms: number) => ms / 1000 + 600;
+    const f = new FightRuntime(claim(), T0, 7);
+    f.join("a", 1, ticket("a", 200), { x: 0, z: 8 }, T0);
+    const p = f.player("a");
+    if (!p) throw new Error("no a");
+    p.hp = 0;
+    p.down = true;
+    (f as unknown as { touch(uid: string): void }).touch("a");
+    const r1 = f.report(T0 + 100, true);
+    if (!r1) throw new Error("no report");
+    f.reported(r1, null, T0 + 200);
+    // Away, back still down (waiting for a Bard), away again.
+    f.leave("a", T0 + 1_000);
+    f.join("a", 1, ticket("a", 0, { hp: { hp: 0, maxHp: 200, down: true }, exp: exp(T0 + 900) }), { x: 0, z: 8 }, T0 + 1_100);
+    f.leave("a", T0 + 2_000);
+    // Revived in Town; its fresh ticket says so.
+    const back = f.join("a", 1, ticket("a", 80, { exp: exp(T0 + 60_000) }), { x: 0, z: 8 }, T0 + 61_000);
+    expect(back.down).toBe(false);
+    expect(back.hp).toBe(80);
+  });
+});

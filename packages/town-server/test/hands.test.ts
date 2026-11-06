@@ -62,3 +62,17 @@ describe("the server's disc pace, with Timing", () => {
     expect(refused).toBe(0);
   });
 });
+
+describe("a throw the server sees miss", () => {
+  it("never holds up a hasted Slinger's next throw (it may have clinked off a wall)", () => {
+    const h = new DiscHands();
+    const quick = 1.5;
+    let t = 1_000;
+    for (let i = 0; i < 40; i++) {
+      t += CAST_INTERVAL_MS / quick;
+      // Every other throw: a wall 3 m off (back fast) the server can't see.
+      const hit = i % 2 === 0 ? null : 18;
+      expect(h.take("a", t, hit, quick), `throw ${i}`).toBe(true);
+    }
+  });
+});

@@ -535,7 +535,14 @@ export class FightRuntime {
   /** A lobby past its start that hasn't locked yet (an empty room stops
    * ticking): the room steps it before letting anyone in. */
   lockDue(now: number): boolean {
-    return !!this.boss && this.stage === "lobby" && now >= this.startsAt;
+    // Only a lobby that had someone in it: a room rebuilt empty (after an
+    // eviction) mustn't lock nobody in and end the event.
+    return (
+      !!this.boss &&
+      this.stage === "lobby" &&
+      now >= this.startsAt &&
+      this.players.size > 0
+    );
   }
 
   /** Whether `uid` may come in now: anyone on their feet in the lobby;
@@ -627,8 +634,10 @@ export class FightRuntime {
       ready: known?.ready ?? new Map(),
     };
     this.players.set(uid, p);
-    // What the fight now holds is its word, until the database has it.
-    this.touch(uid);
+    // A first arrival: what the fight now holds is its word, until the
+    // database has it. A rejoin either keeps the fight's record as it was
+    // or takes the database's (a current ticket): nothing new to confirm.
+    if (!known) this.touch(uid);
     this.absentSince.delete(uid);
     this.history.record(uid, now, at.x, at.z);
     if (!rejoin) this.engine.noteSpawn(uid, now);
@@ -2122,7 +2131,15 @@ export class FightRuntime {
         v.ackedAt = now;
       }
       if (!this.players.get(r.uid)?.present) this.leftUnreported.delete(r.uid);
-      if (r.hp <= 0 && this.players.get(r.uid)?.down) this.downAcked.add(r.uid);
+      if (r.hp <= 0 && this.players.get(r.uid)?.down) {
+        this.downAcked.add(r.uid);
+        // Knocked out and told: left out of later reports, so this is the
+        // last word the database takes, and the fight's record with it.
+        if (v) {
+          v.acked = v.seq;
+          v.ackedAt = now;
+        }
+      }
       // The database may now rise as far as that heal: it's spent.
       if (r.heal) {
         const left = (this.healed.get(r.uid) ?? 0) - r.heal;

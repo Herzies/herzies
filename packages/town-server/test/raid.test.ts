@@ -131,6 +131,11 @@ describe("the lobby", () => {
     expect(f.mayJoin("stranger", false, late + 10)).toBe("locked");
   });
 
+  it("a room rebuilt empty after its start doesn't lock nobody in", () => {
+    const f = new FightRuntime(claim(), T0);
+    expect(f.lockDue(STARTS + 40_000)).toBe(false);
+  });
+
   it("the boss sleeps: it can't be hurt and doesn't attack", () => {
     const f = new FightRuntime(claim(), T0);
     f.join("a", 1, ticket("a", "bard"), { x: 0, z: 9 }, T0);

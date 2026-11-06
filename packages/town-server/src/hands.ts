@@ -30,7 +30,11 @@ export class DiscHands {
     const h = this.hands.get(uid) ?? [0, 0];
     const i = h[0] <= h[1] ? 0 : 1;
     if (h[i] > now + HAND_SLACK_MS) return false;
-    h[i] = now + discCycleMs(hitDist, quick) * HAND_LENIENCY;
+    // A throw the server sees hit nothing may have met what it can't see
+    // (a wall, the floor, a mob drawn a moment off) and be back at once:
+    // only a hit it judged holds the hand for its flight.
+    h[i] =
+      now + discCycleMs(hitDist === null ? 0 : hitDist, quick) * HAND_LENIENCY;
     this.hands.set(uid, h);
     return true;
   }
