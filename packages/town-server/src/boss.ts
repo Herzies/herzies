@@ -6,8 +6,8 @@
  *
  * Fairness rules every attack here follows (see specs/boss-fight.md): every
  * attack is telegraphed on the floor for at least {@link MIN_WINDUP_MS}
- * before it lands; a hit deals flat damage, so health and Def matter, but
- * never more than {@link MAX_HIT_FRACTION} of a herzie's health; a herzie
+ * before it lands; a hit deals flat damage, in full, so health and Def
+ * matter (a herzie too weak for it can be knocked out by one); a herzie
  * that was just hit, just arrived or just got back up can't be hit again
  * straight away; at most {@link MAX_TELEGRAPHS} shapes are on the floor at
  * once (its minions' count too); and a hit is judged against where the
@@ -112,9 +112,8 @@ export const TUNING = {
     2: { fromHp: BOSS_PHASE_AT[0], everyMs: 2_700, slams: 3, ringChance: 0.35 },
     3: { fromHp: BOSS_PHASE_AT[1], everyMs: 2_000, slams: 4, ringChance: 0.4 },
   },
-  /** Damage is flat, before Def and buffs, and within the fairness budget
-   * (a level-20 herzie without Stamina loses at most MAX_HIT_FRACTION of
-   * its health to one). Raised for the raid: a slam you stand in should
+  /** Damage is flat, before Def and buffs, and lands in full: a herzie
+   * too weak for the fight can be knocked out. Raised for the raid: a slam you stand in should
    * sting a level-30 herzie, and a ring you're caught by should hurt. The
    * ring's windup lets someone at the far wall reach its middle wherever
    * the boss has walked to. Raised again (Nov 2026): a raid of five took
@@ -125,16 +124,9 @@ export const TUNING = {
    * follows them — it can't be dodged, only taken. Sized so that a herzie
    * who isn't tanking it is badly hurt, and a Percussionist (Def, a
    * Cymbrella, in tune) is comfortable. Without a taunt, only once there's
-   * a party to hold its attention. It may take up to `maxHitFraction` of
-   * a herzie's health, past the usual one-hit cap: under that cap anyone
-   * could take one, and a tank had nothing to hold. */
-  buster: {
-    everyMs: 10_000,
-    windupMs: 2_000,
-    damage: 500,
-    minPlayers: 2,
-    maxHitFraction: 0.8,
-  },
+   * a party to hold its attention. A damage dealer who takes one is
+   * likely knocked out: holding them is the tank's job. */
+  buster: { everyMs: 10_000, windupMs: 2_000, damage: 300, minPlayers: 2 },
   /** What the boss hates: damage dealt, healing done, and the Cymbrella's
    * clang. Fades by `decayPerSec` a second, so it keeps moving. */
   threat: { perDamage: 1, perHeal: 0.5, cymbrella: 500, decayPerSec: 0.1 },
@@ -143,7 +135,7 @@ export const TUNING = {
    * between two close damage dealers. */
   focusSwitch: { melee: 1.1, ranged: 1.3, meleeReach: 3 },
   /** Each buster leaves its target Rattled: the next one hits harder, per
-   * stack, past the usual one-hit cap (to a ceiling). Fades unhit; a
+   * stack. Fades unhit; a
    * second tank taking a turn is how it's cleared. */
   rattled: { perStack: 0.25, maxStacks: 4, ms: 20_000 },
   /** From phase 2, now and then it charges whoever keeps furthest off (at
@@ -191,9 +183,6 @@ export const RING_REACH =
   BOSS_WANDER.radius +
   2;
 
-/** The most of a herzie's health one hit may take, before Def and buffs:
- * a low level can't be one-shot by flat damage. */
-export const MAX_HIT_FRACTION = 0.3;
 export const MIN_WINDUP_MS = TUNING.minWindupMs;
 export const MAX_TELEGRAPHS = TUNING.maxTelegraphs;
 
@@ -1319,10 +1308,6 @@ export class BossEngine {
           const r = tg.kind === "buster" ? this.rattledOf(p.uid, tg.hitAt) : 0;
           const would = mitigatedHit(p, tg, this.buffs.get(p.uid) ?? [], {
             mult: 1 + TUNING.rattled.perStack * r,
-            cap:
-              tg.kind === "buster"
-                ? TUNING.buster.maxHitFraction
-                : MAX_HIT_FRACTION,
           });
           hits.push(shelteredHit(would, dome.by));
           continue;
@@ -1332,7 +1317,6 @@ export class BossEngine {
           hits.push(
             mitigatedHit(p, tg, this.buffs.get(p.uid) ?? [], {
               mult: 1 + TUNING.rattled.perStack * r,
-              cap: TUNING.buster.maxHitFraction,
             }),
           );
           const stacks = Math.min(TUNING.rattled.maxStacks, r + 1);
@@ -1640,20 +1624,17 @@ export class BossEngine {
   }
 }
 
-/** A telegraph's hit on `p`: capped at a share of their health, then Def
- * and their damage-cutting buffs, under the overall clamp. Shared with the
- * minions, so a Thornling's hit is judged exactly like the boss's. */
+/** A telegraph's hit on `p`: its damage in full, less Def and their
+ * damage-cutting buffs, under the overall clamp. Shared with the minions,
+ * so a Thornling's hit is judged exactly like the boss's. */
 export function mitigatedHit(
   p: BossPlayer,
   tg: Telegraph,
   buffs: readonly Buff[],
-  /** Rattled: a multiplier on the hit, and the cap it may reach. */
-  opts: { mult?: number; cap?: number } = {},
+  /** Rattled: a multiplier on the hit. */
+  opts: { mult?: number } = {},
 ): BossHit {
-  const raw = Math.min(
-    tg.damage * (opts.mult ?? 1),
-    (opts.cap ?? MAX_HIT_FRACTION) * p.maxHp,
-  );
+  const raw = tg.damage * (opts.mult ?? 1);
   const fromBuffs = buffReductions(buffs, tg.hitAt);
   const reductions = [defReduction(p.def ?? 0), ...fromBuffs];
   const damage = Math.max(1, Math.round(mitigate(raw, reductions)));

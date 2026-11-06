@@ -14,7 +14,6 @@ import {
   type BossEvent,
   type BossPlayer,
   covers,
-  MAX_HIT_FRACTION,
   MAX_TELEGRAPHS,
   MIN_WINDUP_MS,
   phaseFor,
@@ -59,10 +58,10 @@ describe("tuning invariants", () => {
     expect(TUNING.ring.windupMs).toBeGreaterThanOrEqual(MIN_WINDUP_MS);
   });
 
-  it("a level-20 herzie with no Stamina takes hits within the budget", () => {
-    const max = maxHpOf(20);
-    expect(TUNING.slam.damage).toBeLessThanOrEqual(MAX_HIT_FRACTION * max);
-    expect(TUNING.ring.damage).toBeLessThanOrEqual(MAX_HIT_FRACTION * max);
+  it("a level-1 herzie with no Stamina lives through a slam or a ring", () => {
+    const max = maxHpOf(1);
+    expect(TUNING.slam.damage).toBeLessThan(max);
+    expect(TUNING.ring.damage).toBeLessThan(max);
   });
 
   it("a slam can be left on foot within its windup, with time to react", () => {
@@ -241,14 +240,14 @@ describe("attacks", () => {
     ]);
   });
 
-  it("caps a hit at a share of a small herzie's health", () => {
+  it("lands a hit in full on a herzie too small for it", () => {
     const e = engine();
     const p = still("a", 0, 5, 60);
     const ev = run(e, T0, T0 + 6_000, [p]);
     const resolve = ev.find((x) => x.t === "resolve");
     if (resolve?.t !== "resolve") throw new Error("no hit");
-    expect(MAX_HIT_FRACTION * 60).toBeLessThan(TUNING.slam.damage);
-    expect(resolve.hits[0].damage).toBe(Math.round(MAX_HIT_FRACTION * 60));
+    expect(TUNING.slam.damage).toBeGreaterThan(60);
+    expect(resolve.hits[0].damage).toBe(TUNING.slam.damage);
   });
 
   it("Def takes its share off a hit", () => {
@@ -611,11 +610,11 @@ describe("production pass: fairness and the raid's size", () => {
     expect(sorted[sorted.length - 1]).toBeGreaterThan(TUNING.buster.damage);
   });
 
-  it("a buster may take past the usual one-hit cap, to its own", () => {
+  it("a buster lands in full, enough to knock out a herzie too weak for it", () => {
     const e = engine(1000, 1000);
-    // 300 HP, no Def: the usual cap is 90; a buster takes up to 240.
-    const tank = still("tank", 0, 5, 300);
-    const other = still("dps", 6, 9, 300);
+    // 250 HP, no Def: a buster takes more than that.
+    const tank = still("tank", 0, 5, 250);
+    const other = still("dps", 6, 9, 250);
     e.setTaunt("tank", T0 + 60_000, T0);
     let first: number | null = null;
     for (let t = T0; t < T0 + 20_000 && first === null; t += 50) {
@@ -626,8 +625,8 @@ describe("production pass: fairness and the raid's size", () => {
         if (ev.t === "resolve" && busters.has(ev.id))
           for (const h of ev.hits) if (h.uid === "tank") first = h.damage;
     }
-    expect(first).toBe(Math.round(TUNING.buster.maxHitFraction * 300));
-    expect(first).toBeGreaterThan(MAX_HIT_FRACTION * 300);
+    expect(first).toBe(TUNING.buster.damage);
+    expect(first).toBeGreaterThan(250);
   });
 
   it("doesn't flip its focus between two who hate it about the same", () => {

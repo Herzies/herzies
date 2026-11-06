@@ -18,7 +18,6 @@ import {
   BossEngine,
   type BossPlayer,
   castSpeed,
-  MAX_HIT_FRACTION,
   TUNING,
 } from "../src/boss";
 import { FightRuntime, type Outbound, statsOf } from "../src/fight";
@@ -277,7 +276,7 @@ describe("the boss's side", () => {
     expect(hit).toMatchObject({
       uid: "a",
       damage: 0,
-      blocked: Math.min(TUNING.slam.damage, MAX_HIT_FRACTION * 200),
+      blocked: TUNING.slam.damage,
       shelteredBy: "tank",
     });
   });
@@ -287,7 +286,7 @@ describe("the boss's side", () => {
     boss.addDome("tank", 0, 8 + DOME.radius + 1.5, T0, 60_000);
     const a = player("a", { x: 0, z: 8 });
     const [hit] = firstHits(boss, [a]);
-    expect(hit.damage).toBe(Math.min(TUNING.slam.damage, MAX_HIT_FRACTION * 200));
+    expect(hit.damage).toBe(TUNING.slam.damage);
     expect(hit.shelteredBy).toBeUndefined();
   });
 
@@ -322,6 +321,14 @@ describe("the boss's side", () => {
     const f = new FightRuntime(claim(), T0);
     f.join("tank", 1, ticket("tank", [["taunt", 1]]), { x: 0, z: 8 }, T0 - 5_000);
     f.join("dps", 2, ticket("dps", [["backspin", 1]]), { x: 4, z: 8 }, T0 - 5_000);
+    // Hits land in full: keep the tank up through its taunt.
+    for (const uid of ["tank", "dps"]) {
+      const p = f.player(uid);
+      if (p) {
+        p.maxHp = 1e6;
+        p.hp = 1e6;
+      }
+    }
     const at = T0 + TUNING.openingMs;
     for (let t = T0 - 1_000; t <= at; t += 50) {
       f.onState("tank", 0, 8, t);

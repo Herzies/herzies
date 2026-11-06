@@ -9,7 +9,7 @@ import {
   WAVE_HAND_HEIGHT,
   WAVE_SPEED,
 } from "@herzies/shared/combat";
-import { MAX_HIT_FRACTION, TUNING } from "../src/boss";
+import { TUNING } from "../src/boss";
 import {
   ESCAPE_LINGER_MS,
   FightRuntime,
@@ -118,8 +118,7 @@ describe("a fight", () => {
     expect(hp[0].msg).toMatchObject({
       t: "hp",
       id: 1,
-      // A slam, under the one-hit cap.
-      hp: 200 - Math.min(TUNING.slam.damage, MAX_HIT_FRACTION * 200),
+      hp: 200 - TUNING.slam.damage,
       maxHp: 200,
     });
     expect(msgs(out, "resolve")[0].msg).toMatchObject({ t: "resolve", hits: [1] });

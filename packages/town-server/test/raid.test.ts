@@ -91,6 +91,14 @@ function locked(
   return { f, out };
 }
 
+/** Hits land in full: a test that isn't about them keeps its herzie up. */
+function toughen(f: FightRuntime, uid: string) {
+  const p = f.player(uid);
+  if (!p) throw new Error(`no ${uid}`);
+  p.maxHp = 1e6;
+  p.hp = 1e6;
+}
+
 describe("the lobby", () => {
   it("lets anyone on their feet in, but not a downed herzie", () => {
     const f = new FightRuntime(claim(), T0);
@@ -409,6 +417,7 @@ describe("Taunt", () => {
 
   it("aims the buster at the taunter, even alone", () => {
     const { f } = locked([tank("t1", 0)]);
+    toughen(f, "t1");
     // The first buster comes after the opening and its own clock (13 s):
     // a taunt cast a few seconds in draws it.
     const t = STARTS + 4_000;
@@ -455,6 +464,7 @@ describe("Taunt", () => {
 describe("the music it hates", () => {
   it("in tune after the settle time, out after the linger", () => {
     const { f } = locked([{ uid: "dps", cls: "record_slinger", x: 0, z: 9 }]);
+    toughen(f, "dps");
     const where = { dps: { x: 0, z: 9 } };
     const t = STARTS + 100;
     f.tune("dps", true, t);
