@@ -1,6 +1,6 @@
 import { PixelIcon, ICON_GRID_JSON as rawItemIconGrids } from "@herzies/shared";
 
-// An emote's Premium icon, painted in the item editor (`pnpm item-editor`,
+// An emote's Premium icon, painted in the item editor (the control panel's Items page,
 // under EXTRA_ICONS) and stored beside the item icons as "emote-<id>". An
 // emote without one shows nothing in its place.
 const grids = rawItemIconGrids as Record<

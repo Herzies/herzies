@@ -15,7 +15,7 @@ import {
 import { useMemo } from "react";
 import { cn } from "../../lib/utils";
 
-// Hand-tweaked portraits, painted in the item editor (`pnpm item-editor`,
+// Hand-tweaked portraits, painted in the item editor (the control panel's Items page,
 // listed there under EXTRA_ICONS) and stored beside the item icons. A
 // visitor with one shows it; one without (every boss, each with its own
 // face) is drawn from their 3D look below. The seeded entries began as a

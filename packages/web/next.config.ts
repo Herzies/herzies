@@ -6,6 +6,10 @@ const nextConfig: NextConfig = {
 	// server would hand the browser whichever stack built first.
 	distDir: process.env.NEXT_DIST_DIR || ".next",
 	transpilePackages: ["@herzies/shared"],
+	// The old dev-only game admin now lives in the control panel.
+	async redirects() {
+		return [{ source: "/dev/admin", destination: "/admin", permanent: false }];
+	},
 	async headers() {
 		return [
 			// The front page's live Town (public/town, see TownBackdrop): its
