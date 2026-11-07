@@ -20,7 +20,7 @@ import { TYPE_ICON_GRIDS as GRIDS } from "./type-icon-grids.js";
  * item.
  *
  * Lives in its own JSON file (rather than inline here) so the desktop's item
- * editor tool (`pnpm item-editor`, see `packages/desktop/tools/item-editor/`)
+ * editor tool (the control panel's Items page, /admin/items)
  * can read and overwrite it directly — saving there rebuilds this package,
  * which the running app picks up. */
 const ITEM_ICON_GRIDS: Partial<

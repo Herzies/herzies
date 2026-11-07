@@ -12,7 +12,8 @@
     "check": "node scripts/vendor-shared.mjs --check && turbo check",
     "test": "turbo test",
     "vendor:shared": "node scripts/vendor-shared.mjs",
-    "vendor:check": "node scripts/vendor-shared.mjs --check"
+    "vendor:check": "node scripts/vendor-shared.mjs --check",
+    "studio": "bash scripts/studio.sh"
   },
   "packageManager": "pnpm@10.21.0",
   "devDependencies": {

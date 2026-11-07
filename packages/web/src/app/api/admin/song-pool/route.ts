@@ -6,7 +6,7 @@ import { createAdminClient } from "@/lib/supabase-admin";
 
 /** Songs the weekly curator picks from (00085). */
 export async function GET(request: Request) {
-  if (!verifyAdmin(request)) return unauthorizedAdmin();
+  if (!(await verifyAdmin(request))) return unauthorizedAdmin();
   try {
     return NextResponse.json({
       songs: await loadSongPool(createAdminClient()),
@@ -21,7 +21,7 @@ export async function GET(request: Request) {
 
 /** Add a song to the pool. */
 export async function POST(request: Request) {
-  if (!verifyAdmin(request)) return unauthorizedAdmin();
+  if (!(await verifyAdmin(request))) return unauthorizedAdmin();
 
   const body = await parseBody(request, songPoolEntrySchema);
   if (isParseError(body)) return body;
@@ -53,7 +53,7 @@ export async function POST(request: Request) {
 
 /** Remove a song from the pool. */
 export async function DELETE(request: Request) {
-  if (!verifyAdmin(request)) return unauthorizedAdmin();
+  if (!(await verifyAdmin(request))) return unauthorizedAdmin();
 
   const id = new URL(request.url).searchParams.get("id");
   if (!id) {

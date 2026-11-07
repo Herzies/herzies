@@ -5,7 +5,7 @@ import { createAdminClient } from "@/lib/supabase-admin";
 
 /** List all multipliers */
 export async function GET(request: Request) {
-  if (!verifyAdmin(request)) {
+  if (!(await verifyAdmin(request))) {
     return unauthorizedAdmin();
   }
 
@@ -27,7 +27,7 @@ export async function GET(request: Request) {
 
 /** Create or update a multiplier */
 export async function POST(request: Request) {
-  if (!verifyAdmin(request)) {
+  if (!(await verifyAdmin(request))) {
     return unauthorizedAdmin();
   }
 
@@ -84,7 +84,7 @@ export async function POST(request: Request) {
 
 /** Delete a multiplier */
 export async function DELETE(request: Request) {
-  if (!verifyAdmin(request)) {
+  if (!(await verifyAdmin(request))) {
     return unauthorizedAdmin();
   }
 
