@@ -60,9 +60,9 @@ export function OverlayWindow({
    * boss's card in a fight), as tall as in the small window, where nothing
    * else is; the chat and the player card keep the left. */
   side?: "right";
-  /** With `narrow` and `side="right"`: wider (the Herzie window's character
-   * screen), and down to the right column's floor rather than hanging from
-   * the top at its content's height. */
+  /** With `narrow` and `side="right"`: down to the right column's floor
+   * rather than hanging from the top at its content's height (the Herzie
+   * window's character screen). */
   wide?: boolean;
   className?: string;
   /** The exit has finished playing: it's off screen now. Until then its
@@ -177,12 +177,7 @@ export function OverlayWindow({
         aria-label={title}
         className={cn(
           "pointer-events-auto absolute inset-0 overflow-hidden rounded-2xl border border-white/12 shadow-[0_18px_50px_-12px_rgba(0,0,0,0.7)]",
-          narrow &&
-            (rightWide
-              ? "left-auto w-[420px]"
-              : right
-                ? "left-auto w-[356px]"
-                : "right-auto w-[356px]"),
+          narrow && (right ? "left-auto w-[356px]" : "right-auto w-[356px]"),
           // A column, so the content shrinks (and scrolls) if it can't fit.
           // Hangs from the top.
           fit && "flex max-h-full flex-col",

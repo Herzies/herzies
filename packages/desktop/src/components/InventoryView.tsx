@@ -210,6 +210,7 @@ function SellBox({
 }
 
 const GRID_COLS = 6;
+const WIDE_GRID_COLS = 5;
 /** Rows visible at once. Capacity starts at BANK_SLOT_COUNT (3 rows of 6) and
  * grows by whole rows per Inventory Expansion, so the grid scrolls once it has
  * more than this — see the row sizing below. */
@@ -1791,9 +1792,9 @@ function InventoryViewImpl({
         // the deck's height.
         size={4}
         // The props around it (Accessories, a Spirit) are placed against
-        // this width, so it spans the gap between the slot columns (~340px
+        // this width, so it spans the gap between the slot columns (~280px
         // at size * 0.6 per column); narrower and they crowd the herzie.
-        cols={140}
+        cols={116}
         zoom={0.95}
         equipped={equipped}
         isPlaying={isPlaying}
@@ -1802,6 +1803,10 @@ function InventoryViewImpl({
       />
     </div>
   );
+
+  /** The bag's columns: five in the big window's narrower character
+   * screen, so its cells stay as big as the small window's six. */
+  const gridCols = wide ? WIDE_GRID_COLS : GRID_COLS;
 
   /** The cells the grid shows. With a filter on: the slots holding what it
    * lets through, in slot order, then the empty slots (in order) to fill out
@@ -1821,8 +1826,8 @@ function InventoryViewImpl({
             key === null ? [{ index, key }] : [],
           );
           const total =
-            Math.max(VISIBLE_ROWS, Math.ceil(shown.length / GRID_COLS)) *
-            GRID_COLS;
+            Math.max(VISIBLE_ROWS, Math.ceil(shown.length / gridCols)) *
+            gridCols;
           const padded: { index: number | null; key: string | null }[] = [
             ...shown,
             ...empties.slice(0, total - shown.length),
@@ -1832,7 +1837,7 @@ function InventoryViewImpl({
         })();
   /** Rows the grid has — whole rows, and never fewer than the three that
    * fill the panel. */
-  const gridRows = Math.max(VISIBLE_ROWS, Math.ceil(cells.length / GRID_COLS));
+  const gridRows = Math.max(VISIBLE_ROWS, Math.ceil(cells.length / gridCols));
 
   const filterTabs = BAG_FILTERS.map(({ id, label }) => (
     <button
@@ -1900,7 +1905,7 @@ function InventoryViewImpl({
       <div
         className="relative min-h-0"
         style={{
-          flex: `1 1 calc(100cqw * ${VISIBLE_ROWS} / ${GRID_COLS})`,
+          flex: `1 1 calc(100cqw * ${VISIBLE_ROWS} / ${gridCols})`,
         }}
       >
         {loading ? (
@@ -1924,15 +1929,18 @@ function InventoryViewImpl({
             <List
               className="h-full"
               contentStyle={{
-                height: `calc(100cqw * ${gridRows} / ${GRID_COLS})`,
+                height: `calc(100cqw * ${gridRows} / ${gridCols})`,
               }}
             >
               <div
-                className="grid h-full grid-cols-6"
-                style={{ gridAutoRows: `${100 / gridRows}%` }}
+                className="grid h-full"
+                style={{
+                  gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))`,
+                  gridAutoRows: `${100 / gridRows}%`,
+                }}
               >
                 {cells.map(({ index, key }, n) => {
-                  const isLastCol = n % GRID_COLS === GRID_COLS - 1;
+                  const isLastCol = n % gridCols === gridCols - 1;
                   const tile = key ? tileByKey.get(key) : undefined;
                   if (index === null) {
                     // Past the bag's real slots (a filter showing more
