@@ -1620,7 +1620,6 @@ function App() {
             onPanelChange={(p) => switchView(p as HerzieTab)}
             onTabLanded={onTabLanded}
             wide={bigWindow}
-            isPlaying={!!state.nowPlaying}
           />
         </>
       )}

@@ -60,9 +60,10 @@ export function OverlayWindow({
    * boss's card in a fight), as tall as in the small window, where nothing
    * else is; the chat and the player card keep the left. */
   side?: "right";
-  /** With `narrow` and `side="right"`: down to the right column's floor
-   * rather than hanging from the top at its content's height (the Herzie
-   * window's character screen). */
+  /** With `narrow` and `side="right"`: may reach down to the right
+   * column's floor (with `fit`, as tall as its content up to there), rather
+   * than keep to the small window's height (the Herzie window's character
+   * screen). */
   wide?: boolean;
   className?: string;
   /** The exit has finished playing: it's off screen now. Until then its
@@ -119,7 +120,7 @@ export function OverlayWindow({
   // Home's half-height window is a fixed size, not as tall as its content.
   const right = narrow && side === "right";
   const rightWide = right && wide;
-  const fit = fitProp && !(half && onHome && !narrow) && !rightWide;
+  const fit = fitProp && !(half && onHome && !narrow);
 
   const closed = phase === "closed" && !open;
   const closing = phase === "closing";
@@ -139,8 +140,8 @@ export function OverlayWindow({
         "pointer-events-none fixed z-60",
         narrow ? "inset-x-3" : "inset-x-2.5",
         rightWide
-          ? // The wide one on the right: from the same top down to the
-            // right column's floor (clear of the skills).
+          ? // The tall one on the right: from the same top, down to the
+            // right column's floor at most (clear of the skills).
             "top-[calc(var(--boss-card-bottom,0px)+10px)] h-[calc(100vh-var(--boss-card-bottom,0px)-66px)]"
           : right
             ? // In the big window, on the right: from the top (under the

@@ -685,7 +685,6 @@ function InventoryViewImpl({
   onPanelChange,
   onTabLanded,
   wide = false,
-  isPlaying = false,
 }: {
   herzie: Herzie;
   initialItem?: string | null;
@@ -726,8 +725,6 @@ function InventoryViewImpl({
   /** The big window: the character screen, deck and bag in one view, the
    * herzie in the middle of its deck. */
   wide?: boolean;
-  /** Music's on: the character screen's herzie dances. */
-  isPlaying?: boolean;
 }) {
   const capacity = bankCapacity(bankExpansions);
   // Crystal Shards, beside the coins in the footer.
@@ -1797,7 +1794,8 @@ function InventoryViewImpl({
         cols={116}
         zoom={0.95}
         equipped={equipped}
-        isPlaying={isPlaying}
+        // Stands still to be dressed, music or not.
+        isPlaying={false}
         paused={!open}
         ariaLabel={herzie.name}
       />
