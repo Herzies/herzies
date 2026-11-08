@@ -50,6 +50,12 @@ const WEARABLE_OPTIONS = [
   "tailwind-cloak",
   // Shoes (drawn on stage 3, the one with legs).
   "eivinds-evasive-pair",
+  // Fabulous Fabian (FF).
+  "ff-shades",
+  "ff-pearls-marble",
+  "ff-cloak-black",
+  "ff-sneakers-black",
+  "ff-pink",
 ];
 
 const DEFAULT_USER = "sandbox-user";
@@ -86,7 +92,9 @@ function Sandbox() {
     setCloakTuning({ id: cloakId, config: { ...cloak, ...patch } });
   };
   const swings =
-    wearables.includes("gold-chain") || wearables.includes("pearl-necklace");
+    wearables.includes("gold-chain") ||
+    wearables.includes("pearl-necklace") ||
+    wearables.includes("ff-pearls-marble");
   const [jsonOpen, setJsonOpen] = useState(false);
 
   const applySeed = useCallback((id: string) => {
@@ -457,20 +465,27 @@ function toEquipped(ids: string[]): Equipped {
       out.head = id;
     else if (id === "clouds" || id === "stars" || id === "blood-moon")
       out.scenery = id;
-    else if (id === "gold-chain" || id === "pearl-necklace" || id === "bowtie")
+    else if (
+      id === "gold-chain" ||
+      id === "pearl-necklace" ||
+      id === "bowtie" ||
+      id === "ff-pearls-marble"
+    )
       out.body = id;
-    else if (id === "fangs") out.face = id;
-    else if (id === "pumpkin-spice") out.color = id;
+    else if (id === "fangs" || id === "ff-shades") out.face = id;
+    else if (id === "pumpkin-spice" || id === "ff-pink") out.color = id;
     else if (id === "ghost" || id === "spirit-orb" || id === "sleptwell")
       out.spirit = id;
     else if (id === "old-cymbal") out.off_hand = id;
     else if (
       id.endsWith("-cloak") ||
       id === "troubadour-mantle" ||
-      id === "groove-cape"
+      id === "groove-cape" ||
+      id === "ff-cloak-black"
     )
       out.back = id;
-    else if (id === "eivinds-evasive-pair") out.feet = id;
+    else if (id === "eivinds-evasive-pair" || id === "ff-sneakers-black")
+      out.feet = id;
     else if (id === "lute" || id === "compact-discs" || id === "worn-stick")
       out.main_hand = id;
     else if (id === "boombox") {

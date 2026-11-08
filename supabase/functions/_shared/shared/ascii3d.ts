@@ -97,6 +97,20 @@ export const VIOLET_RAMP = [
 ] as const;
 
 /**
+ * Pink ramp for FF Pink, Fabulous Fabian's skin, around the brand's pink
+ * (#FF5FA8, hue 331°). The skin is also see-through (TRANSLUCENT_SKINS in
+ * creature-renderer.ts): the 3D view draws the body as pink glass.
+ */
+export const FF_PINK_RAMP = [
+  "#FFD1E6",
+  "#FFA3CD",
+  "#FF77B6",
+  "#FF4FA0",
+  "#E0337F",
+  "#A8205C",
+] as const;
+
+/**
  * Teal ramp for the Thanks for all the fish! colour scheme. Same construction
  * as VIOLET_RAMP, around CREATURE_PALETTE's "teal" (#4ECDC4, hue 175.7°).
  */

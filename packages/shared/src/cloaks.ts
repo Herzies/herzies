@@ -134,6 +134,27 @@ export const CLOAK_STYLES: Readonly<Record<string, CloakStyle>> = {
     hemTrim: 0.04,
     collarTrim: 0.05,
   },
+  // FF Cloak, from Fabulous Fabian: matte black velvet, a pink
+  // lining and edge, cut straight across. Mid-weight.
+  "ff-cloak-black": {
+    shape: {
+      cols: COLS,
+      rows: ROWS,
+      length: 0.92,
+      collarHalf: 1.24,
+      flare: 1.55,
+      hem: "straight",
+      gather: 1.2,
+    },
+    config: DEFAULT_CLOAK_CONFIG,
+    outer: "#1e1c24",
+    lining: "#ff5fa8",
+    trim: "#ff5fa8",
+    clasp: "#ffc2dc",
+    finish: "velvet",
+    hemTrim: 0.04,
+    collarTrim: 0.05,
+  },
 };
 
 /** The cloak a herzie wears, if any (and it can: stage 3, a torso). */

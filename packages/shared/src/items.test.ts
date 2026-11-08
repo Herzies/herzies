@@ -375,6 +375,56 @@ describe("seasonal drop windows", () => {
     expect(getHerzieStats({ head: "fyllings-fedora" }).luck).toBe(10);
   });
 
+  it("names the Fabulous Fabian (FF) range and gives each piece +10 luck", () => {
+    expect(getItem("fabulous-fabian")?.name).toBe("FF Hat");
+    const range = [
+      ["ff-sneakers-black", "FF Sneakers", "feet"],
+      ["ff-cloak-black", "FF Cloak", "back"],
+      ["ff-pearls-marble", "FF Pearls", "body"],
+      ["ff-shades", "FF Shades", "face"],
+      ["ff-pink", "FF Pink", "color"],
+    ] as const;
+    for (const [id, name, slot] of range) {
+      const item = getItem(id);
+      expect(item?.name).toBe(name);
+      expect(item?.rarity).toBe("rare");
+      expect(item?.equipSlot).toBe(slot);
+      expect(getHerzieStats({ [slot]: id }).luck).toBe(10);
+      // Drop-only, like the hat.
+      expect(NON_DROPPABLE_ITEM_IDS).not.toContain(id);
+      expect(bossLootWeights().map((w) => w.itemId)).toContain(id);
+    }
+  });
+
+  it("adds the Fabulous Fabian set's +10 luck only with all six worn", () => {
+    const full = {
+      head: "fabulous-fabian",
+      face: "ff-shades",
+      body: "ff-pearls-marble",
+      back: "ff-cloak-black",
+      feet: "ff-sneakers-black",
+      color: "ff-pink",
+    };
+    const set = getItemSet("ff-pink");
+    expect(set?.itemIds).toHaveLength(6);
+    expect(set?.bonus).toEqual({ luck: 10 });
+    // Six pieces at +10 each, and the set's own +10.
+    expect(getHerzieStats(full).luck).toBe(70);
+    const { feet: _, ...short } = full;
+    expect(getHerzieStats(short).luck).toBe(50);
+    // The same from the units (what the servers read).
+    const units = Object.entries(full).map(([slot, itemId], i) => ({
+      id: `u${i}`,
+      itemId,
+      upgradeLevel: 0,
+      equippedSlot: slot,
+    })) as unknown as ItemUnit[];
+    expect(getHerzieStatsFromUnits(units).luck).toBe(70);
+    expect(
+      getHerzieStatsFromUnits(units.filter((u) => u.itemId !== "ff-pink")).luck,
+    ).toBe(60 - 10);
+  });
+
   it("puts Eivind's Evasive Pair on the feet, +20% move speed", () => {
     const item = getItem("eivinds-evasive-pair");
     expect(item?.rarity).toBe("mythic");
@@ -1686,9 +1736,9 @@ describe("boss loot", () => {
       new URL(`../../../supabase/migrations/${name}`, import.meta.url),
       "utf8",
     );
-  // settle_boss_fight lives in 00114; the roll was last replaced in 00134.
+  // settle_boss_fight lives in 00114; the roll was last replaced in 00145.
   const sql = migration("00114_boss_bonus_loot.sql");
-  const rollSql = migration("00134_feet_slot_evasive_pair.sql");
+  const rollSql = migration("00145_ff_wearables.sql");
 
   it("rolls from the same weights as bossLootWeights", () => {
     const roll = rollSql.slice(
