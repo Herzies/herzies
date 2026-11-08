@@ -14,7 +14,7 @@ type AdminEventBody = z.infer<typeof adminEventSchema>;
 
 /** List all events */
 export async function GET(request: Request) {
-  if (!verifyAdmin(request)) {
+  if (!(await verifyAdmin(request))) {
     return unauthorizedAdmin();
   }
 
@@ -71,7 +71,7 @@ export async function GET(request: Request) {
  * uncurated song hunt or an unstocked George away from players.
  */
 export async function POST(request: Request) {
-  if (!verifyAdmin(request)) {
+  if (!(await verifyAdmin(request))) {
     return unauthorizedAdmin();
   }
 
@@ -312,7 +312,7 @@ function badRequest(error: string) {
 
 /** Delete an event */
 export async function DELETE(request: Request) {
-  if (!verifyAdmin(request)) {
+  if (!(await verifyAdmin(request))) {
     return unauthorizedAdmin();
   }
 

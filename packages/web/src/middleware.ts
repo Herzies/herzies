@@ -32,7 +32,7 @@ setInterval(() => {
 
 /** Rate limit configs: [requests, windowMs] */
 const LIMITS: Record<string, [number, number]> = {
-  admin: [30, 60_000], // 30 req/min for admin routes
+  admin: [300, 60_000], // 300 req/min: the control panel loads several at once
   sync: [10, 60_000], // 10 req/min for sync (daemon calls every 10s)
   auth: [10, 60_000], // 10 req/min for auth refresh
   spotify: [30, 60_000], // 30 req/min for Spotify OAuth endpoints

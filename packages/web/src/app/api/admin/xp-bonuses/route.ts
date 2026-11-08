@@ -5,7 +5,7 @@ import { createAdminClient } from "@/lib/supabase-admin";
 
 /** The built-in XP bonuses (boost, streak, Good Eye Sniper) — 00091. */
 export async function GET(request: Request) {
-  if (!verifyAdmin(request)) {
+  if (!(await verifyAdmin(request))) {
     return unauthorizedAdmin();
   }
 
@@ -28,7 +28,7 @@ export async function GET(request: Request) {
 /** Update one built-in bonus. The rows are fixed (seeded by 00091), so this
  * only ever edits, never creates. */
 export async function POST(request: Request) {
-  if (!verifyAdmin(request)) {
+  if (!(await verifyAdmin(request))) {
     return unauthorizedAdmin();
   }
 
