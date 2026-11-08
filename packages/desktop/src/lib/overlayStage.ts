@@ -1,5 +1,9 @@
 import { HerzieStage, herzieStage } from "@herzies/shared/gl";
 import { createContext, useContext } from "react";
+import {
+  onTownSupersample,
+  townSupersample,
+} from "../components/town/pixelSize";
 
 /**
  * The page's herzie canvas sits under the app's overlay windows, so a herzie
@@ -8,6 +12,21 @@ import { createContext, useContext } from "react";
  * they share it.
  */
 export const overlayHerzieStage = new HerzieStage();
+
+/** The visitor panel's own herzie canvas. The page's canvas sits under the
+ * panel's glass, and the overlay windows' one follows whichever window is
+ * open, which can be one opened over this panel. */
+export const visitorHerzieStage = new HerzieStage();
+
+// Profiles (and the rest drawn on these) follow Settings > Graphics >
+// Supersampling, as the Town does.
+function followSupersample() {
+  const on = townSupersample();
+  overlayHerzieStage.supersample = on;
+  visitorHerzieStage.supersample = on;
+}
+followSupersample();
+onTownSupersample(followSupersample);
 
 /** Which stage the herzies below draw on, and, inside an overlay window,
  * where their sky goes: a layer in the window's panel (clipped to its
