@@ -151,8 +151,8 @@ function useWindowHeight() {
   return height;
 }
 
-/** The Herzie window's tabs. */
-type HerzieTab = "deck" | "bag" | "stats" | "skills";
+/** The Herzie window's tabs (one view in the big window). */
+type HerzieTab = "deck" | "bag";
 /** A class's name, for the player card ("Bard"); none without a class. */
 const classLabelOf = (c: HerzieClass | null | undefined) =>
   c ? CLASS_DEFS[c].name : undefined;
@@ -291,10 +291,10 @@ function App() {
   // until its exit has played: its content keeps still under the fade.
   const [leavingOverlay, setLeavingOverlay] = useState<OverlayId | null>(null);
   const [prevOverlay, setPrevOverlay] = useState<OverlayId | null>(overlay);
-  /** Deck, Bag, Stats and Skills are one window's tabs: switching between
-   * them isn't leaving it. */
+  /** Deck and Bag are one window's tabs: switching between them isn't
+   * leaving it. */
   const isInventory = (v: View | null): v is HerzieTab =>
-    v === "deck" || v === "bag" || v === "stats" || v === "skills";
+    v === "deck" || v === "bag";
   if (prevOverlay !== overlay) {
     setPrevOverlay(overlay);
     if (prevOverlay && !(isInventory(prevOverlay) && isInventory(overlay))) {
@@ -1582,6 +1582,9 @@ function App() {
             onClose={closeWindow}
             title="Herzie"
             narrow={bigWindow}
+            // The big window: the character screen, on the right.
+            side="right"
+            wide={bigWindow}
             onHome={base === "home"}
             inTown={townWorld}
             half
@@ -1616,42 +1619,51 @@ function App() {
             panel={inventoryPanel}
             onPanelChange={(p) => switchView(p as HerzieTab)}
             onTabLanded={onTabLanded}
-            extraTabs={[
-              ...(herzie.statPoints
-                ? [
-                    {
-                      id: "stats",
-                      label: "Stats",
-                      content: (
-                        <StatsTab
-                          // Read off the copies, so each worn one counts at
-                          // its own upgrade level.
-                          stats={getHerzieStatsFromUnits(state.units)}
-                          level={herzie.level}
-                          points={herzie.statPoints}
-                          onLog={addLog}
-                        />
-                      ),
-                    },
-                  ]
-                : []),
-              ...(herzie.class
-                ? [
-                    {
-                      id: "skills",
-                      label: "Skills",
-                      content: (
-                        <SkillsPanel
-                          herzieClass={herzie.class}
-                          skills={state.skills}
-                        />
-                      ),
-                    },
-                  ]
-                : []),
-            ]}
+            wide={bigWindow}
+            isPlaying={!!state.nowPlaying}
           />
         </>
+      )}
+
+      {herzie?.statPoints && (
+        <OverlayWindow
+          open={overlay === "stats"}
+          onClosed={windowClosed("stats")}
+          onClose={closeWindow}
+          title="Stats"
+          narrow={bigWindow}
+          onHome={base === "home"}
+          inTown={townWorld}
+          fit
+        >
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+            <StatsTab
+              // Read off the copies, so each worn one counts at its own
+              // upgrade level.
+              stats={getHerzieStatsFromUnits(state.units)}
+              level={herzie.level}
+              points={herzie.statPoints}
+              onLog={addLog}
+            />
+          </div>
+        </OverlayWindow>
+      )}
+
+      {herzie?.class && (
+        <OverlayWindow
+          open={overlay === "skills"}
+          onClosed={windowClosed("skills")}
+          onClose={closeWindow}
+          title="Skills"
+          narrow={bigWindow}
+          onHome={base === "home"}
+          inTown={townWorld}
+          fit
+        >
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+            <SkillsPanel herzieClass={herzie.class} skills={state.skills} />
+          </div>
+        </OverlayWindow>
       )}
 
       {herzie && (

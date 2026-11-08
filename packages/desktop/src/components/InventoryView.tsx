@@ -32,14 +32,8 @@ import {
   requiredDiceForLevel,
   unitsBestFirst,
 } from "@herzies/shared";
-import {
-  memo,
-  type ReactNode,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { HerzieView } from "@herzies/shared/gl";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   pickGroundSide,
@@ -47,6 +41,7 @@ import {
 } from "../hooks/useOptimisticUnits";
 import { useEscape } from "../lib/escapeStack";
 import { notify } from "../lib/notices";
+import { overlayHerzieStage } from "../lib/overlayStage";
 import { cn, formatAmount } from "../lib/utils";
 import { herzies } from "../tauri-bridge";
 import { Coin, CoinBalance } from "./Coin";
@@ -58,6 +53,7 @@ import {
   type DeckBox,
   type DeckDragState,
   DeckOverlay,
+  DeckPaperdoll,
   type EmptySlotTarget,
 } from "./DeckOverlay";
 import { DeckSlotPicker, type PickerOption } from "./DeckSlotPicker";
@@ -412,12 +408,37 @@ const toBank = (unitId: string) => `[${TILE_UNITS_ATTR}~="${unitId}"]`;
 /** The window's own two tabs, where cards go. */
 type Panel = "bag" | "deck";
 const PANEL_LABELS: Record<Panel, string> = { deck: "Deck", bag: "Bag" };
-/** A tab the window also holds (Stats, Skills), after the deck and the bag. */
-export interface ExtraTab {
-  id: string;
-  label: string;
-  content: ReactNode;
+
+/** The bag's filter tabs. Every item is in exactly one besides All. */
+type BagFilter = "all" | "wearables" | "instruments" | "skins" | "misc";
+const BAG_FILTERS: { id: BagFilter; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "wearables", label: "Wearables" },
+  { id: "instruments", label: "Instruments" },
+  { id: "skins", label: "Skins" },
+  { id: "misc", label: "Misc" },
+];
+/** Wearables are what the herzie has on (head to feet, and the two
+ * Accessories); Modifiers, Spirits and Scenery go in Misc with everything
+ * that can't be worn. */
+const FILTER_OF_TYPE: Partial<Record<ItemType, Exclude<BagFilter, "all">>> = {
+  equipable: "wearables",
+  accessory: "wearables",
+  cloak: "wearables",
+  shoes: "wearables",
+  instrument: "instruments",
+  skin: "skins",
+};
+function bagFilterOf(itemId: string): Exclude<BagFilter, "all"> {
+  const def = getItem(itemId);
+  return (def && FILTER_OF_TYPE[getItemType(def)]) ?? "misc";
 }
+const passesFilter = (filter: BagFilter, itemId: string) =>
+  filter === "all" || bagFilterOf(itemId) === filter;
+/** On each filter tab: where a card returning to the bag flies when the
+ * filter showing hides it. */
+const BAG_FILTER_ATTR = "data-bag-filter";
+const toFilterTab = (filter: BagFilter) => `[${BAG_FILTER_ATTR}="${filter}"]`;
 /** On the menu's Deck and Bag items (TabBar), and on the Menu tab itself
  * while its tray is shut: where a card flies while the window is shut.
  * Space-separated, as the Menu tab stands in for both. */
@@ -662,7 +683,8 @@ function InventoryViewImpl({
   panel,
   onPanelChange,
   onTabLanded,
-  extraTabs = [],
+  wide = false,
+  isPlaying = false,
 }: {
   herzie: Herzie;
   initialItem?: string | null;
@@ -695,13 +717,16 @@ function InventoryViewImpl({
   slot: HTMLElement | null;
   /** The window is open (not just fading out). */
   open: boolean;
-  /** Its tab showing: the deck, the bag, or one of `extraTabs`. */
+  /** Its tab showing: the deck or the bag (both show when `wide`). */
   panel: string;
   onPanelChange: (panel: string) => void;
   /** A card landed on the menu's Deck or Bag item (or the Menu tab). */
   onTabLanded?: (panel: Panel) => void;
-  /** More tabs after the deck and the bag. */
-  extraTabs?: ExtraTab[];
+  /** The big window: the character screen, deck and bag in one view, the
+   * herzie in the middle of its deck. */
+  wide?: boolean;
+  /** Music's on: the character screen's herzie dances. */
+  isPlaying?: boolean;
 }) {
   const capacity = bankCapacity(bankExpansions);
   // Crystal Shards, beside the coins in the footer.
@@ -762,12 +787,7 @@ function InventoryViewImpl({
   const [slotOrder, setSlotOrder] = useState<(string | null)[]>(() =>
     loadSlotOrder(herzie.friendCode, capacity),
   );
-  /** Rows the grid has — capacity always lands on whole rows, and never fewer
-   * than the three that fill the panel. */
-  const gridRows = Math.max(
-    VISIBLE_ROWS,
-    Math.ceil(slotOrder.length / GRID_COLS),
-  );
+  const [bagFilter, setBagFilter] = useState<BagFilter>("all");
   // Capacity arrives after mount (from the first sync, or right after a
   // purchase), so the arrangement has to grow to meet it. Existing placements
   // are untouched; the new slots are simply empty.
@@ -851,30 +871,52 @@ function InventoryViewImpl({
    * window's tab, or the menu while the window is shut. */
   const toTab = (tab: Panel) =>
     open ? `[${WINDOW_TAB_ATTR}="${tab}"]` : `[${PANEL_TAB_ATTR}~="${tab}"]`;
-  const [tabBumps, setTabBumps] = useState<Record<Panel, number>>({
-    bag: 0,
-    deck: 0,
-  });
+  /** Bumps per tab — the window's Deck/Bag tabs, and the bag's filter tabs
+   * (keyed `filter:<id>`). */
+  const [tabBumps, setTabBumps] = useState<Record<string, number>>({});
   /** Tabs mid-bump. Cleared when the animation ends: a class left on would
    * replay it every time the window is shown again. */
-  const [bumping, setBumping] = useState<ReadonlySet<Panel>>(new Set());
+  const [bumping, setBumping] = useState<ReadonlySet<string>>(new Set());
+  const bump = (key: string) => {
+    setTabBumps((b) => ({ ...b, [key]: (b[key] ?? 0) + 1 }));
+    setBumping((current) => new Set(current).add(key));
+  };
+  /** The bump animation on a tab's label (which is re-keyed on each bump,
+   * `tabBumps[key]`, so it restarts). */
+  const bumpProps = (key: string) => ({
+    className: cn("inline-block", bumping.has(key) && "animate-tab-bump"),
+    onAnimationEnd: () =>
+      setBumping((current) => {
+        const next = new Set(current);
+        next.delete(key);
+        return next;
+      }),
+  });
   const landFlight = (id: number) => {
     const target = flights.find((f) => f.id === id)?.target;
     for (const tab of ["bag", "deck"] as const) {
       if (target === `[${WINDOW_TAB_ATTR}="${tab}"]`) {
-        setTabBumps((b) => ({ ...b, [tab]: b[tab] + 1 }));
-        setBumping((current) => new Set(current).add(tab));
+        bump(tab);
       } else if (target === `[${PANEL_TAB_ATTR}~="${tab}"]`) {
         onTabLanded?.(tab);
       }
     }
+    for (const { id: filter } of BAG_FILTERS) {
+      if (target === toFilterTab(filter)) bump(`filter:${filter}`);
+    }
     endFlight(id);
   };
-  /** Where a copy shows: its spot when that window is open, else the menu. */
+  /** Where a copy shows: its spot when that window is open, else the menu.
+   * In the bag, a copy the filter showing hides goes to its filter's tab. */
   const deckSpot = (unitId: string) =>
-    open && panel === "deck" ? toDeck(unitId) : toTab("deck");
-  const bagSpot = (unitId: string) =>
-    open && panel === "bag" ? toBank(unitId) : toTab("bag");
+    open && (wide || panel === "deck") ? toDeck(unitId) : toTab("deck");
+  const bagSpot = (unitId: string) => {
+    if (!open || !(wide || panel === "bag")) return toTab("bag");
+    const itemId = units.find((u) => u.id === unitId)?.itemId;
+    return itemId && !passesFilter(bagFilter, itemId)
+      ? toFilterTab(bagFilterOf(itemId))
+      : toBank(unitId);
+  };
 
   // What the grid shows: one tile per unworn copy, a stack folded into one.
   // Held behind `units`, which is identity-stable while its content is, so this
@@ -1705,6 +1747,259 @@ function InventoryViewImpl({
           : null
       : null;
 
+  /** What the deck's boxes need, in either layout. */
+  const deckProps = {
+    showInstrument:
+      !!herzie.class || !!equipped.main_hand || !!equipped.off_hand,
+    equipped,
+    units,
+    flyingUnitIds,
+    drag: deckDrag,
+    draggingUnitId: draggingOutUnitId,
+    onUnequip: (unitId: string) => {
+      // Dragged out and dropped straight back on its own box.
+      if (suppressClickRef.current) {
+        suppressClickRef.current = false;
+        return;
+      }
+      handleEquip(unitId);
+    },
+    onInspectRequest: (unitId: string) => {
+      if (suppressClickRef.current) {
+        suppressClickRef.current = false;
+        return;
+      }
+      window.getSelection()?.removeAllRanges(); // Shift+click extends one
+      const unit = units.find((u) => u.id === unitId);
+      if (unit) openInspect(unit.itemId, unit.id);
+    },
+    onDragStart: handleDeckPointerDown,
+    onMenuRequest: (unitId: string, x: number, y: number) =>
+      setDeckMenu({ unitId, x, y }),
+    onPlaceRequest: setSlotPicker,
+  };
+
+  /** The character screen's herzie, wearing the deck as it changes. On the
+   * overlay windows' stage, which this window hosts while it's open. */
+  const characterHerzie = (
+    <div className="flex h-full items-center justify-center overflow-hidden">
+      <HerzieView
+        onStage={overlayHerzieStage}
+        userId={herzie.friendCode}
+        stage={herzie.stage}
+        // size 4: a 259px-tall view (48 rows of size * 1.35), which sets
+        // the deck's height.
+        size={4}
+        // The props around it (Accessories, a Spirit) are placed against
+        // this width, so it spans the gap between the slot columns (~340px
+        // at size * 0.6 per column); narrower and they crowd the herzie.
+        cols={140}
+        zoom={0.95}
+        equipped={equipped}
+        isPlaying={isPlaying}
+        paused={!open}
+        ariaLabel={herzie.name}
+      />
+    </div>
+  );
+
+  /** The cells the grid shows. With a filter on: the slots holding what it
+   * lets through, in slot order, then the empty slots (in order) to fill out
+   * the rows — each still its real slot, so a drag between them swaps real
+   * slots and a card dropped on an empty one lands in a real empty slot. */
+  const cells: { index: number | null; key: string | null }[] =
+    bagFilter === "all"
+      ? slotOrder.map((key, index) => ({ index, key }))
+      : (() => {
+          const shown = slotOrder.flatMap((key, index) => {
+            const tile = key ? tileByKey.get(key) : undefined;
+            return tile && passesFilter(bagFilter, tile.itemId)
+              ? [{ index, key }]
+              : [];
+          });
+          const empties = slotOrder.flatMap((key, index) =>
+            key === null ? [{ index, key }] : [],
+          );
+          const total =
+            Math.max(VISIBLE_ROWS, Math.ceil(shown.length / GRID_COLS)) *
+            GRID_COLS;
+          const padded: { index: number | null; key: string | null }[] = [
+            ...shown,
+            ...empties.slice(0, total - shown.length),
+          ];
+          while (padded.length < total) padded.push({ index: null, key: null });
+          return padded;
+        })();
+  /** Rows the grid has — whole rows, and never fewer than the three that
+   * fill the panel. */
+  const gridRows = Math.max(VISIBLE_ROWS, Math.ceil(cells.length / GRID_COLS));
+
+  const filterTabs = BAG_FILTERS.map(({ id, label }) => (
+    <button
+      key={id}
+      type="button"
+      {...{ [BAG_FILTER_ATTR]: id }}
+      onClick={() => setBagFilter(id)}
+      className={cn(
+        "cursor-pointer border-none bg-transparent px-1.5 py-0.5 text-[10px]",
+        bagFilter === id
+          ? "font-bold text-cyan"
+          : "text-text-dim hover:text-text",
+      )}
+    >
+      <span key={tabBumps[`filter:${id}`] ?? 0} {...bumpProps(`filter:${id}`)}>
+        {label}
+      </span>
+    </button>
+  ));
+
+  const bagTools = (
+    <>
+      <Tooltip
+        label={
+          duplicatesCount > 0
+            ? `Sell ${duplicatesCount} duplicate${duplicatesCount === 1 ? "" : "s"}, keeping the best of each`
+            : "No duplicates to sell"
+        }
+      >
+        <button
+          type="button"
+          aria-label="Sell duplicates"
+          disabled={duplicatesCount === 0}
+          onClick={() => setSellDupesConfirm(true)}
+          className="flex cursor-pointer items-center border-none bg-transparent px-1.5 py-0.5 text-text-dim hover:text-cyan disabled:cursor-default disabled:opacity-40 disabled:hover:text-text-dim"
+        >
+          <DuplicatesIcon className="h-3.5 w-3.5" />
+        </button>
+      </Tooltip>
+      <Tooltip label="Quick sort">
+        <button
+          type="button"
+          aria-label="Quick sort"
+          onClick={() => setSlotOrder(sortSlotsByType(tiles, slotOrder.length))}
+          className="flex cursor-pointer items-center border-none bg-transparent px-1.5 py-0.5 text-text-dim hover:text-cyan"
+        >
+          {/* 14px rather than the item pips' 16px: these are chrome beside
+              the bar's label, not content, and read better a little smaller.
+              A 16x16 PixelIcon only lands on whole device pixels at 16px (or a
+              multiple), so both glyphs are drawn at 2px stroke weight to
+              survive the fractional scale — a 1px feature here would go
+              visibly soft. */}
+          <SortIcon className="h-3.5 w-3.5" />
+        </button>
+      </Tooltip>
+    </>
+  );
+
+  /** The grid and the coins under it. */
+  const bagBody = (
+    <>
+      {/* Three rows tall where the window grows to fit it, but only as a
+          basis: in a window of fixed height it shrinks, and the grid
+          scrolls. */}
+      <div
+        className="relative min-h-0"
+        style={{
+          flex: `1 1 calc(100cqw * ${VISIBLE_ROWS} / ${GRID_COLS})`,
+        }}
+      >
+        {loading ? (
+          <div className="pt-5 text-center text-ui text-text-dim">
+            Loading...
+          </div>
+        ) : (
+          // Three rows to begin with; past what fits (each Inventory
+          // Expansion adds two rows) it scrolls.
+          <div
+            ref={gridViewportRef}
+            className={cn(
+              "absolute inset-0",
+              returningOverBag && "ring-1 ring-inset ring-cyan/50",
+            )}
+          >
+            {/* Each row is a sixth of the width (container units), in CSS, so
+                the cells are square on the very first frame — no measuring,
+                and nothing to jump when the view is shown. The grid splits
+                that height evenly between its rows. */}
+            <List
+              className="h-full"
+              contentStyle={{
+                height: `calc(100cqw * ${gridRows} / ${GRID_COLS})`,
+              }}
+            >
+              <div
+                className="grid h-full grid-cols-6"
+                style={{ gridAutoRows: `${100 / gridRows}%` }}
+              >
+                {cells.map(({ index, key }, n) => {
+                  const isLastCol = n % GRID_COLS === GRID_COLS - 1;
+                  const tile = key ? tileByKey.get(key) : undefined;
+                  if (index === null) {
+                    // Past the bag's real slots (a filter showing more
+                    // rows than there are empty slots to fill them):
+                    // just the grid's lines.
+                    return (
+                      <div
+                        // biome-ignore lint/suspicious/noArrayIndexKey: padding cells have no identity but their position
+                        key={`pad-${n}`}
+                        className={cn(
+                          "h-full w-full border-b border-white/15",
+                          !isLastCol && "border-r",
+                        )}
+                      />
+                    );
+                  }
+                  if (!tile) {
+                    return (
+                      <EmptyGridCell
+                        key={`slot-${index}`}
+                        index={index}
+                        isLastCol={isLastCol}
+                        isDragOver={dragVisual?.overIndex === index}
+                      />
+                    );
+                  }
+                  return (
+                    <ItemGridCell
+                      key={`slot-${index}`}
+                      index={index}
+                      itemId={tile.itemId}
+                      unitIds={tile.unitIds}
+                      level={tile.upgradeLevel}
+                      isLastCol={isLastCol}
+                      isDragging={
+                        dragSource?.kind === "bag" && dragSource.index === index
+                      }
+                      // A card from the deck can only be dropped on an empty
+                      // slot — dropped on a full one it finds its own.
+                      isDragOver={
+                        dragSource?.kind === "bag" &&
+                        dragVisual?.overIndex === index
+                      }
+                      flying={tile.unitIds.some((id) => flyingUnitIds.has(id))}
+                      equipped={equipped}
+                      onPlace={(inspect) => handleGridClick(tile, inspect)}
+                      onMenuRequest={(x, y) =>
+                        setTileMenu({ tileKey: tile.key, x, y })
+                      }
+                      onDragPointerDown={handleDragPointerDown}
+                    />
+                  );
+                })}
+              </div>
+            </List>
+          </div>
+        )}
+      </div>
+      {/* No line or gap of its own: the bottom row's line is the divider (a
+          second one 8px under it read as a sliver of a fourth row). */}
+      <CoinBalance
+        amount={currency}
+        shards={crystal?.enabled ? crystal.shards : undefined}
+      />
+    </>
+  );
+
   return (
     <>
       {slot &&
@@ -1712,254 +2007,81 @@ function InventoryViewImpl({
           // The container query: bag rows are sized off the window's width,
           // so the cells are square on the very first frame.
           <div className="@container flex h-full min-h-0 flex-col">
-            {/* h-6: a whole-pixel row, so the pixel-art icons below it sit
-                on whole pixels. */}
-            <div className="mb-1 flex h-6 items-center border-b border-white/15">
-              {(["deck", "bag"] as const).map((tab) => (
-                <TabButton
-                  key={tab}
-                  active={panel === tab}
-                  onClick={() => onPanelChange(tab)}
-                >
-                  {/* Re-keyed on each bump so the animation restarts. */}
-                  <span
-                    key={tabBumps[tab]}
-                    {...{ [WINDOW_TAB_ATTR]: tab }}
-                    className={cn(
-                      "inline-block",
-                      bumping.has(tab) && "animate-tab-bump",
-                    )}
-                    onAnimationEnd={() =>
-                      setBumping((current) => {
-                        const next = new Set(current);
-                        next.delete(tab);
-                        return next;
-                      })
-                    }
-                  >
-                    {PANEL_LABELS[tab]}
-                  </span>
-                </TabButton>
-              ))}
-              {extraTabs.map((tab) => (
-                <TabButton
-                  key={tab.id}
-                  active={panel === tab.id}
-                  onClick={() => onPanelChange(tab.id)}
-                >
-                  {tab.label}
-                </TabButton>
-              ))}
-              <div
-                className={cn(
-                  "ml-auto flex items-center",
-                  panel !== "bag" && "invisible",
-                )}
-              >
-                <Tooltip
-                  label={
-                    duplicatesCount > 0
-                      ? `Sell ${duplicatesCount} duplicate${duplicatesCount === 1 ? "" : "s"}, keeping the best of each`
-                      : "No duplicates to sell"
-                  }
-                >
-                  <button
-                    type="button"
-                    aria-label="Sell duplicates"
-                    disabled={duplicatesCount === 0}
-                    onClick={() => setSellDupesConfirm(true)}
-                    className="flex cursor-pointer items-center border-none bg-transparent px-1.5 py-0.5 text-text-dim hover:text-cyan disabled:cursor-default disabled:opacity-40 disabled:hover:text-text-dim"
-                  >
-                    <DuplicatesIcon className="h-3.5 w-3.5" />
-                  </button>
-                </Tooltip>
-                <Tooltip label="Quick sort">
-                  <button
-                    type="button"
-                    aria-label="Quick sort"
-                    onClick={() =>
-                      setSlotOrder(sortSlotsByType(tiles, slotOrder.length))
-                    }
-                    className="flex cursor-pointer items-center border-none bg-transparent px-1.5 py-0.5 text-text-dim hover:text-cyan"
-                  >
-                    {/* 14px rather than the item pips' 16px: these are chrome
-                        beside the bar's label, not content, and read better a
-                        little smaller. A 16x16 PixelIcon only lands on whole
-                        device pixels at 16px (or a multiple), so both glyphs are
-                        drawn at 2px stroke weight to survive the fractional
-                        scale — a 1px feature here would go visibly soft. */}
-                    <SortIcon className="h-3.5 w-3.5" />
-                  </button>
-                </Tooltip>
-              </div>
-            </div>
-            {/* The bag sets the height (three rows); the deck and the other
-                tabs fill it, scrolling past it, so switching tabs never
-                resizes the window. */}
-            {/* minmax(0, 1fr): the track may shrink below the bag's three
-                rows when the window has a fixed height (Home's half window),
-                rather than pushing the bag out past the window's bottom. */}
-            <div className="relative grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)]">
-              {/* Scrolls only if the window can't fit it. A card dropped
-                  anywhere in here is placed. */}
-              <div
-                {...{ [HERZIE_ZONE_ATTR]: "" }}
-                className={cn(
-                  "absolute inset-0 overflow-y-auto overscroll-contain",
-                  panel !== "deck" && "invisible",
-                )}
-              >
-                <DeckOverlay
-                  showInstrument={
-                    !!herzie.class ||
-                    !!equipped.main_hand ||
-                    !!equipped.off_hand
-                  }
-                  equipped={equipped}
-                  units={units}
-                  flyingUnitIds={flyingUnitIds}
-                  drag={deckDrag}
-                  draggingUnitId={draggingOutUnitId}
-                  onUnequip={(unitId) => {
-                    // Dragged out and dropped straight back on its own box.
-                    if (suppressClickRef.current) {
-                      suppressClickRef.current = false;
-                      return;
-                    }
-                    handleEquip(unitId);
-                  }}
-                  onInspectRequest={(unitId) => {
-                    if (suppressClickRef.current) {
-                      suppressClickRef.current = false;
-                      return;
-                    }
-                    window.getSelection()?.removeAllRanges(); // Shift+click extends one
-                    const unit = units.find((u) => u.id === unitId);
-                    if (unit) openInspect(unit.itemId, unit.id);
-                  }}
-                  onDragStart={handleDeckPointerDown}
-                  onMenuRequest={(unitId, x, y) =>
-                    setDeckMenu({ unitId, x, y })
-                  }
-                  onPlaceRequest={setSlotPicker}
-                />
-              </div>
-              <div
-                className={cn(
-                  "col-start-1 row-start-1 flex min-h-0 flex-col",
-                  panel !== "bag" && "invisible",
-                )}
-              >
-                {/* Three rows tall where the window grows to fit it, but
-                    only as a basis: in a window of fixed height it shrinks,
-                    and the grid scrolls. */}
-                <div
-                  className="relative min-h-0"
-                  style={{
-                    flex: `1 1 calc(100cqw * ${VISIBLE_ROWS} / ${GRID_COLS})`,
-                  }}
-                >
-                  {loading ? (
-                    <div className="pt-5 text-center text-ui text-text-dim">
-                      Loading...
-                    </div>
-                  ) : (
-                    // Three rows to begin with; past what fits (each Inventory
-                    // Expansion adds two rows) it scrolls.
-                    <div
-                      ref={gridViewportRef}
-                      className={cn(
-                        "absolute inset-0",
-                        returningOverBag && "ring-1 ring-inset ring-cyan/50",
-                      )}
+            {wide ? (
+              <>
+                {/* The character screen: drop a card anywhere on it and
+                    it's placed. */}
+                <div {...{ [HERZIE_ZONE_ATTR]: "" }} className="shrink-0">
+                  <DeckPaperdoll {...deckProps} center={characterHerzie} />
+                </div>
+                <div className="mb-1 flex h-6 shrink-0 items-center border-b border-white/15">
+                  {filterTabs}
+                  <div className="ml-auto flex items-center">{bagTools}</div>
+                </div>
+                <div className="flex min-h-0 flex-1 flex-col">{bagBody}</div>
+              </>
+            ) : (
+              <>
+                {/* h-6: a whole-pixel row, so the pixel-art icons below it
+                    sit on whole pixels. */}
+                <div className="mb-1 flex h-6 items-center border-b border-white/15">
+                  {(["deck", "bag"] as const).map((tab) => (
+                    <TabButton
+                      key={tab}
+                      active={panel === tab}
+                      onClick={() => onPanelChange(tab)}
                     >
-                      {/* Each row is a sixth of the width (container units), in CSS,
-                    so the cells are square on the very first frame — no
-                    measuring, and nothing to jump when the view is shown. The
-                    grid splits that height evenly between its rows. */}
-                      <List
-                        className="h-full"
-                        contentStyle={{
-                          height: `calc(100cqw * ${gridRows} / ${GRID_COLS})`,
-                        }}
+                      <span
+                        key={tabBumps[tab] ?? 0}
+                        {...{ [WINDOW_TAB_ATTR]: tab }}
+                        {...bumpProps(tab)}
                       >
-                        <div
-                          className="grid h-full grid-cols-6"
-                          style={{ gridAutoRows: `${100 / gridRows}%` }}
-                        >
-                          {slotOrder.map((key, i) => {
-                            const isLastCol = i % GRID_COLS === GRID_COLS - 1;
-                            const tile = key ? tileByKey.get(key) : undefined;
-                            if (!tile) {
-                              return (
-                                <EmptyGridCell
-                                  key={`slot-${i}`}
-                                  index={i}
-                                  isLastCol={isLastCol}
-                                  isDragOver={dragVisual?.overIndex === i}
-                                />
-                              );
-                            }
-                            return (
-                              <ItemGridCell
-                                key={`slot-${i}`}
-                                index={i}
-                                itemId={tile.itemId}
-                                unitIds={tile.unitIds}
-                                level={tile.upgradeLevel}
-                                isLastCol={isLastCol}
-                                isDragging={
-                                  dragSource?.kind === "bag" &&
-                                  dragSource.index === i
-                                }
-                                // A card from the deck can only be dropped on an empty
-                                // slot — dropped on a full one it finds its own.
-                                isDragOver={
-                                  dragSource?.kind === "bag" &&
-                                  dragVisual?.overIndex === i
-                                }
-                                flying={tile.unitIds.some((id) =>
-                                  flyingUnitIds.has(id),
-                                )}
-                                equipped={equipped}
-                                onPlace={(inspect) =>
-                                  handleGridClick(tile, inspect)
-                                }
-                                onMenuRequest={(x, y) =>
-                                  setTileMenu({ tileKey: tile.key, x, y })
-                                }
-                                onDragPointerDown={handleDragPointerDown}
-                              />
-                            );
-                          })}
-                        </div>
-                      </List>
+                        {PANEL_LABELS[tab]}
+                      </span>
+                    </TabButton>
+                  ))}
+                  <div
+                    className={cn(
+                      "ml-auto flex items-center",
+                      panel !== "bag" && "invisible",
+                    )}
+                  >
+                    {bagTools}
+                  </div>
+                </div>
+                {/* The bag sets the height (its filter row and three rows);
+                    the deck fills it, scrolling past it, so switching tabs
+                    never resizes the window. */}
+                {/* minmax(0, 1fr): the track may shrink below the bag's
+                    rows when the window has a fixed height (Home's half
+                    window), rather than pushing the bag out past the
+                    window's bottom. */}
+                <div className="relative grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)]">
+                  {/* Scrolls only if the window can't fit it. A card dropped
+                      anywhere in here is placed. */}
+                  <div
+                    {...{ [HERZIE_ZONE_ATTR]: "" }}
+                    className={cn(
+                      "absolute inset-0 overflow-y-auto overscroll-contain",
+                      panel !== "deck" && "invisible",
+                    )}
+                  >
+                    <DeckOverlay {...deckProps} />
+                  </div>
+                  <div
+                    className={cn(
+                      "col-start-1 row-start-1 flex min-h-0 flex-col",
+                      panel !== "bag" && "invisible",
+                    )}
+                  >
+                    <div className="mb-1 flex h-5 shrink-0 items-center">
+                      {filterTabs}
                     </div>
-                  )}
+                    {bagBody}
+                  </div>
                 </div>
-                {/* No line or gap of its own: the bottom row's line is the
-                    divider (a second one 8px under it read as a sliver of a
-                    fourth row). */}
-                <CoinBalance
-                  amount={currency}
-                  shards={crystal?.enabled ? crystal.shards : undefined}
-                />
-              </div>
-              {/* The other tabs fill what the deck and the bag take, and
-                  scroll past it, so they never resize the window. Hidden,
-                  not unmounted, so they keep their state. */}
-              {extraTabs.map((tab) => (
-                <div
-                  key={tab.id}
-                  className={cn(
-                    "absolute inset-0 overflow-y-auto overscroll-contain",
-                    panel !== tab.id && "hidden",
-                  )}
-                >
-                  {tab.content}
-                </div>
-              ))}
-            </div>
+              </>
+            )}
           </div>,
           slot,
         )}
