@@ -873,6 +873,7 @@ function EventsViewImpl({
         loading={loading}
         chatMessages={chatMessages}
         chatOverlay={chatOverlay}
+        expanded={expanded}
         cards={cards}
         musicPlaying={musicPlaying}
         paused={
