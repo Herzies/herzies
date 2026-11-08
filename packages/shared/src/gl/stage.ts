@@ -105,6 +105,17 @@ export class HerzieStage {
     this.lastLayout = "";
   }
 
+  /**
+   * Draw everything again next frame, even if nothing moved. For when the
+   * page around the canvas changes in a way the stage can't see: a web view
+   * rebuilding its layers (another window with a backdrop blur opening
+   * over or beside it) can drop what a canvas showed, and an idle stage
+   * wouldn't redraw it.
+   */
+  redraw() {
+    this.lastLayout = "";
+  }
+
   /** Draw `view` from now on; returns the function that stops it. */
   add(view: StageView): () => void {
     const entry: Entry = { view, clips: [], clipAge: CLIP_REFRESH_FRAMES };

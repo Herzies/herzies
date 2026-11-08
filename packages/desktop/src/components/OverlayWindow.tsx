@@ -33,6 +33,7 @@ export function OverlayWindow({
   wide = false,
   className,
   onClosed,
+  noStage,
 }: {
   open: boolean;
   onClose: () => void;
@@ -66,6 +67,10 @@ export function OverlayWindow({
    * screen). */
   wide?: boolean;
   className?: string;
+  /** Has no herzies in it: leaves the overlay stage where it is, so a
+   * window open beside it (the Herzie window, with Stats in the big window)
+   * keeps drawing its herzie. */
+  noStage?: boolean;
   /** The exit has finished playing: it's off screen now. Until then its
    * content should stay as it was (still "active"), or it changes under
    * the fade. */
@@ -105,12 +110,17 @@ export function OverlayWindow({
     return () => window.removeEventListener("pointerdown", down, true);
   }, [open, inTown, isTop]);
 
-  // The herzies inside draw on the overlay stage, hosted in whichever
-  // window is open (only one is at a time).
+  // The herzies inside draw on the overlay stage, hosted in the window
+  // that has them (only one does at a time).
   const host = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (open && host.current) overlayHerzieStage.setHost(host.current);
-  }, [open]);
+    if (open && !noStage && host.current)
+      overlayHerzieStage.setHost(host.current);
+    // A window coming or going makes the web view rebuild its layers, which
+    // can blank a still herzie in another window still open (Stats beside
+    // the Herzie window): draw it again.
+    overlayHerzieStage.redraw();
+  }, [open, noStage]);
   const [skySlot, setSkySlot] = useState<HTMLDivElement | null>(null);
   const stageContext = useMemo(
     () => ({ stage: overlayHerzieStage, inOverlay: true, skySlot }),
@@ -175,6 +185,9 @@ export function OverlayWindow({
       <div
         ref={panel}
         role="dialog"
+        // A press in another window (two can be open side by side) isn't
+        // a press outside this one.
+        data-window-safe
         aria-label={title}
         className={cn(
           "pointer-events-auto absolute inset-0 overflow-hidden rounded-2xl border border-white/12 shadow-[0_18px_50px_-12px_rgba(0,0,0,0.7)]",
@@ -187,7 +200,10 @@ export function OverlayWindow({
           anim,
         )}
         onAnimationEnd={(e) => {
-          if (e.target === e.currentTarget && closing) {
+          if (e.target !== e.currentTarget) return;
+          // Its layers settle as the animation ends: once more (see above).
+          overlayHerzieStage.redraw();
+          if (closing) {
             setPhase("closed");
             onClosed?.();
           }
