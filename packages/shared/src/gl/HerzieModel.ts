@@ -46,6 +46,7 @@ import {
   dangledAxis,
   HELD_ARM,
   hasDangleEquipped,
+  hasTranslucentSkin,
   heldPoses,
   heldSwing,
   primitiveShading,
@@ -69,7 +70,7 @@ import {
   stepDangle,
 } from "../dangle-physics.js";
 import { EMOTE_SECONDS } from "../emotes.js";
-import type { Equipped } from "../items.js";
+import { type Equipped, ITEM_SETS, isSetFullyEquipped } from "../items.js";
 import {
   createThreadSim,
   DEFAULT_THREAD_CONFIG,
@@ -106,12 +107,18 @@ import {
   stepCompanion,
 } from "./companion.js";
 import {
+  GLASS_ORDER,
+  GLASS_PREPASS_ORDER,
+  GLASS_SOLID_ORDER,
+  glassDepthMaterial,
+  glassShadowMaterial,
   type HerzieLighting,
   herzieMaterial,
   type SchemeUniforms,
   setRestPlace,
 } from "./herzieMaterial.js";
 import { buildPropModel, foldHandle, propBodyBox } from "./props.js";
+import { SetShimmer } from "./setShimmer.js";
 import { ShoeSparkles } from "./shoeSparkles.js";
 import {
   GHOST_SURGE,
@@ -304,6 +311,8 @@ const sceneFixed = (s: Sphere) => floats(s) || s.part === "ground";
 /** For a prop's spheres (see Sphere.prop): placed and posed like the rest,
  * but its model is drawn in their place. */
 const UNDRAWN = new THREE.MeshBasicMaterial({ visible: false });
+/** Scratch for posing a prop that turns with its part. */
+const propAim = new THREE.Vector3();
 
 /** Air between a floating companion and the herzie, in creature units. */
 const COMPANION_GAP = 0.15;
@@ -793,6 +802,8 @@ export class HerzieModel {
   private readonly turn = new THREE.Group();
   /** The Evasive Pair's sparkles (shoeSparkles.ts); null without them. */
   private readonly sparkles: ShoeSparkles | null = null;
+  /** A full set's shimmer (setShimmer.ts); null without one. */
+  private shimmer: SetShimmer | null = null;
   /** The floating companion, flying after the herzie; null when it has none,
    * or its scenery is anchored (then the companion stays put with it). */
   private readonly follower: Follower | null;
@@ -830,10 +841,27 @@ export class HerzieModel {
     /** Its handle folded down (0..1), eased: its cat's sat on it. */
     fold: number;
     ground: boolean;
+    /** A prop that turns with its part (a shoe, with its leg's swing): the
+     * sphere it points at from `at`, and which way that was at rest. */
+    aim?: number;
+    rest?: THREE.Vector3;
   }[] = [];
   /** What its cat walks round and sits on (see CatHost.prop). */
   private readonly catProp: CatProp = { x: 0, z: 0, r: 0, top: 0 };
   private readonly materials: THREE.ShaderMaterial[] = [];
+  /** A see-through skin's glass (see hasTranslucentSkin): always blended,
+   * whatever setTint says. */
+  private readonly glassMaterials: THREE.ShaderMaterial[] = [];
+  /** Their depth prepass: one material, a mesh in each glass part. */
+  private glassDepth: THREE.MeshBasicMaterial | null = null;
+  /** And what they cast into the sun's shadow: a lighter shadow. */
+  private glassShadow: THREE.MeshDepthMaterial | null = null;
+  private readonly glassDepthMeshes: THREE.Mesh[] = [];
+  /** A see-through herzie's solid parts, drawn over its glass's depth (see
+   * GLASS_SOLID_ORDER), and their materials: kept in the transparent queue
+   * for it, whatever setTint says. */
+  private readonly overGlass: THREE.Mesh[] = [];
+  private readonly overGlassMaterials = new Set<THREE.Material>();
   /** Creature-space y of the feet, and of the scheme's painted span. */
   private readonly feetY: number;
   private readonly span: [number, number];
@@ -1057,6 +1085,7 @@ export class HerzieModel {
     }
 
     const ramp = scheme ? schemeShades(scheme) : null;
+    const glass = hasTranslucentSkin(look.equipped, look.params);
     // The ground props (the boombox) go in a group of their own that can be
     // scaled about where they stand: shown or hidden apart from the herzie
     // (see setAccessories). Two groups, so the parts keep their places in
@@ -1151,22 +1180,60 @@ export class HerzieModel {
           group.position.set(...s.prop.center);
           parent.add(group);
           propGroups.set(s.prop, group);
+          // A shoe is posed by its foot: placed by the sphere at its middle
+          // and turned by the one out at its toe, so it swings with the
+          // leg (the walk turns a leg about its hip, up to ~40°: placed by
+          // one point and never turned, it would slide off the foot).
+          let at = i;
+          let aim: number | undefined;
+          let rest: THREE.Vector3 | undefined;
+          if (s.prop.kind === "shoe") {
+            const prop = s.prop;
+            const mine = spheres
+              .map((sp, j) => [sp, j] as const)
+              .filter(([sp]) => sp.prop === prop);
+            const dist = (sp: Sphere) =>
+              Math.hypot(
+                sp.center[0] - prop.center[0],
+                sp.center[1] - prop.center[1],
+                sp.center[2] - prop.center[2],
+              );
+            at = mine.reduce((b, c) => (dist(c[0]) < dist(b[0]) ? c : b))[1];
+            const level = mine.filter(
+              ([sp]) => Math.abs(sp.center[1] - prop.center[1]) < prop.r * 0.2,
+            );
+            const toe = level.reduce((b, c) =>
+              c[0].center[2] < b[0].center[2] ? c : b,
+            );
+            aim = toe[1];
+            rest = new THREE.Vector3(...toe[0].center)
+              .sub(new THREE.Vector3(...spheres[at].center))
+              .normalize();
+          }
           this.props.push({
-            at: i,
+            at,
             group,
-            offset: new THREE.Vector3(...s.prop.center).sub(mesh.position),
+            offset: new THREE.Vector3(...s.prop.center).sub(
+              new THREE.Vector3(...spheres[at].center),
+            ),
             fold: 0,
             ground: isGround,
+            aim,
+            rest,
           });
         }
         continue;
       }
       const shading = primitiveShading(s, colors, scheme);
       const isGround = s.part === "ground";
+      // A see-through skin turns what it paints to glass; the eyes and
+      // anything worn stay solid.
+      const isGlass = (glass && shading.schemePainted) || !!shading.lens;
       // Metal's grooves are laid out by its radius: one material each. The
       // ground props never share one with the herzie (they fade apart).
       const key =
         (isGround ? "ground|" : "") +
+        (isGlass ? "glass|" : "") +
         JSON.stringify(shading) +
         (shading.metal ? s.radius : "");
       let material = byShading.get(key);
@@ -1178,14 +1245,29 @@ export class HerzieModel {
           isGround ? accessoryScheme : this.scheme,
           options.lighting,
           s.radius,
+          undefined,
+          undefined,
+          isGlass,
         );
         byShading.set(key, material);
         this.materials.push(material);
         if (isGround) this.accessoryMaterials.push(material);
+        if (isGlass) this.glassMaterials.push(material);
       }
       const mesh = new THREE.Mesh(geometryFor(s), material);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
+      if (isGlass) {
+        // Its depth prepass rides inside it, so it's posed with it.
+        this.glassDepth ??= glassDepthMaterial();
+        this.glassShadow ??= glassShadowMaterial();
+        mesh.customDepthMaterial = this.glassShadow;
+        mesh.renderOrder = GLASS_ORDER;
+        const depth = new THREE.Mesh(mesh.geometry, this.glassDepth);
+        depth.renderOrder = GLASS_PREPASS_ORDER;
+        mesh.add(depth);
+        this.glassDepthMeshes.push(depth);
+      }
       if (!s.shape) mesh.scale.setScalar(s.radius);
       else {
         const axis = new THREE.Vector3(...s.shape.axis).normalize();
@@ -1268,6 +1350,26 @@ export class HerzieModel {
         this.height,
       );
       this.root.add(this.sparkles.points);
+    }
+    if (glass) this.layerOverGlass(spheres);
+    // A full set's shimmer (ItemSet.shimmer), round the herzie itself.
+    const shimmering = ITEM_SETS.find(
+      (set) => set.shimmer && isSetFullyEquipped(look.equipped, set),
+    );
+    if (shimmering?.shimmer && !look.params) {
+      let left = Number.POSITIVE_INFINITY;
+      let right = Number.NEGATIVE_INFINITY;
+      for (const sp of spheres) {
+        if (floats(sp) || sp.part === "ground") continue;
+        left = Math.min(left, sp.center[0] - sp.radius);
+        right = Math.max(right, sp.center[0] + sp.radius);
+      }
+      this.shimmer = new SetShimmer(
+        shimmering.shimmer,
+        this.height,
+        (right - left) * MODEL_SCALE,
+      );
+      this.root.add(this.shimmer.group);
     }
     if (this.anchored) {
       this.anchored.rotation.x = Math.PI;
@@ -1451,6 +1553,7 @@ export class HerzieModel {
     this.follow(dt, speed);
     this.stepCatAlong(dt, speed);
     this.sparkles?.update(dt);
+    this.shimmer?.update(dt);
   }
 
   /** Walks its cat on after it (or keeps it sat, pinned), and poses it. */
@@ -2414,8 +2517,15 @@ export class HerzieModel {
         mesh.quaternion.setFromUnitVectors(UP, scratch);
       }
     }
-    for (const p of this.props)
-      p.group.position.copy(this.meshes[p.at].position).add(p.offset);
+    for (const p of this.props) {
+      const at = this.meshes[p.at].position;
+      if (p.aim !== undefined && p.rest) {
+        propAim.copy(this.meshes[p.aim].position).sub(at).normalize();
+        p.group.quaternion.setFromUnitVectors(p.rest, propAim);
+        propAim.copy(p.offset).applyQuaternion(p.group.quaternion);
+        p.group.position.copy(at).add(propAim);
+      } else p.group.position.copy(at).add(p.offset);
+    }
     if (this.torsoAt >= 0) {
       const [x, y, z] = offsets[this.torsoAt];
       this.torsoOffset = [x, y, z];
@@ -2539,13 +2649,48 @@ export class HerzieModel {
     this.scheme.uFlash.value.set(r, g, b, Math.max(0, Math.min(1, amount)));
   }
 
+  /** A see-through herzie: its solid parts (eyes, anything worn, its
+   * shoes and cloak) go over its glass's depth (GLASS_SOLID_ORDER). Not
+   * what floats beside it or stands on the ground. */
+  private layerOverGlass(spheres: Sphere[]): void {
+    const lift = (mesh: THREE.Mesh) => {
+      const m = mesh.material as THREE.Material;
+      if (m === UNDRAWN || m === this.glassDepth) return;
+      if (this.glassMaterials.includes(m as THREE.ShaderMaterial)) return;
+      mesh.renderOrder = GLASS_SOLID_ORDER;
+      this.overGlass.push(mesh);
+      if (!this.overGlassMaterials.has(m)) {
+        this.overGlassMaterials.add(m);
+        if (!m.transparent) {
+          m.transparent = true;
+          m.needsUpdate = true;
+        }
+      }
+    };
+    spheres.forEach((s, i) => {
+      if (floats(s) || s.part === "ground") return;
+      lift(this.meshes[i]);
+    });
+    for (const p of this.props) {
+      if (p.ground) continue;
+      p.group.traverse((o) => {
+        if ((o as THREE.Mesh).isMesh) lift(o as THREE.Mesh);
+      });
+    }
+    if (this.cloak) lift(this.cloak.mesh);
+  }
+
   setTint(grey: number, opacity: number): void {
+    this.shimmer?.setOpacity(opacity * (1 - grey));
     this.scheme.uGrey.value = grey;
     this.scheme.uOpacity.value = opacity;
     this.tintOpacity = opacity;
     const transparent = opacity < 1;
     for (const m of this.materials) {
       if (this.accessoryMaterials.includes(m)) continue;
+      // Glass, and what's drawn over it, stay in the transparent queue.
+      if (this.glassMaterials.includes(m)) continue;
+      if (this.overGlassMaterials.has(m)) continue;
       if (m.transparent !== transparent) {
         m.transparent = transparent;
         m.needsUpdate = true;
@@ -2632,6 +2777,33 @@ export class HerzieModel {
    * once, before it's drawn.
    */
   petrify(): void {
+    // A statue doesn't shimmer.
+    this.shimmer?.dispose();
+    this.shimmer = null;
+    // Stone isn't see-through: glass goes solid.
+    for (const m of this.glassMaterials) {
+      delete m.defines.GLASS;
+      m.transparent = this.tintOpacity < 1;
+      m.depthWrite = true;
+      m.needsUpdate = true;
+    }
+    this.glassMaterials.length = 0;
+    for (const mesh of this.overGlass) mesh.renderOrder = 0;
+    for (const m of this.overGlassMaterials) {
+      m.transparent = this.tintOpacity < 1;
+      m.needsUpdate = true;
+    }
+    this.overGlass.length = 0;
+    this.overGlassMaterials.clear();
+    for (const d of this.glassDepthMeshes) {
+      const part = d.parent as THREE.Mesh | null;
+      if (part) {
+        part.customDepthMaterial = undefined;
+        part.renderOrder = 0;
+      }
+      d.removeFromParent();
+    }
+    this.glassDepthMeshes.length = 0;
     const stone = new THREE.Color("#b6b1a7");
     for (const m of this.materials) {
       for (const name of [
@@ -2652,9 +2824,12 @@ export class HerzieModel {
 
   dispose() {
     this.sparkles?.dispose();
+    this.shimmer?.dispose();
     // Its cat's own (not its shaded ones, already in materials).
     this.cat?.model.dispose();
     for (const m of this.materials) m.dispose();
+    this.glassDepth?.dispose();
+    this.glassShadow?.dispose();
     // Its own, unlike the shared part geometries.
     this.cloak?.geometry.dispose();
   }

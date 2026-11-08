@@ -459,7 +459,6 @@ mod tests {
             friend_codes: Vec::new(),
             last_craving_date: String::new(),
             last_craving_genre: String::new(),
-            boost_until: None,
             streak_days: 0,
             streak_last_date: None,
             currency: 0,

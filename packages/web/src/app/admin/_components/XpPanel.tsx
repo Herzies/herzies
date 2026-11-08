@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { adminFetch, INPUT } from "./admin-shared";
 
-type XpBonusId = "boost" | "streak" | "good_eye_sniper";
+type XpBonusId = "streak" | "good_eye_sniper";
 
 type XpBonus = {
   id: XpBonusId;
@@ -29,12 +29,6 @@ const BUILT_INS: Record<
   XpBonusId,
   { label: string; unit: string; blurb: string; capped: boolean }
 > = {
-  boost: {
-    label: "BOOST",
-    unit: "flat",
-    blurb: "While a herzie's boost_until is in the future.",
-    capped: false,
-  },
   streak: {
     label: "Daily streak",
     unit: "per streak day",
@@ -100,7 +94,8 @@ export function XpPanel({ secret }: { secret: string }) {
         "/api/admin/xp-bonuses",
         secret,
       );
-      setBonuses(res.bonuses);
+      // Skip rows this panel doesn't know (e.g. the retired boost row).
+      setBonuses(res.bonuses.filter((b) => b.id in BUILT_INS));
       setBonusesMissing(false);
     } catch {
       setBonusesMissing(true);

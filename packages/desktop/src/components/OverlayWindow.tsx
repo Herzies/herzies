@@ -30,6 +30,7 @@ export function OverlayWindow({
   fit: fitProp = false,
   half = false,
   side,
+  wide = false,
   className,
   onClosed,
 }: {
@@ -59,6 +60,11 @@ export function OverlayWindow({
    * boss's card in a fight), as tall as in the small window, where nothing
    * else is; the chat and the player card keep the left. */
   side?: "right";
+  /** With `narrow` and `side="right"`: may reach down to the right
+   * column's floor (with `fit`, as tall as its content up to there), rather
+   * than keep to the small window's height (the Herzie window's character
+   * screen). */
+  wide?: boolean;
   className?: string;
   /** The exit has finished playing: it's off screen now. Until then its
    * content should stay as it was (still "active"), or it changes under
@@ -112,8 +118,9 @@ export function OverlayWindow({
   );
 
   // Home's half-height window is a fixed size, not as tall as its content.
-  const fit = fitProp && !(half && onHome && !narrow);
   const right = narrow && side === "right";
+  const rightWide = right && wide;
+  const fit = fitProp && !(half && onHome && !narrow);
 
   const closed = phase === "closed" && !open;
   const closing = phase === "closing";
@@ -132,31 +139,35 @@ export function OverlayWindow({
         // big window's stay in line with its player card.
         "pointer-events-none fixed z-60",
         narrow ? "inset-x-3" : "inset-x-2.5",
-        right
-          ? // In the big window, on the right: from the top (under the
-            // boss's card, if there is one), as tall as it is in the small
-            // window (10px from its top, 36px from its bottom), and never
-            // down past the skills.
-            "top-[calc(var(--boss-card-bottom,0px)+10px)] h-[calc(var(--small-window-height)-46px)] max-h-[calc(100vh-var(--boss-card-bottom,0px)-66px)]"
-          : narrow
-            ? // In the Town's big window: the small window's size, top left,
-              // 8px under the player card and in line with it.
-              "top-[calc(var(--player-card-bottom,32px)+8px)] h-[calc(var(--small-window-height)-var(--player-card-bottom,32px)-14px)] max-h-[calc(100vh-var(--player-card-bottom,32px)-20px)]"
-            : onHome && half
-              ? // On Home, the deck and the bag: the bottom half, down to
-                // just over the nav's row (main.tsx).
-                "top-[calc(50%+1px)] bottom-[36px]"
-              : onHome && !fit
-                ? // On Home, the rest: from the top (12px down, over the
-                  // player card) to just over the nav's row.
-                  "top-2.5 bottom-[36px]"
-                : fit
-                  ? // From the window's top (12px down, over the player card),
-                    // as tall as it needs, down to the nav's row at most.
+        rightWide
+          ? // The tall one on the right: from the same top, down to the
+            // right column's floor at most (clear of the skills).
+            "top-[calc(var(--boss-card-bottom,0px)+10px)] h-[calc(100vh-var(--boss-card-bottom,0px)-66px)]"
+          : right
+            ? // In the big window, on the right: from the top (under the
+              // boss's card, if there is one), as tall as it is in the small
+              // window (10px from its top, 36px from its bottom), and never
+              // down past the skills.
+              "top-[calc(var(--boss-card-bottom,0px)+10px)] h-[calc(var(--small-window-height)-46px)] max-h-[calc(100vh-var(--boss-card-bottom,0px)-66px)]"
+            : narrow
+              ? // In the Town's big window: the small window's size, top left,
+                // 8px under the player card and in line with it.
+                "top-[calc(var(--player-card-bottom,32px)+8px)] h-[calc(var(--small-window-height)-var(--player-card-bottom,32px)-14px)] max-h-[calc(100vh-var(--player-card-bottom,32px)-20px)]"
+              : onHome && half
+                ? // On Home, the deck and the bag: the bottom half, down to
+                  // just over the nav's row (main.tsx).
+                  "top-[calc(50%+1px)] bottom-[36px]"
+                : onHome && !fit
+                  ? // On Home, the rest: from the top (12px down, over the
+                    // player card) to just over the nav's row.
                     "top-2.5 bottom-[36px]"
-                  : // In the Town: the whole height, as on Home (the Herzie
-                    // window is `fit`, as tall as it needs).
-                    "top-2.5 bottom-[36px]",
+                  : fit
+                    ? // From the window's top (12px down, over the player card),
+                      // as tall as it needs, down to the nav's row at most.
+                      "top-2.5 bottom-[36px]"
+                    : // In the Town: the whole height, as on Home (the Herzie
+                      // window is `fit`, as tall as it needs).
+                      "top-2.5 bottom-[36px]",
         closed && "hidden",
       )}
       data-tauri-drag-region="false"

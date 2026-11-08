@@ -186,21 +186,25 @@ export function HerzieView({
   // A fresh but identical `equipped` (a state push) must not rebuild it.
   const equippedKey = equippedCacheKey(equipped);
   const paramsKey = creatureParams ? JSON.stringify(creatureParams) : "";
+  // Rebuilt when its gear changes; the same herzie carries on from the last
+  // (see carryOver), so putting a hat on doesn't restart its animation.
+  const last = useRef<{ model: HerzieModel; userId: string } | null>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on content
-  const model = useMemo(
-    () =>
-      new HerzieModel(
-        { seed: userId, stage, equipped, params: creatureParams },
-        {
-          layoutCols: cols,
-          layoutRows: SH,
-          anchorScenery: 0,
-          // A rebuild (other gear on) keeps it in hand, not drawn again.
-          armed,
-        },
-      ),
-    [userId, stage, equippedKey, paramsKey, cols],
-  );
+  const model = useMemo(() => {
+    const next = new HerzieModel(
+      { seed: userId, stage, equipped, params: creatureParams },
+      {
+        layoutCols: cols,
+        layoutRows: SH,
+        anchorScenery: 0,
+        // A rebuild (other gear on) keeps it in hand, not drawn again.
+        armed,
+      },
+    );
+    if (last.current?.userId === userId) next.carryOver(last.current.model);
+    last.current = { model: next, userId };
+    return next;
+  }, [userId, stage, equippedKey, paramsKey, cols]);
   useEffect(() => () => model.dispose(), [model]);
 
   // Everything the frame loop reads, kept current without re-registering.

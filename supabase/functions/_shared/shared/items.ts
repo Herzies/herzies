@@ -22,6 +22,7 @@ import {
   col,
   cross,
   dot3,
+  FF_PINK_RAMP,
   GOLD_RAMP,
   LIGHT,
   normV,
@@ -1092,6 +1093,12 @@ export interface ItemSet {
   visual?: { gradient: readonly string[] };
   /** Members whose icon keeps its own painted colours instead of `visual`. */
   visualExempt?: string[];
+  /** Stats the full set adds, on top of its members' own (getHerzieStats,
+   * getHerzieStatsFromUnits). */
+  bonus?: Partial<HerzieStats>;
+  /** The full set's look in 3D: sparkles in these colours
+   * (gl/setShimmer.ts). */
+  shimmer?: { core: string; edge: string };
 }
 
 export const ITEM_SETS: ItemSet[] = [
@@ -1102,7 +1109,30 @@ export const ITEM_SETS: ItemSet[] = [
     itemIds: ["rainbow-headband", "prism"],
     visual: { gradient: RAINBOW_RAMP },
   },
+  {
+    id: "fabulous-fabian",
+    name: "Fabulous Fabian",
+    effect: "+10 luck, and soft pink sparkles",
+    itemIds: [
+      "fabulous-fabian",
+      "ff-shades",
+      "ff-pearls-marble",
+      "ff-cloak-black",
+      "ff-sneakers-black",
+      "ff-pink",
+    ],
+    bonus: { luck: 10 },
+    shimmer: { core: "#FFF4FA", edge: "#FF7FBA" },
+  },
 ];
+
+/** Adds the bonus of every set worn in full (ItemSet.bonus) to `totals`. */
+function addSetBonuses(totals: HerzieStats, worn: ReadonlySet<string>): void {
+  for (const set of ITEM_SETS) {
+    if (!set.bonus || !set.itemIds.every((id) => worn.has(id))) continue;
+    for (const key of STAT_KEYS) totals[key] += set.bonus[key] ?? 0;
+  }
+}
 
 export function getItemSet(itemId: string): ItemSet | undefined {
   return ITEM_SETS.find((set) => set.itemIds.includes(itemId));
@@ -1351,7 +1381,7 @@ export const BOSS_LOOT_EXCLUDED_ITEM_IDS = ["cd"];
 /** What a boss's random loot is drawn from, and how likely each is: every
  * item that drops from listening (not in NON_DROPPABLE_ITEM_IDS, no
  * seasonal window, not in BOSS_LOOT_EXCLUDED_ITEM_IDS), weighted per BOSS_LOOT_RARITY_BOOST. settle_boss_fight
- * rolls from a copy of this list (boss_loot_roll, last in 00134_feet_slot_evasive_pair.sql);
+ * rolls from a copy of this list (boss_loot_roll, last in 00145_ff_wearables.sql);
  * items.test.ts checks the two agree, so a new droppable item needs adding
  * there too. */
 export function bossLootWeights(): { itemId: string; weight: number }[] {
@@ -2795,6 +2825,10 @@ function renderPurpleDaneFrame(yAngle: number): string[] {
   return renderGradientCardFrame(yAngle, VIOLET_RAMP);
 }
 
+function renderFfPinkFrame(yAngle: number): string[] {
+  return renderGradientCardFrame(yAngle, FF_PINK_RAMP);
+}
+
 function renderThanksForAllTheFishFrame(yAngle: number): string[] {
   return renderGradientCardFrame(yAngle, TEAL_RAMP);
 }
@@ -2885,12 +2919,15 @@ function renderPlutusCrownFrame(yAngle: number): string[] {
 
 function fabianCapCardIcon(u: number, v: number): TexSample | null {
   const [ix, iy] = iconUV(u, v);
-  // The pink F on the front panel: a stem, a top bar and a shorter middle bar.
-  const fx = ix + 0.02;
-  const inStem = fx > -0.07 && fx < -0.025 && iy > -0.15 && iy < 0.07;
-  const inTop = fx > -0.07 && fx < 0.07 && iy > -0.15 && iy < -0.105;
-  const inMid = fx > -0.07 && fx < 0.04 && iy > -0.055 && iy < -0.015;
-  if (inStem || inTop || inMid) return { bright: 1, color: "#FF5FA8" };
+  // The pink FF on the front panel: each F a stem, a top bar and a shorter
+  // middle bar.
+  for (const left of [-0.135, 0.015]) {
+    const fx = ix - left;
+    const inStem = fx > 0 && fx < 0.04 && iy > -0.15 && iy < 0.07;
+    const inTop = fx > 0 && fx < 0.12 && iy > -0.15 && iy < -0.105;
+    const inMid = fx > 0 && fx < 0.09 && iy > -0.055 && iy < -0.015;
+    if (inStem || inTop || inMid) return { bright: 1, color: "#FF5FA8" };
+  }
   // The button on top.
   if (ix ** 2 + (iy + 0.27) ** 2 < 0.035 ** 2)
     return { bright: 0.6, color: "#3A3A44" };
@@ -3000,6 +3037,109 @@ function renderEvasivePairFrame(yAngle: number): string[] {
     "#3F6FA8",
     "#1A2E48",
     evasivePairCardIcon,
+  );
+}
+
+// --- Fabulous Fabian (FF) cards ---
+/** FF Sneakers: a black low-top in profile, toe to the right, a
+ * white sole and pink laces. */
+function ffSneakersCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  // The sole: white, a long flat strip under the whole shoe.
+  if (iy > 0.1 && iy < 0.17 && ix > -0.28 && ix < 0.3)
+    return { bright: 0.9, color: "#F4F4F6" };
+  // The toe box: a rounded front reaching right.
+  if (iy > -0.02 && iy <= 0.1 && ix > 0.02) {
+    if (((ix - 0.02) / 0.28) ** 2 + ((iy - 0.1) / 0.12) ** 2 < 1)
+      return { bright: 0.7, color: "#2A2A32" };
+  }
+  // The upper over the heel, with pink laces across the instep.
+  if (ix > -0.28 && ix <= 0.06 && iy > -0.1 && iy <= 0.1) {
+    const laces =
+      ix > -0.06 && ix < 0.04 && Math.round((iy + 0.2) / 0.05) % 2 === 0;
+    if (laces) return { bright: 1, color: "#FF5FA8" };
+    return { bright: 0.65, color: "#2A2A32" };
+  }
+  return null;
+}
+
+function renderFfSneakersFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#FF5FA8",
+    "#3A3A44",
+    "#16161C",
+    ffSneakersCardIcon,
+  );
+}
+
+const FF_CLOAK_ICON: CloakIconStyle = {
+  outer: "#2a2830",
+  fold: "#141218",
+  lining: "#ff5fa8",
+  trim: "#ff5fa8",
+  hem: "straight",
+};
+
+function renderFfCloakFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#FF5FA8",
+    "#3A3A44",
+    "#16161C",
+    cloakCardIcon(FF_CLOAK_ICON),
+  );
+}
+
+function ffPearlsCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  // White pearls, every third flecked pink and every fourth black.
+  return necklaceBeadsIcon(ix, iy, 9, 0.055, (i) =>
+    i % 3 === 1 ? "#FFB3D6" : i % 4 === 2 ? "#5A5262" : "#FBF7F4",
+  );
+}
+
+function renderFfPearlsFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#FF5FA8",
+    "#3A3A44",
+    "#16161C",
+    ffPearlsCardIcon,
+  );
+}
+
+/** FF Shades: two round dark lenses in black rims, a bridge, and a pink dot
+ * at each hinge. */
+function ffShadesCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  for (const cx of [-0.13, 0.13]) {
+    const d = Math.hypot(ix - cx, iy);
+    if (d < 0.08) {
+      // A glint across the upper part of each lens.
+      const glint = Math.abs(ix - cx + iy + 0.04) < 0.015 && iy < -0.01;
+      return glint
+        ? { bright: 0.9, color: "#FFC2DC" }
+        : { bright: 0.45, color: "#141218" };
+    }
+    if (d < 0.105) return { bright: 0.7, color: "#3A3A44" };
+    // The hinge, on each lens's outer edge.
+    if (Math.hypot(ix - cx * 1.85, iy + 0.02) < 0.03)
+      return { bright: 1, color: "#FF5FA8" };
+  }
+  // The bridge.
+  if (Math.abs(ix) < 0.03 && Math.abs(iy + 0.03) < 0.015)
+    return { bright: 0.7, color: "#3A3A44" };
+  return null;
+}
+
+function renderFfShadesFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#FF5FA8",
+    "#3A3A44",
+    "#16161C",
+    ffShadesCardIcon,
   );
 }
 
@@ -3218,6 +3358,11 @@ const plutusCrownFrames = generateFrames(renderPlutusCrownFrame);
 const fabianCapFrames = generateFrames(renderFabianCapFrame);
 const fedoraFrames = generateFrames(renderFedoraFrame);
 const evasivePairFrames = generateFrames(renderEvasivePairFrame);
+const ffSneakersFrames = generateFrames(renderFfSneakersFrame);
+const ffCloakFrames = generateFrames(renderFfCloakFrame);
+const ffPearlsFrames = generateFrames(renderFfPearlsFrame);
+const ffShadesFrames = generateFrames(renderFfShadesFrame);
+const ffPinkFrames = generateFrames(renderFfPinkFrame);
 const fangsFrames = generateFrames(renderFangsFrame);
 const pumpkinSpiceFrames = generateFrames(renderPumpkinSpiceFrame);
 const ghostFrames = generateFrames(renderGhostFrame);
@@ -3891,9 +4036,12 @@ export const ITEMS: ItemDef[] = [
   // Appended rather than filed beside the other hats: a card's number is its
   // place in this list (ItemCard), so inserting mid-list renumbers others.
   {
+    // Fabulous Fabian (FF) is an in-game clothing brand; this was its first
+    // piece, and keeps its original id.
     id: "fabulous-fabian",
-    name: "Fabulous Fabian",
-    description: "Increases your chances of getting into a cool club.",
+    name: "FF Hat",
+    description:
+      "Fabulous Fabian's first hat. Increases your chances of getting into a cool club.",
     rarity: "rare",
     frames: fabianCapFrames,
     equipable: true,
@@ -3924,6 +4072,67 @@ export const ITEMS: ItemDef[] = [
     sellPrice: 1500,
     stats: { moveSpeed: 20 },
   },
+  // More from Fabulous Fabian (FF), the in-game clothing brand behind the FF
+  // Hat. Drop-only, like the hat: the listening pool and a boss's random loot.
+  {
+    id: "ff-sneakers-black",
+    name: "FF Sneakers",
+    description: "Fabulous Fabian's first sneakers",
+    rarity: "rare",
+    frames: ffSneakersFrames,
+    equipable: true,
+    equipSlot: "feet",
+    sellPrice: 250,
+    stats: { luck: 10 },
+  },
+  {
+    id: "ff-cloak-black",
+    name: "FF Cloak",
+    description: "Fabulous Fabian first cloak",
+    rarity: "rare",
+    frames: ffCloakFrames,
+    equipable: true,
+    equipSlot: "back",
+    minStage: 3,
+    sellPrice: 250,
+    stats: { luck: 10 },
+  },
+  {
+    id: "ff-pearls-marble",
+    name: "FF Pearls",
+    description: "Fabulous Fabian's first marbled pearls",
+    rarity: "rare",
+    frames: ffPearlsFrames,
+    equipable: true,
+    equipSlot: "body",
+    minStage: 3,
+    sellPrice: 250,
+    stats: { luck: 10 },
+  },
+  {
+    id: "ff-shades",
+    name: "FF Shades",
+    description: "Fabulous Fabian first shades",
+    rarity: "rare",
+    frames: ffShadesFrames,
+    equipable: true,
+    equipSlot: "face",
+    sellPrice: 250,
+    stats: { luck: 10 },
+  },
+  {
+    // A skin, and see-through: the 3D view draws the body as pink glass
+    // (TRANSLUCENT_SKINS in creature-renderer.ts).
+    id: "ff-pink",
+    name: "FF Pink",
+    description: "Fabulous Fabian's signature pink skin",
+    rarity: "rare",
+    frames: ffPinkFrames,
+    equipable: true,
+    equipSlot: "color",
+    sellPrice: 250,
+    stats: { luck: 10 },
+  },
 ];
 
 export function getItem(id: string): ItemDef | undefined {
@@ -3952,6 +4161,7 @@ export function getHerzieStats(
       totals[key] += stats[key] + level;
     }
   }
+  addSetBonuses(totals, new Set(equippedItemIds(equipped)));
   totals.moveSpeed = Math.min(MAX_MOVE_SPEED, totals.moveSpeed);
   return totals;
 }
@@ -3975,6 +4185,12 @@ export function getHerzieStatsFromUnits(
       totals[key] += stats[key] + unit.upgradeLevel;
     }
   }
+  addSetBonuses(
+    totals,
+    new Set(
+      (units ?? []).filter((u) => u.equippedSlot !== null).map((u) => u.itemId),
+    ),
+  );
   totals.moveSpeed = Math.min(MAX_MOVE_SPEED, totals.moveSpeed);
   return totals;
 }

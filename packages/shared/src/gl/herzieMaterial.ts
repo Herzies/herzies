@@ -53,6 +53,10 @@ export type SchemeUniforms = {
  * sun's (whose full face-on light is 1). */
 const LAMP_BANDS = 1.6;
 
+/** How much of its own colour glass adds over what's behind it (see the
+ * fragment shader's GLASS output). */
+const GLASS_GLOW = 0.28;
+
 /** Most bands a scheme can have (its ramp is uploaded as 3 shades each). */
 const MAX_BANDS = 8;
 
@@ -348,6 +352,123 @@ vec3 polished(vec3 paint, vec3 n, float shadow) {
 }
 #endif
 
+#ifdef GLASS
+// See-through (a translucent skin, see TRANSLUCENT_SKINS): tinted glass,
+// cel style. Clear face on and nearly solid at the edges, in two steps,
+// the edge a lighter band of its own colour; light coming through from
+// behind glows in it; and one hard highlight where it faces the sun, which
+// is solid too. Returns how opaque it is; \`color\` is lit in place.
+float glassy(inout vec3 color, vec3 n, float shadow) {
+  vec3 v = normalize(cameraPosition - vWorldPos);
+  vec3 h = normalize(uSun + v);
+  float nv = max(dot(n, v), 0.0);
+  float edge = smoothstep(0.42, 0.5, 1.0 - nv);
+  float rim = smoothstep(0.68, 0.76, 1.0 - nv);
+  #ifdef LENS
+  // A lens: tinted glass, mostly dark, the eye behind just showing.
+  float alpha = mix(0.97, 0.98, edge);
+  alpha = mix(alpha, 0.99, rim);
+  #else
+  float alpha = mix(0.44, 0.68, edge);
+  alpha = mix(alpha, 0.9, rim);
+  #endif
+  // A touch brighter than paint: over something dark, glass this clear
+  // would otherwise sink to the dark rather than read as its colour.
+  color = min(color * 1.12, vec3(1.0));
+  color = mix(color, min(color * 1.3 + 0.06, vec3(1.0)), rim);
+  // The sun through it, from behind: a glow in the glass.
+  float through = pow(max(dot(-v, uSun), 0.0), 3.0) * shadow;
+  color += color * through * 0.45;
+  float spec = pow(max(dot(n, h), 0.0), 70.0)
+    * max(dot(n, uSun), 0.0) * shadow;
+  float shine = smoothstep(0.3, 0.42, spec);
+  #ifdef LENS
+  // A lens is flat: facing the sun, all of it would catch the highlight
+  // at once and go white. Just a faint sheen instead.
+  color += vec3(0.12) * shine;
+  return alpha;
+  #else
+  color = mix(color, vec3(1.0), shine);
+  return max(alpha, shine);
+  #endif
+}
+#endif
+
+#ifdef MARBLE
+float mhash(vec3 p) {
+  p = fract(p * 0.3183099 + 0.1);
+  p *= 17.0;
+  return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+float mnoise(vec3 x) {
+  vec3 i = floor(x);
+  vec3 f = fract(x);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(mix(mhash(i), mhash(i + vec3(1, 0, 0)), f.x),
+        mix(mhash(i + vec3(0, 1, 0)), mhash(i + vec3(1, 1, 0)), f.x), f.y),
+    mix(mix(mhash(i + vec3(0, 0, 1)), mhash(i + vec3(1, 0, 1)), f.x),
+        mix(mhash(i + vec3(0, 1, 1)), mhash(i + vec3(1, 1, 1)), f.x), f.y),
+    f.z
+  );
+}
+float mfbm(vec3 p) {
+  return 0.5 * mnoise(p) + 0.25 * mnoise(p * 2.03) + 0.125 * mnoise(p * 4.01);
+}
+// Marble, on the pearl itself (its own normal, so the veins stay put as it
+// swings): white, with thin black veins and broader, softer pink ones, each
+// a sine bent by noise (the classic turbulence marble). Each pearl's veins
+// are its own, seeded by its colour (the whites differ a hair).
+vec3 marbled(vec3 color) {
+  float seed = fract(dot(uShades[1], vec3(12.9898, 78.233, 37.719)) * 43.7585);
+  // Broad: a pearl's only a few pixels across, so a vein has to be wide
+  // to be seen at all.
+  vec3 q = normalize(vLocalNormal) * 1.1 + seed * 9.0;
+  float black = abs(sin((q.x * 1.4 + q.y * 0.6) * 1.6 + 2.4 * mfbm(q * 1.5)));
+  float pink = abs(sin((q.z * 1.2 - q.x * 0.5) * 1.3 + 2.0 * mfbm(q * 1.2 + 4.7)));
+  // Stepped edges, as everything on a herzie is.
+  float b = 1.0 - smoothstep(0.2, 0.26, black);
+  float p = 1.0 - smoothstep(0.42, 0.5, pink);
+  vec3 lum = color / max(max(uShades[1].r, max(uShades[1].g, uShades[1].b)), 0.001);
+  color = mix(color, vec3(1.0, 0.42, 0.68) * lum, p * 0.8);
+  color = mix(color, vec3(0.1, 0.08, 0.12) * lum, b * 0.9);
+  return color;
+}
+#endif
+
+#ifdef PEARL
+// A pearl, cel style: its own dark bands, then what makes it a pearl —
+// layered nacre, which throws back a soft sheen whose colour shifts with
+// the angle (orient: purple face on, teal and rose toward the rim), a
+// faint sky over its top, and one hard, bright highlight where it faces
+// the sun. Each band is stepped, as everything else on a herzie is.
+vec3 pearly(vec3 color, vec3 n, float shadow) {
+  #ifdef MARBLE
+  color = marbled(color);
+  #endif
+  vec3 v = normalize(cameraPosition - vWorldPos);
+  vec3 h = normalize(uSun + v);
+  float nv = max(dot(n, v), 0.0);
+  float nh = max(dot(n, h), 0.0);
+  float sunLit = max(dot(n, uSun), 0.0) * shadow;
+  // Orient: a cosine palette walked by the view angle, kept muted.
+  float t = (1.0 - nv) * 0.9 + 0.62;
+  vec3 orient = 0.5 + 0.5 * cos(6.2832 * (t + vec3(0.0, 0.33, 0.67)));
+  orient = mix(vec3(0.55, 0.45, 0.85), orient, 0.55);
+  float rim = smoothstep(0.35, 0.8, 1.0 - nv);
+  color = mix(color, orient * 0.6, rim * 0.45);
+  // The sky over its top half.
+  float up = reflect(-v, n).y;
+  color += vec3(0.07, 0.06, 0.1) * smoothstep(0.1, 0.35, up);
+  // A soft glow round the highlight, and the highlight itself.
+  float glow = pow(nh, 14.0) * sunLit;
+  color += vec3(0.24, 0.18, 0.34) * smoothstep(0.25, 0.6, glow);
+  float spec = pow(nh, 90.0) * sunLit;
+  color = mix(color, vec3(1.0, 0.98, 1.0), smoothstep(0.35, 0.5, spec));
+  return color;
+}
+#endif
+
 void main() {
   vec3 n = normalize(vWorldNormal);
   #ifdef CLOTH
@@ -386,10 +507,21 @@ void main() {
   #ifdef METAL
   color = polished(color, n, shadow);
   #endif
+  #ifdef PEARL
+  color = pearly(color, n, shadow);
+  #endif
   color *= uLight + uLampColor * lamps;
   color = mix(color, vec3(dot(color, vec3(0.2126, 0.7152, 0.0722))), uGrey);
   color = mix(color, uFlash.rgb, uFlash.w);
+  #ifdef GLASS
+  // Premultiplied, plus a little of its own colour added on top: a glow,
+  // so over something dark it still reads as its colour rather than
+  // sinking to the dark behind it. Faded with the herzie, glow and all.
+  float glassAlpha = glassy(color, n, shadow) * uOpacity;
+  gl_FragColor = vec4(color * (glassAlpha + ${GLASS_GLOW.toFixed(2)} * uOpacity), glassAlpha);
+  #else
   gl_FragColor = vec4(color, uOpacity);
+  #endif
   #include <colorspace_fragment>
   #include <fog_fragment>
 }
@@ -415,6 +547,9 @@ export function herzieMaterial(
   /** A second coat's bands (dim, base, bright), painted where the
    * geometry's `coat` attribute is over a half (the cat's markings). */
   patch?: [string, string, string],
+  /** See-through (a translucent skin): drawn blended over its own depth
+   * (see glassDepthMaterial), so only its front surface shows. */
+  glass = false,
 ): THREE.ShaderMaterial {
   const painted = shading.schemePainted && !!ramp;
   const rampColors = Array.from(
@@ -428,6 +563,10 @@ export function herzieMaterial(
   }
   const defines: Record<string, string> = {};
   if (shading.metal) defines.METAL = "";
+  if (shading.pearl) defines.PEARL = "";
+  if (shading.marble) defines.MARBLE = "";
+  if (glass) defines.GLASS = "";
+  if (glass && shading.lens) defines.LENS = "";
   if (cloth) defines.CLOTH = "";
   if (patch) defines.PATCH = "";
   const material = new THREE.ShaderMaterial({
@@ -435,6 +574,12 @@ export function herzieMaterial(
     fragmentShader,
     defines,
     side: cloth ? THREE.DoubleSide : THREE.FrontSide,
+    // Glass is blended, over the depth its prepass wrote: it draws only
+    // where it's the front surface (LessEqual), and writes no depth itself.
+    transparent: glass,
+    premultipliedAlpha: glass,
+    depthWrite: !glass,
+    depthFunc: THREE.LessEqualDepth,
     // Drawn from the side facing the light too: the cloth's thin.
     shadowSide: cloth ? THREE.DoubleSide : null,
     fog: true,
@@ -454,7 +599,8 @@ export function herzieMaterial(
       uFloor: { value: shading.floor },
       uLo: { value: shading.lo },
       uHi: { value: Math.min(shading.hi, 1e6) },
-      uTexture: { value: shading.textured ? textureType : 0 },
+      // Glass is clear: no stripes or shading pattern painted on it.
+      uTexture: { value: shading.textured && !glass ? textureType : 0 },
       uShades: { value: shading.shades.map((hex) => new THREE.Color(hex)) },
       uScheme: { value: painted },
       uBands: { value: painted ? Math.min(ramp.length, MAX_BANDS) : 1 },
@@ -479,6 +625,59 @@ export function herzieMaterial(
       }),
     },
   });
+  return material;
+}
+
+/** Glass draws last: its depth prepass, then its colour, both after the
+ * rest of the transparent queue (renderOrder 0: water, clouds, particles),
+ * so everything behind a see-through herzie is there to show through it —
+ * drawn before the prepass, a puddle behind it would be cut out in its
+ * shape. */
+export const GLASS_PREPASS_ORDER = 10;
+/** A see-through herzie's solid parts (eyes, anything worn): after the
+ * prepass, so whatever of them is inside or behind the glass body (the
+ * half of a cap's crown inside the head, most of an eye) is cut off at its
+ * surface, as on a solid herzie. */
+export const GLASS_SOLID_ORDER = 11;
+export const GLASS_ORDER = 12;
+
+/**
+ * Glass's depth prepass: its shape, depth only, no colour. A see-through
+ * herzie is many overlapping parts; blended as they are, each would show
+ * through the others (an arm through the body, the far side of the head).
+ * Drawn first into the depth buffer, the parts leave only the nearest
+ * surface for the glass to draw on: one clean shell. Pushed a hair back
+ * (polygon offset), so the glass on that same surface still passes.
+ */
+export function glassDepthMaterial(): THREE.MeshBasicMaterial {
+  return new THREE.MeshBasicMaterial({
+    colorWrite: false,
+    // In the transparent queue, so it can come after its other members.
+    transparent: true,
+    depthWrite: true,
+    polygonOffset: true,
+    polygonOffsetFactor: 1,
+    polygonOffsetUnits: 1,
+  });
+}
+
+/**
+ * What glass casts into the sun's shadow map: its shape, with every other
+ * texel of the map left out (a checkerboard), so the shadow it throws comes
+ * out about half as dark once the map's filtering softens it: light gets
+ * through glass. The screen-door trick, in the shadow only.
+ */
+export function glassShadowMaterial(): THREE.MeshDepthMaterial {
+  const material = new THREE.MeshDepthMaterial({
+    depthPacking: THREE.RGBADepthPacking,
+  });
+  material.onBeforeCompile = (shader) => {
+    shader.fragmentShader = shader.fragmentShader.replace(
+      "void main() {",
+      `void main() {
+  if (mod(floor(gl_FragCoord.x) + floor(gl_FragCoord.y), 2.0) < 0.5) discard;`,
+    );
+  };
   return material;
 }
 

@@ -30,8 +30,6 @@ pub struct Herzie {
     pub friend_codes: Vec<String>,
     pub last_craving_date: String,
     pub last_craving_genre: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub boost_until: Option<u64>,
     pub streak_days: u32,
     pub streak_last_date: Option<String>,
     pub currency: u32,
@@ -583,7 +581,7 @@ mod tests {
                 "totalMinutesListened": 10.0, "genreMinutes": {},
                 "friendCode": "HERZ-1", "friendCodes": [],
                 "lastCravingDate": "", "lastCravingGenre": "",
-                "boostUntil": null, "streakDays": 0, "streakLastDate": null,
+                "streakDays": 0, "streakLastDate": null,
                 "currency": 5, "shareListening": true
             },
             "skills": [{ "skillId": "backspin", "level": 1, "xp": 0 }],

@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
-import type { PropModel } from "../creature-renderer.js";
+import type { PropModel, ShoeProp } from "../creature-renderer.js";
 
 /**
  * Props the 3D renderer builds as models of their own, where the ray caster
@@ -14,6 +14,7 @@ import type { PropModel } from "../creature-renderer.js";
 export type Paint = (color: string, matte?: boolean) => THREE.Material;
 
 export function buildPropModel(prop: PropModel, paint: Paint): THREE.Group {
+  if (prop.kind === "shoe") return shoe(prop, paint);
   return boombox(prop.size, prop.mirrored ? -1 : 1, paint);
 }
 
@@ -42,6 +43,170 @@ function alongZ(make: () => THREE.BufferGeometry): THREE.BufferGeometry {
   const g = make();
   g.rotateX(Math.PI / 2);
   return g;
+}
+
+/** A unit sphere squashed to an ellipsoid: scaled in the geometry, so its
+ * normals stay true for the bands (a scaled mesh would skew them). */
+function ellipsoid(rx: number, ry: number, rz: number): THREE.BufferGeometry {
+  return cached(
+    `ellipsoid:${rx.toFixed(4)}:${ry.toFixed(4)}:${rz.toFixed(4)}`,
+    () => new THREE.SphereGeometry(1, 32, 20).scale(rx, ry, rz),
+  );
+}
+
+/** A flat-ended elliptical slab, `h` tall, `w` by `d` across: a sole. */
+function slab(w: number, h: number, d: number): THREE.BufferGeometry {
+  return cached(`slab:${w.toFixed(4)}:${h.toFixed(4)}:${d.toFixed(4)}`, () =>
+    new THREE.CylinderGeometry(1, 1, h, 40, 1).scale(w / 2, 1, d / 2),
+  );
+}
+
+/** How a shoe's upper is shaped, in units of the leg's radius: roomy
+ * enough that the foot stays inside through a stride, which moves it a
+ * little within the shoe. */
+export const SHOE_UPPER = {
+  /** Half-width, half-height and half-length of the ellipsoid it's cut
+   * from, and where that sits (from the shoe's middle; y down, toe −z). */
+  rx: 1.17,
+  ry: 0.8,
+  rz: 1.55,
+  y: -0.12,
+  z: -0.2,
+  /** How far its top drops toward the toe. */
+  toeDrop: 0.5,
+};
+
+/**
+ * A sneaker's upper, sized by the leg's radius `r`: an ellipsoid, its top
+ * sloping down toward the toe and its bottom cut flat at `flatY` (y down),
+ * so it sits square in the sole rather than balancing on a curve.
+ */
+function upperGeometry(r: number, flatY: number): THREE.BufferGeometry {
+  return cached(`shoe-upper:${r.toFixed(4)}:${flatY.toFixed(4)}`, () => {
+    const g = new THREE.SphereGeometry(1, 40, 24);
+    const p = g.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      const ux = p.getX(i);
+      const uy = p.getY(i);
+      const uz = p.getZ(i);
+      let y = (SHOE_UPPER.y + uy * SHOE_UPPER.ry) * r;
+      const z = (SHOE_UPPER.z + uz * SHOE_UPPER.rz) * r;
+      // The top half drops toward the toe (−z): high at the heel and the
+      // ankle, low over the toes.
+      if (uy < 0) {
+        const toward = Math.max(0, -uz);
+        y += SHOE_UPPER.toeDrop * r * toward * toward * -uy;
+      }
+      p.setXYZ(i, ux * SHOE_UPPER.rx * r, Math.min(y, flatY), z);
+    }
+    g.computeVertexNormals();
+    return g;
+  });
+}
+
+/**
+ * A sneaker round its foot, sized by the leg's radius `r` (built about the
+ * shoe's middle, y down, toe at −z; its bottom at +r/2 is the leg's):
+ *
+ * - the upper, wide enough at the leg's middle to hide the foot (the leg
+ *   comes up out of it), sloping down to the toe, flat underneath;
+ * - a toe cap over its front, a shade of its own;
+ * - a sole the shape of its footprint and a little larger, with a stripe
+ *   round its top edge;
+ * - laces across the instep, a cuff round the ankle where the leg comes
+ *   out, and a tab up the heel.
+ *
+ * Smooth shapes, so the bands sweep across them as across the herzie.
+ */
+function shoe(prop: ShoeProp, paint: Paint): THREE.Group {
+  const { style } = prop;
+  // Built at a leg radius of 1 and scaled to the leg (uniformly, so the
+  // normals hold): one set of shapes for every herzie's shoes.
+  const r = 1;
+  const group = new THREE.Group();
+  group.scale.setScalar(prop.r);
+  const add = (
+    geometry: THREE.BufferGeometry,
+    color: string,
+    matte = false,
+  ) => {
+    const mesh = new THREE.Mesh(geometry, paint(color, matte));
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+    return mesh;
+  };
+  const bottom = r * 0.5;
+  const soleH = r * 0.24;
+  const soleTop = bottom - soleH;
+  // The upper, cut flat a little way into the sole.
+  const flatY = soleTop + soleH * 0.4;
+  add(upperGeometry(r, flatY), style.upper);
+  // Its footprint there: the ellipse the cut leaves.
+  const cut = ((flatY / r - SHOE_UPPER.y) / SHOE_UPPER.ry) ** 2;
+  const across = Math.sqrt(Math.max(0, 1 - cut));
+  const footW = 2 * SHOE_UPPER.rx * r * across;
+  const footD = 2 * SHOE_UPPER.rz * r * across;
+  // The sole: that footprint and a lip beyond it, its bottom the leg's.
+  const lip = r * 0.1;
+  const soleW = footW + 2 * lip;
+  const soleD = footD + 2 * lip;
+  const soleZ = SHOE_UPPER.z * r;
+  add(slab(soleW, soleH, soleD), style.sole, true).position.set(
+    0,
+    bottom - soleH / 2,
+    soleZ,
+  );
+  // The stripe round its top edge.
+  const stripeH = r * 0.08;
+  add(
+    slab(soleW + r * 0.03, stripeH, soleD + r * 0.03),
+    style.stripe,
+  ).position.set(0, soleTop + stripeH / 2, soleZ);
+  // The toe cap: over the front of the upper, low.
+  add(ellipsoid(r * 0.92, r * 0.36, r * 0.62), style.toe).position.set(
+    0,
+    soleTop - r * 0.12,
+    soleZ - footD / 2 + r * 0.5,
+  );
+  // Where the upper's top is at `z` (x = 0), as the deformation leaves it.
+  const topAt = (z: number) => {
+    const uz = (z / r - SHOE_UPPER.z) / SHOE_UPPER.rz;
+    const uy = -Math.sqrt(Math.max(0, 1 - uz * uz));
+    const toward = Math.max(0, -uz);
+    return (
+      (SHOE_UPPER.y + uy * SHOE_UPPER.ry) * r +
+      SHOE_UPPER.toeDrop * r * toward * toward * -uy
+    );
+  };
+  // Laces: three short bars across the instep, just proud of the upper.
+  const lace = cached(`shoe-lace:${r.toFixed(4)}`, () =>
+    new THREE.CapsuleGeometry(r * 0.075, r * 0.55, 4, 8).rotateZ(Math.PI / 2),
+  );
+  for (const z of [-0.55, -0.85, -1.15]) {
+    add(lace, style.laces).position.set(0, topAt(z * r) - r * 0.02, z * r);
+  }
+  // The cuff: a ring round the leg where it comes up out of the upper.
+  const [lx, ly, lz] = prop.leg.map((v) => v / prop.r);
+  const cuffY = -r * 0.62;
+  const legHalf = Math.sqrt(Math.max(0, r * r - (cuffY - ly) ** 2));
+  add(
+    cached(`shoe-cuff:${r.toFixed(4)}:${legHalf.toFixed(4)}`, () =>
+      new THREE.TorusGeometry(legHalf + r * 0.03, r * 0.12, 10, 32).rotateX(
+        Math.PI / 2,
+      ),
+    ),
+    style.collar,
+  ).position.set(lx, cuffY, lz);
+  // The heel tab, up the back of the cuff.
+  add(
+    cached(
+      `shoe-tab:${r.toFixed(4)}`,
+      () => new RoundedBoxGeometry(r * 0.36, r * 0.5, r * 0.14, 2, r * 0.06),
+    ),
+    style.tab,
+  ).position.set(lx, cuffY - r * 0.06, lz + legHalf + r * 0.08);
+  return group;
 }
 
 /**

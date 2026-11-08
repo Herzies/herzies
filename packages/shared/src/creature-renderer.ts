@@ -13,6 +13,7 @@ import {
   BOBOKU_RAMP,
   CHAR_ASPECT,
   dot3,
+  FF_PINK_RAMP,
   GOLD_RAMP,
   LIGHT,
   MEDEA_RAMP,
@@ -310,8 +311,10 @@ export interface Sphere {
    * to the hand. See heldPoses. */
   held?: HeldSocket;
   /** Polished metal (the cymbal): it mirrors the sky, and its lathe grooves
-   * catch the sun in a bright bar across it. See herzieMaterial. */
-  finish?: "metal";
+   * catch the sun in a bright bar across it. Pearl (the FF Pearls): a hard
+   * highlight and a sheen that shifts colour as it turns. See
+   * herzieMaterial. */
+  finish?: "metal" | "pearl" | "marble" | "lens";
   /** Where the Evasive Pair's sparkles come from: a wing tip (the trail)
    * or a foot (footfalls). See gl/shoeSparkles.ts. */
   sparkle?: "wing" | "foot";
@@ -322,7 +325,24 @@ export interface Sphere {
 }
 
 /** A prop drawn as a model in 3D (see Sphere.prop). */
-export interface PropModel {
+export type PropModel = BoomboxProp | ShoeProp;
+
+/** One shoe, drawn as a model in 3D (gl/props.ts) round its foot. */
+export interface ShoeProp {
+  kind: "shoe";
+  /** The middle of the shoe, in creature space (y down). */
+  center: V3;
+  yaw: number;
+  /** The leg's radius: the shoe is sized from it. */
+  r: number;
+  /** The leg's middle, from the shoe's (a cuff hugs it). */
+  leg: V3;
+  /** Its colours (see ShoeStyle). */
+  style: ShoeColors;
+}
+
+/** The boombox. */
+export interface BoomboxProp {
   kind: "boombox";
   /** The middle of its body, in creature space (y down). */
   center: V3;
@@ -1344,6 +1364,30 @@ function buildPearlNecklaceSpheres(spheres: Sphere[]): Sphere[] {
   }).beads;
 }
 
+/** FF Pearls, from Fabulous Fabian: the pearl necklace's string,
+ * in white pearls veined with black and pink like marble, with a pearl's
+ * shine (finish "marble"; see herzieMaterial). Each pearl is a slightly
+ * different white, which is also what gives each its own veins. */
+const MARBLE_PEARL_WHITES = [
+  "#FBF7F4",
+  "#F8F3F2",
+  "#FAF5F6",
+  "#F7F4F0",
+  "#FCF6F8",
+] as const;
+
+function buildMarblePearlsSpheres(spheres: Sphere[]): Sphere[] {
+  const neck = getNeck(spheres);
+  if (!neck) return [];
+  return buildNecklaceBeads(neck, {
+    count: 20,
+    beadRadius: () => neck.size * 0.1,
+    color: (i) => MARBLE_PEARL_WHITES[i % MARBLE_PEARL_WHITES.length],
+    sag: neck.size * 0.18,
+    heft: 0.7,
+  }).beads.map((bead) => ({ ...bead, finish: "marble" as const }));
+}
+
 function buildBowtieSpheres(spheres: Sphere[]): Sphere[] {
   const neck = getNeck(spheres);
   if (!neck) return [];
@@ -1409,6 +1453,7 @@ export function hasDangleEquipped(equipped?: Equipped): boolean {
   return (
     equipped?.body === "gold-chain" ||
     equipped?.body === "pearl-necklace" ||
+    equipped?.body === "ff-pearls-marble" ||
     equipped?.head === "witch-hat"
   );
 }
@@ -1416,6 +1461,7 @@ export function hasDangleEquipped(equipped?: Equipped): boolean {
 const BODY_ITEM_BUILDERS: Record<string, (spheres: Sphere[]) => Sphere[]> = {
   "gold-chain": buildGoldChainSpheres,
   "pearl-necklace": buildPearlNecklaceSpheres,
+  "ff-pearls-marble": buildMarblePearlsSpheres,
   bowtie: buildBowtieSpheres,
 };
 
@@ -1814,8 +1860,23 @@ function capsuleBetween(a: V3, b: V3, radius: number, color: string): Sphere {
   };
 }
 
-/** Fabulous Fabian: a black baseball cap, a pink F on its front panel: a
- * round crown, a wide short bill, and a button on top. */
+/** Where a cap's bill sits (creature space, y down): above the eyes, so
+ * on a head whose eyes are high (stage 1) the whole cap rides up rather
+ * than cutting them. Shades keep below it (buildShadesSpheres). */
+function capBillY(
+  spheres: Sphere[],
+  head: { center: V3; radius: number },
+): number {
+  const eyes = spheres.filter((s) => s.part === "eye");
+  const eyeTop = Math.min(...eyes.map((e) => e.center[1] - e.radius));
+  return Math.min(
+    head.center[1] - head.radius * 0.54,
+    eyeTop - head.radius * 0.05,
+  );
+}
+
+/** FF Hat, from Fabulous Fabian: a black baseball cap, a pink FF
+ * on its front panel: a round crown, a wide short bill, and a button on top. */
 function buildFabianCapSpheres(spheres: Sphere[]): Sphere[] {
   const head = getHeadBounds(spheres);
   if (!head) return [];
@@ -1836,9 +1897,7 @@ function buildFabianCapSpheres(spheres: Sphere[]): Sphere[] {
   // Creature space is y down: up is −y; the face is toward −z.
   // The cap sits with its bottom edge above the eyes: on a head whose eyes
   // are high (stage 1), the whole cap rides up rather than cutting them.
-  const eyes = spheres.filter((s) => s.part === "eye");
-  const eyeTop = Math.min(...eyes.map((e) => e.center[1] - e.radius));
-  const billY = Math.min(hy - hr * 0.54, eyeTop - hr * 0.05);
+  const billY = capBillY(spheres, head);
   // The crown: a ball, its middle just below the bill, so what shows over
   // the bill is round all the way up, and not too tall. Below the bill the rest of the ball
   // is narrower than the head there, so it stays inside it.
@@ -1854,9 +1913,9 @@ function buildFabianCapSpheres(spheres: Sphere[]): Sphere[] {
   });
   // The button on top.
   push([hx, crownY - crownR - hr * 0.01, hz], hr * 0.07, black);
-  // The F, in thin pink capsules just proud of the front of the crown,
+  // The FF, in thin pink capsules just proud of the front of the crown,
   // following its curve.
-  const r = hr * 0.04;
+  const r = hr * 0.035;
   const surfaceZ = (x: number, y: number) =>
     hz -
     Math.sqrt(Math.max(0, crownR ** 2 - x ** 2 - (y - crownY) ** 2)) -
@@ -1864,7 +1923,6 @@ function buildFabianCapSpheres(spheres: Sphere[]): Sphere[] {
   const bottom = billY - hr * 0.07;
   const top = bottom - hr * 0.34;
   const mid = (top + bottom) / 2;
-  const left = hx - hr * 0.08;
   const at = (x: number, y: number): V3 => [x, y, surfaceZ(x - hx, y)];
   // In short steps, so the stroke follows the curve.
   const stroke = (a: [number, number], b: [number, number]) => {
@@ -1875,9 +1933,12 @@ function buildFabianCapSpheres(spheres: Sphere[]): Sphere[] {
       result.push(capsuleBetween(p(k / steps), p((k + 1) / steps), r, pink));
     }
   };
-  stroke([left, top], [left, bottom]);
-  stroke([left, top], [hx + hr * 0.13, top]);
-  stroke([left, mid], [hx + hr * 0.08, mid]);
+  // Two Fs side by side, a small gap between them.
+  for (const left of [hx - hr * 0.19, hx + hr * 0.04]) {
+    stroke([left, top], [left, bottom]);
+    stroke([left, top], [left + hr * 0.14, top]);
+    stroke([left, mid], [left + hr * 0.1, mid]);
+  }
   return result;
 }
 
@@ -2217,6 +2278,134 @@ function buildFangSpheres(spheres: Sphere[]): Sphere[] {
         color: "#FFFFFF",
       });
     }
+  }
+  return result;
+}
+
+/** FF Shades, from Fabulous Fabian: a dark round lens over each eye in a
+ * black rim, a bridge between them, arms back to the sides of the head, and
+ * a pink dot at each hinge. Each lens faces out along the head's surface at
+ * its eye, so it sits flat on the curve. */
+function buildShadesSpheres(spheres: Sphere[]): Sphere[] {
+  const head = largestPart(spheres, "head");
+  const eyes = spheres
+    .filter((s) => s.part === "eye")
+    .sort((a, b) => a.center[0] - b.center[0]);
+  if (!head || eyes.length < 2) return [];
+  const [hx, hy, hz] = head.center;
+  const hr = head.radius;
+  const er = Math.max(...eyes.map((e) => e.radius));
+  const black = "#2A2A32";
+  const lensColor = "#0E0D12";
+  const pink = "#FF5FA8";
+  const result: Sphere[] = [];
+  const push = (center: V3, radius: number, color: string, shape?: Shape) =>
+    result.push({
+      center,
+      radius,
+      zone: "wearable",
+      part: "head",
+      color,
+      shape,
+    });
+  // The outermost eye on each side.
+  const pair = [eyes[0], eyes[eyes.length - 1]];
+  // Everything stays under where a cap's bill would be (its underside and a
+  // little air), so they can be worn together: the lenses shrink to fit,
+  // down to a floor, and sit lower than that only if they must.
+  // Measured off the same head the cap is (getHeadBounds).
+  const ceiling = capBillY(spheres, getHeadBounds(spheres) ?? head) + hr * 0.06;
+  const rims: { inner: V3; outer: V3 }[] = [];
+  for (const [i, eye] of pair.entries()) {
+    const side = i === 0 ? -1 : 1;
+    // Out from the head through the eye, but nearly level: tipped up with
+    // the head's curve, a high lens would ride up into the bill.
+    const out = sub(eye.center, head.center);
+    out[1] *= 0.25;
+    const n = Math.hypot(...out) || 1;
+    const normal: V3 = [out[0] / n, out[1] / n, out[2] / n];
+    const rimR = Math.max(
+      er * 1.05,
+      Math.min(er * 1.5, eye.center[1] + er * 0.1 - ceiling),
+    );
+    const lensR = rimR / 1.12;
+    const cy = Math.max(eye.center[1] + er * 0.1, ceiling + rimR);
+    const along = (d: number): V3 => [
+      eye.center[0] + normal[0] * d,
+      cy + normal[1] * d,
+      eye.center[2] + normal[2] * d,
+    ];
+    // The rim: a ring round the lens (open in the middle, so the eye shows
+    // through the glass), in short capsules round its edge.
+    const up: V3 = [0, -1, 0];
+    const cross = (a: V3, b: V3): V3 => [
+      a[1] * b[2] - a[2] * b[1],
+      a[2] * b[0] - a[0] * b[2],
+      a[0] * b[1] - a[1] * b[0],
+    ];
+    const unit = (a: V3): V3 => {
+      const l = Math.hypot(...a) || 1;
+      return [a[0] / l, a[1] / l, a[2] / l];
+    };
+    const across = unit(cross(normal, up));
+    const upward = unit(cross(across, normal));
+    const ringAt = along(er * 1.28);
+    const ringR = lensR * 1.04;
+    const point = (a: number): V3 => [
+      ringAt[0] + (across[0] * Math.cos(a) + upward[0] * Math.sin(a)) * ringR,
+      ringAt[1] + (across[1] * Math.cos(a) + upward[1] * Math.sin(a)) * ringR,
+      ringAt[2] + (across[2] * Math.cos(a) + upward[2] * Math.sin(a)) * ringR,
+    ];
+    const SEGMENTS = 14;
+    for (let k = 0; k < SEGMENTS; k++) {
+      const a0 = (k / SEGMENTS) * Math.PI * 2;
+      const a1 = ((k + 1) / SEGMENTS) * Math.PI * 2;
+      result.push(capsuleBetween(point(a0), point(a1), er * 0.13, black));
+    }
+    result.push({
+      center: along(er * 1.3),
+      radius: lensR,
+      zone: "wearable",
+      part: "head",
+      color: lensColor,
+      // Tinted glass: the eye shows through, a little.
+      finish: "lens",
+      shape: {
+        kind: "cylinder",
+        axis: [
+          normal[0] * er * 0.06,
+          normal[1] * er * 0.06,
+          normal[2] * er * 0.06,
+        ],
+      },
+    });
+    const c = along(er * 1.2);
+    rims.push({
+      inner: [c[0] - side * lensR, c[1], c[2]],
+      outer: [c[0] + side * lensR * 1.05, c[1], c[2]],
+    });
+  }
+  const r = er * 0.14;
+  // The temples: thick, flat-sided bars, as on a chunky pair of shades.
+  const temple = er * 0.24;
+  // The bridge, bowing up a little between the lenses.
+  const [left, right] = rims;
+  const top: V3 = [
+    (left.inner[0] + right.inner[0]) / 2,
+    Math.min(left.inner[1], right.inner[1]) - er * 0.15,
+    Math.min(left.inner[2], right.inner[2]),
+  ];
+  result.push(capsuleBetween(left.inner, top, r, black));
+  result.push(capsuleBetween(top, right.inner, r, black));
+  // The arms: from each hinge back to the side of the head, at eye height.
+  for (const [i, rim] of rims.entries()) {
+    const side = i === 0 ? -1 : 1;
+    const y = rim.outer[1];
+    const dy = y - hy;
+    const reach = Math.sqrt(Math.max(0, hr * hr - dy * dy));
+    const back: V3 = [hx + side * reach * 1.02, y, hz + reach * 0.15];
+    result.push(capsuleBetween(rim.outer, back, temple, black));
+    push(rim.outer, temple * 1.25, pink);
   }
   return result;
 }
@@ -3188,12 +3377,63 @@ function holdProps(
   });
 }
 
+/** How a shoe is coloured: the upper, the toe box, the sole, a stripe round
+ * the sole, the laces, the cuff round the ankle and the heel tab. */
+export interface ShoeColors {
+  upper: string;
+  toe: string;
+  sole: string;
+  stripe: string;
+  laces: string;
+  collar: string;
+  tab: string;
+}
+
+/** How a pair of shoes looks, and whether it has wings. */
+interface ShoeStyle extends ShoeColors {
+  wings: boolean;
+}
+
 /** Eivind's Evasive Pair: a blue high-top on each foot, with a pale wing
- * sweeping up and back off its outer side. Only herzies with legs (stage 3)
- * wear them visibly. Every piece takes its leg's part, so the walk, the
- * dance and the stance carry it along. Nothing reaches below the leg's own
- * bottom, so the herzie stands exactly as tall. */
-function buildEvasivePairSpheres(spheres: Sphere[]): Sphere[] {
+ * sweeping up and back off its outer side. */
+const EVASIVE_PAIR_STYLE: ShoeStyle = {
+  upper: "#3F82D0",
+  toe: "#D6E6F7",
+  sole: "#F4F8FC",
+  stripe: "#2F6DB5",
+  laces: "#1A4580",
+  collar: "#D6E6F7",
+  tab: "#D6E6F7",
+  wings: true,
+};
+
+/** FF Sneakers: black, a white sole with a pink stripe round it,
+ * pink laces, cuff and heel tab. */
+const FF_SNEAKERS_STYLE: ShoeStyle = {
+  upper: "#2A2A32",
+  toe: "#22222A",
+  sole: "#F4F4F6",
+  stripe: "#FF5FA8",
+  laces: "#FF5FA8",
+  collar: "#FF5FA8",
+  tab: "#FF5FA8",
+  wings: false,
+};
+
+const SHOE_STYLES: Record<string, ShoeStyle> = {
+  "eivinds-evasive-pair": EVASIVE_PAIR_STYLE,
+  "ff-sneakers-black": FF_SNEAKERS_STYLE,
+};
+
+/** A shoe on each foot, in `style`. Only herzies with legs (stage 3) wear
+ * them visibly. Every piece takes its leg's part, so the walk, the dance and
+ * the stance carry it along. Nothing reaches below the leg's own bottom, so
+ * the herzie stands exactly as tall.
+ *
+ * The 3D view draws each shoe as a model of its own (gl/props.ts: smooth
+ * shapes, a real sole); these spheres are what the ray caster draws, and
+ * what the model is posed by. The wings stay spheres in both. */
+function buildShoeSpheres(spheres: Sphere[], style: ShoeStyle): Sphere[] {
   const result: Sphere[] = [];
   for (const part of ["leg-l", "leg-r"] as const) {
     const leg = spheres.find((s) => s.part === part && s.zone !== "wearable");
@@ -3223,6 +3463,17 @@ function buildEvasivePairSpheres(spheres: Sphere[]): Sphere[] {
     // foot, not one big shell, so its top can sit low while its bottom is
     // still the leg's (where the feet are is read off center + radius).
     const zc = lz - r * 0.15;
+    // The shoe's model, centred on the foot, its bottom the leg's.
+    const center: V3 = [lx, ly + r * 0.5, zc];
+    const prop: ShoeProp = {
+      kind: "shoe",
+      center,
+      yaw: 0,
+      r,
+      leg: [lx - center[0], ly - center[1], lz - center[2]],
+      style,
+    };
+    const first = result.length;
     const ring = (
       count: number,
       y: number,
@@ -3241,13 +3492,19 @@ function buildEvasivePairSpheres(spheres: Sphere[]): Sphere[] {
         );
       }
     };
-    // The upper: blue, with a pale toe box at the front.
+    // The upper, with a toe box at the front.
     ring(14, ly + r * 0.5, r * 0.6, r * 0.8, r * 0.5, (front) =>
-      front ? "#D6E6F7" : "#3F82D0",
+      front ? style.toe : style.upper,
     );
-    push([lx, ly + r * 0.5, zc], r * 0.5, "#3F82D0", undefined, "foot");
-    // The sole: a thin white line round the bottom, just proud of the upper.
-    ring(16, ly + r * 0.82, r * 0.86, r * 1.05, r * 0.18, () => "#F4F8FC");
+    push(
+      [lx, ly + r * 0.5, zc],
+      r * 0.5,
+      style.upper,
+      undefined,
+      style.wings ? "foot" : undefined,
+    );
+    // The sole: a thin line round the bottom, just proud of the upper.
+    ring(16, ly + r * 0.82, r * 0.86, r * 1.05, r * 0.18, () => style.sole);
     // The underside: heel-to-toe capsules close side by side, so the bottom
     // of the leg can't poke through between the rings. Their bottoms are
     // the leg's.
@@ -3258,14 +3515,17 @@ function buildEvasivePairSpheres(spheres: Sphere[]): Sphere[] {
         push(
           [lx + k * r * 0.2, ly + r * 0.8, zc + dz * r],
           r * 0.2,
-          "#F4F8FC",
+          style.sole,
           { kind: "capsule", axis: [0, 0, r * 0.2] },
         );
       }
     }
-    // Laces: two dark blue dots over the instep.
-    push([lx, ly + r * 0.2, zc - r * 0.75], r * 0.12, "#1A4580");
-    push([lx, ly + r * 0.35, zc - r * 0.95], r * 0.12, "#1A4580");
+    // Laces: two dots over the instep.
+    push([lx, ly + r * 0.2, zc - r * 0.75], r * 0.12, style.laces);
+    push([lx, ly + r * 0.35, zc - r * 0.95], r * 0.12, style.laces);
+    // All of it is the shoe's model in 3D.
+    for (let k = first; k < result.length; k++) result[k].prop = prop;
+    if (!style.wings) continue;
     // The wing: three feathers on the outer side of the shoe, sweeping back,
     // a little up and a little away from the herzie, longest on top.
     const root: V3 = [lx + side * r * 1.0, ly + r * 0.35, zc + r * 0.1];
@@ -3314,6 +3574,9 @@ function appendWearableSpheres(
   if (equipped.face === "fangs") {
     spheres.push(...buildFangSpheres(spheres));
   }
+  if (equipped.face === "ff-shades") {
+    spheres.push(...buildShadesSpheres(spheres));
+  }
   if (equipped.head === "headphones") {
     spheres.push(...buildHeadphoneSpheres(spheres));
   }
@@ -3338,9 +3601,8 @@ function appendWearableSpheres(
   if (equipped.head === "guard-helm") {
     spheres.push(...buildGuardHelmSpheres(spheres));
   }
-  if (equipped.feet === "eivinds-evasive-pair") {
-    spheres.push(...buildEvasivePairSpheres(spheres));
-  }
+  const shoeStyle = equipped.feet && SHOE_STYLES[equipped.feet];
+  if (shoeStyle) spheres.push(...buildShoeSpheres(spheres, shoeStyle));
   const bodyBuilder = equipped.body && BODY_ITEM_BUILDERS[equipped.body];
   if (bodyBuilder) spheres.push(...bodyBuilder(spheres));
 
@@ -3391,6 +3653,9 @@ const COLOR_SCHEMES: Record<string, readonly string[]> = {
   "purple-dane": VIOLET_RAMP,
   "thanks-for-all-the-fish": TEAL_RAMP,
   "pumpkin-spice": PUMPKIN_RAMP,
+  // One band, not the ramp: glass in stripes reads as a pattern, not a
+  // colour. (The card keeps the ramp.)
+  "ff-pink": [FF_PINK_RAMP[2]],
   // Not an item: Good ol' George's gold, applied only by the desktop's
   // Events emblem (see GOLD_SCHEME_ID). No player can equip it.
   [GOLD_SCHEME_ID]: GOLD_RAMP,
@@ -3401,6 +3666,22 @@ const COLOR_SCHEMES: Record<string, readonly string[]> = {
   [PIP_SCHEME_ID]: PIP_RAMP,
   [NAKATA_SCHEME_ID]: NAKATA_RAMP,
 };
+
+/** Skins that make the body see-through: the 3D view draws whatever the
+ * scheme paints as tinted glass (herzieMaterial's GLASS), the eyes and
+ * anything worn staying solid. The ray caster and the cards just paint the
+ * colour. */
+export const TRANSLUCENT_SKINS: ReadonlySet<string> = new Set(["ff-pink"]);
+
+/** Whether this herzie's body is drawn see-through (a boss never is: its
+ * palette is its own, see colorSchemeFor). */
+export function hasTranslucentSkin(
+  equipped?: Equipped,
+  params?: CreatureParams,
+): boolean {
+  if (params?.bodyType === BOSS_BODY_TYPE) return false;
+  return !!equipped?.color && TRANSLUCENT_SKINS.has(equipped.color);
+}
 
 /** True for spheres that a colour scheme is allowed to repaint. */
 function isSchemePaintable(zone: ColorZone, hasOwnColor: boolean): boolean {
@@ -5149,6 +5430,14 @@ export interface PrimitiveShading {
   schemePainted: boolean;
   /** Polished metal: see herzieMaterial. Absent otherwise. */
   metal?: true;
+  /** Pearl: see herzieMaterial. Absent otherwise. */
+  pearl?: true;
+  /** A pearl veined like marble (black and pink through white): see
+   * herzieMaterial's MARBLE. Absent otherwise. */
+  marble?: true;
+  /** Tinted glass (a lens): drawn see-through, see herzieMaterial's GLASS.
+   * Absent otherwise. */
+  lens?: true;
 }
 
 /** The shades shadeWearableColor gives `hex`, dim to bright. */
@@ -5200,6 +5489,29 @@ export function primitiveShading(
     // Its own bands, as paint's: herzieMaterial darkens them under what it
     // mirrors.
     return { ...shading(0.3, 0.6, wearableShades(sp.color)), metal: true };
+  }
+  if (sp.color && sp.finish === "lens") {
+    // Tinted glass stays dark in the sun: its lit band only a shade up
+    // (paint's lifts 40% toward white, which turns a dark lens lavender).
+    const [h, sat, l] = hexToHsl(sp.color);
+    return {
+      ...shading(0.3, 0.6, [
+        shadeWearableColor(sp.color, 0),
+        sp.color.toUpperCase(),
+        hslToHex(h, sat, Math.min(1, l + 0.08)),
+      ]),
+      lens: true,
+    };
+  }
+  if (sp.color && sp.finish === "pearl") {
+    return { ...shading(0.3, 0.6, wearableShades(sp.color)), pearl: true };
+  }
+  if (sp.color && sp.finish === "marble") {
+    return {
+      ...shading(0.3, 0.6, wearableShades(sp.color)),
+      pearl: true,
+      marble: true,
+    };
   }
   if (sp.color) return shading(0.3, 0.6, wearableShades(sp.color));
   if (scheme && isSchemePaintable(sp.zone, false)) {

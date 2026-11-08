@@ -7,7 +7,12 @@ import {
   RigidBody,
 } from "@react-three/rapier";
 import { useEffect, useMemo, useRef } from "react";
-import type { Group } from "three";
+import {
+  type Group,
+  MathUtils,
+  type Mesh,
+  type MeshBasicMaterial,
+} from "three";
 import { cn } from "../../lib/utils";
 import { lookOf } from "../TownScene";
 import { VISITOR_THEMES } from "../VisitorRowTheme";
@@ -34,14 +39,21 @@ const BOSS_SCALE = 2.2;
 const TURN_RATE = 6;
 const MAX_TURN_SPEED = 5;
 
+/** Their ring: how solid it is when shown, how quickly it fades in and out
+ * (per second, eased), and how much smaller it starts as it comes. */
+const RING_OPACITY = 0.85;
+const RING_FADE = 8;
+const RING_GROW_FROM = 0.85;
+
 /**
- * A visitor's spot: while they're in town, a ring on the ground in their
- * colour and the visitor themselves, breathing, turning to look at
- * you as you come near, and solid enough to bump into, with their name
- * over their head (which opens them). Away, there's nothing. A few
- * residents (ROAMERS) wander round their spot and dance now and then, the
- * ring and name going with them. `bare` (the website's Town) leaves out
- * the ring, the name and the "!".
+ * A visitor's spot: while they're in town, the visitor themselves,
+ * breathing, and solid enough to bump into, with their name over their
+ * head (which opens them). As you come near they turn to look at you, and a
+ * ring in their colour fades in round their feet at the same moment; it
+ * fades away as you go. Away, there's nothing. A few residents (ROAMERS)
+ * wander round their spot and dance now and then, the ring and name going
+ * with them. `bare` (the website's Town) leaves out the ring, the name and
+ * the "!".
  */
 export function Visitor({
   spot,
@@ -92,6 +104,8 @@ export function Visitor({
   );
   // What goes with them: the ring, the name, the "!".
   const follow = useRef<Group>(null);
+  const ring = useRef<Mesh>(null);
+  const ringShown = useRef(0);
   const body = useRef<RapierRigidBody>(null);
 
   // The name fades in as you come near.
@@ -137,13 +151,25 @@ export function Visitor({
     // Walking: where they're going. Otherwise you, when you're near; a
     // roamer left alone stays facing however they ended up.
     const walking = roam ? roamHeading(roam) : null;
+    const looking = walking === null && Math.hypot(dx, dz) < NOTICE_RANGE;
     const target =
-      walking ??
-      (Math.hypot(dx, dz) < NOTICE_RANGE
-        ? Math.atan2(dx, dz)
-        : roam
-          ? herzie.heading
-          : plaza);
+      walking ?? (looking ? Math.atan2(dx, dz) : roam ? herzie.heading : plaza);
+    // The ring comes as they look at you, and goes as you leave.
+    if (ring.current) {
+      const shown = MathUtils.damp(
+        ringShown.current,
+        looking ? 1 : 0,
+        RING_FADE,
+        dt,
+      );
+      ringShown.current = shown;
+      const material = ring.current.material as MeshBasicMaterial;
+      material.opacity = RING_OPACITY * shown;
+      ring.current.visible = shown > 0.005;
+      ring.current.scale.setScalar(
+        RING_GROW_FROM + (1 - RING_GROW_FROM) * shown,
+      );
+    }
     herzie.heading = turnToward(
       herzie.heading,
       target,
@@ -187,12 +213,17 @@ export function Visitor({
       )}
       <group ref={follow} position={[at.x, ground, at.z]}>
         {herzie && !bare && (
-          <mesh rotation-x={-Math.PI / 2} position={[0, 0.03, 0]}>
+          <mesh
+            ref={ring}
+            rotation-x={-Math.PI / 2}
+            position={[0, 0.03, 0]}
+            visible={false}
+          >
             <ringGeometry args={[1.05 * size, 1.05 * size + 0.2, 40]} />
             <meshBasicMaterial
               color={theme?.accent ?? "#ffffff"}
               transparent
-              opacity={0.85}
+              opacity={0}
               depthWrite={false}
             />
           </mesh>

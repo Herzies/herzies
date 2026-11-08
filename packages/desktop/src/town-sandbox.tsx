@@ -24,6 +24,8 @@
 // `?color=`, `?head=` and `?spirit=` dress the player (`?head=rainbow-headband`
 // with the default prism skin is the full Prismatic set), and `?back=` gives
 // it a cloak (troubadour-mantle, groove-cape, drumhide-cloak, tailwind-cloak).
+// The Items panel, bottom left, tries anything on: click an item to wear it
+// in its slot, again to take it off (`?stage=` sets the starting stage).
 // `?home=1` starts at Home (town/homeMode); H goes Home and back, walking
 // leaves it. `?crystal=0.6` puts a Crystal by the spawn, 60% charged (`2`
 // for overcharged; `&tier=` its size, `&crystalOpen=1` opens its window);
@@ -42,6 +44,7 @@ import {
   crystalCapacity,
   crystalUpgradeCost,
   getItem,
+  ITEMS,
   type ItemUnit,
   isHerzieClass,
   SH,
@@ -699,7 +702,117 @@ function SandboxOverlayStage({ children }: { children: React.ReactNode }) {
  * `say("bot-seed-3", "hello")` (a friend code, or a bot's seed; the player's
  * own seed for yours).
  */
+type SandboxLook = typeof player;
+
+/** Every equipable item, by name. */
+const PICKABLE = ITEMS.filter((i) => i.equipable && i.equipSlot).sort((a, b) =>
+  a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
+);
+
+/** The slot an item goes in on the herzie (a ground item on the left). */
+const wornSlot = (equipSlot: string) =>
+  equipSlot === "ground" ? "ground_left" : equipSlot;
+
+/** Bottom left: a list of every equipable item to put on the player and
+ * take off again, a filter, and the stage. */
+function ItemPicker({
+  look,
+  onChange,
+}: {
+  look: SandboxLook;
+  onChange: (next: SandboxLook) => void;
+}) {
+  const [open, setOpen] = useState(true);
+  const [filter, setFilter] = useState("");
+  const equipped = look.equipped as Record<string, string | string[]>;
+  const isOn = (id: string, slot: string) => {
+    const v = equipped[wornSlot(slot)];
+    return Array.isArray(v) ? v.includes(id) : v === id;
+  };
+  const toggle = (id: string, slot: string) => {
+    const key = wornSlot(slot);
+    const next: Record<string, string | string[]> = { ...equipped };
+    if (slot === "modifier") {
+      const mods = (next.modifier as string[] | undefined) ?? [];
+      next.modifier = mods.includes(id)
+        ? mods.filter((m) => m !== id)
+        : [...mods, id];
+    } else if (next[key] === id) delete next[key];
+    else next[key] = id;
+    onChange({ ...look, equipped: next as Record<string, string> });
+  };
+  const q = filter.trim().toLowerCase();
+  const shown = PICKABLE.filter(
+    (i) =>
+      !q ||
+      i.name.toLowerCase().includes(q) ||
+      i.id.includes(q) ||
+      i.equipSlot?.startsWith(q),
+  );
+  const button = (on: boolean) =>
+    `rounded px-1.5 py-0.5 ${on ? "bg-white/30" : "bg-white/10"}`;
+  return (
+    <div className="pointer-events-auto absolute bottom-3 left-3 z-30 flex max-h-[70vh] w-[230px] flex-col rounded bg-black/60 p-2 text-[11px] text-white/85">
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          className={button(open)}
+          onClick={() => setOpen((o) => !o)}
+        >
+          Items
+        </button>
+        {[1, 2, 3].map((st) => (
+          <button
+            key={st}
+            type="button"
+            className={button(look.stage === st)}
+            onClick={() => onChange({ ...look, stage: st })}
+          >
+            {st}
+          </button>
+        ))}
+        <button
+          type="button"
+          className={`${button(false)} ml-auto`}
+          onClick={() => onChange({ ...look, equipped: {} })}
+        >
+          Clear
+        </button>
+      </div>
+      {open && (
+        <>
+          <input
+            className="mt-1.5 rounded bg-white/10 px-1.5 py-0.5 outline-none"
+            placeholder="Filter (name, id or slot)"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+          />
+          <div className="mt-1.5 overflow-y-auto">
+            {shown.map((i) => {
+              const slot = i.equipSlot ?? "";
+              const on = isOn(i.id, slot);
+              return (
+                <button
+                  key={i.id}
+                  type="button"
+                  title={i.id}
+                  className={`flex w-full justify-between gap-2 rounded px-1 py-0.5 text-left ${on ? "bg-white/25" : "hover:bg-white/10"}`}
+                  onClick={() => toggle(i.id, slot)}
+                >
+                  <span className="truncate">{i.name}</span>
+                  <span className="shrink-0 text-white/45">{slot}</span>
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function Sandbox() {
+  const [look, setLook] = useState(player);
   const [bubbles, setBubbles] = useState<ChatBubbles>(new Map());
   const [crystalOpen, setCrystalOpen] = useState(
     params.get("crystalOpen") === "1",
@@ -740,7 +853,7 @@ function Sandbox() {
       <CastBar className="bottom-[3.75rem] left-1/2 -translate-x-1/2" />
       <TownCanvas
         spots={spots}
-        player={player}
+        player={look}
         net={net}
         bubbles={bubbles}
         paused={false}
@@ -798,6 +911,7 @@ function Sandbox() {
         className="absolute top-3 left-3 z-30 w-[160px]"
       />
       <SkyControls />
+      <ItemPicker look={look} onChange={setLook} />
     </div>
   );
 }

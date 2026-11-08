@@ -25,6 +25,7 @@ import {
   SLAM_SECONDS,
   waveHop,
 } from "./HerzieModel.js";
+import { SHOE_UPPER } from "./props.js";
 
 const LOOK = { seed: "model-test", stage: 3, equipped: { head: "headphones" } };
 
@@ -1201,4 +1202,182 @@ describe("a slam (Rimshot)", () => {
     h.update(0.6, 0);
     expect(h.released).toBe(false);
   });
+});
+
+describe("FF Pink (a see-through skin)", () => {
+  /** Its body's materials: the ones drawn blended over a depth prepass. */
+  const glassOf = (h: HerzieModel) => {
+    const found = new Set<THREE.ShaderMaterial>();
+    h.root.traverse((o) => {
+      const m = (o as THREE.Mesh).material as THREE.ShaderMaterial | undefined;
+      if (m?.defines && "GLASS" in m.defines) found.add(m);
+    });
+    return [...found];
+  };
+  const prepasses = (h: HerzieModel) => {
+    let n = 0;
+    h.root.traverse((o) => {
+      const m = (o as THREE.Mesh).material as THREE.Material | undefined;
+      if (m && !m.colorWrite) n++;
+    });
+    return n;
+  };
+  const pink = { seed: "glass-test", stage: 3, equipped: { color: "ff-pink" } };
+
+  it("draws the body as glass, each part over a depth prepass", () => {
+    const h = new HerzieModel(pink);
+    const glass = glassOf(h);
+    expect(glass.length).toBeGreaterThan(0);
+    for (const m of glass) {
+      expect(m.transparent).toBe(true);
+      expect(m.depthWrite).toBe(false);
+    }
+    expect(prepasses(h)).toBeGreaterThan(0);
+    // The eyes stay solid.
+    h.root.traverse((o) => {
+      const m = (o as THREE.Mesh).material as THREE.ShaderMaterial | undefined;
+      if (m?.uniforms?.uScheme?.value === false && m.defines)
+        expect("GLASS" in m.defines).toBe(false);
+    });
+  });
+
+  it("draws its solid parts over the glass's depth, so their insides hide", () => {
+    const h = new HerzieModel({
+      ...pink,
+      equipped: { color: "ff-pink", head: "fabulous-fabian" },
+    });
+    const orders = new Set<number>();
+    h.root.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      const m = mesh.material as THREE.ShaderMaterial | undefined;
+      if (!mesh.isMesh || !m?.uniforms?.uShades || "GLASS" in (m.defines ?? {}))
+        return;
+      if (!m.visible) return;
+      orders.add(mesh.renderOrder);
+      expect(m.transparent).toBe(true);
+    });
+    // Glass prepass 10, solids 11, glass 12.
+    expect([...orders]).toEqual([11]);
+    // Back to normal as stone.
+    h.petrify();
+    h.root.traverse((o) => {
+      if ((o as THREE.Mesh).isMesh)
+        expect((o as THREE.Mesh).renderOrder).toBe(0);
+    });
+  });
+
+  it("stays see-through when tinted fully opaque", () => {
+    const h = new HerzieModel(pink);
+    h.setTint(0, 0.5);
+    h.setTint(0, 1);
+    for (const m of glassOf(h)) expect(m.transparent).toBe(true);
+  });
+
+  it("goes solid when turned to stone", () => {
+    const h = new HerzieModel(pink);
+    h.petrify();
+    expect(glassOf(h)).toHaveLength(0);
+    expect(prepasses(h)).toBe(0);
+  });
+
+  it("is plain without it", () => {
+    const h = new HerzieModel({ ...pink, equipped: { color: "prism" } });
+    expect(glassOf(h)).toHaveLength(0);
+    expect(prepasses(h)).toBe(0);
+  });
+});
+
+describe("shoes", () => {
+  /** Whether a point in a shoe's own frame (built at a leg radius of 1, y
+   * down, toe −z) is inside it: its upper (SHOE_UPPER's ellipsoid, before
+   * the toe slopes it) or its sole. A stride moves the foot a hair within
+   * the shoe: within 3% of the leg's radius counts. */
+  const insideShoe = (p: THREE.Vector3) => {
+    const k = 0.03;
+    if (p.y > 0.5 + k) return false;
+    const u = SHOE_UPPER;
+    const upper =
+      (p.x / (u.rx + k)) ** 2 +
+      ((p.y - u.y) / (u.ry + k)) ** 2 +
+      ((p.z - u.z) / (u.rz + k)) ** 2;
+    // The sole, across the foot's whole footprint.
+    const sole = p.y > 0.26 && (p.x / 1.1) ** 2 + ((p.z - u.z) / 1.5) ** 2 < 1;
+    return upper < 1 || sole;
+  };
+
+  it("keeps the feet inside the shoes all through a walk", () => {
+    const h = new HerzieModel({
+      seed: "shoe-walk",
+      stage: 3,
+      equipped: { feet: "ff-sneakers-black" },
+    });
+    const inner = h as unknown as {
+      model: { spheres: Sphere[] };
+      meshes: THREE.Mesh[];
+      props: { group: THREE.Group; at: number }[];
+    };
+    const spheres = inner.model.spheres;
+    const shoes = inner.props.filter(
+      (p) => spheres[p.at].prop?.kind === "shoe",
+    );
+    expect(shoes).toHaveLength(2);
+    h.update(0, 0);
+    let worst = 0;
+    for (let i = 0; i < 90; i++) {
+      h.root.position.z += WALK_SPEED / 60;
+      h.update(1 / 60, WALK_SPEED);
+      h.root.updateMatrixWorld(true);
+      for (const shoe of shoes) {
+        const part = spheres[shoe.at].part;
+        const legAt = spheres.findIndex(
+          (sp) => sp.part === part && sp.zone !== "wearable",
+        );
+        const leg = inner.meshes[legAt];
+        // Points all over the leg's sphere; those below the shoe's cuff
+        // (y −0.45 in its frame, y down) must be inside the shoe.
+        for (let a = 0; a < 16; a++) {
+          for (let b = 1; b < 8; b++) {
+            const t = (a / 16) * Math.PI * 2;
+            const u = (b / 8) * Math.PI;
+            const local = new THREE.Vector3(
+              Math.sin(u) * Math.cos(t),
+              Math.cos(u),
+              Math.sin(u) * Math.sin(t),
+            );
+            const inShoe = shoe.group.worldToLocal(leg.localToWorld(local));
+            if (inShoe.y > -0.45 && !insideShoe(inShoe)) worst++;
+          }
+        }
+      }
+    }
+    expect(worst).toBe(0);
+  });
+
+  for (const feet of ["ff-sneakers-black", "eivinds-evasive-pair"]) {
+    it(`draws ${feet} as a shoe model on each foot, no lower than the leg`, () => {
+      const { spheres } = buildCreatureModel(
+        "shoe-test",
+        3,
+        { feet },
+        undefined,
+        64,
+        64,
+      );
+      const legs = spheres.filter(
+        (s) =>
+          (s.part === "leg-l" || s.part === "leg-r") && s.zone !== "wearable",
+      );
+      const shoes = spheres.filter((s) => s.prop?.kind === "shoe");
+      expect(new Set(shoes.map((s) => s.prop)).size).toBe(2);
+      const legBottom = Math.max(...legs.map((l) => l.center[1] + l.radius));
+      for (const s of spheres.filter((s) => s.zone === "wearable"))
+        expect(s.center[1] + s.radius).toBeLessThanOrEqual(legBottom + 1e-9);
+      for (const s of shoes) {
+        if (s.prop?.kind !== "shoe") continue;
+        // The model's bottom (half the leg's radius below its middle) is
+        // the leg's.
+        expect(s.prop.center[1] + s.prop.r / 2).toBeCloseTo(legBottom, 6);
+      }
+    });
+  }
 });

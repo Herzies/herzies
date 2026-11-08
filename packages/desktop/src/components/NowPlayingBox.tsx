@@ -69,6 +69,9 @@ export function NowPlayingBox({
           albumArtUrl={nowPlaying.albumArtUrl}
           artistImageUrl={nowPlaying.artistImageUrl}
           tags={nowPlaying.tags}
+          // Clear of the modifiers star: it reaches 17px into the card's
+          // content at the bottom right (see below), plus a 5px gap.
+          tagsClassName="pr-[22px]"
           className={card}
         />
       ) : (

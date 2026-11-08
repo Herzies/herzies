@@ -61,21 +61,20 @@ export function calculateXpGain(
 }
 
 /** One built-in XP bonus's formula, tunable from the dev admin
- * (public.xp_bonuses, 00091). `amount` is the flat bonus (boost), or the
- * bonus per streak day / per song hunt won; `cap` bounds the total. */
+ * (public.xp_bonuses, 00091). `amount` is the bonus per streak day / per
+ * song hunt won; `cap` bounds the total. */
 export type XpBonusRule = {
   enabled: boolean;
   amount: number;
   cap: number | null;
 };
 
-export type XpBonusId = "boost" | "streak" | "good_eye_sniper";
+export type XpBonusId = "streak" | "good_eye_sniper";
 export type XpBonusConfig = Record<XpBonusId, XpBonusRule>;
 
 /** What the game used before these became editable — and still uses when
  * the database doesn't send them (a sync_context predating 00091). */
 export const DEFAULT_XP_BONUSES: XpBonusConfig = {
-  boost: { enabled: true, amount: 10.0, cap: null },
   streak: { enabled: true, amount: 0.01, cap: null },
   good_eye_sniper: { enabled: true, amount: 0.02, cap: 0.3 },
 };
