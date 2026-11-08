@@ -1846,19 +1846,12 @@ function buildFabianCapSpheres(spheres: Sphere[]): Sphere[] {
   const crownY = billY + hr * 0.08;
   push([hx, crownY, hz], crownR, black);
   // The bill: wide but short, so it reads from above without covering the
-  // face — three thin discs side by side under the crown's bottom front
-  // edge, the middle one reaching furthest, held level.
-  const billHalf = hr * 0.025;
-  for (const [dx, dz, r] of [
-    [0, 1.0, 0.5],
-    [-0.34, 0.9, 0.44],
-    [0.34, 0.9, 0.44],
-  ] as const) {
-    push([hx + hr * dx, billY, hz - hr * dz], hr * r, "#1E1E24", {
-      kind: "cylinder",
-      axis: [0, -billHalf, 0],
-    });
-  }
+  // face — one thin disc, held level, its back half hidden in the crown
+  // and its front edge one smooth curve.
+  push([hx, billY, hz - hr * 0.72], hr * 0.78, "#1E1E24", {
+    kind: "cylinder",
+    axis: [0, -hr * 0.025, 0],
+  });
   // The button on top.
   push([hx, crownY - crownR - hr * 0.01, hz], hr * 0.07, black);
   // The F, in thin pink capsules just proud of the front of the crown,
