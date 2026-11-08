@@ -103,6 +103,10 @@ const WHATS_NEW_SEEN_KEY = "herzies:whats-new-seen-version";
  * an overlay window over one of them. */
 type Base = "home" | "events";
 type OverlayId = Exclude<View, Base>;
+/** Deck and Bag are one window's tabs: switching between them isn't
+ * leaving it. */
+const isInventory = (v: View | null): v is HerzieTab =>
+  v === "deck" || v === "bag";
 /** The camera on Home with the deck or the bag open: pulled back, so the
  * herzie fits above the window. */
 const HOME_INVENTORY_ZOOM = 0.8;
@@ -291,16 +295,17 @@ function App() {
   // until its exit has played: its content keeps still under the fade.
   const [leavingOverlay, setLeavingOverlay] = useState<OverlayId | null>(null);
   const [prevOverlay, setPrevOverlay] = useState<OverlayId | null>(overlay);
-  /** Deck and Bag are one window's tabs: switching between them isn't
-   * leaving it. */
-  const isInventory = (v: View | null): v is HerzieTab =>
-    v === "deck" || v === "bag";
   if (prevOverlay !== overlay) {
     setPrevOverlay(overlay);
     if (prevOverlay && !(isInventory(prevOverlay) && isInventory(overlay))) {
       setLeavingOverlay(prevOverlay);
     }
   }
+  /** Stats open beside the Herzie window: the big window only, where the
+   * two stand on opposite sides, so you can watch your stats while you
+   * change gear. Either opens without closing the other; close one and the
+   * other stays. */
+  const [statsBeside, setStatsBeside] = useState(false);
   /** The deck-and-bag window's tab: the one asked for last. */
   const [inventoryPanel, setInventoryPanel] = useState<HerzieTab>("deck");
   if (isInventory(overlay) && overlay !== inventoryPanel) {
@@ -829,6 +834,19 @@ function App() {
       }
       // Moving on from the profile: Back no longer goes anywhere special.
       if (v !== "friends") setProfileReturn(null);
+      // The big window: Stats and the Herzie window side by side.
+      const big = bigWindowRef.current;
+      if (big && v === "stats" && isInventory(overlay)) {
+        setStatsBeside((beside) => (toggle ? !beside : true));
+        return true;
+      }
+      if (closing && isInventory(v) && big && statsBeside) {
+        // The Herzie window closes; Stats stays, on its own.
+        setStatsBeside(false);
+        setOverlay("stats");
+        return true;
+      }
+      if (big && isInventory(v) && overlay === "stats") setStatsBeside(true);
       if (closing) {
         setOverlay(null);
         return true;
@@ -839,7 +857,7 @@ function App() {
       setView(v);
       return true;
     },
-    [base, overlay, tradeActive, setView],
+    [base, overlay, tradeActive, setView, statsBeside],
   );
 
   // Walking off at Home: out into the Town.
@@ -868,6 +886,11 @@ function App() {
   // Town, or was made big there.
   const bigWindow = (townWorld && townExpanded) || homeBig;
   bigWindowRef.current = bigWindow;
+  // Stats only stands beside the Herzie window in the big window.
+  if (statsBeside && (!bigWindow || !isInventory(overlay))) {
+    setStatsBeside(false);
+  }
+  const statsBesideOpen = statsBeside && bigWindow && isInventory(overlay);
   /** The window button (or Z): the Town's choice in the Town (remembered),
    * Home's own at Home. */
   const toggleWindow = useCallback(() => {
@@ -1626,10 +1649,11 @@ function App() {
 
       {herzie?.statPoints && (
         <OverlayWindow
-          open={overlay === "stats"}
+          open={overlay === "stats" || statsBesideOpen}
           onClosed={windowClosed("stats")}
-          onClose={closeWindow}
+          onClose={statsBesideOpen ? () => setStatsBeside(false) : closeWindow}
           title="Stats"
+          noStage
           narrow={bigWindow}
           onHome={base === "home"}
           inTown={townWorld}
