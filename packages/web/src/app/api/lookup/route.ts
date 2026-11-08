@@ -59,7 +59,7 @@ export async function GET(request: Request) {
     const { data, error } = await admin
       .from("herzies")
       .select(
-        "user_id, name, friend_code, stage, level, currency, appearance, equipped, item_upgrades, now_playing, share_listening, stat_stamina, stat_sonic, stat_euphony, stat_timing",
+        "user_id, name, friend_code, stage, level, currency, appearance, equipped, item_upgrades, now_playing, last_synced_at, share_listening, stat_stamina, stat_sonic, stat_euphony, stat_timing",
       )
       .eq("friend_code", singleCode.toUpperCase().trim())
       .single();
@@ -110,7 +110,7 @@ export async function GET(request: Request) {
   const { data, error } = await admin
     .from("herzies")
     .select(
-      "user_id, name, friend_code, stage, level, currency, appearance, equipped, item_upgrades, now_playing, share_listening, stat_stamina, stat_sonic, stat_euphony, stat_timing",
+      "user_id, name, friend_code, stage, level, currency, appearance, equipped, item_upgrades, now_playing, last_synced_at, share_listening, stat_stamina, stat_sonic, stat_euphony, stat_timing",
     )
     .in("friend_code", codes);
 
@@ -172,6 +172,7 @@ type HerzieRow = {
     artist?: string;
     albumArtUrl?: string;
   } | null;
+  last_synced_at: string | null;
   share_listening: boolean;
   stat_stamina: number;
   stat_sonic: number;
@@ -186,10 +187,22 @@ type HerzieRow = {
  */
 type ListeningAccess = "full" | "presence" | "none";
 
+/**
+ * How long after a herzie's last sync its now playing still counts. The app
+ * syncs at least once a minute while open (every 60s when hidden), so a
+ * row older than this is left over from an app that went away mid-song
+ * (the computer slept, the app was quit or killed) and never sent the
+ * stop.
+ */
+const NOW_PLAYING_FRESH_MS = 3 * 60_000;
+
 function formatNowPlaying(
   np: { title?: string; artist?: string; albumArtUrl?: string } | null,
+  lastSyncedAt: string | null,
 ): { title: string; artist: string; albumArtUrl?: string } | null {
   if (!np?.title || !np?.artist) return null;
+  const synced = lastSyncedAt ? Date.parse(lastSyncedAt) : Number.NaN;
+  if (!(Date.now() - synced < NOW_PLAYING_FRESH_MS)) return null;
   return { title: np.title, artist: np.artist, albumArtUrl: np.albumArtUrl };
 }
 
@@ -208,7 +221,7 @@ function formatProfile(
   songHuntWins?: number,
 ) {
   const canSeeListening = listeningAccess === "full";
-  const nowPlaying = formatNowPlaying(row.now_playing);
+  const nowPlaying = formatNowPlaying(row.now_playing, row.last_synced_at);
   return {
     name: row.name,
     friendCode: row.friend_code,
