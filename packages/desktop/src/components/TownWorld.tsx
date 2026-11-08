@@ -26,6 +26,8 @@ import {
   observePlayerCard,
   PLAYER_CARD,
   PLAYER_CARD_TOWN,
+  PLAYER_CARD_WIDTH,
+  PLAYER_CARD_WIDTH_BIG,
   PlayerBars,
 } from "./PlayerBars";
 import { type EventCard, formatIn, isDown } from "./TownScene";
@@ -74,6 +76,7 @@ export function TownWorld({
   onOpenProfile,
   player,
   chatOverlay = false,
+  expanded = false,
   musicPlaying = false,
   onLog,
   stats,
@@ -110,6 +113,8 @@ export function TownWorld({
   /** The chat floats over the bottom of the world: keep the prompt above
    * it. */
   chatOverlay?: boolean;
+  /** The big window: a wider player card. */
+  expanded?: boolean;
   cards: EventCard[];
   paused: boolean;
   /** Paused behind a visitor's panel: still load and draw up to the first
@@ -342,9 +347,12 @@ export function TownWorld({
                 window hangs its windows under both (observePlayerCard). */}
             <div
               ref={observePlayerCard}
-              className="absolute top-3 left-3 z-30 flex w-[174px] flex-col gap-2"
+              className={cn(
+                "absolute top-3 left-3 z-30 flex flex-col gap-2",
+                expanded ? PLAYER_CARD_WIDTH_BIG : PLAYER_CARD_WIDTH,
+              )}
             >
-              <div className={cn(PLAYER_CARD, PLAYER_CARD_TOWN)}>
+              <div className={cn(PLAYER_CARD, PLAYER_CARD_TOWN, "w-full")}>
                 <div className="flex h-5 items-center">
                   <span className="block min-w-0 truncate text-ui-lg font-bold text-white">
                     {profile.name}
@@ -366,7 +374,6 @@ export function TownWorld({
                 nowPlaying={profile.nowPlaying ?? null}
                 multipliers={profile.multipliers ?? null}
                 tint={cn(PLAYER_CARD_TOWN, "backdrop-blur-md")}
-                showTags={false}
               />
               <MusicBonus />
             </div>

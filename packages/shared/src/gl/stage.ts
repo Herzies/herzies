@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { SUPERSAMPLE, SupersamplePass } from "./supersample.js";
 
 /** Something drawn on the stage: a scene seen through a camera, inside an
  * element's box on the page. */
@@ -37,10 +38,14 @@ type Entry = { view: StageView; clips: HTMLElement[]; clipAge: number };
  *
  * Drawn at a fraction of the screen's resolution (`pixelScale`) and scaled
  * up without smoothing: the chunky pixels herzies have everywhere.
+ * Supersampled (`supersample`), drawn at twice that and each 2 × 2 block
+ * averaged (see SupersamplePass): the same pixels, steadier edges.
  */
 export class HerzieStage {
   /** Drawn pixels per CSS pixel. */
   pixelScale = 1 / 4;
+  private supersampled = false;
+  private pass: SupersamplePass | null = null;
   private renderer: THREE.WebGLRenderer | null = null;
   private host: HTMLElement | null = null;
   /** The canvas fills `host`'s box, in the page (see setHost). */
@@ -89,6 +94,17 @@ export class HerzieStage {
     });
   }
 
+  get supersample(): boolean {
+    return this.supersampled;
+  }
+
+  set supersample(on: boolean) {
+    if (on === this.supersampled) return;
+    this.supersampled = on;
+    // Drawn again, even if nothing's moving.
+    this.lastLayout = "";
+  }
+
   /** Draw `view` from now on; returns the function that stops it. */
   add(view: StageView): () => void {
     const entry: Entry = { view, clips: [], clipAge: CLIP_REFRESH_FRAMES };
@@ -127,6 +143,8 @@ export class HerzieStage {
   dispose() {
     this.entries.clear();
     this.stop();
+    this.pass?.dispose();
+    this.pass = null;
     if (this.renderer) {
       this.renderer.domElement.remove();
       this.renderer.dispose();
@@ -233,8 +251,8 @@ export class HerzieStage {
     if (idle && layout === this.lastLayout) return;
     this.lastLayout = layout;
 
-    if (renderer.getPixelRatio() !== this.pixelScale)
-      renderer.setPixelRatio(this.pixelScale);
+    const ratio = this.pixelScale * (this.supersampled ? SUPERSAMPLE : 1);
+    if (renderer.getPixelRatio() !== ratio) renderer.setPixelRatio(ratio);
     const size = renderer.getSize(new THREE.Vector2());
     if (size.x !== width || size.y !== height)
       renderer.setSize(width, height, false);
@@ -253,6 +271,13 @@ export class HerzieStage {
       );
       renderer.setScissor(left, height - bottom, right - left, bottom - top);
       renderer.render(view.scene, view.camera);
+    }
+    if (this.supersampled && drawn.length > 0) {
+      renderer.setScissorTest(false);
+      renderer.setViewport(0, 0, width, height);
+      this.pass ??= new SupersamplePass();
+      this.pass.apply(renderer);
+      renderer.setScissorTest(true);
     }
   }
 }

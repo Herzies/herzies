@@ -18,7 +18,7 @@ import { createAdminClient } from "@/lib/supabase-admin";
  * the admin edits, skips or deletes one at a time via /api/admin/events.
  */
 export async function GET(request: Request) {
-  if (!verifyAdmin(request)) {
+  if (!(await verifyAdmin(request))) {
     return unauthorizedAdmin();
   }
 
@@ -40,7 +40,7 @@ export async function GET(request: Request) {
 
 /** Create or update a series, then top up its occurrences. */
 export async function POST(request: Request) {
-  if (!verifyAdmin(request)) {
+  if (!(await verifyAdmin(request))) {
     return unauthorizedAdmin();
   }
 
@@ -147,7 +147,7 @@ export async function POST(request: Request) {
  * finished, skipped or hand-edited is kept (and simply loses its series link).
  */
 export async function DELETE(request: Request) {
-  if (!verifyAdmin(request)) {
+  if (!(await verifyAdmin(request))) {
     return unauthorizedAdmin();
   }
 

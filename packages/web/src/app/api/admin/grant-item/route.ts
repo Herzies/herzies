@@ -5,7 +5,7 @@ import { createAdminClient } from "@/lib/supabase-admin";
 
 /** Manually grant an item to a user by name or friend code */
 export async function POST(request: Request) {
-  if (!verifyAdmin(request)) {
+  if (!(await verifyAdmin(request))) {
     return unauthorizedAdmin();
   }
 

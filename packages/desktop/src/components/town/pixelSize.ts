@@ -79,8 +79,7 @@ export function useTownPixelSize(): number | null {
   );
 }
 
-/** Drawn this many times the resolution each way when supersampling. */
-export const SUPERSAMPLE = 2;
+export { SUPERSAMPLE } from "@herzies/shared/gl";
 
 /**
  * Supersampling (Settings > Graphics, on by default): each big pixel the
@@ -117,6 +116,17 @@ export function setTownSupersample(on: boolean): void {
     // Not remembered, then.
   }
   for (const l of supersampleListeners) l();
+}
+
+/** The setting now, outside React. */
+export function townSupersample(): boolean {
+  return supersample;
+}
+
+/** Called whenever the setting changes; returns the unsubscribe. */
+export function onTownSupersample(cb: () => void): () => void {
+  supersampleListeners.add(cb);
+  return () => supersampleListeners.delete(cb);
 }
 
 export function useTownSupersample(): boolean {

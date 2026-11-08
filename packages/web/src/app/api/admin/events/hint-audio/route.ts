@@ -14,7 +14,7 @@ const ALLOWED_MIME_TYPES: Record<string, string> = {
 
 /** Uploads a hint audio clip and returns its storage object key. */
 export async function POST(request: Request) {
-  if (!verifyAdmin(request)) {
+  if (!(await verifyAdmin(request))) {
     return unauthorizedAdmin();
   }
 

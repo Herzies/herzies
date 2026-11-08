@@ -2,7 +2,7 @@ import type { CardIllustration } from "@herzies/shared";
 import rawCardArt from "@herzies/shared/card-art/card-art.json";
 
 /** Commissioned card illustrations, keyed by item id — managed in the item
- * editor (`pnpm item-editor`). `file` is the finished 4:3 image next to
+ * editor (the control panel's Items page). `file` is the finished 4:3 image next to
  * the manifest in `@herzies/shared/card-art/` (already cropped and filtered
  * there, from the artist's original in art-sources/card-art/); `artist` is
  * printed on the card as its "Illus." credit. The manifest's other fields

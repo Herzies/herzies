@@ -41,7 +41,10 @@ function getRequest(codes: string): Request {
  * non-friend whose listening data must stay private. `friendShares: false`
  * turns HERZ-FRIEND's "Share what you're listening to" setting off.
  */
-function adminWithTwoHerzies({ friendShares = true } = {}) {
+function adminWithTwoHerzies({
+  friendShares = true,
+  friendSyncedAt = new Date().toISOString(),
+} = {}) {
   const admin = createMockAdmin(
     {},
     {
@@ -97,6 +100,7 @@ function adminWithTwoHerzies({ friendShares = true } = {}) {
                   appearance: null,
                   equipped: null,
                   now_playing: { title: "Roygbiv", artist: "Boards" },
+                  last_synced_at: friendSyncedAt,
                   share_listening: friendShares,
                 },
                 {
@@ -109,6 +113,7 @@ function adminWithTwoHerzies({ friendShares = true } = {}) {
                   appearance: null,
                   equipped: null,
                   now_playing: { title: "Secret", artist: "Nobody" },
+                  last_synced_at: new Date().toISOString(),
                   share_listening: true,
                 },
               ],
@@ -188,6 +193,39 @@ describe("GET /api/lookup", () => {
     expect(stranger?.topArtists).toEqual([]);
     expect(stranger?.lastPlayed).toBeNull();
     expect(stranger?.nowPlaying).toBeNull();
+  });
+
+  it("drops a now playing left over from an app that stopped syncing", async () => {
+    // The computer slept (or the app quit) mid-song: no stop was ever sent,
+    // so the row still names the song, but it hasn't synced in hours.
+    mockAuth.mockResolvedValue({ userId: "user-me" });
+    const hoursAgo = new Date(Date.now() - 5 * 60 * 60_000).toISOString();
+    mockAdmin.mockReturnValue(
+      adminWithTwoHerzies({ friendSyncedAt: hoursAgo }) as never,
+    );
+
+    const res = await GET(getRequest("HERZ-FRIEND"));
+    const { herzies } = (await responseJson(res)) as { herzies: Profile[] };
+    const friend = herzies.find((h) => h.friendCode === "HERZ-FRIEND");
+    expect(friend?.nowPlaying).toBeNull();
+    // What they last played is history, not presence: still shown.
+    expect(friend?.lastPlayed?.title).toBe("Roygbiv");
+  });
+
+  it("doesn't tell friends a private herzie is listening once it's stopped syncing", async () => {
+    mockAuth.mockResolvedValue({ userId: "user-me" });
+    const hoursAgo = new Date(Date.now() - 5 * 60 * 60_000).toISOString();
+    mockAdmin.mockReturnValue(
+      adminWithTwoHerzies({
+        friendShares: false,
+        friendSyncedAt: hoursAgo,
+      }) as never,
+    );
+
+    const res = await GET(getRequest("HERZ-FRIEND"));
+    const { herzies } = (await responseJson(res)) as { herzies: Profile[] };
+    const friend = herzies.find((h) => h.friendCode === "HERZ-FRIEND");
+    expect(friend?.isListening).toBe(false);
   });
 
   it("never asks the database for a stranger's listening history", async () => {
