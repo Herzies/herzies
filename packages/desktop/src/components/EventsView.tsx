@@ -33,11 +33,10 @@ import {
   visitorName,
   withStatPoints,
 } from "@herzies/shared";
-import { HerzieStage } from "@herzies/shared/gl";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useEscape } from "../lib/escapeStack";
-import { HerzieStageContext } from "../lib/overlayStage";
+import { HerzieStageContext, visitorHerzieStage } from "../lib/overlayStage";
 import { useQuestBoard } from "../lib/quests";
 import { cn } from "../lib/utils";
 import {
@@ -874,6 +873,7 @@ function EventsViewImpl({
         loading={loading}
         chatMessages={chatMessages}
         chatOverlay={chatOverlay}
+        expanded={expanded}
         cards={cards}
         musicPlaying={musicPlaying}
         paused={
@@ -1523,11 +1523,6 @@ function ScreenView({
     />
   );
 }
-
-/** The visitor panel's own herzie canvas. The page's canvas sits under the
- * panel's glass, and the overlay windows' one follows whichever window is
- * open, which can be one opened over this panel. */
-const visitorHerzieStage = new HerzieStage();
 
 /**
  * A visitor, on a frosted panel over the world. In the big window it's in

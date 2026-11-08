@@ -3733,7 +3733,7 @@ export const ITEMS: ItemDef[] = [
   },
   {
     id: "sleptwell",
-    name: "Sleptwell",
+    name: "sleptwell",
     // Placeholder: the user is writing the real description.
     description: "Fetches what you drop. Naps where you stop.",
     rarity: "legendary",

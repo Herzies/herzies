@@ -24,10 +24,14 @@ export function observePlayerCard(el: HTMLElement | null) {
  * is the backing, so nothing in it needs a text shadow (the bars' labels
  * carry one for the open world). */
 export const PLAYER_CARD =
-  // One width for everyone: what the longest name (20 characters at 13px
-  // in the 0.6em-wide mono, 156px) needs, plus px-2 and the border. The
-  // level and class line ("Lv. 999 · Record Slinger") is narrower.
-  "w-[174px] rounded-xl border border-white/12 px-2 pt-1 pb-2 backdrop-blur-md [&_*]:[text-shadow:none]";
+  "rounded-xl border border-white/12 px-2 pt-1 pb-2 backdrop-blur-md [&_*]:[text-shadow:none]";
+/** The card's width, and the now-playing box's under it. One width for
+ * everyone: what the longest name (20 characters at 13px in the 0.6em-wide
+ * mono, 156px) needs, plus px-2 and the border. The level and class line
+ * ("Lv. 999 · Record Slinger") is narrower. */
+export const PLAYER_CARD_WIDTH = "w-[174px]";
+/** In the big window: room for the track's genre tags. */
+export const PLAYER_CARD_WIDTH_BIG = "w-[240px]";
 export const PLAYER_CARD_HOME = "bg-white/[0.03]";
 export const PLAYER_CARD_TOWN = "bg-black/45";
 

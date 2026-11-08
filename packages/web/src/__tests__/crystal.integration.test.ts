@@ -1,6 +1,6 @@
 /**
  * The Crystal (00140): listening fills it, attuning pays it out.
- * Requires: `npx supabase start` with 00140 applied.
+ * Requires: `npx supabase start` with 00140 and 00141 applied.
  *
  * The game_flags row is global, so this file turns the flag on for its own
  * run and puts it back after (integration files run one at a time).
@@ -94,6 +94,9 @@ describe("Charging", () => {
     expect(Number(row.crystal_fill)).toBe(10);
     expect(Number(row.crystal_xp)).toBeCloseTo(10 * xpPerMinute(body));
     expect(Number(row.crystal_drop_minutes)).toBe(10);
+    // The luck worn while listening (none) goes with the drops.
+    expect(row.crystal_luck).not.toBeNull();
+    expect(Number(row.crystal_luck)).toBe(0);
     expect(row.total_minutes_listened).toBe(10);
     // The old per-sync roll counter keeps pace, so no drop lands on the ground.
     expect(row.drop_rolls_done).toBe(1);
@@ -146,6 +149,55 @@ describe("Charging", () => {
 });
 
 describe("Attuning", () => {
+  it("keeps the luck worn while listening, averaged over the drop minutes", async () => {
+    const user = await newPlayer();
+    const admin = getAdminClient();
+    const charge = (minutes: number, luck: number | null) =>
+      admin.rpc("charge_crystal", {
+        p_user: user.userId,
+        p_minutes: minutes,
+        p_xp: 0,
+        p_luck: luck,
+      });
+    await charge(10, 10);
+    expect(Number((await herzieRow(user.userId)).crystal_luck)).toBe(10);
+    await charge(30, 2);
+    expect(Number((await herzieRow(user.userId)).crystal_luck)).toBeCloseTo(4);
+    // A sync that doesn't say (an older one) leaves it be.
+    await charge(10, null);
+    const row = await herzieRow(user.userId);
+    expect(Number(row.crystal_luck)).toBeCloseTo(4);
+    expect(Number(row.crystal_drop_minutes)).toBe(50);
+  });
+
+  it("minutes held with no luck known take the next charge's", async () => {
+    const user = await newPlayer({ crystal_drop_minutes: 40 });
+    await getAdminClient().rpc("charge_crystal", {
+      p_user: user.userId,
+      p_minutes: 10,
+      p_xp: 0,
+      p_luck: 6,
+    });
+    expect(Number((await herzieRow(user.userId)).crystal_luck)).toBe(6);
+  });
+
+  it("drops left after an attune keep their luck; an empty Crystal forgets it", async () => {
+    const admin = getAdminClient();
+    const partly = await newPlayer({
+      crystal_drop_minutes: 35,
+      crystal_luck: 7,
+    });
+    expect((await attuneCrystal(admin, partly.userId, 0)).ok).toBe(true);
+    expect(Number((await herzieRow(partly.userId)).crystal_luck)).toBe(7);
+
+    const emptied = await newPlayer({
+      crystal_drop_minutes: 30,
+      crystal_luck: 7,
+    });
+    expect((await attuneCrystal(admin, emptied.userId, 0)).ok).toBe(true);
+    expect((await herzieRow(emptied.userId)).crystal_luck).toBeNull();
+  });
+
   it("pays the XP through pending_xp, lands the drops on the ground and empties the Crystal", async () => {
     const user = await newPlayer({
       crystal_fill: 120,

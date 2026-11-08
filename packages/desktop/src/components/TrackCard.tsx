@@ -3,14 +3,23 @@ import { cn } from "../lib/utils";
 import { herzies } from "../tauri-bridge";
 import { MarqueeText } from "./MarqueeText";
 
-/** A now-playing tag. */
+/** A now-playing tag: one line, its text cut short with an ellipsis if
+ * it's wider than the row. 14px tall (see TAG_ROW). */
 function GenrePill({ tag }: { tag: string }) {
   return (
-    <span className="cursor-default rounded-full bg-purple/15 px-1.5 py-px text-ui-sm lowercase text-purple">
+    <span
+      title={tag.toLowerCase()}
+      className="max-w-full cursor-default truncate rounded-full bg-purple/15 px-1.5 py-px text-ui-sm leading-[12px] lowercase text-purple"
+    >
       {tag.toLowerCase()}
     </span>
   );
 }
+
+/** The tags' row: one pill high, so pills that don't fit wrap onto a
+ * second line that's cut off, leaving as many whole ones as there's room
+ * for. The first always shows, cut short itself if it must be. */
+const TAG_ROW = "mt-0.5 flex h-[14px] flex-wrap gap-x-1 overflow-hidden";
 
 /**
  * A track with its album art, title and artist — the home screen's now-playing
@@ -91,7 +100,7 @@ export function TrackCard({
             <div className="text-[10px] text-text-dim/70">{meta}</div>
           ) : null}
           {tags && tags.length > 0 ? (
-            <div className="mt-0.5 flex flex-wrap gap-1">
+            <div className={TAG_ROW}>
               {tags.map((tag) => (
                 <GenrePill key={tag} tag={tag} />
               ))}

@@ -19,7 +19,6 @@ export function NowPlayingBox({
   nowPlaying,
   multipliers,
   tint,
-  showTags = true,
   className,
 }: {
   nowPlaying: AppState["nowPlaying"];
@@ -27,8 +26,6 @@ export function NowPlayingBox({
   multipliers: ActiveMultiplier[] | null;
   /** The card's background (and blur), matching the player card's. */
   tint: string;
-  /** The track's genre tags (left out where the box is narrow). */
-  showTags?: boolean;
   className?: string;
 }) {
   const ghostMode = useGhostMode();
@@ -71,7 +68,7 @@ export function NowPlayingBox({
           artist={nowPlaying.artist}
           albumArtUrl={nowPlaying.albumArtUrl}
           artistImageUrl={nowPlaying.artistImageUrl}
-          tags={showTags ? nowPlaying.tags : undefined}
+          tags={nowPlaying.tags}
           className={card}
         />
       ) : (

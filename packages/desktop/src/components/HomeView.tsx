@@ -21,6 +21,8 @@ import {
   observePlayerCard,
   PLAYER_CARD,
   PLAYER_CARD_HOME,
+  PLAYER_CARD_WIDTH,
+  PLAYER_CARD_WIDTH_BIG,
   PlayerBars,
 } from "./PlayerBars";
 import { Tooltip } from "./Tooltip";
@@ -207,7 +209,13 @@ export function HomeView({
   if (!herzie) return null;
 
   const card = (
-    <div className={cn(PLAYER_CARD, PLAYER_CARD_HOME)}>
+    <div
+      className={cn(
+        PLAYER_CARD,
+        PLAYER_CARD_HOME,
+        big ? PLAYER_CARD_WIDTH_BIG : PLAYER_CARD_WIDTH,
+      )}
+    >
       <div className="flex h-5 items-center">
         <span className="block min-w-0 truncate text-ui-lg font-bold text-cyan">
           <Tooltip label="View your profile">
@@ -241,7 +249,10 @@ export function HomeView({
       <div ref={viewRef} className="pointer-events-none flex h-full flex-col">
         <div
           ref={column}
-          className="pointer-events-auto relative z-50 flex w-[174px] flex-col gap-2"
+          className={cn(
+            "pointer-events-auto relative z-50 flex flex-col gap-2",
+            PLAYER_CARD_WIDTH_BIG,
+          )}
         >
           {card}
           <NowPlayingBox
