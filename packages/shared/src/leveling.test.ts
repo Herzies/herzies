@@ -220,16 +220,12 @@ describe("xpBonusConfig", () => {
   it("takes rows over the defaults and ignores bad ones", () => {
     const config = xpBonusConfig([
       { id: "streak", enabled: false, amount: 0.05, cap: 0.5 },
-      { id: "boost", enabled: true, amount: 0, cap: null }, // amount must be > 0
+      { id: "good_eye_sniper", enabled: true, amount: 0, cap: null }, // amount must be > 0
       { id: "unknown", enabled: true, amount: 1, cap: null },
     ]);
     expect(config.streak).toEqual({ enabled: false, amount: 0.05, cap: 0.5 });
-    expect(config.boost).toEqual(DEFAULT_XP_BONUSES.boost);
-    expect(Object.keys(config).sort()).toEqual([
-      "boost",
-      "good_eye_sniper",
-      "streak",
-    ]);
+    expect(config.good_eye_sniper).toEqual(DEFAULT_XP_BONUSES.good_eye_sniper);
+    expect(Object.keys(config).sort()).toEqual(["good_eye_sniper", "streak"]);
   });
 });
 

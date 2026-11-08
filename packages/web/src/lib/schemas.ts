@@ -257,7 +257,7 @@ export const adminMultiplierSchema = z.object({
 });
 
 export const adminXpBonusSchema = z.object({
-  id: z.enum(["boost", "streak", "good_eye_sniper"]),
+  id: z.enum(["streak", "good_eye_sniper"]),
   enabled: z.boolean(),
   amount: z.number().positive(),
   cap: z.number().positive().nullable(),

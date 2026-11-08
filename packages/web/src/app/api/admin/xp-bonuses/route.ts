@@ -3,7 +3,7 @@ import { unauthorizedAdmin, verifyAdmin } from "@/lib/admin-auth";
 import { adminXpBonusSchema, isParseError, parseBody } from "@/lib/schemas";
 import { createAdminClient } from "@/lib/supabase-admin";
 
-/** The built-in XP bonuses (boost, streak, Good Eye Sniper) — 00091. */
+/** The built-in XP bonuses (streak, Good Eye Sniper) — 00091. */
 export async function GET(request: Request) {
   if (!(await verifyAdmin(request))) {
     return unauthorizedAdmin();

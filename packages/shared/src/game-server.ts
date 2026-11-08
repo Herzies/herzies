@@ -373,7 +373,6 @@ export function rowToHerzie(row: Record<string, unknown>): Herzie {
     friendCodes: (row.friend_codes ?? []) as string[],
     lastCravingDate: (row.last_craving_date ?? "") as string,
     lastCravingGenre: (row.last_craving_genre ?? "") as string,
-    boostUntil: row.boost_until as number | undefined,
     streakDays: (row.streak_days ?? 0) as number,
     streakLastDate: (row.streak_last_date ?? null) as string | null,
     currency: (row.currency ?? 0) as number,
@@ -670,15 +669,7 @@ export async function processSync(
     .map((m) => ({ name: m.name, bonus: m.bonus }));
 
   // The built-in bonuses below follow xp_bonuses (tunable in the dev admin).
-  // Add BOOST if active (stored on the herzie, not in multipliers table)
   const allMultipliers = [...serverMultipliers];
-  if (
-    xpBonuses.boost.enabled &&
-    herzie.boostUntil &&
-    now.getTime() < herzie.boostUntil
-  ) {
-    allMultipliers.push({ name: "BOOST", bonus: xpBonuses.boost.amount });
-  }
 
   // Streak bonus (by default 1% per day, uncapped)
   const streakBonus = scaledBonus(xpBonuses.streak, herzie.streakDays);

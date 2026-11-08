@@ -57,9 +57,6 @@ export interface Herzie {
   lastCravingDate: string;
   lastCravingGenre: string;
 
-  // Boosts
-  boostUntil?: number;
-
   // Streaks
   streakDays: number;
   streakLastDate: string | null;
