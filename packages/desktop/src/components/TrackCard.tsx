@@ -37,6 +37,7 @@ export function TrackCard({
   meta,
   className,
   artClassName = "h-12 w-12",
+  tagsClassName,
 }: {
   title: string;
   artist: string;
@@ -49,6 +50,9 @@ export function TrackCard({
   className?: string;
   /** The artwork's size. */
   artClassName?: string;
+  /** On the tags' row: e.g. room kept clear at its right end, so the last
+   * pill wraps away rather than run under something over the card. */
+  tagsClassName?: string;
 }) {
   return (
     <div className={cn("relative overflow-hidden", className)}>
@@ -100,7 +104,7 @@ export function TrackCard({
             <div className="text-[10px] text-text-dim/70">{meta}</div>
           ) : null}
           {tags && tags.length > 0 ? (
-            <div className={TAG_ROW}>
+            <div className={cn(TAG_ROW, tagsClassName)}>
               {tags.map((tag) => (
                 <GenrePill key={tag} tag={tag} />
               ))}
