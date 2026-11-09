@@ -43,7 +43,7 @@ import { useBossResultsShown } from "./town/combat/results";
 import { useCombat } from "./town/combat/state";
 import { useFpsShown } from "./town/fps";
 import { Hotbar } from "./town/Hotbar";
-import { homeMode } from "./town/homeMode";
+import { homeMode, markWorldSettled } from "./town/homeMode";
 import { Key } from "./town/Key";
 import type { TownMap } from "./town/map";
 import { markMet } from "./town/met";
@@ -331,7 +331,7 @@ export function TownWorld({
         <div
           className={cn(
             // Top right.
-            "pointer-events-none absolute top-3 right-3 z-30 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white/70",
+            "pointer-events-none absolute top-[calc(var(--hud-top,0px)+0.75rem)] right-3 z-30 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white/70",
           )}
         >
           Update Herzies to see other players
@@ -341,33 +341,23 @@ export function TownWorld({
       <div className={hudFade}>
         {profile && !hudHidden ? (
           <>
-            {/* Top left, a frosted card: name and level, then health and
-                experience — as on Home, so nothing shifts between the two.
+            {/* Top left, a frosted card: health and experience — as on Home, so nothing shifts between the two.
                 Under it, 8px down and as wide, what's playing. The big
                 window hangs its windows under both (observePlayerCard). */}
             <div
               ref={observePlayerCard}
               className={cn(
-                "absolute top-3 left-3 z-30 flex flex-col gap-2",
+                "absolute top-[calc(var(--hud-top,0px)+0.75rem)] left-3 z-30 flex flex-col gap-2",
                 expanded ? PLAYER_CARD_WIDTH_BIG : PLAYER_CARD_WIDTH,
               )}
             >
               <div className={cn(PLAYER_CARD, PLAYER_CARD_TOWN, "w-full")}>
-                <div className="flex h-5 items-center">
-                  <span className="block min-w-0 truncate text-ui-lg font-bold text-white">
-                    {profile.name}
-                  </span>
-                </div>
-                {/* The level (and class) on its own line, as on Home. */}
-                <div className="my-0.5 text-[10px] leading-3 whitespace-nowrap text-white/70">
-                  Lv. {profile.level}
-                  {profile.classLabel && ` · ${profile.classLabel}`}
-                </div>
+                {/* Name, level and class are in the top bar (TitleBar). */}
                 <PlayerBars
                   level={profile.level}
                   progress={profile.progress}
                   xp={profile.xp}
-                  className="mt-1.5 text-white/70"
+                  className="mt-1 text-white/70"
                 />
               </div>
               <NowPlayingBox
@@ -439,7 +429,7 @@ export function TownWorld({
         )}
       </div>
       {fpsShown && opened && !hudHidden ? (
-        <FrameRate className="pointer-events-none absolute top-3 z-30 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white/70 tabular-nums" />
+        <FrameRate className="pointer-events-none absolute top-[calc(var(--hud-top,0px)+0.75rem)] z-30 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white/70 tabular-nums" />
       ) : null}
       {opened && (
         <TownBoundary>
@@ -561,6 +551,8 @@ class TownBoundary extends Component<
       info.componentStack,
     );
     homeMode.setReady(false);
+    // Nothing more to wait for: don't hold the loading screen.
+    markWorldSettled();
   }
   render() {
     if (this.state.failed)

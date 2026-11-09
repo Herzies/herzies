@@ -285,3 +285,26 @@ export function resetHomeMode(): void {
   });
   snapshot = { home: false, ready: false, combatMap: false };
 }
+
+/** The world has loaded and been warmed (shaders compiled, textures and
+ * shadows uploaded, see Post) and stopped growing, or it failed to load:
+ * either way, nothing heavy is left to stall the first frames. Set once; the
+ * app's loading screen waits for it (main.tsx). */
+let worldSettled = false;
+const settledListeners = new Set<() => void>();
+
+export function markWorldSettled(): void {
+  if (worldSettled) return;
+  worldSettled = true;
+  for (const l of settledListeners) l();
+}
+
+export function useWorldSettled(): boolean {
+  return useSyncExternalStore(
+    (cb) => {
+      settledListeners.add(cb);
+      return () => settledListeners.delete(cb);
+    },
+    () => worldSettled,
+  );
+}

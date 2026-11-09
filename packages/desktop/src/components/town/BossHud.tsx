@@ -31,7 +31,7 @@ function observeBossCard(el: HTMLElement | null) {
 /** The boss's card: top right, clear of your own (top left), as wide as
  * the space beside it allows. */
 const BOSS_CARD =
-  "pointer-events-none absolute top-3 right-3 z-30 w-[min(15rem,calc(100%-174px-2.25rem))] rounded-xl border border-white/12 bg-black/45 px-2 pt-1 pb-2 text-white backdrop-blur-md";
+  "pointer-events-none absolute top-[calc(var(--hud-top,0px)+0.75rem)] right-3 z-30 w-[min(15rem,calc(100%-174px-2.25rem))] rounded-xl border border-white/12 bg-black/45 px-2 pt-1 pb-2 text-white backdrop-blur-md";
 
 /**
  * What the boss room shows over the world. The boss has a card of its own,
@@ -65,17 +65,24 @@ export function BossHud({ name }: { name: string }) {
   return (
     <>
       {on && tower ? (
-        <div
+        // Top right, a card like the player card (top left): the floor,
+        // then what's left of it. Windows on the right start under it.
+        <section
+          ref={observeBossCard}
           role="status"
-          className="pointer-events-none absolute top-2 left-1/2 z-30 -translate-x-1/2 whitespace-nowrap rounded bg-black/35 px-2.5 py-1 text-center text-ui text-white backdrop-blur-md"
+          aria-label={`Floor ${tower.floor}`}
+          className="pointer-events-none absolute top-[calc(var(--hud-top,0px)+0.75rem)] right-3 z-30 rounded-xl border border-white/12 bg-black/45 px-2 pt-1 pb-1.5 text-white backdrop-blur-md"
         >
-          <span className="font-medium">Floor {tower.floor}</span>
-          <span className="text-text-dim">
-            {" · "}
-            {tower.cleared ? "cleared" : `${mobsLeft()} left`}
-          </span>
-          <EnrageTag tower={tower} now={now} />
-        </div>
+          <div className="flex h-5 items-center">
+            <span className="text-ui font-bold whitespace-nowrap text-text">
+              Floor {tower.floor}
+            </span>
+          </div>
+          <div className="text-[10px] whitespace-nowrap text-text-dim">
+            {tower.cleared ? "Cleared" : `${mobsLeft()} left`}
+            <EnrageTag tower={tower} now={now} />
+          </div>
+        </section>
       ) : on ? (
         <section ref={observeBossCard} className={BOSS_CARD} aria-label={name}>
           <div className="flex h-5 items-center">
@@ -165,7 +172,7 @@ export function BossHud({ name }: { name: string }) {
       {closing && tower ? (
         <div
           role="status"
-          className="pointer-events-none absolute top-12 left-1/2 z-30 -translate-x-1/2 rounded bg-black/70 px-3 py-1.5 text-center text-ui text-white"
+          className="pointer-events-none absolute top-[calc(var(--hud-top,0px)+3rem)] left-1/2 z-30 -translate-x-1/2 rounded bg-black/70 px-3 py-1.5 text-center text-ui text-white"
         >
           The Tower is closing…{" "}
           <span className="text-white/60 tabular-nums">

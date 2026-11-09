@@ -13,11 +13,12 @@ let master: GainNode | null = null;
 let noise: AudioBuffer | null = null;
 
 const MUTE_KEY = "town.sfx.muted";
+/** Off until the player turns it on (remembered once they do). */
 let muted = (() => {
   try {
-    return localStorage.getItem(MUTE_KEY) === "1";
+    return localStorage.getItem(MUTE_KEY) !== "0";
   } catch {
-    return false;
+    return true;
   }
 })();
 

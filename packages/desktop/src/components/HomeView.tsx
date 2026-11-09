@@ -45,7 +45,6 @@ const DROP_EXIT_MS = 260;
 
 export function HomeView({
   state,
-  onOpenProfile,
   onActivity,
   active = true,
   inWorld = false,
@@ -66,8 +65,6 @@ export function HomeView({
    * `display: none` subtree for as long as the user is on another tab.
    */
   active?: boolean;
-  /** Open the viewer's own profile (same layout as other herzies'). */
-  onOpenProfile?: () => void;
   /** Surfaces a line in the activity log (e.g. a refused pickup). */
   onActivity?: (message: string) => void;
 }) {
@@ -216,30 +213,12 @@ export function HomeView({
         big ? PLAYER_CARD_WIDTH_BIG : PLAYER_CARD_WIDTH,
       )}
     >
-      <div className="flex h-5 items-center">
-        <span className="block min-w-0 truncate text-ui-lg font-bold text-cyan">
-          <Tooltip label="View your profile">
-            <button
-              type="button"
-              onClick={onOpenProfile}
-              className="cursor-pointer font-bold text-cyan hover:underline"
-            >
-              {herzie.name}
-            </button>
-          </Tooltip>
-        </span>
-      </div>
-      {/* The level (and class) on its own line, so a long name has the
-              row to itself. */}
-      <div className="my-0.5 text-[10px] leading-3 whitespace-nowrap text-text-dim">
-        Lv. {herzie.level}
-        {herzie.class && ` · ${CLASS_DEFS[herzie.class].name}`}
-      </div>
+      {/* Name, level and class are in the top bar (TitleBar). */}
       <PlayerBars
         level={herzie.level}
         progress={levelProgress(herzie)}
         xp={herzie.xp}
-        className="mt-1.5 text-text-dim"
+        className="mt-1 text-text-dim"
       />
     </div>
   );

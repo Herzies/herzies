@@ -25,6 +25,10 @@ import {
   type TownState,
 } from "@herzies/shared";
 
+/** How long after a herzie is first heard of that its casts only set the
+ * count rather than play: what came before you saw it isn't replayed. */
+const SETTLE_MS = 1500;
+
 /** A signed pass from the `town-ticket` edge function. `instance`: for a
  * map where every herzie has a room of their own (the Tower), which room
  * is theirs. */
@@ -60,6 +64,9 @@ export type RemotePlayer = {
    * the drawn (interpolated) one, so no cast between two draws is lost. */
   castSeq: number | null;
   pendingCasts: number;
+  /** When they were first heard of (performance.now()): for a moment after,
+   * their casts set where they're at rather than play (see SETTLE_MS). */
+  seenAt: number;
   /** Knocked out outside a fight (a Bard can play it back up). */
   down: boolean;
   /** A game master: a "GM" mark goes left of the name. */
@@ -508,6 +515,7 @@ export class TownConnection {
       buffer: existing?.buffer ?? new EntityBuffer(),
       castSeq: existing?.castSeq ?? null,
       pendingCasts: existing?.pendingCasts ?? 0,
+      seenAt: existing?.seenAt ?? performance.now(),
       down: !!p.down,
       gm: !!p.gm,
       pendingEmote: existing?.pendingEmote ?? null,
@@ -525,7 +533,9 @@ export class TownConnection {
       if (!r) continue;
       r.buffer.push(snap.serverTime - e.age, e.state);
       const seq = castSeqOf(e.state.flags);
-      if (r.castSeq !== null) {
+      // Just met (you joined, or they did): whatever they did before isn't
+      // played back, however the first states arrive.
+      if (r.castSeq !== null && now - r.seenAt > SETTLE_MS) {
         r.pendingCasts = Math.min(
           MAX_PENDING_CASTS,
           r.pendingCasts + castsBetween(r.castSeq, seq),

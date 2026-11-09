@@ -13,7 +13,7 @@ import { HerzieView } from "@herzies/shared/gl";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useHerzieStage } from "../lib/overlayStage";
-import { useWindowFocused } from "../tauri-bridge";
+import { useWindowVisible } from "../tauri-bridge";
 
 // Each set's effect is its own overlay below, so they're looked up by id.
 const PRISMATIC_SET = ITEM_SETS.find((set) => set.id === "prismatic");
@@ -115,8 +115,8 @@ export function HerzieWithSky({
     ? { position: "absolute", top: 0, left: 0, width: "100%" }
     : { position: "fixed", top: 0, left: 0, width: "100vw" };
 
-  const focused = useWindowFocused();
-  const paused = !focused || pausedProp;
+  const visible = useWindowVisible();
+  const paused = !visible || pausedProp;
 
   const sky = showSky ? (
     <SkyLayers
@@ -287,7 +287,7 @@ export function HomeSky({
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, [size]);
-  const focused = useWindowFocused();
+  const visible = useWindowVisible();
   return (
     <SkyLayers
       userId={userId}
@@ -295,7 +295,7 @@ export function HomeSky({
       equipped={equipped}
       cols={cols}
       size={size}
-      paused={paused || !focused}
+      paused={paused || !visible}
       box={{ position: "fixed", top: 0, left: 0, width: "100vw" }}
       tall="45vh"
     />

@@ -10,7 +10,7 @@ import {
 import * as THREE from "three";
 import { ambient } from "./ambient";
 import { townLook } from "./depth";
-import { homeMode } from "./homeMode";
+import { homeMode, markWorldSettled } from "./homeMode";
 import { warpAmount } from "./portal";
 import { DistortionBuffer, SonicDistortionEffect } from "./vfx/distortion";
 import { HomeFadeEffect } from "./vfx/homeFade";
@@ -19,6 +19,10 @@ import { HomeFadeEffect } from "./vfx/homeFade";
 const WARM_FRAMES = 3;
 /** How often (frames) the world's looked at to see whether it's grown. */
 const WARM_CHECK_FRAMES = 90;
+/** Frames the world runs before the loading screen lifts, when the app
+ * opens out in it rather than at Home: past the first ones, which compile
+ * and upload. */
+const WORLD_SETTLE_FRAMES = 30;
 
 /** How dark the occlusion gets by day. */
 const DAY_AO = 1.5;
@@ -84,6 +88,8 @@ export function Post({ ao, distort }: { ao: boolean; distort: boolean }) {
     things: -1,
     /** Frames until it's next counted. */
     countIn: 0,
+    /** Frames drawn out in the world (not at Home). */
+    worldFrames: 0,
   });
   useEffect(() => {
     townLook.z = 1;
@@ -95,6 +101,10 @@ export function Post({ ao, distort }: { ao: boolean; distort: boolean }) {
   useFrame(() => {
     const w = warm.current;
     const settled = homeMode.full;
+    // Out in the world (where the app opens), there's no Home to warm it
+    // under: it's drawn for real, so once it's run a moment the app's
+    // loading screen can go.
+    if (!settled && ++w.worldFrames === WORLD_SETTLE_FRAMES) markWorldSettled();
     // Now and then, settled at Home: has the world grown since?
     if (settled && w.state !== "compiling" && w.state !== "drawing") {
       if (--w.countIn <= 0) {
@@ -107,6 +117,10 @@ export function Post({ ao, distort }: { ao: boolean; distort: boolean }) {
         if (things !== w.things) {
           w.things = things;
           w.state = "cold";
+        } else if (w.state === "warm") {
+          // Warm, and nothing new since the last count: the app's loading
+          // screen can go.
+          markWorldSettled();
         }
       }
     }

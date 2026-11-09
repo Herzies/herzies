@@ -1,9 +1,11 @@
 import { CLASS_DEFS, CLASS_IDS, type HerzieClass } from "@herzies/shared";
 import type { Update } from "@tauri-apps/plugin-updater";
 import { useState } from "react";
+import { IS_MAC } from "../lib/platform";
 import { cn } from "../lib/utils";
 import type { AppState } from "../tauri-bridge";
 import { herzies, useGhostMode, useWindowPinned } from "../tauri-bridge";
+
 import { Checkbox } from "./Checkbox";
 import { TabButton } from "./TabButton";
 import { debugDropLoot } from "./town/combat/fight";
@@ -234,25 +236,29 @@ export function SettingsView({
 
       {tab === "Controls" && (
         <>
-          <div className="mb-4">
-            <div className="mb-1.5 text-ui text-text-dim">Window</div>
-            <Checkbox
-              checked={pinned}
-              // setWindowPinned updates the shared cache synchronously, so
-              // this ticks at once.
-              onChange={(pin) => {
-                herzies.setWindowPinned(pin).catch(() => {});
-              }}
-              className="items-start"
-            >
-              <span className="min-w-0">
-                <span className="block text-ui">Pin window</span>
-                <span className="block text-ui-sm text-text-dim">
-                  Keep Herzies open when you click away from it.
+          {/* On macOS the window is a regular app window: it never hides
+              on its own, so there's nothing to pin. */}
+          {!IS_MAC && (
+            <div className="mb-4">
+              <div className="mb-1.5 text-ui text-text-dim">Window</div>
+              <Checkbox
+                checked={pinned}
+                // setWindowPinned updates the shared cache synchronously, so
+                // this ticks at once.
+                onChange={(pin) => {
+                  herzies.setWindowPinned(pin).catch(() => {});
+                }}
+                className="items-start"
+              >
+                <span className="min-w-0">
+                  <span className="block text-ui">Pin window</span>
+                  <span className="block text-ui-sm text-text-dim">
+                    Keep Herzies open when you click away from it.
+                  </span>
                 </span>
-              </span>
-            </Checkbox>
-          </div>
+              </Checkbox>
+            </div>
+          )}
           <div className="mb-4">
             <div className="mb-1.5 text-ui text-text-dim">Aiming</div>
             <label className="flex items-center gap-2 text-ui">

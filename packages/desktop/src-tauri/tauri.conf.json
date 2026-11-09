@@ -15,8 +15,8 @@
       {
         "label": "main",
         "title": "Herzies",
-        "width": 380,
-        "height": 520,
+        "width": 1024,
+        "height": 728,
         "decorations": false,
         "resizable": false,
         "visible": false,
