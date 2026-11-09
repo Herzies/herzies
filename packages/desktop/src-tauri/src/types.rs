@@ -356,6 +356,11 @@ pub struct ItemSnapshot {
     pub bank_expansions: Option<u32>,
     /// Emotes owned (EMOTES ids in @herzies/shared). `None` as above.
     pub emotes: Option<Vec<String>>,
+    /// When the request that produced this was sent: the server's state is at
+    /// least this new. `None` when unknown. Lets a pickup the server already
+    /// confirmed be dropped, rather than re-added, once a snapshot that should
+    /// show it doesn't (sold, listed, eaten) — see `rebase_collects`.
+    pub issued_at: Option<std::time::Instant>,
 }
 
 /// One owned copy of an item — the unit of ownership. It is what a bank tile
