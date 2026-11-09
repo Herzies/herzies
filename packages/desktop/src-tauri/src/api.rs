@@ -777,6 +777,7 @@ pub async fn api_lookup_herzies(
 }
 
 pub async fn api_fetch_inventory(client: &Client) -> Option<ItemSnapshot> {
+    let issued_at = std::time::Instant::now();
     let resp = api_fetch(client, reqwest::Method::GET, "/inventory", None).await?;
     if !resp.status().is_success() {
         return None;
@@ -801,6 +802,7 @@ pub async fn api_fetch_inventory(client: &Client) -> Option<ItemSnapshot> {
         units,
         bank_expansions,
         emotes,
+        issued_at: Some(issued_at),
     })
 }
 
@@ -918,13 +920,14 @@ pub async fn api_apply_dice_upgrade(
 }
 
 /// Sells the named copies.
-pub async fn api_sell_units(client: &Client, unit_ids: &[String]) -> Option<serde_json::Value> {
+/// Errs with the server's reason ("Not enough items", ...) so the player sees
+/// why, rather than a bare "Failed to sell".
+pub async fn api_sell_units(
+    client: &Client,
+    unit_ids: &[String],
+) -> Result<serde_json::Value, String> {
     let body = serde_json::json!({ "unitIds": unit_ids });
-    let resp = api_fetch(client, reqwest::Method::POST, "/inventory/sell", Some(body)).await?;
-    if !resp.status().is_success() {
-        return None;
-    }
-    resp.json().await.ok()
+    api_buy(client, "/inventory/sell", body).await
 }
 
 pub async fn api_buy_from_merchant(

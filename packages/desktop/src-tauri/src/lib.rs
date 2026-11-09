@@ -598,21 +598,24 @@ async fn sell_item(
     state: tauri::State<'_, SharedState>,
 ) -> Result<Option<serde_json::Value>, String> {
     let client = api::http();
-    let result = api::api_sell_units(&client, &unit_ids).await;
-    if let Some(ref data) = result {
+    // Before the request: the response's item state is at least this new.
+    let issued_at = Instant::now();
+    // A refusal errs with the server's reason, which the UI shows.
+    let data = api::api_sell_units(&client, &unit_ids).await?;
+    {
         let mut s = state.lock().unwrap();
         let mut changed = false;
         // Selling a worn copy unequips it server-side too (it simply stops
         // existing) — apply whatever the response says rather than the stale
         // local equip state, so the two never drift apart.
-        if let Some(snapshot) = snapshot_from_response(data, &s) {
+        if let Some(snapshot) = snapshot_from_response(&data, &s, issued_at) {
             apply_inventory(&mut s, snapshot, None);
             // Selling can unequip server-side, so this is a local `equipped`
             // mutation — any `/inventory` fetch in flight must not undo it.
             s.bump_equip_epoch();
             changed = true;
         } else if let Some(new_currency) = data["newCurrency"].as_u64() {
-            s.inventory_currency = new_currency as u32;
+            s.set_currency(new_currency as u32);
             if let Some(ref inv) = s.inventory {
                 storage::save_inventory_cache(
                     inv,
@@ -624,19 +627,16 @@ async fn sell_item(
             }
             changed = true;
         }
-        if let Some(ref mut herzie) = s.herzie {
-            if let Some(new_currency) = data["newCurrency"].as_u64() {
-                herzie.currency = new_currency as u32;
-                storage::save_herzie(herzie);
-                changed = true;
-            }
+        if let Some(new_currency) = data["newCurrency"].as_u64() {
+            s.set_currency(new_currency as u32);
+            changed = true;
         }
         drop(s);
         if changed {
             emit_state_update(&app);
         }
     }
-    Ok(result)
+    Ok(Some(data))
 }
 
 /// Rolls one dice item onto ONE specific card (see DICE_TIERS in
@@ -653,6 +653,8 @@ async fn apply_dice_upgrade(
     state: tauri::State<'_, SharedState>,
 ) -> Result<serde_json::Value, String> {
     let client = api::http();
+    // Before the request: the response's item state is at least this new.
+    let issued_at = Instant::now();
     let data = api::api_apply_dice_upgrade(
         &client,
         &dice_item_id,
@@ -662,7 +664,7 @@ async fn apply_dice_upgrade(
     .await?;
 
     let mut s = state.lock().unwrap();
-    if let Some(snapshot) = snapshot_from_response(&data, &s) {
+    if let Some(snapshot) = snapshot_from_response(&data, &s, issued_at) {
         apply_inventory(&mut s, snapshot, None);
         drop(s);
         emit_state_update(&app);
@@ -679,9 +681,11 @@ async fn equip_item(
     state: tauri::State<'_, SharedState>,
 ) -> Result<serde_json::Value, String> {
     let client = api::http();
+    // Before the request: the response's item state is at least this new.
+    let issued_at = Instant::now();
     let result = api::api_equip_unit(&client, &unit_id, &action, side.as_deref()).await?;
     let mut s = state.lock().unwrap();
-    if let Some(snapshot) = snapshot_from_response(&result, &s) {
+    if let Some(snapshot) = snapshot_from_response(&result, &s, issued_at) {
         apply_inventory(&mut s, snapshot, None);
         // Any `/inventory` fetch already in flight was issued before this
         // change and would otherwise clobber it back — see apply_inventory.
@@ -701,9 +705,11 @@ async fn choose_class(
     state: tauri::State<'_, SharedState>,
 ) -> Result<serde_json::Value, String> {
     let client = api::http();
+    // Before the request: the response's item state is at least this new.
+    let issued_at = Instant::now();
     let result = api::api_choose_class(&client, &class).await?;
     let mut s = state.lock().unwrap();
-    if let Some(snapshot) = snapshot_from_response(&result, &s) {
+    if let Some(snapshot) = snapshot_from_response(&result, &s, issued_at) {
         apply_inventory(&mut s, snapshot, None);
         s.bump_equip_epoch();
     }
@@ -753,8 +759,10 @@ async fn buy_from_merchant(
     state: tauri::State<'_, SharedState>,
 ) -> Result<serde_json::Value, String> {
     let client = api::http();
+    // Before the request: the response's item state is at least this new.
+    let issued_at = Instant::now();
     let data = api::api_buy_from_merchant(&client, &event_id, &item_id, quantity).await?;
-    apply_purchase(&data, &app, &state);
+    apply_purchase(&data, &app, &state, issued_at);
     Ok(data)
 }
 
@@ -766,8 +774,10 @@ async fn buy_from_boboku(
     state: tauri::State<'_, SharedState>,
 ) -> Result<serde_json::Value, String> {
     let client = api::http();
+    // Before the request: the response's item state is at least this new.
+    let issued_at = Instant::now();
     let data = api::api_buy_from_boboku(&client, &item_id, quantity).await?;
-    apply_purchase(&data, &app, &state);
+    apply_purchase(&data, &app, &state, issued_at);
     Ok(data)
 }
 
@@ -784,8 +794,10 @@ async fn claim_tower_reward(
     state: tauri::State<'_, SharedState>,
 ) -> Result<serde_json::Value, String> {
     let client = api::http();
+    // Before the request: the response's item state is at least this new.
+    let issued_at = Instant::now();
     let data = api::api_claim_tower_reward(&client).await?;
-    apply_purchase(&data, &app, &state);
+    apply_purchase(&data, &app, &state, issued_at);
     Ok(data)
 }
 
@@ -809,8 +821,16 @@ async fn claim_quest(
     state: tauri::State<'_, SharedState>,
 ) -> Result<serde_json::Value, String> {
     let client = api::http();
+    // Before the request: the response's item state is at least this new.
+    let issued_at = Instant::now();
     let data = api::api_claim_quest(&client, &id).await?;
-    apply_purchase(&data, &app, &state);
+    // Shards live on the Crystal, which the response doesn't carry: add them
+    // to what's shown, before apply_purchase announces the state.
+    let shards = data["reward"]["shards"].as_u64().unwrap_or(0);
+    if shards > 0 {
+        state.lock().unwrap().add_crystal_shards(shards);
+    }
+    apply_purchase(&data, &app, &state, issued_at);
     Ok(data)
 }
 
@@ -830,6 +850,9 @@ async fn attune_crystal(
     let changed = {
         let mut s = state.lock().unwrap();
         let mut changed = s.accept_crystal(&data["crystal"]);
+        if changed {
+            s.crystal_epoch = s.crystal_epoch.wrapping_add(1);
+        }
         // Show the XP now; the sync that lands it is seconds away.
         let paid = data["xp"].as_f64().unwrap_or(0.0);
         if data["ok"].as_bool() == Some(true) && paid > 0.0 {
@@ -853,6 +876,7 @@ async fn attune_crystal(
                     ..Default::default()
                 },
                 None,
+                None,
             );
             s.bump_drop_epoch();
             changed = true;
@@ -873,7 +897,14 @@ async fn upgrade_crystal(
 ) -> Result<serde_json::Value, String> {
     let client = api::http();
     let data = api::api_upgrade_crystal(&client).await?;
-    let changed = state.lock().unwrap().accept_crystal(&data["crystal"]);
+    let changed = {
+        let mut s = state.lock().unwrap();
+        let changed = s.accept_crystal(&data["crystal"]);
+        if changed {
+            s.crystal_epoch = s.crystal_epoch.wrapping_add(1);
+        }
+        changed
+    };
     if changed {
         emit_state_update(&app);
     }
@@ -888,8 +919,10 @@ async fn buy_from_medea(
     state: tauri::State<'_, SharedState>,
 ) -> Result<serde_json::Value, String> {
     let client = api::http();
+    // Before the request: the response's item state is at least this new.
+    let issued_at = Instant::now();
     let data = api::api_buy_from_medea(&client, &item_id, quantity).await?;
-    apply_purchase(&data, &app, &state);
+    apply_purchase(&data, &app, &state, issued_at);
     Ok(data)
 }
 
@@ -904,8 +937,10 @@ async fn market_list(
     state: tauri::State<'_, SharedState>,
 ) -> Result<serde_json::Value, String> {
     let client = api::http();
+    // Before the request: the response's item state is at least this new.
+    let issued_at = Instant::now();
     let data = api::api_market_list(&client, &unit_id, price, quantity).await?;
-    apply_purchase(&data, &app, &state);
+    apply_purchase(&data, &app, &state, issued_at);
     Ok(data)
 }
 
@@ -923,8 +958,10 @@ async fn market_buy(
     state: tauri::State<'_, SharedState>,
 ) -> Result<serde_json::Value, String> {
     let client = api::http();
+    // Before the request: the response's item state is at least this new.
+    let issued_at = Instant::now();
     let data = api::api_market_buy(&client, &listing_id).await?;
-    apply_purchase(&data, &app, &state);
+    apply_purchase(&data, &app, &state, issued_at);
     Ok(data)
 }
 
@@ -935,8 +972,10 @@ async fn market_collect(
     state: tauri::State<'_, SharedState>,
 ) -> Result<serde_json::Value, String> {
     let client = api::http();
+    // Before the request: the response's item state is at least this new.
+    let issued_at = Instant::now();
     let data = api::api_market_collect(&client).await?;
-    apply_purchase(&data, &app, &state);
+    apply_purchase(&data, &app, &state, issued_at);
     Ok(data)
 }
 
@@ -964,25 +1003,31 @@ async fn eat_item(
     state: tauri::State<'_, SharedState>,
 ) -> Result<serde_json::Value, String> {
     let client = api::http();
+    // Before the request: the response's item state is at least this new.
+    let issued_at = Instant::now();
     let data = api::api_eat_item(&client, &item_id).await?;
-    apply_purchase(&data, &app, &state);
+    apply_purchase(&data, &app, &state, issued_at);
     Ok(data)
 }
 
 /// A purchase's new inventory and balance, saved and announced.
-fn apply_purchase(data: &serde_json::Value, app: &AppHandle, state: &SharedState) {
+fn apply_purchase(
+    data: &serde_json::Value,
+    app: &AppHandle,
+    state: &SharedState,
+    issued_at: Instant,
+) {
     let mut s = state.lock().unwrap();
     let mut changed = false;
-    if let Some(snapshot) = snapshot_from_response(data, &s) {
+    if let Some(snapshot) = snapshot_from_response(data, &s, issued_at) {
         apply_inventory(&mut s, snapshot, None);
         changed = true;
     }
-    if let Some(ref mut herzie) = s.herzie {
-        if let Some(new_currency) = data["newCurrency"].as_u64() {
-            herzie.currency = new_currency as u32;
-            storage::save_herzie(herzie);
-            changed = true;
-        }
+    // Both balances, so the bag (which reads `inventory_currency` first) shows
+    // it now too, not just when a sync catches up.
+    if let Some(new_currency) = data["newCurrency"].as_u64() {
+        s.set_currency(new_currency as u32);
+        changed = true;
     }
     drop(s);
     if changed {
@@ -1444,6 +1489,7 @@ fn apply_inventory(s: &mut ManagedState, snapshot: ItemSnapshot, equip_epoch_bef
         units,
         bank_expansions,
         emotes,
+        issued_at,
     } = snapshot;
     s.inventory = Some(inventory.clone());
     // Only ever grows (see sync_tick), and the "inventory full" check needs it
@@ -1482,6 +1528,7 @@ fn apply_inventory(s: &mut ManagedState, snapshot: ItemSnapshot, equip_epoch_bef
             pending_drops: false,
         },
         units.as_deref(),
+        issued_at,
     );
     storage::save_inventory_cache(
         &inventory,
@@ -1497,7 +1544,11 @@ fn apply_inventory(s: &mut ManagedState, snapshot: ItemSnapshot, equip_epoch_bef
 /// already hold, so a call that changes only some of it (a buy never touches
 /// levels) doesn't blank the rest. `None` when there's no `inventory` at all,
 /// i.e. the response wasn't a success carrying state.
-fn snapshot_from_response(data: &serde_json::Value, s: &ManagedState) -> Option<ItemSnapshot> {
+fn snapshot_from_response(
+    data: &serde_json::Value,
+    s: &ManagedState,
+    issued_at: Instant,
+) -> Option<ItemSnapshot> {
     let inventory = serde_json::from_value::<Inventory>(data["inventory"].clone()).ok()?;
     let currency = data["newCurrency"]
         .as_u64()
@@ -1518,6 +1569,7 @@ fn snapshot_from_response(data: &serde_json::Value, s: &ManagedState) -> Option<
         units,
         bank_expansions: None,
         emotes: None,
+        issued_at: Some(issued_at),
     })
 }
 
@@ -2462,6 +2514,8 @@ async fn sync_tick_with(
         equip_epoch_before,
         inventory_epoch_before,
         trade_epoch_before,
+        currency_epoch_before,
+        crystal_epoch_before,
     ) = {
         let s = state.lock().unwrap();
         let has = s.herzie.is_some();
@@ -2482,6 +2536,8 @@ async fn sync_tick_with(
             s.equip_epoch,
             s.inventory_epoch,
             s.trade_epoch,
+            s.currency_epoch,
+            s.crystal_epoch,
         )
     };
 
@@ -2498,6 +2554,7 @@ async fn sync_tick_with(
         return Ok(());
     }
 
+    let sync_issued_at = Instant::now();
     let result = api::api_sync(client, np_payload, minutes_to_sync, genres).await;
     // /sync can fail for non-network reasons (5xx, schema mismatch, etc.) while
     // the rest of the app keeps working. The tray title (and the frontend
@@ -2543,6 +2600,7 @@ async fn sync_tick_with(
         // clobber the local set (e.g. briefly emptying the just-accepted friend
         // or re-showing an accepted request). The next sync reconciles.
         let friend_state_stale = s.friend_epoch != friend_epoch_before;
+        let s_currency_current = s.currency_epoch == currency_epoch_before;
         let friend_codes_changed = if let Some(ref mut herzie) = s.herzie {
             let server = &sync_resp.herzie;
             herzie.xp = server.xp;
@@ -2563,7 +2621,11 @@ async fn sync_tick_with(
             herzie.genre_minutes = server.genre_minutes.clone();
             herzie.streak_days = server.streak_days;
             herzie.streak_last_date = server.streak_last_date.clone();
-            herzie.currency = server.currency;
+            // Skipped when a sell or purchase set the balance while this
+            // request was out: this one predates it.
+            if s_currency_current {
+                herzie.currency = server.currency;
+            }
             let changed = if friend_state_stale {
                 false
             } else {
@@ -2614,7 +2676,9 @@ async fn sync_tick_with(
         // (applied above) but is what the inventory/store/trade views read. It
         // used to be refreshed only by /inventory, so it has to be kept in step
         // here or removing those fetches would leave the coin stale.
-        s.inventory_currency = sync_resp.herzie.currency;
+        if s_currency_current {
+            s.inventory_currency = sync_resp.herzie.currency;
+        }
 
         // Capacity is credited out-of-band by the Stripe webhook and only ever
         // grows, so unlike inventory it needs no epoch guard: a stale sync can
@@ -2631,7 +2695,12 @@ async fn sync_tick_with(
         // Whether this sync filled the resonance (see crystal_became_full);
         // announced below, once the state's out.
         let mut crystal_filled = false;
-        if let Some(ref crystal) = sync_resp.crystal {
+        // Skipped when an attune, upgrade or quest changed it meanwhile.
+        if let Some(crystal) = sync_resp
+            .crystal
+            .as_ref()
+            .filter(|_| s.crystal_epoch == crystal_epoch_before)
+        {
             let before = s.crystal.clone();
             if s.accept_crystal(crystal) {
                 crystal_filled = state::crystal_became_full(before.as_ref(), crystal);
@@ -2672,7 +2741,7 @@ async fn sync_tick_with(
             s.incoming_friend_requests = sync_resp.incoming_friend_requests.clone();
             s.outgoing_friend_requests = sync_resp.outgoing_friend_requests.clone();
         }
-        s.rebase_collects(replaced, sync_resp.units.as_deref());
+        s.rebase_collects(replaced, sync_resp.units.as_deref(), Some(sync_issued_at));
 
         let app_state = s.to_app_state(env!("CARGO_PKG_VERSION"));
         drop(s);
@@ -3152,6 +3221,7 @@ mod item_state_tests {
                 ]
             }),
             &s,
+            Instant::now(),
         )
         .expect("a response with an inventory is a snapshot");
 
@@ -3171,8 +3241,12 @@ mod item_state_tests {
     #[test]
     fn falls_back_to_what_we_hold_for_anything_missing() {
         let s = state_with_currency(77);
-        let snap = snapshot_from_response(&serde_json::json!({ "inventory": { "cd": 1 } }), &s)
-            .expect("inventory alone is enough");
+        let snap = snapshot_from_response(
+            &serde_json::json!({ "inventory": { "cd": 1 } }),
+            &s,
+            Instant::now(),
+        )
+        .expect("inventory alone is enough");
 
         assert_eq!(snap.currency, 77);
         assert_eq!(snap.equipped["head"], "headphones");
@@ -3184,15 +3258,27 @@ mod item_state_tests {
     #[test]
     fn a_server_without_units_yields_none_not_empty() {
         let s = state_with_currency(0);
-        let snap = snapshot_from_response(&serde_json::json!({ "inventory": {} }), &s).unwrap();
+        let snap =
+            snapshot_from_response(&serde_json::json!({ "inventory": {} }), &s, Instant::now())
+                .unwrap();
         assert!(snap.units.is_none());
     }
 
     #[test]
     fn a_response_without_an_inventory_is_not_a_snapshot() {
         let s = state_with_currency(0);
-        assert!(snapshot_from_response(&serde_json::json!({ "error": "nope" }), &s).is_none());
-        assert!(snapshot_from_response(&serde_json::json!({ "newCurrency": 5 }), &s).is_none());
+        assert!(snapshot_from_response(
+            &serde_json::json!({ "error": "nope" }),
+            &s,
+            Instant::now()
+        )
+        .is_none());
+        assert!(snapshot_from_response(
+            &serde_json::json!({ "newCurrency": 5 }),
+            &s,
+            Instant::now()
+        )
+        .is_none());
     }
 }
 

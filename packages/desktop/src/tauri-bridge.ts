@@ -278,8 +278,8 @@ export const herzies = {
       itemUpgrades: Record<string, number>;
       units: ItemUnit[];
     } | null>("fetch_inventory"),
-  /** Sells specific copies. Resolves null if the server refused (not owned,
-   * not sellable). */
+  /** Sells specific copies. Throws with the server's reason if it refused
+   * (not owned, not sellable). */
   sellItem: (unitIds: string[]) =>
     invoke<{
       earned: number;

@@ -110,6 +110,14 @@ pub struct ManagedState {
     /// contents. Distinct from `equip_epoch`/`drop_epoch` because buying
     /// changes inventory without touching either.
     pub inventory_epoch: u64,
+    /// Bumped when a local call sets the coin balance from its response (a
+    /// sell, a purchase, a quest hand-in). `sync_tick` skips the response's
+    /// balance if it moved, so a sync issued before the change can't put the
+    /// old balance back until the one after.
+    pub currency_epoch: u64,
+    /// Bumped when a local call changes the Crystal (attune, upgrade, shards
+    /// from a quest). `sync_tick` skips the response's Crystal if it moved.
+    pub crystal_epoch: u64,
     /// Bumped whenever a trade invite arrives over Realtime
     /// (`trade_request_ingest`). Same purpose as `friend_epoch`: `sync_tick`
     /// captures it before its network call and skips the response's
@@ -183,6 +191,8 @@ impl ManagedState {
             drop_epoch: 0,
             equip_epoch: 0,
             inventory_epoch: 0,
+            currency_epoch: 0,
+            crystal_epoch: 0,
             trade_epoch: 0,
             multipliers: crate::storage::load_multipliers(),
             pending_minutes_saved_at: None,
@@ -213,6 +223,29 @@ impl ManagedState {
     /// flight won't overwrite it with stale server data.
     pub fn bump_inventory_epoch(&mut self) {
         self.inventory_epoch = self.inventory_epoch.wrapping_add(1);
+    }
+
+    /// The coin balance a call's response reported, everywhere it's shown:
+    /// the herzie, and `inventory_currency`, which the bag reads first.
+    pub fn set_currency(&mut self, currency: u32) {
+        self.inventory_currency = currency;
+        if let Some(ref mut herzie) = self.herzie {
+            herzie.currency = currency;
+            crate::storage::save_herzie(herzie);
+        }
+        self.currency_epoch = self.currency_epoch.wrapping_add(1);
+    }
+
+    /// Shards granted by a call whose response doesn't carry the Crystal (a
+    /// quest hand-in), shown now rather than at the next sync.
+    pub fn add_crystal_shards(&mut self, shards: u64) -> bool {
+        let Some(crystal) = self.crystal.as_mut().and_then(|c| c.as_object_mut()) else {
+            return false;
+        };
+        let held = crystal.get("shards").and_then(|v| v.as_u64()).unwrap_or(0);
+        crystal.insert("shards".into(), serde_json::json!(held + shards));
+        self.crystal_epoch = self.crystal_epoch.wrapping_add(1);
+        true
     }
 
     pub fn clear_app_cache(&mut self) {
@@ -359,6 +392,27 @@ pub fn crystal_became_full(before: Option<&serde_json::Value>, after: &serde_jso
 mod tests {
     use super::*;
 
+    #[test]
+    fn quest_shards_show_at_once_and_hold_off_a_stale_sync() {
+        let mut s = ManagedState::new(None);
+        // No Crystal yet (feature off): nothing to add to.
+        assert!(!s.add_crystal_shards(3));
+        s.crystal = Some(serde_json::json!({ "attunes": 2, "shards": 4 }));
+        let before = s.crystal_epoch;
+        assert!(s.add_crystal_shards(3));
+        assert_eq!(s.crystal.as_ref().unwrap()["shards"], 7);
+        assert_ne!(s.crystal_epoch, before);
+    }
+
+    #[test]
+    fn set_currency_sets_the_balance_the_bag_reads() {
+        let mut s = ManagedState::new(None);
+        let before = s.currency_epoch;
+        s.set_currency(512);
+        assert_eq!(s.inventory_currency, 512);
+        assert_ne!(s.currency_epoch, before);
+    }
+
     fn crystal(enabled: bool, fill: f64, capacity: f64) -> serde_json::Value {
         serde_json::json!({ "enabled": enabled, "fill": fill, "capacity": capacity })
     }
@@ -503,6 +557,8 @@ mod tests {
             drop_epoch: 0,
             equip_epoch: 0,
             inventory_epoch: 0,
+            currency_epoch: 0,
+            crystal_epoch: 0,
             trade_epoch: 0,
             multipliers: None,
             pending_minutes_saved_at: None,

@@ -133,7 +133,13 @@ impl ManagedState {
     /// re-applies every pickup it hasn't seen. `snapshot_units` is the
     /// snapshot's own list of copies (whether or not it was applied), the
     /// only way to tell what it has seen; `None` if it carried none.
-    pub fn rebase_collects(&mut self, replaced: Replaced, snapshot_units: Option<&[ItemUnit]>) {
+    /// `issued_at` is when the snapshot was requested, if known.
+    pub fn rebase_collects(
+        &mut self,
+        replaced: Replaced,
+        snapshot_units: Option<&[ItemUnit]>,
+        issued_at: Option<Instant>,
+    ) {
         if self.collects.is_empty() {
             return;
         }
@@ -145,7 +151,17 @@ impl ManagedState {
                 // No copies to go by: a confirmed pickup is taken as seen.
                 None => c.confirmed_at.is_some(),
             };
-            if seen {
+            // Requested after the server confirmed the pickup, so it had the
+            // copy: if it's missing, it has since left the bag (sold, listed,
+            // eaten). Putting it back would show a copy that no longer exists,
+            // and any sell that names it fails with "Not enough items".
+            let gone = !seen
+                && snapshot_units.is_some()
+                && c.confirmed_at
+                    .is_some_and(|at| issued_at.is_some_and(|issued| issued >= at));
+            if gone {
+                settled.push(id.clone());
+            } else if seen {
                 if replaced.inventory {
                     c.applied = false;
                 }
@@ -248,6 +264,7 @@ mod tests {
                 pending_drops: true,
             },
             Some(&units),
+            None,
         );
     }
 
@@ -371,8 +388,61 @@ mod tests {
                 ..Default::default()
             },
             Some(&[unit("u-hat", "hat")]),
+            None,
         );
         assert_eq!(qty(&s, "pearl"), 1);
         assert!(s.pending_drops.is_empty());
+    }
+
+    /// A snapshot sent before the confirmation may predate the copy, so the
+    /// pickup is still shown over it.
+    #[test]
+    fn a_snapshot_sent_before_the_confirmation_still_shows_the_pickup() {
+        let mut s = state();
+        s.begin_collect("d1");
+        let sent = Instant::now();
+        s.confirm_collect("d1");
+        let units = vec![unit("u-hat", "hat")];
+        s.inventory = Some(HashMap::from([("hat".to_string(), 1)]));
+        s.units = units.clone();
+        s.rebase_collects(
+            Replaced {
+                inventory: true,
+                units: true,
+                pending_drops: false,
+            },
+            Some(&units),
+            Some(sent),
+        );
+        assert_eq!(qty(&s, "pearl"), 1);
+        assert!(s.units.iter().any(|u| u.id == "d1"));
+        assert_eq!(s.collects.len(), 1);
+    }
+
+    /// Picked up, then sold before any sync showed it. The sell's answer
+    /// was asked for after the confirmation, so the server had the copy:
+    /// missing from it means sold, not "not seen yet". Putting it back left
+    /// a copy in the bag that every later sell failed on, for 30 seconds.
+    #[test]
+    fn sold_after_the_confirmation_is_not_put_back() {
+        let mut s = state();
+        s.begin_collect("d1");
+        s.confirm_collect("d1");
+        let sent = Instant::now();
+        let units = vec![unit("u-hat", "hat")];
+        s.inventory = Some(HashMap::from([("hat".to_string(), 1)]));
+        s.units = units.clone();
+        s.rebase_collects(
+            Replaced {
+                inventory: true,
+                units: true,
+                pending_drops: false,
+            },
+            Some(&units),
+            Some(sent),
+        );
+        assert_eq!(qty(&s, "pearl"), 0);
+        assert!(!s.units.iter().any(|u| u.id == "d1"));
+        assert!(s.collects.is_empty());
     }
 }
