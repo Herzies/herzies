@@ -28,6 +28,8 @@ const REASONS: Record<string, { status: number; error: string }> = {
   "bad-quantity": { status: 400, error: "Invalid quantity" },
   "not-enough": { status: 400, error: "You don't have that many" },
   "not-stackable": { status: 400, error: "That one's listed a copy at a time" },
+  "not-that-many": { status: 409, error: "There aren't that many left" },
+  "whole-lot": { status: 400, error: "That one sells as a whole lot" },
 };
 
 /** The response for an RPC's `{ok: false, reason}`. */

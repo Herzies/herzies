@@ -6,16 +6,18 @@ import {
   MARKET_EQUIPPED,
   MARKET_LISTING_HOURS,
   MARKET_MAX_LISTINGS,
-  MARKET_MAX_PRICE,
   MARKET_MAX_STACK,
   MARKET_NAME,
   MARKET_SEED,
   MARKET_STAGE,
   type MarketListing,
   type MarketStall,
+  marketCost,
   marketFee,
+  marketMaxEach,
   marketMinPrice,
   marketPayout,
+  marketPriceEach,
   SpeechBubble,
   useChatter,
 } from "@herzies/shared";
@@ -69,11 +71,27 @@ function stackOf(l: MarketListing) {
   return l.quantity > 1 ? `x${l.quantity} · ` : "";
 }
 
+/** A listing's price: "12 each" for a stack that can be bought a few at a
+ * time, the lot's price otherwise. */
+function ListingPrice({ l }: { l: MarketListing }) {
+  const each = l.quantity > 1 ? marketPriceEach(l) : null;
+  return each !== null ? (
+    <>
+      <Coin amount={each} /> each
+    </>
+  ) : (
+    <>
+      <Coin amount={l.price} />
+      {l.quantity > 1 && " for all"}
+    </>
+  );
+}
+
 function listingSubtitle(l: MarketListing, owned: number) {
   return (
     <>
       {stackOf(l)}
-      <Coin amount={l.price} />
+      <ListingPrice l={l} />
       <Level level={l.upgradeLevel} /> · {l.sellerName ?? "someone"}
       {owned > 0 && ` · ${owned} owned`}
     </>
@@ -87,7 +105,7 @@ function stallSubtitle(l: MarketListing) {
       return (
         <>
           {stackOf(l)}
-          <Coin amount={l.price} />
+          <ListingPrice l={l} />
           <Level level={l.upgradeLevel} /> · {formatIn(l.expiresAt)} left
         </>
       );
@@ -156,9 +174,12 @@ export function MarketPanel({
   const [more, setMore] = useState(false);
   const [browseKey, setBrowseKey] = useState(0);
   const [inspecting, setInspecting] = useState<MarketListing | null>(null);
+  /** A stack whose "how many?" is open, before it's bought. */
+  const [buying, setBuying] = useState<MarketListing | null>(null);
 
   // Sell: the copies picked, how many of them go up, and the price asked for
-  // the lot.
+  // each (the lot's price is that times the count, so it splits evenly and
+  // buyers can take a few).
   const [selling, setSelling] = useState<ListableCopies | null>(null);
   const [sellCount, setSellCount] = useState(1);
   /** A stack whose "how many?" is open, before it's priced. */
@@ -264,26 +285,48 @@ export function MarketPanel({
 
   // --- Browse -------------------------------------------------------------
 
-  /** Why a listing can't be bought right now, or null if it can. */
+  /** A stack that can be bought a few copies at a time. */
+  const splits = (l: MarketListing) =>
+    l.quantity > 1 && marketPriceEach(l) !== null;
+
+  /** Why a listing can't be bought right now, or null if it can. The least
+   * that can be bought is one copy of a stack that splits. */
   const blocked = (l: MarketListing) =>
     mine.has(l.id)
       ? "That's yours"
-      : currency < l.price
+      : currency < marketCost(l, splits(l) ? 1 : l.quantity)
         ? "Insufficient funds"
         : null;
 
-  const buy = (l: MarketListing) =>
+  const buy = (l: MarketListing, count = l.quantity) =>
     run(l.id, async () => {
-      await herzies.marketBuy(l.id).catch((e: unknown) => {
-        // Most likely someone got there first: show the board as it is now.
-        setBrowseKey((k) => k + 1);
-        throw e;
-      });
-      setListings((ls) => ls?.filter((x) => x.id !== l.id) ?? null);
-      setInspecting(null);
-      notify(`Bought "${name(l.itemId)}"`, { kind: "success" });
+      const got = await herzies
+        .marketBuy(l.id, count < l.quantity ? count : undefined)
+        .catch((e: unknown) => {
+          // Most likely someone got there first: show the board as it is now.
+          setBuying(null);
+          setBrowseKey((k) => k + 1);
+          throw e;
+        });
+      // A stack with copies left stays up, smaller.
+      const left =
+        got.listing.status === "active"
+          ? { ...l, quantity: got.listing.quantity, price: got.listing.price }
+          : null;
+      setListings(
+        (ls) =>
+          ls?.flatMap((x) => (x.id !== l.id ? [x] : left ? [left] : [])) ??
+          null,
+      );
+      setInspecting((i) => (i?.id === l.id ? left : i));
+      setBuying(null);
+      const what =
+        got.quantity > 1
+          ? `${got.quantity} "${name(l.itemId)}"`
+          : `"${name(l.itemId)}"`;
+      notify(`Bought ${what}`, { kind: "success" });
       onLog?.(
-        `Bought "${name(l.itemId)}" from ${l.sellerName ?? "someone"} at ${MARKET_NAME}'s board`,
+        `Bought ${what} from ${l.sellerName ?? "someone"} at ${MARKET_NAME}'s board for ${got.spent}`,
       );
     });
 
@@ -294,7 +337,7 @@ export function MarketPanel({
         type="button"
         className="btn"
         disabled={!!reason || pending !== null}
-        onClick={() => buy(l)}
+        onClick={() => (splits(l) ? setBuying(l) : buy(l))}
       >
         {pending === l.id ? "Buying..." : "Buy"}
       </button>
@@ -367,17 +410,19 @@ export function MarketPanel({
 
   const copies = listableCopies(units);
   const sellDef = selling ? getItem(selling.itemId) : undefined;
-  const minPrice = marketMinPrice(sellDef?.sellPrice, sellCount);
-  const price = Number(priceText);
-  const priceOk =
-    Number.isInteger(price) && price >= minPrice && price <= MARKET_MAX_PRICE;
+  /** The asking price is per copy; the listing's is that for them all. */
+  const minEach = marketMinPrice(sellDef?.sellPrice);
+  const maxEach = marketMaxEach(sellCount);
+  const each = Number(priceText);
+  const price = each * sellCount;
+  const priceOk = Number.isInteger(each) && each >= minEach && each <= maxEach;
 
   const priceStack = (row: ListableCopies, count: number) => {
     setError(null);
     setCounting(null);
     setSellCount(count);
     setSelling(row);
-    setPriceText(String(marketMinPrice(getItem(row.itemId)?.sellPrice, count)));
+    setPriceText(String(marketMinPrice(getItem(row.itemId)?.sellPrice)));
   };
   /** Several copies of something stackable ask how many go up first. */
   const pick = (row: ListableCopies) => {
@@ -402,9 +447,9 @@ export function MarketPanel({
   const listReason = full
     ? "Your stall is full"
     : !priceOk
-      ? price > MARKET_MAX_PRICE
+      ? each > maxEach
         ? "That price is too high"
-        : `At least ${minPrice}`
+        : `At least ${minEach}${sellCount > 1 ? " each" : ""}`
       : null;
   const listButton = (() => {
     const button = (
@@ -614,7 +659,12 @@ export function MarketPanel({
           onClose={() => setInspecting(null)}
           equipped={equipped}
           level={inspecting.upgradeLevel}
-          meta={<Coin amount={inspecting.price} />}
+          meta={
+            <>
+              {stackOf(inspecting)}
+              <ListingPrice l={inspecting} />
+            </>
+          }
           footer={
             tab === "browse" ? (
               <div className="flex flex-col items-center gap-1">
@@ -652,7 +702,7 @@ export function MarketPanel({
           meta={
             sellCount > 1 || cheapest !== null ? (
               <>
-                {sellCount > 1 && `Selling ${sellCount} for one price`}
+                {sellCount > 1 && `Selling ${sellCount}, priced each`}
                 {sellCount > 1 && cheapest !== null && " · "}
                 {cheapest !== null && (
                   <>
@@ -669,9 +719,9 @@ export function MarketPanel({
                 <input
                   type="number"
                   className="input w-[110px] text-center"
-                  aria-label="Price"
-                  min={minPrice}
-                  max={MARKET_MAX_PRICE}
+                  aria-label={sellCount > 1 ? "Price each" : "Price"}
+                  min={minEach}
+                  max={maxEach}
                   value={priceText}
                   onChange={(e) => setPriceText(e.target.value)}
                 />
@@ -680,18 +730,39 @@ export function MarketPanel({
               <div className="text-[10px] text-text-dim">
                 {priceOk ? (
                   <>
+                    {sellCount > 1 && (
+                      <>
+                        {sellCount} for <Coin amount={price} /> ·{" "}
+                      </>
+                    )}
                     Fee <Coin amount={marketFee(price)} />, you'll get{" "}
                     <Coin amount={marketPayout(price)} />
                   </>
                 ) : (
                   <>
-                    At least <Coin amount={minPrice} />
+                    At least <Coin amount={minEach} />
+                    {sellCount > 1 && " each"}
                   </>
                 )}
               </div>
               {error && <div className="text-[10px] text-red">{error}</div>}
             </div>
           }
+        />
+      )}
+
+      {buying && (
+        <QuantityModal
+          max={Math.min(
+            buying.quantity,
+            Math.floor(currency / (marketPriceEach(buying) ?? buying.price)),
+          )}
+          confirmLabel="Buy"
+          busy={pending === buying.id}
+          busyLabel="Buying..."
+          total={(n) => <Coin amount={marketCost(buying, n)} />}
+          onConfirm={(n) => buy(buying, n)}
+          onCancel={() => setBuying(null)}
         />
       )}
 

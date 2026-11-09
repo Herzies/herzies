@@ -318,3 +318,9 @@ export const marketListSchema = z.object({
 export const marketListingSchema = z.object({
   listingId: z.guid(),
 });
+
+/** Buying off the board: `quantity` copies of a stack, or all of it. */
+export const marketBuySchema = z.object({
+  listingId: z.guid(),
+  quantity: z.number().int().min(1).max(999).optional(),
+});

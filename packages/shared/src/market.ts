@@ -4,7 +4,7 @@
 // until you come back and collect them.
 //
 // The rules live twice: here, and as constants in the market RPCs
-// (last in 00129_market_stacks.sql). market.test.ts checks the two agree.
+// (last in 00146_market_partial_buys.sql). market.test.ts checks the two agree.
 
 /** His name, in Town and on his board. */
 export const MARKET_NAME = "Plutus";
@@ -39,14 +39,48 @@ export function marketPayout(price: number): number {
 /** The most copies of a stackable item one listing can hold. */
 export const MARKET_MAX_STACK = 999;
 
-/** The lowest price `quantity` copies can be listed at: one coin above what
- * the game pays for them all, since anything less is better sold to the
- * game. */
+/** The lowest price a copy can be listed at, whatever the game pays: at 1
+ * coin the market's cut would be the whole price. */
+export const MARKET_MIN_EACH = 2;
+
+/** The lowest price `quantity` copies can be listed at: one coin a copy
+ * above what the game pays, since anything less is better sold to the game,
+ * and never under MARKET_MIN_EACH a copy. */
 export function marketMinPrice(
   sellPrice: number | undefined,
   quantity = 1,
 ): number {
-  return (sellPrice ?? 0) * quantity + 1;
+  return Math.max((sellPrice ?? 0) + 1, MARKET_MIN_EACH) * quantity;
+}
+
+/** The highest price a copy can ask in a stack of `quantity`, keeping the
+ * whole listing under MARKET_MAX_PRICE. */
+export function marketMaxEach(quantity = 1): number {
+  return Math.floor(MARKET_MAX_PRICE / Math.max(1, quantity));
+}
+
+/** What one copy of a stack costs when it can be bought a few at a time, or
+ * null when the listing sells only whole: its price doesn't split evenly
+ * across its copies (a lot priced as one), or a copy would cost under
+ * MARKET_MIN_EACH. A single copy is just its price. Kept in step with
+ * market_buy (00146). */
+export function marketPriceEach(l: {
+  price: number;
+  quantity: number;
+}): number | null {
+  if (l.quantity <= 1) return l.price;
+  if (l.price % l.quantity !== 0) return null;
+  const each = l.price / l.quantity;
+  return each >= MARKET_MIN_EACH ? each : null;
+}
+
+/** What buying `count` copies of a listing costs. */
+export function marketCost(
+  l: { price: number; quantity: number },
+  count: number,
+): number {
+  if (count >= l.quantity) return l.price;
+  return (marketPriceEach(l) ?? l.price) * count;
 }
 
 /** A listing as the board shows it. */
@@ -58,7 +92,8 @@ export interface MarketListing {
   upgradeLevel: number;
   /** Copies in the listing: more than 1 only for a stackable item. */
   quantity: number;
-  /** For the whole listing, every copy. */
+  /** For the whole listing, every copy. See marketPriceEach for buying
+   * part of a stack. */
   price: number;
   fee: number;
   status: "active" | "sold" | "cancelled" | "expired";

@@ -954,13 +954,14 @@ async fn market_cancel(listing_id: String) -> Result<serde_json::Value, String> 
 #[tauri::command]
 async fn market_buy(
     listing_id: String,
+    quantity: Option<u32>,
     app: AppHandle,
     state: tauri::State<'_, SharedState>,
 ) -> Result<serde_json::Value, String> {
     let client = api::http();
     // Before the request: the response's item state is at least this new.
     let issued_at = Instant::now();
-    let data = api::api_market_buy(&client, &listing_id).await?;
+    let data = api::api_market_buy(&client, &listing_id, quantity).await?;
     apply_purchase(&data, &app, &state, issued_at);
     Ok(data)
 }

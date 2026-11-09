@@ -384,7 +384,8 @@ export const herzies = {
       inventory: Inventory;
     }>("buy_from_medea", { itemId, quantity }),
   /** Puts one copy, or `quantity` of a stackable item, up on Plutus's
-   * market board at `price` for the lot. They leave the bank; throws with the
+   * market board at `price` for the lot (the desktop asks a price each and
+   * multiplies, so a stack can be bought a few at a time). They leave the bank; throws with the
    * server's reason (worn, class gear, price too low, stall full). */
   marketList: (unitId: string, price: number, quantity = 1) =>
     invoke<{
@@ -396,15 +397,18 @@ export const herzies = {
     invoke<{ listing: Omit<MarketListing, "sellerName"> }>("market_cancel", {
       listingId,
     }),
-  /** Buys a listing off the board. Throws when it's gone, it's yours, or
-   * there's no coin or bank room for it. */
-  marketBuy: (listingId: string) =>
+  /** Buys a listing off the board: `quantity` copies of a stack whose price
+   * splits evenly (marketPriceEach), or all of it. `listing` is how it stands
+   * after: sold, or still up with the copies left. Throws when it's gone,
+   * it's yours, or there's no coin or bank room for it. */
+  marketBuy: (listingId: string, quantity?: number) =>
     invoke<{
       spent: number;
+      quantity: number;
       newCurrency: number;
       listing: Omit<MarketListing, "sellerName">;
       inventory: Inventory;
-    }>("market_buy", { listingId }),
+    }>("market_buy", { listingId, quantity: quantity ?? null }),
   /** Collects what's waiting at the board. `itemsLeft`: copies that stayed
    * there because the bank was full (the coins come regardless). */
   marketCollect: () =>

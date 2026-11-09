@@ -1033,12 +1033,17 @@ pub async fn api_market_cancel(
     api_buy(client, "/market/cancel", body).await
 }
 
-/// Buys a listing off the board, paying its price now.
+/// Buys a listing off the board, paying now: `quantity` copies of a stack
+/// whose price splits evenly, or all of it when `None`.
 pub async fn api_market_buy(
     client: &Client,
     listing_id: &str,
+    quantity: Option<u32>,
 ) -> Result<serde_json::Value, String> {
-    let body = serde_json::json!({ "listingId": listing_id });
+    let mut body = serde_json::json!({ "listingId": listing_id });
+    if let Some(quantity) = quantity {
+        body["quantity"] = quantity.into();
+    }
     api_buy(client, "/market/buy", body).await
 }
 
