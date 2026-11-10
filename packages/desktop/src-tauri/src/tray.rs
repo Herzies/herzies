@@ -254,22 +254,22 @@ pub fn close_to_tray(app: &AppHandle) {
 pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     let mut builder = TrayIconBuilder::with_id(TRAY_ID).tooltip("Herzies");
 
-    // macOS renders the tray title as text directly in the menu bar, so the
-    // connected/disconnected signal (`<3` / `</3`) lives there and no icon
-    // image is needed. Windows' notification area has no such text-title
-    // convention — it needs a real icon image, and the connectivity signal
-    // moves to the tooltip instead (see `set_connected`).
+    // The tray icon: a white herzie. On macOS it's a template image, so the
+    // menu bar tints it to match. Connectivity shows in the tooltip (see
+    // `set_connected`).
     #[cfg(target_os = "macos")]
     {
+        let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray@2x.png"))?;
         builder = builder
-            .title("<3")
+            .icon(icon)
+            .icon_as_template(true)
             .menu(&mac_menu::build(app)?)
             .show_menu_on_left_click(true)
             .on_menu_event(|app, event| mac_menu::on_event(app, event.id().as_ref()));
     }
     #[cfg(windows)]
     {
-        let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png"))?;
+        let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray-32.png"))?;
         builder = builder.icon(icon);
     }
 
@@ -325,9 +325,7 @@ fn emit_state_update(app: &AppHandle) {
     }
 }
 
-/// Reflect connectivity state in the tray — macOS shows it as the menu-bar
-/// title (`<3` / `</3`), Windows (no tray text convention) shows it in the
-/// tooltip instead.
+/// Reflect connectivity state in the tray's tooltip.
 pub fn set_connected(app: &AppHandle, connected: bool) {
     let was_connected = IS_CONNECTED.swap(connected, Ordering::Relaxed);
     if was_connected == connected {
@@ -338,20 +336,12 @@ pub fn set_connected(app: &AppHandle, connected: bool) {
         return;
     };
 
-    #[cfg(target_os = "macos")]
-    {
-        let title = if connected { "<3" } else { "</3" };
-        let _ = tray.set_title(Some(title));
-    }
-    #[cfg(windows)]
-    {
-        let tooltip = if connected {
-            "Herzies"
-        } else {
-            "Herzies (offline)"
-        };
-        let _ = tray.set_tooltip(Some(tooltip));
-    }
+    let tooltip = if connected {
+        "Herzies"
+    } else {
+        "Herzies (offline)"
+    };
+    let _ = tray.set_tooltip(Some(tooltip));
 }
 
 pub fn ensure_visible(app: &AppHandle) {

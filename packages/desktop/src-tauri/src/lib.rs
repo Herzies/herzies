@@ -2556,7 +2556,7 @@ async fn sync_tick_with(
     if !has_herzie || !is_logged_in {
         // Not signed in or no herzie yet — no server call needed, and we can't
         // distinguish "offline" from "logged out" without one, so assume the
-        // server is reachable. The tray title already defaults to <3.
+        // server is reachable.
         tray::set_connected(app, is_logged_in);
         let mut s = state.lock().unwrap();
         s.last_sync_ok = is_logged_in;

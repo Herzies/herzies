@@ -341,7 +341,8 @@ export function TownWorld({
       <div className={hudFade}>
         {profile && !hudHidden ? (
           <>
-            {/* Top left, a frosted card: health and experience — as on Home, so nothing shifts between the two.
+            {/* Top left, a frosted card: name and level, then health and
+                experience — as on Home, so nothing shifts between the two.
                 Under it, 8px down and as wide, what's playing. The big
                 window hangs its windows under both (observePlayerCard). */}
             <div
@@ -352,12 +353,21 @@ export function TownWorld({
               )}
             >
               <div className={cn(PLAYER_CARD, PLAYER_CARD_TOWN, "w-full")}>
-                {/* Name, level and class are in the top bar (TitleBar). */}
+                <div className="flex h-5 items-center">
+                  <span className="block min-w-0 truncate text-ui-lg font-bold text-white">
+                    {profile.name}
+                  </span>
+                </div>
+                {/* The level (and class) on its own line, as on Home. */}
+                <div className="my-0.5 text-[10px] leading-3 whitespace-nowrap text-white/70">
+                  Lv. {profile.level}
+                  {profile.classLabel && ` · ${profile.classLabel}`}
+                </div>
                 <PlayerBars
                   level={profile.level}
                   progress={profile.progress}
                   xp={profile.xp}
-                  className="mt-1 text-white/70"
+                  className="mt-1.5 text-white/70"
                 />
               </div>
               <NowPlayingBox

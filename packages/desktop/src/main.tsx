@@ -928,11 +928,14 @@ function App() {
     canExpandTown && (townWorld || (base === "home" && homeInWorld));
   // Not while the world loads at launch: the window opens big
   // (tauri.conf.json) and stays so until there's a screen to size it for.
+  // Nor before the first state arrives (a reload): its placeholder has no
+  // herzie, which would read as logged out and shrink the window for a beat.
   useEffect(() => {
+    if (!hydrated) return;
     // Logged out there's no world coming: the small window at once.
     if (worldLoading && rawState.herzie) return;
     herzies.setTownExpanded(bigWindow).catch(() => {});
-  }, [bigWindow, worldLoading, rawState.herzie]);
+  }, [bigWindow, worldLoading, rawState.herzie, hydrated]);
   // The boss's end screen is up over the Town: the chat steps aside.
   const endScreen = endScreenUp && townWorld;
 
@@ -1316,26 +1319,14 @@ function App() {
       )}
     >
       {worldLoading && <LoadingSplash overlay label="loading the world" />}
-      {/* Across the top, past the padding: the window buttons (macOS),
-          then your herzie's name, level and class. */}
-      <TitleBar
-        className="absolute inset-x-0 top-0"
-        name={herzie.name}
-        level={herzie.level}
-        classLabel={classLabelOf(classOverride ?? herzie.class)}
-        onZoom={canToggleWindow ? toggleWindow : undefined}
-        zoomed={bigWindow}
-      />
-      {/* Holds the bar's place: views start under it. */}
-      <div className="-mt-3 mb-3 h-[var(--title-bar-height,28px)] shrink-0" />
+      {/* Across the top, past the padding: a strip to drag the window by. */}
+      <TitleBar className="absolute inset-x-0 top-0" />
       <div
         className={cn(
           "flex min-h-0 flex-1 flex-col overflow-hidden",
           // The Town's 3D world fills the whole window, out past the app's
-          // padding and up under the frosted top bar; its HUD keeps clear of
-          // the bar (--hud-top). The chat floats over it (the dock).
-          townLayout &&
-            "-mx-3 -mb-3 -mt-[calc(var(--title-bar-height,28px)+0.75rem)] [--hud-top:var(--title-bar-height,28px)]",
+          // padding. The chat floats over it (the dock).
+          townLayout && "-m-3",
           // Home supplies its own bottom breathing room (HomeView's now-playing
           // bar) so its artist-image background can reach the chat's top
           // border instead of stopping short of an outer margin.
@@ -1478,6 +1469,7 @@ function App() {
             active={base === "home"}
             inWorld={homeInWorld}
             big={homeBig}
+            onOpenProfile={() => switchView("profile")}
             onActivity={addLog}
           />
         </div>
