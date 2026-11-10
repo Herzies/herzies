@@ -2,16 +2,13 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { ambient, seasonNow } from "./ambient";
-import { windowMaterial } from "./Buildings";
+import { windowGlow } from "./Buildings";
 import { dayLook, type Hour, localHours, skyLights } from "./DayCycle";
 import { CLOUD_SHADE, townLook } from "./depth";
 import { skyUniforms } from "./Islands";
 import { nightLights } from "./Lamps";
 import { ISLAND_RADIUS } from "./runtime";
 import { dayOfYear, type Season, seasonLook } from "./Seasons";
-
-const LIT_WINDOW = new THREE.Color("#ffd98a");
-const DAY_WINDOW = new THREE.Color("#9fb3c4");
 
 /** The sun's shadow covers the whole island, from a fixed box: no edge
  * where shadows stop, and nothing shimmers as the player walks. A sphere
@@ -68,6 +65,17 @@ function applyRoomLook(
 }
 
 const ROOM_AIR = "#09070e";
+
+/** Whether the northern lights show tonight, and how strongly (0: not at
+ * all): about one winter night in three, the same for everyone, each
+ * night (dusk to the next dawn) taken as one. */
+export function auroraTonight(dayOfYear: number): number {
+  // Nights span midnight: 18:00 of one day and 06:00 of the next are
+  // the same night.
+  const night = Math.floor(dayOfYear + 0.25);
+  const h = Math.abs(Math.sin(night * 12.9898 + 78.233) * 43758.5453) % 1;
+  return h < 0.35 ? 0.6 + (h / 0.35) * 0.4 : 0;
+}
 
 /** The time of year, onto the shared uniforms (see `inSeason`) and for
  * the particles. */
@@ -147,6 +155,8 @@ export function DayLight({
     skyUniforms.uSunDir.value.copy(lights.sun);
     skyUniforms.uMoonDir.value.copy(lights.moon);
     skyUniforms.uSunColor.value.copy(look.sun);
+    skyUniforms.uNight.value = look.night;
+    skyUniforms.uAurora.value = auroraTonight(d) * year.snow * look.night;
     if (scene.background instanceof THREE.Color) {
       scene.background.copy(look.skyHorizon);
     }
@@ -169,7 +179,7 @@ export function DayLight({
         lights.strength * (1 - look.night * (1 - MOON_SHADOW));
     }
     ambient.uSun.value.copy(lights.herzie);
-    windowMaterial.color.lerpColors(DAY_WINDOW, LIT_WINDOW, look.windows);
+    windowGlow.uWindows.value = look.windows;
     nightLights.level = look.windows;
     ambient.uNight.value = look.night;
     ambient.uLight.value.copy(look.herzieLight);

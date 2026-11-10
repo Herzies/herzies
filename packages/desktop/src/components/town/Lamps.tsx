@@ -4,7 +4,13 @@ import { useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { ambient } from "./ambient";
-import { windowLightsOf } from "./Buildings";
+import {
+  GLASS_OUT,
+  lampFlicker,
+  windowLightsOf,
+  windowLit,
+  windowPhase,
+} from "./Buildings";
 import { groundY, objectAt, objectJitter, type TownMap } from "./map";
 
 // Old-school lamp posts — an iron pole, a lantern on top — and the light
@@ -96,7 +102,18 @@ type Glow = {
   intensity: number;
   reach: number;
   onHerzies: number;
+  /** A window's: when it lights up at dusk (see windowPhase). */
+  phase?: number;
+  /** A lamp post's: sets its flicker apart (see lampFlicker). */
+  seed: number;
 };
+
+/** How lit a light is right now, 0–1 (and a touch over, flickering):
+ * a window in its own turn through dusk, a lamp post flickering. */
+function glowLevel(g: Glow, level: number, t: number): number {
+  if (g.phase !== undefined) return windowLit(g.phase, level);
+  return level * lampFlicker(t, g.seed);
+}
 
 /**
  * How strongly each of the `count` nearest lights casts its shadow, given
@@ -130,6 +147,8 @@ export function glowsOf(map: TownMap): Glow[] {
         intensity: LAMP_INTENSITY,
         reach: LAMP_POST_REACH,
         onHerzies: LAMP_ON_HERZIES,
+        // As the lantern glass works it out from where it stands.
+        seed: (Math.abs(Math.sin(x * 12.9898 + z * 78.233) * 43758.5453) % 1) * 100,
       });
     }
   }
@@ -148,6 +167,12 @@ export function glowsOf(map: TownMap): Glow[] {
         intensity: WINDOW_INTENSITY,
         reach: LAMP_REACH,
         onHerzies: WINDOW_ON_HERZIES,
+        phase: windowPhase(
+          w.at[0] + w.out[0] * GLASS_OUT,
+          w.at[1],
+          w.at[2] + w.out[1] * GLASS_OUT,
+        ),
+        seed: 0,
       }),
     );
   return [...lamps, ...windows].slice(0, MAX_LAMPS);
@@ -221,13 +246,44 @@ export function NightLights({ map }: { map: TownMap }) {
     };
   }, [glows]);
 
+  /** Which lights cast right now (the rest are plain): kept between
+   * frames, so the flicker can be written every frame without sorting. */
+  const casting = useRef<{ lamps: number[]; windows: number[] }>({
+    lamps: [],
+    windows: [],
+  });
+
   useFrame(() => {
     const level = nightLights.level < DARK_ENOUGH ? 0 : nightLights.level;
+    const t = ambient.uTime.value;
     const { x, z } = ambient.uPlayer.value;
     const s = shown.current;
+    const moved = level !== s.level || Math.hypot(x - s.x, z - s.z) >= 0.05;
+    // Every frame: the lamps flicker, and the windows come on in turn.
+    if (level > 0 || s.level !== 0) {
+      const { lamps: nearest, windows: nearestWindows } = casting.current;
+      glows.forEach((g, i) => {
+        const light = lights.current[i];
+        const lit = glowLevel(g, level, t);
+        const cast =
+          level > 0 && (nearest.includes(i) || nearestWindows.includes(i));
+        if (light) light.intensity = cast ? 0 : g.intensity * lit;
+        ambient.uLamps.value[i].w = g.onHerzies * lit;
+      });
+      casters.current.forEach((light, k) => {
+        const g = glows[nearest[k]];
+        if (light && g && level > 0)
+          light.intensity = g.intensity * glowLevel(g, level, t);
+      });
+      windowCasters.current.forEach((light, k) => {
+        const g = glows[nearestWindows[k]];
+        if (light && g && level > 0)
+          light.intensity = g.intensity * glowLevel(g, level, t);
+      });
+    }
     // Re-placed when the light changes or the player has moved a little
     // (little enough that the shadows' fades move smoothly).
-    if (level === s.level && Math.hypot(x - s.x, z - s.z) < 0.05) return;
+    if (!moved) return;
     Object.assign(s, { level, x, z });
 
     // The lamp posts and windows nearest the player cast shadows.
@@ -238,6 +294,7 @@ export function NightLights({ map }: { map: TownMap }) {
     const windowsNear = byDistance.filter((n) => n.g.out);
     const nearest = lampsNear.slice(0, SHADOW_LIGHTS).map((n) => n.i);
     const nearestWindows = windowsNear.slice(0, WINDOW_SHADOWS).map((n) => n.i);
+    casting.current = { lamps: nearest, windows: nearestWindows };
     const fades = casterFades(
       lampsNear.map((n) => n.d),
       SHADOW_LIGHTS,
@@ -248,10 +305,11 @@ export function NightLights({ map }: { map: TownMap }) {
     );
     glows.forEach((g, i) => {
       const light = lights.current[i];
+      const lit = glowLevel(g, level, t);
       const cast =
         level > 0 && (nearest.includes(i) || nearestWindows.includes(i));
-      if (light) light.intensity = cast ? 0 : g.intensity * level;
-      ambient.uLamps.value[i].w = g.onHerzies * level;
+      if (light) light.intensity = cast ? 0 : g.intensity * lit;
+      ambient.uLamps.value[i].w = g.onHerzies * lit;
     });
     casters.current.forEach((light, k) => {
       if (!light) return;
@@ -262,7 +320,7 @@ export function NightLights({ map }: { map: TownMap }) {
         return;
       }
       light.position.set(...g.at);
-      light.intensity = g.intensity * level;
+      light.intensity = g.intensity * glowLevel(g, level, t);
       light.shadow.intensity = fades[k];
     });
     windowCasters.current.forEach((light, k) => {
@@ -278,7 +336,7 @@ export function NightLights({ map }: { map: TownMap }) {
       const aim = aims[nearestWindows[k]];
       if (aim) windowAims[k].position.copy(aim.position);
       windowAims[k].updateMatrixWorld();
-      light.intensity = g.intensity * level;
+      light.intensity = g.intensity * glowLevel(g, level, t);
       light.shadow.intensity = windowFades[k];
     });
   });
