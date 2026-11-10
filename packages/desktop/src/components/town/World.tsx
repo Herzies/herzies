@@ -1,3 +1,4 @@
+import { Bunting } from "./Bunting";
 import { Clouds } from "./Clouds";
 import { type Champion, useChampion } from "./champion";
 import type { Hour } from "./DayCycle";
@@ -106,6 +107,7 @@ export function World({
       <HomeIsland radius={islandRadius(map)} />
       <Ground map={map} />
       <Props map={map} champion={champion} />
+      <Bunting map={map} />
       <Particles map={map} />
       <MapColliders key={mapId(map)} map={map} />
     </>

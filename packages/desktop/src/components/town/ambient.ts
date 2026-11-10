@@ -46,6 +46,15 @@ export const seasonNow: { look: SeasonLook } = {
   look: seasonLook(dayOfYear()),
 };
 
+/** The gust's swell at a spot, 0.1–1, as the wind shaders work it out
+ * (the slow swell rolling downwind in `swayInWind`): for what moves on
+ * the CPU and should lean with the trees round it. */
+export function gustAt(x: number, z: number, t: number): number {
+  const w = ambient.uWindDir.value;
+  const along = x * w.x + z * w.y;
+  return 0.55 + 0.45 * Math.sin(along * 0.07 - t * 0.45);
+}
+
 /** How a material moves in the wind. */
 export type Sway = {
   /** Sideways give per unit of height above `from`. */

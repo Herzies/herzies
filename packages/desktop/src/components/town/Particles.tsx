@@ -2,7 +2,7 @@ import { mulberry32 } from "@herzies/shared";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
-import { ambient, seasonNow } from "./ambient";
+import { ambient, gustAt, seasonNow } from "./ambient";
 import { chimneysOf } from "./Buildings";
 import { FOOTPRINT_LIFE, footprints, Trail } from "./footprints";
 import {
@@ -243,9 +243,12 @@ function Smoke({ map }: { map: TownMap }) {
     const t = clock.elapsedTime;
     const wind = ambient.uWindDir.value;
     chimneys.forEach(([x, y, z], c) => {
+      // The same gusts as the trees (see swayInWind): the column leans
+      // further as one rolls past the chimney.
+      const gust = 0.6 + 0.8 * gustAt(x, z, t);
       for (let j = 0; j < PUFFS; j++) {
         const age = (t * 0.18 + j / PUFFS + c * 0.37) % 1;
-        const drift = age * age * 2.5;
+        const drift = age * age * 2.5 * gust;
         pts.set(
           c * PUFFS + j,
           x + wind.x * drift + Math.sin(t + j) * 0.08,
