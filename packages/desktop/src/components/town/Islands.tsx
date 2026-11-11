@@ -207,13 +207,15 @@ export function Sky() {
           vec3 stars(vec3 dir) {
             vec3 cell = floor(dir * STAR_CELLS);
             float h = hash(cell);
-            if (h < 0.6) return vec3(0.0);
+            if (h < 0.72) return vec3(0.0);
             vec3 at = normalize((cell + 0.5 + (hash3(cell + 3.1) - 0.5) * 0.7) / STAR_CELLS);
             float d = 1.0 - dot(dir, at);
-            // The angular radius, as 1 - cos: about a third of a degree.
-            float r = 0.000006 + (h - 0.6) * 0.00003;
+            // The angular radius, as 1 - cos: a tenth of a degree, the
+            // brightest a fifth — a pixel or two at the Town's resolution.
+            float r = 0.0000015 + (h - 0.72) * 0.000016;
             float disc = 1.0 - smoothstep(r * 0.5, r, d);
-            float bright = 0.45 + 0.55 * hash(cell + 7.7);
+            float b = hash(cell + 7.7);
+            float bright = 0.2 + 0.8 * b * b;
             float twinkle = 0.75 + 0.25 * sin(uTime * (1.5 + hash(cell + 9.1) * 3.5) + hash(cell + 2.2) * 50.0);
             float tint = hash(cell + 5.5);
             vec3 colour = tint < 0.15 ? vec3(1.0, 0.85, 0.7) : tint < 0.3 ? vec3(0.8, 0.88, 1.0) : vec3(1.0);

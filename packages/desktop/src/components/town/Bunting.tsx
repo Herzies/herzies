@@ -22,14 +22,15 @@ import {
 /** Lamps closer than this are strung together; further, the rope would
  * sag to the ground. Never closer than MIN: that's two lamps on one
  * corner. */
-const MAX_SPAN = 9;
+const MAX_SPAN = 14;
 const MIN_SPAN = 3.5;
 /** How many strings a lamp post carries at most. */
 const PER_LAMP = 2;
-/** Where the rope ties on: below the lantern's floor. */
-const TIE_BELOW = 0.55;
+/** Where the rope ties on: just below the lantern's floor, high enough
+ * that the pennants clear a stage-3 herzie's head mid-span. */
+const TIE_BELOW = 0.3;
 /** How much the rope sags in the middle, per unit of span. */
-const SAG = 0.045;
+const SAG = 0.03;
 /** Pennants this far apart along the rope. */
 const PENNANT_EVERY = 0.75;
 const PENNANT_W = 0.24;

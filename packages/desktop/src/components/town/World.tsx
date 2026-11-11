@@ -1,3 +1,4 @@
+import { Birds } from "./Birds";
 import { Bunting } from "./Bunting";
 import { Clouds } from "./Clouds";
 import { type Champion, useChampion } from "./champion";
@@ -108,6 +109,7 @@ export function World({
       <Ground map={map} />
       <Props map={map} champion={champion} />
       <Bunting map={map} />
+      <Birds map={map} />
       <Particles map={map} />
       <MapColliders key={mapId(map)} map={map} />
     </>

@@ -38,6 +38,11 @@ export const ambient = {
   uBlossom: { value: 0 },
   uSnow: { value: 0 },
   uIce: { value: 0 },
+  /** How hard it's raining, 0–1 (see weather.ts): the ground goes dark
+   * and wet, the motes and butterflies go in. */
+  uRain: { value: 0 },
+  /** How wet everything is, 0–1: builds through the rain, dries after. */
+  uWet: { value: 0 },
 };
 
 /** The time of year as it's shown, for what moves on the CPU (the

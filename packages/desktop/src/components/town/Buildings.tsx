@@ -417,6 +417,30 @@ export function chimneysOf(map: TownMap): [number, number, number][] {
   });
 }
 
+/** Somewhere a bird can sit: a spot and which way along it faces. */
+export type Perch = { x: number; y: number; z: number; yaw: number };
+
+/** The roof ridges, as perches (see Birds): two spots along each
+ * building's main ridge, a third of the way in from either end. */
+export function ridgePerchesOf(map: TownMap): Perch[] {
+  return buildingsOf(map).flatMap((b) => {
+    if (b.kind === "cave") return [];
+    const s = roofShape(bounds(b.rects[0]));
+    const along = s.alongX ? 0 : Math.PI / 2;
+    return [0.3, 0.7].map((k) => {
+      const a = s.a0 + (s.a1 - s.a0) * k;
+      const [x, , z] = s.p(a, 0, s.bc);
+      const [wx, wz] = turned(b, x, z);
+      return {
+        x: wx,
+        y: b.y + s.top + 0.05,
+        z: wz,
+        yaw: along + b.turn + (k < 0.5 ? Math.PI : 0),
+      };
+    });
+  });
+}
+
 /** How far apart a building's windows are on a wall facing `yaw`: shop
  * windows along a shop's front closer together. */
 function spacingFor(b: Building, door: Door | null) {
