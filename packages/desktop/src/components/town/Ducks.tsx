@@ -113,14 +113,6 @@ function duckGeometry(p: DuckPalette): THREE.BufferGeometry {
       new THREE.SphereGeometry(0.036, 5, 4).translate(-0.1, 0.34, 0.36),
       "#15171c",
     ),
-    // Foam where it sits.
-    painted(
-      new THREE.RingGeometry(0.3, 0.46, 12)
-        .rotateX(-Math.PI / 2)
-        .scale(0.9, 1, 1.25)
-        .translate(0, 0.01, 0),
-      "#e6f1f7",
-    ),
   ];
   if (p.ring) {
     parts.push(
@@ -145,6 +137,21 @@ const duckMaterial = new THREE.MeshLambertMaterial({
 });
 /** Ducks are drawn this much bigger than they're built. */
 const DUCK_SIZE = 1.15;
+
+/** Ripples spreading from each duck: this many at once, each taking this
+ * long (s) to widen and fade. They come faster when it paddles. */
+const RIPPLES = 3;
+const RIPPLE_LIFE = 2.2;
+const rippleGeometry = new THREE.RingGeometry(0.85, 1, 20).rotateX(
+  -Math.PI / 2,
+);
+/** Added to the water, so a ripple only brightens it, and a dimmer
+ * colour is a fainter ripple (fading by instance colour). */
+const rippleMaterial = new THREE.MeshBasicMaterial({
+  transparent: true,
+  depthWrite: false,
+  blending: THREE.AdditiveBlending,
+});
 
 type Duck = {
   drake: boolean;
@@ -184,6 +191,7 @@ const e = new THREE.Euler();
 const v = new THREE.Vector3();
 const size = new THREE.Vector3(DUCK_SIZE, DUCK_SIZE, DUCK_SIZE);
 const none = new THREE.Vector3(0, 0, 0);
+const scale = new THREE.Vector3();
 
 export function Ducks({ map }: { map: TownMap }) {
   const water = useMemo(() => {
@@ -222,24 +230,28 @@ export function Ducks({ map }: { map: TownMap }) {
   }, [water, rand]);
   const drakes = useRef<THREE.InstancedMesh>(null);
   const hens = useRef<THREE.InstancedMesh>(null);
+  const ripples = useRef<THREE.InstancedMesh>(null);
+  const tint = useMemo(() => new THREE.Color(), []);
   const nDrakes = ducks.filter((d) => d.drake).length;
 
   useFrame(({ clock }, dt) => {
     const dm = drakes.current;
     const hm = hens.current;
-    if (!dm || !hm) return;
+    const rm = ripples.current;
+    if (!dm || !hm || !rm) return;
     const t = clock.elapsedTime;
     const step = Math.min(dt, 0.1);
     const { x: px, z: pz } = ambient.uPlayer.value;
     const frozen = ambient.uIce.value > 0.5;
     let nd = 0;
     let nh = 0;
-    ducks.forEach((d) => {
+    ducks.forEach((d, di) => {
       const m = d.drake ? dm : hm;
       const i = d.drake ? nd++ : nh++;
       if (frozen) {
         m4.compose(none, q, none);
         m.setMatrixAt(i, m4);
+        for (let r = 0; r < RIPPLES; r++) rm.setMatrixAt(di * RIPPLES + r, m4);
         return;
       }
       const dx = d.x - px;
@@ -307,7 +319,24 @@ export function Ducks({ map }: { map: TownMap }) {
       q.setFromEuler(e);
       m4.compose(v, q, size);
       m.setMatrixAt(i, m4);
+      // Ripples spreading out and fading, a steadier stream (and a longer
+      // oval, trailing back) when it's moving.
+      const pace = d.to ? 1.8 : 1;
+      for (let r = 0; r < RIPPLES; r++) {
+        const age = (t * pace * 0.45 + d.phase + r / RIPPLES) % 1;
+        const grow = 0.45 + age * (d.to ? 1.1 : 0.9);
+        v.set(d.x, elevation(map, d.x, d.z) + SURFACE + 0.07, d.z);
+        e.set(0, d.heading, 0);
+        q.setFromEuler(e);
+        scale.set(grow, 1, grow * (d.to ? 1.5 : 1.05));
+        m4.compose(v, q, scale);
+        rm.setMatrixAt(di * RIPPLES + r, m4);
+        const fade = (1 - age) * (1 - age) * Math.min(1, age * 6) * 0.85;
+        rm.setColorAt(di * RIPPLES + r, tint.setScalar(fade));
+      }
     });
+    rm.instanceMatrix.needsUpdate = true;
+    if (rm.instanceColor) rm.instanceColor.needsUpdate = true;
     dm.instanceMatrix.needsUpdate = true;
     hm.instanceMatrix.needsUpdate = true;
   });
@@ -328,6 +357,12 @@ export function Ducks({ map }: { map: TownMap }) {
         args={[HEN_GEO, duckMaterial, Math.max(1, ducks.length - nDrakes)]}
         frustumCulled={false}
         castShadow
+      />
+      <instancedMesh
+        key={`r${ducks.length}`}
+        ref={ripples}
+        args={[rippleGeometry, rippleMaterial, ducks.length * RIPPLES]}
+        frustumCulled={false}
       />
     </>
   );

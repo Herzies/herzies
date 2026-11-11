@@ -131,6 +131,9 @@ function birdGeometry(p: Palette): THREE.BufferGeometry {
 /** Wings, swept back to a pointed tip, mirrored either side, the outer
  * part darker; the vertices past the shoulder lift to flap (see
  * `beat` in the material). */
+/** How high the wings' roots are above the feet (see birdGeometry's lift). */
+const SHOULDER = 0.29;
+
 function wingGeometry(p: Palette): THREE.BufferGeometry {
   const g = new THREE.BufferGeometry();
   const side = (m: number) => {
@@ -143,7 +146,10 @@ function wingGeometry(p: Palette): THREE.BufferGeometry {
       ? [...A, ...B, ...E, ...A, ...E, ...D, ...B, ...C, ...E]
       : [...A, ...E, ...B, ...A, ...D, ...E, ...B, ...E, ...C];
   };
-  const pos = [...side(1), ...side(-1)];
+  // Hinged on the body's shoulders, which sit this high off the feet.
+  const pos = [...side(1), ...side(-1)].map((v, i) =>
+    i % 3 === 1 ? v + SHOULDER : v,
+  );
   g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
   const inner = new THREE.Color(p.wing);
   const tip = new THREE.Color(p.wingTip);
@@ -216,6 +222,8 @@ type Crow = {
   /** Seconds until it moves on of its own accord. */
   restless: number;
   phase: number;
+  /** Where its wings are in their beat (radians). */
+  wingPhase: number;
   /** Where it is, and where it's facing. */
   x: number;
   y: number;
@@ -289,6 +297,7 @@ export function Birds({ map }: { map: TownMap }) {
         duration: 1,
         restless: RESTLESS[0] + rand() * (RESTLESS[1] - RESTLESS[0]),
         phase: rand() * 100,
+        wingPhase: 0,
         x: p.x,
         y: p.y,
         z: p.z,
@@ -369,13 +378,19 @@ export function Birds({ map }: { map: TownMap }) {
           if (run > 1e-4) c.heading = Math.atan2(v2.x - v.x, v2.z - v.z);
           pitch = Math.atan2(v2.y - v.y, Math.max(run, 1e-3)) * 0.8;
         }
-        // Beating hard to climb, a few flaps in the glide, a flare at
-        // the end.
-        const flaps =
-          k < 0.4 || k > 0.85
-            ? 1
-            : 0.25 + 0.75 * Math.max(0, Math.sin(t * 2 + c.phase));
-        beat = Math.sin(t * 13 + c.phase) * 0.9 * flaps + (1 - flaps) * 0.25;
+        // Flapping fastest at the take-off and the landing (a rush of
+        // quick, deep beats), settling to slower ones in the climb, and
+        // a few easy ones with glides between in the cruise.
+        const rush = Math.max(1 - k / 0.22, (k - 0.78) / 0.22, 0);
+        const cruise = k > 0.35 && k < 0.78;
+        const flaps = cruise
+          ? 0.2 + 0.8 * Math.max(0, Math.sin(t * 1.6 + c.phase))
+          : 1;
+        const rate = cruise ? 9 : 14 + 12 * Math.min(1, rush);
+        c.wingPhase += rate * step;
+        beat =
+          Math.sin(c.wingPhase) * (0.8 + 0.3 * rush) * flaps +
+          (1 - flaps) * 0.25;
         if (k >= 1) {
           c.perch = c.to;
           c.to = -1;
