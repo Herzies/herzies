@@ -241,14 +241,15 @@ export function Sky() {
           // Northern lights: a band low over the north (-z), curtains of
           // green with a violet fringe above, rippling slowly sideways.
           vec3 aurora(vec3 dir) {
-            if (uAurora <= 0.0 || dir.z > 0.2) return vec3(0.0);
-            float band = smoothstep(0.08, 0.22, dir.y) * (1.0 - smoothstep(0.3, 0.62, dir.y));
+            if (uAurora <= 0.0) return vec3(0.0);
+            float north = smoothstep(0.35, -0.45, dir.z);
+            float band = smoothstep(0.06, 0.24, dir.y) * (1.0 - smoothstep(0.34, 0.7, dir.y)) * north;
             if (band <= 0.0) return vec3(0.0);
             float along = atan(dir.x, -dir.z) * 3.0;
             float t = uTime * 0.05;
             float curtain = vnoise(vec2(along * 1.6 + t, dir.y * 2.0 - t * 0.6))
               * 0.6 + 0.4 * vnoise(vec2(along * 4.5 - t * 1.7, dir.y * 6.0));
-            curtain = smoothstep(0.42, 0.78, curtain);
+            curtain = smoothstep(0.3, 0.85, curtain) * (0.35 + 0.65 * curtain);
             float up = (dir.y - 0.08) / 0.5;
             vec3 colour = mix(vec3(0.15, 0.9, 0.45), vec3(0.6, 0.3, 0.9), smoothstep(0.35, 0.9, up));
             return colour * curtain * band * uAurora * 0.55;
