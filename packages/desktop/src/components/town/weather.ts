@@ -23,7 +23,8 @@ export type Weather = {
   storm: boolean;
 };
 
-const hash = (n: number) => Math.abs(Math.sin(n * 12.9898 + 78.233) * 43758.5453) % 1;
+const hash = (n: number) =>
+  Math.abs(Math.sin(n * 12.9898 + 78.233) * 43758.5453) % 1;
 
 /** How hard it would rain in a slot at its height: 0 for a dry one. */
 function slotRain(slot: number): number {

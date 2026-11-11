@@ -94,10 +94,10 @@ import {
   townSave,
 } from "./components/town/runtime";
 import { dayOfYear } from "./components/town/Seasons";
-import { weatherOverride } from "./components/town/weather";
 import { CastBar, SkillHud } from "./components/town/SkillHud";
 import TownCanvas from "./components/town/TownCanvas";
 import { setVitals } from "./components/town/vitals";
+import { weatherOverride } from "./components/town/weather";
 import { HerzieStageContext, overlayHerzieStage } from "./lib/overlayStage";
 import { herzies } from "./tauri-bridge";
 

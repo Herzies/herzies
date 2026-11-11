@@ -148,7 +148,8 @@ export function glowsOf(map: TownMap): Glow[] {
         reach: LAMP_POST_REACH,
         onHerzies: LAMP_ON_HERZIES,
         // As the lantern glass works it out from where it stands.
-        seed: (Math.abs(Math.sin(x * 12.9898 + z * 78.233) * 43758.5453) % 1) * 100,
+        seed:
+          (Math.abs(Math.sin(x * 12.9898 + z * 78.233) * 43758.5453) % 1) * 100,
       });
     }
   }

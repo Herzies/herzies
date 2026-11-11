@@ -88,7 +88,11 @@ function afloat(
   const n = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) / 0.3));
   for (let i = 0; i <= n; i++) {
     const t = i / n;
-    const [col, row] = cellAt(map, a.x + (b.x - a.x) * t, a.z + (b.z - a.z) * t);
+    const [col, row] = cellAt(
+      map,
+      a.x + (b.x - a.x) * t,
+      a.z + (b.z - a.z) * t,
+    );
     if (!isSunk(terrainAt(map, col, row))) return false;
   }
   return true;
@@ -115,14 +119,13 @@ export function Ducks({ map }: { map: TownMap }) {
   const ducks = useMemo<Duck[]>(() => {
     const n = Math.min(MAX_DUCKS, Math.floor(water.length * PER_CELL));
     // In little groups, as ducks are, rather than one to a pond.
-    const groups = Array.from({ length: Math.ceil(n / 3) }, () =>
-      water[Math.floor(rand() * water.length)],
+    const groups = Array.from(
+      { length: Math.ceil(n / 3) },
+      () => water[Math.floor(rand() * water.length)],
     );
     return Array.from({ length: n }, (_, i) => {
       const [gx, gz] = groups[i % groups.length];
-      const near = water.filter(
-        ([x, z]) => Math.hypot(x - gx, z - gz) < 2.5,
-      );
+      const near = water.filter(([x, z]) => Math.hypot(x - gx, z - gz) < 2.5);
       const [x, z] = near[Math.floor(rand() * near.length)];
       return {
         x,

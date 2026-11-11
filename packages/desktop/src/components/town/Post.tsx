@@ -11,9 +11,11 @@ import * as THREE from "three";
 import { ambient } from "./ambient";
 import { townLook } from "./depth";
 import { homeMode, markWorldSettled } from "./homeMode";
+import { skyUniforms } from "./Islands";
 import { warpAmount } from "./portal";
 import { DistortionBuffer, SonicDistortionEffect } from "./vfx/distortion";
 import { HomeFadeEffect } from "./vfx/homeFade";
+import { LookEffect } from "./vfx/look";
 
 /** How many frames the world's drawn, unseen, to warm it (see Post). */
 const WARM_FRAMES = 3;
@@ -29,6 +31,8 @@ const DAY_AO = 1.5;
 /** How much of it is left at night: the lamps light the corners, and dark
  * on dark only muddies them. */
 const NIGHT_AO = 0.35;
+/** How dark the frame's corners go (see vfx/look.ts). */
+const VIGNETTE = 0.22;
 
 type AOPass = NonNullable<
   Extract<ComponentProps<typeof N8AO>["ref"], { current: unknown }>["current"]
@@ -59,13 +63,15 @@ export function Post({ ao, distort }: { ao: boolean; distort: boolean }) {
   const buffer = useMemo(() => new DistortionBuffer(), []);
   const effect = useMemo(() => new SonicDistortionEffect(buffer), [buffer]);
   const fade = useMemo(() => new HomeFadeEffect(), []);
+  const look = useMemo(() => new LookEffect(), []);
   useEffect(
     () => () => {
       effect.dispose();
       buffer.dispose();
       fade.dispose();
+      look.dispose();
     },
-    [effect, buffer, fade],
+    [effect, buffer, fade, look],
   );
   const scene = useThree((s) => s.scene);
   // Settled at Home: nothing of the world left to draw.
@@ -161,6 +167,14 @@ export function Post({ ao, distort }: { ao: boolean; distort: boolean }) {
       effect.warp = warpAmount();
     }
     fade.fade = homeMode.worldFade;
+    // The golden hour: the sun up but low, and no rain to grey it.
+    const sunY = skyUniforms.uSunDir.value.y;
+    const low =
+      THREE.MathUtils.smoothstep(sunY, -0.02, 0.08) *
+      (1 - THREE.MathUtils.smoothstep(sunY, 0.12, 0.4));
+    look.warm = low * (1 - ambient.uRain.value) * 0.8;
+    // Lighter on the way Home, where the herzie fills the frame.
+    look.vignette = VIGNETTE * (1 - homeMode.aoFade);
   });
   return (
     <EffectComposer multisampling={0} enabled={!atHome}>
@@ -176,6 +190,7 @@ export function Post({ ao, distort }: { ao: boolean; distort: boolean }) {
         />
       )}
       {distort && <primitive object={effect} dispose={null} />}
+      <primitive object={look} dispose={null} />
       <primitive object={fade} dispose={null} />
     </EffectComposer>
   );

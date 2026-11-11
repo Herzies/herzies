@@ -4,17 +4,17 @@ import { Clouds } from "./Clouds";
 import { type Champion, useChampion } from "./champion";
 import type { Hour } from "./DayCycle";
 import { DayLight } from "./DayLight";
-import { HAZE_START } from "./depth";
 import { Ducks } from "./Ducks";
+import { HAZE_START } from "./depth";
 import { Ground } from "./Ground";
 import { DistantIslands, HomeIsland, SKY, Sky } from "./Islands";
 import { islandRadius, type TownMap } from "./map";
 import { Particles } from "./Particles";
 import { MapColliders, Props } from "./Props";
+import { Weather } from "./Rain";
 import { Room } from "./Room";
 import { HOME_MAP, TOWN_MAPS_LOCAL } from "./runtime";
 import type { Season } from "./Seasons";
-import { Weather } from "./Rain";
 
 /** The cave's air: nearly black, a touch of violet. */
 const DARK_ROOM = "#09070e";

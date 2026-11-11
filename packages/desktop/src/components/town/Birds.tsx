@@ -5,7 +5,13 @@ import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { ambient } from "./ambient";
 import { type Perch, ridgePerchesOf } from "./Buildings";
-import { groundY, islandRadius, objectAt, objectJitter, type TownMap } from "./map";
+import {
+  groundY,
+  islandRadius,
+  objectAt,
+  objectJitter,
+  type TownMap,
+} from "./map";
 
 // The birds: crows sitting about on the roof ridges and the lamp posts,
 // which lift off and settle somewhere else when you walk up to them (or
@@ -294,7 +300,9 @@ export function Birds({ map }: { map: TownMap }) {
           f.length = Math.hypot(f.dx, f.dz);
           f.dx /= f.length;
           f.dz /= f.length;
-          f.y = FLOCK_HEIGHT[0] + Math.random() * (FLOCK_HEIGHT[1] - FLOCK_HEIGHT[0]);
+          f.y =
+            FLOCK_HEIGHT[0] +
+            Math.random() * (FLOCK_HEIGHT[1] - FLOCK_HEIGHT[0]);
           f.started = t;
         }
       }

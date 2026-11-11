@@ -169,7 +169,9 @@ gl_Position = projectionMatrix * mvPosition;`,
   return material;
 }
 
-const ropeMaterial = hanging(new THREE.LineBasicMaterial({ color: ROPE_COLOR }));
+const ropeMaterial = hanging(
+  new THREE.LineBasicMaterial({ color: ROPE_COLOR }),
+);
 const pennantMaterial = hanging(
   new THREE.MeshLambertMaterial({
     vertexColors: true,
@@ -245,10 +247,7 @@ export function buntingGeometry(lines: BuntingLine[]): {
   );
   pennants.setAttribute("hang", new THREE.Float32BufferAttribute(penHang, 1));
   pennants.setAttribute("flap", new THREE.Float32BufferAttribute(penFlap, 1));
-  pennants.setAttribute(
-    "color",
-    new THREE.Float32BufferAttribute(penColor, 3),
-  );
+  pennants.setAttribute("color", new THREE.Float32BufferAttribute(penColor, 3));
   pennants.setAttribute(
     "normal",
     new THREE.Float32BufferAttribute(penNormal, 3),

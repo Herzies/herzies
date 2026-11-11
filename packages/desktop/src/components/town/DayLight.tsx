@@ -191,7 +191,8 @@ export function DayLight({
     const flash = room ? 0 : lightning.flash;
     if (flash > 0 || base.current.flash > 0) {
       base.current.flash = flash;
-      if (hemi.current) hemi.current.intensity = base.current.hemi * (1 + 5 * flash);
+      if (hemi.current)
+        hemi.current.intensity = base.current.hemi * (1 + 5 * flash);
       ambient.uLight.value
         .copy(base.current.light)
         .lerp(FLASH_LIGHT, Math.min(1, flash * 1.5));
