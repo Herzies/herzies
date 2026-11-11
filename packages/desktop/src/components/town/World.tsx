@@ -113,7 +113,7 @@ export function World({
       <Bunting map={map} />
       <Birds map={map} />
       <Ducks map={map} />
-      <Weather />
+      <Weather map={map} />
       <Particles map={map} />
       <MapColliders key={mapId(map)} map={map} />
     </>

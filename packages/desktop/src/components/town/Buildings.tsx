@@ -424,7 +424,8 @@ export type Perch = { x: number; y: number; z: number; yaw: number };
  * building's main ridge, a third of the way in from either end. */
 export function ridgePerchesOf(map: TownMap): Perch[] {
   return buildingsOf(map).flatMap((b) => {
-    if (b.kind === "cave") return [];
+    // Only the homes have a ridge (the shops' roofs are flat).
+    if (b.kind !== "home") return [];
     const s = roofShape(bounds(b.rects[0]));
     const along = s.alongX ? 0 : Math.PI / 2;
     return [0.3, 0.7].map((k) => {

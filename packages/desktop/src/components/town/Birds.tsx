@@ -12,6 +12,7 @@ import {
   objectJitter,
   type TownMap,
 } from "./map";
+import { painted } from "./parts";
 
 // The birds: crows sitting about on the roof ridges and the lamp posts,
 // which lift off and settle somewhere else when you walk up to them (or
@@ -38,78 +39,139 @@ const RESTLESS = [40, 110] as const;
 const CROW_SPEED = 6;
 const CROW_ARC = 5;
 /** The top of a lamp post, as a perch (see lampPostGeometry's cap). */
-const LAMP_CAP_Y = 3.72;
+const LAMP_CAP_Y = 3.88;
 
-const CROW = "#23242a";
-const FLOCK_COLOR = "#2d2f38";
+type Palette = {
+  back: string;
+  belly: string;
+  head: string;
+  beak: string;
+  eye: string;
+  tail: string;
+  legs: string;
+  wing: string;
+  wingTip: string;
+};
 
-/** A bird's body: a slim teardrop along z (its heading), a small head
- * and beak, and a fanned tail. */
-const bodyGeometry = (() => {
-  const body = new THREE.SphereGeometry(0.15, 8, 6);
-  body.scale(0.8, 0.72, 1.7);
-  const head = new THREE.SphereGeometry(0.08, 6, 5);
-  head.translate(0, 0.07, 0.27);
-  const beak = new THREE.ConeGeometry(0.03, 0.12, 4);
-  beak.rotateX(Math.PI / 2);
-  beak.translate(0, 0.05, 0.4);
-  // The tail: a flat wedge trailing behind, a little raised.
+/** Crows: sooty, with a pale eye and a yellow beak — the beak and the eye
+ * are what read at the Town's big pixels, so they're oversized. */
+const CROW: Palette = {
+  back: "#3b3d4b",
+  belly: "#5b5e70",
+  head: "#454757",
+  beak: "#e8b13c",
+  eye: "#f6f3e8",
+  tail: "#272830",
+  legs: "#5a452c",
+  wing: "#454758",
+  wingTip: "#1e1f27",
+};
+/** Gulls: white against the sky, black wing tips, a yellow beak. */
+const GULL: Palette = {
+  back: "#eceef2",
+  belly: "#ffffff",
+  head: "#ffffff",
+  beak: "#f2b134",
+  eye: "#1c1e24",
+  tail: "#e2e5ea",
+  legs: "#e0903a",
+  wing: "#e8eaef",
+  wingTip: "#2c313d",
+};
+
+/** A bird, chunky and cute like the herzies — round, a big head, an
+ * oversized beak and eyes, since a few pixels is all it gets: a body in
+ * two tones (back and belly), a fanned tail, little legs. Standing on
+ * the origin, facing +z. */
+function birdGeometry(p: Palette): THREE.BufferGeometry {
+  const lift = 0.25;
+  const at = (g: THREE.BufferGeometry, color: string) =>
+    painted(g.translate(0, lift, 0), color);
+  const sphere = (r: number, sx: number, sy: number, sz: number) =>
+    new THREE.SphereGeometry(r, 8, 6).scale(sx, sy, sz);
+  const eyeAt = (side: number) =>
+    new THREE.SphereGeometry(0.04, 5, 4).translate(side * 0.09, 0.16, 0.27);
   const tail = new THREE.BufferGeometry();
   tail.setAttribute(
     "position",
     new THREE.Float32BufferAttribute(
       [
-        -0.06, 0, -0.2, 0.06, 0, -0.2, 0.15, 0.01, -0.5, -0.06, 0, -0.2, 0.15,
-        0.01, -0.5, -0.15, 0.01, -0.5, 0, 0, -0.2, 0, 0.01, -0.52, 0.06, 0,
-        -0.2,
+        -0.08, 0, -0.18, 0.08, 0, -0.18, 0.2, 0.02, -0.56, -0.08, 0, -0.18, 0.2,
+        0.02, -0.56, -0.2, 0.02, -0.56, -0.08, 0, -0.18, -0.2, 0.02, -0.56, 0,
+        0.03, -0.6, 0.08, 0, -0.18, 0, 0.03, -0.6, 0.2, 0.02, -0.56,
       ],
       3,
     ),
   );
   tail.computeVertexNormals();
-  const g = mergeGeometries(
-    [body, head, beak]
-      .map((p) => {
-        const out = p.toNonIndexed();
-        out.deleteAttribute("uv");
-        return out;
-      })
-      .concat(tail),
-  ) as THREE.BufferGeometry;
-  return g;
-})();
-/** Its wings: swept back to a pointed tip, mirrored either side, with
- * a bend point so they can flap (see `beat` in the material). */
-const wingGeometry = (() => {
+  const leg = (side: number) =>
+    new THREE.CylinderGeometry(0.014, 0.014, 0.14, 4).translate(
+      side * 0.055,
+      -0.18,
+      0.02,
+    );
+  return mergeGeometries([
+    at(sphere(0.18, 0.85, 0.82, 1.4), p.back),
+    at(sphere(0.17, 0.82, 0.62, 1.2).translate(0, -0.06, 0.04), p.belly),
+    at(sphere(0.13, 1, 1, 1).translate(0, 0.14, 0.21), p.head),
+    at(
+      new THREE.ConeGeometry(0.05, 0.16, 5)
+        .rotateX(Math.PI / 2)
+        .translate(0, 0.12, 0.37),
+      p.beak,
+    ),
+    at(eyeAt(1), p.eye),
+    at(eyeAt(-1), p.eye),
+    at(tail, p.tail),
+    at(leg(1), p.legs),
+    at(leg(-1), p.legs),
+  ]) as THREE.BufferGeometry;
+}
+
+/** Wings, swept back to a pointed tip, mirrored either side, the outer
+ * part darker; the vertices past the shoulder lift to flap (see
+ * `beat` in the material). */
+function wingGeometry(p: Palette): THREE.BufferGeometry {
   const g = new THREE.BufferGeometry();
   const side = (m: number) => {
-    const A = [0, 0, 0.12];
-    const B = [m * 0.3, 0, 0.1];
-    const C = [m * 0.68, 0.02, -0.2];
-    const D = [0, 0, -0.16];
-    const E = [m * 0.32, 0, -0.14];
+    const A = [0, 0, 0.16];
+    const B = [m * 0.34, 0, 0.14];
+    const C = [m * 0.8, 0.02, -0.24];
+    const D = [0, 0, -0.22];
+    const E = [m * 0.4, 0, -0.2];
     return m > 0
       ? [...A, ...B, ...E, ...A, ...E, ...D, ...B, ...C, ...E]
       : [...A, ...E, ...B, ...A, ...D, ...E, ...B, ...E, ...C];
   };
-  g.setAttribute(
-    "position",
-    new THREE.Float32BufferAttribute([...side(1), ...side(-1)], 3),
-  );
+  const pos = [...side(1), ...side(-1)];
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  const inner = new THREE.Color(p.wing);
+  const tip = new THREE.Color(p.wingTip);
+  const c = new THREE.Color();
+  const colors: number[] = [];
+  for (let i = 0; i < pos.length; i += 3) {
+    c.copy(inner).lerp(
+      tip,
+      THREE.MathUtils.smoothstep(Math.abs(pos[i]), 0.3, 0.8),
+    );
+    colors.push(c.r, c.g, c.b);
+  }
+  g.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
   g.computeVertexNormals();
   return g;
-})();
+}
+
+const flatLit = () =>
+  new THREE.MeshLambertMaterial({
+    vertexColors: true,
+    flatShading: true,
+    side: THREE.DoubleSide,
+  });
+const birdMaterial = flatLit();
 /** Wings flap by lifting their outer parts: `beat` (per bird) is how far
  * up (or down, negative) the tips go. Applied before the bird's own
  * placement, so it turns and banks with it. */
-const birdMaterial = new THREE.MeshLambertMaterial({
-  flatShading: true,
-  side: THREE.DoubleSide,
-});
-const wingMaterial = new THREE.MeshLambertMaterial({
-  flatShading: true,
-  side: THREE.DoubleSide,
-});
+const wingMaterial = flatLit();
 wingMaterial.onBeforeCompile = (shader) => {
   shader.vertexShader = shader.vertexShader
     .replace("#include <common>", "#include <common>\nattribute float beat;")
@@ -117,11 +179,16 @@ wingMaterial.onBeforeCompile = (shader) => {
       "#include <begin_vertex>",
       `#include <begin_vertex>
 float reach = abs( position.x );
-transformed.y += reach * reach * 1.4 * beat;
+transformed.y += reach * reach * 1.3 * beat;
 transformed.z -= reach * abs( beat ) * 0.12;`,
     );
 };
 wingMaterial.customProgramCacheKey = () => "bird-wing";
+
+const CROW_BODY = birdGeometry(CROW);
+const CROW_WING = wingGeometry(CROW);
+const GULL_BODY = birdGeometry(GULL);
+const GULL_WING = wingGeometry(GULL);
 
 /** Where the crows can sit on this island: the roof ridges and the tops
  * of the lamp posts. */
@@ -241,32 +308,24 @@ export function Birds({ map }: { map: TownMap }) {
     y: 15,
     length: 0,
   });
-  const bodies = useRef<THREE.InstancedMesh>(null);
-  const wings = useRef<THREE.InstancedMesh>(null);
-  const count = crows.length + FLOCK;
-  const wingGeo = useMemo(() => {
-    const g = wingGeometry.clone();
-    g.setAttribute(
-      "beat",
-      new THREE.InstancedBufferAttribute(new Float32Array(count), 1),
-    );
-    return g;
-  }, [count]);
-  useLayoutEffect(() => {
-    const c = new THREE.Color();
-    for (const mesh of [bodies.current, wings.current]) {
-      if (!mesh) continue;
-      for (let i = 0; i < count; i++) {
-        mesh.setColorAt(i, c.set(i < crows.length ? CROW : FLOCK_COLOR));
-      }
-      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-    }
-  }, [count, crows.length]);
+  const crowBody = useRef<THREE.InstancedMesh>(null);
+  const crowWing = useRef<THREE.InstancedMesh>(null);
+  const gullBody = useRef<THREE.InstancedMesh>(null);
+  const gullWing = useRef<THREE.InstancedMesh>(null);
+  const nCrows = crows.length;
+  /** The wings, each with its own per-bird flap (see wingMaterial). */
+  const crowWingGeo = useMemo(
+    () => withBeat(CROW_WING, Math.max(1, nCrows)),
+    [nCrows],
+  );
+  const gullWingGeo = useMemo(() => withBeat(GULL_WING, FLOCK), []);
 
   useFrame(({ clock }, dt) => {
-    const body = bodies.current;
-    const wing = wings.current;
-    if (!body || !wing) return;
+    const body = crowBody.current;
+    const wing = crowWing.current;
+    const gBody = gullBody.current;
+    const gWing = gullWing.current;
+    if (!body || !wing || !gBody || !gWing) return;
     const t = clock.elapsedTime;
     const step = Math.min(dt, 0.1);
     const { x: px, z: pz } = ambient.uPlayer.value;
@@ -326,18 +385,7 @@ export function Birds({ map }: { map: TownMap }) {
       // Sitting: a hop of the head now and then.
       const bob =
         c.to < 0 ? Math.max(0, Math.sin(t * 1.3 + c.phase)) ** 12 * 0.04 : 0;
-      place(
-        body,
-        wing,
-        i,
-        c.x,
-        c.y + bob + 0.14,
-        c.z,
-        c.heading,
-        pitch,
-        beat,
-        1,
-      );
+      place(body, wing, i, c.x, c.y + bob, c.z, c.heading, pitch, beat, 1);
     });
 
     // The flock.
@@ -375,11 +423,10 @@ export function Birds({ map }: { map: TownMap }) {
     }
     const heading = Math.atan2(f.dx, f.dz);
     for (let j = 0; j < FLOCK; j++) {
-      const i = crows.length + j;
       if (along < 0) {
         m4.compose(hidden, q, hidden);
-        body.setMatrixAt(i, m4);
-        wing.setMatrixAt(i, m4);
+        gBody.setMatrixAt(j, m4);
+        gWing.setMatrixAt(j, m4);
         continue;
       }
       // A V: the leader in front, the rest back and out to either side.
@@ -398,41 +445,64 @@ export function Birds({ map }: { map: TownMap }) {
       );
       const beat = Math.sin(t * 10 + j * 0.8) * 0.8 * going + (1 - going) * 0.2;
       place(
-        body,
-        wing,
-        i,
+        gBody,
+        gWing,
+        j,
         x - f.dz * weave * 0.3,
         y,
         z + f.dx * weave * 0.3,
         heading + weave * 0.05,
         Math.cos(t * 1.1 + j) * 0.05,
         beat,
-        0.8,
+        1.35,
       );
     }
-    body.instanceMatrix.needsUpdate = true;
-    wing.instanceMatrix.needsUpdate = true;
+    for (const m of [body, wing, gBody, gWing]) {
+      m.instanceMatrix.needsUpdate = true;
+    }
   });
 
   if (perches.length === 0) return null;
   return (
     <>
       <instancedMesh
-        key={`b${count}`}
-        ref={bodies}
-        args={[bodyGeometry, birdMaterial, count]}
+        key={`cb${nCrows}`}
+        ref={crowBody}
+        args={[CROW_BODY, birdMaterial, Math.max(1, nCrows)]}
         frustumCulled={false}
         castShadow
       />
       <instancedMesh
-        key={`w${count}`}
-        ref={wings}
-        args={[wingGeo, wingMaterial, count]}
+        key={`cw${nCrows}`}
+        ref={crowWing}
+        args={[crowWingGeo, wingMaterial, Math.max(1, nCrows)]}
+        frustumCulled={false}
+        castShadow
+      />
+      <instancedMesh
+        ref={gullBody}
+        args={[GULL_BODY, birdMaterial, FLOCK]}
+        frustumCulled={false}
+        castShadow
+      />
+      <instancedMesh
+        ref={gullWing}
+        args={[gullWingGeo, wingMaterial, FLOCK]}
         frustumCulled={false}
         castShadow
       />
     </>
   );
+}
+
+/** A wing geometry with a per-bird flap attribute for `count` birds. */
+function withBeat(wing: THREE.BufferGeometry, count: number) {
+  const g = wing.clone();
+  g.setAttribute(
+    "beat",
+    new THREE.InstancedBufferAttribute(new Float32Array(count), 1),
+  );
+  return g;
 }
 
 /** Sets a bird's body and wings: nose pitched by `pitch`, wing tips

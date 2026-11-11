@@ -36,40 +36,120 @@ const REST = [2, 7] as const;
 /** How quickly they turn (per second). */
 const TURN = 3;
 
-const BODY = "#8a6a44";
-const HEAD = "#2f7a4a";
-const BILL = "#e8b83a";
-const CHEST = "#d9cdb8";
+type DuckPalette = {
+  back: string;
+  flank: string;
+  chest: string;
+  rear: string;
+  head: string;
+  bill: string;
+  ring: string | null;
+  patch: string;
+};
+/** A mallard drake: green head, white collar, chestnut chest, grey sides,
+ * black behind, yellow bill — bold blocks of colour, which is what
+ * reads when a duck is a dozen pixels long. */
+const DRAKE: DuckPalette = {
+  back: "#8d8578",
+  flank: "#c4c2ba",
+  chest: "#7d4026",
+  rear: "#1d2027",
+  head: "#1b8250",
+  bill: "#f0cc3a",
+  ring: "#f6f3ea",
+  patch: "#2f5fb0",
+};
+/** And the hen: mottled brown all over, an orange bill. */
+const HEN: DuckPalette = {
+  back: "#7a5b3b",
+  flank: "#9b7b54",
+  chest: "#8d6c47",
+  rear: "#5f4630",
+  head: "#7d5f40",
+  bill: "#dd8a2c",
+  ring: null,
+  patch: "#4a6fb8",
+};
 
-/** A duck: a plump body low on the water, a round head on a short neck,
- * a flat bill, a pale chest. Along z (its heading). */
-const duckGeometry = (() => {
-  const body = new THREE.SphereGeometry(0.2, 7, 5);
-  body.scale(0.85, 0.6, 1.4);
-  const chest = new THREE.SphereGeometry(0.16, 6, 4);
-  chest.scale(0.8, 0.55, 1);
-  chest.translate(0, -0.01, 0.12);
-  const tail = new THREE.ConeGeometry(0.07, 0.16, 4);
-  tail.rotateX(-Math.PI / 2 - 0.5);
-  tail.translate(0, 0.08, -0.3);
-  const head = new THREE.SphereGeometry(0.11, 7, 5);
-  head.translate(0, 0.22, 0.2);
-  const bill = new THREE.BoxGeometry(0.1, 0.035, 0.12);
-  bill.translate(0, 0.19, 0.33);
-  return mergeGeometries([
-    painted(body, BODY),
-    painted(chest, CHEST),
-    painted(tail, BODY),
-    painted(head, HEAD),
-    painted(bill, BILL),
-  ]) as THREE.BufferGeometry;
-})();
+/** A duck: a plump, round body riding low, a big round head (herzie
+ * proportions), a wide flat bill, an upturned tail, a wing patch, and a
+ * pale ring of foam on the water round it. Along z (its heading), the
+ * waterline at y 0. */
+function duckGeometry(p: DuckPalette): THREE.BufferGeometry {
+  const sphere = (r: number, sx: number, sy: number, sz: number) =>
+    new THREE.SphereGeometry(r, 8, 6).scale(sx, sy, sz);
+  const parts: THREE.BufferGeometry[] = [
+    painted(sphere(0.22, 0.9, 0.62, 1.35).translate(0, 0.07, -0.02), p.back),
+    painted(sphere(0.2, 0.86, 0.5, 1.1).translate(0, 0.02, 0.02), p.flank),
+    painted(sphere(0.17, 0.85, 0.8, 0.9).translate(0, 0.1, 0.2), p.chest),
+    painted(sphere(0.15, 0.85, 0.7, 0.9).translate(0, 0.08, -0.3), p.rear),
+    // The tail, flicked up.
+    painted(
+      new THREE.ConeGeometry(0.07, 0.2, 4)
+        .rotateX(-Math.PI / 2 + 0.7)
+        .translate(0, 0.2, -0.46),
+      p.rear,
+    ),
+    // A patch on the folded wing.
+    painted(
+      new THREE.BoxGeometry(0.08, 0.02, 0.14).translate(0.15, 0.2, -0.1),
+      p.patch,
+    ),
+    painted(
+      new THREE.BoxGeometry(0.08, 0.02, 0.14).translate(-0.15, 0.2, -0.1),
+      p.patch,
+    ),
+    painted(sphere(0.15, 1, 1, 1).translate(0, 0.3, 0.27), p.head),
+    // The bill: wide and flat, an oversized one reads from far off.
+    painted(
+      new THREE.BoxGeometry(0.15, 0.045, 0.17).translate(0, 0.27, 0.46),
+      p.bill,
+    ),
+    painted(
+      new THREE.SphereGeometry(0.036, 5, 4).translate(0.1, 0.34, 0.36),
+      "#15171c",
+    ),
+    painted(
+      new THREE.SphereGeometry(0.036, 5, 4).translate(-0.1, 0.34, 0.36),
+      "#15171c",
+    ),
+    // Foam where it sits.
+    painted(
+      new THREE.RingGeometry(0.3, 0.46, 12)
+        .rotateX(-Math.PI / 2)
+        .scale(0.9, 1, 1.25)
+        .translate(0, 0.01, 0),
+      "#e6f1f7",
+    ),
+  ];
+  if (p.ring) {
+    parts.push(
+      painted(
+        new THREE.CylinderGeometry(0.095, 0.1, 0.045, 8).translate(
+          0,
+          0.2,
+          0.24,
+        ),
+        p.ring,
+      ),
+    );
+  }
+  return mergeGeometries(parts) as THREE.BufferGeometry;
+}
+const DRAKE_GEO = duckGeometry(DRAKE);
+const HEN_GEO = duckGeometry(HEN);
 const duckMaterial = new THREE.MeshLambertMaterial({
   vertexColors: true,
   flatShading: true,
+  side: THREE.DoubleSide,
 });
+/** Ducks are drawn this much bigger than they're built. */
+const DUCK_SIZE = 1.15;
 
 type Duck = {
+  drake: boolean;
+  /** Its place in its own mesh (drakes and hens are drawn apart). */
+  slot: number;
   x: number;
   z: number;
   heading: number;
@@ -102,7 +182,7 @@ const m4 = new THREE.Matrix4();
 const q = new THREE.Quaternion();
 const e = new THREE.Euler();
 const v = new THREE.Vector3();
-const one = new THREE.Vector3(1, 1, 1);
+const size = new THREE.Vector3(DUCK_SIZE, DUCK_SIZE, DUCK_SIZE);
 const none = new THREE.Vector3(0, 0, 0);
 
 export function Ducks({ map }: { map: TownMap }) {
@@ -128,6 +208,8 @@ export function Ducks({ map }: { map: TownMap }) {
       const near = water.filter(([x, z]) => Math.hypot(x - gx, z - gz) < 2.5);
       const [x, z] = near[Math.floor(rand() * near.length)];
       return {
+        drake: i % 2 === 0,
+        slot: 0,
         x,
         z,
         heading: rand() * Math.PI * 2,
@@ -138,16 +220,23 @@ export function Ducks({ map }: { map: TownMap }) {
       };
     });
   }, [water, rand]);
-  const mesh = useRef<THREE.InstancedMesh>(null);
+  const drakes = useRef<THREE.InstancedMesh>(null);
+  const hens = useRef<THREE.InstancedMesh>(null);
+  const nDrakes = ducks.filter((d) => d.drake).length;
 
   useFrame(({ clock }, dt) => {
-    const m = mesh.current;
-    if (!m) return;
+    const dm = drakes.current;
+    const hm = hens.current;
+    if (!dm || !hm) return;
     const t = clock.elapsedTime;
     const step = Math.min(dt, 0.1);
     const { x: px, z: pz } = ambient.uPlayer.value;
     const frozen = ambient.uIce.value > 0.5;
-    ducks.forEach((d, i) => {
+    let nd = 0;
+    let nh = 0;
+    ducks.forEach((d) => {
+      const m = d.drake ? dm : hm;
+      const i = d.drake ? nd++ : nh++;
       if (frozen) {
         m4.compose(none, q, none);
         m.setMatrixAt(i, m4);
@@ -209,27 +298,37 @@ export function Ducks({ map }: { map: TownMap }) {
       // paddles.
       const bob = Math.sin(t * 1.4 + d.phase) * 0.02;
       const paddling = d.to ? 1 : 0;
-      v.set(d.x, elevation(map, d.x, d.z) + SURFACE + 0.1 + bob, d.z);
+      v.set(d.x, elevation(map, d.x, d.z) + SURFACE + 0.04 + bob, d.z);
       e.set(
         paddling * Math.sin(t * 6 + d.phase) * 0.04,
         d.heading,
         Math.sin(t * 1.1 + d.phase * 0.7) * 0.03,
       );
       q.setFromEuler(e);
-      m4.compose(v, q, one);
+      m4.compose(v, q, size);
       m.setMatrixAt(i, m4);
     });
-    m.instanceMatrix.needsUpdate = true;
+    dm.instanceMatrix.needsUpdate = true;
+    hm.instanceMatrix.needsUpdate = true;
   });
 
   if (ducks.length === 0) return null;
   return (
-    <instancedMesh
-      key={ducks.length}
-      ref={mesh}
-      args={[duckGeometry, duckMaterial, ducks.length]}
-      frustumCulled={false}
-      castShadow
-    />
+    <>
+      <instancedMesh
+        key={`d${nDrakes}`}
+        ref={drakes}
+        args={[DRAKE_GEO, duckMaterial, Math.max(1, nDrakes)]}
+        frustumCulled={false}
+        castShadow
+      />
+      <instancedMesh
+        key={`h${ducks.length - nDrakes}`}
+        ref={hens}
+        args={[HEN_GEO, duckMaterial, Math.max(1, ducks.length - nDrakes)]}
+        frustumCulled={false}
+        castShadow
+      />
+    </>
   );
 }
