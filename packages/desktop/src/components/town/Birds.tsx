@@ -1,10 +1,20 @@
 import { mulberry32 } from "@herzies/shared";
 import { useFrame } from "@react-three/fiber";
-import { useLayoutEffect, useMemo, useRef } from "react";
+import { useMemo, useRef } from "react";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { ambient } from "./ambient";
 import { type Perch, ridgePerchesOf } from "./Buildings";
+import {
+  type Bird,
+  FLIGHT,
+  isPerched,
+  type Pose,
+  perchedBird,
+  startFlight,
+  stepBird,
+  wingWave,
+} from "./birdFlight";
 import {
   groundY,
   islandRadius,
@@ -34,10 +44,6 @@ const FLOCK_HEIGHT = [13, 20] as const;
 const SCARE_RANGE = 3.2;
 /** Left alone, a crow moves on by itself after this long (s). */
 const RESTLESS = [40, 110] as const;
-/** How fast a crow flies between perches, and how high it arcs over
- * the way. */
-const CROW_SPEED = 6;
-const CROW_ARC = 5;
 /** The top of a lamp post, as a perch (see lampPostGeometry's cap). */
 const LAMP_CAP_Y = 3.88;
 
@@ -180,13 +186,15 @@ const birdMaterial = flatLit();
 const wingMaterial = flatLit();
 wingMaterial.onBeforeCompile = (shader) => {
   shader.vertexShader = shader.vertexShader
-    .replace("#include <common>", "#include <common>\nattribute float beat;")
+    .replace("#include <common>", "#include <common>\nattribute vec2 beat;")
     .replace(
       "#include <begin_vertex>",
       `#include <begin_vertex>
 float reach = abs( position.x );
-transformed.y += reach * reach * 1.3 * beat;
-transformed.z -= reach * abs( beat ) * 0.12;`,
+// The shoulder's beat out to the tip's, which comes a moment later.
+float lift = mix( beat.x, beat.y, smoothstep( 0.2, 0.75, reach ) );
+transformed.y += reach * reach * 1.3 * lift;
+transformed.z -= reach * abs( lift ) * 0.12;`,
     );
 };
 wingMaterial.customProgramCacheKey = () => "bird-wing";
@@ -210,47 +218,17 @@ export function perchesOf(map: TownMap): Perch[] {
   return out;
 }
 
+/** A crow: its flight state (see birdFlight.ts), and the island's side
+ * of it — which perch it's on or heading for, and when it'll move on. */
 type Crow = {
-  /** Which perch it's on (or left). */
+  bird: Bird;
+  /** The perch it's on, or left. */
   perch: number;
-  /** Where it's flying to, or -1 when sitting. */
+  /** The perch it's heading for, or -1 when sitting. */
   to: number;
-  /** How far along the flight, 0–1. */
-  flight: number;
-  /** How long this flight takes (s). */
-  duration: number;
   /** Seconds until it moves on of its own accord. */
   restless: number;
-  phase: number;
-  /** Where its wings are in their beat (radians). */
-  wingPhase: number;
-  /** Where it is, and where it's facing. */
-  x: number;
-  y: number;
-  z: number;
-  heading: number;
 };
-
-/** The flight from one perch to another: a quick climb, a long glide
- * and a flared landing — not a symmetrical hump. */
-function flightPoint(
-  a: Perch,
-  b: Perch,
-  k: number,
-  out: THREE.Vector3,
-): THREE.Vector3 {
-  const dist = Math.hypot(b.x - a.x, b.z - a.z);
-  const arc = Math.min(CROW_ARC, 1.4 + dist * 0.22);
-  // Along the ground: away fast, easing into the landing.
-  const e = 1 - (1 - k) ** 1.7;
-  // Up early, then sinking the rest of the way in.
-  const lift = Math.sin(Math.PI * Math.min(1, k ** 0.6)) * arc;
-  return out.set(
-    a.x + (b.x - a.x) * e,
-    a.y + (b.y - a.y) * k + lift,
-    a.z + (b.z - a.z) * e,
-  );
-}
 
 /** Picks a perch for a crow to fly to: free, and some way off. */
 function nextPerch(
@@ -275,9 +253,20 @@ const m4 = new THREE.Matrix4();
 const q = new THREE.Quaternion();
 const e = new THREE.Euler();
 const v = new THREE.Vector3();
-const v2 = new THREE.Vector3();
 const scale = new THREE.Vector3();
 const hidden = new THREE.Vector3(0, 0, 0);
+/** The flock's birds' pose, one at a time. */
+const flockPose: Pose = {
+  x: 0,
+  y: 0,
+  z: 0,
+  heading: 0,
+  pitch: 0,
+  roll: 0,
+  beat: 0,
+  tip: 0,
+  spread: 1,
+};
 
 export function Birds({ map }: { map: TownMap }) {
   const perches = useMemo(() => perchesOf(map), [map]);
@@ -285,26 +274,22 @@ export function Birds({ map }: { map: TownMap }) {
   const crows = useMemo<Crow[]>(() => {
     const n = Math.min(MAX_CROWS, Math.floor(perches.length / 2));
     const taken = new Set<number>();
-    return Array.from({ length: n }, () => {
+    return Array.from({ length: n }, (_, i) => {
       let perch = Math.floor(rand() * perches.length);
       while (taken.has(perch)) perch = (perch + 1) % perches.length;
       taken.add(perch);
-      const p = perches[perch];
       return {
+        bird: perchedBird(perches[perch], i * 7.31 + rand() * 5, rand),
         perch,
         to: -1,
-        flight: 0,
-        duration: 1,
         restless: RESTLESS[0] + rand() * (RESTLESS[1] - RESTLESS[0]),
-        phase: rand() * 100,
-        wingPhase: 0,
-        x: p.x,
-        y: p.y,
-        z: p.z,
-        heading: p.yaw,
       };
     });
   }, [perches, rand]);
+  /** Where each gull's wings are in their beat. */
+  const gullBeat = useRef(
+    Float64Array.from({ length: FLOCK }, (_, j) => j * 0.37),
+  );
   const radius = islandRadius(map);
   /** The flock: when it next sets out, from where, which way. */
   const flock = useRef({
@@ -342,65 +327,40 @@ export function Birds({ map }: { map: TownMap }) {
 
     // The crows.
     crows.forEach((c, i) => {
-      if (c.to < 0) {
-        const near = Math.hypot(c.x - px, c.z - pz) < SCARE_RANGE;
+      const b = c.bird;
+      if (isPerched(b)) {
+        // Back on a perch (or never left).
+        if (c.to >= 0) {
+          c.perch = c.to;
+          c.to = -1;
+        }
+        const near = Math.hypot(b.x - px, b.z - pz) < SCARE_RANGE;
+        const flushed = b.flushIn <= 0;
         c.restless -= step;
-        if (near || c.restless <= 0) {
+        if (near || flushed || c.restless <= 0) {
           const to = nextPerch(perches, taken, c.perch, rand);
-          if (to >= 0) {
-            taken.add(to);
-            const a = perches[c.perch];
-            const b = perches[to];
+          const startled = near || flushed;
+          if (to >= 0 && startFlight(b, perches[to], startled, rand)) {
             c.to = to;
-            c.flight = 0;
-            c.duration = Math.max(
-              1.6,
-              Math.hypot(a.x - b.x, a.z - b.z) / CROW_SPEED + 0.8,
-            );
-          }
+            taken.add(to);
+            // The neighbours go a beat after.
+            if (startled) {
+              for (const o of crows) {
+                if (o === c || !isPerched(o.bird)) continue;
+                if (o.bird.flushIn !== Number.POSITIVE_INFINITY) continue;
+                const d = Math.hypot(o.bird.x - b.x, o.bird.z - b.z);
+                if (d < FLIGHT.flushRange) {
+                  o.bird.flushIn =
+                    FLIGHT.flushDelay[0] +
+                    rand() * (FLIGHT.flushDelay[1] - FLIGHT.flushDelay[0]);
+                }
+              }
+            }
+          } else if (flushed) b.flushIn = Number.POSITIVE_INFINITY;
           c.restless = RESTLESS[0] + rand() * (RESTLESS[1] - RESTLESS[0]);
         }
       }
-      let beat = -1.3;
-      let pitch = 0;
-      if (c.to >= 0) {
-        const a = perches[c.perch];
-        const b = perches[c.to];
-        c.flight += step / c.duration;
-        const k = Math.min(1, c.flight);
-        flightPoint(a, b, k, v);
-        flightPoint(a, b, Math.min(1, k + 0.03), v2);
-        c.x = v.x;
-        c.y = v.y;
-        c.z = v.z;
-        if (k < 1) {
-          const run = Math.hypot(v2.x - v.x, v2.z - v.z);
-          if (run > 1e-4) c.heading = Math.atan2(v2.x - v.x, v2.z - v.z);
-          pitch = Math.atan2(v2.y - v.y, Math.max(run, 1e-3)) * 0.8;
-        }
-        // Flapping fastest at the take-off and the landing (a rush of
-        // quick, deep beats), settling to slower ones in the climb, and
-        // a few easy ones with glides between in the cruise.
-        const rush = Math.max(1 - k / 0.22, (k - 0.78) / 0.22, 0);
-        const cruise = k > 0.35 && k < 0.78;
-        const flaps = cruise
-          ? 0.2 + 0.8 * Math.max(0, Math.sin(t * 1.6 + c.phase))
-          : 1;
-        const rate = cruise ? 9 : 14 + 12 * Math.min(1, rush);
-        c.wingPhase += rate * step;
-        beat =
-          Math.sin(c.wingPhase) * (0.8 + 0.3 * rush) * flaps +
-          (1 - flaps) * 0.25;
-        if (k >= 1) {
-          c.perch = c.to;
-          c.to = -1;
-          c.heading = b.yaw;
-        }
-      }
-      // Sitting: a hop of the head now and then.
-      const bob =
-        c.to < 0 ? Math.max(0, Math.sin(t * 1.3 + c.phase)) ** 12 * 0.04 : 0;
-      place(body, wing, i, c.x, c.y + bob, c.z, c.heading, pitch, beat, 1);
+      place(body, wing, i, stepBird(b, step, rand), 1);
     });
 
     // The flock.
@@ -453,24 +413,29 @@ export function Birds({ map }: { map: TownMap }) {
       const z = f.z0 + f.dz * (along - back) + f.dx * out;
       const weave = Math.sin(t * 0.5 + j * 0.9);
       const y = f.y + Math.sin(t * 1.1 + j) * 0.4;
-      // Flapping in bursts, gliding between (each bird its own rhythm).
-      const going = Math.max(
+      // Flapping in bursts, gliding between (each bird its own rhythm
+      // and its own place in the beat, so the flock isn't in step).
+      const going = THREE.MathUtils.clamp(
+        (Math.sin(t * 0.9 + j * 1.7) + 0.5) * 2,
         0,
-        Math.min(1, (Math.sin(t * 0.9 + j * 1.7) + 0.5) * 2),
+        1,
       );
-      const beat = Math.sin(t * 10 + j * 0.8) * 0.8 * going + (1 - going) * 0.2;
-      place(
-        gBody,
-        gWing,
-        j,
-        x - f.dz * weave * 0.3,
-        y,
-        z + f.dx * weave * 0.3,
-        heading + weave * 0.05,
-        Math.cos(t * 1.1 + j) * 0.05,
-        beat,
-        1.35,
-      );
+      gullBeat.current[j] += (8 + (j % 3) * 0.7) * step;
+      const phase = gullBeat.current[j];
+      const amp = 0.85 * going;
+      const off = 0.2 * (1 - going);
+      const pose = flockPose;
+      pose.x = x - f.dz * weave * 0.3;
+      pose.y = y - wingWave(phase - 0.2) * 0.03 * amp;
+      pose.z = z + f.dx * weave * 0.3;
+      pose.heading = heading + weave * 0.05;
+      pose.pitch = Math.cos(t * 1.1 + j) * 0.05;
+      // Banking a little into the weave.
+      pose.roll = -Math.cos(t * 0.5 + j * 0.9) * 0.12;
+      pose.beat = wingWave(phase) * amp + off;
+      pose.tip = wingWave(phase - 0.14) * amp * 1.1 + off;
+      pose.spread = 1;
+      place(gBody, gWing, j, pose, 1.35);
     }
     for (const m of [body, wing, gBody, gWing]) {
       m.instanceMatrix.needsUpdate = true;
@@ -515,36 +480,31 @@ function withBeat(wing: THREE.BufferGeometry, count: number) {
   const g = wing.clone();
   g.setAttribute(
     "beat",
-    new THREE.InstancedBufferAttribute(new Float32Array(count), 1),
+    new THREE.InstancedBufferAttribute(new Float32Array(count * 2), 2),
   );
   return g;
 }
 
-/** Sets a bird's body and wings: nose pitched by `pitch`, wing tips
- * lifted by `beat` (negative: folded down along the back). */
+/** Sets a bird's body and wings from its pose: tilted and banked, the
+ * wings' shoulders and tips at their own heights (see wingMaterial). */
 function place(
   body: THREE.InstancedMesh,
   wing: THREE.InstancedMesh,
   i: number,
-  x: number,
-  y: number,
-  z: number,
-  heading: number,
-  pitch: number,
-  beat: number,
+  p: Pose,
   size: number,
 ) {
-  v.set(x, y, z);
-  e.set(-pitch, heading, 0, "YXZ");
+  v.set(p.x, p.y, p.z);
+  e.set(-p.pitch, p.heading, p.roll, "YXZ");
   q.setFromEuler(e);
   scale.setScalar(size);
   m4.compose(v, q, scale);
   body.setMatrixAt(i, m4);
   // Folded wings are narrow as well as down.
-  scale.set(beat < -1 ? 0.35 * size : size, size, size);
+  scale.set(p.spread * size, size, size);
   m4.compose(v, q, scale);
   wing.setMatrixAt(i, m4);
   const attr = wing.geometry.attributes.beat as THREE.BufferAttribute;
-  attr.setX(i, beat);
+  attr.setXY(i, p.beat, p.tip);
   attr.needsUpdate = true;
 }

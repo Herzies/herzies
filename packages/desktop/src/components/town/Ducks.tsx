@@ -15,6 +15,7 @@ import {
 } from "./map";
 import { painted } from "./parts";
 import { SURFACE } from "./Water";
+import { WAKE_SIZE, wakeGeometry, wakeMaterial } from "./wake";
 
 // Ducks on the ponds: a few paddling about on the open water, drifting
 // from spot to spot, bobbing on the ripples, and paddling off (quicker)
@@ -138,20 +139,12 @@ const duckMaterial = new THREE.MeshLambertMaterial({
 /** Ducks are drawn this much bigger than they're built. */
 const DUCK_SIZE = 1.15;
 
-/** Ripples spreading from each duck: this many at once, each taking this
- * long (s) to widen and fade. They come faster when it paddles. */
-const RIPPLES = 3;
-const RIPPLE_LIFE = 2.2;
-const rippleGeometry = new THREE.RingGeometry(0.85, 1, 20).rotateX(
-  -Math.PI / 2,
-);
-/** Added to the water, so a ripple only brightens it, and a dimmer
- * colour is a fainter ripple (fading by instance colour). */
-const rippleMaterial = new THREE.MeshBasicMaterial({
-  transparent: true,
-  depthWrite: false,
-  blending: THREE.AdditiveBlending,
-});
+/** How quickly a duck gets going and stops (units/s²), and how fast its
+ * wake builds and dies away (per second). */
+const ACCEL = 1.7;
+const DECEL = 2.6;
+const WAKE_RISE = 3.2;
+const WAKE_FALL = 1.4;
 
 type Duck = {
   drake: boolean;
@@ -162,7 +155,12 @@ type Duck = {
   heading: number;
   to: { x: number; z: number } | null;
   rest: number;
+  /** The pace it's aiming for, and the pace it's at. */
   speed: number;
+  vel: number;
+  /** How much it's moving, 0–1, eased: what the wake follows. */
+  motion: number;
+  headingRate: number;
   phase: number;
 };
 
@@ -224,21 +222,32 @@ export function Ducks({ map }: { map: TownMap }) {
         to: null,
         rest: rand() * REST[1],
         speed: PADDLE,
+        vel: 0,
+        motion: 0,
+        headingRate: 0,
         phase: rand() * 100,
       };
     });
   }, [water, rand]);
   const drakes = useRef<THREE.InstancedMesh>(null);
   const hens = useRef<THREE.InstancedMesh>(null);
-  const ripples = useRef<THREE.InstancedMesh>(null);
-  const tint = useMemo(() => new THREE.Color(), []);
+  const wakes = useRef<THREE.InstancedMesh>(null);
+  const wakeGeo = useMemo(() => {
+    const g = wakeGeometry(ducks.length);
+    const seed = g.attributes.seed as THREE.BufferAttribute;
+    ducks.forEach((d, i) => {
+      seed.setX(i, (d.phase * 0.137) % 1);
+    });
+    return g;
+  }, [ducks]);
+  const wakeMat = useMemo(wakeMaterial, []);
   const nDrakes = ducks.filter((d) => d.drake).length;
 
   useFrame(({ clock }, dt) => {
     const dm = drakes.current;
     const hm = hens.current;
-    const rm = ripples.current;
-    if (!dm || !hm || !rm) return;
+    const wm = wakes.current;
+    if (!dm || !hm || !wm) return;
     const t = clock.elapsedTime;
     const step = Math.min(dt, 0.1);
     const { x: px, z: pz } = ambient.uPlayer.value;
@@ -251,7 +260,7 @@ export function Ducks({ map }: { map: TownMap }) {
       if (frozen) {
         m4.compose(none, q, none);
         m.setMatrixAt(i, m4);
-        for (let r = 0; r < RIPPLES; r++) rm.setMatrixAt(di * RIPPLES + r, m4);
+        wm.setMatrixAt(di, m4);
         return;
       }
       const dx = d.x - px;
@@ -285,16 +294,34 @@ export function Ducks({ map }: { map: TownMap }) {
         const want = Math.atan2(tx, tz);
         let turn = want - d.heading;
         turn = Math.atan2(Math.sin(turn), Math.cos(turn));
-        d.heading += Math.max(-TURN * step, Math.min(TURN * step, turn));
-        const go = Math.min(dist, d.speed * step);
+        const turned = Math.max(-TURN * step, Math.min(TURN * step, turn));
+        d.heading += turned;
+        d.headingRate =
+          d.headingRate +
+          (turned / step - d.headingRate) * Math.min(1, step * 8);
+        // Turns on the spot first, then goes: the pace it aims for is
+        // held back until it faces where it's headed, and it brakes to a
+        // stop at the end (never past it).
+        const facing = Math.max(0, Math.cos(turn));
+        const stopping = Math.sqrt(2 * DECEL * dist) + 0.12;
+        const aim = Math.min(d.speed * facing * facing, stopping);
+        d.vel += Math.max(-DECEL * step, Math.min(ACCEL * step, aim - d.vel));
+        const go = Math.min(dist, d.vel * step);
         d.x += Math.sin(d.heading) * go;
         d.z += Math.cos(d.heading) * go;
-        if (dist <= 0.05) {
+        if (dist <= 0.06) {
           d.to = null;
           d.rest = REST[0] + rand() * (REST[1] - REST[0]);
           d.speed = PADDLE;
         }
       } else {
+        // Gliding to a stop, the wake dying away behind it.
+        d.vel = Math.max(0, d.vel - DECEL * step);
+        d.headingRate *= Math.max(0, 1 - step * 6);
+        if (d.vel > 0) {
+          d.x += Math.sin(d.heading) * d.vel * step;
+          d.z += Math.cos(d.heading) * d.vel * step;
+        }
         d.rest -= step;
         if (d.rest <= 0) {
           const a = rand() * Math.PI * 2;
@@ -306,37 +333,41 @@ export function Ducks({ map }: { map: TownMap }) {
           else d.rest = 0.5;
         }
       }
-      // Riding the ripples (see Water: small and slow), nodding as it
+      // Riding the ripples (see Water: small and slow), the body
+      // leaning into its turns and rocking with each stroke as it
       // paddles.
+      const moving = Math.min(1, d.vel / 0.9);
+      d.motion +=
+        (moving - d.motion) *
+        Math.min(1, step * (moving > d.motion ? WAKE_RISE : WAKE_FALL));
       const bob = Math.sin(t * 1.4 + d.phase) * 0.02;
-      const paddling = d.to ? 1 : 0;
-      v.set(d.x, elevation(map, d.x, d.z) + SURFACE + 0.04 + bob, d.z);
+      const stroke =
+        Math.sin(t * (4 + 3 * d.motion) + d.phase) * 0.045 * d.motion;
+      const surface = elevation(map, d.x, d.z) + SURFACE;
+      v.set(d.x, surface + 0.04 + bob, d.z);
       e.set(
-        paddling * Math.sin(t * 6 + d.phase) * 0.04,
+        stroke,
         d.heading,
-        Math.sin(t * 1.1 + d.phase * 0.7) * 0.03,
+        Math.sin(t * 1.1 + d.phase * 0.7) * 0.03 -
+          Math.max(-0.25, Math.min(0.25, d.headingRate * 0.12)) * d.motion,
       );
       q.setFromEuler(e);
       m4.compose(v, q, size);
       m.setMatrixAt(i, m4);
-      // Ripples spreading out and fading, a steadier stream (and a longer
-      // oval, trailing back) when it's moving.
-      const pace = d.to ? 1.8 : 1;
-      for (let r = 0; r < RIPPLES; r++) {
-        const age = (t * pace * 0.45 + d.phase + r / RIPPLES) % 1;
-        const grow = 0.45 + age * (d.to ? 1.1 : 0.9);
-        v.set(d.x, elevation(map, d.x, d.z) + SURFACE + 0.07, d.z);
-        e.set(0, d.heading, 0);
-        q.setFromEuler(e);
-        scale.set(grow, 1, grow * (d.to ? 1.5 : 1.05));
-        m4.compose(v, q, scale);
-        rm.setMatrixAt(di * RIPPLES + r, m4);
-        const fade = (1 - age) * (1 - age) * Math.min(1, age * 6) * 0.85;
-        rm.setColorAt(di * RIPPLES + r, tint.setScalar(fade));
-      }
+      // Its wake, flat on the water, turned with it.
+      v.y = surface + 0.07;
+      e.set(0, d.heading, 0);
+      q.setFromEuler(e);
+      scale.set(WAKE_SIZE, 1, WAKE_SIZE);
+      m4.compose(v, q, scale);
+      wm.setMatrixAt(di, m4);
+      (wm.geometry.attributes.motion as THREE.BufferAttribute).setX(
+        di,
+        d.motion,
+      );
     });
-    rm.instanceMatrix.needsUpdate = true;
-    if (rm.instanceColor) rm.instanceColor.needsUpdate = true;
+    wm.instanceMatrix.needsUpdate = true;
+    (wm.geometry.attributes.motion as THREE.BufferAttribute).needsUpdate = true;
     dm.instanceMatrix.needsUpdate = true;
     hm.instanceMatrix.needsUpdate = true;
   });
@@ -359,10 +390,11 @@ export function Ducks({ map }: { map: TownMap }) {
         castShadow
       />
       <instancedMesh
-        key={`r${ducks.length}`}
-        ref={ripples}
-        args={[rippleGeometry, rippleMaterial, ducks.length * RIPPLES]}
+        key={`w${ducks.length}`}
+        ref={wakes}
+        args={[wakeGeo, wakeMat, ducks.length]}
         frustumCulled={false}
+        renderOrder={1}
       />
     </>
   );
