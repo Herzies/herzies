@@ -31,7 +31,6 @@ import { keepAtHome } from "./HomeLayer";
 import { HomeShadow } from "./HomeShadow";
 import { homeMode } from "./homeMode";
 import type { TownInput } from "./input";
-import { landed } from "./landings";
 import { groundY, petWalkable, type TownMap } from "./map";
 import {
   ICE_GRIP,
@@ -406,7 +405,6 @@ export function Player({
 
   const stillFor = useRef(0);
   const downed = useRef(0);
-  const wasAirborne = useRef(false);
 
   // At Home, a drag spins the herzie where it stands (the view stays put),
   // with a flick's spin running on and slowing.
@@ -557,12 +555,6 @@ export function Player({
         : rt.playerSpeed,
     );
     downed.current = applyDowned(herzie, downInRaid(), downed.current, dt);
-    // Back on the ground from a hop: a puff of dust at its feet.
-    if (wasAirborne.current && !herzie.airborne) {
-      const { x, y, z } = herzie.root.position;
-      landed(x, y, z, ambient.uTime.value);
-    }
-    wasAirborne.current = herzie.airborne;
     townLive.jumps = herzie.jumps;
     // Through a portal: spun down into the disc, and back up out of the
     // far one.

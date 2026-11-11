@@ -45,7 +45,6 @@ import { assistTarget, type Vec3, waveField } from "./combat/waves";
 import { applyDowned, entityDown } from "./downed";
 import { footprints, Trail } from "./footprints";
 import { HeadBubble } from "./HeadBubble";
-import { landed } from "./landings";
 import { groundY, petWalkable, type TownMap, worldRadius } from "./map";
 import { ICE_SPEED, onIce } from "./movement";
 import { NAME_SHADOW, nameOpacity } from "./nameFade";
@@ -148,7 +147,6 @@ function RemoteHerzie({
   /** Their jump bit last frame; null until the first state, so a herzie
    * doesn't hop just for showing up. */
   const jumpBit = useRef<number | null>(null);
-  const wasAirborne = useRef(false);
   useEffect(() => () => void entityAt.delete(remote.id), [remote.id]);
 
   const tag = useRef<HTMLButtonElement>(null);
@@ -270,12 +268,6 @@ function RemoteHerzie({
       dt,
       onIce(map, s.x, s.z, seasonNow.look.ice) ? s.speed / ICE_SPEED : s.speed,
     );
-    // Back on the ground from a hop: a puff of dust at their feet.
-    if (wasAirborne.current && !herzie.airborne) {
-      const { x, y, z } = herzie.root.position;
-      landed(x, y, z, ambient.uTime.value);
-    }
-    wasAirborne.current = herzie.airborne;
     if (herzie.released && throwsDiscs) {
       // Never waiting on our idea of their catch: a disc of theirs still
       // out from that hand is let go (see DiscField.throw).

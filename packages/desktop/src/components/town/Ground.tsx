@@ -28,7 +28,7 @@ const PLANKS_PER_CELL = 4;
 const RAIL_HEIGHT = 0.45;
 /** Quads a side for a cell where the ground changes, so banks slope and
  * borders blend smoothly. A cell that's the same all round stays one. */
-const SUB = 4;
+const SUB = 8;
 
 /** A cell corner, pulled in onto the island's edge if it's past it — so
  * the rim cells fill the island out to a round edge. */
@@ -74,7 +74,9 @@ function groundPoint(
   const { grass, gravel, wet } = groundBlend(map, x, z);
   under.copy(BANK_COLOR).lerp(BED_COLOR, smooth(0.6, 0.9, wet));
   const k = smooth(0.3, 0.6, wet);
-  const shade = shadeAt(map, x, z) * 0.012;
+  // Damp ground darkens towards the waterline, so the bank reads wet.
+  const shade =
+    shadeAt(map, x, z) * 0.012 - 0.07 * smooth(0.0, 0.3, wet) * (1 - k);
   asGrass.copy(GRASS_COLOR).lerp(under, k).offsetHSL(0, 0, shade);
   asGravel.copy(GRAVEL_COLOR).lerp(under, k).offsetHSL(0, 0, shade);
   const dry = grass + gravel;

@@ -5,7 +5,6 @@ import * as THREE from "three";
 import { ambient, gustAt, seasonNow } from "./ambient";
 import { chimneysOf } from "./Buildings";
 import { FOOTPRINT_LIFE, footprints, Trail } from "./footprints";
-import { LAND_PUFFS, landings, PUFF_LIFE, SPECKS } from "./landings";
 import {
   cellCenter,
   groundY,
@@ -35,7 +34,6 @@ export function Particles({ map }: { map: TownMap }) {
       <FallingLeaves map={map} />
       <Snowfall />
       <SnowPrints map={map} />
-      <LandingDust />
     </>
   );
 }
@@ -618,60 +616,6 @@ function Snowfall() {
         i < falling ? 0.9 : 0,
       );
     });
-    pts.flush();
-  });
-  return (
-    <points
-      geometry={pts.geometry}
-      material={pts.material}
-      frustumCulled={false}
-    />
-  );
-}
-
-// --- Landing dust ----------------------------------------------------------------
-
-const DUST = new THREE.Color("#a89a84");
-const SNOW_DUST = new THREE.Color("#eef2fa");
-
-/** Dust kicked up where a herzie lands (see landings.ts): a ring of
- * specks skimming out and up a little, then gone. White in the snow. */
-function LandingDust() {
-  const pts = usePoints(LAND_PUFFS * SPECKS, THREE.NormalBlending, true);
-  const color = useMemo(() => new THREE.Color(), []);
-  const shown = useRef(false);
-
-  useFrame(() => {
-    const t = ambient.uTime.value;
-    let any = false;
-    color.lerpColors(DUST, SNOW_DUST, ambient.uSnow.value);
-    landings.puffs.forEach((p, k) => {
-      const age = (t - p.born) / PUFF_LIFE;
-      const live = age >= 0 && age < 1;
-      any ||= live;
-      for (let j = 0; j < SPECKS; j++) {
-        const i = k * SPECKS + j;
-        if (!live) {
-          pts.set(i, 0, 0, 0, 0, 0);
-          continue;
-        }
-        const a = (j / SPECKS) * Math.PI * 2 + k;
-        // Out fast and slowing, lifting a little, swelling as it thins.
-        const out = 0.35 + 0.75 * (1 - (1 - age) * (1 - age));
-        const up = 0.08 + Math.sin(age * Math.PI) * 0.2;
-        pts.color(i, color);
-        pts.set(
-          i,
-          p.x + Math.cos(a) * out,
-          p.y + up,
-          p.z + Math.sin(a) * out,
-          0.08 + age * 0.1,
-          0.5 * (1 - age),
-        );
-      }
-    });
-    if (!any && !shown.current) return;
-    shown.current = any;
     pts.flush();
   });
   return (
