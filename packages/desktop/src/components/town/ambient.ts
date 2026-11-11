@@ -267,6 +267,7 @@ export function inSeason<M extends THREE.Material>(
       uBare: ambient.uBare,
       uBlossom: ambient.uBlossom,
       uSnow: ambient.uSnow,
+      uWet: ambient.uWet,
     });
     // Its world position, once the vertex is placed (after any swaying),
     // and for an instanced oak, which tree it is.
@@ -301,6 +302,7 @@ uniform float uFall;
 uniform float uBare;
 uniform float uBlossom;
 uniform float uSnow;
+uniform float uWet;
 varying vec3 vSeasonWorld;
 varying float vSeasonTree;
 varying float vSeasonLump;
@@ -364,6 +366,11 @@ ${
   float depth = uSnow * lies * ${trodden ? "mix( 0.55, 1.15, green )" : "1.15"};
   float cover = step( 1.0 - depth, drift );
   diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.7, 0.75, 0.84 ) * ( 0.94 + grain * 0.06 ), cover );
+  // Wet from the rain (see weather): what faces up goes darker and
+  // richer, in patches where the water lies, and the snow doesn't.
+  float soak = uWet * lies * ( 1.0 - cover ) * ( 0.6 + 0.4 * seasonNoise( xz * 1.3 + 50.0 ) );
+  diffuseColor.rgb *= 1.0 - soak * 0.38;
+  diffuseColor.rgb = mix( diffuseColor.rgb, diffuseColor.rgb * diffuseColor.rgb * 2.2, soak * 0.3 );
 }
 #include <alphamap_fragment>`,
       );

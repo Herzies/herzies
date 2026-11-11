@@ -94,6 +94,7 @@ import {
   townSave,
 } from "./components/town/runtime";
 import { dayOfYear } from "./components/town/Seasons";
+import { weatherOverride } from "./components/town/weather";
 import { CastBar, SkillHud } from "./components/town/SkillHud";
 import TownCanvas from "./components/town/TownCanvas";
 import { setVitals } from "./components/town/vitals";
@@ -121,6 +122,11 @@ const sandboxHour = () => {
   return (sky.hour + ((performance.now() - sky.setAt) / 1000) * speed) % 24;
 };
 const sandboxSeason = () => sky.day ?? dayOfYear();
+// The weather: ?rain=0.6 (&storm=1) to look at it; else the clock's.
+if (params.has("rain")) {
+  weatherOverride.rain = Number(params.get("rain"));
+  weatherOverride.storm = params.get("storm") === "1";
+}
 
 /** "18:30". */
 const clockText = (h: number) =>

@@ -34,6 +34,10 @@ export const skyUniforms = {
   /** How much of the sky the clouds hide, 0–1: the stars and the aurora
    * are behind them (see weather). */
   uOvercast: { value: 0 },
+  /** Lightning: how bright the flash is right now, 0–1. */
+  uFlash: { value: 0 },
+  /** How strong the rainbow is, 0–1 (see weather). */
+  uRainbow: { value: 0 },
 };
 
 /** How often a star falls: one every this many seconds, give or take. */
@@ -188,6 +192,8 @@ export function Sky() {
           uniform vec4 uShoot;
           uniform vec3 uShootTo;
           uniform float uOvercast;
+          uniform float uFlash;
+          uniform float uRainbow;
           varying vec3 vDir;
           // Angular radii, as cosines: the sun about 2.6 degrees, the moon 1.8.
           const float SUN_DISC = 0.99897;
@@ -264,12 +270,36 @@ export function Sky() {
             float life = sin(k * 3.14159);
             return vec3(1.0, 0.97, 0.9) * streak * along * along * life * 1.6;
           }
+          // A rainbow: a ring 42 degrees out from the point opposite the
+          // sun, red outside to violet inside, and a fainter second one
+          // further out, the colours the other way round.
+          vec3 rainbow(vec3 dir) {
+            if (uRainbow <= 0.0) return vec3(0.0);
+            float a = degrees(acos(clamp(dot(dir, -uSunDir), -1.0, 1.0)));
+            // 0 at the inner (violet) edge, 1 at the outer (red).
+            float k = (a - 40.4) / 2.2;
+            float k2 = 1.0 - (a - 50.6) / 2.8;
+            float band = step(0.0, k) * step(k, 1.0);
+            float band2 = step(0.0, k2) * step(k2, 1.0) * 0.3;
+            float u = band > 0.0 ? k : k2;
+            if (band + band2 <= 0.0) return vec3(0.0);
+            // Violet, blue, green, yellow, orange, red.
+            vec3 colour = u < 0.2 ? mix(vec3(0.55, 0.2, 0.8), vec3(0.2, 0.4, 1.0), u / 0.2)
+              : u < 0.4 ? mix(vec3(0.2, 0.4, 1.0), vec3(0.2, 0.85, 0.3), (u - 0.2) / 0.2)
+              : u < 0.6 ? mix(vec3(0.2, 0.85, 0.3), vec3(1.0, 0.9, 0.2), (u - 0.4) / 0.2)
+              : u < 0.8 ? mix(vec3(1.0, 0.9, 0.2), vec3(1.0, 0.55, 0.15), (u - 0.6) / 0.2)
+              : mix(vec3(1.0, 0.55, 0.15), vec3(0.95, 0.2, 0.2), (u - 0.8) / 0.2);
+            // Faded into the sky towards the horizon.
+            float strength = (band + band2) * uRainbow * 0.4 * smoothstep(0.0, 0.25, dir.y);
+            return colour * strength;
+          }
           void main() {
             vec3 dir = normalize(vDir);
             float h = dir.y;
             vec3 c = h > 0.0
               ? mix(uHorizon, uTop, smoothstep(0.0, 0.6, h))
               : mix(uHorizon, uBottom, smoothstep(0.0, 0.5, -h));
+            c += rainbow(dir);
             // Each sinks into the haze at the horizon: dimmer the lower the
             // pixel, and fading out as it sets rather than cut off by it.
             float haze = smoothstep(-0.03, 0.14, h);
@@ -292,6 +322,8 @@ export function Sky() {
             float moonUp = smoothstep(-0.06, 0.06, uMoonDir.y) * haze * (1.0 - uOvercast * 0.85);
             c += vec3(0.55, 0.62, 0.8) * pow(max(toMoon, 0.0), 90.0) * 0.4 * moonUp;
             c = mix(c, vec3(0.95, 0.97, 1.0), step(MOON_DISC, toMoon) * moonUp);
+            // Lightning: the whole sky lit from behind the clouds.
+            c = mix(c, vec3(0.85, 0.88, 1.0), uFlash * 0.75);
             gl_FragColor = vec4(c, 1.0);
             #include <colorspace_fragment>
           }

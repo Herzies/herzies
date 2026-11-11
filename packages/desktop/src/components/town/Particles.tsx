@@ -209,7 +209,7 @@ function Fireflies({ map }: { map: TownMap }) {
         f.y + Math.sin(p * 1.3) * 0.4,
         f.z + Math.cos(p * 0.9) * 1.2,
         0.13,
-        glow * night * seasonNow.look.fireflies,
+        glow * night * seasonNow.look.fireflies * (1 - ambient.uRain.value),
       );
     });
     pts.flush();
@@ -410,7 +410,8 @@ function Butterflies({ map }: { map: TownMap }) {
     // Gone by night: tucked away (scaled to nothing).
     const day =
       (1 - THREE.MathUtils.smoothstep(ambient.uNight.value, 0.3, 0.6)) *
-      seasonNow.look.butterflies;
+      seasonNow.look.butterflies *
+      (1 - THREE.MathUtils.smoothstep(ambient.uRain.value, 0.05, 0.4));
     flies.forEach((f, i) => {
       const p = f.phase + t * 0.6;
       pos.set(

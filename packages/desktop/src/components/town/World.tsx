@@ -14,6 +14,7 @@ import { MapColliders, Props } from "./Props";
 import { Room } from "./Room";
 import { HOME_MAP, TOWN_MAPS_LOCAL } from "./runtime";
 import type { Season } from "./Seasons";
+import { Weather } from "./Rain";
 
 /** The cave's air: nearly black, a touch of violet. */
 const DARK_ROOM = "#09070e";
@@ -112,6 +113,7 @@ export function World({
       <Bunting map={map} />
       <Birds map={map} />
       <Ducks map={map} />
+      <Weather />
       <Particles map={map} />
       <MapColliders key={mapId(map)} map={map} />
     </>

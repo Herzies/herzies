@@ -102,6 +102,7 @@ function waterMaterial(): THREE.MeshLambertMaterial {
         /* glsl */ `#include <common>
 uniform float uTime;
 uniform float uIce;
+uniform float uRain;
 const float ICE_RISE = ${(-SURFACE - 0.02).toFixed(3)};
 attribute float shore;
 varying float vShore;
@@ -119,7 +120,9 @@ float calm = smoothstep( 0.0, 0.6, shore ) * ( 1.0 - uIce );
 transformed.y += uIce * ICE_RISE;
 transformed.y += calm * 0.035 * (
   sin( wp.x * 1.7 + uTime * 1.3 ) + sin( wp.z * 2.1 - uTime * 1.1 )
-);`,
+);
+// Rain on it (see weather): a quick restless chop on top.
+transformed.y += calm * uRain * 0.025 * sin( wp.x * 7.3 + wp.z * 5.1 + uTime * 9.0 );`,
       );
     shader.fragmentShader = shader.fragmentShader
       .replace(
@@ -128,6 +131,7 @@ transformed.y += calm * 0.035 * (
 uniform float uTime;
 uniform float uFoam;
 uniform float uIce;
+uniform float uRain;
 // Smooth value noise: random heights on a grid, eased between.
 float hash21( vec2 p ) {
   p = fract( p * vec2( 123.34, 456.21 ) );
@@ -162,7 +166,13 @@ float glint = smoothstep( 0.66, 0.85, n1 * n2 * 1.25 );
 // to a faint even sheen instead.
 vec2 gpx = fwidth( p );
 float glintFar = smoothstep( 0.12, 0.35, max( gpx.x, gpx.y ) );
-diffuseColor.rgb += mix( glint, 0.05, glintFar * 0.8 ) * 0.28;
+diffuseColor.rgb += mix( glint, 0.05, glintFar * 0.8 ) * 0.28 * ( 1.0 - uRain * 0.7 );
+// Raindrops: pale specks landing here and there, each gone in a blink.
+if ( uRain > 0.0 ) {
+  float tick = floor( uTime * 10.0 );
+  float drop = step( 1.0 - uRain * 0.06, hash21( floor( p * 6.0 ) + tick * 0.37 ) );
+  diffuseColor.rgb += drop * 0.35 * ( 1.0 - glintFar );
+}
 // Foam at the bank, its edge lapping in and out.
 float lap = uFoam * ( 0.75 + 0.25 * sin( uTime * 1.8 + vWorldXZ.x * 2.3 + vWorldXZ.y * 1.7 ) );
 float foam = 1.0 - smoothstep( lap * 0.6, lap, vShore );
