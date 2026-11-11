@@ -143,11 +143,11 @@ const SHOULDER = 0.29;
 function wingGeometry(p: Palette): THREE.BufferGeometry {
   const g = new THREE.BufferGeometry();
   const side = (m: number) => {
-    const A = [0, 0, 0.16];
-    const B = [m * 0.34, 0, 0.14];
-    const C = [m * 0.8, 0.02, -0.24];
-    const D = [0, 0, -0.22];
-    const E = [m * 0.4, 0, -0.2];
+    const A = [0, 0, 0.13];
+    const B = [m * 0.25, 0, 0.11];
+    const C = [m * 0.58, 0.02, -0.2];
+    const D = [0, 0, -0.17];
+    const E = [m * 0.29, 0, -0.16];
     return m > 0
       ? [...A, ...B, ...E, ...A, ...E, ...D, ...B, ...C, ...E]
       : [...A, ...E, ...B, ...A, ...D, ...E, ...B, ...E, ...C];
@@ -164,7 +164,7 @@ function wingGeometry(p: Palette): THREE.BufferGeometry {
   for (let i = 0; i < pos.length; i += 3) {
     c.copy(inner).lerp(
       tip,
-      THREE.MathUtils.smoothstep(Math.abs(pos[i]), 0.3, 0.8),
+      THREE.MathUtils.smoothstep(Math.abs(pos[i]), 0.22, 0.58),
     );
     colors.push(c.r, c.g, c.b);
   }
@@ -195,8 +195,8 @@ wingMaterial.onBeforeCompile = (shader) => {
 float spread = length( instanceMatrix[ 0 ].xyz ) / length( instanceMatrix[ 1 ].xyz );
 float reach = abs( position.x ) * spread;
 // The shoulder's beat out to the tip's, which comes a moment later.
-float lift = mix( beat.x, beat.y, smoothstep( 0.2, 0.75, reach ) );
-transformed.y += reach * reach * 1.3 * lift;
+float lift = mix( beat.x, beat.y, smoothstep( 0.15, 0.55, reach ) );
+transformed.y += reach * reach * 2.0 * lift;
 transformed.z -= reach * abs( lift ) * 0.12;`,
     );
 };
