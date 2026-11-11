@@ -8,45 +8,45 @@ import { skyUniforms } from "./Islands";
 import { groundY, type TownMap } from "./map";
 import { lightning, rainbowNow, stepLightning, weatherNow } from "./weather";
 
-// The weather, applied (see weather.ts for when it rains): the rain
-// itself, as streaks falling round the player; the ground going dark and
-// wet under it, and drying after; the lightning in a storm; and the
-// rainbow once a shower's passed. The sky and the lights go grey under it
-// in DayLight, which reads the same uniforms.
+// The weather, applied (see weather.ts for when it rains): the ground
+// going dark and wet under it, and drying after; the splashes where drops
+// land; the lightning in a storm; and the rainbow once a shower's passed.
+// The falling rain itself is drawn over the frame (see
+// vfx/rainOverlay.ts); the sky and the lights go grey under it in
+// DayLight, which reads the same uniforms.
 
-/** How many streaks fall at the hardest rain, in a box this far round
- * the player and this high. */
-const DROPS = 700;
-const RAIN_REACH = 11;
-const RAIN_HEIGHT = 11;
-/** How fast they fall, and how long each streak is. */
-const RAIN_SPEED = 14;
-const STREAK = 0.55;
-/** The last of a drop's fall (a fraction) it spends splashing. */
-const SPLASH_FALL = 0.04;
-/** How much the wind leans the rain. */
-const RAIN_LEAN = 0.3;
+/** How many splashes can be going at once, near the player. */
+const SPLASHES = 110;
+/** How far from the player they land, and how long each lasts (s). */
+const SPLASH_REACH = 9;
+const SPLASH_LIFE = 0.36;
+/** Each is a ring of this many segments. */
+const RING = 8;
 /** The ground takes this long to soak through (s), and this long to dry. */
 const SOAK = 45;
 const DRY = 240;
 /** How quickly the rain comes on and goes off, as shown (per second). */
 const RAIN_DAMP = 0.6;
 
-/** Streaks: bright at the foot, fading to nothing up the tail, so each
- * reads as a falling drop rather than a stick; lit as the scene is, so
- * rain at night is dark. Alpha is per vertex. */
-const rainMaterial = new THREE.ShaderMaterial({
+/** The ring's corners, unit size. */
+const RING_AT = Array.from({ length: RING }, (_, i) => {
+  const a = (i / RING) * Math.PI * 2;
+  return [Math.cos(a), Math.sin(a)] as const;
+});
+
+/** Lines with a fade per vertex, lit as the scene is (so rain at night is
+ * dark), and faint right at the camera and far off. */
+const splashMaterial = new THREE.ShaderMaterial({
   transparent: true,
   depthWrite: false,
-  uniforms: { uLight: ambient.uLight, uRain: ambient.uRain },
+  uniforms: { uLight: ambient.uLight },
   vertexShader: /* glsl */ `
     attribute float alpha;
     varying float vAlpha;
     void main() {
       vec4 mv = modelViewMatrix * vec4( position, 1.0 );
-      // Faint right at the camera and far off, clearest in between.
       float depth = -mv.z;
-      vAlpha = alpha * smoothstep( 1.5, 6.0, depth ) * ( 1.0 - smoothstep( 14.0, 26.0, depth ) );
+      vAlpha = alpha * smoothstep( 1.5, 5.0, depth ) * ( 1.0 - smoothstep( 16.0, 28.0, depth ) );
       gl_Position = projectionMatrix * mv;
     }
   `,
@@ -55,126 +55,96 @@ const rainMaterial = new THREE.ShaderMaterial({
     varying float vAlpha;
     void main() {
       if ( vAlpha <= 0.01 ) discard;
-      gl_FragColor = vec4( vec3( 0.82, 0.9, 0.98 ) * max( uLight, vec3( 0.25 ) ), vAlpha * 0.75 );
+      gl_FragColor = vec4( vec3( 0.82, 0.9, 0.98 ) * max( uLight, vec3( 0.3 ) ), vAlpha * 0.8 );
       #include <colorspace_fragment>
     }
   `,
 });
 
-/** Rain falling round the player: streaks on the wind, wrapped round a
- * box so it never runs out, like the snow — and a flat ring of splash
- * where each one lands. */
-function Rain({ map }: { map: TownMap }) {
-  const drops = useMemo(() => {
-    const rand = mulberry32(1111);
-    return Array.from({ length: DROPS }, () => ({
-      x: rand() * RAIN_REACH * 2,
-      y: rand() * RAIN_HEIGHT,
-      z: rand() * RAIN_REACH * 2,
-      speed: 0.85 + rand() * 0.3,
-    }));
-  }, []);
-  /** Streaks (two vertices each) then splashes (four: a flat "—"). */
+/**
+ * Where drops land: a ring that starts as a speck and spreads and fades —
+ * the usual splash of a pixel-art game, kept apart from the falling rain
+ * and only near the player, where it can be seen. Each is placed once,
+ * where it lands, and costs nothing to keep; the ring's ground is read
+ * when it's born, not every frame.
+ */
+function Splashes({ map }: { map: TownMap }) {
+  const rand = useMemo(() => mulberry32(2222), []);
+  const spots = useMemo(
+    () =>
+      Array.from({ length: SPLASHES }, () => ({
+        x: 0,
+        y: 0,
+        z: 0,
+        born: Number.NEGATIVE_INFINITY,
+      })),
+    [],
+  );
   const geometry = useMemo(() => {
     const g = new THREE.BufferGeometry();
     g.setAttribute(
       "position",
-      new THREE.BufferAttribute(new Float32Array(DROPS * 6), 3),
+      new THREE.BufferAttribute(new Float32Array(SPLASHES * RING * 6), 3),
     );
     g.setAttribute(
       "alpha",
-      new THREE.BufferAttribute(new Float32Array(DROPS * 2), 1),
+      new THREE.BufferAttribute(new Float32Array(SPLASHES * RING * 2), 1),
     );
     g.setDrawRange(0, 0);
     return g;
   }, []);
-  const splashes = useMemo(() => {
-    const g = new THREE.BufferGeometry();
-    g.setAttribute(
-      "position",
-      new THREE.BufferAttribute(new Float32Array(DROPS * 12), 3),
-    );
-    g.setAttribute(
-      "alpha",
-      new THREE.BufferAttribute(new Float32Array(DROPS * 4), 1),
-    );
-    g.setDrawRange(0, 0);
-    return g;
-  }, []);
-  useLayoutEffect(
-    () => () => {
-      geometry.dispose();
-      splashes.dispose();
-    },
-    [geometry, splashes],
-  );
+  useLayoutEffect(() => () => geometry.dispose(), [geometry]);
   const shown = useRef(0);
 
   useFrame(({ clock }) => {
     const rain = ambient.uRain.value;
-    const falling = Math.round(DROPS * Math.min(1, rain * 1.1));
-    if (falling === 0 && shown.current === 0) return;
-    shown.current = falling;
-    geometry.setDrawRange(0, falling * 2);
-    splashes.setDrawRange(0, falling * 4);
+    const count = Math.round(SPLASHES * Math.min(1, rain * 1.15));
+    if (count === 0 && shown.current === 0) return;
+    shown.current = count;
+    geometry.setDrawRange(0, count * RING * 2);
     const t = clock.elapsedTime;
-    const wind = ambient.uWindDir.value;
     const { x: px, z: pz } = ambient.uPlayer.value;
-    const wrap = (v: number, n: number) => ((v % n) + n) % n;
-    const span = RAIN_REACH * 2;
     const pos = geometry.attributes.position as THREE.BufferAttribute;
     const alpha = geometry.attributes.alpha as THREE.BufferAttribute;
-    const spos = splashes.attributes.position as THREE.BufferAttribute;
-    const salpha = splashes.attributes.alpha as THREE.BufferAttribute;
-    const lx = wind.x * RAIN_LEAN;
-    const lz = wind.y * RAIN_LEAN;
-    for (let i = 0; i < falling; i++) {
-      const d = drops[i];
-      const down = t * RAIN_SPEED * d.speed;
-      const x = px - RAIN_REACH + wrap(d.x + lx * down - px, span);
-      const z = pz - RAIN_REACH + wrap(d.z + lz * down - pz, span);
-      const ground = groundY(map, x, z);
-      // How far down its fall (0 at the top, 1 at the ground).
-      const fall = wrap(d.y - down, RAIN_HEIGHT) / RAIN_HEIGHT;
-      const y = ground + fall * RAIN_HEIGHT;
-      pos.setXYZ(i * 2, x, y, z);
-      pos.setXYZ(i * 2 + 1, x + lx * STREAK, y + STREAK, z + lz * STREAK);
-      alpha.setX(i * 2, 1);
-      alpha.setX(i * 2 + 1, 0);
-      // Landed (the last sliver of its fall): a splash that spreads a
-      // moment and fades.
-      const landed = fall < SPLASH_FALL;
-      const k = landed ? 1 - fall / SPLASH_FALL : 1;
-      const r = 0.06 + k * 0.14;
-      const a = landed ? 1 - k : 0;
-      const gy = ground + 0.03;
-      spos.setXYZ(i * 4, x - r, gy, z);
-      spos.setXYZ(i * 4 + 1, x - r * 0.4, gy, z);
-      spos.setXYZ(i * 4 + 2, x + r * 0.4, gy, z);
-      spos.setXYZ(i * 4 + 3, x + r, gy, z);
-      salpha.setX(i * 4, 0);
-      salpha.setX(i * 4 + 1, a);
-      salpha.setX(i * 4 + 2, a);
-      salpha.setX(i * 4 + 3, 0);
+    for (let i = 0; i < count; i++) {
+      const s = spots[i];
+      let age = (t - s.born) / SPLASH_LIFE;
+      if (age >= 1) {
+        // Lands somewhere new (a little while from now, so they don't
+        // all go off at once).
+        const a = rand() * Math.PI * 2;
+        const r = Math.sqrt(rand()) * SPLASH_REACH;
+        s.x = px + Math.cos(a) * r;
+        s.z = pz + Math.sin(a) * r;
+        s.y = groundY(map, s.x, s.z) + 0.03;
+        s.born = t + rand() * SPLASH_LIFE;
+        age = (t - s.born) / SPLASH_LIFE;
+      }
+      const live = age >= 0;
+      const k = live ? age : 0;
+      // A speck at first, quickly widening and slowing, wider than it is
+      // deep (it's flat on the ground).
+      const spread = 0.03 + 0.2 * (1 - (1 - k) * (1 - k));
+      const a = live ? (1 - k) * (1 - k) * 0.9 : 0;
+      for (let j = 0; j < RING; j++) {
+        const p = RING_AT[j];
+        const n = RING_AT[(j + 1) % RING];
+        const v = (i * RING + j) * 2;
+        pos.setXYZ(v, s.x + p[0] * spread, s.y, s.z + p[1] * spread * 0.8);
+        pos.setXYZ(v + 1, s.x + n[0] * spread, s.y, s.z + n[1] * spread * 0.8);
+        alpha.setX(v, a);
+        alpha.setX(v + 1, a);
+      }
     }
     pos.needsUpdate = true;
     alpha.needsUpdate = true;
-    spos.needsUpdate = true;
-    salpha.needsUpdate = true;
   });
   return (
-    <>
-      <lineSegments
-        geometry={geometry}
-        material={rainMaterial}
-        frustumCulled={false}
-      />
-      <lineSegments
-        geometry={splashes}
-        material={rainMaterial}
-        frustumCulled={false}
-      />
-    </>
+    <lineSegments
+      geometry={geometry}
+      material={splashMaterial}
+      frustumCulled={false}
+    />
   );
 }
 
@@ -204,5 +174,5 @@ export function Weather({ map }: { map: TownMap }) {
     const sunUp = MathUtils.smoothstep(skyUniforms.uSunDir.value.y, 0.05, 0.25);
     skyUniforms.uRainbow.value = rainbowNow() * sunUp * (1 - rain);
   });
-  return <Rain map={map} />;
+  return <Splashes map={map} />;
 }

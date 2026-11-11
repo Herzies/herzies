@@ -12,10 +12,12 @@ import { ambient } from "./ambient";
 import { townLook } from "./depth";
 import { homeMode, markWorldSettled } from "./homeMode";
 import { skyUniforms } from "./Islands";
+import { SUPERSAMPLE, townSupersample } from "./pixelSize";
 import { warpAmount } from "./portal";
 import { DistortionBuffer, SonicDistortionEffect } from "./vfx/distortion";
 import { HomeFadeEffect } from "./vfx/homeFade";
 import { LookEffect } from "./vfx/look";
+import { RainOverlayEffect } from "./vfx/rainOverlay";
 
 /** How many frames the world's drawn, unseen, to warm it (see Post). */
 const WARM_FRAMES = 3;
@@ -64,14 +66,16 @@ export function Post({ ao, distort }: { ao: boolean; distort: boolean }) {
   const effect = useMemo(() => new SonicDistortionEffect(buffer), [buffer]);
   const fade = useMemo(() => new HomeFadeEffect(), []);
   const look = useMemo(() => new LookEffect(), []);
+  const rainFx = useMemo(() => new RainOverlayEffect(), []);
   useEffect(
     () => () => {
       effect.dispose();
       buffer.dispose();
       fade.dispose();
       look.dispose();
+      rainFx.dispose();
     },
-    [effect, buffer, fade, look],
+    [effect, buffer, fade, look, rainFx],
   );
   const scene = useThree((s) => s.scene);
   // Settled at Home: nothing of the world left to draw.
@@ -173,6 +177,17 @@ export function Post({ ao, distort }: { ao: boolean; distort: boolean }) {
       THREE.MathUtils.smoothstep(sunY, -0.02, 0.08) *
       (1 - THREE.MathUtils.smoothstep(sunY, 0.12, 0.4));
     look.warm = low * (1 - ambient.uRain.value) * 0.8;
+    // The falling rain, in the Town's own pixels (supersampling taken out)
+    // and leaning with the wind across the view.
+    const right = camera.matrixWorld.elements;
+    const wind = ambient.uWindDir.value;
+    rainFx.set(
+      ambient.uTime.value,
+      ambient.uRain.value,
+      0.08 + (wind.x * right[0] + wind.y * right[2]) * 0.18,
+      townSupersample() ? SUPERSAMPLE : 1,
+      ambient.uLight.value,
+    );
     // Lighter on the way Home, where the herzie fills the frame.
     look.vignette = VIGNETTE * (1 - homeMode.aoFade);
   });
@@ -190,6 +205,7 @@ export function Post({ ao, distort }: { ao: boolean; distort: boolean }) {
         />
       )}
       {distort && <primitive object={effect} dispose={null} />}
+      <primitive object={rainFx} dispose={null} />
       <primitive object={look} dispose={null} />
       <primitive object={fade} dispose={null} />
     </EffectComposer>
