@@ -18,6 +18,7 @@ import { DistortionBuffer, SonicDistortionEffect } from "./vfx/distortion";
 import { HomeFadeEffect } from "./vfx/homeFade";
 import { LookEffect } from "./vfx/look";
 import { RainOverlayEffect } from "./vfx/rainOverlay";
+import { WEATHER_ON } from "./weather";
 
 /** How many frames the world's drawn, unseen, to warm it (see Post). */
 const WARM_FRAMES = 3;
@@ -205,7 +206,7 @@ export function Post({ ao, distort }: { ao: boolean; distort: boolean }) {
         />
       )}
       {distort && <primitive object={effect} dispose={null} />}
-      <primitive object={rainFx} dispose={null} />
+      {WEATHER_ON && <primitive object={rainFx} dispose={null} />}
       <primitive object={look} dispose={null} />
       <primitive object={fade} dispose={null} />
     </EffectComposer>

@@ -6,6 +6,11 @@
  * pure part, tested on its own; Weather (the component) applies it.
  */
 
+/** Whether there's weather at all. Off for now: nothing rains, no rainbow,
+ * and the rain's pass isn't even in the frame (see Post). Everything that
+ * reacts to rain reads `ambient.uRain`, which just stays 0. */
+export const WEATHER_ON = false;
+
 /** A half hour. */
 const SLOT_MS = 30 * 60_000;
 /** How many slots rain, of all of them. */
@@ -75,6 +80,7 @@ export const weatherOverride: { rain: number | null; storm: boolean } = {
 
 /** The weather now, as shown. */
 export function weatherNow(now = Date.now()): Weather {
+  if (!WEATHER_ON) return { rain: 0, storm: false };
   if (weatherOverride.rain !== null) {
     return { rain: weatherOverride.rain, storm: weatherOverride.storm };
   }
@@ -84,6 +90,7 @@ export function weatherNow(now = Date.now()): Weather {
 /** How strong the rainbow is now, 0–1: for a couple of minutes after a
  * shower, by day (the caller checks the sun). */
 export function rainbowNow(now = Date.now()): number {
+  if (!WEATHER_ON) return 0;
   if (weatherOverride.rain !== null) return 0;
   const ended = rainEndedAt(now);
   if (ended === null) return 0;
