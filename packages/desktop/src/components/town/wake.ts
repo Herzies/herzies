@@ -6,17 +6,14 @@ import { ambient } from "./ambient";
  * shader: no textures, one draw call for every duck on the island.
  *
  * How the pieces follow what water does (and how games fake it):
- *  - At rest, rings spread from it, a few at once at different ages, each
- *    widening, thinning and fading as it goes, and broken up by noise so
- *    they're not perfect circles — the stylized ripple of most games.
- *  - Moving, the rings give way to a wake: a V trailing behind, its arms
+ *  - Only a moving duck leaves anything: a V trailing behind, its arms
  *    in the narrow cone real ducks make (the Kelvin wake, about 19.5° to
  *    the track), whose crests thin, spread and fade with distance; a
  *    bow wave arcing out in front; and a trail of foam down the middle
  *    and at the stern.
- *  - How much of each is a smooth `motion` value (0 still, 1 at full
- *    paddle), so it eases between the two as the duck gets going and
- *    comes to rest, instead of switching.
+ *  - How much of it is a smooth `motion` value (0 still, 1 at full
+ *    paddle), so the wake builds as the duck gets going and dies away
+ *    as it comes to rest, instead of switching.
  *  - Hard-edged, a few levels of opacity, to sit with the Town's chunky
  *    pixels — not soft smears.
  *
@@ -24,7 +21,7 @@ import { ambient } from "./ambient";
  * with it; its shader works in the duck's own frame (+z forward).
  */
 
-/** The quad's side, in world units: room for the rings and the wake. */
+/** The quad's side, in world units: room for the wake. */
 export const WAKE_SIZE = 7;
 /** Where the duck's stern is, along its length: the wake starts here. */
 const STERN = 0.3;
@@ -67,23 +64,7 @@ const fragmentShader = /* glsl */ `
   void main() {
     vec2 p = vP;
     float t = uTime;
-    float d = length( p );
-    float ang = atan( p.y, p.x );
     float a = 0.0;
-
-    // Rings, three at different ages: each starts as a tight ring, widens
-    // quickly and then slower, thins and fades. Broken by noise round the
-    // ring so they flicker in and out like real ones.
-    float still = 1.0 - vMotion * 0.75;
-    for ( int i = 0; i < 3; i++ ) {
-      float age = fract( t * 0.3 + vSeed + float( i ) / 3.0 );
-      float eased = 1.0 - ( 1.0 - age ) * ( 1.0 - age );
-      float r = 0.4 + eased * 2.3;
-      float w = mix( 0.11, 0.03, age );
-      float gaps = smoothstep( 0.12, 0.5, noise1( ang * 2.4 + float( i ) * 9.0 + vSeed * 17.0 + t * 0.2 ) + 0.3 );
-      float life = pow( 1.0 - age, 1.5 ) * smoothstep( 0.0, 0.1, age );
-      a += band( d, r, w ) * gaps * life * still;
-    }
 
     // Moving: a wake behind, a bow wave in front.
     if ( vMotion > 0.02 ) {

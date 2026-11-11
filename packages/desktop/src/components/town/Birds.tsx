@@ -190,7 +190,10 @@ wingMaterial.onBeforeCompile = (shader) => {
     .replace(
       "#include <begin_vertex>",
       `#include <begin_vertex>
-float reach = abs( position.x );
+// How far out along the wing, in the wing's own (spread) width: the
+// instance scales x for a folded wing, and the lift must follow it.
+float spread = length( instanceMatrix[ 0 ].xyz ) / length( instanceMatrix[ 1 ].xyz );
+float reach = abs( position.x ) * spread;
 // The shoulder's beat out to the tip's, which comes a moment later.
 float lift = mix( beat.x, beat.y, smoothstep( 0.2, 0.75, reach ) );
 transformed.y += reach * reach * 1.3 * lift;
