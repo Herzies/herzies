@@ -396,6 +396,25 @@ describe("seasonal drop windows", () => {
     }
   });
 
+  it("rounds out Fylling's range, +10 luck each and drop-only", () => {
+    const range = [
+      ["fyllings-necktie", "Fylling's Necktie", "body"],
+      ["fyllings-loafers", "Fylling's Loafers", "feet"],
+      ["fyllings-cape", "Fylling's Cape", "back"],
+      ["fyllings-monocle", "Fylling's Monocle", "face"],
+      ["fyllings-green", "Fylling's Green", "color"],
+    ] as const;
+    for (const [id, name, slot] of range) {
+      const item = getItem(id);
+      expect(item?.name).toBe(name);
+      expect(item?.rarity).toBe("rare");
+      expect(item?.equipSlot).toBe(slot);
+      expect(getHerzieStats({ [slot]: id }).luck).toBe(10);
+      expect(NON_DROPPABLE_ITEM_IDS).not.toContain(id);
+      expect(bossLootWeights().map((w) => w.itemId)).toContain(id);
+    }
+  });
+
   it("adds the Fabulous Fabian set's +10 luck only with all six worn", () => {
     const full = {
       head: "fabulous-fabian",
@@ -1736,9 +1755,9 @@ describe("boss loot", () => {
       new URL(`../../../supabase/migrations/${name}`, import.meta.url),
       "utf8",
     );
-  // settle_boss_fight lives in 00114; the roll was last replaced in 00145.
+  // settle_boss_fight lives in 00114; the roll was last replaced in 00147.
   const sql = migration("00114_boss_bonus_loot.sql");
-  const rollSql = migration("00145_ff_wearables.sql");
+  const rollSql = migration("00147_fylling_wearables.sql");
 
   it("rolls from the same weights as bossLootWeights", () => {
     const roll = rollSql.slice(

@@ -56,6 +56,12 @@ const WEARABLE_OPTIONS = [
   "ff-cloak-black",
   "ff-sneakers-black",
   "ff-pink",
+  // Fylling's range.
+  "fyllings-necktie",
+  "fyllings-loafers",
+  "fyllings-cape",
+  "fyllings-monocle",
+  "fyllings-green",
 ];
 
 const DEFAULT_USER = "sandbox-user";
@@ -469,11 +475,18 @@ function toEquipped(ids: string[]): Equipped {
       id === "gold-chain" ||
       id === "pearl-necklace" ||
       id === "bowtie" ||
-      id === "ff-pearls-marble"
+      id === "ff-pearls-marble" ||
+      id === "fyllings-necktie"
     )
       out.body = id;
-    else if (id === "fangs" || id === "ff-shades") out.face = id;
-    else if (id === "pumpkin-spice" || id === "ff-pink") out.color = id;
+    else if (id === "fangs" || id === "ff-shades" || id === "fyllings-monocle")
+      out.face = id;
+    else if (
+      id === "pumpkin-spice" ||
+      id === "ff-pink" ||
+      id === "fyllings-green"
+    )
+      out.color = id;
     else if (id === "ghost" || id === "spirit-orb" || id === "sleptwell")
       out.spirit = id;
     else if (id === "old-cymbal") out.off_hand = id;
@@ -481,10 +494,15 @@ function toEquipped(ids: string[]): Equipped {
       id.endsWith("-cloak") ||
       id === "troubadour-mantle" ||
       id === "groove-cape" ||
-      id === "ff-cloak-black"
+      id === "ff-cloak-black" ||
+      id === "fyllings-cape"
     )
       out.back = id;
-    else if (id === "eivinds-evasive-pair" || id === "ff-sneakers-black")
+    else if (
+      id === "eivinds-evasive-pair" ||
+      id === "ff-sneakers-black" ||
+      id === "fyllings-loafers"
+    )
       out.feet = id;
     else if (id === "lute" || id === "compact-discs" || id === "worn-stick")
       out.main_hand = id;

@@ -14,6 +14,7 @@ import {
   CHAR_ASPECT,
   dot3,
   FF_PINK_RAMP,
+  FYLLINGS_GREEN_RAMP,
   GOLD_RAMP,
   LIGHT,
   MEDEA_RAMP,
@@ -44,6 +45,7 @@ import {
   groundSlot,
 } from "./items.js";
 import { settleThread, type ThreadRig } from "./thread-physics.js";
+import type { TieRig } from "./tie-physics.js";
 
 // --- Creature viewport ---
 const SW = 80;
@@ -314,7 +316,7 @@ export interface Sphere {
    * catch the sun in a bright bar across it. Pearl (the FF Pearls): a hard
    * highlight and a sheen that shifts colour as it turns. See
    * herzieMaterial. */
-  finish?: "metal" | "pearl" | "marble" | "lens";
+  finish?: "metal" | "pearl" | "marble" | "lens" | "clear-lens";
   /** Where the Evasive Pair's sparkles come from: a wing tip (the trail)
    * or a foot (footfalls). See gl/shoeSparkles.ts. */
   sparkle?: "wing" | "foot";
@@ -325,7 +327,28 @@ export interface Sphere {
 }
 
 /** A prop drawn as a model in 3D (see Sphere.prop). */
-export type PropModel = BoomboxProp | ShoeProp;
+export type PropModel = BoomboxProp | ShoeProp | TieProp;
+
+/** Fylling's Necktie, drawn as a model in 3D (gl/props.ts): a collar band, a
+ * knot and a ribbon blade that the renderer simulates (tie-physics.ts). */
+export interface TieProp {
+  kind: "necktie";
+  /** The neck's middle, in creature space (y down). */
+  center: V3;
+  yaw: number;
+  /** The ring the collar band makes round the neck: its radius and height. */
+  ringRadius: number;
+  ringY: number;
+  /** The knot's middle and size (its half-width, half-height, half-depth). */
+  knot: V3;
+  knotSize: V3;
+  /** The unit the tie is sized in (a tenth of the head). */
+  k: number;
+  /** How the blade hangs, and its half-width at the root and each point. */
+  rig: TieRig;
+  halfWidths: number[];
+  colors: { base: string; check: string; knot: string; band: string };
+}
 
 /** One shoe, drawn as a model in 3D (gl/props.ts) round its foot. */
 export interface ShoeProp {
@@ -1413,6 +1436,129 @@ function buildBowtieSpheres(spheres: Sphere[]): Sphere[] {
   }));
 }
 
+/** Fylling's Necktie: a band round the neck (the collar the tie runs under),
+ * a small knot at the throat, and a blade lying down the front of the body
+ * that widens toward the bottom before a short point. Light brown, with a soft
+ * tonal check. The blade follows the body's surface (it is round), so it
+ * stays put as the herzie turns.
+ *
+ * These spheres are what the ray caster draws, still. The 3D view draws the
+ * tie's model instead (gl/props.ts): a smooth band and knot, and a ribbon
+ * blade that sways a little with the herzie (tie-physics.ts). */
+function buildNecktieSpheres(spheres: Sphere[]): Sphere[] {
+  const neck = getNeck(spheres);
+  if (!neck) return [];
+  const body = neck.body;
+  const k = neck.size * 0.1;
+  const colors = {
+    base: "#9A7650",
+    check: "#8A6742",
+    knot: "#7A5A3A",
+    band: "#6E5136",
+  };
+  const result: Sphere[] = [];
+  // The tie hangs: it lies on the chest down to the belly's widest point,
+  // then falls straight down from there (the body curves away beneath it).
+  const surfaceZ = (y: number, r: number): number => {
+    const dy = Math.min(y, body.center[1]) - body.center[1];
+    const surface = Math.sqrt(Math.max(0, body.radius ** 2 - dy * dy));
+    // Just proud of the body, on its front (-Z).
+    return body.center[2] - Math.max(surface, neck.radius) - r * 0.2;
+  };
+  const onBody = (y: number, dx: number, r: number, color: string) =>
+    result.push({
+      center: [neck.center[0] + dx, y, surfaceZ(y, r)],
+      radius: r,
+      zone: "wearable",
+      part: "body",
+      color,
+    });
+  // The band: a ring round the neck, just outside it.
+  const ringY = neck.center[1] + k * 0.1;
+  const ringR = neck.radius * 1.04 + k * 0.3;
+  const COUNT = 22;
+  for (let i = 0; i < COUNT; i++) {
+    const a = (i / COUNT) * Math.PI * 2;
+    result.push({
+      center: [
+        neck.center[0] + Math.sin(a) * ringR,
+        ringY,
+        neck.center[2] + Math.cos(a) * ringR,
+      ],
+      radius: k * 0.7,
+      zone: "wearable",
+      part: "body",
+      color: colors.band,
+    });
+  }
+  const top = ringY + k * 0.5;
+  // The knot: a little wider than tall, the middle one in front.
+  onBody(top, -k * 0.55, k * 0.8, colors.knot);
+  onBody(top, k * 0.55, k * 0.8, colors.knot);
+  onBody(top + k * 0.2, 0, k * 0.95, colors.knot);
+  // The blade: narrow under the knot, widening steadily to the bottom, then
+  // a short point over the last stretch.
+  const bladeTop = top + k * 1.3;
+  const length = body.radius * 0.85;
+  const rows = 9;
+  const rowAt: { y: number; half: number }[] = [];
+  for (let i = 0; i < rows; i++) {
+    const t = i / (rows - 1);
+    const y = bladeTop + t * length;
+    const widen = 0.55 + 1.5 * Math.min(1, t / 0.82);
+    const point = t > 0.82 ? 1 - ((t - 0.82) / 0.18) * 0.85 : 1;
+    const half = k * widen * point;
+    rowAt.push({ y, half });
+    // Spheres across the blade's width, wide enough to meet.
+    const across = Math.max(1, Math.round(half / (k * 0.55)));
+    const r = Math.max(k * 0.45, half / (across + 0.4));
+    for (let j = 0; j < across; j++) {
+      const dx = across === 1 ? 0 : -half + (2 * half * (j + 0.5)) / across;
+      // A check: alternate spheres, alternate rows.
+      onBody(y, dx, r * 1.15, (i + j) % 2 === 0 ? colors.base : colors.check);
+    }
+  }
+  // The blade as a chain for the simulation: tied at the first row, each
+  // point after it a row further down.
+  const at = (y: number): V3 => [neck.center[0], y, surfaceZ(y, k * 0.3)];
+  const root = at(rowAt[0].y);
+  const rest = rowAt.slice(1).map((row) => at(row.y));
+  const lengths = rest.map((p, i) => {
+    const from = i === 0 ? root : rest[i - 1];
+    return Math.hypot(p[0] - from[0], p[1] - from[1], p[2] - from[2]);
+  });
+  const dist = (p: V3) =>
+    Math.hypot(
+      p[0] - body.center[0],
+      p[1] - body.center[1],
+      p[2] - body.center[2],
+    );
+  const prop: TieProp = {
+    kind: "necktie",
+    center: [...neck.center] as V3,
+    yaw: 0,
+    ringRadius: ringR,
+    ringY,
+    knot: [neck.center[0], top + k * 0.1, surfaceZ(top, k * 0.9) - k * 0.1],
+    knotSize: [k * 1.5, k * 0.95, k * 0.9],
+    k,
+    rig: {
+      root,
+      rest,
+      lengths,
+      center: [...body.center] as V3,
+      // Riding on the body, its own half-thickness proud of it.
+      clear: rest.map((p) =>
+        Math.min(dist(p) - k * 0.05, body.radius + k * 0.05),
+      ),
+    },
+    halfWidths: rowAt.map((row) => row.half),
+    colors,
+  };
+  for (const sp of result) sp.prop = prop;
+  return result;
+}
+
 /** Poses the dangling spheres for a spin's swing and flare. Flare first —
  * lifting each sphere back up by part of its hang and out from the neck —
  * then the swing, a rotation about the neck's axis. Rotating about that axis
@@ -1463,6 +1609,7 @@ const BODY_ITEM_BUILDERS: Record<string, (spheres: Sphere[]) => Sphere[]> = {
   "pearl-necklace": buildPearlNecklaceSpheres,
   "ff-pearls-marble": buildMarblePearlsSpheres,
   bowtie: buildBowtieSpheres,
+  "fyllings-necktie": buildNecktieSpheres,
 };
 
 /** Placement/orientation overrides for the boombox ground prop. */
@@ -2406,6 +2553,97 @@ function buildShadesSpheres(spheres: Sphere[]): Sphere[] {
     const back: V3 = [hx + side * reach * 1.02, y, hz + reach * 0.15];
     result.push(capsuleBetween(rim.outer, back, temple, black));
     push(rim.outer, temple * 1.25, pink);
+  }
+  return result;
+}
+
+/** Fylling's Monocle: a single round gold-rimmed lens over the right eye (the
+ * outermost on the viewer's right), with a thin gold chain hanging from its
+ * lower edge down the side of the face. Sits flat on the head's curve, like
+ * the shades' lenses. */
+function buildMonocleSpheres(spheres: Sphere[]): Sphere[] {
+  const head = largestPart(spheres, "head");
+  const eyes = spheres
+    .filter((s) => s.part === "eye")
+    .sort((a, b) => a.center[0] - b.center[0]);
+  if (!head || eyes.length < 1) return [];
+  const eye = eyes[eyes.length - 1];
+  const er = Math.max(...eyes.map((e) => e.radius));
+  const gold = "#C9A24A";
+  const goldLight = "#E8CB7A";
+  const out = sub(eye.center, head.center);
+  out[1] *= 0.25;
+  const n = Math.hypot(...out) || 1;
+  const normal: V3 = [out[0] / n, out[1] / n, out[2] / n];
+  const up: V3 = [0, -1, 0];
+  const cross = (a: V3, b: V3): V3 => [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0],
+  ];
+  const unit = (a: V3): V3 => {
+    const l = Math.hypot(...a) || 1;
+    return [a[0] / l, a[1] / l, a[2] / l];
+  };
+  const across = unit(cross(normal, up));
+  const upward = unit(cross(across, normal));
+  const rimR = er * 1.45;
+  const centre: V3 = [
+    eye.center[0] + normal[0] * er * 1.3,
+    eye.center[1] + er * 0.05 + normal[1] * er * 1.3,
+    eye.center[2] + normal[2] * er * 1.3,
+  ];
+  const point = (a: number, radius: number): V3 => [
+    centre[0] + (across[0] * Math.cos(a) + upward[0] * Math.sin(a)) * radius,
+    centre[1] + (across[1] * Math.cos(a) + upward[1] * Math.sin(a)) * radius,
+    centre[2] + (across[2] * Math.cos(a) + upward[2] * Math.sin(a)) * radius,
+  ];
+  const result: Sphere[] = [];
+  const SEGMENTS = 16;
+  for (let k = 0; k < SEGMENTS; k++) {
+    const a0 = (k / SEGMENTS) * Math.PI * 2;
+    const a1 = ((k + 1) / SEGMENTS) * Math.PI * 2;
+    result.push(
+      capsuleBetween(point(a0, rimR), point(a1, rimR), er * 0.14, gold),
+    );
+  }
+  // The glass: clear, so the eye shows through.
+  result.push({
+    center: centre,
+    radius: rimR * 0.92,
+    zone: "wearable",
+    part: "head",
+    color: "#8FB7C4",
+    finish: "clear-lens",
+    shape: {
+      kind: "cylinder",
+      axis: [
+        normal[0] * er * 0.05,
+        normal[1] * er * 0.05,
+        normal[2] * er * 0.05,
+      ],
+    },
+  });
+  // The chain: beads from the rim's lowest point, down and out along the
+  // head's side (where the head curves away, so it hangs against the face).
+  const start = point(-Math.PI / 2 + Math.PI, rimR);
+  const [hx, hy, hz] = head.center;
+  const hr = head.radius;
+  for (let k = 1; k <= 7; k++) {
+    const y = start[1] + k * er * 0.55;
+    const dy = y - hy;
+    const reach = Math.sqrt(Math.max(0, hr * hr - dy * dy));
+    // Slide toward the side of the face as it drops, staying on the surface.
+    const sx = start[0] + (hx + reach * 0.95 - start[0]) * (k / 7) * 0.8;
+    const dx = sx - hx;
+    const zSurface = Math.sqrt(Math.max(0, hr * hr - dx * dx - dy * dy));
+    result.push({
+      center: [sx, y, hz - zSurface - er * 0.05],
+      radius: er * 0.12,
+      zone: "wearable",
+      part: "head",
+      color: k % 2 === 0 ? goldLight : gold,
+    });
   }
   return result;
 }
@@ -3387,6 +3625,9 @@ export interface ShoeColors {
   laces: string;
   collar: string;
   tab: string;
+  /** A loafer: one strap across the instep (in the `laces` colour) instead
+   * of laces. */
+  strap?: boolean;
 }
 
 /** How a pair of shoes looks, and whether it has wings. */
@@ -3420,7 +3661,22 @@ const FF_SNEAKERS_STYLE: ShoeStyle = {
   wings: false,
 };
 
+/** Fylling's Loafers: dark brown polished leather, a tan sole, no laces. A
+ * gold-toned strap tab across the instep stands in for the penny strap. */
+const FYLLINGS_LOAFERS_STYLE: ShoeStyle = {
+  upper: "#3E2A1E",
+  toe: "#352418",
+  sole: "#A8855A",
+  stripe: "#A8855A",
+  laces: "#C9A24A",
+  collar: "#2A1B12",
+  tab: "#2A1B12",
+  strap: true,
+  wings: false,
+};
+
 const SHOE_STYLES: Record<string, ShoeStyle> = {
+  "fyllings-loafers": FYLLINGS_LOAFERS_STYLE,
   "eivinds-evasive-pair": EVASIVE_PAIR_STYLE,
   "ff-sneakers-black": FF_SNEAKERS_STYLE,
 };
@@ -3522,7 +3778,8 @@ function buildShoeSpheres(spheres: Sphere[], style: ShoeStyle): Sphere[] {
     }
     // Laces: two dots over the instep.
     push([lx, ly + r * 0.2, zc - r * 0.75], r * 0.12, style.laces);
-    push([lx, ly + r * 0.35, zc - r * 0.95], r * 0.12, style.laces);
+    if (!style.strap)
+      push([lx, ly + r * 0.35, zc - r * 0.95], r * 0.12, style.laces);
     // All of it is the shoe's model in 3D.
     for (let k = first; k < result.length; k++) result[k].prop = prop;
     if (!style.wings) continue;
@@ -3576,6 +3833,9 @@ function appendWearableSpheres(
   }
   if (equipped.face === "ff-shades") {
     spheres.push(...buildShadesSpheres(spheres));
+  }
+  if (equipped.face === "fyllings-monocle") {
+    spheres.push(...buildMonocleSpheres(spheres));
   }
   if (equipped.head === "headphones") {
     spheres.push(...buildHeadphoneSpheres(spheres));
@@ -3656,6 +3916,9 @@ const COLOR_SCHEMES: Record<string, readonly string[]> = {
   // One band, not the ramp: glass in stripes reads as a pattern, not a
   // colour. (The card keeps the ramp.)
   "ff-pink": [FF_PINK_RAMP[2]],
+  // Avocado green, one band (not the ramp: no stripes), woven in tweed by the
+  // 3D view (TWEED_SKINS).
+  "fyllings-green": [FYLLINGS_GREEN_RAMP[2]],
   // Not an item: Good ol' George's gold, applied only by the desktop's
   // Events emblem (see GOLD_SCHEME_ID). No player can equip it.
   [GOLD_SCHEME_ID]: GOLD_RAMP,
@@ -3672,6 +3935,21 @@ const COLOR_SCHEMES: Record<string, readonly string[]> = {
  * anything worn staying solid. The ray caster and the cards just paint the
  * colour. */
 export const TRANSLUCENT_SKINS: ReadonlySet<string> = new Set(["ff-pink"]);
+
+/** Skins woven in tweed: the 3D view lays a houndstooth over whatever the
+ * scheme paints (herzieMaterial's TWEED). The ray caster and the cards just
+ * paint the colour. */
+export const TWEED_SKINS: ReadonlySet<string> = new Set(["fyllings-green"]);
+
+/** Whether this herzie's body is drawn in tweed (never a boss: its palette
+ * is its own). */
+export function hasTweedSkin(
+  equipped?: Equipped,
+  params?: CreatureParams,
+): boolean {
+  if (params?.bodyType === BOSS_BODY_TYPE) return false;
+  return !!equipped?.color && TWEED_SKINS.has(equipped.color);
+}
 
 /** Whether this herzie's body is drawn see-through (a boss never is: its
  * palette is its own, see colorSchemeFor). */
@@ -5438,6 +5716,9 @@ export interface PrimitiveShading {
   /** Tinted glass (a lens): drawn see-through, see herzieMaterial's GLASS.
    * Absent otherwise. */
   lens?: true;
+  /** A lens of clear glass (the monocle): the eye behind shows plainly.
+   * See herzieMaterial's CLEAR. */
+  clear?: true;
 }
 
 /** The shades shadeWearableColor gives `hex`, dim to bright. */
@@ -5501,6 +5782,18 @@ export function primitiveShading(
         hslToHex(h, sat, Math.min(1, l + 0.08)),
       ]),
       lens: true,
+    };
+  }
+  if (sp.color && sp.finish === "clear-lens") {
+    const [h, sat, l] = hexToHsl(sp.color);
+    return {
+      ...shading(0.3, 0.6, [
+        shadeWearableColor(sp.color, 0),
+        sp.color.toUpperCase(),
+        hslToHex(h, sat, Math.min(1, l + 0.06)),
+      ]),
+      lens: true,
+      clear: true,
     };
   }
   if (sp.color && sp.finish === "pearl") {

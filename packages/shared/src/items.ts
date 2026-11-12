@@ -19,6 +19,7 @@ import {
   cross,
   dot3,
   FF_PINK_RAMP,
+  FYLLINGS_GREEN_RAMP,
   GOLD_RAMP,
   LIGHT,
   normV,
@@ -2825,6 +2826,139 @@ function renderFfPinkFrame(yAngle: number): string[] {
   return renderGradientCardFrame(yAngle, FF_PINK_RAMP);
 }
 
+// --- Fylling's range ---
+
+/** Fylling's Necktie: a knot and a light brown checked blade that widens toward a short point. */
+function fyllingsNecktieCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  // The knot.
+  if (iy > -0.24 && iy < -0.15 && Math.abs(ix) < 0.065)
+    return { bright: 0.6, color: "#7A5A3A" };
+  // The blade: widens from the knot, then a short point.
+  if (iy >= -0.15 && iy < 0.26) {
+    const t = (iy + 0.15) / 0.41;
+    const half =
+      t < 0.82
+        ? 0.04 + 0.12 * (t / 0.82)
+        : 0.16 * (1 - (t - 0.82) / 0.18) + 0.01;
+    if (Math.abs(ix) < half) {
+      // A check: cells about 0.06 square.
+      const stripe =
+        (Math.floor((ix + 0.2) / 0.06) + Math.floor((iy + 0.15) / 0.06)) % 2 ===
+        0;
+      return stripe
+        ? { bright: 0.7, color: "#8A6742" }
+        : { bright: 0.78, color: "#9A7650" };
+    }
+  }
+  return null;
+}
+
+function renderFyllingsNecktieFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#9A7650",
+    "#6E5A44",
+    "#2A221A",
+    fyllingsNecktieCardIcon,
+  );
+}
+
+/** Fylling's Loafers: a brown loafer in profile, toe to the right, a tan sole
+ * and a gold strap across the instep. */
+function fyllingsLoafersCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  // The sole.
+  if (iy > 0.06 && iy < 0.11 && ix > -0.26 && ix < 0.3)
+    return { bright: 0.8, color: "#A8855A" };
+  // The upper: low at the toe, a little higher at the heel, scooped open
+  // at the top where the foot goes.
+  const top =
+    -0.1 +
+    ((0.05 * (ix + 0.26)) / 0.56) * 0 +
+    (ix > 0.05 ? (ix - 0.05) * 0.5 : 0);
+  if (
+    iy >= top &&
+    iy <= 0.06 &&
+    ix > -0.26 &&
+    ix < 0.28 - Math.max(0, iy + 0.02) * 0.2
+  ) {
+    // The strap, with a gold dot.
+    if (Math.abs(ix - 0.06) < 0.045 && iy < 0.03)
+      return { bright: 1, color: "#C9A24A" };
+    return { bright: 0.65, color: "#3E2A1E" };
+  }
+  // The heel's cuff.
+  if (ix > -0.26 && ix < -0.16 && iy > -0.14 && iy < top)
+    return { bright: 0.5, color: "#2A1B12" };
+  return null;
+}
+
+function renderFyllingsLoafersFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#C9A24A",
+    "#6E5A44",
+    "#2A221A",
+    fyllingsLoafersCardIcon,
+  );
+}
+
+const FYLLINGS_CAPE_ICON: CloakIconStyle = {
+  outer: "#35353f",
+  fold: "#1a1a20",
+  lining: "#7a1f2b",
+  trim: "#c9a24a",
+  hem: "straight",
+};
+
+function renderFyllingsCapeFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#C9A24A",
+    "#6E5A44",
+    "#2A221A",
+    cloakCardIcon(FYLLINGS_CAPE_ICON),
+  );
+}
+
+/** Fylling's Monocle: one round lens in a gold rim, with a chain dropping
+ * from its lower edge. */
+function fyllingsMonocleCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  const d = Math.hypot(ix + 0.04, iy + 0.05);
+  if (d < 0.14) {
+    // A glint across the upper part of the glass.
+    const glint = Math.abs(ix + 0.04 + iy + 0.05 + 0.06) < 0.02 && iy < -0.04;
+    return glint
+      ? { bright: 1, color: "#FFFFFF" }
+      : { bright: 0.5, color: "#BFDDE6" };
+  }
+  if (d < 0.175) return { bright: 0.95, color: "#C9A24A" };
+  // The chain: dots curving down and out to the right.
+  for (let k = 0; k < 6; k++) {
+    const cx = 0.05 + k * 0.035;
+    const cy = 0.13 + k * 0.05;
+    if (Math.hypot(ix - cx, iy - cy) < 0.022)
+      return { bright: 0.9, color: k % 2 ? "#E8CB7A" : "#C9A24A" };
+  }
+  return null;
+}
+
+function renderFyllingsMonocleFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#C9A24A",
+    "#6E5A44",
+    "#2A221A",
+    fyllingsMonocleCardIcon,
+  );
+}
+
+function renderFyllingsGreenFrame(yAngle: number): string[] {
+  return renderGradientCardFrame(yAngle, FYLLINGS_GREEN_RAMP);
+}
+
 function renderThanksForAllTheFishFrame(yAngle: number): string[] {
   return renderGradientCardFrame(yAngle, TEAL_RAMP);
 }
@@ -3359,6 +3493,11 @@ const ffCloakFrames = generateFrames(renderFfCloakFrame);
 const ffPearlsFrames = generateFrames(renderFfPearlsFrame);
 const ffShadesFrames = generateFrames(renderFfShadesFrame);
 const ffPinkFrames = generateFrames(renderFfPinkFrame);
+const fyllingsNecktieFrames = generateFrames(renderFyllingsNecktieFrame);
+const fyllingsLoafersFrames = generateFrames(renderFyllingsLoafersFrame);
+const fyllingsCapeFrames = generateFrames(renderFyllingsCapeFrame);
+const fyllingsMonocleFrames = generateFrames(renderFyllingsMonocleFrame);
+const fyllingsGreenFrames = generateFrames(renderFyllingsGreenFrame);
 const fangsFrames = generateFrames(renderFangsFrame);
 const pumpkinSpiceFrames = generateFrames(renderPumpkinSpiceFrame);
 const ghostFrames = generateFrames(renderGhostFrame);
@@ -4053,6 +4192,65 @@ export const ITEMS: ItemDef[] = [
     frames: fedoraFrames,
     equipable: true,
     equipSlot: "head",
+    sellPrice: 250,
+    stats: { luck: 10 },
+  },
+  // The rest of Fylling's range, to go with the fedora. Drop-only.
+  {
+    id: "fyllings-necktie",
+    name: "Fylling's Necktie",
+    description: "Slightly too tight. Fylling says that is the point.",
+    rarity: "rare",
+    frames: fyllingsNecktieFrames,
+    equipable: true,
+    equipSlot: "body",
+    minStage: 3,
+    sellPrice: 250,
+    stats: { luck: 10 },
+  },
+  {
+    id: "fyllings-loafers",
+    name: "Fylling's Loafers",
+    description: "Polished enough to see your own disappointment in.",
+    rarity: "rare",
+    frames: fyllingsLoafersFrames,
+    equipable: true,
+    equipSlot: "feet",
+    sellPrice: 250,
+    stats: { luck: 10 },
+  },
+  {
+    id: "fyllings-cape",
+    name: "Fylling's Cape",
+    description: "For entering rooms a few seconds after everyone else.",
+    rarity: "rare",
+    frames: fyllingsCapeFrames,
+    equipable: true,
+    equipSlot: "back",
+    minStage: 3,
+    sellPrice: 250,
+    stats: { luck: 10 },
+  },
+  {
+    id: "fyllings-monocle",
+    name: "Fylling's Monocle",
+    description: "Lets you look down on things with just the one eye.",
+    rarity: "rare",
+    frames: fyllingsMonocleFrames,
+    equipable: true,
+    equipSlot: "face",
+    sellPrice: 250,
+    stats: { luck: 10 },
+  },
+  {
+    id: "fyllings-green",
+    name: "Fylling's Green",
+    description:
+      "A proper seventies green. It was in fashion once, and Fylling never forgot.",
+    rarity: "rare",
+    frames: fyllingsGreenFrames,
+    equipable: true,
+    equipSlot: "color",
     sellPrice: 250,
     stats: { luck: 10 },
   },

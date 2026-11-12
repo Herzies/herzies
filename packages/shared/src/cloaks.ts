@@ -155,6 +155,28 @@ export const CLOAK_STYLES: Readonly<Record<string, CloakStyle>> = {
     hemTrim: 0.04,
     collarTrim: 0.05,
   },
+  // Fylling's Cape: a classy full-length cape. Charcoal silk outside, a deep
+  // burgundy lining, a thin gold edge and a gold clasp. Long, and cut with a
+  // gentle curve at the hem.
+  "fyllings-cape": {
+    shape: {
+      cols: COLS,
+      rows: ROWS,
+      length: 1.0,
+      collarHalf: 1.2,
+      flare: 1.45,
+      hem: "straight",
+      gather: 1.15,
+    },
+    config: DEFAULT_CLOAK_CONFIG,
+    outer: "#26262e",
+    lining: "#7a1f2b",
+    trim: "#c9a24a",
+    clasp: "#e8cb7a",
+    finish: "silk",
+    hemTrim: 0.035,
+    collarTrim: 0.05,
+  },
 };
 
 /** The cloak a herzie wears, if any (and it can: stage 3, a torso). */

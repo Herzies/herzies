@@ -47,6 +47,7 @@ import {
   HELD_ARM,
   hasDangleEquipped,
   hasTranslucentSkin,
+  hasTweedSkin,
   heldPoses,
   heldSwing,
   primitiveShading,
@@ -81,6 +82,15 @@ import {
   type ThreadSim,
   threadSway,
 } from "../thread-physics.js";
+import {
+  createTieSim,
+  DEFAULT_TIE_CONFIG,
+  isTieSettled,
+  stepTieSim,
+  type TieConfig,
+  type TieRig,
+  type TieSim,
+} from "../tie-physics.js";
 import {
   type AnimationState,
   IDLE_FPS,
@@ -117,7 +127,12 @@ import {
   type SchemeUniforms,
   setRestPlace,
 } from "./herzieMaterial.js";
-import { buildPropModel, foldHandle, propBodyBox } from "./props.js";
+import {
+  buildPropModel,
+  foldHandle,
+  propBodyBox,
+  type TieRibbon,
+} from "./props.js";
 import { SetShimmer } from "./setShimmer.js";
 import { ShoeSparkles } from "./shoeSparkles.js";
 import {
@@ -756,6 +771,16 @@ export class HerzieModel {
     sim: ThreadSim;
     parts: string[];
   } | null = null;
+  /** A worn necktie: its model, and its blade's swing (tie-physics.ts); null
+   * without one. */
+  private tie: {
+    group: THREE.Group;
+    rig: TieRig;
+    sim: TieSim;
+    ribbon: TieRibbon;
+  } | null = null;
+  /** How the tie's blade swings. */
+  tieConfig: TieConfig = DEFAULT_TIE_CONFIG;
   /** How far each thread-hung part has swung (see heldPoses). */
   private heldSway: Record<string, [number, number, number]> | undefined;
   /** Where the torso was moved by the last pose: the threads' knot rides
@@ -1086,6 +1111,7 @@ export class HerzieModel {
 
     const ramp = scheme ? schemeShades(scheme) : null;
     const glass = hasTranslucentSkin(look.equipped, look.params);
+    const tweed = hasTweedSkin(look.equipped, look.params);
     // The ground props (the boombox) go in a group of their own that can be
     // scaled about where they stand: shown or hidden apart from the herzie
     // (see setAccessories). Two groups, so the parts keep their places in
@@ -1176,6 +1202,28 @@ export class HerzieModel {
             }
             return material;
           });
+          if (s.prop.kind === "necktie") {
+            // Built in creature space and moved with the torso's pose (see
+            // stepTie), not posed by a sphere: its blade is simulated.
+            parent.add(group);
+            propGroups.set(s.prop, group);
+            this.tie = {
+              group,
+              rig: s.prop.rig,
+              sim: createTieSim(s.prop.rig),
+              ribbon: group.userData.ribbon as TieRibbon,
+            };
+            if (this.torsoAt < 0) {
+              const [cx, cy, cz] = s.prop.rig.center;
+              this.torsoAt = spheres.findIndex(
+                (sp) =>
+                  sp.center[0] === cx &&
+                  sp.center[1] === cy &&
+                  sp.center[2] === cz,
+              );
+            }
+            continue;
+          }
           group.rotation.y = s.prop.yaw;
           group.position.set(...s.prop.center);
           parent.add(group);
@@ -1231,9 +1279,11 @@ export class HerzieModel {
       const isGlass = (glass && shading.schemePainted) || !!shading.lens;
       // Metal's grooves are laid out by its radius: one material each. The
       // ground props never share one with the herzie (they fade apart).
+      const isTweed = tweed && shading.schemePainted;
       const key =
         (isGround ? "ground|" : "") +
         (isGlass ? "glass|" : "") +
+        (isTweed ? "tweed|" : "") +
         JSON.stringify(shading) +
         (shading.metal ? s.radius : "");
       let material = byShading.get(key);
@@ -1248,6 +1298,7 @@ export class HerzieModel {
           undefined,
           undefined,
           isGlass,
+          isTweed,
         );
         byShading.set(key, material);
         this.materials.push(material);
@@ -1893,7 +1944,9 @@ export class HerzieModel {
     turned -= Math.round(turned / (Math.PI * 2)) * Math.PI * 2;
     this.lastHeading = this.heading;
     this.bodyAngle -= turned;
-    this.stepThreads(dt, turned);
+    const motion = this.motionThisFrame(dt);
+    this.stepThreads(dt, turned, motion);
+    this.stepTie(dt, turned, motion);
     this.stepCloak(dt, turned);
     if (!this.dangles || !this.canDangle) {
       this.dangleSim = null;
@@ -1916,16 +1969,16 @@ export class HerzieModel {
     }
   }
 
-  /** Swings gear hung on threads (the discs) with how it moved this frame:
-   * across the world (from where its root is) and round (`turned`). */
-  private stepThreads(dt: number, turned: number) {
-    const threads = this.threads;
-    if (!threads) return;
+  /** How it moved this frame, in creature space: its speeding up and its
+   * velocity (smoothed over a few frames, as moves don't land evenly on
+   * them), nothing on the first, or across a jump (a portal, a respawn).
+   * Called once a frame: it remembers where it was. */
+  private motionThisFrame(dt: number): {
+    accel: [number, number, number];
+    velocity: [number, number, number];
+  } {
     this.root.updateWorldMatrix(true, false);
     const now = this.root.getWorldPosition(new THREE.Vector3());
-    // How fast it's going and speeding up, smoothed over a few frames
-    // (moves don't land evenly on frames) — nothing on the first, or across
-    // a jump (a portal, a respawn).
     let accel = new THREE.Vector3();
     if (this.lastWorld && dt > 0) {
       const velocity = now.clone().sub(this.lastWorld).divideScalar(dt);
@@ -1947,6 +2000,21 @@ export class HerzieModel {
       -v.y / MODEL_SCALE,
       -(sn * v.x + c * v.z) / MODEL_SCALE,
     ];
+    return {
+      accel: toCreature(accel),
+      velocity: toCreature(this.worldVelocity),
+    };
+  }
+
+  /** Swings gear hung on threads (the discs) with how it moved this frame:
+   * across the world (from where its root is) and round (`turned`). */
+  private stepThreads(
+    dt: number,
+    turned: number,
+    motion: ReturnType<HerzieModel["motionThisFrame"]>,
+  ) {
+    const threads = this.threads;
+    if (!threads) return;
     if (dt > 0) {
       stepThreadSim(
         threads.sim,
@@ -1954,8 +2022,8 @@ export class HerzieModel {
         dt,
         {
           offset: this.torsoOffset,
-          accel: toCreature(accel),
-          velocity: toCreature(this.worldVelocity),
+          accel: motion.accel,
+          velocity: motion.velocity,
           // Turned upright, its heading's turn is the other way round its y.
           turnRate: -turned / dt,
         },
@@ -1969,10 +2037,37 @@ export class HerzieModel {
     });
   }
 
+  /** Sways a necktie's blade with how it moved this frame, and carries the
+   * tie with the torso's pose (its walk bob). */
+  private stepTie(
+    dt: number,
+    turned: number,
+    motion: ReturnType<HerzieModel["motionThisFrame"]>,
+  ) {
+    const tie = this.tie;
+    if (!tie) return;
+    tie.group.position.set(...this.torsoOffset);
+    if (dt <= 0) return;
+    stepTieSim(
+      tie.sim,
+      tie.rig,
+      dt,
+      {
+        offset: this.torsoOffset,
+        accel: motion.accel,
+        velocity: motion.velocity,
+        turnRate: -turned / dt,
+      },
+      this.tieConfig,
+    );
+    tie.ribbon.update(tie.sim.pos);
+  }
+
   /** Nothing dangling is still moving. */
   get dangleSettled(): boolean {
     return (
       this.dangleSim === null &&
+      (!this.tie || isTieSettled(this.tie.sim)) &&
       (!this.threads || isThreadSettled(this.threads.sim)) &&
       (!this.cloak ||
         this.clothDetail === "frozen" ||
@@ -2832,5 +2927,6 @@ export class HerzieModel {
     this.glassShadow?.dispose();
     // Its own, unlike the shared part geometries.
     this.cloak?.geometry.dispose();
+    this.tie?.ribbon.dispose();
   }
 }
