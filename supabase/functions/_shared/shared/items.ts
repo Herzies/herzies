@@ -24,6 +24,7 @@ import {
   dot3,
   FF_PINK_RAMP,
   GOLD_RAMP,
+  LATTE_RAMP,
   LIGHT,
   normV,
   OCEAN_RAMP,
@@ -1096,9 +1097,9 @@ export interface ItemSet {
   /** Stats the full set adds, on top of its members' own (getHerzieStats,
    * getHerzieStatsFromUnits). */
   bonus?: Partial<HerzieStats>;
-  /** The full set's look in 3D: sparkles in these colours
-   * (gl/setShimmer.ts). */
-  shimmer?: { core: string; edge: string };
+  /** The full set's look in 3D: sparkles (or bubbles, `style`) in these
+   * colours (gl/setShimmer.ts). */
+  shimmer?: { core: string; edge: string; style?: "sparkle" | "bubble" };
 }
 
 export const ITEM_SETS: ItemSet[] = [
@@ -1123,6 +1124,21 @@ export const ITEM_SETS: ItemSet[] = [
     ],
     bonus: { luck: 10 },
     shimmer: { core: "#FFF4FA", edge: "#FF7FBA" },
+  },
+  {
+    id: "streetsmart",
+    name: "Streetsmart",
+    effect: "+10 luck, and milky coffee bubbles",
+    itemIds: [
+      "fisherman-beanie",
+      "hipster-moustache",
+      "dollar-chain",
+      "camo-cloak",
+      "shiny-loafers",
+      "latte",
+    ],
+    bonus: { luck: 10 },
+    shimmer: { core: "#FFF8EE", edge: "#D6AE82", style: "bubble" },
   },
 ];
 
@@ -1277,6 +1293,15 @@ export const NON_DROPPABLE_ITEM_IDS = [
   "drumhide-cloak",
   // …and the Tailwind Cloak only for money.
   "tailwind-cloak",
+  // The Streetsmart set: drop-only rares, like FF, once a migration puts them in
+  // the items table and boss_loot_roll. Held out of every pool until then
+  // (the rows don't exist yet, so nothing could drop them anyway).
+  "fisherman-beanie",
+  "hipster-moustache",
+  "dollar-chain",
+  "camo-cloak",
+  "shiny-loafers",
+  "latte",
 ] as const;
 
 /** Never a listening drop, nor in a boss's random loot (they're in
@@ -2829,6 +2854,10 @@ function renderFfPinkFrame(yAngle: number): string[] {
   return renderGradientCardFrame(yAngle, FF_PINK_RAMP);
 }
 
+function renderLatteFrame(yAngle: number): string[] {
+  return renderGradientCardFrame(yAngle, LATTE_RAMP);
+}
+
 function renderThanksForAllTheFishFrame(yAngle: number): string[] {
   return renderGradientCardFrame(yAngle, TEAL_RAMP);
 }
@@ -3143,6 +3172,164 @@ function renderFfShadesFrame(yAngle: number): string[] {
   );
 }
 
+// --- Streetsmart cards ---
+/** Fisherman Beanie: a short red watch cap, a ribbed cuff and a cream
+ * label on it. */
+function fishermanBeanieCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  // The label, on the front of the cuff.
+  if (Math.abs(ix) < 0.05 && Math.abs(iy - 0.08) < 0.035)
+    return { bright: 0.95, color: "#EFE3C8" };
+  // The cuff: a wide band, in upright ribs.
+  if (Math.abs(ix) < 0.3 && iy > -0.02 && iy < 0.17) {
+    const rib = Math.floor((ix + 1) * 28) % 2 === 0;
+    return { bright: rib ? 0.62 : 0.8, color: "#BC2A24" };
+  }
+  // The crown: a low dome over it.
+  if ((ix / 0.28) ** 2 + ((iy + 0.02) / 0.22) ** 2 < 1 && iy <= -0.02)
+    return { bright: 0.85, color: "#D4342C" };
+  return null;
+}
+
+function renderFishermanBeanieFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#D4342C",
+    "#7A2420",
+    "#2E0E0C",
+    fishermanBeanieCardIcon,
+  );
+}
+
+/** Hipster Moustache: a brown handlebar, thick in the middle, curling up
+ * at both tips. */
+function hipsterMoustacheCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  const ax = Math.abs(ix);
+  if (ax > 0.3) return null;
+  const t = ax / 0.3;
+  const curl = Math.max(0, (t - 0.6) / 0.4);
+  const centre = 0.04 + 0.04 * Math.sin(Math.PI * t * 0.8) - 0.16 * curl ** 2;
+  const half = 0.075 * (1 - 0.7 * t ** 0.8) + 0.012;
+  if (Math.abs(iy - centre) < half)
+    return {
+      bright: iy < centre - half * 0.3 ? 0.85 : 0.65,
+      color: t > 0.75 ? "#5E3D27" : "#4A2F1E",
+    };
+  return null;
+}
+
+function renderHipsterMoustacheFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#C49468",
+    "#5E3D27",
+    "#241710",
+    hipsterMoustacheCardIcon,
+  );
+}
+
+/** Dollar Chain: a gold chain hung low, a big $ off it. */
+function dollarChainCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  // The $, below the chain: an S of two loops, a bar through it.
+  const cx = 0;
+  const cy = 0.2;
+  const a = 0.055;
+  const w = 0.022;
+  const gold = { bright: 1, color: GOLD_RAMP[1] };
+  if (Math.abs(ix - cx) < w * 0.7 && Math.abs(iy - cy) < a * 2.5)
+    return { bright: 0.8, color: GOLD_RAMP[2] };
+  const top = Math.hypot(ix - cx, iy - (cy - a));
+  const bot = Math.hypot(ix - cx, iy - (cy + a));
+  // Top loop open on its lower right, bottom loop on its upper left.
+  if (Math.abs(top - a) < w && !(ix > cx && iy > cy - a)) return gold;
+  if (Math.abs(bot - a) < w && !(ix < cx && iy < cy + a)) return gold;
+  return necklaceBeadsIcon(ix, iy - 0.04, 13, 0.035, (i) =>
+    i % 2 === 0 ? GOLD_RAMP[2] : GOLD_RAMP[3],
+  );
+}
+
+function renderDollarChainFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#F5C518",
+    "#A67C00",
+    "#3A2C00",
+    dollarChainCardIcon,
+  );
+}
+
+/** Camo Cloak: the cloak card in woodland blotches. */
+function camoCloakCardIcon(u: number, v: number): TexSample | null {
+  const sample = cloakCardIcon(CAMO_CLOAK_ICON)(u, v);
+  if (!sample || sample.color !== CAMO_CLOAK_ICON.outer) return sample;
+  const [ix, iy] = iconUV(u, v);
+  const blot = (fx: number, fy: number, k: number) =>
+    Math.sin(ix * fx + k) +
+    Math.sin(iy * fy + k * 1.7) +
+    Math.sin((ix + iy) * (fx * 0.6) + k * 2.3);
+  if (blot(17, 23, 0.4) > 1.4) return { ...sample, color: "#A79B6E" };
+  if (blot(21, 15, 2.1) > 1.3) return { ...sample, color: "#5A4632" };
+  if (blot(13, 19, 4.4) > 1.5) return { ...sample, color: "#2E3522" };
+  return sample;
+}
+
+const CAMO_CLOAK_ICON: CloakIconStyle = {
+  outer: "#66703F",
+  fold: "#3E4A2A",
+  lining: "#F07A28",
+  trim: "#3E4A2A",
+  hem: "straight",
+};
+
+function renderCamoCloakFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#F07A28",
+    "#4A5530",
+    "#1C2214",
+    camoCloakCardIcon,
+  );
+}
+
+/** Shiny Loafers: an oxblood loafer in profile, toe to the right, a penny
+ * strap over the instep and a glint along the toe. */
+function shinyLoafersCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  // The sole and heel: dark, thin, a block under the heel.
+  if (iy > 0.11 && iy < 0.15 && ix > -0.27 && ix < 0.3)
+    return { bright: 0.45, color: "#2A1712" };
+  if (iy >= 0.15 && iy < 0.19 && ix > -0.27 && ix < -0.15)
+    return { bright: 0.45, color: "#2A1712" };
+  // The upper: low at the heel, rising over the instep, rounding to the toe.
+  const inToe =
+    ix > -0.02 && ((ix + 0.02) / 0.32) ** 2 + ((iy - 0.11) / 0.12) ** 2 < 1;
+  const inHeel = ix > -0.27 && ix <= -0.02 && iy > 0.0 && iy <= 0.11;
+  if ((inToe || inHeel) && iy <= 0.11) {
+    // The glint: a bright streak along the top of the toe.
+    if (inToe && Math.abs(iy - 0.03 + (ix - 0.12) * 0.25) < 0.012 && ix > 0.05)
+      return { bright: 1, color: "#F3D9CF" };
+    // The penny strap over the instep, a dark slot in it.
+    if (ix > -0.08 && ix < 0.04 && iy > 0.0 && iy < 0.035)
+      return Math.abs(ix + 0.02) < 0.025
+        ? { bright: 0.35, color: "#2A1712" }
+        : { bright: 0.75, color: "#561F17" };
+    return { bright: 0.7, color: "#6A2A20" };
+  }
+  return null;
+}
+
+function renderShinyLoafersFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#C46A4E",
+    "#5A2A20",
+    "#200C08",
+    shinyLoafersCardIcon,
+  );
+}
+
 function renderWitchHatFrame(yAngle: number): string[] {
   return renderIconCard(
     yAngle,
@@ -3363,6 +3550,12 @@ const ffCloakFrames = generateFrames(renderFfCloakFrame);
 const ffPearlsFrames = generateFrames(renderFfPearlsFrame);
 const ffShadesFrames = generateFrames(renderFfShadesFrame);
 const ffPinkFrames = generateFrames(renderFfPinkFrame);
+const fishermanBeanieFrames = generateFrames(renderFishermanBeanieFrame);
+const hipsterMoustacheFrames = generateFrames(renderHipsterMoustacheFrame);
+const dollarChainFrames = generateFrames(renderDollarChainFrame);
+const camoCloakFrames = generateFrames(renderCamoCloakFrame);
+const shinyLoafersFrames = generateFrames(renderShinyLoafersFrame);
+const latteFrames = generateFrames(renderLatteFrame);
 const fangsFrames = generateFrames(renderFangsFrame);
 const pumpkinSpiceFrames = generateFrames(renderPumpkinSpiceFrame);
 const ghostFrames = generateFrames(renderGhostFrame);
@@ -4128,6 +4321,79 @@ export const ITEMS: ItemDef[] = [
     description: "Fabulous Fabian's signature pink skin",
     rarity: "rare",
     frames: ffPinkFrames,
+    equipable: true,
+    equipSlot: "color",
+    sellPrice: 250,
+    stats: { luck: 10 },
+  },
+  // The Streetsmart set: six rare pieces, +10 luck each and +10 more for all
+  // six (ITEM_SETS), with coffee bubbles. Drop-only once migrated; held in
+  // NON_DROPPABLE_ITEM_IDS until then.
+  {
+    id: "fisherman-beanie",
+    name: "Fisherman Beanie",
+    description: "A short red watch cap. Has never been near a boat.",
+    rarity: "rare",
+    frames: fishermanBeanieFrames,
+    equipable: true,
+    equipSlot: "head",
+    sellPrice: 250,
+    stats: { luck: 10 },
+  },
+  {
+    id: "hipster-moustache",
+    name: "Hipster Moustache",
+    description: "A handlebar, waxed daily. Grown before it was cool.",
+    rarity: "rare",
+    frames: hipsterMoustacheFrames,
+    equipable: true,
+    equipSlot: "face",
+    sellPrice: 250,
+    stats: { luck: 10 },
+  },
+  {
+    id: "dollar-chain",
+    name: "Dollar Chain",
+    description: "Gold, heavy, and worn ironically. Probably.",
+    rarity: "rare",
+    frames: dollarChainFrames,
+    equipable: true,
+    equipSlot: "body",
+    minStage: 3,
+    sellPrice: 250,
+    stats: { luck: 10 },
+  },
+  {
+    id: "camo-cloak",
+    name: "Camo Cloak",
+    description:
+      "Woodland camo with a blaze-orange lining. Blends in, stands out.",
+    rarity: "rare",
+    frames: camoCloakFrames,
+    equipable: true,
+    equipSlot: "back",
+    minStage: 3,
+    sellPrice: 250,
+    stats: { luck: 10 },
+  },
+  {
+    id: "shiny-loafers",
+    name: "Shiny Loafers",
+    description: "Polished oxblood penny loafers. No socks.",
+    rarity: "rare",
+    frames: shinyLoafersFrames,
+    equipable: true,
+    equipSlot: "feet",
+    sellPrice: 250,
+    stats: { luck: 10 },
+  },
+  {
+    id: "latte",
+    name: "Latte",
+    description:
+      "A light, milky coffee skin with a head of foam. Oat, obviously.",
+    rarity: "rare",
+    frames: latteFrames,
     equipable: true,
     equipSlot: "color",
     sellPrice: 250,

@@ -138,6 +138,20 @@ export const PUMPKIN_RAMP = [
 ] as const;
 
 /**
+ * Latte ramp for the Latte skin (the Streetsmart set): milk foam on top,
+ * walking down through a light, milky coffee brown. Kept light on purpose:
+ * a latte, not an espresso.
+ */
+export const LATTE_RAMP = [
+  "#F4E7D3",
+  "#E6CBA8",
+  "#D6AE82",
+  "#C49468",
+  "#AE7D53",
+  "#8F6340",
+] as const;
+
+/**
  * Gold ramp for Good ol' George, the rich (and slightly sleazy) merchant NPC.
  * Like VOID_RAMP it is not built around a CREATURE_PALETTE hue and no item
  * grants it: polished highlights down to a deep bronze, so he reads as

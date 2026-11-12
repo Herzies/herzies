@@ -1146,9 +1146,9 @@ export class HerzieModel {
         parent.add(mesh);
         if (!propGroups.has(s.prop)) {
           const isGround = s.part === "ground";
-          const group = buildPropModel(s.prop, (color, matte) => {
+          const group = buildPropModel(s.prop, (color, matte, gloss) => {
             const shading = primitiveShading(
-              { zone: "wearable", color },
+              { zone: "wearable", color, ...(gloss && { finish: "gloss" }) },
               colors,
             );
             if (matte) {

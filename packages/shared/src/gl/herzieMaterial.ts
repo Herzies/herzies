@@ -235,6 +235,25 @@ vec3 clothFinish(vec3 color, vec3 n, float shadow, bool outside, bool trim) {
     // Hide: mottled, matte, a little scuffed.
     float m = noise2(vUv * vec2(9.0, 14.0)) * 0.6 + noise2(vUv * vec2(31.0, 47.0)) * 0.4;
     color *= outside ? 0.84 + 0.3 * m : 0.94 + 0.1 * m;
+  } else if (uFinish == 5) {
+    // Camo: woodland blotches on the outside, in four tones over the
+    // cloth's own olive, each kept to its band's light; the lining plain.
+    if (outside) {
+      vec2 q = vUv * vec2(4.0, 6.0);
+      float a = noise2(q) * 0.65 + noise2(q * 2.3 + 7.1) * 0.35;
+      float b = noise2(q * 1.4 + 3.7) * 0.65 + noise2(q * 3.1 + 1.3) * 0.35;
+      float c = noise2(q * 1.8 + 11.9);
+      float lum = min(1.12, max(color.r, max(color.g, color.b))
+        / max(max(uShades[1].r, max(uShades[1].g, uShades[1].b)), 0.001));
+      vec3 khaki = vec3(0.56, 0.53, 0.37);
+      vec3 brown = vec3(0.42, 0.31, 0.2);
+      vec3 forest = vec3(0.24, 0.29, 0.17);
+      vec3 black = vec3(0.13, 0.14, 0.1);
+      color = mix(color, khaki * lum, step(0.66, a));
+      color = mix(color, brown * lum, step(0.6, b));
+      color = mix(color, forest * lum, step(0.66, 1.0 - a) * step(0.45, c));
+      color = mix(color, black * lum, step(0.74, c) * step(0.5, b));
+    }
   } else if (uFinish == 4) {
     // Silk: sky at the collar to teal at the hem, and a broad, soft sheen.
     if (outside) color *= mix(vec3(1.06, 1.04, 1.0), vec3(0.62, 0.95, 0.92), vUv.y);
@@ -436,6 +455,28 @@ vec3 marbled(vec3 color) {
 }
 #endif
 
+#ifdef GLOSS
+// Polished (patent leather, glossy gold), cel style: its own bands, then
+// one hard, bright highlight where it faces the sun, a softer glow round
+// it, and a thin bright rim where it turns away, the sky caught in it.
+// Stepped, as everything on a herzie is.
+vec3 glossy(vec3 color, vec3 n, float shadow) {
+  vec3 v = normalize(cameraPosition - vWorldPos);
+  vec3 h = normalize(uSun + v);
+  float nv = max(dot(n, v), 0.0);
+  float nh = max(dot(n, h), 0.0);
+  float sunLit = max(dot(n, uSun), 0.0) * shadow;
+  float glow = pow(nh, 16.0) * sunLit;
+  color = mix(color, min(color * 1.45 + 0.08, vec3(1.0)), smoothstep(0.3, 0.45, glow) * 0.6);
+  float spec = pow(nh, 80.0) * sunLit;
+  color = mix(color, vec3(1.0, 0.98, 0.95), smoothstep(0.3, 0.42, spec));
+  float up = reflect(-v, n).y;
+  float rim = smoothstep(0.62, 0.72, 1.0 - nv) * smoothstep(0.0, 0.25, up);
+  color = mix(color, min(color * 1.6 + 0.15, vec3(1.0)), rim * 0.7);
+  return color;
+}
+#endif
+
 #ifdef PEARL
 // A pearl, cel style: its own dark bands, then what makes it a pearl —
 // layered nacre, which throws back a soft sheen whose colour shifts with
@@ -510,6 +551,9 @@ void main() {
   #ifdef PEARL
   color = pearly(color, n, shadow);
   #endif
+  #ifdef GLOSS
+  color = glossy(color, n, shadow);
+  #endif
   color *= uLight + uLampColor * lamps;
   color = mix(color, vec3(dot(color, vec3(0.2126, 0.7152, 0.0722))), uGrey);
   color = mix(color, uFlash.rgb, uFlash.w);
@@ -565,6 +609,7 @@ export function herzieMaterial(
   if (shading.metal) defines.METAL = "";
   if (shading.pearl) defines.PEARL = "";
   if (shading.marble) defines.MARBLE = "";
+  if (shading.gloss) defines.GLOSS = "";
   if (glass) defines.GLASS = "";
   if (glass && shading.lens) defines.LENS = "";
   if (cloth) defines.CLOTH = "";
