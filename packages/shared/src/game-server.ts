@@ -740,9 +740,27 @@ export async function processSync(
         const elapsedMinutes = Math.max(0, elapsedMs / 60_000);
         // Cap to elapsed wall-clock time since the last bill (+grace), times
         // the catch-up allowance that lets an unbilled backlog drain.
+        // The catch-up above real time only covers a backlog that can exist:
+        // minutes the account's life hasn't yet been credited with. A total
+        // at or past the account's age has none, so it gets real time only
+        // (a client syncing every 8s can't hold 3x forever).
+        const createdAt = row.created_at as string | null;
+        const accountMinutes = createdAt
+          ? Math.max(
+              0,
+              (now.getTime() - new Date(createdAt).getTime()) / 60_000,
+            )
+          : Number.POSITIVE_INFINITY;
+        const backlog = Math.max(
+          0,
+          accountMinutes - Number(herzie.totalMinutesListened),
+        );
         minutes = Math.min(
           minutes,
-          elapsedMinutes * CATCHUP_RATE + WALL_CLOCK_GRACE_MINUTES,
+          Math.max(
+            elapsedMinutes,
+            Math.min(elapsedMinutes * CATCHUP_RATE, backlog),
+          ) + WALL_CLOCK_GRACE_MINUTES,
         );
 
         // Enforce minimum cooldown between billable syncs
