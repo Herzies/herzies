@@ -1293,15 +1293,6 @@ export const NON_DROPPABLE_ITEM_IDS = [
   "drumhide-cloak",
   // …and the Tailwind Cloak only for money.
   "tailwind-cloak",
-  // The Streetsmart set: drop-only rares, like FF, once a migration puts them in
-  // the items table and boss_loot_roll. Held out of every pool until then
-  // (the rows don't exist yet, so nothing could drop them anyway).
-  "fisherman-beanie",
-  "hipster-moustache",
-  "dollar-chain",
-  "camo-cloak",
-  "shiny-loafers",
-  "latte",
 ] as const;
 
 /** Never a listening drop, nor in a boss's random loot (they're in
@@ -4327,8 +4318,8 @@ export const ITEMS: ItemDef[] = [
     stats: { luck: 10 },
   },
   // The Streetsmart set: six rare pieces, +10 luck each and +10 more for all
-  // six (ITEM_SETS), with coffee bubbles. Drop-only once migrated; held in
-  // NON_DROPPABLE_ITEM_IDS until then.
+  // six (ITEM_SETS), with coffee bubbles. Drop-only, like FF: the listening
+  // pool and a boss's random loot (00146), and no shop stocks them.
   {
     id: "fisherman-beanie",
     name: "Fisherman Beanie",
