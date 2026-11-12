@@ -245,6 +245,7 @@ pub fn sync_ghost_menu() {
 
 /// Hide the window but keep the app (and its listening) running. On macOS
 /// the Dock icon goes too, until the window comes back.
+#[cfg(target_os = "macos")]
 pub fn close_to_tray(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         hide_window(app, &window);
