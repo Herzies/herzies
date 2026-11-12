@@ -16,6 +16,7 @@ import {
   STATUS_STYLES,
   toDatetimeLocalValue,
 } from "./admin-shared";
+import { CheatFlagsPanel } from "./CheatFlagsPanel";
 import { EventCalendar } from "./EventCalendar";
 import { EventPreview, type PreviewEvent } from "./EventPreview";
 import { EventSeriesPanel } from "./EventSeriesPanel";
@@ -1845,4 +1846,9 @@ export function NotificationsSection() {
 export function GrantSection() {
   const { secret, items } = useAdminData();
   return <GrantItemPanel secret={secret} catalogItems={items} />;
+}
+
+export function CheatFlagsSection() {
+  const { secret } = useAdminData();
+  return <CheatFlagsPanel secret={secret} />;
 }
