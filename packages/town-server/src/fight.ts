@@ -82,7 +82,9 @@ import {
   type Telegraph,
   TUNING,
 } from "./boss";
+import { FairPlay } from "./fairplay";
 import { PositionHistory } from "./history";
+import { SPAWN_JUMP_GRACE_MS } from "./rules";
 import { type TowerArena, TowerEngine, type TowerEvent } from "./tower";
 
 /** The room holds eating to CONSUMABLE_COOLDOWN_MS less this, so a client
@@ -101,6 +103,9 @@ export const VICTORY_RISE_SHARE = 0.3;
 export const ESCAPE_LINGER_MS = 15_000;
 /** After a wipe, how long until the doors close. */
 export const WIPE_LINGER_MS = 15_000;
+/** A Tower herzie on its feet back within this long of leaving comes
+ * back where it left (rejoinAt). */
+export const REJOIN_PIN_MS = 10_000;
 /** A resurrect is cancelled if its Bard moves further than this. */
 export const CHANNEL_SLACK = 0.5;
 /** The boss says something at least this often (a reminder of what it
@@ -355,6 +360,9 @@ export class FightRuntime {
   private towerInflight: TowerBatch | null = null;
   /** The Tower's one herzie (a room of their own). */
   private towerUid = "";
+  /** How the Tower's herzie plays, for spotting a bot (fairplay.ts): it
+   * only watches and logs. Public so a test can give it its own sink. */
+  fair: FairPlay | null = null;
 
   // --- The raid (boss room only).
 
@@ -475,6 +483,7 @@ export class FightRuntime {
       engine,
     );
     f.towerUid = uid;
+    f.fair = new FairPlay();
     return f;
   }
 
@@ -497,6 +506,8 @@ export class FightRuntime {
     // A breather on arrival, as on joining.
     tower.noteSpawn(uid, now);
     this.history.forget(uid);
+    // Back to the start is the game's jump, not the herzie's.
+    this.fair?.moved(uid, now, SPAWN_JUMP_GRACE_MS);
     return [{ to: "all", msg: { t: "floor", ...tower.view() } }];
   }
 
@@ -590,11 +601,26 @@ export class FightRuntime {
     return p;
   }
 
-  /** Where a downed roster member who left comes back: where it fell. */
-  rejoinAt(uid: string): { x: number; z: number } | null {
+  /**
+   * Where a roster member who left comes back: a downed one where it fell,
+   * and in the Tower, one on its feet that's back within REJOIN_PIN_MS
+   * where it left. Otherwise a reconnect would be a way across the island
+   * mid-floor: the hello names any starting point (rules.ts), so dropping
+   * the socket and coming back elsewhere would do what a jump onto the
+   * spawn did. A herzie gone longer starts where its client says.
+   */
+  rejoinAt(
+    uid: string,
+    now: number = Date.now(),
+  ): { x: number; z: number } | null {
     const p = this.players.get(uid);
-    if (!p || p.present || !p.down || !this.fighting(uid)) return null;
-    return p.leftAt ?? null;
+    if (!p || p.present || !this.fighting(uid)) return null;
+    if (p.down) return p.leftAt ?? null;
+    if (!this.tower) return null;
+    const since = this.absentSince.get(uid);
+    return since !== undefined && now - since < REJOIN_PIN_MS
+      ? (p.leftAt ?? null)
+      : null;
   }
 
   /** Someone left (or lost their connection). Their health stays on record;
@@ -602,6 +628,14 @@ export class FightRuntime {
   leave(uid: string, now: number = Date.now()): void {
     const p = this.players.get(uid);
     if (!p) return;
+    // What fair play saw of the floor so far, kept for a rejoin: a quick
+    // reconnect mustn't start its counts over.
+    this.fair?.left(uid, now);
+    this.fair?.report(
+      uid,
+      this.fairContext(p, p.down ? "down" : "left"),
+      false,
+    );
     p.present = false;
     p.leftAt = this.history.at(uid, now) ?? p.leftAt;
     this.history.forget(uid);
@@ -664,7 +698,10 @@ export class FightRuntime {
   onState(uid: string, x: number, z: number, now: number): void {
     const p = this.players.get(uid);
     // A downed herzie stays where it fell, so a Bard can find it.
-    if (p?.present && !p.down) this.history.record(uid, now, x, z);
+    if (p?.present && !p.down) {
+      this.history.record(uid, now, x, z);
+      this.fair?.frame(uid, now, x, z);
+    }
   }
 
   /** A cast. Ignored once knocked out, out of the fight, or when the fight
@@ -682,7 +719,7 @@ export class FightRuntime {
     if (!pos) return "ignored";
     if (this.healers.has(uid) && p.attack === "wave")
       return this.healBolt(p, pos, yaw, pitch, now);
-    return this.engine.cast(
+    const result = this.engine.cast(
       uid,
       pos,
       yaw,
@@ -692,6 +729,22 @@ export class FightRuntime {
       p.attack,
       p.melee,
     );
+    if (result === "hit" && this.fair && this.tower) {
+      const aim = this.tower.aimOn(pos, yaw, pitch, now, p.attack);
+      if (aim) this.fair.aimed(uid, aim.off, aim.half);
+    }
+    return result;
+  }
+
+  /** What a fair-play report is about. */
+  private fairContext(p: FightPlayer, why: string): Record<string, unknown> {
+    return {
+      map: "tower",
+      floor: this.tower?.floor ?? null,
+      cleared: this.tower?.isCleared ?? null,
+      level: p.level,
+      why,
+    };
   }
 
   /**
@@ -776,9 +829,27 @@ export class FightRuntime {
   /**
    * A class skill. The fight decides everything: whether this herzie has
    * the skill, whether it's ready, and what it does. Returns what became of
-   * it, plus what to tell whom.
+   * it, plus what to tell whom. One used is noted for fair play (how soon
+   * after it was ready).
    */
   skill(
+    uid: string,
+    skillId: string,
+    yaw: number,
+    pitch: number,
+    now: number,
+  ): {
+    result: SkillResult;
+    readyAt: number;
+    reason?: SkillRefusal;
+    out: Outbound[];
+  } {
+    const r = this.useSkill(uid, skillId, yaw, pitch, now);
+    if (r.result === "used") this.fair?.skill(uid, skillId, now, r.readyAt);
+    return r;
+  }
+
+  private useSkill(
     uid: string,
     skillId: string,
     yaw: number,
@@ -1762,14 +1833,29 @@ export class FightRuntime {
         this.reportNow = true;
         if (this.tower)
           out.push({ to: "all", msg: { t: "floor", ...this.tower.view() } });
+        // One fair-play line per floor.
+        if (this.fair)
+          for (const p of this.players.values())
+            if (p.present)
+              this.fair.report(p.uid, this.fairContext(p, "cleared"));
         break;
       case "telegraph":
         out.push({
           to: "all",
           msg: { t: "telegraph", ...this.wire(ev.telegraph) },
         });
+        if (this.fair) {
+          const at: { uid: string; x: number; z: number }[] = [];
+          for (const p of this.players.values()) {
+            if (!p.present || p.down) continue;
+            const pos = this.history.at(p.uid, now);
+            if (pos) at.push({ uid: p.uid, x: pos.x, z: pos.z });
+          }
+          this.fair.telegraph(ev.telegraph, at);
+        }
         break;
       case "resolve": {
+        this.fair?.resolved(ev.id, new Set(ev.hits.map((h) => h.uid)), now);
         const sheltered: number[] = [];
         const hit = this.takeHits(ev.hits, out, now, sheltered);
         out.push({

@@ -31,7 +31,7 @@ import {
   shuffleOn,
 } from "@herzies/shared/skills";
 import { timingAttackSpeed } from "@herzies/shared/stats";
-import { towerMob } from "@herzies/shared/tower";
+import { MOB, towerMob } from "@herzies/shared/tower";
 import type { TowerFloor, TowerMob } from "@herzies/shared/town-net";
 import {
   type BossEvent,
@@ -43,7 +43,13 @@ import {
   type Telegraph,
   TUNING,
 } from "./boss";
-import { type MobJudge, MobPack, SEEN_LAG_MS, type TowerArena } from "./mobs";
+import {
+  HIT_SLACK,
+  type MobJudge,
+  MobPack,
+  SEEN_LAG_MS,
+  type TowerArena,
+} from "./mobs";
 
 export { predict, SEEN_LAG_MS, type TowerArena } from "./mobs";
 
@@ -257,6 +263,40 @@ export class TowerEngine {
         mult,
       );
     return "hit";
+  }
+
+  /**
+   * Where a cast aimed at `yaw` finds its mob, judged as cast() judges it
+   * (as the herzie saw the mobs), for fair play (fairplay.ts): how far to
+   * the side of the mob's middle the aim went, flat, in radians, and how
+   * wide the mob looks either side from there. Null for a miss, a melee
+   * blow (no aim), or a mob too close for an angle to mean anything.
+   */
+  aimOn(
+    from: { x: number; z: number },
+    yaw: number,
+    pitch: number,
+    now: number,
+    attack: AttackStyle = "wave",
+  ): { off: number; half: number } | null {
+    if (attack === "melee") return null;
+    const target = this.pack.along(
+      from,
+      aimDirection(yaw, pitch),
+      now - SEEN_LAG_MS,
+      attack === "disc" ? DISC_RANGE : undefined,
+    );
+    if (!target) return null;
+    const dx = target.at.x - from.x;
+    const dz = target.at.z - from.z;
+    const d = Math.hypot(dx, dz);
+    if (d < 1) return null;
+    const off = Math.atan2(
+      Math.sin(Math.atan2(dx, dz) - yaw),
+      Math.cos(Math.atan2(dx, dz) - yaw),
+    );
+    const half = Math.atan((MOB.radius * target.mob.scale + HIT_SLACK) / d);
+    return { off: Math.abs(off), half };
   }
 
   /** A Cymbrella: a dome of `by`'s at (x, z) from `now`, for `ms`. */

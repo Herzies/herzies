@@ -77,7 +77,7 @@ import {
 export const SEEN_LAG_MS = 120;
 /** Casts find a mob this much wider than its body: it moves, and the
  * client's picture of it is a moment old. */
-const HIT_SLACK = 0.3;
+export const HIT_SLACK = 0.3;
 /** How much of a mob's path is kept, for judging casts in the past. */
 const TRAIL_MS = 600;
 
@@ -449,14 +449,18 @@ export class MobPack {
   // --- Hits on them.
 
   /** The nearest mob a ray from (x, z) at hand height finds, as they stood
-   * at `seen`. */
+   * at `seen` (`at`: where that was). */
   along(
     from: { x: number; z: number },
     dir: readonly [number, number, number],
     seen: number,
     range?: number,
-  ): { mob: Mob; dist: number } | null {
-    let best: { mob: Mob; dist: number } | null = null;
+  ): { mob: Mob; dist: number; at: { x: number; z: number } } | null {
+    let best: {
+      mob: Mob;
+      dist: number;
+      at: { x: number; z: number };
+    } | null = null;
     for (const m of this.alive) {
       const at = this.seenAt(m, seen);
       const body: Body = {
@@ -472,7 +476,8 @@ export class MobPack {
         body,
         range,
       );
-      if (dist !== null && (!best || dist < best.dist)) best = { mob: m, dist };
+      if (dist !== null && (!best || dist < best.dist))
+        best = { mob: m, dist, at };
     }
     return best;
   }
