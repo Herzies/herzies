@@ -147,9 +147,9 @@ const KEYS: Key[] = [
   { day: 240, ...SUMMER }, // 28 August
   { day: 268, ...FALL, fall: 0.5, leaves: 0.6 }, // 25 September
   { day: 290, ...FALL }, // 17 October
-  { day: 315, ...FALL }, // 11 November
-  { day: 332, ...LATE_FALL }, // 28 November
-  { day: 350, ...WINTER }, // 16 December
+  { day: 305, ...FALL }, // 1 November
+  { day: 314, ...LATE_FALL, snowfall: 0.15 }, // 12 November: the first flurries
+  { day: 335, ...WINTER }, // 1 December: settled in
 ];
 
 const YEAR = 365;

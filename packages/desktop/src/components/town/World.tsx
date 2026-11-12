@@ -4,7 +4,6 @@ import { Clouds } from "./Clouds";
 import { type Champion, useChampion } from "./champion";
 import type { Hour } from "./DayCycle";
 import { DayLight } from "./DayLight";
-import { Ducks } from "./Ducks";
 import { HAZE_START } from "./depth";
 import { Ground } from "./Ground";
 import { DistantIslands, HomeIsland, SKY, Sky } from "./Islands";
@@ -112,7 +111,6 @@ export function World({
       <Props map={map} champion={champion} />
       <Bunting map={map} />
       <Birds map={map} />
-      <Ducks map={map} />
       <Weather map={map} />
       <Particles map={map} />
       <MapColliders key={mapId(map)} map={map} />
