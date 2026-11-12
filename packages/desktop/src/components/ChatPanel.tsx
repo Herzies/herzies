@@ -219,6 +219,7 @@ export function ChatPanel({
   onStartTrade,
   onActivity,
   frosted = false,
+  big = false,
 }: {
   activityLog: { time: string; message: string }[];
   isOnline: boolean;
@@ -244,6 +245,9 @@ export function ChatPanel({
   /** Over the Town's world: the chat is frosted glass rather than the
    * window's colour. */
   frosted?: boolean;
+  /** The big window: there's room round the open chat, so the screen isn't
+   * darkened behind it (a click outside still closes it). */
+  big?: boolean;
 }) {
   const [input, setInput] = useState("");
   const [itemRefs, setItemRefs] = useState<string[]>([]);
@@ -354,6 +358,26 @@ export function ChatPanel({
       });
     });
   };
+
+  // Kept at the bottom through any change of size (the window going big or
+  // small, the dock moving): the feed's or its content's. Runs before the
+  // scroll event a resize causes, so that doesn't read as scrolling up.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const keep = () => {
+      if (!pinnedToBottomRef.current) return;
+      el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
+    };
+    const ro = new ResizeObserver(keep);
+    ro.observe(el);
+    for (const child of Array.from(el.children)) ro.observe(child);
+    window.addEventListener("resize", keep);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", keep);
+    };
+  }, []);
 
   const handleFeedScroll = () => {
     if (ignoreScrollRef.current) return;
@@ -1177,7 +1201,7 @@ export function ChatPanel({
           aria-label="Close chat"
           className={cn(
             "fixed inset-0 z-[200] cursor-default border-none p-0",
-            frosted ? "bg-black/25" : "bg-black/55",
+            big ? "bg-transparent" : frosted ? "bg-black/25" : "bg-black/55",
           )}
           onMouseDown={(e) => {
             e.preventDefault();

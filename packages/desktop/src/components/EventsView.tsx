@@ -45,6 +45,7 @@ import {
   herzies,
   type TowerGuard,
   useWindowFocused,
+  useWindowVisible,
 } from "../tauri-bridge";
 import { BackButton } from "./BackButton";
 import { BossFightHelp, BossFightPanel, makeDebugBoss } from "./BossFightPanel";
@@ -422,6 +423,7 @@ function EventsViewImpl({
   }, [openRequest, setSelected]);
   const [huntTab, setHuntTab] = useState<"clues" | "finders">("clues");
   const focused = useWindowFocused();
+  const visible = useWindowVisible();
 
   // Leaving an NPC: Esc, or any key that would walk the herzie (WASD, the
   // arrows), takes you back out to the Town. Keys typed into a field (a
@@ -879,7 +881,7 @@ function EventsViewImpl({
         paused={
           (selected !== null && !inPanel) ||
           (!eventsTabVisible && !homeShown) ||
-          !focused
+          !visible
         }
         home={homeShown}
         backdrop={selected !== null && !inPanel && eventsTabVisible}
@@ -949,7 +951,7 @@ function EventsViewImpl({
         >
           <BossFightPanel
             event={selectedEvent}
-            paused={!active || !focused}
+            paused={!active || !visible}
             equipped={equipped}
           />
         </ScreenView>
@@ -992,7 +994,7 @@ function EventsViewImpl({
             units={units}
             onBought={() => setReloadKey((k) => k + 1)}
             onLog={onLog}
-            paused={!active || !focused}
+            paused={!active || !visible}
           />
         </ScreenView>
       );
@@ -1013,7 +1015,7 @@ function EventsViewImpl({
             equipped={equipped}
             onClaimed={() => setGuardKey((k) => k + 1)}
             onLog={onLog}
-            paused={!active || !focused}
+            paused={!active || !visible}
           />
         </ScreenView>
       );
@@ -1029,7 +1031,7 @@ function EventsViewImpl({
           childrenClassName="flex min-h-0 flex-col"
           backButton={back}
         >
-          <NakataPanel equipped={equipped} paused={!active || !focused} />
+          <NakataPanel equipped={equipped} paused={!active || !visible} />
         </ScreenView>
       );
     }
@@ -1044,7 +1046,7 @@ function EventsViewImpl({
           childrenClassName="flex min-h-0 flex-col"
           backButton={back}
         >
-          <CrystalPanel paused={!active || !focused} />
+          <CrystalPanel paused={!active || !visible} />
         </ScreenView>
       );
     }
@@ -1063,7 +1065,7 @@ function EventsViewImpl({
             giver={PIP}
             board={questBoard}
             onLog={onLog}
-            paused={!active || !focused}
+            paused={!active || !visible}
           />
         </ScreenView>
       );
@@ -1086,7 +1088,7 @@ function EventsViewImpl({
             units={units}
             onChanged={() => setStallKey((k) => k + 1)}
             onLog={onLog}
-            paused={!active || !focused}
+            paused={!active || !visible}
           />
         </ScreenView>
       );
@@ -1109,7 +1111,7 @@ function EventsViewImpl({
             units={units}
             onBought={() => {}}
             onLog={onLog}
-            paused={!active || !focused}
+            paused={!active || !visible}
           />
         </ScreenView>
       );
@@ -1337,7 +1339,7 @@ function EventsViewImpl({
           />
         }
       >
-        <OrphiezStage paused={!active || !focused} />
+        <OrphiezStage paused={!active || !visible} />
         {hunt.description ? (
           <div className="mt-1 shrink-0 text-center text-ui text-text-dim">
             {hunt.description}

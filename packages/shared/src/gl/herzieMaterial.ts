@@ -240,6 +240,25 @@ vec3 clothFinish(vec3 color, vec3 n, float shadow, bool outside, bool trim) {
     if (outside) color *= mix(vec3(1.06, 1.04, 1.0), vec3(0.62, 0.95, 0.92), vUv.y);
     float sheen = pow(nh, 9.0) * sunLit;
     color += vec3(0.85, 0.97, 1.0) * smoothstep(0.25, 0.75, sheen) * 0.28;
+  } else if (uFinish == 5) {
+    // Tweed: a 2/2 houndstooth twill (two dark threads, two light), rust
+    // and cream flecks, a thin rust overcheck. Matte. The lining is plain.
+    if (outside) {
+      vec2 cell = floor(vUv * vec2(70.0, 100.0));
+      float x = mod(cell.x, 4.0);
+      float y = mod(cell.y, 4.0);
+      float dark = mod(y - x, 4.0) < 2.0 ? step(x, 1.5) : step(y, 1.5);
+      vec3 light = mix(color, vec3(0.93, 0.9, 0.74) * dot(color, vec3(0.33)) * 2.2, 0.38);
+      vec3 woven = mix(light, color * 0.7, dark);
+      float h = hash21(cell);
+      float fleck = step(0.89, h);
+      vec3 speck = h > 0.945 ? vec3(0.78, 0.42, 0.22) : vec3(0.95, 0.92, 0.8);
+      woven = mix(woven, speck * dot(color, vec3(0.33)) * 2.4, fleck * 0.85);
+      float lineX = step(mod(cell.x, 20.0), 1.5);
+      float lineY = step(mod(cell.y, 20.0), 0.5);
+      woven = mix(woven, vec3(0.7, 0.38, 0.2) * dot(color, vec3(0.33)) * 2.3, max(lineX, lineY) * 0.6);
+      color = woven * (0.95 + 0.1 * hash21(cell + 7.0));
+    }
   }
   return color;
 }
@@ -365,9 +384,16 @@ float glassy(inout vec3 color, vec3 n, float shadow) {
   float edge = smoothstep(0.42, 0.5, 1.0 - nv);
   float rim = smoothstep(0.68, 0.76, 1.0 - nv);
   #ifdef LENS
+  #ifdef CLEAR
+  // Clear glass: you look straight through it, only its edge and a sheen
+  // showing.
+  float alpha = mix(0.035, 0.25, edge);
+  alpha = mix(alpha, 0.55, rim);
+  #else
   // A lens: tinted glass, mostly dark, the eye behind just showing.
   float alpha = mix(0.97, 0.98, edge);
   alpha = mix(alpha, 0.99, rim);
+  #endif
   #else
   float alpha = mix(0.44, 0.68, edge);
   alpha = mix(alpha, 0.9, rim);
@@ -386,6 +412,9 @@ float glassy(inout vec3 color, vec3 n, float shadow) {
   // A lens is flat: facing the sun, all of it would catch the highlight
   // at once and go white. Just a faint sheen instead.
   color += vec3(0.12) * shine;
+  #ifdef CLEAR
+  alpha = max(alpha, shine * 0.55);
+  #endif
   return alpha;
   #else
   color = mix(color, vec3(1.0), shine);
@@ -469,6 +498,46 @@ vec3 pearly(vec3 color, vec3 n, float shadow) {
 }
 #endif
 
+#ifdef TWEED
+// Tweed, on the skin: a fine houndstooth woven as a real one is, a 2/2 twill
+// of two dark threads then two light, warp and weft alike. Each thread is a
+// cell; at each crossing the warp shows where (row - column) mod 4 is under
+// two, else the weft. Over it, as on a good jacket: a thin overcheck every
+// few repeats (a windowpane in rust and cream) and Donegal flecks, a few
+// threads in colours of their own. Laid out round the part (its normal's
+// turn) and down the herzie (its rest height), in threads this big, in
+// creature units.
+const float THREAD = 0.042;
+float tweedHash(vec2 c) {
+  return fract(sin(dot(c, vec2(12.9898, 78.233))) * 43758.5453);
+}
+vec3 tweedWeave(vec3 color, vec3 n) {
+  vec2 at = vec2(atan(n.x, n.z) * 0.72, vRestY) / THREAD;
+  vec2 cell = floor(at);
+  float x = mod(cell.x, 4.0);
+  float y = mod(cell.y, 4.0);
+  float warpDark = step(x, 1.5);
+  float weftDark = step(y, 1.5);
+  float dark = mod(y - x, 4.0) < 2.0 ? warpDark : weftDark;
+  // Light threads: the colour toward cream. Dark: the colour, deepened.
+  vec3 light = mix(color, vec3(0.93, 0.9, 0.74) * dot(color, vec3(0.33)) * 2.2, 0.38);
+  vec3 deep = color * 0.7;
+  vec3 woven = mix(light, deep, dark);
+  // Donegal flecks: about one thread in nine, rust or cream.
+  float h = tweedHash(cell);
+  float fleck = step(0.89, h);
+  vec3 speck = h > 0.945 ? vec3(0.78, 0.42, 0.22) : vec3(0.95, 0.92, 0.8);
+  woven = mix(woven, speck * dot(color, vec3(0.33)) * 2.4, fleck * 0.85);
+  // The overcheck: a thread-wide line every 20 threads each way, two
+  // threads on the vertical, in rust.
+  float lineX = step(mod(cell.x, 20.0), 1.5);
+  float lineY = step(mod(cell.y, 20.0), 0.5);
+  vec3 rust = vec3(0.7, 0.38, 0.2) * dot(color, vec3(0.33)) * 2.3;
+  woven = mix(woven, rust, max(lineX, lineY) * 0.6);
+  return woven * (0.95 + 0.1 * tweedHash(cell + 7.0));
+}
+#endif
+
 void main() {
   vec3 n = normalize(vWorldNormal);
   #ifdef CLOTH
@@ -493,6 +562,9 @@ void main() {
     float t = clamp((vRestY - uTop) / uSpan, 0.0, 0.9999);
     int band = int(floor(t * float(uBands)));
     color = uRamp[band * 3 + shade];
+    #ifdef TWEED
+    color = tweedWeave(color, normalize(vLocalNormal));
+    #endif
   } else {
     color = uShades[shade];
   }
@@ -550,6 +622,9 @@ export function herzieMaterial(
   /** See-through (a translucent skin): drawn blended over its own depth
    * (see glassDepthMaterial), so only its front surface shows. */
   glass = false,
+  /** A tweed skin (see hasTweedSkin): what the scheme paints is woven in a
+   * houndstooth of its own light and dark. */
+  tweed = false,
 ): THREE.ShaderMaterial {
   const painted = shading.schemePainted && !!ramp;
   const rampColors = Array.from(
@@ -566,7 +641,9 @@ export function herzieMaterial(
   if (shading.pearl) defines.PEARL = "";
   if (shading.marble) defines.MARBLE = "";
   if (glass) defines.GLASS = "";
+  if (tweed && painted) defines.TWEED = "";
   if (glass && shading.lens) defines.LENS = "";
+  if (glass && shading.clear) defines.CLEAR = "";
   if (cloth) defines.CLOTH = "";
   if (patch) defines.PATCH = "";
   const material = new THREE.ShaderMaterial({

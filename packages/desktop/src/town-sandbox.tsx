@@ -97,6 +97,7 @@ import { dayOfYear } from "./components/town/Seasons";
 import { CastBar, SkillHud } from "./components/town/SkillHud";
 import TownCanvas from "./components/town/TownCanvas";
 import { setVitals } from "./components/town/vitals";
+import { weatherOverride } from "./components/town/weather";
 import { HerzieStageContext, overlayHerzieStage } from "./lib/overlayStage";
 import { herzies } from "./tauri-bridge";
 
@@ -121,6 +122,11 @@ const sandboxHour = () => {
   return (sky.hour + ((performance.now() - sky.setAt) / 1000) * speed) % 24;
 };
 const sandboxSeason = () => sky.day ?? dayOfYear();
+// The weather: ?rain=0.6 (&storm=1) to look at it; else the clock's.
+if (params.has("rain")) {
+  weatherOverride.rain = Number(params.get("rain"));
+  weatherOverride.storm = params.get("storm") === "1";
+}
 
 /** "18:30". */
 const clockText = (h: number) =>
@@ -260,6 +266,8 @@ const player = {
     }),
     ...(params.get("back") && { back: params.get("back") as string }),
     ...(params.get("feet") && { feet: params.get("feet") as string }),
+    ...(params.get("body") && { body: params.get("body") as string }),
+    ...(params.get("face") && { face: params.get("face") as string }),
   } as Record<string, string>,
 };
 // `?hotbar=star-candy`: that item on slot 2, with three in a pretend bank.

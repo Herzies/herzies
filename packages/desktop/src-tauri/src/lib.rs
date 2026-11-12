@@ -954,13 +954,14 @@ async fn market_cancel(listing_id: String) -> Result<serde_json::Value, String> 
 #[tauri::command]
 async fn market_buy(
     listing_id: String,
+    quantity: Option<u32>,
     app: AppHandle,
     state: tauri::State<'_, SharedState>,
 ) -> Result<serde_json::Value, String> {
     let client = api::http();
     // Before the request: the response's item state is at least this new.
     let issued_at = Instant::now();
-    let data = api::api_market_buy(&client, &listing_id).await?;
+    let data = api::api_market_buy(&client, &listing_id, quantity).await?;
     apply_purchase(&data, &app, &state, issued_at);
     Ok(data)
 }
@@ -1226,6 +1227,7 @@ fn set_town_expanded(app: tauri::AppHandle, expanded: bool) {
 #[tauri::command]
 fn set_ghost_mode(enabled: bool) {
     tray::set_ghost_mode(enabled);
+    tray::sync_ghost_menu();
 }
 
 #[tauri::command]
@@ -2054,6 +2056,16 @@ async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: f64) -> Resu
         }
     }
 
+    {
+        let s = state.lock().unwrap();
+        tray::set_listening(
+            s.current_now_playing
+                .as_ref()
+                .map(|n| (n.title.as_str(), n.artist.as_str())),
+        );
+        tray::set_user(s.herzie.as_ref().map(|h| h.name.as_str()));
+    }
+
     if let Some((artist, title, key)) = spawn_enrichment {
         spawn_track_enrichment(app, artist, title, key);
     }
@@ -2544,7 +2556,7 @@ async fn sync_tick_with(
     if !has_herzie || !is_logged_in {
         // Not signed in or no herzie yet — no server call needed, and we can't
         // distinguish "offline" from "logged out" without one, so assume the
-        // server is reachable. The tray title already defaults to <3.
+        // server is reachable.
         tray::set_connected(app, is_logged_in);
         let mut s = state.lock().unwrap();
         s.last_sync_ok = is_logged_in;
@@ -3099,9 +3111,10 @@ pub fn run() {
                 }
             }
 
-            // Hide dock icon (menu bar only)
+            // A regular app on macOS (Dock, Cmd-Tab) while its window is up;
+            // closing the window leaves only the menu-bar icon (tray.rs).
             #[cfg(target_os = "macos")]
-            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            app.set_activation_policy(tauri::ActivationPolicy::Regular);
 
             #[cfg(target_os = "macos")]
             if let Some(window) = app.get_webview_window("main") {
@@ -3113,6 +3126,19 @@ pub fn run() {
 
             // Restore the "pin window" preference (keep window open on blur)
             tray::set_pinned(storage::load_pin_window());
+
+            // Closing the window (red button, Cmd-W) keeps Herzies running in
+            // the menu bar, listening; Quit is in the tray menu and Cmd-Q.
+            #[cfg(target_os = "macos")]
+            if let Some(window) = app.get_webview_window("main") {
+                let app_handle = app.handle().clone();
+                window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        tray::close_to_tray(&app_handle);
+                    }
+                });
+            }
 
             // Set up window hide-on-blur (production only)
             if !tauri::is_dev() {

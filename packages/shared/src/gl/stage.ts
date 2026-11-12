@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import "./smoothShadows.js";
 import { SUPERSAMPLE, SupersamplePass } from "./supersample.js";
 
 /** Something drawn on the stage: a scene seen through a camera, inside an

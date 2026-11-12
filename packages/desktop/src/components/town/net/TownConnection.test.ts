@@ -186,6 +186,13 @@ describe("TownConnection", () => {
     // The first count heard is where they're at, not casts to show.
     cast(6, 5000);
     expect(r()?.pendingCasts).toBe(0);
+    // Nor what changes in the moment after meeting them: what they did
+    // before you saw them isn't replayed.
+    cast(7, 5033);
+    expect(r()?.pendingCasts).toBe(0);
+    cast(6, 5040);
+    const later = performance.now() + 2000;
+    const clock = vi.spyOn(performance, "now").mockReturnValue(later);
     // Two casts, round the wrap, between ticks.
     cast(0, 5066);
     expect(r()?.pendingCasts).toBe(2);
@@ -194,6 +201,7 @@ describe("TownConnection", () => {
     // A backlog is capped.
     cast(7, 5200);
     expect(r()?.pendingCasts).toBe(3);
+    clock.mockRestore();
   });
 
   it("moves to another island's room", async () => {

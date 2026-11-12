@@ -1,7 +1,8 @@
 /**
- * Integration tests for the market board (00126): list a copy at a fixed
- * price, someone buys it while you're away, and you collect the coins (less
- * the market's cut) or the unsold copy from the board later.
+ * Integration tests for the market board (00126, 00129, 00146): list a copy
+ * (or a stack) at a fixed price, someone buys it, or part of the stack, while
+ * you're away, and you collect the coins (less the market's cut) or the
+ * unsold copies from the board later.
  *
  * Requires: `npx supabase start`
  */
@@ -44,8 +45,10 @@ function list(token: string, unitId: string, price: number, quantity?: number) {
   );
 }
 
-function buy(token: string, listingId: string) {
-  return buyRoute(authenticatedRequest("/market/buy", token, { listingId }));
+function buy(token: string, listingId: string, quantity?: number) {
+  return buyRoute(
+    authenticatedRequest("/market/buy", token, { listingId, quantity }),
+  );
 }
 
 function cancel(token: string, listingId: string) {
@@ -289,6 +292,120 @@ describe("stacks", () => {
     const res = await list(seller.accessToken, unit.id, 400, 2);
     expect(res.status).toBe(400);
     expect((await res.json()).reason).toBe("not-stackable");
+  });
+});
+
+describe("buying part of a stack", () => {
+  /** Lists `quantity` Star Candy at `price` for the lot. */
+  async function stack(quantity: number, price: number) {
+    const seller = await player({ "star-candy": quantity });
+    const [unit] = await getUnits(seller.userId);
+    const res = await list(seller.accessToken, unit.id, price, quantity);
+    expect(res.status).toBe(200);
+    return { seller, listingId: (await res.json()).listing.id as string };
+  }
+
+  it("sells some copies at the price each and leaves the rest up", async () => {
+    const { seller, listingId } = await stack(10, 120);
+    const buyer = await player({}, 1000);
+
+    const res = await buy(buyer.accessToken, listingId, 3);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({ spent: 36, quantity: 3 });
+    expect(body.listing).toMatchObject({
+      id: listingId,
+      status: "active",
+      quantity: 7,
+      price: 84,
+      fee: 4,
+    });
+    expect(await currencyOf(buyer.userId)).toBe(964);
+    expect(await getUnits(buyer.userId)).toHaveLength(3);
+
+    const stall = await (await mine(seller.accessToken)).json();
+    expect(stall.active).toHaveLength(1);
+    expect(stall.active[0]).toMatchObject({ quantity: 7, price: 84 });
+    // 36 less a 1-coin cut.
+    expect(stall).toMatchObject({ coinsWaiting: 35, itemsWaiting: 0 });
+    const paid = await (await collect(seller.accessToken)).json();
+    expect(paid).toMatchObject({ coins: 35, items: 0 });
+  });
+
+  it("sells the rest after a partial buy, and pays for each sale", async () => {
+    const { seller, listingId } = await stack(5, 100);
+    const a = await player({}, 1000);
+    const b = await player({}, 1000);
+
+    expect((await buy(a.accessToken, listingId, 2)).status).toBe(200);
+    const rest = await buy(b.accessToken, listingId, 3);
+    expect(rest.status).toBe(200);
+    expect((await rest.json()).listing).toMatchObject({
+      status: "sold",
+      quantity: 3,
+      price: 60,
+    });
+    expect(await getUnits(a.userId)).toHaveLength(2);
+    expect(await getUnits(b.userId)).toHaveLength(3);
+
+    // 40 less 2, and 60 less 3.
+    const paid = await (await collect(seller.accessToken)).json();
+    expect(paid).toMatchObject({ coins: 95, items: 0 });
+  });
+
+  it("buys the whole stack when no quantity is given", async () => {
+    const { listingId } = await stack(4, 100);
+    const buyer = await player({}, 1000);
+    const res = await buy(buyer.accessToken, listingId);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ spent: 100, quantity: 4 });
+    expect(await getUnits(buyer.userId)).toHaveLength(4);
+  });
+
+  it("refuses more copies than are left", async () => {
+    const { listingId } = await stack(3, 30);
+    const buyer = await player({}, 1000);
+    const res = await buy(buyer.accessToken, listingId, 4);
+    expect(res.status).toBe(409);
+    expect((await res.json()).reason).toBe("not-that-many");
+    expect(await currencyOf(buyer.userId)).toBe(1000);
+  });
+
+  it("sells a lot priced as a whole only whole", async () => {
+    const { listingId } = await stack(3, 100);
+    const buyer = await player({}, 1000);
+    const res = await buy(buyer.accessToken, listingId, 1);
+    expect(res.status).toBe(400);
+    expect((await res.json()).reason).toBe("whole-lot");
+    expect(await getUnits(buyer.userId)).toHaveLength(0);
+  });
+
+  it("charges only for the copies bought when coins are short", async () => {
+    const { listingId } = await stack(10, 100);
+    const buyer = await player({}, 25);
+    expect((await buy(buyer.accessToken, listingId, 3)).status).toBe(400);
+    expect((await buy(buyer.accessToken, listingId, 2)).status).toBe(200);
+    expect(await currencyOf(buyer.userId)).toBe(5);
+  });
+
+  it("never sells more copies than the stack holds to racing buyers", async () => {
+    const { seller, listingId } = await stack(5, 50);
+    const a = await player({}, 1000);
+    const b = await player({}, 1000);
+
+    const statuses = (
+      await Promise.all([
+        buy(a.accessToken, listingId, 3),
+        buy(b.accessToken, listingId, 3),
+      ])
+    ).map((r) => r.status);
+    expect(statuses.sort()).toEqual([200, 409]);
+
+    const copies =
+      (await getUnits(a.userId)).length + (await getUnits(b.userId)).length;
+    expect(copies).toBe(3);
+    const stall = await (await mine(seller.accessToken)).json();
+    expect(stall.active[0]).toMatchObject({ quantity: 2, price: 20 });
   });
 });
 

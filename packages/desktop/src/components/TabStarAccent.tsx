@@ -1,6 +1,6 @@
 import { STAR_TWINKLE_VARIANTS } from "@herzies/shared";
 import { useEffect, useState } from "react";
-import { useWindowFocused } from "../tauri-bridge";
+import { useWindowVisible } from "../tauri-bridge";
 
 /** Pixel stars (Sky scene glyphs) on the button's edges: its corners and
  * its top and bottom borders, half in and half out, clear of the label. */
@@ -15,16 +15,16 @@ const STAR_SLOTS = [
 
 export function TabStarAccent() {
   const [frame, setFrame] = useState(0);
-  // Frozen while nobody can see it, like VisitorSparkles — it shows whenever a
-  // visitor is in town, which can be hours of a hidden window re-rendering at
-  // 5fps.
-  const focused = useWindowFocused();
+  // Frozen while the window's off screen — it shows whenever an event is on,
+  // which can be hours of a hidden window re-rendering at 5fps. On screen it
+  // runs, focused or not.
+  const visible = useWindowVisible();
 
   useEffect(() => {
-    if (!focused) return;
+    if (!visible) return;
     const id = setInterval(() => setFrame((f) => f + 1), 200);
     return () => clearInterval(id);
-  }, [focused]);
+  }, [visible]);
 
   return (
     // Over the whole button (which positions it), out of the layout, so the

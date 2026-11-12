@@ -289,6 +289,7 @@ export function HerzieView({
         const c = camera.current;
         return (
           l.paused &&
+          !model.glittering &&
           !s.dragging &&
           s.velocity === 0 &&
           model.dangleSettled &&

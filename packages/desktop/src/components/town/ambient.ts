@@ -38,6 +38,11 @@ export const ambient = {
   uBlossom: { value: 0 },
   uSnow: { value: 0 },
   uIce: { value: 0 },
+  /** How hard it's raining, 0–1 (see weather.ts): the ground goes dark
+   * and wet, the motes and butterflies go in. */
+  uRain: { value: 0 },
+  /** How wet everything is, 0–1: builds through the rain, dries after. */
+  uWet: { value: 0 },
 };
 
 /** The time of year as it's shown, for what moves on the CPU (the
@@ -45,6 +50,15 @@ export const ambient = {
 export const seasonNow: { look: SeasonLook } = {
   look: seasonLook(dayOfYear()),
 };
+
+/** The gust's swell at a spot, 0.1–1, as the wind shaders work it out
+ * (the slow swell rolling downwind in `swayInWind`): for what moves on
+ * the CPU and should lean with the trees round it. */
+export function gustAt(x: number, z: number, t: number): number {
+  const w = ambient.uWindDir.value;
+  const along = x * w.x + z * w.y;
+  return 0.55 + 0.45 * Math.sin(along * 0.07 - t * 0.45);
+}
 
 /** How a material moves in the wind. */
 export type Sway = {
@@ -253,6 +267,7 @@ export function inSeason<M extends THREE.Material>(
       uBare: ambient.uBare,
       uBlossom: ambient.uBlossom,
       uSnow: ambient.uSnow,
+      uWet: ambient.uWet,
     });
     // Its world position, once the vertex is placed (after any swaying),
     // and for an instanced oak, which tree it is.
@@ -287,6 +302,7 @@ uniform float uFall;
 uniform float uBare;
 uniform float uBlossom;
 uniform float uSnow;
+uniform float uWet;
 varying vec3 vSeasonWorld;
 varying float vSeasonTree;
 varying float vSeasonLump;
@@ -350,6 +366,11 @@ ${
   float depth = uSnow * lies * ${trodden ? "mix( 0.55, 1.15, green )" : "1.15"};
   float cover = step( 1.0 - depth, drift );
   diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.7, 0.75, 0.84 ) * ( 0.94 + grain * 0.06 ), cover );
+  // Wet from the rain (see weather): what faces up goes darker and
+  // richer, in patches where the water lies, and the snow doesn't.
+  float soak = uWet * lies * ( 1.0 - cover ) * ( 0.6 + 0.4 * seasonNoise( xz * 1.3 + 50.0 ) );
+  diffuseColor.rgb *= 1.0 - soak * 0.38;
+  diffuseColor.rgb = mix( diffuseColor.rgb, diffuseColor.rgb * diffuseColor.rgb * 2.2, soak * 0.3 );
 }
 #include <alphamap_fragment>`,
       );

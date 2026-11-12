@@ -111,6 +111,20 @@ export const FF_PINK_RAMP = [
 ] as const;
 
 /**
+ * Black ramp for Fylling's Black: a deep, slightly cool black. Opaque: just a
+ * colour for the whole herzie (the scheme paints one band of it, so there
+ * are no stripes).
+ */
+export const FYLLINGS_BLACK_RAMP = [
+  "#4A4A52",
+  "#35353C",
+  "#26262C",
+  "#17171B",
+  "#0F0F12",
+  "#09090B",
+] as const;
+
+/**
  * Teal ramp for the Thanks for all the fish! colour scheme. Same construction
  * as VIOLET_RAMP, around CREATURE_PALETTE's "teal" (#4ECDC4, hue 175.7°).
  */

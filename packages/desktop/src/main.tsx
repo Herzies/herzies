@@ -17,6 +17,8 @@ import {
   statPoints,
 } from "@herzies/shared";
 import { herzieStage } from "@herzies/shared/gl";
+import { isTauri } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { attachConsole } from "@tauri-apps/plugin-log";
 import {
   isPermissionGranted,
@@ -57,6 +59,7 @@ import { SplashScreen } from "./components/SplashScreen";
 import { StatsTab } from "./components/StatsTab";
 import { StoreView } from "./components/StoreView";
 import { type MenuLanding, TabBar, type View } from "./components/TabBar";
+import { TitleBar } from "./components/TitleBar";
 import { TradeView } from "./components/TradeView";
 import { BULLETIN_KEY } from "./components/town/Boards";
 import { setBagOpen, setLootRoom } from "./components/town/combat/lootFeed";
@@ -66,7 +69,11 @@ import { combat } from "./components/town/combat/state";
 import { setCrystal } from "./components/town/crystalState";
 import { homeDropFeed } from "./components/town/dropSpots";
 import { setOwnedEmotes } from "./components/town/emotes";
-import { homeMode, useHomeMode } from "./components/town/homeMode";
+import {
+  homeMode,
+  useHomeMode,
+  useWorldSettled,
+} from "./components/town/homeMode";
 import { townNet } from "./components/town/net/townNet";
 import {
   canExpandTown,
@@ -81,6 +88,7 @@ import { useTradeRequests } from "./hooks/useTradeRequests";
 import { onLogActivity } from "./lib/activity";
 import { notify } from "./lib/notices";
 import { announcePickup } from "./lib/pickups";
+import { IS_MAC } from "./lib/platform";
 import { stableMerge } from "./lib/stableMerge";
 import { cn } from "./lib/utils";
 import { RELEASE_NOTES } from "./release-notes";
@@ -93,6 +101,7 @@ import {
   type UpdateInstallEvent,
   useGhostMode,
   useWindowFocused,
+  useWindowVisible,
 } from "./tauri-bridge";
 
 const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1h
@@ -117,15 +126,18 @@ const HOME_INVENTORY_RAISE_MS = 340;
 /** How tall Home's own herzie view is drawn (HerzieView's box at size 5):
  * the Town frames Home's herzie the same size (see town/homeCamera). */
 const HOME_VIEW_HEIGHT = Math.ceil(SH * 5 * 1.35);
-/** The small window's height (tauri.conf.json): Home's herzie is drawn as
+/** The small window's height (tauri.conf.json, with the 28px top bar):
+ * Home's herzie is drawn as
  * big for a bigger window as it is for this one. */
-const SMALL_WINDOW_HEIGHT = 520;
+const SMALL_WINDOW_HEIGHT = 548;
 /** In the big window: where the herzie's feet stand (a fraction of the
  * window's height down), and the most it's drawn bigger. */
 const HOME_BIG_FEET = 0.72;
 const HOME_BIG_MAX_ZOOM = 1.6;
 /** How long Home's stand-in herzie takes to give way to the world's. */
 const HOME_STAND_IN_FADE_MS = 450;
+/** The longest the loading screen waits for the world at launch. */
+const WORLD_LOAD_MAX_MS = 20_000;
 /** How long Home's sky stays after leaving, under the world fading back
  * in over it. */
 const HOME_SKY_LINGER_MS = 900;
@@ -260,7 +272,8 @@ function App() {
   useTradeRequests(rawState.isOnline);
   // Home is where the app opens; the Town is the other screen. Herzie,
   // Social, Premium, Settings and a trade open over either as a window.
-  const [base, setBase] = useState<Base>("home");
+  // The app opens on the Town's world (in its big window, see townWindow).
+  const [base, setBase] = useState<Base>("events");
   const [overlay, setOverlay] = useState<OverlayId | null>(null);
   /** What the nav shows as selected. */
   const view: View = overlay ?? base;
@@ -268,6 +281,18 @@ function App() {
   // it's up, is what Home shows; until then (or without it) Home's own
   // stand-in does.
   const { ready: homeInWorld, combatMap } = useHomeMode();
+  // The app opens on Home, which is the 3D Town seen from your herzie: it
+  // loads behind a loading screen, until the world's been warmed and stopped
+  // growing (useWorldSettled), rather than showing a stand-in that freezes
+  // while the world compiles and uploads. Once only; a long load gives up
+  // after WORLD_LOAD_MAX_MS and shows the app anyway.
+  const worldSettled = useWorldSettled();
+  const [loadGaveUp, setLoadGaveUp] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setLoadGaveUp(true), WORLD_LOAD_MAX_MS);
+    return () => clearTimeout(t);
+  }, []);
+  const worldLoading = !worldSettled && !loadGaveUp;
   useEffect(() => {
     homeMode.set(base === "home");
   }, [base]);
@@ -651,10 +676,12 @@ function App() {
   }, []);
 
   // CSS keyframe loops (marquees, floating drops) can't read the hook, so
-  // flag the root and let globals.css pause them while the window is blurred.
+  // flag the root and let globals.css pause them while the window is off
+  // screen. Unfocused but visible, they keep going.
+  const visible = useWindowVisible();
   useEffect(() => {
-    document.documentElement.toggleAttribute("data-window-blurred", !focused);
-  }, [focused]);
+    document.documentElement.toggleAttribute("data-window-hidden", !visible);
+  }, [visible]);
 
   // One effect, not two: a second copy gated on `state.isOnline` alone fired a
   // duplicate of this every time connectivity flipped while the window was
@@ -667,11 +694,11 @@ function App() {
     return () => clearInterval(interval);
   }, [focused, state.isOnline, refreshEventIndicator]);
 
-  // Reset to home screen when logging back in
+  // Back to the world when logging back in
   const prevOnline = useRef(state.isOnline);
   useEffect(() => {
     if (state.isOnline && !prevOnline.current) {
-      setView("home");
+      setView("events");
     }
     prevOnline.current = state.isOnline;
   }, [state.isOnline, setView]);
@@ -899,9 +926,16 @@ function App() {
   }, [base]);
   const canToggleWindow =
     canExpandTown && (townWorld || (base === "home" && homeInWorld));
+  // Not while the world loads at launch: the window opens big
+  // (tauri.conf.json) and stays so until there's a screen to size it for.
+  // Nor before the first state arrives (a reload): its placeholder has no
+  // herzie, which would read as logged out and shrink the window for a beat.
   useEffect(() => {
+    if (!hydrated) return;
+    // Logged out there's no world coming: the small window at once.
+    if (worldLoading && rawState.herzie) return;
     herzies.setTownExpanded(bigWindow).catch(() => {});
-  }, [bigWindow]);
+  }, [bigWindow, worldLoading, rawState.herzie, hydrated]);
   // The boss's end screen is up over the Town: the chat steps aside.
   const endScreen = endScreenUp && townWorld;
 
@@ -948,6 +982,23 @@ function App() {
     };
 
     const handler = (event: KeyboardEvent) => {
+      // Cmd+W (macOS): close the window, as the red button does. Herzies
+      // keeps running in the menu bar (tray.rs).
+      if (
+        IS_MAC &&
+        event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !event.shiftKey &&
+        event.key.toLowerCase() === "w"
+      ) {
+        event.preventDefault();
+        if (isTauri())
+          getCurrentWindow()
+            .close()
+            .catch(() => {});
+        return;
+      }
       // Settings: macOS's conventional Cmd+, (Ctrl+, on Windows/Linux) —
       // works from any view/focus.
       if (
@@ -1254,6 +1305,7 @@ function App() {
         onStartTrade={handleStartTrade}
         onActivity={addLog}
         frosted={townWorld}
+        big={bigWindow}
       />
     ) : null;
 
@@ -1266,11 +1318,14 @@ function App() {
         ghostMode && "grayscale",
       )}
     >
+      {worldLoading && <LoadingSplash overlay label="loading the world" />}
+      {/* Across the top, past the padding: a strip to drag the window by. */}
+      <TitleBar className="absolute inset-x-0 top-0" />
       <div
         className={cn(
           "flex min-h-0 flex-1 flex-col overflow-hidden",
           // The Town's 3D world fills the whole window, out past the app's
-          // padding; the chat floats over it (the dock).
+          // padding. The chat floats over it (the dock).
           townLayout && "-m-3",
           // Home supplies its own bottom breathing room (HomeView's now-playing
           // bar) so its artist-image background can reach the chat's top
@@ -1433,11 +1488,16 @@ function App() {
             // the Town, flush with the window's bottom (-mb-3 undoes the
             // app's pb-3) and its own 12px; elsewhere the app's pb-3.
             "px-3",
+            // In the big window the nav's at the bottom right, so the chat
+            // comes down to the window's bottom margin.
             townLayout
-              ? "absolute inset-x-0 bottom-0 z-40 -mb-3 pb-[38px]"
+              ? cn(
+                  "absolute inset-x-0 bottom-0 z-40 -mb-3",
+                  bigWindow ? "pb-3" : "pb-[38px]",
+                )
               : // Its own layer, over the screens but under the overlay
                 // windows (z-60): the expanded chat stays inside it.
-                "relative z-55 pb-[26px]",
+                cn("relative z-55", bigWindow ? "pb-0" : "pb-[26px]"),
           )}
         >
           <div className={cn(bigWindow && "w-[356px]")}>
@@ -1457,19 +1517,6 @@ function App() {
         </div>
       </div>
 
-      {/* A drag strip along the window's top edge, over everything (the
-          Town's canvas included, which otherwise takes every mouse-down), with
-          a small grab handle in the middle to say it's there. The handle
-          ignores the mouse, so the press lands on the strip, which carries
-          the drag attribute (Tauri only drags from the element that has it). */}
-      <div
-        data-tauri-drag-region
-        data-window-safe
-        className="group fixed inset-x-0 top-0 z-80 flex h-2 cursor-grab justify-center active:cursor-grabbing"
-      >
-        <div className="pointer-events-none mt-[3px] h-[3px] w-9 rounded-full bg-white/20 transition-colors group-hover:bg-white/45" />
-      </div>
-
       {/* The visitor panel's host (EventsView): fixed, it covers Home or the
           Town, under the nav and the windows. */}
       <div ref={setPanelHost} className="contents" />
@@ -1484,7 +1531,8 @@ function App() {
         <div
           className={cn(
             "pointer-events-none fixed bottom-3 z-65 flex transition-opacity duration-300",
-            bigWindow ? "left-3 w-[356px]" : "inset-x-3",
+            // The big window: Events and Menu at the bottom right.
+            bigWindow ? "right-3" : "inset-x-3",
             endScreen && "opacity-0",
           )}
         >
@@ -1507,6 +1555,7 @@ function App() {
               hasStats={!!herzie.statPoints}
               hasSkills={!!herzie.class}
               landing={menuLanding}
+              compact={bigWindow}
               windowSize={
                 canToggleWindow
                   ? { expanded: bigWindow, onToggle: toggleWindow }

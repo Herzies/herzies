@@ -3,7 +3,7 @@ import { CuboidCollider } from "@react-three/rapier";
 import { useLayoutEffect, useMemo } from "react";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import { inSeason, seeThrough } from "./ambient";
+import { ambient, inSeason, seeThrough } from "./ambient";
 import {
   type Building,
   type BuildingRect,
@@ -414,6 +414,31 @@ export function chimneysOf(map: TownMap): [number, number, number][] {
     if (!c) return [];
     const [x, z] = turned(b, c.x, c.z);
     return [[x, b.y + c.base + c.h + 0.1, z] as [number, number, number]];
+  });
+}
+
+/** Somewhere a bird can sit: a spot and which way along it faces. */
+export type Perch = { x: number; y: number; z: number; yaw: number };
+
+/** The roof ridges, as perches (see Birds): two spots along each
+ * building's main ridge, a third of the way in from either end. */
+export function ridgePerchesOf(map: TownMap): Perch[] {
+  return buildingsOf(map).flatMap((b) => {
+    // Only the homes have a ridge (the shops' roofs are flat).
+    if (b.kind !== "home") return [];
+    const s = roofShape(bounds(b.rects[0]));
+    const along = s.alongX ? 0 : Math.PI / 2;
+    return [0.3, 0.7].map((k) => {
+      const a = s.a0 + (s.a1 - s.a0) * k;
+      const [x, , z] = s.p(a, 0, s.bc);
+      const [wx, wz] = turned(b, x, z);
+      return {
+        x: wx,
+        y: b.y + s.top + 0.05,
+        z: wz,
+        yaw: along + b.turn + (k < 0.5 ? Math.PI : 0),
+      };
+    });
   });
 }
 
@@ -1014,11 +1039,59 @@ function buildingGeometry(b: Building) {
       g.translate(-px, 0, -pz).rotateY(b.turn).translate(px, 0, pz);
     }
   }
+  // Each window its own turn to light up at dusk (see windowPhase).
+  const centre = new THREE.Vector3();
+  for (const g of glow) {
+    g.computeBoundingBox();
+    g.boundingBox?.getCenter(centre);
+    const phase = windowPhase(centre.x, centre.y, centre.z);
+    g.setAttribute(
+      "phase",
+      new THREE.BufferAttribute(
+        new Float32Array(g.attributes.position.count).fill(phase),
+        1,
+      ),
+    );
+  }
   return {
     body: mergeGeometries(body) as THREE.BufferGeometry,
     glow:
       glow.length > 0 ? (mergeGeometries(glow) as THREE.BufferGeometry) : null,
   };
+}
+
+/**
+ * When a window lights up at dusk, 0–1: the earliest at 0, the last at 1,
+ * from where its glass is (to the nearest 5cm, so the same window's light
+ * in NightLights, placed from the plan rather than the geometry, agrees).
+ * Each house keeps its own hours.
+ */
+export function windowPhase(x: number, y: number, z: number): number {
+  const q = (v: number) => Math.round(v * 20);
+  const s = Math.sin(q(x) * 12.9898 + q(y) * 78.233 + q(z) * 37.719);
+  return Math.abs(s * 43758.5453) % 1;
+}
+
+/** Where a window light's glass is, from its plan (see windowLightsOf):
+ * just out from the wall, as framedWindow sets it. */
+export const GLASS_OUT = 0.05;
+
+/** How lit a window with this phase is when the town's lights are at
+ * `level` (0 by day, 1 at night): they come on one by one through dusk,
+ * each over a few minutes, and the same in reverse at dawn. */
+export function windowLit(phase: number, level: number): number {
+  const from = phase * 0.75;
+  return THREE.MathUtils.smoothstep(level, from, from + 0.25);
+}
+
+/** The gas lamps' flicker, 1 give or take a little: a slow waver under a
+ * quick one, with now and then a sputter. `seed` sets one lamp apart from
+ * the next. The same curve as the lantern glass's shader. */
+export function lampFlicker(t: number, seed: number): number {
+  const waver = Math.sin(t * 6.1 + seed) * Math.sin(t * 2.3 + seed * 1.7);
+  const sputter =
+    (t * 0.37 + seed) % 1 > 0.8 ? Math.sin(t * 13.7 + seed * 3.1) : 0;
+  return 1 + 0.07 * waver + 0.06 * sputter;
 }
 
 /** Brick courses and plank boards: chunky enough to read at the Town's
@@ -1125,16 +1198,80 @@ const bodyMaterial = seeThrough(
     ),
   ),
 );
+/** How lit the town's windows and lanterns are, 0 by day to 1 at night
+ * (set by DayLight), as the uniform their glass reads. */
+export const windowGlow = {
+  uWindows: { value: 0 },
+  uDayWindow: { value: new THREE.Color("#9fb3c4") },
+};
+const LIT_WINDOW = "#ffd98a";
+
+/** Window glass that lights up at dusk, each pane in its own turn (see
+ * windowPhase), from the daytime's dull blue to a warm glow. */
+function glassLighting<M extends THREE.Material>(
+  material: M,
+  /** The lanterns: flickering, each its own way (see lampFlicker). */
+  flicker: boolean,
+): M {
+  material.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, windowGlow, { uTime: ambient.uTime });
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        "#include <common>",
+        /* glsl */ `#include <common>
+${flicker ? "" : "attribute float phase;"}
+varying float vLit;
+uniform float uWindows;
+uniform float uTime;`,
+      )
+      .replace(
+        "#include <begin_vertex>",
+        /* glsl */ `#include <begin_vertex>
+{
+${
+  flicker
+    ? /* glsl */ `  // The lanterns: all lit together, each flickering its own way.
+  float seed = 0.0;
+  #ifdef USE_INSTANCING
+    seed = fract( sin( dot( instanceMatrix[3].xz, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 ) * 100.0;
+  #endif
+  float waver = sin( uTime * 6.1 + seed ) * sin( uTime * 2.3 + seed * 1.7 );
+  float sputter = step( 0.8, fract( uTime * 0.37 + seed ) ) * sin( uTime * 13.7 + seed * 3.1 );
+  vLit = smoothstep( 0.0, 0.25, uWindows ) * ( 1.0 + 0.07 * waver + 0.06 * sputter );`
+    : /* glsl */ `  float from = phase * 0.75;
+  vLit = smoothstep( from, from + 0.25, uWindows );`
+}
+}`,
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        "#include <common>",
+        /* glsl */ `#include <common>
+uniform vec3 uDayWindow;
+varying float vLit;`,
+      )
+      .replace(
+        "#include <color_fragment>",
+        /* glsl */ `#include <color_fragment>
+diffuseColor.rgb = mix( uDayWindow, diffuseColor.rgb * max( vLit, 1.0 ), min( vLit, 1.0 ) );`,
+      );
+  };
+  material.customProgramCacheKey = () => `glass:${flicker}`;
+  return material;
+}
+
 /** Unlit, so the windows glow against the evening sky; the day cycle
- * turns them down by day (see DayLight). */
+ * turns them down by day (see DayLight), one by one. */
 export const windowMaterial = seeThrough(
-  new THREE.MeshBasicMaterial({ color: "#ffd98a" }),
+  glassLighting(new THREE.MeshBasicMaterial({ color: LIT_WINDOW }), false),
 );
-/** A lantern's glass: lit like the windows (it shares their colour), but
- * never see-through — like the post it sits on, too slight to hide the
- * player, so dithering it would only speckle whoever's behind it. */
-export const lanternMaterial = new THREE.MeshBasicMaterial();
-lanternMaterial.color = windowMaterial.color;
+/** A lantern's glass: lit like the windows, flickering, but never
+ * see-through — like the post it sits on, too slight to hide the player,
+ * so dithering it would only speckle whoever's behind it. */
+export const lanternMaterial = glassLighting(
+  new THREE.MeshBasicMaterial({ color: LIT_WINDOW }),
+  true,
+);
 
 /**
  * The buildings — homes, shops, caves and the auction house — each patch of cells as one,

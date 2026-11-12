@@ -41,10 +41,13 @@ export function bubbleText(msg: Pick<ChatMessage, "content" | "itemRefs">) {
   return text.length > MAX_CHARS ? `${text.slice(0, MAX_CHARS - 1)}…` : text;
 }
 
+/** How old a message can be and still get a bubble when it arrives. */
+const BUBBLE_RECENT_MS = 20_000;
+
 /**
  * Turns new chat messages into bubbles over their senders' heads while
  * `active` (the Town is open). Messages already there when it opens are
- * history, not speech, so they never pop up.
+ * history, not speech, so they never pop up; nor do old ones arriving late.
  */
 export function useChatBubbles(
   messages: readonly ChatMessage[] | undefined,
@@ -65,9 +68,16 @@ export function useChatBubbles(
       seen.current = new Set(list.map((m) => m.id));
       return;
     }
-    const fresh = list.filter((m) => !seen.current?.has(m.id));
+    // New to us and said just now: messages that arrive late (the history,
+    // loading after the Town opened) aren't said over again.
+    const now = Date.now();
+    const fresh = list.filter(
+      (m) =>
+        !seen.current?.has(m.id) &&
+        now - Date.parse(m.createdAt) < BUBBLE_RECENT_MS,
+    );
+    for (const m of list) seen.current.add(m.id);
     if (!fresh.length) return;
-    for (const m of fresh) seen.current.add(m.id);
     setBubbles((prev) => {
       const next = new Map(prev);
       for (const m of fresh) {

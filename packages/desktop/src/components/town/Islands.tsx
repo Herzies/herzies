@@ -2,7 +2,7 @@ import { mulberry32 } from "@herzies/shared";
 import { useFrame } from "@react-three/fiber";
 import { useMemo, useRef } from "react";
 import * as THREE from "three";
-import { inSeason } from "./ambient";
+import { ambient, inSeason } from "./ambient";
 
 /** The sky, top to bottom: the fog fades everything far off into the
  * horizon colour, so distant islands melt into it. */
@@ -21,7 +21,30 @@ export const skyUniforms = {
   uSunDir: { value: new THREE.Vector3(0, -1, 0) },
   uMoonDir: { value: new THREE.Vector3(0, 1, 0) },
   uSunColor: { value: new THREE.Color("#fff4e0") },
+  /** How dark it is (0 by day, 1 at night): the stars come out with it. */
+  uNight: { value: 0 },
+  /** How strong the northern lights are tonight, 0–1 (see DayLight: a
+   * winter night in three). */
+  uAurora: { value: 0 },
+  /** A shooting star: where it started (xyz, unit) and how far along its
+   * fall it is (w, 0–1; past 1 there's none). */
+  uShoot: { value: new THREE.Vector4(0, 1, 0, 2) },
+  /** Where it's falling to (unit). */
+  uShootTo: { value: new THREE.Vector3(0, 1, 0) },
+  /** How much of the sky the clouds hide, 0–1: the stars and the aurora
+   * are behind them (see weather). */
+  uOvercast: { value: 0 },
+  /** Lightning: how bright the flash is right now, 0–1. */
+  uFlash: { value: 0 },
+  /** How strong the rainbow is, 0–1 (see weather). */
+  uRainbow: { value: 0 },
 };
+
+/** How often a star falls: one every this many seconds, give or take. */
+const SHOOTING_EVERY = 90;
+const SHOOTING_SPREAD = 60;
+/** How long a fall lasts (s). */
+const SHOOTING_LIFE = 0.9;
 
 const GRASS = new THREE.Color("#2f5233");
 /** Index in the island profile of the rim's top as the side sees it (the
@@ -148,7 +171,7 @@ export function Sky() {
         depthWrite: false,
         fog: false,
         // Shared, so the day cycle repaints the sky (see DayLight).
-        uniforms: skyUniforms,
+        uniforms: { ...skyUniforms, uTime: ambient.uTime },
         vertexShader: /* glsl */ `
           varying vec3 vDir;
           void main() {
@@ -163,19 +186,131 @@ export function Sky() {
           uniform vec3 uSunDir;
           uniform vec3 uMoonDir;
           uniform vec3 uSunColor;
+          uniform float uTime;
+          uniform float uNight;
+          uniform float uAurora;
+          uniform vec4 uShoot;
+          uniform vec3 uShootTo;
+          uniform float uOvercast;
+          uniform float uFlash;
+          uniform float uRainbow;
           varying vec3 vDir;
           // Angular radii, as cosines: the sun about 2.6 degrees, the moon 1.8.
           const float SUN_DISC = 0.99897;
           const float MOON_DISC = 0.99951;
+          // The star field's cells per unit of direction: one star to a
+          // cell, in some of them.
+          const float STAR_CELLS = 34.0;
+          float hash(vec3 p) {
+            return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+          }
+          vec3 hash3(vec3 p) {
+            return vec3(hash(p), hash(p + 17.3), hash(p + 41.7));
+          }
+          // The stars: the sky cut into cells, a star in two of every
+          // five, each its own brightness and twinkle, a few of them
+          // faintly coloured. Crisp points at the Town's pixels.
+          vec3 stars(vec3 dir) {
+            vec3 cell = floor(dir * STAR_CELLS);
+            float h = hash(cell);
+            if (h < 0.72) return vec3(0.0);
+            vec3 at = normalize((cell + 0.5 + (hash3(cell + 3.1) - 0.5) * 0.7) / STAR_CELLS);
+            float d = 1.0 - dot(dir, at);
+            // The angular radius, as 1 - cos: a tenth of a degree, the
+            // brightest a fifth — a pixel or two at the Town's resolution.
+            float r = 0.0000015 + (h - 0.72) * 0.000016;
+            float disc = 1.0 - smoothstep(r * 0.5, r, d);
+            float b = hash(cell + 7.7);
+            float bright = 0.2 + 0.8 * b * b;
+            float twinkle = 0.75 + 0.25 * sin(uTime * (1.5 + hash(cell + 9.1) * 3.5) + hash(cell + 2.2) * 50.0);
+            float tint = hash(cell + 5.5);
+            vec3 colour = tint < 0.15 ? vec3(1.0, 0.85, 0.7) : tint < 0.3 ? vec3(0.8, 0.88, 1.0) : vec3(1.0);
+            return colour * disc * bright * twinkle;
+          }
+          // Value noise over a plane, for the aurora's curtains.
+          float vnoise(vec2 p) {
+            vec2 i = floor(p);
+            vec2 f = fract(p);
+            vec2 u = f * f * (3.0 - 2.0 * f);
+            float a = hash(vec3(i, 0.0));
+            float b = hash(vec3(i + vec2(1.0, 0.0), 0.0));
+            float c = hash(vec3(i + vec2(0.0, 1.0), 0.0));
+            float d = hash(vec3(i + vec2(1.0, 1.0), 0.0));
+            return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+          }
+          // Northern lights: a band low over the north (-z), curtains of
+          // green with a violet fringe above, rippling slowly sideways.
+          vec3 aurora(vec3 dir) {
+            if (uAurora <= 0.0) return vec3(0.0);
+            float north = smoothstep(0.35, -0.45, dir.z);
+            float band = smoothstep(0.06, 0.24, dir.y) * (1.0 - smoothstep(0.34, 0.7, dir.y)) * north;
+            if (band <= 0.0) return vec3(0.0);
+            float along = atan(dir.x, -dir.z) * 3.0;
+            float t = uTime * 0.05;
+            float curtain = vnoise(vec2(along * 1.6 + t, dir.y * 2.0 - t * 0.6))
+              * 0.6 + 0.4 * vnoise(vec2(along * 4.5 - t * 1.7, dir.y * 6.0));
+            curtain = smoothstep(0.3, 0.85, curtain) * (0.35 + 0.65 * curtain);
+            float up = (dir.y - 0.08) / 0.5;
+            vec3 colour = mix(vec3(0.15, 0.9, 0.45), vec3(0.6, 0.3, 0.9), smoothstep(0.35, 0.9, up));
+            return colour * curtain * band * uAurora * 0.55;
+          }
+          // A shooting star: a short bright streak with a fading tail,
+          // along the chord from where it started towards uShootTo.
+          vec3 shooting(vec3 dir) {
+            float k = uShoot.w;
+            if (k < 0.0 || k > 1.0) return vec3(0.0);
+            vec3 head = normalize(mix(uShoot.xyz, uShootTo, k));
+            vec3 tail = normalize(mix(uShoot.xyz, uShootTo, max(0.0, k - 0.18)));
+            vec3 seg = head - tail;
+            float len2 = max(dot(seg, seg), 1e-6);
+            float along = clamp(dot(dir - tail, seg) / len2, 0.0, 1.0);
+            vec3 near = tail + seg * along;
+            float d = length(dir - near);
+            float streak = 1.0 - smoothstep(0.0, 0.0045, d);
+            // Brightest at the head, gone at the tail; flaring in and out.
+            float life = sin(k * 3.14159);
+            return vec3(1.0, 0.97, 0.9) * streak * along * along * life * 1.6;
+          }
+          // A rainbow: a ring 42 degrees out from the point opposite the
+          // sun, red outside to violet inside, and a fainter second one
+          // further out, the colours the other way round.
+          vec3 rainbow(vec3 dir) {
+            if (uRainbow <= 0.0) return vec3(0.0);
+            float a = degrees(acos(clamp(dot(dir, -uSunDir), -1.0, 1.0)));
+            // 0 at the inner (violet) edge, 1 at the outer (red).
+            float k = (a - 40.4) / 2.2;
+            float k2 = 1.0 - (a - 50.6) / 2.8;
+            float band = step(0.0, k) * step(k, 1.0);
+            float band2 = step(0.0, k2) * step(k2, 1.0) * 0.3;
+            float u = band > 0.0 ? k : k2;
+            if (band + band2 <= 0.0) return vec3(0.0);
+            // Violet, blue, green, yellow, orange, red.
+            vec3 colour = u < 0.2 ? mix(vec3(0.55, 0.2, 0.8), vec3(0.2, 0.4, 1.0), u / 0.2)
+              : u < 0.4 ? mix(vec3(0.2, 0.4, 1.0), vec3(0.2, 0.85, 0.3), (u - 0.2) / 0.2)
+              : u < 0.6 ? mix(vec3(0.2, 0.85, 0.3), vec3(1.0, 0.9, 0.2), (u - 0.4) / 0.2)
+              : u < 0.8 ? mix(vec3(1.0, 0.9, 0.2), vec3(1.0, 0.55, 0.15), (u - 0.6) / 0.2)
+              : mix(vec3(1.0, 0.55, 0.15), vec3(0.95, 0.2, 0.2), (u - 0.8) / 0.2);
+            // Faded into the sky towards the horizon.
+            float strength = (band + band2) * uRainbow * 0.4 * smoothstep(0.0, 0.25, dir.y);
+            return colour * strength;
+          }
           void main() {
             vec3 dir = normalize(vDir);
             float h = dir.y;
             vec3 c = h > 0.0
               ? mix(uHorizon, uTop, smoothstep(0.0, 0.6, h))
               : mix(uHorizon, uBottom, smoothstep(0.0, 0.5, -h));
+            c += rainbow(dir);
             // Each sinks into the haze at the horizon: dimmer the lower the
             // pixel, and fading out as it sets rather than cut off by it.
             float haze = smoothstep(-0.03, 0.14, h);
+            // The stars come out as the sky darkens, thinning at the
+            // horizon, and behind the clouds there are none.
+            float dark = smoothstep(0.5, 0.95, uNight) * haze * (1.0 - uOvercast);
+            if (dark > 0.0) {
+              c += (stars(dir) + shooting(dir)) * dark;
+              c += aurora(dir) * dark;
+            }
             float toSun = dot(dir, uSunDir);
             float toMoon = dot(dir, uMoonDir);
             float sunUp = smoothstep(-0.1, 0.12, uSunDir.y) * haze;
@@ -185,9 +320,11 @@ export function Sky() {
             sun = mix(mix(uHorizon, uSunColor, 0.7), sun, haze);
             c += uSunColor * pow(max(toSun, 0.0), 48.0) * 0.35 * sunUp;
             c = mix(c, sun, step(SUN_DISC, toSun) * sunUp);
-            float moonUp = smoothstep(-0.06, 0.06, uMoonDir.y) * haze;
+            float moonUp = smoothstep(-0.06, 0.06, uMoonDir.y) * haze * (1.0 - uOvercast * 0.85);
             c += vec3(0.55, 0.62, 0.8) * pow(max(toMoon, 0.0), 90.0) * 0.4 * moonUp;
             c = mix(c, vec3(0.95, 0.97, 1.0), step(MOON_DISC, toMoon) * moonUp);
+            // Lightning: the whole sky lit from behind the clouds.
+            c = mix(c, vec3(0.85, 0.88, 1.0), uFlash * 0.75);
             gl_FragColor = vec4(c, 1.0);
             #include <colorspace_fragment>
           }
@@ -196,8 +333,49 @@ export function Sky() {
     [],
   );
   const sky = useRef<THREE.Mesh>(null);
+  // The next shooting star: when it falls, from where to where. Each
+  // player sees their own; they're too brief to share.
+  const shoot = useRef({ at: SHOOTING_EVERY * 0.3, started: Number.NaN });
   // Centred on the camera, so it is always at the horizon's distance.
-  useFrame(({ camera }) => sky.current?.position.copy(camera.position));
+  useFrame(({ camera, clock }) => {
+    sky.current?.position.copy(camera.position);
+    const t = clock.elapsedTime;
+    const s = shoot.current;
+    const u = skyUniforms;
+    if (Number.isNaN(s.started)) {
+      if (t < s.at) return;
+      // Only at night: by day, wait for the next one instead.
+      if (u.uNight.value < 0.6) {
+        s.at = t + 20 + Math.random() * 20;
+        return;
+      }
+      // High up, falling a little way sideways and down.
+      const a = Math.random() * Math.PI * 2;
+      const y = 0.35 + Math.random() * 0.4;
+      const r = Math.sqrt(1 - y * y);
+      const from = new THREE.Vector3(Math.cos(a) * r, y, Math.sin(a) * r);
+      const to = from
+        .clone()
+        .add(
+          new THREE.Vector3(
+            (Math.random() - 0.5) * 0.5,
+            -(0.12 + Math.random() * 0.15),
+            (Math.random() - 0.5) * 0.5,
+          ),
+        )
+        .normalize();
+      u.uShoot.value.set(from.x, from.y, from.z, 0);
+      u.uShootTo.value.copy(to);
+      s.started = t;
+    }
+    const k = (t - s.started) / SHOOTING_LIFE;
+    u.uShoot.value.w = k;
+    if (k > 1) {
+      s.started = Number.NaN;
+      s.at = t + SHOOTING_EVERY + (Math.random() - 0.5) * SHOOTING_SPREAD;
+      u.uShoot.value.w = 2;
+    }
+  });
   return (
     <mesh ref={sky} material={material} renderOrder={-10} frustumCulled={false}>
       <sphereGeometry args={[300, 32, 16]} />

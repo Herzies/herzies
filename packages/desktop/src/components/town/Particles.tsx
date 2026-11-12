@@ -2,7 +2,7 @@ import { mulberry32 } from "@herzies/shared";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
-import { ambient, seasonNow } from "./ambient";
+import { ambient, gustAt, seasonNow } from "./ambient";
 import { chimneysOf } from "./Buildings";
 import { FOOTPRINT_LIFE, footprints, Trail } from "./footprints";
 import {
@@ -28,6 +28,7 @@ export function Particles({ map }: { map: TownMap }) {
   return (
     <>
       <Fireflies map={map} />
+      <Motes map={map} />
       <Smoke map={map} />
       <Butterflies map={map} />
       <FallingLeaves map={map} />
@@ -208,7 +209,7 @@ function Fireflies({ map }: { map: TownMap }) {
         f.y + Math.sin(p * 1.3) * 0.4,
         f.z + Math.cos(p * 0.9) * 1.2,
         0.13,
-        glow * night * seasonNow.look.fireflies,
+        glow * night * seasonNow.look.fireflies * (1 - ambient.uRain.value),
       );
     });
     pts.flush();
@@ -219,6 +220,81 @@ function Fireflies({ map }: { map: TownMap }) {
       material={pts.material}
       frustumCulled={false}
       visible={flies.length > 0}
+    />
+  );
+}
+
+// --- Motes -------------------------------------------------------------------
+
+const MOTES = 40;
+const MOTE = new THREE.Color("#fff6d8");
+/** How far from the player motes are kept: they're too faint to see
+ * further off, so the few there are stay close. */
+const MOTE_REACH = 9;
+const MOTE_HEIGHT = 3;
+
+/** Dust and pollen hanging in the daylight round the player: faint
+ * specks drifting on the air, catching the sun now and then. Kept in a
+ * box round the player, wrapped like the snow, so they're wherever you
+ * look. Gone at night (the fireflies take over) and in the rain. */
+function Motes({ map }: { map: TownMap }) {
+  const pts = usePoints(MOTES, THREE.NormalBlending);
+  const motes = useMemo(() => {
+    const rand = mulberry32(8086);
+    return Array.from({ length: MOTES }, () => ({
+      x: rand() * MOTE_REACH * 2,
+      y: rand() * MOTE_HEIGHT,
+      z: rand() * MOTE_REACH * 2,
+      phase: rand() * 100,
+      speed: 0.6 + rand() * 0.8,
+      size: 0.02 + rand() * 0.02,
+    }));
+  }, []);
+  useLayoutEffect(() => {
+    for (let i = 0; i < MOTES; i++) pts.color(i, MOTE);
+  }, [pts]);
+  const shown = useRef(false);
+
+  useFrame(({ clock }) => {
+    // By day only, and not in winter's bare air.
+    const day =
+      (1 - THREE.MathUtils.smoothstep(ambient.uNight.value, 0.2, 0.5)) *
+      (1 - ambient.uSnow.value) *
+      (1 - ambient.uRain.value);
+    if (day <= 0 && !shown.current) return;
+    shown.current = day > 0;
+    const t = clock.elapsedTime;
+    const wind = ambient.uWindDir.value;
+    const { x: px, z: pz } = ambient.uPlayer.value;
+    const wrap = (v: number, n: number) => ((v % n) + n) % n;
+    const span = MOTE_REACH * 2;
+    const gust = gustAt(px, pz, t);
+    motes.forEach((m, i) => {
+      const drift = t * 0.25 * m.speed * (0.5 + gust);
+      const x = px - MOTE_REACH + wrap(m.x + wind.x * drift - px, span);
+      const z = pz - MOTE_REACH + wrap(m.z + wind.y * drift - pz, span);
+      const y =
+        groundY(map, x, z) +
+        0.3 +
+        wrap(m.y + Math.sin(t * 0.4 * m.speed + m.phase) * 0.6, MOTE_HEIGHT);
+      // Each catches the light now and then: a slow blink, mostly dim.
+      const glint = Math.max(0, Math.sin(t * 0.9 * m.speed + m.phase)) ** 4;
+      pts.set(
+        i,
+        x + Math.sin(t * 0.7 + m.phase) * 0.3,
+        y,
+        z + Math.cos(t * 0.5 + m.phase) * 0.3,
+        m.size,
+        day * (0.08 + 0.3 * glint),
+      );
+    });
+    pts.flush();
+  });
+  return (
+    <points
+      geometry={pts.geometry}
+      material={pts.material}
+      frustumCulled={false}
     />
   );
 }
@@ -243,9 +319,12 @@ function Smoke({ map }: { map: TownMap }) {
     const t = clock.elapsedTime;
     const wind = ambient.uWindDir.value;
     chimneys.forEach(([x, y, z], c) => {
+      // The same gusts as the trees (see swayInWind): the column leans
+      // further as one rolls past the chimney.
+      const gust = 0.6 + 0.8 * gustAt(x, z, t);
       for (let j = 0; j < PUFFS; j++) {
         const age = (t * 0.18 + j / PUFFS + c * 0.37) % 1;
-        const drift = age * age * 2.5;
+        const drift = age * age * 2.5 * gust;
         pts.set(
           c * PUFFS + j,
           x + wind.x * drift + Math.sin(t + j) * 0.08,
@@ -331,7 +410,8 @@ function Butterflies({ map }: { map: TownMap }) {
     // Gone by night: tucked away (scaled to nothing).
     const day =
       (1 - THREE.MathUtils.smoothstep(ambient.uNight.value, 0.3, 0.6)) *
-      seasonNow.look.butterflies;
+      seasonNow.look.butterflies *
+      (1 - THREE.MathUtils.smoothstep(ambient.uRain.value, 0.05, 0.4));
     flies.forEach((f, i) => {
       const p = f.phase + t * 0.6;
       pos.set(

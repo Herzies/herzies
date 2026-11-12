@@ -2,16 +2,20 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { ambient, seasonNow } from "./ambient";
-import { windowMaterial } from "./Buildings";
-import { dayLook, type Hour, localHours, skyLights } from "./DayCycle";
+import { windowGlow } from "./Buildings";
+import {
+  type DayLook,
+  dayLook,
+  type Hour,
+  localHours,
+  skyLights,
+} from "./DayCycle";
 import { CLOUD_SHADE, townLook } from "./depth";
 import { skyUniforms } from "./Islands";
 import { nightLights } from "./Lamps";
 import { ISLAND_RADIUS } from "./runtime";
 import { dayOfYear, type Season, seasonLook } from "./Seasons";
-
-const LIT_WINDOW = new THREE.Color("#ffd98a");
-const DAY_WINDOW = new THREE.Color("#9fb3c4");
+import { lightning } from "./weather";
 
 /** The sun's shadow covers the whole island, from a fixed box: no edge
  * where shadows stop, and nothing shimmers as the player walks. A sphere
@@ -69,6 +73,58 @@ function applyRoomLook(
 
 const ROOM_AIR = "#09070e";
 
+/** The herzies lit by a lightning stroke: white, a touch of blue. */
+const FLASH_LIGHT = new THREE.Color("#e8ecff");
+/** An overcast sky by day and by night: what the sky's colours go to
+ * as the rain comes. */
+const OVERCAST_DAY = {
+  top: new THREE.Color("#5f6a78"),
+  horizon: new THREE.Color("#8d949c"),
+  bottom: new THREE.Color("#6a7280"),
+};
+const OVERCAST_NIGHT = {
+  top: new THREE.Color("#0a0d14"),
+  horizon: new THREE.Color("#1b2029"),
+  bottom: new THREE.Color("#0c0f16"),
+};
+const GREY_LIGHT = new THREE.Color("#b9c0c8");
+
+/** The rain's weather on the day's look: the sky grey, the sun lost
+ * behind the clouds, the light flat and cool, the haze thick. */
+function overcast(look: DayLook, rain: number) {
+  if (rain <= 0) return;
+  const k = Math.min(1, rain * 1.2);
+  const night = look.night;
+  const sky = {
+    top: OVERCAST_DAY.top.clone().lerp(OVERCAST_NIGHT.top, night),
+    horizon: OVERCAST_DAY.horizon.clone().lerp(OVERCAST_NIGHT.horizon, night),
+    bottom: OVERCAST_DAY.bottom.clone().lerp(OVERCAST_NIGHT.bottom, night),
+  };
+  look.skyTop.lerp(sky.top, k * 0.9);
+  look.skyHorizon.lerp(sky.horizon, k * 0.9);
+  look.skyBottom.lerp(sky.bottom, k * 0.9);
+  look.sun.lerp(GREY_LIGHT, k * 0.8);
+  look.sunIntensity *= 1 - k * 0.7;
+  look.hemiSky.lerp(GREY_LIGHT, k * 0.6);
+  look.hemiIntensity *= 1 - k * 0.2;
+  look.herzieLight.lerp(
+    GREY_LIGHT.clone().multiplyScalar(look.herzieLight.r * 0.5 + 0.4),
+    k * 0.6,
+  );
+  look.haze = Math.max(look.haze, k * 0.9);
+}
+
+/** Whether the northern lights show tonight, and how strongly (0: not at
+ * all): about one winter night in three, the same for everyone, each
+ * night (dusk to the next dawn) taken as one. */
+export function auroraTonight(dayOfYear: number): number {
+  // Nights span midnight: 18:00 of one day and 06:00 of the next are
+  // the same night.
+  const night = Math.floor(dayOfYear + 0.25);
+  const h = Math.abs(Math.sin(night * 12.9898 + 78.233) * 43758.5453) % 1;
+  return h < 0.35 ? 0.6 + (h / 0.35) * 0.4 : 0;
+}
+
 /** The time of year, onto the shared uniforms (see `inSeason`) and for
  * the particles. */
 function applySeason(year: ReturnType<typeof seasonLook>) {
@@ -118,6 +174,9 @@ export function DayLight({
     [],
   );
 
+  /** What the lights were set to, before the lightning's flash. */
+  const base = useRef({ hemi: 0, light: new THREE.Color(), flash: 0 });
+
   useFrame(({ clock }) => {
     const t = clock.elapsedTime;
     // A room is always the dead of night, whatever the clock says.
@@ -127,6 +186,17 @@ export function DayLight({
         ? hour()
         : (hour ?? localHours());
     const d = typeof season === "function" ? season() : (season ?? dayOfYear());
+    // Lightning, every frame: the sky's light and the herzies' jump with
+    // each stroke.
+    const flash = room ? 0 : lightning.flash;
+    if (flash > 0 || base.current.flash > 0) {
+      base.current.flash = flash;
+      if (hemi.current)
+        hemi.current.intensity = base.current.hemi * (1 + 5 * flash);
+      ambient.uLight.value
+        .copy(base.current.light)
+        .lerp(FLASH_LIGHT, Math.min(1, flash * 1.5));
+    }
     if (
       t - last.current.at < 0.25 &&
       h === last.current.hour &&
@@ -139,6 +209,7 @@ export function DayLight({
     applySeason(year);
     look.sun.multiply(year.light);
     look.hemiSky.multiply(year.light);
+    overcast(look, ambient.uRain.value);
     const lights = skyLights(h);
 
     skyUniforms.uTop.value.copy(look.skyTop);
@@ -147,6 +218,8 @@ export function DayLight({
     skyUniforms.uSunDir.value.copy(lights.sun);
     skyUniforms.uMoonDir.value.copy(lights.moon);
     skyUniforms.uSunColor.value.copy(look.sun);
+    skyUniforms.uNight.value = look.night;
+    skyUniforms.uAurora.value = auroraTonight(d) * year.snow * look.night;
     if (scene.background instanceof THREE.Color) {
       scene.background.copy(look.skyHorizon);
     }
@@ -155,12 +228,15 @@ export function DayLight({
       // Not a distance: how thick the haze is (see fog.ts).
       scene.fog.far = look.haze;
     }
-    townLook.w = CLOUD_SHADE * (1 - look.night);
+    // Under an overcast sky there's no sun to cast them.
+    townLook.w = CLOUD_SHADE * (1 - look.night) * (1 - ambient.uRain.value);
     if (hemi.current) {
       hemi.current.color.copy(look.hemiSky);
       hemi.current.groundColor.copy(look.hemiGround);
       hemi.current.intensity = look.hemiIntensity;
     }
+    base.current.hemi = look.hemiIntensity;
+    base.current.light.copy(look.herzieLight);
     if (sun.current) {
       sun.current.color.copy(look.sun);
       sun.current.intensity = look.sunIntensity * lights.strength;
@@ -169,7 +245,7 @@ export function DayLight({
         lights.strength * (1 - look.night * (1 - MOON_SHADOW));
     }
     ambient.uSun.value.copy(lights.herzie);
-    windowMaterial.color.lerpColors(DAY_WINDOW, LIT_WINDOW, look.windows);
+    windowGlow.uWindows.value = look.windows;
     nightLights.level = look.windows;
     ambient.uNight.value = look.night;
     ambient.uLight.value.copy(look.herzieLight);

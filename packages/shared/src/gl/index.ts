@@ -11,5 +11,6 @@ export * from "./HerzieView.js";
 export * from "./herzieMaterial.js";
 export * from "./loot.js";
 export * from "./scenery.js";
+export * from "./smoothShadows.js";
 export * from "./stage.js";
 export * from "./supersample.js";

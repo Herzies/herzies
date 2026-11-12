@@ -21,9 +21,9 @@ import {
 export const SURFACE = -0.15;
 const SHORE_WET = wetAtHeight(SURFACE);
 /** Each water cell's surface is this many quads a side, so it can ripple. */
-const SPLIT = 4;
+const SPLIT = 8;
 /** How far from the bank foam reaches. */
-const FOAM = 0.25;
+const FOAM = 0.3;
 const MAX_SHORE = 2;
 
 /** How far a point is from the bank: how far past the shoreline (where
@@ -102,6 +102,7 @@ function waterMaterial(): THREE.MeshLambertMaterial {
         /* glsl */ `#include <common>
 uniform float uTime;
 uniform float uIce;
+uniform float uRain;
 const float ICE_RISE = ${(-SURFACE - 0.02).toFixed(3)};
 attribute float shore;
 varying float vShore;
@@ -119,7 +120,9 @@ float calm = smoothstep( 0.0, 0.6, shore ) * ( 1.0 - uIce );
 transformed.y += uIce * ICE_RISE;
 transformed.y += calm * 0.035 * (
   sin( wp.x * 1.7 + uTime * 1.3 ) + sin( wp.z * 2.1 - uTime * 1.1 )
-);`,
+);
+// Rain on it (see weather): a quick restless chop on top.
+transformed.y += calm * uRain * 0.025 * sin( wp.x * 7.3 + wp.z * 5.1 + uTime * 9.0 );`,
       );
     shader.fragmentShader = shader.fragmentShader
       .replace(
@@ -128,6 +131,7 @@ transformed.y += calm * 0.035 * (
 uniform float uTime;
 uniform float uFoam;
 uniform float uIce;
+uniform float uRain;
 // Smooth value noise: random heights on a grid, eased between.
 float hash21( vec2 p ) {
   p = fract( p * vec2( 123.34, 456.21 ) );
@@ -157,16 +161,50 @@ vec2 p = vWorldXZ;
 vec2 warp = vec2( noise2( p * 0.6 + uTime * 0.11 ), noise2( p * 0.6 - uTime * 0.09 + 7.3 ) );
 float n1 = noise2( p * 1.9 + warp * 1.6 + vec2( uTime * 0.21, uTime * 0.07 ) );
 float n2 = noise2( p * 3.1 - warp + vec2( -uTime * 0.05, uTime * 0.26 ) + 19.1 );
-float glint = smoothstep( 0.66, 0.85, n1 * n2 * 1.25 );
+float glint = smoothstep( 0.7, 0.88, n1 * n2 * 1.25 );
 // Far off, a glint's smaller than a pixel and only flickers: those fade
 // to a faint even sheen instead.
 vec2 gpx = fwidth( p );
 float glintFar = smoothstep( 0.12, 0.35, max( gpx.x, gpx.y ) );
-diffuseColor.rgb += mix( glint, 0.05, glintFar * 0.8 ) * 0.28;
-// Foam at the bank, its edge lapping in and out.
-float lap = uFoam * ( 0.75 + 0.25 * sin( uTime * 1.8 + vWorldXZ.x * 2.3 + vWorldXZ.y * 1.7 ) );
-float foam = 1.0 - smoothstep( lap * 0.6, lap, vShore );
-diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.86, 0.93, 0.98 ), foam * 0.8 );
+diffuseColor.rgb += mix( glint, 0.05, glintFar * 0.8 ) * 0.18 * ( 1.0 - uRain * 0.7 );
+// Raindrops: pale specks landing here and there, each gone in a blink.
+if ( uRain > 0.0 ) {
+  float tick = floor( uTime * 10.0 );
+  float drop = step( 1.0 - uRain * 0.06, hash21( floor( p * 6.0 ) + tick * 0.37 ) );
+  diffuseColor.rgb += drop * 0.35 * ( 1.0 - glintFar );
+}
+// The bank, drawn the way shorelines usually are: the edge is warped by
+// noise so it never reads as a contour, the water fades from clear in the
+// shallows to deep, and foam comes as a few layers — a wet line at the
+// edge, a broken band lapping out, and a swash line that slides back
+// down the bank and fades.
+float warp1 = noise2( p * 2.7 + vec2( uTime * 0.12, -uTime * 0.09 ) );
+float warp2 = noise2( p * 6.5 - vec2( uTime * 0.2, uTime * 0.15 ) + 3.7 );
+float nd = vShore + ( warp1 - 0.5 ) * 0.22 + ( warp2 - 0.5 ) * 0.07;
+// Depth tint: sunlit turquoise in the shallows, the pond's own colour deeper.
+float deep = smoothstep( 0.04, 0.5, nd );
+vec3 shallow = vec3( 0.26, 0.52, 0.6 );
+diffuseColor.rgb = mix( shallow, diffuseColor.rgb, deep );
+// See the bed through the shallows: nearly clear at the edge.
+diffuseColor.a = mix( 0.25, diffuseColor.a, smoothstep( 0.0, 0.3, nd ) );
+// Caustics: bright net lines on the shallows, drifting.
+float cA = noise2( p * 4.2 + vec2( uTime * 0.25, uTime * 0.18 ) );
+float cB = noise2( p * 4.2 * 1.3 - vec2( uTime * 0.2, -uTime * 0.23 ) + 11.0 );
+float caustic = smoothstep( 0.0, 0.06, 0.06 - abs( cA - cB ) );
+diffuseColor.rgb += caustic * ( 1.0 - deep ) * 0.2 * ( 1.0 - uIce );
+// Foam: wet line right at the edge, wobbling.
+float lap = uFoam * ( 0.7 + 0.3 * sin( uTime * 1.6 + p.x * 2.3 + p.y * 1.7 ) );
+float edgeFoam = 1.0 - smoothstep( 0.0, 0.07 + 0.05 * warp2, nd );
+// Broken band, lapping out and in, eaten into by fine noise.
+float bandBreak = smoothstep( 0.42, 0.62, noise2( p * 9.0 + uTime * 0.15 ) + ( 1.0 - nd / lap ) * 0.35 );
+float band = ( 1.0 - smoothstep( lap * 0.55, lap, nd ) ) * bandBreak;
+// Swash: a thin line that rolls up the bank, thins and fades.
+float ph = fract( uTime * 0.16 + warp1 * 0.6 );
+float swashAt = ( 1.0 - ph ) * lap * 1.6;
+float swash = ( 1.0 - smoothstep( 0.0, 0.035 + 0.03 * ph, abs( nd - swashAt ) ) )
+  * ( 1.0 - ph ) * smoothstep( 0.35, 0.6, noise2( p * 7.0 + 5.0 ) );
+float foam = clamp( edgeFoam + band * 0.7 + swash * 0.8, 0.0, 1.0 );
+diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.9, 0.95, 0.98 ), foam * 0.85 );
 diffuseColor.a = mix( diffuseColor.a, 0.95, foam );
 // Frozen over (see Seasons.ts): pale and still, with a few cracks, and
 // frosted white towards the bank.

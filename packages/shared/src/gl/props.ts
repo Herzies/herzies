@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
-import type { PropModel, ShoeProp } from "../creature-renderer.js";
+import type { PropModel, ShoeProp, TieProp } from "../creature-renderer.js";
 
 /**
  * Props the 3D renderer builds as models of their own, where the ray caster
@@ -15,6 +15,7 @@ export type Paint = (color: string, matte?: boolean) => THREE.Material;
 
 export function buildPropModel(prop: PropModel, paint: Paint): THREE.Group {
   if (prop.kind === "shoe") return shoe(prop, paint);
+  if (prop.kind === "necktie") return necktie(prop, paint);
   return boombox(prop.size, prop.mirrored ? -1 : 1, paint);
 }
 
@@ -183,7 +184,8 @@ function shoe(prop: ShoeProp, paint: Paint): THREE.Group {
   const lace = cached(`shoe-lace:${r.toFixed(4)}`, () =>
     new THREE.CapsuleGeometry(r * 0.075, r * 0.55, 4, 8).rotateZ(Math.PI / 2),
   );
-  for (const z of [-0.55, -0.85, -1.15]) {
+  // A loafer has just the one strap.
+  for (const z of style.strap ? [-0.8] : [-0.55, -0.85, -1.15]) {
     add(lace, style.laces).position.set(0, topAt(z * r) - r * 0.02, z * r);
   }
   // The cuff: a ring round the leg where it comes up out of the upper.
@@ -370,4 +372,171 @@ export function propBodyBox(
   if (!body) return null;
   body.updateWorldMatrix(true, false);
   return out.setFromObject(body);
+}
+
+/** What a necktie's group carries for the renderer: moves the blade's
+ * ribbon to where the simulation has the blade's points. */
+export interface TieRibbon {
+  update(points: [number, number, number][]): void;
+  dispose(): void;
+}
+
+/** Cells across the blade's width (the checks). */
+const TIE_COLS = 4;
+
+/**
+ * Fylling's Necktie: a smooth band round the neck, a knot, and a ribbon
+ * blade (a grid of quads, double sided so it shows from behind when it
+ * swings out) that `group.userData.ribbon` reshapes each frame (see
+ * TieRibbon). The ribbon is cut into cells, about square, and alternate
+ * cells use the second material: a check.
+ */
+function necktie(prop: TieProp, paint: Paint): THREE.Group {
+  const group = new THREE.Group();
+  const { colors } = prop;
+  const add = (
+    geometry: THREE.BufferGeometry,
+    color: string,
+    at: [number, number, number],
+    matte = false,
+  ) => {
+    const mesh = new THREE.Mesh(geometry, paint(color, matte));
+    mesh.position.set(...at);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+    return mesh;
+  };
+  // The band: a torus lying flat round the neck.
+  const band = new THREE.TorusGeometry(
+    prop.ringRadius,
+    prop.k * 0.55,
+    10,
+    40,
+  ).rotateX(Math.PI / 2);
+  add(band, colors.band, [prop.center[0], prop.ringY, prop.center[2]], true);
+  // The knot.
+  add(
+    new THREE.SphereGeometry(1, 20, 14).scale(...prop.knotSize),
+    colors.knot,
+    prop.knot,
+    true,
+  );
+  // The ribbon's rows: the root's, then each segment cut into as many rows
+  // as keeps its cells square (at the segment's width), each lying at `t`
+  // of the way along its segment.
+  const controls = prop.rig.rest.length + 1;
+  const rowsAt: { seg: number; t: number }[] = [{ seg: 0, t: 0 }];
+  for (let i = 0; i < controls - 1; i++) {
+    const width = prop.halfWidths[i] + prop.halfWidths[i + 1];
+    const cell = width / TIE_COLS;
+    const n = Math.max(1, Math.min(5, Math.round(prop.rig.lengths[i] / cell)));
+    for (let j = 1; j <= n; j++) rowsAt.push({ seg: i, t: j / n });
+  }
+  const rows = rowsAt.length;
+  const perRow = TIE_COLS + 1;
+  const sheet = rows * perRow;
+  const position = new Float32Array(sheet * 2 * 3);
+  const normal = new Float32Array(sheet * 2 * 3);
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(position, 3));
+  geometry.setAttribute("normal", new THREE.BufferAttribute(normal, 3));
+  // Triangles, grouped by material: the base's cells, then the check's.
+  const base: number[] = [];
+  const check: number[] = [];
+  for (let r = 1; r < rows; r++) {
+    for (let c = 0; c < TIE_COLS; c++) {
+      const a = (r - 1) * perRow + c;
+      const b = a + 1;
+      const d0 = r * perRow + c;
+      const d1 = d0 + 1;
+      const into = (r + c) % 2 === 0 ? base : check;
+      // Front sheet, then the back's, wound the other way.
+      into.push(a, d0, b, b, d0, d1);
+      into.push(
+        sheet + a,
+        sheet + b,
+        sheet + d0,
+        sheet + b,
+        sheet + d1,
+        sheet + d0,
+      );
+    }
+  }
+  geometry.setIndex([...base, ...check]);
+  geometry.addGroup(0, base.length, 0);
+  geometry.addGroup(base.length, check.length, 1);
+  const mesh = new THREE.Mesh(geometry, [
+    paint(colors.base, true),
+    paint(colors.check, true),
+  ]);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mesh.frustumCulled = false;
+  group.add(mesh);
+
+  const toward = new THREE.Vector3();
+  const tangent = new THREE.Vector3();
+  const centre = new THREE.Vector3(...prop.rig.center);
+  // Each control point's frame: where it is, across the blade, the face.
+  const at = Array.from({ length: controls }, () => new THREE.Vector3());
+  const acrossAt = Array.from({ length: controls }, () => new THREE.Vector3());
+  const facingAt = Array.from({ length: controls }, () => new THREE.Vector3());
+  const p = new THREE.Vector3();
+  const across = new THREE.Vector3();
+  const facing = new THREE.Vector3();
+  const ribbon: TieRibbon = {
+    update(points) {
+      const all = [prop.rig.root, ...points];
+      for (let i = 0; i < controls; i++) {
+        const q = all[i];
+        const before = all[Math.max(0, i - 1)];
+        const after = all[Math.min(controls - 1, i + 1)];
+        tangent
+          .set(after[0] - before[0], after[1] - before[1], after[2] - before[2])
+          .normalize();
+        // Out from the chest, then across the blade, then the sheet's face.
+        at[i].set(q[0], q[1], q[2]);
+        toward.copy(at[i]).sub(centre).normalize();
+        acrossAt[i].crossVectors(tangent, toward);
+        if (acrossAt[i].lengthSq() < 1e-8) acrossAt[i].set(1, 0, 0);
+        acrossAt[i].normalize();
+        facingAt[i].crossVectors(acrossAt[i], tangent).normalize();
+        if (facingAt[i].dot(toward) < 0) facingAt[i].negate();
+      }
+      rowsAt.forEach(({ seg, t }, r) => {
+        // Between control points `seg` and `seg + 1` (the root's row is the
+        // first control point).
+        const i0 = r === 0 ? 0 : seg;
+        const i1 = r === 0 ? 0 : seg + 1;
+        const k = r === 0 ? 0 : t;
+        p.lerpVectors(at[i0], at[i1], k);
+        across.lerpVectors(acrossAt[i0], acrossAt[i1], k).normalize();
+        facing.lerpVectors(facingAt[i0], facingAt[i1], k).normalize();
+        const half =
+          prop.halfWidths[i0] + (prop.halfWidths[i1] - prop.halfWidths[i0]) * k;
+        for (let c = 0; c < perRow; c++) {
+          const side = -1 + (2 * c) / TIE_COLS;
+          const v = r * perRow + c;
+          const x = p.x + across.x * half * side + facing.x * prop.k * 0.06;
+          const y = p.y + across.y * half * side + facing.y * prop.k * 0.06;
+          const z = p.z + across.z * half * side + facing.z * prop.k * 0.06;
+          position[v * 3] = position[(sheet + v) * 3] = x;
+          position[v * 3 + 1] = position[(sheet + v) * 3 + 1] = y;
+          position[v * 3 + 2] = position[(sheet + v) * 3 + 2] = z;
+          normal.set([facing.x, facing.y, facing.z], v * 3);
+          normal.set([-facing.x, -facing.y, -facing.z], (sheet + v) * 3);
+        }
+      });
+      geometry.attributes.position.needsUpdate = true;
+      geometry.attributes.normal.needsUpdate = true;
+    },
+    dispose() {
+      geometry.dispose();
+      band.dispose();
+    },
+  };
+  ribbon.update(prop.rig.rest);
+  group.userData.ribbon = ribbon;
+  return group;
 }

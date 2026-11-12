@@ -1,8 +1,9 @@
 import { validateName } from "@herzies/shared";
 import { HerzieView } from "@herzies/shared/gl";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { IS_MAC } from "../lib/platform";
 import { cn } from "../lib/utils";
-import { herzies, useWindowFocused } from "../tauri-bridge";
+import { herzies, useWindowVisible } from "../tauri-bridge";
 
 export function OnboardingScreen({ onClose }: { onClose?: () => void }) {
   const [name, setName] = useState("");
@@ -23,7 +24,7 @@ export function OnboardingScreen({ onClose }: { onClose?: () => void }) {
   const trimmed = name.trim();
   const clientError = trimmed === "" ? null : validateName(trimmed);
   const canSubmit = trimmed !== "" && !clientError && !hatching;
-  const focused = useWindowFocused();
+  const visible = useWindowVisible();
 
   async function submit() {
     if (!canSubmit) return;
@@ -60,7 +61,11 @@ export function OnboardingScreen({ onClose }: { onClose?: () => void }) {
           setLoggingOut(true);
           await herzies.logout();
         }}
-        className="btn absolute top-2 left-2 px-2 py-1 text-ui text-text-dim"
+        className={cn(
+          "btn absolute left-2 px-2 py-1 text-ui text-text-dim",
+          // Under the window buttons on macOS.
+          IS_MAC ? "top-9" : "top-2",
+        )}
       >
         {loggingOut ? "Logging out..." : "Logout"}
       </button>
@@ -70,7 +75,7 @@ export function OnboardingScreen({ onClose }: { onClose?: () => void }) {
           stage={1}
           size={5}
           draggable={false}
-          paused={!focused}
+          paused={!visible}
           // Not hatched yet: a grey ghost of a herzie.
           grey={1}
           opacity={0.35}

@@ -10,21 +10,32 @@ import {
 import * as THREE from "three";
 import { ambient } from "./ambient";
 import { townLook } from "./depth";
-import { homeMode } from "./homeMode";
+import { homeMode, markWorldSettled } from "./homeMode";
+import { skyUniforms } from "./Islands";
+import { SUPERSAMPLE, townSupersample } from "./pixelSize";
 import { warpAmount } from "./portal";
 import { DistortionBuffer, SonicDistortionEffect } from "./vfx/distortion";
 import { HomeFadeEffect } from "./vfx/homeFade";
+import { LookEffect } from "./vfx/look";
+import { RainOverlayEffect } from "./vfx/rainOverlay";
+import { WEATHER_ON } from "./weather";
 
 /** How many frames the world's drawn, unseen, to warm it (see Post). */
 const WARM_FRAMES = 3;
 /** How often (frames) the world's looked at to see whether it's grown. */
 const WARM_CHECK_FRAMES = 90;
+/** Frames the world runs before the loading screen lifts, when the app
+ * opens out in it rather than at Home: past the first ones, which compile
+ * and upload. */
+const WORLD_SETTLE_FRAMES = 30;
 
 /** How dark the occlusion gets by day. */
 const DAY_AO = 1.5;
 /** How much of it is left at night: the lamps light the corners, and dark
  * on dark only muddies them. */
 const NIGHT_AO = 0.35;
+/** How dark the frame's corners go (see vfx/look.ts). */
+const VIGNETTE = 0.22;
 
 type AOPass = NonNullable<
   Extract<ComponentProps<typeof N8AO>["ref"], { current: unknown }>["current"]
@@ -55,13 +66,17 @@ export function Post({ ao, distort }: { ao: boolean; distort: boolean }) {
   const buffer = useMemo(() => new DistortionBuffer(), []);
   const effect = useMemo(() => new SonicDistortionEffect(buffer), [buffer]);
   const fade = useMemo(() => new HomeFadeEffect(), []);
+  const look = useMemo(() => new LookEffect(), []);
+  const rainFx = useMemo(() => new RainOverlayEffect(), []);
   useEffect(
     () => () => {
       effect.dispose();
       buffer.dispose();
       fade.dispose();
+      look.dispose();
+      rainFx.dispose();
     },
-    [effect, buffer, fade],
+    [effect, buffer, fade, look, rainFx],
   );
   const scene = useThree((s) => s.scene);
   // Settled at Home: nothing of the world left to draw.
@@ -84,6 +99,8 @@ export function Post({ ao, distort }: { ao: boolean; distort: boolean }) {
     things: -1,
     /** Frames until it's next counted. */
     countIn: 0,
+    /** Frames drawn out in the world (not at Home). */
+    worldFrames: 0,
   });
   useEffect(() => {
     townLook.z = 1;
@@ -95,6 +112,10 @@ export function Post({ ao, distort }: { ao: boolean; distort: boolean }) {
   useFrame(() => {
     const w = warm.current;
     const settled = homeMode.full;
+    // Out in the world (where the app opens), there's no Home to warm it
+    // under: it's drawn for real, so once it's run a moment the app's
+    // loading screen can go.
+    if (!settled && ++w.worldFrames === WORLD_SETTLE_FRAMES) markWorldSettled();
     // Now and then, settled at Home: has the world grown since?
     if (settled && w.state !== "compiling" && w.state !== "drawing") {
       if (--w.countIn <= 0) {
@@ -107,6 +128,10 @@ export function Post({ ao, distort }: { ao: boolean; distort: boolean }) {
         if (things !== w.things) {
           w.things = things;
           w.state = "cold";
+        } else if (w.state === "warm") {
+          // Warm, and nothing new since the last count: the app's loading
+          // screen can go.
+          markWorldSettled();
         }
       }
     }
@@ -147,6 +172,25 @@ export function Post({ ao, distort }: { ao: boolean; distort: boolean }) {
       effect.warp = warpAmount();
     }
     fade.fade = homeMode.worldFade;
+    // The golden hour: the sun up but low, and no rain to grey it.
+    const sunY = skyUniforms.uSunDir.value.y;
+    const low =
+      THREE.MathUtils.smoothstep(sunY, -0.02, 0.08) *
+      (1 - THREE.MathUtils.smoothstep(sunY, 0.12, 0.4));
+    look.warm = low * (1 - ambient.uRain.value) * 0.8;
+    // The falling rain, in the Town's own pixels (supersampling taken out)
+    // and leaning with the wind across the view.
+    const right = camera.matrixWorld.elements;
+    const wind = ambient.uWindDir.value;
+    rainFx.set(
+      ambient.uTime.value,
+      ambient.uRain.value,
+      0.08 + (wind.x * right[0] + wind.y * right[2]) * 0.18,
+      townSupersample() ? SUPERSAMPLE : 1,
+      ambient.uLight.value,
+    );
+    // Lighter on the way Home, where the herzie fills the frame.
+    look.vignette = VIGNETTE * (1 - homeMode.aoFade);
   });
   return (
     <EffectComposer multisampling={0} enabled={!atHome}>
@@ -162,6 +206,8 @@ export function Post({ ao, distort }: { ao: boolean; distort: boolean }) {
         />
       )}
       {distort && <primitive object={effect} dispose={null} />}
+      {WEATHER_ON && <primitive object={rainFx} dispose={null} />}
+      <primitive object={look} dispose={null} />
       <primitive object={fade} dispose={null} />
     </EffectComposer>
   );

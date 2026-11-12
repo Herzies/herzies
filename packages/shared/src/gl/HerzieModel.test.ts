@@ -1381,3 +1381,32 @@ describe("shoes", () => {
     });
   }
 });
+
+describe("Fylling's Necktie", () => {
+  const tied = {
+    seed: "tie-test",
+    stage: 3,
+    equipped: { body: "fyllings-necktie" },
+  };
+
+  it("draws a smooth model, with a ribbon blade that sways", () => {
+    const h = new HerzieModel(tied);
+    let ribbon: THREE.Mesh | undefined;
+    h.root.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh && Array.isArray(m.material)) ribbon = m;
+    });
+    expect(ribbon).toBeDefined();
+    const before = Array.from(
+      (ribbon?.geometry.attributes.position.array as Float32Array) ?? [],
+    );
+    // Walk away and stop: the blade is flung about, then settles.
+    for (let i = 0; i < 300; i++) h.update(1 / 60, 0);
+    expect(h.dangleSettled).toBe(true);
+    const after = Array.from(
+      (ribbon?.geometry.attributes.position.array as Float32Array) ?? [],
+    );
+    expect(after.every(Number.isFinite)).toBe(true);
+    expect(after.length).toBe(before.length);
+  });
+});

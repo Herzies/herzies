@@ -1,3 +1,5 @@
+import { Birds } from "./Birds";
+import { Bunting } from "./Bunting";
 import { Clouds } from "./Clouds";
 import { type Champion, useChampion } from "./champion";
 import type { Hour } from "./DayCycle";
@@ -8,6 +10,7 @@ import { DistantIslands, HomeIsland, SKY, Sky } from "./Islands";
 import { islandRadius, type TownMap } from "./map";
 import { Particles } from "./Particles";
 import { MapColliders, Props } from "./Props";
+import { Weather } from "./Rain";
 import { Room } from "./Room";
 import { HOME_MAP, TOWN_MAPS_LOCAL } from "./runtime";
 import type { Season } from "./Seasons";
@@ -106,6 +109,9 @@ export function World({
       <HomeIsland radius={islandRadius(map)} />
       <Ground map={map} />
       <Props map={map} champion={champion} />
+      <Bunting map={map} />
+      <Birds map={map} />
+      <Weather map={map} />
       <Particles map={map} />
       <MapColliders key={mapId(map)} map={map} />
     </>

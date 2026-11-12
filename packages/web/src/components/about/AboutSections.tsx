@@ -41,12 +41,13 @@ const WARDROBE: Partial<Record<EquippedSlot, (string | undefined)[]>> = {
     "fyllings-fedora",
     undefined,
   ],
-  face: ["fangs", "ff-shades", undefined],
+  face: ["fangs", "ff-shades", "fyllings-monocle", undefined],
   body: [
     "gold-chain",
     "pearl-necklace",
     "bowtie",
     "ff-pearls-marble",
+    "fyllings-necktie",
     undefined,
   ],
   color: [
@@ -56,6 +57,7 @@ const WARDROBE: Partial<Record<EquippedSlot, (string | undefined)[]>> = {
     "purple-dane",
     "thanks-for-all-the-fish",
     "ff-pink",
+    "fyllings-black",
     undefined,
   ],
   main_hand: ["lute", "compact-discs", "worn-stick", undefined],

@@ -328,6 +328,9 @@ export function Player({
       rt.playerSpeed = townLive.speed = 0;
       return;
     }
+    // Going Home stands it up off its bench, as the camera swings round:
+    // Home has no bench to sit on.
+    if (homeMode.on && townLive.seat) townLive.standUp = true;
     // On a bench: stay put on the seat, facing out, until asked to stand
     // (E again) or walked off it.
     const seat = townLive.seat;

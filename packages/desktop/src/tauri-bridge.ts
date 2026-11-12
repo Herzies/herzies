@@ -384,7 +384,8 @@ export const herzies = {
       inventory: Inventory;
     }>("buy_from_medea", { itemId, quantity }),
   /** Puts one copy, or `quantity` of a stackable item, up on Plutus's
-   * market board at `price` for the lot. They leave the bank; throws with the
+   * market board at `price` for the lot (the desktop asks a price each and
+   * multiplies, so a stack can be bought a few at a time). They leave the bank; throws with the
    * server's reason (worn, class gear, price too low, stall full). */
   marketList: (unitId: string, price: number, quantity = 1) =>
     invoke<{
@@ -396,15 +397,18 @@ export const herzies = {
     invoke<{ listing: Omit<MarketListing, "sellerName"> }>("market_cancel", {
       listingId,
     }),
-  /** Buys a listing off the board. Throws when it's gone, it's yours, or
-   * there's no coin or bank room for it. */
-  marketBuy: (listingId: string) =>
+  /** Buys a listing off the board: `quantity` copies of a stack whose price
+   * splits evenly (marketPriceEach), or all of it. `listing` is how it stands
+   * after: sold, or still up with the copies left. Throws when it's gone,
+   * it's yours, or there's no coin or bank room for it. */
+  marketBuy: (listingId: string, quantity?: number) =>
     invoke<{
       spent: number;
+      quantity: number;
       newCurrency: number;
       listing: Omit<MarketListing, "sellerName">;
       inventory: Inventory;
-    }>("market_buy", { listingId }),
+    }>("market_buy", { listingId, quantity: quantity ?? null }),
   /** Collects what's waiting at the board. `itemsLeft`: copies that stayed
    * there because the bank was full (the coins come regardless). */
   marketCollect: () =>
@@ -657,9 +661,9 @@ export function useWindowPinned(): boolean {
   return pinned;
 }
 
-// Ghost mode mirrors the pin pattern: it only changes through
-// herzies.setGhostMode, so a module-level cache + listener set keeps every
-// hook in sync without a dedicated Tauri event.
+// Ghost mode mirrors the pin pattern: a module-level cache + listener set
+// keeps every hook in sync. It changes through herzies.setGhostMode, or from
+// the macOS tray menu, which emits "ghost-mode".
 let ghostModeCache = false;
 const ghostModeListeners = new Set<(enabled: boolean) => void>();
 
@@ -675,14 +679,58 @@ export function useGhostMode(): boolean {
   useEffect(() => {
     ghostModeListeners.add(setEnabled);
     setEnabled(ghostModeCache);
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
     if (isTauri()) {
       herzies.getGhostMode().catch(() => {});
+      listen<boolean>("ghost-mode", (e) => updateGhostModeCache(e.payload))
+        .then((u) => {
+          if (cancelled) u();
+          else unlisten = u;
+        })
+        .catch(() => {});
     }
     return () => {
+      cancelled = true;
+      unlisten?.();
       ghostModeListeners.delete(setEnabled);
     };
   }, []);
   return enabled;
+}
+
+/** Closed to the menu bar (tray.rs's "window-visible"): one listener for
+ * the app, read by every useWindowVisible. */
+let windowShown = true;
+const shownListeners = new Set<() => void>();
+if (isTauri()) {
+  listen<boolean>("window-visible", (e) => {
+    windowShown = e.payload;
+    for (const l of shownListeners) l();
+  }).catch(() => {});
+}
+
+/**
+ * Whether the window is on screen at all: false while it's closed to the
+ * menu bar (the app says so), or minimised or covered (the browser does).
+ * Animations and the Town run whenever it's visible, focused or not; only
+ * polling waits for focus (useWindowFocused).
+ */
+export function useWindowVisible(): boolean {
+  const read = () =>
+    windowShown && (typeof document === "undefined" || !document.hidden);
+  const [visible, setVisible] = useState(read);
+  useEffect(() => {
+    const update = () => setVisible(read());
+    document.addEventListener("visibilitychange", update);
+    shownListeners.add(update);
+    update();
+    return () => {
+      document.removeEventListener("visibilitychange", update);
+      shownListeners.delete(update);
+    };
+  }, []);
+  return visible;
 }
 
 /**

@@ -23,6 +23,7 @@ export type View =
 /** The windows the Menu button's tray opens, each with its shortcut. */
 type MenuItem = {
   id: View;
+  disabled?: boolean;
   label: string;
   /** Shown as "[key]" to the label's left. */
   key: string;
@@ -48,6 +49,7 @@ export function TabBar({
   hasSkills = false,
   landing = null,
   windowSize = null,
+  compact = false,
 }: {
   /** The open window, else the screen under it (Home, the Town). */
   view: View;
@@ -75,11 +77,27 @@ export function TabBar({
   /** The Town's bigger window, while the Town is on screen: a toggle at the
    * menu's foot (Z does the same). */
   windowSize?: { expanded: boolean; onToggle: () => void } | null;
+  /** The big window: Events and Menu only, at the right; Home/World is the
+   * menu's first item. */
+  compact?: boolean;
 }) {
   const menuButton = useRef<HTMLButtonElement>(null);
   const windowOpen = view !== "home" && view !== "events";
 
+  const onHome = base === "home";
   const items: MenuItem[] = [
+    ...(compact
+      ? [
+          onHome
+            ? { id: "events" as const, label: "World", key: "t" }
+            : {
+                id: "home" as const,
+                label: "Home",
+                key: "h",
+                disabled: homeBlocked,
+              },
+        ]
+      : []),
     { id: "profile", label: "Profile", key: "o" },
     { id: "deck", label: "Deck", key: "i" },
     { id: "bag", label: "Bag", key: "b" },
@@ -115,14 +133,14 @@ export function TabBar({
         ? "border-cyan/40 bg-black/55 font-bold text-cyan"
         : "border-white/12 bg-black/40 text-text hover:bg-black/55 hover:text-cyan/80",
     );
-  const onHome = base === "home";
 
   return (
     // Under the chat, on Home and in the Town alike (main.tsx places it):
     // the Home/World toggle and Events at the left, Menu at the right.
     <div className="flex items-center gap-1.5">
-      {/* One button for the two screens: it names the one you're not on. */}
-      {onHome ? (
+      {/* One button for the two screens: it names the one you're not on.
+          In the big window it's in the menu instead. */}
+      {compact ? null : onHome ? (
         <button
           type="button"
           onClick={() => setView("events")}
@@ -154,7 +172,11 @@ export function TabBar({
         type="button"
         onClick={onEvents}
         title="Events — what's on now and coming up this week"
-        className={cn("relative", buttonClass(eventsOpen))}
+        className={cn(
+          "relative",
+          compact && "ml-auto",
+          buttonClass(eventsOpen),
+        )}
       >
         {/* On the button's edges (the button positions it). */}
         {eventsRunning > 0 && <TabStarAccent />}
@@ -173,7 +195,10 @@ export function TabBar({
         onClick={() => setMenuOpen(!menuOpen)}
         title="Menu — your deck, bag, profile and more. Shortcut [m]"
         aria-expanded={menuOpen}
-        className={cn("ml-auto", buttonClass(menuOpen || windowOpen))}
+        className={cn(
+          !compact && "ml-auto",
+          buttonClass(menuOpen || windowOpen),
+        )}
       >
         <span className="relative">
           <span
@@ -201,6 +226,12 @@ export function TabBar({
               <button
                 key={item.id}
                 type="button"
+                disabled={item.disabled}
+                title={
+                  item.disabled
+                    ? "No Home here — head back out first"
+                    : undefined
+                }
                 onClick={() => {
                   setMenuOpen(false);
                   setView(item.id);
@@ -208,6 +239,8 @@ export function TabBar({
                 className={cn(
                   "flex w-full cursor-pointer items-center gap-2 rounded-md border-none bg-transparent px-2 py-1 text-left text-ui hover:bg-white/8",
                   item.colour === "yellow" ? "text-yellow" : "text-text",
+                  item.disabled &&
+                    "cursor-default opacity-45 hover:bg-transparent",
                   active && "bg-white/10 font-bold",
                   active && item.colour !== "yellow" && "text-cyan",
                 )}

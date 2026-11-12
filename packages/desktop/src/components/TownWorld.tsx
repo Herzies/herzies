@@ -43,7 +43,7 @@ import { useBossResultsShown } from "./town/combat/results";
 import { useCombat } from "./town/combat/state";
 import { useFpsShown } from "./town/fps";
 import { Hotbar } from "./town/Hotbar";
-import { homeMode } from "./town/homeMode";
+import { homeMode, markWorldSettled } from "./town/homeMode";
 import { Key } from "./town/Key";
 import type { TownMap } from "./town/map";
 import { markMet } from "./town/met";
@@ -331,7 +331,7 @@ export function TownWorld({
         <div
           className={cn(
             // Top right.
-            "pointer-events-none absolute top-3 right-3 z-30 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white/70",
+            "pointer-events-none absolute top-[calc(var(--hud-top,0px)+0.75rem)] right-3 z-30 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white/70",
           )}
         >
           Update Herzies to see other players
@@ -348,7 +348,7 @@ export function TownWorld({
             <div
               ref={observePlayerCard}
               className={cn(
-                "absolute top-3 left-3 z-30 flex flex-col gap-2",
+                "absolute top-[calc(var(--hud-top,0px)+0.75rem)] left-3 z-30 flex flex-col gap-2",
                 expanded ? PLAYER_CARD_WIDTH_BIG : PLAYER_CARD_WIDTH,
               )}
             >
@@ -439,7 +439,7 @@ export function TownWorld({
         )}
       </div>
       {fpsShown && opened && !hudHidden ? (
-        <FrameRate className="pointer-events-none absolute top-3 z-30 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white/70 tabular-nums" />
+        <FrameRate className="pointer-events-none absolute top-[calc(var(--hud-top,0px)+0.75rem)] z-30 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white/70 tabular-nums" />
       ) : null}
       {opened && (
         <TownBoundary>
@@ -561,6 +561,8 @@ class TownBoundary extends Component<
       info.componentStack,
     );
     homeMode.setReady(false);
+    // Nothing more to wait for: don't hold the loading screen.
+    markWorldSettled();
   }
   render() {
     if (this.state.failed)

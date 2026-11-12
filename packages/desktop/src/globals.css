@@ -450,19 +450,19 @@
   }
 }
 
-/* Freeze CSS animations while the window is blurred (set in main.tsx) —
-   a pinned window stays on screen but nobody is looking at it. */
-:root[data-window-blurred] *,
-:root[data-window-blurred] *::before,
-:root[data-window-blurred] *::after {
+/* Freeze CSS animations while the window is off screen (set in main.tsx):
+   closed to the menu bar, minimised or covered. */
+:root[data-window-hidden] *,
+:root[data-window-hidden] *::before,
+:root[data-window-hidden] *::after {
   /* biome-ignore lint/complexity/noImportantStyles: must beat inline `animation` shorthands, which reset play-state to running */
   animation-play-state: paused !important;
 }
 
 /* Except the loading splash: it's up while the user is still in the browser
    finishing a login, and paused it sits at its first frame — invisible. */
-:root[data-window-blurred] .loading-splash,
-:root[data-window-blurred] .loading-splash * {
+:root[data-window-hidden] .loading-splash,
+:root[data-window-hidden] .loading-splash * {
   /* biome-ignore lint/complexity/noImportantStyles: must beat the blurred pause above */
   animation-play-state: running !important;
 }
@@ -560,7 +560,7 @@
 :root {
   /* The app window's height when not expanded (tauri.conf.json): overlay
      windows keep it in the Town's big window. */
-  --small-window-height: 520px;
+  --small-window-height: 548px;
 }
 
 /* The Town's labels over the world (drei's Html: name tags, chat over

@@ -984,29 +984,82 @@ export const BLEND_RADIUS = 0.6;
 export type GroundBlend = { grass: number; gravel: number; wet: number };
 
 export function groundBlend(map: TownMap, x: number, z: number): GroundBlend {
-  const R = BLEND_RADIUS;
+  // Grass and gravel keep a tight look (a 1-wide path must survive); the
+  // water's edge is taken from a much wider blur, so a painted staircase
+  // of cells becomes one long, gently wandering curve.
+  const tight = kernel(map, x, z, 1.2, 0.15, 0.05);
+  const wide = kernel(map, x, z, WIDE_REACH, 0.3, 0.08);
+  // Steepen the wide field back to the usual bank width, around its 0.5
+  // contour (where the painted shore is).
+  const wet = Math.min(1, Math.max(0, 0.5 + (wide.wet - 0.5) * WIDE_GAIN));
+  const dry = tight.grass + tight.gravel;
+  const k = dry > 0 ? (1 - wet) / dry : 0;
+  return { grass: tight.grass * k, gravel: tight.gravel * k, wet };
+}
+
+/** How far the water's edge blurs (a 1-wide stream still peaks past 0.5),
+ * and how much that is steepened to keep the bank's width. */
+export const WIDE_REACH = 2;
+const WIDE_GAIN = 1.65;
+
+/** The terrain round a point averaged by a round, smooth kernel over the
+ * cell centres, the spot nudged by noise so edges wander. */
+function kernel(
+  map: TownMap,
+  x: number,
+  z: number,
+  reach: number,
+  big: number,
+  small: number,
+): GroundBlend {
   const out = { grass: 0, gravel: 0, wet: 0 };
   const half = map.size / 2;
-  const [c0, r0] = cellAt(map, x - R, z - R);
-  const [c1, r1] = cellAt(map, x + R, z + R);
+  const wx =
+    x +
+    big * wobble(x * 0.22, z * 0.22, 1) +
+    small * wobble(x * 0.9, z * 0.9, 2);
+  const wz =
+    z +
+    big * wobble(x * 0.22, z * 0.22, 3) +
+    small * wobble(x * 0.9, z * 0.9, 4);
+  const [c0, r0] = cellAt(map, wx - reach, wz - reach);
+  const [c1, r1] = cellAt(map, wx + reach, wz + reach);
+  let total = 0;
   for (let row = r0; row <= r1; row++) {
-    const cz = row - half;
-    const oz = Math.min(z + R, cz + 1) - Math.max(z - R, cz);
-    if (oz <= 0) continue;
+    const dz = row - half + 0.5 - wz;
     for (let col = c0; col <= c1; col++) {
-      const cx = col - half;
-      const ox = Math.min(x + R, cx + 1) - Math.max(x - R, cx);
-      if (ox <= 0) continue;
+      const dx = col - half + 0.5 - wx;
+      const u = (dx * dx + dz * dz) / (reach * reach);
+      if (u >= 1) continue;
+      const w = (1 - u) * (1 - u);
       const t = terrainAt(map, col, row);
       const key = isSunk(t) ? "wet" : t === "g" ? "gravel" : "grass";
-      out[key] += ox * oz;
+      out[key] += w;
+      total += w;
     }
   }
-  const area = 4 * R * R;
-  out.grass /= area;
-  out.gravel /= area;
-  out.wet /= area;
+  if (total > 0) {
+    out.grass /= total;
+    out.gravel /= total;
+    out.wet /= total;
+  }
   return out;
+}
+
+/** Smooth value noise in -1..1, for nudging edges. */
+function wobble(x: number, z: number, seed: number): number {
+  const i = Math.floor(x);
+  const j = Math.floor(z);
+  const fx = x - i;
+  const fz = z - j;
+  const h = (a: number, b: number) =>
+    mulberry32(a * 73856093 + b * 19349663 + seed * 83492791)() * 2 - 1;
+  const ux = fx * fx * (3 - 2 * fx);
+  const uz = fz * fz * (3 - 2 * fz);
+  return (
+    (h(i, j) * (1 - ux) + h(i + 1, j) * ux) * (1 - uz) +
+    (h(i, j + 1) * (1 - ux) + h(i + 1, j + 1) * ux) * uz
+  );
 }
 
 /** Whether a cell's ground is the same all over: it and every cell round
@@ -1014,8 +1067,9 @@ export function groundBlend(map: TownMap, x: number, z: number): GroundBlend {
 export function blendsFlat(map: TownMap, col: number, row: number): boolean {
   const kind = (t: string) => (isSunk(t) ? "~" : t === "g" ? "g" : ".");
   const k = kind(terrainAt(map, col, row));
-  for (let r = row - 1; r <= row + 1; r++) {
-    for (let c = col - 1; c <= col + 1; c++) {
+  // The wide blur reaches two cells out.
+  for (let r = row - 2; r <= row + 2; r++) {
+    for (let c = col - 2; c <= col + 2; c++) {
       if (kind(terrainAt(map, c, r)) !== k) return false;
     }
   }
