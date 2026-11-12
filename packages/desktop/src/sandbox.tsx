@@ -61,7 +61,7 @@ const WEARABLE_OPTIONS = [
   "fyllings-loafers",
   "fyllings-cape",
   "fyllings-monocle",
-  "fyllings-green",
+  "fyllings-black",
 ];
 
 const DEFAULT_USER = "sandbox-user";
@@ -484,7 +484,7 @@ function toEquipped(ids: string[]): Equipped {
     else if (
       id === "pumpkin-spice" ||
       id === "ff-pink" ||
-      id === "fyllings-green"
+      id === "fyllings-black"
     )
       out.color = id;
     else if (id === "ghost" || id === "spirit-orb" || id === "sleptwell")

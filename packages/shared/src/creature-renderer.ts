@@ -14,7 +14,7 @@ import {
   CHAR_ASPECT,
   dot3,
   FF_PINK_RAMP,
-  FYLLINGS_GREEN_RAMP,
+  FYLLINGS_BLACK_RAMP,
   GOLD_RAMP,
   LIGHT,
   MEDEA_RAMP,
@@ -3916,9 +3916,8 @@ const COLOR_SCHEMES: Record<string, readonly string[]> = {
   // One band, not the ramp: glass in stripes reads as a pattern, not a
   // colour. (The card keeps the ramp.)
   "ff-pink": [FF_PINK_RAMP[2]],
-  // Avocado green, one band (not the ramp: no stripes), woven in tweed by the
-  // 3D view (TWEED_SKINS).
-  "fyllings-green": [FYLLINGS_GREEN_RAMP[2]],
+  // Black, one band (not the ramp: no stripes).
+  "fyllings-black": [FYLLINGS_BLACK_RAMP[3]],
   // Not an item: Good ol' George's gold, applied only by the desktop's
   // Events emblem (see GOLD_SCHEME_ID). No player can equip it.
   [GOLD_SCHEME_ID]: GOLD_RAMP,
@@ -3939,7 +3938,7 @@ export const TRANSLUCENT_SKINS: ReadonlySet<string> = new Set(["ff-pink"]);
 /** Skins woven in tweed: the 3D view lays a houndstooth over whatever the
  * scheme paints (herzieMaterial's TWEED). The ray caster and the cards just
  * paint the colour. */
-export const TWEED_SKINS: ReadonlySet<string> = new Set(["fyllings-green"]);
+export const TWEED_SKINS: ReadonlySet<string> = new Set<string>();
 
 /** Whether this herzie's body is drawn in tweed (never a boss: its palette
  * is its own). */

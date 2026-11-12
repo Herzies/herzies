@@ -23,7 +23,7 @@ import {
   cross,
   dot3,
   FF_PINK_RAMP,
-  FYLLINGS_GREEN_RAMP,
+  FYLLINGS_BLACK_RAMP,
   GOLD_RAMP,
   LIGHT,
   normV,
@@ -1103,6 +1103,20 @@ export interface ItemSet {
 }
 
 export const ITEM_SETS: ItemSet[] = [
+  {
+    id: "fyllings-finest",
+    name: "Fylling's Finest",
+    effect: "+10 luck",
+    itemIds: [
+      "fyllings-fedora",
+      "fyllings-monocle",
+      "fyllings-necktie",
+      "fyllings-cape",
+      "fyllings-loafers",
+      "fyllings-black",
+    ],
+    bonus: { luck: 10 },
+  },
   {
     id: "prismatic",
     name: "Prismatic",
@@ -2959,8 +2973,8 @@ function renderFyllingsMonocleFrame(yAngle: number): string[] {
   );
 }
 
-function renderFyllingsGreenFrame(yAngle: number): string[] {
-  return renderGradientCardFrame(yAngle, FYLLINGS_GREEN_RAMP);
+function renderFyllingsBlackFrame(yAngle: number): string[] {
+  return renderGradientCardFrame(yAngle, FYLLINGS_BLACK_RAMP);
 }
 
 function renderThanksForAllTheFishFrame(yAngle: number): string[] {
@@ -3501,7 +3515,7 @@ const fyllingsNecktieFrames = generateFrames(renderFyllingsNecktieFrame);
 const fyllingsLoafersFrames = generateFrames(renderFyllingsLoafersFrame);
 const fyllingsCapeFrames = generateFrames(renderFyllingsCapeFrame);
 const fyllingsMonocleFrames = generateFrames(renderFyllingsMonocleFrame);
-const fyllingsGreenFrames = generateFrames(renderFyllingsGreenFrame);
+const fyllingsBlackFrames = generateFrames(renderFyllingsBlackFrame);
 const fangsFrames = generateFrames(renderFangsFrame);
 const pumpkinSpiceFrames = generateFrames(renderPumpkinSpiceFrame);
 const ghostFrames = generateFrames(renderGhostFrame);
@@ -4247,12 +4261,12 @@ export const ITEMS: ItemDef[] = [
     stats: { luck: 10 },
   },
   {
-    id: "fyllings-green",
-    name: "Fylling's Green",
+    id: "fyllings-black",
+    name: "Fylling's Black",
     description:
-      "A proper seventies green. It was in fashion once, and Fylling never forgot.",
+      "Classy.",
     rarity: "rare",
-    frames: fyllingsGreenFrames,
+    frames: fyllingsBlackFrames,
     equipable: true,
     equipSlot: "color",
     sellPrice: 250,
@@ -4286,7 +4300,7 @@ export const ITEMS: ItemDef[] = [
   {
     id: "ff-cloak-black",
     name: "FF Cloak",
-    description: "Fabulous Fabian first cloak",
+    description: "Fabulous Fabian's first cloak",
     rarity: "rare",
     frames: ffCloakFrames,
     equipable: true,

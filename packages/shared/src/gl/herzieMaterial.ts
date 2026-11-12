@@ -240,6 +240,25 @@ vec3 clothFinish(vec3 color, vec3 n, float shadow, bool outside, bool trim) {
     if (outside) color *= mix(vec3(1.06, 1.04, 1.0), vec3(0.62, 0.95, 0.92), vUv.y);
     float sheen = pow(nh, 9.0) * sunLit;
     color += vec3(0.85, 0.97, 1.0) * smoothstep(0.25, 0.75, sheen) * 0.28;
+  } else if (uFinish == 5) {
+    // Tweed: a 2/2 houndstooth twill (two dark threads, two light), rust
+    // and cream flecks, a thin rust overcheck. Matte. The lining is plain.
+    if (outside) {
+      vec2 cell = floor(vUv * vec2(70.0, 100.0));
+      float x = mod(cell.x, 4.0);
+      float y = mod(cell.y, 4.0);
+      float dark = mod(y - x, 4.0) < 2.0 ? step(x, 1.5) : step(y, 1.5);
+      vec3 light = mix(color, vec3(0.93, 0.9, 0.74) * dot(color, vec3(0.33)) * 2.2, 0.38);
+      vec3 woven = mix(light, color * 0.7, dark);
+      float h = hash21(cell);
+      float fleck = step(0.89, h);
+      vec3 speck = h > 0.945 ? vec3(0.78, 0.42, 0.22) : vec3(0.95, 0.92, 0.8);
+      woven = mix(woven, speck * dot(color, vec3(0.33)) * 2.4, fleck * 0.85);
+      float lineX = step(mod(cell.x, 20.0), 1.5);
+      float lineY = step(mod(cell.y, 20.0), 0.5);
+      woven = mix(woven, vec3(0.7, 0.38, 0.2) * dot(color, vec3(0.33)) * 2.3, max(lineX, lineY) * 0.6);
+      color = woven * (0.95 + 0.1 * hash21(cell + 7.0));
+    }
   }
   return color;
 }

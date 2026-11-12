@@ -15,7 +15,7 @@ VALUES
   ('fyllings-loafers', 'Fylling''s Loafers', 'Polished enough to see your own disappointment in.', 'rare', 250, NULL, false, true, 'feet'),
   ('fyllings-cape', 'Fylling''s Cape', 'For entering rooms a few seconds after everyone else.', 'rare', 250, NULL, false, true, 'back'),
   ('fyllings-monocle', 'Fylling''s Monocle', 'Lets you look down on things with just the one eye.', 'rare', 250, NULL, false, true, 'face'),
-  ('fyllings-green', 'Fylling''s Green', 'A proper seventies green. It was in fashion once, and Fylling never forgot.', 'rare', 250, NULL, false, true, 'color')
+  ('fyllings-black', 'Fylling''s Black', 'Black from head to toe. Fylling calls it dignified; everyone else calls it a funeral.', 'rare', 250, NULL, false, true, 'color')
 ON CONFLICT (id) DO NOTHING;
 
 -- As 00145, with the five Fylling pieces in the pool.
@@ -51,7 +51,7 @@ AS $$
       ('fyllings-loafers', 50),
       ('fyllings-cape', 50),
       ('fyllings-monocle', 50),
-      ('fyllings-green', 50),
+      ('fyllings-black', 50),
       ('eivinds-evasive-pair', 2),
       ('ff-sneakers-black', 50),
       ('ff-cloak-black', 50),

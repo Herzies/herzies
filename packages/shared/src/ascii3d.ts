@@ -107,17 +107,17 @@ export const FF_PINK_RAMP = [
 ] as const;
 
 /**
- * Green ramp for Fylling's Green, a 1970s avocado green around #7C8C34
- * (hue 70°). Opaque: just a colour for the whole herzie (the scheme paints
- * one band of it, the middle, so there are no stripes).
+ * Black ramp for Fylling's Black: a deep, slightly cool black. Opaque: just a
+ * colour for the whole herzie (the scheme paints one band of it, so there
+ * are no stripes).
  */
-export const FYLLINGS_GREEN_RAMP = [
-  "#B9C478",
-  "#9BA84F",
-  "#7C8C34",
-  "#66742A",
-  "#505C20",
-  "#3A4418",
+export const FYLLINGS_BLACK_RAMP = [
+  "#4A4A52",
+  "#35353C",
+  "#26262C",
+  "#17171B",
+  "#0F0F12",
+  "#09090B",
 ] as const;
 
 /**

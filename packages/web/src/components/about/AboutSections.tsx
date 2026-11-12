@@ -57,7 +57,7 @@ const WARDROBE: Partial<Record<EquippedSlot, (string | undefined)[]>> = {
     "purple-dane",
     "thanks-for-all-the-fish",
     "ff-pink",
-    "fyllings-green",
+    "fyllings-black",
     undefined,
   ],
   main_hand: ["lute", "compact-discs", "worn-stick", undefined],

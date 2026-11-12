@@ -26,6 +26,7 @@ export const CLOTH_FINISH = {
   vinyl: 2,
   hide: 3,
   silk: 4,
+  tweed: 5,
 } as const;
 export type ClothFinish = keyof typeof CLOTH_FINISH;
 
@@ -155,8 +156,8 @@ export const CLOAK_STYLES: Readonly<Record<string, CloakStyle>> = {
     hemTrim: 0.04,
     collarTrim: 0.05,
   },
-  // Fylling's Cape: a classy full-length cape. Charcoal silk outside, a deep
-  // burgundy lining, a thin gold edge and a gold clasp. Long, and cut with a
+  // Fylling's Cape: a classy full-length cape. Brown houndstooth tweed
+  // outside, a deep burgundy lining, a thin gold edge and a gold clasp. Long, and cut with a
   // gentle curve at the hem.
   "fyllings-cape": {
     shape: {
@@ -169,11 +170,11 @@ export const CLOAK_STYLES: Readonly<Record<string, CloakStyle>> = {
       gather: 1.15,
     },
     config: DEFAULT_CLOAK_CONFIG,
-    outer: "#26262e",
+    outer: "#6e5f4c",
     lining: "#7a1f2b",
     trim: "#c9a24a",
     clasp: "#e8cb7a",
-    finish: "silk",
+    finish: "tweed",
     hemTrim: 0.035,
     collarTrim: 0.05,
   },

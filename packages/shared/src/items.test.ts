@@ -402,7 +402,7 @@ describe("seasonal drop windows", () => {
       ["fyllings-loafers", "Fylling's Loafers", "feet"],
       ["fyllings-cape", "Fylling's Cape", "back"],
       ["fyllings-monocle", "Fylling's Monocle", "face"],
-      ["fyllings-green", "Fylling's Green", "color"],
+      ["fyllings-black", "Fylling's Black", "color"],
     ] as const;
     for (const [id, name, slot] of range) {
       const item = getItem(id);
