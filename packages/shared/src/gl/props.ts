@@ -9,9 +9,14 @@ import type { PropModel, ShoeProp } from "../creature-renderer.js";
  * caller places and turns the group. `paint` gives the material for a
  * colour, so they're shaded as the herzie is; `matte`, with only a faint
  * highlight (a flat dark face turned to the light would otherwise go grey
- * all over).
+ * all over); `gloss`, polished (finish "gloss": a hard highlight and a
+ * bright rim).
  */
-export type Paint = (color: string, matte?: boolean) => THREE.Material;
+export type Paint = (
+  color: string,
+  matte?: boolean,
+  gloss?: boolean,
+) => THREE.Material;
 
 export function buildPropModel(prop: PropModel, paint: Paint): THREE.Group {
   if (prop.kind === "shoe") return shoe(prop, paint);
@@ -81,8 +86,15 @@ export const SHOE_UPPER = {
  * sloping down toward the toe and its bottom cut flat at `flatY` (y down),
  * so it sits square in the sole rather than balancing on a curve.
  */
-function upperGeometry(r: number, flatY: number): THREE.BufferGeometry {
-  return cached(`shoe-upper:${r.toFixed(4)}:${flatY.toFixed(4)}`, () => {
+function upperGeometry(
+  r: number,
+  flatY: number,
+  /** Cut flat across the top here too (y down), for a low shoe: the
+   * loafer's topline. */
+  topY = Number.NEGATIVE_INFINITY,
+): THREE.BufferGeometry {
+  const key = `shoe-upper:${r.toFixed(4)}:${flatY.toFixed(4)}:${topY.toFixed(4)}`;
+  return cached(key, () => {
     const g = new THREE.SphereGeometry(1, 40, 24);
     const p = g.attributes.position;
     for (let i = 0; i < p.count; i++) {
@@ -97,7 +109,12 @@ function upperGeometry(r: number, flatY: number): THREE.BufferGeometry {
         const toward = Math.max(0, -uz);
         y += SHOE_UPPER.toeDrop * r * toward * toward * -uy;
       }
-      p.setXYZ(i, ux * SHOE_UPPER.rx * r, Math.min(y, flatY), z);
+      p.setXYZ(
+        i,
+        ux * SHOE_UPPER.rx * r,
+        Math.max(topY, Math.min(y, flatY)),
+        z,
+      );
     }
     g.computeVertexNormals();
     return g;
@@ -120,6 +137,7 @@ function upperGeometry(r: number, flatY: number): THREE.BufferGeometry {
  */
 function shoe(prop: ShoeProp, paint: Paint): THREE.Group {
   const { style } = prop;
+  if (style.cut === "loafer") return loafer(prop, paint);
   // Built at a leg radius of 1 and scaled to the leg (uniformly, so the
   // normals hold): one set of shapes for every herzie's shoes.
   const r = 1;
@@ -206,6 +224,97 @@ function shoe(prop: ShoeProp, paint: Paint): THREE.Group {
     ),
     style.tab,
   ).position.set(lx, cuffY - r * 0.06, lz + legHalf + r * 0.08);
+  return group;
+}
+
+/**
+ * A loafer round its foot, built like the sneaker (see `shoe`), but cut
+ * low and slipped on: the upper sliced flat at a low topline, a thin rolled
+ * edge round the opening where the leg comes out, a penny strap across the
+ * instep with its slot, and a thin sole with a heel block under the back.
+ * No laces, no cuff, no tab. With `style.gloss`, all the leather is
+ * polished.
+ */
+function loafer(prop: ShoeProp, paint: Paint): THREE.Group {
+  const { style } = prop;
+  const r = 1;
+  const gloss = !!style.gloss;
+  const group = new THREE.Group();
+  group.scale.setScalar(prop.r);
+  const add = (
+    geometry: THREE.BufferGeometry,
+    color: string,
+    matte = false,
+    shiny = gloss,
+  ) => {
+    const mesh = new THREE.Mesh(geometry, paint(color, matte, shiny));
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+    return mesh;
+  };
+  const bottom = r * 0.5;
+  const soleH = r * 0.16;
+  const soleTop = bottom - soleH;
+  const flatY = soleTop + soleH * 0.4;
+  // Low: the topline at the leg's middle, so the leg shows well above it.
+  const [lx, ly, lz] = prop.leg.map((v) => v / prop.r);
+  const topY = ly + r * 0.08;
+  add(upperGeometry(r, flatY, topY), style.upper);
+  const cut = ((flatY / r - SHOE_UPPER.y) / SHOE_UPPER.ry) ** 2;
+  const across = Math.sqrt(Math.max(0, 1 - cut));
+  const footW = 2 * SHOE_UPPER.rx * r * across;
+  const footD = 2 * SHOE_UPPER.rz * r * across;
+  const lip = r * 0.06;
+  const soleW = footW + 2 * lip;
+  const soleD = footD + 2 * lip;
+  const soleZ = SHOE_UPPER.z * r;
+  // The sole, thin, and a heel block under the back of it.
+  add(slab(soleW, soleH, soleD), style.sole, true, false).position.set(
+    0,
+    bottom - soleH / 2,
+    soleZ,
+  );
+  // Where the upper's top is at `z` (x = 0), as the deformation leaves it.
+  const topAt = (z: number) => {
+    const uz = (z / r - SHOE_UPPER.z) / SHOE_UPPER.rz;
+    const uy = -Math.sqrt(Math.max(0, 1 - uz * uz));
+    const toward = Math.max(0, -uz);
+    const y =
+      (SHOE_UPPER.y + uy * SHOE_UPPER.ry) * r +
+      SHOE_UPPER.toeDrop * r * toward * toward * -uy;
+    return Math.max(topY, y);
+  };
+  // The rolled edge round the opening, just outside the leg.
+  const legHalf = Math.sqrt(Math.max(0, r * r - (topY - ly) ** 2));
+  add(
+    cached(`loafer-topline:${legHalf.toFixed(4)}`, () =>
+      new THREE.TorusGeometry(legHalf + r * 0.04, r * 0.07, 8, 32).rotateX(
+        Math.PI / 2,
+      ),
+    ),
+    style.collar,
+  ).position.set(lx, topY, lz);
+  // The penny strap: a flat band across the instep, in front of the
+  // opening, and the dark slot cut in its middle.
+  const strapZ = lz - legHalf - r * 0.22;
+  const strapY = topAt(strapZ) - r * 0.03;
+  add(
+    cached(
+      "loafer-strap",
+      () => new RoundedBoxGeometry(r * 1.55, r * 0.12, r * 0.32, 2, r * 0.05),
+    ),
+    style.laces,
+  ).position.set(0, strapY, strapZ);
+  add(
+    cached(
+      "loafer-slot",
+      () => new RoundedBoxGeometry(r * 0.42, r * 0.06, r * 0.1, 2, r * 0.03),
+    ),
+    style.sole,
+    true,
+    false,
+  ).position.set(0, strapY - r * 0.05, strapZ);
   return group;
 }
 

@@ -26,6 +26,7 @@ export const CLOTH_FINISH = {
   vinyl: 2,
   hide: 3,
   silk: 4,
+  camo: 5,
 } as const;
 export type ClothFinish = keyof typeof CLOTH_FINISH;
 
@@ -152,6 +153,27 @@ export const CLOAK_STYLES: Readonly<Record<string, CloakStyle>> = {
     trim: "#ff5fa8",
     clasp: "#ffc2dc",
     finish: "velvet",
+    hemTrim: 0.04,
+    collarTrim: 0.05,
+  },
+  // Camo Cloak (the Streetsmart set): woodland camo, a blaze-orange lining
+  // that flashes as it swings, and a gold clasp. Mid-weight, cut straight.
+  "camo-cloak": {
+    shape: {
+      cols: COLS,
+      rows: ROWS,
+      length: 0.92,
+      collarHalf: 1.24,
+      flare: 1.55,
+      hem: "straight",
+      gather: 1.18,
+    },
+    config: DEFAULT_CLOAK_CONFIG,
+    outer: "#66703F",
+    lining: "#F07A28",
+    trim: "#3E4A2A",
+    clasp: "#F5C518",
+    finish: "camo",
     hemTrim: 0.04,
     collarTrim: 0.05,
   },
