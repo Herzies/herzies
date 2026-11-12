@@ -4259,8 +4259,7 @@ export const ITEMS: ItemDef[] = [
   {
     id: "fyllings-black",
     name: "Fylling's Black",
-    description:
-      "Classy.",
+    description: "Classy.",
     rarity: "rare",
     frames: fyllingsBlackFrames,
     equipable: true,
