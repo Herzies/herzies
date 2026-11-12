@@ -1,6 +1,7 @@
 import type { BossPlace } from "@herzies/shared";
 import { HerzieStage, HerzieView } from "@herzies/shared/gl";
 import { useEffect, useRef, useState } from "react";
+import { followTownLook } from "../../lib/overlayStage";
 import { cn } from "../../lib/utils";
 import { leaveCombat } from "./combat/Combat";
 import { clearBossResults, useBossResultsShown } from "./combat/results";
@@ -33,6 +34,7 @@ export function BossResults({
   // Its herzies' own stage, its canvas inside the overlay.
   const [stage] = useState(() => new HerzieStage());
   const overlay = useRef<HTMLDivElement>(null);
+  useEffect(() => followTownLook(stage), [stage]);
   useEffect(() => () => stage.dispose(), [stage]);
   const shown = results !== null;
   useEffect(() => {

@@ -829,6 +829,10 @@ export class HerzieModel {
   private readonly sparkles: ShoeSparkles | null = null;
   /** A full set's shimmer (setShimmer.ts); null without one. */
   private shimmer: SetShimmer | null = null;
+  /** A set shimmer is on: a paused view still needs drawing. */
+  get glittering(): boolean {
+    return this.shimmer !== null;
+  }
   /** The floating companion, flying after the herzie; null when it has none,
    * or its scenery is anchored (then the companion stays put with it). */
   private readonly follower: Follower | null;
@@ -1827,6 +1831,8 @@ export class HerzieModel {
     this.homeFacing = from.homeFacing;
     if (from.lastWorld) this.lastWorld = from.lastWorld.clone();
     this.worldVelocity.copy(from.worldVelocity);
+    // Its set shimmer's sparkles, so equipping something doesn't blink them.
+    if (this.shimmer && from.shimmer) this.shimmer.carryOver(from.shimmer);
     // Its companion, if it's the same kind: the new one takes over the old
     // one's state (where it is, its errand, its pose), keeping its own
     // build (its slot and clearance follow the new gear).

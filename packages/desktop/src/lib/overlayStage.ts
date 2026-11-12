@@ -3,6 +3,7 @@ import { createContext, useContext } from "react";
 import {
   onTownSupersample,
   townSupersample,
+  wholePixelDpr,
 } from "../components/town/pixelSize";
 
 /**
@@ -18,15 +19,31 @@ export const overlayHerzieStage = new HerzieStage();
  * open, which can be one opened over this panel. */
 export const visitorHerzieStage = new HerzieStage();
 
-// Profiles (and the rest drawn on these) follow Settings > Graphics >
-// Supersampling, as the Town does.
-function followSupersample() {
-  const on = townSupersample();
-  overlayHerzieStage.supersample = on;
-  visitorHerzieStage.supersample = on;
+const townLookStages = new Set<HerzieStage>([
+  herzieStage,
+  overlayHerzieStage,
+  visitorHerzieStage,
+]);
+
+/** Draws a stage the way the Town does: the same pixel size, and
+ * Settings > Graphics > Supersampling. Stages made elsewhere (the boss
+ * results' podium) join here. Returns what to call to leave. */
+export function followTownLook(stage: HerzieStage): () => void {
+  townLookStages.add(stage);
+  apply(stage);
+  return () => townLookStages.delete(stage);
 }
-followSupersample();
-onTownSupersample(followSupersample);
+
+function apply(stage: HerzieStage) {
+  stage.pixelScale = wholePixelDpr();
+  stage.supersample = townSupersample();
+}
+
+function followTown() {
+  for (const stage of townLookStages) apply(stage);
+}
+followTown();
+onTownSupersample(followTown);
 
 /** Which stage the herzies below draw on, and, inside an overlay window,
  * where their sky goes: a layer in the window's panel (clipped to its
