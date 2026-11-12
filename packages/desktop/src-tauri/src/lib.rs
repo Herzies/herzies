@@ -7,6 +7,8 @@ mod lastfm;
 #[cfg(target_os = "macos")]
 mod media_remote_adapter;
 mod nowplaying;
+#[cfg(target_os = "macos")]
+mod qobuz;
 #[cfg(windows)]
 mod smtc_adapter;
 mod state;
