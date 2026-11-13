@@ -50,6 +50,7 @@ import {
   hasTweedSkin,
   heldPoses,
   heldSwing,
+  LAY_ANGLE,
   MIC_DROP_RELEASE,
   type PoseEmote,
   primitiveShading,
@@ -235,15 +236,33 @@ const MIC_STAY_SECONDS = 10;
 /** How long after a mic lands before another can be dropped (it replaces
  * it). */
 const MIC_RECAST_SECONDS = 2;
+/** Without arms: when (phase) the mic has grown in, and when it drops. */
+const MIC_ARMLESS_GROW = 0.17;
+const MIC_ARMLESS_RELEASE = 0.3;
 /**
  * How far below the mic's origin its lowest part reaches, in mic units, when
  * turned by `q`: the ends of the handle and the ball, each a sphere of its
  * own, in the shape built by buildMic.
  */
 const MIC_BALLS: readonly [y: number, radius: number][] = [
-  [1.0, 0.25],
+  [0.55, 0.25],
   [-1.35, 0.56],
 ];
+/** The turn that tips a level mic (held as `base`) onto both of those: its
+ * ball end up, by as much as the ball's radius exceeds the handle end's. */
+function micLean(base: THREE.Quaternion): THREE.Quaternion {
+  const [[endY, endR], [ballY, ballR]] = MIC_BALLS;
+  const tip = Math.asin((ballR - endR) / (endY - ballY));
+  const ball = new THREE.Vector3(0, -1, 0).applyQuaternion(base);
+  const level = new THREE.Vector3(ball.x, 0, ball.z);
+  if (level.lengthSq() < 1e-6) return new THREE.Quaternion();
+  level.normalize();
+  const rested = level
+    .clone()
+    .multiplyScalar(Math.cos(tip))
+    .add(new THREE.Vector3(0, Math.sin(tip), 0));
+  return new THREE.Quaternion().setFromUnitVectors(ball.normalize(), rested);
+}
 const micPoint = new THREE.Vector3();
 function micLowest(q: THREE.Quaternion): number {
   let low = Number.POSITIVE_INFINITY;
@@ -340,6 +359,29 @@ function cheerSpin(phase: number): number {
   const at = cheerHopAt(phase);
   if (!at || at.hop < CHEER_HOPS.heights.length - 1) return 0;
   return Math.PI * 2 * smooth(0.12, 0.88, at.f);
+}
+
+/** The roll back onto its back, as a spring: how stiff and how damped (a bit
+ * under critical, so it overshoots and settles); the wind-up before it goes
+ * (forward) or gets up (back), how long and how far; and the squash of
+ * landing against how fast it lands. */
+const LAY_STIFFNESS = 90;
+const LAY_DAMPING = 8.5;
+const LAY_WINDUP_SECONDS = 0.17;
+const LAY_WINDUP_ANGLE = 0.2;
+const LAY_WINDUP_UP_ANGLE = LAY_ANGLE - 0.3;
+const LAY_IMPACT = 0.06;
+const LAY_IMPACT_MAX = 0.16;
+
+/** `axis` turned by `pitch` in the side plane (y-z), as the roll turns the
+ * body: positive tips the top forward (-z), negative back. */
+function pitchAxis(
+  axis: readonly [number, number, number],
+  pitch: number,
+): [number, number, number] {
+  const c = Math.cos(pitch);
+  const s = Math.sin(pitch);
+  return [axis[0], axis[1] * c - axis[2] * s, axis[1] * s + axis[2] * c];
 }
 
 const smooth = (a: number, b: number, v: number) => {
@@ -868,6 +910,18 @@ export class HerzieModel {
   /** Sat on the floor by the Sit emote (not on a seat): up again when it
    * moves, jumps or sits again. */
   floorSit = false;
+  /** A herzie without legs sits by rolling back onto its back: its pitch
+   * (negative is back), its speed, and a spring drives it (see stepLay). */
+  private layAngle = 0;
+  private layVel = 0;
+  private layWant = false;
+  private layArrived = false;
+  /** Seconds left of the wind-up before the roll (or getting up). */
+  private layWindup = 0;
+  /** Whether worn solids are turned off their rest axes by the roll. */
+  private layShapesTurned = false;
+  /** The squash of landing on its back, dying away. */
+  private layImpact = 0;
   /** The mic a mic drop holds up and lets fall (see poseMic). */
   private mic: {
     group: THREE.Group;
@@ -879,14 +933,17 @@ export class HerzieModel {
     drop: {
       pos: THREE.Vector3;
       vel: THREE.Vector3;
-      /** How it was held when let go (world), then turned about `axis` (a
-       * horizontal line across its heading) by `angle`. */
+      /** How it was held when let go (world); it settles tipped by `tilt`
+       * (0..1 of `lean`) to rest on both ball and handle. */
       base: THREE.Quaternion;
+      lean: THREE.Quaternion;
+      tilt: number;
+      /** Seconds it hangs where it is before it falls, and how long it takes
+       * to grow in from a point: both 0 for one let go from a hand. */
+      hold: number;
+      growSeconds: number;
       /** Seconds into its fall when it first touched the floor; null before. */
       landedAt: number | null;
-      axis: THREE.Vector3;
-      angle: number;
-      spin: number;
       /** Its size, the body's height and the floor under it, in world units. */
       r: number;
       h: number;
@@ -1748,6 +1805,7 @@ export class HerzieModel {
       );
     }
     this.stepSit(dt);
+    this.stepLay(dt);
     this.stepJump(dt);
     this.stepDraw(dt);
     this.stepCast(dt);
@@ -2086,7 +2144,6 @@ export class HerzieModel {
     }
     const phase = this.emoteTime / MIC_DROP_SECONDS;
     const armAt = this.armAt[this.waveArmPart];
-    const side = this.waveArmPart === "arm-l" ? 1 : -1;
     let r: number;
     if (armAt >= 0) {
       group.position.copy(this.meshes[armAt].position);
@@ -2098,10 +2155,10 @@ export class HerzieModel {
         group.visible = false;
         return;
       }
-      // Out to the side, level with the head, held out from it.
-      const out = smooth(0.04, 0.22, phase);
+      // No hand to hold it: it appears beside the head, growing from a
+      // point, and drops (the way it goes at the end, backwards).
       group.position.set(
-        head.center[0] - head.radius * (0.4 + 0.95 * out),
+        head.center[0] - head.radius * 2.1,
         head.center[1] + head.radius * 0.35,
         head.center[2] - head.radius * 0.3,
       );
@@ -2118,11 +2175,23 @@ export class HerzieModel {
       micPoint.set(outward * 0.12, 0, -1).normalize(),
     );
     group.visible = true;
-    if (phase >= MIC_DROP_RELEASE) this.releaseMic(mic, side);
+    if (armAt < 0) {
+      // Nothing to hold it: it's in the world from the start (so it doesn't
+      // follow the herzie about), growing in where it appears.
+      this.releaseMic(
+        mic,
+        MIC_ARMLESS_RELEASE * MIC_DROP_SECONDS,
+        MIC_ARMLESS_GROW * MIC_DROP_SECONDS,
+      );
+    } else if (phase >= MIC_DROP_RELEASE) this.releaseMic(mic);
   }
 
   /** Lets the mic go: out of the herzie and into the world where it is. */
-  private releaseMic(mic: NonNullable<HerzieModel["mic"]>, side: number) {
+  private releaseMic(
+    mic: NonNullable<HerzieModel["mic"]>,
+    hold = 0,
+    growSeconds = 0,
+  ) {
     const { group } = mic;
     // Into the scene itself: whatever the herzie is parented to (the Town's
     // player group) moves with it, and the mic stays where it lands.
@@ -2141,21 +2210,22 @@ export class HerzieModel {
     const scale = this.root.getWorldScale(new THREE.Vector3()).y;
     const h = Math.max(0.1, this.height * scale);
     const r = size.y;
-    const heading = this.heading;
     const floor =
       this.groundAt?.(pos.x, pos.z) ??
       this.root.getWorldPosition(new THREE.Vector3()).y;
     world.attach(group);
-    group.scale.setScalar(r);
+    // One that grows in starts from nothing: not a frame at full size first.
+    group.scale.setScalar(growSeconds > 0 ? 1e-4 : r);
     mic.drop = {
       pos,
       // Let go, not thrown: it drops from the open hand.
       vel: new THREE.Vector3(0, 0, 0),
-      axis: new THREE.Vector3(Math.cos(heading), 0, -Math.sin(heading)),
       base: quat,
+      lean: micLean(quat),
+      tilt: 0,
+      hold,
+      growSeconds,
       landedAt: null,
-      angle: 0,
-      spin: side * 3,
       r,
       h,
       floor,
@@ -2172,16 +2242,15 @@ export class HerzieModel {
     const { group } = mic;
     const dt = this.lastDt;
     d.age += dt;
-    d.vel.y -= 9 * d.h * dt;
-    d.pos.addScaledVector(d.vel, dt);
-    if (d.lying) {
-      // Settled flat on its side.
-      const target = Math.round(d.angle / Math.PI) * Math.PI;
-      d.angle += (target - d.angle) * Math.min(1, 10 * dt);
-    } else d.angle += d.spin * dt;
-    group.quaternion.setFromAxisAngle(d.axis, d.angle).multiply(d.base);
-    // Down onto the floor under it, on whichever part of it is lowest as it
-    // turns: its handle's end first, then the ball as it tips over.
+    if (d.age > d.hold) {
+      d.vel.y -= 9 * d.h * dt;
+      d.pos.addScaledVector(d.vel, dt);
+    }
+    // Once down it tips to rest on both the ball and the end of the handle:
+    // the ball is wider, so lying dead level would leave the handle in the air.
+    if (d.landedAt !== null) d.tilt += (1 - d.tilt) * Math.min(1, 12 * dt);
+    group.quaternion.identity().slerp(d.lean, d.tilt).multiply(d.base);
+    // Down onto the floor under it, on whichever part of it is lowest.
     const ground = this.groundAt?.(d.pos.x, d.pos.z) ?? d.floor;
     const low = micLowest(group.quaternion) * d.r;
     if (d.pos.y + low <= ground) {
@@ -2190,8 +2259,6 @@ export class HerzieModel {
       if (d.vel.y < 0) {
         const settled = Math.abs(d.vel.y) < 0.4 * d.h;
         d.vel.y = settled ? 0 : -d.vel.y * 0.38;
-        // It tips over on its first knock, and spins less each bounce.
-        if (!d.lying) d.spin = d.spin === 0 ? 4 : d.spin * 0.6;
         if (settled) d.lying = true;
       }
       const drag = Math.exp(-8 * dt);
@@ -2199,8 +2266,13 @@ export class HerzieModel {
       d.vel.z *= drag;
     }
     group.position.copy(d.pos);
-    const fade = smooth(MIC_STAY_SECONDS, MIC_STAY_SECONDS + 0.8, d.age);
-    group.scale.setScalar(d.r * (1 - fade));
+    const grow = d.growSeconds > 0 ? smooth(0, d.growSeconds, d.age) : 1;
+    const fade = smooth(
+      MIC_STAY_SECONDS,
+      MIC_STAY_SECONDS + 0.8,
+      d.age - d.hold,
+    );
+    group.scale.setScalar(Math.max(1e-4, d.r * grow * (1 - fade)));
     if (fade >= 1) this.stowMic(mic);
   }
 
@@ -2261,6 +2333,11 @@ export class HerzieModel {
     this.danceClock = from.danceClock;
     this.sitting = from.sitting;
     this.floorSit = from.floorSit;
+    this.layAngle = from.layAngle;
+    this.layVel = from.layVel;
+    this.layWant = from.layWant;
+    this.layWindup = from.layWindup;
+    this.layArrived = from.layArrived;
     this.sitWeight = from.sitWeight;
     this.jumps = from.jumps;
     this.airTime = from.airTime;
@@ -2983,6 +3060,57 @@ export class HerzieModel {
     pop.mesh.scale.setScalar(radius * w);
   }
 
+  /**
+   * Rolls a herzie without legs onto its back (or up again) on a spring: a
+   * little rock forward first (anticipation), then back, past where it
+   * comes to rest and settling into it (overshoot), with a squash as it
+   * lands (impact). Getting up rocks back first, then springs upright and
+   * a touch forward.
+   */
+  private stepLay(dt: number) {
+    const want = this.floorSit && !this.hasLegs;
+    if (want !== this.layWant) {
+      this.layWant = want;
+      this.layWindup = LAY_WINDUP_SECONDS;
+      this.layArrived = false;
+    }
+    // First the wind-up: forward before it goes back, back before it gets up.
+    const winding = this.layWindup > 0;
+    this.layWindup = Math.max(0, this.layWindup - dt);
+    const target = winding
+      ? want
+        ? LAY_WINDUP_ANGLE
+        : LAY_WINDUP_UP_ANGLE
+      : want
+        ? LAY_ANGLE
+        : 0;
+    // Small steps: a spring is stable at 1/240s, not at a slow frame's.
+    const steps = Math.max(1, Math.ceil(dt * 240));
+    const h = dt / steps;
+    for (let i = 0; i < steps; i++) {
+      this.layVel +=
+        (LAY_STIFFNESS * (target - this.layAngle) - LAY_DAMPING * this.layVel) *
+        h;
+      this.layAngle += this.layVel * h;
+      if (want && !this.layArrived && this.layAngle <= LAY_ANGLE) {
+        this.layArrived = true;
+        this.layImpact = Math.min(
+          LAY_IMPACT_MAX,
+          Math.abs(this.layVel) * LAY_IMPACT,
+        );
+      }
+    }
+    if (
+      !want &&
+      Math.abs(this.layAngle) < 1e-3 &&
+      Math.abs(this.layVel) < 1e-3
+    ) {
+      this.layAngle = 0;
+      this.layVel = 0;
+    }
+    this.layImpact *= Math.exp(-9 * dt);
+  }
+
   private stepSit(dt: number) {
     const target = this.sitting || this.floorSit ? 1 : 0;
     this.sitWeight +=
@@ -3002,6 +3130,8 @@ export class HerzieModel {
       danceWeight: this.danceWeight,
       dangle: this.dangle,
       sitWeight: this.sitWeight,
+      layAngle: Math.abs(this.layAngle) > 1e-4 ? this.layAngle : undefined,
+      layVel: this.layVel,
       castPhase:
         this.castTime === undefined
           ? undefined
@@ -3046,6 +3176,12 @@ export class HerzieModel {
           heldSwing(motion),
         )
       : null;
+    // Rolled over on its back: what it wears turns with it (a solid's axis
+    // doesn't follow its centre, so it has to be turned too).
+    const layPitch =
+      !this.hasLegs && Math.abs(this.layAngle) > 1e-4 ? this.layAngle : 0;
+    const restoreShapes = layPitch === 0 && this.layShapesTurned;
+    this.layShapesTurned = layPitch !== 0;
     for (let i = 0; i < spheres.length; i++) {
       const s = spheres[i];
       const [x, y, z] = s.center;
@@ -3060,6 +3196,10 @@ export class HerzieModel {
       const prop = s.shape && held?.[s.part];
       if (prop && s.shape) {
         scratch.set(...prop.turn(s.shape.axis)).normalize();
+        mesh.quaternion.setFromUnitVectors(UP, scratch);
+      } else if (s.shape && (layPitch !== 0 || restoreShapes)) {
+        const base = s.dangle ? dangledAxis(s, this.dangle) : s.shape.axis;
+        scratch.set(...pitchAxis(base, layPitch)).normalize();
         mesh.quaternion.setFromUnitVectors(UP, scratch);
       }
     }
@@ -3188,6 +3328,8 @@ export class HerzieModel {
       hop = Math.max(hop, h.lift * k);
       squash += h.squash * k;
     }
+    // Landing on its back: squashed flat, then springing back.
+    squash += this.layImpact;
     const wide = MODEL_SCALE * (1 - breath * 0.6 + squash * 0.7);
     const tall = MODEL_SCALE * (1 + breath - squash);
     this.creature.scale.set(wide, tall, wide);

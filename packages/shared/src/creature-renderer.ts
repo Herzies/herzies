@@ -5281,17 +5281,11 @@ function emoteArmDeltas(
   });
 }
 
-/** The whole body turned about its feet for an emote: forward in a bow,
- * a touch back as a mic is held up. Radians, positive is forward. */
+/** The whole body turned about its feet for an emote: forward in a bow.
+ * Radians, positive is forward. The others keep it upright. */
 function emotePitch(kind: PoseEmote, phase: number): number {
   if (kind === "bow")
     return 0.82 * ease(0, 0.34, phase) * (1 - ease(0.66, 1, phase));
-  if (kind === "micdrop")
-    return (
-      -0.16 *
-      ease(0.05, 0.25, phase) *
-      (1 - ease(MIC_DROP_RELEASE, 0.85, phase))
-    );
   return 0;
 }
 
@@ -6621,6 +6615,11 @@ export type CreatureMotion = Pick<
   emoteKind?: PoseEmote;
   emotePhase?: number;
   emoteArm?: string;
+  /** Rolled back onto its back (herzies without legs sit like this): the
+   * body's pitch in radians, negative is backward, and how fast it's
+   * turning (see layBack). */
+  layAngle?: number;
+  layVel?: number;
   /** How far its class gear is drawn: 0 slung on its back to 1 in its
    * hands (see DRAW). */
   drawPhase?: number;
@@ -6784,7 +6783,73 @@ export function creaturePoseOffsets(
     emoteKind !== undefined
       ? emoteLean(spheres, tilted, emoteKind, emotePhase)
       : tilted;
-  return grounded(spheres, leaned, 1 - sw);
+  const laid =
+    pose.layAngle !== undefined
+      ? layBack(spheres, leaned, pose.layAngle, pose.layVel ?? 0)
+      : leaned;
+  return grounded(spheres, laid, 1 - sw);
+}
+
+/** How far back a herzie without legs rolls to lie on its back (radians),
+ * and how far its arms fall out to the sides there. */
+export const LAY_ANGLE = -1.5;
+const LAY_ARMS = 0.7;
+
+/**
+ * `offsets` with a herzie that has no legs rolled by `angle` about the
+ * middle of its biggest part: negative is back onto its back, a little
+ * positive is the rock forward before it goes. It rolls the way a ball
+ * does — it travels back by the arc it turns through — and is lowered or
+ * raised so the lowest part always rests on the ground it stood on, so it
+ * never sinks or floats mid-roll. Arms fall outward as it goes over, and
+ * swing on past with `vel` (the angle's speed): the follow-through.
+ */
+function layBack(
+  spheres: Sphere[],
+  offsets: V3[],
+  angle: number,
+  vel: number,
+): V3[] {
+  const rig = buildRig(spheres);
+  if (rig.legs || Math.abs(angle) < 1e-4) return offsets;
+  let big = -1;
+  spheres.forEach((sp, i) => {
+    if (isSceneFixed(sp.part)) return;
+    if (big < 0 || sp.radius > spheres[big].radius) big = i;
+  });
+  if (big < 0) return offsets;
+  let at = spheres.map((sp, i) => add(sp.center, offsets[i]));
+  const pivot = at[big];
+  // Arms fall out to the sides (about each shoulder), more the further back
+  // it is, and trail behind the turn.
+  const down = Math.min(1, Math.max(0, -angle / -LAY_ANGLE));
+  at = at.map((p, i) => {
+    const sp = spheres[i];
+    const shoulder = rig.shoulders[sp.part];
+    if (!shoulder || !(sp.part === "arm-l" || sp.part === "arm-r")) return p;
+    const side = LIMB_SIDE[sp.part] ?? 1;
+    const swing = LAY_ARMS * down + 0.08 * vel;
+    return turnAbout(p, shoulder, -side * swing);
+  });
+  const turned = at.map((p, i) =>
+    isSceneFixed(spheres[i].part) ? p : turnAbout(p, pivot, 0, angle),
+  );
+  // The lowest part sits where the lowest part stood.
+  let rest = Number.NEGATIVE_INFINITY;
+  let low = Number.NEGATIVE_INFINITY;
+  spheres.forEach((sp, i) => {
+    if (isSceneFixed(sp.part)) return;
+    rest = Math.max(rest, sp.center[1] + sp.radius);
+    low = Math.max(low, turned[i][1] + sp.radius);
+  });
+  const dy = rest - low;
+  // Rolling back: it goes back by the arc it has turned through.
+  const roll = spheres[big].radius * Math.max(0, -angle);
+  return turned.map((p, i): V3 => {
+    const sp = spheres[i];
+    if (isSceneFixed(sp.part)) return offsets[i];
+    return sub(add(p, [0, dy, roll]), sp.center);
+  });
 }
 
 /**
