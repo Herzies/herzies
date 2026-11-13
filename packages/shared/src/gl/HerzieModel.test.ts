@@ -1414,30 +1414,11 @@ describe("Fylling's Necktie", () => {
 const spheresOf = (m: HerzieModel) =>
   (m as unknown as { model: { spheres: Sphere[] } }).model.spheres;
 
-describe("the bow, cheer, sit and mic drop emotes", () => {
+describe("the cheer, sit and mic drop emotes", () => {
   const run = (m: HerzieModel, seconds: number, speed = 0) => {
     const step = 1 / 120;
     for (let t = 0; t < seconds; t += step) m.update(step, speed);
   };
-  const headY = (m: HerzieModel) => {
-    const at = spheresOf(m).findIndex((s) => s.part === "head");
-    return (m as unknown as { meshes: THREE.Mesh[] }).meshes[at].position;
-  };
-
-  it("bows: the head goes forward and down, then comes back", () => {
-    const m = new HerzieModel(LOOK);
-    run(m, 0.2);
-    const rest = headY(m).clone();
-    expect(m.emote("bow")).toBe(true);
-    run(m, 1.0);
-    const bowed = headY(m).clone();
-    // Creature space: front is -z, down is +y.
-    expect(bowed.z).toBeLessThan(rest.z - 0.3);
-    expect(bowed.y).toBeGreaterThan(rest.y);
-    run(m, 1.5);
-    expect(m.emoting).toBe(false);
-    expect(headY(m).distanceTo(rest)).toBeLessThan(0.15);
-  });
 
   it("cheers: arms thrown up, over by the end", () => {
     const m = new HerzieModel(LOOK);
@@ -1618,7 +1599,7 @@ describe("the bow, cheer, sit and mic drop emotes", () => {
     const m = new HerzieModel(LOOK);
     m.sitting = true;
     expect(m.emote("sit")).toBe(false);
-    expect(m.emote("bow")).toBe(false);
+    expect(m.emote("cheer")).toBe(false);
   });
 
   it("drops the mic: held up, then left where it lands", () => {
@@ -1758,7 +1739,7 @@ describe("the bow, cheer, sit and mic drop emotes", () => {
 
   it("plays on a herzie without arms or legs", () => {
     const m = new HerzieModel({ seed: "model-test", stage: 1, equipped: {} });
-    for (const id of ["bow", "cheer", "micdrop"]) {
+    for (const id of ["cheer", "micdrop"]) {
       expect(m.emote(id)).toBe(true);
       run(m, 3);
       expect(m.emoting).toBe(false);

@@ -5211,7 +5211,7 @@ function waveDeltas(spheres: Sphere[], phase: number, arm: string): V3[] {
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
 /** The emotes (besides the wave) posed here; the model times them. */
-export type PoseEmote = "bow" | "cheer" | "micdrop";
+export type PoseEmote = "cheer" | "micdrop";
 
 /** Where in a mic drop (phase 0..1) the mic leaves the hand. */
 export const MIC_DROP_RELEASE = 0.6;
@@ -5278,43 +5278,6 @@ function emoteArmDeltas(
     }
     const length = Math.hypot(...sub(sp.center, shoulder));
     return sub(add(shoulder, scale(dir, length * reach)), sp.center);
-  });
-}
-
-/** The whole body turned about its feet for an emote: forward in a bow.
- * Radians, positive is forward. The others keep it upright. */
-function emotePitch(kind: PoseEmote, phase: number): number {
-  if (kind === "bow")
-    return 0.82 * ease(0, 0.34, phase) * (1 - ease(0.66, 1, phase));
-  return 0;
-}
-
-/** `offsets` with the herzie turned about its feet by an emote's pitch. */
-function emoteLean(
-  spheres: Sphere[],
-  offsets: V3[],
-  kind: PoseEmote,
-  phase: number,
-): V3[] {
-  const pitch = emotePitch(kind, phase);
-  if (Math.abs(pitch) < 1e-4) return offsets;
-  let low = Number.NEGATIVE_INFINITY;
-  let cx = 0;
-  let cz = 0;
-  let n = 0;
-  spheres.forEach((sp) => {
-    if (isSceneFixed(sp.part)) return;
-    low = Math.max(low, sp.center[1] + sp.radius);
-    cx += sp.center[0];
-    cz += sp.center[2];
-    n++;
-  });
-  if (!n) return offsets;
-  const pivot: V3 = [cx / n, low, cz / n];
-  return offsets.map((d, i): V3 => {
-    const sp = spheres[i];
-    if (isSceneFixed(sp.part)) return d;
-    return sub(turnAbout(add(sp.center, d), pivot, 0, pitch), sp.center);
   });
 }
 
@@ -6610,7 +6573,7 @@ export type CreatureMotion = Pick<
    * isn't waving. `waveArm` is the arm (WAVE_ARM unless given). */
   wavePhase?: number;
   waveArm?: string;
-  /** A timed emote besides the wave (bow, cheer, mic drop), and how far
+  /** A timed emote besides the wave (cheer, mic drop), and how far
    * through it is, 0..1. `emoteArm` is the arm a mic drop holds up. */
   emoteKind?: PoseEmote;
   emotePhase?: number;
@@ -6779,14 +6742,10 @@ export function creaturePoseOffsets(
           (1 - w) * (1 - dw) * (1 - sw),
         )
       : posed;
-  const leaned =
-    emoteKind !== undefined
-      ? emoteLean(spheres, tilted, emoteKind, emotePhase)
-      : tilted;
   const laid =
     pose.layAngle !== undefined
-      ? layBack(spheres, leaned, pose.layAngle, pose.layVel ?? 0)
-      : leaned;
+      ? layBack(spheres, tilted, pose.layAngle, pose.layVel ?? 0)
+      : tilted;
   return grounded(spheres, laid, 1 - sw);
 }
 

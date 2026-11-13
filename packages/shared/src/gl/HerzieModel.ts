@@ -73,12 +73,7 @@ import {
   isDangleSettled,
   stepDangle,
 } from "../dangle-physics.js";
-import {
-  BOW_SECONDS,
-  CHEER_SECONDS,
-  EMOTE_SECONDS,
-  MIC_DROP_SECONDS,
-} from "../emotes.js";
+import { CHEER_SECONDS, EMOTE_SECONDS, MIC_DROP_SECONDS } from "../emotes.js";
 import { type Equipped, ITEM_SETS, isSetFullyEquipped } from "../items.js";
 import {
   createThreadSim,
@@ -314,11 +309,7 @@ const micDown = new THREE.Vector3(0, -1, 0);
 
 /** How long a timed emote (besides the wave) plays, in seconds. */
 function timedEmoteSeconds(kind: PoseEmote): number {
-  return kind === "bow"
-    ? BOW_SECONDS
-    : kind === "cheer"
-      ? CHEER_SECONDS
-      : MIC_DROP_SECONDS;
+  return kind === "cheer" ? CHEER_SECONDS : MIC_DROP_SECONDS;
 }
 
 /** The cheer: three quick hops, each higher than the last and all above a
@@ -1933,7 +1924,7 @@ export class HerzieModel {
       this.floorSit = !this.floorSit;
       return true;
     }
-    if (id === "bow" || id === "cheer" || id === "micdrop") {
+    if (id === "cheer" || id === "micdrop") {
       if (this.sitting) return false;
       if (this.emoteTime !== undefined && this.emoteMove === "spin")
         return false;
@@ -2005,7 +1996,7 @@ export class HerzieModel {
     if (this.emoteTime === undefined) return;
     this.emoteTime += dt;
     const move = this.emoteMove;
-    if (move === "bow" || move === "cheer" || move === "micdrop") {
+    if (move === "cheer" || move === "micdrop") {
       if (this.emoteTime >= timedEmoteSeconds(move)) {
         this.emoteTime = undefined;
       }
@@ -2040,8 +2031,7 @@ export class HerzieModel {
   /** The timed emote playing (bow, cheer, mic drop), if one is. */
   private get timedEmote(): PoseEmote | undefined {
     const m = this.emoteMove;
-    return this.emoteTime !== undefined &&
-      (m === "bow" || m === "cheer" || m === "micdrop")
+    return this.emoteTime !== undefined && (m === "cheer" || m === "micdrop")
       ? m
       : undefined;
   }

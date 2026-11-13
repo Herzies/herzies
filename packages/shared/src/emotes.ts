@@ -23,11 +23,6 @@ export const EMOTES = [
       "Say hi. Herzies without arms yet do a little spin jump instead.",
   },
   {
-    id: "bow",
-    name: "Bow",
-    description: "A slow, graceful bow. Thank you, thank you.",
-  },
-  {
     id: "cheer",
     name: "Cheer",
     description: "Both arms up, a hop and a whoop. Armless herzies just hop.",
@@ -73,7 +68,6 @@ export const EMOTE_SECONDS = 1.6;
 
 /** How long each of the timed emotes plays (seconds). Wave has its own
  * clock (EMOTE_SECONDS) and sit has none: it lasts until you move. */
-export const BOW_SECONDS = 2.0;
 export const CHEER_SECONDS = 1.5;
 export const MIC_DROP_SECONDS = 3.0;
 export const EMOTE_COOLDOWN_MS = 800;
