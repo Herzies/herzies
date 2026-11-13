@@ -152,6 +152,23 @@ export const TUNING = {
     speed: 14,
     damage: 60,
   },
+  /** From phase 2, a dirge: it winds up for `windupMs` as the whole floor
+   * fills, then lands `damage` on everyone, wherever they stand. No dodge,
+   * roll or i-frame spares anyone and no shield or buff takes any off; only
+   * Def does, and only a Cymbrella's dome stops it. Flat and uncapped, so
+   * a low level or a frail build dies to it and a sturdy one lives. Spaced
+   * past a Cymbrella's cooldown so one Percussionist can always answer it
+   * (the pace isn't quickened by the enrage, for the same reason). */
+  doom: {
+    fromPhase: 2,
+    everyMs: 40_000,
+    windupMs: 6_000,
+    /** A Cymbrella must be ready this long before it lands. */
+    answerMs: 2_000,
+    /** The most it waits for one to be. */
+    waitMs: 20_000,
+    damage: 600,
+  },
   /** In reach of whoever it's on, it doesn't stand still: every so often
    * it shifts round them by `angle` (radians either way), at `speed` of
    * its walk. Through its own slams it walks at `slamSpeed` of its walk. */
@@ -220,6 +237,8 @@ export type Telegraph = {
   aimedAt?: string;
   /** The enrage's pulse: lands on everyone, for all their health. */
   lethal?: boolean;
+  /** The dirge: lands on everyone, only a dome stops it (see TUNING.doom). */
+  doom?: boolean;
   /** In the Tower (or a minion in the cave): the mob swinging it. */
   mob?: number;
 };
@@ -231,6 +250,8 @@ export type BossPlayer = {
   maxHp: number;
   /** Their Def (Stamina brings it): takes a share off every hit. */
   def?: number;
+  /** When their Cymbrella is ready (server ms); absent: they have none. */
+  domeAt?: number;
   /** Where they stood at `t` (server ms), or null if unknown. */
   posAt: (t: number) => { x: number; z: number } | null;
 };
@@ -424,6 +445,9 @@ export class BossEngine {
   /** Its own shapes a stun took off the floor, to say so next update. */
   private cancelled: number[] = [];
   private nextScatterAt = 0;
+  private nextDoomAt: number;
+  /** When the dirge first came due while it waited on a dome. */
+  private doomDueAt: number | null = null;
   /** Minion thresholds not yet crossed. */
   private thresholds: number[] = [...MINION_THRESHOLDS];
   /** How a minion's hit on a herzie is judged: by the boss's own breathers
@@ -448,6 +472,7 @@ export class BossEngine {
     this.nextAttackAt = opts.now + TUNING.openingMs;
     this.nextBusterAt = opts.now + TUNING.openingMs + TUNING.buster.everyMs;
     this.nextChargeAt = opts.now + TUNING.openingMs + TUNING.charge.everyMs;
+    this.nextDoomAt = opts.now + TUNING.openingMs + TUNING.doom.everyMs;
     this.threatAt = opts.now;
     this.killed = this.hp <= 0;
     this.sleeping = !!opts.dormant;
@@ -582,6 +607,7 @@ export class BossEngine {
     this.nextAttackAt = now + TUNING.openingMs;
     this.nextBusterAt = now + TUNING.openingMs + TUNING.buster.everyMs;
     this.nextChargeAt = now + TUNING.openingMs + TUNING.charge.everyMs;
+    this.nextDoomAt = now + TUNING.openingMs + TUNING.doom.everyMs;
     this.lastMoveAt = now;
   }
 
@@ -709,9 +735,10 @@ export class BossEngine {
     this.stuns.push(now);
     this.stunnedUntil = now + ms;
     for (const t of this.telegraphs)
-      if (t.mob === undefined && !t.lethal) this.cancelled.push(t.id);
+      if (t.mob === undefined && !t.lethal && !t.doom)
+        this.cancelled.push(t.id);
     this.telegraphs = this.telegraphs.filter(
-      (t) => t.mob !== undefined || t.lethal,
+      (t) => t.mob !== undefined || t.lethal || t.doom,
     );
     this.charging = null;
     this.strideTo = null;
@@ -1279,6 +1306,13 @@ export class BossEngine {
           hits.push({ uid: p.uid, damage: p.maxHp, absorbed: 0, blocked: 0 });
           continue;
         }
+        if (tg.doom) {
+          // The dirge: no dodge, i-frame or safe spot, only a dome.
+          const dome = shelterOf(this.domes, p, tg.hitAt);
+          const would = doomHit(p, tg);
+          hits.push(dome ? shelteredHit(would, dome.by) : would);
+          continue;
+        }
         if ((this.safeUntil.get(p.uid) ?? 0) > tg.hitAt) continue;
         // A buster always lands (a slam a moment before doesn't spare its
         // target): it's the tank's to take.
@@ -1387,7 +1421,8 @@ export class BossEngine {
 
   private room(): boolean {
     let n = 0;
-    for (const t of this.telegraphs) if (t.kind !== "buster" && !t.lethal) n++;
+    for (const t of this.telegraphs)
+      if (t.kind !== "buster" && !t.lethal && !t.doom) n++;
     return n < this.maxShapes;
   }
 
@@ -1403,6 +1438,7 @@ export class BossEngine {
     const fury = enrageFactor(now - this.lockedAt);
     this.startBuster(now, players, targets, events, fury);
     this.startScatter(now, targets, events, fury);
+    this.startDoom(now, players, events);
     this.startCharge(now, targets, events, fury);
     if (now < this.nextAttackAt) return;
     const cfg = TUNING.phases[this.phase];
@@ -1462,6 +1498,49 @@ export class BossEngine {
         ...(p.uid === this.focusUid ? { aimedAt: p.uid } : {}),
       });
     }
+  }
+
+  /** The dirge, on its own clock from phase 2: one at a time, at anyone
+   * still on their feet. */
+  private startDoom(
+    now: number,
+    players: readonly BossPlayer[],
+    events: BossEvent[],
+  ) {
+    const cfg = TUNING.doom;
+    if (this.phase < cfg.fromPhase || now < this.nextDoomAt) return;
+    if (this.telegraphs.some((t) => t.doom)) return;
+    if (!players.some((p) => p.alive)) {
+      this.nextDoomAt = now + 500;
+      return;
+    }
+    // Fair, if deadly: it holds off (up to `waitMs`) until a Cymbrella is
+    // ready to answer it, so a dome spent on a buster a moment ago isn't a
+    // wipe. A raid with none at all gets no such mercy.
+    const domes = players
+      .filter((p) => p.alive && p.domeAt !== undefined)
+      .map((p) => p.domeAt as number);
+    if (domes.length) {
+      this.doomDueAt ??= now;
+      const ready = Math.min(...domes) <= now + cfg.windupMs - cfg.answerMs;
+      if (!ready && now - this.doomDueAt < cfg.waitMs) return;
+    }
+    this.doomDueAt = null;
+    this.nextDoomAt = now + cfg.everyMs;
+    const telegraph: Telegraph = {
+      id: this.nextId(),
+      kind: "ring",
+      x: this.at.x,
+      z: this.at.z,
+      r: RING_REACH,
+      inner: 0,
+      at: now,
+      hitAt: now + cfg.windupMs,
+      damage: cfg.damage,
+      doom: true,
+    };
+    this.telegraphs.push(telegraph);
+    events.push({ t: "telegraph", telegraph });
   }
 
   /** A charge, on its own clock from phase 2: at whoever keeps furthest
@@ -1653,6 +1732,22 @@ export function mitigatedHit(
     // Only a dome blocks (see shelteredHit).
     blocked: 0,
     ...(tg.aimedAt === p.uid ? { aimed: true } : {}),
+  };
+}
+
+/** The dirge as `p` takes it with no dome: flat, past the usual hit cap,
+ * with only their Def to soften it (never buffs, never below 1). */
+export function doomHit(p: BossPlayer, tg: Telegraph): BossHit {
+  const raw = tg.damage;
+  const damage = Math.max(
+    1,
+    Math.round(mitigate(raw, [defReduction(p.def ?? 0)])),
+  );
+  return {
+    uid: p.uid,
+    damage,
+    absorbed: Math.max(0, Math.round(raw) - damage),
+    blocked: 0,
   };
 }
 

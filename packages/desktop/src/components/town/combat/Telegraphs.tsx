@@ -60,13 +60,15 @@ const Shape = memo(function Shape({ shape }: { shape: FloorShape }) {
           uTime: { value: 0 },
           uMotion: { value: reduced() ? 0 : 1 },
           uTone: {
-            value: shape.lethal
-              ? 2
-              : shape.kind === "scatter"
-                ? 3
-                : shape.mob !== undefined
-                  ? 1
-                  : 0,
+            value: shape.doom
+              ? 4
+              : shape.lethal
+                ? 2
+                : shape.kind === "scatter"
+                  ? 3
+                  : shape.mob !== undefined
+                    ? 1
+                    : 0,
           },
         },
         vertexShader: /* glsl */ `
@@ -104,10 +106,12 @@ const Shape = memo(function Shape({ shape }: { shape: FloorShape }) {
               + uRing * smoothstep(0.14, 0.02, abs(d - uInner)) * dash;
             float pulse = mix(1.0, 0.8 + 0.2 * sin(uTime * 12.0), uMotion);
             // The boss's: red to gold. A minion's: green. The pulse: violet.
-            vec3 warm = uTone > 2.5 ? vec3(0.25, 0.72, 1.0)
+            vec3 warm = uTone > 3.5 ? vec3(0.8, 0.05, 0.1)
+              : uTone > 2.5 ? vec3(0.25, 0.72, 1.0)
               : uTone > 1.5 ? vec3(0.55, 0.18, 0.95)
               : uTone > 0.5 ? vec3(0.45, 0.9, 0.25) : vec3(1.0, 0.32, 0.2);
-            vec3 hot = uTone > 2.5 ? vec3(0.8, 0.95, 1.0)
+            vec3 hot = uTone > 3.5 ? vec3(1.0, 0.85, 0.3)
+              : uTone > 2.5 ? vec3(0.8, 0.95, 1.0)
               : uTone > 1.5 ? vec3(0.95, 0.75, 1.0)
               : uTone > 0.5 ? vec3(0.85, 1.0, 0.55) : vec3(1.0, 0.82, 0.55);
             vec3 col = mix(warm, hot, filled * 0.7);
@@ -124,7 +128,7 @@ const Shape = memo(function Shape({ shape }: { shape: FloorShape }) {
         polygonOffsetFactor: -2,
         polygonOffsetUnits: -2,
       }),
-    [shape.r, shape.inner, shape.kind, shape.lethal, shape.mob],
+    [shape.r, shape.inner, shape.kind, shape.lethal, shape.doom, shape.mob],
   );
   useEffect(() => () => material.dispose(), [material]);
 

@@ -219,6 +219,9 @@ export type FightReport = {
   };
   /** Herzies out of the fight (forfeited, or gone too long). */
   out?: { event: string; uids: string[] };
+  /** Herzies who came in after the lock, with the room's health per herzie
+   * (the database grows the boss's health to fit them). */
+  joins?: { event: string; uids: string[]; hpPerPlayer: number };
   /** Everyone in fell: the boss won. */
   wipe?: { event: string };
   /** How the fight went, once, for tuning. */
@@ -391,6 +394,8 @@ export class FightRuntime {
   private revivedQueue: { uid: string; hp: number }[] = [];
   private revivedInflight: FightReport["revived"] | null = null;
   private outQueue = new Set<string>();
+  /** Who came in after the lock and the database hasn't been told. */
+  private joinQueue = new Set<string>();
   private wipePending = false;
   private logPending: FightLog | null = null;
   private raidDirty = false;
@@ -510,23 +515,19 @@ export class FightRuntime {
     return !!this.boss && this.stage === "fight" && this.open;
   }
 
-  /** Whether `uid` may come in now: anyone on their feet in the lobby;
-   * after the lock, only the roster (a downed member too, to wait for a
-   * Bard); nobody once it's over. */
+  /** Whether `uid` may come in now: anyone on their feet, at any time
+   * until it's over (one who arrives after the lock joins the roster, see
+   * {@link join}); a member of the roster comes back down too, to wait for
+   * a Bard. Not one who's out for good. */
   mayJoin(uid: string, down: boolean, now: number): JoinVerdict {
     if (!this.open || this.stage === "over") return "closed";
-    if (this.stage === "lobby") {
-      // Past its start, a lobby that hasn't locked yet (an empty room
-      // waiting on its next tick, or one just rebuilt) is shut: the
-      // roster is whoever was already inside.
-      if (now >= this.startsAt) return "locked";
-      return down ? "down" : "ok";
-    }
-    if (!this.roster) return down ? "down" : "ok";
+    if (this.stage === "lobby" || !this.roster) return down ? "down" : "ok";
+    const state = this.roster.get(uid);
+    if (state === undefined) return down ? "down" : "ok";
     const since = this.absentSince.get(uid);
     if (since !== undefined && now - since >= BOSS_OUT_GRACE_MS)
       return "locked";
-    return this.roster.get(uid) === "in" ? "ok" : "locked";
+    return state === "in" ? "ok" : "locked";
   }
 
   /** Whether `uid` is fighting (on the roster and not out; anyone, without
@@ -588,6 +589,34 @@ export class FightRuntime {
     if (this.tower && ticket.lv) this.tower.level = Math.max(1, ticket.lv);
     this.raidDirty = true;
     return p;
+  }
+
+  /** A herzie who walks in after the lock joins the roster, and the boss's
+   * health grows to fit the bigger raid (as the database's does). */
+  lateJoin(uid: string): void {
+    const boss = this.boss;
+    const p = this.players.get(uid);
+    if (!boss || !p || this.stage !== "fight" || !this.roster) return;
+    if (this.roster.has(uid) || p.down) return;
+    const before = this.rosterIn();
+    this.roster.set(uid, "in");
+    this.joinQueue.add(uid);
+    const after = this.rosterIn();
+    const grown =
+      bossMaxHp(after, this.hpPerPlayer) - bossMaxHp(before, this.hpPerPlayer);
+    if (grown > 0) {
+      boss.setHealth(boss.hp + grown, boss.maxHp + grown);
+      this.bossDirty = true;
+    }
+    this.reportNow = true;
+    this.raidDirty = true;
+  }
+
+  /** How many are in the fight (not out for good). */
+  private rosterIn(): number {
+    let n = 0;
+    for (const s of this.roster?.values() ?? []) if (s === "in") n++;
+    return n;
   }
 
   /** Where a downed roster member who left comes back: where it fell. */
@@ -1239,6 +1268,10 @@ export class FightRuntime {
         alive: !p.down,
         maxHp: p.maxHp,
         def: p.stats.def,
+        // When their Cymbrella is next ready (the dirge waits for one).
+        ...(p.skills.has("cymbrella")
+          ? { domeAt: p.ready.get("cymbrella") ?? 0 }
+          : {}),
         posAt: (t) => this.history.at(p.uid, t),
       });
     }
@@ -1363,7 +1396,8 @@ export class FightRuntime {
   }
 
   /** The lobby locks: whoever stands in the room is in, the boss wakes at a
-   * health sized to them, and the door shuts. Nobody here: no fight. */
+   * health sized to them. The door stays open ({@link lateJoin}). Nobody
+   * here: it waits for whoever comes first. */
   private lock(now: number, out: Outbound[]) {
     const boss = this.boss as BossEngine;
     const uids = [...this.players.values()]
@@ -1374,6 +1408,8 @@ export class FightRuntime {
             now - (this.absentSince.get(p.uid) ?? -Infinity) < LOCK_GRACE_MS),
       )
       .map((p) => p.uid);
+    // Nobody here: the cave stays open and waits for whoever comes first.
+    if (!uids.length) return;
     this.lockedAt = now;
     this.roster = new Map(uids.map((uid) => [uid, "in" as const]));
     this.lockReq = {
@@ -1384,10 +1420,6 @@ export class FightRuntime {
     };
     this.reportNow = true;
     this.raidDirty = true;
-    if (!uids.length) {
-      this.close("escaped", now, now + ESCAPE_LINGER_MS, out);
-      return;
-    }
     this.stage = "fight";
     const maxHp = bossMaxHp(uids.length, this.hpPerPlayer);
     boss.wake(now, maxHp, maxHp);
@@ -1768,6 +1800,7 @@ export class FightRuntime {
           to: "all",
           msg: { t: "telegraph", ...this.wire(ev.telegraph) },
         });
+        if (ev.telegraph.doom) this.speak("doom", now, out, true);
         break;
       case "resolve": {
         const sheltered: number[] = [];
@@ -1963,6 +1996,7 @@ export class FightRuntime {
       this.nextReportAt = Math.min(this.nextReportAt, now + RESULTS_RETRY_MS);
     }
     const out = this.outQueue.size && !dev ? [...this.outQueue] : [];
+    const joins = this.joinQueue.size && !dev ? [...this.joinQueue] : [];
     return {
       results,
       hp: [...this.players.values()]
@@ -1983,6 +2017,15 @@ export class FightRuntime {
       skills: this.xpInflight && !dev ? this.xpInflight : undefined,
       tower: this.towerInflight ?? undefined,
       ...(this.lockReq && !dev ? { lock: this.lockReq } : {}),
+      ...(joins.length
+        ? {
+            joins: {
+              event: this.eventId,
+              uids: joins,
+              hpPerPlayer: this.hpPerPlayer,
+            },
+          }
+        : {}),
       ...(this.revivedInflight ? { revived: this.revivedInflight } : {}),
       ...(out.length ? { out: { event: this.eventId, uids: out } } : {}),
       ...(this.wipePending ? { wipe: { event: this.eventId } } : {}),
@@ -2022,27 +2065,36 @@ export class FightRuntime {
     if (report.lock) this.lockReq = null;
     if (report.out)
       for (const uid of report.out.uids) this.outQueue.delete(uid);
+    // What the database was told of the joins is its own now; joins that
+    // came in since are only ours, and must outlast its roster below.
+    const sentJoins = new Set(report.joins?.uids ?? []);
+    const newer = [...this.joinQueue].filter((uid) => !sentJoins.has(uid));
+    for (const uid of sentJoins) this.joinQueue.delete(uid);
     if (report.wipe) this.wipePending = false;
     if (report.log) this.logPending = null;
-    if (raid) out.push(...this.adoptRaid(raid, now));
+    if (raid) out.push(...this.adoptRaid(raid, now, newer));
     return out;
   }
 
   /** The database's word on the raid: its lock (if it locked first, with
    * another roster, that one stands), refused revives and who's out. */
-  private adoptRaid(raid: RaidReply, now: number): Outbound[] {
+  private adoptRaid(
+    raid: RaidReply,
+    now: number,
+    pendingJoins: readonly string[] = [],
+  ): Outbound[] {
     const out: Outbound[] = [];
     const boss = this.boss;
     if (raid.lock && boss && this.stage === "fight") {
+      // Herzies who joined since this report went out aren't in the
+      // database's roster yet: they stay.
+      const theirRoster = [...new Set([...raid.lock.roster, ...pendingJoins])];
       const mine = [...(this.roster?.keys() ?? [])].sort().join();
-      const theirs = [...raid.lock.roster].sort().join();
+      const theirs = theirRoster.sort().join();
       if (mine !== theirs) {
         const prev = this.roster ?? new Map();
         this.roster = new Map(
-          raid.lock.roster.map((uid) => [
-            uid,
-            prev.get(uid) ?? ("in" as const),
-          ]),
+          theirRoster.map((uid) => [uid, prev.get(uid) ?? ("in" as const)]),
         );
         for (const p of this.players.values())
           if (p.present && !this.roster.has(p.uid))
@@ -2172,6 +2224,7 @@ export class FightRuntime {
       hitAt: t.hitAt,
       ...(target !== undefined ? { target } : {}),
       ...(t.lethal ? { lethal: 1 as const } : {}),
+      ...(t.doom ? { doom: 1 as const } : {}),
       ...(t.mob !== undefined ? { mob: t.mob } : {}),
       ...(t.kind === "lane"
         ? { yaw: round(t.yaw ?? 0), len: round(t.len ?? 0) }
@@ -2219,6 +2272,7 @@ export class FightRuntime {
       this.revivedInflight !== null ||
       this.revivedQueue.length > 0 ||
       this.outQueue.size > 0 ||
+      this.joinQueue.size > 0 ||
       this.wipePending
     );
   }

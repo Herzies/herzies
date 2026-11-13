@@ -149,6 +149,7 @@ function safeSpot(
       (tg) =>
         tg.kind === "buster" ||
         tg.lethal ||
+        tg.doom ||
         !covers({ ...tg, r: tg.r + MARGIN, inner: Math.max(0, tg.inner - MARGIN) }, px, pz),
     );
   if (clear(x, z)) return null;
@@ -252,7 +253,14 @@ function raid(bots: Bot[], seed: number, limitMs = 17 * 60_000): Result {
       });
       const escape = b.dodges && !channeling ? safeSpot(shapesSeen, b.x, b.z) : null;
       const toBoss = Math.hypot(at.x - b.x, at.z - b.z);
-      if (escape) stepToward(b, escape);
+      // The dirge: only a dome stops it, so everyone crowds the
+      // Percussionist, who drops theirs just before it lands.
+      const doom = noticed.find((tg) => tg.doom);
+      const perc = bots.find((o) => o.role === "percussionist" && !f.player(o.uid)?.down);
+      if (doom && perc === b) {
+        // Holds its ground: the dome goes where it stands.
+      } else if (doom && perc && b.dodges && !channeling) stepToward(b, perc, 1.5);
+      else if (escape) stepToward(b, escape);
       else if (!channeling && b.dodges) {
         if (b.role === "bard") {
           // A downed ally to bring back, if the raid has a revive.
@@ -302,7 +310,10 @@ function raid(bots: Bot[], seed: number, limitMs = 17 * 60_000): Result {
       } else if (b.role === "percussionist") {
         f.skill(b.uid, "taunt", 0, 0, t);
         const aimedAtMe = boss.active.some((tg) => tg.target === b.uid || tg.aimedAt === b.uid);
-        if (aimedAtMe) f.skill(b.uid, "cymbrella", 0, 0, t);
+        // Once the dirge is in play the dome is kept for it.
+        if (aimedAtMe && boss.currentPhase < 2) f.skill(b.uid, "cymbrella", 0, 0, t);
+        const dirge = boss.active.find((tg) => tg.doom);
+        if (dirge && dirge.hitAt - t <= 2_000) f.skill(b.uid, "cymbrella", 0, 0, t);
       }
       if (channeling) continue;
       if (t >= b.nextCast) {
@@ -428,10 +439,10 @@ describe("the raid, simulated", () => {
     }
   }, 60_000);
 
-  it("a lone Record Slinger can win, before the enrage ends it", () => {
+  it("a lone Record Slinger is wiped by the dirge: nothing to shelter under", () => {
     const r = raid(party(["record_slinger"]), 4);
-    expect(r.outcome, `after ${min(r.ms)} min`).toBe("victory");
-    expect(r.ms).toBeLessThan(15 * 60_000);
+    expect(r.outcome, `after ${min(r.ms)} min`).toBe("wiped");
+    expect(r.ms).toBeLessThan(5 * 60_000);
   });
 
   it("listening to what the boss hates makes the fight shorter", () => {
@@ -443,7 +454,7 @@ describe("the raid, simulated", () => {
 
   it("a slow-to-react party takes hits; Bards bring the fallen back, and healing keeps them up", () => {
     // Without heal bolts, the sluggish go down and are played back up.
-    const bare = [8, 9].map((sd) =>
+    const bare = [8, 9, 12, 13, 14, 15, 16, 17].map((sd) =>
       raid(party(TRIO, { reaction: 1_250, heals: false }), sd),
     );
     expect(bare.some((r) => r.downs > 0)).toBe(true);
@@ -465,10 +476,12 @@ describe("the raid, simulated", () => {
 
   it("the enrage ends a fight that runs too long", () => {
     // Three classless bumpers, dodging but dealing next to nothing.
+    // (They have no dome for the dirge either, which gets them sooner than
+    // the enrage's pulse would: the pulse is the backstop, for a raid that
+    // can answer the rest.)
     const bots = party(["none", "none", "none"]);
     const r = raid(bots, 7, 20 * 60_000);
     expect(r.outcome).toBe("wiped");
-    expect(r.ms).toBeGreaterThan(14 * 60_000);
     expect(r.ms).toBeLessThan(16 * 60_000);
   });
 

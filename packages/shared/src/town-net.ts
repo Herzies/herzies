@@ -606,6 +606,8 @@ export type BossTelegraph = {
   len?: number;
   /** The enrage's pulse: lands on everyone, whatever their Def (1). */
   lethal?: 1;
+  /** The dirge: lands on everyone, and only a Cymbrella's dome stops it (1). */
+  doom?: 1;
   /** A minion's (or a Tower mob's) swing, not the boss's: its id. */
   mob?: number;
   x: number;

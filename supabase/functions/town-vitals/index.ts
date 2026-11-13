@@ -116,6 +116,7 @@ async function rollDrops(
 
 type RaidMessage = {
   lock?: { event: string; uids: string[]; at: number; hpPerPlayer: number };
+  joins?: { event: string; uids: string[]; hpPerPlayer: number };
   revived?: { event: string; batch: string; rows: { uid: string; hp: number }[] };
   out?: { event: string; uids: string[] };
   wipe?: { event: string };
@@ -139,7 +140,7 @@ async function applyRaid(
     out?: string[];
   } | null;
 }> {
-  const event = [msg.lock, msg.out, msg.revived, msg.wipe, msg.boss]
+  const event = [msg.lock, msg.joins, msg.out, msg.revived, msg.wipe, msg.boss]
     .map((m) => m?.event)
     .find((e): e is string => typeof e === "string" && UUID.test(e));
   if (!event) return { failed: false, blocking: false, reply: null };
@@ -160,6 +161,24 @@ async function applyRaid(
           : null,
         p_at: Number.isFinite(msg.lock.at) ? Math.round(msg.lock.at) : null,
       });
+    } catch {
+      failed = true;
+      blocking = true;
+    }
+  }
+  if (msg.joins && msg.joins.event === event) {
+    // After the lock: herzies who walked in late join the roster and the
+    // boss's health grows to fit them (00148). Blocking, like the lock:
+    // their damage must not land before they're on it.
+    try {
+      const joined = await rpc(db, "join_boss_fight", {
+        p_event: event,
+        p_uids: uids(msg.joins.uids),
+        p_per_player: Number.isFinite(msg.joins.hpPerPlayer)
+          ? msg.joins.hpPerPlayer
+          : null,
+      });
+      if (joined) reply.lock = joined;
     } catch {
       failed = true;
       blocking = true;
@@ -233,6 +252,7 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
     };
     /** The raid (00122): the lock, revives, who's out, a wipe, the log. */
     lock?: { event: string; uids: string[]; at: number; hpPerPlayer: number };
+    joins?: { event: string; uids: string[]; hpPerPlayer: number };
     revived?: { event: string; batch: string; rows: { uid: string; hp: number }[] };
     out?: { event: string; uids: string[] };
     wipe?: { event: string };

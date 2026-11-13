@@ -67,7 +67,7 @@ export function townNet(): TownConnection {
         why === "down"
           ? "You need some rest first."
           : why === "locked"
-            ? "The fight has already started: the cave is sealed until it's over."
+            ? "You left this fight for good: the cave is closed to you until it's over."
             : tower
               ? "The Tower is closed right now."
               : why === "full"

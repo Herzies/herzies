@@ -479,6 +479,8 @@ export class TownRoom extends DurableObject<Env> {
     };
     this.persist(s);
     const fp = this.fight?.join(t.uid, id, t, state, now);
+    // Arriving after the lock: onto the roster, the boss grows to fit.
+    if (fp && !replacing) this.fight?.lateJoin(t.uid);
 
     const others = [...this.sessions.values()].flatMap((o) =>
       o !== s && o.player ? [o.player] : [],
@@ -1170,6 +1172,7 @@ export class TownRoom extends DurableObject<Env> {
       !report.results &&
       !report.tower &&
       !report.lock &&
+      !report.joins &&
       !report.revived &&
       !report.out &&
       !report.wipe

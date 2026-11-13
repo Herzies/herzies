@@ -438,6 +438,105 @@ describe("casts", () => {
     expect(hits.some((h) => h.damage >= p.maxHp)).toBe(true);
   });
 
+  describe("the dirge", () => {
+    /** A phase-2 boss, fighting from T0. */
+    const phase2 = () => {
+      const e = new BossEngine({ hp: 5e5, maxHp: 1e6, seed: 1, now: T0 });
+      expect(e.currentPhase).toBe(2);
+      return e;
+    };
+    const dirgeAt = T0 + TUNING.openingMs + TUNING.doom.everyMs;
+    const hitsOf = (ev: BossEvent[]) =>
+      ev.flatMap((x) => (x.t === "resolve" ? x.hits : []));
+    /** Run until its first dirge has landed. */
+    const through = (e: BossEngine, players: BossPlayer[]) => {
+      const ev = run(e, T0, dirgeAt + TUNING.doom.windupMs + 500, players);
+      const tg = telegraphs(ev).find((t) => t.doom);
+      const resolve = ev.find(
+        (x) => x.t === "resolve" && x.id === tg?.id,
+      );
+      return { tg, hits: resolve?.t === "resolve" ? resolve.hits : [] };
+    };
+
+    it("never comes in phase 1", () => {
+      const e = engine(1e6, 1e6);
+      const ev = run(e, T0, dirgeAt + 20_000, [still("a", 0, 6)]);
+      expect(telegraphs(ev).some((t) => t.doom)).toBe(false);
+    });
+
+    it("winds up for its full length across the whole floor, then lands on everyone", () => {
+      const e = phase2();
+      const players = [still("a", 0, 6), still("b", -9, -9), still("c", 8, 2)];
+      const { tg, hits } = through(e, players);
+      expect(tg).toBeDefined();
+      expect(tg?.hitAt).toBe((tg?.at ?? 0) + TUNING.doom.windupMs);
+      expect(tg?.inner).toBe(0);
+      expect(hits.map((h) => h.uid).sort()).toEqual(["a", "b", "c"]);
+    });
+
+    it("hits flat, past the usual cap: a level-30 herzie without Stamina dies to it", () => {
+      const e = phase2();
+      const frail = still("frail", 0, 6, 342);
+      const { hits } = through(e, [frail]);
+      expect(hits[0].damage).toBeGreaterThanOrEqual(342);
+    });
+
+    it("only Def softens it: a sturdy herzie lives, buffs and i-frames do nothing", () => {
+      const e = phase2();
+      const tank: BossPlayer = { ...still("tank", 0, 6, 780), def: 68 };
+      const { hits } = through(e, [tank]);
+      expect(hits[0].damage).toBeGreaterThan(300);
+      expect(hits[0].damage).toBeLessThan(780);
+      expect(hits[0].absorbed).toBeGreaterThan(0);
+    });
+
+    it("can't be dodged, and a Rimshot doesn't cancel it", () => {
+      const e = phase2();
+      const players = [still("a", 0, 6)];
+      const ev = run(e, T0, dirgeAt + 100, players);
+      expect(telegraphs(ev).some((t) => t.doom)).toBe(true);
+      e.stun(dirgeAt + 200, 2_000);
+      const rest = run(e, dirgeAt + 250, dirgeAt + TUNING.doom.windupMs + 500, players);
+      expect(hitsOf(rest).some((h) => h.damage > 0)).toBe(true);
+    });
+
+    it("a dome stops all of it", () => {
+      const e = phase2();
+      const inside = still("in", 0, 6);
+      const outside = still("out", 9, -6);
+      // The dome stands over the landing (cast two seconds before).
+      e.addDome("perc", 0, 6, dirgeAt + TUNING.doom.windupMs - 2_000, 4_000);
+      const { hits } = through(e, [inside, outside]);
+      const a = hits.find((h) => h.uid === "in");
+      const b = hits.find((h) => h.uid === "out");
+      expect(a).toMatchObject({ damage: 0, shelteredBy: "perc" });
+      expect(a?.blocked).toBeGreaterThanOrEqual(TUNING.doom.damage * 0.4);
+      expect(b?.damage).toBeGreaterThan(0);
+    });
+
+    it("waits (a while) for a Cymbrella to be ready, then comes anyway", () => {
+      const e = phase2();
+      const spent: BossPlayer = {
+        ...still("perc", 0, 6),
+        domeAt: dirgeAt + 60_000,
+      };
+      const early = run(e, T0, dirgeAt + TUNING.doom.waitMs - 500, [spent]);
+      expect(telegraphs(early).some((t) => t.doom)).toBe(false);
+      const late = run(e, dirgeAt + TUNING.doom.waitMs - 450, dirgeAt + TUNING.doom.waitMs + 500, [spent]);
+      expect(telegraphs(late).some((t) => t.doom)).toBe(true);
+      // One whose dome is ready in time doesn't make it wait.
+      const e2 = phase2();
+      const ready: BossPlayer = { ...still("perc", 0, 6), domeAt: dirgeAt };
+      const on = run(e2, T0, dirgeAt + 500, [ready]);
+      expect(telegraphs(on).some((t) => t.doom)).toBe(true);
+    });
+
+    it("keeps its distance from a Cymbrella's cooldown", () => {
+      expect(TUNING.doom.everyMs).toBeGreaterThan(30_000);
+      expect(TUNING.doom.windupMs).toBeGreaterThan(TUNING.doom.answerMs);
+    });
+  });
+
   it("lands a cast on the boss after the wave's flight", () => {
     const e = engine();
     const { yaw, pitch } = aim(0, 8);
