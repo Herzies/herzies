@@ -46,7 +46,7 @@ import { IncomingFriendOverlay } from "./components/IncomingFriendOverlay";
 import { IncomingTradeOverlay } from "./components/IncomingTradeOverlay";
 import { InventoryView } from "./components/InventoryView";
 import { LeaderboardView } from "./components/LeaderboardView";
-import { LoadingSplash } from "./components/LoadingSplash";
+import { LoadingSplash, useSplashShowing } from "./components/LoadingSplash";
 import { Notices } from "./components/Notices";
 import { OnboardingScreen } from "./components/OnboardingScreen";
 import { OverlayWindow } from "./components/OverlayWindow";
@@ -294,6 +294,8 @@ function App() {
     return () => clearTimeout(t);
   }, []);
   const worldLoading = !worldSettled && !loadGaveUp;
+  // The update and what's-new notices wait out any loading splash.
+  const splashShowing = useSplashShowing();
   useEffect(() => {
     homeMode.set(base === "home");
   }, [base]);
@@ -1942,6 +1944,7 @@ function App() {
       )}
 
       {herzie &&
+        !splashShowing &&
         availableUpdate &&
         availableUpdate.version !== dismissedUpdateVersion &&
         overlay !== "settings" && (
@@ -1990,7 +1993,7 @@ function App() {
           />
         )}
 
-      {herzie && whatsNewVersion && (
+      {herzie && !splashShowing && whatsNewVersion && (
         <WhatsNewOverlay
           version={whatsNewVersion}
           highlights={

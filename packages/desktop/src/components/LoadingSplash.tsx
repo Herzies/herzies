@@ -1,8 +1,35 @@
-import { useEffect, useState } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { cn } from "../lib/utils";
 
 /** How long each step of the dots ("", ".", "..", "...") shows. */
 const DOT_MS = 400;
+
+/** How many overlay splashes are up. Notices that would land on top of one
+ * (an update, what's new) wait for it: see {@link useSplashShowing}. */
+let splashes = 0;
+const splashListeners = new Set<() => void>();
+function setSplashes(delta: number) {
+  splashes += delta;
+  for (const l of splashListeners) l();
+}
+
+/** Whether a loading overlay is covering the window right now. */
+export function useSplashShowing(): boolean {
+  return useSyncExternalStore(
+    (cb) => {
+      splashListeners.add(cb);
+      return () => {
+        splashListeners.delete(cb);
+      };
+    },
+    () => splashes > 0,
+  );
+}
 
 /**
  * Full-screen cover while the app has nothing complete to show yet: before
@@ -24,6 +51,13 @@ export function LoadingSplash({
   hint?: string;
   overlay?: boolean;
 }) {
+  // Layout effect: registered before the first paint, so what waits on it
+  // is never drawn over the splash for a frame.
+  useLayoutEffect(() => {
+    if (!overlay) return;
+    setSplashes(1);
+    return () => setSplashes(-1);
+  }, [overlay]);
   return (
     <div
       data-tauri-drag-region
