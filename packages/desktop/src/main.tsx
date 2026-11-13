@@ -102,6 +102,7 @@ import {
   useGhostMode,
   useWindowFocused,
   useWindowVisible,
+  useWindowWaking,
 } from "./tauri-bridge";
 
 const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1h
@@ -679,6 +680,7 @@ function App() {
   // flag the root and let globals.css pause them while the window is off
   // screen. Unfocused but visible, they keep going.
   const visible = useWindowVisible();
+  const waking = useWindowWaking();
   useEffect(() => {
     document.documentElement.toggleAttribute("data-window-hidden", !visible);
   }, [visible]);
@@ -1318,7 +1320,9 @@ function App() {
         ghostMode && "grayscale",
       )}
     >
-      {worldLoading && <LoadingSplash overlay label="loading the world" />}
+      {(worldLoading || waking) && (
+        <LoadingSplash overlay label="loading the world" />
+      )}
       {/* Across the top, past the padding: a strip to drag the window by. */}
       <TitleBar className="absolute inset-x-0 top-0" />
       <div

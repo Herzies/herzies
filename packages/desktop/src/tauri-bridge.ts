@@ -702,12 +702,79 @@ export function useGhostMode(): boolean {
 /** Closed to the menu bar (tray.rs's "window-visible"): one listener for
  * the app, read by every useWindowVisible. */
 let windowShown = true;
+/** Coming back from the menu bar: the window is up but the world is still
+ * waking (its first frames can stall the page for a couple of seconds). */
+let windowWaking = false;
+let wakeTimer: ReturnType<typeof setTimeout> | undefined;
+let wakeRaf = 0;
 const shownListeners = new Set<() => void>();
+const hiddenListeners = new Set<() => void>();
+/** Runs `cb` the moment the window closes to the menu bar. */
+export function onWindowHidden(cb: () => void): () => void {
+  hiddenListeners.add(cb);
+  return () => {
+    hiddenListeners.delete(cb);
+  };
+}
+const notifyShown = () => {
+  for (const l of shownListeners) l();
+};
+
+/** Ends the wake once frames come steady again (or after a few seconds). */
+function watchWake() {
+  const began = performance.now();
+  let last = began;
+  let steady = 0;
+  const tick = (now: number) => {
+    steady = now - last < 40 ? steady + 1 : 0;
+    last = now;
+    if (steady >= 5 || now - began > 8000) {
+      windowWaking = false;
+      notifyShown();
+      return;
+    }
+    wakeRaf = requestAnimationFrame(tick);
+  };
+  wakeRaf = requestAnimationFrame(tick);
+}
+
 if (isTauri()) {
   listen<boolean>("window-visible", (e) => {
-    windowShown = e.payload;
-    for (const l of shownListeners) l();
+    clearTimeout(wakeTimer);
+    cancelAnimationFrame(wakeRaf);
+    if (!e.payload) {
+      windowShown = false;
+      // Up before it's shown again: reopened, the window would otherwise
+      // flash the world's last frame before the splash got painted.
+      windowWaking = true;
+      for (const cb of hiddenListeners) cb();
+    } else if (!windowShown) {
+      // Show the loading screen first, and only then let the Town and the
+      // animations run: the stall would otherwise freeze the page before
+      // the screen had painted.
+      windowWaking = true;
+      wakeTimer = setTimeout(() => {
+        windowShown = true;
+        notifyShown();
+        watchWake();
+      }, 150);
+    }
+    notifyShown();
   }).catch(() => {});
+}
+
+/** Whether the world is still waking after the window came back. */
+export function useWindowWaking(): boolean {
+  const [waking, setWaking] = useState(windowWaking);
+  useEffect(() => {
+    const update = () => setWaking(windowWaking);
+    shownListeners.add(update);
+    update();
+    return () => {
+      shownListeners.delete(update);
+    };
+  }, []);
+  return waking;
 }
 
 /**
