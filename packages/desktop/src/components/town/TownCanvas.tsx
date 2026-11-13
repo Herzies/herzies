@@ -195,6 +195,7 @@ export default function TownCanvas(props: TownCanvasProps) {
       onCreated={props.onCreated}
     >
       <TownRuntimeContext.Provider value={runtime}>
+        <ClockGap />
         <Systems {...props} map={map} spots={spots} input={input} />
         {/* Rapier's WASM loads here: wait inside the canvas instead of
             suspending the whole Town again (the splash would blink). */}
@@ -300,6 +301,17 @@ const NO_STATS: HerzieStats = {
   critDamage: 0,
   moveSpeed: 0,
 };
+
+/** The Town's clock doesn't run while it's paused (window closed to the
+ * menu bar): the first frame back would carry the whole gap in `elapsedTime`
+ * and everything swaying on it (trees, bunting, clouds) would jump to a new
+ * phase. Takes the gap back out, ahead of every other frame callback. */
+function ClockGap() {
+  useFrame((state, delta) => {
+    if (delta > 0.5) state.clock.elapsedTime -= delta;
+  }, -1000);
+  return null;
+}
 
 /** Per-frame housekeeping: input, and who the player is close enough to
  * talk to. */

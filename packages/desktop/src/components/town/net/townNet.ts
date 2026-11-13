@@ -10,7 +10,7 @@ import {
 } from "@herzies/shared";
 import { useEffect, useSyncExternalStore } from "react";
 import { notify } from "../../../lib/notices";
-import { herzies } from "../../../tauri-bridge";
+import { herzies, onWindowHidden } from "../../../tauri-bridge";
 import { setChampion } from "../champion";
 import { MOB_DELAY_MS, setDrawDelaySource } from "../combat/drawDelay";
 import { bossFight, handleBossMessage } from "../combat/fight";
@@ -146,6 +146,16 @@ export function useTownNet(active: boolean): TownConnection {
   }, [active, conn]);
   return conn;
 }
+
+// Closed to the menu bar: leave the Town at once, not after the grace
+// period. The page is suspended while hidden, so a socket left open queues
+// everything the room says, and reopening would chew through all of it in
+// one go (a freeze as long as the window was closed). Reopening restarts it.
+onWindowHidden(() => {
+  if (linger) clearTimeout(linger);
+  linger = null;
+  net?.stop();
+});
 
 /** Re-renders when the connection's status or roster changes. */
 export function useTownNetVersion(conn: TownConnection | null | undefined) {
