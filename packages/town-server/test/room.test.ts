@@ -169,6 +169,24 @@ describe("rules", () => {
     expect(startingPoint("arena", 0, 10)).toEqual({ x: 0, z: 10 });
   });
 
+  it("in a fight, only lets a herzie onto the spawn when the server sent it", () => {
+    // The boss room's spawn is (0, 10): from the far side, a jump there is
+    // a hop out of a slam, not a respawn.
+    const g = newGuard(0, -10, 0, "bossroom");
+    expect(checkMove(g, 0, 10, 100, "bossroom")).toBe(false);
+    const t = newGuard(12, 0, 0, "tower");
+    t.respawn = true;
+    expect(checkMove(t, -12.5, 0.5, 100, "tower")).toBe(true);
+    // Spent: a second one isn't.
+    expect(checkMove(t, 12, 0, 200, "tower")).toBe(false);
+  });
+
+  it("in a fight, holds a lag burst to about a second of sprinting", () => {
+    const g = newGuard(0, 0, 0, "bossroom");
+    expect(checkMove(g, 0, 12, 5_000, "bossroom")).toBe(false);
+    expect(checkMove(g, 0, 10, 5_000, "bossroom")).toBe(true);
+  });
+
   it("rate-limits bursts", () => {
     const l = new RateLimiter(10, 5, 0);
     const ok = Array.from({ length: 8 }, () => l.take(0)).filter(Boolean);

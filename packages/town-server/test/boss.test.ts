@@ -7,13 +7,13 @@ import {
 import { TOWN_WALK_SPEED } from "@herzies/shared/town-net";
 import { BOSS_ENRAGE, BOSS_WANDER } from "@herzies/shared/boss-fight";
 import { RIMSHOT } from "@herzies/shared/skills";
+import { maxHp as maxHpOf } from "@herzies/shared/vitals";
 import { describe, expect, it } from "vitest";
 import {
   BossEngine,
   type BossEvent,
   type BossPlayer,
   covers,
-  MAX_HIT_FRACTION,
   MAX_TELEGRAPHS,
   MIN_WINDUP_MS,
   phaseFor,
@@ -58,10 +58,10 @@ describe("tuning invariants", () => {
     expect(TUNING.ring.windupMs).toBeGreaterThanOrEqual(MIN_WINDUP_MS);
   });
 
-  it("a level-20 herzie with no Stamina takes hits within the budget", () => {
-    const max = 200;
-    expect(TUNING.slam.damage).toBeLessThanOrEqual(MAX_HIT_FRACTION * max);
-    expect(TUNING.ring.damage).toBeLessThanOrEqual(MAX_HIT_FRACTION * max);
+  it("a level-1 herzie with no Stamina lives through a slam or a ring", () => {
+    const max = maxHpOf(1);
+    expect(TUNING.slam.damage).toBeLessThan(max);
+    expect(TUNING.ring.damage).toBeLessThan(max);
   });
 
   it("a slam can be left on foot within its windup, with time to react", () => {
@@ -197,9 +197,18 @@ describe("the boss roams", () => {
     expect(lane.hitAt - lane.at).toBe(TUNING.charge.windupMs);
     expect(covers(lane, 3, 6)).toBe(true);
     // It hits whoever's in the lane as it goes, and ends up down the lane.
-    const after = run(e, t, lane.hitAt + 2_000, [tank, back]);
-    const hit = after.find((x) => x.t === "resolve" && x.id === lane.id);
-    expect(hit?.t === "resolve" && hit.hits.map((h) => h.uid)).toContain("back");
+    // Step by step, to see when.
+    const hitAt = new Map<string, number>();
+    for (let s = t; s <= lane.hitAt + 2_000; s += 50)
+      for (const ev of e.update(s, [tank, back]))
+        if (ev.t === "resolve" && ev.id === lane.id)
+          for (const h of ev.hits) hitAt.set(h.uid, s);
+    expect(hitAt.has("back")).toBe(true);
+    // Not as it sets off: when its body gets to them, down the lane.
+    const run_ = dist({ x: lane.x, z: lane.z }, { x: 3, z: 6 }) - TUNING.boss.radius - TUNING.playerRadius;
+    const expected = lane.hitAt + (Math.max(0, run_) / TUNING.charge.speed) * 1000;
+    expect(hitAt.get("back")).toBeGreaterThan(lane.hitAt + 100);
+    expect(Math.abs((hitAt.get("back") ?? 0) - expected)).toBeLessThan(200);
     expect(dist(e.position, { x: 3, z: 6 })).toBeLessThan(dist({ x: lane.x, z: lane.z }, { x: 3, z: 6 }));
     expect(
       Math.hypot(e.position.x - BOSS_WANDER.x, e.position.z - BOSS_WANDER.z),
@@ -240,14 +249,14 @@ describe("attacks", () => {
     ]);
   });
 
-  it("caps a hit at a share of a small herzie's health", () => {
+  it("lands a hit in full on a herzie too small for it", () => {
     const e = engine();
     const p = still("a", 0, 5, 60);
     const ev = run(e, T0, T0 + 6_000, [p]);
     const resolve = ev.find((x) => x.t === "resolve");
     if (resolve?.t !== "resolve") throw new Error("no hit");
-    expect(MAX_HIT_FRACTION * 60).toBeLessThan(TUNING.slam.damage);
-    expect(resolve.hits[0].damage).toBe(Math.round(MAX_HIT_FRACTION * 60));
+    expect(TUNING.slam.damage).toBeGreaterThan(60);
+    expect(resolve.hits[0].damage).toBe(TUNING.slam.damage);
   });
 
   it("Def takes its share off a hit", () => {
@@ -647,9 +656,9 @@ describe("melee damage", () => {
     expect(dealt()).toBe(dealt(STRIKE_DAMAGE));
   });
 
-  it("no blow out-hits the Record Slinger's disc", () => {
+  it("an instrument out-hits a bare herzie (the Slinger out-damages the stick over a fight: raid-sim)", () => {
     expect(BUMP_DAMAGE).toBeLessThan(STRIKE_DAMAGE);
-    expect(STRIKE_DAMAGE).toBeLessThan(DISC_DAMAGE);
+    expect(DISC_DAMAGE).toBeGreaterThan(1);
   });
 });
 
@@ -707,6 +716,25 @@ describe("production pass: fairness and the raid's size", () => {
     // Busters only (slams on the focus are aimed too): the biggest grow.
     const sorted = [...hits].sort((a, b) => a - b);
     expect(sorted[sorted.length - 1]).toBeGreaterThan(TUNING.buster.damage);
+  });
+
+  it("a buster lands in full, enough to knock out a herzie too weak for it", () => {
+    const e = engine(1000, 1000);
+    // 250 HP, no Def: a buster takes more than that.
+    const tank = still("tank", 0, 5, 250);
+    const other = still("dps", 6, 9, 250);
+    e.setTaunt("tank", T0 + 60_000, T0);
+    let first: number | null = null;
+    for (let t = T0; t < T0 + 20_000 && first === null; t += 50) {
+      const busters = new Set(
+        e.active.filter((tg) => tg.kind === "buster").map((tg) => tg.id),
+      );
+      for (const ev of e.update(t, [tank, other]))
+        if (ev.t === "resolve" && busters.has(ev.id))
+          for (const h of ev.hits) if (h.uid === "tank") first = h.damage;
+    }
+    expect(first).toBe(TUNING.buster.damage);
+    expect(first).toBeGreaterThan(250);
   });
 
   it("doesn't flip its focus between two who hate it about the same", () => {

@@ -91,6 +91,14 @@ function locked(
   return { f, out };
 }
 
+/** Hits land in full: a test that isn't about them keeps its herzie up. */
+function toughen(f: FightRuntime, uid: string) {
+  const p = f.player(uid);
+  if (!p) throw new Error(`no ${uid}`);
+  p.maxHp = 1e6;
+  p.hp = 1e6;
+}
+
 describe("the lobby", () => {
   it("lets anyone on their feet in, but not a downed herzie", () => {
     const f = new FightRuntime(claim(), T0);
@@ -109,6 +117,28 @@ describe("the lobby", () => {
     f.step(STARTS + 18_100);
     expect(f.stage).toBe("fight");
     expect(f.engine.maxHp).toBe(bossMaxHp(1, 10_000));
+  });
+
+  it("a lobby that emptied just before its start locks late with them in", () => {
+    // Everyone's connection dropped (a deploy) 10 s before the start; the
+    // room stopped ticking, so nothing locked it on time.
+    const f = new FightRuntime(claim(), T0);
+    f.join("a", 1, ticket("a", "bard"), { x: 0, z: 9 }, T0);
+    f.join("b", 2, ticket("b", "bard"), { x: 2, z: 9 }, T0);
+    f.leave("a", STARTS - 10_000);
+    f.leave("b", STARTS - 10_000);
+    const late = STARTS + 40_000;
+    expect(f.lockDue(late)).toBe(true);
+    f.step(late);
+    expect(f.stage).toBe("fight");
+    expect(f.mayJoin("a", false, late + 10)).toBe("ok");
+    // The door stays open: a stranger may still come in (as a late arrival).
+    expect(f.mayJoin("stranger", false, late + 10)).toBe("ok");
+  });
+
+  it("a room rebuilt empty after its start doesn't lock nobody in", () => {
+    const f = new FightRuntime(claim(), T0);
+    expect(f.lockDue(STARTS + 40_000)).toBe(false);
   });
 
   it("the boss sleeps: it can't be hurt and doesn't attack", () => {
@@ -408,8 +438,10 @@ describe("Resurrect", () => {
       if (!tank || !bard) throw new Error("missing");
       tank.down = true;
       tank.hp = 0;
-      // The boss is still swinging: keep the Bard standing for the test.
+      // The boss is still swinging (a buster and a slam can knock out a
+      // 200 HP Bard mid-channel): keep the Bard standing for the test.
       bard.down = false;
+      bard.maxHp = 5_000;
       bard.hp = bard.maxHp;
       expect(f.skill("bard", "resurrect", 0, 0, t).result).toBe("used");
       const out = run(f, t, t + 3_200, at);
@@ -467,6 +499,7 @@ describe("Taunt", () => {
 
   it("aims the buster at the taunter, even alone", () => {
     const { f } = locked([tank("t1", 0)]);
+    toughen(f, "t1");
     // The first buster comes after the opening and its own clock (13 s):
     // a taunt cast a few seconds in draws it.
     const t = STARTS + 4_000;
@@ -513,6 +546,7 @@ describe("Taunt", () => {
 describe("the music it hates", () => {
   it("in tune after the settle time, out after the linger", () => {
     const { f } = locked([{ uid: "dps", cls: "record_slinger", x: 0, z: 9 }]);
+    toughen(f, "dps");
     const where = { dps: { x: 0, z: 9 } };
     const t = STARTS + 100;
     f.tune("dps", true, t);
@@ -617,6 +651,41 @@ describe("the music it hates", () => {
     run(f, t, t + IN_TUNE.settleMs + 100, where);
     f.skill("bard", "soothing-drones", 0, 0, t + IN_TUNE.settleMs + 150);
     expect(ally.hp).toBeCloseTo(10 + 200 * 0.2 * IN_TUNE.heal, 5);
+  });
+});
+
+describe("out of the fight", () => {
+  it("a herzie out of the roster isn't healed, credited or fed", () => {
+    const { f } = locked([
+      { uid: "bard", cls: "bard", sk: [["soothing-drones", 1]], x: 0, z: 9 },
+      { uid: "gone", x: 1, z: 9 },
+    ]);
+    // Gone past the grace: out. Then its app comes back (a watcher).
+    f.leave("gone", STARTS + 100);
+    const t = STARTS + BOSS_OUT_GRACE_MS + 500;
+    f.step(t);
+    f.join("gone", 2, ticket("gone", undefined, [], { hp: { hp: 10, maxHp: 200, down: false } }), { x: 1, z: 9 }, t);
+    const gone = f.player("gone");
+    if (!gone) throw new Error("no gone");
+    gone.hp = 10;
+    f.onState("bard", 0, 9, t + 50);
+    f.onState("gone", 1, 9, t + 50);
+    expect(f.skill("bard", "soothing-drones", 0, 0, t + 100).result).toBe("used");
+    expect(gone.hp).toBe(10);
+    expect(f.tryEat("gone", t + 200)).toBe("not-here");
+  });
+
+  it("leaving takes a herzie's buffs off for everyone", () => {
+    const { f } = locked([
+      { uid: "tank", cls: "percussionist", sk: [["taunt", 1]], x: 0, z: 9 },
+      { uid: "b" },
+    ]);
+    const t = STARTS + 200;
+    f.onState("tank", 0, 9, t);
+    expect(f.skill("tank", "taunt", 0, 0, t).result).toBe("used");
+    const out = f.leave("tank", t + 500);
+    const offs = of(out, "buffOff") as { buff: string }[];
+    expect(offs.map((m) => m.buff)).toContain("taunt");
   });
 });
 
@@ -769,10 +838,10 @@ describe("production pass: restarts, absences and the lock", () => {
     f.onState("a", 3, 4, STARTS + 50);
     (f.player("a") as { down: boolean }).down = true;
     f.leave("a", STARTS + 100);
-    const at = f.rejoinAt("a");
+    const at = f.rejoinAt("a", { x: 0, z: 0 }, STARTS + 200);
     expect(at?.x).toBeCloseTo(3, 0);
     expect(at?.z).toBeCloseTo(4, 0);
-    expect(f.rejoinAt("b")).toBeNull();
+    expect(f.rejoinAt("b", { x: 0, z: 0 }, STARTS + 200)).toBeNull();
   });
 });
 

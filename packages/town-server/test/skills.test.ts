@@ -1,4 +1,10 @@
-import { CAST_INTERVAL_MS, DOME, HEAL_BOLT, WAVE_HAND_HEIGHT } from "@herzies/shared/combat";
+import {
+  CAST_INTERVAL_MS,
+  DOME,
+  HEAL_BOLT,
+  tauntPointsPerSecond,
+  WAVE_HAND_HEIGHT,
+} from "@herzies/shared/combat";
 import {
   SKILL_COOLDOWN_GRACE_MS,
   SKILL_DEFS,
@@ -8,7 +14,12 @@ import { timingAttackSpeed } from "@herzies/shared/stats";
 import type { ServerMessage, TownTicketPayload } from "@herzies/shared/town-net";
 import { armed } from "./arms";
 import { describe, expect, it } from "vitest";
-import { BossEngine, type BossPlayer, castSpeed, TUNING } from "../src/boss";
+import {
+  BossEngine,
+  type BossPlayer,
+  castSpeed,
+  TUNING,
+} from "../src/boss";
 import { FightRuntime, type Outbound, statsOf } from "../src/fight";
 
 const T0 = 5_000_000;
@@ -306,6 +317,40 @@ describe("the boss's side", () => {
     expect(xp.find((x) => x.uid === "tank" && x.skill === "cymbrella")?.xp).toBeGreaterThan(0);
   });
 
+  it("in a fight, holding the boss with a Taunt pays its Percussionist, per second held", () => {
+    const f = new FightRuntime(claim(), T0);
+    f.join("tank", 1, ticket("tank", [["taunt", 1]]), { x: 0, z: 8 }, T0 - 5_000);
+    f.join("dps", 2, ticket("dps", [["backspin", 1]]), { x: 4, z: 8 }, T0 - 5_000);
+    // Hits land in full: keep the tank up through its taunt.
+    for (const uid of ["tank", "dps"]) {
+      const p = f.player(uid);
+      if (p) {
+        p.maxHp = 1e6;
+        p.hp = 1e6;
+      }
+    }
+    const at = T0 + TUNING.openingMs;
+    for (let t = T0 - 1_000; t <= at; t += 50) {
+      f.onState("tank", 0, 8, t);
+      f.onState("dps", 4, 8, t);
+      f.step(t);
+    }
+    expect(f.skill("tank", "taunt", 0, 0, at).result).toBe("used");
+    // Past the taunt's end: it pays for the time it held, and no longer.
+    for (let t = at; t < at + SKILL_DEFS.taunt.durationMs! + 2_000; t += 50) {
+      f.onState("tank", 0, 8, t);
+      f.onState("dps", 4, 8, t);
+      f.step(t);
+    }
+    const rows = f.report(at + 20_000, true)?.boss?.damage ?? [];
+    const held = SKILL_DEFS.taunt.durationMs! / 1000;
+    const want = held * tauntPointsPerSecond(100_000, 2);
+    const taunt = rows.find((r) => r.uid === "tank")?.taunt ?? 0;
+    expect(taunt).toBeGreaterThan(want * 0.95);
+    expect(taunt).toBeLessThan(want * 1.05);
+    expect(rows.find((r) => r.uid === "dps")?.taunt).toBeUndefined();
+  });
+
   it("keeps the boss out: it walks up to the edge, no further", () => {
     const boss = new BossEngine({ hp: 1e6, maxHp: 1e6, seed: 1, now: T0 });
     boss.addDome("tank", 0, 8, T0, 60_000);
@@ -499,6 +544,26 @@ describe("Haste", () => {
     f.step(T0 + 12_000);
     const xp = f.report(T0 + 12_001, true)?.skills?.xp ?? [];
     expect(xp.find((x) => x.uid === "bard" && x.skill === "haste")?.xp).toBeGreaterThan(0);
+  });
+});
+
+describe("Haste's pay", () => {
+  it("is for hasted casts only, not a skill's own hits", () => {
+    const f = new FightRuntime(claim(), T0);
+    f.join("bard", 1, ticket("bard", [["haste", 1]]), { x: 0, z: 8 }, T0 - 5_000);
+    // Hits hard enough that one Backspin would pay whole points.
+    f.join("near", 2, ticket("near", [["backspin", 10]]), { x: 5, z: 8 }, T0 - 5_000);
+    const near = f.player("near");
+    if (!near) throw new Error("no near");
+    near.stats.sonicPower = 5_000;
+    f.onState("bard", 0, 8, T0);
+    f.onState("near", 5, 8, T0);
+    f.skill("bard", "haste", 0, 0, T0);
+    const { yaw, pitch } = aim(5, 8);
+    expect(f.skill("near", "backspin", yaw, pitch, T0 + 100).result).toBe("used");
+    f.step(T0 + 3_000);
+    const xp = f.report(T0 + 3_001, true)?.skills?.xp ?? [];
+    expect(xp.find((x) => x.uid === "bard" && x.skill === "haste")).toBeUndefined();
   });
 });
 

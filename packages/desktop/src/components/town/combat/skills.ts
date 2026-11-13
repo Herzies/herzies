@@ -52,6 +52,10 @@ export const skills = {
   /** When each of yours is ready again (performance.now() ms): predicted on
    * use, put right by the server. */
   readyAt: new Map<SkillId, number>(),
+  /** How long the wait that ends at readyAt is in all (ms): the hotbar's
+   * shade is the share of it left. A Resurrect's channel, its cooldown, or
+   * the server's word on one already under way. */
+  spanMs: new Map<SkillId, number>(),
   /** Ever-rising, echoed back in a refusal; and which skill each was. */
   seq: 0,
   sent: new Map<number, SkillId>(),
@@ -95,6 +99,18 @@ export const entityAt = new Map<
 
 /** Where entity `id` is drawn now: its entry updated in place (this runs
  * every frame for every herzie). */
+/** The id you were last set under (see setSelfAt). */
+let selfId: number | null = null;
+
+/** Where you stand, under your id now (-1 before the room gives you one).
+ * A new id (the first welcome, a reconnect) drops the old entry, so no
+ * frozen copy of you is left behind to be locked onto as an ally. */
+export function setSelfAt(id: number, x: number, z: number, top: number) {
+  if (selfId !== null && selfId !== id) entityAt.delete(selfId);
+  selfId = id;
+  setEntityAt(id, x, z, top);
+}
+
 export function setEntityAt(id: number, x: number, z: number, top: number) {
   const e = entityAt.get(id);
   if (e) {
@@ -186,7 +202,9 @@ export function skillReady(id: SkillId, now: number): boolean {
  * all it blocks until it lands). Returns the seq to send. */
 export function startCooldown(id: SkillId, now: number): number {
   const def = SKILL_DEFS[id];
-  skills.readyAt.set(id, now + (def.channelMs ?? def.cooldownMs));
+  const span = def.channelMs ?? def.cooldownMs;
+  skills.readyAt.set(id, now + span);
+  skills.spanMs.set(id, span);
   skills.seq++;
   skills.sent.set(skills.seq, id);
   if (skills.sent.size > 16) {
@@ -200,6 +218,12 @@ export function startCooldown(id: SkillId, now: number): number {
 /** The server's word on when `id` is ready (performance.now() ms). */
 export function setReadyAt(id: SkillId, at: number): void {
   skills.readyAt.set(id, at);
+  // A cooldown already under way: its whole length, so the shade shows
+  // what's left of it, not a fresh full bar.
+  skills.spanMs.set(
+    id,
+    Math.max(at - performance.now(), SKILL_DEFS[id].cooldownMs),
+  );
   emitSkills();
 }
 
@@ -264,6 +288,7 @@ export function resetSkills(): void {
   skills.channels.clear();
   skills.queued = null;
   entityAt.clear();
+  selfId = null;
   clearDomes();
   clearSlams();
   clearStuns();

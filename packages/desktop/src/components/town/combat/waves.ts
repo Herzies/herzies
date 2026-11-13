@@ -198,12 +198,16 @@ export class WaveField {
    * bursts there; one that runs out of reach fizzles.
    */
   step(
-    dt: number,
+    frameDt: number,
     dummies: readonly DummyState[],
     onHit: (hit: Hit) => "crit" | "hit",
+    /** Your own waves' pace: held near-still through a crit's hit-stop
+     * (others' fly on, on the server's time). */
+    mineScale = 1,
   ): void {
     for (const w of this.waves) {
       if (!w.alive) continue;
+      const dt = w.mine ? frameDt * mineScale : frameDt;
       w.age += dt;
       if (w.heal) {
         if (stepHeal(w, dt)) {
@@ -220,10 +224,11 @@ export class WaveField {
       // The nearest dummy it passed into this step (a heal bolt passes
       // through them).
       let best: { t: number; point: Vec3; dummy: DummyState } | null = null;
-      for (const d of w.heal ? [] : dummies) {
-        const hit = waveHitsDummy(d, w.prev, w.pos, WAVE.hitRadius);
-        if (hit && (!best || hit.t < best.t)) best = { ...hit, dummy: d };
-      }
+      if (!w.heal)
+        for (const d of dummies) {
+          const hit = waveHitsDummy(d, w.prev, w.pos, WAVE.hitRadius);
+          if (hit && (!best || hit.t < best.t)) best = { ...hit, dummy: d };
+        }
       if (best) {
         w.alive = false;
         const kind = onHit({ wave: w, dummy: best.dummy, point: best.point });
@@ -250,9 +255,9 @@ export class WaveField {
         }
       }
     }
-    age(this.impacts, dt, IMPACT_SECONDS);
-    age(this.wakes, dt, WAKE_SECONDS);
-    age(this.muzzles, dt, MUZZLE_SECONDS);
+    age(this.impacts, frameDt, IMPACT_SECONDS);
+    age(this.wakes, frameDt, WAKE_SECONDS);
+    age(this.muzzles, frameDt, MUZZLE_SECONDS);
   }
 
   /** A shockwave at `at`, from a wave travelling `dir`. */
@@ -342,6 +347,9 @@ function stepHeal(w: Wave, dt: number): boolean {
   return false;
 }
 
+/** steer's scratch: it runs for every homing wave and disc, every step. */
+const steerWant: Vec3 = [0, 0, 0];
+
 export function steer(
   w: { pos: Vec3; dir: Vec3; target: DummyState | null },
   dt: number,
@@ -354,7 +362,10 @@ export function steer(
   const tz = d.z - w.pos[2];
   const len = Math.hypot(tx, ty, tz);
   if (len < 0.5) return;
-  const want: Vec3 = [tx / len, ty / len, tz / len];
+  const want = steerWant;
+  want[0] = tx / len;
+  want[1] = ty / len;
+  want[2] = tz / len;
   const cos = Math.min(
     1,
     want[0] * w.dir[0] + want[1] * w.dir[1] + want[2] * w.dir[2],

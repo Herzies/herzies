@@ -12,6 +12,7 @@ import { useEffect, useSyncExternalStore } from "react";
 import { notify } from "../../../lib/notices";
 import { herzies } from "../../../tauri-bridge";
 import { setChampion } from "../champion";
+import { MOB_DELAY_MS, setDrawDelaySource } from "../combat/drawDelay";
 import { bossFight, handleBossMessage } from "../combat/fight";
 import { combat } from "../combat/state";
 import { settleEat } from "../eat";
@@ -106,6 +107,9 @@ export function townNet(): TownConnection {
       townLive.teleport = { x, z };
     },
   });
+  // Mobs and the boss are drawn on the same clock as everyone else.
+  const clock = net.clock;
+  setDrawDelaySource(() => (clock.synced ? clock.delay : MOB_DELAY_MS));
   return net;
 }
 

@@ -6,8 +6,8 @@
  *
  * Fairness rules every attack here follows (see specs/boss-fight.md): every
  * attack is telegraphed on the floor for at least {@link MIN_WINDUP_MS}
- * before it lands; a hit deals flat damage, so health and Def matter, but
- * never more than {@link MAX_HIT_FRACTION} of a herzie's health; a herzie
+ * before it lands; a hit deals flat damage, in full, so health and Def
+ * matter (a herzie too weak for it can be knocked out by one); a herzie
  * that was just hit, just arrived or just got back up can't be hit again
  * straight away; at most {@link MAX_TELEGRAPHS} shapes are on the floor at
  * once (its minions' count too); and a hit is judged against where the
@@ -45,6 +45,7 @@ import {
   type HitStats,
   hitDamage,
   insideDome,
+  MELEE_CLEAVE,
   MELEE_REACH,
   meleeReaches,
   pushOutOfDomes,
@@ -69,6 +70,7 @@ import {
 } from "@herzies/shared/skills";
 import { defReduction, timingAttackSpeed } from "@herzies/shared/stats";
 import type { TowerMob } from "@herzies/shared/town-net";
+import { DiscHands } from "./hands";
 import { type Mob, type MobJudge, MobPack, SEEN_LAG_MS } from "./mobs";
 
 // ---------------------------------------------------------------------------
@@ -112,20 +114,21 @@ export const TUNING = {
     2: { fromHp: BOSS_PHASE_AT[0], everyMs: 2_700, slams: 3, ringChance: 0.35 },
     3: { fromHp: BOSS_PHASE_AT[1], everyMs: 2_000, slams: 4, ringChance: 0.4 },
   },
-  /** Damage is flat, before Def and buffs, and within the fairness budget
-   * (a level-20 herzie without Stamina loses at most MAX_HIT_FRACTION of
-   * its health to one). Raised for the raid: a slam you stand in should
+  /** Damage is flat, before Def and buffs, and lands in full: a herzie
+   * too weak for the fight can be knocked out. Raised for the raid: a slam you stand in should
    * sting a level-30 herzie, and a ring you're caught by should hurt. The
    * ring's windup lets someone at the far wall reach its middle wherever
-   * the boss has walked to. */
-  slam: { radius: 3, windupMs: 1_600, damage: 58 },
-  ring: { inner: 6.5, windupMs: 4_200, damage: 60 },
+   * the boss has walked to. Raised again (Nov 2026): a raid of five took
+   * 1.6k damage in all, so its Bard had nothing to do. */
+  slam: { radius: 3, windupMs: 1_600, damage: 75 },
+  ring: { inner: 6.5, windupMs: 4_200, damage: 78 },
   /** The tank-buster: aimed at whoever the boss is focused on, and it
    * follows them — it can't be dodged, only taken. Sized so that a herzie
    * who isn't tanking it is badly hurt, and a Percussionist (Def, a
    * Cymbrella, in tune) is comfortable. Without a taunt, only once there's
-   * a party to hold its attention. */
-  buster: { everyMs: 10_000, windupMs: 2_000, damage: 85, minPlayers: 2 },
+   * a party to hold its attention. A damage dealer who takes one is
+   * likely knocked out: holding them is the tank's job. */
+  buster: { everyMs: 10_000, windupMs: 2_000, damage: 300, minPlayers: 2 },
   /** What the boss hates: damage dealt, healing done, and the Cymbrella's
    * clang. Fades by `decayPerSec` a second, so it keeps moving. */
   threat: { perDamage: 1, perHeal: 0.5, cymbrella: 500, decayPerSec: 0.1 },
@@ -134,9 +137,9 @@ export const TUNING = {
    * between two close damage dealers. */
   focusSwitch: { melee: 1.1, ranged: 1.3, meleeReach: 3 },
   /** Each buster leaves its target Rattled: the next one hits harder, per
-   * stack, past the usual one-hit cap (to a ceiling). Fades unhit; a
+   * stack. Fades unhit; a
    * second tank taking a turn is how it's cleared. */
-  rattled: { perStack: 0.25, maxStacks: 4, ms: 20_000, maxHitFraction: 0.6 },
+  rattled: { perStack: 0.25, maxStacks: 4, ms: 20_000 },
   /** From phase 2, now and then it charges whoever keeps furthest off (at
    * least `minDist` away): it faces them for `windupMs` as a lane `width`
    * wide fills on the floor, then barrels down it at `speed`, on through
@@ -150,7 +153,7 @@ export const TUNING = {
     width: 2.6,
     overshoot: 2,
     speed: 14,
-    damage: 60,
+    damage: 78,
   },
   /** From phase 2, a dirge: it winds up for `windupMs` as the whole floor
    * fills, then lands `damage` on everyone, wherever they stand. No dodge,
@@ -186,7 +189,7 @@ export const TUNING = {
     everyMs: 25_000,
     windupMs: 2_500,
     radius: 2.5,
-    damage: 40,
+    damage: 55,
     perMarks: 6,
   },
 } as const;
@@ -199,9 +202,6 @@ export const RING_REACH =
   BOSS_WANDER.radius +
   2;
 
-/** The most of a herzie's health one hit may take, before Def and buffs:
- * a low level can't be one-shot by flat damage. */
-export const MAX_HIT_FRACTION = 0.3;
 export const MIN_WINDUP_MS = TUNING.minWindupMs;
 export const MAX_TELEGRAPHS = TUNING.maxTelegraphs;
 
@@ -389,6 +389,8 @@ export class BossEngine {
   private pending: PendingHit[] = [];
   /** Cast tokens per player: refill one per `castEveryMs`, up to the burst. */
   private casts = new Map<string, { tokens: number; at: number }>();
+  /** A Slinger's discs: a hand throws once its disc is back. */
+  private hands = new DiscHands();
   private invulnUntil = new Map<string, number>();
   private safeUntil = new Map<string, number>();
   private killed = false;
@@ -423,6 +425,13 @@ export class BossEngine {
     endAt: number;
   } | null = null;
   private nextChargeAt: number;
+  /** A charge's lane once it sets off: who its body has run into so far
+   * (each is hit once, as it reaches them, not all at the set-off). */
+  private sweep: {
+    tg: Telegraph;
+    from: { x: number; z: number };
+    struck: Set<string>;
+  } | null = null;
   /** Where it's shifting to round its focus, and when it next shifts. */
   private strideTo: { x: number; z: number } | null = null;
   private nextStrideAt = 0;
@@ -628,8 +637,14 @@ export class BossEngine {
     this.safeUntil.set(uid, now + TUNING.spawnSafeMs);
   }
 
+  /** Whether `uid` is in its spawn breather at `t`. */
+  spawnSafe(uid: string, t: number): boolean {
+    return this.judge.safe(uid, t);
+  }
+
   forget(uid: string): void {
     this.casts.delete(uid);
+    this.hands.forget(uid);
     this.invulnUntil.delete(uid);
     this.safeUntil.delete(uid);
     this.threat.delete(uid);
@@ -675,8 +690,8 @@ export class BossEngine {
   }
 
   /** A buff on `uid`; the same kind doesn't stack (the stronger wins). */
-  buff(uid: string, next: Buff): Buff {
-    const list = applyBuff(this.buffs.get(uid) ?? [], next);
+  buff(uid: string, next: Buff, now?: number): Buff {
+    const list = applyBuff(this.buffs.get(uid) ?? [], next, now);
     this.buffs.set(uid, list);
     return list.find((b) => b.id === next.id) as Buff;
   }
@@ -842,9 +857,10 @@ export class BossEngine {
     const boost = this.damageMult(uid, now);
     for (let i = 0; i < BACKSPIN_DISCS; i++) {
       const dir = aimDirection(yaw + (i - half) * BACKSPIN_SPREAD, pitch);
-      const hit = this.nearest(from, dir, now);
+      // Discs: a disc's reach and flight, as they're drawn.
+      const hit = this.nearest(from, dir, now, DISC_RANGE);
       if (!hit) continue;
-      const at = now + (hit.dist / WAVE_SPEED) * 1000;
+      const at = now + discLandsAfterMs(hit.dist);
       if (hit.mob) {
         this.mobs?.queue(uid, hit.mob, at, stats, mult * boost, "backspin");
       } else {
@@ -942,8 +958,18 @@ export class BossEngine {
       );
       const onMobs = this.mobs?.inReach(from, yaw, now - SEEN_LAG_MS) ?? [];
       if (!onBoss && !onMobs.length) return "miss";
-      for (const m of onMobs)
-        this.mobs?.queue(uid, m, now, stats, melee * boost);
+      // The boss takes the blow in full; its minions (or, without it in
+      // reach, all but the nearest) only the cleave's share.
+      onMobs.forEach((m, i) => {
+        const full = !onBoss && i === 0;
+        this.mobs?.queue(
+          uid,
+          m,
+          now,
+          stats,
+          melee * boost * (full ? 1 : MELEE_CLEAVE),
+        );
+      });
       if (onBoss) {
         const { amount, crit } = hitDamage(stats, this.rand);
         this.pending.push({
@@ -962,6 +988,20 @@ export class BossEngine {
       now,
       disc ? DISC_RANGE : undefined,
     );
+    // Both discs still out: nothing to throw (counted as a miss, never a
+    // strike: the app holds the same pace, so it's lag, not a cheat).
+    if (
+      disc &&
+      !this.hands.take(
+        uid,
+        now,
+        hit?.dist ?? null,
+        // As quick as the app flies it: Haste and Timing both.
+        castSpeed(this.buffs.get(uid) ?? [], now) *
+          (1 + timingAttackSpeed(stats.timing ?? 0)),
+      )
+    )
+      return "miss";
     if (!hit) return "miss";
     const at =
       now +
@@ -1037,6 +1077,7 @@ export class BossEngine {
     if (!stunned) this.walk(now, players);
     else this.lastMoveAt = now;
     this.keepOut(now);
+    this.sweepCharge(now, players, events);
     this.startEnrage(now, players, events);
     if (!stunned) this.startAttacks(now, players, events);
     return events;
@@ -1215,6 +1256,59 @@ export class BossEngine {
     }
   }
 
+  /**
+   * A charge on its way down its lane: whoever its body reaches, in the
+   * lane now and a moment before (the defender's benefit, as for any
+   * telegraph), is hit, once. It ends where the charge does (its run out,
+   * a dome, a stun), after a last look where it stopped.
+   */
+  private sweepCharge(
+    now: number,
+    players: readonly BossPlayer[],
+    events: BossEvent[],
+  ) {
+    const sw = this.sweep;
+    if (!sw) return;
+    const tg = sw.tg;
+    const yaw = tg.yaw ?? 0;
+    const ux = Math.sin(yaw);
+    const uz = Math.cos(yaw);
+    // How far down the lane its middle is.
+    const along = (this.at.x - sw.from.x) * ux + (this.at.z - sw.from.z) * uz;
+    const reach = TUNING.boss.radius + TUNING.playerRadius;
+    const hits: BossHit[] = [];
+    for (const p of players) {
+      if (!p.alive || sw.struck.has(p.uid)) continue;
+      if ((this.safeUntil.get(p.uid) ?? 0) > now) continue;
+      if ((this.invulnUntil.get(p.uid) ?? 0) > now) continue;
+      const pos = p.posAt(now);
+      if (!pos) continue;
+      const theirs = (pos.x - sw.from.x) * ux + (pos.z - sw.from.z) * uz;
+      if (Math.abs(theirs - along) > reach) continue;
+      const inside = [now, now - TUNING.rewindMs].every((t) => {
+        const at = p.posAt(t);
+        return !!at && covers(tg, at.x, at.z);
+      });
+      if (!inside) continue;
+      sw.struck.add(p.uid);
+      const hitTg = { ...tg, hitAt: now };
+      const dome = shelterOf(this.domes, p, now);
+      if (dome) {
+        hits.push(
+          shelteredHit(
+            mitigatedHit(p, hitTg, this.buffs.get(p.uid) ?? []),
+            dome.by,
+          ),
+        );
+        continue;
+      }
+      hits.push(mitigatedHit(p, hitTg, this.buffs.get(p.uid) ?? []));
+      this.invulnUntil.set(p.uid, now + TUNING.invulnMs);
+    }
+    if (hits.length) events.push({ t: "resolve", id: tg.id, hits });
+    if (!this.charging) this.sweep = null;
+  }
+
   /** A charge: lining up (turning to its lane), then down it. */
   private stepCharge(now: number, dt: number) {
     const c = this.charging;
@@ -1299,6 +1393,13 @@ export class BossEngine {
     this.telegraphs = this.telegraphs.filter((t) => t.hitAt > now);
     for (const tg of due) {
       const hits: BossHit[] = [];
+      // Its charge's lane: the boom as it sets off; its body hits each
+      // herzie as it gets to them (see sweepCharge).
+      if (tg.kind === "lane" && tg.mob === undefined && this.charging) {
+        this.sweep = { tg, from: { ...this.charging.from }, struck: new Set() };
+        events.push({ t: "resolve", id: tg.id, hits });
+        continue;
+      }
       for (const p of players) {
         if (!p.alive) continue;
         if (tg.lethal) {
@@ -1344,7 +1445,6 @@ export class BossEngine {
           const r = tg.kind === "buster" ? this.rattledOf(p.uid, tg.hitAt) : 0;
           const would = mitigatedHit(p, tg, this.buffs.get(p.uid) ?? [], {
             mult: 1 + TUNING.rattled.perStack * r,
-            cap: r > 0 ? TUNING.rattled.maxHitFraction : MAX_HIT_FRACTION,
           });
           hits.push(shelteredHit(would, dome.by));
           continue;
@@ -1354,7 +1454,6 @@ export class BossEngine {
           hits.push(
             mitigatedHit(p, tg, this.buffs.get(p.uid) ?? [], {
               mult: 1 + TUNING.rattled.perStack * r,
-              cap: r > 0 ? TUNING.rattled.maxHitFraction : MAX_HIT_FRACTION,
             }),
           );
           const stacks = Math.min(TUNING.rattled.maxStacks, r + 1);
@@ -1707,20 +1806,17 @@ export class BossEngine {
   }
 }
 
-/** A telegraph's hit on `p`: capped at a share of their health, then Def
- * and their damage-cutting buffs, under the overall clamp. Shared with the
- * minions, so a Thornling's hit is judged exactly like the boss's. */
+/** A telegraph's hit on `p`: its damage in full, less Def and their
+ * damage-cutting buffs, under the overall clamp. Shared with the minions,
+ * so a Thornling's hit is judged exactly like the boss's. */
 export function mitigatedHit(
   p: BossPlayer,
   tg: Telegraph,
   buffs: readonly Buff[],
-  /** Rattled: a multiplier on the hit, and the cap it may reach. */
-  opts: { mult?: number; cap?: number } = {},
+  /** Rattled: a multiplier on the hit. */
+  opts: { mult?: number } = {},
 ): BossHit {
-  const raw = Math.min(
-    tg.damage * (opts.mult ?? 1),
-    (opts.cap ?? MAX_HIT_FRACTION) * p.maxHp,
-  );
+  const raw = tg.damage * (opts.mult ?? 1);
   const fromBuffs = buffReductions(buffs, tg.hitAt);
   const reductions = [defReduction(p.def ?? 0), ...fromBuffs];
   const damage = Math.max(1, Math.round(mitigate(raw, reductions)));
