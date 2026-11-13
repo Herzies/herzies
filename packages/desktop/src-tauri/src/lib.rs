@@ -1220,6 +1220,21 @@ fn get_window_pinned() -> bool {
     tray::is_pinned()
 }
 
+/// Float the window above other windows. Unlike "pin window" (stay open on
+/// blur), this keeps it visible on top.
+#[tauri::command]
+fn set_always_on_top(app: tauri::AppHandle, on: bool) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.set_always_on_top(on);
+    }
+    storage::save_always_on_top(on);
+}
+
+#[tauri::command]
+fn get_always_on_top() -> bool {
+    storage::load_always_on_top()
+}
+
 /// The Town's bigger window, on or off (see tray::set_town_expanded).
 #[tauri::command]
 fn set_town_expanded(app: tauri::AppHandle, expanded: bool) {
@@ -3040,6 +3055,8 @@ pub fn run() {
             fetch_ongoing_trades,
             set_window_pinned,
             get_window_pinned,
+            set_always_on_top,
+            get_always_on_top,
             set_town_expanded,
             set_ghost_mode,
             get_ghost_mode,
@@ -3128,6 +3145,9 @@ pub fn run() {
 
             // Restore the "pin window" preference (keep window open on blur)
             tray::set_pinned(storage::load_pin_window());
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_always_on_top(storage::load_always_on_top());
+            }
 
             // Closing the window (red button, Cmd-W) keeps Herzies running in
             // the menu bar, listening; Quit is in the tray menu and Cmd-Q.

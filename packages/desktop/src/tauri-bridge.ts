@@ -512,6 +512,10 @@ export const herzies = {
       return pinned;
     }),
 
+  /** Float the window above all other windows. */
+  setAlwaysOnTop: (on: boolean) => invoke<void>("set_always_on_top", { on }),
+  getAlwaysOnTop: () => invoke<boolean>("get_always_on_top"),
+
   /** "Ghost mode" — pause all listening tracking (no XP, minutes, or now playing). */
   setGhostMode: (enabled: boolean) => {
     updateGhostModeCache(enabled);

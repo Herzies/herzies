@@ -1,6 +1,6 @@
 import { CLASS_DEFS, CLASS_IDS, type HerzieClass } from "@herzies/shared";
 import type { Update } from "@tauri-apps/plugin-updater";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { IS_MAC } from "../lib/platform";
 import { cn } from "../lib/utils";
 import type { AppState } from "../tauri-bridge";
@@ -113,6 +113,13 @@ export function SettingsView({
   const shareListening = state.herzie?.shareListening ?? true;
   const pinned = useWindowPinned();
   const ghostMode = useGhostMode();
+  const [alwaysOnTop, setAlwaysOnTop] = useState(false);
+  useEffect(() => {
+    herzies
+      .getAlwaysOnTop()
+      .then(setAlwaysOnTop)
+      .catch(() => {});
+  }, []);
 
   const shortcuts: { key: string; label: string }[] = [
     { key: "H", label: "Home" },
@@ -236,11 +243,28 @@ export function SettingsView({
 
       {tab === "Controls" && (
         <>
+          <div className="mb-4">
+            <div className="mb-1.5 text-ui text-text-dim">Window</div>
+            <Checkbox
+              checked={alwaysOnTop}
+              onChange={(on) => {
+                setAlwaysOnTop(on);
+                herzies.setAlwaysOnTop(on).catch(() => setAlwaysOnTop(!on));
+              }}
+              className="items-start"
+            >
+              <span className="min-w-0">
+                <span className="block text-ui">Always on top</span>
+                <span className="block text-ui-sm text-text-dim">
+                  Keep Herzies above your other windows.
+                </span>
+              </span>
+            </Checkbox>
+          </div>
           {/* On macOS the window is a regular app window: it never hides
               on its own, so there's nothing to pin. */}
           {!IS_MAC && (
             <div className="mb-4">
-              <div className="mb-1.5 text-ui text-text-dim">Window</div>
               <Checkbox
                 checked={pinned}
                 // setWindowPinned updates the shared cache synchronously, so
