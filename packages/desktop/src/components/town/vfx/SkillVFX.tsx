@@ -1,4 +1,5 @@
 import { BACKSPIN_DISCS, BACKSPIN_SPREAD, SKILL_DEFS } from "@herzies/shared";
+import { DISC_RANGE, DISC_SPEED } from "@herzies/shared/combat";
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo } from "react";
 import * as THREE from "three";
@@ -7,7 +8,6 @@ import { buffOn, entityAt, SKILL_FX_MS, skills } from "../combat/skills";
 /** Rings a Soothing Drones sends out, one after another. */
 const DRONE_RINGS = 3;
 const DRONE_RING_GAP_MS = 220;
-const DISC_SPEED = 22;
 /** In-tune auras, and the notes over each. */
 const MAX_AURAS = 12;
 const NOTES = 3;
@@ -174,7 +174,11 @@ export function SkillVFX() {
   useFrame(() => {
     const now = performance.now();
     // Forget effects that have played out.
-    skills.casts = skills.casts.filter((c) => now - c.at < SKILL_FX_MS);
+    // (In place: no new array a frame.)
+    const casts = skills.casts;
+    let kept = 0;
+    for (const c of casts) if (now - c.at < SKILL_FX_MS) casts[kept++] = c;
+    casts.length = kept;
 
     let ring = 0;
     let disc = 0;
@@ -214,7 +218,8 @@ export function SkillVFX() {
         for (let i = 0; i < BACKSPIN_DISCS && disc < fx.discs.length; i++) {
           const yaw = c.yaw + (i - half) * BACKSPIN_SPREAD;
           const m = fx.discs[disc++];
-          m.visible = travelled < 30;
+          // Out to a disc's reach, where the server stops looking.
+          m.visible = travelled < DISC_RANGE;
           m.position.set(
             c.x + Math.sin(yaw) * (0.6 + travelled),
             1.2,

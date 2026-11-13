@@ -6,10 +6,10 @@ import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { NAME_SHADOW } from "../nameFade";
 import { liveDummies } from "./Dummies";
+import { drawDelayMs } from "./drawDelay";
 import { type DummyState, newTarget } from "./dummy";
 import {
   bossFight,
-  MOB_DELAY_MS,
   type MobView,
   mobAt,
   towerMobs,
@@ -260,7 +260,7 @@ const Mob = memo(function Mob({ id }: { id: number }) {
   useLayoutEffect(() => {
     const m = towerMobs.get(id);
     if (!m) return;
-    const at = mobAt(m, performance.now() - MOB_DELAY_MS);
+    const at = mobAt(m, performance.now() - drawDelayMs());
     const t = newTarget(`mob${id}`, at.x, at.z, at.yaw, id);
     t.size = scaleOf(m);
     target.current = t;
@@ -285,7 +285,7 @@ const Mob = memo(function Mob({ id }: { id: number }) {
     if (!m || !g) return;
     const dt = Math.min(frameDt, 0.1);
     const now = performance.now();
-    const at = mobAt(m, now - MOB_DELAY_MS);
+    const at = mobAt(m, now - drawDelayMs());
     g.position.set(at.x, 0, at.z);
     g.rotation.y = at.yaw;
 

@@ -51,7 +51,10 @@ pub async fn get_now_playing() -> Option<NowPlayingInfo> {
         if let Some(info) = query_app(MUSIC_SCRIPT, "Music").await {
             return Some(info);
         }
-        return query_app(SPOTIFY_SCRIPT, "Spotify").await;
+        if let Some(info) = query_app(SPOTIFY_SCRIPT, "Spotify").await {
+            return Some(info);
+        }
+        return crate::qobuz::get_now_playing().await;
     }
 
     #[cfg(windows)]

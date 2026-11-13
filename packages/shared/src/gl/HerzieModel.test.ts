@@ -1410,3 +1410,339 @@ describe("Fylling's Necktie", () => {
     expect(after.length).toBe(before.length);
   });
 });
+
+const spheresOf = (m: HerzieModel) =>
+  (m as unknown as { model: { spheres: Sphere[] } }).model.spheres;
+
+describe("the cheer, sit and mic drop emotes", () => {
+  const run = (m: HerzieModel, seconds: number, speed = 0) => {
+    const step = 1 / 120;
+    for (let t = 0; t < seconds; t += step) m.update(step, speed);
+  };
+
+  it("cheers: arms thrown up, over by the end", () => {
+    const m = new HerzieModel(LOOK);
+    const arm = spheresOf(m).findIndex((s) => s.part === "arm-l");
+    const meshes = (m as unknown as { meshes: THREE.Mesh[] }).meshes;
+    run(m, 0.2);
+    const rest = meshes[arm].position.y;
+    expect(m.emote("cheer")).toBe(true);
+    run(m, 0.5);
+    expect(meshes[arm].position.y).toBeLessThan(rest - 0.2);
+    run(m, 2);
+    expect(m.emoting).toBe(false);
+  });
+
+  it("cheers with three hops, each above a normal jump's height", () => {
+    const m = new HerzieModel(LOOK);
+    const body = (m as unknown as { creature: THREE.Object3D }).creature;
+    run(m, 0.3);
+    const rest = body.position.y;
+    m.emote("cheer");
+    // Rises through half a jump's height: one per hop (the breathing and the
+    // squash wobble a little too, well below it).
+    const bar = JUMP_HEIGHT * 0.5;
+    let up = false;
+    let hops = 0;
+    let top = 0;
+    const step = 1 / 240;
+    for (let t = 0; t < 1.6; t += step) {
+      m.update(step, 0);
+      const h = body.position.y - rest;
+      top = Math.max(top, h);
+      if (h > bar && !up) hops++;
+      up = h > bar;
+    }
+    expect(hops).toBe(3);
+    expect(top).toBeGreaterThan(JUMP_HEIGHT);
+  });
+
+  it("sits on the floor, and gets up when played again or walking off", () => {
+    const m = new HerzieModel(LOOK);
+    expect(m.emote("sit")).toBe(true);
+    expect(m.floorSit).toBe(true);
+    run(m, 1);
+    expect(m.emote("sit")).toBe(true);
+    expect(m.floorSit).toBe(false);
+    m.emote("sit");
+    run(m, 0.2, WALK_SPEED);
+    expect(m.floorSit).toBe(false);
+  });
+
+  describe("rolling onto its back (no legs)", () => {
+    const small = (stage: number) =>
+      new HerzieModel({ seed: "model-test", stage, equipped: {} });
+    const lay = (m: HerzieModel) =>
+      (m as unknown as { layAngle: number }).layAngle;
+    // The lowest point of the body parts, in creature space (y is down).
+    const lowest = (m: HerzieModel) => {
+      const inner = m as unknown as {
+        meshes: THREE.Mesh[];
+        model: { spheres: Sphere[] };
+      };
+      let low = Number.NEGATIVE_INFINITY;
+      inner.model.spheres.forEach((sp, i) => {
+        if (sp.part !== "body" && sp.part !== "head") return;
+        low = Math.max(low, inner.meshes[i].position.y + sp.radius);
+      });
+      return low;
+    };
+
+    it.each([
+      1, 2,
+    ])("stage %i: rocks forward, rolls back, overshoots and settles", (stage) => {
+      const m = small(stage);
+      run(m, 0.3);
+      m.emote("sit");
+      let max = 0;
+      let min = 0;
+      const step = 1 / 120;
+      for (let t = 0; t < 2.5; t += step) {
+        m.update(step, 0);
+        max = Math.max(max, lay(m));
+        min = Math.min(min, lay(m));
+      }
+      // The wind-up forward, then past where it rests, then settled there.
+      expect(max).toBeGreaterThan(0.05);
+      expect(min).toBeLessThan(-1.55);
+      expect(lay(m)).toBeGreaterThan(-1.56);
+      expect(lay(m)).toBeLessThan(-1.44);
+    });
+
+    it("keeps resting on the ground all the way over", () => {
+      const m = small(2);
+      run(m, 0.3);
+      const rest = lowest(m);
+      m.emote("sit");
+      const step = 1 / 120;
+      for (let t = 0; t < 2; t += step) {
+        m.update(step, 0);
+        // Not sunk into the ground, nor floating off it.
+        expect(Math.abs(lowest(m) - rest)).toBeLessThan(0.03);
+      }
+    });
+
+    it("gets up again, rocking back first", () => {
+      const m = small(1);
+      m.emote("sit");
+      run(m, 2.5);
+      m.emote("sit");
+      expect(m.floorSit).toBe(false);
+      const first = lay(m);
+      m.update(1 / 120, 0);
+      // The first thing it does is rock further back.
+      expect(lay(m)).toBeLessThan(first + 1e-9);
+      run(m, 2.5);
+      expect(Math.abs(lay(m))).toBeLessThan(0.01);
+    });
+
+    it("stands up when it walks off", () => {
+      const m = small(1);
+      m.emote("sit");
+      run(m, 2);
+      run(m, 2.5, WALK_SPEED);
+      expect(Math.abs(lay(m))).toBeLessThan(0.01);
+    });
+
+    it("turns what it wears with it", () => {
+      const m = new HerzieModel({
+        seed: "model-test",
+        stage: 1,
+        equipped: { head: "headphones" },
+      });
+      const inner = m as unknown as {
+        meshes: THREE.Mesh[];
+        model: { spheres: Sphere[] };
+      };
+      const worn = inner.model.spheres
+        .map((sp, i) => ({ sp, i }))
+        .filter(({ sp }) => sp.shape && !sp.dangle);
+      expect(worn.length).toBeGreaterThan(0);
+      const facing = (i: number) =>
+        new THREE.Vector3(0, 1, 0).applyQuaternion(inner.meshes[i].quaternion);
+      const rested = worn.map(({ i }) => facing(i));
+      m.emote("sit");
+      run(m, 2.5);
+      const pitch = lay(m);
+      worn.forEach(({ sp, i }, k) => {
+        const [ax, ay, az] = (sp.shape as { axis: [number, number, number] })
+          .axis;
+        const c = Math.cos(pitch);
+        const s = Math.sin(pitch);
+        const want = new THREE.Vector3(
+          ax,
+          ay * c - az * s,
+          ay * s + az * c,
+        ).normalize();
+        expect(facing(i).distanceTo(want)).toBeLessThan(1e-3);
+        // Not where it stood: an ear cup's face now points up, not out.
+        if (Math.abs(ay) + Math.abs(az) > 1e-6)
+          expect(facing(i).distanceTo(rested[k])).toBeGreaterThan(0.1);
+      });
+      // And back again once it's up.
+      m.emote("sit");
+      run(m, 2.5);
+      worn.forEach(({ i }, k) => {
+        expect(facing(i).distanceTo(rested[k])).toBeLessThan(1e-3);
+      });
+    });
+
+    it("doesn't roll with legs: it sits", () => {
+      const m = new HerzieModel(LOOK);
+      m.emote("sit");
+      run(m, 2);
+      expect(lay(m)).toBe(0);
+    });
+  });
+
+  it("won't sit on a seat that's already taken", () => {
+    const m = new HerzieModel(LOOK);
+    m.sitting = true;
+    expect(m.emote("sit")).toBe(false);
+    expect(m.emote("cheer")).toBe(false);
+  });
+
+  it("drops the mic: held up, then left where it lands", () => {
+    const scene = new THREE.Scene();
+    const m = new HerzieModel(LOOK);
+    scene.add(m.root);
+    expect(m.emote("micdrop")).toBe(true);
+    const inner = (
+      m as unknown as {
+        mic: { group: THREE.Group; drop: { lying: boolean } | null };
+      }
+    ).mic;
+    run(m, 1.2);
+    // Held straight up in the hand, on the herzie.
+    expect(inner.group.visible).toBe(true);
+    expect(inner.drop).toBeNull();
+    // Held level: its length (local y) lies flat in the world.
+    inner.group.updateWorldMatrix(true, false);
+    const along = new THREE.Vector3(0, 1, 0).transformDirection(
+      inner.group.matrixWorld,
+    );
+    expect(Math.abs(along.y)).toBeLessThan(0.05);
+    run(m, 1.0); // past the release
+    expect(inner.drop).not.toBeNull();
+    expect(inner.group.parent).toBe(scene);
+    run(m, 1.0);
+    expect(inner.drop?.lying).toBe(true);
+    const at = inner.group.getWorldPosition(new THREE.Vector3());
+    expect(at.y).toBeGreaterThanOrEqual(-1e-6);
+    expect(at.y).toBeLessThan(0.4);
+    // The herzie walks off: the mic stays.
+    m.root.position.x = 6;
+    run(m, 1);
+    expect(m.emoting).toBe(false);
+    expect(
+      inner.group.getWorldPosition(new THREE.Vector3()).distanceTo(at),
+    ).toBeLessThan(0.05);
+    expect(inner.group.visible).toBe(true);
+    // And fades after a while.
+    run(m, 11);
+    expect(inner.group.visible).toBe(false);
+    expect(inner.drop).toBeNull();
+  });
+
+  it("can drop another mic about 2s after the last lands, replacing it", () => {
+    const scene = new THREE.Scene();
+    const m = new HerzieModel(LOOK);
+    scene.add(m.root);
+    expect(m.emote("micdrop")).toBe(true);
+    run(m, 2.0); // let go at 1.8s: still falling or only just down
+    expect(m.emote("micdrop")).toBe(false);
+    run(m, 1.2); // down, but not 2s since
+    expect(m.emote("micdrop")).toBe(false);
+    run(m, 1.5); // 2s and more since it landed
+    expect(m.emote("micdrop")).toBe(true);
+    // The old mic is put away, the new one held.
+    run(m, 0.5);
+    const mic = (m as unknown as { mic: { drop: unknown } }).mic;
+    expect(mic.drop).toBeNull();
+  });
+
+  it("lands the mic on the ground under it, hills and all", () => {
+    const scene = new THREE.Scene();
+    const m = new HerzieModel(LOOK);
+    scene.add(m.root);
+    // A slope: the floor rises with x, and the hand is out to one side.
+    m.groundAt = (x) => 0.3 + x * 0.2;
+    m.emote("micdrop");
+    run(m, 4.5);
+    const inner = m as unknown as {
+      mic: { group: THREE.Group; drop: { lying: boolean; r: number } | null };
+    };
+    const g = inner.mic.group;
+    expect(inner.mic.drop?.lying).toBe(true);
+    // Nothing of it is below the floor there, and it touches it.
+    const q = g.quaternion;
+    const lowest = Math.min(
+      new THREE.Vector3(0, 0.55, 0).applyQuaternion(q).y - 0.25,
+      new THREE.Vector3(0, -1.35, 0).applyQuaternion(q).y - 0.56,
+    );
+    const r = inner.mic.drop?.r ?? 1;
+    const floor = 0.3 + g.position.x * 0.2;
+    expect(g.position.y + lowest * r).toBeGreaterThanOrEqual(floor - 1e-4);
+    expect(g.position.y + lowest * r).toBeLessThan(floor + 1e-3);
+  });
+
+  it("rests on both the ball and the handle's end, not just the ball", () => {
+    const scene = new THREE.Scene();
+    const m = new HerzieModel(LOOK);
+    scene.add(m.root);
+    m.emote("micdrop");
+    run(m, 4.5);
+    const inner = m as unknown as {
+      mic: { group: THREE.Group; drop: { r: number } | null };
+    };
+    const g = inner.mic.group;
+    const r = inner.mic.drop?.r ?? 1;
+    const bottom = (y: number, radius: number) =>
+      g.position.y +
+      new THREE.Vector3(0, y, 0).applyQuaternion(g.quaternion).y * r -
+      radius * r;
+    // The handle's end and the ball are both on the floor (y = 0).
+    expect(Math.abs(bottom(0.55, 0.25))).toBeLessThan(0.01 * r + 1e-3);
+    expect(Math.abs(bottom(-1.35, 0.56))).toBeLessThan(0.01 * r + 1e-3);
+  });
+
+  it("without arms the mic grows in the world beside it, then drops", () => {
+    const scene = new THREE.Scene();
+    const m = new HerzieModel({ seed: "model-test", stage: 1, equipped: {} });
+    scene.add(m.root);
+    m.emote("micdrop");
+    const inner = m as unknown as {
+      mic: { group: THREE.Group; drop: unknown };
+    };
+    // Never at full size on the first frame: it grows in from a point.
+    m.update(1 / 60, 0);
+    const first = inner.mic.group.scale.x;
+    run(m, 0.05);
+    const early = inner.mic.group.scale.x;
+    expect(first).toBeLessThan(early);
+    // In the world from the start, not on the herzie.
+    expect(inner.mic.group.parent).toBe(scene);
+    const spawned = inner.mic.group.getWorldPosition(new THREE.Vector3());
+    // The herzie walks off while it grows: the mic stays where it appeared.
+    m.root.position.x = 4;
+    run(m, 0.4);
+    const grown = inner.mic.group.scale.x;
+    expect(first).toBeLessThan(grown * 0.1);
+    expect(early).toBeLessThan(grown * 0.5);
+    const hanging = inner.mic.group.getWorldPosition(new THREE.Vector3());
+    expect(hanging.distanceTo(spawned)).toBeLessThan(1e-3);
+    run(m, 2); // let go at 0.9s, down by now
+    const y = inner.mic.group.getWorldPosition(new THREE.Vector3()).y;
+    expect(y).toBeLessThan(0.3);
+    expect(y).toBeLessThan(spawned.y);
+  });
+
+  it("plays on a herzie without arms or legs", () => {
+    const m = new HerzieModel({ seed: "model-test", stage: 1, equipped: {} });
+    for (const id of ["cheer", "micdrop"]) {
+      expect(m.emote(id)).toBe(true);
+      run(m, 3);
+      expect(m.emoting).toBe(false);
+    }
+  });
+});

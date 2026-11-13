@@ -44,6 +44,7 @@ import {
   pushStunLabel,
 } from "./DamageNumbers";
 import { noteDomeHit, removeDome } from "./domes";
+import { drawDelayMs } from "./drawDelay";
 import { setBossResults } from "./results";
 import {
   clearBuff,
@@ -182,11 +183,6 @@ export function mobsLeft(): number {
   return n;
 }
 
-/** How far behind the newest word mobs and the boss are drawn, ms: a bit
- * over two server ticks, so one late packet never leaves them standing.
- * Samples are stamped with the server's time, not when they arrived, so
- * the spacing stays even through network jitter. */
-export const MOB_DELAY_MS = 150;
 /** A gap in samples longer than this was the thing standing still: pin
  * its old spot just before the new one rather than glide across the gap. */
 const QUIET_GAP_MS = TOWN_TICK_MS * 2.5;
@@ -194,13 +190,22 @@ const QUIET_GAP_MS = TOWN_TICK_MS * 2.5;
 /** Where the boss stands at `at` (performance.now() ms; drawn a moment
  * behind the newest word, like a mob), and which way it faces. Its home
  * until the server says otherwise. */
-export function bossNow(at: number = performance.now() - MOB_DELAY_MS): {
+export function bossNow(
+  at: number = performance.now() - drawDelayMs(),
+  /** Written into and returned, for a caller that asks every frame. */
+  out: { x: number; z: number; yaw: number } = { x: 0, z: 0, yaw: 0 },
+): {
   x: number;
   z: number;
   yaw: number;
 } {
   const s = bossFight.bossPath;
-  if (!s.length) return { x: BOSS_STAND.x, z: BOSS_STAND.z, yaw: Math.PI };
+  if (!s.length) {
+    out.x = BOSS_STAND.x;
+    out.z = BOSS_STAND.z;
+    out.yaw = Math.PI;
+    return out;
+  }
   for (let i = s.length - 1; i > 0; i--) {
     const a = s[i - 1];
     const b = s[i];
@@ -208,15 +213,17 @@ export function bossNow(at: number = performance.now() - MOB_DELAY_MS): {
       const k = b.at > a.at ? (at - a.at) / (b.at - a.at) : 1;
       let dy = b.yaw - a.yaw;
       dy = Math.atan2(Math.sin(dy), Math.cos(dy));
-      return {
-        x: a.x + (b.x - a.x) * k,
-        z: a.z + (b.z - a.z) * k,
-        yaw: a.yaw + dy * k,
-      };
+      out.x = a.x + (b.x - a.x) * k;
+      out.z = a.z + (b.z - a.z) * k;
+      out.yaw = a.yaw + dy * k;
+      return out;
     }
   }
-  const last = s[s.length - 1];
-  return at < s[0].at ? s[0] : last;
+  const p = at < s[0].at ? s[0] : s[s.length - 1];
+  out.x = p.x;
+  out.z = p.z;
+  out.yaw = p.yaw;
+  return out;
 }
 
 /** Add a sample to a path, in order, pinning the old spot after a quiet
@@ -347,6 +354,11 @@ function setTower(f: TowerFloor, now: number) {
 let lootSeq = 0;
 /** A crit's hit-stop, ms: the world holds still a beat. */
 const CRIT_STOP_MS = 60;
+/** How long after a blow felt to land here the server's word on it may
+ * take (a round trip, and some): within it, the word adds no second thud. */
+const MELEE_FELT_MS = 500;
+/** The least time between two impact sounds from hits landing at once. */
+const IMPACT_GAP_MS = 45;
 /** When the boss's warning last sounded (performance.now() ms). */
 let lastWarnAt = Number.NEGATIVE_INFINITY;
 
@@ -407,8 +419,12 @@ export function resetBossFight(): void {
     !bossFight.shapes.length &&
     !bossFight.closing &&
     !bossFight.loots.length
-  )
+  ) {
+    // No fight to forget, but a practice's buffs, domes and slams (and
+    // where everyone stood) don't come along to the next island.
+    resetSkills();
     return;
+  }
   bossFight.on = false;
   setRegenFrozen(false);
   bossFight.event = "";
@@ -494,6 +510,20 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       // drawn by entity).
       bossFight.you = m.you;
       if (!m.fight) {
+        // Back into a room with no fight on (it ended while we were away,
+        // or the room started over): what we had is over. The end screen
+        // and any loot stay, as for a fight that closed.
+        if (bossFight.on) {
+          bossFight.on = false;
+          bossFight.shapes = [];
+          bossFight.raid = null;
+          bossFight.tally = null;
+          bossFight.say = null;
+          bossFight.bossPath = [];
+          towerMobs.clear();
+          setRegenFrozen(false);
+          emitHp();
+        }
         emit();
         return;
       }
@@ -595,30 +625,42 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       const mob = m.mob !== undefined ? towerMobs.get(m.mob) : undefined;
       if (mob) {
         mob.hitAt = now;
-        const at = mobAt(mob, now - MOB_DELAY_MS);
+        const at = mobAt(mob, now - drawDelayMs());
         const jitter = () => (Math.random() - 0.5) * 0.6;
         pushDamageNumber(
           [at.x + jitter(), MOB.top + 0.3, at.z + jitter()],
           m.damage,
           m.crit,
+          `mob${m.mob}`,
         );
       } else {
+        combat.bossHitAt = now;
         const jitter = (Math.random() - 0.5) * 1.6;
         const at = bossNow();
         pushDamageNumber(
           [at.x + jitter, BOSS_NUMBER_Y, at.z],
           m.damage,
           m.crit,
+          "boss",
         );
       }
       combat.hitAt = now;
       combat.hitCrit = m.crit;
+      // A blow you already felt land (its thud, its hold, its shake): the
+      // server's word on it is the number, and a crit's sting. One feel
+      // per blow, not two.
+      const felt = now - combat.meleeFeltAt < MELEE_FELT_MS;
+      if (felt && !m.crit) return;
       // Your own hits: a nudge, a jolt on a crit, but never enough to keep
       // the camera rattling through a long fight. A crit holds the world
       // still for a beat.
-      if (combat.trauma < 0.3) shake(m.crit ? 0.22 : 0.05);
+      if (combat.trauma < 0.3) shake(m.crit ? 0.22 : felt ? 0 : 0.05);
       if (m.crit) combat.slowUntil = now + CRIT_STOP_MS;
-      sfxImpact(m.crit ? "crit" : "hit");
+      // One sound for a blow that strikes several at once.
+      if (m.crit || now - combat.impactAt > IMPACT_GAP_MS) {
+        combat.impactAt = now;
+        sfxImpact(m.crit ? "crit" : "hit");
+      }
       return;
     }
     case "down":
@@ -846,6 +888,9 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
         clearBuff(clock.you() ?? -1, id);
       // Nor the dome you put up: nobody may run into one that isn't there.
       if (id === "cymbrella") removeDome(clock.you() ?? -1);
+      // Nor the Rimshot you wound up: it never lands (Combat sees the slam
+      // gone and stops the swing, the root and the drum roll).
+      if (id === "rimshot") cancelSlam(clock.you() ?? -1);
       if (m.reason) notify(REFUSALS[m.reason], { kind: "info" });
       emitSkills();
       return;

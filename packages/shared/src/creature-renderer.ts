@@ -5208,6 +5208,79 @@ function waveDeltas(spheres: Sphere[], phase: number, arm: string): V3[] {
   });
 }
 
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+
+/** The emotes (besides the wave) posed here; the model times them. */
+export type PoseEmote = "cheer" | "micdrop";
+
+/** Where in a mic drop (phase 0..1) the mic leaves the hand. */
+export const MIC_DROP_RELEASE = 0.6;
+
+/** How much an emote takes over its arms at `phase`: up, held, down. */
+export function emoteArmWeight(kind: PoseEmote, phase: number): number {
+  if (kind === "cheer")
+    return ease(0, 0.18, phase) * (1 - ease(0.84, 1, phase));
+  if (kind === "micdrop")
+    return ease(0, 0.2, phase) * (1 - ease(0.74, 0.94, phase));
+  return 0;
+}
+
+/** The arms an emote takes over. */
+function emoteArms(kind: PoseEmote, arm: string): readonly string[] {
+  return kind === "cheer"
+    ? ["arm-l", "arm-r"]
+    : kind === "micdrop"
+      ? [arm]
+      : [];
+}
+
+/**
+ * The arms of a cheer (both thrown up, pumping) or a mic drop (one hand
+ * brought up in front of the face to hold the mic out, then opened wide to
+ * let it go), as deltas from rest. Every other part stays put.
+ */
+function emoteArmDeltas(
+  spheres: Sphere[],
+  kind: PoseEmote,
+  phase: number,
+  micArm: string,
+): V3[] {
+  const rig = buildRig(spheres);
+  const arms = emoteArms(kind, micArm);
+  return spheres.map((sp): V3 => {
+    const shoulder = rig.shoulders[sp.part];
+    if (!shoulder || !arms.includes(sp.part)) return [0, 0, 0];
+    const side = LIMB_SIDE[sp.part] ?? 1;
+    let dir: V3;
+    let reach: number;
+    if (kind === "cheer") {
+      // One pump a hop: out and up at the top of each of the three.
+      const u = Math.min(1, Math.max(0, (phase - 0.1) / 0.8));
+      const pump = 2 * Math.sin(Math.PI * ((u * 3) % 1)) - 1;
+      dir = norm([side * (0.5 + 0.18 * pump), -1, -0.15]);
+      reach = WAVE_REACH + 0.1 * pump;
+    } else {
+      // Straight out to the side, level with the shoulder.
+      const held: V3 = norm([side * 1, -0.1, -0.2]);
+      const open: V3 = norm([side * 1, 0.12, -0.2]);
+      const rest = norm([side * 0.3, 1, 0]);
+      const hold = ease(0.1, 0.26, phase);
+      const letGo = ease(
+        MIC_DROP_RELEASE - 0.02,
+        MIC_DROP_RELEASE + 0.06,
+        phase,
+      );
+      const home = ease(0.7, 0.94, phase);
+      const raised = norm(add(scale(rest, 1 - hold), scale(held, hold)));
+      const flung = norm(add(scale(raised, 1 - letGo), scale(open, letGo)));
+      dir = norm(add(scale(flung, 1 - home), scale(rest, home)));
+      reach = lerp(1, 1.85, hold);
+    }
+    const length = Math.hypot(...sub(sp.center, shoulder));
+    return sub(add(shoulder, scale(dir, length * reach)), sp.center);
+  });
+}
+
 /** A herzie with legs waves standing on one: it leans over the leg
  * opposite the waving arm and lifts the other off the ground. */
 const WAVE_TILT = {
@@ -6500,6 +6573,16 @@ export type CreatureMotion = Pick<
    * isn't waving. `waveArm` is the arm (WAVE_ARM unless given). */
   wavePhase?: number;
   waveArm?: string;
+  /** A timed emote besides the wave (cheer, mic drop), and how far
+   * through it is, 0..1. `emoteArm` is the arm a mic drop holds up. */
+  emoteKind?: PoseEmote;
+  emotePhase?: number;
+  emoteArm?: string;
+  /** Rolled back onto its back (herzies without legs sit like this): the
+   * body's pitch in radians, negative is backward, and how fast it's
+   * turning (see layBack). */
+  layAngle?: number;
+  layVel?: number;
   /** How far its class gear is drawn: 0 slung on its back to 1 in its
    * hands (see DRAW). */
   drawPhase?: number;
@@ -6559,6 +6642,17 @@ export function creaturePoseOffsets(
       ? waveDeltas(base, pose.wavePhase, waveArm)
       : null;
   const wavew = pose.wavePhase !== undefined ? waveWeight(pose.wavePhase) : 0;
+  const emoteKind = pose.emoteKind;
+  const emotePhase = pose.emotePhase ?? 0;
+  const emoteArm = pose.emoteArm ?? WAVE_ARM;
+  const ew =
+    emoteKind !== undefined ? emoteArmWeight(emoteKind, emotePhase) : 0;
+  const emoted =
+    emoteKind !== undefined && ew > 0
+      ? emoteArmDeltas(base, emoteKind, emotePhase, emoteArm)
+      : null;
+  const emotedArms =
+    emoteKind !== undefined ? emoteArms(emoteKind, emoteArm) : [];
   const offsets = spheres.map((s, i): V3 => {
     const b = base[i].center;
     // Scene-anchored parts (a floating pet) keep their own idle bob even
@@ -6595,6 +6689,13 @@ export function creaturePoseOffsets(
       x = x * (1 - wavew) + g[0] * wavew;
       y = y * (1 - wavew) + g[1] * wavew;
       z = z * (1 - wavew) + g[2] * wavew;
+    }
+    // A cheer or a mic drop takes its arms over (a cast, after, wins).
+    if (emoted && emotedArms.includes(s.part)) {
+      const g = emoted[i];
+      x = x * (1 - ew) + g[0] * ew;
+      y = y * (1 - ew) + g[1] * ew;
+      z = z * (1 - ew) + g[2] * ew;
     }
     // A cast takes the casting arm over; the lean adds to whatever else.
     const c = cast?.[i];
@@ -6641,7 +6742,73 @@ export function creaturePoseOffsets(
           (1 - w) * (1 - dw) * (1 - sw),
         )
       : posed;
-  return grounded(spheres, tilted, 1 - sw);
+  const laid =
+    pose.layAngle !== undefined
+      ? layBack(spheres, tilted, pose.layAngle, pose.layVel ?? 0)
+      : tilted;
+  return grounded(spheres, laid, 1 - sw);
+}
+
+/** How far back a herzie without legs rolls to lie on its back (radians),
+ * and how far its arms fall out to the sides there. */
+export const LAY_ANGLE = -1.5;
+const LAY_ARMS = 0.7;
+
+/**
+ * `offsets` with a herzie that has no legs rolled by `angle` about the
+ * middle of its biggest part: negative is back onto its back, a little
+ * positive is the rock forward before it goes. It rolls the way a ball
+ * does — it travels back by the arc it turns through — and is lowered or
+ * raised so the lowest part always rests on the ground it stood on, so it
+ * never sinks or floats mid-roll. Arms fall outward as it goes over, and
+ * swing on past with `vel` (the angle's speed): the follow-through.
+ */
+function layBack(
+  spheres: Sphere[],
+  offsets: V3[],
+  angle: number,
+  vel: number,
+): V3[] {
+  const rig = buildRig(spheres);
+  if (rig.legs || Math.abs(angle) < 1e-4) return offsets;
+  let big = -1;
+  spheres.forEach((sp, i) => {
+    if (isSceneFixed(sp.part)) return;
+    if (big < 0 || sp.radius > spheres[big].radius) big = i;
+  });
+  if (big < 0) return offsets;
+  let at = spheres.map((sp, i) => add(sp.center, offsets[i]));
+  const pivot = at[big];
+  // Arms fall out to the sides (about each shoulder), more the further back
+  // it is, and trail behind the turn.
+  const down = Math.min(1, Math.max(0, -angle / -LAY_ANGLE));
+  at = at.map((p, i) => {
+    const sp = spheres[i];
+    const shoulder = rig.shoulders[sp.part];
+    if (!shoulder || !(sp.part === "arm-l" || sp.part === "arm-r")) return p;
+    const side = LIMB_SIDE[sp.part] ?? 1;
+    const swing = LAY_ARMS * down + 0.08 * vel;
+    return turnAbout(p, shoulder, -side * swing);
+  });
+  const turned = at.map((p, i) =>
+    isSceneFixed(spheres[i].part) ? p : turnAbout(p, pivot, 0, angle),
+  );
+  // The lowest part sits where the lowest part stood.
+  let rest = Number.NEGATIVE_INFINITY;
+  let low = Number.NEGATIVE_INFINITY;
+  spheres.forEach((sp, i) => {
+    if (isSceneFixed(sp.part)) return;
+    rest = Math.max(rest, sp.center[1] + sp.radius);
+    low = Math.max(low, turned[i][1] + sp.radius);
+  });
+  const dy = rest - low;
+  // Rolling back: it goes back by the arc it has turned through.
+  const roll = spheres[big].radius * Math.max(0, -angle);
+  return turned.map((p, i): V3 => {
+    const sp = spheres[i];
+    if (isSceneFixed(sp.part)) return offsets[i];
+    return sub(add(p, [0, dy, roll]), sp.center);
+  });
 }
 
 /**

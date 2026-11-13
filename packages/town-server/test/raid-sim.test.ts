@@ -5,28 +5,33 @@
  * the end. Tuning that makes the raid unwinnable, trivial, or too long fails
  * here rather than in a playtest.
  *
- * The bots' stats are a level-30 herzie's with sensible gear and stat
- * points; their damage lands near what real herzies dealt before the raid
- * (about 250-340 a second each), which BOSS_HP_PER_PLAYER is sized from.
+ * The bots' stats are a level-30 herzie's as a real ticket carries them
+ * (withStatPoints over its class gear: the level's own Sonic Power and
+ * Def, base crit damage, 58 stat points), and they attack as the app lets
+ * them: a Slinger's two discs must be back in hand to throw again
+ * (discCycleMs), a Percussionist stops for its Rimshot's wind-up.
  */
 import { BOSS_WANDER, bossMaxHp } from "@herzies/shared/boss-fight";
 import {
   CAST_INTERVAL_MS,
+  type Contribution,
+  contributionOf,
   DISC_RANGE,
+  discCycleMs,
   HEAL_TARGET_HEIGHT,
   MELEE_REACH,
   WAVE_HAND_HEIGHT,
 } from "@herzies/shared/combat";
-import { attackSpeed, SKILL_DEFS } from "@herzies/shared/skills";
+import { attackSpeed, RIMSHOT, SKILL_DEFS } from "@herzies/shared/skills";
 import { MOB } from "@herzies/shared/tower";
-import { STAT_TUNING } from "@herzies/shared/stats";
+import { timingAttackSpeed } from "@herzies/shared/stats";
 import type { BossClaim, TownTicketPayload } from "@herzies/shared/town-net";
 import { TOWN_WALK_SPEED } from "@herzies/shared/town-net";
-import { maxHp as maxHpOf } from "@herzies/shared/vitals";
 import { armed } from "./arms";
 import { describe, expect, it } from "vitest";
 import { type BossEngine, covers, type Telegraph, TUNING } from "../src/boss";
 import { FightRuntime } from "../src/fight";
+import { type Role, realTicket, statsFor } from "./herzies";
 
 const STEP = 50;
 const REACTION_MS = 450;
@@ -37,7 +42,6 @@ const LEVEL = 30;
  * Workers test runtime has no environment to switch it from). */
 const LOG = false;
 
-type Role = "bard" | "percussionist" | "record_slinger" | "none";
 
 type Bot = {
   uid: string;
@@ -56,57 +60,16 @@ type Bot = {
   tunedTo: boolean;
   /** A Bard: heals with its lute (its heal stance) when someone's hurt. */
   heals: boolean;
+  /** A Slinger's two discs: when each is back in hand. */
+  hands: [number, number];
 };
 
-/** A level-30 herzie's stats for its class: gear (an instrument), 58 stat
- * points, and the level's own Def. */
-function statsFor(role: Role): {
-  st: [number, number, number, number, number, number, number];
-  stamina: number;
-} {
-  const levelDef = LEVEL * 0.6;
-  switch (role) {
-    case "record_slinger":
-      // Discs (SP 8, crit 5, crit dmg 25); points into Sonic Power.
-      return { st: [8 + 50, 0, 5, 25, 8, levelDef, 0], stamina: 8 };
-    case "bard":
-      // Lute (Euphony 12, SP 3); points split Euphony and Sonic Power.
-      return { st: [3 + 28, 0, 0, 0, 0, levelDef, 12 + 30], stamina: 0 };
-    case "percussionist": {
-      // Stick (SP 4) and cymbal (Def 10); points mostly Stamina.
-      const stamina = 40;
-      return {
-        st: [4 + 18, 0, 0, 0, stamina, 10 + levelDef + stamina * STAT_TUNING.defPerStamina, 0],
-        stamina,
-      };
-    }
-    default:
-      return { st: [20, 0, 0, 0, 0, levelDef, 0], stamina: 0 };
-  }
-}
-
-function skillsFor(role: Role): [string, number][] {
-  if (role === "bard")
-    return [["soothing-drones", 5], ["resurrect", 5], ["haste", 5]];
-  if (role === "percussionist") return [["cymbrella", 5], ["taunt", 5]];
-  if (role === "record_slinger") return [["backspin", 5]];
-  return [];
-}
-
 function ticketFor(b: Bot): TownTicketPayload {
-  const { st, stamina } = statsFor(b.role);
-  const max = maxHpOf(LEVEL, stamina);
-  return armed({
-    uid: b.uid,
-    name: b.uid,
-    look: { seed: b.uid, stage: 3 },
-    exp: 9e9,
-    hp: { hp: max, maxHp: max, down: false },
-    st,
-    lv: LEVEL,
-    ...(b.role !== "none" ? { cls: b.role, sk: skillsFor(b.role) } : {}),
-  });
+  return realTicket(b.uid, b.role, LEVEL);
 }
+
+/** Its stats (for the bots' own pacing). */
+const statsOf = (role: Role) => statsFor(role, LEVEL);
 
 function party(
   roles: Role[],
@@ -132,6 +95,7 @@ function party(
       channelUntil: 0,
       tunedTo: false,
       heals: opts.heals ?? true,
+      hands: [0, 0],
     };
   });
 }
@@ -149,6 +113,7 @@ function safeSpot(
       (tg) =>
         tg.kind === "buster" ||
         tg.lethal ||
+        tg.doom ||
         !covers({ ...tg, r: tg.r + MARGIN, inner: Math.max(0, tg.inner - MARGIN) }, px, pz),
     );
   if (clear(x, z)) return null;
@@ -194,6 +159,12 @@ type Result = {
   wander: number;
   /** Its minions that fell. */
   minions: number;
+  /** Health each herzie lost (as shares of its own max, summed), by uid. */
+  lost: Map<string, number>;
+  /** Each herzie's contribution score at the end, by uid. */
+  scores: Map<string, number>;
+  /** Each herzie's damage (boss and minions) a second, by uid. */
+  dps: Map<string, number>;
 };
 
 function raid(bots: Bot[], seed: number, limitMs = 17 * 60_000): Result {
@@ -215,6 +186,8 @@ function raid(bots: Bot[], seed: number, limitMs = 17 * 60_000): Result {
   let minHp = 1;
   let shapes = 0;
   let lanes = 0;
+  const lost = new Map<string, number>();
+  const hpWas = new Map<string, number>();
   let t = T0;
   while (t - STARTS < limitMs && !f.closeWhy) {
     t += STEP;
@@ -252,7 +225,14 @@ function raid(bots: Bot[], seed: number, limitMs = 17 * 60_000): Result {
       });
       const escape = b.dodges && !channeling ? safeSpot(shapesSeen, b.x, b.z) : null;
       const toBoss = Math.hypot(at.x - b.x, at.z - b.z);
-      if (escape) stepToward(b, escape);
+      // The dirge: only a dome stops it, so everyone crowds the
+      // Percussionist, who drops theirs just before it lands.
+      const doom = noticed.find((tg) => tg.doom);
+      const perc = bots.find((o) => o.role === "percussionist" && !f.player(o.uid)?.down);
+      if (doom && perc === b) {
+        // Holds its ground: the dome goes where it stands.
+      } else if (doom && perc && b.dodges && !channeling) stepToward(b, perc, 1.5);
+      else if (escape) stepToward(b, escape);
       else if (!channeling && b.dodges) {
         if (b.role === "bard") {
           // A downed ally to bring back, if the raid has a revive.
@@ -302,11 +282,27 @@ function raid(bots: Bot[], seed: number, limitMs = 17 * 60_000): Result {
       } else if (b.role === "percussionist") {
         f.skill(b.uid, "taunt", 0, 0, t);
         const aimedAtMe = boss.active.some((tg) => tg.target === b.uid || tg.aimedAt === b.uid);
-        if (aimedAtMe) f.skill(b.uid, "cymbrella", 0, 0, t);
+        // Once the dirge is in play the dome is kept for it.
+        if (aimedAtMe && boss.currentPhase < 2) f.skill(b.uid, "cymbrella", 0, 0, t);
+        const dirge = boss.active.find((tg) => tg.doom);
+        if (dirge && dirge.hitAt - t <= 2_000) f.skill(b.uid, "cymbrella", 0, 0, t);
+        // Rimshot whenever the boss (or a pack) is in its ring: it stands
+        // still through the wind-up, no swings meanwhile.
+        const ring = RIMSHOT.radius + TUNING.boss.radius;
+        if (!channeling && toBoss <= ring && f.skill(b.uid, "rimshot", 0, 0, t).result === "used")
+          b.channelUntil = t + (SKILL_DEFS.rimshot.castMs ?? 0);
+      } else if (b.role === "record_slinger" && boss.wireMobs().length >= 2) {
+        f.skill(b.uid, "shuffle", 0, 0, t);
       }
       if (channeling) continue;
-      if (t >= b.nextCast) {
-        b.nextCast = t + CAST_INTERVAL_MS / attackSpeed(f.engine.buffsOf(b.uid, t), t);
+      const quick =
+        attackSpeed(f.engine.buffsOf(b.uid, t), t) * (1 + timingAttackSpeed(statsOf(b.role).timing));
+      // A Slinger throws only with a disc in hand.
+      const hand: 0 | 1 | null =
+        b.role === "record_slinger" ? (b.hands[0] <= b.hands[1] ? 0 : 1) : null;
+      const handFree = hand === null || b.hands[hand] <= t;
+      if (t >= b.nextCast && handFree) {
+        b.nextCast = t + CAST_INTERVAL_MS / quick;
         // A Bard heals with its lute whoever's hurt most (under 75%),
         // else attacks.
         if (b.role === "bard" && b.heals) {
@@ -353,7 +349,12 @@ function raid(bots: Bot[], seed: number, limitMs = 17 * 60_000): Result {
         const dz = aim.z - b.z;
         const yaw = Math.atan2(dx, dz);
         const pitch = Math.atan2(aim.chest - WAVE_HAND_HEIGHT, Math.hypot(dx, dz));
-        if (b.role === "record_slinger") f.skill(b.uid, "backspin", yaw, pitch, t);
+        if (b.role === "record_slinger") {
+          f.skill(b.uid, "backspin", yaw, pitch, t);
+          // Out to what it hits (the body's near side), or its full reach.
+          const surface = Math.hypot(dx, dz) - (aim.chest === MOB.chest ? MOB.radius : TUNING.boss.radius);
+          if (hand !== null) b.hands[hand] = t + discCycleMs(surface <= DISC_RANGE ? Math.max(0, surface) : null, quick);
+        }
         f.cast(b.uid, yaw, pitch, t);
       }
     }
@@ -374,12 +375,29 @@ function raid(bots: Bot[], seed: number, limitMs = 17 * 60_000): Result {
       if (o.msg.t === "down") downs++;
       if (o.msg.t === "revived") revives++;
     }
+    for (const b of bots) {
+      const p = f.player(b.uid);
+      if (!p) continue;
+      const was = hpWas.get(b.uid) ?? p.hp;
+      if (p.hp < was)
+        lost.set(b.uid, (lost.get(b.uid) ?? 0) + (was - p.hp) / p.maxHp);
+      hpWas.set(b.uid, p.hp);
+    }
   }
+  const dealt = (f as unknown as { dealt: Map<string, Contribution> }).dealt;
+  const scores = new Map(
+    [...dealt].map(([uid, c]) => [uid, contributionOf(c)] as const),
+  );
   if (LOG)
     console.log(
     `SIM ${bots.map((b) => b.role[0]).join("")} seed=${seed} -> ${f.closeWhy} in ${min(t - STARTS)} min, maxHp=${f.engine.maxHp}, hp left=${Math.round(f.engine.hp)}, downs=${downs}, revives=${revives}, minions=${minionsDown}, hits=${hitsTaken}, shapes=${shapes}, charges=${lanes}, minHp=${Math.round(minHp * 100)}%`,
   );
+  const secs = Math.max(1, (t - STARTS) / 1000);
+  const dps = new Map(
+    [...dealt].map(([uid, c]) => [uid, (c.damage + (c.adds ?? 0)) / secs] as const),
+  );
   return {
+    dps,
     outcome: f.closeWhy,
     ms: t - STARTS,
     maxHp: f.engine.maxHp,
@@ -387,13 +405,41 @@ function raid(bots: Bot[], seed: number, limitMs = 17 * 60_000): Result {
     revives,
     wander,
     minions: minionsDown,
+    lost,
+    scores,
   };
 }
 
 const TRIO: Role[] = ["bard", "percussionist", "record_slinger"];
+
+/** Each class's mean damage a second over seeds, in parties of `roles`. */
+function classDps(roles: Role[], seeds: number[]): Record<string, number> {
+  const sum: Record<string, number[]> = {};
+  for (const seed of seeds) {
+    const r = raid(party(roles), seed);
+    for (const [uid, d] of r.dps) (sum[uid.split("-")[0]] ??= []).push(d);
+  }
+  return Object.fromEntries(
+    Object.entries(sum).map(([k, v]) => [k, Math.round(v.reduce((a, b) => a + b, 0) / v.length)]),
+  );
+}
 const min = (ms: number) => Math.round((ms / 60_000) * 10) / 10;
 
 describe("the raid, simulated", () => {
+  it("prints each class's damage a second (for tuning)", () => {
+    const trio = classDps(TRIO, [1, 2, 3, 4]);
+    const six = classDps([...TRIO, ...TRIO], [1, 2]);
+    if (LOG)
+      console.log(`CLASS DPS trio ${JSON.stringify(trio)} six ${JSON.stringify(six)}`);
+    // The Slinger is the damage class; the tank lands well short of it but
+    // not far below (about 60%), whatever the size of the raid.
+    for (const t of [trio, six]) {
+      expect(t.record_slinger).toBeGreaterThan(t.percussionist);
+      expect(t.percussionist / t.record_slinger).toBeGreaterThan(0.5);
+      expect(t.percussionist / t.record_slinger).toBeLessThan(0.75);
+    }
+  }, 60_000);
+
   it("a trio of the three classes wins in six to eight minutes, give or take", () => {
     const r = raid(party(TRIO), 1);
     expect(r.outcome, `after ${min(r.ms)} min`).toBe("victory");
@@ -428,10 +474,34 @@ describe("the raid, simulated", () => {
     }
   }, 60_000);
 
-  it("a lone Record Slinger can win, before the enrage ends it", () => {
+  it("a party without a Percussionist takes a beating the trio doesn't", () => {
+    const seeds = [1, 2, 3, 4];
+    const trio = seeds.map((sd) => raid(party(TRIO), sd));
+    const bare = seeds.map((sd) =>
+      raid(party(["bard", "record_slinger", "record_slinger"]), sd),
+    );
+    const downs = (rs: Result[]) => rs.reduce((n, r) => n + r.downs, 0);
+    // Nobody holds the busters: they land on the damage dealers.
+    expect(downs(bare)).toBeGreaterThan(downs(trio));
+    // Nor is there a dome for the dirge: the party is wiped, where the
+    // trio wins.
+    expect(bare.every((r) => r.outcome === "wiped")).toBe(true);
+    expect(trio.every((r) => r.outcome === "victory")).toBe(true);
+  });
+
+  it("the trio's Percussionist ranks with its Record Slinger, not far below", () => {
+    for (const sd of [1, 2]) {
+      const r = raid(party(TRIO), sd);
+      const tank = r.scores.get("percussionist-1") ?? 0;
+      const slinger = r.scores.get("record_slinger-2") ?? 0;
+      expect(tank, `seed ${sd}`).toBeGreaterThan(slinger * 0.75);
+    }
+  });
+
+  it("a lone Record Slinger is wiped by the dirge: nothing to shelter under", () => {
     const r = raid(party(["record_slinger"]), 4);
-    expect(r.outcome, `after ${min(r.ms)} min`).toBe("victory");
-    expect(r.ms).toBeLessThan(15 * 60_000);
+    expect(r.outcome, `after ${min(r.ms)} min`).toBe("wiped");
+    expect(r.ms).toBeLessThan(5 * 60_000);
   });
 
   it("listening to what the boss hates makes the fight shorter", () => {
@@ -443,7 +513,7 @@ describe("the raid, simulated", () => {
 
   it("a slow-to-react party takes hits; Bards bring the fallen back, and healing keeps them up", () => {
     // Without heal bolts, the sluggish go down and are played back up.
-    const bare = [8, 9].map((sd) =>
+    const bare = [8, 9, 12, 13, 14, 15, 16, 17].map((sd) =>
       raid(party(TRIO, { reaction: 1_250, heals: false }), sd),
     );
     expect(bare.some((r) => r.downs > 0)).toBe(true);
@@ -465,10 +535,12 @@ describe("the raid, simulated", () => {
 
   it("the enrage ends a fight that runs too long", () => {
     // Three classless bumpers, dodging but dealing next to nothing.
+    // (They have no dome for the dirge either, which gets them sooner than
+    // the enrage's pulse would: the pulse is the backstop, for a raid that
+    // can answer the rest.)
     const bots = party(["none", "none", "none"]);
     const r = raid(bots, 7, 20 * 60_000);
     expect(r.outcome).toBe("wiped");
-    expect(r.ms).toBeGreaterThan(14 * 60_000);
     expect(r.ms).toBeLessThan(16 * 60_000);
   });
 

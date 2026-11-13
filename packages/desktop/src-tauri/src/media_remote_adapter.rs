@@ -143,6 +143,7 @@ const MUSIC_BUNDLE_ALLOWLIST: &[&str] = &[
     "com.apple.Music",
     "com.spotify.client",
     "com.tidal.desktop",
+    "com.qobuz.desktop",
     "com.apple.podcasts",
     "com.apple.MusicKit.MusicUI",
 ];
@@ -239,6 +240,7 @@ fn source_from_bundle_id(bundle_id: &str) -> String {
         "com.apple.Music" => "Music".into(),
         "com.spotify.client" => "Spotify".into(),
         "com.tidal.desktop" => "Tidal".into(),
+        "com.qobuz.desktop" => "Qobuz".into(),
         other => other.rsplit('.').next().unwrap_or(other).to_string(),
     }
 }
@@ -260,6 +262,16 @@ mod tests {
             is_music_app,
             media_type: None,
         }
+    }
+
+    #[test]
+    fn allowlists_qobuz() {
+        assert!(counts_as_music_listening(&sample(
+            "com.qobuz.desktop",
+            None,
+            None
+        )));
+        assert_eq!(source_from_bundle_id("com.qobuz.desktop"), "Qobuz");
     }
 
     #[test]

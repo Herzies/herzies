@@ -100,6 +100,24 @@ function StanceSlot() {
   );
 }
 
+/** The hotbar's one animation loop: runs while any slot is shown. */
+const cooldownWatchers = new Set<(now: number) => void>();
+let cooldownRaf = 0;
+function cooldownFrame() {
+  const now = performance.now();
+  for (const w of cooldownWatchers) w(now);
+  cooldownRaf = cooldownWatchers.size
+    ? requestAnimationFrame(cooldownFrame)
+    : 0;
+}
+function onCooldownFrame(w: (now: number) => void): () => void {
+  cooldownWatchers.add(w);
+  if (!cooldownRaf) cooldownRaf = requestAnimationFrame(cooldownFrame);
+  return () => {
+    cooldownWatchers.delete(w);
+  };
+}
+
 /**
  * One of your class skills on the hotbar: its letters, greyed from the top
  * while it cools down with the seconds left, and a hint of what it does.
@@ -118,34 +136,29 @@ function SkillSlot({
   useSkills();
   const mine = mySkillAt(n);
   const def = mine ? SKILL_DEFS[mine.id] : null;
-  // The cooldown runs off the frame clock, not renders.
+  // The cooldown runs off the frame clock, not renders: one shared loop
+  // for every slot, writing only what changed.
   const shade = useRef<HTMLSpanElement>(null);
   const secs = useRef<HTMLSpanElement>(null);
   useEffect(() => {
-    let raf = 0;
-    const step = () => {
+    let height = "";
+    return onCooldownFrame((now) => {
       const s = mySkillAt(n);
-      if (shade.current && secs.current) {
-        if (!s) {
-          shade.current.style.height = "0";
-          if (secs.current.textContent) secs.current.textContent = "";
-        } else {
-          const left = Math.max(
-            0,
-            (skills.readyAt.get(s.id) ?? 0) - performance.now(),
-          );
-          const f = Math.min(1, left / SKILL_DEFS[s.id].cooldownMs);
-          shade.current.style.height = `${f * 100}%`;
-          // Text only when it changes (a write replaces the node).
-          const text = f > 0 ? String(Math.ceil(left / 1000)) : "";
-          if (secs.current.textContent !== text)
-            secs.current.textContent = text;
-        }
+      if (!shade.current || !secs.current) return;
+      const left = s ? Math.max(0, (skills.readyAt.get(s.id) ?? 0) - now) : 0;
+      const span = s
+        ? (skills.spanMs.get(s.id) ?? SKILL_DEFS[s.id].cooldownMs)
+        : 1;
+      const f = Math.min(1, left / Math.max(1, span));
+      const h = `${Math.round(f * 1000) / 10}%`;
+      if (h !== height) {
+        height = h;
+        shade.current.style.height = h;
       }
-      raf = requestAnimationFrame(step);
-    };
-    raf = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(raf);
+      // Text only when it changes (a write replaces the node).
+      const text = f > 0 ? String(Math.ceil(left / 1000)) : "";
+      if (secs.current.textContent !== text) secs.current.textContent = text;
+    });
   }, [n]);
   return (
     <Tooltip

@@ -116,6 +116,7 @@ async function rollDrops(
 
 type RaidMessage = {
   lock?: { event: string; uids: string[]; at: number; hpPerPlayer: number };
+  joins?: { event: string; uids: string[]; hpPerPlayer: number };
   revived?: { event: string; batch: string; rows: { uid: string; hp: number }[] };
   out?: { event: string; uids: string[] };
   wipe?: { event: string };
@@ -139,7 +140,7 @@ async function applyRaid(
     out?: string[];
   } | null;
 }> {
-  const event = [msg.lock, msg.out, msg.revived, msg.wipe, msg.boss]
+  const event = [msg.lock, msg.joins, msg.out, msg.revived, msg.wipe, msg.boss]
     .map((m) => m?.event)
     .find((e): e is string => typeof e === "string" && UUID.test(e));
   if (!event) return { failed: false, blocking: false, reply: null };
@@ -160,6 +161,24 @@ async function applyRaid(
           : null,
         p_at: Number.isFinite(msg.lock.at) ? Math.round(msg.lock.at) : null,
       });
+    } catch {
+      failed = true;
+      blocking = true;
+    }
+  }
+  if (msg.joins && msg.joins.event === event) {
+    // After the lock: herzies who walked in late join the roster and the
+    // boss's health grows to fit them (00148). Blocking, like the lock:
+    // their damage must not land before they're on it.
+    try {
+      const joined = await rpc(db, "join_boss_fight", {
+        p_event: event,
+        p_uids: uids(msg.joins.uids),
+        p_per_player: Number.isFinite(msg.joins.hpPerPlayer)
+          ? msg.joins.hpPerPlayer
+          : null,
+      });
+      if (joined) reply.lock = joined;
     } catch {
       failed = true;
       blocking = true;
@@ -221,18 +240,20 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
     boss?: {
       event: string;
       batch: string;
-      /** Damage, the HP each healed or blocked (00111), and minion
-       * damage (00122). */
+      /** Damage, the HP each healed or blocked (00111), minion damage
+       * (00122), and the points a Taunt's hold earned (00142). */
       damage: {
         uid: string;
         damage: number;
         healing?: number;
         blocked?: number;
         adds?: number;
+        taunt?: number;
       }[];
     };
     /** The raid (00122): the lock, revives, who's out, a wipe, the log. */
     lock?: { event: string; uids: string[]; at: number; hpPerPlayer: number };
+    joins?: { event: string; uids: string[]; hpPerPlayer: number };
     revived?: { event: string; batch: string; rows: { uid: string; hp: number }[] };
     out?: { event: string; uids: string[] };
     wipe?: { event: string };
@@ -311,11 +332,15 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
         ? (boss.damage ?? []).slice(0, MAX_BATCH).filter(
           (d) =>
             UUID.test(d.uid) &&
-            [d.damage, d.healing ?? 0, d.blocked ?? 0, d.adds ?? 0].every(
-              Number.isFinite,
-            ) &&
+            [
+              d.damage,
+              d.healing ?? 0,
+              d.blocked ?? 0,
+              d.adds ?? 0,
+              d.taunt ?? 0,
+            ].every(Number.isFinite) &&
             (d.damage > 0 || (d.healing ?? 0) > 0 || (d.blocked ?? 0) > 0 ||
-              (d.adds ?? 0) > 0),
+              (d.adds ?? 0) > 0 || (d.taunt ?? 0) > 0),
         )
         : [];
     // The raid first: the lock (so the boss's health is sized before any

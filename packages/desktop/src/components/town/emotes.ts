@@ -1,6 +1,7 @@
 import {
   EMOTE_COOLDOWN_MS,
   type EmoteId,
+  emoteCooldownMs,
   isEmoteId,
   ownedEmotes,
 } from "@herzies/shared";
@@ -54,20 +55,29 @@ export function useAltHeld(): boolean {
 
 /** The emote waiting for the player's next frame (null: none). */
 export const emoteRequest: { id: EmoteId | null } = { id: null };
-/** When the last one played (performance.now() ms). */
+/** When the last one played, and when each did (performance.now() ms). */
 let lastPlayedAt = Number.NEGATIVE_INFINITY;
+const playedAt = new Map<string, number>();
 
 /** Asks for an emote you own: the player plays it on its next frame. Too
  * soon after the last one (the server drops those) does nothing. */
 export function playEmote(id: string) {
   if (!isEmoteId(id) || !owned.includes(id)) return;
-  if (performance.now() - lastPlayedAt < EMOTE_COOLDOWN_MS) return;
+  const now = performance.now();
+  if (now - lastPlayedAt < EMOTE_COOLDOWN_MS) return;
+  // Its own cooldown, if it has one (a Mic Drop's mic is still on the floor).
+  if (
+    now - (playedAt.get(id) ?? Number.NEGATIVE_INFINITY) <
+    emoteCooldownMs(id)
+  )
+    return;
   emoteRequest.id = id;
 }
 
 /** The player played it: starts the cooldown. */
-export function emotePlayed() {
+export function emotePlayed(id?: string) {
   lastPlayedAt = performance.now();
+  if (id) playedAt.set(id, lastPlayedAt);
 }
 
 /** The Alt bar's slot `n` (1-based): the nth emote owned. */

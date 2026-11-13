@@ -17,6 +17,7 @@ import {
   BOSS_HP_PER_PLAYER,
   BOSS_OUT_GRACE_MS,
   bossMaxHp,
+  classDef,
   IN_TUNE,
   inTuneBonus,
   MINION_FLOOR,
@@ -45,12 +46,14 @@ import {
   type HitStats,
   healTarget,
   meleeDamage,
+  tauntPointsPerSecond,
   WAVE_HAND_HEIGHT,
   WAVE_SPEED,
 } from "@herzies/shared/combat";
 import { CONSUMABLE_COOLDOWN_MS } from "@herzies/shared/medea";
 import {
   buffMultiplier,
+  HASTE_MAX,
   isSkillId,
   SKILL_COOLDOWN_GRACE_MS,
   SKILL_DEFS,
@@ -73,6 +76,7 @@ import type {
   TownLook,
   TownTicketPayload,
 } from "@herzies/shared/town-net";
+import { TOWN_TICKET_TTL_S } from "@herzies/shared/town-net";
 import {
   BossEngine,
   type BossEvent,
@@ -124,6 +128,9 @@ export const UNSEEN_STANDING_MS = 60_000;
 /** A lobby member whose connection dropped just before the start is still
  * on the roster if they were gone less than this. */
 export const LOCK_GRACE_MS = 30_000;
+/** A herzie back within this of leaving is reconnecting, not arriving: it
+ * gets no spawn breather (else reconnecting would be a shield). */
+export const REJOIN_MS = 10_000;
 
 export type Outbound = {
   /** Everyone in the room, or one player. */
@@ -219,6 +226,9 @@ export type FightReport = {
   };
   /** Herzies out of the fight (forfeited, or gone too long). */
   out?: { event: string; uids: string[] };
+  /** Herzies who came in after the lock, with the room's health per herzie
+   * (the database grows the boss's health to fit them). */
+  joins?: { event: string; uids: string[]; hpPerPlayer: number };
   /** Everyone in fell: the boss won. */
   wipe?: { event: string };
   /** How the fight went, once, for tuning. */
@@ -270,6 +280,8 @@ export type BossRow = {
   healing?: number;
   blocked?: number;
   adds?: number;
+  /** Points held with a Taunt (00142). */
+  taunt?: number;
 };
 
 /** Until the end screen's table comes back, the fight reports this often. */
@@ -318,6 +330,17 @@ export class FightRuntime {
   } | null = null;
   /** Players who left since their health was last reported. */
   private leftUnreported = new Set<string>();
+  /** Each herzie's health as this fight tells it: a count of the changes
+   * it made (hits, heals, knock-outs, revives), how many of them the
+   * database has taken, and when it last took one (server ms). A ticket
+   * issued after every change was taken is the truth; one issued before is
+   * behind the fight, and loses to it (see join). */
+  private vitals = new Map<
+    string,
+    { seq: number; acked: number; ackedAt: number }
+  >();
+  /** The changes each report carried, by herzie, until it's taken. */
+  private vitalsSent = new WeakMap<FightReport, Map<string, number>>();
   /** Players whose knock-out the database has been told about. They are
    * left out of every later report: a herzie that has since respawned in
    * town mustn't be knocked out again by a stale 0 (the database only
@@ -375,6 +398,8 @@ export class FightRuntime {
   private readonly minionFloor: number | null;
   /** Resurrects being played, by their Bard. */
   private channels = new Map<string, Channel>();
+  /** The last step a Taunt's hold was paid up to (see creditTaunt). */
+  private tauntAt: number | null = null;
   /** Rimshots winding up: where each Percussionist stands (held there),
    * when it lands, and at what level. */
   private slams = new Map<
@@ -391,6 +416,8 @@ export class FightRuntime {
   private revivedQueue: { uid: string; hp: number }[] = [];
   private revivedInflight: FightReport["revived"] | null = null;
   private outQueue = new Set<string>();
+  /** Who came in after the lock and the database hasn't been told. */
+  private joinQueue = new Set<string>();
   private wipePending = false;
   private logPending: FightLog | null = null;
   private raidDirty = false;
@@ -510,23 +537,32 @@ export class FightRuntime {
     return !!this.boss && this.stage === "fight" && this.open;
   }
 
-  /** Whether `uid` may come in now: anyone on their feet in the lobby;
-   * after the lock, only the roster (a downed member too, to wait for a
-   * Bard); nobody once it's over. */
+  /** A lobby past its start that hasn't locked yet (an empty room stops
+   * ticking): the room steps it before letting anyone in. */
+  lockDue(now: number): boolean {
+    // Only a lobby that had someone in it: a room rebuilt empty (after an
+    // eviction) mustn't lock nobody in and end the event.
+    return (
+      !!this.boss &&
+      this.stage === "lobby" &&
+      now >= this.startsAt &&
+      this.players.size > 0
+    );
+  }
+
+  /** Whether `uid` may come in now: anyone on their feet, at any time
+   * until it's over (one who arrives after the lock joins the roster, see
+   * {@link join}); a member of the roster comes back down too, to wait for
+   * a Bard. Not one who's out for good. */
   mayJoin(uid: string, down: boolean, now: number): JoinVerdict {
     if (!this.open || this.stage === "over") return "closed";
-    if (this.stage === "lobby") {
-      // Past its start, a lobby that hasn't locked yet (an empty room
-      // waiting on its next tick, or one just rebuilt) is shut: the
-      // roster is whoever was already inside.
-      if (now >= this.startsAt) return "locked";
-      return down ? "down" : "ok";
-    }
-    if (!this.roster) return down ? "down" : "ok";
+    if (this.stage === "lobby" || !this.roster) return down ? "down" : "ok";
+    const state = this.roster.get(uid);
+    if (state === undefined) return down ? "down" : "ok";
     const since = this.absentSince.get(uid);
     if (since !== undefined && now - since >= BOSS_OUT_GRACE_MS)
       return "locked";
-    return this.roster.get(uid) === "in" ? "ok" : "locked";
+    return state === "in" ? "ok" : "locked";
   }
 
   /** Whether `uid` is fighting (on the roster and not out; anyone, without
@@ -535,8 +571,26 @@ export class FightRuntime {
     return !this.roster || this.roster.get(uid) === "in";
   }
 
-  /** Someone arrives. Health is the lower of what their ticket says and what
-   * this fight remembers, so a quick leave and rejoin heals nothing. */
+  /** This fight changed `uid`'s health or knocked it out (or up). */
+  private touch(uid: string): void {
+    const v = this.vitals.get(uid);
+    if (v) v.seq++;
+    else this.vitals.set(uid, { seq: 1, acked: 0, ackedAt: 0 });
+  }
+
+  /** Whether a ticket issued at `issued` (server ms) knows everything this
+   * fight did to `uid`'s health: the database took every change before the
+   * ticket was signed. */
+  private ticketCurrent(uid: string, issued: number): boolean {
+    const v = this.vitals.get(uid);
+    return !v || (v.acked >= v.seq && issued >= v.ackedAt);
+  }
+
+  /** Someone arrives. A herzie this fight knows comes back as the fight
+   * left it, unless its ticket is newer than everything the fight told the
+   * database (it may have been revived or eaten in Town since): so no
+   * reconnect, with an old ticket or a fresh one, heals or stands anyone
+   * up. */
   join(
     uid: string,
     id: number,
@@ -546,21 +600,22 @@ export class FightRuntime {
   ): FightPlayer {
     const maxHp = ticket.hp?.maxHp ?? 105;
     const fromTicket = ticket.hp?.down ? 0 : (ticket.hp?.hp ?? maxHp);
-    // The ticket is the database's word (the room insists it's fresh). The
-    // one time it can be behind is a leave whose report hasn't landed yet:
-    // then what this fight remembers is truer, and rejoining mustn't heal.
     const known = this.players.get(uid);
-    const behind = !!known && this.leftUnreported.has(uid);
-    // A revive the database hasn't taken yet: the fight's word stands.
-    const revivedHere =
-      !!known && !known.down && this.revivedQueue.some((r) => r.uid === uid);
-    const hp = revivedHere
-      ? known.hp
-      : behind
-        ? Math.min(known.hp, fromTicket)
-        : fromTicket;
-    const down =
-      !revivedHere && (ticket.hp?.down || hp <= 0 || (behind && known.down));
+    const issued = (ticket.exp - TOWN_TICKET_TTL_S) * 1000;
+    // A revive the database hasn't taken yet is the fight's word too.
+    const reviving =
+      this.revivedQueue.some((r) => r.uid === uid) ||
+      !!this.revivedInflight?.rows.some((r) => r.uid === uid);
+    const fightsWord =
+      !!known && (reviving || !this.ticketCurrent(uid, issued));
+    const hp = fightsWord ? known.hp : fromTicket;
+    const down = fightsWord ? known.down : !!ticket.hp?.down || hp <= 0;
+    // Back within moments of leaving (a reconnect, a second copy of the
+    // app): no fresh breather, or reconnecting would be a shield.
+    const since = this.absentSince.get(uid);
+    const rejoin =
+      !!known &&
+      (known.present || (since !== undefined && now - since < REJOIN_MS));
     if (!down) this.downAcked.delete(uid);
     const p: FightPlayer = {
       uid,
@@ -580,9 +635,13 @@ export class FightRuntime {
       ready: known?.ready ?? new Map(),
     };
     this.players.set(uid, p);
+    // A first arrival: what the fight now holds is its word, until the
+    // database has it. A rejoin either keeps the fight's record as it was
+    // or takes the database's (a current ticket): nothing new to confirm.
+    if (!known) this.touch(uid);
     this.absentSince.delete(uid);
     this.history.record(uid, now, at.x, at.z);
-    this.engine.noteSpawn(uid, now);
+    if (!rejoin) this.engine.noteSpawn(uid, now);
     // The Tower's room outlives a visit: the level is today's, not the
     // one it was made with.
     if (this.tower && ticket.lv) this.tower.level = Math.max(1, ticket.lv);
@@ -590,18 +649,64 @@ export class FightRuntime {
     return p;
   }
 
-  /** Where a downed roster member who left comes back: where it fell. */
-  rejoinAt(uid: string): { x: number; z: number } | null {
+  /** A herzie who walks in after the lock joins the roster, and the boss's
+   * health grows to fit the bigger raid (as the database's does). */
+  lateJoin(uid: string): void {
+    const boss = this.boss;
     const p = this.players.get(uid);
-    if (!p || p.present || !p.down || !this.fighting(uid)) return null;
-    return p.leftAt ?? null;
+    if (!boss || !p || this.stage !== "fight" || !this.roster) return;
+    if (this.roster.has(uid) || p.down) return;
+    const before = this.rosterIn();
+    this.roster.set(uid, "in");
+    this.joinQueue.add(uid);
+    const after = this.rosterIn();
+    const grown =
+      bossMaxHp(after, this.hpPerPlayer) - bossMaxHp(before, this.hpPerPlayer);
+    if (grown > 0) {
+      boss.setHealth(boss.hp + grown, boss.maxHp + grown);
+      this.bossDirty = true;
+    }
+    this.reportNow = true;
+    this.raidDirty = true;
+  }
+
+  /** How many are in the fight (not out for good). */
+  private rosterIn(): number {
+    let n = 0;
+    for (const s of this.roster?.values() ?? []) if (s === "in") n++;
+    return n;
+  }
+
+  /** Where a roster member who left comes back, if the fight says: a
+   * downed one where it fell; one back within {@link REJOIN_MS} (a
+   * reconnect) no farther than `slack` from where it was, so reconnecting
+   * can't carry anyone across the arena. Null: wherever it says. */
+  rejoinAt(
+    uid: string,
+    want: { x: number; z: number },
+    now: number,
+    slack = 3,
+  ): { x: number; z: number } | null {
+    const p = this.players.get(uid);
+    if (!p || p.present || !p.leftAt || !this.fighting(uid)) return null;
+    if (p.down) return p.leftAt;
+    const since = this.absentSince.get(uid);
+    if (since === undefined || now - since >= REJOIN_MS) return null;
+    const d = Math.hypot(want.x - p.leftAt.x, want.z - p.leftAt.z);
+    return d > slack ? p.leftAt : null;
   }
 
   /** Someone left (or lost their connection). Their health stays on record;
    * a roster member who stays gone too long is out. */
-  leave(uid: string, now: number = Date.now()): void {
+  leave(uid: string, now: number = Date.now()): Outbound[] {
     const p = this.players.get(uid);
-    if (!p) return;
+    if (!p) return [];
+    // What it wore goes with it: say so, or a copy that takes its place
+    // (same id) would show buffs the fight no longer counts.
+    // Out of tune first, so its time in tune is logged.
+    const out = this.setInTune(uid, false, now);
+    for (const b of this.engine.buffsOf(uid, now))
+      out.push({ to: "all", msg: { t: "buffOff", id: p.id, buff: b.id } });
     p.present = false;
     p.leftAt = this.history.at(uid, now) ?? p.leftAt;
     this.history.forget(uid);
@@ -615,6 +720,7 @@ export class FightRuntime {
     this.absentSince.set(uid, now);
     this.reportNow = true;
     this.raidDirty = true;
+    return out;
   }
 
   /** A player's ticket was renewed: stats, class (a class chosen mid-fight
@@ -680,6 +786,8 @@ export class FightRuntime {
       return "ignored";
     const pos = this.history.at(uid, now);
     if (!pos) return "ignored";
+    // Winding up a Rimshot: its hands are busy (the app swings none).
+    if (this.slams.has(uid)) return "ignored";
     if (this.healers.has(uid) && p.attack === "wave")
       return this.healBolt(p, pos, yaw, pitch, now);
     return this.engine.cast(
@@ -762,6 +870,7 @@ export class FightRuntime {
       );
       if (!(heal > 0)) continue;
       o.hp += heal;
+      this.touch(o.uid);
       this.healed.set(o.uid, (this.healed.get(o.uid) ?? 0) + heal);
       out.push({
         to: "all",
@@ -843,7 +952,7 @@ export class FightRuntime {
       let restored = 0;
       const mult = healMult(p.stats.euphony) * this.healBoost(uid, now);
       for (const o of this.players.values()) {
-        if (!o.present || o.down) continue;
+        if (!o.present || o.down || !this.fighting(o.uid)) continue;
         const at = this.history.at(o.uid, now);
         if (!at) continue;
         if (Math.hypot(at.x - pos.x, at.z - pos.z) > (def.radius ?? 0))
@@ -851,6 +960,7 @@ export class FightRuntime {
         const heal = Math.min(o.maxHp - o.hp, value * mult * o.maxHp);
         if (heal <= 0) continue;
         o.hp += heal;
+        this.touch(o.uid);
         restored += heal;
         this.healed.set(o.uid, (this.healed.get(o.uid) ?? 0) + heal);
         out.push({
@@ -871,11 +981,15 @@ export class FightRuntime {
       this.engine.addThreat(uid, TUNING.threat.cymbrella);
       // On its caster for as long, for the HUD: an older app reads it as
       // its overhead cymbal, "100% less damage".
-      const buff = this.engine.buff(uid, {
-        id: "cymbrella",
-        value: 1,
-        until: now + ms,
-      });
+      const buff = this.engine.buff(
+        uid,
+        {
+          id: "cymbrella",
+          value: 1,
+          until: now + ms,
+        },
+        now,
+      );
       out.push(this.buffMsg(p.id, buff));
     } else if (skillId === "haste") {
       // Everyone standing near (the Bard too), for its length. Euphony
@@ -883,17 +997,21 @@ export class FightRuntime {
       const strength = Math.min(HASTE_MAX, value * buffMult(p.stats.euphony));
       const until = now + (def.durationMs ?? 0);
       for (const o of this.players.values()) {
-        if (!o.present || o.down) continue;
+        if (!o.present || o.down || !this.fighting(o.uid)) continue;
         const at = this.history.at(o.uid, now);
         if (!at) continue;
         if (Math.hypot(at.x - pos.x, at.z - pos.z) > (def.radius ?? 0))
           continue;
-        const buff = this.engine.buff(o.uid, {
-          id: "haste",
-          value: strength,
-          until,
-          by: uid,
-        });
+        const buff = this.engine.buff(
+          o.uid,
+          {
+            id: "haste",
+            value: strength,
+            until,
+            by: uid,
+          },
+          now,
+        );
         out.push(this.buffMsg(o.id, buff));
       }
     } else if (skillId === "backspin") {
@@ -910,17 +1028,21 @@ export class FightRuntime {
     } else if (skillId === "shuffle") {
       // Its discs bounce on for a while: the casts do the work (and earn
       // it its XP, per bounce's damage).
-      const buff = this.engine.buff(uid, {
-        id: "shuffle",
-        value: shuffleBounces(level),
-        until: now + (def.durationMs ?? 0),
-      });
+      const buff = this.engine.buff(
+        uid,
+        {
+          id: "shuffle",
+          value: shuffleBounces(level),
+          until: now + (def.durationMs ?? 0),
+        },
+        now,
+      );
       out.push(this.buffMsg(p.id, buff));
     } else if (skillId === "taunt" && boss) {
       const until = now + (def.durationMs ?? 0);
       const before = boss.setTaunt(uid, until, now);
       if (before) out.push(...this.untaunt(before));
-      const buff = boss.buff(uid, { id: "taunt", value: 1, until });
+      const buff = boss.buff(uid, { id: "taunt", value: 1, until }, now);
       // Top of its list when the taunt runs out, so it doesn't snap back
       // at once to whoever it hated before.
       boss.tauntThreat(uid);
@@ -1069,7 +1191,7 @@ export class FightRuntime {
    */
   tryEat(uid: string, now: number): EatRefusal | null {
     const p = this.players.get(uid);
-    if (!p?.present || !this.open) return "not-here";
+    if (!p?.present || !this.open || !this.fighting(uid)) return "not-here";
     if (p.down) return "down";
     if (p.hp >= p.maxHp) return "full";
     const since = now - (this.ate.get(uid) ?? Number.NEGATIVE_INFINITY);
@@ -1084,10 +1206,11 @@ export class FightRuntime {
    * knocked out or left while it was being used up. */
   eat(uid: string, amount: number): Outbound[] {
     const p = this.players.get(uid);
-    if (!p?.present || p.down || amount <= 0) return [];
+    if (!p?.present || p.down || amount <= 0 || !this.fighting(uid)) return [];
     const heal = Math.min(p.maxHp - p.hp, amount);
     if (heal <= 0) return [];
     p.hp += heal;
+    this.touch(uid);
     this.healed.set(uid, (this.healed.get(uid) ?? 0) + heal);
     this.reportNow = true;
     return [
@@ -1238,7 +1361,13 @@ export class FightRuntime {
         uid: p.uid,
         alive: !p.down,
         maxHp: p.maxHp,
-        def: p.stats.def,
+        // A Percussionist is the tank wherever it fights: its Def counts
+        // more in the Tower too (classDef).
+        def: classDef(p.cls, p.stats.def),
+        // When their Cymbrella is next ready (the dirge waits for one).
+        ...(p.skills.has("cymbrella")
+          ? { domeAt: p.ready.get("cymbrella") ?? 0 }
+          : {}),
         posAt: (t) => this.history.at(p.uid, t),
       });
     }
@@ -1247,6 +1376,7 @@ export class FightRuntime {
       // update.
       this.stepSlams(now, out);
       for (const ev of this.engine.update(now, alive)) this.apply(ev, out, now);
+      if (boss) this.creditTaunt(boss, now);
       this.landBolts(now, out);
       const tower = this.tower;
       if (tower) {
@@ -1363,19 +1493,30 @@ export class FightRuntime {
   }
 
   /** The lobby locks: whoever stands in the room is in, the boss wakes at a
-   * health sized to them, and the door shuts. Nobody here: no fight. */
+   * health sized to them. The door stays open ({@link lateJoin}). Nobody
+   * here: it waits for whoever comes first. */
   private lock(now: number, out: Outbound[]) {
     const boss = this.boss as BossEngine;
+    // Who was in at the start: a lock that runs late (an empty room that
+    // stopped ticking) still judges the grace from then.
+    const at = Math.min(now, this.startsAt);
     const uids = [...this.players.values()]
       .filter(
         (p) =>
           !p.down &&
           (p.present ||
-            now - (this.absentSince.get(p.uid) ?? -Infinity) < LOCK_GRACE_MS),
+            at - (this.absentSince.get(p.uid) ?? -Infinity) < LOCK_GRACE_MS),
       )
       .map((p) => p.uid);
+    // Nobody here: the cave stays open and waits for whoever comes first.
+    if (!uids.length) return;
     this.lockedAt = now;
     this.roster = new Map(uids.map((uid) => [uid, "in" as const]));
+    // Locked late: those away get the grace to reconnect from now, as
+    // after a restart, not from when the room went quiet.
+    if (now > this.startsAt)
+      for (const uid of uids)
+        if (this.absentSince.has(uid)) this.absentSince.set(uid, now);
     this.lockReq = {
       event: this.eventId,
       uids,
@@ -1384,10 +1525,6 @@ export class FightRuntime {
     };
     this.reportNow = true;
     this.raidDirty = true;
-    if (!uids.length) {
-      this.close("escaped", now, now + ESCAPE_LINGER_MS, out);
-      return;
-    }
     this.stage = "fight";
     const maxHp = bossMaxHp(uids.length, this.hpPerPlayer);
     boss.wake(now, maxHp, maxHp);
@@ -1462,6 +1599,7 @@ export class FightRuntime {
       const hp = Math.max(1, Math.round(p.maxHp * VICTORY_RISE_SHARE));
       p.down = false;
       p.hp = hp;
+      this.touch(p.uid);
       this.downAcked.delete(p.uid);
       this.healed.delete(p.uid);
       this.revivedQueue = [
@@ -1496,6 +1634,7 @@ export class FightRuntime {
     );
     target.down = false;
     target.hp = hp;
+    this.touch(target.uid);
     this.downAcked.delete(target.uid);
     this.healed.delete(target.uid);
     this.engine.noteSpawn(target.uid, now);
@@ -1559,12 +1698,16 @@ export class FightRuntime {
     t.onSince = now;
     const bonus = inTuneBonus(p.cls);
     if (!bonus) return [];
-    const buff = this.engine.buff(uid, {
-      id: "in_tune",
-      kind: bonus.kind,
-      value: bonus.value,
-      until: now + OPEN_ENDED_MS,
-    });
+    const buff = this.engine.buff(
+      uid,
+      {
+        id: "in_tune",
+        kind: bonus.kind,
+        value: bonus.value,
+        until: now + OPEN_ENDED_MS,
+      },
+      now,
+    );
     return [this.buffMsg(p.id, buff)];
   }
 
@@ -1714,6 +1857,7 @@ export class FightRuntime {
         continue;
       }
       p.hp = Math.max(0, p.hp - h.damage);
+      this.touch(p.uid);
       hit.push(p.id);
       // A taunt pays for the hits it drew.
       if (h.aimed && taunter === p.uid && p.skills.has("taunt"))
@@ -1768,6 +1912,7 @@ export class FightRuntime {
           to: "all",
           msg: { t: "telegraph", ...this.wire(ev.telegraph) },
         });
+        if (ev.telegraph.doom) this.speak("doom", now, out, true);
         break;
       case "resolve": {
         const sheltered: number[] = [];
@@ -1793,7 +1938,8 @@ export class FightRuntime {
         break;
       }
       case "hit": {
-        this.bossDirty = true;
+        // A minion's hit leaves the boss's health as it was.
+        if (ev.mob === undefined) this.bossDirty = true;
         this.credit(
           ev.uid,
           ev.mob !== undefined && !this.tower ? "adds" : "damage",
@@ -1802,8 +1948,9 @@ export class FightRuntime {
         if (ev.skill && isSkillId(ev.skill))
           this.earn(ev.uid, ev.skill, skillXpFor(ev.skill, ev.damage));
         // A hasted hit: the Bard who hasted them earns for the share of
-        // their damage the haste added.
-        {
+        // their damage the haste added. Only casts are quickened (a
+        // Shuffle's bounces are a cast's), not a skill's own hits.
+        if (!ev.skill || ev.skill === "shuffle") {
           const haste = this.engine
             .buffsOf(ev.uid, now)
             .find((b) => b.id === "haste");
@@ -1901,9 +2048,11 @@ export class FightRuntime {
           const healing = tenths(c.healing);
           const blocked = tenths(c.blocked);
           const adds = Math.round(c.adds ?? 0);
+          const taunt = Math.round(c.taunt ?? 0);
           if (healing > 0) row.healing = healing;
           if (blocked > 0) row.blocked = blocked;
           if (adds > 0) row.adds = adds;
+          if (taunt > 0) row.taunt = taunt;
           return row;
         }),
       };
@@ -1963,7 +2112,8 @@ export class FightRuntime {
       this.nextReportAt = Math.min(this.nextReportAt, now + RESULTS_RETRY_MS);
     }
     const out = this.outQueue.size && !dev ? [...this.outQueue] : [];
-    return {
+    const joins = this.joinQueue.size && !dev ? [...this.joinQueue] : [];
+    const report: FightReport = {
       results,
       hp: [...this.players.values()]
         .filter((p) => p.present || this.leftUnreported.has(p.uid))
@@ -1983,11 +2133,26 @@ export class FightRuntime {
       skills: this.xpInflight && !dev ? this.xpInflight : undefined,
       tower: this.towerInflight ?? undefined,
       ...(this.lockReq && !dev ? { lock: this.lockReq } : {}),
+      ...(joins.length
+        ? {
+            joins: {
+              event: this.eventId,
+              uids: joins,
+              hpPerPlayer: this.hpPerPlayer,
+            },
+          }
+        : {}),
       ...(this.revivedInflight ? { revived: this.revivedInflight } : {}),
       ...(out.length ? { out: { event: this.eventId, uids: out } } : {}),
       ...(this.wipePending ? { wipe: { event: this.eventId } } : {}),
       ...(this.logPending && results ? { log: this.logPending } : {}),
     };
+    // What this report tells of each herzie's health, as of which change.
+    const sent = new Map<string, number>();
+    for (const r of report.hp)
+      sent.set(r.uid, this.vitals.get(r.uid)?.seq ?? 0);
+    this.vitalsSent.set(report, sent);
+    return report;
   }
 
   /** `town-vitals` took the report: what it carried needn't be re-sent. */
@@ -2000,9 +2165,24 @@ export class FightRuntime {
     // Revives first: a revived herzie's 0 must not count as "told".
     if (report.revived && this.revivedInflight?.batch === report.revived.batch)
       this.revivedInflight = null;
+    const sent = this.vitalsSent.get(report);
     for (const r of report.hp) {
+      const v = this.vitals.get(r.uid);
+      const seq = sent?.get(r.uid);
+      if (v && seq !== undefined && seq > v.acked) {
+        v.acked = seq;
+        v.ackedAt = now;
+      }
       if (!this.players.get(r.uid)?.present) this.leftUnreported.delete(r.uid);
-      if (r.hp <= 0 && this.players.get(r.uid)?.down) this.downAcked.add(r.uid);
+      if (r.hp <= 0 && this.players.get(r.uid)?.down) {
+        this.downAcked.add(r.uid);
+        // Knocked out and told: left out of later reports, so this is the
+        // last word the database takes, and the fight's record with it.
+        if (v) {
+          v.acked = v.seq;
+          v.ackedAt = now;
+        }
+      }
       // The database may now rise as far as that heal: it's spent.
       if (r.heal) {
         const left = (this.healed.get(r.uid) ?? 0) - r.heal;
@@ -2022,27 +2202,36 @@ export class FightRuntime {
     if (report.lock) this.lockReq = null;
     if (report.out)
       for (const uid of report.out.uids) this.outQueue.delete(uid);
+    // What the database was told of the joins is its own now; joins that
+    // came in since are only ours, and must outlast its roster below.
+    const sentJoins = new Set(report.joins?.uids ?? []);
+    const newer = [...this.joinQueue].filter((uid) => !sentJoins.has(uid));
+    for (const uid of sentJoins) this.joinQueue.delete(uid);
     if (report.wipe) this.wipePending = false;
     if (report.log) this.logPending = null;
-    if (raid) out.push(...this.adoptRaid(raid, now));
+    if (raid) out.push(...this.adoptRaid(raid, now, newer));
     return out;
   }
 
   /** The database's word on the raid: its lock (if it locked first, with
    * another roster, that one stands), refused revives and who's out. */
-  private adoptRaid(raid: RaidReply, now: number): Outbound[] {
+  private adoptRaid(
+    raid: RaidReply,
+    now: number,
+    pendingJoins: readonly string[] = [],
+  ): Outbound[] {
     const out: Outbound[] = [];
     const boss = this.boss;
     if (raid.lock && boss && this.stage === "fight") {
+      // Herzies who joined since this report went out aren't in the
+      // database's roster yet: they stay.
+      const theirRoster = [...new Set([...raid.lock.roster, ...pendingJoins])];
       const mine = [...(this.roster?.keys() ?? [])].sort().join();
-      const theirs = [...raid.lock.roster].sort().join();
+      const theirs = theirRoster.sort().join();
       if (mine !== theirs) {
         const prev = this.roster ?? new Map();
         this.roster = new Map(
-          raid.lock.roster.map((uid) => [
-            uid,
-            prev.get(uid) ?? ("in" as const),
-          ]),
+          theirRoster.map((uid) => [uid, prev.get(uid) ?? ("in" as const)]),
         );
         for (const p of this.players.values())
           if (p.present && !this.roster.has(p.uid))
@@ -2172,11 +2361,31 @@ export class FightRuntime {
       hitAt: t.hitAt,
       ...(target !== undefined ? { target } : {}),
       ...(t.lethal ? { lethal: 1 as const } : {}),
+      ...(t.doom ? { doom: 1 as const } : {}),
       ...(t.mob !== undefined ? { mob: t.mob } : {}),
       ...(t.kind === "lane"
         ? { yaw: round(t.yaw ?? 0), len: round(t.len ?? 0) }
         : {}),
     };
+  }
+
+  /** Holding the boss is the tank's work: whoever holds a Taunt earns
+   * for the time since the last step (a second at most, so a stall can't
+   * pay a lump). */
+  private creditTaunt(boss: BossEngine, now: number) {
+    const since = this.tauntAt;
+    this.tauntAt = now;
+    const taunter = boss.taunter(now);
+    if (!taunter || since === null || now <= since) return;
+    const p = this.players.get(taunter);
+    if (!p?.present || p.down || !this.fighting(taunter)) return;
+    const roster = this.roster?.size ?? this.players.size;
+    this.credit(
+      taunter,
+      "taunt",
+      (Math.min(now - since, 1_000) / 1000) *
+        tauntPointsPerSecond(this.engine.maxHp, roster),
+    );
   }
 
   /** `uid` did `amount` of `kind` for the fight: into the next batch (and
@@ -2219,6 +2428,7 @@ export class FightRuntime {
       this.revivedInflight !== null ||
       this.revivedQueue.length > 0 ||
       this.outQueue.size > 0 ||
+      this.joinQueue.size > 0 ||
       this.wipePending
     );
   }
@@ -2230,12 +2440,6 @@ export const DEV_EVENT = "dev";
 /** What a fight reads off a player's stats: a cast's damage, their Def, and
  * what Euphony does to their skills. */
 export type FightStats = HitStats & { def: number; euphony: number };
-
-/** Stats from a ticket's `st`; a ticket from before stat points has no Def
- * or Euphony, and one from before stats has nothing. */
-/** The most attack speed a Haste can give, however much Euphony is behind
- * it (+50%). */
-const HASTE_MAX = 0.5;
 
 /** How a ticket's herzie fights: its basic attack, a blow's strength, and
  * whether it holds its class's instrument. */
@@ -2252,6 +2456,8 @@ function armsOf(
   };
 }
 
+/** Stats from a ticket's `st`; a ticket from before stat points has no Def
+ * or Euphony, and one from before stats has nothing. */
 export function statsOf(st: TownTicketPayload["st"]): FightStats {
   const n = (v: number | undefined) =>
     typeof v === "number" && Number.isFinite(v) ? v : 0;

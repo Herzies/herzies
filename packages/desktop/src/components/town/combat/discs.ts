@@ -1,7 +1,11 @@
 import {
   type ChainBody,
+  DISC_BOUNCE_S,
+  DISC_HANG_S,
+  DISC_OVERSHOOT,
   DISC_RANGE,
   DISC_SPEED,
+  discBackS,
   nextInChain,
 } from "@herzies/shared/combat";
 import { SHUFFLE_REACH } from "@herzies/shared/skills";
@@ -29,17 +33,12 @@ export const DISC = {
   /** It's drawn toward a dummy, like a wave, but turns a little less. */
   homing: 2.6,
   /** Past its reach, how far it carries on as it slows, and how long it
-   * hangs there turning (seconds). */
-  overshoot: 0.8,
-  hang: 0.11,
+   * hangs there turning (seconds): as the server times it. */
+  overshoot: DISC_OVERSHOOT,
+  hang: DISC_HANG_S,
   /** Off a hit, how far it bounces back, and how long that takes. */
   bounce: 0.6,
-  bounceTime: 0.08,
-  /** Back: its average speed (it starts slow and comes in fast), and how
-   * long it may take at most, and at least (seconds). */
-  backSpeed: 34,
-  backMax: 1.2,
-  backMin: 0.16,
+  bounceTime: DISC_BOUNCE_S,
   /** How far out to its hand's side the way back bows (a share of the
    * distance, and at most), and how high it rises. */
   bow: 0.22,
@@ -269,9 +268,16 @@ export class DiscField {
   }
 
   /** Moves everything on by `dt` seconds. */
-  step(dt: number, dummies: readonly DummyState[], hooks: DiscHooks): void {
+  step(
+    frameDt: number,
+    dummies: readonly DummyState[],
+    hooks: DiscHooks,
+    /** Your own discs' pace through a crit's hit-stop (see WaveField). */
+    mineScale = 1,
+  ): void {
     for (const d of this.discs) {
       if (!d.alive) continue;
+      const dt = d.mine ? frameDt * mineScale : frameDt;
       d.age += dt;
       d.t += dt;
       set(d.prev, d.pos);
@@ -280,7 +286,7 @@ export class DiscField {
       else if (d.phase === "turn") stepTurn(d);
       else this.stepBack(d, hooks);
     }
-    age(this.sparks, dt, SPARK_SECONDS);
+    age(this.sparks, frameDt, SPARK_SECONDS);
   }
 
   private stepOut(
@@ -514,9 +520,10 @@ export function curve(d: Disc, to: Readonly<Vec3>, e: number, out: Vec3) {
   out[2] = v * v * a[2] + 2 * v * e * cz + e * e * to[2];
 }
 
-/** How long a disc takes back over `dist`. */
+/** How long a disc takes back over `dist` (seconds): the server's
+ * timing, a snap however far (discBackS). */
 export function backTime(dist: number): number {
-  return Math.min(DISC.backMax, Math.max(DISC.backMin, dist / DISC.backSpeed));
+  return discBackS(dist);
 }
 
 /** Which hand throws next for `owner`: the other one from last time if its

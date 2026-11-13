@@ -138,9 +138,63 @@ describe("the cave raid", () => {
       expect(open.hated).toEqual(["rock", "jazz", "metal"]);
     });
 
-    it("closes for good if nobody locked it soon after the start", async () => {
-      await spawnBoss(-3 * 60_000);
-      expect(await rpc("open_boss_json", {})).toBeNull();
+    it("stays open past its start, even if nobody locked it", async () => {
+      const event = await spawnBoss(-30 * 60_000);
+      const open = await rpc<{ event: string } | null>("open_boss_json", {});
+      expect(open?.event).toBe(event);
+      expect(open).not.toHaveProperty("locked");
+    });
+  });
+
+  describe("late arrivals", () => {
+    it("join the roster after the lock, and the boss grows to fit them", async () => {
+      const event = await spawnBoss();
+      const [a, b, late] = [await player(), await player(), await player()];
+      const first = await lock(event, [a, b]);
+      const joined = await rpc<{
+        hp: number;
+        maxHp: number;
+        roster: string[];
+      }>("join_boss_fight", {
+        p_event: event,
+        p_uids: [late],
+        p_per_player: 10_000,
+      });
+      expect(joined.maxHp).toBe(bossMaxHp(3, 10_000));
+      expect(joined.hp).toBeCloseTo(first.hp + (joined.maxHp - first.maxHp), 0);
+      expect([...joined.roster].sort()).toEqual([a, b, late].sort());
+      expect(await participants(event)).toMatchObject({ [late]: "in" });
+      const open = await rpc<{ locked: { roster: string[] } }>(
+        "open_boss_json",
+        {},
+      );
+      expect([...open.locked.roster].sort()).toEqual([a, b, late].sort());
+    });
+
+    it("are counted once, and one who is out stays out", async () => {
+      const event = await spawnBoss();
+      const [a, b] = [await player(), await player()];
+      const first = await lock(event, [a, b]);
+      await rpc("mark_boss_out", { p_event: event, p_uids: [b] });
+      const again = await rpc<{ maxHp: number }>("join_boss_fight", {
+        p_event: event,
+        p_uids: [a, b],
+        p_per_player: 10_000,
+      });
+      expect(again.maxHp).toBe(first.maxHp);
+      expect(await participants(event)).toEqual({ [a]: "in", [b]: "out" });
+    });
+
+    it("can't join a fight that hasn't locked or is over", async () => {
+      const event = await spawnBoss();
+      const a = await player();
+      expect(
+        await rpc("join_boss_fight", {
+          p_event: event,
+          p_uids: [a],
+          p_per_player: null,
+        }),
+      ).toBeNull();
     });
   });
 
@@ -502,8 +556,14 @@ describe("the cave raid: production pass", () => {
     expect(error?.message).toMatch(/fight has started/);
   });
 
-  it("a fight nobody locked is over two minutes past its start", async () => {
+  it("a fight nobody locked stays up, and is over when its event ends", async () => {
     const event = await spawnBoss(-3 * 60_000);
+    expect(await rpc("resolve_boss_fight", {})).toBe(0);
+    expect((await state(event)).escaped).toBe(false);
+    await admin()
+      .from("events")
+      .update({ ends_at: new Date(Date.now() - 1_000).toISOString() })
+      .eq("id", event);
     await rpc("resolve_boss_fight", {});
     expect((await state(event)).escaped).toBe(true);
     const { data } = await admin()

@@ -8,6 +8,7 @@ import {
   Music,
   Package,
   Repeat,
+  ShieldAlert,
   Zap,
 } from "lucide-react";
 
@@ -27,6 +28,7 @@ export const NAV: NavGroup[] = [
       { title: "XP", href: "/admin/xp", icon: Zap },
       { title: "Song pool", href: "/admin/song-pool", icon: Music },
       { title: "Notifications", href: "/admin/notifications", icon: Bell },
+      { title: "Cheat flags", href: "/admin/cheat-flags", icon: ShieldAlert },
     ],
   },
   {

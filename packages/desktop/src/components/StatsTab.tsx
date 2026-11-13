@@ -1,11 +1,14 @@
 import {
   buffMult,
+  classDef,
   defReduction,
   formatStat,
+  HASTE_MAX,
   type HerzieStats,
   healMult,
   maxHp as maxHpFor,
   NO_STAT_POINTS,
+  PERCUSSIONIST_DEF_MULT,
   POINT_STATS,
   type PointStat,
   STAT_KEYS,
@@ -60,6 +63,7 @@ function secondaryLines(
   nowStamina: number,
   next: HerzieStats,
   nextStamina: number,
+  cls?: string | null,
 ): Line[] {
   const lines: Line[] = [];
   if (level)
@@ -87,35 +91,45 @@ function secondaryLines(
     hint: "How much faster it attacks, from Timing",
   });
   // "Given": Euphony strengthens what the herzie does for others, never
-  // the healing it gets itself — read as that, "Healing" misled.
-  lines.push({
-    key: "healsGiven",
-    label: "Heals given",
-    now: Math.round((healMult(now.euphony) - 1) * 100),
-    next: Math.round((healMult(next.euphony) - 1) * 100),
-    text: (v) => `+${v}%`,
-    hint: "Heals you give, not ones you get",
-  });
-  lines.push({
-    key: "buffsGiven",
-    label: "Buffs given",
-    now: Math.round((buffMult(now.euphony) - 1) * 100),
-    next: Math.round((buffMult(next.euphony) - 1) * 100),
-    text: (v) => `+${v}%`,
-    hint: "Buffs you give, not ones you get",
-  });
-  for (const key of SECONDARY)
+  // the healing it gets itself — read as that, "Healing" misled. Only a
+  // Bard heals or buffs, so only a Bard (or a herzie yet to choose) is
+  // shown them: to a Slinger or a tank, Euphony does nothing.
+  if (!cls || cls === "bard") {
+    lines.push({
+      key: "healsGiven",
+      label: "Heals given",
+      now: Math.round((healMult(now.euphony) - 1) * 100),
+      next: Math.round((healMult(next.euphony) - 1) * 100),
+      text: (v) => `+${v}%`,
+      hint: "Heals you give, not ones you get",
+    });
+    lines.push({
+      key: "buffsGiven",
+      label: "Buffs given",
+      now: Math.round((buffMult(now.euphony) - 1) * 100),
+      next: Math.round((buffMult(next.euphony) - 1) * 100),
+      text: (v) => `+${v}%`,
+      hint: `Buffs you give, not ones you get (a Haste, up to +${Math.round(HASTE_MAX * 100)}% attack speed)`,
+    });
+  }
+  for (const key of SECONDARY) {
+    // A Percussionist's Def counts more in a fight (classDef): show that.
+    const def = key === "def";
     lines.push({
       key,
       label: STAT_LABELS[key],
-      now: now[key],
-      next: next[key],
+      now: def ? classDef(cls, now.def) : now[key],
+      next: def ? classDef(cls, next.def) : next[key],
       text: (v) => formatStat(key, v),
-      hint:
-        key === "def"
-          ? `Takes ${Math.round(defReduction(next.def) * 100)}% off every hit`
-          : undefined,
+      hint: def
+        ? `Takes ${Math.round(defReduction(classDef(cls, next.def)) * 100)}% off every hit${
+            cls === "percussionist"
+              ? ` (a Percussionist's Def counts ${PERCUSSIONIST_DEF_MULT}×)`
+              : ""
+          }`
+        : undefined,
     });
+  }
   return lines;
 }
 
@@ -147,12 +161,15 @@ export function StatsTab({
   stats,
   level,
   points,
+  cls,
   onLog,
 }: {
   /** What the herzie's cards give. */
   stats: HerzieStats;
   level: number;
   points: StatPoints;
+  /** Its class: a Percussionist's Def counts more. */
+  cls?: string | null;
   onLog?: (msg: string) => void;
 }) {
   /** The allocation being placed; equal to `points` when nothing's moved. */
@@ -254,6 +271,7 @@ export function StatsTab({
             points.stamina,
             next,
             placing.stamina,
+            cls,
           ).map((line) => (
             <LineRow key={line.key} line={line} />
           ))}

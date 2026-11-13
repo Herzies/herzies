@@ -165,21 +165,12 @@ Deno.serve(async (request) => {
       );
     }
     const claim = open as BossClaim;
-    if (claim.locked) {
-      if (!claim.locked.roster.includes(user.id)) {
-        return jsonResponse(
-          { error: "The fight has started", reason: "locked" },
-          403,
-        );
-      }
-    } else if (claim.starts && now >= claim.starts * 1000) {
-      // Past its start but not locked yet (the room locks on its next
-      // tick): the roster is whoever was already inside.
-      return jsonResponse(
-        { error: "The fight has started", reason: "locked" },
-        403,
-      );
-    } else if (vitals.down) {
+    // The door stays open until the boss is gone: anyone on their feet may
+    // come in, before the lock or after it (a late arrival joins the
+    // roster, and the boss grows to fit). A downed herzie only comes back
+    // to a fight it's on the roster of, to wait for a Bard. The room
+    // itself turns away one who left the fight for good.
+    if (vitals.down && !claim.locked?.roster.includes(user.id)) {
       return jsonResponse({ error: "Knocked out", reason: "down" }, 403);
     }
     boss = claim;

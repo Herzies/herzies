@@ -14,6 +14,7 @@ export type BossLineKind =
   | "minions"
   | "enrage"
   | "pulse"
+  | "doom"
   | "victory"
   | "wipe";
 
@@ -42,6 +43,11 @@ export const BOSS_LINES: Record<BossLineKind, readonly string[]> = {
   ],
   enrage: ["I am DONE being patient!", "You're still here?! Faster, then."],
   pulse: ["THIS ENDS NOW."],
+  doom: [
+    "Hear that? That's your funeral march. Get under the cymbal!",
+    "No dodging this one. Hide or die.",
+    "Everything. Everyone. Now.",
+  ],
   victory: ["Not... the... music...", "Fine. FINE. Take your shiny things."],
   wipe: ["Silence at last.", "Come back when you can hold a tune."],
 };

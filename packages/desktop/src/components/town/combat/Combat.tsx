@@ -13,10 +13,12 @@ import {
 } from "@herzies/shared";
 import {
   BOSS_STAND,
+  bossReaches,
   DISC_DAMAGE,
   DISC_RANGE,
   HEAL_TARGET_HEIGHT,
   healTarget,
+  MELEE_CLEAVE,
   meleeDamage,
   meleeReaches,
   STRIKE_DAMAGE,
@@ -70,7 +72,7 @@ import {
   noteSkillCast,
   queueSkill,
   setBuff,
-  setEntityAt,
+  setSelfAt,
   shuffleOf,
   skillReady,
   skills,
@@ -96,6 +98,10 @@ const CAST_INTERVAL = CAST_INTERVAL_MS / 1000;
 const AIM_RANGE = 60;
 /** How slow waves and dummies go during a crit's hit-stop. */
 const HIT_STOP_SCALE = 0.12;
+/** Scratch for the frame's reach check: nothing allocated each frame. */
+const reachFrom = { x: 0, z: 0 };
+const reachBody = { x: 0, z: 0, radius: 0 };
+const bossScratch = { x: 0, z: 0, yaw: 0 };
 const HIT_STOP_MS = 65;
 const HANDS: readonly DiscHand[] = ["held-l", "held-r"];
 /** A Rimshot's hold on the slam (a plain strike holds 70 ms): the
@@ -231,6 +237,15 @@ export function Combat({
     const onPointerUp = (e: PointerEvent) => {
       if (e.button === 0) combat.fireHeld = false;
     };
+    // Let go outside the window (or the system took the pointer): no
+    // pointerup ever comes, so the next move or a cancel says it's up.
+    const onPointerMove = (e: PointerEvent) => {
+      if (combat.fireHeld && e.pointerType === "mouse" && !(e.buttons & 1))
+        combat.fireHeld = false;
+    };
+    const onPointerCancel = () => {
+      combat.fireHeld = false;
+    };
     // Typing in the chat, or the app going to the background, ends it.
     const onFocusIn = (e: FocusEvent) => {
       if (combat.on && typing(e.target)) leave();
@@ -241,6 +256,8 @@ export function Combat({
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
     window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointercancel", onPointerCancel);
     window.addEventListener("blur", leave);
     document.addEventListener("focusin", onFocusIn);
     document.addEventListener("visibilitychange", onHidden);
@@ -250,6 +267,8 @@ export function Combat({
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointercancel", onPointerCancel);
       window.removeEventListener("blur", leave);
       document.removeEventListener("focusin", onFocusIn);
       document.removeEventListener("visibilitychange", onHidden);
@@ -274,6 +293,10 @@ export function Combat({
     /** The aim stopped on something solid that isn't a dummy. */
     blocked: false,
     castAt: Number.NEGATIVE_INFINITY,
+    /** A cast under way that began in combat: it releases (and the server
+     * hears of it) even if combat is left mid-swing, as others already
+     * saw it start. */
+    live: false,
     /** The hand the disc under way is thrown from (a Record Slinger). */
     throwing: "held-l" as DiscHand,
     /** The dummy the crosshair's on, if any. */
@@ -485,27 +508,34 @@ export function Combat({
       const dz = a.point.z - chest.z;
       const yaw =
         Math.hypot(dx, dz) > 0.5 ? Math.atan2(dx, dz) : herzie.heading;
-      const from = { x: chest.x, z: chest.z };
-      combat.inReach =
-        liveDummies.some((d) =>
-          meleeReaches(from, yaw, {
-            ...d,
-            radius: DUMMY.radius * (d.size ?? 1),
-          }),
-        ) ||
-        (inBossRoom() &&
-          meleeReaches(from, yaw, { ...bossNow(), radius: BOSS_STAND.radius }));
+      const from = reachFrom;
+      from.x = chest.x;
+      from.z = chest.z;
+      const body = reachBody;
+      let reach = false;
+      for (const d of liveDummies) {
+        body.x = d.x;
+        body.z = d.z;
+        body.radius = DUMMY.radius * (d.size ?? 1);
+        if (meleeReaches(from, yaw, body)) {
+          reach = true;
+          break;
+        }
+      }
+      if (!reach && inBossRoom()) {
+        bossNow(undefined, bossScratch);
+        body.x = bossScratch.x;
+        body.z = bossScratch.z;
+        body.radius = BOSS_STAND.radius;
+        reach = meleeReaches(from, yaw, body);
+      }
+      combat.inReach = reach;
     }
 
     // Where you are, for effects that follow you (a Cymbrella overhead).
     if (herzie) {
       herzie.root.getWorldPosition(chest);
-      setEntityAt(
-        bossFight.you ?? -1,
-        chest.x,
-        chest.z,
-        chest.y + herzie.height,
-      );
+      setSelfAt(bossFight.you ?? -1, chest.x, chest.z, chest.y + herzie.height);
     }
 
     // --- A class skill: pressed (or pressed just before it was ready).
@@ -689,6 +719,7 @@ export function Combat({
         (!discs || free !== null);
       if (combat.on && (queued || combat.fireHeld) && ready && discs && free) {
         a.castAt = now;
+        a.live = true;
         a.throwing = free;
         combat.queuedAt = Number.NEGATIVE_INFINITY;
         herzie.root.getWorldPosition(chest);
@@ -706,6 +737,7 @@ export function Combat({
         sfxDiscThrow(free === "held-l");
       } else if (combat.on && (queued || combat.fireHeld) && ready) {
         a.castAt = now;
+        a.live = true;
         a.bolt = heals ? stance.lock : null;
         a.freeHeal = heals && stance.lock === null;
         combat.queuedAt = Number.NEGATIVE_INFINITY;
@@ -754,7 +786,7 @@ export function Combat({
       // The blow lands: whatever's in front of it, in reach, is hit.
       else if (
         herzie.released &&
-        combat.on &&
+        a.live &&
         melee &&
         herzie.castMotion !== "slam"
       ) {
@@ -763,21 +795,34 @@ export function Combat({
         const from = { x: chest.x, z: chest.z };
         const height = herzie.height * (blow === "strike" ? 0.6 : 0.4);
         let landed = false;
-        for (const d of liveDummies) {
-          if (
-            !meleeReaches(from, yaw, {
+        // Nearest first: it takes the blow in full, the rest the cleave's
+        // share, as the server judges a blow through a pack.
+        const struck = liveDummies
+          .filter((d) =>
+            meleeReaches(from, yaw, {
               ...d,
               radius: DUMMY.radius * (d.size ?? 1),
-            })
+            }),
           )
-            continue;
+          .sort(
+            (p, q) =>
+              Math.hypot(p.x - from.x, p.z - from.z) -
+              Math.hypot(q.x - from.x, q.z - from.z),
+          );
+        for (const [i, d] of struck.entries()) {
           const toward = flatToward(from, d);
           const point: Vec3 = [
             d.x - toward[0] * DUMMY.radius,
             Math.min(DUMMY.chest, height),
             d.z - toward[2] * DUMMY.radius,
           ];
-          const kind = myHit(d, toward, point, meleeDamage(blow), now);
+          const kind = myHit(
+            d,
+            toward,
+            point,
+            meleeDamage(blow) * (i === 0 ? 1 : MELEE_CLEAVE),
+            now,
+          );
           waveField.burst(point, toward, kind);
           landed = true;
         }
@@ -804,11 +849,12 @@ export function Combat({
           sfxMeleeHit(blow);
           // Held still on the contact, a beat, so it lands.
           herzie.hitstop();
+          combat.meleeFeltAt = now;
         }
         shake(landed ? 0.1 : 0.03);
       }
       // The hand is out: the disc leaves it.
-      if (herzie.released && combat.on && discs) {
+      if (herzie.released && a.live && discs) {
         const h = a.throwing;
         herzie.heldWorldPosition(h, hand);
         // With the crosshair on a dummy, at its middle: the aim may be on
@@ -829,12 +875,40 @@ export function Combat({
           inBossRoom() &&
           Math.hypot(a.point.x - bossAt.x, a.point.z - bossAt.z) <
             BOSS_STAND.radius + 0.8;
+        // The boss by the server's own rule (aim assist and its whole body,
+        // from where sendBossCast aims): a throw that grazes it hits it
+        // here too, rather than flying past while the number comes in.
+        let assisted: number | null = null;
+        if (inBossRoom() && !target && !(solid && onBoss)) {
+          herzie.root.getWorldPosition(chest);
+          const ox = chest.x;
+          const oz = chest.z;
+          const ax = a.point.x - ox;
+          const ay = a.point.y - WAVE_HAND_HEIGHT;
+          const az = a.point.z - oz;
+          const len = Math.hypot(ax, ay, az) || 1;
+          assisted = bossReaches(
+            [ox, WAVE_HAND_HEIGHT, oz],
+            [ax / len, ay / len, az / len],
+            DISC_RANGE,
+            bossAt,
+          );
+          // A wall nearer than it is still where it turns.
+          if (assisted !== null && solid && toAim < assisted) assisted = null;
+        }
         discField.throw(from, toward, {
           mine: true,
           owner: herzie,
           hand: h,
-          reach: solid ? toAim : DISC_RANGE,
-          strike: solid ? (onBoss ? "target" : "wall") : null,
+          reach: assisted ?? (solid ? toAim : DISC_RANGE),
+          strike:
+            assisted !== null
+              ? "target"
+              : solid
+                ? onBoss
+                  ? "target"
+                  : "wall"
+                : null,
           target,
           quick: speed,
           bounces: shuffleOf(bossFight.you ?? -1, now),
@@ -844,7 +918,7 @@ export function Combat({
       }
       // The hand is out: the wave leaves it (Player's update, last frame).
       const ally = a.bolt === null ? undefined : entityAt.get(a.bolt);
-      if (herzie.released && combat.on && combat.attack === "wave" && ally) {
+      if (herzie.released && a.live && combat.attack === "wave" && ally) {
         // A heal bolt: off to the ally it locked onto, homing on them.
         herzie.handWorldPosition(hand);
         dir
@@ -881,7 +955,7 @@ export function Combat({
         });
         sfxHealBolt();
         shake(0.02);
-      } else if (herzie.released && combat.on && combat.attack === "wave") {
+      } else if (herzie.released && a.live && combat.attack === "wave") {
         herzie.handWorldPosition(hand);
         dir.copy(a.point).sub(hand);
         const toAim = dir.length();
@@ -900,22 +974,29 @@ export function Combat({
         sfxCast();
         shake(0.05);
       }
+      // Let go (or cut short, a Rimshot's or a knock-out's): done.
+      if (herzie.released || !herzie.casting) a.live = false;
     }
 
     // --- Waves in flight, and what they hit. A crit's hit-stop holds them
     // near-still for a beat.
     const slow = now < combat.slowUntil ? HIT_STOP_SCALE : 1;
-    waveField.step(dt * slow, liveDummies, ({ wave, dummy, point }) => {
-      if (!wave.mine) {
-        hitDummy(dummy, wave.dir[0], wave.dir[2], 100, false, now, false);
-        sfxImpact("hit");
-        return "hit";
-      }
-      return myHit(dummy, wave.dir, point, wave.scale, now);
-    });
+    waveField.step(
+      dt,
+      liveDummies,
+      ({ wave, dummy, point }) => {
+        if (!wave.mine) {
+          hitDummy(dummy, wave.dir[0], wave.dir[2], 100, false, now, false);
+          sfxImpact("hit");
+          return "hit";
+        }
+        return myHit(dummy, wave.dir, point, wave.scale, now);
+      },
+      slow,
+    );
     // Discs in flight, anyone's; and the sounds of yours turning and
     // glancing off walls.
-    discField.step(dt * slow, liveDummies, discHooks.current);
+    discField.step(dt, liveDummies, discHooks.current, slow);
     for (const sp of discField.sparks) {
       if (!sp.alive || sp.heard) continue;
       sp.heard = true;

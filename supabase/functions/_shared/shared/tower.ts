@@ -202,7 +202,7 @@ const DAMAGE_GROWTH = 1.08;
 const CURVE_CAP_FLOOR = 80;
 
 /** A floor's mob: its level, health and how hard its swing lands (before
- * the level gap, Def and the hit cap). */
+ * the level gap and Def). */
 export function towerMob(floor: number): {
   level: number;
   hp: number;

@@ -159,6 +159,7 @@ struct SmtcNowPlaying {
 /// a real Windows install; expect to refine this list once verified there.
 const MUSIC_APP_ALLOWLIST: &[&str] = &[
     "Spotify.exe",
+    "Qobuz.exe",
     "Microsoft.ZuneMusic_8wekyb3d8bbwe!App", // Windows' built-in Media Player (Groove-derived)
 ];
 
@@ -196,6 +197,7 @@ fn counts_as_music_listening(parsed: &SmtcNowPlaying) -> bool {
 fn source_from_app_id(app_id: &str) -> String {
     match app_id {
         "Spotify.exe" => "Spotify".into(),
+        "Qobuz.exe" => "Qobuz".into(),
         "Microsoft.ZuneMusic_8wekyb3d8bbwe!App" => "Media Player".into(),
         other => other
             .split('!')

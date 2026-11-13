@@ -28,12 +28,13 @@ export type RaidStage = "lobby" | "fight" | "over";
 // Health scales with the roster
 
 /** The boss's health per herzie, unless the event's config sets its own
- * `hpPerPlayer`. Calibrated on the fights before the raid (five herzies
- * dealt ~60k each in four minutes, nine ~44k in four and a half: about
- * 250-340 damage a second each) so a roster fells it in six to eight
- * minutes. In raid-sim, bots that never miss and never stop take about
- * five and a half. Mirrored by lock_boss_fight. */
-export const BOSS_HP_PER_PLAYER = 130_000;
+ * `hpPerPlayer`. Sized from raid-sim with herzies' real stats (level 30,
+ * as tickets carry them: about 350-850 damage a second each by class), so
+ * a roster of bots that never miss fells it in about six minutes, and
+ * real players in six to eight. (130k was sized from older stats: the
+ * Nov 6 raid ended in 4.3 minutes.) The town-server sends it with the
+ * lock; lock_boss_fight's own 130000 is only a fallback. */
+export const BOSS_HP_PER_PLAYER = 210_000;
 /** Health grows a little slower than the roster (WoW's flex raids): a big
  * group has a slight edge, and nobody is turned away to keep it easy. */
 export const BOSS_HP_EXPONENT = 0.9;
@@ -174,6 +175,16 @@ export const IN_TUNE = {
   /** Record Slinger: hits this many times harder. */
   damage: 1.25,
 } as const;
+
+/** A Percussionist's Def counts this many times over in a fight: the
+ * tank's own toughness, which no other class can buy with Stamina. */
+export const PERCUSSIONIST_DEF_MULT = 1.5;
+
+/** The Def a herzie of class `cls` fights with. */
+export function classDef(cls: string | null | undefined, def: number): number {
+  const d = Math.max(0, Number.isFinite(def) ? def : 0);
+  return cls === "percussionist" ? d * PERCUSSIONIST_DEF_MULT : d;
+}
 
 /** What an in-tune herzie of class `cls` gets: the kind of bonus and its
  * value, or null for a classless herzie (or an unknown class). */

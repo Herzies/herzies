@@ -87,6 +87,49 @@ export function discLandsAfterMs(dist: number): number {
   return (dist / DISC_SPEED) * 1000;
 }
 
+/** A disc's way back to the hand: a snap, quick however far it went (a
+ * base and a little a metre, at most a ceiling), so a Slinger keeps its
+ * pace out to most of its reach and only eases off at the far end of it
+ * (about 85% at full reach), rather than falling off a cliff. In seconds,
+ * before attack speed (which shortens it). */
+export const DISC_BACK = { base: 0.16, perMetre: 0.006, max: 1.2 } as const;
+/** Off a hit, how long its bounce takes before it turns for home (s). */
+export const DISC_BOUNCE_S = 0.08;
+/** Past its reach with nothing hit: how far it carries on and how long
+ * it hangs there turning (world units, s). */
+export const DISC_OVERSHOOT = 0.8;
+export const DISC_HANG_S = 0.11;
+
+/** How long a disc takes back from `dist` away, in seconds, at attack
+ * speed `quick` (1: unhasted). */
+export function discBackS(dist: number, quick = 1): number {
+  return (
+    Math.min(
+      DISC_BACK.max,
+      DISC_BACK.base + Math.max(0, dist) * DISC_BACK.perMetre,
+    ) / Math.max(1e-3, quick)
+  );
+}
+
+/**
+ * How long a thrown disc is out of the hand, in ms: out to what it hits
+ * at `hitDist` (null: nothing, so to its full reach, a carry and a hang),
+ * the bounce, and back. A hand can throw again once it's back, so with two
+ * hands this sets how fast a Slinger may throw at a range. The server
+ * holds a Slinger to it, with slack; the client flies its discs by the
+ * same numbers.
+ */
+export function discCycleMs(hitDist: number | null, quick = 1): number {
+  const s =
+    hitDist === null
+      ? DISC_RANGE / DISC_SPEED +
+        DISC_OVERSHOOT / DISC_SPEED +
+        DISC_HANG_S +
+        discBackS(DISC_RANGE + DISC_OVERSHOOT, quick)
+      : hitDist / DISC_SPEED + DISC_BOUNCE_S + discBackS(hitDist, quick);
+  return s * 1000;
+}
+
 /** Something a bouncing disc may go on to: where it stands, and how wide
  * it is (the leg ends at its surface). */
 export type ChainBody<T> = { ref: T; x: number; z: number; radius: number };
@@ -281,9 +324,16 @@ export function stunMs(base: number, recent: number): number {
 export const MELEE_REACH = 1.6;
 /** How far either way of where it faces a melee hit reaches (radians). */
 export const MELEE_ARC = (60 * Math.PI) / 180;
-/** A Percussionist's stick as a share of a wave's: the same. The tank
- * stands in its face to hold it, not to out-hit the Record Slinger. */
-export const STRIKE_DAMAGE = 1;
+/** A Percussionist's stick as a share of a wave's: more, for standing in
+ * the boss's face to land it, though still short of the Record Slinger
+ * (about 60% of its damage in raid-sim, with its discs, in-tune bonus and
+ * skills). */
+export const STRIKE_DAMAGE = 1.5;
+/** A melee blow cleaves through everything in its arc, but only the first
+ * thing it meets (the nearest, or the boss) takes it in full; the rest take
+ * this share. A tank's cleave spreads its hold over a pack, not damage
+ * enough to out-clear the damage class. */
+export const MELEE_CLEAVE = 0.5;
 /** A herzie without its instrument (or a class) slams its body into it:
  * the weakest blow there is, so a class and its instrument are a step up. */
 export const BUMP_DAMAGE = 0.5;
@@ -295,20 +345,44 @@ export const PUNCH_DAMAGE = 0.6;
 // Contribution: how much a herzie did for a boss fight, which ranks its end
 // screen, rewards, statue and leaderboard. Damage counts as it is; healing
 // and what a Cymbrella blocked count this many times over, because a heal is
-// worth far more than a hit (a Bard restores ~100 HP in the time a damage
-// dealer hits for ~4,000). Mirrored by boss_contribution in 00111.
+// worth far more than a hit (a level-30 Bard restores a few dozen HP a
+// second, Drones and heal bolts together, while a Record Slinger deals some
+// 800). Holding the boss with a Taunt counts too, per
+// second held (see tauntPointsPerSecond). Mirrored by boss_contribution in
+// 00111 and 00142.
 
 /** How many points of damage one HP healed or blocked is worth. */
 export const CONTRIBUTION_SUPPORT_WEIGHT = 10;
 
+/** A second of holding the boss with a Taunt is worth this many times what
+ * an average herzie deals in a second of a fight that runs to
+ * {@link TAUNT_FIGHT_SECONDS}: a Percussionist who holds it most of the
+ * fight (two trading it) ranks with the damage dealers, not below them. */
+export const TAUNT_CONTRIBUTION_WEIGHT = 1.5;
+/** The fight length a taunt's worth is sized from (the raid's target). */
+export const TAUNT_FIGHT_SECONDS = 390;
+
+/** Points a second held with a Taunt is worth, for a boss of `maxHp` and a
+ * roster of `roster`: from the boss's health, so a bigger boss pays more. */
+export function tauntPointsPerSecond(maxHp: number, roster: number): number {
+  if (!(maxHp > 0)) return 0;
+  return (
+    (TAUNT_CONTRIBUTION_WEIGHT * maxHp) /
+    Math.max(1, Math.floor(roster) || 1) /
+    TAUNT_FIGHT_SECONDS
+  );
+}
+
 /** What a herzie did for a fight: damage dealt to the boss, HP healed, HP
- * blocked, and damage dealt to its minions (`adds`: counted like boss damage
- * for the ranking, but never taken off the boss's health). */
+ * blocked, damage dealt to its minions (`adds`: counted like boss damage
+ * for the ranking, but never taken off the boss's health), and the points
+ * holding the boss with a Taunt earned (`taunt`, already in points). */
 export type Contribution = {
   damage: number;
   healing: number;
   blocked: number;
   adds?: number;
+  taunt?: number;
 };
 
 /** A herzie's contribution score. */
@@ -316,6 +390,7 @@ export function contributionOf(c: Contribution): number {
   return (
     c.damage +
     (c.adds ?? 0) +
+    (c.taunt ?? 0) +
     CONTRIBUTION_SUPPORT_WEIGHT * (c.healing + c.blocked)
   );
 }
