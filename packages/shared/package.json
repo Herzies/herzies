@@ -76,6 +76,11 @@
       "import": "./dist/stats.js",
       "require": "./dist/stats.js"
     },
+    "./items": {
+      "types": "./dist/items.d.ts",
+      "import": "./dist/items.js",
+      "require": "./dist/items.js"
+    },
     "./gl": {
       "types": "./dist/gl/index.d.ts",
       "import": "./dist/gl/index.js",

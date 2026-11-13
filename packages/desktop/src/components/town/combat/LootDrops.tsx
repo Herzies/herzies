@@ -20,7 +20,7 @@ import {
   sfxLootPickup,
   sfxSpiritNotice,
 } from "../sfx";
-import { bossFight, useBossFight } from "./fight";
+import { bossFight, bossNow, useBossFight } from "./fight";
 import {
   BOSS_ORIGIN,
   flightAt,
@@ -226,6 +226,15 @@ function StoneBurst() {
     }
     if (!started.current) {
       started.current = true;
+      // Where it fell: it walks, so not its home spot.
+      const fell = bossNow();
+      const ox = fell.x - BOSS_STAND.x;
+      const oz = fell.z - BOSS_STAND.z;
+      for (const sh of shards) {
+        sh.p.x += ox;
+        sh.p.z += oz;
+      }
+      flash.current.position.set(fell.x, BOSS_STAND.chest, fell.z);
       sfxLootBurst();
       if (!reducedMotion()) {
         shake(0.55);

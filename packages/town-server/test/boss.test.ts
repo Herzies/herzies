@@ -7,13 +7,13 @@ import {
 import { TOWN_WALK_SPEED } from "@herzies/shared/town-net";
 import { BOSS_ENRAGE, BOSS_WANDER } from "@herzies/shared/boss-fight";
 import { RIMSHOT } from "@herzies/shared/skills";
+import { maxHp as maxHpOf } from "@herzies/shared/vitals";
 import { describe, expect, it } from "vitest";
 import {
   BossEngine,
   type BossEvent,
   type BossPlayer,
   covers,
-  MAX_HIT_FRACTION,
   MAX_TELEGRAPHS,
   MIN_WINDUP_MS,
   phaseFor,
@@ -58,10 +58,10 @@ describe("tuning invariants", () => {
     expect(TUNING.ring.windupMs).toBeGreaterThanOrEqual(MIN_WINDUP_MS);
   });
 
-  it("a level-20 herzie with no Stamina takes hits within the budget", () => {
-    const max = 200;
-    expect(TUNING.slam.damage).toBeLessThanOrEqual(MAX_HIT_FRACTION * max);
-    expect(TUNING.ring.damage).toBeLessThanOrEqual(MAX_HIT_FRACTION * max);
+  it("a level-1 herzie with no Stamina lives through a slam or a ring", () => {
+    const max = maxHpOf(1);
+    expect(TUNING.slam.damage).toBeLessThan(max);
+    expect(TUNING.ring.damage).toBeLessThan(max);
   });
 
   it("a slam can be left on foot within its windup, with time to react", () => {
@@ -197,9 +197,18 @@ describe("the boss roams", () => {
     expect(lane.hitAt - lane.at).toBe(TUNING.charge.windupMs);
     expect(covers(lane, 3, 6)).toBe(true);
     // It hits whoever's in the lane as it goes, and ends up down the lane.
-    const after = run(e, t, lane.hitAt + 2_000, [tank, back]);
-    const hit = after.find((x) => x.t === "resolve" && x.id === lane.id);
-    expect(hit?.t === "resolve" && hit.hits.map((h) => h.uid)).toContain("back");
+    // Step by step, to see when.
+    const hitAt = new Map<string, number>();
+    for (let s = t; s <= lane.hitAt + 2_000; s += 50)
+      for (const ev of e.update(s, [tank, back]))
+        if (ev.t === "resolve" && ev.id === lane.id)
+          for (const h of ev.hits) hitAt.set(h.uid, s);
+    expect(hitAt.has("back")).toBe(true);
+    // Not as it sets off: when its body gets to them, down the lane.
+    const run_ = dist({ x: lane.x, z: lane.z }, { x: 3, z: 6 }) - TUNING.boss.radius - TUNING.playerRadius;
+    const expected = lane.hitAt + (Math.max(0, run_) / TUNING.charge.speed) * 1000;
+    expect(hitAt.get("back")).toBeGreaterThan(lane.hitAt + 100);
+    expect(Math.abs((hitAt.get("back") ?? 0) - expected)).toBeLessThan(200);
     expect(dist(e.position, { x: 3, z: 6 })).toBeLessThan(dist({ x: lane.x, z: lane.z }, { x: 3, z: 6 }));
     expect(
       Math.hypot(e.position.x - BOSS_WANDER.x, e.position.z - BOSS_WANDER.z),
@@ -240,14 +249,14 @@ describe("attacks", () => {
     ]);
   });
 
-  it("caps a hit at a share of a small herzie's health", () => {
+  it("lands a hit in full on a herzie too small for it", () => {
     const e = engine();
     const p = still("a", 0, 5, 60);
     const ev = run(e, T0, T0 + 6_000, [p]);
     const resolve = ev.find((x) => x.t === "resolve");
     if (resolve?.t !== "resolve") throw new Error("no hit");
-    expect(MAX_HIT_FRACTION * 60).toBeLessThan(TUNING.slam.damage);
-    expect(resolve.hits[0].damage).toBe(Math.round(MAX_HIT_FRACTION * 60));
+    expect(TUNING.slam.damage).toBeGreaterThan(60);
+    expect(resolve.hits[0].damage).toBe(TUNING.slam.damage);
   });
 
   it("Def takes its share off a hit", () => {
@@ -438,6 +447,105 @@ describe("casts", () => {
     expect(hits.some((h) => h.damage >= p.maxHp)).toBe(true);
   });
 
+  describe("the dirge", () => {
+    /** A phase-2 boss, fighting from T0. */
+    const phase2 = () => {
+      const e = new BossEngine({ hp: 5e5, maxHp: 1e6, seed: 1, now: T0 });
+      expect(e.currentPhase).toBe(2);
+      return e;
+    };
+    const dirgeAt = T0 + TUNING.openingMs + TUNING.doom.everyMs;
+    const hitsOf = (ev: BossEvent[]) =>
+      ev.flatMap((x) => (x.t === "resolve" ? x.hits : []));
+    /** Run until its first dirge has landed. */
+    const through = (e: BossEngine, players: BossPlayer[]) => {
+      const ev = run(e, T0, dirgeAt + TUNING.doom.windupMs + 500, players);
+      const tg = telegraphs(ev).find((t) => t.doom);
+      const resolve = ev.find(
+        (x) => x.t === "resolve" && x.id === tg?.id,
+      );
+      return { tg, hits: resolve?.t === "resolve" ? resolve.hits : [] };
+    };
+
+    it("never comes in phase 1", () => {
+      const e = engine(1e6, 1e6);
+      const ev = run(e, T0, dirgeAt + 20_000, [still("a", 0, 6)]);
+      expect(telegraphs(ev).some((t) => t.doom)).toBe(false);
+    });
+
+    it("winds up for its full length across the whole floor, then lands on everyone", () => {
+      const e = phase2();
+      const players = [still("a", 0, 6), still("b", -9, -9), still("c", 8, 2)];
+      const { tg, hits } = through(e, players);
+      expect(tg).toBeDefined();
+      expect(tg?.hitAt).toBe((tg?.at ?? 0) + TUNING.doom.windupMs);
+      expect(tg?.inner).toBe(0);
+      expect(hits.map((h) => h.uid).sort()).toEqual(["a", "b", "c"]);
+    });
+
+    it("hits flat, past the usual cap: a level-30 herzie without Stamina dies to it", () => {
+      const e = phase2();
+      const frail = still("frail", 0, 6, 342);
+      const { hits } = through(e, [frail]);
+      expect(hits[0].damage).toBeGreaterThanOrEqual(342);
+    });
+
+    it("only Def softens it: a sturdy herzie lives, buffs and i-frames do nothing", () => {
+      const e = phase2();
+      const tank: BossPlayer = { ...still("tank", 0, 6, 780), def: 68 };
+      const { hits } = through(e, [tank]);
+      expect(hits[0].damage).toBeGreaterThan(300);
+      expect(hits[0].damage).toBeLessThan(780);
+      expect(hits[0].absorbed).toBeGreaterThan(0);
+    });
+
+    it("can't be dodged, and a Rimshot doesn't cancel it", () => {
+      const e = phase2();
+      const players = [still("a", 0, 6)];
+      const ev = run(e, T0, dirgeAt + 100, players);
+      expect(telegraphs(ev).some((t) => t.doom)).toBe(true);
+      e.stun(dirgeAt + 200, 2_000);
+      const rest = run(e, dirgeAt + 250, dirgeAt + TUNING.doom.windupMs + 500, players);
+      expect(hitsOf(rest).some((h) => h.damage > 0)).toBe(true);
+    });
+
+    it("a dome stops all of it", () => {
+      const e = phase2();
+      const inside = still("in", 0, 6);
+      const outside = still("out", 9, -6);
+      // The dome stands over the landing (cast two seconds before).
+      e.addDome("perc", 0, 6, dirgeAt + TUNING.doom.windupMs - 2_000, 4_000);
+      const { hits } = through(e, [inside, outside]);
+      const a = hits.find((h) => h.uid === "in");
+      const b = hits.find((h) => h.uid === "out");
+      expect(a).toMatchObject({ damage: 0, shelteredBy: "perc" });
+      expect(a?.blocked).toBeGreaterThanOrEqual(TUNING.doom.damage * 0.4);
+      expect(b?.damage).toBeGreaterThan(0);
+    });
+
+    it("waits (a while) for a Cymbrella to be ready, then comes anyway", () => {
+      const e = phase2();
+      const spent: BossPlayer = {
+        ...still("perc", 0, 6),
+        domeAt: dirgeAt + 60_000,
+      };
+      const early = run(e, T0, dirgeAt + TUNING.doom.waitMs - 500, [spent]);
+      expect(telegraphs(early).some((t) => t.doom)).toBe(false);
+      const late = run(e, dirgeAt + TUNING.doom.waitMs - 450, dirgeAt + TUNING.doom.waitMs + 500, [spent]);
+      expect(telegraphs(late).some((t) => t.doom)).toBe(true);
+      // One whose dome is ready in time doesn't make it wait.
+      const e2 = phase2();
+      const ready: BossPlayer = { ...still("perc", 0, 6), domeAt: dirgeAt };
+      const on = run(e2, T0, dirgeAt + 500, [ready]);
+      expect(telegraphs(on).some((t) => t.doom)).toBe(true);
+    });
+
+    it("keeps its distance from a Cymbrella's cooldown", () => {
+      expect(TUNING.doom.everyMs).toBeGreaterThan(30_000);
+      expect(TUNING.doom.windupMs).toBeGreaterThan(TUNING.doom.answerMs);
+    });
+  });
+
   it("lands a cast on the boss after the wave's flight", () => {
     const e = engine();
     const { yaw, pitch } = aim(0, 8);
@@ -548,9 +656,9 @@ describe("melee damage", () => {
     expect(dealt()).toBe(dealt(STRIKE_DAMAGE));
   });
 
-  it("no blow out-hits the Record Slinger's disc", () => {
+  it("an instrument out-hits a bare herzie (the Slinger out-damages the stick over a fight: raid-sim)", () => {
     expect(BUMP_DAMAGE).toBeLessThan(STRIKE_DAMAGE);
-    expect(STRIKE_DAMAGE).toBeLessThan(DISC_DAMAGE);
+    expect(DISC_DAMAGE).toBeGreaterThan(1);
   });
 });
 
@@ -608,6 +716,25 @@ describe("production pass: fairness and the raid's size", () => {
     // Busters only (slams on the focus are aimed too): the biggest grow.
     const sorted = [...hits].sort((a, b) => a - b);
     expect(sorted[sorted.length - 1]).toBeGreaterThan(TUNING.buster.damage);
+  });
+
+  it("a buster lands in full, enough to knock out a herzie too weak for it", () => {
+    const e = engine(1000, 1000);
+    // 250 HP, no Def: a buster takes more than that.
+    const tank = still("tank", 0, 5, 250);
+    const other = still("dps", 6, 9, 250);
+    e.setTaunt("tank", T0 + 60_000, T0);
+    let first: number | null = null;
+    for (let t = T0; t < T0 + 20_000 && first === null; t += 50) {
+      const busters = new Set(
+        e.active.filter((tg) => tg.kind === "buster").map((tg) => tg.id),
+      );
+      for (const ev of e.update(t, [tank, other]))
+        if (ev.t === "resolve" && busters.has(ev.id))
+          for (const h of ev.hits) if (h.uid === "tank") first = h.damage;
+    }
+    expect(first).toBe(TUNING.buster.damage);
+    expect(first).toBeGreaterThan(250);
   });
 
   it("doesn't flip its focus between two who hate it about the same", () => {

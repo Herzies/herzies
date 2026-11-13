@@ -5,9 +5,11 @@ import {
   BOSS_WANDER,
   bossMaxHp,
   clampToWander,
+  classDef,
   enrageFactor,
   inTuneBonus,
   minionPackSize,
+  PERCUSSIONIST_DEF_MULT,
   parseBossRewardPools,
   parseTune,
   rewardPoolItemChance,
@@ -170,5 +172,17 @@ describe("parseBossRewardPools", () => {
     expect(rewardPoolItemChance({ itemIds: ["a", "b"], mode: "all" })).toBe(
       100,
     );
+  });
+});
+
+describe("class Def", () => {
+  it("a Percussionist's Def counts more; everyone else's as it is", () => {
+    expect(PERCUSSIONIST_DEF_MULT).toBeGreaterThan(1);
+    expect(classDef("percussionist", 100)).toBe(100 * PERCUSSIONIST_DEF_MULT);
+    expect(classDef("record_slinger", 100)).toBe(100);
+    expect(classDef("bard", 100)).toBe(100);
+    expect(classDef(null, 100)).toBe(100);
+    expect(classDef("percussionist", Number.NaN)).toBe(0);
+    expect(classDef("percussionist", -5)).toBe(0);
   });
 });

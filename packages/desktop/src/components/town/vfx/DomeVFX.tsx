@@ -184,23 +184,36 @@ function build(slot: Slot, map: TownMap, cx: number, cz: number, r: number) {
   const pos = slot.shell.geometry.getAttribute(
     "position",
   ) as THREE.BufferAttribute;
+  const nrm = slot.shell.geometry.getAttribute(
+    "normal",
+  ) as THREE.BufferAttribute;
   const p = pos.array as Float32Array;
+  const q = nrm.array as Float32Array;
   for (let i = 0; i <= RINGS; i++) {
     const th = (i / RINGS) * (Math.PI / 2);
-    const d = Math.sin(th) * r;
-    const up = Math.cos(th) * r;
+    const sth = Math.sin(th);
+    const cth = Math.cos(th);
+    const d = sth * r;
+    const up = cth * r;
     for (let j = 0; j <= SEGS; j++) {
       const ph = (j / SEGS) * Math.PI * 2;
-      const x = cx + Math.sin(ph) * d;
-      const z = cz + Math.cos(ph) * d;
+      const sph = Math.sin(ph);
+      const cph = Math.cos(ph);
+      const x = cx + sph * d;
+      const z = cz + cph * d;
       const k = (i * (SEGS + 1) + j) * 3;
       p[k] = x;
       p[k + 1] = groundY(map, x, z) + up;
       p[k + 2] = z;
+      // The hemisphere's own normal: what the shading wants, and the same
+      // at any size (no pass over the mesh each frame it grows).
+      q[k] = sth * sph;
+      q[k + 1] = cth;
+      q[k + 2] = sth * cph;
     }
   }
   pos.needsUpdate = true;
-  slot.shell.geometry.computeVertexNormals();
+  nrm.needsUpdate = true;
   slot.shell.geometry.computeBoundingSphere();
 
   const lpos = slot.line.geometry.getAttribute(
@@ -327,7 +340,8 @@ export function DomeVFX({ map }: { map: TownMap }) {
       const r = shownRadius(d, now);
       if (slot.built.d !== d || Math.abs(slot.built.r - r) > 1e-3) {
         build(slot, map, d.x, d.z, r);
-        slot.built = { d, r };
+        slot.built.d = d;
+        slot.built.r = r;
       }
       const alpha = alphaOf(d, now);
       const su = slot.shell.material.uniforms;

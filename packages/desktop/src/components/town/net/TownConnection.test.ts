@@ -196,11 +196,15 @@ describe("TownConnection", () => {
     // Two casts, round the wrap, between ticks.
     cast(0, 5066);
     expect(r()?.pendingCasts).toBe(2);
+    // Each stamped with when it was made, to be shown as the drawn clock
+    // gets there.
+    expect(r()?.castTimes).toEqual([5066, 5066]);
     cast(0, 5132);
     expect(r()?.pendingCasts).toBe(2);
-    // A backlog is capped.
+    // A backlog is capped, keeping the newest.
     cast(7, 5200);
     expect(r()?.pendingCasts).toBe(3);
+    expect(r()?.castTimes).toEqual([5200, 5200, 5200]);
     clock.mockRestore();
   });
 

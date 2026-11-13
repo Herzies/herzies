@@ -234,13 +234,22 @@ describe("boss room", () => {
       },
     });
 
-    it("lets a roster member in, and turns away anyone else", async () => {
+    it("lets a roster member in, and a late arrival too, who joins the roster", async () => {
       await new Promise((r) => setTimeout(r, 100));
       const a = await enter("r-standing", { boss: raidClaim() });
       const w = await a.next("welcome");
       expect(w.fight?.raid).toMatchObject({ stage: "fight", you: "in" });
       const c = await enter("r-outsider", { boss: raidClaim() });
-      expect(await c.closed).toBe(TOWN_CLOSE.sealed);
+      const cw = await c.next("welcome");
+      expect(cw.fight?.raid).toMatchObject({ stage: "fight", you: "in" });
+      // A downed outsider isn't a roster member: still turned away.
+      const d = await enter("r-outsider-down", {
+        boss: raidClaim(),
+        hp: { hp: 0, maxHp: 200, down: true },
+      });
+      expect(await d.closed).toBe(TOWN_CLOSE.sealed);
+      c.ws.close();
+      await c.closed;
       a.ws.close();
       await a.closed;
     });

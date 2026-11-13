@@ -296,6 +296,9 @@ export class MobPack {
   spawnFloor(now: number): void {
     const base = towerMob(this.floor).hp;
     this.mobs = [];
+    // A new floor's mobs: nothing of the last one's to remember.
+    this.sent.clear();
+    this.bumpedAt.clear();
     this.telegraphs = [];
     this.pending = [];
     this.wakeAt = now + FLOOR_OPENING_MS;
@@ -356,6 +359,7 @@ export class MobPack {
     boss: { x: number; z: number },
     herzies: readonly { x: number; z: number }[],
   ): number[] {
+    this.forgetFallen();
     const base = towerMob(this.floor).hp;
     const kinds: MobKind[] = [];
     const spitters = count >= 3 ? Math.floor(count / 4) || 1 : 0;
@@ -398,6 +402,19 @@ export class MobPack {
       ids.push(id);
     }
     return ids;
+  }
+
+  /** The fallen are only in the way of the living: off the list, and out
+   * of what's remembered of them (a hit still in flight lands on nothing). */
+  private forgetFallen(): void {
+    const gone = new Set<number>();
+    for (const m of this.mobs) if (m.hp <= 0) gone.add(m.id);
+    if (!gone.size) return;
+    this.mobs = this.mobs.filter((m) => !gone.has(m.id));
+    for (const id of gone) this.sent.delete(id);
+    for (const key of this.bumpedAt.keys())
+      if (gone.has(Number(key.slice(0, key.indexOf(":")))))
+        this.bumpedAt.delete(key);
   }
 
   private add(
@@ -480,15 +497,21 @@ export class MobPack {
   /** Every mob a melee blow from `from`, facing `yaw`, reaches (as they
    * stood at `seen`). */
   inReach(from: { x: number; z: number }, yaw: number, seen: number): Mob[] {
-    return this.alive.filter((m) => {
+    const hit: { m: Mob; d: number }[] = [];
+    for (const m of this.alive) {
       const at = this.seenAt(m, seen);
-      return meleeReaches(
-        from,
-        yaw,
-        { x: at.x, z: at.z, radius: MOB.radius * m.scale + HIT_SLACK },
-        MELEE_REACH + TUNING.meleeSlack,
-      );
-    });
+      if (
+        meleeReaches(
+          from,
+          yaw,
+          { x: at.x, z: at.z, radius: MOB.radius * m.scale + HIT_SLACK },
+          MELEE_REACH + TUNING.meleeSlack,
+        )
+      )
+        hit.push({ m, d: Math.hypot(at.x - from.x, at.z - from.z) });
+    }
+    // Nearest first: a cleave lands in full on the first only.
+    return hit.sort((a, b) => a.d - b.d).map((h) => h.m);
   }
 
   /** Every mob a ground slam at `at` reaches: its body within `radius`

@@ -162,7 +162,8 @@ export const SKILL_DEFS: Record<SkillId, SkillDef> = {
     kind: "buff",
     describe:
       "For 10 s, each disc you throw bounces on to {v} nearby, each bounce 30% weaker than the last.",
-    // Bounces: 1 at level 1, one more every two levels, 5 at the cap.
+    // Bounces: 1 at level 1, about one more every two levels (rounded),
+    // 5 from level 9.
     value: [1, 5],
     count: ["more enemy", "more enemies"],
     // Only for a pack: a lone target is hit as ever, so it adds nothing
@@ -179,7 +180,7 @@ export const SKILL_DEFS: Record<SkillId, SkillDef> = {
     name: "Rimshot",
     kind: "attack",
     describe:
-      "Winds up for 0.8 s, then slams the ground: every enemy within 3.5 m takes twice a strike, each with a {v} chance to be stunned for 2 s (the boss 1 s), cutting short whatever it was winding up.",
+      "Winds up for 0.8 s, then slams the ground: every enemy within 3.5 m takes twice a strike, each with a {v} chance to be stunned for 2 s (the boss 1 s, half that again for each stun in the last 16 s), cutting short whatever it was winding up.",
     // The chance to stun each enemy hit (see RIMSHOT).
     value: [0.25, 0.5],
     cooldownMs: 10_000,
@@ -214,6 +215,10 @@ export function skillLearned(id: SkillId, level: number): boolean {
 /** Shuffle: how far a disc bounces on from what it hit, centre to centre
  * on the ground (the training grounds' dummies stand 8.5 apart), and how
  * much weaker each bounce is than the one before. */
+/** The most attack speed a Haste can give, however much Euphony is behind
+ * it (+50%). */
+export const HASTE_MAX = 0.5;
+
 export const SHUFFLE_REACH = 9;
 export const SHUFFLE_FALLOFF = 0.7;
 
@@ -370,23 +375,30 @@ export function buffMultiplier(
   return m;
 }
 
-/** Adds a buff under the no-stacking rule: one of each kind; the stronger
- * value and the later expiry win. */
-export function applyBuff(buffs: readonly Buff[], next: Buff): Buff[] {
-  const prev = buffs.find((b) => b.id === next.id);
-  const rest = buffs.filter((b) => b.id !== next.id);
-  if (!prev) return [...rest, next];
+/** Adds a buff under the no-stacking rule: one of each kind. A stronger
+ * one takes over with its own length; as strong, the later expiry wins
+ * (a refresh, credited to the newer); a weaker one leaves the stronger be,
+ * so recasting a lesser Haste can't stretch a greater one. Buffs that ran
+ * out by `now` are dropped first, so one that ended lends nothing. */
+export function applyBuff(
+  buffs: readonly Buff[],
+  next: Buff,
+  now: number = Number.NEGATIVE_INFINITY,
+): Buff[] {
+  const live = buffs.filter((b) => b.until > now);
+  const prev = live.find((b) => b.id === next.id);
+  const rest = live.filter((b) => b.id !== next.id);
+  if (!prev || next.value > prev.value) return [...rest, next];
+  if (next.value < prev.value) return [...rest, prev];
+  const by = next.by ?? prev.by;
   return [
     ...rest,
     {
       id: next.id,
-      value: Math.max(prev.value, next.value),
+      value: next.value,
       until: Math.max(prev.until, next.until),
       ...(next.kind ? { kind: next.kind } : {}),
-      // The one that's stronger (or, as strong, the newer) is whose.
-      ...((next.value >= prev.value ? next.by : prev.by)
-        ? { by: next.value >= prev.value ? next.by : prev.by }
-        : {}),
+      ...(by ? { by } : {}),
     },
   ];
 }

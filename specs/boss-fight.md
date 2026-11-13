@@ -34,14 +34,16 @@
 >   the wire and the client interpolates it.
 > - Its focus is a taunter if there is one, else whoever it hates most, else the
 >   nearest herzie. It switches only for someone it hates clearly more (110% in
->   melee, 130% from range). Its buster (70, can't be dodged, always lands,
+>   melee, 130% from range). Its buster (300, can't be dodged, always lands,
 >   exempt from the shape cap) and the first slam of each volley go at the focus.
+> - **Hits land in full** (Nov 2026): no share-of-health cap. A herzie too weak
+>   for a hit is knocked out by it; health, Def and a tank are the answer.
 > - **Rattled:** each buster leaves its target Rattled for 20 s: the next buster
->   hits +25% per stack (to 4), past the usual 30% one-hit cap (to 60%). Two
+>   hits +25% per stack (to 4). Two
 >   Percussionists trading the boss is how it's cleared.
 > - **Raid size:** one more shape and slam per 6 herzies (to 10). From 20,
 >   **Scatter** every 25 s: ⌈n/6⌉ herzies (never the focus) are marked for
->   2.5 s, and each mark goes off around its herzie (r 2.5, 40) on anyone close.
+>   2.5 s, and each mark goes off around its herzie (r 2.5, 55) on anyone close.
 >   Spread out.
 > - Slam counts use weighted rounding: no breakpoints.
 > - At 50% and 25% health it calls Thornlings (the Tower's mobs, `MobPack`), about

@@ -104,6 +104,8 @@ const RATE = 30;
 const BURST = 45;
 /** Dropped or refused messages per sweep before a socket is kicked. */
 const MAX_STRIKES = 90;
+/** How often a walking herzie's position is saved to its socket. */
+const MOVE_SAVE_MS = 1_000;
 const MAX_TEXT = 8_192;
 /** First byte of a cast frame (see `encodeCastFrame`). */
 const CAST_OP = 3;
@@ -162,6 +164,11 @@ type Session = {
   };
   limiter: RateLimiter;
   strikes: number;
+  /** When its attachment was last saved for its moves (server ms), and
+   * whether a move since is unsaved: a walk is saved once a second, not
+   * every tick (its whole attachment, look and all, each time). */
+  movedSavedAt?: number;
+  moveUnsaved?: boolean;
   /** When this socket last said what it's listening to (server ms). */
   tunedAt?: number;
   /** When it last switched its lute's stance (Date.now() ms). */
@@ -223,7 +230,7 @@ export class TownRoom extends DurableObject<Env> {
       if (att.player) {
         session.player = {
           ...att.player,
-          guard: newGuard(att.player.state.x, att.player.state.z, now),
+          guard: newGuard(att.player.state.x, att.player.state.z, now, att.map),
           receivedAt: now,
           rest: new RestMeter(att.player.restSince ?? null),
         };
@@ -444,6 +451,9 @@ export class TownRoom extends DurableObject<Env> {
         id = other.player.id;
         this.sessions.delete(other.ws);
         this.dirty.delete(other);
+        // The fight hears it leave like any other, so the copy coming in
+        // is judged a rejoin (no healing back from its ticket, no breather).
+        for (const o of this.fight?.leave(t.uid, now) ?? []) this.dispatch(o);
         this.close(other.ws, TOWN_CLOSE.replaced, "replaced");
       }
     }
@@ -452,8 +462,9 @@ export class TownRoom extends DurableObject<Env> {
 
     // A knocked-out herzie lies where it fell: a reconnect can't carry its
     // body over to a Bard.
-    const fell = this.fight?.rejoinAt(t.uid) ?? null;
-    const at = fell ?? startingPoint(s.att.map, m.at?.x, m.at?.z);
+    const asked = startingPoint(s.att.map, m.at?.x, m.at?.z);
+    const kept = this.fight?.rejoinAt(t.uid, asked, now) ?? null;
+    const at = kept ?? asked;
     const state = quantizeState({
       x: at.x,
       z: at.z,
@@ -468,7 +479,7 @@ export class TownRoom extends DurableObject<Env> {
       look: t.look,
       exp: t.exp,
       state,
-      guard: newGuard(state.x, state.z, now),
+      guard: newGuard(state.x, state.z, now, s.att.map),
       receivedAt: now,
       maxHp: t.hp?.maxHp,
       rest: new RestMeter(),
@@ -479,6 +490,8 @@ export class TownRoom extends DurableObject<Env> {
     };
     this.persist(s);
     const fp = this.fight?.join(t.uid, id, t, state, now);
+    // Arriving after the lock: onto the roster, the boss grows to fit.
+    if (fp && !replacing) this.fight?.lateJoin(t.uid);
 
     const others = [...this.sessions.values()].flatMap((o) =>
       o !== s && o.player ? [o.player] : [],
@@ -493,7 +506,8 @@ export class TownRoom extends DurableObject<Env> {
       // Everyone else sees the newcomer's health bar.
       this.broadcast({ t: "hp", id, hp: fp.hp, maxHp: fp.maxHp }, s);
       if (fp.down) this.send(s, { t: "down" });
-      if (fell) this.send(s, { t: "correct", x: state.x, z: state.z });
+      // Put back where the fight has it (where it fell, or where it was).
+      if (kept) this.send(s, { t: "correct", x: state.x, z: state.z });
     }
     if (others.length) {
       s.ws.send(
@@ -563,6 +577,7 @@ export class TownRoom extends DurableObject<Env> {
    * ticket lapse; and forgives old strikes. */
   async alarm() {
     const now = Date.now();
+    this.saveMoves();
     for (const [ws, att] of [...this.watchers]) {
       const pinged =
         this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() ?? 0;
@@ -637,6 +652,8 @@ export class TownRoom extends DurableObject<Env> {
       if (++this.quietTicks >= IDLE_TICKS && this.ticker) {
         clearInterval(this.ticker);
         this.ticker = null;
+        // Going quiet (and maybe to sleep): where everyone stopped is saved.
+        this.saveMoves();
       }
       return;
     }
@@ -651,7 +668,11 @@ export class TownRoom extends DurableObject<Env> {
         age: now - s.player.receivedAt,
         state: s.player.state,
       });
-      this.persist(s);
+      if (now - (s.movedSavedAt ?? Number.NEGATIVE_INFINITY) >= MOVE_SAVE_MS) {
+        s.movedSavedAt = now;
+        s.moveUnsaved = false;
+        this.persist(s);
+      } else s.moveUnsaved = true;
     }
     this.dirty.clear();
     if (!entries.length) return;
@@ -668,7 +689,8 @@ export class TownRoom extends DurableObject<Env> {
     if (s.player) {
       this.flushRest(Date.now(), s);
       if (this.fight) {
-        this.fight.leave(s.player.uid, Date.now());
+        for (const o of this.fight.leave(s.player.uid, Date.now()))
+          this.dispatch(o);
         this.maybeReport(Date.now(), true);
         // An empty room keeps ticking while a fight is on: the grace, the
         // wipe and the reports run without anyone watching.
@@ -767,6 +789,9 @@ export class TownRoom extends DurableObject<Env> {
       this.drop(s, TOWN_CLOSE.closed, "closed");
       return false;
     }
+    // An empty lobby stopped ticking before its start: lock it now, with
+    // whoever was in it, so those coming back are let in as its roster.
+    if (this.fight.lockDue(now)) this.runFight(now);
     const verdict = this.fight.mayJoin(t.uid, down, now);
     if (verdict === "ok") return true;
     if (verdict === "closed") this.drop(s, TOWN_CLOSE.closed, "closed");
@@ -827,10 +852,12 @@ export class TownRoom extends DurableObject<Env> {
       this.strike(s);
       return;
     }
-    // The move back to the start needs nothing here: a jump onto the map's
-    // spawn is always allowed (checkMove), and the frames still on their
-    // way from the far portal must pass too.
-    for (const o of this.fight.next(p.uid, now)) this.dispatch(o);
+    // The move back to the start: the one jump onto the spawn a fight
+    // allows (checkMove). Frames still on their way from the far portal
+    // pass as ordinary walking.
+    const moved = this.fight.next(p.uid, now);
+    if (moved.length) p.guard.respawn = true;
+    for (const o of moved) this.dispatch(o);
   }
 
   private onCast(s: Session, message: ArrayBuffer, now: number) {
@@ -1170,6 +1197,7 @@ export class TownRoom extends DurableObject<Env> {
       !report.results &&
       !report.tower &&
       !report.lock &&
+      !report.joins &&
       !report.revived &&
       !report.out &&
       !report.wipe
@@ -1180,7 +1208,11 @@ export class TownRoom extends DurableObject<Env> {
     void postVitals(this.env, { action: "report", ...report })
       .then((reply) => {
         if (!reply) return;
-        for (const o of fight.reported(report, reply.raid)) this.dispatch(o);
+        const outs = fight.reported(report, reply.raid);
+        // The room may have moved on to another fight (the Tower's next
+        // event) while this was out: this one's news isn't for its players.
+        if (this.fight !== fight) return;
+        for (const o of outs) this.dispatch(o);
         const loot = reply.boss?.loot;
         if (loot) for (const o of fight.loot(loot)) this.dispatch(o);
         const levels = reply.skills?.levels;
@@ -1234,6 +1266,16 @@ export class TownRoom extends DurableObject<Env> {
     // gets a fresh room.
     this.fight = null;
     this.closeScheduled = false;
+  }
+
+  /** Save every move not yet saved (see Session.movedSavedAt). */
+  private saveMoves() {
+    for (const s of this.sessions.values()) {
+      if (!s.moveUnsaved) continue;
+      s.moveUnsaved = false;
+      s.movedSavedAt = Date.now();
+      this.persist(s);
+    }
   }
 
   private persist(s: Session) {

@@ -4,11 +4,13 @@ import {
   aimDirection,
   BOSS_STAND,
   bossReaches,
+  CAST_INTERVAL_MS,
   CONTRIBUTION_SUPPORT_WEIGHT,
   contributionOf,
   DISC_RANGE,
   DOME,
   discChain,
+  discCycleMs,
   domeRadiusAt,
   healTarget,
   insideDome,
@@ -17,6 +19,9 @@ import {
   nextInChain,
   pushOutOfDomes,
   stunMs,
+  TAUNT_CONTRIBUTION_WEIGHT,
+  TAUNT_FIGHT_SECONDS,
+  tauntPointsPerSecond,
   type Vec3,
   WAVE_HAND_HEIGHT,
   WAVE_RANGE,
@@ -147,6 +152,28 @@ describe("contribution", () => {
       contributionOf({ damage: 300, healing: 80, blocked: 0 }),
     ).toBeGreaterThan(contributionOf({ damage: 1000, healing: 0, blocked: 0 }));
   });
+
+  it("counts a taunt's points as they are", () => {
+    expect(
+      contributionOf({ damage: 100, healing: 0, blocked: 0, taunt: 250 }),
+    ).toBe(350);
+  });
+
+  it("pays a taunt second as a share of an average herzie's damage a second", () => {
+    // Five herzies against 553k: one fight-length's worth each, over the
+    // target fight, times the weight.
+    expect(tauntPointsPerSecond(553_371, 5)).toBeCloseTo(
+      (TAUNT_CONTRIBUTION_WEIGHT * 553_371) / 5 / TAUNT_FIGHT_SECONDS,
+    );
+    // A bigger boss pays more; nothing for no boss or a junk roster.
+    expect(tauntPointsPerSecond(1_000_000, 5)).toBeGreaterThan(
+      tauntPointsPerSecond(500_000, 5),
+    );
+    expect(tauntPointsPerSecond(0, 5)).toBe(0);
+    expect(tauntPointsPerSecond(100_000, 0)).toBe(
+      tauntPointsPerSecond(100_000, 1),
+    );
+  });
 });
 
 describe("disc chains (Shuffle)", () => {
@@ -245,5 +272,28 @@ describe("stuns", () => {
     expect(stunMs(2_000, 0)).toBe(2_000);
     expect(stunMs(2_000, 1)).toBe(1_000);
     expect(stunMs(2_000, 2)).toBe(500);
+  });
+});
+
+describe("a disc's time out of the hand", () => {
+  // Two hands at the cast pace: a hand must be back within two casts.
+  const full = 2 * CAST_INTERVAL_MS;
+  const pace = (d: number) => Math.min(1, full / discCycleMs(d));
+
+  it("keeps a Slinger's full pace out to most of its reach", () => {
+    for (const d of [2, 8, 14, 18]) expect(pace(d)).toBe(1);
+  });
+
+  it("eases off at the far end, without a cliff", () => {
+    expect(pace(24)).toBeGreaterThan(0.8);
+    expect(pace(24)).toBeLessThan(0.9);
+    // Smooth: no step bigger than a few percent a metre.
+    for (let d = 14; d < 24; d++)
+      expect(pace(d) - pace(d + 1)).toBeLessThan(0.04);
+  });
+
+  it("comes back quicker when hasted, and a miss is out longest", () => {
+    expect(discCycleMs(20, 1.4)).toBeLessThan(discCycleMs(20));
+    expect(discCycleMs(null)).toBeGreaterThan(discCycleMs(DISC_RANGE));
   });
 });

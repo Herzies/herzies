@@ -8,6 +8,7 @@
 import {
   TOWN_MAPS,
   TOWN_SPRINT_SPEED,
+  TOWN_TICKETED_MAPS,
   type TownMapId,
 } from "@herzies/shared/town-net";
 
@@ -16,6 +17,14 @@ import {
 const SPEED_SLACK = 1.5;
 /** Distance a herzie may build up while its packets are delayed. */
 const MAX_BUDGET = TOWN_SPRINT_SPEED * SPEED_SLACK * 2;
+/** In a fight (the boss room, the Tower) less: a whole budget there is a
+ * step out of a telegraph and back, or across the arena to a boss. A
+ * lag spike longer than this is corrected, as fighting games do. */
+const FIGHT_BUDGET = TOWN_SPRINT_SPEED * SPEED_SLACK * 1.25;
+
+function budgetFor(map: TownMapId): number {
+  return TOWN_TICKETED_MAPS.has(map) ? FIGHT_BUDGET : MAX_BUDGET;
+}
 /** A jump onto the spawn point is a respawn, which is allowed. */
 const SPAWN_TOLERANCE = 1.5;
 /** Leeway past the walkable edge, for rounding on the wire. */
@@ -28,10 +37,18 @@ export type MoveGuard = {
   at: number;
   /** Distance the herzie may still cover right now. */
   budget: number;
+  /** A jump onto the spawn the server sent it on (the Tower's next
+   * floor): in a fight, the only one allowed. Spent on use. */
+  respawn?: boolean;
 };
 
-export function newGuard(x: number, z: number, now: number): MoveGuard {
-  return { x, z, at: now, budget: MAX_BUDGET };
+export function newGuard(
+  x: number,
+  z: number,
+  now: number,
+  map?: TownMapId,
+): MoveGuard {
+  return { x, z, at: now, budget: map ? budgetFor(map) : MAX_BUDGET };
 }
 
 /** Whether a move to (x, z) at `now` is possible; updates the guard if so. */
@@ -45,18 +62,26 @@ export function checkMove(
   const { radius, spawn } = TOWN_MAPS[map];
   if (!Number.isFinite(x) || !Number.isFinite(z)) return false;
   if (Math.hypot(x, z) > radius + EDGE_TOLERANCE) return false;
+  const cap = budgetFor(map);
   const elapsed = Math.max(0, now - g.at) / 1000;
   const budget = Math.min(
-    MAX_BUDGET,
+    cap,
     g.budget + elapsed * TOWN_SPRINT_SPEED * SPEED_SLACK,
   );
   const distance = Math.hypot(x - g.x, z - g.z);
-  const respawn = Math.hypot(x - spawn.x, z - spawn.z) <= SPAWN_TOLERANCE;
+  // Anywhere peaceful, a jump onto the spawn is a respawn. In a fight it
+  // must be one the server sent (or anyone could hop out of a slam).
+  const respawn =
+    Math.hypot(x - spawn.x, z - spawn.z) <= SPAWN_TOLERANCE &&
+    (!TOWN_TICKETED_MAPS.has(map) || !!g.respawn);
   if (distance > budget && !respawn) return false;
   g.x = x;
   g.z = z;
   g.at = now;
-  g.budget = respawn && distance > budget ? MAX_BUDGET : budget - distance;
+  if (respawn && distance > budget) {
+    g.budget = cap;
+    g.respawn = false;
+  } else g.budget = budget - distance;
   return true;
 }
 
