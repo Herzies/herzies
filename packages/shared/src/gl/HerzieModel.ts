@@ -50,6 +50,8 @@ import {
   hasTweedSkin,
   heldPoses,
   heldSwing,
+  MIC_DROP_RELEASE,
+  type PoseEmote,
   primitiveShading,
   SLAM,
   type Sphere,
@@ -70,7 +72,12 @@ import {
   isDangleSettled,
   stepDangle,
 } from "../dangle-physics.js";
-import { EMOTE_SECONDS } from "../emotes.js";
+import {
+  BOW_SECONDS,
+  CHEER_SECONDS,
+  EMOTE_SECONDS,
+  MIC_DROP_SECONDS,
+} from "../emotes.js";
 import { type Equipped, ITEM_SETS, isSetFullyEquipped } from "../items.js";
 import {
   createThreadSim,
@@ -222,6 +229,118 @@ const WAVE_HOP = {
 
 /** How long the wave hop takes, crouch to settled. */
 const WAVE_HOP_SECONDS = WAVE_HOP.takeoff + WAVE_HOP.air + WAVE_HOP.landSeconds;
+
+/** A dropped mic: how long it lies there before it fades (seconds). */
+const MIC_STAY_SECONDS = 10;
+/** How long after a mic lands before another can be dropped (it replaces
+ * it). */
+const MIC_RECAST_SECONDS = 2;
+/**
+ * How far below the mic's origin its lowest part reaches, in mic units, when
+ * turned by `q`: the ends of the handle and the ball, each a sphere of its
+ * own, in the shape built by buildMic.
+ */
+const MIC_BALLS: readonly [y: number, radius: number][] = [
+  [1.0, 0.25],
+  [-1.35, 0.56],
+];
+const micPoint = new THREE.Vector3();
+function micLowest(q: THREE.Quaternion): number {
+  let low = Number.POSITIVE_INFINITY;
+  for (const [y, radius] of MIC_BALLS) {
+    micPoint.set(0, y, 0).applyQuaternion(q);
+    low = Math.min(low, micPoint.y - radius);
+  }
+  return low;
+}
+
+/** The ball's dotted grille: dark dots on a lighter ground, in staggered
+ * rows, as a texture. None where there's no canvas (a test). */
+function micGrilleTexture(): THREE.Texture | null {
+  if (typeof document === "undefined") return null;
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 128;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.fillStyle = "#98a0b4";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "#07070b";
+  const cols = 28;
+  const rows = 16;
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      const x = ((col + (row % 2 ? 0.5 : 0)) / cols) * canvas.width;
+      const y = ((row + 0.5) / rows) * canvas.height;
+      ctx.beginPath();
+      ctx.arc(x, y, 2.6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  // No mipmaps: the holes stay holes at a distance, not a blur.
+  tex.generateMipmaps = false;
+  tex.minFilter = THREE.NearestFilter;
+  tex.magFilter = THREE.NearestFilter;
+  tex.wrapS = THREE.RepeatWrapping;
+  return tex;
+}
+
+/** The mic's size against the hand holding it. */
+const MIC_SIZE = 1.7;
+/** The way the mic's ball points in its own space (the handle is the other
+ * way: creature space is upside down). */
+const micDown = new THREE.Vector3(0, -1, 0);
+
+/** How long a timed emote (besides the wave) plays, in seconds. */
+function timedEmoteSeconds(kind: PoseEmote): number {
+  return kind === "bow"
+    ? BOW_SECONDS
+    : kind === "cheer"
+      ? CHEER_SECONDS
+      : MIC_DROP_SECONDS;
+}
+
+/** The cheer: three quick hops, each higher than the last and all above a
+ * normal jump (JUMP_HEIGHT), the last with a full turn. Where in the emote
+ * (phase 0..1) they happen, and how high each goes (creature units). */
+const CHEER_HOPS = { from: 0.1, span: 0.8, heights: [0.95, 1.1, 1.3] } as const;
+
+/** How far through the cheer's hops `phase` is: which hop (0..2) and how
+ * far through it (0..1); null before and after them. */
+function cheerHopAt(phase: number): { hop: number; f: number } | null {
+  const u = (phase - CHEER_HOPS.from) / CHEER_HOPS.span;
+  if (u <= 0 || u >= 1) return null;
+  const n = CHEER_HOPS.heights.length;
+  return { hop: Math.min(n - 1, Math.floor(u * n)), f: (u * n) % 1 };
+}
+
+/** The cheer's hops `phase` (0..1) through it: how high (creature units) and
+ * how squashed (positive) or stretched (negative). */
+function cheerHop(phase: number): { lift: number; squash: number } {
+  const at = cheerHopAt(phase);
+  if (!at) return { lift: 0, squash: 0 };
+  const { hop, f } = at;
+  // Crouched as it lands and as it sets off again, stretched in the air.
+  const crouch = 0.08 * (smooth(0.86, 1, f) + (1 - smooth(0, 0.14, f)));
+  return {
+    lift: CHEER_HOPS.heights[hop] * 4 * f * (1 - f),
+    squash:
+      crouch -
+      0.09 *
+        Math.abs(1 - 2 * f) *
+        smooth(0.1, 0.25, f) *
+        (1 - smooth(0.8, 0.95, f)),
+  };
+}
+
+/** The turn (radians) the cheer's last hop makes: once round, in the air. */
+function cheerSpin(phase: number): number {
+  const at = cheerHopAt(phase);
+  if (!at || at.hop < CHEER_HOPS.heights.length - 1) return 0;
+  return Math.PI * 2 * smooth(0.12, 0.88, at.f);
+}
 
 const smooth = (a: number, b: number, v: number) => {
   const t = Math.min(1, Math.max(0, (v - a) / (b - a)));
@@ -745,7 +864,41 @@ export class HerzieModel {
   /** Seconds into an emote; undefined when none is playing. How it plays:
    * a wave of `waveArmPart`, or, with no arms, a spin hop. */
   private emoteTime: number | undefined;
-  private emoteMove: "wave" | "spin" = "wave";
+  private emoteMove: "wave" | "spin" | PoseEmote = "wave";
+  /** Sat on the floor by the Sit emote (not on a seat): up again when it
+   * moves, jumps or sits again. */
+  floorSit = false;
+  /** The mic a mic drop holds up and lets fall (see poseMic). */
+  private mic: {
+    group: THREE.Group;
+    materials: THREE.Material[];
+    geometries: THREE.BufferGeometry[];
+    textures: THREE.Texture[];
+    /** Once let go: the mic in the world (it stays where it lands, off the
+     * herzie); null while held or stowed. */
+    drop: {
+      pos: THREE.Vector3;
+      vel: THREE.Vector3;
+      /** How it was held when let go (world), then turned about `axis` (a
+       * horizontal line across its heading) by `angle`. */
+      base: THREE.Quaternion;
+      /** Seconds into its fall when it first touched the floor; null before. */
+      landedAt: number | null;
+      axis: THREE.Vector3;
+      angle: number;
+      spin: number;
+      /** Its size, the body's height and the floor under it, in world units. */
+      r: number;
+      h: number;
+      /** The floor under where it was let go, for when the host can't say
+       * (see groundAt). */
+      floor: number;
+      lying: boolean;
+      age: number;
+    } | null;
+  } | null = null;
+  /** The last frame's dt, for the mic's fall. */
+  private lastDt = 0;
   private waveArmPart: string = WAVE_ARM;
   /** Waved again mid-wave: carry it on (see stepEmote). */
   private waveAgain = false;
@@ -1580,6 +1733,9 @@ export class HerzieModel {
 
   /** Advances the animation and poses the parts. Call every frame. */
   update(dt: number, speed: number): void {
+    this.lastDt = dt;
+    // Walking off stands it up from the floor.
+    if (this.floorSit && speed > 0.3) this.floorSit = false;
     stepAnimation(this.anim, dt, speed);
     this.stepDance(dt);
     if (this.surge) {
@@ -1600,8 +1756,14 @@ export class HerzieModel {
     this.swing(dt);
     // A spin hop turns it once round, eased in and out.
     const u = this.spinPhase;
+    const cheer =
+      this.timedEmote === "cheer" && this.emoteTime !== undefined
+        ? cheerSpin(this.emoteTime / CHEER_SECONDS)
+        : 0;
     this.turn.rotation.y =
-      this.heading + (u === undefined ? 0 : u * u * (3 - 2 * u) * Math.PI * 2);
+      this.heading +
+      (u === undefined ? 0 : u * u * (3 - 2 * u) * Math.PI * 2) +
+      cheer;
     this.pose();
     this.animateBody();
     this.drawCloak();
@@ -1628,7 +1790,7 @@ export class HerzieModel {
     host.scale = this.root.getWorldScale(scratchScale).y;
     host.heading = this.heading;
     host.dancing = this.danceWeight > 0.5;
-    host.sitting = this.sitting;
+    host.sitting = this.sitting || this.floorSit;
     host.afk = this.afk;
     host.groundAt = this.groundAt ?? undefined;
     host.walkable = this.walkable ?? undefined;
@@ -1682,6 +1844,10 @@ export class HerzieModel {
    * doesn't. Returns whether it took off.
    */
   jump(): boolean {
+    if (this.floorSit) {
+      this.floorSit = false;
+      return false;
+    }
     if (this.sitting || this.sitWeight > 0.01) return false;
     if (this.airTime !== undefined) {
       this.jumpBuffer = JUMP_BUFFER_SECONDS;
@@ -1703,12 +1869,52 @@ export class HerzieModel {
    * already spinning.
    */
   emote(id: string): boolean {
+    if (id === "sit") {
+      // Sit down where it stands, or get up again. Not on a seat.
+      if (this.sitting) return false;
+      this.floorSit = !this.floorSit;
+      return true;
+    }
+    if (id === "bow" || id === "cheer" || id === "micdrop") {
+      if (this.sitting) return false;
+      if (this.emoteTime !== undefined && this.emoteMove === "spin")
+        return false;
+      // Up off the floor first; one emote replaces another.
+      this.floorSit = false;
+      const arm =
+        this.armAt[WAVE_ARM] >= 0
+          ? WAVE_ARM
+          : this.armAt[CAST_ARM] >= 0
+            ? CAST_ARM
+            : null;
+      this.emoteMove = id;
+      this.waveArmPart = arm ?? WAVE_ARM;
+      this.emoteTime = 0;
+      this.waveAgain = false;
+      this.waveHopTime = undefined;
+      // The last mic is still falling, or only just landed: a moment after it
+      // has (MIC_RECAST_SECONDS), the next replaces it.
+      const last = this.mic?.drop;
+      if (
+        id === "micdrop" &&
+        last &&
+        (last.landedAt === null ||
+          last.age - last.landedAt < MIC_RECAST_SECONDS)
+      )
+        return false;
+      if (id === "micdrop") {
+        // Built on first use, so no one else carries a mic around.
+        this.mic ??= this.buildMic();
+        this.stowMic(this.mic);
+      }
+      return true;
+    }
     if (id !== "wave") return false;
-    if (this.emoteTime !== undefined) {
-      if (this.emoteMove === "spin") return false;
+    if (this.emoteTime !== undefined && this.emoteMove === "wave") {
       this.waveAgain = true;
       return true;
     }
+    if (this.emoteTime !== undefined && this.emoteMove === "spin") return false;
     const arm =
       this.armAt[WAVE_ARM] >= 0
         ? WAVE_ARM
@@ -1740,7 +1946,14 @@ export class HerzieModel {
     }
     if (this.emoteTime === undefined) return;
     this.emoteTime += dt;
-    const spin = this.emoteMove === "spin";
+    const move = this.emoteMove;
+    if (move === "bow" || move === "cheer" || move === "micdrop") {
+      if (this.emoteTime >= timedEmoteSeconds(move)) {
+        this.emoteTime = undefined;
+      }
+      return;
+    }
+    const spin = move === "spin";
     if (!spin && this.waveAgain) {
       // Waved again. With the arm up, go back whole swings, which looks
       // the same: the hand just keeps waving. Too early for that, it
@@ -1764,6 +1977,231 @@ export class HerzieModel {
     this.emoteTime = undefined;
     // Down from the spin hop: the jump's landing squash.
     if (spin && this.airTime === undefined) this.landTime = 0;
+  }
+
+  /** The timed emote playing (bow, cheer, mic drop), if one is. */
+  private get timedEmote(): PoseEmote | undefined {
+    const m = this.emoteMove;
+    return this.emoteTime !== undefined &&
+      (m === "bow" || m === "cheer" || m === "micdrop")
+      ? m
+      : undefined;
+  }
+
+  /** The mic a mic drop holds: a dark handle and a silver head, hidden
+   * until then. Sized to the hand (1 = the hand's radius). */
+  private buildMic() {
+    // Flat materials, shaded by hand: the Town's lights leave a lit one near
+    // black. Each vertex runs from `low` (down) to `high` (up); creature
+    // space is upside down, so up is -y here.
+    const shaded = (
+      geo: THREE.BufferGeometry,
+      low: string,
+      high: string,
+    ): THREE.BufferGeometry => {
+      geo.computeBoundingBox();
+      const { min, max } = geo.boundingBox as THREE.Box3;
+      const pos = geo.getAttribute("position");
+      const lo = new THREE.Color(low);
+      const hi = new THREE.Color(high);
+      const c = new THREE.Color();
+      const colors = new Float32Array(pos.count * 3);
+      for (let i = 0; i < pos.count; i++) {
+        const t = (max.y - pos.getY(i)) / Math.max(1e-6, max.y - min.y);
+        c.copy(lo).lerp(hi, t);
+        colors.set([c.r, c.g, c.b], i * 3);
+      }
+      geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+      return geo;
+    };
+    const paint = new THREE.MeshBasicMaterial({ vertexColors: true });
+    // The ball is a grille: a dark dotted pattern, in rows that stagger.
+    const textures: THREE.Texture[] = [];
+    const grille = new THREE.MeshBasicMaterial({ vertexColors: true });
+    const dots = micGrilleTexture();
+    if (dots) {
+      grille.map = dots;
+      textures.push(dots);
+    }
+    const handle = shaded(
+      new THREE.CylinderGeometry(0.2, 0.25, 1.9, 10),
+      "#101015",
+      "#3a3a46",
+    );
+    const head = shaded(
+      new THREE.SphereGeometry(0.56, 16, 12),
+      "#6a6f80",
+      "#c9cfdf",
+    );
+    const ring = shaded(
+      new THREE.CylinderGeometry(0.4, 0.34, 0.16, 12),
+      "#15151b",
+      "#30303c",
+    );
+    const group = new THREE.Group();
+    const h = new THREE.Mesh(handle, paint);
+    h.position.y = -0.15;
+    const t = new THREE.Mesh(head, grille);
+    t.position.y = -1.35;
+    const r = new THREE.Mesh(ring, paint);
+    r.position.y = -0.92;
+    for (const m of [h, t, r]) {
+      m.castShadow = true;
+      group.add(m);
+    }
+    group.visible = false;
+    this.creature.add(group);
+    return {
+      group,
+      materials: [paint, grille],
+      geometries: [handle, head, ring],
+      textures,
+      drop: null,
+    };
+  }
+
+  /** The mic put away: off the floor and back in the herzie, unseen. */
+  private stowMic(mic: NonNullable<HerzieModel["mic"]>) {
+    mic.drop = null;
+    mic.group.visible = false;
+    if (mic.group.parent !== this.creature) this.creature.add(mic.group);
+  }
+
+  /** The mic of a mic drop: held up straight in the hand until it opens,
+   * then let go into the world, where it falls, bounces, rolls onto its
+   * side and stays put — not following the herzie — until it fades. Call
+   * after the parts are posed. */
+  private poseMic() {
+    const mic = this.mic;
+    if (!mic) return;
+    if (mic.drop) {
+      this.stepMicDrop(mic, mic.drop);
+      return;
+    }
+    const { group } = mic;
+    const kind = this.timedEmote;
+    if (kind !== "micdrop" || this.emoteTime === undefined) {
+      group.visible = false;
+      return;
+    }
+    const phase = this.emoteTime / MIC_DROP_SECONDS;
+    const armAt = this.armAt[this.waveArmPart];
+    const side = this.waveArmPart === "arm-l" ? 1 : -1;
+    let r: number;
+    if (armAt >= 0) {
+      group.position.copy(this.meshes[armAt].position);
+      r = this.model.spheres[armAt].radius;
+    } else {
+      // No arms: held up beside the head, as the cast hand is.
+      const head = this.popHand?.head;
+      if (!head) {
+        group.visible = false;
+        return;
+      }
+      // Out to the side, level with the head, held out from it.
+      const out = smooth(0.04, 0.22, phase);
+      group.position.set(
+        head.center[0] - head.radius * (0.4 + 0.95 * out),
+        head.center[1] + head.radius * 0.35,
+        head.center[2] - head.radius * 0.3,
+      );
+      r = head.radius * POP_HAND * 1.4;
+    }
+    r *= MIC_SIZE;
+    group.scale.setScalar(r);
+    // Held out level, lengthways in the fist: the ball (its -y) pointing
+    // forward, a touch out to the arm's own side.
+    const outward =
+      armAt >= 0 ? Math.sign(this.model.spheres[armAt].center[0]) || 1 : -1;
+    group.quaternion.setFromUnitVectors(
+      micDown,
+      micPoint.set(outward * 0.12, 0, -1).normalize(),
+    );
+    group.visible = true;
+    if (phase >= MIC_DROP_RELEASE) this.releaseMic(mic, side);
+  }
+
+  /** Lets the mic go: out of the herzie and into the world where it is. */
+  private releaseMic(mic: NonNullable<HerzieModel["mic"]>, side: number) {
+    const { group } = mic;
+    // Into the scene itself: whatever the herzie is parented to (the Town's
+    // player group) moves with it, and the mic stays where it lands.
+    let world: THREE.Object3D | null = this.root.parent;
+    while (world?.parent) world = world.parent;
+    if (!world) {
+      // Nowhere to leave it.
+      group.visible = false;
+      return;
+    }
+    group.updateWorldMatrix(true, false);
+    const pos = new THREE.Vector3();
+    const quat = new THREE.Quaternion();
+    const size = new THREE.Vector3();
+    group.matrixWorld.decompose(pos, quat, size);
+    const scale = this.root.getWorldScale(new THREE.Vector3()).y;
+    const h = Math.max(0.1, this.height * scale);
+    const r = size.y;
+    const heading = this.heading;
+    const floor =
+      this.groundAt?.(pos.x, pos.z) ??
+      this.root.getWorldPosition(new THREE.Vector3()).y;
+    world.attach(group);
+    group.scale.setScalar(r);
+    mic.drop = {
+      pos,
+      // Let go, not thrown: it drops from the open hand.
+      vel: new THREE.Vector3(0, 0, 0),
+      axis: new THREE.Vector3(Math.cos(heading), 0, -Math.sin(heading)),
+      base: quat,
+      landedAt: null,
+      angle: 0,
+      spin: side * 3,
+      r,
+      h,
+      floor,
+      lying: false,
+      age: 0,
+    };
+  }
+
+  /** One step of the let-go mic, in world space. */
+  private stepMicDrop(
+    mic: NonNullable<HerzieModel["mic"]>,
+    d: NonNullable<NonNullable<HerzieModel["mic"]>["drop"]>,
+  ) {
+    const { group } = mic;
+    const dt = this.lastDt;
+    d.age += dt;
+    d.vel.y -= 9 * d.h * dt;
+    d.pos.addScaledVector(d.vel, dt);
+    if (d.lying) {
+      // Settled flat on its side.
+      const target = Math.round(d.angle / Math.PI) * Math.PI;
+      d.angle += (target - d.angle) * Math.min(1, 10 * dt);
+    } else d.angle += d.spin * dt;
+    group.quaternion.setFromAxisAngle(d.axis, d.angle).multiply(d.base);
+    // Down onto the floor under it, on whichever part of it is lowest as it
+    // turns: its handle's end first, then the ball as it tips over.
+    const ground = this.groundAt?.(d.pos.x, d.pos.z) ?? d.floor;
+    const low = micLowest(group.quaternion) * d.r;
+    if (d.pos.y + low <= ground) {
+      d.pos.y = ground - low;
+      if (d.landedAt === null) d.landedAt = d.age;
+      if (d.vel.y < 0) {
+        const settled = Math.abs(d.vel.y) < 0.4 * d.h;
+        d.vel.y = settled ? 0 : -d.vel.y * 0.38;
+        // It tips over on its first knock, and spins less each bounce.
+        if (!d.lying) d.spin = d.spin === 0 ? 4 : d.spin * 0.6;
+        if (settled) d.lying = true;
+      }
+      const drag = Math.exp(-8 * dt);
+      d.vel.x *= drag;
+      d.vel.z *= drag;
+    }
+    group.position.copy(d.pos);
+    const fade = smooth(MIC_STAY_SECONDS, MIC_STAY_SECONDS + 0.8, d.age);
+    group.scale.setScalar(d.r * (1 - fade));
+    if (fade >= 1) this.stowMic(mic);
   }
 
   /** 0..1 through the spin hop; undefined when not spinning. */
@@ -1822,6 +2260,7 @@ export class HerzieModel {
     this.danceTime = from.danceTime;
     this.danceClock = from.danceClock;
     this.sitting = from.sitting;
+    this.floorSit = from.floorSit;
     this.sitWeight = from.sitWeight;
     this.jumps = from.jumps;
     this.airTime = from.airTime;
@@ -2545,7 +2984,7 @@ export class HerzieModel {
   }
 
   private stepSit(dt: number) {
-    const target = this.sitting ? 1 : 0;
+    const target = this.sitting || this.floorSit ? 1 : 0;
     this.sitWeight +=
       (target - this.sitWeight) * (1 - Math.exp(-SIT_BLEND_RATE * dt));
     if (Math.abs(this.sitWeight - target) < 1e-3) this.sitWeight = target;
@@ -2575,6 +3014,12 @@ export class HerzieModel {
           ? undefined
           : this.catchTime / CATCH_SECONDS,
       catchArm: this.catchArm,
+      emoteKind: this.timedEmote,
+      emotePhase:
+        this.timedEmote !== undefined && this.emoteTime !== undefined
+          ? this.emoteTime / timedEmoteSeconds(this.timedEmote)
+          : undefined,
+      emoteArm: this.waveArmPart,
       wavePhase:
         this.emoteMove === "wave" && this.emoteTime !== undefined
           ? this.emoteTime / EMOTE_SECONDS
@@ -2627,6 +3072,7 @@ export class HerzieModel {
         p.group.position.copy(at).add(propAim);
       } else p.group.position.copy(at).add(p.offset);
     }
+    this.poseMic();
     if (this.torsoAt >= 0) {
       const [x, y, z] = offsets[this.torsoAt];
       this.torsoOffset = [x, y, z];
@@ -2727,6 +3173,18 @@ export class HerzieModel {
     ) {
       const k = (1 - w) * (1 - this.sitWeight);
       const h = waveHop(this.waveHopTime);
+      hop = Math.max(hop, h.lift * k);
+      squash += h.squash * k;
+    }
+    // Cheering: two hops with the arms up, wherever it has legs or not.
+    if (
+      this.timedEmote === "cheer" &&
+      this.emoteTime !== undefined &&
+      this.airTime === undefined &&
+      this.landTime === undefined
+    ) {
+      const k = (1 - w) * (1 - this.sitWeight);
+      const h = cheerHop(this.emoteTime / CHEER_SECONDS);
       hop = Math.max(hop, h.lift * k);
       squash += h.squash * k;
     }
@@ -2931,6 +3389,10 @@ export class HerzieModel {
     for (const m of this.materials) m.dispose();
     this.glassDepth?.dispose();
     this.glassShadow?.dispose();
+    for (const m of this.mic?.materials ?? []) m.dispose();
+    for (const g of this.mic?.geometries ?? []) g.dispose();
+    for (const t of this.mic?.textures ?? []) t.dispose();
+    this.mic?.group.removeFromParent();
     // Its own, unlike the shared part geometries.
     this.cloak?.geometry.dispose();
     this.tie?.ribbon.dispose();

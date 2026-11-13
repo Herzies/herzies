@@ -15,7 +15,11 @@
 import { DurableObject } from "cloudflare:workers";
 import { parseTune, TUNE_MIN_INTERVAL_MS } from "@herzies/shared/boss-fight";
 import { hasInstrument } from "@herzies/shared/classes";
-import { EMOTE_COOLDOWN_MS, isEmoteId } from "@herzies/shared/emotes";
+import {
+  EMOTE_COOLDOWN_MS,
+  emoteCooldownMs,
+  isEmoteId,
+} from "@herzies/shared/emotes";
 import { SKILL_DEFS, skillValue } from "@herzies/shared/skills";
 import { healMult } from "@herzies/shared/stats";
 import {
@@ -164,6 +168,9 @@ type Session = {
   stanceAt?: number;
   /** When it last played an emote (Date.now() ms). */
   emoteAt?: number;
+  /** When each emote was last played (ms), for the ones with their own
+   * cooldown (see emoteCooldownMs). */
+  emoteAtById?: Map<string, number>;
 };
 
 export class TownRoom extends DurableObject<Env> {
@@ -1059,7 +1066,10 @@ export class TownRoom extends DurableObject<Env> {
     if (!p.emotes?.includes(e)) return;
     if (s.emoteAt !== undefined && now - s.emoteAt < EMOTE_COOLDOWN_MS - 250)
       return;
+    const last = s.emoteAtById?.get(e);
+    if (last !== undefined && now - last < emoteCooldownMs(e) - 250) return;
     s.emoteAt = now;
+    (s.emoteAtById ??= new Map()).set(e, now);
     this.broadcast({ t: "emote", id: p.id, e }, s);
   }
 

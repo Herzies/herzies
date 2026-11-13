@@ -5208,6 +5208,122 @@ function waveDeltas(spheres: Sphere[], phase: number, arm: string): V3[] {
   });
 }
 
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+
+/** The emotes (besides the wave) posed here; the model times them. */
+export type PoseEmote = "bow" | "cheer" | "micdrop";
+
+/** Where in a mic drop (phase 0..1) the mic leaves the hand. */
+export const MIC_DROP_RELEASE = 0.6;
+
+/** How much an emote takes over its arms at `phase`: up, held, down. */
+export function emoteArmWeight(kind: PoseEmote, phase: number): number {
+  if (kind === "cheer")
+    return ease(0, 0.18, phase) * (1 - ease(0.84, 1, phase));
+  if (kind === "micdrop")
+    return ease(0, 0.2, phase) * (1 - ease(0.74, 0.94, phase));
+  return 0;
+}
+
+/** The arms an emote takes over. */
+function emoteArms(kind: PoseEmote, arm: string): readonly string[] {
+  return kind === "cheer"
+    ? ["arm-l", "arm-r"]
+    : kind === "micdrop"
+      ? [arm]
+      : [];
+}
+
+/**
+ * The arms of a cheer (both thrown up, pumping) or a mic drop (one hand
+ * brought up in front of the face to hold the mic out, then opened wide to
+ * let it go), as deltas from rest. Every other part stays put.
+ */
+function emoteArmDeltas(
+  spheres: Sphere[],
+  kind: PoseEmote,
+  phase: number,
+  micArm: string,
+): V3[] {
+  const rig = buildRig(spheres);
+  const arms = emoteArms(kind, micArm);
+  return spheres.map((sp): V3 => {
+    const shoulder = rig.shoulders[sp.part];
+    if (!shoulder || !arms.includes(sp.part)) return [0, 0, 0];
+    const side = LIMB_SIDE[sp.part] ?? 1;
+    let dir: V3;
+    let reach: number;
+    if (kind === "cheer") {
+      // One pump a hop: out and up at the top of each of the three.
+      const u = Math.min(1, Math.max(0, (phase - 0.1) / 0.8));
+      const pump = 2 * Math.sin(Math.PI * ((u * 3) % 1)) - 1;
+      dir = norm([side * (0.5 + 0.18 * pump), -1, -0.15]);
+      reach = WAVE_REACH + 0.1 * pump;
+    } else {
+      // Straight out to the side, level with the shoulder.
+      const held: V3 = norm([side * 1, -0.1, -0.2]);
+      const open: V3 = norm([side * 1, 0.12, -0.2]);
+      const rest = norm([side * 0.3, 1, 0]);
+      const hold = ease(0.1, 0.26, phase);
+      const letGo = ease(
+        MIC_DROP_RELEASE - 0.02,
+        MIC_DROP_RELEASE + 0.06,
+        phase,
+      );
+      const home = ease(0.7, 0.94, phase);
+      const raised = norm(add(scale(rest, 1 - hold), scale(held, hold)));
+      const flung = norm(add(scale(raised, 1 - letGo), scale(open, letGo)));
+      dir = norm(add(scale(flung, 1 - home), scale(rest, home)));
+      reach = lerp(1, 1.85, hold);
+    }
+    const length = Math.hypot(...sub(sp.center, shoulder));
+    return sub(add(shoulder, scale(dir, length * reach)), sp.center);
+  });
+}
+
+/** The whole body turned about its feet for an emote: forward in a bow,
+ * a touch back as a mic is held up. Radians, positive is forward. */
+function emotePitch(kind: PoseEmote, phase: number): number {
+  if (kind === "bow")
+    return 0.82 * ease(0, 0.34, phase) * (1 - ease(0.66, 1, phase));
+  if (kind === "micdrop")
+    return (
+      -0.16 *
+      ease(0.05, 0.25, phase) *
+      (1 - ease(MIC_DROP_RELEASE, 0.85, phase))
+    );
+  return 0;
+}
+
+/** `offsets` with the herzie turned about its feet by an emote's pitch. */
+function emoteLean(
+  spheres: Sphere[],
+  offsets: V3[],
+  kind: PoseEmote,
+  phase: number,
+): V3[] {
+  const pitch = emotePitch(kind, phase);
+  if (Math.abs(pitch) < 1e-4) return offsets;
+  let low = Number.NEGATIVE_INFINITY;
+  let cx = 0;
+  let cz = 0;
+  let n = 0;
+  spheres.forEach((sp) => {
+    if (isSceneFixed(sp.part)) return;
+    low = Math.max(low, sp.center[1] + sp.radius);
+    cx += sp.center[0];
+    cz += sp.center[2];
+    n++;
+  });
+  if (!n) return offsets;
+  const pivot: V3 = [cx / n, low, cz / n];
+  return offsets.map((d, i): V3 => {
+    const sp = spheres[i];
+    if (isSceneFixed(sp.part)) return d;
+    return sub(turnAbout(add(sp.center, d), pivot, 0, pitch), sp.center);
+  });
+}
+
 /** A herzie with legs waves standing on one: it leans over the leg
  * opposite the waving arm and lifts the other off the ground. */
 const WAVE_TILT = {
@@ -6500,6 +6616,11 @@ export type CreatureMotion = Pick<
    * isn't waving. `waveArm` is the arm (WAVE_ARM unless given). */
   wavePhase?: number;
   waveArm?: string;
+  /** A timed emote besides the wave (bow, cheer, mic drop), and how far
+   * through it is, 0..1. `emoteArm` is the arm a mic drop holds up. */
+  emoteKind?: PoseEmote;
+  emotePhase?: number;
+  emoteArm?: string;
   /** How far its class gear is drawn: 0 slung on its back to 1 in its
    * hands (see DRAW). */
   drawPhase?: number;
@@ -6559,6 +6680,17 @@ export function creaturePoseOffsets(
       ? waveDeltas(base, pose.wavePhase, waveArm)
       : null;
   const wavew = pose.wavePhase !== undefined ? waveWeight(pose.wavePhase) : 0;
+  const emoteKind = pose.emoteKind;
+  const emotePhase = pose.emotePhase ?? 0;
+  const emoteArm = pose.emoteArm ?? WAVE_ARM;
+  const ew =
+    emoteKind !== undefined ? emoteArmWeight(emoteKind, emotePhase) : 0;
+  const emoted =
+    emoteKind !== undefined && ew > 0
+      ? emoteArmDeltas(base, emoteKind, emotePhase, emoteArm)
+      : null;
+  const emotedArms =
+    emoteKind !== undefined ? emoteArms(emoteKind, emoteArm) : [];
   const offsets = spheres.map((s, i): V3 => {
     const b = base[i].center;
     // Scene-anchored parts (a floating pet) keep their own idle bob even
@@ -6595,6 +6727,13 @@ export function creaturePoseOffsets(
       x = x * (1 - wavew) + g[0] * wavew;
       y = y * (1 - wavew) + g[1] * wavew;
       z = z * (1 - wavew) + g[2] * wavew;
+    }
+    // A cheer or a mic drop takes its arms over (a cast, after, wins).
+    if (emoted && emotedArms.includes(s.part)) {
+      const g = emoted[i];
+      x = x * (1 - ew) + g[0] * ew;
+      y = y * (1 - ew) + g[1] * ew;
+      z = z * (1 - ew) + g[2] * ew;
     }
     // A cast takes the casting arm over; the lean adds to whatever else.
     const c = cast?.[i];
@@ -6641,7 +6780,11 @@ export function creaturePoseOffsets(
           (1 - w) * (1 - dw) * (1 - sw),
         )
       : posed;
-  return grounded(spheres, tilted, 1 - sw);
+  const leaned =
+    emoteKind !== undefined
+      ? emoteLean(spheres, tilted, emoteKind, emotePhase)
+      : tilted;
+  return grounded(spheres, leaned, 1 - sw);
 }
 
 /**

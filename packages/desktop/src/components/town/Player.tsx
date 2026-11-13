@@ -485,7 +485,10 @@ export function Player({
     // Standing still to music: dance.
     stillFor.current = rt.playerSpeed > 0.05 ? 0 : stillFor.current + dt;
     townLive.dancing =
-      townLive.music && !townLive.seat && stillFor.current >= DANCE_AFTER;
+      townLive.music &&
+      !townLive.seat &&
+      !herzie.floorSit &&
+      stillFor.current >= DANCE_AFTER;
     herzie.dancing = townLive.dancing;
     // Space: hop, unless it's seated or being carried through a portal. The
     // body jumps; the walk goes on under it, steered as ever.
@@ -507,7 +510,7 @@ export function Player({
       emoteRequest.id = null;
       townLive.lastInputAt = performance.now();
       if (!combat.on && !townLive.frozen && herzie.emote(emote)) {
-        emotePlayed();
+        emotePlayed(emote);
         townNet().sendEmote(emote);
       }
     }

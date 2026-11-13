@@ -22,3 +22,12 @@ describe("emotes", () => {
     expect(ownedEmotes(null)).toEqual([]);
   });
 });
+
+describe("emote cooldowns", () => {
+  it("a mic drop waits for its mic to go; the rest wait the usual moment", async () => {
+    const { emoteCooldownMs, EMOTE_COOLDOWN_MS } = await import("./emotes.js");
+    expect(emoteCooldownMs("micdrop")).toBeGreaterThan(EMOTE_COOLDOWN_MS);
+    expect(emoteCooldownMs("wave")).toBe(EMOTE_COOLDOWN_MS);
+    expect(emoteCooldownMs("not-an-emote")).toBe(EMOTE_COOLDOWN_MS);
+  });
+});
