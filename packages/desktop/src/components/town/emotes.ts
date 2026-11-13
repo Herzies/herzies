@@ -1,7 +1,7 @@
 import {
   EMOTE_COOLDOWN_MS,
-  emoteCooldownMs,
   type EmoteId,
+  emoteCooldownMs,
   isEmoteId,
   ownedEmotes,
 } from "@herzies/shared";
@@ -66,7 +66,10 @@ export function playEmote(id: string) {
   const now = performance.now();
   if (now - lastPlayedAt < EMOTE_COOLDOWN_MS) return;
   // Its own cooldown, if it has one (a Mic Drop's mic is still on the floor).
-  if (now - (playedAt.get(id) ?? Number.NEGATIVE_INFINITY) < emoteCooldownMs(id))
+  if (
+    now - (playedAt.get(id) ?? Number.NEGATIVE_INFINITY) <
+    emoteCooldownMs(id)
+  )
     return;
   emoteRequest.id = id;
 }
