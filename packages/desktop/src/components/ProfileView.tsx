@@ -153,9 +153,16 @@ export function ProfileView({
 
         {!isSelf && (
           <div className="mb-2 flex shrink-0 gap-1.5">
-            <button type="button" className="btn text-purple" onClick={onTrade}>
-              Trade
-            </button>
+            {/* Trading needs a friendship: the server refuses otherwise. */}
+            {isFriend && (
+              <button
+                type="button"
+                className="btn text-purple"
+                onClick={onTrade}
+              >
+                Trade
+              </button>
+            )}
             {!canRemove && requestPending && (
               <button type="button" className="btn text-text-dim" disabled>
                 Request sent

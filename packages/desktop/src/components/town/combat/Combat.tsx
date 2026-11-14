@@ -63,7 +63,7 @@ import {
   nextHand,
 } from "./discs";
 import { DUMMY, type DummyState, hitDummy, meterDps } from "./dummy";
-import { bossFight, bossNow } from "./fight";
+import { bossFight, bossNow, useBossFight } from "./fight";
 import { enterMouseLook, exitMouseLook } from "./mouseLook";
 import {
   attackSpeedOf,
@@ -160,6 +160,11 @@ export function Combat({
   // to fight (map.combat).
   const canFight = active;
 
+  // The Tower is a fight from the first step: aim mode starts on (Tab still
+  // leaves it).
+  useBossFight();
+  const inTower = !!bossFight.tower;
+
   // Knocked out: back to roaming, the mouse let go.
   const down = !!useVitals()?.down;
   useEffect(() => {
@@ -253,6 +258,7 @@ export function Combat({
     const onHidden = () => {
       if (document.hidden) leave();
     };
+    if (inTower && !getVitals()?.down) void enter();
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
     window.addEventListener("pointerup", onPointerUp);
@@ -276,7 +282,7 @@ export function Combat({
       document.removeEventListener("mousedown", onMouseDown, true);
       leave();
     };
-  }, [canFight, surface]);
+  }, [canFight, surface, inTower]);
 
   // A new island (Combat comes and goes with its physics): discs still
   // out are home in the hand, not flying across the portal after it.
