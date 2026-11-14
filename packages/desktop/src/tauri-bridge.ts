@@ -228,11 +228,27 @@ export const herzies = {
 
   onStateUpdate: (cb: (state: AppState) => void) => {
     let cancelled = false;
+    // Only the latest push matters: a page that was suspended gets them all
+    // at once on wake, and applying each (deep merge + render) is the freeze.
+    let latest: AppState | null = null;
+    let raf = 0;
+    const flush = () => {
+      raf = 0;
+      const next = latest;
+      latest = null;
+      if (next && !cancelled) cb(next);
+    };
     const unlisten = listen<AppState>("state-update", (event) => {
-      if (!cancelled) cb(event.payload);
+      if (cancelled) return;
+      probe.stateUpdates++;
+      latest = event.payload;
+      // Hidden pages get no frames: apply it when they do (the wake refetch
+      // below makes it moot anyway).
+      if (!raf) raf = requestAnimationFrame(flush);
     });
     return () => {
       cancelled = true;
+      if (raf) cancelAnimationFrame(raf);
       unlisten.then((fn) => fn());
     };
   },
@@ -736,6 +752,43 @@ function watchWake() {
     wakeRaf = requestAnimationFrame(tick);
   };
   wakeRaf = requestAnimationFrame(tick);
+}
+
+/** Dev-only wake probe: what arrived while the page was hidden, and how
+ * long the first frame took once it came back (see the log line on wake). */
+export const probe = { stateUpdates: 0 };
+if (import.meta.env.DEV && typeof document !== "undefined") {
+  let hiddenAt = 0;
+  let before = 0;
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      hiddenAt = Date.now();
+      before = probe.stateUpdates;
+      return;
+    }
+    if (!hiddenAt) return;
+    const woke = performance.now();
+    const hiddenSecs = Math.round((Date.now() - hiddenAt) / 1000);
+    const pushes = probe.stateUpdates - before;
+    requestAnimationFrame(() => {
+      const frameMs = Math.round(performance.now() - woke);
+      setTimeout(() => {
+        console.info(
+          `[wake] hidden ${hiddenSecs}s, ${pushes} state pushes while hidden, first frame +${frameMs}ms`,
+        );
+      }, 100);
+    });
+  });
+}
+
+/** Tells the backend whether the page is on screen, so it stops pushing
+ * state at a suspended webview. */
+function reportUiActive() {
+  invoke<void>("set_ui_active", { active: !document.hidden }).catch(() => {});
+}
+if (isTauri() && typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", reportUiActive);
+  reportUiActive();
 }
 
 if (isTauri()) {

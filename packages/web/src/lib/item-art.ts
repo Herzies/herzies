@@ -229,6 +229,9 @@ function adoptLegacyCardArt(): void {
 const EXTRA_ICONS: ArtItem[] = [
   { id: BANK_EXPANSION.id, name: BANK_EXPANSION.name, autoColor: "#facc15" },
   { id: "emote-wave", name: "Wave (emote)", autoColor: "#f6c99c" },
+  { id: "emote-cheer", name: "Cheer (emote)", autoColor: "#f6c99c" },
+  { id: "emote-sit", name: "Sit (emote)", autoColor: "#f6c99c" },
+  { id: "emote-micdrop", name: "Mic Drop (emote)", autoColor: "#f6c99c" },
   {
     id: "visitor-orphiez",
     name: "Orphiez (Town portrait)",

@@ -46,7 +46,7 @@ import { IncomingFriendOverlay } from "./components/IncomingFriendOverlay";
 import { IncomingTradeOverlay } from "./components/IncomingTradeOverlay";
 import { InventoryView } from "./components/InventoryView";
 import { LeaderboardView } from "./components/LeaderboardView";
-import { LoadingSplash } from "./components/LoadingSplash";
+import { LoadingSplash, useSplashShowing } from "./components/LoadingSplash";
 import { Notices } from "./components/Notices";
 import { OnboardingScreen } from "./components/OnboardingScreen";
 import { OverlayWindow } from "./components/OverlayWindow";
@@ -294,6 +294,8 @@ function App() {
     return () => clearTimeout(t);
   }, []);
   const worldLoading = !worldSettled && !loadGaveUp;
+  // The update and what's-new notices wait out any loading splash.
+  const splashShowing = useSplashShowing();
   useEffect(() => {
     homeMode.set(base === "home");
   }, [base]);
@@ -578,6 +580,11 @@ function App() {
       setHydrated(true);
     });
     const unlistenState = herzies.onStateUpdate(applyState);
+    // Pushes are skipped while the page is hidden: catch up once on return.
+    const onVisible = () => {
+      if (!document.hidden) herzies.getState().then(applyState);
+    };
+    document.addEventListener("visibilitychange", onVisible);
     // What the backend says happened (a pickup, a friend, a visitor, a level
     // up): into the log, and over the screen for a moment.
     const unlistenActivity = herzies.onActivity((message) => {
@@ -612,6 +619,7 @@ function App() {
     });
     return () => {
       unlistenState();
+      document.removeEventListener("visibilitychange", onVisible);
       unlistenActivity();
       unlistenLog();
       unlistenDeepLink();
@@ -1942,6 +1950,7 @@ function App() {
       )}
 
       {herzie &&
+        !splashShowing &&
         availableUpdate &&
         availableUpdate.version !== dismissedUpdateVersion &&
         overlay !== "settings" && (
@@ -1990,7 +1999,7 @@ function App() {
           />
         )}
 
-      {herzie && whatsNewVersion && (
+      {herzie && !splashShowing && whatsNewVersion && (
         <WhatsNewOverlay
           version={whatsNewVersion}
           highlights={

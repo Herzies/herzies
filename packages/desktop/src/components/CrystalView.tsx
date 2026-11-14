@@ -43,6 +43,7 @@ function spring(
   damping: number,
 ) {
   // Sub-steps keep a long frame (coming back to the page) stable.
+  dt = Math.min(dt, 0.1);
   const n = Math.max(1, Math.ceil(dt / (1 / 120)));
   const h = dt / n;
   for (let i = 0; i < n; i++) {

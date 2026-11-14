@@ -334,7 +334,9 @@ fn add_friend_locally(
         s.bump_friend_epoch();
         let app_state = s.to_app_state(env!("CARGO_PKG_VERSION"));
         drop(s);
-        let _ = app.emit("state-update", &app_state);
+        if tray::is_ui_active() {
+            let _ = app.emit("state-update", &app_state);
+        }
     }
     let _ = app.emit(
         "activity",
@@ -1207,6 +1209,14 @@ async fn fetch_ongoing_trades() -> Result<serde_json::Value, String> {
         Some(trades) => Ok(serde_json::json!({ "trades": trades })),
         None => Ok(serde_json::json!({ "trades": [] })),
     }
+}
+
+/// The page reports whether it's on screen. While it isn't, periodic state
+/// pushes are skipped (a suspended webview queues them and chews through the
+/// backlog on wake); the page refetches when it comes back.
+#[tauri::command]
+fn set_ui_active(active: bool) {
+    tray::set_ui_active(active);
 }
 
 #[tauri::command]
@@ -2094,7 +2104,7 @@ async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: f64) -> Resu
     let app_state = {
         let s = state.lock().unwrap();
         let changed = s.current_now_playing != np_before || s.pending_minutes != minutes_before;
-        if !changed || !tray::is_window_visible() {
+        if !changed || !tray::is_window_visible() || !tray::is_ui_active() {
             return Ok(());
         }
         s.to_app_state(env!("CARGO_PKG_VERSION"))
@@ -2564,7 +2574,9 @@ async fn sync_tick_with(
         s.last_sync_ok = is_logged_in;
         let app_state = s.to_app_state(env!("CARGO_PKG_VERSION"));
         drop(s);
-        let _ = app.emit("state-update", &app_state);
+        if tray::is_ui_active() {
+            let _ = app.emit("state-update", &app_state);
+        }
         return Ok(());
     }
 
@@ -2759,7 +2771,9 @@ async fn sync_tick_with(
 
         let app_state = s.to_app_state(env!("CARGO_PKG_VERSION"));
         drop(s);
-        let _ = app.emit("state-update", &app_state);
+        if tray::is_ui_active() {
+            let _ = app.emit("state-update", &app_state);
+        }
 
         if friend_codes_changed {
             let app_clone = app.clone();
@@ -2990,6 +3004,7 @@ pub fn run() {
         .manage(LoginAttempt(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             get_state,
+            set_ui_active,
             login,
             cancel_login,
             logout,
@@ -3158,13 +3173,18 @@ pub fn run() {
                 }
             }
 
-            // Cold start — whether opened by the user, launched at login, or
-            // run in dev — always surfaces the window. Goes through the tray's
-            // show path rather than a bare window.show(): that also activates
-            // the app, without which the window opens behind whatever is
-            // frontmost and nothing visibly happens.
-            tray::ensure_visible(app.handle());
-            if tauri::is_dev() {
+            // Cold start surfaces the window, whether the user opened the app
+            // or it's dev. Launched at login (the `--autostart` the plugin
+            // passes) it stays in the menu bar instead: listening, tray up,
+            // no window until it's opened. Goes through the tray's show path
+            // rather than a bare window.show(): that also activates the app,
+            // without which the window opens behind whatever is frontmost
+            // and nothing visibly happens.
+            let at_login = std::env::args().any(|a| a == "--autostart");
+            if !at_login {
+                tray::ensure_visible(app.handle());
+            }
+            if tauri::is_dev() && !at_login {
                 // No focus listener in dev, so mark the window focused by hand.
                 tray::on_focus(app.handle());
             }

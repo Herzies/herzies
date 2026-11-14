@@ -128,12 +128,24 @@ export function useTownNet(active: boolean): TownConnection {
     if (linger) clearTimeout(linger);
     linger = null;
     townLive.lastInputAt = performance.now();
-    conn.start();
+    // Minimised, covered or on another Space: the page is suspended, so a
+    // live socket queues the room's messages for the wake. Drop it, rejoin
+    // when the page is back.
+    const onVisibility = () => {
+      if (document.hidden) conn.stop();
+      else {
+        townLive.lastInputAt = performance.now();
+        conn.start();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    if (!document.hidden) conn.start();
     conn.setAfk(false);
     const afk = setInterval(() => {
       conn.setAfk(performance.now() - townLive.lastInputAt > AFK_MS);
     }, 5_000);
     return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
       clearInterval(afk);
       townLive.speed = 0;
       conn.setAfk(true);

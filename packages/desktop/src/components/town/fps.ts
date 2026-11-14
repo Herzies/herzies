@@ -37,3 +37,8 @@ export function useFpsShown(): boolean {
     () => shown,
   );
 }
+
+/** Frames the Town canvas has drawn (counted in its frame loop). The meter
+ * reads this, not the browser's frame rate: unfocused, the canvas draws
+ * less often than the page repaints. */
+export const drawn = { frames: 0 };

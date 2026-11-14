@@ -5,7 +5,8 @@ import {
 } from "@herzies/shared";
 import { Canvas, type RootState, useFrame, useThree } from "@react-three/fiber";
 import { Physics } from "@react-three/rapier";
-import { Suspense, useMemo, useRef } from "react";
+import { Suspense, useEffect, useMemo, useRef } from "react";
+import { useWindowFocused } from "../../tauri-bridge";
 import type { Look } from "../TownScene";
 import { ambient } from "./ambient";
 import { crystalHasSomething, isAttuning, startAttune } from "./attune";
@@ -25,6 +26,7 @@ import { Telegraphs } from "./combat/Telegraphs";
 import { getCrystal } from "./crystalState";
 import type { Hour } from "./DayCycle";
 import { driftClouds } from "./depth";
+import { drawn } from "./fps";
 import { isMouth, usePortalOpen } from "./gates";
 import { HomeDrops } from "./HomeDrops";
 import { HomeLayer } from "./HomeLayer";
@@ -171,6 +173,11 @@ export default function TownCanvas(props: TownCanvasProps) {
   // averaged back down to the same big pixels (see Supersample), at Home
   // too.
   const supersample = useTownSupersample();
+  // Visible but not the window you're in (a pinned window beside another
+  // app, the Town on a second screen): drawn at a fraction of the rate,
+  // which is most of the CPU.
+  const unfocused = !useWindowFocused();
+  const throttled = THROTTLE_UNFOCUSED && unfocused && !props.paused;
 
   return (
     <Canvas
@@ -191,11 +198,12 @@ export default function TownCanvas(props: TownCanvasProps) {
       // included, and the herzie stage (fixed, z-index 1) draws over them.
       style={{ imageRendering: "pixelated", isolation: "isolate" }}
       camera={{ fov: 55, near: 0.1, far: 400 }}
-      frameloop={props.paused ? "never" : "always"}
+      frameloop={props.paused || throttled ? "never" : "always"}
       onCreated={props.onCreated}
     >
       <TownRuntimeContext.Provider value={runtime}>
         <ClockGap />
+        {throttled && <UnfocusedTicker />}
         <Systems {...props} map={map} spots={spots} input={input} />
         {/* Rapier's WASM loads here: wait inside the canvas instead of
             suspending the whole Town again (the splash would blink). */}
@@ -302,12 +310,34 @@ const NO_STATS: HerzieStats = {
   moveSpeed: 0,
 };
 
+/** Off for now: the Town draws at full rate unfocused too. */
+const THROTTLE_UNFOCUSED = false;
+
+/** Unfocused frame rate. */
+const UNFOCUSED_FPS = 3;
+
+/** Draws the frames while the canvas is stopped for being unfocused. Not
+ * "demand": Rapier invalidates after every step while the player's body is
+ * awake, which would keep that drawing at the full rate. */
+function UnfocusedTicker() {
+  const advance = useThree((s) => s.advance);
+  useEffect(() => {
+    const id = setInterval(
+      () => advance(performance.now()),
+      1000 / UNFOCUSED_FPS,
+    );
+    return () => clearInterval(id);
+  }, [advance]);
+  return null;
+}
+
 /** The Town's clock doesn't run while it's paused (window closed to the
  * menu bar): the first frame back would carry the whole gap in `elapsedTime`
  * and everything swaying on it (trees, bunting, clouds) would jump to a new
  * phase. Takes the gap back out, ahead of every other frame callback. */
 function ClockGap() {
   useFrame((state, delta) => {
+    drawn.frames++;
     if (delta > 0.5) state.clock.elapsedTime -= delta;
   }, -1000);
   return null;

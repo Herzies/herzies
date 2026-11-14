@@ -5,6 +5,7 @@
 #
 #   scripts/local.sh up                 functions + web (:3101) + Town (:8797), Ctrl-C stops all
 #   scripts/local.sh desktop            the desktop app against them (quit the installed beta first)
+#   scripts/local.sh desktop-release    the same, as a release build (the production-only window handlers)
 #   scripts/local.sh herzie EMAIL LVL   set a local herzie's level (xp and stage to match)
 #   scripts/local.sh boss [HP] [LOBBY]  open the cave's lobby now; the fight locks in LOBBY
 #                                       minutes (default 3) with HP per herzie (default 20000)
@@ -106,6 +107,22 @@ cmd_desktop() {
     exec npx tauri dev
 }
 
+# The release build (what ships: bundled frontend, optimised Rust, the
+# production-only window handlers) against the local stack. Run the binary
+# itself, not the .app, so it gets this environment.
+cmd_desktop_release() {
+  load_stack
+  cd packages/desktop
+  npx tauri build --no-bundle
+  NEXT_PUBLIC_SUPABASE_URL="$API_URL" \
+    NEXT_PUBLIC_SUPABASE_ANON_KEY="$ANON_KEY" \
+    HERZIES_FUNCTIONS_URL="$API_URL/functions/v1" \
+    HERZIES_API_URL="http://localhost:$WEB_PORT/api" \
+    HERZIES_WEB_URL="http://localhost:$WEB_PORT" \
+    HERZIES_CONFIG_DIR="$HOME/.config/herzies-local" \
+    exec src-tauri/target/release/herzies-desktop
+}
+
 cmd_herzie() {
   local email="${1:?email}" level="${2:?level}"
   # Cumulative XP for the level (totalXpForLevel) and its stage
@@ -151,6 +168,7 @@ cmd_reset() {
 case "${1:-}" in
   up) cmd_up ;;
   desktop) cmd_desktop ;;
+  desktop-release) cmd_desktop_release ;;
   herzie) shift; cmd_herzie "$@" ;;
   boss) shift; cmd_boss "$@" ;;
   tower) shift; cmd_tower "$@" ;;

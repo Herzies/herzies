@@ -1166,7 +1166,7 @@ export function ChatPanel({
       ...(code && !isSelf(code)
         ? [{ label: "Profile", onClick: run("profile") }]
         : []),
-      ...(target.withTrade && code && !isSelf(code)
+      ...(target.withTrade && code && !isSelf(code) && isAlreadyFriend(code)
         ? [{ label: "Trade", onClick: run("trade") }]
         : []),
       { label: "Report (soon)", onClick: run("report") },

@@ -1781,6 +1781,9 @@ export class HerzieModel {
 
   /** Advances the animation and poses the parts. Call every frame. */
   update(dt: number, speed: number): void {
+    // A frame after a long stall (hidden page, wake) must not simulate the
+    // whole gap: stepLay alone runs dt*240 iterations.
+    dt = Math.min(dt, 0.1);
     this.lastDt = dt;
     // Walking off stands it up from the floor.
     if (this.floorSit && speed > 0.3) this.floorSit = false;

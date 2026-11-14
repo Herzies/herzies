@@ -18,6 +18,19 @@ static HIDE_PENDING: AtomicBool = AtomicBool::new(false);
 /// read this to throttle polling when the user can't see the result.
 static WINDOW_VISIBLE: AtomicBool = AtomicBool::new(false);
 
+/// Whether the page itself says it's on screen (document.visibility +
+/// focus). The window can be minimised, covered or on another Space while
+/// WINDOW_VISIBLE is still true; a suspended page queues every event we emit.
+static UI_ACTIVE: AtomicBool = AtomicBool::new(true);
+
+pub fn set_ui_active(active: bool) {
+    UI_ACTIVE.store(active, Ordering::Relaxed);
+}
+
+pub fn is_ui_active() -> bool {
+    UI_ACTIVE.load(Ordering::Relaxed)
+}
+
 pub fn is_window_visible() -> bool {
     WINDOW_VISIBLE.load(Ordering::Relaxed)
 }

@@ -41,7 +41,7 @@ import { bossFight, resetBossFight, useBossFight } from "./town/combat/fight";
 import { onLootLog } from "./town/combat/lootFeed";
 import { useBossResultsShown } from "./town/combat/results";
 import { useCombat } from "./town/combat/state";
-import { useFpsShown } from "./town/fps";
+import { drawn, useFpsShown } from "./town/fps";
 import { Hotbar } from "./town/Hotbar";
 import { homeMode, markWorldSettled } from "./town/homeMode";
 import { Key } from "./town/Key";
@@ -577,7 +577,7 @@ class TownBoundary extends Component<
 
 /** A key, as the hints show it. */
 /** Frames drawn per second, counted over each half second: the Town's,
- * since it draws every frame the browser does. Shown from Settings →
+ * counted from the canvas's own draws (it slows down unfocused). Shown from Settings →
  * Controls. Top right; in a raid the boss's card has that corner, so it
  * sits just left of it (the card's width, BossHud's BOSS_CARD). */
 function FrameRate({ className }: { className?: string }) {
@@ -585,18 +585,15 @@ function FrameRate({ className }: { className?: string }) {
   const bossCard = bossFight.on && !bossFight.tower;
   const [fps, setFps] = useState<number | null>(null);
   useEffect(() => {
-    let frames = 0;
+    let last = drawn.frames;
     let since = performance.now();
-    let raf = requestAnimationFrame(function tick(now) {
-      frames++;
-      if (now - since >= 500) {
-        setFps(Math.round((frames * 1000) / (now - since)));
-        frames = 0;
-        since = now;
-      }
-      raf = requestAnimationFrame(tick);
-    });
-    return () => cancelAnimationFrame(raf);
+    const id = setInterval(() => {
+      const now = performance.now();
+      setFps(Math.round(((drawn.frames - last) * 1000) / (now - since)));
+      last = drawn.frames;
+      since = now;
+    }, 500);
+    return () => clearInterval(id);
   }, []);
   return fps === null ? null : (
     <div
