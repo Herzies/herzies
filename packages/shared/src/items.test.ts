@@ -464,6 +464,14 @@ describe("seasonal drop windows", () => {
       "eivinds-evasive-pair",
     );
   });
+
+  it("puts Eivind's Wings on the back as mythic boss loot", () => {
+    const item = getItem("eivinds-wings");
+    expect(item?.rarity).toBe("mythic");
+    expect(item?.equipSlot).toBe("back");
+    expect(NON_DROPPABLE_ITEM_IDS).not.toContain("eivinds-wings");
+    expect(bossLootWeights().map((w) => w.itemId)).toContain("eivinds-wings");
+  });
 });
 
 describe("pickWeightedDrop", () => {
@@ -1755,9 +1763,9 @@ describe("boss loot", () => {
       new URL(`../../../supabase/migrations/${name}`, import.meta.url),
       "utf8",
     );
-  // settle_boss_fight lives in 00114; the roll was last replaced in 00147.
+  // settle_boss_fight lives in 00114; the roll was last replaced in 00149.
   const sql = migration("00114_boss_bonus_loot.sql");
-  const rollSql = migration("00147_fylling_wearables.sql");
+  const rollSql = migration("00149_eivind_set.sql");
 
   it("rolls from the same weights as bossLootWeights", () => {
     const roll = rollSql.slice(

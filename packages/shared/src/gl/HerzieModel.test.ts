@@ -1746,3 +1746,76 @@ describe("the cheer, sit and mic drop emotes", () => {
     }
   });
 });
+
+describe("Eivind's wings", () => {
+  const SET = {
+    seed: "model-test",
+    stage: 3,
+    equipped: { back: "eivinds-wings" },
+  };
+  /** Every position of a mesh's geometry, in the model's space. */
+  const reachOf = (h: HerzieModel) => {
+    let far = 0;
+    h.root.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh || !mesh.geometry.attributes.position) return;
+      const pos = mesh.geometry.attributes.position;
+      if (pos.count < 100) return;
+      for (let i = 0; i < pos.count; i++)
+        far = Math.max(far, Math.abs(pos.getX(i)));
+    });
+    return far;
+  };
+
+  it("are drawn at stage 3, as feathers rather than cloth", () => {
+    const h = new HerzieModel(SET);
+    expect(h.root.children.length).toBeGreaterThan(0);
+    // No cloak: the wings aren't a cloth sim.
+    expect(h.hasCloak).toBe(false);
+    // Not worn before the stage with a torso to hang them from.
+    expect(new HerzieModel({ ...SET, stage: 2 }).dangleSettled).toBe(true);
+  });
+
+  it("ride the torso: they bob with its walk", () => {
+    const h = new HerzieModel(SET);
+    const parts = h as unknown as {
+      wings: { group: THREE.Group };
+    };
+    let rise = 0;
+    let fall = 0;
+    for (let i = 0; i < 90; i++) {
+      h.update(1 / 60, 2.2);
+      rise = Math.max(rise, parts.wings.group.position.y);
+      fall = Math.min(fall, parts.wings.group.position.y);
+    }
+    expect(rise - fall).toBeGreaterThan(0.001);
+  });
+
+  it("fold at rest, and spread wide when it jumps", () => {
+    const h = new HerzieModel(SET);
+    for (let i = 0; i < 60; i++) h.update(1 / 60, 0);
+    const folded = reachOf(h);
+    h.jump();
+    let widest = 0;
+    for (let i = 0; i < 40; i++) {
+      h.update(1 / 60, 0);
+      widest = Math.max(widest, reachOf(h));
+    }
+    expect(widest).toBeGreaterThan(folded * 1.3);
+  });
+
+  it("go quiet again once it lands and stands still", () => {
+    const h = new HerzieModel(SET);
+    const wings = (h as unknown as { wings: { settled: boolean } }).wings;
+    h.jump();
+    for (let i = 0; i < 10; i++) h.update(1 / 60, 0);
+    expect(wings.settled).toBe(false);
+    // Stretching now and then is idle play: wait out one, to a still moment.
+    let quiet = false;
+    for (let i = 0; i < 1200 && !quiet; i++) {
+      h.update(1 / 60, 0);
+      quiet = wings.settled;
+    }
+    expect(quiet).toBe(true);
+  });
+});

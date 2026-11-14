@@ -146,6 +146,7 @@ import {
   type SurgeTuning,
   stepSurge,
 } from "./surge.js";
+import { WINGS_ITEM_ID, Wings } from "./wings.js";
 
 /** Which herzie, and dressed how. */
 export type HerzieLook = {
@@ -994,6 +995,9 @@ export class HerzieModel {
   private worldVelocity = new THREE.Vector3();
   /** Its cloak, simulated (see cloak-physics.ts); null without one. */
   private readonly cloak: CloakRun | null = null;
+  /** Its wings (Eivind's), beaten by hand rather than simulated; null
+   * without them. */
+  private readonly wings: Wings | null = null;
   /** For a herzie with no arms: the hand it grows to cast with, beside its
    * head, and where on the head it grows from. */
   private readonly popHand: {
@@ -1175,6 +1179,9 @@ export class HerzieModel {
     // A cloak, on a herzie with a back to hang it from.
     const cloakStyle = look.stage >= 3 ? cloakStyleFor(look.equipped) : null;
     const cloakRig = cloakStyle ? cutCloak(cloakStyle, spheres, feet) : null;
+    if (look.stage >= 3 && look.equipped?.back === WINGS_ITEM_ID) {
+      this.wings = this.dressWings(spheres, options.lighting);
+    }
     // Class gear rests on its back, but swings out and reaches further
     // drawn: bound it all the way through the draw.
     const drawing: Sphere[] = [];
@@ -1228,6 +1235,14 @@ export class HerzieModel {
         radius: reachOut,
         zone: "wearable",
         part: "cloak",
+      });
+    }
+    if (this.wings) {
+      drawing.push({
+        center: this.wings.reach.center,
+        radius: this.wings.reach.radius,
+        zone: "wearable",
+        part: "wings",
       });
     }
     this.bounds = turnBounds([...spheres, ...drawing], feet);
@@ -1591,6 +1606,18 @@ export class HerzieModel {
       this.cloak = this.dressCloak(cloakStyle, cloakRig, options.lighting);
       this.creature.add(this.cloak.mesh);
       for (const clasp of this.cloak.clasps) this.creature.add(clasp);
+    }
+    if (this.wings) {
+      this.creature.add(this.wings.group);
+      // The wings ride the torso's pose: find which sphere it is.
+      if (this.torsoAt < 0) {
+        let best = -1;
+        spheres.forEach((sp, i) => {
+          if (sp.zone === "wearable" || sp.part !== "body") return;
+          if (best < 0 || sp.radius > spheres[best].radius) best = i;
+        });
+        this.torsoAt = best;
+      }
     }
     this.creature.rotation.x = Math.PI;
     this.turn.add(this.creature);
@@ -2462,6 +2489,7 @@ export class HerzieModel {
     const motion = this.motionThisFrame(dt);
     this.stepThreads(dt, turned, motion);
     this.stepTie(dt, turned, motion);
+    this.stepWings(dt, motion);
     this.stepCloak(dt, turned);
     if (!this.dangles || !this.canDangle) {
       this.dangleSim = null;
@@ -2578,11 +2606,25 @@ export class HerzieModel {
     tie.ribbon.update(tie.sim.pos);
   }
 
+  /** Beats its wings with how it moved this frame. */
+  private stepWings(
+    dt: number,
+    motion: ReturnType<HerzieModel["motionThisFrame"]>,
+  ) {
+    this.wings?.update(dt, {
+      offset: this.torsoOffset,
+      velocity: motion.velocity,
+      jump: this.jumpHeight / (this.creature.scale.y || MODEL_SCALE),
+      sit: this.sitWeight,
+    });
+  }
+
   /** Nothing dangling is still moving. */
   get dangleSettled(): boolean {
     return (
       this.dangleSim === null &&
       (!this.tie || isTieSettled(this.tie.sim)) &&
+      (!this.wings || this.wings.settled) &&
       (!this.threads || isThreadSettled(this.threads.sim)) &&
       (!this.cloak ||
         this.clothDetail === "frozen" ||
@@ -2593,6 +2635,41 @@ export class HerzieModel {
   /** Whether it wears a cloak. */
   get hasCloak(): boolean {
     return this.cloak !== null;
+  }
+
+  /** Builds its wings: on the torso's back, in pale silk with a blue
+   * tip to every feather. Null without a torso. */
+  private dressWings(
+    spheres: Sphere[],
+    lighting: HerzieLighting | undefined,
+  ): Wings | null {
+    let body: Sphere | undefined;
+    for (const s of spheres) {
+      if (s.zone === "wearable" || s.part !== "body") continue;
+      if (!body || s.radius > body.radius) body = s;
+    }
+    if (!body) return null;
+    const { colors } = this.model;
+    const shadesOf = (hex: string) =>
+      primitiveShading({ zone: "wearable", color: hex }, colors).shades;
+    const material = herzieMaterial(
+      primitiveShading({ zone: "wearable", color: "#f4f8fc" }, colors),
+      0,
+      null,
+      this.scheme,
+      lighting,
+      1,
+      {
+        lining: shadesOf("#d6e6f7"),
+        trim: shadesOf("#3f82d0"),
+        finish: CLOTH_FINISH.silk,
+        // Each feather's tip, blue.
+        hemTrim: 0.16,
+        collarTrim: 0,
+      },
+    );
+    this.materials.push(material);
+    return new Wings({ center: body.center, radius: body.radius }, material, 0);
   }
 
   /** Builds its cloak's cloth, mesh and brooches. */
@@ -3530,6 +3607,7 @@ export class HerzieModel {
     this.mic?.group.removeFromParent();
     // Its own, unlike the shared part geometries.
     this.cloak?.geometry.dispose();
+    this.wings?.dispose();
     this.tie?.ribbon.dispose();
   }
 }

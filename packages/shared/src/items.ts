@@ -1392,7 +1392,7 @@ export const BOSS_LOOT_EXCLUDED_ITEM_IDS = ["cd"];
 /** What a boss's random loot is drawn from, and how likely each is: every
  * item that drops from listening (not in NON_DROPPABLE_ITEM_IDS, no
  * seasonal window, not in BOSS_LOOT_EXCLUDED_ITEM_IDS), weighted per BOSS_LOOT_RARITY_BOOST. settle_boss_fight
- * rolls from a copy of this list (boss_loot_roll, last in 00145_ff_wearables.sql);
+ * rolls from a copy of this list (boss_loot_roll, last in 00149_eivind_set.sql);
  * items.test.ts checks the two agree, so a new droppable item needs adding
  * there too. */
 export function bossLootWeights(): { itemId: string; weight: number }[] {
@@ -3184,6 +3184,40 @@ function renderEvasivePairFrame(yAngle: number): string[] {
   );
 }
 
+// --- Eivind's set cards ---
+// The Evasive Pair's blues and pale whites.
+const EIVIND_BLUE = "#3F82D0";
+const EIVIND_WHITE = "#F4F8FC";
+
+/** Eivind's Wings: a pair of white feathered wings, blue-edged, swept
+ * out from the shoulders. */
+function eivindWingsCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  const ax = Math.abs(ix);
+  if (ax < 0.04 || ax > 0.3) return null;
+  const t = (ax - 0.04) / 0.26; // 0 at the shoulder, 1 at the tip
+  const topEdge = -0.2 - 0.1 * t;
+  // Feathers: the lower edge steps down, one scallop per feather.
+  const feather = Math.floor(t * 4) / 4;
+  const bottomEdge =
+    -0.02 + 0.3 * Math.sin(Math.min(1, feather + 0.1) * 2.2) - 0.1 * t;
+  if (iy < topEdge || iy > bottomEdge) return null;
+  const rim = iy < topEdge + 0.025 || iy > bottomEdge - 0.025;
+  return rim
+    ? { bright: 0.95, color: EIVIND_BLUE }
+    : { bright: 0.9, color: EIVIND_WHITE };
+}
+
+function renderEivindWingsFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#7FB3E8",
+    "#3F6FA8",
+    "#1A2E48",
+    eivindWingsCardIcon,
+  );
+}
+
 // --- Fabulous Fabian (FF) cards ---
 /** FF Sneakers: a black low-top in profile, toe to the right, a
  * white sole and pink laces. */
@@ -3502,6 +3536,7 @@ const plutusCrownFrames = generateFrames(renderPlutusCrownFrame);
 const fabianCapFrames = generateFrames(renderFabianCapFrame);
 const fedoraFrames = generateFrames(renderFedoraFrame);
 const evasivePairFrames = generateFrames(renderEvasivePairFrame);
+const eivindWingsFrames = generateFrames(renderEivindWingsFrame);
 const ffSneakersFrames = generateFrames(renderFfSneakersFrame);
 const ffCloakFrames = generateFrames(renderFfCloakFrame);
 const ffPearlsFrames = generateFrames(renderFfPearlsFrame);
@@ -4278,6 +4313,18 @@ export const ITEMS: ItemDef[] = [
     equipSlot: "feet",
     sellPrice: 1500,
     stats: { moveSpeed: 20 },
+  },
+  // Eivind's wings, to go with the shoes. Mythic, drop-only.
+  {
+    id: "eivinds-wings",
+    name: "Eivind's Wings",
+    description: "Light as a feather, and nearly as quiet",
+    rarity: "mythic",
+    frames: eivindWingsFrames,
+    equipable: true,
+    equipSlot: "back",
+    minStage: 3,
+    sellPrice: 1500,
   },
   // More from Fabulous Fabian (FF), the in-game clothing brand behind the FF
   // Hat. Drop-only, like the hat: the listening pool and a boss's random loot.

@@ -48,8 +48,9 @@ const WEARABLE_OPTIONS = [
   "groove-cape",
   "drumhide-cloak",
   "tailwind-cloak",
-  // Shoes (drawn on stage 3, the one with legs).
+  // Eivind's (shoes are drawn on stage 3, the one with legs; so are wings).
   "eivinds-evasive-pair",
+  "eivinds-wings",
   // Fabulous Fabian (FF).
   "ff-shades",
   "ff-pearls-marble",
@@ -495,7 +496,8 @@ function toEquipped(ids: string[]): Equipped {
       id === "troubadour-mantle" ||
       id === "groove-cape" ||
       id === "ff-cloak-black" ||
-      id === "fyllings-cape"
+      id === "fyllings-cape" ||
+      id === "eivinds-wings"
     )
       out.back = id;
     else if (
