@@ -376,6 +376,7 @@ export function TownWorld({
                 tint={cn(PLAYER_CARD_TOWN, "backdrop-blur-md")}
               />
               <MusicBonus />
+              {!hudHidden ? <SkillHud stacked className="" /> : null}
             </div>
             <div
               className={cn(
@@ -391,7 +392,6 @@ export function TownWorld({
               )}
             >
               {combatHint}
-              {!hudHidden ? <SkillHud className="bottom-full right-0" /> : null}
               {!hudHidden ? (
                 <Hotbar
                   units={units}
