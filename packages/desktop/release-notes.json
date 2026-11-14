@@ -1,5 +1,9 @@
 [
   {
+    "version": "0.1.0-beta.71",
+    "highlights": ["Bug fixes, hopefully fewer freezes"]
+  },
+  {
     "version": "0.1.0-beta.70",
     "highlights": ["Fix performance issues"]
   },
