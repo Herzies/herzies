@@ -3,6 +3,10 @@ import { useEscape } from "../lib/escapeStack";
 import { HerzieStageContext, overlayHerzieStage } from "../lib/overlayStage";
 import { cn } from "../lib/utils";
 
+/** How long the herzie stage draws every frame after a window opens or
+ * settles: the web view may rebuild its layers late. */
+const SETTLE_MS = 1500;
+
 /**
  * A frosted window over the app (Herzie, Social, Premium, ...): rounded,
  * bordered glass from the top down to the window's bottom. No
@@ -118,8 +122,9 @@ export function OverlayWindow({
       overlayHerzieStage.setHost(host.current);
     // A window coming or going makes the web view rebuild its layers, which
     // can blank a still herzie in another window still open (Stats beside
-    // the Herzie window): draw it again.
-    overlayHerzieStage.redraw();
+    // the Herzie window): draw it again, and keep drawing while the layers
+    // settle.
+    overlayHerzieStage.redraw(SETTLE_MS);
   }, [open, noStage]);
   const [skySlot, setSkySlot] = useState<HTMLDivElement | null>(null);
   const stageContext = useMemo(
@@ -205,7 +210,7 @@ export function OverlayWindow({
         onAnimationEnd={(e) => {
           if (e.target !== e.currentTarget) return;
           // Its layers settle as the animation ends: once more (see above).
-          overlayHerzieStage.redraw();
+          overlayHerzieStage.redraw(SETTLE_MS);
           if (closing) {
             setPhase("closed");
             onClosed?.();

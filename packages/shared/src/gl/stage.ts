@@ -56,6 +56,8 @@ export class HerzieStage {
   private last = 0;
   /** Where everything was last drawn, to tell whether anything moved. */
   private lastLayout = "";
+  /** Draw every frame until then (performance.now() ms), moving or not. */
+  private forceUntil = 0;
 
   /**
    * Put the canvas inside `host` (first, under the rest of it) instead of
@@ -113,8 +115,12 @@ export class HerzieStage {
    * over or beside it) can drop what a canvas showed, and an idle stage
    * wouldn't redraw it.
    */
-  redraw() {
+  redraw(forMs = 0) {
     this.lastLayout = "";
+    // The layers can be rebuilt a while after the cause (the blur settling,
+    // the compositor catching up), not at one known moment: keep drawing
+    // every frame for a spell instead of once.
+    if (forMs > 0) this.forceUntil = performance.now() + forMs;
   }
 
   /** Draw `view` from now on; returns the function that stops it. */
@@ -260,7 +266,12 @@ export class HerzieStage {
     // Nothing animating and nothing moved: what's on the canvas is still
     // right, so leave it (an app left open all day shouldn't redraw a paused
     // herzie sixty times a second).
-    if (idle && layout === this.lastLayout) return;
+    if (
+      idle &&
+      layout === this.lastLayout &&
+      performance.now() > this.forceUntil
+    )
+      return;
     this.lastLayout = layout;
 
     const ratio = this.pixelScale * (this.supersampled ? SUPERSAMPLE : 1);
