@@ -580,6 +580,11 @@ function App() {
       setHydrated(true);
     });
     const unlistenState = herzies.onStateUpdate(applyState);
+    // Pushes are skipped while the page is hidden: catch up once on return.
+    const onVisible = () => {
+      if (!document.hidden) herzies.getState().then(applyState);
+    };
+    document.addEventListener("visibilitychange", onVisible);
     // What the backend says happened (a pickup, a friend, a visitor, a level
     // up): into the log, and over the screen for a moment.
     const unlistenActivity = herzies.onActivity((message) => {
@@ -614,6 +619,7 @@ function App() {
     });
     return () => {
       unlistenState();
+      document.removeEventListener("visibilitychange", onVisible);
       unlistenActivity();
       unlistenLog();
       unlistenDeepLink();

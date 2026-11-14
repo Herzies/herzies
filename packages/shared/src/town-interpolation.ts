@@ -91,6 +91,9 @@ function angleDelta(from: number, to: number): number {
 }
 
 /** One remote herzie's recent states, in server time. */
+/** Far more than the render delay ever spans. */
+const MAX_SAMPLES = 64;
+
 export class EntityBuffer {
   private samples: Sample[] = [];
 
@@ -104,6 +107,11 @@ export class EntityBuffer {
       this.samples.push({ t: t - TOWN_TICK_MS, s: { ...last.s, speed: 0 } });
     }
     this.samples.push({ t, s });
+    // sample() trims as frames draw; with none drawing (hidden page) it
+    // would grow without bound and trim in one long pass on wake.
+    if (this.samples.length > MAX_SAMPLES) {
+      this.samples.splice(0, this.samples.length - MAX_SAMPLES);
+    }
   }
 
   get empty(): boolean {
