@@ -4322,7 +4322,7 @@ export const ITEMS: ItemDef[] = [
   {
     id: "eivinds-wings",
     name: "Eivind's Wings",
-    description: "Light as a feather, and nearly as quiet",
+    description: "Fly, baby. Fly!",
     rarity: "mythic",
     frames: eivindWingsFrames,
     equipable: true,
