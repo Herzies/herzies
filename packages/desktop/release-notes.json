@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.1.0-beta.72",
+    "highlights": [
+      "Three class sets are in: The Troubadour, In the Groove and Drumhide",
+      "Eivind's Wings, and Eivind's set to go with the shoes",
+      "Class gear can now be traded and sold on the market",
+      "Always on top setting",
+      "New app icon"
+    ]
+  },
+  {
     "version": "0.1.0-beta.71",
     "highlights": ["Bug fixes, hopefully fewer freezes"]
   },

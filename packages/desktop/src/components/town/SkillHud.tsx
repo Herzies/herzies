@@ -13,15 +13,20 @@ import { townSave } from "./runtime";
  * the boss's busters (stacks, seconds left: time to hand the boss over),
  * a Haste (how much faster, the seconds left), and a Shuffle (how many
  * bounces, the seconds left).
+ * With `stacked` it's a plain list in the style of the music bonus
+ * (BossHud's MusicBonus), to sit right under it below the now-playing box.
  * Your skills sit on the hotbar (Hotbar.tsx) with their cooldowns; a skill
  * being played, or a Bard playing you back up, is the cast bar over its
  * middle (CastBar). (A level-up is a notice: lib/notices.ts.)
  */
 export function SkillHud({
   className = "bottom-3 right-2",
+  stacked = false,
 }: {
-  /** Where it sits: absolute-positioning classes. */
+  /** Where it sits: absolute-positioning classes (or, stacked, any). */
   className?: string;
+  /** Plain lines in the music bonus's style, in the flow, not boxes. */
+  stacked?: boolean;
 }) {
   const buffBox = useRef<HTMLDivElement>(null);
   const rattledBox = useRef<HTMLDivElement>(null);
@@ -76,31 +81,39 @@ export function SkillHud({
     return () => cancelAnimationFrame(raf);
   }, []);
 
+  const row = (color: string) =>
+    stacked
+      ? cn(
+          "px-0.5 text-ui font-bold [text-shadow:0_1px_2px_#000,0_0_6px_#000]",
+          color,
+        )
+      : cn("rounded bg-black/60 px-1.5 text-[11px]", color);
   return (
     <div
       className={cn(
-        "pointer-events-none absolute z-30 flex flex-col items-center gap-1",
+        "pointer-events-none flex flex-col",
+        stacked ? "self-start" : "absolute z-30 items-center gap-1",
         className,
       )}
     >
       <div
         ref={rattledBox}
-        className="rounded bg-black/60 px-1.5 text-[11px] text-[#ff8a7a]"
+        className={row("text-[#ff8a7a]")}
         style={{ display: "none" }}
       />
       <div
         ref={hasteBox}
-        className="rounded bg-black/60 px-1.5 text-[11px] text-[#5ef0ff]"
+        className={row("text-[#5ef0ff]")}
         style={{ display: "none" }}
       />
       <div
         ref={shuffleBox}
-        className="rounded bg-black/60 px-1.5 text-[11px] text-[#c9a7ff]"
+        className={row("text-[#c9a7ff]")}
         style={{ display: "none" }}
       />
       <div
         ref={buffBox}
-        className="rounded bg-black/60 px-1.5 text-[11px] text-yellow"
+        className={row("text-yellow")}
         style={{ display: "none" }}
       />
     </div>

@@ -15,6 +15,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { parseTune, TUNE_MIN_INTERVAL_MS } from "@herzies/shared/boss-fight";
 import { hasInstrument } from "@herzies/shared/classes";
+import { generateCreatureParams } from "@herzies/shared/creature-params";
 import {
   EMOTE_COOLDOWN_MS,
   emoteCooldownMs,
@@ -1320,7 +1321,8 @@ export class TownRoom extends DurableObject<Env> {
   }
 
   /** Who comes, goes and changes clothes, as watchers see them: without
-   * names, in stand-in bodies. Nothing else a room says reaches them. */
+   * names or friend codes (see watchedOf). Nothing else a room says reaches
+   * them. */
   private tellWatchers(m: ServerMessage) {
     let out: ServerMessage | null = null;
     if (m.t === "leave" || m.t === "emote") out = m;
@@ -1383,8 +1385,9 @@ function playerOf(p: {
   };
 }
 
-/** A player as watchers see it: no name, and a stand-in body wearing its
- * gear. Null until it has a stand-in. */
+/** A player as watchers see it: no name, its own body and gear, but under
+ * a stand-in seed, since the real seed is its friend code (see
+ * standInSeed). Null until it has a stand-in. */
 function watchedOf(p: {
   id: number;
   look: TownLook;
@@ -1395,7 +1398,12 @@ function watchedOf(p: {
   return {
     id: p.id,
     name: "",
-    look: { seed: p.standIn, stage: p.look.stage, equipped: p.look.equipped },
+    look: {
+      seed: p.standIn,
+      stage: p.look.stage,
+      equipped: p.look.equipped,
+      body: generateCreatureParams(p.look.seed),
+    },
     ...(p.down ? { down: true as const } : {}),
   };
 }

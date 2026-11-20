@@ -1,9 +1,10 @@
 /**
- * The body the website draws a herzie with. A herzie's real body is made
- * from its friend code, so drawing it in public would let anyone work the
- * code back out of it (and with the code, look the herzie up). Watchers get
- * a seed made from the user id and the server's secret instead: the same
- * herzie always gets the same made-up body, and nothing leads back to it.
+ * The seed the website is told a herzie has. Its real seed is its friend
+ * code, which would let anyone look the herzie up, so watchers get a seed
+ * made from the user id and the server's secret instead (the same herzie
+ * always gets the same one), with the herzie's real body sent alongside as
+ * numbers (TownLook.body). The body can still be matched back to a code by
+ * rolling every code until one fits; the seed just doesn't hand it over.
  */
 export async function standInSeed(
   uid: string,

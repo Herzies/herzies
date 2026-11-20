@@ -26,6 +26,11 @@
       "import": "./dist/town-net.js",
       "require": "./dist/town-net.js"
     },
+    "./creature-params": {
+      "types": "./dist/creature-params.d.ts",
+      "import": "./dist/creature-params.js",
+      "require": "./dist/creature-params.js"
+    },
     "./combat": {
       "types": "./dist/combat.d.ts",
       "import": "./dist/combat.js",

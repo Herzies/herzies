@@ -1,3 +1,4 @@
+import { generateCreatureParams } from "@herzies/shared/creature-params";
 import {
   decodeSnapshot,
   encodeStateFrame,
@@ -351,10 +352,14 @@ describe("room", () => {
 });
 
 describe("watchers", () => {
-  type Watched = { id: number; name: string; look: { seed: string; equipped?: unknown } };
+  type Watched = {
+    id: number;
+    name: string;
+    look: { seed: string; equipped?: unknown; body?: unknown };
+  };
   const watch = (shard: number) => connect(shard, "&watch=1");
 
-  it("sees herzies come, walk and go, without names or real bodies", async () => {
+  it("sees herzies come, walk and go, in their own bodies, without names or codes", async () => {
     const shard = ++shardSeq;
     const a = await join(shard, "a", at(1, 2));
     const w = await watch(shard);
@@ -362,8 +367,10 @@ describe("watchers", () => {
     expect(welcome.you).toBe(0);
     expect(welcome.players).toHaveLength(1);
     expect(welcome.players[0].name).toBe("");
-    expect(welcome.players[0].look.seed).not.toBe("HERZ-a");
     expect(welcome.players[0].look.seed).toMatch(/^W-[0-9a-f]{16}$/);
+    expect(welcome.players[0].look.body).toEqual(generateCreatureParams("HERZ-a"));
+    // The friend code itself is never sent.
+    expect(JSON.stringify(welcome)).not.toContain("HERZ-a");
     await sleep(50);
     expect(w.snapshots[0]?.entries[0]).toMatchObject({ id: a.id, state: { x: 1, z: 2 } });
 

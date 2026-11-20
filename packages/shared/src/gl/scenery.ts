@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import { mulberry32 } from "../creature-renderer.js";
+import { mulberry32 } from "../creature-params.js";
 
 // The Town's scenery shapes (trees, bushes, grass, rocks), plain geometry
 // with colours baked in per vertex: the Town draws them with its own

@@ -1,6 +1,12 @@
 import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
-import type { PropModel, ShoeProp, TieProp } from "../creature-renderer.js";
+import {
+  type FeatherProp,
+  featherVane,
+  type PropModel,
+  type ShoeProp,
+  type TieProp,
+} from "../creature-renderer.js";
 
 /**
  * Props the 3D renderer builds as models of their own, where the ray caster
@@ -16,6 +22,7 @@ export type Paint = (color: string, matte?: boolean) => THREE.Material;
 export function buildPropModel(prop: PropModel, paint: Paint): THREE.Group {
   if (prop.kind === "shoe") return shoe(prop, paint);
   if (prop.kind === "necktie") return necktie(prop, paint);
+  if (prop.kind === "feather") return feather(prop, paint);
   return boombox(prop.size, prop.mirrored ? -1 : 1, paint);
 }
 
@@ -209,6 +216,102 @@ function shoe(prop: ShoeProp, paint: Paint): THREE.Group {
     style.tab,
   ).position.set(lx, cuffY - r * 0.06, lz + legHalf + r * 0.08);
   return group;
+}
+
+/** Rows down a feather's vane. */
+const FEATHER_ROWS = 28;
+/** Where along it the vane turns the tip's colour. */
+const FEATHER_TIP = 0.86;
+
+/**
+ * A feather: a quill along a smooth curve through `prop.spine`, and a vane
+ * either side of it, flat but folded back a little from the quill so it
+ * catches the light like one. The trailing side is narrower than the
+ * leading one, and each has a split in it, as a flight feather has. Two
+ * sheets, wound opposite ways, so it shows from behind as well.
+ */
+function feather(prop: FeatherProp, paint: Paint): THREE.Group {
+  const group = new THREE.Group();
+  const curve = new THREE.CatmullRomCurve3(
+    prop.spine.map((p) => new THREE.Vector3(...p)),
+  );
+  const facing = new THREE.Vector3(...prop.facing).normalize();
+  /** A split in the vane, `at` along it: how much of the width is left. */
+  const split = (t: number, at: number) =>
+    1 - 0.5 * Math.max(0, 1 - Math.abs(t - at) / 0.035);
+  // Each row: its left edge, the quill, its right edge.
+  const rows: THREE.Vector3[][] = [];
+  for (let r = 0; r <= FEATHER_ROWS; r++) {
+    const t = r / FEATHER_ROWS;
+    const spine = curve.getPoint(t);
+    const across = curve.getTangent(t).cross(facing).normalize();
+    const w = prop.width * featherVane(t);
+    const edge = (side: number, width: number) =>
+      spine
+        .clone()
+        .addScaledVector(across, side * width)
+        .addScaledVector(facing, -0.3 * width);
+    rows.push([
+      edge(-1, w * 0.72 * split(t, 0.5)),
+      spine,
+      edge(1, w * split(t, 0.64)),
+    ]);
+  }
+  const vane = (from: number, to: number) => {
+    const position: number[] = [];
+    const normal: number[] = [];
+    const tri = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3) => {
+      // Wound so the front sheet's face looks along `facing`, then the
+      // back's the other way.
+      const n = b.clone().sub(a).cross(c.clone().sub(a));
+      const [p, q] = n.dot(facing) >= 0 ? [b, c] : [c, b];
+      for (const v of [a, p, q]) {
+        position.push(v.x, v.y, v.z);
+        normal.push(facing.x, facing.y, facing.z);
+      }
+      for (const v of [a, q, p]) {
+        position.push(v.x, v.y, v.z);
+        normal.push(-facing.x, -facing.y, -facing.z);
+      }
+    };
+    for (let r = from + 1; r <= to; r++) {
+      const [l0, s0, r0] = rows[r - 1];
+      const [l1, s1, r1] = rows[r];
+      tri(l0, s0, l1);
+      tri(s0, s1, l1);
+      tri(s0, r0, s1);
+      tri(r0, r1, s1);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(position, 3));
+    g.setAttribute("normal", new THREE.Float32BufferAttribute(normal, 3));
+    return g;
+  };
+  const own: THREE.BufferGeometry[] = [];
+  const add = (geometry: THREE.BufferGeometry, color: string) => {
+    own.push(geometry);
+    const mesh = new THREE.Mesh(geometry, paint(color));
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+  };
+  const tipRow = Math.round(FEATHER_TIP * FEATHER_ROWS);
+  add(vane(0, tipRow), prop.colors.vane);
+  add(vane(tipRow, FEATHER_ROWS), prop.colors.tip);
+  add(
+    new THREE.TubeGeometry(curve, FEATHER_ROWS, prop.width * 0.09, 6),
+    prop.colors.quill,
+  );
+  // Its own shapes, unlike the shared ones the other props are cut from:
+  // the model frees them (see disposeProp).
+  group.userData.geometries = own;
+  return group;
+}
+
+/** Frees what a prop model built for itself alone (a feather's shapes). */
+export function disposeProp(group: THREE.Group): void {
+  const own = group.userData.geometries as THREE.BufferGeometry[] | undefined;
+  for (const g of own ?? []) g.dispose();
 }
 
 /**

@@ -474,8 +474,7 @@ export function MarketPanel({
       <List className="min-h-0 flex-1">
         {copies.length === 0 ? (
           <div className="text-ui text-text-dim">
-            Nothing in your bank he can take. Worn and class gear stays with
-            you.
+            Nothing in your bank he can take. Worn gear stays with you.
           </div>
         ) : (
           copies.map((row) => (

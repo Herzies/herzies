@@ -48,8 +48,9 @@ const WEARABLE_OPTIONS = [
   "groove-cape",
   "drumhide-cloak",
   "tailwind-cloak",
-  // Shoes (drawn on stage 3, the one with legs).
+  // Eivind's (shoes are drawn on stage 3, the one with legs; so are wings).
   "eivinds-evasive-pair",
+  "eivinds-wings",
   // Fabulous Fabian (FF).
   "ff-shades",
   "ff-pearls-marble",
@@ -62,6 +63,16 @@ const WEARABLE_OPTIONS = [
   "fyllings-cape",
   "fyllings-monocle",
   "fyllings-black",
+  // The class sets, with their cloaks above.
+  "troubadour-plume",
+  "troubadour-ruff",
+  "troubadour-slippers",
+  "groove-cap",
+  "spindle-chain",
+  "groove-kicks",
+  "drumhide-helm",
+  "drumhide-gorget",
+  "drumhide-boots",
 ];
 
 const DEFAULT_USER = "sandbox-user";
@@ -466,7 +477,10 @@ function toEquipped(ids: string[]): Equipped {
       id === "sixpence" ||
       id === "plutus-crown" ||
       id === "fabulous-fabian" ||
-      id === "fyllings-fedora"
+      id === "fyllings-fedora" ||
+      id === "troubadour-plume" ||
+      id === "groove-cap" ||
+      id === "drumhide-helm"
     )
       out.head = id;
     else if (id === "clouds" || id === "stars" || id === "blood-moon")
@@ -476,7 +490,10 @@ function toEquipped(ids: string[]): Equipped {
       id === "pearl-necklace" ||
       id === "bowtie" ||
       id === "ff-pearls-marble" ||
-      id === "fyllings-necktie"
+      id === "fyllings-necktie" ||
+      id === "troubadour-ruff" ||
+      id === "spindle-chain" ||
+      id === "drumhide-gorget"
     )
       out.body = id;
     else if (id === "fangs" || id === "ff-shades" || id === "fyllings-monocle")
@@ -495,13 +512,17 @@ function toEquipped(ids: string[]): Equipped {
       id === "troubadour-mantle" ||
       id === "groove-cape" ||
       id === "ff-cloak-black" ||
-      id === "fyllings-cape"
+      id === "fyllings-cape" ||
+      id === "eivinds-wings"
     )
       out.back = id;
     else if (
       id === "eivinds-evasive-pair" ||
       id === "ff-sneakers-black" ||
-      id === "fyllings-loafers"
+      id === "fyllings-loafers" ||
+      id === "troubadour-slippers" ||
+      id === "groove-kicks" ||
+      id === "drumhide-boots"
     )
       out.feet = id;
     else if (id === "lute" || id === "compact-discs" || id === "worn-stick")

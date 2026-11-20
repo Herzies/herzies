@@ -947,8 +947,8 @@ export interface ItemDef {
    * neckwear sits where the head meets the body, which a herzie only grows
    * at stage 3. */
   minStage?: Stage;
-  /** Class equipment: only a herzie of this class can wear it, and it's
-   * bound to them — no sell price, never traded, never dropped. */
+  /** Only a herzie of this class can wear it (equip_unit checks
+   * items.required_class). It trades, sells and lists like anything else. */
   requiredClass?: HerzieClass;
   /** A seasonal item only drops inside this yearly window (UTC, inclusive,
    * may wrap the new year). Copies already owned are unaffected outside it. */
@@ -1139,6 +1139,51 @@ export const ITEM_SETS: ItemSet[] = [
     bonus: { luck: 10 },
     shimmer: { core: "#FFF4FA", edge: "#FF7FBA" },
   },
+  {
+    id: "eivinds",
+    name: "Eivind's",
+    effect: "+10 luck, and blue and white sparkles",
+    itemIds: ["eivinds-evasive-pair", "eivinds-wings"],
+    bonus: { luck: 10 },
+    shimmer: { core: "#F4F8FC", edge: "#3F82D0" },
+  },
+  // The class sets, one per class, each built round its class cloak. Every
+  // piece is locked to its class (requiredClass), so only that class can
+  // complete one.
+  {
+    id: "troubadour",
+    name: "The Troubadour",
+    effect: "+20 euphony, and golden sparkles",
+    itemIds: [
+      "troubadour-plume",
+      "troubadour-ruff",
+      "troubadour-mantle",
+      "troubadour-slippers",
+    ],
+    bonus: { euphony: 20 },
+    shimmer: { core: "#FFF6D0", edge: "#F2CF5B" },
+  },
+  {
+    id: "groove",
+    name: "In the Groove",
+    effect: "+5% crit chance, +20% crit damage, and red sparkles",
+    itemIds: ["groove-cap", "spindle-chain", "groove-cape", "groove-kicks"],
+    bonus: { critChance: 5, critDamage: 20 },
+    shimmer: { core: "#FFE3E5", edge: "#D8373F" },
+  },
+  {
+    id: "drumhide",
+    name: "Drumhide",
+    effect: "+10 def, +10 stamina, and brass sparkles",
+    itemIds: [
+      "drumhide-helm",
+      "drumhide-gorget",
+      "drumhide-cloak",
+      "drumhide-boots",
+    ],
+    bonus: { def: 10, stamina: 10 },
+    shimmer: { core: "#FFE9B0", edge: "#C9A03E" },
+  },
 ];
 
 /** Adds the bonus of every set worn in full (ItemSet.bonus) to `totals`. */
@@ -1263,6 +1308,17 @@ export const RARITY_DROP_WEIGHTS: Record<Rarity, number> = {
   mythic: 1,
 };
 
+/** Never a listening drop, nor in a boss's random loot (they're in
+ * NON_DROPPABLE_ITEM_IDS, so George and every other pool leave them out
+ * too): the class cloaks, legendary, earned only from a boss fight's reward
+ * pools (BossFightConfig.rewardPools), which the admin sets per fight. The
+ * rest of each class set drops like any legendary. */
+export const BOSS_ONLY_ITEM_IDS = [
+  "troubadour-mantle",
+  "groove-cape",
+  "drumhide-cloak",
+] as const;
+
 /** Items that can never appear as a random world drop, regardless of rarity. */
 export const NON_DROPPABLE_ITEM_IDS = [
   "first-edition",
@@ -1285,23 +1341,10 @@ export const NON_DROPPABLE_ITEM_IDS = [
   "star-candy",
   // Boboku's spare cap: he sells it (BOBOKU_STOCK), it never drops.
   "sixpence",
-  // The class cloaks come only from a boss's reward pools
-  // (BOSS_ONLY_ITEM_IDS)…
-  "troubadour-mantle",
-  "groove-cape",
-  "drumhide-cloak",
+  // The class cloaks come only from a boss's reward pools…
+  ...BOSS_ONLY_ITEM_IDS,
   // …and the Tailwind Cloak only for money.
   "tailwind-cloak",
-] as const;
-
-/** Never a listening drop, nor in a boss's random loot (they're in
- * NON_DROPPABLE_ITEM_IDS, so George and every other pool leave them out
- * too): the class cloaks, legendary, earned only from a boss fight's reward
- * pools (BossFightConfig.rewardPools), which the admin sets per fight. */
-export const BOSS_ONLY_ITEM_IDS = [
-  "troubadour-mantle",
-  "groove-cape",
-  "drumhide-cloak",
 ] as const;
 
 /** How many uncollected drops may stand on the ground at once.
@@ -1396,7 +1439,7 @@ export const BOSS_LOOT_EXCLUDED_ITEM_IDS = ["cd"];
 /** What a boss's random loot is drawn from, and how likely each is: every
  * item that drops from listening (not in NON_DROPPABLE_ITEM_IDS, no
  * seasonal window, not in BOSS_LOOT_EXCLUDED_ITEM_IDS), weighted per BOSS_LOOT_RARITY_BOOST. settle_boss_fight
- * rolls from a copy of this list (boss_loot_roll, last in 00145_ff_wearables.sql);
+ * rolls from a copy of this list (boss_loot_roll, last in 00151_class_set_drops.sql);
  * items.test.ts checks the two agree, so a new droppable item needs adding
  * there too. */
 export function bossLootWeights(): { itemId: string; weight: number }[] {
@@ -3188,6 +3231,328 @@ function renderEvasivePairFrame(yAngle: number): string[] {
   );
 }
 
+// --- Eivind's set cards ---
+// The Evasive Pair's blues and pale whites.
+const EIVIND_BLUE = "#3F82D0";
+const EIVIND_WHITE = "#F4F8FC";
+
+/** Eivind's Wings: a pair of white feathered wings, blue-edged, swept
+ * out from the shoulders. */
+function eivindWingsCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  const ax = Math.abs(ix);
+  if (ax < 0.04 || ax > 0.3) return null;
+  const t = (ax - 0.04) / 0.26; // 0 at the shoulder, 1 at the tip
+  const topEdge = -0.2 - 0.1 * t;
+  // Feathers: the lower edge steps down, one scallop per feather.
+  const feather = Math.floor(t * 4) / 4;
+  const bottomEdge =
+    -0.02 + 0.3 * Math.sin(Math.min(1, feather + 0.1) * 2.2) - 0.1 * t;
+  if (iy < topEdge || iy > bottomEdge) return null;
+  const rim = iy < topEdge + 0.025 || iy > bottomEdge - 0.025;
+  return rim
+    ? { bright: 0.95, color: EIVIND_BLUE }
+    : { bright: 0.9, color: EIVIND_WHITE };
+}
+
+function renderEivindWingsFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#7FB3E8",
+    "#3F6FA8",
+    "#1A2E48",
+    eivindWingsCardIcon,
+  );
+}
+
+// --- Class set cards ---
+// Each set in its cloak's colours (CLOAK_STYLES in cloaks.ts): the
+// Troubadour's purple velvet and gold, the Groove's black vinyl with a red
+// label and silver, the Drumhide's oxblood hide and brass.
+const TROUBADOUR_PURPLE = "#7B3FB8";
+const TROUBADOUR_GOLD = "#F2CF5B";
+const GROOVE_BLACK = "#2A2A33";
+const GROOVE_RED = "#D8373F";
+const GROOVE_SILVER = "#D8D8E8";
+const DRUMHIDE_OXBLOOD = "#7A2E24";
+const DRUMHIDE_BRASS = "#D6AE48";
+
+/** Troubadour's Plume: a purple beret tipped to the right on a gold band,
+ * a cream feather curling up from a gold clasp on the left. */
+function plumedBeretCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  // The clasp.
+  if (Math.hypot(ix + 0.24, iy - 0.11) < 0.04)
+    return { bright: 1, color: TROUBADOUR_GOLD };
+  // The beret: a wide ellipse, tilted to dip on the right.
+  const tilt = 0.2;
+  const bx = ix - 0.03;
+  const by = iy - 0.02;
+  const rx = bx * Math.cos(tilt) + by * Math.sin(tilt);
+  const ry = -bx * Math.sin(tilt) + by * Math.cos(tilt);
+  if ((rx / 0.3) ** 2 + (ry / 0.12) ** 2 < 1)
+    return { bright: 0.8 - ry, color: TROUBADOUR_PURPLE };
+  // The band.
+  if (Math.abs(ix) < 0.22 && iy > 0.1 && iy < 0.15)
+    return { bright: 0.9, color: TROUBADOUR_GOLD };
+  // The feather: an arc up from the clasp, tapering, gold at its tip.
+  const dx = ix - 0.1;
+  const dy = iy - 0.13;
+  const a = Math.atan2(dy, dx);
+  if (a <= -Math.PI * 0.55) {
+    const t = (a + Math.PI) / (Math.PI * 0.45);
+    if (Math.abs(Math.hypot(dx, dy) - 0.36) < 0.045 * (1 - 0.6 * t))
+      return t > 0.8
+        ? { bright: 0.95, color: TROUBADOUR_GOLD }
+        : { bright: 0.95, color: "#FFF6DC" };
+  }
+  return null;
+}
+
+function renderPlumedBeretFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#c79cf0",
+    "#6f4a99",
+    "#3a2257",
+    plumedBeretCardIcon,
+  );
+}
+
+/** Troubadour's Ruff: a ring of cream pleats, gold-edged, a gold brooch at
+ * the throat. */
+function ruffCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  const dy = iy - 0.02;
+  if (Math.hypot(ix, dy - 0.15) < 0.05)
+    return { bright: 1, color: TROUBADOUR_GOLD };
+  const a = Math.atan2(dy / 0.55, ix);
+  const d = Math.hypot(ix, dy / 0.55);
+  // Scalloped outside edge, one bump a pleat.
+  const outer = 0.29 + 0.025 * Math.cos(a * 12);
+  if (d > 0.15 && d < outer) {
+    const pleat = Math.floor(((a + Math.PI) / (Math.PI * 2)) * 12);
+    if (d > outer - 0.02) return { bright: 0.9, color: TROUBADOUR_GOLD };
+    return { bright: 0.9, color: pleat % 2 === 0 ? "#FBF3DF" : "#EBDDBB" };
+  }
+  return null;
+}
+
+function renderRuffFrame(yAngle: number): string[] {
+  return renderIconCard(yAngle, "#c79cf0", "#6f4a99", "#3a2257", ruffCardIcon);
+}
+
+/** How a class set's shoe is drawn on its card: in profile, toe to the
+ * right, its collar as high as `top` (a slipper is low, a boot tall). */
+interface ShoeIconStyle {
+  top: number;
+  upper: string;
+  sole: string;
+  cuff: string;
+  /** Laces (dots down the vamp) or a strap across the instep. */
+  accent: string;
+  strap: boolean;
+}
+
+function shoeCardIcon(style: ShoeIconStyle) {
+  // The collar's height along the shoe: level over the heel, falling along
+  // the vamp to the toe.
+  const collarAt = (x: number) =>
+    x < -0.02
+      ? style.top
+      : style.top + ((x + 0.02) / 0.3) * (-0.03 - style.top);
+  return (u: number, v: number): TexSample | null => {
+    const [ix, iy] = iconUV(u, v);
+    if (iy > 0.06 && iy < 0.11 && ix > -0.26 && ix < 0.3)
+      return { bright: 0.85, color: style.sole };
+    const top = collarAt(ix);
+    if (
+      iy < top ||
+      iy > 0.06 ||
+      ix < -0.26 ||
+      ix > 0.28 - Math.max(0, iy + 0.02) * 0.2
+    )
+      return null;
+    if (iy < top + 0.035 && ix < -0.02)
+      return { bright: 0.8, color: style.cuff };
+    if (style.strap) {
+      if (ix > 0.02 && ix < 0.08) return { bright: 1, color: style.accent };
+    } else {
+      // Laces: three dots just under the collar, down the vamp.
+      for (const lx of [0, 0.07, 0.14])
+        if (Math.hypot(ix - lx, iy - collarAt(lx) - 0.03) < 0.022)
+          return { bright: 1, color: style.accent };
+    }
+    return { bright: 0.65 + iy, color: style.upper };
+  };
+}
+
+const TROUBADOUR_SLIPPERS_ICON: ShoeIconStyle = {
+  top: -0.07,
+  upper: TROUBADOUR_PURPLE,
+  sole: "#E8C35A",
+  cuff: TROUBADOUR_GOLD,
+  accent: TROUBADOUR_GOLD,
+  strap: true,
+};
+const GROOVE_KICKS_ICON: ShoeIconStyle = {
+  top: -0.2,
+  upper: GROOVE_BLACK,
+  sole: "#F4F4F6",
+  cuff: "#B8B8C8",
+  accent: GROOVE_RED,
+  strap: false,
+};
+const DRUMHIDE_BOOTS_ICON: ShoeIconStyle = {
+  top: -0.26,
+  upper: DRUMHIDE_OXBLOOD,
+  sole: "#3A1A12",
+  cuff: "#C9A27A",
+  accent: DRUMHIDE_BRASS,
+  strap: true,
+};
+
+function renderTroubadourSlippersFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#c79cf0",
+    "#6f4a99",
+    "#3a2257",
+    shoeCardIcon(TROUBADOUR_SLIPPERS_ICON),
+  );
+}
+
+/** Groove Cap: a black cap in profile, worn backwards (its red bill points
+ * back, to the left), a little record on the front of the crown. */
+function grooveCapCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  // The record on the crown's front: silver hole, red label, black vinyl.
+  const dr = Math.hypot(ix - 0.14, iy + 0.02);
+  if (dr < 0.015) return { bright: 1, color: GROOVE_SILVER };
+  if (dr < 0.045) return { bright: 0.9, color: GROOVE_RED };
+  if (dr < 0.1) return { bright: 0.45, color: "#16161C" };
+  // The button on top.
+  if (Math.hypot(ix, iy + 0.17) < 0.03)
+    return { bright: 1, color: GROOVE_SILVER };
+  // The crown: the top half of a ball.
+  if (iy <= 0.1 && Math.hypot(ix, iy - 0.1) < 0.26)
+    return { bright: 0.55 - iy * 0.5, color: GROOVE_BLACK };
+  // The bill, flat, out the back.
+  if (((ix + 0.3) / 0.16) ** 2 + ((iy - 0.1) / 0.035) ** 2 < 1)
+    return { bright: 0.85, color: GROOVE_RED };
+  return null;
+}
+
+function renderGrooveCapFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#c8c8d8",
+    "#5a5a6e",
+    "#24242e",
+    grooveCapCardIcon,
+  );
+}
+
+/** Spindle Chain: a silver chain with a seven-inch single hanging off it. */
+function spindleChainCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  const dr = Math.hypot(ix, iy - 0.25);
+  if (dr < 0.015) return { bright: 1, color: GROOVE_SILVER };
+  if (dr < 0.045) return { bright: 0.9, color: GROOVE_RED };
+  if (dr < 0.11) return { bright: 0.45, color: "#16161C" };
+  return necklaceBeadsIcon(ix, iy, 11, 0.04, (i) =>
+    i % 2 === 0 ? GROOVE_SILVER : "#9A9AAE",
+  );
+}
+
+function renderSpindleChainFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#c8c8d8",
+    "#5a5a6e",
+    "#24242e",
+    spindleChainCardIcon,
+  );
+}
+
+function renderGrooveKicksFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#c8c8d8",
+    "#5a5a6e",
+    "#24242e",
+    shoeCardIcon(GROOVE_KICKS_ICON),
+  );
+}
+
+/** Drumhide Helm: a snare drum, a pale head on top, brass hoops and lugs
+ * round an oxblood shell. */
+function drumhideHelmCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  const rx = 0.28;
+  const topY = -0.1;
+  const bottomY = 0.12;
+  const ell = (y: number) => (ix / rx) ** 2 + ((iy - y) / 0.07) ** 2;
+  if (ell(topY) < 1)
+    return ell(topY) > 0.7
+      ? { bright: 1, color: DRUMHIDE_BRASS }
+      : { bright: 0.95, color: "#E9DCC0" };
+  if (Math.abs(ix) > rx) return null;
+  // The shell's bottom edge curves with the drum.
+  const below = bottomY + 0.07 * Math.sqrt(Math.max(0, 1 - (ix / rx) ** 2));
+  if (iy < topY || iy > below) return null;
+  if (iy > below - 0.035) return { bright: 1, color: DRUMHIDE_BRASS };
+  for (const lx of [-0.2, -0.07, 0.07, 0.2])
+    if (Math.abs(ix - lx) < 0.022 && iy > topY + 0.06 && iy < below - 0.06)
+      return { bright: 1, color: DRUMHIDE_BRASS };
+  return { bright: 0.75 - Math.abs(ix), color: DRUMHIDE_OXBLOOD };
+}
+
+function renderDrumhideHelmFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#e0b48a",
+    "#8a4a32",
+    "#4a2016",
+    drumhideHelmCardIcon,
+  );
+}
+
+/** Drumhide Gorget: a thick collar of oxblood hide, studded with brass. */
+function gorgetCardIcon(u: number, v: number): TexSample | null {
+  const [ix, iy] = iconUV(u, v);
+  const dy = (iy - 0.02) / 0.55;
+  const d = Math.hypot(ix, dy);
+  if (d < 0.17 || d > 0.29) return null;
+  const a = Math.atan2(dy, ix);
+  // A stud every so often round the middle of the band.
+  const k = Math.round((a / (Math.PI * 2)) * 10);
+  const sa = (k / 10) * Math.PI * 2;
+  if (Math.hypot(ix - Math.cos(sa) * 0.23, dy - Math.sin(sa) * 0.23) < 0.035)
+    return { bright: 1, color: DRUMHIDE_BRASS };
+  return { bright: 0.7 - dy, color: DRUMHIDE_OXBLOOD };
+}
+
+function renderGorgetFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#e0b48a",
+    "#8a4a32",
+    "#4a2016",
+    gorgetCardIcon,
+  );
+}
+
+function renderDrumhideBootsFrame(yAngle: number): string[] {
+  return renderIconCard(
+    yAngle,
+    "#e0b48a",
+    "#8a4a32",
+    "#4a2016",
+    shoeCardIcon(DRUMHIDE_BOOTS_ICON),
+  );
+}
+
 // --- Fabulous Fabian (FF) cards ---
 /** FF Sneakers: a black low-top in profile, toe to the right, a
  * white sole and pink laces. */
@@ -3506,6 +3871,16 @@ const plutusCrownFrames = generateFrames(renderPlutusCrownFrame);
 const fabianCapFrames = generateFrames(renderFabianCapFrame);
 const fedoraFrames = generateFrames(renderFedoraFrame);
 const evasivePairFrames = generateFrames(renderEvasivePairFrame);
+const eivindWingsFrames = generateFrames(renderEivindWingsFrame);
+const troubadourPlumeFrames = generateFrames(renderPlumedBeretFrame);
+const troubadourRuffFrames = generateFrames(renderRuffFrame);
+const troubadourSlippersFrames = generateFrames(renderTroubadourSlippersFrame);
+const grooveCapFrames = generateFrames(renderGrooveCapFrame);
+const spindleChainFrames = generateFrames(renderSpindleChainFrame);
+const grooveKicksFrames = generateFrames(renderGrooveKicksFrame);
+const drumhideHelmFrames = generateFrames(renderDrumhideHelmFrame);
+const drumhideGorgetFrames = generateFrames(renderGorgetFrame);
+const drumhideBootsFrames = generateFrames(renderDrumhideBootsFrame);
 const ffSneakersFrames = generateFrames(renderFfSneakersFrame);
 const ffCloakFrames = generateFrames(renderFfCloakFrame);
 const ffPearlsFrames = generateFrames(renderFfPearlsFrame);
@@ -4062,9 +4437,9 @@ export const ITEMS: ItemDef[] = [
     // coins make it grindable after all.
     sellPrice: 500,
   },
-  // Class equipment (classes.ts): handed over, worn, when a class is chosen.
-  // Sold for a little, like any common item (00109), but never traded
-  // (trade_offer_unit_ids) and never dropped (NON_DROPPABLE_ITEM_IDS).
+  // Class equipment (classes.ts): Boboku sells it (00112). Only its class can
+  // wear it; it sells for a little, like any common item (00109), trades like
+  // anything else, and never drops (NON_DROPPABLE_ITEM_IDS).
   {
     id: "lute",
     name: "Lute",
@@ -4119,8 +4494,9 @@ export const ITEMS: ItemDef[] = [
   },
   // Cloaks (the back slot): simulated cloth in the 3D view (cloak-physics.ts,
   // CLOAK_STYLES in creature-renderer.ts). Stage 3, where a herzie has a back
-  // to hang one from. The three class cloaks suit a class but any herzie can
-  // wear them; they come only from a boss's reward pools (BOSS_ONLY_ITEM_IDS).
+  // to hang one from. The three class cloaks are locked to their class
+  // (requiredClass); they come only from a boss's reward pools
+  // (BOSS_ONLY_ITEM_IDS).
   {
     id: "troubadour-mantle",
     name: "Troubadour's Mantle",
@@ -4130,6 +4506,7 @@ export const ITEMS: ItemDef[] = [
     equipable: true,
     equipSlot: "back",
     minStage: 3,
+    requiredClass: "bard",
     sellPrice: 500,
     stats: { euphony: 18, stamina: 6 },
   },
@@ -4142,6 +4519,7 @@ export const ITEMS: ItemDef[] = [
     equipable: true,
     equipSlot: "back",
     minStage: 3,
+    requiredClass: "record_slinger",
     sellPrice: 500,
     stats: { sonicPower: 8, critChance: 6, critDamage: 20 },
   },
@@ -4154,6 +4532,7 @@ export const ITEMS: ItemDef[] = [
     equipable: true,
     equipSlot: "back",
     minStage: 3,
+    requiredClass: "percussionist",
     sellPrice: 500,
     stats: { def: 15, stamina: 10 },
   },
@@ -4263,8 +4642,7 @@ export const ITEMS: ItemDef[] = [
   {
     id: "fyllings-black",
     name: "Fylling's Black",
-    description:
-      "Classy.",
+    description: "Classy.",
     rarity: "rare",
     frames: fyllingsBlackFrames,
     equipable: true,
@@ -4281,8 +4659,24 @@ export const ITEMS: ItemDef[] = [
     frames: evasivePairFrames,
     equipable: true,
     equipSlot: "feet",
+    minStage: 2,
     sellPrice: 1500,
     stats: { moveSpeed: 20 },
+  },
+  // Eivind's wings, to go with the shoes: Eivind's set (ITEM_SETS). Mythic,
+  // drop-only.
+  {
+    id: "eivinds-wings",
+    name: "Eivind's Wings",
+    description: "Fly, baby. Fly!",
+    rarity: "mythic",
+    frames: eivindWingsFrames,
+    equipable: true,
+    equipSlot: "back",
+    minStage: 3,
+    sellPrice: 1500,
+    // With the Evasive Pair, exactly MAX_MOVE_SPEED.
+    stats: { moveSpeed: 5, luck: 15 },
   },
   // More from Fabulous Fabian (FF), the in-game clothing brand behind the FF
   // Hat. Drop-only, like the hat: the listening pool and a boss's random loot.
@@ -4344,6 +4738,126 @@ export const ITEMS: ItemDef[] = [
     equipSlot: "color",
     sellPrice: 250,
     stats: { luck: 10 },
+  },
+  // The class sets: each class cloak's look carried onto a hat, a neck piece
+  // and shoes, with stats for its class (ITEM_SETS), and locked to that
+  // class. Legendary drops: listening, the Crystal and a boss's random loot.
+  {
+    id: "troubadour-plume",
+    name: "Troubadour's Plume",
+    description: "«Stooop it's tickling hhihihii»",
+    rarity: "legendary",
+    frames: troubadourPlumeFrames,
+    equipable: true,
+    equipSlot: "head",
+    minStage: 2,
+    requiredClass: "bard",
+    sellPrice: 500,
+    stats: { euphony: 12, stamina: 4 },
+  },
+  {
+    id: "troubadour-ruff",
+    name: "Troubadour's Ruff",
+    description: "just renaissance things",
+    rarity: "legendary",
+    frames: troubadourRuffFrames,
+    equipable: true,
+    equipSlot: "body",
+    minStage: 3,
+    requiredClass: "bard",
+    sellPrice: 500,
+    stats: { euphony: 10, stamina: 4 },
+  },
+  {
+    id: "troubadour-slippers",
+    name: "Troubadour's Slippers",
+    description: "So velvety so quiet",
+    rarity: "legendary",
+    frames: troubadourSlippersFrames,
+    equipable: true,
+    equipSlot: "feet",
+    minStage: 2,
+    requiredClass: "bard",
+    sellPrice: 500,
+    stats: { euphony: 8, moveSpeed: 4 },
+  },
+  {
+    id: "groove-cap",
+    name: "Groove Cap",
+    description: "Worn backwards for more damage",
+    rarity: "legendary",
+    frames: grooveCapFrames,
+    equipable: true,
+    equipSlot: "head",
+    minStage: 2,
+    requiredClass: "record_slinger",
+    sellPrice: 500,
+    stats: { sonicPower: 6, critChance: 3 },
+  },
+  {
+    id: "spindle-chain",
+    name: "Spindle Chain",
+    description: "Insert into CD-ROM",
+    rarity: "legendary",
+    frames: spindleChainFrames,
+    equipable: true,
+    equipSlot: "body",
+    minStage: 3,
+    requiredClass: "record_slinger",
+    sellPrice: 500,
+    stats: { sonicPower: 4, critDamage: 15 },
+  },
+  {
+    id: "groove-kicks",
+    name: "Groove Kicks",
+    description: "DJ Kicks",
+    rarity: "legendary",
+    frames: grooveKicksFrames,
+    equipable: true,
+    equipSlot: "feet",
+    minStage: 2,
+    requiredClass: "record_slinger",
+    sellPrice: 500,
+    stats: { critChance: 3, critDamage: 10 },
+  },
+  {
+    id: "drumhide-helm",
+    name: "Drumhide Helm",
+    description: "Now you're a real drumhead! Hahahaha…",
+    rarity: "legendary",
+    frames: drumhideHelmFrames,
+    equipable: true,
+    equipSlot: "head",
+    minStage: 2,
+    requiredClass: "percussionist",
+    sellPrice: 500,
+    stats: { def: 12, stamina: 6 },
+  },
+  {
+    id: "drumhide-gorget",
+    name: "Drumhide Gorget",
+    description: "Gotta cover your neck, percussionist!",
+    rarity: "legendary",
+    frames: drumhideGorgetFrames,
+    equipable: true,
+    equipSlot: "body",
+    minStage: 3,
+    requiredClass: "percussionist",
+    sellPrice: 500,
+    stats: { def: 8, stamina: 6 },
+  },
+  {
+    id: "drumhide-boots",
+    name: "Drumhide Boots",
+    description: "Awesome for double pedalling",
+    rarity: "legendary",
+    frames: drumhideBootsFrames,
+    equipable: true,
+    equipSlot: "feet",
+    minStage: 2,
+    requiredClass: "percussionist",
+    sellPrice: 500,
+    stats: { def: 6, stamina: 4 },
   },
 ];
 

@@ -151,12 +151,12 @@ describe("listing", () => {
     expect(await getUnits(seller.userId)).toHaveLength(1);
   });
 
-  it("refuses class gear, which is bound to its herzie", async () => {
+  it("lists class gear like anything else", async () => {
     const seller = await player({ lute: 1 });
     const [unit] = await getUnits(seller.userId);
     const res = await list(seller.accessToken, unit.id, 400);
-    expect(res.status).toBe(400);
-    expect((await res.json()).reason).toBe("bound");
+    expect(res.status).toBe(200);
+    expect((await res.json()).listing).toMatchObject({ itemId: "lute" });
   });
 
   it("refuses a price at or below what the game pays", async () => {

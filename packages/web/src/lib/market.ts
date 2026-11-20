@@ -15,7 +15,6 @@ const REASONS: Record<string, { status: number; error: string }> = {
   "not-found": { status: 404, error: "Herzie not found" },
   "not-owned": { status: 404, error: "That isn't yours" },
   equipped: { status: 400, error: "Take it off before listing it" },
-  bound: { status: 400, error: "That can't be sold to other players" },
   "price-too-low": {
     status: 400,
     error: "The game pays that much — sell it there instead",

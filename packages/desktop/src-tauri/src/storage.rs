@@ -474,6 +474,9 @@ struct SettingsFile {
     /// file or key means pinned.
     #[serde(default = "default_pin_window")]
     pin_window: bool,
+    /// Off unless the user turns it on.
+    #[serde(default)]
+    always_on_top: bool,
 }
 
 fn default_pin_window() -> bool {
@@ -484,6 +487,7 @@ impl Default for SettingsFile {
     fn default() -> Self {
         Self {
             pin_window: default_pin_window(),
+            always_on_top: false,
         }
     }
 }
@@ -510,6 +514,16 @@ pub fn load_pin_window() -> bool {
 pub fn save_pin_window(pinned: bool) {
     let mut settings = load_settings();
     settings.pin_window = pinned;
+    save_settings(&settings);
+}
+
+pub fn load_always_on_top() -> bool {
+    load_settings().always_on_top
+}
+
+pub fn save_always_on_top(on: bool) {
+    let mut settings = load_settings();
+    settings.always_on_top = on;
     save_settings(&settings);
 }
 

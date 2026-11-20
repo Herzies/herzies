@@ -1,6 +1,6 @@
 /**
  * Integration tests for classes (00106) and class skills in the boss fight
- * (00107): choosing a class once, its bound gear, the class check on equip,
+ * (00107): choosing a class once, its gear, the class check on equip,
  * the heal allowance on HP reports, and skill XP batches.
  *
  * Grants aren't tested here by calling as a client: a denied call crashes
@@ -182,7 +182,7 @@ describe("class gear", () => {
   it("only a herzie of its class can wear it", async () => {
     const bard = await player({ stage: 2, level: 12 });
     await rpc("choose_class", { p_user_id: bard, p_class: "bard" });
-    // A stray cymbal in a bard's bag (it can't get there by trade or drop).
+    // A cymbal in a bard's bag (traded or bought from Boboku).
     const { data: unit } = await admin()
       .from("item_units")
       .insert({ user_id: bard, item_id: "old-cymbal" })
@@ -196,7 +196,7 @@ describe("class gear", () => {
     expect(r).toMatchObject({ ok: false, reason: "class-required" });
   });
 
-  it("can't be sold", async () => {
+  it("sells to the game for a little", async () => {
     const userId = await player({ stage: 2, level: 12 });
     await rpc("choose_class", { p_user_id: userId, p_class: "bard" });
     await admin()
@@ -207,33 +207,28 @@ describe("class gear", () => {
       p_user_id: userId,
       p_unit_ids: [lute?.id],
     });
-    expect(r).toMatchObject({ ok: false, reason: "not-sellable" });
+    expect(r).toMatchObject({ ok: true, earned: 10 });
   });
 
-  it("can't be offered in a trade, even unworn", async () => {
+  it("can be offered in a trade when unworn", async () => {
     const userId = await player({ stage: 2, level: 12 });
     await rpc("choose_class", { p_user_id: userId, p_class: "bard" });
     await admin()
       .from("item_units")
       .insert({ user_id: userId, item_id: "lute" });
     const lute = (await getUnits(userId)).find((u) => u.item_id === "lute");
-    await rpc("equip_unit", {
-      p_user_id: userId,
-      p_unit_id: lute?.id,
-      p_action: "unequip",
-    });
     expect(
       await rpc("trade_offer_unit_ids", {
         p_offer: { units: [{ unitId: lute?.id }] },
         p_user_id: userId,
       }),
-    ).toBeNull();
+    ).toEqual([lute?.id]);
     expect(
       await rpc("trade_offer_unit_ids", {
         p_offer: { items: { lute: 1 } },
         p_user_id: userId,
       }),
-    ).toBeNull();
+    ).toEqual([lute?.id]);
   });
 });
 

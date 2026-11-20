@@ -10,7 +10,7 @@ const unit = (
 ): ItemUnit => ({ id, itemId, upgradeLevel, equippedSlot });
 
 describe("listableCopies", () => {
-  it("leaves out worn copies, class gear and unknown items", () => {
+  it("leaves out worn copies and unknown items, but not class gear", () => {
     const units = [
       unit("a", "headphones"),
       unit("b", "headphones", 0, "head"),
@@ -19,6 +19,7 @@ describe("listableCopies", () => {
     ];
     expect(listableCopies(units)).toEqual([
       { itemId: "headphones", upgradeLevel: 0, unitIds: ["a"] },
+      { itemId: "lute", upgradeLevel: 0, unitIds: ["c"] },
     ]);
   });
 
@@ -74,8 +75,8 @@ describe("matchMarketItems", () => {
     expect(rareHeads).not.toContain("sixpence");
   });
 
-  it("leaves out class gear, which can't be listed", () => {
-    expect(matchMarketItems("lute")).toEqual([]);
+  it("finds class gear, which trades like anything else", () => {
+    expect(matchMarketItems("lute")).toEqual(["lute"]);
   });
 
   it("matches nothing for nothing", () => {

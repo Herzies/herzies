@@ -1,14 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { RAINBOW_RAMP, VOID_RAMP } from "./ascii3d.js";
 import {
+  CREATURE_PARAM_BOUNDS,
+  generateCreatureParams,
+} from "./creature-params.js";
+import {
   BOSS_BODY_TYPE,
   buildCreatureModel,
   buildCreatureSpheres,
-  CREATURE_PARAM_BOUNDS,
   creaturePoseOffsets,
   creatureSeatDrop,
   DEFAULT_Y_ANGLE,
-  generateCreatureParams,
   generateDanceFrames,
   generateIdleFrames,
   generateRotationFrames,

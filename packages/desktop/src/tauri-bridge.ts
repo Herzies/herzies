@@ -402,7 +402,7 @@ export const herzies = {
   /** Puts one copy, or `quantity` of a stackable item, up on Plutus's
    * market board at `price` for the lot (the desktop asks a price each and
    * multiplies, so a stack can be bought a few at a time). They leave the bank; throws with the
-   * server's reason (worn, class gear, price too low, stall full). */
+   * server's reason (worn, price too low, stall full). */
   marketList: (unitId: string, price: number, quantity = 1) =>
     invoke<{
       listing: Omit<MarketListing, "sellerName">;
@@ -527,6 +527,10 @@ export const herzies = {
       updatePinnedCache(pinned);
       return pinned;
     }),
+
+  /** Float the window above all other windows. */
+  setAlwaysOnTop: (on: boolean) => invoke<void>("set_always_on_top", { on }),
+  getAlwaysOnTop: () => invoke<boolean>("get_always_on_top"),
 
   /** "Ghost mode" — pause all listening tracking (no XP, minutes, or now playing). */
   setGhostMode: (enabled: boolean) => {
