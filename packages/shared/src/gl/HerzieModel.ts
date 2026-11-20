@@ -27,6 +27,7 @@ import {
   cloakColliders,
   cloakStyleFor,
 } from "../cloaks.js";
+import type { CreatureParams } from "../creature-params.js";
 import {
   buildCreatureModel,
   CAST,
@@ -36,7 +37,6 @@ import {
   CREATURE_FRAME_HEIGHT,
   type CreatureModel,
   type CreatureMotion,
-  type CreatureParams,
   castHand,
   castWeight,
   creaturePoseOffsets,
@@ -157,6 +157,9 @@ export type HerzieLook = {
   equipped?: Equipped;
   /** Hand-set params instead of the seed's (the boss). */
   params?: CreatureParams;
+  /** A herzie's own body, rolled from a seed it was sent without (what the
+   * website gets, see TownLook): drawn like any herzie's, unlike `params`. */
+  body?: CreatureParams;
 };
 
 export type HerzieModelOptions = {
@@ -1134,7 +1137,7 @@ export class HerzieModel {
       look.seed,
       look.stage,
       look.equipped,
-      look.params,
+      look.params ?? look.body,
       options.layoutCols ?? 64,
       options.layoutRows ?? 64,
     );

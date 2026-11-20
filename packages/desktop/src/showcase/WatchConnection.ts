@@ -9,8 +9,8 @@ import {
   type TownPlayer,
 } from "@herzies/shared";
 
-/** Someone in the Town, as the website sees them: no name, and a body the
- * server made up (see the Town server's standInSeed). */
+/** Someone in the Town, as the website sees them: no name, its own body
+ * and gear under a stand-in seed (see the Town server's watchedOf). */
 export type Watched = {
   id: number;
   look: TownLook;

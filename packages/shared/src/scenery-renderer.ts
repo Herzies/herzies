@@ -5,7 +5,7 @@
  * stars plus a big moon with bats flitting across it. Anchored to window top.
  */
 
-import { mulberry32, simpleHash } from "./creature-renderer.js";
+import { mulberry32, simpleHash } from "./creature-params.js";
 
 const SKY_COLOR = "#8899aa";
 const BRIGHT_STAR_COLOR = "#ccddee";

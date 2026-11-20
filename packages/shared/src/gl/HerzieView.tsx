@@ -10,8 +10,8 @@ import {
 } from "react";
 import * as THREE from "three";
 import type { CloakConfig } from "../cloak-physics.js";
+import type { CreatureParams } from "../creature-params.js";
 import {
-  type CreatureParams,
   DEFAULT_CAMERA_DISTANCE,
   DEFAULT_CAMERA_TILT_DEG,
   DEFAULT_Y_ANGLE,

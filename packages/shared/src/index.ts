@@ -13,6 +13,7 @@ export {
 } from "./cloak-physics.js";
 export * from "./cloaks.js";
 export * from "./craving.js";
+export * from "./creature-params.js";
 export * from "./creature-renderer.js";
 export * from "./crystal.js";
 export * from "./dangle-physics.js";

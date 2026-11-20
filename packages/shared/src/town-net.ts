@@ -12,6 +12,7 @@
  * Kept free of React and the DOM: this file is bundled into the Worker and
  * vendored into the Deno edge functions.
  */
+import type { CreatureParams } from "./creature-params.js";
 import type { Equipped } from "./items.js";
 
 /** Bumped on any incompatible change; the server turns away other versions
@@ -110,10 +111,15 @@ export const TOWN_CLOSE = {
 
 /** What other players need to draw you. */
 export type TownLook = {
-  /** The render seed: the herzie's friend code. */
+  /** The render seed: the herzie's friend code. Website watchers get a
+   * stand-in seed instead, with the body the real one rolls in `body`, so
+   * the code never leaves the server. */
   seed: string;
   stage: number;
   equipped?: Equipped;
+  /** The body its real seed rolls, drawn instead of the seed's. Only what
+   * watchers get carries it. */
+  body?: CreatureParams;
 };
 
 export type TownTicketPayload = {
