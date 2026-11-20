@@ -38,6 +38,7 @@ import {
   hasRoomFor,
   hitDamage,
   ITEM_DROP_WEIGHT_OVERRIDES,
+  ITEM_SETS,
   ITEMS,
   type ItemDef,
   type ItemUnit,
@@ -1782,9 +1783,9 @@ describe("boss loot", () => {
       new URL(`../../../supabase/migrations/${name}`, import.meta.url),
       "utf8",
     );
-  // settle_boss_fight lives in 00114; the roll was last replaced in 00149.
+  // settle_boss_fight lives in 00114; the roll was last replaced in 00151.
   const sql = migration("00114_boss_bonus_loot.sql");
-  const rollSql = migration("00149_eivind_set.sql");
+  const rollSql = migration("00151_class_set_drops.sql");
 
   it("rolls from the same weights as bossLootWeights", () => {
     const roll = rollSql.slice(
@@ -1913,7 +1914,7 @@ describe("class sets", () => {
     percussionist: "drumhide-cloak",
   };
 
-  it("builds one boss-only set round each class cloak: head, body, back, feet", () => {
+  it("builds one set round each class cloak: head, body, back, feet", () => {
     const boss = new Set(bossLootWeights().map((w) => w.itemId));
     for (const cls of CLASS_IDS) {
       const set = getItemSet(CLOAK_OF[cls]);
@@ -1930,9 +1931,12 @@ describe("class sets", () => {
         expect(item?.requiredClass).toBe(cls);
         // Never worn before stage 2 (level 10).
         expect(item?.minStage).toBeGreaterThanOrEqual(2);
-        expect(BOSS_ONLY_ITEM_IDS).toContain(item?.id);
-        expect(NON_DROPPABLE_ITEM_IDS).toContain(item?.id);
-        expect(boss.has(item?.id ?? "")).toBe(false);
+        // The cloak only from a fight's reward pools; the rest drop at
+        // random, from listening and a boss's loot alike.
+        const cloak = item?.id === CLOAK_OF[cls];
+        expect(BOSS_ONLY_ITEM_IDS.includes(item?.id as never)).toBe(cloak);
+        expect(NON_DROPPABLE_ITEM_IDS.includes(item?.id as never)).toBe(cloak);
+        expect(boss.has(item?.id ?? "")).toBe(!cloak);
       }
     }
   });
@@ -1981,8 +1985,10 @@ describe("class sets", () => {
       requiredClass: cls,
     }));
     const cloaks = new Set(Object.values(CLOAK_OF));
-    const pieces = BOSS_ONLY_ITEM_IDS.filter((id) => !cloaks.has(id));
-    expect(rows.map((r) => r.id)).toEqual(pieces);
+    const pieces = ITEM_SETS.filter((s) =>
+      s.itemIds.some((id) => cloaks.has(id)),
+    ).flatMap((s) => s.itemIds.filter((id) => !cloaks.has(id)));
+    expect(rows.map((r) => r.id).sort()).toEqual(pieces.sort());
     for (const row of rows) {
       const item = getItem(row.id);
       expect(row).toEqual({

@@ -1310,22 +1310,13 @@ export const RARITY_DROP_WEIGHTS: Record<Rarity, number> = {
 
 /** Never a listening drop, nor in a boss's random loot (they're in
  * NON_DROPPABLE_ITEM_IDS, so George and every other pool leave them out
- * too): the class sets, cloaks included, legendary, earned only from a boss
- * fight's reward pools (BossFightConfig.rewardPools), which the admin sets
- * per fight. */
+ * too): the class cloaks, legendary, earned only from a boss fight's reward
+ * pools (BossFightConfig.rewardPools), which the admin sets per fight. The
+ * rest of each class set drops like any legendary. */
 export const BOSS_ONLY_ITEM_IDS = [
   "troubadour-mantle",
   "groove-cape",
   "drumhide-cloak",
-  "troubadour-plume",
-  "troubadour-ruff",
-  "troubadour-slippers",
-  "groove-cap",
-  "spindle-chain",
-  "groove-kicks",
-  "drumhide-helm",
-  "drumhide-gorget",
-  "drumhide-boots",
 ] as const;
 
 /** Items that can never appear as a random world drop, regardless of rarity. */
@@ -1350,7 +1341,7 @@ export const NON_DROPPABLE_ITEM_IDS = [
   "star-candy",
   // Boboku's spare cap: he sells it (BOBOKU_STOCK), it never drops.
   "sixpence",
-  // The class sets come only from a boss's reward pools…
+  // The class cloaks come only from a boss's reward pools…
   ...BOSS_ONLY_ITEM_IDS,
   // …and the Tailwind Cloak only for money.
   "tailwind-cloak",
@@ -1448,7 +1439,7 @@ export const BOSS_LOOT_EXCLUDED_ITEM_IDS = ["cd"];
 /** What a boss's random loot is drawn from, and how likely each is: every
  * item that drops from listening (not in NON_DROPPABLE_ITEM_IDS, no
  * seasonal window, not in BOSS_LOOT_EXCLUDED_ITEM_IDS), weighted per BOSS_LOOT_RARITY_BOOST. settle_boss_fight
- * rolls from a copy of this list (boss_loot_roll, last in 00149_eivind_set.sql);
+ * rolls from a copy of this list (boss_loot_roll, last in 00151_class_set_drops.sql);
  * items.test.ts checks the two agree, so a new droppable item needs adding
  * there too. */
 export function bossLootWeights(): { itemId: string; weight: number }[] {
@@ -4750,12 +4741,11 @@ export const ITEMS: ItemDef[] = [
   },
   // The class sets: each class cloak's look carried onto a hat, a neck piece
   // and shoes, with stats for its class (ITEM_SETS), and locked to that
-  // class. Legendary and boss-only, like the cloaks (BOSS_ONLY_ITEM_IDS).
+  // class. Legendary drops: listening, the Crystal and a boss's random loot.
   {
     id: "troubadour-plume",
     name: "Troubadour's Plume",
-    description:
-      "«Stooop it's tickling hhihihii»",
+    description: "«Stooop it's tickling hhihihii»",
     rarity: "legendary",
     frames: troubadourPlumeFrames,
     equipable: true,
