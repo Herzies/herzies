@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { CLASS_IDS, type HerzieClass } from "./classes.js";
 import {
   applyEquip,
   applyItemUpgrade,
@@ -448,6 +449,7 @@ describe("seasonal drop windows", () => {
     const item = getItem("eivinds-evasive-pair");
     expect(item?.rarity).toBe("mythic");
     expect(item?.equipSlot).toBe("feet");
+    expect(item?.minStage).toBe(2);
     expect(item && getItemType(item)).toBe("shoes");
     expect(DECK_SLOT_GROUPS.find((g) => g.label === "Feet")?.slots).toEqual([
       "feet",
@@ -469,8 +471,22 @@ describe("seasonal drop windows", () => {
     const item = getItem("eivinds-wings");
     expect(item?.rarity).toBe("mythic");
     expect(item?.equipSlot).toBe("back");
+    expect(item?.minStage).toBe(3);
     expect(NON_DROPPABLE_ITEM_IDS).not.toContain("eivinds-wings");
     expect(bossLootWeights().map((w) => w.itemId)).toContain("eivinds-wings");
+  });
+
+  it("makes the shoes and wings Eivind's set: +10 luck, move speed at the cap", () => {
+    const set = getItemSet("eivinds-wings");
+    expect(set?.itemIds).toEqual(["eivinds-evasive-pair", "eivinds-wings"]);
+    expect(getHerzieStats({ back: "eivinds-wings" }).luck).toBe(15);
+    const both = getHerzieStats({
+      feet: "eivinds-evasive-pair",
+      back: "eivinds-wings",
+    });
+    expect(both.moveSpeed).toBe(MAX_MOVE_SPEED);
+    // The wings' 15, and the set's 10.
+    expect(both.luck).toBe(25);
   });
 });
 
@@ -696,8 +712,10 @@ describe("applyEquip", () => {
     expect(unitsToEquipped(next)).toEqual({ off_hand: "old-cymbal" });
   });
 
-  it("class equipment sells for a little, and never drops", () => {
-    const gear = ITEMS.filter((i) => i.requiredClass);
+  it("instruments are class gear, sell for a little, and never drop", () => {
+    const gear = ITEMS.filter(
+      (i) => i.equipSlot === "main_hand" || i.equipSlot === "off_hand",
+    );
     expect(gear.map((i) => i.id).sort()).toEqual([
       "compact-discs",
       "lute",
@@ -705,6 +723,7 @@ describe("applyEquip", () => {
       "worn-stick",
     ]);
     for (const item of gear) {
+      expect(item.requiredClass).toBeDefined();
       expect(item.sellPrice).toBe(10);
       expect(NON_DROPPABLE_ITEM_IDS).toContain(item.id);
     }
@@ -1829,7 +1848,6 @@ describe("cloaks", () => {
       const item = getItem(id);
       expect(item?.equipSlot).toBe("back");
       expect(item?.minStage).toBe(3);
-      expect(item?.requiredClass).toBeUndefined();
       expect(item?.rarity).toBe("legendary");
       expect(item && getItemType(item)).toBe("cloak");
     }
@@ -1885,5 +1903,96 @@ describe("cloaks", () => {
     expect(TOWN_SPRINT_SPEED * (1 + MAX_MOVE_SPEED / 100)).toBeLessThan(
       TOWN_SPRINT_SPEED * 1.5,
     );
+  });
+});
+
+describe("class sets", () => {
+  const CLOAK_OF: Record<HerzieClass, string> = {
+    bard: "troubadour-mantle",
+    record_slinger: "groove-cape",
+    percussionist: "drumhide-cloak",
+  };
+
+  it("builds one boss-only set round each class cloak: head, body, back, feet", () => {
+    const boss = new Set(bossLootWeights().map((w) => w.itemId));
+    for (const cls of CLASS_IDS) {
+      const set = getItemSet(CLOAK_OF[cls]);
+      expect(set?.bonus).toBeDefined();
+      const pieces = (set?.itemIds ?? []).map((id) => getItem(id));
+      expect(pieces.map((p) => p?.equipSlot).sort()).toEqual([
+        "back",
+        "body",
+        "feet",
+        "head",
+      ]);
+      for (const item of pieces) {
+        expect(item?.rarity).toBe("legendary");
+        expect(item?.requiredClass).toBe(cls);
+        // Never worn before stage 2 (level 10).
+        expect(item?.minStage).toBeGreaterThanOrEqual(2);
+        expect(BOSS_ONLY_ITEM_IDS).toContain(item?.id);
+        expect(NON_DROPPABLE_ITEM_IDS).toContain(item?.id);
+        expect(boss.has(item?.id ?? "")).toBe(false);
+      }
+    }
+  });
+
+  it("adds the set's bonus only with all four worn, upgrades on top", () => {
+    const full = [
+      unit("h", "drumhide-helm", 2, "head"),
+      unit("b", "drumhide-gorget", 0, "body"),
+      unit("c", "drumhide-cloak", 0, "back"),
+      unit("f", "drumhide-boots", 0, "feet"),
+    ];
+    // 12 + 8 + 15 + 6 from the pieces, 2 from the helm's upgrade, 10 from
+    // the set.
+    expect(getHerzieStatsFromUnits(full).def).toBe(53);
+    expect(getHerzieStatsFromUnits(full.slice(0, 3)).def).toBe(37);
+    expect(
+      getHerzieStats({
+        head: "groove-cap",
+        body: "spindle-chain",
+        back: "groove-cape",
+        feet: "groove-kicks",
+      }).critChance,
+    ).toBe(6 + 3 + 3 + 5);
+  });
+
+  it("has an items row for each new piece with the catalog's rules", () => {
+    const sql = readFileSync(
+      new URL(
+        "../../../supabase/migrations/00150_class_sets.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    // Names and descriptions are left out: they're edited in the admin,
+    // against items.ts, and nothing reads the table's copies.
+    const rows = [
+      ...sql.matchAll(
+        /\('([a-z-]+)', '(?:[^']|'')*', '(?:[^']|'')*',\s*'(\w+)', (\d+), NULL, false, true, '(\w+)', (NULL|\d), '(\w+)'\)/g,
+      ),
+    ].map(([, id, rarity, sell, slot, stage, cls]) => ({
+      id,
+      rarity,
+      sellPrice: Number(sell),
+      equipSlot: slot,
+      minStage: stage === "NULL" ? undefined : Number(stage),
+      requiredClass: cls,
+    }));
+    const cloaks = new Set(Object.values(CLOAK_OF));
+    const pieces = BOSS_ONLY_ITEM_IDS.filter((id) => !cloaks.has(id));
+    expect(rows.map((r) => r.id)).toEqual(pieces);
+    for (const row of rows) {
+      const item = getItem(row.id);
+      expect(row).toEqual({
+        id: item?.id,
+        rarity: item?.rarity,
+        sellPrice: item?.sellPrice,
+        equipSlot: item?.equipSlot,
+        minStage: item?.minStage,
+        requiredClass: item?.requiredClass,
+      });
+    }
   });
 });

@@ -327,7 +327,32 @@ export interface Sphere {
 }
 
 /** A prop drawn as a model in 3D (see Sphere.prop). */
-export type PropModel = BoomboxProp | ShoeProp | TieProp;
+export type PropModel = BoomboxProp | ShoeProp | TieProp | FeatherProp;
+
+/** A feather (the Troubadour's Plume's), drawn as a model in 3D
+ * (gl/props.ts): a quill along `spine` and a flat vane either side of it. */
+export interface FeatherProp {
+  kind: "feather";
+  /** Its root, where it's pinned to the hat, in creature space (y down). */
+  center: V3;
+  yaw: number;
+  /** Points along the quill from the root to the tip, from `center`. */
+  spine: V3[];
+  /** The vane's half-width at its widest. */
+  width: number;
+  /** Which way its broad face looks. */
+  facing: V3;
+  /** The vane, its last fifth (`tip`), and the quill. */
+  colors: { vane: string; tip: string; quill: string };
+}
+
+/** A feather vane's width at `t` along it (0 at the root, 1 the tip), as a
+ * share of its widest: a bare quill at the root, round shouldered, coming
+ * to a point. */
+export function featherVane(t: number): number {
+  if (t <= 0.1 || t >= 1) return 0;
+  return Math.sin(Math.PI * ((t - 0.1) / 0.9) ** 0.7);
+}
 
 /** Fylling's Necktie, drawn as a model in 3D (gl/props.ts): a collar band, a
  * knot and a ribbon blade that the renderer simulates (tie-physics.ts). */
@@ -1559,6 +1584,141 @@ function buildNecktieSpheres(spheres: Sphere[]): Sphere[] {
   return result;
 }
 
+/** Troubadour's Ruff: a starched collar of cream pleats standing out round
+ * the neck, each pleat a short capsule pointing outward, fastened at the
+ * throat with a gold brooch. */
+function buildRuffSpheres(spheres: Sphere[]): Sphere[] {
+  const neck = getNeck(spheres);
+  if (!neck) return [];
+  const pleat = neck.size * 0.085;
+  const reach = neck.size * 0.11;
+  const { beads, front } = buildNecklaceBeads(neck, {
+    count: 28,
+    beadRadius: () => pleat,
+    color: (i) => (i % 2 === 0 ? "#FBF3DF" : "#E9DCBC"),
+    sag: neck.size * 0.05,
+    // Starched: it hardly swings.
+    heft: 0.35,
+  });
+  // Turn each bead into a pleat standing out from the neck.
+  for (const bead of beads) {
+    const dx = bead.center[0] - neck.center[0];
+    const dz = bead.center[2] - neck.center[2];
+    const d = Math.hypot(dx, dz) || 1;
+    const out: V3 = [dx / d, 0, dz / d];
+    bead.center = [
+      bead.center[0] + out[0] * reach * 0.6,
+      bead.center[1],
+      bead.center[2] + out[2] * reach * 0.6,
+    ];
+    bead.shape = {
+      kind: "capsule",
+      axis: [out[0] * reach, pleat * 0.25, out[2] * reach],
+    };
+  }
+  const frontBead = beads.reduce((a, b) => (b.center[2] < a.center[2] ? b : a));
+  const z = frontBead.center[2] - reach * 0.9;
+  beads.push({
+    center: [front[0], front[1], z],
+    radius: neck.size * 0.1,
+    zone: "wearable",
+    part: "body",
+    color: "#F2CF5B",
+    finish: "metal",
+    dangle: frontBead.dangle,
+  });
+  return beads;
+}
+
+/** Spindle Chain: a silver chain with a little black seven-inch single
+ * hanging off it, red label and all (the Groove Cape's colours). */
+function buildSpindleChainSpheres(spheres: Sphere[]): Sphere[] {
+  const neck = getNeck(spheres);
+  if (!neck) return [];
+  const big = neck.size * 0.09;
+  const small = neck.size * 0.065;
+  const { beads, front } = buildNecklaceBeads(neck, {
+    count: 24,
+    beadRadius: (i) => (i % 2 === 0 ? big : small),
+    color: (i) => (i % 2 === 0 ? "#D8D8E8" : "#9A9AAE"),
+    sag: neck.size * 0.2,
+    heft: 1,
+  });
+  for (const bead of beads) bead.finish = "metal";
+  // The record hangs face out from the lowest link, standing proud of the
+  // chest: a thin black disc, its red label, the spindle hole in silver.
+  // All of it clears the body, which bulges out below the neck: it stands
+  // off the body's widest point within the disc's height.
+  const discR = neck.size * 0.22;
+  const py = front[1] + big + discR * 0.85;
+  const widest = Math.min(
+    Math.max(neck.body.center[1], py - discR),
+    py + discR,
+  );
+  const pz =
+    neck.center[2] - (neckSurfaceRadius(neck, widest) + neck.size * 0.03);
+  const dangle: Dangle = {
+    weight: 1,
+    hang: py - neck.center[1],
+    pivot: [neck.center[0], neck.center[2]],
+  };
+  const disc = (dz: number, radius: number, color: string, half: number) =>
+    beads.push({
+      center: [front[0], py, pz - dz],
+      radius,
+      zone: "wearable",
+      part: "body",
+      color,
+      shape: { kind: "cylinder", axis: [0, 0, -half] },
+      dangle,
+    });
+  disc(0, discR, "#1B1B23", neck.size * 0.02);
+  disc(neck.size * 0.02, discR * 0.4, "#D8373F", neck.size * 0.008);
+  disc(neck.size * 0.03, discR * 0.1, "#D8D8E8", neck.size * 0.006);
+  return beads;
+}
+
+/** Drumhide Gorget: a thick collar of oxblood hide, close round the neck,
+ * studded with brass (the Drumhide Cloak's colours). */
+function buildGorgetSpheres(spheres: Sphere[]): Sphere[] {
+  const neck = getNeck(spheres);
+  if (!neck) return [];
+  const r = neck.size * 0.12;
+  const { beads } = buildNecklaceBeads(neck, {
+    count: 30,
+    beadRadius: () => r,
+    color: (i) => (i % 2 === 0 ? "#7A2E24" : "#6A271E"),
+    sag: neck.size * 0.05,
+    // Stiff leather: barely moves.
+    heft: 0.2,
+  });
+  // Upright, overlapping: one deep band rather than a string of beads.
+  for (const bead of beads) {
+    bead.shape = { kind: "capsule", axis: [0, r * 0.6, 0] };
+  }
+  // A brass stud on every third segment, set into its outside.
+  const studs: Sphere[] = [];
+  beads.forEach((bead, i) => {
+    if (i % 3 !== 0) return;
+    const dx = bead.center[0] - neck.center[0];
+    const dz = bead.center[2] - neck.center[2];
+    const d = Math.hypot(dx, dz) || 1;
+    studs.push({
+      ...bead,
+      center: [
+        bead.center[0] + (dx / d) * r * 0.8,
+        bead.center[1],
+        bead.center[2] + (dz / d) * r * 0.8,
+      ],
+      radius: r * 0.38,
+      shape: undefined,
+      color: "#D6AE48",
+      finish: "metal",
+    });
+  });
+  return [...beads, ...studs];
+}
+
 /** Poses the dangling spheres for a spin's swing and flare. Flare first —
  * lifting each sphere back up by part of its hang and out from the neck —
  * then the swing, a rotation about the neck's axis. Rotating about that axis
@@ -1600,6 +1760,9 @@ export function hasDangleEquipped(equipped?: Equipped): boolean {
     equipped?.body === "gold-chain" ||
     equipped?.body === "pearl-necklace" ||
     equipped?.body === "ff-pearls-marble" ||
+    equipped?.body === "troubadour-ruff" ||
+    equipped?.body === "spindle-chain" ||
+    equipped?.body === "drumhide-gorget" ||
     equipped?.head === "witch-hat"
   );
 }
@@ -1610,6 +1773,9 @@ const BODY_ITEM_BUILDERS: Record<string, (spheres: Sphere[]) => Sphere[]> = {
   "ff-pearls-marble": buildMarblePearlsSpheres,
   bowtie: buildBowtieSpheres,
   "fyllings-necktie": buildNecktieSpheres,
+  "troubadour-ruff": buildRuffSpheres,
+  "spindle-chain": buildSpindleChainSpheres,
+  "drumhide-gorget": buildGorgetSpheres,
 };
 
 /** Placement/orientation overrides for the boombox ground prop. */
@@ -2284,6 +2450,246 @@ function buildGuardHelmSpheres(spheres: Sphere[]): Sphere[] {
       hr * (0.15 - 0.03 * Math.abs(t)),
       crest,
     );
+  }
+  return result;
+}
+
+/** How far the creature's own head reaches out from a vertical axis through
+ * (x, z) at height `y`: what a hat's crown must clear there, or the head
+ * pokes through it. */
+function headReachAt(spheres: Sphere[], x: number, z: number, y: number) {
+  let reach = 0;
+  for (const s of spheres) {
+    if (s.part !== "head" || s.zone === "wearable") continue;
+    const dy = y - s.center[1];
+    if (Math.abs(dy) >= s.radius) continue;
+    const off = Math.hypot(s.center[0] - x, s.center[2] - z);
+    reach = Math.max(reach, off + Math.sqrt(s.radius ** 2 - dy * dy));
+  }
+  return reach;
+}
+
+/** Troubadour's Plume: a purple velvet beret, tipped down over one side,
+ * on a gold band, with a long cream feather sweeping up and back from a
+ * gold clasp on the other. The 3D view draws the feather as a model of its
+ * own (gl/props.ts: a quill and a flat, curved vane); the ray caster gets
+ * tapering cones along its spine. */
+function buildPlumedBeretSpheres(spheres: Sphere[]): Sphere[] {
+  const head = getHeadBounds(spheres);
+  if (!head) return [];
+  const [hx, hy, hz] = head.center;
+  const hr = head.radius;
+  const velvet = "#7B3FB8";
+  const gold = "#F2CF5B";
+  const result: Sphere[] = [];
+  const push = (
+    center: V3,
+    radius: number,
+    color: string,
+    extra: Partial<Sphere> = {},
+  ) =>
+    result.push({
+      center,
+      radius,
+      zone: "wearable",
+      part: "head",
+      color,
+      ...extra,
+    });
+  // Creature space is y down: up is −y; the face is toward −z. The beret
+  // dips toward +x; the feather rises on −x.
+  const bandY = hy - hr * 0.7;
+  const bandHalf = hr * 0.06;
+  const bandR = Math.max(
+    hr * 0.78,
+    headReachAt(spheres, hx, hz, bandY) + hr * 0.03,
+  );
+  push([hx, bandY, hz], bandR, gold, {
+    shape: { kind: "cylinder", axis: [0, -bandHalf, 0] },
+  });
+  // The beret: a wide, soft disc puffed up on top, leaning so its +x edge
+  // hangs lower, and pushed a little that way so it overhangs.
+  const capHalf = hr * 0.05;
+  push(
+    [hx + hr * 0.14, bandY - bandHalf - hr * 0.08, hz + hr * 0.04],
+    hr * 1.02,
+    velvet,
+    {
+      shape: {
+        kind: "cylinder",
+        axis: [capHalf * 0.35, -capHalf, 0],
+        dome: hr * 0.32,
+      },
+    },
+  );
+  // The little stalk on top.
+  push(
+    [hx + hr * 0.08, bandY - bandHalf - hr * 0.44, hz + hr * 0.04],
+    hr * 0.06,
+    velvet,
+  );
+  // The clasp, a purple stone in gold, on the beret's raised edge, where
+  // the feather starts. The feather stays low, like the witch hat: a grown
+  // herzie's head sits near the top of the frame, and a tall plume would
+  // be cut off.
+  const root: V3 = [hx - hr * 0.88, bandY - hr * 0.42, hz + hr * 0.05];
+  push(root, hr * 0.1, gold, { finish: "metal" });
+  push([root[0] - hr * 0.06, root[1], root[2] - hr * 0.05], hr * 0.05, velvet);
+  // The feather: up and out past the beret's edge, then curling back,
+  // drooping at its tip.
+  const count = 12;
+  const spine: V3[] = [];
+  for (let k = 0; k <= count; k++) {
+    const t = k / count;
+    spine.push([
+      root[0] - hr * 0.42 * Math.sin(t * Math.PI * 0.5),
+      root[1] - hr * 0.6 * Math.sin(t * Math.PI * 0.8),
+      root[2] + hr * 0.45 * t * t,
+    ]);
+  }
+  const prop: FeatherProp = {
+    kind: "feather",
+    center: root,
+    yaw: 0,
+    spine: spine.map((p) => sub(p, root)),
+    width: hr * 0.24,
+    // Its broad face turned to the front and a little out.
+    facing: [-0.4, 0, -1],
+    colors: { vane: "#FFF6DC", tip: gold, quill: "#E2CF9E" },
+  };
+  // What the ray caster draws: a tapering cone a segment, its width the
+  // vane's.
+  const widthAt = (t: number) => hr * (0.03 + 0.09 * featherVane(t));
+  for (let k = 0; k < count; k++) {
+    const half = scale(sub(spine[k + 1], spine[k]), 0.5);
+    push(
+      add(spine[k], half),
+      widthAt(k / count),
+      k >= count - 2 ? gold : "#FFF6DC",
+      {
+        shape: {
+          kind: "cone",
+          axis: half,
+          tipRadius: widthAt((k + 1) / count),
+        },
+        prop,
+      },
+    );
+  }
+  return result;
+}
+
+/** Groove Cap: a black cap worn backwards, its bill the red of the Groove
+ * Cape's lining, and a little seven-inch single on the front of the crown
+ * where the bill used to be: red label, silver spindle hole. */
+function buildGrooveCapSpheres(spheres: Sphere[]): Sphere[] {
+  const head = getHeadBounds(spheres);
+  if (!head) return [];
+  const [hx, , hz] = head.center;
+  const hr = head.radius;
+  const black = "#2A2A33";
+  const result: Sphere[] = [];
+  const push = (center: V3, radius: number, color: string, shape?: Shape) =>
+    result.push({
+      center,
+      radius,
+      zone: "wearable",
+      part: "head",
+      color,
+      shape,
+    });
+  // Creature space is y down: up is −y; the face is toward −z. Shaped like
+  // the FF Hat (buildFabianCapSpheres): a ball for the crown riding above
+  // the eyes, a thin disc for the bill — here at the back.
+  const billY = capBillY(spheres, head);
+  const crownR = hr * 0.86;
+  const crownY = billY + hr * 0.08;
+  push([hx, crownY, hz], crownR, black);
+  push([hx, billY + hr * 0.04, hz + hr * 0.72], hr * 0.74, "#D8373F", {
+    kind: "cylinder",
+    // Tipped down a touch toward the back of the neck.
+    axis: [0, -hr * 0.025, -hr * 0.004],
+  });
+  push([hx, crownY - crownR - hr * 0.01, hz], hr * 0.07, "#D8D8E8");
+  // The record, on the crown's front where it curves up, facing out along
+  // the crown's surface.
+  const up = 0.5;
+  const n: V3 = [0, -Math.sin(up), -Math.cos(up)];
+  const at = (out: number): V3 => [
+    hx + n[0] * out,
+    crownY + n[1] * out,
+    hz + n[2] * out,
+  ];
+  const disc = (out: number, radius: number, color: string, half: number) =>
+    push(at(out), radius, color, {
+      kind: "cylinder",
+      axis: [n[0] * half, n[1] * half, n[2] * half],
+    });
+  disc(crownR - hr * 0.02, hr * 0.3, "#16161C", hr * 0.03);
+  disc(crownR + hr * 0.01, hr * 0.12, "#D8373F", hr * 0.01);
+  disc(crownR + hr * 0.025, hr * 0.035, "#D8D8E8", hr * 0.008);
+  return result;
+}
+
+/** Drumhide Helm: a snare drum worn as a helmet. An oxblood shell pulled
+ * down over the head, a pale drumhead on top, brass hoops round both edges
+ * and brass tension lugs between them, all the way round. */
+function buildDrumhideHelmSpheres(spheres: Sphere[]): Sphere[] {
+  const head = getHeadBounds(spheres);
+  if (!head) return [];
+  const [hx, hy, hz] = head.center;
+  const hr = head.radius;
+  const brass = "#D6AE48";
+  const result: Sphere[] = [];
+  const push = (
+    center: V3,
+    radius: number,
+    color: string,
+    extra: Partial<Sphere> = {},
+  ) =>
+    result.push({
+      center,
+      radius,
+      zone: "wearable",
+      part: "head",
+      color,
+      ...extra,
+    });
+  // Creature space is y down: up is −y. Low, like the guard's helm, so a
+  // grown herzie's doesn't run off the top of the frame.
+  const shellY = hy - hr * 0.64;
+  const shellHalf = hr * 0.2;
+  const shellR = Math.max(
+    hr * 0.96,
+    headReachAt(spheres, hx, hz, shellY + shellHalf) + hr * 0.04,
+  );
+  push([hx, shellY, hz], shellR, "#7A2E24", {
+    shape: { kind: "cylinder", axis: [0, -shellHalf, 0] },
+  });
+  // The drumhead, a little proud of the top and very slightly domed.
+  push([hx, shellY - shellHalf, hz], shellR * 0.97, "#E9DCC0", {
+    shape: { kind: "cylinder", axis: [0, -hr * 0.015, 0], dome: hr * 0.04 },
+  });
+  // The hoops.
+  for (const y of [shellY - shellHalf, shellY + shellHalf]) {
+    push([hx, y, hz], shellR + hr * 0.04, brass, {
+      shape: { kind: "cylinder", axis: [0, -hr * 0.035, 0] },
+      finish: "metal",
+    });
+  }
+  // The lugs: short brass bars standing between the hoops.
+  const lugs = 8;
+  for (let i = 0; i < lugs; i++) {
+    const a = ((i + 0.5) / lugs) * Math.PI * 2;
+    const x = hx + Math.sin(a) * (shellR + hr * 0.03);
+    const z = hz - Math.cos(a) * (shellR + hr * 0.03);
+    const lug = capsuleBetween(
+      [x, shellY - shellHalf * 0.5, z],
+      [x, shellY + shellHalf * 0.5, z],
+      hr * 0.05,
+      brass,
+    );
+    result.push({ ...lug, finish: "metal" });
   }
   return result;
 }
@@ -3675,10 +4081,51 @@ const FYLLINGS_LOAFERS_STYLE: ShoeStyle = {
   wings: false,
 };
 
+/** The class sets' shoes, each in its cloak's colours: the Troubadour's
+ * purple velvet slippers with a gold strap, the Groove's black high-tops
+ * with red and silver, the Drumhide's oxblood boots with a brass buckle. */
+const TROUBADOUR_SLIPPERS_STYLE: ShoeStyle = {
+  upper: "#7B3FB8",
+  toe: "#5E2D92",
+  sole: "#E8C35A",
+  stripe: "#F2CF5B",
+  laces: "#F2CF5B",
+  collar: "#F2CF5B",
+  tab: "#5E2D92",
+  strap: true,
+  wings: false,
+};
+
+const GROOVE_KICKS_STYLE: ShoeStyle = {
+  upper: "#2A2A33",
+  toe: "#1B1B23",
+  sole: "#F4F4F6",
+  stripe: "#D8373F",
+  laces: "#D8373F",
+  collar: "#B8B8C8",
+  tab: "#D8373F",
+  wings: false,
+};
+
+const DRUMHIDE_BOOTS_STYLE: ShoeStyle = {
+  upper: "#7A2E24",
+  toe: "#5E221A",
+  sole: "#3A1A12",
+  stripe: "#C9A03E",
+  laces: "#D6AE48",
+  collar: "#C9A27A",
+  tab: "#5E221A",
+  strap: true,
+  wings: false,
+};
+
 const SHOE_STYLES: Record<string, ShoeStyle> = {
   "fyllings-loafers": FYLLINGS_LOAFERS_STYLE,
   "eivinds-evasive-pair": EVASIVE_PAIR_STYLE,
   "ff-sneakers-black": FF_SNEAKERS_STYLE,
+  "troubadour-slippers": TROUBADOUR_SLIPPERS_STYLE,
+  "groove-kicks": GROOVE_KICKS_STYLE,
+  "drumhide-boots": DRUMHIDE_BOOTS_STYLE,
 };
 
 /** A shoe on each foot, in `style`. Only herzies with legs (stage 3) wear
@@ -3860,6 +4307,15 @@ function appendWearableSpheres(
   }
   if (equipped.head === "guard-helm") {
     spheres.push(...buildGuardHelmSpheres(spheres));
+  }
+  if (equipped.head === "troubadour-plume") {
+    spheres.push(...buildPlumedBeretSpheres(spheres));
+  }
+  if (equipped.head === "groove-cap") {
+    spheres.push(...buildGrooveCapSpheres(spheres));
+  }
+  if (equipped.head === "drumhide-helm") {
+    spheres.push(...buildDrumhideHelmSpheres(spheres));
   }
   const shoeStyle = equipped.feet && SHOE_STYLES[equipped.feet];
   if (shoeStyle) spheres.push(...buildShoeSpheres(spheres, shoeStyle));

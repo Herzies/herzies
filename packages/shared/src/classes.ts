@@ -105,7 +105,7 @@ export function hasInstrument(
   return !!inst && mainHand === inst;
 }
 
-/** The class an instrument belongs to (class items are class-bound). */
+/** The class an instrument belongs to (only that class can wear it). */
 function classOfInstrument(mainHand: string | null | undefined) {
   if (!mainHand) return null;
   for (const def of Object.values(CLASS_DEFS))
@@ -119,8 +119,8 @@ function classOfInstrument(mainHand: string | null | undefined) {
  * from stage 3 (it has a body to swing from), a body slam before that.
  *
  * `cls` undefined means "not known" (someone else's herzie): the
- * instrument in its hand speaks for its class, since class gear is bound
- * to the class. `null` means "has no class".
+ * instrument in its hand speaks for its class, since only that class can
+ * wear it. `null` means "has no class".
  */
 export function basicAttack(h: {
   cls: string | null | undefined;

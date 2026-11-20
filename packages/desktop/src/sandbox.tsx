@@ -63,6 +63,16 @@ const WEARABLE_OPTIONS = [
   "fyllings-cape",
   "fyllings-monocle",
   "fyllings-black",
+  // The class sets, with their cloaks above.
+  "troubadour-plume",
+  "troubadour-ruff",
+  "troubadour-slippers",
+  "groove-cap",
+  "spindle-chain",
+  "groove-kicks",
+  "drumhide-helm",
+  "drumhide-gorget",
+  "drumhide-boots",
 ];
 
 const DEFAULT_USER = "sandbox-user";
@@ -467,7 +477,10 @@ function toEquipped(ids: string[]): Equipped {
       id === "sixpence" ||
       id === "plutus-crown" ||
       id === "fabulous-fabian" ||
-      id === "fyllings-fedora"
+      id === "fyllings-fedora" ||
+      id === "troubadour-plume" ||
+      id === "groove-cap" ||
+      id === "drumhide-helm"
     )
       out.head = id;
     else if (id === "clouds" || id === "stars" || id === "blood-moon")
@@ -477,7 +490,10 @@ function toEquipped(ids: string[]): Equipped {
       id === "pearl-necklace" ||
       id === "bowtie" ||
       id === "ff-pearls-marble" ||
-      id === "fyllings-necktie"
+      id === "fyllings-necktie" ||
+      id === "troubadour-ruff" ||
+      id === "spindle-chain" ||
+      id === "drumhide-gorget"
     )
       out.body = id;
     else if (id === "fangs" || id === "ff-shades" || id === "fyllings-monocle")
@@ -503,7 +519,10 @@ function toEquipped(ids: string[]): Equipped {
     else if (
       id === "eivinds-evasive-pair" ||
       id === "ff-sneakers-black" ||
-      id === "fyllings-loafers"
+      id === "fyllings-loafers" ||
+      id === "troubadour-slippers" ||
+      id === "groove-kicks" ||
+      id === "drumhide-boots"
     )
       out.feet = id;
     else if (id === "lute" || id === "compact-discs" || id === "worn-stick")

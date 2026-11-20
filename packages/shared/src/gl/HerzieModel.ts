@@ -132,6 +132,7 @@ import {
 } from "./herzieMaterial.js";
 import {
   buildPropModel,
+  disposeProp,
   foldHandle,
   propBodyBox,
   type TieRibbon,
@@ -1475,6 +1476,19 @@ export class HerzieModel {
             );
             aim = toe[1];
             rest = new THREE.Vector3(...toe[0].center)
+              .sub(new THREE.Vector3(...spheres[at].center))
+              .normalize();
+          }
+          // A feather is placed by its root and turned by its tip, so it
+          // stays pinned to the hat as the head moves.
+          if (s.prop.kind === "feather") {
+            const prop = s.prop;
+            let tip = i;
+            spheres.forEach((sp, j) => {
+              if (sp.prop === prop) tip = j;
+            });
+            aim = tip;
+            rest = new THREE.Vector3(...spheres[tip].center)
               .sub(new THREE.Vector3(...spheres[at].center))
               .normalize();
           }
@@ -3609,5 +3623,6 @@ export class HerzieModel {
     this.cloak?.geometry.dispose();
     this.wings?.dispose();
     this.tie?.ribbon.dispose();
+    for (const p of this.props) disposeProp(p.group);
   }
 }
