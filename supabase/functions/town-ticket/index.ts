@@ -76,7 +76,7 @@ Deno.serve(async (request) => {
   });
   const { data: herzie, error } = await admin
     .from("herzies")
-    .select("name, friend_code, stage, equipped, level, hp, hp_at, down, class, stat_stamina, stat_sonic, stat_euphony, stat_timing, emotes, gm")
+    .select("name, friend_code, stage, equipped, level, hp, hp_at, down, class, stat_stamina, stat_sonic, stat_euphony, stat_timing, emotes, gm, title")
     .eq("user_id", user.id)
     .maybeSingle();
   if (error) {
@@ -223,6 +223,8 @@ Deno.serve(async (request) => {
         : {}),
       // A game master (00133): other players see a "GM" mark on its name.
       ...(herzie.gm ? { gm: true as const } : {}),
+      // The title it wears (00152), shown under its name in Town.
+      ...(herzie.title ? { ti: herzie.title as string } : {}),
     },
     TOWN_TICKET_SECRET,
   );

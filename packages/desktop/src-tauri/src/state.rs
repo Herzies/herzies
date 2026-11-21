@@ -67,6 +67,16 @@ pub struct ManagedState {
     pub xp_floor: Option<(f64, std::time::Instant)>,
     /// The class skills, from the last sync that carried them.
     pub skills: Vec<HerzieSkill>,
+    /// The loadouts, from the last sync or item response that carried them.
+    pub loadouts: Option<LoadoutState>,
+    /// Titles earned that the UI hasn't announced yet, oldest first. A sync
+    /// carries each once; they wait here until the UI acks them, so a window
+    /// that's closed when they arrive still gets to show them.
+    pub new_titles: Vec<String>,
+    /// Bumped when a wear changes `herzie.title` locally. `sync_tick` skips
+    /// the response's title if it moved, so a sync issued before the wear
+    /// can't put the old title back (and refresh the Town ticket twice).
+    pub title_epoch: u64,
     /// Friend profiles keyed by friend code (persisted when codes match).
     pub friends: HashMap<String, HerzieProfile>,
     /// Latest incoming trade from `/sync` (cleared when absent on a successful sync).
@@ -180,6 +190,9 @@ impl ManagedState {
             crystal: None,
             xp_floor: None,
             skills: Vec::new(),
+            loadouts: None,
+            new_titles: Vec::new(),
+            title_epoch: 0,
             friends: crate::storage::load_friends_cache(&friend_codes),
             pending_trade_request: None,
             pending_friend_request: None,
@@ -257,6 +270,8 @@ impl ManagedState {
         self.units.clear();
         self.bank_expansions = 0;
         self.emotes.clear();
+        self.loadouts = None;
+        self.new_titles.clear();
         self.friends.clear();
         self.pending_trade_request = None;
         self.pending_friend_request = None;
@@ -344,6 +359,8 @@ impl ManagedState {
             emotes: self.emotes.clone(),
             crystal: self.crystal.clone(),
             skills: self.skills.clone(),
+            loadouts: self.loadouts.clone(),
+            new_titles: self.new_titles.clone(),
             friends: self.friends.clone(),
             pending_trade_request: self.pending_trade_request.clone(),
             pending_friend_request: self.pending_friend_request.clone(),
@@ -507,6 +524,7 @@ mod tests {
             stage,
             class: None,
             stat_points: None,
+            title: None,
             total_minutes_listened: 0.0,
             genre_minutes: HashMap::new(),
             friend_code: "ABCD".to_string(),
@@ -546,6 +564,9 @@ mod tests {
             crystal: None,
             xp_floor: None,
             skills: Vec::new(),
+            loadouts: None,
+            new_titles: Vec::new(),
+            title_epoch: 0,
             friends: HashMap::new(),
             pending_trade_request: None,
             pending_friend_request: None,

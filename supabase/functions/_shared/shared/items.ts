@@ -40,6 +40,7 @@ import {
   VIOLET_RAMP,
 } from "./ascii3d.ts";
 import type { HerzieClass } from "./classes.ts";
+import { isLoadoutIndex, type LoadoutIndex } from "./loadouts.ts";
 import {
   levelStats,
   normalizeStatPoints,
@@ -214,7 +215,10 @@ const catalogBankLookup: BankItemLookup = (itemId) => {
  * currently needs: one slot per stackable item id owned (any quantity),
  * plus one per unit of a non-stackable item — except whatever's currently
  * equipped, which reserves a unit as "worn" and frees its bank slot. Mirrors
- * the slot-key expansion InventoryView uses to lay out its grid. */
+ * the slot-key expansion InventoryView uses to lay out its grid. Copies put
+ * away in the other loadout never reach it: inventory_v2 leaves them out.
+ * The SQL twin is 00152 bag_slots_used, which can't skip non-"deck" items
+ * (the items table has no category; none exist yet): keep the two equal. */
 export function bankSlotsUsed(
   inventory: Record<string, number> | null | undefined,
   equipped: Equipped | null | undefined,
@@ -323,9 +327,20 @@ export interface ItemUnit {
   itemId: string;
   upgradeLevel: number;
   equippedSlot: UnitSlot | null;
+  /** The inactive loadout holding this copy (00152 `loadout_items`), or
+   * absent. A held copy that isn't worn is put away: out of the bag, and it
+   * can't be sold, listed, traded or spent until it's taken off again. A worn
+   * copy can be held too (the same copy in both loadouts). */
+  heldBy?: LoadoutIndex;
 }
 
 const UNIT_SLOTS: readonly string[] = [...EQUIPPED_SLOTS, "modifier"];
+
+/** Whether a copy is in the bag: not worn and not put away in the other
+ * loadout. The same rule as the SQL `inventory_v2` projection (00152). */
+export function isInBag(unit: ItemUnit): boolean {
+  return unit.equippedSlot === null && unit.heldBy === undefined;
+}
 
 /** Parse an untrusted units payload (an API response, a local cache), dropping
  * anything malformed rather than trusting its shape. */
@@ -336,7 +351,7 @@ export function normalizeUnits(raw: unknown): ItemUnit[] {
     if (!entry || typeof entry !== "object") continue;
     const r = entry as Record<string, unknown>;
     if (typeof r.id !== "string" || typeof r.itemId !== "string") continue;
-    out.push({
+    const unit: ItemUnit = {
       id: r.id,
       itemId: r.itemId,
       upgradeLevel: typeof r.upgradeLevel === "number" ? r.upgradeLevel : 0,
@@ -345,17 +360,24 @@ export function normalizeUnits(raw: unknown): ItemUnit[] {
         UNIT_SLOTS.includes(r.equippedSlot)
           ? (r.equippedSlot as UnitSlot)
           : null,
-    });
+    };
+    if (isLoadoutIndex(r.heldBy)) unit.heldBy = r.heldBy;
+    out.push(unit);
   }
   return out;
 }
 
-/** `{itemId: count}` — the legacy inventory shape, derived. */
+/** `{itemId: count}` — the legacy inventory shape, derived. Copies put away in
+ * the other loadout (held, not worn) are left out, the same as the
+ * `inventory_v2` projection the server derives it from (00152). */
 export function unitsToInventory(
   units: readonly ItemUnit[],
 ): Record<string, number> {
   const out: Record<string, number> = {};
-  for (const u of units) out[u.itemId] = (out[u.itemId] ?? 0) + 1;
+  for (const u of units) {
+    if (u.equippedSlot === null && u.heldBy !== undefined) continue;
+    out[u.itemId] = (out[u.itemId] ?? 0) + 1;
+  }
   return out;
 }
 
@@ -391,10 +413,11 @@ export interface BankTile {
 }
 
 /**
- * The bank grid's tiles: every unworn copy in the "deck" category, with a
- * stackable item's copies folded into one tile. Always exactly as many tiles as
- * `bankSlotsUsed` counts slots — they are the same rule, one returning the
- * tiles and the other their number.
+ * The bank grid's tiles: every copy in the bag (see `isInBag`) in the "deck"
+ * category, with a stackable item's copies folded into one tile. Always exactly
+ * as many tiles as `bankSlotsUsed` counts slots for the `inventory_v2`
+ * projection — they are the same rule, one returning the tiles and the other
+ * their number.
  */
 export function bankTiles(
   units: readonly ItemUnit[],
@@ -403,7 +426,7 @@ export function bankTiles(
   const tiles: BankTile[] = [];
   const stacks = new Map<string, BankTile>();
   for (const u of units) {
-    if (u.equippedSlot !== null) continue;
+    if (!isInBag(u)) continue;
     const info = lookup(u.itemId);
     if (info && info.category !== "deck") continue;
     if (info?.stackable) {
@@ -432,16 +455,34 @@ export function bankTiles(
   return tiles;
 }
 
+/**
+ * Whether going from `before` to `after` grows the bag past `capacity`: the
+ * rule equip_unit and switch_loadout (00152 bag_would_overflow) refuse a
+ * change with "bag-full" on, so a prediction can refuse it the same way. A
+ * change that doesn't grow the bag always passes, even over capacity, so a
+ * swap never gets stuck.
+ */
+export function growsBagPastCapacity(
+  before: readonly ItemUnit[],
+  after: readonly ItemUnit[],
+  capacity: number,
+  lookup: BankItemLookup = catalogBankLookup,
+): boolean {
+  const used = bankTiles(after, lookup).length;
+  return used > capacity && used > bankTiles(before, lookup).length;
+}
+
 /** Copies of one item, plainest first — unworn before worn, then lowest level,
  * then in the order given (oldest first). What "sell/offer N of this item"
  * means when it can't say which copies: a spare goes before one you've
- * invested in or are wearing. */
+ * invested in or are wearing. Copies the other loadout holds are left out:
+ * they can't be sold or offered while it holds them. */
 export function unitsPlainestFirst(
   units: readonly ItemUnit[],
   itemId: string,
 ): ItemUnit[] {
   return units
-    .filter((u) => u.itemId === itemId)
+    .filter((u) => u.itemId === itemId && u.heldBy === undefined)
     .map((u, order) => ({ u, order }))
     .sort(
       (a, b) =>
@@ -544,6 +585,10 @@ export type EquipOutcome =
  *  - Equipping into an occupied single-value slot displaces the incumbent
  *    (swapping a hat shouldn't need an explicit unequip first); the displaced
  *    copy returns to the bank.
+ *
+ * `heldBy` rides along untouched: a held copy taken off stays put away in
+ * the other loadout. Bag capacity isn't checked here; equip_unit refuses a
+ * change that would overflow it ("bag-full", see growsBagPastCapacity).
  */
 export function applyEquip(
   units: readonly ItemUnit[],
@@ -764,9 +809,7 @@ export function applyItemUpgrade(
   const { protectionItemId = null, result = "upgraded" } = options;
   if (!getItem(diceItemId)?.dice) return { ok: false, reason: "not-dice" };
 
-  const dice = units.find(
-    (u) => u.itemId === diceItemId && u.equippedSlot === null,
-  );
+  const dice = units.find((u) => u.itemId === diceItemId && isInBag(u));
   if (!dice) return { ok: false, reason: "dice-not-owned" };
 
   const target = units.find((u) => u.id === targetUnitId);
@@ -792,9 +835,7 @@ export function applyItemUpgrade(
   const risky = chance < 1;
   let pick: ItemUnit | undefined;
   if (risky && protectionItemId) {
-    pick = units.find(
-      (u) => u.itemId === protectionItemId && u.equippedSlot === null,
-    );
+    pick = units.find((u) => u.itemId === protectionItemId && isInBag(u));
     if (!getItem(protectionItemId)?.protection || !pick) {
       return { ok: false, reason: "protection-not-owned" };
     }

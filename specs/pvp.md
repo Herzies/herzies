@@ -12,7 +12,7 @@ Decisions the user made:
 - Rewards are **cosmetic only**.
 - Teams use an **always-on queue**.
 
-No PvP code exists yet. The next migration is `00141`.
+**Status:** Duels (phase 1) are built: `packages/shared/src/duel.ts` (rules), `packages/town-server/src/duel.ts` (the judge), the desktop's `components/town/duel/`, and `duel_results` / `record_duel` (migration 00152) for title credit. Wilds and Teams are still plans. Titles (`packages/shared/src/titles.ts`) shipped alongside, as a general feats system rather than PvP-only rewards. The next free migration number is in `supabase/migrations`, not here.
 
 ## What we build on (found in code)
 - **In the boss room and Tower, casts are already judged on the server.**
@@ -71,14 +71,21 @@ No PvP code exists yet. The next migration is `00141`.
 
 ## Modes
 
-### Duel (phase 1, proves the PvP damage path)
-- **Start a duel:** right-click a herzie → "Challenge to duel", or `/duel "Name"`. The target gets a `notify()` with Accept/Decline (20 s timeout).
-- **Where it happens:** in place, in the current room. A ring is drawn around the midpoint (radius ~12). Leaving it for more than 3 s forfeits.
-- **Who it affects:** only the two duelists can damage each other. Everyone else is unaffected and can watch.
-- **Format:** best of 1, a 3-2-1 countdown, a 90 s limit, then sudden-death damage ramps up.
-- **Losing:** you're "defeated", not KO'd. **All PvP HP is room-local:** it starts at full max HP, is never reported to `town-vitals`, and is never sent home by `respawn_herzie`. Stored PvE HP is untouched, which keeps "death costs only time" true everywhere.
-- **Ranked vs unranked:** unranked by default, using real stats. A "Ranked duel" toggle uses normalized stats and changes duel rating.
-- **Where duels are blocked:** boss cave and the Tower. Home is fine.
+### Duel (phase 1, built)
+Shaped from an industry survey (WoW, ESO, FFXIV, OSRS, Lost Ark, BDO, New World, GW2, plus fighting-game and shooter feel). The numbers live in `DUEL` (`shared/src/duel.ts`); this is the why.
+- **Start a duel:** click a herzie's name → "Challenge to duel". You must stand within **8 units** (server-checked against positions it knows, +1.5 slack), roughly WoW's 9.9 yd interact range: you walk up to someone you can see. The target gets an in-Town card showing your level and class, with Accept/Decline, a **20 s** drain, and "Block duels from…". The pair must still be within 20 units when it's accepted.
+- **Anti-spam:** one outgoing challenge at a time; 5 s between challenges; 30 s per pair after a decline or no answer, 5 min after a second decline within 10 min. Settings has "Duel requests: Everyone / Friends only / Nobody" (ESO's default-off auto-decline drew harassment complaints, so this one is easy to find). Copy stays neutral: "didn't answer", "declined", "yielded" (never "fled").
+- **Where it happens:** in place. A ring of radius **14** (12 left disc users no room to kite) drops between the two, pulled in to fit the map. Both are put on marks 6 units either side of the centre, which removes the "opener" problem duel tournaments write pages of rules about.
+- **Countdown:** a VS card (skipped on a rematch), then 3-2-1-FIGHT at 0.8 s each, timed from the server's clock. Moving and casting are held; aiming isn't.
+- **Who it affects:** only the two duelists can hurt, heal or buff each other. Everyone else can watch: the ring and both health bars are visible to the room.
+- **Fight:** casts and skills are judged by the server exactly like PvE casts, with the opponent as a herzie body. Gear still matters (Sonic Power, crits, Timing), but three duel-only levers keep classes even: duel health comes from level alone (Stamina made Percussionists outlast everyone), Def counts at 15%, and the PvE disc/stick bonuses don't apply (discs deal 0.85 of a wave). A matrix test holds every class pairing at 15–30 s to kill at levels 20 and 40, with neither side more than 1.33× faster. One hit never takes more than 30% of max HP; Rimshot stuns at half strength with diminishing returns; Taunt and Resurrect do nothing. Leaving the ring for **3 s** yields (paused while stunned), and hits from outside the ring don't count.
+- **Time:** 90 s, then sudden death (+25% damage, −50% healing, compounding every 10 s). At 150 s the higher share of health wins, or it's a draw.
+- **Losing:** you kneel; you're not KO'd. All duel HP is room-local: it starts full, is never reported to `town-vitals`, and never sends anyone home. Stored PvE HP is untouched, which keeps "death costs only time" true everywhere.
+- **Leaving:** yield or changing map ends it at once. A dropped connection has 10 s to come back; a drop during the countdown cancels the duel.
+- **After:** VICTORY/DEFEAT banner, a room line `"A" defeated "B" in a duel`, and Rematch (both must click within 12 s) or GG.
+- **Credit:** every finished duel is posted to `town-vitals` (`record_duel`, replay-safe). A win counts towards titles only if the fight lasted 15 s, the loser dealt 10% of the winner's max HP, the levels are within 10, and it's the first such win over that opponent that day.
+- **Ranked duels:** not built. When they come, they use the normalized stat template below and Glicko-2.
+- **Where duels are blocked:** boss cave and the Tower.
 
 ### Wilds (phase 2)
 - PvP is on everywhere in `wilds` except the safe camp. The camp radius sits around the spawn and comes from a `safe` layer in the map editor.
@@ -109,9 +116,9 @@ No PvP code exists yet. The next migration is `00141`.
   - Comes in tiered seasonal trophies: Bronze/Silver/Gold/Platinum/Herzie Legend, based on peak rating. The season's year/month is printed on the item.
   - Duel-streak and Wanted-hunter trophies are awarded once.
   - Uses the per-copy `item_units` row so it records the season. Not tradable, not sellable (`NON_DROPPABLE_ITEM_IDS`).
-- **Titles**
-  - "Duelist", "Wanted", "Arena Champion".
-  - Shown with the name like the GM mark and carried in the ticket. Store them in `herzies.title` + an `earned_titles text[]`.
+- **Titles** (the system exists: `shared/src/titles.ts`, `herzie_titles`, worn under the name and carried in the ticket as `ti`)
+  - Duels already grant "Duelist", "Battle of the Bands", "Dueling Banjos" and "Encore".
+  - Still to add with their modes: "Wanted", "Arena Champion".
 - **Leaderboards**
   - `pvp_duel`, `pvp_team` and `pvp_wilds_month` (kills), with `_friends` variants on the existing leaderboard route.
 - **Champion statue**

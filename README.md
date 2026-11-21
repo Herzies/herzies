@@ -34,7 +34,7 @@ Download the latest **Herzies Desktop** build for macOS or Windows from the [lat
 |---------|-------------|
 | [`herzies-desktop`](packages/desktop) | The desktop app (Tauri + React). Music detection, the herzie, the 3D Town. Also builds the website's Town showcase (`build:showcase`) |
 | [`@herzies/shared`](packages/shared) | Game rules, item catalog, types, the sync game loop (`game-server.ts`), and the WebGL herzie renderer (`gl/`) |
-| [`@herzies/town-server`](packages/town-server) | The multiplayer Town: Cloudflare Worker + Durable Objects. Rooms, combat, the boss cave and the Tower |
+| [`@herzies/town-server`](packages/town-server) | The multiplayer Town: Cloudflare Worker + Durable Objects. Rooms, combat, duels, the boss cave and the Tower |
 | [`@herzies/web`](packages/web) | Website, sign-in, store (Stripe) and the remaining API routes, on Vercel |
 
 ## Edge functions
@@ -47,7 +47,7 @@ Download the latest **Herzies Desktop** build for macOS or Windows from the [lat
 | `trade-pending` | Incoming trade requests, polled by the app |
 | `collect-drop` | Picks up a drop off the ground |
 | `town-ticket` | Signs the pass into the Town server |
-| `town-vitals` | Where herzie HP is written, by the Town server and the app |
+| `town-vitals` | Where herzie HP is written, by the Town server and the app. Also takes the Town server's duel results (`record_duel`) |
 | `attune-crystal` | Cashes in the Crystal: XP and drops |
 | `upgrade-crystal` | Spends Crystal Shards on a bigger Crystal |
 | `debug-spawn-drop` | Dev builds only: spawns a drop on demand |

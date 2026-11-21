@@ -22,9 +22,9 @@ import type { Equipped } from "./items.ts";
 /** Bumped on any incompatible change; the server turns away other versions
  * with {@link TOWN_CLOSE.outdated} so old desktop betas say "update" instead of
  * misreading frames. */
-export const TOWN_PROTOCOL = 4;
-// 4: cloaks (the Back slot). A boss pays everyone in the cave, and an app
-// from before the cloaks doesn't know them, so it's kept out until updated.
+export const TOWN_PROTOCOL = 5;
+// 5: duels (see duel.ts) and titles under names. An app from before can't
+// answer a challenge or draw a duel it's standing in.
 
 /** Server snapshot rate. */
 export const TOWN_TICK_HZ = 15;
@@ -163,6 +163,8 @@ export type TownTicketPayload = {
   em?: string[];
   /** A game master (00133): its name carries a "GM" mark. */
   gm?: true;
+  /** The title it wears (titles.ts), shown under its name. Absent: none. */
+  ti?: string;
 };
 
 /** The boss room's half of a ticket. */
@@ -554,6 +556,94 @@ export type TownPlayer = {
   down?: true;
   /** A game master: its name carries a "GM" mark. */
   gm?: true;
+  /** The title it wears (titles.ts), shown under its name. */
+  title?: string;
+};
+
+/** What a duelist sends about a duel (see duel.ts). */
+export type DuelClientOp =
+  /** Challenge herzie `to` (an entity id), standing within
+   * DUEL.challengeRange. One outgoing challenge at a time: a new one
+   * replaces the last. */
+  | { op: "ask"; to: number }
+  /** Answer `from`'s challenge. `auto`: declined without asking the player
+   * (they don't take duels, or blocked this herzie): the challenger is told
+   * "not accepting" rather than "declined". */
+  | { op: "answer"; from: number; yes: boolean; auto?: boolean }
+  /** Withdraw your challenge. */
+  | { op: "cancel" }
+  /** Give up the duel you're in (also sent before leaving the map). */
+  | { op: "yield" }
+  /** After a duel: ask for a rematch, or agree to one asked for. */
+  | { op: "rematch" };
+
+/** Why a challenge (or a rematch) didn't happen, as the room tells the
+ * challenger. */
+export type DuelRefusal =
+  /** Not close enough: walk up (DUEL.challengeRange; on accept, acceptRange). */
+  | "far"
+  /** One of you is in a duel, or the herzie is answering another challenge. */
+  | "busy"
+  /** Not on this map (DUEL_MAPS). */
+  | "here"
+  | "self"
+  | "declined"
+  /** No answer in DUEL.askTtlMs. */
+  | "expired"
+  /** The herzie doesn't take duels (an `auto` decline). */
+  | "auto"
+  /** Too soon: after your last challenge, or this herzie's last decline.
+   * `retryIn` says how long. */
+  | "cooldown"
+  /** The herzie is away (AFK) or knocked out. */
+  | "away"
+  /** The herzie left the room. */
+  | "gone"
+  /** You withdrew it. */
+  | "cancelled";
+
+/** How a duel ended. */
+export type DuelEndReason =
+  /** Brought to its knees (the winner's hit took the last of its HP). */
+  | "defeat"
+  /** Gave up. */
+  | "yield"
+  /** Stayed outside the ring too long. */
+  | "bounds"
+  /** Left the room, or lost its connection and didn't come back. */
+  | "left"
+  /** Ran to DUEL.hardCapMs: the higher share of health won. */
+  | "time"
+  /** Ran to DUEL.hardCapMs level, or both left. No winner. */
+  | "draw"
+  /** Called off before the fight began (a disconnect in the countdown, the
+   * room restarting). Nothing counts. */
+  | "cancelled";
+
+/** A duel as the room tells everyone in it. Times are server clock (ms,
+ * the snapshots' clock). */
+export type DuelState = {
+  id: number;
+  /** The challenger and the challenged (entity ids). */
+  a: number;
+  b: number;
+  /** The ring's centre (radius DUEL.ringRadius). */
+  x: number;
+  z: number;
+  phase: "countdown" | "fight" | "over";
+  /** Whether the countdown opens with the VS card (not on a rematch). */
+  intro: boolean;
+  /** When the countdown began, and when the fight does ("FIGHT!"). */
+  at: number;
+  startsAt: number;
+  /** Sudden death from here (startsAt + DUEL.regulationMs), and the end at
+   * the latest (startsAt + DUEL.hardCapMs). */
+  suddenAt: number;
+  endsAt: number;
+  /** Where each was put for the countdown. */
+  marks: { a: { x: number; z: number }; b: { x: number; z: number } };
+  /** Both duelists' duel health. */
+  hp: { id: number; hp: number; maxHp: number }[];
 };
 
 export type ClientMessage =
@@ -583,11 +673,14 @@ export type ClientMessage =
   | { t: "emote"; e: string }
   /** Knocked out in a raid, and giving up: out of the fight for good (no
    * reward). The app then respawns you in town. */
-  | { t: "forfeit" };
+  | { t: "forfeit" }
+  /** Duels, on the maps that have them (DUEL_MAPS). */
+  | ({ t: "duel" } & DuelClientOp);
 
 /** Why a skill was refused, when the player can do something about it:
- * nobody downed near enough, no revives left, or not until the fight. */
-export type SkillRefusal = "no-target" | "not-yet" | "instrument";
+ * nobody downed near enough, no revives left, not until the fight, or not
+ * in a duel (Taunt, Resurrect). */
+export type SkillRefusal = "no-target" | "not-yet" | "instrument" | "duel";
 
 /** Why the room refused to let you eat: knocked out, already at full HP,
  * too soon after the last one, none left in the bank, not something you
@@ -741,8 +834,15 @@ export type BossPlace = {
 };
 
 export type ServerMessage =
-  /** Accepted: your entity id and everyone else here. A full snapshot follows. */
-  | { t: "welcome"; you: number; players: TownPlayer[]; fight?: FightState }
+  /** Accepted: your entity id and everyone else here. A full snapshot
+   * follows. `duels`: those running in the room (to draw their rings). */
+  | {
+      t: "welcome";
+      you: number;
+      players: TownPlayer[];
+      fight?: FightState;
+      duels?: DuelState[];
+    }
   /** The boss's health and phase, when either changes. */
   | { t: "boss"; hp: number; maxHp: number; phase: 1 | 2 | 3 }
   | ({ t: "telegraph" } & BossTelegraph)
@@ -871,6 +971,61 @@ export type ServerMessage =
       ok: boolean;
       heal?: number;
       reason?: EatRefusal;
+    }
+  /** `from` challenges you to a duel (sent to you alone): its level and
+   * class for the prompt, and ms left to answer. */
+  | {
+      t: "duelAsk";
+      from: number;
+      lv?: number;
+      cls?: string;
+      ttl: number;
+    }
+  /** Your challenge to `to` is out, waiting `ttl` ms (sent to you alone). */
+  | { t: "duelAsked"; to: number; ttl: number }
+  /** A challenge (or rematch) with `with` didn't happen, and why (sent to
+   * those it concerns). `retryIn`: ms until you may ask again. */
+  | { t: "duelNo"; with: number; why: DuelRefusal; retryIn?: number }
+  /** `from` withdrew its challenge, or it ran out (sent to the challenged). */
+  | { t: "duelAskGone"; from: number }
+  /** Your last opponent wants a rematch (sent to you alone). */
+  | { t: "duelRematch"; by: number }
+  /** A duel began, moved on a phase, or went into sudden death (to the
+   * whole room). */
+  | ({ t: "duel" } & DuelState)
+  /** A duelist's duel health (to the whole room). */
+  | { t: "duelHp"; id: number; hp: number; maxHp: number }
+  /** Your duel hit landed on `target` for `damage` (sent to you alone);
+   * `blocked`: a Cymbrella's dome took it (damage 0). */
+  | {
+      t: "duelHit";
+      target: number;
+      damage: number;
+      crit: boolean;
+      blocked?: true;
+    }
+  /** A duelist is stunned until `until` (server ms; to the whole room). */
+  | { t: "duelStun"; id: number; until: number }
+  /** You're outside the ring: you yield at `until` (server ms) unless you're
+   * back. Null: back in, or the timer paused (stunned). */
+  | { t: "duelOut"; until: number | null }
+  /** Your opponent's connection dropped: it has until `until` (server ms)
+   * to come back (null: it's back). */
+  | { t: "duelAway"; id: number; until: number | null }
+  /** A duel ended (to the whole room). `winner`/`loser` null on a draw or a
+   * cancel. `ms`: how long the fight ran. `rematchUntil`: server ms the
+   * two may ask for a rematch until (absent if they can't). */
+  | {
+      t: "duelEnd";
+      id: number;
+      a: number;
+      b: number;
+      winner: number | null;
+      loser: number | null;
+      why: DuelEndReason;
+      ms: number;
+      tally: { id: number; damage: number; hits: number }[];
+      rematchUntil?: number;
     };
 
 export function parseServerMessage(text: string): ServerMessage | null {

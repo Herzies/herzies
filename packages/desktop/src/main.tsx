@@ -56,10 +56,11 @@ import { QuestsView } from "./components/QuestsView";
 import { SettingsView } from "./components/SettingsView";
 import { SkillsPanel } from "./components/SkillsPanel";
 import { SplashScreen } from "./components/SplashScreen";
-import { StatsTab } from "./components/StatsTab";
+import { StatsWindow, type StatsWindowTab } from "./components/StatsWindow";
 import { StoreView } from "./components/StoreView";
 import { type MenuLanding, TabBar, type View } from "./components/TabBar";
 import { TitleBar } from "./components/TitleBar";
+import { TitleToasts } from "./components/TitleToast";
 import { TradeView } from "./components/TradeView";
 import { BULLETIN_KEY } from "./components/town/Boards";
 import { setBagOpen, setLootRoom } from "./components/town/combat/lootFeed";
@@ -86,6 +87,7 @@ import { useOptimisticUnits } from "./hooks/useOptimisticUnits";
 import { useHomeStageOffset } from "./hooks/useStageAlignment";
 import { useTradeRequests } from "./hooks/useTradeRequests";
 import { onLogActivity } from "./lib/activity";
+import { setLoadouts } from "./lib/loadoutState";
 import { notify } from "./lib/notices";
 import { announcePickup } from "./lib/pickups";
 import { IS_MAC } from "./lib/platform";
@@ -247,6 +249,7 @@ function App() {
     rawState.units,
     rawState.herzie?.stage ?? 1,
     rawState.herzie?.class ?? null,
+    bankCapacity(rawState.bankExpansions),
   );
   // Memoized on its inputs, each of which is itself identity-stable while its
   // content is unchanged (`rawState` via stableMerge, field by field) — so this
@@ -334,6 +337,8 @@ function App() {
    * change gear. Either opens without closing the other; close one and the
    * other stays. */
   const [statsBeside, setStatsBeside] = useState(false);
+  /** The Stats window's tab: Stats or Titles. */
+  const [statsTab, setStatsTab] = useState<StatsWindowTab>("stats");
   /** The deck-and-bag window's tab: the one asked for last. */
   const [inventoryPanel, setInventoryPanel] = useState<HerzieTab>("deck");
   if (isInventory(overlay) && overlay !== inventoryPanel) {
@@ -439,11 +444,11 @@ function App() {
     combat.blow = a.blow;
     setArmed(hasInstrument(attackCls, mainHand), instrumentOf(attackCls));
   }, [attackCls, attackStage, mainHand]);
-  // A new class, level or instrument: the Town server judges casts from the
-  // ticket (a class's attack, the instrument it needs; the Tower's level
-  // gap), so it gets a fresh one. After a beat, so the server has the
-  // change saved.
-  const ticketKey = `${rawState.herzie?.class ?? ""}|${rawState.herzie?.level ?? 0}|${rawState.equipped.main_hand ?? ""}`;
+  // A new class, level, instrument or title: the Town server judges casts
+  // from the ticket (a class's attack, the instrument it needs; the Tower's
+  // level gap) and shows the title worn from it, so it gets a fresh one.
+  // After a beat, so the server has the change saved.
+  const ticketKey = `${rawState.herzie?.class ?? ""}|${rawState.herzie?.level ?? 0}|${rawState.equipped.main_hand ?? ""}|${rawState.herzie?.title ?? ""}`;
   const firstTicketKey = useRef(ticketKey);
   useEffect(() => {
     if (firstTicketKey.current === ticketKey) return;
@@ -565,6 +570,10 @@ function App() {
   useEffect(() => {
     setCrystal(state.crystal);
   }, [state.crystal]);
+  // The loadouts, for the Deck's tabs and their hover card.
+  useEffect(() => {
+    setLoadouts(state.loadouts);
+  }, [state.loadouts]);
 
   const addLog = useCallback((message: string) => {
     const time = new Date().toISOString();
@@ -1063,8 +1072,7 @@ function App() {
       const v = shortcuts[key];
       if (!v) return;
       if (v === "home" && homeBlocked) return;
-      // Stats once the server knows stat points, Skills once there's a class.
-      if (v === "stats" && !herzie.statPoints) return;
+      // Skills once there's a class.
       if (v === "skills" && !herzie.class) return;
       switchView(v, true);
     };
@@ -1403,6 +1411,7 @@ function App() {
                     xp: herzie.xp,
                     multipliers: state.multipliers,
                     classLabel: classLabelOf(classOverride ?? herzie.class),
+                    title: herzie.title ?? null,
                     nowPlaying: state.nowPlaying,
                   }
                 : undefined
@@ -1564,7 +1573,6 @@ function App() {
               setView={(v) => switchView(v, true)}
               menuOpen={menuOpen}
               setMenuOpen={setMenuOpen}
-              hasStats={!!herzie.statPoints}
               hasSkills={!!herzie.class}
               landing={menuLanding}
               compact={bigWindow}
@@ -1617,14 +1625,14 @@ function App() {
         >
           {selfProfile ? (
             <ProfileView
-              profile={
+              profile={{
                 // The synced profile's nowPlaying.albumArtUrl only ever holds
                 // Last.fm's art (see sync_tick in lib.rs — the local system
                 // artwork data: URL is never synced). Prefer the live local
                 // value here, which does include it, whenever it's still the
                 // same track — avoids a stale mismatch right after a track
                 // change, before the next sync tick catches up.
-                selfProfile.nowPlaying &&
+                ...(selfProfile.nowPlaying &&
                 state.nowPlaying &&
                 state.nowPlaying.title === selfProfile.nowPlaying.title &&
                 state.nowPlaying.artist === selfProfile.nowPlaying.artist &&
@@ -1636,8 +1644,10 @@ function App() {
                         albumArtUrl: state.nowPlaying.albumArtUrl,
                       },
                     }
-                  : selfProfile
-              }
+                  : selfProfile),
+                // The title just put on, before the profile's next fetch.
+                title: herzie.title ?? null,
+              }}
               isSelf
               isFriend
               stageOverride={stageOverride}
@@ -1708,7 +1718,7 @@ function App() {
         </>
       )}
 
-      {herzie?.statPoints && (
+      {herzie && (
         <OverlayWindow
           open={overlay === "stats" || statsBesideOpen}
           onClosed={windowClosed("stats")}
@@ -1720,16 +1730,17 @@ function App() {
           inTown={townWorld}
           fit
         >
-          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-            <StatsTab
-              // Read off the copies, so each worn one counts at its own
-              // upgrade level.
-              stats={getHerzieStatsFromUnits(state.units)}
-              level={herzie.level}
-              points={herzie.statPoints}
-              onLog={addLog}
-            />
-          </div>
+          <StatsWindow
+            herzie={herzie}
+            // Read off the copies, so each worn one counts at its own
+            // upgrade level.
+            stats={getHerzieStatsFromUnits(state.units)}
+            open={overlay === "stats" || statsBesideOpen}
+            tab={statsTab}
+            onTabChange={setStatsTab}
+            refreshKey={(rawState.newTitles ?? []).join()}
+            onLog={addLog}
+          />
         </OverlayWindow>
       )}
 
@@ -2033,6 +2044,16 @@ function App() {
 
       {/* Short messages that matter now (lib/notices.ts). */}
       <Notices />
+      {/* New titles, announced (TitleToast). */}
+      {herzie && (
+        <TitleToasts
+          newTitles={rawState.newTitles ?? []}
+          onOpenTitles={() => {
+            setStatsTab("titles");
+            if (overlay !== "stats" && !statsBesideOpen) switchView("stats");
+          }}
+        />
+      )}
     </div>
   );
 }

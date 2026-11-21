@@ -30,6 +30,9 @@ export interface PickerOption {
   /** How many the player has, shown instead of a level — for pickers whose
    * rows are a whole stack (the Town hotbar) rather than one copy. */
   count?: number;
+  /** A short dim aside: "In loadout 2" for a piece the other loadout holds,
+   * which wearing here shares rather than takes. */
+  note?: string;
 }
 
 /** Floating list of the items a given deck slot can take, anchored at a
@@ -153,6 +156,11 @@ export function DeckSlotPicker({
                 {option.count !== undefined && (
                   <span className="shrink-0 text-text-dim tabular-nums">
                     {option.count}
+                  </span>
+                )}
+                {option.note && (
+                  <span className="shrink-0 text-[9px] text-text-dim">
+                    {option.note}
                   </span>
                 )}
               </button>

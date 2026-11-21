@@ -16,6 +16,11 @@ import {
   SENSITIVITY_MIN,
   setAimSensitivity,
 } from "./town/combat/sensitivity";
+import {
+  type DuelRequests,
+  duelRequests as readDuelRequests,
+  setDuelRequests,
+} from "./town/duel/store";
 import { setFpsShown, useFpsShown } from "./town/fps";
 import {
   defaultPixelSize,
@@ -35,6 +40,13 @@ const TELEPORTS = [
   ["home", "Home"],
   ["arena", "Training grounds"],
 ] as const;
+
+/** Privacy > Duel requests: who may challenge you. */
+const DUEL_REQUESTS: readonly (readonly [DuelRequests, string])[] = [
+  ["everyone", "Everyone"],
+  ["friends", "Friends only"],
+  ["nobody", "Nobody"],
+];
 
 /** Debug is for dev builds only. */
 const TABS = ["Account", "Privacy", "Controls", "Graphics", "Debug"] as const;
@@ -107,6 +119,7 @@ export function SettingsView({
   const [aim, setAim] = useState(aimSensitivity);
   const [townSounds, setTownSounds] = useState(() => !sfxMuted());
   const fpsShown = useFpsShown();
+  const [duelRequests, setDuelRequestsShown] = useState(readDuelRequests);
   const pixelSize = useTownPixelSize();
   const supersample = useTownSupersample();
   const [tab, setTab] = useState<SettingsTab>("Account");
@@ -238,6 +251,34 @@ export function SettingsView({
               )}
             </div>
           )}
+          <div>
+            <div className="mb-1.5 text-ui">Duel requests</div>
+            <div className="flex gap-1.5">
+              {DUEL_REQUESTS.map(([v, label]) => (
+                <button
+                  key={v}
+                  type="button"
+                  className={cn(
+                    "btn",
+                    duelRequests === v
+                      ? "border-cyan text-cyan"
+                      : "border-[#555] text-text-dim",
+                  )}
+                  aria-pressed={duelRequests === v}
+                  onClick={() => {
+                    setDuelRequests(v);
+                    setDuelRequestsShown(v);
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="mt-1 text-ui-sm text-text-dim">
+              Who can challenge you to a duel in the Town. Challenges from
+              anyone else are turned down for you, quietly.
+            </div>
+          </div>
         </div>
       )}
 

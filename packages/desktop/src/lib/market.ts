@@ -1,4 +1,10 @@
-import { getItem, ITEMS, type ItemUnit, type Rarity } from "@herzies/shared";
+import {
+  getItem,
+  ITEMS,
+  type ItemUnit,
+  isInBag,
+  type Rarity,
+} from "@herzies/shared";
 
 /** Copies of one item at one upgrade level: one row on the Sell tab. */
 export interface ListableCopies {
@@ -7,7 +13,7 @@ export interface ListableCopies {
   unitIds: string[];
 }
 
-/** The copies Plutus will take: unworn ones. The server refuses the rest
+/** The copies Plutus will take: those in the bag. The server refuses the rest
  * anyway; this keeps them off the Sell tab. Alike copies share a row (a stack
  * of sweets is one line, not thirty), grouped by name with the most upgraded
  * first. */
@@ -15,7 +21,7 @@ export function listableCopies(units: readonly ItemUnit[]): ListableCopies[] {
   const rows = new Map<string, ListableCopies>();
   for (const u of units) {
     const def = getItem(u.itemId);
-    if (!def || u.equippedSlot) continue;
+    if (!def || !isInBag(u)) continue;
     const key = `${u.itemId}:${u.upgradeLevel}`;
     const row = rows.get(key);
     if (row) row.unitIds.push(u.id);

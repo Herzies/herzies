@@ -25,6 +25,8 @@ import { discField } from "./combat/discs";
 import { shoveFromBoss } from "./combat/fight";
 import { combat } from "./combat/state";
 import { applyDowned, downInRaid } from "./downed";
+import { fighterPace, poseFighter } from "./duel/fx";
+import { duel, duelHeld } from "./duel/store";
 import { emotePlayed, emoteRequest } from "./emotes";
 import { HeadBubble } from "./HeadBubble";
 import { keepAtHome } from "./HomeLayer";
@@ -61,6 +63,8 @@ const NO_ROTATION: [boolean, boolean, boolean] = [false, false, false];
 /** How long it stands still, music playing, before it starts dancing (s):
  * a pause mid-walk isn't a dance. */
 const DANCE_AFTER = 0.4;
+/** How long the walk to a duel's mark takes (ms). */
+const GLIDE_MS = 400;
 
 /**
  * The player's herzie: a kinematic body moved by Rapier's character
@@ -110,6 +114,18 @@ function aiming(input: TownInput): TownInput {
   return Object.assign(aimingInput, input, {
     mouseLeft: false,
     mouseRight: true,
+  });
+}
+
+/** The keys as they are, less any that walk: turning (and aiming) only. */
+const heldInput: TownInput = { ...stillInput };
+function heldStill(input: TownInput): TownInput {
+  return Object.assign(heldInput, input, {
+    forward: false,
+    back: false,
+    left: false,
+    right: false,
+    mouseLeft: false,
   });
 }
 
@@ -171,6 +187,13 @@ export function Player({
   }, [world]);
   /** The direction walking is relative to (see walkAzimuth). */
   const walkAz = useRef<number | null>(null);
+  /** Where a glide to a duel's mark set off from (see townLive.glide). */
+  const glideFrom = useRef({
+    of: null as object | null,
+    x: 0,
+    z: 0,
+    heading: 0,
+  });
 
   const equippedKey = JSON.stringify(look.equipped ?? null);
   // Its gear's move speed (the Tailwind Cloak): no die can raise it
@@ -332,6 +355,36 @@ export function Player({
       rt.playerSpeed = townLive.speed = 0;
       return;
     }
+    // Put on a duel's mark: walked there, eased, turning to face the
+    // ring's middle, rather than snapped.
+    const glide = townLive.glide;
+    if (glide) {
+      const p = b.translation();
+      const g = glideFrom.current;
+      if (g.of !== glide)
+        Object.assign(g, {
+          of: glide,
+          x: p.x,
+          z: p.z,
+          heading: herzie.heading,
+        });
+      const t = Math.min(1, (performance.now() - glide.from) / GLIDE_MS);
+      const e = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
+      const x = g.x + (glide.x - g.x) * e;
+      const z = g.z + (glide.z - g.z) * e;
+      const turn = glide.heading - g.heading;
+      townLive.seat = null;
+      m.vx = m.vz = 0;
+      herzie.heading = m.heading =
+        g.heading + Math.atan2(Math.sin(turn), Math.cos(turn)) * e;
+      rt.playerSpeed = townLive.speed = Math.hypot(x - p.x, z - p.z) / dt;
+      b.setNextKinematicTranslation({ x, y: groundY(map, x, z), z });
+      townSave.x = x;
+      townSave.z = z;
+      townSave.heading = herzie.heading;
+      if (t >= 1) townLive.glide = null;
+      return;
+    }
     // Going through a portal: carried, not walking. Knocked out in a raid:
     // lying where it fell, for a Bard to find.
     // Winding up a Rimshot: planted where it stands.
@@ -376,6 +429,16 @@ export function Player({
     townLive.standUp = false;
     walkAz.current = walkAzimuth(walkAz.current, rt.cameraAzimuth, input);
     m.heading = herzie.heading;
+    // A duel's countdown, or stunned in one: held on the spot, still free
+    // to turn (and aim).
+    if (duelHeld()) {
+      stepMover(m, heldStill(input), walkAz.current, dt, speedScale);
+      m.vx = m.vz = 0;
+      herzie.heading = m.heading;
+      townSave.heading = herzie.heading;
+      rt.playerSpeed = townLive.speed = 0;
+      return;
+    }
     // On ice: slippery — its legs go as fast as ever as it pushes off,
     // but it gets less far for them, and glides when it stops.
     const here = b.translation();
@@ -515,7 +578,8 @@ export function Player({
       if (
         !townLive.seat &&
         !townLive.frozen &&
-        performance.now() >= combat.rootedUntil
+        performance.now() >= combat.rootedUntil &&
+        !duelHeld()
       )
         herzie.jump();
     }
@@ -565,8 +629,10 @@ export function Player({
       catVisit.current = homeMode.visit;
       if (homeMode.on) herzie.catToHome();
     }
+    // A duel's hit-stop and finishing slow-down hold its pose, not the
+    // world.
     herzie.update(
-      dt,
+      dt * fighterPace(duel.you, performance.now()),
       ice.current.on
         ? ice.current.pushing
           ? ice.current.stride
@@ -574,6 +640,8 @@ export function Player({
         : rt.playerSpeed,
     );
     downed.current = applyDowned(herzie, downInRaid(), downed.current, dt);
+    // A duel's blows and its end, on your herzie (see duel/fx).
+    poseFighter(herzie, duel.you, performance.now(), dt);
     townLive.jumps = herzie.jumps;
     // Through a portal: spun down into the disc, and back up out of the
     // far one.

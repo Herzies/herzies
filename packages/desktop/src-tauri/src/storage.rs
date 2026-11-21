@@ -664,6 +664,7 @@ mod tests {
                 item_id: "boombox".to_string(),
                 upgrade_level: 3,
                 equipped_slot: Some("ground_left".to_string()),
+                held_by: Some(2),
             }],
             bank_expansions: 2,
         };

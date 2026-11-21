@@ -20,6 +20,10 @@
  * out, and a wipe. Those land first, in that order, so the boss's health is
  * sized before the first damage and a revive lands before the health that
  * follows it; every one is idempotent, so a retried report is safe.
+ *
+ * A finished duel is reported once (action "duel"): it lands in 00152's
+ * record_duel, never touching health, and a replay of the same id adds
+ * nothing.
  */
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
@@ -275,6 +279,18 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
     /** action "revive": the health a Bard's resurrect brings `uid` back
      * with (outside a raid). */
     health?: unknown;
+    /** action "duel": a finished duel (00152 record_duel). `id` is the
+     * room's, unique per duel; the per-duelist maps are keyed by uid. */
+    id?: unknown;
+    a?: unknown;
+    b?: unknown;
+    winner?: unknown;
+    why?: unknown;
+    ms?: unknown;
+    damage?: unknown;
+    maxHp?: unknown;
+    level?: unknown;
+    credited?: unknown;
   };
   try {
     msg = JSON.parse(body);
@@ -315,6 +331,32 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
         p_hp: health,
       });
       return jsonResponse({ ok: !!vitals, vitals: vitals ?? null });
+    } catch {
+      return jsonResponse({ ok: false }, 500);
+    }
+  }
+  if (msg.action === "duel") {
+    // A finished duel, reported once per end and safe to replay (the id).
+    const duel = duelOf(msg);
+    if (!duel) return jsonResponse({ error: "Bad duel" }, 400);
+    try {
+      const res = (await rpc(db, "record_duel", {
+        p_id: duel.id,
+        p_a: duel.a,
+        p_b: duel.b,
+        p_winner: duel.winner,
+        p_why: duel.why,
+        p_ms: duel.ms,
+        p_damage: duel.damage,
+        p_max_hp: duel.maxHp,
+        p_level: duel.level,
+        p_credited: duel.credited,
+      })) as { recorded?: boolean; counted?: boolean } | null;
+      return jsonResponse({
+        ok: true,
+        recorded: !!res?.recorded,
+        counted: !!res?.counted,
+      });
     } catch {
       return jsonResponse({ ok: false }, 500);
     }
@@ -501,6 +543,79 @@ async function handleRoom(request: Request, body: string): Promise<Response> {
     );
   }
   return jsonResponse({ error: "Unknown action" }, 400);
+}
+
+const DUEL_REASONS: Record<string, true> = {
+  defeat: true,
+  yield: true,
+  bounds: true,
+  left: true,
+  time: true,
+  draw: true,
+};
+
+/** A duel report checked field by field, or null if it doesn't hold
+ * together: two different duelists, a winner that's one of them (none only
+ * for a draw), a known reason. The per-duelist numbers keep only the two
+ * duelists' finite values. */
+function duelOf(msg: {
+  id?: unknown;
+  a?: unknown;
+  b?: unknown;
+  winner?: unknown;
+  why?: unknown;
+  ms?: unknown;
+  damage?: unknown;
+  maxHp?: unknown;
+  level?: unknown;
+  credited?: unknown;
+}): {
+  id: string;
+  a: string;
+  b: string;
+  winner: string | null;
+  why: string;
+  ms: number;
+  damage: Record<string, number>;
+  maxHp: Record<string, number>;
+  level: Record<string, number>;
+  credited: boolean;
+} | null {
+  const { id, a, b, why } = msg;
+  const winner = msg.winner ?? null;
+  const ms = Number(msg.ms);
+  if (
+    typeof id !== "string" || id.length === 0 || id.length > 200 ||
+    typeof a !== "string" || !UUID.test(a) ||
+    typeof b !== "string" || !UUID.test(b) || a === b ||
+    typeof why !== "string" || !Object.hasOwn(DUEL_REASONS, why) ||
+    !Number.isFinite(ms) || ms < 0 ||
+    (winner === null) !== (why === "draw") ||
+    (winner !== null && winner !== a && winner !== b)
+  ) {
+    return null;
+  }
+  const perDuelist = (v: unknown): Record<string, number> => {
+    const out: Record<string, number> = {};
+    if (!v || typeof v !== "object") return out;
+    for (const uid of [a, b]) {
+      const n = Number((v as Record<string, unknown>)[uid]);
+      if (Number.isFinite(n)) out[uid] = n;
+    }
+    return out;
+  };
+  return {
+    id,
+    a,
+    b,
+    winner: winner as string | null,
+    why,
+    ms: Math.min(Math.round(ms), 2_147_483_647),
+    damage: perDuelist(msg.damage),
+    maxHp: perDuelist(msg.maxHp),
+    level: perDuelist(msg.level),
+    credited: msg.credited === true && winner !== null,
+  };
 }
 
 async function handlePlayer(request: Request, body: string): Promise<Response> {

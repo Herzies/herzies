@@ -5,8 +5,10 @@ import {
   type EquipRejection,
   type GroundSide,
   getItem,
+  growsBagPastCapacity,
   type HerzieClass,
   type ItemUnit,
+  isInBag,
   levelForStage,
   normalizeEquipped,
   normalizeUnits,
@@ -33,6 +35,9 @@ const RECONCILE_TIMEOUT_MS = 6000;
  * the optimistic layer replaced.
  */
 const SETTLE_GRACE_MS = 400;
+
+/** equip_unit's own words for taking a piece off into a full bag. */
+const BAG_FULL_MESSAGE = "Your bag is full: make room first.";
 
 /** User-facing text for the reasons applyEquip can refuse a toggle locally. */
 const REJECTION_MESSAGES: Record<EquipRejection, string> = {
@@ -85,7 +90,7 @@ function deriveEquipped(units: ItemUnit[], previous: Equipped): Equipped {
 function unitsKey(units: ItemUnit[]): string {
   return JSON.stringify(
     units
-      .map((u) => [u.id, u.upgradeLevel, u.equippedSlot])
+      .map((u) => [u.id, u.upgradeLevel, u.equippedSlot, u.heldBy ?? null])
       .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
   );
 }
@@ -151,7 +156,10 @@ export function useOptimisticUnits(
   /** The herzie's stage, for items with a `minStage`. */
   stage: number,
   /** The herzie's class, for class gear (`requiredClass`). */
-  herzieClass: HerzieClass | null = null,
+  herzieClass: HerzieClass | null,
+  /** Bag slots (`bankCapacity`): taking a piece off into a full bag is
+   * refused, as equip_unit refuses it. */
+  capacity: number,
 ) {
   const [overlay, setOverlay] = useState<OwnedState | null>(null);
   /** Unsettled changes. While non-zero, more server transitions are coming. */
@@ -186,6 +194,8 @@ export function useOptimisticUnits(
   stageRef.current = stage;
   const classRef = useRef(herzieClass);
   classRef.current = herzieClass;
+  const capacityRef = useRef(capacity);
+  capacityRef.current = capacity;
 
   // Read inside callbacks without making them depend on (and be recreated by)
   // every render — same pattern as FriendsView's friendsRef.
@@ -244,7 +254,6 @@ export function useOptimisticUnits(
           sent: false,
         };
       }
-
       const item = getItem(unit.itemId);
       // `preferredSide` is the caller naming the exact ground slot it means
       // (the deck's two Accessory boxes are ground_left and ground_right, and
@@ -282,6 +291,16 @@ export function useOptimisticUnits(
                 : REJECTION_MESSAGES[predicted.reason],
           sent: false,
         };
+      }
+      // A full bag can't take what this sends to it: the piece taken off
+      // (unless the other loadout still holds it), or whatever a held or worn
+      // piece knocks off. A piece coming out of the bag always makes room.
+      // equip_unit's own rule (bag_would_overflow).
+      if (
+        !isInBag(unit) &&
+        growsBagPastCapacity(base.units, predicted.units, capacityRef.current)
+      ) {
+        return { ok: false, action, error: BAG_FULL_MESSAGE, sent: false };
       }
 
       // Into the ref now as well as state, so a second change made in the same

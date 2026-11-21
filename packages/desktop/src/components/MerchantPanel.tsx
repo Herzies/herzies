@@ -16,6 +16,7 @@ import {
   GEORGE_EQUIPPED,
   GEORGE_SEED,
   getItem,
+  isInBag,
   MEDEA_EQUIPPED,
   MEDEA_KEY,
   MEDEA_NAME,
@@ -291,8 +292,7 @@ export function MerchantPanel({
   // Nandor is paid in unworn treats; George in coins.
   const balance =
     persona === NANDOR
-      ? units.filter((u) => u.itemId === TREAT_ITEM_ID && !u.equippedSlot)
-          .length
+      ? units.filter((u) => u.itemId === TREAT_ITEM_ID && isInBag(u)).length
       : currency;
 
   const lines = boboku

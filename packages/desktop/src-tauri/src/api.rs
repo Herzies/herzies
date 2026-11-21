@@ -794,6 +794,7 @@ pub async fn api_fetch_inventory(client: &Client) -> Option<ItemSnapshot> {
     let units = serde_json::from_value::<Vec<ItemUnit>>(data["units"].clone()).ok();
     let bank_expansions = data["bankExpansions"].as_u64().map(|n| n as u32);
     let emotes = serde_json::from_value::<Vec<String>>(data["emotes"].clone()).ok();
+    let loadouts = serde_json::from_value::<LoadoutState>(data["loadouts"].clone()).ok();
     Some(ItemSnapshot {
         inventory,
         currency,
@@ -802,8 +803,73 @@ pub async fn api_fetch_inventory(client: &Client) -> Option<ItemSnapshot> {
         units,
         bank_expansions,
         emotes,
+        loadouts,
         issued_at: Some(issued_at),
     })
+}
+
+/// Puts the other loadout on (1 or 2). On a refusal, errs with the server's
+/// reason code (`LoadoutRefusal`: same, too-soon, ...) when it gives one, so
+/// the UI can say it in its own words; otherwise with its message.
+pub async fn api_switch_loadout(client: &Client, loadout: u8) -> Result<serde_json::Value, String> {
+    api_post_with_reason(
+        client,
+        "/inventory/loadout",
+        serde_json::json!({ "loadout": loadout }),
+    )
+    .await
+}
+
+/// Every title: the one worn, those earned, the numbers they're earned on,
+/// and how many herzies hold each.
+pub async fn api_fetch_titles(client: &Client) -> Result<serde_json::Value, String> {
+    api_get(client, "/titles").await
+}
+
+/// Wears an earned title, or none (`None`). Errs with the reason code
+/// (not-earned, unknown) when the server gives one.
+pub async fn api_wear_title(
+    client: &Client,
+    title: Option<&str>,
+) -> Result<serde_json::Value, String> {
+    api_post_with_reason(
+        client,
+        "/titles/wear",
+        serde_json::json!({ "title": title }),
+    )
+    .await
+}
+
+/// Marks titles as looked at: their NEW pill goes.
+pub async fn api_mark_titles_seen(
+    client: &Client,
+    ids: &[String],
+) -> Result<serde_json::Value, String> {
+    api_buy(client, "/titles/seen", serde_json::json!({ "ids": ids })).await
+}
+
+/// POSTs, erring with the refusal's `reason` code when there is one, else
+/// the server's message.
+async fn api_post_with_reason(
+    client: &Client,
+    path: &str,
+    body: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let resp = api_fetch(client, reqwest::Method::POST, path, Some(body))
+        .await
+        .ok_or_else(|| "Network error".to_string())?;
+    let status = resp.status();
+    let text = resp.text().await.map_err(|e| format!("Read error: {e}"))?;
+    let data: serde_json::Value =
+        serde_json::from_str(&text).map_err(|_| format!("Server returned {status}"))?;
+    if !status.is_success() {
+        let msg = data["reason"]
+            .as_str()
+            .or_else(|| data["error"].as_str())
+            .unwrap_or("Unknown error");
+        return Err(msg.to_string());
+    }
+    Ok(data)
 }
 
 /// Wears or removes one specific copy. Surfaces the server's message (max

@@ -1,5 +1,5 @@
 import type { Herzie, ItemUnit, Trade, TradeOffer } from "@herzies/shared";
-import { getItem, ItemTypeIcon } from "@herzies/shared";
+import { getItem, ItemTypeIcon, isInBag } from "@herzies/shared";
 import {
   type ReactNode,
   useCallback,
@@ -36,12 +36,12 @@ interface OfferGroup {
   unitIds: string[];
 }
 
-/** What could be offered: every copy that isn't being worn. A worn copy can't
- * be traded (the server refuses it), so it isn't listed. */
+/** What could be offered: every copy in the bag. A worn copy, or one the other
+ * loadout holds, can't be traded (the server refuses it), so it isn't listed. */
 function offerGroups(units: readonly ItemUnit[]): OfferGroup[] {
   const groups = new Map<string, OfferGroup>();
   for (const u of units) {
-    if (u.equippedSlot !== null) continue;
+    if (!isInBag(u)) continue;
     const key = `${u.itemId}:${u.upgradeLevel}`;
     const group = groups.get(key);
     if (group) group.unitIds.push(u.id);

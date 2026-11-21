@@ -1,6 +1,7 @@
 import type { HerzieClass } from "./classes.js";
 import type { CrystalState } from "./crystal.js";
 import type { Equipped, HerzieStats, ItemUnit } from "./items.js";
+import type { LoadoutState } from "./loadouts.js";
 import type { SkillId } from "./skills.js";
 import type { StatPoints } from "./stats.js";
 
@@ -44,6 +45,9 @@ export interface Herzie {
   /** Stat points spent (stats.ts). Set only by allocate_stats — sync never
    * writes them. Absent from an older server. */
   statPoints?: StatPoints;
+  /** The title it wears (titles.ts), or null for none. Set only by
+   * set_title — sync never writes it. Absent from an older server. */
+  title?: string | null;
 
   // Music stats
   totalMinutesListened: number;
@@ -95,6 +99,8 @@ export interface HerzieProfile {
     albumArtUrl?: string;
   } | null;
   songHuntWins?: number;
+  /** The title it wears (titles.ts), if any. */
+  title?: string | null;
   /** Set (true) when this is a friend who keeps their listening private:
    * nowPlaying, lastPlayed and topArtists are withheld, and only
    * `isListening` says whether they're playing something right now. */
@@ -164,6 +170,12 @@ export interface SyncResponse {
   skills?: HerzieSkill[];
   /** The Crystal (00140). Absent from an older server. */
   crystal?: CrystalState;
+  /** Titles (titles.ts ids) earned since the last sync, in catalog order:
+   * each is handed over once, for the "title earned" toast. Absent from an
+   * older server. */
+  newTitles?: string[];
+  /** The loadouts (loadouts.ts). Absent from an older server. */
+  loadouts?: LoadoutState;
 }
 
 /** One skill a herzie knows (public.herzie_skills). */

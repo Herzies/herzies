@@ -750,6 +750,94 @@ async fn allocate_stats(
     Ok(result)
 }
 
+/// Puts the other loadout on (1 or 2). The answer carries the item state
+/// (applied like an equip's), the loadouts, and what couldn't be put on.
+#[tauri::command]
+async fn switch_loadout(
+    loadout: u8,
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    let client = api::http();
+    // Before the request: the response's item state is at least this new.
+    let issued_at = Instant::now();
+    let result = api::api_switch_loadout(&client, loadout).await?;
+    let mut s = state.lock().unwrap();
+    if let Some(snapshot) = snapshot_from_response(&result, &s, issued_at) {
+        apply_inventory(&mut s, snapshot, None);
+        // Like an equip: an `/inventory` already in flight predates it.
+        s.bump_equip_epoch();
+    }
+    drop(s);
+    emit_state_update(&app);
+    Ok(result)
+}
+
+/// Every title, earned or not, for the Titles tab. The worn one it reports
+/// is the server's word, so it's taken unless a wear is on its way.
+#[tauri::command]
+async fn fetch_titles(
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    let client = api::http();
+    let epoch_before = state.lock().unwrap().title_epoch;
+    let result = api::api_fetch_titles(&client).await?;
+    let worn = result["worn"].as_str().map(str::to_string);
+    let mut s = state.lock().unwrap();
+    let changed =
+        s.title_epoch == epoch_before && s.herzie.as_ref().is_some_and(|h| h.title != worn);
+    if changed {
+        if let Some(herzie) = &mut s.herzie {
+            herzie.title = worn;
+            storage::save_herzie(herzie);
+        }
+        drop(s);
+        emit_state_update(&app);
+    }
+    Ok(result)
+}
+
+/// Wears an earned title, or none.
+#[tauri::command]
+async fn wear_title(
+    title: Option<String>,
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    let client = api::http();
+    let result = api::api_wear_title(&client, title.as_deref()).await?;
+    let mut s = state.lock().unwrap();
+    if let Some(herzie) = &mut s.herzie {
+        herzie.title = result["worn"].as_str().map(str::to_string);
+        storage::save_herzie(herzie);
+    }
+    s.title_epoch = s.title_epoch.wrapping_add(1);
+    drop(s);
+    emit_state_update(&app);
+    Ok(result)
+}
+
+/// Clears the NEW pill on titles that have been looked at.
+#[tauri::command]
+async fn mark_titles_seen(ids: Vec<String>) -> Result<serde_json::Value, String> {
+    let client = api::http();
+    api::api_mark_titles_seen(&client, &ids).await
+}
+
+/// The UI has announced these new titles: they leave the queue.
+#[tauri::command]
+fn ack_new_titles(ids: Vec<String>, app: AppHandle, state: tauri::State<'_, SharedState>) {
+    let mut s = state.lock().unwrap();
+    let before = s.new_titles.len();
+    s.new_titles.retain(|id| !ids.contains(id));
+    let changed = s.new_titles.len() != before;
+    drop(s);
+    if changed {
+        emit_state_update(&app);
+    }
+}
+
 /// Buys from Good ol' George (a live `merchant` event) — the only way coins
 /// buy items — or from Nandor the Treatless (a `treat_trader`), paid in
 /// treats. Applies the returned item state, and the new coin balance when
@@ -1518,6 +1606,7 @@ fn apply_inventory(s: &mut ManagedState, snapshot: ItemSnapshot, equip_epoch_bef
         units,
         bank_expansions,
         emotes,
+        loadouts,
         issued_at,
     } = snapshot;
     s.inventory = Some(inventory.clone());
@@ -1529,6 +1618,9 @@ fn apply_inventory(s: &mut ManagedState, snapshot: ItemSnapshot, equip_epoch_bef
     }
     if let Some(emotes) = emotes {
         s.emotes = emotes;
+    }
+    if let Some(loadouts) = loadouts {
+        s.loadouts = Some(loadouts);
     }
     s.inventory_currency = currency;
     s.item_upgrades = item_upgrades.clone();
@@ -1590,6 +1682,7 @@ fn snapshot_from_response(
     let item_upgrades = serde_json::from_value::<ItemUpgrades>(data["itemUpgrades"].clone())
         .unwrap_or_else(|_| s.item_upgrades.clone());
     let units = serde_json::from_value::<Vec<ItemUnit>>(data["units"].clone()).ok();
+    let loadouts = serde_json::from_value::<LoadoutState>(data["loadouts"].clone()).ok();
     Some(ItemSnapshot {
         inventory,
         currency,
@@ -1598,6 +1691,7 @@ fn snapshot_from_response(
         units,
         bank_expansions: None,
         emotes: None,
+        loadouts,
         issued_at: Some(issued_at),
     })
 }
@@ -2555,6 +2649,7 @@ async fn sync_tick_with(
         trade_epoch_before,
         currency_epoch_before,
         crystal_epoch_before,
+        title_epoch_before,
     ) = {
         let s = state.lock().unwrap();
         let has = s.herzie.is_some();
@@ -2577,6 +2672,7 @@ async fn sync_tick_with(
             s.trade_epoch,
             s.currency_epoch,
             s.crystal_epoch,
+            s.title_epoch,
         )
     };
 
@@ -2642,6 +2738,7 @@ async fn sync_tick_with(
         // or re-showing an accepted request). The next sync reconciles.
         let friend_state_stale = s.friend_epoch != friend_epoch_before;
         let s_currency_current = s.currency_epoch == currency_epoch_before;
+        let s_title_current = s.title_epoch == title_epoch_before;
         let friend_codes_changed = if let Some(ref mut herzie) = s.herzie {
             let server = &sync_resp.herzie;
             herzie.xp = server.xp;
@@ -2657,6 +2754,10 @@ async fn sync_tick_with(
             // keeps what's here.
             if server.stat_points.is_some() {
                 herzie.stat_points = server.stat_points;
+            }
+            // Skipped when a wear changed it while this request was out.
+            if s_title_current {
+                herzie.title = server.title.clone();
             }
             herzie.total_minutes_listened = server.total_minutes_listened;
             herzie.genre_minutes = server.genre_minutes.clone();
@@ -2732,6 +2833,16 @@ async fn sync_tick_with(
         }
         if let Some(emotes) = sync_resp.emotes.clone() {
             s.emotes = emotes;
+        }
+        if let Some(loadouts) = sync_resp.loadouts.clone() {
+            s.loadouts = Some(loadouts);
+        }
+        // Queued until the UI acks them (see `ack_new_titles`); a title
+        // can't arrive twice, but guard against a repeat all the same.
+        for id in &sync_resp.new_titles {
+            if !s.new_titles.contains(id) {
+                s.new_titles.push(id.clone());
+            }
         }
         // Whether this sync filled the resonance (see crystal_became_full);
         // announced below, once the state's out.
@@ -3057,6 +3168,11 @@ pub fn run() {
             equip_item,
             choose_class,
             allocate_stats,
+            switch_loadout,
+            fetch_titles,
+            wear_title,
+            mark_titles_seen,
+            ack_new_titles,
             fetch_store_products,
             fetch_premium_items,
             start_purchase,

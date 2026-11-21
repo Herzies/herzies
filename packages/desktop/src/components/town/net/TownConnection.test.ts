@@ -285,6 +285,40 @@ describe("TownConnection", () => {
     latest().json({ t: "correct", x: 4, z: 5 });
     expect(corrections).toEqual([[4, 5]]);
   });
+
+  it("keeps worn titles, and has its say before leaving a room", async () => {
+    const leaving = vi.fn();
+    const conn: TownConnection = new TownConnection({
+      map: "home",
+      getTicket: vi.fn(async () => ticket),
+      readState: () => ({ x: 0, z: 0, heading: 0, speed: 0, flags: 0 }),
+      onLeaving: () => {
+        leaving();
+        conn.sendDuel({ op: "yield" });
+      },
+    });
+    conn.start();
+    await settle();
+    const ws = latest();
+    ws.open();
+    const look = { seed: "s", stage: 1 };
+    ws.json({
+      t: "welcome",
+      you: 7,
+      players: [{ id: 3, name: "eddie", look, title: "duel-10" }],
+    });
+    expect(conn.remotes.get(3)?.title).toBe("duel-10");
+    ws.json({ t: "join", player: { id: 4, name: "fay", look } });
+    expect(conn.remotes.get(4)?.title).toBeNull();
+    ws.json({ t: "look", player: { id: 3, name: "eddie", look } });
+    expect(conn.remotes.get(3)?.title).toBeNull();
+    conn.setMap("arena");
+    expect(leaving).toHaveBeenCalledOnce();
+    expect(JSON.parse(ws.sent.at(-1) as string)).toEqual({
+      t: "duel",
+      op: "yield",
+    });
+  });
 });
 
 /** The first retry is never later than this. */

@@ -15,6 +15,14 @@ import { setChampion } from "../champion";
 import { MOB_DELAY_MS, setDrawDelaySource } from "../combat/drawDelay";
 import { bossFight, handleBossMessage } from "../combat/fight";
 import { combat } from "../combat/state";
+import { forgetFighters } from "../duel/fx";
+import {
+  handleDuelMessage,
+  inDuel,
+  localOf,
+  myDuel,
+  resetDuels,
+} from "../duel/store";
 import { settleEat } from "../eat";
 import { goToMap, townLive, townSave } from "../runtime";
 import { setVitals } from "../vitals";
@@ -53,12 +61,33 @@ export function townNet(): TownConnection {
     map: isTownMapId(townSave.map) ? townSave.map : "home",
     getTicket: (map) => ticketSource(map),
     onMessage: (m) => {
-      if (m.t === "ate") settleEat(m);
-      else
-        handleBossMessage(m, {
-          toLocal: (t) => net?.clock.toLocal(t) ?? t,
-          you: () => net?.you ?? null,
-        });
+      if (m.t === "ate") {
+        settleEat(m);
+        return;
+      }
+      const clock = {
+        toLocal: (t: number) => net?.clock.toLocal(t) ?? t,
+        you: () => net?.you ?? null,
+      };
+      // Duels have messages of their own; the welcome is everyone's.
+      const duels = handleDuelMessage(m, {
+        ...clock,
+        who: (id) => {
+          const r = net?.remotes.get(id);
+          return r
+            ? { name: r.name, seed: r.look.seed, title: r.title }
+            : undefined;
+        },
+        send: (op) => net?.sendDuel(op),
+      });
+      if (!duels) handleBossMessage(m, clock);
+    },
+    // Leaving mid-duel (another island, the Town closed) is yielding: said
+    // now, rather than left to the room to find out.
+    onLeaving: () => {
+      if (inDuel()) net?.sendDuel({ op: "yield" });
+      resetDuels();
+      forgetFighters();
     },
     onRefused: (why) => {
       // The cave (or the Tower) won't have us: back to town, with the
@@ -104,6 +133,19 @@ export function townNet(): TownConnection {
       ),
     }),
     onCorrect: (x, z) => {
+      // Put on your mark for a duel's countdown: walked there, facing the
+      // ring's middle (and so the other one), not snapped.
+      const d = myDuel();
+      if (d && !townLive.frozen && performance.now() < localOf(d.startsAt)) {
+        if (townLive.glide?.x !== x || townLive.glide.z !== z)
+          townLive.glide = {
+            x,
+            z,
+            heading: Math.atan2(d.x - x, d.z - z),
+            from: performance.now(),
+          };
+        return;
+      }
       townLive.teleport = { x, z };
     },
   });
@@ -148,6 +190,9 @@ export function useTownNet(active: boolean): TownConnection {
       document.removeEventListener("visibilitychange", onVisibility);
       clearInterval(afk);
       townLive.speed = 0;
+      // Closing the Town mid-duel is giving it up (the socket lingers, but
+      // nobody's there to fight).
+      if (inDuel()) conn.sendDuel({ op: "yield" });
       conn.setAfk(true);
       if (--users > 0) return;
       linger = setTimeout(() => {

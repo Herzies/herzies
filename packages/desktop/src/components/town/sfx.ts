@@ -805,3 +805,123 @@ export function sfxCrystalTick(progress: number): void {
   const f = 1200 + progress * 1400;
   tone(a, "sine", f, f, 0.025, 0.002, 0.05);
 }
+
+// --- Titles and loadouts -----------------------------------------------------
+
+/** A title earned: a bright two-note chime; `big` (legendary, mythic) a
+ * rising arpeggio over a soft swell. */
+export function sfxTitle(big: boolean): void {
+  const a = audio();
+  if (!a) return;
+  if (!big) {
+    tone(a, "triangle", 880, 880, 0.08, 0.004, 0.3);
+    tone(a, "triangle", 1319, 1319, 0.08, 0.004, 0.5, 0.1);
+    return;
+  }
+  tone(a, "sine", 220, 110, 0.12, 0.02, 0.7);
+  noiseBurst(a, "highpass", 6000, 2500, 0.8, 0.06, 0.5);
+  for (const [i, f] of [659, 880, 1109, 1319, 1760].entries())
+    tone(a, "triangle", f, f, 0.07, 0.005, 0.9, 0.07 * i);
+}
+
+// --- Duels -----------------------------------------------------------------
+
+/** Someone challenges you: a bright call, up a fourth, with a shimmer. */
+export function sfxDuelChallenge(): void {
+  const a = audio();
+  if (!a) return;
+  tone(a, "triangle", 784, 784, 0.09, 0.004, 0.22);
+  tone(a, "triangle", 1047, 1047, 0.1, 0.004, 0.45, 0.12);
+  noiseBurst(a, "highpass", 7000, 4000, 0.7, 0.03, 0.3);
+}
+
+/** The ring's centre landing: a low thump and a puff. */
+export function sfxDuelThump(): void {
+  const a = audio();
+  if (!a) return;
+  const k = wobble(0.03);
+  tone(a, "sine", 110 * k, 40 * k, 0.55, 0.003, 0.28);
+  noiseBurst(a, "lowpass", 700 * k, 150, 0.8, 0.18, 0.14);
+}
+
+/** "3", "2", "1": a tick a semitone higher each time (`step` 0, 1, 2). */
+export function sfxDuelTick(step: number): void {
+  const a = audio();
+  if (!a) return;
+  const f = 740 * 2 ** (step / 12);
+  tone(a, "triangle", f, f, 0.15, 0.003, 0.14);
+  tone(a, "sine", f / 2, f / 2, 0.08, 0.003, 0.1);
+}
+
+/** "FIGHT!": a drum hit under a short brass stab. */
+export function sfxDuelFight(): void {
+  const a = audio();
+  if (!a) return;
+  tone(a, "sine", 130, 45, 0.8, 0.003, 0.32);
+  noiseBurst(a, "lowpass", 1600, 220, 1, 0.35, 0.16);
+  for (const f of [349, 440, 523])
+    tone(a, "sawtooth", f, f * 1.01, 0.06, 0.012, 0.32, 0.01);
+  noiseBurst(a, "highpass", 5200, 2600, 0.7, 0.12, 0.45);
+}
+
+/** Your duel hit confirmed: a woody "thock" over more bass; a crit adds
+ * the same knock five semitones up. */
+export function sfxDuelThock(crit: boolean): void {
+  const a = audio();
+  if (!a) return;
+  const k = wobble(0.03);
+  tone(a, "triangle", 560 * k, 300 * k, 0.2, 0.002, 0.08);
+  tone(a, "sine", 140 * k, 55 * k, 0.5, 0.003, 0.16);
+  noiseBurst(a, "bandpass", 1800 * k, 900 * k, 2.5, 0.16, 0.05);
+  if (crit) {
+    const up = 2 ** (5 / 12);
+    tone(a, "triangle", 560 * k * up, 300 * k * up, 0.14, 0.002, 0.1, 0.02);
+    tone(a, "sine", 1760 * k, 1700 * k, 0.05, 0.003, 0.3, 0.03);
+  }
+}
+
+/** A hit blocked by a dome: a dull clank. */
+export function sfxDuelBlocked(): void {
+  const a = audio();
+  if (!a) return;
+  tone(a, "square", 330, 300, 0.05, 0.002, 0.08);
+  noiseBurst(a, "bandpass", 2400, 1600, 4, 0.08, 0.08);
+}
+
+/** The winning blow: a deep boom with a bright crack over it. */
+export function sfxDuelFinish(): void {
+  const a = audio();
+  if (!a) return;
+  tone(a, "sine", 90, 28, 0.9, 0.003, 0.7);
+  noiseBurst(a, "highpass", 6000, 1800, 0.8, 0.25, 0.4);
+  tone(a, "triangle", 1568, 1480, 0.08, 0.003, 0.6, 0.02);
+}
+
+/** Won a duel: a rising fanfare, landing on a held chord (about 1.5 s). */
+export function sfxDuelVictory(): void {
+  const a = audio();
+  if (!a) return;
+  const run = [523, 659, 784];
+  for (const [i, f] of run.entries())
+    tone(a, "triangle", f, f, 0.1, 0.005, 0.18, i * 0.13);
+  for (const f of [523, 659, 784, 1047])
+    tone(a, "triangle", f, f, 0.08, 0.01, 1.1, 0.42);
+  tone(a, "sine", 131, 131, 0.14, 0.02, 1.1, 0.42);
+  noiseBurst(a, "highpass", 6500, 3500, 0.7, 0.05, 0.8);
+}
+
+/** Lost a duel: two soft notes, falling. */
+export function sfxDuelDefeat(): void {
+  const a = audio();
+  if (!a) return;
+  tone(a, "sine", 523, 523, 0.09, 0.02, 0.4);
+  tone(a, "sine", 392, 388, 0.09, 0.02, 0.7, 0.38);
+}
+
+/** Outside the ring: a low tick each second. */
+export function sfxDuelOut(): void {
+  const a = audio();
+  if (!a) return;
+  tone(a, "square", 196, 190, 0.07, 0.002, 0.09);
+  tone(a, "sine", 98, 96, 0.12, 0.002, 0.12);
+}

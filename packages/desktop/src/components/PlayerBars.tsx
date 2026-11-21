@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { cn } from "../lib/utils";
 import { CrystalBar, ExpBar, HpBar } from "./SquareBar";
 import { useCrystal } from "./town/crystalState";
+import { useMyDuelHp } from "./town/duel/store";
 import { refreshVitals, useLiveHp } from "./town/vitals";
 
 /** Publishes the Town's player card's bottom edge (from the window's top)
@@ -37,7 +38,9 @@ export const PLAYER_CARD_TOWN = "bg-black/45";
 
 /**
  * The herzie's health and experience, under its name on Home and in the
- * Town alike. (The modifiers star is on the now-playing box.)
+ * Town alike. (The modifiers star is on the now-playing box.) In a duel the
+ * health bar is the duel's: your stored health is untouched by it, and
+ * comes back when the ring has gone.
  */
 export function PlayerBars({
   level,
@@ -53,6 +56,7 @@ export function PlayerBars({
   className?: string;
 }) {
   const live = useLiveHp();
+  const duelHp = useMyDuelHp();
   const crystal = useCrystal();
   const crystalOn = crystal?.enabled === true;
   // Health is fetched when the Town opens; on Home first, ask for it here.
@@ -63,13 +67,15 @@ export function PlayerBars({
 
   return (
     <div className={cn("flex flex-col gap-[3px]", className)}>
-      {live && (
+      {duelHp ? (
+        <HpBar hp={duelHp.hp} maxHp={duelHp.maxHp} className="min-w-0" />
+      ) : live ? (
         <HpBar
           hp={live.down ? 0 : live.hp}
           maxHp={live.maxHp}
           className="min-w-0"
         />
-      )}
+      ) : null}
       <ExpBar
         progress={progress}
         level={level}

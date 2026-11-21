@@ -16,6 +16,7 @@ const REASONS: Record<string, string> = {
   "target-not-owned": "You don't own that card",
   "max-level": "That card is already fully upgraded",
   "protection-not-owned": "You don't have a Safety Pick",
+  held: "That card is in your other loadout",
 };
 
 export async function POST(request: Request) {

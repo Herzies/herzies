@@ -32,19 +32,19 @@ import {
   RIMSHOT,
   shuffleOn,
 } from "@herzies/shared/skills";
-import { timingAttackSpeed } from "@herzies/shared/stats";
 import { towerMob } from "@herzies/shared/tower";
 import type { TowerFloor, TowerMob } from "@herzies/shared/town-net";
 import {
   type BossEvent,
   type BossPlayer,
-  castSpeed,
   type Phase,
+  quickness,
   rng,
   type ShelterDome,
   type Telegraph,
   TUNING,
 } from "./boss";
+import { CastBudget } from "./budgets";
 import { DiscHands } from "./hands";
 import { type MobJudge, MobPack, SEEN_LAG_MS, type TowerArena } from "./mobs";
 
@@ -59,7 +59,7 @@ export type TowerEvent =
 export class TowerEngine {
   private readonly pack: MobPack;
   private cleared = false;
-  private casts = new Map<string, { tokens: number; at: number }>();
+  private casts = new CastBudget(TUNING.castEveryMs, TUNING.castBurst);
   /** A Slinger's discs: a hand throws once its disc is back. */
   private hands = new DiscHands();
   private safeUntil = new Map<string, number>();
@@ -167,7 +167,7 @@ export class TowerEngine {
   }
 
   forget(uid: string): void {
-    this.casts.delete(uid);
+    this.casts.forget(uid);
     this.hands.forget(uid);
     this.safeUntil.delete(uid);
     this.buffs.delete(uid);
@@ -262,8 +262,7 @@ export class TowerEngine {
         now,
         target?.dist ?? null,
         // As quick as the app flies it: Haste and Timing both.
-        castSpeed(this.buffs.get(uid) ?? [], now) *
-          (1 + timingAttackSpeed(stats.timing ?? 0)),
+        quickness(this.buffs.get(uid) ?? [], now, stats.timing),
       )
     )
       return "miss";
@@ -363,22 +362,11 @@ export class TowerEngine {
 
   /** A cast's token (a heal bolt spends one too); see BossEngine's. */
   spendCast(uid: string, now: number, timing = 0): boolean {
-    const bucket = this.casts.get(uid) ?? {
-      tokens: TUNING.castBurst,
-      at: now,
-    };
-    bucket.tokens = Math.min(
-      TUNING.castBurst,
-      bucket.tokens +
-        (Math.max(0, now - bucket.at) / TUNING.castEveryMs) *
-          castSpeed(this.buffs.get(uid) ?? [], now) *
-          (1 + timingAttackSpeed(timing)),
+    return this.casts.spend(
+      uid,
+      now,
+      quickness(this.buffs.get(uid) ?? [], now, timing),
     );
-    bucket.at = now;
-    this.casts.set(uid, bucket);
-    if (bucket.tokens < 1) return false;
-    bucket.tokens -= 1;
-    return true;
   }
 
   // --- Time passing.

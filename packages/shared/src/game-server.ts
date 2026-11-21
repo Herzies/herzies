@@ -67,8 +67,16 @@ import {
   withStatPoints,
   xpBonusConfig,
 } from "./game-rules.js";
+import type { LoadoutState } from "./loadouts.js";
 import { genreInTags } from "./pip-genres.js";
 import { QUEST_GIVERS, type QuestParams, questGenre } from "./quests.js";
+import {
+  getTitle,
+  inCatalogOrder,
+  syncTitleMetrics,
+  type TitleId,
+  titleGoalReached,
+} from "./titles.js";
 
 /** Minimum gap between two *billable* syncs, measured from `last_billed_at`.
  *
@@ -377,6 +385,7 @@ export function rowToHerzie(row: Record<string, unknown>): Herzie {
     streakLastDate: (row.streak_last_date ?? null) as string | null,
     currency: (row.currency ?? 0) as number,
     shareListening: (row.share_listening ?? true) as boolean,
+    title: (row.title ?? null) as string | null,
   };
 }
 
@@ -477,6 +486,11 @@ interface SyncContext {
    * nothing": stats then fall back to the legacy id-keyed columns.
    */
   item_units?: unknown[];
+  /** The loadouts (00152). Absent on an older database. */
+  loadouts?: LoadoutState;
+  /** Titles earned and not handed to the app yet (00152). Absent on an
+   * older database. */
+  new_titles?: string[];
   active_hunts: { id: string; title: string }[];
   /**
    * The live boss, if any (00075). No longer read: listening doesn't damage
@@ -544,6 +558,11 @@ export async function processSync(
   emotes: string[];
   /** The Crystal (00140): what listening has stored up to attune for. */
   crystal: CrystalState;
+  /** Titles earned since the last sync, in catalog order, handed over once
+   * (see take_new_titles, 00152). */
+  newTitles: TitleId[];
+  /** The loadouts (00152); absent from an older database. */
+  loadouts?: LoadoutState;
 }> {
   const source = options.source ?? "cli";
   // 1. Fetch everything this sync reads, in one round trip.
@@ -566,6 +585,9 @@ export async function processSync(
   }
 
   const herzie = rowToHerzie(row);
+  // Where the sync's title metrics stood before it moved them: a goal
+  // crossed in between asks the database to grant (step 7b).
+  const titleMetricsBefore = syncTitleMetrics(herzie);
   const notifications: EventNotification[] = [];
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
@@ -1121,17 +1143,19 @@ export async function processSync(
 
   // 6. Match live now_playing against secret tracks / song hunts.
   // Skip Spotify catch-up sync — it has no real-time now_playing.
+  let huntWon = false;
   if (source !== "spotify" && nowPlaying) {
-    const eventNotifications = await checkSecretTrackEvents(
+    const found = await checkSecretTrackEvents(
       admin,
       userId,
       nowPlaying.title,
       nowPlaying.artist,
       notifiedHunts,
     );
-    notifications.push(...eventNotifications);
+    notifications.push(...found.notifications);
+    huntWon = found.huntWon;
     // A reward grant minted units under fresh ids we never saw.
-    if (eventNotifications.some((n) => n.itemId)) unitsStale = true;
+    if (found.notifications.some((n) => n.itemId)) unitsStale = true;
   }
 
   // 6b. First-finder notifications for song hunts
@@ -1233,6 +1257,46 @@ export async function processSync(
     .select("inventory_v2, equipped, item_upgrades, bank_expansions, emotes")
     .single();
 
+  // 7b. Titles. Granted here only when this sync crossed a goal on what it
+  // moves (listening, level, streak, genres) or won a song hunt: anything
+  // else is granted where it happens, or when the Titles tab opens. Then
+  // the ones not handed over yet are taken, in the same call, for the app's
+  // toast: at most once, whatever granted them. Asked only when there's
+  // something to do (sync is hot). A failure never fails the sync: they're
+  // still waiting next time.
+  let newTitles: TitleId[] = [];
+  const crossed = titleGoalReached(
+    titleMetricsBefore,
+    syncTitleMetrics(herzie),
+  );
+  if (crossed || huntWon || (ctx.new_titles?.length ?? 0) > 0) {
+    const { data: taken, error: titlesError } = await admin.rpc(
+      "take_new_titles",
+      { p_user: userId, p_refresh: crossed || huntWon },
+    );
+    if (!titlesError && Array.isArray(taken)) {
+      newTitles = inCatalogOrder(taken);
+    }
+  }
+  // The activity feed's line; the app's toast comes from newTitles.
+  if (newTitles.length > 2) {
+    notifications.push({
+      type: "info",
+      title: "Titles earned",
+      message: `You earned ${newTitles.length} titles`,
+      logOnly: true,
+    });
+  } else {
+    for (const id of newTitles) {
+      notifications.push({
+        type: "info",
+        title: "Title earned",
+        message: `You earned the title "${getTitle(id)?.name ?? id}"`,
+        logOnly: true,
+      });
+    }
+  }
+
   // 8. Pending trade request — resolved with the initiator's name in
   // sync_context, which was previously two queries here.
   const pendingTradeRequest = ctx.pending_trade ?? undefined;
@@ -1331,6 +1395,8 @@ export async function processSync(
     // about them at launch (it no longer fetches /inventory then).
     emotes: (syncedRow?.emotes ?? row.emotes ?? []) as string[],
     crystal: crystalStateFromRow(crystalRow, crystalOn),
+    newTitles,
+    loadouts: ctx.loadouts ?? undefined,
   };
 }
 
@@ -1401,6 +1467,7 @@ export async function loadFriendRequests(
 /**
  * Check if the currently playing track matches any active secret track events.
  * If it does and the user hasn't claimed it yet, grant the reward.
+ * `huntWon`: a song hunt was claimed, which can earn a title.
  */
 async function checkSecretTrackEvents(
   admin: SupabaseClient,
@@ -1408,8 +1475,9 @@ async function checkSecretTrackEvents(
   title: string,
   artist: string,
   notifiedHunts: string[],
-): Promise<EventNotification[]> {
+): Promise<{ notifications: EventNotification[]; huntWon: boolean }> {
   const notifications: EventNotification[] = [];
+  let huntWon = false;
   const now = new Date().toISOString();
 
   // Fetch active secret track events
@@ -1421,7 +1489,7 @@ async function checkSecretTrackEvents(
     .lte("starts_at", now)
     .gte("ends_at", now);
 
-  if (!events || events.length === 0) return notifications;
+  if (!events || events.length === 0) return { notifications, huntWon };
 
   for (const event of events) {
     const config = event.config as SecretTrackConfig;
@@ -1503,18 +1571,18 @@ async function checkSecretTrackEvents(
     });
 
     if (isSongHunt) {
+      huntWon = true;
       // One-time bonus: the first time a user wins any song hunt, grant the
       // Good Eye Sniper (cosmetic, tracks their song-hunt win count via a
       // live query — never re-granted, so duplicate copies never pile up).
-      const { data: sniperRow } = await admin
-        .from("herzies")
-        .select("inventory_v2")
+      // Counted from the copies, not inventory_v2: that leaves out a copy
+      // put away in the other loadout, which is still owned.
+      const { count: sniperCopies } = await admin
+        .from("item_units")
+        .select("id", { count: "exact", head: true })
         .eq("user_id", userId)
-        .single();
-      const alreadyOwnedSniper =
-        ((sniperRow?.inventory_v2 as Record<string, number> | null)?.[
-          "good-eye-sniper"
-        ] ?? 0) > 0;
+        .eq("item_id", "good-eye-sniper");
+      const alreadyOwnedSniper = (sniperCopies ?? 0) > 0;
       if (!alreadyOwnedSniper) {
         await admin.rpc("grant_inventory_item", {
           p_user_id: userId,
@@ -1529,7 +1597,7 @@ async function checkSecretTrackEvents(
     }
   }
 
-  return notifications;
+  return { notifications, huntWon };
 }
 
 // ---------------------------------------------------------------------------

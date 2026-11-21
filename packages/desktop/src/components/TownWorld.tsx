@@ -41,6 +41,7 @@ import { bossFight, resetBossFight, useBossFight } from "./town/combat/fight";
 import { onLootLog } from "./town/combat/lootFeed";
 import { useBossResultsShown } from "./town/combat/results";
 import { useCombat } from "./town/combat/state";
+import { DuelHud } from "./town/duel/DuelHud";
 import { drawn, useFpsShown } from "./town/fps";
 import { Hotbar } from "./town/Hotbar";
 import { homeMode, markWorldSettled } from "./town/homeMode";
@@ -50,6 +51,7 @@ import { markMet } from "./town/met";
 import { useTownNet, useTownNetVersion } from "./town/net/townNet";
 import { spotsOf, type TownSpot, townLive, useTownMap } from "./town/runtime";
 import { CastBar, SkillHud } from "./town/SkillHud";
+import { TitleLine } from "./town/TitleLine";
 import { useTuneSender } from "./town/tune";
 
 // three.js, Rapier's WASM and friends: loaded the first time someone opens
@@ -103,6 +105,8 @@ export function TownWorld({
     multipliers?: ActiveMultiplier[] | null;
     /** The class's name ("Bard"), after the level. */
     classLabel?: string;
+    /** The title it wears (titles.ts), under the name. */
+    title?: string | null;
     /** What's playing, under the card. */
     nowPlaying?: AppState["nowPlaying"];
   };
@@ -358,6 +362,11 @@ export function TownWorld({
                     {profile.name}
                   </span>
                 </div>
+                {/* The title it wears, in its rarity's colour. */}
+                <TitleLine
+                  id={profile.title}
+                  className="-mt-0.5 mb-0.5 text-[10px] font-medium leading-3"
+                />
                 {/* The level (and class) on its own line, as on Home. */}
                 <div className="my-0.5 text-[10px] leading-3 whitespace-nowrap text-white/70">
                   Lv. {profile.level}
@@ -467,6 +476,9 @@ export function TownWorld({
           <div className={hudFade}>
             <TownVitals inFight={!!map.combat} chatOverlay={chatOverlay} />
             <BossHud name={bossCard?.title ?? "The boss"} />
+            {profile ? (
+              <DuelHud me={{ name: profile.name, title: profile.title }} />
+            ) : null}
           </div>
           <BossResults interactive={!windowOpen} />
         </>

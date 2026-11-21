@@ -13,6 +13,9 @@ import type {
   Inventory,
   ItemUnit,
   ItemUpgradeResult,
+  LoadoutIndex,
+  LoadoutState,
+  LoadoutSwitchReport,
   MarketListing,
   MarketStall,
   PendingDrop,
@@ -20,6 +23,7 @@ import type {
   PremiumItem,
   StatPoints,
   StoreProduct,
+  TitlesState,
   TownLook,
   Trade,
   TradeState,
@@ -115,6 +119,16 @@ export type AttuneCrystalReply =
     }
   | { ok: false; reason: "stale" | "not-found"; crystal?: CrystalState };
 
+/** What a loadout switch answers: the item state (already applied to the
+ * app's state by the time this returns), the loadouts, and what couldn't be
+ * put on. */
+export interface LoadoutSwitchReply {
+  equipped: Equipped;
+  units: ItemUnit[];
+  loadouts: LoadoutState;
+  report: LoadoutSwitchReport;
+}
+
 export interface AppState {
   herzie: Herzie | null;
   nowPlaying: {
@@ -150,6 +164,12 @@ export interface AppState {
   /** The Crystal: what listening has stored up to attune for. Null until a
    * server that knows about it has answered. */
   crystal?: CrystalState | null;
+  /** The two loadouts: which is worn, and the other's pieces. Null until a
+   * server that knows about them has answered. */
+  loadouts?: LoadoutState | null;
+  /** Titles earned and not announced yet (TITLES ids), oldest first: the
+   * app toasts them, then `ackNewTitles`. */
+  newTitles?: string[];
   friends: Record<string, HerzieProfile>;
   pendingTradeRequest?: PendingTradeRequest | null;
   pendingFriendRequest?: PendingFriendRequest | null;
@@ -332,6 +352,21 @@ export const herzies = {
       euphony: points.euphony,
       timing: points.timing,
     }),
+  /** Puts the other loadout on. Rejects with a `LoadoutRefusal` code
+   * ("same", "too-soon", "invalid"), or the server's message. */
+  switchLoadout: (loadout: LoadoutIndex) =>
+    invoke<LoadoutSwitchReply>("switch_loadout", { loadout }),
+  /** Every title, earned or not, with progress and holder counts. */
+  fetchTitles: () => invoke<TitlesState>("fetch_titles"),
+  /** Wears an earned title, or none (null). Rejects with "not-earned",
+   * "unknown", or the server's message. */
+  wearTitle: (title: string | null) =>
+    invoke<{ worn: string | null }>("wear_title", { title }),
+  /** Clears the NEW pill on titles that have been looked at. */
+  markTitlesSeen: (ids: string[]) =>
+    invoke<{ ok: true }>("mark_titles_seen", { ids }),
+  /** These new titles have been announced: they leave `newTitles`. */
+  ackNewTitles: (ids: string[]) => invoke<void>("ack_new_titles", { ids }),
   /** Rolls a dice item onto ONE named card. The server rolls, never the
    * client: `result` says whether it went up, a failed roll was absorbed by
    * the Safety Pick (`protectionItemId`), or the card broke. Throws with the

@@ -264,6 +264,7 @@ const REFUSALS: Record<SkillRefusal, string> = {
   "no-target": "No one knocked out near enough to bring back.",
   "not-yet": "That only works once the fight is on.",
   instrument: "Your class's skills need its instrument in your main hand.",
+  duel: "That skill doesn't work in a duel.",
 };
 
 /** Where a mob is at `at` (performance.now() ms), between its samples. */

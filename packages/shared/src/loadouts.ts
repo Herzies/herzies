@@ -1,0 +1,58 @@
+/**
+ * Loadouts: two sets of gear a herzie switches between in one click.
+ *
+ * What's worn is still only `item_units.equipped_slot`: the active loadout
+ * is whatever the herzie wears, saved as it changes (nothing to "save"). The
+ * other loadout holds its gear (00152 `loadout_items`, like Guild Wars 2 or
+ * New World): a copy it holds that isn't worn is out of the bag (no bag slot,
+ * can't be sold, traded or spent) until you switch back and take it off. A
+ * copy can be in both loadouts; it counts once.
+ *
+ * Switching (00152 switch_loadout) never moves anything into or out of the
+ * bag: what's worn becomes the loadout being left, and the other one is put
+ * on under the same rules as equipping by hand (stage, class, the modifier
+ * cap). A held copy that's gone by the switch is left empty and reported; one
+ * the herzie can no longer wear goes to the bag, and if the bag can't take
+ * them all the switch is refused. Loadout 2 starts empty.
+ */
+import type { UnitSlot } from "./items.js";
+
+export const LOADOUT_COUNT = 2;
+export type LoadoutIndex = 1 | 2;
+
+export function isLoadoutIndex(n: unknown): n is LoadoutIndex {
+  return n === 1 || n === 2;
+}
+
+/** One worn piece of the inactive loadout: the slot, the copy, and its item
+ * (so a missing copy can still say what it was). Modifiers are each a piece
+ * in slot "modifier", in the order they were put on. */
+export interface LoadoutPiece {
+  slot: UnitSlot;
+  /** The copy's id, or null once that copy is gone. */
+  unitId: string | null;
+  itemId: string;
+}
+
+/** The loadouts as `/api/inventory` reports them. */
+export interface LoadoutState {
+  active: LoadoutIndex;
+  /** The other loadout's pieces; null until it's first been made (switching
+   * to it then starts it empty). */
+  inactive: LoadoutPiece[] | null;
+}
+
+/** Why a switch (or taking a piece off) was refused: "bag-full" when the bag
+ * can't take what would land in it. */
+export type LoadoutRefusal = "same" | "too-soon" | "invalid" | "bag-full";
+
+/** The pieces a switch couldn't put on, by item id: their copy was gone
+ * (`missing`), or the herzie can't wear it any more (stage, class) and it went
+ * to the bag (`refused`). */
+export interface LoadoutSwitchReport {
+  missing: string[];
+  refused: string[];
+}
+
+/** Server-side minimum gap between switches, against click spam. */
+export const LOADOUT_SWITCH_GAP_MS = 1000;

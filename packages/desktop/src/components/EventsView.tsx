@@ -319,6 +319,7 @@ function EventsViewImpl({
     xp?: number;
     multipliers?: ActiveMultiplier[] | null;
     classLabel?: string;
+    title?: string | null;
     nowPlaying?: AppState["nowPlaying"];
   };
   /** Tab stays mounted but hidden; only poll while user is on Events. */

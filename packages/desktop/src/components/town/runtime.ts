@@ -77,6 +77,15 @@ export const townLive = {
   /** Set to move the herzie straight there next step (the server refused a
    * move); Player clears it. */
   teleport: null as { x: number; z: number; heading?: number } | null,
+  /** Set to walk the herzie to (x, z) over GLIDE_MS, turning to `heading`
+   * (a duel putting it on its mark; begun at `from`, performance.now() ms).
+   * Player clears it on arrival. */
+  glide: null as {
+    x: number;
+    z: number;
+    heading: number;
+    from: number;
+  } | null,
   /** The bench seat the herzie is sitting on, if any (see Benches). */
   seat: null as Seat | null,
   /** Stand up from it next step (Player clears it). */
@@ -154,6 +163,7 @@ export function goToMap(
   });
   townLive.seat = null;
   townLive.teleport = null;
+  townLive.glide = null;
   for (const l of mapListeners) l();
 }
 

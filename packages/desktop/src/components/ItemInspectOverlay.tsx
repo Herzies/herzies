@@ -10,7 +10,13 @@ import {
   ItemStatLines,
   ItemTypeTag,
 } from "@herzies/shared";
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import { getCardIllustration } from "../lib/card-art";
 import { useEscape } from "../lib/escapeStack";
@@ -84,16 +90,21 @@ function tagTooltip(label: string, tag: React.ReactElement) {
 
 /** The condensed hover preview for the bag and the deck: name, type, stats and
  * set progress — no art, icon, rarity or description, so it reads at a glance
- * while browsing. Right-click → Inspect opens the full card. */
+ * while browsing. Right-click → Inspect opens the full card. `label`: a small
+ * line over the name ("Worn"); `footer`: under the rest (a comparison). */
 export function CompactItemPreview({
   itemId,
   equipped,
   level = 0,
+  label,
+  footer,
 }: {
   itemId: string;
   /** Current deck — for set progress, as in ItemPreviewCard. */
   equipped?: Equipped | null;
   level?: number;
+  label?: ReactNode;
+  footer?: ReactNode;
 }) {
   const item = getItem(itemId);
   const set = getItemSet(itemId);
@@ -104,6 +115,9 @@ export function CompactItemPreview({
   return (
     // Text only, no icon: the card's own tile is right there under the cursor.
     <div className="w-[180px] border border-white/15 bg-bg-panel p-2 text-left shadow-xl shadow-black/50">
+      {label ? (
+        <div className="text-ui-sm leading-4 text-text-dim">{label}</div>
+      ) : null}
       <div className="text-ui font-bold leading-4 text-text">
         {item.name}
         {level > 0 ? <span className="text-cyan"> +{level}</span> : null}
@@ -119,6 +133,7 @@ export function CompactItemPreview({
           {set.name} set {setCount}/{set.itemIds.length}
         </div>
       )}
+      {footer}
     </div>
   );
 }

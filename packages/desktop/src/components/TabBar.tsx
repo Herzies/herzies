@@ -45,7 +45,6 @@ export function TabBar({
   onEvents,
   unspentPoints = 0,
   homeBlocked = false,
-  hasStats = false,
   hasSkills = false,
   landing = null,
   windowSize = null,
@@ -70,8 +69,7 @@ export function TabBar({
   /** Home can't be gone to from here (an island you fight on): the button
    * stays, greyed. */
   homeBlocked?: boolean;
-  /** The server knows stat points / the herzie has a class. */
-  hasStats?: boolean;
+  /** The herzie has a class: Skills is in the menu. */
   hasSkills?: boolean;
   landing?: MenuLanding | null;
   /** The Town's bigger window, while the Town is on screen: a toggle at the
@@ -101,7 +99,7 @@ export function TabBar({
     { id: "profile", label: "Profile", key: "o" },
     { id: "deck", label: "Deck", key: "i" },
     { id: "bag", label: "Bag", key: "b" },
-    ...(hasStats ? [{ id: "stats" as const, label: "Stats", key: "j" }] : []),
+    { id: "stats", label: "Stats", key: "j" },
     ...(hasSkills
       ? [{ id: "skills" as const, label: "Skills", key: "k" }]
       : []),

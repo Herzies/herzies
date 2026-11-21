@@ -16,6 +16,7 @@ import { DurableObject } from "cloudflare:workers";
 import { parseTune, TUNE_MIN_INTERVAL_MS } from "@herzies/shared/boss-fight";
 import { hasInstrument } from "@herzies/shared/classes";
 import { generateCreatureParams } from "@herzies/shared/creature-params";
+import { DUEL_MAPS } from "@herzies/shared/duel";
 import {
   EMOTE_COOLDOWN_MS,
   emoteCooldownMs,
@@ -23,6 +24,7 @@ import {
 } from "@herzies/shared/emotes";
 import { SKILL_DEFS, skillValue } from "@herzies/shared/skills";
 import { healMult } from "@herzies/shared/stats";
+import { isTitleId, type TitleId } from "@herzies/shared/titles";
 import {
   type BossClaim,
   decodeCastFrame,
@@ -34,6 +36,7 @@ import {
   type ServerMessage,
   type SnapshotEntry,
   TOWN_CLOSE,
+  TOWN_FLAG_AFK,
   TOWN_FLAG_SITTING,
   TOWN_INSTANCED_MAPS,
   TOWN_MAPS,
@@ -56,6 +59,7 @@ import {
   verifyTownTicket,
 } from "@herzies/shared/town-net";
 import { benchBonusHp } from "@herzies/shared/vitals";
+import { type DuelEffects, type DuelPeer, DuelRuntime } from "./duel";
 import { CHANNEL_SLACK, DEV_EVENT, FightRuntime, type Outbound } from "./fight";
 import { RestMeter } from "./rest";
 import {
@@ -66,7 +70,7 @@ import {
   startingPoint,
 } from "./rules";
 import { standInSeed } from "./standin";
-import { eatInDb, postVitals, reviveInDb } from "./vitals";
+import { eatInDb, postDuel, postVitals, reviveInDb } from "./vitals";
 
 export type Env = {
   TOWN_ROOM: DurableObjectNamespace<TownRoom>;
@@ -138,6 +142,14 @@ type Attachment = {
     emotes?: string[];
     /** A game master (from the ticket). */
     gm?: boolean;
+    /** The title it wears (from the ticket), under its name. */
+    title?: TitleId;
+    /** How it fights (from the ticket), for a duel: kept here because a
+     * room that hibernates forgets the ticket. */
+    st?: TownTicketPayload["st"];
+    sk?: TownTicketPayload["sk"];
+    lv?: number;
+    cls?: string;
     /** Its Resurrect's level (0: it has none), and how much stronger its
      * heals are (its Euphony), for a resurrect outside a fight. */
     rez?: number;
@@ -192,6 +204,12 @@ export class TownRoom extends DurableObject<Env> {
   private quietTicks = 0;
   /** The boss room's fight, once someone has arrived with a boss ticket. */
   private fight: FightRuntime | null = null;
+  /** Duels, in a peaceful room that has them (DUEL_MAPS). */
+  private duels: DuelRuntime | null = null;
+  /** Duelists whose connection dropped mid-fight, by user id: their herzie
+   * stands where it was (and keeps its id) until they're back or the duel
+   * is over. */
+  private ghosts = new Map<string, NonNullable<Session["player"]>>();
   /** Resurrects being played outside a fight, by their Bard's user id. */
   private townChannels = new Map<string, TownChannel>();
   /** When each Bard's Resurrect is ready again outside a fight (server ms),
@@ -364,6 +382,11 @@ export class TownRoom extends DurableObject<Env> {
         on?: unknown;
         heal?: unknown;
         e?: unknown;
+        op?: unknown;
+        to?: unknown;
+        from?: unknown;
+        yes?: unknown;
+        auto?: unknown;
       };
       try {
         m = JSON.parse(message);
@@ -380,6 +403,7 @@ export class TownRoom extends DurableObject<Env> {
       else if (m?.t === "stance" && s.player) this.onStance(s, m.heal);
       else if (m?.t === "forfeit" && s.player) this.onForfeit(s, now);
       else if (m?.t === "emote" && s.player) this.onEmote(s, m.e, now);
+      else if (m?.t === "duel" && s.player) this.onDuel(s, m, now);
       else this.strike(s);
       return;
     }
@@ -400,11 +424,23 @@ export class TownRoom extends DurableObject<Env> {
     // Knocked out in the cave: the body stays put (frames still on their
     // way from before the fall aren't held against the socket).
     if (this.fight?.frozen(p.uid)) return;
-    const next = quantizeState(frame.state);
-    if (!checkMove(p.guard, next.x, next.z, now, s.att.map)) {
-      this.strike(s);
-      this.send(s, { t: "correct", x: p.state.x, z: p.state.z });
-      return;
+    let next = quantizeState(frame.state);
+    // On its mark for a duel's countdown, or stunned in one: it may turn,
+    // not walk (put right without a strike: its app eases it there).
+    const held = this.duels?.hold(p.uid, next.x, next.z, now);
+    if (held) {
+      next = quantizeState({ ...next, x: held.x, z: held.z, speed: 0 });
+      p.guard.x = next.x;
+      p.guard.z = next.z;
+      p.guard.at = now;
+      if (held.correct) this.send(s, { t: "correct", x: next.x, z: next.z });
+    } else {
+      p.guard.fight = !!this.duels?.dueling(p.uid);
+      if (!checkMove(p.guard, next.x, next.z, now, s.att.map)) {
+        this.strike(s);
+        this.send(s, { t: "correct", x: p.state.x, z: p.state.z });
+        return;
+      }
     }
     const wasSeated = (p.state.flags & TOWN_FLAG_SITTING) !== 0;
     p.state = next;
@@ -415,6 +451,7 @@ export class TownRoom extends DurableObject<Env> {
     // (which counts the bench's speed itself) agrees when it looks.
     if (wasSeated && !seated) this.flushRest(now, s);
     this.fight?.onState(p.uid, next.x, next.z, now);
+    this.duels?.onState(p.uid, next.x, next.z, now);
     this.dirty.add(s);
     this.startTicking();
   }
@@ -443,10 +480,14 @@ export class TownRoom extends DurableObject<Env> {
     const ticketed = TOWN_TICKETED_MAPS.has(s.att.map);
     if (ticketed && !this.admit(s, t, now)) return;
 
+    // A duelist whose connection dropped mid-fight, back in time: it's
+    // still standing where it was, under its id.
+    const ghost = this.ghosts.get(t.uid);
+    this.ghosts.delete(t.uid);
+    let id: number | undefined = ghost?.id;
     // The same herzie again (a reconnect, or a second copy of the app):
     // the new socket takes over the old one's place and id, so others see
     // it carry on rather than leave and come back.
-    let id: number | undefined;
     for (const other of this.sessions.values()) {
       if (other !== s && other.player?.uid === t.uid) {
         id = other.player.id;
@@ -464,7 +505,9 @@ export class TownRoom extends DurableObject<Env> {
     // A knocked-out herzie lies where it fell: a reconnect can't carry its
     // body over to a Bard.
     const asked = startingPoint(s.att.map, m.at?.x, m.at?.z);
-    const kept = this.fight?.rejoinAt(t.uid, asked, now) ?? null;
+    const kept =
+      this.fight?.rejoinAt(t.uid, asked, now) ??
+      (ghost ? { x: ghost.state.x, z: ghost.state.z } : null);
     const at = kept ?? asked;
     const state = quantizeState({
       x: at.x,
@@ -487,21 +530,33 @@ export class TownRoom extends DurableObject<Env> {
       standIn,
       emotes: t.em,
       ...(t.gm ? { gm: true } : {}),
+      ...(isTitleId(t.ti) ? { title: t.ti } : {}),
+      st: t.st,
+      sk: t.sk,
+      lv: t.lv,
+      cls: t.cls,
       ...townVitalsOf(t, !!this.fight),
     };
+    const duels = this.duelsHere(s.att.map);
     this.persist(s);
     const fp = this.fight?.join(t.uid, id, t, state, now);
     // Arriving after the lock: onto the roster, the boss grows to fit.
     if (fp && !replacing) this.fight?.lateJoin(t.uid);
 
-    const others = [...this.sessions.values()].flatMap((o) =>
-      o !== s && o.player ? [o.player] : [],
-    );
+    // Everyone else here, a dropped duelist's standing herzie too.
+    const others = [
+      ...[...this.sessions.values()].flatMap((o) =>
+        o !== s && o.player ? [o.player] : [],
+      ),
+      ...this.ghosts.values(),
+    ];
+    const running = duels?.states() ?? [];
     this.send(s, {
       t: "welcome",
       you: id,
       players: others.map(playerOf),
       fight: this.fight?.state(now, t.uid),
+      ...(running.length ? { duels: running } : {}),
     });
     if (fp) {
       // Everyone else sees the newcomer's health bar.
@@ -510,6 +565,7 @@ export class TownRoom extends DurableObject<Env> {
       // Put back where the fight has it (where it fell, or where it was).
       if (kept) this.send(s, { t: "correct", x: state.x, z: state.z });
     }
+    if (ghost) this.send(s, { t: "correct", x: state.x, z: state.z });
     if (others.length) {
       s.ws.send(
         encodeSnapshot(
@@ -523,6 +579,7 @@ export class TownRoom extends DurableObject<Env> {
       replacing ? { t: "look", player: me } : { t: "join", player: me },
       s,
     );
+    if (duels) this.applyDuel(duels.back(t.uid, now));
     this.dirty.add(s);
     this.startTicking();
     this.log(replacing ? "rejoin" : "join", s);
@@ -537,10 +594,12 @@ export class TownRoom extends DurableObject<Env> {
       this.drop(s, TOWN_CLOSE.auth, "bad renewal");
       return;
     }
+    const title = isTitleId(t.ti) ? t.ti : undefined;
     const changed =
       t.name !== p.name ||
       JSON.stringify(t.look) !== JSON.stringify(p.look) ||
-      !!t.gm !== !!p.gm;
+      !!t.gm !== !!p.gm ||
+      title !== p.title;
     p.exp = t.exp;
     p.maxHp = t.hp?.maxHp;
     const wasDown = !!p.down;
@@ -551,6 +610,12 @@ export class TownRoom extends DurableObject<Env> {
     p.look = t.look;
     p.emotes = t.em;
     p.gm = !!t.gm;
+    p.title = title;
+    // For the next duel: one under way keeps what it started with.
+    p.st = t.st;
+    p.sk = t.sk;
+    p.lv = t.lv;
+    p.cls = t.cls;
     this.persist(s);
     if (changed || downChanged)
       this.broadcast({ t: "look", player: playerOf(p) });
@@ -649,7 +714,13 @@ export class TownRoom extends DurableObject<Env> {
   private tick() {
     if (this.fight) this.runFight(Date.now());
     if (this.townChannels.size) this.stepTownChannels(Date.now());
-    if (this.dirty.size === 0 && !this.fight && !this.townChannels.size) {
+    if (this.duels?.live) this.applyDuel(this.duels.step(Date.now()));
+    if (
+      this.dirty.size === 0 &&
+      !this.fight &&
+      !this.townChannels.size &&
+      !this.duels?.live
+    ) {
       if (++this.quietTicks >= IDLE_TICKS && this.ticker) {
         clearInterval(this.ticker);
         this.ticker = null;
@@ -704,7 +775,16 @@ export class TownRoom extends DurableObject<Env> {
           this.ticker = null;
         }
       }
-      this.broadcast({ t: "leave", id: s.player.id });
+      // A duelist dropping out mid-fight stays standing (still in the
+      // duel) for a while: the room only says it left once that's over.
+      if (this.duels) {
+        const e = this.duels.gone(s.player.uid, Date.now());
+        if (this.duels.holds(s.player.uid))
+          this.ghosts.set(s.player.uid, s.player);
+        this.applyDuel(e);
+      }
+      if (!this.ghosts.has(s.player.uid))
+        this.broadcast({ t: "leave", id: s.player.id });
       this.log("leave", s, why);
     }
   }
@@ -721,6 +801,7 @@ export class TownRoom extends DurableObject<Env> {
   private freeId(): number {
     const used = new Set<number>();
     for (const s of this.sessions.values()) if (s.player) used.add(s.player.id);
+    for (const g of this.ghosts.values()) used.add(g.id);
     let id = 1;
     while (used.has(id)) id++;
     return id;
@@ -864,17 +945,28 @@ export class TownRoom extends DurableObject<Env> {
   private onCast(s: Session, message: ArrayBuffer, now: number) {
     const cast = decodeCastFrame(message);
     const p = s.player;
-    if (!cast || !p || !this.fight) {
+    if (!cast || !p) {
       this.strike(s);
       return;
     }
-    const result = this.fight.cast(p.uid, cast.yaw, cast.pitch, now);
-    if (result === "cooldown") this.strike(s);
+    if (this.fight) {
+      const result = this.fight.cast(p.uid, cast.yaw, cast.pitch, now);
+      if (result === "cooldown") this.strike(s);
+      return;
+    }
+    if (this.duels?.dueling(p.uid)) {
+      const result = this.duels.cast(p.uid, cast.yaw, cast.pitch, now);
+      if (result === "cooldown") this.strike(s);
+      return;
+    }
+    // Casts are only judged in a fight; the last ones of a duel that just
+    // ended are still arriving, though, and aren't held against it.
+    if (!this.duels?.justEnded(p.uid, now)) this.strike(s);
   }
 
-  /** A class skill. Only the boss room runs them; anywhere else they're
-   * the client's own practice (no effect, no XP), so they're dropped
-   * without a strike. */
+  /** A class skill. Only fights run them (the boss room's, the Tower's, a
+   * duel's); anywhere else they're the client's own practice (no effect,
+   * no XP), so they're dropped without a strike. */
   private onSkill(
     s: Session,
     m: { skill?: unknown; seq?: unknown; yaw?: unknown; pitch?: unknown },
@@ -894,17 +986,16 @@ export class TownRoom extends DurableObject<Env> {
       this.strike(s);
       return;
     }
-    if (!this.fight) {
+    const judged = this.fight
+      ? this.fight.skill(p.uid, m.skill, yaw, pitch, now)
+      : this.duels?.dueling(p.uid)
+        ? this.duels.skill(p.uid, m.skill, yaw, pitch, now)
+        : null;
+    if (!judged) {
       this.townSkill(s, m.skill, seq, yaw, now);
       return;
     }
-    const { result, readyAt, reason, out } = this.fight.skill(
-      p.uid,
-      m.skill,
-      yaw,
-      pitch,
-      now,
-    );
+    const { result, readyAt, reason, out } = judged;
     for (const o of out) this.dispatch(o);
     if (result === "used" || result === "ignored") return;
     // Refused: say when it's ready (and why, if it's something the player
@@ -1167,6 +1258,127 @@ export class TownRoom extends DurableObject<Env> {
     this.maybeReport(now);
   }
 
+  /** This room's duels, if it's a peaceful room on a map that has them
+   * (made on first use: a room that woke from hibernation has none yet). */
+  private duelsHere(map: TownMapId): DuelRuntime | null {
+    if (!DUEL_MAPS.has(map) || this.fight) return null;
+    this.duels ??= new DuelRuntime(
+      map,
+      this.ctx.id.name ?? `${map}:${this.ctx.id.toString()}`,
+      {
+        byUid: (uid) => this.peerWhere((p) => p.uid === uid),
+        byId: (id) => this.peerWhere((p) => p.id === id),
+      },
+    );
+    return this.duels;
+  }
+
+  /** The herzie on a socket here that `match` picks, as a duel sees it. */
+  private peerWhere(
+    match: (p: NonNullable<Session["player"]>) => boolean,
+  ): DuelPeer | null {
+    for (const s of this.sessions.values()) {
+      const p = s.player;
+      if (!p || !match(p)) continue;
+      return {
+        uid: p.uid,
+        id: p.id,
+        x: p.state.x,
+        z: p.state.z,
+        away: !!p.down || (p.state.flags & TOWN_FLAG_AFK) !== 0,
+        combat: {
+          look: p.look,
+          st: p.st,
+          sk: p.sk,
+          lv: p.lv,
+          cls: p.cls,
+        },
+      };
+    }
+    return null;
+  }
+
+  /** A duel op: a challenge, its answer, giving up, a rematch. */
+  private onDuel(
+    s: Session,
+    m: {
+      op?: unknown;
+      to?: unknown;
+      from?: unknown;
+      yes?: unknown;
+      auto?: unknown;
+    },
+    now: number,
+  ) {
+    const p = s.player;
+    if (!p) return;
+    const duels = this.duelsHere(s.att.map);
+    if (m.op === "ask" && Number.isInteger(m.to)) {
+      const to = m.to as number;
+      if (duels) this.applyDuel(duels.ask(p.uid, to, now));
+      else this.send(s, { t: "duelNo", with: to, why: "here" });
+    } else if (
+      m.op === "answer" &&
+      Number.isInteger(m.from) &&
+      typeof m.yes === "boolean" &&
+      (m.auto === undefined || typeof m.auto === "boolean")
+    ) {
+      if (duels)
+        this.applyDuel(
+          duels.answer(p.uid, m.from as number, m.yes, m.auto === true, now),
+        );
+    } else if (m.op === "cancel") {
+      if (duels) this.applyDuel(duels.cancel(p.uid));
+    } else if (m.op === "yield") {
+      if (duels) this.applyDuel(duels.yield(p.uid, now));
+    } else if (m.op === "rematch") {
+      if (duels) this.applyDuel(duels.rematch(p.uid, now));
+    } else this.strike(s);
+  }
+
+  /** Carry out what the duels said: tell whom, put duelists on their
+   * marks, report finished duels, and let go of dropped duelists whose
+   * duel is over. */
+  private applyDuel(e: DuelEffects) {
+    const now = Date.now();
+    for (const o of e.out) this.dispatch(o);
+    for (const at of e.place) {
+      const s = [...this.sessions.values()].find(
+        (o) => o.player?.uid === at.uid,
+      );
+      const p = s?.player;
+      if (!s || !p) continue;
+      // Its app eases it there; a fight's rules from here (see MoveGuard).
+      p.state = quantizeState({ ...p.state, x: at.x, z: at.z, speed: 0 });
+      p.guard = {
+        ...newGuard(p.state.x, p.state.z, now, s.att.map),
+        fight: true,
+      };
+      p.receivedAt = now;
+      this.send(s, { t: "correct", x: p.state.x, z: p.state.z });
+      this.dirty.add(s);
+    }
+    for (const r of e.results) {
+      void postDuel(this.env, r);
+      console.log(
+        JSON.stringify({
+          event: "duel",
+          id: r.id,
+          why: r.why,
+          ms: r.ms,
+          winner: r.winner,
+          credited: r.credited,
+        }),
+      );
+    }
+    for (const [uid, g] of this.ghosts) {
+      if (this.duels?.holds(uid)) continue;
+      this.ghosts.delete(uid);
+      this.broadcast({ t: "leave", id: g.id });
+    }
+    if (this.duels?.live) this.startTicking();
+  }
+
   private dispatch(o: Outbound) {
     if (o.to === "all") {
       this.broadcast(o.msg);
@@ -1300,6 +1512,12 @@ export class TownRoom extends DurableObject<Env> {
         // From the ticket, and forgotten in a hibernation otherwise.
         emotes: p.emotes,
         ...(p.gm ? { gm: true } : {}),
+        ...(p.title ? { title: p.title } : {}),
+        // How it fights, for its next duel.
+        st: p.st,
+        sk: p.sk,
+        lv: p.lv,
+        cls: p.cls,
       };
     }
     try {
@@ -1375,6 +1593,7 @@ function playerOf(p: {
   look: TownLook;
   down?: boolean;
   gm?: boolean;
+  title?: string;
 }): TownPlayer {
   return {
     id: p.id,
@@ -1382,6 +1601,7 @@ function playerOf(p: {
     look: p.look,
     ...(p.down ? { down: true as const } : {}),
     ...(p.gm ? { gm: true as const } : {}),
+    ...(p.title ? { title: p.title } : {}),
   };
 }
 

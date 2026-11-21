@@ -26,6 +26,7 @@ import { Telegraphs } from "./combat/Telegraphs";
 import { getCrystal } from "./crystalState";
 import type { Hour } from "./DayCycle";
 import { driftClouds } from "./depth";
+import { DuelScene } from "./duel/DuelScene";
 import { drawn } from "./fps";
 import { isMouth, usePortalOpen } from "./gates";
 import { HomeDrops } from "./HomeDrops";
@@ -269,12 +270,16 @@ export default function TownCanvas(props: TownCanvasProps) {
           </Physics>
         </Suspense>
         {props.net && (
-          <RemotePlayers
-            map={map}
-            net={props.net}
-            bubbles={props.bubbles}
-            onOpenProfile={props.onOpenProfile}
-          />
+          <>
+            <RemotePlayers
+              map={map}
+              net={props.net}
+              bubbles={props.bubbles}
+              onOpenProfile={props.onOpenProfile}
+            />
+            {/* Duels' rings, and what a duel's end leaves over heads. */}
+            <DuelScene map={map} />
+          </>
         )}
         <CameraRig map={map} />
         {/* Aim mode works on every island, so its effects are always here. */}

@@ -9,6 +9,7 @@ import {
   type LootDrop,
   signVitalsRequest,
 } from "@herzies/shared/town-net";
+import type { DuelResult } from "./duel";
 import type { FightReport, RaidReply } from "./fight";
 import type { Env } from "./room";
 
@@ -93,6 +94,16 @@ export async function reviveInDb(
     health,
   })) as { ok?: boolean } | null;
   return !!reply?.ok;
+}
+
+/** A finished duel, for its tallies and titles. Fire-and-forget: the edge
+ * function is replay-safe on the duel's id, and a duel lost in the post
+ * costs nothing but a title's progress. */
+export async function postDuel(
+  env: Pick<Env, "TOWN_TICKET_SECRET" | "TOWN_VITALS_URL">,
+  result: DuelResult,
+): Promise<void> {
+  await signedPost(env, { action: "duel", ...result });
 }
 
 /** POST `payload` to `town-vitals`, signed. The reply's JSON, or null on

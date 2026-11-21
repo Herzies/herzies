@@ -304,6 +304,8 @@ export class DiscField {
     // The nearest dummy it passed into this step: hit, and bounce back.
     let best: { t: number; point: Vec3; dummy: DummyState } | null = null;
     for (const dm of dummies) {
+      // Never its own thrower (a duelist standing in for a dummy).
+      if (dm.body && dm.body === d.owner) continue;
       const hit = waveHitsDummy(dm, d.prev, d.pos, DISC.hitRadius);
       if (hit && (!best || hit.t < best.t)) best = { ...hit, dummy: dm };
     }
@@ -356,7 +358,12 @@ export class DiscField {
   ): boolean {
     if (d.hops >= d.bounces) return false;
     const at = "key" in from ? from : { x: from[0], z: from[2] };
-    const next = nextInChain(at, chainBodies(dummies), d.struck, SHUFFLE_REACH);
+    const next = nextInChain(
+      at,
+      chainBodies(dummies, d.owner),
+      d.struck,
+      SHUFFLE_REACH,
+    );
     if (!next) return false;
     d.phase = "hop";
     d.t = 0;
@@ -455,14 +462,23 @@ export class DiscField {
   }
 }
 
-/** What a disc may bounce on to: every target, as the chain picks them. */
-function chainBodies(dummies: readonly DummyState[]): ChainBody<DummyState>[] {
-  return dummies.map((dm) => ({
-    ref: dm,
-    x: dm.x,
-    z: dm.z,
-    radius: DUMMY.radius * (dm.size ?? 1),
-  }));
+/** What a disc may bounce on to: every target but its own thrower, as the
+ * chain picks them. */
+function chainBodies(
+  dummies: readonly DummyState[],
+  owner: object | null,
+): ChainBody<DummyState>[] {
+  const out: ChainBody<DummyState>[] = [];
+  for (const dm of dummies) {
+    if (dm.body && dm.body === owner) continue;
+    out.push({
+      ref: dm,
+      x: dm.x,
+      z: dm.z,
+      radius: DUMMY.radius * (dm.size ?? 1),
+    });
+  }
+  return out;
 }
 
 /** Off a hit (or a wall): a quick bounce back the way it came. */

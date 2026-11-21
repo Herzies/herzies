@@ -30,8 +30,10 @@ import {
   getHerzieStats,
   getHerzieStatsFromUnits,
   getItem,
+  getItemCategory,
   getItemSet,
   getItemType,
+  growsBagPastCapacity,
   HALLOWEEN_DROP_WINDOW,
   HIT_BASE,
   HIT_SPREAD,
@@ -43,6 +45,7 @@ import {
   type ItemDef,
   type ItemUnit,
   isBankFull,
+  isInBag,
   isInDropWindow,
   isModifierEquipped,
   MAX_ITEM_UPGRADE_LEVEL,
@@ -1724,6 +1727,74 @@ describe("bank tiles", () => {
         bankSlotsUsed(unitsToInventory(units), unitsToEquipped(units)),
       );
     }
+  });
+});
+
+describe("copies the other loadout holds", () => {
+  const held = (u: ItemUnit): ItemUnit => ({ ...u, heldBy: 1 });
+  const units = [
+    unit("bag", "boombox"),
+    held(unit("away", "boombox", 2)),
+    held(unit("shared", "headphones", 0, "head")),
+    unit("cd", "cd"),
+  ];
+
+  it("reads heldBy, and drops anything that isn't a loadout", () => {
+    expect(
+      normalizeUnits([
+        { id: "a", itemId: "cd", heldBy: 2 },
+        { id: "b", itemId: "cd", heldBy: 3 },
+        { id: "c", itemId: "cd", heldBy: "1" },
+      ]).map((u) => u.heldBy),
+    ).toEqual([2, undefined, undefined]);
+    expect(normalizeUnits([{ id: "b", itemId: "cd", heldBy: 3 }])[0]).toEqual({
+      id: "b",
+      itemId: "cd",
+      upgradeLevel: 0,
+      equippedSlot: null,
+    });
+  });
+
+  it("keeps a held copy that isn't worn out of the bag and the inventory", () => {
+    expect(units.map(isInBag)).toEqual([true, false, false, true]);
+    expect(bankTiles(units).map((t) => t.key)).toEqual(["bag", "stack:cd"]);
+    expect(unitsToInventory(units)).toEqual({
+      boombox: 1,
+      headphones: 1,
+      cd: 1,
+    });
+    expect(bankTiles(units)).toHaveLength(
+      bankSlotsUsed(unitsToInventory(units), unitsToEquipped(units)),
+    );
+  });
+
+  it("never picks a held copy to sell or offer", () => {
+    expect(unitsPlainestFirst(units, "boombox").map((u) => u.id)).toEqual([
+      "bag",
+    ]);
+    expect(pickPlainestUnitIds(units, "headphones", 1)).toBeNull();
+  });
+
+  it("grows the bag past capacity only when it gets bigger", () => {
+    const off = units.map((u) =>
+      u.id === "shared" ? { ...u, equippedSlot: null } : u,
+    );
+    const offUnheld = off.map((u) =>
+      u.id === "shared" ? unit("shared", "headphones") : u,
+    );
+    // Held, it stays out of the bag however full that is.
+    expect(growsBagPastCapacity(units, off, 2)).toBe(false);
+    expect(growsBagPastCapacity(units, offUnheld, 2)).toBe(true);
+    expect(growsBagPastCapacity(units, offUnheld, 3)).toBe(false);
+    // Shrinking or standing still passes even over capacity.
+    expect(growsBagPastCapacity(offUnheld, units, 0)).toBe(false);
+    expect(growsBagPastCapacity(units, units, 0)).toBe(false);
+  });
+
+  // bag_slots_used (00152) has no category to skip, so it counts every item:
+  // the two only agree while every catalog item is in the "deck" category.
+  it("has no item outside the deck category, which the SQL bag count assumes", () => {
+    expect(ITEMS.filter((i) => getItemCategory(i) !== "deck")).toEqual([]);
   });
 });
 

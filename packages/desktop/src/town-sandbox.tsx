@@ -9,6 +9,9 @@
 // `?net=local` joins the multiplayer Town on `wrangler dev` (in
 // packages/town-server, with TOWN_TICKET_SECRET=dev-town-secret in .dev.vars);
 // `&name=` and `&server=ws://…` to taste. Open it twice to see each other.
+// Duels too: in each tab, click the other's name, then "Challenge to duel"
+// (within 8 u); `&title=` wears a title (a titles.ts id, e.g.
+// `&title=duel-10`), shown under the name and on the duel's cards.
 // `?map=bossroom` (with `?net=local`) joins the boss's cave on `wrangler dev`
 // (`&lobby=20` makes it a raid that locks 20 s after loading; `&per=` sets
 // its health per herzie)
@@ -78,6 +81,7 @@ import { combat } from "./components/town/combat/state";
 import { getCrystal, setCrystal } from "./components/town/crystalState";
 import { localHours } from "./components/town/DayCycle";
 import { homeDropFeed } from "./components/town/dropSpots";
+import { DuelHud } from "./components/town/duel/DuelHud";
 import { setOwnedEmotes } from "./components/town/emotes";
 import { setTowerOpen } from "./components/town/gates";
 import { Hotbar } from "./components/town/Hotbar";
@@ -442,6 +446,7 @@ function localNet() {
               }
             : {}),
           lv: Number(params.get("level") ?? 10),
+          ...(params.get("title") ? { ti: params.get("title") as string } : {}),
           ...(sandboxEmotes.length ? { em: sandboxEmotes } : {}),
           tower:
             map === "tower"
@@ -852,6 +857,14 @@ function Sandbox() {
         }
       />
       <BossHud name="The boss" />
+      {net ? (
+        <DuelHud
+          me={{
+            name: params.get("name") ?? "You",
+            title: params.get("title"),
+          }}
+        />
+      ) : null}
       <Notices />
       <SkillHud />
       <Hotbar

@@ -4,7 +4,9 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { ambient } from "./ambient";
 import { aimSensitivity } from "./combat/sensitivity";
-import { combat, kickOffset } from "./combat/state";
+import { combat, kickOffset, reducedMotion } from "./combat/state";
+import { duel, localOf, myDuel } from "./duel/store";
+import { behindToward, SWING_MS, swingAzimuth } from "./duel/swing";
 import { blendPose, type HomePose, homeAzimuth, homePose } from "./homeCamera";
 import { type HomeFrame, homeMode } from "./homeMode";
 import { groundY, type TownMap } from "./map";
@@ -132,6 +134,8 @@ export function CameraRig({ map }: { map?: TownMap }) {
     position: new THREE.Vector3(),
     target: new THREE.Vector3(),
   });
+  /** The duel the view last swung round for, and that swing. */
+  const swing = useRef({ duel: -1, on: false, from: 0, to: 0, at: 0 });
 
   // Restore where the camera was, and save it again on the way out.
   useEffect(() => {
@@ -172,6 +176,36 @@ export function CameraRig({ map }: { map?: TownMap }) {
       arrived.current = townSave.arrival;
       c.moveTo(townSave.x, LOOK_HEIGHT, townSave.z, false);
       c.rotateTo(townSave.azimuth, c.polarAngle, false);
+    }
+
+    // A duel's countdown: swung round behind your herzie, your opponent
+    // ahead, so "FIGHT!" finds them in front of you. Not if you're turning
+    // the view yourself (a drag, the arrow keys, aiming): that's left be.
+    const sw = swing.current;
+    const d = myDuel();
+    const now = performance.now();
+    if (d && d.id !== sw.duel && now < localOf(d.startsAt)) {
+      sw.duel = d.id;
+      const mine = d.a === duel.you ? d.marks.a : d.marks.b;
+      sw.from = c.azimuthAngle;
+      sw.to = behindToward(mine, d.a === duel.you ? d.marks.b : d.marks.a);
+      sw.at = now;
+      sw.on = true;
+    }
+    if (sw.on) {
+      const keys = rt.input.current;
+      const turning =
+        c.currentAction !== ACTION.NONE ||
+        combat.lookX !== 0 ||
+        combat.lookY !== 0 ||
+        !!keys?.turnLeft ||
+        !!keys?.turnRight;
+      const t = reducedMotion() ? 1 : (now - sw.at) / SWING_MS;
+      if (turning) sw.on = false;
+      else {
+        c.rotateTo(swingAzimuth(sw.from, sw.to, t), c.polarAngle, false);
+        if (t >= 1) sw.on = false;
+      }
     }
 
     // Into or out of combat: the mouse aims (the view itself stays put).

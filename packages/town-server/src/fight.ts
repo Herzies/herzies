@@ -2443,8 +2443,8 @@ export type FightStats = HitStats & { def: number; euphony: number };
 
 /** How a ticket's herzie fights: its basic attack, a blow's strength, and
  * whether it holds its class's instrument. */
-function armsOf(
-  ticket: TownTicketPayload,
+export function armsOf(
+  ticket: Pick<TownTicketPayload, "cls" | "look">,
 ): Pick<FightPlayer, "attack" | "melee" | "armed"> {
   const cls = isHerzieClass(ticket.cls) ? ticket.cls : null;
   const mainHand = ticket.look.equipped?.main_hand ?? null;
@@ -2474,7 +2474,9 @@ export function statsOf(st: TownTicketPayload["st"]): FightStats {
 }
 
 /** The skills a ticket says this herzie has, at their levels. */
-function skillsOf(ticket: TownTicketPayload): Map<SkillId, number> {
+export function skillsOf(
+  ticket: Pick<TownTicketPayload, "sk">,
+): Map<SkillId, number> {
   const out = new Map<SkillId, number>();
   for (const entry of ticket.sk ?? []) {
     if (!Array.isArray(entry)) continue;

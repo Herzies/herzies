@@ -71,6 +71,12 @@ export type DummyState = {
   mob?: number;
   /** How much wider than a dummy it is (an elite or the Warden). */
   size?: number;
+  /** A duel opponent standing in for a dummy (its entity id): aimed at and
+   * struck like one, but the server judges the hits. */
+  herzie?: number;
+  /** What stands for it (its herzie): its own waves and discs pass
+   * through it. */
+  body?: object;
 };
 
 /** A fresh target at (x, z): a dummy, or a mob standing in for one. */

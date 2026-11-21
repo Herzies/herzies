@@ -1,6 +1,7 @@
 import {
   castSeqOf,
   castsBetween,
+  type DuelClientOp,
   decodeSnapshot,
   EntityBuffer,
   encodeCastFrame,
@@ -75,6 +76,8 @@ export type RemotePlayer = {
   down: boolean;
   /** A game master: a "GM" mark goes left of the name. */
   gm: boolean;
+  /** The title it wears (titles.ts), under its name; null: none. */
+  title: string | null;
   /** An emote they played, not yet shown (null: none). */
   pendingEmote: string | null;
 };
@@ -100,6 +103,9 @@ export type TownConnectionOptions = {
   readState: () => TownState;
   /** The server refused a move: put the herzie back here. */
   onCorrect?: (x: number, z: number) => void;
+  /** About to leave this room (another island, out of the Town), with the
+   * socket still open: last words go now (a duel yielded). */
+  onLeaving?: () => void;
 };
 
 /** How often to ping; the server drops sockets silent for 45 s. */
@@ -192,6 +198,7 @@ export class TownConnection {
     this.shard = 0;
     this.attempt = 0;
     this.clearRetry();
+    this.leaving();
     this.teardown(1000, "moving");
     if (this.wanted && this.status !== "outdated") this.connect();
   }
@@ -200,8 +207,14 @@ export class TownConnection {
   stop() {
     this.wanted = false;
     this.clearRetry();
+    this.leaving();
     this.teardown(1000, "bye");
     if (this.status !== "outdated") this.setStatus("idle");
+  }
+
+  /** Last words to the room we're leaving, while they can still go. */
+  private leaving() {
+    if (this.status === "online") this.opts.onLeaving?.();
   }
 
   /** Shown dimmed to others ("away"). Sent at once. */
@@ -434,6 +447,7 @@ export class TownConnection {
           r.look = m.player.look;
           r.down = !!m.player.down;
           r.gm = !!m.player.gm;
+          r.title = m.player.title ?? null;
         } else if (m.player.id !== this.you) this.addRemote(m.player);
         this.emit();
         return;
@@ -489,6 +503,12 @@ export class TownConnection {
     this.sendJson({ t: "emote", e });
   }
 
+  /** About a duel: a challenge, an answer, a yield, a rematch. */
+  sendDuel(op: DuelClientOp) {
+    if (this.status !== "online") return;
+    this.sendJson({ t: "duel", ...op });
+  }
+
   /** Knocked out in a raid, and giving up (no reward). */
   sendForfeit() {
     if (this.status !== "online") return;
@@ -523,6 +543,7 @@ export class TownConnection {
       castTimes: existing?.castTimes ?? [],
       down: !!p.down,
       gm: !!p.gm,
+      title: p.title ?? null,
       pendingEmote: existing?.pendingEmote ?? null,
     });
   }

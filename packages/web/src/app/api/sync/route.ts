@@ -43,6 +43,10 @@ export async function POST(request: Request) {
       skills: result.skills,
       // The Crystal: what listening has stored up to attune for.
       crystal: result.crystal,
+      // Titles earned since the last sync, for the app's toast.
+      newTitles: result.newTitles,
+      // The loadouts, for the Deck's 1 | 2 tabs.
+      loadouts: result.loadouts,
     };
 
     return NextResponse.json(response);

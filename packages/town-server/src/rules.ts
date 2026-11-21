@@ -17,13 +17,17 @@ import {
 const SPEED_SLACK = 1.5;
 /** Distance a herzie may build up while its packets are delayed. */
 const MAX_BUDGET = TOWN_SPRINT_SPEED * SPEED_SLACK * 2;
-/** In a fight (the boss room, the Tower) less: a whole budget there is a
- * step out of a telegraph and back, or across the arena to a boss. A
- * lag spike longer than this is corrected, as fighting games do. */
+/** In a fight (the boss room, the Tower, a duel) less: a whole budget
+ * there is a step out of a telegraph and back, or across the arena to a
+ * boss. A lag spike longer than this is corrected, as fighting games do. */
 const FIGHT_BUDGET = TOWN_SPRINT_SPEED * SPEED_SLACK * 1.25;
 
-function budgetFor(map: TownMapId): number {
-  return TOWN_TICKETED_MAPS.has(map) ? FIGHT_BUDGET : MAX_BUDGET;
+function fightRules(map: TownMapId, g?: MoveGuard): boolean {
+  return TOWN_TICKETED_MAPS.has(map) || !!g?.fight;
+}
+
+function budgetFor(map: TownMapId, g?: MoveGuard): number {
+  return fightRules(map, g) ? FIGHT_BUDGET : MAX_BUDGET;
 }
 /** A jump onto the spawn point is a respawn, which is allowed. */
 const SPAWN_TOLERANCE = 1.5;
@@ -40,6 +44,9 @@ export type MoveGuard = {
   /** A jump onto the spawn the server sent it on (the Tower's next
    * floor): in a fight, the only one allowed. Spent on use. */
   respawn?: boolean;
+  /** In a duel, on a peaceful map: held to a fight's rules (its budget,
+   * and no hop onto the spawn to get out of the ring). */
+  fight?: boolean;
 };
 
 export function newGuard(
@@ -62,7 +69,7 @@ export function checkMove(
   const { radius, spawn } = TOWN_MAPS[map];
   if (!Number.isFinite(x) || !Number.isFinite(z)) return false;
   if (Math.hypot(x, z) > radius + EDGE_TOLERANCE) return false;
-  const cap = budgetFor(map);
+  const cap = budgetFor(map, g);
   const elapsed = Math.max(0, now - g.at) / 1000;
   const budget = Math.min(
     cap,
@@ -73,7 +80,7 @@ export function checkMove(
   // must be one the server sent (or anyone could hop out of a slam).
   const respawn =
     Math.hypot(x - spawn.x, z - spawn.z) <= SPAWN_TOLERANCE &&
-    (!TOWN_TICKETED_MAPS.has(map) || !!g.respawn);
+    (!fightRules(map, g) || !!g.respawn);
   if (distance > budget && !respawn) return false;
   g.x = x;
   g.z = z;
