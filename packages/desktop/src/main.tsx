@@ -100,7 +100,9 @@ import {
   downloadUpdate,
   herzies,
   installUpdate,
+  refreshFullscreen,
   type UpdateInstallEvent,
+  useFullscreen,
   useGhostMode,
   useWindowFocused,
   useWindowVisible,
@@ -306,9 +308,14 @@ function App() {
   useEffect(() => {
     homeMode.setLocked(overlay !== null);
   }, [overlay]);
+  /** Real OS full screen (the menu's toggle, or the OS's own way in and
+   * out): the world's screens take the big window's layout, and the
+   * window's size is left alone until it's back out. */
+  const fullscreen = useFullscreen();
   /** Home in the big window (see setView): only once Home's in the world. */
   const [homeBigWanted, setHomeBig] = useState(false);
-  const homeBig = base === "home" && homeInWorld && homeBigWanted;
+  const homeBig =
+    base === "home" && homeInWorld && (homeBigWanted || fullscreen);
   /** Whether the window's big right now, for setView (set where it's
    * worked out, below). */
   const bigWindowRef = useRef(false);
@@ -412,7 +419,7 @@ function App() {
   const [testClassChoice, setTestClassChoice] = useState(false);
   // The Town's skill bar follows the class skills the app knows about —
   // or, under a Class Preview, that class's skills at Lv. 1 (practice on
-  // the training grounds works; the cave's server refuses them).
+  // Town's dummies works; the cave's server refuses them).
   useEffect(() => {
     const cls = classOverride ?? rawState.herzie?.class;
     setMySkills(
@@ -685,7 +692,8 @@ function App() {
       .fetchActiveEvents()
       .then(({ events }) => {
         // Not the monthly Tower: it's always on, so it would keep the
-        // button sparkling all month.
+        // button sparkling all month. The Wilds do count: they're only on
+        // of an evening, and the ships are worth a look while they fly.
         setEventsRunning(events.filter((e) => e.type !== "tower").length);
       })
       .catch(() => {
@@ -930,7 +938,7 @@ function App() {
   const townExpanded = useTownExpanded();
   // Home has its own say (homeBig): it's big if it came from the big
   // Town, or was made big there.
-  const bigWindow = (townWorld && townExpanded) || homeBig;
+  const bigWindow = (townWorld && (townExpanded || fullscreen)) || homeBig;
   bigWindowRef.current = bigWindow;
   // Stats only stands beside the Herzie window in the big window.
   if (statsBeside && (!bigWindow || !isInventory(overlay))) {
@@ -943,18 +951,28 @@ function App() {
     if (base === "home") setHomeBig((b) => !b);
     else toggleTownExpanded();
   }, [base]);
+  // Not in full screen: there's no window size to pick there.
   const canToggleWindow =
-    canExpandTown && (townWorld || (base === "home" && homeInWorld));
+    canExpandTown &&
+    !fullscreen &&
+    (townWorld || (base === "home" && homeInWorld));
   // Not while the world loads at launch: the window opens big
   // (tauri.conf.json) and stays so until there's a screen to size it for.
   // Nor before the first state arrives (a reload): its placeholder has no
   // herzie, which would read as logged out and shrink the window for a beat.
+  // Nor in full screen: the OS has the window's frame, and hands back the
+  // one from before on the way out, which this then sizes for the screen.
   useEffect(() => {
-    if (!hydrated) return;
+    if (!hydrated || fullscreen) return;
     // Logged out there's no world coming: the small window at once.
     if (worldLoading && rawState.herzie) return;
     herzies.setTownExpanded(bigWindow).catch(() => {});
-  }, [bigWindow, worldLoading, rawState.herzie, hydrated]);
+  }, [bigWindow, worldLoading, rawState.herzie, hydrated, fullscreen]);
+  // The menu says Full screen or Exit full screen: ask the window afresh as
+  // it opens, in case a resize went by unheard.
+  useEffect(() => {
+    if (menuOpen) refreshFullscreen();
+  }, [menuOpen]);
   // The boss's end screen is up over the Town: the chat steps aside.
   const endScreen = endScreenUp && townWorld;
 
@@ -1401,6 +1419,7 @@ function App() {
             playerSeed={herzie?.friendCode}
             playerStage={stageOverride ?? herzie?.stage}
             playerStatPoints={herzie?.statPoints}
+            playerClass={classOverride ?? herzie?.class ?? null}
             playerProfile={
               herzie
                 ? {
@@ -1579,6 +1598,16 @@ function App() {
               windowSize={
                 canToggleWindow
                   ? { expanded: bigWindow, onToggle: toggleWindow }
+                  : null
+              }
+              fullscreen={
+                isTauri()
+                  ? {
+                      on: fullscreen,
+                      onToggle: () => {
+                        herzies.setFullscreen(!fullscreen).catch(() => {});
+                      },
+                    }
                   : null
               }
               // Only once the server knows stat points: before that,

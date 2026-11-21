@@ -1,6 +1,7 @@
-import { type GameEvent, visitorName } from "@herzies/shared";
+import { type GameEvent, visitorName, WILDS_EVENT_TYPE } from "@herzies/shared";
 import { VisitorIcon } from "./icons/VisitorIcon";
 import { List } from "./List";
+import { useWildsService } from "./town/airship/service";
 import { VISITOR_THEMES } from "./VisitorRowTheme";
 
 /** What kind of thing each event is, as the board's notes say it. */
@@ -10,6 +11,7 @@ const KIND: Record<string, string> = {
   treat_trader: "Treat trading",
   boss_fight: "Boss fight",
   tower: "The Tower",
+  wilds: "Blåmann sails from the Sky Dock",
   secret_track: "Secret track",
 };
 
@@ -36,7 +38,8 @@ function when(iso: string): string {
 }
 
 /** The screen an on-now note opens: the visitor's own (null: nothing to
- * open, e.g. the Tower, which is a portal). Same keys as the Town's cards. */
+ * open, e.g. the Tower or the Wilds, which are places). Same keys as the
+ * Town's cards. */
 function openKeyOf(e: GameEvent): string | null {
   if (e.type === "song_hunt") return "song_hunt";
   if (
@@ -129,7 +132,12 @@ function Note({
 }) {
   const theme = upcoming ? PLAIN : (VISITOR_THEMES[event.type] ?? PLAIN);
   const name = visitorName(event.type, event.title);
-  const kind = KIND[event.type];
+  const kind =
+    event.type === WILDS_EVENT_TYPE && !upcoming ? (
+      <WildsKind />
+    ) : (
+      KIND[event.type]
+    );
   const body = (
     <div className="flex items-center gap-2.5">
       {/* Nothing for the Tower or a secret track (no one to draw), nor for
@@ -174,4 +182,20 @@ function Note({
       {body}
     </button>
   );
+}
+
+/** "every 2 minutes", "every 100 s": how often Blåmann leaves each dock. */
+function departsEvery(ms: number): string {
+  const sec = Math.round(ms / 1000);
+  if (sec % 60 === 0) return `every ${sec / 60} minutes`;
+  return `every ${sec} s`;
+}
+
+/** An on-now Wilds note's second line: how often Blåmann goes, from the
+ * timetable it runs on. */
+function WildsKind() {
+  const service = useWildsService();
+  return service
+    ? `Blåmann leaves the Sky Dock ${departsEvery(service.departEveryMs)}`
+    : KIND[WILDS_EVENT_TYPE];
 }

@@ -30,7 +30,7 @@ import { useRapier } from "@react-three/rapier";
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { notify } from "../../../lib/notices";
-import { entityDown } from "../downed";
+import { entityDown, youDown } from "../downed";
 import { duelFighting, duelHeld, inDuel, myDuelHp } from "../duel/store";
 import { groundY, type TownMap } from "../map";
 import { townNet } from "../net/townNet";
@@ -54,6 +54,7 @@ import {
   sfxTaunt,
 } from "../sfx";
 import { getVitals, useVitals } from "../vitals";
+import { myWildsHp, wildsHeld, wildsOn } from "../wilds/store";
 import { pushDamageNumber, pushStunLabel } from "./DamageNumbers";
 import { liveDummies } from "./Dummies";
 import {
@@ -124,15 +125,15 @@ const typing = (t: EventTarget | null) => {
 };
 
 /**
- * Fighting on the training grounds: combat mode's controls, your aim, your
+ * Fighting in the Town: combat mode's controls, your aim, your
  * casts, and every wave in flight — where it lands and what that does.
  *
  * - Tab: into combat mode (the mouse aims; the camera stays as it is);
  *   Esc, or Tab again: out.
  * - Left click or F: cast. Holding it keeps casting; a press mid-cast is
  *   kept for the next.
- * - Q or 1: your class skill, if you have one. In the boss room the server
- *   runs it; on the training grounds it's practice (no XP).
+ * - Q or 1: your class skill, if you have one. In a fight the server runs
+ *   it; anywhere else it's practice on the dummies (no XP).
  *
  * Aiming is the usual third-person way: a ray from the camera through the
  * crosshair finds what you're pointing at, and the wave flies from the
@@ -367,7 +368,7 @@ export function Combat({
   /**
    * A Rimshot's slam, as the stick strikes the ground: the shockwave and the
    * rest of the show (SlamVFX), a heavy hold on the contact, the camera's
-   * jolt and the boom. On the training grounds every dummy within reach
+   * jolt and the boom. Out of a fight every dummy within reach
    * takes twice a strike, rocked back from the middle, and rolls its own
    * stun; in a fight the server judges it all (the room hears of hits and
    * stuns with its next word).
@@ -560,10 +561,13 @@ export function Combat({
     // that swing out; any other press only a moment.
     const keptFor = mine?.id === "rimshot" ? RIMSHOT_QUEUE_MS : CAST_BUFFER_MS;
     if (queued && now - queued.at >= keptFor) skills.queued = null;
-    // In a fight, the server judges what you do: the boss room, or a duel
-    // once "FIGHT!" is called. Its countdown (and a stun) holds you.
-    const judged = bossFight.on || duelFighting(now);
-    const held = duelHeld(now);
+    // In a fight, the server judges what you do: the boss room, a duel
+    // once "FIGHT!" is called, or the Wilds' free-for-all. A duel's
+    // countdown (and a stun) holds you, and being knocked out (out of
+    // health anywhere, or down in the Wilds) until you're back up.
+    const brawl = wildsOn();
+    const judged = bossFight.on || duelFighting(now) || brawl;
+    const held = duelHeld(now) || wildsHeld(now) || youDown();
     // A taunt does nothing outside a fight, nor a resurrect in a fight
     // that isn't on (the lobby, the Tower): say so rather than spend the
     // press. Outside a fight, a resurrect brings back anyone knocked out.
@@ -573,21 +577,30 @@ export function Combat({
       ((mine.id === "taunt" && !raidOn) ||
         (mine.id === "resurrect" && bossFight.on && !raidOn));
     const unarmed = !!mine && !skills.armed;
-    // Taunt and Resurrect have no place in a duel; Soothing Drones heal only
-    // you there, so at full health they'd be spent on nothing.
+    // Taunt and Resurrect have no place in a duel or the Wilds; Soothing
+    // Drones heal only you there, so at full health they'd be spent on
+    // nothing.
+    const versus = inDuel() || brawl;
     const notInDuel =
-      !!mine && (mine.id === "taunt" || mine.id === "resurrect") && inDuel();
+      !!mine && (mine.id === "taunt" || mine.id === "resurrect") && versus;
     const duelHp =
-      mine?.id === "soothing-drones" && inDuel() ? myDuelHp() : null;
+      mine?.id === "soothing-drones"
+        ? inDuel()
+          ? myDuelHp()
+          : brawl
+            ? myWildsHp()
+            : null
+        : null;
     const nothingToHeal = !!duelHp && duelHp.hp >= duelHp.maxHp;
     if (queued && mine && unarmed) {
       skills.queued = null;
       notify(instrumentNeeded(mine.id), { kind: "info" });
     } else if (queued && mine && notInDuel) {
       skills.queued = null;
-      notify(`"${SKILL_DEFS[mine.id].name}" doesn't work in a duel.`, {
-        kind: "info",
-      });
+      notify(
+        `"${SKILL_DEFS[mine.id].name}" doesn't work ${brawl ? "on other herzies" : "in a duel"}.`,
+        { kind: "info" },
+      );
     } else if (queued && mine && nothingToHeal) {
       skills.queued = null;
       notify("You're at full health.", { kind: "info" });
@@ -718,9 +731,8 @@ export function Combat({
     const blow = combat.blow;
     // A Bard's lute in its heal stance: locked onto the ally nearest the
     // aim (never yourself, never the knocked out: they need a Resurrect).
-    // In a duel it only ever attacks.
-    const heals =
-      combat.on && combat.attack === "wave" && healing() && !inDuel();
+    // In a duel or the Wilds it only ever attacks.
+    const heals = combat.on && combat.attack === "wave" && healing() && !versus;
     stance.lock = null;
     if (herzie && heals) {
       herzie.root.getWorldPosition(chest);

@@ -5,6 +5,11 @@
  *
  * Requires: `npx supabase start`
  */
+import {
+  WILDS_DEPART_DEFAULT_S,
+  WILDS_DEPART_MAX_S,
+  WILDS_DEPART_MIN_S,
+} from "@herzies/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import {
   DELETE as deleteSeriesRoute,
@@ -403,6 +408,82 @@ describe("boss series", () => {
       ),
     );
     expect(res.status).toBe(400);
+  });
+});
+
+describe("wilds series", () => {
+  /** Daily evenings, two hours, the first started an hour ago. */
+  const wildsSeries = (configTemplate: Record<string, unknown> = {}) => ({
+    type: "wilds",
+    title: "The Wilds",
+    anchorAt: new Date(Date.now() - HOUR).toISOString(),
+    intervalDays: 1,
+    durationMinutes: 120,
+    configTemplate,
+  });
+
+  it("goes live at once, the ship interval filled in", async () => {
+    const id = await saveSeries(wildsSeries());
+    const rows = await occurrences(id);
+    expect(rows.length).toBeGreaterThanOrEqual(28);
+    expect(rows.every((r) => r.active && r.type === "wilds")).toBe(true);
+    expect(rows[0].config).toEqual({ departEverySec: WILDS_DEPART_DEFAULT_S });
+
+    const body = await (await activeEvents(new Request("http://x"))).json();
+    const live = body.events.filter(
+      (e: { type: string }) => e.type === "wilds",
+    );
+    expect(live).toHaveLength(1);
+    expect(live[0]).toMatchObject({
+      id: rows[0].id,
+      title: "The Wilds",
+      config: { departEverySec: WILDS_DEPART_DEFAULT_S },
+    });
+    // Tomorrow's, for "Blåmann sails from…".
+    expect(
+      body.upcoming.find((e: { type: string }) => e.type === "wilds")?.id,
+    ).toBe(rows[1].id);
+  });
+
+  it("keeps an interval in range and refuses one out of it", async () => {
+    const id = await saveSeries(wildsSeries({ departEverySec: 150 }));
+    const [current] = await occurrences(id);
+    expect(current.config).toEqual({ departEverySec: 150 });
+
+    for (const departEverySec of [
+      WILDS_DEPART_MIN_S - 1,
+      WILDS_DEPART_MAX_S + 1,
+      60.5,
+      "60",
+    ]) {
+      const res = await saveSeriesRoute(
+        adminRequest("event-series", wildsSeries({ departEverySec })),
+      );
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toMatch(/departEverySec/);
+    }
+    const res = await saveOccurrence(current, {
+      config: { departEverySec: WILDS_DEPART_MIN_S - 1 },
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("reaches players whole, whatever the row holds", async () => {
+    await admin()
+      .from("events")
+      .insert({
+        type: "wilds",
+        title: "The Wilds",
+        active: true,
+        starts_at: new Date(Date.now() - HOUR).toISOString(),
+        ends_at: new Date(Date.now() + HOUR).toISOString(),
+        config: { departEverySec: 100_000, stray: true },
+      })
+      .throwOnError();
+    const body = await (await activeEvents(new Request("http://x"))).json();
+    expect(
+      body.events.find((e: { type: string }) => e.type === "wilds")?.config,
+    ).toEqual({ departEverySec: WILDS_DEPART_MAX_S });
   });
 });
 

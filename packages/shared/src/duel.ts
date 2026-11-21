@@ -1,8 +1,8 @@
 /**
- * Duels: 1v1 fights between two herzies, anywhere in a peaceful room (Home,
- * the training grounds, the Wilds). Walk up to a herzie, challenge it; if it
- * accepts, a ring drops around the two of you and the Town server judges the
- * fight (town-server `duel.ts`), the way it judges a boss fight.
+ * Duels: 1v1 fights between two herzies, anywhere in Town. Walk up to a
+ * herzie, challenge it; if it accepts, a ring drops around the two of you
+ * and the Town server judges the fight (town-server `duel.ts`), the way it
+ * judges a boss fight.
  *
  * Nothing is lost: duel HP lives in the room for the duel only. It starts
  * full, is never written to the database, and a defeated herzie just kneels
@@ -98,12 +98,11 @@ export const DUEL = {
 } as const;
 
 /** The maps a duel may be fought on: the peaceful ones. The boss cave and
- * the Tower have fights of their own. */
-export const DUEL_MAPS: ReadonlySet<TownMapId> = new Set([
-  "home",
-  "arena",
-  "wilds",
-]);
+ * the Tower have fights of their own. Not the Wilds either: everyone
+ * there may already fight anyone outside its safe camp (wilds-pvp.ts), and
+ * a ring (radius 14) won't fit in the camp (radius 15) without spilling
+ * into the free-for-all, where others could hit the duelists. */
+export const DUEL_MAPS: ReadonlySet<TownMapId> = new Set(["home"]);
 
 /** When the fight starts, in ms after the accept. */
 export function duelCountdownMs(intro: boolean): number {

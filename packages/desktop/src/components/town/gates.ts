@@ -36,9 +36,10 @@ function useTower() {
   );
 }
 
-/** A portal into a room (the boss's cave). */
+/** A portal into a cave (the boss's: a dark room). The Tower's hall is a
+ * room too, but its way in is the Tower's door, open while its event is. */
 export function isMouth(portal: Portal): boolean {
-  return !portal.next && !!mapById(portal.to).room;
+  return !portal.next && mapById(portal.to).room === "dark";
 }
 
 /** Whether `portal` is open, as things stand. */

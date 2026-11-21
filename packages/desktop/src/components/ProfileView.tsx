@@ -152,7 +152,7 @@ export function ProfileView({
               Lv. {profile.level}
             </span>
           </div>
-          {/* The title worn, under the name as in Town. */}
+          {/* The title worn, under the name (as on the duel's cards). */}
           <TitleLabel id={profile.title} className="text-ui-sm font-bold" />
         </div>
 

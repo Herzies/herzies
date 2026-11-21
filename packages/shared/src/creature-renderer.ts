@@ -3395,6 +3395,7 @@ function discIn(
   part: string,
   hand: Hand,
   onIt: V3,
+  size: number,
   thread?: HeldSocket["thread"],
 ): Sphere[] {
   const { at, side, r } = hand;
@@ -3417,16 +3418,19 @@ function discIn(
   const toShoulder = sub(hand.shoulder, onIt);
   const rim = add(
     onIt,
-    scale(norm(sub(toShoulder, scale(out, dot(toShoulder, out)))), r * 0.9),
+    scale(
+      norm(sub(toShoulder, scale(out, dot(toShoulder, out)))),
+      r * 0.9 * size,
+    ),
   );
   const disc = slung(
     hand,
     [
-      held(part, center, r * 0.95, "#d9d9e8", {
+      held(part, center, r * 0.95 * size, "#d9d9e8", {
         kind: "cylinder",
         axis: scale(face, r * 0.04),
       }),
-      held(part, center, r * 0.22, "#3a3a4a", {
+      held(part, center, r * 0.22 * size, "#3a3a4a", {
         kind: "cylinder",
         axis: scale(face, r * 0.06),
       }),
@@ -3447,43 +3451,56 @@ const DISC_LIFT: Record<string, number> = {
   [OFF_HELD]: 0.1,
 };
 
+/** How much lower than between the shoulders (torso radii) the discs
+ * hang on the back: any higher and the upper one's rim cuts into the
+ * head. */
+const DISC_DROP = 0.26;
+
 /**
  * Compact Discs: one item, a disc in each hand. On the back they hang down
  * the spine on invisible threads — the main hand's tied up between the
  * shoulders, the other tied to it — and swing as the herzie moves (see
  * thread-physics.ts). Built where they settle, so a still herzie shows them
- * as they'd really hang.
+ * as they'd really hang. `size`: the discs' radius, × the class pair's
+ * (held the same way, by the same palm, whatever their size).
  */
-const buildCompactDiscs: HeldBuilder = (spheres, part, hand) => {
-  const otherPart = part === MAIN_HELD ? OFF_HELD : MAIN_HELD;
-  const other = handOf(spheres, HELD_ARM[otherPart], hand.over);
-  const hung = [
-    { part, hand },
-    ...(other ? [{ part: otherPart, hand: other }] : []),
-  ].sort((a, b) => (a.part === MAIN_HELD ? -1 : b.part === MAIN_HELD ? 1 : 0));
-  const top = hung[0].hand;
-  const { center, radius } = top.torso;
-  const lift = (h: (typeof hung)[number]) => h.hand.r * DISC_LIFT[h.part];
-  // Where they'd hang: one above the other, down the spine.
-  const guess = hung.map((h, i) =>
-    onBack(h.hand, 0, i === 0 ? -0.32 : 0, lift(h)),
-  );
-  const knot = onBack(top, 0, -0.62, lift(hung[0]));
-  const rig: ThreadRig = {
-    knot,
-    lengths: guess.map((g, i) =>
-      Math.hypot(...sub(g, i === 0 ? knot : guess[i - 1])),
-    ),
-    rest: guess,
-    center,
-    clear: hung.map((h) => radius + lift(h)),
-    parts: hung.map((h) => h.part),
+const compactDiscs =
+  (size: number): HeldBuilder =>
+  (spheres, part, hand) => {
+    const otherPart = part === MAIN_HELD ? OFF_HELD : MAIN_HELD;
+    const other = handOf(spheres, HELD_ARM[otherPart], hand.over);
+    const hung = [
+      { part, hand },
+      ...(other ? [{ part: otherPart, hand: other }] : []),
+    ].sort((a, b) =>
+      a.part === MAIN_HELD ? -1 : b.part === MAIN_HELD ? 1 : 0,
+    );
+    const top = hung[0].hand;
+    const { center, radius } = top.torso;
+    const lift = (h: (typeof hung)[number]) => h.hand.r * DISC_LIFT[h.part];
+    // Where they'd hang: one above the other, down the spine — low enough
+    // that the upper one's rim clears the head, a bigger pair hung lower by
+    // as much as it's grown.
+    const drop = DISC_DROP + ((size - 1) * 0.95 * top.r) / radius;
+    const guess = hung.map((h, i) =>
+      onBack(h.hand, 0, (i === 0 ? -0.32 : 0) + drop, lift(h)),
+    );
+    const knot = onBack(top, 0, -0.62 + drop, lift(hung[0]));
+    const rig: ThreadRig = {
+      knot,
+      lengths: guess.map((g, i) =>
+        Math.hypot(...sub(g, i === 0 ? knot : guess[i - 1])),
+      ),
+      rest: guess,
+      center,
+      clear: hung.map((h) => radius + lift(h)),
+      parts: hung.map((h) => h.part),
+    };
+    rig.rest = settleThread(rig);
+    return hung.flatMap((h, index) =>
+      discIn(h.part, h.hand, rig.rest[index], size, { rig, index }),
+    );
   };
-  rig.rest = settleThread(rig);
-  return hung.flatMap((h, index) =>
-    discIn(h.part, h.hand, rig.rest[index], { rig, index }),
-  );
-};
 
 /** Lute: in the hand, its body at the palm and the neck pointing forward
  * and a little down — carried easy. On the back, slung across: the neck up
@@ -3544,11 +3561,48 @@ const buildLute: HeldBuilder = (_s, part, hand) => {
   );
 };
 
+/** A held builder with its colours swapped, `colors` from the base's to
+ * the new one's: how a Wilds instrument looks like the class instrument
+ * it's built on, the same shape, in its own wood and metal. */
+function recolored(
+  build: HeldBuilder,
+  colors: Readonly<Record<string, string>>,
+): HeldBuilder {
+  return (spheres, part, hand) =>
+    build(spheres, part, hand).map((s) =>
+      s.color && colors[s.color] ? { ...s, color: colors[s.color] } : s,
+    );
+}
+
 const HELD_ITEM_BUILDERS: Record<string, HeldBuilder> = {
   "worn-stick": buildWornStick,
   "old-cymbal": buildOldCymbal,
-  "compact-discs": buildCompactDiscs,
+  "compact-discs": compactDiscs(1),
   lute: buildLute,
+  // The Wilds instruments (wilds-loot.ts): their base's prop, recoloured
+  // (and the discs cut a size up).
+  "thunderhide-sticks": recolored(buildWornStick, {
+    // Storm-grey hide wrap, a lightning-yellow tip.
+    "#2a2422": "#4a5070",
+    "#3b3330": "#ffe066",
+  }),
+  "storm-cymbal": recolored(buildOldCymbal, {
+    // Blued steel, lightning at the rim for the verdigris.
+    "#d4b04c": "#9fb8d8",
+    "#b8923a": "#6f88aa",
+    "#6fa38a": "#ffe066",
+  }),
+  "stormcut-discs": recolored(compactDiscs(1.18), {
+    "#d9d9e8": "#7fb4ff",
+    "#3a3a4a": "#ffe066",
+  }),
+  "wildwood-lute": recolored(buildLute, {
+    // Green-gold tonewood, a sky-blue neck.
+    "#c98a4b": "#9fbf5a",
+    "#2b1a0e": "#16240e",
+    "#6b4226": "#4f8fc0",
+    "#4a2c18": "#2c5a80",
+  }),
 };
 
 function buildHeldSpheres(spheres: Sphere[], equipped: Equipped): Sphere[] {

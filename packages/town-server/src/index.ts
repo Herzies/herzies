@@ -49,6 +49,8 @@ export default {
     const room = env.TOWN_ROOM.get(env.TOWN_ROOM.idFromName(name));
     const headers = new Headers(request.headers);
     headers.set("x-town-map", map);
+    // Which shard it is (each Wilds shard has its own caches).
+    headers.set("x-town-shard", String(shard));
     if (instance) headers.set("x-town-instance", instance);
     else headers.delete("x-town-instance");
     if (watch) headers.set("x-town-watch", "1");

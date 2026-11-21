@@ -21,12 +21,16 @@
  *   human can react to.
  * - A par time per floor (floorParMs): past it the mobs enrage, faster and
  *   quicker to swing, so waiting it out never works.
- * - Every 5th floor an elite (ELITE), every 10th a Warden (WARDEN).
+ * - Every 5th floor an elite (ELITE), every 10th a Warden (WARDEN), who
+ *   leaves a chest behind (TOWER_CHEST).
  *
  * Kills pay a little XP (kept behind what the same time listening brings)
- * and now and then an item, picked exactly as listening picks one, under a
- * daily cap.
+ * and now and then an item, picked as listening picks one (leaning a little
+ * rarer the higher the floor: towerLootLean), under a daily cap. The
+ * Warden's chest pays a few items more, leaning rarer still.
  */
+
+import type { Rarity } from "./items.js";
 
 /** A mob's body, in world units from the ground: an upright capsule a wave
  * is judged against, like a training dummy's. (Elites and the Warden are
@@ -249,10 +253,90 @@ export const TOWER_XP_DAILY_CAP = 300;
 /** The chance a kill drops an item: one in eight, so a floor or two of
  * mobs usually turns something up. That's faster than listening (one per ten
  * minutes) on purpose; the daily cap is what keeps it in check. The item is
- * picked as listening picks one (rarity weights and luck). */
+ * picked as listening picks one (rarity weights and luck), leaning a little
+ * rarer the higher the floor (towerLootLean). */
 export const TOWER_DROP_CHANCE = 1 / 8;
 /** At most this many tower drops a day (UTC). */
 export const TOWER_DROPS_DAILY_CAP = 30;
+
+/**
+ * How much likelier the rare-and-up items get the higher the floor: every
+ * 10 floors climbed adds `per10` to their drop weight (relative, so +10%
+ * at floor 11, +20% at floor 21…), counted floor by floor, up to `cap`
+ * (+50%, from floor 51 on). Gentle on purpose: a rare stays rare (at the
+ * live pool a kill's drop is a rare about one time in 40 on the first
+ * floors, about one in 27 at the cap), and climbing is worth it without
+ * being the only way to play.
+ */
+export const TOWER_RARE_LEAN = { per10: 0.1, cap: 0.5 } as const;
+
+/** The rare-and-up weight factor on `floor` (1 on floor 1, never down as
+ * you climb, at most 1 + TOWER_RARE_LEAN.cap). */
+export function towerRareFactor(floor: number): number {
+  const f = Number.isFinite(floor) ? Math.max(1, Math.floor(floor)) : 1;
+  return (
+    1 + Math.min(TOWER_RARE_LEAN.cap, (TOWER_RARE_LEAN.per10 * (f - 1)) / 10)
+  );
+}
+
+/**
+ * Every 10th floor (the Warden's) leaves a chest on the compass in the
+ * middle of the hall once its mobs are down. Walking up to it opens it —
+ * the Town server judges that, as it judges every hit — and what's in it is
+ * rolled by `town-vitals` like a kill's drop and tossed out like one:
+ * towerChestRolls items, without Nostalgic Tokens (as a boss's loot),
+ * leaning rarer than a kill's by `lean` on top of the floor's
+ * (towerLootLean). Once per floor per Tower (the database keeps which:
+ * 00155's tower_chests), outside the daily drop cap: it's a milestone, not
+ * a farm. Going on with it still shut opens it on the way (nothing's lost).
+ */
+export const TOWER_CHEST = {
+  every: WARDEN.every,
+  /** Where it stands: the compass at the hall's middle. */
+  at: { x: 0, z: 0 },
+  /** Opens when you come this close (centre to centre): onto the star. */
+  reach: 2,
+  /** It lands first: it opens no sooner than this after the floor clears,
+   * so it's seen before it opens even with you standing on the star. */
+  settleMs: 1_000,
+  /** On top of the floor's lean: a little rarer than a boss's random loot
+   * leans (BOSS_LOOT_RARITY_BOOST in items.ts). */
+  lean: {
+    common: 1,
+    uncommon: 1.5,
+    rare: 2.5,
+    legendary: 2.5,
+    mythic: 2.5,
+  } satisfies Record<Rarity, number>,
+} as const;
+
+/** Whether clearing `floor` leaves a chest. */
+export const isChestFloor = (floor: number) =>
+  Number.isInteger(floor) && floor >= 1 && floor % TOWER_CHEST.every === 0;
+
+/** How many items a chest holds: 2 on floor 10, one more every 20 floors,
+ * at most 4 (floor 40 on). */
+export function towerChestRolls(floor: number): number {
+  return Math.min(4, 2 + Math.floor(Math.max(1, floor) / 20));
+}
+
+/** Each rarity's drop-weight factor for an item dropped on `floor` (a
+ * chest's, with `chest`), on top of listening's weights and luck: what
+ * `town-vitals` hands pickWeightedDrop. */
+export function towerLootLean(
+  floor: number,
+  chest = false,
+): Record<Rarity, number> {
+  const rare = towerRareFactor(floor);
+  const lean: Record<Rarity, number> | null = chest ? TOWER_CHEST.lean : null;
+  return {
+    common: lean?.common ?? 1,
+    uncommon: lean?.uncommon ?? 1,
+    rare: rare * (lean?.rare ?? 1),
+    legendary: rare * (lean?.legendary ?? 1),
+    mythic: rare * (lean?.mythic ?? 1),
+  };
+}
 
 function clamp(v: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, v));

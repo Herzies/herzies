@@ -337,13 +337,16 @@ function RaidLine({ raid, now }: { raid: RaidView; now: number }) {
   );
 }
 
-/** Under your now-playing box in the boss room, while your music is
- * getting to the boss: your class's bonus ("Healing: +30%"). */
+/** Under your now-playing box in the boss room or the Tower, while your
+ * music is getting to the boss (or the Tower's mobs): your class's bonus
+ * ("Healing: +30%"). */
 export function MusicBonus() {
   useBossFight();
   useSkills();
   const [now, setNow] = useState(() => performance.now());
-  const inRaid = bossFight.on && !!bossFight.raid && !bossFight.closing;
+  const inTower = !!bossFight.tower;
+  const inRaid =
+    bossFight.on && (!!bossFight.raid || inTower) && !bossFight.closing;
   useEffect(() => {
     if (!inRaid) return;
     const t = setInterval(() => setNow(performance.now()), 500);
@@ -363,7 +366,11 @@ export function MusicBonus() {
   return (
     <div
       role="status"
-      title="The boss hates music: yours makes you stronger"
+      title={
+        inTower
+          ? "Your music makes you stronger in the Tower"
+          : "The boss hates music: yours makes you stronger"
+      }
       className="pointer-events-none self-start px-0.5 text-ui font-bold text-[#ffd84a] [text-shadow:0_1px_2px_#000,0_0_6px_#000]"
     >
       ♪ {bonus}

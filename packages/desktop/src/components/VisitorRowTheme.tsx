@@ -100,6 +100,12 @@ export const VISITOR_THEMES: Record<string, VisitorTheme> = {
     dim: "#9fcfa4",
     accent: "#7fe08a",
   },
+  // The Wilds: evening sky, like the ships' crossing.
+  wilds: {
+    background: "linear-gradient(90deg, #07142a 0%, #16305e 55%, #060f20 100%)",
+    dim: "#a9c3ec",
+    accent: "#8fb8ff",
+  },
 };
 
 /** Legible over any backdrop: a hard one-pixel drop like the pixel art's. */

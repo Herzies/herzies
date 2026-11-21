@@ -20,6 +20,9 @@ export type VitalsReport = {
   action: "report";
   /** Extra HP earned resting on a bench. */
   rest?: { uid: string; bonus: number }[];
+  /** Who's on the Wilds for `event` now (the room's 30 s sweep): each
+   * gets the Wilds' listening bonus for WILDS_PRESENCE_MS. */
+  wilds?: { event: string; uids: string[] };
 } & Partial<FightReport>;
 
 /** What `town-vitals` answers. Only the boss part is read: `loot` is set
@@ -37,9 +40,9 @@ export type VitalsReply = {
   /** The end screen's table, if it was asked for: the top ten, and each
    * asked-about herzie's place by user id (none if they dealt nothing). */
   results?: { top: BossPlace[]; you: Record<string, BossPlace> } | null;
-  /** What the Tower batch's kills dropped (empty on a replay: they were
-   * handed out the first time). */
-  tower?: { drops: LootDrop[] } | null;
+  /** What the Tower batch's kills dropped, and its chest held (both empty
+   * on a replay: they were handed out the first time). */
+  tower?: { drops: LootDrop[]; chest?: LootDrop[] } | null;
   /** The raid as the database holds it: its lock, refused revives, and
    * who's out (00122). */
   raid?: RaidReply | null;
@@ -104,6 +107,120 @@ export async function postDuel(
   result: DuelResult,
 ): Promise<void> {
   await signedPost(env, { action: "duel", ...result });
+}
+
+/** A card a herzie taken down on the Wilds dropped, as the database holds
+ * it in escrow. */
+export type WildsEscrow = { id: string; item: string; level: number };
+
+/** `town-vitals` on a take: in the taker's bag, or why not. */
+export type WildsTakeReply =
+  | { ok: true; item: string; level: number }
+  | { ok: false; why: "bag-full" | "gone" };
+
+/** `town-vitals` on opening a cache: the opener's loot (pending drops),
+ * or `opened` false (and nothing) if it was opened already. */
+export type WildsCacheReply = { opened: boolean; drops: LootDrop[] };
+
+/** What the Wilds' loot asks the database (00154, through `town-vitals`).
+ * Each resolves null when it couldn't be asked (or the reply made no
+ * sense), which leaves everything as it was: every one is idempotent on
+ * its ids, so the room may simply ask again. */
+export type WildsLootDb = {
+  /** Escrow one random card from `victim`'s bag under drop `id` (made by
+   * the room). `drop` null: nothing to drop (an empty bag, or `event`
+   * isn't the wilds event on now). */
+  drop(r: {
+    id: string;
+    event: string;
+    victim: string;
+    killer: string | null;
+    x: number;
+    z: number;
+  }): Promise<{ drop: WildsEscrow | null } | null>;
+  /** Move escrowed drop `id` into `uid`'s bag. */
+  take(id: string, uid: string): Promise<WildsTakeReply | null>;
+  /** Give unclaimed drops back to their owners: the ids that went back
+   * (the rest were taken or returned already). */
+  giveBack(ids: string[]): Promise<{ returned: string[] } | null>;
+  /** Open cache `id` for `uid`: its loot as pending drops, or `opened`
+   * false if someone got there first. */
+  cache(r: {
+    id: string;
+    event: string;
+    uid: string;
+    x: number;
+    z: number;
+  }): Promise<WildsCacheReply | null>;
+};
+
+/** The Wilds' loot's line to the database, signed like every report. */
+export function wildsLootDb(
+  env: Pick<Env, "TOWN_TICKET_SECRET" | "TOWN_VITALS_URL">,
+): WildsLootDb {
+  return {
+    async drop(r) {
+      const reply = (await signedPost(env, {
+        action: "wildsDrop",
+        ...r,
+      })) as { drop?: Partial<WildsEscrow> | null } | null;
+      if (!reply || reply.drop === undefined) return null;
+      const d = reply.drop;
+      if (d === null) return { drop: null };
+      if (typeof d.item !== "string") return null;
+      return {
+        drop: { id: String(d.id ?? r.id), item: d.item, level: level(d.level) },
+      };
+    },
+    async take(id, uid) {
+      const reply = (await signedPost(env, {
+        action: "wildsTake",
+        id,
+        uid,
+      })) as {
+        ok?: boolean;
+        item?: unknown;
+        level?: unknown;
+        why?: unknown;
+      } | null;
+      if (!reply) return null;
+      if (reply.ok === true && typeof reply.item === "string")
+        return { ok: true, item: reply.item, level: level(reply.level) };
+      if (
+        reply.ok === false &&
+        (reply.why === "bag-full" || reply.why === "gone")
+      )
+        return { ok: false, why: reply.why };
+      return null;
+    },
+    async giveBack(ids) {
+      const reply = (await signedPost(env, {
+        action: "wildsReturn",
+        ids,
+      })) as { returned?: unknown } | null;
+      if (!reply || !Array.isArray(reply.returned)) return null;
+      return { returned: reply.returned.map(String) };
+    },
+    async cache(r) {
+      const reply = (await signedPost(env, {
+        action: "wildsCache",
+        ...r,
+      })) as { opened?: unknown; drops?: unknown } | null;
+      if (!reply || typeof reply.opened !== "boolean") return null;
+      const drops = Array.isArray(reply.drops)
+        ? (reply.drops as LootDrop[]).filter(
+            (d) => typeof d?.id === "string" && typeof d?.item === "string",
+          )
+        : [];
+      return { opened: reply.opened, drops: reply.opened ? drops : [] };
+    },
+  };
+}
+
+/** An upgrade level from a reply: a whole number, 0 if it's missing. */
+function level(v: unknown): number {
+  const n = Number(v);
+  return Number.isInteger(n) && n > 0 ? n : 0;
 }
 
 /** POST `payload` to `town-vitals`, signed. The reply's JSON, or null on

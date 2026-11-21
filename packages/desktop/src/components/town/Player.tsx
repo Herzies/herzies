@@ -2,11 +2,12 @@ import {
   getHerzieStats,
   NAKATA_KEY,
   SH,
+  type ShipIndex,
   TOWN_SPRINT_SPEED,
 } from "@herzies/shared";
 import { HerzieModel, WALK_SPEED } from "@herzies/shared/gl";
 import { Html } from "@react-three/drei";
-import { useFrame, useThree } from "@react-three/fiber";
+import { createPortal, useFrame, useThree } from "@react-three/fiber";
 import {
   CapsuleCollider,
   type RapierCollider,
@@ -18,13 +19,23 @@ import {
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import type { Look } from "../TownScene";
+import {
+  crossAboard,
+  crossAshore,
+  keepOnDeck,
+  keepOnIsland,
+  standY,
+} from "./airship/boarding";
+import { onDeck } from "./airship/deck";
+import { fleet } from "./airship/fleet";
+import { useShipFrame } from "./airship/frames";
 import { ambient, seasonNow } from "./ambient";
 import { SEAT_Y } from "./Benches";
 import type { ChatBubble } from "./chatBubbles";
 import { discField } from "./combat/discs";
 import { shoveFromBoss } from "./combat/fight";
 import { combat } from "./combat/state";
-import { applyDowned, downInRaid } from "./downed";
+import { applyDowned, youDown } from "./downed";
 import { fighterPace, poseFighter } from "./duel/fx";
 import { duel, duelHeld } from "./duel/store";
 import { emotePlayed, emoteRequest } from "./emotes";
@@ -41,9 +52,17 @@ import {
   stepMover,
   walkAzimuth,
 } from "./movement";
+import { NAME_SHADOW } from "./nameFade";
 import { AFK_MS, townNet } from "./net/townNet";
-import { warpAmount } from "./portal";
-import { townLive, townSave, useTownRuntime } from "./runtime";
+import { warp, warpAmount } from "./portal";
+import { arriving, townLive, townSave, useTownRuntime } from "./runtime";
+import { titleName, WORN_TITLE_COLOUR } from "./TitleLine";
+import { wildsHeld } from "./wilds/store";
+
+/** The player's herzie as it last was: a new Player (another island's
+ * physics, stepping on or off a sky ship) carries on from it when the step
+ * across is seamless, rather than starting afresh. */
+let lastPlayerHerzie: HerzieModel | null = null;
 
 /** The capsule the controller pushes around: radius and half-height of its
  * straight part, standing on the ground. */
@@ -136,6 +155,9 @@ export function Player({
   respawn = 0,
   reach,
   bubble,
+  deck = null,
+  name,
+  title,
 }: {
   /** The island it walks on: its ground's ups and downs. */
   map: TownMap;
@@ -147,13 +169,23 @@ export function Player({
   spawn: TownMap["spawn"];
   /** Bumped to put the player back at `spawn`. */
   respawn?: number;
+  /** Aboard this sky ship: its physics are the deck's own (in the deck's
+   * frame, at the scene's origin), and it's drawn on the ship, riding
+   * through the sky with it. */
+  deck?: ShipIndex | null;
+  /** Your herzie's name, over its head (none: no label). */
+  name?: string;
+  /** The title you wear (a titles.ts id), over the name. */
+  title?: string | null;
 }) {
   const rt = useTownRuntime();
+  const frame = useShipFrame(deck);
   // Where the body starts: where the save has it when it mounts (it moves
-  // itself from then on; a respawn or a teleport puts it elsewhere).
+  // itself from then on; a respawn or a teleport puts it elsewhere) — on
+  // a gangplank, partway up it.
   // biome-ignore lint/correctness/useExhaustiveDependencies: once, on mount
   const startAt = useMemo<[number, number, number]>(
-    () => [townSave.x, groundY(map, townSave.x, townSave.z), townSave.z],
+    () => [townSave.x, standY(map, townSave.x, townSave.z), townSave.z],
     [],
   );
   const { world, rapier } = useRapier();
@@ -166,7 +198,15 @@ export function Player({
   /** The Home visit its cat last came in for (see catToHome). */
   const catVisit = useRef(homeMode.visit);
   const collider = useRef<RapierCollider>(null);
-  const mover = useRef<Mover>({ vx: 0, vz: 0, heading: townSave.heading });
+  // Stepping on or off a ship, it carries on at the pace it was going.
+  const mover = useRef<Mover>({
+    vx: arriving.vx,
+    vz: arriving.vz,
+    heading: townSave.heading,
+  });
+  /** Where a step may take it: kept on the island (or a gangplank), or
+   * aboard. */
+  const kept = useRef({ x: 0, z: 0 });
   /** Whether it's on ice, and if it's pushing off, how fast its legs go:
    * as fast as they would on the ground (see movement.ts). */
   const ice = useRef({ on: false, pushing: false, stride: 0 });
@@ -194,6 +234,13 @@ export function Player({
     z: 0,
     heading: 0,
   });
+  /** Aboard: a marker on the body (where physics has it, in the deck's
+   * frame) and what's drawn, which follows it on the ship. */
+  const anchor = useRef<THREE.Group>(null);
+  const visualRef = useRef<THREE.Group | null>(null);
+  /** The island the save was on when this Player mounted (a map change
+   * hands the save to the next one; see the step's first lines). */
+  const mountedOn = useRef(townSave.map);
 
   const equippedKey = JSON.stringify(look.equipped ?? null);
   // Its gear's move speed (the Tailwind Cloak): no die can raise it
@@ -228,15 +275,28 @@ export function Player({
       layoutRows: SH,
       anchorGround: true,
     });
-    const last = lastHerzie.current;
-    if (last) next.carryOver(last);
+    const last =
+      lastHerzie.current ?? (arriving.seamless ? lastPlayerHerzie : null);
+    if (last) {
+      // In the space the last one was in, so what it carries over means
+      // the same (the frame effect below moves it on to this one's).
+      next.setFrame(last.frame);
+      next.carryOver(last);
+    }
     lastHerzie.current = next;
+    lastPlayerHerzie = next;
     return next;
   }, [look.seed, look.stage, equippedKey]);
+  // On a ship's deck its cat, companion and cloth live in the deck's
+  // space (see HerzieModel.setFrame).
   useEffect(() => {
-    // Its cat spirit (if it has one) walks the same ground, round water.
+    herzie.setFrame(frame);
+  }, [herzie, frame]);
+  useEffect(() => {
+    // Its cat spirit (if it has one) walks the same ground, round water —
+    // or, on a deck, inside the rail.
     herzie.groundAt = (x, z) => groundY(map, x, z);
-    const walkable = petWalkable(map, reach);
+    const walkable = map.ship ? onDeck : petWalkable(map, reach);
     herzie.walkable = walkable;
     // Whether it can walk straight there: dry all the way, and nothing
     // solid (a wall, a tree, a stall) at a cat's height.
@@ -289,7 +349,15 @@ export function Player({
     rt.playerHerzie = herzie;
     return () => {
       if (rt.playerHerzie === herzie) rt.playerHerzie = null;
-      herzie.dispose();
+      // Freed after the next frame, unless it's been taken up again: the
+      // Player that replaces this one (stepping aboard or ashore is a new
+      // physics world, so a new Player) draws its herzie first, sharing
+      // its shaders. Freed now, three would drop the shaders nothing
+      // used any more and compile them all again for the new one — a
+      // stall as the herzie crosses.
+      requestAnimationFrame(() => {
+        if (rt.playerHerzie !== herzie) herzie.dispose();
+      });
     };
   }, [herzie, rt]);
   // Gone from the world means standing still, as far as others can tell.
@@ -326,6 +394,10 @@ export function Player({
     const col = collider.current;
     const kcc = controller.current;
     if (!b || !col || !kcc) return;
+    // Gone to another island (or onto a ship) since it mounted: the next
+    // Player takes over as soon as it's up, and the save is already its —
+    // this one stays put and keeps its hands off it.
+    if (townSave.map !== mountedOn.current) return;
     const dt = w.timestep;
     // In combat the herzie faces where the camera looks and strafes, as
     // with the right button held; the left button casts rather than looks.
@@ -346,7 +418,7 @@ export function Player({
       townLive.teleport = null;
       townLive.seat = null;
       m.vx = m.vz = 0;
-      const y = groundY(map, to.x, to.z);
+      const y = standY(map, to.x, to.z);
       b.setTranslation({ x: to.x, y, z: to.z }, true);
       b.setNextKinematicTranslation({ x: to.x, y, z: to.z });
       townSave.x = to.x;
@@ -355,8 +427,8 @@ export function Player({
       rt.playerSpeed = townLive.speed = 0;
       return;
     }
-    // Put on a duel's mark: walked there, eased, turning to face the
-    // ring's middle, rather than snapped.
+    // Put on a duel's mark, or up or down a gangplank: walked there,
+    // eased, turning to face the way it's going, rather than snapped.
     const glide = townLive.glide;
     if (glide) {
       const p = b.translation();
@@ -368,7 +440,10 @@ export function Player({
           z: p.z,
           heading: herzie.heading,
         });
-      const t = Math.min(1, (performance.now() - glide.from) / GLIDE_MS);
+      const t = Math.min(
+        1,
+        (performance.now() - glide.from) / (glide.ms ?? GLIDE_MS),
+      );
       const e = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
       const x = g.x + (glide.x - g.x) * e;
       const z = g.z + (glide.z - g.z) * e;
@@ -378,19 +453,22 @@ export function Player({
       herzie.heading = m.heading =
         g.heading + Math.atan2(Math.sin(turn), Math.cos(turn)) * e;
       rt.playerSpeed = townLive.speed = Math.hypot(x - p.x, z - p.z) / dt;
-      b.setNextKinematicTranslation({ x, y: groundY(map, x, z), z });
+      b.setNextKinematicTranslation({ x, y: standY(map, x, z), z });
       townSave.x = x;
       townSave.z = z;
       townSave.heading = herzie.heading;
-      if (t >= 1) townLive.glide = null;
+      if (t >= 1) {
+        townLive.glide = null;
+        glide.after?.();
+      }
       return;
     }
-    // Going through a portal: carried, not walking. Knocked out in a raid:
-    // lying where it fell, for a Bard to find.
-    // Winding up a Rimshot: planted where it stands.
+    // Going through a portal: carried, not walking. Knocked out (anywhere:
+    // out of health, or taken down in the Wilds): lying where it fell, not
+    // even turning. Winding up a Rimshot: planted where it stands.
     if (
       townLive.frozen ||
-      downInRaid() ||
+      youDown() ||
       performance.now() < combat.rootedUntil
     ) {
       m.vx = m.vz = 0;
@@ -427,11 +505,17 @@ export function Player({
       return;
     }
     townLive.standUp = false;
-    walkAz.current = walkAzimuth(walkAz.current, rt.cameraAzimuth, input);
+    // The camera's azimuth is the sky's; aboard, walking is in the deck's
+    // frame, turned by the ship's heading.
+    const cameraAz =
+      deck === null
+        ? rt.cameraAzimuth
+        : rt.cameraAzimuth - fleet.poses[deck].yaw;
+    walkAz.current = walkAzimuth(walkAz.current, cameraAz, input);
     m.heading = herzie.heading;
-    // A duel's countdown, or stunned in one: held on the spot, still free
-    // to turn (and aim).
-    if (duelHeld()) {
+    // A duel's countdown, or stunned in one (or in the Wilds): held on the
+    // spot, still free to turn (and aim).
+    if (duelHeld() || wildsHeld()) {
       stepMover(m, heldStill(input), walkAz.current, dt, speedScale);
       m.vx = m.vz = 0;
       herzie.heading = m.heading;
@@ -466,20 +550,24 @@ export function Player({
     let z = p.z + move.z;
     // A roaming boss shoves you aside.
     ({ x, z } = shoveFromBoss(x, z));
-    const r = Math.hypot(x, z);
-    if (r > reach) {
-      x = (x / r) * reach;
-      z = (z / r) * reach;
-    }
+    // On the island (and a moored ship's gangplank), or on deck.
+    ({ x, z } =
+      deck === null
+        ? keepOnIsland(map, reach, p.x, p.z, x, z, kept.current)
+        : keepOnDeck(deck, p.x, p.z, x, z, kept.current));
     // The walk cycle follows the distance actually covered: pushing into a
     // tree stops the feet too.
     rt.playerSpeed = Math.hypot(x - p.x, z - p.z) / dt;
     townLive.speed = rt.playerSpeed;
-    // Over hill and dale: the body is always on the ground under it.
-    b.setNextKinematicTranslation({ x, y: groundY(map, x, z), z });
+    // Over hill and dale (and up a gangplank): the body is always on what's
+    // under it.
+    b.setNextKinematicTranslation({ x, y: standY(map, x, z), z });
     townSave.x = x;
     townSave.z = z;
     townSave.heading = herzie.heading;
+    // Through a ship's gangway: aboard, or ashore.
+    if (deck === null) crossAboard(map, m);
+    else crossAshore(deck, m);
   });
 
   const stillFor = useRef(0);
@@ -558,6 +646,10 @@ export function Player({
   }, [surface, herzie, camera]);
   rt.playerFootSpread = herzie.footSpread;
   useFrame((_, dt) => {
+    // Knocked out: lying where it fell (see downed), off the floor's seat
+    // too, and nothing it does until it's back up.
+    const down = youDown();
+    if (down) herzie.floorSit = false;
     // Sitting: on the seat, not the ground.
     herzie.root.position.y = townLive.seat ? SEAT_Y : 0;
     herzie.sitting = !!townLive.seat;
@@ -565,21 +657,24 @@ export function Player({
     stillFor.current = rt.playerSpeed > 0.05 ? 0 : stillFor.current + dt;
     townLive.dancing =
       townLive.music &&
+      !down &&
       !townLive.seat &&
       !herzie.floorSit &&
       stillFor.current >= DANCE_AFTER;
     herzie.dancing = townLive.dancing;
-    // Space: hop, unless it's seated or being carried through a portal. The
-    // body jumps; the walk goes on under it, steered as ever.
+    // Space: hop, unless it's seated, knocked out or being carried through
+    // a portal. The body jumps; the walk goes on under it, steered as ever.
     const raw = rt.input.current;
     if (raw?.jump) {
       raw.jump = false;
       townLive.lastInputAt = performance.now();
       if (
+        !down &&
         !townLive.seat &&
         !townLive.frozen &&
         performance.now() >= combat.rootedUntil &&
-        !duelHeld()
+        !duelHeld() &&
+        !wildsHeld()
       )
         herzie.jump();
     }
@@ -589,7 +684,7 @@ export function Player({
     if (emote) {
       emoteRequest.id = null;
       townLive.lastInputAt = performance.now();
-      if (!combat.on && !townLive.frozen && herzie.emote(emote)) {
+      if (!combat.on && !down && !townLive.frozen && herzie.emote(emote)) {
         emotePlayed(emote);
         townNet().sendEmote(emote);
       }
@@ -639,18 +734,65 @@ export function Player({
           : 0
         : rt.playerSpeed,
     );
-    downed.current = applyDowned(herzie, downInRaid(), downed.current, dt);
+    downed.current = applyDowned(herzie, down, downed.current, dt);
     // A duel's blows and its end, on your herzie (see duel/fx).
     poseFighter(herzie, duel.you, performance.now(), dt);
     townLive.jumps = herzie.jumps;
     // Through a portal: spun down into the disc, and back up out of the
-    // far one.
-    const k = warpAmount();
+    // far one. Through a door, just walked through.
+    const k = warp.door ? 0 : warpAmount();
     herzie.root.scale.setScalar(1 - 0.85 * k);
     herzie.root.rotation.y = k * k * Math.PI * 4;
   });
 
-  return (
+  const wornTitle = titleName(title);
+
+  // Aboard, what's drawn rides on the ship: kept where the body is, in the
+  // deck's frame (the body is at the scene's origin, in the deck's own
+  // coordinates, interpolated by now; the camera reads it at -2).
+  useFrame(() => {
+    const a = anchor.current;
+    const v = visualRef.current;
+    if (!frame || !a || !v) return;
+    a.getWorldPosition(v.position);
+  }, -2.5);
+
+  const visual = (
+    <group
+      ref={(g) => {
+        rt.playerBody = g;
+        visualRef.current = g;
+      }}
+    >
+      <primitive object={herzie.root} />
+      <HomeShadow radius={Math.max(0.5, herzie.height * 0.42)} />
+      {/* The title you wear and your own name under it, as everyone
+          else's reads (RemotePlayers) — always full: you're never far from
+          yourself. What you just said stacks over them. */}
+      <Html position={[0, herzie.height + 0.3, 0]} zIndexRange={[19, 0]}>
+        <div className="pointer-events-none flex -translate-x-1/2 -translate-y-full flex-col items-center">
+          {bubble ? <HeadBubble key={bubble.key} bubble={bubble} /> : null}
+          {wornTitle ? (
+            <div
+              className="whitespace-nowrap text-[9px] font-medium leading-tight"
+              style={{ color: WORN_TITLE_COLOUR, textShadow: NAME_SHADOW }}
+            >
+              {wornTitle}
+            </div>
+          ) : null}
+          {name ? (
+            <div
+              className="whitespace-nowrap text-[11px] font-medium leading-tight text-white"
+              style={{ textShadow: NAME_SHADOW }}
+            >
+              {name}
+            </div>
+          ) : null}
+        </div>
+      </Html>
+    </group>
+  );
+  const physical = (
     <RigidBody
       ref={(b) => {
         body.current = b;
@@ -666,21 +808,15 @@ export function Player({
         args={CAPSULE_ARGS}
         position={CAPSULE_AT}
       />
-      <group
-        ref={(g) => {
-          rt.playerBody = g;
-        }}
-      >
-        <primitive object={herzie.root} />
-        <HomeShadow radius={Math.max(0.5, herzie.height * 0.42)} />
-      </group>
-      {bubble ? (
-        <Html position={[0, herzie.height + 0.3, 0]} zIndexRange={[19, 0]}>
-          <div className="-translate-x-1/2 -translate-y-full">
-            <HeadBubble key={bubble.key} bubble={bubble} />
-          </div>
-        </Html>
-      ) : null}
+      {frame ? <group ref={anchor} /> : visual}
     </RigidBody>
+  );
+  return frame ? (
+    <>
+      {physical}
+      {createPortal(visual, frame)}
+    </>
+  ) : (
+    physical
   );
 }

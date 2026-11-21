@@ -985,6 +985,45 @@ pub async fn api_apply_dice_upgrade(
     Ok(data)
 }
 
+/// POSTs `body` and surfaces the server's error message, like
+/// `api_apply_dice_upgrade`.
+async fn api_post_surfacing(
+    client: &Client,
+    path: &str,
+    body: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let resp = api_fetch(client, reqwest::Method::POST, path, Some(body))
+        .await
+        .ok_or_else(|| "Network error".to_string())?;
+    let status = resp.status();
+    let text = resp.text().await.map_err(|e| format!("Read error: {e}"))?;
+    let data: serde_json::Value =
+        serde_json::from_str(&text).map_err(|_| format!("Server returned {status}"))?;
+    if !status.is_success() {
+        let msg = data["error"].as_str().unwrap_or("Unknown error");
+        return Err(msg.to_string());
+    }
+    Ok(data)
+}
+
+/// Crafts a Wilds instrument from a base instrument plus crafting bits.
+/// Errs with the server's reason (unknown recipe, not enough bits, bag full…).
+pub async fn api_craft_wilds_instrument(
+    client: &Client,
+    recipe: &str,
+) -> Result<serde_json::Value, String> {
+    api_post_surfacing(client, "/wilds/craft", serde_json::json!({ "recipe": recipe })).await
+}
+
+/// Tunes one instrument copy up a level with crafting bits.
+/// Errs with the server's reason (not tunable, already maxed, not enough bits).
+pub async fn api_tune_instrument(
+    client: &Client,
+    unit_id: &str,
+) -> Result<serde_json::Value, String> {
+    api_post_surfacing(client, "/wilds/tune", serde_json::json!({ "unitId": unit_id })).await
+}
+
 /// Sells the named copies.
 /// Errs with the server's reason ("Not enough items", ...) so the player sees
 /// why, rather than a bare "Failed to sell".

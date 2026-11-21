@@ -22,9 +22,7 @@
  * server judges its casts like anyone's; nothing here is special-cased on
  * the server.
  */
-import { CLASS_IDS, instrumentOf } from "@herzies/shared/classes";
 import { DUEL } from "@herzies/shared/duel";
-import { getHerzieStats, withStatPoints } from "@herzies/shared/items";
 import { SKILL_DEFS } from "@herzies/shared/skills";
 import {
   decodeSnapshot,
@@ -38,64 +36,33 @@ import {
   TOWN_WALK_SPEED,
   withCastSeq,
 } from "@herzies/shared/town-net";
-import { maxHp } from "@herzies/shared/vitals";
+import { classOr, herzieKit } from "./bot-herzie.mjs";
 
 const url = process.env.TOWN_URL ?? "ws://localhost:8787";
 const secret = process.env.TOWN_TICKET_SECRET ?? "dev-town-secret";
 const shard = process.env.SHARD ?? "0";
 const name = process.env.BOT_NAME ?? "Sparring Bot";
-const cls = CLASS_IDS.includes(process.env.BOT_CLASS)
-  ? process.env.BOT_CLASS
-  : "bard";
+const cls = classOr(process.env.BOT_CLASS, "bard");
 const baseLevel = Number(process.env.BOT_LEVEL ?? 20);
 const match = process.env.BOT_MATCH !== "0";
 const accuracy = Math.max(0, Math.min(1, Number(process.env.BOT_ACCURACY ?? 0.55)));
 const title = process.env.BOT_TITLE ?? "duel-50";
 const uid = `duel-bot-${cls}`;
 
-/** What it holds and where its points go, like a player of its class. */
-const GEAR = {
-  bard: { main_hand: "lute" },
-  record_slinger: { main_hand: "compact-discs" },
-  percussionist: { main_hand: "worn-stick", off_hand: "old-cymbal" },
-};
-const SKILLS = {
-  bard: [["soothing-drones", 5], ["haste", 5]],
-  record_slinger: [["backspin", 5], ["shuffle", 5]],
-  percussionist: [["cymbrella", 5], ["rimshot", 5]],
-};
 const MELEE = cls === "percussionist";
 /** How far it likes to stand from you: in reach of its stick, or well
  * inside a wave's range but far enough to make you aim. */
 const KEEP = MELEE ? 1.1 : 7;
 
-function points(level) {
-  const n = 2 * Math.max(0, level - 1);
-  if (cls === "bard")
-    return { stamina: 0, sonicPower: Math.ceil(n / 2), euphony: Math.floor(n / 2), timing: 0 };
-  if (cls === "percussionist") {
-    const stamina = Math.round(n * 0.7);
-    return { stamina, sonicPower: n - stamina, euphony: 0, timing: 0 };
-  }
-  return { stamina: 0, sonicPower: n, euphony: 0, timing: 0 };
-}
-
 async function ticketFor(level) {
-  const lv = Math.max(1, Math.min(200, Math.round(level)));
-  const gear = { ...GEAR[cls], main_hand: instrumentOf(cls) ?? GEAR[cls].main_hand };
-  const s = withStatPoints(getHerzieStats(gear), points(lv), lv);
-  const max = maxHp(lv, s.stamina);
+  const { gear, ...kit } = herzieKit(cls, level);
   return signTownTicket(
     {
       uid,
       name,
       look: { seed: `BOT-${cls.toUpperCase()}`, stage: 3, equipped: gear },
       exp: Math.floor(Date.now() / 1000) + 600,
-      hp: { hp: max, maxHp: max, down: false },
-      st: [s.sonicPower, s.luck, s.critChance, s.critDamage, s.stamina, s.def, s.euphony, s.timing],
-      lv,
-      cls,
-      sk: SKILLS[cls],
+      ...kit,
       em: ["wave", "cheer"],
       ti: title,
     },

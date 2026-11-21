@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { matchesSecretTrack, processSync } from "./game-server.js";
+import { WILDS_LISTEN_BONUS, WILDS_LISTEN_LABEL } from "./wilds-loot.js";
 
 describe("matchesSecretTrack", () => {
   const hunt = {
@@ -76,17 +77,21 @@ type Reply = { data?: unknown; error?: { message: string } };
 
 /**
  * Just enough of a Supabase client for a sync that only listens: RPCs
- * answer from `rpcs` (sync_context from `ctx`), and every table query
- * resolves to nothing. Records the RPCs called.
+ * answer from `rpcs` (sync_context from `ctx`), and a table query resolves
+ * to `tables[name]` (nothing if absent). Records the RPCs called.
  */
-function fakeAdmin(ctx: unknown, rpcs: Record<string, Reply> = {}) {
+function fakeAdmin(
+  ctx: unknown,
+  rpcs: Record<string, Reply> = {},
+  tables: Record<string, unknown> = {},
+) {
   const calls: { fn: string; args: Record<string, unknown> }[] = [];
-  const query = (): unknown => {
+  const query = (data: unknown = null): unknown => {
     const q: unknown = new Proxy(() => {}, {
       get(_t, prop) {
         if (prop === "then") {
           return (resolve: (v: unknown) => void) =>
-            resolve({ data: null, error: null });
+            resolve({ data, error: null });
         }
         return () => q;
       },
@@ -100,7 +105,7 @@ function fakeAdmin(ctx: unknown, rpcs: Record<string, Reply> = {}) {
       const reply = rpcs[fn] ?? {};
       return { data: reply.data ?? null, error: reply.error ?? null };
     },
-    from: () => query(),
+    from: (table: string) => query(tables[table]),
   };
   return { admin: admin as unknown as SupabaseClient, calls };
 }
@@ -218,5 +223,72 @@ describe("processSync and titles", () => {
     const result = await processSync(admin, "u1", null, 0, []);
     expect(result.herzie.title).toBe("duel-1");
     expect(result.loadouts).toEqual(loadouts);
+  });
+});
+
+describe("processSync on the Wilds", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const soon = () => new Date(Date.now() + 60_000).toISOString();
+  const ago = () => new Date(Date.now() - 1_000).toISOString();
+
+  it("adds the Wilds' bonus while the room says you're there", async () => {
+    const { admin } = fakeAdmin(context({ wilds_until: soon() }));
+    const on = await processSync(admin, "u1", null, 5, []);
+    expect(on.multipliers).toContainEqual({
+      name: WILDS_LISTEN_LABEL,
+      bonus: WILDS_LISTEN_BONUS,
+    });
+
+    const { admin: offAdmin } = fakeAdmin(context({ wilds_until: ago() }));
+    const off = await processSync(offAdmin, "u1", null, 5, []);
+    expect(off.multipliers.map((m) => m.name)).not.toContain(
+      WILDS_LISTEN_LABEL,
+    );
+    // The same five minutes are worth more there.
+    expect(on.herzie.xp).toBeGreaterThan(off.herzie.xp);
+  });
+
+  it("reads sync_context's wilds_until when the row lacks it", async () => {
+    const { admin } = fakeAdmin(context({}, { wilds_until: soon() }));
+    const result = await processSync(admin, "u1", null, 0, []);
+    expect(result.multipliers.map((m) => m.name)).toContain(WILDS_LISTEN_LABEL);
+  });
+
+  /** A sync owed drop rolls (none credited this time), with a pool of
+   * lutes; what it asked roll_pending_drops to put down. */
+  async function rolled(herzie: Record<string, unknown>) {
+    const { admin, calls } = fakeAdmin(
+      context({ drop_rolls_done: 0, ...herzie }),
+      { roll_pending_drops: { data: 0 } },
+      { items: [{ id: "lute", rarity: "common" }] },
+    );
+    await processSync(admin, "u1", null, 0, []);
+    const call = calls.find((c) => c.fn === "roll_pending_drops");
+    return (call?.args.p_item_ids ?? []) as string[];
+  }
+
+  it("makes a share of listening's drops bits there", async () => {
+    // Under WILDS_LISTEN_BIT_SHARE, and the commonest bit.
+    vi.spyOn(Math, "random").mockReturnValue(0.1);
+    const ids = await rolled({ wilds_until: soon() });
+    // (A seasonal extra may ride along; it rolls on its own.)
+    expect(new Set(ids.filter((id) => id !== "trick-or-treat"))).toEqual(
+      new Set(["tonewood"]),
+    );
+  });
+
+  it("rolls the pool as ever past the share, and off the Wilds", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.9);
+    const there = await rolled({ wilds_until: soon() });
+    expect(there).toContain("lute");
+    expect(there).not.toContain("tonewood");
+
+    vi.spyOn(Math, "random").mockReturnValue(0.1);
+    const away = await rolled({ wilds_until: ago() });
+    expect(away).toContain("lute");
+    expect(away).not.toContain("tonewood");
   });
 });

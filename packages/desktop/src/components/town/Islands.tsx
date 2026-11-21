@@ -40,6 +40,50 @@ export const skyUniforms = {
   uRainbow: { value: 0 },
 };
 
+/**
+ * The sky's broad colour on a view direction, as GLSL: the dome's gradient
+ * (top, horizon, bottom), the sun's wide glow and lightning's flash —
+ * everything but its points of light (stars, discs, aurora, rainbow).
+ * Shared by the dome (see Sky) and whatever has to melt into it (the
+ * Tower's top, see Tower), so they can't drift apart; bind `skyUniforms`'
+ * objects into the shader by reference and the day cycle repaints both.
+ * Linear colour, like the dome's before its colorspace_fragment.
+ */
+export const SKY_GRADIENT_GLSL = /* glsl */ `
+uniform vec3 uTop;
+uniform vec3 uHorizon;
+uniform vec3 uBottom;
+uniform vec3 uSunDir;
+uniform vec3 uSunColor;
+uniform float uFlash;
+// How far a direction is above the horizon's haze: what sinks into it
+// (the sun, the stars) dims the lower it is.
+float skyHaze( float h ) {
+  return smoothstep( -0.03, 0.14, h );
+}
+vec3 skyGradient( vec3 dir ) {
+  float h = dir.y;
+  return h > 0.0
+    ? mix( uHorizon, uTop, smoothstep( 0.0, 0.6, h ) )
+    : mix( uHorizon, uBottom, smoothstep( 0.0, 0.5, -h ) );
+}
+// How far up the sun is, for its glow and disc (faded into the haze).
+float skySunUp( vec3 dir ) {
+  return smoothstep( -0.1, 0.12, uSunDir.y ) * skyHaze( dir.y );
+}
+vec3 skySunGlow( vec3 dir ) {
+  return uSunColor * pow( max( dot( dir, uSunDir ), 0.0 ), 48.0 ) * 0.35 * skySunUp( dir );
+}
+// Lightning: the whole sky lit from behind the clouds.
+vec3 skyFlash( vec3 c ) {
+  return mix( c, vec3( 0.85, 0.88, 1.0 ), uFlash * 0.75 );
+}
+// The sky's colour behind a direction, minus its points of light.
+vec3 skyColor( vec3 dir ) {
+  return skyFlash( skyGradient( dir ) + skySunGlow( dir ) );
+}
+`;
+
 /** How often a star falls: one every this many seconds, give or take. */
 const SHOOTING_EVERY = 90;
 const SHOOTING_SPREAD = 60;
@@ -180,21 +224,16 @@ export function Sky() {
           }
         `,
         fragmentShader: /* glsl */ `
-          uniform vec3 uTop;
-          uniform vec3 uHorizon;
-          uniform vec3 uBottom;
-          uniform vec3 uSunDir;
           uniform vec3 uMoonDir;
-          uniform vec3 uSunColor;
           uniform float uTime;
           uniform float uNight;
           uniform float uAurora;
           uniform vec4 uShoot;
           uniform vec3 uShootTo;
           uniform float uOvercast;
-          uniform float uFlash;
           uniform float uRainbow;
           varying vec3 vDir;
+          ${SKY_GRADIENT_GLSL}
           // Angular radii, as cosines: the sun about 2.6 degrees, the moon 1.8.
           const float SUN_DISC = 0.99897;
           const float MOON_DISC = 0.99951;
@@ -297,13 +336,11 @@ export function Sky() {
           void main() {
             vec3 dir = normalize(vDir);
             float h = dir.y;
-            vec3 c = h > 0.0
-              ? mix(uHorizon, uTop, smoothstep(0.0, 0.6, h))
-              : mix(uHorizon, uBottom, smoothstep(0.0, 0.5, -h));
+            vec3 c = skyGradient(dir);
             c += rainbow(dir);
             // Each sinks into the haze at the horizon: dimmer the lower the
             // pixel, and fading out as it sets rather than cut off by it.
-            float haze = smoothstep(-0.03, 0.14, h);
+            float haze = skyHaze(h);
             // The stars come out as the sky darkens, thinning at the
             // horizon, and behind the clouds there are none.
             float dark = smoothstep(0.5, 0.95, uNight) * haze * (1.0 - uOvercast);
@@ -313,18 +350,17 @@ export function Sky() {
             }
             float toSun = dot(dir, uSunDir);
             float toMoon = dot(dir, uMoonDir);
-            float sunUp = smoothstep(-0.1, 0.12, uSunDir.y) * haze;
+            float sunUp = skySunUp(dir);
             // A wide warm glow, then a hard-edged disc that stays crisp
             // in the Town's chunky pixels — warmer and hazier as it sets.
             vec3 sun = mix(uSunColor, vec3(1.0, 0.98, 0.9), 0.55);
             sun = mix(mix(uHorizon, uSunColor, 0.7), sun, haze);
-            c += uSunColor * pow(max(toSun, 0.0), 48.0) * 0.35 * sunUp;
+            c += skySunGlow(dir);
             c = mix(c, sun, step(SUN_DISC, toSun) * sunUp);
             float moonUp = smoothstep(-0.06, 0.06, uMoonDir.y) * haze * (1.0 - uOvercast * 0.85);
             c += vec3(0.55, 0.62, 0.8) * pow(max(toMoon, 0.0), 90.0) * 0.4 * moonUp;
             c = mix(c, vec3(0.95, 0.97, 1.0), step(MOON_DISC, toMoon) * moonUp);
-            // Lightning: the whole sky lit from behind the clouds.
-            c = mix(c, vec3(0.85, 0.88, 1.0), uFlash * 0.75);
+            c = skyFlash(c);
             gl_FragColor = vec4(c, 1.0);
             #include <colorspace_fragment>
           }

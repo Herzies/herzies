@@ -39,6 +39,7 @@ import { type Copy, type Part, PartMesh, type Placed, painted } from "./parts";
 import type { SeasonLook } from "./Seasons";
 import { StandColliders, Stands } from "./Stands";
 import { type Champion, StatueColliders, Statues } from "./Statues";
+import { Tower } from "./Tower";
 import {
   SPECIES,
   type Species,
@@ -538,6 +539,7 @@ export function Props({
       )}
       {!backdrop && <SeasonalProps map={map} oaks={species.oak} />}
       <Buildings map={map} />
+      <Tower map={map} />
       {!backdrop && <NightLights map={map} />}
       <Benches map={map} />
       <Stands map={map} />

@@ -2,6 +2,7 @@ import { CameraControls, CameraControlsImpl } from "@react-three/drei";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
+import { fleet } from "./airship/fleet";
 import { ambient } from "./ambient";
 import { aimSensitivity } from "./combat/sensitivity";
 import { combat, kickOffset, reducedMotion } from "./combat/state";
@@ -161,10 +162,13 @@ export function CameraRig({ map }: { map?: TownMap }) {
     time.current += delta;
     homeMode.step(delta);
     // Leaving Home: the camera it swings back to is behind the herzie,
-    // looking the way it faces (it'll walk off that way).
+    // looking the way it faces (it'll walk off that way) — aboard, its
+    // heading is the deck's, turned by the ship's.
     const h = home.current;
     if (h.on && !homeMode.on && rt.playerHerzie) {
-      c.rotateTo(rt.playerHerzie.heading - Math.PI, c.polarAngle, false);
+      const yaw =
+        townSave.map === "airship" ? fleet.poses[townSave.ship].yaw : 0;
+      c.rotateTo(rt.playerHerzie.heading + yaw - Math.PI, c.polarAngle, false);
     }
     h.on = homeMode.on;
     // At Home a drag spins the herzie (see HomeSpin), not the view.
@@ -276,6 +280,27 @@ export function CameraRig({ map }: { map?: TownMap }) {
           tilt * KEY_TILT_SPEED * delta,
           true,
         );
+      }
+    }
+    // Aboard a sky ship: the view turns with the ship, rigidly and at once
+    // (so the deck holds still on screen as it comes round), but never
+    // rolls or pitches with it — the horizon stays level. The turn goes on
+    // where the view is now as well as where it's easing to: through
+    // rotate() it would be eased like an orbit of yours, and trail the
+    // ship. (camera-controls keeps the two privately; any orbit of yours
+    // still eases, on top.)
+    const aboard = townSave.map === "airship" ? townSave.ship : null;
+    if (aboard !== null && !homeMode.on) {
+      const turned = fleet.turned[aboard];
+      if (turned) {
+        const s = c as unknown as {
+          _spherical: THREE.Spherical;
+          _sphericalEnd: THREE.Spherical;
+          _needsUpdate: boolean;
+        };
+        s._spherical.theta += turned;
+        s._sphericalEnd.theta += turned;
+        s._needsUpdate = true;
       }
     }
     body.getWorldPosition(at.current);

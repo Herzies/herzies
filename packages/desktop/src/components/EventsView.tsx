@@ -12,6 +12,7 @@ import {
   getHerzieStats,
   getHerzieStatsFromUnits,
   getItem,
+  type HerzieClass,
   RARITY_COLORS as ITEM_RARITY_COLORS,
   ItemTypeIcon,
   isVisitorType,
@@ -50,6 +51,7 @@ import {
 import { BackButton } from "./BackButton";
 import { BossFightHelp, BossFightPanel, makeDebugBoss } from "./BossFightPanel";
 import { BulletinPanel } from "./BulletinPanel";
+import { CraftingPanel } from "./CraftingPanel";
 import { CrystalPanel } from "./CrystalPanel";
 import ItemInspectOverlay, {
   INSPECT_ORIGIN_ATTR,
@@ -66,8 +68,11 @@ import { TabButton } from "./TabButton";
 import { TowerGuardPanel } from "./TowerGuardPanel";
 import type { EventCard } from "./TownScene";
 import { TownWorld } from "./TownWorld";
+import { setWildsService, setWildsUpcoming } from "./town/airship/service";
 import { BULLETIN_KEY } from "./town/Boards";
 import { setTowerOpen } from "./town/gates";
+import { CRAFTING_KEY } from "./town/wilds/craftingSpot";
+import { wildsFeed } from "./town/wildsFeed";
 import { View } from "./View";
 import { VisitorHelp } from "./VisitorHelp";
 import { VISITOR_THEMES } from "./VisitorRowTheme";
@@ -282,6 +287,7 @@ function EventsViewImpl({
   playerSeed,
   playerStage,
   playerStatPoints,
+  playerClass = null,
   playerProfile,
   musicPlaying = false,
   onOpenProfile,
@@ -310,6 +316,8 @@ function EventsViewImpl({
   playerStage?: number;
   /** Its stat points, added to what its cards give. */
   playerStatPoints?: StatPoints;
+  /** Its class (the Crafting Station makes only its instruments). */
+  playerClass?: HerzieClass | null;
   /** Name, level and progress to the next level, shown top left in the Town. */
   playerProfile?: {
     friendCode?: string;
@@ -405,6 +413,16 @@ function EventsViewImpl({
   const [previousLoaded, setPreviousLoaded] = useState(false);
   const [previousKey, setPreviousKey] = useState(0);
   const liveIdsRef = useRef<string | null>(null);
+  // The sky ship runs while a Wilds event is on. Re-fed on every poll (each
+  // brings fresh arrays), which is also what lets an ended service's last
+  // run finish and the ship then lay up (see setWildsService) — but not
+  // before the first answer: till then "none" is only not knowing.
+  useEffect(() => {
+    if (!activeLoaded) return;
+    const { service, upcomingAt } = wildsFeed(events, upcoming);
+    setWildsService(service);
+    setWildsUpcoming(upcomingAt);
+  }, [events, upcoming, activeLoaded]);
 
   const [inspectOverlay, setInspectOverlay] = useState<"item" | null>(null);
 
@@ -758,9 +776,10 @@ function EventsViewImpl({
     // visitor (Nandor) opens his stall like George does.
     for (const e of liveEvents) {
       if (EVENT_TYPES.some((t) => t.type === e.type)) continue;
-      // The Tower is a place, not a visitor: its portal opens instead
-      // (town/gates.ts), and the bulletin board lists it.
-      if (e.type === "tower") continue;
+      // The Tower and the Wilds are places, not visitors: the Tower's door
+      // opens and the sky ship flies instead, and the bulletin board lists
+      // them.
+      if (e.type === "tower" || e.type === "wilds") continue;
       const limited = LIMITED_TYPES.includes(e.type);
       cards.push({
         type: e.type,
@@ -1048,6 +1067,25 @@ function EventsViewImpl({
           backButton={back}
         >
           <CrystalPanel paused={!active || !visible} />
+        </ScreenView>
+      );
+    }
+
+    if (selected === CRAFTING_KEY) {
+      return (
+        <ScreenView
+          inPanel={screenInPanel}
+          ownName
+          title="The Crafting Station"
+          colour="cyan"
+          childrenClassName="flex min-h-0 flex-col"
+          backButton={back}
+        >
+          <CraftingPanel
+            units={units}
+            herzieClass={playerClass}
+            onLog={onLog}
+          />
         </ScreenView>
       );
     }

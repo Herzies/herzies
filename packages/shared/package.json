@@ -86,6 +86,21 @@
       "import": "./dist/tower.js",
       "require": "./dist/tower.js"
     },
+    "./wilds": {
+      "types": "./dist/wilds.d.ts",
+      "import": "./dist/wilds.js",
+      "require": "./dist/wilds.js"
+    },
+    "./wilds-pvp": {
+      "types": "./dist/wilds-pvp.d.ts",
+      "import": "./dist/wilds-pvp.js",
+      "require": "./dist/wilds-pvp.js"
+    },
+    "./wilds-loot": {
+      "types": "./dist/wilds-loot.d.ts",
+      "import": "./dist/wilds-loot.js",
+      "require": "./dist/wilds-loot.js"
+    },
     "./medea": {
       "types": "./dist/medea.d.ts",
       "import": "./dist/medea.js",

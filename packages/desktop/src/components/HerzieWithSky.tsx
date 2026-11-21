@@ -59,6 +59,8 @@ interface Props {
   zoomEase?: number;
   /** Class gear drawn into its hands instead of slung on its back. */
   armed?: boolean;
+  /** Turn from the default three-quarter view, radians (HerzieView). */
+  defaultAngle?: number;
 }
 
 /**
@@ -86,6 +88,7 @@ export function HerzieWithSky({
   offsetY,
   zoomEase,
   armed,
+  defaultAngle,
 }: Props) {
   // Full-window-width column count, shared by the sky and the creature
   // viewport so both span the window without stretching their contents.
@@ -163,6 +166,7 @@ export function HerzieWithSky({
         offsetY={offsetY}
         zoomEase={zoomEase}
         armed={armed}
+        defaultAngle={defaultAngle}
         onStage={onStage}
         wrapperStyle={
           showSky && !inOverlay

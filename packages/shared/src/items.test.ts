@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import itemIconGrids from "./card/item-icon-grids.json" with { type: "json" };
 import { CLASS_IDS, type HerzieClass } from "./classes.js";
 import {
   applyEquip,
@@ -72,6 +73,7 @@ import {
 } from "./items.js";
 import { STAT_TUNING, timingCritChance } from "./stats.js";
 import { TOWN_SPRINT_SPEED } from "./town-net.js";
+import { WILDS_BITS, WILDS_RECIPES } from "./wilds-loot.js";
 
 /** A unit with sensible defaults, so a test only states what it cares about. */
 const unit = (
@@ -720,15 +722,19 @@ describe("applyEquip", () => {
     const gear = ITEMS.filter(
       (i) => i.equipSlot === "main_hand" || i.equipSlot === "off_hand",
     );
-    expect(gear.map((i) => i.id).sort()).toEqual([
-      "compact-discs",
-      "lute",
-      "old-cymbal",
-      "worn-stick",
-    ]);
+    expect(gear.map((i) => i.id).sort()).toEqual(
+      [
+        "compact-discs",
+        "lute",
+        "old-cymbal",
+        "worn-stick",
+        ...WILDS_RECIPES.map((r) => r.id),
+      ].sort(),
+    );
     for (const item of gear) {
       expect(item.requiredClass).toBeDefined();
-      expect(item.sellPrice).toBe(10);
+      // The Wilds' builds of them are worth more (see "Wilds loot").
+      expect(item.sellPrice).toBe(item.rarity === "rare" ? 40 : 10);
       expect(NON_DROPPABLE_ITEM_IDS).toContain(item.id);
     }
   });
@@ -2070,6 +2076,113 @@ describe("class sets", () => {
         minStage: item?.minStage,
         requiredClass: item?.requiredClass,
       });
+    }
+  });
+});
+
+describe("Wilds loot", () => {
+  const bits = {
+    tonewood: ["Tonewood", "common", 3],
+    "sky-string": ["Sky String", "uncommon", 8],
+    "storm-hide": ["Storm Hide", "rare", 25],
+    resonite: ["Resonite", "legendary", 80],
+  } as const;
+  const instruments = {
+    "wildwood-lute": {
+      name: "Wildwood Lute",
+      slot: "main_hand",
+      cls: "bard",
+      stats: { euphony: 18, sonicPower: 5 },
+    },
+    "stormcut-discs": {
+      name: "Stormcut Discs",
+      slot: "main_hand",
+      cls: "record_slinger",
+      stats: { sonicPower: 12, critChance: 8, critDamage: 38 },
+    },
+    "thunderhide-sticks": {
+      name: "Thunderhide Sticks",
+      slot: "main_hand",
+      cls: "percussionist",
+      stats: { sonicPower: 6, critChance: 3 },
+    },
+    "storm-cymbal": {
+      name: "Storm Cymbal",
+      slot: "off_hand",
+      cls: "percussionist",
+      stats: { def: 15 },
+    },
+  } as const;
+
+  it("has every bit, a plain stackable card", () => {
+    expect(Object.keys(bits).sort()).toEqual([...WILDS_BITS].sort());
+    for (const [id, [name, rarity, sell]] of Object.entries(bits)) {
+      const item = getItem(id);
+      expect(item).toMatchObject({ name, rarity, sellPrice: sell });
+      expect(item?.stackable, id).toBe(true);
+      expect(item?.equipable, id).toBeFalsy();
+      expect(item?.stats, id).toBeUndefined();
+      // In the bag like any card (a deck item: one tile a stack).
+      expect(getItemCategory(item as ItemDef), id).toBe("deck");
+      expect(item?.frames.length, id).toBeGreaterThan(0);
+    }
+  });
+
+  it("has every Wilds instrument, as the contract has it", () => {
+    expect(Object.keys(instruments).sort()).toEqual(
+      WILDS_RECIPES.map((r) => r.id).sort(),
+    );
+    for (const [id, def] of Object.entries(instruments)) {
+      const item = getItem(id);
+      expect(item).toMatchObject({
+        name: def.name,
+        rarity: "rare",
+        sellPrice: 40,
+        equipable: true,
+        equipSlot: def.slot,
+        minStage: 2,
+        requiredClass: def.cls,
+      });
+      expect(item?.stats, id).toEqual(def.stats);
+      expect(item?.stackable, id).toBeFalsy();
+      expect(item?.frames.length, id).toBeGreaterThan(0);
+    }
+  });
+
+  it("makes each one about half as strong again as its base, in its slot", () => {
+    for (const r of WILDS_RECIPES) {
+      const base = getItem(r.base);
+      const wild = getItem(r.id);
+      expect(wild?.equipSlot, r.id).toBe(base?.equipSlot);
+      expect(wild?.requiredClass, r.id).toBe(base?.requiredClass);
+      for (const [key, v] of Object.entries(base?.stats ?? {}))
+        expect(
+          wild?.stats?.[key as keyof typeof wild.stats],
+          `${r.id} ${key}`,
+        ).toBeGreaterThanOrEqual((v ?? 0) * 1.4);
+    }
+  });
+
+  it("never drops from the normal pools", () => {
+    for (const id of [...WILDS_BITS, ...WILDS_RECIPES.map((r) => r.id)])
+      expect(NON_DROPPABLE_ITEM_IDS as readonly string[]).toContain(id);
+  });
+
+  it("has a painted icon for each, not the generic one", () => {
+    const grids: Record<string, { grid: string[]; palette: string[] }> =
+      itemIconGrids;
+    for (const id of [...WILDS_BITS, ...WILDS_RECIPES.map((r) => r.id)]) {
+      const icon = grids[id];
+      expect(icon, id).toBeDefined();
+      expect(icon.grid.length, id).toBe(24);
+      for (const row of icon.grid) {
+        expect(row.length, id).toBe(24);
+        for (const ch of row)
+          if (ch !== ".")
+            expect(Number.parseInt(ch, 16), id).toBeLessThan(
+              icon.palette.length,
+            );
+      }
     }
   });
 });

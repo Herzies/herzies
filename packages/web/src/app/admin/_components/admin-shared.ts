@@ -40,7 +40,7 @@ export type AdminEvent = {
 
 export type EventSeries = {
   id: string;
-  type: "song_hunt" | "boss_fight" | "merchant" | "tower";
+  type: "song_hunt" | "boss_fight" | "merchant" | "tower" | "wilds";
   title: string;
   description: string | null;
   enabled: boolean;
@@ -97,6 +97,7 @@ export const EVENT_TYPE_LABELS: Record<string, string> = {
   merchant: "Good ol' George",
   treat_trader: "Nandor the Treatless (treats)",
   tower: "the Tower",
+  wilds: "The Wilds",
   secret_track: "secret track",
 };
 
@@ -107,6 +108,7 @@ export const EVENT_TYPE_STYLES: Record<string, string> = {
   merchant: "border-yellow text-yellow bg-yellow/10",
   treat_trader: "border-orange text-orange bg-orange/10",
   tower: "border-green text-green bg-green/10",
+  wilds: "border-blue text-blue bg-blue/10",
   secret_track: "border-purple text-purple bg-purple/10",
 };
 

@@ -49,3 +49,6 @@ export * from "./town-net.js";
 export * from "./types.js";
 export * from "./visitors.js";
 export * from "./vitals.js";
+export * from "./wilds.js";
+export * from "./wilds-loot.js";
+export * from "./wilds-pvp.js";

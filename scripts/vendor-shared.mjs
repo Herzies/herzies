@@ -47,6 +47,8 @@ const ENTRIES = [
   join(ROOT, "packages/shared/src/vitals.ts"),
   // The Tower's payouts (town-vitals function).
   join(ROOT, "packages/shared/src/tower.ts"),
+  // The Wilds' config, made whole for the clients (events-active function).
+  join(ROOT, "packages/shared/src/wilds.ts"),
 ];
 
 const BANNED = [

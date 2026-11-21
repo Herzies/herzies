@@ -597,8 +597,12 @@ export function useDropLoop(
       pushLootLog(`Bag full — ${waiting}`);
       return;
     }
-    // In the bag now, and said now: the app adds it before the server's
-    // answer (and takes it back out if the server says no).
+    // Said now. A drop off Home's ground the app adds to the bag before the
+    // server's answer (and takes back out if the server says no); a room's
+    // loot (the boss's, a Tower mob's, a Wilds cache's) it mostly hasn't
+    // seen yet — only a sync lists it — so the bag is fetched once it's taken,
+    // rather than left to the next sync (up to 10 s off with the window
+    // focused, a minute hidden).
     justIn.set(d, { version: roomVersion(), at: now });
     const pickup = announcePickup(name);
     const dropId = d.dropId;
@@ -608,6 +612,7 @@ export function useDropLoop(
         if (outcome === "collected") {
           refusals.delete(dropId);
           pickup.confirm();
+          if (!d.home) herzies.fetchInventory().catch(() => {});
           return;
         }
         // Not ours to say: "gone" is most likely the server's spirit having

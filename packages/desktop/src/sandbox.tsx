@@ -43,6 +43,11 @@ const WEARABLE_OPTIONS = [
   "compact-discs",
   "worn-stick",
   "old-cymbal",
+  // The Wilds instruments (their class gear's shapes, recoloured).
+  "wildwood-lute",
+  "stormcut-discs",
+  "thunderhide-sticks",
+  "storm-cymbal",
   // Cloaks (stage 3: worn on the back, under any slung gear).
   "troubadour-mantle",
   "groove-cape",
@@ -87,6 +92,8 @@ function Sandbox() {
   const [animate, setAnimate] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [armed, setArmed] = useState(false);
+  // Turned from the default three-quarter view (π: from behind).
+  const [angle, setAngle] = useState(0);
   const [draggable, setDraggable] = useState(true);
   const [showSky, setShowSky] = useState(false);
   const [wearables, setWearables] = useState<string[]>([]);
@@ -291,6 +298,12 @@ function Sandbox() {
             bounds={{ min: 2, max: 20, step: 1 }}
             onChange={setSize}
           />
+          <SliderField
+            label="angle (rad)"
+            value={angle}
+            bounds={{ min: -3.2, max: 3.2, step: 0.05 }}
+            onChange={setAngle}
+          />
           <Check
             label="animate (rotate)"
             checked={animate}
@@ -453,6 +466,7 @@ function Sandbox() {
           animate={animate}
           isPlaying={isPlaying}
           armed={armed}
+          defaultAngle={angle}
           equipped={toEquipped(wearables)}
           creatureParams={params}
           dangleConfig={dangle}
@@ -506,7 +520,7 @@ function toEquipped(ids: string[]): Equipped {
       out.color = id;
     else if (id === "ghost" || id === "spirit-orb" || id === "sleptwell")
       out.spirit = id;
-    else if (id === "old-cymbal") out.off_hand = id;
+    else if (id === "old-cymbal" || id === "storm-cymbal") out.off_hand = id;
     else if (
       id.endsWith("-cloak") ||
       id === "troubadour-mantle" ||
@@ -525,7 +539,14 @@ function toEquipped(ids: string[]): Equipped {
       id === "drumhide-boots"
     )
       out.feet = id;
-    else if (id === "lute" || id === "compact-discs" || id === "worn-stick")
+    else if (
+      id === "lute" ||
+      id === "compact-discs" ||
+      id === "worn-stick" ||
+      id === "wildwood-lute" ||
+      id === "stormcut-discs" ||
+      id === "thunderhide-sticks"
+    )
       out.main_hand = id;
     else if (id === "boombox") {
       if (!out.ground_left) out.ground_left = id;

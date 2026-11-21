@@ -60,7 +60,8 @@
 > - After 3 s of music a classed herzie is in tune; the bonus lingers 8 s after
 >   it stops. Percussionists take 15% less damage (under the 75%
 >   clamp), Bards heal ×1.3, Record Slingers hit ×1.25.
-> - In tune shows as a gold aura on the beat, rising notes, and a lit HUD chip.
+> - In tune shows only as a lit HUD line under the now-playing box (no
+>   in-world aura). The Tower pays the same bonus, by the same rules.
 >
 > **Classes.**
 > - Bards: Resurrect.

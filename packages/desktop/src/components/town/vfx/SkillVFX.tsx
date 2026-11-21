@@ -3,16 +3,11 @@ import { DISC_RANGE, DISC_SPEED } from "@herzies/shared/combat";
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo } from "react";
 import * as THREE from "three";
-import { buffOn, entityAt, SKILL_FX_MS, skills } from "../combat/skills";
+import { entityAt, SKILL_FX_MS, skills } from "../combat/skills";
 
 /** Rings a Soothing Drones sends out, one after another. */
 const DRONE_RINGS = 3;
 const DRONE_RING_GAP_MS = 220;
-/** In-tune auras, and the notes over each. */
-const MAX_AURAS = 12;
-const NOTES = 3;
-/** The aura's pulse: about a beat at 120 bpm. */
-const BEAT_MS = 500;
 /** Resurrect beams at once. */
 const MAX_BEAMS = 4;
 /** How far a Taunt's shout spreads. */
@@ -22,33 +17,13 @@ const PINK = new THREE.Color(0xff7eb6);
 const RED = new THREE.Color(0xff3b30);
 const GOLD = new THREE.Color(0xffd84a);
 
-/** A note glyph, drawn once, for the in-tune sprites. */
-function noteTexture(): THREE.CanvasTexture {
-  const c = document.createElement("canvas");
-  c.width = c.height = 64;
-  const ctx = c.getContext("2d");
-  if (ctx) {
-    ctx.font = "bold 52px system-ui, sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.shadowColor = "rgba(0,0,0,0.6)";
-    ctx.shadowBlur = 6;
-    ctx.fillStyle = "#ffe27a";
-    ctx.fillText("♪", 32, 34);
-  }
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  return t;
-}
-
 /**
  * Class skills as they happen, for everyone in the room: Soothing Drones
  * pulses out over the ground as far as it reaches, Backspin's discs spin
- * away along the aim, a Taunt's shout spreads red from its caster, a Resurrect is a
- * gold beam from its Bard to the fallen while it plays, and whoever is in
- * tune with what the boss hates glows gold on the beat with notes rising
- * over them. Pooled meshes, moved each frame; nothing is created while
- * fighting.
+ * away along the aim, a Taunt's shout spreads red from its caster, and a
+ * Resurrect is a gold beam from its Bard to the fallen while it plays.
+ * (Being in tune shows only in the HUD: BossHud's MusicBonus.) Pooled
+ * meshes, moved each frame; nothing is created while fighting.
  */
 export function SkillVFX() {
   const fx = useMemo(() => {
@@ -85,40 +60,6 @@ export function SkillVFX() {
       return m;
     });
 
-    const auraGeo = new THREE.CircleGeometry(0.95, 40);
-    auraGeo.rotateX(-Math.PI / 2);
-    const auras = Array.from({ length: MAX_AURAS }, () => {
-      const m = new THREE.Mesh(
-        auraGeo,
-        new THREE.MeshBasicMaterial({
-          color: GOLD,
-          transparent: true,
-          depthWrite: false,
-          blending: THREE.AdditiveBlending,
-          fog: false,
-        }),
-      );
-      m.visible = false;
-      m.renderOrder = 5;
-      group.add(m);
-      return m;
-    });
-    const noteTex = noteTexture();
-    const noteMat = new THREE.SpriteMaterial({
-      map: noteTex,
-      transparent: true,
-      depthWrite: false,
-      fog: false,
-    });
-    const notes = Array.from({ length: MAX_AURAS * NOTES }, () => {
-      const m = new THREE.Sprite(noteMat.clone());
-      m.scale.setScalar(0.42);
-      m.visible = false;
-      m.renderOrder = 7;
-      group.add(m);
-      return m;
-    });
-
     const beamGeo = new THREE.CylinderGeometry(0.07, 0.07, 1, 8, 1, true);
     beamGeo.rotateX(Math.PI / 2);
     const beamMat = new THREE.MeshBasicMaterial({
@@ -140,16 +81,11 @@ export function SkillVFX() {
       group,
       rings,
       discs,
-      auras,
-      notes,
       beams,
       ringGeo,
       discGeo,
-      auraGeo,
       beamGeo,
       discMat,
-      noteTex,
-      noteMat,
       beamMat,
     };
   }, []);
@@ -159,14 +95,9 @@ export function SkillVFX() {
       fx.ringGeo.dispose();
       fx.discGeo.dispose();
       fx.discMat.dispose();
-      fx.auraGeo.dispose();
       fx.beamGeo.dispose();
-      fx.noteTex.dispose();
-      fx.noteMat.dispose();
       fx.beamMat.dispose();
       for (const r of fx.rings) (r.material as THREE.Material).dispose();
-      for (const a of fx.auras) (a.material as THREE.Material).dispose();
-      for (const n of fx.notes) (n.material as THREE.Material).dispose();
     },
     [fx],
   );
@@ -234,37 +165,6 @@ export function SkillVFX() {
     for (; disc < fx.discs.length; disc++) fx.discs[disc].visible = false;
 
     // A Cymbrella's dome is its own effect: vfx/DomeVFX.
-
-    // In tune: a gold glow underfoot on the beat, and notes rising.
-    let aura = 0;
-    const beat =
-      0.5 + 0.5 * Math.cos(((now % BEAT_MS) / BEAT_MS) * Math.PI * 2);
-    for (const [id, at] of entityAt) {
-      if (aura >= fx.auras.length) break;
-      if (!buffOn(id, "in_tune", now)) continue;
-      const i = aura++;
-      const m = fx.auras[i];
-      m.visible = true;
-      m.position.set(at.x, 0.07, at.z);
-      m.scale.setScalar(0.9 + 0.25 * beat);
-      (m.material as THREE.MeshBasicMaterial).opacity = 0.18 + 0.22 * beat;
-      for (let n = 0; n < NOTES; n++) {
-        const note = fx.notes[i * NOTES + n];
-        const u = (((now / 1600 + n / NOTES + id * 0.37) % 1) + 1) % 1;
-        const a = id * 1.7 + n * 2.1 + u * 1.5;
-        note.visible = true;
-        note.position.set(
-          at.x + Math.sin(a) * 0.55,
-          at.top * 0.6 + u * 1.4,
-          at.z + Math.cos(a) * 0.55,
-        );
-        (note.material as THREE.SpriteMaterial).opacity = Math.sin(u * Math.PI);
-      }
-    }
-    for (let i = aura; i < fx.auras.length; i++) {
-      fx.auras[i].visible = false;
-      for (let n = 0; n < NOTES; n++) fx.notes[i * NOTES + n].visible = false;
-    }
 
     // A Resurrect being played: a beam from the Bard to the fallen, pulsing
     // brighter as it nears the end.

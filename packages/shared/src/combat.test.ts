@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { basicAttack, hasInstrument, instrumentOf } from "./classes.js";
+import {
+  basicAttack,
+  hasInstrument,
+  instrumentOf,
+  instrumentsOf,
+} from "./classes.js";
 import {
   aimDirection,
   BOSS_STAND,
@@ -77,6 +82,44 @@ describe("melee", () => {
     expect(instrumentOf(null)).toBeNull();
     expect(hasInstrument("record_slinger", "compact-discs")).toBe(true);
     expect(hasInstrument("bard", null)).toBe(false);
+  });
+
+  it("plays a Wilds instrument exactly like its base", () => {
+    // instrumentOf stays the starting one; the family takes both.
+    expect(instrumentOf("bard")).toBe("lute");
+    expect(instrumentsOf("bard")).toEqual(["lute", "wildwood-lute"]);
+    expect(instrumentsOf("record_slinger")).toEqual([
+      "compact-discs",
+      "stormcut-discs",
+    ]);
+    expect(instrumentsOf("percussionist")).toEqual([
+      "worn-stick",
+      "thunderhide-sticks",
+    ]);
+    expect(instrumentsOf(null)).toEqual([]);
+    expect(hasInstrument("bard", "wildwood-lute")).toBe(true);
+    expect(hasInstrument("record_slinger", "stormcut-discs")).toBe(true);
+    expect(hasInstrument("percussionist", "thunderhide-sticks")).toBe(true);
+    // Only its own class's, and never the off hand's cymbal.
+    expect(hasInstrument("bard", "stormcut-discs")).toBe(false);
+    expect(hasInstrument("percussionist", "storm-cymbal")).toBe(false);
+
+    const at = (cls: string | null | undefined, stage: number, hand?: string) =>
+      basicAttack({ cls, stage, mainHand: hand });
+    expect(at("percussionist", 3, "thunderhide-sticks")).toEqual({
+      style: "melee",
+      blow: "strike",
+    });
+    expect(at("bard", 2, "wildwood-lute").style).toBe("wave");
+    expect(at("record_slinger", 2, "stormcut-discs").style).toBe("disc");
+    // Someone else's herzie: a Wilds instrument tells its class too.
+    expect(at(undefined, 2, "stormcut-discs").style).toBe("disc");
+    expect(at(undefined, 3, "storm-cymbal")).toEqual({
+      style: "melee",
+      blow: "punch",
+    });
+    // In the wrong class's hands, it's just a fist.
+    expect(at("bard", 3, "thunderhide-sticks").blow).toBe("punch");
   });
 });
 

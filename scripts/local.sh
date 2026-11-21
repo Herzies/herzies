@@ -10,6 +10,11 @@
 #   scripts/local.sh boss [HP] [LOBBY]  open the cave's lobby now; the fight locks in LOBBY
 #                                       minutes (default 3) with HP per herzie (default 20000)
 #   scripts/local.sh tower [HOURS]      open the Tower (its portal in Town) for a few hours
+#   scripts/local.sh wilds [HOURS] [EVERY]  run the sky ship to the Wilds for a few hours,
+#                                       leaving each dock every EVERY s (default 120)
+#   scripts/local.sh wilds-bot [CLASS] [LVL]  a rival on the Wilds (Rival A): fights anyone out of
+#                                       the camp, drops a card when taken down (needs `up` and
+#                                       `wilds`; see town-server/scripts/wilds-bot.mjs)
 #   scripts/local.sh reset              wipe the local database (all migrations re-applied)
 #   scripts/local.sh kit EMAIL [CLASS] [LVL]  ready a herzie to fight: level (default 25),
 #                                       class (default bard), its instrument and spare gear
@@ -231,6 +236,24 @@ cmd_tower() {
     returning id, ends_at;"
 }
 
+cmd_wilds() {
+  local hours="${1:-3}" every="${2:-120}"
+  psql_local -c "insert into public.events (type, title, active, starts_at, ends_at, config)
+    values ('wilds', 'The Wilds', true, now() - interval '1 minute', now() + interval '$hours hours',
+            jsonb_build_object('departEverySec', $every))
+    returning id, ends_at;"
+}
+
+# Class and level default to its herzie's class and the dev user's level
+# (see the script for the rest of its env).
+cmd_wilds_bot() {
+  local secret
+  secret="$(grep -E '^TOWN_TICKET_SECRET=' packages/town-server/.dev.vars | cut -d= -f2-)"
+  exec env TOWN_URL="ws://127.0.0.1:$TOWN_PORT" TOWN_TICKET_SECRET="$secret" DB_CONTAINER="$DB_CONTAINER" \
+    ${1:+BOT_CLASS="$1"} ${2:+BOT_LEVEL="$2"} \
+    node packages/town-server/scripts/wilds-bot.mjs
+}
+
 cmd_reset() {
   npx --yes "$SUPABASE_CLI" db reset --local
 }
@@ -244,6 +267,8 @@ case "${1:-}" in
   bot) shift; cmd_bot "$@" ;;
   boss) shift; cmd_boss "$@" ;;
   tower) shift; cmd_tower "$@" ;;
+  wilds) shift; cmd_wilds "$@" ;;
+  wilds-bot) shift; cmd_wilds_bot "$@" ;;
   reset) cmd_reset ;;
-  *) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

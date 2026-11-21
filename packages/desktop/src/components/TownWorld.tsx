@@ -32,6 +32,7 @@ import {
 } from "./PlayerBars";
 import { type EventCard, formatIn, isDown } from "./TownScene";
 import { TownVitals } from "./TownVitals";
+import { SkyDockHud } from "./town/airship/SkyDockHud";
 import { BossHud, MusicBonus } from "./town/BossHud";
 import { BossResults } from "./town/BossResults";
 import { setCave } from "./town/cave";
@@ -46,13 +47,21 @@ import { drawn, useFpsShown } from "./town/fps";
 import { Hotbar } from "./town/Hotbar";
 import { homeMode, markWorldSettled } from "./town/homeMode";
 import { Key } from "./town/Key";
+import { LocationTitle } from "./town/LocationTitle";
 import type { TownMap } from "./town/map";
 import { markMet } from "./town/met";
 import { useTownNet, useTownNetVersion } from "./town/net/townNet";
-import { spotsOf, type TownSpot, townLive, useTownMap } from "./town/runtime";
+import {
+  spotsOf,
+  type TownSpot,
+  townLive,
+  townSave,
+  useTownMap,
+} from "./town/runtime";
 import { CastBar, SkillHud } from "./town/SkillHud";
-import { TitleLine } from "./town/TitleLine";
+import type { BenchPrompt } from "./town/TownCanvas";
 import { useTuneSender } from "./town/tune";
+import { WildsHud } from "./town/wilds/WildsHud";
 
 // three.js, Rapier's WASM and friends: loaded the first time someone opens
 // the Town, not at app start.
@@ -105,7 +114,8 @@ export function TownWorld({
     multipliers?: ActiveMultiplier[] | null;
     /** The class's name ("Bard"), after the level. */
     classLabel?: string;
-    /** The title it wears (titles.ts), under the name. */
+    /** The title it wears (titles.ts), over your herzie's name and on the
+     * duel's cards (not on this card). */
     title?: string | null;
     /** What's playing, under the card. */
     nowPlaying?: AppState["nowPlaying"];
@@ -152,9 +162,7 @@ export function TownWorld({
   useEffect(() => onLootLog((message) => onLog?.(message)), [onLog]);
   const [near, setNear] = useState<TownSpot | null>(null);
   const endScreen = useBossResultsShown() !== null;
-  const [bench, setBench] = useState<
-    "sit" | "stand" | "read" | "attune" | "upgrade" | null
-  >(null);
+  const [bench, setBench] = useState<BenchPrompt | null>(null);
   const [portalTo, setPortalTo] = useState<TownMap | null>(null);
   const fighting = useCombat();
   const fpsShown = useFpsShown();
@@ -181,13 +189,15 @@ export function TownWorld({
   // A backdrop runs until that first frame is up.
   const canvasPaused = paused && !(backdrop && !ready);
 
-  // The visitors stand on islands with spots for them (home), not out on
-  // the training grounds.
+  // The visitors stand on islands with spots for them (home), not out in
+  // the Tower or the cave.
   const map = useTownMap();
-  // Everyone else on the island you're on.
+  // Everyone else on the island you're on (aboard a sky ship: that ship's
+  // room, its shard the ship).
   useEffect(() => {
-    if (isTownMapId(map.id)) net.setMap(map.id);
-  }, [map.id, net]);
+    if (isTownMapId(map.id))
+      net.setMap(map.id, map.ship ? townSave.ship : undefined);
+  }, [map.id, map.ship, net]);
   // Out of the boss room (or the Tower), the fight is forgotten.
   useEffect(() => {
     if (map.id !== "bossroom" && map.id !== "tower") resetBossFight();
@@ -332,12 +342,7 @@ export function TownWorld({
       )}
     >
       {net.status === "outdated" ? (
-        <div
-          className={cn(
-            // Top right.
-            "pointer-events-none absolute top-[calc(var(--hud-top,0px)+0.75rem)] right-3 z-30 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white/70",
-          )}
-        >
+        <div className="pointer-events-none absolute top-[calc(var(--hud-top,0px)+0.75rem)] right-3 z-30 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white/70">
           Update Herzies to see other players
         </div>
       ) : null}
@@ -362,11 +367,6 @@ export function TownWorld({
                     {profile.name}
                   </span>
                 </div>
-                {/* The title it wears, in its rarity's colour. */}
-                <TitleLine
-                  id={profile.title}
-                  className="-mt-0.5 mb-0.5 text-[10px] font-medium leading-3"
-                />
                 {/* The level (and class) on its own line, as on Home. */}
                 <div className="my-0.5 text-[10px] leading-3 whitespace-nowrap text-white/70">
                   Lv. {profile.level}
@@ -384,8 +384,15 @@ export function TownWorld({
                 multipliers={profile.multipliers ?? null}
                 tint={cn(PLAYER_CARD_TOWN, "backdrop-blur-md")}
               />
-              <MusicBonus />
-              {!hudHidden ? <SkillHud stacked className="" /> : null}
+              {/* One stacked list under it: where you stand on the Wilds
+                  and the Sky Dock's board first (they stay), then the
+                  music bonus and your buffs (they come and go). */}
+              <div className="pointer-events-none flex flex-col self-start">
+                <WildsHud />
+                <SkyDockHud />
+                <MusicBonus />
+                {!hudHidden ? <SkillHud stacked className="" /> : null}
+              </div>
             </div>
             <div
               className={cn(
@@ -458,6 +465,8 @@ export function TownWorld({
               net={net}
               bubbles={bubbles}
               player={look}
+              playerName={profile?.name}
+              playerTitle={profile?.title}
               paused={canvasPaused}
               onOpen={onOpen}
               onOpenProfile={onOpenProfile}
@@ -479,6 +488,7 @@ export function TownWorld({
             {profile ? (
               <DuelHud me={{ name: profile.name, title: profile.title }} />
             ) : null}
+            <LocationTitle />
           </div>
           <BossResults interactive={!windowOpen} />
         </>
@@ -520,7 +530,7 @@ export function TownWorld({
             : `${
                 portalTo.id === "home"
                   ? "Back to "
-                  : portalTo.room
+                  : portalTo.room === "dark"
                     ? "Enter "
                     : "Enter the "
               }${portalTo.name}`}{" "}
@@ -537,15 +547,19 @@ export function TownWorld({
             promptAt,
           )}
         >
-          {bench === "sit"
-            ? "Sit down"
-            : bench === "read"
-              ? "Read the bulletin board"
-              : bench === "attune"
-                ? "Attune to the Crystal"
-                : bench === "upgrade"
-                  ? "Upgrade crystal"
-                  : "Stand up"}{" "}
+          {typeof bench === "object"
+            ? `Pick up ${bench.name}`
+            : bench === "sit"
+              ? "Sit down"
+              : bench === "read"
+                ? "Read the bulletin board"
+                : bench === "attune"
+                  ? "Attune to the Crystal"
+                  : bench === "upgrade"
+                    ? "Upgrade crystal"
+                    : bench === "crafting"
+                      ? "Crafting Station"
+                      : "Stand up"}{" "}
           <span className="text-text-dim">[E]</span>
         </button>
       ) : null}
@@ -590,8 +604,9 @@ class TownBoundary extends Component<
 /** A key, as the hints show it. */
 /** Frames drawn per second, counted over each half second: the Town's,
  * counted from the canvas's own draws (it slows down unfocused). Shown from Settings →
- * Controls. Top right; in a raid the boss's card has that corner, so it
- * sits just left of it (the card's width, BossHud's BOSS_CARD). */
+ * Controls. Top right; in a raid the
+ * boss's card has that corner, so it sits just left of it (the card's
+ * width, BossHud's BOSS_CARD). */
 function FrameRate({ className }: { className?: string }) {
   useBossFight();
   const bossCard = bossFight.on && !bossFight.tower;

@@ -26,6 +26,7 @@ import {
   fetchUpcomingEvents,
   fetchWeekEvents,
 } from "../_shared/shared/game-events.ts";
+import { WILDS_EVENT_TYPE, wildsConfig } from "../_shared/shared/wilds.ts";
 import { corsHeaders, jsonResponse } from "../_shared/cors.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -109,6 +110,9 @@ Deno.serve(async (request) => {
             e.config as MerchantConfig,
             user.id,
           );
+        } else if (e.type === WILDS_EVENT_TYPE) {
+          // Made whole, so every client times the ship alike.
+          config = wildsConfig(e.config);
         } else {
           config = e.config as Record<string, unknown>;
         }

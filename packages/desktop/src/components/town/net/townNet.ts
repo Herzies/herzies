@@ -11,6 +11,8 @@ import {
 import { useEffect, useSyncExternalStore } from "react";
 import { notify } from "../../../lib/notices";
 import { herzies, onWindowHidden } from "../../../tauri-bridge";
+import { turnedAway } from "../airship/boarding";
+import { noteServerTime } from "../airship/skyClock";
 import { setChampion } from "../champion";
 import { MOB_DELAY_MS, setDrawDelaySource } from "../combat/drawDelay";
 import { bossFight, handleBossMessage } from "../combat/fight";
@@ -26,6 +28,8 @@ import {
 import { settleEat } from "../eat";
 import { goToMap, townLive, townSave } from "../runtime";
 import { setVitals } from "../vitals";
+import { handleWildsLootMessage, resetWildsLoot } from "../wilds/loot";
+import { handleWildsMessage, resetWilds } from "../wilds/store";
 import { TownConnection, type TownTicket } from "./TownConnection";
 
 /** Stay in the Town this long after leaving its tab or opening a visitor,
@@ -80,7 +84,16 @@ export function townNet(): TownConnection {
         },
         send: (op) => net?.sendDuel(op),
       });
-      if (!duels) handleBossMessage(m, clock);
+      // So does the Wilds' free-for-all.
+      const pvp = handleWildsMessage(m, { ...clock, map: () => townSave.map });
+      // And its loot: the cards dropped where herzies fell, the caches. A
+      // cache's own loot is a `loot`, like a Tower mob's (the boss's below).
+      const loot = handleWildsLootMessage(m, {
+        ...clock,
+        map: () => townSave.map,
+        me: () => townSave,
+      });
+      if (!duels && !pvp && !loot) handleBossMessage(m, clock);
     },
     // Leaving mid-duel (another island, the Town closed) is yielding: said
     // now, rather than left to the room to find out.
@@ -88,8 +101,16 @@ export function townNet(): TownConnection {
       if (inDuel()) net?.sendDuel({ op: "yield" });
       resetDuels();
       forgetFighters();
+      resetWilds();
+      resetWildsLoot();
     },
     onRefused: (why) => {
+      // The sky ship's deck too crowded to come aboard: back down on the pier.
+      if (townSave.map === "airship") {
+        notify("Blåmann is full. Catch her next sailing!");
+        turnedAway(townSave.ship);
+        return;
+      }
       // The cave (or the Tower) won't have us: back to town, with the
       // reason.
       const tower = townSave.map === "tower";
@@ -106,6 +127,7 @@ export function townNet(): TownConnection {
       );
       goToMap("home");
     },
+    onServerTime: (t) => noteServerTime(t),
     onRoomClosed: () => {
       notify(
         townSave.map === "tower"

@@ -2,6 +2,7 @@ import { LOW_HP_FRACTION } from "@herzies/shared";
 import { useEffect, useState } from "react";
 import { cn } from "../lib/utils";
 import { herzies } from "../tauri-bridge";
+import { PromptOverlay } from "./PromptOverlay";
 import { bossFight, useBossFight } from "./town/combat/fight";
 import { useBossResultsShown } from "./town/combat/results";
 import { townNet } from "./town/net/townNet";
@@ -12,7 +13,7 @@ import { refreshVitals, setVitals, useLiveHp } from "./town/vitals";
  * The red edge as health runs low, and what comes up when it runs out: in a
  * raid you're in, a banner (you lie where you fell; a Bard can play you
  * back up, or you can leave the fight and its reward); anywhere else, the
- * screen that sends you home to rest.
+ * prompt box that sends you home to rest.
  */
 export function TownVitals({
   inFight,
@@ -106,41 +107,29 @@ export function TownVitals({
           ) : null}
         </div>
       ) : down && !results && !bossFight.closing ? (
-        // As the boss fight's end screen: the window fills the Town down to
-        // the bottom margin, the world blurred out behind it.
-        <div
-          className="absolute inset-x-3 top-[38px] z-50 flex"
-          style={{ bottom: "0.75rem" }}
+        // The app's own prompt box, up top: the Town stays in sight around
+        // it. Escape doesn't dismiss it (there's nothing else to choose).
+        <PromptOverlay
+          title="Oh no! You need some rest"
+          titleId="down-title"
+          escapeDisabled
+          actions={[
+            {
+              label: "Respawn in town",
+              busyLabel: "Respawning…",
+              busy,
+              onClick: respawn,
+            },
+          ]}
         >
-          <section
-            role="alertdialog"
-            aria-labelledby="down-title"
-            className="relative flex min-h-0 w-full flex-col items-center justify-center gap-2 overflow-y-auto rounded border border-white/15 bg-black/45 px-4 py-3 text-center text-ui text-text shadow-lg backdrop-blur-md"
-          >
-            <h2 id="down-title" className="text-xl font-bold text-text">
-              Oh no! You need some rest
-            </h2>
-            <p className="text-[10px] text-text-dim">
-              Your herzie ran out of health. A Bard can play it back up where it
-              fell — or rest to get up on your own.
+          Your herzie ran out of health. A Bard can play it back up where it
+          fell — or rest to get up on your own.
+          {failed ? (
+            <p className="mt-1 text-[10px] text-text-dim">
+              Couldn't reach the server. Try again.
             </p>
-            <div className="mt-1.5 flex justify-center">
-              <button
-                type="button"
-                className="btn"
-                onClick={respawn}
-                disabled={busy}
-              >
-                {busy ? "Respawning…" : "Respawn in town"}
-              </button>
-            </div>
-            {failed ? (
-              <p className="text-[10px] text-text-dim">
-                Couldn't reach the server. Try again.
-              </p>
-            ) : null}
-          </section>
-        </div>
+          ) : null}
+        </PromptOverlay>
       ) : null}
     </>
   );

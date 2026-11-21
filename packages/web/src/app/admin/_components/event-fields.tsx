@@ -4,6 +4,11 @@ import {
   BOSS_HP_PER_PLAYER,
   type BossRewardPool,
   rewardPoolItemChance,
+  WILDS_DEPART_DEFAULT_S,
+  WILDS_DEPART_MAX_S,
+  WILDS_DEPART_MIN_S,
+  WILDS_LEG_S,
+  wildsConfigError,
 } from "@herzies/shared";
 import { type CatalogItem, INPUT } from "./admin-shared";
 
@@ -610,6 +615,81 @@ export function MerchantConfigFields({
       >
         + add item
       </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The Wilds (the sky ship, Blåmann)
+// ---------------------------------------------------------------------------
+
+/** How often the sky ship leaves each dock, as typed (seconds). */
+export type WildsConfigForm = { departEverySec: string };
+
+export function defaultWildsConfig(): WildsConfigForm {
+  return { departEverySec: String(WILDS_DEPART_DEFAULT_S) };
+}
+
+export function wildsConfigFromRecord(
+  config: Record<string, unknown>,
+): WildsConfigForm {
+  return typeof config.departEverySec === "number"
+    ? { departEverySec: String(config.departEverySec) }
+    : defaultWildsConfig();
+}
+
+/** Form → config, or why it can't be saved (the server checks the same). */
+export function wildsFormToConfig(
+  form: WildsConfigForm,
+): Record<string, unknown> | string {
+  const config = { departEverySec: Number(form.departEverySec) };
+  return wildsConfigError(config) ?? config;
+}
+
+/** "every 2 minutes", "every 100 s": how the timetable reads to players. */
+function every(sec: number): string {
+  if (sec % 60 === 0) return `every ${sec / 60} minutes`;
+  return `every ${sec} s`;
+}
+
+export function WildsConfigFields({
+  wilds,
+  setWilds,
+  fieldIdPrefix,
+}: {
+  wilds: WildsConfigForm;
+  setWilds: (next: WildsConfigForm) => void;
+  fieldIdPrefix: string;
+}) {
+  const sec = Number(wilds.departEverySec);
+  const problem = wildsConfigError({ departEverySec: sec });
+  return (
+    <div className="grid sm:grid-cols-2 gap-4 border border-border rounded-sm p-4 bg-bg">
+      <div>
+        <label
+          className="block text-xs text-text-dim mb-1"
+          htmlFor={`${fieldIdPrefix}-wilds-depart`}
+        >
+          ship departs every (seconds)
+        </label>
+        <input
+          id={`${fieldIdPrefix}-wilds-depart`}
+          type="number"
+          min={WILDS_DEPART_MIN_S}
+          max={WILDS_DEPART_MAX_S}
+          step={1}
+          value={wilds.departEverySec}
+          onChange={(e) => setWilds({ departEverySec: e.target.value })}
+          className={INPUT}
+        />
+      </div>
+      <p className="sm:col-span-2 text-xs text-text-dim">
+        {problem
+          ? `${WILDS_DEPART_MIN_S}–${WILDS_DEPART_MAX_S} seconds (default ${WILDS_DEPART_DEFAULT_S}).`
+          : `Blåmann, the sky ship, leaves each Sky Dock (home island and the Wilds) ${every(sec)}, half that after leaving the other. The flight takes ${WILDS_LEG_S} s each way, so she waits ${sec / 2 - WILDS_LEG_S} s at each dock for players to walk on and off.`}{" "}
+        She runs while the event is on; outside it she&apos;s laid up at home,
+        and anyone left on the Wilds is sent back to Town.
+      </p>
     </div>
   );
 }

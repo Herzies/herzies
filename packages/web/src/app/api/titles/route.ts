@@ -4,10 +4,11 @@ import { authenticateRequest, isAuthError } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase-admin";
 
 /** The Titles tab: what's worn, what's earned, the numbers progress is
- * shown on and how many herzies hold each. Opening it grants whatever the
- * herzie has reached that nothing else grants as it happens (friends, Market
- * sales, a Tower month closing, a fallen boss): those come back in
- * `granted`, and the next sync hands them over for the toast too. */
+ * shown on, how many herzies hold each and how many there are in all.
+ * Opening it grants whatever the herzie has reached that nothing else
+ * grants as it happens (friends, Market sales, a Tower month closing, a
+ * tenth boss fight): those come back in `granted`, and the next sync hands
+ * them over for the toast too. */
 export async function GET(request: Request) {
   const auth = await authenticateRequest(request);
   if (isAuthError(auth)) return auth;
@@ -30,6 +31,7 @@ export async function GET(request: Request) {
     earned: state.earned ?? [],
     metrics: state.metrics,
     holders: state.holders ?? {},
+    herzies: state.herzies ?? 0,
     granted: state.granted ?? [],
   } satisfies TitlesState);
 }

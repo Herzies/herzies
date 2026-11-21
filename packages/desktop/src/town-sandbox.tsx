@@ -11,7 +11,7 @@
 // `&name=` and `&server=ws://…` to taste. Open it twice to see each other.
 // Duels too: in each tab, click the other's name, then "Challenge to duel"
 // (within 8 u); `&title=` wears a title (a titles.ts id, e.g.
-// `&title=duel-10`), shown under the name and on the duel's cards.
+// `&title=duel-10`), shown over the name and on the duel's cards.
 // `?map=bossroom` (with `?net=local`) joins the boss's cave on `wrangler dev`
 // (`&lobby=20` makes it a raid that locks 20 s after loading; `&per=` sets
 // its health per herzie)
@@ -38,6 +38,19 @@
 // (Settings > Debug), `take()` has the server take
 // the oldest back (a spirit's sweep), and `?ground=boombox` gives the
 // herzie a ground accessory to fade in at Home.
+// `?wilds=20` runs Blåmann to the Wilds, its first run leaving home in
+// 20 s (`&every=` seconds between departures from each dock, default
+// 120); `&dock=1` starts you at the end of the home Sky Dock's pier.
+// `?map=wilds&loot=1` puts a cache and two dropped cards in front of you
+// (`&lootItem=` the locked one; `&cacheAt=`, `&hold=rival`: see below); E
+// at the Crafting Station (or `&craftingOpen=1`) opens its window, with a
+// made-up bag of bits and `&class=`'s instruments. `?map=wilds&zone=1`
+// joins a made-up free-for-all (nobody else in it), for the HUD's lines
+// under the now-playing box: safe camp or PvP zone, and the cache's hold.
+// `?map=tower&chest=1` stands a cleared Warden's floor (10) with its chest
+// on the compass, as the room would tell it: walk onto the star and it
+// opens and tosses out made-up loot (nothing's granted); the next floor's
+// turns up a few seconds later.
 import "./globals.css";
 import {
   basicAttack,
@@ -47,21 +60,35 @@ import {
   crystalCapacity,
   crystalUpgradeCost,
   getItem,
+  getItemIcon,
   ITEMS,
   type ItemUnit,
   isHerzieClass,
   SH,
   signTownTicket,
   totalXpForLevel,
+  WILDS_DEPART_DEFAULT_S,
+  WILDS_LEG_MS,
 } from "@herzies/shared";
+import { TOWER_CHEST, towerChestRolls } from "@herzies/shared/tower";
+import {
+  WILDS_CACHE_HOLD_MS,
+  WILDS_CACHE_HOLD_RADIUS,
+} from "@herzies/shared/wilds-loot";
 import type { RootState } from "@react-three/fiber";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { CraftingPanel } from "./components/CraftingPanel";
 import { CrystalPanel } from "./components/CrystalPanel";
 import { Notices } from "./components/Notices";
+import { NowPlayingBox } from "./components/NowPlayingBox";
 import { PlayerBars } from "./components/PlayerBars";
 import type { EventCard } from "./components/TownScene";
 import { TownVitals } from "./components/TownVitals";
+import { berthOf } from "./components/town/airship/berth";
+import { fleet } from "./components/town/airship/fleet";
+import { SkyDockHud } from "./components/town/airship/SkyDockHud";
+import { setWildsService } from "./components/town/airship/service";
 import { BossHud } from "./components/town/BossHud";
 import { BossResults } from "./components/town/BossResults";
 import { CRYSTAL, crystalsOf } from "./components/town/Crystal";
@@ -70,7 +97,10 @@ import {
   bubbleDuration,
   type ChatBubbles,
 } from "./components/town/chatBubbles";
-import { debugDropLoot } from "./components/town/combat/fight";
+import {
+  debugDropLoot,
+  handleBossMessage,
+} from "./components/town/combat/fight";
 import { setLootRoom } from "./components/town/combat/lootFeed";
 import {
   sampleBossResults,
@@ -87,6 +117,7 @@ import { setTowerOpen } from "./components/town/gates";
 import { Hotbar } from "./components/town/Hotbar";
 import { homeMode } from "./components/town/homeMode";
 import { assignHotbar } from "./components/town/hotbarSlots";
+import { LocationTitle } from "./components/town/LocationTitle";
 import { cellAt, objectAt } from "./components/town/map";
 import { setTownTicketSource, townNet } from "./components/town/net/townNet";
 import {
@@ -102,13 +133,39 @@ import { CastBar, SkillHud } from "./components/town/SkillHud";
 import TownCanvas from "./components/town/TownCanvas";
 import { setVitals } from "./components/town/vitals";
 import { weatherOverride } from "./components/town/weather";
+import { CRAFTING_KEY } from "./components/town/wilds/craftingSpot";
+import {
+  handleWildsLootMessage,
+  wildsLoot,
+} from "./components/town/wilds/loot";
+import { handleWildsMessage } from "./components/town/wilds/store";
+import { CacheHud, WildsHud } from "./components/town/wilds/WildsHud";
 import { HerzieStageContext, overlayHerzieStage } from "./lib/overlayStage";
 import { herzies } from "./tauri-bridge";
 
 const params = new URLSearchParams(location.search);
 const { spots: SPOTS, spare: SPARE_SPOTS } = spotsOf(HOME_MAP);
-// Start on another island: ?map=arena .
+// Start on another island: ?map=tower .
 if (params.has("map")) goToMap(params.get("map") as string);
+if (params.has("wilds")) {
+  const every = Number(params.get("every") ?? WILDS_DEPART_DEFAULT_S) * 1000;
+  const first = Date.now() + Number(params.get("wilds") || 20) * 1000;
+  const startsAt = first - (every / 2 - WILDS_LEG_MS);
+  setWildsService({
+    startsAt,
+    endsAt: startsAt + 7_200_000,
+    departEveryMs: every,
+  });
+}
+if (params.get("dock") === "1") {
+  const b = berthOf(HOME_MAP);
+  if (b)
+    goToMap("home", {
+      x: b.pierEnd.x - Math.sin(b.out) * 3,
+      z: b.pierEnd.z - Math.cos(b.out) * 3,
+      heading: b.out,
+    });
+}
 
 const startHour = params.has("time") ? Number(params.get("time")) : null;
 const speed = Number(params.get("speed") ?? 0);
@@ -497,7 +554,197 @@ if (params.get("cave") === "open") {
 }
 const net = params.get("net") === "local" ? localNet() : null;
 // For poking at from the console and browser tests.
-Object.assign(window, { townNet: net });
+Object.assign(window, { townNet: net, townSave, townLive, fleet });
+
+// --- The Wilds' loot ---------------------------------------------------------------
+// `?map=wilds&loot=1`: a cache a little way ahead (`&cacheAt=` units, 4 by
+// default: you start in its ring) and two dropped cards either side (the
+// left one someone else's for a minute yet), as the room would tell them.
+// E by a card you may take asks for it (it goes nowhere without a room).
+// The room's hold on the cache is faked here: stand in the ring 10 s and
+// it opens, and another turns up a moment later; `&hold=rival` has
+// someone else in it already, 3 s in, who stays (contested while you're
+// in too, theirs in a few seconds if you step out).
+if (params.get("loot") === "1") {
+  const ctx = {
+    toLocal: (t: number) => t,
+    you: () => wildsLoot.you,
+    map: () => townSave.map,
+    me: () => townSave,
+  };
+  handleWildsLootMessage({ t: "welcome", you: 1, players: [] }, ctx);
+  const fx = Math.sin(townSave.heading);
+  const fz = Math.cos(townSave.heading);
+  const at = (ahead: number, side: number) => ({
+    x: townSave.x + fx * ahead + fz * side,
+    z: townSave.z + fz * ahead - fx * side,
+  });
+  const t = performance.now();
+  const spot = at(Number(params.get("cacheAt") ?? 4), 0);
+  handleWildsLootMessage(
+    {
+      t: "wildsLoot",
+      drops: [
+        {
+          id: "sandbox-locked",
+          item: params.get("lootItem") ?? "wildwood-lute",
+          level: 2,
+          ...at(1.2, 2),
+          firstFor: 2,
+          firstUntil: t + 60_000,
+          expiresAt: t + 120_000,
+        },
+        {
+          id: "sandbox-free",
+          item: "storm-hide",
+          level: 0,
+          ...at(1.2, -2),
+          firstFor: null,
+          firstUntil: 0,
+          expiresAt: t + 120_000,
+        },
+      ],
+      cache: { id: "sandbox-cache-0", ...spot },
+      hold: null,
+    },
+    ctx,
+  );
+  const rivalIn = params.get("hold") === "rival";
+  let k = 0;
+  let mine: number | null = null;
+  let rival: number | null = rivalIn ? 3_000 : null;
+  let last = performance.now();
+  let told = "";
+  setInterval(() => {
+    const now = performance.now();
+    const dt = now - last;
+    last = now;
+    const c = wildsLoot.cache;
+    if (!c) return;
+    const inside =
+      Math.hypot(townSave.x - c.x, townSave.z - c.z) <= WILDS_CACHE_HOLD_RADIUS;
+    mine = inside ? mine : null;
+    const stepped = inside && mine === null;
+    if (stepped) mine = 0;
+    const contested = mine !== null && rival !== null;
+    if (!contested && mine !== null && !stepped) mine += dt;
+    if (!contested && mine === null && rival !== null) rival += dt;
+    const state = `${mine !== null}|${rival !== null}|${contested}`;
+    if (state !== told) {
+      told = state;
+      const holders: { id: number; ms: number }[] = [];
+      if (rival !== null) holders.push({ id: 2, ms: rival });
+      if (mine !== null) holders.push({ id: 1, ms: mine });
+      handleWildsLootMessage(
+        { t: "wildsHold", id: c.id, holders, contested, at: now },
+        ctx,
+      );
+    }
+    const by =
+      (mine ?? 0) >= WILDS_CACHE_HOLD_MS
+        ? 1
+        : (rival ?? 0) >= WILDS_CACHE_HOLD_MS
+          ? 2
+          : null;
+    if (by === null) return;
+    handleWildsLootMessage(
+      { t: "wildsCache", cache: null, by, byName: "Rival" },
+      ctx,
+    );
+    mine = null;
+    rival = rivalIn ? 3_000 : null;
+    told = "";
+    setTimeout(
+      () =>
+        handleWildsLootMessage(
+          { t: "wildsCache", cache: { id: `sandbox-cache-${++k}`, ...spot } },
+          ctx,
+        ),
+      3_000,
+    );
+  }, 100);
+}
+// `?map=tower&chest=1`: floor 10 cleared, its chest standing. The room's
+// part is faked: on the star (after the chest's landed) it opens, and its
+// loot follows as `town-vitals`' reply would, a moment later.
+if (params.get("map") === "tower" && params.get("chest") === "1") {
+  const clock = { toLocal: (t: number) => t, you: () => null };
+  const pool = ITEMS.filter((i) => i.rarity !== "common" && getItemIcon(i));
+  const standOn = (floor: number, chest: boolean) =>
+    handleBossMessage(
+      {
+        t: "floor",
+        floor,
+        level: floor,
+        you: Number(params.get("level") ?? 10),
+        mobs: [],
+        cleared: true,
+        ...(chest ? { chest: TOWER_CHEST.at } : {}),
+      },
+      clock,
+    );
+  let floor = 10;
+  let since = performance.now();
+  standOn(floor, true);
+  setInterval(() => {
+    const now = performance.now();
+    if (
+      since === 0 ||
+      now - since < TOWER_CHEST.settleMs ||
+      Math.hypot(townSave.x - TOWER_CHEST.at.x, townSave.z - TOWER_CHEST.at.z) >
+        TOWER_CHEST.reach
+    )
+      return;
+    since = 0;
+    standOn(floor, false);
+    const drops = Array.from({ length: towerChestRolls(floor) }, () => ({
+      id: "",
+      item: pool[Math.floor(Math.random() * pool.length)].id,
+    }));
+    setTimeout(
+      () => handleBossMessage({ t: "loot", drops, at: TOWER_CHEST.at }, clock),
+      600,
+    );
+    setTimeout(() => {
+      floor += 10;
+      since = performance.now();
+      standOn(floor, true);
+    }, 6_000);
+  }, 100);
+}
+// `?map=wilds&zone=1`: in the Wilds' free-for-all, as the room's welcome
+// would have it (casts and skills then go to a server there isn't).
+const zone = params.get("zone") === "1";
+if (zone)
+  handleWildsMessage(
+    { t: "welcome", you: 1, players: [] },
+    { toLocal: (t) => t, map: () => townSave.map },
+  );
+// `?craftingOpen=1`: the Crafting Station's window, with a bag of bits and
+// the class's (`?class=`) instruments.
+const craftingUnits: ItemUnit[] = [
+  ...(
+    [
+      ["tonewood", 14],
+      ["sky-string", 7],
+      ["storm-hide", 2],
+      ["resonite", 1],
+    ] as const
+  ).flatMap(([itemId, n]) =>
+    Array.from({ length: n }, (_, i) => ({
+      id: `sandbox-${itemId}-${i}`,
+      itemId,
+      upgradeLevel: 0,
+      equippedSlot: null,
+    })),
+  ),
+  ...(isHerzieClass(cls) ? CLASS_DEFS[cls].equipment : []).map((itemId, i) => ({
+    id: `sandbox-instrument-${i}`,
+    itemId,
+    upgradeLevel: 2 + i * 4,
+    equippedSlot: null,
+  })),
+];
 
 // --- Home ----------------------------------------------------------------------
 // Framed as the app's small window frames Home: the feet about where Home's
@@ -830,6 +1077,9 @@ function Sandbox() {
   const [crystalOpen, setCrystalOpen] = useState(
     params.get("crystalOpen") === "1",
   );
+  const [craftingOpen, setCraftingOpen] = useState(
+    params.get("craftingOpen") === "1",
+  );
   useEffect(() => {
     let n = 0;
     Object.assign(window, {
@@ -857,6 +1107,7 @@ function Sandbox() {
         }
       />
       <BossHud name="The boss" />
+      <LocationTitle />
       {net ? (
         <DuelHud
           me={{
@@ -875,6 +1126,8 @@ function Sandbox() {
       <TownCanvas
         spots={spots}
         player={look}
+        playerName={params.get("name") ?? "You"}
+        playerTitle={params.get("title")}
         net={net}
         bubbles={bubbles}
         paused={false}
@@ -901,6 +1154,7 @@ function Sandbox() {
         onOpen={(key) => {
           console.log("[town-sandbox] open", key);
           if (key === CRYSTAL_KEY) setCrystalOpen(true);
+          if (key === CRAFTING_KEY) setCraftingOpen(true);
         }}
         onNearChange={(s) => console.log("[town-sandbox] near", s?.key ?? null)}
       />
@@ -925,12 +1179,43 @@ function Sandbox() {
           </button>
         </div>
       ) : null}
-      <PlayerBars
-        level={7}
-        progress={0.3}
-        xp={totalXpForLevel(7) + 400}
-        className="absolute top-3 left-3 z-30 w-[160px]"
-      />
+      {craftingOpen ? (
+        <div className="absolute top-12 right-3 z-40 flex max-h-[calc(100%-4rem)] w-[320px] flex-col rounded-xl border border-white/15 p-3">
+          <div className="pointer-events-none absolute inset-0 rounded-xl bg-black/70 backdrop-blur-md" />
+          <div className="relative flex min-h-0 flex-1 flex-col">
+            <CraftingPanel
+              units={craftingUnits}
+              herzieClass={isHerzieClass(cls) ? cls : null}
+            />
+          </div>
+          <button
+            type="button"
+            className="btn relative mt-2"
+            onClick={() => setCraftingOpen(false)}
+          >
+            Close
+          </button>
+        </div>
+      ) : null}
+      {/* Top left as in the Town: the player card's bars, what's playing,
+          and the stacked list under it (TownWorld). */}
+      <div className="pointer-events-none absolute top-3 left-3 z-30 flex w-[174px] flex-col gap-2">
+        <PlayerBars
+          level={7}
+          progress={0.3}
+          xp={totalXpForLevel(7) + 400}
+          className="w-[160px]"
+        />
+        <NowPlayingBox
+          nowPlaying={null}
+          multipliers={null}
+          tint="bg-black/45 backdrop-blur-md"
+        />
+        <div className="flex flex-col self-start">
+          {zone ? <WildsHud /> : <CacheHud />}
+          <SkyDockHud />
+        </div>
+      </div>
       <SkyControls />
       <ItemPicker look={look} onChange={setLook} />
     </div>

@@ -17,8 +17,17 @@ import { HerzieModel } from "@herzies/shared/gl";
 import { Html } from "@react-three/drei";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
-import { type Group, Raycaster, Sphere, Vector2, Vector3 } from "three";
+import {
+  type Group,
+  type Object3D,
+  Raycaster,
+  Sphere,
+  Vector2,
+  Vector3,
+} from "three";
 import { GmMark } from "../GmMark";
+import { standY } from "./airship/boarding";
+import { onDeck } from "./airship/deck";
 import { ambient, seasonNow } from "./ambient";
 import { SEAT_Y } from "./Benches";
 import { BUBBLE_RANGE, type ChatBubble, type ChatBubbles } from "./chatBubbles";
@@ -64,7 +73,8 @@ import type { RemotePlayer, TownConnection } from "./net/TownConnection";
 import { useTownNetVersion } from "./net/townNet";
 import { townSave, useTownRuntime } from "./runtime";
 import { sfxRimshotSlam } from "./sfx";
-import { titleLook } from "./TitleLine";
+import { titleName, WORN_TITLE_COLOUR } from "./TitleLine";
+import { wildsBarOf, wildsDown, wildsFoe } from "./wilds/store";
 
 /** What every label reads: the herzie the pointer's on, and the nearest
  * few, who are named (REMOTE_LABEL.nearest). */
@@ -87,6 +97,7 @@ export function RemotePlayers({
   net,
   bubbles,
   onOpenProfile,
+  frame = null,
 }: {
   /** The island they're on with you: its ground's ups and downs. */
   map: TownMap;
@@ -95,6 +106,9 @@ export function RemotePlayers({
   onOpenProfile?: (friendCode: string) => void;
   /** What people are saying, by friend code. */
   bubbles?: ChatBubbles;
+  /** On a sky ship's deck: the deck's group (they're drawn inside it, in
+   * its coordinates), the space their cats and companions live in. */
+  frame?: Object3D | null;
 }) {
   useTownNetVersion(net);
   return (
@@ -108,6 +122,7 @@ export function RemotePlayers({
           net={net}
           bubble={bubbles?.get(r.look.seed)}
           onOpenProfile={onOpenProfile}
+          frame={frame}
         />
       ))}
     </>
@@ -198,12 +213,14 @@ function RemoteHerzie({
   net,
   bubble,
   onOpenProfile,
+  frame,
 }: {
   map: TownMap;
   remote: RemotePlayer;
   net: TownConnection;
   bubble?: ChatBubble;
   onOpenProfile?: (friendCode: string) => void;
+  frame: Object3D | null;
 }) {
   const { look } = remote;
   const lookKey = JSON.stringify(look);
@@ -214,9 +231,13 @@ function RemoteHerzie({
     [lookKey, remote.id],
   );
   useEffect(() => {
-    // Its cat spirit (if it has one) walks the same ground, round water.
+    herzie.setFrame(frame);
+  }, [herzie, frame]);
+  useEffect(() => {
+    // Its cat spirit (if it has one) walks the same ground, round water —
+    // or, on a deck, inside the rail.
     herzie.groundAt = (x, z) => groundY(map, x, z);
-    herzie.walkable = petWalkable(map, worldRadius(map));
+    herzie.walkable = map.ship ? onDeck : petWalkable(map, worldRadius(map));
   }, [herzie, map]);
   useEffect(() => {
     herzie.root.visible = false;
@@ -280,14 +301,17 @@ function RemoteHerzie({
     if (!s) return;
     herzie.root.visible = true;
     if (tag.current) tag.current.style.visibility = "visible";
-    // Sitting on a bench: on its seat, not the ground.
+    // Sitting on a bench: on its seat, not the ground. On a gangplank: on
+    // the plank.
     const seated = (s.flags & TOWN_FLAG_SITTING) !== 0;
-    const ground = groundY(map, s.x, s.z);
+    const ground = standY(map, s.x, s.z);
     herzie.root.position.set(s.x, ground + (seated ? SEAT_Y : 0), s.z);
-    // Your duel's opponent: aimed at and struck like a dummy (the server
-    // judges it), while the fight's on.
+    // Your duel's opponent, or anyone you may fight in the Wilds: aimed at
+    // and struck like a dummy (the server judges it), while the fight's on.
     const now = performance.now();
-    const facing = myOpponent() === remote.id && duelFighting(now);
+    const facing =
+      (myOpponent() === remote.id && duelFighting(now)) ||
+      wildsFoe(remote.id, s, townSave, now);
     if (facing && !target.current) {
       const t = newTarget(`duel${remote.id}`, s.x, s.z, s.heading);
       t.herzie = remote.id;
@@ -486,12 +510,14 @@ function RemoteHerzie({
         });
     }
     // Knocked out (in the cave, or anywhere outside a fight): lying where
-    // it fell, with a mark a Bard can spot from across the room.
-    const down = entityDown(remote.id) || remote.down;
+    // it fell, with a mark a Bard can spot from across the room. Taken down
+    // in the Wilds it lies there too, with no mark: it gets up by itself.
+    const ko = entityDown(remote.id) || !!remote.down;
+    const down = ko || wildsDown(remote.id);
     downed.current = applyDowned(herzie, down, downed.current, dt);
     // A duel's blows and its end, on this herzie (see duel/fx).
     poseFighter(herzie, remote.id, now, dt);
-    if (downMark.current) downMark.current.style.display = down ? "" : "none";
+    if (downMark.current) downMark.current.style.display = ko ? "" : "none";
     // A thrown disc isn't in the hand.
     herzie.setHeldHidden("held-l", discField.isOut(herzie, "held-l"));
     herzie.setHeldHidden("held-r", discField.isOut(herzie, "held-r"));
@@ -514,7 +540,8 @@ function RemoteHerzie({
       bubbleBox.current.style.display = near ? "" : "none";
     }
     // In a fight, a small health bar under the name: a duel's for its two
-    // (bigger over your opponent), the boss fight's for everyone.
+    // (bigger over your opponent), the boss fight's for everyone, the
+    // Wilds' once it's been hurt.
     const ring = ringOf(remote.id);
     const opponent = myOpponent() === remote.id;
     if (hpBox.current && hpFill.current) {
@@ -522,7 +549,7 @@ function RemoteHerzie({
         ? ring.health.get(remote.id)
         : bossFight.on
           ? bossFight.health.get(remote.id)
-          : undefined;
+          : wildsBarOf(remote.id, now);
       hpBox.current.style.display = h ? "" : "none";
       const big = opponent ? "1" : "";
       if (hpBox.current.dataset.big !== big) hpBox.current.dataset.big = big;
@@ -573,13 +600,14 @@ function RemoteHerzie({
     }
   });
 
-  const title = titleLook(remote.title);
+  const title = titleName(remote.title);
   return (
     <>
       <primitive object={herzie.root} />
       <group ref={tagAnchor}>
         <Html zIndexRange={[19, 0]}>
-          {/* Stacked up from the anchor: the bubble over the name. */}
+          {/* Stacked up from the anchor: the bubble over the title, the
+              title over the name. */}
           <div className="flex -translate-x-1/2 -translate-y-full flex-col items-center">
             <div
               ref={downMark}
@@ -597,6 +625,15 @@ function RemoteHerzie({
               ref={labelBox}
               className="flex origin-bottom flex-col items-center"
             >
+              {title ? (
+                <div
+                  ref={titleLine}
+                  className="pointer-events-none whitespace-nowrap text-[9px] font-medium leading-tight"
+                  style={{ color: WORN_TITLE_COLOUR, textShadow: NAME_SHADOW }}
+                >
+                  {title}
+                </div>
+              ) : null}
               <button
                 type="button"
                 ref={tag}
@@ -623,15 +660,6 @@ function RemoteHerzie({
                 {remote.gm ? <GmMark className="[text-shadow:none]" /> : null}
                 {remote.name}
               </button>
-              {title ? (
-                <div
-                  ref={titleLine}
-                  className="pointer-events-none whitespace-nowrap text-[9px] font-medium leading-tight"
-                  style={{ color: title.color, textShadow: NAME_SHADOW }}
-                >
-                  {title.name}
-                </div>
-              ) : null}
               <div
                 ref={hpBox}
                 className="pointer-events-none mt-px h-[3px] w-10 overflow-hidden rounded-sm bg-black/60 data-[big=1]:mt-0.5 data-[big=1]:h-[5px] data-[big=1]:w-16 data-[low=1]:animate-pulse data-[low=1]:outline data-[low=1]:outline-1 data-[low=1]:outline-red-400/70 motion-reduce:animate-none"

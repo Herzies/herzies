@@ -10,20 +10,12 @@
  * can touch each other; nobody else in the room can hurt, heal or buff
  * either of them, or be touched by them.
  */
-import { classDef } from "@herzies/shared/boss-fight";
-import { type AttackStyle, isHerzieClass } from "@herzies/shared/classes";
 import {
   aimDirection,
-  bodyHitAt,
-  DISC_RANGE,
   discLandsAfterMs,
   HERZIE_BODY,
   hitDamage,
-  MELEE_REACH,
-  meleeReaches,
   STRIKE_DAMAGE,
-  WAVE_HAND_HEIGHT,
-  WAVE_SPEED,
 } from "@herzies/shared/combat";
 import {
   DUEL,
@@ -33,7 +25,6 @@ import {
   duelCredited,
   duelDamage,
   duelMarks,
-  duelMaxHp,
   duelRing,
   inDuelRing,
   suddenDeath,
@@ -63,20 +54,24 @@ import {
   type SkillRefusal,
   TOWN_MAPS,
   type TownMapId,
-  type TownTicketPayload,
 } from "@herzies/shared/town-net";
 import { quickness, type ShelterDome, shelterOf, TUNING } from "./boss";
 import { CastBudget, StunReturns } from "./budgets";
-import {
-  armsOf,
-  type FightStats,
-  type Outbound,
-  type SkillResult,
-  skillsOf,
-  statsOf,
-} from "./fight";
+import type { Outbound, SkillResult } from "./fight";
 import { DiscHands } from "./hands";
 import { PositionHistory } from "./history";
+import {
+  all,
+  buffMsg,
+  castMeets,
+  firstAlong,
+  type PvpKit,
+  type PvpTicket,
+  pvpKit,
+  round,
+  seenAt,
+  to,
+} from "./pvp";
 
 /** Casts and skills from a herzie whose duel just ended are still on their
  * way for this long: dropped, never held against its socket. */
@@ -90,13 +85,6 @@ export const HOLD_SLACK = 0.5;
 export const HOLD_EASE_MS = 500;
 export const HOLD_CORRECT_EVERY_MS = 250;
 
-/** How a herzie fights, from its newest ticket: taken when a duel is
- * accepted, and kept for the duel (a renewed ticket changes nothing). */
-export type DuelTicket = Pick<
-  TownTicketPayload,
-  "look" | "st" | "sk" | "lv" | "cls"
->;
-
 /** A herzie in the room as challenges see it: where the room has it, and
  * whether it can be asked. */
 export type DuelPeer = {
@@ -106,7 +94,9 @@ export type DuelPeer = {
   z: number;
   /** AFK, or knocked out (its ticket says so): not to be challenged. */
   away: boolean;
-  combat: DuelTicket;
+  /** How it fights, from its newest ticket: taken when a duel is
+   * accepted, and kept for the duel (a renewed ticket changes nothing). */
+  combat: PvpTicket;
 };
 
 /** Who's in the room now (on a socket: not a duelist waiting to come
@@ -143,19 +133,12 @@ export type DuelEffects = {
   results: DuelResult[];
 };
 
-type Fighter = {
+/** A duelist: its kit (health from its level, its ticket's stats, Def,
+ * attack and skills) and how its duel goes. */
+type Fighter = PvpKit & {
   uid: string;
   id: number;
   hp: number;
-  maxHp: number;
-  level: number;
-  stats: FightStats;
-  /** Its Def as it fights (classDef). */
-  def: number;
-  attack: AttackStyle;
-  melee: number;
-  armed: boolean;
-  skills: Map<SkillId, number>;
   ready: Map<SkillId, number>;
   /** Only its own (Haste, Shuffle, its Cymbrella's): nobody else's reach
    * it in a duel. */
@@ -554,28 +537,18 @@ export class DuelRuntime {
     const quick = quickness(f.buffs, now, f.stats.timing);
     if (!this.casts.spend(uid, now, quick)) return "cooldown";
     const inside = inDuelRing(d.centre, pos);
-    const seen = this.seen(o.uid, now);
-    if (f.attack === "melee") {
-      if (!inside || !seen) return "miss";
-      const reaches = meleeReaches(
-        pos,
-        yaw,
-        { x: seen.x, z: seen.z, radius: HERZIE_BODY.radius },
-        MELEE_REACH + TUNING.meleeSlack,
-      );
-      if (!reaches) return "miss";
-      this.queue(d, f, o, now, duelAttackShare("melee", f.melee));
-      return "hit";
-    }
-    const disc = f.attack === "disc";
-    const dist = seen
-      ? this.reach(pos, aimDirection(yaw, pitch), seen, disc)
+    const seen = seenAt(this.history, o.uid, now);
+    const hit = seen
+      ? castMeets(f, pos, yaw, pitch, [{ uid: o.uid, ...seen }])
       : null;
     // Both discs out: see BossEngine.cast.
-    if (disc && !this.hands.take(uid, now, dist, quick)) return "miss";
-    if (dist === null || !inside) return "miss";
-    const flight = disc ? discLandsAfterMs(dist) : (dist / WAVE_SPEED) * 1000;
-    this.queue(d, f, o, now + flight, duelAttackShare(f.attack, f.melee));
+    if (
+      f.attack === "disc" &&
+      !this.hands.take(uid, now, hit?.dist ?? null, quick)
+    )
+      return "miss";
+    if (!hit || !inside) return "miss";
+    this.queue(d, f, o, now + hit.flightMs, hit.mult);
     return "hit";
   }
 
@@ -685,16 +658,15 @@ export class DuelRuntime {
         ),
       );
     } else if (skillId === "backspin") {
-      const seen = this.seen(o.uid, now);
+      const seen = seenAt(this.history, o.uid, now);
       if (seen && inDuelRing(d.centre, pos)) {
         // Each a disc: `value` of a wave, at a disc's share in a duel.
         const mult = value * DUEL.discShare;
         const half = (BACKSPIN_DISCS - 1) / 2;
         for (let i = 0; i < BACKSPIN_DISCS; i++) {
           const dir = aimDirection(yaw + (i - half) * BACKSPIN_SPREAD, pitch);
-          const dist = this.reach(pos, dir, seen, true);
-          if (dist !== null)
-            this.queue(d, f, o, now + discLandsAfterMs(dist), mult);
+          const hit = firstAlong(pos, dir, [{ uid: o.uid, ...seen }], true);
+          if (hit) this.queue(d, f, o, now + discLandsAfterMs(hit.dist), mult);
         }
       }
     } else if (skillId === "rimshot") {
@@ -767,7 +739,7 @@ export class DuelRuntime {
       if (!s || now < s.until) continue;
       f.slam = null;
       if (!inDuelRing(d.centre, s)) continue;
-      const seen = this.seen(o.uid, now);
+      const seen = seenAt(this.history, o.uid, now);
       if (
         !seen ||
         Math.hypot(seen.x - s.x, seen.z - s.z) >
@@ -1077,29 +1049,6 @@ export class DuelRuntime {
     return d.a.uid === uid ? [d.a, d.b] : [d.b, d.a];
   }
 
-  /** Where `uid` stood as its opponent's client saw it at `now`. */
-  private seen(uid: string, now: number): { x: number; z: number } | null {
-    return (
-      this.history.at(uid, now - TUNING.seenLagMs) ?? this.history.at(uid, now)
-    );
-  }
-
-  /** How far along `dir` from (x, z) a wave (or a disc) meets a herzie
-   * standing at `at`, if it does. */
-  private reach(
-    from: { x: number; z: number },
-    dir: readonly [number, number, number],
-    at: { x: number; z: number },
-    disc: boolean,
-  ): number | null {
-    return bodyHitAt(
-      [from.x, WAVE_HAND_HEIGHT, from.z],
-      dir,
-      { ...HERZIE_BODY, x: at.x, z: at.z },
-      disc ? DISC_RANGE : undefined,
-    );
-  }
-
   /** A hit from `by` on `victim` landing at `at`: rolled now, judged as it
    * lands. */
   private queue(
@@ -1211,24 +1160,12 @@ export class DuelRuntime {
 /** A duelist as it starts: full duel health (its level's), its ticket's
  * stats, skills all ready, no buffs. */
 function fighter(p: DuelPeer, mark: { x: number; z: number }): Fighter {
-  const c = p.combat;
-  const stats = statsOf(c.st);
-  const level =
-    typeof c.lv === "number" && Number.isFinite(c.lv)
-      ? Math.max(1, Math.floor(c.lv))
-      : 1;
-  const maxHp = duelMaxHp(level);
-  const cls = isHerzieClass(c.cls) ? c.cls : null;
+  const kit = pvpKit(p.combat);
   return {
+    ...kit,
     uid: p.uid,
     id: p.id,
-    hp: maxHp,
-    maxHp,
-    level,
-    stats,
-    def: classDef(cls, stats.def),
-    ...armsOf(c),
-    skills: skillsOf(c),
+    hp: kit.maxHp,
     ready: new Map(),
     buffs: [],
     mark,
@@ -1250,27 +1187,6 @@ function effects(): DuelEffects {
   return { out: [], place: [], results: [] };
 }
 
-function to(uid: string, msg: ServerMessage): Outbound {
-  return { to: { uid }, msg };
-}
-
-function all(msg: ServerMessage): Outbound {
-  return { to: "all", msg };
-}
-
-function buffMsg(id: number, b: Buff): ServerMessage {
-  return {
-    t: "buff",
-    id,
-    buff: b.id,
-    value: b.value,
-    until: b.until,
-    ...(b.kind ? { kind: b.kind } : {}),
-  };
-}
-
 function apart(a: { x: number; z: number }, b: { x: number; z: number }) {
   return Math.hypot(a.x - b.x, a.z - b.z);
 }
-
-const round = (n: number) => Math.round(n * 100) / 100;

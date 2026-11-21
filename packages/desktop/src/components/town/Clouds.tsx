@@ -10,7 +10,7 @@ const COUNT = 16;
 const DRIFT = 0.006;
 
 /** A cloud's colours: shaded blue-grey underneath, white on top. */
-const CLOUD = { deep: "#c3cde0", mid: "#e4e9f3", lit: "#ffffff" };
+export const CLOUD = { deep: "#c3cde0", mid: "#e4e9f3", lit: "#ffffff" };
 
 /** One cloud: a few soft round puffs (the same rounded clumps as an oak's
  * crown, shaded as one mass), flattened, side by side. */

@@ -1,8 +1,9 @@
 /**
- * A duel through a real Durable Object: two herzies in the Wilds challenge,
- * accept, count down, trade a hit, drop and come back, and one yields. A
- * shard of its own (the Wilds: room.test.ts has Home's). The room keeps its
- * own clock, so this waits out the real countdown (about 3 s).
+ * A duel through a real Durable Object: two herzies in Town challenge,
+ * accept, count down, trade a hit, drop and come back, and one yields. On
+ * Home's shard 0, which room.test.ts leaves alone (its rooms are shards 1
+ * up). The room keeps its own clock, so this waits out the real countdown
+ * (about 3 s).
  */
 import { HERZIE_BODY, WAVE_HAND_HEIGHT } from "@herzies/shared/combat";
 import { TITLES } from "@herzies/shared/titles";
@@ -21,7 +22,7 @@ const TITLE = TITLES[0].id;
 
 async function connect(shard: number) {
   const res = await exports.default.fetch(
-    `https://town.test/v1/town/wilds?shard=${shard}`,
+    `https://town.test/v1/town/home?shard=${shard}`,
     { headers: { upgrade: "websocket" } },
   );
   const ws = res.webSocket;
@@ -73,8 +74,8 @@ const send = (ws: WebSocket, m: unknown) => ws.send(JSON.stringify(m));
 
 describe("a duel in a room", () => {
   it("is asked, accepted, counted down, fought, dropped, resumed and yielded", async () => {
-    const a = await join(1, "duel-a", 0, TITLE);
-    const b = await join(1, "duel-b", 4, "not-a-title");
+    const a = await join(0, "duel-a", 0, TITLE);
+    const b = await join(0, "duel-b", 4, "not-a-title");
     // Titles under names: a real one shows, a made-up one doesn't.
     expect(b.welcome.players).toEqual([
       expect.objectContaining({ id: a.id, title: TITLE }),
@@ -123,7 +124,7 @@ describe("a duel in a room", () => {
     expect(a.messages.some((m) => m.t === "leave")).toBe(false);
 
     // It comes back under the same id, to the duel still on.
-    const back = await join(1, "duel-b", 4);
+    const back = await join(0, "duel-b", 4);
     expect(back.id).toBe(b.id);
     expect(back.welcome.duels).toEqual([
       expect.objectContaining({ id: fight.id, phase: "fight" }),

@@ -4,11 +4,13 @@ import { mapById } from "./maps";
 import {
   arrivalOn,
   PORTAL_HALF_WIDTH,
+  PORTAL_REACH,
   type Portal,
   portalSide,
   portalsOf,
   walkedThrough,
 } from "./portal";
+import { TOWER_PLINTH, towerPlace } from "./towerPlan";
 
 const facingSouth: Portal = {
   key: "0,0",
@@ -21,8 +23,8 @@ const facingSouth: Portal = {
 
 describe("portals", () => {
   it("lead from home to islands that lead back home", () => {
-    // Which islands home opens onto is the map's call (the Training
-    // Grounds and the Wilds come and go); every one must have a way back.
+    // Which islands home opens onto is the map's call; every one must have
+    // a way back.
     const home = portalsOf(mapById("home"));
     expect(home.length).toBeGreaterThan(0);
     for (const p of home) {
@@ -47,14 +49,14 @@ describe("portals", () => {
   });
 
   it("puts you out in front of the portal back, facing away from it", () => {
-    const arena = mapById("arena");
-    const back = portalsOf(arena).find((p) => p.to === "home") as Portal;
-    const at = arrivalOn(arena, "home");
+    const cave = mapById("bossroom");
+    const back = portalsOf(cave).find((p) => p.to === "home") as Portal;
+    const at = arrivalOn(cave, "home");
     expect(portalSide(back, at.x, at.z).ahead).toBeGreaterThan(1.5);
     expect(at.heading).toBeCloseTo(back.yaw);
     // From an island with no portal back: its spawn.
-    const spawn = arrivalOn(arena, "nowhere");
-    expect([spawn.x, spawn.z]).toEqual(arena.spawn.at);
+    const spawn = arrivalOn(cave, "nowhere");
+    expect([spawn.x, spawn.z]).toEqual(cave.spawn.at);
   });
 });
 
@@ -99,6 +101,65 @@ describe("the cave's mouth", () => {
     const after = { x: mouth.x - fx * 0.1, z: mouth.z - fz * 0.1 };
     expect(walkedThrough(mouth, before.x, before.z, after.x, after.z)).toBe(
       true,
+    );
+  });
+});
+
+describe("the Tower's door", () => {
+  const home = mapById("home");
+  const door = portalsOf(home).find((p) => p.door) as Portal;
+  const tower = buildingsOf(home).find((b) => b.kind === "tower");
+  /** A herzie is this wide either side of its middle (Player's RADIUS). */
+  const BODY = 0.55;
+
+  it("is home's way into the Tower, now there's no portal disc for it", () => {
+    expect(door).toMatchObject({ to: "tower", door: true });
+    expect(portalsOf(home).filter((p) => p.to === "tower" && !p.door)).toEqual(
+      [],
+    );
+    // And the Tower still leads back home.
+    expect(portalsOf(mapById("tower")).map((p) => p.to)).toContain("home");
+  });
+
+  it("is reached with E from where a herzie can stand, in front of the porch", () => {
+    if (!tower) throw new Error("no tower");
+    const at = towerPlace(tower);
+    // The tower's behind it.
+    expect(portalSide(door, at.x, at.z).ahead).toBeLessThan(0);
+    // Pressed up against the tower, straight in front of the door, and a
+    // step back from there: in reach either way.
+    for (const back of [0, 1.5]) {
+      const out = TOWER_PLINTH + BODY + back;
+      const x = at.x + Math.sin(door.yaw) * out;
+      const z = at.z + Math.cos(door.yaw) * out;
+      expect(Math.hypot(x - door.x, z - door.z)).toBeLessThan(PORTAL_REACH);
+    }
+  });
+
+  it("never takes you in for walking past or into the wall beside it", () => {
+    // Across its plane, right through where a disc would be.
+    const fx = Math.sin(door.yaw);
+    const fz = Math.cos(door.yaw);
+    expect(
+      walkedThrough(
+        door,
+        door.x + fx,
+        door.z + fz,
+        door.x - fx * 0.2,
+        door.z - fz * 0.2,
+      ),
+    ).toBe(false);
+  });
+
+  it("lets you out of the Tower in front of it, facing away from it", () => {
+    if (!tower) throw new Error("no tower");
+    const out = arrivalOn(home, "tower");
+    expect(out.heading).toBeCloseTo(door.yaw);
+    expect(portalSide(door, out.x, out.z).ahead).toBeGreaterThan(1.5);
+    // Clear of the tower itself.
+    const at = towerPlace(tower);
+    expect(Math.hypot(out.x - at.x, out.z - at.z)).toBeGreaterThan(
+      TOWER_PLINTH + BODY,
     );
   });
 });

@@ -136,9 +136,8 @@ const STYLE = `
 .town-fx .dmg { position: absolute; left: 0; top: 0; will-change: transform, opacity; white-space: nowrap;
   font-weight: 800; font-size: 15px; color: #e9fbff; letter-spacing: -0.5px;
   text-shadow: 0 0 6px rgba(80, 200, 255, 0.55), 0 2px 0 #0b2233, 1px 0 0 #0b2233, -1px 0 0 #0b2233, 0 -1px 0 #0b2233; }
-.town-fx .dmg.crit { color: #ffe08a;
+.town-fx .dmg.crit { color: #ffe08a; font-size: 17px; font-weight: 900;
   text-shadow: 0 0 10px rgba(255, 190, 60, 0.75), 0 2px 0 #3a2200, 1px 0 0 #3a2200, -1px 0 0 #3a2200, 0 -1px 0 #3a2200; }
-.town-fx .dmg.crit::after { content: "!"; margin-left: 1px; }
 .town-fx .dmg.blocked { color: #b8bcc8; font-size: 12px; letter-spacing: 0.5px; text-transform: uppercase;
   text-shadow: 0 2px 0 #1a1c22, 1px 0 0 #1a1c22, -1px 0 0 #1a1c22, 0 -1px 0 #1a1c22; }
 .town-fx .dmg.hurt { color: #ff6b6b;

@@ -70,6 +70,13 @@ export const OBJECTS = {
   D: { name: "Training dummy", color: "#d9b26a" },
   O: { name: "Portal", color: "#b07aff" },
   Q: { name: "Crystal", color: "#7fe8ff" },
+  I: { name: "Tower", color: "#d7c7f0" },
+  // Where the sky ship ties up: a pier out to the rim, the ship moored
+  // alongside past it (see airship/berth.ts). Faces out of the island.
+  X: { name: "Sky dock", color: "#c58a4a" },
+  // A workbench that opens the crafting window (see wilds/craftingSpot.ts).
+  // Faces the middle of the island unless turned.
+  W: { name: "Crafting station", color: "#e0a458" },
 } as const;
 export type ObjectChar = keyof typeof OBJECTS;
 
@@ -83,22 +90,33 @@ export const MAP_ID = /^[a-z][a-z0-9-]{1,23}$/;
  * same island's next floor, and only opens once the floor is cleared. */
 export type PortalLink = { to: MapId; next?: true };
 
+/** The kinds of enclosed room a map can be (see TownMap's `room`). */
+export const ROOM_KINDS = ["dark", "tower"] as const;
+export type RoomKind = (typeof ROOM_KINDS)[number];
+
 export type TownMap = {
   version: 2;
   id: MapId;
-  /** What the game calls it ("Enter the Training Grounds"). */
+  /** What the game calls it ("The Wilds"). */
   name: string;
   size: number;
   /** Where the island floats in the one sky every island shares: the
    * island you're on is drawn at the origin, the others where they float
    * relative to it. Home is at [0, 0, 0]. */
   origin: [x: number, y: number, z: number];
-  /** Whether you can fight here (the training grounds' dummies). */
+  /** Whether you can fight here (the boss's cave, the Tower). */
   combat?: boolean;
   /** An enclosed room instead of an island in the sky: no sky, clouds or
-   * other islands, a floor and walls, and a lamp-lit dark. The boss's
-   * cave. Room maps aren't drawn as islands in anyone else's sky. */
-  room?: "dark";
+   * other islands, a floor and walls. "dark": the boss's cave, rough rock
+   * round a lamp-lit dark, entered through a cave's mouth. "tower": the
+   * Tower's hall inside, a round stone hall lit by torches and its
+   * windows (see TowerHall). Room maps aren't drawn as islands in anyone
+   * else's sky. */
+  room?: RoomKind;
+  /** A sky ship's deck rather than an island: walked on in the ship's own
+   * frame, drawn by the ship (see airship/), never as ground, and never as
+   * an island in anyone's sky. Its round grid only holds what's on deck. */
+  ship?: true;
   /** Where each portal ("O") leads: "col,row" → link. */
   portals?: Record<string, PortalLink>;
   /** size rows of size terrain chars (OFF where off the island). */
@@ -422,9 +440,13 @@ export function parseMap(json: unknown): TownMap {
   if (m.combat !== undefined && typeof m.combat !== "boolean") {
     errors.push("combat: expected true or false");
   }
-  if (m.room !== undefined && m.room !== "dark") {
-    errors.push('room: expected "dark"');
+  if (m.room !== undefined && !ROOM_KINDS.includes(m.room as RoomKind)) {
+    errors.push(`room: expected one of ${ROOM_KINDS.join(", ")}`);
   }
+  if (m.ship !== undefined && m.ship !== true) {
+    errors.push("ship: expected true");
+  }
+  if (m.ship && m.room) errors.push("ship: a deck can't also be a room");
   const size = m.size as number;
   if (
     !Number.isInteger(size) ||
@@ -625,12 +647,13 @@ export function serializeMap(map: TownMap): string {
     : "";
   const combat = map.combat ? `\n  "combat": true,` : "";
   const room = map.room ? `\n  "room": ${JSON.stringify(map.room)},` : "";
+  const ship = map.ship ? `\n  "ship": true,` : "";
   return `{
   "version": ${map.version},
   "id": ${JSON.stringify(map.id)},
   "name": ${JSON.stringify(map.name)},
   "size": ${map.size},
-  "origin": [${map.origin.join(", ")}],${combat}${room}${portals}
+  "origin": [${map.origin.join(", ")}],${combat}${room}${ship}${portals}
   "spawn": { "at": ${pt(map.spawn.at)}, "heading": ${map.spawn.heading} },
   "spots": {${spots ? `\n${spots}\n  ` : ""}},${field("spare", "[]", map.spare.map(pt))}${facing}${turns}
   "terrain": ${rows(map.terrain)},
@@ -777,6 +800,7 @@ export const BUILDING_KINDS = {
   $: "shop",
   C: "cave",
   A: "auction",
+  I: "tower",
 } as const;
 export type BuildingKind = (typeof BUILDING_KINDS)[keyof typeof BUILDING_KINDS];
 export const isBuildingChar = (ch: string): ch is keyof typeof BUILDING_KINDS =>

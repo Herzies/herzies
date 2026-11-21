@@ -220,9 +220,10 @@ export function Portals({
   live?: boolean;
 }) {
   // The cave's mouth is there only while the cave is open, the Tower's
-  // door while it's on, its way on once the floor's clear.
+  // way on once the floor's clear. A door (the Tower's) is its building's
+  // own: no disc.
   const isOpen = usePortalOpen();
-  const all = useMemo(() => portalsOf(map), [map]);
+  const all = useMemo(() => portalsOf(map).filter((p) => !p.door), [map]);
   const portals = all.filter(isOpen);
   return (
     <>

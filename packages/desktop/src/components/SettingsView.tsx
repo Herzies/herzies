@@ -36,10 +36,7 @@ import { setSfxMuted, sfxMuted } from "./town/sfx";
 import { View } from "./View";
 
 /** Debug > Teleport: straight to a map's spawn, no portal needed. */
-const TELEPORTS = [
-  ["home", "Home"],
-  ["arena", "Training grounds"],
-] as const;
+const TELEPORTS = [["home", "Home"]] as const;
 
 /** Privacy > Duel requests: who may challenge you. */
 const DUEL_REQUESTS: readonly (readonly [DuelRequests, string])[] = [

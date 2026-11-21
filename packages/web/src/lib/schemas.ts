@@ -121,6 +121,16 @@ export const upgradeItemSchema = z.union([
   }),
 ]);
 
+/** The Crafting Station: craft a Wilds instrument (a WILDS_RECIPES id). */
+export const wildsCraftSchema = z.object({
+  recipe: z.string().min(1).max(100),
+});
+
+/** The Crafting Station: tune one copy of an instrument up a level. */
+export const wildsTuneSchema = z.object({
+  unitId,
+});
+
 export const createTradeSchema = z.object({
   targetFriendCode: z.string().min(1),
 });
@@ -182,7 +192,7 @@ export const adminEventSchema = z.object({
 
 export const adminEventSeriesSchema = z.object({
   id: z.string().optional(),
-  type: z.enum(["song_hunt", "boss_fight", "merchant", "tower"]),
+  type: z.enum(["song_hunt", "boss_fight", "merchant", "tower", "wilds"]),
   title: z.string().min(1),
   description: z.string().optional(),
   enabled: z.boolean().optional(),

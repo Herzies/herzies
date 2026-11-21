@@ -877,6 +877,22 @@
   }
 }
 
+/* A place's name as you arrive: fades in, holds, and fades out. */
+@keyframes location-title {
+  from {
+    opacity: 0;
+  }
+  18% {
+    opacity: 1;
+  }
+  75% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
 /* A bar emptying over the animation's duration (a challenge's time). */
 @keyframes duel-drain {
   from {

@@ -1,0 +1,220 @@
+/**
+ * The Wilds: an island of free-for-all PvP east of Town, reached only by sky
+ * ship. While a "wilds" event is on, the one sky ship, Blåmann, shuttles
+ * between the Sky Docks on the home island and on the Wilds: it leaves
+ * each dock every `departEverySec`, half an interval after it left the
+ * other.
+ *
+ * The timetable is a pure function of the event's window, its interval and
+ * the time, so every client (and any server) agrees on where the ship is
+ * without a word on the wire: a late joiner just asks where it is now. Its
+ * path through the sky is the desktop's (it comes from where the docks
+ * stand on its maps); only its timing is shared.
+ *
+ * Kept free of React and the DOM: vendored into the edge functions.
+ */
+
+/** The event type, in `events` and `event_series`. */
+export const WILDS_EVENT_TYPE = "wilds";
+
+/** How long the ship takes from one dock to the other (casting off and
+ * settling in included), seconds. The desktop's flight path is timed to
+ * exactly this. */
+export const WILDS_LEG_S = 36;
+export const WILDS_LEG_MS = WILDS_LEG_S * 1000;
+/** The shortest the ship may stay at a dock: time to walk off and on. */
+export const WILDS_MIN_DOCKED_S = 12;
+/** The ship leaves each dock every this many seconds, by default; the
+ * admin may set anything from MIN to MAX. It's there and back in one
+ * interval, so the shortest gives it its shortest stay at each end. */
+export const WILDS_DEPART_DEFAULT_S = 120;
+export const WILDS_DEPART_MIN_S = 2 * (WILDS_LEG_S + WILDS_MIN_DOCKED_S);
+export const WILDS_DEPART_MAX_S = 1200;
+
+/** The ships in service: just Blåmann. Its passengers share the room
+ * `airship`, shard 0 (the ship's index). */
+export const SKY_SHIPS = 1;
+export type ShipIndex = 0;
+
+/** The two ends of the route. */
+export type SkyDock = "home" | "wilds";
+
+/** The event's tunables, as the admin sets them (`events.config`). */
+export type WildsConfig = { departEverySec: number };
+
+/** A "wilds" event's config, made whole: missing or out-of-range values
+ * fall back to the default or are clamped. */
+export function wildsConfig(raw: unknown): WildsConfig {
+  const v = (raw as { departEverySec?: unknown } | null)?.departEverySec;
+  const n =
+    typeof v === "number" && Number.isFinite(v)
+      ? Math.round(v)
+      : WILDS_DEPART_DEFAULT_S;
+  return {
+    departEverySec: Math.min(
+      WILDS_DEPART_MAX_S,
+      Math.max(WILDS_DEPART_MIN_S, n),
+    ),
+  };
+}
+
+/** Why a config can't be saved (null: it can). Unlike `wildsConfig`, which
+ * clamps, this is for the admin's form. */
+export function wildsConfigError(raw: unknown): string | null {
+  const v = (raw as { departEverySec?: unknown } | null)?.departEverySec;
+  if (typeof v !== "number" || !Number.isInteger(v)) {
+    return "departEverySec: expected a whole number of seconds";
+  }
+  if (v < WILDS_DEPART_MIN_S || v > WILDS_DEPART_MAX_S) {
+    return `departEverySec: expected ${WILDS_DEPART_MIN_S}–${WILDS_DEPART_MAX_S} seconds`;
+  }
+  return null;
+}
+
+/** A run of the ship: the event's window (ms since the epoch) and how
+ * often it leaves each dock. */
+export type WildsService = {
+  startsAt: number;
+  endsAt: number;
+  departEveryMs: number;
+};
+
+export function wildsServiceOf(
+  startsAt: number,
+  endsAt: number,
+  config: unknown,
+): WildsService {
+  return {
+    startsAt,
+    endsAt,
+    departEveryMs: wildsConfig(config).departEverySec * 1000,
+  };
+}
+
+/** Where the ship is in its timetable. */
+export type ShipState =
+  | {
+      kind: "docked";
+      at: SkyDock;
+      /** When it tied up (-Infinity: before anyone can remember). */
+      since: number;
+      /** When it casts off, with passengers; null: it's laid up there
+       * (at home) until the next service, and takes nobody. */
+      until: number | null;
+    }
+  | {
+      kind: "flying";
+      from: SkyDock;
+      to: SkyDock;
+      departedAt: number;
+      arrivesAt: number;
+    };
+
+/** Between services the ship is laid up at home, where a service starts
+ * it from. */
+const LAID_UP: ShipState = {
+  kind: "docked",
+  at: "home",
+  since: Number.NEGATIVE_INFINITY,
+  until: null,
+};
+
+/** The timetable's numbers: run `j` leaves home at `d(j)`, ties up at the
+ * Wilds a leg later, leaves there at `d(j) + H` (half an interval on) and
+ * is home a leg after that, till run `j + 1`. Run 0 leaves once the ship
+ * has lain at home from the start as long as any run does. The last run
+ * is `last`: the last to leave home before the end, which still comes
+ * back (whoever it took out needs a way home); -1 if none does. */
+function timetable(s: WildsService) {
+  const D = s.departEveryMs;
+  const L = WILDS_LEG_MS;
+  const H = D / 2;
+  const first = s.startsAt + (H - L);
+  const d = (j: number) => first + j * D;
+  // The last j with d(j) < endsAt (at least -1).
+  const last = Math.max(-1, Math.ceil((s.endsAt - first) / D) - 1);
+  return { D, L, H, d, last, first };
+}
+
+/** Where ship `_ship` (there's only Blåmann) is at `now` (ms since the
+ * epoch), on `service` (null: none on or coming: laid up at home). */
+export function shipState(
+  service: WildsService | null,
+  _ship: ShipIndex,
+  now: number,
+): ShipState {
+  if (!service || now < service.startsAt) return LAID_UP;
+  const { D, L, H, d, last, first } = timetable(service);
+  // Its latest run from home by now, the last at most.
+  const j = Math.min(Math.floor((now - first) / D), last);
+  if (j < 0) {
+    // Before its first run: boarding at home, where it was already lying
+    // (or still laid up, if the service is too short for any).
+    return {
+      kind: "docked",
+      at: "home",
+      since: Number.NEGATIVE_INFINITY,
+      until: last >= 0 ? d(0) : null,
+    };
+  }
+  const t = now - d(j);
+  if (t < L) {
+    return {
+      kind: "flying",
+      from: "home",
+      to: "wilds",
+      departedAt: d(j),
+      arrivesAt: d(j) + L,
+    };
+  }
+  if (t < H) {
+    return { kind: "docked", at: "wilds", since: d(j) + L, until: d(j) + H };
+  }
+  if (t < H + L) {
+    return {
+      kind: "flying",
+      from: "wilds",
+      to: "home",
+      departedAt: d(j) + H,
+      arrivesAt: d(j) + H + L,
+    };
+  }
+  return {
+    kind: "docked",
+    at: "home",
+    since: d(j) + H + L,
+    until: j < last ? d(j + 1) : null,
+  };
+}
+
+/** The ship's next departure with passengers from `dock` after `now`:
+ * when it ties up there (it may already have) and when it leaves. Null:
+ * no more this service. */
+export function nextDeparture(
+  service: WildsService | null,
+  dock: SkyDock,
+  now: number,
+): { ship: ShipIndex; dockedFrom: number; departsAt: number } | null {
+  if (!service) return null;
+  const { D, L, H, d, last, first } = timetable(service);
+  // Run j leaves this dock at d(j) + off.
+  const off = dock === "home" ? 0 : H;
+  const j = Math.max(0, Math.floor((now - first - off) / D) + 1);
+  if (j > last) return null;
+  let dockedFrom = d(j) + L;
+  if (dock === "home") dockedFrom = j === 0 ? service.startsAt : d(j) - H + L;
+  return { ship: 0, dockedFrom, departsAt: d(j) + off };
+}
+
+/** The camp round the Wilds' Sky Dock and spawn, on its west rim (facing
+ * Town): no fighting in it. Wilds-map coordinates (x, z) and radius,
+ * world units. */
+export const WILDS_SAFE_CAMP = { x: -73, z: 0.5, r: 15 } as const;
+
+/** Whether a point on the Wilds is in its safe camp. */
+export function inWildsSafeCamp(x: number, z: number): boolean {
+  return (
+    Math.hypot(x - WILDS_SAFE_CAMP.x, z - WILDS_SAFE_CAMP.z) <=
+    WILDS_SAFE_CAMP.r
+  );
+}

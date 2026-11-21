@@ -4,6 +4,7 @@ import type {
   MerchantConfig,
   SongHuntConfig,
 } from "@herzies/shared";
+import { WILDS_EVENT_TYPE, wildsConfig } from "@herzies/shared";
 import { NextResponse } from "next/server";
 import { authenticateRequestOptional } from "@/lib/auth";
 import {
@@ -64,6 +65,9 @@ export async function GET(request: Request) {
           e.config as MerchantConfig,
           userId,
         );
+      } else if (e.type === WILDS_EVENT_TYPE) {
+        // Made whole, so every client times the ships alike.
+        config = wildsConfig(e.config);
       } else {
         config = e.config as Record<string, unknown>;
       }

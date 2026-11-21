@@ -6,6 +6,7 @@ import {
   validateBossConfig,
   validateMerchantConfig,
   validateTowerConfig,
+  validateWildsConfig,
 } from "@/lib/event-config";
 import { adminEventSchema, isParseError, parseBody } from "@/lib/schemas";
 import { createAdminClient } from "@/lib/supabase-admin";
@@ -121,6 +122,12 @@ export async function POST(request: Request) {
 
   if (type === "tower") {
     const result = await validateTowerConfig(admin, config);
+    if ("error" in result) return badRequest(result.error);
+    config = result.config;
+  }
+
+  if (type === "wilds") {
+    const result = validateWildsConfig(config);
     if ("error" in result) return badRequest(result.error);
     config = result.config;
   }

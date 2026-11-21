@@ -265,6 +265,7 @@ const REFUSALS: Record<SkillRefusal, string> = {
   "not-yet": "That only works once the fight is on.",
   instrument: "Your class's skills need its instrument in your main hand.",
   duel: "That skill doesn't work in a duel.",
+  wilds: "That skill doesn't work on other herzies.",
 };
 
 /** Where a mob is at `at` (performance.now() ms), between its samples. */
@@ -724,9 +725,12 @@ export function handleBossMessage(m: ServerMessage, clock: Clock): void {
       const was = bossFight.tower;
       setTower(m, now);
       if (m.cleared && !(was?.floor === m.floor && was.cleared)) {
-        notify(`Floor ${m.floor} cleared! The way on is open.`, {
-          kind: "success",
-        });
+        notify(
+          m.chest
+            ? `Floor ${m.floor} cleared! The Warden left a chest.`
+            : `Floor ${m.floor} cleared! The way on is open.`,
+          { kind: "success" },
+        );
         sfxPortal();
       } else if (!m.cleared && was && was.floor !== m.floor) {
         notify(`Floor ${m.floor}`, { kind: "info" });

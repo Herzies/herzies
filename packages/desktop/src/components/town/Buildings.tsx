@@ -1,5 +1,5 @@
 import { mulberry32 } from "@herzies/shared";
-import { CuboidCollider } from "@react-three/rapier";
+import { CuboidCollider, CylinderCollider } from "@react-three/rapier";
 import { useLayoutEffect, useMemo } from "react";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
@@ -11,6 +11,7 @@ import {
   type TownMap,
   turned,
 } from "./map";
+import { TOWER_PLINTH, towerPlace, towerWindowLights } from "./towerPlan";
 
 // Houses after the early Pokémon towns: short plank walls on a dark
 // footing, a big striped roof in a bold colour that does most of the
@@ -19,8 +20,8 @@ import {
 
 /** Doors are sized for a stage-3 herzie (about 2.35 tall and round):
  * this wide across, their bottom a little sunk into the step. */
-const DOOR_RADIUS = 1.25;
-const DOOR_Y = 1.15;
+export const DOOR_RADIUS = 1.25;
+export const DOOR_Y = 1.15;
 /** Window heights (their middles): downstairs, tops level with the door's;
  * upstairs (only the round window over a home's door), in the middle of
  * the second storey. Between them, a trim band marks the floor. */
@@ -462,6 +463,7 @@ export type WindowLight = {
 export function windowLightsOf(map: TownMap): WindowLight[] {
   return buildingsOf(map).flatMap((b) => {
     if (b.kind === "cave") return [];
+    if (b.kind === "tower") return towerWindowLights(b);
     const isPart = partOf(b);
     const door = doorAt(b);
     return b.rects.flatMap((r) =>
@@ -1204,11 +1206,12 @@ export const windowGlow = {
   uWindows: { value: 0 },
   uDayWindow: { value: new THREE.Color("#9fb3c4") },
 };
-const LIT_WINDOW = "#ffd98a";
+export const LIT_WINDOW = "#ffd98a";
 
 /** Window glass that lights up at dusk, each pane in its own turn (see
- * windowPhase), from the daytime's dull blue to a warm glow. */
-function glassLighting<M extends THREE.Material>(
+ * windowPhase, carried by a `phase` attribute), from the daytime's dull
+ * blue to a warm glow. */
+export function glassLighting<M extends THREE.Material>(
   material: M,
   /** The lanterns: flickering, each its own way (see lampFlicker). */
   flicker: boolean,
@@ -1276,11 +1279,14 @@ export const lanternMaterial = glassLighting(
 /**
  * The buildings — homes, shops, caves and the auction house — each patch of cells as one,
  * its door toward the middle of town. All of them merged into one mesh
- * (plus one for the lit windows).
+ * (plus one for the lit windows). The Tower is drawn on its own (see
+ * Tower), fading into the sky as no other building does.
  */
 export function Buildings({ map }: { map: TownMap }) {
   const built = useMemo(() => {
-    const parts = buildingsOf(map).map(buildingGeometry);
+    const parts = buildingsOf(map)
+      .filter((b) => b.kind !== "tower")
+      .map(buildingGeometry);
     if (parts.length === 0) return null;
     const glows = parts.flatMap((p) => (p.glow ? [p.glow] : []));
     return {
@@ -1312,11 +1318,23 @@ export function Buildings({ map }: { map: TownMap }) {
   );
 }
 
-/** A box collider per building rectangle. */
+/** A box collider per building rectangle; a round one round the Tower's
+ * plinth. */
 export function BuildingColliders({ map }: { map: TownMap }) {
+  const all = useMemo(() => buildingsOf(map), [map]);
   const rects = useMemo(
-    () => buildingsOf(map).flatMap((b) => b.rects.map((r) => ({ ...r, b }))),
-    [map],
+    () =>
+      all
+        .filter((b) => b.kind !== "tower")
+        .flatMap((b) => b.rects.map((r) => ({ ...r, b }))),
+    [all],
+  );
+  const towers = useMemo(
+    () =>
+      all
+        .filter((b) => b.kind === "tower")
+        .map((b) => ({ b, at: towerPlace(b) })),
+    [all],
   );
   return (
     <>
@@ -1332,6 +1350,18 @@ export function BuildingColliders({ map }: { map: TownMap }) {
             args={[r.w / 2, half, r.h / 2]}
             position={[x, r.b.foot + half, z]}
             rotation={[0, r.b.turn, 0]}
+          />
+        );
+      })}
+      {towers.map(({ b, at }) => {
+        // As high as a house's walls from the lowest ground under it:
+        // nobody jumps any higher.
+        const half = (b.y + WALL - b.foot) / 2;
+        return (
+          <CylinderCollider
+            key={`t${b.anchor.join(",")}`}
+            args={[half, TOWER_PLINTH * at.scale]}
+            position={[at.x, b.foot + half, at.z]}
           />
         );
       })}

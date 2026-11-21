@@ -1069,6 +1069,12 @@ export class HerzieModel {
   pathClear:
     | ((ax: number, az: number, bx: number, bz: number) => boolean)
     | null = null;
+  /** The space it lives in, when that isn't the world's: what its
+   * companion, its cat and its cloth's sway move through. A sky ship's
+   * deck carries its herzies through the sky; measured in the deck's
+   * space, they keep up with it instead of trailing out behind. Changed
+   * with setFrame, which carries them over. */
+  private frameSpace: THREE.Object3D | null = null;
   private readonly meshes: THREE.Mesh[] = [];
   /** Props drawn as models (see Sphere.prop): each follows the sphere at
    * `at` (it hops with it), `offset` from it. */
@@ -1881,8 +1887,7 @@ export class HerzieModel {
       poseCat(model, state, 1);
       return;
     }
-    this.root.updateWorldMatrix(true, false);
-    this.root.getWorldPosition(host.position);
+    this.inFrame(this.root, host.position);
     host.scale = this.root.getWorldScale(scratchScale).y;
     host.heading = this.heading;
     host.dancing = this.danceWeight > 0.5;
@@ -1907,7 +1912,7 @@ export class HerzieModel {
     // Posed in world terms, then brought into the root's space (which
     // carries the herzie's scale already).
     poseCat(model, state, 1);
-    this.root.worldToLocal(model.group.position);
+    this.frameToRoot(model.group.position);
   }
 
   /** Its boombox, as its cat sees it (round its middle, and its top), in
@@ -2397,6 +2402,73 @@ export class HerzieModel {
     }
   }
 
+  /** The space it lives in (null: the world's; see frameSpace). */
+  get frame(): THREE.Object3D | null {
+    return this.frameSpace;
+  }
+
+  /** Moves it into another space (a ship's deck, or back to the world's),
+   * carrying everything it remembers there across, so its cat, its
+   * companion and its cloth carry on as they were, not jumping. */
+  setFrame(next: THREE.Object3D | null): void {
+    if (next === this.frameSpace) return;
+    // Old space → world → new space.
+    const m = new THREE.Matrix4();
+    if (this.frameSpace) {
+      this.frameSpace.updateWorldMatrix(true, false);
+      m.copy(this.frameSpace.matrixWorld);
+    }
+    if (next) {
+      next.updateWorldMatrix(true, false);
+      m.premultiply(next.matrixWorld.clone().invert());
+    }
+    const turn = new THREE.Quaternion();
+    m.decompose(new THREE.Vector3(), turn, new THREE.Vector3());
+    const yaw = new THREE.Euler().setFromQuaternion(turn, "YXZ").y;
+    const at = (v: THREE.Vector3 | null) => v?.applyMatrix4(m);
+    const along = (v: THREE.Vector3 | null) => v?.applyQuaternion(turn);
+    at(this.lastWorld);
+    along(this.worldVelocity);
+    if (this.cloak) {
+      at(this.cloak.lastWorld);
+      along(this.cloak.worldVelocity);
+    }
+    const f = this.follower?.state;
+    if (f) {
+      at(f.position);
+      at(f.anchor);
+      at(f.target);
+      along(f.velocity);
+      f.heading += yaw;
+      f.slotHeading += yaw;
+    }
+    const c = this.cat && !this.cat.pinned ? this.cat.state : null;
+    if (c) {
+      at(c.position);
+      at(c.hostLast);
+      at(c.target);
+      at(c.pounceFrom);
+      at(c.pounceTo);
+      along(c.hostVelocity);
+      c.heading += yaw;
+      c.slotHeading += yaw;
+    }
+    this.frameSpace = next;
+  }
+
+  /** Where `obj` is in its frame's space. */
+  private inFrame(obj: THREE.Object3D, out: THREE.Vector3): THREE.Vector3 {
+    obj.updateWorldMatrix(true, false);
+    obj.getWorldPosition(out);
+    return this.frameSpace ? this.frameSpace.worldToLocal(out) : out;
+  }
+
+  /** A point in its frame's space, into its root's. */
+  private frameToRoot(v: THREE.Vector3): THREE.Vector3 {
+    if (this.frameSpace) this.frameSpace.localToWorld(v);
+    return this.root.worldToLocal(v);
+  }
+
   /** Whether it has a floating companion of its own (a spirit) to send. */
   get hasCompanion(): boolean {
     return this.follower !== null || (this.cat !== null && !this.cat.pinned);
@@ -2456,8 +2528,7 @@ export class HerzieModel {
     if (!f) return;
     const { host, state } = f;
     // Fresh: a host may have moved it (or what it's on) this frame.
-    this.root.updateWorldMatrix(true, false);
-    this.root.getWorldPosition(host.position);
+    this.inFrame(this.root, host.position);
     host.scale = this.root.getWorldScale(scratchScale).y;
     host.heading = this.heading;
     host.dancing = this.danceWeight > 0.5;
@@ -2490,7 +2561,7 @@ export class HerzieModel {
       const [wide, tall] = surgeStretch(surge.v);
       f.yaw.scale.set(wide, tall, wide);
     }
-    this.root.worldToLocal(f.group.position);
+    this.frameToRoot(f.group.position);
     f.yaw.rotation.set(pitch, heading, state.roll, "YXZ");
   }
 
@@ -2537,8 +2608,7 @@ export class HerzieModel {
     accel: [number, number, number];
     velocity: [number, number, number];
   } {
-    this.root.updateWorldMatrix(true, false);
-    const now = this.root.getWorldPosition(new THREE.Vector3());
+    const now = this.inFrame(this.root, new THREE.Vector3());
     let accel = new THREE.Vector3();
     if (this.lastWorld && dt > 0) {
       const velocity = now.clone().sub(this.lastWorld).divideScalar(dt);
@@ -2907,8 +2977,7 @@ export class HerzieModel {
   private stepCloak(dt: number, turned: number) {
     const run = this.cloak;
     if (!run || !(dt > 0)) return;
-    this.creature.updateWorldMatrix(true, false);
-    const now = this.creature.getWorldPosition(new THREE.Vector3());
+    const now = this.inFrame(this.creature, new THREE.Vector3());
     const scale = this.root.getWorldScale(scratchScale).y * MODEL_SCALE;
     let accel = new THREE.Vector3();
     let jumped = false;

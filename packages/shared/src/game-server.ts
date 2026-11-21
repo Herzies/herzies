@@ -77,6 +77,12 @@ import {
   type TitleId,
   titleGoalReached,
 } from "./titles.js";
+import {
+  rollBit,
+  WILDS_LISTEN_BIT_SHARE,
+  WILDS_LISTEN_BONUS,
+  WILDS_LISTEN_LABEL,
+} from "./wilds-loot.js";
 
 /** Minimum gap between two *billable* syncs, measured from `last_billed_at`.
  *
@@ -491,6 +497,9 @@ interface SyncContext {
   /** Titles earned and not handed to the app yet (00152). Absent on an
    * older database. */
   new_titles?: string[];
+  /** Until when the herzie counts as on the Wilds (00154; the room says
+   * so every half minute). Absent on an older database; also on `herzie`. */
+  wilds_until?: string | null;
   active_hunts: { id: string; title: string }[];
   /**
    * The live boss, if any (00075). No longer read: listening doesn't damage
@@ -728,6 +737,19 @@ export async function processSync(
         allMultipliers.push({ name: "Good Eye Sniper", bonus });
       }
     }
+  }
+
+  // On the Wilds (00154): +50% while the Wilds room keeps saying you're
+  // there (town-vitals' report.wilds, good for WILDS_PRESENCE_MS). Part of
+  // `multipliers`, so the app lists it with the rest.
+  const wildsUntil =
+    ctx.wilds_until ?? (row.wilds_until as string | null | undefined) ?? null;
+  const onWilds = wildsUntil !== null && Date.parse(wildsUntil) > now.getTime();
+  if (onWilds) {
+    allMultipliers.push({
+      name: WILDS_LISTEN_LABEL,
+      bonus: WILDS_LISTEN_BONUS,
+    });
   }
 
   // 4. Calculate and apply XP (server-authoritative)
@@ -999,8 +1021,19 @@ export async function processSync(
       // rollsConsumed above. (DROP_CHANCE_PER_TICK is 1 today, so this never
       // fires in production.)
       if (!dropTestMode && Math.random() >= DROP_CHANCE_PER_TICK) continue;
-      const picked = pickWeightedDrop(droppable, herzieStats.luck);
-      if (picked) pickedIds.push(picked.id);
+      // On the Wilds, some of what listening drops is a bit instead: the
+      // only way bits come of listening (they're never in the pool). Only
+      // on a roll actually taken, like the seasonal extras below.
+      if (
+        onWilds &&
+        droppable.length > 0 &&
+        Math.random() < WILDS_LISTEN_BIT_SHARE
+      ) {
+        pickedIds.push(rollBit(Math.random()));
+      } else {
+        const picked = pickWeightedDrop(droppable, herzieStats.luck);
+        if (picked) pickedIds.push(picked.id);
+      }
       // Seasonal extras (the Halloween Treat) roll on their own, on top —
       // only on a roll actually taken (see rollsConsumed), so a failed pool
       // query can't pay them out twice.

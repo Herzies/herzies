@@ -3,7 +3,7 @@
 // Run `pnpm vendor:shared` after changing the original.
 
 /**
- * Titles: proofs of feats, worn on a second line under the herzie's name.
+ * Titles: proofs of feats, worn on a small line over the herzie's name.
  * Earned for good on the herzie (like emotes, never items), so they can't be
  * traded or sold, and once earned are never taken back. One is worn at a
  * time, or none.
@@ -78,7 +78,7 @@ export const TITLE_CATEGORY_LABELS: Record<TitleCategory, string> = {
 
 export interface TitleDef {
   id: string;
-  /** What's worn under the name. */
+  /** What's worn over the name. */
   name: string;
   /** How it's earned, as the Titles tab says it. */
   description: string;
@@ -426,14 +426,17 @@ export function getTitle(id: string | null | undefined): TitleDef | undefined {
   return id ? BY_ID.get(id) : undefined;
 }
 
-/** What `/api/titles` answers (00152 titles_json): the title worn, every
- * one earned, the numbers progress is shown on, how many herzies hold each
- * title, and the ones this very request granted. */
+/** What `/api/titles` answers (00152 titles_json, 00156): the title worn,
+ * every one earned, the numbers progress is shown on, how many herzies hold
+ * each title out of how many there are in all, and the ones this very
+ * request granted. */
 export interface TitlesState {
   worn: TitleId | null;
   earned: EarnedTitle[];
   metrics: TitleMetrics;
   holders: Partial<Record<TitleId, number>>;
+  /** Herzies in all: what `holders` are a share of. */
+  herzies: number;
   granted: TitleId[];
 }
 

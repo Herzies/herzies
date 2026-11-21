@@ -1,3 +1,5 @@
+import { bellStrikeAt } from "./airship/bell";
+
 /**
  * The Town's sound effects, made on the spot with WebAudio — no files: a
  * whoosh as a wave leaves the hand, a "bwomp" where it lands, a chime on a
@@ -254,6 +256,17 @@ export function sfxPortal(): void {
   if (!a) return;
   noiseBurst(a, "bandpass", 200, 3200, 2, 0.35, 0.8);
   tone(a, "sine", 110, 440, 0.2, 0.2, 0.7);
+}
+
+/** Going in through a heavy door: a creak as it swings, then the thump of
+ * it shutting behind you. */
+export function sfxDoor(): void {
+  const a = audio();
+  if (!a) return;
+  const k = wobble(0.05);
+  tone(a, "sawtooth", 150 * k, 210 * k, 0.035, 0.08, 0.35);
+  tone(a, "sine", 95 * k, 50 * k, 0.45, 0.004, 0.25, 0.42);
+  noiseBurst(a, "lowpass", 700 * k, 140, 1, 0.12, 0.12);
 }
 
 /** An attack is coming: a rising tone for as long as the shape fills, so
@@ -925,3 +938,313 @@ export function sfxDuelOut(): void {
   tone(a, "square", 196, 190, 0.07, 0.002, 0.09);
   tone(a, "sine", 98, 96, 0.12, 0.002, 0.12);
 }
+
+// --- The sky ship ------------------------------------------------------------
+// Blåmann, to the Wilds: a bell and a horn to say she's going (heard
+// from the dock as well as on board), the hull creaking and bumping, and
+// the ride itself — the engines' hum and the wind — while you're aboard.
+// Each takes a `volume` (0–1, how near it is, say), on top of the rest.
+
+type Audio = NonNullable<ReturnType<typeof audio>>;
+
+/** `a`, through a gain of its own at `volume`: let go after `seconds`. */
+function atVolume(a: Audio, volume: number, seconds: number): Audio {
+  const bus = a.ctx.createGain();
+  bus.gain.value = Math.max(0, volume);
+  bus.connect(a.out);
+  setTimeout(() => bus.disconnect(), (seconds + 0.5) * 1000);
+  return { ...a, out: bus };
+}
+
+/** A small bronze bell's partials: [× the strike note, loudness, how
+ * long it rings (s)] — the hum under it, the strike note, the minor
+ * third that makes it a bell, and the shimmer over it. */
+const BELL_PARTIALS: [number, number, number][] = [
+  [0.5, 0.05, 2.6],
+  [1, 0.12, 1.9],
+  [1.19, 0.06, 1.3],
+  [1.5, 0.035, 1],
+  [2, 0.06, 1.1],
+  [2.52, 0.025, 0.6],
+  [3.01, 0.015, 0.4],
+];
+
+/** The ship's bell, `strikes` times, in pairs as a ship's bell is rung:
+ * ding-ding, ding-ding — on the strikes the bells you see swing to
+ * (airship/bell.ts). */
+export function sfxShipBell(strikes = 1, volume = 1): void {
+  const a0 = audio();
+  if (!a0) return;
+  const n = Math.max(1, Math.round(strikes));
+  const a = atVolume(a0, volume, bellStrikeAt(n) + 3);
+  const f = 740 * wobble(0.01);
+  for (let i = 0; i < n; i++) {
+    const t = bellStrikeAt(i);
+    for (const [ratio, peak, ring] of BELL_PARTIALS)
+      tone(a, "sine", f * ratio, f * ratio * 0.998, peak, 0.002, ring, t);
+    // The clapper's tick.
+    tone(a, "triangle", f * 4.2, f * 3.9, 0.025, 0.001, 0.04, t);
+  }
+}
+
+/** The ship's horn: a long, low, warm call — two reeds a fifth apart and
+ * a hair out of tune, scooping up into pitch, its tone opening out as it
+ * sounds and closing as it dies. About two seconds. */
+export function sfxShipHorn(volume = 1): void {
+  const a0 = audio();
+  if (!a0) return;
+  const { ctx: c } = a0;
+  const held = 1.8;
+  const a = atVolume(a0, volume, held + 1.2);
+  const t = c.currentTime;
+  // The horn's throat: its tone opening out as it sounds, closing as it dies.
+  const throat = c.createBiquadFilter();
+  throat.type = "lowpass";
+  throat.Q.value = 0.8;
+  throat.frequency.setValueAtTime(200, t);
+  throat.frequency.linearRampToValueAtTime(850, t + 0.35);
+  throat.frequency.setValueAtTime(850, t + held - 0.3);
+  throat.frequency.linearRampToValueAtTime(240, t + held + 0.5);
+  const g = c.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.13, t + 0.25);
+  g.gain.setValueAtTime(0.13, t + held - 0.3);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + held + 0.6);
+  throat.connect(g).connect(a.out);
+  const base = 92 * wobble(0.02);
+  // A slow vibrato, shared.
+  const vibrato = c.createOscillator();
+  vibrato.frequency.value = 4.6;
+  const depth = c.createGain();
+  depth.gain.value = base * 0.005;
+  vibrato.connect(depth);
+  const voices: [ratio: number, type: OscillatorType, level: number][] = [
+    [1, "sawtooth", 0.9],
+    [1.004, "triangle", 0.8],
+    [1.5, "sawtooth", 0.45],
+    [0.5, "sine", 0.9],
+  ];
+  const oscs = voices.map(([ratio, type, level]) => {
+    const o = c.createOscillator();
+    o.type = type;
+    o.frequency.setValueAtTime(base * ratio * 0.94, t);
+    o.frequency.exponentialRampToValueAtTime(base * ratio, t + 0.3);
+    depth.connect(o.frequency);
+    const v = c.createGain();
+    v.gain.value = level;
+    o.connect(v).connect(throat);
+    return o;
+  });
+  for (const o of [...oscs, vibrato]) {
+    o.start(t);
+    o.stop(t + held + 0.7);
+  }
+}
+
+/** The hull creaking: wood grabbing and letting go — a buzz pulsing
+ * through a narrow band, rising and falling a little. Each its own. */
+export function sfxShipCreak(volume = 1): void {
+  const a0 = audio();
+  if (!a0) return;
+  const { ctx: c } = a0;
+  const k = wobble(0.08);
+  const len = 0.5 + Math.random() * 0.4;
+  const a = atVolume(a0, volume, len + 0.3);
+  const t = c.currentTime;
+  const o = c.createOscillator();
+  o.type = "sawtooth";
+  o.frequency.setValueAtTime(70 * k, t);
+  o.frequency.linearRampToValueAtTime(110 * k, t + len * 0.6);
+  o.frequency.linearRampToValueAtTime(84 * k, t + len);
+  const band = c.createBiquadFilter();
+  band.type = "bandpass";
+  band.Q.value = 5;
+  band.frequency.setValueAtTime(650 * k, t);
+  band.frequency.linearRampToValueAtTime(1100 * k, t + len);
+  // Stick and slip: the sound caught and let go 18–34 times a second.
+  const grab = c.createGain();
+  grab.gain.value = 0.5;
+  const slip = c.createOscillator();
+  slip.type = "square";
+  slip.frequency.setValueAtTime(18 * k, t);
+  slip.frequency.linearRampToValueAtTime(34 * k, t + len);
+  const depth = c.createGain();
+  depth.gain.value = 0.5;
+  slip.connect(depth).connect(grab.gain);
+  const g = c.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.12, t + 0.08);
+  g.gain.setValueAtTime(0.12, t + len * 0.7);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+  o.connect(band).connect(grab).connect(g).connect(a.out);
+  for (const n of [o, slip]) {
+    n.start(t);
+    n.stop(t + len + 0.05);
+  }
+}
+
+/** The hull bumping the dock, or the gangplank landing: a low wooden
+ * thunk. */
+export function sfxShipThunk(volume = 1): void {
+  const a0 = audio();
+  if (!a0) return;
+  const a = atVolume(a0, volume, 0.6);
+  const k = wobble(0.06);
+  tone(a, "sine", 130 * k, 52 * k, 0.45, 0.004, 0.3);
+  tone(a, "triangle", 260 * k, 170 * k, 0.1, 0.002, 0.08);
+  noiseBurst(a, "lowpass", 700 * k, 160, 0.8, 0.18, 0.14);
+}
+
+/** The ride's sound, while it plays. */
+type ShipLoop = {
+  bus: GainNode;
+  engine: OscillatorNode[];
+  engineLevel: GainNode;
+  engineTone: BiquadFilterNode;
+  chug: OscillatorNode;
+  wind: AudioBufferSourceNode;
+  windTone: BiquadFilterNode;
+  windLevel: GainNode;
+  whistleTone: BiquadFilterNode;
+  whistleLevel: GainNode;
+};
+let shipLoop: ShipLoop | null = null;
+/** A few seconds of noise for the wind: the one-second burst buffer would
+ * be heard repeating, held this long. */
+let windNoise: AudioBuffer | null = null;
+/** The ships' cruising speed, u/s: the wind's full at it. */
+const SHIP_CRUISE = 7;
+/** How quickly the ride's sound follows the ship (s, a time constant). */
+const SHIP_FOLLOW = 0.3;
+
+function shipLoopOf(a: Audio): ShipLoop {
+  const { ctx: c } = a;
+  if (!windNoise) {
+    windNoise = c.createBuffer(1, c.sampleRate * 3, c.sampleRate);
+    const d = windNoise.getChannelData(0);
+    // Brown-ish: each sample a step from the last, so it rumbles.
+    let last = 0;
+    for (let i = 0; i < d.length; i++) {
+      last = (last + 0.04 * (Math.random() * 2 - 1)) / 1.04;
+      d[i] = last * 3.5;
+    }
+  }
+  const bus = c.createGain();
+  bus.gain.value = 0;
+  bus.connect(a.out);
+  // The engines: a low buzz and its octave through a low-pass, thrumming
+  // with the propellers (a tremolo that quickens with the throttle).
+  const engineTone = c.createBiquadFilter();
+  engineTone.type = "lowpass";
+  engineTone.frequency.value = 260;
+  const thrum = c.createGain();
+  thrum.gain.value = 0.75;
+  const chug = c.createOscillator();
+  chug.frequency.value = 4;
+  const chugDepth = c.createGain();
+  chugDepth.gain.value = 0.25;
+  chug.connect(chugDepth).connect(thrum.gain);
+  const engineLevel = c.createGain();
+  engineLevel.gain.value = 0;
+  engineTone.connect(thrum).connect(engineLevel).connect(bus);
+  const engine = (["sawtooth", "square"] as const).map((type, i) => {
+    const o = c.createOscillator();
+    o.type = type;
+    o.frequency.value = i === 0 ? 46 : 92.3;
+    const v = c.createGain();
+    v.gain.value = i === 0 ? 1 : 0.3;
+    o.connect(v).connect(engineTone);
+    return o;
+  });
+  // The wind: a rumble opening up as it rises, and a thin whistle in the
+  // rigging over it.
+  const wind = c.createBufferSource();
+  wind.buffer = windNoise;
+  wind.loop = true;
+  const windTone = c.createBiquadFilter();
+  windTone.type = "lowpass";
+  windTone.frequency.value = 300;
+  const windLevel = c.createGain();
+  windLevel.gain.value = 0;
+  wind.connect(windTone).connect(windLevel).connect(bus);
+  const whistleTone = c.createBiquadFilter();
+  whistleTone.type = "bandpass";
+  whistleTone.Q.value = 7;
+  whistleTone.frequency.value = 900;
+  const whistleLevel = c.createGain();
+  whistleLevel.gain.value = 0;
+  wind.connect(whistleTone).connect(whistleLevel).connect(bus);
+  for (const n of [...engine, chug]) n.start();
+  wind.start(0, Math.random() * 3);
+  return {
+    bus,
+    engine,
+    engineLevel,
+    engineTone,
+    chug,
+    wind,
+    windTone,
+    windLevel,
+    whistleTone,
+    whistleLevel,
+  };
+}
+
+/**
+ * The sound of riding a sky ship, for as long as you're near one: the
+ * engines' hum, pitched and thrumming with the throttle, and the wind,
+ * rising steeply with the speed and brightening as it does. Call `set`
+ * every frame or so; `near` 0 (or muting) lets it go entirely, so a ship
+ * far off costs nothing.
+ */
+export const shipAmbience = {
+  set({
+    speed,
+    throttle,
+    near,
+  }: {
+    /** u/s. */
+    speed: number;
+    /** 0–1. */
+    throttle: number;
+    /** 0 far off – 1 on board. */
+    near: number;
+  }): void {
+    if (muted || near <= 0.001) {
+      if (shipLoop) shipAmbience.stop();
+      return;
+    }
+    const a = audio();
+    if (!a) return;
+    shipLoop ??= shipLoopOf(a);
+    const s = shipLoop;
+    const now = a.ctx.currentTime;
+    const thr = Math.min(1, Math.max(0, throttle));
+    const v = Math.min(1, Math.max(0, speed / SHIP_CRUISE));
+    const wind = v ** 1.7;
+    const follow = (p: AudioParam, to: number) =>
+      p.setTargetAtTime(to, now, SHIP_FOLLOW);
+    follow(s.bus.gain, Math.min(1, near));
+    const pitch = 0.85 + 0.3 * thr;
+    follow(s.engine[0].frequency, 46 * pitch);
+    follow(s.engine[1].frequency, 92.3 * pitch);
+    follow(s.engineTone.frequency, 220 + 340 * thr);
+    follow(s.engineLevel.gain, 0.015 + 0.075 * thr);
+    follow(s.chug.frequency, 4 + 8 * thr);
+    follow(s.windTone.frequency, 300 * 10 ** v);
+    follow(s.windLevel.gain, 0.02 + 0.16 * wind);
+    follow(s.whistleTone.frequency, 900 + 1300 * v);
+    follow(s.whistleLevel.gain, 0.03 * wind);
+  },
+  /** Fade it out and let it all go. */
+  stop(): void {
+    const s = shipLoop;
+    if (!s || !ctx) return;
+    shipLoop = null;
+    const now = ctx.currentTime;
+    s.bus.gain.cancelScheduledValues(now);
+    s.bus.gain.setTargetAtTime(0, now, 0.1);
+    for (const n of [...s.engine, s.chug, s.wind]) n.stop(now + 0.6);
+    setTimeout(() => s.bus.disconnect(), 800);
+  },
+};

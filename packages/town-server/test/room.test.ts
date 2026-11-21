@@ -158,16 +158,26 @@ describe("rules", () => {
   });
 
   it("refuses leaving the island", () => {
-    const g = newGuard(39.9, 0, 0);
-    expect(checkMove(g, 41, 0, 1000, "home")).toBe(false);
+    const g = newGuard(0, 39.9, 0);
+    expect(checkMove(g, 0, 41, 1000, "home")).toBe(false);
   });
 
-  it("holds the training grounds to its own, smaller island and spawn", () => {
-    const g = newGuard(16.5, 0, 0);
-    expect(checkMove(g, 18, 0, 1000, "arena")).toBe(false);
-    expect(checkMove(g, 0, -12, 100, "arena")).toBe(true);
-    expect(startingPoint("arena", 30, 0)).toEqual({ x: 0, z: -12 });
-    expect(startingPoint("arena", 0, 10)).toEqual({ x: 0, z: 10 });
+  it("lets you out past its edge up the Sky Dock's gangplank, and no further", () => {
+    const [x0, z0] = TOWN_MAPS.home.gangplank.from;
+    const [x1, z1] = TOWN_MAPS.home.gangplank.to;
+    const g = newGuard(x0, z0, 0);
+    expect(checkMove(g, x1, z1, 2000, "home")).toBe(true);
+    expect(startingPoint("home", x1, z1)).toEqual({ x: x1, z: z1 });
+    // Off its side, into the sky.
+    expect(checkMove(g, x1, z1 + 2, 3000, "home")).toBe(false);
+  });
+
+  it("holds the Wilds to its own island and spawn", () => {
+    const g = newGuard(81.5, 0, 0);
+    expect(checkMove(g, 84, 0, 1000, "wilds")).toBe(false);
+    expect(checkMove(g, -66.5, 0.5, 100, "wilds")).toBe(true);
+    expect(startingPoint("wilds", 90, 0)).toEqual({ x: -66.5, z: 0.5 });
+    expect(startingPoint("wilds", 0, 10)).toEqual({ x: 0, z: 10 });
   });
 
   it("in a fight, only lets a herzie onto the spawn when the server sent it", () => {

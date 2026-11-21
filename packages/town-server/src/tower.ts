@@ -9,6 +9,9 @@
  * herzie's casts, and "cleared" once the last mob falls. No breather
  * after a hit here: every attack that lands, lands.
  * Linger past a floor's par time and its mobs enrage.
+ * A Warden's floor, cleared, leaves a chest (TOWER_CHEST) that opens as
+ * the herzie walks up to it ("chest"); what's in it is `town-vitals`' to
+ * roll, like a kill's drop.
  */
 
 import type { AttackStyle } from "@herzies/shared/classes";
@@ -32,7 +35,7 @@ import {
   RIMSHOT,
   shuffleOn,
 } from "@herzies/shared/skills";
-import { towerMob } from "@herzies/shared/tower";
+import { isChestFloor, TOWER_CHEST, towerMob } from "@herzies/shared/tower";
 import type { TowerFloor, TowerMob } from "@herzies/shared/town-net";
 import {
   type BossEvent,
@@ -54,11 +57,17 @@ export { predict, SEEN_LAG_MS, type TowerArena } from "./mobs";
 export type TowerEvent =
   | BossEvent
   | { t: "mobDown"; mob: number; by: string; x: number; z: number }
-  | { t: "cleared"; floor: number };
+  | { t: "cleared"; floor: number }
+  /** A cleared floor's chest opened, standing at (x, z). */
+  | { t: "chest"; floor: number; x: number; z: number };
 
 export class TowerEngine {
   private readonly pack: MobPack;
   private cleared = false;
+  /** The cleared floor's chest, while it stands shut, and from when it
+   * may open (TOWER_CHEST.settleMs after it lands). */
+  private chest: { x: number; z: number } | null = null;
+  private chestFrom = 0;
   private casts = new CastBudget(TUNING.castEveryMs, TUNING.castBurst);
   /** A Slinger's discs: a hand throws once its disc is back. */
   private hands = new DiscHands();
@@ -145,7 +154,17 @@ export class TowerEngine {
       mobs: this.wireMobs(),
       cleared: this.cleared,
       enrageIn: Math.max(0, Math.round(this.pack.enrageAt - this.pack.now)),
+      ...(this.chest ? { chest: this.chest } : {}),
     };
+  }
+
+  /** Opens the floor's chest if one stands shut (walked up to, or the
+   * herzie going on without it): what it was, or null. */
+  openChest(): Extract<TowerEvent, { t: "chest" }> | null {
+    const at = this.chest;
+    if (!at) return null;
+    this.chest = null;
+    return { t: "chest", floor: this.floor, x: at.x, z: at.z };
   }
 
   /** Whether the floor's mobs have enraged. */
@@ -207,11 +226,13 @@ export class TowerEngine {
 
   // --- Floors.
 
-  /** On to the next floor, if this one's cleared. */
+  /** On to the next floor, if this one's cleared. A chest still shut is
+   * left behind: open it first (FightRuntime.next does). */
   next(now: number): boolean {
     if (!this.cleared) return false;
     this.pack.floor++;
     this.cleared = false;
+    this.chest = null;
     this.pack.spawnFloor(now);
     return true;
   }
@@ -377,8 +398,27 @@ export class TowerEngine {
     if (!this.cleared && this.pack.size > 0 && !this.pack.alive.length) {
       this.cleared = true;
       this.pack.clearPending();
+      if (isChestFloor(this.floor)) {
+        this.chest = TOWER_CHEST.at;
+        this.chestFrom = now + TOWER_CHEST.settleMs;
+      }
       events.push({ t: "cleared", floor: this.floor });
     }
+    // The chest opens to the first herzie up on their feet who comes
+    // close (in the Tower, the only one), once it's down.
+    if (this.chest && now >= this.chestFrom)
+      for (const p of players) {
+        const at = p.alive ? p.posAt(now) : null;
+        if (
+          at &&
+          Math.hypot(at.x - this.chest.x, at.z - this.chest.z) <=
+            TOWER_CHEST.reach
+        ) {
+          const opened = this.openChest();
+          if (opened) events.push(opened);
+          break;
+        }
+      }
     return events;
   }
 }

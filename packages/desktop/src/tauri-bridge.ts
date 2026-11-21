@@ -31,6 +31,7 @@ import type {
 } from "@herzies/shared";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { relaunch } from "@tauri-apps/plugin-process";
 import {
@@ -390,6 +391,29 @@ export const herzies = {
       targetUnitId,
       protectionItemId,
     }),
+  /** Crafts a Wilds instrument from a `WILDS_RECIPES` recipe: consumes a base
+   * instrument (keeping its upgrade level) plus crafting bits. Throws with the
+   * server's error message (unknown recipe, not enough bits, bag full, …). */
+  craftWildsInstrument: (recipe: string) =>
+    invoke<{
+      ok: boolean;
+      item: string;
+      unitId: string;
+      inventory: Inventory;
+      itemUpgrades: Record<string, number>;
+      units: ItemUnit[];
+    }>("craft_wilds_instrument", { recipe }),
+  /** Tunes one instrument copy (worn or not) up a level with crafting bits.
+   * Throws with the server's error message (not tunable, already at +6, not
+   * enough bits). */
+  tuneInstrument: (unitId: string) =>
+    invoke<{
+      ok: boolean;
+      newLevel: number;
+      inventory: Inventory;
+      itemUpgrades: Record<string, number>;
+      units: ItemUnit[];
+    }>("tune_instrument", { unitId }),
   /** Buys from a live merchant (Good ol' George, for coins) or treat_trader
    * (Nandor the Treatless, for treats). Throws with the server's message
    * (sold out, limit reached, not enough currency, …). `newCurrency` is
@@ -550,6 +574,13 @@ export const herzies = {
   setTownExpanded: (expanded: boolean) =>
     isTauri()
       ? invoke<void>("set_town_expanded", { expanded })
+      : Promise.resolve(),
+  /** Real OS full screen (macOS: the window's own Space, not just
+   * maximised), on or off; useFullscreen follows the result. Nothing
+   * outside the app. */
+  setFullscreen: (on: boolean) =>
+    isTauri()
+      ? getCurrentWindow().setFullscreen(on).finally(refreshFullscreen)
       : Promise.resolve(),
 
   /** Keep the window open when it loses focus (not always-on-top). */
@@ -890,6 +921,71 @@ export function useWindowVisible(): boolean {
     };
   }, []);
   return visible;
+}
+
+/** Whether the window's in full screen: one store for the app, read by
+ * every useFullscreen. */
+let fullscreenCache = false;
+const fullscreenListeners = new Set<(on: boolean) => void>();
+let fullscreenRecheck: ReturnType<typeof setTimeout> | undefined;
+/** Went in or out since the webview last got the keyboard back. */
+let fullscreenMoved = false;
+
+/** Asks the window whether it's in full screen, now and once more after
+ * macOS's slide into or out of its Space has settled: its last resize can
+ * land before the window counts itself out (or in).
+ *
+ * Once settled after going in or out, the webview takes the keyboard back.
+ * macOS only takes a titled, resizable window full screen, and ours is a
+ * fixed size (its title bar invisible, tray.rs use_native_corners): tao
+ * lends it that style on the way in and restores the old one once out (tao
+ * `toggle_full_screen_async`, `restore_state_from_fullscreen`), and each
+ * style change makes tao's own NSView first responder — detached since wry
+ * put the WKWebView in its own parent view as the window's content. Every
+ * key then went nowhere until Tab walked the window's key-view loop onto
+ * the webview. The settled read comes 800 ms after the last resize, which
+ * tao emits after both style changes. */
+export function refreshFullscreen(): void {
+  if (!isTauri()) return;
+  const read = (settled: boolean) =>
+    getCurrentWindow()
+      .isFullscreen()
+      .then((on) => {
+        if (fullscreenCache !== on) {
+          fullscreenCache = on;
+          fullscreenMoved = true;
+          for (const l of fullscreenListeners) l(on);
+        }
+        if (settled && fullscreenMoved) {
+          fullscreenMoved = false;
+          return getCurrentWebview().setFocus();
+        }
+      })
+      .catch(() => {});
+  read(false);
+  clearTimeout(fullscreenRecheck);
+  fullscreenRecheck = setTimeout(() => read(true), 800);
+}
+if (isTauri()) {
+  // Going in or out resizes the window, whoever did it (the menu, or the
+  // OS's own way out).
+  getCurrentWindow()
+    .onResized(refreshFullscreen)
+    .catch(() => {});
+  refreshFullscreen();
+}
+
+/** Whether the window's in real OS full screen (never in a plain browser). */
+export function useFullscreen(): boolean {
+  const [on, setOn] = useState(fullscreenCache);
+  useEffect(() => {
+    fullscreenListeners.add(setOn);
+    setOn(fullscreenCache);
+    return () => {
+      fullscreenListeners.delete(setOn);
+    };
+  }, []);
+  return on;
 }
 
 /**

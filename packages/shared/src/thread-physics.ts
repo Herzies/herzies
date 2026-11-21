@@ -16,7 +16,7 @@
 type V3 = [number, number, number];
 
 /** How a chain of weights hangs: built with the herzie (see the renderer's
- * buildCompactDiscs). */
+ * compactDiscs). */
 export interface ThreadRig {
   /** Where the first thread is tied, at rest. */
   knot: V3;

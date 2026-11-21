@@ -1,10 +1,4 @@
-import {
-  getTitle,
-  RARITY_COLORS,
-  type Rarity,
-  TITLES,
-  type TitleDef,
-} from "@herzies/shared";
+import { getTitle, type Rarity, type TitleDef } from "@herzies/shared";
 
 /** Rarest first. */
 export const RARITY_RANK: Record<Rarity, number> = {
@@ -18,58 +12,6 @@ export const RARITY_RANK: Record<Rarity, number> = {
 /** The rarities that get the big toast and a shimmer. */
 export const isGrandRarity = (rarity: Rarity) =>
   rarity === "legendary" || rarity === "mythic";
-
-/** A title's colour: its rarity's, as items have. */
-export function titleColour(id: string | null | undefined): string | null {
-  const def = getTitle(id);
-  return def ? RARITY_COLORS[def.rarity] : null;
-}
-
-/** One ladder (titles on the same number, low to high), or a lone title. */
-export interface TitleFamily {
-  key: string;
-  rungs: TitleDef[];
-}
-
-/** The catalog as the Titles tab lists it: in its own order, each ladder
- * (neighbouring titles of one category on the same metric) as one family. */
-export function titleFamilies(
-  catalog: readonly TitleDef[] = TITLES,
-): TitleFamily[] {
-  const families: TitleFamily[] = [];
-  for (const def of catalog) {
-    const last = families.at(-1)?.rungs.at(-1);
-    if (
-      last &&
-      def.metric &&
-      last.metric === def.metric &&
-      last.category === def.category
-    ) {
-      families[families.length - 1].rungs.push(def);
-    } else {
-      families.push({ key: def.id, rungs: [def] });
-    }
-  }
-  return families;
-}
-
-/** The rungs of a ladder the tab shows: folded, the highest one earned and
- * the next one to go for (the first, before any is earned); open, all of
- * them. A ladder of two shows both either way. */
-export function shownRungs(
-  family: TitleFamily,
-  earned: ReadonlySet<string>,
-  open: boolean,
-): TitleDef[] {
-  const { rungs } = family;
-  if (open || rungs.length <= 2) return rungs;
-  let top = -1;
-  rungs.forEach((r, i) => {
-    if (earned.has(r.id)) top = i;
-  });
-  if (top < 0) return [rungs[0]];
-  return rungs.slice(top, top + 2);
-}
 
 /** How a batch of new titles is announced: each on its own, or (three or
  * more at once, as after the first launch with titles) one summary, rarest
@@ -95,9 +37,21 @@ export function announceTitles(ids: readonly string[]): TitleAnnouncement[] {
   return defs.map((def) => ({ kind: "one", def }));
 }
 
-/** "Held by 1 herzie", "Held by 12 herzies". */
-export const heldByLabel = (n: number) =>
-  `Held by ${n.toLocaleString("en-US")} herzie${n === 1 ? "" : "s"}`;
+/** How rare a title is: the share of all herzies holding it, "Held by
+ * 3.2% of herzies". A tenth of a percent under 10%, whole above; never
+ * rounded to nothing ("<0.1%") nor, while someone lacks it, to everyone
+ * ("99%"). An earned title has one holder at least: you. */
+export function heldByLabel(holders: number, herzies: number): string {
+  const n = Math.max(holders, 1);
+  const all = Math.max(herzies, n);
+  const pct = (n / all) * 100;
+  if (pct < 0.1) return "Held by <0.1% of herzies";
+  const shown =
+    Math.round(pct * 10) < 100
+      ? (Math.round(pct * 10) / 10).toFixed(1)
+      : String(n < all ? Math.min(Math.round(pct), 99) : 100);
+  return `Held by ${shown}% of herzies`;
+}
 
 /** An earned date as the tab says it: "3 Nov 2026". */
 export function earnedOn(iso: string): string {

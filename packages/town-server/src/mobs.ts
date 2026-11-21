@@ -310,8 +310,9 @@ export class MobPack {
     // Two packs, either side of the far middle, so they come at you from
     // two ways at once.
     const away = Math.atan2(-entry.x, -entry.z);
-    // In the open meadow: the wooded rim (past about 13) is the client's
-    // trees, which mobs here know nothing of.
+    // Out on the open floor: the barrels and pots stacked round the hall's
+    // wall (past about 18) are the client's, which mobs here know nothing
+    // of.
     const r = Math.min(radius - 4, 12);
     for (let i = 0; i < n; i++) {
       const kind = kinds[i];

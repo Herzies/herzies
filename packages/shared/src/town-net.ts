@@ -14,13 +14,20 @@
  */
 import type { CreatureParams } from "./creature-params.js";
 import type { Equipped } from "./items.js";
+import type {
+  WildsCacheHold,
+  WildsCacheView,
+  WildsGroundDrop,
+  WildsLootRefusal,
+} from "./wilds-loot.js";
 
 /** Bumped on any incompatible change; the server turns away other versions
  * with {@link TOWN_CLOSE.outdated} so old desktop betas say "update" instead of
  * misreading frames. */
-export const TOWN_PROTOCOL = 5;
-// 5: duels (see duel.ts) and titles under names. An app from before can't
-// answer a challenge or draw a duel it's standing in.
+export const TOWN_PROTOCOL = 6;
+// 6: the sky ship to the Wilds (the `airship` map, a room for its deck) and
+// free-for-all PvP on the Wilds. An app from before can't ride a ship or
+// fight there.
 
 /** Server snapshot rate. */
 export const TOWN_TICK_HZ = 15;
@@ -31,30 +38,78 @@ export const TOWN_ROOM_CAPACITY = 40;
 export const TOWN_MAX_SHARDS = 16;
 
 /** The maps a client may ask for, with what the server needs to check
- * movement: the walkable radius and where a respawn puts you. Must match the
- * desktop's map files (checked by a desktop test). */
+ * movement: the walkable radius and where a respawn puts you, and on the
+ * islands with a Sky Dock its ship's gangplank — walked up from the pier's
+ * end past the island's edge into the gangway (`from` foot, `to` top, its
+ * walkable `half` width either side), which is the island's room's until
+ * you're through. Must match the desktop's map files (checked by a desktop
+ * test). */
 export const TOWN_MAPS = {
-  home: { radius: 40, spawn: { x: 13.5, z: 12 } },
-  /** The training grounds, through the portal: training dummies. */
-  arena: { radius: 17, spawn: { x: 0, z: -12 } },
+  home: {
+    radius: 40,
+    spawn: { x: 13.5, z: 12 },
+    gangplank: { from: [39.42, -3.78], to: [44.42, -4.26], half: 0.5 },
+  },
   /** The boss's cave: a small dark room, one shared fight. */
   bossroom: { radius: 13, spawn: { x: 0, z: 10 } },
-  /** The Tower (an event): a lush island fought floor by floor, alone. Its
-   * spawn is the meadow's west end; each new floor puts you back there. */
+  /** The Tower (an event): its round stone hall inside, fought floor by
+   * floor, alone. Its spawn is the west end of the open floor, a few
+   * steps in from the doorway; each new floor puts you back there. */
   tower: { radius: 21, spawn: { x: -12.5, z: 0.5 } },
-  /** The Wilds: a big wild island west of Town, through its portal. */
-  wilds: { radius: 83, spawn: { x: 66.5, z: 0.5 } },
+  /** The Wilds: a big wild island east of Town, reached by sky ship. */
+  wilds: {
+    radius: 83,
+    spawn: { x: -66.5, z: 0.5 },
+    gangplank: { from: [-82.6, 0.52], to: [-87.62, 0.55], half: 0.5 },
+  },
+  /** A sky ship's deck, in its own frame (its flight is the same for
+   * everyone, from the clock: see wilds.ts). One room per ship: its shard
+   * is the ship's index. */
+  airship: { radius: 13, spawn: { x: 0, z: 0 } },
 } as const;
 export type TownMapId = keyof typeof TOWN_MAPS;
 export function isTownMapId(id: string): id is TownMapId {
   return Object.hasOwn(TOWN_MAPS, id);
 }
 
+type Gangplank = {
+  readonly from: readonly [number, number];
+  readonly to: readonly [number, number];
+  readonly half: number;
+};
+
+/** Whether (x, z) is somewhere a herzie may stand on `map`, give or take
+ * `slack`: inside its walkable radius, or on its Sky Dock's gangplank (a
+ * ship's there only some of the time; the server doesn't keep the
+ * timetable, and a stub of plank in the air is nowhere worth cheating to). */
+export function inTownBounds(
+  map: TownMapId,
+  x: number,
+  z: number,
+  slack = 0,
+): boolean {
+  const def: { radius: number; gangplank?: Gangplank } = TOWN_MAPS[map];
+  if (Math.hypot(x, z) <= def.radius + slack) return true;
+  const g = def.gangplank;
+  if (!g) return false;
+  const [x0, z0] = g.from;
+  const dx = g.to[0] - x0;
+  const dz = g.to[1] - z0;
+  const len = Math.hypot(dx, dz);
+  const along = ((x - x0) * dx + (z - z0) * dz) / len;
+  const across = ((x - x0) * dz - (z - z0) * dx) / len;
+  return (
+    along >= -slack &&
+    along <= len + slack &&
+    Math.abs(across) <= g.half + slack
+  );
+}
 /** Maps where sitting on a bench earns extra health: the peaceful ones
  * with benches. The app counts it as you sit; the Town server credits it. */
 export const TOWN_REST_MAPS: ReadonlySet<TownMapId> = new Set([
   "home",
   "wilds",
+  "airship",
 ]);
 
 /** Maps that are one room however many come: the boss is shared, so there is
@@ -147,6 +202,11 @@ export type TownTicketPayload = {
    * seconds), and the floor this herzie starts on (one past their best).
    * The Tower turns away tickets without it. */
   tower?: { event: string; until: number; floor: number };
+  /** Set only while a "wilds" event is on (on a ticket for the Wilds): the
+   * event and its window (ms since the epoch). The Wilds room keys its
+   * caches, dropped cards and listening bonus on it; without it, none of
+   * those. */
+  wilds?: { event: string; startsAt: number; endsAt: number };
   /** The herzie's level, for the Tower's level gap. */
   lv?: number;
   /** The herzie's class (classes.ts), once chosen. */
@@ -159,7 +219,7 @@ export type TownTicketPayload = {
   em?: string[];
   /** A game master (00133): its name carries a "GM" mark. */
   gm?: true;
-  /** The title it wears (titles.ts), shown under its name. Absent: none. */
+  /** The title it wears (titles.ts), shown over its name. Absent: none. */
   ti?: string;
 };
 
@@ -355,7 +415,7 @@ export const TOWN_FLAG_DANCING = 4;
  * an "is casting" bit, so two casts between ticks aren't one. */
 export const TOWN_CAST_SHIFT = 3;
 export const TOWN_CAST_MASK = 0b111 << TOWN_CAST_SHIFT;
-/** In combat mode, on the training grounds. */
+/** In combat mode. */
 export const TOWN_FLAG_COMBAT = 64;
 /** Flips on every jump: whenever it changes, the herzie hopped. A toggle,
  * not an "is airborne" bit, so a jump straight after landing still shows. */
@@ -552,7 +612,7 @@ export type TownPlayer = {
   down?: true;
   /** A game master: its name carries a "GM" mark. */
   gm?: true;
-  /** The title it wears (titles.ts), shown under its name. */
+  /** The title it wears (titles.ts), shown over its name. */
   title?: string;
 };
 
@@ -642,6 +702,19 @@ export type DuelState = {
   hp: { id: number; hp: number; maxHp: number }[];
 };
 
+/** A herzie in the Wilds' free-for-all (wilds-pvp.ts) as the room tells
+ * everyone, when any of it changes: its PvP health, whether it's down
+ * (and gets up in the camp at `down`, server ms), and whether hits on it
+ * don't count yet (until `shield`, server ms). Nobody is told of a
+ * herzie at full health with neither. */
+export type WildsPvpState = {
+  id: number;
+  hp: number;
+  maxHp: number;
+  down?: number;
+  shield?: number;
+};
+
 export type ClientMessage =
   /** First message on a socket. `at` is where the herzie stands now. */
   | { t: "hello"; v: number; ticket: string; at: TownState }
@@ -657,8 +730,9 @@ export type ClientMessage =
   /** In the Tower, on a cleared floor: on to the next one. The room puts
    * you back at the map's spawn (the west end). */
   | { t: "next" }
-  /** In the boss room: whether you're playing music (the boss hates it,
-   * any of it). Sent when it changes. */
+  /** In the boss room or the Tower: whether you're playing music (the boss
+   * hates it, any of it; the Tower pays the same bonus). Sent when it
+   * changes. */
   | { t: "tune"; on: boolean }
   /** A Bard's lute: its basic attack heals the ally it's aimed at (true)
    * or hurts (false). Sent on every switch and every arrival. */
@@ -671,12 +745,21 @@ export type ClientMessage =
    * reward). The app then respawns you in town. */
   | { t: "forfeit" }
   /** Duels, on the maps that have them (DUEL_MAPS). */
-  | ({ t: "duel" } & DuelClientOp);
+  | ({ t: "duel" } & DuelClientOp)
+  /** On the Wilds: take dropped card `id` (in reach, and only once its
+   * first claim is yours or over). (A cache isn't asked for: the room
+   * opens it for whoever holds it; see `wildsHold`.) */
+  | { t: "wildsTake"; id: string };
 
 /** Why a skill was refused, when the player can do something about it:
  * nobody downed near enough, no revives left, not until the fight, or not
- * in a duel (Taunt, Resurrect). */
-export type SkillRefusal = "no-target" | "not-yet" | "instrument" | "duel";
+ * in a duel or the Wilds' free-for-all (Taunt, Resurrect). */
+export type SkillRefusal =
+  | "no-target"
+  | "not-yet"
+  | "instrument"
+  | "duel"
+  | "wilds";
 
 /** Why the room refused to let you eat: knocked out, already at full HP,
  * too soon after the last one, none left in the bank, not something you
@@ -812,6 +895,10 @@ export type TowerFloor = {
   /** Ms until the mobs enrage, as of sending (0: they have). Missing from
    * older servers. */
   enrageIn?: number;
+  /** A cleared Warden's floor's chest, where it stands, until you walk up
+   * to it (the room opens it, and its loot follows as a `loot` from here:
+   * see TOWER_CHEST). Absent: no chest (any other floor, or opened). */
+  chest?: { x: number; z: number };
 };
 
 /** One piece of boss loot: a pending drop's id and its item id. */
@@ -877,7 +964,8 @@ export type ServerMessage =
   | {
       t: "loot";
       drops: LootDrop[];
-      /** Where they drop from (a Tower mob); absent: out of the boss. */
+      /** Where they drop from (a Tower mob, or a Warden's chest); absent:
+       * out of the boss. */
       at?: { x: number; z: number };
     }
   /** The fight is over: how it went, its ten top damage dealers, and your
@@ -1022,7 +1110,71 @@ export type ServerMessage =
       ms: number;
       tally: { id: number; damage: number; hits: number }[];
       rematchUntil?: number;
-    };
+    }
+  /** A herzie's standing in the Wilds' free-for-all changed (to the whole
+   * room; to a newcomer, everyone's that isn't the default). `by`: who
+   * just hurt it, for the blow's direction. */
+  | ({ t: "pvp"; by?: number } & WildsPvpState)
+  /** Your blow in the Wilds landed on `target` for `damage` (sent to you
+   * alone); `blocked`: its Cymbrella dome took it, or it was still
+   * protected (damage 0). */
+  | {
+      t: "pvpHit";
+      target: number;
+      damage: number;
+      crit: boolean;
+      blocked?: true;
+    }
+  /** A herzie in the Wilds is stunned until `until` (server ms; to the
+   * whole room). */
+  | { t: "pvpStun"; id: number; until: number }
+  /** A herzie in the Wilds was taken down by `by` (an entity id; null if
+   * it has left the room since), names as they were then. `logged`: it
+   * left mid-fight, which counts the same. Sent to the two of them and to
+   * anyone near where it fell. */
+  | {
+      t: "pvpFeed";
+      by: number | null;
+      byName: string;
+      victim: number;
+      victimName: string;
+      logged?: true;
+    }
+  /** The Wilds' loot as it lies (to a newcomer, after `welcome`): the
+   * cards dropped by herzies taken down, the cache that's out, and who's
+   * holding it (null: nobody). */
+  | {
+      t: "wildsLoot";
+      drops: WildsGroundDrop[];
+      cache: WildsCacheView | null;
+      hold: WildsCacheHold | null;
+    }
+  /** A herzie taken down on the Wilds (entity `from`) dropped a card where
+   * it fell (to the whole room). */
+  | { t: "wildsDrop"; drop: WildsGroundDrop; from: number }
+  /** A dropped card is gone: taken by entity `by` (null: someone who has
+   * left since), or `back` to its owner, unclaimed (to the whole room). */
+  | { t: "wildsGone"; id: string; by: number | null; back?: true }
+  /** A cache turned up (`cache`), or was opened by `by` (`cache` null;
+   * `byName` as they were then) or ran out (null, no `by`). To the whole
+   * room. */
+  | {
+      t: "wildsCache";
+      cache: WildsCacheView | null;
+      by?: number;
+      byName?: string;
+    }
+  /** You took a dropped card (sent to you alone): it's in your bag. */
+  | { t: "wildsTaken"; item: string; level: number }
+  /** You were taken down and dropped this card (sent to you alone). */
+  | { t: "wildsLost"; item: string; level: number }
+  /** Who's holding cache `id` changed (to the whole room; see
+   * WildsCacheHold): said on each change, not as it counts. Cleared by
+   * the cache's own `wildsCache`. */
+  | ({ t: "wildsHold"; id: string } & WildsCacheHold)
+  /** The room wouldn't let you take drop `id`, or couldn't open cache
+   * `id` for you though you held it, and why (sent to you alone). */
+  | { t: "wildsRefused"; id: string; why: WildsLootRefusal };
 
 export function parseServerMessage(text: string): ServerMessage | null {
   try {

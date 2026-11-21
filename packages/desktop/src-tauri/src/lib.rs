@@ -676,6 +676,46 @@ async fn apply_dice_upgrade(
     Ok(data)
 }
 
+/// Crafts a Wilds instrument (recipe from WILDS_RECIPES); applies the returned item state.
+#[tauri::command]
+async fn craft_wilds_instrument(
+    recipe: String,
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    let client = api::http();
+    // Before the request: the response's item state is at least this new.
+    let issued_at = Instant::now();
+    let data = api::api_craft_wilds_instrument(&client, &recipe).await?;
+    let mut s = state.lock().unwrap();
+    if let Some(snapshot) = snapshot_from_response(&data, &s, issued_at) {
+        apply_inventory(&mut s, snapshot, None);
+        drop(s);
+        emit_state_update(&app);
+    }
+    Ok(data)
+}
+
+/// Tunes one instrument copy with crafting bits; applies the returned item state.
+#[tauri::command]
+async fn tune_instrument(
+    unit_id: String,
+    app: AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
+    let client = api::http();
+    // Before the request: the response's item state is at least this new.
+    let issued_at = Instant::now();
+    let data = api::api_tune_instrument(&client, &unit_id).await?;
+    let mut s = state.lock().unwrap();
+    if let Some(snapshot) = snapshot_from_response(&data, &s, issued_at) {
+        apply_inventory(&mut s, snapshot, None);
+        drop(s);
+        emit_state_update(&app);
+    }
+    Ok(data)
+}
+
 #[tauri::command]
 async fn equip_item(
     unit_id: String,
@@ -2582,6 +2622,7 @@ async fn events_watch_loop(app: AppHandle) {
             let title = match event.event_type.as_str() {
                 "song_hunt" => "Orphiez is in town!".to_string(),
                 "tower" => "The Tower is open!".to_string(),
+                "wilds" => "The Wilds are open!".to_string(),
                 _ if event.title.trim().is_empty() => "Someone's in town!".to_string(),
                 _ => format!("{} is in town!", event.title),
             };
@@ -2603,16 +2644,22 @@ async fn events_watch_loop(app: AppHandle) {
             let fallback_body = if event.event_type == "song_hunt" {
                 "He's lost a song. Help him find it."
             } else if event.event_type == "tower" {
-                "Climb it floor by floor, through the portal in Town."
+                "Climb it floor by floor, through its door in Town."
             } else {
                 "Someone new has arrived in Town."
             };
-            let body = event
-                .description
-                .as_deref()
-                .map(|d| d.trim())
-                .filter(|d| !d.is_empty())
-                .unwrap_or(fallback_body);
+            // The Wilds always say where the ship leaves from: an admin's
+            // description wouldn't know.
+            let body = if event.event_type == "wilds" {
+                "Blåmann is sailing: board her at the Sky Dock on the home island's east rim."
+            } else {
+                event
+                    .description
+                    .as_deref()
+                    .map(|d| d.trim())
+                    .filter(|d| !d.is_empty())
+                    .unwrap_or(fallback_body)
+            };
             send_notification(&app, &title, body, Some("events"));
             let _ = app.emit("activity", format!("{}: {}", title, body));
         }
@@ -3146,6 +3193,8 @@ pub fn run() {
             fetch_inventory,
             sell_item,
             apply_dice_upgrade,
+            craft_wilds_instrument,
+            tune_instrument,
             buy_from_merchant,
             buy_from_boboku,
             fetch_tower_guard,

@@ -4,6 +4,7 @@ import { CrystalBar, ExpBar, HpBar } from "./SquareBar";
 import { useCrystal } from "./town/crystalState";
 import { useMyDuelHp } from "./town/duel/store";
 import { refreshVitals, useLiveHp } from "./town/vitals";
+import { useMyWildsHp } from "./town/wilds/store";
 
 /** Publishes the Town's player card's bottom edge (from the window's top)
  * as `--player-card-bottom`: the Town's big window hangs its windows under
@@ -39,8 +40,9 @@ export const PLAYER_CARD_TOWN = "bg-black/45";
 /**
  * The herzie's health and experience, under its name on Home and in the
  * Town alike. (The modifiers star is on the now-playing box.) In a duel the
- * health bar is the duel's: your stored health is untouched by it, and
- * comes back when the ring has gone.
+ * health bar is the duel's, and in the Wilds their free-for-all's: your
+ * stored health is untouched by either, and comes back when the ring has
+ * gone (or you leave the Wilds).
  */
 export function PlayerBars({
   level,
@@ -56,7 +58,8 @@ export function PlayerBars({
   className?: string;
 }) {
   const live = useLiveHp();
-  const duelHp = useMyDuelHp();
+  const wildsHp = useMyWildsHp();
+  const duelHp = useMyDuelHp() ?? wildsHp;
   const crystal = useCrystal();
   const crystalOn = crystal?.enabled === true;
   // Health is fetched when the Town opens; on Home first, ask for it here.

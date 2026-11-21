@@ -6,6 +6,7 @@
  * physics engine on the server.
  */
 import {
+  inTownBounds,
   TOWN_MAPS,
   TOWN_SPRINT_SPEED,
   TOWN_TICKETED_MAPS,
@@ -66,9 +67,9 @@ export function checkMove(
   now: number,
   map: TownMapId,
 ): boolean {
-  const { radius, spawn } = TOWN_MAPS[map];
+  const { spawn } = TOWN_MAPS[map];
   if (!Number.isFinite(x) || !Number.isFinite(z)) return false;
-  if (Math.hypot(x, z) > radius + EDGE_TOLERANCE) return false;
+  if (!inTownBounds(map, x, z, EDGE_TOLERANCE)) return false;
   const cap = budgetFor(map, g);
   const elapsed = Math.max(0, now - g.at) / 1000;
   const budget = Math.min(
@@ -92,19 +93,20 @@ export function checkMove(
   return true;
 }
 
-/** Where a newcomer may start: where they say, if it's on the island. */
+/** Where a newcomer may start: where they say, if it's on the island (or
+ * its gangplank: stepping ashore, that's where you join). */
 export function startingPoint(
   map: TownMapId,
   x: unknown,
   z: unknown,
 ): { x: number; z: number } {
-  const { radius, spawn } = TOWN_MAPS[map];
+  const { spawn } = TOWN_MAPS[map];
   if (
     typeof x === "number" &&
     typeof z === "number" &&
     Number.isFinite(x) &&
     Number.isFinite(z) &&
-    Math.hypot(x, z) <= radius
+    inTownBounds(map, x, z)
   )
     return { x, z };
   return { ...spawn };

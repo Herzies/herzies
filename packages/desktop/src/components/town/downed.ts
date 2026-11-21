@@ -1,23 +1,26 @@
 import type { HerzieModel } from "@herzies/shared/gl";
 import { bossFight } from "./combat/fight";
 import { getVitals } from "./vitals";
+import { myWildsDown } from "./wilds/store";
 
 /**
- * A herzie knocked out in a raid: it lies where it fell, greyed, until a
- * Bard plays it back up (or it gives up). Shared by your herzie (Player)
- * and everyone else's (RemotePlayers), so a Bard can find the body.
+ * A herzie knocked out: it falls over and lies where it fell, greyed, until
+ * it's back up (a Bard plays it up, it respawns, or the Wilds' camp stands
+ * it up). Shared by your herzie (Player) and everyone else's
+ * (RemotePlayers), so a Bard can find the body.
  */
 
 /** How far it tips over, radians: on its side, not flat out of sight. */
 const LIE = 1.2;
-/** How fast it falls and gets back up, per second. */
-const RATE = 4;
+/** How fast it falls and gets back up, per second (a fall takes 0.4 s). */
+const RATE = 2.5;
 
-/** Whether you're down where a Bard can bring you back, so you stay where
- * you fell: in a raid that's on, or anywhere outside a fight. */
-export function downInRaid(): boolean {
-  if (!getVitals()?.down) return false;
-  return bossFight.on ? bossFight.raid?.stage === "fight" : true;
+/** Whether your herzie is down, wherever that is: out of health (the Tower,
+ * the cave at any stage, the Town) or taken down in the Wilds. It lies
+ * where it fell, and doesn't walk, turn, jump, cast or emote until it's back
+ * up; the camera's still yours. */
+export function youDown(): boolean {
+  return !!getVitals()?.down || myWildsDown();
 }
 
 /** Whether herzie `id` is down in the cave. */
@@ -40,7 +43,9 @@ export function applyDowned(
 ): number {
   const k = Math.max(0, Math.min(1, was + (down ? dt : -dt) * RATE));
   if (k === 0 && was === 0) return 0;
-  herzie.root.rotation.z = k * LIE;
+  // Toppling: slow off its feet, quickest as it hits the floor (and so,
+  // getting up, a push off the floor that slows as it rights itself).
+  herzie.root.rotation.z = k * k * LIE;
   herzie.setTint(k * 0.7, 1);
   return k;
 }

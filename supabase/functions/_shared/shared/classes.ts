@@ -10,6 +10,7 @@
  * (00137_shuffle.sql). A new class needs both.
  */
 import type { SkillId } from "./skills.ts";
+import { WILDS_RECIPES } from "./wilds-loot.ts";
 
 export const CLASS_IDS = ["bard", "record_slinger", "percussionist"] as const;
 export type HerzieClass = (typeof CLASS_IDS)[number];
@@ -25,8 +26,9 @@ export interface ClassDef {
   name: string;
   emoji: string;
   role: ClassRole;
-  /** The class's gear; the first is its instrument (main hand), which its
-   * basic attack and skills need. */
+  /** The class's starting gear; the first is its instrument (main hand),
+   * which its basic attack and skills need (or a Wilds build of it, see
+   * instrumentsOf). */
   equipment: string[];
   /** The skill every herzie of this class starts with. */
   starterSkill: SkillId;
@@ -93,27 +95,47 @@ export type MeleeBlow = "strike" | "punch" | "bump";
 /** What a herzie's basic attack is: its style, and for melee, which blow. */
 export type BasicAttack = { style: AttackStyle; blow: MeleeBlow };
 
-/** The instrument a class plays its basic attack and skills with: the
- * first of its equipment, worn in the main hand. */
+/** The instrument a class starts with and plays its basic attack and
+ * skills with: the first of its equipment, worn in the main hand. Boboku
+ * sells it, choosing the class gives it, and the Wilds build on it. */
 export function instrumentOf(cls: string | null | undefined): string | null {
   return isHerzieClass(cls) ? (CLASS_DEFS[cls].equipment[0] ?? null) : null;
 }
 
-/** Whether a herzie of class `cls` holds its class's instrument. Without
- * it, it can't use its class's basic attack or skills. */
+/** Every main-hand instrument a class plays: its own (instrumentOf) and
+ * the Wilds' builds of it (WILDS_RECIPES), which play exactly the same,
+ * the same attack and the same skills, only stronger. Empty for no class. */
+export function instrumentsOf(
+  cls: string | null | undefined,
+): readonly string[] {
+  return isHerzieClass(cls) ? INSTRUMENT_FAMILIES[cls] : [];
+}
+
+const INSTRUMENT_FAMILIES = {} as Record<HerzieClass, readonly string[]>;
+for (const id of CLASS_IDS) {
+  const base = CLASS_DEFS[id].equipment[0];
+  INSTRUMENT_FAMILIES[id] = [
+    base,
+    ...WILDS_RECIPES.filter((r) => r.base === base).map((r) => r.id),
+  ];
+}
+
+/** Whether a herzie of class `cls` holds one of its class's instruments
+ * (instrumentsOf). Without one, it can't use its class's basic attack or
+ * skills. */
 export function hasInstrument(
   cls: string | null | undefined,
   mainHand: string | null | undefined,
 ): boolean {
-  const inst = instrumentOf(cls);
-  return !!inst && mainHand === inst;
+  return !!mainHand && instrumentsOf(cls).includes(mainHand);
 }
 
-/** The class an instrument belongs to (only that class can wear it). */
+/** The class a main-hand instrument belongs to, any of its family (only
+ * that class can wear it). */
 function classOfInstrument(mainHand: string | null | undefined) {
   if (!mainHand) return null;
-  for (const def of Object.values(CLASS_DEFS))
-    if (def.equipment[0] === mainHand) return def.id;
+  for (const id of CLASS_IDS)
+    if (INSTRUMENT_FAMILIES[id].includes(mainHand)) return id;
   return null;
 }
 

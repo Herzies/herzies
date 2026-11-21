@@ -1,4 +1,10 @@
-import { getItem, parseBossRewardPools, TREAT_ITEM_ID } from "@herzies/shared";
+import {
+  getItem,
+  parseBossRewardPools,
+  TREAT_ITEM_ID,
+  wildsConfig,
+  wildsConfigError,
+} from "@herzies/shared";
 import type { createAdminClient } from "@/lib/supabase-admin";
 
 type Admin = ReturnType<typeof createAdminClient>;
@@ -26,6 +32,8 @@ export function isEventConfigComplete(type: string, config: Config): boolean {
   if (type === "merchant" || type === "treat_trader") {
     return Array.isArray(config.stock) && config.stock.length > 0;
   }
+  // Anything else (a boss, the Tower, the Wilds) fills its gaps with
+  // defaults, so it's always ready.
   return true;
 }
 
@@ -63,6 +71,19 @@ export async function validateTowerConfig(
     ...new Set((raw as string[]).map((n) => n.trim()).filter(Boolean)),
   ];
   return { config: { topRewardItemId: reward, excludeHerzies } };
+}
+
+/**
+ * Validate a Wilds config: how often the sky ship leaves each dock
+ * (`departEverySec`; the default when left out). Out-of-range values are
+ * refused rather than clamped, so the admin learns what they typed was
+ * wrong. Nothing else is kept: the timetable needs only this and the window.
+ */
+export function validateWildsConfig(config: Config): ConfigResult {
+  const filled = config.departEverySec === undefined ? wildsConfig({}) : config;
+  const error = wildsConfigError(filled);
+  if (error) return { error };
+  return { config: wildsConfig(filled) };
 }
 
 const isPositiveInt = (v: unknown): v is number =>

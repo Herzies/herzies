@@ -11,6 +11,7 @@ import {
   type TownMap,
   withTurn,
 } from "./map";
+import { towerPlace } from "./towerPlan";
 
 const MID = MAP_SIZE / 2;
 
@@ -54,6 +55,25 @@ describe("window lights", () => {
     // A 3×3 home: a window each on its three plain walls (its door wall
     // is too short either side of the door for one).
     expect(windowLightsOf(map)).toHaveLength(3);
+  });
+
+  it("lights the Tower's ground windows, facing out of it", () => {
+    const map = emptyMap();
+    for (let r = MID; r < MID + 5; r++) {
+      const line = map.objects[r];
+      map.objects[r] = `${line.slice(0, MID)}IIIII${line.slice(MID + 5)}`;
+    }
+    const [tower] = buildingsOf(map);
+    expect(tower.kind).toBe("tower");
+    const at = towerPlace(tower);
+    const lights = windowLightsOf(map);
+    expect(lights).toHaveLength(4);
+    for (const l of lights) {
+      const [dx, dz] = [l.at[0] - at.x, l.at[2] - at.z];
+      // On the drum (not out at the cells' corners), looking away from it.
+      expect(Math.hypot(dx, dz)).toBeLessThan(2.5);
+      expect(dx * l.out[0] + dz * l.out[1]).toBeGreaterThan(2);
+    }
   });
 });
 
