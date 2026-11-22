@@ -131,6 +131,14 @@ export const TOWN_TICKETED_MAPS: ReadonlySet<TownMapId> = new Set([
   "bossroom",
   "tower",
 ]);
+/** Maps whose ticket is asked for by name (`town-ticket?map=`), so it can
+ * carry that map's claim: the ticketed ones, which need one, and the Wilds,
+ * where an open "wilds" event's claim keys the room's loot and the
+ * listening bonus (none while the Wilds are shut). */
+export const TOWN_CLAIM_MAPS: ReadonlySet<TownMapId> = new Set([
+  ...TOWN_TICKETED_MAPS,
+  "wilds",
+]);
 /** Maps where every herzie gets a room of their own: the client names it
  * with `?i=<user id>`, and the room only takes that herzie's ticket. */
 export const TOWN_INSTANCED_MAPS: ReadonlySet<TownMapId> = new Set(["tower"]);

@@ -1,10 +1,10 @@
 import {
   isTownMapId,
+  TOWN_CLAIM_MAPS,
   TOWN_FLAG_COMBAT,
   TOWN_FLAG_DANCING,
   TOWN_FLAG_JUMP,
   TOWN_FLAG_SITTING,
-  TOWN_TICKETED_MAPS,
   type TownMapId,
   withCastSeq,
 } from "@herzies/shared";
@@ -40,7 +40,7 @@ export const AFK_MS = 2 * 60_000;
 
 let ticketSource: (map: TownMapId) => Promise<TownTicket> = async (map) => {
   const t = await herzies.fetchTownTicket(
-    TOWN_TICKETED_MAPS.has(map) ? map : undefined,
+    TOWN_CLAIM_MAPS.has(map) ? map : undefined,
   );
   // Every ticket carries the herzie's health as of now.
   if (t.vitals && !bossFight.on) setVitals(t.vitals);
