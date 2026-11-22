@@ -28,6 +28,14 @@ export type Grid = { size: number };
 export function islandRadius(g: Grid): number {
   return g.size / 2;
 }
+
+/** A steady 0–1 from two numbers, the same every run: the shader-style
+ * `sin` hash the Town scatters its little differences with (which lamp
+ * flickers when, which nights have northern lights, which slots rain). */
+export function hash01(a: number, b: number): number {
+  return Math.abs(Math.sin(a * 12.9898 + b * 78.233) * 43758.5453) % 1;
+}
+
 /** How far you can walk from an island's middle. */
 export function worldRadius(g: Grid): number {
   return g.size / 2 - EDGE_MARGIN;
@@ -866,13 +874,19 @@ export function turned(b: Building, x: number, z: number): [number, number] {
   return [px + dx * c + dz * s, pz - dx * s + dz * c];
 }
 
+const buildingsCache = new WeakMap<TownMap, Building[]>();
+
 /**
  * Every building on the map — homes, shops, caves and the auction house. Painted cells of
  * the same kind that touch are one building; an L or T shape is split into rectangles, largest first.
  * The door goes in the middle of the biggest rectangle's side that faces
  * the middle of town (or the next best side that's an outside wall).
+ * Worked out once per map (maps aren't changed in place: the editor makes
+ * a new one), as many things on the island read them.
  */
 export function buildingsOf(map: TownMap): Building[] {
+  const cached = buildingsCache.get(map);
+  if (cached) return cached;
   const seen = new Set<number>();
   const size = map.size;
   const key = (c: number, r: number) => r * size + c;
@@ -962,6 +976,7 @@ export function buildingsOf(map: TownMap): Building[] {
       });
     }
   }
+  buildingsCache.set(map, out);
   return out;
 }
 

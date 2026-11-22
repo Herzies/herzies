@@ -1,4 +1,9 @@
-import { getItem, type ItemDef, type Rarity } from "@herzies/shared";
+import {
+  getItem,
+  type ItemDef,
+  RARITY_RANK,
+  type Rarity,
+} from "@herzies/shared";
 import { BOSS_STAND } from "@herzies/shared/combat";
 import { ITEM_VOXEL } from "@herzies/shared/gl";
 import type { LootTier } from "../sfx";
@@ -87,9 +92,7 @@ export const LOOT = {
 
 /** Rarity as a number: how grand the drop looks and sounds. */
 export function tierOf(rarity: Rarity): LootTier {
-  return (
-    { common: 0, uncommon: 1, rare: 2, legendary: 3, mythic: 4 } as const
-  )[rarity];
+  return (4 - RARITY_RANK[rarity]) as LootTier;
 }
 
 // --- The voxel model --------------------------------------------------------

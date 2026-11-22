@@ -1,5 +1,6 @@
 import { totalXpForLevel, xpForLevel } from "@herzies/shared";
-import { useEffect, useState } from "react";
+import { useRef, useState } from "react";
+import { usePoll } from "../hooks/usePoll";
 import { cn } from "../lib/utils";
 import {
   herzies,
@@ -68,25 +69,24 @@ export function LeaderboardView({
   const [entries, setEntries] = useState<LeaderboardEntry[] | null>(null);
   const focused = useWindowFocused();
 
-  // Fetch on opening (or switching board), refresh while focused.
-  useEffect(() => {
-    if (!active) return;
-    let cancelled = false;
-    setEntries(null);
-    const load = () =>
+  // Fetch on opening (or switching board), refresh while focused. Only a new
+  // board blanks the list: refocusing used to, and it flickered every time.
+  const shownBoard = useRef(board);
+  usePoll(
+    (alive) => {
+      if (shownBoard.current !== board) {
+        shownBoard.current = board;
+        setEntries(null);
+      }
       herzies
         .fetchLeaderboard(board)
         .then((res) => {
-          if (!cancelled) setEntries(res.entries);
+          if (alive()) setEntries(res.entries);
         })
         .catch(() => {});
-    load();
-    const interval = focused ? setInterval(load, POLL_MS) : undefined;
-    return () => {
-      cancelled = true;
-      if (interval) clearInterval(interval);
-    };
-  }, [active, focused, board]);
+    },
+    { enabled: active, focused, everyMs: POLL_MS, key: board },
+  );
 
   return (
     <View colour="cyan" childrenClassName="flex min-h-0 flex-col">

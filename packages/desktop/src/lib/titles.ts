@@ -1,13 +1,9 @@
-import { getTitle, type Rarity, type TitleDef } from "@herzies/shared";
-
-/** Rarest first. */
-export const RARITY_RANK: Record<Rarity, number> = {
-  mythic: 0,
-  legendary: 1,
-  rare: 2,
-  uncommon: 3,
-  common: 4,
-};
+import {
+  getTitle,
+  RARITY_RANK,
+  type Rarity,
+  type TitleDef,
+} from "@herzies/shared";
 
 /** The rarities that get the big toast and a shimmer. */
 export const isGrandRarity = (rarity: Rarity) =>

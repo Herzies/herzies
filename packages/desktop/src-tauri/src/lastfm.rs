@@ -349,7 +349,13 @@ impl LastFmService {
         Self {
             api_key,
             app_name,
-            http: reqwest::Client::new(),
+            // Bounded, so a stalled request can't leave `enrichment_in_flight`
+            // stuck and block the retry for unverified tracks forever.
+            http: reqwest::Client::builder()
+                .connect_timeout(Duration::from_secs(5))
+                .timeout(Duration::from_secs(10))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new()),
             cache: Mutex::new(HashMap::new()),
             artist_tags_cache: Mutex::new(HashMap::new()),
             rate_limit_until: Mutex::new(None),
@@ -494,6 +500,9 @@ impl LastFmService {
     }
 }
 
+/// Dev convenience: picks up `.env.local` from the source tree. Release builds
+/// must not read a build-machine path at runtime.
+#[cfg(debug_assertions)]
 pub fn load_env() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.env.local");
     if path.exists() {

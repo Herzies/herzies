@@ -520,4 +520,12 @@ export interface Trade {
   targetAccepted: boolean;
   createdAt: string;
   expiresAt: string;
+  /** Bumped by the database on every change (00157), so a newer picture of
+   * the trade can be told from an older one. Absent from older servers. */
+  version?: number;
 }
+
+/** A trade as polled without names, or as broadcast on each change: the
+ * names are asked for once, since they can't change mid-trade. */
+export type TradeUpdate = Omit<Trade, "initiatorName" | "targetName"> &
+  Partial<Pick<Trade, "initiatorName" | "targetName">>;

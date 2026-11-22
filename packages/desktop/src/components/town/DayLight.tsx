@@ -13,7 +13,7 @@ import {
 import { CLOUD_SHADE, townLook } from "./depth";
 import { skyUniforms } from "./Islands";
 import { nightLights } from "./Lamps";
-import type { RoomKind } from "./map";
+import { hash01, type RoomKind } from "./map";
 import { ISLAND_RADIUS } from "./runtime";
 import { dayOfYear, type Season, seasonLook } from "./Seasons";
 import { lightning } from "./weather";
@@ -170,7 +170,7 @@ export function auroraTonight(dayOfYear: number): number {
   // Nights span midnight: 18:00 of one day and 06:00 of the next are
   // the same night.
   const night = Math.floor(dayOfYear + 0.25);
-  const h = Math.abs(Math.sin(night * 12.9898 + 78.233) * 43758.5453) % 1;
+  const h = hash01(night, 1);
   return h < 0.35 ? 0.6 + (h / 0.35) * 0.4 : 0;
 }
 
@@ -239,7 +239,9 @@ export function DayLight({
   );
   /** Which way the light comes from (unit, toward the sun), as last read. */
   const sunDir = useRef(new THREE.Vector3(0, 1, 0));
-  const box = useRef({ x: 0, z: 0, reach, applied: "" });
+  /** `applied`: the box's reach its shadow camera was last fitted to, in
+   * hundredths. */
+  const box = useRef({ x: 0, z: 0, reach, applied: Number.NaN });
 
   /** What the lights were set to, before the lightning's flash. */
   const base = useRef({ hemi: 0, light: new THREE.Color(), flash: 0 });
@@ -277,7 +279,7 @@ export function DayLight({
     light.target.position.copy(centre);
     light.target.updateMatrixWorld();
     light.position.copy(centre).addScaledVector(dir, d);
-    const key = `${r.toFixed(2)}`;
+    const key = Math.round(r * 100);
     if (key !== b.applied) {
       b.applied = key;
       cam.left = -r;

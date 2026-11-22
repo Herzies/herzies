@@ -104,6 +104,10 @@ const HIT_STOP_SCALE = 0.12;
 const reachFrom = { x: 0, z: 0 };
 const reachBody = { x: 0, z: 0, radius: 0 };
 const bossScratch = { x: 0, z: 0, yaw: 0 };
+/** The heal stance's allies each frame, and the entries they're written
+ * into: kept, so aiming a heal makes nothing new. */
+const allies: { id: number; x: number; z: number }[] = [];
+const allyPool: { id: number; x: number; z: number }[] = [];
 const HIT_STOP_MS = 65;
 const HANDS: readonly DiscHand[] = ["held-l", "held-r"];
 /** A Rimshot's hold on the slam (a plain strike holds 70 ms): the
@@ -739,12 +743,18 @@ export function Combat({
       chest.y += herzie.height * 0.55;
       dir.copy(a.point).sub(chest).normalize();
       const me = bossFight.you ?? -1;
-      const allies: { id: number; x: number; z: number }[] = [];
+      let n = 0;
       for (const [id, at] of entityAt) {
         if (id === me || id === -1) continue;
         if (entityDown(id)) continue;
-        allies.push({ id, x: at.x, z: at.z });
+        allyPool[n] ??= { id: 0, x: 0, z: 0 };
+        const ally = allyPool[n];
+        ally.id = id;
+        ally.x = at.x;
+        ally.z = at.z;
+        allies[n++] = ally;
       }
+      allies.length = n;
       stance.lock =
         healTarget([chest.x, chest.y, chest.z], [dir.x, dir.y, dir.z], allies)
           ?.ally.id ?? null;

@@ -61,12 +61,42 @@ function audio(): {
       noise = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
       const d = noise.getChannelData(0);
       for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+      document.addEventListener("visibilitychange", onVisibility);
     }
     if (ctx.state === "suspended") void ctx.resume();
+    // A sound while hidden: the quiet's counted from this one.
+    if (document.hidden) quietWhenHidden();
     return { ctx, out: master as GainNode, noise: noise as AudioBuffer };
   } catch {
     return null;
   }
+}
+
+/** Hidden this long (closed to the menu bar, minimised) with nothing held
+ * sounding, the context lets go of the audio thread: every sound but a
+ * held one (the ship's loop, a loot hum) is long over by then. */
+const HIDDEN_QUIET_MS = 30_000;
+let quietTimer: ReturnType<typeof setTimeout> | undefined;
+/** Loot hums sounding (the ship's loop is `shipLoop`). */
+let hums = 0;
+
+function quietWhenHidden(): void {
+  clearTimeout(quietTimer);
+  quietTimer = setTimeout(() => {
+    if (!ctx || !document.hidden || hums > 0 || shipLoop) return;
+    if (ctx.state === "running") void ctx.suspend();
+  }, HIDDEN_QUIET_MS);
+}
+
+/** Never suspended on screen: back, it's picked up again at once (rather
+ * than with the next sound, as audio() would), held sounds and all. */
+function onVisibility(): void {
+  if (document.hidden) {
+    quietWhenHidden();
+    return;
+  }
+  clearTimeout(quietTimer);
+  if (ctx?.state === "suspended") void ctx.resume();
 }
 
 const wobble = (amount = 0.05) => 1 + (Math.random() * 2 - 1) * amount;
@@ -654,10 +684,14 @@ export function sfxLootHum(tier: LootTier): {
   g.disconnect();
   g.connect(swell).connect(out);
   lfo.start();
+  hums++;
+  let stopped = false;
   const peak = 0.02 + tier * 0.008;
   return {
     level: (v) => g.gain.setTargetAtTime(peak * v, c.currentTime, 0.15),
     stop: () => {
+      if (!stopped) hums--;
+      stopped = true;
       const t = c.currentTime;
       g.gain.setTargetAtTime(0, t, 0.08);
       for (const o of [...oscs, lfo]) o.stop(t + 0.5);
@@ -1116,6 +1150,11 @@ let windNoise: AudioBuffer | null = null;
 const SHIP_CRUISE = 7;
 /** How quickly the ride's sound follows the ship (s, a time constant). */
 const SHIP_FOLLOW = 0.3;
+/** Where each of the ride's params was last sent, and how far (a fraction
+ * of that) it must move to be sent again: `set` runs every frame, and a
+ * hair's change, eased over SHIP_FOLLOW, can't be heard. */
+const shipAimed = new WeakMap<AudioParam, number>();
+const SHIP_RETARGET = 1e-3;
 
 function shipLoopOf(a: Audio): ShipLoop {
   const { ctx: c } = a;
@@ -1222,8 +1261,15 @@ export const shipAmbience = {
     const thr = Math.min(1, Math.max(0, throttle));
     const v = Math.min(1, Math.max(0, speed / SHIP_CRUISE));
     const wind = v ** 1.7;
-    const follow = (p: AudioParam, to: number) =>
+    const follow = (p: AudioParam, to: number) => {
+      const was = shipAimed.get(p);
+      const still =
+        was !== undefined &&
+        Math.abs(to - was) <= Math.abs(was) * SHIP_RETARGET;
+      if (still) return;
+      shipAimed.set(p, to);
       p.setTargetAtTime(to, now, SHIP_FOLLOW);
+    };
     follow(s.bus.gain, Math.min(1, near));
     const pitch = 0.85 + 0.3 * thr;
     follow(s.engine[0].frequency, 46 * pitch);

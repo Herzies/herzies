@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EntityBuffer, ServerClock } from "./town-interpolation.js";
+import { blankState, EntityBuffer, ServerClock } from "./town-interpolation.js";
 import {
   castSeqOf,
   castsBetween,
@@ -197,6 +197,18 @@ describe("EntityBuffer", () => {
     expect(
       (b as unknown as { samples: unknown[] }).samples.length,
     ).toBeLessThan(25);
+  });
+
+  it("fills the state it's given, as it would a new one", () => {
+    const b = new EntityBuffer();
+    b.push(0, state(0, 0, 4.5, 0.1));
+    b.push(100, state(0.45, 0.2, 4.5, 0.3));
+    const out = blankState();
+    for (const t of [-50, 0, 50, 150, 1_000]) {
+      expect(b.sample(t, out)).toBe(out);
+      expect(out).toEqual(b.sample(t));
+    }
+    expect(new EntityBuffer().sample(0, out)).toBeNull();
   });
 });
 

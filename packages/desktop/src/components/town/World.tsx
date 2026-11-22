@@ -19,6 +19,8 @@ import { Room } from "./Room";
 import { HOME_MAP, TOWN_MAPS_LOCAL } from "./runtime";
 import type { Season } from "./Seasons";
 import { TowerHall } from "./TowerHall";
+import { compileUnseen } from "./vfx/warmup";
+import { WEATHER_ON } from "./weather";
 
 /** A room's air until DayLight sets it (the cave's: nearly black, a touch
  * of violet). */
@@ -162,6 +164,8 @@ function Precompile() {
     const was = gl.getRenderTarget();
     gl.setRenderTarget(OFFSCREEN);
     gl.compileAsync(scene, camera);
+    // And what isn't in the scene yet: effects, telegraphs, loot pillars.
+    compileUnseen(gl, scene, camera);
     gl.setRenderTarget(was);
   });
   return null;
@@ -194,7 +198,7 @@ function Island({
         <>
           <Bunting map={map} />
           <Birds map={map} />
-          <Weather map={map} />
+          {WEATHER_ON && <Weather map={map} />}
           <Particles map={map} />
         </>
       )}

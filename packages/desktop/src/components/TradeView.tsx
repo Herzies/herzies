@@ -7,6 +7,12 @@ import {
   useRef,
   useState,
 } from "react";
+import {
+  isFinished,
+  mergeTrade,
+  onTradeUpdate,
+  tradeChannelLive,
+} from "../lib/tradeLive";
 import { cn, formatAmount } from "../lib/utils";
 import { herzies, useWindowFocused } from "../tauri-bridge";
 import { Coin } from "./Coin";
@@ -16,14 +22,26 @@ import { NumberTicker } from "./NumberTicker";
 import { PromptOverlay } from "./PromptOverlay";
 import { QuantityModal } from "./QuantityModal";
 
-/** How often we poll `/trade/status` while both sides are in the trade and
- * the window is focused (ms) — tight, so a partner's lock/accept lands fast. */
+/** How often `/trade/status` is polled while both sides are in the trade and
+ * the window is focused. Every change arrives live the moment it commits
+ * (lib/tradeLive), so this only catches a broadcast that got lost. */
+const TRADE_FALLBACK_POLL_MS = 2_000;
+/** The same while the live channel is down: polling is all there is then,
+ * so it's tight enough that a partner's lock/accept lands fast. */
 const TRADE_POLL_MS = 650;
-/** While the partner hasn't joined yet: nothing moves until they do. */
+/** While the partner hasn't joined yet (their join arrives live too). */
 const TRADE_WAITING_POLL_MS = 2_000;
 /** While the window is unfocused or hidden. A trade left open in the tray used
  * to poll `/trade/status` (a Vercel route) at 650ms until it expired. */
 const TRADE_BACKGROUND_POLL_MS = 5_000;
+
+type PollPace = "active" | "waiting" | "background";
+
+function pollDelay(pace: PollPace): number {
+  if (pace === "background") return TRADE_BACKGROUND_POLL_MS;
+  if (pace === "waiting") return TRADE_WAITING_POLL_MS;
+  return tradeChannelLive() ? TRADE_FALLBACK_POLL_MS : TRADE_POLL_MS;
+}
 
 /** Copies of one item at one level: interchangeable, so offered by count. A
  * copy at another level is a different row, which is what lets a player offer
@@ -159,23 +177,54 @@ export function TradeView({
   const onActiveChangeRef = useRef(onActiveChange);
   onActiveChangeRef.current = onActiveChange;
   // Same treatment for onClose: the parent passes an inline arrow, so naming it
-  // as a dependency of the poll effect below would restart the 650ms interval —
-  // and fire an immediate tick — on every single parent render.
+  // as a dependency of the poll effect below would restart the poll loop —
+  // and fire an immediate poll — on every single parent render.
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
-  const tradeActive =
-    !!tradeId && trade?.state !== "completed" && trade?.state !== "cancelled";
+  const tradeActive = !!tradeId && !isFinished(trade?.state);
   useEffect(() => {
     onActiveChangeRef.current?.(tradeActive);
   }, [tradeActive]);
   useEffect(() => () => onActiveChangeRef.current?.(false), []);
 
-  const refreshTrade = useCallback(async () => {
-    if (!tradeId) return null;
-    const t = await herzies.tradePoll(tradeId);
-    if (t) setTrade(t);
+  const tradeRef = useRef(trade);
+  tradeRef.current = trade;
+  /** Polls the trade and takes it in. The names come with the first poll of
+   * a trade only: they can't change mid-trade. */
+  const pollTrade = useCallback(async (id: string) => {
+    const t = await herzies.tradePoll(id, tradeRef.current?.id !== id);
+    if (t) setTrade((prev) => mergeTrade(prev, t));
     return t;
+  }, []);
+
+  const refreshTrade = useCallback(
+    async () => (tradeId ? pollTrade(tradeId) : null),
+    [tradeId, pollTrade],
+  );
+
+  // Every change to the trade, as it commits: the partner's, and our own
+  // (which can land before our own request has even answered).
+  useEffect(() => {
+    if (!tradeId) return;
+    return onTradeUpdate((update) => {
+      if (update.id === tradeId) setTrade((prev) => mergeTrade(prev, update));
+    });
   }, [tradeId]);
+
+  // However it ended (seen live, polled, or our own accept), say so and close.
+  const finished = isFinished(trade?.state) ? trade?.state : null;
+  useEffect(() => {
+    if (!finished) return;
+    setMessage(
+      finished === "completed" ? "Trade completed!" : "Trade cancelled",
+    );
+    if (closeScheduledRef.current) return;
+    closeScheduledRef.current = true;
+    setTimeout(() => {
+      closeScheduledRef.current = false;
+      onCloseRef.current();
+    }, 2000);
+  }, [finished]);
 
   // A completed trade moved items both ways, and /trade/accept doesn't return
   // the result — pull the inventory once so the bank (and this view's offer
@@ -190,12 +239,12 @@ export function TradeView({
   // Read by the poll loop on each reschedule, so focus or state changes adjust
   // its pace without restarting it.
   const focused = useWindowFocused();
-  const pollDelayRef = useRef(TRADE_POLL_MS);
-  pollDelayRef.current = !focused
-    ? TRADE_BACKGROUND_POLL_MS
+  const pollPaceRef = useRef<PollPace>("active");
+  pollPaceRef.current = !focused
+    ? "background"
     : trade?.state === "pending"
-      ? TRADE_WAITING_POLL_MS
-      : TRADE_POLL_MS;
+      ? "waiting"
+      : "active";
   /** Runs the next poll now (set by the loop below). */
   const pollNowRef = useRef<(() => void) | null>(null);
   // Coming back to the window shouldn't wait out a 5s background delay.
@@ -203,32 +252,17 @@ export function TradeView({
     if (focused) pollNowRef.current?.();
   }, [focused]);
 
-  // Hydrate + keep trade fresh. Keeps polling (slower) while the window is
-  // blurred so a partner's lock/accept still lands, and stops once the trade
-  // is over.
+  // Hydrate, then keep fresh as a fallback to the live updates. Keeps polling
+  // (slower) while the window is blurred, and stops once the trade is over.
   useEffect(() => {
     if (!tradeId) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
 
     const tick = async (): Promise<boolean> => {
-      const t = await herzies.tradePoll(tradeId);
+      const t = await pollTrade(tradeId);
       if (cancelled) return false;
-      if (t) setTrade(t);
-      if (t?.state === "completed" || t?.state === "cancelled") {
-        setMessage(
-          t.state === "completed" ? "Trade completed!" : "Trade cancelled",
-        );
-        if (!closeScheduledRef.current) {
-          closeScheduledRef.current = true;
-          setTimeout(() => {
-            closeScheduledRef.current = false;
-            onCloseRef.current();
-          }, 2000);
-        }
-        return false;
-      }
-      return true;
+      return !isFinished(t?.state);
     };
 
     let inFlight = false;
@@ -242,7 +276,7 @@ export function TradeView({
       const keepGoing = await tick().catch(() => true);
       inFlight = false;
       if (keepGoing && !cancelled) {
-        timer = setTimeout(run, pollDelayRef.current);
+        timer = setTimeout(run, pollDelay(pollPaceRef.current));
       }
     };
     pollNowRef.current = () => void run();
@@ -255,7 +289,7 @@ export function TradeView({
     };
     // The poll's lifetime is tied to the trade, not to the parent's render
     // identity — see onCloseRef above.
-  }, [tradeId]);
+  }, [tradeId, pollTrade]);
 
   const handleCreate = useCallback(
     async (overrideCode?: string) => {

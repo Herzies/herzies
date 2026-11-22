@@ -6,6 +6,8 @@
  * pure part, tested on its own; Weather (the component) applies it.
  */
 
+import { hash01 } from "./map";
+
 /** Whether there's weather at all. Off for now: nothing rains, no rainbow,
  * and the rain's pass isn't even in the frame (see Post). Everything that
  * reacts to rain reads `ambient.uRain`, which just stays 0. */
@@ -28,12 +30,9 @@ export type Weather = {
   storm: boolean;
 };
 
-const hash = (n: number) =>
-  Math.abs(Math.sin(n * 12.9898 + 78.233) * 43758.5453) % 1;
-
 /** How hard it would rain in a slot at its height: 0 for a dry one. */
 function slotRain(slot: number): number {
-  const h = hash(slot);
+  const h = hash01(slot, 1);
   if (h >= RAIN_CHANCE) return 0;
   // Light showers more often than downpours.
   const k = h / RAIN_CHANCE;
@@ -78,9 +77,12 @@ export const weatherOverride: { rain: number | null; storm: boolean } = {
   storm: false,
 };
 
+/** No weather: what weatherNow says while it's off (one, not one a frame). */
+const CLEAR: Weather = Object.freeze({ rain: 0, storm: false });
+
 /** The weather now, as shown. */
 export function weatherNow(now = Date.now()): Weather {
-  if (!WEATHER_ON) return { rain: 0, storm: false };
+  if (!WEATHER_ON) return CLEAR;
   if (weatherOverride.rain !== null) {
     return { rain: weatherOverride.rain, storm: weatherOverride.storm };
   }

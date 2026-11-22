@@ -601,11 +601,9 @@ class TownBoundary extends Component<
   }
 }
 
-/** A key, as the hints show it. */
-/** Frames drawn per second, counted over each half second: the Town's,
- * counted from the canvas's own draws (it slows down unfocused). Shown from Settings →
- * Controls. Top right; in a raid the
- * boss's card has that corner, so it sits just left of it (the card's
+/** Frames drawn per second, counted over each half second from the Town
+ * canvas's own draws. Shown from Settings → Controls. Top right; in a raid
+ * the boss's card has that corner, so it sits just left of it (the card's
  * width, BossHud's BOSS_CARD). */
 function FrameRate({ className }: { className?: string }) {
   useBossFight();

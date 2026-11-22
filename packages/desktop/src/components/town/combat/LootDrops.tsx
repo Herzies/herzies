@@ -4,7 +4,7 @@ import { itemVoxelMeshes, lootPillarMaterial } from "@herzies/shared/gl";
 import type { LootDrop } from "@herzies/shared/town-net";
 import { Html } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
-import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { notify } from "../../../lib/notices";
 import { announcePickup } from "../../../lib/pickups";
@@ -380,6 +380,13 @@ export type Drop = {
     /** The motes (a THREE.Points). */
     sparkles: THREE.Object3D | null;
     label: HTMLDivElement | null;
+    /** Mounts or unmounts the label (DropView's), and whether it's up. */
+    showLabel?: (on: boolean) => void;
+    labelUp?: boolean;
+    /** When the label last showed, so it's kept until it's faded out. */
+    labelShownAt?: number;
+    /** The label's just mounted: left at 0 for a frame, so it fades in. */
+    labelFresh?: boolean;
   };
 };
 
@@ -658,11 +665,9 @@ export function useDropLoop(
     const held = hold();
     for (const d of drops) {
       const flat = Math.hypot(d.pos.x - player.x, d.pos.z - player.z);
-      // Something that dropped while you listened is only taken with room
-      // in the bag for it; otherwise it stays lying there, and says why
-      // when you walk up to it.
-      const room = !d.home || hasLootRoom(d.item.id);
       // Turned down by the server a moment ago: left be (see refusals).
+      // Asked of every drop each frame: while a refusal settles, it watches
+      // the bag.
       const refusedHere = d.dropId !== "" && refused(d.dropId, now);
       switch (d.phase) {
         case "waiting": {
@@ -703,24 +708,22 @@ export function useDropLoop(
             claimed.delete(d);
             if (errand === d) errand = null;
           }
+          // Something that dropped while you listened is only taken with room
+          // in the bag for it; otherwise it stays lying there, and says why
+          // when you walk up to it. (Only asked in reach: it copies the bag.)
+          const reach = !held && flat < LOOT.magnetRadius;
+          const room = reach && (!d.home || hasLootRoom(d.item.id));
           if (
-            !held &&
+            reach &&
             !room &&
             !bagOpen() &&
-            flat < LOOT.magnetRadius &&
             now - (d.fullNoticeAt ?? 0) > FULL_NOTICE_MS
           ) {
             d.fullNoticeAt = now;
             notify("Bag full");
           }
           // Walk into it: it comes to you (and the spirit can stand down).
-          if (
-            !held &&
-            !refusedHere &&
-            room &&
-            flat < LOOT.magnetRadius &&
-            now - d.restedAt > 120
-          ) {
+          if (room && !refusedHere && now - d.restedAt > 120) {
             if (errand === d) errand = null;
             d.fetch = null;
             d.phase = "pulled";
@@ -824,19 +827,23 @@ function nextErrand(
   let best: Drop | null = null;
   let bestScore = Number.POSITIVE_INFINITY;
   const onRun = out;
-  const taking = alsoTaking(now);
+  // Only built if something gets as far as the bag check.
+  let taking: string[] | null = null;
   for (const x of drops) {
     if (
       x.phase !== "resting" ||
       x.unreachable ||
-      (x.dropId !== "" && refused(x.dropId, now)) ||
-      // No room for it on top of what it's already got: left lying there
-      // until there is. (A test drop grants nothing, so always fits.)
-      (x.dropId !== "" && !hasLootRoom(x.item.id, taking)) ||
       now - x.restedAt <= LOOT.spiritDelayMs ||
       Math.hypot(x.pos.x - player.x, x.pos.z - player.z) >= LOOT.spiritRadius
     )
       continue;
+    if (x.dropId !== "") {
+      if (refused(x.dropId, now)) continue;
+      // No room for it on top of what it's already got: left lying there
+      // until there is. (A test drop grants nothing, so always fits.)
+      taking ??= alsoTaking(now);
+      if (!hasLootRoom(x.item.id, taking)) continue;
+    }
     const near = Math.hypot(x.spot.x - spirit.x, x.spot.z - spirit.z);
     const score = onRun ? near : x.tier * 1e4 + near;
     if (score < bestScore) {
@@ -967,18 +974,40 @@ function draw(d: Drop, now: number, dt: number, flat: number) {
 
   // Its name, close up. At Home, where everything's close and the names
   // would pile up, only as it lands: what came, said once.
+  const near = landed && d.phase !== "pulled";
+  const homeK =
+    d.home && homeMode.on
+      ? Math.max(0, Math.min(1, 1 - (now - d.restedAt - HOME_LABEL_MS) / 500))
+      : 1;
+  const o = near
+    ? Math.max(0, Math.min(1, (LOOT.labelRadius - flat) / 2)) * homeK
+    : 0;
+  // The label (a drei Html, with work of its own every frame) is only
+  // mounted while it could show: from the flight in, near enough; and kept
+  // until it's faded out.
+  const could =
+    (d.phase === "flying" || (near && homeK > 0)) &&
+    flat < LOOT.labelRadius + 2;
+  if (o > 0 || could) v.labelShownAt = now;
+  const up = could || now - (v.labelShownAt ?? 0) < 300;
+  if (up !== !!v.labelUp) {
+    v.labelUp = up;
+    v.showLabel?.(up);
+  }
   if (v.label) {
-    const near = landed && d.phase !== "pulled";
-    let o = near ? Math.max(0, Math.min(1, (LOOT.labelRadius - flat) / 2)) : 0;
-    if (d.home && homeMode.on)
-      o *= Math.max(
-        0,
-        Math.min(1, 1 - (now - d.restedAt - HOME_LABEL_MS) / 500),
-      );
-    v.label.style.opacity = String(o);
+    if (v.labelFresh) v.labelFresh = false;
+    else v.label.style.opacity = String(o);
   }
   d.hum?.level(Math.max(0, 1 - flat / 14));
 }
+
+/** Never drawn: for Precompile to compile the pillar's shader before the
+ * first drop lands. (Every pillar's material is its own, but they share
+ * one program.) */
+export const pillarWarmup = new THREE.Mesh(
+  new THREE.BufferGeometry(),
+  lootPillarMaterial(new THREE.Color()),
+);
 
 /** One drop's model, beam, floor glow and name. */
 export function DropView({ drop }: { drop: Drop }) {
@@ -1009,8 +1038,24 @@ export function DropView({ drop }: { drop: Drop }) {
     g.setAttribute("position", new THREE.BufferAttribute(pts, 3));
     return g;
   }, [drop.tier]);
+  useEffect(
+    () => () => {
+      pillarMaterial.dispose();
+      sparkles?.dispose();
+    },
+    [pillarMaterial, sparkles],
+  );
 
   const v = drop.view;
+  // Mounted and unmounted by draw (see its label).
+  const [label, setLabel] = useState(false);
+  useEffect(() => {
+    v.showLabel = setLabel;
+    if (v.labelUp) setLabel(true);
+    return () => {
+      v.showLabel = undefined;
+    };
+  }, [v]);
   return (
     <group
       ref={(g) => {
@@ -1027,25 +1072,28 @@ export function DropView({ drop }: { drop: Drop }) {
           <primitive object={plain} />
           <primitive object={glow} />
         </group>
-        <Html
-          center
-          position={[0, 0.95, 0]}
-          zIndexRange={[18, 0]}
-          style={{ pointerEvents: "none" }}
-        >
-          <div
-            ref={(el) => {
-              v.label = el;
-            }}
-            // Its name stays up at Home, where the rest of the Town's
-            // labels go (see TownWorld).
-            data-home-keep={drop.home ? "" : undefined}
-            className="whitespace-nowrap text-[11px] font-bold [text-shadow:0_1px_2px_#000,0_0_6px_#000] transition-opacity duration-200"
-            style={{ color: drop.color, opacity: 0 }}
+        {label ? (
+          <Html
+            center
+            position={[0, 0.95, 0]}
+            zIndexRange={[18, 0]}
+            style={{ pointerEvents: "none" }}
           >
-            {drop.item.name}
-          </div>
-        </Html>
+            <div
+              ref={(el) => {
+                v.label = el;
+                v.labelFresh = el !== null;
+              }}
+              // Its name stays up at Home, where the rest of the Town's
+              // labels go (see TownWorld).
+              data-home-keep={drop.home ? "" : undefined}
+              className="whitespace-nowrap text-[11px] font-bold [text-shadow:0_1px_2px_#000,0_0_6px_#000] transition-opacity duration-200"
+              style={{ color: drop.color, opacity: 0 }}
+            >
+              {drop.item.name}
+            </div>
+          </Html>
+        ) : null}
       </group>
       <group
         ref={(g) => {

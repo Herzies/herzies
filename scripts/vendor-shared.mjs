@@ -121,15 +121,16 @@ const collected = collect(ENTRIES);
 const generated = new Map();
 for (const [file, source] of collected) {
   const name = relative(join(ROOT, "packages/shared/src"), file);
-  generated.set(name.replace(/\.ts$/, ".ts"), forDeno(source, name));
+  generated.set(name, forDeno(source, name));
 }
 
 const check = process.argv.includes("--check");
 
 if (check) {
   const stale = [];
+  // Recursive: the graph may reach into a subfolder (gl/, card/) some day.
   const existing = existsSync(OUT_DIR)
-    ? readdirSync(OUT_DIR).filter((f) => f.endsWith(".ts"))
+    ? readdirSync(OUT_DIR, { recursive: true }).filter((f) => f.endsWith(".ts"))
     : [];
   for (const [name, content] of generated) {
     const path = join(OUT_DIR, name);
@@ -153,7 +154,9 @@ if (check) {
   rmSync(OUT_DIR, { recursive: true, force: true });
   mkdirSync(OUT_DIR, { recursive: true });
   for (const [name, content] of generated) {
-    writeFileSync(join(OUT_DIR, name), content);
+    const path = join(OUT_DIR, name);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, content);
   }
   console.log(
     `vendor-shared: wrote ${generated.size} files to ${relative(ROOT, OUT_DIR)}`,

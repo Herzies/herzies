@@ -17,6 +17,7 @@ import { BuildingColliders, Buildings, lanternMaterial } from "./Buildings";
 import { CrystalColliders, Crystals } from "./Crystal";
 import { barrelGeometry, potsGeometry } from "./clutter";
 import { Dummies, DummyColliders } from "./combat/Dummies";
+import { homeMode } from "./homeMode";
 import { trunkMaterial } from "./Islands";
 import {
   LANTERN_Y,
@@ -427,6 +428,7 @@ function InSeason({
 }) {
   const ref = useRef<THREE.Group>(null);
   useFrame(() => {
+    if (homeMode.full) return;
     const group = ref.current;
     if (!group) return;
     const w = THREE.MathUtils.clamp(weight(seasonNow.look), 0, 1);
@@ -458,7 +460,19 @@ function SeasonalProps({ map, oaks }: { map: TownMap; oaks: Placed[] }) {
   );
 }
 
-function placeAll(map: TownMap) {
+type Placement = {
+  placed: Record<Kind, Placed[]>;
+  trees: Record<string, Placed[]>;
+  species: Record<Species, Placed[]>;
+};
+
+/** placeAll's, per map: the island's things and their colliders both
+ * want them. */
+const placements = new WeakMap<TownMap, Placement>();
+
+function placeAll(map: TownMap): Placement {
+  const cached = placements.get(map);
+  if (cached) return cached;
   const placed = Object.fromEntries(
     Object.keys(KINDS).map((k) => [k, []]),
   ) as unknown as Record<Kind, Placed[]>;
@@ -478,7 +492,9 @@ function placeAll(map: TownMap) {
       } else if (o in KINDS) placed[o as Kind].push(objectPlace(map, col, row));
     }
   }
-  return { placed, trees, species };
+  const placement = { placed, trees, species };
+  placements.set(map, placement);
+  return placement;
 }
 
 /** What isn't drawn on an island seen across the sky (see Backdrop). */

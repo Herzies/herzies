@@ -1,6 +1,6 @@
 import { mulberry32 } from "@herzies/shared";
 import { useFrame } from "@react-three/fiber";
-import { useMemo, useRef } from "react";
+import { useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { ambient } from "./ambient";
@@ -15,6 +15,7 @@ import {
   stepBird,
   wingWave,
 } from "./birdFlight";
+import { homeMode } from "./homeMode";
 import {
   groundY,
   islandRadius,
@@ -316,8 +317,14 @@ export function Birds({ map }: { map: TownMap }) {
     [nCrows],
   );
   const gullWingGeo = useMemo(() => withBeat(GULL_WING, FLOCK), []);
+  useLayoutEffect(() => () => crowWingGeo.dispose(), [crowWingGeo]);
+  useLayoutEffect(() => () => gullWingGeo.dispose(), [gullWingGeo]);
+  /** The perches taken or being flown to (refilled every frame). */
+  const taken = useMemo(() => new Set<number>(), []);
 
   useFrame(({ clock }, dt) => {
+    // Unseen, settled at Home: they hold still till the world's back.
+    if (homeMode.full) return;
     const body = crowBody.current;
     const wing = crowWing.current;
     const gBody = gullBody.current;
@@ -326,7 +333,8 @@ export function Birds({ map }: { map: TownMap }) {
     const t = clock.elapsedTime;
     const step = Math.min(dt, 0.1);
     const { x: px, z: pz } = ambient.uPlayer.value;
-    const taken = new Set(crows.map((c) => (c.to >= 0 ? c.to : c.perch)));
+    taken.clear();
+    for (const c of crows) taken.add(c.to >= 0 ? c.to : c.perch);
 
     // The crows.
     crows.forEach((c, i) => {
@@ -440,9 +448,10 @@ export function Birds({ map }: { map: TownMap }) {
       pose.spread = 1;
       place(gBody, gWing, j, pose, 1.35);
     }
-    for (const m of [body, wing, gBody, gWing]) {
-      m.instanceMatrix.needsUpdate = true;
-    }
+    body.instanceMatrix.needsUpdate = true;
+    wing.instanceMatrix.needsUpdate = true;
+    gBody.instanceMatrix.needsUpdate = true;
+    gWing.instanceMatrix.needsUpdate = true;
   });
 
   if (perches.length === 0) return null;

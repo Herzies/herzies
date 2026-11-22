@@ -1,4 +1,4 @@
-import { RARITY_COLORS } from "@herzies/shared";
+import { RARITIES, RARITY_COLORS } from "@herzies/shared";
 import { useFrame } from "@react-three/fiber";
 import { useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
@@ -45,9 +45,7 @@ export const RIFT = {
 } as const;
 
 /** The rarities its rim flickers through while it works. */
-const FLICKER = (
-  ["common", "uncommon", "rare", "legendary", "mythic"] as const
-).map((r) => new THREE.Color(RARITY_COLORS[r]));
+const FLICKER = RARITIES.map((r) => new THREE.Color(RARITY_COLORS[r]));
 
 export type Rift = {
   key: string;

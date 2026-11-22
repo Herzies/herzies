@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { ambient } from "./ambient";
 import type { Champion } from "./champion";
+import { homeMode } from "./homeMode";
 import { cellCenter, facingAt, groundY, objectAt, type TownMap } from "./map";
 import { nameOpacity } from "./nameFade";
 import { townSave } from "./runtime";
@@ -71,6 +72,8 @@ function Statue({
   // The plaque fades in as you come near.
   const plaque = useRef<HTMLDivElement>(null);
   useFrame(() => {
+    // Settled at Home the plaque's already faded out (see nameOpacity).
+    if (homeMode.full) return;
     if (plaque.current) {
       plaque.current.style.opacity = String(
         nameOpacity(Math.hypot(townSave.x - x, townSave.z - z)),

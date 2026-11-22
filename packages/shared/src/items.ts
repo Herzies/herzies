@@ -1304,6 +1304,26 @@ export const DECK_TOTAL_SLOTS = DECK_SLOT_GROUPS.reduce(
   0,
 );
 
+/** Every rarity, plainest first. */
+export const RARITIES = [
+  "common",
+  "uncommon",
+  "rare",
+  "legendary",
+  "mythic",
+] as const satisfies readonly Rarity[];
+
+/** Rarest first: mythic is 0, common 4. Typed on Rarity so a new tier can't
+ * be forgotten in the sorts that use it — mythic once was, and fell through
+ * to common. */
+export const RARITY_RANK: Record<Rarity, number> = {
+  mythic: 0,
+  legendary: 1,
+  rare: 2,
+  uncommon: 3,
+  common: 4,
+};
+
 export const RARITY_COLORS: Record<Rarity, string> = {
   common: "#9d9d9d",
   uncommon: "#1eff00",

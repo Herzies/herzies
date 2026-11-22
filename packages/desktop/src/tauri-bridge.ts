@@ -25,8 +25,8 @@ import type {
   StoreProduct,
   TitlesState,
   TownLook,
-  Trade,
   TradeState,
+  TradeUpdate,
   Vitals,
 } from "@herzies/shared";
 import { invoke, isTauri } from "@tauri-apps/api/core";
@@ -39,7 +39,7 @@ import {
   type DownloadEvent,
   type Update,
 } from "@tauri-apps/plugin-updater";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 
 /** What the server made of a pickup (see `collectDrop`). */
 export type CollectOutcome = "collected" | "gone" | "bag-full";
@@ -564,8 +564,10 @@ export const herzies = {
     invoke<{ completed: boolean } | null>("trade_accept", { tradeId }),
   tradeCancel: (tradeId: string) =>
     invoke<boolean>("trade_cancel", { tradeId }),
-  tradePoll: (tradeId: string) =>
-    invoke<Trade | null>("trade_poll", { tradeId }),
+  /** The trade as it stands. `withNames`: both parties' names too, which
+   * can't change mid-trade, so they're asked for once. */
+  tradePoll: (tradeId: string, withNames = true) =>
+    invoke<TradeUpdate | null>("trade_poll", { tradeId, withNames }),
   fetchOngoingTrades: () =>
     invoke<{ trades: OngoingTrade[] }>("fetch_ongoing_trades"),
 
@@ -988,6 +990,30 @@ export function useFullscreen(): boolean {
   return on;
 }
 
+/** Whether the window has focus: one store and one Tauri listener for the
+ * app, read by every useWindowFocused. Starts true until the window says. */
+let focusedCache = true;
+const focusedListeners = new Set<() => void>();
+function setFocusedCache(on: boolean): void {
+  if (focusedCache === on) return;
+  focusedCache = on;
+  for (const l of focusedListeners) l();
+}
+// Sandbox / Vite dev runs in a plain browser — no Tauri window APIs.
+if (isTauri()) {
+  const w = getCurrentWindow();
+  w.onFocusChanged(({ payload }) => setFocusedCache(payload)).catch(() => {});
+  w.isFocused()
+    .then(setFocusedCache)
+    .catch(() => {});
+}
+function subscribeFocused(l: () => void): () => void {
+  focusedListeners.add(l);
+  return () => {
+    focusedListeners.delete(l);
+  };
+}
+
 /**
  * Tracks whether the Tauri window currently has focus. Use it to pause
  * animation timers whenever the user isn't actively in the window — an
@@ -995,24 +1021,7 @@ export function useFullscreen(): boolean {
  * background, so neither is worth burning CPU on.
  */
 export function useWindowFocused(): boolean {
-  const [focused, setFocused] = useState(true);
-  useEffect(() => {
-    // Sandbox / Vite dev runs in a plain browser — no Tauri window APIs.
-    if (!isTauri()) return;
-
-    const w = getCurrentWindow();
-    let unlisten: (() => void) | undefined;
-    w.onFocusChanged(({ payload }) => setFocused(payload)).then((fn) => {
-      unlisten = fn;
-    });
-    w.isFocused()
-      .then((v) => setFocused(v))
-      .catch(() => {});
-    return () => {
-      unlisten?.();
-    };
-  }, []);
-  return focused;
+  return useSyncExternalStore(subscribeFocused, () => focusedCache);
 }
 
 export type UpdateInstallEvent =

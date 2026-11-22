@@ -48,6 +48,11 @@ export const QUEST_COMPLETE_TITLE = "Quest complete";
  * only covers the rest (a new day, Spotify listens). */
 const POLL_MS = 60_000;
 
+/** Subscribers that are active with the window focused. They share one
+ * interval: the first starts it, the last stops it. */
+let pollers = 0;
+let pollTimer: ReturnType<typeof setInterval> | undefined;
+
 /**
  * The quest board, or null until it first loads. While `active`, it's
  * fetched on mount, every minute with the window focused, and whenever sync
@@ -60,8 +65,10 @@ export function useQuestBoard(active: boolean): QuestBoard | null {
   useEffect(() => {
     if (!active || !focused) return;
     refreshQuests();
-    const timer = setInterval(refreshQuests, POLL_MS);
-    return () => clearInterval(timer);
+    if (pollers++ === 0) pollTimer = setInterval(refreshQuests, POLL_MS);
+    return () => {
+      if (--pollers === 0) clearInterval(pollTimer);
+    };
   }, [active, focused]);
 
   useEffect(() => {

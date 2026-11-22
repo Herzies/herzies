@@ -26,20 +26,28 @@ export function SkyDockHud() {
   const upcoming = useWildsUpcoming();
   const [status, setStatus] = useState<DockStatus | null>(null);
   useEffect(() => {
+    // A new status only when what it says has changed: not a render every
+    // look.
+    const show = (next: DockStatus | null) =>
+      setStatus((was) =>
+        was?.text === next?.text && was?.progress === next?.progress
+          ? was
+          : next,
+      );
     const look = () => {
       const now = fleet.now;
-      if (!now) return setStatus(null);
+      if (!now) return show(null);
       if (map.ship)
-        return setStatus(aboardStatus(fleet.poses[townSave.ship].state, now));
+        return show(aboardStatus(fleet.poses[townSave.ship].state, now));
       const dock = dockOf(map);
       const b = dock ? berthOf(map) : null;
       const near =
         !!b &&
         Math.hypot(townSave.x - b.pierEnd.x, townSave.z - b.pierEnd.z) <= NEAR;
       if (!dock || !b || !(near || (dock === "wilds" && noShipHome())))
-        return setStatus(null);
+        return show(null);
       const k = shipAt(dock);
-      setStatus(
+      show(
         dockStatus(
           dock,
           service,

@@ -1,4 +1,5 @@
 mod api;
+mod artwork;
 mod auth;
 mod collects;
 mod game;
@@ -91,9 +92,8 @@ fn now_playing_payload(s: &ManagedState) -> Option<NowPlayingPayload> {
             artist: np.artist.clone(),
             genre,
             // Sync only Last.fm's remote artwork, not `np.album_art_url`
-            // (which prefers the local system artwork data: URL) — that blob
-            // is fine for this device's own widget but too large, macOS-only,
-            // and not durable enough to store/serve to friends.
+            // (which prefers the local system artwork, a `herzies-art` URL
+            // that only this app can load) — friends couldn't show it.
             album_art_url: s.enrichment.as_ref().and_then(|e| e.album_art_url.clone()),
         }
     })
@@ -541,14 +541,21 @@ async fn friend_lookup(
     let client = api::http();
     if let Some(profiles) = api::api_lookup_herzies(&client, &codes).await {
         let mut s = state.lock().unwrap();
-        for (code, profile) in &profiles {
-            s.friends.insert(code.clone(), profile.clone());
+        // Polled while Friends is open: most rounds bring nothing new, and
+        // then there's nothing to save or push to the webview.
+        let changed = profiles
+            .iter()
+            .any(|(code, profile)| s.friends.get(code) != Some(profile));
+        if changed {
+            for (code, profile) in &profiles {
+                s.friends.insert(code.clone(), profile.clone());
+            }
+            if let Some(herzie) = &s.herzie {
+                storage::save_friends_cache(&herzie.friend_codes, &s.friends);
+            }
+            drop(s);
+            emit_state_update(&app);
         }
-        if let Some(ref herzie) = s.herzie {
-            storage::save_friends_cache(&herzie.friend_codes, &s.friends);
-        }
-        drop(s);
-        emit_state_update(&app);
         Ok(profiles)
     } else {
         let s = state.lock().unwrap();
@@ -1325,9 +1332,9 @@ async fn trade_cancel(trade_id: String) -> Result<bool, String> {
 }
 
 #[tauri::command]
-async fn trade_poll(trade_id: String) -> Result<Option<Trade>, String> {
+async fn trade_poll(trade_id: String, with_names: bool) -> Result<Option<Trade>, String> {
     let client = api::http();
-    Ok(api::api_poll_trade(&client, &trade_id).await)
+    Ok(api::api_poll_trade(&client, &trade_id, with_names).await)
 }
 
 #[tauri::command]
@@ -1448,20 +1455,12 @@ async fn get_auth_config() -> Result<Option<AuthConfig>, String> {
     let session = storage::load_session();
 
     match (token, session) {
-        (Some(access_token), Some(session)) => {
-            let supabase_url = std::env::var("NEXT_PUBLIC_SUPABASE_URL")
-                .or_else(|_| std::env::var("SUPABASE_URL"))
-                .unwrap_or_else(|_| "https://ojqfqxolbjegorgoyond.supabase.co".to_string());
-            let anon_key = std::env::var("NEXT_PUBLIC_SUPABASE_ANON_KEY")
-                .or_else(|_| std::env::var("SUPABASE_ANON_KEY"))
-                .unwrap_or_else(|_| "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9qcWZxeG9sYmplZ29yZ295b25kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc2NTcwMjgsImV4cCI6MjA5MzIzMzAyOH0.BBT77VK1ROJr57BJvMfCyra3lbycMA9u2-jxG-LhBJE".to_string());
-            Ok(Some(AuthConfig {
-                supabase_url,
-                anon_key,
-                access_token,
-                user_id: session.user_id,
-            }))
-        }
+        (Some(access_token), Some(session)) => Ok(Some(AuthConfig {
+            supabase_url: api::supabase_url(),
+            anon_key: api::supabase_anon_key(),
+            access_token,
+            user_id: session.user_id,
+        })),
         _ => Ok(None),
     }
 }
@@ -1477,6 +1476,11 @@ async fn chat_fetch(
     let client = api::http();
     if let Some(chat) = api::api_chat_fetch(&client).await {
         let mut s = state.lock().unwrap();
+        // The safety poll and the refetch on focus mostly find what realtime
+        // already delivered: no need to push the whole state for that.
+        if s.chat_messages == chat.messages {
+            return Ok(Some(chat));
+        }
         s.chat_messages = chat.messages.clone();
         let app_state = s.to_app_state(env!("CARGO_PKG_VERSION"));
         drop(s);
@@ -1834,7 +1838,6 @@ async fn refresh_app_cache(app: &AppHandle, client: &Client, include_inventory: 
 // --- Background loops ---
 
 async fn poll_loop(app: AppHandle) {
-    let client = api::http();
     let mut last_tick = Instant::now();
 
     loop {
@@ -1850,7 +1853,7 @@ async fn poll_loop(app: AppHandle) {
 
         let elapsed = last_tick.elapsed().as_secs_f64().min(2.0 * delay as f64);
         last_tick = Instant::now();
-        if let Err(e) = poll_tick(&app, &client, elapsed).await {
+        if let Err(e) = poll_tick(&app, elapsed).await {
             log::warn!("Poll error: {}", e);
         }
     }
@@ -1982,7 +1985,11 @@ async fn fetch_system_artwork_url() -> Option<String> {
 fn spawn_system_artwork_fetch(app: &AppHandle, track_key: String) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        let Some(artwork) = fetch_system_artwork_url().await else {
+        let Some(artwork) = fetch_system_artwork_url()
+            .await
+            .as_deref()
+            .and_then(artwork::Artwork::from_data_url)
+        else {
             return;
         };
 
@@ -1992,7 +1999,9 @@ fn spawn_system_artwork_fetch(app: &AppHandle, track_key: String) {
             if s.last_track_key.as_deref() != Some(track_key.as_str()) {
                 return;
             }
-            s.system_album_art_url = Some(artwork);
+            // Published under the lock, after the check: a late fetch for a
+            // track already gone can't replace the playing one's image.
+            s.system_album_art_url = Some(artwork::publish(artwork));
             let album_art_url =
                 resolve_album_art_url(s.system_album_art_url.as_deref(), s.enrichment.as_ref());
             if let Some(ref mut np) = s.current_now_playing {
@@ -2035,7 +2044,7 @@ fn spawn_artist_image_fetch(app: &AppHandle, artist: String, track_key: String) 
     });
 }
 
-async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: f64) -> Result<(), String> {
+async fn poll_tick(app: &AppHandle, elapsed_secs: f64) -> Result<(), String> {
     let state = app.state::<SharedState>();
     let lastfm = app.state::<LastFmService>();
 
@@ -2052,7 +2061,14 @@ async fn poll_tick(app: &AppHandle, _client: &Client, elapsed_secs: f64) -> Resu
         return Ok(());
     }
 
-    let np = nowplaying::get_now_playing().await;
+    // Ghost mode tracks nothing, so don't spend a MediaRemote read (and the
+    // AppleScript fallbacks behind it) on finding out what's playing: None
+    // takes the same "not tracking" arm below as a ghost's track would.
+    let np = if tray::is_ghost_mode() {
+        None
+    } else {
+        nowplaying::get_now_playing().await
+    };
 
     // Collect side-effect info to act on after releasing the lock
     let mut spawn_enrichment: Option<(String, String, String)> = None;
@@ -3118,8 +3134,26 @@ pub(crate) fn adopt_local_herzie() -> Option<Herzie> {
 
 // --- Tauri setup ---
 
+/// Where the `log` facade goes: stdout for the terminal running `tauri dev`,
+/// and ~/Library/Logs/<identifier>/ so issues that need a restart to clear
+/// still leave a trail. Debug builds also mirror it into the webview console,
+/// next to the frontend's own lines in devtools; in release that was an IPC
+/// event per line that nobody reads.
+fn log_targets() -> Vec<tauri_plugin_log::Target> {
+    use tauri_plugin_log::{Target, TargetKind};
+    let mut targets = vec![
+        Target::new(TargetKind::Stdout),
+        Target::new(TargetKind::LogDir { file_name: None }),
+    ];
+    if cfg!(debug_assertions) {
+        targets.push(Target::new(TargetKind::Webview));
+    }
+    targets
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(debug_assertions)]
     lastfm::load_env();
     let lastfm_service = LastFmService::from_env();
     lastfm_service.log_missing_key_once();
@@ -3140,21 +3174,13 @@ pub fn run() {
             // at login" (stay hidden in the menu bar).
             Some(vec!["--autostart"]),
         ))
+        .register_uri_scheme_protocol(artwork::SCHEME, |_ctx, request| {
+            artwork::respond(request.uri().path())
+        })
         .plugin(
-            // Routes the `log` facade somewhere visible: stdout for the
-            // terminal running `tauri dev`, and the webview console so the
-            // same lines show up in devtools next to the frontend's own.
             tauri_plugin_log::Builder::new()
                 .level(log::LevelFilter::Info)
-                .targets([
-                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
-                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview),
-                    // Persisted to ~/Library/Logs/<identifier>/ so issues
-                    // that need a restart to clear still leave a trail.
-                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
-                        file_name: None,
-                    }),
-                ])
+                .targets(log_targets())
                 .build(),
         )
         .plugin(tauri_plugin_notification::init())
@@ -3399,7 +3425,7 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 let client = api::http();
                 // Initial tick credits no listening minutes (no prior interval).
-                let _ = poll_tick(&app_handle, &client, 0.0).await;
+                let _ = poll_tick(&app_handle, 0.0).await;
                 let _ = sync_tick(&app_handle, &client).await;
                 refresh_app_cache(&app_handle, &client, false).await;
             });

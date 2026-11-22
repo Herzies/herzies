@@ -29,6 +29,7 @@ import {
   meetsMinStage,
   RARITY_COLORS,
   RARITY_LABELS,
+  RARITY_RANK,
   requiredDiceForLevel,
   unitsBestFirst,
 } from "@herzies/shared";
@@ -659,22 +660,12 @@ function EmptyGridCell({
   );
 }
 
-// Typed on Rarity so a new tier can't be forgotten here again — mythic was,
-// and fell through to common.
-const RARITY_ORDER: Record<Rarity, number> = {
-  mythic: 0,
-  legendary: 1,
-  rare: 2,
-  uncommon: 3,
-  common: 4,
-};
-
 /** Rarity, then name, then — so an upgraded copy leads its plainer twins —
  * highest level first. The order fresh tiles are placed in and the order the
  * quick sort starts from. */
 function compareTiles(a: BankTile, b: BankTile): number {
-  const ra = RARITY_ORDER[getItem(a.itemId)?.rarity ?? "common"];
-  const rb = RARITY_ORDER[getItem(b.itemId)?.rarity ?? "common"];
+  const ra = RARITY_RANK[getItem(a.itemId)?.rarity ?? "common"];
+  const rb = RARITY_RANK[getItem(b.itemId)?.rarity ?? "common"];
   if (ra !== rb) return ra - rb;
   const byName = (getItem(a.itemId)?.name ?? a.itemId).localeCompare(
     getItem(b.itemId)?.name ?? b.itemId,
@@ -2360,7 +2351,7 @@ function InventoryViewImpl({
                 of odds and ends can't outgrow the dialog. Nothing valuable
                 can hide behind "+N more": the batch is common and uncommon
                 only (see `duplicates`), and the tiles sort rarity-first (see
-                RARITY_ORDER) so the uncommons are the rows that do show. */}
+                RARITY_RANK) so the uncommons are the rows that do show. */}
             <div className="flex flex-col gap-0.5 text-ui-sm text-text-dim">
               {duplicates.slice(0, 6).map((d) => {
                 const def = getItem(d.itemId);

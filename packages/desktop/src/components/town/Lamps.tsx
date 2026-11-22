@@ -11,7 +11,7 @@ import {
   windowLit,
   windowPhase,
 } from "./Buildings";
-import { groundY, objectAt, objectJitter, type TownMap } from "./map";
+import { groundY, hash01, objectAt, objectJitter, type TownMap } from "./map";
 import { TOWN_MAPS_LOCAL } from "./maps";
 
 // Old-school lamp posts — an iron pole, a lantern on top — and the light
@@ -149,8 +149,7 @@ export function glowsOf(map: TownMap): Glow[] {
         reach: LAMP_POST_REACH,
         onHerzies: LAMP_ON_HERZIES,
         // As the lantern glass works it out from where it stands.
-        seed:
-          (Math.abs(Math.sin(x * 12.9898 + z * 78.233) * 43758.5453) % 1) * 100,
+        seed: hash01(x, z) * 100,
       });
     }
   }
@@ -267,6 +266,10 @@ function idleShadow(
   if (idle && !light.shadow.map) light.shadow.needsUpdate = true;
 }
 
+/** Nearest first (made once: NightLights sorts with it most frames while
+ * walking). */
+const byDistance = (a: { d: number }, b: { d: number }) => a.d - b.d;
+
 /**
  * The town's little lights at night: a warm point light at every lamp
  * post, and a cone of light out of every lit window onto the ground in
@@ -321,6 +324,18 @@ export function NightLights({ map }: { map: TownMap }) {
     lamps: [],
     windows: [],
   });
+  /** Scratch for the re-placing, kept so walking about allocates nothing:
+   * every glow with its distance (`order` re-sorted from `byIndex` each
+   * time, so ties go as ever), and the lamps' and windows' distances. */
+  const near = useMemo(() => {
+    const byIndex = glows.map((g, i) => ({ i, g, d: 0 }));
+    return {
+      byIndex,
+      order: byIndex.slice(),
+      lamps: [] as number[],
+      windows: [] as number[],
+    };
+  }, [glows]);
 
   useFrame(() => {
     const level = nightLights.level < DARK_ENOUGH ? 0 : nightLights.level;
@@ -353,25 +368,40 @@ export function NightLights({ map }: { map: TownMap }) {
     // Re-placed when the light changes or the player has moved a little
     // (little enough that the shadows' fades move smoothly).
     if (!moved) return;
-    Object.assign(s, { level, x, z });
+    // Dark, and dark already: nothing to move till dusk (which re-places
+    // everything).
+    if (level === 0 && s.level === 0) {
+      s.x = x;
+      s.z = z;
+      return;
+    }
+    s.level = level;
+    s.x = x;
+    s.z = z;
 
     // The lamp posts and windows nearest the player cast shadows.
-    const byDistance = glows
-      .map((g, i) => ({ i, g, d: Math.hypot(g.at[0] - x, g.at[2] - z) }))
-      .sort((a, b) => a.d - b.d);
-    const lampsNear = byDistance.filter((n) => !n.g.out);
-    const windowsNear = byDistance.filter((n) => n.g.out);
-    const nearest = lampsNear.slice(0, SHADOW_LIGHTS).map((n) => n.i);
-    const nearestWindows = windowsNear.slice(0, WINDOW_SHADOWS).map((n) => n.i);
-    casting.current = { lamps: nearest, windows: nearestWindows };
-    const fades = casterFades(
-      lampsNear.map((n) => n.d),
-      SHADOW_LIGHTS,
-    );
-    const windowFades = casterFades(
-      windowsNear.map((n) => n.d),
-      WINDOW_SHADOWS,
-    );
+    const { byIndex, order } = near;
+    for (let i = 0; i < byIndex.length; i++) {
+      const n = byIndex[i];
+      n.d = Math.hypot(n.g.at[0] - x, n.g.at[2] - z);
+      order[i] = n;
+    }
+    order.sort(byDistance);
+    const nearest = casting.current.lamps;
+    const nearestWindows = casting.current.windows;
+    nearest.length = nearestWindows.length = 0;
+    near.lamps.length = near.windows.length = 0;
+    for (const n of order) {
+      if (n.g.out) {
+        near.windows.push(n.d);
+        if (nearestWindows.length < WINDOW_SHADOWS) nearestWindows.push(n.i);
+      } else {
+        near.lamps.push(n.d);
+        if (nearest.length < SHADOW_LIGHTS) nearest.push(n.i);
+      }
+    }
+    const fades = casterFades(near.lamps, SHADOW_LIGHTS);
+    const windowFades = casterFades(near.windows, WINDOW_SHADOWS);
     glows.forEach((g, i) => {
       const light = lights.current[i];
       const lit = glowLevel(g, level, t);

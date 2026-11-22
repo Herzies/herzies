@@ -1,3 +1,4 @@
+import { clamp01 } from "../easing";
 import { cellCenter, facingAt, groundY, objectAt, type TownMap } from "../map";
 
 /**
@@ -268,5 +269,3 @@ export function waveHitsDummy(
     point: [d.x + (ox / ol) * radius, axisY, d.z + (oz / ol) * radius],
   };
 }
-
-const clamp01 = (v: number) => Math.min(1, Math.max(0, v));

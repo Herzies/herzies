@@ -33,7 +33,7 @@ This runs `tauri dev` (Vite + native shell).
 
 ## Releasing
 
-1. Bump the version in `package.json` and `src-tauri/tauri.conf.json` (must match).
+1. Bump the version in `package.json`, `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml` (all must match; `cargo check` then updates `Cargo.lock`).
 2. Add an entry to [`release-notes.json`](./release-notes.json) for that version:
    ```json
    { "version": "0.1.0-beta.40", "highlights": ["Added X", "Fixed Y"] }

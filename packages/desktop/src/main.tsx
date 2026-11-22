@@ -104,7 +104,6 @@ import {
   type UpdateInstallEvent,
   useFullscreen,
   useGhostMode,
-  useWindowFocused,
   useWindowVisible,
   useWindowWaking,
 } from "./tauri-bridge";
@@ -550,7 +549,6 @@ function App() {
     version: string;
     promise: Promise<void>;
   } | null>(null);
-  const focused = useWindowFocused();
   const ghostMode = useGhostMode();
 
   // The cave's loot asks the bank before picking up, as Home's drops do.
@@ -683,24 +681,6 @@ function App() {
     return () => root.remove("boss-mode", "merchant-mode");
   }, [base, eventsScreen]);
 
-  // The tab only needs to know whether a song hunt is running right now, which
-  // /events-active alone answers — and it's an Edge Function, so it's cheap and
-  // fast. This used to also fetch /events/previous-hunt (a slow Vercel route)
-  // purely "for parity with EventsView" and discard the result.
-  const refreshEventIndicator = useCallback(() => {
-    herzies
-      .fetchActiveEvents()
-      .then(({ events }) => {
-        // Not the monthly Tower: it's always on, so it would keep the
-        // button sparkling all month. The Wilds do count: they're only on
-        // of an evening, and the ships are worth a look while they fly.
-        setEventsRunning(events.filter((e) => e.type !== "tower").length);
-      })
-      .catch(() => {
-        setEventsRunning(0);
-      });
-  }, []);
-
   // CSS keyframe loops (marquees, floating drops) can't read the hook, so
   // flag the root and let globals.css pause them while the window is off
   // screen. Unfocused but visible, they keep going.
@@ -709,17 +689,6 @@ function App() {
   useEffect(() => {
     document.documentElement.toggleAttribute("data-window-hidden", !visible);
   }, [visible]);
-
-  // One effect, not two: a second copy gated on `state.isOnline` alone fired a
-  // duplicate of this every time connectivity flipped while the window was
-  // open, which is part of why opening the tray produced a burst of identical
-  // requests.
-  useEffect(() => {
-    if (!focused || !state.isOnline) return;
-    refreshEventIndicator();
-    const interval = setInterval(refreshEventIndicator, 60_000);
-    return () => clearInterval(interval);
-  }, [focused, state.isOnline, refreshEventIndicator]);
 
   // Back to the world when logging back in
   const prevOnline = useRef(state.isOnline);
@@ -917,6 +886,13 @@ function App() {
   // Walking off at Home: out into the Town.
   useEffect(
     () => homeMode.onExitRequest(() => switchView("events")),
+    [switchView],
+  );
+
+  // Stable, so the always-mounted InventoryView (memo) doesn't re-render on
+  // every App render.
+  const onInventoryPanel = useCallback(
+    (p: string) => switchView(p as HerzieTab),
     [switchView],
   );
 
@@ -1408,6 +1384,7 @@ function App() {
             debugForceMerchant={debugMerchantOverride}
             debugForceTreatTrader={debugTreatTraderOverride}
             onScreenChange={setEventsScreen}
+            onEventsRunning={setEventsRunning}
             equipped={
               classOverride
                 ? withClassGear(state.equipped, classOverride)
@@ -1740,7 +1717,7 @@ function App() {
             slot={inventorySlot}
             open={isInventory(overlay)}
             panel={inventoryPanel}
-            onPanelChange={(p) => switchView(p as HerzieTab)}
+            onPanelChange={onInventoryPanel}
             onTabLanded={onTabLanded}
             wide={bigWindow}
           />
@@ -2090,11 +2067,13 @@ function App() {
 // Pipes the Rust side's `log` output into this webview's console, so backend
 // and frontend lines interleave in devtools instead of only reaching the
 // terminal running `tauri dev`. The plugin's Webview target emits events; this
-// is the subscriber that turns them into console output, and without it that
-// target goes nowhere.
-attachConsole().catch(() => {
-  // Logging is a debugging aid, never a reason to fail startup.
-});
+// is the subscriber that turns them into console output. Dev builds only, as
+// is that target (lib.rs `log_targets`).
+if (import.meta.env.DEV) {
+  attachConsole().catch(() => {
+    // Logging is a debugging aid, never a reason to fail startup.
+  });
+}
 
 const root = createRoot(document?.getElementById("root") ?? document.body);
 root.render(<App />);

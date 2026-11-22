@@ -5,6 +5,7 @@ import * as THREE from "three";
 import { ambient, gustAt, seasonNow } from "./ambient";
 import { chimneysOf } from "./Buildings";
 import { FOOTPRINT_LIFE, footprints, Trail } from "./footprints";
+import { homeMode } from "./homeMode";
 import {
   cellCenter,
   groundY,
@@ -25,6 +26,16 @@ import { useTownRuntime } from "./runtime";
  * instanced mesh, moved on the CPU — there are only ever a few hundred.
  */
 export function Particles({ map }: { map: TownMap }) {
+  const gl = useThree((s) => s.gl);
+  const camera = useThree((s) => s.camera);
+  // World size → pixels at distance 1, in the canvas's own (low-res)
+  // pixels: the same for every pool, so worked out once.
+  useFrame(() => {
+    if (homeMode.full) return;
+    const fov = (camera as THREE.PerspectiveCamera).fov ?? 55;
+    uPixels.value =
+      gl.domElement.height / (2 * Math.tan((fov * Math.PI) / 360));
+  });
   return (
     <>
       <Fireflies map={map} />
@@ -40,12 +51,14 @@ export function Particles({ map }: { map: TownMap }) {
 
 // --- Point sprites ---------------------------------------------------------
 
+/** Every pool's point size scale (see Particles). */
+const uPixels = { value: 1 };
+const POINT_ATTRIBUTES = ["position", "size", "alpha", "color"] as const;
+
 /** A pool of square point sprites, each with its own size (world units),
  * colour and opacity, written on the CPU every frame. `round`: each one
  * clipped to a circle (still hard-edged, in the Town's pixels). */
 function usePoints(count: number, blending: THREE.Blending, round = false) {
-  const gl = useThree((s) => s.gl);
-  const camera = useThree((s) => s.camera);
   const points = useMemo(() => {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute(
@@ -69,7 +82,7 @@ function usePoints(count: number, blending: THREE.Blending, round = false) {
       depthWrite: false,
       blending,
       defines: round ? { ROUND: "" } : {},
-      uniforms: { uPixels: { value: 1 } },
+      uniforms: { uPixels },
       vertexShader: /* glsl */ `
         uniform float uPixels;
         attribute float size;
@@ -107,12 +120,6 @@ function usePoints(count: number, blending: THREE.Blending, round = false) {
     },
     [points],
   );
-  // World size → pixels at distance 1, in the canvas's own (low-res) pixels.
-  useFrame(() => {
-    const fov = (camera as THREE.PerspectiveCamera).fov ?? 55;
-    points.material.uniforms.uPixels.value =
-      gl.domElement.height / (2 * Math.tan((fov * Math.PI) / 360));
-  });
   const a = points.geometry.attributes;
   return {
     ...points,
@@ -132,9 +139,11 @@ function usePoints(count: number, blending: THREE.Blending, round = false) {
       (a.color as THREE.BufferAttribute).setXYZ(i, c.r, c.g, c.b);
     },
     flush() {
-      for (const name of ["position", "size", "alpha", "color"]) {
+      for (const name of POINT_ATTRIBUTES) {
         (a[name] as THREE.BufferAttribute).needsUpdate = true;
       }
+      // Not for culling (there's none): three sorts see-through things by
+      // their bounds' centre, so it follows the pool about.
       points.geometry.computeBoundingSphere();
     },
   };
@@ -196,10 +205,17 @@ function Fireflies({ map }: { map: TownMap }) {
   useLayoutEffect(() => {
     for (let i = 0; i < FIREFLIES; i++) pts.color(i, FIREFLY);
   }, [pts]);
+  const shown = useRef(false);
 
   useFrame(({ clock }) => {
-    const t = clock.elapsedTime;
+    if (homeMode.full) return;
     const night = THREE.MathUtils.smoothstep(ambient.uNight.value, 0.3, 0.8);
+    // Out by day (and in the rain, and out of season): once they've faded,
+    // left as they are, every one see-through.
+    const out = night * seasonNow.look.fireflies * (1 - ambient.uRain.value);
+    if (out <= 0 && !shown.current) return;
+    shown.current = out > 0;
+    const t = clock.elapsedTime;
     flies.forEach((f, i) => {
       const p = f.phase + t * f.speed;
       const glow = (0.5 + 0.5 * Math.sin(t * f.blink + f.phase)) ** 3;
@@ -256,6 +272,7 @@ function Motes({ map }: { map: TownMap }) {
   const shown = useRef(false);
 
   useFrame(({ clock }) => {
+    if (homeMode.full) return;
     // By day only, and not in winter's bare air.
     const day =
       (1 - THREE.MathUtils.smoothstep(ambient.uNight.value, 0.2, 0.5)) *
@@ -314,8 +331,13 @@ function Smoke({ map }: { map: TownMap }) {
   useLayoutEffect(() => {
     for (let i = 0; i < count; i++) pts.color(i, SMOKE);
   }, [pts, count]);
+  const shown = useRef(false);
 
   useFrame(({ clock }) => {
+    if (homeMode.full) return;
+    // None (out of season): once faded, left as they are, see-through.
+    if (seasonNow.look.smoke <= 0 && !shown.current) return;
+    shown.current = seasonNow.look.smoke > 0;
     const t = clock.elapsedTime;
     const wind = ambient.uWindDir.value;
     chimneys.forEach(([x, y, z], c) => {
@@ -402,16 +424,21 @@ function Butterflies({ map }: { map: TownMap }) {
   const e = useMemo(() => new THREE.Euler(), []);
   const pos = useMemo(() => new THREE.Vector3(), []);
   const scale = useMemo(() => new THREE.Vector3(), []);
+  /** The mesh, once it's been tucked away for the night: left so. */
+  const tucked = useRef<THREE.InstancedMesh | null>(null);
 
   useFrame(({ clock }) => {
+    if (homeMode.full) return;
     const mesh = ref.current;
     if (!mesh) return;
-    const t = clock.elapsedTime;
     // Gone by night: tucked away (scaled to nothing).
     const day =
       (1 - THREE.MathUtils.smoothstep(ambient.uNight.value, 0.3, 0.6)) *
       seasonNow.look.butterflies *
       (1 - THREE.MathUtils.smoothstep(ambient.uRain.value, 0.05, 0.4));
+    if (day <= 0 && tucked.current === mesh) return;
+    tucked.current = day <= 0 ? mesh : null;
+    const t = clock.elapsedTime;
     flies.forEach((f, i) => {
       const p = f.phase + t * 0.6;
       pos.set(
@@ -506,19 +533,27 @@ function FallingLeaves({ map }: { map: TownMap }) {
   const pos = useMemo(() => new THREE.Vector3(), []);
   const one = useMemo(() => new THREE.Vector3(1, 1, 1), []);
   const zero = useMemo(() => new THREE.Vector3(0, 0, 0), []);
+  /** The mesh, once every leaf's down and none's to fall: left so. */
+  const landed = useRef<THREE.InstancedMesh | null>(null);
 
   useFrame(({ clock }) => {
     const mesh = ref.current;
     if (!mesh || trees.length === 0) return;
-    const t = clock.elapsedTime;
-    const wind = ambient.uWindDir.value;
     const { leaves: many, petals } = seasonNow.look;
     const falling = Math.round(LEAVES * Math.max(many, petals));
+    if (falling === 0 && landed.current === mesh) return;
+    // Unseen at Home they still let go when they would, so the world comes
+    // back mid-fall as ever; they're just not placed.
+    const unseen = homeMode.full;
+    const t = clock.elapsedTime;
+    const wind = ambient.uWindDir.value;
     let recolored = false;
+    let airborne = false;
     leaves.current.forEach((l, i) => {
       let age = (t - l.born) / LEAF_FALL;
       // Out of season: lands, and stays down (out of sight).
       if (age > 1 && i >= falling) {
+        if (unseen) return;
         m.compose(pos, q, zero);
         mesh.setMatrixAt(i, m);
         return;
@@ -538,6 +573,8 @@ function FallingLeaves({ map }: { map: TownMap }) {
         l.spin = rand() * 10;
         age = (t - l.born) / LEAF_FALL;
       }
+      airborne = true;
+      if (unseen) return;
       const k = Math.max(0, age);
       const sway = Math.sin(t * 2.2 + l.spin) * 0.5;
       pos.set(
@@ -551,8 +588,10 @@ function FallingLeaves({ map }: { map: TownMap }) {
       m.compose(pos, q, age < 0 ? zero : one);
       mesh.setMatrixAt(i, m);
     });
-    mesh.instanceMatrix.needsUpdate = true;
     if (recolored && mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    if (unseen) return;
+    mesh.instanceMatrix.needsUpdate = true;
+    landed.current = falling === 0 && !airborne ? mesh : null;
   });
   if (trees.length === 0) return null;
   return (
@@ -595,6 +634,7 @@ function Snowfall() {
   const shown = useRef(false);
 
   useFrame(({ clock }) => {
+    if (homeMode.full) return;
     const heavy = seasonNow.look.snowfall;
     const falling = Math.round(FLAKES * heavy);
     if (falling === 0 && !shown.current) return;

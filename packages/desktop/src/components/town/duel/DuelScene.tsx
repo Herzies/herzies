@@ -4,6 +4,7 @@ import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { entityAt } from "../combat/skills";
+import { easeOut } from "../easing";
 import { groundY, type TownMap } from "../map";
 import { NAME_SHADOW } from "../nameFade";
 import { townSave } from "../runtime";
@@ -50,8 +51,6 @@ export function DuelScene({ map }: { map: TownMap }) {
     </>
   );
 }
-
-const easeOut = (t: number) => 1 - (1 - t) ** 3;
 
 /** One duel's ring and marker. */
 function Ring({ duel: d, map }: { duel: DuelView; map: TownMap }) {
@@ -100,6 +99,8 @@ function Ring({ duel: d, map }: { duel: DuelView; map: TownMap }) {
       knob: new THREE.SphereGeometry(0.11, 12, 8),
       /** The radius last laid out (re-laid only while it grows). */
       laid: -1,
+      /** What it was last painted with (repainted only when that changes). */
+      painted: { sudden: false, base: Number.NaN, edge: 0, toward: 0 },
     };
   }, []);
   useEffect(
@@ -152,11 +153,25 @@ function Ring({ duel: d, map }: { duel: DuelView; map: TownMap }) {
           )
         : 0;
     const toward = Math.atan2(townSave.x - d.x, townSave.z - d.z);
-    paint(parts.line, parts.wall, colour, BASE * beat, edge, toward);
+    const p = parts.painted;
+    if (
+      sudden !== p.sudden ||
+      Math.abs(BASE * beat - p.base) > 1e-3 ||
+      (edge === 0) !== (p.edge === 0) ||
+      Math.abs(edge - p.edge) > 1e-3 ||
+      // Where it's toward only shows with an edge.
+      (edge > 0 && Math.abs(toward - p.toward) > 1e-3)
+    ) {
+      paint(parts.line, parts.wall, colour, BASE * beat, edge, toward);
+      p.sudden = sudden;
+      p.base = BASE * beat;
+      p.edge = edge;
+      p.toward = toward;
+      parts.line.attributes.color.needsUpdate = true;
+      parts.wall.attributes.color.needsUpdate = true;
+    }
     parts.lineMat.opacity = fade;
     parts.wallMat.opacity = fade;
-    parts.line.attributes.color.needsUpdate = true;
-    parts.wall.attributes.color.needsUpdate = true;
     const g = markerGroup.current;
     if (g) {
       const y = groundY(map, d.x, d.z);
@@ -257,9 +272,8 @@ function paint(
   const wc = wall.attributes.color.array as Float32Array;
   for (let i = 0; i < SEGMENTS; i++) {
     const o = i * 12;
-    let k = 0;
-    for (const step of [i, i + 1]) {
-      const a = (step / SEGMENTS) * Math.PI * 2;
+    for (let k = 0; k < 12; k += 6) {
+      const a = ((i + k / 6) / SEGMENTS) * Math.PI * 2;
       const off = Math.abs(
         Math.atan2(Math.sin(a - toward), Math.cos(a - toward)),
       );
@@ -273,7 +287,6 @@ function paint(
         wc[o + k + j] = c * w;
         wc[o + k + 3 + j] = 0;
       }
-      k += 6;
     }
   }
 }
@@ -284,8 +297,15 @@ function Floaters() {
     notes: [],
     winners: [],
   });
-  const key = useRef("");
+  const key = useRef("|");
   useFrame(() => {
+    // No duels and no winners: nothing to show, and nothing shown.
+    if (
+      duel.rooms.size === 0 &&
+      duelFeel.winners.size === 0 &&
+      key.current === "|"
+    )
+      return;
     const now = performance.now();
     const notes: number[] = [];
     for (const d of duel.rooms.values())

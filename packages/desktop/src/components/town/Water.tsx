@@ -257,6 +257,12 @@ function FishRings({ map }: { map: TownMap }) {
       ),
     [],
   );
+  useLayoutEffect(
+    () => () => {
+      for (const m of materials) m.dispose();
+    },
+    [materials],
+  );
 
   useFrame(({ clock }) => {
     const t = clock.elapsedTime;
@@ -308,6 +314,7 @@ export function Water({ map }: { map: TownMap }) {
   const geometry = useMemo(() => waterGeometry(map), [map]);
   useLayoutEffect(() => () => geometry.dispose(), [geometry]);
   const material = useMemo(waterMaterial, []);
+  useLayoutEffect(() => () => material.dispose(), [material]);
   return (
     <>
       <mesh geometry={geometry} material={material} />

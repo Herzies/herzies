@@ -1,6 +1,10 @@
 "use client";
 
-import type { SongHuntConfig, SongHuntHint } from "@herzies/shared";
+import {
+  RARITIES,
+  type SongHuntConfig,
+  type SongHuntHint,
+} from "@herzies/shared";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAdminData } from "./admin-data";
 import {
@@ -40,8 +44,6 @@ import {
 import { NotificationsPanel } from "./NotificationsPanel";
 import { SongPoolPanel } from "./SongPoolPanel";
 import { XpPanel } from "./XpPanel";
-
-const RARITIES = ["common", "uncommon", "rare", "legendary", "mythic"] as const;
 
 type SongHuntHintForm = {
   text: string;

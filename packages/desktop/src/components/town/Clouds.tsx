@@ -4,6 +4,7 @@ import { useFrame } from "@react-three/fiber";
 import { useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { homeMode } from "./homeMode";
 
 /** How many clouds, and how fast the whole sky of them turns. */
 const COUNT = 16;
@@ -82,6 +83,7 @@ export function Clouds() {
   const meshes = useRef<(THREE.Mesh | null)[]>([]);
 
   useFrame(({ clock }) => {
+    if (homeMode.full) return;
     const t = clock.elapsedTime;
     if (ring.current) ring.current.rotation.y = t * DRIFT;
     clouds.forEach((c, i) => {

@@ -1,8 +1,9 @@
 import { mulberry32 } from "@herzies/shared";
 import { useFrame } from "@react-three/fiber";
-import { useMemo, useRef } from "react";
+import { useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { ambient, inSeason } from "./ambient";
+import { homeMode } from "./homeMode";
 
 /** The sky, top to bottom: the fog fades everything far off into the
  * horizon colour, so distant islands melt into it. */
@@ -203,6 +204,7 @@ export function HomeIsland({ radius }: { radius: number }) {
       }),
     [radius],
   );
+  useLayoutEffect(() => () => geometry.dispose(), [geometry]);
   return <mesh geometry={geometry} material={islandMaterial} />;
 }
 
@@ -368,12 +370,14 @@ export function Sky() {
       }),
     [],
   );
+  useLayoutEffect(() => () => material.dispose(), [material]);
   const sky = useRef<THREE.Mesh>(null);
   // The next shooting star: when it falls, from where to where. Each
   // player sees their own; they're too brief to share.
   const shoot = useRef({ at: SHOOTING_EVERY * 0.3, started: Number.NaN });
   // Centred on the camera, so it is always at the horizon's distance.
   useFrame(({ camera, clock }) => {
+    if (homeMode.full) return;
     sky.current?.position.copy(camera.position);
     const t = clock.elapsedTime;
     const s = shoot.current;
@@ -482,7 +486,9 @@ function DistantIsland({ island }: { island: Distant }) {
     () => islandGeometry(island.radius, island.radius * 1.3, island.seed),
     [island],
   );
+  useLayoutEffect(() => () => geometry.dispose(), [geometry]);
   useFrame(({ clock }) => {
+    if (homeMode.full) return;
     const g = group.current;
     if (!g) return;
     const t = clock.elapsedTime;

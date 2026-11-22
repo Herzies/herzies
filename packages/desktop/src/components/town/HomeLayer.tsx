@@ -46,8 +46,8 @@ const LIGHTS_EVERY = 30;
  * lights (put on the layer too) and, while the world's still drawn, its
  * shadows: the shadow maps it already drew are kept, so nothing shades
  * differently in the second drawing. Settled at Home, the canvas is cleared
- * to see-through first (the composer's standing down: see Post), and the
- * shadows are only what Home's things cast.
+ * to see-through first (the composer's standing down: see Post), and no
+ * shadows are drawn: the world's lights, faded out, cast none to see.
  */
 export function HomeLayer() {
   const gl = useThree((s) => s.gl);
@@ -116,7 +116,6 @@ export function HomeLayer() {
       gl.clear(true, true, true);
     } else {
       gl.clearDepth();
-      gl.shadowMap.autoUpdate = false;
     }
     // Drawn straight to the screen, where three tone-maps and encodes
     // itself: the materials mustn't as well (see depth.ts).
@@ -126,12 +125,20 @@ export function HomeLayer() {
     const k = homeMode.worldFade;
     const ws = lights.current;
     saved.intensity.length = saved.shadow.length = 0;
+    // The shadow maps aren't drawn again for this: while the world's still
+    // drawn they're its own (see above), and settled at Home every world
+    // light's shadow is faded to nothing here (the studio's cast none) —
+    // unless a caster has no map yet (the app opening on Home), which
+    // WebKit can't draw a lit material with (see Lamps' idleShadow).
+    let unmapped = false;
     for (const l of ws) {
       saved.intensity.push(l.intensity);
       saved.shadow.push(l.shadow?.intensity ?? 0);
       l.intensity *= 1 - k;
       if (l.shadow) l.shadow.intensity *= 1 - k;
+      if (l.castShadow && !l.shadow?.map) unmapped = true;
     }
+    if (!full || !unmapped) gl.shadowMap.autoUpdate = false;
     // The studio's sun, turned with Home's camera (Home's view had its
     // camera on +z).
     const turn = homeMode.azimuth ?? 0;

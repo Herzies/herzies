@@ -1,7 +1,9 @@
 import {
+  blankState,
   CRYSTAL_KEY,
   type HerzieStats,
   TOWN_FLAG_SITTING,
+  type TownState,
 } from "@herzies/shared";
 import {
   Canvas,
@@ -11,8 +13,7 @@ import {
   useThree,
 } from "@react-three/fiber";
 import { Physics } from "@react-three/rapier";
-import { Suspense, useEffect, useMemo, useRef } from "react";
-import { useWindowFocused } from "../../tauri-bridge";
+import { Suspense, useMemo, useRef } from "react";
 import type { Look } from "../TownScene";
 import { berthOf } from "./airship/berth";
 import {
@@ -241,11 +242,6 @@ export default function TownCanvas(props: TownCanvasProps) {
   // averaged back down to the same big pixels (see Supersample), at Home
   // too.
   const supersample = useTownSupersample();
-  // Visible but not the window you're in (a pinned window beside another
-  // app, the Town on a second screen): drawn at a fraction of the rate,
-  // which is most of the CPU.
-  const unfocused = !useWindowFocused();
-  const throttled = THROTTLE_UNFOCUSED && unfocused && !props.paused;
 
   return (
     <Canvas
@@ -266,12 +262,11 @@ export default function TownCanvas(props: TownCanvasProps) {
       // included, and the herzie stage (fixed, z-index 1) draws over them.
       style={{ imageRendering: "pixelated", isolation: "isolate" }}
       camera={{ fov: 55, near: 0.1, far: 400 }}
-      frameloop={props.paused || throttled ? "never" : "always"}
+      frameloop={props.paused ? "never" : "always"}
       onCreated={props.onCreated}
     >
       <TownRuntimeContext.Provider value={runtime}>
         <ClockGap />
-        {throttled && <UnfocusedTicker />}
         <Systems
           {...props}
           map={map}
@@ -425,27 +420,6 @@ const NO_STATS: HerzieStats = {
   moveSpeed: 0,
 };
 
-/** Off for now: the Town draws at full rate unfocused too. */
-const THROTTLE_UNFOCUSED = false;
-
-/** Unfocused frame rate. */
-const UNFOCUSED_FPS = 3;
-
-/** Draws the frames while the canvas is stopped for being unfocused. Not
- * "demand": Rapier invalidates after every step while the player's body is
- * awake, which would keep that drawing at the full rate. */
-function UnfocusedTicker() {
-  const advance = useThree((s) => s.advance);
-  useEffect(() => {
-    const id = setInterval(
-      () => advance(performance.now()),
-      1000 / UNFOCUSED_FPS,
-    );
-    return () => clearInterval(id);
-  }, [advance]);
-  return null;
-}
-
 /** The Town's clock doesn't run while it's paused (window closed to the
  * menu bar): the first frame back would carry the whole gap in `elapsedTime`
  * and everything swaying on it (trees, bunting, clouds) would jump to a new
@@ -505,6 +479,23 @@ function Systems({
   /** Where the player was last frame, on which island: walking through a
    * disc is going from one side of it to the other. */
   const last = useRef({ map: "", x: 0, z: 0 });
+  /** The other players sitting down, sampled near a bench: the first `n`
+   * of `at` (kept and refilled, not made, each frame). A seat's taken if
+   * one of them is on it. */
+  const sitting = useMemo(() => {
+    const at: TownState[] = [];
+    const state = {
+      at,
+      n: 0,
+      taken: (s: Seat) => {
+        for (let i = 0; i < state.n; i++) {
+          if (Math.hypot(at[i].x - s.x, at[i].z - s.z) < 0.4) return true;
+        }
+        return false;
+      },
+    };
+    return state;
+  }, []);
   /** Since when the ship you're on has been laid up (you're seen off it
    * after a moment), and since when you've been on the Wilds with no ship
    * to take you home (you're sent home after a moment). */
@@ -590,7 +581,9 @@ function Systems({
           }
         }
       }
-      Object.assign(l, { map: map.id, x: townSave.x, z: townSave.z });
+      l.map = map.id;
+      l.x = townSave.x;
+      l.z = townSave.z;
     }
     // The portal close enough to step into with E.
     let nearest: Portal | null = null;
@@ -699,17 +692,16 @@ function Systems({
       !crafting.current &&
       benches.length > 0
     ) {
-      const sitting: { x: number; z: number }[] = [];
+      sitting.n = 0;
       if (net) {
         const t = net.clock.renderTime(performance.now());
         for (const r of net.remotes.values()) {
-          const st = r.buffer.sample(t);
-          if (st && st.flags & TOWN_FLAG_SITTING) sitting.push(st);
+          sitting.at[sitting.n] ??= blankState();
+          const st = r.buffer.sample(t, sitting.at[sitting.n]);
+          if (st && st.flags & TOWN_FLAG_SITTING) sitting.n++;
         }
       }
-      seat.current = seatNear(benches, townSave.x, townSave.z, (s) =>
-        sitting.some((p) => Math.hypot(p.x - s.x, p.z - s.z) < 0.4),
-      );
+      seat.current = seatNear(benches, townSave.x, townSave.z, sitting.taken);
     }
     if (townLive.benchPressed) {
       townLive.benchPressed = false;

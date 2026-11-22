@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HerzieAppearance {
     pub head_index: u32,
@@ -80,7 +80,7 @@ fn default_true() -> bool {
     true
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HerzieProfile {
     pub name: String,
@@ -121,14 +121,14 @@ pub struct HerzieProfile {
     pub title: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TopArtist {
     pub name: String,
     pub plays: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProfileNowPlaying {
     pub title: String,
@@ -137,7 +137,7 @@ pub struct ProfileNowPlaying {
     pub album_art_url: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProfileLastPlayed {
     pub title: String,
@@ -340,8 +340,11 @@ pub struct Trade {
     pub id: String,
     pub initiator_id: String,
     pub target_id: String,
-    pub initiator_name: String,
-    pub target_name: String,
+    /// Only when asked for (`/trade/status?names=0` leaves them out).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initiator_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_name: Option<String>,
     pub initiator_offer: TradeOffer,
     pub target_offer: TradeOffer,
     pub state: String,
@@ -349,6 +352,10 @@ pub struct Trade {
     pub target_accepted: bool,
     pub created_at: String,
     pub expires_at: String,
+    /// Orders polls against the live broadcasts (00157); absent from older
+    /// servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<u64>,
 }
 
 pub type Inventory = HashMap<String, u32>;
@@ -569,7 +576,7 @@ pub struct ActiveEventsResponse {
     pub week: Vec<GameEvent>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatMessage {
     pub id: String,

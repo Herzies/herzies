@@ -206,6 +206,17 @@ export function bossNow(
     out.yaw = Math.PI;
     return out;
   }
+  return sampleAt(s, at, out);
+}
+
+/** Where something is at `at`, between its (in order, at least one)
+ * samples, its yaw turned the short way round; held at the first or the
+ * last outside them. Written into `out`, and returned. */
+function sampleAt<T extends { x: number; z: number; yaw: number }>(
+  s: readonly { at: number; x: number; z: number; yaw: number }[],
+  at: number,
+  out: T,
+): T {
   for (let i = s.length - 1; i > 0; i--) {
     const a = s[i - 1];
     const b = s[i];
@@ -272,25 +283,16 @@ const REFUSALS: Record<SkillRefusal, string> = {
 export function mobAt(
   m: MobView,
   at: number,
+  /** Written into and returned, for a caller that asks every frame. */
+  out: { x: number; z: number; yaw: number } = { x: 0, z: 0, yaw: 0 },
 ): { x: number; z: number; yaw: number } {
-  const s = m.samples;
-  const last = s[s.length - 1];
-  if (!last) return { x: 0, z: 0, yaw: 0 };
-  for (let i = s.length - 1; i > 0; i--) {
-    const a = s[i - 1];
-    const b = s[i];
-    if (a.at <= at && at <= b.at) {
-      const k = b.at > a.at ? (at - a.at) / (b.at - a.at) : 1;
-      let dy = b.yaw - a.yaw;
-      dy = Math.atan2(Math.sin(dy), Math.cos(dy));
-      return {
-        x: a.x + (b.x - a.x) * k,
-        z: a.z + (b.z - a.z) * k,
-        yaw: a.yaw + dy * k,
-      };
-    }
+  if (!m.samples.length) {
+    out.x = 0;
+    out.z = 0;
+    out.yaw = 0;
+    return out;
   }
-  return at < s[0].at ? s[0] : last;
+  return sampleAt(m.samples, at, out);
 }
 
 /** A stun the server just told of, ending at `until` (local ms), on

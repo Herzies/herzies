@@ -22,7 +22,8 @@ pub struct ManagedState {
     pub enrichment: Option<TrackEnrichment>,
     pub enrichment_requested_at: Option<Instant>,
     pub enrichment_in_flight: bool,
-    /// Album art from the system Now Playing session (`data:` URL), when available.
+    /// Album art from the system Now Playing session, when available: its
+    /// `herzies-art` protocol URL (see artwork.rs).
     pub system_album_art_url: Option<String>,
     /// Current artist's portrait photo (Spotify), fetched via our backend.
     /// Cleared and re-fetched only when the artist actually changes, so
@@ -405,6 +406,28 @@ pub fn crystal_became_full(before: Option<&serde_json::Value>, after: &serde_jso
     before.is_some_and(|b| !crystal_full(b)) && crystal_full(after)
 }
 
+impl ManagedState {
+    /// Take a Crystal state from the server unless it's older than the one we
+    /// hold: a sync that left before an attune comes back with the Crystal as
+    /// it was, and must not refill the one that was just emptied. Every attune
+    /// bumps `attunes`, so a lower count is always the older picture.
+    pub fn accept_crystal(&mut self, next: &serde_json::Value) -> bool {
+        if !next.is_object() {
+            return false;
+        }
+        let held = self
+            .crystal
+            .as_ref()
+            .and_then(|c| c["attunes"].as_u64())
+            .unwrap_or(0);
+        if next["attunes"].as_u64().unwrap_or(0) < held {
+            return false;
+        }
+        self.crystal = Some(next.clone());
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -622,27 +645,5 @@ mod tests {
     fn display_herzie_none_when_no_herzie() {
         let state = test_state(None, 5.0);
         assert!(state.display_herzie().is_none());
-    }
-}
-
-impl ManagedState {
-    /// Take a Crystal state from the server unless it's older than the one we
-    /// hold: a sync that left before an attune comes back with the Crystal as
-    /// it was, and must not refill the one that was just emptied. Every attune
-    /// bumps `attunes`, so a lower count is always the older picture.
-    pub fn accept_crystal(&mut self, next: &serde_json::Value) -> bool {
-        if !next.is_object() {
-            return false;
-        }
-        let held = self
-            .crystal
-            .as_ref()
-            .and_then(|c| c["attunes"].as_u64())
-            .unwrap_or(0);
-        if next["attunes"].as_u64().unwrap_or(0) < held {
-            return false;
-        }
-        self.crystal = Some(next.clone());
-        true
     }
 }

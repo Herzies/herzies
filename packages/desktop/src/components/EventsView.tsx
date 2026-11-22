@@ -36,6 +36,7 @@ import {
 } from "@herzies/shared";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { usePoll } from "../hooks/usePoll";
 import { useEscape } from "../lib/escapeStack";
 import { HerzieStageContext, visitorHerzieStage } from "../lib/overlayStage";
 import { useQuestBoard } from "../lib/quests";
@@ -276,6 +277,7 @@ function EventsViewImpl({
   debugForceMerchant = false,
   debugForceTreatTrader = false,
   onScreenChange,
+  onEventsRunning,
   equipped,
   units = [],
   currency = 0,
@@ -360,6 +362,9 @@ function EventsViewImpl({
   onScreenChange?: (
     screen: "boss" | "merchant" | "world" | "visitor" | null,
   ) => void;
+  /** How many events are on (not the monthly Tower), for the app's Events
+   * button: from this view's own poll, so the app needn't fetch them too. */
+  onEventsRunning?: (running: number) => void;
   /** Current deck, used to show set progress in the reward preview. */
   equipped?: Equipped | null;
   /** Every owned copy, for George's "N owned" counts. */
@@ -530,16 +535,14 @@ function EventsViewImpl({
   /** The Town or a visitor on screen: kept fresh (not just Home). */
   const fastPoll = eventsTabVisible || selected !== null;
   // reloadKey is a trigger, not a value: George's stall bumps it after a buy.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reloadKey re-runs the fetch
-  useEffect(() => {
-    if (!active) return;
-    let cancelled = false;
-
-    const refresh = () =>
+  usePoll(
+    (alive) =>
       herzies
         .fetchActiveEvents()
         .then((active) => {
-          if (cancelled) return;
+          if (!alive()) return;
+          // Fresh arrays every time, on purpose: each poll's re-render is
+          // also what moves the cards' countdowns and the finders' "Ns ago".
           setEvents(active.events);
           setUpcoming(active.upcoming ?? []);
           setWeek(active.week ?? []);
@@ -553,17 +556,23 @@ function EventsViewImpl({
           liveIdsRef.current = ids;
         })
         .catch(() => {
-          if (!cancelled) setActiveLoaded(true);
-        });
+          if (alive()) setActiveLoaded(true);
+        }),
+    {
+      enabled: active,
+      focused,
+      everyMs: fastPoll ? EVENTS_POLL_MS : HOME_EVENTS_POLL_MS,
+      key: String(reloadKey),
+    },
+  );
 
-    refresh();
-    const every = fastPoll ? EVENTS_POLL_MS : HOME_EVENTS_POLL_MS;
-    const interval = focused ? setInterval(refresh, every) : undefined;
-    return () => {
-      cancelled = true;
-      if (interval) clearInterval(interval);
-    };
-  }, [focused, active, reloadKey, fastPoll]);
+  // Not the monthly Tower: it's always on, so it would keep the button
+  // sparkling all month. The Wilds do count: they're only on of an evening,
+  // and the ships are worth a look while they fly.
+  const running = events.filter((e) => e.type !== "tower").length;
+  useEffect(() => {
+    onEventsRunning?.(running);
+  }, [running, onEventsRunning]);
 
   // /events/previous-hunt returns the last ended hunt *or* boss, whichever is
   // newer. While Orphiez is in town his card is live and never shows the last
@@ -637,24 +646,22 @@ function EventsViewImpl({
   const [stall, setStall] = useState<MarketStall | null>(null);
   const [stallKey, setStallKey] = useState(0);
   const marketOpen = selected === MARKET_KEY;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: stallKey and marketOpen re-run the fetch
-  useEffect(() => {
-    if (!active) return;
-    let cancelled = false;
-    const refresh = () =>
+  usePoll(
+    (alive) =>
       herzies
         .marketMine()
         .then((m) => {
-          if (!cancelled) setStall(m);
+          if (alive()) setStall(m);
         })
-        .catch(() => {});
-    refresh();
-    const interval = focused ? setInterval(refresh, MARKET_POLL_MS) : undefined;
-    return () => {
-      cancelled = true;
-      if (interval) clearInterval(interval);
-    };
-  }, [active, focused, stallKey, marketOpen]);
+        .catch(() => {}),
+    {
+      enabled: active,
+      focused,
+      everyMs: MARKET_POLL_MS,
+      // A sale made or his panel opened or closed: fetch it again.
+      key: `${stallKey}:${marketOpen}`,
+    },
+  );
 
   /** A visitor open in the big window's panel, the world still showing. */
   const inPanel = expanded && selected !== null;

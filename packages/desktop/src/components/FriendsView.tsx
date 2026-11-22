@@ -5,6 +5,7 @@ import type {
   HerzieProfile,
 } from "@herzies/shared";
 import { useEffect, useRef, useState } from "react";
+import { usePoll } from "../hooks/usePoll";
 import { notify } from "../lib/notices";
 import { cn } from "../lib/utils";
 import { herzies, type OngoingTrade, useWindowFocused } from "../tauri-bridge";
@@ -137,14 +138,12 @@ export function FriendsView({
   // Poll friend profiles while this view is actually on screen (now playing /
   // online status). /lookup is the app's most expensive endpoint — 2-3s for a
   // full friend list — so running it from behind another view was pure waste.
-  useEffect(() => {
-    if (!active || !focused || !friendCodesKey) return;
-    const codes = friendCodesKey.split(",");
-    const poll = () => herzies.friendLookup(codes);
-    poll();
-    const interval = setInterval(poll, FRIEND_POLL_MS);
-    return () => clearInterval(interval);
-  }, [active, focused, friendCodesKey]);
+  usePoll(() => herzies.friendLookup(friendCodesKey.split(",")), {
+    enabled: active && !!friendCodesKey,
+    focused,
+    everyMs: FRIEND_POLL_MS,
+    key: friendCodesKey,
+  });
 
   // Whether the open profile came from the Town (see openedFromTown).
   const [profileBackCloses, setProfileBackCloses] = useState(false);
@@ -196,23 +195,16 @@ export function FriendsView({
   }, [search]);
 
   // Fetch ongoing trades when the tab is opened and refresh while focused.
-  useEffect(() => {
-    if (!active || tab !== "trades") return;
-    let cancelled = false;
-    const load = () =>
+  usePoll(
+    (alive) =>
       herzies
         .fetchOngoingTrades()
         .then((res) => {
-          if (!cancelled) setOngoingTrades(res.trades);
+          if (alive()) setOngoingTrades(res.trades);
         })
-        .catch(() => {});
-    load();
-    const interval = focused ? setInterval(load, TRADES_POLL_MS) : undefined;
-    return () => {
-      cancelled = true;
-      if (interval) clearInterval(interval);
-    };
-  }, [active, tab, focused]);
+        .catch(() => {}),
+    { enabled: active && tab === "trades", focused, everyMs: TRADES_POLL_MS },
+  );
 
   const outgoingCodes = new Set(outgoingRequests.map((r) => r.friendCode));
 

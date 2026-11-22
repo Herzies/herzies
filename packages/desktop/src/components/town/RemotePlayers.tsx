@@ -1,5 +1,6 @@
 import {
   basicAttack,
+  blankState,
   TOWN_FLAG_AFK,
   TOWN_FLAG_COMBAT,
   TOWN_FLAG_DANCING,
@@ -200,6 +201,24 @@ function LabelTracker({ net }: { net: TownConnection }) {
   return null;
 }
 
+/** The labels' styles, written only when they change: every remote's
+ * are set every frame, and a style written is the page's to restyle. */
+function setStyle(
+  el: HTMLElement,
+  prop: "display" | "visibility" | "pointerEvents",
+  value: string,
+) {
+  if (el.style[prop] !== value) el.style[prop] = value;
+}
+
+/** The opacity last written to each label (read back, it's a string). */
+const opacities = new WeakMap<HTMLElement, number>();
+function setOpacity(el: HTMLElement, value: number) {
+  if (opacities.get(el) === value) return;
+  opacities.set(el, value);
+  el.style.opacity = String(value);
+}
+
 /**
  * Another player's herzie, drawn a moment in the past between the states
  * the server sent (see ServerClock/EntityBuffer), walking at the speed it
@@ -294,13 +313,15 @@ function RemoteHerzie({
     [],
   );
   const menuOpen = useDuelValue(() => duel.menu?.id === remote.id);
+  /** Where it's drawn this frame (filled, not made, each frame). */
+  const drawn = useMemo(blankState, []);
 
   useFrame(({ camera }, dt) => {
     const drawnAt = net.clock.renderTime(performance.now());
-    const s = remote.buffer.sample(drawnAt);
+    const s = remote.buffer.sample(drawnAt, drawn);
     if (!s) return;
     herzie.root.visible = true;
-    if (tag.current) tag.current.style.visibility = "visible";
+    if (tag.current) setStyle(tag.current, "visibility", "visible");
     // Sitting on a bench: on its seat, not the ground. On a gangplank: on
     // the plank.
     const seated = (s.flags & TOWN_FLAG_SITTING) !== 0;
@@ -517,7 +538,8 @@ function RemoteHerzie({
     downed.current = applyDowned(herzie, down, downed.current, dt);
     // A duel's blows and its end, on this herzie (see duel/fx).
     poseFighter(herzie, remote.id, now, dt);
-    if (downMark.current) downMark.current.style.display = ko ? "" : "none";
+    if (downMark.current)
+      setStyle(downMark.current, "display", ko ? "" : "none");
     // A thrown disc isn't in the hand.
     herzie.setHeldHidden("held-l", discField.isOut(herzie, "held-l"));
     herzie.setHeldHidden("held-r", discField.isOut(herzie, "held-r"));
@@ -537,7 +559,7 @@ function RemoteHerzie({
     if (bubbleBox.current) {
       const near =
         Math.hypot(s.x - townSave.x, s.z - townSave.z) <= BUBBLE_RANGE;
-      bubbleBox.current.style.display = near ? "" : "none";
+      setStyle(bubbleBox.current, "display", near ? "" : "none");
     }
     // In a fight, a small health bar under the name: a duel's for its two
     // (bigger over your opponent), the boss fight's for everyone, the
@@ -550,7 +572,7 @@ function RemoteHerzie({
         : bossFight.on
           ? bossFight.health.get(remote.id)
           : wildsBarOf(remote.id, now);
-      hpBox.current.style.display = h ? "" : "none";
+      setStyle(hpBox.current, "display", h ? "" : "none");
       const big = opponent ? "1" : "";
       if (hpBox.current.dataset.big !== big) hpBox.current.dataset.big = big;
       if (h) {
@@ -575,16 +597,15 @@ function RemoteHerzie({
     });
     const dim = away ? 0.45 : 1;
     if (tag.current) {
-      tag.current.style.opacity = String(label.name * dim);
+      setOpacity(tag.current, label.name * dim);
       // Faded out, so not clickable either.
-      tag.current.style.pointerEvents = label.name < 0.1 ? "none" : "";
+      setStyle(tag.current, "pointerEvents", label.name < 0.1 ? "none" : "");
       if (away !== afk.current) {
         afk.current = away;
         tag.current.dataset.afk = away ? "1" : "";
       }
     }
-    if (titleLine.current)
-      titleLine.current.style.opacity = String(label.title * dim);
+    if (titleLine.current) setOpacity(titleLine.current, label.title * dim);
     if (
       labelBox.current &&
       Math.abs(label.scale - labelScale.current) > 0.005
@@ -592,11 +613,10 @@ function RemoteHerzie({
       labelScale.current = label.scale;
       labelBox.current.style.transform = `scale(${label.scale})`;
     }
-    if (hpBox.current) hpBox.current.style.opacity = String(label.hp);
+    if (hpBox.current) setOpacity(hpBox.current, label.hp);
     if (duelMark.current) {
       const shown = ring && ring.endedAt === null ? "" : "none";
-      if (duelMark.current.style.display !== shown)
-        duelMark.current.style.display = shown;
+      setStyle(duelMark.current, "display", shown);
     }
   });
 
