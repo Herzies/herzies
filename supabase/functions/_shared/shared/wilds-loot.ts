@@ -218,11 +218,7 @@ export function wildsCacheSpot(
 
 /** A cache's id: one per event, shard and the moment it turned up (server
  * ms), what opening it once hangs on. */
-export function wildsCacheId(
-  event: string,
-  at: number,
-  shard: number,
-): string {
+export function wildsCacheId(event: string, at: number, shard: number): string {
   return `${event}:${at}:${shard}`;
 }
 
