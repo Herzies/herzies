@@ -15,7 +15,7 @@ import {
   WILDS_RECIPES,
   type WildsRecipe,
 } from "@herzies/shared";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { notify } from "../lib/notices";
 import { cn } from "../lib/utils";
 import { herzies } from "../tauri-bridge";
@@ -26,6 +26,7 @@ import ItemInspectOverlay, {
 import { List } from "./List";
 import { TabButton } from "./TabButton";
 import { Tooltip } from "./Tooltip";
+import { setCraftingTalk } from "./town/wilds/craftingSpot";
 
 /** A card to open Inspect on: which, at what tuning, and (for one shown
  * with its icon) the INSPECT_ORIGIN_ATTR key the card grows out of. */
@@ -44,9 +45,10 @@ const TABS: { id: Tab; name: string }[] = [
  * Wilds' safe camp has one; see town/wilds/craftingSpot.ts), in two tabs:
  * Craft (first) makes any class's Wilds instrument out of that class's own
  * and bits, yours first; Tune tunes any instrument you have with bits.
- * Laid out like the Crystal's (CrystalPanel): the name, a line, the tabs,
- * then each thing to do with its cost and its one button; your bits at the
- * foot, as a stall shows your coins.
+ * Titled like any visitor's window: the name, the tabs, then each thing
+ * to do with its cost and its one button; your bits at the foot, as a
+ * stall shows your coins. While it's open, the bench is awake: its eyes
+ * open and follow you (see CraftingStation.tsx).
  *
  * Every card named here — what a recipe makes and what from, each bit in a
  * cost, the instruments to tune, your bits — opens Inspect on a click, as a
@@ -70,6 +72,10 @@ export function CraftingPanel({
   onLog?: (message: string) => void;
 }) {
   const [tab, setTab] = useState<Tab>("craft");
+  useEffect(() => {
+    setCraftingTalk(true);
+    return () => setCraftingTalk(false);
+  }, []);
   /** The recipe or unit an answer is on its way for. */
   const [busy, setBusy] = useState<string | null>(null);
   const [inspecting, setInspecting] = useState<Inspecting | null>(null);
@@ -123,12 +129,8 @@ export function CraftingPanel({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
-      <div className="text-center text-[16px] font-bold text-cyan">
+      <div className="text-center text-[16px] font-bold text-[#d9d4cc]">
         The Crafting Station
-      </div>
-      <div className="text-center text-ui-sm text-text-dim">
-        Bring me what the Wilds give up, and I'll make your instrument sing like
-        a storm.
       </div>
 
       <div className="flex shrink-0 gap-1 border-b border-white/15 text-ui">
@@ -340,7 +342,7 @@ function Row({
   const def = getItem(itemId);
   const inspect = () => onInspect({ itemId, level, origin });
   return (
-    <div className="flex items-center gap-2 border-t border-white/10 px-2 py-1.5">
+    <div className="flex items-center gap-2 border-t border-white/10 px-2 py-1.5 first:border-t-0">
       {def ? (
         // The name below is the same button for keyboards and readers.
         <button

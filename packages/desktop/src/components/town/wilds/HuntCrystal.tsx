@@ -59,8 +59,7 @@ const SPIN_HUNT = 7;
 /** Past this, it stops animating (still drawn). */
 const ANIMATE_REACH = 90;
 
-/** The cradle's stone, shared with the treasure crystals (WildsLoot). */
-export const cradleMaterial = inSeason(
+const cradleMaterial = inSeason(
   new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }),
 );
 

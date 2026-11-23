@@ -71,22 +71,22 @@ export const WILDS_RECIPES: readonly WildsRecipe[] = [
   {
     id: "wildwood-lute",
     base: "lute",
-    bits: { tonewood: 12, "sky-string": 6, "storm-hide": 2 },
+    bits: { tonewood: 16, "sky-string": 8, "storm-hide": 3 },
   },
   {
     id: "stormcut-discs",
     base: "compact-discs",
-    bits: { tonewood: 8, "sky-string": 8, "storm-hide": 2 },
+    bits: { tonewood: 10, "sky-string": 11, "storm-hide": 3 },
   },
   {
     id: "thunderhide-sticks",
     base: "worn-stick",
-    bits: { tonewood: 12, "sky-string": 3, "storm-hide": 3 },
+    bits: { tonewood: 16, "sky-string": 4, "storm-hide": 4 },
   },
   {
     id: "storm-cymbal",
     base: "old-cymbal",
-    bits: { tonewood: 6, "sky-string": 6, "storm-hide": 3 },
+    bits: { tonewood: 8, "sky-string": 8, "storm-hide": 4 },
   },
 ];
 

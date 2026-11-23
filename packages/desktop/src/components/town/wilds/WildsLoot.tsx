@@ -12,16 +12,14 @@ import * as THREE from "three";
 import { ambient } from "../ambient";
 import { LOOT, lootItem } from "../combat/loot";
 import { groundY, type TownMap } from "../map";
-import { cradleMaterial } from "./HuntCrystal";
 import {
-  CRADLE_GEOMETRY,
   HUNT_CRYSTAL_GEOMETRY,
-  HUNT_DAIS_R,
-  HUNT_FLOAT_Y,
   HUNT_MOTE_GEOMETRY,
+  HUNT_RING_GEOMETRY,
   type HuntUniforms,
   huntCrystalMaterial,
   huntMotesMaterial,
+  huntRingMaterial,
 } from "./huntCrystalModel";
 import {
   type CacheSpot,
@@ -41,21 +39,23 @@ import {
  * Hunt Crystal's light points toward, in a ring on the ground: stand in
  * it long enough and it's yours. The ring fills round in gold as you
  * hold it and in red as someone else does, and flashes red while it's
- * contested (the HUD says so too: see CacheHud). A card is picked up with
- * E (the prompt: see TownCanvas), or left lying; what a cache holds
- * fountains out as ordinary loot (LootDrops).
+ * contested (the HUD says so too: see CacheHud); opened, the crystal
+ * bursts. A card is picked up with E (the prompt: see TownCanvas), or left
+ * lying; what a cache holds fountains out as ordinary loot (LootDrops).
  *
  * Mounted on the Wilds only, in the island's frame.
  */
 export function WildsLoot({ map }: { map: TownMap }) {
   useWildsLoot();
   const cache = wildsLoot.cache;
+  const opened = wildsLoot.opened;
   return (
     <>
       {[...wildsLoot.drops.values()].map((d) => (
         <DroppedCard key={d.id} drop={d} map={map} />
       ))}
       {cache ? <Cache key={cache.id} cache={cache} map={map} /> : null}
+      {opened ? <CacheBurst key={opened.at} at={opened} map={map} /> : null}
     </>
   );
 }
@@ -295,17 +295,21 @@ function holdRingMaterial(): THREE.ShaderMaterial {
   });
 }
 
-/** The treasure crystal's size against the Hunt Crystal's, and how long
- * it takes to rise out of the ground. */
+/** The treasure crystal's size against the Hunt Crystal's, how high it
+ * floats (its middle, in its own scaled frame), and how long it takes to
+ * rise out of the ground. */
 const TREASURE_SCALE = 0.8;
+const TREASURE_FLOAT = 1.5;
 const POP_MS = 600;
+/** Held this far, it trembles: it's about to go. */
+const TREMBLE_FROM = 0.8;
 
 /**
- * The cache: a treasure crystal, a small Hunt Crystal in a small cradle,
- * standing in its hold ring. Grey stone with a glint now and then (look
- * for it), it fills with gold from the foot as it's held (the furthest
- * hold), spinning up as it fills; opened, it's gone and its loot fountains
- * out (LootDrops). Its cradle is solid.
+ * The cache: a treasure crystal, a small Hunt Crystal floating over the
+ * ground in its hold ring. Grey stone with a glint now and then (look for
+ * it), it fills with gold from the foot as it's held (the furthest hold),
+ * spinning up as it fills and trembling near the end; opened, it bursts
+ * (CacheBurst) and its loot fountains out (LootDrops). Solid.
  */
 function Cache({ cache, map }: { cache: CacheSpot; map: TownMap }) {
   const ground = groundY(map, cache.x, cache.z);
@@ -367,8 +371,14 @@ function Cache({ cache, map }: { cache: CacheSpot; map: TownMap }) {
     parts.angle += Math.min(dt, 0.1) * (0.4 + 4 * fill * fill);
     if (parts.body) parts.body.scale.setScalar(pop * TREASURE_SCALE);
     if (parts.spin) {
+      const shake =
+        Math.max(0, (fill - TREMBLE_FROM) / (1 - TREMBLE_FROM)) * 0.06;
       parts.spin.rotation.y = parts.angle;
-      parts.spin.position.y = HUNT_FLOAT_Y + Math.sin(t * 1.3) * 0.08;
+      parts.spin.position.set(
+        (Math.random() - 0.5) * shake,
+        TREASURE_FLOAT + Math.sin(t * 1.3) * 0.08,
+        (Math.random() - 0.5) * shake,
+      );
     }
   });
   return (
@@ -380,17 +390,11 @@ function Cache({ cache, map }: { cache: CacheSpot; map: TownMap }) {
         position={[cache.x, ground, cache.z]}
         scale={0}
       >
-        <mesh
-          geometry={CRADLE_GEOMETRY}
-          material={cradleMaterial}
-          castShadow
-          receiveShadow
-        />
         <group
           ref={(g) => {
             parts.spin = g;
           }}
-          position-y={HUNT_FLOAT_Y}
+          position-y={TREASURE_FLOAT}
         >
           <mesh
             geometry={HUNT_CRYSTAL_GEOMETRY}
@@ -401,16 +405,144 @@ function Cache({ cache, map }: { cache: CacheSpot; map: TownMap }) {
         <points
           geometry={HUNT_MOTE_GEOMETRY}
           material={parts.motes}
-          position-y={HUNT_FLOAT_Y}
+          position-y={TREASURE_FLOAT}
           frustumCulled={false}
         />
       </group>
       <CylinderCollider
-        args={[0.5 * TREASURE_SCALE, HUNT_DAIS_R * 0.9 * TREASURE_SCALE]}
-        position={[cache.x, ground + 0.5 * TREASURE_SCALE, cache.z]}
+        args={[0.8, 0.45]}
+        position={[cache.x, ground + 0.8, cache.z]}
       />
       {/* In the island's frame: its points stand on the ground themselves. */}
       <mesh geometry={ringGeometry} material={ring} />
     </>
+  );
+}
+
+/** How long a treasure crystal's burst lasts (s), its flash's share of
+ * that, how many shards fly, and how far its ring rolls out. */
+const BURST_S = 1.4;
+const FLASH_S = 0.45;
+const SHARDS = 16;
+const BURST_RING = 9;
+const GRAVITY = 14;
+
+const shardGeometry = new THREE.OctahedronGeometry(0.11, 0).scale(1, 1.8, 1);
+const flashGeometry = new THREE.IcosahedronGeometry(1, 2);
+
+/**
+ * A treasure crystal opened: it explodes where it floated, a flash of
+ * gold-white swelling and gone, shards of gold flung out and falling, a
+ * ring rolling out over the ground, all over in BURST_S. A burst over
+ * stays hidden till the next.
+ */
+function CacheBurst({
+  at,
+  map,
+}: {
+  at: { x: number; z: number; at: number };
+  map: TownMap;
+}) {
+  const y = groundY(map, at.x, at.z) + TREASURE_FLOAT * TREASURE_SCALE;
+  const parts = useMemo(() => {
+    const u: HuntUniforms = {
+      uTime: ambient.uTime,
+      uCharge: { value: 1 },
+      uHunt: { value: 0 },
+      uBurst: { value: 1 },
+    };
+    const glow = () =>
+      new THREE.MeshBasicMaterial({
+        color: "#ffd86b",
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      });
+    return {
+      u,
+      ring: huntRingMaterial(u),
+      flash: glow(),
+      shard: glow(),
+      // Each shard's way out: across, up, and how fast it turns.
+      flights: Array.from({ length: SHARDS }, (_, i) => {
+        const a = (i / SHARDS) * Math.PI * 2 + Math.random() * 0.4;
+        const v = 3 + Math.random() * 4;
+        return {
+          vx: Math.cos(a) * v,
+          vz: Math.sin(a) * v,
+          vy: 3 + Math.random() * 5,
+          spin: (Math.random() - 0.5) * 20,
+        };
+      }),
+      root: null as THREE.Group | null,
+      flashMesh: null as THREE.Mesh | null,
+      ringMesh: null as THREE.Mesh | null,
+      shards: [] as (THREE.Mesh | null)[],
+    };
+  }, []);
+  useEffect(
+    () => () => {
+      parts.ring.dispose();
+      parts.flash.dispose();
+      parts.shard.dispose();
+    },
+    [parts],
+  );
+  useFrame(() => {
+    const s = (performance.now() - at.at) / 1000;
+    if (parts.root) parts.root.visible = s >= 0 && s < BURST_S;
+    if (s < 0 || s >= BURST_S) return;
+    const k = s / BURST_S;
+    if (parts.flashMesh) {
+      const f = Math.min(1, s / FLASH_S);
+      parts.flashMesh.visible = f < 1;
+      parts.flashMesh.scale.setScalar(0.4 + 3.2 * (1 - (1 - f) ** 3));
+      parts.flash.opacity = (1 - f) ** 2;
+    }
+    parts.u.uBurst.value = (1 - k) ** 2;
+    parts.ringMesh?.scale.setScalar(1 + (1 - (1 - k) ** 2) * BURST_RING);
+    parts.shard.opacity = 1 - k * k;
+    parts.flights.forEach((f, i) => {
+      const m = parts.shards[i];
+      if (!m) return;
+      m.position.set(f.vx * s, f.vy * s - 0.5 * GRAVITY * s * s, f.vz * s);
+      m.rotation.set(f.spin * s, f.spin * s * 0.7, 0);
+      m.scale.setScalar(1 - k * 0.6);
+    });
+  });
+  return (
+    <group
+      ref={(g) => {
+        parts.root = g;
+      }}
+      position={[at.x, y, at.z]}
+    >
+      <mesh
+        ref={(m) => {
+          parts.flashMesh = m;
+        }}
+        geometry={flashGeometry}
+        material={parts.flash}
+      />
+      {parts.flights.map((_, i) => (
+        <mesh
+          // biome-ignore lint/suspicious/noArrayIndexKey: fixed shards
+          key={i}
+          ref={(m) => {
+            parts.shards[i] = m;
+          }}
+          geometry={shardGeometry}
+          material={parts.shard}
+        />
+      ))}
+      <mesh
+        ref={(m) => {
+          parts.ringMesh = m;
+        }}
+        geometry={HUNT_RING_GEOMETRY}
+        material={parts.ring}
+        position-y={0.06 - TREASURE_FLOAT * TREASURE_SCALE}
+      />
+    </group>
   );
 }

@@ -91,6 +91,9 @@ export const wildsLoot = {
   /** When a cache last turned up while you were there (performance.now()
    * ms): the crystal's burst. Not one that was out when you came. */
   huntOnAt: Number.NEGATIVE_INFINITY,
+  /** The last cache opened while you were there: where it stood and when
+   * (performance.now() ms), for its treasure crystal bursting. */
+  opened: null as { x: number; z: number; at: number } | null,
 };
 
 /** Cards asked for and not answered: not asked again until then
@@ -334,7 +337,9 @@ export function handleWildsLootMessage(
           );
         }
       } else if (m.by !== undefined) {
-        // Opened: by you (its loot's on its way), or by someone else.
+        // Opened: its crystal bursts where it stood.
+        if (was) wildsLoot.opened = { x: was.x, z: was.z, at: now };
+        // By you (its loot's on its way), or by someone else.
         if (m.by === ctx.you())
           notify("You opened the cache", { kind: "success" });
         else
@@ -428,6 +433,7 @@ export function resetWildsLoot(): void {
   wildsLoot.hold = null;
   wildsLoot.hunt = null;
   wildsLoot.huntOnAt = Number.NEGATIVE_INFINITY;
+  wildsLoot.opened = null;
   warnedAt = Number.NEGATIVE_INFINITY;
   holds.clear();
   emit();

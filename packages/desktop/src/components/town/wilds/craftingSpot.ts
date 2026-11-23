@@ -25,6 +25,16 @@ export const CRAFTING_STATION = "W";
 /** Window key, like CRYSTAL_KEY / BULLETIN_KEY. */
 export const CRAFTING_KEY = "crafting";
 
+/** Whether the Crafting Station's window is open (you're talking to it):
+ * its bench wakes, eyes open (CraftingStation.tsx reads this each frame). */
+let talking = false;
+export function setCraftingTalk(on: boolean): void {
+  talking = on;
+}
+export function craftingTalking(): boolean {
+  return talking;
+}
+
 /** How close you need to be for its prompt. */
 export const CRAFTING_REACH = 2.4;
 
